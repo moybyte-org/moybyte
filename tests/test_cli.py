@@ -81,3 +81,22 @@ def test_cli_check_portable(capsys):
 
     assert result == 0
     assert "portable check passed" in captured.out
+
+
+def test_cli_firmware_header(capsys, tmp_path):
+    out = tmp_path / "bundle.h"
+    result = main(
+        [
+            "firmware-header",
+            "examples/tiny_runner.kcproj",
+            "--board",
+            "lilygo_t_deck_plus",
+            "--out",
+            str(out),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert "generated:" in captured.out
+    assert out.exists()

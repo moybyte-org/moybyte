@@ -44,6 +44,13 @@ Build the first serial-only firmware smoke test:
 make firmware-build-lilygo
 ```
 
+Flash and monitor it once the board appears as a serial device:
+
+```bash
+make firmware-upload-lilygo PORT=/dev/ttyACM0
+make firmware-monitor-lilygo PORT=/dev/ttyACM0
+```
+
 Run a desktop simulator window when pygame is available:
 
 ```bash

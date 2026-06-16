@@ -6,3 +6,4 @@ examples/*/generated/
 *.kc8
 .pio/
 firmware/**/.pio/
+firmware/lilygo_t_deck_plus/include/kidcode_project_bundle.h

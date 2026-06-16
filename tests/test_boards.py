@@ -2,6 +2,7 @@ import json
 import zipfile
 
 from kidcode_cli.boards import board_profile_json, device_doctor, export_device_project
+from kidcode_cli.firmware import write_bundle_header
 from kidcode_cli.main import main
 from kidcode_cli.projects import create_project
 
@@ -50,3 +51,16 @@ def test_cli_device_commands(capsys, tmp_path):
     export = capsys.readouterr()
     assert "exported:" in export.out
     assert (out_dir / "deploy.json").exists()
+
+
+def test_write_bundle_header_creates_c_array(tmp_path):
+    project = create_project(str(tmp_path / "header_game"))
+    out = tmp_path / "kidcode_project_bundle.h"
+
+    result = write_bundle_header(project, "lilygo_t_deck_plus", str(out))
+    text = out.read_text(encoding="utf-8")
+
+    assert result == str(out)
+    assert '#define KIDCODE_PROJECT_ID "header_game"' in text
+    assert "#define KIDCODE_PROJECT_BUNDLE_SIZE " in text
+    assert "static const uint8_t KIDCODE_PROJECT_BUNDLE[]" in text

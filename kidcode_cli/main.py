@@ -8,6 +8,7 @@ from kidcode.errors import KidCodeRuntimeError, ManifestError
 from kidcode.manifest import Manifest
 from kidcode_blocks.compiler import compile_project
 from kidcode_cli.boards import board_profile_json, device_doctor, export_device_project
+from kidcode_cli.firmware import write_bundle_header
 from kidcode_cli.pack import pack_project
 from kidcode_cli.portable import check_path
 from kidcode_cli.projects import create_project
@@ -66,6 +67,12 @@ def _cmd_device_doctor(args):
 def _cmd_export_device(args):
     out_dir = export_device_project(args.project, args.board, args.out)
     print("exported: " + _display_path(out_dir))
+    return 0
+
+
+def _cmd_firmware_header(args):
+    out_path = write_bundle_header(args.project, args.board, args.out)
+    print("generated: " + _display_path(out_path))
     return 0
 
 
@@ -160,6 +167,12 @@ def build_parser():
     export_device.add_argument("--board", default="lilygo_t_deck_plus")
     export_device.add_argument("--out", required=True)
     export_device.set_defaults(func=_cmd_export_device)
+
+    firmware_header = sub.add_parser("firmware-header")
+    firmware_header.add_argument("project")
+    firmware_header.add_argument("--board", default="lilygo_t_deck_plus")
+    firmware_header.add_argument("--out", required=True)
+    firmware_header.set_defaults(func=_cmd_firmware_header)
 
     new = sub.add_parser("new")
     new.add_argument("project")

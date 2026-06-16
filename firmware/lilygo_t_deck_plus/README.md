@@ -19,14 +19,18 @@ https://raw.githubusercontent.com/Xinyuan-LilyGO/T-Deck/master/examples/UnitTest
 Local build:
 
 ```bash
-pio run -d firmware/lilygo_t_deck_plus
+make firmware-build-lilygo
 ```
+
+`make firmware-build-lilygo` first generates
+`include/kidcode_project_bundle.h` from `examples/tiny_runner.kcproj`, then runs
+PlatformIO.
 
 Upload, once the board is attached:
 
 ```bash
-pio run -d firmware/lilygo_t_deck_plus -t upload --upload-port /dev/ttyACM0
-pio device monitor -d firmware/lilygo_t_deck_plus -b 115200
+make firmware-upload-lilygo PORT=/dev/ttyACM0
+make firmware-monitor-lilygo PORT=/dev/ttyACM0
 ```
 
 If upload does not start, the upstream notes say to enter download mode by
