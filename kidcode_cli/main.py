@@ -84,6 +84,36 @@ def _cmd_device_port(_args):
     return 0
 
 
+def _cmd_lilygo_next(_args):
+    info = device_doctor("lilygo_t_deck_plus")
+    print("KidCode LilyGO next step")
+    print("Board: " + info["title"])
+    if not info["platformio"]:
+        print("PlatformIO is not available. Run `make setup` and install PlatformIO before flashing.")
+        return 1
+    ports = info["serial_ports"]
+    if not ports:
+        print("No serial port is visible yet.")
+        print("1. Connect the T-Deck Plus over USB-C.")
+        print("2. Power it on.")
+        print("3. If upload mode is needed, hold the center trackball and press reset.")
+        print("4. Run `make device-port` again.")
+        return 1
+    if len(ports) > 1:
+        print("Multiple serial ports are visible:")
+        for port in ports:
+            print("  " + port)
+        print("Pick the T-Deck Plus port and run:")
+        print("  make firmware-smoke-lilygo PORT=<port>")
+        return 2
+    port = ports[0]
+    print("Detected serial port: " + port)
+    print("Run:")
+    print("  make firmware-smoke-lilygo PORT=" + port)
+    print("Expected screen: centered 128x128 tiny_runner canvas with moving green player.")
+    return 0
+
+
 def _cmd_export_device(args):
     out_dir = export_device_project(args.project, args.board, args.out)
     print("exported: " + _display_path(out_dir))
@@ -194,6 +224,9 @@ def build_parser():
 
     device_port = sub.add_parser("device-port")
     device_port.set_defaults(func=_cmd_device_port)
+
+    lilygo_next = sub.add_parser("lilygo-next")
+    lilygo_next.set_defaults(func=_cmd_lilygo_next)
 
     export_device = sub.add_parser("export-device")
     export_device.add_argument("project")

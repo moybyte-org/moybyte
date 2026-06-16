@@ -48,6 +48,7 @@ Local checks:
 ```bash
 kidcode board-info lilygo_t_deck_plus
 kidcode device-doctor --board lilygo_t_deck_plus
+kidcode lilygo-next
 kidcode device-port
 kidcode export-device examples/tiny_runner.kcproj --board lilygo_t_deck_plus --out /tmp/kidcode_lilygo_t_deck_plus
 ```

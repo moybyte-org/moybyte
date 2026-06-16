@@ -35,6 +35,7 @@ Prepare the current LilyGO T-Deck Plus target artifact:
 
 ```bash
 make device-doctor
+./.venv/bin/kidcode lilygo-next
 make export-lilygo-example
 ```
 

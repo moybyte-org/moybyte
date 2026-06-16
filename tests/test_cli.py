@@ -121,3 +121,11 @@ def test_cli_firmware_smoke_check(capsys, tmp_path):
 
     assert result == 0
     assert "firmware smoke check passed" in captured.out
+
+
+def test_cli_lilygo_next_reports_status(capsys):
+    result = main(["lilygo-next"])
+    captured = capsys.readouterr()
+
+    assert result in [0, 1, 2]
+    assert "KidCode LilyGO next step" in captured.out
