@@ -18,6 +18,13 @@ Check that project code stays inside the portable subset intended for a future d
 make check-portable
 ```
 
+Create a new project:
+
+```bash
+.venv/bin/kidcode new my_game
+.venv/bin/kidcode run my_game.kcproj --headless --frames 60
+```
+
 Run a desktop simulator window when pygame is available:
 
 ```bash

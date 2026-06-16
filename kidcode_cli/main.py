@@ -8,6 +8,7 @@ from kidcode.errors import KidCodeRuntimeError, ManifestError
 from kidcode.manifest import Manifest
 from kidcode_blocks.compiler import compile_project
 from kidcode_cli.portable import check_path
+from kidcode_cli.projects import create_project
 from kidcode_sim.main import run_project
 
 
@@ -27,6 +28,18 @@ def _cmd_doctor(_args):
 def _cmd_validate(args):
     manifest = Manifest.load(args.project)
     print("valid: " + manifest.title + " (" + manifest.id + ")")
+    return 0
+
+
+def _cmd_new(args):
+    project_dir = create_project(
+        args.project,
+        project_id=args.project_id,
+        title=args.title,
+        kind=args.kind,
+        age_mode=args.age_mode,
+    )
+    print("created: " + project_dir)
     return 0
 
 
@@ -85,6 +98,14 @@ def build_parser():
     validate = sub.add_parser("validate")
     validate.add_argument("project")
     validate.set_defaults(func=_cmd_validate)
+
+    new = sub.add_parser("new")
+    new.add_argument("project")
+    new.add_argument("--id", dest="project_id")
+    new.add_argument("--title")
+    new.add_argument("--kind", choices=["game", "app", "demo", "tool"], default="game")
+    new.add_argument("--age-mode", choices=["cards", "blocks", "text", "advanced"], default="text")
+    new.set_defaults(func=_cmd_new)
 
     run = sub.add_parser("run")
     run.add_argument("project")

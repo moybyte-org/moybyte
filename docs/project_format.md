@@ -25,3 +25,9 @@ PC v0 executes local Python code. Permissions are enforced for KidCode services,
 Project entry paths must stay inside the `.kcproj` folder. Runtime entry overrides use the same rule.
 
 The repo includes text, blocks, app, and radio stub examples under `examples/`.
+
+Create a new project with:
+
+```bash
+kidcode new my_game
+```
