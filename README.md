@@ -38,6 +38,12 @@ make device-doctor
 make export-lilygo-example
 ```
 
+Build the first serial-only firmware smoke test:
+
+```bash
+make firmware-build-lilygo
+```
+
 Run a desktop simulator window when pygame is available:
 
 ```bash
