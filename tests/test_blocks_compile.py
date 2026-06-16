@@ -1,6 +1,9 @@
 import os
 
+import pytest
+
 from kidcode_blocks.compiler import compile_blocks, compile_project
+from kidcode_blocks.schema import BlockValidationError
 from kidcode_sim.headless_backend import HeadlessSimulator
 
 
@@ -27,7 +30,9 @@ def test_compile_blocks_generates_readable_python():
 
     assert "from kidcode import *" in code
     assert "def update(dt):" in code
-    assert "if button('right')" in code
+    assert "# Update script" in code
+    assert 'if button("right")' in code
+    assert 'player = sprite("player", x=1, y=2, w=8, h=8)' in code
 
 
 def test_compile_project_and_run_generated_code():
@@ -37,3 +42,57 @@ def test_compile_project_and_run_generated_code():
     sim = HeadlessSimulator("examples/blocks_demo.kcproj", entry="generated/main.generated.py")
     context = sim.run(frames=5)
     assert context.frame == 5
+
+
+def test_compile_blocks_rejects_unknown_sprite_reference():
+    with pytest.raises(BlockValidationError) as err:
+        compile_blocks(
+            {
+                "schema": "kidcode.blocks.v1",
+                "sprites": [{"name": "player"}],
+                "scripts": [
+                    {
+                        "event": {"type": "draw"},
+                        "body": [{"type": "draw_sprite", "sprite": "coin"}],
+                    }
+                ],
+            }
+        )
+
+    assert "unknown sprite 'coin'" in str(err.value)
+
+
+def test_compile_blocks_rejects_unsafe_text_template():
+    with pytest.raises(BlockValidationError) as err:
+        compile_blocks(
+            {
+                "schema": "kidcode.blocks.v1",
+                "variables": [{"name": "score", "initial": 0}],
+                "scripts": [
+                    {
+                        "event": {"type": "draw"},
+                        "body": [{"type": "text", "value": "{score.__class__}", "x": 0, "y": 0}],
+                    }
+                ],
+            }
+        )
+
+    assert "must be a simple variable name" in str(err.value)
+
+
+def test_compile_blocks_rejects_unknown_button():
+    with pytest.raises(BlockValidationError) as err:
+        compile_blocks(
+            {
+                "schema": "kidcode.blocks.v1",
+                "sprites": [{"name": "player"}],
+                "scripts": [
+                    {
+                        "event": {"type": "update"},
+                        "body": [{"type": "if_button", "button": "turbo", "body": []}],
+                    }
+                ],
+            }
+        )
+
+    assert "known button" in str(err.value)

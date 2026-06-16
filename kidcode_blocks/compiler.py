@@ -2,6 +2,7 @@
 
 import json
 import os
+import string
 
 from .schema import validate_blocks
 
@@ -21,7 +22,20 @@ def _ident(name):
 
 
 def _quote(value):
-    return repr(value)
+    return json.dumps(value)
+
+
+def _template_expr(value):
+    formatter = string.Formatter()
+    has_fields = False
+    for _literal, field_name, _format_spec, _conversion in formatter.parse(value):
+        if field_name is not None:
+            has_fields = True
+            break
+    quoted = _quote(value)
+    if has_fields:
+        return "f" + quoted
+    return quoted
 
 
 def _indent(level):
@@ -36,12 +50,10 @@ def _emit_statement(block, lines, level, globals_needed):
         lines.append(p + "clear(" + repr(color) + ")")
     elif kind == "text":
         value = block.get("value", "")
-        prefix = "f" if "{" in str(value) and "}" in str(value) else ""
         lines.append(
             p
             + "text("
-            + prefix
-            + _quote(value)
+            + _template_expr(value)
             + ", "
             + repr(block.get("x", 0))
             + ", "
@@ -92,7 +104,7 @@ def _emit_statement(block, lines, level, globals_needed):
     elif kind == "wait":
         lines.append(p + "# wait is ignored by the v0 frame runtime")
     elif kind == "send_radio":
-        lines.append(p + "radio.send(" + repr(block.get("message", "")) + ")")
+        lines.append(p + "radio.send(" + _quote(block.get("message", "")) + ")")
     else:
         raise ValueError("unknown block type: " + str(kind))
 
@@ -106,7 +118,7 @@ def compile_blocks(data):
     ]
 
     for var in data.get("variables", []):
-        lines.append(_ident(var["name"]) + " = " + repr(var.get("initial", 0)))
+        lines.append(_ident(var["name"]) + " = " + _quote(var.get("initial", 0)))
     if data.get("variables"):
         lines.append("")
 
@@ -120,7 +132,7 @@ def compile_blocks(data):
         lines.append(
             name
             + " = sprite("
-            + repr(asset)
+            + _quote(asset)
             + ", x="
             + repr(x)
             + ", y="
@@ -146,6 +158,7 @@ def compile_blocks(data):
         globals_needed = set()
         for block in script.get("body", []):
             _emit_statement(block, body_lines, 1, globals_needed)
+        lines.append("# " + event.capitalize() + " script")
         lines.append("def " + event + "(" + fn_args + "):")
         if globals_needed:
             lines.append(_indent(1) + "global " + ", ".join(sorted(globals_needed)))
