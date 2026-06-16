@@ -3,7 +3,7 @@ SYSTEM_PYTHON ?= python3
 PYTHON ?= $(VENV)/bin/python
 KIDCODE ?= $(VENV)/bin/kidcode
 
-.PHONY: setup test run-example run-headless compile-blocks doctor check-portable pack-example export-lilygo-example device-doctor firmware-bundle-lilygo firmware-build-lilygo firmware-upload-lilygo firmware-monitor-lilygo
+.PHONY: setup test run-example run-headless compile-blocks doctor check-portable pack-example export-lilygo-example device-doctor device-port firmware-bundle-lilygo firmware-build-lilygo firmware-upload-lilygo firmware-monitor-lilygo firmware-smoke-check-lilygo
 
 setup:
 	$(SYSTEM_PYTHON) -m venv --system-site-packages $(VENV)
@@ -17,6 +17,9 @@ doctor:
 
 device-doctor:
 	$(KIDCODE) device-doctor --board lilygo_t_deck_plus
+
+device-port:
+	$(KIDCODE) device-port
 
 run-example:
 	$(KIDCODE) run examples/tiny_runner.kcproj
@@ -49,3 +52,7 @@ firmware-upload-lilygo: firmware-bundle-lilygo
 firmware-monitor-lilygo:
 	test -n "$(PORT)"
 	pio device monitor -d firmware/lilygo_t_deck_plus -b 115200 --port $(PORT)
+
+firmware-smoke-check-lilygo:
+	test -n "$(LOG)"
+	$(KIDCODE) firmware-smoke-check $(LOG) --board lilygo_t_deck_plus --project-id tiny_runner

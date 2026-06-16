@@ -48,8 +48,17 @@ Local checks:
 ```bash
 kidcode board-info lilygo_t_deck_plus
 kidcode device-doctor --board lilygo_t_deck_plus
+kidcode device-port
 kidcode export-device examples/tiny_runner.kcproj --board lilygo_t_deck_plus --out /tmp/kidcode_lilygo_t_deck_plus
 ```
 
 The export step creates a `.kc8` bundle and `deploy.json`. Firmware scaffolding
 should consume that directory rather than reading arbitrary project files.
+
+After flashing, the first serial smoke test should print the board id, bundled
+project id, non-zero bundle byte count, and a heartbeat. Save monitor output and
+check it with:
+
+```bash
+kidcode firmware-smoke-check /tmp/kidcode_lilygo_serial.log --board lilygo_t_deck_plus --project-id tiny_runner
+```

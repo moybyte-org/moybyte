@@ -47,8 +47,25 @@ make firmware-build-lilygo
 Flash and monitor it once the board appears as a serial device:
 
 ```bash
+make device-port
 make firmware-upload-lilygo PORT=/dev/ttyACM0
 make firmware-monitor-lilygo PORT=/dev/ttyACM0
+```
+
+Expected serial smoke output includes:
+
+```text
+KidCode firmware smoke test
+Board id: lilygo_t_deck_plus
+Bundled project: tiny_runner
+Bundle bytes: <non-zero>
+KidCode heartbeat 0
+```
+
+Save a monitor log and verify it with:
+
+```bash
+make firmware-smoke-check-lilygo LOG=/tmp/kidcode_lilygo_serial.log
 ```
 
 Run a desktop simulator window when pygame is available:

@@ -1,7 +1,7 @@
 import json
 import zipfile
 
-from kidcode_cli.boards import board_profile_json, device_doctor, export_device_project
+from kidcode_cli.boards import board_profile_json, device_doctor, export_device_project, smoke_check_log
 from kidcode_cli.firmware import write_bundle_header
 from kidcode_cli.main import main
 from kidcode_cli.projects import create_project
@@ -64,3 +64,34 @@ def test_write_bundle_header_creates_c_array(tmp_path):
     assert '#define KIDCODE_PROJECT_ID "header_game"' in text
     assert "#define KIDCODE_PROJECT_BUNDLE_SIZE " in text
     assert "static const uint8_t KIDCODE_PROJECT_BUNDLE[]" in text
+
+
+def test_smoke_check_log_accepts_expected_serial_output(tmp_path):
+    log = tmp_path / "serial.log"
+    log.write_text(
+        "KidCode firmware smoke test\n"
+        "Board id: lilygo_t_deck_plus\n"
+        "Bundled project: tiny_runner\n"
+        "Bundle bytes: 123\n"
+        "Runtime: serial-only scaffold\n"
+        "KidCode heartbeat 0\n",
+        encoding="utf-8",
+    )
+
+    assert smoke_check_log(str(log), project_id="tiny_runner") == []
+
+
+def test_smoke_check_log_rejects_missing_project(tmp_path):
+    log = tmp_path / "serial.log"
+    log.write_text(
+        "KidCode firmware smoke test\n"
+        "Board id: lilygo_t_deck_plus\n"
+        "Bundle bytes: 123\n"
+        "Runtime: serial-only scaffold\n"
+        "KidCode heartbeat 0\n",
+        encoding="utf-8",
+    )
+
+    failures = smoke_check_log(str(log), project_id="tiny_runner")
+
+    assert "missing serial text: Bundled project: tiny_runner" in failures

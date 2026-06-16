@@ -3,6 +3,7 @@
 import glob
 import json
 import os
+import re
 import shutil
 
 from kidcode.errors import ManifestError
@@ -67,6 +68,13 @@ def serial_ports():
     return sorted(set(ports))
 
 
+def choose_serial_port():
+    ports = serial_ports()
+    if len(ports) == 1:
+        return ports[0]
+    return None
+
+
 def device_doctor(board_id):
     profile = get_board_profile(board_id)
     return {
@@ -76,6 +84,30 @@ def device_doctor(board_id):
         "serial_ports": serial_ports(),
         "platformio_env": profile["platformio_env"],
     }
+
+
+def smoke_check_log(path, board_id="lilygo_t_deck_plus", project_id=None):
+    profile = get_board_profile(board_id)
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        text = fh.read()
+    failures = []
+    required = [
+        "KidCode firmware smoke test",
+        "Board id: " + profile["id"],
+        "Runtime: serial-only scaffold",
+        "KidCode heartbeat",
+    ]
+    if project_id is not None:
+        required.append("Bundled project: " + project_id)
+    for item in required:
+        if item not in text:
+            failures.append("missing serial text: " + item)
+    match = re.search(r"Bundle bytes:\s*(\d+)", text)
+    if match is None:
+        failures.append("missing bundle byte count")
+    elif int(match.group(1)) <= 0:
+        failures.append("bundle byte count is zero")
+    return failures
 
 
 def export_device_project(project_path, board_id, out_dir):

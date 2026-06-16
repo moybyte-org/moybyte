@@ -100,3 +100,22 @@ def test_cli_firmware_header(capsys, tmp_path):
     assert result == 0
     assert "generated:" in captured.out
     assert out.exists()
+
+
+def test_cli_firmware_smoke_check(capsys, tmp_path):
+    log = tmp_path / "serial.log"
+    log.write_text(
+        "KidCode firmware smoke test\n"
+        "Board id: lilygo_t_deck_plus\n"
+        "Bundled project: tiny_runner\n"
+        "Bundle bytes: 123\n"
+        "Runtime: serial-only scaffold\n"
+        "KidCode heartbeat 0\n",
+        encoding="utf-8",
+    )
+
+    result = main(["firmware-smoke-check", str(log)])
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert "firmware smoke check passed" in captured.out

@@ -29,8 +29,28 @@ PlatformIO.
 Upload, once the board is attached:
 
 ```bash
+make device-port
 make firmware-upload-lilygo PORT=/dev/ttyACM0
 make firmware-monitor-lilygo PORT=/dev/ttyACM0
+```
+
+Expected serial output:
+
+```text
+KidCode firmware smoke test
+Board: LilyGO T-Deck Plus
+Board id: lilygo_t_deck_plus
+Bundled project: tiny_runner
+Bundle title: Tiny Runner
+Bundle bytes: <non-zero>
+Runtime: serial-only scaffold
+KidCode heartbeat 0
+```
+
+Verify a saved serial log:
+
+```bash
+make firmware-smoke-check-lilygo LOG=/tmp/kidcode_lilygo_serial.log
 ```
 
 If upload does not start, the upstream notes say to enter download mode by

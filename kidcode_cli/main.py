@@ -7,7 +7,12 @@ import sys
 from kidcode.errors import KidCodeRuntimeError, ManifestError
 from kidcode.manifest import Manifest
 from kidcode_blocks.compiler import compile_project
-from kidcode_cli.boards import board_profile_json, device_doctor, export_device_project
+from kidcode_cli.boards import (
+    board_profile_json,
+    device_doctor,
+    export_device_project,
+    smoke_check_log,
+)
 from kidcode_cli.firmware import write_bundle_header
 from kidcode_cli.pack import pack_project
 from kidcode_cli.portable import check_path
@@ -64,6 +69,21 @@ def _cmd_device_doctor(args):
     return 0
 
 
+def _cmd_device_port(_args):
+    ports = device_doctor("lilygo_t_deck_plus")["serial_ports"]
+    if not ports:
+        print("no serial ports found", file=sys.stderr)
+        return 1
+    if len(ports) > 1:
+        print("multiple serial ports found:", file=sys.stderr)
+        for port in ports:
+            print("  " + port, file=sys.stderr)
+        print("set PORT explicitly", file=sys.stderr)
+        return 2
+    print(ports[0])
+    return 0
+
+
 def _cmd_export_device(args):
     out_dir = export_device_project(args.project, args.board, args.out)
     print("exported: " + _display_path(out_dir))
@@ -73,6 +93,16 @@ def _cmd_export_device(args):
 def _cmd_firmware_header(args):
     out_path = write_bundle_header(args.project, args.board, args.out)
     print("generated: " + _display_path(out_path))
+    return 0
+
+
+def _cmd_firmware_smoke_check(args):
+    failures = smoke_check_log(args.log, board_id=args.board, project_id=args.project_id)
+    if failures:
+        for failure in failures:
+            print(failure, file=sys.stderr)
+        return 1
+    print("firmware smoke check passed")
     return 0
 
 
@@ -162,6 +192,9 @@ def build_parser():
     device_doctor_cmd.add_argument("--board", default="lilygo_t_deck_plus")
     device_doctor_cmd.set_defaults(func=_cmd_device_doctor)
 
+    device_port = sub.add_parser("device-port")
+    device_port.set_defaults(func=_cmd_device_port)
+
     export_device = sub.add_parser("export-device")
     export_device.add_argument("project")
     export_device.add_argument("--board", default="lilygo_t_deck_plus")
@@ -173,6 +206,12 @@ def build_parser():
     firmware_header.add_argument("--board", default="lilygo_t_deck_plus")
     firmware_header.add_argument("--out", required=True)
     firmware_header.set_defaults(func=_cmd_firmware_header)
+
+    firmware_smoke_check = sub.add_parser("firmware-smoke-check")
+    firmware_smoke_check.add_argument("log")
+    firmware_smoke_check.add_argument("--board", default="lilygo_t_deck_plus")
+    firmware_smoke_check.add_argument("--project-id", default="tiny_runner")
+    firmware_smoke_check.set_defaults(func=_cmd_firmware_smoke_check)
 
     new = sub.add_parser("new")
     new.add_argument("project")
