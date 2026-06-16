@@ -34,6 +34,12 @@ make firmware-upload-lilygo PORT=/dev/ttyACM0
 make firmware-monitor-lilygo PORT=/dev/ttyACM0
 ```
 
+One-step smoke run:
+
+```bash
+make firmware-smoke-lilygo PORT=/dev/ttyACM0
+```
+
 Expected serial output:
 
 ```text
@@ -43,9 +49,13 @@ Board id: lilygo_t_deck_plus
 Bundled project: tiny_runner
 Bundle title: Tiny Runner
 Bundle bytes: <non-zero>
+Display backlight: blinking
 Runtime: serial-only scaffold
 KidCode heartbeat 0
 ```
+
+The TFT backlight should blink once per heartbeat. That is the first physical
+proof that the firmware loop is running before the display driver is integrated.
 
 Verify a saved serial log:
 

@@ -62,3 +62,9 @@ check it with:
 ```bash
 kidcode firmware-smoke-check /tmp/kidcode_lilygo_serial.log --board lilygo_t_deck_plus --project-id tiny_runner
 ```
+
+The smoke firmware also blinks the TFT backlight once per heartbeat. Use:
+
+```bash
+make firmware-smoke-lilygo PORT=/dev/ttyACM0
+```

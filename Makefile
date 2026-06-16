@@ -2,8 +2,10 @@ VENV ?= .venv
 SYSTEM_PYTHON ?= python3
 PYTHON ?= $(VENV)/bin/python
 KIDCODE ?= $(VENV)/bin/kidcode
+MONITOR_SECONDS ?= 12
+LOG ?= /tmp/kidcode_lilygo_serial.log
 
-.PHONY: setup test run-example run-headless compile-blocks doctor check-portable pack-example export-lilygo-example device-doctor device-port firmware-bundle-lilygo firmware-build-lilygo firmware-upload-lilygo firmware-monitor-lilygo firmware-smoke-check-lilygo
+.PHONY: setup test run-example run-headless compile-blocks doctor check-portable pack-example export-lilygo-example device-doctor device-port firmware-bundle-lilygo firmware-build-lilygo firmware-upload-lilygo firmware-monitor-lilygo firmware-smoke-check-lilygo firmware-smoke-lilygo
 
 setup:
 	$(SYSTEM_PYTHON) -m venv --system-site-packages $(VENV)
@@ -56,3 +58,13 @@ firmware-monitor-lilygo:
 firmware-smoke-check-lilygo:
 	test -n "$(LOG)"
 	$(KIDCODE) firmware-smoke-check $(LOG) --board lilygo_t_deck_plus --project-id tiny_runner
+
+firmware-smoke-lilygo:
+	PORT_VALUE="$(PORT)"; \
+	if [ -z "$$PORT_VALUE" ]; then PORT_VALUE="$$( $(KIDCODE) device-port )" || exit $$?; fi; \
+	LOG_VALUE="$(LOG)"; \
+	echo "Using port $$PORT_VALUE"; \
+	echo "Writing serial log to $$LOG_VALUE"; \
+	$(MAKE) firmware-upload-lilygo PORT="$$PORT_VALUE"; \
+	timeout $(MONITOR_SECONDS)s pio device monitor -d firmware/lilygo_t_deck_plus -b 115200 --port "$$PORT_VALUE" --raw --quiet > "$$LOG_VALUE" || true; \
+	$(KIDCODE) firmware-smoke-check "$$LOG_VALUE" --board lilygo_t_deck_plus --project-id tiny_runner

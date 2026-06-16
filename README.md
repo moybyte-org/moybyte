@@ -52,6 +52,12 @@ make firmware-upload-lilygo PORT=/dev/ttyACM0
 make firmware-monitor-lilygo PORT=/dev/ttyACM0
 ```
 
+Or run the upload, short monitor capture, and serial check in one step:
+
+```bash
+make firmware-smoke-lilygo PORT=/dev/ttyACM0
+```
+
 Expected serial smoke output includes:
 
 ```text
@@ -59,6 +65,7 @@ KidCode firmware smoke test
 Board id: lilygo_t_deck_plus
 Bundled project: tiny_runner
 Bundle bytes: <non-zero>
+Display backlight: blinking
 KidCode heartbeat 0
 ```
 

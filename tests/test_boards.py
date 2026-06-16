@@ -73,6 +73,7 @@ def test_smoke_check_log_accepts_expected_serial_output(tmp_path):
         "Board id: lilygo_t_deck_plus\n"
         "Bundled project: tiny_runner\n"
         "Bundle bytes: 123\n"
+        "Display backlight: blinking\n"
         "Runtime: serial-only scaffold\n"
         "KidCode heartbeat 0\n",
         encoding="utf-8",
@@ -87,6 +88,7 @@ def test_smoke_check_log_rejects_missing_project(tmp_path):
         "KidCode firmware smoke test\n"
         "Board id: lilygo_t_deck_plus\n"
         "Bundle bytes: 123\n"
+        "Display backlight: blinking\n"
         "Runtime: serial-only scaffold\n"
         "KidCode heartbeat 0\n",
         encoding="utf-8",
