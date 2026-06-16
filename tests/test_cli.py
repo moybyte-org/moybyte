@@ -114,7 +114,8 @@ def test_cli_firmware_smoke_check(capsys, tmp_path):
         "Runtime: native tiny_runner scaffold\n"
         "KidCode heartbeat 0\n"
         "Native tiny_runner player_x 62\n"
-        "Native tiny_runner player_y 60\n",
+        "Native tiny_runner player_y 60\n"
+        "Native buttons left/right/up/down 0/0/0/0\n",
         encoding="utf-8",
     )
 

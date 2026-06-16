@@ -28,6 +28,17 @@ static const int16_t coin_y = 24;
 static bool keyboard_detected = false;
 static uint8_t last_key = 0;
 
+struct KidButtons {
+    bool up;
+    bool down;
+    bool left;
+    bool right;
+    bool a;
+    bool b;
+};
+
+static KidButtons buttons = {false, false, false, false, false, false};
+
 static void tftSelect() {
     digitalWrite(KIDCODE_BOARD_TFT_CS, LOW);
 }
@@ -151,7 +162,7 @@ static void drawCanvasBorder() {
     drawCanvasRect(KIDCODE_CANVAS_SIZE - 1, 0, 1, KIDCODE_CANVAS_SIZE, border);
 }
 
-static void updateNativeTinyRunner() {
+static uint8_t readKeyboardKey() {
     uint8_t key = 0;
     if (keyboard_detected) {
         Wire.beginTransmission(KIDCODE_BOARD_KEYBOARD_ADDR);
@@ -165,45 +176,83 @@ static void updateNativeTinyRunner() {
             Serial.println("Keyboard: lost");
         }
     }
+    return key;
+}
 
-    if (key != 0) {
-        last_key = key;
-        Serial.print("Key pressed: 0x");
-        Serial.println(key, HEX);
+static void clearButtons() {
+    buttons.up = false;
+    buttons.down = false;
+    buttons.left = false;
+    buttons.right = false;
+    buttons.a = false;
+    buttons.b = false;
+}
+
+static void updateButtonsFromKey(uint8_t key) {
+    clearButtons();
+    if (key == 0) {
+        return;
     }
-
-    bool moved = false;
+    last_key = key;
+    Serial.print("Key pressed: 0x");
+    Serial.println(key, HEX);
     switch (key) {
         case 'a':
         case 'A':
         case 'h':
         case 'H':
-            player_x -= 2;
-            moved = true;
+            buttons.left = true;
             break;
         case 'd':
         case 'D':
         case 'l':
         case 'L':
-            player_x += 2;
-            moved = true;
+            buttons.right = true;
             break;
         case 'w':
         case 'W':
         case 'k':
         case 'K':
-            player_y -= 2;
-            moved = true;
+            buttons.up = true;
             break;
         case 's':
         case 'S':
         case 'j':
         case 'J':
-            player_y += 2;
-            moved = true;
+            buttons.down = true;
+            break;
+        case 'z':
+        case 'Z':
+            buttons.a = true;
+            break;
+        case 'x':
+        case 'X':
+            buttons.b = true;
             break;
         default:
             break;
+    }
+}
+
+static void updateNativeTinyRunner() {
+    updateButtonsFromKey(readKeyboardKey());
+
+    bool moved = false;
+    if (buttons.left) {
+        player_x -= 2;
+        moved = true;
+    }
+    if (buttons.right) {
+        player_x += 2;
+        moved = true;
+    }
+    if (buttons.up) {
+        player_y -= 2;
+        moved = true;
+    }
+    if (buttons.down) {
+        player_y += 2;
+        moved = true;
     }
 
     if (!keyboard_detected && !moved) {
@@ -331,6 +380,14 @@ void loop() {
     Serial.println(player_y);
     Serial.print("Native tiny_runner last_key ");
     Serial.println(last_key);
+    Serial.print("Native buttons left/right/up/down ");
+    Serial.print(buttons.left);
+    Serial.print("/");
+    Serial.print(buttons.right);
+    Serial.print("/");
+    Serial.print(buttons.up);
+    Serial.print("/");
+    Serial.println(buttons.down);
     frame_count += 1;
     delay(100);
 }

@@ -101,6 +101,7 @@ def smoke_check_log(path, board_id="lilygo_t_deck_plus", project_id=None):
         "KidCode heartbeat",
         "Native tiny_runner player_x",
         "Native tiny_runner player_y",
+        "Native buttons left/right/up/down",
     ]
     if project_id is not None:
         required.append("Bundled project: " + project_id)

@@ -55,13 +55,15 @@ Runtime: native tiny_runner scaffold
 KidCode heartbeat 0
 Native tiny_runner player_x 62
 Native tiny_runner player_y 60
+Native buttons left/right/up/down 0/0/0/0
 ```
 
 The display should show a centered 128x128 KidCode canvas with a white border,
 a green player rectangle, and a yellow coin rectangle. The player moves
 horizontally when no keyboard is detected. When the keyboard is detected, use
-`WASD` or `HJKL` to move the player. This is a native firmware scaffold for
-`tiny_runner`, not a general Python runtime yet.
+`WASD` or `HJKL` to move the player. `Z` maps to KidCode `a`, and `X` maps to
+KidCode `b`. This is a native firmware scaffold for `tiny_runner`, not a
+general Python runtime yet.
 
 Verify a saved serial log:
 

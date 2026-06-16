@@ -18,6 +18,8 @@ def test_lilygo_firmware_scaffold_uses_board_profile():
     assert "KidCode firmware smoke test" in main_cpp
     assert "Display: KidCode native tiny_runner canvas" in main_cpp
     assert "renderNativeTinyRunner" in main_cpp
+    assert "struct KidButtons" in main_cpp
+    assert "updateButtonsFromKey" in main_cpp
     assert "KIDCODE_CANVAS_SIZE = 128" in main_cpp
     assert "#include <Wire.h>" in main_cpp
     assert "KIDCODE_BOARD_KEYBOARD_ADDR" in main_cpp

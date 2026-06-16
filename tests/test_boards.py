@@ -79,7 +79,8 @@ def test_smoke_check_log_accepts_expected_serial_output(tmp_path):
         "Runtime: native tiny_runner scaffold\n"
         "KidCode heartbeat 0\n"
         "Native tiny_runner player_x 62\n"
-        "Native tiny_runner player_y 60\n",
+        "Native tiny_runner player_y 60\n"
+        "Native buttons left/right/up/down 0/0/0/0\n",
         encoding="utf-8",
     )
 
@@ -97,7 +98,8 @@ def test_smoke_check_log_rejects_missing_project(tmp_path):
         "Runtime: native tiny_runner scaffold\n"
         "KidCode heartbeat 0\n"
         "Native tiny_runner player_x 62\n"
-        "Native tiny_runner player_y 60\n",
+        "Native tiny_runner player_y 60\n"
+        "Native buttons left/right/up/down 0/0/0/0\n",
         encoding="utf-8",
     )
 

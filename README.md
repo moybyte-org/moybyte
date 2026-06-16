@@ -72,7 +72,8 @@ KidCode heartbeat 0
 ```
 
 In the native firmware scaffold, use `WASD` or `HJKL` on the T-Deck keyboard to
-move the green player rectangle.
+move the green player rectangle. `Z` maps to KidCode `a`, and `X` maps to
+KidCode `b`.
 
 Save a monitor log and verify it with:
 
