@@ -23,8 +23,15 @@ PALETTE = [
 ]
 
 
+def sprite_color_index(name):
+    total = 0
+    for ch in str(name):
+        total += ord(ch)
+    return 2 + (total % (len(PALETTE) - 2))
+
+
 class PygameBackend:
-    def __init__(self, canvas, scale=4):
+    def __init__(self, canvas, scale=4, title="KidCode"):
         import pygame
 
         self.pygame = pygame
@@ -48,7 +55,7 @@ class PygameBackend:
             pygame.K_ESCAPE: "stop",
         }
         self.surface = pygame.display.set_mode((canvas.width * scale, canvas.height * scale))
-        pygame.display.set_caption("KidCode")
+        pygame.display.set_caption(title)
         self.font = pygame.font.Font(None, 8 * scale)
         self.clock = pygame.time.Clock()
 
@@ -62,6 +69,8 @@ class PygameBackend:
                 button = self.key_map.get(event.key)
                 if button is not None:
                     input_state.set_button(button, event.type == pygame.KEYDOWN)
+                    if button == "stop" and event.type == pygame.KEYDOWN:
+                        running = False
         return running
 
     def present(self, commands):
@@ -74,7 +83,7 @@ class PygameBackend:
             elif kind in ("rect", "sprite"):
                 color = command.get("color", 3)
                 if kind == "sprite":
-                    color = 3
+                    color = sprite_color_index(command.get("name", "sprite"))
                 rect = pygame.Rect(
                     int(command["x"] * scale),
                     int(command["y"] * scale),
@@ -110,24 +119,32 @@ class PygameBackend:
     def tick(self, fps):
         return self.clock.tick(fps) / 1000.0
 
+    def close(self):
+        self.pygame.quit()
 
-def run_pygame(project_path, entry=None, frames=None, fps=30):
+
+def run_pygame(project_path, entry=None, frames=None, fps=30, scale=None):
     import os
 
     project_path = os.path.abspath(project_path)
     manifest = Manifest.load(project_path)
-    backend = PygameBackend(manifest.canvas, manifest.canvas.scale)
+    backend = PygameBackend(manifest.canvas, scale or manifest.canvas.scale, manifest.title)
     context = RuntimeContext(manifest, project_path, backend)
     context.load_entry(resolve_project_file(project_path, entry or manifest.entry, "entry"))
 
     count = 0
     running = True
-    while running:
-        running = backend.pump_input(context.input)
-        dt = backend.tick(fps)
-        context.step(dt)
-        count += 1
-        if frames is not None and count >= frames:
-            running = False
-    context.state = "STOPPED"
+    try:
+        while running:
+            running = backend.pump_input(context.input)
+            dt = backend.tick(fps)
+            context.step(dt)
+            count += 1
+            if context.state == "ERROR":
+                running = False
+            if frames is not None and count >= frames:
+                running = False
+        context.state = "STOPPED"
+    finally:
+        backend.close()
     return context

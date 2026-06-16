@@ -16,6 +16,14 @@ Check that project code stays inside the portable subset intended for a future d
 make check-portable
 ```
 
+Run a desktop simulator window when pygame is available:
+
+```bash
+.venv/bin/kidcode run examples/tiny_runner.kcproj --fps 30 --scale 4
+```
+
+Press `Esc` or close the window to exit.
+
 Kid projects import the small public API from `kidcode`:
 
 ```python

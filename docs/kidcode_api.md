@@ -32,3 +32,9 @@ Run the checker before adding examples:
 ```bash
 kidcode check-portable examples/tiny_runner.kcproj
 ```
+
+The desktop simulator supports `--fps` and `--scale` for manual runs:
+
+```bash
+kidcode run examples/tiny_runner.kcproj --fps 30 --scale 4
+```

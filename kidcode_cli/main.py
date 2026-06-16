@@ -31,11 +31,22 @@ def _cmd_validate(args):
 
 
 def _cmd_run(args):
+    if args.frames is not None and args.frames <= 0:
+        print("--frames must be greater than zero", file=sys.stderr)
+        return 2
+    if args.fps <= 0:
+        print("--fps must be greater than zero", file=sys.stderr)
+        return 2
+    if args.scale is not None and args.scale <= 0:
+        print("--scale must be greater than zero", file=sys.stderr)
+        return 2
     context = run_project(
         args.project,
         headless=args.headless,
         frames=args.frames,
         entry=args.entry,
+        fps=args.fps,
+        scale=args.scale,
     )
     print("ran: " + context.manifest.id + " frames=" + str(context.frame))
     if context.audio.calls:
@@ -80,6 +91,8 @@ def build_parser():
     run.add_argument("--headless", action="store_true")
     run.add_argument("--frames", type=int)
     run.add_argument("--entry")
+    run.add_argument("--fps", type=int, default=30)
+    run.add_argument("--scale", type=int)
     run.set_defaults(func=_cmd_run)
 
     compile_cmd = sub.add_parser("compile")
