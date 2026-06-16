@@ -1,5 +1,7 @@
 # KidCode
 
+[![CI](https://github.com/nikola-j/kidcode/actions/workflows/ci.yml/badge.svg)](https://github.com/nikola-j/kidcode/actions/workflows/ci.yml)
+
 KidCode is a PC-first simulator and SDK for a future ESP32 kids' creative coding console.
 
 The first goal is the edit-run-test loop on a normal computer:
