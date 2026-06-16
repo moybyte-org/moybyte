@@ -1,0 +1,1 @@
+"""KidCode CLI package."""

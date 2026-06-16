@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kidcode"
+version = "0.1.0"
+description = "PC-first SDK and simulator for KidCode projects."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+]
+sim = [
+  "pygame>=2.5",
+]
+
+[project.scripts]
+kidcode = "kidcode_cli.main:main"
+
+[tool.setuptools.packages.find]
+include = ["kidcode*", "kidcode_sim*", "kidcode_blocks*", "kidcode_cli*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

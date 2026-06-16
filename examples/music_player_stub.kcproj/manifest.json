@@ -1,0 +1,23 @@
+{
+  "schema": "kidcode.project.v1",
+  "id": "music_player_stub",
+  "title": "Music Player Stub",
+  "kind": "app",
+  "age_mode": "text",
+  "entry": "main.py",
+  "canvas": {
+    "width": 128,
+    "height": 128,
+    "scale": 4
+  },
+  "permissions": {
+    "files": "project",
+    "sd_card": false,
+    "audio": true,
+    "radio": false,
+    "wifi": false,
+    "ai": false,
+    "gpio": false,
+    "system": false
+  }
+}
