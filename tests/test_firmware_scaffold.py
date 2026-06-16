@@ -16,7 +16,9 @@ def test_lilygo_firmware_scaffold_uses_board_profile():
     )
 
     assert "KidCode firmware smoke test" in main_cpp
-    assert "Display: ST7789 color heartbeat" in main_cpp
+    assert "Display: KidCode native tiny_runner canvas" in main_cpp
+    assert "renderNativeTinyRunner" in main_cpp
+    assert "KIDCODE_CANVAS_SIZE = 128" in main_cpp
     assert "tftFillScreen" in main_cpp
     assert "KIDCODE_BOARD_TFT_BACKLIGHT" in main_cpp
     assert "KIDCODE_BOARD_POWERON 10" in profile

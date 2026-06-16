@@ -63,8 +63,8 @@ check it with:
 kidcode firmware-smoke-check /tmp/kidcode_lilygo_serial.log --board lilygo_t_deck_plus --project-id tiny_runner
 ```
 
-The smoke firmware also alternates full-screen ST7789 colors once per heartbeat.
-Use:
+The smoke firmware now renders a centered 128x128 native `tiny_runner` canvas
+and moves the player rectangle. Use:
 
 ```bash
 make firmware-smoke-lilygo PORT=/dev/ttyACM0

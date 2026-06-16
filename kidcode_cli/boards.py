@@ -94,9 +94,10 @@ def smoke_check_log(path, board_id="lilygo_t_deck_plus", project_id=None):
     required = [
         "KidCode firmware smoke test",
         "Board id: " + profile["id"],
-        "Display: ST7789 color heartbeat",
-        "Runtime: serial-only scaffold",
+        "Display: KidCode native tiny_runner canvas",
+        "Runtime: native tiny_runner scaffold",
         "KidCode heartbeat",
+        "Native tiny_runner player_x",
     ]
     if project_id is not None:
         required.append("Bundled project: " + project_id)

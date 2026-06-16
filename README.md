@@ -65,7 +65,7 @@ KidCode firmware smoke test
 Board id: lilygo_t_deck_plus
 Bundled project: tiny_runner
 Bundle bytes: <non-zero>
-Display: ST7789 color heartbeat
+Display: KidCode native tiny_runner canvas
 KidCode heartbeat 0
 ```
 

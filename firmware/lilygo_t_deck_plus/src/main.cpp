@@ -14,7 +14,16 @@
 static uint32_t frame_count = 0;
 static const uint16_t SCREEN_WIDTH = 320;
 static const uint16_t SCREEN_HEIGHT = 240;
+static const uint16_t KIDCODE_CANVAS_SIZE = 128;
+static const uint16_t KIDCODE_CANVAS_SCALE = 1;
+static const uint16_t KIDCODE_CANVAS_X = (SCREEN_WIDTH - (KIDCODE_CANVAS_SIZE * KIDCODE_CANVAS_SCALE)) / 2;
+static const uint16_t KIDCODE_CANVAS_Y = (SCREEN_HEIGHT - (KIDCODE_CANVAS_SIZE * KIDCODE_CANVAS_SCALE)) / 2;
 static const uint32_t TFT_SPI_HZ = 40000000;
+static int16_t player_x = 60;
+static int16_t player_y = 60;
+static int8_t player_dx = 2;
+static const int16_t coin_x = 24;
+static const int16_t coin_y = 24;
 
 static void tftSelect() {
     digitalWrite(KIDCODE_BOARD_TFT_CS, LOW);
@@ -89,6 +98,72 @@ static void tftFillScreen(uint16_t color) {
     tftDeselect();
 }
 
+static void tftFillRect(uint16_t x, uint16_t y, uint16_t width, uint16_t height, uint16_t color) {
+    if (width == 0 || height == 0) {
+        return;
+    }
+    uint8_t pixels[128];
+    for (size_t i = 0; i < sizeof(pixels); i += 2) {
+        pixels[i] = static_cast<uint8_t>(color >> 8);
+        pixels[i + 1] = static_cast<uint8_t>(color & 0xFF);
+    }
+    tftAddressWindow(x, y, x + width - 1, y + height - 1);
+    digitalWrite(KIDCODE_BOARD_TFT_DC, HIGH);
+    tftSelect();
+    uint32_t remaining = static_cast<uint32_t>(width) * height;
+    while (remaining > 0) {
+        uint32_t chunk_pixels = remaining > 64 ? 64 : remaining;
+        SPI.writeBytes(pixels, chunk_pixels * 2);
+        remaining -= chunk_pixels;
+    }
+    tftDeselect();
+}
+
+static uint16_t canvasX(int16_t x) {
+    return KIDCODE_CANVAS_X + (x * KIDCODE_CANVAS_SCALE);
+}
+
+static uint16_t canvasY(int16_t y) {
+    return KIDCODE_CANVAS_Y + (y * KIDCODE_CANVAS_SCALE);
+}
+
+static void drawCanvasRect(int16_t x, int16_t y, int16_t width, int16_t height, uint16_t color) {
+    if (width <= 0 || height <= 0) {
+        return;
+    }
+    tftFillRect(
+        canvasX(x),
+        canvasY(y),
+        width * KIDCODE_CANVAS_SCALE,
+        height * KIDCODE_CANVAS_SCALE,
+        color
+    );
+}
+
+static void drawCanvasBorder() {
+    const uint16_t border = 0xFFFF;
+    drawCanvasRect(0, 0, KIDCODE_CANVAS_SIZE, 1, border);
+    drawCanvasRect(0, KIDCODE_CANVAS_SIZE - 1, KIDCODE_CANVAS_SIZE, 1, border);
+    drawCanvasRect(0, 0, 1, KIDCODE_CANVAS_SIZE, border);
+    drawCanvasRect(KIDCODE_CANVAS_SIZE - 1, 0, 1, KIDCODE_CANVAS_SIZE, border);
+}
+
+static void updateNativeTinyRunner() {
+    player_x += player_dx;
+    if (player_x <= 2 || player_x >= 118) {
+        player_dx = -player_dx;
+        player_x += player_dx;
+    }
+}
+
+static void renderNativeTinyRunner() {
+    tftFillScreen(0x0000);
+    drawCanvasRect(0, 0, KIDCODE_CANVAS_SIZE, KIDCODE_CANVAS_SIZE, 0x0000);
+    drawCanvasBorder();
+    drawCanvasRect(player_x, player_y, 8, 8, 0x07E0);
+    drawCanvasRect(coin_x, coin_y, 8, 8, 0xFFE0);
+}
+
 static void initDisplay() {
     pinMode(KIDCODE_BOARD_TFT_CS, OUTPUT);
     pinMode(KIDCODE_BOARD_TFT_DC, OUTPUT);
@@ -140,7 +215,7 @@ static void initDisplay() {
     tftCommand(0x21);
     tftCommand(0x29);
     delay(20);
-    tftFillScreen(0x001F);
+    renderNativeTinyRunner();
 }
 
 void setup() {
@@ -162,16 +237,18 @@ void setup() {
     Serial.println(KIDCODE_PROJECT_TITLE);
     Serial.print("Bundle bytes: ");
     Serial.println(KIDCODE_PROJECT_BUNDLE_SIZE);
-    Serial.println("Display: ST7789 color heartbeat");
-    Serial.println("Runtime: serial-only scaffold");
-    Serial.println("Next: display, keyboard, and .kc8 bundle loading");
+    Serial.println("Display: KidCode native tiny_runner canvas");
+    Serial.println("Runtime: native tiny_runner scaffold");
+    Serial.println("Next: keyboard input and general .kc8 runtime loading");
 }
 
 void loop() {
-    const uint16_t colors[] = {0x001F, 0x07E0, 0xF800, 0xFFE0};
-    tftFillScreen(colors[frame_count % 4]);
+    updateNativeTinyRunner();
+    renderNativeTinyRunner();
     Serial.print("KidCode heartbeat ");
     Serial.println(frame_count);
+    Serial.print("Native tiny_runner player_x ");
+    Serial.println(player_x);
     frame_count += 1;
-    delay(1000);
+    delay(100);
 }

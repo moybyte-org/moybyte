@@ -49,14 +49,16 @@ Board id: lilygo_t_deck_plus
 Bundled project: tiny_runner
 Bundle title: Tiny Runner
 Bundle bytes: <non-zero>
-Display: ST7789 color heartbeat
-Runtime: serial-only scaffold
+Display: KidCode native tiny_runner canvas
+Runtime: native tiny_runner scaffold
 KidCode heartbeat 0
+Native tiny_runner player_x 62
 ```
 
-The display should alternate full-screen colors once per heartbeat. This is the
-first physical proof that the firmware loop and ST7789 display path are running
-before the KidCode canvas renderer is integrated.
+The display should show a centered 128x128 KidCode canvas with a white border,
+a green player rectangle, and a yellow coin rectangle. The player moves
+horizontally. This is a native firmware scaffold for `tiny_runner`, not a
+general Python runtime yet.
 
 Verify a saved serial log:
 
@@ -74,7 +76,7 @@ Next firmware steps:
 1. compile this serial smoke test
 2. flash it and verify serial output
 3. add display init from the official T-Deck examples
-4. draw the 128x128 KidCode logical canvas
-5. read keyboard/trackball input into KidCode button names
-6. load /data/tiny_runner.kc8 or an embedded bundle
+4. read keyboard/trackball input into KidCode button names
+5. replace the native tiny_runner scaffold with general .kc8 runtime loading
+6. map a portable subset to MicroPython or native generated code
 ```
