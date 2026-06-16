@@ -49,13 +49,14 @@ Board id: lilygo_t_deck_plus
 Bundled project: tiny_runner
 Bundle title: Tiny Runner
 Bundle bytes: <non-zero>
-Display backlight: blinking
+Display: ST7789 color heartbeat
 Runtime: serial-only scaffold
 KidCode heartbeat 0
 ```
 
-The TFT backlight should blink once per heartbeat. That is the first physical
-proof that the firmware loop is running before the display driver is integrated.
+The display should alternate full-screen colors once per heartbeat. This is the
+first physical proof that the firmware loop and ST7789 display path are running
+before the KidCode canvas renderer is integrated.
 
 Verify a saved serial log:
 

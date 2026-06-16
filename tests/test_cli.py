@@ -109,7 +109,7 @@ def test_cli_firmware_smoke_check(capsys, tmp_path):
         "Board id: lilygo_t_deck_plus\n"
         "Bundled project: tiny_runner\n"
         "Bundle bytes: 123\n"
-        "Display backlight: blinking\n"
+        "Display: ST7789 color heartbeat\n"
         "Runtime: serial-only scaffold\n"
         "KidCode heartbeat 0\n",
         encoding="utf-8",

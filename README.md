@@ -65,7 +65,7 @@ KidCode firmware smoke test
 Board id: lilygo_t_deck_plus
 Bundled project: tiny_runner
 Bundle bytes: <non-zero>
-Display backlight: blinking
+Display: ST7789 color heartbeat
 KidCode heartbeat 0
 ```
 

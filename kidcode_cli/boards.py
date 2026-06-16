@@ -94,7 +94,7 @@ def smoke_check_log(path, board_id="lilygo_t_deck_plus", project_id=None):
     required = [
         "KidCode firmware smoke test",
         "Board id: " + profile["id"],
-        "Display backlight: blinking",
+        "Display: ST7789 color heartbeat",
         "Runtime: serial-only scaffold",
         "KidCode heartbeat",
     ]
