@@ -12,6 +12,7 @@ def test_board_info_contains_lilygo_profile():
 
     assert profile["mcu"] == "esp32s3"
     assert profile["platformio_env"] == "T-Deck"
+    assert profile["pins"]["keyboard_addr"] == 0x55
     assert profile["pins"]["keyboard_int"] == 46
 
 
@@ -73,10 +74,12 @@ def test_smoke_check_log_accepts_expected_serial_output(tmp_path):
         "Board id: lilygo_t_deck_plus\n"
         "Bundled project: tiny_runner\n"
         "Bundle bytes: 123\n"
+        "Keyboard: detected\n"
         "Display: KidCode native tiny_runner canvas\n"
         "Runtime: native tiny_runner scaffold\n"
         "KidCode heartbeat 0\n"
-        "Native tiny_runner player_x 62\n",
+        "Native tiny_runner player_x 62\n"
+        "Native tiny_runner player_y 60\n",
         encoding="utf-8",
     )
 
@@ -89,10 +92,12 @@ def test_smoke_check_log_rejects_missing_project(tmp_path):
         "KidCode firmware smoke test\n"
         "Board id: lilygo_t_deck_plus\n"
         "Bundle bytes: 123\n"
+        "Keyboard: detected\n"
         "Display: KidCode native tiny_runner canvas\n"
         "Runtime: native tiny_runner scaffold\n"
         "KidCode heartbeat 0\n"
-        "Native tiny_runner player_x 62\n",
+        "Native tiny_runner player_x 62\n"
+        "Native tiny_runner player_y 60\n",
         encoding="utf-8",
     )
 

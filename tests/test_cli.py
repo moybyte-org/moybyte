@@ -109,10 +109,12 @@ def test_cli_firmware_smoke_check(capsys, tmp_path):
         "Board id: lilygo_t_deck_plus\n"
         "Bundled project: tiny_runner\n"
         "Bundle bytes: 123\n"
+        "Keyboard: detected\n"
         "Display: KidCode native tiny_runner canvas\n"
         "Runtime: native tiny_runner scaffold\n"
         "KidCode heartbeat 0\n"
-        "Native tiny_runner player_x 62\n",
+        "Native tiny_runner player_x 62\n"
+        "Native tiny_runner player_y 60\n",
         encoding="utf-8",
     )
 

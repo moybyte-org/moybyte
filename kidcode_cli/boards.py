@@ -34,6 +34,7 @@ BOARD_PROFILES = {
             "power_on": 10,
             "i2c_sda": 18,
             "i2c_scl": 8,
+            "keyboard_addr": 0x55,
             "keyboard_int": 46,
             "sdcard_cs": 39,
             "tft_cs": 12,
@@ -95,9 +96,11 @@ def smoke_check_log(path, board_id="lilygo_t_deck_plus", project_id=None):
         "KidCode firmware smoke test",
         "Board id: " + profile["id"],
         "Display: KidCode native tiny_runner canvas",
+        "Keyboard:",
         "Runtime: native tiny_runner scaffold",
         "KidCode heartbeat",
         "Native tiny_runner player_x",
+        "Native tiny_runner player_y",
     ]
     if project_id is not None:
         required.append("Bundled project: " + project_id)

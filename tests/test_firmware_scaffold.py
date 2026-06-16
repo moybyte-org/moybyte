@@ -19,7 +19,10 @@ def test_lilygo_firmware_scaffold_uses_board_profile():
     assert "Display: KidCode native tiny_runner canvas" in main_cpp
     assert "renderNativeTinyRunner" in main_cpp
     assert "KIDCODE_CANVAS_SIZE = 128" in main_cpp
+    assert "#include <Wire.h>" in main_cpp
+    assert "KIDCODE_BOARD_KEYBOARD_ADDR" in main_cpp
     assert "tftFillScreen" in main_cpp
     assert "KIDCODE_BOARD_TFT_BACKLIGHT" in main_cpp
+    assert "KIDCODE_BOARD_KEYBOARD_ADDR 0x55" in profile
     assert "KIDCODE_BOARD_POWERON 10" in profile
     assert "lilygo_t_deck_plus" in profile

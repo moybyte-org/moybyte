@@ -66,9 +66,13 @@ KidCode firmware smoke test
 Board id: lilygo_t_deck_plus
 Bundled project: tiny_runner
 Bundle bytes: <non-zero>
+Keyboard: detected
 Display: KidCode native tiny_runner canvas
 KidCode heartbeat 0
 ```
+
+In the native firmware scaffold, use `WASD` or `HJKL` on the T-Deck keyboard to
+move the green player rectangle.
 
 Save a monitor log and verify it with:
 

@@ -30,6 +30,7 @@ Pin values currently captured from upstream `examples/UnitTest/utilities.h`:
 BOARD_POWERON       10
 BOARD_I2C_SDA       18
 BOARD_I2C_SCL       8
+KEYBOARD I2C ADDR   0x55
 BOARD_KEYBOARD_INT  46
 BOARD_SDCARD_CS     39
 BOARD_TFT_CS        12
@@ -65,7 +66,8 @@ kidcode firmware-smoke-check /tmp/kidcode_lilygo_serial.log --board lilygo_t_dec
 ```
 
 The smoke firmware now renders a centered 128x128 native `tiny_runner` canvas
-and moves the player rectangle. Use:
+and moves the player rectangle. It polls the keyboard over I2C address `0x55`;
+use `WASD` or `HJKL` to move when the keyboard is detected. Use:
 
 ```bash
 make firmware-smoke-lilygo PORT=/dev/ttyACM0

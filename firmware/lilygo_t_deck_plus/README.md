@@ -49,16 +49,19 @@ Board id: lilygo_t_deck_plus
 Bundled project: tiny_runner
 Bundle title: Tiny Runner
 Bundle bytes: <non-zero>
+Keyboard: detected
 Display: KidCode native tiny_runner canvas
 Runtime: native tiny_runner scaffold
 KidCode heartbeat 0
 Native tiny_runner player_x 62
+Native tiny_runner player_y 60
 ```
 
 The display should show a centered 128x128 KidCode canvas with a white border,
 a green player rectangle, and a yellow coin rectangle. The player moves
-horizontally. This is a native firmware scaffold for `tiny_runner`, not a
-general Python runtime yet.
+horizontally when no keyboard is detected. When the keyboard is detected, use
+`WASD` or `HJKL` to move the player. This is a native firmware scaffold for
+`tiny_runner`, not a general Python runtime yet.
 
 Verify a saved serial log:
 
@@ -76,7 +79,7 @@ Next firmware steps:
 1. compile this serial smoke test
 2. flash it and verify serial output
 3. add display init from the official T-Deck examples
-4. read keyboard/trackball input into KidCode button names
+4. map the keyboard polling into canonical KidCode button names
 5. replace the native tiny_runner scaffold with general .kc8 runtime loading
 6. map a portable subset to MicroPython or native generated code
 ```

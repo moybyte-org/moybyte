@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <SPI.h>
+#include <Wire.h>
 
 #include "kidcode_board_profile.h"
 
@@ -24,6 +25,8 @@ static int16_t player_y = 60;
 static int8_t player_dx = 2;
 static const int16_t coin_x = 24;
 static const int16_t coin_y = 24;
+static bool keyboard_detected = false;
+static uint8_t last_key = 0;
 
 static void tftSelect() {
     digitalWrite(KIDCODE_BOARD_TFT_CS, LOW);
@@ -149,10 +152,79 @@ static void drawCanvasBorder() {
 }
 
 static void updateNativeTinyRunner() {
-    player_x += player_dx;
-    if (player_x <= 2 || player_x >= 118) {
-        player_dx = -player_dx;
+    uint8_t key = 0;
+    if (keyboard_detected) {
+        Wire.beginTransmission(KIDCODE_BOARD_KEYBOARD_ADDR);
+        if (Wire.endTransmission() == 0) {
+            Wire.requestFrom(static_cast<uint8_t>(KIDCODE_BOARD_KEYBOARD_ADDR), static_cast<uint8_t>(1));
+            if (Wire.available() > 0) {
+                key = Wire.read();
+            }
+        } else {
+            keyboard_detected = false;
+            Serial.println("Keyboard: lost");
+        }
+    }
+
+    if (key != 0) {
+        last_key = key;
+        Serial.print("Key pressed: 0x");
+        Serial.println(key, HEX);
+    }
+
+    bool moved = false;
+    switch (key) {
+        case 'a':
+        case 'A':
+        case 'h':
+        case 'H':
+            player_x -= 2;
+            moved = true;
+            break;
+        case 'd':
+        case 'D':
+        case 'l':
+        case 'L':
+            player_x += 2;
+            moved = true;
+            break;
+        case 'w':
+        case 'W':
+        case 'k':
+        case 'K':
+            player_y -= 2;
+            moved = true;
+            break;
+        case 's':
+        case 'S':
+        case 'j':
+        case 'J':
+            player_y += 2;
+            moved = true;
+            break;
+        default:
+            break;
+    }
+
+    if (!keyboard_detected && !moved) {
         player_x += player_dx;
+        if (player_x <= 2 || player_x >= 118) {
+            player_dx = -player_dx;
+            player_x += player_dx;
+        }
+    }
+
+    if (player_x < 2) {
+        player_x = 2;
+    }
+    if (player_x > 118) {
+        player_x = 118;
+    }
+    if (player_y < 2) {
+        player_y = 2;
+    }
+    if (player_y > 118) {
+        player_y = 118;
     }
 }
 
@@ -222,6 +294,10 @@ void setup() {
     pinMode(KIDCODE_BOARD_POWERON, OUTPUT);
     digitalWrite(KIDCODE_BOARD_POWERON, HIGH);
     initDisplay();
+    Wire.begin(KIDCODE_BOARD_I2C_SDA, KIDCODE_BOARD_I2C_SCL);
+    pinMode(KIDCODE_BOARD_KEYBOARD_INT, INPUT_PULLUP);
+    Wire.beginTransmission(KIDCODE_BOARD_KEYBOARD_ADDR);
+    keyboard_detected = Wire.endTransmission() == 0;
 
     Serial.begin(115200);
     delay(1000);
@@ -237,6 +313,8 @@ void setup() {
     Serial.println(KIDCODE_PROJECT_TITLE);
     Serial.print("Bundle bytes: ");
     Serial.println(KIDCODE_PROJECT_BUNDLE_SIZE);
+    Serial.print("Keyboard: ");
+    Serial.println(keyboard_detected ? "detected" : "not detected");
     Serial.println("Display: KidCode native tiny_runner canvas");
     Serial.println("Runtime: native tiny_runner scaffold");
     Serial.println("Next: keyboard input and general .kc8 runtime loading");
@@ -249,6 +327,10 @@ void loop() {
     Serial.println(frame_count);
     Serial.print("Native tiny_runner player_x ");
     Serial.println(player_x);
+    Serial.print("Native tiny_runner player_y ");
+    Serial.println(player_y);
+    Serial.print("Native tiny_runner last_key ");
+    Serial.println(last_key);
     frame_count += 1;
     delay(100);
 }
