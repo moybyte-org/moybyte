@@ -3,7 +3,7 @@ SYSTEM_PYTHON ?= python3
 PYTHON ?= $(VENV)/bin/python
 KIDCODE ?= $(VENV)/bin/kidcode
 
-.PHONY: setup test run-example run-headless compile-blocks doctor check-portable pack-example
+.PHONY: setup test run-example run-headless compile-blocks doctor check-portable pack-example export-lilygo-example device-doctor
 
 setup:
 	$(SYSTEM_PYTHON) -m venv --system-site-packages $(VENV)
@@ -14,6 +14,9 @@ test:
 
 doctor:
 	$(KIDCODE) doctor
+
+device-doctor:
+	$(KIDCODE) device-doctor --board lilygo_t_deck_plus
 
 run-example:
 	$(KIDCODE) run examples/tiny_runner.kcproj
@@ -29,3 +32,6 @@ check-portable:
 
 pack-example:
 	$(KIDCODE) pack examples/tiny_runner.kcproj --out /tmp/tiny_runner.kc8
+
+export-lilygo-example:
+	$(KIDCODE) export-device examples/tiny_runner.kcproj --board lilygo_t_deck_plus --out /tmp/kidcode_lilygo_t_deck_plus

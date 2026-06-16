@@ -31,6 +31,13 @@ Pack a project bundle:
 .venv/bin/kidcode pack examples/tiny_runner.kcproj --out /tmp/tiny_runner.kc8
 ```
 
+Prepare the current LilyGO T-Deck Plus target artifact:
+
+```bash
+make device-doctor
+make export-lilygo-example
+```
+
 Run a desktop simulator window when pygame is available:
 
 ```bash

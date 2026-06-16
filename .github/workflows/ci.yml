@@ -50,3 +50,6 @@ jobs:
 
       - name: Pack tiny runner
         run: make pack-example
+
+      - name: Export LilyGO bundle
+        run: make export-lilygo-example

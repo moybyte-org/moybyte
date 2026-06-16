@@ -257,3 +257,10 @@ manual flash/deploy flow
 
 The board profile should be named `lilygo_t_deck_plus` once the exact firmware
 stack and pin/display/keyboard details are verified.
+
+The current local board profile lives in `docs/boards/lilygo_t_deck_plus.md` and
+can be inspected with:
+
+```bash
+kidcode board-info lilygo_t_deck_plus
+```

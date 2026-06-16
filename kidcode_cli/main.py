@@ -7,6 +7,7 @@ import sys
 from kidcode.errors import KidCodeRuntimeError, ManifestError
 from kidcode.manifest import Manifest
 from kidcode_blocks.compiler import compile_project
+from kidcode_cli.boards import board_profile_json, device_doctor, export_device_project
 from kidcode_cli.pack import pack_project
 from kidcode_cli.portable import check_path
 from kidcode_cli.projects import create_project
@@ -36,6 +37,35 @@ def _cmd_doctor(_args):
 def _cmd_validate(args):
     manifest = Manifest.load(args.project)
     print("valid: " + manifest.title + " (" + manifest.id + ")")
+    return 0
+
+
+def _cmd_board_info(args):
+    print(board_profile_json(args.board), end="")
+    return 0
+
+
+def _cmd_device_doctor(args):
+    info = device_doctor(args.board)
+    print("KidCode device doctor")
+    print("Board: " + info["title"] + " (" + info["board"] + ")")
+    print("PlatformIO env: " + info["platformio_env"])
+    if info["platformio"]:
+        print("PlatformIO: " + info["platformio"])
+    else:
+        print("PlatformIO: not found")
+    if info["serial_ports"]:
+        print("Serial ports:")
+        for port in info["serial_ports"]:
+            print("  " + port)
+    else:
+        print("Serial ports: none found")
+    return 0
+
+
+def _cmd_export_device(args):
+    out_dir = export_device_project(args.project, args.board, args.out)
+    print("exported: " + _display_path(out_dir))
     return 0
 
 
@@ -116,6 +146,20 @@ def build_parser():
     validate = sub.add_parser("validate")
     validate.add_argument("project")
     validate.set_defaults(func=_cmd_validate)
+
+    board_info = sub.add_parser("board-info")
+    board_info.add_argument("board")
+    board_info.set_defaults(func=_cmd_board_info)
+
+    device_doctor_cmd = sub.add_parser("device-doctor")
+    device_doctor_cmd.add_argument("--board", default="lilygo_t_deck_plus")
+    device_doctor_cmd.set_defaults(func=_cmd_device_doctor)
+
+    export_device = sub.add_parser("export-device")
+    export_device.add_argument("project")
+    export_device.add_argument("--board", default="lilygo_t_deck_plus")
+    export_device.add_argument("--out", required=True)
+    export_device.set_defaults(func=_cmd_export_device)
 
     new = sub.add_parser("new")
     new.add_argument("project")
