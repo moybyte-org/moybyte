@@ -25,4 +25,4 @@ compile-blocks:
 	$(KIDCODE) compile examples/blocks_demo.kcproj
 
 check-portable:
-	$(KIDCODE) check-portable examples/tiny_runner.kcproj examples/blocks_demo.kcproj examples/music_player_stub.kcproj
+	$(KIDCODE) check-portable examples/tiny_runner.kcproj examples/blocks_demo.kcproj examples/music_player_stub.kcproj examples/radio_pong_stub.kcproj

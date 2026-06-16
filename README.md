@@ -24,6 +24,15 @@ Run a desktop simulator window when pygame is available:
 
 Press `Esc` or close the window to exit.
 
+Bundled examples:
+
+```text
+examples/tiny_runner.kcproj
+examples/blocks_demo.kcproj
+examples/music_player_stub.kcproj
+examples/radio_pong_stub.kcproj
+```
+
 Kid projects import the small public API from `kidcode`:
 
 ```python

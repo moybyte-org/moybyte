@@ -23,3 +23,5 @@ kidcode run examples/blocks_demo.kcproj --entry generated/main.generated.py --he
 PC v0 executes local Python code. Permissions are enforced for KidCode services, but they are not a complete Python sandbox.
 
 Project entry paths must stay inside the `.kcproj` folder. Runtime entry overrides use the same rule.
+
+The repo includes text, blocks, app, and radio stub examples under `examples/`.
