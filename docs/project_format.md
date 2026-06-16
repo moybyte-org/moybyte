@@ -31,3 +31,13 @@ Create a new project with:
 ```bash
 kidcode new my_game
 ```
+
+Pack a `.kc8` bundle with:
+
+```bash
+kidcode pack my_game.kcproj --out my_game.kc8
+```
+
+Bundles are zip files with a `kidcode_bundle.json` metadata file and project
+files at archive root. Generated files and Python caches are excluded unless
+`--include-generated` is used.

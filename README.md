@@ -25,6 +25,12 @@ Create a new project:
 .venv/bin/kidcode run my_game.kcproj --headless --frames 60
 ```
 
+Pack a project bundle:
+
+```bash
+.venv/bin/kidcode pack examples/tiny_runner.kcproj --out /tmp/tiny_runner.kc8
+```
+
 Run a desktop simulator window when pygame is available:
 
 ```bash

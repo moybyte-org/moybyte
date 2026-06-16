@@ -3,7 +3,7 @@ SYSTEM_PYTHON ?= python3
 PYTHON ?= $(VENV)/bin/python
 KIDCODE ?= $(VENV)/bin/kidcode
 
-.PHONY: setup test run-example run-headless compile-blocks doctor check-portable
+.PHONY: setup test run-example run-headless compile-blocks doctor check-portable pack-example
 
 setup:
 	$(SYSTEM_PYTHON) -m venv --system-site-packages $(VENV)
@@ -26,3 +26,6 @@ compile-blocks:
 
 check-portable:
 	$(KIDCODE) check-portable examples/tiny_runner.kcproj examples/blocks_demo.kcproj examples/music_player_stub.kcproj examples/radio_pong_stub.kcproj
+
+pack-example:
+	$(KIDCODE) pack examples/tiny_runner.kcproj --out /tmp/tiny_runner.kc8

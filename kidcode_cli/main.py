@@ -7,9 +7,17 @@ import sys
 from kidcode.errors import KidCodeRuntimeError, ManifestError
 from kidcode.manifest import Manifest
 from kidcode_blocks.compiler import compile_project
+from kidcode_cli.pack import pack_project
 from kidcode_cli.portable import check_path
 from kidcode_cli.projects import create_project
 from kidcode_sim.main import run_project
+
+
+def _display_path(path):
+    rel = os.path.relpath(path)
+    if rel.startswith(".."):
+        return os.path.abspath(path)
+    return rel
 
 
 def _cmd_doctor(_args):
@@ -71,7 +79,17 @@ def _cmd_run(args):
 
 def _cmd_compile(args):
     out_path = compile_project(args.project)
-    print("generated: " + os.path.relpath(out_path))
+    print("generated: " + _display_path(out_path))
+    return 0
+
+
+def _cmd_pack(args):
+    out_path = pack_project(
+        args.project,
+        out_path=args.out,
+        include_generated=args.include_generated,
+    )
+    print("packed: " + _display_path(out_path))
     return 0
 
 
@@ -119,6 +137,12 @@ def build_parser():
     compile_cmd = sub.add_parser("compile")
     compile_cmd.add_argument("project")
     compile_cmd.set_defaults(func=_cmd_compile)
+
+    pack = sub.add_parser("pack")
+    pack.add_argument("project")
+    pack.add_argument("--out")
+    pack.add_argument("--include-generated", action="store_true")
+    pack.set_defaults(func=_cmd_pack)
 
     check_portable = sub.add_parser("check-portable")
     check_portable.add_argument("paths", nargs="+")

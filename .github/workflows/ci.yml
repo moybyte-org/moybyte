@@ -47,3 +47,6 @@ jobs:
 
       - name: Run radio pong stub
         run: .venv/bin/kidcode run examples/radio_pong_stub.kcproj --headless --frames 30
+
+      - name: Pack tiny runner
+        run: make pack-example
