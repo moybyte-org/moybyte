@@ -42,6 +42,10 @@ examples/music_player_stub.kcproj
 examples/radio_pong_stub.kcproj
 ```
 
+The firmware-facing API contract is in
+`docs/firmware_runtime_contract.md`. The first concrete hardware target is the
+LilyGO T-Deck Plus, with board-specific details kept out of the portable API.
+
 Kid projects import the small public API from `kidcode`:
 
 ```python
