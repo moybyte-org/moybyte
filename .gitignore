@@ -7,4 +7,7 @@ examples/*/generated/
 *.kc8
 .pio/
 firmware/**/.pio/
+firmware/lilygo_t_deck_plus_micropython/.build/
+firmware/lilygo_t_deck_plus_micropython/dist/
+firmware/lilygo_t_deck_plus_reference/
 firmware/lilygo_t_deck_plus/include/kidcode_project_bundle.h
