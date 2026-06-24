@@ -78,8 +78,8 @@ re-staged every build, gitignored):
 - `runtime/font.py` — petme128 8×8 font (host only; the device uses framebuf's copy).
 - `runtime/host_app.py` — host glue: host `make_api`, `build_workstation()`, `ConsoleDriver` (mouse=touch, arrows=trackball). Not on device.
 
-The pre-unification host UI (`shell.py`, `workstation.py`, `engine.py`, `api.py`,
-`cartridge.py`) is **legacy/superseded** by the shared console (kept only for its tests).
+(The pre-unification host UI — `shell.py`/`workstation.py`/`engine.py`/`api.py`/
+`cartridge.py` — was removed once the shared console replaced it; issue #17.)
 
 ### Device module map (`firmware/lilygo_t_deck_plus_micropython/modules/`)
 

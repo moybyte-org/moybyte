@@ -469,15 +469,6 @@ class Workstation:
         t = f.get("card")
         return t.replace("{value}", str(v)) if t else "%s: %s" % (f["key"].upper(), v)
 
-    def code_lines(self):
-        out = ["WHEN START:"]
-        for f in self.cart["edit"]:
-            v = self.config.get(f["key"], f.get("default"))
-            if f["type"] == "choice":
-                v = str(v).replace("_", " ").upper()
-            out.append("  " + f["key"].upper() + " = " + str(v))
-        return out
-
     def handle_input(self):
         i = self.input
         if self.screen == "launcher":
