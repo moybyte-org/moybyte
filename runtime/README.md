@@ -26,11 +26,9 @@ the device freezes the identical code) and **host glue**.
 | `host_app.py` | **(host glue)** host `make_api`, `build_workstation()` (320×240 Canvas + `kid_carts` + seeded system carts), and `ConsoleDriver` (mouse/keyboard → the shared console) |
 | `input.py` | **(host)** `InputState` — held/pressed/released + `last_key` (same contract as firmware `kidcode`) |
 
-Legacy host reference (the pre-unification UI, now **superseded by the shared
-console** and not used by the simulator — kept for their tests pending retirement):
-`cartridge.py` (`Cartridge`/`Catalog`), `api.py` (`make_api(runtime)`),
-`engine.py` (`DesktopRuntime`), `shell.py` (`DesktopShell`), `workstation.py`
-(`Workstation`).
+The pre-unification host UI (`shell.py`, `workstation.py`, `engine.py`, `api.py`,
+`cartridge.py`) was **removed** once the shared console replaced it (issue #17); the
+older `.kcproj` SDK lives separately under `kidcode/` / `kidcode_cli/`.
 
 Content + tooling:
 - `system_carts/` — `wallpaper_space.kcart` (Living Desktop: starfield + pet),
