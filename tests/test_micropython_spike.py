@@ -369,6 +369,30 @@ def test_micropython_native_sd_shares_display_spi_host():
     assert "ws.can_manage = False" not in runtime
 
 
+def test_micropython_touch_and_idle_cursor():
+    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    shell = (ROOT / "modules" / "kidcode_shell.py").read_text(encoding="utf-8")
+
+    # GT911 touch driver on I2C0 (off the SPI bus), fed into the shared pointer.
+    assert "class Touch:" in runtime
+    assert "0x814E" in runtime and "0x8150" in runtime          # GT911 status/point regs
+    assert "TOUCH_SWAP" in runtime and "TOUCH_FLIP_Y" in runtime
+    assert "touch = Touch(canvas.w, canvas.h" in runtime
+    assert "tp = touch.poll()" in runtime
+    assert "pointer.place(tp[0], tp[1])" in runtime
+
+    # Cursor auto-hides when the trackball is idle; touch keeps it hidden.
+    assert "self.visible" in runtime
+    assert "def tick(self, now):" in runtime
+    assert "self.pointer.visible" in runtime               # draw guard
+    assert "pointer.tick(now)" in runtime
+
+    # Touch calibration bring-up mode (serial-only, flush-once).
+    assert "def run_touch_calibrate(handler):" in runtime
+    assert "RUN_TOUCH_CALIBRATE" in shell
+    assert "run_touch_calibrate(_task_handler)" in shell
+
+
 def test_micropython_spike_enables_watchdog_after_display_bringup():
     shell = (ROOT / "modules" / "kidcode_shell.py").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")

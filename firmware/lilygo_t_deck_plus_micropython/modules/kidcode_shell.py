@@ -14,6 +14,11 @@ RUN_FULLSCREEN_BENCH = False
 # (kc_gfx C kernel + kc_compositor) instead of the normal app. Read
 # `KidCode compositor smoke ...` over serial. See STAGE3_PLAN.md.
 RUN_COMPOSITOR_SMOKE = False
+# Touch bring-up: when True, boot draws corner targets and prints each GT911
+# sample (raw + mapped) over serial instead of the desktop, so the touch->canvas
+# mapping (kid_runtime.TOUCH_*) can be calibrated. Flush-on-start only, so USB
+# serial stays alive (the desktop loop's continuous flush would starve it).
+RUN_TOUCH_CALIBRATE = False
 # Default device boot (v0.4): the fantasy workstation on the native compositor --
 # cartridge launcher + carts + keyboard, same kid API as the host simulator (see
 # kid_runtime.py). Supersedes the legacy 128x128 LVGL game loop below, which stays
@@ -54,6 +59,11 @@ def main():
 
     if RUN_COMPOSITOR_SMOKE:
         _run_compositor_smoke(_task_handler)
+        return
+
+    if RUN_TOUCH_CALIBRATE:
+        from kid_runtime import run_touch_calibrate
+        run_touch_calibrate(_task_handler)
         return
 
     if RUN_DESKTOP:
