@@ -16,8 +16,11 @@ import json
 import os
 import shutil
 
+from .editors import SpriteSheet
+
 REQUIRED_FIELDS = ("format", "title", "type", "runtime", "main")
 CART_FORMAT = "kidcode-cart-v1"
+SPRITES_FILE = "sprites.kgfx"
 
 
 class CartridgeError(Exception):
@@ -25,12 +28,15 @@ class CartridgeError(Exception):
 
 
 class Cartridge:
-    def __init__(self, path, manifest, main_source, config, system=False):
+    def __init__(self, path, manifest, main_source, config, system=False, sheet=None):
         self.path = path
         self.manifest = manifest
         self.main_source = main_source
         self.config = config
         self.system = system
+        # The cartridge's sprite sheet (8x8 indexed tiles). Always present so
+        # spr(n, ...) is safe even before any sprites are painted.
+        self.sheet = sheet if sheet is not None else SpriteSheet()
 
     @property
     def title(self):
@@ -75,8 +81,16 @@ class Cartridge:
             except ValueError as exc:
                 raise CartridgeError("invalid config.json: %s" % exc)
 
+        # Optional sprite sheet (PICO-8 __gfx__-style hex); absent for carts that
+        # have no painted sprites yet.
+        sheet = None
+        sprites_path = os.path.join(path, SPRITES_FILE)
+        if os.path.isfile(sprites_path):
+            with open(sprites_path, "r", encoding="utf-8") as fh:
+                sheet = SpriteSheet.from_hex(fh.read())
+
         system = bool(manifest.get("system", False))
-        return cls(path, manifest, main_source, config, system=system)
+        return cls(path, manifest, main_source, config, system=system, sheet=sheet)
 
     def duplicate(self, dest_dir, new_title=None):
         """Copy this cartridge into dest_dir as an editable (non-system) copy."""
@@ -98,6 +112,23 @@ class Cartridge:
             self.config.update(updates)
         with open(os.path.join(self.path, "config.json"), "w", encoding="utf-8") as fh:
             json.dump(self.config, fh, indent=2)
+
+    def save_sprites(self):
+        """Persist the sprite sheet to sprites.kgfx. Refuses system carts."""
+        if self.system:
+            raise CartridgeError("cannot edit a system cartridge; duplicate it first")
+        with open(os.path.join(self.path, SPRITES_FILE), "w", encoding="utf-8") as fh:
+            fh.write(self.sheet.to_hex())
+        self.sheet.dirty = False
+
+    def save_main(self, source):
+        """Persist edited cartridge source to its main file. Refuses system carts."""
+        if self.system:
+            raise CartridgeError("cannot edit a system cartridge; duplicate it first")
+        self.main_source = source
+        with open(os.path.join(self.path, self.manifest.get("main", "main.py")),
+                  "w", encoding="utf-8") as fh:
+            fh.write(source)
 
 
 def _validate(manifest):

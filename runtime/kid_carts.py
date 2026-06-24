@@ -97,6 +97,10 @@ def load(path):
         cfg.update(json.loads(_read(path + "/config.json")))
     except (OSError, ValueError):
         pass
+    try:
+        sprites = _read(path + "/sprites.kgfx")   # PICO-8 __gfx__-style hex, optional
+    except OSError:
+        sprites = None
     return {
         "path": path,
         "title": man.get("title", "cart"),
@@ -104,6 +108,7 @@ def load(path):
         "src": src,
         "cfg": cfg,
         "edit": man.get("edit", []),
+        "sprites": sprites,
     }
 
 
@@ -133,6 +138,12 @@ def save_code(cart, src):
     cart["src"] = src
 
 
+def save_sprites(cart, hex_text):
+    """Persist the sprite sheet (PICO-8 __gfx__-style hex) to sprites.kgfx."""
+    _write(cart["path"] + "/sprites.kgfx", hex_text)
+    cart["sprites"] = hex_text
+
+
 # --- cart management (create / duplicate / delete) --------------------------
 
 # A friendly starter cartridge: an editable colored dot on a wallpaper.
@@ -141,8 +152,8 @@ NEW_TEMPLATE = {
     "src": (
         "def _draw():\n"
         "    cls(col(cfg('bg', 'dark_blue')))\n"
-        "    circfill(W // 2, H // 2, cfg('size', 24), col(cfg('color', 'yellow')))\n"
-        "    text('MY NEW CART', 20, 20, col('white'), 2)\n"
+        "    circ(W // 2, H // 2, cfg('size', 24), col(cfg('color', 'yellow')))\n"
+        "    print('MY NEW CART', 20, 20, col('white'), 2)\n"
     ),
     "cfg": {"bg": "dark_blue", "color": "yellow", "size": 24},
     "edit": [

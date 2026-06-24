@@ -2,7 +2,8 @@
 #
 # This is "the computer itself", made of editable code. Change config and press
 # Run: more stars, a faster sky, a different pet, a new background. The API
-# (cls/pset/rectfill/spr/text/cfg/col/rnd/image) is injected by the runtime.
+# (cls/pix/rect/spr/print/cfg/col/rnd/image -- TIC-80 style) is injected by the
+# runtime.
 
 stars = []
 pet = None
@@ -63,8 +64,8 @@ def _update(dt):
 def _draw():
     cls(col(cfg("bg", "dark_blue")))
     for s in stars:
-        pset(s[0], s[1], 7 if s[2] > 25 else 6)
-    rectfill(0, H - 24, W, 24, col("dark_green"))   # ground
+        pix(s[0], s[1], 7 if s[2] > 25 else 6)
+    rect(0, H - 24, W, 24, col("dark_green"))   # ground
     bob = 2 if (int(t * 4) % 2 == 0) else 0
-    spr(pet, int(pet_x), H - 24 - 28 - bob, 4)       # 4x-scaled pet on the ground
-    text("MY SPACE COMPUTER", 10, 10, col("white"), 3)
+    spr(pet, int(pet_x), H - 24 - 28 - bob, scale=4)  # 4x-scaled pet on the ground
+    print("MY SPACE COMPUTER", 10, 10, col("white"), 3)

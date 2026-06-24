@@ -83,9 +83,9 @@ def _update(dt):
 def _draw():
     cls(col("black"))
     for s in stars:
-        circfill(int(s[0]), int(s[1]), 3, col("yellow"))
+        circ(int(s[0]), int(s[1]), 3, col("yellow"))
     by = H - 24 - BH
-    rectfill(0, H - 24, W, 24, col("dark_blue"))     # floor
-    rectfill(int(bx), by, BW, BH, col("brown"))      # basket
-    spr(catcher, int(bx) + BW // 2 - 18, by - 18, 4)
-    text("SCORE " + str(score), 10, 10, col("white"), 3)
+    rect(0, H - 24, W, 24, col("dark_blue"))     # floor
+    rect(int(bx), by, BW, BH, col("brown"))      # basket
+    spr(catcher, int(bx) + BW // 2 - 18, by - 18, scale=4)
+    print("SCORE " + str(score), 10, 10, col("white"), 3)

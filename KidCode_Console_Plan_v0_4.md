@@ -38,6 +38,46 @@ Picotron is the clearest north-star reference. It proves the emotional and archi
 
 ---
 
+## 0.5 Implementation status — June 2026 (what's actually built)
+
+This document is the **direction**; this section is where the build actually is.
+The console now runs end-to-end on both the **host simulator** and the **LilyGO
+T-Deck Plus** (MicroPython) — and, importantly, from the **same code**.
+
+**Built**
+- **One shared console** — `runtime/console.py` + `runtime/editors.py` +
+  `runtime/kid_carts.py`, staged into the firmware at build so the device freezes
+  the identical modules. The host sim is now a **faithful emulator** of the device:
+  same 320×240 surface, same petme128 8×8 font, **mouse = touchscreen**, **arrows =
+  trackball**.
+- **Everything-is-a-cartridge `.kcart` model** (manifest + `main.py` + `config.json`
+  + `sprites.kgfx`); seeded system carts (Space / Ocean / Star Catcher), with
+  create / duplicate / delete and on-device SD live read+write.
+- **On-device code editor** — full-screen: caret nav, vertical+horizontal scroll
+  (1-cell scrolloff), drag-to-scroll, tap-to-place, RUN/SAVE/CLOSE icons, and a
+  tappable symbol palette for `= ( ) [ ] { } < > %` (the keyboard has no `=`). *(issue #3 ✅)*
+- **On-device sprite/paint editor** + `sprites.kgfx` storage (PICO-8 `__gfx__`-style). *(issue #4 ✅)*
+- **Native RGB565 DMA compositor** (`kc_gfx` / `kc_compositor`; see firmware
+  `NATIVE_CORE_PLAN.md` / `STAGE3_PLAN.md`); trackball + GT911 touch + keyboard
+  (clean 1-byte ASCII — see `CLAUDE.md`).
+
+**Divergences from this plan worth noting**
+- **Runtime (§1.4, §6–7, issue #6):** the plan called for **Lua-first** with
+  MicroPython as the lab option. In practice the console is **MicroPython**, and we
+  adopted **TIC-80-style drawing-API conventions in-place** (`rect`/`circ` filled,
+  `rectb`/`circb` outlines, `pix`, `print`, sheet-indexed `spr`) rather than a Lua
+  VM (issue #11). A Lua VM / full TIC-80 runtime (`TIC()` loop, 240×136 framebuffer,
+  `sfx`/`music`, `.tic` import) remains open (#11).
+- **Surface (§1.6):** the live target is the T-Deck's **320×240**, not 480×270.
+- **Host:** the host reference is now the shared console (a device emulator),
+  superseding the older `runtime/shell.py` / `workstation.py` UI (retirement: #17).
+
+**Open / next (GitHub issues):** #11 (full TIC-80 runtime), #14 (on-device error
+reporting + safe save — a bad cart can currently hang the launcher), #17 (retire
+legacy host UI), #18 (cross-cart sprite reuse); plus the earlier #1/#2/#5/#7/#8/#13.
+
+---
+
 ## 1. What changed from v0.3
 
 ### 1.1 From “creative coding console” to “fantasy workstation”

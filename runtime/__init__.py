@@ -10,6 +10,7 @@ kc_compositor (device) or a Lua VM, not just this host Python reference.
 from . import palette
 from .canvas import Canvas, Image
 from .cartridge import Cartridge, CartridgeError
+from .editors import CodeEditor, PaintEditor, SpriteSheet
 from .engine import DesktopRuntime
 from .input import InputState
 from .shell import DesktopShell
@@ -20,6 +21,9 @@ __all__ = [
     "Image",
     "Cartridge",
     "CartridgeError",
+    "CodeEditor",
+    "PaintEditor",
+    "SpriteSheet",
     "DesktopRuntime",
     "DesktopShell",
     "InputState",

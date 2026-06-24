@@ -91,9 +91,9 @@ class Launcher:
             x = gx + col_i * (tw + 12)
             y = gy + row_i * (th + 12)
             selected = (i == self.sel)
-            cv.rectfill(x, y, tw, th, _C["dark_purple"] if selected else _C["black"])
-            cv.rect(x, y, tw, th, _C["yellow"] if selected else _C["dark_grey"])
-            cv.rectfill(x + 8, y + 8, tw - 16, 22, _C[_TYPE_COLOR.get(item.type, "indigo")])
+            cv.rect(x, y, tw, th, _C["dark_purple"] if selected else _C["black"])
+            cv.rectb(x, y, tw, th, _C["yellow"] if selected else _C["dark_grey"])
+            cv.rect(x + 8, y + 8, tw - 16, 22, _C[_TYPE_COLOR.get(item.type, "indigo")])
             cv.print(item.title[:15], x + 10, y + 40, _C["white"], 2)
             cv.print(item.type.upper(), x + 10, y + 62, _C["peach"], 2)
         cv.print("ARROWS MOVE   RUN OPEN", 16, cv.h - 22, _C["light_grey"], 2)
@@ -147,6 +147,16 @@ class Workstation:
         # Gameplay (held) input goes to the running cartridge in desktop mode.
         if self.screen == "desktop" and self.shell and self.shell.mode == "desktop":
             self.shell.rt.input.set_held(name, down)
+
+    def type_char(self, code):
+        # Typed text goes to the code editor (when its panel is open).
+        if self.screen == "desktop" and self.shell:
+            self.shell.type_char(code)
+
+    def click(self, x, y):
+        # Pointer clicks reach the code/paint editor panels.
+        if self.screen == "desktop" and self.shell:
+            self.shell.click(x, y)
 
     def frame(self, dt):
         if self.screen == "launcher":
