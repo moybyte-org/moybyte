@@ -372,6 +372,65 @@ def test_micropython_spike_documents_tdeck_reference_paths():
     assert "No LilyGO-maintained MicroPython T-Deck example" in notes
 
 
+def test_kc_compositor_plan_strips_and_host_guard():
+    spec = importlib.util.spec_from_file_location(
+        "kc_compositor", ROOT / "modules" / "kc_compositor.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    # Host guard: no bus -> no compositor (never touches kc_alloc/framebuf).
+    assert module.make_compositor(None) is None
+
+    # Even strip height tiles the full panel exactly.
+    assert module.plan_strips(240, 40) == [
+        (0, 40), (40, 40), (80, 40), (120, 40), (160, 40), (200, 40)
+    ]
+
+    # Uneven strip height: last band is the shorter remainder, and the bands
+    # always cover the full height with no gaps or overlap.
+    bands = module.plan_strips(240, 36)
+    assert bands[-1] == (216, 24)
+    assert sum(rows for _y, rows in bands) == 240
+    for (y, rows), (next_y, _r) in zip(bands, bands[1:]):
+        assert y + rows == next_y
+
+    try:
+        module.plan_strips(240, 0)
+        assert False, "strip_h <= 0 should raise"
+    except ValueError:
+        pass
+
+
+def test_kc_compositor_dirty_region_math():
+    spec = importlib.util.spec_from_file_location(
+        "kc_compositor", ROOT / "modules" / "kc_compositor.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    # clip_rect clamps to the screen, including negative origins and overruns.
+    assert module.clip_rect(10, 10, 5, 5, 320, 240) == (10, 10, 5, 5)
+    assert module.clip_rect(-5, -5, 20, 20, 320, 240) == (0, 0, 15, 15)
+    assert module.clip_rect(315, 0, 20, 10, 320, 240) == (315, 0, 5, 10)
+    assert module.clip_rect(400, 0, 10, 10, 320, 240)[2] == 0  # off-screen -> w=0
+
+    # union_rect grows the bounding box; None is the identity.
+    assert module.union_rect(None, (1, 2, 3, 4)) == (1, 2, 3, 4)
+    assert module.union_rect((1, 2, 3, 4), None) == (1, 2, 3, 4)
+    assert module.union_rect((0, 0, 10, 10), (20, 20, 5, 5)) == (0, 0, 25, 25)
+
+    # DirtyTracker unions adds and resets on take().
+    dt = module.DirtyTracker()
+    assert dt.take(320, 240) is None
+    dt.add(10, 10, 5, 5)
+    dt.add(100, 100, 10, 10)
+    assert dt.take(320, 240) == (10, 10, 100, 100)
+    assert dt.take(320, 240) is None  # reset after take
+    dt.add(0, 0, 0, 0)  # empty adds are ignored
+    assert dt.is_empty()
+
+
 def test_tdeck_keyboard_latches_event_keys_for_hold_window():
     spec = importlib.util.spec_from_file_location(
         "kidcode_firmware_input", ROOT / "modules" / "kidcode" / "input.py"

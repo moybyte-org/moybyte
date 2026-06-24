@@ -79,6 +79,20 @@ if [ -d "${KC_ALLOC_SRC}" ]; then
   fi
 fi
 
+# Stage the KidCode kc_gfx native C module (VM-neutral RGB565 pixel kernel for the
+# Stage 3 native compositor) into the upstream ext_mod tree, same pattern as
+# kc_alloc (ext_mod is wiped on re-clone, so re-stage every build).
+KC_GFX_SRC="${SCRIPT_DIR}/native/kc_gfx"
+KC_GFX_DST="${UPSTREAM_DIR}/ext_mod/kc_gfx"
+if [ -d "${KC_GFX_SRC}" ]; then
+  rm -rf "${KC_GFX_DST}"
+  cp -r "${KC_GFX_SRC}" "${KC_GFX_DST}"
+  EXT_MOD_CMAKE="${UPSTREAM_DIR}/ext_mod/micropython.cmake"
+  if ! grep -q 'kc_gfx/micropython.cmake' "${EXT_MOD_CMAKE}"; then
+    sed -i '/kc_alloc\/micropython.cmake/a include(${CMAKE_CURRENT_LIST_DIR}/kc_gfx/micropython.cmake)' "${EXT_MOD_CMAKE}"
+  fi
+fi
+
 BUILDER_ESP32="${UPSTREAM_DIR}/builder/esp32.py"
 if [ -f "${BUILDER_ESP32}" ]; then
   sed -i \

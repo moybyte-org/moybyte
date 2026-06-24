@@ -10,4 +10,5 @@ firmware/**/.pio/
 firmware/lilygo_t_deck_plus_micropython/.build/
 firmware/lilygo_t_deck_plus_micropython/dist/
 firmware/lilygo_t_deck_plus_reference/
+firmware/reference_tulipcc/
 firmware/lilygo_t_deck_plus/include/kidcode_project_bundle.h
