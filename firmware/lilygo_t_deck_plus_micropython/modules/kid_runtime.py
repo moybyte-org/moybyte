@@ -2,13 +2,20 @@
 #
 # Boots the fantasy workstation on the T-Deck: a cartridge launcher + the carts,
 # navigated with the keyboard/trackball, each cart drawn through the native
-# kc_compositor. The drawing API (cls/pset/rect/rectfill/circ/spr/text/btn/...)
-# matches the host `runtime/` reference, so cartridges are portable; only the
+# kc_compositor. The drawing API (cls/pix/rect/rectb/circ/circb/spr/print/btn/...,
+# TIC-80 style: rect/circ are filled, rectb/circb are outlines) matches the host
+# `runtime/` reference, so cartridges are portable; only the
 # canvas backend differs (framebuf over the compositor buffer + palette->RGB565).
 #
 # v1 embeds the cart sources; loading real .kcart files from SD is the follow-on.
 
 import time
+
+# Editor cores (CodeEditor / SpriteSheet / PaintEditor) are backend-agnostic and
+# shared verbatim with the host (canonical: runtime/editors.py; build.sh stages a
+# copy into modules/ so it freezes here as the top-level module `editors`).
+from editors import CodeEditor, PaintEditor, SpriteSheet
+from console import NAMES, Pointer, Workstation, _cursor_delta, color
 
 # KID64 palette as RGB565 (generated from runtime/palette.py; no colorsys here).
 PAL565 = (
@@ -21,19 +28,6 @@ PAL565 = (
     0xF1E7, 0xF407, 0xF627, 0xDF87, 0x9787, 0x5787, 0x3F8D, 0x3F95,
     0x3F9E, 0x3D7E, 0x3B5E, 0x51FE, 0x91FE, 0xD9FE, 0xF1F8, 0xF1F0,
 )
-
-NAMES = {
-    "black": 0, "dark_blue": 1, "dark_purple": 2, "dark_green": 3, "brown": 4,
-    "dark_grey": 5, "light_grey": 6, "white": 7, "red": 8, "orange": 9,
-    "yellow": 10, "green": 11, "blue": 12, "indigo": 13, "pink": 14, "peach": 15,
-}
-_TYPE_COLOR = {"wallpaper": 12, "game": 8, "app": 11, "tool": 9}  # index by type
-
-
-def color(name_or_index):
-    if isinstance(name_or_index, str):
-        return NAMES.get(name_or_index, 7)
-    return int(name_or_index) & 63
 
 
 class Image:
@@ -56,51 +50,6 @@ class Image:
         return cls(w, h, pix, -1)
 
 
-# Mouse-style pointer sprite (O=black outline, F=white fill), hotspot at top-left.
-CURSOR = Image.from_ascii([
-    "O.......", "OO......", "OFO.....", "OFFO....", "OFFFO...", "OFFFFO..",
-    "OFFFFFO.", "OFFFFFFO", "OFFFOOO.", "OFOOFO..", "OO..OFO.", "O...OFO.", "....OO..",
-], {"O": 0, "F": 7}, ".")
-
-
-CURSOR_IDLE_MS = 2000  # hide the trackball cursor after this long with no movement
-
-
-class Pointer:
-    """A screen-space cursor. The trackball drives it relatively (and shows it);
-    touch places it absolutely (finger is the pointer, so it stays hidden). The
-    cursor auto-hides after CURSOR_IDLE_MS without trackball movement."""
-
-    def __init__(self, w, h, idle_ms=CURSOR_IDLE_MS):
-        self.w = w
-        self.h = h
-        self.x = w // 2
-        self.y = h // 2
-        self.click = False
-        self.visible = True
-        self.idle_ms = idle_ms
-        self._last_move = _ticks_ms()
-
-    def move(self, dx, dy):
-        # Relative move from the trackball: clamp, and wake the cursor.
-        self.x = max(0, min(self.w - 1, self.x + dx))
-        self.y = max(0, min(self.h - 1, self.y + dy))
-        self.visible = True
-        self._last_move = _ticks_ms()
-
-    def place(self, x, y):
-        # Absolute position from touch: hit-test there, but keep the cursor
-        # hidden (the finger already shows where you are).
-        self.x = max(0, min(self.w - 1, x))
-        self.y = max(0, min(self.h - 1, y))
-        self.visible = False
-
-    def tick(self, now):
-        # Auto-hide once the trackball has been idle long enough.
-        if self.visible and _ticks_diff(now, self._last_move) >= self.idle_ms:
-            self.visible = False
-
-
 class DeviceCanvas:
     """The kid drawing API, backed by a framebuf over the compositor buffer."""
 
@@ -117,29 +66,33 @@ class DeviceCanvas:
     def cls(self, c=0):
         self._fb.fill(self._col(c))
 
-    def pset(self, x, y, c):
+    def pix(self, x, y, c=None):
+        # TIC-80 pix: read the index with two args, set it with three.
+        if c is None:
+            return self._fb.pixel(int(x), int(y))
         self._fb.pixel(int(x), int(y), self._col(c))
-
-    def pget(self, x, y):
-        return self._fb.pixel(int(x), int(y))
-
-    def rect(self, x, y, w, h, c):
-        self._fb.rect(int(x), int(y), int(w), int(h), self._col(c))
-
-    def rectfill(self, x, y, w, h, c):
-        self._fb.fill_rect(int(x), int(y), int(w), int(h), self._col(c))
 
     def line(self, x1, y1, x2, y2, c):
         self._fb.line(int(x1), int(y1), int(x2), int(y2), self._col(c))
 
-    def circfill(self, cx, cy, r, c):
+    def rect(self, x, y, w, h, c):
+        # TIC-80 rect = FILLED rectangle.
+        self._fb.fill_rect(int(x), int(y), int(w), int(h), self._col(c))
+
+    def rectb(self, x, y, w, h, c):
+        # TIC-80 rectb = rectangle outline.
+        self._fb.rect(int(x), int(y), int(w), int(h), self._col(c))
+
+    def circ(self, cx, cy, r, c):
+        # TIC-80 circ = FILLED circle.
         cx = int(cx); cy = int(cy); r = int(r)
         col = self._col(c)
         for dy in range(-r, r + 1):
             span = int((r * r - dy * dy) ** 0.5)
             self._fb.fill_rect(cx - span, cy + dy, 2 * span + 1, 1, col)
 
-    def circ(self, cx, cy, r, c):
+    def circb(self, cx, cy, r, c):
+        # TIC-80 circb = circle outline.
         cx = int(cx); cy = int(cy); r = int(r)
         col = self._col(c)
         x = r; y = 0; err = 0
@@ -171,18 +124,30 @@ class DeviceCanvas:
         self._fb.text(str(s), int(x), int(y), self._col(c))
 
 
-def make_api(canvas, input, config):
+def make_api(canvas, input, config, sheet=None):
     import random
 
     def cfg(key, default=None):
         return config.get(key, default)
 
+    def spr(n, x, y, colorkey=-1, scale=1):
+        # TIC-80 spr(id, x, y[, colorkey, scale]) from the cart's sheet. Also
+        # accepts an Image directly (ASCII-art sprites); then a 4th positional is
+        # treated as scale, e.g. spr(pet, x, y, scale=4).
+        if isinstance(n, Image):
+            return canvas.spr(n, x, y, colorkey if colorkey != -1 else scale)
+        if sheet is None:
+            return
+        img = sheet.tile_image(int(n), colorkey)
+        if img is not None:
+            canvas.spr(img, x, y, scale)
+
     return {
         "W": canvas.w, "H": canvas.h,
-        "cls": canvas.cls, "pset": canvas.pset, "pget": canvas.pget,
-        "line": canvas.line, "rect": canvas.rect, "rectfill": canvas.rectfill,
-        "circ": canvas.circ, "circfill": canvas.circfill, "spr": canvas.spr,
-        "text": canvas.print,
+        "cls": canvas.cls, "pix": canvas.pix,
+        "line": canvas.line, "rect": canvas.rect, "rectb": canvas.rectb,
+        "circ": canvas.circ, "circb": canvas.circb, "spr": spr,
+        "print": canvas.print,
         "btn": input.held, "btnp": input.pressed,
         "cfg": cfg, "col": color,
         "rnd": lambda n=1.0: random.random() * n,
@@ -215,11 +180,11 @@ def _update(dt):
     if pet_x>W-40 or pet_x<4: pet_dir=-pet_dir
 def _draw():
     cls(col(cfg("bg","dark_blue")))
-    for s in stars: pset(s[0],s[1],7 if s[2]>25 else 6)
-    rectfill(0,H-24,W,24,col("dark_green"))
+    for s in stars: pix(s[0],s[1],7 if s[2]>25 else 6)
+    rect(0,H-24,W,24,col("dark_green"))
     bob=2 if (int(t*4)%2==0) else 0
-    spr(pet,int(pet_x),H-24-28-bob,4)
-    text("MY SPACE COMPUTER",10,10,col("white"),3)
+    spr(pet,int(pet_x),H-24-28-bob,scale=4)
+    print("MY SPACE COMPUTER",10,10,col("white"),3)
 """
 
 OCEAN_SRC = """
@@ -240,11 +205,11 @@ def _update(dt):
     if fish_x>W-40 or fish_x<4: fish_dir=-fish_dir
 def _draw():
     cls(col(cfg("water","blue")))
-    for b in bubbles: circ(int(b[0]),int(b[1]),b[2],col("white"))
-    rectfill(0,H-18,W,18,col("brown"))
+    for b in bubbles: circb(int(b[0]),int(b[1]),b[2],col("white"))
+    rect(0,H-18,W,18,col("brown"))
     wob=2 if (int(t*3)%2==0) else 0
-    spr(fish,int(fish_x),H-18-24-wob,4)
-    text("OCEAN",10,10,col("white"),3)
+    spr(fish,int(fish_x),H-18-24-wob,scale=4)
+    print("OCEAN",10,10,col("white"),3)
 """
 
 STAR_SRC = """
@@ -285,12 +250,12 @@ def _update(dt):
         elif s[1]>H: _spawn(s)
 def _draw():
     cls(col("black"))
-    for s in stars: circfill(int(s[0]),int(s[1]),3,col("yellow"))
+    for s in stars: circ(int(s[0]),int(s[1]),3,col("yellow"))
     by=H-24-BH
-    rectfill(0,H-24,W,24,col("dark_blue"))
-    rectfill(int(bx),by,BW,BH,col("brown"))
-    spr(catcher,int(bx)+BW//2-18,by-18,4)
-    text("SCORE "+str(score),10,10,col("white"),3)
+    rect(0,H-24,W,24,col("dark_blue"))
+    rect(int(bx),by,BW,BH,col("brown"))
+    spr(catcher,int(bx)+BW//2-18,by-18,scale=4)
+    print("SCORE "+str(score),10,10,col("white"),3)
 """
 
 CARTS = [
@@ -319,408 +284,6 @@ CARTS = [
 ]
 
 
-# --- Pointer UI layout (320x240) -------------------------------------------
-_MENU_BTN = (4, 4, 76, 18)        # desktop overlay: open Make-it-mine
-_HOME_BTN = (240, 4, 76, 18)      # desktop overlay: back to launcher
-_RUN_BTN = (28, 188, 70, 24)
-_CODE_BTN = (104, 188, 84, 24)
-_CLOSE_BTN = (194, 188, 96, 24)
-_CARD_X = 24
-_CARD_W = 272
-_CARD_Y0 = 52
-_CARD_DY = 22
-_CARD_H = 20
-# Launcher action bar (pointer): create / duplicate / delete a cartridge.
-_NEW_BTN = (12, 206, 92, 28)
-_DUP_BTN = (114, 206, 92, 28)
-_DEL_BTN = (216, 206, 92, 28)
-_CURSOR_BASE = 4
-
-
-def _cursor_delta(n):
-    # n = net pulses this frame on one axis. Precise on a slow roll
-    # (1 pulse -> _CURSOR_BASE+1 px), accelerates super-linearly on a fast roll.
-    a = n if n >= 0 else -n
-    if a == 0:
-        return 0
-    d = a * _CURSOR_BASE + a * a
-    return d if n > 0 else -d
-
-
-def _in(px, py, rect):
-    x, y, w, h = rect
-    return x <= px < x + w and y <= py < y + h
-
-
-class Launcher:
-    TILE_Y0 = 36
-    TILE_H = 34
-    TILE_PITCH = 40
-    VISIBLE = 4
-
-    def __init__(self, items):
-        self.items = items
-        self.sel = 0
-        self.top = 0
-
-    def move(self, d):
-        n = len(self.items)
-        if n:
-            self.sel = (self.sel + d) % n
-            self._scroll()
-
-    def _scroll(self):
-        if self.sel < self.top:
-            self.top = self.sel
-        elif self.sel >= self.top + self.VISIBLE:
-            self.top = self.sel - self.VISIBLE + 1
-
-    def selected(self):
-        return self.items[self.sel] if self.items else None
-
-    def _visible(self):
-        return range(self.top, min(len(self.items), self.top + self.VISIBLE))
-
-    def tile_rect(self, i):
-        if i < self.top or i >= self.top + self.VISIBLE:
-            return None
-        return (10, self.TILE_Y0 + (i - self.top) * self.TILE_PITCH, 300, self.TILE_H)
-
-    def tile_at(self, px, py):
-        for i in self._visible():
-            r = self.tile_rect(i)
-            if r and _in(px, py, r):
-                return i
-        return None
-
-    def draw(self, cv):
-        cv.cls(NAMES["dark_blue"])
-        cv.print("CARTRIDGES", 12, 8, NAMES["white"], 2)
-        for i in self._visible():
-            x, y, w, h = self.tile_rect(i)
-            it = self.items[i]
-            sel = (i == self.sel)
-            cv.rectfill(x, y, w, h, NAMES["dark_purple"] if sel else NAMES["black"])
-            cv.rect(x, y, w, h, NAMES["yellow"] if sel else NAMES["dark_grey"])
-            cv.rectfill(x + 6, y + 6, 10, h - 12, _TYPE_COLOR.get(it["type"], NAMES["indigo"]))
-            cv.print(it["title"], x + 24, y + 5, NAMES["white"], 2)
-            cv.print(it["type"].upper(), x + 24, y + 19, NAMES["peach"], 2)
-        if self.top > 0:
-            cv.print("^", 300, self.TILE_Y0, NAMES["light_grey"], 2)
-        if self.top + self.VISIBLE < len(self.items):
-            cv.print("v", 300, self.TILE_Y0 + (self.VISIBLE - 1) * self.TILE_PITCH, NAMES["light_grey"], 2)
-
-
-class Workstation:
-    def __init__(self, comp, canvas, input, carts=None):
-        self.comp = comp
-        self.canvas = canvas
-        self.input = input
-        self.launcher = Launcher(carts if carts else CARTS)
-        self.screen = "launcher"      # "launcher" | "desktop" | "menu"
-        self.cart = None
-        self.config = None
-        self.ns = None
-        self._update = None
-        self._draw = None
-        self.msel = 0                 # selected card in the menu
-        self.code_view = False
-        self.pointer = None           # set by run_desktop
-        self.carts_root = None        # SD carts dir (reads); set by run_desktop
-        self.can_manage = True        # writes enabled? run_desktop sets this from
-                                      # whether SD is the cart source (carts_root)
-        # SD session wrapper: mounts SD for the duration of fn(), then releases it
-        # so the render loop's flushes never collide on the shared bus. On device
-        # run_desktop swaps in kidcode_sd.with_sd_live (native kc_sd attach). The
-        # default is a host passthrough.
-        self._with_sd = lambda fn: fn()
-
-    def _start(self):
-        ns = make_api(self.canvas, self.input, self.config)
-        try:
-            exec(self.cart["src"], ns)
-            if ns.get("_init"):
-                ns["_init"]()
-        except Exception as exc:  # noqa: BLE001
-            print("KidCode cart error:", exc)
-            return False
-        self.ns = ns
-        self._update = ns.get("_update")
-        self._draw = ns.get("_draw")
-        return True
-
-    def open(self):
-        self.cart = self.launcher.selected()
-        self.config = dict(self.cart["cfg"])
-        self.msel = 0
-        self.code_view = False
-        if self._start():
-            self.screen = "desktop"
-
-    def apply(self):
-        if self._start():
-            self.screen = "desktop"
-            self._save_config()
-
-    def _save_config(self):
-        # Persist edits to the SD cartridge (embedded fallback carts have no path).
-        if self.cart and self.cart.get("path"):
-            self.cart["cfg"] = dict(self.config)   # in-RAM sync (always)
-            if not self.can_manage:
-                return                             # writes deferred on device
-            try:
-                import kid_carts
-                self._with_sd(lambda: kid_carts.save_config(self.cart))
-            except Exception as exc:  # noqa: BLE001
-                print("KidCode save failed:", exc)
-
-    def go_home(self):
-        self.screen = "launcher"
-        self.cart = None
-        self.ns = None
-
-    # -- cart management (SD) ------------------------------------------------
-    #
-    # Each action mounts the SD card, mutates, and re-scans within a single
-    # _with_sd session, then the card is unmounted before the next flush.
-
-    def _apply_items(self, items):
-        if items:
-            self.launcher.items = items
-            if self.launcher.sel >= len(items):
-                self.launcher.sel = len(items) - 1
-            self.launcher._scroll()
-
-    def new_cart(self):
-        if not self.carts_root or not self.can_manage:
-            return
-        try:
-            import kid_carts
-            self._apply_items(self._with_sd(lambda: (
-                kid_carts.new_from_template(self.carts_root),
-                kid_carts.scan(self.carts_root))[1]))
-        except Exception as exc:  # noqa: BLE001
-            print("KidCode new cart failed:", exc)
-
-    def dup_cart(self):
-        if not self.carts_root or not self.can_manage or not self.launcher.selected():
-            return
-        sel = self.launcher.selected()
-        try:
-            import kid_carts
-            self._apply_items(self._with_sd(lambda: (
-                kid_carts.duplicate(sel, self.carts_root),
-                kid_carts.scan(self.carts_root))[1]))
-        except Exception as exc:  # noqa: BLE001
-            print("KidCode duplicate failed:", exc)
-
-    def del_cart(self):
-        if not self.carts_root or not self.can_manage or len(self.launcher.items) <= 1:
-            return  # keep at least one cartridge
-        sel = self.launcher.selected()
-        try:
-            import kid_carts
-            self._apply_items(self._with_sd(lambda: (
-                kid_carts.delete(sel),
-                kid_carts.scan(self.carts_root))[1]))
-        except Exception as exc:  # noqa: BLE001
-            print("KidCode delete failed:", exc)
-
-    def adjust(self, d):
-        f = self.cart["edit"][self.msel]
-        key = f["key"]
-        cur = self.config.get(key, f.get("default"))
-        if f["type"] == "int":
-            v = int(cur) + d * f.get("step", 1)
-            if "min" in f:
-                v = max(f["min"], v)
-            if "max" in f:
-                v = min(f["max"], v)
-            self.config[key] = v
-        elif f["type"] == "choice":
-            ch = f["choices"]
-            idx = ch.index(cur) if cur in ch else 0
-            self.config[key] = ch[(idx + d) % len(ch)]
-
-    def card_text(self, i):
-        f = self.cart["edit"][i]
-        v = self.config.get(f["key"], f.get("default"))
-        if f["type"] == "choice":
-            v = str(v).replace("_", " ").upper()
-        t = f.get("card")
-        return t.replace("{value}", str(v)) if t else "%s: %s" % (f["key"].upper(), v)
-
-    def code_lines(self):
-        out = ["WHEN START:"]
-        for f in self.cart["edit"]:
-            v = self.config.get(f["key"], f.get("default"))
-            if f["type"] == "choice":
-                v = str(v).replace("_", " ").upper()
-            out.append("  " + f["key"].upper() + " = " + str(v))
-        return out
-
-    def handle_input(self):
-        i = self.input
-        if self.screen == "launcher":
-            if i.pressed("up") or i.pressed("left"):
-                self.launcher.move(-1)
-            if i.pressed("down") or i.pressed("right"):
-                self.launcher.move(1)
-            if i.pressed("a") or i.pressed("run"):
-                self.open()
-        elif self.screen == "desktop":
-            if i.pressed("home") or i.pressed("stop"):
-                self.go_home()
-            elif i.pressed("b") and self.cart.get("edit"):
-                self.screen = "menu"
-        elif self.screen == "menu":
-            ed = self.cart["edit"]
-            if i.pressed("up"):
-                self.msel = (self.msel - 1) % len(ed)
-            if i.pressed("down"):
-                self.msel = (self.msel + 1) % len(ed)
-            if i.pressed("left"):
-                self.adjust(-1)
-            if i.pressed("right"):
-                self.adjust(1)
-            if i.pressed("a"):
-                self.code_view = not self.code_view
-            if i.pressed("run"):
-                self.apply()
-            elif i.pressed("b"):
-                self.screen = "desktop"
-            elif i.pressed("home"):
-                self.go_home()
-
-    # -- pointer (trackball-as-mouse) ----------------------------------------
-
-    def _card_at(self, px, py):
-        for i in range(len(self.cart["edit"])):
-            y = _CARD_Y0 + i * _CARD_DY
-            if _CARD_X <= px < _CARD_X + _CARD_W and y <= py < y + _CARD_H:
-                return i
-        return None
-
-    def handle_pointer(self):
-        p = self.pointer
-        if p is None:
-            return
-        px, py, click = p.x, p.y, p.click
-        if self.screen == "launcher":
-            i = self.launcher.tile_at(px, py)
-            if i is not None:
-                self.launcher.sel = i          # hover highlights
-            if click:
-                if self.can_manage and _in(px, py, _NEW_BTN):
-                    self.new_cart()
-                elif self.can_manage and _in(px, py, _DUP_BTN):
-                    self.dup_cart()
-                elif self.can_manage and _in(px, py, _DEL_BTN):
-                    self.del_cart()
-                elif i is not None:
-                    self.open()
-        elif self.screen == "desktop":
-            if click:
-                if self.cart.get("edit") and _in(px, py, _MENU_BTN):
-                    self.screen = "menu"
-                elif _in(px, py, _HOME_BTN):
-                    self.go_home()
-        elif self.screen == "menu":
-            if not self.code_view:
-                ci = self._card_at(px, py)
-                if ci is not None:
-                    self.msel = ci             # hover highlights
-            if click:
-                if _in(px, py, _RUN_BTN):
-                    self.apply()
-                elif _in(px, py, _CODE_BTN):
-                    self.code_view = not self.code_view
-                elif _in(px, py, _CLOSE_BTN):
-                    self.screen = "desktop"
-                elif not self.code_view:
-                    ci = self._card_at(px, py)
-                    if ci is not None:
-                        self.msel = ci
-                        self.adjust(-1 if px < _CARD_X + _CARD_W // 2 else 1)
-
-    # -- frame + drawing -----------------------------------------------------
-
-    def frame(self, dt):
-        if self.screen == "launcher":
-            self.launcher.draw(self.canvas)
-            if self.can_manage:
-                self._btn("NEW", _NEW_BTN, NAMES["green"])
-                self._btn("DUP", _DUP_BTN, NAMES["blue"])
-                self._btn("DEL", _DEL_BTN, NAMES["red"])
-        elif self.screen == "desktop":
-            try:
-                if self._update:
-                    self._update(dt)
-                if self._draw:
-                    self._draw()
-            except Exception as exc:  # noqa: BLE001
-                print("KidCode frame error:", exc)
-                self.go_home()
-            else:
-                self._draw_desktop_buttons()
-        else:  # menu: frozen cart behind the panel
-            try:
-                if self._draw:
-                    self._draw()
-            except Exception:
-                pass
-            if self.code_view:
-                self._draw_code()
-            else:
-                self._draw_cards()
-        self._draw_cursor()
-        self.comp.flush()
-
-    def _btn(self, label, rect, fill):
-        x, y, w, h = rect
-        cv = self.canvas
-        cv.rectfill(x, y, w, h, fill)
-        cv.rect(x, y, w, h, NAMES["white"])
-        cv.print(label, x + 6, y + (h - 8) // 2, NAMES["black"], 2)
-
-    def _draw_desktop_buttons(self):
-        if self.cart.get("edit"):
-            self._btn("EDIT", _MENU_BTN, NAMES["dark_purple"])
-        self._btn("HOME", _HOME_BTN, NAMES["dark_grey"])
-
-    def _draw_cursor(self):
-        if self.pointer is not None and self.pointer.visible:
-            self.canvas.spr(CURSOR, self.pointer.x, self.pointer.y, 1)
-
-    def _draw_cards(self):
-        cv = self.canvas
-        cv.rectfill(20, 16, 280, 206, NAMES["dark_purple"])
-        cv.rect(20, 16, 280, 206, NAMES["pink"])
-        cv.print("MAKE IT MINE", 30, 22, NAMES["white"], 2)
-        for i in range(len(self.cart["edit"])):
-            y = _CARD_Y0 + i * _CARD_DY
-            if i == self.msel:
-                cv.rectfill(_CARD_X, y - 1, _CARD_W, _CARD_H, NAMES["indigo"])
-            cv.print("-", _CARD_X + 4, y, NAMES["yellow"], 2)
-            cv.print(self.card_text(i), _CARD_X + 22, y,
-                     NAMES["white"] if i == self.msel else NAMES["light_grey"], 2)
-            cv.print("+", _CARD_X + _CARD_W - 12, y, NAMES["yellow"], 2)
-        self._btn("RUN", _RUN_BTN, NAMES["green"])
-        self._btn("CODE", _CODE_BTN, NAMES["blue"])
-        self._btn("CLOSE", _CLOSE_BTN, NAMES["red"])
-
-    def _draw_code(self):
-        cv = self.canvas
-        cv.rectfill(20, 16, 280, 206, NAMES["black"])
-        cv.rect(20, 16, 280, 206, NAMES["green"])
-        cv.print("SEE THE CODE", 30, 22, NAMES["green"], 2)
-        y = 44
-        for ln in self.code_lines():
-            cv.print(ln, 30, y, NAMES["light_grey"], 2)
-            y += 15
-        self._btn("RUN", _RUN_BTN, NAMES["green"])
-        self._btn("CARDS", _CODE_BTN, NAMES["blue"])
-        self._btn("CLOSE", _CLOSE_BTN, NAMES["red"])
 
 
 class TrackBall:
@@ -971,7 +534,10 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
     # mount (now safe via the native kc_sd path) if the shell didn't prefetch.
     carts, carts_root = (prefetched if prefetched is not None
                          else _load_carts(kidcode_sd.with_sd_live))
+    import kid_carts
     ws = Workstation(comp, canvas, inp, carts)
+    ws.make_api = make_api        # device cart namespace (DeviceCanvas + Image + color)
+    ws.carts_store = kid_carts    # SD .kcart store (scan/load/save/create/dup/delete)
     ws.carts_root = carts_root
     # Writes are enabled on-device via kc_sd: it attaches the SD card to the SPI
     # host esp_lcd already initialized (instead of machine.SDCard re-initializing
@@ -981,6 +547,7 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
     ws.can_manage = carts_root is not None
     ws._with_sd = kidcode_sd.with_sd_live
     ws.pointer = pointer
+    ws.keyboard = keyboard        # lets the code editor switch to text (ASCII) mode
     print("KidCode desktop running (kb=%d ball=%d touch=%d)"
           % (1 if keyboard.available else 0, 1 if ball.available else 0,
              1 if touch.available else 0))
@@ -996,12 +563,18 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
         except Exception:
             pass
         inp.begin_frame()                       # keyboard edges (still a fallback)
-        counts, click = ball.poll()             # trackball -> move the cursor
-        dx = _cursor_delta(counts[3] - counts[2])   # right - left
-        dy = _cursor_delta(counts[1] - counts[0])   # down - up
-        if dx or dy:
-            pointer.move(dx, dy)
+        counts, click = ball.poll()             # trackball
+        nx = counts[3] - counts[2]              # right - left (raw pulses)
+        ny = counts[1] - counts[0]              # down - up
+        if ws.screen == "menu" and ws.menu_view == "code":
+            ws.nav(nx, ny)                      # in the code editor the trackball moves the caret
+        else:
+            dx = _cursor_delta(nx)
+            dy = _cursor_delta(ny)
+            if dx or dy:
+                pointer.move(dx, dy)            # elsewhere it moves the cursor
         tp = touch.poll()                       # touch -> absolute position + tap
+        pointer.down = tp is not None           # held finger drives drag-scroll
         if tp is not None:
             pointer.place(tp[0], tp[1])
             if tp[2]:                           # press edge = tap = click
@@ -1048,7 +621,7 @@ def run_touch_calibrate(handler):
     canvas.cls(NAMES["black"])
     for (cx, cy) in ((8, 8), (canvas.w - 9, 8), (8, canvas.h - 9),
                      (canvas.w - 9, canvas.h - 9), (canvas.w // 2, canvas.h // 2)):
-        canvas.rect(cx - 6, cy - 6, 12, 12, NAMES["yellow"])
+        canvas.rectb(cx - 6, cy - 6, 12, 12, NAMES["yellow"])
     canvas.print("TOUCH CORNERS", 100, canvas.h // 2 - 24, NAMES["white"], 2)
     canvas.print("watch serial", 108, canvas.h // 2 + 8, NAMES["light_grey"], 1)
     comp.flush()
@@ -1061,3 +634,58 @@ def run_touch_calibrate(handler):
             print("KidCode touch-cal status=0x%02x bytes=%s"
                   % (status, " ".join("%02x" % b for b in d)))
         time.sleep_ms(50)
+
+
+def run_keyboard_probe(handler):
+    """Keyboard bring-up aid (kidcode_shell.RUN_KEYBOARD_PROBE): read the T-Deck
+    keyboard over I2C0 and print the byte each key returns -- the code-editor's
+    1-byte ASCII read path. No panel takeover/flush, so USB serial stays alive
+    (the desktop loop's continuous flush would starve it).
+
+    Tap each key left->right, top->bottom; each new key prints one `KEY ...` line.
+    We deliberately do NOT send the raw-matrix command (0x03) so this shows the
+    keyboard's plain ASCII protocol -- exactly what the editor should consume."""
+    if handler is not None:
+        try:
+            handler.deinit()
+        except Exception as exc:  # noqa: BLE001
+            print("KidCode kb-probe: takeover failed:", exc)
+    try:
+        from machine import I2C, Pin
+    except Exception as exc:  # noqa: BLE001
+        print("KidCode kb-probe unavailable:", exc)
+        return
+    addr = 0x55
+    try:
+        i2c = I2C(0, scl=Pin(8), sda=Pin(18), freq=400000)
+    except Exception as exc:  # noqa: BLE001
+        print("KidCode kb-probe i2c failed:", exc)
+        return
+    found = []
+    try:
+        found = i2c.scan()
+    except Exception:  # noqa: BLE001
+        pass
+    print("KidCode keyboard probe start; i2c scan=%s addr=0x%02x"
+          % ([hex(a) for a in found], addr))
+    print("KidCode kb-probe: tap keys L->R, T->B. lines = KEY <n> 0x<hex> <dec> '<char>'")
+    prev = 0
+    n = 0
+    beat = 0
+    while True:
+        try:
+            d = i2c.readfrom(addr, 1)
+            k = d[0] if d else 0
+        except Exception as exc:  # noqa: BLE001
+            print("KidCode kb-probe read err:", exc)
+            time.sleep_ms(300)
+            continue
+        if k and k != prev:
+            n += 1
+            ch = chr(k) if 0x20 <= k <= 0x7E else "."
+            print("KEY %d 0x%02x %d '%s'" % (n, k, k, ch))
+        prev = k
+        beat += 1
+        if beat % 250 == 0:        # ~5s heartbeat so you know it's alive
+            print("KidCode kb-probe alive (keys so far: %d)" % n)
+        time.sleep_ms(20)

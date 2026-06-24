@@ -12,6 +12,7 @@ class InputState:
         self._held = set()
         self._prev = set()
         self.pointer = None  # (x, y) or None
+        self.last_key = 0    # last typed ASCII byte (for the shared code editor)
 
     def set_held(self, name, down):
         if down:

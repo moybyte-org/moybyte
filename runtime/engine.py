@@ -66,7 +66,7 @@ class DesktopRuntime:
     def _draw_error(self):
         cv = self.canvas
         cv.cls(_pal_index("dark_purple"))
-        cv.rect(8, 8, cv.w - 16, cv.h - 16, _pal_index("pink"))
+        cv.rectb(8, 8, cv.w - 16, cv.h - 16, _pal_index("pink"))
         cv.print("OOPS", 20, 24, _pal_index("white"), scale=4)
         msg = str(self.error)
         # wrap to the canvas width at the 3x5 font's ~8px/char (scale 2).

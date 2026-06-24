@@ -4,6 +4,34 @@
 
 KidCode is a PC-first simulator and SDK for a future ESP32 kids' creative coding console.
 
+> **Two systems live in this repo** (see `CLAUDE.md`): the original **`.kcproj` SDK**
+> (documented below), and the newer **v0.4 `.kcart` console** — a TIC-80-style
+> "fantasy workstation" where *everything is a cartridge*. The v0.4 console is where
+> current feature work happens.
+
+## v0.4 console (current direction)
+
+One shared console runs on both the PC and the LilyGO T-Deck Plus (it renders the
+same pixels on each). Run it on the PC:
+
+```bash
+.venv/bin/python tools/simulate_desktop.py    # launcher -> cartridge -> code/paint editors
+```
+
+Build + flash the device firmware (MicroPython):
+
+```bash
+KIDCODE_SKIP_VFS_BOOT=1 make firmware-build-lilygo-micropython
+make firmware-flash-lilygo-micropython PORT=/dev/ttyACM0
+```
+
+Design + current status: [`KidCode_Console_Plan_v0_4.md`](KidCode_Console_Plan_v0_4.md)
+(see its "Implementation status" section). Working orientation: `CLAUDE.md`.
+
+---
+
+## `.kcproj` SDK (original)
+
 The first goal is the edit-run-test loop on a normal computer:
 
 ```bash

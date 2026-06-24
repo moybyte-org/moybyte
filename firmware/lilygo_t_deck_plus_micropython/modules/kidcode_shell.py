@@ -7,18 +7,23 @@ ENABLE_EXTERNAL_PROJECT_FILES = False
 ENABLE_SD_PROJECT_SLOT = True
 ENABLE_SD_PREFETCH = True
 # Stage 2 spike: when True, boot runs the full-screen native compositor benchmark
-# (NATIVE_CORE_PLAN.md) and never enters the normal game loop. Flip to True for a
+# (docs/history/NATIVE_CORE_PLAN.md) and never enters the normal game loop. Flip to True for a
 # bench build, read `KidCode fullscreen bench ...` over serial, then flip back.
 RUN_FULLSCREEN_BENCH = False
 # Stage 3 device validation: when True, boot runs the dirty-rect compositor smoke
 # (kc_gfx C kernel + kc_compositor) instead of the normal app. Read
-# `KidCode compositor smoke ...` over serial. See STAGE3_PLAN.md.
+# `KidCode compositor smoke ...` over serial. See docs/history/STAGE3_PLAN.md.
 RUN_COMPOSITOR_SMOKE = False
 # Touch bring-up: when True, boot draws corner targets and prints each GT911
 # sample (raw + mapped) over serial instead of the desktop, so the touch->canvas
 # mapping (kid_runtime.TOUCH_*) can be calibrated. Flush-on-start only, so USB
 # serial stays alive (the desktop loop's continuous flush would starve it).
 RUN_TOUCH_CALIBRATE = False
+# Keyboard bring-up: when True, boot just reads the T-Deck keyboard over I2C and
+# prints the byte each key returns (the code-editor's read path), with NO panel
+# takeover, so USB serial stays alive. Tap keys and read `KEY ...` over serial to
+# build the keymap. Flip back to False for normal boot.
+RUN_KEYBOARD_PROBE = False
 # Default device boot (v0.4): the fantasy workstation on the native compositor --
 # cartridge launcher + carts + keyboard, same kid API as the host simulator (see
 # kid_runtime.py). Supersedes the legacy 128x128 LVGL game loop below, which stays
@@ -47,7 +52,7 @@ GAME_SLOTS = (
 def main():
     print("KidCode MicroPython shell starting")
     prefetched_sd_project = _prefetch_sd_project()
-    prefetched_carts = _prefetch_carts() if RUN_DESKTOP else None
+    prefetched_carts = _prefetch_carts() if (RUN_DESKTOP and not RUN_KEYBOARD_PROBE) else None
     lv, _display, _task_handler = _init_display()
     if lv is None:
         _serial_fallback_loop(None)
@@ -64,6 +69,11 @@ def main():
     if RUN_TOUCH_CALIBRATE:
         from kid_runtime import run_touch_calibrate
         run_touch_calibrate(_task_handler)
+        return
+
+    if RUN_KEYBOARD_PROBE:
+        from kid_runtime import run_keyboard_probe
+        run_keyboard_probe(_task_handler)
         return
 
     if RUN_DESKTOP:
@@ -410,7 +420,7 @@ def _native_takeover(handler):
     # Stop LVGL's background TaskHandler timer (machine.Timer @ 5ms scheduling
     # lv.task_handler) so it stops burning CPU and -- critically once the
     # compositor goes async -- stops contending for the SPI bus. See
-    # NATIVE_CORE_PLAN.md "native takeover".
+    # docs/history/NATIVE_CORE_PLAN.md "native takeover".
     if handler is None:
         return
     try:

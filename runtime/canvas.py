@@ -1,70 +1,17 @@
 """Indexed software canvas for the v0.4 workstation (host reference impl).
 
 A `Canvas` is a `width x height` buffer of palette indices (default 480x270, the
-v0.4 logical workstation surface) with the PICO-8-style drawing API from the v0.4
-plan (cls / pset / line / rect / rectfill / circ / circfill / spr / print).
-`to_rgb888()` resolves indices through the palette for display (pygame) or export
-(GIF). The same index-based API is what a future device backend maps onto the
-native `kc_compositor` RGB565 framebuffer.
+v0.4 logical workstation surface) with a TIC-80-style drawing API
+(cls / pix / line / rect / rectb / circ / circb / spr / print) -- note rect/circ
+are FILLED and rectb/circb are the outlines, per TIC-80. `to_rgb888()` resolves
+indices through the palette for display (pygame) or export (GIF). The same
+index-based API is what the device backend maps onto the native `kc_compositor`
+RGB565 framebuffer.
 """
 
+from . import font as _font
 from . import palette as _pal
-
-# Compact 3x5 font: char -> 5 rows of 3 cells ('#'/space). Enough for titles and
-# numbers; a richer native font is a later (device) concern.
-_FONT_ROWS = {
-    " ": ("   ", "   ", "   ", "   ", "   "),
-    "0": ("###", "# #", "# #", "# #", "###"),
-    "1": (" # ", "## ", " # ", " # ", "###"),
-    "2": ("###", "  #", "###", "#  ", "###"),
-    "3": ("###", "  #", "###", "  #", "###"),
-    "4": ("# #", "# #", "###", "  #", "  #"),
-    "5": ("###", "#  ", "###", "  #", "###"),
-    "6": ("###", "#  ", "###", "# #", "###"),
-    "7": ("###", "  #", "  #", "  #", "  #"),
-    "8": ("###", "# #", "###", "# #", "###"),
-    "9": ("###", "# #", "###", "  #", "###"),
-    "A": ("###", "# #", "###", "# #", "# #"),
-    "B": ("## ", "# #", "## ", "# #", "## "),
-    "C": ("###", "#  ", "#  ", "#  ", "###"),
-    "D": ("## ", "# #", "# #", "# #", "## "),
-    "E": ("###", "#  ", "###", "#  ", "###"),
-    "F": ("###", "#  ", "###", "#  ", "#  "),
-    "G": ("###", "#  ", "# #", "# #", "###"),
-    "H": ("# #", "# #", "###", "# #", "# #"),
-    "I": ("###", " # ", " # ", " # ", "###"),
-    "J": ("  #", "  #", "  #", "# #", "###"),
-    "K": ("# #", "# #", "## ", "# #", "# #"),
-    "L": ("#  ", "#  ", "#  ", "#  ", "###"),
-    "M": ("# #", "###", "###", "# #", "# #"),
-    "N": ("# #", "###", "###", "###", "# #"),
-    "O": ("###", "# #", "# #", "# #", "###"),
-    "P": ("###", "# #", "###", "#  ", "#  "),
-    "Q": ("###", "# #", "# #", "###", "  #"),
-    "R": ("## ", "# #", "## ", "# #", "# #"),
-    "S": ("###", "#  ", "###", "  #", "###"),
-    "T": ("###", " # ", " # ", " # ", " # "),
-    "U": ("# #", "# #", "# #", "# #", "###"),
-    "V": ("# #", "# #", "# #", "# #", " # "),
-    "W": ("# #", "# #", "###", "###", "# #"),
-    "X": ("# #", "# #", " # ", "# #", "# #"),
-    "Y": ("# #", "# #", " # ", " # ", " # "),
-    "Z": ("###", "  #", " # ", "#  ", "###"),
-    ":": ("   ", " # ", "   ", " # ", "   "),
-    ".": ("   ", "   ", "   ", "   ", " # "),
-    "-": ("   ", "   ", "###", "   ", "   "),
-    "!": (" # ", " # ", " # ", "   ", " # "),
-    "/": ("  #", "  #", " # ", "#  ", "#  "),
-    ",": ("   ", "   ", "   ", " # ", "#  "),
-    "?": ("###", "  #", " # ", "   ", " # "),
-    "'": (" # ", " # ", "   ", "   ", "   "),
-    "=": ("   ", "###", "   ", "###", "   "),
-    "_": ("   ", "   ", "   ", "   ", "###"),
-    "(": (" ##", " # ", " # ", " # ", " ##"),
-    ")": ("## ", " # ", " # ", " # ", "## "),
-    "+": ("   ", " # ", "###", " # ", "   "),
-    "%": ("# #", "  #", " # ", "#  ", "# #"),
-}
+from .editors import SpriteSheet  # noqa: F401  (canonical home; re-exported here)
 
 
 class Image:
@@ -106,18 +53,41 @@ class Canvas:
     def cls(self, c=0):
         self.buf[:] = bytes((c & 63,)) * (self.w * self.h)
 
-    def pset(self, x, y, c):
+    def pix(self, x, y, c=None):
+        # TIC-80 pix: read the index at (x, y) with two args, set it with three
+        # (replaces the old pset/pget pair).
         x = int(x)
         y = int(y)
-        if 0 <= x < self.w and 0 <= y < self.h:
-            self.buf[y * self.w + x] = c & 63
-
-    def pget(self, x, y):
-        if 0 <= x < self.w and 0 <= y < self.h:
+        if not (0 <= x < self.w and 0 <= y < self.h):
+            return 0
+        if c is None:
             return self.buf[y * self.w + x]
-        return 0
+        self.buf[y * self.w + x] = c & 63
 
-    def rectfill(self, x, y, w, h, c):
+    def line(self, x0, y0, x1, y1, c):
+        x0 = int(x0)
+        y0 = int(y0)
+        x1 = int(x1)
+        y1 = int(y1)
+        dx = abs(x1 - x0)
+        dy = -abs(y1 - y0)
+        sx = 1 if x0 < x1 else -1
+        sy = 1 if y0 < y1 else -1
+        err = dx + dy
+        while True:
+            self.pix(x0, y0, c)
+            if x0 == x1 and y0 == y1:
+                break
+            e2 = 2 * err
+            if e2 >= dy:
+                err += dy
+                x0 += sx
+            if e2 <= dx:
+                err += dx
+                y0 += sy
+
+    def rect(self, x, y, w, h, c):
+        # TIC-80 rect = FILLED rectangle (the old rectfill).
         x = int(x)
         y = int(y)
         x0 = max(0, x)
@@ -134,47 +104,28 @@ class Canvas:
             base = yy * width + x0
             buf[base:base + (x1 - x0)] = row
 
-    def rect(self, x, y, w, h, c):
+    def rectb(self, x, y, w, h, c):
+        # TIC-80 rectb = rectangle border/outline (the old rect).
         x = int(x)
         y = int(y)
         w = int(w)
         h = int(h)
-        self.rectfill(x, y, w, 1, c)
-        self.rectfill(x, y + h - 1, w, 1, c)
-        self.rectfill(x, y, 1, h, c)
-        self.rectfill(x + w - 1, y, 1, h, c)
+        self.rect(x, y, w, 1, c)
+        self.rect(x, y + h - 1, w, 1, c)
+        self.rect(x, y, 1, h, c)
+        self.rect(x + w - 1, y, 1, h, c)
 
-    def line(self, x0, y0, x1, y1, c):
-        x0 = int(x0)
-        y0 = int(y0)
-        x1 = int(x1)
-        y1 = int(y1)
-        dx = abs(x1 - x0)
-        dy = -abs(y1 - y0)
-        sx = 1 if x0 < x1 else -1
-        sy = 1 if y0 < y1 else -1
-        err = dx + dy
-        while True:
-            self.pset(x0, y0, c)
-            if x0 == x1 and y0 == y1:
-                break
-            e2 = 2 * err
-            if e2 >= dy:
-                err += dy
-                x0 += sx
-            if e2 <= dx:
-                err += dx
-                y0 += sy
-
-    def circfill(self, cx, cy, r, c):
+    def circ(self, cx, cy, r, c):
+        # TIC-80 circ = FILLED circle (the old circfill).
         cx = int(cx)
         cy = int(cy)
         r = int(r)
         for dy in range(-r, r + 1):
             span = int((r * r - dy * dy) ** 0.5)
-            self.rectfill(cx - span, cy + dy, 2 * span + 1, 1, c)
+            self.rect(cx - span, cy + dy, 2 * span + 1, 1, c)
 
-    def circ(self, cx, cy, r, c):
+    def circb(self, cx, cy, r, c):
+        # TIC-80 circb = circle border/outline (the old circ).
         cx = int(cx)
         cy = int(cy)
         r = int(r)
@@ -183,7 +134,7 @@ class Canvas:
         err = 0
         while x >= y:
             for px, py in ((x, y), (y, x), (-y, x), (-x, y), (-x, -y), (-y, -x), (y, -x), (x, -y)):
-                self.pset(cx + px, cy + py, c)
+                self.pix(cx + px, cy + py, c)
             y += 1
             if err <= 0:
                 err += 2 * y + 1
@@ -221,21 +172,22 @@ class Canvas:
                 p = img.pix[base_s + sx]
                 if p == t or p < 0:
                     continue
-                self.rectfill(x + sx * scale, y + sy * scale, scale, scale, p)
+                self.rect(x + sx * scale, y + sy * scale, scale, scale, p)
 
-    def print(self, s, x, y, c, scale=2):
-        x = int(x)
-        y = int(y)
-        cx = x
-        for ch in str(s).upper():
-            glyph = _FONT_ROWS.get(ch)
-            if glyph is not None:
-                for gy in range(5):
-                    rowbits = glyph[gy]
-                    for gx in range(3):
-                        if rowbits[gx] == "#":
-                            self.rectfill(cx + gx * scale, y + gy * scale, scale, scale, c)
-            cx += 4 * scale  # 3 wide + 1 spacing
+    def print(self, s, x, y, c, scale=1):
+        # Render with the shared petme128 8x8 font so host text is pixel-identical
+        # to the device's framebuf.text. Fixed 8px like the device -- `scale` is
+        # accepted for call-compatibility but ignored (the device can't scale text).
+        ci = c & 63
+        buf = self.buf
+        w = self.w
+        h = self.h
+
+        def put(px, py):
+            if 0 <= px < w and 0 <= py < h:
+                buf[py * w + px] = ci
+
+        _font.draw(put, s, x, y)
 
     # -- output --------------------------------------------------------------
 

@@ -1,8 +1,10 @@
 import importlib.util
+import sys
 from pathlib import Path
 
 
 ROOT = Path("firmware/lilygo_t_deck_plus_micropython")
+EDITORS_SRC = Path("runtime") / "editors.py"
 
 
 def test_micropython_spike_scaffold_exists():
@@ -381,10 +383,11 @@ def test_micropython_touch_and_idle_cursor():
     assert "tp = touch.poll()" in runtime
     assert "pointer.place(tp[0], tp[1])" in runtime
 
-    # Cursor auto-hides when the trackball is idle; touch keeps it hidden.
-    assert "self.visible" in runtime
-    assert "def tick(self, now):" in runtime
-    assert "self.pointer.visible" in runtime               # draw guard
+    # Cursor auto-hide + the Pointer live in the shared console now.
+    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    assert "class Pointer:" in console
+    assert "def tick(self, now):" in console
+    assert "self.pointer.visible" in console               # draw guard
     assert "pointer.tick(now)" in runtime
 
     # Touch calibration bring-up mode (serial-only, flush-once).
@@ -417,7 +420,7 @@ def test_micropython_spike_renderer_uses_title_status_and_screen_primitives():
 
 def test_micropython_spike_documents_tdeck_reference_paths():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    notes = (ROOT / "SPIKE_RESULTS.md").read_text(encoding="utf-8")
+    notes = (Path("docs/history") / "SPIKE_RESULTS.md").read_text(encoding="utf-8")
 
     assert "lvgl_micropython/display_configs/LilyGo-TDeck" in readme
     assert "TulipCC" in readme
@@ -597,3 +600,177 @@ def test_tdeck_keyboard_falls_back_when_raw_mode_is_ignored():
     assert state.held("right")
     assert state.last_key == ord("d")
     assert not keyboard.raw_mode
+
+
+def _load_kid_runtime():
+    # kid_runtime does `from editors import ...` and `from console import ...`; the
+    # device freezes build-staged copies of runtime/editors.py and runtime/console.py
+    # as top-level modules. Register those same canonical files so the device module
+    # loads under CPython (editors first -- console imports it).
+    for name in ("editors", "console"):
+        spec = importlib.util.spec_from_file_location(name, Path("runtime") / (name + ".py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        sys.modules[name] = mod
+
+    spec = importlib.util.spec_from_file_location(
+        "kid_runtime", ROOT / "modules" / "kid_runtime.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_code_editor_edits_buffer():
+    CodeEditor = _load_kid_runtime().CodeEditor
+    ed = CodeEditor("def _draw():\n    cls(1)\n")
+    assert ed.lines == ["def _draw():", "    cls(1)", ""]
+
+    # type at the end of line 1
+    ed.row, ed.col = 1, len(ed.lines[1])
+    for ch in " hi":
+        ed.key(ord(ch))
+    assert ed.lines[1] == "    cls(1) hi"
+    assert ed.dirty
+
+    # enter splits and carries the indentation (kid-friendly Python)
+    ed.row, ed.col = 1, len(ed.lines[1])
+    ed.key(0x0D)
+    assert ed.lines[2] == "    " and len(ed.lines) == 4
+
+    # backspace at column 0 joins with the previous line
+    ed.row, ed.col = 2, 0
+    ed.key(0x08)
+    assert len(ed.lines) == 3 and ed.lines[1] == "    cls(1) hi    "
+
+    # tab inserts two spaces; control bytes are ignored
+    n = len(ed.lines[ed.row])
+    assert ed.key(0x09) and len(ed.lines[ed.row]) == n + 2
+    assert ed.key(0x01) is False
+
+    # tap-to-place clamps into range and round-trips through text()
+    ed.place(999, 999)
+    assert ed.row == len(ed.lines) - 1 and ed.col == len(ed.lines[-1])
+    assert ed.text() == "\n".join(ed.lines)
+
+
+def test_code_editor_wired_into_device_shell():
+    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    carts = (Path("runtime") / "kid_carts.py").read_text(encoding="utf-8")
+
+    # The console + editor cores are shared with the host (imported, not redefined).
+    assert "from editors import CodeEditor, PaintEditor, SpriteSheet" in runtime
+    assert "from console import NAMES, Pointer, Workstation" in runtime
+    # The editor edits the real source and saves it through the (injected) store.
+    assert "self.editor = CodeEditor(self.cart[\"src\"])" in console
+    assert "def save_code(self):" in console
+    assert "self.carts_store.save_code(self.cart, src)" in console
+    assert "def save_code(cart, src):" in carts
+    # run_desktop injects the device make_api + SD cart store into the shared console.
+    assert "ws.make_api = make_api" in runtime
+    assert "ws.carts_store = kid_carts" in runtime
+
+    # The keyboard stays in 1-byte ASCII mode (raw matrix is never enabled -- it
+    # garbled editor text; verified via the keyboard probe).
+    assert "kb.raw_mode = False" in console
+    assert "kb._enable_raw_mode()" not in console
+    inp = (ROOT / "modules" / "kidcode" / "input.py").read_text(encoding="utf-8")
+    assert "self._enable_raw_mode()" not in inp        # __init__ no longer enables it
+    assert "ws.keyboard = keyboard" in runtime
+
+
+def test_device_draw_api_uses_tic80_names():
+    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+
+    # TIC-80 conventions on the device canvas + api: rect/circ filled, rectb/circb
+    # outlines, pix for pixels, print for text. The old PICO-8-ish names are gone.
+    for name in ("def pix(", "def rect(", "def rectb(", "def circ(", "def circb("):
+        assert name in runtime, name
+    assert '"rect": canvas.rect, "rectb": canvas.rectb' in runtime
+    assert '"circ": canvas.circ, "circb": canvas.circb' in runtime
+    assert '"cls": canvas.cls, "pix": canvas.pix' in runtime
+    assert '"print": canvas.print' in runtime
+    # The canvas no longer exposes the old names (SpriteSheet keeps its own
+    # pget/pset for the sheet pixel buffer, which is fine -- check the canvas/api).
+    for gone in ("def rectfill(", "def circfill(", "canvas.pset", "canvas.rectfill",
+                 '"text": canvas.print'):
+        assert gone not in runtime, gone
+
+
+def test_device_sprite_sheet_and_paint_editor():
+    m = _load_kid_runtime()
+    S, P = m.SpriteSheet, m.PaintEditor
+    sh = S(4, 4)                            # 32x32, 16 sprites
+    assert sh.count == 16 and (sh.w, sh.h) == (32, 32) and sh.is_blank()
+    assert sh.tile_origin(5) == (8, 8)
+    sh.tset(5, 1, 2, 9)
+    assert sh.tget(5, 1, 2) == 9 and sh.dirty
+    sh2 = S.from_hex(sh.to_hex(), 4, 4)     # hex round-trips, dirty resets
+    assert sh2.pix == sh.pix and sh2.dirty is False
+    pe = P(sh)
+    pe.color = 12
+    pe.paint(0, 0)
+    assert sh.tget(0, 0, 0) == 12
+    pe.pick(0, 0)
+    assert pe.color == 12
+    pe.select(-1)
+    assert pe.n == sh.count - 1
+
+
+def test_device_spr_is_sheet_indexed_and_accepts_image():
+    m = _load_kid_runtime()
+    sheet = m.SpriteSheet(4, 4)
+    sheet.tset(3, 0, 0, 11)
+    calls = []
+
+    class StubCanvas:
+        w = 320
+        h = 240
+
+        def spr(self, img, x, y, scale=1):
+            calls.append((img.w, img.h, x, y, scale))
+
+        def __getattr__(self, name):
+            return lambda *a, **k: 0
+
+    class StubInput:
+        def held(self, name):
+            return False
+
+        def pressed(self, name):
+            return False
+
+    api = m.make_api(StubCanvas(), StubInput(), {}, sheet)
+    api["spr"](3, 100, 60)                  # TIC-80 indexed sprite from the sheet
+    assert calls[-1] == (8, 8, 100, 60, 1)
+    api["spr"](m.Image.from_ascii(["#"], {"#": 7}), 8, 9, scale=4)  # Image still works
+    assert calls[-1] == (1, 1, 8, 9, 4)
+
+
+def test_device_sprite_storage_wired():
+    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    carts = (Path("runtime") / "kid_carts.py").read_text(encoding="utf-8")
+    assert "def make_api(canvas, input, config, sheet=None):" in runtime   # device cart API
+    assert "self.sheet = self._build_sheet()" in console                   # shared console
+    assert "self.carts_store.save_sprites(self.cart, hexs)" in console
+    assert "def save_sprites(cart, hex_text):" in carts
+    assert '"sprites": sprites' in carts
+
+
+def test_editor_cores_are_shared_single_source():
+    # One canonical file (runtime/editors.py); the device imports it and the build
+    # stages it into the frozen modules tree -- no duplicated class definitions.
+    editors = EDITORS_SRC.read_text(encoding="utf-8")
+    for cls in ("class CodeEditor:", "class SpriteSheet:", "class PaintEditor:"):
+        assert cls in editors, cls
+    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    canvas = Path("runtime/canvas.py").read_text(encoding="utf-8")
+    # Neither backend redefines the shared cores.
+    for cls in ("class CodeEditor:", "class SpriteSheet:", "class PaintEditor:"):
+        assert cls not in runtime, "device redefines " + cls
+    assert "class SpriteSheet:" not in canvas, "host canvas redefines SpriteSheet"
+    # build.sh stages the canonical file into modules/ so the device freezes it.
+    build = (ROOT / "build.sh").read_text(encoding="utf-8")
+    assert 'cp "${REPO_ROOT}/runtime/editors.py" "${SCRIPT_DIR}/modules/editors.py"' in build

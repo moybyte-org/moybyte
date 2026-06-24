@@ -9,6 +9,10 @@ examples/*/generated/
 firmware/**/.pio/
 firmware/lilygo_t_deck_plus_micropython/.build/
 firmware/lilygo_t_deck_plus_micropython/dist/
+# Shared host/device modules staged from runtime/ by build.sh (canonical lives in runtime/)
+firmware/lilygo_t_deck_plus_micropython/modules/editors.py
+firmware/lilygo_t_deck_plus_micropython/modules/console.py
+firmware/lilygo_t_deck_plus_micropython/modules/kid_carts.py
 firmware/lilygo_t_deck_plus_reference/
 firmware/reference_tulipcc/
 firmware/lilygo_t_deck_plus/include/kidcode_project_bundle.h

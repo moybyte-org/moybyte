@@ -9,16 +9,28 @@ Group A (PC simulator first)** + **Task Group B (cartridge format)** + the first
 
 ## What's here
 
+**The shared console (host == device).** The launcher/desktop/cards/code/paint UI
+is now ONE module (`console.py`) that both the host *and* the T-Deck run — the host
+renders the same 320×240 pixels with the same petme128 font. The files below split
+into **shared** (canonical here, build-staged into the firmware `modules/` tree so
+the device freezes the identical code) and **host glue**.
+
 | file | role |
 |---|---|
-| `palette.py` | `KID64` 64-color palette (PICO-8 base 16 + ramp), name↔index |
-| `canvas.py` | `Canvas` — 480×270 **indexed** surface, PICO-8-style API (`cls/pset/line/rect/rectfill/circ/circfill/spr/print`), 3×5 font, `to_rgb888()`; `Image` sprites |
-| `input.py` | `InputState` — held/pressed/released buttons (same contract as firmware `kidcode`) |
-| `cartridge.py` | `Cartridge` — `.kcart` folder (manifest + main + `config.json`), load/validate, **duplicate**, **save_config**, system-vs-user |
-| `api.py` | the cartridge global namespace (`cls/spr/text/btn/cfg/col/rnd/image/...`) bound to a runtime |
-| `engine.py` | `DesktopRuntime` — load a cart, run `_init/_update/_draw`, recover bad carts into a friendly on-canvas error |
-| `shell.py` | `DesktopShell` — the interactive desktop + **cards editor**: a **Make it mine** panel that shows each editable field as a natural-language card (from the manifest `edit` schema / `card` templates), a **See the code** view, **Run** to apply, **Save** to a user cartridge. `press(button)` events, live or scripted. |
-| `workstation.py` | `Catalog` / `Launcher` / `Workstation` — boot to a **cartridge gallery**, open any `.kcart` (wallpaper / game) into the shell, **Home** back, rescan for saved user carts. "Everything is a cartridge." |
+| `palette.py` | **(shared-ish)** `KID64` 64-color palette (PICO-8 base 16 + ramp), name↔index |
+| `font.py` | **(host)** petme128 8×8 font extracted byte-for-byte from framebuf, so host text is pixel-identical to the device |
+| `canvas.py` | **(host)** `Canvas` — indexed surface (320×240 in the console), TIC-80 API (`cls/pix/line/rect/rectb/circ/circb/spr/print` — `rect`/`circ` filled, `rectb`/`circb` outlines), `print` uses `font.py`, `to_rgb888()`; `Image` sprites |
+| `editors.py` | **(shared, staged to device)** `CodeEditor` / `SpriteSheet` (8×8 tiles + `__gfx__` hex) / `PaintEditor` |
+| `console.py` | **(shared, staged to device)** `Launcher` + `Pointer` + `Workstation` + cards/code/paint UI + layout/`NAMES`/`CURSOR`. Backend-agnostic: injected `make_api` + cart store. The device's `kid_runtime` imports it; `host_app` runs it on the host |
+| `kid_carts.py` | **(shared, staged to device)** the `.kcart` store — scan/load/save_config/save_code/save_sprites/create/duplicate/delete (dict carts; only `json`+`os`) |
+| `host_app.py` | **(host glue)** host `make_api`, `build_workstation()` (320×240 Canvas + `kid_carts` + seeded system carts), and `ConsoleDriver` (mouse/keyboard → the shared console) |
+| `input.py` | **(host)** `InputState` — held/pressed/released + `last_key` (same contract as firmware `kidcode`) |
+
+Legacy host reference (the pre-unification UI, now **superseded by the shared
+console** and not used by the simulator — kept for their tests pending retirement):
+`cartridge.py` (`Cartridge`/`Catalog`), `api.py` (`make_api(runtime)`),
+`engine.py` (`DesktopRuntime`), `shell.py` (`DesktopShell`), `workstation.py`
+(`Workstation`).
 
 Content + tooling:
 - `system_carts/` — `wallpaper_space.kcart` (Living Desktop: starfield + pet),

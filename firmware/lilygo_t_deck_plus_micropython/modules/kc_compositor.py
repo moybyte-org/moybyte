@@ -3,7 +3,7 @@
 # Owns a full-screen RGB565 framebuffer (PSRAM) and flushes only the *dirty*
 # region to the ST7789 over the lcd_bus DMA path -- the model the Stage 2 gate
 # proved is required (full-frame redraw is bus-bound at ~21-28 FPS; a dirty band
-# is 73-91 FPS). See STAGE3_PLAN.md / SPIKE_FINAL.md.
+# is 73-91 FPS). See docs/history/STAGE3_PLAN.md / docs/history/SPIKE_FINAL.md.
 #
 # Drawing and strip-packing go through the native `kc_gfx` C kernel when present
 # (VM-neutral, fast); otherwise they fall back to `framebuf` / pure-Python so the

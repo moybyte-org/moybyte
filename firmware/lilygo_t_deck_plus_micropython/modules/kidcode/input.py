@@ -71,7 +71,12 @@ class TDeckKeyboard:
 
             self._i2c = I2C(0, scl=Pin(8), sda=Pin(18), freq=400000)
             self._i2c.readfrom(self.KEYBOARD_ADDR, 1)
-            self._enable_raw_mode()
+            # The T-Deck keyboard returns clean 1-byte ASCII (verified by the
+            # keyboard probe). We do NOT enable the 5-byte "raw matrix" mode
+            # (RAW_MODE_CMD): it only decoded a fixed WASD/ZX subset and, once the
+            # command was sent, the flag couldn't undo it -- which garbled the code
+            # editor's text. poll() uses the 1-byte ASCII path; _buttons_for_key
+            # maps letters to nav/game buttons (with the KEY_HOLD_MS latch).
             self.available = True
         except Exception as exc:
             print("KidCode keyboard unavailable:", exc)

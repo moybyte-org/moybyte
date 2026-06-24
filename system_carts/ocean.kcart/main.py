@@ -43,8 +43,8 @@ def _update(dt):
 def _draw():
     cls(col(cfg("water", "blue")))
     for b in bubbles:
-        circ(int(b[0]), int(b[1]), b[2], col("white"))
-    rectfill(0, H - 18, W, 18, col("brown"))          # seabed
+        circb(int(b[0]), int(b[1]), b[2], col("white"))   # bubble outlines
+    rect(0, H - 18, W, 18, col("brown"))          # seabed
     wob = 2 if (int(t * 3) % 2 == 0) else 0
-    spr(fish, int(fish_x), H - 18 - 24 - wob, 4)
-    text("OCEAN", 10, 10, col("white"), 3)
+    spr(fish, int(fish_x), H - 18 - 24 - wob, scale=4)
+    print("OCEAN", 10, 10, col("white"), 3)
