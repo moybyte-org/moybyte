@@ -69,6 +69,29 @@ def read_first_project_source(spi_bus=None):
         _deselect_after_sd()
 
 
+def with_sd(fn, spi_bus=None):
+    """Mount the SD card, run fn() (which may read/write under /sd), then always
+    unmount + deselect so the display can own the shared SPI bus again. This is
+    the same lifecycle as read_first_project_source: leaving an SDCard device on
+    the bus collides with esp_lcd flushes and hard-hangs the device."""
+    import os
+
+    sd = None
+    owned_spi = None
+    try:
+        spi_bus = spi_bus or _display_spi_bus()
+        if spi_bus is None:
+            owned_spi = _new_spi_bus()
+            spi_bus = owned_spi
+        sd = _mount_sd_device(spi_bus)
+        return fn()
+    finally:
+        _unmount_if_possible(os)
+        _deinit_if_possible(sd)
+        _deinit_if_possible(owned_spi)
+        _deselect_after_sd()
+
+
 def _mount_sd_device(spi_bus):
     import os
     from machine import Pin, SDCard
