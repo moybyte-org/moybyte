@@ -63,19 +63,42 @@ CURSOR = Image.from_ascii([
 ], {"O": 0, "F": 7}, ".")
 
 
-class Pointer:
-    """A screen-space cursor driven by trackball pulses; click is its button."""
+CURSOR_IDLE_MS = 2000  # hide the trackball cursor after this long with no movement
 
-    def __init__(self, w, h):
+
+class Pointer:
+    """A screen-space cursor. The trackball drives it relatively (and shows it);
+    touch places it absolutely (finger is the pointer, so it stays hidden). The
+    cursor auto-hides after CURSOR_IDLE_MS without trackball movement."""
+
+    def __init__(self, w, h, idle_ms=CURSOR_IDLE_MS):
         self.w = w
         self.h = h
         self.x = w // 2
         self.y = h // 2
         self.click = False
+        self.visible = True
+        self.idle_ms = idle_ms
+        self._last_move = _ticks_ms()
 
     def move(self, dx, dy):
+        # Relative move from the trackball: clamp, and wake the cursor.
         self.x = max(0, min(self.w - 1, self.x + dx))
         self.y = max(0, min(self.h - 1, self.y + dy))
+        self.visible = True
+        self._last_move = _ticks_ms()
+
+    def place(self, x, y):
+        # Absolute position from touch: hit-test there, but keep the cursor
+        # hidden (the finger already shows where you are).
+        self.x = max(0, min(self.w - 1, x))
+        self.y = max(0, min(self.h - 1, y))
+        self.visible = False
+
+    def tick(self, now):
+        # Auto-hide once the trackball has been idle long enough.
+        if self.visible and _ticks_diff(now, self._last_move) >= self.idle_ms:
+            self.visible = False
 
 
 class DeviceCanvas:
@@ -666,7 +689,7 @@ class Workstation:
         self._btn("HOME", _HOME_BTN, NAMES["dark_grey"])
 
     def _draw_cursor(self):
-        if self.pointer is not None:
+        if self.pointer is not None and self.pointer.visible:
             self.canvas.spr(CURSOR, self.pointer.x, self.pointer.y, 1)
 
     def _draw_cards(self):
@@ -747,6 +770,126 @@ class TrackBall:
         return counts, click
 
 
+# Touch -> canvas mapping, calibrated on hardware (RUN_TOUCH_CALIBRATE byte dump).
+# This T-Deck's GT911 already reports landscape coords matching the 320x240 canvas
+# (x ~0..320, y ~0..240), so no axis swap is needed -- only the Y axis is inverted
+# (raw top=240, bottom=0). read_raw() handles the byte order (y in bytes 0-1, x in
+# bytes 2-3); these just scale + flip into canvas space.
+TOUCH_SWAP = False      # raw axes already match the landscape canvas
+TOUCH_FLIP_X = False
+TOUCH_FLIP_Y = True     # GT911 Y runs opposite the screen
+TOUCH_RAW_W = 320       # GT911 reported max along x
+TOUCH_RAW_H = 240       # GT911 reported max along y
+
+
+class Touch:
+    """T-Deck GT911 capacitive touch over I2C0 (the same bus as the keyboard,
+    off the SPI bus -- no display contention). poll() returns an absolute
+    (x, y, tap) in canvas coords, where tap is True only on the press edge."""
+
+    ADDRS = (0x5D, 0x14)      # GT911 default / alternate I2C addresses
+    REG_STATUS = 0x814E       # touch status: bit7 ready, low nibble = point count
+    REG_POINT0 = 0x8150       # point 0: [track, xl, xh, yl, yh, sizel, ...]
+
+    def __init__(self, w, h, i2c=None):
+        self.w = w
+        self.h = h
+        self.available = False
+        self.addr = None
+        self._i2c = i2c
+        self._down = False
+        try:
+            from machine import I2C, Pin
+
+            if self._i2c is None:
+                self._i2c = I2C(0, scl=Pin(8), sda=Pin(18), freq=400000)
+            for a in self.ADDRS:
+                try:
+                    self._i2c.readfrom(a, 1)
+                    self.addr = a
+                    self.available = True
+                    break
+                except Exception:
+                    pass
+            if not self.available:
+                print("KidCode touch: GT911 not found on I2C0")
+        except Exception as exc:  # noqa: BLE001
+            print("KidCode touch unavailable:", exc)
+
+    def read_raw(self):
+        """One GT911 read. Returns (rx, ry) when a finger is down, False when the
+        controller reports a fresh sample with no touch (finger up), or None when
+        no new sample is ready (state unknown -- keep whatever we had). Clears the
+        status register after a ready read so the next sample is produced."""
+        if not self.available:
+            return None
+        try:
+            status = self._i2c.readfrom_mem(self.addr, self.REG_STATUS, 1, addrsize=16)[0]
+        except Exception:
+            return None
+        if not (status & 0x80):
+            return None  # buffer not ready yet -- do NOT clear, do NOT change state
+        raw = False      # ready sample, default "finger up"
+        if (status & 0x0F) >= 1:
+            try:
+                d = self._i2c.readfrom_mem(self.addr, self.REG_POINT0, 4, addrsize=16)
+                # This GT911 lays the point out as y(lo,hi) then x(lo,hi) -- see
+                # the touch calibration byte dump. Return (x_raw, y_raw) for _map.
+                raw = (d[2] | (d[3] << 8), d[0] | (d[1] << 8))
+            except Exception:
+                raw = None
+        try:
+            self._i2c.writeto_mem(self.addr, self.REG_STATUS, b"\x00", addrsize=16)
+        except Exception:
+            pass
+        return raw
+
+    def debug_read(self):
+        """Calibration only: return (status, 8 raw point bytes) and clear, or None
+        when no fresh sample. Lets us see the exact GT911 byte layout."""
+        if not self.available:
+            return None
+        try:
+            status = self._i2c.readfrom_mem(self.addr, self.REG_STATUS, 1, addrsize=16)[0]
+        except Exception:
+            return None
+        if not (status & 0x80):
+            return None
+        data = None
+        if (status & 0x0F) >= 1:
+            try:
+                data = self._i2c.readfrom_mem(self.addr, self.REG_POINT0, 8, addrsize=16)
+            except Exception:
+                data = None
+        try:
+            self._i2c.writeto_mem(self.addr, self.REG_STATUS, b"\x00", addrsize=16)
+        except Exception:
+            pass
+        return (status, data)
+
+    def _map(self, rx, ry):
+        if TOUCH_SWAP:
+            rx, ry = ry, rx
+        if TOUCH_FLIP_X:
+            rx = TOUCH_RAW_W - 1 - rx
+        if TOUCH_FLIP_Y:
+            ry = TOUCH_RAW_H - 1 - ry
+        x = rx * self.w // TOUCH_RAW_W
+        y = ry * self.h // TOUCH_RAW_H
+        return max(0, min(self.w - 1, x)), max(0, min(self.h - 1, y))
+
+    def poll(self):
+        raw = self.read_raw()
+        if not raw:                 # None (no new sample) or False (finger up)
+            if raw is False:        # only a confirmed "up" clears the press state
+                self._down = False
+            return None
+        x, y = self._map(raw[0], raw[1])
+        tap = not self._down        # press edge -> single tap/click
+        self._down = True
+        return (x, y, tap)
+
+
 def _ticks_ms():
     try:
         return time.ticks_ms()
@@ -821,6 +964,7 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
     inp = InputState()
     keyboard = TDeckKeyboard(inp)
     ball = TrackBall()
+    touch = Touch(canvas.w, canvas.h, i2c=getattr(keyboard, "_i2c", None))
     pointer = Pointer(canvas.w, canvas.h)
     import kidcode_sd
     # Carts are read from SD before display init; only fall back to a post-display
@@ -837,8 +981,9 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
     ws.can_manage = carts_root is not None
     ws._with_sd = kidcode_sd.with_sd_live
     ws.pointer = pointer
-    print("KidCode desktop running (kb=%d ball=%d)"
-          % (1 if keyboard.available else 0, 1 if ball.available else 0))
+    print("KidCode desktop running (kb=%d ball=%d touch=%d)"
+          % (1 if keyboard.available else 0, 1 if ball.available else 0,
+             1 if touch.available else 0))
 
     frame_ms = 1000 // fps_cap
     last = _ticks_ms()
@@ -856,10 +1001,63 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
         dy = _cursor_delta(counts[1] - counts[0])   # down - up
         if dx or dy:
             pointer.move(dx, dy)
+        tp = touch.poll()                       # touch -> absolute position + tap
+        if tp is not None:
+            pointer.place(tp[0], tp[1])
+            if tp[2]:                           # press edge = tap = click
+                click = True
         pointer.click = click
+        pointer.tick(now)                       # auto-hide the idle trackball cursor
         ws.handle_input()                       # keyboard W/A/S/D etc.
         ws.handle_pointer()                     # cursor hover + click
         ws.frame(dt)
         elapsed = _ticks_diff(_ticks_ms(), now)
         if elapsed < frame_ms:
             time.sleep_ms(frame_ms - elapsed)
+
+
+def run_touch_calibrate(handler):
+    """Touch bring-up aid (kidcode_shell.RUN_TOUCH_CALIBRATE). Draws corner
+    targets and prints each GT911 sample (raw + current mapping) over serial.
+
+    It flushes the panel only ONCE up front and then just polls + prints, so USB
+    serial keeps draining -- the normal desktop loop's continuous flush starves
+    USB and you'd see nothing. Touch each yellow corner, read the raw coords over
+    serial, then set TOUCH_SWAP / TOUCH_FLIP_X / TOUCH_FLIP_Y / TOUCH_RAW_* above
+    so the mapped value lands on that corner, and rebuild."""
+    if handler is not None:
+        try:
+            handler.deinit()
+        except Exception as exc:  # noqa: BLE001
+            print("KidCode touch-cal: takeover failed:", exc)
+    try:
+        from tdeck_display import get_display_bus
+        from kc_compositor import make_compositor
+        from kidcode.input import InputState, TDeckKeyboard
+    except Exception as exc:  # noqa: BLE001
+        print("KidCode touch-cal unavailable:", exc)
+        return
+    comp = make_compositor(get_display_bus(), 320, 240, strip_h=40)
+    if comp is None:
+        print("KidCode touch-cal: no compositor")
+        return
+    canvas = DeviceCanvas(comp)
+    inp = InputState()
+    keyboard = TDeckKeyboard(inp)
+    touch = Touch(canvas.w, canvas.h, i2c=getattr(keyboard, "_i2c", None))
+    canvas.cls(NAMES["black"])
+    for (cx, cy) in ((8, 8), (canvas.w - 9, 8), (8, canvas.h - 9),
+                     (canvas.w - 9, canvas.h - 9), (canvas.w // 2, canvas.h // 2)):
+        canvas.rect(cx - 6, cy - 6, 12, 12, NAMES["yellow"])
+    canvas.print("TOUCH CORNERS", 100, canvas.h // 2 - 24, NAMES["white"], 2)
+    canvas.print("watch serial", 108, canvas.h // 2 + 8, NAMES["light_grey"], 1)
+    comp.flush()
+    print("KidCode touch-cal start avail=%d addr=%s"
+          % (1 if touch.available else 0, hex(touch.addr) if touch.addr else "?"))
+    while True:
+        r = touch.debug_read()
+        if r and r[1]:  # (status, 8 raw bytes) on a real touch
+            status, d = r
+            print("KidCode touch-cal status=0x%02x bytes=%s"
+                  % (status, " ".join("%02x" % b for b in d)))
+        time.sleep_ms(50)
