@@ -83,6 +83,39 @@ edit now reliably re-freezes.
   image boots; it disables MicroPython's writable `/` filesystem. Whether the
   normal writable-VFS boot can show a screen is unanswered.
 
+## Stage 2 gate result (2026-06-23): full-screen compositor — PASS
+
+Built a full-screen 320x240 RGB565 compositor (`modules/kc_compositor.py`,
+strip-blit over the `lcd_bus` DMA path) + an on-device benchmark
+(`RUN_FULLSCREEN_BENCH` in `kidcode_shell.py`) to answer the one open question:
+can the full screen flush fast enough for the v0.4 desktop? Measured flush time:
+
+| surface | 40 MHz flush / fps | 80 MHz flush / fps |
+|---|---|---|
+| full-redraw 320x240 | 41 ms / 21 | 29 ms / 28 |
+| partial band 320x64 | 11 ms / 73 | 8 ms / 91 |
+
+- **Bus-bound and linear in rows pushed** (64/240 x 41 = 11 ms, measured 11).
+  Full-screen full-redraw cannot reach 60 FPS even at 80 MHz.
+- **Partial/dirty-rect updates are the answer:** a 320x64 band is 73 FPS @40 MHz,
+  91 @80 MHz. A desktop (static wallpaper + small animated regions) lives here,
+  so 60+ FPS is achievable on this panel.
+- **80 MHz is stable** on this unit (no corruption, only tearing). Gains are
+  sub-linear: the Python slice-copy (PSRAM->internal SRAM) + per-strip
+  `tx_param` overhead (~13 ms/full frame) doesn't scale with clock -- a C
+  compositor cuts this.
+- **Tearing** (large moving color bands) is clock-independent: flush > ~16 ms
+  panel refresh and there is no tearing-effect (TE) sync. Cosmetic; fixed in
+  Stage 3 by TE sync / double-buffering, not a clock bump.
+
+Decisions locked for Stage 3 (the production C compositor):
+- Desktop renders via native compositor + **dirty-rect/partial updates**, never
+  a full-frame redraw.
+- Adopt **80 MHz** for the full-screen path (validated stable); 40 MHz stays fine
+  for the 128x128 game path (CPU-bound there, 80 MHz was a no-op).
+- Move the strip pack + RGB332 LUT + flush into **C**; add **TE sync /
+  double-buffering** to kill tearing.
+
 ## Next milestones
 
 - **Stage 1.5 (optional, low value at 128×128):** eliminate the per-frame
