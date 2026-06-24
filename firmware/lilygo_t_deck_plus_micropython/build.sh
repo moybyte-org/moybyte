@@ -93,6 +93,20 @@ if [ -d "${KC_GFX_SRC}" ]; then
   fi
 fi
 
+# Stage the KidCode kc_sd native C module (SD card attached to the display-shared
+# SPI host -- see native/kc_sd/modkc_sd.c) into the upstream ext_mod tree, same
+# pattern as kc_gfx (ext_mod is wiped on re-clone, so re-stage every build).
+KC_SD_SRC="${SCRIPT_DIR}/native/kc_sd"
+KC_SD_DST="${UPSTREAM_DIR}/ext_mod/kc_sd"
+if [ -d "${KC_SD_SRC}" ]; then
+  rm -rf "${KC_SD_DST}"
+  cp -r "${KC_SD_SRC}" "${KC_SD_DST}"
+  EXT_MOD_CMAKE="${UPSTREAM_DIR}/ext_mod/micropython.cmake"
+  if ! grep -q 'kc_sd/micropython.cmake' "${EXT_MOD_CMAKE}"; then
+    sed -i '/kc_gfx\/micropython.cmake/a include(${CMAKE_CURRENT_LIST_DIR}/kc_sd/micropython.cmake)' "${EXT_MOD_CMAKE}"
+  fi
+fi
+
 BUILDER_ESP32="${UPSTREAM_DIR}/builder/esp32.py"
 if [ -f "${BUILDER_ESP32}" ]; then
   sed -i \
