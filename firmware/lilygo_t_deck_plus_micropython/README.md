@@ -311,6 +311,33 @@ before display init and the firmware fell back to the older after-display SD
 read path. Check serial for `KidCode SD prefetch failed` or
 `KidCode SD prefetch found no project`.
 
+### Live SD reads/writes while the panel is running (`kc_sd`)
+
+The boot prefetch above mounts SD with `machine.SDCard`, which works only
+*before* `init_display()` because it re-runs `spi_bus_initialize()` on the host
+the panel later claims. For SD access *after* the panel is live (cart saves,
+re-scans, create/duplicate/delete in the workstation) the firmware uses the
+native `kc_sd` module (`native/kc_sd/modkc_sd.c`).
+
+`kc_sd` follows the ESP-IDF "Sharing the SPI Bus Among SD Cards and Other SPI
+Devices" pattern: it does **not** re-initialize the bus. `esp_lcd` already ran
+`spi_bus_initialize()`, so `kc_sd` only `sdspi_host_init_device()`s the card as a
+second device on that same host and probes it. The panel device is left attached,
+so the display keeps working afterward. `kidcode_sd.with_sd_live(fn)` mounts the
+card (FAT via a `kc_sd`-backed block device) **once and keeps it resident**, then
+runs `fn`. The desktop loop is single-threaded with LVGL's task handler stopped
+(native takeover), so an SD session runs strictly between frames and never
+collides with a `tx_color` flush. This is why `Workstation.can_manage` is now
+enabled on device (`run_desktop` wires `_with_sd = kidcode_sd.with_sd_live`).
+
+**Do not tear the SD device down between ops.** The first cut unmounted +
+`sdspi_host_deinit`'d after every write and also forced `TFT_CS` high via
+`Pin(...)`; both corrupt the shared bus/DMA state, and the *next* panel flush
+**silent-hangs** the board — the write lands on SD, then resume freezes with no
+panic and USB still enumerated but dead (confirmed over serial: nothing after
+`KidCode desktop running`). Keep the card mounted, leave `TFT_CS`/`SD_CS` to their
+drivers, and only park the unused LoRa `RADIO_CS` high.
+
 Recommended full-flash order for the next hardware pass:
 
 1. `kidcode_lvgl_tdeck_board_jtag_full_dio_0x0.bin`: custom T-Deck board config

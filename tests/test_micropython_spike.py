@@ -339,6 +339,36 @@ def test_micropython_spike_has_guarded_sd_project_loader():
     assert "vfs.mount(block_device, path)" in sd_loader
 
 
+def test_micropython_native_sd_shares_display_spi_host():
+    # The live SD path attaches the card to the host esp_lcd already initialized
+    # (kc_sd) instead of re-running spi_bus_initialize like machine.SDCard, which
+    # hangs the shared bus once the panel is up. See modkc_sd.c header.
+    mod = (ROOT / "native" / "kc_sd" / "modkc_sd.c").read_text(encoding="utf-8")
+    cmake = (ROOT / "native" / "kc_sd" / "micropython.cmake").read_text(encoding="utf-8")
+    build = (ROOT / "build.sh").read_text(encoding="utf-8")
+    sd_loader = (ROOT / "modules" / "kidcode_sd.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+
+    # Native module attaches (init_device) rather than re-initializing the bus.
+    assert "MP_REGISTER_MODULE(MP_QSTR_kc_sd" in mod
+    assert "sdspi_host_init_device" in mod
+    assert "sdmmc_read_sectors" in mod and "sdmmc_write_sectors" in mod
+    assert "target_link_libraries(usermod INTERFACE usermod_kc_sd)" in cmake
+    assert "ext_mod/kc_sd" in build
+    assert "kc_sd/micropython.cmake" in build
+
+    # Python live-mount path + block device backed by kc_sd.
+    assert "class _NativeSDBlockDev" in sd_loader
+    assert "def with_sd_live(fn):" in sd_loader
+    assert "def mount_sd_live(" in sd_loader
+    assert "import kc_sd" in sd_loader
+
+    # Desktop enables management through the live path (no longer hard-disabled).
+    assert "ws._with_sd = kidcode_sd.with_sd_live" in runtime
+    assert "ws.can_manage = carts_root is not None" in runtime
+    assert "ws.can_manage = False" not in runtime
+
+
 def test_micropython_spike_enables_watchdog_after_display_bringup():
     shell = (ROOT / "modules" / "kidcode_shell.py").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")

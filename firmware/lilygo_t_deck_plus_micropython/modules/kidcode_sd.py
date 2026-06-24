@@ -92,6 +92,95 @@ def with_sd(fn, spi_bus=None):
         _deselect_after_sd()
 
 
+# --- live SD sharing (native single-bus, while the panel is running) --------
+#
+# machine.SDCard re-runs spi_bus_initialize() on the host esp_lcd already owns,
+# which hard-hangs the board once the panel is live (see the README SD section
+# and CLAUDE.md). The kc_sd native module instead ATTACHES the card to that same,
+# already-initialized host (ESP-IDF "Sharing the SPI Bus" guide) -- no bus re-init,
+# the panel device is left intact. So reads AND writes work mid-run, as long as
+# the caller never flushes the panel during the SD session (the device desktop
+# loop is single-threaded, so with_sd_live() runs between frames).
+SD_LIVE_FREQ_KHZ = 20000
+
+
+class _NativeSDBlockDev:
+    """MicroPython block device backed by kc_sd (FAT via vfs.mount)."""
+
+    def __init__(self, sectors):
+        self.sectors = sectors
+
+    def readblocks(self, block, buf, off=0):
+        import kc_sd
+
+        if off:
+            raise OSError(22)  # EINVAL: byte-offset addressing unsupported (FAT uses 512-blocks)
+        kc_sd.read(block, buf, len(buf) // kc_sd.SECTOR_SIZE)
+        return 0
+
+    def writeblocks(self, block, buf, off=0):
+        import kc_sd
+
+        if off:
+            raise OSError(22)
+        kc_sd.write(block, buf, len(buf) // kc_sd.SECTOR_SIZE)
+        return 0
+
+    def ioctl(self, op, arg):
+        if op == 4:        # MP_BLOCKDEV_IOCTL_BLOCK_COUNT
+            return self.sectors
+        if op == 5:        # MP_BLOCKDEV_IOCTL_BLOCK_SIZE
+            import kc_sd
+
+            return kc_sd.SECTOR_SIZE
+        return 0           # INIT / DEINIT / SYNC / BLOCK_ERASE: nothing to do
+
+
+def mount_sd_live(host=SPI_HOST, cs=SD_CS, freq_khz=SD_LIVE_FREQ_KHZ):
+    """Attach + mount the SD card on the display-shared host via kc_sd."""
+    import kc_sd
+
+    sectors = kc_sd.init(host, cs, freq_khz)
+    bd = _NativeSDBlockDev(sectors)
+    _mount(bd, SD_MOUNT)
+    return bd
+
+
+_live_mounted = False
+
+
+def with_sd_live(fn):
+    """Run fn() (cart reads/writes under /sd) with SD mounted via the native
+    single-bus path (kc_sd) while the panel is live, then return -- WITHOUT
+    tearing the card down. The SD device is mounted once and kept resident for
+    the rest of the device session.
+
+    Why persistent: tearing the sdspi device down between ops (sdspi_host_deinit)
+    corrupts the shared SPI bus + DMA state esp_lcd needs, and the next panel
+    flush hangs the board -- observed as "the write lands on SD, then resume
+    hangs." We also leave esp_lcd's TFT_CS and sdspi's SD_CS untouched (both are
+    driver-owned); only the unused LoRa radio CS is parked high. The desktop loop
+    is single-threaded, so fn() never overlaps a panel flush."""
+    global _live_mounted
+    import os
+
+    if not _live_mounted:
+        try:
+            from machine import Pin
+
+            Pin(RADIO_CS, Pin.OUT, value=1)  # park the unused LoRa radio CS only
+        except Exception:
+            pass
+        try:
+            os.mkdir(SD_MOUNT)
+        except OSError:
+            pass
+        if not _looks_mounted(os):
+            mount_sd_live()
+        _live_mounted = True
+    return fn()
+
+
 def _mount_sd_device(spi_bus):
     import os
     from machine import Pin, SDCard

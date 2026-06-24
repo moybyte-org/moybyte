@@ -404,12 +404,12 @@ class Workstation:
         self.code_view = False
         self.pointer = None           # set by run_desktop
         self.carts_root = None        # SD carts dir (reads); set by run_desktop
-        self.can_manage = True        # writes enabled? device disables until the
-                                      # panel-release write path lands (SD writes
-                                      # while the panel is live hang the bus)
-        # SD session wrapper: mounts the (display-shared) SPI bus for the
-        # duration of fn(), then unmounts+deselects so the render loop's flushes
-        # never collide with a mounted SDCard. Default is a host passthrough.
+        self.can_manage = True        # writes enabled? run_desktop sets this from
+                                      # whether SD is the cart source (carts_root)
+        # SD session wrapper: mounts SD for the duration of fn(), then releases it
+        # so the render loop's flushes never collide on the shared bus. On device
+        # run_desktop swaps in kidcode_sd.with_sd_live (native kc_sd attach). The
+        # default is a host passthrough.
         self._with_sd = lambda fn: fn()
 
     def _start(self):
@@ -761,13 +761,20 @@ def _ticks_diff(a, b):
         return a - b
 
 
-def _load_carts():
+def _load_carts(session=None):
     """Load cartridges from SD (seeding the built-ins on first boot). Returns
     (carts, carts_root); carts_root is None (management disabled) on fallback to
-    the embedded carts if the SD card is missing/unreadable."""
+    the embedded carts if the SD card is missing/unreadable.
+
+    `session` is the SD lifecycle wrapper to mount under. Default is the
+    pre-display machine.SDCard path (used by the boot prefetch); pass
+    kidcode_sd.with_sd_live for the post-display native path."""
     try:
         import kidcode_sd
         import kid_carts
+
+        if session is None:
+            session = kidcode_sd.with_sd
 
         def _seed_and_scan():
             kid_carts.ensure_dirs()
@@ -776,7 +783,7 @@ def _load_carts():
 
         # Mount only for the seed+scan, then unmount: the render loop must own
         # the shared SPI bus with no SDCard device attached, or flushes hang.
-        carts = kidcode_sd.with_sd(_seed_and_scan)
+        carts = session(_seed_and_scan)
         if carts:
             print("KidCode loaded %d carts from SD" % len(carts))
             return carts, kid_carts.CARTS_DIR
@@ -815,17 +822,20 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
     keyboard = TDeckKeyboard(inp)
     ball = TrackBall()
     pointer = Pointer(canvas.w, canvas.h)
-    # Carts are read from SD before display init; only fall back to a (risky)
-    # post-display mount if the shell didn't prefetch.
-    carts, carts_root = prefetched if prefetched is not None else _load_carts()
+    import kidcode_sd
+    # Carts are read from SD before display init; only fall back to a post-display
+    # mount (now safe via the native kc_sd path) if the shell didn't prefetch.
+    carts, carts_root = (prefetched if prefetched is not None
+                         else _load_carts(kidcode_sd.with_sd_live))
     ws = Workstation(comp, canvas, inp, carts)
     ws.carts_root = carts_root
-    # Reads work (carts were prefetched before display init). Writes are disabled
-    # on-device for now: mounting SD while the panel owns the shared SPI bus hangs
-    # it (see README). _with_sd stays the no-op passthrough so any stray write
-    # fails gracefully instead of bricking. Re-enable once the write path releases
-    # the panel (deinit display bus -> mount -> write -> unmount -> reinit).
-    ws.can_manage = False
+    # Writes are enabled on-device via kc_sd: it attaches the SD card to the SPI
+    # host esp_lcd already initialized (instead of machine.SDCard re-initializing
+    # it, which hangs the live bus). with_sd_live mounts the card once and keeps
+    # it resident -- tearing it down per op silent-hangs the next panel flush.
+    # can_manage falls back off if the SD root is unknown (booted on embedded carts).
+    ws.can_manage = carts_root is not None
+    ws._with_sd = kidcode_sd.with_sd_live
     ws.pointer = pointer
     print("KidCode desktop running (kb=%d ball=%d)"
           % (1 if keyboard.available else 0, 1 if ball.available else 0))
