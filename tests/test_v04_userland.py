@@ -186,9 +186,12 @@ def test_console_runs_game_cart_and_scores(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Star Catcher")
     assert ws.cart["type"] == "game"
+    ws.config["autoplay"] = 1               # opt into attract mode, then re-run
+    ws.apply()
     for _ in range(240):                    # attract-mode auto-play
         ws.frame(1 / 30)
-    assert ws.ns["score"] >= 1
+    # `best` survives the game-over reset, so it's the honest "did it score" check.
+    assert ws.ns["best"] >= 1
 
 
 def test_console_cards_make_it_mine_edit_and_run(tmp_path):
