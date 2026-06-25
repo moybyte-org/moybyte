@@ -6,35 +6,13 @@
 # runtime.
 
 stars = []
-pet = None
+pet = 0          # the chosen pet sprite tile id (0 frog, 1 robot -- both editable)
 pet_x = 0.0
 pet_dir = 1
 t = 0.0
 
-# 9x7 frog and 7x6 robot, drawn as ASCII -> palette indices.
-FROG = [
-    ".GG...GG.",
-    "GWGGGGGWG",
-    "GGGGGGGGG",
-    "GGKGGGKGG",
-    "GGGGGGGGG",
-    ".GGGGGGG.",
-    "..G.G.G..",
-]
-ROBOT = [
-    ".LLLLL.",
-    "LKOKOKL",
-    "LLLLLLL",
-    "LKLLLKL",
-    "LLLLLLL",
-    ".L...L.",
-]
-
-
-def _make_pet(kind):
-    if kind == "robot":
-        return image(ROBOT, {"L": col("light_grey"), "O": col("red"), "K": col("black")})
-    return image(FROG, {"G": col("green"), "W": col("white"), "K": col("black")})
+# The pet faces live in the cart's sprite sheet (sprites.kgfx): frog=0, robot=1.
+# Pick one in "Make it mine" and edit it in the paint editor.
 
 
 def _init():
@@ -44,7 +22,11 @@ def _init():
     stars = []
     for _i in range(n):
         stars.append([rnd(W), rnd(H), spd * (0.4 + rnd(0.6))])
-    pet = _make_pet(cfg("pet", "frog"))
+    p = cfg("pet", 0)                # tile id (tolerate a stale string config)
+    try:
+        pet = int(p)
+    except (TypeError, ValueError):
+        pet = 1 if p == "robot" else 0
     pet_x = W * 0.5
 
 
@@ -80,5 +62,5 @@ def _draw():
         pix(s[0], s[1], 7 if s[2] > 25 else 6)
     rect(0, H - 24, W, 24, col("dark_green"))   # ground
     bob = 2 if (int(t * 4) % 2 == 0) else 0
-    spr(pet, int(pet_x), H - 24 - 28 - bob, scale=4)  # 4x-scaled pet on the ground
+    spr(pet, int(pet_x), H - 24 - 28 - bob, 0, 4)  # 4x-scaled pet tile (frog/robot)
     print("MY SPACE COMPUTER", 10, 10, col("white"), 3)

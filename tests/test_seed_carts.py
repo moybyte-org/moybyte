@@ -297,3 +297,80 @@ def test_pet_picker_selects_a_sprite_tile(tmp_path):
     ws.apply()
     assert ws.cart_error is None
     assert ws.ns["pet"] == 2                             # the running cart uses the picked tile
+
+
+# -- the wallpaper carts also moved to editable sprite tiles (#15/#18) --------
+#
+# Space Desktop (frog/robot pet) and Ocean Desktop (fish) used to hardcode their
+# character as an inline image() ASCII blob in main.py; now each keeps it in the
+# cart's sprites.kgfx and draws with spr(<int tile id>, ...). These assert the
+# sheet the editor loads is non-empty and the draw is a real sprite-tile draw.
+import re  # noqa: E402
+
+# Folder -> the sprite tile ids its sprites.kgfx must paint.
+WALLPAPER_SHEETS = {
+    "wallpaper_space": (0, 1),    # frog / robot pet faces (copied from star_catcher, #18)
+    "ocean": (0,),                # the fish
+}
+
+
+def test_wallpaper_carts_have_nonempty_sprite_sheets():
+    from runtime.canvas import SpriteSheet
+
+    for folder, tiles in WALLPAPER_SHEETS.items():
+        f = SYSTEM_CARTS / (folder + ".kcart") / "sprites.kgfx"
+        assert f.is_file(), folder + " is missing sprites.kgfx"
+        sheet = SpriteSheet.from_hex(f.read_text(encoding="utf-8"))
+        assert not sheet.is_blank(), folder + " sprite sheet is blank (editor shows nothing)"
+        for n in tiles:
+            pix = [sheet.tget(n, lx, ly) for ly in range(8) for lx in range(8)]
+            assert any(pix), "%s tile %d is blank" % (folder, n)
+
+
+def test_wallpaper_carts_draw_via_integer_sprite_tile():
+    # The character is no longer an inline image(): main.py must spr() an integer
+    # tile id (and not reference the old image()/FROG/ROBOT/FISH blobs).
+    for folder in WALLPAPER_SHEETS:
+        src = (SYSTEM_CARTS / (folder + ".kcart") / "main.py").read_text(encoding="utf-8")
+        assert "image(" not in src, folder + " still builds an inline image()"
+        # at least one spr() call whose first arg is an int literal or the `pet` var
+        assert re.search(r"spr\(\s*(?:\d+|pet)\b", src), folder + " has no spr(<int tile>, ...)"
+
+
+def test_wallpaper_carts_load_their_sheet_and_run_headless(tmp_path):
+    from runtime import host_app
+
+    title_for = {"wallpaper_space": "Space Desktop", "ocean": "Ocean Desktop"}
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    for folder, tiles in WALLPAPER_SHEETS.items():
+        _open_cart(ws, title_for[folder])
+        assert ws.screen == "desktop", folder
+        assert ws.cart_error is None, folder
+        assert ws.sheet is not None and not ws.sheet.is_blank(), folder
+        for n in tiles:
+            assert ws.sheet.tile_image(n).pix.count(0) < 64, "%s tile %d blank" % (folder, n)
+        _run(ws, 90)                                     # attract mode, no crash
+        assert ws.cart_error is None, folder
+        assert len(set(ws.canvas.buf)) > 1, folder
+        ws.go_home()
+
+
+def test_space_pet_picker_selects_a_sprite_tile(tmp_path):
+    from runtime import host_app
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_cart(ws, "Space Desktop")
+    ws._open_menu()
+    rows = ws._card_layout()
+    pet = [r for r in rows if r["f"]["key"] == "pet"][0]
+    assert pet["display"] == "sprite-tiles"
+    cells = ws._choice_cells(pet)
+    assert len(cells) == 2                               # frog / robot
+    _, (cx, cy, cw, ch) = cells[1]                       # tap the robot tile
+    ws.pointer.place(cx + cw // 2, cy + ch // 2)
+    ws.pointer.click = True
+    ws.handle_pointer()
+    assert ws.config["pet"] == 1
+    ws.apply()
+    assert ws.cart_error is None
+    assert ws.ns["pet"] == 1                             # the running cart uses the picked tile
