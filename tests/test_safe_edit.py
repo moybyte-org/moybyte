@@ -183,3 +183,245 @@ def test_run_code_refuses_invalid_source_and_keeps_editor(tmp_path):
     ws.run_code()
     assert ws.screen == "desktop" and ws.cart_error is None
     assert "cls(6)" in kid_carts.load(path)["src"]
+
+
+# -- (e) [BLOCKER] a cart whose exception's __str__ itself raises -----------
+
+# The evil cart: _draw raises an exception whose own __str__ raises. If frame()
+# (or _start) ever re-stringifies the RAW exc, that secondary RuntimeError
+# escapes the loop -> on device the panel never paints and the board hangs.
+_EVIL_SRC = (
+    "class Evil(Exception):\n"
+    "    def __str__(self):\n"
+    "        raise RuntimeError('str blew up')\n"
+    "def _draw():\n"
+    "    raise Evil()\n"
+)
+
+_EVIL_AT_START_SRC = (
+    "class Evil(Exception):\n"
+    "    def __str__(self):\n"
+    "        raise RuntimeError('str blew up')\n"
+    "def _init():\n"
+    "    raise Evil()\n"
+    "def _draw():\n"
+    "    cls(1)\n"
+)
+
+
+def test_evil_str_cart_does_not_escape_frame(tmp_path):
+    ws = _make_ws_with_cart(tmp_path, _EVIL_SRC)
+    assert ws.screen == "desktop"
+    for _ in range(5):
+        ws.frame(1 / 30)                  # MUST NOT raise (incl. the print path)
+    assert ws.cart_error is not None      # panel text was still produced via _err_text
+    assert "Evil" in ws.cart_error        # the type name survives even when __str__ dies
+    # The broken cart was stopped so it isn't re-run every frame.
+    assert ws._update is None and ws._draw is None
+
+
+def test_evil_str_cart_at_start_does_not_escape(tmp_path):
+    # The same hostile exception, but raised in _init during _start(): open() must
+    # land on the desktop with a panel, never propagate out of _start's print.
+    ws = _make_ws_with_cart(tmp_path, _EVIL_AT_START_SRC)   # open() runs _start()
+    assert ws.screen == "desktop"
+    assert ws.cart_error is not None and "Evil" in ws.cart_error
+    for _ in range(3):
+        ws.frame(1 / 30)                  # must not raise
+
+
+# -- (f) [MAJOR] fixing a crashed cart + SAVE clears the stale panel --------
+
+def test_fix_and_save_clears_stale_crash_panel_and_reruns(tmp_path):
+    from runtime import kid_carts
+    ws = _make_ws_with_cart(tmp_path, "def _draw():\n    raise ValueError('boom')\n",
+                            title="Fixable")
+    path = ws.cart["path"]
+
+    ws.frame(1 / 30)                      # crash -> panel set, cart stopped
+    assert ws.cart_error is not None and ws._draw is None
+
+    # Open the code editor, fix the source, and hit SAVE (not RUN).
+    ws.set_menu_view("code")
+    ws.screen = "menu"
+    ws.editor.set_text("def _draw():\n    cls(7)\n")
+    assert ws.save_code() is True
+    assert ws.cart_error is None          # SAVE_OK cleared the stale crash text
+    assert ws.save_status == "SAVED"
+    assert "cls(7)" in kid_carts.load(path)["src"]
+
+    # Closing the editor (the X button) returns to the desktop and the FIXED cart
+    # actually runs again -- _draw is re-bound, no leftover panel.
+    ws._leave_menu()
+    assert ws.screen == "desktop"
+    assert ws.cart_error is None
+    assert ws._draw is not None           # re-_start() rebound the (now valid) cart
+    for _ in range(3):
+        ws.frame(1 / 30)                  # runs clean, no panel
+    assert ws.cart_error is None
+
+
+def test_save_sprites_failure_surfaces_error(tmp_path, monkeypatch):
+    # A failed sprite save must set save_status/cart_error (visible on device),
+    # mirroring save_code -- not fail silently.
+    ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(1)\n", title="Sprites")
+    assert ws.sheet is not None
+    ws.sheet.dirty = True
+
+    def _boom(cart, hexs):
+        raise OSError("disk full")
+    monkeypatch.setattr(ws.carts_store, "save_sprites", _boom)
+    ws.save_sprites()
+    assert ws.save_status == "SAVE FAILED"
+    assert ws.cart_error is not None and "sprites" in ws.cart_error.lower()
+    assert ws.sheet.dirty is True         # not marked clean on failure
+
+
+# -- (g) [MAJOR] atomic-write crash window is recoverable via .bak ----------
+
+def test_crash_between_renames_is_recoverable_via_bak(tmp_path, monkeypatch):
+    # Simulate a crash AFTER the good file is moved to .bak but BEFORE .tmp is
+    # published: there is no main.py on disk, only main.py.bak. load() must heal.
+    from runtime import kid_carts
+    root = str(tmp_path / "carts")
+    kid_carts.ensure_dirs(root)
+    good = "def _draw():\n    cls(1)  # GOOD\n"
+    c = kid_carts.create("Crashy", root, src=good, type="app")
+    path = c["path"]
+    main = Path(path) / "main.py"
+
+    # Make the SECOND rename (tmp -> path) "crash" mid-_write_atomic.
+    real_rename = kid_carts.os.rename
+    calls = {"n": 0}
+
+    def flaky_rename(src, dst):
+        calls["n"] += 1
+        if calls["n"] == 2:               # path->bak ran; now blow up the tmp->path swap
+            raise KeyboardInterrupt("power lost")
+        return real_rename(src, dst)
+
+    monkeypatch.setattr(kid_carts.os, "rename", flaky_rename)
+    try:
+        kid_carts.save_code(c, "def _draw():\n    cls(2)  # NEW\n")
+    except KeyboardInterrupt:
+        pass
+    monkeypatch.setattr(kid_carts.os, "rename", real_rename)
+
+    # The damage we expect: main.py is gone, only main.py.bak (the GOOD copy) remains.
+    assert not main.exists()
+    assert (Path(path) / "main.py.bak").exists()
+
+    # load() must NOT return None here -- it heals from .bak.
+    loaded = kid_carts.load(path)
+    assert loaded is not None
+    assert "GOOD" in loaded["src"]        # recovered the last-known-good source
+    assert main.exists()                  # and republished it on disk
+    assert "GOOD" in main.read_text()
+
+
+# -- (h) [MAJOR] rename-unsupported fallback keeps the data -----------------
+
+def test_rename_unsupported_fallback_keeps_data(tmp_path, monkeypatch):
+    # On a FAT VFS where os.rename raises, _write_atomic must fall back to copy and
+    # NEVER delete the good file before publishing -> no data loss.
+    from runtime import kid_carts
+    root = str(tmp_path / "carts")
+    kid_carts.ensure_dirs(root)
+    good = "def _draw():\n    cls(1)  # OLD\n"
+    c = kid_carts.create("NoRename", root, src=good, type="app")
+    path = c["path"]
+    main = Path(path) / "main.py"
+
+    def no_rename(src, dst):
+        raise OSError("rename not supported on FAT")
+    monkeypatch.setattr(kid_carts.os, "rename", no_rename)
+
+    status, msg = kid_carts.save_code(c, "def _draw():\n    cls(2)  # NEW\n")
+    assert status == kid_carts.SAVE_OK
+    # The new bytes published via copy; the real file is present and correct.
+    assert main.exists() and "NEW" in main.read_text()
+    # No orphan tmp survives the fallback.
+    assert not (Path(path) / "main.py.tmp").exists()
+    # And load() reads the new content.
+    assert "NEW" in kid_carts.load(path)["src"]
+
+
+def test_rename_unsupported_keeps_path_if_publish_copy_fails(tmp_path, monkeypatch):
+    # Even when BOTH os.rename and the publish copy fail, the original good file
+    # must remain (the old code did _remove(path) first -> total loss). We never
+    # delete path early, so the data is always still recoverable.
+    from runtime import kid_carts
+    root = str(tmp_path / "carts")
+    kid_carts.ensure_dirs(root)
+    good = "def _draw():\n    cls(1)  # KEEPME\n"
+    c = kid_carts.create("Keep", root, src=good, type="app")
+    main_path = c["path"] + "/main.py"
+    main = Path(main_path)
+
+    monkeypatch.setattr(kid_carts.os, "rename",
+                        lambda s, d: (_ for _ in ()).throw(OSError("no rename")))
+    # Make the publish copy (tmp -> the real main.py) fail too -- the worst case.
+    real_copy = kid_carts._copy
+
+    def boom_copy(src, dst):
+        if dst == main_path:              # only the publish copy of main.py blows up
+            raise OSError("write failed")
+        return real_copy(src, dst)
+    monkeypatch.setattr(kid_carts, "_copy", boom_copy)
+
+    try:
+        kid_carts.save_code(c, "def _draw():\n    cls(2)\n")
+    except OSError:
+        pass
+    monkeypatch.setattr(kid_carts, "_copy", real_copy)
+
+    # path was never deleted before publishing -> the original good file is intact.
+    assert main.exists() and "KEEPME" in main.read_text()
+    # And load() still returns the last-known-good cart (no data loss).
+    loaded = kid_carts.load(c["path"])
+    assert loaded is not None and "KEEPME" in loaded["src"]
+
+
+# -- (i) [MINOR] orphan .tmp is cleaned on a partial/failed write -----------
+
+def test_orphan_tmp_cleaned_on_failed_write(tmp_path, monkeypatch):
+    from runtime import kid_carts
+    root = str(tmp_path / "carts")
+    kid_carts.ensure_dirs(root)
+    c = kid_carts.create("Tmp", root, src="def _draw():\n    cls(1)\n", type="app")
+    path = c["path"]
+
+    # Force the tmp write to fail (e.g. ENOSPC) AFTER it would have created the file.
+    real_write = kid_carts._write
+
+    def failing_write(p, data):
+        if p.endswith(".tmp"):
+            real_write(p, data[: len(data) // 2])   # partial bytes land...
+            raise OSError("ENOSPC")                  # ...then the write dies
+        return real_write(p, data)
+    monkeypatch.setattr(kid_carts, "_write", failing_write)
+
+    try:
+        kid_carts.save_code(c, "def _draw():\n    cls(2)\n")
+    except OSError:
+        pass
+    monkeypatch.setattr(kid_carts, "_write", real_write)
+
+    assert not (Path(path) / "main.py.tmp").exists()   # orphan cleaned up
+    # The original file is untouched (the failure happened before any swap).
+    assert "cls(1)" in (Path(path) / "main.py").read_text()
+
+
+def test_save_shared_sheet_is_atomic(tmp_path):
+    from runtime import kid_carts
+    root = str(tmp_path / "carts")
+    kid_carts.ensure_dirs(root)
+    kid_carts.save_shared_sheet("0011\n2233\n", root)
+    assert kid_carts.load_shared_sheet(root).startswith("0011")
+    # _write_atomic used -> no orphan tmp left behind beside the sheet.
+    sheet = Path(kid_carts.shared_sheet_path(root))
+    assert not Path(str(sheet) + ".tmp").exists()
+    # A second save keeps a .bak of the previous version (recoverable).
+    kid_carts.save_shared_sheet("4455\n", root)
+    assert kid_carts.load_shared_sheet(root).startswith("4455")
+    assert Path(str(sheet) + ".bak").read_text().startswith("0011")

@@ -349,8 +349,11 @@ class Workstation:
         except Exception as exc:  # noqa: BLE001
             # The device's native run loop starves USB, so a print() never reaches
             # serial -- stash the failure so frame() can paint an on-canvas panel.
+            # Print only the _err_text-guarded string, never the raw `exc`: a cart
+            # exception whose __str__ itself raises would otherwise escape here and
+            # become the exact silent device hang the panel exists to prevent.
             self.cart_error = _err_text(exc)
-            print("KidCode cart error:", exc)
+            print("KidCode cart error:", self.cart_error)
             return False
         self.cart_error = None
         self.ns = ns
@@ -419,6 +422,14 @@ class Workstation:
 
     def _leave_menu(self):
         self._set_text_mode(False)
+        # Returning to the desktop from the code editor must run whatever source is
+        # in the editor now (the kid may have fixed a crash and hit SAVE, or just
+        # edited and closed). Re-_start() with the editor text so the FIXED cart
+        # actually runs -- otherwise a previously-set cart_error would re-paint the
+        # stale "crashed" panel and _update/_draw would stay None forever.
+        if self.menu_view == "code" and self.editor is not None and self.cart is not None:
+            self.cart["src"] = self.editor.text()
+            self._start()
         self.screen = "desktop"
 
     def _editor_input(self):
@@ -451,18 +462,25 @@ class Workstation:
             self.save_status = None             # nothing to persist, but src is valid
             return True
         try:
-            status = self._with_sd(lambda: self.carts_store.save_code(self.cart, src))
-            if isinstance(status, tuple) and status[0] != self.carts_store.SAVE_OK:
-                self.save_status = "SAVE FAILED " + str(status[1])
-                self.cart_error = "Could not save -- " + str(status[1])
+            # kid_carts.save_code always returns a (status, message) 2-tuple.
+            status, smsg = self._with_sd(lambda: self.carts_store.save_code(self.cart, src))
+            if status != self.carts_store.SAVE_OK:
+                self.save_status = "SAVE FAILED " + str(smsg)
+                self.cart_error = "Could not save -- " + str(smsg)
                 return False
             self.editor.dirty = False
             self.save_status = "SAVED"
+            # A successful save means the source now compiles and persisted: clear
+            # any stale crash text so returning to the desktop re-runs the fixed
+            # cart instead of re-painting the old "crashed" panel. (run_code/the
+            # _leave_menu re-_start() then actually re-exec it.)
+            self.cart_error = None
             return True
         except Exception as exc:  # noqa: BLE001
+            txt = _err_text(exc)
             self.save_status = "SAVE FAILED"
-            self.cart_error = "Could not save -- " + _err_text(exc)
-            print("KidCode save code failed:", exc)
+            self.cart_error = "Could not save -- " + txt
+            print("KidCode save code failed:", txt)
             return False
 
     def run_code(self):
@@ -487,8 +505,15 @@ class Workstation:
         try:
             self._with_sd(lambda: self.carts_store.save_sprites(self.cart, hexs))
             self.sheet.dirty = False
+            self.save_status = "SAVED"
         except Exception as exc:  # noqa: BLE001
-            print("KidCode save sprites failed:", exc)
+            # Mirror the save_code contract: a failed sprite save must be VISIBLE on
+            # device (no serial in the run loop), not silent. _err_text-guarded so a
+            # weird exception's __str__ can't itself escape this handler.
+            txt = _err_text(exc)
+            self.save_status = "SAVE FAILED"
+            self.cart_error = "Could not save sprites -- " + txt
+            print("KidCode save sprites failed:", txt)
 
     def apply(self):
         # Re-run with the new config. Always return to the desktop: on success it
@@ -931,7 +956,11 @@ class Workstation:
                     self.cart_error = _err_text(exc)
                     self._update = None
                     self._draw = None
-                    print("KidCode frame error:", exc)
+                    # Print the _err_text-guarded string, never the raw `exc`: a
+                    # cart exception whose __str__ itself raises would otherwise
+                    # escape frame() here -> the silent device hang the panel
+                    # exists to prevent.
+                    print("KidCode frame error:", self.cart_error)
             if self.cart_error is not None:
                 self._draw_error_panel()
             self._draw_desktop_buttons()
