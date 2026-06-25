@@ -2,33 +2,18 @@
 # stars. With no input it auto-plays (attract mode), so it's lively in the
 # simulator GIF; pressing a key takes over. Same runtime as the wallpaper -- a
 # game is just another cartridge.
+#
+# The CATCHER is a real sprite-sheet tile (id 0 = frog, id 1 = robot, both
+# editable in the paint editor). The "Make it mine" CATCHER card is a sprite-tile
+# picker: tap the frog or the robot to choose -- no reading required.
 
 BW = 48          # catcher width
 BH = 14
+SPR_SCALE = 4    # the 8x8 catcher tile is drawn at 4x (32x32)
 score = 0
 bx = 0.0
+catcher = 0      # the chosen catcher sprite tile id
 stars = []
-catcher = None
-
-FROG = [
-    ".GG...GG.",
-    "GWGGGGGWG",
-    "GGGGGGGGG",
-    "GGKGGGKGG",
-    ".GGGGGGG.",
-]
-ROBOT = [
-    ".LLLLL.",
-    "LKOKOKL",
-    "LLLLLLL",
-    ".L...L.",
-]
-
-
-def _make_catcher(kind):
-    if kind == "robot":
-        return image(ROBOT, {"L": col("light_grey"), "O": col("red"), "K": col("black")})
-    return image(FROG, {"G": col("green"), "W": col("white"), "K": col("black")})
 
 
 def _spawn(s):
@@ -46,7 +31,11 @@ def _init():
         s = [0, 0, 0]
         _spawn(s)
         stars.append(s)
-    catcher = _make_catcher(cfg("basket", "frog"))
+    b = cfg("basket", 0)                   # tile id (tolerate a stale string config)
+    try:
+        catcher = int(b)
+    except (TypeError, ValueError):
+        catcher = 1 if b == "robot" else 0
 
 
 def _nearest_star():
@@ -87,5 +76,6 @@ def _draw():
     by = H - 24 - BH
     rect(0, H - 24, W, 24, col("dark_blue"))     # floor
     rect(int(bx), by, BW, BH, col("brown"))      # basket
-    spr(catcher, int(bx) + BW // 2 - 18, by - 18, scale=4)
+    spr(catcher, int(bx) + BW // 2 - 8 * SPR_SCALE // 2, by - 8 * SPR_SCALE,
+        -1, SPR_SCALE)                            # catcher tile (frog/robot)
     print("SCORE " + str(score), 10, 10, col("white"), 3)

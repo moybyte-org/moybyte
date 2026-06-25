@@ -583,9 +583,93 @@ class Workstation:
         f = self.cart["edit"][i]
         v = self.config.get(f["key"], f.get("default"))
         if f["type"] == "choice":
-            v = str(v).replace("_", " ").upper()
+            v = self._choice_label(f, v)
         t = f.get("card")
         return t.replace("{value}", str(v)) if t else "%s: %s" % (f["key"].upper(), v)
+
+    # -- visual ("display") cards (#15) --------------------------------------
+    #
+    # A card field MAY carry an optional `display` hint -- "gauge" | "count" |
+    # "choice-icons" | "sprite-tiles" -- that draws the VALUE as a picture a kid
+    # who can't read can recognize, with the number/word kept as a small SECONDARY
+    # cue. When `display` is absent the card renders exactly as before (one text
+    # line), so every existing cart keeps working untouched.
+
+    _DISPLAYS = ("gauge", "count", "choice-icons", "sprite-tiles", "bg-thumbs")
+    _CELL_DISPLAYS = ("choice-icons", "sprite-tiles", "bg-thumbs")
+
+    def _card_display(self, f):
+        d = f.get("display")
+        return d if d in self._DISPLAYS else None
+
+    def _choice_label(self, f, v):
+        """A short readable label for a choice value -- a kid-friendly word for a
+        string choice, or just the id for tile/number choices."""
+        if isinstance(v, str):
+            return v.replace("_", " ").upper()
+        return str(v)
+
+    def _choice_index(self, f, cur):
+        ch = f["choices"]
+        return ch.index(cur) if cur in ch else 0
+
+    def _resolve_tiles(self, f):
+        """For a `sprite-tiles` field, the list of sprite tile ids its choices map
+        to. `choices` may be ints (tile ids directly) or names paired with a
+        parallel `tiles` list. Returns ints; non-resolvable entries become 0."""
+        tiles = f.get("tiles")
+        if tiles:
+            return [int(t) for t in tiles]
+        out = []
+        for c in f.get("choices", []):
+            try:
+                out.append(int(c))
+            except (TypeError, ValueError):
+                out.append(0)
+        return out
+
+    def _card_height(self, f):
+        d = self._card_display(f)
+        if d in ("sprite-tiles", "bg-thumbs"):
+            return 44
+        if d in ("gauge", "count", "choice-icons"):
+            return 32
+        return _CARD_H
+
+    def _card_layout(self):
+        """Pure (no-draw) per-card geometry so draw and hit-test agree. Returns a
+        list of dicts: {i, f, display, x, y, w, h}, laid out top-down from
+        _CARD_Y0 with a per-card height that depends on its display type."""
+        rows = []
+        y = _CARD_Y0
+        for i, f in enumerate(self.cart["edit"]):
+            h = self._card_height(f)
+            rows.append({"i": i, "f": f, "display": self._card_display(f),
+                         "x": _CARD_X, "y": y, "w": _CARD_W, "h": h})
+            y += h + 2
+        return rows
+
+    def _choice_cells(self, row):
+        """Tappable cells for a choice-icons / sprite-tiles card: one box per
+        choice, laid out left-to-right under the label. Returns a list of
+        (choice_index, cell_rect)."""
+        f = row["f"]
+        n = len(f.get("choices", []))
+        if n <= 0:
+            return []
+        if row["display"] == "bg-thumbs":
+            cw, ch = 40, 26                # wide thumbnails for background previews
+        elif row["display"] == "sprite-tiles":
+            cw = ch = 26
+        else:
+            cw = ch = 22
+        gap = 4
+        x0 = row["x"] + 4
+        top = row["y"] + 12
+        cells = []
+        for k in range(n):
+            cells.append((k, (x0 + k * (cw + gap), top, cw, ch)))
+        return cells
 
     def handle_input(self):
         i = self.input
@@ -706,11 +790,26 @@ class Workstation:
         self._autoscroll = 0
 
     def _card_at(self, px, py):
-        for i in range(len(self.cart["edit"])):
-            y = _CARD_Y0 + i * _CARD_DY
-            if _CARD_X <= px < _CARD_X + _CARD_W and y <= py < y + _CARD_H:
-                return i
+        for row in self._card_layout():
+            if _in(px, py, (row["x"], row["y"], row["w"], row["h"])):
+                return row["i"]
         return None
+
+    def _card_tap(self, px, py, ci):
+        """Apply a tap inside card `ci`. For an icon/sprite picker, tapping a
+        specific choice cell SETS that choice (no scrolling needed -- a kid taps
+        the picture they want). Otherwise the card is a -/+ stepper: the left half
+        decrements, the right half increments (matching the on-card glyphs)."""
+        for row in self._card_layout():
+            if row["i"] != ci:
+                continue
+            if row["display"] in self._CELL_DISPLAYS:
+                for k, cell in self._choice_cells(row):
+                    if _in(px, py, cell):
+                        self.config[row["f"]["key"]] = row["f"]["choices"][k]
+                        return
+            self.adjust(-1 if px < _CARD_X + _CARD_W // 2 else 1)
+            return
 
     def handle_pointer(self):
         p = self.pointer
@@ -760,7 +859,7 @@ class Workstation:
                 elif _in(px, py, _CLOSE_BTN):
                     self._leave_menu()
                 elif ci is not None:
-                    self.adjust(-1 if px < _CARD_X + _CARD_W // 2 else 1)
+                    self._card_tap(px, py, ci)
 
     def nav(self, dx, dy):
         # Directional input (host arrows / device trackball). In the code editor it
@@ -858,14 +957,26 @@ class Workstation:
         cv.rectb(x, y, w, h, NAMES["white"])
         cv.print(label, x + 6, y + (h - 8) // 2, NAMES["black"], 2)
 
+    def _icon_btn(self, kind, label, rect, fill):
+        """A button that leads with an icon glyph (pre-literate) and keeps the
+        word as a small secondary cue beside it -- so a reader still gets the
+        label and a kid who can't read still gets the picture."""
+        x, y, w, h = rect
+        cv = self.canvas
+        cv.rect(x, y, w, h, fill)
+        cv.rectb(x, y, w, h, NAMES["white"])
+        self._glyph(kind, (x + 2, y, 16, h), NAMES["black"])
+        if label:
+            cv.print(label, x + 19, y + (h - 8) // 2, NAMES["black"], 1)
+
     def _draw_desktop_buttons(self):
-        # Carts with a Make-it-mine schema open the cards menu; the rest jump
-        # straight to the code editor -- label the button to match. (cart may be
-        # None defensively if an error panel is up with no open cart.)
+        # Carts with a Make-it-mine schema open the cards menu (pencil = EDIT); the
+        # rest jump straight to the code editor (same glyph -- both are "change me").
+        # (cart may be None defensively if an error panel is up with no open cart.)
         has_edit = bool(self.cart.get("edit")) if self.cart else False
-        self._btn("EDIT" if has_edit else "CODE", _MENU_BTN, NAMES["dark_purple"])
-        self._btn("PAINT", _PAINT_BTN, NAMES["orange"])
-        self._btn("HOME", _HOME_BTN, NAMES["dark_grey"])
+        self._icon_btn("edit", "EDIT" if has_edit else "CODE", _MENU_BTN, NAMES["dark_purple"])
+        self._icon_btn("paint", "PAINT", _PAINT_BTN, NAMES["orange"])
+        self._icon_btn("home", "HOME", _HOME_BTN, NAMES["dark_grey"])
 
     def _draw_error_panel(self):
         # A friendly on-canvas crash report (the device never reaches serial, so
@@ -893,18 +1004,138 @@ class Workstation:
         cv = self.canvas
         cv.rect(20, 16, 280, 206, NAMES["dark_purple"])
         cv.rectb(20, 16, 280, 206, NAMES["pink"])
-        cv.print("MAKE IT MINE", 30, 22, NAMES["white"], 2)
-        for i in range(len(self.cart["edit"])):
-            y = _CARD_Y0 + i * _CARD_DY
-            if i == self.msel:
-                cv.rect(_CARD_X, y - 1, _CARD_W, _CARD_H, NAMES["indigo"])
-            cv.print("-", _CARD_X + 4, y, NAMES["yellow"], 2)
-            cv.print(self.card_text(i), _CARD_X + 22, y,
-                     NAMES["white"] if i == self.msel else NAMES["light_grey"], 2)
-            cv.print("+", _CARD_X + _CARD_W - 12, y, NAMES["yellow"], 2)
-        self._btn("RUN", _RUN_BTN, NAMES["green"])
-        self._btn("CODE", _CODE_BTN, NAMES["blue"])
-        self._btn("CLOSE", _CLOSE_BTN, NAMES["red"])
+        self._glyph("edit", (28, 20, 14, 14), NAMES["yellow"])   # pencil = "make it yours"
+        cv.print("MAKE IT MINE", 46, 22, NAMES["white"], 2)
+        for row in self._card_layout():
+            self._draw_card(row)
+        self._icon_btn("run", "GO", _RUN_BTN, NAMES["green"])
+        self._icon_btn("edit", "CODE", _CODE_BTN, NAMES["blue"])
+        self._icon_btn("close", "", _CLOSE_BTN, NAMES["red"])
+
+    def _draw_card(self, row):
+        cv = self.canvas
+        i, f = row["i"], row["f"]
+        x, y, w, h = row["x"], row["y"], row["w"], row["h"]
+        sel = (i == self.msel)
+        if sel:
+            cv.rect(x, y - 1, w, h, NAMES["indigo"])
+        fg = NAMES["white"] if sel else NAMES["light_grey"]
+        disp = row["display"]
+        if disp is None:                                # today's plain text card
+            self._glyph("minus", (x, y, 14, 14), NAMES["yellow"])
+            cv.print(self.card_text(i), x + 18, y, fg, 2)
+            self._glyph("plus", (x + w - 14, y, 14, 14), NAMES["yellow"])
+            return
+        # Visual card: a small label line (the SECONDARY text cue) + a picture row.
+        cv.print(self.card_text(i), x + 2, y, fg, 1)
+        if disp == "gauge":
+            self._draw_gauge(row)
+        elif disp == "count":
+            self._draw_count(row)
+        elif disp == "bg-thumbs":
+            self._draw_bg_thumbs(row)
+        elif disp in ("choice-icons", "sprite-tiles"):
+            self._draw_choice_icons(row)
+
+    def _draw_gauge(self, row):
+        # A slow->fast slider: a turtle at the low end, a rabbit at the high end,
+        # a track filled to the value's fraction, and a knob. Tap left/right of the
+        # card to step it (the -/+ contract is preserved by _card_tap).
+        cv = self.canvas
+        f = row["f"]
+        x, y, w = row["x"], row["y"], row["w"]
+        lo = f.get("min", 0)
+        hi = f.get("max", lo + 1)
+        cur = self.config.get(f["key"], f.get("default", lo))
+        try:
+            frac = (float(cur) - lo) / (hi - lo) if hi > lo else 0.0
+        except (TypeError, ValueError):
+            frac = 0.0
+        frac = max(0.0, min(1.0, frac))
+        ends = f.get("gauge", {}) if isinstance(f.get("gauge"), dict) else {}
+        ty = y + 18
+        tx0 = x + 18
+        tx1 = x + w - 18
+        tw = tx1 - tx0
+        self._glyph(ends.get("low", "turtle"), (x, ty - 6, 16, 14), NAMES["green"])
+        self._glyph(ends.get("high", "rabbit"), (x + w - 16, ty - 6, 16, 14), NAMES["peach"])
+        cv.rect(tx0, ty, tw, 3, NAMES["dark_grey"])                 # track
+        cv.rect(tx0, ty, int(tw * frac), 3, NAMES["yellow"])        # filled portion
+        kx = tx0 + int(tw * frac)
+        cv.rect(kx - 1, ty - 3, 3, 9, NAMES["white"])               # knob
+
+    def _draw_count(self, row):
+        # N repeated icons == the value, so a count reads at a glance. Capped so a
+        # big number stays one tidy row; the number itself is the label cue above.
+        f = row["f"]
+        x, y, w = row["x"], row["y"], row["w"]
+        cur = self.config.get(f["key"], f.get("default", 0))
+        try:
+            n = int(cur)
+        except (TypeError, ValueError):
+            n = 0
+        glyph = f.get("icon", "star")
+        cap = int(f.get("count_max", min(f.get("max", 12), 14)))
+        shown = max(0, min(n, cap))
+        step = 16
+        per_row = max(1, (w - 4) // step)
+        for k in range(shown):
+            gx = x + 2 + (k % per_row) * step
+            gy = y + 14 + (k // per_row) * 14
+            self._glyph(glyph, (gx, gy, 14, 14), NAMES["yellow"])
+
+    def _draw_choice_icons(self, row):
+        # Each choice is its own tappable cell -- a glyph (choice-icons) or a real
+        # sprite tile from the cart sheet (sprite-tiles). The current pick is boxed.
+        cv = self.canvas
+        f = row["f"]
+        cur = self.config.get(f["key"], f.get("default"))
+        sel_k = self._choice_index(f, cur)
+        tiles = self._resolve_tiles(f) if row["display"] == "sprite-tiles" else None
+        icons = f.get("icons") or []
+        for k, (cx, cy, cw, ch) in self._choice_cells(row):
+            chosen = (k == sel_k)
+            cv.rect(cx, cy, cw, ch, NAMES["black"] if chosen else NAMES["dark_purple"])
+            cv.rectb(cx, cy, cw, ch, NAMES["yellow"] if chosen else NAMES["dark_grey"])
+            if tiles is not None and self.sheet is not None:
+                img = self.sheet.tile_image(tiles[k] if k < len(tiles) else 0, -1)
+                if img is not None:
+                    self.canvas.spr(img, cx + (cw - 16) // 2, cy + (ch - 16) // 2, 2)
+            else:
+                glyph = icons[k] if k < len(icons) else "dot"
+                self._glyph(glyph, (cx + (cw - 14) // 2, cy + (ch - 14) // 2, 14, 14),
+                            NAMES["white"])
+
+    # A few named background presets, each a tiny "what the screen will look like"
+    # thumbnail. A cart reads the chosen name in cfg("bg") and paints to match
+    # (e.g. _bg(name) at the top of _draw). New presets just add a clause here.
+    _BG_PRESETS = ("black", "dark_blue", "night", "stripes")
+
+    def _draw_bg_thumb(self, name, rect):
+        """Paint a small preview of background preset `name` inside `rect`."""
+        cv = self.canvas
+        x, y, w, h = rect
+        if name == "night":                              # starfield
+            cv.rect(x, y, w, h, NAMES["black"])
+            for sx, sy in ((4, 4), (14, 9), (24, 5), (30, 15), (9, 17), (20, 12)):
+                cv.pix(x + sx, y + sy, NAMES["white"])
+        elif name == "stripes":
+            for i in range(0, w, 6):
+                cv.rect(x + i, y, 3, h, NAMES["indigo"])
+                cv.rect(x + i + 3, y, 3, h, NAMES["dark_blue"])
+        else:                                            # a solid color swatch
+            cv.rect(x, y, w, h, NAMES.get(name, NAMES["black"]))
+
+    def _draw_bg_thumbs(self, row):
+        # Each choice is a tappable thumbnail of the resulting background (#15 P3).
+        cv = self.canvas
+        f = row["f"]
+        cur = self.config.get(f["key"], f.get("default"))
+        sel_k = self._choice_index(f, cur)
+        for k, (cx, cy, cw, ch) in self._choice_cells(row):
+            self._draw_bg_thumb(f["choices"][k], (cx + 1, cy + 1, cw - 2, ch - 2))
+            cv.rectb(cx, cy, cw, ch,
+                     NAMES["yellow"] if k == sel_k else NAMES["dark_grey"])
 
     def _draw_code(self):
         cv = self.canvas
@@ -941,24 +1172,74 @@ class Workstation:
             cv.print(_CODE_SYMBOLS[i], x + 6, _SYM_Y + 6, NAMES["white"], 1)
 
     def _draw_icon(self, kind, rect):
+        # A glyph on its own colored button background -- the code-editor top bar
+        # (run/save/close). The pure glyph vocabulary lives in _glyph(); this just
+        # paints a backing box of a sensible color, then the glyph on top.
+        bg = {"run": "green", "save": "blue", "close": "red"}.get(kind, "dark_grey")
+        x, y, w, h = rect
+        self.canvas.rect(x, y, w, h, NAMES[bg])
+        self._glyph(kind, rect, NAMES["black"] if kind == "run" else NAMES["white"])
+
+    def _glyph(self, kind, rect, c):
+        """Draw an icon glyph (no background) centered in `rect`, in color `c`.
+        The shared pre-literate icon vocabulary -- composed from the indexed
+        primitives only (pix/line/rect/rectb/circ/circb), so it renders identically
+        on host and device. Unknown kinds draw NOTHING, so every caller can keep a
+        text label as the guaranteed fallback."""
         cv = self.canvas
         x, y, w, h = rect
-        if kind == "run":
-            cv.rect(x, y, w, h, NAMES["green"])         # play triangle
+        cx, cy = x + w // 2, y + h // 2
+        if kind == "run":                               # play triangle
             for i in range(6):
                 hh = 10 - 2 * i
                 if hh > 0:
-                    cv.rect(x + 4 + i, y + 2 + i, 1, hh, NAMES["black"])
-        elif kind == "save":
-            cv.rect(x, y, w, h, NAMES["blue"])          # down-arrow ("save")
-            cx = x + w // 2
-            cv.rect(cx, y + 2, 1, 6, NAMES["white"])
-            cv.line(x + 3, y + 6, cx, y + 10, NAMES["white"])
-            cv.line(x + w - 4, y + 6, cx, y + 10, NAMES["white"])
-        else:  # close
-            cv.rect(x, y, w, h, NAMES["red"])           # X
-            cv.line(x + 3, y + 3, x + w - 4, y + h - 4, NAMES["black"])
-            cv.line(x + w - 4, y + 3, x + 3, y + h - 4, NAMES["black"])
+                    cv.rect(x + (w - 8) // 2 + i, cy - 5 + i, 1, hh, c)
+        elif kind == "save":                            # down-into-tray arrow
+            cv.rect(cx, y + 2, 1, 6, c)
+            cv.line(x + 3, y + 6, cx, y + 10, c)
+            cv.line(x + w - 4, y + 6, cx, y + 10, c)
+        elif kind == "close":                           # X
+            cv.line(x + 3, y + 3, x + w - 4, y + h - 4, c)
+            cv.line(x + w - 4, y + 3, x + 3, y + h - 4, c)
+        elif kind == "edit":                            # pencil (diagonal + nib)
+            cv.line(x + 4, y + h - 5, x + w - 5, y + 4, c)
+            cv.line(x + 5, y + h - 5, x + w - 4, y + 5, c)
+            cv.rect(x + 2, y + h - 6, 3, 3, c)          # nib block
+        elif kind == "paint":                           # brush: handle + bristle
+            cv.line(cx + 5, y + 3, cx - 3, y + h - 6, c)
+            cv.rect(cx - 6, y + h - 7, 7, 5, c)         # bristle block
+        elif kind == "home":                            # house: roof + walls + door
+            for i in range(5):
+                cv.line(cx - i, cy - 4 + i, cx + i, cy - 4 + i, c)   # roof
+            cv.rectb(cx - 4, cy, 9, 6, c)               # walls
+            cv.rect(cx - 1, cy + 2, 3, 4, c)            # door
+        elif kind == "minus":
+            cv.rect(cx - 4, cy - 1, 9, 2, c)
+        elif kind == "plus":
+            cv.rect(cx - 4, cy - 1, 9, 2, c)
+            cv.rect(cx - 1, cy - 4, 2, 9, c)
+        elif kind == "turtle":                          # gauge low end (slow)
+            cv.circ(cx - 1, cy + 1, 3, c)               # shell
+            cv.rect(cx + 2, cy, 3, 2, c)                # head
+            cv.rect(cx - 5, cy + 3, 2, 2, c)            # foot
+        elif kind == "rabbit":                          # gauge high end (fast)
+            cv.circ(cx, cy + 1, 3, c)                   # body
+            cv.rect(cx - 1, cy - 5, 1, 4, c)            # ears
+            cv.rect(cx + 1, cy - 5, 1, 4, c)
+        elif kind == "star":                            # generic count token
+            cv.rect(cx - 3, cy, 7, 1, c)
+            cv.rect(cx, cy - 3, 1, 7, c)
+            cv.pix(cx - 2, cy - 2, c)
+            cv.pix(cx + 2, cy - 2, c)
+            cv.pix(cx - 2, cy + 2, c)
+            cv.pix(cx + 2, cy + 2, c)
+        elif kind == "dot":                             # generic count/choice token
+            cv.circ(cx, cy, 3, c)
+        elif kind == "heart":
+            cv.circ(cx - 2, cy - 1, 2, c)
+            cv.circ(cx + 2, cy - 1, 2, c)
+            for i in range(4):
+                cv.line(cx - 3 + i, cy + i, cx + 3 - i, cy + i, c)
 
     def _draw_paint(self):
         cv = self.canvas

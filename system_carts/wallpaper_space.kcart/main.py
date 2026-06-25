@@ -61,8 +61,21 @@ def _update(dt):
         pet_dir = -pet_dir
 
 
+def _paint_bg(name):
+    # Match the "Make it mine" BG thumbnail presets: solid colors, a black
+    # "night" sky (the stars below make it a starfield), or indigo/blue stripes.
+    if name == "stripes":
+        for i in range(0, W, 24):
+            rect(i, 0, 12, H, col("indigo"))
+            rect(i + 12, 0, 12, H, col("dark_blue"))
+    elif name == "night":
+        cls(col("black"))
+    else:
+        cls(col(name))
+
+
 def _draw():
-    cls(col(cfg("bg", "dark_blue")))
+    _paint_bg(cfg("bg", "dark_blue"))
     for s in stars:
         pix(s[0], s[1], 7 if s[2] > 25 else 6)
     rect(0, H - 24, W, 24, col("dark_green"))   # ground
