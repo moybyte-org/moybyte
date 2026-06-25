@@ -37,13 +37,15 @@ TITLE_TO_FOLDER = {
     "Tiny Runner": "tiny_runner",
     "Hop Quest": "platformer",
     "Tap Only Red": "tap_red",
+    "Beeper": "beeper",
 }
 
 
 def _load_kid_runtime():
     # Mirror tests/test_micropython_spike.py::_load_kid_runtime: the device does
-    # `from editors import ...` / `from console import ...`, frozen from runtime/.
-    for name in ("editors", "console"):
+    # `from editors import ...` / `from audio import ...` / `from console import ...`,
+    # frozen from runtime/ (editors + audio first -- console imports both).
+    for name in ("editors", "audio", "console"):
         spec = importlib.util.spec_from_file_location(name, ROOT / "runtime" / (name + ".py"))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
@@ -92,6 +94,21 @@ def test_embedded_sprites_match_sheet_or_both_absent():
             assert cart["sprites"]                              # non-empty
         else:
             assert "sprites" not in cart, folder + " has no sheet but embeds one"
+
+
+def test_embedded_sounds_match_sounds_json_or_both_absent():
+    # The audio bank (#16) mirrors system_carts/<cart>/sounds.json byte-for-byte
+    # (parsed): the device seeds it from the embedded entry, so any drift fails here.
+    carts = _carts_by_title()
+    for title, cart in carts.items():
+        folder = TITLE_TO_FOLDER[title]
+        path = SYSTEM_CARTS / (folder + ".kcart") / "sounds.json"
+        if path.exists():
+            assert cart.get("sounds") == json.loads(path.read_text(encoding="utf-8")), \
+                "embedded sounds drifted from " + folder + "/sounds.json"
+            assert cart["sounds"]                               # non-empty
+        else:
+            assert "sounds" not in cart, folder + " has no sounds.json but embeds one"
 
 
 def test_embedded_edit_and_cfg_match_manifest():
