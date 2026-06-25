@@ -90,7 +90,7 @@ def _draw():
     show = not (2.7 < blink < 2.85)
     px = W // 2 - 16            # 8x8 tile drawn at 4x = 32px wide
     py = H - 26 - 36 + bob
-    spr(pet, px, py if show else py + 2, -1, 4)    # tile id from the cart sheet
+    spr(pet, px, py if show else py + 2, 0, 4)    # tile id from the cart sheet
     # mood word
     if mood > 60:
         word = "HAPPY"

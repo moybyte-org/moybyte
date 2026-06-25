@@ -128,7 +128,7 @@ def _draw():
         rect(int(o[0]), gy - o[2], o[1], o[2], col("green"))
         rectb(int(o[0]), gy - o[2], o[1], o[2], col("dark_green"))
     # hero (8x8 tile at 2x = 16px, from the cart sheet)
-    spr(hero, HERO_X, gy - HERO_H - int(hero_y), -1, 2)
+    spr(hero, HERO_X, gy - HERO_H - int(hero_y), 0, 2)
     print("SCORE " + str(int(score)), 8, 8, col("white"), 2)
     print("BEST " + str(best), 8, 24, col("yellow"), 1)
     print("UP=JUMP", W - 60, 8, col("light_grey"), 1)

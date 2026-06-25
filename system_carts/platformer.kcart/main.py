@@ -230,7 +230,7 @@ def _draw():
     rect(gx + 6, gy - 2, 2, TS + 2, col("white"))
     rect(gx + 8, gy, 8, 6, col(fc))
     # player: an editable 8x8 hero tile at 2x (16px), centered on the PWxPH box
-    spr(_hero_tile(), int(px) + PW // 2 - 8, int(py) + PH - 16, -1, 2)
+    spr(_hero_tile(), int(px) + PW // 2 - 8, int(py) + PH - 16, 0, 2)
     # HUD
     got = 0
     for c in coins:
