@@ -45,12 +45,21 @@ def make_api(canvas, input, config, sheet=None):
         if img is not None:
             canvas.spr(img, x, y, scale)
 
+    def touch():
+        # Pointer (mouse stands in for touch on the host) exposed to touch-driven
+        # carts: (x, y, tapped) this frame, or None when there is no pointer.
+        # `tapped` is the press edge so a cart scores at most one hit per tap.
+        p = getattr(input, "pointer", None)
+        if p is None:
+            return None
+        return (p.x, p.y, bool(p.click))
+
     return {
         "W": canvas.w, "H": canvas.h,
         "cls": canvas.cls, "pix": canvas.pix,
         "line": canvas.line, "rect": canvas.rect, "rectb": canvas.rectb,
         "circ": canvas.circ, "circb": canvas.circb, "spr": spr,
-        "print": canvas.print,
+        "print": canvas.print, "touch": touch,
         "btn": input.held, "btnp": input.pressed,
         "cfg": cfg, "col": palette.color,
         "rnd": lambda n=1.0: random.random() * n,
@@ -93,6 +102,7 @@ def build_workstation(carts_dir=None):
     ws.carts_root = carts_dir
     ws.can_manage = True
     ws.pointer = console.Pointer(WIDTH, HEIGHT)
+    inp.pointer = ws.pointer       # touch-driven carts read it via the api touch()
     return ws
 
 
