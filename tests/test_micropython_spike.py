@@ -356,6 +356,65 @@ def test_tdeck_keyboard_falls_back_when_raw_mode_is_ignored():
     assert not keyboard.raw_mode
 
 
+def test_tdeck_keyboard_set_game_mode_toggles_raw():
+    spec = importlib.util.spec_from_file_location(
+        "kidcode_firmware_input", ROOT / "modules" / "kidcode" / "input.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    writes = []
+
+    class FakeI2C:
+        def writeto(self, _addr, data):
+            writes.append(bytes(data))
+
+    kb = module.TDeckKeyboard.__new__(module.TDeckKeyboard)
+    kb.input = module.InputState()
+    kb.available = True
+    kb.raw_mode = False
+    kb._raw_unsupported = False
+    kb._i2c = FakeI2C()
+    kb._held_buttons = ()
+    kb._held_until_ms = 0
+    RAW = module.TDeckKeyboard.RAW_MODE_CMD
+    KEY = module.TDeckKeyboard.KEY_MODE_CMD
+
+    # Entering a cart -> raw matrix (0x03) for true hold-to-move.
+    kb.set_game_mode(True)
+    assert kb.raw_mode and writes == [RAW]
+
+    # Idempotent: no extra I2C traffic while already in the wanted mode.
+    kb.set_game_mode(True)
+    assert writes == [RAW]
+
+    # Opening the code editor -> back to 1-byte ASCII (0x04) so typing is clean.
+    kb.set_game_mode(False)
+    assert not kb.raw_mode and writes == [RAW, KEY]
+
+    # A board whose keyboard firmware ignored 0x03 sticks on ASCII: no more retries.
+    kb._raw_unsupported = True
+    kb.set_game_mode(True)
+    assert not kb.raw_mode and writes == [RAW, KEY]
+
+
+def test_device_canvas_uses_native_kc_gfx():
+    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    # The hot drawing ops go through the native kc_gfx kernel (fill/fill_rect/
+    # blit565) writing into the shared framebuffer, not the per-pixel Python loop,
+    # so complex carts stay fast.
+    assert "self._gfx = compositor.gfx()" in runtime
+    assert "self._gfx.fill(self._buf" in runtime          # cls
+    assert "self._gfx.fill_rect(self._buf" in runtime     # rect / circ
+    assert "self._gfx.blit565(self._buf" in runtime       # spr
+    # Sprites are cached as a pre-scaled RGB565 blit; sheet tiles reuse one Image
+    # across frames so the cache is built once, not rebuilt every frame.
+    assert "def _cache_rgb(self, img, scale):" in runtime
+    assert "tile_cache" in runtime
+    comp = (ROOT / "modules" / "kc_compositor.py").read_text(encoding="utf-8")
+    assert "def gfx(self):" in comp
+
+
 def _load_kid_runtime():
     # kid_runtime does `from editors import ...` and `from console import ...`; the
     # device freezes build-staged copies of runtime/editors.py and runtime/console.py
@@ -432,12 +491,18 @@ def test_code_editor_wired_into_device_shell():
     assert "ws.make_api = make_api" in runtime
     assert "ws.carts_store = kid_carts" in runtime
 
-    # The keyboard stays in 1-byte ASCII mode (raw matrix is never enabled -- it
-    # garbled editor text; verified via the keyboard probe).
-    assert "kb.raw_mode = False" in console
+    # The console flips the keyboard between ASCII (code editor: clean typing) and
+    # the raw matrix (running cart: true hold-to-move) on every screen change. It
+    # does NOT poke raw_mode directly or enable raw itself -- it asks the keyboard,
+    # which knows whether the firmware supports it.
+    assert "kb.set_game_mode(not on)" in console
     assert "kb._enable_raw_mode()" not in console
     inp = (ROOT / "modules" / "kidcode" / "input.py").read_text(encoding="utf-8")
-    assert "self._enable_raw_mode()" not in inp        # __init__ no longer enables it
+    assert "def set_game_mode(self, on):" in inp       # the per-screen mode toggle
+    # The editor/launcher must boot in ASCII -- __init__ never enables raw (raw is
+    # only entered later, via set_game_mode, once a cart is running).
+    init_src = inp.split("def __init__(self, input_state):", 1)[1].split("\n    def ", 1)[0]
+    assert "_enable_raw_mode" not in init_src
     assert "ws.keyboard = keyboard" in runtime
 
 
@@ -507,6 +572,66 @@ def test_device_spr_is_sheet_indexed_and_accepts_image():
     assert calls[-1] == (8, 8, 100, 60, 1)
     api["spr"](m.Image.from_ascii(["#"], {"#": 7}), 8, 9, scale=4)  # Image still works
     assert calls[-1] == (1, 1, 8, 9, 4)
+
+
+def test_sprite_sheet_pset_bumps_gen():
+    # pset bumps a generation counter so a running cart's tile cache can detect a
+    # sprite edit and rebuild (host/device parity for live sprite edits).
+    SpriteSheet = _load_kid_runtime().SpriteSheet
+    sh = SpriteSheet(4, 4)
+    assert sh.gen == 0
+    sh.pset(0, 0, 5)
+    assert sh.gen == 1
+    sh.pset(1, 0, 6)
+    assert sh.gen == 2
+    # An out-of-bounds pset is a no-op and must not bump gen.
+    sh.pset(-1, 0, 7)
+    sh.pset(sh.w, 0, 7)
+    assert sh.gen == 2
+    # tset routes through pset, so it bumps too.
+    sh.tset(0, 2, 2, 9)
+    assert sh.gen == 3
+
+
+def test_device_tile_cache_invalidated_on_sprite_edit():
+    # The device tile cache (and each Image's RGB565 blit cache) snapshots a tile's
+    # pixels. After a kid edits a sprite, the running cart must re-blit fresh art,
+    # not the stale cached Image. make_api watches the sheet's gen counter and
+    # clears the cache when it changes.
+    m = _load_kid_runtime()
+    sheet = m.SpriteSheet(4, 4)
+    sheet.tset(0, 0, 0, 3)
+    blitted = []
+
+    class StubCanvas:
+        w = 320
+        h = 240
+
+        def spr(self, img, x, y, scale=1):
+            blitted.append(img)
+
+        def __getattr__(self, name):
+            return lambda *a, **k: 0
+
+    class StubInput:
+        def held(self, name):
+            return False
+
+        def pressed(self, name):
+            return False
+
+    api = m.make_api(StubCanvas(), StubInput(), {}, sheet)
+    api["spr"](0, 0, 0)
+    first = blitted[-1]
+    # Same sheet, same id, no edit -> the cached Image is reused (object identity).
+    api["spr"](0, 0, 0)
+    assert blitted[-1] is first
+
+    # A paint edit bumps sheet.gen -> the cache is invalidated and a fresh Image
+    # (rebuilt from the new pixels) is blitted next frame.
+    sheet.pset(0, 0, 5)
+    api["spr"](0, 0, 0)
+    assert blitted[-1] is not first
 
 
 def test_device_sprite_storage_wired():

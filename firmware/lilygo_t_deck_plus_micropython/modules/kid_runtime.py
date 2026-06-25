@@ -30,6 +30,16 @@ PAL565 = (
     0x3F9E, 0x3D7E, 0x3B5E, 0x51FE, 0x91FE, 0xD9FE, 0xF1F8, 0xF1F0,
 )
 
+# RGB565 colour-key for native sprite blits: transparent sprite pixels are baked
+# to this value so kc_gfx.blit565 skips them. Magenta is absent from KID64; a
+# visible pixel that happens to equal it is nudged by one LSB when the cache is
+# built (see DeviceCanvas._cache_rgb), so it can never read as transparent.
+_RGB_KEY = 0xF81F
+
+# Flip to False to force the slow Python per-pixel drawing path (no native kc_gfx)
+# for an FPS A/B comparison against the native-blit build.
+_USE_GFX = True
+
 
 class Image:
     def __init__(self, width, height, pix, transparent=-1):
@@ -52,20 +62,38 @@ class Image:
 
 
 class DeviceCanvas:
-    """The kid drawing API, backed by a framebuf over the compositor buffer."""
+    """The kid drawing API. The hot ops (cls/rect/circ/spr) go through the native
+    kc_gfx C kernel writing straight into the compositor's RGB565 framebuffer --
+    this is what keeps complex carts off the slow per-pixel Python path. framebuf
+    over the same buffer still serves text/lines/pixels and is the fallback on an
+    image built without kc_gfx."""
 
     def __init__(self, compositor):
         import framebuf
 
         self._comp = compositor
         self.w, self.h = compositor.size()
-        self._fb = framebuf.FrameBuffer(compositor.framebuffer(), self.w, self.h, framebuf.RGB565)
+        self._buf = compositor.framebuffer()          # raw RGB565 bytearray (for kc_gfx)
+        self._fb = framebuf.FrameBuffer(self._buf, self.w, self.h, framebuf.RGB565)
+        self._gfx = compositor.gfx() if _USE_GFX else None   # native kernel, or None
 
     def _col(self, c):
         return PAL565[c & 63]
 
+    def _fill(self, x, y, w, h, col):
+        # Filled rect of a pre-resolved RGB565 colour; native (clamped in C) when
+        # kc_gfx is present, else framebuf. Shared by rect() and circ().
+        if self._gfx is not None:
+            self._gfx.fill_rect(self._buf, self.w, x, y, w, h, col)
+        else:
+            self._fb.fill_rect(x, y, w, h, col)
+
     def cls(self, c=0):
-        self._fb.fill(self._col(c))
+        col = self._col(c)
+        if self._gfx is not None:
+            self._gfx.fill(self._buf, self.w * self.h, col)
+        else:
+            self._fb.fill(col)
 
     def pix(self, x, y, c=None):
         # TIC-80 pix: read the index with two args, set it with three.
@@ -78,7 +106,7 @@ class DeviceCanvas:
 
     def rect(self, x, y, w, h, c):
         # TIC-80 rect = FILLED rectangle.
-        self._fb.fill_rect(int(x), int(y), int(w), int(h), self._col(c))
+        self._fill(int(x), int(y), int(w), int(h), self._col(c))
 
     def rectb(self, x, y, w, h, c):
         # TIC-80 rectb = rectangle outline.
@@ -90,7 +118,7 @@ class DeviceCanvas:
         col = self._col(c)
         for dy in range(-r, r + 1):
             span = int((r * r - dy * dy) ** 0.5)
-            self._fb.fill_rect(cx - span, cy + dy, 2 * span + 1, 1, col)
+            self._fill(cx - span, cy + dy, 2 * span + 1, 1, col)
 
     def circb(self, cx, cy, r, c):
         # TIC-80 circb = circle outline.
@@ -110,6 +138,51 @@ class DeviceCanvas:
 
     def spr(self, img, x, y, scale=1):
         x = int(x); y = int(y); scale = int(scale)
+        if scale < 1:
+            scale = 1
+        if self._gfx is None:
+            self._spr_py(img, x, y, scale)
+            return
+        # Blit a cached, pre-scaled RGB565 copy of the sprite in one C call. The
+        # cache lives on the Image (sheet tiles are reused across frames via the
+        # make_api tile cache, so the rebuild is once-per-sprite, not per-frame).
+        if getattr(img, "_rgb", None) is None or getattr(img, "_rgb_scale", 0) != scale:
+            self._cache_rgb(img, scale)
+        self._gfx.blit565(self._buf, self.w, self.h, x, y,
+                          img._rgb, img._rgb_w, img._rgb_h, _RGB_KEY)
+
+    def _cache_rgb(self, img, scale):
+        # Bake the indexed sprite into an RGB565 buffer at `scale`, transparent
+        # pixels set to _RGB_KEY so blit565 skips them. Built rarely (cached), so
+        # the per-pixel loop here is fine -- it's the per-frame blit that matters.
+        import framebuf
+
+        w = img.w * scale
+        h = img.h * scale
+        buf = bytearray(w * h * 2)
+        fb = framebuf.FrameBuffer(buf, w, h, framebuf.RGB565)
+        fb.fill(_RGB_KEY)
+        pal = PAL565
+        t = img.transparent
+        pix = img.pix
+        iw = img.w
+        for sy in range(img.h):
+            base = sy * iw
+            for sx in range(iw):
+                p = pix[base + sx]
+                if p == t or p < 0:
+                    continue
+                col = pal[p & 63]
+                if col == _RGB_KEY:
+                    col ^= 0x20          # nudge a visible pixel off the colour-key
+                fb.fill_rect(sx * scale, sy * scale, scale, scale, col)
+        img._rgb = buf
+        img._rgb_w = w
+        img._rgb_h = h
+        img._rgb_scale = scale
+
+    def _spr_py(self, img, x, y, scale):
+        # Per-pixel fallback when kc_gfx is absent (image built without it).
         fb = self._fb
         pal = PAL565
         t = img.transparent
@@ -128,6 +201,13 @@ class DeviceCanvas:
 def make_api(canvas, input, config, sheet=None):
     import random
 
+    tile_cache = {}        # (tile id, colorkey) -> Image, so a redrawn sheet sprite
+                           # reuses one Image (and its RGB565 blit cache) every frame
+                           # instead of rebuilding it. Invalidated when the sheet's
+                           # gen counter changes (a paint edit), so a live sprite edit
+                           # shows fresh art instead of stale cached pixels.
+    _cache_gen = [None]
+
     def cfg(key, default=None):
         return config.get(key, default)
 
@@ -139,9 +219,18 @@ def make_api(canvas, input, config, sheet=None):
             return canvas.spr(n, x, y, colorkey if colorkey != -1 else scale)
         if sheet is None:
             return
-        img = sheet.tile_image(int(n), colorkey)
-        if img is not None:
-            canvas.spr(img, x, y, scale)
+        g = getattr(sheet, "gen", 0)
+        if g != _cache_gen[0]:
+            tile_cache.clear()
+            _cache_gen[0] = g
+        ck = (int(n), colorkey)
+        img = tile_cache.get(ck)
+        if img is None:
+            img = sheet.tile_image(int(n), colorkey)
+            if img is None:
+                return
+            tile_cache[ck] = img
+        canvas.spr(img, x, y, scale)
 
     def touch():
         # GT911 pointer exposed to touch-driven carts: (x, y, tapped) this frame,
