@@ -8,48 +8,20 @@ food = 80.0
 joy = 80.0
 t = 0.0
 idle = 0.0
-pet = None
+pet = 0          # the chosen pet sprite tile (0 frog, 1 cat, 2 robot -- editable)
 bob = 0
 blink = 0.0
 
-# 9x8 pet faces, recolored per "kind". E=eye, M=mouth, .=transparent.
-FROG = [
-    ".BBBBBBB.",
-    "BBBBBBBBB",
-    "BEBBBBBEB",
-    "BBBBBBBBB",
-    "BBMMMMMBB",
-    "BBBBBBBBB",
-    ".BBBBBBB.",
-    "..B...B..",
-]
-CAT = [
-    "B.......B",
-    "BB.....BB",
-    "BBBBBBBBB",
-    "BEBBBBBEB",
-    "BBBBNBBBB",
-    "BBMMMMMBB",
-    ".BBBBBBB.",
-    "..BB.BB..",
-]
-ROBOT = [
-    "BBBBBBBBB",
-    "B.......B",
-    "B.E...E.B",
-    "B.......B",
-    "B.MMMMM.B",
-    "B.......B",
-    "BBBBBBBBB",
-    "..B...B..",
-]
-KINDS = {"frog": (FROG, "green"), "cat": (CAT, "orange"), "robot": (ROBOT, "light_grey")}
+# The pet faces live in the cart's sprite sheet (sprites.kgfx): frog=0, cat=1,
+# robot=2. Pick one in "Make it mine" and edit it in the paint editor.
 
 
-def _make_pet(kind):
-    rows, body = KINDS.get(kind, KINDS["frog"])
-    return image(rows, {"B": col(body), "E": col("black"), "M": col("red"),
-                        "N": col("pink")}, ".")
+def _pet_tile():
+    p = cfg("pet", 0)                # tile id (tolerate a stale string config)
+    try:
+        return int(p)
+    except (TypeError, ValueError):
+        return {"cat": 1, "robot": 2}.get(p, 0)
 
 
 def _init():
@@ -60,7 +32,7 @@ def _init():
     idle = 0.0
     bob = 0
     blink = 0.0
-    pet = _make_pet(cfg("pet", "frog"))
+    pet = _pet_tile()
 
 
 def _feed():
@@ -116,12 +88,9 @@ def _draw():
     rect(0, H - 26, W, 26, col("dark_green"))
     # the pet, bobbing; blink by hiding it for a beat (cheap eye-blink)
     show = not (2.7 < blink < 2.85)
-    px = W // 2 - 18
+    px = W // 2 - 16            # 8x8 tile drawn at 4x = 32px wide
     py = H - 26 - 36 + bob
-    if show:
-        spr(pet, px, py, scale=4)
-    else:
-        spr(pet, px, py + 2, scale=4)
+    spr(pet, px, py if show else py + 2, -1, 4)    # tile id from the cart sheet
     # mood word
     if mood > 60:
         word = "HAPPY"
