@@ -68,6 +68,48 @@ def _wrap(text, cols):
     return out
 
 
+def _exc_cart_line(exc, fname="<cart>"):
+    """Best-effort: the 1-based source line INSIDE the cart where `exc` was
+    raised, or None -- so a runtime crash can drop the kid on the offending line
+    (#24), like a syntax error does. Both backends rely on the cart being
+    compiled with the filename `fname` (see _start). Host (CPython) walks the
+    traceback objects; the device (MicroPython, which exposes no tb objects)
+    parses sys.print_exception's rendered output. The DEEPEST cart frame wins."""
+    tb = getattr(exc, "__traceback__", None)
+    line = None
+    while tb is not None:
+        try:
+            if tb.tb_frame.f_code.co_filename == fname:
+                line = tb.tb_lineno
+        except AttributeError:
+            pass
+        tb = tb.tb_next
+    if line is not None:
+        return line
+    try:
+        import sys
+        import io
+        buf = io.StringIO()
+        sys.print_exception(exc, buf)              # MicroPython only
+        for ln in buf.getvalue().split("\n"):
+            if fname in ln:
+                p = ln.find("line ")
+                if p >= 0:
+                    num = ""
+                    for ch in ln[p + 5:]:
+                        if "0" <= ch <= "9":
+                            num += ch
+                        elif num:
+                            break
+                    if num:
+                        line = int(num)            # keep the last (deepest) match
+    except Exception:  # noqa: BLE001
+        pass
+    if line is not None:
+        return line
+    return getattr(exc, "lineno", None)            # SyntaxError caught at compile
+
+
 class _Blit:
     """Minimal blittable for the cursor sprite (canvas.spr reads only these)."""
     def __init__(self, w, h, pix, transparent=-1):
@@ -108,6 +150,89 @@ def color(name_or_index):
         return NAMES.get(name_or_index, 7)
     return int(name_or_index) & 63
 
+
+# --- code-editor syntax highlighting (#24) ---------------------------------
+# A tiny, MicroPython-safe tokenizer: scans one source line char-by-char and
+# returns a per-character list of KID64 palette indices, so the code view draws
+# colored runs without any re/tokenize dependency (those are heavy/absent on the
+# device). Token classes map to:
+_HL_TEXT = 6        # light_grey -- identifiers, operators, punctuation (default)
+_HL_KEYWORD = 12    # blue
+_HL_STRING = 11     # green
+_HL_NUMBER = 9      # orange
+_HL_COMMENT = 5     # dark_grey
+_HL_BUILTIN = 14    # pink -- the cart drawing verbs stand out
+
+_HL_KEYWORDS = (
+    "False", "None", "True", "and", "as", "assert", "break", "class",
+    "continue", "def", "del", "elif", "else", "except", "finally", "for",
+    "from", "global", "if", "import", "in", "is", "lambda", "nonlocal", "not",
+    "or", "pass", "raise", "return", "try", "while", "with", "yield",
+)
+# Cart-API verbs + the common builtins a kid actually types. Keep roughly in
+# sync with make_api (host_app / kid_runtime); an extra name here is harmless.
+_HL_BUILTINS = (
+    "cls", "pix", "pset", "line", "rect", "rectb", "circ", "circb", "spr",
+    "print", "btn", "btnp", "touch", "cfg", "col", "rnd", "flr", "abs", "min",
+    "max", "sin", "cos", "range", "len", "int", "str", "float", "round", "sqrt",
+)
+
+
+def _is_alpha(ch):
+    return ch == "_" or ("a" <= ch <= "z") or ("A" <= ch <= "Z")
+
+
+def _highlight(line):
+    """Return a list of palette indices, one per character of `line` (#24).
+    Hand-rolled scanner -- no regex/tokenize, so it runs under MicroPython."""
+    n = len(line)
+    out = [_HL_TEXT] * n
+    i = 0
+    while i < n:
+        ch = line[i]
+        if ch == "#":                          # comment to end of line
+            while i < n:
+                out[i] = _HL_COMMENT
+                i += 1
+            break
+        if ch == '"' or ch == "'":             # string literal (single line)
+            q = ch
+            out[i] = _HL_STRING
+            i += 1
+            while i < n:
+                out[i] = _HL_STRING
+                if line[i] == "\\" and i + 1 < n:   # escape: consume next char too
+                    i += 1
+                    out[i] = _HL_STRING
+                    i += 1
+                    continue
+                if line[i] == q:
+                    i += 1
+                    break
+                i += 1
+            continue
+        if "0" <= ch <= "9":                   # number literal
+            while i < n and (("0" <= line[i] <= "9") or line[i] == "." or line[i] == "x"):
+                out[i] = _HL_NUMBER
+                i += 1
+            continue
+        if _is_alpha(ch):                      # identifier / keyword / builtin
+            j = i
+            while j < n and (_is_alpha(line[j]) or "0" <= line[j] <= "9"):
+                j += 1
+            word = line[i:j]
+            if word in _HL_KEYWORDS:
+                cl = _HL_KEYWORD
+            elif word in _HL_BUILTINS:
+                cl = _HL_BUILTIN
+            else:
+                cl = _HL_TEXT
+            while i < j:
+                out[i] = cl
+                i += 1
+            continue
+        i += 1                                 # operator / punctuation / space
+    return out
 
 
 CURSOR_IDLE_MS = 2000  # hide the trackball cursor after this long with no movement
@@ -346,6 +471,10 @@ class Workstation:
         self.carts_root = None        # SD carts dir (reads); set by run_desktop
         self.cart_error = None        # last cart failure text -> on-canvas error panel
         self.save_status = None       # last save_code result text (e.g. a syntax error)
+        self.code_err = None          # short inline syntax-error message (#24)
+        self.code_err_row = None      # 0-based row the syntax error is on (#24)
+        self.crash_line = None        # 1-based cart line of the last runtime crash (#24)
+        self._hl_cache = {}           # per-line syntax-highlight memo (#24)
         self.paint_status = None      # last sprite-reuse (GET/PUT) result text (#18)
         self.can_manage = True        # writes enabled? run_desktop sets this from
                                       # whether SD is the cart source (carts_root)
@@ -358,7 +487,9 @@ class Workstation:
     def _start(self):
         ns = self.make_api(self.canvas, self.input, self.config, self.sheet)
         try:
-            exec(self.cart["src"], ns)
+            # Compile with the "<cart>" filename so a runtime traceback carries
+            # cart line numbers (_exc_cart_line reads them to mark the bad line).
+            exec(compile(self.cart["src"], "<cart>", "exec"), ns)
             if ns.get("_init"):
                 ns["_init"]()
         except Exception as exc:  # noqa: BLE001
@@ -368,9 +499,11 @@ class Workstation:
             # exception whose __str__ itself raises would otherwise escape here and
             # become the exact silent device hang the panel exists to prevent.
             self.cart_error = _err_text(exc)
+            self.crash_line = _exc_cart_line(exc)
             print("KidCode cart error:", self.cart_error)
             return False
         self.cart_error = None
+        self.crash_line = None
         self.ns = ns
         self._update = ns.get("_update")
         self._draw = ns.get("_draw")
@@ -413,6 +546,13 @@ class Workstation:
             if self.editor is None and self.cart is not None:
                 self.editor = CodeEditor(self.cart["src"])
                 self._ekey_prev = 0
+                if self.crash_line is not None:
+                    # Opened after a runtime crash -> land on the line that raised.
+                    self._mark_code_error(self.crash_line - 1,
+                                          (self.cart_error or "crashed")[:32])
+                else:
+                    self.code_err = None
+                    self.code_err_row = None
         elif view == "paint":
             if self.paint is None and self.sheet is not None:
                 self.paint = PaintEditor(self.sheet)
@@ -457,7 +597,10 @@ class Workstation:
             return
         k = self.input.last_key
         if k and k != self._ekey_prev:
-            self.editor.key(k)
+            if self.editor.key(k):       # text changed -> drop the stale error marker
+                self.code_err = None
+                self.code_err_row = None
+                self.crash_line = None
         self._ekey_prev = k
 
     def save_code(self):
@@ -474,7 +617,11 @@ class Workstation:
         if not ok:
             self.save_status = "SYNTAX " + msg
             self.cart_error = "Syntax error -- " + msg
+            self._set_code_error(msg)        # mark the bad line in the editor (#24)
             return False
+        self.code_err = None                 # parses now -> clear the inline marker
+        self.code_err_row = None
+        self.crash_line = None               # a re-run will re-detect any runtime crash
         if not (self.cart.get("path") and self.can_manage):
             self.save_status = None             # nothing to persist, but src is valid
             return True
@@ -499,6 +646,32 @@ class Workstation:
             self.cart_error = "Could not save -- " + txt
             print("KidCode save code failed:", txt)
             return False
+
+    def _set_code_error(self, msg):
+        """Record a syntax error so the code view can mark the offending line
+        inline (#24). compile_check formats messages as "line N: <reason>"; pull
+        N out for the marker, keep the short reason for the inline note, and move
+        the caret onto that line so the fix is one tap away."""
+        row = None
+        short = msg
+        if msg.startswith("line "):
+            rest = msg[5:]
+            p = rest.find(":")
+            if p > 0 and rest[:p].strip().isdigit():
+                row = int(rest[:p].strip()) - 1
+                short = rest[p + 1:].strip()
+        self._mark_code_error(row, short)
+
+    def _mark_code_error(self, row, short):
+        """Record an inline error marker (#24) and, if the editor is open, move
+        the caret onto `row` (0-based) so the fix is one tap away."""
+        self.code_err = short
+        self.code_err_row = row
+        if row is not None and self.editor is not None:
+            ed = self.editor
+            ed.row = max(0, min(len(ed.lines) - 1, row))
+            ed._clamp_col()
+            ed._scroll()
 
     def run_code(self):
         # Refuse to run un-parseable source: keep the kid in the editor with the
@@ -1118,6 +1291,7 @@ class Workstation:
                     # broken cart, and fall through to paint the error panel; the
                     # desktop buttons stay so the kid can EDIT/CODE the fix.
                     self.cart_error = _err_text(exc)
+                    self.crash_line = _exc_cart_line(exc)   # mark the line on EDIT (#24)
                     self._update = None
                     self._draw = None
                     # Print the _err_text-guarded string, never the raw `exc`: a
@@ -1361,15 +1535,51 @@ class Workstation:
         # code area (horizontal scroll: columns [left, left+COLS))
         if ed is not None:
             vis = ed.visible_lines()
+            errrow = self.code_err_row
             for idx in range(len(vis)):
                 y = _CODE_Y0 + idx * _CODE_LH
-                cv.print(vis[idx][ed.left:ed.left + CodeEditor.COLS], _CODE_X0, y,
-                         NAMES["light_grey"], 1)
+                full = vis[idx]
+                on_err = errrow is not None and ed.top + idx == errrow
+                if on_err:                      # inline error: gutter mark + underline (#24)
+                    cv.rect(0, y, 3, 8, NAMES["red"])
+                    cv.rect(_CODE_X0, y + 8, CodeEditor.COLS * 8, 1, NAMES["red"])
+                seg = full[ed.left:ed.left + CodeEditor.COLS]
+                segcols = self._hl(full)[ed.left:ed.left + CodeEditor.COLS]
+                self._draw_code_runs(seg, segcols, y)
+                if on_err and self.code_err:    # short reason after the code, if it fits
+                    mcol = len(seg) + 1
+                    if mcol < CodeEditor.COLS - 2:
+                        cv.print(self.code_err[:CodeEditor.COLS - mcol],
+                                 _CODE_X0 + mcol * 8, y, NAMES["red"], 1)
                 if ed.top + idx == ed.row:      # caret on the cursor's line
                     vcol = ed.col - ed.left
                     if 0 <= vcol <= CodeEditor.COLS:
                         cv.rect(_CODE_X0 + vcol * 8, y, 1, 8, NAMES["yellow"])
         self._draw_symbols()
+
+    def _hl(self, line):
+        """Memoized per-line syntax highlight (#24). Lines recur every frame, so
+        cache by text; bound the cache so a long edit session can't grow it."""
+        cols = self._hl_cache.get(line)
+        if cols is None:
+            if len(self._hl_cache) > 400:
+                self._hl_cache.clear()
+            cols = _highlight(line)
+            self._hl_cache[line] = cols
+        return cols
+
+    def _draw_code_runs(self, seg, segcols, y):
+        """Draw one code line as runs of same-colored text (#24)."""
+        cv = self.canvas
+        n = len(seg)
+        i = 0
+        while i < n:
+            cl = segcols[i]
+            j = i + 1
+            while j < n and segcols[j] == cl:
+                j += 1
+            cv.print(seg[i:j], _CODE_X0 + i * 8, y, cl, 1)
+            i = j
 
     def _draw_symbols(self):
         # Tappable coding-symbol palette (supplies what the keyboard can't type).
