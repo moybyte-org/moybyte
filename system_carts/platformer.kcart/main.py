@@ -1,8 +1,10 @@
-# Hop Quest -- a single-screen platformer cartridge. Walk LEFT / RIGHT, JUMP with
-# UP / A / RUN. Collect every coin to win the round (then it resets); fall off the
-# bottom and you respawn at the start. Gravity + tile collision on a solid grid.
-# With no input a little auto-pilot plays it (attract mode) so the GIF stays lively.
-# Pure indexed canvas + btn input -- identical on host and device.
+# Hop Quest -- a single-screen platformer. Walk LEFT / RIGHT, JUMP with UP / A /
+# RUN. Collect every coin to light the goal flag green, then reach it to WIN the
+# round (it celebrates, then resets). Fall off the bottom and you respawn at the
+# start. Gravity + tile collision on a solid grid.
+#
+# AUTOPLAY (in "Make it mine") is OFF by default -- YOU climb. Flip it on to watch
+# a little auto-pilot clear the level (attract mode). Pure indexed canvas + btn.
 
 TS = 16          # tile size in pixels
 # Level map: # solid, = one-way-ish platform (also solid here), C coin, G goal,
@@ -42,6 +44,9 @@ won = 0.0
 t = 0.0
 ai_dir = 1
 ai_jump = 0.0
+got = 0           # coins collected this round (drives the HUD + goal color)
+sparks = []       # collect/win particles: [x, y, vx, vy, life, color]
+flash = 0.0       # white pop on collect, decays
 
 
 # The player hero is a sprite-sheet tile (sprites.kgfx): tile 0 and tile 1, both
@@ -68,6 +73,7 @@ def _solid(tx, ty):
 
 def _init():
     global px, py, vx, vy, coins, goal, spawn, won, t, ai_dir, ai_jump
+    global got, sparks, flash
     coins = []
     for ty in range(len(LEVEL)):
         for tx in range(len(LEVEL[ty])):
@@ -86,6 +92,9 @@ def _init():
     t = 0.0
     ai_dir = 1
     ai_jump = 0.0
+    got = 0
+    sparks = []
+    flash = 0.0
 
 
 def _respawn():
@@ -116,9 +125,26 @@ def _all_taken():
     return True
 
 
+def _burst(x, y, n, color):
+    for _i in range(n):
+        sparks.append([x, y, (rnd(2.0) - 1.0) * 70, -rnd(80) - 10, 0.5, color])
+
+
 def _update(dt):
-    global px, py, vx, vy, on_ground, won, t, ai_dir, ai_jump
+    global px, py, vx, vy, on_ground, won, t, ai_dir, ai_jump, got, flash
     t += dt
+    if flash > 0.0:
+        flash = max(0.0, flash - dt)
+    # particles always tick (so the win burst animates during the banner)
+    keep = []
+    for p in sparks:
+        p[4] -= dt
+        if p[4] > 0.0:
+            p[0] += p[2] * dt
+            p[1] += p[3] * dt
+            p[3] += 220.0 * dt
+            keep.append(p)
+    sparks[:] = keep
     if won > 0.0:
         won -= dt
         if won <= 0.0:
@@ -129,7 +155,7 @@ def _update(dt):
     right = btn("right")
     jump = btn("up") or btn("a") or btn("run")
     any_input = left or right or jump
-    attract = not any_input
+    attract = cfg("autoplay", 0) and not any_input
     if attract:
         # Attract auto-pilot: head toward the goal column and HOP whenever the
         # staircase rises ahead. The walk direction always pushes toward the goal
@@ -196,15 +222,20 @@ def _update(dt):
             cy = c[1] * TS + TS // 2
             if abs((px + PW / 2) - cx) < 12 and abs((py + PH / 2) - cy) < 12:
                 c[2] = True
+                got += 1
+                flash = 0.12
+                _burst(cx, cy, 5, "yellow")
     # reach the goal with everything collected -> win
     gx = goal[0] * TS
     gy = goal[1] * TS
     if _all_taken() and abs(px - gx) < 14 and abs(py - gy) < 18:
+        if won <= 0.0:
+            _burst(gx + 8, gy, 14, "green")   # confetti on the win
         won = 1.5
 
 
 def _draw():
-    cls(col(cfg("sky", "dark_blue")))
+    cls(col("white") if flash > 0.0 else col(cfg("sky", "dark_blue")))
     # tiles
     for ty in range(len(LEVEL)):
         row = LEVEL[ty]
@@ -215,7 +246,7 @@ def _draw():
                 rect(x, y, TS, TS, col("brown"))
                 rect(x, y, TS, 3, col("dark_green"))
                 rectb(x, y, TS, TS, col("dark_grey"))
-    # coins
+    # coins (a bobbing pulse so they read as collectible)
     for c in coins:
         if not c[2]:
             cx = c[0] * TS + TS // 2
@@ -223,19 +254,21 @@ def _draw():
             r = 4 + (1 if int(t * 6) % 2 == 0 else 0)
             circ(cx, cy, r, col("yellow"))
             circb(cx, cy, r, col("orange"))
-    # goal flag
+    # particles
+    for p in sparks:
+        pix(int(p[0]), int(p[1]), col(p[5]))
+    # goal flag (green once every coin is collected)
     gx = goal[0] * TS
     gy = goal[1] * TS
-    fc = "green" if _all_taken() else "red"
+    lit = _all_taken()
+    fc = "green" if lit else "red"
     rect(gx + 6, gy - 2, 2, TS + 2, col("white"))
     rect(gx + 8, gy, 8, 6, col(fc))
+    if lit:                                   # a little shimmer when armed
+        pix(gx + 12, gy - 4, col("yellow"))
     # player: an editable 8x8 hero tile at 2x (16px), centered on the PWxPH box
-    spr(_hero_tile(), int(px) + PW // 2 - 8, int(py) + PH - 16, -1, 2)
+    spr(_hero_tile(), int(px) + PW // 2 - 8, int(py) + PH - 16, 0, 2)
     # HUD
-    got = 0
-    for c in coins:
-        if c[2]:
-            got += 1
     print("COINS " + str(got) + "/" + str(len(coins)), 6, 4, col("white"), 1)
     if won > 0.0:
         print("YOU WIN!", W // 2 - 32, H // 2 - 8, col("yellow"), 2)
