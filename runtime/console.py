@@ -125,6 +125,12 @@ _CARD_H = 20
 _NEW_BTN = (12, 206, 92, 28)
 _DUP_BTN = (114, 206, 92, 28)
 _DEL_BTN = (216, 206, 92, 28)
+# Launcher scrolling (#1). The tile strip spans TILE_Y0..(below the last tile);
+# a finger held in the top/bottom EDGE band autoscrolls toward the off-screen
+# rows, and dragging anywhere in the strip pans it by whole tiles.
+_LIST_Y0 = 36           # == Launcher.TILE_Y0 (defined below; kept in sync)
+_LIST_BOTTOM = 200      # tiles end above the action bar (y=206)
+_LIST_EDGE = 28         # px band at top/bottom of the strip that autoscrolls
 # Code editor: FULL-SCREEN (320x240). Top bar = title + run/save/close icons;
 # the code area fills the middle; a tappable symbol palette runs along the bottom
 # (the T-Deck keyboard has no `=`/`[]`/`{}`/`<>`/`%`, so the palette supplies them).
@@ -156,16 +162,25 @@ _SPR_PREV = (214, 40, 40, 24)
 _SPR_NEXT = (262, 40, 40, 24)
 _PAINT_SAVE = (14, 190, 88, 26)
 _PAINT_CLOSE = (200, 190, 102, 26)
-_CURSOR_BASE = 4
+# Trackball cursor sensitivity (#2). _CURSOR_BASE is the per-pulse step; the
+# quadratic _CURSOR_ACCEL term adds light acceleration so a fast roll crosses the
+# 320px screen in far fewer pulses while a slow, single-pulse roll stays precise.
+# These are a FEEL tweak meant to be finalized on real hardware (the trackball's
+# pulses-per-revolution sets the true "rolls to cross").  Before: BASE=4, ACCEL=1
+# (1 pulse -> 5px, ~64 px/s at a steady 1 pulse/frame). After: BASE=7, ACCEL=2
+# (1 pulse -> 9px; a 6-pulse flick -> 6*7 + 2*36 = 114px, so ~3 brisk rolls cross).
+_CURSOR_BASE = 7
+_CURSOR_ACCEL = 2
 
 
 def _cursor_delta(n):
     # n = net pulses this frame on one axis. Precise on a slow roll
-    # (1 pulse -> _CURSOR_BASE+1 px), accelerates super-linearly on a fast roll.
+    # (1 pulse -> _CURSOR_BASE + _CURSOR_ACCEL px), accelerates super-linearly on a
+    # fast roll (the a*a term dominates as pulses-per-frame climbs).
     a = n if n >= 0 else -n
     if a == 0:
         return 0
-    d = a * _CURSOR_BASE + a * a
+    d = a * _CURSOR_BASE + _CURSOR_ACCEL * a * a
     return d if n > 0 else -d
 
 
@@ -197,6 +212,20 @@ class Launcher:
             self.top = self.sel
         elif self.sel >= self.top + self.VISIBLE:
             self.top = self.sel - self.VISIBLE + 1
+        self._clamp_top()
+
+    def max_top(self):
+        # Topmost index that still fills the visible window (0 when everything fits).
+        return max(0, len(self.items) - self.VISIBLE)
+
+    def _clamp_top(self):
+        self.top = max(0, min(self.max_top(), self.top))
+
+    def scroll(self, d):
+        # Pan the visible window by d rows (touch drag / autoscroll), clamped so the
+        # last row never scrolls past the bottom. Independent of `sel` -- this just
+        # moves which slice of the list is on screen.
+        self.top = max(0, min(self.max_top(), self.top + d))
 
     def selected(self):
         return self.items[self.sel] if self.items else None
@@ -256,6 +285,9 @@ class Workstation:
         self.keyboard = None          # set by run_desktop (for raw/text mode toggle)
         self._ekey_prev = 0           # last consumed keyboard byte (edge detect)
         self._drag = None             # last pointer pos during a code-view drag-scroll
+        self._ldrag = None            # launcher drag state [press_y, last_y, moved?]
+        self._autoscroll = 0          # frames a finger has dwelled in a launcher edge
+        self._lhover = (-1, -1)       # last cursor pos used for launcher hover-highlight
         self.pointer = None           # set by run_desktop
         self.carts_root = None        # SD carts dir (reads); set by run_desktop
         self.can_manage = True        # writes enabled? run_desktop sets this from
@@ -511,6 +543,82 @@ class Workstation:
 
     # -- pointer (trackball-as-mouse) ----------------------------------------
 
+    def _launcher_pointer(self, px, py, click):
+        # The launcher cart list scrolls by touch (#1): drag the strip to pan it,
+        # or dwell a held finger in the top/bottom edge band to autoscroll. A plain
+        # tap (press + release with no drag) opens the tile under the finger.
+        down = self.pointer.down
+        in_strip = _LIST_Y0 <= py < _LIST_BOTTOM and 10 <= px < 310
+
+        # Action-bar buttons fire on the press edge (they sit below the strip).
+        if click:
+            if self.can_manage and _in(px, py, _NEW_BTN):
+                self.new_cart(); self._end_launcher_drag(); return
+            if self.can_manage and _in(px, py, _DUP_BTN):
+                self.dup_cart(); self._end_launcher_drag(); return
+            if self.can_manage and _in(px, py, _DEL_BTN):
+                self.del_cart(); self._end_launcher_drag(); return
+            # A trackball click (cursor click, no finger down) opens the tile under
+            # it. Touch taps open on release instead (so a drag can scroll first).
+            if not down:
+                i = self.launcher.tile_at(px, py)
+                if i is not None:
+                    self.launcher.sel = i
+                    self.open()
+                    return
+
+        if down:
+            if self._ldrag is None:                 # finger just went down in/at the strip
+                self._ldrag = [py, py, False]       # [press_y, last_y, moved?]
+                self._autoscroll = 0
+            press_y, last_y, moved = self._ldrag
+            # Drag: pan by whole tiles as the finger crosses each tile pitch.
+            steps = (last_y - py) // self.launcher.TILE_PITCH
+            if steps:
+                self.launcher.scroll(steps)
+                last_y = last_y - steps * self.launcher.TILE_PITCH
+            if abs(py - press_y) > 4:
+                moved = True
+            self._ldrag = [press_y, last_y, moved]
+            # Autoscroll while dwelling in an edge band (held finger, not just a flick).
+            if in_strip and py < _LIST_Y0 + _LIST_EDGE:
+                self._autoscroll += 1
+                if self._autoscroll % 6 == 0:
+                    self.launcher.scroll(-1)
+            elif in_strip and py >= _LIST_BOTTOM - _LIST_EDGE:
+                self._autoscroll += 1
+                if self._autoscroll % 6 == 0:
+                    self.launcher.scroll(1)
+            else:
+                self._autoscroll = 0
+            # Hover-highlight the tile under a still finger (suppressed once dragging).
+            if not moved:
+                i = self.launcher.tile_at(px, py)
+                if i is not None:
+                    self.launcher.sel = i
+        else:
+            # Finger lifted: a tap that never became a drag opens the tile it was on.
+            if self._ldrag is not None and not self._ldrag[2]:
+                i = self.launcher.tile_at(px, py)
+                if i is not None:
+                    self.launcher.sel = i
+                    self.open()
+                self._end_launcher_drag()
+            else:
+                self._end_launcher_drag()
+                # Trackball cursor hover (no touch): highlight the tile the cursor
+                # MOVED onto. Only re-highlight when the cursor actually moved, so a
+                # parked cursor sitting on a tile doesn't fight keyboard up/down nav.
+                if (px, py) != self._lhover:
+                    self._lhover = (px, py)
+                    i = self.launcher.tile_at(px, py)
+                    if i is not None:
+                        self.launcher.sel = i
+
+    def _end_launcher_drag(self):
+        self._ldrag = None
+        self._autoscroll = 0
+
     def _card_at(self, px, py):
         for i in range(len(self.cart["edit"])):
             y = _CARD_Y0 + i * _CARD_DY
@@ -524,18 +632,7 @@ class Workstation:
             return
         px, py, click = p.x, p.y, p.click
         if self.screen == "launcher":
-            i = self.launcher.tile_at(px, py)
-            if i is not None:
-                self.launcher.sel = i          # hover highlights
-            if click:
-                if self.can_manage and _in(px, py, _NEW_BTN):
-                    self.new_cart()
-                elif self.can_manage and _in(px, py, _DUP_BTN):
-                    self.dup_cart()
-                elif self.can_manage and _in(px, py, _DEL_BTN):
-                    self.del_cart()
-                elif i is not None:
-                    self.open()
+            self._launcher_pointer(px, py, click)
         elif self.screen == "desktop":
             if click:
                 if _in(px, py, _MENU_BTN):
