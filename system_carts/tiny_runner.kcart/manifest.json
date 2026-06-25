@@ -1,0 +1,23 @@
+{
+  "format": "kidcode-cart-v1",
+  "title": "Tiny Runner",
+  "type": "game",
+  "runtime": "python",
+  "main": "main.py",
+  "system": true,
+  "canvas": { "width": 480, "height": 270, "palette": "kid64" },
+  "permissions": ["graphics", "input"],
+  "safe_to_share": true,
+  "config": {
+    "speed": 130,
+    "jump": 220,
+    "hero": "green",
+    "sky": "dark_blue"
+  },
+  "edit": [
+    { "key": "speed", "label": "SPEED", "type": "int", "min": 60, "max": 260, "step": 10, "card": "RUN AT {value}" },
+    { "key": "jump", "label": "JUMP", "type": "int", "min": 140, "max": 340, "step": 10, "card": "JUMP POWER {value}" },
+    { "key": "hero", "label": "HERO", "type": "choice", "choices": ["green", "red", "yellow", "pink"], "card": "HERO IS {value}" },
+    { "key": "sky", "label": "SKY", "type": "choice", "choices": ["dark_blue", "indigo", "dark_purple", "black"], "card": "SKY IS {value}" }
+  ]
+}

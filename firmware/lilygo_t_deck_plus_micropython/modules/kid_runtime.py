@@ -142,12 +142,21 @@ def make_api(canvas, input, config, sheet=None):
         if img is not None:
             canvas.spr(img, x, y, scale)
 
+    def touch():
+        # GT911 pointer exposed to touch-driven carts: (x, y, tapped) this frame,
+        # or None when there is no pointer. `tapped` is the press edge so a cart
+        # scores at most one hit per tap. Same contract as the host make_api.
+        p = getattr(input, "pointer", None)
+        if p is None:
+            return None
+        return (p.x, p.y, bool(p.click))
+
     return {
         "W": canvas.w, "H": canvas.h,
         "cls": canvas.cls, "pix": canvas.pix,
         "line": canvas.line, "rect": canvas.rect, "rectb": canvas.rectb,
         "circ": canvas.circ, "circb": canvas.circb, "spr": spr,
-        "print": canvas.print,
+        "print": canvas.print, "touch": touch,
         "btn": input.held, "btnp": input.pressed,
         "cfg": cfg, "col": color,
         "rnd": lambda n=1.0: random.random() * n,
@@ -258,6 +267,258 @@ def _draw():
     print("SCORE "+str(score),10,10,col("white"),3)
 """
 
+PET_SRC = """
+food=80.0; joy=80.0; t=0.0; idle=0.0; pet=None; bob=0; blink=0.0
+FROG=[".BBBBBBB.","BBBBBBBBB","BEBBBBBEB","BBBBBBBBB","BBMMMMMBB","BBBBBBBBB",".BBBBBBB.","..B...B.."]
+CAT=["B.......B","BB.....BB","BBBBBBBBB","BEBBBBBEB","BBBBNBBBB","BBMMMMMBB",".BBBBBBB.","..BB.BB.."]
+ROBOT=["BBBBBBBBB","B.......B","B.E...E.B","B.......B","B.MMMMM.B","B.......B","BBBBBBBBB","..B...B.."]
+KINDS={"frog":(FROG,"green"),"cat":(CAT,"orange"),"robot":(ROBOT,"light_grey")}
+def _mk(k):
+    rows,body=KINDS.get(k,KINDS["frog"])
+    return image(rows,{"B":col(body),"E":col("black"),"M":col("red"),"N":col("pink")},".")
+def _init():
+    global food,joy,t,idle,pet,bob,blink
+    food=80.0; joy=80.0; t=0.0; idle=0.0; bob=0; blink=0.0; pet=_mk(cfg("pet","frog"))
+def _update(dt):
+    global food,joy,t,idle,bob,blink
+    t+=dt; blink+=dt
+    if blink>3.0: blink=0.0
+    d=cfg("decay",4); food=max(0.0,food-d*dt); joy=max(0.0,joy-d*0.8*dt); acted=False
+    if btn("left"): food=min(100.0,food+18.0); acted=True
+    if btn("right"): joy=min(100.0,joy+18.0); acted=True
+    if acted: idle=0.0
+    else:
+        idle+=dt
+        if idle>1.5:
+            if food<=joy: food=min(100.0,food+18.0)
+            else: joy=min(100.0,joy+18.0)
+    bob=-2 if (int(t*3)%2==0) else 0
+def _bar(x,y,w,v,c):
+    rect(x,y,w,8,col("dark_grey"))
+    f=int(w*v/100.0)
+    if f>0: rect(x,y,f,8,col(c))
+    rectb(x,y,w,8,col("white"))
+def _draw():
+    cls(col(cfg("bg","dark_purple"))); mood=min(food,joy)
+    rect(0,H-26,W,26,col("dark_green")); show=not (2.7<blink<2.85)
+    spr(pet,W//2-18,H-26-36+bob+(0 if show else 2),scale=4)
+    if mood>60: word="HAPPY"; wc="green"
+    elif mood>25: word="OK"; wc="yellow"
+    else: word="SAD"; wc="red"
+    print("PET: "+word,10,10,col(wc),2)
+    print("FOOD",10,34,col("white"),1); _bar(48,33,110,food,"orange")
+    print("JOY",10,50,col("white"),1); _bar(48,49,110,joy,"pink")
+    print("LEFT=FEED  RIGHT=PLAY",10,H-16,col("light_grey"),1)
+"""
+
+RUNNER_SRC = """
+GR=26; HX=40; HW=16; HH=20
+hy=0.0; vel=0.0; score=0.0; best=0; obs=[]; sx=0.0; t=0.0; hero=None
+RUN=["..HHHH..","..HHHH..","..FFFF..",".FFFFFF.","FFFFFFFF","FF.FF.FF",".F....F."]
+def _gy(): return H-GR
+def _init():
+    global hy,vel,score,obs,sx,t,hero
+    hy=0.0; vel=0.0; score=0.0; obs=[]; sx=W; t=0.0
+    hero=image(RUN,{"H":col(cfg("hero","green")),"F":col("white")},".")
+def _spawn():
+    global sx
+    obs.append([sx,10+int(rnd(6)),12+int(rnd(16))]); sx=W+40+rnd(120)
+def _jump():
+    global vel
+    if hy<=0.1: vel=-float(cfg("jump",220))
+def _reset():
+    global score,best,obs,hy,vel
+    if int(score)>best: best=int(score)
+    score=0.0; obs=[]; hy=0.0; vel=0.0
+def _danger():
+    for o in obs:
+        if o[0]+o[1]>HX and o[0]<HX+60: return True
+    return False
+def _update(dt):
+    global hy,vel,score,sx,t
+    t+=dt; sp=float(cfg("speed",130)); score+=sp*dt*0.1
+    vel+=700.0*dt; hy-=vel*dt
+    if hy<0.0: hy=0.0; vel=0.0
+    if btn("up") or btn("a") or btn("run"): _jump()
+    elif _danger(): _jump()
+    sx-=sp*dt
+    for o in obs: o[0]-=sp*dt
+    while obs and obs[0][0]+obs[0][1]<0: obs.pop(0)
+    if sx<=W: _spawn()
+    gy=_gy(); hy0=gy-HH-int(hy); hy1=gy-int(hy)
+    for o in obs:
+        ox0=int(o[0]); ox1=int(o[0])+o[1]; oy0=gy-o[2]
+        if HX+HW>ox0 and HX<ox1 and hy1>oy0 and hy0<gy: _reset(); break
+def _draw():
+    cls(col(cfg("sky","dark_blue"))); gy=_gy()
+    rect(0,gy,W,GR,col("brown")); rect(0,gy,W,2,col("dark_green"))
+    hx=int(-(t*20)%120)
+    for i in range(-1,W//120+2): circ(hx+i*120+60,gy,26,col("dark_green"))
+    for o in obs:
+        rect(int(o[0]),gy-o[2],o[1],o[2],col("green")); rectb(int(o[0]),gy-o[2],o[1],o[2],col("dark_green"))
+    spr(hero,HX,gy-HH-int(hy),scale=2)
+    print("SCORE "+str(int(score)),8,8,col("white"),2)
+    print("BEST "+str(best),8,24,col("yellow"),1)
+    print("UP=JUMP",W-60,8,col("light_grey"),1)
+"""
+
+PLAT_SRC = """
+TS=16
+LEVEL=["                    ","                    ","        CCC         ","      #######        ","                  G ","   C          #### ","  ####   CC         ","          ##        "," S        C    C    ","####    #####  #### ","             C      ","          ####### C ","####################"]
+PW=12; PH=14
+px=0.0; py=0.0; vx=0.0; vy=0.0; og=False; coins=[]; goal=(0,0); spawn=(0,0); won=0.0; t=0.0; aj=0.0
+def _solid(tx,ty):
+    if ty<0 or ty>=len(LEVEL): return False
+    row=LEVEL[ty]
+    if tx<0 or tx>=len(row): return True
+    return row[tx] in "#="
+def _init():
+    global px,py,vx,vy,coins,goal,spawn,won,t,aj
+    coins=[]
+    for ty in range(len(LEVEL)):
+        for tx in range(len(LEVEL[ty])):
+            ch=LEVEL[ty][tx]
+            if ch=="C": coins.append([tx,ty,False])
+            elif ch=="G": goal=(tx,ty)
+            elif ch=="S": spawn=(tx,ty)
+    px=spawn[0]*TS; py=spawn[1]*TS; vx=0.0; vy=0.0; won=0.0; t=0.0; aj=0.0
+def _respawn():
+    global px,py,vx,vy
+    px=spawn[0]*TS; py=spawn[1]*TS; vx=0.0; vy=0.0
+def _hit(nx,ny):
+    tx0=int(nx)//TS; tx1=int(nx+PW-1)//TS; ty0=int(ny)//TS; ty1=int(ny+PH-1)//TS
+    for ty in range(ty0,ty1+1):
+        for tx in range(tx0,tx1+1):
+            if _solid(tx,ty): return True
+    return False
+def _all():
+    for c in coins:
+        if not c[2]: return False
+    return True
+def _update(dt):
+    global px,py,vx,vy,og,won,t,aj
+    t+=dt
+    if won>0.0:
+        won-=dt
+        if won<=0.0: _init()
+        return
+    mv=float(cfg("speed",90)); left=btn("left"); right=btn("right")
+    jump=btn("up") or btn("a") or btn("run"); ai=not (left or right or jump)
+    if ai:
+        tg=None
+        for c in coins:
+            if not c[2]: tg=(c[0]*TS,c[1]*TS); break
+        if tg is None: tg=(goal[0]*TS,goal[1]*TS)
+        if tg[0]>px+2: right=True
+        elif tg[0]<px-2: left=True
+        aj-=dt
+        if (tg[1]<py-4 or vx==0.0) and og and aj<=0.0: jump=True; aj=0.6
+    vx=0.0
+    if left: vx=-mv
+    if right: vx=mv
+    vy+=600.0*dt
+    if vy>360.0: vy=360.0
+    if jump and og: vy=-float(cfg("jump",230)); og=False
+    nx=px+vx*dt
+    if not _hit(nx,py): px=nx
+    else:
+        while vx!=0.0 and not _hit(px+(1 if vx>0 else -1),py): px+=1 if vx>0 else -1
+    og=False; ny=py+vy*dt
+    if not _hit(px,ny): py=ny
+    else:
+        st=1 if vy>0 else -1
+        while not _hit(px,py+st): py+=st
+        if vy>0: og=True
+        vy=0.0
+    if py>len(LEVEL)*TS+40: _respawn()
+    for c in coins:
+        if not c[2]:
+            cx=c[0]*TS+TS//2; cy=c[1]*TS+TS//2
+            if abs((px+PW/2)-cx)<12 and abs((py+PH/2)-cy)<12: c[2]=True
+    if _all() and abs(px-goal[0]*TS)<14 and abs(py-goal[1]*TS)<18: won=1.5
+def _draw():
+    cls(col(cfg("sky","dark_blue")))
+    for ty in range(len(LEVEL)):
+        row=LEVEL[ty]
+        for tx in range(len(row)):
+            if row[tx] in "#=":
+                x=tx*TS; y=ty*TS
+                rect(x,y,TS,TS,col("brown")); rect(x,y,TS,3,col("dark_green")); rectb(x,y,TS,TS,col("dark_grey"))
+    for c in coins:
+        if not c[2]:
+            cx=c[0]*TS+TS//2; cy=c[1]*TS+TS//2; r=4+(1 if int(t*6)%2==0 else 0)
+            circ(cx,cy,r,col("yellow")); circb(cx,cy,r,col("orange"))
+    fc="green" if _all() else "red"
+    rect(goal[0]*TS+6,goal[1]*TS-2,2,TS+2,col("white")); rect(goal[0]*TS+8,goal[1]*TS,8,6,col(fc))
+    rect(int(px),int(py),PW,PH,col(cfg("hero","pink"))); rectb(int(px),int(py),PW,PH,col("white"))
+    got=0
+    for c in coins:
+        if c[2]: got+=1
+    print("COINS "+str(got)+"/"+str(len(coins)),6,4,col("white"),1)
+    if won>0.0: print("YOU WIN!",W//2-32,H//2-8,col("yellow"),2)
+"""
+
+TAPRED_SRC = """
+score=0; misses=0; bub=[]; t=0.0; flash=0.0; auto=0.0; sp=0.0
+COLORS=["orange","yellow","green","blue","pink","indigo"]; MAXM=5
+def _spawn():
+    red=rnd(1.0)<float(cfg("red_share",40))/100.0
+    ci=col("red") if red else col(COLORS[int(rnd(len(COLORS)))])
+    r=12+int(rnd(8)); bub.append([rnd(W-2*r)+r,H+r,r,ci,red])
+def _init():
+    global score,misses,bub,t,flash,auto,sp
+    score=0; misses=0; bub=[]; t=0.0; flash=0.0; auto=0.0; sp=0.0
+    for _i in range(4): _spawn()
+def _pop(b,good):
+    global score,misses,flash
+    if good: score+=1; flash=0.25
+    else: misses+=1; flash=-0.25
+    bub.remove(b)
+def _hit(x,y):
+    for b in reversed(bub):
+        dx=x-b[0]; dy=y-b[1]
+        if dx*dx+dy*dy<=(b[2]+4)*(b[2]+4): _pop(b,b[4]); return True
+    return False
+def _nr():
+    best=None
+    for b in bub:
+        if b[4] and (best is None or b[1]<best[1]): best=b
+    return best
+def _update(dt):
+    global t,flash,auto,sp,misses
+    t+=dt
+    if flash>0: flash=max(0.0,flash-dt)
+    elif flash<0: flash=min(0.0,flash+dt)
+    rise=float(cfg("rise",45))
+    for b in bub: b[1]-=rise*dt
+    keep=[]
+    for b in bub:
+        if b[1]+b[2]<0:
+            if b[4]: misses+=1
+        else: keep.append(b)
+    bub[:]=keep; sp+=dt
+    if sp>0.6 and len(bub)<int(cfg("max_bubbles",8)): sp=0.0; _spawn()
+    tapped=False; tp=touch()
+    if tp is not None and tp[2]: _hit(tp[0],tp[1]); tapped=True
+    auto+=dt
+    if not tapped and auto>0.7:
+        auto=0.0; b=_nr()
+        if b is not None: _pop(b,True)
+    if misses>=MAXM: _init()
+def _draw():
+    bg="dark_blue"
+    if flash>0: bg="dark_green"
+    elif flash<0: bg="dark_purple"
+    cls(col(bg))
+    for b in bub:
+        circ(int(b[0]),int(b[1]),b[2],b[3]); circb(int(b[0]),int(b[1]),b[2],col("white"))
+    print("TAP THE RED",8,8,col("red"),2); print("SCORE "+str(score),8,26,col("white"),1)
+    for i in range(MAXM):
+        x=W-14-i*12; c="red" if i<misses else "dark_grey"
+        rect(x,10,9,9,col(c)); rectb(x,10,9,9,col("white"))
+    print("MISS",W-14-(MAXM-1)*12,22,col("light_grey"),1)
+"""
+
 CARTS = [
     {"title": "Space Desktop", "type": "wallpaper", "src": SPACE_SRC,
      "cfg": {"star_count": 80, "star_speed": 30, "bg": "dark_blue", "pet": "frog"},
@@ -280,6 +541,36 @@ CARTS = [
          {"key": "star_count", "type": "int", "min": 1, "max": 20, "step": 1, "card": "DROP {value} STARS"},
          {"key": "fall_speed", "type": "int", "min": 20, "max": 200, "step": 10, "card": "STARS FALL AT {value}"},
          {"key": "basket", "type": "choice", "choices": ["frog", "robot"], "card": "CATCHER IS A {value}"},
+     ]},
+    {"title": "Pixel Pet", "type": "game", "src": PET_SRC,
+     "cfg": {"pet": "frog", "decay": 4, "bg": "dark_purple"},
+     "edit": [
+         {"key": "pet", "type": "choice", "choices": ["frog", "cat", "robot"], "card": "PET IS A {value}"},
+         {"key": "decay", "type": "int", "min": 1, "max": 12, "step": 1, "card": "NEEDINESS {value}"},
+         {"key": "bg", "type": "choice", "choices": ["dark_purple", "dark_blue", "black", "indigo"], "card": "ROOM IS {value}"},
+     ]},
+    {"title": "Tiny Runner", "type": "game", "src": RUNNER_SRC,
+     "cfg": {"speed": 130, "jump": 220, "hero": "green", "sky": "dark_blue"},
+     "edit": [
+         {"key": "speed", "type": "int", "min": 60, "max": 260, "step": 10, "card": "RUN AT {value}"},
+         {"key": "jump", "type": "int", "min": 140, "max": 340, "step": 10, "card": "JUMP POWER {value}"},
+         {"key": "hero", "type": "choice", "choices": ["green", "red", "yellow", "pink"], "card": "HERO IS {value}"},
+         {"key": "sky", "type": "choice", "choices": ["dark_blue", "indigo", "dark_purple", "black"], "card": "SKY IS {value}"},
+     ]},
+    {"title": "Hop Quest", "type": "game", "src": PLAT_SRC,
+     "cfg": {"speed": 90, "jump": 230, "hero": "pink", "sky": "dark_blue"},
+     "edit": [
+         {"key": "speed", "type": "int", "min": 40, "max": 180, "step": 10, "card": "WALK AT {value}"},
+         {"key": "jump", "type": "int", "min": 150, "max": 340, "step": 10, "card": "JUMP POWER {value}"},
+         {"key": "hero", "type": "choice", "choices": ["pink", "red", "green", "yellow"], "card": "HERO IS {value}"},
+         {"key": "sky", "type": "choice", "choices": ["dark_blue", "indigo", "dark_purple", "black"], "card": "SKY IS {value}"},
+     ]},
+    {"title": "Tap Only Red", "type": "game", "src": TAPRED_SRC,
+     "cfg": {"rise": 45, "red_share": 40, "max_bubbles": 8},
+     "edit": [
+         {"key": "rise", "type": "int", "min": 20, "max": 110, "step": 5, "card": "BUBBLES RISE AT {value}"},
+         {"key": "red_share", "type": "int", "min": 15, "max": 80, "step": 5, "card": "{value}% ARE RED"},
+         {"key": "max_bubbles", "type": "int", "min": 4, "max": 16, "step": 1, "card": "UP TO {value} BUBBLES"},
      ]},
 ]
 
@@ -529,6 +820,7 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
     ball = TrackBall()
     touch = Touch(canvas.w, canvas.h, i2c=getattr(keyboard, "_i2c", None))
     pointer = Pointer(canvas.w, canvas.h)
+    inp.pointer = pointer         # touch-driven carts read it via the api touch()
     import kidcode_sd
     # Carts are read from SD before display init; only fall back to a post-display
     # mount (now safe via the native kc_sd path) if the shell didn't prefetch.
