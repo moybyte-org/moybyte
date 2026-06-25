@@ -28,6 +28,46 @@ def _ticks_diff(a, b):
         return a - b
 
 
+def _err_text(exc):
+    """A short, kid-readable one-liner for an exception (type: message). Robust
+    on MicroPython, whose exceptions sometimes stringify oddly."""
+    try:
+        name = type(exc).__name__
+    except Exception:  # noqa: BLE001
+        name = "Error"
+    try:
+        msg = str(exc)
+    except Exception:  # noqa: BLE001
+        msg = ""
+    return (name + ": " + msg) if msg else name
+
+
+def _wrap(text, cols):
+    """Word-wrap `text` into a list of lines no wider than `cols` chars. A single
+    word longer than `cols` is hard-split so it still fits the panel."""
+    if cols < 1:
+        cols = 1
+    out = []
+    for para in str(text).split("\n"):
+        line = ""
+        for word in para.split(" "):
+            while len(word) > cols:                 # hard-split an over-long token
+                if line:
+                    out.append(line)
+                    line = ""
+                out.append(word[:cols])
+                word = word[cols:]
+            if not line:
+                line = word
+            elif len(line) + 1 + len(word) <= cols:
+                line = line + " " + word
+            else:
+                out.append(line)
+                line = word
+        out.append(line)
+    return out
+
+
 class _Blit:
     """Minimal blittable for the cursor sprite (canvas.spr reads only these)."""
     def __init__(self, w, h, pix, transparent=-1):
@@ -258,6 +298,8 @@ class Workstation:
         self._drag = None             # last pointer pos during a code-view drag-scroll
         self.pointer = None           # set by run_desktop
         self.carts_root = None        # SD carts dir (reads); set by run_desktop
+        self.cart_error = None        # last cart failure text -> on-canvas error panel
+        self.save_status = None       # last save_code result text (e.g. a syntax error)
         self.can_manage = True        # writes enabled? run_desktop sets this from
                                       # whether SD is the cart source (carts_root)
         # SD session wrapper: mounts SD for the duration of fn(), then releases it
@@ -273,8 +315,12 @@ class Workstation:
             if ns.get("_init"):
                 ns["_init"]()
         except Exception as exc:  # noqa: BLE001
+            # The device's native run loop starves USB, so a print() never reaches
+            # serial -- stash the failure so frame() can paint an on-canvas panel.
+            self.cart_error = _err_text(exc)
             print("KidCode cart error:", exc)
             return False
+        self.cart_error = None
         self.ns = ns
         self._update = ns.get("_update")
         self._draw = ns.get("_draw")
@@ -286,11 +332,16 @@ class Workstation:
         self.msel = 0
         self.editor = None
         self.paint = None
+        self.cart_error = None
+        self.save_status = None
         self.sheet = self._build_sheet()
         self.menu_view = "cards"
         self._set_text_mode(False)
-        if self._start():
-            self.screen = "desktop"
+        # Open to the desktop even if the cart failed to start: frame() shows the
+        # error panel there and the EDIT/CODE button stays reachable so the kid can
+        # fix it (a silent stay-on-launcher would be a dead end on the device).
+        self._start()
+        self.screen = "desktop"
 
     def _build_sheet(self):
         hexs = self.cart.get("sprites") if self.cart else None
@@ -350,21 +401,51 @@ class Workstation:
         self._ekey_prev = k
 
     def save_code(self):
-        if not (self.editor and self.cart and self.cart.get("path") and self.can_manage):
-            return
+        """Persist the edited source. Returns True iff it was written. A source
+        that won't compile is REFUSED (the good file is left intact) and the
+        syntax error is surfaced via self.save_status / cart_error rather than
+        silently writing garbage. Non-SD carts (no path) just no-op True."""
+        if not (self.editor and self.cart):
+            return False
         src = self.editor.text()
+        # Always compile-check, even for embedded/non-SD carts, so the kid sees a
+        # syntax error before run_code execs it into a hard failure.
+        ok, msg = self.carts_store.compile_check(src)
+        if not ok:
+            self.save_status = "SYNTAX " + msg
+            self.cart_error = "Syntax error -- " + msg
+            return False
+        if not (self.cart.get("path") and self.can_manage):
+            self.save_status = None             # nothing to persist, but src is valid
+            return True
         try:
-            self._with_sd(lambda: self.carts_store.save_code(self.cart, src))
+            status = self._with_sd(lambda: self.carts_store.save_code(self.cart, src))
+            if isinstance(status, tuple) and status[0] != self.carts_store.SAVE_OK:
+                self.save_status = "SAVE FAILED " + str(status[1])
+                self.cart_error = "Could not save -- " + str(status[1])
+                return False
             self.editor.dirty = False
+            self.save_status = "SAVED"
+            return True
         except Exception as exc:  # noqa: BLE001
+            self.save_status = "SAVE FAILED"
+            self.cart_error = "Could not save -- " + _err_text(exc)
             print("KidCode save code failed:", exc)
+            return False
 
     def run_code(self):
+        # Refuse to run un-parseable source: keep the kid in the editor with the
+        # syntax error shown rather than dropping to a blank/broken desktop.
         if self.editor is not None:
-            self.cart["src"] = self.editor.text()   # in-RAM apply (always)
-            self.save_code()                         # persist if SD-backed
+            if not self.save_code():
+                return                               # syntax/save error -> stay in editor
+            self.cart["src"] = self.editor.text()   # in-RAM apply (validated above)
         if self._start():
             self._set_text_mode(False)
+            self.screen = "desktop"
+        else:
+            # Compiled but raised at exec/_init: show the error panel on the desktop
+            # (still reachable -> the kid can reopen the editor to fix it).
             self.screen = "desktop"
 
     def save_sprites(self):
@@ -378,8 +459,11 @@ class Workstation:
             print("KidCode save sprites failed:", exc)
 
     def apply(self):
-        if self._start():
-            self.screen = "desktop"
+        # Re-run with the new config. Always return to the desktop: on success it
+        # runs, on failure frame() paints the error panel there (still reachable).
+        ok = self._start()
+        self.screen = "desktop"
+        if ok:
             self._save_config()
 
     def _save_config(self):
@@ -400,6 +484,8 @@ class Workstation:
         self.screen = "launcher"
         self.cart = None
         self.ns = None
+        self.cart_error = None
+        self.save_status = None
 
     # -- cart management (SD) ------------------------------------------------
     #
@@ -635,16 +721,24 @@ class Workstation:
                 self._btn("DUP", _DUP_BTN, NAMES["blue"])
                 self._btn("DEL", _DEL_BTN, NAMES["red"])
         elif self.screen == "desktop":
-            try:
-                if self._update:
-                    self._update(dt)
-                if self._draw:
-                    self._draw()
-            except Exception as exc:  # noqa: BLE001
-                print("KidCode frame error:", exc)
-                self.go_home()
-            else:
-                self._draw_desktop_buttons()
+            if self.cart_error is None:
+                try:
+                    if self._update:
+                        self._update(dt)
+                    if self._draw:
+                        self._draw()
+                except Exception as exc:  # noqa: BLE001
+                    # A cart that raises mid-frame must NOT escape the loop (the
+                    # device would hang silently). Capture it, stop running the
+                    # broken cart, and fall through to paint the error panel; the
+                    # desktop buttons stay so the kid can EDIT/CODE the fix.
+                    self.cart_error = _err_text(exc)
+                    self._update = None
+                    self._draw = None
+                    print("KidCode frame error:", exc)
+            if self.cart_error is not None:
+                self._draw_error_panel()
+            self._draw_desktop_buttons()
         elif self.menu_view == "code":
             self._draw_code()              # full-screen editor (covers the cart)
         else:  # cards / paint: a panel over the frozen cart
@@ -669,11 +763,30 @@ class Workstation:
 
     def _draw_desktop_buttons(self):
         # Carts with a Make-it-mine schema open the cards menu; the rest jump
-        # straight to the code editor -- label the button to match.
-        self._btn("EDIT" if self.cart.get("edit") else "CODE",
-                  _MENU_BTN, NAMES["dark_purple"])
+        # straight to the code editor -- label the button to match. (cart may be
+        # None defensively if an error panel is up with no open cart.)
+        has_edit = bool(self.cart.get("edit")) if self.cart else False
+        self._btn("EDIT" if has_edit else "CODE", _MENU_BTN, NAMES["dark_purple"])
         self._btn("PAINT", _PAINT_BTN, NAMES["orange"])
         self._btn("HOME", _HOME_BTN, NAMES["dark_grey"])
+
+    def _draw_error_panel(self):
+        # A friendly on-canvas crash report (the device never reaches serial, so
+        # this is the ONLY error surface). Drawn with the indexed API only: a red
+        # box + a short title + the exception text, word-wrapped and truncated to
+        # fit. The CODE/EDIT button below it stays live so the kid can fix the cart.
+        cv = self.canvas
+        x, y, w, h = 14, 40, 292, 132
+        cv.rect(x, y, w, h, NAMES["dark_purple"])
+        cv.rectb(x, y, w, h, NAMES["red"])
+        cv.rect(x, y, w, 14, NAMES["red"])
+        cv.print("OOPS! THIS CART CRASHED", x + 6, y + 4, NAMES["white"], 1)
+        cols = (w - 16) // 8                       # 8px monospace cells
+        lines = _wrap(self.cart_error or "Unknown error", cols)
+        max_rows = (h - 30) // _CODE_LH
+        for i in range(min(len(lines), max_rows)):
+            cv.print(lines[i], x + 8, y + 20 + i * _CODE_LH, NAMES["peach"], 1)
+        cv.print("TAP CODE TO FIX IT", x + 8, y + h - 12, NAMES["yellow"], 1)
 
     def _draw_cursor(self):
         if self.pointer is not None and self.pointer.visible:
