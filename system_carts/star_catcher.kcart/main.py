@@ -77,5 +77,5 @@ def _draw():
     rect(0, H - 24, W, 24, col("dark_blue"))     # floor
     rect(int(bx), by, BW, BH, col("brown"))      # basket
     spr(catcher, int(bx) + BW // 2 - 8 * SPR_SCALE // 2, by - 8 * SPR_SCALE,
-        -1, SPR_SCALE)                            # catcher tile (frog/robot)
+        0, SPR_SCALE)                            # catcher tile (frog/robot)
     print("SCORE " + str(score), 10, 10, col("white"), 3)
