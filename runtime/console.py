@@ -161,6 +161,12 @@ _CARD_W = 272
 _CARD_Y0 = 52
 _CARD_DY = 22
 _CARD_H = 20
+# Cards-menu scroll window (#3): cards lay out from _CARD_Y0 down; rows whose
+# bottom would pass _CARD_VIEW_BOTTOM are scrolled off rather than drawn over the
+# RUN/CODE/CLOSE bar (y=188). A small up/down chevron strip on the right scrolls.
+_CARD_VIEW_BOTTOM = 186
+_CARD_SCROLL_UP = (300, 38, 16, 14)     # tap to scroll cards up (toward the top)
+_CARD_SCROLL_DN = (300, 168, 16, 14)    # tap to scroll cards down
 # Launcher action bar (pointer): create / duplicate / delete a cartridge.
 _NEW_BTN = (12, 206, 92, 28)
 _DUP_BTN = (114, 206, 92, 28)
@@ -202,6 +208,13 @@ _SPR_PREV = (214, 40, 40, 24)
 _SPR_NEXT = (262, 40, 40, 24)
 _PAINT_SAVE = (14, 190, 88, 26)
 _PAINT_CLOSE = (200, 190, 102, 26)
+# Cross-cart sprite reuse (#18): two buttons in the paint editor move the CURRENT
+# tile between this cart's sheet and the well-known shared sheet, so a kid can
+# carry a painted sprite from one cart to another without repainting.
+#   GET  -- import the current tile FROM the shared sheet into this cart's sheet.
+#   PUT  -- save the current tile TO the shared sheet (persisted to disk).
+_PAINT_GET = (210, 130, 92, 20)
+_PAINT_PUT = (210, 154, 92, 20)
 # Trackball cursor sensitivity (#2). _CURSOR_BASE is the per-pulse step; the
 # quadratic _CURSOR_ACCEL term adds light acceleration so a fast roll crosses the
 # 320px screen in far fewer pulses while a slow, single-pulse roll stays precise.
@@ -318,6 +331,7 @@ class Workstation:
         self._update = None
         self._draw = None
         self.msel = 0                 # selected card in the menu
+        self.mtop = 0                 # first card scrolled into view (#3)
         self.menu_view = "cards"      # menu sub-view: "cards" | "code" | "paint"
         self.editor = None            # CodeEditor while menu_view == "code"
         self.sheet = None             # SpriteSheet for the open cart (built on open)
@@ -332,6 +346,7 @@ class Workstation:
         self.carts_root = None        # SD carts dir (reads); set by run_desktop
         self.cart_error = None        # last cart failure text -> on-canvas error panel
         self.save_status = None       # last save_code result text (e.g. a syntax error)
+        self.paint_status = None      # last sprite-reuse (GET/PUT) result text (#18)
         self.can_manage = True        # writes enabled? run_desktop sets this from
                                       # whether SD is the cart source (carts_root)
         # SD session wrapper: mounts SD for the duration of fn(), then releases it
@@ -365,6 +380,7 @@ class Workstation:
         self.cart = self.launcher.selected()
         self.config = dict(self.cart["cfg"])
         self.msel = 0
+        self.mtop = 0
         self.editor = None
         self.paint = None
         self.cart_error = None
@@ -418,6 +434,7 @@ class Workstation:
 
     def _open_paint(self):
         self.screen = "menu"
+        self.paint_status = None
         self.set_menu_view("paint")
 
     def _leave_menu(self):
@@ -514,6 +531,74 @@ class Workstation:
             self.save_status = "SAVE FAILED"
             self.cart_error = "Could not save sprites -- " + txt
             print("KidCode save sprites failed:", txt)
+
+    # -- cross-cart sprite reuse (#18) ---------------------------------------
+    #
+    # The shared sheet is a single .kgfx living beside the carts dir. PUT copies
+    # the tile a kid is painting INTO that shared sheet; GET copies a tile back
+    # OUT of it into whatever cart they're painting next -- so a sprite travels
+    # between carts without being repainted. Both go through SpriteSheet.copy_tile
+    # (the import primitive) and the kid_carts shared-sheet store.
+
+    def _load_shared_sheet(self):
+        """Read the shared sheet into a SpriteSheet (empty one if never saved)."""
+        try:
+            hexs = self._with_sd(lambda: self.carts_store.load_shared_sheet(self.carts_root))
+        except Exception as exc:  # noqa: BLE001
+            print("KidCode load shared sheet failed:", exc)
+            return None
+        if hexs:
+            try:
+                return SpriteSheet.from_hex(hexs)
+            except Exception:  # noqa: BLE001
+                pass
+        return SpriteSheet()
+
+    def share_tile_get(self):
+        """Import the current tile FROM the shared sheet into this cart's sheet
+        (same tile id). The kid then SAVEs the cart sheet to keep it."""
+        if not (self.paint and self.sheet):
+            return False
+        shared = self._load_shared_sheet()
+        if shared is None:
+            self.paint_status = "NO SHARED"
+            return False
+        if shared.is_blank():
+            self.paint_status = "SHARED EMPTY"   # nothing painted there yet
+            return False
+        n = self.paint.n
+        if self.sheet.copy_tile(shared, n, dst_n=n) is None:
+            self.paint_status = "GET FAILED"
+            return False
+        self.paint_status = "GOT SPR " + str(n)
+        return True
+
+    def share_tile_put(self):
+        """Save the current tile TO the shared sheet (persisted), so another cart
+        can GET it. Loads the shared sheet, drops this tile in at the same id, and
+        writes it back."""
+        if not (self.paint and self.sheet):
+            return False
+        if not (self.carts_root and self.can_manage):
+            self.paint_status = None             # writes deferred -- nothing to persist
+            return False
+        shared = self._load_shared_sheet()
+        if shared is None:
+            self.paint_status = "PUT FAILED"
+            return False
+        n = self.paint.n
+        if shared.copy_tile(self.sheet, n, dst_n=n) is None:
+            self.paint_status = "PUT FAILED"
+            return False
+        try:
+            hexs = shared.to_hex()
+            self._with_sd(lambda: self.carts_store.save_shared_sheet(hexs, self.carts_root))
+        except Exception as exc:  # noqa: BLE001
+            self.paint_status = "PUT FAILED"
+            print("KidCode save shared sheet failed:", exc)
+            return False
+        self.paint_status = "PUT SPR " + str(n)
+        return True
 
     def apply(self):
         # Re-run with the new config. Always return to the desktop: on success it
@@ -642,13 +727,13 @@ class Workstation:
         """For a `sprite-tiles` field, the list of sprite tile ids its choices map
         to. `choices` may be ints (tile ids directly) or names paired with a
         parallel `tiles` list. Returns ints; non-resolvable entries become 0."""
-        tiles = f.get("tiles")
-        if tiles:
-            return [int(t) for t in tiles]
+        src = f.get("tiles")
+        if not src:
+            src = f.get("choices", [])
         out = []
-        for c in f.get("choices", []):
-            try:
-                out.append(int(c))
+        for c in src:                          # guard BOTH branches: a non-numeric
+            try:                               # tiles/choices entry must not escape
+                out.append(int(c))             # _draw_cards -> device hang (#15).
             except (TypeError, ValueError):
                 out.append(0)
         return out
@@ -657,22 +742,82 @@ class Workstation:
         d = self._card_display(f)
         if d in ("sprite-tiles", "bg-thumbs"):
             return 44
-        if d in ("gauge", "count", "choice-icons"):
+        if d == "choice-icons":
+            return 36         # cells are 22px tall at y+12 -> bottom y+34 fits in 36
+        if d in ("gauge", "count"):
             return 32
         return _CARD_H
 
     def _card_layout(self):
-        """Pure (no-draw) per-card geometry so draw and hit-test agree. Returns a
-        list of dicts: {i, f, display, x, y, w, h}, laid out top-down from
-        _CARD_Y0 with a per-card height that depends on its display type."""
+        """Pure (no-draw) per-card geometry for the VISIBLE cards so draw and
+        hit-test agree (#3). Cards lay out top-down from _CARD_Y0 starting at the
+        scrolled-in index self.mtop; a row is included only while its bottom stays
+        within _CARD_VIEW_BOTTOM (so cards never overlap the RUN/CODE/CLOSE bar).
+        Returns dicts: {i, f, display, x, y, w, h}."""
         rows = []
         y = _CARD_Y0
-        for i, f in enumerate(self.cart["edit"]):
+        top = self._clamp_mtop()
+        for i in range(top, len(self.cart["edit"])):
+            f = self.cart["edit"][i]
             h = self._card_height(f)
+            if i > top and y + h > _CARD_VIEW_BOTTOM:
+                break                       # next row would spill past the buttons
             rows.append({"i": i, "f": f, "display": self._card_display(f),
                          "x": _CARD_X, "y": y, "w": _CARD_W, "h": h})
             y += h + 2
         return rows
+
+    def _card_count(self):
+        return len(self.cart["edit"]) if self.cart and self.cart.get("edit") else 0
+
+    def _max_mtop(self):
+        """Topmost card index that still leaves the view full from the bottom up:
+        walk heights backwards, summing until the next card would no longer fit."""
+        n = self._card_count()
+        if n == 0:
+            return 0
+        avail = _CARD_VIEW_BOTTOM - _CARD_Y0
+        used = 0
+        top = n
+        for i in range(n - 1, -1, -1):
+            h = self._card_height(self.cart["edit"][i])
+            step = h if top == n else h + 2
+            if used + step > avail:
+                break
+            used += step
+            top = i
+        # Never park past the last card: even a card taller than the window must
+        # still be reachable (_card_layout always shows at least the top row).
+        return min(top, n - 1)
+
+    def _clamp_mtop(self):
+        self.mtop = max(0, min(self._max_mtop(), self.mtop))
+        return self.mtop
+
+    def scroll_cards(self, d):
+        """Scroll the cards window by d rows (clamped). Independent of msel."""
+        self.mtop = max(0, min(self._max_mtop(), self.mtop + d))
+
+    def _cards_scrollable(self):
+        """True when not all cards fit at once (so the chevrons are live)."""
+        return self._max_mtop() > 0
+
+    def _reveal_card(self, i):
+        """Scroll so card i is on screen (mirror Launcher._scroll): bring it down
+        into view if it's above the window, or up into view if it's below."""
+        if i < self.mtop:
+            self.mtop = i
+        else:
+            # Page the window down one card at a time until i's row is included.
+            guard = self._card_count()
+            while guard >= 0:
+                if any(r["i"] == i for r in self._card_layout()):
+                    break
+                if self.mtop >= self._max_mtop():
+                    break
+                self.mtop += 1
+                guard -= 1
+        self._clamp_mtop()
 
     def _choice_cells(self, row):
         """Tappable cells for a choice-icons / sprite-tiles card: one box per
@@ -721,8 +866,10 @@ class Workstation:
                 return
             if i.pressed("up"):
                 self.msel = (self.msel - 1) % len(ed)
+                self._reveal_card(self.msel)
             if i.pressed("down"):
                 self.msel = (self.msel + 1) % len(ed)
+                self._reveal_card(self.msel)
             if i.pressed("left"):
                 self.adjust(-1)
             if i.pressed("right"):
@@ -892,6 +1039,10 @@ class Workstation:
                     self.set_menu_view("code")
                 elif _in(px, py, _CLOSE_BTN):
                     self._leave_menu()
+                elif self._cards_scrollable() and _in(px, py, _CARD_SCROLL_UP):
+                    self.scroll_cards(-1)
+                elif self._cards_scrollable() and _in(px, py, _CARD_SCROLL_DN):
+                    self.scroll_cards(1)
                 elif ci is not None:
                     self._card_tap(px, py, ci)
 
@@ -936,6 +1087,10 @@ class Workstation:
             pe.select(-1)
         elif _in(px, py, _SPR_NEXT):
             pe.select(1)
+        elif _in(px, py, _PAINT_GET):          # import the tile from the shared sheet
+            self.share_tile_get()
+        elif _in(px, py, _PAINT_PUT):          # save the tile to the shared sheet
+            self.share_tile_put()
         elif _in(px, py, _PAINT_SAVE):
             self.save_sprites()
         elif _in(px, py, _PAINT_CLOSE):
@@ -984,7 +1139,16 @@ class Workstation:
             if self.menu_view == "paint":
                 self._draw_paint()
             else:
-                self._draw_cards()
+                try:
+                    self._draw_cards()
+                except Exception as exc:  # noqa: BLE001
+                    # A malformed card (e.g. a bad tiles/choices entry) must NOT
+                    # escape the frame loop -- the device would hang silently with
+                    # no error surface. Fall back to a readable panel + CLOSE.
+                    self.cart_error = _err_text(exc)
+                    print("KidCode cards error:", exc)
+                    self._draw_error_panel()
+                    self._icon_btn("close", "", _CLOSE_BTN, NAMES["red"])
         self._draw_cursor()
         self.comp.flush()
 
@@ -1046,6 +1210,11 @@ class Workstation:
         cv.print("MAKE IT MINE", 46, 22, NAMES["white"], 2)
         for row in self._card_layout():
             self._draw_card(row)
+        if self._cards_scrollable():           # up/down chevrons when cards overflow
+            if self.mtop > 0:
+                cv.print("^", _CARD_SCROLL_UP[0], _CARD_SCROLL_UP[1], NAMES["yellow"], 2)
+            if self.mtop < self._max_mtop():
+                cv.print("v", _CARD_SCROLL_DN[0], _CARD_SCROLL_DN[1], NAMES["yellow"], 2)
         self._icon_btn("run", "GO", _RUN_BTN, NAMES["green"])
         self._icon_btn("edit", "CODE", _CODE_BTN, NAMES["blue"])
         self._icon_btn("close", "", _CLOSE_BTN, NAMES["red"])
@@ -1103,8 +1272,10 @@ class Workstation:
         cv.rect(kx - 1, ty - 3, 3, 9, NAMES["white"])               # knob
 
     def _draw_count(self, row):
-        # N repeated icons == the value, so a count reads at a glance. Capped so a
-        # big number stays one tidy row; the number itself is the label cue above.
+        # N repeated icons == the value, so a count reads at a glance. Kept to ONE
+        # tidy row -- the count card is 32px tall, so a 2nd row of glyphs would
+        # spill into the next card. The number itself is the label cue above, so an
+        # over-cap value still reads correctly even when not every icon fits.
         f = row["f"]
         x, y, w = row["x"], row["y"], row["w"]
         cur = self.config.get(f["key"], f.get("default", 0))
@@ -1113,14 +1284,13 @@ class Workstation:
         except (TypeError, ValueError):
             n = 0
         glyph = f.get("icon", "star")
-        cap = int(f.get("count_max", min(f.get("max", 12), 14)))
-        shown = max(0, min(n, cap))
         step = 16
         per_row = max(1, (w - 4) // step)
+        cap = int(f.get("count_max", min(f.get("max", 12), 14)))
+        shown = max(0, min(n, cap, per_row))    # clamp to a single row
         for k in range(shown):
-            gx = x + 2 + (k % per_row) * step
-            gy = y + 14 + (k // per_row) * 14
-            self._glyph(glyph, (gx, gy, 14, 14), NAMES["yellow"])
+            gx = x + 2 + k * step
+            self._glyph(glyph, (gx, y + 14, 14, 14), NAMES["yellow"])
 
     def _draw_choice_icons(self, row):
         # Each choice is its own tappable cell -- a glyph (choice-icons) or a real
@@ -1144,10 +1314,11 @@ class Workstation:
                 self._glyph(glyph, (cx + (cw - 14) // 2, cy + (ch - 14) // 2, 14, 14),
                             NAMES["white"])
 
-    # A few named background presets, each a tiny "what the screen will look like"
-    # thumbnail. A cart reads the chosen name in cfg("bg") and paints to match
-    # (e.g. _bg(name) at the top of _draw). New presets just add a clause here.
-    _BG_PRESETS = ("black", "dark_blue", "night", "stripes")
+    # Each bg-thumbs choice is drawn as a tiny "what the screen will look like"
+    # preview. A cart reads the chosen name in cfg("bg") and paints to match.
+    # "night"/"stripes" get a patterned thumbnail; any other name renders as a
+    # solid swatch via NAMES.get, so arbitrary palette colors (e.g. "indigo")
+    # just work -- no preset list to keep in sync.
 
     def _draw_bg_thumb(self, name, rect):
         """Paint a small preview of background preset `name` inside `rect`."""
@@ -1273,6 +1444,14 @@ class Workstation:
             cv.pix(cx + 2, cy + 2, c)
         elif kind == "dot":                             # generic count/choice token
             cv.circ(cx, cy, 3, c)
+        elif kind == "get":                             # shared->cart: down-arrow (#18)
+            cv.rect(cx, y + 2, 1, 7, c)                 # shaft
+            cv.line(x + 3, y + 6, cx, y + 10, c)        # arrowhead
+            cv.line(x + w - 4, y + 6, cx, y + 10, c)
+        elif kind == "put":                             # cart->shared: up-arrow (#18)
+            cv.rect(cx, y + 4, 1, 7, c)                 # shaft
+            cv.line(x + 3, y + 7, cx, y + 3, c)         # arrowhead
+            cv.line(x + w - 4, y + 7, cx, y + 3, c)
         elif kind == "heart":
             cv.circ(cx - 2, cy - 1, 2, c)
             cv.circ(cx + 2, cy - 1, 2, c)
@@ -1313,5 +1492,11 @@ class Workstation:
             for lx in range(8):
                 cv.rect(ppx + lx * ps, ppy + ly * ps, ps, ps, sheet.tget(pe.n, lx, ly))
         cv.rectb(ppx, ppy, 8 * ps, 8 * ps, NAMES["dark_grey"])
+        # Cross-cart sprite reuse (#18): GET pulls this tile out of the shared
+        # sheet, PUT pushes it in. A small status line shows the last result.
+        self._icon_btn("get", "GET", _PAINT_GET, NAMES["indigo"])
+        self._icon_btn("put", "PUT", _PAINT_PUT, NAMES["dark_green"])
+        if self.paint_status:
+            cv.print(self.paint_status[:18], 110, 196, NAMES["yellow"], 1)
         self._btn("SAVE", _PAINT_SAVE, NAMES["green"])
         self._btn("CLOSE", _PAINT_CLOSE, NAMES["red"])

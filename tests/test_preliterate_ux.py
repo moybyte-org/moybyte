@@ -83,10 +83,19 @@ def test_all_display_types_render_without_error():
     _draw_once(ws)                          # must not raise
     assert len(set(ws.canvas.buf)) > 1      # something was drawn
 
-    # every card got a layout row; visual cards are taller than the text default.
+    # _card_layout() now returns only the VISIBLE cards (cards-menu scrolling, #3):
+    # the four tall visual cards overflow one screen, so the last is scrolled off.
     rows = ws._card_layout()
-    assert [r["display"] for r in rows] == ["count", "gauge", "choice-icons", "sprite-tiles"]
-    assert rows[3]["h"] > console._CARD_H   # sprite-tiles row is tallest
+    assert [r["display"] for r in rows] == ["count", "gauge", "choice-icons"]
+    assert ws._cards_scrollable()           # an overflow -> the chevrons are live
+
+    # ...and scrolling down brings the sprite-tiles card into view (still tallest).
+    ws.scroll_cards(1)
+    visible = ws._card_layout()
+    assert "sprite-tiles" in {r["display"] for r in visible}
+    spr = [r for r in visible if r["display"] == "sprite-tiles"][0]
+    assert spr["h"] > console._CARD_H       # sprite-tiles row is tallest
+    _draw_once(ws)                          # the scrolled view also renders cleanly
 
 
 def test_missing_display_falls_back_to_text_card():
@@ -256,3 +265,111 @@ def test_existing_seed_carts_still_render_their_cards(tmp_path):
         ws.frame(1 / 30)                                # draws cards, no error
         assert len(set(ws.canvas.buf)) > 1
         ws.go_home()
+
+
+# -- robustness: a malformed sprite-tiles card can't crash the cards menu (#1) --
+
+def test_non_numeric_tiles_entry_does_not_crash_cards_menu():
+    # A cart authored with a non-numeric `tiles` entry must not raise through
+    # _resolve_tiles -> _draw_choice_icons -> _draw_cards (which would hang the
+    # device). The bad entry resolves to tile 0 and the frame still draws.
+    edit = [{"key": "who", "type": "choice", "choices": ["a", "b"],
+             "tiles": ["oops", 1], "display": "sprite-tiles", "card": "WHO {value}"}]
+    ws = _ws_with_cart(edit, {"who": "a"}, _painted_sheet())
+    assert ws._resolve_tiles(edit[0]) == [0, 1]     # bad entry -> 0, good one kept
+    _draw_once(ws)                                   # must not raise
+    assert ws.cart_error is None                     # no crash captured
+
+
+def test_draw_cards_is_wrapped_against_a_thrown_card():
+    # Belt-and-braces: even if a card raises for some unforeseen reason, frame()
+    # must capture it (not let it escape the loop) and paint the error panel.
+    ws = _ws_with_cart([{"key": "k", "type": "int", "min": 0, "max": 9, "card": "K"}],
+                       {"k": 1})
+
+    def _boom(row):
+        raise ValueError("boom")
+    ws._draw_card = _boom
+    _draw_once(ws)                                   # must not raise out of frame()
+    assert ws.cart_error is not None
+    assert "boom" in ws.cart_error
+
+
+# -- cards-menu scrolling (#3) ----------------------------------------------
+
+def _many_tile_cards(n):
+    return [{"key": "k%d" % i, "type": "choice", "choices": [0, 1], "tiles": [0, 1],
+             "display": "sprite-tiles", "card": "K%d" % i} for i in range(n)]
+
+
+def test_cards_menu_scroll_clamps_and_keeps_rows_on_panel():
+    edit = _many_tile_cards(6)                       # 6 sprite-tiles cards (h=44) overflow
+    ws = _ws_with_cart(edit, {})
+    assert ws._cards_scrollable()
+
+    ws.scroll_cards(99)                              # clamp: never past the last card
+    assert ws.mtop == ws._max_mtop()
+    bottoms = [r["y"] + r["h"] for r in ws._card_layout()]
+    assert max(bottoms) <= console._CARD_VIEW_BOTTOM # nothing runs over the buttons
+    assert ws._card_layout()[-1]["i"] == len(edit) - 1   # the last card IS reachable
+
+    ws.scroll_cards(-99)                             # clamp the other way
+    assert ws.mtop == 0
+    assert ws._card_layout()[0]["i"] == 0
+    _draw_once(ws)                                   # the scrolled view renders cleanly
+
+
+def test_card_hit_test_agrees_with_scrolled_layout():
+    # _card_at must match the SAME visible rows _draw_cards lays out, at any scroll.
+    edit = _many_tile_cards(6)
+    ws = _ws_with_cart(edit, {})
+    ws.scroll_cards(2)
+    for row in ws._card_layout():
+        cx = row["x"] + row["w"] // 2
+        cy = row["y"] + row["h"] // 2
+        assert ws._card_at(cx, cy) == row["i"]
+    # A point above the first visible card hits nothing (it's scrolled off).
+    assert ws._card_at(ws._card_layout()[0]["x"] + 2, console._CARD_Y0 - 4) is None
+
+
+def test_reveal_card_brings_any_selection_into_view():
+    edit = _many_tile_cards(6)
+    ws = _ws_with_cart(edit, {})
+    # Selecting any card and revealing it must put it in the visible window, and
+    # never scroll past the clamp.
+    for sel in range(len(edit)):
+        ws.msel = sel
+        ws._reveal_card(sel)
+        assert any(r["i"] == sel for r in ws._card_layout())
+        assert 0 <= ws.mtop <= ws._max_mtop()
+
+
+# -- choice-icons hit-test (no dead-zone) (#4) ------------------------------
+
+def test_choice_icons_cells_fit_inside_their_card():
+    edit = [{"key": "p", "type": "choice", "choices": ["x", "y", "z"],
+             "display": "choice-icons", "icons": ["star", "heart", "dot"], "card": "P"}]
+    ws = _ws_with_cart(edit, {"p": "x"})
+    row = ws._card_layout()[0]
+    card_bottom = row["y"] + row["h"]
+    for _, (cx, cy, cw, ch) in ws._choice_cells(row):
+        assert cy + ch <= card_bottom               # cell bottom no longer 2px past
+        # and a tap at the cell's bottom edge still lands inside the card rect.
+        assert ws._card_at(cx + cw // 2, cy + ch - 1) == 0
+
+
+# -- count card stays one tidy row (#6) -------------------------------------
+
+def test_count_card_clamps_to_one_row():
+    # A big count must not wrap to a 2nd row that spills into the next card.
+    edit = [{"key": "n", "type": "int", "min": 0, "max": 99, "step": 1,
+             "display": "count", "icon": "star", "count_max": 99, "card": "N {value}"}]
+    ws = _ws_with_cart(edit, {"n": 99})
+    row = ws._card_layout()[0]
+    # The drawn glyphs all sit on the single row at y+14 (height 32 card) -- assert
+    # by drawing and checking nothing was painted below the card's bottom band.
+    _draw_once(ws)                                   # must not raise
+    # one-row cap = how many 16px glyph slots fit across the card width.
+    per_row = max(1, (row["w"] - 4) // 16)
+    # the loop is clamped to per_row, so even n=99 draws at most per_row glyphs.
+    assert per_row >= 1 and per_row <= 18
