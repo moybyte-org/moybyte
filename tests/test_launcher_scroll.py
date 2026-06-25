@@ -102,11 +102,17 @@ def test_dwell_in_bottom_edge_autoscrolls(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     assert ws.launcher.top == 0
 
-    # Hold a finger still in the bottom edge band -> the list autoscrolls down.
+    # Drag DOWN into the bottom edge band (establishing a real drag), then dwell
+    # there -> the list keeps autoscrolling. Autoscroll only fires once the gesture
+    # is classified as a drag (a held-still tap must NOT autoscroll -- see below).
+    y0 = C._LIST_Y0 + 8
     ey = C._LIST_BOTTOM - 4
-    drv.touch(160, ey)
+    drv.touch(160, y0)
+    drv.frame(1 / 30)
+    drv.touch_drag(160, ey)            # move into the band -> moved=True
+    drv.frame(1 / 30)
     for _ in range(40):
-        drv.touch_drag(160, ey)        # held, not moving (dwell)
+        drv.touch_drag(160, ey)        # dwell in the band
         drv.frame(1 / 30)
         if ws.launcher.top > 0:
             break
@@ -123,8 +129,13 @@ def test_dwell_in_top_edge_autoscrolls_back(tmp_path):
     ws.launcher.top = ws.launcher.max_top()
     assert ws.launcher.top > 0
 
+    # Drag UP into the top edge band, then dwell -> autoscroll back to the top.
+    y0 = C._LIST_BOTTOM - 8
     ty = C._LIST_Y0 + 4
-    drv.touch(160, ty)
+    drv.touch(160, y0)
+    drv.frame(1 / 30)
+    drv.touch_drag(160, ty)            # move into the TOP band -> moved=True
+    drv.frame(1 / 30)
     for _ in range(40):
         drv.touch_drag(160, ty)        # dwell in the TOP band
         drv.frame(1 / 30)
@@ -132,6 +143,116 @@ def test_dwell_in_top_edge_autoscrolls_back(tmp_path):
             break
     drv.touch_up()
     assert ws.launcher.top == 0
+
+
+def test_held_tap_on_first_tile_opens_that_tile(tmp_path):
+    """A finger HELD still on the FIRST visible tile (whose y-range overlaps the
+    top autoscroll band) must open THAT tile, not autoscroll and open a neighbor
+    that slid under the still finger (#1)."""
+    from runtime import host_app
+
+    ws = _ws_with_carts(tmp_path, 10)
+    drv = host_app.ConsoleDriver(ws)
+    ws.launcher.top = 0
+    target = ws.launcher.items[0]["title"]
+
+    r = ws.launcher.tile_rect(0)
+    cx, cy = r[0] + r[2] // 2, r[1] + 4        # near the top edge, inside the band
+    drv.touch(cx, cy)
+    for _ in range(40):                         # hold, perfectly still
+        drv.touch_drag(cx, cy)
+        drv.frame(1 / 30)
+    assert ws.launcher.top == 0                 # a still finger did NOT autoscroll
+    drv.touch_up()
+    drv.frame(1 / 30)
+
+    assert ws.screen == "desktop"
+    assert ws.launcher.items[ws.launcher.sel]["title"] == target
+
+
+def test_held_tap_on_last_tile_opens_that_tile(tmp_path):
+    """A finger HELD still on the LAST visible tile (overlapping the bottom band)
+    must open THAT tile, not its neighbor (#1)."""
+    from runtime import host_app
+
+    ws = _ws_with_carts(tmp_path, 10)
+    drv = host_app.ConsoleDriver(ws)
+    ws.launcher.top = 0
+    last_visible = ws.launcher.VISIBLE - 1
+    target = ws.launcher.items[last_visible]["title"]
+
+    r = ws.launcher.tile_rect(last_visible)
+    cx, cy = r[0] + r[2] // 2, r[1] + r[3] - 4   # near the bottom edge, in the band
+    drv.touch(cx, cy)
+    for _ in range(40):                          # hold, perfectly still
+        drv.touch_drag(cx, cy)
+        drv.frame(1 / 30)
+    assert ws.launcher.top == 0                  # a still finger did NOT autoscroll
+    drv.touch_up()
+    drv.frame(1 / 30)
+
+    assert ws.screen == "desktop"
+    assert ws.launcher.items[ws.launcher.sel]["title"] == target
+
+
+def test_one_px_down_drag_does_not_scroll_or_misopen(tmp_path):
+    """A 1px DOWNWARD move must NOT scroll a row (the floor-division bug made
+    -1 // 40 == -1, scrolling a whole row) and must still open the tapped tile (#2)."""
+    from runtime import host_app
+
+    ws = _ws_with_carts(tmp_path, 12)
+    drv = host_app.ConsoleDriver(ws)
+    # Start mid-list so a wrongful scroll(-1) actually moves `top` (at top=0 it
+    # would clamp to 0 and hide the bug). Tap visible row 1 = item index top+1.
+    ws.launcher.top = 3
+    idx = ws.launcher.top + 1
+    target = ws.launcher.items[idx]["title"]
+
+    r = ws.launcher.tile_rect(idx)
+    cx, cy = r[0] + r[2] // 2, r[1] + r[3] // 2
+    drv.touch(cx, cy)
+    drv.frame(1 / 30)
+    drv.touch_drag(cx, cy + 1)            # 1px DOWN -- below the moved threshold
+    drv.frame(1 / 30)
+    assert ws.launcher.top == 3           # no row scrolled (floor bug would do -1)
+    drv.touch_up()
+    drv.frame(1 / 30)
+
+    assert ws.screen == "desktop"
+    assert ws.launcher.items[ws.launcher.sel]["title"] == target   # the RIGHT cart
+
+
+def test_up_and_down_drag_thresholds_are_symmetric(tmp_path):
+    """One full TILE_PITCH each way steps exactly one row; sub-pitch moves step
+    none. Up and down must be symmetric (no floor-division asymmetry, #2)."""
+    from runtime import console as C
+    from runtime import host_app
+
+    pitch = C.Launcher.TILE_PITCH
+
+    def steps_after_drag(start_top, dy):
+        ws = _ws_with_carts(tmp_path, 12)
+        drv = host_app.ConsoleDriver(ws)
+        ws.launcher.top = start_top
+        y0 = C._LIST_Y0 + 8
+        drv.touch(160, y0)
+        drv.frame(1 / 30)
+        drv.touch_drag(160, y0 + dy)
+        drv.frame(1 / 30)
+        moved = ws.launcher.top - start_top
+        drv.touch_up()
+        return moved
+
+    mid = C.Launcher(_ws_with_carts(tmp_path, 12).launcher.items).max_top() // 2
+
+    # Just under a pitch each way -> no step (this is what the floor bug broke).
+    assert steps_after_drag(mid, (pitch - 1)) == 0
+    assert steps_after_drag(mid, -(pitch - 1)) == 0
+    # Exactly one pitch each way -> exactly one row, symmetric magnitude.
+    up = steps_after_drag(mid, -pitch)                  # finger moves UP -> scroll down (+1)
+    down = steps_after_drag(mid, pitch)                 # finger moves DOWN -> scroll up (-1)
+    assert up == 1
+    assert down == -1
 
 
 # -- arrows / trackball nav still scrolls ----------------------------------
