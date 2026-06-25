@@ -99,7 +99,15 @@ def ensure_dirs(root=CARTS_DIR):
 
 
 def seed_builtins(seed_list, root=CARTS_DIR):
-    """Write any missing built-in carts to SD as editable .kcart folders."""
+    """Write any missing built-in carts to SD as editable .kcart folders.
+
+    A seed dict that carries a non-empty "sprites" hex blob also gets a
+    sprites.kgfx written, so the device's paint editor (and the cart's spr()
+    tile draws) have the real art -- without this the device seeds blank sheets
+    and the games fall back to nothing. The manifest is COMPLETE (canvas +
+    permissions + full edit schema) so the visual "Make it mine" cards render on
+    device exactly as on host. Existing carts on SD are left untouched (so the
+    user clears /sd/kidcode/carts once to pick up new seeds)."""
     for cart in seed_list:
         d = root + "/" + slug(cart["title"]) + ".kcart"
         if _exists(d):
@@ -109,9 +117,16 @@ def seed_builtins(seed_list, root=CARTS_DIR):
             "format": CART_FORMAT, "title": cart["title"], "type": cart["type"],
             "runtime": "python", "main": "main.py", "edit": cart.get("edit", []),
         }
+        if cart.get("canvas") is not None:
+            manifest["canvas"] = cart["canvas"]
+        if cart.get("permissions") is not None:
+            manifest["permissions"] = cart["permissions"]
         _write(d + "/manifest.json", json.dumps(manifest))
         _write(d + "/main.py", cart["src"])
         _write(d + "/config.json", json.dumps(cart["cfg"]))
+        sprites = cart.get("sprites")
+        if sprites:
+            _write(d + "/sprites.kgfx", sprites)
 
 
 def load(path):
