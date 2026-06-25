@@ -152,6 +152,46 @@ def test_platformer_falling_off_respawns(tmp_path):
     assert ws.ns["py"] == float(spawn[1] * ts)            # back at the spawn tile
 
 
+def test_platformer_level_rows_are_equal_width():
+    # The invisible side walls depend on every row being the same length; ragged
+    # rows used to give some rows a wall 1 col closer than others (#19 review).
+    import re
+
+    src = (SYSTEM_CARTS / "platformer.kcart" / "main.py").read_text(encoding="utf-8")
+    block = src.split("LEVEL = [", 1)[1].split("]", 1)[0]
+    rows = re.findall(r'"([^"]*)"', block)
+    assert rows, "could not parse the LEVEL map"
+    widths = {len(r) for r in rows}
+    assert widths == {20}, "ragged LEVEL rows, widths seen: " + repr(sorted(widths))
+
+
+def test_platformer_attract_collects_coins_and_completes(tmp_path):
+    # The attract auto-pilot (no input) must make REAL progress, not sit in a
+    # dead limit-cycle: over a long headless run it has to collect every coin and
+    # actually complete a round (#19 review: it used to win 0/10 forever). This is
+    # the same code path the device runs.
+    from runtime import host_app
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_cart(ws, "Hop Quest")
+    ncoins = len(ws.ns["coins"])
+    assert ncoins > 0
+
+    max_got = 0
+    full_wins = 0
+    for _ in range(3000):                                 # long run, no input
+        ws.input.begin_frame()                            # nothing held -> attract
+        ws.frame(1 / 30)
+        got = sum(1 for c in ws.ns["coins"] if c[2])
+        if got > max_got:
+            max_got = got
+        if ws.ns["won"] >= 1.5:                           # the frame a round is won
+            full_wins += 1
+
+    assert max_got == ncoins, "attract only collected %d/%d coins" % (max_got, ncoins)
+    assert full_wins >= 1, "attract never completed a round in 3000 frames"
+
+
 def test_tap_red_scores_red_and_penalizes_other(tmp_path):
     from runtime import host_app
 

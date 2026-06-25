@@ -5,7 +5,7 @@
   "runtime": "python",
   "main": "main.py",
   "system": true,
-  "canvas": { "width": 480, "height": 270, "palette": "kid64" },
+  "canvas": { "width": 320, "height": 240, "palette": "kid64" },
   "permissions": ["graphics", "input"],
   "safe_to_share": true,
   "config": {

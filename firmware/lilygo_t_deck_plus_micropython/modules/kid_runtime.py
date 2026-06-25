@@ -1037,20 +1037,24 @@ PLAT_SRC = """# Hop Quest -- a single-screen platformer cartridge. Walk LEFT / R
 
 TS = 16          # tile size in pixels
 # Level map: # solid, = one-way-ish platform (also solid here), C coin, G goal,
-# S spawn, space empty. 20 cols x 13 rows fits the 320x240 canvas (top HUD aside).
+# S spawn, space empty. EVERY row is exactly 20 cols x 13 rows -> the 320x240
+# canvas (top HUD aside). The terrain is a solid staircase climbing right from the
+# spawn to a plateau with the goal; a coin sits one tile above each tread. Because
+# the steps are a *filled* wedge, even a short hop lands on solid ground and keeps
+# the climb going -- which is what lets the attract auto-pilot clear every coin.
 LEVEL = [
     "                    ",
     "                    ",
-    "        CCC         ",
-    "      #######        ",
-    "                  G ",
-    "   C          #### ",
-    "  ####   CC         ",
-    "          ##        ",
-    " S        C    C    ",
-    "####    #####  #### ",
-    "             C      ",
-    "          ####### C ",
+    "                 C G",
+    "              C ####",
+    "            C ######",
+    "          C ########",
+    "        C ##########",
+    "      C ############",
+    "    C ##############",
+    "  C ################",
+    " SC#################",
+    "####################",
     "####################",
 ]
 
@@ -1156,23 +1160,31 @@ def _update(dt):
     right = btn("right")
     jump = btn("up") or btn("a") or btn("run")
     any_input = left or right or jump
-    if not any_input:
-        # attract mode: drift toward the nearest uncollected coin (or the goal)
-        target = None
-        for c in coins:
-            if not c[2]:
-                target = (c[0] * TS, c[1] * TS)
-                break
-        if target is None:
-            target = (goal[0] * TS, goal[1] * TS)
-        if target[0] > px + 2:
+    attract = not any_input
+    if attract:
+        # Attract auto-pilot: head toward the goal column and HOP whenever the
+        # staircase rises ahead. The walk direction always pushes toward the goal
+        # so it keeps advancing (no in-place bounce); the lateral momentum during
+        # the hop carries the hero onto the next tread, so coin-by-coin it climbs
+        # the whole staircase and reaches the goal -> the round completes + resets.
+        gx = goal[0] * TS
+        if gx > px + 2:
             right = True
-        elif target[0] < px - 2:
+        elif gx < px - 2:
             left = True
         ai_jump -= dt
-        if (target[1] < py - 4 or vx == 0.0) and on_ground and ai_jump <= 0.0:
+        ddir = 1 if right else (-1 if left else 0)
+        wall_ahead = False
+        if on_ground and ddir != 0:
+            edge = px + (PW if ddir > 0 else 0)
+            ahead_tx = int(edge + ddir * 3) // TS
+            for ty in (int(py), int(py + PH // 2), int(py + PH - 1)):
+                if _solid(ahead_tx, ty // TS):
+                    wall_ahead = True
+                    break
+        if wall_ahead and on_ground and ai_jump <= 0.0:
             jump = True
-            ai_jump = 0.6
+            ai_jump = 0.4
     vx = 0.0
     if left:
         vx = -move
@@ -1183,7 +1195,9 @@ def _update(dt):
     if vy > 360.0:
         vy = 360.0
     if jump and on_ground:
-        vy = -float(cfg("jump", 230))
+        # The auto-pilot uses a fixed, tuned hop so its climb is reliable no matter
+        # what JUMP power the kid has dialled in; a real player gets cfg("jump").
+        vy = -(210.0 if attract else float(cfg("jump", 230)))
         on_ground = False
     # move X then Y with tile collision
     nx = px + vx * dt
@@ -1518,7 +1532,7 @@ def _draw():
 
 CARTS = [
     {"title": "Space Desktop", "type": "wallpaper", "src": SPACE_SRC,
-     "canvas": {"width": 480, "height": 270, "palette": "kid64"},
+     "canvas": {"width": 320, "height": 240, "palette": "kid64"},
      "permissions": ["graphics", "input"],
      "cfg": {"star_count": 80, "star_speed": 30, "bg": "dark_blue", "pet": "frog"},
      "edit": [
@@ -1528,7 +1542,7 @@ CARTS = [
          {"key": "bg", "label": "BG", "type": "choice", "choices": ["dark_blue", "night", "stripes", "indigo"], "display": "bg-thumbs", "card": "SKY IS {value}"},
      ]},
     {"title": "Ocean Desktop", "type": "wallpaper", "src": OCEAN_SRC,
-     "canvas": {"width": 480, "height": 270, "palette": "kid64"},
+     "canvas": {"width": 320, "height": 240, "palette": "kid64"},
      "permissions": ["graphics", "input"],
      "cfg": {"bubble_count": 60, "rise_speed": 25, "water": "blue"},
      "edit": [
@@ -1538,7 +1552,7 @@ CARTS = [
      ]},
     {"title": "Star Catcher", "type": "game", "src": STAR_SRC,
      "sprites": STAR_GFX,
-     "canvas": {"width": 480, "height": 270, "palette": "kid64"},
+     "canvas": {"width": 320, "height": 240, "palette": "kid64"},
      "permissions": ["graphics", "input"],
      "cfg": {"star_count": 5, "fall_speed": 70, "basket": 0},
      "edit": [
@@ -1548,7 +1562,7 @@ CARTS = [
      ]},
     {"title": "Pixel Pet", "type": "game", "src": PET_SRC,
      "sprites": PET_GFX,
-     "canvas": {"width": 480, "height": 270, "palette": "kid64"},
+     "canvas": {"width": 320, "height": 240, "palette": "kid64"},
      "permissions": ["graphics", "input"],
      "cfg": {"pet": 0, "decay": 4, "bg": "dark_purple"},
      "edit": [
@@ -1558,7 +1572,7 @@ CARTS = [
      ]},
     {"title": "Tiny Runner", "type": "game", "src": RUNNER_SRC,
      "sprites": RUNNER_GFX,
-     "canvas": {"width": 480, "height": 270, "palette": "kid64"},
+     "canvas": {"width": 320, "height": 240, "palette": "kid64"},
      "permissions": ["graphics", "input"],
      "cfg": {"speed": 130, "jump": 220, "hero": 0, "sky": "dark_blue"},
      "edit": [
@@ -1569,7 +1583,7 @@ CARTS = [
      ]},
     {"title": "Hop Quest", "type": "game", "src": PLAT_SRC,
      "sprites": PLAT_GFX,
-     "canvas": {"width": 480, "height": 270, "palette": "kid64"},
+     "canvas": {"width": 320, "height": 240, "palette": "kid64"},
      "permissions": ["graphics", "input"],
      "cfg": {"speed": 90, "jump": 230, "hero": 0, "sky": "dark_blue"},
      "edit": [
@@ -1579,7 +1593,7 @@ CARTS = [
          {"key": "sky", "label": "SKY", "type": "choice", "choices": ["dark_blue", "indigo", "dark_purple", "black"], "card": "SKY IS {value}"},
      ]},
     {"title": "Tap Only Red", "type": "game", "src": TAPRED_SRC,
-     "canvas": {"width": 480, "height": 270, "palette": "kid64"},
+     "canvas": {"width": 320, "height": 240, "palette": "kid64"},
      "permissions": ["graphics", "input"],
      "cfg": {"rise": 45, "red_share": 40, "max_bubbles": 8},
      "edit": [
