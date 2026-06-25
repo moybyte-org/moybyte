@@ -350,6 +350,37 @@ _PAINT_PUT = (210, 154, 92, 20)
 _CURSOR_BASE = 7
 _CURSOR_ACCEL = 2
 
+# --- Button icon glyphs (the pre-literate icon vocabulary) ------------------
+# 1-bit, recolorable pixel bitmaps designed on a 12x12 grid at the native button
+# size (boxes are 14-16px), then centered in each button's rect and blitted in
+# the requested palette color via the indexed primitives only -- so they render
+# identically on host (runtime/canvas.py) and the frozen device console. Each
+# glyph is a tuple of 12 ints: row r, bit (11 - col) set => pixel on. Constant
+# (no per-frame allocation; freezes into firmware at ~15*12 ints).
+#
+# Hand-authored at this grid, adapted from the Pixelarticons set
+# (https://pixelarticons.com, MIT License (c) Gerrit Halfmann) -- a purpose-built
+# pixel-icon vocabulary; shapes traced down to 12x12 and hand-cleaned for
+# legibility at button size. MIT permits this use; this comment is the notice.
+_GLYPH_SIZE = 12
+_GLYPHS = {
+    "run":    (0x000, 0x180, 0x1C0, 0x1E0, 0x1F0, 0x1F8, 0x1F8, 0x1F0, 0x1E0, 0x1C0, 0x180, 0x000),
+    "save":   (0x000, 0x7FE, 0x402, 0x5FA, 0x402, 0x402, 0x4F2, 0x492, 0x492, 0x492, 0x7FE, 0x000),
+    "close":  (0x000, 0x204, 0x30C, 0x198, 0x0F0, 0x060, 0x060, 0x0F0, 0x198, 0x30C, 0x204, 0x000),
+    "edit":   (0x01E, 0x03E, 0x07C, 0x0F8, 0x0F0, 0x1E0, 0x3C0, 0x780, 0x700, 0x600, 0x400, 0x000),
+    "paint":  (0x006, 0x00C, 0x018, 0x030, 0x060, 0x0E0, 0x1F0, 0x1F0, 0x1F0, 0x0E0, 0x000, 0x000),
+    "home":   (0x000, 0x060, 0x0F0, 0x1F8, 0x3FC, 0x7FE, 0x204, 0x264, 0x264, 0x264, 0x3FC, 0x000),
+    "minus":  (0x000, 0x000, 0x000, 0x000, 0x000, 0x7FE, 0x7FE, 0x000, 0x000, 0x000, 0x000, 0x000),
+    "plus":   (0x000, 0x000, 0x060, 0x060, 0x060, 0x7FE, 0x7FE, 0x060, 0x060, 0x060, 0x000, 0x000),
+    "turtle": (0x000, 0x0F8, 0x1FC, 0x3FE, 0x3FE, 0x3FE, 0x3FE, 0x2ED, 0x653, 0x000, 0x000, 0x000),
+    "rabbit": (0x220, 0x220, 0x220, 0x360, 0x1C0, 0x3E0, 0x7F4, 0x7F0, 0x3E0, 0x000, 0x000, 0x000),
+    "star":   (0x000, 0x060, 0x060, 0x0F0, 0xFFC, 0x7F8, 0x3F0, 0x3F0, 0x618, 0x618, 0x000, 0x000),
+    "dot":    (0x000, 0x000, 0x000, 0x0F0, 0x1F8, 0x1F8, 0x1F8, 0x0F0, 0x000, 0x000, 0x000, 0x000),
+    "get":    (0x000, 0x060, 0x060, 0x060, 0x264, 0x1F0, 0x0E0, 0x040, 0x7FE, 0x402, 0x7FE, 0x000),
+    "put":    (0x000, 0x040, 0x0E0, 0x1F0, 0x264, 0x060, 0x060, 0x060, 0x7FE, 0x402, 0x7FE, 0x000),
+    "heart":  (0x000, 0x30C, 0x79E, 0x7FE, 0x7FE, 0x7FE, 0x3FC, 0x1F8, 0x0F0, 0x060, 0x000, 0x000),
+}
+
 
 def _cursor_delta(n):
     # n = net pulses this frame on one axis. Precise on a slow roll
@@ -1601,72 +1632,33 @@ class Workstation:
 
     def _glyph(self, kind, rect, c):
         """Draw an icon glyph (no background) centered in `rect`, in color `c`.
-        The shared pre-literate icon vocabulary -- composed from the indexed
-        primitives only (pix/line/rect/rectb/circ/circb), so it renders identically
-        on host and device. Unknown kinds draw NOTHING, so every caller can keep a
-        text label as the guaranteed fallback."""
+        The shared pre-literate icon vocabulary -- a 12x12 1-bit pixel bitmap
+        (see _GLYPHS) blitted via the indexed primitives only (rect spans), so it
+        renders identically on host and device. Unknown kinds draw NOTHING, so
+        every caller can keep a text label as the guaranteed fallback."""
+        bits = _GLYPHS.get(kind)
+        if bits is None:                                # unknown -> nothing (fallback contract)
+            return
         cv = self.canvas
         x, y, w, h = rect
-        cx, cy = x + w // 2, y + h // 2
-        if kind == "run":                               # play triangle
-            for i in range(6):
-                hh = 10 - 2 * i
-                if hh > 0:
-                    cv.rect(x + (w - 8) // 2 + i, cy - 5 + i, 1, hh, c)
-        elif kind == "save":                            # down-into-tray arrow
-            cv.rect(cx, y + 2, 1, 6, c)
-            cv.line(x + 3, y + 6, cx, y + 10, c)
-            cv.line(x + w - 4, y + 6, cx, y + 10, c)
-        elif kind == "close":                           # X
-            cv.line(x + 3, y + 3, x + w - 4, y + h - 4, c)
-            cv.line(x + w - 4, y + 3, x + 3, y + h - 4, c)
-        elif kind == "edit":                            # pencil (diagonal + nib)
-            cv.line(x + 4, y + h - 5, x + w - 5, y + 4, c)
-            cv.line(x + 5, y + h - 5, x + w - 4, y + 5, c)
-            cv.rect(x + 2, y + h - 6, 3, 3, c)          # nib block
-        elif kind == "paint":                           # brush: handle + bristle
-            cv.line(cx + 5, y + 3, cx - 3, y + h - 6, c)
-            cv.rect(cx - 6, y + h - 7, 7, 5, c)         # bristle block
-        elif kind == "home":                            # house: roof + walls + door
-            for i in range(5):
-                cv.line(cx - i, cy - 4 + i, cx + i, cy - 4 + i, c)   # roof
-            cv.rectb(cx - 4, cy, 9, 6, c)               # walls
-            cv.rect(cx - 1, cy + 2, 3, 4, c)            # door
-        elif kind == "minus":
-            cv.rect(cx - 4, cy - 1, 9, 2, c)
-        elif kind == "plus":
-            cv.rect(cx - 4, cy - 1, 9, 2, c)
-            cv.rect(cx - 1, cy - 4, 2, 9, c)
-        elif kind == "turtle":                          # gauge low end (slow)
-            cv.circ(cx - 1, cy + 1, 3, c)               # shell
-            cv.rect(cx + 2, cy, 3, 2, c)                # head
-            cv.rect(cx - 5, cy + 3, 2, 2, c)            # foot
-        elif kind == "rabbit":                          # gauge high end (fast)
-            cv.circ(cx, cy + 1, 3, c)                   # body
-            cv.rect(cx - 1, cy - 5, 1, 4, c)            # ears
-            cv.rect(cx + 1, cy - 5, 1, 4, c)
-        elif kind == "star":                            # generic count token
-            cv.rect(cx - 3, cy, 7, 1, c)
-            cv.rect(cx, cy - 3, 1, 7, c)
-            cv.pix(cx - 2, cy - 2, c)
-            cv.pix(cx + 2, cy - 2, c)
-            cv.pix(cx - 2, cy + 2, c)
-            cv.pix(cx + 2, cy + 2, c)
-        elif kind == "dot":                             # generic count/choice token
-            cv.circ(cx, cy, 3, c)
-        elif kind == "get":                             # shared->cart: down-arrow (#18)
-            cv.rect(cx, y + 2, 1, 7, c)                 # shaft
-            cv.line(x + 3, y + 6, cx, y + 10, c)        # arrowhead
-            cv.line(x + w - 4, y + 6, cx, y + 10, c)
-        elif kind == "put":                             # cart->shared: up-arrow (#18)
-            cv.rect(cx, y + 4, 1, 7, c)                 # shaft
-            cv.line(x + 3, y + 7, cx, y + 3, c)         # arrowhead
-            cv.line(x + w - 4, y + 7, cx, y + 3, c)
-        elif kind == "heart":
-            cv.circ(cx - 2, cy - 1, 2, c)
-            cv.circ(cx + 2, cy - 1, 2, c)
-            for i in range(4):
-                cv.line(cx - 3 + i, cy + i, cx + 3 - i, cy + i, c)
+        n = _GLYPH_SIZE
+        # Center the 12x12 mask in the rect (centers match the old cx/cy glyphs).
+        ox = x + (w - n) // 2
+        oy = y + (h - n) // 2
+        for r in range(n):
+            row = bits[r]
+            if not row:
+                continue
+            yy = oy + r
+            run = 0                                     # length of the current on-run
+            for col in range(n):                        # walk L->R, coalescing runs
+                if row & (1 << (n - 1 - col)):
+                    run += 1
+                elif run:
+                    cv.rect(ox + col - run, yy, run, 1, c)
+                    run = 0
+            if run:
+                cv.rect(ox + n - run, yy, run, 1, c)
 
     def _draw_paint(self):
         cv = self.canvas
