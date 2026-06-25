@@ -45,20 +45,9 @@ check-portable:
 pack-example:
 	$(KIDCODE) pack examples/tiny_runner.kcproj --out /tmp/tiny_runner.kc8
 
-export-lilygo-example:
-	$(KIDCODE) export-device examples/tiny_runner.kcproj --board lilygo_t_deck_plus --out /tmp/kidcode_lilygo_t_deck_plus
-
-firmware-bundle-lilygo:
-	$(KIDCODE) firmware-header examples/tiny_runner.kcproj --board lilygo_t_deck_plus --out firmware/lilygo_t_deck_plus/include/kidcode_project_bundle.h
-
-firmware-build-lilygo: firmware-bundle-lilygo
-	pio run -d firmware/lilygo_t_deck_plus
-
 firmware-build-lilygo-micropython:
 	bash firmware/lilygo_t_deck_plus_micropython/build.sh
 
-firmware-sim-lilygo-micropython:
-	$(SYSTEM_PYTHON) tools/simulate_micropython_spike.py --renderer fake-lvgl --frames 120 --ascii
 
 firmware-flash-lilygo-micropython:
 	test -n "$(PORT)"
@@ -84,24 +73,3 @@ firmware-monitor-lilygo-micropython:
 	test -n "$(PORT)"
 	$(IDF_PYTHON) -m serial.tools.miniterm $(PORT) 115200
 
-firmware-upload-lilygo: firmware-bundle-lilygo
-	test -n "$(PORT)"
-	pio run -d firmware/lilygo_t_deck_plus -t upload --upload-port $(PORT)
-
-firmware-monitor-lilygo:
-	test -n "$(PORT)"
-	pio device monitor -d firmware/lilygo_t_deck_plus -b 115200 --port $(PORT)
-
-firmware-smoke-check-lilygo:
-	test -n "$(LOG)"
-	$(KIDCODE) firmware-smoke-check $(LOG) --board lilygo_t_deck_plus --project-id tiny_runner
-
-firmware-smoke-lilygo:
-	PORT_VALUE="$(PORT)"; \
-	if [ -z "$$PORT_VALUE" ]; then PORT_VALUE="$$( $(KIDCODE) device-port )" || exit $$?; fi; \
-	LOG_VALUE="$(LOG)"; \
-	echo "Using port $$PORT_VALUE"; \
-	echo "Writing serial log to $$LOG_VALUE"; \
-	$(MAKE) firmware-upload-lilygo PORT="$$PORT_VALUE"; \
-	timeout $(MONITOR_SECONDS)s pio device monitor -d firmware/lilygo_t_deck_plus -b 115200 --port "$$PORT_VALUE" --raw --quiet > "$$LOG_VALUE" || true; \
-	$(KIDCODE) firmware-smoke-check "$$LOG_VALUE" --board lilygo_t_deck_plus --project-id tiny_runner

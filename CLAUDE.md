@@ -60,8 +60,8 @@ make firmware-flash-lilygo-micropython PORT=/dev/ttyACM0           # esptool, de
 make firmware-monitor-lilygo-micropython PORT=/dev/ttyACM0         # miniterm @115200
 ```
 
-- The build (`firmware/lilygo_t_deck_plus_micropython/build.sh`) **clones `lvgl_micropython` into `.build/`**, stages the native C modules (`native/kc_gfx`, `kc_alloc`, and `kc_sd`) into its `ext_mod` tree (re-staged every build because `ext_mod` is wiped on re-clone), freezes the `modules/` Python, and emits `app` + full-flash images to `dist/` (both gitignored). It needs the ESP-IDF 5.5 toolchain (`IDF_PYTHON ?= ~/.espressif/.../idf5.5_py3.10_env/bin/python`).
-- There is an older Arduino/PlatformIO firmware in `firmware/lilygo_t_deck_plus/` (`make firmware-build-lilygo`, `firmware-smoke-lilygo`). It's a serial smoke test, not the console; don't confuse the two.
+- The build (`firmware/lilygo_t_deck_plus_micropython/build.sh`) **clones `lvgl_micropython` into `.build/`**, stages the native C modules (`native/kc_gfx`, `kc_alloc`, and `kc_sd`) into its `ext_mod` tree (re-staged every build because `ext_mod` is wiped on re-clone) and the shared `runtime/` modules (`editors`/`console`/`kid_carts`) into `modules/`, freezes the `modules/` Python, and emits `app` + full-flash images to `dist/` (both gitignored). It needs the ESP-IDF 5.5 toolchain (`IDF_PYTHON ?= ~/.espressif/.../idf5.5_py3.10_env/bin/python`).
+- The MicroPython console is the only firmware. (The older Arduino/PlatformIO serial-smoke firmware and the legacy LVGL `.kcproj` game-loop boot path were removed; git history has them.)
 
 ### Host == device: the shared console (important)
 

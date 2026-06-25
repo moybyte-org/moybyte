@@ -83,36 +83,12 @@ dist/<name>_full_dio_0x0.bin
 dist/<name>_full_qio_0x0.bin
 ```
 
-## Host Simulator
+## Host development
 
-The host simulator runs the frozen KidCode Python stack through CPython with a
-scripted keyboard and a recording renderer:
-
-```bash
-make firmware-sim-lilygo-micropython
-```
-
-Direct CLI example:
-
-```bash
-tools/simulate_micropython_spike.py --renderer fake-lvgl --frames 120 --input right:30,down:30,left:30,up:30 --ascii
-```
-
-External project-file example:
-
-```bash
-tools/simulate_micropython_spike.py --renderer fake-lvgl --source path/to/project.py --frames 60 --ascii
-```
-
-Renderer modes:
-
-- `recording`: fastest path; records KidCode draw commands directly.
-- `fake-lvgl`: runs the real `ConsoleRenderer` against a fake LVGL object API.
-
-This is intentionally not an ESP32 display-driver simulator. It validates
-project loading, `from kidcode import *`, input mapping, frame stepping, render
-commands, and our LVGL object usage before using hardware. It does not validate
-the launcher, bootloader, panel pins, SPI timing, or native LVGL C bindings.
+The v0.4 console runs on the PC from the **same shared code** this firmware
+freezes — see `tools/simulate_desktop.py` (it renders the same launcher / carts /
+code+paint editors). The old fake-LVGL `.kcproj` simulator
+(`simulate_micropython_spike.py`) was removed with the legacy game loop.
 
 ## Hardware References
 

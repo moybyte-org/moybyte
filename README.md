@@ -59,56 +59,6 @@ Pack a project bundle:
 .venv/bin/kidcode pack examples/tiny_runner.kcproj --out /tmp/tiny_runner.kc8
 ```
 
-Prepare the current LilyGO T-Deck Plus target artifact:
-
-```bash
-make device-doctor
-./.venv/bin/kidcode lilygo-next
-make export-lilygo-example
-```
-
-Build the first serial-only firmware smoke test:
-
-```bash
-make firmware-build-lilygo
-```
-
-Flash and monitor it once the board appears as a serial device:
-
-```bash
-make device-port
-make firmware-upload-lilygo PORT=/dev/ttyACM0
-make firmware-monitor-lilygo PORT=/dev/ttyACM0
-```
-
-Or run the upload, short monitor capture, and serial check in one step:
-
-```bash
-make firmware-smoke-lilygo PORT=/dev/ttyACM0
-```
-
-Expected serial smoke output includes:
-
-```text
-KidCode firmware smoke test
-Board id: lilygo_t_deck_plus
-Bundled project: tiny_runner
-Bundle bytes: <non-zero>
-Keyboard: detected
-Display: KidCode native tiny_runner canvas
-KidCode heartbeat 0
-```
-
-In the native firmware scaffold, use `WASD` or `HJKL` on the T-Deck keyboard to
-move the green player rectangle. `Z` maps to KidCode `a`, and `X` maps to
-KidCode `b`.
-
-Save a monitor log and verify it with:
-
-```bash
-make firmware-smoke-check-lilygo LOG=/tmp/kidcode_lilygo_serial.log
-```
-
 Run a desktop simulator window when pygame is available:
 
 ```bash
