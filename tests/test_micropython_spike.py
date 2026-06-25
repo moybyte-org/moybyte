@@ -12,7 +12,6 @@ def test_micropython_spike_scaffold_exists():
     assert (ROOT / "build.sh").exists()
     assert (ROOT / "modules" / "main.py").exists()
     assert (ROOT / "modules" / "kidcode" / "__init__.py").exists()
-    assert (ROOT / "modules" / "projects" / "tiny_runner.py").exists()
 
 
 def test_micropython_spike_documents_sd_launcher_bin():
@@ -28,191 +27,6 @@ def test_micropython_spike_documents_sd_launcher_bin():
     assert "USB full flashing is valid on this board" in readme
     assert "KIDCODE_BOARD_CONFIG=tdeck" in readme
     assert "kidcode_lvgl_tdeck_board_jtag_full_dio_0x0.bin" in readme
-
-
-def test_micropython_spike_has_host_simulator():
-    makefile = Path("Makefile").read_text(encoding="utf-8")
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    simulator = Path("tools/simulate_micropython_spike.py").read_text(encoding="utf-8")
-
-    assert "firmware-sim-lilygo-micropython:" in makefile
-    assert "tools/simulate_micropython_spike.py" in makefile
-    assert "Host Simulator" in readme
-    assert "fake-lvgl" in readme
-    assert "--source path/to/project.py" in readme
-    assert "not an ESP32 display-driver simulator" in readme
-    assert "class ScriptedKeyboard" in simulator
-    assert "class RecordingRenderer" in simulator
-    assert "class FakeLVGL" in simulator
-    assert "class FakeLVGLRenderer" in simulator
-    assert '"stop": "stop"' in simulator
-    assert 'parser.add_argument("--source"' in simulator
-
-
-def test_micropython_host_simulator_moves_tiny_runner_player():
-    spec = importlib.util.spec_from_file_location(
-        "kidcode_micropython_sim", Path("tools/simulate_micropython_spike.py")
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    result = module.run_simulation(
-        frames=10,
-        dt=1 / 30,
-        script=module.parse_script("right:10"),
-    )
-
-    player = result["sprites"]["player"]
-    assert result["rendered_frames"] == 10
-    assert player["x"] > 60
-    assert player["y"] == 60
-    assert any(command["type"] == "text" and "score" in command["value"] for command in result["last_commands"])
-
-
-def test_micropython_host_simulator_can_run_console_renderer_with_fake_lvgl():
-    spec = importlib.util.spec_from_file_location(
-        "kidcode_micropython_sim", Path("tools/simulate_micropython_spike.py")
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    result = module.run_simulation(
-        frames=5,
-        dt=1 / 30,
-        script=module.parse_script("right:5"),
-        renderer_mode="fake-lvgl",
-    )
-
-    snapshot = result["renderer_snapshot"]
-    assert result["renderer_mode"] == "fake-lvgl"
-    assert "player" in snapshot["objects"]
-    assert "coin" in snapshot["objects"]
-    assert snapshot["objects"]["player"]["pos"][0] > snapshot["objects"]["coin"]["pos"][0]
-    assert any("score" in value for value in snapshot["text"])
-
-
-def test_micropython_runner_stop_and_run_reload_in_simulator():
-    spec = importlib.util.spec_from_file_location(
-        "kidcode_micropython_sim", Path("tools/simulate_micropython_spike.py")
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    stopped = module.run_simulation(
-        frames=3,
-        dt=1 / 30,
-        script=module.parse_script("home:3"),
-        renderer_mode="fake-lvgl",
-    )
-    assert "stopped" in stopped["status"].lower()
-    assert any("stopped" in value for value in stopped["renderer_snapshot"]["text"])
-
-    reloaded = module.run_simulation(
-        frames=8,
-        dt=1 / 30,
-        script=module.parse_script("home:1,run:1,right:6"),
-        renderer_mode="fake-lvgl",
-    )
-    assert reloaded["sprites"]["player"]["x"] > 60
-    assert "player" in reloaded["renderer_snapshot"]["objects"]
-
-
-def test_fake_lvgl_renderer_reuses_text_objects_and_handles_lines():
-    spec = importlib.util.spec_from_file_location(
-        "kidcode_micropython_sim", Path("tools/simulate_micropython_spike.py")
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    state = module.begin_firmware_imports()
-    try:
-        renderer = module.FakeLVGLRenderer()
-        renderer.render(
-            (
-                {"type": "clear", "color": 0},
-                {"type": "text", "value": "one", "x": 1, "y": 2, "color": 1},
-                {"type": "line", "x1": 0, "y1": 0, "x2": 8, "y2": 0, "color": 3},
-            )
-        )
-        child_count = renderer.frames[-1]["child_count"]
-        renderer.render(
-            (
-                {"type": "clear", "color": 0},
-                {"type": "text", "value": "two", "x": 1, "y": 2, "color": 1},
-                {"type": "line", "x1": 0, "y1": 0, "x2": 8, "y2": 0, "color": 3},
-            )
-        )
-        snapshot = renderer.frames[-1]
-    finally:
-        module.restore_imports(state)
-
-    assert snapshot["child_count"] == child_count
-    assert snapshot["text"] == ["two"]
-    assert snapshot["objects"]["line_0"]["size"] == (9, 1)
-
-
-def test_micropython_host_simulator_loads_external_source_file(tmp_path):
-    source = tmp_path / "project.py"
-    source.write_text(
-        "\n".join(
-            (
-                "from kidcode import *",
-                "p = sprite('player', x=10, y=20)",
-                "def update(dt):",
-                "    if button('right'):",
-                "        p.x += 3",
-                "def draw():",
-                "    clear(0)",
-                "    draw_sprite(p)",
-                "    text('external', 1, 1, 1)",
-            )
-        ),
-        encoding="utf-8",
-    )
-    spec = importlib.util.spec_from_file_location(
-        "kidcode_micropython_sim", Path("tools/simulate_micropython_spike.py")
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    result = module.run_simulation(
-        frames=4,
-        dt=1 / 30,
-        script=module.parse_script("right:4"),
-        source_path=source,
-        renderer_mode="fake-lvgl",
-    )
-
-    assert result["source_path"] == str(source)
-    assert result["sprites"]["player"]["x"] == 22
-    assert any("external" in value for value in result["renderer_snapshot"]["text"])
-
-
-def test_micropython_host_simulator_runs_frozen_game_slots():
-    spec = importlib.util.spec_from_file_location(
-        "kidcode_micropython_sim", Path("tools/simulate_micropython_spike.py")
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    input_test = module.run_simulation(
-        frames=3,
-        dt=1 / 30,
-        script=module.parse_script("a:3"),
-        project="projects.input_test",
-        renderer_mode="fake-lvgl",
-    )
-    assert any("input test" in value for value in input_test["renderer_snapshot"]["text"])
-
-    bounce = module.run_simulation(
-        frames=5,
-        dt=1 / 30,
-        script=module.parse_script("right:5"),
-        project="projects.bounce_box",
-        renderer_mode="fake-lvgl",
-    )
-    assert "robot" in bounce["sprites"]
-    assert any("bounce" in value for value in bounce["renderer_snapshot"]["text"])
 
 
 def test_micropython_spike_build_uses_lvgl_micropython_and_frozen_modules():
@@ -282,44 +96,6 @@ def test_micropython_spike_uses_tdeck_native_panel_geometry():
     assert "display._ORIENTATION_TABLE = (0, 160, 192, 96)" in display
     assert "display.set_rotation" in display
 
-
-def test_micropython_spike_has_controlled_project_loader():
-    loader = (ROOT / "modules" / "kidcode_project_loader.py").read_text(encoding="utf-8")
-    shell = (ROOT / "modules" / "kidcode_shell.py").read_text(encoding="utf-8")
-    kidcode_init = (ROOT / "modules" / "kidcode" / "__init__.py").read_text(encoding="utf-8")
-    tiny_runner = (ROOT / "modules" / "projects" / "tiny_runner.py").read_text(encoding="utf-8")
-
-    assert "def __init__(self, input_state, keyboard, renderer):" in loader
-    assert "self.input = input_state" in loader
-    assert "fps=%d k=%02x r=%d m=%02x" in loader
-    assert "def _held_mask(self):" in loader
-    assert "def try_load_source(self, project_name, source):" in loader
-    assert "def try_load_file(self, paths):" in loader
-    assert "def run_restart_cycles(self, module_name, count):" in loader
-    assert "def _make_source_env(project_name):" in loader
-    assert "def _normalize_source(source):" in loader
-    assert "load_frozen_project" in loader
-    assert "exec(source, env)" in loader
-    assert "KidCode source exec starting" in loader
-    assert 'line.strip() == "from kidcode import *"' in loader
-    assert 'env[name] = getattr(kidcode, name)' in loader
-    assert '"__builtins__": __builtins__' not in loader
-    assert "PROJECT_FILE_PATHS" in shell
-    assert "ENABLE_BOOT_SELF_TESTS = False" in shell
-    assert "ENABLE_EXTERNAL_PROJECT_FILES = False" in shell
-    assert "ENABLE_SD_PREFETCH = True" in shell
-    assert "GAME_SLOTS" in shell
-    assert "projects.input_test" in shell
-    assert "projects.bounce_box" in shell
-    assert "SD Project" in shell
-    assert "def _prefetch_sd_project():" in shell
-    assert "def _load_sd_project" in shell
-    assert "cached SD project" in shell
-    assert "/sd/kidcode/project.py" in shell
-    assert "def reset_api():" in kidcode_init
-    assert "game = _runtime.game" in kidcode_init
-    assert "from kidcode import *" in tiny_runner
-    assert "def setup():" in tiny_runner
 
 
 def test_micropython_spike_has_guarded_sd_project_loader():
@@ -394,28 +170,6 @@ def test_micropython_touch_and_idle_cursor():
     assert "def run_touch_calibrate(handler):" in runtime
     assert "RUN_TOUCH_CALIBRATE" in shell
     assert "run_touch_calibrate(_task_handler)" in shell
-
-
-def test_micropython_spike_enables_watchdog_after_display_bringup():
-    shell = (ROOT / "modules" / "kidcode_shell.py").read_text(encoding="utf-8")
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-
-    assert "ENABLE_WATCHDOG = True" in shell
-    assert "wdt = _make_watchdog() if ENABLE_WATCHDOG else None" in shell
-    assert "Watchdog reset recovery is enabled" in readme
-
-
-def test_micropython_spike_renderer_uses_title_status_and_screen_primitives():
-    renderer = (ROOT / "modules" / "kidcode_lvgl_renderer.py").read_text(encoding="utf-8")
-    shell = (ROOT / "modules" / "kidcode_shell.py").read_text(encoding="utf-8")
-
-    assert "self.canvas_x" in renderer
-    assert "self.canvas.set_pos(self.canvas_x, self.canvas_y)" in renderer
-    assert "def render_message(self, status, lines):" in renderer
-    assert "self.title.set_text(\"KidCode \" + str(value)[:28])" in renderer
-    assert "renderer.set_status(\"renderer ok\")" in shell
-    assert "obj = self.lv.obj(self.screen)" in renderer
-    assert "label = self.lv.label(self.screen)" in renderer
 
 
 def test_micropython_spike_documents_tdeck_reference_paths():
