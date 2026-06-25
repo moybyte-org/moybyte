@@ -73,11 +73,16 @@ def test_all_new_carts_open_and_run_headless(tmp_path):
 
 
 def test_carts_are_lively_in_attract_mode(tmp_path):
+    # AUTOPLAY now defaults OFF (the kid plays), so the attract self-play is an
+    # opt-in: turn it on, then the cart must animate itself with no input -- this
+    # is the path the simulator demo GIF uses.
     from runtime import host_app
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     for title in NEW_CARTS:
         _open_cart(ws, title)
+        ws.config["autoplay"] = 1
+        ws.apply()
         snaps = set()
         for _ in range(120):
             ws.input.begin_frame()
@@ -174,6 +179,8 @@ def test_platformer_attract_collects_coins_and_completes(tmp_path):
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Hop Quest")
+    ws.config["autoplay"] = 1                             # opt into the auto-pilot
+    ws.apply()
     ncoins = len(ws.ns["coins"])
     assert ncoins > 0
 
