@@ -415,6 +415,23 @@ def test_device_canvas_uses_native_kc_gfx():
     assert "def gfx(self):" in comp
 
 
+def test_native_blit_map_wired_for_tilemaps():
+    # The tilemap blit (#32) is a native kc_gfx op (one C call per map() region) and
+    # DeviceCanvas.map drives it from a baked RGB565 tile atlas, with a Python
+    # per-tile fallback when kc_gfx is absent. Grep the frozen device sources +
+    # the C module like the other firmware tests.
+    c = (ROOT / "native" / "kc_gfx" / "modkc_gfx.c").read_text(encoding="utf-8")
+    assert "kc_gfx_blit_map" in c
+    assert "MP_ROM_QSTR(MP_QSTR_blit_map)" in c          # registered in the module dict
+    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    assert "def map(self, tilemap, sheet" in runtime     # DeviceCanvas.map
+    assert "self._gfx.blit_map(self._buf" in runtime     # native one-call blit
+    assert "def _sheet_atlas(self, sheet, colorkey):" in runtime  # baked RGB565 atlas
+    assert "def _map_py(self, tilemap, sheet" in runtime  # no-kc_gfx fallback
+    # The device cart API exposes map/mget/mset, same names as the host make_api.
+    assert '"map": map_, "mget": mget, "mset": mset,' in runtime
+
+
 def _load_kid_runtime():
     # kid_runtime does `from editors import ...` and `from console import ...`; the
     # device freezes build-staged copies of runtime/{editors,audio,console}.py as
@@ -574,6 +591,45 @@ def test_device_spr_is_sheet_indexed_and_accepts_image():
     assert calls[-1] == (1, 1, 8, 9, 4)
 
 
+def test_device_make_api_map_mget_mset(tmp_path=None):
+    # The device cart API exposes map()/mget()/mset() bound to the injected TileMap
+    # (#32): mget/mset round-trip through it, and map() forwards to canvas.map with
+    # the cart's tilemap + sheet. Exercised under CPython via the frozen modules.
+    m = _load_kid_runtime()
+    from editors import TileMap
+    sheet = m.SpriteSheet(4, 4)
+    tm = TileMap(3, 3)
+    mapped = []
+
+    class StubCanvas:
+        w = 320
+        h = 240
+
+        def map(self, tilemap, sheet, *args):
+            mapped.append((tilemap, sheet, args))
+
+        def __getattr__(self, name):
+            return lambda *a, **k: 0
+
+    class StubInput:
+        def held(self, name):
+            return False
+
+        def pressed(self, name):
+            return False
+
+    api = m.make_api(StubCanvas(), StubInput(), {}, sheet, None, tm)
+    api["mset"](1, 2, 5)
+    assert api["mget"](1, 2) == 5 and tm.mget(1, 2) == 5
+    api["map"](0, 0, 3, 3, 0, 0, -1, 2)
+    assert mapped and mapped[-1][0] is tm and mapped[-1][1] is sheet
+    assert mapped[-1][2] == (0, 0, 3, 3, 0, 0, -1, 2)
+    # With no tilemap injected, the API stays callable (map() no-ops, mget -> -1).
+    api2 = m.make_api(StubCanvas(), StubInput(), {}, sheet)
+    assert api2["mget"](0, 0) == -1
+    api2["map"](0, 0)                       # no crash, draws nothing
+
+
 def test_sprite_sheet_pset_bumps_gen():
     # pset bumps a generation counter so a running cart's tile cache can detect a
     # sprite edit and rebuild (host/device parity for live sprite edits).
@@ -638,8 +694,8 @@ def test_device_sprite_storage_wired():
     runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "kid_carts.py").read_text(encoding="utf-8")
-    # device cart API -- now also takes the injected audio backend (#16)
-    assert "def make_api(canvas, input, config, sheet=None, audio=None):" in runtime
+    # device cart API -- now also takes the injected audio backend (#16) + tilemap (#32)
+    assert "def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None):" in runtime
     assert "self.sheet = self._build_sheet()" in console                   # shared console
     assert "self.carts_store.save_sprites(self.cart, hexs)" in console
     assert "def save_sprites(cart, hex_text):" in carts

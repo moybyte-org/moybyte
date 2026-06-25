@@ -194,11 +194,97 @@ class DeviceCanvas:
                     continue
                 fb.fill_rect(x + sx * scale, y + sy * scale, scale, scale, pal[p & 63])
 
+    def map(self, tilemap, sheet, mx=0, my=0, w=None, h=None,
+            sx=0, sy=0, colorkey=-1, scale=1):
+        # TIC-80 map(): blit a w x h cell region of the tilemap over `sheet` to
+        # screen (sx, sy) in ONE native kc_gfx.blit_map call (issue #32). The sheet
+        # is baked once into an RGB565 tile atlas (cached on the sheet, rebuilt only
+        # on a paint edit via sheet.gen), so per-frame cost is just the C walk.
+        mx = int(mx); my = int(my); sx = int(sx); sy = int(sy); scale = int(scale)
+        if scale < 1:
+            scale = 1
+        if w is None:
+            w = tilemap.w - mx
+        if h is None:
+            h = tilemap.h - my
+        tile = sheet.TILE
+        if self._gfx is None:
+            self._map_py(tilemap, sheet, mx, my, int(w), int(h), sx, sy, colorkey, scale)
+            return
+        atlas, ntiles = self._sheet_atlas(sheet, colorkey)
+        self._gfx.blit_map(self._buf, self.w, self.h, sx, sy,
+                           tilemap.cells, tilemap.w, tilemap.h,
+                           mx, my, int(w), int(h),
+                           atlas, ntiles, tile, scale, _RGB_KEY)
+
+    def _sheet_atlas(self, sheet, colorkey):
+        # Bake the whole sheet into a contiguous RGB565 tile atlas (ntiles tiles of
+        # TILE x TILE, tile-major) for kc_gfx.blit_map. Cached on the sheet and keyed
+        # by (gen, colorkey) so a paint edit or a different colorkey rebakes; this is
+        # the map() analogue of _cache_rgb. Transparent indices (== colorkey) bake to
+        # _RGB_KEY so blit_map skips them.
+        gen = getattr(sheet, "gen", 0)
+        if (getattr(sheet, "_atlas", None) is not None
+                and sheet._atlas_gen == gen and sheet._atlas_key == colorkey):
+            return sheet._atlas, sheet._atlas_n
+        tile = sheet.TILE
+        ntiles = sheet.count
+        tpx = tile * tile
+        buf = bytearray(ntiles * tpx * 2)
+        pal = PAL565
+        cols = sheet.cols
+        sw = sheet.w
+        spix = sheet.pix
+        key = _RGB_KEY
+        pos = 0
+        for n in range(ntiles):
+            ox = (n % cols) * tile
+            oy = (n // cols) * tile
+            for ly in range(tile):
+                base = (oy + ly) * sw + ox
+                for lx in range(tile):
+                    p = spix[base + lx]
+                    if p == colorkey:
+                        col = key
+                    else:
+                        col = pal[p & 63]
+                        if col == key:
+                            col ^= 0x20      # nudge a visible pixel off the key
+                    buf[pos] = col & 0xFF
+                    buf[pos + 1] = (col >> 8) & 0xFF
+                    pos += 2
+        sheet._atlas = buf
+        sheet._atlas_n = ntiles
+        sheet._atlas_gen = gen
+        sheet._atlas_key = colorkey
+        return buf, ntiles
+
+    def _map_py(self, tilemap, sheet, mx, my, w, h, sx, sy, colorkey, scale):
+        # Per-tile fallback when kc_gfx is absent: draw each non-empty cell via the
+        # framebuf spr path. Tile images cached by id so a repeat tile builds once.
+        tile = sheet.TILE
+        step = tile * scale
+        cache = {}
+        for cy in range(h):
+            ty = my + cy
+            py = sy + cy * step
+            for cx in range(w):
+                tid = tilemap.mget(mx + cx, ty)
+                if tid < 0:
+                    continue
+                img = cache.get(tid)
+                if img is None:
+                    img = sheet.tile_image(tid, colorkey)
+                    cache[tid] = img if img is not None else False
+                if not img:
+                    continue
+                self._spr_py(img, sx + cx * step, py, scale)
+
     def print(self, s, x, y, c, scale=2):
         self._fb.text(str(s), int(x), int(y), self._col(c))
 
 
-def make_api(canvas, input, config, sheet=None, audio=None):
+def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None):
     import random
 
     tile_cache = {}        # (tile id, colorkey) -> Image, so a redrawn sheet sprite
@@ -259,6 +345,20 @@ def make_api(canvas, input, config, sheet=None, audio=None):
             tile_cache[ck] = img
         canvas.spr(img, x, y, scale)
 
+    def map_(mx=0, my=0, w=None, h=None, sx=0, sy=0, colorkey=-1, scale=1):
+        # TIC-80 map(): blit a region of the cart's tilemap over the sheet (#32).
+        # Same signature/semantics as the host make_api -- one native blit_map call.
+        if tilemap is None or sheet is None:
+            return
+        canvas.map(tilemap, sheet, mx, my, w, h, sx, sy, colorkey, scale)
+
+    def mget(x, y):
+        return tilemap.mget(x, y) if tilemap is not None else -1
+
+    def mset(x, y, tile):
+        if tilemap is not None:
+            tilemap.mset(x, y, tile)
+
     def touch():
         # GT911 pointer exposed to touch-driven carts: (x, y, tapped) this frame,
         # or None when there is no pointer. `tapped` is the press edge so a cart
@@ -273,6 +373,7 @@ def make_api(canvas, input, config, sheet=None, audio=None):
         "cls": canvas.cls, "pix": canvas.pix,
         "line": canvas.line, "rect": canvas.rect, "rectb": canvas.rectb,
         "circ": canvas.circ, "circb": canvas.circb, "spr": spr,
+        "map": map_, "mget": mget, "mset": mset,
         "print": canvas.print, "touch": touch,
         "btn": input.held, "btnp": input.pressed,
         "cfg": cfg, "col": color,

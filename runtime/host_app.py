@@ -135,10 +135,10 @@ def make_sdl_audio(engine):
     return SdlAudio(engine)
 
 
-def make_api(canvas, input, config, sheet=None, audio=None):
+def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None):
     """The cartridge global namespace on the host -- same names/signature as the
-    device make_api (TIC-80 draw API + sheet-or-Image spr + audio), bound to a host
-    Canvas and audio backend."""
+    device make_api (TIC-80 draw API + sheet-or-Image spr + audio + tilemap), bound
+    to a host Canvas and audio backend."""
 
     def cfg(key, default=None):
         return config.get(key, default)
@@ -176,6 +176,21 @@ def make_api(canvas, input, config, sheet=None, audio=None):
         if img is not None:
             canvas.spr(img, x, y, scale)
 
+    def map_(mx=0, my=0, w=None, h=None, sx=0, sy=0, colorkey=-1, scale=1):
+        # TIC-80 map(mx, my, w, h, sx, sy, colorkey, scale): blit a w x h region of
+        # the cart's tilemap (top-left cell mx,my) to screen (sx,sy). Tiles are the
+        # 8x8 sheet sprites; `scale` enlarges each (so scale=2 => 16px world tiles).
+        if tilemap is None or sheet is None:
+            return
+        canvas.map(tilemap, sheet, mx, my, w, h, sx, sy, colorkey, scale)
+
+    def mget(x, y):
+        return tilemap.mget(x, y) if tilemap is not None else -1
+
+    def mset(x, y, tile):
+        if tilemap is not None:
+            tilemap.mset(x, y, tile)
+
     def touch():
         # Pointer (mouse stands in for touch on the host) exposed to touch-driven
         # carts: (x, y, tapped) this frame, or None when there is no pointer.
@@ -190,6 +205,7 @@ def make_api(canvas, input, config, sheet=None, audio=None):
         "cls": canvas.cls, "pix": canvas.pix,
         "line": canvas.line, "rect": canvas.rect, "rectb": canvas.rectb,
         "circ": canvas.circ, "circb": canvas.circb, "spr": spr,
+        "map": map_, "mget": mget, "mset": mset,
         "print": canvas.print, "touch": touch,
         "btn": input.held, "btnp": input.pressed,
         "cfg": cfg, "col": palette.color,

@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT))
 
 from runtime import palette  # noqa: E402
 from runtime.canvas import Canvas, Image, SpriteSheet  # noqa: E402
+from runtime.editors import TileMap  # noqa: E402
 
 SYSTEM_CARTS = ROOT / "system_carts"
 
@@ -94,6 +95,72 @@ def test_sprite_sheet_tiles_and_hex_roundtrip():
     assert img.pix[2 * 8 + 1] == 9          # local (1,2)
 
 
+# -- tilemap (#32) ---------------------------------------------------------
+
+def test_tilemap_mget_mset_empty_and_roundtrip():
+    tm = TileMap(4, 3)
+    assert (tm.w, tm.h) == (4, 3) and tm.is_blank()
+    assert tm.mget(0, 0) == -1               # blank cells read as EMPTY (-1)
+    assert tm.mget(99, 0) == -1              # out of range is EMPTY, not a crash
+    tm.mset(1, 2, 9)                         # place tile 9
+    assert tm.mget(1, 2) == 9 and not tm.is_blank() and tm.dirty
+    g0 = tm.gen
+    tm.mset(0, 0, 0)                         # tile id 0 is a real tile, not "empty"
+    assert tm.mget(0, 0) == 0 and tm.gen == g0 + 1
+    tm.mset(1, 2, -1)                        # a negative id clears the cell
+    assert tm.mget(1, 2) == -1
+    tm.mset(3, 0, 5)
+    tm2 = TileMap.from_hex(tm.to_hex())      # header carries dims; blob round-trips
+    assert (tm2.w, tm2.h) == (4, 3)
+    assert tm2.mget(0, 0) == 0 and tm2.mget(3, 0) == 5 and tm2.mget(1, 2) == -1
+    assert tm2.cells == tm.cells and tm2.dirty is False
+
+
+def test_tilemap_clamps_tile_id_to_byte():
+    tm = TileMap(2, 2)
+    tm.mset(0, 0, TileMap.MAX_ID + 50)       # over the ceiling -> clamped, never wraps
+    assert tm.mget(0, 0) == TileMap.MAX_ID
+
+
+def test_canvas_map_blits_tiles_at_scale():
+    cv = Canvas(40, 40)
+    cv.cls(0)
+    sheet = SpriteSheet()
+    sheet.tset(7, 0, 0, 8)                   # tile 7: a single red pixel at its (0,0)
+    sheet.tset(7, 7, 7, 9)                   # ... and green at (7,7)
+    tm = TileMap(2, 2)
+    tm.mset(1, 1, 7)                         # one tile at cell (1,1), rest empty
+    cv.map(tm, sheet, 0, 0, 2, 2, 0, 0, -1, 2)   # scale 2 -> each cell is 16px
+    # cell (1,1) lands at screen (16,16); tile pixel (0,0) -> a 2x2 red block there
+    assert cv.pix(16, 16) == 8 and cv.pix(17, 17) == 8
+    # its (7,7) pixel -> green 2x2 block at (16+14, 16+14)
+    assert cv.pix(30, 30) == 9
+    # empty cells drew nothing
+    assert cv.pix(0, 0) == 0 and cv.pix(8, 8) == 0
+
+
+def test_map_mget_mset_via_make_api():
+    from runtime import host_app
+    cv = Canvas(40, 40)
+    cv.cls(0)
+    sheet = SpriteSheet()
+    sheet.tset(3, 0, 0, 11)
+    tm = TileMap(3, 3)
+
+    class _Input:
+        def held(self, n):
+            return False
+
+        def pressed(self, n):
+            return False
+
+    api = host_app.make_api(cv, _Input(), {}, sheet, None, tm)
+    api["mset"](1, 1, 3)                     # cart-facing mset writes the shared map
+    assert api["mget"](1, 1) == 3 and tm.mget(1, 1) == 3
+    api["map"](0, 0, 3, 3, 0, 0, -1, 1)      # cart-facing map() draws it (scale 1)
+    assert cv.pix(8, 8) == 11                # tile 3 at cell (1,1), pixel (0,0) -> 8,8
+
+
 # -- code editor core ------------------------------------------------------
 
 def test_code_editor_scrolloff_and_horizontal_scroll():
@@ -160,9 +227,12 @@ def test_kid_carts_store_roundtrip(tmp_path):
     # save edited code + a sprite sheet; reload reflects both
     kid_carts.save_code(c, "def _draw():\n    cls(2)\n")
     kid_carts.save_sprites(c, "012\n345\n")
+    kid_carts.save_map(c, TileMap(3, 2).to_hex())   # tilemap blob persists (#32)
     reloaded = kid_carts.load(c["path"])
     assert "cls(2)" in reloaded["src"]
     assert reloaded["sprites"].startswith("012")
+    assert reloaded["map"] is not None
+    assert TileMap.from_hex(reloaded["map"]).w == 3  # the saved map.kmap round-trips
     # duplicate makes an independent editable copy
     dup = kid_carts.duplicate(c, root, new_title="Copy")
     assert dup["title"] == "Copy" and dup["path"] != c["path"]
@@ -192,6 +262,29 @@ def test_console_runs_game_cart_and_scores(tmp_path):
         ws.frame(1 / 30)
     # `best` survives the game-over reset, so it's the honest "did it score" check.
     assert ws.ns["best"] >= 1
+
+
+def test_hop_quest_uses_tilemap_and_still_plays(tmp_path):
+    # Hop Quest now draws its level with map() and reads collision with mget() (#32).
+    # Verify the cart loads its tilemap, draws ground through map(), and the attract
+    # auto-pilot still clears every coin + reaches the win banner (gameplay intact).
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_cart(ws, "Hop Quest")
+    assert ws.cart["type"] == "game"
+    assert ws.cart.get("map") and not ws.tilemap.is_blank()    # the level is a tilemap
+    assert ws.ns["_solid"](0, 12) and not ws.ns["_solid"](0, 0)  # mget collision works
+    ws.config["autoplay"] = 1
+    ws.apply()
+    coins = len(ws.ns["coins"])
+    most, won = 0, False
+    for _ in range(900):                    # attract-mode auto-play climbs the stair
+        ws.frame(1 / 30)
+        most = max(most, ws.ns.get("got", 0))
+        if ws.ns.get("won", 0.0) > 0.0:
+            won = True
+    assert most == coins and won            # collected every coin and won the round
+    assert len(set(ws.canvas.buf)) > 1      # the map() blit drew the ground
 
 
 def test_console_cards_make_it_mine_edit_and_run(tmp_path):
