@@ -11,11 +11,11 @@
   "config": {
     "star_count": 5,
     "fall_speed": 70,
-    "basket": "frog"
+    "basket": 0
   },
   "edit": [
-    { "key": "star_count", "label": "STARS", "type": "int", "min": 1, "max": 20, "step": 1, "card": "DROP {value} STARS" },
-    { "key": "fall_speed", "label": "SPEED", "type": "int", "min": 20, "max": 200, "step": 10, "card": "STARS FALL AT {value}" },
-    { "key": "basket", "label": "CATCHER", "type": "choice", "choices": ["frog", "robot"], "card": "CATCHER IS A {value}" }
+    { "key": "star_count", "label": "STARS", "type": "int", "min": 1, "max": 12, "step": 1, "display": "count", "icon": "star", "card": "DROP {value} STARS" },
+    { "key": "fall_speed", "label": "SPEED", "type": "int", "min": 20, "max": 200, "step": 10, "display": "gauge", "gauge": { "low": "turtle", "high": "rabbit" }, "card": "STARS FALL AT {value}" },
+    { "key": "basket", "label": "CATCHER", "type": "choice", "choices": [0, 1], "tiles": [0, 1], "display": "sprite-tiles", "card": "CATCHER IS A {value}" }
   ]
 }

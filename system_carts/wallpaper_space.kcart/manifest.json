@@ -17,8 +17,8 @@
   },
   "edit": [
     { "key": "star_count", "label": "STARS", "type": "int", "min": 10, "max": 300, "step": 10, "card": "ADD {value} STARS" },
-    { "key": "star_speed", "label": "SPEED", "type": "int", "min": 5, "max": 90, "step": 5, "card": "SKY MOVES AT {value}" },
+    { "key": "star_speed", "label": "SPEED", "type": "int", "min": 5, "max": 90, "step": 5, "display": "gauge", "gauge": { "low": "turtle", "high": "rabbit" }, "card": "SKY MOVES AT {value}" },
     { "key": "pet", "label": "PET", "type": "choice", "choices": ["frog", "robot"], "card": "PET IS A {value}" },
-    { "key": "bg", "label": "BG", "type": "choice", "choices": ["dark_blue", "dark_purple", "black", "indigo"], "card": "SKY IS {value}" }
+    { "key": "bg", "label": "BG", "type": "choice", "choices": ["dark_blue", "night", "stripes", "indigo"], "display": "bg-thumbs", "card": "SKY IS {value}" }
   ]
 }
