@@ -759,6 +759,7 @@ class Workstation:
                 i = self.launcher.tile_at(px, py)
                 if i is not None:
                     self.launcher.sel = i
+                    self._end_launcher_drag()
                     self.open()
                     return
 
@@ -768,19 +769,27 @@ class Workstation:
                 self._autoscroll = 0
             press_y, last_y, moved = self._ldrag
             # Drag: pan by whole tiles as the finger crosses each tile pitch.
-            steps = (last_y - py) // self.launcher.TILE_PITCH
+            # Truncate toward zero (NOT floor) so up and down are symmetric -- a
+            # plain floor would turn a 1px DOWN move into a whole-row scroll
+            # (-1 // 40 == -1) and mis-open the wrong cart (#2).
+            d = last_y - py
+            pitch = self.launcher.TILE_PITCH
+            steps = d // pitch if d >= 0 else -((-d) // pitch)
             if steps:
                 self.launcher.scroll(steps)
-                last_y = last_y - steps * self.launcher.TILE_PITCH
+                last_y = last_y - steps * pitch
             if abs(py - press_y) > 4:
                 moved = True
             self._ldrag = [press_y, last_y, moved]
-            # Autoscroll while dwelling in an edge band (held finger, not just a flick).
-            if in_strip and py < _LIST_Y0 + _LIST_EDGE:
+            # Autoscroll while dwelling in an edge band -- but ONLY once the gesture
+            # is an actual drag (`moved`). The bands overlap the first/last tile, so
+            # autoscrolling on a HELD-still tap would slide a different row under the
+            # finger and open the wrong cart on release (#1).
+            if moved and in_strip and py < _LIST_Y0 + _LIST_EDGE:
                 self._autoscroll += 1
                 if self._autoscroll % 6 == 0:
                     self.launcher.scroll(-1)
-            elif in_strip and py >= _LIST_BOTTOM - _LIST_EDGE:
+            elif moved and in_strip and py >= _LIST_BOTTOM - _LIST_EDGE:
                 self._autoscroll += 1
                 if self._autoscroll % 6 == 0:
                     self.launcher.scroll(1)
