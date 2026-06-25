@@ -21,6 +21,11 @@ except ImportError:  # pragma: no cover
 CARTS_DIR = "/sd/kidcode/carts"
 CART_FORMAT = "kidcode-cart-v1"
 
+# A single shared sprite sheet lives alongside the carts dir (one level up, so
+# it sits beside every <name>.kcart folder). Tiles painted here are reusable
+# across carts; the import-tile primitive copies tiles between any two sheets.
+SHARED_SHEET_NAME = "shared.kgfx"
+
 
 def _mkdir(path):
     try:
@@ -142,6 +147,30 @@ def save_sprites(cart, hex_text):
     """Persist the sprite sheet (PICO-8 __gfx__-style hex) to sprites.kgfx."""
     _write(cart["path"] + "/sprites.kgfx", hex_text)
     cart["sprites"] = hex_text
+
+
+# --- shared sprite sheet (cross-cart sprite reuse, #18) ---------------------
+
+def shared_sheet_path(root=CARTS_DIR):
+    """Well-known path of the shared sprite sheet: a sibling of the carts dir
+    (one level up from `root`), so it isn't tied to any single cart."""
+    parent = root.rsplit("/", 1)[0]
+    return (parent + "/" + SHARED_SHEET_NAME) if parent else SHARED_SHEET_NAME
+
+
+def load_shared_sheet(root=CARTS_DIR):
+    """Read the shared sprite sheet's hex (PICO-8 __gfx__-style), or None if it
+    has never been saved. Caller turns it into a SpriteSheet via from_hex."""
+    try:
+        return _read(shared_sheet_path(root))
+    except OSError:
+        return None
+
+
+def save_shared_sheet(hex_text, root=CARTS_DIR):
+    """Persist the shared sprite sheet's hex. Ensures the parent dir exists."""
+    ensure_dirs(root)
+    _write(shared_sheet_path(root), hex_text)
 
 
 # --- cart management (create / duplicate / delete) --------------------------
