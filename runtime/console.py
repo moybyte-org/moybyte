@@ -11,6 +11,7 @@ free apart from the shared editor cores below.
 
 import time
 
+from audio import AudioBank, AudioEngine
 from editors import CodeEditor, PaintEditor, SpriteSheet
 
 
@@ -472,12 +473,46 @@ class Launcher:
             cv.print("v", 300, self.TILE_Y0 + (self.VISIBLE - 1) * self.TILE_PITCH, NAMES["light_grey"], 2)
 
 
+class _SilentAudio:
+    """No-op audio backend (#16): wraps an AudioEngine but never produces sound.
+    The default when no make_audio backend was injected. Exposes the same control
+    surface the api binds to, so make_api stays identical whether or not real
+    playback is wired. (Permission-gating audio on the manifest 'sound' permission
+    is future work -- the v0.4 console doesn't yet enforce any cart permissions.)"""
+
+    def __init__(self, engine):
+        self.engine = engine
+
+    def sfx(self, n, chan=None):
+        pass
+
+    def beep(self, freq, dur=0.15):
+        pass
+
+    def music(self, track, loop=True):
+        pass
+
+    def music_stop(self):
+        pass
+
+    def sound_stop(self, chan=None):
+        pass
+
+    def volume(self, level):
+        pass
+
+    def tick(self, dt):
+        pass
+
+
 class Workstation:
     def __init__(self, comp, canvas, input, carts=None):
         self.comp = comp
         self.canvas = canvas
         self.input = input
-        self.make_api = None       # injected: make_api(canvas, input, cfg, sheet)->ns
+        self.make_api = None       # injected: make_api(canvas, input, cfg, sheet, audio)->ns
+        self.make_audio = None      # injected: make_audio(engine)->audio backend (host/device)
+        self.audio = None           # the per-cart audio backend (built on open, #16)
         self.carts_store = None     # injected: cart store module (kid_carts API)
         self.launcher = Launcher(carts if carts else [])
         self.screen = "launcher"      # "launcher" | "desktop" | "menu"
@@ -518,7 +553,8 @@ class Workstation:
         self._fps = 0.0               # smoothed frames/sec (EMA of 1/dt)
 
     def _start(self):
-        ns = self.make_api(self.canvas, self.input, self.config, self.sheet)
+        self._build_audio()
+        ns = self.make_api(self.canvas, self.input, self.config, self.sheet, self.audio)
         try:
             # Compile with the "<cart>" filename so a runtime traceback carries
             # cart line numbers (_exc_cart_line reads them to mark the bad line).
@@ -568,6 +604,20 @@ class Workstation:
             except Exception:  # noqa: BLE001
                 pass
         return SpriteSheet()
+
+    def _build_audio(self):
+        """Build the per-cart audio backend (#16): an AudioEngine over the cart's
+        sound bank (sounds.json), wrapped by the injected host/device backend. The
+        mirror of _build_sheet. A cart with no bank gets the friendly default bank
+        so beep()/the editor still work. Falls back to a silent backend if no
+        make_audio was injected (keeps make_api callable everywhere)."""
+        data = self.cart.get("sounds") if self.cart else None
+        bank = AudioBank.from_dict(data) if data else AudioBank.default()
+        engine = AudioEngine(bank)
+        if self.make_audio is not None:
+            self.audio = self.make_audio(engine)
+        else:
+            self.audio = _SilentAudio(engine)
 
     # -- code / paint editors (#3, #4) ---------------------------------------
 
@@ -1326,6 +1376,8 @@ class Workstation:
                         self._update(dt)
                     if self._draw:
                         self._draw()
+                    if self.audio is not None:
+                        self.audio.tick(dt)      # advance/feed playback (#16)
                 except Exception as exc:  # noqa: BLE001
                     # A cart that raises mid-frame must NOT escape the loop (the
                     # device would hang silently). Capture it, stop running the

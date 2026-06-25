@@ -198,7 +198,7 @@ class DeviceCanvas:
         self._fb.text(str(s), int(x), int(y), self._col(c))
 
 
-def make_api(canvas, input, config, sheet=None):
+def make_api(canvas, input, config, sheet=None, audio=None):
     import random
 
     tile_cache = {}        # (tile id, colorkey) -> Image, so a redrawn sheet sprite
@@ -210,6 +210,33 @@ def make_api(canvas, input, config, sheet=None):
 
     def cfg(key, default=None):
         return config.get(key, default)
+
+    # Audio (#16): same names/signature as the host make_api. Bound to the injected
+    # device audio backend (DeviceAudio / a silent fallback); no-op if absent so a
+    # cart's sfx()/beep()/music() never crash when audio isn't wired.
+    def _sfx(n, chan=None):
+        if audio is not None:
+            audio.sfx(n, chan)
+
+    def _beep(freq, dur=0.15):
+        if audio is not None:
+            audio.beep(freq, dur)
+
+    def _music(track, loop=True):
+        if audio is not None:
+            audio.music(track, loop)
+
+    def _music_stop():
+        if audio is not None:
+            audio.music_stop()
+
+    def _sound_stop(chan=None):
+        if audio is not None:
+            audio.sound_stop(chan)
+
+    def _volume(level):
+        if audio is not None:
+            audio.volume(level)
 
     def spr(n, x, y, colorkey=-1, scale=1):
         # TIC-80 spr(id, x, y[, colorkey, scale]) from the cart's sheet. Also
@@ -249,11 +276,111 @@ def make_api(canvas, input, config, sheet=None):
         "print": canvas.print, "touch": touch,
         "btn": input.held, "btnp": input.pressed,
         "cfg": cfg, "col": color,
+        "sfx": _sfx, "beep": _beep, "music": _music,
+        "music_stop": _music_stop, "sound_stop": _sound_stop, "volume": _volume,
         "rnd": lambda n=1.0: random.random() * n,
         "flr": lambda x: int(x // 1),
         "Image": Image,
         "image": lambda rows, mapping, transparent=".": Image.from_ascii(rows, mapping, transparent),
     }
+
+
+# --- Audio backend (#16) -- I2S to the MAX98357 amp -------------------------
+# NEEDS ON-DEVICE VERIFICATION. The T-Deck Plus has an I2S class-D amp + speaker
+# on a SEPARATE peripheral from the shared display/SD SPI host, so audio does NOT
+# collide with the SD/display bus-takeover constraints (see CLAUDE.md). The pin
+# map is from the LilyGO reference (examples/I2SPlay/utilities.h):
+#     I2S_BCK = GPIO 7, I2S_WS = GPIO 5, I2S_DOUT = GPIO 6
+# The shared AudioEngine (frozen `audio` module) renders signed-16-bit mono PCM via
+# render(n); this backend just streams those bytes to the I2S DMA buffer once per
+# frame, in the single-threaded desktop loop (the same place SD ops run -- no
+# background task in v1; see docs/audio_design_v04.md sec 6).
+#
+# UNVERIFIED until a hardware spike confirms: (1) these pins/format actually drive
+# the amp (check the schematic for an amp SD-mode/gain pin); (2) the pure-Python
+# mixer fits the per-frame CPU budget at 30 FPS (else drop the rate, or move the
+# mixer to a native kc_audio C module like kc_gfx); (3) non-blocking write() never
+# stalls a frame. Do NOT claim this is tested on hardware.
+
+I2S_BCK = 7
+I2S_WS = 5
+I2S_DOUT = 6
+AUDIO_RATE = 11025
+AUDIO_IBUF = 4096
+
+
+class DeviceAudio:
+    """I2S audio backend for the T-Deck. Wraps the shared AudioEngine and feeds
+    its rendered PCM to a machine.I2S TX stream once per frame. Constructed behind
+    a try/except so a board/build without I2S degrades to silence, never a crash.
+
+    STUB / NEEDS ON-DEVICE VERIFICATION -- the I2S init + per-frame feed below are
+    the intended path but are unproven on hardware in this environment."""
+
+    def __init__(self, engine):
+        self.engine = engine
+        self.i2s = None
+        try:
+            from machine import I2S, Pin
+            self.i2s = I2S(
+                0,
+                sck=Pin(I2S_BCK),
+                ws=Pin(I2S_WS),
+                sd=Pin(I2S_DOUT),
+                mode=I2S.TX,
+                bits=16,
+                format=I2S.MONO,
+                rate=AUDIO_RATE,
+                ibuf=AUDIO_IBUF,
+            )
+        except Exception as exc:  # noqa: BLE001 -- no amp / no I2S -> stay silent
+            print("KidCode audio: I2S unavailable, silent:", exc)
+            self.i2s = None
+
+    # control surface (mirrors host FakeAudio / _SilentAudio) -------------
+    def sfx(self, n, chan=None):
+        self.engine.play_sfx(n, chan)
+
+    def beep(self, freq, dur=0.15):
+        self.engine.play_beep(freq, dur)
+
+    def music(self, track, loop=True):
+        self.engine.play_music(track, loop)
+
+    def music_stop(self):
+        self.engine.stop_music()
+
+    def sound_stop(self, chan=None):
+        self.engine.stop(chan)
+
+    def volume(self, level):
+        self.engine.set_volume(level)
+
+    def tick(self, dt):
+        """Render this frame's PCM and stream it to the I2S DMA buffer. Skips work
+        when nothing is playing so a silent cart costs almost nothing. write() is
+        the MicroPython non-blocking I2S write (returns early if ibuf is full) --
+        never let it stall the single-threaded desktop loop."""
+        if self.i2s is None:
+            return
+        if not self.engine.is_active():
+            return
+        n = int(self.engine.rate * dt)
+        if n <= 0:
+            return
+        try:
+            pcm = self.engine.render(n)
+            self.i2s.write(pcm)        # NEEDS ON-DEVICE VERIFICATION (non-blocking)
+        except Exception as exc:  # noqa: BLE001 -- audio must never crash the loop
+            print("KidCode audio tick failed:", exc)
+            self.i2s = None
+
+
+def make_audio(engine):
+    """Injected backend factory (#16): wrap an AudioEngine in the device I2S
+    backend. run_desktop hands this to the shared Workstation, the mirror of the
+    host's make_audio. STUB -- DeviceAudio playback is UNVERIFIED on hardware."""
+    return DeviceAudio(engine)
 
 
 # --- Embedded cartridges (v1) -----------------------------------------------
@@ -513,6 +640,7 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
     import kid_carts
     ws = Workstation(comp, canvas, inp, carts)
     ws.make_api = make_api        # device cart namespace (DeviceCanvas + Image + color)
+    ws.make_audio = make_audio    # device I2S audio backend (#16, NEEDS HW VERIFICATION)
     ws.carts_store = kid_carts    # SD .kcart store (scan/load/save/create/dup/delete)
     ws.carts_root = carts_root
     # Writes are enabled on-device via kc_sd: it attaches the SD card to the SPI

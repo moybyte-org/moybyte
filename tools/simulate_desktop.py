@@ -212,6 +212,10 @@ def main():
 
     dt = 1.0 / args.fps
     ws = host_app.build_workstation(args.save_dir)
+    # Live windowed run -> stream real audio to the speakers (#16). Headless /
+    # scripted runs keep the silent FakeAudio so they stay deterministic + device-free.
+    if not args.demo and args.script is None:
+        ws.make_audio = host_app.make_sdl_audio
     # The scripted demo tour drives no gameplay input, so default it to autoplay
     # (so the GIF is lively); a live, interactive session defaults to PLAY.
     autoplay = args.autoplay if args.autoplay is not None else args.demo
