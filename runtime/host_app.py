@@ -85,6 +85,56 @@ def make_audio(engine):
     return FakeAudio(engine)
 
 
+class SdlAudio(FakeAudio):
+    """Real desktop playback backend (#16): like FakeAudio (records calls + drives
+    the engine) but ALSO streams the rendered PCM to the speakers via pygame.mixer,
+    so audio can be evaluated on the PC before the device's I2S path. Each frame it
+    renders one block (signed-16-bit mono LE, the engine's native format) and queues
+    it on a channel so blocks play back-to-back. Falls back to silent (plain
+    FakeAudio behavior) if no audio device is available, so headless runs never
+    crash."""
+
+    def __init__(self, engine):
+        FakeAudio.__init__(self, engine)
+        self._ok = False
+        self._pygame = None
+        self._chan = None
+        self._keep = None        # hold a ref to the in-flight Sound so it isn't GC'd
+        try:
+            import pygame
+            pygame.mixer.quit()  # reset any default (44.1k stereo) init to our format
+            pygame.mixer.init(frequency=engine.rate, size=-16, channels=1, buffer=512)
+            self._pygame = pygame
+            self._chan = pygame.mixer.Channel(0)
+            self._ok = True
+        except Exception:        # no audio device (headless/CI) -> silent fallback
+            self._ok = False
+
+    def tick(self, dt):
+        n = int(self.engine.rate * (dt if dt > 0.0 else 0.0))
+        if n <= 0:
+            return
+        pcm = self.engine.render(n)   # advance the mixer; bytes of LE int16 mono
+        self.rendered += n
+        if not self._ok or not pcm:
+            return
+        try:
+            snd = self._pygame.mixer.Sound(buffer=pcm)
+            if self._chan.get_busy():
+                self._chan.queue(snd)     # play right after the current block
+            else:
+                self._chan.play(snd)
+            self._keep = snd
+        except Exception:
+            self._ok = False              # stop trying if the device drops out
+
+
+def make_sdl_audio(engine):
+    """Factory for the real desktop-playback backend (simulate_desktop wires this
+    for live windowed runs; tests/headless keep make_audio's FakeAudio)."""
+    return SdlAudio(engine)
+
+
 def make_api(canvas, input, config, sheet=None, audio=None):
     """The cartridge global namespace on the host -- same names/signature as the
     device make_api (TIC-80 draw API + sheet-or-Image spr + audio), bound to a host
