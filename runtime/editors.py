@@ -203,6 +203,8 @@ class SpriteSheet:
         self.h = rows * self.TILE
         self.pix = pix if pix is not None else bytearray(self.w * self.h)
         self.dirty = False
+        self.gen = 0          # bumps on every pset, so a running cart's tile cache
+                              # can detect a sprite edit and rebuild (host/device parity)
 
     @property
     def count(self):
@@ -217,6 +219,7 @@ class SpriteSheet:
         if 0 <= x < self.w and 0 <= y < self.h:
             self.pix[y * self.w + x] = c & 15
             self.dirty = True
+            self.gen += 1
 
     def tile_origin(self, n):
         return (n % self.cols) * self.TILE, (n // self.cols) * self.TILE

@@ -514,6 +514,8 @@ class Workstation:
         # run_desktop swaps in kidcode_sd.with_sd_live (native kc_sd attach). The
         # default is a host passthrough.
         self._with_sd = lambda fn: fn()
+        self.show_fps = True          # bottom-right FPS readout while a cart runs
+        self._fps = 0.0               # smoothed frames/sec (EMA of 1/dt)
 
     def _start(self):
         ns = self.make_api(self.canvas, self.input, self.config, self.sheet)
@@ -590,12 +592,16 @@ class Workstation:
         self._set_text_mode(view == "code")
 
     def _set_text_mode(self, on):
-        # The T-Deck keyboard always returns clean 1-byte ASCII now, so there is no
-        # mode to flip -- the editor reads last_key directly and nav/menus read the
-        # mapped buttons. Kept as a hook (and to keep the keyboard out of raw mode).
+        # The code editor needs clean 1-byte ASCII (it reads last_key for typing);
+        # a running cart wants the raw key matrix so a *held* direction keeps firing
+        # (true hold-to-move -- the ASCII path reports each key once on the press
+        # edge with no autorepeat). Flip the keyboard between the two on every screen
+        # change. Raw needs keyboard fw >= 2025-06-12; without it the keyboard keeps
+        # sending ASCII and TDeckKeyboard sticks on the 1-byte + hold-latch path, so
+        # this is safe on any firmware. No-op on the host (no keyboard).
         kb = self.keyboard
         if kb is not None:
-            kb.raw_mode = False
+            kb.set_game_mode(not on)
 
     def _open_menu(self):
         self.screen = "menu"
@@ -1303,6 +1309,10 @@ class Workstation:
     # -- frame + drawing -----------------------------------------------------
 
     def frame(self, dt):
+        if dt > 0:
+            inst = 1.0 / dt
+            # EMA so the readout reflects sustained rate, not single-frame jitter.
+            self._fps = inst if self._fps <= 0 else self._fps + (inst - self._fps) * 0.15
         if self.screen == "launcher":
             self.launcher.draw(self.canvas)
             if self.can_manage:
@@ -1354,8 +1364,22 @@ class Workstation:
                     print("KidCode cards error:", exc)
                     self._draw_error_panel()
                     self._icon_btn("close", "", _CLOSE_BTN, NAMES["red"])
+        if self.show_fps and self.screen == "desktop":
+            self._draw_fps()
         self._draw_cursor()
         self.comp.flush()
+
+    def _draw_fps(self):
+        # Tiny FPS readout in the bottom-right, over a dark chip so it stays legible
+        # on any cart. The desktop overlay buttons all sit along the top, so this
+        # corner is free. Drawn with the indexed API only (host == device).
+        cv = self.canvas
+        s = "%d" % int(self._fps + 0.5)
+        tw = len(s) * 8
+        x = cv.w - tw - 3
+        y = cv.h - 10
+        cv.rect(x - 2, y - 1, tw + 4, 10, NAMES["black"])
+        cv.print(s, x, y, NAMES["yellow"], 1)
 
     def _btn(self, label, rect, fill):
         x, y, w, h = rect
