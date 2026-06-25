@@ -1,0 +1,21 @@
+{
+  "format": "kidcode-cart-v1",
+  "title": "Pixel Pet",
+  "type": "game",
+  "runtime": "python",
+  "main": "main.py",
+  "system": true,
+  "canvas": { "width": 480, "height": 270, "palette": "kid64" },
+  "permissions": ["graphics", "input"],
+  "safe_to_share": true,
+  "config": {
+    "pet": "frog",
+    "decay": 4,
+    "bg": "dark_purple"
+  },
+  "edit": [
+    { "key": "pet", "label": "PET", "type": "choice", "choices": ["frog", "cat", "robot"], "card": "PET IS A {value}" },
+    { "key": "decay", "label": "NEEDS", "type": "int", "min": 1, "max": 12, "step": 1, "card": "NEEDINESS {value}" },
+    { "key": "bg", "label": "ROOM", "type": "choice", "choices": ["dark_purple", "dark_blue", "black", "indigo"], "card": "ROOM IS {value}" }
+  ]
+}
