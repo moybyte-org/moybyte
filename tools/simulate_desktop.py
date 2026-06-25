@@ -177,12 +177,34 @@ def run_live(driver, dt, scale):
     pygame.quit()
 
 
+def _force_autoplay_on_open(ws):
+    """Wrap ws.open so every cart it opens runs in AUTOPLAY (attract) mode.
+
+    Carts now default to autoplay OFF so a kid actually plays; the scripted demo
+    tour, though, sends no gameplay input, so without this every game would sit
+    idle. Flip the just-opened cart's `autoplay` config on (if it has one) and
+    re-start it so the GIF/tour stays lively."""
+    _orig_open = ws.open
+
+    def _open():
+        _orig_open()
+        if ws.cart and isinstance(ws.config, dict) and "autoplay" in ws.config:
+            ws.config["autoplay"] = 1
+            ws._start()
+
+    ws.open = _open
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--cart", help="launch a single .kcart directly (skip the launcher)")
     ap.add_argument("--gif", metavar="PATH")
     ap.add_argument("--script", default=None)
     ap.add_argument("--demo", action="store_true")
+    ap.add_argument("--autoplay", dest="autoplay", action="store_true", default=None,
+                    help="force games into attract/autoplay mode (default ON for --demo)")
+    ap.add_argument("--no-autoplay", dest="autoplay", action="store_false",
+                    help="play games yourself even in the scripted demo")
     ap.add_argument("--save-dir", default=DEFAULT_SAVE_DIR)
     ap.add_argument("--scale", type=int, default=2)
     ap.add_argument("--fps", type=int, default=30)
@@ -190,6 +212,11 @@ def main():
 
     dt = 1.0 / args.fps
     ws = host_app.build_workstation(args.save_dir)
+    # The scripted demo tour drives no gameplay input, so default it to autoplay
+    # (so the GIF is lively); a live, interactive session defaults to PLAY.
+    autoplay = args.autoplay if args.autoplay is not None else args.demo
+    if autoplay:
+        _force_autoplay_on_open(ws)
     if args.cart:
         _open_named_cart(ws, args.cart, args.save_dir)
     driver = host_app.ConsoleDriver(ws)

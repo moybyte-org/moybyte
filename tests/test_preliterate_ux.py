@@ -237,8 +237,11 @@ def test_space_desktop_bg_picker_applies_a_preset(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open(ws, "Space Desktop")
     ws._open_menu()
-    rows = ws._card_layout()
-    bg = [r for r in rows if r["f"]["key"] == "bg"][0]
+    # The PET card is now a (taller) sprite-tiles picker, so all four cards no
+    # longer fit at once -- scroll the BG card into view the way a kid would.
+    bg_i = [i for i, f in enumerate(ws.cart["edit"]) if f["key"] == "bg"][0]
+    ws._reveal_card(bg_i)
+    bg = [r for r in ws._card_layout() if r["f"]["key"] == "bg"][0]
     assert bg["display"] == "bg-thumbs"
     _tap_cell(ws, bg, 2)                         # "stripes"
     assert ws.config["bg"] == "stripes"

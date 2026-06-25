@@ -2,28 +2,21 @@
 # Shows the gallery has variety; same shape as the Space Desktop.
 
 bubbles = []
-fish = None
 fish_x = 0.0
 fish_dir = 1
 t = 0.0
 
-FISH = [
-    "...WWW..",
-    ".WWWWWWK",
-    "WWWWWWWW",
-    ".WWWWWWK",
-    "...WWW..",
-]
+# The fish lives in the cart's sprite sheet (sprites.kgfx) as tile 0 -- edit it
+# in the paint editor.
 
 
 def _init():
-    global bubbles, fish, fish_x
+    global bubbles, fish_x
     n = int(cfg("bubble_count", 60))
     spd = cfg("rise_speed", 25)
     bubbles = []
     for _i in range(n):
         bubbles.append([rnd(W), rnd(H), 1 + int(rnd(2)), spd * (0.5 + rnd(0.8))])
-    fish = image(FISH, {"W": col("orange"), "K": col("black")})
     fish_x = W * 0.5
 
 
@@ -46,5 +39,5 @@ def _draw():
         circb(int(b[0]), int(b[1]), b[2], col("white"))   # bubble outlines
     rect(0, H - 18, W, 18, col("brown"))          # seabed
     wob = 2 if (int(t * 3) % 2 == 0) else 0
-    spr(fish, int(fish_x), H - 18 - 24 - wob, scale=4)
+    spr(0, int(fish_x), H - 18 - 24 - wob, 0, 4)   # fish tile, 4x scaled
     print("OCEAN", 10, 10, col("white"), 3)
