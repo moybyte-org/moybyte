@@ -248,6 +248,23 @@ class SpriteSheet:
                 return False
         return True
 
+    def copy_tile(self, src_sheet, src_n, dst_n=None):
+        """Copy one 8x8 tile from another sheet into this one -- the cross-cart
+        sprite-reuse primitive (#18). `src_sheet` is any SpriteSheet (another
+        cart's sheet, or the shared sheet); `src_n` is the source sprite id and
+        `dst_n` is where it lands here (defaults to the same id). Copies pixel by
+        pixel through tget/tset so source and destination sheets may differ in
+        size. Returns the destination id, or None if either id is out of range."""
+        if dst_n is None:
+            dst_n = src_n
+        if (src_n < 0 or src_n >= src_sheet.count
+                or dst_n < 0 or dst_n >= self.count):
+            return None
+        for ly in range(self.TILE):
+            for lx in range(self.TILE):
+                self.tset(dst_n, lx, ly, src_sheet.tget(src_n, lx, ly))
+        return dst_n
+
     def to_hex(self):
         """Serialize to h lines of w hex nibbles (PICO-8 __gfx__ style)."""
         w = self.w
