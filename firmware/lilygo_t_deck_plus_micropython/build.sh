@@ -116,6 +116,11 @@ fi
 cp "${REPO_ROOT}/runtime/editors.py" "${SCRIPT_DIR}/modules/editors.py"
 cp "${REPO_ROOT}/runtime/console.py" "${SCRIPT_DIR}/modules/console.py"
 cp "${REPO_ROOT}/runtime/kid_carts.py" "${SCRIPT_DIR}/modules/kid_carts.py"
+# carts_data.py is GENERATED from system_carts/ (it replaces the ~1800 lines of
+# embedded carts kid_runtime used to hand-duplicate) so the device's seed /
+# fallback carts can never drift from the host source of truth -- kid_runtime
+# does `from carts_data import CARTS`.
+"${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_device_carts.py" "${SCRIPT_DIR}/modules/carts_data.py"
 
 BUILDER_ESP32="${UPSTREAM_DIR}/builder/esp32.py"
 if [ -f "${BUILDER_ESP32}" ]; then
