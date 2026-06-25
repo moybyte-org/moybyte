@@ -47,6 +47,35 @@ def _write(path, data):
         f.write(data)
 
 
+def _remove(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _write_atomic(path, data):
+    """Write `data` to `path` without ever leaving a truncated real file.
+
+    Strategy (crash-safe, MicroPython/FAT friendly -- os.rename can't clobber an
+    existing target on FAT, so we move the good file aside first):
+      1. write the new bytes to `path.tmp`            (a crash here leaves path intact)
+      2. rotate the current good file to `path.bak`   (path momentarily gone)
+      3. rename `path.tmp` -> `path`                  (the atomic swap)
+    If step 3 fails the previous good copy is still recoverable as `path.bak`.
+    """
+    tmp = path + ".tmp"
+    bak = path + ".bak"
+    _write(tmp, data)                 # full new file lands in tmp first
+    if _exists(path):
+        _remove(bak)                  # FAT rename won't overwrite -> clear stale bak
+        try:
+            os.rename(path, bak)      # keep the last-known-good copy aside
+        except OSError:
+            _remove(path)             # rename unsupported? fall back to a plain swap
+    os.rename(tmp, path)              # atomic publish of the new contents
+
+
 def slug(title):
     out = ""
     for ch in str(title).lower():
@@ -81,39 +110,53 @@ def seed_builtins(seed_list, root=CARTS_DIR):
 
 
 def load(path):
-    """Load one .kcart folder into a cart dict, or None on error."""
+    """Load one .kcart folder into a cart dict, or None on error.
+
+    A corrupt cart (bad manifest.json, missing main.py, or anything else
+    unexpected) returns None instead of throwing, so one broken folder can never
+    take down the gallery or the boot path. The whole body is also guarded so a
+    surprise (e.g. a weird VFS error) still degrades to a skip, not a crash."""
     try:
-        man = json.loads(_read(path + "/manifest.json"))
-    except (OSError, ValueError) as exc:
-        print("KidCode cart manifest bad:", path, exc)
+        try:
+            man = json.loads(_read(path + "/manifest.json"))
+        except (OSError, ValueError) as exc:
+            print("KidCode cart manifest bad:", path, exc)
+            return None
+        if not isinstance(man, dict):
+            print("KidCode cart manifest not an object:", path)
+            return None
+        try:
+            src = _read(path + "/" + man.get("main", "main.py"))
+        except OSError as exc:
+            print("KidCode cart main missing:", path, exc)
+            return None
+        cfg = dict(man.get("config", {}))
+        try:
+            cfg.update(json.loads(_read(path + "/config.json")))
+        except (OSError, ValueError):
+            pass
+        try:
+            sprites = _read(path + "/sprites.kgfx")   # PICO-8 __gfx__-style hex, optional
+        except OSError:
+            sprites = None
+        return {
+            "path": path,
+            "title": man.get("title", "cart"),
+            "type": man.get("type", "app"),
+            "src": src,
+            "cfg": cfg,
+            "edit": man.get("edit", []),
+            "sprites": sprites,
+        }
+    except Exception as exc:  # noqa: BLE001  -- never let one bad cart escape
+        print("KidCode cart unreadable:", path, exc)
         return None
-    try:
-        src = _read(path + "/" + man.get("main", "main.py"))
-    except OSError as exc:
-        print("KidCode cart main missing:", path, exc)
-        return None
-    cfg = dict(man.get("config", {}))
-    try:
-        cfg.update(json.loads(_read(path + "/config.json")))
-    except (OSError, ValueError):
-        pass
-    try:
-        sprites = _read(path + "/sprites.kgfx")   # PICO-8 __gfx__-style hex, optional
-    except OSError:
-        sprites = None
-    return {
-        "path": path,
-        "title": man.get("title", "cart"),
-        "type": man.get("type", "app"),
-        "src": src,
-        "cfg": cfg,
-        "edit": man.get("edit", []),
-        "sprites": sprites,
-    }
 
 
 def scan(root=CARTS_DIR):
-    """All carts found under root, sorted by folder name."""
+    """All carts found under root, sorted by folder name. Corrupt carts are
+    skipped (load() returns None), and any per-entry surprise is swallowed so a
+    single bad folder can't break the launcher."""
     carts = []
     try:
         names = sorted(os.listdir(root))
@@ -121,7 +164,11 @@ def scan(root=CARTS_DIR):
         return carts
     for name in names:
         if name.endswith(".kcart"):
-            c = load(root + "/" + name)
+            try:
+                c = load(root + "/" + name)
+            except Exception as exc:  # noqa: BLE001  -- belt-and-braces over load()
+                print("KidCode cart scan skipped:", name, exc)
+                c = None
             if c:
                 carts.append(c)
     return carts
@@ -129,18 +176,48 @@ def scan(root=CARTS_DIR):
 
 def save_config(cart):
     """Persist a cart's edited config back to its config.json (needs cart['path'])."""
-    _write(cart["path"] + "/config.json", json.dumps(cart["cfg"]))
+    _write_atomic(cart["path"] + "/config.json", json.dumps(cart["cfg"]))
+
+
+# save_code() outcomes -- the caller (Workstation) surfaces these to the kid:
+SAVE_OK = "ok"            # source parsed and was written atomically
+SAVE_BAD_SYNTAX = "bad"   # source won't compile; the good file was left untouched
+
+
+def compile_check(src):
+    """Return (ok, message). ok is True when `src` is valid Python; otherwise
+    message is a short human-readable syntax-error string. Uses compile() (no
+    exec), which exists on both CPython and MicroPython."""
+    try:
+        compile(src, "<cart>", "exec")
+        return True, ""
+    except SyntaxError as exc:
+        msg = getattr(exc, "msg", None) or str(exc)
+        lineno = getattr(exc, "lineno", None)
+        if lineno:
+            return False, "line %d: %s" % (lineno, msg)
+        return False, str(msg)
+    except Exception as exc:  # noqa: BLE001  -- MicroPython may raise plain ValueError
+        return False, str(exc)
 
 
 def save_code(cart, src):
-    """Persist edited source back to the cart's main file (code editor)."""
-    _write(cart["path"] + "/main.py", src)
+    """Persist edited source to the cart's main file, ATOMICALLY and only if it
+    compiles. Returns (status, message): status is SAVE_OK on success, or
+    SAVE_BAD_SYNTAX with a message (and the previous good file is left intact)
+    when `src` won't parse, so a kid's broken edit can never truncate the cart."""
+    ok, msg = compile_check(src)
+    if not ok:
+        return SAVE_BAD_SYNTAX, msg
+    _write_atomic(cart["path"] + "/main.py", src)
     cart["src"] = src
+    return SAVE_OK, ""
 
 
 def save_sprites(cart, hex_text):
-    """Persist the sprite sheet (PICO-8 __gfx__-style hex) to sprites.kgfx."""
-    _write(cart["path"] + "/sprites.kgfx", hex_text)
+    """Persist the sprite sheet (PICO-8 __gfx__-style hex) to sprites.kgfx,
+    atomically so an interrupted write can't truncate the real file."""
+    _write_atomic(cart["path"] + "/sprites.kgfx", hex_text)
     cart["sprites"] = hex_text
 
 
