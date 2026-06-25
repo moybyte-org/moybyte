@@ -40,6 +40,19 @@ ai_dir = 1
 ai_jump = 0.0
 
 
+# The player hero is a sprite-sheet tile (sprites.kgfx): tile 0 and tile 1, both
+# editable in the paint editor. The collision box stays PW x PH; the sprite is
+# drawn over it.
+
+
+def _hero_tile():
+    h = cfg("hero", 0)               # tile id (tolerate a stale color-name config)
+    try:
+        return int(h)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _solid(tx, ty):
     if ty < 0 or ty >= len(LEVEL):
         return False
@@ -202,9 +215,8 @@ def _draw():
     fc = "green" if _all_taken() else "red"
     rect(gx + 6, gy - 2, 2, TS + 2, col("white"))
     rect(gx + 8, gy, 8, 6, col(fc))
-    # player
-    rect(int(px), int(py), PW, PH, col(cfg("hero", "pink")))
-    rectb(int(px), int(py), PW, PH, col("white"))
+    # player: an editable 8x8 hero tile at 2x (16px), centered on the PWxPH box
+    spr(_hero_tile(), int(px) + PW // 2 - 8, int(py) + PH - 16, -1, 2)
     # HUD
     got = 0
     for c in coins:

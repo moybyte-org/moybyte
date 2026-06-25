@@ -15,21 +15,22 @@ best = 0
 obs = []             # obstacles: [x, w, h]
 spawn_x = 0.0
 t = 0.0
-hero = None
+hero = 0             # the chosen hero sprite tile (0 or 1 -- editable in paint)
 
-RUNNER = [
-    "..HHHH..",
-    "..HHHH..",
-    "..FFFF..",
-    ".FFFFFF.",
-    "FFFFFFFF",
-    "FF.FF.FF",
-    ".F....F.",
-]
+# The hero runs from the cart's sprite sheet (sprites.kgfx): tile 0 and tile 1.
+# Pick one in "Make it mine" and edit it in the paint editor.
 
 
 def _ground_y():
     return H - GROUND
+
+
+def _hero_tile():
+    h = cfg("hero", 0)               # tile id (tolerate a stale color-name config)
+    try:
+        return int(h)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _init():
@@ -40,7 +41,7 @@ def _init():
     obs = []
     spawn_x = W
     t = 0.0
-    hero = image(RUNNER, {"H": col(cfg("hero", "green")), "F": col("white")}, ".")
+    hero = _hero_tile()
 
 
 def _spawn():
@@ -126,8 +127,8 @@ def _draw():
     for o in obs:
         rect(int(o[0]), gy - o[2], o[1], o[2], col("green"))
         rectb(int(o[0]), gy - o[2], o[1], o[2], col("dark_green"))
-    # hero
-    spr(hero, HERO_X, gy - HERO_H - int(hero_y), scale=2)
+    # hero (8x8 tile at 2x = 16px, from the cart sheet)
+    spr(hero, HERO_X, gy - HERO_H - int(hero_y), -1, 2)
     print("SCORE " + str(int(score)), 8, 8, col("white"), 2)
     print("BEST " + str(best), 8, 24, col("yellow"), 1)
     print("UP=JUMP", W - 60, 8, col("light_grey"), 1)

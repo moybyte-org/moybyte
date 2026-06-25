@@ -11,13 +11,13 @@
   "config": {
     "speed": 90,
     "jump": 230,
-    "hero": "pink",
+    "hero": 0,
     "sky": "dark_blue"
   },
   "edit": [
     { "key": "speed", "label": "SPEED", "type": "int", "min": 40, "max": 180, "step": 10, "card": "WALK AT {value}" },
     { "key": "jump", "label": "JUMP", "type": "int", "min": 150, "max": 340, "step": 10, "card": "JUMP POWER {value}" },
-    { "key": "hero", "label": "HERO", "type": "choice", "choices": ["pink", "red", "green", "yellow"], "card": "HERO IS {value}" },
+    { "key": "hero", "label": "HERO", "type": "choice", "choices": [0, 1], "tiles": [0, 1], "display": "sprite-tiles", "card": "HERO IS {value}" },
     { "key": "sky", "label": "SKY", "type": "choice", "choices": ["dark_blue", "indigo", "dark_purple", "black"], "card": "SKY IS {value}" }
   ]
 }

@@ -177,3 +177,83 @@ def test_tap_red_scores_red_and_penalizes_other(tmp_path):
     ws.input.begin_frame()
     ws.frame(1 / 30)
     assert ws.ns["misses"] == m0 + 1
+
+
+# -- character art lives in EDITABLE sprite-sheet tiles (#15 follow-up) ------
+#
+# The carts whose characters used to be inline ASCII Images in main.py now keep
+# them in the cart's sprites.kgfx, so the paint/sprite editor actually shows art
+# to edit (the original bug: "I don't see the sprites that the games use"). These
+# assert the sheet the editor loads is non-empty and the cart still runs.
+
+# Folder -> the sprite tile ids its sprites.kgfx must paint (the editor surface).
+CONVERTED_SHEETS = {
+    "pet": (0, 1, 2),            # frog / cat / robot pet faces
+    "tiny_runner": (0, 1),       # two runner heroes
+    "platformer": (0, 1),        # two hop heroes
+}
+# Tap Only Red stays PRIMITIVE on purpose: its bubbles are variable-radius
+# circles whose color IS the gameplay (red vs lure), set per-bubble at spawn --
+# a fixed 8x8 tile can't express that, so it has no sprites.kgfx.
+PRIMITIVE_CARTS = ("tap_red",)
+
+
+def test_converted_carts_have_nonempty_sprite_sheets():
+    from runtime.canvas import SpriteSheet
+
+    for folder, tiles in CONVERTED_SHEETS.items():
+        f = SYSTEM_CARTS / (folder + ".kcart") / "sprites.kgfx"
+        assert f.is_file(), folder + " is missing sprites.kgfx"
+        hexs = f.read_text(encoding="utf-8")
+        sheet = SpriteSheet.from_hex(hexs)
+        assert not sheet.is_blank(), folder + " sprite sheet is blank (editor shows nothing)"
+        for n in tiles:                              # each expected character tile is painted
+            pix = [sheet.tget(n, lx, ly) for ly in range(8) for lx in range(8)]
+            assert any(pix), "%s tile %d is blank" % (folder, n)
+
+
+def test_primitive_cart_has_no_sprite_sheet():
+    # The genuinely-primitive cart is intentionally left without a sheet.
+    for folder in PRIMITIVE_CARTS:
+        assert not (SYSTEM_CARTS / (folder + ".kcart") / "sprites.kgfx").exists(), folder
+
+
+def test_converted_carts_load_their_sheet_and_run_headless(tmp_path):
+    from runtime import host_app
+
+    title_for = {"pet": "Pixel Pet", "tiny_runner": "Tiny Runner",
+                 "platformer": "Hop Quest"}
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    for folder, tiles in CONVERTED_SHEETS.items():
+        _open_cart(ws, title_for[folder])
+        assert ws.screen == "desktop", folder            # started cleanly
+        assert ws.cart_error is None, folder
+        # the editor would load THIS sheet -> it must carry the painted tiles
+        assert ws.sheet is not None and not ws.sheet.is_blank(), folder
+        for n in tiles:
+            assert ws.sheet.tile_image(n).pix.count(0) < 64, "%s tile %d blank" % (folder, n)
+        _run(ws, 90)                                     # attract mode, no crash
+        assert ws.cart_error is None, folder
+        assert len(set(ws.canvas.buf)) > 1, folder
+        ws.go_home()
+
+
+def test_pet_picker_selects_a_sprite_tile(tmp_path):
+    from runtime import host_app
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_cart(ws, "Pixel Pet")
+    ws._open_menu()
+    rows = ws._card_layout()
+    pet = [r for r in rows if r["f"]["key"] == "pet"][0]
+    assert pet["display"] == "sprite-tiles"
+    cells = ws._choice_cells(pet)
+    assert len(cells) == 3                               # frog / cat / robot
+    _, (cx, cy, cw, ch) = cells[2]                       # tap the robot tile
+    ws.pointer.place(cx + cw // 2, cy + ch // 2)
+    ws.pointer.click = True
+    ws.handle_pointer()
+    assert ws.config["pet"] == 2
+    ws.apply()
+    assert ws.cart_error is None
+    assert ws.ns["pet"] == 2                             # the running cart uses the picked tile
