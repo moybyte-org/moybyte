@@ -311,35 +311,58 @@ def _draw():
     print("OCEAN", 10, 10, col("white"), 3)
 """
 
-STAR_SRC = """# Star Catcher -- a game cartridge. Move the catcher LEFT/RIGHT to catch falling
-# stars. With no input it auto-plays (attract mode), so it's lively in the
-# simulator GIF; pressing a key takes over. Same runtime as the wallpaper -- a
-# game is just another cartridge.
+STAR_SRC = """# Star Catcher -- catch the falling stars! Move the catcher LEFT/RIGHT (B / A
+# also work) to scoop up stars before they hit the floor. Each catch is +1 and
+# builds a COMBO that scores extra; let one fall and you lose a heart. Lose all 3
+# hearts and the round resets. Stars fall faster the higher you score, so the
+# pressure climbs.
+#
+# AUTOPLAY (in "Make it mine") is OFF by default -- YOU play. Flip it on to watch
+# the console play itself (attract mode).
 #
 # The CATCHER is a real sprite-sheet tile (id 0 = frog, id 1 = robot, both
 # editable in the paint editor). The "Make it mine" CATCHER card is a sprite-tile
 # picker: tap the frog or the robot to choose -- no reading required.
 
-BW = 48          # catcher width
+BW = 44          # catcher width (a touch tighter than before)
 BH = 14
 SPR_SCALE = 4    # the 8x8 catcher tile is drawn at 4x (32x32)
+LIVES = 3
 score = 0
+combo = 0
+best = 0
+lives = LIVES
 bx = 0.0
 catcher = 0      # the chosen catcher sprite tile id
 stars = []
+sparks = []      # catch particles: [x, y, vx, vy, life]
+flash = 0.0      # white catch glow, decays
+shake = 0.0      # screen-shake amount, decays
+over = 0.0       # >0 = game-over banner timer
+
+
+def _base_speed():
+    return float(cfg("fall_speed", 70))
 
 
 def _spawn(s):
     s[0] = rnd(W - 8)
     s[1] = -rnd(H * 0.5) - 8
-    s[2] = cfg("fall_speed", 70) * (0.7 + rnd(0.6))
+    # speed ramps with score so the game gets harder the better you do
+    s[2] = _base_speed() * (0.7 + rnd(0.6)) * (1.0 + score * 0.02)
 
 
 def _init():
-    global score, bx, stars, catcher
+    global score, combo, lives, bx, stars, catcher, sparks, flash, shake, over
     score = 0
+    combo = 0
+    lives = LIVES
     bx = W / 2 - BW / 2
     stars = []
+    sparks = []
+    flash = 0.0
+    shake = 0.0
+    over = 0.0
     for _i in range(int(cfg("star_count", 5))):
         s = [0, 0, 0]
         _spawn(s)
@@ -352,22 +375,63 @@ def _init():
 
 
 def _nearest_star():
-    best = None
+    # the star that will reach the floor SOONEST (time = distance / fall speed),
+    # so the autoplay catcher commits early instead of thrashing between stars.
+    by = H - 24 - BH
+    best_s = None
+    best_t = 0.0
     for s in stars:
-        if best is None or s[1] > best[1]:
-            best = s
-    return best
+        ttf = (by - s[1]) / max(1.0, s[2])
+        if best_s is None or ttf < best_t:
+            best_s = s
+            best_t = ttf
+    return best_s
+
+
+def _burst(x, y):
+    # a few sparks fly out of a caught star (cheap particles)
+    for _i in range(6):
+        sparks.append([x, y, (rnd(2.0) - 1.0) * 80, -rnd(90) - 20, 0.5])
+
+
+def _catch(s):
+    global score, combo, best, flash, shake
+    score += 1 + combo // 5          # combo bonus: every 5 in a row scores extra
+    combo += 1
+    if score > best:
+        best = score
+    flash = 0.18
+    shake = 3.0
+    _burst(s[0], H - 24 - BH)
+    _spawn(s)
+
+
+def _drop(s):
+    global lives, combo, shake, over
+    combo = 0
+    lives -= 1
+    shake = 5.0
+    if lives <= 0:
+        over = 1.2
+    _spawn(s)
 
 
 def _update(dt):
-    global bx, score
-    speed = 160
-    if btn("left"):
+    global bx, flash, shake, over
+    if over > 0.0:
+        over -= dt
+        if over <= 0.0:
+            _init()
+        return
+    speed = 200.0                       # tighter, snappier catcher
+    left = btn("left") or btn("b")
+    right = btn("right") or btn("a")
+    if left:
         bx -= speed * dt
-    elif btn("right"):
+    elif right:
         bx += speed * dt
-    else:
-        target = _nearest_star()           # attract mode: drift toward a star
+    elif cfg("autoplay", 0):            # attract mode: drift toward a star
+        target = _nearest_star()
         if target is not None:
             want = target[0] - BW / 2
             bx += max(-speed * dt, min(speed * dt, want - bx))
@@ -376,22 +440,50 @@ def _update(dt):
     for s in stars:
         s[1] += s[2] * dt
         if s[1] + 6 >= by and s[1] <= by + BH and bx <= s[0] <= bx + BW:
-            score += 1
-            _spawn(s)
+            _catch(s)
         elif s[1] > H:
-            _spawn(s)
+            _drop(s)
+    # particles
+    keep = []
+    for p in sparks:
+        p[4] -= dt
+        if p[4] > 0.0:
+            p[0] += p[2] * dt
+            p[1] += p[3] * dt
+            p[3] += 240.0 * dt
+            keep.append(p)
+    sparks[:] = keep
+    if flash > 0.0:
+        flash = max(0.0, flash - dt)
+    if shake > 0.0:
+        shake = max(0.0, shake - dt * 12.0)
 
 
 def _draw():
-    cls(col("black"))
+    sx = 0
+    if shake > 0.0:
+        sx = int(rnd(shake * 2) - shake)
+    cls(col("white") if flash > 0.0 else col("black"))
     for s in stars:
-        circ(int(s[0]), int(s[1]), 3, col("yellow"))
+        circ(int(s[0]) + sx, int(s[1]), 3, col("yellow"))
+        pix(int(s[0]) + sx, int(s[1]) - 4, col("white"))   # tiny sparkle tail
+    for p in sparks:
+        pix(int(p[0]) + sx, int(p[1]), col("yellow"))
     by = H - 24 - BH
-    rect(0, H - 24, W, 24, col("dark_blue"))     # floor
-    rect(int(bx), by, BW, BH, col("brown"))      # basket
-    spr(catcher, int(bx) + BW // 2 - 8 * SPR_SCALE // 2, by - 8 * SPR_SCALE,
-        -1, SPR_SCALE)                            # catcher tile (frog/robot)
-    print("SCORE " + str(score), 10, 10, col("white"), 3)
+    rect(0, H - 24, W, 24, col("dark_blue"))         # floor
+    rect(int(bx) + sx, by, BW, BH, col("brown"))     # basket
+    spr(catcher, int(bx) + sx + BW // 2 - 8 * SPR_SCALE // 2, by - 8 * SPR_SCALE,
+        -1, SPR_SCALE)                               # catcher tile (frog/robot)
+    print("SCORE " + str(score), 8, 8, col("white"), 2)
+    if combo >= 2:
+        print("X" + str(combo), 8, 26, col("yellow"), 1)
+    # hearts (lives) top-right
+    for i in range(LIVES):
+        c = "red" if i < lives else "dark_grey"
+        rect(W - 14 - i * 12, 9, 8, 7, col(c))
+    if over > 0.0:
+        print("GAME OVER", W // 2 - 36, H // 2 - 8, col("red"), 2)
+        print("BEST " + str(best), W // 2 - 24, H // 2 + 10, col("yellow"), 1)
 """
 
 STAR_GFX = """00bb00bb066666600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
@@ -523,11 +615,13 @@ bbbbbbbb666666660000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"""
 
-PET_SRC = """# Pixel Pet -- a virtual-pet cartridge. Keep your pet FED and HAPPY:
+PET_SRC = """# Pixel Pet -- a virtual pet. Keep your pet FED and HAPPY:
 #   LEFT  = feed (fills the food meter)   RIGHT = play (fills the joy meter)
-# Both meters drain over time; a hungry or bored pet gets sad. With no input it
-# auto-cares for itself (attract mode) so it stays lively in the simulator GIF.
-# Same runtime/API as every other cart -- a pet is just another cartridge.
+# Both meters drain over time; a hungry or bored pet gets sad, and how it looks
+# (and its bounce) follows its mood. Care for it and it shows little hearts.
+#
+# AUTOPLAY (in "Make it mine") is OFF by default -- YOU look after it. Flip it on
+# and the pet cares for itself (attract mode). A pet is just another cartridge.
 
 food = 80.0
 joy = 80.0
@@ -536,6 +630,8 @@ idle = 0.0
 pet = 0          # the chosen pet sprite tile (0 frog, 1 cat, 2 robot -- editable)
 bob = 0
 blink = 0.0
+hearts = []      # floating care feedback: [x, y, life]
+
 
 # The pet faces live in the cart's sprite sheet (sprites.kgfx): frog=0, cat=1,
 # robot=2. Pick one in "Make it mine" and edit it in the paint editor.
@@ -550,23 +646,32 @@ def _pet_tile():
 
 
 def _init():
-    global food, joy, t, idle, pet, bob, blink
+    global food, joy, t, idle, pet, bob, blink, hearts
     food = 80.0
     joy = 80.0
     t = 0.0
     idle = 0.0
     bob = 0
     blink = 0.0
+    hearts = []
     pet = _pet_tile()
+
+
+def _heart(x):
+    hearts.append([x, H - 26 - 40, 0.8])
 
 
 def _feed():
     global food
+    if food < 100.0:
+        _heart(W // 2 - 18)
     food = min(100.0, food + 18.0)
 
 
 def _play():
     global joy
+    if joy < 100.0:
+        _heart(W // 2 + 18)
     joy = min(100.0, joy + 18.0)
 
 
@@ -590,12 +695,23 @@ def _update(dt):
         idle = 0.0
     else:
         idle += dt
-        if idle > 1.5:                 # attract mode: care for the neediest meter
+        if cfg("autoplay", 0) and idle > 1.5:   # attract: care for the neediest meter
             if food <= joy:
                 _feed()
             else:
                 _play()
-    bob = -2 if (int(t * 3) % 2 == 0) else 0
+    # floating hearts rise + fade
+    keep = []
+    for h in hearts:
+        h[2] -= dt
+        if h[2] > 0.0:
+            h[1] -= 26.0 * dt
+            keep.append(h)
+    hearts[:] = keep
+    # a happier pet bounces faster
+    mood = min(food, joy)
+    rate = 3 if mood > 40 else 2
+    bob = -3 if (int(t * rate) % 2 == 0) else 0
 
 
 def _bar(x, y, w, v, c):
@@ -604,6 +720,20 @@ def _bar(x, y, w, v, c):
     if fill > 0:
         rect(x, y, fill, 8, col(c))
     rectb(x, y, w, 8, col("white"))
+
+
+def _smiley(cx, cy, mood):
+    # a tiny mood face floating above the pet (smile / flat / frown)
+    pix(cx - 4, cy - 2, col("white"))
+    pix(cx + 4, cy - 2, col("white"))
+    if mood > 60:                                 # smile
+        line(cx - 3, cy + 2, cx, cy + 4, col("white"))
+        line(cx, cy + 4, cx + 3, cy + 2, col("white"))
+    elif mood > 25:                               # flat
+        line(cx - 3, cy + 3, cx + 3, cy + 3, col("white"))
+    else:                                         # frown
+        line(cx - 3, cy + 4, cx, cy + 2, col("white"))
+        line(cx, cy + 2, cx + 3, cy + 4, col("white"))
 
 
 def _draw():
@@ -616,6 +746,14 @@ def _draw():
     px = W // 2 - 16            # 8x8 tile drawn at 4x = 32px wide
     py = H - 26 - 36 + bob
     spr(pet, px, py if show else py + 2, -1, 4)    # tile id from the cart sheet
+    _smiley(W // 2, py - 8, mood)
+    # floating hearts
+    for h in hearts:
+        x = int(h[0])
+        y = int(h[1])
+        pix(x - 1, y, col("pink"))
+        pix(x + 1, y, col("pink"))
+        pix(x, y + 1, col("pink"))
     # mood word
     if mood > 60:
         word = "HAPPY"
@@ -764,10 +902,13 @@ bb8888bb99eeee996000000600000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"""
 
-RUNNER_SRC = """# Tiny Runner -- an endless-runner game cartridge. The hero runs automatically;
-# you only JUMP. Press UP / A / RUN to hop over the cactus obstacles. Hitting one
-# resets the run. With no input it auto-jumps (attract mode) so the simulator GIF
-# stays lively. Pure indexed canvas + btn input -- portable host<->device.
+RUNNER_SRC = """# Tiny Runner -- an endless-runner game. The hero runs automatically; you only
+# JUMP. Press UP / A / RUN to hop over the cactus obstacles. The longer you
+# survive the FASTER it gets, so your score keeps climbing the pressure. Hitting a
+# cactus ends the run (your BEST is kept). Pure indexed canvas + btn input.
+#
+# AUTOPLAY (in "Make it mine") is OFF by default -- YOU jump. Flip it on to watch
+# the console auto-jump forever (attract mode).
 
 GROUND = 26          # ground height from the bottom
 HERO_X = 40
@@ -782,6 +923,9 @@ obs = []             # obstacles: [x, w, h]
 spawn_x = 0.0
 t = 0.0
 hero = 0             # the chosen hero sprite tile (0 or 1 -- editable in paint)
+dust = []            # jump/run dust: [x, y, vx, vy, life]
+flash = 0.0          # white near-miss/landing pop, decays
+squash = 0.0         # >0 = hero landing squash, decays
 
 # The hero runs from the cart's sprite sheet (sprites.kgfx): tile 0 and tile 1.
 # Pick one in "Make it mine" and edit it in the paint editor.
@@ -799,14 +943,22 @@ def _hero_tile():
         return 0
 
 
+def _speed():
+    # speed ramps up the longer you run, so the game gets harder over time
+    return float(cfg("speed", 130)) * (1.0 + score * 0.004)
+
+
 def _init():
-    global hero_y, vel, score, obs, spawn_x, t, hero
+    global hero_y, vel, score, obs, spawn_x, t, hero, dust, flash, squash
     hero_y = 0.0
     vel = 0.0
     score = 0.0
     obs = []
     spawn_x = W
     t = 0.0
+    dust = []
+    flash = 0.0
+    squash = 0.0
     hero = _hero_tile()
 
 
@@ -817,20 +969,27 @@ def _spawn():
     spawn_x = W + 40 + rnd(120)
 
 
+def _puff(x, y, n):
+    for _i in range(n):
+        dust.append([x, y, (rnd(2.0) - 1.0) * 30 - 40, -rnd(40), 0.4])
+
+
 def _jump():
     global vel
     if hero_y <= 0.1:                 # only when on the ground
         vel = -float(cfg("jump", 220))
+        _puff(HERO_X + HERO_W // 2, _ground_y(), 4)
 
 
 def _reset_run():
-    global score, best, obs, hero_y, vel
+    global score, best, obs, hero_y, vel, flash
     if int(score) > best:
         best = int(score)
     score = 0.0
     obs = []
     hero_y = 0.0
     vel = 0.0
+    flash = 0.3
 
 
 def _danger():
@@ -842,20 +1001,28 @@ def _danger():
 
 
 def _update(dt):
-    global hero_y, vel, score, spawn_x, t
+    global hero_y, vel, score, spawn_x, t, flash, squash
     t += dt
-    spd = float(cfg("speed", 130))
+    spd = _speed()
     score += spd * dt * 0.1
+    if flash > 0.0:
+        flash = max(0.0, flash - dt)
+    if squash > 0.0:
+        squash = max(0.0, squash - dt * 6.0)
     # gravity / jump arc
+    was_air = hero_y > 0.1
     vel += 700.0 * dt
     hero_y -= vel * dt
     if hero_y < 0.0:
         hero_y = 0.0
+        if was_air:                   # just landed: squash + a little dust
+            squash = 1.0
+            _puff(HERO_X + HERO_W // 2, _ground_y(), 3)
         vel = 0.0
-    # input: jump on UP / A / RUN; otherwise auto-jump when danger is near
+    # input: jump on UP / A / RUN; with AUTOPLAY on, auto-jump when danger is near
     if btn("up") or btn("a") or btn("run"):
         _jump()
-    elif _danger():
+    elif cfg("autoplay", 0) and _danger():
         _jump()
     # move + recycle obstacles
     spawn_x -= spd * dt
@@ -865,6 +1032,16 @@ def _update(dt):
         obs.pop(0)
     if spawn_x <= W:
         _spawn()
+    # dust particles
+    keep = []
+    for p in dust:
+        p[4] -= dt
+        if p[4] > 0.0:
+            p[0] += p[2] * dt
+            p[1] += p[3] * dt
+            p[3] += 200.0 * dt
+            keep.append(p)
+    dust[:] = keep
     # collision -> reset
     gy = _ground_y()
     hx0 = HERO_X
@@ -881,7 +1058,7 @@ def _update(dt):
 
 
 def _draw():
-    cls(col(cfg("sky", "dark_blue")))
+    cls(col("white") if flash > 0.0 else col(cfg("sky", "dark_blue")))
     gy = _ground_y()
     rect(0, gy, W, GROUND, col("brown"))
     rect(0, gy, W, 2, col("dark_green"))
@@ -889,12 +1066,23 @@ def _draw():
     hx = int(-(t * 20) % 120)
     for i in range(-1, W // 120 + 2):
         circ(hx + i * 120 + 60, gy, 26, col("dark_green"))
+    # ground speckle that scrolls (sells the run speed)
+    sx = int(-(t * 120) % 24)
+    for i in range(-1, W // 24 + 2):
+        pix(sx + i * 24, gy + 8, col("dark_grey"))
+    # dust
+    for p in dust:
+        pix(int(p[0]), int(p[1]), col("light_grey"))
     # obstacles (cacti)
     for o in obs:
         rect(int(o[0]), gy - o[2], o[1], o[2], col("green"))
         rectb(int(o[0]), gy - o[2], o[1], o[2], col("dark_green"))
-    # hero (8x8 tile at 2x = 16px, from the cart sheet)
-    spr(hero, HERO_X, gy - HERO_H - int(hero_y), -1, 2)
+    # hero (8x8 tile at 2x = 16px, from the cart sheet); squashed flat on landing
+    hsc = 2
+    hy = gy - HERO_H - int(hero_y)
+    if squash > 0.0:
+        hy = gy - 13                  # sit lower so the squash reads as a flatten
+    spr(hero, HERO_X, hy, -1, hsc)
     print("SCORE " + str(int(score)), 8, 8, col("white"), 2)
     print("BEST " + str(best), 8, 24, col("yellow"), 1)
     print("UP=JUMP", W - 60, 8, col("light_grey"), 1)
@@ -1029,11 +1217,13 @@ RUNNER_GFX = """00bbbb0000888800000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"""
 
-PLAT_SRC = """# Hop Quest -- a single-screen platformer cartridge. Walk LEFT / RIGHT, JUMP with
-# UP / A / RUN. Collect every coin to win the round (then it resets); fall off the
-# bottom and you respawn at the start. Gravity + tile collision on a solid grid.
-# With no input a little auto-pilot plays it (attract mode) so the GIF stays lively.
-# Pure indexed canvas + btn input -- identical on host and device.
+PLAT_SRC = """# Hop Quest -- a single-screen platformer. Walk LEFT / RIGHT, JUMP with UP / A /
+# RUN. Collect every coin to light the goal flag green, then reach it to WIN the
+# round (it celebrates, then resets). Fall off the bottom and you respawn at the
+# start. Gravity + tile collision on a solid grid.
+#
+# AUTOPLAY (in "Make it mine") is OFF by default -- YOU climb. Flip it on to watch
+# a little auto-pilot clear the level (attract mode). Pure indexed canvas + btn.
 
 TS = 16          # tile size in pixels
 # Level map: # solid, = one-way-ish platform (also solid here), C coin, G goal,
@@ -1073,6 +1263,9 @@ won = 0.0
 t = 0.0
 ai_dir = 1
 ai_jump = 0.0
+got = 0           # coins collected this round (drives the HUD + goal color)
+sparks = []       # collect/win particles: [x, y, vx, vy, life, color]
+flash = 0.0       # white pop on collect, decays
 
 
 # The player hero is a sprite-sheet tile (sprites.kgfx): tile 0 and tile 1, both
@@ -1099,6 +1292,7 @@ def _solid(tx, ty):
 
 def _init():
     global px, py, vx, vy, coins, goal, spawn, won, t, ai_dir, ai_jump
+    global got, sparks, flash
     coins = []
     for ty in range(len(LEVEL)):
         for tx in range(len(LEVEL[ty])):
@@ -1117,6 +1311,9 @@ def _init():
     t = 0.0
     ai_dir = 1
     ai_jump = 0.0
+    got = 0
+    sparks = []
+    flash = 0.0
 
 
 def _respawn():
@@ -1147,9 +1344,26 @@ def _all_taken():
     return True
 
 
+def _burst(x, y, n, color):
+    for _i in range(n):
+        sparks.append([x, y, (rnd(2.0) - 1.0) * 70, -rnd(80) - 10, 0.5, color])
+
+
 def _update(dt):
-    global px, py, vx, vy, on_ground, won, t, ai_dir, ai_jump
+    global px, py, vx, vy, on_ground, won, t, ai_dir, ai_jump, got, flash
     t += dt
+    if flash > 0.0:
+        flash = max(0.0, flash - dt)
+    # particles always tick (so the win burst animates during the banner)
+    keep = []
+    for p in sparks:
+        p[4] -= dt
+        if p[4] > 0.0:
+            p[0] += p[2] * dt
+            p[1] += p[3] * dt
+            p[3] += 220.0 * dt
+            keep.append(p)
+    sparks[:] = keep
     if won > 0.0:
         won -= dt
         if won <= 0.0:
@@ -1160,7 +1374,7 @@ def _update(dt):
     right = btn("right")
     jump = btn("up") or btn("a") or btn("run")
     any_input = left or right or jump
-    attract = not any_input
+    attract = cfg("autoplay", 0) and not any_input
     if attract:
         # Attract auto-pilot: head toward the goal column and HOP whenever the
         # staircase rises ahead. The walk direction always pushes toward the goal
@@ -1227,15 +1441,20 @@ def _update(dt):
             cy = c[1] * TS + TS // 2
             if abs((px + PW / 2) - cx) < 12 and abs((py + PH / 2) - cy) < 12:
                 c[2] = True
+                got += 1
+                flash = 0.12
+                _burst(cx, cy, 5, "yellow")
     # reach the goal with everything collected -> win
     gx = goal[0] * TS
     gy = goal[1] * TS
     if _all_taken() and abs(px - gx) < 14 and abs(py - gy) < 18:
+        if won <= 0.0:
+            _burst(gx + 8, gy, 14, "green")   # confetti on the win
         won = 1.5
 
 
 def _draw():
-    cls(col(cfg("sky", "dark_blue")))
+    cls(col("white") if flash > 0.0 else col(cfg("sky", "dark_blue")))
     # tiles
     for ty in range(len(LEVEL)):
         row = LEVEL[ty]
@@ -1246,7 +1465,7 @@ def _draw():
                 rect(x, y, TS, TS, col("brown"))
                 rect(x, y, TS, 3, col("dark_green"))
                 rectb(x, y, TS, TS, col("dark_grey"))
-    # coins
+    # coins (a bobbing pulse so they read as collectible)
     for c in coins:
         if not c[2]:
             cx = c[0] * TS + TS // 2
@@ -1254,19 +1473,21 @@ def _draw():
             r = 4 + (1 if int(t * 6) % 2 == 0 else 0)
             circ(cx, cy, r, col("yellow"))
             circb(cx, cy, r, col("orange"))
-    # goal flag
+    # particles
+    for p in sparks:
+        pix(int(p[0]), int(p[1]), col(p[5]))
+    # goal flag (green once every coin is collected)
     gx = goal[0] * TS
     gy = goal[1] * TS
-    fc = "green" if _all_taken() else "red"
+    lit = _all_taken()
+    fc = "green" if lit else "red"
     rect(gx + 6, gy - 2, 2, TS + 2, col("white"))
     rect(gx + 8, gy, 8, 6, col(fc))
+    if lit:                                   # a little shimmer when armed
+        pix(gx + 12, gy - 4, col("yellow"))
     # player: an editable 8x8 hero tile at 2x (16px), centered on the PWxPH box
     spr(_hero_tile(), int(px) + PW // 2 - 8, int(py) + PH - 16, -1, 2)
     # HUD
-    got = 0
-    for c in coins:
-        if c[2]:
-            got += 1
     print("COINS " + str(got) + "/" + str(len(coins)), 6, 4, col("white"), 1)
     if won > 0.0:
         print("YOU WIN!", W // 2 - 32, H // 2 - 8, col("yellow"), 2)
@@ -1401,15 +1622,20 @@ PLAT_GFX = """00eeee0000cccc0000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"""
 
-TAPRED_SRC = """# Tap Only Red -- a TOUCHSCREEN mini-game cartridge. Colored bubbles float up the
-# screen. TAP the RED ones to score; tapping any other color costs a miss. Miss
-# too many and the round resets. Uses the touch() api (mouse = touch on the host
-# sim, GT911 on device). With no taps an auto-player pops red bubbles (attract
-# mode) so the simulator GIF stays lively.
+TAPRED_SRC = """# Tap Only Red -- a TOUCHSCREEN mini-game. Colored bubbles float up the screen.
+# TAP the RED ones to score (consecutive reds build a COMBO); tapping any other
+# color, or letting a red float off the top, costs a MISS. Miss too many and the
+# round resets. The bubbles speed up the higher you score. Uses the touch() api
+# (mouse = touch on the host sim, GT911 on device).
+#
+# AUTOPLAY (in "Make it mine") is OFF by default -- YOU tap. Flip it on to watch
+# an auto-player pop the reds (attract mode).
 
 score = 0
+combo = 0
 misses = 0
 bubbles = []      # [x, y, r, color_index, is_red]
+pops = []         # pop particles: [x, y, vx, vy, life, color]
 t = 0.0
 flash = 0.0       # >0 = recent good tap glow ; <0 = recent bad tap (red flash)
 auto = 0.0
@@ -1420,10 +1646,12 @@ MAX_MISS = 5
 
 
 def _init():
-    global score, misses, bubbles, t, flash, auto, spawn_t
+    global score, combo, misses, bubbles, pops, t, flash, auto, spawn_t
     score = 0
+    combo = 0
     misses = 0
     bubbles = []
+    pops = []
     t = 0.0
     flash = 0.0
     auto = 0.0
@@ -1439,14 +1667,22 @@ def _spawn():
     bubbles.append([rnd(W - 2 * r) + r, H + r, r, ci, red])
 
 
+def _burst(x, y, ci):
+    for _i in range(7):
+        pops.append([x, y, (rnd(2.0) - 1.0) * 90, (rnd(2.0) - 1.0) * 90, 0.4, ci])
+
+
 def _pop(b, good):
-    global score, misses, flash
+    global score, combo, misses, flash
     if good:
-        score += 1
+        score += 1 + combo // 4      # combo bonus: every 4 reds in a row scores more
+        combo += 1
         flash = 0.25
     else:
         misses += 1
+        combo = 0
         flash = -0.25
+    _burst(b[0], b[1], b[3])
     bubbles.remove(b)
 
 
@@ -1470,24 +1706,35 @@ def _nearest_red():
 
 
 def _update(dt):
-    global t, flash, auto, spawn_t, misses
+    global t, flash, auto, spawn_t, misses, combo
     t += dt
     if flash > 0:
         flash = max(0.0, flash - dt)
     elif flash < 0:
         flash = min(0.0, flash + dt)
-    rise = float(cfg("rise", 45))
+    # rise speed ramps a little with score so it gets harder over a good run
+    rise = float(cfg("rise", 45)) * (1.0 + score * 0.01)
     for b in bubbles:
         b[1] -= rise * dt
-    # off the top: red escaped = a miss; lures just vanish
+    # off the top: red escaped = a miss (and breaks the combo); lures just vanish
     keep = []
     for b in bubbles:
         if b[1] + b[2] < 0:
             if b[4]:
                 misses += 1
+                combo = 0
         else:
             keep.append(b)
     bubbles[:] = keep
+    # pop particles
+    pk = []
+    for p in pops:
+        p[4] -= dt
+        if p[4] > 0.0:
+            p[0] += p[2] * dt
+            p[1] += p[3] * dt
+            pk.append(p)
+    pops[:] = pk
     spawn_t += dt
     if spawn_t > 0.6 and len(bubbles) < int(cfg("max_bubbles", 8)):
         spawn_t = 0.0
@@ -1498,9 +1745,9 @@ def _update(dt):
     if tp is not None and tp[2]:
         _hit(tp[0], tp[1])
         tapped = True
-    # attract mode: no taps -> auto-pop the nearest red bubble now and then
+    # AUTOPLAY: no taps -> auto-pop the nearest red bubble now and then
     auto += dt
-    if not tapped and auto > 0.7:
+    if cfg("autoplay", 0) and not tapped and auto > 0.7:
         auto = 0.0
         b = _nearest_red()
         if b is not None:
@@ -1519,8 +1766,14 @@ def _draw():
     for b in bubbles:
         circ(int(b[0]), int(b[1]), b[2], b[3])
         circb(int(b[0]), int(b[1]), b[2], col("white"))
+        if b[4]:                                   # a little shine marks the reds
+            pix(int(b[0]) - b[2] // 3, int(b[1]) - b[2] // 3, col("white"))
+    for p in pops:
+        pix(int(p[0]), int(p[1]), p[5])
     print("TAP THE RED", 8, 8, col("red"), 2)
     print("SCORE " + str(score), 8, 26, col("white"), 1)
+    if combo >= 2:
+        print("X" + str(combo), 70, 26, col("yellow"), 1)
     # miss pips
     for i in range(MAX_MISS):
         x = W - 14 - i * 12
@@ -1554,52 +1807,57 @@ CARTS = [
      "sprites": STAR_GFX,
      "canvas": {"width": 320, "height": 240, "palette": "kid64"},
      "permissions": ["graphics", "input"],
-     "cfg": {"star_count": 5, "fall_speed": 70, "basket": 0},
+     "cfg": {"star_count": 5, "fall_speed": 70, "basket": 0, "autoplay": 0},
      "edit": [
          {"key": "star_count", "label": "STARS", "type": "int", "min": 1, "max": 12, "step": 1, "display": "count", "icon": "star", "card": "DROP {value} STARS"},
          {"key": "fall_speed", "label": "SPEED", "type": "int", "min": 20, "max": 200, "step": 10, "display": "gauge", "gauge": {"low": "turtle", "high": "rabbit"}, "card": "STARS FALL AT {value}"},
          {"key": "basket", "label": "CATCHER", "type": "choice", "choices": [0, 1], "tiles": [0, 1], "display": "sprite-tiles", "card": "CATCHER IS A {value}"},
+         {"key": "autoplay", "label": "AUTOPLAY", "type": "choice", "choices": [0, 1], "icons": ["close", "run"], "display": "choice-icons", "card": "AUTOPLAY {value}"},
      ]},
     {"title": "Pixel Pet", "type": "game", "src": PET_SRC,
      "sprites": PET_GFX,
      "canvas": {"width": 320, "height": 240, "palette": "kid64"},
      "permissions": ["graphics", "input"],
-     "cfg": {"pet": 0, "decay": 4, "bg": "dark_purple"},
+     "cfg": {"pet": 0, "decay": 4, "bg": "dark_purple", "autoplay": 0},
      "edit": [
          {"key": "pet", "label": "PET", "type": "choice", "choices": [0, 1, 2], "tiles": [0, 1, 2], "display": "sprite-tiles", "card": "PET IS A {value}"},
          {"key": "decay", "label": "NEEDS", "type": "int", "min": 1, "max": 12, "step": 1, "card": "NEEDINESS {value}"},
          {"key": "bg", "label": "ROOM", "type": "choice", "choices": ["dark_purple", "dark_blue", "black", "indigo"], "card": "ROOM IS {value}"},
+         {"key": "autoplay", "label": "AUTOPLAY", "type": "choice", "choices": [0, 1], "icons": ["close", "run"], "display": "choice-icons", "card": "AUTOPLAY {value}"},
      ]},
     {"title": "Tiny Runner", "type": "game", "src": RUNNER_SRC,
      "sprites": RUNNER_GFX,
      "canvas": {"width": 320, "height": 240, "palette": "kid64"},
      "permissions": ["graphics", "input"],
-     "cfg": {"speed": 130, "jump": 220, "hero": 0, "sky": "dark_blue"},
+     "cfg": {"speed": 130, "jump": 220, "hero": 0, "sky": "dark_blue", "autoplay": 0},
      "edit": [
          {"key": "speed", "label": "SPEED", "type": "int", "min": 60, "max": 260, "step": 10, "card": "RUN AT {value}"},
          {"key": "jump", "label": "JUMP", "type": "int", "min": 140, "max": 340, "step": 10, "card": "JUMP POWER {value}"},
          {"key": "hero", "label": "HERO", "type": "choice", "choices": [0, 1], "tiles": [0, 1], "display": "sprite-tiles", "card": "HERO IS {value}"},
          {"key": "sky", "label": "SKY", "type": "choice", "choices": ["dark_blue", "indigo", "dark_purple", "black"], "card": "SKY IS {value}"},
+         {"key": "autoplay", "label": "AUTOPLAY", "type": "choice", "choices": [0, 1], "icons": ["close", "run"], "display": "choice-icons", "card": "AUTOPLAY {value}"},
      ]},
     {"title": "Hop Quest", "type": "game", "src": PLAT_SRC,
      "sprites": PLAT_GFX,
      "canvas": {"width": 320, "height": 240, "palette": "kid64"},
      "permissions": ["graphics", "input"],
-     "cfg": {"speed": 90, "jump": 230, "hero": 0, "sky": "dark_blue"},
+     "cfg": {"speed": 90, "jump": 230, "hero": 0, "sky": "dark_blue", "autoplay": 0},
      "edit": [
          {"key": "speed", "label": "SPEED", "type": "int", "min": 40, "max": 180, "step": 10, "card": "WALK AT {value}"},
          {"key": "jump", "label": "JUMP", "type": "int", "min": 150, "max": 340, "step": 10, "card": "JUMP POWER {value}"},
          {"key": "hero", "label": "HERO", "type": "choice", "choices": [0, 1], "tiles": [0, 1], "display": "sprite-tiles", "card": "HERO IS {value}"},
          {"key": "sky", "label": "SKY", "type": "choice", "choices": ["dark_blue", "indigo", "dark_purple", "black"], "card": "SKY IS {value}"},
+         {"key": "autoplay", "label": "AUTOPLAY", "type": "choice", "choices": [0, 1], "icons": ["close", "run"], "display": "choice-icons", "card": "AUTOPLAY {value}"},
      ]},
     {"title": "Tap Only Red", "type": "game", "src": TAPRED_SRC,
      "canvas": {"width": 320, "height": 240, "palette": "kid64"},
      "permissions": ["graphics", "input"],
-     "cfg": {"rise": 45, "red_share": 40, "max_bubbles": 8},
+     "cfg": {"rise": 45, "red_share": 40, "max_bubbles": 8, "autoplay": 0},
      "edit": [
          {"key": "rise", "label": "SPEED", "type": "int", "min": 20, "max": 110, "step": 5, "card": "BUBBLES RISE AT {value}"},
          {"key": "red_share", "label": "REDS", "type": "int", "min": 15, "max": 80, "step": 5, "card": "{value}% ARE RED"},
          {"key": "max_bubbles", "label": "CROWD", "type": "int", "min": 4, "max": 16, "step": 1, "card": "UP TO {value} BUBBLES"},
+         {"key": "autoplay", "label": "AUTOPLAY", "type": "choice", "choices": [0, 1], "icons": ["close", "run"], "display": "choice-icons", "card": "AUTOPLAY {value}"},
      ]},
 ]
 
