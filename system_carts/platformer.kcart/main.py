@@ -6,13 +6,15 @@
 # AUTOPLAY (in "Make it mine") is OFF by default -- YOU climb. Flip it on to watch
 # a little auto-pilot clear the level (attract mode). Pure indexed canvas + btn.
 
-TS = 16          # tile size in pixels
-# Level map: # solid, = one-way-ish platform (also solid here), C coin, G goal,
-# S spawn, space empty. EVERY row is exactly 20 cols x 13 rows -> the 320x240
-# canvas (top HUD aside). The terrain is a solid staircase climbing right from the
-# spawn to a plateau with the goal; a coin sits one tile above each tread. Because
-# the steps are a *filled* wedge, even a short hop lands on solid ground and keeps
-# the climb going -- which is what lets the attract auto-pilot clear every coin.
+TS = 16          # tile size in pixels (one map cell, drawn at scale 2 over 8x8 tiles)
+GROUND = 2       # sprite-sheet tile id for a solid block (baked into sprites.kgfx)
+# The solid terrain now lives in the cart's TILEMAP (map.kmap), drawn in ONE native
+# map() call instead of ~381 per-frame rect/spr draws (#32) -- and collision reads
+# it back with mget() instead of scanning a string grid. This LEVEL string stays as
+# the readable source for the NON-tile markers: C coin, G goal, S spawn (#/= cells
+# are the ground in the tilemap). EVERY row is exactly 20 cols x 13 rows -> the
+# 320x240 canvas (top HUD aside). The terrain is a solid staircase climbing right
+# from the spawn to a plateau with the goal; a coin sits one tile above each tread.
 LEVEL = [
     "                    ",
     "                    ",
@@ -28,6 +30,8 @@ LEVEL = [
     "####################",
     "####################",
 ]
+MW = 20          # tilemap width in cells (matches map.kmap)
+MH = 13          # tilemap height in cells
 
 PW = 12
 PH = 14
@@ -63,12 +67,15 @@ def _hero_tile():
 
 
 def _solid(tx, ty):
-    if ty < 0 or ty >= len(LEVEL):
+    # Collision reads the tilemap (mget) instead of scanning the LEVEL string: a
+    # non-empty cell (>= 0) is solid ground. Above the top and below the bottom is
+    # open air (so jumps clear the ceiling and a fall drops off-screen); the left
+    # and right edges are walls so the player can't walk out of the level.
+    if ty < 0 or ty >= MH:
         return False
-    row = LEVEL[ty]
-    if tx < 0 or tx >= len(row):
+    if tx < 0 or tx >= MW:
         return True            # walls on the sides keep the player in
-    return row[tx] in "#="
+    return mget(tx, ty) >= 0
 
 
 def _init():
@@ -236,16 +243,10 @@ def _update(dt):
 
 def _draw():
     cls(col("white") if flash > 0.0 else col(cfg("sky", "dark_blue")))
-    # tiles
-    for ty in range(len(LEVEL)):
-        row = LEVEL[ty]
-        for tx in range(len(row)):
-            if row[tx] in "#=":
-                x = tx * TS
-                y = ty * TS
-                rect(x, y, TS, TS, col("brown"))
-                rect(x, y, TS, 3, col("dark_green"))
-                rectb(x, y, TS, TS, col("dark_grey"))
+    # The whole solid terrain in ONE native map() call (#32): the 20x13 tilemap of
+    # 8x8 ground tiles, drawn at scale 2 so each cell is a 16px (TS) world block.
+    # This replaces the old ~381 rect/rectb-per-tile loop -- the big on-device win.
+    map(0, 0, MW, MH, 0, 0, -1, 2)
     # coins (a bobbing pulse so they read as collectible)
     for c in coins:
         if not c[2]:

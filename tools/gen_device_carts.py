@@ -64,6 +64,9 @@ def build_carts(system_carts_dir):
         sounds = os.path.join(base, "sounds.json")     # AudioBank, optional (#16)
         if os.path.exists(sounds):
             cart["sounds"] = json.loads(_read(sounds))
+        tilemap = os.path.join(base, "map.kmap")        # TileMap blob, optional (#32)
+        if os.path.exists(tilemap):
+            cart["map"] = _read(tilemap)
         if "canvas" in man:
             cart["canvas"] = man["canvas"]
         if "permissions" in man:

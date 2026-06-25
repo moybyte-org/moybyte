@@ -12,7 +12,7 @@ free apart from the shared editor cores below.
 import time
 
 from audio import AudioBank, AudioEngine
-from editors import CodeEditor, PaintEditor, SpriteSheet
+from editors import CodeEditor, PaintEditor, SpriteSheet, TileMap
 
 
 def _ticks_ms():
@@ -174,6 +174,7 @@ _HL_KEYWORDS = (
 # sync with make_api (host_app / kid_runtime); an extra name here is harmless.
 _HL_BUILTINS = (
     "cls", "pix", "pset", "line", "rect", "rectb", "circ", "circb", "spr",
+    "map", "mget", "mset",
     "print", "btn", "btnp", "touch", "cfg", "col", "rnd", "flr", "abs", "min",
     "max", "sin", "cos", "range", "len", "int", "str", "float", "round", "sqrt",
 )
@@ -510,7 +511,7 @@ class Workstation:
         self.comp = comp
         self.canvas = canvas
         self.input = input
-        self.make_api = None       # injected: make_api(canvas, input, cfg, sheet, audio)->ns
+        self.make_api = None       # injected: make_api(canvas, input, cfg, sheet, audio, tilemap)->ns
         self.make_audio = None      # injected: make_audio(engine)->audio backend (host/device)
         self.audio = None           # the per-cart audio backend (built on open, #16)
         self.carts_store = None     # injected: cart store module (kid_carts API)
@@ -526,6 +527,7 @@ class Workstation:
         self.menu_view = "cards"      # menu sub-view: "cards" | "code" | "paint"
         self.editor = None            # CodeEditor while menu_view == "code"
         self.sheet = None             # SpriteSheet for the open cart (built on open)
+        self.tilemap = None           # TileMap for the open cart (built on open, #32)
         self.paint = None             # PaintEditor while menu_view == "paint"
         self.keyboard = None          # set by run_desktop (for raw/text mode toggle)
         self._ekey_prev = 0           # last consumed keyboard byte (edge detect)
@@ -554,7 +556,8 @@ class Workstation:
 
     def _start(self):
         self._build_audio()
-        ns = self.make_api(self.canvas, self.input, self.config, self.sheet, self.audio)
+        ns = self.make_api(self.canvas, self.input, self.config, self.sheet,
+                           self.audio, self.tilemap)
         try:
             # Compile with the "<cart>" filename so a runtime traceback carries
             # cart line numbers (_exc_cart_line reads them to mark the bad line).
@@ -588,6 +591,7 @@ class Workstation:
         self.cart_error = None
         self.save_status = None
         self.sheet = self._build_sheet()
+        self.tilemap = self._build_tilemap()
         self.menu_view = "cards"
         self._set_text_mode(False)
         # Open to the desktop even if the cart failed to start: frame() shows the
@@ -604,6 +608,18 @@ class Workstation:
             except Exception:  # noqa: BLE001
                 pass
         return SpriteSheet()
+
+    def _build_tilemap(self):
+        """Build the open cart's TileMap from its map.kmap blob (#32), or an empty
+        map when the cart has none -- the mirror of _build_sheet, so map()/mget()/
+        mset() are always callable (an empty map just blits nothing)."""
+        blob = self.cart.get("map") if self.cart else None
+        if blob:
+            try:
+                return TileMap.from_hex(blob)
+            except Exception:  # noqa: BLE001
+                pass
+        return TileMap()
 
     def _build_audio(self):
         """Build the per-cart audio backend (#16): an AudioEngine over the cart's

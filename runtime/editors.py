@@ -297,6 +297,104 @@ class SpriteSheet:
         return sheet
 
 
+class TileMap:
+    """A w x h grid of tile ids laid over a SpriteSheet -- the data a native
+    map() blit walks (#32). Each cell holds a sprite id (0..count-1) or -1 for
+    "empty" (no tile drawn there). Backend-agnostic like SpriteSheet, so the host
+    Canvas.map and the device DeviceCanvas.map both consume the same grid.
+
+    Storage is a flat bytearray of w*h cells where each byte is `tile_id + 1`
+    (so 0 means empty); this keeps the on-disk blob compact and an all-zero map
+    is genuinely blank. Serializes to a `map.kmap` text blob: a header line
+    `w h` followed by `h` rows of `w * 2` hex digits (one byte per cell, "00"
+    = empty), mirroring the PICO-8 __gfx__-style sprites.kgfx pattern. Tile ids
+    are capped at 254 (254 distinct tiles is ample for a kid level; the 16x16
+    sheet's id 255 simply can't be placed on the map)."""
+
+    EMPTY = -1
+    MAX_ID = 254          # a cell stores id+1 in one byte, so 255 is the ceiling
+
+    def __init__(self, w=20, h=15, cells=None):
+        self.w = w
+        self.h = h
+        self.cells = cells if cells is not None else bytearray(w * h)
+        self.dirty = False
+        self.gen = 0          # bumps on every mset, so a running cart's map cache
+                              # can detect an edit and rebuild (host/device parity)
+
+    def mget(self, x, y):
+        """Tile id at cell (x, y), or -1 (EMPTY) for a blank/out-of-range cell."""
+        x = int(x)
+        y = int(y)
+        if 0 <= x < self.w and 0 <= y < self.h:
+            return self.cells[y * self.w + x] - 1
+        return self.EMPTY
+
+    def mset(self, x, y, tile):
+        """Set cell (x, y) to a tile id (a negative id clears it to EMPTY)."""
+        x = int(x)
+        y = int(y)
+        if not (0 <= x < self.w and 0 <= y < self.h):
+            return
+        tile = int(tile)
+        if tile < 0:
+            v = 0
+        else:
+            if tile > self.MAX_ID:
+                tile = self.MAX_ID
+            v = tile + 1
+        self.cells[y * self.w + x] = v
+        self.dirty = True
+        self.gen += 1
+
+    def is_blank(self):
+        for c in self.cells:
+            if c:
+                return False
+        return True
+
+    def to_hex(self):
+        """Serialize to `w h` + h rows of w*2 hex digits (one byte/cell)."""
+        rows = ["%d %d" % (self.w, self.h)]
+        w = self.w
+        for y in range(self.h):
+            base = y * w
+            rows.append("".join("%02x" % self.cells[base + x] for x in range(w)))
+        return "\n".join(rows)
+
+    @classmethod
+    def from_hex(cls, text, default_w=20, default_h=15):
+        """Parse a map.kmap blob (header `w h` + rows of hex byte pairs). Falls
+        back to the default dims for a missing/blank header so a truncated blob
+        still loads as an empty map rather than throwing."""
+        lines = [ln.strip() for ln in str(text).split("\n")]
+        lines = [ln for ln in lines if ln]
+        w, h = default_w, default_h
+        body = lines
+        if lines:
+            head = lines[0].split()
+            if len(head) == 2:
+                try:
+                    w = int(head[0])
+                    h = int(head[1])
+                    body = lines[1:]
+                except ValueError:
+                    pass
+        tm = cls(w, h)
+        cells = tm.cells
+        for y in range(min(h, len(body))):
+            row = body[y]
+            for x in range(w):
+                i = x * 2
+                if i + 2 <= len(row):
+                    try:
+                        cells[y * w + x] = int(row[i:i + 2], 16) & 0xFF
+                    except ValueError:
+                        pass
+        tm.dirty = False
+        return tm
+
+
 class PaintEditor:
     """Pixel-paint state over a SpriteSheet tile: current sprite + paint color.
     The shell maps taps on the zoomed grid/palette to these calls."""

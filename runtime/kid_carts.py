@@ -182,6 +182,9 @@ def seed_builtins(seed_list, root=CARTS_DIR):
         sounds = cart.get("sounds")               # AudioBank dict, optional (#16)
         if sounds:
             _write(d + "/sounds.json", json.dumps(sounds))
+        tilemap = cart.get("map")                 # TileMap.to_hex() blob, optional (#32)
+        if tilemap:
+            _write(d + "/map.kmap", tilemap)
 
 
 def load(path):
@@ -220,6 +223,10 @@ def load(path):
             sounds = json.loads(_read(path + "/sounds.json"))  # AudioBank, optional (#16)
         except (OSError, ValueError):
             sounds = None
+        try:
+            tilemap = _read(path + "/map.kmap")   # TileMap blob (#32), optional
+        except OSError:
+            tilemap = None
         return {
             "path": path,
             "title": man.get("title", "cart"),
@@ -229,6 +236,7 @@ def load(path):
             "edit": man.get("edit", []),
             "sprites": sprites,
             "sounds": sounds,
+            "map": tilemap,
         }
     except Exception as exc:  # noqa: BLE001  -- never let one bad cart escape
         print("KidCode cart unreadable:", path, exc)
@@ -309,6 +317,13 @@ def save_sounds(cart, bank_dict):
     plain JSON-able data ({"sfx": [...], "music": [...]})."""
     _write_atomic(cart["path"] + "/sounds.json", json.dumps(bank_dict))
     cart["sounds"] = bank_dict
+
+
+def save_map(cart, hex_text):
+    """Persist a cart's tilemap (TileMap.to_hex() blob) to map.kmap (#32),
+    atomically so an interrupted write can't truncate the real file."""
+    _write_atomic(cart["path"] + "/map.kmap", hex_text)
+    cart["map"] = hex_text
 
 
 # --- shared sprite sheet (cross-cart sprite reuse, #18) ---------------------
