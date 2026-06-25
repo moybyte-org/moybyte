@@ -367,6 +367,13 @@ def _load_kid_runtime():
         spec.loader.exec_module(mod)
         sys.modules[name] = mod
 
+    # kid_runtime now does `from carts_data import CARTS` (build-generated from
+    # system_carts/ -- see tools/gen_device_carts.py). Register the same generated
+    # data so the device module execs under CPython.
+    sys.path.insert(0, "tools")
+    import gen_device_carts
+    sys.modules["carts_data"] = gen_device_carts.as_module("system_carts")
+
     spec = importlib.util.spec_from_file_location(
         "kid_runtime", ROOT / "modules" / "kid_runtime.py"
     )
