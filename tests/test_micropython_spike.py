@@ -358,10 +358,10 @@ def test_tdeck_keyboard_falls_back_when_raw_mode_is_ignored():
 
 def _load_kid_runtime():
     # kid_runtime does `from editors import ...` and `from console import ...`; the
-    # device freezes build-staged copies of runtime/editors.py and runtime/console.py
-    # as top-level modules. Register those same canonical files so the device module
-    # loads under CPython (editors first -- console imports it).
-    for name in ("editors", "console"):
+    # device freezes build-staged copies of runtime/{editors,audio,console}.py as
+    # top-level modules. Register those same canonical files so the device module
+    # loads under CPython (editors + audio first -- console imports both).
+    for name in ("editors", "audio", "console"):
         spec = importlib.util.spec_from_file_location(name, Path("runtime") / (name + ".py"))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
@@ -506,11 +506,48 @@ def test_device_sprite_storage_wired():
     runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "kid_carts.py").read_text(encoding="utf-8")
-    assert "def make_api(canvas, input, config, sheet=None):" in runtime   # device cart API
+    # device cart API -- now also takes the injected audio backend (#16)
+    assert "def make_api(canvas, input, config, sheet=None, audio=None):" in runtime
     assert "self.sheet = self._build_sheet()" in console                   # shared console
     assert "self.carts_store.save_sprites(self.cart, hexs)" in console
     assert "def save_sprites(cart, hex_text):" in carts
     assert '"sprites": sprites' in carts
+
+
+def test_device_audio_wired():
+    # Audio core (#16): shared model/mixer (runtime/audio.py) + device I2S backend
+    # stub + host==device API surface + sounds.json storage. Source-level checks
+    # mirror how the other firmware tests grep the frozen device modules.
+    audio = (Path("runtime") / "audio.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    carts = (Path("runtime") / "kid_carts.py").read_text(encoding="utf-8")
+    build = (ROOT / "build.sh").read_text(encoding="utf-8")
+
+    # The shared audio core: dependency-light (math only) synth + mixer + model.
+    assert "class AudioEngine:" in audio
+    assert "def render(self, nframes):" in audio
+    assert "class AudioBank:" in audio
+    # The console builds a per-cart AudioEngine and injects an audio backend.
+    assert "from audio import AudioBank, AudioEngine" in console
+    assert "def _build_audio(self):" in console
+    assert "self.audio.tick(dt)" in console
+    # The device make_api binds the same six audio names as the host.
+    for name in ('"sfx": _sfx', '"beep": _beep', '"music": _music',
+                 '"music_stop": _music_stop', '"sound_stop": _sound_stop',
+                 '"volume": _volume'):
+        assert name in runtime, name
+    # The device I2S backend is wired in (stub -- NEEDS ON-DEVICE VERIFICATION).
+    assert "class DeviceAudio:" in runtime
+    assert "from machine import I2S, Pin" in runtime
+    assert "mode=I2S.TX" in runtime
+    assert "ws.make_audio = make_audio" in runtime
+    assert "NEEDS ON-DEVICE VERIFICATION" in runtime
+    # sounds.json storage in the shared cart store.
+    assert "def save_sounds(cart, bank_dict):" in carts
+    assert '"sounds": sounds' in carts
+    # build.sh stages the shared audio module into the frozen modules tree.
+    assert 'cp "${REPO_ROOT}/runtime/audio.py" "${SCRIPT_DIR}/modules/audio.py"' in build
 
 
 def test_editor_cores_are_shared_single_source():
