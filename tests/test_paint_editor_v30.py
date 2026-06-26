@@ -275,9 +275,16 @@ def test_save_persists_a_2x2_sprite(tmp_path):
     assert reloaded.tget(cols + 1, 1, 1) == 14
 
 
-# -- Part A applied to the map editor (drag-to-stamp) ------------------------
+# -- Part A applied to the map editor (tap = paint) --------------------------
 
-def test_map_drag_stamps_a_run_of_tiles(tmp_path):
+def _map_cell_center(C, cx, cy):
+    return (C._MV_X0 + cx * C._MV_CELL + C._MV_CELL // 2,
+            C._MV_Y0 + cy * C._MV_CELL + C._MV_CELL // 2)
+
+
+def test_map_tap_paints_one_cell(tmp_path):
+    # In the map editor a tap (press + release in place) stamps the brush into the
+    # single cell under it -- the drag gesture is reserved for panning (#37).
     from runtime import console as C
     from runtime import host_app
 
@@ -287,20 +294,109 @@ def test_map_drag_stamps_a_run_of_tiles(tmp_path):
     ws._open_map()
     assert ws.menu_view == "map"
     drv = host_app.ConsoleDriver(ws)
-    ws.mapedit.n = 4                               # a recognizable brush tile id
+    me = ws.mapedit
+    me.n = 4                                       # a recognizable brush tile id
+    cells_before = bytes(ws.tilemap.cells)
 
-    def cell_center(cx, cy):
-        return (C._MV_X0 + cx * C._MV_CELL + C._MV_CELL // 2,
-                C._MV_Y0 + cy * C._MV_CELL + C._MV_CELL // 2)
+    x0, y0 = _map_cell_center(C, 2, 1)
+    drv.touch(x0, y0)                              # press
+    drv.frame(1 / 30)
+    drv.touch_up()                                 # release in place -> a tap
+    drv.frame(1 / 30)
 
-    x0, y0 = cell_center(0, 0)
+    cx, cy = me.cam_x + 2, me.cam_y + 1
+    assert ws.tilemap.mget(cx, cy) == 4           # the tapped cell got the brush
+    # Exactly one cell changed (the tap stamped a single cell, not a run).
+    changed = [k for k in range(len(cells_before))
+               if cells_before[k] != ws.tilemap.cells[k]]
+    assert changed == [cy * ws.tilemap.w + cx]
+
+
+# -- #37: touch-drag pans the map, tap still paints ---------------------------
+
+def test_map_drag_pans_view_while_tap_still_paints(tmp_path):
+    # A drag across the map view (press + move past the pan threshold + release)
+    # PANS the visible window -- it scrolls the camera and does NOT stamp tiles --
+    # while a plain tap still paints one cell. This is the tap=paint / drag=pan
+    # scheme that makes a map larger than the 320x240 screen navigable by touch.
+    from runtime import console as C
+    from runtime import host_app
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.launcher.sel = 0
+    ws.open()
+    ws._open_map()
+    assert ws.menu_view == "map"
+    drv = host_app.ConsoleDriver(ws)
+    me = ws.mapedit
+    me.n = 4
+    # Make sure the map is bigger than the view so a pan has room to move.
+    assert ws.tilemap.w > C._MV_COLS and ws.tilemap.h > C._MV_ROWS
+    cam0 = (me.cam_x, me.cam_y)
+    cells_before = bytes(ws.tilemap.cells)         # snapshot to prove a pan is no-paint
+
+    # Drag left/up by several cells: press near the right, move far to the left.
+    x0, y0 = _map_cell_center(C, 6, 4)
+    x1 = x0 - 4 * C._MV_CELL                        # well past _MAP_PAN_THRESH
+    y1 = y0 - 3 * C._MV_CELL
     drv.touch(x0, y0)
     drv.frame(1 / 30)
-    x1, y1 = cell_center(4, 0)                      # jump across 4 cells in one frame
     drv.touch_drag(x1, y1)
     drv.frame(1 / 30)
     drv.touch_up()
     drv.frame(1 / 30)
 
-    for cx in range(5):                            # the whole run got stamped, no gaps
-        assert ws.tilemap.mget(cx, 0) == 4
+    # The view scrolled (content followed the finger) and nothing was stamped.
+    assert (me.cam_x, me.cam_y) != cam0
+    assert me.cam_x > 0 and me.cam_y > 0
+    assert bytes(ws.tilemap.cells) == cells_before  # a pan must not paint any cell
+    assert not ws.tilemap.dirty                     # a pure pan leaves no edits
+
+    # A plain tap still paints, even after panning.
+    me = ws.mapedit
+    tx, ty = _map_cell_center(C, 1, 1)
+    drv.touch(tx, ty)
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert ws.tilemap.mget(me.cam_x + 1, me.cam_y + 1) == 4
+
+
+def test_map_empty_sky_tile_is_selectable_and_clears_a_cell(tmp_path):
+    # The empty/"sky" swatch (#37) is a first-class palette pick: selecting it sets
+    # the brush to EMPTY (-1), and tapping a filled cell with it clears the cell so
+    # mget() returns 0/-1 (the transparent value map() skips). This is how a kid
+    # paints sky/background or undoes a placement by overpainting.
+    from runtime import console as C
+    from runtime import host_app
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.launcher.sel = 0
+    ws.open()
+    ws._open_map()
+    drv = host_app.ConsoleDriver(ws)
+
+    # First fill a cell with a real tile.
+    ws.mapedit.n = 4
+    fx, fy = _map_cell_center(C, 0, 0)
+    drv.touch(fx, fy)
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert ws.tilemap.mget(0, 0) == 4
+
+    # Tap the SKY swatch to pick the empty brush, then tap the filled cell.
+    sx = C._TP_SKY[0] + C._TP_SKY[2] // 2
+    sy = C._TP_SKY[1] + C._TP_SKY[3] // 2
+    drv.touch(sx, sy)
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert ws.mapedit.n < 0                         # the brush is now EMPTY
+
+    drv.touch(fx, fy)                              # paint sky over the filled cell
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert ws.tilemap.mget(0, 0) == ws.tilemap.EMPTY   # cleared to transparent (-1)
+    assert ws.tilemap.cells[0] == 0                # stored as byte 0 == "no tile"
