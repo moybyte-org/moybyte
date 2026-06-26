@@ -192,12 +192,19 @@ def test_micropython_cart_textmode_flips_keyboard_ascii_raw():
     assert "self._sync_cart_text_mode()" in console
     assert 'getattr(self.input, "text_mode", False)' in console
     assert "kb.set_game_mode(not want_text)" in console
-    assert "self.input.text_mode = False" in console      # cleared on screen leave
+    # _set_text_mode is the single source of truth: it sets text_mode for the code
+    # editor (on=True) AND clears it elsewhere (on=False), so a typed key never also
+    # latches its game-button alias in either the editor or a text-mode cart.
+    assert "self.input.text_mode = bool(on)" in console
 
     # The keyboard's ASCII<->raw switch (the device mechanism) is unchanged and the
     # older-firmware fallback (RAW_GAME_MODE / _raw_unsupported) is still respected.
     assert "def set_game_mode(self, on):" in kb
     assert "RAW_GAME_MODE" in kb and "_raw_unsupported" in kb
+    # In ASCII text mode the keyboard poll reports the key but does NOT latch its
+    # game-button alias (w/a/s/d/z/x -> up/left/down/right/a/b), so typing a
+    # password/name can't also trigger d-pad/shortcut actions (#38/#42).
+    assert 'if getattr(self.input, "text_mode", False):' in kb
 
 
 def test_micropython_spike_documents_tdeck_reference_paths():

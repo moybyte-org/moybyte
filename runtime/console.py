@@ -1932,11 +1932,14 @@ class Workstation:
         # change. Raw needs keyboard fw >= 2025-06-12; without it the keyboard keeps
         # sending ASCII and TDeckKeyboard sticks on the 1-byte + hold-latch path, so
         # this is safe on any firmware. No-op on the host (no keyboard).
-        # Leaving any screen clears a running cart's text-mode REQUEST (#38/#42) so it
-        # can never leak past the cart that asked for it into the launcher/editor/next
-        # cart -- the desktop frame re-derives the keyboard mode from input.text_mode.
-        if not on:
-            self.input.text_mode = False
+        # text_mode is the single source of truth for "typing, don't latch buttons":
+        # the device keyboard, in ASCII, otherwise ALSO fires a typed key's game alias
+        # (w/a/s/d/z/x -> up/left/down/right/a/b), so a typed name/password would
+        # trigger d-pad/shortcut actions. Set it for the code editor too (on=True), and
+        # clear it on every other screen (on=False) so it can never leak past the cart
+        # /editor that asked for it -- the desktop frame re-derives keyboard mode from
+        # input.text_mode (#38/#42). No-op on the host (no keyboard); harmless flag set.
+        self.input.text_mode = bool(on)
         kb = self.keyboard
         if kb is not None:
             kb.set_game_mode(not on)
