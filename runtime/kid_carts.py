@@ -227,6 +227,10 @@ def load(path):
             tilemap = _read(path + "/map.kmap")   # TileMap blob (#32), optional
         except OSError:
             tilemap = None
+        try:
+            blocks = json.loads(_read(path + "/blocks.json"))  # block source (#29), optional
+        except (OSError, ValueError):
+            blocks = None
         return {
             "path": path,
             "title": man.get("title", "cart"),
@@ -242,6 +246,10 @@ def load(path):
             "sprites": sprites,
             "sounds": sounds,
             "map": tilemap,
+            # Block source (#29): the program tree a cart was authored from in the
+            # block editor, or None for a code-authored cart. main.py stays the
+            # runnable source either way; blocks.json is the editable origin.
+            "blocks": blocks,
         }
     except Exception as exc:  # noqa: BLE001  -- never let one bad cart escape
         print("KidCode cart unreadable:", path, exc)
@@ -329,6 +337,62 @@ def save_map(cart, hex_text):
     atomically so an interrupted write can't truncate the real file."""
     _write_atomic(cart["path"] + "/map.kmap", hex_text)
     cart["map"] = hex_text
+
+
+def _import_blocks():
+    """Import the blocks compiler under whichever name it's known by: bare
+    `blocks` on the device (frozen top-level) and on the host once host_app has
+    aliased it, or `runtime.blocks` when a test imports kid_carts directly. The
+    device path is plain `import blocks` (MicroPython has no packages here)."""
+    try:
+        import blocks
+        return blocks
+    except ImportError:
+        from runtime import blocks
+        return blocks
+
+
+# --- block source (#29: the block editor's blocks.json) ---------------------
+#
+# A cart authored in the block editor carries its program tree as blocks.json
+# beside main.py. blocks.json is the EDITABLE origin; main.py is the runnable
+# source the compiler emits from it. load_blocks reads the tree (None if a cart
+# has no block source -- i.e. it was code-authored); save_blocks compiles the
+# tree to main.py and persists BOTH (atomically, same crash-safe path as the
+# other saves) so the block source and the runnable code can never drift.
+
+def load_blocks(cart_or_path):
+    """Read a cart's block program (the blocks.json tree), or None if there is
+    none / it's unreadable. Accepts a cart dict or a .kcart folder path."""
+    path = cart_or_path["path"] if isinstance(cart_or_path, dict) else cart_or_path
+    try:
+        return json.loads(_read(path + "/blocks.json"))
+    except (OSError, ValueError):
+        return None
+
+
+def save_blocks(cart, program):
+    """Persist a cart's block program to blocks.json AND compile it to main.py,
+    so the block source and the runnable code stay in lockstep (compile-on-save).
+
+    Returns (status, message): SAVE_OK once both files are written, or
+    SAVE_BAD_SYNTAX with a message if the compiled source won't parse or the
+    program is malformed (a BlockError) -- in which case NEITHER file is touched,
+    so a corrupt edit can never truncate the cart or strand a broken main.py.
+    Writes blocks.json first then main.py; both are atomic."""
+    blocks = _import_blocks()
+    try:
+        src = blocks.compile_blocks(program)
+    except Exception as exc:            # noqa: BLE001 -- BlockError / bad tree
+        return SAVE_BAD_SYNTAX, str(exc)
+    ok, msg = compile_check(src)        # belt-and-braces: the emitted code must parse
+    if not ok:
+        return SAVE_BAD_SYNTAX, msg
+    _write_atomic(cart["path"] + "/blocks.json", json.dumps(program))
+    cart["blocks"] = program
+    _write_atomic(cart["path"] + "/main.py", src)
+    cart["src"] = src
+    return SAVE_OK, ""
 
 
 # --- persistent cart memory (pmem, TIC-80-style) ----------------------------

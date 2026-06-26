@@ -114,10 +114,12 @@ fi
 #   audio.py      -- sound model + AudioEngine synth/mixer (#16)
 #   console.py    -- launcher + desktop + cards/code/paint UI + Pointer
 #   kid_carts.py  -- the .kcart store (scan/load/save/create/duplicate/delete)
+#   blocks.py     -- block model + blocks->Python compiler (#29; kid_carts imports it)
 cp "${REPO_ROOT}/runtime/editors.py" "${SCRIPT_DIR}/modules/editors.py"
 cp "${REPO_ROOT}/runtime/audio.py" "${SCRIPT_DIR}/modules/audio.py"
 cp "${REPO_ROOT}/runtime/console.py" "${SCRIPT_DIR}/modules/console.py"
 cp "${REPO_ROOT}/runtime/kid_carts.py" "${SCRIPT_DIR}/modules/kid_carts.py"
+cp "${REPO_ROOT}/runtime/blocks.py" "${SCRIPT_DIR}/modules/blocks.py"
 # carts_data.py is GENERATED from system_carts/ (it replaces the ~1800 lines of
 # embedded carts kid_runtime used to hand-duplicate) so the device's seed /
 # fallback carts can never drift from the host source of truth -- kid_runtime
