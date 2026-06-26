@@ -769,14 +769,63 @@ class BlockEditor:
 
     # -- variables -----------------------------------------------------------
     def add_var(self, name):
-        """Declare a new variable (so variable slots can reference it). De-duplicates
-        and ignores blanks. Returns the variable list."""
-        name = str(name).strip()
+        """Declare a new variable (so variable slots can reference it). The name is
+        sanitized into a safe identifier (kid free-text -> `my_score`), de-duplicated,
+        and blanks are ignored. Returns the variable list."""
+        name = self.blocks.sanitize_var_name(name)
         vars_ = self.program.setdefault("vars", [])
         if name and name not in vars_:
             vars_.append(name)
             self.dirty = True
         return vars_
+
+    def new_var(self, base="var"):
+        """Create a freshly-named variable with a sensible default (var, var2, ...)
+        the kid can rename. Returns the new variable's name (so the UI can drop the
+        kid straight into renaming it)."""
+        name = self.blocks.unique_var_name(self.variables(), base)
+        self.program.setdefault("vars", []).append(name)
+        self.dirty = True
+        return name
+
+    def rename_var(self, old, new):
+        """Rename a declared variable AND rewrite every variable-slot reference to it
+        across the whole tree, so set/change/expr slots keep pointing at it. The new
+        name is sanitized; a blank or duplicate (other than `old` itself) is rejected.
+        Returns the applied name, or None if the rename didn't happen."""
+        new = self.blocks.sanitize_var_name(new)
+        vars_ = self.program.setdefault("vars", [])
+        if not new or old not in vars_:
+            return None
+        if new != old and new in vars_:
+            return None                       # would collide with another variable
+        vars_[vars_.index(old)] = new
+        self._rewrite_var_refs(old, new)
+        self.dirty = True
+        return new
+
+    def _rewrite_var_refs(self, old, new):
+        """Walk the tree and rewrite every SLOT_VARIABLE slot value that equals `old`
+        to `new` (statements' params, nested expression params, child bodies)."""
+        SLOT_VARIABLE = self.blocks.SLOT_VARIABLE
+
+        def walk(node):
+            if not isinstance(node, dict):
+                return
+            d = self.blocks.block_def(node.get("t"))
+            params = node.get("p", {}) or {}
+            if d is not None:
+                for slot in d["slots"]:
+                    nm = slot["name"]
+                    if slot["type"] == SLOT_VARIABLE and params.get(nm) == old:
+                        params[nm] = new
+            for v in params.values():
+                walk(v)                       # nested expression blocks in expr slots
+            for c in node.get("c", []) or []:
+                walk(c)
+
+        for s in self.program.get("scripts", []) or []:
+            walk(s)
 
     def variables(self):
         return list(self.program.get("vars", []) or [])

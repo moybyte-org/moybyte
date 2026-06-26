@@ -337,7 +337,12 @@ def test_dropdown_slot_picker_sets_the_value(tmp_path):
     assert 'cls(col("green"))' in blocks.compile_blocks(be.program)
 
 
-def test_variable_slot_picker_auto_declares_when_empty(tmp_path):
+def test_variable_slot_picker_leads_with_new_variable(tmp_path):
+    """Opening a {var} slot with no variables yet shows a picker that LEADS with
+    '+ new variable' (Bug 2): choosing it creates one, opens the name prompt, and
+    the slot ends up filled with the (default-named) variable -- so the program
+    compiles. The kid never hits an empty/uncreatable slot."""
+    import runtime.console as C
     ws, _, _ = _ws_with_block_cart(tmp_path)
     ws._open_blocks()
     be = ws.blocks_ed
@@ -347,11 +352,16 @@ def test_variable_slot_picker_auto_declares_when_empty(tmp_path):
     ws.blk_slot = 0                                 # the {var} slot
     ws._blk_a()                                     # opens the variable picker
     assert ws.blk_menu is not None and ws.blk_menu["mode"] == "variable"
-    assert ws.blk_menu["items"]                     # auto-declared a friendly default
+    # the first item is the create-and-name entry
+    assert ws.blk_menu["items"][0] == C._NEW_VAR_ITEM
     ws.blk_menu["sel"] = 0
-    ws._blk_menu_select()
-    assert ws.blk_menu is None
-    # the program now compiles (the var is both declared and assigned)
+    ws._blk_menu_select()                           # create + open the name prompt
+    assert ws.blk_menu is None and ws.blk_kbd is not None
+    ws._blk_kbd_commit()                            # accept the default name
+    assert ws.blk_kbd is None
+    # the var is declared, the slot points at it, and the program compiles
+    assert be.variables()
+    assert be.selected_block()["p"]["var"] in be.variables()
     blocks.compile_blocks(be.program)
 
 
@@ -431,3 +441,184 @@ def test_forever_and_wait_have_kidfacing_hints(tmp_path):
     # and the compiled forever is the bounded loop (Part-1 contract)
     src = blocks.compile_blocks(be.program)
     assert "while True" not in src and "range(100000)" in src
+
+
+# ----------------------------------------------------------------------------
+# Bug 1 (data loss): opening BLOCKS on a hand-written-code cart must NEVER
+# clobber that cart's main.py.
+# ----------------------------------------------------------------------------
+
+_HANDWRITTEN_SRC = (
+    "# my own game, do not lose this!\n"
+    "x = 5\n"
+    "\n"
+    "def _draw():\n"
+    "    cls(col('black'))\n"
+    "    circ(x, 50, 8, col('red'))\n"
+)
+
+
+def _ws_with_code_cart(tmp_path, src, title="Code Cart"):
+    """A workstation opened on a cart whose main.py is HAND-WRITTEN code (no
+    blocks.json) -- the case Bug 1 must protect."""
+    from runtime import host_app
+    root = str(tmp_path / "carts")
+    ws = host_app.build_workstation(root)
+    cart = kid_carts.create(title, root, src=src, type="game")
+    ws.launcher.items = kid_carts.scan(root)
+    for i, c in enumerate(ws.launcher.items):
+        if c["title"] == title:
+            ws.launcher.sel = i
+            break
+    ws.open()
+    return ws, cart, root
+
+
+def test_blocks_on_handwritten_cart_does_not_lose_code(tmp_path):
+    """THE core regression: a plain-Python cart's main.py is NOT overwritten when
+    the kid opens BLOCKS and saves an (empty) block program."""
+    ws, cart, root = _ws_with_code_cart(tmp_path, _HANDWRITTEN_SRC)
+    # the editor opens in PROTECTED mode (hand-written main.py, no blocks.json)
+    ws._open_blocks()
+    assert ws.menu_view == "blocks"
+    assert ws.blk_protect is True
+    # try to SAVE the empty block program -- it must refuse and keep the code
+    assert ws.save_blocks() is False
+    # in-RAM source is untouched...
+    assert ws.cart["src"] == _HANDWRITTEN_SRC
+    # ...and so is the on-disk main.py (nothing was written, no blocks.json appeared)
+    reloaded = kid_carts.load(cart["path"])
+    assert reloaded["src"] == _HANDWRITTEN_SRC
+    assert reloaded["blocks"] is None
+    # leaving the editor re-runs the kid's real code (not an empty blocks cart)
+    ws._leave_menu()
+    for _ in range(3):
+        ws.frame(1 / 30)
+    assert ws.cart_error is None
+    assert ws.ns is not None and ws.ns.get("x") == 5     # the real code ran
+
+
+def test_blocks_protect_blocks_graduate_overwrite(tmp_path):
+    """In protected mode, 'graduate to code' opens the EXISTING code (it must not
+    compile the empty blocks over it)."""
+    ws, cart, _ = _ws_with_code_cart(tmp_path, _HANDWRITTEN_SRC)
+    ws._open_blocks()
+    assert ws.blk_protect is True
+    ws.graduate_to_code()
+    assert ws.menu_view == "code" and ws.editor is not None
+    assert ws.editor.text() == _HANDWRITTEN_SRC          # the kid's code, not blocks
+    assert "Made with KidCode blocks" not in ws.editor.text()
+
+
+def test_block_authored_cart_is_not_protected(tmp_path):
+    """A genuinely block-authored cart (has blocks.json) stays fully editable --
+    the guard only fires on hand-written code. Round-trip is unchanged."""
+    ws, cart, root = _ws_with_block_cart(tmp_path)
+    ws._open_blocks()
+    be = ws.blocks_ed
+    assert ws.blk_protect is False                       # new-template cart: editable
+    be.add_var("score")
+    _go_to_insert(be, 1)
+    be.insert_block("set_var", {"var": "score", "value": 7})
+    assert ws.save_blocks() is True
+    # reopen fresh from disk: it loads its blocks.json, so it's NOT protected and
+    # saving works again (round-trip unchanged).
+    ws.launcher.items = kid_carts.scan(root)
+    for i, c in enumerate(ws.launcher.items):
+        if c["title"] == cart["title"]:
+            ws.launcher.sel = i
+    ws.open()
+    ws._open_blocks()
+    assert ws.blk_protect is False
+    assert ws.save_blocks() is True
+
+
+# ----------------------------------------------------------------------------
+# Bug 2 (UX): create + name a new variable, then use it.
+# ----------------------------------------------------------------------------
+
+def test_new_variable_entry_creates_names_and_is_usable(tmp_path):
+    """The Variables category leads with '+ new variable'. Choosing it creates a
+    variable, opens the on-screen-keyboard name prompt, the kid types a name, and
+    the named variable is then usable in a set block -- and compiles into the
+    generated Python under that exact name."""
+    import runtime.console as C
+    ws, cart, _ = _ws_with_block_cart(tmp_path)
+    ws._open_blocks()
+    be = ws.blocks_ed
+    # open the insert menu -> Variables category
+    _go_to_insert(be, 1)
+    ws._blk_open_categories()
+    ws.blk_menu["sel"] = ws.blk_menu["items"].index(blocks.CAT_VARIABLES)
+    ws._blk_menu_select()
+    assert ws.blk_menu["mode"] == "blk"
+    # the FIRST entry in Variables is "+ new variable"
+    assert ws.blk_menu["items"][0] == C._NEW_VAR_ITEM
+    assert ws._blk_menu_label(0) == C._NEW_VAR_LABEL
+    ws.blk_menu["sel"] = 0
+    ws._blk_menu_select()                                # create + open name prompt
+    assert ws.blk_kbd is not None
+    # type a name: "lives" (each char is a keystroke; backspace + a digit too)
+    for ch in "lives":
+        ws._blk_kbd_key(ord(ch))
+    ws._blk_kbd_key(ord("2"))                            # "lives2"
+    ws._blk_kbd_key(8)                                   # backspace -> "lives"
+    ws._blk_kbd_commit()
+    assert ws.blk_kbd is None
+    assert "lives" in be.variables()
+    # now USE it: insert a set_var and point its {var} slot at "lives"
+    _go_to_insert(be, 1)
+    be.insert_block("set_var", {"var": "lives", "value": 3})
+    src = blocks.compile_blocks(be.program)
+    assert "lives = 0" in src                            # declared at module level
+    assert "lives = 3" in src                            # assigned in the body
+    _run(src)                                            # runs clean as a cart
+
+
+def test_new_variable_name_is_sanitized_and_renames_references(tmp_path):
+    """Free-typed names are coerced to safe identifiers, and renaming a variable
+    rewrites every slot that referenced it (so set/change/expr keep working)."""
+    ws, _, _ = _ws_with_block_cart(tmp_path)
+    ws._open_blocks()
+    be = ws.blocks_ed
+    name = be.new_var("var")                             # default-named variable
+    _go_to_insert(be, 1)
+    be.insert_block("set_var", {"var": name, "value": 1})
+    # rename it via free text with spaces/punctuation -> a safe identifier
+    applied = be.rename_var(name, "my score!!")
+    assert applied == "my_score"
+    assert "my_score" in be.variables() and name not in be.variables()
+    # the set_var slot followed the rename (find it wherever it landed)
+    assert _select_type(be, "set_var")
+    assert be.selected_block()["p"]["var"] == "my_score"
+    src = blocks.compile_blocks(be.program)
+    assert "my_score = 0" in src and "my_score = 1" in src
+
+
+def test_name_prompt_keyboard_flow_through_the_driver(tmp_path):
+    """The name prompt is reachable + typeable through the real input model
+    (type_char == on-screen keyboard, press('a') == confirm), end to end."""
+    import runtime.console as C
+    ws, _, _ = _ws_with_block_cart(tmp_path)
+    ws._open_blocks()
+    be = ws.blocks_ed
+    drv = _driver(ws)
+    # drive to the Variables block list and pick "+ new variable"
+    ws._blk_open_categories()
+    ws.blk_menu["sel"] = ws.blk_menu["items"].index(blocks.CAT_VARIABLES)
+    ws._blk_menu_select()
+    ws.blk_menu["sel"] = 0                               # "+ new variable"
+    drv.press("a")
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)                                    # release
+    assert ws.blk_kbd is not None
+    # type "gold" one char per frame (last_key edge), then confirm with A
+    for ch in "gold":
+        drv.type_char(ord(ch))
+        drv.frame(1 / 30)
+        drv.frame(1 / 30)                                # release so the next edge fires
+    drv.press("a")
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    assert ws.blk_kbd is None
+    assert "gold" in be.variables()
