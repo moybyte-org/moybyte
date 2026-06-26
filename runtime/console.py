@@ -346,6 +346,7 @@ _SET_W = 284
 _SET_ROW_Y0 = 40
 _SET_ROW_H = 26
 _SET_BACK = (288, 18, 18, 14)       # close Settings (X), in the panel title row
+_SET_ACH = (262, 18, 22, 14)        # open the achievements view (trophy), title row (#21)
 # Code editor: FULL-SCREEN (320x240). Top bar = title + run/save/close icons;
 # the code area fills the middle; a tappable symbol palette runs along the bottom
 # (the T-Deck keyboard has no `=`/`[]`/`{}`/`<>`/`%`, so the palette supplies them).
@@ -472,6 +473,14 @@ _GLYPHS = {
     "app":    (0x000, 0x7FE, 0x402, 0x7FE, 0x402, 0x402, 0x402, 0x402, 0x402, 0x402, 0x7FE, 0x000),
     "wifi":   (0x000, 0x000, 0x1F8, 0x204, 0x0F0, 0x108, 0x060, 0x000, 0x060, 0x000, 0x000, 0x000),
     "batt":   (0x000, 0x000, 0x180, 0x7FE, 0x7FE, 0x7FE, 0x7FE, 0x7FE, 0x7FE, 0x000, 0x000, 0x000),
+    # Achievements (#21): "trophy" (the unlocked-badge cue), "lock" (a locked/secret
+    # entry), "smile" (the "Oh! You found me!" Easter-egg character), "key" (the
+    # explorer reward), and "spark" (the celebratory confetti pip).
+    "trophy": (0x000, 0x7FE, 0x7FE, 0x3FC, 0x3FC, 0x1F8, 0x0F0, 0x060, 0x060, 0x1F8, 0x1F8, 0x000),
+    "lock":   (0x000, 0x0F0, 0x108, 0x108, 0x108, 0x7FE, 0x7FE, 0x792, 0x792, 0x7FE, 0x7FE, 0x000),
+    "smile":  (0x0F0, 0x308, 0x404, 0x492, 0x492, 0x404, 0x444, 0x438, 0x404, 0x308, 0x0F0, 0x000),
+    "key":    (0x000, 0x1C0, 0x220, 0x220, 0x1C0, 0x080, 0x080, 0x0E0, 0x080, 0x0E0, 0x000, 0x000),
+    "spark":  (0x000, 0x060, 0x060, 0x060, 0x366, 0x1FC, 0x060, 0x1FC, 0x366, 0x060, 0x060, 0x000),
 }
 
 
@@ -550,6 +559,142 @@ def _line_cells(x0, y0, x1, y1):
 
 # Per-type icon glyph for a cart tile on the desktop (the pre-literate cue).
 _TYPE_GLYPH = {"wallpaper": "paint", "game": "run", "app": "app", "tool": "gear"}
+
+
+# --- achievements + Easter eggs (#21) ---------------------------------------
+#
+# A small, tasteful set of fun milestones a kid hits naturally (open/run a cart,
+# paint a sprite, edit a map, save code, play a few carts, visit each editor) plus
+# the hidden Easter-egg rewards. Each is a tuple (id, name, glyph, hidden):
+#   id     -- stable key persisted in achievements.json
+#   name   -- the friendly title shown in the toast + the achievements view
+#   glyph  -- the icon from _GLYPHS drawn beside it
+#   hidden -- True hides the name as "???" in the view until it's unlocked, so a
+#             secret stays a surprise (the Easter-egg rewards are all hidden).
+# Backend-agnostic + MicroPython-safe (a plain tuple of tuples, frozen into the
+# device build). The store (kid_carts.load/save_achievements) holds only the
+# unlocked ids; this catalog is the single source of what each one MEANS, so host
+# and device show identical badges.
+ACHIEVEMENTS = (
+    ("first_open",   "First Steps",     "app",    False),
+    ("first_run",    "Lift Off!",       "run",    False),
+    ("first_paint",  "Little Artist",   "paint",  False),
+    ("first_map",    "Map Maker",       "map",    False),
+    ("first_code",   "Code Wizard",     "code",   False),
+    ("play_five",    "Cart Explorer",   "star",   False),
+    ("toolbox",      "Toolbox Master",  "gear",   False),
+    ("decorator",    "Home Decorator",  "heart",  False),
+    # Hidden Easter-egg rewards (name shown as "???" until found):
+    ("konami",        "Secret Coder",    "spark",  True),
+    ("clock_tinker",  "Time Traveler",   "smile",  True),
+    ("secret_door",   "Secret Finder",   "key",    True),
+)
+
+# Which achievement(s) a plain milestone event unlocks. Counters (play_five,
+# toolbox) are tallied separately by Achievements.note; everything else maps an
+# event name straight to one id. Keep this list of events in sync with the hook
+# points in Workstation (open/run/save_*/editor opens).
+_EVENT_ACHIEVEMENT = {
+    "open": "first_open",
+    "run": "first_run",
+    "paint_save": "first_paint",
+    "map_save": "first_map",
+    "code_save": "first_code",
+    "wallpaper_change": "decorator",
+}
+
+# Editors a kid can visit; opening all of them earns "toolbox".
+_TOOLBOX_VIEWS = ("code", "paint", "map")
+_PLAY_GOAL = 5            # distinct carts opened to earn "Cart Explorer"
+
+ACH_TITLE = {a[0]: a[1] for a in ACHIEVEMENTS}
+ACH_GLYPH = {a[0]: a[2] for a in ACHIEVEMENTS}
+ACH_HIDDEN = {a[0]: a[3] for a in ACHIEVEMENTS}
+
+TOAST_MS = 2600          # how long a celebratory unlock banner stays on screen
+
+
+class Achievements:
+    """Tracks which fun milestones a kid has unlocked, awards each exactly once,
+    persists the unlocked set, and queues a celebratory toast on a fresh unlock.
+
+    Backend-agnostic + MicroPython-safe. The Workstation owns one of these, calls
+    note(event[, key]) at the existing flow points (open/run/paint-save/...), and
+    reads `toast`/`toast_until` to draw the banner. Persistence + audio are injected
+    callbacks so this class stays free of the SD wrapper and the audio backend (the
+    Workstation wires those), which also makes it trivially unit-testable."""
+
+    def __init__(self, unlocked=None, on_save=None, on_unlock=None):
+        # `unlocked` is the list loaded from achievements.json (ids already valid).
+        self.unlocked = {}                 # id -> True (a set; dict for MP parity)
+        for i in (unlocked or ()):
+            self.unlocked[i] = True
+        self._on_save = on_save            # called(list_of_ids) to persist; None = volatile
+        self._on_unlock = on_unlock        # called(id) on a FRESH unlock (e.g. a beep)
+        self._seen_views = {}              # editor views visited this session+history
+        self._played = {}                  # distinct cart keys opened (for play_five)
+        self.toast = None                  # (id, title, glyph) of the live toast, or None
+        self.toast_until = 0               # _ticks_ms deadline the toast hides at
+
+    # -- queries -------------------------------------------------------------
+    def has(self, ach_id):
+        return ach_id in self.unlocked
+
+    def count(self):
+        return len(self.unlocked)
+
+    # -- awarding ------------------------------------------------------------
+    def award(self, ach_id):
+        """Unlock `ach_id` if it isn't already and is a known achievement. Returns
+        True only on the FIRST unlock (so a milestone awards exactly once), and then
+        persists + raises a toast + fires the on_unlock hook. A repeat is a no-op."""
+        if ach_id in self.unlocked or ach_id not in ACH_TITLE:
+            return False
+        self.unlocked[ach_id] = True
+        if self._on_save is not None:
+            try:
+                self._on_save(list(self.unlocked.keys()))
+            except Exception as exc:  # noqa: BLE001 -- a failed save must not crash the UI
+                print("KidCode achievements save failed:", _err_text(exc))
+        self.toast = (ach_id, ACH_TITLE[ach_id], ACH_GLYPH.get(ach_id, "trophy"))
+        self.toast_until = _ticks_ms() + TOAST_MS
+        if self._on_unlock is not None:
+            try:
+                self._on_unlock(ach_id)
+            except Exception:  # noqa: BLE001 -- audio is best-effort celebration
+                pass
+        return True
+
+    def note(self, event, key=None):
+        """Record a milestone `event` and award whatever it earns. `key` is the
+        per-event detail used by the counter milestones: for "open" it's the cart
+        identity (distinct carts -> play_five); for "editor" it's the view name
+        (visiting all editors -> toolbox). Direct-mapped events (open/run/saves)
+        award their id immediately. Safe to call every time the event happens --
+        award() makes the once-only guarantee."""
+        if event == "open":
+            if key is not None:
+                self._played[key] = True
+                if len(self._played) >= _PLAY_GOAL:
+                    self.award("play_five")
+            self.award("first_open")
+        elif event == "editor":
+            if key in _TOOLBOX_VIEWS:
+                self._seen_views[key] = True
+                if all(v in self._seen_views for v in _TOOLBOX_VIEWS):
+                    self.award("toolbox")
+        elif event in _EVENT_ACHIEVEMENT:
+            self.award(_EVENT_ACHIEVEMENT[event])
+
+    def toast_active(self, now=None):
+        if self.toast is None:
+            return False
+        if now is None:
+            now = _ticks_ms()
+        if _ticks_diff(self.toast_until, now) <= 0:
+            self.toast = None
+            return False
+        return True
 
 
 class Launcher:
@@ -810,6 +955,20 @@ class Workstation:
         self._with_sd = lambda fn: fn()
         self.show_fps = True          # bottom-right FPS readout while a cart runs
         self._fps = 0.0               # smoothed frames/sec (EMA of 1/dt)
+        # Achievements (#21): a small set of fun milestones + the hidden Easter-egg
+        # rewards. Starts empty/volatile; load_achievements() wires the SD store +
+        # the unlock beep. The Workstation calls ach.note(event) at the flow points
+        # below (open/run/save_*/editor opens) and draws ach.toast each frame.
+        self.ach = Achievements()
+        # Easter-egg trigger state. Kept tiny + reset on screen changes so a stray
+        # sequence never carries between contexts. None of these touch cart data.
+        self._konami_pos = 0          # how far into the Konami sequence we are (desktop)
+        self._clock_taps = 0          # clock taps on the status strip (Time Traveler)
+        self._secret_taps = 0         # SETTINGS-title taps (Secret Finder door)
+        self.egg_msg = None           # (line, glyph) of the live Easter-egg popup, or None
+        self.egg_until = 0            # _ticks_ms the egg popup hides at
+        self._confetti_until = 0      # _ticks_ms the Konami confetti effect ends
+        self.show_achievements = False  # the locked/unlocked list overlay (Settings entry)
 
     def _cart_has_perm(self, name):
         """True iff the open cart's manifest permissions include `name` (#38).
@@ -874,6 +1033,115 @@ class Workstation:
                 self.system = {}
         self.select_wallpaper(self.system.get("wallpaper"), persist=False)
 
+    def load_achievements(self):
+        """Load the unlocked achievements (kid_carts achievements.json) and wire the
+        store + unlock-beep into a fresh Achievements (#21). Safe no-op on an
+        embedded/no-store boot -- then the achievements stay in volatile RAM (still
+        awarded + toasted this session, just not remembered). Call after the store +
+        carts_root are injected (host build_workstation / device run_desktop)."""
+        unlocked = []
+        if self.carts_store is not None and self.carts_root is not None:
+            try:
+                unlocked = self._with_sd(
+                    lambda: self.carts_store.load_achievements(self.carts_root)) or []
+            except Exception as exc:  # noqa: BLE001 -- a bad store must not crash boot
+                print("KidCode achievements load failed:", _err_text(exc))
+                unlocked = []
+        self.ach = Achievements(unlocked, on_save=self._save_achievements,
+                                on_unlock=self._achievement_unlocked)
+
+    def _save_achievements(self, ids):
+        """Persist the unlocked-id list through the SD wrapper, when writes are on.
+        A failed/disabled write just isn't remembered (the badge still shows this
+        session) -- never fatal."""
+        if not (self.carts_store is not None and self.carts_root is not None
+                and self.can_manage):
+            return
+        self._with_sd(lambda: self.carts_store.save_achievements(ids, self.carts_root))
+
+    def _achievement_unlocked(self, ach_id):
+        """Celebrate a fresh unlock with a short rising beep, when audio is wired.
+        Best-effort -- a silent backend (or none) just skips it. The toast is the
+        primary, always-present feedback; the beep is the cherry on top."""
+        au = self.audio
+        if au is not None:
+            try:
+                au.beep(880, 0.08)
+                au.beep(1320, 0.12)
+            except Exception:  # noqa: BLE001
+                pass
+
+    # -- hidden Easter eggs (#21) --------------------------------------------
+    #
+    # Three playful, SAFE, reversible secrets, each gated behind a non-obvious
+    # trigger and each awarding a hidden achievement. None touch persistent cart
+    # data; the only state is a short on-canvas popup (egg_msg/egg_until) and a
+    # confetti timer, all of which expire on their own. Triggers reset on screen
+    # changes so a half-entered sequence never carries between contexts.
+    #
+    #   1. Konami code on the home desktop (up up down down left right left right
+    #      b a) -> confetti rain + "OH! YOU FOUND ME!" -> "Secret Coder".
+    #   2. Tapping the desktop clock 7 times -> a time-travel wink -> "Time
+    #      Traveler".
+    #   3. Tapping the SETTINGS title 5 times (the hidden "secret door") -> "knock
+    #      knock... oh! you found me!" -> "Secret Finder".
+
+    _KONAMI = ("up", "up", "down", "down", "left", "right", "left", "right", "b", "a")
+    _CLOCK_HIT = (0, 0, 40, _STATUS_H)          # the clock text region on the status strip
+    _SET_TITLE_HIT = (30, 18, 130, 16)          # the "SETTINGS" panel title (secret door)
+    _CLOCK_TAP_GOAL = 7
+    _SECRET_TAP_GOAL = 5
+
+    def _show_egg(self, line, glyph="smile", ms=2600):
+        """Pop a non-blocking Easter-egg banner (drawn over the current screen for
+        `ms`). Purely cosmetic + self-expiring."""
+        self.egg_msg = (line, glyph)
+        self.egg_until = _ticks_ms() + ms
+
+    def _konami_step(self, name):
+        """Advance the desktop Konami sequence on a button press; the full code in
+        order fires the confetti egg + awards "Secret Coder". A wrong key restarts
+        (but still counts if it's the sequence's first key, so a fresh start works)."""
+        seq = self._KONAMI
+        if name == seq[self._konami_pos]:
+            self._konami_pos += 1
+        else:
+            # restart; the press may itself be the (new) first step
+            self._konami_pos = 1 if name == seq[0] else 0
+        if self._konami_pos >= len(seq):
+            self._konami_pos = 0
+            self._confetti_until = _ticks_ms() + 3000
+            self._show_egg("OH! YOU FOUND ME!", "smile", ms=3000)
+            self.ach.award("konami")
+
+    def _tap_clock(self):
+        """Count a clock tap; the _CLOCK_TAP_GOAL'th in a row fires the time egg +
+        awards "Time Traveler". Any other desktop tap resets the run."""
+        self._clock_taps += 1
+        if self._clock_taps >= self._CLOCK_TAP_GOAL:
+            self._clock_taps = 0
+            self._show_egg("TICK TOCK... TIME TRAVELER!", "smile")
+            self.ach.award("clock_tinker")
+
+    def _tap_secret_door(self):
+        """Count a SETTINGS-title tap (the hidden door); the _SECRET_TAP_GOAL'th
+        knocks it open -> "Secret Finder"."""
+        self._secret_taps += 1
+        if self._secret_taps >= self._SECRET_TAP_GOAL:
+            self._secret_taps = 0
+            self._show_egg("KNOCK KNOCK... OH! YOU FOUND ME!", "key", ms=3000)
+            self.ach.award("secret_door")
+
+    def _egg_active(self, now=None):
+        if self.egg_msg is None:
+            return False
+        if now is None:
+            now = _ticks_ms()
+        if _ticks_diff(self.egg_until, now) <= 0:
+            self.egg_msg = None
+            return False
+        return True
+
     def select_wallpaper(self, wp_id, persist=True):
         """Choose the desktop backdrop. `wp_id` is a wallpaper cart slug or a
         "fill:<color>" built-in; an unknown/None id falls back to the first
@@ -932,6 +1200,7 @@ class Workstation:
         cur = self.wallpaper_id if self.wallpaper_id in opts else opts[0]
         nxt = opts[(opts.index(cur) + d) % len(opts)]
         self.select_wallpaper(nxt, persist=True)
+        self.ach.note("wallpaper_change")       # "Home Decorator": changed the backdrop (#21)
 
     def _draw_wallpaper(self, dt):
         """Paint the backdrop: run the wallpaper cart's _update/_draw, or a solid
@@ -984,6 +1253,8 @@ class Workstation:
     def open_settings(self):
         self.set_msel = 0
         self.screen = "settings"
+        self.show_achievements = False
+        self._secret_taps = 0              # fresh secret-door run each visit (#21)
         self._set_text_mode(False)
 
     def settings_adjust(self, d):
@@ -1073,6 +1344,10 @@ class Workstation:
         # fix it (a silent stay-on-launcher would be a dead end on the device).
         self._start()
         self.screen = "desktop"
+        # Achievements (#21): opening a cart is "First Steps"; opening _PLAY_GOAL
+        # distinct carts is "Cart Explorer". Key by the cart's path/title so it's
+        # the SAME identity the launcher uses (distinct carts, not repeat opens).
+        self.ach.note("open", self.cart.get("path") or self.cart.get("title"))
 
     def _build_sheet(self, cart=None):
         # Build `cart`'s sprite sheet (default: the open cart), or a blank one when
@@ -1165,6 +1440,9 @@ class Workstation:
             if self.mapedit is None and self.tilemap is not None and self.sheet is not None:
                 self.mapedit = MapEditor(self.tilemap, self.sheet)
         self._set_text_mode(view == "code")
+        # Achievements (#21): visiting each editor (code/paint/map) earns "Toolbox
+        # Master". "cards" isn't an editor, so it's ignored by note().
+        self.ach.note("editor", view)
 
     def _set_text_mode(self, on):
         # The code editor needs clean 1-byte ASCII (it reads last_key for typing);
@@ -1242,6 +1520,7 @@ class Workstation:
         self.crash_line = None               # a re-run will re-detect any runtime crash
         if not (self.cart.get("path") and self.can_manage):
             self.save_status = None             # nothing to persist, but src is valid
+            self.ach.note("code_save")          # "Code Wizard": valid code saved (#21)
             return True
         try:
             # kid_carts.save_code always returns a (status, message) 2-tuple.
@@ -1252,6 +1531,7 @@ class Workstation:
                 return False
             self.editor.dirty = False
             self.save_status = "SAVED"
+            self.ach.note("code_save")          # "Code Wizard": code saved (#21)
             # A successful save means the source now compiles and persisted: clear
             # any stale crash text so returning to the desktop re-runs the fixed
             # cart instead of re-painting the old "crashed" panel. (run_code/the
@@ -1299,6 +1579,7 @@ class Workstation:
                 return                               # syntax/save error -> stay in editor
             self.cart["src"] = self.editor.text()   # in-RAM apply (validated above)
         if self._start():
+            self.ach.note("run")                # "Lift Off!": a cart was RUN (#21)
             self._set_text_mode(False)
             self.screen = "desktop"
         else:
@@ -1314,6 +1595,7 @@ class Workstation:
             self._with_sd(lambda: self.carts_store.save_sprites(self.cart, hexs))
             self.sheet.dirty = False
             self.save_status = "SAVED"
+            self.ach.note("paint_save")         # "Little Artist": a sprite saved (#21)
         except Exception as exc:  # noqa: BLE001
             # Mirror the save_code contract: a failed sprite save must be VISIBLE on
             # device (no serial in the run loop), not silent. _err_text-guarded so a
@@ -1334,6 +1616,7 @@ class Workstation:
             self._with_sd(lambda: self.carts_store.save_map(self.cart, hexs))
             self.tilemap.dirty = False
             self.save_status = "SAVED"
+            self.ach.note("map_save")           # "Map Maker": a map saved (#21)
         except Exception as exc:  # noqa: BLE001
             txt = _err_text(exc)
             self.save_status = "SAVE FAILED"
@@ -1414,6 +1697,7 @@ class Workstation:
         ok = self._start()
         self.screen = "desktop"
         if ok:
+            self.ach.note("run")                # "Lift Off!": GO re-ran the cart (#21)
             self._save_config()
 
     def _save_config(self):
@@ -1437,6 +1721,9 @@ class Workstation:
         self.ns = None
         self.cart_error = None
         self.save_status = None
+        self.show_achievements = False
+        self._konami_pos = 0          # fresh Konami run on the home desktop (#21)
+        self._clock_taps = 0
 
     # -- cart management (SD) ------------------------------------------------
     #
@@ -1650,6 +1937,13 @@ class Workstation:
     def handle_input(self):
         i = self.input
         if self.screen == "launcher":
+            # Konami Easter egg (#21): watch every button press on the home desktop
+            # for the secret sequence (the nav below still runs normally -- the egg
+            # is a passive observer, so it never blocks the launcher).
+            for _b in self._KONAMI:
+                if i.pressed(_b):
+                    self._konami_step(_b)
+                    break
             # Grid nav (#28): left/right step a column, up/down a whole row.
             if i.pressed("left"):
                 self.launcher.nav2d(-1, 0)
@@ -1747,6 +2041,13 @@ class Workstation:
         # row + page chevrons fire on the press edge. There's no list drag anymore --
         # the grid pages instead. Trackball hover still previews the icon under it.
         if click:
+            # Clock Easter egg (#21): tapping the status-strip clock _CLOCK_TAP_GOAL
+            # times wakes the Time Traveler. Checked before the management row so a
+            # tap on the clock never falls through to a button.
+            if _in(px, py, self._CLOCK_HIT):
+                self._tap_clock()
+                return
+            self._clock_taps = 0                # any other desktop tap resets the run
             slot = self._dock_slot_at(px, py)
             if slot is not None:
                 self._activate_dock(slot)
@@ -1785,9 +2086,24 @@ class Workstation:
     def _settings_pointer(self, px, py, click):
         if not click:
             return
+        # The achievements view is a modal overlay: while it's up, any tap closes it
+        # (it has no controls of its own besides "tap to dismiss").
+        if self.show_achievements:
+            self.show_achievements = False
+            return
+        if _in(px, py, _SET_ACH):              # trophy: open the achievements view (#21)
+            self.show_achievements = True
+            self._secret_taps = 0
+            return
         if _in(px, py, _SET_BACK):
             self.go_home()
             return
+        # Secret-door Easter egg (#21): tapping the SETTINGS title (not a button)
+        # _SECRET_TAP_GOAL times knocks the hidden door open. Reset on any other tap.
+        if _in(px, py, self._SET_TITLE_HIT):
+            self._tap_secret_door()
+            return
+        self._secret_taps = 0
         slot = self._dock_slot_at(px, py)
         if slot is not None:
             self._activate_dock(slot)
@@ -2125,6 +2441,17 @@ class Workstation:
                     self._icon_btn("close", "", _CLOSE_BTN, NAMES["red"])
         if self.show_fps and self.screen == "desktop":
             self._draw_fps()
+        # Achievements + Easter eggs (#21) overlay on TOP of every screen, so an
+        # unlock celebration / secret popup is always visible and never disturbs the
+        # screen underneath (it's drawn last, then expires on its own).
+        if self._confetti_until and _ticks_diff(self._confetti_until, _ticks_ms()) > 0:
+            self._draw_confetti()
+        if self.show_achievements:
+            self._draw_achievements()
+        if self._egg_active():
+            self._draw_egg()
+        if self.ach.toast_active():
+            self._draw_toast()
         self._draw_cursor()
         self.comp.flush()
 
@@ -2216,6 +2543,10 @@ class Workstation:
         cv.rectb(8, 16, 304, 198, NAMES["pink"])
         self._glyph("gear", (14, 18, 14, 14), NAMES["yellow"])
         cv.print("SETTINGS", 32, 20, NAMES["white"], 2)
+        # Achievements view button (#21): a trophy badge with the unlocked count.
+        cv.rect(_SET_ACH[0], _SET_ACH[1], _SET_ACH[2], _SET_ACH[3], NAMES["indigo"])
+        self._glyph("trophy", (_SET_ACH[0] - 2, _SET_ACH[1], 14, 14), NAMES["yellow"])
+        cv.print(str(self.ach.count()), _SET_ACH[0] + 13, _SET_ACH[1] + 4, NAMES["white"], 1)
         self._mini_btn("X", _SET_BACK, NAMES["red"])
         for i in range(len(self._SETTINGS_ROWS)):
             self._draw_settings_row(i)
@@ -2263,6 +2594,88 @@ class Workstation:
         y = cv.h - 10
         cv.rect(x - 2, y - 1, tw + 4, 10, NAMES["black"])
         cv.print(s, x, y, NAMES["yellow"], 1)
+
+    # -- achievements + Easter-egg drawing (#21) -----------------------------
+
+    def _draw_toast(self):
+        """A small celebratory banner near the top: a trophy + "ACHIEVEMENT!" + the
+        achievement name + its glyph. Drawn last each frame over whatever screen is
+        up, so it never disturbs the content beneath and expires on its own. Indexed
+        API only (host == device)."""
+        cv = self.canvas
+        ach_id, title, glyph = self.ach.toast
+        x, y, w, h = 36, 26, 248, 38
+        cv.rect(x, y, w, h, NAMES["dark_purple"])
+        cv.rectb(x, y, w, h, NAMES["yellow"])
+        cv.rect(x, y, w, 12, NAMES["yellow"])
+        self._glyph("trophy", (x + 2, y - 1, 12, 12), NAMES["black"])
+        cv.print("ACHIEVEMENT UNLOCKED!", x + 16, y + 2, NAMES["black"], 1)
+        self._glyph(glyph, (x + 6, y + 16, 16, 16), NAMES["yellow"])
+        cv.print(title[:24], x + 28, y + 20, NAMES["white"], 2)
+
+    def _draw_egg(self):
+        """A non-blocking Easter-egg popup: a friendly character glyph + the secret
+        message, centered low so it reads as a surprise without covering the action.
+        Self-expiring (egg_until); cosmetic only -- touches no cart data."""
+        cv = self.canvas
+        line, glyph = self.egg_msg
+        w = min(cv.w - 16, 24 + len(line) * 8 + 8)
+        x = (cv.w - w) // 2
+        y = 150
+        h = 30
+        cv.rect(x, y, w, h, NAMES["black"])
+        cv.rectb(x, y, w, h, NAMES["pink"])
+        self._glyph(glyph, (x + 4, y + 7, 16, 16), NAMES["peach"])
+        cv.print(line, x + 24, y + 11, NAMES["white"], 1)
+
+    def _draw_confetti(self):
+        """The Konami egg's celebration: a scatter of colored spark glyphs that
+        drift down with the elapsed time. Cheap + deterministic (no RNG state),
+        purely cosmetic, gone when _confetti_until passes."""
+        cv = self.canvas
+        t = (_ticks_diff(_ticks_ms(), 0) // 80) % 240
+        cols = (NAMES["red"], NAMES["yellow"], NAMES["green"], NAMES["blue"],
+                NAMES["pink"], NAMES["orange"])
+        for k in range(18):
+            sx = (k * 53 + 7) % (cv.w - 6)
+            sy = (k * 37 + t + (k * k)) % (cv.h - 6)
+            self._glyph("spark", (sx, sy, 8, 8), cols[k % len(cols)])
+
+    def _draw_achievements(self):
+        """The achievements view (#21): a full panel listing every achievement,
+        unlocked ones with their name + glyph in bright color, locked ones greyed
+        with a lock + "???" (so a hidden secret stays a surprise). A two-column grid
+        so all ~11 fit at 320x240. Tap anywhere to dismiss (see _settings_pointer).
+        Indexed API + the shared glyph vocabulary only (host == device)."""
+        cv = self.canvas
+        cv.rect(6, 14, 308, 212, NAMES["dark_blue"])
+        cv.rectb(6, 14, 308, 212, NAMES["yellow"])
+        self._glyph("trophy", (12, 16, 14, 14), NAMES["yellow"])
+        cv.print("ACHIEVEMENTS", 30, 18, NAMES["white"], 2)
+        cv.print("%d / %d" % (self.ach.count(), len(ACHIEVEMENTS)), 240, 20,
+                 NAMES["yellow"], 1)
+        col_w = 150
+        row_h = 18
+        x0 = 12
+        y0 = 36
+        per_col = 6
+        for k in range(len(ACHIEVEMENTS)):
+            ach_id, title, glyph, hidden = ACHIEVEMENTS[k]
+            col = k // per_col
+            row = k % per_col
+            x = x0 + col * col_w
+            y = y0 + row * row_h
+            got = self.ach.has(ach_id)
+            if got:
+                self._glyph(glyph, (x, y, 14, 14), NAMES["yellow"])
+                cv.print(title[:16], x + 16, y + 3, NAMES["white"], 1)
+            else:
+                self._glyph("lock", (x, y, 14, 14), NAMES["dark_grey"])
+                # A hidden (Easter-egg) achievement stays "???"; a normal locked one
+                # shows its name greyed so a kid knows what's there to earn.
+                label = "???" if hidden else title[:16]
+                cv.print(label, x + 16, y + 3, NAMES["light_grey"], 1)
+        cv.print("TAP TO CLOSE", 110, 210, NAMES["light_grey"], 1)
 
     def _btn(self, label, rect, fill):
         x, y, w, h = rect

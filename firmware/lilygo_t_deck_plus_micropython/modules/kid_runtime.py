@@ -978,6 +978,9 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
     # the wallpaper backdrop runs the chosen wallpaper cart's _draw (and _update if
     # cheap) each home frame; _wp_live can be set False to keep it _draw-only.
     ws.load_system()
+    # Achievements (#21): load the unlocked badges (achievements.json) so earned
+    # milestones survive a reboot. Same store + with_sd_live path as system.json.
+    ws.load_achievements()
     print("KidCode desktop running (kb=%d ball=%d touch=%d)"
           % (1 if keyboard.available else 0, 1 if ball.available else 0,
              1 if touch.available else 0))
