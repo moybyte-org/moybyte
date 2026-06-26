@@ -513,7 +513,7 @@ def test_device_sprite_storage_wired():
     runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "kid_carts.py").read_text(encoding="utf-8")
-    assert "def make_api(canvas, input, config, sheet=None):" in runtime   # device cart API
+    assert "def make_api(canvas, input, config, sheet=None, pmem=None):" in runtime   # device cart API
     assert "self.sheet = self._build_sheet()" in console                   # shared console
     assert "self.carts_store.save_sprites(self.cart, hexs)" in console
     assert "def save_sprites(cart, hex_text):" in carts

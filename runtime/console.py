@@ -173,7 +173,8 @@ _HL_KEYWORDS = (
 # sync with make_api (host_app / kid_runtime); an extra name here is harmless.
 _HL_BUILTINS = (
     "cls", "pix", "pset", "line", "rect", "rectb", "circ", "circb", "spr",
-    "print", "btn", "btnp", "touch", "cfg", "col", "rnd", "flr", "abs", "min",
+    "print", "btn", "btnp", "touch", "mouse", "key", "keyp", "time", "pmem",
+    "cfg", "col", "rnd", "flr", "abs", "min",
     "max", "sin", "cos", "range", "len", "int", "str", "float", "round", "sqrt",
 )
 
@@ -472,6 +473,40 @@ class Launcher:
             cv.print("v", 300, self.TILE_Y0 + (self.VISIBLE - 1) * self.TILE_PITCH, NAMES["light_grey"], 2)
 
 
+class Pmem:
+    """A cart's persistent memory: 256 x 32-bit unsigned ints, TIC-80 pmem().
+
+    Backend-agnostic (host + device share this). The Workstation builds one per
+    cart from kid_carts.load_pmem and injects its `cell` accessor into make_api as
+    `pmem(i[, v])`: read pmem(i) -> int, write pmem(i, v) -> persists (when the
+    cart is on a writable store). A write only persists if the value actually
+    changed, so a cart calling pmem(i, v) every frame doesn't hammer the SD."""
+
+    CELLS = 256
+    MASK = 0xFFFFFFFF
+
+    def __init__(self, cells=None, on_write=None):
+        # `cells` is the loaded list (already 256 long from kid_carts.load_pmem);
+        # default to all-zero so an embedded/non-SD cart still gets working RAM.
+        if cells is None:
+            cells = [0] * self.CELLS
+        self.cells = cells
+        self._on_write = on_write   # called(cells) to persist; None = volatile
+
+    def cell(self, index, value=None):
+        i = int(index)
+        if i < 0 or i >= self.CELLS:
+            return 0
+        if value is None:
+            return self.cells[i]
+        v = int(value) & self.MASK
+        if self.cells[i] != v:
+            self.cells[i] = v
+            if self._on_write is not None:
+                self._on_write(self.cells)
+        return v
+
+
 class Workstation:
     def __init__(self, comp, canvas, input, carts=None):
         self.comp = comp
@@ -491,6 +526,9 @@ class Workstation:
         self.menu_view = "cards"      # menu sub-view: "cards" | "code" | "paint"
         self.editor = None            # CodeEditor while menu_view == "code"
         self.sheet = None             # SpriteSheet for the open cart (built on open)
+        self.pmem = None              # Pmem (persistent cart store) for the open cart
+        self._cart_start_ms = 0       # _ticks_ms when the running cart last _start()ed
+        self._cart_key_prev = 0       # last frame's keyboard byte (key()/keyp() edge)
         self.paint = None             # PaintEditor while menu_view == "paint"
         self.keyboard = None          # set by run_desktop (for raw/text mode toggle)
         self._ekey_prev = 0           # last consumed keyboard byte (edge detect)
@@ -516,7 +554,11 @@ class Workstation:
         self._with_sd = lambda fn: fn()
 
     def _start(self):
-        ns = self.make_api(self.canvas, self.input, self.config, self.sheet)
+        # Stamp the cart-start clock so the cart's time() reads ms since this run
+        # began (re-run on apply/run_code/edit-close resets it, like TIC-80).
+        self._cart_start_ms = _ticks_ms()
+        self.input.cart_start_ms = self._cart_start_ms
+        ns = self.make_api(self.canvas, self.input, self.config, self.sheet, self.pmem)
         try:
             # Compile with the "<cart>" filename so a runtime traceback carries
             # cart line numbers (_exc_cart_line reads them to mark the bad line).
@@ -550,6 +592,8 @@ class Workstation:
         self.cart_error = None
         self.save_status = None
         self.sheet = self._build_sheet()
+        self.pmem = self._build_pmem()
+        self._cart_key_prev = 0       # fresh cart: no stale key edge
         self.menu_view = "cards"
         self._set_text_mode(False)
         # Open to the desktop even if the cart failed to start: frame() shows the
@@ -566,6 +610,30 @@ class Workstation:
             except Exception:  # noqa: BLE001
                 pass
         return SpriteSheet()
+
+    def _build_pmem(self):
+        """Load the open cart's persistent memory (pmem.json) into a Pmem, wiring
+        its writes back through the SD store when the cart is writable. An
+        embedded/non-SD cart still gets working (volatile) RAM."""
+        path = self.cart.get("path") if self.cart else None
+        cells = None
+        if path and self.carts_store is not None:
+            try:
+                cells = self._with_sd(lambda: self.carts_store.load_pmem(path))
+            except Exception as exc:  # noqa: BLE001
+                print("KidCode pmem load failed:", exc)
+                cells = None
+
+        on_write = None
+        if path and self.carts_store is not None and self.can_manage:
+            def on_write(values, cart=self.cart):
+                try:
+                    self._with_sd(lambda: self.carts_store.save_pmem(cart, values))
+                except Exception as exc:  # noqa: BLE001
+                    # No serial in the device run loop, but a failed pmem write must
+                    # not crash the cart -- the kid just loses that one save.
+                    print("KidCode pmem save failed:", _err_text(exc))
+        return Pmem(cells, on_write)
 
     # -- code / paint editors (#3, #4) ---------------------------------------
 
@@ -1311,6 +1379,15 @@ class Workstation:
                 self._btn("DEL", _DEL_BTN, NAMES["red"])
         elif self.screen == "desktop":
             if self.cart_error is None:
+                # Resolve this frame's keyboard edge for the cart's key()/keyp():
+                # last_key is the byte held this frame (0 when nothing is down);
+                # keyp fires only on the 0->key transition. Done here (not in
+                # InputState) so it's independent of whether the backend sets
+                # last_key before or after begin_frame().
+                k = self.input.last_key
+                self.input.cart_key = k
+                self.input.cart_keyp = k if (k and k != self._cart_key_prev) else 0
+                self._cart_key_prev = k
                 try:
                     if self._update:
                         self._update(dt)
