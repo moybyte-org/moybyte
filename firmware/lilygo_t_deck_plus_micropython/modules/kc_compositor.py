@@ -129,6 +129,7 @@ class Compositor:
         except Exception as exc:
             print("KidCode compositor: full-frame buffer unavailable:", exc)
             self._frame = None
+        self._frame_mv = memoryview(self._frame) if self._frame is not None else None
         self._dirty = DirtyTracker()
         # Native pixel kernel (fast, VM-neutral) when the image has it.
         try:
@@ -217,13 +218,30 @@ class Compositor:
     # -- flush ---------------------------------------------------------------
 
     def flush(self):
-        """Flush the whole screen. One DMA transfer from the PSRAM frame buffer
-        when available (seamless, no per-strip boundary glitches); otherwise the
-        strip path."""
+        """Flush the whole screen from the dedicated PSRAM frame buffer in row-bands.
+
+        Each band is a DISTINCT, stable slice of `_frame` (copied once up front and
+        never overwritten during the flush), so the async esp_lcd DMA (trans_queue
+        depth 10) can never read a buffer that the next band has already clobbered --
+        that reuse-race on the single shared strip buffer caused the one-band vertical
+        offset/duplication. Banding into <=strip_h rows also keeps each transfer's DMA
+        bounce small enough to allocate (a single 320x240 tx_color NO_MEMs on the S3's
+        fragmented internal heap). Window armed once; RAMWR then RAMWRC streams in."""
         if self._frame is not None:
-            self._frame[:] = self._fb     # native-order copy; tx_color swaps _frame in place
+            self._frame[:] = self._fb     # one stable full copy in PSRAM
             self._set_window(0, 0, self._w - 1, self._h - 1)
-            self._bus.tx_color(RAMWR, self._frame, 0, 0, self._w - 1, self._h - 1, 0, True)
+            mv = self._frame_mv
+            rb = self._row_bytes
+            rows_per = self._strip_h
+            cmd = RAMWR
+            yy = 0
+            while yy < self._h:
+                rows = rows_per if yy + rows_per <= self._h else (self._h - yy)
+                last = (yy + rows >= self._h)
+                self._bus.tx_color(cmd, mv[yy * rb:(yy + rows) * rb],
+                                   0, yy, self._w - 1, yy + rows - 1, 0, last)
+                cmd = RAMWRC
+                yy += rows
         else:
             self._flush_region(0, 0, self._w, self._h)
         self._dirty.clear()
