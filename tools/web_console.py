@@ -134,15 +134,36 @@ class WebConsole:
     server never steps the console from two requests at once (the console is
     single-threaded, like the device loop)."""
 
-    def __init__(self, save_dir, fps=DEFAULT_FPS, cart=None):
+    def __init__(self, save_dir, fps=DEFAULT_FPS, cart=None, sys_size=None,
+                 font_scale=1):
         self.dt = 1.0 / max(1, fps)
-        self.ws = host_app.build_workstation(save_dir)
+        # Two-domain seam (#39): `sys_size` is the SYSTEM canvas size the desktop
+        # renders on (default 320x240 = today); the game stays a fixed 320x240,
+        # composited as a centered viewport. The browser already reads canvas.w/h,
+        # so a larger system canvas just fills more of the page.
+        self.ws = host_app.build_workstation(save_dir, sys_size=sys_size,
+                                             font_scale=font_scale)
         # The decided architecture: the web is a NEW CANVAS BACKEND. The shared
-        # console draws through ws.canvas every frame, so we reassign it to a
-        # recording CommandCanvas WITHOUT touching runtime/console.py. ws.comp stays
-        # the host _NullComp (its flush() is a no-op -- nothing to flush on the host).
-        self.canvas = CommandCanvas(host_app.WIDTH, host_app.HEIGHT)
-        self.ws.canvas = self.canvas
+        # console draws the desktop chrome through the SYSTEM canvas every frame, so
+        # we reassign THAT to a recording CommandCanvas WITHOUT touching
+        # runtime/console.py. (ws.comp stays the host _NullComp; its flush() is a
+        # no-op -- nothing to flush on the host.)
+        sw, sh = (self.ws.sys_canvas.w, self.ws.sys_canvas.h)
+        self.canvas = CommandCanvas(sw, sh, font_scale=self.ws._effective_font_scale())
+        if self.ws._sys_canvas is None:
+            # Degradation (320x240): one surface -- the game canvas IS the system
+            # canvas, so swap ws.canvas (the cart draws into the recorder too). The
+            # game canvas keeps 8px text regardless, so the recorder's font_scale must
+            # be 1 here (no distinct system canvas to scale).
+            self.canvas.set_font_scale(1)
+            self.ws.canvas = self.canvas
+        else:
+            # Distinct system canvas: record the chrome on the system canvas; the game
+            # canvas stays a real rasterizer so _composite_game can read its pixels
+            # and emit the viewport as one spr command into the recorder. Relayout so
+            # the launcher grid + chrome reflect the recorder's size/scale.
+            self.ws._sys_canvas = self.canvas
+            self.ws._relayout()
         # Live, real-connection-aware WiFi (your PC is online) -- matches the
         # interactive pygame run, so network carts test against real sockets.
         self.ws.wifi = host_app.make_host_wifi(host_app.kid_carts, self.ws.carts_root)
@@ -329,9 +350,17 @@ def main(argv=None):
     ap.add_argument("--save-dir", default=DEFAULT_SAVE_DIR)
     ap.add_argument("--fps", type=int, default=DEFAULT_FPS,
                     help="console step rate (dt = 1/fps per /frame request)")
+    # Two-domain seam (#39): the SYSTEM canvas size the desktop fills in the browser
+    # (default 320x240 = today). The game is the centered fixed-aspect viewport.
+    ap.add_argument("--size", default="320x240", metavar="WxH",
+                    help="system canvas size (default 320x240)")
+    ap.add_argument("--font-scale", type=int, default=1, choices=(1, 2, 3),
+                    help="initial system-UI font scale 1/2/3 (system.json overrides)")
     args = ap.parse_args(argv)
 
-    console = WebConsole(args.save_dir, fps=args.fps, cart=args.cart)
+    w, _, h = args.size.lower().partition("x")
+    console = WebConsole(args.save_dir, fps=args.fps, cart=args.cart,
+                         sys_size=(int(w), int(h)), font_scale=args.font_scale)
     server = make_server(console, host=args.host, port=args.port)
     url = _lan_url(server.server_address[1])
     print("KidCode web console (draw-command streaming) serving the live desktop at:")

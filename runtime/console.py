@@ -347,6 +347,7 @@ _SET_ROW_Y0 = 40
 _SET_ROW_H = 26
 _SET_BACK = (288, 18, 18, 14)       # close Settings (X), in the panel title row
 _SET_ACH = (262, 18, 22, 14)        # open the achievements view (trophy), title row (#21)
+_SET_TITLE_HIT = (30, 18, 130, 16)  # the "SETTINGS" panel title (secret door, #21)
 # Code editor: FULL-SCREEN (320x240). Top bar = title + run/save/close icons;
 # the code area fills the middle; a tappable symbol palette runs along the bottom
 # (the T-Deck keyboard has no `=`/`[]`/`{}`/`<>`/`%`, so the palette supplies them).
@@ -432,6 +433,154 @@ _MAP_CLOSE = (126, 198, 76, 20)
 _CURSOR_BASE = 7
 _CURSOR_ACCEL = 2
 
+# Baseline the responsive layout reproduces EXACTLY (#39 graceful degradation).
+_BASE_W = 320
+_BASE_H = 240
+_FONT_W = 8                 # petme128 cell width at scale 1 (one char advance)
+# Letterbox/bezel fill (#39): the solid KID64 index the system canvas shows around
+# the integer-scaled 320x240 game viewport (the borders of the fixed-aspect frame).
+_VIEWPORT_BEZEL = 0         # black
+
+
+class Layout:
+    """Responsive desktop-shell geometry (#39): the status strip, cart icon grid,
+    page chevrons, management buttons, bottom dock, and Settings rows derived from
+    the SYSTEM canvas size (w, h) + the system font scale (1/2/3) -- instead of the
+    hand-placed 320x240 constants. The desktop reflows to fill a larger panel and
+    the chrome scales with the font.
+
+    The single hard contract: at (w, h, fs) == (320, 240, 1) every field equals the
+    frozen module constant, byte-for-byte -- the T-Deck path is unchanged. The exact
+    baseline is reproduced VERBATIM (the `_base` branch) rather than re-derived, so
+    no reflow formula's integer-floor can drift a pixel at the default size; the
+    responsive formulas only run on a larger canvas / bigger font. The editors stay
+    a fixed 320x240 viewport in step 1, so their constants are NOT routed here.
+
+    `font_w` is the on-screen char-cell width (8 * fs) so callers center/space text
+    that the SystemCanvas renders at `fs`; chrome heights/margins scale with fs too."""
+
+    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1):
+        self.w = int(w)
+        self.h = int(h)
+        self.fs = max(1, int(font_scale))
+        fs = self.fs
+        self.font_w = _FONT_W * fs
+        self._base = (self.w == _BASE_W and self.h == _BASE_H and fs == 1)
+
+        # -- status strip + dock (heights/positions scale with the font) --------
+        self.status_h = _STATUS_H * fs
+        self.dock_h = _DOCK_H * fs
+        self.dock_y = self.h - self.dock_h
+        n = len(_DOCK_SLOTS)
+        if self._base:
+            self.dock_w, self.dock_gap, self.dock_x0 = _DOCK_W, _DOCK_GAP, _DOCK_X0
+        else:
+            self.dock_gap = _DOCK_GAP * fs
+            # Fill the width with n evenly-spaced slots, snug to the edges.
+            self.dock_w = max(_FONT_W,
+                              (self.w - 2 * _DOCK_X0 - (n - 1) * self.dock_gap) // n)
+            span = n * self.dock_w + (n - 1) * self.dock_gap
+            self.dock_x0 = max(0, (self.w - span) // 2)
+
+        # -- cart icon grid (reflows COLS x ROWS to fill the band) ---------------
+        self.icon_w = _ICON_W * fs
+        self.icon_h = _ICON_H * fs
+        self.icon_gap_x = _ICON_GAP_X * fs
+        self.icon_gap_y = _ICON_GAP_Y * fs
+        self.icon_box = _ICON_BOX * fs
+        self.icon_y0 = self.status_h + 8 * fs
+        if self._base:
+            self.cols, self.rows = _ICON_COLS, _ICON_ROWS
+            self.icon_x0 = _ICON_X0
+        else:
+            self.cols = max(1, (self.w + self.icon_gap_x) //
+                            (self.icon_w + self.icon_gap_x))
+            band = self.dock_y - self.icon_y0
+            self.rows = max(1, (band + self.icon_gap_y) //
+                            (self.icon_h + self.icon_gap_y))
+            grid_w = self.cols * self.icon_w + (self.cols - 1) * self.icon_gap_x
+            self.icon_x0 = max(0, (self.w - grid_w) // 2)
+        self.page = self.cols * self.rows
+
+        # -- status strip glyph box + the selected-cart name slot ----------------
+        self.status_gh = 12 * fs                     # pip/glyph box (scaled w/ font)
+        if self._base:
+            self.status_name_x = 78                  # frozen baseline (not 6*fw+6)
+            self.status_name_maxc = 18
+        else:
+            self.status_name_x = 6 * self.font_w + 6
+            self.status_name_maxc = max(
+                4, (self.w - 7 * self.font_w - 4 * self.status_gh) // self.font_w)
+
+        # -- management buttons (NEW/DUP/DEL), tucked at the strip's right end ---
+        if self._base:
+            self.new_btn, self.dup_btn, self.del_btn = _NEW_BTN, _DUP_BTN, _DEL_BTN
+        else:
+            bh = max(8, self.status_h - 2)
+            bw = 3 * self.font_w + 2
+            gap = 2 * fs
+            x0 = self.w - 3 * bw - 2 * gap - 2
+            self.new_btn = (x0, 1, bw, bh)
+            self.dup_btn = (x0 + bw + gap, 1, bw, bh)
+            self.del_btn = (x0 + 2 * (bw + gap), 1, bw, bh)
+
+        # -- page chevrons (centered vertically in the icon band) ----------------
+        if self._base:
+            self.page_prev, self.page_next = _PAGE_PREV, _PAGE_NEXT
+        else:
+            cy = (self.icon_y0 + self.dock_y) // 2 - 12 * fs
+            self.page_prev = (2, cy, 14 * fs, 24 * fs)
+            self.page_next = (self.w - 2 - 14 * fs, cy, 14 * fs, 24 * fs)
+
+        # -- Settings rows + panel (scale row height with the font) --------------
+        self.set_row_h = _SET_ROW_H * fs
+        if self._base:
+            self.set_x = _SET_X
+            self.set_w = _SET_W
+            self.set_row_y0 = _SET_ROW_Y0
+            self.settings_panel = (8, 16, 304, 198)         # frozen baseline
+            self.set_back = _SET_BACK
+            self.set_ach = _SET_ACH
+            self.set_title_hit = _SET_TITLE_HIT
+        else:
+            # The Settings panel fills the band between the status strip and dock.
+            py0 = self.status_h + 2 * fs
+            ph = self.dock_y - py0 - 2 * fs
+            self.settings_panel = (8 * fs, py0, self.w - 16 * fs, ph)
+            self.set_x = self.settings_panel[0] + 10 * fs
+            self.set_w = self.settings_panel[2] - 20 * fs
+            self.set_row_y0 = py0 + 24 * fs
+            pr = self.settings_panel[0] + self.settings_panel[2]   # panel right edge
+            self.set_back = (pr - 20 * fs, py0 + 2 * fs, 18 * fs, 14 * fs)
+            self.set_ach = (pr - 46 * fs, py0 + 2 * fs, 22 * fs, 14 * fs)
+            self.set_title_hit = (self.settings_panel[0] + 14 * fs, py0 + 2 * fs,
+                                  10 * self.font_w, 16 * fs)
+
+    # -- derived rects (mirror the old module-constant arithmetic) ----------
+    def dock_slot_rect(self, k):
+        x = self.dock_x0 + k * (self.dock_w + self.dock_gap)
+        return (x, self.dock_y + 1, self.dock_w, self.dock_h - 2)
+
+    def settings_row_rect(self, i):
+        return (self.set_x, self.set_row_y0 + i * self.set_row_h,
+                self.set_w, self.set_row_h - 2)
+
+    def tile_rect(self, i, page):
+        """Grid-cell rect for cart index `i` on `page`, or None if off that page."""
+        start = page * self.page
+        if i < start or i >= start + self.page:
+            return None
+        k = i - start
+        col = k % self.cols
+        row = k // self.cols
+        x = self.icon_x0 + col * (self.icon_w + self.icon_gap_x)
+        y = self.icon_y0 + row * (self.icon_h + self.icon_gap_y)
+        return (x, y, self.icon_w, self.icon_h)
+
+    def clock_hit(self):
+        # The clock-text region on the status strip (Time Traveler egg, #21).
+        return (0, 0, 40 if self._base else 5 * self.font_w, self.status_h)
+
 # --- Button icon glyphs (the pre-literate icon vocabulary) ------------------
 # 1-bit, recolorable pixel bitmaps designed on a 12x12 grid at the native button
 # size (boxes are 14-16px), then centered in each button's rect and blitted in
@@ -497,22 +646,29 @@ def _blit_glyph(cv, kind, rect, c):
         return
     x, y, w, h = rect
     n = _GLYPH_SIZE
-    ox = x + (w - n) // 2                            # center the 12x12 mask in the rect
-    oy = y + (h - n) // 2
+    # Scale the icon mask with the canvas's system font scale (#39) so glyphs grow
+    # alongside text on a larger system canvas. A plain (game) Canvas has font_scale
+    # 1, so this is byte-identical to the original 1x path everywhere else.
+    fs = getattr(cv, "font_scale", 1)
+    if fs < 1:
+        fs = 1
+    span = n * fs
+    ox = x + (w - span) // 2                          # center the (scaled) mask in the rect
+    oy = y + (h - span) // 2
     for r in range(n):
         row = bits[r]
         if not row:
             continue
-        yy = oy + r
+        yy = oy + r * fs
         run = 0                                     # length of the current on-run
         for col in range(n):                        # walk L->R, coalescing runs
             if row & (1 << (n - 1 - col)):
                 run += 1
             elif run:
-                cv.rect(ox + col - run, yy, run, 1, c)
+                cv.rect(ox + (col - run) * fs, yy, run * fs, fs, c)
                 run = 0
         if run:
-            cv.rect(ox + n - run, yy, run, 1, c)
+            cv.rect(ox + (n - run) * fs, yy, run * fs, fs, c)
 
 
 def _cursor_delta(n):
@@ -701,16 +857,29 @@ class Launcher:
     """The desktop home (#28): carts laid out as a PAGED GRID of tappable icon
     tiles over the wallpaper backdrop, instead of a flat vertical strip. Keeps the
     selection model (items/sel/selected/move) the rest of the console relies on;
-    `page`/PAGE is the grid's scroll unit (one screen of COLS x ROWS icons)."""
+    `page`/PAGE is the grid's scroll unit (one screen of COLS x ROWS icons).
 
-    COLS = _ICON_COLS
-    ROWS = _ICON_ROWS
-    PAGE = _ICON_COLS * _ICON_ROWS        # cart icons shown per desktop page
+    The grid geometry comes from an injected `Layout` (#39) so it reflows with the
+    system canvas size + font scale; COLS/ROWS/PAGE are instance attributes mirrored
+    from the live layout (so callers reading them, and the selection/paging model,
+    track the reflowed grid). A bare Launcher(items) (unit construction) falls back
+    to the 320x240 / scale-1 baseline -- exactly today's 4x2/PAGE=8 grid."""
 
-    def __init__(self, items):
+    def __init__(self, items, layout=None):
         self.items = items
         self.sel = 0
         self.page = 0
+        self.set_layout(layout or Layout())
+
+    def set_layout(self, layout):
+        """Adopt a new grid layout (size/font-scale change) and re-clamp the page so
+        the selection stays on a valid screen. Mirrors COLS/ROWS/PAGE as instance
+        attributes for the callers/tests that read them directly."""
+        self.layout = layout
+        self.COLS = layout.cols
+        self.ROWS = layout.rows
+        self.PAGE = layout.page
+        self._clamp_page()
 
     # -- selection ----------------------------------------------------------
     def set_items(self, items):
@@ -760,16 +929,9 @@ class Launcher:
 
     def tile_rect(self, i):
         """The grid-cell rect for cart index i, or None if it's not on the current
-        page. Cells lay out left-to-right, top-to-bottom in the icon area."""
-        start = self.page * self.PAGE
-        if i < start or i >= start + self.PAGE:
-            return None
-        k = i - start
-        col = k % self.COLS
-        row = k // self.COLS
-        x = _ICON_X0 + col * (_ICON_W + _ICON_GAP_X)
-        y = _ICON_Y0 + row * (_ICON_H + _ICON_GAP_Y)
-        return (x, y, _ICON_W, _ICON_H)
+        page. Cells lay out left-to-right, top-to-bottom in the icon area (geometry
+        from the live Layout, so it reflows with the system canvas / font scale)."""
+        return self.layout.tile_rect(i, self.page)
 
     def tile_at(self, px, py):
         for i in self._page_range():
@@ -782,28 +944,33 @@ class Launcher:
         # Icon tiles only -- the wallpaper backdrop + status strip + dock are drawn
         # by the Workstation around this (so the wallpaper shows through). For each
         # cart: a rounded art box (its sprite tile 0 if it has one, else a type
-        # glyph), the selection ring, and a short name beneath.
+        # glyph), the selection ring, and a short name beneath. All geometry scales
+        # with the layout (font scale), so a bigger panel shows bigger tiles (#39).
+        lay = self.layout
+        box = lay.icon_box
+        fw = lay.font_w                              # on-screen char-cell width (8*fs)
+        spr_scale = max(1, box // 16)                # fit the 16x16 icon sprite in the box
         for i in self._page_range():
             x, y, w, h = self.tile_rect(i)
             it = self.items[i]
             sel = (i == self.sel)
-            bx = x + (w - _ICON_BOX) // 2
+            bx = x + (w - box) // 2
             by = y + 2
-            cv.rect(bx, by, _ICON_BOX, _ICON_BOX, NAMES["dark_purple"])
-            cv.rectb(bx, by, _ICON_BOX, _ICON_BOX,
+            cv.rect(bx, by, box, box, NAMES["dark_purple"])
+            cv.rectb(bx, by, box, box,
                      NAMES["yellow"] if sel else NAMES["dark_grey"])
             img = sheet_for(it) if sheet_for is not None else None
             if img is not None:
-                cv.spr(img, bx + (_ICON_BOX - 16 * 2) // 2,
-                       by + (_ICON_BOX - 16 * 2) // 2, 2)
+                cv.spr(img, bx + (box - 16 * spr_scale) // 2,
+                       by + (box - 16 * spr_scale) // 2, spr_scale)
             else:
-                self._tile_glyph(cv, it, (bx, by, _ICON_BOX, _ICON_BOX))
-            # short name (one line, truncated to the tile width: 8px cells)
+                self._tile_glyph(cv, it, (bx, by, box, box))
+            # short name (one line, truncated to the tile width: fw-wide cells)
             name = it["title"]
-            maxc = w // 8
+            maxc = w // fw
             if len(name) > maxc:
                 name = name[:maxc]
-            cv.print(name, x + (w - len(name) * 8) // 2, by + _ICON_BOX + 3,
+            cv.print(name, x + (w - len(name) * fw) // 2, by + box + 3,
                      NAMES["white"] if sel else NAMES["light_grey"], 1)
 
     def _tile_glyph(self, cv, it, box):
@@ -881,9 +1048,36 @@ class _SilentAudio:
 
 
 class Workstation:
-    def __init__(self, comp, canvas, input, carts=None):
+    def __init__(self, comp, canvas, input, carts=None, sys_canvas=None,
+                 font_scale=1):
         self.comp = comp
+        # Two rendering domains (#39). The GAME canvas is the fixed 320x240 indexed
+        # surface the cart + cart API draw on -- carts are UNCHANGED. The SYSTEM
+        # canvas is the panel/window surface the desktop/launcher/settings + status
+        # strip + dock render on, responsive to its size + the system font scale; a
+        # running cart (and, for step 1, the editors) draw on the game canvas and are
+        # composited as a fixed-aspect, integer-scaled, centered viewport into it.
+        # When sys_canvas is None (or the same size, the T-Deck default) the system
+        # canvas IS the game canvas -- one object, so everything is pixel-identical
+        # to today (graceful degradation), and the composite step is a no-op.
         self.canvas = canvas
+        # A distinct SYSTEM canvas, or None for the degradation case where the system
+        # canvas IS the game canvas. Kept as a separate field (not a hard reference to
+        # `canvas`) so the property tracks `self.canvas` even if a backend swap
+        # reassigns it later (the web console does `ws.canvas = CommandCanvas(...)`).
+        self._sys_canvas = sys_canvas if (sys_canvas is not None
+                                          and sys_canvas is not canvas) else None
+        # `font_scale` is the REQUESTED system-UI scale (persisted). It only takes
+        # visible effect on a distinct SYSTEM canvas that can render scaled text; in
+        # the degradation case (no system canvas -- e.g. the T-Deck, whose framebuf
+        # text can't scale) the effective scale is 1, so the chrome layout matches the
+        # 8px text actually drawn. The requested value is still kept + persisted, so a
+        # bigger panel later honours it.
+        self.font_scale = max(1, int(font_scale))
+        if self._sys_canvas is not None:
+            self._sys_canvas.set_font_scale(self.font_scale)
+        self.layout = Layout(self.sys_canvas.w, self.sys_canvas.h,
+                             self._effective_font_scale())
         self.input = input
         self.make_api = None       # injected: make_api(canvas, input, cfg, sheet, audio, tilemap, pmem, wifi)->ns
         self.make_audio = None      # injected: make_audio(engine)->audio backend (host/device)
@@ -894,7 +1088,7 @@ class Workstation:
         # manifest permissions include "network" (capability-gated -- see _start).
         self.wifi = None            # injected wifi backend (host FakeWifi / device WLAN)
         self.carts_store = None     # injected: cart store module (kid_carts API)
-        self.launcher = Launcher(carts if carts else [])
+        self.launcher = Launcher(carts if carts else [], self.layout)
         # Screen states (#28): "launcher" is now the DESKTOP home (wallpaper + cart
         # icon grid + dock); "desktop" is a running cart; "menu" is the cards/code/
         # paint/map editors; "settings" is the Settings app.
@@ -970,6 +1164,14 @@ class Workstation:
         self._confetti_until = 0      # _ticks_ms the Konami confetti effect ends
         self.show_achievements = False  # the locked/unlocked list overlay (Settings entry)
 
+    @property
+    def sys_canvas(self):
+        """The SYSTEM canvas the desktop chrome + overlays render on (#39). A distinct
+        SystemCanvas when one was supplied, else the GAME canvas itself (degradation:
+        one surface, pixel-identical to today). Reading through `self.canvas` keeps it
+        correct even if a backend swaps the game canvas (e.g. the web CommandCanvas)."""
+        return self._sys_canvas if self._sys_canvas is not None else self.canvas
+
     def _cart_has_perm(self, name):
         """True iff the open cart's manifest permissions include `name` (#38).
         kid_carts.load() carries the manifest "permissions" list onto the cart;
@@ -1023,7 +1225,8 @@ class Workstation:
 
     def load_system(self):
         """Load the system settings (kid_carts system.json) and apply the saved
-        wallpaper. Safe no-op if no store/root is wired (embedded boot)."""
+        wallpaper + font scale (#39). Safe no-op if no store/root is wired (embedded
+        boot)."""
         if self.carts_store is not None and self.carts_root is not None:
             try:
                 self.system = self._with_sd(
@@ -1031,7 +1234,74 @@ class Workstation:
             except Exception as exc:  # noqa: BLE001 -- a bad store must not crash boot
                 print("KidCode system load failed:", _err_text(exc))
                 self.system = {}
+        # System font scale (#39): apply the persisted choice (1/2/3) so the desktop
+        # boots at the saved text size. set_font_scale relays it into the system
+        # canvas + relayouts; persist=False so loading doesn't re-write the store.
+        self.set_font_scale(self.system.get("font_scale", self.font_scale),
+                            persist=False)
         self.select_wallpaper(self.system.get("wallpaper"), persist=False)
+
+    # -- system font scale (#39) ---------------------------------------------
+    #
+    # The system-UI font is settings-resizable (petme128 nearest-neighbor x1/x2/x3),
+    # persisted in system.json (mirroring the #28 wallpaper setting) and applied live.
+    # The GAME canvas keeps plain 8x8 text regardless -- scaling lives in the system
+    # canvas + the responsive Layout, so a cart is never affected.
+
+    FONT_SCALES = (1, 2, 3)
+
+    def _effective_font_scale(self):
+        """The scale actually applied to the system canvas + layout. It is the
+        requested font_scale ONLY when a distinct system canvas exists (one that can
+        render scaled text); in the degradation case (the T-Deck / a shared 320x240
+        canvas, whose framebuf text can't scale) it is 1, so the chrome geometry
+        always matches the 8px text actually drawn -- no mis-laid-out desktop."""
+        return self.font_scale if self._sys_canvas is not None else 1
+
+    def set_font_scale(self, scale, persist=True):
+        """Set the system-UI font scale (clamped to FONT_SCALES), relay the effective
+        scale into the system canvas + relayout the desktop, and (by default) persist
+        it. The game canvas text is always 8px; the effective scale is 1 without a
+        distinct system canvas (so the choice is remembered but only shows on a panel
+        that can render it)."""
+        try:
+            scale = int(scale)
+        except (TypeError, ValueError):
+            scale = 1
+        if scale not in self.FONT_SCALES:
+            scale = self.FONT_SCALES[0]
+        self.font_scale = scale
+        if self._sys_canvas is not None:
+            self._sys_canvas.set_font_scale(self._effective_font_scale())
+        self._relayout()
+        if persist:
+            self._persist_font_scale()
+
+    def cycle_font_scale(self, d):
+        """Step the font scale by d through FONT_SCALES (Settings < / > stepper);
+        applies + persists immediately so the desktop text resizes live."""
+        scales = self.FONT_SCALES
+        cur = self.font_scale if self.font_scale in scales else scales[0]
+        nxt = scales[(scales.index(cur) + d) % len(scales)]
+        self.set_font_scale(nxt, persist=True)
+
+    def _relayout(self):
+        """Rebuild the responsive layout from the live system-canvas size + the
+        EFFECTIVE font scale and re-push it into the launcher (so its grid reflows).
+        Called on a font-scale change (and could be called on a resize)."""
+        self.layout = Layout(self.sys_canvas.w, self.sys_canvas.h,
+                             self._effective_font_scale())
+        self.launcher.set_layout(self.layout)
+
+    def _persist_font_scale(self):
+        self.system["font_scale"] = self.font_scale
+        if not (self.carts_store is not None and self.carts_root is not None
+                and self.can_manage):
+            return
+        try:
+            self._with_sd(lambda: self.carts_store.save_system(self.system, self.carts_root))
+        except Exception as exc:  # noqa: BLE001 -- a failed write just isn't remembered
+            print("KidCode system save failed:", _err_text(exc))
 
     def load_achievements(self):
         """Load the unlocked achievements (kid_carts achievements.json) and wire the
@@ -1087,8 +1357,8 @@ class Workstation:
     #      knock... oh! you found me!" -> "Secret Finder".
 
     _KONAMI = ("up", "up", "down", "down", "left", "right", "left", "right", "b", "a")
-    _CLOCK_HIT = (0, 0, 40, _STATUS_H)          # the clock text region on the status strip
-    _SET_TITLE_HIT = (30, 18, 130, 16)          # the "SETTINGS" panel title (secret door)
+    # Easter-egg hit regions (#21) are now derived from self.layout (clock_hit() /
+    # set_title_hit) so they track the responsive status strip / Settings panel.
     _CLOCK_TAP_GOAL = 7
     _SECRET_TAP_GOAL = 5
 
@@ -1246,6 +1516,7 @@ class Workstation:
 
     _SETTINGS_ROWS = (
         ("wallpaper", "WALLPAPER", "wallpaper"),
+        ("font_scale", "FONT SIZE", "font"),
         ("volume", "VOLUME", "mock-gauge"),
         ("brightness", "BRIGHTNESS", "mock-gauge"),
         ("name", "NAME", "mock-name"),
@@ -1267,6 +1538,9 @@ class Workstation:
         key = self._SETTINGS_ROWS[self.set_msel][0]
         if key == "wallpaper":
             self.cycle_wallpaper(d)
+            return
+        if key == "font_scale":                 # system-UI font size (#39): live + persisted
+            self.cycle_font_scale(d)
             return
         if key == "theme":
             cur = self.system.get("theme", self._MOCK_THEMES[0])
@@ -2011,12 +2285,11 @@ class Workstation:
     # -- pointer (trackball-as-mouse) ----------------------------------------
 
     def _dock_slot_rect(self, k):
-        x = _DOCK_X0 + k * (_DOCK_W + _DOCK_GAP)
-        return (x, _DOCK_Y + 1, _DOCK_W, _DOCK_H - 2)
+        return self.layout.dock_slot_rect(k)
 
     def _dock_slot_at(self, px, py):
         """Which dock slot ("home"/"code"/.../"settings") was tapped, or None."""
-        if py < _DOCK_Y:
+        if py < self.layout.dock_y:
             return None
         for k in range(len(_DOCK_SLOTS)):
             if _in(px, py, self._dock_slot_rect(k)):
@@ -2053,7 +2326,8 @@ class Workstation:
             # Clock Easter egg (#21): tapping the status-strip clock _CLOCK_TAP_GOAL
             # times wakes the Time Traveler. Checked before the management row so a
             # tap on the clock never falls through to a button.
-            if _in(px, py, self._CLOCK_HIT):
+            lay = self.layout
+            if _in(px, py, lay.clock_hit()):
                 self._tap_clock()
                 return
             self._clock_taps = 0                # any other desktop tap resets the run
@@ -2061,15 +2335,15 @@ class Workstation:
             if slot is not None:
                 self._activate_dock(slot)
                 return
-            if self.can_manage and _in(px, py, _NEW_BTN):
+            if self.can_manage and _in(px, py, lay.new_btn):
                 self.new_cart(); return
-            if self.can_manage and _in(px, py, _DUP_BTN):
+            if self.can_manage and _in(px, py, lay.dup_btn):
                 self.dup_cart(); return
-            if self.can_manage and _in(px, py, _DEL_BTN):
+            if self.can_manage and _in(px, py, lay.del_btn):
                 self.del_cart(); return
-            if self.launcher.max_page() > 0 and _in(px, py, _PAGE_PREV):
+            if self.launcher.max_page() > 0 and _in(px, py, lay.page_prev):
                 self.launcher.flip_page(-1); return
-            if self.launcher.max_page() > 0 and _in(px, py, _PAGE_NEXT):
+            if self.launcher.max_page() > 0 and _in(px, py, lay.page_next):
                 self.launcher.flip_page(1); return
             i = self.launcher.tile_at(px, py)
             if i is not None:
@@ -2090,7 +2364,7 @@ class Workstation:
                 self.launcher.sel = i
 
     def _settings_row_rect(self, i):
-        return (_SET_X, _SET_ROW_Y0 + i * _SET_ROW_H, _SET_W, _SET_ROW_H - 2)
+        return self.layout.settings_row_rect(i)
 
     def _settings_pointer(self, px, py, click):
         if not click:
@@ -2100,16 +2374,17 @@ class Workstation:
         if self.show_achievements:
             self.show_achievements = False
             return
-        if _in(px, py, _SET_ACH):              # trophy: open the achievements view (#21)
+        lay = self.layout
+        if _in(px, py, lay.set_ach):           # trophy: open the achievements view (#21)
             self.show_achievements = True
             self._secret_taps = 0
             return
-        if _in(px, py, _SET_BACK):
+        if _in(px, py, lay.set_back):
             self.go_home()
             return
         # Secret-door Easter egg (#21): tapping the SETTINGS title (not a button)
         # _SECRET_TAP_GOAL times knocks the hidden door open. Reset on any other tap.
-        if _in(px, py, self._SET_TITLE_HIT):
+        if _in(px, py, lay.set_title_hit):
             self._tap_secret_door()
             return
         self._secret_taps = 0
@@ -2117,14 +2392,15 @@ class Workstation:
         if slot is not None:
             self._activate_dock(slot)
             return
+        edge = 5 * self.layout.font_w           # the "<"/">" hit zone (40px at fs=1)
         for i in range(len(self._SETTINGS_ROWS)):
             x, y, w, h = self._settings_row_rect(i)
             if _in(px, py, (x, y, w, h)):
                 self.set_msel = i
                 # left third = "<" (decrement), right third = ">" (increment).
-                if px >= x + w - 40:
+                if px >= x + w - edge:
                     self.settings_adjust(1)
-                elif px <= x + 40:
+                elif px <= x + edge:
                     self.settings_adjust(-1)
                 return
 
@@ -2155,11 +2431,18 @@ class Workstation:
         if p is None:
             return
         px, py, click = p.x, p.y, p.click
+        # The desktop chrome (launcher/settings) hit-tests in SYSTEM coords; a running
+        # cart + the editors live in the 320x240 GAME viewport, so translate the
+        # pointer into game coords for those (#39). Also publish the game-space
+        # pointer so the cart touch()/mouse() API reads the viewport, not the panel.
+        gx, gy = self._game_xy(px, py)
+        self.input.game_pointer = (gx, gy, click, p.down)
         if self.screen == "launcher":
             self._launcher_pointer(px, py, click)
         elif self.screen == "settings":
             self._settings_pointer(px, py, click)
         elif self.screen == "desktop":
+            px, py = gx, gy
             # While a cart runs the TOP-BAR overlay (EDIT/CODE, PAINT, MAP, HOME) is
             # the TIC-80 one-tap tool switcher -- it occludes only 22px at the top so
             # gameplay keeps the rest of the screen (a bottom dock would cover the
@@ -2174,6 +2457,7 @@ class Workstation:
                 elif _in(px, py, _HOME_BTN):
                     self.go_home()
         elif self.screen == "menu":
+            px, py = gx, gy                    # editors live in the 320x240 viewport
             if self.menu_view == "code":
                 self._code_drag(px, py)        # touch/mouse drag pans the viewport
                 if click:
@@ -2389,6 +2673,96 @@ class Workstation:
         if rs is not None:
             rs()
 
+    # -- two-domain composite + viewport coords (#39) ------------------------
+
+    def _viewport(self):
+        """The composited game viewport as (ox, oy, scale) -- the top-left of the
+        320x240 game canvas inside the system canvas, and its integer scale. (0, 0,
+        1) when the two canvases are the same object (degradation)."""
+        gc = self.canvas
+        sc = self.sys_canvas
+        if sc is gc:
+            return (0, 0, 1)
+        scale = min(sc.w // gc.w, sc.h // gc.h)
+        if scale < 1:
+            scale = 1
+        ox = (sc.w - gc.w * scale) // 2
+        oy = (sc.h - gc.h * scale) // 2
+        return (ox, oy, scale)
+
+    def _game_xy(self, px, py):
+        """Map a SYSTEM-canvas point (where the pointer lives) into GAME-canvas
+        coords, so a running cart / the editors (drawn in the 320x240 viewport) hit-
+        test correctly. Identity in the degradation case."""
+        ox, oy, scale = self._viewport()
+        return ((px - ox) // scale, (py - oy) // scale)
+
+    def _composite_game(self):
+        """Blit the fixed 320x240 GAME canvas into the SYSTEM canvas as a
+        fixed-aspect, integer-scaled, centered viewport, filling the letterbox with
+        a solid bezel color. A no-op when the two canvases are the same object (the
+        degradation case: 320x240 system canvas == game canvas, pixel-identical to
+        today). Index-only (host == device): reads game indices, writes them scaled
+        into the system buffer, so no palette resolve is needed."""
+        gc = self.canvas
+        sc = self.sys_canvas
+        if sc is gc:
+            return
+        ox, oy, scale = self._viewport()
+        sc.cls(_VIEWPORT_BEZEL)                     # letterbox fill
+        gbuf = getattr(gc, "buf", None)
+        sbuf = getattr(sc, "buf", None)
+        if gbuf is None or sbuf is None:
+            # A recording system canvas (the web CommandCanvas) has no framebuffer to
+            # copy into -- blit the whole game frame as one scaled sprite so the draw
+            # stream carries the viewport. The game canvas must expose its pixels.
+            self._composite_via_spr(gc, sc, gbuf, ox, oy, scale)
+            return
+        gw = gc.w
+        sw = sc.w
+        sh = sc.h
+        vw = gw * scale
+        # The viewport always fits a system canvas >= the game (the supported case),
+        # so take the fast row-replication path. A degenerate smaller-than-game system
+        # canvas (negative offset / overflow) falls to a clipped per-pixel path that
+        # can never resize the bytearray.
+        fits = ox >= 0 and oy >= 0 and ox + vw <= sw and oy + gc.h * scale <= sh
+        if fits:
+            for gy in range(gc.h):
+                grow = gy * gw
+                for s in range(scale):
+                    base = (oy + gy * scale + s) * sw + ox
+                    if scale == 1:
+                        sbuf[base:base + gw] = gbuf[grow:grow + gw]
+                    else:
+                        out = base
+                        for gx in range(gw):
+                            sbuf[out:out + scale] = bytes((gbuf[grow + gx],)) * scale
+                            out += scale
+            return
+        for gy in range(gc.h):                      # clipped fallback (defensive)
+            grow = gy * gw
+            for s in range(scale):
+                dy = oy + gy * scale + s
+                if dy < 0 or dy >= sh:
+                    continue
+                dx0 = ox if ox > 0 else 0
+                dx1 = min(sw, ox + vw)
+                if dx1 <= dx0:
+                    continue
+                base = dy * sw
+                for dx in range(dx0, dx1):
+                    sbuf[base + dx] = gbuf[grow + (dx - ox) // scale]
+
+    def _composite_via_spr(self, gc, sc, gbuf, ox, oy, scale):
+        """Composite by blitting the game frame as ONE scaled sprite -- the path for a
+        recording system canvas (the web CommandCanvas) that has no framebuffer to
+        copy into. Records a single spr command per frame carrying the game pixels."""
+        if gbuf is None:
+            return
+        img = _Blit(gc.w, gc.h, list(gbuf), -1)     # opaque (no transparent index)
+        sc.spr(img, ox, oy, scale)
+
     def frame(self, dt):
         if dt > 0:
             inst = 1.0 / dt
@@ -2464,9 +2838,18 @@ class Workstation:
                     self._icon_btn("close", "", _CLOSE_BTN, NAMES["red"])
         if self.show_fps and self.screen == "desktop":
             self._draw_fps()
+        # Two-domain seam (#39): the "desktop" (running cart) + "menu" (editors) drew
+        # on the fixed 320x240 GAME canvas above; composite it into the SYSTEM canvas
+        # as a centered, integer-scaled viewport. The "launcher"/"settings" screens
+        # already drew straight on the system canvas, so they skip the composite. A
+        # no-op when the two canvases are the same object (the 320x240 degradation
+        # case -> pixel-identical to today).
+        if self.screen in ("desktop", "menu"):
+            self._composite_game()
         # Achievements + Easter eggs (#21) overlay on TOP of every screen, so an
         # unlock celebration / secret popup is always visible and never disturbs the
-        # screen underneath (it's drawn last, then expires on its own).
+        # screen underneath (it's drawn last, then expires on its own). These are
+        # SYSTEM chrome -> drawn on the system canvas (over the composited viewport).
         if self._confetti_until and _ticks_diff(self._confetti_until, _ticks_ms()) > 0:
             self._draw_confetti()
         if self.show_achievements:
@@ -2483,41 +2866,48 @@ class Workstation:
     def _draw_desktop_home(self, dt):
         """The home desktop: wallpaper backdrop -> cart icon grid -> top status
         strip -> bottom dock. The wallpaper is drawn first and the rest layer over
-        it, exactly the Picotron model (wallpaper shows through the chrome)."""
+        it, exactly the Picotron model (wallpaper shows through the chrome). All on
+        the SYSTEM canvas, reflowed to its size + font scale (#39)."""
         self._draw_wallpaper(dt)
-        self.launcher.draw(self.canvas, self._icon_sheet_for)
+        cv = self.sys_canvas
+        lay = self.layout
+        self.launcher.draw(cv, self._icon_sheet_for)
         # page chevrons when more than one page of carts
         if self.launcher.max_page() > 0:
-            cv = self.canvas
             if self.launcher.page > 0:
-                cv.print("<", _PAGE_PREV[0] + 3, _PAGE_PREV[1] + 8, NAMES["white"], 2)
+                px, py = lay.page_prev[0], lay.page_prev[1]
+                cv.print("<", px + 3, py + 8, NAMES["white"], 2)
             if self.launcher.page < self.launcher.max_page():
-                cv.print(">", _PAGE_NEXT[0] + 3, _PAGE_NEXT[1] + 8, NAMES["white"], 2)
+                px, py = lay.page_next[0], lay.page_next[1]
+                cv.print(">", px + 3, py + 8, NAMES["white"], 2)
         self._draw_status_strip("home")
         self._draw_dock("home")
 
     def _draw_status_strip(self, where):
         """The thin top status strip: a clock, the selected cart's name (home) or
         title (settings), and battery/wifi pips. Translucency isn't available on the
-        indexed canvas, so it's a slim dark bar that the wallpaper meets just below."""
-        cv = self.canvas
-        cv.rect(0, 0, cv.w, _STATUS_H, NAMES["black"])
+        indexed canvas, so it's a slim dark bar that the wallpaper meets just below.
+        On the SYSTEM canvas; height + text follow the layout/font scale (#39)."""
+        cv = self.sys_canvas
+        lay = self.layout
+        gh = lay.status_gh                           # glyph box scaled with the font
+        cv.rect(0, 0, cv.w, lay.status_h, NAMES["black"])
         cv.print(self._clock_text(), 2, 3, NAMES["light_grey"], 1)
         if where == "home":
             sel = self.launcher.selected()
             if sel is not None:
                 name = sel["title"]
-                if len(name) > 18:
-                    name = name[:18]
-                cv.print(name, 78, 3, NAMES["white"], 1)
+                if len(name) > lay.status_name_maxc:
+                    name = name[:lay.status_name_maxc]
+                cv.print(name, lay.status_name_x, 3, NAMES["white"], 1)
         # battery + wifi pips (placeholders): a wifi glyph + a battery glyph.
-        self._glyph("wifi", (cv.w - 24, 1, 12, 12), NAMES["green"])
-        self._glyph("batt", (cv.w - 12, 1, 12, 12), NAMES["green"])
+        self._glyph("wifi", (cv.w - 2 * gh, 1, gh, gh), NAMES["green"], cv)
+        self._glyph("batt", (cv.w - gh, 1, gh, gh), NAMES["green"], cv)
         # Home management actions tuck into the strip (only when writes are enabled).
         if where == "home" and self.can_manage:
-            self._mini_btn("NEW", _NEW_BTN, NAMES["green"])
-            self._mini_btn("DUP", _DUP_BTN, NAMES["blue"])
-            self._mini_btn("DEL", _DEL_BTN, NAMES["red"])
+            self._mini_btn("NEW", lay.new_btn, NAMES["green"], cv)
+            self._mini_btn("DUP", lay.dup_btn, NAMES["blue"], cv)
+            self._mini_btn("DEL", lay.del_btn, NAMES["red"], cv)
 
     def _clock_text(self):
         """A wall-clock HH:MM from time.localtime when available, else a mm:ss
@@ -2529,9 +2919,10 @@ class Workstation:
             secs = _ticks_diff(_ticks_ms(), 0) // 1000
             return "%02d:%02d" % ((secs // 60) % 100, secs % 60)
 
-    def _mini_btn(self, label, rect, fill):
+    def _mini_btn(self, label, rect, fill, cv=None):
         x, y, w, h = rect
-        cv = self.canvas
+        if cv is None:
+            cv = self.canvas
         cv.rect(x, y, w, h, fill)
         cv.print(label, x + 2, y + 2, NAMES["black"], 1)
 
@@ -2540,9 +2931,12 @@ class Workstation:
         The active slot (home on the desktop, settings in Settings) is highlighted;
         the music slot is greyed (its editor is #16, not yet here). Tool slots that
         need an open cart read dimmed on the home desktop."""
-        cv = self.canvas
-        cv.rect(0, _DOCK_Y, cv.w, cv.h - _DOCK_Y, NAMES["dark_grey"])
-        cv.rect(0, _DOCK_Y, cv.w, 1, NAMES["black"])
+        cv = self.sys_canvas
+        lay = self.layout
+        fw = lay.font_w                              # on-screen char-cell width (8*fs)
+        gh = lay.status_gh                           # glyph box (12*fs)
+        cv.rect(0, lay.dock_y, cv.w, cv.h - lay.dock_y, NAMES["dark_grey"])
+        cv.rect(0, lay.dock_y, cv.w, 1, NAMES["black"])
         for k in range(len(_DOCK_SLOTS)):
             slot = _DOCK_SLOTS[k]
             x, y, w, h = self._dock_slot_rect(k)
@@ -2553,31 +2947,39 @@ class Workstation:
             if is_active:
                 cv.rect(x, y, w, h, NAMES["indigo"])
             gc = NAMES["white"] if enabled else NAMES["dark_blue"]
-            self._glyph(_DOCK_GLYPH[slot], (x, y, w, 12), gc)
+            self._glyph(_DOCK_GLYPH[slot], (x, y, w, gh), gc, cv)
             label = _DOCK_LABEL[slot]
-            cv.print(label, x + (w - len(label) * 8) // 2, y + 12, gc, 1)
+            cv.print(label, x + (w - len(label) * fw) // 2, y + gh, gc, 1)
 
     def _draw_settings(self, dt):
-        """The Settings app (#28): wallpaper picker (FUNCTIONAL, persists) plus the
-        mocked rows, over the live wallpaper so the backdrop preview is honest."""
+        """The Settings app (#28): wallpaper picker + font-size picker (both
+        FUNCTIONAL, persist) plus the mocked rows, over the live wallpaper so the
+        backdrop preview is honest. On the SYSTEM canvas; panel + title-row controls
+        reflow with the layout/font scale (#39)."""
         self._draw_wallpaper(dt)
-        cv = self.canvas
-        cv.rect(8, 16, 304, 198, NAMES["dark_purple"])
-        cv.rectb(8, 16, 304, 198, NAMES["pink"])
-        self._glyph("gear", (14, 18, 14, 14), NAMES["yellow"])
-        cv.print("SETTINGS", 32, 20, NAMES["white"], 2)
+        cv = self.sys_canvas
+        lay = self.layout
+        fs = lay.fs
+        px, py, pw, ph = lay.settings_panel
+        cv.rect(px, py, pw, ph, NAMES["dark_purple"])
+        cv.rectb(px, py, pw, ph, NAMES["pink"])
+        self._glyph("gear", (px + 6, py + 2, 14 * fs, 14 * fs), NAMES["yellow"], cv)
+        cv.print("SETTINGS", px + 24, py + 4, NAMES["white"], 2)
         # Achievements view button (#21): a trophy badge with the unlocked count.
-        cv.rect(_SET_ACH[0], _SET_ACH[1], _SET_ACH[2], _SET_ACH[3], NAMES["indigo"])
-        self._glyph("trophy", (_SET_ACH[0] - 2, _SET_ACH[1], 14, 14), NAMES["yellow"])
-        cv.print(str(self.ach.count()), _SET_ACH[0] + 13, _SET_ACH[1] + 4, NAMES["white"], 1)
-        self._mini_btn("X", _SET_BACK, NAMES["red"])
+        sa = lay.set_ach
+        cv.rect(sa[0], sa[1], sa[2], sa[3], NAMES["indigo"])
+        self._glyph("trophy", (sa[0] - 2, sa[1], 14 * fs, 14 * fs), NAMES["yellow"], cv)
+        cv.print(str(self.ach.count()), sa[0] + 13 * fs, sa[1] + 4, NAMES["white"], 1)
+        self._mini_btn("X", lay.set_back, NAMES["red"], cv)
         for i in range(len(self._SETTINGS_ROWS)):
             self._draw_settings_row(i)
         self._draw_status_strip("settings")
         self._draw_dock("settings")
 
     def _draw_settings_row(self, i):
-        cv = self.canvas
+        cv = self.sys_canvas
+        lay = self.layout
+        fw = lay.font_w
         key, label, kind = self._SETTINGS_ROWS[i]
         x, y, w, h = self._settings_row_rect(i)
         sel = (i == self.set_msel)
@@ -2585,26 +2987,28 @@ class Workstation:
             cv.rect(x, y, w, h, NAMES["indigo"])
         fg = NAMES["white"] if sel else NAMES["light_grey"]
         cv.print(label, x + 4, y + 5, fg, 1)
-        # < value > stepper at the right.
-        cv.print("<", x + w - 90, y + 5, NAMES["yellow"], 2)
-        cv.print(">", x + w - 14, y + 5, NAMES["yellow"], 2)
-        vx = x + w - 78
+        # < value > stepper at the right (the chevrons print at double size = 2*fw).
+        cv.print("<", x + w - 11 * fw - 2, y + 5, NAMES["yellow"], 2)
+        cv.print(">", x + w - 2 * fw + 2, y + 5, NAMES["yellow"], 2)
+        vx = x + w - 78 * lay.fs           # value column (baseline x+w-78)
         if kind == "wallpaper":
             cv.print(self._settings_wallpaper_label()[:9], vx, y + 5, NAMES["green"], 1)
+        elif kind == "font":               # system-UI font size (#39): 1x / 2x / 3x
+            cv.print("%dx" % self.font_scale, vx, y + 5, NAMES["green"], 1)
         elif kind == "mock-gauge":
             lvl = int(self.system.get(key, 3))
             for s in range(5):
                 c = NAMES["green"] if s < lvl else NAMES["dark_grey"]
-                cv.rect(vx + s * 8, y + 6, 6, 8, c)
+                cv.rect(vx + s * 8 * lay.fs, y + 6, 6 * lay.fs, 8 * lay.fs, c)
         elif kind == "mock-name":
             cv.print(str(self.system.get("name", self._MOCK_NAMES[0]))[:8], vx, y + 5,
                      NAMES["peach"], 1)
         else:  # mock-choice (theme)
             cv.print(str(self.system.get("theme", self._MOCK_THEMES[0])).upper()[:8], vx,
                      y + 5, NAMES["peach"], 1)
-        # Mark mocked rows clearly as not-yet-functional.
-        if kind != "wallpaper":
-            cv.print("soon", x + 4, y + 14, NAMES["dark_grey"], 1)
+        # Mark not-yet-functional rows clearly (wallpaper + font are FUNCTIONAL).
+        if kind not in ("wallpaper", "font"):
+            cv.print("soon", x + 4, y + 6 + fw, NAMES["dark_grey"], 1)
 
     def _draw_fps(self):
         # Tiny FPS readout in the bottom-right, over a dark chip so it stays legible
@@ -2625,22 +3029,22 @@ class Workstation:
         achievement name + its glyph. Drawn last each frame over whatever screen is
         up, so it never disturbs the content beneath and expires on its own. Indexed
         API only (host == device)."""
-        cv = self.canvas
+        cv = self.sys_canvas
         ach_id, title, glyph = self.ach.toast
         x, y, w, h = 36, 26, 248, 38
         cv.rect(x, y, w, h, NAMES["dark_purple"])
         cv.rectb(x, y, w, h, NAMES["yellow"])
         cv.rect(x, y, w, 12, NAMES["yellow"])
-        self._glyph("trophy", (x + 2, y - 1, 12, 12), NAMES["black"])
+        self._glyph("trophy", (x + 2, y - 1, 12, 12), NAMES["black"], cv)
         cv.print("ACHIEVEMENT UNLOCKED!", x + 16, y + 2, NAMES["black"], 1)
-        self._glyph(glyph, (x + 6, y + 16, 16, 16), NAMES["yellow"])
+        self._glyph(glyph, (x + 6, y + 16, 16, 16), NAMES["yellow"], cv)
         cv.print(title[:24], x + 28, y + 20, NAMES["white"], 2)
 
     def _draw_egg(self):
         """A non-blocking Easter-egg popup: a friendly character glyph + the secret
         message, centered low so it reads as a surprise without covering the action.
         Self-expiring (egg_until); cosmetic only -- touches no cart data."""
-        cv = self.canvas
+        cv = self.sys_canvas
         line, glyph = self.egg_msg
         w = min(cv.w - 16, 24 + len(line) * 8 + 8)
         x = (cv.w - w) // 2
@@ -2648,21 +3052,21 @@ class Workstation:
         h = 30
         cv.rect(x, y, w, h, NAMES["black"])
         cv.rectb(x, y, w, h, NAMES["pink"])
-        self._glyph(glyph, (x + 4, y + 7, 16, 16), NAMES["peach"])
+        self._glyph(glyph, (x + 4, y + 7, 16, 16), NAMES["peach"], cv)
         cv.print(line, x + 24, y + 11, NAMES["white"], 1)
 
     def _draw_confetti(self):
         """The Konami egg's celebration: a scatter of colored spark glyphs that
         drift down with the elapsed time. Cheap + deterministic (no RNG state),
         purely cosmetic, gone when _confetti_until passes."""
-        cv = self.canvas
+        cv = self.sys_canvas
         t = (_ticks_diff(_ticks_ms(), 0) // 80) % 240
         cols = (NAMES["red"], NAMES["yellow"], NAMES["green"], NAMES["blue"],
                 NAMES["pink"], NAMES["orange"])
         for k in range(18):
             sx = (k * 53 + 7) % (cv.w - 6)
             sy = (k * 37 + t + (k * k)) % (cv.h - 6)
-            self._glyph("spark", (sx, sy, 8, 8), cols[k % len(cols)])
+            self._glyph("spark", (sx, sy, 8, 8), cols[k % len(cols)], cv)
 
     def _draw_achievements(self):
         """The achievements view (#21): a full panel listing every achievement,
@@ -2670,10 +3074,10 @@ class Workstation:
         with a lock + "???" (so a hidden secret stays a surprise). A two-column grid
         so all ~11 fit at 320x240. Tap anywhere to dismiss (see _settings_pointer).
         Indexed API + the shared glyph vocabulary only (host == device)."""
-        cv = self.canvas
+        cv = self.sys_canvas
         cv.rect(6, 14, 308, 212, NAMES["dark_blue"])
         cv.rectb(6, 14, 308, 212, NAMES["yellow"])
-        self._glyph("trophy", (12, 16, 14, 14), NAMES["yellow"])
+        self._glyph("trophy", (12, 16, 14, 14), NAMES["yellow"], cv)
         cv.print("ACHIEVEMENTS", 30, 18, NAMES["white"], 2)
         cv.print("%d / %d" % (self.ach.count(), len(ACHIEVEMENTS)), 240, 20,
                  NAMES["yellow"], 1)
@@ -2690,10 +3094,10 @@ class Workstation:
             y = y0 + row * row_h
             got = self.ach.has(ach_id)
             if got:
-                self._glyph(glyph, (x, y, 14, 14), NAMES["yellow"])
+                self._glyph(glyph, (x, y, 14, 14), NAMES["yellow"], cv)
                 cv.print(title[:16], x + 16, y + 3, NAMES["white"], 1)
             else:
-                self._glyph("lock", (x, y, 14, 14), NAMES["dark_grey"])
+                self._glyph("lock", (x, y, 14, 14), NAMES["dark_grey"], cv)
                 # A hidden (Easter-egg) achievement stays "???"; a normal locked one
                 # shows its name greyed so a kid knows what's there to earn.
                 label = "???" if hidden else title[:16]
@@ -2748,8 +3152,12 @@ class Workstation:
         cv.print("TAP CODE TO FIX IT", x + 8, y + h - 12, NAMES["yellow"], 1)
 
     def _draw_cursor(self):
+        # The pointer lives in SYSTEM-canvas space (it ranges over the panel size),
+        # so the cursor draws on the system canvas, on TOP of the composited viewport
+        # (#39). Scaled with the font so it stays visible on a big panel; at scale 1
+        # / a 320x240 system canvas this is exactly today's 1x cursor on the canvas.
         if self.pointer is not None and self.pointer.visible:
-            self.canvas.spr(CURSOR, self.pointer.x, self.pointer.y, 1)
+            self.sys_canvas.spr(CURSOR, self.pointer.x, self.pointer.y, self.font_scale)
 
     def _draw_cards(self):
         cv = self.canvas
@@ -2974,11 +3382,13 @@ class Workstation:
         self.canvas.rect(x, y, w, h, NAMES[bg])
         self._glyph(kind, rect, NAMES["black"] if kind == "run" else NAMES["white"])
 
-    def _glyph(self, kind, rect, c):
-        # Draw a centered icon glyph in color `c` onto this workstation's canvas.
-        # The shared blit + the glyph encoding live in the module-level _blit_glyph
-        # so Launcher (canvas-only) renders the identical vocabulary.
-        _blit_glyph(self.canvas, kind, rect, c)
+    def _glyph(self, kind, rect, c, cv=None):
+        # Draw a centered icon glyph in color `c`. Defaults to the GAME canvas (the
+        # editors/cart-overlay callers); the desktop/system callers pass cv=
+        # self.sys_canvas so the glyph follows the system font scale (#39). The shared
+        # blit + the glyph encoding live in the module-level _blit_glyph so Launcher
+        # (canvas-only) renders the identical vocabulary.
+        _blit_glyph(cv if cv is not None else self.canvas, kind, rect, c)
 
     def _draw_paint(self):
         cv = self.canvas
