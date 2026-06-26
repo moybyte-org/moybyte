@@ -48,6 +48,7 @@ sheet is sent so a future id-based `spr` (a bandwidth optimization) can resolve 
 but correctness here never depends on the sheet, only the per-command pixels.
 """
 
+from runtime import font as _font
 from runtime import palette as _pal
 
 
@@ -60,11 +61,19 @@ class CommandCanvas:
     console never reads pixels during a draw, only writes them, so this is safe
     (and matches how a pure command stream must behave)."""
 
-    def __init__(self, width=320, height=240, palette=None):
+    def __init__(self, width=320, height=240, palette=None, font_scale=1):
         self.w = width
         self.h = height
         self.palette = palette or _pal.KID64
+        # System-UI font scale (#39): when this recorder stands in for the SYSTEM
+        # canvas, the console calls set_font_scale on it and reads font_scale (in
+        # _blit_glyph). Scaled text is recorded as rect commands (the replayer already
+        # handles rect), so the browser renders the bigger font with no new op.
+        self.font_scale = max(1, int(font_scale))
         self._cmds = []
+
+    def set_font_scale(self, scale):
+        self.font_scale = max(1, int(scale))
 
     # -- frame handoff -------------------------------------------------------
 
@@ -179,10 +188,23 @@ class CommandCanvas:
                 self.spr(img, sx + cx * step, py, scale)
 
     def print(self, s, x, y, c, scale=1):
-        # Canvas.print ignores scale (fixed 8px like the device's framebuf.text), so
-        # we record only s/x/y/c. The replayer renders with the petme128 font from
-        # GET /assets, pixel-identical to font.draw().
-        self._cmds.append(["print", str(s), int(x), int(y), c & 63])
+        # The per-call `scale` arg is ignored (like Canvas.print). At font_scale 1 we
+        # record a `print` op the replayer renders with the petme128 font from
+        # GET /assets, pixel-identical to font.draw(). At font_scale > 1 (the
+        # resizable system font, #39) we record the scaled glyph as rect blocks --
+        # exactly what SystemCanvas.print rasterizes -- so the browser shows the bigger
+        # font without a new op (the replayer already handles rect).
+        fs = self.font_scale
+        if fs <= 1:
+            self._cmds.append(["print", str(s), int(x), int(y), c & 63])
+            return
+        ci = c & 63
+        cmds = self._cmds
+
+        def block(bx, by, n):
+            cmds.append(["rect", bx, by, n, n, ci])
+
+        _font.draw_scaled(block, s, x, y, fs)
 
     # -- output (parity with Canvas; not used by the web path) ---------------
 

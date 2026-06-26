@@ -24,6 +24,11 @@ gallery. No device needed. Drive it live (pygame) or headlessly via a script.
 
   # launch a single cartridge directly (skip the launcher)
   python tools/simulate_desktop.py --cart system_carts/star_catcher.kcart
+
+  # a roomy responsive desktop at a larger SYSTEM canvas (#39): the desktop reflows
+  # to fill it; the game stays a fixed 320x240, composited as a centered viewport.
+  python tools/simulate_desktop.py --size 960x600
+  python tools/simulate_desktop.py --size 960x600 --font-scale 2
 """
 
 import argparse
@@ -51,6 +56,14 @@ def _coerce(value):
         except ValueError:
             pass
     return value
+
+
+def parse_size(text):
+    """Parse a '--size WxH' string into (w, h). The SYSTEM canvas size (#39): the
+    desktop renders here, responsive; the game stays a fixed 320x240 viewport. The
+    default (320x240) is exactly today (the T-Deck panel)."""
+    w, _, h = text.lower().partition("x")
+    return (int(w), int(h))
 
 
 def parse_script(text):
@@ -208,10 +221,19 @@ def main():
     ap.add_argument("--save-dir", default=DEFAULT_SAVE_DIR)
     ap.add_argument("--scale", type=int, default=2)
     ap.add_argument("--fps", type=int, default=30)
+    # Two-domain seam (#39): the SYSTEM canvas size. Default 320x240 = today (the
+    # T-Deck panel); a larger size opens a roomy responsive desktop with the game
+    # composited as a centered viewport.
+    ap.add_argument("--size", default="320x240", metavar="WxH",
+                    help="system canvas size (default 320x240 = the T-Deck panel)")
+    ap.add_argument("--font-scale", type=int, default=1, choices=(1, 2, 3),
+                    help="initial system-UI font scale 1/2/3 (system.json overrides)")
     args = ap.parse_args()
 
     dt = 1.0 / args.fps
-    ws = host_app.build_workstation(args.save_dir)
+    sys_size = parse_size(args.size)
+    ws = host_app.build_workstation(args.save_dir, sys_size=sys_size,
+                                    font_scale=args.font_scale)
     # Live windowed run -> stream real audio to the speakers (#16). Headless /
     # scripted runs keep the silent FakeAudio so they stay deterministic + device-free.
     if not args.demo and args.script is None:

@@ -48,6 +48,12 @@ class Image:
 
 
 class Canvas:
+    # The game canvas always renders petme128 text at the native 8px cell (the
+    # device can't scale text). The SYSTEM canvas (SystemCanvas) overrides this to
+    # the user's settings-chosen scale; _blit_glyph reads it so icon glyphs follow
+    # the text size. Kept on the base so every backend exposes it uniformly.
+    font_scale = 1
+
     def __init__(self, width=480, height=270, palette=None):
         self.w = width
         self.h = height
@@ -326,3 +332,46 @@ class Canvas:
     def to_rgb888(self):
         pal3 = [bytes(rgb) for rgb in self.palette]
         return b"".join(pal3[i] for i in self.buf)
+
+
+class SystemCanvas(Canvas):
+    """The SYSTEM canvas (the panel/window surface): identical to `Canvas` except
+    its `print` honours a settings-chosen `font_scale` (petme128 nearest-neighbor
+    x1/x2/x3). The two-domain seam (#39): the desktop/launcher/settings + status
+    strip + dock draw here at native resolution and reflow with the size; the
+    running cart (and, for now, the editors) draw on the fixed 320x240 GAME canvas
+    (a plain `Canvas`, text always 8px) and are composited in as a viewport.
+
+    At font_scale == 1 every drawn pixel is byte-identical to Canvas.print -- the
+    graceful-degradation guarantee (a 320x240 system canvas at scale 1 is exactly
+    today). Scaling is contained entirely here, so a cart that ever calls print on
+    its game canvas is never affected."""
+
+    def __init__(self, width=320, height=240, palette=None, font_scale=1):
+        Canvas.__init__(self, width, height, palette)
+        self.font_scale = max(1, int(font_scale))
+
+    def set_font_scale(self, scale):
+        self.font_scale = max(1, int(scale))
+
+    def print(self, s, x, y, c, scale=1):
+        # System text: render petme128 at `font_scale` (nearest-neighbor). At scale
+        # 1 each glyph pixel is one _put -- identical to Canvas.print. At >1 each
+        # becomes a font_scale x font_scale filled block via rect() (which carries
+        # clip/camera/pal). `scale` (the legacy per-call arg) is ignored, exactly
+        # like Canvas.print, so callers that pass 1/2 keep working.
+        ci = c & 63
+        fs = self.font_scale
+        if fs <= 1:
+            put = self._put
+
+            def emit(px, py):
+                put(px, py, ci)
+
+            _font.draw(emit, s, x, y)
+            return
+
+        def block(bx, by, n):
+            self.rect(bx, by, n, n, ci)
+
+        _font.draw_scaled(block, s, x, y, fs)
