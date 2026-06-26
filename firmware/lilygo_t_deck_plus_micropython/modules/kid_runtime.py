@@ -1105,12 +1105,10 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
     if comp is None:
         print("KidCode desktop: no compositor")
         return
-    # Force the small-strip flush path. The single full-frame tx_color partially
-    # transfers then fails with OSError 257 (ESP_ERR_NO_MEM): the LCD SPI path needs
-    # an internal-RAM bounce buffer sized to the transfer, and a whole 320x240 frame
-    # (153 KB) is too big on the current internal-RAM budget. 24-row strips need a
-    # small bounce that fits; _flush_region streams them seamlessly (RAMWR->RAMWRC).
-    comp._frame = None
+    # The compositor flushes the dedicated _frame buffer in strip_h-row bands: each a
+    # distinct, stable slice (the async esp_lcd DMA can't race a reused buffer -> no
+    # offset/duplication) and small enough that the per-band DMA bounce fits the S3's
+    # fragmented internal heap (a single 320x240 tx_color NO_MEMs). strip_h=24 = band.
 
     canvas = DeviceCanvas(comp)
     inp = InputState()
