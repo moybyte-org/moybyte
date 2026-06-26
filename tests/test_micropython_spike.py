@@ -777,15 +777,22 @@ def test_device_wifi_wired():
     assert "def make_api(canvas, input, config, sheet=None, audio=None," in runtime
     assert "pmem=None, wifi=None):" in runtime
     assert 'ns["wifi"] = wifi' in runtime
-    # The device WLAN backend (STUB -- needs hardware verification) + autoconnect.
+    # The device WLAN backend (STUB -- needs hardware verification). LAZY: the WLAN
+    # stack is brought up on demand (scan/connect), NEVER at boot -- bringing it up at
+    # boot reserved the internal RAM the LCD DMA flush needs and froze the desktop
+    # (OSError 257 / ESP_ERR_NO_MEM). The radio comes up only via _ensure_wlan.
     assert "class DeviceWifi:" in runtime
-    assert "network.WLAN(network.STA_IF)" in runtime
+    assert "def _ensure_wlan(self):" in runtime           # lazy radio bring-up
+    assert "network.WLAN(network.STA_IF)" in runtime       # (lives inside _ensure_wlan now)
     assert "def make_wifi(store=None, root=None):" in runtime
-    assert "def autoconnect_wifi(wifi):" in runtime
+    assert "def autoconnect_wifi(wifi):" in runtime        # still defined, but NOT called at boot
     assert "NEEDS ON-DEVICE VERIFICATION" in runtime
-    # run_desktop injects the system service + autoconnects from saved creds.
+    # run_desktop wires the system service but does NOT bring WiFi up at boot (WLAN
+    # reserves the internal RAM the LCD DMA needs -- WiFi<->display coexistence is #38).
     assert "ws.wifi = make_wifi(kid_carts, carts_root)" in runtime
-    assert "autoconnect_wifi(ws.wifi)" in runtime
+    assert "autoconnect_wifi(ws.wifi)" not in runtime      # boot autoconnect removed
+    # Each frame is guarded so one bad flush can't brick the device.
+    assert "KidCode frame error:" in runtime
     # The shared console gates injection on the "network" manifest permission.
     assert "def _cart_has_perm(self, name):" in console
     assert 'self.wifi if self._cart_has_perm("network") else None' in console

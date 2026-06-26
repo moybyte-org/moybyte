@@ -715,7 +715,17 @@ class DeviceWifi:
     def __init__(self, store=None, root=None):
         self._store = store
         self._root = root
+        # LAZY: bringing the WiFi stack up reserves a large chunk of INTERNAL RAM that
+        # the LCD DMA flush (lcd_panel_io_tx_color) also needs. Doing it at boot starved
+        # the panel flush -> OSError 257 (ESP_ERR_NO_MEM) and froze the desktop. So spin
+        # the radio up only on first real use (scan/connect), never at boot. Whether WiFi
+        # and the display can coexist at all on this RAM budget is an open #38 question.
         self.wlan = None
+
+    def _ensure_wlan(self):
+        """Bring the radio up on demand (never at boot -- see __init__)."""
+        if self.wlan is not None:
+            return self.wlan
         try:
             import network
             self.wlan = network.WLAN(network.STA_IF)
@@ -723,13 +733,14 @@ class DeviceWifi:
         except Exception as exc:  # noqa: BLE001 -- no radio / no network module -> degrade
             print("KidCode wifi: WLAN unavailable, offline:", exc)
             self.wlan = None
+        return self.wlan
 
     # -- the injected `wifi` API surface (host == device) ----------------
     def scan(self):
         """Nearby networks as (ssid, signal%, locked?) -- NEEDS ON-DEVICE VERIFICATION.
         WLAN.scan() returns (ssid, bssid, channel, RSSI, security, hidden) tuples;
         map RSSI (~-100..-30 dBm) to a 0..100 bar and security!=0 to locked."""
-        if self.wlan is None:
+        if self._ensure_wlan() is None:
             return []
         try:
             out = []
@@ -751,7 +762,7 @@ class DeviceWifi:
         timing below is a sketch -- a real impl waits on a status callback/timeout)."""
         ssid = str(ssid)
         ok = False
-        if self.wlan is not None:
+        if self._ensure_wlan() is not None:
             try:
                 self.wlan.connect(ssid, password)
                 # Brief poll for association. The single-threaded desktop loop calls
@@ -1127,7 +1138,11 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
     # Injected into a cart's namespace ONLY when its manifest grants "network".
     # Autoconnect from the saved creds at boot. NEEDS ON-DEVICE VERIFICATION.
     ws.wifi = make_wifi(kid_carts, carts_root)
-    autoconnect_wifi(ws.wifi)
+    # WiFi is deliberately NOT brought up at boot: the WLAN stack reserves internal RAM
+    # the LCD DMA flush needs, so autoconnecting here starved the panel flush (OSError
+    # 257 / ESP_ERR_NO_MEM) and froze the desktop. DeviceWifi is lazy now -- the radio
+    # only spins up when the WiFi-manager cart scans/connects. WiFi<->display coexistence
+    # on this RAM budget is an open #38 item. (autoconnect_wifi left defined, not called.)
     # Desktop shell (#28): load system.json + apply the saved wallpaper. On device
     # the wallpaper backdrop runs the chosen wallpaper cart's _draw (and _update if
     # cheap) each home frame; _wp_live can be set False to keep it _draw-only.
@@ -1139,6 +1154,9 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
           % (1 if keyboard.available else 0, 1 if ball.available else 0,
              1 if touch.available else 0))
 
+    import gc
+    gc.collect()                                # defrag after the heavy boot so the LCD
+                                                # DMA flush has the internal RAM it needs
     frame_ms = 1000 // fps_cap
     last = _ticks_ms()
     while True:
@@ -1168,9 +1186,13 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
                 click = True
         pointer.click = click
         pointer.tick(now)                       # auto-hide the idle trackball cursor
-        ws.handle_input()                       # keyboard W/A/S/D etc.
-        ws.handle_pointer()                     # cursor hover + click
-        ws.frame(dt)
+        try:
+            ws.handle_input()                   # keyboard W/A/S/D etc.
+            ws.handle_pointer()                 # cursor hover + click
+            ws.frame(dt)                        # draw + composite + flush
+        except Exception as exc:                # never let one bad frame brick the device:
+            print("KidCode frame error:", exc)  # print the traceback's reason to serial
+            gc.collect()                        # a NO_MEM flush may recover after a collect
         elapsed = _ticks_diff(_ticks_ms(), now)
         if elapsed < frame_ms:
             time.sleep_ms(frame_ms - elapsed)
