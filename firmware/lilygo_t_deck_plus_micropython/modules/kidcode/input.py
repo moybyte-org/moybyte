@@ -104,6 +104,14 @@ class TDeckKeyboard:
         now_ms = _ticks_ms()
         key = self._read_key()
         self.input.last_key = key
+        # Text mode (a cart's textmode(True) / the code editor): report the key but do
+        # NOT also fire its game-button alias (w/a/s/d/z/x -> up/left/down/right/a/b),
+        # or a typed password/name would also trigger d-pad + A/B shortcut actions
+        # (#38/#42). Clear any latched buttons and stop here -- key()/keyp() still work.
+        if getattr(self.input, "text_mode", False):
+            self._held_buttons = ()
+            self.input.release_all()
+            return
         if key != 0:
             self._held_buttons = self._buttons_for_key(key)
             self._held_until_ms = now_ms + self.KEY_HOLD_MS
