@@ -305,32 +305,221 @@ def sfx_music_to_sounds(sfx_lines, music_lines, max_sfx=64):
 
 
 # --------------------------------------------------------------------------
-# __lua__  ->  main.py   (reference comment + working v0.4 stub; NOT executed)
+# __lua__  ->  main.py   (reference comment + GUIDED porting notes; NOT executed)
 # --------------------------------------------------------------------------
+# KidCode is Python, not Lua (issue #6), so a PICO-8 cart can't "just run" -- the
+# kid PORTS it, and that's the lesson (issue #36). We DON'T transpile. Instead we
+# keep the original Lua as a reference comment and scaffold the port with inline
+# `# PORT NOTE:` lines for the real PICO-8 -> KidCode gotchas -- but only for the
+# verbs THIS cart actually uses (scanned from its Lua), so the guidance is
+# relevant, not boilerplate. See docs/porting_pico8.md for the full cheatsheet.
+
+CHEATSHEET = "docs/porting_pico8.md"
+
+# Each entry: pico8 token -> (note lines, checklist line). `note` may span several
+# lines (each becomes a `# PORT NOTE:` line); `checklist` is a one-line tick-box
+# the kid ticks off, or None to keep it out of the checklist.
+#
+# Grouped by the three "gotcha" rules from the #13 analysis + the not-here-yet set.
+PORT_NOTES = [
+    # -- inverted draw verbs (PICO-8 names are the OPPOSITE fill in KidCode) ----
+    ("rectfill", (
+        ["PICO-8 rectfill() = FILLED rect. In KidCode that verb is rect().",
+         "AND the args change: PICO-8 rectfill(x,y,x1,y1,c) takes the opposite",
+         "CORNER (x1,y1); KidCode rect(x,y,w,h,c) takes WIDTH,HEIGHT. Convert:",
+         "w = x1-x+1 ; h = y1-y+1."],
+        "[ ] rectfill(x,y,x1,y1,c) -> rect(x,y, x1-x+1, y1-y+1, c)")),
+    ("rect", (
+        ["PICO-8 rect() = OUTLINE. In KidCode the outline verb is rectb().",
+         "(KidCode rect() is FILLED -- the names are swapped vs PICO-8!)",
+         "Args also change from corner (x1,y1) to extent (w,h):",
+         "w = x1-x+1 ; h = y1-y+1."],
+        "[ ] rect(x,y,x1,y1,c) outline -> rectb(x,y, x1-x+1, y1-y+1, c)")),
+    ("circfill", (
+        ["PICO-8 circfill(x,y,r,c) = FILLED circle. In KidCode that is circ().",
+         "(Same x,y,r args -- only the name changes.)"],
+        "[ ] circfill -> circ")),
+    ("circ", (
+        ["PICO-8 circ(x,y,r,c) = OUTLINE circle. In KidCode the outline verb is",
+         "circb(). (KidCode circ() is FILLED -- swapped vs PICO-8!)"],
+        "[ ] circ outline -> circb")),
+    # -- buttons (numeric -> named) -------------------------------------------
+    ("btnp", (
+        ["PICO-8 btnp(i) uses NUMBERS 0..5. KidCode btnp() uses NAMES:",
+         "0->'left' 1->'right' 2->'up' 3->'down' 4->'a'(O) 5->'b'(X).",
+         "e.g. btnp(4) -> btnp('a')."],
+        "[ ] btnp(0..5) numbers -> btnp('left'/'right'/'up'/'down'/'a'/'b')")),
+    ("btn", (
+        ["PICO-8 btn(i) uses NUMBERS 0..5. KidCode btn() uses NAMES:",
+         "0->'left' 1->'right' 2->'up' 3->'down' 4->'a'(O) 5->'b'(X).",
+         "e.g. btn(0) -> btn('left')."],
+        "[ ] btn(0..5) numbers -> btn('left'/'right'/'up'/'down'/'a'/'b')")),
+    # -- renames (same idea, different name) ----------------------------------
+    ("pset", (
+        ["PICO-8 pset(x,y,c) sets a pixel. KidCode uses pix(x,y,c) (3 args = set)."],
+        "[ ] pset -> pix")),
+    ("pget", (
+        ["PICO-8 pget(x,y) reads a pixel. KidCode uses pix(x,y) (2 args = read)."],
+        "[ ] pget -> pix(x,y) (2 args)")),
+    ("spr", (
+        ["spr(n,x,y) is mostly the same! KidCode spr(n,x,y) draws tile n.",
+         "Differences: KidCode has spr(n,x,y, colorkey, scale) -- no width/height",
+         "multi-tile span and no flip_x/flip_y yet, so big/flipped sprites need",
+         "drawing tile-by-tile."],
+        None)),
+    ("print", (
+        ["print(s,x,y,c) is mostly 1:1. KidCode print(s,x,y,c, scale) -- but the",
+         "color is a palette INDEX or col('name'), e.g. col('white')."],
+        None)),
+    ("cls", (
+        ["cls(c) is 1:1. (cls() defaults to color 0 / black on both.)"],
+        None)),
+    ("line", (
+        ["line(x0,y0,x1,y1,c) is 1:1 in KidCode."],
+        None)),
+    # -- not here (yet) -> adapt or skip --------------------------------------
+    ("map", (
+        ["map()/mget()/mset() draw or read a TILEMAP. KidCode has no map() yet",
+         "(coming with issue #32). For now, draw tiles by hand with spr() in a",
+         "loop, or skip the map."],
+        "[ ] map/mget/mset: draw tiles by hand (no map() until #32)")),
+    ("mget", (
+        ["mget(cx,cy) reads a map cell. No tilemap in KidCode yet (#32) -- skip",
+         "or store your level in a Python list and read that."],
+        "[ ] mget/mset: use a Python list for your level (no map() yet)")),
+    ("mset", (
+        ["mset(cx,cy,v) writes a map cell. No tilemap in KidCode yet (#32) -- use",
+         "a Python list for your level instead."],
+        None)),
+    ("pal", (
+        ["pal()/palt() remap or hide palette colors. KidCode has no palette remap;",
+         "per-sprite transparency is the spr() colorkey arg instead. Skip pal()",
+         "and pass a colorkey to spr() for transparency."],
+        "[ ] pal/palt: use the spr() colorkey for transparency, skip remaps")),
+    ("palt", (
+        ["palt(c, on) sets a transparent color. KidCode uses spr(n,x,y, colorkey)",
+         "per draw -- no global transparency table."],
+        None)),
+    ("camera", (
+        ["camera(x,y) shifts all drawing. KidCode has no camera yet -- subtract the",
+         "camera offset yourself in your x,y math."],
+        "[ ] camera: subtract the offset in your own x,y math")),
+    ("sspr", (
+        ["sspr() stretches part of the sheet. KidCode has no sspr() -- use spr()",
+         "with the scale arg for whole-tile scaling, or skip the stretch."],
+        "[ ] sspr: use spr(..., scale=N) or skip")),
+    ("fget", (
+        ["fget()/fset() read/write per-sprite FLAG bits. KidCode has no sprite",
+         "flags -- track those facts in your own Python data instead."],
+        "[ ] fget/fset: keep sprite flags in your own Python dict/list")),
+    ("fset", (
+        ["fset() sets a sprite flag bit. No sprite flags in KidCode -- use your own",
+         "Python data."],
+        None)),
+    ("peek", (
+        ["peek()/poke() read/write raw memory. KidCode has NO raw memory access on",
+         "purpose (it's a kids' console) -- there is no equivalent; rewrite that",
+         "part using normal Python variables/lists."],
+        "[ ] peek/poke: REMOVE -- rewrite with normal Python variables")),
+    ("poke", (
+        ["poke() writes raw memory. Not available in KidCode by design -- rewrite",
+         "with normal Python variables/lists."],
+        None)),
+]
+
+# Map each "verb" token to its index in PORT_NOTES so duplicates (e.g. peek+poke
+# both ticking the same box) don't double-print.
+_NOTE_BY_TOKEN = {tok: i for i, (tok, _) in enumerate(PORT_NOTES)}
+
+
+def _scan_lua_verbs(lua_lines):
+    """Return the set of PICO-8 verb tokens (from PORT_NOTES) that appear in this
+    cart's Lua as whole-word function calls (`verb` followed by optional spaces
+    then `(`). Word-boundary matched so `rect` doesn't fire inside `rectfill` and
+    `print` doesn't fire inside `sprint`."""
+    text = "\n".join(lua_lines)
+    found = set()
+    for tok, _ in PORT_NOTES:
+        i = 0
+        n = len(tok)
+        while True:
+            j = text.find(tok, i)
+            if j < 0:
+                break
+            i = j + n
+            # left boundary: not part of a longer identifier
+            if j > 0 and (text[j - 1].isalnum() or text[j - 1] == "_"):
+                continue
+            # right boundary: must be a call -> optional spaces then '('
+            k = j + n
+            while k < len(text) and text[k] in " \t":
+                k += 1
+            if k < len(text) and text[k] == "(":
+                found.add(tok)
+                break
+    return found
+
 
 def lua_to_main_py(lua_lines, title):
-    """A runnable v0.4 cart stub with the original PICO-8 Lua kept as a commented
-    reference. We do NOT transpile or run Lua (gated on the runtime decision, #6)."""
+    """A runnable v0.4 cart stub + the original PICO-8 Lua as a reference comment,
+    GUIDED with `# PORT NOTE:` lines + a port checklist for ONLY the PICO-8 verbs
+    this cart actually uses. We do NOT transpile or run Lua (gated on #6)."""
     safe_title = title.replace('"', "'")
+    used = _scan_lua_verbs(lua_lines)
+    # keep PORT_NOTES order (gotchas first, not-here-yet last) for stable output
+    used_idx = sorted({_NOTE_BY_TOKEN[t] for t in used})
+
     head = (
         '# Imported from a PICO-8 .p8 by tools/import_p8.py.\n'
         '#\n'
-        '# Only the ASSETS were imported (sprites.kgfx, and sounds.json if present).\n'
-        '# The original PICO-8 Lua is preserved below as a REFERENCE COMMENT -- it is\n'
-        '# NOT executed: running PICO-8 code needs a Lua VM, which is gated on the\n'
-        '# KidCode runtime decision (issue #6). This stub just draws the sprites so\n'
-        '# you can see the imported art and start porting the game to v0.4 Python.\n'
+        '# Only the ASSETS were imported (sprites.kgfx, and sounds.json if present;\n'
+        '# audio is a lossy fold and __map__/.p8.png are not imported yet).\n'
+        '# KidCode is PYTHON, not Lua -- so a PICO-8 cart does not "just run": you\n'
+        '# PORT it, and that is the fun part. The original PICO-8 Lua is kept below\n'
+        '# as a REFERENCE COMMENT (NOT executed -- running Lua is gated on #6).\n'
+        '#\n'
+        '# Cheatsheet (verb-by-verb PICO-8 -> KidCode map): ' + CHEATSHEET + '\n'
+        '#\n'
+        '# This stub just draws the imported sprites so you can see the art, then\n'
+        '# you rewrite _update/_draw in v0.4 Python using the notes below.\n'
         '\n'
         'def _draw():\n'
         '    cls(0)\n'
         '    print("imported from .p8", 8, 8, col("white"))\n'
-        '    print("%s", 8, 20, col("yellow"))\n'
+        '    print("' + safe_title + '", 8, 20, col("yellow"))\n'
         '    # show the first row of the imported sprite sheet\n'
         '    for i in range(16):\n'
         '        spr(i, 8 + i * 18, 40)\n'
-        '\n\n'
-        '# ----- original PICO-8 __lua__ (reference only; not run) -----\n'
-    ) % safe_title
+        '\n'
+    )
+
+    # Port checklist (stretch goal): only the boxes that apply to THIS cart.
+    checklist_lines = []
+    for idx in used_idx:
+        box = PORT_NOTES[idx][1][1]
+        if box:
+            checklist_lines.append(box)
+    if checklist_lines:
+        head += (
+            '\n# ===== PORT CHECKLIST (this cart) =====\n'
+            '# Tick each off as you port it from the Lua reference below:\n'
+        )
+        for box in checklist_lines:
+            head += '#   ' + box + '\n'
+
+    # The PORT NOTEs (only for verbs this cart uses), then the Lua reference.
+    head += '\n\n# ----- original PICO-8 __lua__ (reference only; not run) -----\n'
+    if used_idx:
+        head += (
+            '# Watch out for these PICO-8 -> KidCode differences in the code below\n'
+            '# (only the verbs THIS cart uses are listed; full map: ' + CHEATSHEET + '):\n'
+        )
+        for idx in used_idx:
+            note_lines = PORT_NOTES[idx][1][0]
+            for nl in note_lines:
+                head += '# PORT NOTE: ' + nl + '\n'
+        head += '#\n'
+
     body = "\n".join("# " + ln for ln in lua_lines)
     return head + body + "\n"
 
@@ -381,11 +570,19 @@ def import_p8(p8_path, out_dir):
         json.dump(make_manifest(title), f, indent=2)
     summary["imported"].append("manifest.json")
 
-    # main.py (Lua reference + stub)
-    main_py = lua_to_main_py(sections.get("lua", []), title)
+    # main.py (Lua reference + GUIDED port notes for the verbs this cart uses)
+    lua_lines = sections.get("lua", [])
+    main_py = lua_to_main_py(lua_lines, title)
     with open(os.path.join(out_dir, "main.py"), "w", encoding="utf-8") as f:
         f.write(main_py)
-    summary["imported"].append("main.py (Lua kept as reference comment, not run)")
+    used_verbs = sorted(_scan_lua_verbs(lua_lines))
+    if used_verbs:
+        summary["imported"].append(
+            "main.py (Lua reference + %d PORT NOTE verbs: %s; cheatsheet: %s)"
+            % (len(used_verbs), ", ".join(used_verbs), CHEATSHEET))
+    else:
+        summary["imported"].append(
+            "main.py (Lua reference, no known PICO-8 verbs to annotate)")
 
     # config.json (empty -- nothing to edit yet)
     with open(os.path.join(out_dir, "config.json"), "w", encoding="utf-8") as f:
