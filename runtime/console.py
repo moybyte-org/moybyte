@@ -425,6 +425,10 @@ _TP_PAGE = _TP_COLS * _TP_ROWS          # tiles shown per palette page
 _TP_AREA = (_TP_X0, _TP_Y0, _TP_COLS * _TP_CELL, _TP_ROWS * _TP_CELL)
 _TP_PREV = (_TP_X0, _TP_Y0 + _TP_ROWS * _TP_CELL + 2, 42, 18)        # page back
 _TP_NEXT = (_TP_X0 + 46, _TP_Y0 + _TP_ROWS * _TP_CELL + 2, 42, 18)   # page forward
+# Empty/"sky" swatch (#37): a first-class, selectable palette entry on the bottom
+# button row (right of CLOSE). Picking it sets the brush to EMPTY so a tap paints
+# "nothing" -- the transparent/background cell map() skips -- like any other tile.
+_TP_SKY = (206, 198, 100, 20)
 # Pan d-pad (right column, under the palette): 4 arrow buttons that scroll the
 # view. Kept clear of the map view (x < 196) and the bottom button row (y = 198).
 _PAN_UP = (244, 146, 24, 16)
@@ -435,6 +439,11 @@ _PAN_DN = (244, 182, 24, 16)
 _MAP_ERASE = (14, 198, 40, 20)
 _MAP_SAVE = (58, 198, 64, 20)
 _MAP_CLOSE = (126, 198, 76, 20)
+# Map editor gesture threshold (#37): a pointer drag farther than this many pixels
+# from its press origin pans the visible window (drag = pan); a shorter press +
+# release taps one cell (tap = paint). Touch-drag panning is the primary way to
+# navigate a map larger than the 320x240 view, so it wins over drag-to-stamp.
+_MAP_PAN_THRESH = 6
 # Block editor (#29 Part 2): the structured outline. A title bar + a vertical
 # scrolling list of Scratch-style colored block rows (the flattened script) over a
 # bottom action bar. Built 320x240-first (the responsive pass is #39 step 2), drawn
@@ -1193,7 +1202,11 @@ class Workstation:
         self._ekey_prev = 0           # last consumed keyboard byte (edge detect)
         self._drag = None             # last pointer pos during a code-view drag-scroll
         self._paint_drag = None       # last painted grid cell during a paint drag (#30)
-        self._map_drag = None         # last stamped map cell during a map drag (#30)
+        self._map_drag = None         # last pointer (px,py) during a map pan drag (#37)
+        self._map_press = None        # gesture origin (px,py); set on press, None on release (#37)
+        self._map_panning = False     # this gesture has crossed the pan threshold (#37)
+        self._map_paint_undo = None   # (cx,cy,prev_byte) painted on press; reverted if the
+                                      # gesture turns out to be a pan, not a tap (#37)
         self._lhover = (-1, -1)       # last cursor pos used for desktop icon hover-highlight
         self.pointer = None           # set by run_desktop
         # Desktop wallpaper (#28): a chosen wallpaper-type cart compiled into its
@@ -1870,6 +1883,10 @@ class Workstation:
         self.screen = "menu"
         self.save_status = None
         self.map_erase = False
+        self._map_press = None         # fresh gesture state on open (#37)
+        self._map_panning = False
+        self._map_drag = None
+        self._map_paint_undo = None
         self.set_menu_view("map")
 
     def _open_blocks(self):
@@ -2406,6 +2423,24 @@ class Workstation:
                 return
             if self.menu_view == "paint":
                 return                         # paint is pointer/touch-driven
+            if self.menu_view == "map":
+                # The d-pad pans the visible map window (the grid is bigger than the
+                # screen); B leaves (#37). Painting stays pointer/touch-driven.
+                me = self.mapedit
+                if me is not None:
+                    if i.pressed("up"):
+                        me.pan(0, -1)
+                    if i.pressed("down"):
+                        me.pan(0, 1)
+                    if i.pressed("left"):
+                        me.pan(-1, 0)
+                    if i.pressed("right"):
+                        me.pan(1, 0)
+                if i.pressed("b"):
+                    self._leave_menu()
+                elif i.pressed("home"):
+                    self.go_home()
+                return
             ed = self.cart.get("edit")
             if not ed:
                 return
@@ -2637,12 +2672,18 @@ class Workstation:
                     self._paint_drag = None
                 return
             if self.menu_view == "map":
+                # Tap = paint one cell, drag = pan (#37). The map grid is bigger
+                # than the on-screen window, so dragging the grid scrolls the view;
+                # only a short press-and-release stamps the brush there. A palette
+                # pick / button press fires on the click edge as usual; a tap on the
+                # MAP VIEW is deferred to release so a drag that turns into a pan
+                # never leaves a stray stamp at its origin.
                 if click:
                     self._map_click(px, py)
                 elif p.down:
-                    self._map_stroke(px, py)   # drag to stamp/erase tiles (#30)
+                    self._map_pan_drag(px, py)
                 else:
-                    self._map_drag = None
+                    self._map_release(px, py)
                 return
             if self.menu_view == "blocks":
                 self._blocks_pointer(px, py, click)   # outline + insert menu (#29)
@@ -2759,33 +2800,101 @@ class Workstation:
         start = self.map_page
         return list(range(start, min(start + _TP_PAGE, count)))
 
-    def _map_stroke(self, px, py):
-        """Drag-to-stamp on the map view (#30): stamp/erase the map cell under the
-        pointer and fill the line from the last stamped cell, so dragging lays a
-        continuous run of tiles. Returns True if a map cell was touched. Shares the
-        stroke model with the paint editor (host mouse == device touch)."""
+    def _map_cell_at(self, px, py):
+        """The map cell (cx, cy) under pointer (px, py) accounting for the pan
+        offset, or None when the pointer is outside the visible map view."""
         me = self.mapedit
         if me is None or not _in(px, py, _MV_AREA):
-            self._map_drag = None
-            return False
+            return None
         cx = me.cam_x + (px - _MV_X0) // _MV_CELL
         cy = me.cam_y + (py - _MV_Y0) // _MV_CELL
+        return (cx, cy)
+
+    def _map_paint(self, cx, cy):
+        """Stamp the brush at map cell (cx, cy): the EMPTY brush (#37) clears the
+        cell (paints sky/background), otherwise the brush's tile is placed. The
+        ERASE toggle still forces a clear regardless of the brush."""
+        me = self.mapedit
+        if me is None:
+            return
+        if self.map_erase or me.n < 0:
+            me.erase(cx, cy)
+        else:
+            me.place(cx, cy)
+
+    def _map_pan_drag(self, px, py):
+        """Held-drag handler for the map view (#37): once a drag that began inside
+        the map view moves past _MAP_PAN_THRESH px it latches PAN mode for the rest
+        of the gesture and scrolls the camera by the drag delta (in cells), so the
+        content follows the finger. A drag is a pan, not a paint -- so when it
+        latches it REVERTS the cell stamped on the press edge (the tap-paint), which
+        means a tap paints and a drag pans without a stray stamp at the origin."""
+        press = self._map_press
+        if press is None:
+            return
+        if not self._map_panning:
+            if abs(px - press[0]) < _MAP_PAN_THRESH and abs(py - press[1]) < _MAP_PAN_THRESH:
+                return                         # still within the tap dead-zone
+            self._map_panning = True           # crossed the threshold -> this is a pan
+            self._map_drag = press
+            self._map_revert_paint()           # undo the press-edge stamp (it was a pan)
+        me = self.mapedit
         last = self._map_drag
-        cells = ([(cx, cy)] if last is None
-                 else _line_cells(last[0], last[1], cx, cy))
-        for mx, my in cells:
-            if self.map_erase:
-                me.erase(mx, my)
-            else:
-                me.place(mx, my)
-        self._map_drag = (cx, cy)
-        return True
+        if me is None or last is None:
+            return
+        dcx = (last[0] - px) // _MV_CELL       # content follows the finger: drag
+        dcy = (last[1] - py) // _MV_CELL       # right -> see cells to the left
+        if dcx or dcy:
+            me.pan(dcx, dcy)
+            # advance the anchor by whole cells consumed (keep the sub-cell remainder
+            # so a slow drag still accumulates instead of stalling).
+            self._map_drag = (last[0] - dcx * _MV_CELL, last[1] - dcy * _MV_CELL)
+
+    def _map_revert_paint(self):
+        """Undo the cell stamped on the press edge (used when a press turns into a
+        pan): restore the cell's previous byte AND the map's dirty/gen counters so a
+        pure pan is side-effect-free (no false '*' dirty flag, no spurious cache
+        rebuild in a running cart)."""
+        u = self._map_paint_undo
+        tm = self.tilemap
+        if u is not None and tm is not None:
+            cx, cy, prev, dirty, gen = u
+            if 0 <= cx < tm.w and 0 <= cy < tm.h:
+                tm.cells[cy * tm.w + cx] = prev
+            tm.dirty = dirty
+            tm.gen = gen
+        self._map_paint_undo = None
+
+    def _map_release(self, px, py):
+        """Pointer up in the map view (#37): the tap-paint already landed on the
+        press edge (and a pan would have reverted it), so release just clears the
+        gesture state."""
+        self._map_press = None
+        self._map_panning = False
+        self._map_drag = None
+        self._map_paint_undo = None
 
     def _map_click(self, px, py):
         me = self.mapedit
         if me is None:
             return
-        if self._map_stroke(px, py):           # stamp/erase a cell in the map view
+        if _in(px, py, _MV_AREA):              # a press in the map view: start a
+            self._map_press = (px, py)         # gesture (tap=paint / drag=pan).
+            self._map_panning = False
+            self._map_drag = None
+            # Paint immediately so a tap is responsive; remember the cell + its prior
+            # byte so a drag-that-becomes-a-pan can revert it (no stray stamp) (#37).
+            cell = self._map_cell_at(px, py)
+            tm = self.tilemap
+            if cell is not None and tm is not None:
+                cx, cy = cell
+                if 0 <= cx < tm.w and 0 <= cy < tm.h:
+                    self._map_paint_undo = (cx, cy, tm.cells[cy * tm.w + cx],
+                                            tm.dirty, tm.gen)
+                    self._map_paint(cx, cy)
+            return
+        if _in(px, py, _TP_SKY):               # the EMPTY/"sky" swatch (#37)
+            me.n = self.tilemap.EMPTY if self.tilemap is not None else -1
             return
         if _in(px, py, _TP_AREA):              # pick the brush tile from the palette
             col = (px - _TP_X0) // _TP_CELL
@@ -4051,7 +4160,10 @@ class Workstation:
         sheet = self.sheet
         cv.rect(8, 16, 304, 204, NAMES["black"])
         cv.rectb(8, 16, 304, 204, NAMES["green"])
-        title = "MAP  TILE " + str(me.n if me else 0)
+        if me is not None and me.n < 0:        # the EMPTY/"sky" brush (#37)
+            title = "MAP  SKY"
+        else:
+            title = "MAP  TILE " + str(me.n if me else 0)
         if self.tilemap is not None and self.tilemap.dirty:
             title = title + " *"
         cv.print(title, 14, 18, NAMES["green"], 1)
@@ -4106,6 +4218,17 @@ class Workstation:
         self._btn("ER", _MAP_ERASE, NAMES["red"] if self.map_erase else NAMES["dark_grey"])
         self._btn("SAVE", _MAP_SAVE, NAMES["green"])
         self._btn("CLOSE", _MAP_CLOSE, NAMES["red"])
+        # EMPTY/"sky" swatch (#37): a selectable brush that paints "nothing". Drawn
+        # as a checkerboard (the universal transparent cue) + "SKY" label, boxed
+        # white when it's the active brush so it reads like any other palette pick.
+        sx, sy, sw, sh = _TP_SKY
+        cb = sh // 2
+        cv.rect(sx, sy, sw, sh, NAMES["dark_blue"])
+        cv.rect(sx, sy, cb, cb, NAMES["light_grey"])
+        cv.rect(sx + cb, sy + cb, cb, cb, NAMES["light_grey"])
+        cv.print("SKY", sx + sw - 26, sy + (sh - 8) // 2, NAMES["white"], 1)
+        cv.rectb(sx, sy, sw, sh,
+                 NAMES["white"] if me.n < 0 else NAMES["dark_grey"])
 
     # -- block editor drawing (#29 Part 2) -----------------------------------
 
