@@ -38,6 +38,7 @@ CART_ORDER = [
     "battle_city",
     "tap_red",
     "beeper",
+    "wifi",
 ]
 
 

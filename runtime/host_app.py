@@ -135,10 +135,107 @@ def make_sdl_audio(engine):
     return SdlAudio(engine)
 
 
-def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None, pmem=None):
+# --- WiFi (#38): host fake backend ------------------------------------------
+# The device wraps network.WLAN; on the PC there is no radio, so this fake gives
+# the WiFi-manager cart something to drive in the simulator. It mirrors the
+# device backend's interface exactly -- scan/connect/status/forget/known -- with
+# canned scan results, a fake connect (records creds + reports connected), and a
+# fake IP, so the manager cart is fully assertable headlessly (like FakeAudio).
+#
+# Credentials persist through the SAME store the device uses (kid_carts
+# load_wifi/remember_wifi/forget_wifi over wifi.json), so a connect() the kid
+# makes in the sim survives a reload -- the host story matches the device story.
+
+
+class FakeWifi:
+    """Host WiFi backend: a faithful stand-in for the device network.WLAN service.
+
+    `store`/`root` are the kid_carts credential store + its carts dir; when given,
+    connect()/forget() persist to wifi.json and known() reads it back (so the sim
+    exercises the real persistence path). With no store it stays in-memory only."""
+
+    # Canned access points the sim "sees" (ssid, signal%, locked?). A real radio
+    # returns far more; this is enough for the manager cart's list UI.
+    FAKE_APS = (
+        ("Home WiFi", 88, True),
+        ("Coffee Shop", 60, False),
+        ("Neighbor 5G", 42, True),
+        ("Library Guest", 30, False),
+    )
+    FAKE_IP = "192.168.1.42"
+
+    def __init__(self, store=None, root=None):
+        self._store = store
+        self._root = root
+        self._connected = False
+        self._ssid = None
+
+    # -- the injected `wifi` API surface (host == device) ----------------
+    def scan(self):
+        """List nearby networks as (ssid, signal, locked) tuples."""
+        return [tuple(ap) for ap in self.FAKE_APS]
+
+    def connect(self, ssid, password=""):
+        """'Associate' with `ssid` (fake: always succeeds), remember the creds, and
+        report connected. Returns True. The connection persists across carts (it's
+        system state) and the creds persist to disk for autoconnect."""
+        self._connected = True
+        self._ssid = str(ssid)
+        if self._store is not None and self._root is not None:
+            try:
+                self._store.remember_wifi(ssid, password, self._root)
+            except Exception as exc:  # noqa: BLE001 -- a save failure must not crash the cart
+                print("KidCode wifi remember failed:", exc)
+        return True
+
+    def disconnect(self):
+        self._connected = False
+        self._ssid = None
+
+    def status(self):
+        """(connected, ssid, ip): the live link state other features read."""
+        if self._connected:
+            return (True, self._ssid, self.FAKE_IP)
+        return (False, None, None)
+
+    def forget(self, ssid):
+        """Drop a saved network; disconnect if it's the active one."""
+        ssid = str(ssid)
+        if self._store is not None and self._root is not None:
+            try:
+                self._store.forget_wifi(ssid, self._root)
+            except Exception as exc:  # noqa: BLE001
+                print("KidCode wifi forget failed:", exc)
+        if self._ssid == ssid:
+            self.disconnect()
+        return True
+
+    def known(self):
+        """The remembered SSIDs (for the manager's 'saved' markers + autoconnect)."""
+        if self._store is not None and self._root is not None:
+            try:
+                return [n["ssid"] for n in self._store.load_wifi(self._root)]
+            except Exception as exc:  # noqa: BLE001
+                print("KidCode wifi known failed:", exc)
+        return []
+
+
+def make_wifi(store=None, root=None):
+    """Injected backend factory: the host FakeWifi over the kid_carts store.
+    build_workstation hands this to the Workstation; the device injects DeviceWifi."""
+    return FakeWifi(store, root)
+
+
+def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
+             pmem=None, wifi=None):
     """The cartridge global namespace on the host -- same names/signature as the
     device make_api (TIC-80 draw API + sheet-or-Image spr + audio + tilemap), bound
-    to a host Canvas and audio backend."""
+    to a host Canvas and audio backend.
+
+    `wifi` is the capability-gated network backend (#38): the Workstation passes it
+    ONLY for a cart whose manifest permissions include "network", and we inject the
+    `wifi` name into the namespace iff it is non-None -- so a normal kid cart gets
+    no network access at all (the base key-set is identical either way)."""
 
     def cfg(key, default=None):
         return config.get(key, default)
@@ -239,7 +336,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None, pmem=N
             return 0
         return pmem.cell(index, value)
 
-    return {
+    ns = {
         "W": canvas.w, "H": canvas.h,
         "cls": canvas.cls, "pix": canvas.pix,
         "line": canvas.line, "rect": canvas.rect, "rectb": canvas.rectb,
@@ -256,6 +353,9 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None, pmem=N
         "Image": Image,
         "image": lambda rows, mapping, transparent=".": Image.from_ascii(rows, mapping, transparent),
     }
+    if wifi is not None:                 # capability-gated network API (#38)
+        ns["wifi"] = wifi
+    return ns
 
 
 class _NullComp:
@@ -290,6 +390,10 @@ def build_workstation(carts_dir=None):
     ws.make_audio = make_audio
     ws.carts_store = kid_carts
     ws.carts_root = carts_dir
+    # WiFi (#38): one fake system service shared across carts, persisting through
+    # the same kid_carts wifi.json store the device uses. Injected into a cart's
+    # namespace ONLY when its manifest grants "network" (see Workstation._start).
+    ws.wifi = make_wifi(kid_carts, carts_dir)
     ws.can_manage = True
     ws.pointer = console.Pointer(WIDTH, HEIGHT)
     inp.pointer = ws.pointer       # touch-driven carts read it via the api touch()

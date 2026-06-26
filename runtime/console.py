@@ -586,9 +586,14 @@ class Workstation:
         self.comp = comp
         self.canvas = canvas
         self.input = input
-        self.make_api = None       # injected: make_api(canvas, input, cfg, sheet, audio, tilemap)->ns
+        self.make_api = None       # injected: make_api(canvas, input, cfg, sheet, audio, tilemap, pmem, wifi)->ns
         self.make_audio = None      # injected: make_audio(engine)->audio backend (host/device)
         self.audio = None           # the per-cart audio backend (built on open, #16)
+        # WiFi (#38): a SYSTEM service shared across carts (the connection persists
+        # when a cart exits), not per-cart. run_desktop/build_workstation injects
+        # the backend here; it's exposed to a cart's namespace ONLY when the cart's
+        # manifest permissions include "network" (capability-gated -- see _start).
+        self.wifi = None            # injected wifi backend (host FakeWifi / device WLAN)
         self.carts_store = None     # injected: cart store module (kid_carts API)
         self.launcher = Launcher(carts if carts else [])
         self.screen = "launcher"      # "launcher" | "desktop" | "menu"
@@ -635,14 +640,27 @@ class Workstation:
         self.show_fps = True          # bottom-right FPS readout while a cart runs
         self._fps = 0.0               # smoothed frames/sec (EMA of 1/dt)
 
+    def _cart_has_perm(self, name):
+        """True iff the open cart's manifest permissions include `name` (#38).
+        kid_carts.load() carries the manifest "permissions" list onto the cart;
+        an embedded/legacy cart with none simply never matches, so it gets no
+        gated APIs."""
+        perms = self.cart.get("permissions") if self.cart else None
+        return bool(perms) and name in perms
+
     def _start(self):
         self._build_audio()
         # Stamp the cart-start clock so the cart's time() reads ms since this run
         # began (re-run on apply/run_code/edit-close resets it, like TIC-80).
         self._cart_start_ms = _ticks_ms()
         self.input.cart_start_ms = self._cart_start_ms
+        # Capability-permission gate (#38): hand make_api the wifi backend ONLY
+        # when this cart declares the "network" permission, so a normal kid cart
+        # gets NO `wifi` name (sandbox preserved). make_api injects `wifi` into the
+        # cart namespace iff the backend it receives is non-None.
+        wifi = self.wifi if self._cart_has_perm("network") else None
         ns = self.make_api(self.canvas, self.input, self.config, self.sheet,
-                           self.audio, self.tilemap, self.pmem)
+                           self.audio, self.tilemap, self.pmem, wifi)
         try:
             # Compile with the "<cart>" filename so a runtime traceback carries
             # cart line numbers (_exc_cart_line reads them to mark the bad line).
