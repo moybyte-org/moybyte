@@ -1714,6 +1714,8 @@ class Workstation:
         self.tilemap = self._build_tilemap()
         self.pmem = self._build_pmem()
         self._cart_key_prev = 0       # fresh cart: no stale key edge
+        self.input.text_mode = False  # a fresh cart starts in game mode (#38/#42);
+                                      # it opts into text input via textmode(True)
         self.menu_view = "cards"
         self._set_text_mode(False)
         # Open to the desktop even if the cart failed to start: frame() shows the
@@ -1851,9 +1853,31 @@ class Workstation:
         # change. Raw needs keyboard fw >= 2025-06-12; without it the keyboard keeps
         # sending ASCII and TDeckKeyboard sticks on the 1-byte + hold-latch path, so
         # this is safe on any firmware. No-op on the host (no keyboard).
+        # Leaving any screen clears a running cart's text-mode REQUEST (#38/#42) so it
+        # can never leak past the cart that asked for it into the launcher/editor/next
+        # cart -- the desktop frame re-derives the keyboard mode from input.text_mode.
+        if not on:
+            self.input.text_mode = False
         kb = self.keyboard
         if kb is not None:
             kb.set_game_mode(not on)
+
+    def _sync_cart_text_mode(self):
+        # Cart text input (#38/#42): a RUNNING cart opts into text-keyboard mode by
+        # calling textmode(True) (make_api), which sets input.text_mode. Games leave it
+        # off (the default) and keep the raw/game keyboard so a held direction keeps
+        # firing btn(). When a cart asks for text mode we flip the keyboard to clean
+        # 1-byte ASCII (set_game_mode(False)) so key()/keyp() yield typeable bytes;
+        # when it turns text mode back off we restore game mode. Idempotent (the
+        # keyboard's set_game_mode only talks to the HW on a real transition), called
+        # each running-cart frame so a mid-cart textmode() toggle takes effect. No-op
+        # on the host (no keyboard) -- there the same flag gates type_char routing in
+        # ConsoleDriver. On older keyboard firmware set_game_mode(True) is a no-op
+        # (stays ASCII) and the hold-latch fallback applies, so this is safe.
+        want_text = bool(getattr(self.input, "text_mode", False))
+        kb = self.keyboard
+        if kb is not None:
+            kb.set_game_mode(not want_text)
 
     def _open_menu(self):
         self.screen = "menu"
@@ -3379,6 +3403,12 @@ class Workstation:
                     # escape frame() here -> the silent device hang the panel
                     # exists to prevent.
                     print("KidCode frame error:", self.cart_error)
+            # Cart text input (#38/#42): apply the keyboard mode the cart's _update may
+            # have just requested via textmode(), so the NEXT keyboard poll yields the
+            # right bytes (clean ASCII for typing, raw/game for hold-to-move). One-frame
+            # latency; no-op on the host. Done every running-cart frame so a mid-cart
+            # toggle (e.g. wifi entering/leaving its password screen) takes effect.
+            self._sync_cart_text_mode()
             # Clear any cart-set camera/clip/pal/palt (#11) before the console paints
             # its own UI overlays, so they're never offset/clipped/recoloured.
             self._reset_canvas_state()
