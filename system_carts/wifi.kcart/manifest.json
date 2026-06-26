@@ -1,0 +1,13 @@
+{
+  "format": "kidcode-cart-v1",
+  "title": "WiFi",
+  "type": "tool",
+  "runtime": "python",
+  "main": "main.py",
+  "system": true,
+  "canvas": { "width": 320, "height": 240, "palette": "kid64" },
+  "permissions": ["graphics", "input", "network"],
+  "safe_to_share": false,
+  "config": {},
+  "edit": []
+}

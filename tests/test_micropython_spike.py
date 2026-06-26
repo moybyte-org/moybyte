@@ -696,7 +696,9 @@ def test_device_sprite_storage_wired():
     carts = (Path("runtime") / "kid_carts.py").read_text(encoding="utf-8")
     # device cart API -- also takes the injected audio backend (#16) + tilemap
     # (#32) + persistent memory (pmem, #11).
-    assert "def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None, pmem=None):" in runtime
+    # make_api now also takes the capability-gated wifi backend LAST (#38).
+    assert "def make_api(canvas, input, config, sheet=None, audio=None," in runtime
+    assert "pmem=None, wifi=None):" in runtime
     assert "self.sheet = self._build_sheet()" in console                   # shared console
     assert "self.carts_store.save_sprites(self.cart, hexs)" in console
     assert "def save_sprites(cart, hex_text):" in carts
@@ -737,6 +739,38 @@ def test_device_audio_wired():
     assert '"sounds": sounds' in carts
     # build.sh stages the shared audio module into the frozen modules tree.
     assert 'cp "${REPO_ROOT}/runtime/audio.py" "${SCRIPT_DIR}/modules/audio.py"' in build
+
+
+def test_device_wifi_wired():
+    # WiFi (#38): the device network.WLAN service backend + capability-gated `wifi`
+    # injection + autoconnect + the shared credential store. Source-level checks
+    # mirror how the other firmware tests grep the frozen device modules.
+    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    carts = (Path("runtime") / "kid_carts.py").read_text(encoding="utf-8")
+
+    # make_api takes the gated wifi backend LAST and injects `wifi` only when set.
+    assert "def make_api(canvas, input, config, sheet=None, audio=None," in runtime
+    assert "pmem=None, wifi=None):" in runtime
+    assert 'ns["wifi"] = wifi' in runtime
+    # The device WLAN backend (STUB -- needs hardware verification) + autoconnect.
+    assert "class DeviceWifi:" in runtime
+    assert "network.WLAN(network.STA_IF)" in runtime
+    assert "def make_wifi(store=None, root=None):" in runtime
+    assert "def autoconnect_wifi(wifi):" in runtime
+    assert "NEEDS ON-DEVICE VERIFICATION" in runtime
+    # run_desktop injects the system service + autoconnects from saved creds.
+    assert "ws.wifi = make_wifi(kid_carts, carts_root)" in runtime
+    assert "autoconnect_wifi(ws.wifi)" in runtime
+    # The shared console gates injection on the "network" manifest permission.
+    assert "def _cart_has_perm(self, name):" in console
+    assert 'self.wifi if self._cart_has_perm("network") else None' in console
+    # The shared cart store carries permissions + persists known networks.
+    assert '"permissions": man.get("permissions", []),' in carts
+    assert "def load_wifi(root=CARTS_DIR):" in carts
+    assert "def save_wifi(networks, root=CARTS_DIR):" in carts
+    assert "def remember_wifi(ssid, password, root=CARTS_DIR):" in carts
+    assert "def forget_wifi(ssid, root=CARTS_DIR):" in carts
 
 
 def test_editor_cores_are_shared_single_source():

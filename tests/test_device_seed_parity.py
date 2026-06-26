@@ -43,6 +43,7 @@ TITLE_TO_FOLDER = {
     "Battle City": "battle_city",
     "Tap Only Red": "tap_red",
     "Beeper": "beeper",
+    "WiFi": "wifi",
 }
 
 

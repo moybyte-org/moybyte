@@ -234,6 +234,11 @@ def load(path):
             "src": src,
             "cfg": cfg,
             "edit": man.get("edit", []),
+            # Manifest capability permissions (#38): a cart only gets a gated API
+            # (e.g. the injected `wifi`) when its permission is listed here. A
+            # normal kid cart has just ["graphics","input"] (or none) and stays
+            # network-less -- the sandbox is preserved.
+            "permissions": man.get("permissions", []),
             "sprites": sprites,
             "sounds": sounds,
             "map": tilemap,
@@ -385,6 +390,73 @@ def save_shared_sheet(hex_text, root=CARTS_DIR):
     asset, so an interrupted write must never truncate it."""
     ensure_dirs(root)
     _write_atomic(shared_sheet_path(root), hex_text)
+
+
+# --- known WiFi networks (system credential store, #38) ---------------------
+#
+# The WiFi service persists known networks (ssid + password) to a single system
+# JSON that lives BESIDE the carts dir (a sibling of `root`, like the shared
+# sheet) -- it is system state, not tied to any cart. The injected `wifi` API
+# (permission-gated) drives load/save here; the device autoconnects from this at
+# boot. Written atomically (same crash-safe path as the cart saves) so an
+# interrupted write can never truncate a kid's saved passwords. MicroPython-safe
+# (json + os only).
+
+WIFI_STORE_NAME = "wifi.json"
+
+
+def wifi_store_path(root=CARTS_DIR):
+    """Well-known path of the WiFi credential store: a sibling of the carts dir
+    (one level up from `root`), so it isn't tied to any single cart."""
+    parent = root.rsplit("/", 1)[0]
+    return (parent + "/" + WIFI_STORE_NAME) if parent else WIFI_STORE_NAME
+
+
+def load_wifi(root=CARTS_DIR):
+    """Read the known-networks list: [{"ssid": str, "password": str}, ...].
+    Returns [] when nothing has been saved yet or the file is unreadable/garbage
+    (a corrupt store must never crash the boot autoconnect)."""
+    try:
+        data = json.loads(_read(wifi_store_path(root)))
+    except (OSError, ValueError):
+        return []
+    nets = data.get("networks") if isinstance(data, dict) else None
+    if not isinstance(nets, list):
+        return []
+    out = []
+    for n in nets:
+        if isinstance(n, dict) and n.get("ssid"):
+            out.append({"ssid": str(n["ssid"]), "password": str(n.get("password", ""))})
+    return out
+
+
+def save_wifi(networks, root=CARTS_DIR):
+    """Persist the known-networks list, atomically. Ensures the parent dir exists.
+    `networks` is a list of {"ssid", "password"} dicts."""
+    ensure_dirs(root)
+    clean = [{"ssid": str(n["ssid"]), "password": str(n.get("password", ""))}
+             for n in networks if n.get("ssid")]
+    _write_atomic(wifi_store_path(root), json.dumps({"networks": clean}))
+
+
+def remember_wifi(ssid, password, root=CARTS_DIR):
+    """Add/replace one network in the store (by ssid) and persist. Returns the
+    updated list. The most-recently-remembered network is moved to the FRONT, so
+    autoconnect prefers the last one the kid joined."""
+    ssid = str(ssid)
+    nets = [n for n in load_wifi(root) if n["ssid"] != ssid]
+    nets.insert(0, {"ssid": ssid, "password": str(password or "")})
+    save_wifi(nets, root)
+    return nets
+
+
+def forget_wifi(ssid, root=CARTS_DIR):
+    """Drop one network from the store (by ssid) and persist. Returns the updated
+    list (unchanged if the ssid wasn't known)."""
+    ssid = str(ssid)
+    nets = [n for n in load_wifi(root) if n["ssid"] != ssid]
+    save_wifi(nets, root)
+    return nets
 
 
 # --- cart management (create / duplicate / delete) --------------------------
