@@ -1185,6 +1185,7 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
         print("KidCode mem: gc_free=%d (esp32 n/a: %s)" % (gc.mem_free(), _e))
     frame_ms = 1000 // fps_cap
     last = _ticks_ms()
+    _backlight_on = False         # #45: panel stays dark until the first frame ships
     while True:
         now = _ticks_ms()
         dt = max(0.0, min(0.1, _ticks_diff(now, last) / 1000.0))
@@ -1219,6 +1220,18 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
         except Exception as exc:                # never let one bad frame brick the device:
             print("KidCode frame error:", exc)  # print the traceback's reason to serial
             gc.collect()                        # a NO_MEM flush may recover after a collect
+        # Boot "CRT" flash fix (#45): the backlight booted OFF (tdeck_board/tdeck_display)
+        # so the ST7789 power-on GRAM noise is never lit. Turn it on the instant the
+        # first real frame has been composed+flushed -- ws._frames_drawn ticks past 0
+        # only inside frame() after comp.flush() -- so the user's first sight is the
+        # desktop, not garbage. One-shot; guarded so a no-op redraw frame won't re-light.
+        if not _backlight_on and getattr(ws, "_frames_drawn", 0) > 0:
+            try:
+                import tdeck_display
+                tdeck_display.set_backlight(True)
+            except Exception as _bl:            # display-less host / bring-up: ignore
+                print("KidCode backlight on failed:", _bl)
+            _backlight_on = True
         elapsed = _ticks_diff(_ticks_ms(), now)
         if elapsed < frame_ms:
             time.sleep_ms(frame_ms - elapsed)

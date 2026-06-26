@@ -14,4 +14,8 @@ def init_board_pins():
     Pin(RADIO_CS, Pin.OUT, value=1)
     Pin(TFT_CS, Pin.OUT, value=1)
     Pin(SPI_MISO, Pin.IN, Pin.PULL_UP)
-    Pin(BACKLIGHT, Pin.OUT, value=1)
+    # Backlight stays OFF through panel init + cart prefetch so the ST7789's
+    # power-on GRAM noise (the boot "CRT" flash, #45) is never lit. The boot
+    # path turns it on only after the first KidCode frame is composed+flushed
+    # (tdeck_display.set_backlight, called from kid_runtime.run_desktop).
+    Pin(BACKLIGHT, Pin.OUT, value=0)

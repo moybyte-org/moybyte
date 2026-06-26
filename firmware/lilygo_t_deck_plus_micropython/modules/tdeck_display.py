@@ -1,10 +1,16 @@
 _spi_bus = None
 _display_bus = None
+_display = None
+_backlight_pin = None
+_backlight_gpio = None
 
 
 def init_display():
     global _spi_bus
     global _display_bus
+    global _display
+    global _backlight_pin
+    global _backlight_gpio
     from machine import Pin
     import lcd_bus
     import machine
@@ -59,14 +65,46 @@ def init_display():
         display.set_rotation(lv.DISPLAY_ROTATION._270)
     except AttributeError:
         display.set_rotation(3)
+    # Backlight is deliberately LEFT OFF here (#45): the panel is now init'd but its
+    # GRAM still holds power-on noise, so lighting it would show the boot "CRT" flash.
+    # set_backlight(True) is called from the boot path AFTER the first composed frame
+    # is flushed (kid_runtime.run_desktop) so the user only ever sees the real desktop.
+    # Prefer the ST7789 driver's own set_backlight (it owns GPIO `backlight`); only
+    # fall back to a raw Pin if the driver lacks it -- creating a competing Pin on a
+    # driver-owned GPIO is exactly the kind of dual-ownership the bus notes warn about.
+    _display = display
+    _backlight_gpio = backlight
     try:
-        display.set_backlight(100)
+        display.set_backlight(0)
     except AttributeError:
-        Pin(backlight, Pin.OUT, value=1)
+        _backlight_pin = Pin(backlight, Pin.OUT, value=0)
 
-    print("KidCode display ready")
+    print("KidCode display ready (backlight off until first frame)")
     handler = task_handler.TaskHandler(duration=5)
     return lv, display, handler
+
+
+def set_backlight(on=True):
+    """Turn the panel backlight on/off after init.
+
+    Kept off through init+prefetch so the ST7789's power-on GRAM garbage never
+    shows (#45); the boot path calls this once the first KidCode frame has been
+    composited and flushed. Uses the LVGL display's set_backlight when available
+    (PWM duty, driver-owned GPIO); only falls back to the raw backlight GPIO if the
+    driver has no set_backlight (matches the original init fallback)."""
+    global _backlight_pin
+    from machine import Pin
+    duty = 100 if on else 0
+    if _display is not None:
+        try:
+            _display.set_backlight(duty)
+            return
+        except AttributeError:
+            pass
+    if _backlight_pin is None and _backlight_gpio is not None:
+        _backlight_pin = Pin(_backlight_gpio, Pin.OUT)
+    if _backlight_pin is not None:
+        _backlight_pin.value(1 if on else 0)
 
 
 def get_spi_bus():
