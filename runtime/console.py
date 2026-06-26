@@ -3310,10 +3310,32 @@ class Workstation:
         # types a fresh name instead of appending to the default), `var` is the
         # just-created variable's CURRENT name -- confirm renames it old->typed, and a
         # blank/invalid entry keeps this default. `slot_target`, if set, is the
-        # (block, slot) to fill with the final name.
-        self.blk_kbd = {"text": "", "var": name, "slot_target": slot_target}
+        # (block, slot) to fill with the final name. `armed` is the one-frame guard
+        # below (#29): the prompt ignores commit/cancel until its first input pass
+        # arms it, so the very input that *selected* "+ new variable" (a held A /
+        # Enter, or the tap) can't carry into the fresh prompt and instantly close it.
+        self.blk_kbd = {"text": "", "var": name, "slot_target": slot_target,
+                        "armed": False}
         self._set_text_mode(True)            # ASCII keyboard for typing the name
-        self._ekey_prev = 0
+        # Neutralise the triggering input so the prompt's first frame can't consume
+        # it (#29). "+ new variable" is chosen with A/Enter (keyboard) or a tap
+        # (touch); without this the still-latched A/Enter edge -- or the held Enter
+        # *byte* (last_key) on the device -- lands on the new prompt as commit, and
+        # the prompt flashes shut with the default name before the kid can type.
+        self.input.release_all()             # drop held buttons (host + device)
+        # Wipe this frame's edge sets so i.pressed("a"/"run"/"b") is empty next pass.
+        try:
+            self.input._pressed = set()
+            self.input._released = set()
+            self.input._last = set()         # device InputState edge snapshot
+            self.input._prev = set()         # host InputState edge snapshot
+        except AttributeError:
+            pass
+        # Seed the typed-key edge with the byte held RIGHT NOW so a held A/Enter byte
+        # (last_key) isn't re-read as a fresh keystroke on the prompt's first frame.
+        self._ekey_prev = getattr(self.input, "last_key", 0) or 0
+        if self.pointer is not None:
+            self.pointer.click = False       # a tap that opened the prompt != OK
 
     def _blk_kbd_commit(self):
         """Confirm the name prompt: rename the new variable to the typed text (falling
@@ -3479,6 +3501,14 @@ class Workstation:
             # The variable name-entry prompt owns input: type the name (one insert per
             # physical press, edge-detected like the code editor), Enter/A confirm, B
             # cancels. last_key carries the resolved ASCII byte (text mode is on).
+            # One-frame guard (#29): the FIRST input pass after the prompt opens only
+            # arms it -- never commits/cancels -- so the A/Enter/tap that *selected*
+            # "+ new variable" (which can still be latched/held this frame) can't carry
+            # in and instantly close the prompt before the kid types a name.
+            if not self.blk_kbd.get("armed"):
+                self.blk_kbd["armed"] = True
+                self._ekey_prev = i.last_key   # don't read the trigger byte as a key
+                return
             k = i.last_key
             if k and k != self._ekey_prev:
                 self._blk_kbd_key(k)
@@ -3585,6 +3615,11 @@ class Workstation:
     def _blk_kbd_click(self, px, py):
         """Touch handling for the variable name prompt: DEL backspaces, OK confirms,
         X cancels. (Typing the name itself is the on-screen/T-Deck keyboard.)"""
+        # One-frame guard (#29): the tap that *opened* the prompt (selecting "+ new
+        # variable") must not carry into this first pass and immediately hit OK/X.
+        if self.blk_kbd is not None and not self.blk_kbd.get("armed"):
+            self.blk_kbd["armed"] = True
+            return
         if _in(px, py, _BLK_KBD_DEL):
             self._blk_kbd_key(8); return
         if _in(px, py, _BLK_KBD_OK):
