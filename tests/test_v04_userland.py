@@ -418,3 +418,108 @@ def test_host_console_paint_via_mouse(tmp_path):
     drv.click(C._PG_X0 + 2, C._PG_Y0 + 2)               # paint sprite 0, pixel (0,0)
     drv.frame(1 / 30)
     assert ws.sheet.tget(0, 0, 0) == 12
+
+
+# -- map (tilemap) editor (#32) --------------------------------------------
+
+def test_map_editor_place_erase_select_pick_pan():
+    from runtime.editors import MapEditor
+    tm = TileMap(20, 15)
+    sheet = SpriteSheet()
+    me = MapEditor(tm, sheet)
+    me.n = 7
+    me.place(2, 3)                          # stamp the current tile
+    assert tm.mget(2, 3) == 7
+    me.erase(2, 3)                          # erase clears it back to empty
+    assert tm.mget(2, 3) == TileMap.EMPTY
+    me.select(1)                            # step the brush through the sheet ids
+    assert me.n == 8
+    tm.mset(5, 5, 12)
+    me.pick(5, 5)                           # pick samples a placed cell into the brush
+    assert me.n == 12
+    me.pick(0, 0)                           # a tap on an empty cell leaves the brush
+    assert me.n == 12
+    me.pan(3, 2)
+    assert (me.cam_x, me.cam_y) == (3, 2)
+    me.pan(-10, -10)                        # clamps at the map edge (never < 0)
+    assert (me.cam_x, me.cam_y) == (0, 0)
+    me.pan(999, 999)                        # clamps to the last cell (never off the map)
+    assert me.cam_x == tm.w - 1 and me.cam_y == tm.h - 1
+
+
+def test_host_console_map_open_place_and_render(tmp_path):
+    from runtime import console as C
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    drv = host_app.ConsoleDriver(ws)
+    drv.press("run")
+    drv.frame(1 / 30)
+    drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2)      # open the MAP overlay button
+    drv.frame(1 / 30)
+    assert ws.menu_view == "map" and ws.mapedit is not None
+    # pick the 2nd palette tile (id == map_page + 1) ...
+    px = C._TP_X0 + 1 * C._TP_CELL
+    py = C._TP_Y0
+    drv.click(px + 2, py + 2)
+    drv.frame(1 / 30)
+    assert ws.mapedit.n == ws.map_page + 1
+    # ... then stamp it onto the top-left visible map cell and confirm mget reflects it
+    drv.click(C._MV_X0 + 2, C._MV_Y0 + 2)
+    drv.frame(1 / 30)
+    cx = ws.mapedit.cam_x
+    cy = ws.mapedit.cam_y
+    assert ws.tilemap.mget(cx, cy) == ws.mapedit.n
+    assert len(set(drv.rgb888())) > 1                    # the map view rendered
+
+
+def test_host_console_map_erase_and_pan(tmp_path):
+    from runtime import console as C
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    drv = host_app.ConsoleDriver(ws)
+    drv.press("run"); drv.frame(1 / 30)
+    drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2); drv.frame(1 / 30)
+    ws.mapedit.n = 3
+    drv.click(C._MV_X0 + 2, C._MV_Y0 + 2); drv.frame(1 / 30)   # stamp tile 3 at (0,0)
+    assert ws.tilemap.mget(0, 0) == 3
+    drv.click(C._MAP_ERASE[0] + 2, C._MAP_ERASE[1] + 2); drv.frame(1 / 30)  # ERASE on
+    assert ws.map_erase
+    drv.click(C._MV_X0 + 2, C._MV_Y0 + 2); drv.frame(1 / 30)   # now a tap erases
+    assert ws.tilemap.mget(0, 0) == TileMap.EMPTY
+    drv.click(C._PAN_RT[0] + 2, C._PAN_RT[1] + 2); drv.frame(1 / 30)        # pan right
+    assert ws.mapedit.cam_x == 1
+
+
+def test_host_console_map_save_roundtrips(tmp_path):
+    from runtime import console as C
+    from runtime import host_app, kid_carts
+    carts_dir = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts_dir)
+    drv = host_app.ConsoleDriver(ws)
+    drv.press("run"); drv.frame(1 / 30)
+    cart_path = ws.cart["path"]
+    drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2); drv.frame(1 / 30)
+    ws.mapedit.n = 6
+    drv.click(C._MV_X0 + 2, C._MV_Y0 + 2); drv.frame(1 / 30)   # stamp tile 6 at (0,0)
+    drv.click(C._MAP_SAVE[0] + 2, C._MAP_SAVE[1] + 2); drv.frame(1 / 30)    # SAVE
+    assert ws.save_status == "SAVED"
+    reloaded = kid_carts.load(cart_path)                  # map.kmap persisted on disk
+    assert reloaded["map"] is not None
+    assert TileMap.from_hex(reloaded["map"]).mget(0, 0) == 6
+
+
+def test_map_edit_seen_by_running_cart_via_gen(tmp_path):
+    # An mset bumps tilemap.gen, the parity hook a running cart's map cache watches,
+    # so a placement made in the editor is reflected immediately (the editor edits
+    # the SAME TileMap object the cart's map()/mget() read).
+    from runtime import console as C
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    drv = host_app.ConsoleDriver(ws)
+    drv.press("run"); drv.frame(1 / 30)
+    tm = ws.tilemap
+    before = tm.gen
+    drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2); drv.frame(1 / 30)
+    drv.click(C._MV_X0 + 2, C._MV_Y0 + 2); drv.frame(1 / 30)   # stamp a cell
+    assert tm.gen > before                                # mset bumped gen (live pickup)
+    assert tm is ws.tilemap                               # same object the cart's api holds

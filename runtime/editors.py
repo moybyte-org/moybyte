@@ -10,6 +10,8 @@ only its own rendering + input glue around these.
   CodeEditor   -- editable text buffer + cursor (the on-device code editor, #3)
   SpriteSheet  -- indexed 8x8 tile sheet + PICO-8 __gfx__-style hex (#4 storage)
   PaintEditor  -- pixel-paint state over a sheet tile (#4 editor)
+  TileMap      -- grid of tile ids over a sheet + map.kmap hex (#32 storage)
+  MapEditor    -- tile-placement state over a TileMap (#32 editor)
 
 Keep this module dependency-free so it freezes cleanly and imports under both
 CPython (tests/host) and MicroPython (device).
@@ -412,3 +414,47 @@ class PaintEditor:
 
     def select(self, d):
         self.n = (self.n + d) % self.sheet.count
+
+
+class MapEditor:
+    """Tile-placement state over a TileMap + its SpriteSheet -- the map analogue
+    of PaintEditor (#32). PaintEditor places palette indices onto a sprite tile;
+    this places sprite ids onto map cells. Pure logic: the shell maps taps on the
+    visible map region / tile palette to these calls and renders the result.
+
+    Holds the current tile id to stamp + a (cam_x, cam_y) view offset in cells, so
+    a map larger than the on-screen window can be panned. `place` stamps the
+    current tile, `erase` clears a cell, `pick` samples the cell under a tap into
+    the brush, and `select(d)` steps the brush through the sheet's tile ids."""
+
+    def __init__(self, tilemap, sheet):
+        self.tilemap = tilemap
+        self.sheet = sheet
+        self.n = 0            # current tile id to stamp (a sprite id in the sheet)
+        self.cam_x = 0        # top-left visible cell (pan offset), in cells
+        self.cam_y = 0
+
+    def place(self, cell_x, cell_y):
+        """Stamp the current tile id at map cell (cell_x, cell_y)."""
+        self.tilemap.mset(cell_x, cell_y, self.n)
+
+    def erase(self, cell_x, cell_y):
+        """Clear map cell (cell_x, cell_y) to empty (no tile)."""
+        self.tilemap.mset(cell_x, cell_y, self.tilemap.EMPTY)
+
+    def pick(self, cell_x, cell_y):
+        """Sample the tile at a map cell into the brush (skip empty cells, so a
+        tap on blank space doesn't reset the brush to a confusing -1)."""
+        tid = self.tilemap.mget(cell_x, cell_y)
+        if tid >= 0:
+            self.n = tid
+
+    def select(self, d):
+        """Step the brush tile id by d, wrapping through the sheet's tile ids."""
+        self.n = (self.n + d) % self.sheet.count
+
+    def pan(self, dcx, dcy):
+        """Pan the view by (dcx, dcy) cells, clamped so the top-left visible cell
+        always stays inside the map (never scroll the whole map off the window)."""
+        self.cam_x = max(0, min(self.tilemap.w - 1, self.cam_x + dcx))
+        self.cam_y = max(0, min(self.tilemap.h - 1, self.cam_y + dcy))

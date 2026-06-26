@@ -12,7 +12,7 @@ free apart from the shared editor cores below.
 import time
 
 from audio import AudioBank, AudioEngine
-from editors import CodeEditor, PaintEditor, SpriteSheet, TileMap
+from editors import CodeEditor, MapEditor, PaintEditor, SpriteSheet, TileMap
 
 
 def _ticks_ms():
@@ -278,8 +278,13 @@ class Pointer:
 
 
 # --- Pointer UI layout (320x240) -------------------------------------------
-_MENU_BTN = (4, 4, 76, 18)        # desktop overlay: open Make-it-mine
-_HOME_BTN = (240, 4, 76, 18)      # desktop overlay: back to launcher
+# Desktop overlay button row (top edge): EDIT/CODE, PAINT, MAP, then HOME at the
+# right. Four buttons now share the 320px row, so they're tighter than the old
+# three -- each glyph-led button keeps a short label that fits its width.
+_MENU_BTN = (4, 4, 64, 18)        # desktop overlay: open Make-it-mine / code
+_PAINT_BTN = (72, 4, 64, 18)      # desktop overlay: open the paint editor
+_MAP_BTN = (140, 4, 64, 18)       # desktop overlay: open the map (tilemap) editor
+_HOME_BTN = (252, 4, 64, 18)      # desktop overlay: back to launcher
 _RUN_BTN = (28, 188, 70, 24)
 _CODE_BTN = (104, 188, 84, 24)
 _CLOSE_BTN = (194, 188, 96, 24)
@@ -321,7 +326,7 @@ _SYM_H = 20
 _SYM_CELL = 20
 _SYM_AREA = (0, _SYM_Y, _SYM_CELL * len(_CODE_SYMBOLS), _SYM_H)
 # Paint editor (#4): zoomed 8x8 grid + 16-color palette (2x8) + sprite selector.
-_PAINT_BTN = (122, 4, 76, 18)     # desktop overlay: open the paint editor
+# (_PAINT_BTN -- the desktop overlay button -- lives in the button row above.)
 _PG_X0 = 14
 _PG_Y0 = 32
 _PG_CELL = 18
@@ -342,6 +347,38 @@ _PAINT_CLOSE = (200, 190, 102, 26)
 #   PUT  -- save the current tile TO the shared sheet (persisted to disk).
 _PAINT_GET = (210, 130, 92, 20)
 _PAINT_PUT = (210, 154, 92, 20)
+# Map (tilemap) editor (#32): a panned view of the map on the left where each cell
+# is the scaled sprite tile placed there, and a paged tile palette on the right to
+# pick the brush tile. Tap a map cell to stamp the brush (or erase, when the ERASE
+# toggle is on); tap a palette cell to select that tile id. Mirrors the paint
+# editor's structure (grid + picker + save/close), with pan controls for maps
+# larger than the on-screen window.
+_MV_X0 = 14            # map view top-left (cells drawn scaled here)
+_MV_Y0 = 32
+_MV_CELL = 14          # px per cell in the view (tappable, shows the 8x8 tile)
+_MV_COLS = 13          # visible map columns
+_MV_ROWS = 11          # visible map rows
+_MV_AREA = (_MV_X0, _MV_Y0, _MV_COLS * _MV_CELL, _MV_ROWS * _MV_CELL)
+# Tile palette (right): a paged grid of sheet tiles; tap to pick the brush.
+_TP_X0 = 210
+_TP_Y0 = 32
+_TP_CELL = 22
+_TP_COLS = 4
+_TP_ROWS = 4
+_TP_PAGE = _TP_COLS * _TP_ROWS          # tiles shown per palette page
+_TP_AREA = (_TP_X0, _TP_Y0, _TP_COLS * _TP_CELL, _TP_ROWS * _TP_CELL)
+_TP_PREV = (_TP_X0, _TP_Y0 + _TP_ROWS * _TP_CELL + 2, 42, 18)        # page back
+_TP_NEXT = (_TP_X0 + 46, _TP_Y0 + _TP_ROWS * _TP_CELL + 2, 42, 18)   # page forward
+# Pan d-pad (right column, under the palette): 4 arrow buttons that scroll the
+# view. Kept clear of the map view (x < 196) and the bottom button row (y = 198).
+_PAN_UP = (244, 146, 24, 16)
+_PAN_LF = (218, 164, 24, 16)
+_PAN_RT = (270, 164, 24, 16)
+_PAN_DN = (244, 182, 24, 16)
+# ERASE toggle + SAVE + CLOSE along the bottom-left (clear of the d-pad column).
+_MAP_ERASE = (14, 198, 40, 20)
+_MAP_SAVE = (58, 198, 64, 20)
+_MAP_CLOSE = (126, 198, 76, 20)
 # Trackball cursor sensitivity (#2). _CURSOR_BASE is the per-pulse step; the
 # quadratic _CURSOR_ACCEL term adds light acceleration so a fast roll crosses the
 # 320px screen in far fewer pulses while a slow, single-pulse roll stays precise.
@@ -381,6 +418,9 @@ _GLYPHS = {
     "get":    (0x000, 0x060, 0x060, 0x060, 0x264, 0x1F0, 0x0E0, 0x040, 0x7FE, 0x402, 0x7FE, 0x000),
     "put":    (0x000, 0x040, 0x0E0, 0x1F0, 0x264, 0x060, 0x060, 0x060, 0x7FE, 0x402, 0x7FE, 0x000),
     "heart":  (0x000, 0x30C, 0x79E, 0x7FE, 0x7FE, 0x7FE, 0x3FC, 0x1F8, 0x0F0, 0x060, 0x000, 0x000),
+    # "map": a 3x3 tile grid (the tilemap editor's nav/open icon, #32) -- full
+    # h-lines at rows 1/5/9, v-lines at cols 1/5/9, so it reads as a placed grid.
+    "map":    (0x000, 0x7FE, 0x444, 0x444, 0x444, 0x7FE, 0x444, 0x444, 0x444, 0x7FE, 0x000, 0x000),
 }
 
 
@@ -524,11 +564,14 @@ class Workstation:
         self._draw = None
         self.msel = 0                 # selected card in the menu
         self.mtop = 0                 # first card scrolled into view (#3)
-        self.menu_view = "cards"      # menu sub-view: "cards" | "code" | "paint"
+        self.menu_view = "cards"      # menu sub-view: "cards" | "code" | "paint" | "map"
         self.editor = None            # CodeEditor while menu_view == "code"
         self.sheet = None             # SpriteSheet for the open cart (built on open)
         self.tilemap = None           # TileMap for the open cart (built on open, #32)
         self.paint = None             # PaintEditor while menu_view == "paint"
+        self.mapedit = None           # MapEditor while menu_view == "map" (#32)
+        self.map_erase = False        # map editor: tap-to-erase instead of stamp
+        self.map_page = 0             # map editor: first tile id shown in the palette
         self.keyboard = None          # set by run_desktop (for raw/text mode toggle)
         self._ekey_prev = 0           # last consumed keyboard byte (edge detect)
         self._drag = None             # last pointer pos during a code-view drag-scroll
@@ -588,6 +631,7 @@ class Workstation:
         self.mtop = 0
         self.editor = None
         self.paint = None
+        self.mapedit = None
         self.cart_error = None
         self.save_status = None
         self.sheet = self._build_sheet()
@@ -655,6 +699,12 @@ class Workstation:
         elif view == "paint":
             if self.paint is None and self.sheet is not None:
                 self.paint = PaintEditor(self.sheet)
+        elif view == "map":
+            # Mirror the paint branch: build the MapEditor over the cart's TileMap
+            # + sheet (both always exist after open()). Edits go straight into the
+            # live tilemap, so a running cart picks them up via tilemap.gen (#32).
+            if self.mapedit is None and self.tilemap is not None and self.sheet is not None:
+                self.mapedit = MapEditor(self.tilemap, self.sheet)
         self._set_text_mode(view == "code")
 
     def _set_text_mode(self, on):
@@ -679,6 +729,12 @@ class Workstation:
         self.screen = "menu"
         self.paint_status = None
         self.set_menu_view("paint")
+
+    def _open_map(self):
+        self.screen = "menu"
+        self.save_status = None
+        self.map_erase = False
+        self.set_menu_view("map")
 
     def _leave_menu(self):
         self._set_text_mode(False)
@@ -808,6 +864,23 @@ class Workstation:
             self.cart_error = "Could not save sprites -- " + txt
             print("KidCode save sprites failed:", txt)
 
+    def save_map(self):
+        # Persist the cart's tilemap to map.kmap (#32) -- the exact mirror of
+        # save_sprites (to_hex -> SD wrapper -> save_map). The running cart already
+        # holds this same TileMap, so a save only persists what it's already using.
+        if not (self.tilemap and self.cart and self.cart.get("path") and self.can_manage):
+            return
+        hexs = self.tilemap.to_hex()
+        try:
+            self._with_sd(lambda: self.carts_store.save_map(self.cart, hexs))
+            self.tilemap.dirty = False
+            self.save_status = "SAVED"
+        except Exception as exc:  # noqa: BLE001
+            txt = _err_text(exc)
+            self.save_status = "SAVE FAILED"
+            self.cart_error = "Could not save map -- " + txt
+            print("KidCode save map failed:", txt)
+
     # -- cross-cart sprite reuse (#18) ---------------------------------------
     #
     # The shared sheet is a single .kgfx living beside the carts dir. PUT copies
@@ -899,6 +972,7 @@ class Workstation:
         self._set_text_mode(False)    # restore the game-button keyboard mode
         self.editor = None
         self.paint = None
+        self.mapedit = None
         self.screen = "launcher"
         self.cart = None
         self.ns = None
@@ -1281,6 +1355,8 @@ class Workstation:
                     self._open_menu()
                 elif _in(px, py, _PAINT_BTN):
                     self._open_paint()
+                elif _in(px, py, _MAP_BTN):
+                    self._open_map()
                 elif _in(px, py, _HOME_BTN):
                     self.go_home()
         elif self.screen == "menu":
@@ -1304,6 +1380,10 @@ class Workstation:
             if self.menu_view == "paint":
                 if click:
                     self._paint_click(px, py)
+                return
+            if self.menu_view == "map":
+                if click:
+                    self._map_click(px, py)
                 return
             ci = self._card_at(px, py)
             if ci is not None:
@@ -1372,6 +1452,54 @@ class Workstation:
         elif _in(px, py, _PAINT_CLOSE):
             self._leave_menu()
 
+    def _map_palette_ids(self):
+        """The tile ids shown on the current palette page (a window into the sheet,
+        clamped so the last page never runs past the sheet's tile count)."""
+        if self.sheet is None:
+            return []
+        count = self.sheet.count
+        start = self.map_page
+        return list(range(start, min(start + _TP_PAGE, count)))
+
+    def _map_click(self, px, py):
+        me = self.mapedit
+        if me is None:
+            return
+        if _in(px, py, _MV_AREA):              # stamp/erase a cell in the map view
+            cx = me.cam_x + (px - _MV_X0) // _MV_CELL
+            cy = me.cam_y + (py - _MV_Y0) // _MV_CELL
+            if self.map_erase:
+                me.erase(cx, cy)
+            else:
+                me.place(cx, cy)
+        elif _in(px, py, _TP_AREA):            # pick the brush tile from the palette
+            col = (px - _TP_X0) // _TP_CELL
+            row = (py - _TP_Y0) // _TP_CELL
+            if 0 <= col < _TP_COLS and 0 <= row < _TP_ROWS:
+                k = row * _TP_COLS + col
+                ids = self._map_palette_ids()
+                if 0 <= k < len(ids):
+                    me.n = ids[k]
+        elif _in(px, py, _TP_PREV):            # page the palette back/forward
+            self.map_page = max(0, self.map_page - _TP_PAGE)
+        elif _in(px, py, _TP_NEXT):
+            if self.sheet is not None and self.map_page + _TP_PAGE < self.sheet.count:
+                self.map_page += _TP_PAGE
+        elif _in(px, py, _PAN_UP):
+            me.pan(0, -1)
+        elif _in(px, py, _PAN_DN):
+            me.pan(0, 1)
+        elif _in(px, py, _PAN_LF):
+            me.pan(-1, 0)
+        elif _in(px, py, _PAN_RT):
+            me.pan(1, 0)
+        elif _in(px, py, _MAP_ERASE):          # toggle stamp <-> erase
+            self.map_erase = not self.map_erase
+        elif _in(px, py, _MAP_SAVE):
+            self.save_map()
+        elif _in(px, py, _MAP_CLOSE):
+            self._leave_menu()
+
     # -- frame + drawing -----------------------------------------------------
 
     def frame(self, dt):
@@ -1413,7 +1541,7 @@ class Workstation:
             self._draw_desktop_buttons()
         elif self.menu_view == "code":
             self._draw_code()              # full-screen editor (covers the cart)
-        else:  # cards / paint: a panel over the frozen cart
+        else:  # cards / paint / map: a panel over the frozen cart
             try:
                 if self._draw:
                     self._draw()
@@ -1421,6 +1549,8 @@ class Workstation:
                 pass
             if self.menu_view == "paint":
                 self._draw_paint()
+            elif self.menu_view == "map":
+                self._draw_map()
             else:
                 try:
                     self._draw_cards()
@@ -1475,6 +1605,7 @@ class Workstation:
         has_edit = bool(self.cart.get("edit")) if self.cart else False
         self._icon_btn("edit", "EDIT" if has_edit else "CODE", _MENU_BTN, NAMES["dark_purple"])
         self._icon_btn("paint", "PAINT", _PAINT_BTN, NAMES["orange"])
+        self._icon_btn("map", "MAP", _MAP_BTN, NAMES["green"])
         self._icon_btn("home", "HOME", _HOME_BTN, NAMES["dark_grey"])
 
     def _draw_error_panel(self):
@@ -1794,3 +1925,69 @@ class Workstation:
             cv.print(self.paint_status[:18], 110, 196, NAMES["yellow"], 1)
         self._btn("SAVE", _PAINT_SAVE, NAMES["green"])
         self._btn("CLOSE", _PAINT_CLOSE, NAMES["red"])
+
+    def _draw_map(self):
+        # The map (tilemap) editor (#32): a panned view of the map on the left where
+        # each cell shows the placed sprite tile, and a paged tile palette on the
+        # right to pick the brush. Mirrors _draw_paint's structure (grid + picker +
+        # save/close), drawn with the indexed API only so host == device.
+        cv = self.canvas
+        me = self.mapedit
+        sheet = self.sheet
+        cv.rect(8, 16, 304, 204, NAMES["black"])
+        cv.rectb(8, 16, 304, 204, NAMES["green"])
+        title = "MAP  TILE " + str(me.n if me else 0)
+        if self.tilemap is not None and self.tilemap.dirty:
+            title = title + " *"
+        cv.print(title, 14, 18, NAMES["green"], 1)
+        if me is None or sheet is None or self.tilemap is None:
+            return
+        tm = self.tilemap
+        # Visible map region: each cell is the 8x8 sprite tile placed there, centered
+        # in an _MV_CELL box, with grid lines so empty cells read as empty. Tile
+        # images are cached by id within the draw so a repeated tile builds once.
+        cache = {}
+        off = (_MV_CELL - sheet.TILE) // 2
+        for ry in range(_MV_ROWS):
+            cy = me.cam_y + ry
+            for rx in range(_MV_COLS):
+                cx = me.cam_x + rx
+                x = _MV_X0 + rx * _MV_CELL
+                y = _MV_Y0 + ry * _MV_CELL
+                inb = (cx < tm.w and cy < tm.h)
+                cv.rect(x, y, _MV_CELL, _MV_CELL,
+                        NAMES["dark_blue"] if inb else NAMES["black"])
+                if inb:
+                    tid = tm.mget(cx, cy)
+                    if tid >= 0:
+                        img = cache.get(tid)
+                        if img is None:
+                            img = sheet.tile_image(tid, -1)
+                            cache[tid] = img if img is not None else False
+                        if img:
+                            cv.spr(img, x + off, y + off, 1)
+                cv.rectb(x, y, _MV_CELL, _MV_CELL, NAMES["dark_grey"])
+        # Tile palette (right): a page of sheet tiles; the brush tile is boxed white.
+        ids = self._map_palette_ids()
+        for k in range(len(ids)):
+            tid = ids[k]
+            x = _TP_X0 + (k % _TP_COLS) * _TP_CELL
+            y = _TP_Y0 + (k // _TP_COLS) * _TP_CELL
+            cv.rect(x, y, _TP_CELL, _TP_CELL, NAMES["black"])
+            img = sheet.tile_image(tid, -1)
+            if img is not None:
+                cv.spr(img, x + (_TP_CELL - sheet.TILE) // 2,
+                       y + (_TP_CELL - sheet.TILE) // 2, 1)
+            cv.rectb(x, y, _TP_CELL, _TP_CELL,
+                     NAMES["white"] if tid == me.n else NAMES["dark_grey"])
+        self._btn("<", _TP_PREV, NAMES["blue"])
+        self._btn(">", _TP_NEXT, NAMES["blue"])
+        # Pan d-pad under the map view.
+        self._btn("^", _PAN_UP, NAMES["indigo"])
+        self._btn("v", _PAN_DN, NAMES["indigo"])
+        self._btn("<", _PAN_LF, NAMES["indigo"])
+        self._btn(">", _PAN_RT, NAMES["indigo"])
+        # ERASE toggle (highlighted when active) + SAVE + CLOSE.
+        self._btn("ER", _MAP_ERASE, NAMES["red"] if self.map_erase else NAMES["dark_grey"])
+        self._btn("SAVE", _MAP_SAVE, NAMES["green"])
+        self._btn("CLOSE", _MAP_CLOSE, NAMES["red"])
