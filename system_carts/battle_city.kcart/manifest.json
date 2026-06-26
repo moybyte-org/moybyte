@@ -1,0 +1,19 @@
+{
+  "format": "kidcode-cart-v1",
+  "title": "Battle City",
+  "type": "game",
+  "runtime": "python",
+  "main": "main.py",
+  "system": true,
+  "canvas": { "width": 320, "height": 240, "palette": "kid64" },
+  "permissions": ["graphics", "input", "audio"],
+  "safe_to_share": true,
+  "config": {
+    "enemies": 6,
+    "autoplay": 0
+  },
+  "edit": [
+    { "key": "enemies", "label": "ENEMIES", "type": "int", "min": 1, "max": 16, "step": 1, "display": "count", "icon": "dot", "card": "FIGHT {value} TANKS" },
+    { "key": "autoplay", "label": "AUTOPLAY", "type": "choice", "choices": [0, 1], "icons": ["close", "run"], "display": "choice-icons", "card": "AUTOPLAY {value}" }
+  ]
+}
