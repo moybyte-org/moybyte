@@ -169,6 +169,20 @@ def run_live(driver, dt, scale):
                     driver.type_char(0x09)
                 elif ev.unicode and 0x20 <= ord(ev.unicode) <= 0x7E:
                     driver.type_char(ord(ev.unicode))
+            elif ev.type == pygame.KEYDOWN and driver.in_text_mode():
+                # A running cart that asked for text input via textmode(True) (#38/#42):
+                # route typed unicode + Enter/Backspace/Esc to the cart's key() exactly
+                # as the code editor does. The cart owns the meaning of those keys (e.g.
+                # the wifi cart: Enter=connect, Backspace=delete, Esc=back to the list),
+                # so Esc does NOT quit the simulator here -- the cart handles it.
+                if ev.key == pygame.K_RETURN:
+                    driver.type_char(0x0D)
+                elif ev.key == pygame.K_BACKSPACE:
+                    driver.type_char(0x08)
+                elif ev.key == pygame.K_ESCAPE:
+                    driver.type_char(0x1B)
+                elif ev.unicode and 0x20 <= ord(ev.unicode) <= 0x7E:
+                    driver.type_char(ord(ev.unicode))
             elif ev.type == pygame.KEYDOWN:
                 if ev.key == pygame.K_ESCAPE:
                     running = False
