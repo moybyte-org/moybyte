@@ -24,6 +24,17 @@ def main():
         _serial_fallback_loop(None)
         return
 
+    # The backlight now boots OFF (#45) and the desktop path turns it on only after
+    # its first composed frame. The bring-up modes below draw straight to the panel
+    # with no such hook, so light it now -- they were always meant to be watched on
+    # the screen and never had a GRAM-flash concern.
+    if not RUN_DESKTOP:
+        try:
+            from tdeck_display import set_backlight
+            set_backlight(True)
+        except Exception as exc:
+            print("KidCode backlight on failed:", exc)
+
     if RUN_FULLSCREEN_BENCH:
         _run_fullscreen_bench(_task_handler)
         return
