@@ -23,12 +23,12 @@ sys.modules.setdefault("audio", _audio)
 from . import console  # noqa: E402  (after the editors/audio aliases above)
 from . import kid_carts  # noqa: E402  (shared .kcart store; host-clean)
 from . import palette  # noqa: E402
-from .canvas import Canvas, Image  # noqa: E402
+from .canvas import Canvas, Image, SystemCanvas  # noqa: E402
 from .input import InputState  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SYSTEM_CARTS = os.path.join(ROOT, "system_carts")
-WIDTH, HEIGHT = 320, 240
+WIDTH, HEIGHT = 320, 240        # the fixed GAME canvas (the console spec)
 PAN_SPEED = 6            # px/frame the arrow-keys-as-trackball nudge the cursor
 
 
@@ -343,7 +343,13 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
     def touch():
         # Pointer (mouse stands in for touch on the host) exposed to touch-driven
         # carts: (x, y, tapped) this frame, or None when there is no pointer.
-        # `tapped` is the press edge so a cart scores at most one hit per tap.
+        # `tapped` is the press edge so a cart scores at most one hit per tap. The
+        # coords are GAME-canvas space (input.game_pointer, set by handle_pointer
+        # from the viewport transform), so a cart in a larger system canvas reads the
+        # 320x240 viewport, not the panel (#39). Falls back to the raw pointer.
+        gp = getattr(input, "game_pointer", None)
+        if gp is not None:
+            return (gp[0], gp[1], bool(gp[2]))
         p = getattr(input, "pointer", None)
         if p is None:
             return None
@@ -353,6 +359,10 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # TIC-80-shaped 7-tuple (x, y, left, middle, right, scrollx, scrolly)
         # aliasing touch(): tap -> left button. The host pointer (and the device
         # touchscreen) has no middle/right/scroll, so those are constant 0/False.
+        # Game-canvas coords (the viewport), like touch() (#39).
+        gp = getattr(input, "game_pointer", None)
+        if gp is not None:
+            return (gp[0], gp[1], bool(gp[2]), False, False, 0, 0)
         p = getattr(input, "pointer", None)
         if p is None:
             return (0, 0, False, False, False, 0, 0)
@@ -432,14 +442,32 @@ def _seed_system_carts(carts_dir):
                 shutil.copytree(os.path.join(SYSTEM_CARTS, name), dst)
 
 
-def build_workstation(carts_dir=None):
-    """Build the shared console.Workstation wired to host backends."""
+def build_workstation(carts_dir=None, sys_size=None, font_scale=1):
+    """Build the shared console.Workstation wired to host backends.
+
+    The two-domain seam (#39): `sys_size` is the SYSTEM canvas size (w, h) -- the
+    panel/window the desktop renders on, responsive. The GAME canvas is always the
+    fixed 320x240 the carts + cart API draw on. When `sys_size` is None or 320x240
+    (the T-Deck default) the system canvas IS the game canvas (one object), so the
+    desktop is pixel-identical to today. `font_scale` (1/2/3) is the initial
+    system-UI font size (the persisted system.json value overrides it on load)."""
     carts_dir = carts_dir or os.path.expanduser("~/.kidcode/carts")
     _seed_system_carts(carts_dir)
     carts = kid_carts.scan(carts_dir)
-    canvas = Canvas(WIDTH, HEIGHT)
+    canvas = Canvas(WIDTH, HEIGHT)               # the fixed 320x240 GAME canvas
+    sw, sh = sys_size if sys_size else (WIDTH, HEIGHT)
+    # The system canvas must be at least the game size -- the game is composited into
+    # it as a viewport, so a smaller panel makes no sense (and would letterbox into
+    # nothing). Clamp up so a stray small --size never produces a broken surface.
+    sw = max(WIDTH, int(sw))
+    sh = max(HEIGHT, int(sh))
+    if (sw, sh) == (WIDTH, HEIGHT) and int(font_scale) <= 1:
+        sys_canvas = None                        # share one canvas -> identical to today
+    else:
+        sys_canvas = SystemCanvas(sw, sh, font_scale=font_scale)
     inp = InputState()
-    ws = console.Workstation(_NullComp(), canvas, inp, carts)
+    ws = console.Workstation(_NullComp(), canvas, inp, carts,
+                             sys_canvas=sys_canvas, font_scale=font_scale)
     ws.make_api = make_api
     ws.make_audio = make_audio
     ws.carts_store = kid_carts
@@ -449,7 +477,9 @@ def build_workstation(carts_dir=None):
     # namespace ONLY when its manifest grants "network" (see Workstation._start).
     ws.wifi = make_wifi(kid_carts, carts_dir)
     ws.can_manage = True
-    ws.pointer = console.Pointer(WIDTH, HEIGHT)
+    # The pointer ranges over the SYSTEM canvas (the panel surface the cursor moves
+    # on), so size it to that. The api touch() reads it in system coords.
+    ws.pointer = console.Pointer(ws.sys_canvas.w, ws.sys_canvas.h)
     inp.pointer = ws.pointer       # touch-driven carts read it via the api touch()
     # Desktop shell (#28): load the system settings (system.json) and apply the
     # saved wallpaper so the home screen boots with the chosen backdrop.
@@ -544,7 +574,10 @@ class ConsoleDriver:
         self.input.last_key = 0
 
     def rgb888(self):
-        return self.ws.canvas.to_rgb888()
+        # The SYSTEM canvas is what the panel/window shows (the composited viewport +
+        # responsive desktop chrome). When it's the same object as the game canvas
+        # (320x240 degradation) this is exactly today's output (#39).
+        return self.ws.sys_canvas.to_rgb888()
 
     def current_canvas(self):
-        return self.ws.canvas
+        return self.ws.sys_canvas

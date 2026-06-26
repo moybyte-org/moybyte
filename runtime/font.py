@@ -88,3 +88,27 @@ def draw(put, s, x, y):
                 bits >>= 1
                 py += 1
         cx += WIDTH
+
+
+def draw_scaled(block, s, x, y, scale):
+    """Render `s` at nearest-neighbor `scale`: each set glyph pixel becomes a
+    scale x scale block, emitted via block(bx, by, scale) so the caller fills a
+    square. scale=1 plots one pixel per call -- identical coverage to draw() but
+    through the block sink. Used for the resizable SYSTEM-UI font (the game canvas
+    keeps plain 8x8 via draw()); cell advance is WIDTH*scale per char."""
+    scale = int(scale)
+    if scale < 1:
+        scale = 1
+    cx = int(x)
+    y = int(y)
+    for ch in str(s):
+        col = glyph(ch)
+        for j in range(WIDTH):
+            bits = col[j]
+            row = 0
+            while bits:
+                if bits & 1:
+                    block(cx + j * scale, y + row * scale, scale)
+                bits >>= 1
+                row += 1
+        cx += WIDTH * scale
