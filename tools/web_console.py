@@ -1,35 +1,49 @@
 #!/usr/bin/env python3
-"""Web console (#22 v1, host-first): the KidCode desktop, remote-rendered in a browser.
+"""Web console (#22, cutoff #2): the web is a new CANVAS BACKEND (draw-command
+streaming), not a pixel viewer.
 
-The browser does NOT reimplement anything. The existing host `Workstation` (the
+The browser does NOT reimplement the console. The existing host `Workstation` (the
 shared `runtime/console.py`, the same UI the T-Deck runs) stays authoritative and
-keeps running on the PC; the browser is a thin client that **renders its
-framebuffer and forwards input** -- so you drive the full desktop (launcher /
-carts / code+paint editors / everything) from your computer as if local.
+keeps running on the PC. v1 streamed its rasterized framebuffer as a PNG; this
+cutoff replaces that transport: the console draws through an *injected* canvas, so
+we swap in a `CommandCanvas` that **records each draw call** (`cls/rect/spr/print/
+map/...`) into a per-frame, JSON-serializable command list. We ship that list to
+the browser, and a JS replayer redraws the commands on a scaled <canvas> (crisp,
+resolution-independent). The wire is a few calls per frame, not 76,800 pixels.
+
+The swap is done WITHOUT touching the shared tree: `Workstation` reads `self.canvas`
+every frame, so after `host_app.build_workstation()` we just reassign
+`ws.canvas = CommandCanvas(...)`. (`ws.comp` stays the host `_NullComp`, whose
+flush() is a no-op -- there's no panel to flush on the host.)
 
 Architecture (a pure-stdlib HTTP server, polling protocol -- no third-party web
 deps, no hand-rolled WebSockets):
 
-  GET  /            -> the static HTML page (a scaled <canvas> + JS poller).
-  GET  /frame.png   -> the CURRENT framebuffer as a PNG. The server steps the
-                       console (`driver.frame(dt)`) once per request, converts
-                       `ws.canvas.buf` (320x240 KID64 palette indices) to RGB via
-                       the KID64 table, and PIL-encodes a 320x240 PNG.
-  POST /input       -> JSON of browser events; we replay them through the SAME
-                       host `ConsoleDriver` the pygame sim uses, so the console
-                       reacts identically:
-                         {"type":"move", "x":..,"y":..}      -> touch_drag
-                         {"type":"down", "x":..,"y":..}      -> touch (a tap)
-                         {"type":"up"}                       -> touch_up
-                         {"type":"pan",  "dx":..,"dy":..}    -> pan (trackball)
-                         {"type":"press","name":"run|a|b|home|left|.."} -> press
-                         {"type":"hold", "name":..,"down":bool}          -> hold
-                         {"type":"key",  "code":<ascii>}     -> type_char
-                         {"type":"esc"}                      -> escape
-
-The browser is the *only* input source, so we map mouse->touch and keys->keyboard
-EXACTLY as `runtime/host_app.ConsoleDriver` (and `tools/simulate_desktop.run_live`)
-do -- by driving that very ConsoleDriver, not a reimplementation of it.
+  GET  /          -> the static HTML page (a scaled <canvas> + JS replayer/poller).
+  GET  /assets    -> the STATIC stuff the browser needs to render the command list:
+                       { "w","h",                       # logical surface size
+                         "palette": [[r,g,b], ...64],    # KID64 index -> RGB
+                         "font": {"first","w","h","glyphs":[[col,...8], ...]},
+                         "sheet": {...} | null,          # open cart's sprite sheet
+                         "tilemap": {...} | null,        # open cart's tilemap
+                         "cart": "<title or null>" }     # for cart-change detection
+                     The page refetches /assets when "cart" changes (new sheet).
+  GET  /frame     -> JSON {"cmds":[...], "cart":"<title>"}: the recorded draw calls
+                     for ONE freshly-stepped frame. Each request: clear the canvas's
+                     buffer, `driver.frame(dt)` (the console draws into CommandCanvas),
+                     then `take_commands()` and return them. "cart" lets the client
+                     notice a cart change and refetch /assets.
+  POST /input     -> JSON of browser events; replayed through the SAME host
+                     `ConsoleDriver` the pygame sim uses, so the console reacts
+                     identically (unchanged from v1):
+                       {"type":"move", "x":..,"y":..}      -> touch_drag
+                       {"type":"down", "x":..,"y":..}      -> touch (a tap)
+                       {"type":"up"}                       -> touch_up
+                       {"type":"pan",  "dx":..,"dy":..}    -> pan (trackball)
+                       {"type":"press","name":"run|a|b|home|left|.."} -> press
+                       {"type":"hold", "name":..,"down":bool}          -> hold
+                       {"type":"key",  "code":<ascii>}     -> type_char
+                       {"type":"esc"}                      -> escape
 
 Run it:
 
@@ -37,15 +51,17 @@ Run it:
     python tools/web_console.py --port 9000
     python tools/web_console.py --cart system_carts/star_catcher.kcart
 
-Open the printed URL -> the full KidCode desktop, live in the browser.
+Open the printed URL -> the full KidCode desktop, live in the browser, redrawn from
+the command stream.
 
-The device port (a MicroPython HTTP server streaming the device framebuffer over
-WiFi) is the follow-up, gated on #38 (WiFi manager) and the single-threaded loop
-(serve between frames, never mid-flush). The protocol here is what it mirrors.
+The device port (a MicroPython command-recording canvas + an HTTP server over WiFi)
+is the follow-up, gated on #38 (WiFi manager) and the single-threaded loop (serve
+between frames, never mid-flush). It is MUCH lighter than v1's pixel transport: the
+device only records the calls it already makes -- it never has to read back or
+encode its framebuffer.
 """
 
 import argparse
-import io
 import json
 import os
 import sys
@@ -55,8 +71,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer  # noqa: E402
 
+from runtime import font  # noqa: E402  (petme128 glyphs -> JSON for the replayer)
 from runtime import host_app  # noqa: E402  (runs the SHARED console.Workstation)
 from runtime import palette  # noqa: E402  (KID64 index -> RGB)
+from tools.command_canvas import CommandCanvas  # noqa: E402  (the recording backend)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_SAVE_DIR = os.path.expanduser("~/.kidcode/projects")
@@ -76,15 +94,55 @@ def _read_html():
         return f.read()
 
 
+def font_glyphs():
+    """Export the petme128 font as JSON: each glyph is its 8 column-bytes (LSB =
+    top row, exactly how runtime.font.draw scans it), so the JS replayer renders
+    `print` pixel-identically to the host Canvas.print / device framebuf.text."""
+    glyphs = []
+    n = len(font._FONT) // font.WIDTH
+    for i in range(n):
+        col = font._FONT[i * font.WIDTH:(i + 1) * font.WIDTH]
+        glyphs.append(list(col))
+    return {"first": font.FIRST, "w": font.WIDTH, "h": font.HEIGHT, "glyphs": glyphs}
+
+
+def sheet_json(sheet):
+    """The open cart's sprite sheet as JSON (cols/rows/TILE + flat 16-color pixels).
+    Sent so a future id-based `spr` can resolve on the browser; correctness never
+    depends on it (spr commands carry their own pixels)."""
+    if sheet is None:
+        return None
+    return {
+        "cols": sheet.cols, "rows": sheet.rows, "tile": sheet.TILE,
+        "w": sheet.w, "h": sheet.h,
+        "pix": list(sheet.pix),
+    }
+
+
+def tilemap_json(tilemap):
+    """The open cart's tilemap as JSON (w/h + flat cells, each = tile_id+1, 0=empty)
+    -- mirrors TileMap's storage. Sent for completeness / a future id-based map."""
+    if tilemap is None:
+        return None
+    return {"w": tilemap.w, "h": tilemap.h, "cells": list(tilemap.cells)}
+
+
 class WebConsole:
-    """Owns the single live Workstation + its ConsoleDriver, and turns the current
-    framebuffer into a PNG. All console mutation (frame step + input) is serialized
-    under one lock so the threaded HTTP server never steps the console from two
-    requests at once (the console is single-threaded, like the device loop)."""
+    """Owns the single live Workstation, swaps its canvas for a CommandCanvas, and
+    serves the recorded command stream + the static render assets. All console
+    mutation (frame step + input) is serialized under one lock so the threaded HTTP
+    server never steps the console from two requests at once (the console is
+    single-threaded, like the device loop)."""
 
     def __init__(self, save_dir, fps=DEFAULT_FPS, cart=None):
         self.dt = 1.0 / max(1, fps)
         self.ws = host_app.build_workstation(save_dir)
+        # The decided architecture: the web is a NEW CANVAS BACKEND. The shared
+        # console draws through ws.canvas every frame, so we reassign it to a
+        # recording CommandCanvas WITHOUT touching runtime/console.py. ws.comp stays
+        # the host _NullComp (its flush() is a no-op -- nothing to flush on the host).
+        self.canvas = CommandCanvas(host_app.WIDTH, host_app.HEIGHT)
+        self.ws.canvas = self.canvas
         # Live, real-connection-aware WiFi (your PC is online) -- matches the
         # interactive pygame run, so network carts test against real sockets.
         self.ws.wifi = host_app.make_host_wifi(host_app.kid_carts, self.ws.carts_root)
@@ -92,11 +150,6 @@ class WebConsole:
             self._open_named_cart(cart, save_dir)
         self.driver = host_app.ConsoleDriver(self.ws)
         self._lock = threading.Lock()
-        self._rgb_table = [bytes(rgb) for rgb in palette.KID64]
-        # PIL is available on the host (used by the GIF export too); import here so
-        # the module imports even where Pillow is absent until a frame is requested.
-        from PIL import Image  # noqa: F401  (validate availability eagerly)
-        self._Image = Image
 
     def _open_named_cart(self, cart_path, carts_dir):
         """Copy a named .kcart into the store (if needed), select + open it -- the
@@ -112,6 +165,14 @@ class WebConsole:
                 self.ws.launcher.sel = i
                 break
         self.ws.open()
+
+    def _cart_title(self):
+        """A stable id for the open cart (its title) so the client can detect a cart
+        change and refetch /assets. None on the launcher/desktop home."""
+        cart = getattr(self.ws, "cart", None)
+        if cart is None:
+            return None
+        return cart.get("title")
 
     # -- input ---------------------------------------------------------------
     def apply_events(self, events):
@@ -145,23 +206,34 @@ class WebConsole:
                     d.escape()
 
     # -- output --------------------------------------------------------------
-    def step_png(self):
-        """Advance the console one frame and return the framebuffer as PNG bytes."""
-        with self._lock:
-            self.driver.frame(self.dt)
-            cv = self.driver.current_canvas()
-            w, h = cv.w, cv.h
-            rgb = self._buf_to_rgb(cv.buf)
-        img = self._Image.frombytes("RGB", (w, h), rgb)
-        out = io.BytesIO()
-        img.save(out, format="PNG")
-        return out.getvalue(), w, h
+    def step_frame(self):
+        """Advance the console one frame and return (commands, cart_title).
 
-    def _buf_to_rgb(self, buf):
-        # Indices -> RGB888 via the KID64 table. (Canvas.to_rgb888 does the same;
-        # we use a cached table so we never re-pack the palette per frame.)
-        table = self._rgb_table
-        return b"".join(table[i] for i in buf)
+        The console draws into the CommandCanvas during driver.frame(); we take the
+        recorded list afterward. We clear any stale commands first so a partially
+        recorded frame (shouldn't happen under the lock) can never leak in."""
+        with self._lock:
+            self.canvas.take_commands()      # drop anything stale (defensive)
+            self.driver.frame(self.dt)
+            cmds = self.canvas.take_commands()
+            cart = self._cart_title()
+        return cmds, cart
+
+    def assets(self):
+        """The static render assets the browser needs: palette + font + the open
+        cart's sheet/tilemap. Re-fetched by the client when the cart changes."""
+        with self._lock:
+            sheet = sheet_json(getattr(self.ws, "sheet", None))
+            tilemap = tilemap_json(getattr(self.ws, "tilemap", None))
+            cart = self._cart_title()
+        return {
+            "w": self.canvas.w, "h": self.canvas.h,
+            "palette": [list(rgb) for rgb in palette.KID64],
+            "font": font_glyphs(),
+            "sheet": sheet,
+            "tilemap": tilemap,
+            "cart": cart,
+        }
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -177,7 +249,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        # Frames must never be cached -- the page polls the same URL repeatedly.
+        # Frames/assets must never be cached -- the page polls the same URLs.
         self.send_header("Cache-Control", "no-store")
         for k, v in (extra or {}).items():
             self.send_header(k, v)
@@ -185,17 +257,28 @@ class _Handler(BaseHTTPRequestHandler):
         if body:
             self.wfile.write(body)
 
+    def _send_json(self, code, obj):
+        self._send(code, json.dumps(obj).encode("utf-8"),
+                   "application/json; charset=utf-8")
+
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         if path in ("/", "/index.html"):
             self._send(200, self.html, "text/html; charset=utf-8")
-        elif path == "/frame.png":
+        elif path == "/assets":
             try:
-                png, _w, _h = self.console.step_png()
+                assets = self.console.assets()
+            except Exception as exc:  # noqa: BLE001 -- must not kill the server
+                self._send(500, str(exc).encode("utf-8"), "text/plain; charset=utf-8")
+                return
+            self._send_json(200, assets)
+        elif path == "/frame":
+            try:
+                cmds, cart = self.console.step_frame()
             except Exception as exc:  # noqa: BLE001 -- a frame error must not kill the server
                 self._send(500, str(exc).encode("utf-8"), "text/plain; charset=utf-8")
                 return
-            self._send(200, png, "image/png")
+            self._send_json(200, {"cmds": cmds, "cart": cart})
         else:
             self._send(404, b"not found", "text/plain; charset=utf-8")
 
@@ -238,20 +321,20 @@ def _lan_url(port):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="KidCode web console (#22 v1, host-first)")
+    ap = argparse.ArgumentParser(description="KidCode web console (#22, draw-command streaming)")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
     ap.add_argument("--host", default="0.0.0.0",
                     help="bind address (default 0.0.0.0 = reachable on the LAN)")
     ap.add_argument("--cart", help="open a single .kcart directly (skip the launcher)")
     ap.add_argument("--save-dir", default=DEFAULT_SAVE_DIR)
     ap.add_argument("--fps", type=int, default=DEFAULT_FPS,
-                    help="console step rate (dt = 1/fps per /frame.png request)")
+                    help="console step rate (dt = 1/fps per /frame request)")
     args = ap.parse_args(argv)
 
     console = WebConsole(args.save_dir, fps=args.fps, cart=args.cart)
     server = make_server(console, host=args.host, port=args.port)
     url = _lan_url(server.server_address[1])
-    print("KidCode web console serving the live desktop at:")
+    print("KidCode web console (draw-command streaming) serving the live desktop at:")
     print("    %s" % url)
     print("    http://127.0.0.1:%d/  (localhost)" % server.server_address[1])
     print("Open it in a browser to drive the full console. Ctrl-C to stop.")
