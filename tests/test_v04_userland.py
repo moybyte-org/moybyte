@@ -325,3 +325,158 @@ def test_host_console_paint_via_mouse(tmp_path):
     drv.click(C._PG_X0 + 2, C._PG_Y0 + 2)               # paint sprite 0, pixel (0,0)
     drv.frame(1 / 30)
     assert ws.sheet.tget(0, 0, 0) == 12
+
+
+# -- TIC-80-idiomatic Game Lab API (#11): mouse/time/key/keyp/pmem -----------
+
+class _Stub:
+    """Minimal canvas/input stubs for direct make_api unit tests (no display)."""
+    w = 320
+    h = 240
+
+    def __getattr__(self, name):
+        return lambda *a, **k: 0
+
+
+class _StubInput:
+    def held(self, n):
+        return False
+
+    def pressed(self, n):
+        return False
+
+
+class _Pointer:
+    def __init__(self, x=0, y=0, click=False):
+        self.x = x
+        self.y = y
+        self.click = click
+
+
+def test_mouse_aliases_touch_as_tic80_tuple():
+    from runtime import host_app
+    inp = _StubInput()
+    api = host_app.make_api(_Stub(), inp, {})
+    # No pointer -> all-zero 7-tuple (never None, unlike touch()).
+    assert api["mouse"]() == (0, 0, False, False, False, 0, 0)
+    inp.pointer = _Pointer(40, 70, click=True)
+    x, y, left, mid, right, sx, sy = api["mouse"]()
+    assert (x, y, left) == (40, 70, True)              # touch (x,y,tapped) -> x,y,left
+    assert (mid, right, sx, sy) == (False, False, 0, 0)  # no middle/right/scroll
+    # touch() still returns its own 3-tuple shape unchanged.
+    assert api["touch"]() == (40, 70, True)
+
+
+def test_time_advances_with_cart_clock():
+    from runtime import host_app
+    from runtime import console as C
+    inp = _StubInput()
+    inp.cart_start_ms = C._ticks_ms()
+    api = host_app.make_api(_Stub(), inp, {})
+    t0 = api["time"]()
+    assert t0 >= 0
+    # Move the start back 50ms; time() = now - start must grow accordingly.
+    inp.cart_start_ms = C._ticks_diff(inp.cart_start_ms, 50)
+    assert api["time"]() >= t0 + 50
+
+
+def test_key_and_keyp_reflect_current_frame_key():
+    from runtime import host_app
+    inp = _StubInput()
+    api = host_app.make_api(_Stub(), inp, {})
+    a, b = ord("a"), ord("b")
+    # No key held this frame.
+    assert api["key"]() == 0 and api["key"](a) is False
+    assert api["keyp"]() == 0 and api["keyp"](a) is False
+    # Workstation.frame sets cart_key (held this frame) + cart_keyp (the edge).
+    inp.cart_key = a
+    inp.cart_keyp = a
+    assert api["key"]() == a and api["key"](a) is True and api["key"](b) is False
+    assert api["keyp"](a) is True
+    # Next frame the same key is still held but the edge is gone.
+    inp.cart_keyp = 0
+    assert api["key"](a) is True and api["keyp"](a) is False
+
+
+def test_pmem_round_trips_and_persists_to_pmem_json(tmp_path):
+    from runtime import kid_carts
+    from runtime import console as C
+    root = str(tmp_path / "carts")
+    kid_carts.ensure_dirs(root)
+    cart = kid_carts.create("Saver", root, src="def _draw():\n    pass\n")
+    # Fresh cart: pmem reads all zero.
+    cells = kid_carts.load_pmem(cart["path"])
+    assert cells == [0] * 256
+
+    writes = []
+    pm = C.Pmem(cells, on_write=lambda values: writes.append(list(values)))
+    assert pm.cell(0) == 0
+    assert pm.cell(0, 1234) == 1234 and pm.cell(0) == 1234   # write then read back
+    assert pm.cell(255, 7) == 7                              # last cell works
+    assert pm.cell(256, 9) == 0 and pm.cell(-1, 9) == 0      # out of range -> 0, no-op
+    # A no-change write must NOT re-persist (no per-frame SD hammering).
+    n_before = len(writes)
+    pm.cell(0, 1234)
+    assert len(writes) == n_before
+    assert writes[-1][0] == 1234 and writes[-1][255] == 7
+
+    # Persist for real + reload sees it (no pmem.json existed before).
+    kid_carts.save_pmem(cart, pm.cells)
+    reloaded = kid_carts.load_pmem(cart["path"])
+    assert reloaded[0] == 1234 and reloaded[255] == 7
+    # 32-bit unsigned mask: values are stored & re-read masked.
+    pm2 = C.Pmem(reloaded)
+    assert pm2.cell(1, 0x1_0000_0001) == 1                   # wraps to 32 bits
+
+
+def test_pmem_persists_through_workstation_open(tmp_path):
+    from runtime import host_app
+    from runtime import kid_carts
+    carts_dir = str(tmp_path / "carts")
+    # Create a cart whose _init bumps a high-score counter in pmem, before the
+    # workstation scans the dir, so the launcher picks it up.
+    kid_carts.ensure_dirs(carts_dir)
+    src = (
+        "def _init():\n"
+        "    pmem(0, pmem(0) + 1)\n"
+        "def _draw():\n"
+        "    pass\n"
+    )
+    kid_carts.create("Counter", carts_dir, src=src)
+
+    ws = host_app.build_workstation(carts_dir)
+    _open_cart(ws, "Counter")
+    assert ws.screen == "desktop" and ws.cart_error is None
+    assert ws.pmem.cell(0) == 1                  # _init bumped it once
+    # It persisted to pmem.json: reopening loads the saved value and bumps again.
+    ws.open()                                    # re-open the same selected cart
+    assert ws.pmem.cell(0) == 2
+
+
+def test_key_keyp_plumbed_through_console_driver(tmp_path):
+    # End-to-end: a cart reads key()/keyp(); the host ConsoleDriver feeds a typed
+    # byte into input.last_key and Workstation.frame resolves the held/edge state.
+    from runtime import host_app
+    from runtime import kid_carts
+    carts_dir = str(tmp_path / "carts")
+    kid_carts.ensure_dirs(carts_dir)
+    src = (
+        "log = []\n"
+        "def _update(dt):\n"
+        "    log.append((key(), keyp(), key(ord('a')), keyp(ord('a'))))\n"
+        "def _draw():\n"
+        "    pass\n"
+    )
+    kid_carts.create("Keys", carts_dir, src=src)
+    ws = host_app.build_workstation(carts_dir)
+    drv = host_app.ConsoleDriver(ws)
+    _open_cart(ws, "Keys")
+    assert ws.screen == "desktop" and ws.cart_error is None
+    a = ord("a")
+    drv.type_char(a); drv.frame(1 / 30)        # frame 1: press edge
+    drv.type_char(a); drv.frame(1 / 30)        # frame 2: still held, no edge
+    drv.frame(1 / 30)                          # frame 3: released
+    log = ws.ns["log"]
+    assert log[0] == (a, a, True, True)        # held + pressed-this-frame
+    assert log[1] == (a, 0, True, False)       # held, edge gone
+    assert log[2] == (0, 0, False, False)      # released

@@ -295,6 +295,41 @@ def save_sprites(cart, hex_text):
     cart["sprites"] = hex_text
 
 
+# --- persistent cart memory (pmem, TIC-80-style) ----------------------------
+#
+# A cart's pmem is 256 x 32-bit unsigned ints stored as a JSON list in pmem.json
+# beside main.py. TIC-80 gives carts pmem(i)/pmem(i,v) for high scores / save
+# state; this is the per-cart backing store. Reads default to all-zero; saves
+# are atomic (same crash-safe path as sprites/config) so an interrupted write
+# can never truncate a kid's save.
+
+PMEM_CELLS = 256
+PMEM_MASK = 0xFFFFFFFF
+
+
+def load_pmem(path):
+    """Read a cart's pmem (path = the .kcart folder). Returns a list of 256 ints,
+    all zero when there's no pmem.json yet or it's unreadable/short (padded)."""
+    cells = [0] * PMEM_CELLS
+    try:
+        data = json.loads(_read(path + "/pmem.json"))
+    except (OSError, ValueError):
+        return cells
+    if isinstance(data, list):
+        for i in range(min(PMEM_CELLS, len(data))):
+            try:
+                cells[i] = int(data[i]) & PMEM_MASK
+            except (TypeError, ValueError):
+                cells[i] = 0
+    return cells
+
+
+def save_pmem(cart, cells):
+    """Persist a cart's pmem list (256 ints) to pmem.json, atomically so an
+    interrupted write can't truncate it (needs cart['path'])."""
+    _write_atomic(cart["path"] + "/pmem.json", json.dumps(list(cells)))
+
+
 # --- shared sprite sheet (cross-cart sprite reuse, #18) ---------------------
 
 def shared_sheet_path(root=CARTS_DIR):

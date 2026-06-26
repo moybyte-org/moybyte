@@ -125,7 +125,7 @@ class DeviceCanvas:
         self._fb.text(str(s), int(x), int(y), self._col(c))
 
 
-def make_api(canvas, input, config, sheet=None):
+def make_api(canvas, input, config, sheet=None, pmem=None):
     import random
 
     def cfg(key, default=None):
@@ -152,13 +152,52 @@ def make_api(canvas, input, config, sheet=None):
             return None
         return (p.x, p.y, bool(p.click))
 
+    def mouse():
+        # TIC-80-shaped 7-tuple (x, y, left, middle, right, scrollx, scrolly)
+        # aliasing touch(): tap -> left button. The touchscreen has no
+        # middle/right/scroll, so those are constant 0/False.
+        p = getattr(input, "pointer", None)
+        if p is None:
+            return (0, 0, False, False, False, 0, 0)
+        return (p.x, p.y, bool(p.click), False, False, 0, 0)
+
+    def time():
+        # Milliseconds since the cart started (set by Workstation._start).
+        start = getattr(input, "cart_start_ms", 0)
+        return _ticks_diff(_ticks_ms(), start)
+
+    def key(code=None):
+        # key([code]) -> is that ASCII key held this frame (key(ord("a"))). The
+        # T-Deck keyboard reports one byte per frame, so key() tracks that single
+        # last key, not a full held-set: only one key reads as down at a time. With
+        # no arg, returns the last key code (0 when nothing is down).
+        cur = getattr(input, "cart_key", 0)
+        if code is None:
+            return cur
+        return cur == int(code)
+
+    def keyp(code=None):
+        # keyp([code]) -> pressed THIS frame (the 0->key edge). Same single-key
+        # limitation as key(); no auto-repeat hold/period args.
+        edge = getattr(input, "cart_keyp", 0)
+        if code is None:
+            return edge
+        return edge == int(code)
+
+    def pmem_fn(index, value=None):
+        # TIC-80 pmem(i[, v]): read pmem(i) -> int, write pmem(i, v) -> persists.
+        if pmem is None:
+            return 0
+        return pmem.cell(index, value)
+
     return {
         "W": canvas.w, "H": canvas.h,
         "cls": canvas.cls, "pix": canvas.pix,
         "line": canvas.line, "rect": canvas.rect, "rectb": canvas.rectb,
         "circ": canvas.circ, "circb": canvas.circb, "spr": spr,
-        "print": canvas.print, "touch": touch,
+        "print": canvas.print, "touch": touch, "mouse": mouse,
         "btn": input.held, "btnp": input.pressed,
+        "key": key, "keyp": keyp, "time": time, "pmem": pmem_fn,
         "cfg": cfg, "col": color,
         "rnd": lambda n=1.0: random.random() * n,
         "flr": lambda x: int(x // 1),
