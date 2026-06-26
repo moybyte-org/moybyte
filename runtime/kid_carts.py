@@ -496,6 +496,61 @@ def save_system(settings, root=CARTS_DIR):
     _write_atomic(system_store_path(root), json.dumps(dict(settings)))
 
 
+# --- achievements (#21) -----------------------------------------------------
+#
+# The set of unlocked achievement ids (fun milestones a kid hits naturally, plus
+# the hidden Easter-egg rewards) persists to a single achievements.json that lives
+# BESIDE the carts dir (a sibling of `root`, like system.json/wifi.json/the shared
+# sheet) -- it is system state, not tied to any cart. Stored as {"unlocked": [id,
+# ...]}; the catalog of what each id MEANS lives in the shared console (host ==
+# device). Written atomically (same crash-safe path as the cart saves) so an
+# interrupted write can never lose a kid's earned badges. MicroPython-safe (json +
+# os only).
+
+ACHIEVEMENTS_STORE_NAME = "achievements.json"
+
+
+def achievements_store_path(root=CARTS_DIR):
+    """Well-known path of the achievements store: a sibling of the carts dir
+    (one level up from `root`), so it isn't tied to any single cart."""
+    parent = root.rsplit("/", 1)[0]
+    return (parent + "/" + ACHIEVEMENTS_STORE_NAME) if parent else ACHIEVEMENTS_STORE_NAME
+
+
+def load_achievements(root=CARTS_DIR):
+    """Read the unlocked achievement ids as a list. Returns [] when nothing has
+    been earned yet or the file is unreadable/garbage (a corrupt store must never
+    crash boot). Duplicates/non-strings are dropped so the loaded list is clean."""
+    try:
+        data = json.loads(_read(achievements_store_path(root)))
+    except (OSError, ValueError):
+        return []
+    ids = data.get("unlocked") if isinstance(data, dict) else None
+    if not isinstance(ids, list):
+        return []
+    out = []
+    seen = {}
+    for i in ids:
+        if isinstance(i, str) and i not in seen:
+            seen[i] = True
+            out.append(i)
+    return out
+
+
+def save_achievements(unlocked, root=CARTS_DIR):
+    """Persist the unlocked achievement ids (a list of strings), atomically.
+    Ensures the parent dir exists."""
+    ensure_dirs(root)
+    clean = []
+    seen = {}
+    for i in unlocked:
+        s = str(i)
+        if s not in seen:
+            seen[s] = True
+            clean.append(s)
+    _write_atomic(achievements_store_path(root), json.dumps({"unlocked": clean}))
+
+
 # --- cart management (create / duplicate / delete) --------------------------
 
 # A friendly starter cartridge: an editable colored dot on a wallpaper.

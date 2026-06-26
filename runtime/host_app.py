@@ -451,6 +451,9 @@ def build_workstation(carts_dir=None):
     # Desktop shell (#28): load the system settings (system.json) and apply the
     # saved wallpaper so the home screen boots with the chosen backdrop.
     ws.load_system()
+    # Achievements (#21): load the unlocked badges (achievements.json) so earned
+    # milestones persist across reboots and the toast/view reflect them.
+    ws.load_achievements()
     return ws
 
 
