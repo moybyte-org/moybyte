@@ -287,6 +287,70 @@ def test_hop_quest_uses_tilemap_and_still_plays(tmp_path):
     assert len(set(ws.canvas.buf)) > 1      # the map() blit drew the ground
 
 
+def test_battle_city_runs_with_tilemap_and_autoplay_progresses(tmp_path):
+    # Battle City (#35): a top-down tank battle drawn over the cart's brick/steel
+    # tilemap (map.kmap) with map()/mget()/mset(). Verify it loads its tilemap and
+    # spawns a wave, then that the attract auto-pilot runs many frames without error
+    # and actually PROGRESSES -- destroys enemies (score climbs) and the round ends
+    # (a wave is cleared or the base/lives are lost, then it resets).
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_cart(ws, "Battle City")
+    assert ws.cart["type"] == "game"
+    assert ws.cart_error is None
+    assert ws.cart.get("map") and not ws.tilemap.is_blank()     # the field is a tilemap
+    # brick + steel are both present in the field (the two wall kinds)
+    field = [ws.tilemap.mget(x, y) for y in range(ws.tilemap.h) for x in range(ws.tilemap.w)]
+    assert 8 in field and 9 in field                            # brick (8) + steel (9)
+    ws.config["autoplay"] = 1
+    ws.apply()
+    assert ws.ns["spawn_q"] + ws.ns["_alive_enemies"]() == ws.config["enemies"]
+    best_score, states = 0, set()
+    for _ in range(1200):                   # attract-mode auto-play hunts enemies
+        ws.frame(1 / 30)
+        assert ws.cart_error is None        # never crash a frame
+        best_score = max(best_score, ws.ns["score"])
+        states.add(ws.ns["state"])
+    assert best_score > 0                   # destroyed at least one enemy (scored)
+    assert states != {0}                    # reached a win or game-over (round ended)
+    assert len(set(ws.canvas.buf)) > 3      # the map()/sprites drew the battlefield
+
+
+def test_battle_city_brick_crumbles_steel_stops(tmp_path):
+    # Bullet vs walls: a player bullet into a BRICK cell clears it (mset -> empty),
+    # while a STEEL cell is never destroyed. Drive a couple of shots straight into
+    # each wall kind and check the tilemap before/after.
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_cart(ws, "Battle City")
+    ns = ws.ns
+    TS = ns["TS"]
+    # find a brick and a steel cell in the loaded field
+    brick = steel = None
+    for y in range(ws.tilemap.h):
+        for x in range(ws.tilemap.w):
+            v = ws.tilemap.mget(x, y)
+            if v == 8 and brick is None:
+                brick = (x, y)
+            elif v == 9 and steel is None:
+                steel = (x, y)
+    assert brick and steel
+    # fire a bullet directly at the brick cell's center (owner 0 = player) and step
+    bx, by = brick
+    ns["bullets"].append([bx * TS + TS // 2, by * TS + TS // 2 - TS, 1, 0])  # heading down
+    for _ in range(20):
+        ws.frame(1 / 30)
+        if ws.tilemap.mget(bx, by) < 0:
+            break
+    assert ws.tilemap.mget(bx, by) < 0           # brick crumbled to empty
+    # a bullet into steel leaves it intact
+    sx, sy = steel
+    ns["bullets"].append([sx * TS + TS // 2, sy * TS + TS // 2 - TS, 1, 0])
+    for _ in range(20):
+        ws.frame(1 / 30)
+    assert ws.tilemap.mget(sx, sy) == 9          # steel never destroyed
+
+
 def test_console_cards_make_it_mine_edit_and_run(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
