@@ -1,7 +1,7 @@
 # KidCode v0.4 Audio — design + vertical slice
 
 **Issue:** #16 (Audio: sound effects + music, plus an on-device music editor)
-**Status:** host vertical slice landed; device I2S path stubbed (NEEDS ON-DEVICE VERIFICATION)
+**Status:** host vertical slice landed; device I2S path implemented (non-blocking feed, NEEDS ON-DEVICE VERIFICATION)
 **Scope of this doc:** the cart-facing audio API, the shared sound data model, the
 host backend, the device (T-Deck Plus I2S) backend, on-cart storage, and where the
 on-device music/SFX editor fits the existing console UI.
@@ -203,47 +203,79 @@ display + SD fight over — so audio does **not** collide with the display/SD bu
 takeover constraints (`CLAUDE.md`). That removes the scariest risk; the open risk
 is purely CPU budget in the single-threaded loop.
 
-Sketch (`DeviceAudio` in `kid_runtime.py`, behind a try/except so a board without
-the amp degrades to silence, never a crash):
+Also crucial: **`BOARD_POWERON` (GPIO 10) must be HIGH** to power the board
+peripherals — the amp *and* the panel sit behind it (the reference sets it in every
+`setup()`). KidCode already drives it at boot (`tdeck_board.init_board_pins`), and
+the panel works, so the amp is powered. There is **no separate amp enable / SD-mode
+/ gain GPIO** on the T-Deck Plus (the only audio pins are BCK/WS/DOUT; the ES7210 is
+the *mic*, unrelated). So pins + power + format are all correct — silence is the
+I2S *init* or the *feed*, not the wiring.
+
+> **Correction (the original sketch was wrong about blocking).** MicroPython
+> `machine.I2S.write()` is **BLOCKING by default** — it copies the whole buffer into
+> the DMA ring before returning, *waiting* if the ring is full. Rendering `rate*dt`
+> samples and blocking-`write()`ing them every frame stalls the single-threaded loop
+> for ~one frame of audio per frame: that is the observed **FPS drop**, and the
+> jitter under-runs the DMA into **crackle**. Non-blocking is **opt-in** via
+> `I2S.irq(handler)` (which switches the port into non-blocking mode: `write()`
+> returns immediately, the port copies your buffer on a background FreeRTOS task,
+> and fires `handler` on completion) or the uasyncio path. The ESP32 non-blocking
+> `write()` keeps a *pointer* to the caller buffer until that copy finishes, with a
+> queue depth of 1 (a second in-flight write is silently dropped).
+
+The implemented `DeviceAudio` (`kid_runtime.py`, behind a try/except so a board
+without the amp degrades to silence, never a crash):
 
 ```python
 from machine import I2S, Pin
-audio = I2S(0, sck=Pin(7), ws=Pin(5), sd=Pin(6),
-            mode=I2S.TX, bits=16, format=I2S.MONO,
-            rate=11025, ibuf=4096)
-# each frame, between draws (the loop is single-threaded, like SD ops):
-audio.write(engine.render(samples_this_frame))   # non-blocking when ibuf has room
+i2s = I2S(0, sck=Pin(7), ws=Pin(5), sd=Pin(6),
+          mode=I2S.TX, bits=16, format=I2S.MONO,
+          rate=8000, ibuf=4096)
+i2s.irq(self._on_done)          # -> NON-blocking mode; _on_done clears self._busy
+# each frame, between draws (single-threaded, like SD ops):
+if not self._busy and engine.is_active():
+    n = min(int(engine.rate * dt), AUDIO_MAX_FRAME)
+    engine.render_into(buf, n)  # ONE persistent double-buffer, no per-frame alloc
+    self._busy = True
+    i2s.write(memoryview(buf)[:n * 2])   # returns immediately; ibuf rides out jitter
 ```
 
-MicroPython `machine.I2S` supports non-blocking writes (returns immediately if the
-internal buffer is full) and an asyncio path. For v1 we render `rate * dt` samples
-per frame and `write()` them; the DMA `ibuf` smooths jitter.
+Two persistent buffers are alternated so the buffer the port still holds a pointer
+to is never reused or GC'd mid-copy; `_busy` (cleared by the irq) gates the next
+write so a write is issued only when the previous copy is done — the DMA `ibuf`
+covers any skipped frame. Rate is **8 kHz** (the reference `SimpleTone` rate) to
+halve the per-frame mixer cost; `render_into` skips all work when nothing plays.
 
 **This path is written but NOT verified on hardware in this environment.** What a
 hardware spike must confirm:
 
-1. The I2S pins/format above actually drive the MAX98357 (amp may need an SD-mode/
-   gain pin; confirm against the schematic — the reference's ES7210 is the *mic*;
-   the amp is separate).
-2. `engine.render()` at 11025 Hz fits the per-frame CPU budget at 30 FPS without
-   dropping the desktop below playable (measure; drop to 8000 Hz if needed). The
-   pure-Python mixer may be too slow on-device — a native `kc_audio` C mixer (like
-   `kc_gfx`) is the likely escalation; the model/format stays the same.
-3. Non-blocking `audio.write()` never stalls a frame (use the ibuf; never block).
+1. The I2S pins/format above actually drive the MAX98357 audibly (boot log prints
+   `KidCode audio: I2S ready ...` on success, or `I2S UNAVAILABLE, silent: <exc>`
+   if the constructor raised — read it during the ~2 s boot window).
+2. The pure-Python mixer at 8 kHz fits the per-frame CPU budget at 30 FPS without
+   dropping the desktop below playable (measure). If still too slow, a native
+   `kc_audio` C mixer (like `kc_gfx`) is the escalation; the model/format/`render_into`
+   seam stay identical.
+3. Non-blocking `write()` + the `_busy` gate never stalls a frame and never crackles
+   (the ibuf should absorb jitter).
 4. Whether a uasyncio background feeder is worth it (§6) vs. the synchronous
-   per-frame `write`.
+   per-frame non-blocking `write`.
 
 ---
 
 ## 6. Open question answered: background task vs. per-frame
 
 **v1: serve audio per-frame in the single-threaded desktop loop** — same as SD ops.
-Each frame the runtime renders `rate*dt` samples and writes them to the I2S DMA
-buffer (host: the audio callback pulls). The DMA `ibuf` (a few KB) absorbs frame
-jitter; at 11025 Hz / 30 FPS that's ~368 samples/frame, trivially within one DMA
-buffer. A background uasyncio feeder is a **possible v2 optimization** if music +
-heavy draws ever starve the buffer, but it adds the multitasking the v0.4 plan
-explicitly defers (plan §6.3). Keep v1 synchronous.
+Each frame the runtime renders `min(rate*dt, AUDIO_MAX_FRAME)` samples and **issues a
+non-blocking I2S `write()`** (host: the audio callback pulls). The write returns
+immediately; the port copies on its own task and the DMA `ibuf` (a few KB) absorbs
+frame jitter — at 8 kHz / 30 FPS that's ~267 samples/frame, well within one DMA
+buffer. (The earlier note assumed `write()` was non-blocking by default; it is not —
+see the §5 correction. The single-threaded loop still works, but only because the
+write is made non-blocking via `I2S.irq()`.) A background uasyncio feeder is a
+**possible v2 optimization** if music + heavy draws ever starve the buffer, but it
+adds the multitasking the v0.4 plan explicitly defers (plan §6.3). Keep v1 the
+synchronous non-blocking per-frame feed.
 
 ---
 
