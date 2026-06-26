@@ -27,7 +27,10 @@ def init_display():
     sck = 40
     host = 1
     cs = 12
-    freq = 40000000
+    freq = 80000000   # PERF (#33): 40->80 MHz halves the ~31ms full-frame SPI flush.
+    # If the panel shows tearing/corruption/garbage, it's over the ST7789's limit on
+    # this wiring -> drop to 62500000, then 40000000. The flush is bandwidth-bound, so
+    # this is the main flush lever (band count barely matters -- same total bytes).
 
     print("KidCode display SPI starting")
     _spi_bus = machine.SPI.Bus(host=host, mosi=mosi, miso=miso, sck=sck)
