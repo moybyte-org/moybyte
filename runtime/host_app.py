@@ -226,6 +226,51 @@ def make_wifi(store=None, root=None):
     return FakeWifi(store, root)
 
 
+def _real_local_ip():
+    """The desktop's real outbound LAN IP (no packet sent), or None. Lets the live
+    sim report the actual connection so network features (web editor #22, AI #8)
+    bind to / report a real IP on the host instead of a placeholder."""
+    import socket
+    s = None
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))          # no traffic; just resolves the route
+        return s.getsockname()[0]
+    except Exception:  # noqa: BLE001 -- offline / sandboxed -> fall back
+        return None
+    finally:
+        if s is not None:
+            s.close()
+
+
+class HostWifi(FakeWifi):
+    """Live-sim WiFi backend that reports the *real* desktop connection -- your PC
+    is already online, so `status()` returns the actual LAN IP and `scan()` lists
+    the real network alongside the canned demo APs. This makes the desktop sim a
+    genuine testbed for network features (#22 web editor, #8 AI) over real Python
+    sockets, with the device `network.WLAN` as the unverified port. scan/connect
+    stay light (we don't manage the OS's WiFi); the value is real status/IP. Falls
+    back to FakeWifi when offline."""
+
+    def status(self):
+        ip = _real_local_ip()
+        if ip:
+            return (True, self._ssid or "desktop", ip)
+        return FakeWifi.status(self)
+
+    def scan(self):
+        nets = list(FakeWifi.scan(self))
+        if _real_local_ip():
+            nets.insert(0, (self._ssid or "desktop", 99, False))
+        return nets
+
+
+def make_host_wifi(store=None, root=None):
+    """Live-sim factory: real-connection-aware WiFi (simulate_desktop wires this for
+    interactive runs; tests/headless keep the deterministic FakeWifi)."""
+    return HostWifi(store, root)
+
+
 def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
              pmem=None, wifi=None):
     """The cartridge global namespace on the host -- same names/signature as the

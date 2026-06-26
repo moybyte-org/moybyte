@@ -216,6 +216,9 @@ def main():
     # scripted runs keep the silent FakeAudio so they stay deterministic + device-free.
     if not args.demo and args.script is None:
         ws.make_audio = host_app.make_sdl_audio
+        # Live run -> report the desktop's REAL WiFi connection/IP (your PC is online),
+        # so network features test against real Python sockets. Headless keeps FakeWifi.
+        ws.wifi = host_app.make_host_wifi(host_app.kid_carts, ws.carts_root)
     # The scripted demo tour drives no gameplay input, so default it to autoplay
     # (so the GIF is lively); a live, interactive session defaults to PLAY.
     autoplay = args.autoplay if args.autoplay is not None else args.demo
