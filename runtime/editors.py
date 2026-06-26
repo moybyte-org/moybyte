@@ -12,6 +12,7 @@ only its own rendering + input glue around these.
   PaintEditor  -- pixel-paint state over a sheet tile (#4 editor)
   TileMap      -- grid of tile ids over a sheet + map.kmap hex (#32 storage)
   MapEditor    -- tile-placement state over a TileMap (#32 editor)
+  BlockEditor  -- structured-outline block program + cursor (#29 Part 2 editor)
 
 Keep this module dependency-free so it freezes cleanly and imports under both
 CPython (tests/host) and MicroPython (device).
@@ -531,3 +532,261 @@ class MapEditor:
         always stays inside the map (never scroll the whole map off the window)."""
         self.cam_x = max(0, min(self.tilemap.w - 1, self.cam_x + dcx))
         self.cam_y = max(0, min(self.tilemap.h - 1, self.cam_y + dcy))
+
+
+class BlockRow:
+    """One visual line of the flattened block-outline (what the cursor moves over).
+
+    Two flavors share this struct so the cursor is a single index over both:
+      kind == "block"  -- an existing block; `block` is its dict, `parent` is the
+                          list it lives in, `index` its position in that list.
+      kind == "insert" -- an empty insert point (a `+` slot) where a NEW statement
+                          can be added; `parent`/`index` say where it would land.
+    `depth` is the indent level (for the renderer); `is_else` marks the synthetic
+    "else" divider row of an if_else (a block row the kid can't delete directly)."""
+
+    def __init__(self, kind, depth, parent, index, block=None, is_else=False):
+        self.kind = kind          # "block" | "insert"
+        self.depth = depth
+        self.parent = parent      # the children list this row belongs to
+        self.index = index        # position of the block (or the insert point) in it
+        self.block = block        # the block dict for a "block" row, else None
+        self.is_else = is_else    # the if_else divider (a non-deletable label row)
+
+
+class BlockEditor:
+    """The structured-outline block program + a cursor over its flattened script
+    (issue #29 Part 2). Pure logic -- no rendering, no I/O -- so it backs both the
+    host console and the frozen device console. The `blocks` module (Part 1) is the
+    vocabulary/compiler; it's INJECTED (not imported) so this stays dependency-free
+    and freezes cleanly: the host passes runtime.blocks, the device passes the
+    frozen `blocks`.
+
+    The program is the Part-1 `{vars, scripts}` tree. The kid navigates a flattened
+    list of rows (events, statements, and the `+` insert points between them) with
+    a single cursor; A inserts at an insert point or edits a block, and the edit ops
+    (delete / move / set-slot) mutate the tree and re-flatten. No dragging -- exactly
+    the decided device-friendly interaction."""
+
+    def __init__(self, blocks, program=None):
+        self.blocks = blocks
+        self.program = program if program is not None else blocks.empty_program()
+        self.cur = 0              # cursor index into self.rows
+        self.rows = []
+        self.dirty = False
+        self.reflow()
+
+    # -- flattening ----------------------------------------------------------
+    def reflow(self):
+        """Rebuild the flat row list from the tree, then clamp the cursor. Called
+        after every structural edit so rows/cursor stay in sync with the program."""
+        rows = []
+        scripts = self.program.get("scripts", []) or []
+        for si in range(len(scripts)):
+            self._flatten_block(rows, scripts, si, 0)
+        if not rows:                              # an empty program still needs a row
+            rows.append(BlockRow("insert", 0, scripts, 0))
+        self.rows = rows
+        if self.cur >= len(rows):
+            self.cur = len(rows) - 1
+        if self.cur < 0:
+            self.cur = 0
+
+    def _flatten_block(self, rows, parent, index, depth):
+        b = parent[index]
+        tid = b.get("t")
+        if tid == self.blocks.ELSE_MARKER:        # the if_else divider, drawn as a label
+            rows.append(BlockRow("block", depth, parent, index, b, is_else=True))
+            return
+        rows.append(BlockRow("block", depth, parent, index, b))
+        if self.blocks.is_cblock(tid) or self._is_hat(tid):
+            # A block with a body (hat / c-block) shows its children indented, with
+            # an insert point before each child and one trailing insert point so the
+            # body can always be appended to even when empty. Ensure the body list
+            # exists (make_block omits "c" on hats), so inserts have a real target.
+            children = b.setdefault("c", [])
+            cdepth = depth + 1
+            for ci in range(len(children)):
+                rows.append(BlockRow("insert", cdepth, children, ci))
+                self._flatten_block(rows, children, ci, cdepth)
+            rows.append(BlockRow("insert", cdepth, children, len(children)))
+
+    def _is_hat(self, tid):
+        d = self.blocks.block_def(tid)
+        return bool(d) and d.get("shape") == self.blocks.SHAPE_HAT
+
+    # -- cursor --------------------------------------------------------------
+    def move(self, d):
+        """Move the cursor by d rows (honors magnitude, like the code editor)."""
+        n = len(self.rows)
+        if n == 0:
+            return
+        self.cur = max(0, min(n - 1, self.cur + d))
+
+    def row(self):
+        """The row under the cursor (or None for an empty editor)."""
+        if 0 <= self.cur < len(self.rows):
+            return self.rows[self.cur]
+        return None
+
+    def selected_block(self):
+        """The block dict under the cursor, or None if the cursor is on an insert
+        point (or the synthetic else divider)."""
+        r = self.row()
+        if r is not None and r.kind == "block" and not r.is_else:
+            return r.block
+        return None
+
+    def at_insert(self):
+        r = self.row()
+        return r is not None and r.kind == "insert"
+
+    # -- structural edits ----------------------------------------------------
+    def insert_block(self, type_id, params=None, children=None):
+        """Insert a freshly-built block (make_block) at the cursor's insert point.
+        No-op (returns None) if the cursor isn't on an insert point. The new block
+        becomes the selection so editing/nesting flows continue on it. Returns the
+        new block dict on success."""
+        r = self.row()
+        if r is None or r.kind != "insert":
+            return None
+        blk = self.blocks.make_block(type_id, params, children)
+        r.parent.insert(r.index, blk)
+        self.dirty = True
+        self.reflow()
+        self._select_block(blk)
+        return blk
+
+    def insert_else(self):
+        """Add an else divider to the if_else c-block under the cursor (so the kid
+        can build the else branch). No-op if the selected block isn't an if_else or
+        already has an else. The else marker goes at the END of the children, after
+        the if-body. Returns True on success."""
+        b = self.selected_block()
+        if b is None or b.get("t") != "if_else":
+            return False
+        children = b.setdefault("c", [])
+        for c in children:
+            if c.get("t") == self.blocks.ELSE_MARKER:
+                return False                      # only one else per if_else
+        children.append(self.blocks.make_block(self.blocks.ELSE_MARKER))
+        self.dirty = True
+        self.reflow()
+        return True
+
+    def delete(self):
+        """Delete the selected block (and its whole subtree). Refuses to delete an
+        event hat (a script must keep its lifecycle) and the synthetic else divider.
+        Returns True if something was removed."""
+        r = self.row()
+        if r is None or r.kind != "block" or r.is_else:
+            return False
+        tid = r.block.get("t")
+        if self._is_hat(tid):
+            return False                          # never delete an event hat
+        del r.parent[r.index]
+        self.dirty = True
+        self.reflow()
+        # keep the cursor near where the block was (clamp handles the tail case)
+        self.cur = max(0, min(len(self.rows) - 1, self.cur))
+        return True
+
+    def move_block(self, d):
+        """Reorder the selected block up (d<0) / down (d>0) among its SIBLINGS in
+        the same body. Won't move a hat (events stay ordered by kind) or the else
+        divider, and won't move past the ends of its sibling list. Returns True if
+        it moved."""
+        r = self.row()
+        if r is None or r.kind != "block" or r.is_else:
+            return False
+        if self._is_hat(r.block.get("t")):
+            return False
+        siblings = r.parent
+        i = r.index
+        j = i + (1 if d > 0 else -1)
+        if j < 0 or j >= len(siblings):
+            return False
+        if siblings[j].get("t") == self.blocks.ELSE_MARKER:
+            # Don't shuffle a statement across the else boundary by a single step --
+            # that silently changes branches. The kid moves it explicitly instead.
+            return False
+        siblings[i], siblings[j] = siblings[j], siblings[i]
+        self.dirty = True
+        self.reflow()
+        self._select_block(siblings[j])
+        return True
+
+    # -- slot editing --------------------------------------------------------
+    def slots(self, block=None):
+        """The catalog slot descriptors for a block (defaults to the selection).
+        Empty list for an unknown/None block."""
+        b = block if block is not None else self.selected_block()
+        if b is None:
+            return []
+        d = self.blocks.block_def(b.get("t"))
+        return list(d["slots"]) if d else []
+
+    def slot_value(self, slot_name, block=None):
+        b = block if block is not None else self.selected_block()
+        if b is None:
+            return None
+        return (b.get("p", {}) or {}).get(slot_name)
+
+    def set_slot(self, slot_name, value, block=None):
+        """Write a slot value on a block (defaults to the selection). The caller is
+        responsible for passing a value the slot's type accepts (a number/string
+        literal, a variable name, a dropdown option, or an expression block dict for
+        an expr slot). Returns True if the block exists."""
+        b = block if block is not None else self.selected_block()
+        if b is None:
+            return False
+        p = b.setdefault("p", {})
+        p[slot_name] = value
+        self.dirty = True
+        return True
+
+    def cycle_dropdown(self, slot_name, d=1, block=None):
+        """Step a dropdown slot to the next/previous option (wrapping). Convenience
+        for the picker UI. Returns the new option, or None if the slot isn't a known
+        dropdown. (number/text slots are edited via set_slot from the keyboard.)"""
+        b = block if block is not None else self.selected_block()
+        if b is None:
+            return None
+        for slot in self.slots(b):
+            if slot["name"] == slot_name and slot["type"] == self.blocks.SLOT_DROPDOWN:
+                opts = self.blocks.slot_options(slot)
+                if not opts:
+                    return None
+                cur = (b.get("p", {}) or {}).get(slot_name)
+                try:
+                    i = opts.index(cur)
+                except ValueError:
+                    i = 0
+                val = opts[(i + d) % len(opts)]
+                self.set_slot(slot_name, val, b)
+                return val
+        return None
+
+    # -- variables -----------------------------------------------------------
+    def add_var(self, name):
+        """Declare a new variable (so variable slots can reference it). De-duplicates
+        and ignores blanks. Returns the variable list."""
+        name = str(name).strip()
+        vars_ = self.program.setdefault("vars", [])
+        if name and name not in vars_:
+            vars_.append(name)
+            self.dirty = True
+        return vars_
+
+    def variables(self):
+        return list(self.program.get("vars", []) or [])
+
+    # -- helpers -------------------------------------------------------------
+    def _select_block(self, blk):
+        """Park the cursor on the row that holds `blk` after a reflow (so an insert/
+        move leaves the new/moved block selected)."""
+        for i in range(len(self.rows)):
+            r = self.rows[i]
+            if r.kind == "block" and r.block is blk:
+                self.cur = i
+                return

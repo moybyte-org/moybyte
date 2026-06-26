@@ -12,7 +12,18 @@ free apart from the shared editor cores below.
 import time
 
 from audio import AudioBank, AudioEngine
-from editors import CodeEditor, MapEditor, PaintEditor, SpriteSheet, TileMap
+from editors import (BlockEditor, CodeEditor, MapEditor, PaintEditor,
+                     SpriteSheet, TileMap)
+
+# The block vocabulary/compiler (#29). Imported under whichever name it's known by:
+# bare `blocks` on the device (frozen top-level) and on the host once host_app has
+# aliased it, or `runtime.blocks` when a test loads console/kid_runtime directly
+# without that alias (the device path is plain `import blocks`). Mirrors
+# kid_carts._import_blocks so neither module hard-depends on import order.
+try:
+    import blocks as _blocks_mod
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import blocks as _blocks_mod
 
 
 def _ticks_ms():
@@ -285,6 +296,7 @@ class Pointer:
 _MENU_BTN = (4, 4, 64, 18)        # desktop overlay: open Make-it-mine / code
 _PAINT_BTN = (72, 4, 64, 18)      # desktop overlay: open the paint editor
 _MAP_BTN = (140, 4, 64, 18)       # desktop overlay: open the map (tilemap) editor
+_BLOCKS_BTN = (208, 4, 42, 18)    # desktop overlay: open the block editor (#29)
 _HOME_BTN = (252, 4, 64, 18)      # desktop overlay: back to launcher
 _RUN_BTN = (28, 188, 70, 24)
 _CODE_BTN = (104, 188, 84, 24)
@@ -423,6 +435,63 @@ _PAN_DN = (244, 182, 24, 16)
 _MAP_ERASE = (14, 198, 40, 20)
 _MAP_SAVE = (58, 198, 64, 20)
 _MAP_CLOSE = (126, 198, 76, 20)
+# Block editor (#29 Part 2): the structured outline. A title bar + a vertical
+# scrolling list of Scratch-style colored block rows (the flattened script) over a
+# bottom action bar. Built 320x240-first (the responsive pass is #39 step 2), drawn
+# on the GAME canvas through the same primitives as the other editors so host ==
+# device. Pressing A on an insert `+` row opens the category->block insert menu.
+_BLK_TITLE_Y = 2
+_BLK_X0 = 6                # left edge of the outline
+_BLK_W = 308              # outline width
+_BLK_Y0 = 16             # first row's top
+_BLK_ROW_H = 16          # one block row's height (8px text + padding)
+_BLK_INDENT = 12         # px of indent per nesting depth
+_BLK_ROWS = 11           # visible rows (Y0 .. just above the action bar)
+_BLK_AREA = (_BLK_X0, _BLK_Y0, _BLK_W, _BLK_ROWS * _BLK_ROW_H)
+# Bottom action bar: ADD / DEL / up / down on the left, SAVE / CODE / CLOSE right.
+_BLK_ADD = (6, 196, 40, 22)
+_BLK_DEL = (48, 196, 34, 22)
+_BLK_UP = (84, 196, 22, 22)
+_BLK_DN = (108, 196, 22, 22)
+_BLK_SAVE = (138, 196, 50, 22)
+_BLK_CODE = (190, 196, 56, 22)   # graduate to code
+_BLK_CLOSE = (248, 196, 66, 22)
+# The insert menu: a modal list overlay (category list, then the block list for the
+# chosen category, then for some slots a small option picker). Drawn over a frozen
+# outline; navigated with up/down + A, B backs out one level.
+_BLK_MENU = (40, 24, 240, 192)        # the modal panel
+_BLK_MENU_ROW_H = 16
+_BLK_MENU_ROWS = 10                   # visible menu rows (scrolls if more)
+# In-row slot editing: tapping/right-step on a selected block cycles to its NEXT
+# editable slot; that slot is highlighted, and A opens its editor (number bump,
+# variable/dropdown picker, expr -> a nested expression insert).
+# Kid-facing category names for the insert menu (the catalog ids are terse keys).
+_CAT_LABEL = {
+    "events": "When...", "control": "Control", "draw": "Draw", "input": "Buttons",
+    "variables": "Variables", "operators": "Math", "sound": "Sound",
+}
+
+
+def _blk_plain_label(label):
+    """A block's display label with the {slot} placeholders stripped to bare names,
+    so a menu/row reads like 'repeat times' or 'if cond'. The renderer fills the
+    real slot values inline; this is the human template without the braces."""
+    out = ""
+    for ch in str(label):
+        if ch == "{":
+            out += ""              # drop the brace; keep the slot name that follows
+        elif ch == "}":
+            out += ""
+        else:
+            out += ch
+    return out
+
+
+# Kid-facing one-line hints for the surprising blocks (shown under the title).
+_BLK_HINTS = {
+    "forever": "forever = repeats fast every frame (not endless)",
+    "wait": "wait = a friendly pause (each frame keeps drawing)",
+}
 # Trackball cursor sensitivity (#2). _CURSOR_BASE is the per-pulse step; the
 # quadratic _CURSOR_ACCEL term adds light acceleration so a fast roll crosses the
 # 320px screen in far fewer pulses while a slow, single-pulse roll stays precise.
@@ -613,6 +682,8 @@ _GLYPHS = {
     # "map": a 3x3 tile grid (the tilemap editor's nav/open icon, #32) -- full
     # h-lines at rows 1/5/9, v-lines at cols 1/5/9, so it reads as a placed grid.
     "map":    (0x000, 0x7FE, 0x444, 0x444, 0x444, 0x7FE, 0x444, 0x444, 0x444, 0x7FE, 0x000, 0x000),
+    # "blocks": two stacked Scratch-style notched bricks (the #29 block-editor icon).
+    "blocks": (0x000, 0x3F8, 0x7FC, 0x7FC, 0x3F8, 0x000, 0x1FC, 0x3FE, 0x3FE, 0x1FC, 0x000, 0x000),
     # Desktop-shell dock icons (#28). "code" = angle brackets </>; "gear" = a
     # settings cog; "note" = a music note (the #16 music slot, greyed until it
     # lands); "app" = a generic window (default cart icon).
@@ -1111,6 +1182,13 @@ class Workstation:
         self.mapedit = None           # MapEditor while menu_view == "map" (#32)
         self.map_erase = False        # map editor: tap-to-erase instead of stamp
         self.map_page = 0             # map editor: first tile id shown in the palette
+        # Block editor (#29 Part 2): a BlockEditor over the cart's block program +
+        # the structured-outline UI state. `blocks_ed` is built lazily on first open.
+        self.blocks_ed = None         # BlockEditor while menu_view == "blocks"
+        self.blk_top = 0              # first outline row scrolled into view
+        self.blk_slot = 0             # which slot of the selected block is highlighted
+        self.blk_menu = None          # active insert menu state dict, or None
+        self.blk_status = None        # last block-editor SAVE result text
         self.keyboard = None          # set by run_desktop (for raw/text mode toggle)
         self._ekey_prev = 0           # last consumed keyboard byte (edge detect)
         self._drag = None             # last pointer pos during a code-view drag-scroll
@@ -1614,6 +1692,8 @@ class Workstation:
         self.editor = None
         self.paint = None
         self.mapedit = None
+        self.blocks_ed = None
+        self.blk_menu = None
         self.cart_error = None
         self.save_status = None
         self.sheet = self._build_sheet()
@@ -1722,6 +1802,27 @@ class Workstation:
             # live tilemap, so a running cart picks them up via tilemap.gen (#32).
             if self.mapedit is None and self.tilemap is not None and self.sheet is not None:
                 self.mapedit = MapEditor(self.tilemap, self.sheet)
+        elif view == "blocks":
+            # Build the BlockEditor over the cart's block program (#29). A cart
+            # authored from blocks carries blocks.json (cart["blocks"]); a code-only
+            # cart starts a fresh empty program -- saving it makes the cart
+            # block-authored from then on. The Part-1 `blocks` module is injected so
+            # the editor core stays dependency-free.
+            if self.blocks_ed is None and self.cart is not None:
+                prog = None
+                if self.carts_store is not None and self.cart.get("path"):
+                    try:
+                        prog = self._with_sd(
+                            lambda: self.carts_store.load_blocks(self.cart))
+                    except Exception as exc:  # noqa: BLE001
+                        print("KidCode load blocks failed:", _err_text(exc))
+                if prog is None:
+                    prog = self.cart.get("blocks")
+                self.blocks_ed = BlockEditor(_blocks_mod, prog)
+                self.blk_top = 0
+                self.blk_slot = 0
+                self.blk_menu = None
+                self.blk_status = None
         self._set_text_mode(view == "code")
         # Achievements (#21): visiting each editor (code/paint/map) earns "Toolbox
         # Master". "cards" isn't an editor, so it's ignored by note().
@@ -1756,6 +1857,11 @@ class Workstation:
         self.map_erase = False
         self.set_menu_view("map")
 
+    def _open_blocks(self):
+        self.screen = "menu"
+        self.blk_status = None
+        self.set_menu_view("blocks")
+
     def _leave_menu(self):
         self._set_text_mode(False)
         # Returning to the desktop from the code editor must run whatever source is
@@ -1766,6 +1872,14 @@ class Workstation:
         if self.menu_view == "code" and self.editor is not None and self.cart is not None:
             self.cart["src"] = self.editor.text()
             self._start()
+        elif self.menu_view == "blocks":
+            self.blk_menu = None
+            # A saved block edit already recompiled cart["src"] (save_blocks); re-run
+            # it so leaving the outline runs the freshest program, just like the code
+            # editor does. (Unsaved edits don't touch src, so this re-runs the last
+            # saved version -- the kid SAVEs to keep changes, exactly like code.)
+            if self.cart is not None:
+                self._start()
         self.screen = "desktop"
 
     def _editor_input(self):
@@ -1999,6 +2113,8 @@ class Workstation:
         self.editor = None
         self.paint = None
         self.mapedit = None
+        self.blocks_ed = None
+        self.blk_menu = None
         self.screen = "launcher"
         self.cart = None
         self.ns = None
@@ -2258,6 +2374,9 @@ class Workstation:
             if self.menu_view == "code":
                 self._editor_input()           # keyboard is in text mode here
                 return
+            if self.menu_view == "blocks":
+                self._blocks_input()           # cursor nav + insert menu (#29)
+                return
             if self.menu_view == "paint":
                 return                         # paint is pointer/touch-driven
             ed = self.cart.get("edit")
@@ -2454,6 +2573,8 @@ class Workstation:
                     self._open_paint()
                 elif _in(px, py, _MAP_BTN):
                     self._open_map()
+                elif _in(px, py, _BLOCKS_BTN):
+                    self._open_blocks()
                 elif _in(px, py, _HOME_BTN):
                     self.go_home()
         elif self.screen == "menu":
@@ -2495,6 +2616,9 @@ class Workstation:
                     self._map_stroke(px, py)   # drag to stamp/erase tiles (#30)
                 else:
                     self._map_drag = None
+                return
+            if self.menu_view == "blocks":
+                self._blocks_pointer(px, py, click)   # outline + insert menu (#29)
                 return
             ci = self._card_at(px, py)
             if ci is not None:
@@ -2663,6 +2787,367 @@ class Workstation:
         elif _in(px, py, _MAP_CLOSE):
             self._leave_menu()
 
+    # -- block editor (#29 Part 2) -------------------------------------------
+    #
+    # The structured outline. The cursor moves over the flattened script (block rows
+    # + the `+` insert points between them); A inserts (at an insert point) or steps
+    # through / edits the selected block's slots. No dragging -- the decided
+    # device-friendly interaction. The vocabulary/compiler is Part 1's blocks module;
+    # the BlockEditor core (runtime/editors.py) owns the tree edits, this owns the UI.
+
+    def _blk_reveal(self):
+        """Keep the block cursor inside the visible outline window (scrolloff)."""
+        be = self.blocks_ed
+        if be is None:
+            return
+        if be.cur < self.blk_top:
+            self.blk_top = be.cur
+        elif be.cur > self.blk_top + _BLK_ROWS - 1:
+            self.blk_top = be.cur - _BLK_ROWS + 1
+        maxtop = len(be.rows) - _BLK_ROWS
+        if maxtop < 0:
+            maxtop = 0
+        self.blk_top = max(0, min(maxtop, self.blk_top))
+
+    def _blk_move_cursor(self, d):
+        be = self.blocks_ed
+        if be is None:
+            return
+        be.move(d)
+        self.blk_slot = 0          # a new selection resets the slot highlight
+        self._blk_reveal()
+
+    def _blk_a(self):
+        """The A/primary action in the outline: open the insert menu on a `+` row,
+        or edit the highlighted slot of the selected block (a c-block with no slots
+        falls back to opening the insert menu for its body's first gap)."""
+        be = self.blocks_ed
+        if be is None:
+            return
+        if be.at_insert():
+            self._blk_open_categories()
+            return
+        b = be.selected_block()
+        if b is None:
+            return
+        slots = be.slots(b)
+        if slots:
+            self._blk_edit_slot(b, slots[self.blk_slot % len(slots)])
+
+    def _blk_next_slot(self):
+        """Step the slot highlight to the selected block's next slot (wraps)."""
+        be = self.blocks_ed
+        if be is None:
+            return
+        slots = be.slots()
+        if slots:
+            self.blk_slot = (self.blk_slot + 1) % len(slots)
+
+    # -- the insert menu (category -> block, plus slot pickers) --------------
+    def _blk_open_categories(self):
+        """Open the modal insert menu at the category level."""
+        self.blk_menu = {"mode": "cat", "sel": 0, "top": 0,
+                         "items": _blocks_mod.categories()}
+
+    def _blk_open_blocks(self, category):
+        ids = _blocks_mod.blocks_in_category(category)
+        # Events are the lifecycle hats -- they live at the top level and the empty
+        # program already has all three, so they're not insertable into a body.
+        if category == _blocks_mod.CAT_EVENTS:
+            ids = []
+        self.blk_menu = {"mode": "blk", "cat": category, "sel": 0, "top": 0,
+                         "items": ids}
+
+    def _blk_menu_items(self):
+        m = self.blk_menu
+        return m["items"] if m else []
+
+    def _blk_menu_label(self, i):
+        """The display label for menu item i (a category name or a block label)."""
+        m = self.blk_menu
+        if not m:
+            return ""
+        item = m["items"][i]
+        if m["mode"] == "cat":
+            return _CAT_LABEL.get(item, item).upper()
+        if m["mode"] == "blk":
+            d = _blocks_mod.block_def(item)
+            return _blk_plain_label(d["label"]) if d else item
+        if m["mode"] in ("dropdown", "variable"):
+            return str(item)
+        return str(item)
+
+    def _blk_menu_move(self, d):
+        m = self.blk_menu
+        if not m or not m["items"]:
+            return
+        m["sel"] = max(0, min(len(m["items"]) - 1, m["sel"] + d))
+        if m["sel"] < m["top"]:
+            m["top"] = m["sel"]
+        elif m["sel"] > m["top"] + _BLK_MENU_ROWS - 1:
+            m["top"] = m["sel"] - _BLK_MENU_ROWS + 1
+
+    def _blk_menu_select(self):
+        """Activate the highlighted menu item (drill in or commit)."""
+        m = self.blk_menu
+        if not m or not m["items"]:
+            return
+        item = m["items"][m["sel"]]
+        if m["mode"] == "cat":
+            self._blk_open_blocks(item)
+        elif m["mode"] == "blk":
+            self._blk_insert_chosen(item)
+        elif m["mode"] == "dropdown":
+            self.blocks_ed.set_slot(m["slot"], item, m["block"])
+            self.blk_menu = None
+        elif m["mode"] == "variable":
+            self.blocks_ed.set_slot(m["slot"], item, m["block"])
+            self.blk_menu = None
+        elif m["mode"] == "expr":
+            self._blk_insert_expr(item)
+
+    def _blk_menu_back(self):
+        """Back out one menu level (block list -> categories), or close the menu."""
+        m = self.blk_menu
+        if not m:
+            return
+        if m["mode"] == "blk":
+            self._blk_open_categories()
+        else:
+            self.blk_menu = None
+
+    def _blk_insert_chosen(self, type_id):
+        """Insert the chosen block type at the cursor and close the menu."""
+        be = self.blocks_ed
+        be.insert_block(type_id)
+        self.blk_slot = 0
+        self.blk_menu = None
+        self._blk_reveal()
+
+    # -- slot editors --------------------------------------------------------
+    def _blk_edit_slot(self, block, slot):
+        """Open the right editor for a slot's type: number/text bump inline (or via
+        the keyboard pad), variable + dropdown open a picker, expr opens a nested
+        expression-block insert menu."""
+        be = self.blocks_ed
+        t = slot["type"]
+        name = slot["name"]
+        if t == _blocks_mod.SLOT_DROPDOWN:
+            # A dropdown opens its option list (16 colors is a lot to cycle through);
+            # left/right still cycle it in place for a quick one-step tweak.
+            self._blk_open_dropdown_picker(block, slot)
+        elif t == _blocks_mod.SLOT_NUMBER:
+            self._blk_bump_number(block, name, 1)
+        elif t == _blocks_mod.SLOT_TEXT:
+            cur = str((block.get("p", {}) or {}).get(name, ""))
+            be.set_slot(name, cur + "!", block)   # placeholder bump; keyboard refines
+        elif t == _blocks_mod.SLOT_VARIABLE:
+            self._blk_open_variable_picker(block, name)
+        elif t == _blocks_mod.SLOT_EXPR:
+            self._blk_open_expr_menu(block, name)
+
+    def _blk_bump_number(self, block, name, d):
+        be = self.blocks_ed
+        cur = (block.get("p", {}) or {}).get(name, 0)
+        try:
+            val = int(cur) + d
+        except (TypeError, ValueError):
+            val = d
+        be.set_slot(name, val, block)
+
+    def _blk_open_variable_picker(self, block, name):
+        be = self.blocks_ed
+        items = be.variables()
+        if not items:
+            # No variables yet: auto-declare friendly defaults so a slot is fillable
+            # even before the kid names one (they can rename later).
+            be.add_var("score")
+            items = be.variables()
+        self.blk_menu = {"mode": "variable", "sel": 0, "top": 0, "items": items,
+                         "block": block, "slot": name}
+
+    def _blk_open_dropdown_picker(self, block, slot):
+        opts = _blocks_mod.slot_options(slot)
+        self.blk_menu = {"mode": "dropdown", "sel": 0, "top": 0, "items": opts,
+                         "block": block, "slot": slot["name"]}
+
+    def _blk_open_expr_menu(self, block, name):
+        """Open the expression chooser for an expr slot: the operator / input /
+        variable reporter blocks (everything with an `expr` shape), plus a couple of
+        literal choices. Selecting one writes a nested expression block into the
+        slot."""
+        ids = []
+        for cat in _blocks_mod.categories():
+            for bid in _blocks_mod.blocks_in_category(cat):
+                if _blocks_mod.is_expr(bid):
+                    ids.append(bid)
+        self.blk_menu = {"mode": "expr", "sel": 0, "top": 0, "items": ids,
+                         "block": block, "slot": name}
+
+    def _blk_insert_expr(self, type_id):
+        """Write a fresh expression block of `type_id` into the target expr slot."""
+        m = self.blk_menu
+        self.blocks_ed.set_slot(m["slot"], _blocks_mod.make_block(type_id), m["block"])
+        self.blk_menu = None
+
+    # -- save / graduate -----------------------------------------------------
+    def save_blocks(self):
+        """Compile-on-save the block program to blocks.json + main.py, surfacing
+        SAVE_OK / a syntax problem like save_code does. Returns True on success.
+        A non-SD/embedded cart just validates + applies in RAM."""
+        be = self.blocks_ed
+        if not (be and self.cart):
+            return False
+        prog = be.program
+        # Always compile-check first so the kid sees a problem before it persists.
+        try:
+            src = _blocks_mod.compile_blocks(prog)
+        except Exception as exc:  # noqa: BLE001 -- BlockError on a corrupt tree
+            self.blk_status = "BAD: " + _err_text(exc)
+            return False
+        ok, msg = self.carts_store.compile_check(src) if self.carts_store else (True, "")
+        if not ok:
+            self.blk_status = "SYNTAX " + msg
+            return False
+        if not (self.cart.get("path") and self.can_manage and self.carts_store):
+            # nothing to persist (embedded / writes deferred): apply in RAM so RUN works
+            self.cart["src"] = src
+            self.cart["blocks"] = prog
+            be.dirty = False
+            self.blk_status = "SAVED"
+            self.ach.note("code_save")
+            return True
+        try:
+            status, smsg = self._with_sd(
+                lambda: self.carts_store.save_blocks(self.cart, prog))
+            if status != self.carts_store.SAVE_OK:
+                self.blk_status = "SAVE BAD " + str(smsg)
+                return False
+            be.dirty = False
+            self.blk_status = "SAVED"
+            self.ach.note("code_save")          # "Code Wizard": a program saved (#21)
+            self.cart_error = None
+            return True
+        except Exception as exc:  # noqa: BLE001
+            self.blk_status = "SAVE FAILED"
+            print("KidCode save blocks failed:", _err_text(exc))
+            return False
+
+    def graduate_to_code(self):
+        """The one-way 'graduate to code' rung: compile the block program and open
+        the generated main.py in the code editor, so a kid moves from blocks to text
+        on the same cart. Saves first (so blocks.json + main.py are in lockstep), then
+        switches to the code view on the freshly compiled source."""
+        be = self.blocks_ed
+        if not (be and self.cart):
+            return
+        try:
+            src = _blocks_mod.compile_blocks(be.program)
+        except Exception as exc:  # noqa: BLE001
+            self.blk_status = "BAD: " + _err_text(exc)
+            return
+        self.save_blocks()                       # persist (best-effort) before leaving
+        self.cart["src"] = src                   # ensure the editor opens the latest
+        self.editor = None                       # rebuild on the new source
+        self.blk_menu = None
+        self.set_menu_view("code")
+
+    # -- block-editor input / pointer ----------------------------------------
+    def _blocks_input(self):
+        """Keyboard/button input for the outline + insert menu. Mirrors the other
+        editors' edge-driven nav. The menu, when open, captures nav + A/B."""
+        i = self.input
+        if self.blk_menu is not None:
+            if i.pressed("up"):
+                self._blk_menu_move(-1)
+            if i.pressed("down"):
+                self._blk_menu_move(1)
+            if i.pressed("a") or i.pressed("run"):
+                self._blk_menu_select()
+            elif i.pressed("b"):
+                self._blk_menu_back()
+            return
+        if i.pressed("up"):
+            self._blk_move_cursor(-1)
+        if i.pressed("down"):
+            self._blk_move_cursor(1)
+        if i.pressed("right"):
+            self._blk_next_slot()                # step the highlighted slot
+        if i.pressed("left"):
+            # left on a number slot decrements it (a quick tweak without the menu)
+            self._blk_left()
+        if i.pressed("a"):
+            self._blk_a()
+        elif i.pressed("run"):
+            self.save_blocks()
+        elif i.pressed("b"):
+            self._leave_menu()
+        elif i.pressed("home"):
+            self.go_home()
+
+    def _blk_left(self):
+        be = self.blocks_ed
+        if be is None:
+            return
+        b = be.selected_block()
+        slots = be.slots(b)
+        if not slots:
+            return
+        slot = slots[self.blk_slot % len(slots)]
+        if slot["type"] == _blocks_mod.SLOT_NUMBER:
+            self._blk_bump_number(b, slot["name"], -1)
+        elif slot["type"] == _blocks_mod.SLOT_DROPDOWN:
+            be.cycle_dropdown(slot["name"], -1, b)
+
+    def _blocks_pointer(self, px, py, click):
+        if not click:
+            return
+        if self.blk_menu is not None:
+            self._blk_menu_click(px, py)
+            return
+        be = self.blocks_ed
+        if be is None:
+            return
+        # Action bar
+        if _in(px, py, _BLK_ADD):
+            self._blk_open_categories(); return
+        if _in(px, py, _BLK_DEL):
+            be.delete(); self.blk_slot = 0; self._blk_reveal(); return
+        if _in(px, py, _BLK_UP):
+            be.move_block(-1); self._blk_reveal(); return
+        if _in(px, py, _BLK_DN):
+            be.move_block(1); self._blk_reveal(); return
+        if _in(px, py, _BLK_SAVE):
+            self.save_blocks(); return
+        if _in(px, py, _BLK_CODE):
+            self.graduate_to_code(); return
+        if _in(px, py, _BLK_CLOSE):
+            self._leave_menu(); return
+        # Tap a row in the outline: select it (and on a block, advance the slot
+        # highlight / open the insert menu on a `+` row -- a tap == the A action).
+        if _in(px, py, _BLK_AREA):
+            ridx = self.blk_top + (py - _BLK_Y0) // _BLK_ROW_H
+            if 0 <= ridx < len(be.rows):
+                if ridx == be.cur:
+                    self._blk_a()                # a second tap acts (insert / edit)
+                else:
+                    be.cur = ridx
+                    self.blk_slot = 0
+                    self._blk_reveal()
+
+    def _blk_menu_click(self, px, py):
+        m = self.blk_menu
+        if not m:
+            return
+        mx, my, mw, mh = _BLK_MENU
+        if not _in(px, py, _BLK_MENU):
+            self.blk_menu = None                 # tap outside dismisses
+            return
+        ridx = m["top"] + (py - (my + 16)) // _BLK_MENU_ROW_H
+        if 0 <= ridx < len(m["items"]):
+            m["sel"] = ridx
+            self._blk_menu_select()
+
     # -- frame + drawing -----------------------------------------------------
 
     def _reset_canvas_state(self):
@@ -2812,6 +3297,8 @@ class Workstation:
             self._draw_desktop_buttons()
         elif self.menu_view == "code":
             self._draw_code()              # full-screen editor (covers the cart)
+        elif self.menu_view == "blocks":
+            self._draw_blocks()            # full-screen structured outline (#29)
         else:  # cards / paint / map: a panel over the frozen cart
             try:
                 if self._draw:
@@ -3131,6 +3618,7 @@ class Workstation:
         self._icon_btn("edit", "EDIT" if has_edit else "CODE", _MENU_BTN, NAMES["dark_purple"])
         self._icon_btn("paint", "PAINT", _PAINT_BTN, NAMES["orange"])
         self._icon_btn("map", "MAP", _MAP_BTN, NAMES["green"])
+        self._icon_btn("blocks", "", _BLOCKS_BTN, NAMES["pink"])   # open the block editor (#29)
         self._icon_btn("home", "HOME", _HOME_BTN, NAMES["dark_grey"])
 
     def _draw_error_panel(self):
@@ -3523,3 +4011,247 @@ class Workstation:
         self._btn("ER", _MAP_ERASE, NAMES["red"] if self.map_erase else NAMES["dark_grey"])
         self._btn("SAVE", _MAP_SAVE, NAMES["green"])
         self._btn("CLOSE", _MAP_CLOSE, NAMES["red"])
+
+    # -- block editor drawing (#29 Part 2) -----------------------------------
+
+    def _draw_blocks(self):
+        """The structured outline: a title bar, a scrolling list of Scratch-style
+        colored block rows (the flattened script with the cursor highlighted and the
+        insert points shown as `+`), and a bottom action bar. Drawn with the indexed
+        API + petme128 font only, so host == device."""
+        cv = self.canvas
+        be = self.blocks_ed
+        cv.cls(NAMES["dark_blue"])
+        title = "BLOCKS  " + (self.cart["title"][:18] if self.cart else "")
+        if be is not None and be.dirty:
+            title = title + " *"
+        cv.print(title, _BLK_X0, _BLK_TITLE_Y, NAMES["white"], 1)
+        if self.blk_status:
+            cv.print(self.blk_status[:20], 198, _BLK_TITLE_Y, NAMES["yellow"], 1)
+        if be is None:
+            return
+        # A kid-facing hint for the surprising blocks (forever-is-bounded / wait).
+        hint = self._blk_hint()
+        if hint:
+            cv.print(hint[:50], _BLK_X0, 9, NAMES["light_grey"], 1)
+        rows = be.rows
+        for vi in range(_BLK_ROWS):
+            ridx = self.blk_top + vi
+            if ridx >= len(rows):
+                break
+            self._draw_blk_row(rows[ridx], vi, ridx == be.cur)
+        # scroll cue
+        if self.blk_top > 0:
+            cv.print("^", _BLK_X0 + _BLK_W - 8, _BLK_Y0, NAMES["white"], 1)
+        if self.blk_top + _BLK_ROWS < len(rows):
+            cv.print("v", _BLK_X0 + _BLK_W - 8,
+                     _BLK_Y0 + (_BLK_ROWS - 1) * _BLK_ROW_H, NAMES["white"], 1)
+        # action bar
+        self._icon_btn("plus", "ADD", _BLK_ADD, NAMES["green"])
+        self._btn("DEL", _BLK_DEL, NAMES["red"])
+        self._btn("^", _BLK_UP, NAMES["indigo"])
+        self._btn("v", _BLK_DN, NAMES["indigo"])
+        self._btn("SAVE", _BLK_SAVE, NAMES["blue"])
+        self._icon_btn("code", "CODE", _BLK_CODE, NAMES["dark_purple"])
+        self._btn("CLOSE", _BLK_CLOSE, NAMES["dark_grey"])
+        if self.blk_menu is not None:
+            self._draw_blk_menu()
+
+    def _blk_hint(self):
+        be = self.blocks_ed
+        b = be.selected_block() if be is not None else None
+        if b is not None:
+            return _BLK_HINTS.get(b.get("t"))
+        return None
+
+    def _draw_blk_row(self, row, vi, is_cursor):
+        cv = self.canvas
+        be = self.blocks_ed
+        y = _BLK_Y0 + vi * _BLK_ROW_H
+        x = _BLK_X0 + row.depth * _BLK_INDENT
+        w = _BLK_W - row.depth * _BLK_INDENT
+        if row.kind == "insert":
+            # an empty insert point: a slim dashed-looking `+` slot
+            c = NAMES["yellow"] if is_cursor else NAMES["dark_grey"]
+            cv.rectb(x, y + 2, w - 2, _BLK_ROW_H - 4, c)
+            cv.print("+", x + 4, y + 4, c, 1)
+            if is_cursor:
+                cv.print("add a block", x + 16, y + 4, NAMES["light_grey"], 1)
+            return
+        b = row.block
+        cat = self._blk_block_cat(b)
+        fill = NAMES[_blocks_mod.CATEGORY_COLOR.get(cat, "dark_grey")]
+        if row.is_else:
+            fill = NAMES["orange"]
+        cv.rect(x, y + 1, w - 2, _BLK_ROW_H - 2, fill)
+        border = NAMES["white"] if is_cursor else NAMES["black"]
+        cv.rectb(x, y + 1, w - 2, _BLK_ROW_H - 2, border)
+        # readable text color over the block fill (light on dark, dark on light)
+        fg = NAMES["white"] if cat in ("draw", "input", "variables", "control") \
+            and not row.is_else else NAMES["black"]
+        if row.is_else:
+            fg = NAMES["black"]
+        label = self._blk_row_text(b, row.is_else)
+        cv.print(label[:(w - 8) // 8], x + 4, y + 4, fg, 1)
+        # highlight the selected block's active slot with a small caret under it
+        if is_cursor and not row.is_else:
+            self._draw_blk_slot_caret(b, x, y)
+
+    def _draw_blk_slot_caret(self, b, x, y):
+        slots = self.blocks_ed.slots(b)
+        if not slots:
+            return
+        # underline the active slot's value within the rendered label so the kid
+        # sees which one A/left/right will edit.
+        cv = self.canvas
+        si = self.blk_slot % len(slots)
+        col0 = self._blk_slot_text_col(b, si)
+        if col0 is None:
+            return
+        sval = self._blk_slot_display(b, slots[si])
+        cv.rect(x + 4 + col0 * 8, y + 12, max(8, len(sval) * 8), 1, NAMES["yellow"])
+
+    def _blk_block_cat(self, b):
+        d = _blocks_mod.block_def(b.get("t"))
+        return d["category"] if d else "control"
+
+    def _blk_row_text(self, b, is_else=False):
+        """Render a block's inline label: the catalog template with each {slot}
+        replaced by its value's compact display (a literal, a color/button name, a
+        variable, or a compact expression). Mirrors the Scratch-style inline look."""
+        if is_else or b.get("t") == _blocks_mod.ELSE_MARKER:
+            return "else"
+        d = _blocks_mod.block_def(b.get("t"))
+        if d is None:
+            return str(b.get("t"))
+        out = ""
+        tmpl = d["label"]
+        i = 0
+        n = len(tmpl)
+        slot_by_name = {}
+        for s in d["slots"]:
+            slot_by_name[s["name"]] = s
+        while i < n:
+            ch = tmpl[i]
+            if ch == "{":
+                j = tmpl.find("}", i)
+                if j < 0:
+                    out += ch
+                    i += 1
+                    continue
+                name = tmpl[i + 1:j]
+                slot = slot_by_name.get(name)
+                out += self._blk_slot_display(b, slot) if slot else name
+                i = j + 1
+            else:
+                out += ch
+                i += 1
+        return out
+
+    def _blk_slot_text_col(self, b, si):
+        """The character column where slot `si`'s value starts in the rendered row
+        label (so the caret underlines the right run). None if it can't be found."""
+        d = _blocks_mod.block_def(b.get("t"))
+        if d is None or si >= len(d["slots"]):
+            return None
+        target = d["slots"][si]["name"]
+        tmpl = d["label"]
+        col = 0
+        i = 0
+        n = len(tmpl)
+        while i < n:
+            ch = tmpl[i]
+            if ch == "{":
+                j = tmpl.find("}", i)
+                if j < 0:
+                    col += 1
+                    i += 1
+                    continue
+                name = tmpl[i + 1:j]
+                slot = None
+                for s in d["slots"]:
+                    if s["name"] == name:
+                        slot = s
+                        break
+                disp = self._blk_slot_display(b, slot) if slot else name
+                if name == target:
+                    return col
+                col += len(disp)
+                i = j + 1
+            else:
+                col += 1
+                i += 1
+        return None
+
+    def _blk_slot_display(self, b, slot):
+        """A compact string for one slot's current value (for the inline row)."""
+        name = slot["name"]
+        val = (b.get("p", {}) or {}).get(name)
+        t = slot["type"]
+        if t == _blocks_mod.SLOT_EXPR:
+            return self._blk_expr_display(val)
+        if t == _blocks_mod.SLOT_TEXT:
+            return '"' + str(val) + '"'
+        if val is None:
+            return "0" if t == _blocks_mod.SLOT_NUMBER else "?"
+        return str(val)
+
+    def _blk_expr_display(self, val):
+        """A compact, brace-free rendering of an expression slot value: a literal
+        stays itself; an expression block renders its own label recursively (so a
+        nested `(x + 1)` reads inline)."""
+        if val is None:
+            return "0"
+        if isinstance(val, dict):
+            return self._blk_row_text(val)
+        if isinstance(val, str):
+            return '"' + val + '"'
+        return str(val)
+
+    def _draw_blk_menu(self):
+        """The modal insert/picker menu over the frozen outline: a titled panel with
+        a scrolling list of choices (categories, blocks, dropdown options, or
+        variables). Navigated up/down + A; B backs out."""
+        cv = self.canvas
+        m = self.blk_menu
+        mx, my, mw, mh = _BLK_MENU
+        cv.rect(mx, my, mw, mh, NAMES["black"])
+        cv.rectb(mx, my, mw, mh, NAMES["yellow"])
+        titles = {"cat": "PICK A KIND", "blk": "PICK A BLOCK",
+                  "dropdown": "PICK ONE", "variable": "PICK A VARIABLE",
+                  "expr": "PICK A VALUE"}
+        cv.print(titles.get(m["mode"], "PICK"), mx + 6, my + 4, NAMES["yellow"], 1)
+        items = m["items"]
+        if not items:
+            cv.print("(nothing here)", mx + 8, my + 22, NAMES["light_grey"], 1)
+            cv.print("B = back", mx + 8, my + mh - 12, NAMES["light_grey"], 1)
+            return
+        for vi in range(_BLK_MENU_ROWS):
+            ridx = m["top"] + vi
+            if ridx >= len(items):
+                break
+            y = my + 16 + vi * _BLK_MENU_ROW_H
+            sel = ridx == m["sel"]
+            if sel:
+                cv.rect(mx + 3, y, mw - 6, _BLK_MENU_ROW_H - 1, NAMES["indigo"])
+            # color the category/block swatch chips so the look matches the outline
+            chip = self._blk_menu_chip(ridx)
+            if chip is not None:
+                cv.rect(mx + 5, y + 2, 8, _BLK_MENU_ROW_H - 5, chip)
+            label = self._blk_menu_label(ridx)
+            cv.print(label[:(mw - 24) // 8], mx + 16, y + 3,
+                     NAMES["white"] if sel else NAMES["light_grey"], 1)
+        cv.print("B = back", mx + 6, my + mh - 12, NAMES["light_grey"], 1)
+
+    def _blk_menu_chip(self, ridx):
+        """The category-color chip for menu row `ridx` (categories + block lists);
+        None for plain pickers (dropdown/variable rows have no category color)."""
+        m = self.blk_menu
+        item = m["items"][ridx]
+        if m["mode"] == "cat":
+            return NAMES[_blocks_mod.CATEGORY_COLOR.get(item, "dark_grey")]
+        if m["mode"] in ("blk", "expr"):
+            d = _blocks_mod.block_def(item)
+            if d:
+                return NAMES[_blocks_mod.CATEGORY_COLOR.get(d["category"], "dark_grey")]
+        return None
