@@ -247,6 +247,37 @@ class SpriteSheet:
                 pix.append(self.pix[base + lx])
         return _SheetSprite(self.TILE, self.TILE, pix, transparent)
 
+    def tile_span_image(self, n, tw=1, th=1, transparent=-1):
+        """Build a (tw x th)-tile blittable starting at sprite n -- a TIC-80-style
+        multi-tile sprite (spr(n, x, y, w=2, h=2) draws the 16x16 block whose
+        top-left tile is n). The span reads the contiguous sheet pixels covering
+        tiles n, n+1, ..., n+cols, ... so a 2x2 sprite painted as one 16x16 block
+        in the editor blits as one image. Spans are clamped to the sheet's right/
+        bottom edge so a span starting near the edge never reads out of bounds."""
+        if n < 0 or n >= self.count:
+            return None
+        if tw < 1:
+            tw = 1
+        if th < 1:
+            th = 1
+        ox, oy = self.tile_origin(n)
+        # Clamp the span to what fits to the right of / below the start tile.
+        max_tw = (self.w - ox) // self.TILE
+        max_th = (self.h - oy) // self.TILE
+        if tw > max_tw:
+            tw = max_tw
+        if th > max_th:
+            th = max_th
+        pw = tw * self.TILE
+        ph = th * self.TILE
+        w = self.w
+        pix = []
+        for sy in range(ph):
+            base = (oy + sy) * w + ox
+            for sx in range(pw):
+                pix.append(self.pix[base + sx])
+        return _SheetSprite(pw, ph, pix, transparent)
+
     def is_blank(self):
         for p in self.pix:
             if p:
@@ -398,22 +429,64 @@ class TileMap:
 
 
 class PaintEditor:
-    """Pixel-paint state over a SpriteSheet tile: current sprite + paint color.
-    The shell maps taps on the zoomed grid/palette to these calls."""
+    """Pixel-paint state over a SpriteSheet tile: current sprite + paint color +
+    sprite size. The shell maps taps on the zoomed grid/palette to these calls.
+
+    `size` is the side length in 8x8 tiles (1 = an 8x8 sprite, 2 = a 16x16 sprite
+    spanning a 2x2 block of sheet tiles, 3 = 24x24, TIC-80-style). The paint grid
+    edits the size*8 x size*8 pixel region whose top-left is tile `n`'s origin --
+    and because the constituent tiles (n, n+1, n+cols, ...) are contiguous in the
+    sheet's flat pixel buffer, painting that region writes straight through to all
+    of them, no special multi-tile bookkeeping. `paint`/`pick` take grid-local
+    pixel coords (0..size*8-1) and offset them onto the tile origin."""
+
+    SIZES = (1, 2, 3)     # selectable sprite sizes (side length in tiles)
 
     def __init__(self, sheet):
         self.sheet = sheet
-        self.n = 0            # current sprite id
+        self.n = 0            # current sprite id (top-left tile of the sprite)
         self.color = 8        # current paint color (red, a friendly default)
+        self.size = 1         # sprite side length in tiles (1=8x8, 2=16x16, ...)
+
+    @property
+    def dim(self):
+        """Editable region side length in pixels (size * 8)."""
+        return self.size * self.sheet.TILE
+
+    def _origin(self):
+        return self.sheet.tile_origin(self.n)
 
     def paint(self, lx, ly):
-        self.sheet.tset(self.n, lx, ly, self.color)
+        """Paint grid-local pixel (lx, ly) within the size*8 region at tile n."""
+        if 0 <= lx < self.dim and 0 <= ly < self.dim:
+            ox, oy = self._origin()
+            self.sheet.pset(ox + lx, oy + ly, self.color)
 
     def pick(self, lx, ly):
-        self.color = self.sheet.tget(self.n, lx, ly)
+        if 0 <= lx < self.dim and 0 <= ly < self.dim:
+            ox, oy = self._origin()
+            self.color = self.sheet.pget(ox + lx, oy + ly)
 
     def select(self, d):
         self.n = (self.n + d) % self.sheet.count
+        self._clamp_size()   # a big sprite near the sheet edge shrinks to fit
+
+    def cycle_size(self):
+        """Step to the next selectable sprite size (1 -> 2 -> 3 -> 1), clamped so
+        the span still fits the sheet from the current tile (a 3x3 sprite near the
+        right/bottom edge falls back to a size that fits)."""
+        i = self.SIZES.index(self.size) if self.size in self.SIZES else 0
+        self.size = self.SIZES[(i + 1) % len(self.SIZES)]
+        self._clamp_size()
+
+    def _clamp_size(self):
+        """Shrink size until the size*size tile block fits the sheet from tile n."""
+        ox, oy = self._origin()
+        max_tw = (self.sheet.w - ox) // self.sheet.TILE
+        max_th = (self.sheet.h - oy) // self.sheet.TILE
+        fit = max_tw if max_tw < max_th else max_th
+        if self.size > fit:
+            self.size = fit if fit >= 1 else 1
 
 
 class MapEditor:

@@ -325,10 +325,12 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         if audio is not None:
             audio.volume(level)
 
-    def spr(n, x, y, colorkey=-1, scale=1):
-        # TIC-80 spr(id, x, y[, colorkey, scale]) from the cart's sheet. Also
-        # accepts an Image directly (ASCII-art sprites); then a 4th positional is
-        # treated as scale, e.g. spr(pet, x, y, scale=4).
+    def spr(n, x, y, colorkey=-1, scale=1, w=1, h=1):
+        # TIC-80 spr(id, x, y[, colorkey, scale, w, h]) from the cart's sheet. w/h
+        # are the tile span: spr(n, x, y, w=2, h=2) draws the 16x16 multi-tile sprite
+        # whose top-left is tile n (#30); w=h=1 is the plain 8x8 sprite. Also accepts
+        # an Image directly (ASCII-art sprites); then a 4th positional is treated as
+        # scale, e.g. spr(pet, x, y, scale=4).
         if isinstance(n, Image):
             return canvas.spr(n, x, y, colorkey if colorkey != -1 else scale)
         if sheet is None:
@@ -337,10 +339,13 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         if g != _cache_gen[0]:
             tile_cache.clear()
             _cache_gen[0] = g
-        ck = (int(n), colorkey)
+        ck = (int(n), colorkey, int(w), int(h))
         img = tile_cache.get(ck)
         if img is None:
-            img = sheet.tile_image(int(n), colorkey)
+            if w > 1 or h > 1:
+                img = sheet.tile_span_image(int(n), int(w), int(h), colorkey)
+            else:
+                img = sheet.tile_image(int(n), colorkey)
             if img is None:
                 return
             tile_cache[ck] = img
