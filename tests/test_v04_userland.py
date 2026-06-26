@@ -302,11 +302,13 @@ def test_battle_city_runs_with_tilemap_and_autoplay_progresses(tmp_path):
     # brick + steel are both present in the field (the two wall kinds)
     field = [ws.tilemap.mget(x, y) for y in range(ws.tilemap.h) for x in range(ws.tilemap.w)]
     assert 8 in field and 9 in field                            # brick (8) + steel (9)
+    import random
+    random.seed(1234)                       # deterministic attract run (spawns + auto-pilot use rnd())
     ws.config["autoplay"] = 1
     ws.apply()
     assert ws.ns["spawn_q"] + ws.ns["_alive_enemies"]() == ws.config["enemies"]
     best_score, states = 0, set()
-    for _ in range(1200):                   # attract-mode auto-play hunts enemies
+    for _ in range(2400):                   # attract-mode auto-play hunts enemies (headroom to end a round)
         ws.frame(1 / 30)
         assert ws.cart_error is None        # never crash a frame
         best_score = max(best_score, ws.ns["score"])
