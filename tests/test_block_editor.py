@@ -622,3 +622,79 @@ def test_name_prompt_keyboard_flow_through_the_driver(tmp_path):
     drv.frame(1 / 30)
     assert ws.blk_kbd is None
     assert "gold" in be.variables()
+
+
+def test_new_variable_prompt_survives_the_opening_keypress(tmp_path):
+    """Regression (#29): the A/Enter press that SELECTS '+ new variable' must NOT
+    carry into the freshly opened name prompt and instantly commit it (the device
+    bug: the prompt flashed for a frame and the variable kept its default name).
+    Here A is *held* across the open frame (mimicking the device keyboard latch and
+    the held Enter byte) -- the prompt must stay open, no commit -- and only a name
+    the kid then types becomes the variable's name (compiled under that name)."""
+    ws, cart, _ = _ws_with_block_cart(tmp_path)
+    ws._open_blocks()
+    be = ws.blocks_ed
+    drv = _driver(ws)
+    # drill to Variables -> "+ new variable" highlighted
+    ws._blk_open_categories()
+    ws.blk_menu["sel"] = ws.blk_menu["items"].index(blocks.CAT_VARIABLES)
+    ws._blk_menu_select()
+    ws.blk_menu["sel"] = 0
+    # SELECT it with A *while ALSO* holding the Enter byte (0x0D) -- on the device A
+    # is the Enter/z alias, so last_key carries that byte; with no idle frame between
+    # the select and the next pass the trigger could leak into the prompt's commit.
+    drv.hold("a", True)
+    drv.type_char(0x0D)
+    drv.frame(1 / 30)                                    # this frame opens the prompt
+    assert ws.blk_kbd is not None, "prompt should open"
+    # A + the Enter byte STILL held the very next frame: the prompt must NOT commit.
+    drv.type_char(0x0D)
+    drv.frame(1 / 30)
+    assert ws.blk_kbd is not None, "opening keypress must not auto-commit the prompt"
+    assert not be.variables() or be.variables() == [ws.blk_kbd["var"]]
+    drv.hold("a", False)
+    drv.type_char(0)
+    drv.frame(1 / 30)                                    # release the trigger
+    # now the kid actually types a name and confirms -> the TYPED name sticks
+    for ch in "lives":
+        drv.type_char(ord(ch))
+        drv.frame(1 / 30)
+        drv.frame(1 / 30)                               # release so each edge fires
+    drv.press("a")                                      # confirm
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    assert ws.blk_kbd is None
+    assert "lives" in be.variables()
+    assert "var" not in be.variables()                 # NOT the default name
+    # and it compiles into the generated Python under the typed name
+    _go_to_insert(be, 1)
+    be.insert_block("set_var", {"var": "lives", "value": 3})
+    src = blocks.compile_blocks(be.program)
+    assert "lives = 0" in src and "lives = 3" in src
+    _run(src)
+
+
+def test_new_variable_prompt_survives_the_opening_tap(tmp_path):
+    """Regression (#29), touch path: the TAP that selects '+ new variable' must not
+    carry into the new prompt and hit OK. Open the prompt by tapping its menu row,
+    then assert it stays open across the next frame (the opening click is cleared)."""
+    import runtime.console as C
+    ws, _, _ = _ws_with_block_cart(tmp_path)
+    ws._open_blocks()
+    be = ws.blocks_ed
+    drv = _driver(ws)
+    # drill to Variables block list
+    ws._blk_open_categories()
+    ws.blk_menu["sel"] = ws.blk_menu["items"].index(blocks.CAT_VARIABLES)
+    ws._blk_menu_select()
+    assert ws.blk_menu["mode"] == "blk"
+    # tap the "+ new variable" row (index 0) to select it -> opens the name prompt
+    mx, my = C._BLK_MENU[0], C._BLK_MENU[1]
+    row0_y = (my + 16) + 0 * C._BLK_MENU_ROW_H + 2
+    drv.click(mx + 20, row0_y)
+    drv.frame(1 / 30)
+    assert ws.blk_kbd is not None, "tapping '+ new variable' should open the prompt"
+    # an immediate next frame (the tap is gone) -- the prompt must still be open,
+    # not closed by the opening tap leaking onto OK/X.
+    drv.frame(1 / 30)
+    assert ws.blk_kbd is not None, "opening tap must not auto-commit the prompt"
