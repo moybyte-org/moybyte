@@ -1211,9 +1211,13 @@ class Workstation:
                 if self._wp_live and self._wp_update is not None and dt > 0:
                     self._wp_update(dt)
                 self._wp_draw()
+                # Clear any camera/clip/pal/palt (#11) the wallpaper cart set, so the
+                # home/settings foreground (icons, status strip, dock) draws clean.
+                self._reset_canvas_state()
                 return
             except Exception as exc:  # noqa: BLE001 -- drop a broken wallpaper to the fill
                 print("KidCode wallpaper draw error:", _err_text(exc))
+                self._reset_canvas_state()
                 self._wp_ns = self._wp_update = self._wp_draw = None
         # Solid fill fallback (also the "fill:<color>" built-ins).
         wp = self.wallpaper_id or "fill:dark_blue"
@@ -1289,6 +1293,11 @@ class Workstation:
 
     def _start(self):
         self._build_audio()
+        # Reset the canvas draw state (camera/clip/pal/palt, #11) so a fresh cart run
+        # never inherits a previous cart's clip rect or palette swap.
+        rs = getattr(self.canvas, "reset_state", None)
+        if rs is not None:
+            rs()
         # Stamp the cart-start clock so the cart's time() reads ms since this run
         # began (re-run on apply/run_code/edit-close resets it, like TIC-80).
         self._cart_start_ms = _ticks_ms()
@@ -2372,6 +2381,14 @@ class Workstation:
 
     # -- frame + drawing -----------------------------------------------------
 
+    def _reset_canvas_state(self):
+        # Reset the canvas's TIC-80 draw state (camera/clip/pal/palt, #11) if the
+        # backend supports it. Guarded so a backend without draw state (a test stub,
+        # or a recording canvas) is a no-op.
+        rs = getattr(self.canvas, "reset_state", None)
+        if rs is not None:
+            rs()
+
     def frame(self, dt):
         if dt > 0:
             inst = 1.0 / dt
@@ -2413,6 +2430,9 @@ class Workstation:
                     # escape frame() here -> the silent device hang the panel
                     # exists to prevent.
                     print("KidCode frame error:", self.cart_error)
+            # Clear any cart-set camera/clip/pal/palt (#11) before the console paints
+            # its own UI overlays, so they're never offset/clipped/recoloured.
+            self._reset_canvas_state()
             if self.cart_error is not None:
                 self._draw_error_panel()
             self._draw_desktop_buttons()
@@ -2424,6 +2444,9 @@ class Workstation:
                     self._draw()
             except Exception:
                 pass
+            # Clear cart-set camera/clip/pal/palt (#11) so the editor panel over the
+            # frozen cart frame draws unaffected.
+            self._reset_canvas_state()
             if self.menu_view == "paint":
                 self._draw_paint()
             elif self.menu_view == "map":

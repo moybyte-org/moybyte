@@ -93,13 +93,30 @@ class TeeCanvas:
     def circb(self, cx, cy, r, c):
         self.raster.circb(cx, cy, r, c); self.rec.circb(cx, cy, r, c)
 
-    def spr(self, img, x, y, scale=1):
-        self.raster.spr(img, x, y, scale); self.rec.spr(img, x, y, scale)
+    def spr(self, img, x, y, scale=1, flip=0):
+        self.raster.spr(img, x, y, scale, flip); self.rec.spr(img, x, y, scale, flip)
 
     def map(self, tilemap, sheet, mx=0, my=0, w=None, h=None,
             sx=0, sy=0, colorkey=-1, scale=1):
         self.raster.map(tilemap, sheet, mx, my, w, h, sx, sy, colorkey, scale)
         self.rec.map(tilemap, sheet, mx, my, w, h, sx, sy, colorkey, scale)
+
+    # Draw state (#11): forward to BOTH so the recorded stream replays identically.
+    def reset_state(self):
+        self.raster.reset_state(); self.rec.reset_state()
+
+    def camera(self, x=0, y=0):
+        self.rec.camera(x, y)
+        return self.raster.camera(x, y)
+
+    def clip(self, x=None, y=None, w=None, h=None):
+        self.raster.clip(x, y, w, h); self.rec.clip(x, y, w, h)
+
+    def pal(self, c0=None, c1=None):
+        self.raster.pal(c0, c1); self.rec.pal(c0, c1)
+
+    def palt(self, c=None, on=None):
+        self.raster.palt(c, on); self.rec.palt(c, on)
 
     def print(self, s, x, y, c, scale=1):
         self.raster.print(s, x, y, c, scale); self.rec.print(s, x, y, c, scale)
@@ -327,7 +344,8 @@ def test_frame_returns_command_list(server):
     cmds = obj["cmds"]
     assert isinstance(cmds, list) and len(cmds) > 0
     # Every command is a list whose head is a known op name.
-    ops = {"cls", "pix", "line", "rect", "rectb", "circ", "circb", "spr", "print"}
+    ops = {"cls", "pix", "line", "rect", "rectb", "circ", "circb", "spr", "print",
+           "reset_state", "camera", "clip", "pal", "palt"}    # +draw state (#11)
     assert all(isinstance(c, list) and c[0] in ops for c in cmds)
     # The frame opens by clearing/painting the wallpaper backdrop.
     assert any(c[0] in ("cls", "rect") for c in cmds)

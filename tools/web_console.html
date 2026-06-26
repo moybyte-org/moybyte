@@ -112,18 +112,37 @@
   // Each op below is the JS twin of the matching runtime/canvas.py method. We work
   // in palette indices in `idx`, then resolve to RGBA once per frame in blit().
 
-  function setPix(x, y, c) {            // bounds-checked index write
-    x |= 0; y |= 0;
-    if (x < 0 || x >= W || y < 0 || y >= H) return;
-    idx[y * W + x] = c & 63;
+  // Draw state (TIC-80 cluster 2, #11): camera offset, clip rect, pal remap, palt
+  // sprite-transparency -- mirrors runtime/canvas.py so the browser replays the same
+  // pixels. resetState() restores defaults (the console resets between cart frames).
+  var camX = 0, camY = 0;
+  var clipX0 = 0, clipY0 = 0, clipX1 = W, clipY1 = H;
+  var palMap = null, palT = null;
+  function resetState() {
+    camX = 0; camY = 0;
+    clipX0 = 0; clipY0 = 0; clipX1 = W; clipY1 = H;
+    palMap = new Uint8Array(64);
+    palT = new Uint8Array(64);
+    for (var i = 0; i < 64; i++) palMap[i] = i;
+  }
+  resetState();
+
+  function put(x, y, ci) {              // camera + clip + pal, then write
+    x = (x - camX) | 0; y = (y - camY) | 0;
+    if (x < clipX0 || x >= clipX1 || y < clipY0 || y >= clipY1) return;
+    idx[y * W + x] = palMap[ci & 63];
   }
 
-  function fillRect(x, y, w, h, c) {    // Canvas.rect (FILLED), clipped
-    x |= 0; y |= 0; w |= 0; h |= 0;
-    var x0 = Math.max(0, x), y0 = Math.max(0, y);
-    var x1 = Math.min(W, x + w), y1 = Math.min(H, y + h);
+  function setPix(x, y, c) {            // Canvas.pix write (camera-relative, clipped)
+    put(x | 0, y | 0, c);
+  }
+
+  function fillRect(x, y, w, h, c) {    // Canvas.rect (FILLED), camera + clip
+    x = (x | 0) - camX; y = (y | 0) - camY; w |= 0; h |= 0;
+    var x0 = Math.max(clipX0, x), y0 = Math.max(clipY0, y);
+    var x1 = Math.min(clipX1, x + w), y1 = Math.min(clipY1, y + h);
     if (x1 <= x0 || y1 <= y0) return;
-    var ci = c & 63;
+    var ci = palMap[c & 63];
     for (var yy = y0; yy < y1; yy++) {
       var base = yy * W;
       for (var xx = x0; xx < x1; xx++) idx[base + xx] = ci;
@@ -171,31 +190,34 @@
     }
   }
 
-  // spr: raw-pixel blit, mirroring Canvas.spr (transparency + integer scaling).
-  // cmd = ["spr", x, y, scale, w, h, t, pix]; t = transparent index (<0 = none-ish:
-  // Canvas skips p===t OR p<0, so a pixel value of -1 is also transparent).
-  function spr(x, y, scale, sw, sh, t, pix) {
-    x |= 0; y |= 0; scale |= 0;
+  // spr: raw-pixel blit, mirroring Canvas.spr (transparency + integer scaling + flip).
+  // cmd = ["spr", x, y, scale, w, h, t, pix, flip]; t = transparent index (<0 = none-ish:
+  // Canvas skips p===t OR p<0, so a pixel value of -1 is also transparent). flip
+  // (0=none, 1=h, 2=v, 3=both, #11) mirrors the source read; camera/clip/pal/palt
+  // all apply via put()/fillRect().
+  function spr(x, y, scale, sw, sh, t, pix, flip) {
+    x |= 0; y |= 0; scale |= 0; flip |= 0;
+    var fx = flip & 1, fy = (flip >> 1) & 1;
     if (scale <= 1) {
       for (var sy = 0; sy < sh; sy++) {
-        var ty = y + sy;
-        if (ty < 0 || ty >= H) continue;
-        var baseS = sy * sw, baseD = ty * W;
+        var ssy = fy ? (sh - 1 - sy) : sy;
+        var baseS = ssy * sw;
         for (var sx = 0; sx < sw; sx++) {
-          var tx = x + sx;
-          if (tx < 0 || tx >= W) continue;
-          var p = pix[baseS + sx];
-          if (p === t || p < 0) continue;
-          idx[baseD + tx] = p & 63;
+          var ssx = fx ? (sw - 1 - sx) : sx;
+          var p = pix[baseS + ssx];
+          if (p === t || p < 0 || palT[p & 63]) continue;
+          put(x + sx, y + sy, p);
         }
       }
       return;
     }
     for (var sy2 = 0; sy2 < sh; sy2++) {
-      var b2 = sy2 * sw;
+      var ssy2 = fy ? (sh - 1 - sy2) : sy2;
+      var b2 = ssy2 * sw;
       for (var sx2 = 0; sx2 < sw; sx2++) {
-        var p2 = pix[b2 + sx2];
-        if (p2 === t || p2 < 0) continue;
+        var ssx2 = fx ? (sw - 1 - sx2) : sx2;
+        var p2 = pix[b2 + ssx2];
+        if (p2 === t || p2 < 0 || palT[p2 & 63]) continue;
         fillRect(x + sx2 * scale, y + sy2 * scale, scale, scale, p2);
       }
     }
@@ -225,15 +247,33 @@
     for (var i = 0; i < cmds.length; i++) {
       var cmd = cmds[i], op = cmd[0];
       switch (op) {
-        case "cls":   idx.fill(cmd[1] & 63); break;
+        case "cls":   idx.fill(palMap[cmd[1] & 63]); break;
         case "pix":   setPix(cmd[1], cmd[2], cmd[3]); break;
         case "line":  line(cmd[1], cmd[2], cmd[3], cmd[4], cmd[5]); break;
         case "rect":  fillRect(cmd[1], cmd[2], cmd[3], cmd[4], cmd[5]); break;
         case "rectb": rectb(cmd[1], cmd[2], cmd[3], cmd[4], cmd[5]); break;
         case "circ":  circ(cmd[1], cmd[2], cmd[3], cmd[4]); break;
         case "circb": circb(cmd[1], cmd[2], cmd[3], cmd[4]); break;
-        case "spr":   spr(cmd[1], cmd[2], cmd[3], cmd[4], cmd[5], cmd[6], cmd[7]); break;
+        case "spr":   spr(cmd[1], cmd[2], cmd[3], cmd[4], cmd[5], cmd[6], cmd[7], cmd[8] || 0); break;
         case "print": drawText(cmd[1], cmd[2], cmd[3], cmd[4]); break;
+        // Draw state (#11): apply in order so the browser tracks clip/camera/pal/palt.
+        case "reset_state": resetState(); break;
+        case "camera": camX = cmd[1] | 0; camY = cmd[2] | 0; break;
+        case "clip":
+          if (cmd.length > 1) {
+            var cx = cmd[1] | 0, cy = cmd[2] | 0, cw = cmd[3] | 0, ch = cmd[4] | 0;
+            clipX0 = Math.max(0, cx); clipY0 = Math.max(0, cy);
+            clipX1 = Math.min(W, cx + cw); clipY1 = Math.min(H, cy + ch);
+          } else { clipX0 = 0; clipY0 = 0; clipX1 = W; clipY1 = H; }
+          break;
+        case "pal":
+          if (cmd.length > 1) { palMap[cmd[1] & 63] = cmd[2] & 63; }
+          else { for (var pi = 0; pi < 64; pi++) palMap[pi] = pi; }
+          break;
+        case "palt":
+          if (cmd.length > 1) { palT[cmd[1] & 63] = cmd[2] ? 1 : 0; }
+          else { palT.fill(0); }
+          break;
         default: break;   // forward-compatible: ignore unknown ops
       }
     }

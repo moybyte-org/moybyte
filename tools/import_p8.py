@@ -363,9 +363,9 @@ PORT_NOTES = [
         "[ ] pget -> pix(x,y) (2 args)")),
     ("spr", (
         ["spr(n,x,y) is mostly the same! KidCode spr(n,x,y) draws tile n.",
-         "Differences: KidCode has spr(n,x,y, colorkey, scale) -- no width/height",
-         "multi-tile span and no flip_x/flip_y yet, so big/flipped sprites need",
-         "drawing tile-by-tile."],
+         "KidCode spr(n,x,y, colorkey, scale, flip, w, h): flip 1/2/3 mirrors",
+         "h/v/both, and w,h give a multi-tile span -- so big/flipped sprites work",
+         "directly (PICO-8's flip_x/flip_y -> flip = flip_x + 2*flip_y)."],
         None)),
     ("print", (
         ["print(s,x,y,c) is mostly 1:1. KidCode print(s,x,y,c, scale) -- but the",
@@ -379,31 +379,28 @@ PORT_NOTES = [
         None)),
     # -- not here (yet) -> adapt or skip --------------------------------------
     ("map", (
-        ["map()/mget()/mset() draw or read a TILEMAP. KidCode has no map() yet",
-         "(coming with issue #32). For now, draw tiles by hand with spr() in a",
-         "loop, or skip the map."],
-        "[ ] map/mget/mset: draw tiles by hand (no map() until #32)")),
+        ["map()/mget()/mset() draw or read a TILEMAP -- KidCode HAS these now (#32):",
+         "map(mx,my,w,h, sx,sy, colorkey, scale), mget(x,y), mset(x,y, id)."],
+        None)),
     ("mget", (
-        ["mget(cx,cy) reads a map cell. No tilemap in KidCode yet (#32) -- skip",
-         "or store your level in a Python list and read that."],
-        "[ ] mget/mset: use a Python list for your level (no map() yet)")),
+        ["mget(cx,cy) reads a map cell -- KidCode has mget(x,y) (#32)."],
+        None)),
     ("mset", (
-        ["mset(cx,cy,v) writes a map cell. No tilemap in KidCode yet (#32) -- use",
-         "a Python list for your level instead."],
+        ["mset(cx,cy,v) writes a map cell -- KidCode has mset(x,y, id) (#32)."],
         None)),
     ("pal", (
-        ["pal()/palt() remap or hide palette colors. KidCode has no palette remap;",
-         "per-sprite transparency is the spr() colorkey arg instead. Skip pal()",
-         "and pass a colorkey to spr() for transparency."],
-        "[ ] pal/palt: use the spr() colorkey for transparency, skip remaps")),
+        ["pal(c0,c1) remaps a draw colour -- KidCode HAS this now (#11), same name;",
+         "pal() with no args resets. Per-sprite transparency is also available as",
+         "the spr() colorkey arg or palt(c, on)."],
+        None)),
     ("palt", (
-        ["palt(c, on) sets a transparent color. KidCode uses spr(n,x,y, colorkey)",
-         "per draw -- no global transparency table."],
+        ["palt(c, on) sets a transparent colour -- KidCode HAS this now (#11), same",
+         "name; palt() resets. spr()'s colorkey arg also works per draw."],
         None)),
     ("camera", (
-        ["camera(x,y) shifts all drawing. KidCode has no camera yet -- subtract the",
-         "camera offset yourself in your x,y math."],
-        "[ ] camera: subtract the offset in your own x,y math")),
+        ["camera(x,y) shifts all drawing -- KidCode HAS this now (#11), same name and",
+         "semantics; camera() with no args resets to (0,0). clip(x,y,w,h) is here too."],
+        None)),
     ("sspr", (
         ["sspr() stretches part of the sheet. KidCode has no sspr() -- use spr()",
          "with the scale arg for whole-tile scaling, or skip the stretch."],

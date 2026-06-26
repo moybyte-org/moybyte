@@ -109,7 +109,7 @@ def test_spr_with_wh_span_blits_a_16x16_image():
     class StubCanvas:
         w, h = 320, 240
 
-        def spr(self, img, x, y, scale=1):
+        def spr(self, img, x, y, scale=1, flip=0):
             calls.append((img.w, img.h, x, y, scale))
 
         def __getattr__(self, name):

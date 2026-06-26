@@ -74,6 +74,35 @@ class CommandCanvas:
         self._cmds = []
         return cmds
 
+    # -- draw state (camera / clip / pal / palt, #11) ------------------------
+    # Recorded as literal commands so the replayer applies the SAME draw state, in
+    # order; the stream stays self-contained and replays pixel-identically.
+
+    def reset_state(self):
+        self._cmds.append(["reset_state"])
+
+    def camera(self, x=0, y=0):
+        self._cmds.append(["camera", int(x), int(y)])
+        return (0, 0)
+
+    def clip(self, x=None, y=None, w=None, h=None):
+        if x is None:
+            self._cmds.append(["clip"])
+        else:
+            self._cmds.append(["clip", int(x), int(y), int(w), int(h)])
+
+    def pal(self, c0=None, c1=None):
+        if c0 is None:
+            self._cmds.append(["pal"])
+        else:
+            self._cmds.append(["pal", int(c0) & 63, int(c1) & 63])
+
+    def palt(self, c=None, on=None):
+        if c is None:
+            self._cmds.append(["palt"])
+        else:
+            self._cmds.append(["palt", int(c) & 63, 1 if on else 0])
+
     # -- primitives (each just records; see module docstring for formats) ----
 
     def cls(self, c=0):
@@ -101,10 +130,11 @@ class CommandCanvas:
     def circb(self, cx, cy, r, c):
         self._cmds.append(["circb", int(cx), int(cy), int(r), c & 63])
 
-    def spr(self, img, x, y, scale=1):
+    def spr(self, img, x, y, scale=1, flip=0):
         # `img` is an Image / _SheetSprite (.w/.h/.pix/.transparent) -- the id has
         # already been resolved to pixels by the time the canvas sees it. Emit the
-        # raw pixels so the stream is self-contained and replays identically.
+        # raw pixels so the stream is self-contained and replays identically. `flip`
+        # (0=none, 1=h, 2=v, 3=both, #11) is carried so the replay mirrors too.
         t = img.transparent
         if t is None:
             t = -1
@@ -112,7 +142,7 @@ class CommandCanvas:
         # -1 transparent markers); JSON handles ints, and the replayer reads them.
         pix = list(img.pix)
         self._cmds.append(["spr", int(x), int(y), int(scale),
-                           int(img.w), int(img.h), int(t), pix])
+                           int(img.w), int(img.h), int(t), pix, int(flip)])
 
     def map(self, tilemap, sheet, mx=0, my=0, w=None, h=None,
             sx=0, sy=0, colorkey=-1, scale=1):
@@ -193,9 +223,30 @@ def replay_to_canvas(commands, canvas):
             canvas.circb(cmd[1], cmd[2], cmd[3], cmd[4])
         elif op == "spr":
             _x, _y, scale, w, h, t, pix = cmd[1:8]
+            flip = cmd[8] if len(cmd) > 8 else 0    # #11: optional flip field
             img = Image(w, h, pix, transparent=t)
-            canvas.spr(img, _x, _y, scale)
+            canvas.spr(img, _x, _y, scale, flip)
         elif op == "print":
             canvas.print(cmd[1], cmd[2], cmd[3], cmd[4])
+        # -- draw state (#11): apply in order so the replay tracks clip/camera/pal --
+        elif op == "reset_state":
+            canvas.reset_state()
+        elif op == "camera":
+            canvas.camera(cmd[1], cmd[2])
+        elif op == "clip":
+            if len(cmd) > 1:
+                canvas.clip(cmd[1], cmd[2], cmd[3], cmd[4])
+            else:
+                canvas.clip()
+        elif op == "pal":
+            if len(cmd) > 1:
+                canvas.pal(cmd[1], cmd[2])
+            else:
+                canvas.pal()
+        elif op == "palt":
+            if len(cmd) > 1:
+                canvas.palt(cmd[1], bool(cmd[2]))
+            else:
+                canvas.palt()
         # unknown ops are ignored (forward-compatible)
     return canvas

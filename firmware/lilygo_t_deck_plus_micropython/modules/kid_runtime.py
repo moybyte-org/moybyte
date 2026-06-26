@@ -76,19 +76,94 @@ class DeviceCanvas:
         self._buf = compositor.framebuffer()          # raw RGB565 bytearray (for kc_gfx)
         self._fb = framebuf.FrameBuffer(self._buf, self.w, self.h, framebuf.RGB565)
         self._gfx = compositor.gfx() if _USE_GFX else None   # native kernel, or None
+        self.reset_state()
+
+    # -- draw state (camera / clip / pal / palt, #11) ------------------------
+    # Mirror runtime/canvas.py exactly so a .kcart draws the same pixels host-side
+    # and on-device: camera offsets all coords, clip bounds the write region (passed
+    # to the kc_gfx kernel for blits / intersected for fills), pal remaps draw
+    # indices (applied in _col, so every primitive inherits it), palt marks sprite
+    # indices transparent. _palgen bumps on a pal/palt change so the per-sprite RGB
+    # cache (which bakes pal+palt in) knows to re-bake.
+
+    def reset_state(self):
+        self._cam_x = 0
+        self._cam_y = 0
+        self._clip_x0 = 0
+        self._clip_y0 = 0
+        self._clip_x1 = self.w
+        self._clip_y1 = self.h
+        self._pal_map = bytearray(range(64))
+        self._palt = bytearray(64)          # 0 opaque, 1 transparent (default opaque)
+        self._palgen = 0
+
+    def camera(self, x=0, y=0):
+        prev = (self._cam_x, self._cam_y)
+        self._cam_x = int(x)
+        self._cam_y = int(y)
+        return prev
+
+    def clip(self, x=None, y=None, w=None, h=None):
+        if x is None:
+            self._clip_x0 = 0
+            self._clip_y0 = 0
+            self._clip_x1 = self.w
+            self._clip_y1 = self.h
+            return
+        x = int(x); y = int(y); w = int(w); h = int(h)
+        self._clip_x0 = max(0, x)
+        self._clip_y0 = max(0, y)
+        self._clip_x1 = min(self.w, x + w)
+        self._clip_y1 = min(self.h, y + h)
+
+    def pal(self, c0=None, c1=None):
+        if c0 is None:
+            for i in range(64):
+                self._pal_map[i] = i
+        else:
+            self._pal_map[int(c0) & 63] = int(c1) & 63
+        self._palgen += 1                   # invalidate cached sprite RGB (pal baked in)
+
+    def palt(self, c=None, on=None):
+        if c is None:
+            for i in range(64):
+                self._palt[i] = 0
+        else:
+            self._palt[int(c) & 63] = 1 if on else 0
+        self._palgen += 1                   # invalidate cached sprite RGB (palt baked in)
 
     def _col(self, c):
-        return PAL565[c & 63]
+        # Resolve a draw index to RGB565 through the pal remap, so cls/pix/line/rect/
+        # circ/circb/rectb all honour pal() for free.
+        return PAL565[self._pal_map[c & 63]]
 
     def _fill(self, x, y, w, h, col):
-        # Filled rect of a pre-resolved RGB565 colour; native (clamped in C) when
-        # kc_gfx is present, else framebuf. Shared by rect() and circ().
+        # Filled rect of a pre-resolved RGB565 colour, camera-offset and intersected
+        # with the clip rect; native (clamped in C) when kc_gfx is present, else
+        # framebuf. Shared by rect()/circ()/rectb().
+        x -= self._cam_x
+        y -= self._cam_y
+        x0 = max(self._clip_x0, x)
+        y0 = max(self._clip_y0, y)
+        x1 = min(self._clip_x1, x + w)
+        y1 = min(self._clip_y1, y + h)
+        if x1 <= x0 or y1 <= y0:
+            return
         if self._gfx is not None:
-            self._gfx.fill_rect(self._buf, self.w, x, y, w, h, col)
+            self._gfx.fill_rect(self._buf, self.w, x0, y0, x1 - x0, y1 - y0, col)
         else:
-            self._fb.fill_rect(x, y, w, h, col)
+            self._fb.fill_rect(x0, y0, x1 - x0, y1 - y0, col)
+
+    def _put(self, x, y, col):
+        # Single clipped, camera-offset framebuf pixel write (pal already applied in
+        # the resolved `col`). Used by pix/line/circb so they honour camera+clip.
+        x -= self._cam_x
+        y -= self._cam_y
+        if self._clip_x0 <= x < self._clip_x1 and self._clip_y0 <= y < self._clip_y1:
+            self._fb.pixel(x, y, col)
 
     def cls(self, c=0):
+        # Full-surface reset: ignores camera/clip (like TIC-80) but honours pal.
         col = self._col(c)
         if self._gfx is not None:
             self._gfx.fill(self._buf, self.w * self.h, col)
@@ -96,24 +171,49 @@ class DeviceCanvas:
             self._fb.fill(col)
 
     def pix(self, x, y, c=None):
-        # TIC-80 pix: read the index with two args, set it with three.
+        # TIC-80 pix: read the index with two args, set it with three. Reads are
+        # camera-relative; the buffer holds RGB565 so a read returns that, not an index.
+        x = int(x) - self._cam_x
+        y = int(y) - self._cam_y
         if c is None:
-            return self._fb.pixel(int(x), int(y))
-        self._fb.pixel(int(x), int(y), self._col(c))
+            return self._fb.pixel(x, y)
+        if self._clip_x0 <= x < self._clip_x1 and self._clip_y0 <= y < self._clip_y1:
+            self._fb.pixel(x, y, self._col(c))
 
     def line(self, x1, y1, x2, y2, c):
-        self._fb.line(int(x1), int(y1), int(x2), int(y2), self._col(c))
+        # Bresenham through _put so camera+clip+pal apply (matches the host rasterizer
+        # pixel-for-pixel; framebuf.line can't clip to an arbitrary rect).
+        x0 = int(x1); y0 = int(y1); xe = int(x2); ye = int(y2)
+        col = self._col(c)
+        dx = abs(xe - x0); dy = -abs(ye - y0)
+        sx = 1 if x0 < xe else -1
+        sy = 1 if y0 < ye else -1
+        err = dx + dy
+        while True:
+            self._put(x0, y0, col)
+            if x0 == xe and y0 == ye:
+                break
+            e2 = 2 * err
+            if e2 >= dy:
+                err += dy; x0 += sx
+            if e2 <= dx:
+                err += dx; y0 += sy
 
     def rect(self, x, y, w, h, c):
         # TIC-80 rect = FILLED rectangle.
         self._fill(int(x), int(y), int(w), int(h), self._col(c))
 
     def rectb(self, x, y, w, h, c):
-        # TIC-80 rectb = rectangle outline.
-        self._fb.rect(int(x), int(y), int(w), int(h), self._col(c))
+        # TIC-80 rectb = rectangle outline (4 clipped fills, like the host).
+        x = int(x); y = int(y); w = int(w); h = int(h)
+        col = self._col(c)
+        self._fill(x, y, w, 1, col)
+        self._fill(x, y + h - 1, w, 1, col)
+        self._fill(x, y, 1, h, col)
+        self._fill(x + w - 1, y, 1, h, col)
 
     def circ(self, cx, cy, r, c):
-        # TIC-80 circ = FILLED circle.
+        # TIC-80 circ = FILLED circle (each scanline a clipped _fill).
         cx = int(cx); cy = int(cy); r = int(r)
         col = self._col(c)
         for dy in range(-r, r + 1):
@@ -121,14 +221,13 @@ class DeviceCanvas:
             self._fill(cx - span, cy + dy, 2 * span + 1, 1, col)
 
     def circb(self, cx, cy, r, c):
-        # TIC-80 circb = circle outline.
+        # TIC-80 circb = circle outline (per-pixel through _put, camera+clip+pal).
         cx = int(cx); cy = int(cy); r = int(r)
         col = self._col(c)
         x = r; y = 0; err = 0
-        fb = self._fb
         while x >= y:
             for px, py in ((x, y), (y, x), (-y, x), (-x, y), (-x, -y), (-y, -x), (y, -x), (x, -y)):
-                fb.pixel(cx + px, cy + py, col)
+                self._put(cx + px, cy + py, col)
             y += 1
             if err <= 0:
                 err += 2 * y + 1
@@ -136,25 +235,36 @@ class DeviceCanvas:
                 x -= 1
                 err -= 2 * x + 1
 
-    def spr(self, img, x, y, scale=1):
-        x = int(x); y = int(y); scale = int(scale)
+    def spr(self, img, x, y, scale=1, flip=0):
+        # TIC-80 flip: 0=none, 1=h, 2=v, 3=both (#11). Camera offsets the dst; the
+        # clip rect is passed to the native blit (or honoured in the fallback). pal +
+        # palt are baked into the cached RGB565 copy (re-baked when _palgen changes).
+        x = int(x) - self._cam_x
+        y = int(y) - self._cam_y
+        scale = int(scale)
+        flip = int(flip)
         if scale < 1:
             scale = 1
         if self._gfx is None:
-            self._spr_py(img, x, y, scale)
+            self._spr_py(img, x, y, scale, flip)
             return
-        # Blit a cached, pre-scaled RGB565 copy of the sprite in one C call. The
+        # Blit a cached, pre-scaled+flipped+pal-applied RGB565 copy in one C call. The
         # cache lives on the Image (sheet tiles are reused across frames via the
-        # make_api tile cache, so the rebuild is once-per-sprite, not per-frame).
-        if getattr(img, "_rgb", None) is None or getattr(img, "_rgb_scale", 0) != scale:
-            self._cache_rgb(img, scale)
+        # make_api tile cache, so the rebuild is once-per-(sprite,scale,flip,pal)).
+        if (getattr(img, "_rgb", None) is None
+                or getattr(img, "_rgb_scale", 0) != scale
+                or getattr(img, "_rgb_flip", -1) != flip
+                or getattr(img, "_rgb_palgen", -1) != self._palgen):
+            self._cache_rgb(img, scale, flip)
         self._gfx.blit565(self._buf, self.w, self.h, x, y,
-                          img._rgb, img._rgb_w, img._rgb_h, _RGB_KEY)
+                          img._rgb, img._rgb_w, img._rgb_h, _RGB_KEY,
+                          self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
 
-    def _cache_rgb(self, img, scale):
-        # Bake the indexed sprite into an RGB565 buffer at `scale`, transparent
-        # pixels set to _RGB_KEY so blit565 skips them. Built rarely (cached), so
-        # the per-pixel loop here is fine -- it's the per-frame blit that matters.
+    def _cache_rgb(self, img, scale, flip=0):
+        # Bake the indexed sprite into an RGB565 buffer at `scale`, mirrored per
+        # `flip`, with pal remap + palt transparency applied; transparent pixels set
+        # to _RGB_KEY so blit565 skips them. Built rarely (cached), so the per-pixel
+        # loop here is fine -- it's the per-frame blit that matters.
         import framebuf
 
         w = img.w * scale
@@ -163,16 +273,23 @@ class DeviceCanvas:
         fb = framebuf.FrameBuffer(buf, w, h, framebuf.RGB565)
         fb.fill(_RGB_KEY)
         pal = PAL565
+        pmap = self._pal_map
+        palt = self._palt
         t = img.transparent
         pix = img.pix
         iw = img.w
-        for sy in range(img.h):
-            base = sy * iw
+        ih = img.h
+        fx = flip & 1
+        fy = (flip >> 1) & 1
+        for sy in range(ih):
+            ssy = (ih - 1 - sy) if fy else sy
+            base = ssy * iw
             for sx in range(iw):
-                p = pix[base + sx]
-                if p == t or p < 0:
+                ssx = (iw - 1 - sx) if fx else sx
+                p = pix[base + ssx]
+                if p == t or p < 0 or palt[p & 63]:
                     continue
-                col = pal[p & 63]
+                col = pal[pmap[p & 63]]
                 if col == _RGB_KEY:
                     col ^= 0x20          # nudge a visible pixel off the colour-key
                 fb.fill_rect(sx * scale, sy * scale, scale, scale, col)
@@ -180,27 +297,51 @@ class DeviceCanvas:
         img._rgb_w = w
         img._rgb_h = h
         img._rgb_scale = scale
+        img._rgb_flip = flip
+        img._rgb_palgen = self._palgen
 
-    def _spr_py(self, img, x, y, scale):
-        # Per-pixel fallback when kc_gfx is absent (image built without it).
-        fb = self._fb
+    def _spr_py(self, img, x, y, scale, flip=0):
+        # Per-pixel fallback when kc_gfx is absent (image built without it). Honours
+        # camera (applied by the caller into x,y), clip, pal, palt, and flip.
         pal = PAL565
+        pmap = self._pal_map
+        palt = self._palt
         t = img.transparent
-        for sy in range(img.h):
-            base = sy * img.w
-            for sx in range(img.w):
-                p = img.pix[base + sx]
-                if p == t or p < 0:
+        iw = img.w
+        ih = img.h
+        pix = img.pix
+        fx = flip & 1
+        fy = (flip >> 1) & 1
+        for sy in range(ih):
+            ssy = (ih - 1 - sy) if fy else sy
+            base = ssy * iw
+            for sx in range(iw):
+                ssx = (iw - 1 - sx) if fx else sx
+                p = pix[base + ssx]
+                if p == t or p < 0 or palt[p & 63]:
                     continue
-                fb.fill_rect(x + sx * scale, y + sy * scale, scale, scale, pal[p & 63])
+                col = pal[pmap[p & 63]]
+                # Clipped fill block (camera already applied into x,y).
+                bx = x + sx * scale
+                by = y + sy * scale
+                x0 = max(self._clip_x0, bx)
+                y0 = max(self._clip_y0, by)
+                x1 = min(self._clip_x1, bx + scale)
+                y1 = min(self._clip_y1, by + scale)
+                if x1 > x0 and y1 > y0:
+                    self._fb.fill_rect(x0, y0, x1 - x0, y1 - y0, col)
 
     def map(self, tilemap, sheet, mx=0, my=0, w=None, h=None,
             sx=0, sy=0, colorkey=-1, scale=1):
         # TIC-80 map(): blit a w x h cell region of the tilemap over `sheet` to
         # screen (sx, sy) in ONE native kc_gfx.blit_map call (issue #32). The sheet
         # is baked once into an RGB565 tile atlas (cached on the sheet, rebuilt only
-        # on a paint edit via sheet.gen), so per-frame cost is just the C walk.
-        mx = int(mx); my = int(my); sx = int(sx); sy = int(sy); scale = int(scale)
+        # on a paint edit via sheet.gen, a different colorkey, or a pal/palt change),
+        # so per-frame cost is just the C walk. camera offsets (sx,sy); the clip rect
+        # is passed to the kernel (#11).
+        mx = int(mx); my = int(my); scale = int(scale)
+        sx = int(sx) - self._cam_x
+        sy = int(sy) - self._cam_y
         if scale < 1:
             scale = 1
         if w is None:
@@ -215,23 +356,28 @@ class DeviceCanvas:
         self._gfx.blit_map(self._buf, self.w, self.h, sx, sy,
                            tilemap.cells, tilemap.w, tilemap.h,
                            mx, my, int(w), int(h),
-                           atlas, ntiles, tile, scale, _RGB_KEY)
+                           atlas, ntiles, tile, scale, _RGB_KEY,
+                           self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
 
     def _sheet_atlas(self, sheet, colorkey):
         # Bake the whole sheet into a contiguous RGB565 tile atlas (ntiles tiles of
         # TILE x TILE, tile-major) for kc_gfx.blit_map. Cached on the sheet and keyed
-        # by (gen, colorkey) so a paint edit or a different colorkey rebakes; this is
-        # the map() analogue of _cache_rgb. Transparent indices (== colorkey) bake to
-        # _RGB_KEY so blit_map skips them.
+        # by (gen, colorkey, palgen) so a paint edit, a different colorkey, or a
+        # pal/palt change rebakes; this is the map() analogue of _cache_rgb. pal remap
+        # + palt transparency are applied (so map honours them, host==device).
+        # Transparent indices (== colorkey, or palt) bake to _RGB_KEY -> blit_map skips.
         gen = getattr(sheet, "gen", 0)
         if (getattr(sheet, "_atlas", None) is not None
-                and sheet._atlas_gen == gen and sheet._atlas_key == colorkey):
+                and sheet._atlas_gen == gen and sheet._atlas_key == colorkey
+                and getattr(sheet, "_atlas_palgen", -1) == self._palgen):
             return sheet._atlas, sheet._atlas_n
         tile = sheet.TILE
         ntiles = sheet.count
         tpx = tile * tile
         buf = bytearray(ntiles * tpx * 2)
         pal = PAL565
+        pmap = self._pal_map
+        palt = self._palt
         cols = sheet.cols
         sw = sheet.w
         spix = sheet.pix
@@ -244,10 +390,10 @@ class DeviceCanvas:
                 base = (oy + ly) * sw + ox
                 for lx in range(tile):
                     p = spix[base + lx]
-                    if p == colorkey:
+                    if p == colorkey or palt[p & 63]:
                         col = key
                     else:
-                        col = pal[p & 63]
+                        col = pal[pmap[p & 63]]
                         if col == key:
                             col ^= 0x20      # nudge a visible pixel off the key
                     buf[pos] = col & 0xFF
@@ -257,6 +403,7 @@ class DeviceCanvas:
         sheet._atlas_n = ntiles
         sheet._atlas_gen = gen
         sheet._atlas_key = colorkey
+        sheet._atlas_palgen = self._palgen
         return buf, ntiles
 
     def _map_py(self, tilemap, sheet, mx, my, w, h, sx, sy, colorkey, scale):
@@ -281,7 +428,11 @@ class DeviceCanvas:
                 self._spr_py(img, sx + cx * step, py, scale)
 
     def print(self, s, x, y, c, scale=2):
-        self._fb.text(str(s), int(x), int(y), self._col(c))
+        # camera offsets the text origin (#11). The clip rect is NOT applied to text:
+        # framebuf.text can't clip to an arbitrary rect, and device text already uses
+        # framebuf's 8x8 font (not the host's petme128), so text was never pixel-exact
+        # across backends. clip + text is a rare combo; the host clips text per-pixel.
+        self._fb.text(str(s), int(x) - self._cam_x, int(y) - self._cam_y, self._col(c))
 
 
 def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
@@ -325,14 +476,15 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         if audio is not None:
             audio.volume(level)
 
-    def spr(n, x, y, colorkey=-1, scale=1, w=1, h=1):
-        # TIC-80 spr(id, x, y[, colorkey, scale, w, h]) from the cart's sheet. w/h
-        # are the tile span: spr(n, x, y, w=2, h=2) draws the 16x16 multi-tile sprite
-        # whose top-left is tile n (#30); w=h=1 is the plain 8x8 sprite. Also accepts
-        # an Image directly (ASCII-art sprites); then a 4th positional is treated as
+    def spr(n, x, y, colorkey=-1, scale=1, flip=0, w=1, h=1):
+        # TIC-80 spr(id, x, y[, colorkey, scale, flip, w, h]) from the cart's sheet.
+        # w/h are the tile span: spr(n, x, y, w=2, h=2) draws the 16x16 multi-tile
+        # sprite whose top-left is tile n (#30). flip (0=none, 1=h, 2=v, 3=both, #11)
+        # mirrors the sprite. w=h=1, flip=0 is the plain 8x8 sprite. Also accepts an
+        # Image directly (ASCII-art sprites); then a 4th positional is treated as
         # scale, e.g. spr(pet, x, y, scale=4).
         if isinstance(n, Image):
-            return canvas.spr(n, x, y, colorkey if colorkey != -1 else scale)
+            return canvas.spr(n, x, y, colorkey if colorkey != -1 else scale, flip)
         if sheet is None:
             return
         g = getattr(sheet, "gen", 0)
@@ -349,7 +501,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
             if img is None:
                 return
             tile_cache[ck] = img
-        canvas.spr(img, x, y, scale)
+        canvas.spr(img, x, y, scale, flip)
 
     def map_(mx=0, my=0, w=None, h=None, sx=0, sy=0, colorkey=-1, scale=1):
         # TIC-80 map(): blit a region of the cart's tilemap over the sheet (#32).
@@ -419,6 +571,8 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         "circ": canvas.circ, "circb": canvas.circb, "spr": spr,
         "map": map_, "mget": mget, "mset": mset,
         "print": canvas.print, "touch": touch, "mouse": mouse,
+        "clip": canvas.clip, "camera": canvas.camera,
+        "pal": canvas.pal, "palt": canvas.palt,
         "btn": input.held, "btnp": input.pressed,
         "key": key, "keyp": keyp, "time": time, "pmem": pmem_fn,
         "cfg": cfg, "col": color,

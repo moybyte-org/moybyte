@@ -83,12 +83,15 @@ blue, indigo, pink, peach` (indices 0–15).
 ### Sprites
 
 `spr(n, x, y)` draws tile `n` at `(x, y)` in both. KidCode's version is
-`spr(n, x, y, colorkey, scale)`:
+`spr(n, x, y, colorkey, scale, flip, w, h)`:
 
 - **Transparency:** PICO-8 uses `palt(c, true)`; KidCode passes a `colorkey`
-  straight to `spr` (e.g. `spr(3, x, y, 0)` makes color 0 see-through).
-- **No multi-tile span** (`spr(n,x,y,w,h)`) and **no flip** (`spr(n,x,y,...,fx,fy)`)
-  yet — draw big or flipped sprites tile-by-tile for now.
+  straight to `spr` (e.g. `spr(3, x, y, 0)` makes color 0 see-through). KidCode
+  also has TIC-80-style `palt(c, on)` to set a per-index transparent colour.
+- **Multi-tile span:** `spr(n, x, y, w=2, h=2)` draws the 16×16 sprite whose
+  top-left is tile `n`.
+- **Flip:** `spr(n, x, y, flip=F)` mirrors the sprite — `1` horizontal, `2`
+  vertical, `3` both (TIC-80's flip arg).
 - **Scaling:** `spr(n, x, y, scale=2)` doubles the size.
 
 ### Buttons & input
@@ -118,11 +121,13 @@ your `main.py` when your cart uses them:
 
 | PICO-8 | What to do instead |
 |---|---|
-| `map()` / `mget` / `mset` | No tilemap yet (coming in issue #32). Draw tiles by hand with `spr()` in a loop, or keep your level in a Python list. |
-| `pal()` / `palt()` | No palette remap. Use the `spr` `colorkey` arg for transparency; skip remaps. |
-| `camera(x,y)` | No camera. Subtract the camera offset yourself in your x,y math. |
 | `fget` / `fset` | No sprite flags. Keep that info in your own Python dict or list. |
 | `peek` / `poke` / `memcpy` | **No raw memory access — on purpose.** Rewrite that part with normal Python variables and lists. |
+
+KidCode now HAS direct equivalents for several PICO-8/TIC-80 verbs that were once
+missing: `map()` / `mget` / `mset` (tilemap, #32), and `camera(x,y)`,
+`clip(x,y,w,h)`, `pal(c0,c1)`, `palt(c,on)` (draw state, #11) — all with the same
+names and semantics, on both the host and the device.
 
 ## A tiny worked example
 

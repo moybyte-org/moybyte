@@ -68,10 +68,12 @@ static mp_obj_t kc_gfx_fill_rect(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(kc_gfx_fill_rect_obj, 7, 7, kc_gfx_fill_rect);
 
-// blit565(dst, dw, dh, dx, dy, src, sw, sh, key) -- key=-1 opaque, else skip
-// source pixels equal to `key` (transparent color).
+// blit565(dst, dw, dh, dx, dy, src, sw, sh, key[, cx0, cy0, cx1, cy1]) -- key=-1
+// opaque, else skip source pixels equal to `key` (transparent color). The optional
+// clip rect [cx0,cy0)..[cx1,cy1) (screen space, #11) further bounds the write region;
+// when omitted it defaults to the full destination (cx0=cy0=0, cx1=dw, cy1=dh), so
+// pre-#11 9-arg call sites are byte-for-byte unchanged.
 static mp_obj_t kc_gfx_blit565(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
     size_t dcap, scap;
     uint16_t *dst = kc_gfx_buf_w(a[0], &dcap);
     mp_int_t dw = mp_obj_get_int(a[1]);
@@ -85,14 +87,23 @@ static mp_obj_t kc_gfx_blit565(size_t n_args, const mp_obj_t *a) {
     if (dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0) return mp_const_none;
     if ((size_t)dw * (size_t)dh > dcap) dh = (mp_int_t)(dcap / (size_t)dw);
     if ((size_t)sw * (size_t)sh > scap) sh = (mp_int_t)(scap / (size_t)sw);
+    // Clip rect, intersected with the buffer; defaults to the whole destination.
+    mp_int_t cx0 = (n_args > 9) ? mp_obj_get_int(a[9]) : 0;
+    mp_int_t cy0 = (n_args > 10) ? mp_obj_get_int(a[10]) : 0;
+    mp_int_t cx1 = (n_args > 11) ? mp_obj_get_int(a[11]) : dw;
+    mp_int_t cy1 = (n_args > 12) ? mp_obj_get_int(a[12]) : dh;
+    if (cx0 < 0) cx0 = 0;
+    if (cy0 < 0) cy0 = 0;
+    if (cx1 > dw) cx1 = dw;
+    if (cy1 > dh) cy1 = dh;
     for (mp_int_t row = 0; row < sh; row++) {
         mp_int_t ty = dy + row;
-        if (ty < 0 || ty >= dh) continue;
+        if (ty < cy0 || ty >= cy1) continue;
         const uint16_t *srow = src + (size_t)row * (size_t)sw;
         uint16_t *drow = dst + (size_t)ty * (size_t)dw;
         for (mp_int_t col = 0; col < sw; col++) {
             mp_int_t tx = dx + col;
-            if (tx < 0 || tx >= dw) continue;
+            if (tx < cx0 || tx >= cx1) continue;
             uint16_t p = srow[col];
             if (key >= 0 && p == (uint16_t)key) continue;
             drow[tx] = p;
@@ -100,18 +111,18 @@ static mp_obj_t kc_gfx_blit565(size_t n_args, const mp_obj_t *a) {
     }
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(kc_gfx_blit565_obj, 9, 9, kc_gfx_blit565);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(kc_gfx_blit565_obj, 9, 13, kc_gfx_blit565);
 
 // blit_map(dst, dw, dh, sx, sy, cells, map_w, map_h, mx, my, rw, rh,
-//          atlas, ntiles, tile, scale, key) -- blit a (rw x rh) cell region of a
-// tilemap in ONE C call (issue #32). `cells` is a byte grid where each cell holds
-// `tile_id + 1` (0 = empty, skipped); a non-empty cell's tile is copied from the
-// pre-converted RGB565 `atlas` (ntiles tiles of `tile`x`tile` pixels, tile-major,
-// row-within-tile) into dst at screen (sx,sy), each source pixel expanded to a
-// `scale` x `scale` block (so scale=2 => 16px tiles). Pixels equal to `key` are
-// transparent. Fully bounds-clamped like blit565: off-screen cells/pixels clip.
+//          atlas, ntiles, tile, scale, key[, cx0, cy0, cx1, cy1]) -- blit a (rw x rh)
+// cell region of a tilemap in ONE C call (issue #32). `cells` is a byte grid where
+// each cell holds `tile_id + 1` (0 = empty, skipped); a non-empty cell's tile is
+// copied from the pre-converted RGB565 `atlas` (ntiles tiles of `tile`x`tile` pixels,
+// tile-major, row-within-tile) into dst at screen (sx,sy), each source pixel expanded
+// to a `scale` x `scale` block (so scale=2 => 16px tiles). Pixels equal to `key` are
+// transparent. The optional clip rect [cx0,cy0)..[cx1,cy1) (#11) bounds the write
+// region; omitted -> full destination, so pre-#11 17-arg calls are unchanged.
 static mp_obj_t kc_gfx_blit_map(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
     size_t dcap, ccap, acap;
     uint16_t *dst = kc_gfx_buf_w(a[0], &dcap);
     mp_int_t dw = mp_obj_get_int(a[1]);
@@ -136,6 +147,15 @@ static mp_obj_t kc_gfx_blit_map(size_t n_args, const mp_obj_t *a) {
     if (dw <= 0 || dh <= 0 || map_w <= 0 || map_h <= 0 || tile <= 0 || ntiles <= 0)
         return mp_const_none;
     if (scale < 1) scale = 1;
+    // Clip rect, intersected with the buffer; defaults to the whole destination.
+    mp_int_t cx0 = (n_args > 17) ? mp_obj_get_int(a[17]) : 0;
+    mp_int_t cy0 = (n_args > 18) ? mp_obj_get_int(a[18]) : 0;
+    mp_int_t cx1 = (n_args > 19) ? mp_obj_get_int(a[19]) : dw;
+    mp_int_t cy1 = (n_args > 20) ? mp_obj_get_int(a[20]) : dh;
+    if (cx0 < 0) cx0 = 0;
+    if (cy0 < 0) cy0 = 0;
+    if (cx1 > dw) cx1 = dw;
+    if (cy1 > dh) cy1 = dh;
     mp_int_t tpx = tile * tile;                  // pixels per atlas tile
     if ((size_t)ntiles * (size_t)tpx > acap) return mp_const_none;  // atlas too small
     mp_int_t step = tile * scale;                // on-screen size of one cell
@@ -154,12 +174,12 @@ static mp_obj_t kc_gfx_blit_map(size_t n_args, const mp_obj_t *a) {
             if (tid >= ntiles) continue;
             const uint16_t *tsrc = atlas + (size_t)tid * (size_t)tpx;
             mp_int_t dx0 = sx + cx * step;
-            // expand the tile's tile x tile pixels by `scale`, bounds-clamped.
+            // expand the tile's tile x tile pixels by `scale`, clip-bounded.
             for (mp_int_t row = 0; row < tile; row++) {
                 const uint16_t *srow = tsrc + (size_t)row * (size_t)tile;
                 for (mp_int_t sub_y = 0; sub_y < scale; sub_y++) {
                     mp_int_t ty = dy0 + row * scale + sub_y;
-                    if (ty < 0 || ty >= dh) continue;
+                    if (ty < cy0 || ty >= cy1) continue;
                     uint16_t *drow = dst + (size_t)ty * (size_t)dw;
                     for (mp_int_t col = 0; col < tile; col++) {
                         uint16_t p = srow[col];
@@ -167,7 +187,7 @@ static mp_obj_t kc_gfx_blit_map(size_t n_args, const mp_obj_t *a) {
                         mp_int_t bx = dx0 + col * scale;
                         for (mp_int_t sub_x = 0; sub_x < scale; sub_x++) {
                             mp_int_t tx = bx + sub_x;
-                            if (tx < 0 || tx >= dw) continue;
+                            if (tx < cx0 || tx >= cx1) continue;
                             drow[tx] = p;
                         }
                     }
@@ -177,7 +197,7 @@ static mp_obj_t kc_gfx_blit_map(size_t n_args, const mp_obj_t *a) {
     }
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(kc_gfx_blit_map_obj, 17, 17, kc_gfx_blit_map);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(kc_gfx_blit_map_obj, 17, 21, kc_gfx_blit_map);
 
 // pack_strip(fb, fb_w, x, y, w, rows, dst) -- copy a (w x rows) window of the
 // framebuffer into dst contiguously (row-major). Full-width is one memcpy;
