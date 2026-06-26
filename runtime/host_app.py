@@ -448,6 +448,9 @@ def build_workstation(carts_dir=None):
     ws.can_manage = True
     ws.pointer = console.Pointer(WIDTH, HEIGHT)
     inp.pointer = ws.pointer       # touch-driven carts read it via the api touch()
+    # Desktop shell (#28): load the system settings (system.json) and apply the
+    # saved wallpaper so the home screen boots with the chosen backdrop.
+    ws.load_system()
     return ws
 
 

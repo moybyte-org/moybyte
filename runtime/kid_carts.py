@@ -459,6 +459,43 @@ def forget_wifi(ssid, root=CARTS_DIR):
     return nets
 
 
+# --- system settings (desktop shell, #28) -----------------------------------
+#
+# A single system-level config (wallpaper choice, later volume/brightness/name/
+# theme) that is NOT tied to any one cart -- today config is per-cart only
+# (cart["cfg"] / save_config). It lives BESIDE the carts dir (a sibling of
+# `root`, like wifi.json and the shared sheet) so it is system state. Written
+# atomically (same crash-safe path as the cart saves) so an interrupted write can
+# never truncate the kid's settings, and written through the same with_sd_live
+# path on device. MicroPython-safe (json + os only).
+
+SYSTEM_STORE_NAME = "system.json"
+
+
+def system_store_path(root=CARTS_DIR):
+    """Well-known path of the system settings store: a sibling of the carts dir
+    (one level up from `root`), so it isn't tied to any single cart."""
+    parent = root.rsplit("/", 1)[0]
+    return (parent + "/" + SYSTEM_STORE_NAME) if parent else SYSTEM_STORE_NAME
+
+
+def load_system(root=CARTS_DIR):
+    """Read the system settings dict. Returns {} when nothing has been saved yet
+    or the file is unreadable/garbage (a corrupt store must never crash boot)."""
+    try:
+        data = json.loads(_read(system_store_path(root)))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_system(settings, root=CARTS_DIR):
+    """Persist the system settings dict, atomically. Ensures the parent dir
+    exists. `settings` is plain JSON-able data."""
+    ensure_dirs(root)
+    _write_atomic(system_store_path(root), json.dumps(dict(settings)))
+
+
 # --- cart management (create / duplicate / delete) --------------------------
 
 # A friendly starter cartridge: an editable colored dot on a wallpaper.
