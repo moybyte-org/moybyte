@@ -589,6 +589,27 @@ def test_device_spr_is_sheet_indexed_and_accepts_image():
     assert calls[-1] == (8, 8, 100, 60, 1)
     api["spr"](m.Image.from_ascii(["#"], {"#": 7}), 8, 9, scale=4)  # Image still works
     assert calls[-1] == (1, 1, 8, 9, 4)
+    # Multi-tile span (#30): spr(n, x, y, w=2, h=2) blits a 16x16 image from the
+    # sheet (the device path, so host == device for larger sprites).
+    api["spr"](0, 12, 14, w=2, h=2)
+    assert calls[-1] == (16, 16, 12, 14, 1)
+
+
+def test_device_paint_editor_sizes_and_spans(tmp_path=None):
+    # The shared PaintEditor's larger-sprite support (#30) under the device modules:
+    # cycle_size steps 1->2->3, the 2x2 region writes the four constituent tiles,
+    # and tile_span_image builds the contiguous block.
+    m = _load_kid_runtime()
+    cols = 16
+    sh = m.SpriteSheet(cols, 16)
+    pe = m.PaintEditor(sh)
+    assert pe.size == 1 and pe.dim == 8
+    pe.cycle_size(); assert pe.size == 2 and pe.dim == 16
+    pe.color = 7
+    pe.paint(10, 11)                        # bottom-right tile of the 2x2 block
+    assert sh.tget(cols + 1, 2, 3) == 7
+    img = sh.tile_span_image(0, 2, 2)
+    assert (img.w, img.h) == (16, 16) and img.pix[11 * 16 + 10] == 7
 
 
 def test_device_make_api_map_mget_mset(tmp_path=None):
