@@ -483,6 +483,20 @@ def empty_program():
 
 _INDENT = "    "
 
+# The first line every block-compiled main.py carries. The block editor uses it
+# to tell a block-authored cart (safe to overwrite on SAVE) from a hand-written
+# code cart (whose main.py must NEVER be clobbered by an empty block program).
+BLOCK_MARKER = "# Made with KidCode blocks."
+
+
+def is_block_authored_source(src):
+    """True if `src` looks like it was emitted by compile_blocks (i.e. it carries
+    the BLOCK_MARKER on its first line). Used to gate the block editor so opening
+    BLOCKS on a hand-written-code cart can't silently replace its main.py."""
+    if not src:
+        return False
+    return str(src).lstrip().startswith(BLOCK_MARKER)
+
 
 class BlockError(Exception):
     """Raised when a program references an unknown block type (a corrupt
@@ -758,6 +772,48 @@ def _is_identifier(name):
     return True
 
 
+def is_identifier(name):
+    """Public alias for the variable-name validator (the block editor's create/
+    rename flow gates names through this so a slot can never inject code)."""
+    return _is_identifier(name)
+
+
+def sanitize_var_name(raw):
+    """Coerce a kid's free-typed text into a SAFE Python identifier for a variable
+    name (MicroPython-safe, no regex): keep letters/digits/underscore, turn spaces
+    and other characters into underscores, prefix an underscore if it starts with a
+    digit, and avoid clashing with a keyword. Returns "" if nothing usable remains
+    (the caller then falls back to a generated default)."""
+    out = ""
+    for ch in str(raw).strip():
+        if ch.isalpha() or ch.isdigit() or ch == "_":
+            out += ch
+        elif ch == " " or ch == "-":
+            out += "_"
+        # anything else (quotes, parens, punctuation) is dropped
+    if not out:
+        return ""
+    if out[0].isdigit():
+        out = "_" + out
+    if out in _KEYWORDS:
+        out = out + "_"
+    return out
+
+
+def unique_var_name(existing, base="var"):
+    """A variable name not already in `existing`: `base`, else base2, base3, ...
+    Used to seed a freshly-created variable with a sensible default the kid can
+    then rename."""
+    existing = set(existing or [])
+    base = sanitize_var_name(base) or "var"
+    if base not in existing:
+        return base
+    i = 2
+    while (base + str(i)) in existing:
+        i += 1
+    return base + str(i)
+
+
 def compile_blocks(program):
     """Compile a block program (the schema above) into a cart's main.py source.
 
@@ -771,7 +827,7 @@ def compile_blocks(program):
     known_vars = collect_vars(program)
     scripts = program.get("scripts", []) or []
 
-    out = ["# Made with KidCode blocks. Edit in the block editor (or graduate to code)."]
+    out = [BLOCK_MARKER + " Edit in the block editor (or graduate to code)."]
 
     # module-level variable declarations (each starts at 0).
     if known_vars:

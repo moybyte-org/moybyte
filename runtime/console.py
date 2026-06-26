@@ -471,6 +471,12 @@ _BLK_CLOSE = (248, 196, 66, 22)
 _BLK_MENU = (40, 24, 240, 192)        # the modal panel
 _BLK_MENU_ROW_H = 16
 _BLK_MENU_ROWS = 10                   # visible menu rows (scrolls if more)
+# The variable name-entry prompt: a small modal with the live name + touch buttons
+# (the kid types on the keyboard; OK/DEL/X are for touch). #29 Bug 2.
+_BLK_KBD = (40, 78, 240, 84)          # the prompt panel
+_BLK_KBD_DEL = (52, 124, 50, 24)      # backspace
+_BLK_KBD_OK = (188, 124, 40, 24)      # confirm
+_BLK_KBD_X = (232, 124, 36, 24)       # cancel
 # In-row slot editing: tapping/right-step on a selected block cycles to its NEXT
 # editable slot; that slot is highlighted, and A opens its editor (number bump,
 # variable/dropdown picker, expr -> a nested expression insert).
@@ -479,6 +485,12 @@ _CAT_LABEL = {
     "events": "When...", "control": "Control", "draw": "Draw", "input": "Buttons",
     "variables": "Variables", "operators": "Math", "sound": "Sound",
 }
+
+# Sentinel menu row: "make a brand-new variable + name it". It heads the Variables
+# block list AND the variable-slot picker, so a kid can always create + name a
+# variable with just ▲▼ + A (no dragging) and then use it everywhere (#29 Bug 2).
+_NEW_VAR_ITEM = "\x00new_var"
+_NEW_VAR_LABEL = "+ new variable"
 
 
 def _blk_plain_label(label):
@@ -1198,6 +1210,8 @@ class Workstation:
         self.blk_slot = 0             # which slot of the selected block is highlighted
         self.blk_menu = None          # active insert menu state dict, or None
         self.blk_status = None        # last block-editor SAVE result text
+        self.blk_protect = False      # block editor opened on a hand-written-code cart
+        self.blk_kbd = None           # inline name-entry prompt state dict, or None
         self.keyboard = None          # set by run_desktop (for raw/text mode toggle)
         self._ekey_prev = 0           # last consumed keyboard byte (edge detect)
         self._drag = None             # last pointer pos during a code-view drag-scroll
@@ -1721,6 +1735,8 @@ class Workstation:
         self.mapedit = None
         self.blocks_ed = None
         self.blk_menu = None
+        self.blk_kbd = None
+        self.blk_protect = False
         self.cart_error = None
         self.save_status = None
         self.sheet = self._build_sheet()
@@ -1846,11 +1862,22 @@ class Workstation:
                         print("KidCode load blocks failed:", _err_text(exc))
                 if prog is None:
                     prog = self.cart.get("blocks")
+                # DATA-LOSS GUARD (#29): a cart whose main.py is hand-written code
+                # (no blocks.json, and main.py wasn't emitted by the block compiler)
+                # must NEVER have that code clobbered by saving an empty block program.
+                # When that's the case, run the block editor in PROTECTED mode: the
+                # outline still opens (read-only-ish), but SAVE / graduate refuse to
+                # overwrite main.py and tell the kid why. A genuinely block-authored
+                # cart (has blocks.json) -- or an empty/new-template cart with no real
+                # code -- is unprotected and round-trips exactly as before.
+                self.blk_protect = (prog is None
+                                    and self._cart_has_handwritten_code())
                 self.blocks_ed = BlockEditor(_blocks_mod, prog)
                 self.blk_top = 0
                 self.blk_slot = 0
                 self.blk_menu = None
-                self.blk_status = None
+                self.blk_status = ("CODE LOCKED -- can't blockify"
+                                   if self.blk_protect else None)
         self._set_text_mode(view == "code")
         # Achievements (#21): visiting each editor (code/paint/map) earns "Toolbox
         # Master". "cards" isn't an editor, so it's ignored by note().
@@ -1891,8 +1918,30 @@ class Workstation:
 
     def _open_blocks(self):
         self.screen = "menu"
-        self.blk_status = None
+        # NB: don't pre-clear blk_status here -- set_menu_view("blocks") sets the
+        # "CODE LOCKED" notice when it builds the editor in protected mode, and
+        # clearing it after would hide the data-loss guard's message.
         self.set_menu_view("blocks")
+
+    def _cart_has_handwritten_code(self):
+        """True if the current cart's main.py is real, hand-written code that the
+        block editor must not overwrite: there is non-trivial source AND it was NOT
+        emitted by the block compiler (no BLOCK_MARKER) AND it isn't the throwaway
+        new-cart template. A brand-new / template-only cart returns False, so a kid
+        can freely start authoring it with blocks."""
+        cart = self.cart
+        if cart is None:
+            return False
+        src = cart.get("src") or ""
+        if _blocks_mod.is_block_authored_source(src):
+            return False                         # already block-authored main.py
+        # The default new-cart template is fair game to blockify (it's boilerplate,
+        # not the kid's own code) -- treat it as no real code.
+        tmpl = getattr(self.carts_store, "NEW_TEMPLATE", None) if self.carts_store else None
+        if tmpl is not None and src.strip() == str(tmpl.get("src", "")).strip():
+            return False
+        # Any remaining non-whitespace source is the kid's own code -> protect it.
+        return bool(src.strip())
 
     def _leave_menu(self):
         self._dirty = True             # back to the desktop repaints (#44)
@@ -1907,6 +1956,7 @@ class Workstation:
             self._start()
         elif self.menu_view == "blocks":
             self.blk_menu = None
+            self.blk_kbd = None
             # A saved block edit already recompiled cart["src"] (save_blocks); re-run
             # it so leaving the outline runs the freshest program, just like the code
             # editor does. (Unsaved edits don't touch src, so this re-runs the last
@@ -2149,6 +2199,8 @@ class Workstation:
         self.mapedit = None
         self.blocks_ed = None
         self.blk_menu = None
+        self.blk_kbd = None
+        self.blk_protect = False
         self.screen = "launcher"
         self.cart = None
         self.ns = None
@@ -2992,6 +3044,10 @@ class Workstation:
         # program already has all three, so they're not insertable into a body.
         if category == _blocks_mod.CAT_EVENTS:
             ids = []
+        # Variables: head the list with "+ new variable" so creating + naming one is
+        # the first, obvious thing in the category (#29 Bug 2).
+        if category == _blocks_mod.CAT_VARIABLES:
+            ids = [_NEW_VAR_ITEM] + list(ids)
         self.blk_menu = {"mode": "blk", "cat": category, "sel": 0, "top": 0,
                          "items": ids}
 
@@ -3005,6 +3061,8 @@ class Workstation:
         if not m:
             return ""
         item = m["items"][i]
+        if item == _NEW_VAR_ITEM:
+            return _NEW_VAR_LABEL
         if m["mode"] == "cat":
             return _CAT_LABEL.get(item, item).upper()
         if m["mode"] == "blk":
@@ -3030,6 +3088,11 @@ class Workstation:
         if not m or not m["items"]:
             return
         item = m["items"][m["sel"]]
+        if item == _NEW_VAR_ITEM:
+            # "+ new variable": create one with a default name and immediately open
+            # the on-screen-keyboard name prompt so the kid names it (#29 Bug 2).
+            self._blk_new_variable()
+            return
         if m["mode"] == "cat":
             self._blk_open_blocks(item)
         elif m["mode"] == "blk":
@@ -3093,15 +3156,92 @@ class Workstation:
         be.set_slot(name, val, block)
 
     def _blk_open_variable_picker(self, block, name):
+        # The variable-slot picker: "+ new variable" first (so a kid can create +
+        # name one right here and have the slot use it), then every declared variable.
         be = self.blocks_ed
-        items = be.variables()
-        if not items:
-            # No variables yet: auto-declare friendly defaults so a slot is fillable
-            # even before the kid names one (they can rename later).
-            be.add_var("score")
-            items = be.variables()
+        items = [_NEW_VAR_ITEM] + be.variables()
         self.blk_menu = {"mode": "variable", "sel": 0, "top": 0, "items": items,
                          "block": block, "slot": name}
+
+    # -- variable create + name (on-screen keyboard) -------------------------
+    def _blk_new_variable(self):
+        """Create a fresh variable (default name) and open the name-entry prompt so
+        the kid types its name with the on-screen keyboard. Remembers the menu that
+        was open (variable-slot picker) so that slot gets filled with the named var
+        once the kid confirms (#29 Bug 2)."""
+        be = self.blocks_ed
+        if be is None:
+            return
+        m = self.blk_menu
+        slot_target = None
+        if m is not None and m.get("mode") == "variable":
+            slot_target = (m.get("block"), m.get("slot"))
+        name = be.new_var("var")
+        self.blk_menu = None
+        # An inline prompt: `text` is the live edit buffer (starts EMPTY so the kid
+        # types a fresh name instead of appending to the default), `var` is the
+        # just-created variable's CURRENT name -- confirm renames it old->typed, and a
+        # blank/invalid entry keeps this default. `slot_target`, if set, is the
+        # (block, slot) to fill with the final name.
+        self.blk_kbd = {"text": "", "var": name, "slot_target": slot_target}
+        self._set_text_mode(True)            # ASCII keyboard for typing the name
+        self._ekey_prev = 0
+
+    def _blk_kbd_commit(self):
+        """Confirm the name prompt: rename the new variable to the typed text (falling
+        back to its default if blank/invalid), fill the target slot if any, and close
+        the prompt."""
+        be = self.blocks_ed
+        k = self.blk_kbd
+        if be is None or k is None:
+            self.blk_kbd = None
+            self._set_text_mode(False)
+            return
+        old = k["var"]
+        typed = k["text"]
+        applied = be.rename_var(old, typed)
+        final = applied if applied else old   # blank/dup/invalid keeps the default
+        bt = k.get("slot_target")
+        if bt is not None and bt[0] is not None:
+            be.set_slot(bt[1], final, bt[0])
+        self.blk_kbd = None
+        self._set_text_mode(False)
+        self.blk_status = "var: " + final[:12]
+
+    def _blk_kbd_cancel(self):
+        """Cancel the name prompt: keep the default-named variable (it's already
+        declared and usable), just close the prompt + fill the slot with the default."""
+        be = self.blocks_ed
+        k = self.blk_kbd
+        if be is not None and k is not None:
+            bt = k.get("slot_target")
+            if bt is not None and bt[0] is not None:
+                be.set_slot(bt[1], k["var"], bt[0])
+        self.blk_kbd = None
+        self._set_text_mode(False)
+
+    def _blk_kbd_key(self, ch):
+        """Apply one typed character to the name buffer: backspace deletes, Enter
+        confirms, Esc cancels, and any name-legal char appends."""
+        k = self.blk_kbd
+        if k is None:
+            return
+        if ch in (8, 127):                    # backspace / delete
+            k["text"] = k["text"][:-1]
+            return
+        if ch in (13, 10):                    # Enter -> confirm
+            self._blk_kbd_commit()
+            return
+        if ch == 27:                          # Esc -> cancel
+            self._blk_kbd_cancel()
+            return
+        if 32 <= ch < 127:
+            c = chr(ch)
+            # Keep the buffer to name-legal characters (letters/digits/_/space/dash);
+            # sanitize_var_name finalizes it on commit, but filtering here keeps the
+            # on-screen buffer honest. Cap the length so it always fits a row.
+            if (c.isalpha() or c.isdigit() or c in ("_", " ", "-")) and len(k["text"]) < 16:
+                k["text"] += c
 
     def _blk_open_dropdown_picker(self, block, slot):
         opts = _blocks_mod.slot_options(slot)
@@ -3134,6 +3274,11 @@ class Workstation:
         A non-SD/embedded cart just validates + applies in RAM."""
         be = self.blocks_ed
         if not (be and self.cart):
+            return False
+        if self.blk_protect:
+            # DATA-LOSS GUARD (#29): this cart's main.py is hand-written code that a
+            # block save would replace. Refuse and tell the kid -- their code stays.
+            self.blk_status = "CART HAS CODE -- not saved"
             return False
         prog = be.program
         # Always compile-check first so the kid sees a problem before it persists.
@@ -3178,6 +3323,14 @@ class Workstation:
         be = self.blocks_ed
         if not (be and self.cart):
             return
+        if self.blk_protect:
+            # Protected cart: don't compile the (empty) blocks over the kid's real
+            # main.py. Just open the code editor on the EXISTING source -- "graduate"
+            # here simply means "go edit the code you already have".
+            self.editor = None
+            self.blk_menu = None
+            self.set_menu_view("code")
+            return
         try:
             src = _blocks_mod.compile_blocks(be.program)
         except Exception as exc:  # noqa: BLE001
@@ -3194,6 +3347,19 @@ class Workstation:
         """Keyboard/button input for the outline + insert menu. Mirrors the other
         editors' edge-driven nav. The menu, when open, captures nav + A/B."""
         i = self.input
+        if self.blk_kbd is not None:
+            # The variable name-entry prompt owns input: type the name (one insert per
+            # physical press, edge-detected like the code editor), Enter/A confirm, B
+            # cancels. last_key carries the resolved ASCII byte (text mode is on).
+            k = i.last_key
+            if k and k != self._ekey_prev:
+                self._blk_kbd_key(k)
+            self._ekey_prev = k
+            if i.pressed("a") or i.pressed("run"):
+                self._blk_kbd_commit()
+            elif i.pressed("b"):
+                self._blk_kbd_cancel()
+            return
         if self.blk_menu is not None:
             if i.pressed("up"):
                 self._blk_menu_move(-1)
@@ -3238,6 +3404,9 @@ class Workstation:
 
     def _blocks_pointer(self, px, py, click):
         if not click:
+            return
+        if self.blk_kbd is not None:
+            self._blk_kbd_click(px, py)
             return
         if self.blk_menu is not None:
             self._blk_menu_click(px, py)
@@ -3284,6 +3453,18 @@ class Workstation:
         if 0 <= ridx < len(m["items"]):
             m["sel"] = ridx
             self._blk_menu_select()
+
+    def _blk_kbd_click(self, px, py):
+        """Touch handling for the variable name prompt: DEL backspaces, OK confirms,
+        X cancels. (Typing the name itself is the on-screen/T-Deck keyboard.)"""
+        if _in(px, py, _BLK_KBD_DEL):
+            self._blk_kbd_key(8); return
+        if _in(px, py, _BLK_KBD_OK):
+            self._blk_kbd_commit(); return
+        if _in(px, py, _BLK_KBD_X):
+            self._blk_kbd_cancel(); return
+        # taps inside the panel are ignored (no dismiss-on-tap-outside: a stray tap
+        # shouldn't discard a half-typed name).
 
     # -- frame + drawing -----------------------------------------------------
 
@@ -4274,6 +4455,33 @@ class Workstation:
         self._btn("CLOSE", _BLK_CLOSE, NAMES["dark_grey"])
         if self.blk_menu is not None:
             self._draw_blk_menu()
+        if self.blk_kbd is not None:
+            self._draw_blk_kbd()
+
+    def _draw_blk_kbd(self):
+        """The variable name-entry prompt: the live name being typed + touch buttons.
+        Indexed API + petme128 only (host == device)."""
+        cv = self.canvas
+        x, y, w, h = _BLK_KBD
+        cv.rect(x, y, w, h, NAMES["dark_purple"])
+        cv.rectb(x, y, w, h, NAMES["white"])
+        cv.print("NAME YOUR VARIABLE", x + 10, y + 8, NAMES["white"], 1)
+        cv.print("type a name, then OK", x + 10, y + 18, NAMES["light_grey"], 1)
+        # the live edit buffer in a field with a blinking-ish caret bar
+        fx, fy, fw = x + 10, y + 30, w - 20
+        cv.rect(fx, fy, fw, 14, NAMES["black"])
+        cv.rectb(fx, fy, fw, 14, NAMES["light_grey"])
+        txt = (self.blk_kbd.get("text") or "")[:24]
+        if txt:
+            cv.print(txt, fx + 4, fy + 3, NAMES["white"], 1)
+        else:
+            # empty buffer: show the default name as a dim placeholder (OK keeps it)
+            cv.print(str(self.blk_kbd.get("var", ""))[:24], fx + 4, fy + 3,
+                     NAMES["dark_grey"], 1)
+        cv.rect(fx + 4 + len(txt) * 8, fy + 3, 6, 8, NAMES["yellow"])   # caret
+        self._btn("DEL", _BLK_KBD_DEL, NAMES["red"])
+        self._btn("OK", _BLK_KBD_OK, NAMES["green"])
+        self._btn("X", _BLK_KBD_X, NAMES["dark_grey"])
 
     def _blk_hint(self):
         be = self.blocks_ed
