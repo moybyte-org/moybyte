@@ -411,10 +411,48 @@ _PAINT_PUT = (210, 154, 92, 20)
 # larger than the on-screen window.
 _MV_X0 = 14            # map view top-left (cells drawn scaled here)
 _MV_Y0 = 32
-_MV_CELL = 14          # px per cell in the view (tappable, shows the 8x8 tile)
-_MV_COLS = 13          # visible map columns
-_MV_ROWS = 11          # visible map rows
-_MV_AREA = (_MV_X0, _MV_Y0, _MV_COLS * _MV_CELL, _MV_ROWS * _MV_CELL)
+# The map-view rectangle is sized dynamically from the current ZOOM level (#37
+# follow-up): the cell size in px drives how many cells fit (and how big each tile
+# is drawn). The available rectangle is x 14..~206, y 32..~196 -- clear of the tile
+# palette (x >= 210) / pan d-pad / bottom button row (y = 198). All hit-testing,
+# panning and drawing route through Workstation._mv_metrics() so they share one
+# live cell size; there is no fixed _MV_CELL/_MV_COLS/_MV_ROWS/_MV_AREA any more.
+_MV_AVAIL_W = 192      # usable map-view width  (14 .. 206)
+_MV_AVAIL_H = 164      # usable map-view height (32 .. 196)
+# TIC-80-style zoom: a small ascending list of cell sizes in px. Zoom only goes IN
+# from the default (bigger cells -> fewer cells -> more detail), so a tile is only
+# ever UPscaled (no sub-8px downscaling). The DEFAULT (index 0, most zoomed-OUT) is
+# computed -- not hardcoded -- as the largest cell that still shows the whole map of
+# both shipped games with NO panning: battle_city is 15x15 and platformer is 20x13,
+# so the default must fit >= 20 columns AND >= 15 rows in the available rectangle.
+_MV_FIT_COLS = 20      # widest shipped map (platformer)
+_MV_FIT_ROWS = 15      # tallest shipped map (battle_city)
+
+
+def _mv_default_cell():
+    """The largest cell size (px) that still fits the whole shipped maps with no
+    panning: >= _MV_FIT_COLS columns AND >= _MV_FIT_ROWS rows in the available
+    rectangle. Computed rather than hardcoded so the fit guarantee is provable.
+    With a 192x164 area this is 9px (192//9 = 21 cols, 164//9 = 18 rows)."""
+    cell = 4
+    best = cell
+    while cell <= 40:
+        if _MV_AVAIL_W // cell >= _MV_FIT_COLS and _MV_AVAIL_H // cell >= _MV_FIT_ROWS:
+            best = cell
+        cell += 1
+    return best
+
+
+# Zoom levels, ascending: index 0 is the fit-both default; the rest zoom IN. The
+# zoomed-in sizes are multiples of the 8px tile (16/24/32) so each tile UPSCALES to
+# fill its cell exactly (scale = cell // 8 = 2/3/4) -- crisp pixel art, no floating
+# 8px tile in a big box.
+_MV_ZOOMS = [_mv_default_cell(), 16, 24, 32]
+# ZOOM control: a small button in the map editor that cycles the zoom level. Sits
+# in the empty CENTER of the pan d-pad (between UP/DOWN/LEFT/RIGHT) -- a natural,
+# TIC-80-ish spot that overlaps nothing (palette PREV/NEXT end at y 140; the d-pad
+# arrows surround x 244,y 164 without filling its center).
+_MAP_ZOOM = (244, 164, 24, 16)
 # Tile palette (right): a paged grid of sheet tiles; tap to pick the brush.
 _TP_X0 = 210
 _TP_Y0 = 32
@@ -1203,6 +1241,7 @@ class Workstation:
         self.mapedit = None           # MapEditor while menu_view == "map" (#32)
         self.map_erase = False        # map editor: tap-to-erase instead of stamp
         self.map_page = 0             # map editor: first tile id shown in the palette
+        self.map_zoom = 0             # map editor: zoom level index into _MV_ZOOMS (0 = fit)
         # Block editor (#29 Part 2): a BlockEditor over the cart's block program +
         # the structured-outline UI state. `blocks_ed` is built lazily on first open.
         self.blocks_ed = None         # BlockEditor while menu_view == "blocks"
@@ -1934,11 +1973,17 @@ class Workstation:
         self.screen = "menu"
         self.save_status = None
         self.map_erase = False
+        self.map_zoom = 0              # reset to the fit-both default zoom (#37 follow-up)
         self._map_press = None         # fresh gesture state on open (#37)
         self._map_panning = False
         self._map_drag = None
         self._map_paint_undo = None
         self.set_menu_view("map")
+        # Open with the camera at the top-left so the whole map shows at the default
+        # (fit-both) zoom with zero panning. set_menu_view builds the MapEditor.
+        if self.mapedit is not None:
+            self.mapedit.cam_x = 0
+            self.mapedit.cam_y = 0
 
     def _open_blocks(self):
         self.screen = "menu"
@@ -2505,13 +2550,15 @@ class Workstation:
                 me = self.mapedit
                 if me is not None:
                     if i.pressed("up"):
-                        me.pan(0, -1)
+                        self._map_pan(0, -1)
                     if i.pressed("down"):
-                        me.pan(0, 1)
+                        self._map_pan(0, 1)
                     if i.pressed("left"):
-                        me.pan(-1, 0)
+                        self._map_pan(-1, 0)
                     if i.pressed("right"):
-                        me.pan(1, 0)
+                        self._map_pan(1, 0)
+                    if i.pressed("a"):          # A cycles the zoom level (#37 follow-up)
+                        self._map_cycle_zoom()
                 if i.pressed("b"):
                     self._leave_menu()
                 elif i.pressed("home"):
@@ -2876,14 +2923,65 @@ class Workstation:
         start = self.map_page
         return list(range(start, min(start + _TP_PAGE, count)))
 
+    def _mv_metrics(self):
+        """The LIVE map-view metrics for the current zoom level (#37 follow-up):
+        (x0, y0, cell, cols, rows). `cell` is the px per cell at the current zoom;
+        `cols`/`rows` are how many whole cells fit the available rectangle. All map
+        hit-testing, panning and drawing route through this so they share one cell
+        size -- there is no fixed _MV_CELL/_MV_COLS/_MV_ROWS any more."""
+        idx = self.map_zoom
+        if idx < 0:
+            idx = 0
+        elif idx >= len(_MV_ZOOMS):
+            idx = len(_MV_ZOOMS) - 1
+        cell = _MV_ZOOMS[idx]
+        cols = _MV_AVAIL_W // cell
+        rows = _MV_AVAIL_H // cell
+        return (_MV_X0, _MV_Y0, cell, cols, rows)
+
+    def _mv_area(self):
+        """The current map-view rectangle (x, y, w, h) for _in() hit-tests."""
+        x0, y0, cell, cols, rows = self._mv_metrics()
+        return (x0, y0, cols * cell, rows * cell)
+
+    def _map_clamp_cam(self):
+        """Clamp the camera so you can't scroll far past the map edges at the
+        current zoom: the top-left visible cell stays in [0, max(0, dim - visible)],
+        so a map smaller than the view always pins to (0, 0) (no panning needed)."""
+        me = self.mapedit
+        tm = self.tilemap
+        if me is None or tm is None:
+            return
+        x0, y0, cell, cols, rows = self._mv_metrics()
+        me.cam_x = max(0, min(max(0, tm.w - cols), me.cam_x))
+        me.cam_y = max(0, min(max(0, tm.h - rows), me.cam_y))
+
+    def _map_cycle_zoom(self):
+        """Cycle to the next zoom level (wrapping back to the fit-both default),
+        then re-clamp the camera so a zoom-out can't leave it scrolled off-map."""
+        self.map_zoom = (self.map_zoom + 1) % len(_MV_ZOOMS)
+        self._map_clamp_cam()
+
+    def _map_pan(self, dcx, dcy):
+        """Pan the camera by (dcx, dcy) cells then clamp to the map edges at the
+        current zoom (the editor's clamp, which knows the visible cols/rows -- the
+        MapEditor.pan clamp is zoom-agnostic so we re-clamp here)."""
+        me = self.mapedit
+        if me is None:
+            return
+        me.cam_x = me.cam_x + dcx
+        me.cam_y = me.cam_y + dcy
+        self._map_clamp_cam()
+
     def _map_cell_at(self, px, py):
         """The map cell (cx, cy) under pointer (px, py) accounting for the pan
         offset, or None when the pointer is outside the visible map view."""
         me = self.mapedit
-        if me is None or not _in(px, py, _MV_AREA):
+        if me is None or not _in(px, py, self._mv_area()):
             return None
-        cx = me.cam_x + (px - _MV_X0) // _MV_CELL
-        cy = me.cam_y + (py - _MV_Y0) // _MV_CELL
+        x0, y0, cell, cols, rows = self._mv_metrics()
+        cx = me.cam_x + (px - x0) // cell
+        cy = me.cam_y + (py - y0) // cell
         return (cx, cy)
 
     def _map_paint(self, cx, cy):
@@ -2918,13 +3016,14 @@ class Workstation:
         last = self._map_drag
         if me is None or last is None:
             return
-        dcx = (last[0] - px) // _MV_CELL       # content follows the finger: drag
-        dcy = (last[1] - py) // _MV_CELL       # right -> see cells to the left
+        x0, y0, cell, cols, rows = self._mv_metrics()
+        dcx = (last[0] - px) // cell           # content follows the finger: drag
+        dcy = (last[1] - py) // cell           # right -> see cells to the left
         if dcx or dcy:
-            me.pan(dcx, dcy)
+            self._map_pan(dcx, dcy)
             # advance the anchor by whole cells consumed (keep the sub-cell remainder
             # so a slow drag still accumulates instead of stalling).
-            self._map_drag = (last[0] - dcx * _MV_CELL, last[1] - dcy * _MV_CELL)
+            self._map_drag = (last[0] - dcx * cell, last[1] - dcy * cell)
 
     def _map_revert_paint(self):
         """Undo the cell stamped on the press edge (used when a press turns into a
@@ -2954,7 +3053,7 @@ class Workstation:
         me = self.mapedit
         if me is None:
             return
-        if _in(px, py, _MV_AREA):              # a press in the map view: start a
+        if _in(px, py, self._mv_area()):       # a press in the map view: start a
             self._map_press = (px, py)         # gesture (tap=paint / drag=pan).
             self._map_panning = False
             self._map_drag = None
@@ -2985,14 +3084,16 @@ class Workstation:
         elif _in(px, py, _TP_NEXT):
             if self.sheet is not None and self.map_page + _TP_PAGE < self.sheet.count:
                 self.map_page += _TP_PAGE
+        elif _in(px, py, _MAP_ZOOM):           # cycle the zoom level (#37 follow-up)
+            self._map_cycle_zoom()
         elif _in(px, py, _PAN_UP):
-            me.pan(0, -1)
+            self._map_pan(0, -1)
         elif _in(px, py, _PAN_DN):
-            me.pan(0, 1)
+            self._map_pan(0, 1)
         elif _in(px, py, _PAN_LF):
-            me.pan(-1, 0)
+            self._map_pan(-1, 0)
         elif _in(px, py, _PAN_RT):
-            me.pan(1, 0)
+            self._map_pan(1, 0)
         elif _in(px, py, _MAP_ERASE):          # toggle stamp <-> erase
             self.map_erase = not self.map_erase
         elif _in(px, py, _MAP_SAVE):
@@ -4371,29 +4472,35 @@ class Workstation:
         sheet = self.sheet
         cv.rect(8, 16, 304, 204, NAMES["black"])
         cv.rectb(8, 16, 304, 204, NAMES["green"])
+        # Live zoom metrics (#37 follow-up): one cell size drives the grid, the tile
+        # upscale and the title's "z<level>" badge.
+        x0, y0, cell, cols, rows = self._mv_metrics()
         if me is not None and me.n < 0:        # the EMPTY/"sky" brush (#37)
             title = "MAP  SKY"
         else:
             title = "MAP  TILE " + str(me.n if me else 0)
+        title = title + "  z" + str(self.map_zoom + 1)
         if self.tilemap is not None and self.tilemap.dirty:
             title = title + " *"
         cv.print(title, 14, 18, NAMES["green"], 1)
         if me is None or sheet is None or self.tilemap is None:
             return
         tm = self.tilemap
-        # Visible map region: each cell is the 8x8 sprite tile placed there, centered
-        # in an _MV_CELL box, with grid lines so empty cells read as empty. Tile
-        # images are cached by id within the draw so a repeated tile builds once.
+        # Visible map region: each cell is the sprite tile placed there, UPSCALED to
+        # fill the cell (scale = cell // TILE, crisp pixel-art) and centered, with grid
+        # lines so empty cells read as empty. Tile images are cached by id within the
+        # draw so a repeated tile builds once.
         cache = {}
-        off = (_MV_CELL - sheet.TILE) // 2
-        for ry in range(_MV_ROWS):
+        scale = max(1, cell // sheet.TILE)
+        off = (cell - sheet.TILE * scale) // 2
+        for ry in range(rows):
             cy = me.cam_y + ry
-            for rx in range(_MV_COLS):
+            for rx in range(cols):
                 cx = me.cam_x + rx
-                x = _MV_X0 + rx * _MV_CELL
-                y = _MV_Y0 + ry * _MV_CELL
+                x = x0 + rx * cell
+                y = y0 + ry * cell
                 inb = (cx < tm.w and cy < tm.h)
-                cv.rect(x, y, _MV_CELL, _MV_CELL,
+                cv.rect(x, y, cell, cell,
                         NAMES["dark_blue"] if inb else NAMES["black"])
                 if inb:
                     tid = tm.mget(cx, cy)
@@ -4403,8 +4510,8 @@ class Workstation:
                             img = sheet.tile_image(tid, -1)
                             cache[tid] = img if img is not None else False
                         if img:
-                            cv.spr(img, x + off, y + off, 1)
-                cv.rectb(x, y, _MV_CELL, _MV_CELL, NAMES["dark_grey"])
+                            cv.spr(img, x + off, y + off, scale)
+                cv.rectb(x, y, cell, cell, NAMES["dark_grey"])
         # Tile palette (right): a page of sheet tiles; the brush tile is boxed white.
         ids = self._map_palette_ids()
         for k in range(len(ids)):
@@ -4420,6 +4527,9 @@ class Workstation:
                      NAMES["white"] if tid == me.n else NAMES["dark_grey"])
         self._btn("<", _TP_PREV, NAMES["blue"])
         self._btn(">", _TP_NEXT, NAMES["blue"])
+        # ZOOM control (#37 follow-up): cycles the zoom level (in the d-pad center);
+        # the title's "z<level>" badge shows which level is active.
+        self._btn("Z" + str(self.map_zoom + 1), _MAP_ZOOM, NAMES["dark_purple"])
         # Pan d-pad under the map view.
         self._btn("^", _PAN_UP, NAMES["indigo"])
         self._btn("v", _PAN_DN, NAMES["indigo"])
