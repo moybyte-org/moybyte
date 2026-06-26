@@ -1161,10 +1161,12 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
     import gc
     gc.collect()                                # defrag after the heavy boot so the LCD
                                                 # DMA flush has the internal RAM it needs
-    try:                                        # one-shot internal-RAM snapshot (diagnostic):
-        import esp32                            # internal_heap regions = (total, free, max_free, min_free)
-        print("KidCode mem: gc_free=%d internal_heap=%s"
-              % (gc.mem_free(), esp32.idf_heap_info(esp32.HEAP_INTERNAL)))
+    try:                                        # one-shot heap snapshot (diagnostic):
+        import esp32                            # each region = (total, free, max_contiguous, min_free);
+        # the small regions are internal SRAM, the huge one is PSRAM. The LCD DMA
+        # bounce needs a contiguous INTERNAL block, so watch the small regions' max.
+        print("KidCode mem: gc_free=%d heap=%s"
+              % (gc.mem_free(), esp32.idf_heap_info(esp32.HEAP_DATA)))
     except Exception as _e:                     # noqa: BLE001 -- diagnostic only
         print("KidCode mem: gc_free=%d (esp32 n/a: %s)" % (gc.mem_free(), _e))
     frame_ms = 1000 // fps_cap

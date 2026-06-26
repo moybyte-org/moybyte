@@ -130,6 +130,10 @@ class Compositor:
             print("KidCode compositor: full-frame buffer unavailable:", exc)
             self._frame = None
         self._frame_mv = memoryview(self._frame) if self._frame is not None else None
+        # PERF knob: rows per SPI transfer in the full-frame flush. Bigger = fewer
+        # transfers = higher FPS, bounded by the per-band DMA bounce fitting internal
+        # RAM. 48 -> 5 transfers for 240 rows (24 was 10). Tunable via _flush_rows.
+        self._flush_rows = 48
         self._dirty = DirtyTracker()
         # Native pixel kernel (fast, VM-neutral) when the image has it.
         try:
@@ -232,7 +236,12 @@ class Compositor:
             self._set_window(0, 0, self._w - 1, self._h - 1)
             mv = self._frame_mv
             rb = self._row_bytes
-            rows_per = self._strip_h
+            # PERF: each band is one SPI transfer; fewer/bigger bands = higher FPS
+            # (the old single-transfer full flush was ~2x faster than the 24-row
+            # banding). Bounded by the per-band DMA bounce fitting internal RAM.
+            # 48 rows -> 5 transfers (was 24 rows / 10). Tune up to the measured
+            # internal headroom (see the "KidCode mem:" boot readout).
+            rows_per = self._flush_rows
             cmd = RAMWR
             yy = 0
             while yy < self._h:
