@@ -1,5 +1,6 @@
 .venv/
 .idea/
+.claude/                # local Claude Code settings + agent worktrees
 __pycache__/
 .pytest_cache/
 *.egg-info/
