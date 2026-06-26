@@ -558,6 +558,19 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
             return edge
         return edge == int(code)
 
+    def textmode(on=True):
+        # textmode([on]) -> opt a RUNNING cart into TEXT-keyboard input (#38/#42).
+        # By default a running cart is in GAME mode: the T-Deck keyboard is in raw
+        # matrix mode so a held WASD/arrow keeps driving btn() (true hold-to-move),
+        # but it yields no clean typeable ASCII. Call textmode(True) to switch to
+        # text mode -- the Workstation flips the keyboard to clean 1-byte ASCII so
+        # key()/keyp() return typeable bytes (a password, a name); textmode(False)
+        # restores game mode. Same name + behavior on the host (host_app). Resets to
+        # game mode automatically when the cart exits. (On older keyboard firmware
+        # that ignores raw mode the keyboard is always ASCII; textmode is then a
+        # no-op flip but key()/keyp() still work via the hold-latch path.)
+        input.text_mode = bool(on)
+
     def pmem_fn(index, value=None):
         # TIC-80 pmem(i[, v]): read pmem(i) -> int, write pmem(i, v) -> persists.
         if pmem is None:
@@ -575,6 +588,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         "pal": canvas.pal, "palt": canvas.palt,
         "btn": input.held, "btnp": input.pressed,
         "key": key, "keyp": keyp, "time": time, "pmem": pmem_fn,
+        "textmode": textmode,
         "cfg": cfg, "col": color,
         "sfx": _sfx, "beep": _beep, "music": _music,
         "music_stop": _music_stop, "sound_stop": _sound_stop, "volume": _volume,

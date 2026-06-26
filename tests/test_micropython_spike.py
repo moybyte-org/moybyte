@@ -172,6 +172,34 @@ def test_micropython_touch_and_idle_cursor():
     assert "run_touch_calibrate(_task_handler)" in shell
 
 
+def test_micropython_cart_textmode_flips_keyboard_ascii_raw():
+    # Cart text input (#38/#42): a running cart opts into text-keyboard mode via the
+    # `textmode` verb; the device backend then flips the T-Deck keyboard to clean
+    # 1-byte ASCII so key()/keyp() yield typeable bytes, and back to raw/game mode
+    # otherwise (so games keep hold-to-move). Firmware tests grep the frozen source.
+    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    kb = (ROOT / "modules" / "kidcode" / "input.py").read_text(encoding="utf-8")
+
+    # The device make_api exposes `textmode`, setting input.text_mode (host parity).
+    assert "def textmode(on=True):" in runtime
+    assert '"textmode": textmode,' in runtime
+    assert "input.text_mode = bool(on)" in runtime
+
+    # The shared console derives the keyboard mode from the cart's request each
+    # running-cart frame and reverts on exit -- via the existing set_game_mode path.
+    assert "def _sync_cart_text_mode(self):" in console
+    assert "self._sync_cart_text_mode()" in console
+    assert 'getattr(self.input, "text_mode", False)' in console
+    assert "kb.set_game_mode(not want_text)" in console
+    assert "self.input.text_mode = False" in console      # cleared on screen leave
+
+    # The keyboard's ASCII<->raw switch (the device mechanism) is unchanged and the
+    # older-firmware fallback (RAW_GAME_MODE / _raw_unsupported) is still respected.
+    assert "def set_game_mode(self, on):" in kb
+    assert "RAW_GAME_MODE" in kb and "_raw_unsupported" in kb
+
+
 def test_micropython_spike_documents_tdeck_reference_paths():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     notes = (Path("docs/history") / "SPIKE_RESULTS.md").read_text(encoding="utf-8")
