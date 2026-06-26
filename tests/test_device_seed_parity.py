@@ -40,6 +40,7 @@ TITLE_TO_FOLDER = {
     "Pixel Pet": "pet",
     "Tiny Runner": "tiny_runner",
     "Hop Quest": "platformer",
+    "Battle City": "battle_city",
     "Tap Only Red": "tap_red",
     "Beeper": "beeper",
 }

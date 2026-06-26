@@ -35,6 +35,7 @@ CART_ORDER = [
     "pet",
     "tiny_runner",
     "platformer",
+    "battle_city",
     "tap_red",
     "beeper",
 ]
