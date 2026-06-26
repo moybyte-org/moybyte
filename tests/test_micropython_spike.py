@@ -777,6 +777,11 @@ def test_device_audio_wired():
     # The shared audio core: dependency-light (math only) synth + mixer + model.
     assert "class AudioEngine:" in audio
     assert "def render(self, nframes):" in audio
+    # The allocation-free render core the device backend feeds I2S from (#16): the
+    # device reuses one persistent buffer, so render_into must exist and render()
+    # must delegate to it (keeps host bytes-returning behavior identical).
+    assert "def render_into(self, out, nframes):" in audio
+    assert "self.render_into(out, nframes)" in audio
     assert "class AudioBank:" in audio
     # The console builds a per-cart AudioEngine and injects an audio backend.
     assert "from audio import AudioBank, AudioEngine" in console
@@ -787,12 +792,18 @@ def test_device_audio_wired():
                  '"music_stop": _music_stop', '"sound_stop": _sound_stop',
                  '"volume": _volume'):
         assert name in runtime, name
-    # The device I2S backend is wired in (stub -- NEEDS ON-DEVICE VERIFICATION).
+    # The device I2S backend is wired in (NEEDS ON-DEVICE VERIFICATION).
     assert "class DeviceAudio:" in runtime
     assert "from machine import I2S, Pin" in runtime
     assert "mode=I2S.TX" in runtime
     assert "ws.make_audio = make_audio" in runtime
     assert "NEEDS ON-DEVICE VERIFICATION" in runtime
+    # The feed must be NON-BLOCKING: irq() flips the I2S port into non-blocking mode
+    # and a completion flag gates the next write, so write() can never stall the
+    # single-threaded render loop (the cause of the reported FPS drop / crackle).
+    assert "self.i2s.irq(self._on_done)" in runtime
+    assert "self.engine.render_into(buf, n)" in runtime
+    assert "if self._busy:" in runtime
     # sounds.json storage in the shared cart store.
     assert "def save_sounds(cart, bank_dict):" in carts
     assert '"sounds": sounds' in carts
