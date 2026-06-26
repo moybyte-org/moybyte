@@ -500,7 +500,8 @@ def test_code_editor_wired_into_device_shell():
     assert "from editors import CodeEditor, PaintEditor, SpriteSheet" in runtime
     assert "from console import NAMES, Pointer, Workstation" in runtime
     # The editor edits the real source and saves it through the (injected) store.
-    assert "self.editor = CodeEditor(self.cart[\"src\"])" in console
+    # (#39 step 2 the constructor also takes the responsive cols/rows window.)
+    assert "self.editor = CodeEditor(self.cart[\"src\"]," in console
     assert "def save_code(self):" in console
     assert "self.carts_store.save_code(self.cart, src)" in console
     assert "def save_code(cart, src):" in carts
