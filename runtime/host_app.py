@@ -16,9 +16,11 @@ import sys
 # device names). Register the canonical runtime/editors.py and runtime/audio.py under
 # those bare names so console.py imports them on the host too.
 from . import audio as _audio
+from . import blocks as _blocks
 from . import editors as _editors
 sys.modules.setdefault("editors", _editors)
 sys.modules.setdefault("audio", _audio)
+sys.modules.setdefault("blocks", _blocks)   # kid_carts.save_blocks does `import blocks`
 
 from . import console  # noqa: E402  (after the editors/audio aliases above)
 from . import kid_carts  # noqa: E402  (shared .kcart store; host-clean)
