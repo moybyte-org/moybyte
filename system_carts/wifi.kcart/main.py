@@ -113,6 +113,13 @@ def _update(dt):
     global sel, mode
     if not _has_wifi():
         return
+    # Text input (#38/#42): the password screen needs TYPEABLE keys, so ask the
+    # console for text-keyboard mode there; the list/status screens navigate with
+    # buttons, so keep game mode there (held up/down still move the selection). The
+    # console flips the device keyboard ASCII<->raw / routes typed chars to key()
+    # accordingly; calling it every frame is idempotent and self-correcting (after a
+    # connect drops back to the list, the next frame reverts to game mode).
+    textmode(mode == "pass")
     if mode == "pass":
         _type_password(dt)
         return
