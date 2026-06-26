@@ -19,9 +19,10 @@
     flex: 1 1 auto; display: flex; align-items: center; justify-content: center;
     width: 100%; padding: 10px; box-sizing: border-box;
   }
-  /* The screen: a 320x240 indexed framebuffer, scaled up with CRISP pixels. */
+  /* The screen: the command stream is replayed into a 320x240 buffer, then this
+     <canvas> upscales it with CRISP (nearest-neighbor) pixels. */
   canvas {
-    image-rendering: pixelated;            /* nearest-neighbor upscale */
+    image-rendering: pixelated;
     image-rendering: crisp-edges;
     background: #000;
     border: 1px solid #1d2b53;
@@ -44,7 +45,7 @@
 <body>
 <header>
   <h1>KidCode &mdash; web console</h1>
-  <p>The live desktop, remote-rendered. <span id="status">connecting&hellip;</span></p>
+  <p>The live desktop, redrawn from the draw-command stream. <span id="status">connecting&hellip;</span></p>
 </header>
 <div id="stage">
   <canvas id="screen" width="320" height="240" tabindex="0"></canvas>
@@ -59,21 +60,199 @@
 <script>
 (function () {
   "use strict";
-  var W = 320, H = 240, FPS = 30;
+
+  // ===========================================================================
+  // The browser is a NEW CANVAS BACKEND, not a pixel viewer. The host console
+  // draws through a CommandCanvas that RECORDS each draw call; GET /frame returns
+  // that per-frame command list and we REPLAY it here onto an offscreen 320x240
+  // index buffer, resolving indices -> RGB via the KID64 palette from /assets.
+  // The replay mirrors runtime/canvas.py's rasterization EXACTLY so the browser
+  // pixels equal the host's (the Python cross-check proves this for the same ops).
+  // ===========================================================================
+
+  var FPS = 30;
   var canvas = document.getElementById("screen");
   var ctx = canvas.getContext("2d");
   ctx.imageSmoothingEnabled = false;
   var statusEl = document.getElementById("status");
 
-  // Outgoing browser events get queued and flushed to /input each frame, so a
-  // burst of mousemoves collapses into one POST per frame (matches the device's
-  // per-frame input model). The server replays them through the host ConsoleDriver.
+  // --- render assets (palette + font + sheet), fetched once + on cart change --
+  var W = 320, H = 240;
+  var PAL = null;            // [[r,g,b], ...64]
+  var FONT = null;          // {first, w, h, glyphs:[[col,...8], ...]}
+  var assetsReady = false;
+  var assetsCart = undefined;   // last cart we loaded assets for (detect changes)
+
+  // The offscreen index buffer + its ImageData (RGBA), allocated once assets land.
+  var idx = null;           // Uint8Array(W*H) of palette indices
+  var image = null;         // ImageData(W,H)
+  var rgba = null;          // image.data (Uint8ClampedArray)
+
+  function allocBuffers() {
+    canvas.width = W; canvas.height = H;
+    ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = false;
+    idx = new Uint8Array(W * H);
+    image = ctx.createImageData(W, H);
+    rgba = image.data;
+  }
+
+  function fetchAssets() {
+    return fetch("/assets").then(function (r) { return r.json(); }).then(function (a) {
+      W = a.w; H = a.h;
+      PAL = a.palette;
+      FONT = a.font;
+      assetsCart = a.cart;
+      allocBuffers();
+      assetsReady = true;
+    });
+  }
+
+  // ---- the replayer: command list -> the index buffer ----------------------
+  // Each op below is the JS twin of the matching runtime/canvas.py method. We work
+  // in palette indices in `idx`, then resolve to RGBA once per frame in blit().
+
+  function setPix(x, y, c) {            // bounds-checked index write
+    x |= 0; y |= 0;
+    if (x < 0 || x >= W || y < 0 || y >= H) return;
+    idx[y * W + x] = c & 63;
+  }
+
+  function fillRect(x, y, w, h, c) {    // Canvas.rect (FILLED), clipped
+    x |= 0; y |= 0; w |= 0; h |= 0;
+    var x0 = Math.max(0, x), y0 = Math.max(0, y);
+    var x1 = Math.min(W, x + w), y1 = Math.min(H, y + h);
+    if (x1 <= x0 || y1 <= y0) return;
+    var ci = c & 63;
+    for (var yy = y0; yy < y1; yy++) {
+      var base = yy * W;
+      for (var xx = x0; xx < x1; xx++) idx[base + xx] = ci;
+    }
+  }
+
+  function rectb(x, y, w, h, c) {       // Canvas.rectb (outline) = 4 fills
+    fillRect(x, y, w, 1, c);
+    fillRect(x, y + h - 1, w, 1, c);
+    fillRect(x, y, 1, h, c);
+    fillRect(x + w - 1, y, 1, h, c);
+  }
+
+  function line(x0, y0, x1, y1, c) {    // Canvas.line: Bresenham, same as Python
+    x0 |= 0; y0 |= 0; x1 |= 0; y1 |= 0;
+    var dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0);
+    var sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+    var err = dx + dy, e2;
+    while (true) {
+      setPix(x0, y0, c);
+      if (x0 === x1 && y0 === y1) break;
+      e2 = 2 * err;
+      if (e2 >= dy) { err += dy; x0 += sx; }
+      if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+  }
+
+  function circ(cx, cy, r, c) {         // Canvas.circ (FILLED) = horizontal spans
+    cx |= 0; cy |= 0; r |= 0;
+    for (var dy = -r; dy <= r; dy++) {
+      var span = Math.floor(Math.sqrt(r * r - dy * dy));
+      fillRect(cx - span, cy + dy, 2 * span + 1, 1, c);
+    }
+  }
+
+  function circb(cx, cy, r, c) {        // Canvas.circb (outline): midpoint circle
+    cx |= 0; cy |= 0; r |= 0;
+    var x = r, y = 0, err = 0;
+    while (x >= y) {
+      var pts = [[x, y], [y, x], [-y, x], [-x, y], [-x, -y], [-y, -x], [y, -x], [x, -y]];
+      for (var i = 0; i < 8; i++) setPix(cx + pts[i][0], cy + pts[i][1], c);
+      y += 1;
+      if (err <= 0) { err += 2 * y + 1; }
+      else { x -= 1; err -= 2 * x + 1; }
+    }
+  }
+
+  // spr: raw-pixel blit, mirroring Canvas.spr (transparency + integer scaling).
+  // cmd = ["spr", x, y, scale, w, h, t, pix]; t = transparent index (<0 = none-ish:
+  // Canvas skips p===t OR p<0, so a pixel value of -1 is also transparent).
+  function spr(x, y, scale, sw, sh, t, pix) {
+    x |= 0; y |= 0; scale |= 0;
+    if (scale <= 1) {
+      for (var sy = 0; sy < sh; sy++) {
+        var ty = y + sy;
+        if (ty < 0 || ty >= H) continue;
+        var baseS = sy * sw, baseD = ty * W;
+        for (var sx = 0; sx < sw; sx++) {
+          var tx = x + sx;
+          if (tx < 0 || tx >= W) continue;
+          var p = pix[baseS + sx];
+          if (p === t || p < 0) continue;
+          idx[baseD + tx] = p & 63;
+        }
+      }
+      return;
+    }
+    for (var sy2 = 0; sy2 < sh; sy2++) {
+      var b2 = sy2 * sw;
+      for (var sx2 = 0; sx2 < sw; sx2++) {
+        var p2 = pix[b2 + sx2];
+        if (p2 === t || p2 < 0) continue;
+        fillRect(x + sx2 * scale, y + sy2 * scale, scale, scale, p2);
+      }
+    }
+  }
+
+  // print: petme128, mirroring font.draw -- column j, row bit from LSB(top), 8px
+  // advance per char. FONT.glyphs[ch-first] is the 8 column-bytes.
+  function drawText(s, x, y, c) {
+    if (!FONT) return;
+    var cx = x | 0; y = y | 0;
+    var first = FONT.first, gw = FONT.w, glyphs = FONT.glyphs, n = glyphs.length;
+    for (var k = 0; k < s.length; k++) {
+      var gi = s.charCodeAt(k) - first;
+      var col = (gi >= 0 && gi < n) ? glyphs[gi] : glyphs[0];
+      for (var j = 0; j < gw; j++) {
+        var bits = col[j], py = y;
+        while (bits) {
+          if (bits & 1) setPix(cx + j, py, c);
+          bits >>= 1; py += 1;
+        }
+      }
+      cx += gw;
+    }
+  }
+
+  function replay(cmds) {
+    for (var i = 0; i < cmds.length; i++) {
+      var cmd = cmds[i], op = cmd[0];
+      switch (op) {
+        case "cls":   idx.fill(cmd[1] & 63); break;
+        case "pix":   setPix(cmd[1], cmd[2], cmd[3]); break;
+        case "line":  line(cmd[1], cmd[2], cmd[3], cmd[4], cmd[5]); break;
+        case "rect":  fillRect(cmd[1], cmd[2], cmd[3], cmd[4], cmd[5]); break;
+        case "rectb": rectb(cmd[1], cmd[2], cmd[3], cmd[4], cmd[5]); break;
+        case "circ":  circ(cmd[1], cmd[2], cmd[3], cmd[4]); break;
+        case "circb": circb(cmd[1], cmd[2], cmd[3], cmd[4]); break;
+        case "spr":   spr(cmd[1], cmd[2], cmd[3], cmd[4], cmd[5], cmd[6], cmd[7]); break;
+        case "print": drawText(cmd[1], cmd[2], cmd[3], cmd[4]); break;
+        default: break;   // forward-compatible: ignore unknown ops
+      }
+    }
+  }
+
+  function blit() {
+    // Resolve the index buffer -> RGBA once, then paint it (no per-pixel canvas ops).
+    var n = W * H, j = 0;
+    for (var i = 0; i < n; i++) {
+      var rgb = PAL[idx[i]];
+      rgba[j++] = rgb[0]; rgba[j++] = rgb[1]; rgba[j++] = rgb[2]; rgba[j++] = 255;
+    }
+    ctx.putImageData(image, 0, 0);
+  }
+
+  // ---- pointer = touchscreen (mouse -> touch x/y/click) --------------------
   var queue = [];
   function send(ev) { queue.push(ev); }
 
-  // ---- pointer = touchscreen (mouse -> touch x/y/click) --------------------
-  // Map a mouse/touch position to integer 320x240 canvas pixels (the console's
-  // logical coords), accounting for the CSS upscale.
   function toCanvasXY(clientX, clientY) {
     var r = canvas.getBoundingClientRect();
     var x = Math.floor((clientX - r.left) / r.width * W);
@@ -86,13 +265,13 @@
     canvas.setPointerCapture(e.pointerId);
     dragging = true;
     var p = toCanvasXY(e.clientX, e.clientY);
-    send({ type: "down", x: p.x, y: p.y });     // a tap (press edge)
+    send({ type: "down", x: p.x, y: p.y });
     e.preventDefault();
   });
   canvas.addEventListener("pointermove", function (e) {
     if (!dragging) return;
     var p = toCanvasXY(e.clientX, e.clientY);
-    send({ type: "move", x: p.x, y: p.y });      // drag, button down
+    send({ type: "move", x: p.x, y: p.y });
     e.preventDefault();
   });
   function endDrag(e) {
@@ -104,75 +283,42 @@
   canvas.addEventListener("pointerup", endDrag);
   canvas.addEventListener("pointercancel", endDrag);
 
-  // ---- keyboard ------------------------------------------------------------
-  // Two regimes, mirroring tools/simulate_desktop.run_live exactly:
-  //  * arrows  = the TRACKBALL  -> a per-frame pan (dx,dy) while held.
-  //  * WASD    = launcher/gameplay nav buttons; Enter=run, Z=a, X=b, H=home.
-  //  * In the CODE EDITOR, letters type (ASCII) and arrows still pan the caret.
-  // We don't know on the client whether the code editor is open, so we always
-  // forward printable keys as `key` (the server only types them when the editor
-  // is the focus) AND drive nav via held WASD -- the same dual feed the sim uses.
+  // ---- keyboard (unchanged from v1: mirrors simulate_desktop.run_live) -----
   var PAN = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
   var NAV = { a: "left", d: "right", w: "up", s: "down" };
   var SHORTCUT = { Enter: "run", z: "a", x: "b", h: "home" };
-  var panHeld = {};      // arrow key -> true while down
-  var navHeld = {};      // logical nav name -> true while down (for hold/release)
+  var panHeld = {};
+  var navHeld = {};
 
   function navName(e) {
-    // Lowercase single letters drive nav; uppercase (shift) still works.
     var k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     return NAV[k];
   }
 
   canvas.addEventListener("keydown", function (e) {
-    if (e.key in PAN) {
-      panHeld[e.key] = true;                          // trackball / caret nav
-      e.preventDefault();
-      return;
-    }
-    if (e.key === "Escape") {
-      send({ type: "esc" });
-      e.preventDefault();
-      return;
-    }
-    // Editor typing keys + every printable char: forwarded as an ASCII byte.
-    // The server only consumes it when the code editor is focused; otherwise the
-    // console ignores last_key, so this is harmless when navigating the desktop.
+    if (e.key in PAN) { panHeld[e.key] = true; e.preventDefault(); return; }
+    if (e.key === "Escape") { send({ type: "esc" }); e.preventDefault(); return; }
     var code = null;
     if (e.key === "Enter") code = 0x0D;
     else if (e.key === "Backspace") code = 0x08;
     else if (e.key === "Tab") code = 0x09;
     else if (e.key.length === 1 && e.key.charCodeAt(0) >= 0x20 && e.key.charCodeAt(0) <= 0x7E)
       code = e.key.charCodeAt(0);
-    if (code !== null) {
-      send({ type: "key", code: code });
-    }
-    // Nav buttons (Enter/Z/X/H shortcuts are one-shot presses; WASD are holds).
+    if (code !== null) send({ type: "key", code: code });
     var sc = SHORTCUT[e.key.length === 1 ? e.key.toLowerCase() : e.key];
-    if (sc && !e.repeat) {
-      send({ type: "press", name: sc });
-    }
+    if (sc && !e.repeat) send({ type: "press", name: sc });
     var nav = navName(e);
-    if (nav && !navHeld[nav]) {
-      navHeld[nav] = true;
-      send({ type: "hold", name: nav, down: true });
-    }
+    if (nav && !navHeld[nav]) { navHeld[nav] = true; send({ type: "hold", name: nav, down: true }); }
     if (sc || nav || code !== null) e.preventDefault();
   });
 
   canvas.addEventListener("keyup", function (e) {
     if (e.key in PAN) { delete panHeld[e.key]; e.preventDefault(); return; }
     var nav = navName(e);
-    if (nav && navHeld[nav]) {
-      delete navHeld[nav];
-      send({ type: "hold", name: nav, down: false });
-    }
+    if (nav && navHeld[nav]) { delete navHeld[nav]; send({ type: "hold", name: nav, down: false }); }
   });
 
   // ---- the frame loop ------------------------------------------------------
-  // Each tick: emit the current trackball vector, flush queued input, then fetch
-  // and draw the next framebuffer. Polling is deliberately simple (no WebSocket).
-  var img = new Image();
   var inflight = false;
   var ok = false;
 
@@ -191,30 +337,36 @@
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ events: batch })
-    }).catch(function () { /* drop a failed input batch; next frame retries */ });
+    }).catch(function () { /* drop a failed batch; next frame retries */ });
   }
 
   function drawFrame() {
-    if (inflight) return;
+    if (inflight || !assetsReady) return;
     inflight = true;
-    // Cache-bust so the browser always fetches a fresh frame.
-    img.src = "/frame.png?t=" + Date.now();
+    fetch("/frame").then(function (r) { return r.json(); }).then(function (f) {
+      // A cart change means a new sprite sheet -> refetch assets (then this frame
+      // still replays fine; the sheet only matters for a future id-based spr).
+      if (f.cart !== assetsCart) {
+        assetsCart = f.cart;
+        fetchAssets().catch(function () {});
+      }
+      replay(f.cmds || []);
+      blit();
+      inflight = false;
+      if (!ok) { ok = true; statusEl.textContent = "live"; statusEl.style.color = "#00e436"; }
+    }).catch(function () {
+      inflight = false;
+      statusEl.textContent = "reconnecting…"; statusEl.style.color = "#ff004d";
+    });
   }
-  img.onload = function () {
-    ctx.drawImage(img, 0, 0, W, H);
-    inflight = false;
-    if (!ok) { ok = true; statusEl.textContent = "live"; statusEl.style.color = "#00e436"; }
-  };
-  img.onerror = function () {
-    inflight = false;
-    statusEl.textContent = "reconnecting…"; statusEl.style.color = "#ff004d";
-  };
 
-  function tick() {
-    flushInput();
-    drawFrame();
-  }
-  setInterval(tick, Math.round(1000 / FPS));
+  function tick() { flushInput(); drawFrame(); }
+
+  fetchAssets().then(function () {
+    setInterval(tick, Math.round(1000 / FPS));
+  }).catch(function () {
+    statusEl.textContent = "no assets"; statusEl.style.color = "#ff004d";
+  });
   canvas.focus();
 })();
 </script>
