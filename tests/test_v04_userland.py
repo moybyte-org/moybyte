@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT))
 
 from runtime import palette  # noqa: E402
 from runtime.canvas import Canvas, Image, SpriteSheet  # noqa: E402
+from runtime.editors import TileMap  # noqa: E402
 
 SYSTEM_CARTS = ROOT / "system_carts"
 
@@ -94,6 +95,72 @@ def test_sprite_sheet_tiles_and_hex_roundtrip():
     assert img.pix[2 * 8 + 1] == 9          # local (1,2)
 
 
+# -- tilemap (#32) ---------------------------------------------------------
+
+def test_tilemap_mget_mset_empty_and_roundtrip():
+    tm = TileMap(4, 3)
+    assert (tm.w, tm.h) == (4, 3) and tm.is_blank()
+    assert tm.mget(0, 0) == -1               # blank cells read as EMPTY (-1)
+    assert tm.mget(99, 0) == -1              # out of range is EMPTY, not a crash
+    tm.mset(1, 2, 9)                         # place tile 9
+    assert tm.mget(1, 2) == 9 and not tm.is_blank() and tm.dirty
+    g0 = tm.gen
+    tm.mset(0, 0, 0)                         # tile id 0 is a real tile, not "empty"
+    assert tm.mget(0, 0) == 0 and tm.gen == g0 + 1
+    tm.mset(1, 2, -1)                        # a negative id clears the cell
+    assert tm.mget(1, 2) == -1
+    tm.mset(3, 0, 5)
+    tm2 = TileMap.from_hex(tm.to_hex())      # header carries dims; blob round-trips
+    assert (tm2.w, tm2.h) == (4, 3)
+    assert tm2.mget(0, 0) == 0 and tm2.mget(3, 0) == 5 and tm2.mget(1, 2) == -1
+    assert tm2.cells == tm.cells and tm2.dirty is False
+
+
+def test_tilemap_clamps_tile_id_to_byte():
+    tm = TileMap(2, 2)
+    tm.mset(0, 0, TileMap.MAX_ID + 50)       # over the ceiling -> clamped, never wraps
+    assert tm.mget(0, 0) == TileMap.MAX_ID
+
+
+def test_canvas_map_blits_tiles_at_scale():
+    cv = Canvas(40, 40)
+    cv.cls(0)
+    sheet = SpriteSheet()
+    sheet.tset(7, 0, 0, 8)                   # tile 7: a single red pixel at its (0,0)
+    sheet.tset(7, 7, 7, 9)                   # ... and green at (7,7)
+    tm = TileMap(2, 2)
+    tm.mset(1, 1, 7)                         # one tile at cell (1,1), rest empty
+    cv.map(tm, sheet, 0, 0, 2, 2, 0, 0, -1, 2)   # scale 2 -> each cell is 16px
+    # cell (1,1) lands at screen (16,16); tile pixel (0,0) -> a 2x2 red block there
+    assert cv.pix(16, 16) == 8 and cv.pix(17, 17) == 8
+    # its (7,7) pixel -> green 2x2 block at (16+14, 16+14)
+    assert cv.pix(30, 30) == 9
+    # empty cells drew nothing
+    assert cv.pix(0, 0) == 0 and cv.pix(8, 8) == 0
+
+
+def test_map_mget_mset_via_make_api():
+    from runtime import host_app
+    cv = Canvas(40, 40)
+    cv.cls(0)
+    sheet = SpriteSheet()
+    sheet.tset(3, 0, 0, 11)
+    tm = TileMap(3, 3)
+
+    class _Input:
+        def held(self, n):
+            return False
+
+        def pressed(self, n):
+            return False
+
+    api = host_app.make_api(cv, _Input(), {}, sheet, None, tm)
+    api["mset"](1, 1, 3)                     # cart-facing mset writes the shared map
+    assert api["mget"](1, 1) == 3 and tm.mget(1, 1) == 3
+    api["map"](0, 0, 3, 3, 0, 0, -1, 1)      # cart-facing map() draws it (scale 1)
+    assert cv.pix(8, 8) == 11                # tile 3 at cell (1,1), pixel (0,0) -> 8,8
+
+
 # -- code editor core ------------------------------------------------------
 
 def test_code_editor_scrolloff_and_horizontal_scroll():
@@ -160,9 +227,12 @@ def test_kid_carts_store_roundtrip(tmp_path):
     # save edited code + a sprite sheet; reload reflects both
     kid_carts.save_code(c, "def _draw():\n    cls(2)\n")
     kid_carts.save_sprites(c, "012\n345\n")
+    kid_carts.save_map(c, TileMap(3, 2).to_hex())   # tilemap blob persists (#32)
     reloaded = kid_carts.load(c["path"])
     assert "cls(2)" in reloaded["src"]
     assert reloaded["sprites"].startswith("012")
+    assert reloaded["map"] is not None
+    assert TileMap.from_hex(reloaded["map"]).w == 3  # the saved map.kmap round-trips
     # duplicate makes an independent editable copy
     dup = kid_carts.duplicate(c, root, new_title="Copy")
     assert dup["title"] == "Copy" and dup["path"] != c["path"]
@@ -192,6 +262,93 @@ def test_console_runs_game_cart_and_scores(tmp_path):
         ws.frame(1 / 30)
     # `best` survives the game-over reset, so it's the honest "did it score" check.
     assert ws.ns["best"] >= 1
+
+
+def test_hop_quest_uses_tilemap_and_still_plays(tmp_path):
+    # Hop Quest now draws its level with map() and reads collision with mget() (#32).
+    # Verify the cart loads its tilemap, draws ground through map(), and the attract
+    # auto-pilot still clears every coin + reaches the win banner (gameplay intact).
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_cart(ws, "Hop Quest")
+    assert ws.cart["type"] == "game"
+    assert ws.cart.get("map") and not ws.tilemap.is_blank()    # the level is a tilemap
+    assert ws.ns["_solid"](0, 12) and not ws.ns["_solid"](0, 0)  # mget collision works
+    ws.config["autoplay"] = 1
+    ws.apply()
+    coins = len(ws.ns["coins"])
+    most, won = 0, False
+    for _ in range(900):                    # attract-mode auto-play climbs the stair
+        ws.frame(1 / 30)
+        most = max(most, ws.ns.get("got", 0))
+        if ws.ns.get("won", 0.0) > 0.0:
+            won = True
+    assert most == coins and won            # collected every coin and won the round
+    assert len(set(ws.canvas.buf)) > 1      # the map() blit drew the ground
+
+
+def test_battle_city_runs_with_tilemap_and_autoplay_progresses(tmp_path):
+    # Battle City (#35): a top-down tank battle drawn over the cart's brick/steel
+    # tilemap (map.kmap) with map()/mget()/mset(). Verify it loads its tilemap and
+    # spawns a wave, then that the attract auto-pilot runs many frames without error
+    # and actually PROGRESSES -- destroys enemies (score climbs) and the round ends
+    # (a wave is cleared or the base/lives are lost, then it resets).
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_cart(ws, "Battle City")
+    assert ws.cart["type"] == "game"
+    assert ws.cart_error is None
+    assert ws.cart.get("map") and not ws.tilemap.is_blank()     # the field is a tilemap
+    # brick + steel are both present in the field (the two wall kinds)
+    field = [ws.tilemap.mget(x, y) for y in range(ws.tilemap.h) for x in range(ws.tilemap.w)]
+    assert 8 in field and 9 in field                            # brick (8) + steel (9)
+    ws.config["autoplay"] = 1
+    ws.apply()
+    assert ws.ns["spawn_q"] + ws.ns["_alive_enemies"]() == ws.config["enemies"]
+    best_score, states = 0, set()
+    for _ in range(1200):                   # attract-mode auto-play hunts enemies
+        ws.frame(1 / 30)
+        assert ws.cart_error is None        # never crash a frame
+        best_score = max(best_score, ws.ns["score"])
+        states.add(ws.ns["state"])
+    assert best_score > 0                   # destroyed at least one enemy (scored)
+    assert states != {0}                    # reached a win or game-over (round ended)
+    assert len(set(ws.canvas.buf)) > 3      # the map()/sprites drew the battlefield
+
+
+def test_battle_city_brick_crumbles_steel_stops(tmp_path):
+    # Bullet vs walls: a player bullet into a BRICK cell clears it (mset -> empty),
+    # while a STEEL cell is never destroyed. Drive a couple of shots straight into
+    # each wall kind and check the tilemap before/after.
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_cart(ws, "Battle City")
+    ns = ws.ns
+    TS = ns["TS"]
+    # find a brick and a steel cell in the loaded field
+    brick = steel = None
+    for y in range(ws.tilemap.h):
+        for x in range(ws.tilemap.w):
+            v = ws.tilemap.mget(x, y)
+            if v == 8 and brick is None:
+                brick = (x, y)
+            elif v == 9 and steel is None:
+                steel = (x, y)
+    assert brick and steel
+    # fire a bullet directly at the brick cell's center (owner 0 = player) and step
+    bx, by = brick
+    ns["bullets"].append([bx * TS + TS // 2, by * TS + TS // 2 - TS, 1, 0])  # heading down
+    for _ in range(20):
+        ws.frame(1 / 30)
+        if ws.tilemap.mget(bx, by) < 0:
+            break
+    assert ws.tilemap.mget(bx, by) < 0           # brick crumbled to empty
+    # a bullet into steel leaves it intact
+    sx, sy = steel
+    ns["bullets"].append([sx * TS + TS // 2, sy * TS + TS // 2 - TS, 1, 0])
+    for _ in range(20):
+        ws.frame(1 / 30)
+    assert ws.tilemap.mget(sx, sy) == 9          # steel never destroyed
 
 
 def test_console_cards_make_it_mine_edit_and_run(tmp_path):
@@ -480,3 +637,108 @@ def test_key_keyp_plumbed_through_console_driver(tmp_path):
     assert log[0] == (a, a, True, True)        # held + pressed-this-frame
     assert log[1] == (a, 0, True, False)       # held, edge gone
     assert log[2] == (0, 0, False, False)      # released
+
+
+# -- map (tilemap) editor (#32) --------------------------------------------
+
+def test_map_editor_place_erase_select_pick_pan():
+    from runtime.editors import MapEditor
+    tm = TileMap(20, 15)
+    sheet = SpriteSheet()
+    me = MapEditor(tm, sheet)
+    me.n = 7
+    me.place(2, 3)                          # stamp the current tile
+    assert tm.mget(2, 3) == 7
+    me.erase(2, 3)                          # erase clears it back to empty
+    assert tm.mget(2, 3) == TileMap.EMPTY
+    me.select(1)                            # step the brush through the sheet ids
+    assert me.n == 8
+    tm.mset(5, 5, 12)
+    me.pick(5, 5)                           # pick samples a placed cell into the brush
+    assert me.n == 12
+    me.pick(0, 0)                           # a tap on an empty cell leaves the brush
+    assert me.n == 12
+    me.pan(3, 2)
+    assert (me.cam_x, me.cam_y) == (3, 2)
+    me.pan(-10, -10)                        # clamps at the map edge (never < 0)
+    assert (me.cam_x, me.cam_y) == (0, 0)
+    me.pan(999, 999)                        # clamps to the last cell (never off the map)
+    assert me.cam_x == tm.w - 1 and me.cam_y == tm.h - 1
+
+
+def test_host_console_map_open_place_and_render(tmp_path):
+    from runtime import console as C
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    drv = host_app.ConsoleDriver(ws)
+    drv.press("run")
+    drv.frame(1 / 30)
+    drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2)      # open the MAP overlay button
+    drv.frame(1 / 30)
+    assert ws.menu_view == "map" and ws.mapedit is not None
+    # pick the 2nd palette tile (id == map_page + 1) ...
+    px = C._TP_X0 + 1 * C._TP_CELL
+    py = C._TP_Y0
+    drv.click(px + 2, py + 2)
+    drv.frame(1 / 30)
+    assert ws.mapedit.n == ws.map_page + 1
+    # ... then stamp it onto the top-left visible map cell and confirm mget reflects it
+    drv.click(C._MV_X0 + 2, C._MV_Y0 + 2)
+    drv.frame(1 / 30)
+    cx = ws.mapedit.cam_x
+    cy = ws.mapedit.cam_y
+    assert ws.tilemap.mget(cx, cy) == ws.mapedit.n
+    assert len(set(drv.rgb888())) > 1                    # the map view rendered
+
+
+def test_host_console_map_erase_and_pan(tmp_path):
+    from runtime import console as C
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    drv = host_app.ConsoleDriver(ws)
+    drv.press("run"); drv.frame(1 / 30)
+    drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2); drv.frame(1 / 30)
+    ws.mapedit.n = 3
+    drv.click(C._MV_X0 + 2, C._MV_Y0 + 2); drv.frame(1 / 30)   # stamp tile 3 at (0,0)
+    assert ws.tilemap.mget(0, 0) == 3
+    drv.click(C._MAP_ERASE[0] + 2, C._MAP_ERASE[1] + 2); drv.frame(1 / 30)  # ERASE on
+    assert ws.map_erase
+    drv.click(C._MV_X0 + 2, C._MV_Y0 + 2); drv.frame(1 / 30)   # now a tap erases
+    assert ws.tilemap.mget(0, 0) == TileMap.EMPTY
+    drv.click(C._PAN_RT[0] + 2, C._PAN_RT[1] + 2); drv.frame(1 / 30)        # pan right
+    assert ws.mapedit.cam_x == 1
+
+
+def test_host_console_map_save_roundtrips(tmp_path):
+    from runtime import console as C
+    from runtime import host_app, kid_carts
+    carts_dir = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts_dir)
+    drv = host_app.ConsoleDriver(ws)
+    drv.press("run"); drv.frame(1 / 30)
+    cart_path = ws.cart["path"]
+    drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2); drv.frame(1 / 30)
+    ws.mapedit.n = 6
+    drv.click(C._MV_X0 + 2, C._MV_Y0 + 2); drv.frame(1 / 30)   # stamp tile 6 at (0,0)
+    drv.click(C._MAP_SAVE[0] + 2, C._MAP_SAVE[1] + 2); drv.frame(1 / 30)    # SAVE
+    assert ws.save_status == "SAVED"
+    reloaded = kid_carts.load(cart_path)                  # map.kmap persisted on disk
+    assert reloaded["map"] is not None
+    assert TileMap.from_hex(reloaded["map"]).mget(0, 0) == 6
+
+
+def test_map_edit_seen_by_running_cart_via_gen(tmp_path):
+    # An mset bumps tilemap.gen, the parity hook a running cart's map cache watches,
+    # so a placement made in the editor is reflected immediately (the editor edits
+    # the SAME TileMap object the cart's map()/mget() read).
+    from runtime import console as C
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    drv = host_app.ConsoleDriver(ws)
+    drv.press("run"); drv.frame(1 / 30)
+    tm = ws.tilemap
+    before = tm.gen
+    drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2); drv.frame(1 / 30)
+    drv.click(C._MV_X0 + 2, C._MV_Y0 + 2); drv.frame(1 / 30)   # stamp a cell
+    assert tm.gen > before                                # mset bumped gen (live pickup)
+    assert tm is ws.tilemap                               # same object the cart's api holds

@@ -19,11 +19,12 @@ the device freezes the identical code) and **host glue**.
 |---|---|
 | `palette.py` | **(shared-ish)** `KID64` 64-color palette (PICO-8 base 16 + ramp), name↔index |
 | `font.py` | **(host)** petme128 8×8 font extracted byte-for-byte from framebuf, so host text is pixel-identical to the device |
-| `canvas.py` | **(host)** `Canvas` — indexed surface (320×240 in the console), TIC-80 API (`cls/pix/line/rect/rectb/circ/circb/spr/print` — `rect`/`circ` filled, `rectb`/`circb` outlines), `print` uses `font.py`, `to_rgb888()`; `Image` sprites |
-| `editors.py` | **(shared, staged to device)** `CodeEditor` / `SpriteSheet` (8×8 tiles + `__gfx__` hex) / `PaintEditor` |
-| `console.py` | **(shared, staged to device)** `Launcher` + `Pointer` + `Workstation` + cards/code/paint UI + layout/`NAMES`/`CURSOR`. Backend-agnostic: injected `make_api` + cart store. The device's `kid_runtime` imports it; `host_app` runs it on the host |
-| `kid_carts.py` | **(shared, staged to device)** the `.kcart` store — scan/load/save_config/save_code/save_sprites/create/duplicate/delete (dict carts; only `json`+`os`) |
-| `host_app.py` | **(host glue)** host `make_api`, `build_workstation()` (320×240 Canvas + `kid_carts` + seeded system carts), and `ConsoleDriver` (mouse/keyboard → the shared console) |
+| `canvas.py` | **(host)** `Canvas` — indexed surface (320×240 in the console), TIC-80 API (`cls/pix/line/rect/rectb/circ/circb/spr/map/print` — `rect`/`circ` filled, `rectb`/`circb` outlines; `map` blits a tilemap region, native one-call `kc_gfx.blit_map` on device), `print` uses `font.py`, `to_rgb888()`; `Image` sprites |
+| `editors.py` | **(shared, staged to device)** `CodeEditor` / `SpriteSheet` (8×8 tiles + `__gfx__` hex) / `TileMap` (`w×h` tile-id grid over a sheet + `map.kmap` hex, `mget`/`mset`, #32) / `PaintEditor` |
+| `audio.py` | **(shared, staged to device)** sound data model (`SFX`/`MusicTrack`/`AudioBank`) + `AudioEngine` pure-Python synth/mixer (`render()` → PCM). Backends (host `FakeAudio`/SDL, device I2S) consume `render()`. See `docs/audio_design_v04.md` (#16) |
+| `console.py` | **(shared, staged to device)** `Launcher` + `Pointer` + `Workstation` + cards/code/paint UI + layout/`NAMES`/`CURSOR`. Backend-agnostic: injected `make_api` + `make_audio` + cart store. The device's `kid_runtime` imports it; `host_app` runs it on the host |
+| `kid_carts.py` | **(shared, staged to device)** the `.kcart` store — scan/load/save_config/save_code/save_sprites/save_sounds/save_map/create/duplicate/delete (dict carts; `map.kmap` tilemap blob, #32; only `json`+`os`) |
+| `host_app.py` | **(host glue)** host `make_api` (incl. audio), `FakeAudio` backend, `build_workstation()` (320×240 Canvas + `kid_carts` + seeded system carts), and `ConsoleDriver` (mouse/keyboard → the shared console) |
 | `input.py` | **(host)** `InputState` — held/pressed/released + `last_key` (same contract as firmware `kidcode`) |
 
 The pre-unification host UI (`shell.py`, `workstation.py`, `engine.py`, `api.py`,

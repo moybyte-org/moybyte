@@ -35,7 +35,9 @@ CART_ORDER = [
     "pet",
     "tiny_runner",
     "platformer",
+    "battle_city",
     "tap_red",
+    "beeper",
 ]
 
 
@@ -46,7 +48,8 @@ def _read(path):
 
 def build_carts(system_carts_dir):
     """Read each system cart and build its embedded entry (title/type/src/
-    sprites?/canvas?/permissions?/cfg/edit) -- the shape kid_runtime expects."""
+    sprites?/sounds?/canvas?/permissions?/cfg/edit) -- the shape kid_runtime
+    expects (and seed_builtins writes back to SD)."""
     carts = []
     for folder in CART_ORDER:
         base = os.path.join(system_carts_dir, folder + ".kcart")
@@ -59,6 +62,12 @@ def build_carts(system_carts_dir):
         sheet = os.path.join(base, "sprites.kgfx")
         if os.path.exists(sheet):
             cart["sprites"] = _read(sheet)
+        sounds = os.path.join(base, "sounds.json")     # AudioBank, optional (#16)
+        if os.path.exists(sounds):
+            cart["sounds"] = json.loads(_read(sounds))
+        tilemap = os.path.join(base, "map.kmap")        # TileMap blob, optional (#32)
+        if os.path.exists(tilemap):
+            cart["map"] = _read(tilemap)
         if "canvas" in man:
             cart["canvas"] = man["canvas"]
         if "permissions" in man:

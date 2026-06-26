@@ -174,6 +174,41 @@ class Canvas:
                     continue
                 self.rect(x + sx * scale, y + sy * scale, scale, scale, p)
 
+    def map(self, tilemap, sheet, mx=0, my=0, w=None, h=None,
+            sx=0, sy=0, colorkey=-1, scale=1):
+        # TIC-80 map(): blit a w x h cell region of `tilemap` (top-left cell mx,my)
+        # over `sheet` to screen (sx, sy). Each non-empty cell draws its 8x8 sheet
+        # tile via spr() at `scale` (so scale=2 => 16px world tiles). The native
+        # device path (DeviceCanvas.map -> kc_gfx.blit_map) does this in one C call;
+        # here it's the readable per-tile reference. Tile images are cached by id so
+        # a repeated tile is built once per draw, not once per cell.
+        mx = int(mx)
+        my = int(my)
+        scale = int(scale)
+        if scale < 1:
+            scale = 1
+        if w is None:
+            w = tilemap.w - mx
+        if h is None:
+            h = tilemap.h - my
+        tile = sheet.TILE
+        step = tile * scale
+        cache = {}
+        for cy in range(int(h)):
+            ty = my + cy
+            py = sy + cy * step
+            for cx in range(int(w)):
+                tid = tilemap.mget(mx + cx, ty)
+                if tid < 0:
+                    continue
+                img = cache.get(tid)
+                if img is None:
+                    img = sheet.tile_image(tid, colorkey)
+                    cache[tid] = img if img is not None else False
+                if not img:
+                    continue
+                self.spr(img, sx + cx * step, py, scale)
+
     def print(self, s, x, y, c, scale=1):
         # Render with the shared petme128 8x8 font so host text is pixel-identical
         # to the device's framebuf.text. Fixed 8px like the device -- `scale` is

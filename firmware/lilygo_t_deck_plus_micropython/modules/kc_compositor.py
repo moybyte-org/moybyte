@@ -154,6 +154,11 @@ class Compositor:
     def has_gfx(self):
         return self._gfx is not None
 
+    def gfx(self):
+        """The native kc_gfx kernel (or None). Lets a canvas drawing into this
+        compositor's framebuffer() call the C fill/blit kernels directly."""
+        return self._gfx
+
     def dirty(self):
         return self._dirty
 
