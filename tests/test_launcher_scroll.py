@@ -70,14 +70,21 @@ def test_touch_drag_down_scrolls_back(tmp_path):
     ws.launcher.top = ws.launcher.max_top()                     # start at the bottom
     assert ws.launcher.top > 0
 
+    # Drag DOWN to scroll back toward the top. One stroke can only travel the screen
+    # height (~4 pitches), so repeat the stroke (lift + re-press) until the window is
+    # back at the top -- robust to however many system carts are seeded.
     y0 = C._LIST_Y0 + 8
-    drv.touch(160, y0)
-    drv.frame(1 / 30)
-    for k in range(1, 5):
-        drv.touch_drag(160, y0 + k * ws.launcher.TILE_PITCH)    # drag DOWN
+    pitch = ws.launcher.TILE_PITCH
+    for _stroke in range(ws.launcher.max_top() + 2):
+        if ws.launcher.top == 0:
+            break
+        drv.touch(160, y0)
         drv.frame(1 / 30)
-    drv.touch_up()
-    drv.frame(1 / 30)
+        for k in range(1, 5):
+            drv.touch_drag(160, y0 + k * pitch)                 # drag DOWN
+            drv.frame(1 / 30)
+        drv.touch_up()
+        drv.frame(1 / 30)
 
     assert ws.launcher.top == 0                                 # back to the top
 
