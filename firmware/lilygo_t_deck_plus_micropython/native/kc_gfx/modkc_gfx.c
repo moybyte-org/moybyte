@@ -102,6 +102,83 @@ static mp_obj_t kc_gfx_blit565(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(kc_gfx_blit565_obj, 9, 9, kc_gfx_blit565);
 
+// blit_map(dst, dw, dh, sx, sy, cells, map_w, map_h, mx, my, rw, rh,
+//          atlas, ntiles, tile, scale, key) -- blit a (rw x rh) cell region of a
+// tilemap in ONE C call (issue #32). `cells` is a byte grid where each cell holds
+// `tile_id + 1` (0 = empty, skipped); a non-empty cell's tile is copied from the
+// pre-converted RGB565 `atlas` (ntiles tiles of `tile`x`tile` pixels, tile-major,
+// row-within-tile) into dst at screen (sx,sy), each source pixel expanded to a
+// `scale` x `scale` block (so scale=2 => 16px tiles). Pixels equal to `key` are
+// transparent. Fully bounds-clamped like blit565: off-screen cells/pixels clip.
+static mp_obj_t kc_gfx_blit_map(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t dcap, ccap, acap;
+    uint16_t *dst = kc_gfx_buf_w(a[0], &dcap);
+    mp_int_t dw = mp_obj_get_int(a[1]);
+    mp_int_t dh = mp_obj_get_int(a[2]);
+    mp_int_t sx = mp_obj_get_int(a[3]);
+    mp_int_t sy = mp_obj_get_int(a[4]);
+    mp_buffer_info_t cbi;
+    mp_get_buffer_raise(a[5], &cbi, MP_BUFFER_READ);
+    const uint8_t *cells = (const uint8_t *)cbi.buf;
+    ccap = cbi.len;                              // cells is a byte grid (1 byte/cell)
+    mp_int_t map_w = mp_obj_get_int(a[6]);
+    mp_int_t map_h = mp_obj_get_int(a[7]);
+    mp_int_t mx = mp_obj_get_int(a[8]);
+    mp_int_t my = mp_obj_get_int(a[9]);
+    mp_int_t rw = mp_obj_get_int(a[10]);
+    mp_int_t rh = mp_obj_get_int(a[11]);
+    const uint16_t *atlas = kc_gfx_buf_r(a[12], &acap);
+    mp_int_t ntiles = mp_obj_get_int(a[13]);
+    mp_int_t tile = mp_obj_get_int(a[14]);
+    mp_int_t scale = mp_obj_get_int(a[15]);
+    mp_int_t key = mp_obj_get_int(a[16]);
+    if (dw <= 0 || dh <= 0 || map_w <= 0 || map_h <= 0 || tile <= 0 || ntiles <= 0)
+        return mp_const_none;
+    if (scale < 1) scale = 1;
+    mp_int_t tpx = tile * tile;                  // pixels per atlas tile
+    if ((size_t)ntiles * (size_t)tpx > acap) return mp_const_none;  // atlas too small
+    mp_int_t step = tile * scale;                // on-screen size of one cell
+    for (mp_int_t cy = 0; cy < rh; cy++) {
+        mp_int_t myy = my + cy;
+        if (myy < 0 || myy >= map_h) continue;
+        mp_int_t dy0 = sy + cy * step;
+        for (mp_int_t cx = 0; cx < rw; cx++) {
+            mp_int_t mxx = mx + cx;
+            if (mxx < 0 || mxx >= map_w) continue;
+            size_t ci = (size_t)myy * (size_t)map_w + (size_t)mxx;
+            if (ci >= ccap) continue;
+            mp_int_t v = cells[ci];
+            if (v == 0) continue;                // empty cell
+            mp_int_t tid = v - 1;
+            if (tid >= ntiles) continue;
+            const uint16_t *tsrc = atlas + (size_t)tid * (size_t)tpx;
+            mp_int_t dx0 = sx + cx * step;
+            // expand the tile's tile x tile pixels by `scale`, bounds-clamped.
+            for (mp_int_t row = 0; row < tile; row++) {
+                const uint16_t *srow = tsrc + (size_t)row * (size_t)tile;
+                for (mp_int_t sub_y = 0; sub_y < scale; sub_y++) {
+                    mp_int_t ty = dy0 + row * scale + sub_y;
+                    if (ty < 0 || ty >= dh) continue;
+                    uint16_t *drow = dst + (size_t)ty * (size_t)dw;
+                    for (mp_int_t col = 0; col < tile; col++) {
+                        uint16_t p = srow[col];
+                        if (key >= 0 && p == (uint16_t)key) continue;
+                        mp_int_t bx = dx0 + col * scale;
+                        for (mp_int_t sub_x = 0; sub_x < scale; sub_x++) {
+                            mp_int_t tx = bx + sub_x;
+                            if (tx < 0 || tx >= dw) continue;
+                            drow[tx] = p;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(kc_gfx_blit_map_obj, 17, 17, kc_gfx_blit_map);
+
 // pack_strip(fb, fb_w, x, y, w, rows, dst) -- copy a (w x rows) window of the
 // framebuffer into dst contiguously (row-major). Full-width is one memcpy;
 // cropped rects are packed row-by-row in C (the slow Stage 2 Python path).
@@ -137,6 +214,7 @@ static const mp_rom_map_elem_t kc_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_fill),       MP_ROM_PTR(&kc_gfx_fill_obj) },
     { MP_ROM_QSTR(MP_QSTR_fill_rect),  MP_ROM_PTR(&kc_gfx_fill_rect_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit565),    MP_ROM_PTR(&kc_gfx_blit565_obj) },
+    { MP_ROM_QSTR(MP_QSTR_blit_map),   MP_ROM_PTR(&kc_gfx_blit_map_obj) },
     { MP_ROM_QSTR(MP_QSTR_pack_strip), MP_ROM_PTR(&kc_gfx_pack_strip_obj) },
 };
 static MP_DEFINE_CONST_DICT(kc_gfx_globals, kc_gfx_globals_table);

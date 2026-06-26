@@ -111,9 +111,11 @@ fi
 # sources live in runtime/ (imported by the host as runtime.*); the device freezes
 # these copies as top-level modules, so both consoles run literally the same code:
 #   editors.py    -- CodeEditor / SpriteSheet / PaintEditor
+#   audio.py      -- sound model + AudioEngine synth/mixer (#16)
 #   console.py    -- launcher + desktop + cards/code/paint UI + Pointer
 #   kid_carts.py  -- the .kcart store (scan/load/save/create/duplicate/delete)
 cp "${REPO_ROOT}/runtime/editors.py" "${SCRIPT_DIR}/modules/editors.py"
+cp "${REPO_ROOT}/runtime/audio.py" "${SCRIPT_DIR}/modules/audio.py"
 cp "${REPO_ROOT}/runtime/console.py" "${SCRIPT_DIR}/modules/console.py"
 cp "${REPO_ROOT}/runtime/kid_carts.py" "${SCRIPT_DIR}/modules/kid_carts.py"
 # carts_data.py is GENERATED from system_carts/ (it replaces the ~1800 lines of

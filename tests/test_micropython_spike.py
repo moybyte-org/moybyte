@@ -356,12 +356,88 @@ def test_tdeck_keyboard_falls_back_when_raw_mode_is_ignored():
     assert not keyboard.raw_mode
 
 
+def test_tdeck_keyboard_set_game_mode_toggles_raw():
+    spec = importlib.util.spec_from_file_location(
+        "kidcode_firmware_input", ROOT / "modules" / "kidcode" / "input.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    writes = []
+
+    class FakeI2C:
+        def writeto(self, _addr, data):
+            writes.append(bytes(data))
+
+    kb = module.TDeckKeyboard.__new__(module.TDeckKeyboard)
+    kb.input = module.InputState()
+    kb.available = True
+    kb.raw_mode = False
+    kb._raw_unsupported = False
+    kb._i2c = FakeI2C()
+    kb._held_buttons = ()
+    kb._held_until_ms = 0
+    RAW = module.TDeckKeyboard.RAW_MODE_CMD
+    KEY = module.TDeckKeyboard.KEY_MODE_CMD
+
+    # Entering a cart -> raw matrix (0x03) for true hold-to-move.
+    kb.set_game_mode(True)
+    assert kb.raw_mode and writes == [RAW]
+
+    # Idempotent: no extra I2C traffic while already in the wanted mode.
+    kb.set_game_mode(True)
+    assert writes == [RAW]
+
+    # Opening the code editor -> back to 1-byte ASCII (0x04) so typing is clean.
+    kb.set_game_mode(False)
+    assert not kb.raw_mode and writes == [RAW, KEY]
+
+    # A board whose keyboard firmware ignored 0x03 sticks on ASCII: no more retries.
+    kb._raw_unsupported = True
+    kb.set_game_mode(True)
+    assert not kb.raw_mode and writes == [RAW, KEY]
+
+
+def test_device_canvas_uses_native_kc_gfx():
+    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    # The hot drawing ops go through the native kc_gfx kernel (fill/fill_rect/
+    # blit565) writing into the shared framebuffer, not the per-pixel Python loop,
+    # so complex carts stay fast.
+    assert "self._gfx = compositor.gfx()" in runtime
+    assert "self._gfx.fill(self._buf" in runtime          # cls
+    assert "self._gfx.fill_rect(self._buf" in runtime     # rect / circ
+    assert "self._gfx.blit565(self._buf" in runtime       # spr
+    # Sprites are cached as a pre-scaled RGB565 blit; sheet tiles reuse one Image
+    # across frames so the cache is built once, not rebuilt every frame.
+    assert "def _cache_rgb(self, img, scale):" in runtime
+    assert "tile_cache" in runtime
+    comp = (ROOT / "modules" / "kc_compositor.py").read_text(encoding="utf-8")
+    assert "def gfx(self):" in comp
+
+
+def test_native_blit_map_wired_for_tilemaps():
+    # The tilemap blit (#32) is a native kc_gfx op (one C call per map() region) and
+    # DeviceCanvas.map drives it from a baked RGB565 tile atlas, with a Python
+    # per-tile fallback when kc_gfx is absent. Grep the frozen device sources +
+    # the C module like the other firmware tests.
+    c = (ROOT / "native" / "kc_gfx" / "modkc_gfx.c").read_text(encoding="utf-8")
+    assert "kc_gfx_blit_map" in c
+    assert "MP_ROM_QSTR(MP_QSTR_blit_map)" in c          # registered in the module dict
+    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    assert "def map(self, tilemap, sheet" in runtime     # DeviceCanvas.map
+    assert "self._gfx.blit_map(self._buf" in runtime     # native one-call blit
+    assert "def _sheet_atlas(self, sheet, colorkey):" in runtime  # baked RGB565 atlas
+    assert "def _map_py(self, tilemap, sheet" in runtime  # no-kc_gfx fallback
+    # The device cart API exposes map/mget/mset, same names as the host make_api.
+    assert '"map": map_, "mget": mget, "mset": mset,' in runtime
+
+
 def _load_kid_runtime():
     # kid_runtime does `from editors import ...` and `from console import ...`; the
-    # device freezes build-staged copies of runtime/editors.py and runtime/console.py
-    # as top-level modules. Register those same canonical files so the device module
-    # loads under CPython (editors first -- console imports it).
-    for name in ("editors", "console"):
+    # device freezes build-staged copies of runtime/{editors,audio,console}.py as
+    # top-level modules. Register those same canonical files so the device module
+    # loads under CPython (editors + audio first -- console imports both).
+    for name in ("editors", "audio", "console"):
         spec = importlib.util.spec_from_file_location(name, Path("runtime") / (name + ".py"))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
@@ -432,12 +508,18 @@ def test_code_editor_wired_into_device_shell():
     assert "ws.make_api = make_api" in runtime
     assert "ws.carts_store = kid_carts" in runtime
 
-    # The keyboard stays in 1-byte ASCII mode (raw matrix is never enabled -- it
-    # garbled editor text; verified via the keyboard probe).
-    assert "kb.raw_mode = False" in console
+    # The console flips the keyboard between ASCII (code editor: clean typing) and
+    # the raw matrix (running cart: true hold-to-move) on every screen change. It
+    # does NOT poke raw_mode directly or enable raw itself -- it asks the keyboard,
+    # which knows whether the firmware supports it.
+    assert "kb.set_game_mode(not on)" in console
     assert "kb._enable_raw_mode()" not in console
     inp = (ROOT / "modules" / "kidcode" / "input.py").read_text(encoding="utf-8")
-    assert "self._enable_raw_mode()" not in inp        # __init__ no longer enables it
+    assert "def set_game_mode(self, on):" in inp       # the per-screen mode toggle
+    # The editor/launcher must boot in ASCII -- __init__ never enables raw (raw is
+    # only entered later, via set_game_mode, once a cart is running).
+    init_src = inp.split("def __init__(self, input_state):", 1)[1].split("\n    def ", 1)[0]
+    assert "_enable_raw_mode" not in init_src
     assert "ws.keyboard = keyboard" in runtime
 
 
@@ -509,15 +591,152 @@ def test_device_spr_is_sheet_indexed_and_accepts_image():
     assert calls[-1] == (1, 1, 8, 9, 4)
 
 
+def test_device_make_api_map_mget_mset(tmp_path=None):
+    # The device cart API exposes map()/mget()/mset() bound to the injected TileMap
+    # (#32): mget/mset round-trip through it, and map() forwards to canvas.map with
+    # the cart's tilemap + sheet. Exercised under CPython via the frozen modules.
+    m = _load_kid_runtime()
+    from editors import TileMap
+    sheet = m.SpriteSheet(4, 4)
+    tm = TileMap(3, 3)
+    mapped = []
+
+    class StubCanvas:
+        w = 320
+        h = 240
+
+        def map(self, tilemap, sheet, *args):
+            mapped.append((tilemap, sheet, args))
+
+        def __getattr__(self, name):
+            return lambda *a, **k: 0
+
+    class StubInput:
+        def held(self, name):
+            return False
+
+        def pressed(self, name):
+            return False
+
+    api = m.make_api(StubCanvas(), StubInput(), {}, sheet, None, tm)
+    api["mset"](1, 2, 5)
+    assert api["mget"](1, 2) == 5 and tm.mget(1, 2) == 5
+    api["map"](0, 0, 3, 3, 0, 0, -1, 2)
+    assert mapped and mapped[-1][0] is tm and mapped[-1][1] is sheet
+    assert mapped[-1][2] == (0, 0, 3, 3, 0, 0, -1, 2)
+    # With no tilemap injected, the API stays callable (map() no-ops, mget -> -1).
+    api2 = m.make_api(StubCanvas(), StubInput(), {}, sheet)
+    assert api2["mget"](0, 0) == -1
+    api2["map"](0, 0)                       # no crash, draws nothing
+
+
+def test_sprite_sheet_pset_bumps_gen():
+    # pset bumps a generation counter so a running cart's tile cache can detect a
+    # sprite edit and rebuild (host/device parity for live sprite edits).
+    SpriteSheet = _load_kid_runtime().SpriteSheet
+    sh = SpriteSheet(4, 4)
+    assert sh.gen == 0
+    sh.pset(0, 0, 5)
+    assert sh.gen == 1
+    sh.pset(1, 0, 6)
+    assert sh.gen == 2
+    # An out-of-bounds pset is a no-op and must not bump gen.
+    sh.pset(-1, 0, 7)
+    sh.pset(sh.w, 0, 7)
+    assert sh.gen == 2
+    # tset routes through pset, so it bumps too.
+    sh.tset(0, 2, 2, 9)
+    assert sh.gen == 3
+
+
+def test_device_tile_cache_invalidated_on_sprite_edit():
+    # The device tile cache (and each Image's RGB565 blit cache) snapshots a tile's
+    # pixels. After a kid edits a sprite, the running cart must re-blit fresh art,
+    # not the stale cached Image. make_api watches the sheet's gen counter and
+    # clears the cache when it changes.
+    m = _load_kid_runtime()
+    sheet = m.SpriteSheet(4, 4)
+    sheet.tset(0, 0, 0, 3)
+    blitted = []
+
+    class StubCanvas:
+        w = 320
+        h = 240
+
+        def spr(self, img, x, y, scale=1):
+            blitted.append(img)
+
+        def __getattr__(self, name):
+            return lambda *a, **k: 0
+
+    class StubInput:
+        def held(self, name):
+            return False
+
+        def pressed(self, name):
+            return False
+
+    api = m.make_api(StubCanvas(), StubInput(), {}, sheet)
+    api["spr"](0, 0, 0)
+    first = blitted[-1]
+    # Same sheet, same id, no edit -> the cached Image is reused (object identity).
+    api["spr"](0, 0, 0)
+    assert blitted[-1] is first
+
+    # A paint edit bumps sheet.gen -> the cache is invalidated and a fresh Image
+    # (rebuilt from the new pixels) is blitted next frame.
+    sheet.pset(0, 0, 5)
+    api["spr"](0, 0, 0)
+    assert blitted[-1] is not first
+
+
 def test_device_sprite_storage_wired():
     runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "kid_carts.py").read_text(encoding="utf-8")
-    assert "def make_api(canvas, input, config, sheet=None, pmem=None):" in runtime   # device cart API
+    # device cart API -- also takes the injected audio backend (#16) + tilemap
+    # (#32) + persistent memory (pmem, #11).
+    assert "def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None, pmem=None):" in runtime
     assert "self.sheet = self._build_sheet()" in console                   # shared console
     assert "self.carts_store.save_sprites(self.cart, hexs)" in console
     assert "def save_sprites(cart, hex_text):" in carts
     assert '"sprites": sprites' in carts
+
+
+def test_device_audio_wired():
+    # Audio core (#16): shared model/mixer (runtime/audio.py) + device I2S backend
+    # stub + host==device API surface + sounds.json storage. Source-level checks
+    # mirror how the other firmware tests grep the frozen device modules.
+    audio = (Path("runtime") / "audio.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    carts = (Path("runtime") / "kid_carts.py").read_text(encoding="utf-8")
+    build = (ROOT / "build.sh").read_text(encoding="utf-8")
+
+    # The shared audio core: dependency-light (math only) synth + mixer + model.
+    assert "class AudioEngine:" in audio
+    assert "def render(self, nframes):" in audio
+    assert "class AudioBank:" in audio
+    # The console builds a per-cart AudioEngine and injects an audio backend.
+    assert "from audio import AudioBank, AudioEngine" in console
+    assert "def _build_audio(self):" in console
+    assert "self.audio.tick(dt)" in console
+    # The device make_api binds the same six audio names as the host.
+    for name in ('"sfx": _sfx', '"beep": _beep', '"music": _music',
+                 '"music_stop": _music_stop', '"sound_stop": _sound_stop',
+                 '"volume": _volume'):
+        assert name in runtime, name
+    # The device I2S backend is wired in (stub -- NEEDS ON-DEVICE VERIFICATION).
+    assert "class DeviceAudio:" in runtime
+    assert "from machine import I2S, Pin" in runtime
+    assert "mode=I2S.TX" in runtime
+    assert "ws.make_audio = make_audio" in runtime
+    assert "NEEDS ON-DEVICE VERIFICATION" in runtime
+    # sounds.json storage in the shared cart store.
+    assert "def save_sounds(cart, bank_dict):" in carts
+    assert '"sounds": sounds' in carts
+    # build.sh stages the shared audio module into the frozen modules tree.
+    assert 'cp "${REPO_ROOT}/runtime/audio.py" "${SCRIPT_DIR}/modules/audio.py"' in build
 
 
 def test_editor_cores_are_shared_single_source():

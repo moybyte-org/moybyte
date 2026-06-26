@@ -12,12 +12,15 @@ import random
 import shutil
 import sys
 
-# console.py uses `from editors import ...` (its frozen device name). Register the
-# canonical runtime/editors.py under that bare name so it imports on the host too.
+# console.py uses `from editors import ...` and `from audio import ...` (its frozen
+# device names). Register the canonical runtime/editors.py and runtime/audio.py under
+# those bare names so console.py imports them on the host too.
+from . import audio as _audio
 from . import editors as _editors
 sys.modules.setdefault("editors", _editors)
+sys.modules.setdefault("audio", _audio)
 
-from . import console  # noqa: E402  (after the editors alias above)
+from . import console  # noqa: E402  (after the editors/audio aliases above)
 from . import kid_carts  # noqa: E402  (shared .kcart store; host-clean)
 from . import palette  # noqa: E402
 from .canvas import Canvas, Image  # noqa: E402
@@ -29,12 +32,140 @@ WIDTH, HEIGHT = 320, 240
 PAN_SPEED = 6            # px/frame the arrow-keys-as-trackball nudge the cursor
 
 
-def make_api(canvas, input, config, sheet=None, pmem=None):
+class FakeAudio:
+    """Host audio backend (#16) that records every call AND drives the shared
+    AudioEngine, so behavior is fully assertable headlessly -- no sound hardware
+    needed. Mirrors the existing sim fakes (kidcode_sim fake audio,
+    kidcode/audio.py AudioService.calls). The optional real-playback backend
+    (SdlAudio, see docs/audio_design_v04.md) is a thin follow-on that pulls
+    engine.render() from an SDL stream instead of just recording.
+
+    `tick(dt)` renders a block each frame so render() is exercised on the same
+    schedule the device's per-frame I2S feeder would use."""
+
+    def __init__(self, engine):
+        self.engine = engine
+        self.calls = []           # [("sfx", n, chan), ("beep", f, d), ...]
+        self.rendered = 0         # total PCM frames pulled via tick()
+
+    def sfx(self, n, chan=None):
+        self.calls.append(("sfx", int(n), chan))
+        self.engine.play_sfx(n, chan)
+
+    def beep(self, freq, dur=0.15):
+        self.calls.append(("beep", freq, dur))
+        self.engine.play_beep(freq, dur)
+
+    def music(self, track, loop=True):
+        self.calls.append(("music", int(track), bool(loop)))
+        self.engine.play_music(track, loop)
+
+    def music_stop(self):
+        self.calls.append(("music_stop",))
+        self.engine.stop_music()
+
+    def sound_stop(self, chan=None):
+        self.calls.append(("sound_stop", chan))
+        self.engine.stop(chan)
+
+    def volume(self, level):
+        self.calls.append(("volume", level))
+        self.engine.set_volume(level)
+
+    def tick(self, dt):
+        n = int(self.engine.rate * max(0.0, dt))
+        if n > 0:
+            self.engine.render(n)
+            self.rendered += n
+
+
+def make_audio(engine):
+    """Injected backend factory: wrap an AudioEngine in the host FakeAudio backend.
+    build_workstation hands this to the Workstation; the device injects its own."""
+    return FakeAudio(engine)
+
+
+class SdlAudio(FakeAudio):
+    """Real desktop playback backend (#16): like FakeAudio (records calls + drives
+    the engine) but ALSO streams the rendered PCM to the speakers via pygame.mixer,
+    so audio can be evaluated on the PC before the device's I2S path. Each frame it
+    renders one block (signed-16-bit mono LE, the engine's native format) and queues
+    it on a channel so blocks play back-to-back. Falls back to silent (plain
+    FakeAudio behavior) if no audio device is available, so headless runs never
+    crash."""
+
+    def __init__(self, engine):
+        FakeAudio.__init__(self, engine)
+        self._ok = False
+        self._pygame = None
+        self._chan = None
+        self._keep = None        # hold a ref to the in-flight Sound so it isn't GC'd
+        try:
+            import pygame
+            pygame.mixer.quit()  # reset any default (44.1k stereo) init to our format
+            pygame.mixer.init(frequency=engine.rate, size=-16, channels=1, buffer=512)
+            self._pygame = pygame
+            self._chan = pygame.mixer.Channel(0)
+            self._ok = True
+        except Exception:        # no audio device (headless/CI) -> silent fallback
+            self._ok = False
+
+    def tick(self, dt):
+        n = int(self.engine.rate * (dt if dt > 0.0 else 0.0))
+        if n <= 0:
+            return
+        pcm = self.engine.render(n)   # advance the mixer; bytes of LE int16 mono
+        self.rendered += n
+        if not self._ok or not pcm:
+            return
+        try:
+            snd = self._pygame.mixer.Sound(buffer=pcm)
+            if self._chan.get_busy():
+                self._chan.queue(snd)     # play right after the current block
+            else:
+                self._chan.play(snd)
+            self._keep = snd
+        except Exception:
+            self._ok = False              # stop trying if the device drops out
+
+
+def make_sdl_audio(engine):
+    """Factory for the real desktop-playback backend (simulate_desktop wires this
+    for live windowed runs; tests/headless keep make_audio's FakeAudio)."""
+    return SdlAudio(engine)
+
+
+def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None, pmem=None):
     """The cartridge global namespace on the host -- same names/signature as the
-    device make_api (TIC-80 draw API + sheet-or-Image spr), bound to a host Canvas."""
+    device make_api (TIC-80 draw API + sheet-or-Image spr + audio + tilemap), bound
+    to a host Canvas and audio backend."""
 
     def cfg(key, default=None):
         return config.get(key, default)
+
+    def _sfx(n, chan=None):
+        if audio is not None:
+            audio.sfx(n, chan)
+
+    def _beep(freq, dur=0.15):
+        if audio is not None:
+            audio.beep(freq, dur)
+
+    def _music(track, loop=True):
+        if audio is not None:
+            audio.music(track, loop)
+
+    def _music_stop():
+        if audio is not None:
+            audio.music_stop()
+
+    def _sound_stop(chan=None):
+        if audio is not None:
+            audio.sound_stop(chan)
+
+    def _volume(level):
+        if audio is not None:
+            audio.volume(level)
 
     def spr(n, x, y, colorkey=-1, scale=1):
         if isinstance(n, Image):
@@ -44,6 +175,21 @@ def make_api(canvas, input, config, sheet=None, pmem=None):
         img = sheet.tile_image(int(n), colorkey)
         if img is not None:
             canvas.spr(img, x, y, scale)
+
+    def map_(mx=0, my=0, w=None, h=None, sx=0, sy=0, colorkey=-1, scale=1):
+        # TIC-80 map(mx, my, w, h, sx, sy, colorkey, scale): blit a w x h region of
+        # the cart's tilemap (top-left cell mx,my) to screen (sx,sy). Tiles are the
+        # 8x8 sheet sprites; `scale` enlarges each (so scale=2 => 16px world tiles).
+        if tilemap is None or sheet is None:
+            return
+        canvas.map(tilemap, sheet, mx, my, w, h, sx, sy, colorkey, scale)
+
+    def mget(x, y):
+        return tilemap.mget(x, y) if tilemap is not None else -1
+
+    def mset(x, y, tile):
+        if tilemap is not None:
+            tilemap.mset(x, y, tile)
 
     def touch():
         # Pointer (mouse stands in for touch on the host) exposed to touch-driven
@@ -98,10 +244,13 @@ def make_api(canvas, input, config, sheet=None, pmem=None):
         "cls": canvas.cls, "pix": canvas.pix,
         "line": canvas.line, "rect": canvas.rect, "rectb": canvas.rectb,
         "circ": canvas.circ, "circb": canvas.circb, "spr": spr,
+        "map": map_, "mget": mget, "mset": mset,
         "print": canvas.print, "touch": touch, "mouse": mouse,
         "btn": input.held, "btnp": input.pressed,
         "key": key, "keyp": keyp, "time": time, "pmem": pmem_fn,
         "cfg": cfg, "col": palette.color,
+        "sfx": _sfx, "beep": _beep, "music": _music,
+        "music_stop": _music_stop, "sound_stop": _sound_stop, "volume": _volume,
         "rnd": lambda n=1.0: random.random() * n,
         "flr": lambda x: int(x // 1),
         "Image": Image,
@@ -138,6 +287,7 @@ def build_workstation(carts_dir=None):
     inp = InputState()
     ws = console.Workstation(_NullComp(), canvas, inp, carts)
     ws.make_api = make_api
+    ws.make_audio = make_audio
     ws.carts_store = kid_carts
     ws.carts_root = carts_dir
     ws.can_manage = True

@@ -30,6 +30,16 @@ PAL565 = (
     0x3F9E, 0x3D7E, 0x3B5E, 0x51FE, 0x91FE, 0xD9FE, 0xF1F8, 0xF1F0,
 )
 
+# RGB565 colour-key for native sprite blits: transparent sprite pixels are baked
+# to this value so kc_gfx.blit565 skips them. Magenta is absent from KID64; a
+# visible pixel that happens to equal it is nudged by one LSB when the cache is
+# built (see DeviceCanvas._cache_rgb), so it can never read as transparent.
+_RGB_KEY = 0xF81F
+
+# Flip to False to force the slow Python per-pixel drawing path (no native kc_gfx)
+# for an FPS A/B comparison against the native-blit build.
+_USE_GFX = True
+
 
 class Image:
     def __init__(self, width, height, pix, transparent=-1):
@@ -52,20 +62,38 @@ class Image:
 
 
 class DeviceCanvas:
-    """The kid drawing API, backed by a framebuf over the compositor buffer."""
+    """The kid drawing API. The hot ops (cls/rect/circ/spr) go through the native
+    kc_gfx C kernel writing straight into the compositor's RGB565 framebuffer --
+    this is what keeps complex carts off the slow per-pixel Python path. framebuf
+    over the same buffer still serves text/lines/pixels and is the fallback on an
+    image built without kc_gfx."""
 
     def __init__(self, compositor):
         import framebuf
 
         self._comp = compositor
         self.w, self.h = compositor.size()
-        self._fb = framebuf.FrameBuffer(compositor.framebuffer(), self.w, self.h, framebuf.RGB565)
+        self._buf = compositor.framebuffer()          # raw RGB565 bytearray (for kc_gfx)
+        self._fb = framebuf.FrameBuffer(self._buf, self.w, self.h, framebuf.RGB565)
+        self._gfx = compositor.gfx() if _USE_GFX else None   # native kernel, or None
 
     def _col(self, c):
         return PAL565[c & 63]
 
+    def _fill(self, x, y, w, h, col):
+        # Filled rect of a pre-resolved RGB565 colour; native (clamped in C) when
+        # kc_gfx is present, else framebuf. Shared by rect() and circ().
+        if self._gfx is not None:
+            self._gfx.fill_rect(self._buf, self.w, x, y, w, h, col)
+        else:
+            self._fb.fill_rect(x, y, w, h, col)
+
     def cls(self, c=0):
-        self._fb.fill(self._col(c))
+        col = self._col(c)
+        if self._gfx is not None:
+            self._gfx.fill(self._buf, self.w * self.h, col)
+        else:
+            self._fb.fill(col)
 
     def pix(self, x, y, c=None):
         # TIC-80 pix: read the index with two args, set it with three.
@@ -78,7 +106,7 @@ class DeviceCanvas:
 
     def rect(self, x, y, w, h, c):
         # TIC-80 rect = FILLED rectangle.
-        self._fb.fill_rect(int(x), int(y), int(w), int(h), self._col(c))
+        self._fill(int(x), int(y), int(w), int(h), self._col(c))
 
     def rectb(self, x, y, w, h, c):
         # TIC-80 rectb = rectangle outline.
@@ -90,7 +118,7 @@ class DeviceCanvas:
         col = self._col(c)
         for dy in range(-r, r + 1):
             span = int((r * r - dy * dy) ** 0.5)
-            self._fb.fill_rect(cx - span, cy + dy, 2 * span + 1, 1, col)
+            self._fill(cx - span, cy + dy, 2 * span + 1, 1, col)
 
     def circb(self, cx, cy, r, c):
         # TIC-80 circb = circle outline.
@@ -110,6 +138,51 @@ class DeviceCanvas:
 
     def spr(self, img, x, y, scale=1):
         x = int(x); y = int(y); scale = int(scale)
+        if scale < 1:
+            scale = 1
+        if self._gfx is None:
+            self._spr_py(img, x, y, scale)
+            return
+        # Blit a cached, pre-scaled RGB565 copy of the sprite in one C call. The
+        # cache lives on the Image (sheet tiles are reused across frames via the
+        # make_api tile cache, so the rebuild is once-per-sprite, not per-frame).
+        if getattr(img, "_rgb", None) is None or getattr(img, "_rgb_scale", 0) != scale:
+            self._cache_rgb(img, scale)
+        self._gfx.blit565(self._buf, self.w, self.h, x, y,
+                          img._rgb, img._rgb_w, img._rgb_h, _RGB_KEY)
+
+    def _cache_rgb(self, img, scale):
+        # Bake the indexed sprite into an RGB565 buffer at `scale`, transparent
+        # pixels set to _RGB_KEY so blit565 skips them. Built rarely (cached), so
+        # the per-pixel loop here is fine -- it's the per-frame blit that matters.
+        import framebuf
+
+        w = img.w * scale
+        h = img.h * scale
+        buf = bytearray(w * h * 2)
+        fb = framebuf.FrameBuffer(buf, w, h, framebuf.RGB565)
+        fb.fill(_RGB_KEY)
+        pal = PAL565
+        t = img.transparent
+        pix = img.pix
+        iw = img.w
+        for sy in range(img.h):
+            base = sy * iw
+            for sx in range(iw):
+                p = pix[base + sx]
+                if p == t or p < 0:
+                    continue
+                col = pal[p & 63]
+                if col == _RGB_KEY:
+                    col ^= 0x20          # nudge a visible pixel off the colour-key
+                fb.fill_rect(sx * scale, sy * scale, scale, scale, col)
+        img._rgb = buf
+        img._rgb_w = w
+        img._rgb_h = h
+        img._rgb_scale = scale
+
+    def _spr_py(self, img, x, y, scale):
+        # Per-pixel fallback when kc_gfx is absent (image built without it).
         fb = self._fb
         pal = PAL565
         t = img.transparent
@@ -121,15 +194,135 @@ class DeviceCanvas:
                     continue
                 fb.fill_rect(x + sx * scale, y + sy * scale, scale, scale, pal[p & 63])
 
+    def map(self, tilemap, sheet, mx=0, my=0, w=None, h=None,
+            sx=0, sy=0, colorkey=-1, scale=1):
+        # TIC-80 map(): blit a w x h cell region of the tilemap over `sheet` to
+        # screen (sx, sy) in ONE native kc_gfx.blit_map call (issue #32). The sheet
+        # is baked once into an RGB565 tile atlas (cached on the sheet, rebuilt only
+        # on a paint edit via sheet.gen), so per-frame cost is just the C walk.
+        mx = int(mx); my = int(my); sx = int(sx); sy = int(sy); scale = int(scale)
+        if scale < 1:
+            scale = 1
+        if w is None:
+            w = tilemap.w - mx
+        if h is None:
+            h = tilemap.h - my
+        tile = sheet.TILE
+        if self._gfx is None:
+            self._map_py(tilemap, sheet, mx, my, int(w), int(h), sx, sy, colorkey, scale)
+            return
+        atlas, ntiles = self._sheet_atlas(sheet, colorkey)
+        self._gfx.blit_map(self._buf, self.w, self.h, sx, sy,
+                           tilemap.cells, tilemap.w, tilemap.h,
+                           mx, my, int(w), int(h),
+                           atlas, ntiles, tile, scale, _RGB_KEY)
+
+    def _sheet_atlas(self, sheet, colorkey):
+        # Bake the whole sheet into a contiguous RGB565 tile atlas (ntiles tiles of
+        # TILE x TILE, tile-major) for kc_gfx.blit_map. Cached on the sheet and keyed
+        # by (gen, colorkey) so a paint edit or a different colorkey rebakes; this is
+        # the map() analogue of _cache_rgb. Transparent indices (== colorkey) bake to
+        # _RGB_KEY so blit_map skips them.
+        gen = getattr(sheet, "gen", 0)
+        if (getattr(sheet, "_atlas", None) is not None
+                and sheet._atlas_gen == gen and sheet._atlas_key == colorkey):
+            return sheet._atlas, sheet._atlas_n
+        tile = sheet.TILE
+        ntiles = sheet.count
+        tpx = tile * tile
+        buf = bytearray(ntiles * tpx * 2)
+        pal = PAL565
+        cols = sheet.cols
+        sw = sheet.w
+        spix = sheet.pix
+        key = _RGB_KEY
+        pos = 0
+        for n in range(ntiles):
+            ox = (n % cols) * tile
+            oy = (n // cols) * tile
+            for ly in range(tile):
+                base = (oy + ly) * sw + ox
+                for lx in range(tile):
+                    p = spix[base + lx]
+                    if p == colorkey:
+                        col = key
+                    else:
+                        col = pal[p & 63]
+                        if col == key:
+                            col ^= 0x20      # nudge a visible pixel off the key
+                    buf[pos] = col & 0xFF
+                    buf[pos + 1] = (col >> 8) & 0xFF
+                    pos += 2
+        sheet._atlas = buf
+        sheet._atlas_n = ntiles
+        sheet._atlas_gen = gen
+        sheet._atlas_key = colorkey
+        return buf, ntiles
+
+    def _map_py(self, tilemap, sheet, mx, my, w, h, sx, sy, colorkey, scale):
+        # Per-tile fallback when kc_gfx is absent: draw each non-empty cell via the
+        # framebuf spr path. Tile images cached by id so a repeat tile builds once.
+        tile = sheet.TILE
+        step = tile * scale
+        cache = {}
+        for cy in range(h):
+            ty = my + cy
+            py = sy + cy * step
+            for cx in range(w):
+                tid = tilemap.mget(mx + cx, ty)
+                if tid < 0:
+                    continue
+                img = cache.get(tid)
+                if img is None:
+                    img = sheet.tile_image(tid, colorkey)
+                    cache[tid] = img if img is not None else False
+                if not img:
+                    continue
+                self._spr_py(img, sx + cx * step, py, scale)
+
     def print(self, s, x, y, c, scale=2):
         self._fb.text(str(s), int(x), int(y), self._col(c))
 
 
-def make_api(canvas, input, config, sheet=None, pmem=None):
+def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None, pmem=None):
     import random
+
+    tile_cache = {}        # (tile id, colorkey) -> Image, so a redrawn sheet sprite
+                           # reuses one Image (and its RGB565 blit cache) every frame
+                           # instead of rebuilding it. Invalidated when the sheet's
+                           # gen counter changes (a paint edit), so a live sprite edit
+                           # shows fresh art instead of stale cached pixels.
+    _cache_gen = [None]
 
     def cfg(key, default=None):
         return config.get(key, default)
+
+    # Audio (#16): same names/signature as the host make_api. Bound to the injected
+    # device audio backend (DeviceAudio / a silent fallback); no-op if absent so a
+    # cart's sfx()/beep()/music() never crash when audio isn't wired.
+    def _sfx(n, chan=None):
+        if audio is not None:
+            audio.sfx(n, chan)
+
+    def _beep(freq, dur=0.15):
+        if audio is not None:
+            audio.beep(freq, dur)
+
+    def _music(track, loop=True):
+        if audio is not None:
+            audio.music(track, loop)
+
+    def _music_stop():
+        if audio is not None:
+            audio.music_stop()
+
+    def _sound_stop(chan=None):
+        if audio is not None:
+            audio.sound_stop(chan)
+
+    def _volume(level):
+        if audio is not None:
+            audio.volume(level)
 
     def spr(n, x, y, colorkey=-1, scale=1):
         # TIC-80 spr(id, x, y[, colorkey, scale]) from the cart's sheet. Also
@@ -139,9 +332,32 @@ def make_api(canvas, input, config, sheet=None, pmem=None):
             return canvas.spr(n, x, y, colorkey if colorkey != -1 else scale)
         if sheet is None:
             return
-        img = sheet.tile_image(int(n), colorkey)
-        if img is not None:
-            canvas.spr(img, x, y, scale)
+        g = getattr(sheet, "gen", 0)
+        if g != _cache_gen[0]:
+            tile_cache.clear()
+            _cache_gen[0] = g
+        ck = (int(n), colorkey)
+        img = tile_cache.get(ck)
+        if img is None:
+            img = sheet.tile_image(int(n), colorkey)
+            if img is None:
+                return
+            tile_cache[ck] = img
+        canvas.spr(img, x, y, scale)
+
+    def map_(mx=0, my=0, w=None, h=None, sx=0, sy=0, colorkey=-1, scale=1):
+        # TIC-80 map(): blit a region of the cart's tilemap over the sheet (#32).
+        # Same signature/semantics as the host make_api -- one native blit_map call.
+        if tilemap is None or sheet is None:
+            return
+        canvas.map(tilemap, sheet, mx, my, w, h, sx, sy, colorkey, scale)
+
+    def mget(x, y):
+        return tilemap.mget(x, y) if tilemap is not None else -1
+
+    def mset(x, y, tile):
+        if tilemap is not None:
+            tilemap.mset(x, y, tile)
 
     def touch():
         # GT911 pointer exposed to touch-driven carts: (x, y, tapped) this frame,
@@ -195,15 +411,116 @@ def make_api(canvas, input, config, sheet=None, pmem=None):
         "cls": canvas.cls, "pix": canvas.pix,
         "line": canvas.line, "rect": canvas.rect, "rectb": canvas.rectb,
         "circ": canvas.circ, "circb": canvas.circb, "spr": spr,
+        "map": map_, "mget": mget, "mset": mset,
         "print": canvas.print, "touch": touch, "mouse": mouse,
         "btn": input.held, "btnp": input.pressed,
         "key": key, "keyp": keyp, "time": time, "pmem": pmem_fn,
         "cfg": cfg, "col": color,
+        "sfx": _sfx, "beep": _beep, "music": _music,
+        "music_stop": _music_stop, "sound_stop": _sound_stop, "volume": _volume,
         "rnd": lambda n=1.0: random.random() * n,
         "flr": lambda x: int(x // 1),
         "Image": Image,
         "image": lambda rows, mapping, transparent=".": Image.from_ascii(rows, mapping, transparent),
     }
+
+
+# --- Audio backend (#16) -- I2S to the MAX98357 amp -------------------------
+# NEEDS ON-DEVICE VERIFICATION. The T-Deck Plus has an I2S class-D amp + speaker
+# on a SEPARATE peripheral from the shared display/SD SPI host, so audio does NOT
+# collide with the SD/display bus-takeover constraints (see CLAUDE.md). The pin
+# map is from the LilyGO reference (examples/I2SPlay/utilities.h):
+#     I2S_BCK = GPIO 7, I2S_WS = GPIO 5, I2S_DOUT = GPIO 6
+# The shared AudioEngine (frozen `audio` module) renders signed-16-bit mono PCM via
+# render(n); this backend just streams those bytes to the I2S DMA buffer once per
+# frame, in the single-threaded desktop loop (the same place SD ops run -- no
+# background task in v1; see docs/audio_design_v04.md sec 6).
+#
+# UNVERIFIED until a hardware spike confirms: (1) these pins/format actually drive
+# the amp (check the schematic for an amp SD-mode/gain pin); (2) the pure-Python
+# mixer fits the per-frame CPU budget at 30 FPS (else drop the rate, or move the
+# mixer to a native kc_audio C module like kc_gfx); (3) non-blocking write() never
+# stalls a frame. Do NOT claim this is tested on hardware.
+
+I2S_BCK = 7
+I2S_WS = 5
+I2S_DOUT = 6
+AUDIO_RATE = 11025
+AUDIO_IBUF = 4096
+
+
+class DeviceAudio:
+    """I2S audio backend for the T-Deck. Wraps the shared AudioEngine and feeds
+    its rendered PCM to a machine.I2S TX stream once per frame. Constructed behind
+    a try/except so a board/build without I2S degrades to silence, never a crash.
+
+    STUB / NEEDS ON-DEVICE VERIFICATION -- the I2S init + per-frame feed below are
+    the intended path but are unproven on hardware in this environment."""
+
+    def __init__(self, engine):
+        self.engine = engine
+        self.i2s = None
+        try:
+            from machine import I2S, Pin
+            self.i2s = I2S(
+                0,
+                sck=Pin(I2S_BCK),
+                ws=Pin(I2S_WS),
+                sd=Pin(I2S_DOUT),
+                mode=I2S.TX,
+                bits=16,
+                format=I2S.MONO,
+                rate=AUDIO_RATE,
+                ibuf=AUDIO_IBUF,
+            )
+        except Exception as exc:  # noqa: BLE001 -- no amp / no I2S -> stay silent
+            print("KidCode audio: I2S unavailable, silent:", exc)
+            self.i2s = None
+
+    # control surface (mirrors host FakeAudio / _SilentAudio) -------------
+    def sfx(self, n, chan=None):
+        self.engine.play_sfx(n, chan)
+
+    def beep(self, freq, dur=0.15):
+        self.engine.play_beep(freq, dur)
+
+    def music(self, track, loop=True):
+        self.engine.play_music(track, loop)
+
+    def music_stop(self):
+        self.engine.stop_music()
+
+    def sound_stop(self, chan=None):
+        self.engine.stop(chan)
+
+    def volume(self, level):
+        self.engine.set_volume(level)
+
+    def tick(self, dt):
+        """Render this frame's PCM and stream it to the I2S DMA buffer. Skips work
+        when nothing is playing so a silent cart costs almost nothing. write() is
+        the MicroPython non-blocking I2S write (returns early if ibuf is full) --
+        never let it stall the single-threaded desktop loop."""
+        if self.i2s is None:
+            return
+        if not self.engine.is_active():
+            return
+        n = int(self.engine.rate * dt)
+        if n <= 0:
+            return
+        try:
+            pcm = self.engine.render(n)
+            self.i2s.write(pcm)        # NEEDS ON-DEVICE VERIFICATION (non-blocking)
+        except Exception as exc:  # noqa: BLE001 -- audio must never crash the loop
+            print("KidCode audio tick failed:", exc)
+            self.i2s = None
+
+
+def make_audio(engine):
+    """Injected backend factory (#16): wrap an AudioEngine in the device I2S
+    backend. run_desktop hands this to the shared Workstation, the mirror of the
+    host's make_audio. STUB -- DeviceAudio playback is UNVERIFIED on hardware."""
+    return DeviceAudio(engine)
 
 
 # --- Embedded cartridges (v1) -----------------------------------------------
@@ -463,6 +780,7 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
     import kid_carts
     ws = Workstation(comp, canvas, inp, carts)
     ws.make_api = make_api        # device cart namespace (DeviceCanvas + Image + color)
+    ws.make_audio = make_audio    # device I2S audio backend (#16, NEEDS HW VERIFICATION)
     ws.carts_store = kid_carts    # SD .kcart store (scan/load/save/create/dup/delete)
     ws.carts_root = carts_root
     # Writes are enabled on-device via kc_sd: it attaches the SD card to the SPI

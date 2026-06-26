@@ -57,12 +57,23 @@ class InputState:
 class TDeckKeyboard:
     KEYBOARD_ADDR = 0x55
     KEY_HOLD_MS = 260
-    RAW_MODE_CMD = b"\x03"
+    RAW_MODE_CMD = b"\x03"     # LILYGO_KB_MODE_RAW_CMD: stream the raw key matrix
+    KEY_MODE_CMD = b"\x04"     # LILYGO_KB_MODE_KEY_CMD: back to 1-byte ASCII
+    # Use the raw key matrix for true hold-to-move while a cart runs. The matrix
+    # is the only way a *held* direction keeps firing -- the 1-byte ASCII path
+    # reports each key once on the press edge (no autorepeat), so the hold-latch
+    # below can only fake it for KEY_HOLD_MS and then movement stalls. Raw mode
+    # needs T-Deck keyboard firmware >= 2025-06-12; on older firmware the 0x03
+    # command is ignored, the keyboard keeps sending ASCII, and _read_raw_buttons
+    # detects that and sticks the session back on the ASCII + latch path. Set this
+    # False to force the ASCII path regardless of firmware.
+    RAW_GAME_MODE = True
 
     def __init__(self, input_state):
         self.input = input_state
         self.available = False
         self.raw_mode = False
+        self._raw_unsupported = False   # set once if 0x03 was ignored (old firmware)
         self._i2c = None
         self._held_buttons = ()
         self._held_until_ms = 0
@@ -71,12 +82,13 @@ class TDeckKeyboard:
 
             self._i2c = I2C(0, scl=Pin(8), sda=Pin(18), freq=400000)
             self._i2c.readfrom(self.KEYBOARD_ADDR, 1)
-            # The T-Deck keyboard returns clean 1-byte ASCII (verified by the
-            # keyboard probe). We do NOT enable the 5-byte "raw matrix" mode
-            # (RAW_MODE_CMD): it only decoded a fixed WASD/ZX subset and, once the
-            # command was sent, the flag couldn't undo it -- which garbled the code
-            # editor's text. poll() uses the 1-byte ASCII path; _buttons_for_key
-            # maps letters to nav/game buttons (with the KEY_HOLD_MS latch).
+            # Boot in 1-byte ASCII mode (clean ASCII; verified by the keyboard
+            # probe). set_game_mode(True) switches to the raw matrix (0x03) while a
+            # cart runs so a *held* direction keeps firing, and set_game_mode(False)
+            # restores ASCII (0x04) for the code editor -- sending 0x04 is the revert
+            # an earlier attempt missed, which is why raw mode used to garble editor
+            # text irreversibly. __init__ never enables raw (the editor/launcher must
+            # come up in ASCII); the console toggles it per screen.
             self.available = True
         except Exception as exc:
             print("KidCode keyboard unavailable:", exc)
@@ -101,6 +113,31 @@ class TDeckKeyboard:
         self.input.release_all()
         for button in self._held_buttons:
             self.input.set_button(button, True)
+
+    def set_game_mode(self, on):
+        """Switch the keyboard between raw-matrix (on=True: true held-state for a
+        running cart) and 1-byte ASCII (on=False: the code editor / launcher). The
+        console calls this on every screen change; it is idempotent and only talks
+        to the keyboard on a real transition. Honoured only when RAW_GAME_MODE is
+        set and the firmware actually supports raw -- otherwise it stays on ASCII
+        and the hold-latch fallback applies."""
+        if not self.available or self._i2c is None:
+            return
+        want = bool(on) and self.RAW_GAME_MODE and not self._raw_unsupported
+        if want == self.raw_mode:
+            return
+        if want:
+            self._enable_raw_mode()      # sends 0x03; sets raw_mode True on success
+        else:
+            self._disable_raw_mode()     # sends 0x04; back to 1-byte ASCII
+
+    def _disable_raw_mode(self):
+        try:
+            self._i2c.writeto(self.KEYBOARD_ADDR, self.KEY_MODE_CMD)
+        except Exception as exc:  # noqa: BLE001
+            print("KidCode keyboard mode revert failed:", exc)
+        self.raw_mode = False
+        self._held_buttons = ()
 
     def _read_key(self):
         if not self.available or self._i2c is None:
@@ -138,7 +175,11 @@ class TDeckKeyboard:
             key = data[0]
             buttons = self._buttons_for_key(key) if key > 0x20 else ()
             if buttons:
+                # A printable ASCII byte arrived while we asked for raw: the
+                # firmware ignored 0x03 (pre-2025-06-12). Stick the session on the
+                # 1-byte ASCII + latch path so set_game_mode stops retrying raw.
                 self.raw_mode = False
+                self._raw_unsupported = True
                 self._held_buttons = buttons
                 self._held_until_ms = _ticks_ms() + self.KEY_HOLD_MS
                 self.input.last_key = key
@@ -171,6 +212,9 @@ class TDeckKeyboard:
         if d0 & 0x01:
             buttons.append("home")
             key = ord("q")
+        if d1 & 0x01:
+            buttons.append("stop")
+            key = ord("e")
         self.input.last_key = key
         return buttons
 
