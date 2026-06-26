@@ -300,16 +300,52 @@ _CARD_H = 20
 _CARD_VIEW_BOTTOM = 186
 _CARD_SCROLL_UP = (300, 38, 16, 14)     # tap to scroll cards up (toward the top)
 _CARD_SCROLL_DN = (300, 168, 16, 14)    # tap to scroll cards down
-# Launcher action bar (pointer): create / duplicate / delete a cartridge.
-_NEW_BTN = (12, 206, 92, 28)
-_DUP_BTN = (114, 206, 92, 28)
-_DEL_BTN = (216, 206, 92, 28)
-# Launcher scrolling (#1). The tile strip spans TILE_Y0..(below the last tile);
-# a finger held in the top/bottom EDGE band autoscrolls toward the off-screen
-# rows, and dragging anywhere in the strip pans it by whole tiles.
-_LIST_Y0 = 36           # == Launcher.TILE_Y0 (defined below; kept in sync)
-_LIST_BOTTOM = 200      # tiles end above the action bar (y=206)
-_LIST_EDGE = 28         # px band at top/bottom of the strip that autoscrolls
+# --- Desktop shell (#28): home = wallpaper + cart icon grid + dock ----------
+# The home screen is now a Picotron/TIC-80-style desktop: a wallpaper backdrop, a
+# grid of tappable cart icons, a thin top status strip (clock + status pips), and
+# a persistent bottom dock. Drawn with the indexed API + petme128 font + the
+# _glyph vocabulary only, so host == device.
+_STATUS_H = 14          # top status strip height (wallpaper shows through above icons)
+_DOCK_Y = 218           # bottom dock strip top
+_DOCK_H = 22
+# Cart icon grid: a page of COLS x ROWS tiles between the status strip and dock.
+_ICON_COLS = 4
+_ICON_ROWS = 2
+_ICON_W = 70            # tile footprint (icon box + label)
+_ICON_H = 84
+_ICON_GAP_X = 6
+_ICON_GAP_Y = 6
+_ICON_X0 = 8            # left margin so the COLS tiles + gaps center in 320px
+_ICON_Y0 = _STATUS_H + 8
+_ICON_BOX = 40          # the inner art box of a tile (the tappable icon proper)
+# Home management actions (create / duplicate / delete) -- a small row of icon
+# buttons tucked at the right of the status strip, only drawn when can_manage.
+_NEW_BTN = (236, 1, 26, 12)
+_DUP_BTN = (264, 1, 26, 12)
+_DEL_BTN = (292, 1, 26, 12)
+# Page chevrons (when more carts than one page): tap to flip pages.
+_PAGE_PREV = (2, 110, 14, 24)
+_PAGE_NEXT = (304, 110, 14, 24)
+# Bottom dock (persistent tool switcher, TIC-80 style): one tap to jump between
+# home / code / draw / map / run / settings. On the home screen HOME is the
+# active highlight; while a cart is open the dock stays so a kid hops tools
+# without back-tracking. Six evenly-spaced slots across 320px.
+_DOCK_SLOTS = ("home", "code", "paint", "map", "run", "settings")
+_DOCK_GLYPH = {"home": "home", "code": "code", "paint": "paint",
+               "map": "map", "run": "run", "settings": "gear"}
+_DOCK_LABEL = {"home": "HOME", "code": "CODE", "paint": "DRAW",
+               "map": "MAP", "run": "RUN", "settings": "SET"}
+_DOCK_W = 52
+_DOCK_GAP = 1
+_DOCK_X0 = 2
+# Settings screen (#28): wallpaper picker (FUNCTIONAL) + mocked rows. A simple
+# vertical list of rows, each with a < label > stepper; the wallpaper row applies
+# + persists immediately, the rest are clearly-marked no-ops ("soon").
+_SET_X = 18
+_SET_W = 284
+_SET_ROW_Y0 = 40
+_SET_ROW_H = 26
+_SET_BACK = (288, 18, 18, 14)       # close Settings (X), in the panel title row
 # Code editor: FULL-SCREEN (320x240). Top bar = title + run/save/close icons;
 # the code area fills the middle; a tappable symbol palette runs along the bottom
 # (the T-Deck keyboard has no `=`/`[]`/`{}`/`<>`/`%`, so the palette supplies them).
@@ -427,7 +463,47 @@ _GLYPHS = {
     # "map": a 3x3 tile grid (the tilemap editor's nav/open icon, #32) -- full
     # h-lines at rows 1/5/9, v-lines at cols 1/5/9, so it reads as a placed grid.
     "map":    (0x000, 0x7FE, 0x444, 0x444, 0x444, 0x7FE, 0x444, 0x444, 0x444, 0x7FE, 0x000, 0x000),
+    # Desktop-shell dock icons (#28). "code" = angle brackets </>; "gear" = a
+    # settings cog; "note" = a music note (the #16 music slot, greyed until it
+    # lands); "app" = a generic window (default cart icon).
+    "code":   (0x000, 0x048, 0x08C, 0x118, 0x230, 0x230, 0x118, 0x08C, 0x048, 0x000, 0x000, 0x000),
+    "gear":   (0x000, 0x060, 0x276, 0x3FC, 0x1F8, 0x18C, 0x18C, 0x1F8, 0x3FC, 0x276, 0x060, 0x000),
+    "note":   (0x000, 0x07E, 0x042, 0x042, 0x042, 0x042, 0x0C6, 0x1CE, 0x1CE, 0x0C4, 0x000, 0x000),
+    "app":    (0x000, 0x7FE, 0x402, 0x7FE, 0x402, 0x402, 0x402, 0x402, 0x402, 0x402, 0x7FE, 0x000),
+    "wifi":   (0x000, 0x000, 0x1F8, 0x204, 0x0F0, 0x108, 0x060, 0x000, 0x060, 0x000, 0x000, 0x000),
+    "batt":   (0x000, 0x000, 0x180, 0x7FE, 0x7FE, 0x7FE, 0x7FE, 0x7FE, 0x7FE, 0x000, 0x000, 0x000),
 }
+
+
+def _blit_glyph(cv, kind, rect, c):
+    """Draw an icon glyph (no background) centered in `rect`, in color `c`, onto
+    canvas `cv`. The shared pre-literate icon vocabulary -- a 12x12 1-bit pixel
+    bitmap (see _GLYPHS) blitted via the indexed primitives only (rect spans), so
+    it renders identically on host and device. Unknown kinds draw NOTHING, so
+    every caller can keep a text label as the guaranteed fallback. Module-level so
+    both Workstation._glyph and Launcher (which only holds a canvas) share one
+    implementation -- the glyph encoding lives in exactly one loop."""
+    bits = _GLYPHS.get(kind)
+    if bits is None:                                # unknown -> nothing (fallback contract)
+        return
+    x, y, w, h = rect
+    n = _GLYPH_SIZE
+    ox = x + (w - n) // 2                            # center the 12x12 mask in the rect
+    oy = y + (h - n) // 2
+    for r in range(n):
+        row = bits[r]
+        if not row:
+            continue
+        yy = oy + r
+        run = 0                                     # length of the current on-run
+        for col in range(n):                        # walk L->R, coalescing runs
+            if row & (1 << (n - 1 - col)):
+                run += 1
+            elif run:
+                cv.rect(ox + col - run, yy, run, 1, c)
+                run = 0
+        if run:
+            cv.rect(ox + n - run, yy, run, 1, c)
 
 
 def _cursor_delta(n):
@@ -472,77 +548,125 @@ def _line_cells(x0, y0, x1, y1):
     return cells
 
 
+# Per-type icon glyph for a cart tile on the desktop (the pre-literate cue).
+_TYPE_GLYPH = {"wallpaper": "paint", "game": "run", "app": "app", "tool": "gear"}
+
+
 class Launcher:
-    TILE_Y0 = 36
-    TILE_H = 34
-    TILE_PITCH = 40
-    VISIBLE = 4
+    """The desktop home (#28): carts laid out as a PAGED GRID of tappable icon
+    tiles over the wallpaper backdrop, instead of a flat vertical strip. Keeps the
+    selection model (items/sel/selected/move) the rest of the console relies on;
+    `page`/PAGE is the grid's scroll unit (one screen of COLS x ROWS icons)."""
+
+    COLS = _ICON_COLS
+    ROWS = _ICON_ROWS
+    PAGE = _ICON_COLS * _ICON_ROWS        # cart icons shown per desktop page
 
     def __init__(self, items):
         self.items = items
         self.sel = 0
-        self.top = 0
+        self.page = 0
 
-    def move(self, d):
+    # -- selection ----------------------------------------------------------
+    def set_items(self, items):
+        """Replace the cart list (after a create/duplicate/delete) and re-clamp the
+        selection + page so neither dangles past the new end. The public re-sync
+        entry point -- callers must not poke the private page bookkeeping."""
+        self.items = items
+        if self.sel >= len(items):
+            self.sel = max(0, len(items) - 1)
+        self._page_to_sel()
+
+    def nav2d(self, dx, dy):
+        """Grid navigation: dx steps a column, dy steps a row. Clamped within the
+        list (no wrap) so arrow nav feels like a real grid."""
         n = len(self.items)
-        if n:
-            self.sel = (self.sel + d) % n
-            self._scroll()
+        if not n:
+            return
+        step = dx + dy * self.COLS
+        self.sel = max(0, min(n - 1, self.sel + step))
+        self._page_to_sel()
 
-    def _scroll(self):
-        if self.sel < self.top:
-            self.top = self.sel
-        elif self.sel >= self.top + self.VISIBLE:
-            self.top = self.sel - self.VISIBLE + 1
-        self._clamp_top()
+    def _page_to_sel(self):
+        self.page = self.sel // self.PAGE
+        self._clamp_page()
 
-    def max_top(self):
-        # Topmost index that still fills the visible window (0 when everything fits).
-        return max(0, len(self.items) - self.VISIBLE)
+    def max_page(self):
+        n = len(self.items)
+        return max(0, (n - 1) // self.PAGE) if n else 0
 
-    def _clamp_top(self):
-        self.top = max(0, min(self.max_top(), self.top))
+    def _clamp_page(self):
+        self.page = max(0, min(self.max_page(), self.page))
 
-    def scroll(self, d):
-        # Pan the visible window by d rows (touch drag / autoscroll), clamped so the
-        # last row never scrolls past the bottom. Independent of `sel` -- this just
-        # moves which slice of the list is on screen.
-        self.top = max(0, min(self.max_top(), self.top + d))
+    def flip_page(self, d):
+        """Page the grid by d screens (chevron tap), moving the selection onto the
+        first tile of the new page so keyboard nav continues from there."""
+        self.page = max(0, min(self.max_page(), self.page + d))
+        first = self.page * self.PAGE
+        if self.items and not (first <= self.sel < first + self.PAGE):
+            self.sel = min(len(self.items) - 1, first)
 
     def selected(self):
         return self.items[self.sel] if self.items else None
 
-    def _visible(self):
-        return range(self.top, min(len(self.items), self.top + self.VISIBLE))
+    def _page_range(self):
+        start = self.page * self.PAGE
+        return range(start, min(len(self.items), start + self.PAGE))
 
     def tile_rect(self, i):
-        if i < self.top or i >= self.top + self.VISIBLE:
+        """The grid-cell rect for cart index i, or None if it's not on the current
+        page. Cells lay out left-to-right, top-to-bottom in the icon area."""
+        start = self.page * self.PAGE
+        if i < start or i >= start + self.PAGE:
             return None
-        return (10, self.TILE_Y0 + (i - self.top) * self.TILE_PITCH, 300, self.TILE_H)
+        k = i - start
+        col = k % self.COLS
+        row = k // self.COLS
+        x = _ICON_X0 + col * (_ICON_W + _ICON_GAP_X)
+        y = _ICON_Y0 + row * (_ICON_H + _ICON_GAP_Y)
+        return (x, y, _ICON_W, _ICON_H)
 
     def tile_at(self, px, py):
-        for i in self._visible():
+        for i in self._page_range():
             r = self.tile_rect(i)
             if r and _in(px, py, r):
                 return i
         return None
 
-    def draw(self, cv):
-        cv.cls(NAMES["dark_blue"])
-        cv.print("CARTRIDGES", 12, 8, NAMES["white"], 2)
-        for i in self._visible():
+    def draw(self, cv, sheet_for=None):
+        # Icon tiles only -- the wallpaper backdrop + status strip + dock are drawn
+        # by the Workstation around this (so the wallpaper shows through). For each
+        # cart: a rounded art box (its sprite tile 0 if it has one, else a type
+        # glyph), the selection ring, and a short name beneath.
+        for i in self._page_range():
             x, y, w, h = self.tile_rect(i)
             it = self.items[i]
             sel = (i == self.sel)
-            cv.rect(x, y, w, h, NAMES["dark_purple"] if sel else NAMES["black"])
-            cv.rectb(x, y, w, h, NAMES["yellow"] if sel else NAMES["dark_grey"])
-            cv.rect(x + 6, y + 6, 10, h - 12, _TYPE_COLOR.get(it["type"], NAMES["indigo"]))
-            cv.print(it["title"], x + 24, y + 5, NAMES["white"], 2)
-            cv.print(it["type"].upper(), x + 24, y + 19, NAMES["peach"], 2)
-        if self.top > 0:
-            cv.print("^", 300, self.TILE_Y0, NAMES["light_grey"], 2)
-        if self.top + self.VISIBLE < len(self.items):
-            cv.print("v", 300, self.TILE_Y0 + (self.VISIBLE - 1) * self.TILE_PITCH, NAMES["light_grey"], 2)
+            bx = x + (w - _ICON_BOX) // 2
+            by = y + 2
+            cv.rect(bx, by, _ICON_BOX, _ICON_BOX, NAMES["dark_purple"])
+            cv.rectb(bx, by, _ICON_BOX, _ICON_BOX,
+                     NAMES["yellow"] if sel else NAMES["dark_grey"])
+            img = sheet_for(it) if sheet_for is not None else None
+            if img is not None:
+                cv.spr(img, bx + (_ICON_BOX - 16 * 2) // 2,
+                       by + (_ICON_BOX - 16 * 2) // 2, 2)
+            else:
+                self._tile_glyph(cv, it, (bx, by, _ICON_BOX, _ICON_BOX))
+            # short name (one line, truncated to the tile width: 8px cells)
+            name = it["title"]
+            maxc = w // 8
+            if len(name) > maxc:
+                name = name[:maxc]
+            cv.print(name, x + (w - len(name) * 8) // 2, by + _ICON_BOX + 3,
+                     NAMES["white"] if sel else NAMES["light_grey"], 1)
+
+    def _tile_glyph(self, cv, it, box):
+        # A type-colored art box with a centered type glyph, for carts with no
+        # sprite. Uses the shared module-level glyph blitter (host == device).
+        x, y, w, h = box
+        cv.rect(x + 6, y + 6, w - 12, h - 12, _TYPE_COLOR.get(it["type"], NAMES["indigo"]))
+        _blit_glyph(cv, _TYPE_GLYPH.get(it["type"], "app"), box, NAMES["black"])
 
 
 class Pmem:
@@ -626,7 +750,10 @@ class Workstation:
         self.wifi = None            # injected wifi backend (host FakeWifi / device WLAN)
         self.carts_store = None     # injected: cart store module (kid_carts API)
         self.launcher = Launcher(carts if carts else [])
-        self.screen = "launcher"      # "launcher" | "desktop" | "menu"
+        # Screen states (#28): "launcher" is now the DESKTOP home (wallpaper + cart
+        # icon grid + dock); "desktop" is a running cart; "menu" is the cards/code/
+        # paint/map editors; "settings" is the Settings app.
+        self.screen = "launcher"      # "launcher" | "desktop" | "menu" | "settings"
         self.cart = None
         self.config = None
         self.ns = None
@@ -650,10 +777,22 @@ class Workstation:
         self._drag = None             # last pointer pos during a code-view drag-scroll
         self._paint_drag = None       # last painted grid cell during a paint drag (#30)
         self._map_drag = None         # last stamped map cell during a map drag (#30)
-        self._ldrag = None            # launcher drag state [press_y, last_y, moved?]
-        self._autoscroll = 0          # frames a finger has dwelled in a launcher edge
-        self._lhover = (-1, -1)       # last cursor pos used for launcher hover-highlight
+        self._lhover = (-1, -1)       # last cursor pos used for desktop icon hover-highlight
         self.pointer = None           # set by run_desktop
+        # Desktop wallpaper (#28): a chosen wallpaper-type cart compiled into its
+        # own namespace and run (its _draw, optionally _update) as the BACKDROP each
+        # home/settings frame -- the Picotron "wallpaper is a cart" model. None until
+        # _select_wallpaper picks one; a solid KID64 fill is the zero-cart fallback.
+        self.system = {}              # system settings dict (kid_carts system.json)
+        self.wallpaper_id = None      # chosen wallpaper: cart slug or "fill:<color>"
+        self._wp_ns = None            # wallpaper cart namespace
+        self._wp_update = None        # wallpaper _update(dt) (live wallpapers)
+        self._wp_draw = None          # wallpaper _draw() (the backdrop layer)
+        self._wp_cart = None          # the wallpaper cart dict currently loaded
+        self._wp_live = True          # run the wallpaper's _update too (set False to
+                                      # save cost: _draw-only static backdrop)
+        self._icon_cache = {}         # cart path -> desktop-icon sprite Image (or None)
+        self.set_msel = 0             # selected row in the Settings screen
         self.carts_root = None        # SD carts dir (reads); set by run_desktop
         self.cart_error = None        # last cart failure text -> on-canvas error panel
         self.save_status = None       # last save_code result text (e.g. a syntax error)
@@ -679,6 +818,203 @@ class Workstation:
         gated APIs."""
         perms = self.cart.get("permissions") if self.cart else None
         return bool(perms) and name in perms
+
+    # -- desktop wallpaper (#28) ---------------------------------------------
+    #
+    # The home screen renders a chosen wallpaper-type cart as a live backdrop:
+    # exactly the Picotron model where a wallpaper is just a fullscreen cart. We
+    # reuse the cart-run machinery (compile + _init/_update/_draw) but in a SEPARATE
+    # namespace so it never collides with the foreground cart. Fallback options are
+    # plain solid KID64 fills ("fill:<color>"), so there's always a valid choice
+    # even with zero wallpaper carts installed (and a cheap option for the device).
+
+    _FILL_WALLPAPERS = ("fill:dark_blue", "fill:black", "fill:indigo", "fill:dark_purple")
+
+    def wallpaper_carts(self):
+        """The wallpaper-type carts available as backdrops (discovery: scan the
+        launcher items by type, KidCode's equivalent of Picotron's wallpapers
+        folder). Returns the cart dicts in launcher order."""
+        return [c for c in self.launcher.items if c.get("type") == "wallpaper"]
+
+    def wallpaper_options(self):
+        """All selectable wallpaper ids: each wallpaper cart's slug, then the
+        built-in solid fills (always present so there's a valid pick)."""
+        out = []
+        for c in self.wallpaper_carts():
+            out.append(self._wp_id_for(c))
+        out.extend(self._FILL_WALLPAPERS)
+        return out
+
+    def _wp_id_for(self, cart):
+        # A stable id for a wallpaper cart: its folder name (slug) so the choice
+        # survives a reboot. Embedded/path-less carts fall back to the title slug.
+        path = cart.get("path")
+        if path:
+            name = path.rsplit("/", 1)[-1]
+            if name.endswith(".kcart"):
+                name = name[:-6]
+            return name
+        return self.carts_store.slug(cart["title"]) if self.carts_store else cart["title"]
+
+    def _wp_cart_by_id(self, wp_id):
+        for c in self.wallpaper_carts():
+            if self._wp_id_for(c) == wp_id:
+                return c
+        return None
+
+    def load_system(self):
+        """Load the system settings (kid_carts system.json) and apply the saved
+        wallpaper. Safe no-op if no store/root is wired (embedded boot)."""
+        if self.carts_store is not None and self.carts_root is not None:
+            try:
+                self.system = self._with_sd(
+                    lambda: self.carts_store.load_system(self.carts_root)) or {}
+            except Exception as exc:  # noqa: BLE001 -- a bad store must not crash boot
+                print("KidCode system load failed:", _err_text(exc))
+                self.system = {}
+        self.select_wallpaper(self.system.get("wallpaper"), persist=False)
+
+    def select_wallpaper(self, wp_id, persist=True):
+        """Choose the desktop backdrop. `wp_id` is a wallpaper cart slug or a
+        "fill:<color>" built-in; an unknown/None id falls back to the first
+        available option. Compiles the chosen cart into its own namespace (or sets
+        a solid fill) and, when persist, writes the choice to system.json."""
+        opts = self.wallpaper_options()
+        if wp_id not in opts:
+            wp_id = opts[0] if opts else self._FILL_WALLPAPERS[0]
+        self.wallpaper_id = wp_id
+        self._wp_ns = self._wp_update = self._wp_draw = None
+        self._wp_cart = None
+        if not (isinstance(wp_id, str) and wp_id.startswith("fill:")):
+            cart = self._wp_cart_by_id(wp_id)
+            if cart is not None:
+                self._compile_wallpaper(cart)
+        if persist:
+            self._persist_wallpaper()
+
+    def _compile_wallpaper(self, cart):
+        """Compile a wallpaper cart into its own namespace + grab its _update/_draw,
+        running its _init. Guarded: any failure leaves the backdrop on the solid
+        fill (a broken wallpaper must never take down the desktop)."""
+        try:
+            sheet = self._build_sheet(cart)
+            tilemap = self._build_tilemap(cart)
+            ns = self.make_api(self.canvas, self.input, dict(cart.get("cfg", {})),
+                               sheet, _SilentAudio(AudioEngine(AudioBank.default())),
+                               tilemap, Pmem(), None)
+            exec(compile(cart["src"], "<wallpaper>", "exec"), ns)
+            if ns.get("_init"):
+                ns["_init"]()
+            self._wp_ns = ns
+            self._wp_cart = cart
+            self._wp_update = ns.get("_update")
+            self._wp_draw = ns.get("_draw")
+        except Exception as exc:  # noqa: BLE001
+            print("KidCode wallpaper error:", _err_text(exc))
+            self._wp_ns = self._wp_update = self._wp_draw = None
+
+    def _persist_wallpaper(self):
+        self.system["wallpaper"] = self.wallpaper_id
+        if not (self.carts_store is not None and self.carts_root is not None
+                and self.can_manage):
+            return
+        try:
+            self._with_sd(lambda: self.carts_store.save_system(self.system, self.carts_root))
+        except Exception as exc:  # noqa: BLE001 -- a failed write just isn't remembered
+            print("KidCode system save failed:", _err_text(exc))
+
+    def cycle_wallpaper(self, d):
+        """Step the wallpaper choice by d (Settings < / > stepper); applies +
+        persists immediately so the desktop updates live."""
+        opts = self.wallpaper_options()
+        if not opts:
+            return
+        cur = self.wallpaper_id if self.wallpaper_id in opts else opts[0]
+        nxt = opts[(opts.index(cur) + d) % len(opts)]
+        self.select_wallpaper(nxt, persist=True)
+
+    def _draw_wallpaper(self, dt):
+        """Paint the backdrop: run the wallpaper cart's _update/_draw, or a solid
+        fill. Always fully clears the canvas so the foreground draws over a clean
+        backdrop. Guarded so a misbehaving wallpaper degrades to a fill."""
+        if self._wp_draw is not None:
+            try:
+                if self._wp_live and self._wp_update is not None and dt > 0:
+                    self._wp_update(dt)
+                self._wp_draw()
+                return
+            except Exception as exc:  # noqa: BLE001 -- drop a broken wallpaper to the fill
+                print("KidCode wallpaper draw error:", _err_text(exc))
+                self._wp_ns = self._wp_update = self._wp_draw = None
+        # Solid fill fallback (also the "fill:<color>" built-ins).
+        wp = self.wallpaper_id or "fill:dark_blue"
+        name = wp[5:] if isinstance(wp, str) and wp.startswith("fill:") else "dark_blue"
+        self.canvas.cls(NAMES.get(name, NAMES["dark_blue"]))
+
+    def _icon_sheet_for(self, cart):
+        """A cached sprite Image for a cart's desktop icon (its sheet tile 0), or
+        None when the cart has no art (then the type glyph is drawn). Cached per
+        cart path so the grid doesn't rebuild a sheet every frame."""
+        key = cart.get("path") or cart.get("title")
+        cache = self._icon_cache
+        if key in cache:
+            return cache[key]
+        sheet = self._build_sheet(cart)             # shared sprite-load + fallback
+        img = sheet.tile_image(0, -1) if not sheet.is_blank() else None
+        cache[key] = img
+        return img
+
+    # -- Settings screen (#28) -----------------------------------------------
+    #
+    # Wallpaper is FUNCTIONAL (applies + persists); the rest are real-looking but
+    # no-op controls clearly marked "soon", so the layout is proven without
+    # committing to backends. Each row is (key, label, kind): "wallpaper" is the
+    # live one; "mock" rows just step a cosmetic placeholder value.
+
+    _SETTINGS_ROWS = (
+        ("wallpaper", "WALLPAPER", "wallpaper"),
+        ("volume", "VOLUME", "mock-gauge"),
+        ("brightness", "BRIGHTNESS", "mock-gauge"),
+        ("name", "NAME", "mock-name"),
+        ("theme", "THEME", "mock-choice"),
+    )
+    _MOCK_THEMES = ("day", "night", "candy")
+    _MOCK_NAMES = ("ALEX", "SAM", "KIT", "RAE")
+
+    def open_settings(self):
+        self.set_msel = 0
+        self.screen = "settings"
+        self._set_text_mode(False)
+
+    def settings_adjust(self, d):
+        """Step the selected Settings row by d. Wallpaper applies + persists; the
+        mock rows just move a cosmetic value held in self.system (not acted on)."""
+        key = self._SETTINGS_ROWS[self.set_msel][0]
+        if key == "wallpaper":
+            self.cycle_wallpaper(d)
+            return
+        if key == "theme":
+            cur = self.system.get("theme", self._MOCK_THEMES[0])
+            i = self._MOCK_THEMES.index(cur) if cur in self._MOCK_THEMES else 0
+            self.system["theme"] = self._MOCK_THEMES[(i + d) % len(self._MOCK_THEMES)]
+        elif key == "name":
+            cur = self.system.get("name", self._MOCK_NAMES[0])
+            i = self._MOCK_NAMES.index(cur) if cur in self._MOCK_NAMES else 0
+            self.system["name"] = self._MOCK_NAMES[(i + d) % len(self._MOCK_NAMES)]
+        else:  # mock-gauge (volume / brightness): a 0..5 placeholder
+            v = int(self.system.get(key, 3)) + d
+            self.system[key] = max(0, min(5, v))
+
+    def _settings_wallpaper_label(self):
+        """A friendly label for the current wallpaper: the cart's TITLE for a
+        wallpaper cart, or the color name for a built-in solid fill."""
+        wp = self.wallpaper_id or ""
+        if isinstance(wp, str) and wp.startswith("fill:"):
+            return wp[5:].replace("_", " ").upper()
+        cart = self._wp_cart_by_id(wp)
+        if cart is not None:
+            return cart["title"].upper()
+        return str(wp).replace("_", " ").upper()
 
     def _start(self):
         self._build_audio()
@@ -738,8 +1074,11 @@ class Workstation:
         self._start()
         self.screen = "desktop"
 
-    def _build_sheet(self):
-        hexs = self.cart.get("sprites") if self.cart else None
+    def _build_sheet(self, cart=None):
+        # Build `cart`'s sprite sheet (default: the open cart), or a blank one when
+        # there's no/bad art. The wallpaper runner passes a cart explicitly.
+        cart = cart if cart is not None else self.cart
+        hexs = cart.get("sprites") if cart else None
         if hexs:
             try:
                 return SpriteSheet.from_hex(hexs)
@@ -771,11 +1110,13 @@ class Workstation:
                     print("KidCode pmem save failed:", _err_text(exc))
         return Pmem(cells, on_write)
 
-    def _build_tilemap(self):
-        """Build the open cart's TileMap from its map.kmap blob (#32), or an empty
-        map when the cart has none -- the mirror of _build_sheet, so map()/mget()/
-        mset() are always callable (an empty map just blits nothing)."""
-        blob = self.cart.get("map") if self.cart else None
+    def _build_tilemap(self, cart=None):
+        """Build `cart`'s TileMap from its map.kmap blob (#32) (default: the open
+        cart), or an empty map when the cart has none -- the mirror of _build_sheet,
+        so map()/mget()/mset() are always callable (an empty map just blits
+        nothing). The wallpaper runner passes a cart explicitly."""
+        cart = cart if cart is not None else self.cart
+        blob = cart.get("map") if cart else None
         if blob:
             try:
                 return TileMap.from_hex(blob)
@@ -1104,10 +1445,7 @@ class Workstation:
 
     def _apply_items(self, items):
         if items:
-            self.launcher.items = items
-            if self.launcher.sel >= len(items):
-                self.launcher.sel = len(items) - 1
-            self.launcher._scroll()
+            self.launcher.set_items(items)
 
     def new_cart(self):
         if not self.carts_root or not self.can_manage:
@@ -1312,12 +1650,28 @@ class Workstation:
     def handle_input(self):
         i = self.input
         if self.screen == "launcher":
-            if i.pressed("up") or i.pressed("left"):
-                self.launcher.move(-1)
-            if i.pressed("down") or i.pressed("right"):
-                self.launcher.move(1)
+            # Grid nav (#28): left/right step a column, up/down a whole row.
+            if i.pressed("left"):
+                self.launcher.nav2d(-1, 0)
+            if i.pressed("right"):
+                self.launcher.nav2d(1, 0)
+            if i.pressed("up"):
+                self.launcher.nav2d(0, -1)
+            if i.pressed("down"):
+                self.launcher.nav2d(0, 1)
             if i.pressed("a") or i.pressed("run"):
                 self.open()
+        elif self.screen == "settings":
+            if i.pressed("up"):
+                self.set_msel = (self.set_msel - 1) % len(self._SETTINGS_ROWS)
+            if i.pressed("down"):
+                self.set_msel = (self.set_msel + 1) % len(self._SETTINGS_ROWS)
+            if i.pressed("left"):
+                self.settings_adjust(-1)
+            if i.pressed("right"):
+                self.settings_adjust(1)
+            if i.pressed("b") or i.pressed("home") or i.pressed("stop"):
+                self.go_home()
         elif self.screen == "desktop":
             if i.pressed("home") or i.pressed("stop"):
                 self.go_home()
@@ -1353,90 +1707,101 @@ class Workstation:
 
     # -- pointer (trackball-as-mouse) ----------------------------------------
 
+    def _dock_slot_rect(self, k):
+        x = _DOCK_X0 + k * (_DOCK_W + _DOCK_GAP)
+        return (x, _DOCK_Y + 1, _DOCK_W, _DOCK_H - 2)
+
+    def _dock_slot_at(self, px, py):
+        """Which dock slot ("home"/"code"/.../"settings") was tapped, or None."""
+        if py < _DOCK_Y:
+            return None
+        for k in range(len(_DOCK_SLOTS)):
+            if _in(px, py, self._dock_slot_rect(k)):
+                return _DOCK_SLOTS[k]
+        return None
+
+    def _activate_dock(self, slot):
+        """Run a dock action. The dock is drawn on home + settings; from the home
+        desktop only home/settings/run apply (no open cart for the editors), but if
+        a cart is still open behind Settings the tool slots switch its active editor
+        (TIC-80 style). run = open the selected cart from home, or re-run the open
+        one from Settings."""
+        if slot == "home":
+            self.go_home()
+        elif slot == "settings":
+            self.open_settings()
+        elif self.cart is not None:                # tool slots need an open cart
+            if slot == "code":
+                self._open_menu()
+            elif slot == "paint":
+                self._open_paint()
+            elif slot == "map":
+                self._open_map()
+            elif slot == "run":
+                self.run_code() if self.editor is not None else self.apply()
+        elif slot == "run" and self.launcher.selected() is not None:
+            self.open()                            # on the home desktop, run = open selected
+
     def _launcher_pointer(self, px, py, click):
-        # The launcher cart list scrolls by touch (#1): drag the strip to pan it,
-        # or dwell a held finger in the top/bottom edge band to autoscroll. A plain
-        # tap (press + release with no drag) opens the tile under the finger.
-        down = self.pointer.down
-        in_strip = _LIST_Y0 <= py < _LIST_BOTTOM and 10 <= px < 310
-
-        # Action-bar buttons fire on the press edge (they sit below the strip).
+        # Desktop home (#28): a tap on a cart icon opens it; the dock + management
+        # row + page chevrons fire on the press edge. There's no list drag anymore --
+        # the grid pages instead. Trackball hover still previews the icon under it.
         if click:
+            slot = self._dock_slot_at(px, py)
+            if slot is not None:
+                self._activate_dock(slot)
+                return
             if self.can_manage and _in(px, py, _NEW_BTN):
-                self.new_cart(); self._end_launcher_drag(); return
+                self.new_cart(); return
             if self.can_manage and _in(px, py, _DUP_BTN):
-                self.dup_cart(); self._end_launcher_drag(); return
+                self.dup_cart(); return
             if self.can_manage and _in(px, py, _DEL_BTN):
-                self.del_cart(); self._end_launcher_drag(); return
-            # A trackball click (cursor click, no finger down) opens the tile under
-            # it. Touch taps open on release instead (so a drag can scroll first).
-            if not down:
-                i = self.launcher.tile_at(px, py)
-                if i is not None:
-                    self.launcher.sel = i
-                    self._end_launcher_drag()
-                    self.open()
-                    return
+                self.del_cart(); return
+            if self.launcher.max_page() > 0 and _in(px, py, _PAGE_PREV):
+                self.launcher.flip_page(-1); return
+            if self.launcher.max_page() > 0 and _in(px, py, _PAGE_NEXT):
+                self.launcher.flip_page(1); return
+            i = self.launcher.tile_at(px, py)
+            if i is not None:
+                self.launcher.sel = i
+                self.open()
+                return
+        # Trackball cursor hover (no click): highlight the icon the cursor MOVED
+        # onto. Only when the position actually changed frame-to-frame, so a
+        # parked cursor doesn't fight keyboard nav. _lhover seeds to the live
+        # pointer position on the first frame so the initial centered cursor isn't
+        # treated as a move (which would clobber the first arrow step).
+        if self._lhover == (-1, -1):
+            self._lhover = (px, py)
+        elif (px, py) != self._lhover:
+            self._lhover = (px, py)
+            i = self.launcher.tile_at(px, py)
+            if i is not None:
+                self.launcher.sel = i
 
-        if down:
-            if self._ldrag is None:                 # finger just went down in/at the strip
-                self._ldrag = [py, py, False]       # [press_y, last_y, moved?]
-                self._autoscroll = 0
-            press_y, last_y, moved = self._ldrag
-            # Drag: pan by whole tiles as the finger crosses each tile pitch.
-            # Truncate toward zero (NOT floor) so up and down are symmetric -- a
-            # plain floor would turn a 1px DOWN move into a whole-row scroll
-            # (-1 // 40 == -1) and mis-open the wrong cart (#2).
-            d = last_y - py
-            pitch = self.launcher.TILE_PITCH
-            steps = d // pitch if d >= 0 else -((-d) // pitch)
-            if steps:
-                self.launcher.scroll(steps)
-                last_y = last_y - steps * pitch
-            if abs(py - press_y) > 4:
-                moved = True
-            self._ldrag = [press_y, last_y, moved]
-            # Autoscroll while dwelling in an edge band -- but ONLY once the gesture
-            # is an actual drag (`moved`). The bands overlap the first/last tile, so
-            # autoscrolling on a HELD-still tap would slide a different row under the
-            # finger and open the wrong cart on release (#1).
-            if moved and in_strip and py < _LIST_Y0 + _LIST_EDGE:
-                self._autoscroll += 1
-                if self._autoscroll % 6 == 0:
-                    self.launcher.scroll(-1)
-            elif moved and in_strip and py >= _LIST_BOTTOM - _LIST_EDGE:
-                self._autoscroll += 1
-                if self._autoscroll % 6 == 0:
-                    self.launcher.scroll(1)
-            else:
-                self._autoscroll = 0
-            # Hover-highlight the tile under a still finger (suppressed once dragging).
-            if not moved:
-                i = self.launcher.tile_at(px, py)
-                if i is not None:
-                    self.launcher.sel = i
-        else:
-            # Finger lifted: a tap that never became a drag opens the tile it was on.
-            if self._ldrag is not None and not self._ldrag[2]:
-                i = self.launcher.tile_at(px, py)
-                if i is not None:
-                    self.launcher.sel = i
-                    self.open()
-                self._end_launcher_drag()
-            else:
-                self._end_launcher_drag()
-                # Trackball cursor hover (no touch): highlight the tile the cursor
-                # MOVED onto. Only re-highlight when the cursor actually moved, so a
-                # parked cursor sitting on a tile doesn't fight keyboard up/down nav.
-                if (px, py) != self._lhover:
-                    self._lhover = (px, py)
-                    i = self.launcher.tile_at(px, py)
-                    if i is not None:
-                        self.launcher.sel = i
+    def _settings_row_rect(self, i):
+        return (_SET_X, _SET_ROW_Y0 + i * _SET_ROW_H, _SET_W, _SET_ROW_H - 2)
 
-    def _end_launcher_drag(self):
-        self._ldrag = None
-        self._autoscroll = 0
+    def _settings_pointer(self, px, py, click):
+        if not click:
+            return
+        if _in(px, py, _SET_BACK):
+            self.go_home()
+            return
+        slot = self._dock_slot_at(px, py)
+        if slot is not None:
+            self._activate_dock(slot)
+            return
+        for i in range(len(self._SETTINGS_ROWS)):
+            x, y, w, h = self._settings_row_rect(i)
+            if _in(px, py, (x, y, w, h)):
+                self.set_msel = i
+                # left third = "<" (decrement), right third = ">" (increment).
+                if px >= x + w - 40:
+                    self.settings_adjust(1)
+                elif px <= x + 40:
+                    self.settings_adjust(-1)
+                return
 
     def _card_at(self, px, py):
         for row in self._card_layout():
@@ -1467,7 +1832,13 @@ class Workstation:
         px, py, click = p.x, p.y, p.click
         if self.screen == "launcher":
             self._launcher_pointer(px, py, click)
+        elif self.screen == "settings":
+            self._settings_pointer(px, py, click)
         elif self.screen == "desktop":
+            # While a cart runs the TOP-BAR overlay (EDIT/CODE, PAINT, MAP, HOME) is
+            # the TIC-80 one-tap tool switcher -- it occludes only 22px at the top so
+            # gameplay keeps the rest of the screen (a bottom dock would cover the
+            # play area). The bottom dock is the home/settings chrome.
             if click:
                 if _in(px, py, _MENU_BTN):
                     self._open_menu()
@@ -1691,11 +2062,9 @@ class Workstation:
             # EMA so the readout reflects sustained rate, not single-frame jitter.
             self._fps = inst if self._fps <= 0 else self._fps + (inst - self._fps) * 0.15
         if self.screen == "launcher":
-            self.launcher.draw(self.canvas)
-            if self.can_manage:
-                self._btn("NEW", _NEW_BTN, NAMES["green"])
-                self._btn("DUP", _DUP_BTN, NAMES["blue"])
-                self._btn("DEL", _DEL_BTN, NAMES["red"])
+            self._draw_desktop_home(dt)
+        elif self.screen == "settings":
+            self._draw_settings(dt)
         elif self.screen == "desktop":
             if self.cart_error is None:
                 # Resolve this frame's keyboard edge for the cart's key()/keyp():
@@ -1758,6 +2127,130 @@ class Workstation:
             self._draw_fps()
         self._draw_cursor()
         self.comp.flush()
+
+    # -- desktop shell drawing (#28) -----------------------------------------
+
+    def _draw_desktop_home(self, dt):
+        """The home desktop: wallpaper backdrop -> cart icon grid -> top status
+        strip -> bottom dock. The wallpaper is drawn first and the rest layer over
+        it, exactly the Picotron model (wallpaper shows through the chrome)."""
+        self._draw_wallpaper(dt)
+        self.launcher.draw(self.canvas, self._icon_sheet_for)
+        # page chevrons when more than one page of carts
+        if self.launcher.max_page() > 0:
+            cv = self.canvas
+            if self.launcher.page > 0:
+                cv.print("<", _PAGE_PREV[0] + 3, _PAGE_PREV[1] + 8, NAMES["white"], 2)
+            if self.launcher.page < self.launcher.max_page():
+                cv.print(">", _PAGE_NEXT[0] + 3, _PAGE_NEXT[1] + 8, NAMES["white"], 2)
+        self._draw_status_strip("home")
+        self._draw_dock("home")
+
+    def _draw_status_strip(self, where):
+        """The thin top status strip: a clock, the selected cart's name (home) or
+        title (settings), and battery/wifi pips. Translucency isn't available on the
+        indexed canvas, so it's a slim dark bar that the wallpaper meets just below."""
+        cv = self.canvas
+        cv.rect(0, 0, cv.w, _STATUS_H, NAMES["black"])
+        cv.print(self._clock_text(), 2, 3, NAMES["light_grey"], 1)
+        if where == "home":
+            sel = self.launcher.selected()
+            if sel is not None:
+                name = sel["title"]
+                if len(name) > 18:
+                    name = name[:18]
+                cv.print(name, 78, 3, NAMES["white"], 1)
+        # battery + wifi pips (placeholders): a wifi glyph + a battery glyph.
+        self._glyph("wifi", (cv.w - 24, 1, 12, 12), NAMES["green"])
+        self._glyph("batt", (cv.w - 12, 1, 12, 12), NAMES["green"])
+        # Home management actions tuck into the strip (only when writes are enabled).
+        if where == "home" and self.can_manage:
+            self._mini_btn("NEW", _NEW_BTN, NAMES["green"])
+            self._mini_btn("DUP", _DUP_BTN, NAMES["blue"])
+            self._mini_btn("DEL", _DEL_BTN, NAMES["red"])
+
+    def _clock_text(self):
+        """A wall-clock HH:MM from time.localtime when available, else a mm:ss
+        uptime so the strip always shows a live clock (host == device)."""
+        try:
+            lt = time.localtime()
+            return "%02d:%02d" % (lt[3], lt[4])
+        except Exception:  # noqa: BLE001
+            secs = _ticks_diff(_ticks_ms(), 0) // 1000
+            return "%02d:%02d" % ((secs // 60) % 100, secs % 60)
+
+    def _mini_btn(self, label, rect, fill):
+        x, y, w, h = rect
+        cv = self.canvas
+        cv.rect(x, y, w, h, fill)
+        cv.print(label, x + 2, y + 2, NAMES["black"], 1)
+
+    def _draw_dock(self, where):
+        """The persistent bottom dock: home / code / draw / map / run / settings.
+        The active slot (home on the desktop, settings in Settings) is highlighted;
+        the music slot is greyed (its editor is #16, not yet here). Tool slots that
+        need an open cart read dimmed on the home desktop."""
+        cv = self.canvas
+        cv.rect(0, _DOCK_Y, cv.w, cv.h - _DOCK_Y, NAMES["dark_grey"])
+        cv.rect(0, _DOCK_Y, cv.w, 1, NAMES["black"])
+        for k in range(len(_DOCK_SLOTS)):
+            slot = _DOCK_SLOTS[k]
+            x, y, w, h = self._dock_slot_rect(k)
+            is_active = (slot == "home" and where == "home") or \
+                        (slot == "settings" and where == "settings")
+            # On the home desktop the editor tools have no cart -> dim them.
+            enabled = slot in ("home", "settings", "run") or self.cart is not None
+            if is_active:
+                cv.rect(x, y, w, h, NAMES["indigo"])
+            gc = NAMES["white"] if enabled else NAMES["dark_blue"]
+            self._glyph(_DOCK_GLYPH[slot], (x, y, w, 12), gc)
+            label = _DOCK_LABEL[slot]
+            cv.print(label, x + (w - len(label) * 8) // 2, y + 12, gc, 1)
+
+    def _draw_settings(self, dt):
+        """The Settings app (#28): wallpaper picker (FUNCTIONAL, persists) plus the
+        mocked rows, over the live wallpaper so the backdrop preview is honest."""
+        self._draw_wallpaper(dt)
+        cv = self.canvas
+        cv.rect(8, 16, 304, 198, NAMES["dark_purple"])
+        cv.rectb(8, 16, 304, 198, NAMES["pink"])
+        self._glyph("gear", (14, 18, 14, 14), NAMES["yellow"])
+        cv.print("SETTINGS", 32, 20, NAMES["white"], 2)
+        self._mini_btn("X", _SET_BACK, NAMES["red"])
+        for i in range(len(self._SETTINGS_ROWS)):
+            self._draw_settings_row(i)
+        self._draw_status_strip("settings")
+        self._draw_dock("settings")
+
+    def _draw_settings_row(self, i):
+        cv = self.canvas
+        key, label, kind = self._SETTINGS_ROWS[i]
+        x, y, w, h = self._settings_row_rect(i)
+        sel = (i == self.set_msel)
+        if sel:
+            cv.rect(x, y, w, h, NAMES["indigo"])
+        fg = NAMES["white"] if sel else NAMES["light_grey"]
+        cv.print(label, x + 4, y + 5, fg, 1)
+        # < value > stepper at the right.
+        cv.print("<", x + w - 90, y + 5, NAMES["yellow"], 2)
+        cv.print(">", x + w - 14, y + 5, NAMES["yellow"], 2)
+        vx = x + w - 78
+        if kind == "wallpaper":
+            cv.print(self._settings_wallpaper_label()[:9], vx, y + 5, NAMES["green"], 1)
+        elif kind == "mock-gauge":
+            lvl = int(self.system.get(key, 3))
+            for s in range(5):
+                c = NAMES["green"] if s < lvl else NAMES["dark_grey"]
+                cv.rect(vx + s * 8, y + 6, 6, 8, c)
+        elif kind == "mock-name":
+            cv.print(str(self.system.get("name", self._MOCK_NAMES[0]))[:8], vx, y + 5,
+                     NAMES["peach"], 1)
+        else:  # mock-choice (theme)
+            cv.print(str(self.system.get("theme", self._MOCK_THEMES[0])).upper()[:8], vx,
+                     y + 5, NAMES["peach"], 1)
+        # Mark mocked rows clearly as not-yet-functional.
+        if kind != "wallpaper":
+            cv.print("soon", x + 4, y + 14, NAMES["dark_grey"], 1)
 
     def _draw_fps(self):
         # Tiny FPS readout in the bottom-right, over a dark chip so it stays legible
@@ -2046,34 +2539,10 @@ class Workstation:
         self._glyph(kind, rect, NAMES["black"] if kind == "run" else NAMES["white"])
 
     def _glyph(self, kind, rect, c):
-        """Draw an icon glyph (no background) centered in `rect`, in color `c`.
-        The shared pre-literate icon vocabulary -- a 12x12 1-bit pixel bitmap
-        (see _GLYPHS) blitted via the indexed primitives only (rect spans), so it
-        renders identically on host and device. Unknown kinds draw NOTHING, so
-        every caller can keep a text label as the guaranteed fallback."""
-        bits = _GLYPHS.get(kind)
-        if bits is None:                                # unknown -> nothing (fallback contract)
-            return
-        cv = self.canvas
-        x, y, w, h = rect
-        n = _GLYPH_SIZE
-        # Center the 12x12 mask in the rect (centers match the old cx/cy glyphs).
-        ox = x + (w - n) // 2
-        oy = y + (h - n) // 2
-        for r in range(n):
-            row = bits[r]
-            if not row:
-                continue
-            yy = oy + r
-            run = 0                                     # length of the current on-run
-            for col in range(n):                        # walk L->R, coalescing runs
-                if row & (1 << (n - 1 - col)):
-                    run += 1
-                elif run:
-                    cv.rect(ox + col - run, yy, run, 1, c)
-                    run = 0
-            if run:
-                cv.rect(ox + n - run, yy, run, 1, c)
+        # Draw a centered icon glyph in color `c` onto this workstation's canvas.
+        # The shared blit + the glyph encoding live in the module-level _blit_glyph
+        # so Launcher (canvas-only) renders the identical vocabulary.
+        _blit_glyph(self.canvas, kind, rect, c)
 
     def _draw_paint(self):
         cv = self.canvas

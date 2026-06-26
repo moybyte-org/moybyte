@@ -974,6 +974,10 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
     # Autoconnect from the saved creds at boot. NEEDS ON-DEVICE VERIFICATION.
     ws.wifi = make_wifi(kid_carts, carts_root)
     autoconnect_wifi(ws.wifi)
+    # Desktop shell (#28): load system.json + apply the saved wallpaper. On device
+    # the wallpaper backdrop runs the chosen wallpaper cart's _draw (and _update if
+    # cheap) each home frame; _wp_live can be set False to keep it _draw-only.
+    ws.load_system()
     print("KidCode desktop running (kb=%d ball=%d touch=%d)"
           % (1 if keyboard.available else 0, 1 if ball.available else 0,
              1 if touch.available else 0))
