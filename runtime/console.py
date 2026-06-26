@@ -1241,6 +1241,18 @@ class Workstation:
         self.egg_until = 0            # _ticks_ms the egg popup hides at
         self._confetti_until = 0      # _ticks_ms the Konami confetti effect ends
         self.show_achievements = False  # the locked/unlocked list overlay (Settings entry)
+        # Redraw-on-change (#44 step 1): a static UI screen costs ~0 -- frame() only
+        # redraws + flushes when something visible changed. `_dirty` is the "redraw
+        # this frame" flag; it starts True so the very first frame always paints, and
+        # is set whenever input/state could have changed the picture (mark_dirty()).
+        # `_last_ptr` snapshots the pointer state actually drawn so a cursor move/hide/
+        # click triggers exactly one redraw. A running cart and a live wallpaper /
+        # overlay effect animate every frame -> always dirty -> unchanged full-redraw
+        # behaviour for them. `_frames_drawn` counts the frames that actually painted
+        # (idle frames are skipped) -- a host-testable witness of the win.
+        self._dirty = True
+        self._last_ptr = None         # (x, y, visible, down, click) last drawn, or None
+        self._frames_drawn = 0        # frames that actually drew+flushed (test witness)
 
     @property
     def sys_canvas(self):
@@ -1604,6 +1616,7 @@ class Workstation:
     _MOCK_NAMES = ("ALEX", "SAM", "KIT", "RAE")
 
     def open_settings(self):
+        self._dirty = True             # screen change repaints (#44)
         self.set_msel = 0
         self.screen = "settings"
         self.show_achievements = False
@@ -1644,6 +1657,7 @@ class Workstation:
         return str(wp).replace("_", " ").upper()
 
     def _start(self):
+        self._dirty = True             # a (re)started cart paints its first frame (#44)
         self._build_audio()
         # Reset the canvas draw state (camera/clip/pal/palt, #11) so a fresh cart run
         # never inherits a previous cart's clip rect or palette swap.
@@ -1781,6 +1795,7 @@ class Workstation:
     def set_menu_view(self, view):
         """Switch the menu sub-view, building the matching editor and toggling
         the keyboard between game (raw) and text (ASCII) modes."""
+        self._dirty = True             # sub-view change always repaints (#44)
         self.menu_view = view
         if view == "code":
             if self.editor is None and self.cart is not None:
@@ -1863,6 +1878,7 @@ class Workstation:
         self.set_menu_view("blocks")
 
     def _leave_menu(self):
+        self._dirty = True             # back to the desktop repaints (#44)
         self._set_text_mode(False)
         # Returning to the desktop from the code editor must run whatever source is
         # in the editor now (the kid may have fixed a crash and hit SAVE, or just
@@ -2109,6 +2125,7 @@ class Workstation:
                 print("KidCode save failed:", exc)
 
     def go_home(self):
+        self._dirty = True             # screen change repaints (#44)
         self._set_text_mode(False)    # restore the game-button keyboard mode
         self.editor = None
         self.paint = None
@@ -2335,6 +2352,16 @@ class Workstation:
 
     def handle_input(self):
         i = self.input
+        # Redraw-on-change (#44): a button PRESS edge or a typed key this frame may
+        # change visible state (nav, select, screen/menu switch, an edit), so request a
+        # repaint. Only the press edge (not release, not a steady hold) is marked: every
+        # UI handler acts on i.pressed()/the typed key, never on the release, so a press
+        # draws exactly one frame and the UI is static again -- a release/hold that
+        # changes nothing costs nothing. Pointer-driven changes (click/drag/cursor move)
+        # are caught separately in frame() via the pointer-state snapshot. Conservative
+        # but never stale: a press that's a no-op costs one redraw, not a wrong screen.
+        if getattr(i, "_pressed", None) or i.last_key:
+            self._dirty = True
         if self.screen == "launcher":
             # Konami Easter egg (#21): watch every button press on the home desktop
             # for the secret sequence (the nav below still runs normally -- the egg
@@ -2644,6 +2671,7 @@ class Workstation:
         if (self.screen == "menu" and self.menu_view == "code"
                 and self.editor is not None and (dx or dy)):
             self.editor.move(dy, dx)
+            self._dirty = True             # caret moved -> redraw (#44)
 
     def _code_drag(self, px, py):
         # Touch/mouse drag inside the code area pans the viewport (content follows
@@ -3248,11 +3276,73 @@ class Workstation:
         img = _Blit(gc.w, gc.h, list(gbuf), -1)     # opaque (no transparent index)
         sc.spr(img, ox, oy, scale)
 
+    # -- redraw-on-change (#44 step 1) ---------------------------------------
+
+    def mark_dirty(self):
+        """Request a redraw on the next frame(). Called whenever a visible change
+        could have happened (input that mutates state, scrolls, edits, screen/menu
+        switches, selection moves). Cheap + idempotent -- the actual draw is
+        coalesced to one in frame()."""
+        self._dirty = True
+
+    def _ptr_state(self):
+        """The pointer state that affects what's drawn: position, visibility, the
+        held/click flags. A change here (cursor moved, auto-hid, tapped, drag) means
+        the picture differs, so frame() must repaint. None when there's no pointer."""
+        p = self.pointer
+        if p is None:
+            return None
+        return (p.x, p.y, bool(p.visible), bool(p.down), bool(p.click))
+
+    def _animating(self, dt):
+        """True when SOMETHING on screen changes every frame on its own, so the UI
+        must keep redrawing even without input:
+          - a running cart (games animate -> unchanged full-redraw behaviour),
+          - a live wallpaper on the home/settings backdrop (its _update advances it),
+          - the achievement toast / Konami confetti / Easter-egg popup while active.
+        A static launcher/editor/menu with a still wallpaper hits none of these."""
+        # A running cart on the desktop draws every frame (unless it crashed, when the
+        # error panel is static).
+        if self.screen == "desktop" and self.cart_error is None and (
+                self._update is not None or self._draw is not None):
+            return True
+        # A live wallpaper animates the home/settings backdrop.
+        if self.screen in ("launcher", "settings") and self._wp_live \
+                and self._wp_update is not None and self._wp_draw is not None and dt > 0:
+            return True
+        # Transient overlays redraw while they're up.
+        if self._confetti_until and _ticks_diff(self._confetti_until, _ticks_ms()) > 0:
+            return True
+        if self._egg_active():
+            return True
+        if self.ach.toast_active():
+            return True
+        return False
+
+    def _needs_redraw(self, dt):
+        """Decide whether frame() must repaint+flush this frame. True when something
+        marked the UI dirty, an animation source is live, or the pointer state the
+        last frame drew has changed (cursor move/hide, tap, drag)."""
+        if self._dirty:
+            return True
+        if self._animating(dt):
+            return True
+        if self._ptr_state() != self._last_ptr:
+            return True
+        return False
+
     def frame(self, dt):
         if dt > 0:
             inst = 1.0 / dt
             # EMA so the readout reflects sustained rate, not single-frame jitter.
             self._fps = inst if self._fps <= 0 else self._fps + (inst - self._fps) * 0.15
+        # Redraw-on-change (#44): a static UI screen (no animation, no pointer change,
+        # nothing marked dirty) is skipped entirely -- no draw, no flush. The panel /
+        # host window simply retains the last frame, so an idle UI costs ~0 and the
+        # device saves the SPI flush + power. A running cart / live wallpaper / active
+        # overlay always reports animating, so it redraws every frame as before.
+        if not self._needs_redraw(dt):
+            return
         if self.screen == "launcher":
             self._draw_desktop_home(dt)
         elif self.screen == "settings":
@@ -3347,6 +3437,11 @@ class Workstation:
             self._draw_toast()
         self._draw_cursor()
         self.comp.flush()
+        # We painted this frame: clear the dirty flag and snapshot the pointer state
+        # we just drew, so the NEXT frame only repaints if something changes again.
+        self._dirty = False
+        self._last_ptr = self._ptr_state()
+        self._frames_drawn += 1
 
     # -- desktop shell drawing (#28) -----------------------------------------
 
