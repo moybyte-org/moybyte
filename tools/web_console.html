@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KidCode web console</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body {
+    margin: 0; height: 100%;
+    background: #0b0f1a; color: #c2c3c7;
+    font: 14px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  header { padding: 10px 14px 4px; text-align: center; }
+  header h1 { margin: 0; font-size: 15px; letter-spacing: .04em; color: #fff1e8; }
+  header p  { margin: 4px 0 0; font-size: 11px; opacity: .7; }
+  #stage {
+    flex: 1 1 auto; display: flex; align-items: center; justify-content: center;
+    width: 100%; padding: 10px; box-sizing: border-box;
+  }
+  /* The screen: a 320x240 indexed framebuffer, scaled up with CRISP pixels. */
+  canvas {
+    image-rendering: pixelated;            /* nearest-neighbor upscale */
+    image-rendering: crisp-edges;
+    background: #000;
+    border: 1px solid #1d2b53;
+    border-radius: 6px;
+    max-width: 100%; height: auto;
+    touch-action: none;                    /* we handle pointer/drag ourselves */
+    cursor: crosshair;
+  }
+  footer {
+    padding: 6px 12px 12px; font-size: 11px; opacity: .65; text-align: center;
+    max-width: 680px;
+  }
+  kbd {
+    background: #1d2b53; border-radius: 3px; padding: 1px 5px;
+    color: #fff1e8; font-size: 10px;
+  }
+  #status { color: #ffec27; }
+</style>
+</head>
+<body>
+<header>
+  <h1>KidCode &mdash; web console</h1>
+  <p>The live desktop, remote-rendered. <span id="status">connecting&hellip;</span></p>
+</header>
+<div id="stage">
+  <canvas id="screen" width="320" height="240" tabindex="0"></canvas>
+</div>
+<footer>
+  Click/drag = touchscreen &middot;
+  <kbd>WASD</kbd> nav &middot; <kbd>Enter</kbd> run &middot; <kbd>Z</kbd> select &middot;
+  <kbd>X</kbd> menu &middot; <kbd>H</kbd> home &middot; arrows = trackball &middot;
+  <kbd>Esc</kbd> close panel. In the code editor, letters type and arrows move the caret.
+</footer>
+
+<script>
+(function () {
+  "use strict";
+  var W = 320, H = 240, FPS = 30;
+  var canvas = document.getElementById("screen");
+  var ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  var statusEl = document.getElementById("status");
+
+  // Outgoing browser events get queued and flushed to /input each frame, so a
+  // burst of mousemoves collapses into one POST per frame (matches the device's
+  // per-frame input model). The server replays them through the host ConsoleDriver.
+  var queue = [];
+  function send(ev) { queue.push(ev); }
+
+  // ---- pointer = touchscreen (mouse -> touch x/y/click) --------------------
+  // Map a mouse/touch position to integer 320x240 canvas pixels (the console's
+  // logical coords), accounting for the CSS upscale.
+  function toCanvasXY(clientX, clientY) {
+    var r = canvas.getBoundingClientRect();
+    var x = Math.floor((clientX - r.left) / r.width * W);
+    var y = Math.floor((clientY - r.top) / r.height * H);
+    return { x: Math.max(0, Math.min(W - 1, x)), y: Math.max(0, Math.min(H - 1, y)) };
+  }
+  var dragging = false;
+  canvas.addEventListener("pointerdown", function (e) {
+    canvas.focus();
+    canvas.setPointerCapture(e.pointerId);
+    dragging = true;
+    var p = toCanvasXY(e.clientX, e.clientY);
+    send({ type: "down", x: p.x, y: p.y });     // a tap (press edge)
+    e.preventDefault();
+  });
+  canvas.addEventListener("pointermove", function (e) {
+    if (!dragging) return;
+    var p = toCanvasXY(e.clientX, e.clientY);
+    send({ type: "move", x: p.x, y: p.y });      // drag, button down
+    e.preventDefault();
+  });
+  function endDrag(e) {
+    if (!dragging) return;
+    dragging = false;
+    send({ type: "up" });
+    if (e) e.preventDefault();
+  }
+  canvas.addEventListener("pointerup", endDrag);
+  canvas.addEventListener("pointercancel", endDrag);
+
+  // ---- keyboard ------------------------------------------------------------
+  // Two regimes, mirroring tools/simulate_desktop.run_live exactly:
+  //  * arrows  = the TRACKBALL  -> a per-frame pan (dx,dy) while held.
+  //  * WASD    = launcher/gameplay nav buttons; Enter=run, Z=a, X=b, H=home.
+  //  * In the CODE EDITOR, letters type (ASCII) and arrows still pan the caret.
+  // We don't know on the client whether the code editor is open, so we always
+  // forward printable keys as `key` (the server only types them when the editor
+  // is the focus) AND drive nav via held WASD -- the same dual feed the sim uses.
+  var PAN = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+  var NAV = { a: "left", d: "right", w: "up", s: "down" };
+  var SHORTCUT = { Enter: "run", z: "a", x: "b", h: "home" };
+  var panHeld = {};      // arrow key -> true while down
+  var navHeld = {};      // logical nav name -> true while down (for hold/release)
+
+  function navName(e) {
+    // Lowercase single letters drive nav; uppercase (shift) still works.
+    var k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    return NAV[k];
+  }
+
+  canvas.addEventListener("keydown", function (e) {
+    if (e.key in PAN) {
+      panHeld[e.key] = true;                          // trackball / caret nav
+      e.preventDefault();
+      return;
+    }
+    if (e.key === "Escape") {
+      send({ type: "esc" });
+      e.preventDefault();
+      return;
+    }
+    // Editor typing keys + every printable char: forwarded as an ASCII byte.
+    // The server only consumes it when the code editor is focused; otherwise the
+    // console ignores last_key, so this is harmless when navigating the desktop.
+    var code = null;
+    if (e.key === "Enter") code = 0x0D;
+    else if (e.key === "Backspace") code = 0x08;
+    else if (e.key === "Tab") code = 0x09;
+    else if (e.key.length === 1 && e.key.charCodeAt(0) >= 0x20 && e.key.charCodeAt(0) <= 0x7E)
+      code = e.key.charCodeAt(0);
+    if (code !== null) {
+      send({ type: "key", code: code });
+    }
+    // Nav buttons (Enter/Z/X/H shortcuts are one-shot presses; WASD are holds).
+    var sc = SHORTCUT[e.key.length === 1 ? e.key.toLowerCase() : e.key];
+    if (sc && !e.repeat) {
+      send({ type: "press", name: sc });
+    }
+    var nav = navName(e);
+    if (nav && !navHeld[nav]) {
+      navHeld[nav] = true;
+      send({ type: "hold", name: nav, down: true });
+    }
+    if (sc || nav || code !== null) e.preventDefault();
+  });
+
+  canvas.addEventListener("keyup", function (e) {
+    if (e.key in PAN) { delete panHeld[e.key]; e.preventDefault(); return; }
+    var nav = navName(e);
+    if (nav && navHeld[nav]) {
+      delete navHeld[nav];
+      send({ type: "hold", name: nav, down: false });
+    }
+  });
+
+  // ---- the frame loop ------------------------------------------------------
+  // Each tick: emit the current trackball vector, flush queued input, then fetch
+  // and draw the next framebuffer. Polling is deliberately simple (no WebSocket).
+  var img = new Image();
+  var inflight = false;
+  var ok = false;
+
+  function panVector() {
+    var dx = (panHeld.ArrowRight ? 1 : 0) - (panHeld.ArrowLeft ? 1 : 0);
+    var dy = (panHeld.ArrowDown ? 1 : 0) - (panHeld.ArrowUp ? 1 : 0);
+    return [dx, dy];
+  }
+
+  function flushInput() {
+    var v = panVector();
+    if (v[0] || v[1]) send({ type: "pan", dx: v[0], dy: v[1] });
+    if (queue.length === 0) return Promise.resolve();
+    var batch = queue; queue = [];
+    return fetch("/input", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ events: batch })
+    }).catch(function () { /* drop a failed input batch; next frame retries */ });
+  }
+
+  function drawFrame() {
+    if (inflight) return;
+    inflight = true;
+    // Cache-bust so the browser always fetches a fresh frame.
+    img.src = "/frame.png?t=" + Date.now();
+  }
+  img.onload = function () {
+    ctx.drawImage(img, 0, 0, W, H);
+    inflight = false;
+    if (!ok) { ok = true; statusEl.textContent = "live"; statusEl.style.color = "#00e436"; }
+  };
+  img.onerror = function () {
+    inflight = false;
+    statusEl.textContent = "reconnecting…"; statusEl.style.color = "#ff004d";
+  };
+
+  function tick() {
+    flushInput();
+    drawFrame();
+  }
+  setInterval(tick, Math.round(1000 / FPS));
+  canvas.focus();
+})();
+</script>
+</body>
+</html>
