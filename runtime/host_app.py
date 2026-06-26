@@ -309,12 +309,18 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         if audio is not None:
             audio.volume(level)
 
-    def spr(n, x, y, colorkey=-1, scale=1):
+    def spr(n, x, y, colorkey=-1, scale=1, w=1, h=1):
+        # TIC-80 spr(id, x, y[, colorkey, scale, w, h]): w/h are the tile span, so
+        # spr(n, x, y, w=2, h=2) draws the 16x16 multi-tile sprite whose top-left is
+        # tile n (#30). w=h=1 is the plain 8x8 sprite (unchanged for old carts).
         if isinstance(n, Image):
             return canvas.spr(n, x, y, colorkey if colorkey != -1 else scale)
         if sheet is None:
             return
-        img = sheet.tile_image(int(n), colorkey)
+        if w > 1 or h > 1:
+            img = sheet.tile_span_image(int(n), int(w), int(h), colorkey)
+        else:
+            img = sheet.tile_image(int(n), colorkey)
         if img is not None:
             canvas.spr(img, x, y, scale)
 
