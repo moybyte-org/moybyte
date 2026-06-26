@@ -1101,10 +1101,16 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
     except Exception as exc:
         print("KidCode desktop unavailable:", exc)
         return
-    comp = make_compositor(get_display_bus(), 320, 240, strip_h=40)
+    comp = make_compositor(get_display_bus(), 320, 240, strip_h=24)
     if comp is None:
         print("KidCode desktop: no compositor")
         return
+    # Force the small-strip flush path. The single full-frame tx_color partially
+    # transfers then fails with OSError 257 (ESP_ERR_NO_MEM): the LCD SPI path needs
+    # an internal-RAM bounce buffer sized to the transfer, and a whole 320x240 frame
+    # (153 KB) is too big on the current internal-RAM budget. 24-row strips need a
+    # small bounce that fits; _flush_region streams them seamlessly (RAMWR->RAMWRC).
+    comp._frame = None
 
     canvas = DeviceCanvas(comp)
     inp = InputState()
@@ -1157,6 +1163,12 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
     import gc
     gc.collect()                                # defrag after the heavy boot so the LCD
                                                 # DMA flush has the internal RAM it needs
+    try:                                        # one-shot internal-RAM snapshot (diagnostic):
+        import esp32                            # internal_heap regions = (total, free, max_free, min_free)
+        print("KidCode mem: gc_free=%d internal_heap=%s"
+              % (gc.mem_free(), esp32.idf_heap_info(esp32.HEAP_INTERNAL)))
+    except Exception as _e:                     # noqa: BLE001 -- diagnostic only
+        print("KidCode mem: gc_free=%d (esp32 n/a: %s)" % (gc.mem_free(), _e))
     frame_ms = 1000 // fps_cap
     last = _ticks_ms()
     while True:
