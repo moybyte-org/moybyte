@@ -27,8 +27,22 @@ class CodeEditor:
     COLS = 38          # visible columns (8px font across the full 320px screen)
     ROWS = 20          # visible lines (full-screen code editor)
 
-    def __init__(self, src=""):
+    def __init__(self, src="", cols=None, rows=None):
+        # COLS/ROWS default to the 320x240 baseline class attrs; a responsive shell
+        # (#39 step 2) passes the layout-derived window so a bigger system canvas
+        # shows more lines + wider columns. set_view_size() re-clamps on a resize.
+        if cols is not None:
+            self.COLS = int(cols)
+        if rows is not None:
+            self.ROWS = int(rows)
         self.set_text(src)
+
+    def set_view_size(self, cols, rows):
+        """Adopt a new visible window (size/font-scale change) and re-clamp scroll
+        so the caret stays in view. Instance COLS/ROWS shadow the class baseline."""
+        self.COLS = max(1, int(cols))
+        self.ROWS = max(1, int(rows))
+        self._scroll()
 
     def set_text(self, src):
         self.lines = str(src).split("\n")
