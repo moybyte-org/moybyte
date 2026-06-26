@@ -72,6 +72,34 @@ def test_render_produces_pcm_and_silence_when_idle():
     assert not eng.is_active()
 
 
+def test_render_into_matches_render_and_reuses_buffer():
+    # The device I2S backend (#16) feeds I2S from render_into() into ONE persistent
+    # buffer per frame (so the non-blocking write's held pointer never sees a GC'd /
+    # reallocated buffer). render_into must produce byte-identical output to render()
+    # and report the frames written, so the two seams stay equivalent.
+    a = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
+    b = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
+    a.play_sfx(0)
+    b.play_sfx(0)
+    buf = bytearray(400)                       # 200 frames * 2 bytes, reused below
+    n = b.render_into(buf, 200)
+    assert n == 200
+    assert bytes(buf) == a.render(200)         # same samples from the same start
+    # a second call reuses the SAME buffer object (no per-frame allocation)
+    before = id(buf)
+    n2 = b.render_into(buf, 200)
+    assert n2 == 200 and id(buf) == before
+    assert bytes(buf) == a.render(200)         # both engines advanced in lockstep
+
+
+def test_render_into_idle_is_silent_and_returns_zero_for_empty():
+    eng = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
+    buf = bytearray(100)
+    assert eng.render_into(buf, 0) == 0        # nframes<=0 -> no work
+    assert eng.render_into(buf, 50) == 50      # idle engine -> silence written
+    assert set(buf) == {0}
+
+
 def test_play_sfx_makes_nonzero_audio_then_finishes():
     eng = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
     eng.play_sfx(0)

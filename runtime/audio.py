@@ -361,20 +361,24 @@ class AudioEngine:
 
     # -- rendering -------------------------------------------------------
 
-    def render(self, nframes):
-        """Pull `nframes` of signed-16-bit little-endian mono PCM as bytes, mixing
-        all active voices. Advances every voice's step/phase cursor and the music
-        scheduler. This is the seam the host/device backends consume."""
+    def render_into(self, out, nframes):
+        """Mix `nframes` of signed-16-bit little-endian mono PCM into the caller's
+        `out` bytearray (which must hold at least nframes*2 bytes), advancing every
+        voice + the music scheduler. Returns the number of frames written.
+
+        This is the allocation-free core render() and the device I2S backend share:
+        the device reuses one persistent buffer per frame (so the I2S non-blocking
+        write, which holds a pointer to it, never sees a GC'd / reallocated buffer),
+        while render() wraps this for the host's bytes-returning sample-pull."""
         nframes = int(nframes)
         if nframes <= 0:
-            return b""
+            return 0
         rate = self.rate
         dt_frame = nframes / float(rate)
         # advance the music phrase scheduler for this whole block
         self._advance_music(dt_frame)
         inv_rate = 1.0 / rate
         master = self.volume
-        out = bytearray(nframes * 2)
         voices = self.voices
         for i in range(nframes):
             acc = 0.0
@@ -403,6 +407,18 @@ class AudioEngine:
             val = int(acc * 32767)
             out[2 * i] = val & 0xFF
             out[2 * i + 1] = (val >> 8) & 0xFF
+        return nframes
+
+    def render(self, nframes):
+        """Pull `nframes` of signed-16-bit little-endian mono PCM as bytes, mixing
+        all active voices. Advances every voice's step/phase cursor and the music
+        scheduler. This is the seam the host/device backends consume; the device
+        prefers render_into() to avoid a per-frame allocation."""
+        nframes = int(nframes)
+        if nframes <= 0:
+            return b""
+        out = bytearray(nframes * 2)
+        self.render_into(out, nframes)
         return bytes(out)
 
     def tick(self, dt):

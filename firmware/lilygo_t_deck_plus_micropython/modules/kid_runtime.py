@@ -607,40 +607,81 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
 
 
 # --- Audio backend (#16) -- I2S to the MAX98357 amp -------------------------
-# NEEDS ON-DEVICE VERIFICATION. The T-Deck Plus has an I2S class-D amp + speaker
-# on a SEPARATE peripheral from the shared display/SD SPI host, so audio does NOT
-# collide with the SD/display bus-takeover constraints (see CLAUDE.md). The pin
-# map is from the LilyGO reference (examples/I2SPlay/utilities.h):
-#     I2S_BCK = GPIO 7, I2S_WS = GPIO 5, I2S_DOUT = GPIO 6
-# The shared AudioEngine (frozen `audio` module) renders signed-16-bit mono PCM via
-# render(n); this backend just streams those bytes to the I2S DMA buffer once per
-# frame, in the single-threaded desktop loop (the same place SD ops run -- no
-# background task in v1; see docs/audio_design_v04.md sec 6).
+# The T-Deck Plus has a MAX98357 I2S class-D amp + speaker on a SEPARATE peripheral
+# from the shared display/SD SPI host, so audio does NOT collide with the SD/display
+# bus-takeover constraints (see CLAUDE.md). Pin map + power gate from the LilyGO
+# reference (examples/I2SPlay/utilities.h + I2SPlay.ino / SimpleTone.ino):
+#     I2S_BCK = GPIO 7, I2S_WS = GPIO 5 (LRCK), I2S_DOUT = GPIO 6
+#     BOARD_POWERON = GPIO 10 must be HIGH (already driven at boot by tdeck_board)
+# There is NO separate amp enable / SD-mode / gain GPIO on this board -- the amp's
+# SD pin is hardwired and the only power gate is BOARD_POWERON (confirmed: the panel
+# also lives behind it, and the panel works, so the amp is powered too). I2S.MONO
+# puts samples on the left slot, which is the MAX98357's mono input. So pins, power
+# and format are all correct; if it is silent the failure is the I2S *init* (made
+# loud below) or the *feed*, not the wiring.
 #
-# UNVERIFIED until a hardware spike confirms: (1) these pins/format actually drive
-# the amp (check the schematic for an amp SD-mode/gain pin); (2) the pure-Python
-# mixer fits the per-frame CPU budget at 30 FPS (else drop the rate, or move the
-# mixer to a native kc_audio C module like kc_gfx); (3) non-blocking write() never
-# stalls a frame. Do NOT claim this is tested on hardware.
+# THE FEED -- why the old per-frame blocking write was wrong:
+# MicroPython machine.I2S.write() is BLOCKING by default (it copies the whole
+# buffer into the DMA ring before returning, waiting if the ring is full). The old
+# code rendered rate*dt samples every frame and blocking-wrote them, so write()
+# stalled the single-threaded loop for ~one frame of audio each frame -- that is
+# exactly the reported FPS drop, and the jitter under-ran the DMA into crackle.
+# Fix: NON-BLOCKING writes (I2S.irq() switches the port into NON_BLOCKING mode; the
+# port copies our buffer on its own FreeRTOS task and fires our callback when done).
+# The ESP32 non-blocking write keeps a POINTER to the caller's buffer until that
+# copy finishes, so we must (a) keep the buffer alive -- a persistent double-buffer,
+# not a fresh `bytes` each frame -- and (b) only write when the previous copy is
+# done (the queue depth is 1; a second in-flight write is silently dropped). The
+# big DMA ibuf (the ring) absorbs the frame jitter so the speaker never starves.
+#
+# CPU budget: the pure-Python mixer is the cost. We render at 8 kHz (the reference
+# SimpleTone rate) to halve the per-frame sample count vs. 11025, and skip all work
+# when nothing is playing so a silent cart costs ~nothing. If the mixer is still too
+# slow at 30 FPS the escalation is a native kc_audio C mixer (like kc_gfx); the data
+# model + render() seam stay identical.
+#
+# STILL NEEDS ON-DEVICE VERIFICATION: that this actually drives the amp audibly with
+# no crackle and no FPS drop. Do NOT claim it is tested on hardware.
 
 I2S_BCK = 7
 I2S_WS = 5
 I2S_DOUT = 6
-AUDIO_RATE = 11025
+# 8 kHz mono: matches the reference SimpleTone rate and halves the per-frame mixer
+# cost vs. 11025. DeviceAudio retunes the shared engine to this rate in __init__ so
+# render_into() sizes its blocks to match the I2S port.
+AUDIO_RATE = 8000
+# DMA ring buffer (bytes). ~0.25 s of 8 kHz/16-bit mono -- big enough to ride out
+# frame jitter (and a skipped frame or two) so the speaker never under-runs.
 AUDIO_IBUF = 4096
+# Cap a single frame's render so a long dt (e.g. after a slow frame) can't make the
+# mixer chew through a huge block and itself stall the loop. ~50 ms of audio.
+AUDIO_MAX_FRAME = AUDIO_RATE // 20
 
 
 class DeviceAudio:
-    """I2S audio backend for the T-Deck. Wraps the shared AudioEngine and feeds
-    its rendered PCM to a machine.I2S TX stream once per frame. Constructed behind
-    a try/except so a board/build without I2S degrades to silence, never a crash.
+    """I2S audio backend for the T-Deck. Wraps the shared AudioEngine and feeds its
+    rendered PCM to a machine.I2S TX stream NON-BLOCKINGLY, so a running cart's
+    sfx()/music() never stalls the render loop. Constructed behind a try/except so a
+    board/build without I2S degrades to silence, never a crash.
 
-    STUB / NEEDS ON-DEVICE VERIFICATION -- the I2S init + per-frame feed below are
-    the intended path but are unproven on hardware in this environment."""
+    NEEDS ON-DEVICE VERIFICATION -- written to the reference pins/power/format but
+    unproven on hardware in this environment (see the module comment above)."""
 
     def __init__(self, engine):
         self.engine = engine
+        # The shared engine is built at its default 11025 Hz; the device renders at
+        # 8 kHz to halve the per-frame mixer cost (only render_into reads .rate, live,
+        # so retuning it here is safe) and to match the I2S port's configured rate.
+        engine.rate = AUDIO_RATE
         self.i2s = None
+        # Double buffer: render alternates into bufs[_buf], write()s it non-blocking;
+        # the I2S port copies it on a background task and fires _on_done. We never
+        # touch a buffer while its copy is in flight (_busy), so the port always sees
+        # stable bytes. Persistent bytearrays => the GC can't collect an in-flight one.
+        self._bufs = (bytearray(AUDIO_MAX_FRAME * 2), bytearray(AUDIO_MAX_FRAME * 2))
+        self._buf = 0
+        self._busy = False
+        self._busy_ticks = 0       # watchdog: frames the busy flag has been stuck set
         try:
             from machine import I2S, Pin
             self.i2s = I2S(
@@ -654,9 +695,23 @@ class DeviceAudio:
                 rate=AUDIO_RATE,
                 ibuf=AUDIO_IBUF,
             )
+            # irq() flips the port into NON_BLOCKING mode and registers our
+            # completion callback -- write() now returns immediately.
+            self.i2s.irq(self._on_done)
+            print("KidCode audio: I2S ready (%d Hz mono, BCK=%d WS=%d DOUT=%d)"
+                  % (AUDIO_RATE, I2S_BCK, I2S_WS, I2S_DOUT))
         except Exception as exc:  # noqa: BLE001 -- no amp / no I2S -> stay silent
-            print("KidCode audio: I2S unavailable, silent:", exc)
+            # LOUD: if audio is silent on-device this is the line to look for in the
+            # ~2 s boot log (the only window serial is live before the takeover loop).
+            print("KidCode audio: I2S UNAVAILABLE, silent:", exc)
             self.i2s = None
+
+    def _on_done(self, _i2s):
+        """I2S non-blocking completion callback: the background copy of the last
+        buffer into the DMA ring is done, so it's safe to render into / write the
+        next one. Runs via mp_sched (between bytecodes), so just clears the flag."""
+        self._busy = False
+        self._busy_ticks = 0
 
     # control surface (mirrors host FakeAudio / _SilentAudio) -------------
     def sfx(self, n, chan=None):
@@ -678,29 +733,50 @@ class DeviceAudio:
         self.engine.set_volume(level)
 
     def tick(self, dt):
-        """Render this frame's PCM and stream it to the I2S DMA buffer. Skips work
-        when nothing is playing so a silent cart costs almost nothing. write() is
-        the MicroPython non-blocking I2S write (returns early if ibuf is full) --
-        never let it stall the single-threaded desktop loop."""
+        """Render this frame's PCM and stream it to the I2S DMA ring NON-BLOCKINGLY.
+        Skips all work when nothing is playing (silent cart ~= free) or when the
+        previous buffer is still being copied (the DMA ring covers that frame), so
+        write() never stalls the single-threaded desktop loop."""
         if self.i2s is None:
             return
+        if self._busy:
+            # Previous buffer still in flight -> let the DMA ring drain. Watchdog:
+            # if the completion irq somehow never fired (so _busy would stick and
+            # silence the rest of the session), force-clear after a few frames -- by
+            # then a <=50 ms buffer has long since drained, so a fresh write is safe.
+            self._busy_ticks += 1
+            if self._busy_ticks < 4:
+                return
+            self._busy = False
+            self._busy_ticks = 0
         if not self.engine.is_active():
             return
+        # Render at most AUDIO_MAX_FRAME samples (a long dt can't make the mixer
+        # chew a huge block); the DMA ring smooths the missing tail next frame.
         n = int(self.engine.rate * dt)
         if n <= 0:
             return
+        if n > AUDIO_MAX_FRAME:
+            n = AUDIO_MAX_FRAME
         try:
-            pcm = self.engine.render(n)
-            self.i2s.write(pcm)        # NEEDS ON-DEVICE VERIFICATION (non-blocking)
+            # render_into reuses our persistent buffer (no per-frame allocation, and
+            # the buffer the port holds a pointer to stays alive); memoryview gives
+            # write() exactly the rendered slice.
+            buf = self._bufs[self._buf]
+            self.engine.render_into(buf, n)
+            self._buf ^= 1
+            self._busy = True
+            self.i2s.write(memoryview(buf)[:n * 2])
         except Exception as exc:  # noqa: BLE001 -- audio must never crash the loop
             print("KidCode audio tick failed:", exc)
+            self._busy = False
             self.i2s = None
 
 
 def make_audio(engine):
     """Injected backend factory (#16): wrap an AudioEngine in the device I2S
     backend. run_desktop hands this to the shared Workstation, the mirror of the
-    host's make_audio. STUB -- DeviceAudio playback is UNVERIFIED on hardware."""
+    host's make_audio. NEEDS ON-DEVICE VERIFICATION (see module comment)."""
     return DeviceAudio(engine)
 
 
