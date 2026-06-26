@@ -309,12 +309,13 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         if audio is not None:
             audio.volume(level)
 
-    def spr(n, x, y, colorkey=-1, scale=1, w=1, h=1):
-        # TIC-80 spr(id, x, y[, colorkey, scale, w, h]): w/h are the tile span, so
-        # spr(n, x, y, w=2, h=2) draws the 16x16 multi-tile sprite whose top-left is
-        # tile n (#30). w=h=1 is the plain 8x8 sprite (unchanged for old carts).
+    def spr(n, x, y, colorkey=-1, scale=1, flip=0, w=1, h=1):
+        # TIC-80 spr(id, x, y[, colorkey, scale, flip, w, h]): w/h are the tile span,
+        # so spr(n, x, y, w=2, h=2) draws the 16x16 multi-tile sprite whose top-left
+        # is tile n (#30). flip (0=none, 1=h, 2=v, 3=both) mirrors the sprite pixels
+        # (#11). w=h=1, flip=0 is the plain 8x8 sprite (unchanged for old carts).
         if isinstance(n, Image):
-            return canvas.spr(n, x, y, colorkey if colorkey != -1 else scale)
+            return canvas.spr(n, x, y, colorkey if colorkey != -1 else scale, flip)
         if sheet is None:
             return
         if w > 1 or h > 1:
@@ -322,7 +323,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         else:
             img = sheet.tile_image(int(n), colorkey)
         if img is not None:
-            canvas.spr(img, x, y, scale)
+            canvas.spr(img, x, y, scale, flip)
 
     def map_(mx=0, my=0, w=None, h=None, sx=0, sy=0, colorkey=-1, scale=1):
         # TIC-80 map(mx, my, w, h, sx, sy, colorkey, scale): blit a w x h region of
@@ -394,6 +395,8 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         "circ": canvas.circ, "circb": canvas.circb, "spr": spr,
         "map": map_, "mget": mget, "mset": mset,
         "print": canvas.print, "touch": touch, "mouse": mouse,
+        "clip": canvas.clip, "camera": canvas.camera,
+        "pal": canvas.pal, "palt": canvas.palt,
         "btn": input.held, "btnp": input.pressed,
         "key": key, "keyp": keyp, "time": time, "pmem": pmem_fn,
         "cfg": cfg, "col": palette.color,

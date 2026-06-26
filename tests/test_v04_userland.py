@@ -742,3 +742,155 @@ def test_map_edit_seen_by_running_cart_via_gen(tmp_path):
     drv.click(C._MV_X0 + 2, C._MV_Y0 + 2); drv.frame(1 / 30)   # stamp a cell
     assert tm.gen > before                                # mset bumped gen (live pickup)
     assert tm is ws.tilemap                               # same object the cart's api holds
+
+
+# -- TIC-80 draw verbs cluster 2 (#11): clip / camera / spr-flip / pal / palt -
+
+def test_clip_suppresses_out_of_rect_and_resets():
+    cv = Canvas(32, 24)
+    cv.cls(0)
+    cv.clip(8, 8, 8, 8)            # only [8,16)x[8,16) draws
+    cv.rect(0, 0, 32, 24, 8)       # full-screen fill, clipped to the rect
+    assert cv.pix(8, 8) == 8 and cv.pix(15, 15) == 8
+    assert cv.pix(7, 8) == 0 and cv.pix(16, 8) == 0     # just outside -> suppressed
+    assert cv.pix(0, 0) == 0 and cv.pix(31, 23) == 0
+    cv.clip()                      # reset to full screen
+    cv.rect(0, 0, 32, 24, 11)
+    assert cv.pix(0, 0) == 11 and cv.pix(31, 23) == 11  # now everything draws
+
+
+def test_clip_also_bounds_pix_line_circ_spr():
+    cv = Canvas(32, 24)
+    cv.cls(0)
+    cv.clip(10, 10, 4, 4)
+    cv.pix(2, 2, 8)                # outside -> dropped
+    cv.pix(11, 11, 9)             # inside -> drawn
+    cv.circ(11, 11, 20, 14)       # huge circle, clipped to the 4x4 box
+    cv.line(0, 0, 31, 23, 7)      # diagonal, only its in-box pixels survive
+    assert cv.pix(2, 2) == 0
+    # every set pixel must lie within the clip rect
+    for y in range(24):
+        for x in range(32):
+            if cv.pix(x, y) != 0:
+                assert 10 <= x < 14 and 10 <= y < 14, (x, y)
+
+
+def test_camera_offsets_all_primitives_and_resets():
+    cv = Canvas(32, 24)
+    cv.cls(0)
+    cv.camera(10, 5)               # world (10,5) -> screen (0,0)
+    cv.rect(10, 5, 4, 4, 8)        # draws at SCREEN (0,0)..(3,3)
+    cv.camera()                    # reset; now pix() reads in screen space
+    assert cv.pix(0, 0) == 8 and cv.pix(3, 3) == 8   # landed at screen origin
+    assert cv.pix(10, 5) == 0      # NOT at the world coords
+    cv.rect(10, 5, 2, 2, 11)       # no camera now -> world == screen
+    assert cv.pix(10, 5) == 11
+
+
+def test_camera_returns_previous_offset():
+    cv = Canvas(16, 16)
+    assert cv.camera(3, 4) == (0, 0)   # returns prior offset (TIC-80)
+    assert cv.camera(0, 0) == (3, 4)
+
+
+def test_spr_flip_horizontal_vertical_both():
+    # Asymmetric 2x2 so each flip is distinguishable: index 8 top-left only.
+    img = Image.from_ascii(["8.", ".."], {"8": 8})
+    # no flip: 8 at top-left
+    cv = Canvas(8, 8); cv.cls(0); cv.spr(img, 0, 0, 1, 0)
+    assert cv.pix(0, 0) == 8 and cv.pix(1, 0) == 0 and cv.pix(0, 1) == 0
+    # h flip: 8 moves to top-right
+    cv = Canvas(8, 8); cv.cls(0); cv.spr(img, 0, 0, 1, 1)
+    assert cv.pix(1, 0) == 8 and cv.pix(0, 0) == 0
+    # v flip: 8 moves to bottom-left
+    cv = Canvas(8, 8); cv.cls(0); cv.spr(img, 0, 0, 1, 2)
+    assert cv.pix(0, 1) == 8 and cv.pix(0, 0) == 0
+    # both: 8 moves to bottom-right
+    cv = Canvas(8, 8); cv.cls(0); cv.spr(img, 0, 0, 1, 3)
+    assert cv.pix(1, 1) == 8 and cv.pix(0, 0) == 0
+
+
+def test_spr_flip_default_is_unchanged_for_old_callsites():
+    # spr without a flip arg must behave exactly as before (regression guard).
+    img = Image.from_ascii(["89", "AB"], {"8": 8, "9": 9, "A": 10, "B": 11})
+    cv = Canvas(8, 8); cv.cls(0); cv.spr(img, 0, 0)
+    assert cv.pix(0, 0) == 8 and cv.pix(1, 0) == 9
+    assert cv.pix(0, 1) == 10 and cv.pix(1, 1) == 11
+
+
+def test_pal_remaps_draw_index_and_resets():
+    cv = Canvas(8, 8)
+    cv.cls(0)
+    cv.pal(8, 11)                  # draw "8" as "11"
+    cv.rect(0, 0, 4, 4, 8)
+    assert cv.pix(0, 0) == 11      # remapped
+    cv.pal()                       # reset to identity
+    cv.rect(4, 4, 2, 2, 8)
+    assert cv.pix(4, 4) == 8       # back to literal
+
+
+def test_pal_applies_to_sprite_pixels():
+    img = Image.from_ascii(["8"], {"8": 8})
+    cv = Canvas(8, 8); cv.cls(0)
+    cv.pal(8, 14)                  # recolour the sprite's "8" to 14
+    cv.spr(img, 0, 0)
+    assert cv.pix(0, 0) == 14
+
+
+def test_palt_makes_index_transparent_for_spr():
+    img = Image.from_ascii(["89"], {"8": 8, "9": 9})
+    cv = Canvas(8, 8); cv.cls(3)   # background 3
+    cv.palt(8, True)               # index 8 transparent
+    cv.spr(img, 0, 0)
+    assert cv.pix(0, 0) == 3       # the "8" pixel let the background through
+    assert cv.pix(1, 0) == 9       # the "9" pixel still drew
+    cv.palt()                      # reset -> all opaque again
+    cv.cls(3); cv.spr(img, 0, 0)
+    assert cv.pix(0, 0) == 8
+
+
+def test_reset_state_clears_camera_clip_pal_palt():
+    cv = Canvas(16, 16)
+    cv.camera(5, 5); cv.clip(2, 2, 4, 4); cv.pal(8, 11); cv.palt(9, True)
+    cv.reset_state()
+    cv.cls(0)
+    cv.rect(0, 0, 16, 16, 8)       # camera/clip gone -> fills, pal gone -> literal 8
+    assert cv.pix(0, 0) == 8 and cv.pix(15, 15) == 8
+
+
+def test_make_api_exposes_cluster2_verbs_with_identical_keyset():
+    # The cart namespace gains clip/camera/pal/palt; spr takes a flip arg. The host
+    # and device make_api key-sets stay identical (the device spike test pins it too).
+    from runtime import host_app
+    api = host_app.make_api(Canvas(32, 24), _StubInput(), {})
+    for name in ("clip", "camera", "pal", "palt"):
+        assert name in api and callable(api[name])
+
+
+def test_cart_using_clip_camera_flip_runs_and_resets_between_frames(tmp_path):
+    # A cart that sets camera/clip/pal must NOT leak that draw state into the
+    # console's own UI overlays: the Workstation resets canvas state after the cart
+    # frame. Drive a tiny inline cart through the shared console.
+    import os
+    from runtime import host_app
+    carts = tmp_path / "carts"
+    os.makedirs(carts / "clipper.kcart")
+    (carts / "clipper.kcart" / "manifest.json").write_text(
+        '{"title": "Clipper", "type": "game", "runtime": "python", "main": "main.py"}')
+    (carts / "clipper.kcart" / "main.py").write_text(
+        "def _draw():\n"
+        "    cls(0)\n"
+        "    camera(5, 5)\n"
+        "    clip(0, 0, 20, 20)\n"
+        "    pal(8, 11)\n"
+        "    rect(0, 0, W, H, 8)\n")
+    (carts / "clipper.kcart" / "config.json").write_text("{}")
+    ws = host_app.build_workstation(str(carts))
+    drv = host_app.ConsoleDriver(ws)
+    _open_cart(ws, "Clipper")
+    drv.frame(1 / 30)
+    assert ws.cart_error is None
+    # After the frame the canvas draw state is back to defaults (UI drew clean).
+    assert ws.canvas._cam_x == 0 and ws.canvas._cam_y == 0
+    assert ws.canvas._clip_x1 == ws.canvas.w and ws.canvas._clip_y1 == ws.canvas.h
+    assert list(ws.canvas._pal_map) == list(range(64))

@@ -409,7 +409,7 @@ def test_device_canvas_uses_native_kc_gfx():
     assert "self._gfx.blit565(self._buf" in runtime       # spr
     # Sprites are cached as a pre-scaled RGB565 blit; sheet tiles reuse one Image
     # across frames so the cache is built once, not rebuilt every frame.
-    assert "def _cache_rgb(self, img, scale):" in runtime
+    assert "def _cache_rgb(self, img, scale, flip=0):" in runtime
     assert "tile_cache" in runtime
     comp = (ROOT / "modules" / "kc_compositor.py").read_text(encoding="utf-8")
     assert "def gfx(self):" in comp
@@ -571,8 +571,8 @@ def test_device_spr_is_sheet_indexed_and_accepts_image():
         w = 320
         h = 240
 
-        def spr(self, img, x, y, scale=1):
-            calls.append((img.w, img.h, x, y, scale))
+        def spr(self, img, x, y, scale=1, flip=0):
+            calls.append((img.w, img.h, x, y, scale, flip))
 
         def __getattr__(self, name):
             return lambda *a, **k: 0
@@ -586,13 +586,16 @@ def test_device_spr_is_sheet_indexed_and_accepts_image():
 
     api = m.make_api(StubCanvas(), StubInput(), {}, sheet)
     api["spr"](3, 100, 60)                  # TIC-80 indexed sprite from the sheet
-    assert calls[-1] == (8, 8, 100, 60, 1)
+    assert calls[-1] == (8, 8, 100, 60, 1, 0)
     api["spr"](m.Image.from_ascii(["#"], {"#": 7}), 8, 9, scale=4)  # Image still works
-    assert calls[-1] == (1, 1, 8, 9, 4)
+    assert calls[-1] == (1, 1, 8, 9, 4, 0)
     # Multi-tile span (#30): spr(n, x, y, w=2, h=2) blits a 16x16 image from the
     # sheet (the device path, so host == device for larger sprites).
     api["spr"](0, 12, 14, w=2, h=2)
-    assert calls[-1] == (16, 16, 12, 14, 1)
+    assert calls[-1] == (16, 16, 12, 14, 1, 0)
+    # Flip (#11): spr(n, x, y, scale=1, flip=3) forwards flip to canvas.spr.
+    api["spr"](3, 5, 6, -1, 1, 3)
+    assert calls[-1] == (8, 8, 5, 6, 1, 3)
 
 
 def test_device_paint_editor_sizes_and_spans(tmp_path=None):
@@ -684,7 +687,7 @@ def test_device_tile_cache_invalidated_on_sprite_edit():
         w = 320
         h = 240
 
-        def spr(self, img, x, y, scale=1):
+        def spr(self, img, x, y, scale=1, flip=0):
             blitted.append(img)
 
         def __getattr__(self, name):
