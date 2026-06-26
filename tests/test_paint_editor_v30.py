@@ -277,9 +277,12 @@ def test_save_persists_a_2x2_sprite(tmp_path):
 
 # -- Part A applied to the map editor (tap = paint) --------------------------
 
-def _map_cell_center(C, cx, cy):
-    return (C._MV_X0 + cx * C._MV_CELL + C._MV_CELL // 2,
-            C._MV_Y0 + cy * C._MV_CELL + C._MV_CELL // 2)
+def _map_cell_center(ws, cx, cy):
+    # Pixel center of visible map cell (cx, cy) at the workstation's LIVE zoom (#37
+    # follow-up): the map-view metrics are dynamic now, so compute from _mv_metrics().
+    x0, y0, cell, cols, rows = ws._mv_metrics()
+    return (x0 + cx * cell + cell // 2,
+            y0 + cy * cell + cell // 2)
 
 
 def test_map_tap_paints_one_cell(tmp_path):
@@ -298,7 +301,7 @@ def test_map_tap_paints_one_cell(tmp_path):
     me.n = 4                                       # a recognizable brush tile id
     cells_before = bytes(ws.tilemap.cells)
 
-    x0, y0 = _map_cell_center(C, 2, 1)
+    x0, y0 = _map_cell_center(ws, 2, 1)
     drv.touch(x0, y0)                              # press
     drv.frame(1 / 30)
     drv.touch_up()                                 # release in place -> a tap
@@ -330,15 +333,18 @@ def test_map_drag_pans_view_while_tap_still_paints(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     me = ws.mapedit
     me.n = 4
-    # Make sure the map is bigger than the view so a pan has room to move.
-    assert ws.tilemap.w > C._MV_COLS and ws.tilemap.h > C._MV_ROWS
+    # Zoom all the way IN so the map is bigger than the view and a pan has room to
+    # move (the default fit-both zoom shows the whole shipped map -> nothing to pan).
+    ws.map_zoom = len(C._MV_ZOOMS) - 1
+    x0m, y0m, cell, cols, rows = ws._mv_metrics()
+    assert ws.tilemap.w > cols and ws.tilemap.h > rows
     cam0 = (me.cam_x, me.cam_y)
     cells_before = bytes(ws.tilemap.cells)         # snapshot to prove a pan is no-paint
 
     # Drag left/up by several cells: press near the right, move far to the left.
-    x0, y0 = _map_cell_center(C, 6, 4)
-    x1 = x0 - 4 * C._MV_CELL                        # well past _MAP_PAN_THRESH
-    y1 = y0 - 3 * C._MV_CELL
+    x0, y0 = _map_cell_center(ws, 4, 3)
+    x1 = x0 - 3 * cell                             # well past _MAP_PAN_THRESH
+    y1 = y0 - 2 * cell
     drv.touch(x0, y0)
     drv.frame(1 / 30)
     drv.touch_drag(x1, y1)
@@ -354,7 +360,7 @@ def test_map_drag_pans_view_while_tap_still_paints(tmp_path):
 
     # A plain tap still paints, even after panning.
     me = ws.mapedit
-    tx, ty = _map_cell_center(C, 1, 1)
+    tx, ty = _map_cell_center(ws, 1, 1)
     drv.touch(tx, ty)
     drv.frame(1 / 30)
     drv.touch_up()
@@ -378,7 +384,7 @@ def test_map_empty_sky_tile_is_selectable_and_clears_a_cell(tmp_path):
 
     # First fill a cell with a real tile.
     ws.mapedit.n = 4
-    fx, fy = _map_cell_center(C, 0, 0)
+    fx, fy = _map_cell_center(ws, 0, 0)
     drv.touch(fx, fy)
     drv.frame(1 / 30)
     drv.touch_up()
