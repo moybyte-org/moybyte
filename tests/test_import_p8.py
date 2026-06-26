@@ -53,6 +53,9 @@ SYNTHETIC_P8 = "\n".join([
     "-- by tester",
     "function _draw()",
     " cls(0)",
+    " if btn(0) then x -= 1 end",
+    " rectfill(x, 60, x+8, 68, 8)",
+    " circ(64, 64, 10, 7)",
     " spr(0,10,10)",
     "end",
     "__gfx__",
@@ -216,3 +219,95 @@ def test_empty_sections_handled(tmp_path):
     assert cart is not None
     assert cart["sprites"] is None
     assert cart["sounds"] is None
+
+
+# -- guided PICO-8 -> KidCode porting (#36) --------------------------------
+
+def test_port_notes_for_used_verbs_only(tmp_path):
+    """The synthetic cart's Lua uses rectfill, circ, and btn(0). The generated
+    main.py must carry the matching PORT NOTEs (rect inversion + arg-shape, circ
+    inversion, btn names) and MUST NOT emit notes for verbs the cart never uses."""
+    p8 = _write_p8(tmp_path)
+    out = tmp_path / "out.kcart"
+    import_p8.import_p8(str(p8), str(out))
+    src = (out / "main.py").read_text(encoding="utf-8")
+
+    # gotcha 1+2: rectfill -> rect with corner->extent arg change
+    assert "# PORT NOTE:" in src
+    assert "rectfill() = FILLED rect" in src
+    assert "rect()" in src
+    assert "x1-x+1" in src                       # the corner->w,h conversion rule
+    # gotcha 1: circ outline -> circb
+    assert "circ(x,y,r,c) = OUTLINE circle" in src
+    assert "circb()" in src
+    # gotcha 3: numeric buttons -> names
+    assert "btn(i) uses NUMBERS 0..5" in src
+    assert "btn('left')" in src
+
+    # The cart does NOT use these -> no PORT NOTE should mention them.
+    assert "peek()" not in src
+    assert "poke()" not in src
+    assert "camera(" not in src
+    assert "map()" not in src
+    assert "sspr(" not in src
+    assert "pal()" not in src
+
+    # `rect` token must NOT fire just from being inside `rectfill` (word-boundary).
+    # The cart has no standalone PICO-8 `rect(` call, so the outline-rect note
+    # ("rect() = OUTLINE") must be absent.
+    assert "rect() = OUTLINE" not in src
+
+
+def test_port_checklist_and_cheatsheet_pointer(tmp_path):
+    p8 = _write_p8(tmp_path)
+    out = tmp_path / "out.kcart"
+    import_p8.import_p8(str(p8), str(out))
+    src = (out / "main.py").read_text(encoding="utf-8")
+
+    # stretch goal: a port checklist with the boxes for this cart's verbs
+    assert "PORT CHECKLIST" in src
+    assert "[ ] rectfill" in src
+    assert "[ ] circ outline -> circb" in src
+    assert "[ ]" in src and "btn" in src
+    # and a pointer to the cheatsheet
+    assert "docs/porting_pico8.md" in src
+    # still valid, runnable Python (the notes are all comments)
+    compile(src, "main.py", "exec")
+
+
+def test_no_port_notes_when_no_known_verbs(tmp_path):
+    """A cart whose Lua uses no known PICO-8 verbs gets no PORT NOTE / checklist."""
+    p8 = tmp_path / "plain.p8"
+    p8.write_text(
+        "pico-8 cartridge\nversion 41\n__lua__\nx = 1 + 2\nfoo = bar(x)\n",
+        encoding="utf-8")
+    out = tmp_path / "plain.kcart"
+    import_p8.import_p8(str(p8), str(out))
+    src = (out / "main.py").read_text(encoding="utf-8")
+    assert "# PORT NOTE:" not in src
+    assert "PORT CHECKLIST" not in src
+    # the cheatsheet pointer is always in the header regardless
+    assert "docs/porting_pico8.md" in src
+
+
+def test_scan_lua_verbs_word_boundaries():
+    """_scan_lua_verbs matches whole-word calls only: rect != rectfill, and a
+    word like 'sprint' must not trigger 'spr'/'print'."""
+    found = import_p8._scan_lua_verbs(["rectfill(0,0,1,1,8)", "sprint = 3"])
+    assert "rectfill" in found
+    assert "rect" not in found      # not fired by the substring in rectfill
+    assert "spr" not in found       # not fired by 'sprint'
+    assert "print" not in found
+    # a real spr() call does fire
+    assert "spr" in import_p8._scan_lua_verbs(["spr(1, 0, 0)"])
+
+
+def test_cheatsheet_doc_exists():
+    doc = ROOT / "docs" / "porting_pico8.md"
+    assert doc.is_file()
+    text = doc.read_text(encoding="utf-8")
+    # the 3 gotchas + the key verb mappings are documented
+    assert "rectfill" in text and "rectb" in text
+    assert "circb" in text
+    assert 'btn("left")' in text
+    assert "peek" in text and "poke" in text
