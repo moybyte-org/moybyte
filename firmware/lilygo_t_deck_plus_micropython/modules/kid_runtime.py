@@ -76,7 +76,33 @@ class DeviceCanvas:
         self._buf = compositor.framebuffer()          # raw RGB565 bytearray (for kc_gfx)
         self._fb = framebuf.FrameBuffer(self._buf, self.w, self.h, framebuf.RGB565)
         self._gfx = compositor.gfx() if _USE_GFX else None   # native kernel, or None
+        # DMA double-buffer (#40, default OFF): the compositor's BACK buffer ping-pongs
+        # between two physical buffers each flush, so this canvas must re-point its
+        # draw target at it every frame (sync_back) -- a stale pointer would draw into
+        # the buffer that's being DMA'd (tear). framebuf can't retarget its backing
+        # store in place, so cache one framebuf per physical buffer keyed by id(buf)
+        # and pick the matching one on each swap; no per-frame allocation. In
+        # single-buffer mode framebuffer() never moves, so sync_back is a cheap no-op.
+        self._fb_by_buf = {id(self._buf): self._fb}
         self.reset_state()
+
+    def sync_back(self):
+        """Re-point the draw target at the compositor's current BACK buffer (#40
+        double-buffer). Called once per frame BEFORE drawing: the prior flush() swapped
+        the back buffer, so cls/rect/spr/map/text/pix/line must target the NEW back or
+        they'd write the buffer mid-DMA (tear). No-op when the buffer is unchanged
+        (single-buffer mode, or the very first frame). framebuf is cached per physical
+        buffer so a swap just re-selects, never reallocates."""
+        buf = self._comp.back_buffer()
+        if buf is self._buf:
+            return                        # unchanged -> no-op (the common path)
+        self._buf = buf
+        fb = self._fb_by_buf.get(id(buf))
+        if fb is None:
+            import framebuf
+            fb = framebuf.FrameBuffer(buf, self.w, self.h, framebuf.RGB565)
+            self._fb_by_buf[id(buf)] = fb
+        self._fb = fb
 
     # -- draw state (camera / clip / pal / palt, #11) ------------------------
     # Mirror runtime/canvas.py exactly so a .kcart draws the same pixels host-side
@@ -1358,7 +1384,17 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
     # it resident -- tearing it down per op silent-hangs the next panel flush.
     # can_manage falls back off if the SD root is unknown (booted on embedded carts).
     ws.can_manage = carts_root is not None
-    ws._with_sd = kidcode_sd.with_sd_live
+    # SD vs panel-DMA mutual exclusion (#40 double-buffer): SD shares the panel's SPI
+    # host, so an SD op can NOT overlap an in-flight panel DMA. Wrap with_sd_live so it
+    # drains any pending panel DMA (comp.sync()) BEFORE touching the SD card -- the
+    # desktop loop is single-threaded so SD ops run between frames, but with double-
+    # buffer a frame's flush DMA may still be in flight when the op starts. sync() is a
+    # no-op in single-buffer mode (the flush already blocked), so this is safe either
+    # way and the wrapper is transparent to the shared console code.
+    def _with_sd_synced(fn):
+        comp.sync()
+        return kidcode_sd.with_sd_live(fn)
+    ws._with_sd = _with_sd_synced
     ws.pointer = pointer
     ws.keyboard = keyboard        # lets the code editor switch to text (ASCII) mode
     # WiFi (#38): one SYSTEM service (network.WLAN STA) shared across carts, so the
@@ -1442,6 +1478,12 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
                 click = True
         pointer.click = click
         pointer.tick(now)                       # auto-hide the idle trackball cursor
+        # DMA double-buffer (#40, default OFF): point the canvas at the compositor's
+        # current BACK buffer before drawing. The previous flush() swapped it, so this
+        # frame's cls/rect/spr/map must target the new back, never the buffer that's
+        # mid-DMA. No-op (buffer unchanged) in single-buffer mode or on a skipped frame.
+        _frames_before = getattr(ws, "_frames_drawn", 0)
+        canvas.sync_back()
         try:
             ws.handle_input()                   # keyboard W/A/S/D etc.
             ws.handle_pointer()                 # cursor hover + click
@@ -1454,6 +1496,19 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
             print("KidCode frame error:", exc)  # print the traceback's reason to serial
             _diag_flush(diag, ws)
             gc.collect()                        # a NO_MEM flush may recover after a collect
+        # DMA double-buffer (#40): finish the displayed frame when the UI goes IDLE.
+        # flush() holds back the final band (the busy-wait completion point) for the
+        # NEXT flush's drain so render overlaps the DMA -- but the redraw-on-change gate
+        # (#44) may skip flush() for many idle frames, which would leave that final band
+        # un-issued and the panel showing an incomplete frame. So when THIS frame did
+        # not draw (no flush happened), drain any pending band: the panel is then fully
+        # painted and stays idle (pending -> None, so this fires once, not every idle
+        # frame). No-op in single-buffer mode (sync() is a no-op there).
+        if getattr(ws, "_frames_drawn", 0) == _frames_before:
+            try:
+                comp.sync()
+            except Exception:
+                pass
         # A cart that raises inside its own _update/_draw is caught INSIDE ws.frame()
         # (so it never reaches the except above) -- it sets ws.cart_error. Mirror any
         # NEW cart_error into diag + flush it, so an in-cart crash is captured offline
