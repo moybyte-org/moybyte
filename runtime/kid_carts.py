@@ -150,24 +150,75 @@ def ensure_dirs(root=CARTS_DIR):
     _mkdir(root)
 
 
+def _cart_version(path):
+    """The integer "version" of an on-SD cart's manifest, or 0 when it has none
+    (or is unreadable). A pre-versioning cart therefore counts as the oldest, so
+    a versioned built-in always supersedes it on the next boot."""
+    try:
+        man = json.loads(_read_recover(path + "/manifest.json"))
+        if isinstance(man, dict):
+            return int(man.get("version", 0))
+    except Exception:  # noqa: BLE001 -- a bad manifest just reads as version 0
+        pass
+    return 0
+
+
+# The per-kid files kept across a destructive re-seed: pmem.json is the cart's
+# save state / high scores (TIC-80 pmem), config.json is the kid's "Make it mine"
+# tuning. A version bump replaces CODE + ART but restores these over the fresh
+# copy, so updating a cart never wipes a kid's progress or settings.
+_RESEED_PRESERVE = ("pmem.json", "config.json")
+
+
+def _preserve_kid_data(path):
+    """Snapshot an on-SD cart's per-kid files (saves + config) before a re-seed
+    wipes the folder. Returns {name: text} for those present (crash-safe read)."""
+    kept = {}
+    for name in _RESEED_PRESERVE:
+        try:
+            kept[name] = _read_recover(path + "/" + name)
+        except OSError:
+            pass                  # not written yet (no saves / default config) -> skip
+    return kept
+
+
 def seed_builtins(seed_list, root=CARTS_DIR):
-    """Write any missing built-in carts to SD as editable .kcart folders.
+    """Write missing/outdated built-in carts to SD as editable .kcart folders.
 
     A seed dict that carries a non-empty "sprites" hex blob also gets a
     sprites.kgfx written, so the device's paint editor (and the cart's spr()
     tile draws) have the real art -- without this the device seeds blank sheets
     and the games fall back to nothing. The manifest is COMPLETE (canvas +
-    permissions + full edit schema) so the visual "Make it mine" cards render on
-    device exactly as on host. Existing carts on SD are left untouched (so the
-    user clears /sd/kidcode/carts once to pick up new seeds)."""
+    permissions + full edit schema + version) so the visual "Make it mine" cards
+    render on device exactly as on host.
+
+    Versioning (the re-seed): a cart already on SD is left untouched UNLESS the
+    built-in's "version" is newer than the on-SD one -- then its CODE + ART are
+    REPLACED wholesale (the old folder is removed first), but the kid's data
+    (pmem.json saves + config.json tuning, see _RESEED_PRESERVE) is preserved
+    over the fresh copy. So a content update keeps high scores and settings;
+    on-device edits to a built-in's *code/sprites* are discarded. Pre-versioning
+    carts read as version 0, so bumping a built-in to >=1 refreshes stale copies
+    automatically -- no more "clear /sd/kidcode/carts by hand". Bump a built-in's
+    manifest "version" whenever you change its content.
+
+    (Migration note: a preserved config.json keeps the kid's old values, so a
+    NEW default for an EXISTING config key won't apply to an already-seeded cart;
+    a brand-new key just falls back to its code default via cfg(key, default).)"""
     for cart in seed_list:
         d = root + "/" + slug(cart["title"]) + ".kcart"
+        seed_ver = int(cart.get("version", 0))
+        preserved = None
         if _exists(d):
-            continue
+            if seed_ver <= _cart_version(d):
+                continue
+            preserved = _preserve_kid_data(d)   # keep saves + tuning across the wipe
+            _rmtree(d)            # newer built-in: replace code+art wholesale
         _mkdir(d)
         manifest = {
             "format": CART_FORMAT, "title": cart["title"], "type": cart["type"],
             "runtime": "python", "main": "main.py", "edit": cart.get("edit", []),
+            "version": seed_ver,
         }
         if cart.get("canvas") is not None:
             manifest["canvas"] = cart["canvas"]
@@ -190,6 +241,11 @@ def seed_builtins(seed_list, root=CARTS_DIR):
             # a block-authored seed (tap_game) ships its blocks.json so it opens in
             # the on-device block editor as blocks, not just compiled code.
             _write(d + "/blocks.json", json.dumps(blocks))
+        if preserved:
+            # restore the kid's saves + tuning AFTER the seed write, so config.json
+            # holds their values (not the freshly-seeded defaults) and pmem survives.
+            for name, data in preserved.items():
+                _write(d + "/" + name, data)
 
 
 def load(path):
@@ -240,6 +296,7 @@ def load(path):
             "path": path,
             "title": man.get("title", "cart"),
             "type": man.get("type", "app"),
+            "version": int(man.get("version", 0)),   # 0 = pre-versioning (re-seedable)
             "src": src,
             "cfg": cfg,
             "edit": man.get("edit", []),

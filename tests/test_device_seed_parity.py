@@ -260,8 +260,8 @@ def test_seed_builtins_skips_sheet_when_seed_has_none(tmp_path):
 
 
 def test_seed_builtins_leaves_existing_cart_untouched(tmp_path):
-    # The already-flashed-device caveat: a cart already on SD is not overwritten,
-    # so new seeds-with-sprites only land after the user clears the carts dir.
+    # A cart already on SD is left untouched when the seed is NOT newer (here both
+    # default to version 0): equal versions => skip, so on-device edits survive.
     from runtime import kid_carts
 
     root = str(tmp_path / "carts")
@@ -270,7 +270,92 @@ def test_seed_builtins_leaves_existing_cart_untouched(tmp_path):
     d.mkdir()
     (d / "manifest.json").write_text('{"title": "Keep Me"}', encoding="utf-8")
     seed = [{"title": "Keep Me", "type": "game", "src": "X", "cfg": {}, "edit": [],
-             "sprites": "ffff"}]
+             "sprites": "ffff"}]          # no "version" -> 0, same as the on-SD cart
     kid_carts.seed_builtins(seed, root)
     assert not (d / "sprites.kgfx").exists()        # pre-existing cart untouched
     assert (d / "manifest.json").read_text(encoding="utf-8") == '{"title": "Keep Me"}'
+
+
+def _seed(title, version, src, **extra):
+    s = {"title": title, "type": "game", "src": src, "cfg": {}, "edit": []}
+    if version is not None:
+        s["version"] = version
+    s.update(extra)
+    return s
+
+
+def test_seed_builtins_overwrites_when_version_is_newer(tmp_path):
+    # The #47 re-seed: a built-in whose version is newer than the on-SD copy
+    # REPLACES it wholesale (destructive). Bumping the version is how a content
+    # change reaches an already-seeded device without a manual carts-dir wipe.
+    from runtime import kid_carts
+
+    root = str(tmp_path / "carts")
+    kid_carts.ensure_dirs(root)
+
+    kid_carts.seed_builtins([_seed("Hop", 1, "OLD", sprites="aaaa")], root)
+    d = Path(root) / "hop.kcart"
+    assert (d / "main.py").read_text(encoding="utf-8") == "OLD"
+    # a v2 seed with new code and NO sprite blob must overwrite + drop the stale sheet
+    kid_carts.seed_builtins([_seed("Hop", 2, "NEW")], root)
+    assert (d / "main.py").read_text(encoding="utf-8") == "NEW"
+    assert not (d / "sprites.kgfx").exists()        # code/art wholesale replace
+    assert kid_carts.load(str(d))["version"] == 2
+
+
+def test_seed_builtins_preserves_saves_and_config_across_version_bump(tmp_path):
+    # A re-seed replaces code/art but keeps the kid's data: pmem.json (high scores /
+    # save state) and config.json (Make-it-mine tuning) survive the bump.
+    from runtime import kid_carts
+
+    root = str(tmp_path / "carts")
+    kid_carts.ensure_dirs(root)
+    kid_carts.seed_builtins([_seed("Hop", 1, "v1")], root)
+    d = Path(root) / "hop.kcart"
+
+    cart = kid_carts.load(str(d))                    # the kid plays + tunes the cart
+    kid_carts.save_config({**cart, "cfg": {"speed": 9}})   # Make-it-mine edit
+    kid_carts.save_pmem(cart, [4242] + [0] * 255)          # a high score
+
+    kid_carts.seed_builtins([_seed("Hop", 2, "v2")], root)  # content update
+    assert (d / "main.py").read_text(encoding="utf-8") == "v2"     # code refreshed
+    assert kid_carts.load(str(d))["cfg"]["speed"] == 9            # tuning kept
+    assert kid_carts.load_pmem(str(d))[0] == 4242                 # save kept
+
+
+def test_seed_builtins_skips_when_version_not_newer(tmp_path):
+    # An equal-or-older built-in never clobbers the on-SD cart (so a kid's edits to
+    # a built-in survive every boot until you actually bump the version).
+    from runtime import kid_carts
+
+    root = str(tmp_path / "carts")
+    kid_carts.ensure_dirs(root)
+    kid_carts.seed_builtins([_seed("Hop", 5, "MINE")], root)
+    d = Path(root) / "hop.kcart"
+    kid_carts.seed_builtins([_seed("Hop", 5, "SAME")], root)   # equal -> skip
+    assert (d / "main.py").read_text(encoding="utf-8") == "MINE"
+    kid_carts.seed_builtins([_seed("Hop", 3, "OLDER")], root)  # older -> skip
+    assert (d / "main.py").read_text(encoding="utf-8") == "MINE"
+
+
+def test_seed_builtins_refreshes_a_preversion_cart(tmp_path):
+    # The real-device case: an existing unversioned cart (version 0) is refreshed by
+    # any version>=1 built-in -- this is what auto-fixes stale carts after a bump.
+    from runtime import kid_carts
+
+    root = str(tmp_path / "carts")
+    kid_carts.ensure_dirs(root)
+    d = Path(root) / "hop.kcart"
+    d.mkdir()
+    (d / "manifest.json").write_text('{"title": "Hop"}', encoding="utf-8")  # no version
+    (d / "main.py").write_text("STALE", encoding="utf-8")
+    kid_carts.seed_builtins([_seed("Hop", 1, "FRESH")], root)
+    assert (d / "main.py").read_text(encoding="utf-8") == "FRESH"
+    assert kid_carts.load(str(d))["version"] == 1
+
+
+def test_every_system_cart_is_versioned():
+    # Every built-in carries a version>=1 so it supersedes a pre-versioning on-SD copy
+    # (and the generator propagates it into the embedded seed).
+    for cart in _carts_by_title().values():
+        assert cart.get("version", 0) >= 1, cart["title"] + " missing manifest version"

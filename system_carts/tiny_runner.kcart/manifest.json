@@ -1,5 +1,6 @@
 {
   "format": "kidcode-cart-v1",
+  "version": 1,
   "title": "Tiny Runner",
   "type": "game",
   "runtime": "python",
