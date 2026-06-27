@@ -611,34 +611,53 @@ class Layout:
             self.dock_x0 = max(0, (self.w - span) // 2)
 
         # -- cart icon grid (reflows COLS x ROWS to fill the band) ---------------
+        # The launcher/home screen no longer draws the bottom dock (#46), so the cart
+        # grid reclaims the height below the status strip down to the canvas floor
+        # (grid_bottom), not just down to the dock. (Settings keeps the dock, so its
+        # panel still stops at dock_y -- that bound is unchanged.)
         self.icon_w = _ICON_W * fs
         self.icon_h = _ICON_H * fs
         self.icon_gap_x = _ICON_GAP_X * fs
         self.icon_gap_y = _ICON_GAP_Y * fs
         self.icon_box = _ICON_BOX * fs
         self.icon_y0 = self.status_h + 8 * fs
+        self.grid_bottom = self.h - 4 * fs           # launcher grid floor (no dock)
         if self._base:
             self.cols, self.rows = _ICON_COLS, _ICON_ROWS
             self.icon_x0 = _ICON_X0
         else:
             self.cols = max(1, (self.w + self.icon_gap_x) //
                             (self.icon_w + self.icon_gap_x))
-            band = self.dock_y - self.icon_y0
+            band = self.grid_bottom - self.icon_y0
             self.rows = max(1, (band + self.icon_gap_y) //
                             (self.icon_h + self.icon_gap_y))
             grid_w = self.cols * self.icon_w + (self.cols - 1) * self.icon_gap_x
             self.icon_x0 = max(0, (self.w - grid_w) // 2)
         self.page = self.cols * self.rows
 
-        # -- status strip glyph box + the selected-cart name slot ----------------
+        # -- status strip glyph box --------------------------------------------
         self.status_gh = 12 * fs                     # pip/glyph box (scaled w/ font)
+
+        # -- Settings gear, on the strip's LEFT (between the clock and the cart-name
+        # slot). The launcher no longer draws the bottom dock (#46), so this is the
+        # home screen's entry to Settings; placed left where there's clear space (the
+        # right end is the pips + the NEW/DUP/DEL cluster) and always drawn (not gated
+        # on can_manage). At baseline: clock ends ~x42, name slot starts x78 -> a
+        # 12px gear at x44 sits cleanly in the gap.
+        if self._base:
+            self.set_btn = (44, 1, 14, 12)
+        else:
+            gw = max(12, self.status_h - 2)
+            self.set_btn = (5 * self.font_w + 4 * fs, 1, gw, gw)
+
+        # -- selected-cart name slot (after the clock + gear) ------------------
         if self._base:
             self.status_name_x = 78                  # frozen baseline (not 6*fw+6)
             self.status_name_maxc = 18
         else:
-            self.status_name_x = 6 * self.font_w + 6
+            self.status_name_x = self.set_btn[0] + self.set_btn[2] + 4 * fs
             self.status_name_maxc = max(
-                4, (self.w - 7 * self.font_w - 4 * self.status_gh) // self.font_w)
+                4, (self.w - self.status_name_x - 4 * self.status_gh) // self.font_w)
 
         # -- management buttons (NEW/DUP/DEL), tucked at the strip's right end ---
         if self._base:
@@ -656,7 +675,7 @@ class Layout:
         if self._base:
             self.page_prev, self.page_next = _PAGE_PREV, _PAGE_NEXT
         else:
-            cy = (self.icon_y0 + self.dock_y) // 2 - 12 * fs
+            cy = (self.icon_y0 + self.grid_bottom) // 2 - 12 * fs
             self.page_prev = (2, cy, 14 * fs, 24 * fs)
             self.page_next = (self.w - 2 - 14 * fs, cy, 14 * fs, 24 * fs)
 
@@ -1631,14 +1650,31 @@ class Workstation:
     def _draw_wallpaper(self, dt):
         """Paint the backdrop: run the wallpaper cart's _update/_draw, or a solid
         fill. Always fully clears the canvas so the foreground draws over a clean
-        backdrop. Guarded so a misbehaving wallpaper degrades to a fill."""
+        backdrop. Guarded so a misbehaving wallpaper degrades to a fill.
+
+        Status-strip safe area (#46): on the launcher/settings the strip sits along the
+        top, so a wallpaper that draws art/text near y=0 (the shipped ones print their
+        title at y=10) gets sliced by the strip band. Before running the wallpaper we
+        push its drawing DOWN by the strip height (camera) and clip the art to the rows
+        below the strip, so the wallpaper composites into a known safe area beneath the
+        strip and is never cut into. cls() ignores camera/clip (like TIC-80), so the
+        backdrop FILL still covers the whole surface -- only the foreground art shifts,
+        leaving a clean strip band of the wallpaper's own background colour."""
         if self._wp_draw is not None:
             try:
                 if self._wp_live and self._wp_update is not None and dt > 0:
                     self._wp_update(dt)
+                sh = self.layout.status_h
+                safe = sh if self.screen in ("launcher", "settings") else 0
+                if safe:
+                    # camera(0, -sh): a draw at world y lands at screen y + sh (below
+                    # the strip); clip keeps the art inside the safe rows.
+                    self.canvas.camera(0, -safe)
+                    self.canvas.clip(0, safe, self.canvas.w, self.canvas.h - safe)
                 self._wp_draw()
-                # Clear any camera/clip/pal/palt (#11) the wallpaper cart set, so the
-                # home/settings foreground (icons, status strip, dock) draws clean.
+                # Clear any camera/clip/pal/palt (#11) the wallpaper cart set (and the
+                # safe-area camera/clip above), so the home/settings foreground (icons,
+                # status strip) draws clean at full extent.
                 self._reset_canvas_state()
                 return
             except Exception as exc:  # noqa: BLE001 -- drop a broken wallpaper to the fill
@@ -2626,9 +2662,11 @@ class Workstation:
             self.open()                            # on the home desktop, run = open selected
 
     def _launcher_pointer(self, px, py, click):
-        # Desktop home (#28): a tap on a cart icon opens it; the dock + management
+        # Desktop home (#28): a tap on a cart icon opens it; the gear + management
         # row + page chevrons fire on the press edge. There's no list drag anymore --
         # the grid pages instead. Trackball hover still previews the icon under it.
+        # The bottom in-cart dock is no longer drawn on the launcher (#46), so it's not
+        # hit-tested here; Settings is reached via the gear in the status strip.
         if click:
             # Clock Easter egg (#21): tapping the status-strip clock _CLOCK_TAP_GOAL
             # times wakes the Time Traveler. Checked before the management row so a
@@ -2638,9 +2676,8 @@ class Workstation:
                 self._tap_clock()
                 return
             self._clock_taps = 0                # any other desktop tap resets the run
-            slot = self._dock_slot_at(px, py)
-            if slot is not None:
-                self._activate_dock(slot)
+            if _in(px, py, lay.set_btn):        # gear -> Settings (replaces the dock)
+                self.open_settings()
                 return
             if self.can_manage and _in(px, py, lay.new_btn):
                 self.new_cart(); return
@@ -3906,9 +3943,15 @@ class Workstation:
 
     def _draw_desktop_home(self, dt):
         """The home desktop: wallpaper backdrop -> cart icon grid -> top status
-        strip -> bottom dock. The wallpaper is drawn first and the rest layer over
-        it, exactly the Picotron model (wallpaper shows through the chrome). All on
-        the SYSTEM canvas, reflowed to its size + font scale (#39)."""
+        strip. The wallpaper is drawn first and the rest layer over it, exactly the
+        Picotron model (wallpaper shows through the chrome). All on the SYSTEM canvas,
+        reflowed to its size + font scale (#39).
+
+        The bottom in-cart tool dock is NOT drawn here (#46): on the launcher the
+        code/draw/map/run slots have no cart to act on, so the dock was a dead row.
+        It returns the moment a cart is open (the in-cart top-bar buttons / Settings'
+        dock). Settings stays reachable via the gear button in the status strip; the
+        cart grid reclaims the freed bottom band (Layout.grid_bottom)."""
         self._draw_wallpaper(dt)
         cv = self.sys_canvas
         lay = self.layout
@@ -3922,19 +3965,25 @@ class Workstation:
                 px, py = lay.page_next[0], lay.page_next[1]
                 cv.print(">", px + 3, py + 8, NAMES["white"], 2)
         self._draw_status_strip("home")
-        self._draw_dock("home")
 
     def _draw_status_strip(self, where):
         """The thin top status strip: a clock, the selected cart's name (home) or
-        title (settings), and battery/wifi pips. Translucency isn't available on the
-        indexed canvas, so it's a slim dark bar that the wallpaper meets just below.
+        title (settings), battery/wifi pips, and (home) the Settings gear. Translucency
+        isn't available on the indexed canvas, so it's a slim dark backing band with a
+        thin edge line below it -- a deliberate shelf over the wallpaper rather than a
+        hard cut. The wallpaper's own art is pushed below this band (see
+        _draw_wallpaper #46), so no wallpaper content is overpainted; the band only
+        sits over the wallpaper's plain backdrop fill, and the text stays legible.
         On the SYSTEM canvas; height + text follow the layout/font scale (#39)."""
         cv = self.sys_canvas
         lay = self.layout
         gh = lay.status_gh                           # glyph box scaled with the font
         cv.rect(0, 0, cv.w, lay.status_h, NAMES["black"])
+        cv.rect(0, lay.status_h - 1, cv.w, 1, NAMES["dark_grey"])   # shelf edge line
         cv.print(self._clock_text(), 2, 3, NAMES["light_grey"], 1)
         if where == "home":
+            # Settings entry (the launcher has no dock now, #46): a gear on the strip.
+            self._glyph("gear", lay.set_btn, NAMES["light_grey"], cv)
             sel = self.launcher.selected()
             if sel is not None:
                 name = sel["title"]
