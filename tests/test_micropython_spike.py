@@ -277,6 +277,50 @@ def test_kc_compositor_dirty_region_math():
     assert dt.is_empty()
 
 
+def test_kc_compositor_flush_breakdown_instrumentation():
+    """The flush-breakdown instrumentation (perf #33/#12): flush() times its
+    sub-steps and logs a `FLUSHBRK copy=.. tx=.. setup=.. n=.. total=..` line via
+    kidcode_diag, so the owner can read live whether the ~28 ms flush is SPI clock
+    (tx) or non-transfer overhead (copy/setup). Grep the device source (the firmware
+    tests assert structure, not execution) + the importable module constants."""
+    comp_src = (ROOT / "modules" / "kc_compositor.py").read_text(encoding="utf-8")
+
+    # The revert-able gate + the sample throttle are single named constants.
+    assert "FLUSH_INSTRUMENT = True" in comp_src
+    assert "FLUSH_SAMPLE_EVERY = 30" in comp_src
+    # The exact log line shape the owner reads live (copy/tx/setup/n/total in ms).
+    assert 'msg = "copy=%.2f tx=%.2f setup=%.2f n=%d total=%.2f" % (' in comp_src
+    assert '"FLUSHBRK"' in comp_src
+    # The transfer (`tx`) is timed in isolation -- the band push is factored out of
+    # flush() so the instrumented path times exactly the SPI/DMA, not the copy.
+    assert "def _flush_full_frame(self):" in comp_src
+    assert "def _flush_instrumented(self):" in comp_src
+    assert "def _log_flushbrk(self, copy_us, tx_us, setup_us, n, total_us):" in comp_src
+    # Timing uses ticks_us for sub-ms resolution (the copy is ~ms-scale).
+    assert "time.ticks_us" in comp_src
+    # REVERT is documented as flipping the one flag, and the untimed flush path is
+    # preserved byte-for-byte (the `_frame[:] = self._fb` copy + the band loop).
+    assert "To REVERT: set FLUSH_INSTRUMENT = False" in comp_src
+    assert "self._frame[:] = self._fb" in comp_src
+
+    # The module still imports + the gate constant is the importable knob.
+    spec = importlib.util.spec_from_file_location(
+        "kc_compositor", ROOT / "modules" / "kc_compositor.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.FLUSH_INSTRUMENT is True
+    assert module.FLUSH_SAMPLE_EVERY == 30
+
+    # The clock finding is documented at the SPI bootstrap: the T-Deck panel pins
+    # are NOT the S3 IOMUX-native FSPI pins, so 80 MHz is a board limit, and the
+    # freq constant is the documented revert lever.
+    disp_src = (ROOT / "modules" / "tdeck_display.py").read_text(encoding="utf-8")
+    assert "IOMUX" in disp_src
+    assert "GPIO matrix" in disp_src
+    assert "freq = 80000000" in disp_src
+
+
 def test_tdeck_keyboard_latches_event_keys_for_hold_window():
     spec = importlib.util.spec_from_file_location(
         "kidcode_firmware_input", ROOT / "modules" / "kidcode" / "input.py"
