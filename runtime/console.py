@@ -1334,6 +1334,17 @@ class Workstation:
         self._with_sd = lambda fn: fn()
         self.show_fps = True          # bottom-right FPS readout while a cart runs
         self._fps = 0.0               # smoothed frames/sec (EMA of 1/dt)
+        # Frame-time breakdown HUD (#43/#44 perf): off by default; tap the FPS
+        # readout (bottom-right, while a cart runs) to toggle it. When on, frame()
+        # records the per-frame split in ms -- _flush_ms is the compositor's panel
+        # DMA flush (comp.flush(); ~0 on the host's _NullComp), _draw_ms is the
+        # rest (cart _update/_draw + the console's own draw = total minus flush).
+        # All EMA-smoothed like _fps so the numbers read steady, not single-frame
+        # jitter. This tells us whether the wall is the SPI flush or the per-frame
+        # MicroPython draw cost on device. Measurement only -- no render-path change.
+        self.perf_hud = False         # frame-time breakdown HUD shown? (tap FPS to toggle)
+        self._flush_ms = 0.0          # smoothed comp.flush() ms (panel DMA)
+        self._draw_ms = 0.0           # smoothed draw ms (total frame - flush)
         # Achievements (#21): a small set of fun milestones + the hidden Easter-egg
         # rewards. Starts empty/volatile; load_achievements() wires the SD store +
         # the unlock beep. The Workstation calls ach.note(event) at the flow points
@@ -2824,6 +2835,11 @@ class Workstation:
                     self._open_blocks()
                 elif _in(px, py, _HOME_BTN):
                     self.go_home()
+                elif self.show_fps and _in(px, py, self._fps_tap_rect()):
+                    # Tapping the FPS readout toggles the frame-time breakdown HUD
+                    # (#43/#44 perf). Deliberate, no keyboard, doesn't fight game
+                    # input -- the touch lands on a small bottom-right corner box.
+                    self.perf_hud = not self.perf_hud
         elif self.screen == "menu":
             px, py = gx, gy                    # editors live in the 320x240 viewport
             if self.menu_view == "code":
@@ -3993,6 +4009,11 @@ class Workstation:
         # overlay always reports animating, so it redraws every frame as before.
         if not self._needs_redraw(dt):
             return
+        # Perf HUD (#43/#44): mark the start of this frame's draw work. Cheap (one
+        # ticks call); only meaningful for a frame we actually paint, so it's after
+        # the redraw gate. _flush_ms is filled around comp.flush() below; _draw_ms
+        # is the rest (total span - flush). Both EMA-smoothed at frame end.
+        _frame_t0 = _ticks_ms() if self.perf_hud else 0
         if self.screen == "launcher":
             self._draw_desktop_home(dt)
         elif self.screen == "settings":
@@ -4071,6 +4092,8 @@ class Workstation:
                     self._icon_btn("close", "", _CLOSE_BTN, NAMES["red"])
         if self.show_fps and self.screen == "desktop":
             self._draw_fps()
+            if self.perf_hud:
+                self._draw_perf_hud()      # frame-time breakdown above the FPS chip
         # Two-domain seam (#39): the "desktop" (running cart) + "menu" (editors) drew
         # on the fixed 320x240 GAME canvas above; composite it into the SYSTEM canvas
         # as a centered, integer-scaled viewport. The "launcher"/"settings" screens
@@ -4092,7 +4115,26 @@ class Workstation:
         if self.ach.toast_active():
             self._draw_toast()
         self._draw_cursor()
-        self.comp.flush()
+        # Perf HUD (#43/#44): time the panel DMA flush in isolation, then back out
+        # the draw span (everything before it this frame). On the host _NullComp the
+        # flush is a near-zero no-op (no real panel), so flush reads ~0 and draw ~=
+        # total -- the real flush-vs-draw split only shows on device. The flush call
+        # is unconditional + identical either way; the timing is two cheap ticks
+        # calls gated on perf_hud, so the render path itself is unchanged.
+        if self.perf_hud:
+            _flush_t0 = _ticks_ms()
+            self.comp.flush()
+            _flush = _ticks_diff(_ticks_ms(), _flush_t0)
+            _total = _ticks_diff(_ticks_ms(), _frame_t0)
+            _draw = _total - _flush
+            if _draw < 0:
+                _draw = 0
+            self._flush_ms = float(_flush) if self._flush_ms <= 0 \
+                else self._flush_ms + (_flush - self._flush_ms) * 0.15
+            self._draw_ms = float(_draw) if self._draw_ms <= 0 \
+                else self._draw_ms + (_draw - self._draw_ms) * 0.15
+        else:
+            self.comp.flush()
         # We painted this frame: clear the dirty flag and snapshot the pointer state
         # we just drew, so the NEXT frame only repaints if something changes again.
         self._dirty = False
@@ -4271,6 +4313,36 @@ class Workstation:
         y = cv.h - 10
         cv.rect(x - 2, y - 1, tw + 4, 10, NAMES["black"])
         cv.print(s, x, y, NAMES["yellow"], 1)
+
+    def _fps_tap_rect(self):
+        """The bottom-right corner the FPS readout lives in, used as the tap target
+        that toggles the perf HUD (#43/#44). Generous (a fixed corner box, not just
+        the few-pixel digit chip) so a finger on the device touchscreen lands it; it
+        sits over the FPS chip in GAME-canvas coords (the desktop hit-tests in game
+        space). Kept off the cart's own top-bar tools, so a kid never trips it by
+        accident -- they'd have to deliberately poke the FPS number."""
+        cv = self.canvas
+        w, h = 40, 14
+        return (cv.w - w, cv.h - h, w, h)
+
+    def _draw_perf_hud(self):
+        """Frame-time breakdown (#43/#44 perf), drawn just above the FPS chip when
+        perf_hud is on: "f<flush> d<draw> t<total>" in ms (total = flush + draw).
+        flush is the panel DMA flush (comp.flush(); ~0 on the host's _NullComp, real
+        only on device); draw is everything else (cart _update/_draw + console draw).
+        Indexed API only (host == device); compact so it doesn't overlap the cart's
+        HUD where avoidable."""
+        cv = self.canvas
+        f = int(self._flush_ms + 0.5)
+        d = int(self._draw_ms + 0.5)
+        s = "f%d d%d t%d" % (f, d, f + d)
+        tw = len(s) * 8
+        x = cv.w - tw - 3
+        if x < 1:
+            x = 1
+        y = cv.h - 20            # one 8px row above the FPS chip (which sits at h-10)
+        cv.rect(x - 2, y - 1, tw + 4, 10, NAMES["black"])
+        cv.print(s, x, y, NAMES["white"], 1)
 
     # -- achievements + Easter-egg drawing (#21) -----------------------------
 
