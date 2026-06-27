@@ -894,6 +894,63 @@ def test_native_kc_audio_mixer_wired():
     assert "ka.voice_read(c)" in runtime
 
 
+def test_native_kc_audio_core1_task_wired():
+    # CRACKLE FIX (#41): the I2S feed used to be coupled to the render loop -- tick()
+    # fed I2S once per ~50-80 ms frame on core 0, so a long draw under-ran the DMA ->
+    # crackle. The fix is a dedicated native C task PINNED TO CORE 1 that owns the IDF
+    # i2s_std channel and feeds it continuously, decoupled from rendering. core 0 (the
+    # MicroPython VM) cannot run Python on core 1; only a pure-C task can. Source-level
+    # checks, the same way the other firmware tests grep the device sources.
+    c = (ROOT / "native" / "kc_audio" / "modkc_audio.c").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+
+    # The C side spawns a FreeRTOS task PINNED TO CORE 1 that owns the I2S write loop.
+    assert "xTaskCreatePinnedToCore(" in c
+    assert "kc_audio_task" in c            # the core-1 feeder task body
+    # pinned to core 1 (the last xTaskCreatePinnedToCore arg); the comment names it too
+    assert "1 /* core 1 */" in c
+    assert "core 1" in c
+    # The task owns the IDF i2s_std channel (separate from machine.I2S) + writes it.
+    assert "i2s_new_channel(" in c
+    assert "i2s_channel_init_std_mode(" in c
+    assert "i2s_channel_write(" in c
+    # The cross-core voice handoff is mutex-protected (core 0 writes, core 1 reads):
+    # a torn read / use-after-free is NOT acceptable (a momentary glitch is).
+    assert "xSemaphoreCreateMutex(" in c
+    assert "xSemaphoreTake(" in c
+    assert "xSemaphoreGive(" in c
+    # The core-1 task must NEVER call into the MicroPython runtime (no MP heap/GIL from
+    # core 1) -- it mixes from a plain-C snapshot of the shared voices.
+    assert "kc_mix_block(snap" in c
+    # MP control surface for the task: start (returns False -> fallback), stop, the
+    # commit lock, the live master volume, and the published active mask.
+    for fn in ("kc_audio_audio_start", "kc_audio_audio_stop", "kc_audio_voice_lock",
+               "kc_audio_voice_unlock", "kc_audio_set_master", "kc_audio_active_mask"):
+        assert fn in c, fn
+    for name in ('MP_QSTR_audio_start', 'MP_QSTR_audio_stop', 'MP_QSTR_voice_lock',
+                 'MP_QSTR_voice_unlock', 'MP_QSTR_set_master', 'MP_QSTR_active_mask'):
+        assert name in c, name
+
+    # The Python DeviceAudio prefers the core-1 task and exposes a revert flag.
+    assert "KC_AUDIO_CORE1 = True" in runtime          # default-on, the crackle fix
+    assert "if KC_AUDIO_CORE1 and self._kc_audio is not None:" in runtime
+    assert "self._kc_audio.audio_start(I2S_BCK, I2S_WS, I2S_DOUT, AUDIO_RATE)" in runtime
+    assert "self._core1 = True" in runtime
+    # In core-1 mode tick() does NO per-frame I2S write / per-sample mix -- it only
+    # schedules + commits voice state across to the C task.
+    assert "def _tick_core1(self, dt):" in runtime
+    assert "if self._core1:" in runtime
+    assert "ka.voice_lock()" in runtime
+    assert "ka.voice_unlock()" in runtime
+    assert "ka.active_mask()" in runtime
+    assert "ka.voice_set(c, v.active, v.steps, v.step_dur, v.loop," in runtime
+    # The legacy single-core feed stays as the FALLBACK (machine.I2S) so a bad result
+    # is revert-able (KC_AUDIO_CORE1=False) and a no-kc_audio build still works.
+    assert "legacy single-core feed (fallback)" in runtime
+    assert "if not self._core1:" in runtime            # only open machine.I2S in fallback
+    assert "self.i2s = I2S(" in runtime
+
+
 def test_device_wifi_wired():
     # WiFi (#38): the device network.WLAN service backend + capability-gated `wifi`
     # injection + autoconnect + the shared credential store. Source-level checks
