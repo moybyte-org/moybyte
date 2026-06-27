@@ -62,6 +62,57 @@ FLUSH_INSTRUMENT = True
 FLUSH_SAMPLE_EVERY = 30   # log one FLUSHBRK per N flushes (~ every 0.5-1.5 s)
 
 
+# --- DMA double-buffering / flush overlap (#40) -----------------------------
+#
+# DEFAULT OFF. This is the fragile #40 DMA/SPI path, so it is opt-in: with
+# DOUBLE_BUFFER = False the proven single-buffer banded flush below runs
+# byte-for-byte unchanged (the instant revert -- see "TO ENABLE / TO REVERT").
+#
+# WHY. The panel flush is hardware-floored at ~28 ms (153,600 B @ ~40 MHz on
+# this board's GPIO-matrix wiring -- see docs/spi_flush_80mhz.md; it can't go
+# faster). Today the flush is SERIAL with render: frame = render(~50) +
+# flush(28) ~= 78 ms -> ~13 fps. With double-buffering the flush DMA runs WHILE
+# the CPU renders the next frame, so frame = max(render, flush) ~= 50 ms ->
+# ~20 fps. The flush can't be made faster, but it can be HIDDEN.
+#
+# HOW (the buffer/swap design + how completion is tracked).
+# Two DISTINCT PSRAM RGB565 framebuffers, A and B (2 x 153,600 B in PSRAM; we
+# have ~7.7 MB free, so this is fine). At any moment one is the FRONT (being
+# DMA'd to the panel) and the other is the BACK (the DeviceCanvas / kc_gfx draw
+# into it). flush() never copies (the old `_frame[:] = _fb`): A and B are
+# distinct, so the DMA can read the front while the CPU writes the back -- no
+# race, which is the whole reason the dedicated-copy buffer existed.
+#
+# COMPLETION TRACKING -- the load-bearing detail. At the MicroPython
+# lcd_bus.SPIBus level there is NO exposed on_color_trans_done callback and no
+# "is the DMA busy" poll. The only completion signal the API gives us is that
+# `tx_color(..., last=True)` BUSY-WAITS until the whole queued transfer chain
+# has drained (see kc_canvas.py / kidcode_shell.py: "tx_color ... busy-waits for
+# the SPI transfer"); the continuation bands (`last=False`) queue async into
+# esp_lcd's trans_queue (depth 10) and return immediately. So we get overlap by
+# DEFERRING the one blocking band: flush() kicks every band of the front buffer
+# `last=False` (all async) and holds back the FINAL band; the blocking
+# `last=True` band is issued at the START of the NEXT flush (_drain_dma), i.e.
+# AFTER the CPU has spent the frame rendering into the back buffer. The loop only
+# stalls if render finished faster than the front's DMA -- exactly the
+# max(render, flush) behaviour. `_dma_pending` (the held-back final band's
+# cmd/y/rows) + `_dma_front` (which buffer is in flight) are the done-flag: a
+# non-None `_dma_pending` means "a frame's DMA is still in flight; drain it
+# before reusing that buffer or touching the shared SPI bus".
+#
+# SD vs panel-DMA mutual exclusion: the SD card shares this SPI host, so an SD
+# access can NOT overlap an in-flight panel DMA. sync() drains any pending DMA;
+# run_desktop calls comp.sync() before every with_sd_live op (see #40 notes in
+# CLAUDE.md -- never flush/DMA the panel inside an SD session).
+#
+# TO ENABLE: set DOUBLE_BUFFER = True (or flip comp.double_buffer at runtime),
+# rebuild, flash. TO REVERT (the one-flag fallback if it tears/glitches/hangs --
+# the #40 failure mode): set DOUBLE_BUFFER = False -> flush() is the original
+# single-buffer banded path, byte-for-byte. FLUSHBRK instrumentation works in
+# BOTH paths so the overlap is measurable either way.
+DOUBLE_BUFFER = False
+
+
 def plan_strips(height, strip_h):
     """Row bands [(y, rows), ...] covering `height`, each <= strip_h rows.
 
@@ -173,6 +224,40 @@ class Compositor:
             print("KidCode compositor: full-frame buffer unavailable:", exc)
             self._frame = None
         self._frame_mv = memoryview(self._frame) if self._frame is not None else None
+        # --- DMA double-buffer ping-pong (#40; default OFF, see DOUBLE_BUFFER) ---
+        # Per-instance copy of the module flag so a runtime toggle (comp.double_buffer
+        # = True) is possible without touching globals. Only honoured when a SECOND
+        # PSRAM frame buffer could be allocated; otherwise we fall back to the proven
+        # single-buffer path (and never tear).
+        self.double_buffer = DOUBLE_BUFFER
+        # `_fb` above is buffer A (the always-present draw target). `_fb_b` is the
+        # second ping-pong buffer in PSRAM DMA memory; with both present, one is the
+        # FRONT (DMAing to the panel) and the other the BACK (drawn into). `_back` is
+        # the buffer the canvas currently draws into; `_dma_front` is the buffer whose
+        # bands are queued/in-flight; `_dma_pending` is the held-back final band
+        # (cmd, y, rows) -- non-None == "a frame's DMA is still in flight, drain it
+        # before reusing the front or touching the shared SPI bus". See the module
+        # DMA-double-buffer block for the full design + completion-tracking rationale.
+        self._fb_b = None
+        if self.double_buffer:
+            try:
+                import lcd_bus
+                self._fb_b = kc_alloc.malloc_dma(
+                    width * height * 2, lcd_bus.MEMORY_SPIRAM | lcd_bus.MEMORY_DMA
+                )
+            except Exception as exc:
+                print("KidCode compositor: 2nd framebuffer unavailable, "
+                      "double-buffer OFF:", exc)
+                self._fb_b = None
+        if self._fb_b is None:
+            self.double_buffer = False     # no 2nd buffer -> single-buffer path
+        # ping-pong state: A is _fb, B is _fb_b. `_back` is the bytearray the canvas
+        # draws into THIS frame; `_dma_front` is the buffer being DMA'd; `_dma_pending`
+        # the (cmd, y, rows) final band held back from the last flush() (None = idle).
+        self._back = self._fb
+        self._front = self._fb
+        self._dma_front = None
+        self._dma_pending = None
         # PERF knob: rows per SPI transfer in the full-frame flush. Bigger = fewer
         # transfers = higher FPS, bounded by the per-band DMA bounce fitting internal
         # RAM. 48 -> 5 transfers for 240 rows (24 was 10). Tunable via _flush_rows.
@@ -192,16 +277,42 @@ class Compositor:
         except ImportError:
             self._gfx = None
         # framebuf fallback for drawing (and the only path for text()).
+        # `_fbuf` follows the current BACK buffer: in single-buffer mode that is
+        # always _fb (identical to before); in double-buffer mode it is rebound to
+        # the new back buffer on each swap (_swap_buffers). framebuf can't retarget
+        # its backing store in place, so we keep one framebuf per physical buffer and
+        # pick the right one -- no per-frame allocation.
+        self._fbuf = None
+        self._fbuf_a = None
+        self._fbuf_b = None
         try:
             import framebuf
-            self._fbuf = framebuf.FrameBuffer(self._fb, width, height, framebuf.RGB565)
+            self._fbuf_a = framebuf.FrameBuffer(self._fb, width, height, framebuf.RGB565)
+            if self._fb_b is not None:
+                self._fbuf_b = framebuf.FrameBuffer(self._fb_b, width, height, framebuf.RGB565)
         except Exception:
-            self._fbuf = None
+            self._fbuf_a = None
+            self._fbuf_b = None
+        # memoryview of each physical buffer (for the _blit_py fallback / strip pack).
+        self._fb_a_mv = self._fb_mv
+        self._fb_b_mv = memoryview(self._fb_b) if self._fb_b is not None else None
+        # Point the BACK-buffer aliases at A initially (single-buffer => never moves).
+        self._back_mv = self._fb_a_mv
+        self._fbuf = self._fbuf_a
 
     # -- introspection -------------------------------------------------------
 
     def framebuffer(self):
-        return self._fb
+        # The current BACK buffer -- what the canvas / kc_gfx must draw into THIS
+        # frame. In single-buffer mode this is always _fb (unchanged). In
+        # double-buffer mode it ping-pongs, so a DeviceCanvas must re-fetch it each
+        # frame (see DeviceCanvas.sync_back in kid_runtime) -- never cache it.
+        return self._back
+
+    def back_buffer(self):
+        """Alias of framebuffer(): the buffer the canvas should draw into this frame.
+        Named so the double-buffer wiring reads clearly at the call site."""
+        return self._back
 
     def size(self):
         return (self._w, self._h)
@@ -221,14 +332,14 @@ class Compositor:
 
     def clear(self, color):
         if self._gfx is not None:
-            self._gfx.fill(self._fb, self._w * self._h, color)
+            self._gfx.fill(self._back, self._w * self._h, color)
         elif self._fbuf is not None:
             self._fbuf.fill(color)
         self._dirty.add(0, 0, self._w, self._h)
 
     def fill_rect(self, x, y, w, h, color):
         if self._gfx is not None:
-            self._gfx.fill_rect(self._fb, self._w, x, y, w, h, color)
+            self._gfx.fill_rect(self._back, self._w, x, y, w, h, color)
         elif self._fbuf is not None:
             self._fbuf.fill_rect(x, y, w, h, color)
         self._dirty.add(x, y, w, h)
@@ -236,7 +347,7 @@ class Compositor:
     def blit(self, src, dx, dy, sw, sh, key=-1):
         """Blit a sw*sh RGB565 source buffer at (dx, dy); key=-1 opaque."""
         if self._gfx is not None:
-            self._gfx.blit565(self._fb, self._w, self._h, dx, dy, src, sw, sh, key)
+            self._gfx.blit565(self._back, self._w, self._h, dx, dy, src, sw, sh, key)
         else:
             self._blit_py(src, dx, dy, sw, sh, key)
         self._dirty.add(dx, dy, sw, sh)
@@ -250,7 +361,7 @@ class Compositor:
     def _blit_py(self, src, dx, dy, sw, sh, key):
         # Correct-but-slow fallback used only when kc_gfx is absent.
         smv = memoryview(src)
-        fb = self._fb_mv
+        fb = self._back_mv
         w = self._w
         for row in range(sh):
             ty = dy + row
@@ -285,7 +396,16 @@ class Compositor:
         When FLUSH_INSTRUMENT is on, one flush in FLUSH_SAMPLE_EVERY is timed and a
         `FLUSHBRK copy=.. tx=.. setup=.. n=.. total=..` line is logged (see the
         instrumentation block at the top of this module) to localize the ~28 ms --
-        clock (tx) vs overhead (copy/setup). The untimed path below is unchanged."""
+        clock (tx) vs overhead (copy/setup). The untimed path below is unchanged.
+
+        DOUBLE_BUFFER (default OFF, #40): when enabled, flush() routes to the
+        ping-pong path (_flush_double) -- drain the previous frame's in-flight DMA,
+        swap, then kick the just-rendered buffer's DMA and RETURN so the CPU can
+        render the next frame while it transfers (frame = max(render, flush)). When
+        OFF, the proven single-buffer banded path below runs byte-for-byte."""
+        if self.double_buffer:
+            self._flush_double()
+            return
         if FLUSH_INSTRUMENT:
             self._flush_n += 1
             if self._flush_n >= FLUSH_SAMPLE_EVERY:
@@ -299,6 +419,140 @@ class Compositor:
         else:
             self._flush_region(0, 0, self._w, self._h)
         self._dirty.clear()
+
+    # -- DMA double-buffer / flush overlap (#40; default OFF) ----------------
+
+    def _flush_double(self):
+        """Ping-pong flush: hide the panel DMA behind the next frame's render.
+
+        Sequence each call (see the DOUBLE_BUFFER block at module top for the full
+        design + completion-tracking rationale):
+          1. DRAIN the previous frame's in-flight DMA -- issue the held-back final
+             band (`last=True`, which busy-waits until the whole chain has drained).
+             This runs AFTER the CPU spent the frame rendering into `_back`, so the
+             wait is only the slice of flush that render didn't already hide.
+          2. SWAP: the just-rendered `_back` becomes the new FRONT (to DMA); the old
+             front (now drained, safe to overwrite) becomes the new `_back`.
+          3. KICK the new front's bands `last=False` (async, queue + return) and HOLD
+             the final band in `_dma_pending` for the next call's drain. The CPU now
+             renders the next frame into `_back` while the front DMAs.
+
+        No `_frame[:] = _fb` copy: A and B are distinct buffers, so the DMA reads the
+        front while the CPU writes the back -- the invariant that makes this race-free
+        (NEVER render into a buffer whose DMA hasn't drained; step 1 guarantees it).
+
+        FLUSHBRK still samples here (1-in-N), timing the DRAIN as `tx` (the residual
+        flush the overlap didn't hide) + the KICK as `setup`, so the overlap is
+        measurable: a well-hidden flush shows tx -> ~0."""
+        instrument = False
+        if FLUSH_INSTRUMENT:
+            self._flush_n += 1
+            if self._flush_n >= FLUSH_SAMPLE_EVERY:
+                self._flush_n = 0
+                instrument = True
+        us = self._ticks_us() if instrument else None
+        if us is not None:
+            try:
+                import time
+                t0 = us()
+                self._drain_dma()            # step 1: finish the prior frame's DMA
+                t1 = us()
+                self._swap_buffers()         # step 2
+                self._kick_front()           # step 3: queue bands, hold the last
+                t2 = us()
+                drain_us = time.ticks_diff(t1, t0)
+                kick_us = time.ticks_diff(t2, t1)
+                # tx = the residual (un-hidden) flush we still had to wait on;
+                # setup = the kick (window arm + queueing the async bands); copy = 0
+                # (double-buffer removes the PSRAM->PSRAM copy entirely). n = the total
+                # band count (the _flush_rows split), for parity with the single-buffer
+                # FLUSHBRK line. A well-hidden flush shows tx -> ~0.
+                n = (self._h + self._flush_rows - 1) // self._flush_rows
+                self._log_flushbrk(0, drain_us, kick_us, n, drain_us + kick_us)
+            except Exception:
+                # Instrumentation must never crash the loop: fall back to the plain
+                # (untimed) sequence so the frame still ships.
+                self._drain_dma()
+                self._swap_buffers()
+                self._kick_front()
+        else:
+            self._drain_dma()
+            self._swap_buffers()
+            self._kick_front()
+        self._dirty.clear()
+
+    def _swap_buffers(self):
+        """Make the just-rendered `_back` the FRONT, and the (now drained) old front
+        the new `_back`. Repoints the back-buffer aliases (_back / _back_mv / _fbuf)
+        so subsequent draws + framebuffer() target the new back. Caller must have
+        drained any in-flight DMA first (the old front must be safe to overwrite)."""
+        front = self._back                     # the frame we just rendered -> DMA it
+        back = self._fb_b if front is self._fb else self._fb
+        self._front = front
+        self._back = back
+        if back is self._fb:
+            self._back_mv = self._fb_a_mv
+            self._fbuf = self._fbuf_a
+        else:
+            self._back_mv = self._fb_b_mv
+            self._fbuf = self._fbuf_b
+
+    def _kick_front(self):
+        """Queue every band of `_front` EXCEPT the last as async tx_color (`last=False`,
+        returns immediately), recording the final band in `_dma_pending` so the NEXT
+        flush's _drain_dma issues it `last=True` (the busy-wait completion point). The
+        window is armed once here; the held-back final band reuses the same armed
+        window (RAMWRC continues into it). `_dma_front` marks which buffer is in
+        flight so sync()/_drain_dma know what to wait on."""
+        self._set_window(0, 0, self._w - 1, self._h - 1)
+        mv = self._front_mv()
+        rb = self._row_bytes
+        rows_per = self._flush_rows
+        cmd = RAMWR
+        yy = 0
+        h = self._h
+        # All bands but the last: async. The last band's params are held back.
+        while yy < h:
+            rows = rows_per if yy + rows_per <= h else (h - yy)
+            is_last = (yy + rows >= h)
+            if is_last:
+                # Hold the final band: do NOT issue it now (its last=True would
+                # busy-wait here and serialize). Record it for the next drain.
+                self._dma_pending = (cmd, yy, rows)
+                break
+            self._bus.tx_color(cmd, mv[yy * rb:(yy + rows) * rb],
+                               0, yy, self._w - 1, yy + rows - 1, 0, False)
+            cmd = RAMWRC
+            yy += rows
+        self._dma_front = self._front
+
+    def _front_mv(self):
+        """memoryview of the in-flight FRONT buffer (for the held-back final band)."""
+        return self._fb_a_mv if self._front is self._fb else self._fb_b_mv
+
+    def _drain_dma(self):
+        """Finish the previous frame's in-flight DMA: issue the held-back final band
+        with `last=True`, which busy-waits until the WHOLE queued chain has drained.
+        After this returns the front buffer is fully on the panel and safe to reuse
+        as the next back. No-op when nothing is pending (first frame / after sync())."""
+        pending = self._dma_pending
+        if pending is None:
+            return
+        self._dma_pending = None
+        cmd, yy, rows = pending
+        mv = self._fb_a_mv if self._dma_front is self._fb else self._fb_b_mv
+        rb = self._row_bytes
+        self._bus.tx_color(cmd, mv[yy * rb:(yy + rows) * rb],
+                           0, yy, self._w - 1, yy + rows - 1, 0, True)
+        self._dma_front = None
+
+    def sync(self):
+        """Block until any in-flight panel DMA has fully drained, leaving NO transfer
+        on the shared SPI bus. The SD card shares this SPI host, so the desktop loop
+        MUST call this before any with_sd_live op (a panel DMA and an SD access can't
+        run at once -- see CLAUDE.md #40). A no-op in single-buffer mode (the flush
+        already fully blocked) and when nothing is pending."""
+        self._drain_dma()
 
     def _flush_full_frame(self):
         """Band the already-copied `_frame` out to the panel in one armed window.
@@ -401,12 +655,20 @@ class Compositor:
 
     def flush_rect(self, x, y, w, h):
         """Flush an explicit region."""
+        # Region flushes pack from the BACK buffer through the internal-SRAM strip and
+        # block (last=True), so any in-flight full-frame DMA must finish first or two
+        # windows would collide on the bus. No-op drain unless double-buffer is mid-
+        # flight (these region paths are bench/smoke only; the desktop uses flush()).
+        if self.double_buffer:
+            self._drain_dma()
         x, y, w, h = clip_rect(x, y, w, h, self._w, self._h)
         if w > 0 and h > 0:
             self._flush_region(x, y, w, h)
 
     def flush_dirty(self):
         """Flush only the region drawn since the last flush (the desktop path)."""
+        if self.double_buffer:
+            self._drain_dma()
         box = self._dirty.take(self._w, self._h)
         if box is None:
             return False
@@ -438,12 +700,12 @@ class Compositor:
             rows = rows_per if yy + rows_per <= y + h else (y + h - yy)
             nbytes = rows * rb
             if gfx is not None:
-                gfx.pack_strip(self._fb, self._w, x, yy, w, rows, strip)
+                gfx.pack_strip(self._back, self._w, x, yy, w, rows, strip)
             elif full_width:
                 fbrb = self._row_bytes
-                strip[:nbytes] = self._fb_mv[yy * fbrb:(yy + rows) * fbrb]
+                strip[:nbytes] = self._back_mv[yy * fbrb:(yy + rows) * fbrb]
             else:
-                mv = self._fb_mv
+                mv = self._back_mv
                 off = 0
                 for r in range(rows):
                     si = ((yy + r) * self._w + x) * 2

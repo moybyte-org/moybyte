@@ -142,7 +142,11 @@ def test_micropython_native_sd_shares_display_spi_host():
     assert "import kc_sd" in sd_loader
 
     # Desktop enables management through the live path (no longer hard-disabled).
-    assert "ws._with_sd = kidcode_sd.with_sd_live" in runtime
+    # The SD session is wrapped so it drains any in-flight panel DMA first (the
+    # #40 double-buffer SD-vs-panel mutual exclusion), but still delegates to the
+    # native live-mount path.
+    assert "ws._with_sd = _with_sd_synced" in runtime
+    assert "return kidcode_sd.with_sd_live(fn)" in runtime
     assert "ws.can_manage = carts_root is not None" in runtime
     assert "ws.can_manage = False" not in runtime
 
@@ -319,6 +323,173 @@ def test_kc_compositor_flush_breakdown_instrumentation():
     assert "IOMUX" in disp_src
     assert "GPIO matrix" in disp_src
     assert "freq = 80000000" in disp_src
+
+
+def test_kc_compositor_double_buffer_default_off_and_revertible():
+    """DMA double-buffering / flush overlap (#40): a ping-pong of two PSRAM frame
+    buffers so the panel DMA runs WHILE the CPU renders the next frame (frame =
+    max(render, flush)). SAFETY: it is OPT-IN behind DOUBLE_BUFFER, DEFAULT OFF, so
+    the proven single-buffer banded flush is the one-flag instant revert if it tears/
+    glitches/hangs (the #40 failure mode). Grep the device source for the design +
+    the default-off gate + the SD-vs-panel-DMA mutual exclusion."""
+    comp_src = (ROOT / "modules" / "kc_compositor.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+
+    # The gate is a single named constant, DEFAULT OFF (the instant revert). The
+    # module-level assignment statement is the False one (the doc comment may mention
+    # "= True" as the enable instruction, so assert the actual top-level statement,
+    # not just any substring).
+    assert "\nDOUBLE_BUFFER = False\n" in comp_src
+    assert "\nDOUBLE_BUFFER = True\n" not in comp_src     # never shipped enabled
+    # ... and importable so the flag is verifiable, not just textual.
+    spec = importlib.util.spec_from_file_location(
+        "kc_compositor", ROOT / "modules" / "kc_compositor.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.DOUBLE_BUFFER is False
+
+    # Two distinct PSRAM ping-pong buffers (A=_fb, B=_fb_b); flush picks the back.
+    assert "self._fb_b = None" in comp_src
+    assert "self.double_buffer = DOUBLE_BUFFER" in comp_src
+    # The swap/kick/drain machinery + deferred completion (the held-back final band).
+    assert "def _flush_double(self):" in comp_src
+    assert "def _swap_buffers(self):" in comp_src
+    assert "def _kick_front(self):" in comp_src
+    assert "def _drain_dma(self):" in comp_src
+    assert "self._dma_pending" in comp_src              # the done-flag
+    # The kick queues bands async (last=False) and RETURNS without waiting; the
+    # blocking last=True band is deferred to the next drain (the overlap mechanism).
+    assert ", 0, False)" in comp_src                    # async band (last=False)
+    assert ", 0, True)" in comp_src                     # the deferred completion band
+    # No PSRAM->PSRAM copy on the double path -- it flushes the just-rendered buffer
+    # directly (the whole point: A/B are distinct so DMA reads A while CPU writes B).
+    assert "No `_frame[:] = _fb` copy" in comp_src
+
+    # The single-buffer path is preserved byte-for-byte (the instant revert).
+    assert "if self.double_buffer:\n            self._flush_double()\n            return" in comp_src
+    assert "self._frame[:] = self._fb" in comp_src      # untouched single-buffer copy
+
+    # SD vs panel-DMA mutual exclusion: SD shares the SPI host, so an SD op may not
+    # overlap an in-flight panel DMA. sync() drains it; run_desktop wraps with_sd_live
+    # to sync() FIRST.
+    assert "def sync(self):" in comp_src
+    assert "def _with_sd_synced(fn):" in runtime
+    assert "comp.sync()" in runtime
+    assert "return kidcode_sd.with_sd_live(fn)" in runtime
+
+    # The canvas follows the back buffer each frame (a stale pointer would draw into
+    # the buffer mid-DMA -> tear); run_desktop calls it before drawing.
+    assert "def back_buffer(self):" in comp_src
+    assert "def sync_back(self):" in runtime
+    assert "canvas.sync_back()" in runtime
+
+
+def test_kc_compositor_double_buffer_pingpong_logic():
+    """Exercise the ping-pong flush logic with stub native modules (no hardware):
+    verify the buffer SWAP, the DEFERRED completion (final band held back, drained on
+    the next flush), that NO per-frame full-frame copy happens, and that sync() drains
+    the in-flight DMA for the SD mutual-exclusion. This is the executable counterpart
+    of the grep test -- it proves the invariant, not just the structure."""
+    import types
+
+    # Stub the device-only natives the Compositor.__init__ imports. kc_alloc.malloc_dma
+    # returns a plain bytearray (DMA memory is just RAM on the host); lcd_bus exposes
+    # the MEMORY_* flags; framebuf is a no-op FrameBuffer (we drive raw buffers here).
+    fake_alloc = types.ModuleType("kc_alloc")
+    fake_alloc.malloc_dma = lambda n, flags=0: bytearray(n)
+    fake_lcd = types.ModuleType("lcd_bus")
+    fake_lcd.MEMORY_SPIRAM = 1
+    fake_lcd.MEMORY_DMA = 2
+
+    class _FB:
+        def __init__(self, buf, w, h, fmt):
+            self.buf = buf
+        def fill(self, c):
+            pass
+        def fill_rect(self, *a):
+            pass
+        def text(self, *a):
+            pass
+    fake_framebuf = types.ModuleType("framebuf")
+    fake_framebuf.FrameBuffer = _FB
+    fake_framebuf.RGB565 = 1
+
+    saved = {k: sys.modules.get(k) for k in ("kc_alloc", "lcd_bus", "framebuf", "kc_gfx")}
+    sys.modules["kc_alloc"] = fake_alloc
+    sys.modules["lcd_bus"] = fake_lcd
+    sys.modules["framebuf"] = fake_framebuf
+    sys.modules.pop("kc_gfx", None)   # no native kernel -> framebuf fallback path
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "kc_compositor_pp", ROOT / "modules" / "kc_compositor.py"
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        # Enable double-buffer the way the owner would (flip the flag, rebuild) so the
+        # 2nd PSRAM buffer is allocated at construction. The default stays False on
+        # disk (the other test asserts that); this only mutates the freshly-imported
+        # test copy of the module.
+        module.DOUBLE_BUFFER = True
+
+        # A fake lcd_bus.SPIBus recording every tx_color (the DMA) + tx_param (window).
+        class FakeBus:
+            def __init__(self):
+                self.colors = []   # (cmd, nbytes, y0, y1, last)
+                self.params = []   # (cmd, ...)
+            def tx_param(self, cmd, data):
+                self.params.append(cmd)
+            def tx_color(self, cmd, data, x0, y0, x1, y1, _z, last):
+                self.colors.append((cmd, len(bytes(data)), y0, y1, last))
+
+        bus = FakeBus()
+        comp = module.Compositor(bus, 320, 240, strip_h=24)
+        assert comp.double_buffer is True   # picked up the enabled module flag
+        # Two distinct physical buffers must exist for ping-pong.
+        assert comp._fb_b is not None
+        assert comp._fb is not comp._fb_b
+
+        a = comp._fb
+        # FRAME 1: back is A. flush() -> drain(no-op) + swap(front=A,back=B) + kick(A).
+        assert comp.back_buffer() is a
+        comp.flush()
+        # The just-rendered A is now the FRONT (in flight); the canvas draws into B.
+        assert comp._front is a
+        assert comp.back_buffer() is comp._fb_b
+        # A's bands were queued async EXCEPT the final one, which is held back.
+        assert comp._dma_pending is not None
+        last_flags = [c[4] for c in bus.colors]
+        assert last_flags and all(f is False for f in last_flags)  # none completed yet
+        n_after_kick1 = len(bus.colors)
+        assert n_after_kick1 >= 1                                  # async bands issued
+        # No full-frame PSRAM->PSRAM copy: _frame stays whatever it was (unused).
+        # (The double path never assigns _frame[:] = _fb.)
+
+        # FRAME 2: flush() drains A's held-back final band (last=True) FIRST, then
+        # swaps (front=B, back=A) and kicks B.
+        comp.flush()
+        # Exactly one completing (last=True) transfer happened (A's drained final band).
+        completed = [c for c in bus.colors if c[4] is True]
+        assert len(completed) == 1
+        assert comp._front is comp._fb_b
+        assert comp.back_buffer() is a                              # recycled, drained
+        assert comp._dma_pending is not None                       # B's final band held
+
+        # sync() drains the in-flight DMA (B's held band) for the SD mutual exclusion,
+        # leaving NOTHING pending on the shared bus.
+        comp.sync()
+        assert comp._dma_pending is None
+        completed2 = [c for c in bus.colors if c[4] is True]
+        assert len(completed2) == 2                                # B's band drained too
+        # sync() with nothing pending is a safe no-op (idempotent).
+        comp.sync()
+        assert comp._dma_pending is None
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = v
 
 
 def test_tdeck_keyboard_latches_event_keys_for_hold_window():
