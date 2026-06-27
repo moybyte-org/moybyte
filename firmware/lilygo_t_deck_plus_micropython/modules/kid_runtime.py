@@ -650,12 +650,18 @@ I2S_DOUT = 6
 # cost vs. 11025. DeviceAudio retunes the shared engine to this rate in __init__ so
 # render_into() sizes its blocks to match the I2S port.
 AUDIO_RATE = 8000
-# DMA ring buffer (bytes). ~0.25 s of 8 kHz/16-bit mono -- big enough to ride out
-# frame jitter (and a skipped frame or two) so the speaker never under-runs.
-AUDIO_IBUF = 4096
-# Cap a single frame's render so a long dt (e.g. after a slow frame) can't make the
-# mixer chew through a huge block and itself stall the loop. ~50 ms of audio.
-AUDIO_MAX_FRAME = AUDIO_RATE // 20
+# DMA ring buffer (bytes). ~0.5 s of 8 kHz/16-bit mono -- a deep cushion so the
+# speaker never under-runs across the slow/variable render frames (12-15 fps today
+# -> 66-83 ms apart) plus jitter. The ring is internal DMA RAM but tiny in bytes
+# (8 KB), so a generous cushion is cheap.
+AUDIO_IBUF = 8192
+# Cap on a single tick's render. CRACKLE FIX: this MUST exceed the real frame
+# interval, or each tick feeds less audio than the frame consumes and the ring
+# drains to an under-run. At 12 fps a frame is ~83 ms; the old ~50 ms cap fed a
+# systematic ~25 ms/frame deficit -> crackle. ~166 ms (down to ~6 fps) leaves
+# headroom; tick() still feeds only rate*dt, so this just stops the truncation.
+# (The native kc_audio mixer makes a larger block cheap, so it can't stall.)
+AUDIO_MAX_FRAME = AUDIO_RATE // 6
 
 
 class DeviceAudio:
