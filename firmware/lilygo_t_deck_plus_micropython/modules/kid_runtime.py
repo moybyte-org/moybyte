@@ -453,6 +453,40 @@ class DeviceCanvas:
                     continue
                 self._spr_py(img, sx + cx * step, py, scale)
 
+    def spr_batch(self, sheet, items, colorkey=-1, scale=1):
+        # Draw N sheet tiles in ONE native kc_gfx.blit_batch call (#43) -- the sprite
+        # analogue of map(). `items` is a list of (tile, x, y) or (tile, x, y, flip)
+        # tuples (world coords; camera offsets each, clip honoured). It reuses the SAME
+        # cached RGB565 tile atlas map() bakes (_sheet_atlas, keyed on sheet.gen so a
+        # paint edit / colorkey / pal change rebakes), so the per-frame cost is just the
+        # C walk over the items -- N per-sprite MP->C blits collapse to one call.
+        scale = int(scale)
+        if scale < 1:
+            scale = 1
+        tile = sheet.TILE
+        if self._gfx is None:
+            # Fallback: per-item framebuf spr (camera+clip applied inside spr()). Tile
+            # images cached by id so a repeated tile builds once, like _map_py.
+            cache = {}
+            for it in items:
+                tid = it[0]
+                if tid < 0:
+                    continue
+                flip = it[3] if len(it) > 3 else 0
+                img = cache.get(tid)
+                if img is None:
+                    img = sheet.tile_image(tid, colorkey)
+                    cache[tid] = img if img is not None else False
+                if not img:
+                    continue
+                self.spr(img, it[1], it[2], scale, flip)
+            return
+        atlas, ntiles = self._sheet_atlas(sheet, colorkey)
+        self._gfx.blit_batch(self._buf, self.w, self.h, items,
+                             atlas, ntiles, tile, scale, _RGB_KEY,
+                             self._cam_x, self._cam_y,
+                             self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+
     def print(self, s, x, y, c, scale=2):
         # camera offsets the text origin (#11). The clip rect is NOT applied to text:
         # framebuf.text can't clip to an arbitrary rect, and device text already uses
@@ -536,6 +570,23 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
             return
         canvas.map(tilemap, sheet, mx, my, w, h, sx, sy, colorkey, scale)
 
+    def spr_batch(items, colorkey=-1, scale=1):
+        # spr_batch(items[, colorkey, scale]): draw MANY sheet tiles in ONE native
+        # call (#43) -- the sprite analogue of map(). `items` is a sequence of
+        # (tile, x, y) or (tile, x, y, flip) tuples (flip 0=none/1=h/2=v/3=both,
+        # like spr()); `colorkey` + `scale` apply uniformly to the whole batch. Coords
+        # are world space (the camera offsets each; the clip rect is honoured) and the
+        # tiles come from the cart's sheet -- the SAME RGB565 atlas map() uses, so the
+        # cost is one C walk over the items instead of N per-sprite MP->C blits. This
+        # is the lever for explosion-heavy frames (the per-sprite draw-call count is
+        # the device's FPS bottleneck). SHEET TILES ONLY, 1x1 tiles: Image sprites and
+        # multi-tile (w/h>1) sprites still use spr(). No-op when the cart has no sheet.
+        if sheet is None:
+            return
+        # No tile-cache refresh needed (unlike spr()): the atlas is keyed on sheet.gen,
+        # so _sheet_atlas rebakes itself after a live paint edit.
+        canvas.spr_batch(sheet, items, colorkey, scale)
+
     def mget(x, y):
         return tilemap.mget(x, y) if tilemap is not None else -1
 
@@ -608,6 +659,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         "cls": canvas.cls, "pix": canvas.pix,
         "line": canvas.line, "rect": canvas.rect, "rectb": canvas.rectb,
         "circ": canvas.circ, "circb": canvas.circb, "spr": spr,
+        "spr_batch": spr_batch,
         "map": map_, "mget": mget, "mset": mset,
         "print": canvas.print, "touch": touch, "mouse": mouse,
         "clip": canvas.clip, "camera": canvas.camera,

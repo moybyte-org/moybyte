@@ -279,6 +279,23 @@ class Canvas:
                     continue
                 self.rect(x + sx * scale, y + sy * scale, scale, scale, p)
 
+    def spr_batch(self, sheet, items, colorkey=-1, scale=1):
+        # Draw many sheet tiles in one call (#43) -- the sprite analogue of map(). The
+        # device collapses this to a single kc_gfx.blit_batch C call (the draw-call
+        # count is its FPS bottleneck); on the host this readable per-item loop is the
+        # reference, and must match the device pixel-for-pixel. `items` is a sequence of
+        # (tile, x, y) or (tile, x, y, flip) tuples; tiles resolve through `sheet` like
+        # map(). camera/clip/pal/palt all apply inside self.spr().
+        for it in items:
+            tile = it[0]
+            x = it[1]
+            y = it[2]
+            flip = it[3] if len(it) > 3 else 0
+            img = sheet.tile_image(int(tile), colorkey)
+            if img is None:
+                continue
+            self.spr(img, x, y, scale, flip)
+
     def map(self, tilemap, sheet, mx=0, my=0, w=None, h=None,
             sx=0, sy=0, colorkey=-1, scale=1):
         # TIC-80 map(): blit a w x h cell region of `tilemap` (top-left cell mx,my)
