@@ -42,6 +42,7 @@ TITLE_TO_FOLDER = {
     "Hop Quest": "platformer",
     "Battle City": "battle_city",
     "Tap Only Red": "tap_red",
+    "Tap Game": "tap_game",
     "Beeper": "beeper",
     "WiFi": "wifi",
 }
@@ -145,6 +146,22 @@ def test_embedded_edit_and_cfg_match_manifest():
         man = _manifest(TITLE_TO_FOLDER[title])
         assert cart["edit"] == man["edit"], "edit schema drifted for " + title
         assert cart["cfg"] == man["config"], "config drifted for " + title
+
+
+def test_embedded_blocks_match_blocks_json_or_both_absent():
+    # A block-authored cart (#29: tap_game) carries its blocks.json into the bundle
+    # (parsed) so the on-device block editor opens it as blocks; a code-only cart has
+    # no "blocks" key. Drift fails here.
+    carts = _carts_by_title()
+    for title, cart in carts.items():
+        folder = TITLE_TO_FOLDER[title]
+        path = SYSTEM_CARTS / (folder + ".kcart") / "blocks.json"
+        if path.exists():
+            assert cart.get("blocks") == json.loads(path.read_text(encoding="utf-8")), \
+                "embedded blocks drifted from " + folder + "/blocks.json"
+            assert cart["blocks"]                               # non-empty
+        else:
+            assert "blocks" not in cart, folder + " has no blocks.json but embeds one"
 
 
 def test_embedded_carry_canvas_and_permissions_for_seed_builtins():

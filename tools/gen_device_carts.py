@@ -37,6 +37,7 @@ CART_ORDER = [
     "platformer",
     "battle_city",
     "tap_red",
+    "tap_game",
     "beeper",
     "wifi",
 ]
@@ -69,6 +70,11 @@ def build_carts(system_carts_dir):
         tilemap = os.path.join(base, "map.kmap")        # TileMap blob, optional (#32)
         if os.path.exists(tilemap):
             cart["map"] = _read(tilemap)
+        blocks = os.path.join(base, "blocks.json")      # block source (#29), optional
+        if os.path.exists(blocks):
+            # carry the block program so a block-authored seed (tap_game) opens in
+            # the on-device block editor, not just as compiled code.
+            cart["blocks"] = json.loads(_read(blocks))
         if "canvas" in man:
             cart["canvas"] = man["canvas"]
         if "permissions" in man:
