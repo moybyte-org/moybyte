@@ -33,10 +33,32 @@ def init_display():
     sck = 40
     host = 1
     cs = 12
-    freq = 80000000   # PERF (#33): 40->80 MHz halves the ~31ms full-frame SPI flush.
-    # If the panel shows tearing/corruption/garbage, it's over the ST7789's limit on
-    # this wiring -> drop to 62500000, then 40000000. The flush is bandwidth-bound, so
-    # this is the main flush lever (band count barely matters -- same total bytes).
+    # SPI clock. PERF (#33): bumped 40->80 MHz to (try to) halve the full-frame
+    # flush. BUT 80 MHz is almost certainly UNREACHABLE on this board's wiring, and
+    # the FLUSHBRK instrumentation (kc_compositor.flush) is here to prove it:
+    #
+    #   The ESP32-S3's full-speed SPI needs ALL signals on the IOMUX-native FSPI
+    #   pins -- on SPI2 those are GPIO 11 (FSPID/MOSI), 12 (FSPICLK/SCLK), 13
+    #   (FSPIQ/MISO). This board wires the panel to MOSI=41, SCK=40, MISO=38 --
+    #   none IOMUX-native -- so every signal routes through the GPIO matrix. For a
+    #   write-only LCD the GPIO matrix caps the usable output clock at ~40 MHz (the
+    #   26 MHz figure is the full-duplex/read cap; write-only is ~40). So esp_lcd's
+    #   divider can't deliver a real 80 MHz here: requesting 80 MHz yields an
+    #   effective ~40 MHz, and a 153,600-byte (320x240 RGB565) push is ~30 ms --
+    #   right on the measured ~28 ms `flush=`. 80 MHz on this wiring is a board
+    #   limit, not a tunable bug. (Refs: ESP-IDF SPI Master IOMUX vs GPIO-matrix;
+    #   docs/perf_60fps_architecture.md sec 1.3.)
+    #
+    # The pins are fixed by the board, so the real flush lever is NOT this clock --
+    # it's DMA double-buffering (hide the flush; #40) + lower internal res (#44/#33).
+    # CONFIRM with FLUSHBRK: if `tx` ~= 25-28 ms the clock IS the wall and 40 MHz is
+    # the honest setting; if `tx` ~= 15 ms then 80 MHz IS landing and the overhead
+    # (copy/setup) is the lever instead. Until FLUSHBRK confirms, leave 80 MHz
+    # requested (harmless: esp_lcd clamps to what the divider can do).
+    #
+    # REVERT / tune: if the panel shows tearing/corruption/garbage, this clock is
+    # over the ST7789's limit on this wiring -> drop to 62500000, then 40000000.
+    freq = 80000000
 
     print("KidCode display SPI starting")
     _spi_bus = machine.SPI.Bus(host=host, mosi=mosi, miso=miso, sck=sck)

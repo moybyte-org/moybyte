@@ -19,6 +19,49 @@ RAMWR = 0x2C   # memory write
 RAMWRC = 0x3C  # memory write continue (stream more pixels into the same window)
 
 
+# --- flush-breakdown instrumentation (perf #33/#12) -------------------------
+#
+# THE QUESTION. The desktop loop times the whole comp.flush() at a CONSTANT
+# ~28 ms/frame for a 320x240 RGB565 frame (153,600 bytes). At a *true* 80 MHz
+# SPI that transfer alone should be ~15.4 ms, so 28 ms is ~2x the ideal. Two
+# very different causes have the same total:
+#   (a) the SPI clock isn't actually 80 MHz -- the T-Deck display pins
+#       (MOSI=41, SCK=40, MISO=38) are NOT the ESP32-S3 IOMUX-native FSPI pins
+#       (11/12/13), so they route through the GPIO matrix, which caps a
+#       write-only LCD output at ~40 MHz -> a 153 KB push is ~30 ms. If that's
+#       it, the 28 ms is almost ALL `tx` and 80 MHz is unreachable on this fixed
+#       wiring (a real finding, not a fixable bug).
+#   (b) a big slice of the 28 ms is NON-transfer overhead inside flush() -- the
+#       `self._frame[:] = self._fb` 153 KB PSRAM->PSRAM copy (the doc estimates
+#       ~3 ms) plus the per-band window/tx_color setup -- in which case `tx` is
+#       ~15 ms and the copy/overhead is the lever to cut.
+#
+# To tell these apart ON HARDWARE (we can't profile here), flush() times its
+# sub-steps with ticks_us and logs ONE line via kidcode_diag (which echoes live
+# to serial AND persists to the boot dump):
+#
+#   FLUSHBRK copy=<ms> tx=<ms> setup=<ms> n=<bands> total=<ms>
+#
+#   copy  = the `_frame[:] = _fb` full-frame copy (0 when the strip path is used)
+#   tx    = the band push: the tx_color DMA transfers + the one tiny _set_window
+#           window arm (the actual SPI work -- the window arm is a negligible
+#           tx_param vs the 153 KB push)
+#   setup = total - copy - tx: residual Python/bookkeeping not in copy or tx
+#           (normally ~0; surfaces any unattributed per-flush overhead)
+#   n     = number of bands / tx_color calls
+#   total = the whole flush (should track the console's `flush=` HUD number)
+#
+# READING IT: if tx ~= 25-28 ms -> the SPI clock is the wall (case a). If
+# tx ~= 15 ms and copy+setup ~= 13 ms -> overhead is the wall (case b).
+#
+# Gated by FLUSH_INSTRUMENT and sampled every FLUSH_SAMPLE_EVERY-th flush so it
+# can't flood the diag ring / serial. To REVERT: set FLUSH_INSTRUMENT = False --
+# the timing path then never runs and flush() is byte-for-byte the original hot
+# loop (the timed branch is a self-contained copy of the untimed one).
+FLUSH_INSTRUMENT = True
+FLUSH_SAMPLE_EVERY = 30   # log one FLUSHBRK per N flushes (~ every 0.5-1.5 s)
+
+
 def plan_strips(height, strip_h):
     """Row bands [(y, rows), ...] covering `height`, each <= strip_h rows.
 
@@ -134,6 +177,13 @@ class Compositor:
         # transfers = higher FPS, bounded by the per-band DMA bounce fitting internal
         # RAM. 48 -> 5 transfers for 240 rows (24 was 10). Tunable via _flush_rows.
         self._flush_rows = 48
+        # FLUSHBRK instrumentation: count flushes so we sample 1-in-N (see the
+        # FLUSH_INSTRUMENT block at module top). Lazily-bound diag/time handles so
+        # the host (no kidcode_diag) and an instrument-off build pay nothing.
+        self._flush_n = 0
+        self._diag = None
+        self._diag_tried = False
+        self._diag_us = None
         self._dirty = DirtyTracker()
         # Native pixel kernel (fast, VM-neutral) when the image has it.
         try:
@@ -230,30 +280,124 @@ class Compositor:
         that reuse-race on the single shared strip buffer caused the one-band vertical
         offset/duplication. Banding into <=strip_h rows also keeps each transfer's DMA
         bounce small enough to allocate (a single 320x240 tx_color NO_MEMs on the S3's
-        fragmented internal heap). Window armed once; RAMWR then RAMWRC streams in."""
+        fragmented internal heap). Window armed once; RAMWR then RAMWRC streams in.
+
+        When FLUSH_INSTRUMENT is on, one flush in FLUSH_SAMPLE_EVERY is timed and a
+        `FLUSHBRK copy=.. tx=.. setup=.. n=.. total=..` line is logged (see the
+        instrumentation block at the top of this module) to localize the ~28 ms --
+        clock (tx) vs overhead (copy/setup). The untimed path below is unchanged."""
+        if FLUSH_INSTRUMENT:
+            self._flush_n += 1
+            if self._flush_n >= FLUSH_SAMPLE_EVERY:
+                self._flush_n = 0
+                if self._flush_instrumented():
+                    self._dirty.clear()
+                    return
         if self._frame is not None:
             self._frame[:] = self._fb     # one stable full copy in PSRAM
-            self._set_window(0, 0, self._w - 1, self._h - 1)
-            mv = self._frame_mv
-            rb = self._row_bytes
-            # PERF: each band is one SPI transfer; fewer/bigger bands = higher FPS
-            # (the old single-transfer full flush was ~2x faster than the 24-row
-            # banding). Bounded by the per-band DMA bounce fitting internal RAM.
-            # 48 rows -> 5 transfers (was 24 rows / 10). Tune up to the measured
-            # internal headroom (see the "KidCode mem:" boot readout).
-            rows_per = self._flush_rows
-            cmd = RAMWR
-            yy = 0
-            while yy < self._h:
-                rows = rows_per if yy + rows_per <= self._h else (self._h - yy)
-                last = (yy + rows >= self._h)
-                self._bus.tx_color(cmd, mv[yy * rb:(yy + rows) * rb],
-                                   0, yy, self._w - 1, yy + rows - 1, 0, last)
-                cmd = RAMWRC
-                yy += rows
+            self._flush_full_frame()
         else:
             self._flush_region(0, 0, self._w, self._h)
         self._dirty.clear()
+
+    def _flush_full_frame(self):
+        """Band the already-copied `_frame` out to the panel in one armed window.
+
+        Returns the number of bands (tx_color calls). Pure transfer -- the caller
+        owns the `_frame[:] = _fb` copy and the dirty clear. Split out of flush()
+        so the instrumented path can time exactly this (the `tx`) in isolation."""
+        self._set_window(0, 0, self._w - 1, self._h - 1)
+        mv = self._frame_mv
+        rb = self._row_bytes
+        # PERF: each band is one SPI transfer; fewer/bigger bands = higher FPS
+        # (the old single-transfer full flush was ~2x faster than the 24-row
+        # banding). Bounded by the per-band DMA bounce fitting internal RAM.
+        # 48 rows -> 5 transfers (was 24 rows / 10). Tune up to the measured
+        # internal headroom (see the "KidCode mem:" boot readout).
+        rows_per = self._flush_rows
+        cmd = RAMWR
+        yy = 0
+        n = 0
+        while yy < self._h:
+            rows = rows_per if yy + rows_per <= self._h else (self._h - yy)
+            last = (yy + rows >= self._h)
+            self._bus.tx_color(cmd, mv[yy * rb:(yy + rows) * rb],
+                               0, yy, self._w - 1, yy + rows - 1, 0, last)
+            cmd = RAMWRC
+            yy += rows
+            n += 1
+        return n
+
+    def _ticks_us(self):
+        """Bound time.ticks_us once (device-only; None on the host/no-time build)."""
+        if self._diag_us is not None:
+            return self._diag_us
+        try:
+            import time
+            self._diag_us = time.ticks_us
+        except (ImportError, AttributeError):
+            self._diag_us = None
+        return self._diag_us
+
+    def _flush_instrumented(self):
+        """Timed full-frame flush that logs ONE FLUSHBRK line. Returns True if it
+        performed the flush (so flush() doesn't double it), False to fall through to
+        the normal path (no timer / no full-frame buffer / any failure).
+
+        Splits the ~28 ms into copy (PSRAM->PSRAM) + tx (SPI/DMA) + setup (window
+        arm + per-band bookkeeping = total - copy - tx), the exact breakdown that
+        decides clock-bound vs overhead-bound. All guarded -- instrumentation must
+        never crash the render loop."""
+        us = self._ticks_us()
+        if us is None or self._frame is None:
+            return False
+        try:
+            import time
+            t0 = us()
+            self._frame[:] = self._fb
+            t1 = us()
+            n = self._flush_full_frame()
+            t2 = us()
+            copy_us = time.ticks_diff(t1, t0)
+            tx_us = time.ticks_diff(t2, t1)
+            total_us = time.ticks_diff(t2, t0)
+            # setup = total - copy - tx: the window arm (_set_window) + per-band
+            # slicing/bookkeeping that isn't the copy or the DMA push itself. The
+            # band loop's _set_window/tx_color setup is folded into tx_us (it's
+            # inside _flush_full_frame), so setup_us is normally ~0; it exists to
+            # surface any per-band Python overhead the split didn't attribute.
+            setup_us = total_us - tx_us - copy_us
+            if setup_us < 0:
+                setup_us = 0
+            self._log_flushbrk(copy_us, tx_us, setup_us, n, total_us)
+            return True
+        except Exception:
+            return False
+
+    def _log_flushbrk(self, copy_us, tx_us, setup_us, n, total_us):
+        """Emit the FLUSHBRK line via kidcode_diag (live serial echo + boot dump).
+        Falls back to a plain print if diag is unavailable. Fully guarded."""
+        def _ms(v):
+            return v / 1000.0
+        msg = "copy=%.2f tx=%.2f setup=%.2f n=%d total=%.2f" % (
+            _ms(copy_us), _ms(tx_us), _ms(setup_us), n, _ms(total_us))
+        if not self._diag_tried:
+            self._diag_tried = True
+            try:
+                import kidcode_diag
+                self._diag = kidcode_diag
+            except Exception:
+                self._diag = None
+        try:
+            if self._diag is not None:
+                self._diag.log("FLUSHBRK", msg)
+                return
+        except Exception:
+            pass
+        try:
+            print("KidCode FLUSHBRK", msg)
+        except Exception:
+            pass
 
     def flush_rect(self, x, y, w, h):
         """Flush an explicit region."""
