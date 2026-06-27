@@ -811,6 +811,45 @@ def test_device_audio_wired():
     assert 'cp "${REPO_ROOT}/runtime/audio.py" "${SCRIPT_DIR}/modules/audio.py"' in build
 
 
+def test_native_kc_audio_mixer_wired():
+    # Native PCM mixer (#16): the per-sample software mix in runtime/audio.py is the
+    # device bottleneck (~12 FPS, crackle), so the heavy inner loop moves into the C
+    # module native/kc_audio (mirror of kc_gfx/kc_sd). DeviceAudio PREFERS it and
+    # falls back to the Python render_into when it isn't frozen in. Source-level
+    # checks, the same way the other firmware tests grep the device sources.
+    c = (ROOT / "native" / "kc_audio" / "modkc_audio.c").read_text(encoding="utf-8")
+    cmake = (ROOT / "native" / "kc_audio" / "micropython.cmake").read_text(encoding="utf-8")
+    build = (ROOT / "build.sh").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+
+    # The C module exposes the per-block kernel API + registers as `kc_audio`.
+    assert "MP_REGISTER_MODULE(MP_QSTR_kc_audio" in c
+    assert "kc_audio_voice_set" in c          # push exact Python _Voice state into C
+    assert "kc_audio_voice_read" in c         # read advanced render state back out
+    assert "kc_audio_render" in c             # the heavy per-sample mix loop
+    # cmake links the usermod the kc_gfx/kc_sd way.
+    assert "target_link_libraries(usermod INTERFACE usermod_kc_audio)" in cmake
+    # build.sh stages it into ext_mod next to kc_gfx/kc_sd (re-staged every build).
+    assert "ext_mod/kc_audio" in build
+    assert "kc_audio/micropython.cmake" in build
+
+    # DeviceAudio prefers the native mixer but keeps a Python fallback so a build
+    # WITHOUT kc_audio still works (and the host is unaffected).
+    assert "import kc_audio" in runtime
+    assert "self._kc_audio = kc_audio" in runtime
+    assert "self._kc_audio = None" in runtime                      # fallback branch
+    assert "def _render_native(self, buf, n):" in runtime
+    assert "if self._kc_audio is not None:" in runtime
+    assert "self._render_native(buf, n)" in runtime
+    assert "self.engine.render_into(buf, n)" in runtime            # Python fallback path
+    # The native path keeps the Python engine the source of truth: it still runs the
+    # music scheduler in Python and pushes/reads voice state around the C mix.
+    assert "eng._advance_music" in runtime
+    assert "ka.voice_set(" in runtime
+    assert "ka.render(buf, n, eng.rate, eng.volume)" in runtime
+    assert "ka.voice_read(c)" in runtime
+
+
 def test_device_wifi_wired():
     # WiFi (#38): the device network.WLAN service backend + capability-gated `wifi`
     # injection + autoconnect + the shared credential store. Source-level checks
