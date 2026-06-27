@@ -1604,6 +1604,22 @@ def _diag_perf_sample(diag, ws):
         pass
 
 
+def _diag_drawbrk(diag, ws):
+    """Log a DRAWBRK line splitting the frame's draw cost into cart _update / cart
+    _draw / console chrome (the dock+cursor+overlays remainder) -- the breakdown
+    that says where draw= goes (cart logic vs sprites/draw vs chrome). Guarded ->
+    a no-op on any failure (and only meaningful while a cart runs)."""
+    if diag is None:
+        return
+    try:
+        if ws.perf_sample() is None:        # only while a cart is actively running
+            return
+        b = ws.perf_breakdown()             # (upd_ms, cart_ms, chrome_ms)
+        diag.log("DRAWBRK", "upd=%.2f cart=%.2f chrome=%.2f" % (b[0], b[1], b[2]))
+    except Exception:
+        pass
+
+
 def _load_carts(session=None):
     """Load cartridges from SD (seeding the built-ins on first boot). Returns
     (carts, carts_root); carts_root is None (management disabled) on fallback to
@@ -1715,6 +1731,10 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
     # the wallpaper backdrop runs the chosen wallpaper cart's _draw (and _update if
     # cheap) each home frame; _wp_live can be set False to keep it _draw-only.
     ws.load_system()
+    # Unified top bar (Stage 1): build the 16x16 IconSheet the bar draws its chrome
+    # icons from -- from system_icons.kgfx on SD if present, else the baked default
+    # theme. Same store + with_sd_live path as system.json.
+    ws.load_icon_sheet()
     # Achievements (#21): load the unlocked badges (achievements.json) so earned
     # milestones survive a reboot. Same store + with_sd_live path as system.json.
     ws.load_achievements()
@@ -1845,6 +1865,7 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
         if diag is not None and _ticks_diff(_tnow, _diag_perf_at) >= 0:
             _diag_perf_at = _tnow + 3000
             _diag_perf_sample(diag, ws)
+            _diag_drawbrk(diag, ws)
         # Diag SD flush (~5s): overwrite /sd/kidcode/diag.log with the current ring.
         # Runs between frames on the native single-bus path (with_sd_live), never
         # during a panel flush. Guarded -> a flush failure degrades to a no-op.

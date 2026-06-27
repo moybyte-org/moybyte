@@ -513,6 +513,9 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1):
     # Desktop shell (#28): load the system settings (system.json) and apply the
     # saved wallpaper so the home screen boots with the chosen backdrop.
     ws.load_system()
+    # Unified top bar (Stage 1): build the 16x16 IconSheet the bar draws its chrome
+    # icons from -- from system_icons.kgfx if present, else the baked default theme.
+    ws.load_icon_sheet()
     # Achievements (#21): load the unlocked badges (achievements.json) so earned
     # milestones persist across reboots and the toast/view reflect them.
     ws.load_achievements()

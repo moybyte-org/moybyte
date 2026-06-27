@@ -518,6 +518,44 @@ def save_shared_sheet(hex_text, root=CARTS_DIR):
     _write_atomic(shared_sheet_path(root), hex_text)
 
 
+# --- system icon theme (the unified top bar, Stage 1) -----------------------
+#
+# The top-bar icons render from an EDITABLE 16x16 IconSheet rather than hardcoded
+# glyphs (so the bar is themeable). Its theme persists to a single system_icons.kgfx
+# that lives BESIDE the carts dir (a sibling of `root`, like shared.kgfx) -- it is
+# system state, not tied to any cart. Same PICO-8 __gfx__-style hex format as the
+# sprite sheets. NOT seeded eagerly: a missing file means "use the baked default
+# theme" (load returns None), so the absent-file case is the common one. A save only
+# happens once on-device icon editing lands (Stage 2).
+
+SYSTEM_ICONS_NAME = "system_icons.kgfx"
+
+
+def system_icons_path(root=CARTS_DIR):
+    """Well-known path of the system icon theme: a sibling of the carts dir (one
+    level up from `root`), so it isn't tied to any single cart."""
+    parent = root.rsplit("/", 1)[0]
+    return (parent + "/" + SYSTEM_ICONS_NAME) if parent else SYSTEM_ICONS_NAME
+
+
+def load_system_icons(root=CARTS_DIR):
+    """Read the system icon theme's hex (PICO-8 __gfx__-style), or None if it has
+    never been saved -- in which case the caller uses the baked default IconSheet.
+    Caller turns the hex into an IconSheet via IconSheet.from_hex."""
+    try:
+        return _read(system_icons_path(root))
+    except OSError:
+        return None
+
+
+def save_system_icons(hex_text, root=CARTS_DIR):
+    """Persist the system icon theme's hex (Stage 2 editing). Ensures the parent dir
+    exists. Written atomically (like the shared sheet) -- it's a shared system asset,
+    so an interrupted write must never truncate it."""
+    ensure_dirs(root)
+    _write_atomic(system_icons_path(root), hex_text)
+
+
 # --- known WiFi networks (system credential store, #38) ---------------------
 #
 # The WiFi service persists known networks (ssid + password) to a single system

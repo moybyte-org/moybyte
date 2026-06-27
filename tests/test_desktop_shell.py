@@ -202,30 +202,52 @@ def test_go_home_keeps_wallpaper(tmp_path):
     assert ws.wallpaper_id == wp
 
 
+def test_perf_breakdown_splits_draw_into_phases(tmp_path):
+    """DRAWBRK (#43 follow-up): with perf capture on, a running cart's draw time is
+    split into cart _update / cart _draw / console chrome, exposed by
+    perf_breakdown() (the device diag's DRAWBRK payload). Host frames are sub-ms so
+    the numbers are tiny, but the wiring + shape must hold and the three phases must
+    sum to ~the draw total (= chrome is the remainder)."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.perf_capture = True
+    ws.launcher.sel = 0
+    ws.open()
+    for _ in range(5):
+        drv.frame(1 / 30)
+    assert ws.screen == "desktop"
+    upd, cart, chrome = ws.perf_breakdown()
+    assert all(isinstance(v, float) and v >= 0 for v in (upd, cart, chrome))
+    # the split is the components of draw_ms; their sum tracks it within rounding.
+    assert abs((upd + cart + chrome) - ws._draw_ms) <= 2.0
+
+
 # -- #46: no bottom dock on the launcher; it returns inside a cart ----------
 
 def _spy_draw(ws):
     """Record which chrome layers a frame draws, by wrapping the draw methods.
-    Returns a dict of call counters."""
+    Returns a dict of call counters.
+
+    The unified top bar (Stage 1) is now ONE drawer -- _draw_status_strip(where) --
+    on both screens, so "strip" counts the launcher/Settings bar (where home/settings)
+    and "incart" counts the running-cart bar (where == "desktop")."""
     seen = {"dock": 0, "incart": 0, "strip": 0}
     odock = ws._draw_dock
-    obtns = ws._draw_desktop_buttons
     ostrip = ws._draw_status_strip
 
     def dock(where):
         seen["dock"] += 1
         return odock(where)
 
-    def btns():
-        seen["incart"] += 1
-        return obtns()
-
     def strip(where):
-        seen["strip"] += 1
+        if where == "desktop":
+            seen["incart"] += 1
+        else:
+            seen["strip"] += 1
         return ostrip(where)
 
     ws._draw_dock = dock
-    ws._draw_desktop_buttons = btns
     ws._draw_status_strip = strip
     return seen
 
