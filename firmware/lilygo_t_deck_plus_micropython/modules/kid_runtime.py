@@ -704,13 +704,25 @@ AUDIO_RATE = 8000
 # -> 66-83 ms apart) plus jitter. The ring is internal DMA RAM but tiny in bytes
 # (8 KB), so a generous cushion is cheap.
 AUDIO_IBUF = 8192
-# Cap on a single tick's render. CRACKLE FIX: this MUST exceed the real frame
-# interval, or each tick feeds less audio than the frame consumes and the ring
-# drains to an under-run. At 12 fps a frame is ~83 ms; the old ~50 ms cap fed a
-# systematic ~25 ms/frame deficit -> crackle. ~166 ms (down to ~6 fps) leaves
-# headroom; tick() still feeds only rate*dt, so this just stops the truncation.
-# (The native kc_audio mixer makes a larger block cheap, so it can't stall.)
-AUDIO_MAX_FRAME = AUDIO_RATE // 6
+# Ring capacity in FRAMES (16-bit mono -> 2 bytes/frame). The single-core feed tops
+# the ring up TOWARD this each tick (see below) instead of feeding exactly rate*dt.
+AUDIO_IBUF_FRAMES = AUDIO_IBUF // 2
+# Cap on a single tick's render/write, in frames. SINGLE-CORE CRACKLE FIX: tick()
+# no longer feeds exactly rate*dt (which kept the ring hovering near-empty -> any
+# 50-60 ms draw under-ran it). Instead it TOPS THE RING UP toward AUDIO_IBUF_FRAMES
+# every tick, so the deep ~0.5 s ring stays full and rides out long draws + jitter.
+# A single non-blocking write can therefore be as large as the whole ring (the
+# native kc_audio mixer makes a big block cheap), so the cap is the full ring -- it
+# only bounds the rare cold-start fill, never a steady-state top-up.
+AUDIO_MAX_FRAME = AUDIO_IBUF_FRAMES
+
+# Audio diagnostics (kidcode_diag): log each sfx/music trigger and, in core-1 mode,
+# a periodic "active=N committed=M" sample, so the owner can read on serial/SD
+# exactly what reached the mixer (the Battle City rapid-sfx case). Gated so it can
+# NEVER flood the diag ring: triggers log on the event (each sfx/music call), and
+# the core-1 active sample logs at most once every AUDIO_DIAG_SAMPLE_MS.
+AUDIO_DIAG = True
+AUDIO_DIAG_SAMPLE_MS = 1000
 
 
 class DeviceAudio:
@@ -744,16 +756,27 @@ class DeviceAudio:
         # Core-1 commit tracking: the C task owns per-sample advancement (idx/t/phase)
         # once a voice is committed, so we must NOT re-commit a voice's (now stale)
         # Python cursor every frame -- that would reset it to step 0 and stutter. We
-        # only commit a voice the frame it is (re)triggered or stopped, detected by a
-        # change in (id(steps), active): AudioEngine._Voice.play()/stop() always assign
-        # a BRAND-NEW steps list, so the identity changes exactly on a (re)trigger.
-        self._commit_sig = [None] * len(engine.voices)
+        # only commit a voice the frame it is (re)triggered or stopped. THE BATTLE CITY
+        # FIX (#41): detect that by the voice's monotonic _Voice.gen counter (bumped on
+        # EVERY play()/stop()), NOT by (id(steps), active). id(steps) is unreliable --
+        # MicroPython's GC can hand a freshly allocated steps list the SAME address as
+        # the just-freed previous one, so a rapid retrigger of the same SFX (Battle City
+        # fires many sfx/s) read as "unchanged" and was silently never committed -> the
+        # note never reached the mixer. gen changes on every trigger, so every sfx --
+        # rapid, overlapping, channel-reused -- now reliably commits.
+        self._commit_gen = [None] * len(engine.voices)
         # Per-voice flag: a voice committed-active whose play the core-1 task has NOT
         # yet confirmed in active_mask() (the task snapshots ~every block, ~32 ms, so a
         # fresh trigger may not be reflected for a frame or two). While pending we do
         # NOT let a stale clear mask mark the voice free -- otherwise a fast frame could
         # see the just-started voice as idle and steal the channel mid-note.
         self._await_active = [False] * len(engine.voices)
+        # Diag: a periodic core-1 "active=N committed=M" sample (rate-limited) + a
+        # running count of triggers committed since the last sample, so the owner can
+        # read whether Battle City's rapid sfx reach the task. _diag_t0 is the last
+        # sample's ticks_ms; _diag_committed accumulates triggers between samples.
+        self._diag_t0 = 0
+        self._diag_committed = 0
         # Legacy-feed double buffer (only used in the fallback path): render alternates
         # into bufs[_buf], write()s it non-blocking; the port copies it on a background
         # task and fires _on_done. We never touch a buffer while its copy is in flight
@@ -762,6 +785,15 @@ class DeviceAudio:
         self._buf = 0
         self._busy = False
         self._busy_ticks = 0       # watchdog: frames the busy flag has been stuck set
+        # Single-core TOP-UP accounting (#41 single-core crackle fix): a software
+        # estimate of how many frames are still queued in the I2S DMA ring. Each tick
+        # we subtract what the speaker consumed (rate*dt) and add what we wrote, then
+        # refill toward AUDIO_IBUF_FRAMES. This is the lever that keeps the ring full
+        # (a deep cushion) instead of hovering near-empty. Conservative: it can only
+        # UNDER-estimate occupancy (we floor at 0 and the ring's own back-pressure --
+        # a full ring drops the tail of an over-long write -- caps the real depth), so
+        # it never tricks us into starving the ring.
+        self._buffered = 0
         # NATIVE kc_audio (#16/#41): the per-sample mix is the device bottleneck (the
         # pure-Python render_into runs the beeper at ~12 FPS and crackles), and the
         # I2S feed must run off the render core (#41). When kc_audio is frozen in we
@@ -830,12 +862,29 @@ class DeviceAudio:
     # control surface (mirrors host FakeAudio / _SilentAudio) -------------
     def sfx(self, n, chan=None):
         self.engine.play_sfx(n, chan)
+        if AUDIO_DIAG:
+            self._diag_trigger("sfx", n, chan)
 
     def beep(self, freq, dur=0.15):
         self.engine.play_beep(freq, dur)
+        if AUDIO_DIAG:
+            self._diag_trigger("beep", int(freq), None)
 
     def music(self, track, loop=True):
         self.engine.play_music(track, loop)
+        if AUDIO_DIAG:
+            self._diag_trigger("music", track, None)
+
+    def _diag_trigger(self, kind, n, chan):
+        """Log one sfx/beep/music trigger to kidcode_diag (event-gated, so it cannot
+        flood -- one line per actual call). Reports the path so the owner can tell at
+        a glance which feed is live: feed=core1 vs feed=single. Fully guarded."""
+        try:
+            feed = "core1" if self._core1 else "single"
+            ch = "auto" if chan is None else chan
+            _diag_note("AUDIO", "%s=%s chan=%s feed=%s" % (kind, n, ch, feed))
+        except Exception:   # noqa: BLE001 -- diag must never crash a trigger
+            pass
 
     def music_stop(self):
         self.engine.stop_music()
@@ -855,22 +904,25 @@ class DeviceAudio:
     # -- core-1 feed: commit voice state across, advance the scheduler ----
     def _tick_core1(self, dt):
         """The crackle fix's per-frame core-0 work: run the music scheduler in Python,
-        commit only the voices that were (re)triggered/stopped this frame into the
-        shared C kc_voices[] (atomically, under the kc_audio mutex), and read the
-        core-1 task's published active mask back so the scheduler / is_active() see the
-        truth. NO per-sample mix and NO I2S write happen here -- the core-1 task does
-        both, continuously, off the render core. Intentionally cheap (a few C calls), so
-        a slow frame can never starve the speaker.
+        commit every voice that was (re)triggered/stopped this frame into the shared C
+        kc_voices[] (atomically, under the kc_audio mutex), and read the core-1 task's
+        published active mask back so the scheduler / is_active() see the truth. NO
+        per-sample mix and NO I2S write happen here -- the core-1 task does both,
+        continuously, off the render core. Intentionally cheap (a few C calls), so a
+        slow frame can never starve the speaker.
 
         WHY ONLY DIRTY VOICES: once a voice is committed the C task owns its per-sample
         advancement (idx/t/phase/noise). The Python _Voice's cursor goes stale (we do
         NOT pull it back -- that would be a chatty cross-core read), so re-committing it
         every frame would reset the C voice to step 0 and stutter. A voice only needs a
         fresh commit when Python (re)triggers or stops it, which we detect by a change
-        in (id(steps), active): _Voice.play()/stop() always assign a brand-new list."""
+        in _Voice.gen (bumped on every play()/stop()). gen -- not (id(steps), active) --
+        is what fixes the Battle City regression: id(steps) aliases on GC reuse, so a
+        rapid same-SFX retrigger read as unchanged and was never committed (#41)."""
         eng = self.engine
         ka = self._kc_audio
         voices = eng.voices
+        nv = len(voices)
         # Read the task's published activity FIRST, into the Python voices that the C
         # task owns, so the scheduler's free-channel pick / is_active() reflect voices
         # the task has finished playing.
@@ -879,26 +931,30 @@ class DeviceAudio:
         except Exception:   # noqa: BLE001 -- never crash the loop on a status read
             mask = None
         if mask is not None:
-            for c in range(len(voices)):
+            for c in range(nv):
                 v = voices[c]
                 bit_set = bool(mask & (1 << c))
                 if bit_set:
                     # task confirms this play is live -> a later clear is now trusted.
                     self._await_active[c] = False
-                elif v.active and not self._await_active[c]:
-                    # task says voice c is done AND we've already seen it go live, so
-                    # this clear is real -> reflect it (the scheduler can reuse it).
+                elif (v.active and not self._await_active[c]
+                      and v.gen == self._commit_gen[c]):
+                    # task says voice c is done AND we've already seen it go live AND
+                    # Python hasn't RE-triggered it since our last commit (gen still
+                    # matches) -> this clear is real, reflect it so the scheduler can
+                    # reuse the channel. The gen guard is critical: if the cart already
+                    # fired a fresh sfx on this channel this frame (gen advanced), the
+                    # commit below owns it -- we must NOT clobber its active flag here.
                     v.active = False
         # Music scheduler (Python) -- step it by the real elapsed frame time. It may
-        # retrigger SFX onto voices; those become dirty and are committed below.
+        # retrigger SFX onto voices; those bump gen and are committed below.
         eng._advance_music(dt)
-        # Commit ONLY the voices whose (id(steps), active) changed since the last
-        # commit, atomically vs. the task's snapshot (voice_lock brackets the set).
+        # Commit EVERY voice whose gen changed since our last commit, atomically vs. the
+        # task's snapshot (voice_lock brackets the whole set). Every (re)trigger bumps
+        # gen, so rapid/overlapping/channel-reused sfx all commit -- nothing is dropped.
         dirty = []
-        for c in range(len(voices)):
-            v = voices[c]
-            sig = (id(v.steps), v.active)
-            if sig != self._commit_sig[c]:
+        for c in range(nv):
+            if voices[c].gen != self._commit_gen[c]:
                 dirty.append(c)
         if dirty:
             ka.voice_lock()
@@ -911,10 +967,39 @@ class DeviceAudio:
                 ka.voice_unlock()
             for c in dirty:
                 v = voices[c]
-                self._commit_sig[c] = (id(v.steps), v.active)
+                self._commit_gen[c] = v.gen
                 # A freshly committed ACTIVE voice must not be cleared by a stale mask
                 # until the task confirms it live at least once (see __init__).
                 self._await_active[c] = bool(v.active)
+                if v.active:
+                    self._diag_committed += 1
+        if AUDIO_DIAG:
+            self._diag_core1_sample(mask)
+
+    def _diag_core1_sample(self, mask):
+        """Rate-limited core-1 health sample: at most once per AUDIO_DIAG_SAMPLE_MS log
+        the active-voice count (from the task's published mask) + how many triggers we
+        committed since the last sample. Lets the owner confirm Battle City's rapid sfx
+        are actually reaching the task (committed climbs, active>0). Fully guarded so it
+        can never crash the loop, and gated so it can never flood the diag ring."""
+        try:
+            now = _ticks_ms()
+            if _ticks_diff(now, self._diag_t0) < AUDIO_DIAG_SAMPLE_MS:
+                return
+            self._diag_t0 = now
+            active = 0
+            if mask:
+                m = mask
+                while m:
+                    active += m & 1
+                    m >>= 1
+            committed = self._diag_committed
+            self._diag_committed = 0
+            # Only emit a line when something is going on, so a silent UI never logs.
+            if active or committed:
+                _diag_note("AUDIO", "core1 active=%d committed=%d" % (active, committed))
+        except Exception:   # noqa: BLE001 -- diag must never crash the loop
+            pass
 
     def tick(self, dt):
         """Per-frame audio work. In core-1 mode this only schedules + commits voice
@@ -928,26 +1013,46 @@ class DeviceAudio:
                 print("KidCode audio tick (core1) failed:", exc)
             return
 
-        # --- legacy single-core feed (fallback) ---
+        # --- legacy single-core feed (fallback) -- TOP-UP, the crackle fix ---
+        # CRACKLE ROOT CAUSE (single-core): the old feed rendered exactly rate*dt per
+        # frame, so the DMA ring only ever held about one frame's worth -- it hovered
+        # near-empty and ANY 50-60 ms long draw / GC pause drained it to an under-run
+        # (the crackle). THE FIX: top the deep (~0.5 s) ring UP toward full each tick
+        # instead of just replacing what was consumed, so the cushion absorbs long
+        # frames + jitter. We track buffered frames in software (_buffered): subtract
+        # what the speaker drained since the last tick, then refill toward the cap.
         if self.i2s is None:
             return
+        # Account for what the DMA drained since the last tick (real elapsed audio
+        # time). Floor at 0 so the estimate can only UNDER-state occupancy (safe: we
+        # over-fill rather than starve; the ring's own back-pressure caps the truth).
+        drained = int(self.engine.rate * dt)
+        self._buffered -= drained
+        if self._buffered < 0:
+            self._buffered = 0
         if self._busy:
-            # Previous buffer still in flight -> let the DMA ring drain. Watchdog:
-            # if the completion irq somehow never fired (so _busy would stick and
-            # silence the rest of the session), force-clear after a few frames -- by
-            # then a <=50 ms buffer has long since drained, so a fresh write is safe.
+            # Previous buffer still in flight -> the port is still copying it into the
+            # ring, so we can't reuse the buffer yet. Watchdog: if the completion irq
+            # somehow never fired (so _busy would stick and silence the rest of the
+            # session), force-clear after a few frames -- by then even a full-ring
+            # buffer has long since been copied, so a fresh write is safe.
             self._busy_ticks += 1
             if self._busy_ticks < 4:
                 return
             self._busy = False
             self._busy_ticks = 0
         if not self.engine.is_active():
+            # Nothing playing: let the ring drain to silence; reset the estimate so the
+            # next sound starts from a known-empty ring (auto_clear emits silence).
+            self._buffered = 0
             return
-        # Render at most AUDIO_MAX_FRAME samples (a long dt can't make the mixer
-        # chew a huge block); the DMA ring smooths the missing tail next frame.
-        n = int(self.engine.rate * dt)
-        if n <= 0:
-            return
+        # Refill toward a FULL ring. want = the deficit; render that much (capped to
+        # the persistent buffer / a single write). The native kc_audio mixer makes a
+        # big block cheap, so a deep top-up costs little and buys a long cushion.
+        want = AUDIO_IBUF_FRAMES - self._buffered
+        if want <= 0:
+            return                  # ring already full -> skip this tick, no under-run
+        n = want
         if n > AUDIO_MAX_FRAME:
             n = AUDIO_MAX_FRAME
         try:
@@ -964,6 +1069,7 @@ class DeviceAudio:
             self._buf ^= 1
             self._busy = True
             self.i2s.write(memoryview(buf)[:n * 2])
+            self._buffered += n      # n more frames now queued toward the ring
         except Exception as exc:  # noqa: BLE001 -- audio must never crash the loop
             print("KidCode audio tick failed:", exc)
             self._busy = False
