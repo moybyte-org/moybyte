@@ -698,3 +698,228 @@ def test_new_variable_prompt_survives_the_opening_tap(tmp_path):
     # not closed by the opening tap leaking onto OK/X.
     drv.frame(1 / 30)
     assert ws.blk_kbd is not None, "opening tap must not auto-commit the prompt"
+
+
+# ----------------------------------------------------------------------------
+# Typed literals in slots (#29 blocking gap): an expr slot is a Scratch editable
+# oval -- type a number OR drop a reporter block; number slots are typeable too.
+# ----------------------------------------------------------------------------
+
+def test_expr_slot_defaults_to_a_typeable_literal(tmp_path):
+    """Editing an expr slot opens the number pad by default (not the block menu), so
+    a kid can TYPE a literal -- the previously-impossible `set score to 0`."""
+    ws, _, _ = _ws_with_block_cart(tmp_path)
+    ws._open_blocks()
+    be = ws.blocks_ed
+    # a fresh set_var: its {value} expr slot defaults to the literal 0
+    be.new_var("score")
+    _go_to_insert(be, 1)
+    blk = be.insert_block("set_var", {"var": "score", "value": 0})
+    # edit the value (expr) slot -> the NUMBER PAD opens (a literal), not the block menu
+    slot = [s for s in be.slots(blk) if s["name"] == "value"][0]
+    ws._blk_edit_slot(blk, slot)
+    assert ws.blk_kbd is not None and ws.blk_kbd["kind"] == "num"
+    assert ws.blk_kbd.get("allow_block"), "an expr slot must offer the BLOCK escape"
+    assert ws.blk_menu is None
+
+
+def test_type_a_literal_into_an_expr_slot_compiles_to_bare_value(tmp_path):
+    """The headline fix: typing 5 into a set_var value (an expr slot) compiles to the
+    BARE literal `score = 5` -- no quotes, no code injection -- and runs."""
+    ws, _, _ = _ws_with_block_cart(tmp_path)
+    ws._open_blocks()
+    be = ws.blocks_ed
+    be.new_var("score")
+    _go_to_insert(be, 1)
+    blk = be.insert_block("set_var", {"var": "score", "value": 0})
+    slot = [s for s in be.slots(blk) if s["name"] == "value"][0]
+    ws._blk_edit_slot(blk, slot)
+    # type "5" then OK
+    ws._blk_kbd_key(ord("5"))
+    ws._blk_kbd_commit()
+    assert ws.blk_kbd is None
+    assert blk["p"]["value"] == 5 and isinstance(blk["p"]["value"], int)
+    src = blocks.compile_blocks(be.program)
+    assert "score = 5" in src                    # bare literal, not "5"
+    _run(src)
+
+
+def test_set_var_to_zero_and_three_roundtrip_and_execute(tmp_path):
+    """`set score to 0` and `set lives to 3` -- the exact cases that were impossible --
+    round-trip through the model and EXECUTE with the right values."""
+    ws, _, _ = _ws_with_block_cart(tmp_path)
+    ws._open_blocks()
+    be = ws.blocks_ed
+    be.new_var("score")
+    be.new_var("lives")
+    _go_to_insert(be, 1)
+    b0 = be.insert_block("set_var", {"var": "score", "value": 0})
+    _go_to_insert(be, 1)
+    b3 = be.insert_block("set_var", {"var": "lives", "value": 0})
+    # type 0 into score's value, 3 into lives' value, both via the number pad
+    s0 = [s for s in be.slots(b0) if s["name"] == "value"][0]
+    ws._blk_edit_slot(b0, s0)
+    ws._blk_kbd_key(ord("0"))
+    ws._blk_kbd_commit()
+    s3 = [s for s in be.slots(b3) if s["name"] == "value"][0]
+    ws._blk_edit_slot(b3, s3)
+    ws._blk_kbd_key(ord("3"))
+    ws._blk_kbd_commit()
+    src = blocks.compile_blocks(be.program)
+    assert "score = 0" in src and "lives = 3" in src
+    # these run in _init; check the values land
+    fake = _run(src)
+    assert fake["score"] == 0 and fake["lives"] == 3
+
+
+def test_negative_and_decimal_literals_type_correctly(tmp_path):
+    """A leading '-' and a single '.' are accepted; the slot stores a real int/float."""
+    ws, _, _ = _ws_with_block_cart(tmp_path)
+    ws._open_blocks()
+    be = ws.blocks_ed
+    be.new_var("v")
+    _go_to_insert(be, 1)
+    blk = be.insert_block("change_var", {"var": "v", "value": 0})
+    slot = [s for s in be.slots(blk) if s["name"] == "value"][0]
+    ws._blk_edit_slot(blk, slot)
+    for ch in "-2":                              # type "-2"
+        ws._blk_kbd_key(ord(ch))
+    # a stray second '-' and letters are filtered out of the buffer
+    ws._blk_kbd_key(ord("-"))
+    ws._blk_kbd_key(ord("x"))
+    ws._blk_kbd_commit()
+    assert blk["p"]["value"] == -2
+    src = blocks.compile_blocks(be.program)
+    assert "v = v + (-2)" in src
+
+
+def test_number_slot_is_typeable(tmp_path):
+    """A plain number slot (repeat times) also opens the number pad -- no more dozens
+    of +1 taps to reach a value like 440."""
+    ws, _, _ = _ws_with_block_cart(tmp_path)
+    ws._open_blocks()
+    be = ws.blocks_ed
+    _go_to_insert(be, 1)
+    blk = be.insert_block("beep", {"freq": 440})
+    slot = [s for s in be.slots(blk) if s["name"] == "freq"][0]
+    ws._blk_edit_slot(blk, slot)
+    assert ws.blk_kbd is not None and ws.blk_kbd["kind"] == "num"
+    assert not ws.blk_kbd.get("allow_block")     # a number slot can't hold a block
+    for ch in "880":
+        ws._blk_kbd_key(ord(ch))
+    ws._blk_kbd_commit()
+    assert blk["p"]["freq"] == 880
+
+
+def test_expr_menu_leads_with_type_a_number_and_keeps_reporters(tmp_path):
+    """The expr chooser still exists (for dropping a reporter), now headed by
+    'type a number' so a literal is the first, obvious choice -- and the operator /
+    input / variable reporters are all still there."""
+    import runtime.console as C
+    ws, _, _ = _ws_with_block_cart(tmp_path)
+    ws._open_blocks()
+    be = ws.blocks_ed
+    _go_to_insert(be, 1)
+    blk = be.insert_block("spr", {"id": 0, "x": 0, "y": 0})
+    ws._blk_open_expr_menu(blk, "x")
+    items = ws.blk_menu["items"]
+    assert items[0] == C._NUM_LITERAL_ITEM
+    assert ws._blk_menu_label(0) == C._NUM_LITERAL_LABEL
+    # the reporters survived
+    for rid in ("op_add", "op_gt", "var", "btn", "touched"):
+        assert rid in items
+    # picking "type a number" opens the number pad on that slot
+    ws.blk_menu["sel"] = 0
+    ws._blk_menu_select()
+    assert ws.blk_menu is None
+    assert ws.blk_kbd is not None and ws.blk_kbd["kind"] == "num"
+
+
+def test_expr_slot_can_still_hold_a_reporter_block(tmp_path):
+    """Dropping a reporter into an expr slot still works (the white oval accepts a
+    block too): a var reporter in spr's x compiles to the bare variable name."""
+    ws, _, _ = _ws_with_block_cart(tmp_path)
+    ws._open_blocks()
+    be = ws.blocks_ed
+    be.new_var("px")
+    _go_to_insert(be, 1)
+    blk = be.insert_block("spr", {"id": 0, "x": 0, "y": 0})
+    ws._blk_open_expr_menu(blk, "x")
+    ws.blk_menu["sel"] = ws.blk_menu["items"].index("var")
+    ws._blk_menu_select()                         # drop a `var` reporter into x
+    # the reporter's own {var} slot then points at px
+    be.set_slot("var", "px", blk["p"]["x"])
+    src = blocks.compile_blocks(be.program)
+    assert "spr(0, px, 0)" in src
+    # editing that slot again RE-OPENS the block chooser (it holds a block, not a literal)
+    slot = [s for s in be.slots(blk) if s["name"] == "x"][0]
+    ws._blk_edit_slot(blk, slot)
+    assert ws.blk_menu is not None and ws.blk_menu["mode"] == "expr"
+    assert ws.blk_kbd is None
+
+
+def test_number_prompt_typing_through_the_driver(tmp_path):
+    """End-to-end through the real input model: open a number slot, type via last_key,
+    confirm with A -- the slot holds the typed value and compiles bare."""
+    ws, _, _ = _ws_with_block_cart(tmp_path)
+    ws._open_blocks()
+    be = ws.blocks_ed
+    drv = _driver(ws)
+    _go_to_insert(be, 1)
+    blk = be.insert_block("beep", {"freq": 0})
+    slot = [s for s in be.slots(blk) if s["name"] == "freq"][0]
+    ws._blk_edit_slot(blk, slot)                  # opens the number pad (armed next frame)
+    assert ws.blk_kbd is not None
+    drv.frame(1 / 30)                             # one frame to ARM the prompt
+    for ch in "440":
+        drv.type_char(ord(ch))
+        drv.frame(1 / 30)
+        drv.frame(1 / 30)                         # release so each edge fires
+    drv.press("a")                               # confirm
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    assert ws.blk_kbd is None
+    assert blk["p"]["freq"] == 440
+
+
+def test_number_prompt_survives_the_opening_keypress(tmp_path):
+    """Regression parity with the var prompt (#29): the A/Enter that OPENS the number
+    pad must not carry in and instantly commit it on the first frame."""
+    ws, _, _ = _ws_with_block_cart(tmp_path)
+    ws._open_blocks()
+    be = ws.blocks_ed
+    drv = _driver(ws)
+    _go_to_insert(be, 1)
+    blk = be.insert_block("beep", {"freq": 7})
+    # select the freq slot and press A to open the pad, A still held the next frame
+    ws.blk_slot = 0
+    drv.hold("a", True)
+    drv.type_char(0x0D)
+    drv.frame(1 / 30)                            # A opens the slot editor (number pad)
+    assert ws.blk_kbd is not None
+    drv.type_char(0x0D)
+    drv.frame(1 / 30)
+    assert ws.blk_kbd is not None, "opening keypress must not auto-commit the number pad"
+    drv.hold("a", False)
+    drv.type_char(0)
+    drv.frame(1 / 30)
+
+
+def test_left_nudges_an_expr_literal_slot(tmp_path):
+    """The quick -1 nudge (left) works on an expr slot holding a numeric literal,
+    not just plain number slots -- but leaves a slot holding a block alone."""
+    ws, _, _ = _ws_with_block_cart(tmp_path)
+    ws._open_blocks()
+    be = ws.blocks_ed
+    be.new_var("x")
+    _go_to_insert(be, 1)
+    blk = be.insert_block("set_var", {"var": "x", "value": 5})  # value is an expr-literal
+    # cursor on the block, slot index pointing at "value"
+    assert _select_type(be, "set_var")
+    ws.blk_slot = [s["name"] for s in be.slots(blk)].index("value")
+    ws._blk_left()
+    assert blk["p"]["value"] == 4
+    # now put a block in the slot -> left must NOT touch it
+    be.set_slot("value", mk("op_add", {"a": 1, "b": 2}), blk)
+    ws._blk_left()
+    assert isinstance(blk["p"]["value"], dict)
