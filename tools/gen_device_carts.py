@@ -59,6 +59,9 @@ def build_carts(system_carts_dir):
         cart = {
             "title": man["title"],
             "type": man.get("type", "app"),
+            # cart content version (#47): seed_builtins overwrites a stale on-SD copy
+            # when this is newer. Pre-versioning carts default to 0.
+            "version": int(man.get("version", 0)),
             "src": _read(os.path.join(base, "main.py")),
         }
         sheet = os.path.join(base, "sprites.kgfx")

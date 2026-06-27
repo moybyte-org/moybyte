@@ -1,5 +1,6 @@
 {
   "format": "kidcode-cart-v1",
+  "version": 1,
   "title": "Star Catcher",
   "type": "game",
   "runtime": "python",
