@@ -156,6 +156,43 @@ def test_stop_all_silences_everything():
     assert not eng.is_active()
 
 
+def test_voice_gen_bumps_on_every_trigger_and_stop():
+    # The device core-1 feed (#41) commits a voice to the C mixer only when its
+    # _Voice.gen counter changes -- this is the Battle City fix. The old detector
+    # used (id(steps), active), but the GC can reuse a freed list's address, so a
+    # rapid retrigger of the SAME sfx on the SAME channel read as "unchanged" and was
+    # never committed (silent). gen must increment on EVERY play()/stop(), so every
+    # trigger -- even an identical one onto a channel it already owns -- is detected.
+    eng = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
+    v = eng.voices[0]
+    assert v.gen == 0
+    # Rapid retriggers of the same SFX on the same forced channel: gen strictly climbs.
+    seen = [v.gen]
+    for _ in range(10):
+        eng.play_sfx(0, chan=0)
+        assert v.gen > seen[-1], "play() must bump gen every time (Battle City fix)"
+        seen.append(v.gen)
+    # A stop is also a committable state change.
+    g = v.gen
+    eng.stop(0)
+    assert v.gen > g
+    # The gen sequence has no duplicates -> every trigger is distinguishable.
+    assert len(set(seen)) == len(seen)
+
+
+def test_voice_gen_independent_per_channel():
+    # Each channel's gen advances independently, so committing one voice never looks
+    # like a change on another (the core-1 dirty scan is per-channel).
+    eng = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
+    g_before = [v.gen for v in eng.voices]
+    eng.play_sfx(0, chan=1)
+    for c, v in enumerate(eng.voices):
+        if c == 1:
+            assert v.gen > g_before[c]
+        else:
+            assert v.gen == g_before[c]
+
+
 # -- host API surface (host_app.make_api + FakeAudio) ----------------------
 
 class _Input:
@@ -230,7 +267,9 @@ def test_beeper_demo_cart_makes_sound(tmp_path):
     assert isinstance(ws.audio, host_app.FakeAudio)
     # _init() should have started the looping music (music_on defaults to 1)
     assert ("music", 0, True) in ws.audio.calls
-    # run attract mode; it auto-taps pads -> sfx/beep calls accrue, mixer renders
+    # Enable the cart's attract mode (off by default since it auto-cycles the pads)
+    # so the demo audibly exercises sfx + beep through the console + mixer.
+    ws.config["autoplay"] = 1
     for _ in range(120):
         ws.frame(1 / 30)
     kinds = [c[0] for c in ws.audio.calls]

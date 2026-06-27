@@ -211,6 +211,13 @@ class _Voice:
         self.t = 0.0            # seconds into the current step
         self.phase = 0.0        # oscillator phase 0..1
         self.noise = 12345      # noise LCG state
+        # Monotonic trigger counter: bumped on EVERY (re)trigger/stop so a consumer
+        # can detect a fresh play unambiguously. The device core-1 feed (#41) uses
+        # this to decide which voices to commit to the C task each frame -- it MUST
+        # NOT rely on id(steps), which the GC can reuse for a freshly allocated list
+        # at the same address (a rapid retrigger of the same SFX then reads as
+        # "unchanged" and silently never reaches the mixer -- the Battle City bug).
+        self.gen = 0
 
     def play(self, steps, step_dur, loop):
         self.active = bool(steps)
@@ -220,10 +227,12 @@ class _Voice:
         self.idx = 0
         self.t = 0.0
         self.phase = 0.0
+        self.gen += 1           # a new trigger -> commit it (see self.gen above)
 
     def stop(self):
         self.active = False
         self.steps = []
+        self.gen += 1           # a stop is also a state change to commit
 
     def advance_step(self):
         """Move to the next step; deactivate (or loop) at the end."""

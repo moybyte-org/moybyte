@@ -1073,6 +1073,7 @@ def test_native_kc_audio_core1_task_wired():
     # checks, the same way the other firmware tests grep the device sources.
     c = (ROOT / "native" / "kc_audio" / "modkc_audio.c").read_text(encoding="utf-8")
     runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    audio_src = (Path("runtime") / "audio.py").read_text(encoding="utf-8")
 
     # The C side spawns a FreeRTOS task PINNED TO CORE 1 that owns the I2S write loop.
     assert "xTaskCreatePinnedToCore(" in c
@@ -1114,11 +1115,36 @@ def test_native_kc_audio_core1_task_wired():
     assert "ka.voice_unlock()" in runtime
     assert "ka.active_mask()" in runtime
     assert "ka.voice_set(c, v.active, v.steps, v.step_dur, v.loop," in runtime
+    # BATTLE CITY FIX (#41): commit is keyed off the monotonic _Voice.gen counter, NOT
+    # (id(steps), active). id(steps) aliases on a GC list-address reuse, so a rapid
+    # same-SFX retrigger read as "unchanged" and was never committed (silent). gen
+    # bumps on every play()/stop(), so every rapid/overlapping sfx commits.
+    assert "self._commit_gen" in runtime               # gen-keyed dirty tracking
+    assert "self.gen" in audio_src                      # _Voice.gen counter (audio.py)
+    assert "voices[c].gen != self._commit_gen[c]" in runtime
+    assert "self._commit_gen[c] = v.gen" in runtime
+    # The mask-clear must NOT clobber a voice the cart re-triggered this frame: it only
+    # honours a done-clear when gen still matches the last commit (no pending trigger).
+    assert "v.gen == self._commit_gen[c]" in runtime
+    assert "self.gen += 1" in audio_src                 # bumped on play() AND stop()
     # The legacy single-core feed stays as the FALLBACK (machine.I2S) so a bad result
-    # is revert-able (KC_AUDIO_CORE1=False) and a no-kc_audio build still works.
+    # is revert-able (KC_AUDIO_CORE1=False) and a no-kc_audio build still works. It now
+    # TOPS the deep DMA ring UP toward full each tick (the single-core crackle fix)
+    # instead of feeding exactly rate*dt (which kept the ring near-empty -> under-ran).
     assert "legacy single-core feed (fallback)" in runtime
     assert "if not self._core1:" in runtime            # only open machine.I2S in fallback
     assert "self.i2s = I2S(" in runtime
+    assert "AUDIO_IBUF_FRAMES = AUDIO_IBUF // 2" in runtime
+    assert "self._buffered" in runtime                  # software ring-occupancy estimate
+    assert "want = AUDIO_IBUF_FRAMES - self._buffered" in runtime
+    assert "self._buffered += n" in runtime             # account for what we wrote
+    # AUDIO DIAGNOSTICS: each sfx/music trigger logs an event line; core-1 logs a
+    # rate-limited active=/committed= sample so Battle City's audio is debuggable blind.
+    assert "AUDIO_DIAG = True" in runtime
+    assert "def _diag_trigger(self, kind, n, chan):" in runtime
+    assert "def _diag_core1_sample(self, mask):" in runtime
+    assert '_diag_note("AUDIO"' in runtime
+    assert "core1 active=%d committed=%d" in runtime
 
 
 def test_device_wifi_wired():
