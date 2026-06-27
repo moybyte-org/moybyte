@@ -96,6 +96,10 @@ class TeeCanvas:
     def spr(self, img, x, y, scale=1, flip=0):
         self.raster.spr(img, x, y, scale, flip); self.rec.spr(img, x, y, scale, flip)
 
+    def spr_batch(self, sheet, items, colorkey=-1, scale=1):
+        self.raster.spr_batch(sheet, items, colorkey, scale)
+        self.rec.spr_batch(sheet, items, colorkey, scale)
+
     def map(self, tilemap, sheet, mx=0, my=0, w=None, h=None,
             sx=0, sy=0, colorkey=-1, scale=1):
         self.raster.map(tilemap, sheet, mx, my, w, h, sx, sy, colorkey, scale)

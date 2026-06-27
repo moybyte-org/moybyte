@@ -153,6 +153,23 @@ class CommandCanvas:
         self._cmds.append(["spr", int(x), int(y), int(scale),
                            int(img.w), int(img.h), int(t), pix, int(flip)])
 
+    def spr_batch(self, sheet, items, colorkey=-1, scale=1):
+        # Mirror Canvas.spr_batch (#43): emit one spr command per item, resolving each
+        # tile through the sheet like map() does. Reusing the spr() op keeps the replay
+        # pixel-identical with no dedicated batch op; tile Images are cached per id
+        # within the batch so a repeated tile is built once.
+        cache = {}
+        for it in items:
+            tid = int(it[0])
+            flip = it[3] if len(it) > 3 else 0
+            img = cache.get(tid)
+            if img is None:
+                img = sheet.tile_image(tid, colorkey)
+                cache[tid] = img if img is not None else False
+            if not img:
+                continue
+            self.spr(img, it[1], it[2], scale, flip)
+
     def map(self, tilemap, sheet, mx=0, my=0, w=None, h=None,
             sx=0, sy=0, colorkey=-1, scale=1):
         # Mirror Canvas.map EXACTLY: walk the w x h cell region and emit one spr

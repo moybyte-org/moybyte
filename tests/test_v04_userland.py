@@ -161,6 +161,50 @@ def test_map_mget_mset_via_make_api():
     assert cv.pix(8, 8) == 11                # tile 3 at cell (1,1), pixel (0,0) -> 8,8
 
 
+def test_spr_batch_matches_individual_spr_calls():
+    # spr_batch (#43) must draw the SAME pixels as the equivalent sequence of spr()
+    # calls (the device collapses it to one C call; the host is the per-item reference,
+    # and the two paths must agree pixel-for-pixel). Build two canvases, draw a few
+    # tiles (one flipped) via each path, and assert the buffers are identical.
+    sheet = SpriteSheet()
+    sheet.tset(1, 0, 0, 8)                    # tile 1: red at (0,0)
+    sheet.tset(1, 7, 0, 9)                    # ... and green at (7,0) (asymmetric -> flip shows)
+    sheet.tset(2, 3, 3, 11)                   # tile 2: a centre pixel
+
+    items = [(1, 5, 6), (2, 20, 8, 0), (1, 12, 14, 1)]   # last one h-flipped
+
+    cv_batch = Canvas(40, 40)
+    cv_batch.cls(0)
+    cv_batch.spr_batch(sheet, items, colorkey=-1, scale=2)
+
+    cv_indiv = Canvas(40, 40)
+    cv_indiv.cls(0)
+    for it in items:
+        flip = it[3] if len(it) > 3 else 0
+        cv_indiv.spr(sheet.tile_image(it[0], -1), it[1], it[2], 2, flip)
+
+    assert cv_batch.buf == cv_indiv.buf
+    assert len(set(cv_batch.buf)) > 1        # sanity: it actually drew something
+
+
+def test_spr_batch_no_op_when_sheet_is_none():
+    # make_api.spr_batch is a no-op (no crash) for a cart with no sheet.
+    from runtime import host_app
+    cv = Canvas(20, 20)
+    cv.cls(0)
+
+    class _Input:
+        def held(self, n):
+            return False
+
+        def pressed(self, n):
+            return False
+
+    api = host_app.make_api(cv, _Input(), {}, sheet=None)
+    api["spr_batch"]([(0, 0, 0)], 0, 2)      # must not raise
+    assert set(cv.buf) == {0}                 # nothing drawn
+
+
 # -- code editor core ------------------------------------------------------
 
 def test_code_editor_scrolloff_and_horizontal_scroll():

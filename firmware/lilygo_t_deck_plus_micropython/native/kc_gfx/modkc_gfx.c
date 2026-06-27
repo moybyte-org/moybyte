@@ -199,6 +199,88 @@ static mp_obj_t kc_gfx_blit_map(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(kc_gfx_blit_map_obj, 17, 21, kc_gfx_blit_map);
 
+// blit_batch(dst, dw, dh, items, atlas, ntiles, tile, scale, key,
+//            cam_x, cam_y, cx0, cy0, cx1, cy1) -- draw N sprite tiles in ONE C call
+// (issue #43): the sprite analogue of blit_map (#32). `items` is a list/tuple of
+// (tile, x, y) or (tile, x, y, flip) tuples; each tile is copied from the
+// pre-converted RGB565 `atlas` (ntiles tiles of `tile`x`tile` pixels, tile-major,
+// row-within-tile -- exactly what _sheet_atlas bakes, the SAME atlas map() uses)
+// into dst at world (x,y) minus the camera, each source pixel expanded to a
+// `scale` x `scale` block. Pixels equal to `key` are transparent. `flip` mirrors
+// per item (TIC-80: 0=none, 1=h, 2=v, 3=both) -- the one thing blit_map has no need
+// of, so we read the source pixel from the mirrored tile-local index but write it
+// to the un-mirrored block. The clip rect [cx0,cy0)..[cx1,cy1) (#11) bounds the
+// write region, intersected with the buffer. Collapses N per-sprite MicroPython->C
+// blit565 calls into one walk, which is the device's draw-call bottleneck.
+static mp_obj_t kc_gfx_blit_batch(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t dcap, acap;
+    uint16_t *dst = kc_gfx_buf_w(a[0], &dcap);
+    mp_int_t dw = mp_obj_get_int(a[1]);
+    mp_int_t dh = mp_obj_get_int(a[2]);
+    size_t n_items;
+    mp_obj_t *item_arr;
+    mp_obj_get_array(a[3], &n_items, &item_arr);  // list or tuple of item tuples
+    const uint16_t *atlas = kc_gfx_buf_r(a[4], &acap);
+    mp_int_t ntiles = mp_obj_get_int(a[5]);
+    mp_int_t tile = mp_obj_get_int(a[6]);
+    mp_int_t scale = mp_obj_get_int(a[7]);
+    mp_int_t key = mp_obj_get_int(a[8]);
+    mp_int_t cam_x = mp_obj_get_int(a[9]);
+    mp_int_t cam_y = mp_obj_get_int(a[10]);
+    if (dw <= 0 || dh <= 0 || tile <= 0 || ntiles <= 0) return mp_const_none;
+    if (scale < 1) scale = 1;
+    // Clip rect, intersected with the buffer.
+    mp_int_t cx0 = mp_obj_get_int(a[11]);
+    mp_int_t cy0 = mp_obj_get_int(a[12]);
+    mp_int_t cx1 = mp_obj_get_int(a[13]);
+    mp_int_t cy1 = mp_obj_get_int(a[14]);
+    if (cx0 < 0) cx0 = 0;
+    if (cy0 < 0) cy0 = 0;
+    if (cx1 > dw) cx1 = dw;
+    if (cy1 > dh) cy1 = dh;
+    mp_int_t tpx = tile * tile;                  // pixels per atlas tile
+    if ((size_t)ntiles * (size_t)tpx > acap) return mp_const_none;  // atlas too small
+    for (size_t i = 0; i < n_items; i++) {
+        size_t ilen;
+        mp_obj_t *ielem;
+        mp_obj_get_array(item_arr[i], &ilen, &ielem);  // (tile, x, y[, flip])
+        if (ilen < 3) continue;
+        mp_int_t tid = mp_obj_get_int(ielem[0]);
+        if (tid < 0 || tid >= ntiles) continue;
+        mp_int_t dx0 = mp_obj_get_int(ielem[1]) - cam_x;
+        mp_int_t dy0 = mp_obj_get_int(ielem[2]) - cam_y;
+        mp_int_t flip = (ilen > 3) ? mp_obj_get_int(ielem[3]) : 0;
+        mp_int_t fx = flip & 1;
+        mp_int_t fy = (flip >> 1) & 1;
+        const uint16_t *tsrc = atlas + (size_t)tid * (size_t)tpx;
+        // expand the tile's tile x tile pixels by `scale`, clip-bounded, mirroring
+        // the SOURCE read per flip but writing to the un-mirrored block (like spr).
+        for (mp_int_t row = 0; row < tile; row++) {
+            mp_int_t ssy = fy ? (tile - 1 - row) : row;
+            const uint16_t *srow = tsrc + (size_t)ssy * (size_t)tile;
+            for (mp_int_t sub_y = 0; sub_y < scale; sub_y++) {
+                mp_int_t ty = dy0 + row * scale + sub_y;
+                if (ty < cy0 || ty >= cy1) continue;
+                uint16_t *drow = dst + (size_t)ty * (size_t)dw;
+                for (mp_int_t col = 0; col < tile; col++) {
+                    mp_int_t ssx = fx ? (tile - 1 - col) : col;
+                    uint16_t p = srow[ssx];
+                    if (key >= 0 && p == (uint16_t)key) continue;
+                    mp_int_t bx = dx0 + col * scale;
+                    for (mp_int_t sub_x = 0; sub_x < scale; sub_x++) {
+                        mp_int_t tx = bx + sub_x;
+                        if (tx < cx0 || tx >= cx1) continue;
+                        drow[tx] = p;
+                    }
+                }
+            }
+        }
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(kc_gfx_blit_batch_obj, 15, 15, kc_gfx_blit_batch);
+
 // pack_strip(fb, fb_w, x, y, w, rows, dst) -- copy a (w x rows) window of the
 // framebuffer into dst contiguously (row-major). Full-width is one memcpy;
 // cropped rects are packed row-by-row in C (the slow Stage 2 Python path).
@@ -235,6 +317,7 @@ static const mp_rom_map_elem_t kc_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_fill_rect),  MP_ROM_PTR(&kc_gfx_fill_rect_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit565),    MP_ROM_PTR(&kc_gfx_blit565_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_map),   MP_ROM_PTR(&kc_gfx_blit_map_obj) },
+    { MP_ROM_QSTR(MP_QSTR_blit_batch), MP_ROM_PTR(&kc_gfx_blit_batch_obj) },
     { MP_ROM_QSTR(MP_QSTR_pack_strip), MP_ROM_PTR(&kc_gfx_pack_strip_obj) },
 };
 static MP_DEFINE_CONST_DICT(kc_gfx_globals, kc_gfx_globals_table);

@@ -681,6 +681,28 @@ def test_native_blit_map_wired_for_tilemaps():
     assert '"map": map_, "mget": mget, "mset": mset,' in runtime
 
 
+def test_native_spr_batch_wired_for_sprites():
+    # The sprite-batch blit (#43) is a native kc_gfx op (one C call for N sprites, the
+    # sprite analogue of blit_map / #32) and DeviceCanvas.spr_batch drives it from the
+    # SAME baked RGB565 tile atlas map() uses, with a Python per-item fallback when
+    # kc_gfx is absent. Grep the frozen device sources + the C module, like the other
+    # firmware tests (this file does not execute device code).
+    c = (ROOT / "native" / "kc_gfx" / "modkc_gfx.c").read_text(encoding="utf-8")
+    assert "kc_gfx_blit_batch" in c
+    assert "MP_ROM_QSTR(MP_QSTR_blit_batch)" in c        # registered in the module dict
+    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    assert "def spr_batch(self, sheet, items" in runtime  # DeviceCanvas.spr_batch
+    assert "self._gfx.blit_batch(self._buf" in runtime    # native one-call blit
+    assert "def spr_batch(items" in runtime               # make_api spr_batch
+    assert '"spr_batch": spr_batch,' in runtime           # exposed in the cart namespace
+    # The batch reuses the map() atlas (one bake, keyed on sheet.gen), not per-sprite.
+    assert "atlas, ntiles = self._sheet_atlas(sheet, colorkey)" in runtime
+    # Battle City adopts it: the moving sprites go out in one batch (#43).
+    battle = (Path("system_carts") / "battle_city.kcart"
+              / "main.py").read_text(encoding="utf-8")
+    assert "spr_batch(" in battle
+
+
 def _load_kid_runtime():
     # kid_runtime does `from editors import ...` and `from console import ...`; the
     # device freezes build-staged copies of runtime/{editors,audio,console}.py as

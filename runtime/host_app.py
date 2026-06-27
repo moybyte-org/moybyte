@@ -335,6 +335,19 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
             return
         canvas.map(tilemap, sheet, mx, my, w, h, sx, sy, colorkey, scale)
 
+    def spr_batch(items, colorkey=-1, scale=1):
+        # spr_batch(items[, colorkey, scale]): draw MANY sheet tiles in one call (#43)
+        # -- the sprite analogue of map(). `items` is a sequence of (tile, x, y) or
+        # (tile, x, y, flip) tuples (flip 0=none/1=h/2=v/3=both, like spr()); colorkey +
+        # scale apply uniformly to the whole batch. Coords are world space (camera +
+        # clip apply), tiles come from the cart's sheet. On the device this is ONE
+        # native blit_batch call for N sprites (the draw-call count is its FPS
+        # bottleneck); here it's the readable per-item reference. SHEET TILES ONLY,
+        # 1x1 tiles -- Image sprites and multi-tile (w/h>1) sprites still use spr().
+        if sheet is None:
+            return
+        canvas.spr_batch(sheet, items, colorkey, scale)
+
     def mget(x, y):
         return tilemap.mget(x, y) if tilemap is not None else -1
 
@@ -417,6 +430,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         "cls": canvas.cls, "pix": canvas.pix,
         "line": canvas.line, "rect": canvas.rect, "rectb": canvas.rectb,
         "circ": canvas.circ, "circb": canvas.circb, "spr": spr,
+        "spr_batch": spr_batch,
         "map": map_, "mget": mget, "mset": mset,
         "print": canvas.print, "touch": touch, "mouse": mouse,
         "clip": canvas.clip, "camera": canvas.camera,
