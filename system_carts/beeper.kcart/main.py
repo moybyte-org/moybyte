@@ -58,12 +58,14 @@ def _update(dt):
             if x <= tp[0] < x + w and y <= tp[1] < y + h:
                 _hit(i)
                 tapped = True
-    # attract mode: cycle the pads so the simulator demo is audible
-    auto += dt
-    if not tapped and auto > 0.6:
-        auto = 0.0
-        _hit(which)
-        which = (which + 1) % 4
+    # attract mode: auto-cycle the pads. OFF by default so you trigger sounds
+    # yourself; set cfg("autoplay", 1) to make the simulator demo audible.
+    if cfg("autoplay", 0):
+        auto += dt
+        if not tapped and auto > 0.6:
+            auto = 0.0
+            _hit(which)
+            which = (which + 1) % 4
 
 
 def _draw():
