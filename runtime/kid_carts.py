@@ -185,6 +185,11 @@ def seed_builtins(seed_list, root=CARTS_DIR):
         tilemap = cart.get("map")                 # TileMap.to_hex() blob, optional (#32)
         if tilemap:
             _write(d + "/map.kmap", tilemap)
+        blocks = cart.get("blocks")               # block program tree, optional (#29)
+        if blocks:
+            # a block-authored seed (tap_game) ships its blocks.json so it opens in
+            # the on-device block editor as blocks, not just compiled code.
+            _write(d + "/blocks.json", json.dumps(blocks))
 
 
 def load(path):
