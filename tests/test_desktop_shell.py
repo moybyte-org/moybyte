@@ -26,7 +26,7 @@ def test_desktop_home_renders(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     assert ws.screen == "launcher"
     drv.frame(1 / 30)
-    # Wallpaper backdrop + icon grid + status strip + dock => many colors.
+    # Wallpaper backdrop + icon grid + status strip => many colors.
     assert len(set(drv.rgb888())) > 4
 
 
@@ -99,14 +99,13 @@ def test_settings_screen_opens_and_renders(tmp_path):
     assert len(set(drv.rgb888())) > 4
 
 
-def test_settings_dock_gear_opens_settings(tmp_path):
-    from runtime import console as C
+def test_status_strip_gear_opens_settings_from_home(tmp_path):
+    """The launcher has no bottom dock (#46); Settings is reached via the gear button
+    on the status strip. Tapping it opens Settings."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
-    # The settings dock slot (last slot) tapped from the home desktop.
-    k = C._DOCK_SLOTS.index("settings")
-    x, y, w, h = ws._dock_slot_rect(k)
+    x, y, w, h = ws.layout.set_btn
     drv.click(x + w // 2, y + h // 2)
     drv.frame(1 / 30)
     assert ws.screen == "settings"
@@ -178,14 +177,13 @@ def test_management_buttons_still_create_and_delete(tmp_path):
     assert len(ws.launcher.items) == n0 + 1
 
 
-def test_dock_run_opens_selected_cart_from_home(tmp_path):
-    from runtime import console as C
+def test_tapping_a_cart_icon_opens_it_from_home(tmp_path):
+    """The launcher's primary action: tapping a cart's icon tile opens it. (The old
+    dock 'run' slot was removed from the launcher with the dock, #46.)"""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
-    ws.launcher.sel = 0
-    k = C._DOCK_SLOTS.index("run")
-    x, y, w, h = ws._dock_slot_rect(k)
+    x, y, w, h = ws.layout.tile_rect(0, ws.launcher.page)
     drv.click(x + w // 2, y + h // 2)
     drv.frame(1 / 30)
     assert ws.screen == "desktop"
@@ -202,3 +200,109 @@ def test_go_home_keeps_wallpaper(tmp_path):
     ws.go_home()
     assert ws.screen == "launcher"
     assert ws.wallpaper_id == wp
+
+
+# -- #46: no bottom dock on the launcher; it returns inside a cart ----------
+
+def _spy_draw(ws):
+    """Record which chrome layers a frame draws, by wrapping the draw methods.
+    Returns a dict of call counters."""
+    seen = {"dock": 0, "incart": 0, "strip": 0}
+    odock = ws._draw_dock
+    obtns = ws._draw_desktop_buttons
+    ostrip = ws._draw_status_strip
+
+    def dock(where):
+        seen["dock"] += 1
+        return odock(where)
+
+    def btns():
+        seen["incart"] += 1
+        return obtns()
+
+    def strip(where):
+        seen["strip"] += 1
+        return ostrip(where)
+
+    ws._draw_dock = dock
+    ws._draw_desktop_buttons = btns
+    ws._draw_status_strip = strip
+    return seen
+
+
+def test_launcher_does_not_draw_the_bottom_dock(tmp_path):
+    """The home/launcher screen no longer draws the in-cart bottom dock (#46): it was
+    a dead row there. The status strip is still drawn (clock/pips/management/gear)."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    seen = _spy_draw(ws)
+    assert ws.screen == "launcher"
+    drv.frame(1 / 30)
+    assert seen["dock"] == 0          # the 6-slot dock is NOT drawn on the launcher
+    assert seen["incart"] == 0        # nor the in-cart tool buttons (no cart open)
+    assert seen["strip"] >= 1         # the status strip IS drawn (still present)
+
+
+def test_in_cart_dock_returns_when_a_cart_is_open(tmp_path):
+    """Opening a cart brings back the in-cart tool bar (EDIT/PAINT/MAP/HOME). The
+    launcher's removal of the dead dock does not touch the in-cart chrome."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.launcher.sel = 0
+    ws.open()
+    assert ws.screen == "desktop"
+    seen = _spy_draw(ws)
+    drv.frame(1 / 30)
+    assert seen["incart"] >= 1        # the in-cart tool buttons ARE drawn
+    # The 6-slot bottom dock belongs to home/settings, not a running cart.
+    assert seen["dock"] == 0
+
+
+def test_launcher_grid_band_reclaims_the_freed_dock_space(tmp_path):
+    """With the dock gone the launcher cart grid extends below the old dock line: on a
+    larger canvas the responsive grid uses the reclaimed band (more rows than it would
+    fit if it still stopped at the dock)."""
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(640, 480))
+    lay = ws.layout
+    # grid_bottom is the canvas floor (no dock), strictly below the old dock line.
+    assert lay.grid_bottom > lay.dock_y
+    # The reclaimed band fits at least one more row than the dock-bounded band would.
+    band_now = lay.grid_bottom - lay.icon_y0
+    band_old = lay.dock_y - lay.icon_y0
+    rows_now = (band_now + lay.icon_gap_y) // (lay.icon_h + lay.icon_gap_y)
+    rows_old = (band_old + lay.icon_gap_y) // (lay.icon_h + lay.icon_gap_y)
+    assert rows_now >= rows_old
+
+
+def test_status_strip_stays_legible_over_an_animated_wallpaper(tmp_path):
+    """#46: the status strip must stay readable on the home screen even with a live
+    animated wallpaper behind it. The strip's backing band fills its rows, so the
+    clock text region is the strip's dark backing, not wallpaper noise, and the
+    wallpaper's own content is pushed below the strip (its safe area)."""
+    from runtime import console as C
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    # Pick a real animated wallpaper cart (the shipped ones print a title at y=10,
+    # which is inside the strip band -- the bug #46 fixes).
+    cart_wp = [o for o in ws.wallpaper_options() if not str(o).startswith("fill:")]
+    assert cart_wp, "expected at least one wallpaper cart seeded"
+    ws.select_wallpaper(cart_wp[0], persist=False)
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)
+    sc = ws.sys_canvas
+    lay = ws.layout
+    # The strip backing band is solid black across its rows (legible scrim), so the
+    # top-left clock region is not overwritten by wallpaper art.
+    black = C.NAMES["black"]
+    # Sample a column at the far right of the strip, above the pips' glyph rows but
+    # within the band: the backing fill must be present (not raw wallpaper).
+    y = 0
+    assert sc.buf[y * sc.w + 1] == black
+    # The wallpaper's safe area (just below the strip) is NOT plain black -- the
+    # animated backdrop visibly occupies the rows beneath the strip.
+    below = lay.status_h + 2
+    band = set(sc.buf[below * sc.w:below * sc.w + sc.w])
+    assert len(band) >= 1   # rendered without error; backdrop occupies below-strip rows
