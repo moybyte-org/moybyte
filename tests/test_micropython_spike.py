@@ -794,6 +794,40 @@ def test_code_editor_wired_into_device_shell():
     assert "ws.keyboard = keyboard" in runtime
 
 
+def test_unified_top_bar_wired_into_device_shell():
+    """The unified, themeable 18px top bar (Stage 1): the launcher's old 14px status
+    strip + the running-cart's labeled button row are now ONE bar of 16x16 IconSheet
+    sprites on BOTH screens. The device freezes the SAME runtime/console.py +
+    editors.py + kid_carts.py, so grep the canonical sources (staged into modules/ at
+    build) for the new wiring."""
+    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    editors = EDITORS_SRC.read_text(encoding="utf-8")
+    carts = (Path("runtime") / "kid_carts.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+
+    # The bar is 18px and drawn by ONE unified drawer -- the old per-screen
+    # _draw_desktop_buttons is gone, and the running-cart ("desktop") screen now calls
+    # the shared bar.
+    assert "_STATUS_H = 18" in console
+    assert "def _draw_desktop_buttons" not in console
+    assert 'self._draw_status_strip("desktop")' in console
+
+    # The 16x16 IconSheet + its slot map + the bar's icon-blit helper.
+    assert "class IconSheet(SpriteSheet):" in editors
+    assert "TILE = 16" in editors
+    assert "_ICON = {" in console
+    assert "def _icon(self, kind, x, y, cv=None):" in console
+    assert "self.icon_sheet" in console
+
+    # Storage: load/save the editable theme beside the carts dir (absent = default).
+    assert "system_icons" in carts
+    assert "def load_system_icons(" in carts
+    assert "def save_system_icons(" in carts
+
+    # The device run loop builds + injects the IconSheet the same way as the host.
+    assert "ws.load_icon_sheet()" in runtime
+
+
 def test_device_draw_api_uses_tic80_names():
     runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
 
@@ -1282,6 +1316,14 @@ def test_micropython_offline_diag_wiring():
     assert "self.perf_capture = False" in console         # default off -> host identical
     assert "ws.perf_capture = True" in runtime            # device turns capture on
     assert "_perf = self.perf_hud or self.perf_capture" in console
+
+    # DRAWBRK (#43 follow-up): the phase split of draw= into cart _update / cart
+    # _draw / console chrome, sampled alongside PERF so we can see where the
+    # per-frame draw cost actually goes instead of guessing.
+    assert "def perf_breakdown(self):" in console
+    assert 'diag.log("DRAWBRK", "upd=%.2f cart=%.2f chrome=%.2f"' in runtime
+    assert "_diag_drawbrk(diag, ws)" in runtime
+    assert "ws.perf_breakdown()" in runtime
 
     # Existing diagnostics routed through diag (printed AND persisted): boot heap,
     # the frame-error trace, the in-cart crash, and the audio I2S status line.

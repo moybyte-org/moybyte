@@ -12,7 +12,7 @@ free apart from the shared editor cores below.
 import time
 
 from audio import AudioBank, AudioEngine
-from editors import (BlockEditor, CodeEditor, MapEditor, PaintEditor,
+from editors import (BlockEditor, CodeEditor, IconSheet, MapEditor, PaintEditor,
                      SpriteSheet, TileMap)
 
 # The block vocabulary/compiler (#29). Imported under whichever name it's known by:
@@ -290,14 +290,32 @@ class Pointer:
 
 
 # --- Pointer UI layout (320x240) -------------------------------------------
-# Desktop overlay button row (top edge): EDIT/CODE, PAINT, MAP, then HOME at the
-# right. Four buttons now share the 320px row, so they're tighter than the old
-# three -- each glyph-led button keeps a short label that fits its width.
-_MENU_BTN = (4, 4, 64, 18)        # desktop overlay: open Make-it-mine / code
-_PAINT_BTN = (72, 4, 64, 18)      # desktop overlay: open the paint editor
-_MAP_BTN = (140, 4, 64, 18)       # desktop overlay: open the map (tilemap) editor
-_BLOCKS_BTN = (208, 4, 42, 18)    # desktop overlay: open the block editor (#29)
-_HOME_BTN = (252, 4, 64, 18)      # desktop overlay: back to launcher
+# The unified top bar (Stage 1): an 18px black strip on BOTH the launcher and the
+# running-cart screen, where every chrome control is a 16x16 sprite from an editable
+# IconSheet (not the old labeled glyph buttons). On the running-cart screen the LEFT
+# cluster is the tool switcher -- HOME, EDIT/CODE, PAINT, MAP, BLOCKS -- a row of
+# icon-only buttons. 16px icons in an 18px bar -> 1px top margin (y=1); icons stride
+# _BAR_STRIDE (16 + 2px gap). These rects are GAME-canvas coords (the running-cart
+# screen hit-tests in the 320x240 viewport); the launcher's NEW/DUP/DEL/gear live in
+# Layout (system-canvas coords) since the home screen hit-tests there.
+_BAR_ICON = 16              # icon sprite side (16x16, from the IconSheet)
+_BAR_GAP = 2               # px between adjacent bar icons
+_BAR_STRIDE = _BAR_ICON + _BAR_GAP        # 18: left-edge step between icons
+_BAR_Y = 1                 # icons sit 1px down in the 18px bar (1px top/bottom margin)
+_HOME_BTN = (2, _BAR_Y, _BAR_ICON, _BAR_ICON)                    # back to launcher
+_MENU_BTN = (2 + _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)      # Make-it-mine / code
+_PAINT_BTN = (2 + 2 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)  # paint editor
+_MAP_BTN = (2 + 3 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)   # map (tilemap) editor
+_BLOCKS_BTN = (2 + 4 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)  # block editor (#29)
+# Right cluster on the running-cart bar (GAME canvas, always 320 wide @ fs 1): gear
+# hard-right, then batt, wifi, then the clock text. Mirrors the launcher Layout's
+# right cluster so both bars read identically. The clock egg hit-test uses _BAR_CLOCK.
+# Literal 320 width / 18px bar / 8px font here (the game canvas is fixed; _STATUS_H /
+# _FONT_W are defined below, so these don't forward-reference them).
+_BAR_GEAR = (320 - 2 - _BAR_ICON, _BAR_Y, _BAR_ICON, _BAR_ICON)
+_BAR_BATT = (_BAR_GEAR[0] - _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)
+_BAR_WIFI = (_BAR_BATT[0] - _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)
+_BAR_CLOCK = (_BAR_WIFI[0] - 2 - 5 * 8, 0, 5 * 8, 18)
 _RUN_BTN = (28, 188, 70, 24)
 _CODE_BTN = (104, 188, 84, 24)
 _CLOSE_BTN = (194, 188, 96, 24)
@@ -314,10 +332,12 @@ _CARD_SCROLL_UP = (300, 38, 16, 14)     # tap to scroll cards up (toward the top
 _CARD_SCROLL_DN = (300, 168, 16, 14)    # tap to scroll cards down
 # --- Desktop shell (#28): home = wallpaper + cart icon grid + dock ----------
 # The home screen is now a Picotron/TIC-80-style desktop: a wallpaper backdrop, a
-# grid of tappable cart icons, a thin top status strip (clock + status pips), and
-# a persistent bottom dock. Drawn with the indexed API + petme128 font + the
-# _glyph vocabulary only, so host == device.
-_STATUS_H = 14          # top status strip height (wallpaper shows through above icons)
+# grid of tappable cart icons, the unified 18px top bar (clock + wifi/batt/gear +
+# NEW/DUP/DEL management icons), and (in Settings) the bottom dock. The top bar's
+# icons are 16x16 sprites from the editable IconSheet (Stage 1); the rest of the
+# chrome uses the indexed API + petme128 font + the _glyph vocabulary, so host ==
+# device.
+_STATUS_H = 18          # unified top bar height (16px icons + 1px top/bottom margin)
 _DOCK_Y = 218           # bottom dock strip top
 _DOCK_H = 22
 # Cart icon grid: a page of COLS x ROWS tiles between the status strip and dock.
@@ -330,11 +350,13 @@ _ICON_GAP_Y = 6
 _ICON_X0 = 8            # left margin so the COLS tiles + gaps center in 320px
 _ICON_Y0 = _STATUS_H + 8
 _ICON_BOX = 40          # the inner art box of a tile (the tappable icon proper)
-# Home management actions (create / duplicate / delete) -- a small row of icon
-# buttons tucked at the right of the status strip, only drawn when can_manage.
-_NEW_BTN = (236, 1, 26, 12)
-_DUP_BTN = (264, 1, 26, 12)
-_DEL_BTN = (292, 1, 26, 12)
+# Home management actions (create / duplicate / delete) -- 16x16 icon buttons on the
+# LEFT of the top bar's right cluster (the cluster is, L->R: NEW DUP DEL ... wifi batt
+# gear, with the gear hard against the right edge). Only drawn/hit-tested when
+# can_manage. 320x240 baseline; Layout reflows them on a larger system canvas.
+_NEW_BTN = (2, _BAR_Y, _BAR_ICON, _BAR_ICON)        # placeholder; Layout sets the real x
+_DUP_BTN = (2 + _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)
+_DEL_BTN = (2 + 2 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)
 # Page chevrons (when more carts than one page): tap to flip pages.
 _PAGE_PREV = (2, 110, 14, 24)
 _PAGE_NEXT = (304, 110, 14, 24)
@@ -657,41 +679,37 @@ class Layout:
             self.icon_x0 = max(0, (self.w - grid_w) // 2)
         self.page = self.cols * self.rows
 
-        # -- status strip glyph box --------------------------------------------
-        self.status_gh = 12 * fs                     # pip/glyph box (scaled w/ font)
+        # -- unified top bar: icon size + clusters (Stage 1) -------------------
+        # Every bar control is a 16x16 IconSheet sprite (16px icons, 1px margin in the
+        # 18px bar -> y = _BAR_Y). Icons scale with the font (24px at fs=2, etc.) so
+        # the bar grows on a larger system canvas. status_gh stays the 12*fs glyph box
+        # the non-bar chrome (dock/settings/toasts) still uses via _glyph.
+        self.status_gh = 12 * fs                      # legacy glyph box (dock/settings)
+        ic = _BAR_ICON * fs                           # bar icon side, scaled
+        stride = ic + _BAR_GAP * fs                   # left-edge step between bar icons
+        self.bar_icon = ic
+        self.bar_stride = stride
+        edge = 2 * fs                                 # margin from the canvas edges
 
-        # -- Settings gear, on the strip's LEFT (between the clock and the cart-name
-        # slot). The launcher no longer draws the bottom dock (#46), so this is the
-        # home screen's entry to Settings; placed left where there's clear space (the
-        # right end is the pips + the NEW/DUP/DEL cluster) and always drawn (not gated
-        # on can_manage). At baseline: clock ends ~x42, name slot starts x78 -> a
-        # 12px gear at x44 sits cleanly in the gap.
-        if self._base:
-            self.set_btn = (44, 1, 14, 12)
-        else:
-            gw = max(12, self.status_h - 2)
-            self.set_btn = (5 * self.font_w + 4 * fs, 1, gw, gw)
+        # -- right cluster (always): clock text, then wifi, batt, gear, right-aligned.
+        # The gear is hard against the right edge (the home screen's Settings entry,
+        # always drawn -- not gated on can_manage); batt + wifi sit to its left, then
+        # the clock text fills the space before them.
+        self.set_btn = (self.w - edge - ic, _BAR_Y, ic, ic)                 # gear
+        self.batt_btn = (self.set_btn[0] - stride, _BAR_Y, ic, ic)
+        self.wifi_btn = (self.batt_btn[0] - stride, _BAR_Y, ic, ic)
+        self.clock_w = 5 * self.font_w                # "HH:MM" (5 chars)
+        self.clock_x = max(edge, self.wifi_btn[0] - edge - self.clock_w)
 
-        # -- selected-cart name slot (after the clock + gear) ------------------
-        if self._base:
-            self.status_name_x = 78                  # frozen baseline (not 6*fw+6)
-            self.status_name_maxc = 18
-        else:
-            self.status_name_x = self.set_btn[0] + self.set_btn[2] + 4 * fs
-            self.status_name_maxc = max(
-                4, (self.w - self.status_name_x - 4 * self.status_gh) // self.font_w)
+        # -- left cluster (launcher, can_manage): NEW / DUP / DEL icon buttons.
+        self.new_btn = (edge, _BAR_Y, ic, ic)
+        self.dup_btn = (self.new_btn[0] + stride, _BAR_Y, ic, ic)
+        self.del_btn = (self.dup_btn[0] + stride, _BAR_Y, ic, ic)
 
-        # -- management buttons (NEW/DUP/DEL), tucked at the strip's right end ---
-        if self._base:
-            self.new_btn, self.dup_btn, self.del_btn = _NEW_BTN, _DUP_BTN, _DEL_BTN
-        else:
-            bh = max(8, self.status_h - 2)
-            bw = 3 * self.font_w + 2
-            gap = 2 * fs
-            x0 = self.w - 3 * bw - 2 * gap - 2
-            self.new_btn = (x0, 1, bw, bh)
-            self.dup_btn = (x0 + bw + gap, 1, bw, bh)
-            self.del_btn = (x0 + 2 * (bw + gap), 1, bw, bh)
+        # -- selected-cart name slot: between the management cluster and the clock.
+        self.status_name_x = self.del_btn[0] + self.del_btn[2] + edge
+        self.status_name_maxc = max(
+            4, (self.clock_x - edge - self.status_name_x) // self.font_w)
 
         # -- page chevrons (centered vertically in the icon band) ----------------
         if self._base:
@@ -747,8 +765,8 @@ class Layout:
         return (x, y, self.icon_w, self.icon_h)
 
     def clock_hit(self):
-        # The clock-text region on the status strip (Time Traveler egg, #21).
-        return (0, 0, 40 if self._base else 5 * self.font_w, self.status_h)
+        # The clock-text region in the top bar's right cluster (Time Traveler egg #21).
+        return (self.clock_x, 0, self.clock_w, self.status_h)
 
 # --- Button icon glyphs (the pre-literate icon vocabulary) ------------------
 # 1-bit, recolorable pixel bitmaps designed on a 12x12 grid at the native button
@@ -840,6 +858,137 @@ def _blit_glyph(cv, kind, rect, c):
                 run = 0
         if run:
             cv.rect(ox + (n - run) * fs, yy, run * fs, fs, c)
+
+
+# --- the unified top bar's icon theme (Stage 1) -----------------------------
+#
+# The top bar's chrome controls are 16x16 sprites drawn from an EDITABLE IconSheet
+# (so the bar is themeable), not the hardcoded _GLYPHS bitmaps -- which collapses the
+# ~120 glyph rect-spans/frame the labeled button rows cost into ~12 cached sprite
+# blits (a measured ~15ms/frame device win). `_ICON` is the slot map: a chrome kind ->
+# its sprite id in the 8x4 IconSheet (row-major). The IconSheet is loaded from
+# system_icons.kgfx when present, else baked from `_ICON_ART` below. The _glyph
+# vocabulary stays for NON-chrome uses (the cards/paint/blocks editors).
+_ICON = {
+    "home": 0, "edit": 1, "code": 2, "paint": 3, "map": 4, "blocks": 5,
+    "gear": 6, "wifi": 7, "batt": 8, "new": 9, "dup": 10, "del": 11,
+    "close": 12, "run": 13, "save": 14,
+}
+
+# The baked default theme: each icon is 16 row-strings of 16 chars over the 16-color
+# base palette. A char is a palette nibble (hex), or "." for transparent. Authored
+# high-contrast (mostly white 7 outlines + a couple of accents) so they read at 16px
+# on the black bar. Kept readable here so the theme is hand-editable; _default_icon_
+# sheet() bakes it into an IconSheet's pixels at the _ICON slots.
+_ICON_ART = {
+    "home": (                                  # a house: roof + body + door/window
+        "................", ".......77.......", "......7887......", ".....78887......",
+        "....7888887.....", "...788888887....", "..78888888887...", ".7888888888887..",
+        ".7666666666667..", ".7677777767667..", ".7677777767667..", ".7677777767667..",
+        ".7677777767667..", ".7666666666667..", ".7777777777777..", "................"),
+    "edit": (                                  # a pencil on the diagonal
+        "............777.", "...........7887.", "..........78887.", ".........788887.",
+        "........788887..", ".......788887...", "......788887....", ".....788887.....",
+        "....788887......", "...788887.......", "..788887........", ".788887.........",
+        ".78887..........", ".7887...........", ".777............", "................"),
+    "code": (                                  # angle brackets < >
+        "................", "................", ".....7....7.....", "....77....77....",
+        "...77......77...", "..77........77..", ".77..........77.", "77............77",
+        ".77..........77.", "..77........77..", "...77......77...", "....77....77....",
+        ".....7....7.....", "................", "................", "................"),
+    "paint": (                                 # a paintbrush (orange handle, pink tip)
+        "............777.", "...........7997.", "..........79997.", ".........799997.",
+        "........799997..", ".......79997....", "......7997......", ".....7997.......",
+        "....7997........", "...7eee7........", "..7eeeee7.......", ".7eeeeeee7......",
+        ".7eeeeeee7......", "..7eeeee7.......", "...7eee7........", "....777........."),
+    "map": (                                   # a 3x3 tile grid
+        "................", ".7777777777777..", ".7...7...7...7..", ".7...7...7...7..",
+        ".7777777777777..", ".7...7...7...7..", ".7...7...7...7..", ".7777777777777..",
+        ".7...7...7...7..", ".7...7...7...7..", ".7777777777777..", "................",
+        "................", "................", "................", "................"),
+    "blocks": (                                # a puzzle piece
+        "................", "..7777..........", "..7..7..........", "..7..7..7777....",
+        ".77..777....7...", ".7..........7...", ".7..........7...", ".77........77...",
+        "..7777..7777....", "..7..7..7.......", "..7..7..7.......", "..7..777........",
+        "..7....7........", "..7....7........", "..777777........", "................"),
+    "gear": (                                  # a cog with a hollow centre
+        "......7777......", "...7..7777..7...", "...77.7777.77...", "...777777777....",
+        ".7777777777777..", ".7777777777777..", "7777.77777.7777.", "7777.7..7..7777.",
+        "7777.7..7..7777.", "7777.77777.7777.", ".7777777777777..", ".7777777777777..",
+        "...777777777....", "...77.7777.77...", "...7..7777..7...", "......7777......"),
+    "wifi": (                                  # three signal arcs over a base dot
+        "................", "................", "....7777777.....", "..77.......77...",
+        ".7....777....7..", "....77...77.....", "...7.......7....", ".....77777......",
+        "....7.....7.....", "................", ".......77.......", "......7887......",
+        ".......77.......", "................", "................", "................"),
+    "batt": (                                  # a battery body + nub + green charge
+        "................", "................", "................", "...........77...",
+        ".77777777777b7..", ".7.........7b7..", ".7.bbbbbb..7b7..", ".7.bbbbbb..777..",
+        ".7.bbbbbb..7b7..", ".7.bbbbbb..7b7..", ".7.........7b7..", ".77777777777b7..",
+        "...........77...", "................", "................", "................"),
+    "new": (                                   # a blank page with a plus
+        ".7777777777.....", ".7........7.....", ".7...77...7.....", ".7...77...7.....",
+        ".7.7777777.7....", ".7.7777777.7....", ".7...77...7.....", ".7...77...7.....",
+        ".7........7.....", ".7........7.....", ".7........7.....", ".7........7.....",
+        ".7........7.....", ".7........7.....", ".7777777777.....", "................"),
+    "dup": (                                   # two overlapping pages
+        "...777777777....", "...7.......7....", ".7777777...7....", ".7.....7...7....",
+        ".7.....7...7....", ".7.....77777....", ".7.........7....", ".7.........7....",
+        ".7.........7....", ".7.........7....", ".7.........7....", ".7.........7....",
+        ".7.........7....", ".7.........7....", ".77777777777....", "................"),
+    "del": (                                   # a trash can with a lid
+        "................", ".....77777......", "...77.....77....", ".7777777777777..",
+        "................", "..77777777777...", "..7.7.7.7.7.7...", "..7.7.7.7.7.7...",
+        "..7.7.7.7.7.7...", "..7.7.7.7.7.7...", "..7.7.7.7.7.7...", "..7.7.7.7.7.7...",
+        "..7.7.7.7.7.7...", "..77777777777...", "...777777777....", "................"),
+    "close": (                                 # an X
+        "................", ".77..........77.", ".877........778.", "..877......778..",
+        "...877....778...", "....877..778....", ".....877778.....", "......8778......",
+        "......8778......", ".....877778.....", "....877..778....", "...877....778...",
+        "..877......778..", ".877........778.", ".77..........77.", "................"),
+    "run": (                                   # a play triangle
+        "................", "....77..........", "....787.........", "....7887........",
+        "....78887.......", "....788887......", "....7888887.....", "....78888887....",
+        "....78888887....", "....7888887.....", "....788887......", "....78887.......",
+        "....7887........", "....787.........", "....77..........", "................"),
+    "save": (                                  # a floppy disk
+        ".77777777777....", ".7.......7.7....", ".7.bbbbb.7.7....", ".7.bbbbb.7.7....",
+        ".7.bbbbb.7.7....", ".7.......7.7....", ".7.......7.7....", ".7777777777.....",
+        ".7.........7....", ".7.7777777.7....", ".7.7.....7.7....", ".7.7.....7.7....",
+        ".7.7.....7.7....", ".7.7.....7.7....", ".77777777777....", "................"),
+}
+
+
+def _nibble(ch):
+    """One _ICON_ART char -> a palette index, or -1 for transparent ('.')."""
+    if ch == ".":
+        return -1
+    try:
+        return int(ch, 16) & 15
+    except ValueError:
+        return -1
+
+
+def _default_icon_sheet():
+    """Bake `_ICON_ART` into a fresh IconSheet at the `_ICON` slots -- the theme used
+    when no system_icons.kgfx exists. Each art entry is painted into its 16x16 tile
+    via tset, so the result serializes/loads through the same .kgfx hex as any sheet.
+    Unmapped/short rows just leave that tile blank (transparent)."""
+    sheet = IconSheet()
+    t = sheet.TILE
+    for kind, rows in _ICON_ART.items():
+        n = _ICON.get(kind)
+        if n is None or n >= sheet.count:
+            continue
+        for ly in range(t):
+            row = rows[ly] if ly < len(rows) else ""
+            for lx in range(t):
+                ch = row[lx] if lx < len(row) else "."
+                c = _nibble(ch)
+                if c >= 0:
+                    sheet.tset(n, lx, ly, c)
+    sheet.dirty = False
+    return sheet
 
 
 def _cursor_delta(n):
@@ -1316,6 +1465,14 @@ class Workstation:
         self._wp_live = True          # run the wallpaper's _update too (set False to
                                       # save cost: _draw-only static backdrop)
         self._icon_cache = {}         # cart path -> desktop-icon sprite Image (or None)
+        # Unified top bar (Stage 1): the editable 16x16 IconSheet the bar draws its
+        # chrome icons from. Injected by build_workstation / run_desktop (loaded from
+        # system_icons.kgfx, else the baked default theme); None falls back to _glyph.
+        # _bar_img_cache memoises tile_image(slot) per kind so the SAME _SheetSprite is
+        # reused every frame -- on the device that keeps its per-Image RGB565 blit cache
+        # alive (one cached blit per icon), the whole point of moving the bar to sprites.
+        self.icon_sheet = None
+        self._bar_img_cache = {}      # icon kind -> cached _SheetSprite (or None)
         self.set_msel = 0             # selected row in the Settings screen
         self.carts_root = None        # SD carts dir (reads); set by run_desktop
         self.cart_error = None        # last cart failure text -> on-canvas error panel
@@ -1352,6 +1509,12 @@ class Workstation:
         self.perf_capture = False     # measure flush/draw without drawing the HUD
         self._flush_ms = 0.0          # smoothed comp.flush() ms (panel DMA)
         self._draw_ms = 0.0           # smoothed draw ms (total frame - flush)
+        # DRAWBRK phase split of _draw_ms (#43 follow-up): where the per-frame draw
+        # cost actually goes -- cart _update, cart _draw, and the console chrome
+        # (dock + cursor + overlays, the remainder). Surfaced via perf_breakdown().
+        self._upd_ms = 0.0            # smoothed cart _update(dt) ms
+        self._cart_ms = 0.0           # smoothed cart _draw()+audio.tick ms
+        self._chrome_ms = 0.0         # smoothed chrome ms (= draw - upd - cart)
         # Achievements (#21): a small set of fun milestones + the hidden Easter-egg
         # rewards. Starts empty/volatile; load_achievements() wires the SD store +
         # the unlock beep. The Workstation calls ach.note(event) at the flow points
@@ -1455,6 +1618,35 @@ class Workstation:
         self.set_font_scale(self.system.get("font_scale", self.font_scale),
                             persist=False)
         self.select_wallpaper(self.system.get("wallpaper"), persist=False)
+
+    def set_icon_sheet(self, sheet):
+        """Adopt the top-bar IconSheet (Stage 1) and drop the per-kind image cache so
+        the next frame rebuilds its sprites (and, on the device, their RGB565 copies)
+        from the new theme. None reverts the bar to the _glyph fallback."""
+        self.icon_sheet = sheet
+        self._bar_img_cache = {}
+
+    def load_icon_sheet(self):
+        """Build the top-bar IconSheet (Stage 1): load system_icons.kgfx via the store
+        if present, else bake the default theme. Safe on an embedded/no-store boot --
+        then it's the baked default. Adopts it (clears the cache). Called after the
+        store + carts_root are wired (host build_workstation / device run_desktop)."""
+        hexs = None
+        if self.carts_store is not None and self.carts_root is not None:
+            load = getattr(self.carts_store, "load_system_icons", None)
+            if load is not None:
+                try:
+                    hexs = self._with_sd(lambda: load(self.carts_root))
+                except Exception as exc:  # noqa: BLE001 -- a bad theme falls back to default
+                    print("KidCode icons load failed:", _err_text(exc))
+                    hexs = None
+        sheet = None
+        if hexs:
+            try:
+                sheet = IconSheet.from_hex(hexs)
+            except Exception:  # noqa: BLE001
+                sheet = None
+        self.set_icon_sheet(sheet if sheet is not None else _default_icon_sheet())
 
     # -- system font scale (#39) ---------------------------------------------
     #
@@ -2827,12 +3019,16 @@ class Workstation:
             self._settings_pointer(px, py, click)
         elif self.screen == "desktop":
             px, py = gx, gy
-            # While a cart runs the TOP-BAR overlay (EDIT/CODE, PAINT, MAP, HOME) is
-            # the TIC-80 one-tap tool switcher -- it occludes only 22px at the top so
-            # gameplay keeps the rest of the screen (a bottom dock would cover the
-            # play area). The bottom dock is the home/settings chrome.
+            # While a cart runs the unified TOP BAR (HOME, EDIT/CODE, PAINT, MAP,
+            # BLOCKS as 16x16 icons) is the TIC-80 one-tap tool switcher -- it occludes
+            # only the 18px bar at the top so gameplay keeps the rest of the screen (a
+            # bottom dock would cover the play area). The icon rects are the same
+            # _HOME_BTN/_MENU_BTN/... constants the bar draws from, so a tap on an icon
+            # fires its action.
             if click:
-                if _in(px, py, _MENU_BTN):
+                if _in(px, py, _HOME_BTN):
+                    self.go_home()
+                elif _in(px, py, _MENU_BTN):
                     self._open_menu()
                 elif _in(px, py, _PAINT_BTN):
                     self._open_paint()
@@ -2840,8 +3036,6 @@ class Workstation:
                     self._open_map()
                 elif _in(px, py, _BLOCKS_BTN):
                     self._open_blocks()
-                elif _in(px, py, _HOME_BTN):
-                    self.go_home()
                 elif self.show_fps and _in(px, py, self._fps_tap_rect()):
                     # Tapping the FPS readout toggles the frame-time breakdown HUD
                     # (#43/#44 perf). Deliberate, no keyboard, doesn't fight game
@@ -4023,6 +4217,8 @@ class Workstation:
         # fires when perf_capture is set (device diag sampling) -- not just the HUD.
         _perf = self.perf_hud or self.perf_capture
         _frame_t0 = _ticks_ms() if _perf else 0
+        _upd = 0          # cart _update(dt) ms this frame (perf split; 0 off the cart path)
+        _cart = 0         # cart _draw()+audio.tick ms this frame
         if self.screen == "launcher":
             self._draw_desktop_home(dt)
         elif self.screen == "settings":
@@ -4039,12 +4235,17 @@ class Workstation:
                 self.input.cart_keyp = k if (k and k != self._cart_key_prev) else 0
                 self._cart_key_prev = k
                 try:
+                    _ts = _ticks_ms() if _perf else 0
                     if self._update:
                         self._update(dt)
+                    _tm = _ticks_ms() if _perf else 0
                     if self._draw:
                         self._draw()
                     if self.audio is not None:
                         self.audio.tick(dt)      # advance/feed playback (#16)
+                    if _perf:
+                        _upd = _ticks_diff(_tm, _ts)
+                        _cart = _ticks_diff(_ticks_ms(), _tm)
                 except Exception as exc:  # noqa: BLE001
                     # A cart that raises mid-frame must NOT escape the loop (the
                     # device would hang silently). Capture it, stop running the
@@ -4070,7 +4271,7 @@ class Workstation:
             self._reset_canvas_state()
             if self.cart_error is not None:
                 self._draw_error_panel()
-            self._draw_desktop_buttons()
+            self._draw_status_strip("desktop")     # unified top bar (tool switcher)
         elif self.menu_view == "code":
             self._draw_code()              # full-screen editor (covers the cart)
         elif self.menu_view == "blocks":
@@ -4143,6 +4344,17 @@ class Workstation:
                 else self._flush_ms + (_flush - self._flush_ms) * 0.15
             self._draw_ms = float(_draw) if self._draw_ms <= 0 \
                 else self._draw_ms + (_draw - self._draw_ms) * 0.15
+            # DRAWBRK split: cart _update / cart _draw / console chrome (the
+            # remainder = dock + cursor + overlays). chrome = draw - upd - cart.
+            _chrome = _draw - _upd - _cart
+            if _chrome < 0:
+                _chrome = 0
+            self._upd_ms = float(_upd) if self._upd_ms <= 0 \
+                else self._upd_ms + (_upd - self._upd_ms) * 0.15
+            self._cart_ms = float(_cart) if self._cart_ms <= 0 \
+                else self._cart_ms + (_cart - self._cart_ms) * 0.15
+            self._chrome_ms = float(_chrome) if self._chrome_ms <= 0 \
+                else self._chrome_ms + (_chrome - self._chrome_ms) * 0.15
         else:
             self.comp.flush()
         # We painted this frame: clear the dirty flag and snapshot the pointer state
@@ -4179,37 +4391,71 @@ class Workstation:
         self._draw_status_strip("home")
 
     def _draw_status_strip(self, where):
-        """The thin top status strip: a clock, the selected cart's name (home) or
-        title (settings), battery/wifi pips, and (home) the Settings gear. Translucency
-        isn't available on the indexed canvas, so it's a slim dark backing band with a
-        thin edge line below it -- a deliberate shelf over the wallpaper rather than a
-        hard cut. The wallpaper's own art is pushed below this band (see
-        _draw_wallpaper #46), so no wallpaper content is overpainted; the band only
-        sits over the wallpaper's plain backdrop fill, and the text stays legible.
-        On the SYSTEM canvas; height + text follow the layout/font scale (#39)."""
+        """The unified 18px top bar (Stage 1), drawn on BOTH the launcher/Settings and
+        the running-cart screen. A black backing band (with a thin shelf edge line
+        below) full of 16x16 IconSheet sprites instead of the old labeled glyph
+        buttons. Layers:
+
+          * Right cluster (always): the clock text, then wifi, batt, gear icons,
+            right-aligned (wifi/batt keep their placeholder green for now).
+          * Left cluster (launcher home / Settings): NEW / DUP / DEL icons when
+            can_manage; the selected cart's name fills the gap before the clock.
+          * Left cluster (running cart, where == "desktop"): the tool switcher --
+            HOME, then EDIT (or CODE for a no-edit cart), PAINT, MAP, BLOCKS.
+
+        The launcher/Settings bar draws on the SYSTEM canvas (reflowed by Layout #39);
+        the running-cart bar draws on the GAME canvas (the fixed 320x240 viewport), so
+        it uses the fixed _BAR_* / button-rect constants. Translucency isn't available
+        on the indexed canvas, so the dark band is a deliberate shelf over the
+        wallpaper (whose art is pushed below it, see _draw_wallpaper #46)."""
+        if where == "desktop":
+            self._draw_top_bar_cart()
+            return
         cv = self.sys_canvas
         lay = self.layout
-        gh = lay.status_gh                           # glyph box scaled with the font
         cv.rect(0, 0, cv.w, lay.status_h, NAMES["black"])
         cv.rect(0, lay.status_h - 1, cv.w, 1, NAMES["dark_grey"])   # shelf edge line
-        cv.print(self._clock_text(), 2, 3, NAMES["light_grey"], 1)
+        # Right cluster: clock + wifi/batt/gear (gear = the Settings entry, always
+        # drawn -- the launcher has no bottom dock, #46).
+        cv.print(self._clock_text(), lay.clock_x, 3, NAMES["light_grey"], 1)
+        self._icon("wifi", lay.wifi_btn[0], lay.wifi_btn[1], cv)
+        self._icon("batt", lay.batt_btn[0], lay.batt_btn[1], cv)
+        self._icon("gear", lay.set_btn[0], lay.set_btn[1], cv)
+        # Left cluster: management icons (when writable) + the selected cart's name.
         if where == "home":
-            # Settings entry (the launcher has no dock now, #46): a gear on the strip.
-            self._glyph("gear", lay.set_btn, NAMES["light_grey"], cv)
+            if self.can_manage:
+                self._icon("new", lay.new_btn[0], lay.new_btn[1], cv)
+                self._icon("dup", lay.dup_btn[0], lay.dup_btn[1], cv)
+                self._icon("del", lay.del_btn[0], lay.del_btn[1], cv)
             sel = self.launcher.selected()
             if sel is not None:
                 name = sel["title"]
                 if len(name) > lay.status_name_maxc:
                     name = name[:lay.status_name_maxc]
                 cv.print(name, lay.status_name_x, 3, NAMES["white"], 1)
-        # battery + wifi pips (placeholders): a wifi glyph + a battery glyph.
-        self._glyph("wifi", (cv.w - 2 * gh, 1, gh, gh), NAMES["green"], cv)
-        self._glyph("batt", (cv.w - gh, 1, gh, gh), NAMES["green"], cv)
-        # Home management actions tuck into the strip (only when writes are enabled).
-        if where == "home" and self.can_manage:
-            self._mini_btn("NEW", lay.new_btn, NAMES["green"], cv)
-            self._mini_btn("DUP", lay.dup_btn, NAMES["blue"], cv)
-            self._mini_btn("DEL", lay.del_btn, NAMES["red"], cv)
+
+    def _draw_top_bar_cart(self):
+        """The running-cart half of the unified top bar (where == "desktop"). Drawn on
+        the GAME canvas with the fixed 320x240 rects: a tool switcher on the left
+        (HOME / EDIT|CODE / PAINT / MAP / BLOCKS) + the right cluster (clock + wifi /
+        batt / gear). Same icon vocabulary as the launcher bar so both read alike."""
+        cv = self.canvas
+        cv.rect(0, 0, cv.w, _STATUS_H, NAMES["black"])
+        cv.rect(0, _STATUS_H - 1, cv.w, 1, NAMES["dark_grey"])      # shelf edge line
+        # Left cluster: the TIC-80 one-tap tool switcher. Carts with a Make-it-mine
+        # schema open the cards menu (pencil = EDIT); the rest jump straight to code
+        # (the < > glyph = CODE). cart may be None defensively (error panel, no cart).
+        has_edit = bool(self.cart.get("edit")) if self.cart else False
+        self._icon("home", _HOME_BTN[0], _HOME_BTN[1], cv)
+        self._icon("edit" if has_edit else "code", _MENU_BTN[0], _MENU_BTN[1], cv)
+        self._icon("paint", _PAINT_BTN[0], _PAINT_BTN[1], cv)
+        self._icon("map", _MAP_BTN[0], _MAP_BTN[1], cv)
+        self._icon("blocks", _BLOCKS_BTN[0], _BLOCKS_BTN[1], cv)
+        # Right cluster: clock + wifi/batt/gear (gear inert on the cart bar for now).
+        cv.print(self._clock_text(), _BAR_CLOCK[0], 3, NAMES["light_grey"], 1)
+        self._icon("wifi", _BAR_WIFI[0], _BAR_WIFI[1], cv)
+        self._icon("batt", _BAR_BATT[0], _BAR_BATT[1], cv)
+        self._icon("gear", _BAR_GEAR[0], _BAR_GEAR[1], cv)
 
     def _clock_text(self):
         """A wall-clock HH:MM from time.localtime when available, else a mm:ss
@@ -4351,6 +4597,14 @@ class Workstation:
         name = cart.get("title") or cart.get("path") or "?"
         return (name, self._fps, self._flush_ms, self._draw_ms)
 
+    def perf_breakdown(self):
+        """(_upd_ms, _cart_ms, _chrome_ms): the EMA phase split of draw_ms -- cart
+        _update, cart _draw (incl. audio.tick), and console chrome (dock + cursor +
+        overlays, the remainder). Used by the device diag's DRAWBRK line to find
+        where the per-frame draw cost actually goes (cart logic vs sprites/draw vs
+        chrome). Only meaningful while a cart runs with perf_capture/perf_hud on."""
+        return (self._upd_ms, self._cart_ms, self._chrome_ms)
+
     def _draw_perf_hud(self):
         """Frame-time breakdown (#43/#44 perf), drawn just above the FPS chip when
         perf_hud is on: "f<flush> d<draw> t<total>" in ms (total = flush + draw).
@@ -4470,17 +4724,6 @@ class Workstation:
         self._glyph(kind, (x + 2, y, 16, h), NAMES["black"])
         if label:
             cv.print(label, x + 19, y + (h - 8) // 2, NAMES["black"], 1)
-
-    def _draw_desktop_buttons(self):
-        # Carts with a Make-it-mine schema open the cards menu (pencil = EDIT); the
-        # rest jump straight to the code editor (same glyph -- both are "change me").
-        # (cart may be None defensively if an error panel is up with no open cart.)
-        has_edit = bool(self.cart.get("edit")) if self.cart else False
-        self._icon_btn("edit", "EDIT" if has_edit else "CODE", _MENU_BTN, NAMES["dark_purple"])
-        self._icon_btn("paint", "PAINT", _PAINT_BTN, NAMES["orange"])
-        self._icon_btn("map", "MAP", _MAP_BTN, NAMES["green"])
-        self._icon_btn("blocks", "", _BLOCKS_BTN, NAMES["pink"])   # open the block editor (#29)
-        self._icon_btn("home", "HOME", _HOME_BTN, NAMES["dark_grey"])
 
     def _draw_error_panel(self):
         # A friendly on-canvas crash report (the device never reaches serial, so
@@ -4738,6 +4981,40 @@ class Workstation:
         # blit + the glyph encoding live in the module-level _blit_glyph so Launcher
         # (canvas-only) renders the identical vocabulary.
         _blit_glyph(cv if cv is not None else self.canvas, kind, rect, c)
+
+    def _bar_image(self, kind):
+        """The cached 16x16 _SheetSprite for top-bar icon `kind`, or None when the
+        icon sheet/slot is missing. Memoised per kind so the SAME image object is
+        blitted every frame -- the device caches its RGB565 copy on the image, so the
+        bar costs one cached blit per icon (Stage 1's perf goal)."""
+        if kind in self._bar_img_cache:
+            return self._bar_img_cache[kind]
+        img = None
+        if self.icon_sheet is not None:
+            slot = _ICON.get(kind)
+            if slot is not None:
+                img = self.icon_sheet.tile_image(slot)   # transparent -1 (icons keyed)
+        self._bar_img_cache[kind] = img
+        return img
+
+    def _icon(self, kind, x, y, cv=None):
+        """Blit the top-bar icon `kind` (a 16x16 IconSheet sprite) at (x, y). The
+        themeable replacement for _glyph on the bar; falls back to _glyph (the 12x12
+        bitmap, centered) when the icon sheet/slot is missing, so the bar never crashes
+        on a half-wired theme. cv defaults to the system canvas (the bar lives there);
+        the running-cart bar passes the game canvas explicitly. The icon scales with
+        the canvas's system font scale (#39) so it grows on a larger panel -- the GAME
+        canvas is always scale 1, so the cart bar is byte-identical."""
+        cv = cv if cv is not None else self.sys_canvas
+        fs = getattr(cv, "font_scale", 1)
+        if fs < 1:
+            fs = 1
+        img = self._bar_image(kind)
+        if img is not None:
+            cv.spr(img, x, y, fs)                        # 16px art upscaled by font scale
+        else:
+            self._glyph(kind, (x, y, _BAR_ICON * fs, _BAR_ICON * fs),
+                        NAMES["light_grey"], cv)
 
     def _draw_paint(self):
         cv = self.canvas

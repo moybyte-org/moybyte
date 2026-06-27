@@ -9,6 +9,7 @@ only its own rendering + input glue around these.
 
   CodeEditor   -- editable text buffer + cursor (the on-device code editor, #3)
   SpriteSheet  -- indexed 8x8 tile sheet + PICO-8 __gfx__-style hex (#4 storage)
+  IconSheet    -- SpriteSheet of 16x16 tiles: the editable top-bar icon theme
   PaintEditor  -- pixel-paint state over a sheet tile (#4 editor)
   TileMap      -- grid of tile ids over a sheet + map.kmap hex (#32 storage)
   MapEditor    -- tile-placement state over a TileMap (#32 editor)
@@ -312,6 +313,45 @@ class SpriteSheet:
 
     @classmethod
     def from_hex(cls, text, cols=16, rows=16):
+        sheet = cls(cols, rows)
+        w = sheet.w
+        y = 0
+        for line in text.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            if y >= sheet.h:
+                break
+            for x in range(min(w, len(line))):
+                try:
+                    sheet.pix[y * w + x] = int(line[x], 16)
+                except ValueError:
+                    pass
+            y += 1
+        sheet.dirty = False
+        return sheet
+
+
+class IconSheet(SpriteSheet):
+    """An indexed sprite sheet of 16x16 tiles -- the editable icon theme behind the
+    unified top bar (Stage 1). It IS a SpriteSheet: everything (tile_image, the flat
+    .kgfx hex serialize/parse, copy_tile) drives off self.TILE, so a 16x16 tile is
+    automatic. The only overrides are the bigger TILE and a smaller default geometry
+    (8 cols x 4 rows = 32 icon slots, a 128x64 sheet). Colors are still the 16-color
+    base palette (c & 15), so an icon reads on the dark bar and theme files round-trip
+    through the same hex format as sprites.kgfx / shared.kgfx."""
+
+    TILE = 16
+
+    def __init__(self, cols=8, rows=4, pix=None):
+        SpriteSheet.__init__(self, cols, rows, pix)
+
+    @classmethod
+    def from_hex(cls, text, cols=8, rows=4):
+        # Same flat-grid parse as SpriteSheet (which is dimensioned off self.w/self.h,
+        # so it already handles 16px tiles); only the default geometry differs. The
+        # parse body is duplicated rather than delegating to SpriteSheet.from_hex so it
+        # stays a plain classmethod under MicroPython (no __func__ rebinding).
         sheet = cls(cols, rows)
         w = sheet.w
         y = 0
