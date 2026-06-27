@@ -27,7 +27,12 @@
     background: #000;
     border: 1px solid #1d2b53;
     border-radius: 6px;
-    max-width: 100%; height: auto;
+    /* Scale up to fill the viewport while keeping the 320x240 (4:3) ratio crisp.
+       112vh keeps the height under the header/footer; 96vw caps width on narrow
+       screens; height:auto derives the 4:3 height from the chosen width. */
+    width: min(96vw, 112vh);
+    height: auto;
+    max-width: 100%;
     touch-action: none;                    /* we handle pointer/drag ourselves */
     cursor: crosshair;
   }
