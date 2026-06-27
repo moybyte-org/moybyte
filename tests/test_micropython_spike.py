@@ -325,29 +325,28 @@ def test_kc_compositor_flush_breakdown_instrumentation():
     assert "freq = 80000000" in disp_src
 
 
-def test_kc_compositor_double_buffer_default_off_and_revertible():
+def test_kc_compositor_double_buffer_enabled_and_revertible():
     """DMA double-buffering / flush overlap (#40): a ping-pong of two PSRAM frame
-    buffers so the panel DMA runs WHILE the CPU renders the next frame (frame =
-    max(render, flush)). SAFETY: it is OPT-IN behind DOUBLE_BUFFER, DEFAULT OFF, so
-    the proven single-buffer banded flush is the one-flag instant revert if it tears/
-    glitches/hangs (the #40 failure mode). Grep the device source for the design +
-    the default-off gate + the SD-vs-panel-DMA mutual exclusion."""
+    buffers so the panel DMA runs WHILE the CPU renders the next frame. Device-
+    confirmed stable + the copy-removal win (flush 28->20ms, copy=0, ~13->16-19fps),
+    so it is now the DEFAULT ON. It stays a single-flag revert: set DOUBLE_BUFFER =
+    False -> the proven single-buffer banded flush runs byte-for-byte (the #40
+    instant fallback). Grep the device source for the design + the gate + the
+    SD-vs-panel-DMA mutual exclusion."""
     comp_src = (ROOT / "modules" / "kc_compositor.py").read_text(encoding="utf-8")
     runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
 
-    # The gate is a single named constant, DEFAULT OFF (the instant revert). The
-    # module-level assignment statement is the False one (the doc comment may mention
-    # "= True" as the enable instruction, so assert the actual top-level statement,
-    # not just any substring).
-    assert "\nDOUBLE_BUFFER = False\n" in comp_src
-    assert "\nDOUBLE_BUFFER = True\n" not in comp_src     # never shipped enabled
+    # The gate is a single named constant, now DEFAULT ON (device-confirmed). It
+    # stays revertible (a one-flag fallback to the single-buffer path) -- assert the
+    # actual top-level assignment is True (the line may carry a trailing comment).
+    assert "\nDOUBLE_BUFFER = True" in comp_src
     # ... and importable so the flag is verifiable, not just textual.
     spec = importlib.util.spec_from_file_location(
         "kc_compositor", ROOT / "modules" / "kc_compositor.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    assert module.DOUBLE_BUFFER is False
+    assert module.DOUBLE_BUFFER is True
 
     # Two distinct PSRAM ping-pong buffers (A=_fb, B=_fb_b); flush picks the back.
     assert "self._fb_b = None" in comp_src
