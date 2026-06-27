@@ -68,12 +68,16 @@ FLUSH_SAMPLE_EVERY = 30   # log one FLUSHBRK per N flushes (~ every 0.5-1.5 s)
 # DOUBLE_BUFFER = False the proven single-buffer banded flush below runs
 # byte-for-byte unchanged (the instant revert -- see "TO ENABLE / TO REVERT").
 #
-# WHY. The panel flush is hardware-floored at ~28 ms (153,600 B @ ~40 MHz on
-# this board's GPIO-matrix wiring -- see docs/spi_flush_80mhz.md; it can't go
-# faster). Today the flush is SERIAL with render: frame = render(~50) +
-# flush(28) ~= 78 ms -> ~13 fps. With double-buffering the flush DMA runs WHILE
-# the CPU renders the next frame, so frame = max(render, flush) ~= 50 ms ->
-# ~20 fps. The flush can't be made faster, but it can be HIDDEN.
+# WHY. Device FLUSHBRK measurement: the old serial flush was ~28 ms = a 10.5 ms
+# `_frame[:]=_fb` PSRAM copy + ~17.4 ms tx (the SPI runs ~80 MHz -- the earlier
+# "40 MHz floor" was wrong; see docs/spi_flush_80mhz.md). Double-buffering deletes
+# the copy outright (A/B distinct buffers, no copy needed) -> measured flush drops
+# to ~20 ms (copy=0), ~13->~16-19 fps. NOTE (measured): the tx is NOT fully hidden
+# behind render -- lcd_bus exposes no async-completion callback, so the deferred
+# final band drains synchronously (~17 ms shows up as `setup`/drain, not overlapped).
+# So we bank the copy-removal win here; TRUE overlap (tx hidden) would need native
+# esp_lcd access -- deferred (the per-object DRAW cost is the bigger wall: a native
+# sprite-batch, #43). The flush can't be made faster, but the copy is gone.
 #
 # HOW (the buffer/swap design + how completion is tracked).
 # Two DISTINCT PSRAM RGB565 framebuffers, A and B (2 x 153,600 B in PSRAM; we
@@ -110,7 +114,7 @@ FLUSH_SAMPLE_EVERY = 30   # log one FLUSHBRK per N flushes (~ every 0.5-1.5 s)
 # the #40 failure mode): set DOUBLE_BUFFER = False -> flush() is the original
 # single-buffer banded path, byte-for-byte. FLUSHBRK instrumentation works in
 # BOTH paths so the overlap is measurable either way.
-DOUBLE_BUFFER = False
+DOUBLE_BUFFER = True   # device-confirmed stable + the copy-removal win (~13->16-19fps)
 
 
 def plan_strips(height, strip_h):
