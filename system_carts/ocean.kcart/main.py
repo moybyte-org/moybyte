@@ -39,5 +39,7 @@ def _draw():
         circb(int(b[0]), int(b[1]), b[2], col("white"))   # bubble outlines
     rect(0, H - 18, W, 18, col("brown"))          # seabed
     wob = 2 if (int(t * 3) % 2 == 0) else 0
-    spr(0, int(fish_x), H - 18 - 24 - wob, 0, 4)   # fish tile, 4x scaled
+    # spr-flip (#11): the fish faces right by default; flip it horizontally (mode 1)
+    # when swimming left so it always faces where it's going -- the live demo of flip.
+    spr(0, int(fish_x), H - 18 - 24 - wob, 1 if fish_dir < 0 else 0, 4)  # fish, 4x, faces travel
     print("OCEAN", 10, 10, col("white"), 3)
