@@ -620,28 +620,51 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
 # and format are all correct; if it is silent the failure is the I2S *init* (made
 # loud below) or the *feed*, not the wiring.
 #
-# THE FEED -- why the old per-frame blocking write was wrong:
-# MicroPython machine.I2S.write() is BLOCKING by default (it copies the whole
-# buffer into the DMA ring before returning, waiting if the ring is full). The old
-# code rendered rate*dt samples every frame and blocking-wrote them, so write()
-# stalled the single-threaded loop for ~one frame of audio each frame -- that is
-# exactly the reported FPS drop, and the jitter under-ran the DMA into crackle.
-# Fix: NON-BLOCKING writes (I2S.irq() switches the port into NON_BLOCKING mode; the
-# port copies our buffer on its own FreeRTOS task and fires our callback when done).
-# The ESP32 non-blocking write keeps a POINTER to the caller's buffer until that
-# copy finishes, so we must (a) keep the buffer alive -- a persistent double-buffer,
-# not a fresh `bytes` each frame -- and (b) only write when the previous copy is
-# done (the queue depth is 1; a second in-flight write is silently dropped). The
-# big DMA ibuf (the ring) absorbs the frame jitter so the speaker never starves.
+# THE FEED -- THE CRACKLE FIX (#41): a dedicated core-1 audio task.
+# The root cause of the crackle was that the I2S feed was COUPLED to the render loop:
+# DeviceAudio.tick() ran once per frame on core 0 (the MicroPython VM core), and a
+# render frame is ~50-80 ms (12-14 fps). During a long draw the I2S DMA ring drained
+# and under-ran -> crackle. A deeper ring + bigger feed cap only helped "a bit"
+# because the feed CADENCE was still the slow, jittery frame rate.
 #
-# CPU budget: the pure-Python mixer is the cost. We render at 8 kHz (the reference
-# SimpleTone rate) to halve the per-frame sample count vs. 11025, and skip all work
-# when nothing is playing so a silent cart costs ~nothing. If the mixer is still too
-# slow at 30 FPS the escalation is a native kc_audio C mixer (like kc_gfx); the data
-# model + render() seam stay identical.
+# The fix (owner's call, matches PixelRoot / most MCU games): feed I2S from a
+# DEDICATED native FreeRTOS task PINNED TO CORE 1, decoupled from rendering, so the
+# DMA is topped up continuously no matter how slow core 0's frame is. The ESP32-S3 is
+# dual-core; MicroPython's VM is single-core (core 0), but the native kc_audio C task
+# runs on core 1 fully independently. I2S is on its OWN pins (separate from the shared
+# SPI display/SD bus -- see #40), so core 1 owning I2S never touches the panel/SD path.
 #
-# STILL NEEDS ON-DEVICE VERIFICATION: that this actually drives the amp audibly with
-# no crackle and no FPS drop. Do NOT claim it is tested on hardware.
+# THE SPLIT (see native/kc_audio/modkc_audio.c for the C side):
+#   core 0 (this Python): owns the model + control surface + music scheduler. Each
+#       frame tick() runs the music scheduler and COMMITS every voice's state into the
+#       shared C kc_voices[] (kc_audio.voice_commit, bracketed by voice_lock/unlock so
+#       the commit is atomic vs. the task's snapshot). It does NO per-sample work and
+#       NO I2S write. To advance phrases it reads kc_audio.active_mask() -- the bit set
+#       the core-1 task last published per still-playing voice.
+#   core 1 (C task): owns the IDF i2s_std channel + the write loop. Each block it
+#       snapshots kc_voices[] under the mutex, mixes (the heavy per-sample loop), and
+#       writes to I2S (blocking on the DMA drain -- which paces it to the audio clock,
+#       on core 1, so the VM never stalls), then folds the advanced cursor back.
+#
+# FALLBACK (revert-able with NO rebuild): if the core-1 task can't start (no kc_audio,
+# old build, channel/task creation fails) DeviceAudio uses the LEGACY single-core feed
+# -- machine.I2S non-blocking writes fed per-frame from tick(), the per-block
+# voice_set/render/voice_read kernel. Set KC_AUDIO_CORE1 = False below to force that
+# path even when the task is available (e.g. to A/B a bad result).
+#
+# The legacy feed's mechanics (for reference): MicroPython machine.I2S.write() is
+# BLOCKING by default; I2S.irq() flips it NON_BLOCKING (the port copies our buffer on
+# its own task and fires our callback). The non-blocking write keeps a POINTER to the
+# caller's buffer until the copy finishes, so we keep the buffer alive (a persistent
+# double-buffer) and only write when the previous copy is done.
+#
+# STILL NEEDS ON-DEVICE VERIFICATION: that the core-1 task actually drives the amp
+# audibly with no crackle and no FPS drop. Do NOT claim it is tested on hardware.
+
+# Master switch for the core-1 audio task (#41). True: prefer the dedicated core-1
+# I2S feeder (the crackle fix); fall back to the legacy per-frame feed if it can't
+# start. Set False to FORCE the legacy single-core feed (revert without a rebuild).
+KC_AUDIO_CORE1 = True
 
 I2S_BCK = 7
 I2S_WS = 5
@@ -665,10 +688,21 @@ AUDIO_MAX_FRAME = AUDIO_RATE // 6
 
 
 class DeviceAudio:
-    """I2S audio backend for the T-Deck. Wraps the shared AudioEngine and feeds its
-    rendered PCM to a machine.I2S TX stream NON-BLOCKINGLY, so a running cart's
-    sfx()/music() never stalls the render loop. Constructed behind a try/except so a
-    board/build without I2S degrades to silence, never a crash.
+    """I2S audio backend for the T-Deck. Wraps the shared AudioEngine. Two feeds:
+
+    * CORE-1 task (#41, default -- the crackle fix): the native kc_audio C module owns
+      the IDF i2s_std channel and a FreeRTOS task pinned to core 1 that mixes + writes
+      I2S continuously, decoupled from the render loop. tick() only runs the music
+      scheduler and commits voice state across to C -- no per-sample mix, no I2S write
+      on core 0. This is what stops the crackle (audio is fed no matter how slow a
+      frame is).
+    * LEGACY single-core feed (fallback): if the core-1 task can't start, fall back to
+      machine.I2S non-blocking writes fed per-frame from tick(), with the native
+      per-block kernel (or the pure-Python mixer if kc_audio is absent). Set the
+      module-level KC_AUDIO_CORE1 = False to FORCE this path (revert with no rebuild).
+
+    Constructed behind try/except at every step so a board/build without kc_audio or
+    I2S degrades to a quieter mode (or silence), never a crash.
 
     NEEDS ON-DEVICE VERIFICATION -- written to the reference pins/power/format but
     unproven on hardware in this environment (see the module comment above)."""
@@ -680,19 +714,33 @@ class DeviceAudio:
         # so retuning it here is safe) and to match the I2S port's configured rate.
         engine.rate = AUDIO_RATE
         self.i2s = None
-        # Double buffer: render alternates into bufs[_buf], write()s it non-blocking;
-        # the I2S port copies it on a background task and fires _on_done. We never
-        # touch a buffer while its copy is in flight (_busy), so the port always sees
-        # stable bytes. Persistent bytearrays => the GC can't collect an in-flight one.
+        self._core1 = False        # True once the core-1 feeder task is running
+        # Core-1 commit tracking: the C task owns per-sample advancement (idx/t/phase)
+        # once a voice is committed, so we must NOT re-commit a voice's (now stale)
+        # Python cursor every frame -- that would reset it to step 0 and stutter. We
+        # only commit a voice the frame it is (re)triggered or stopped, detected by a
+        # change in (id(steps), active): AudioEngine._Voice.play()/stop() always assign
+        # a BRAND-NEW steps list, so the identity changes exactly on a (re)trigger.
+        self._commit_sig = [None] * len(engine.voices)
+        # Per-voice flag: a voice committed-active whose play the core-1 task has NOT
+        # yet confirmed in active_mask() (the task snapshots ~every block, ~32 ms, so a
+        # fresh trigger may not be reflected for a frame or two). While pending we do
+        # NOT let a stale clear mask mark the voice free -- otherwise a fast frame could
+        # see the just-started voice as idle and steal the channel mid-note.
+        self._await_active = [False] * len(engine.voices)
+        # Legacy-feed double buffer (only used in the fallback path): render alternates
+        # into bufs[_buf], write()s it non-blocking; the port copies it on a background
+        # task and fires _on_done. We never touch a buffer while its copy is in flight
+        # (_busy). Persistent bytearrays => the GC can't collect an in-flight one.
         self._bufs = (bytearray(AUDIO_MAX_FRAME * 2), bytearray(AUDIO_MAX_FRAME * 2))
         self._buf = 0
         self._busy = False
         self._busy_ticks = 0       # watchdog: frames the busy flag has been stuck set
-        # NATIVE MIXER (#16): the per-sample mix is the device bottleneck (the pure-
-        # Python render_into runs the beeper at ~12 FPS and crackles). When the
-        # native kc_audio C kernel is frozen in, prefer it: Python still owns the
-        # model/control/music scheduler (engine.*), C just runs the heavy inner loop.
-        # A build WITHOUT kc_audio falls straight back to engine.render_into, so the
+        # NATIVE kc_audio (#16/#41): the per-sample mix is the device bottleneck (the
+        # pure-Python render_into runs the beeper at ~12 FPS and crackles), and the
+        # I2S feed must run off the render core (#41). When kc_audio is frozen in we
+        # prefer it for both; Python still owns the model/control/music scheduler. A
+        # build WITHOUT kc_audio falls back to engine.render_into + machine.I2S, so the
         # firmware still works and the host is unaffected.
         try:
             import kc_audio
@@ -701,35 +749,55 @@ class DeviceAudio:
         except Exception:   # noqa: BLE001 -- no native module -> Python mixer fallback
             self._kc_audio = None
             print("KidCode audio: native kc_audio absent, using Python mixer")
-        try:
-            from machine import I2S, Pin
-            self.i2s = I2S(
-                0,
-                sck=Pin(I2S_BCK),
-                ws=Pin(I2S_WS),
-                sd=Pin(I2S_DOUT),
-                mode=I2S.TX,
-                bits=16,
-                format=I2S.MONO,
-                rate=AUDIO_RATE,
-                ibuf=AUDIO_IBUF,
-            )
-            # irq() flips the port into NON_BLOCKING mode and registers our
-            # completion callback -- write() now returns immediately.
-            self.i2s.irq(self._on_done)
-            _diag_note("audio", "I2S ready (%d Hz mono, BCK=%d WS=%d DOUT=%d)"
-                       % (AUDIO_RATE, I2S_BCK, I2S_WS, I2S_DOUT))
-        except Exception as exc:  # noqa: BLE001 -- no amp / no I2S -> stay silent
-            # LOUD: if audio is silent on-device this is the line to look for in the
-            # ~2 s boot log AND the persisted diag dump (the takeover loop starves
-            # serial, so the offline diag is the only post-boot view).
-            _diag_note("audio", "I2S UNAVAILABLE, silent: %s" % (exc,))
-            self.i2s = None
+
+        # 1) Preferred path: hand I2S to the dedicated core-1 task (the crackle fix).
+        if KC_AUDIO_CORE1 and self._kc_audio is not None:
+            try:
+                self._kc_audio.set_master(engine.volume)
+                if self._kc_audio.audio_start(I2S_BCK, I2S_WS, I2S_DOUT, AUDIO_RATE):
+                    self._core1 = True
+                    _diag_note("audio", "core-1 I2S task running (%d Hz mono, "
+                               "BCK=%d WS=%d DOUT=%d)"
+                               % (AUDIO_RATE, I2S_BCK, I2S_WS, I2S_DOUT))
+                    print("KidCode audio: core-1 I2S feeder ENABLED")
+                else:
+                    _diag_note("audio", "core-1 task unavailable, legacy feed")
+            except Exception as exc:  # noqa: BLE001 -- any failure -> legacy feed
+                _diag_note("audio", "core-1 start failed (%s), legacy feed" % (exc,))
+                self._core1 = False
+
+        # 2) Fallback path: open machine.I2S for the legacy per-frame feed. Skip it
+        #    when the core-1 task owns the I2S peripheral (two owners would clash).
+        if not self._core1:
+            try:
+                from machine import I2S, Pin
+                self.i2s = I2S(
+                    0,
+                    sck=Pin(I2S_BCK),
+                    ws=Pin(I2S_WS),
+                    sd=Pin(I2S_DOUT),
+                    mode=I2S.TX,
+                    bits=16,
+                    format=I2S.MONO,
+                    rate=AUDIO_RATE,
+                    ibuf=AUDIO_IBUF,
+                )
+                # irq() flips the port into NON_BLOCKING mode and registers our
+                # completion callback -- write() now returns immediately.
+                self.i2s.irq(self._on_done)
+                _diag_note("audio", "legacy I2S ready (%d Hz mono, BCK=%d WS=%d DOUT=%d)"
+                           % (AUDIO_RATE, I2S_BCK, I2S_WS, I2S_DOUT))
+            except Exception as exc:  # noqa: BLE001 -- no amp / no I2S -> stay silent
+                # LOUD: if audio is silent on-device this is the line to look for in
+                # the ~2 s boot log AND the persisted diag dump (the takeover loop
+                # starves serial, so the offline diag is the only post-boot view).
+                _diag_note("audio", "I2S UNAVAILABLE, silent: %s" % (exc,))
+                self.i2s = None
 
     def _on_done(self, _i2s):
-        """I2S non-blocking completion callback: the background copy of the last
-        buffer into the DMA ring is done, so it's safe to render into / write the
-        next one. Runs via mp_sched (between bytecodes), so just clears the flag."""
+        """I2S non-blocking completion callback (legacy feed): the background copy of
+        the last buffer into the DMA ring is done, so it's safe to render into / write
+        the next one. Runs via mp_sched (between bytecodes), so just clears the flag."""
         self._busy = False
         self._busy_ticks = 0
 
@@ -751,48 +819,90 @@ class DeviceAudio:
 
     def volume(self, level):
         self.engine.set_volume(level)
+        # Publish the live master volume to the core-1 task (read each mix block).
+        if self._core1:
+            try:
+                self._kc_audio.set_master(self.engine.volume)
+            except Exception:   # noqa: BLE001 -- volume must never crash the loop
+                pass
 
-    def _render_native(self, buf, n):
-        """Render `n` frames into `buf` using the native kc_audio kernel for the heavy
-        per-sample loop, keeping the Python AudioEngine the single source of truth.
+    # -- core-1 feed: commit voice state across, advance the scheduler ----
+    def _tick_core1(self, dt):
+        """The crackle fix's per-frame core-0 work: run the music scheduler in Python,
+        commit only the voices that were (re)triggered/stopped this frame into the
+        shared C kc_voices[] (atomically, under the kc_audio mutex), and read the
+        core-1 task's published active mask back so the scheduler / is_active() see the
+        truth. NO per-sample mix and NO I2S write happen here -- the core-1 task does
+        both, continuously, off the render core. Intentionally cheap (a few C calls), so
+        a slow frame can never starve the speaker.
 
-        This is the exact same sequence as AudioEngine.render_into, with ONLY the
-        inner sample loop delegated to C:
-          1. advance the music phrase scheduler in Python (it may retrigger SFX),
-          2. push each voice's exact state into the C mirror (voice_set),
-          3. C mixes the whole block (the part that was too slow in MicroPython),
-          4. read the advanced render state back into the Python voices (voice_read)
-             so is_active() / the next block's scheduler see the truth.
-        Because C holds no cross-block state, the output is identical to the pure-
-        Python mixer -- same .kcart, same samples on host and device."""
+        WHY ONLY DIRTY VOICES: once a voice is committed the C task owns its per-sample
+        advancement (idx/t/phase/noise). The Python _Voice's cursor goes stale (we do
+        NOT pull it back -- that would be a chatty cross-core read), so re-committing it
+        every frame would reset the C voice to step 0 and stutter. A voice only needs a
+        fresh commit when Python (re)triggers or stops it, which we detect by a change
+        in (id(steps), active): _Voice.play()/stop() always assign a brand-new list."""
         eng = self.engine
         ka = self._kc_audio
-        # 1. music scheduler (Python) -- same dt_frame math as render_into.
-        eng._advance_music(n / float(eng.rate))
         voices = eng.voices
-        # 2. push exact voice state into C.
+        # Read the task's published activity FIRST, into the Python voices that the C
+        # task owns, so the scheduler's free-channel pick / is_active() reflect voices
+        # the task has finished playing.
+        try:
+            mask = ka.active_mask()
+        except Exception:   # noqa: BLE001 -- never crash the loop on a status read
+            mask = None
+        if mask is not None:
+            for c in range(len(voices)):
+                v = voices[c]
+                bit_set = bool(mask & (1 << c))
+                if bit_set:
+                    # task confirms this play is live -> a later clear is now trusted.
+                    self._await_active[c] = False
+                elif v.active and not self._await_active[c]:
+                    # task says voice c is done AND we've already seen it go live, so
+                    # this clear is real -> reflect it (the scheduler can reuse it).
+                    v.active = False
+        # Music scheduler (Python) -- step it by the real elapsed frame time. It may
+        # retrigger SFX onto voices; those become dirty and are committed below.
+        eng._advance_music(dt)
+        # Commit ONLY the voices whose (id(steps), active) changed since the last
+        # commit, atomically vs. the task's snapshot (voice_lock brackets the set).
+        dirty = []
         for c in range(len(voices)):
             v = voices[c]
-            ka.voice_set(c, v.active, v.steps, v.step_dur, v.loop,
-                         v.idx, v.t, v.phase, v.noise)
-        # 3. the heavy mix, in C.
-        ka.render(buf, n, eng.rate, eng.volume)
-        # 4. read the advanced state back into the Python voices.
-        for c in range(len(voices)):
-            st = ka.voice_read(c)
-            if st is not None:
+            sig = (id(v.steps), v.active)
+            if sig != self._commit_sig[c]:
+                dirty.append(c)
+        if dirty:
+            ka.voice_lock()
+            try:
+                for c in dirty:
+                    v = voices[c]
+                    ka.voice_set(c, v.active, v.steps, v.step_dur, v.loop,
+                                 v.idx, v.t, v.phase, v.noise)
+            finally:
+                ka.voice_unlock()
+            for c in dirty:
                 v = voices[c]
-                v.active = st[0]
-                v.idx = st[1]
-                v.t = st[2]
-                v.phase = st[3]
-                v.noise = st[4]
+                self._commit_sig[c] = (id(v.steps), v.active)
+                # A freshly committed ACTIVE voice must not be cleared by a stale mask
+                # until the task confirms it live at least once (see __init__).
+                self._await_active[c] = bool(v.active)
 
     def tick(self, dt):
-        """Render this frame's PCM and stream it to the I2S DMA ring NON-BLOCKINGLY.
-        Skips all work when nothing is playing (silent cart ~= free) or when the
-        previous buffer is still being copied (the DMA ring covers that frame), so
-        write() never stalls the single-threaded desktop loop."""
+        """Per-frame audio work. In core-1 mode this only schedules + commits voice
+        state (the core-1 task feeds I2S); in the legacy fallback it renders this
+        frame's PCM and streams it to the DMA ring NON-BLOCKINGLY. Either way it must
+        never stall the single-threaded desktop loop."""
+        if self._core1:
+            try:
+                self._tick_core1(dt)
+            except Exception as exc:  # noqa: BLE001 -- audio must never crash the loop
+                print("KidCode audio tick (core1) failed:", exc)
+            return
+
+        # --- legacy single-core feed (fallback) ---
         if self.i2s is None:
             return
         if self._busy:
@@ -832,6 +942,42 @@ class DeviceAudio:
             print("KidCode audio tick failed:", exc)
             self._busy = False
             self.i2s = None
+
+    def _render_native(self, buf, n):
+        """LEGACY per-block feed: render `n` frames into `buf` using the native kc_audio
+        kernel for the heavy per-sample loop, keeping the Python AudioEngine the single
+        source of truth. Same sequence as AudioEngine.render_into, ONLY the inner sample
+        loop delegated to C:
+          1. advance the music phrase scheduler in Python (it may retrigger SFX),
+          2. push each voice's exact state into the C mirror (voice_set),
+          3. C mixes the whole block (the part that was too slow in MicroPython),
+          4. read the advanced render state back into the Python voices (voice_read)
+             so is_active() / the next block's scheduler see the truth.
+        Because C holds no cross-block state, the output is identical to the pure-
+        Python mixer -- same .kcart, same samples on host and device. (Used only in the
+        legacy single-core feed; the core-1 task uses its own snapshot/mix loop.)"""
+        eng = self.engine
+        ka = self._kc_audio
+        # 1. music scheduler (Python) -- same dt_frame math as render_into.
+        eng._advance_music(n / float(eng.rate))
+        voices = eng.voices
+        # 2. push exact voice state into C.
+        for c in range(len(voices)):
+            v = voices[c]
+            ka.voice_set(c, v.active, v.steps, v.step_dur, v.loop,
+                         v.idx, v.t, v.phase, v.noise)
+        # 3. the heavy mix, in C.
+        ka.render(buf, n, eng.rate, eng.volume)
+        # 4. read the advanced state back into the Python voices.
+        for c in range(len(voices)):
+            st = ka.voice_read(c)
+            if st is not None:
+                v = voices[c]
+                v.active = st[0]
+                v.idx = st[1]
+                v.t = st[2]
+                v.phase = st[3]
+                v.noise = st[4]
 
 
 def make_audio(engine):
