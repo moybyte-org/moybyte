@@ -904,3 +904,69 @@ def test_editor_cores_are_shared_single_source():
     # build.sh stages the canonical file into modules/ so the device freezes it.
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
     assert 'cp "${REPO_ROOT}/runtime/editors.py" "${SCRIPT_DIR}/modules/editors.py"' in build
+
+
+def test_micropython_offline_diag_wiring():
+    """Offline on-device diagnostics (kidcode_diag): a RAM ring persisted to SD and
+    dumped to serial at the NEXT boot, since run_desktop's takeover loop starves USB
+    serial. Grep the frozen device sources for the boot-dump, the with_sd_live flush,
+    and the perf-sample wiring (the firmware tests assert structure, not execution)."""
+    diag = (ROOT / "modules" / "kidcode_diag.py").read_text(encoding="utf-8")
+    shell = (ROOT / "modules" / "kidcode_shell.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+
+    # The diag module exists with the bounded ring + the stable dump markers + the
+    # single-file (one-session) log path.
+    assert "class _Ring(object):" in diag
+    assert 'DUMP_HEADER = "===== KidCode diag dump (previous session) ====="' in diag
+    assert 'DUMP_FOOTER = "===== end diag dump ====="' in diag
+    assert 'LOG_PATH = "/sd/kidcode/diag.log"' in diag
+    assert "ENABLED = True" in diag                       # default-on, documented toggle
+    # The on/off toggle is documented as how to disable.
+    assert "DISABLE" in diag
+    # log() echoes every line live to stdout (the empirical loop-serial test) in
+    # addition to buffering -- so reading /dev/ttyACM* DURING a run is a direct test
+    # of whether the takeover loop actually starves serial.
+    assert "ECHO_LIVE = True" in diag
+    assert 'print("KidCode", line)' in diag
+    # No rotation / second file (owner: the file is just the most-recent session).
+    assert "diag.prev.log" not in diag
+
+    # Boot dump runs in main() BEFORE init_display() -- the bus-safe pre-display
+    # window where serial is alive and machine.SDCard mounting is safe.
+    assert "def dump_previous_to_serial(" in diag
+    assert "_dump_diag()" in shell
+    main_src = shell.split("def main(", 1)[1].split("def ", 1)[0]
+    assert main_src.index("_dump_diag()") < main_src.index("_init_display()")
+    # The boot read uses the pre-display machine.SDCard path (kidcode_sd.with_sd),
+    # NOT the live native path -- documented as the safe pre-display read.
+    assert "kidcode_sd.with_sd(" in diag
+    assert "BEFORE init_display" in diag
+
+    # Periodic SD flush goes through the live single-bus path (with_sd_live), runs
+    # between frames, and overwrites the whole ring (one session per file).
+    assert "def flush_to_sd(with_sd):" in diag
+    assert 'open(LOG_PATH, "w")' in diag                  # overwrite, never append
+    assert "_diag_flush(diag, ws)" in runtime
+    assert 'with_sd = getattr(ws, "_with_sd", None)' in runtime   # = with_sd_live
+    assert "diag.flush_to_sd(with_sd)" in runtime
+
+    # Perf samples: a structured PERF line sampled every few seconds while a cart
+    # runs (the per-cart frame-timing payload for the offline dump).
+    assert "def format_perf(cart, fps, flush_ms, draw_ms):" in diag
+    assert 'return "PERF cart=%s fps=%d flush=%d draw=%d" % (' in diag
+    assert "_diag_perf_sample(diag, ws)" in runtime
+    assert "ws.perf_sample()" in runtime
+    # The shared console EXPOSES the numbers host-safely; the device SAMPLES them.
+    assert "def perf_sample(self):" in console
+    assert "self.perf_capture = False" in console         # default off -> host identical
+    assert "ws.perf_capture = True" in runtime            # device turns capture on
+    assert "_perf = self.perf_hud or self.perf_capture" in console
+
+    # Existing diagnostics routed through diag (printed AND persisted): boot heap,
+    # the frame-error trace, the in-cart crash, and the audio I2S status line.
+    assert '_diag_log("mem",' in runtime
+    assert '_diag_log("frame error", exc, diag)' in runtime
+    assert '_diag_log("cart error", _ce, diag)' in runtime
+    assert '_diag_note("audio", "I2S' in runtime

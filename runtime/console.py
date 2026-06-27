@@ -1343,6 +1343,13 @@ class Workstation:
         # jitter. This tells us whether the wall is the SPI flush or the per-frame
         # MicroPython draw cost on device. Measurement only -- no render-path change.
         self.perf_hud = False         # frame-time breakdown HUD shown? (tap FPS to toggle)
+        # perf_capture decouples the per-frame timing MEASUREMENT from drawing the
+        # HUD: when either perf_hud OR perf_capture is set, frame() records the
+        # flush/draw split (the two cheap ticks calls below). The device backend
+        # (kid_runtime.run_desktop) sets perf_capture=True so it can SAMPLE these
+        # numbers into the offline diag log without painting the HUD on screen.
+        # Default False -> host behaviour is byte-identical (no extra ticks calls).
+        self.perf_capture = False     # measure flush/draw without drawing the HUD
         self._flush_ms = 0.0          # smoothed comp.flush() ms (panel DMA)
         self._draw_ms = 0.0           # smoothed draw ms (total frame - flush)
         # Achievements (#21): a small set of fun milestones + the hidden Easter-egg
@@ -4012,8 +4019,10 @@ class Workstation:
         # Perf HUD (#43/#44): mark the start of this frame's draw work. Cheap (one
         # ticks call); only meaningful for a frame we actually paint, so it's after
         # the redraw gate. _flush_ms is filled around comp.flush() below; _draw_ms
-        # is the rest (total span - flush). Both EMA-smoothed at frame end.
-        _frame_t0 = _ticks_ms() if self.perf_hud else 0
+        # is the rest (total span - flush). Both EMA-smoothed at frame end. Also
+        # fires when perf_capture is set (device diag sampling) -- not just the HUD.
+        _perf = self.perf_hud or self.perf_capture
+        _frame_t0 = _ticks_ms() if _perf else 0
         if self.screen == "launcher":
             self._draw_desktop_home(dt)
         elif self.screen == "settings":
@@ -4120,8 +4129,9 @@ class Workstation:
         # flush is a near-zero no-op (no real panel), so flush reads ~0 and draw ~=
         # total -- the real flush-vs-draw split only shows on device. The flush call
         # is unconditional + identical either way; the timing is two cheap ticks
-        # calls gated on perf_hud, so the render path itself is unchanged.
-        if self.perf_hud:
+        # calls gated on perf_hud OR perf_capture (device diag sampling), so the
+        # render path itself is unchanged.
+        if _perf:
             _flush_t0 = _ticks_ms()
             self.comp.flush()
             _flush = _ticks_diff(_ticks_ms(), _flush_t0)
@@ -4324,6 +4334,22 @@ class Workstation:
         cv = self.canvas
         w, h = 40, 14
         return (cv.w - w, cv.h - h, w, h)
+
+    def perf_sample(self):
+        """Snapshot of the current per-frame perf numbers for offline sampling:
+        (cart_name, fps, flush_ms, draw_ms). Used by the device backend's diag
+        sampler (kid_runtime.run_desktop) to log a PERF line every few seconds
+        while a cart runs. flush_ms/draw_ms are only meaningful when perf_capture
+        (or perf_hud) is on -- run_desktop sets perf_capture=True at boot. Backend-
+        agnostic + host-safe: pure reads, no drawing, no hardware. Returns None
+        when no cart is actively running (nothing useful to sample)."""
+        running = (self.screen == "desktop" and self.cart is not None
+                   and self.cart_error is None)
+        if not running:
+            return None
+        cart = self.cart
+        name = cart.get("title") or cart.get("path") or "?"
+        return (name, self._fps, self._flush_ms, self._draw_ms)
 
     def _draw_perf_hud(self):
         """Frame-time breakdown (#43/#44 perf), drawn just above the FPS chip when

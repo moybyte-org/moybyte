@@ -711,12 +711,13 @@ class DeviceAudio:
             # irq() flips the port into NON_BLOCKING mode and registers our
             # completion callback -- write() now returns immediately.
             self.i2s.irq(self._on_done)
-            print("KidCode audio: I2S ready (%d Hz mono, BCK=%d WS=%d DOUT=%d)"
-                  % (AUDIO_RATE, I2S_BCK, I2S_WS, I2S_DOUT))
+            _diag_note("audio", "I2S ready (%d Hz mono, BCK=%d WS=%d DOUT=%d)"
+                       % (AUDIO_RATE, I2S_BCK, I2S_WS, I2S_DOUT))
         except Exception as exc:  # noqa: BLE001 -- no amp / no I2S -> stay silent
             # LOUD: if audio is silent on-device this is the line to look for in the
-            # ~2 s boot log (the only window serial is live before the takeover loop).
-            print("KidCode audio: I2S UNAVAILABLE, silent:", exc)
+            # ~2 s boot log AND the persisted diag dump (the takeover loop starves
+            # serial, so the offline diag is the only post-boot view).
+            _diag_note("audio", "I2S UNAVAILABLE, silent: %s" % (exc,))
             self.i2s = None
 
     def _on_done(self, _i2s):
@@ -875,7 +876,7 @@ class DeviceWifi:
             self.wlan = network.WLAN(network.STA_IF)
             self.wlan.active(True)
         except Exception as exc:  # noqa: BLE001 -- no radio / no network module -> degrade
-            print("KidCode wifi: WLAN unavailable, offline:", exc)
+            _diag_note("wifi", "WLAN unavailable, offline: %s" % (exc,))
             self.wlan = None
         return self.wlan
 
@@ -1001,10 +1002,10 @@ def autoconnect_wifi(wifi):
             nets = store.load_wifi(root)
         for n in nets:                      # front-of-list = last joined
             if wifi.connect(n["ssid"], n.get("password", "")):
-                print("KidCode wifi autoconnected:", n["ssid"])
+                _diag_note("wifi", "autoconnected: %s" % (n["ssid"],))
                 return True
     except Exception as exc:  # noqa: BLE001 -- autoconnect must never block/crash boot
-        print("KidCode wifi autoconnect failed:", exc)
+        _diag_note("wifi", "autoconnect failed: %s" % (exc,))
     return False
 
 
@@ -1036,7 +1037,7 @@ class TrackBall:
             self._click = Pin(self.CLICK_PIN, Pin.IN, Pin.PULL_UP)
             self.available = True
         except Exception as exc:  # noqa: BLE001
-            print("KidCode trackball unavailable:", exc)
+            _diag_note("trackball", "unavailable: %s" % (exc,))
 
     def _handler(self, idx):
         counts = self._counts
@@ -1102,9 +1103,9 @@ class Touch:
                 except Exception:
                     pass
             if not self.available:
-                print("KidCode touch: GT911 not found on I2C0")
+                _diag_note("touch", "GT911 not found on I2C0")
         except Exception as exc:  # noqa: BLE001
-            print("KidCode touch unavailable:", exc)
+            _diag_note("touch", "unavailable: %s" % (exc,))
 
     def read_raw(self):
         """One GT911 read. Returns (rx, ry) when a finger is down, False when the
@@ -1192,6 +1193,79 @@ def _ticks_diff(a, b):
         return time.ticks_diff(a, b)
     except AttributeError:
         return a - b
+
+
+# --- offline diagnostics wiring (kidcode_diag) ------------------------------
+#
+# Thin guarded shims so the run_desktop loop can route prints + perf samples
+# through diag without each call site needing a try/except. `diag` is the
+# kidcode_diag module or None (import failed -> everything degrades to a no-op).
+# All device-side: the diag SAMPLING/wiring lives here, while the shared
+# runtime/console.py only EXPOSES the numbers (perf_capture + perf_sample), so it
+# stays host-safe.
+
+def _diag_note(tag, msg):
+    """Module-level convenience for call sites that don't hold a `diag` handle
+    (the audio/wifi/keyboard backends): lazily import kidcode_diag and persist +
+    print the line (logp). Falls back to a plain print if diag is unavailable.
+    Fully guarded -- a diag failure here must never affect the caller."""
+    try:
+        import kidcode_diag
+
+        kidcode_diag.logp(tag, msg)
+        return
+    except Exception:
+        pass
+    try:
+        print("KidCode", tag, msg)
+    except Exception:
+        pass
+
+
+def _diag_log(tag, msg, diag):
+    """Persist a line to the diag ring AND print it live (boot serial is still
+    useful). logp() does both; falls back to a plain print if diag is absent.
+    `diag` is the already-imported module (or None) -- this is the hot-path
+    variant used inside run_desktop, avoiding a per-call import."""
+    if diag is not None:
+        try:
+            diag.logp(tag, msg)
+            return
+        except Exception:
+            pass
+    try:
+        print("KidCode", tag, msg)
+    except Exception:
+        pass
+
+
+def _diag_flush(diag, ws):
+    """Flush the diag RAM ring to /sd/kidcode/diag.log via the workstation's live
+    SD session wrapper (with_sd_live). Guarded: a flush failure is a no-op so it
+    can never crash the loop. Skips the write when SD management is disabled (the
+    embedded-carts fallback, where carts_root is None -> no writable SD root)."""
+    if diag is None:
+        return
+    try:
+        if not getattr(ws, "can_manage", False):
+            return
+        with_sd = getattr(ws, "_with_sd", None)
+        diag.flush_to_sd(with_sd)
+    except Exception:
+        pass
+
+
+def _diag_perf_sample(diag, ws):
+    """Log a PERF sample line from the workstation's current frame numbers, if a
+    cart is actively running. Guarded -> a no-op on any failure."""
+    if diag is None:
+        return
+    try:
+        sample = ws.perf_sample()      # (name, fps, flush_ms, draw_ms) or None
+        if sample is not None:
+            diag.log_perf(sample[0], sample[1], sample[2], sample[3])
+    except Exception:
+        pass
 
 
 def _load_carts(session=None):
@@ -1298,9 +1372,22 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
     # Achievements (#21): load the unlocked badges (achievements.json) so earned
     # milestones survive a reboot. Same store + with_sd_live path as system.json.
     ws.load_achievements()
-    print("KidCode desktop running (kb=%d ball=%d touch=%d)"
-          % (1 if keyboard.available else 0, 1 if ball.available else 0,
-             1 if touch.available else 0))
+    # Offline diagnostics (kidcode_diag): RAM ring now, flushed to SD every ~5s and
+    # on a crash, dumped to serial at next boot. perf_capture makes ws.frame() record
+    # the flush/draw split each frame WITHOUT drawing the on-screen HUD, so the perf
+    # sampler below can read steady numbers. Guarded import: no diag -> plain loop.
+    try:
+        import kidcode_diag as diag
+    except Exception:
+        diag = None
+    if diag is not None:
+        try:
+            ws.perf_capture = True   # measure flush/draw for the diag perf samples
+        except Exception:
+            pass
+    _diag_log("boot", "desktop running kb=%d ball=%d touch=%d"
+              % (1 if keyboard.available else 0, 1 if ball.available else 0,
+                 1 if touch.available else 0), diag)
 
     import gc
     gc.collect()                                # defrag after the heavy boot so the LCD
@@ -1309,13 +1396,19 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
         import esp32                            # each region = (total, free, max_contiguous, min_free);
         # the small regions are internal SRAM, the huge one is PSRAM. The LCD DMA
         # bounce needs a contiguous INTERNAL block, so watch the small regions' max.
-        print("KidCode mem: gc_free=%d heap=%s"
-              % (gc.mem_free(), esp32.idf_heap_info(esp32.HEAP_DATA)))
+        _diag_log("mem", "gc_free=%d heap=%s"
+                  % (gc.mem_free(), esp32.idf_heap_info(esp32.HEAP_DATA)), diag)
     except Exception as _e:                     # noqa: BLE001 -- diagnostic only
-        print("KidCode mem: gc_free=%d (esp32 n/a: %s)" % (gc.mem_free(), _e))
+        _diag_log("mem", "gc_free=%d (esp32 n/a: %s)" % (gc.mem_free(), _e), diag)
     frame_ms = 1000 // fps_cap
     last = _ticks_ms()
     _backlight_on = False         # #45: panel stays dark until the first frame ships
+    # Diag timers: flush the RAM ring to SD every ~5s (between frames, never during a
+    # panel flush -- with_sd_live mounts on the native single-bus path), and sample
+    # the perf HUD numbers into a PERF line every ~3s while a cart runs.
+    _diag_flush_at = _ticks_ms() + 5000
+    _diag_perf_at = _ticks_ms() + 3000
+    _diag_prev_cart_err = None    # last ws.cart_error we logged, so we log each crash once
     while True:
         now = _ticks_ms()
         dt = max(0.0, min(0.1, _ticks_diff(now, last) / 1000.0))
@@ -1348,8 +1441,25 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
             ws.handle_pointer()                 # cursor hover + click
             ws.frame(dt)                        # draw + composite + flush
         except Exception as exc:                # never let one bad frame brick the device:
+            # Capture the crash in diag AND print it live: a crash we can't see live
+            # (the takeover loop has starved USB) is the whole reason diag exists, so
+            # flush it to SD immediately so next boot's dump has it.
+            _diag_log("frame error", exc, diag)
             print("KidCode frame error:", exc)  # print the traceback's reason to serial
+            _diag_flush(diag, ws)
             gc.collect()                        # a NO_MEM flush may recover after a collect
+        # A cart that raises inside its own _update/_draw is caught INSIDE ws.frame()
+        # (so it never reaches the except above) -- it sets ws.cart_error. Mirror any
+        # NEW cart_error into diag + flush it, so an in-cart crash is captured offline
+        # for the next-boot dump (the takeover loop has starved live serial by now).
+        if diag is not None:
+            _ce = getattr(ws, "cart_error", None)
+            if _ce is not None and _ce != _diag_prev_cart_err:
+                _diag_prev_cart_err = _ce
+                _diag_log("cart error", _ce, diag)
+                _diag_flush(diag, ws)
+            elif _ce is None:
+                _diag_prev_cart_err = None
         # Boot "CRT" flash fix (#45): the backlight booted OFF (tdeck_board/tdeck_display)
         # so the ST7789 power-on GRAM noise is never lit. Turn it on the instant the
         # first real frame has been composed+flushed -- ws._frames_drawn ticks past 0
@@ -1362,6 +1472,20 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
             except Exception as _bl:            # display-less host / bring-up: ignore
                 print("KidCode backlight on failed:", _bl)
             _backlight_on = True
+        # Diag perf sample (~3s): a structured "PERF cart=<name> fps=<n> flush=<ms>
+        # draw=<ms>" line while a cart runs -- the payload that makes "play -> reboot
+        # -> paste the serial" yield per-cart frame timings offline. No SD touch here
+        # (just the RAM ring); the 5s flush below is what writes it out.
+        _tnow = _ticks_ms()
+        if diag is not None and _ticks_diff(_tnow, _diag_perf_at) >= 0:
+            _diag_perf_at = _tnow + 3000
+            _diag_perf_sample(diag, ws)
+        # Diag SD flush (~5s): overwrite /sd/kidcode/diag.log with the current ring.
+        # Runs between frames on the native single-bus path (with_sd_live), never
+        # during a panel flush. Guarded -> a flush failure degrades to a no-op.
+        if diag is not None and _ticks_diff(_tnow, _diag_flush_at) >= 0:
+            _diag_flush_at = _tnow + 5000
+            _diag_flush(diag, ws)
         elapsed = _ticks_diff(_ticks_ms(), now)
         if elapsed < frame_ms:
             time.sleep_ms(frame_ms - elapsed)

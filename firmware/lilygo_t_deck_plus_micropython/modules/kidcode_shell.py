@@ -18,6 +18,12 @@ BENCH_BREATHER_MS = 150
 
 def main():
     print("KidCode MicroPython shell starting")
+    # Offline diagnostics (kidcode_diag): the run_desktop takeover loop starves USB
+    # serial, so we persist a RAM log to /sd/kidcode/diag.log during the session and
+    # DUMP the previous session's file here -- BEFORE init_display(), the only window
+    # where (a) serial is alive and (b) the machine.SDCard read path is bus-safe (the
+    # panel isn't up yet, same pre-display window as the cart prefetch). Fully guarded.
+    _dump_diag()
     prefetched_carts = _prefetch_carts() if (RUN_DESKTOP and not RUN_KEYBOARD_PROBE) else None
     lv, _display, _task_handler = _init_display()
     if lv is None:
@@ -78,6 +84,19 @@ def _feed(wdt):
             wdt.feed()
         except Exception:
             pass
+
+
+def _dump_diag():
+    """Print the previous session's diagnostics log to serial, then let the new
+    session start overwriting it. Runs before init_display() so the read uses the
+    bus-safe pre-display machine.SDCard path and serial is still alive. A diag
+    failure must never block the boot, so the whole thing is guarded."""
+    try:
+        import kidcode_diag
+
+        kidcode_diag.dump_previous_to_serial()
+    except Exception as exc:
+        print("KidCode diag dump failed:", exc)
 
 
 def _prefetch_carts():
