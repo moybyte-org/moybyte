@@ -442,3 +442,160 @@ def test_block_cart_runs_through_workstation(tmp_path):
         ws.frame(1 / 30)
     assert ws.cart_error is None                        # ran 10 frames clean
     assert ws.ns["x"] == 100                            # _init set it; no input held
+
+
+# ----------------------------------------------------------------------------
+# Typed literals in expr slots (#29 blocking gap) + the number helpers
+# ----------------------------------------------------------------------------
+
+def test_literal_in_expr_slot_compiles_bare_and_runs():
+    # an integer literal in an expr slot emits the BARE value; a kid can finally
+    # `set score to 0` / `set x to 50` / compare `> 100`.
+    prog = _program(["score", "x"], [mk("on_start", children=[
+        mk("set_var", {"var": "score", "value": 0}),
+        mk("set_var", {"var": "x", "value": 50}),
+    ]), mk("on_update", children=[
+        mk("if", {"cond": mk("op_gt", {"a": mk("var", {"var": "x"}), "b": 100})},
+           children=[mk("change_var", {"var": "score", "value": 1})]),
+    ])])
+    src = blocks.compile_blocks(prog)
+    assert "score = 0" in src and "x = 50" in src
+    assert "(x > 100)" in src
+    _assert_micropython_safe(src)
+    fake = _run_cart(src)[0]
+    assert fake["score"] == 0 and fake["x"] == 50
+
+
+def test_float_literal_in_expr_slot():
+    prog = _program(["g"], [mk("on_start", children=[
+        mk("set_var", {"var": "g", "value": 4.5})])])
+    src = blocks.compile_blocks(prog)
+    assert "g = 4.5" in src
+    assert _run_cart(src)[0]["g"] == 4.5
+
+
+def test_parse_number_literal_coerces_and_sanitizes():
+    p = blocks.parse_number_literal
+    assert p("5") == 5 and isinstance(p("5"), int)
+    assert p("-3") == -3
+    assert p("4.5") == 4.5
+    assert p("1.2.3") == 1.23         # second dot dropped, its digits kept
+    assert p("x9y") == 9              # letters dropped
+    assert p("", 7) == 7 and p("-", 7) == 7 and p(".", 7) == 7   # nothing usable -> default
+    # a sanitized literal can never carry code through to the compiler
+    assert p("0); import os #") == 0
+
+
+def test_is_literal_value():
+    assert blocks.is_literal_value(0) and blocks.is_literal_value("hi")
+    assert blocks.is_literal_value(None)
+    assert not blocks.is_literal_value(mk("op_add", {"a": 1, "b": 2}))
+
+
+def test_op_rnd_is_an_integer_and_takes_an_expression():
+    # op_rnd now emits a whole number and its bound is an expr slot (so `random to W`
+    # or `random to (x + 5)` works, not just a literal).
+    prog = _program(["r"], [mk("on_start", children=[
+        mk("set_var", {"var": "r", "value": mk("op_rnd", {"n": 10})})])])
+    src = blocks.compile_blocks(prog)
+    assert "int(rnd(10))" in src
+    _run_cart(src)
+    # an expression as the bound compiles too
+    prog2 = _program(["r"], [mk("on_start", children=[
+        mk("set_var", {"var": "r", "value": mk("op_rnd", {"n": mk("op_add", {"a": 100, "b": 5})})})])])
+    assert "int(rnd((100 + 5)))" in blocks.compile_blocks(prog2)
+
+
+def test_tap_position_readers_compile_and_hit_test():
+    # touch_x / touch_y let a tap game know WHERE the tap landed.
+    prog = _program(["hit"], [mk("on_update", children=[
+        mk("if", {"cond": mk("op_gt", {"a": mk("touch_x"), "b": 100})},
+           children=[mk("set_var", {"var": "hit", "value": 1})])])])
+    src = blocks.compile_blocks(prog)
+    assert "_touch_x()" in src and "def _touch_x():" in src
+    _assert_micropython_safe(src)
+    # with a tap at x=150, the branch fires
+    fake = _FakeAPI()
+    fake._touch = (150, 50, True)
+    fake, _ = _run_cart(src, frames=1, fake=fake)
+    assert fake["hit"] == 1
+    # no tap -> _touch_x returns -100, branch does not fire
+    fake2 = _FakeAPI()
+    fake2._touch = None
+    fake2, _ = _run_cart(src, frames=1, fake=fake2)
+    assert fake2.get("hit", 0) == 0
+
+
+# ----------------------------------------------------------------------------
+# The shipped tap_game.kcart: its blocks.json is the source of truth, compiles to
+# the shipped main.py, and the cart plays (tap the target -> score).
+# ----------------------------------------------------------------------------
+
+def _tap_game_dir():
+    return str(ROOT / "system_carts" / "tap_game.kcart")
+
+
+def test_tap_game_blocks_json_compiles_to_shipped_main():
+    import json
+    base = _tap_game_dir()
+    with open(base + "/blocks.json") as f:
+        prog = json.loads(f.read())
+    with open(base + "/main.py") as f:
+        shipped = f.read()
+    # the cart is block-authored: blocks.json compiles to EXACTLY the shipped main.py
+    assert blocks.compile_blocks(prog) == shipped
+    assert blocks.is_block_authored_source(shipped)
+
+
+def test_tap_game_cart_loads_blocks_and_runs():
+    base = _tap_game_dir()
+    cart = kid_carts.load(base)
+    assert cart is not None and cart["blocks"] is not None
+    # opening it in the block editor would see real blocks
+    assert cart["blocks"]["vars"]                       # declared variables present
+    _run_cart(cart["src"], frames=3)                    # plays clean headlessly
+
+
+def test_tap_game_scores_on_a_tap_on_the_target(tmp_path):
+    from runtime import host_app
+    base = _tap_game_dir()
+    cart = kid_carts.load(base)
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.launcher.items = [cart]
+    ws.launcher.sel = 0
+    ws.open()
+    assert ws.cart_error is None
+    ws.input.game_pointer = None
+    for _ in range(3):
+        ws.frame(1 / 30)
+    tx, ty = ws.ns["tx"], ws.ns["ty"]
+    before = ws.ns["score"]
+    ws.input.game_pointer = (int(tx) + 14, int(ty) + 14, True)   # tap the target center
+    ws.frame(1 / 30)
+    assert ws.ns["score"] == before + 1                 # scored
+    # tapping empty space does not score
+    ws.ns["tx"], ws.ns["ty"] = 250, 180
+    ws.input.game_pointer = (5, 18, True)
+    s = ws.ns["score"]
+    ws.frame(1 / 30)
+    assert ws.ns["score"] == s
+    # the clock runs out -> game over
+    ws.input.game_pointer = None
+    ws.ns["timer"] = 2
+    for _ in range(4):
+        ws.frame(1 / 30)
+    assert ws.ns["over"] == 1
+
+
+def test_tap_game_is_in_the_device_cart_bundle():
+    # gen_device_carts must pick the new cart up (it scans system_carts/), and carry
+    # its blocks.json so the on-device block editor opens it as blocks.
+    import sys as _sys
+    _sys.path.insert(0, str(ROOT / "tools"))
+    import gen_device_carts
+    carts = gen_device_carts.build_carts(str(ROOT / "system_carts"))
+    tg = [c for c in carts if c["title"] == "Tap Game"]
+    assert tg, "Tap Game not in the device bundle (add it to CART_ORDER)"
+    assert tg[0].get("blocks"), "Tap Game must carry blocks.json into the bundle"
+    # the rendered module is valid Python (repr round-trips)
+    compile(gen_device_carts.render_module(carts), "<carts_data>", "exec")

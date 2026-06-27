@@ -515,6 +515,21 @@ _BLK_KBD = (40, 78, 240, 84)          # the prompt panel
 _BLK_KBD_DEL = (52, 124, 50, 24)      # backspace
 _BLK_KBD_OK = (188, 124, 40, 24)      # confirm
 _BLK_KBD_X = (232, 124, 36, 24)       # cancel
+# The number-entry prompt (#29): a taller modal with an on-screen DIGIT GRID so a
+# kid can TAP a literal in (touch-only / device sym-key-free), plus type it on the
+# keyboard. The grid is 0-9 . - laid out 6-per-row; OK/DEL/X/BLOCK along the bottom.
+_BLK_NUM = (24, 36, 272, 168)         # the prompt panel
+_BLK_NUM_GX = 34                      # digit grid left
+_BLK_NUM_GY = 78                      # digit grid top
+_BLK_NUM_BW = 40                      # one key's width
+_BLK_NUM_BH = 26                      # one key's height
+_BLK_NUM_BPR = 6                      # keys per row
+_BLK_NUM_KEYS = ["1", "2", "3", "4", "5", "6",
+                 "7", "8", "9", "0", ".", "-"]
+_BLK_NUM_DEL = (34, 168, 56, 26)      # backspace
+_BLK_NUM_BLOCK = (96, 168, 60, 26)    # swap to a reporter block (expr slots only)
+_BLK_NUM_OK = (200, 168, 40, 26)      # confirm
+_BLK_NUM_X = (244, 168, 40, 26)       # cancel
 # In-row slot editing: tapping/right-step on a selected block cycles to its NEXT
 # editable slot; that slot is highlighted, and A opens its editor (number bump,
 # variable/dropdown picker, expr -> a nested expression insert).
@@ -529,6 +544,13 @@ _CAT_LABEL = {
 # variable with just ▲▼ + A (no dragging) and then use it everywhere (#29 Bug 2).
 _NEW_VAR_ITEM = "\x00new_var"
 _NEW_VAR_LABEL = "+ new variable"
+
+# Sentinel menu row in the expr-slot chooser: "type a number" -- the Scratch white
+# editable oval. It heads the reporter list so a typed literal (the common case:
+# `set score to 0`, `> 100`) is the first, obvious choice; picking it opens the
+# number keypad instead of dropping a block (#29).
+_NUM_LITERAL_ITEM = "\x00num_lit"
+_NUM_LITERAL_LABEL = "123 type a number"
 
 
 def _blk_plain_label(label):
@@ -3228,6 +3250,8 @@ class Workstation:
         item = m["items"][i]
         if item == _NEW_VAR_ITEM:
             return _NEW_VAR_LABEL
+        if item == _NUM_LITERAL_ITEM:
+            return _NUM_LITERAL_LABEL
         if m["mode"] == "cat":
             return _CAT_LABEL.get(item, item).upper()
         if m["mode"] == "blk":
@@ -3257,6 +3281,13 @@ class Workstation:
             # "+ new variable": create one with a default name and immediately open
             # the on-screen-keyboard name prompt so the kid names it (#29 Bug 2).
             self._blk_new_variable()
+            return
+        if item == _NUM_LITERAL_ITEM:
+            # "type a number": close the chooser and open the number keypad on this
+            # expr slot (the Scratch white oval -- a literal instead of a block).
+            blk, name = m["block"], m["slot"]
+            self.blk_menu = None
+            self._blk_open_number_prompt(blk, name, None)
             return
         if m["mode"] == "cat":
             self._blk_open_blocks(item)
@@ -3291,9 +3322,10 @@ class Workstation:
 
     # -- slot editors --------------------------------------------------------
     def _blk_edit_slot(self, block, slot):
-        """Open the right editor for a slot's type: number/text bump inline (or via
-        the keyboard pad), variable + dropdown open a picker, expr opens a nested
-        expression-block insert menu."""
+        """Open the right editor for a slot's type: a number slot (and an expr slot
+        holding a literal) opens the on-screen number pad so the kid TYPES the value;
+        an expr slot is the Scratch white oval -- type a number OR drop in a reporter
+        block; variable + dropdown open a picker; text opens the keyboard."""
         be = self.blocks_ed
         t = slot["type"]
         name = slot["name"]
@@ -3302,23 +3334,93 @@ class Workstation:
             # left/right still cycle it in place for a quick one-step tweak.
             self._blk_open_dropdown_picker(block, slot)
         elif t == _blocks_mod.SLOT_NUMBER:
-            self._blk_bump_number(block, name, 1)
+            # Type the number directly (the +/- bump still lives on left/right).
+            self._blk_open_number_prompt(block, name, slot)
         elif t == _blocks_mod.SLOT_TEXT:
             cur = str((block.get("p", {}) or {}).get(name, ""))
-            be.set_slot(name, cur + "!", block)   # placeholder bump; keyboard refines
+            self._blk_open_text_prompt(block, name, cur)
         elif t == _blocks_mod.SLOT_VARIABLE:
             self._blk_open_variable_picker(block, name)
         elif t == _blocks_mod.SLOT_EXPR:
-            self._blk_open_expr_menu(block, name)
+            # Scratch's editable oval: a literal opens the number pad (with an
+            # "insert a block" escape hatch); a slot already holding a reporter block
+            # re-opens the block chooser so the kid can swap/clear it.
+            val = (block.get("p", {}) or {}).get(name)
+            if _blocks_mod.is_literal_value(val):
+                self._blk_open_number_prompt(block, name, slot)
+            else:
+                self._blk_open_expr_menu(block, name)
 
     def _blk_bump_number(self, block, name, d):
+        # +/- nudge of a numeric slot (left/right in the outline). Works on a number
+        # slot AND on an expr slot holding a numeric literal -- a quick tweak without
+        # the keypad. A float keeps its fraction (e.g. 4.5 -> 5.5).
         be = self.blocks_ed
         cur = (block.get("p", {}) or {}).get(name, 0)
-        try:
-            val = int(cur) + d
-        except (TypeError, ValueError):
-            val = d
+        if isinstance(cur, float):
+            val = cur + d
+        else:
+            try:
+                val = int(cur) + d
+            except (TypeError, ValueError):
+                val = d
         be.set_slot(name, val, block)
+
+    # -- typed literal prompts (number / text), shared on-screen keypad -------
+    def _blk_arm_prompt(self):
+        """Neutralise the input edge that OPENED a prompt so its first frame can't
+        carry the still-latched A/Enter/tap straight into commit/cancel (#29). Shared
+        by every blk_kbd prompt (variable name, number, text)."""
+        self._set_text_mode(True)            # ASCII keyboard for typing
+        self.input.release_all()             # drop held buttons (host + device)
+        try:
+            self.input._pressed = set()
+            self.input._released = set()
+            self.input._last = set()         # device InputState edge snapshot
+            self.input._prev = set()         # host InputState edge snapshot
+        except AttributeError:
+            pass
+        # Seed the typed-key edge with the byte held RIGHT NOW so a held A/Enter byte
+        # (last_key) isn't re-read as a fresh keystroke on the prompt's first frame.
+        self._ekey_prev = getattr(self.input, "last_key", 0) or 0
+        if self.pointer is not None:
+            self.pointer.click = False       # a tap that opened the prompt != OK
+
+    def _blk_open_number_prompt(self, block, name, slot):
+        """Open the on-screen number pad to TYPE a literal into a number / expr slot
+        (#29 blocking gap: you can now set `score to 0`, `x to 50`, compare `> 100`).
+        `slot` is the catalog slot (or None when reopened from the expr chooser): an
+        expr slot can ALSO hold a reporter, so the pad offers a "BLOCK" escape hatch
+        for it. The pad starts EMPTY (default-on-OK is the slot's current value), so
+        the kid types a fresh number."""
+        cur = (block.get("p", {}) or {}).get(name)
+        allow_block = self._blk_slot_is_expr(block, name, slot)
+        self.blk_menu = None
+        self.blk_kbd = {"kind": "num", "text": "", "cur": cur,
+                        "block": block, "slot": name, "allow_block": allow_block,
+                        "armed": False}
+        self._blk_arm_prompt()
+
+    def _blk_slot_is_expr(self, block, name, slot):
+        """True if the named slot on `block` is an expr slot (so the number pad can
+        offer 'BLOCK' to drop a reporter instead). Uses `slot` when given; else looks
+        the slot up in the catalog by name."""
+        if slot is not None:
+            return slot["type"] == _blocks_mod.SLOT_EXPR
+        d = _blocks_mod.block_def(block.get("t"))
+        if d is None:
+            return False
+        for s in d["slots"]:
+            if s["name"] == name:
+                return s["type"] == _blocks_mod.SLOT_EXPR
+        return False
+
+    def _blk_open_text_prompt(self, block, name, cur):
+        """Open the on-screen keyboard to TYPE a text literal into a text slot."""
+        self.blk_menu = None
+        self.blk_kbd = {"kind": "text", "text": str(cur or ""),
+                        "block": block, "slot": name, "armed": False}
+        self._blk_arm_prompt()
 
     def _blk_open_variable_picker(self, block, name):
         # The variable-slot picker: "+ new variable" first (so a kid can create +
@@ -3347,60 +3449,57 @@ class Workstation:
         # types a fresh name instead of appending to the default), `var` is the
         # just-created variable's CURRENT name -- confirm renames it old->typed, and a
         # blank/invalid entry keeps this default. `slot_target`, if set, is the
-        # (block, slot) to fill with the final name. `armed` is the one-frame guard
-        # below (#29): the prompt ignores commit/cancel until its first input pass
-        # arms it, so the very input that *selected* "+ new variable" (a held A /
-        # Enter, or the tap) can't carry into the fresh prompt and instantly close it.
-        self.blk_kbd = {"text": "", "var": name, "slot_target": slot_target,
-                        "armed": False}
-        self._set_text_mode(True)            # ASCII keyboard for typing the name
-        # Neutralise the triggering input so the prompt's first frame can't consume
-        # it (#29). "+ new variable" is chosen with A/Enter (keyboard) or a tap
-        # (touch); without this the still-latched A/Enter edge -- or the held Enter
-        # *byte* (last_key) on the device -- lands on the new prompt as commit, and
-        # the prompt flashes shut with the default name before the kid can type.
-        self.input.release_all()             # drop held buttons (host + device)
-        # Wipe this frame's edge sets so i.pressed("a"/"run"/"b") is empty next pass.
-        try:
-            self.input._pressed = set()
-            self.input._released = set()
-            self.input._last = set()         # device InputState edge snapshot
-            self.input._prev = set()         # host InputState edge snapshot
-        except AttributeError:
-            pass
-        # Seed the typed-key edge with the byte held RIGHT NOW so a held A/Enter byte
-        # (last_key) isn't re-read as a fresh keystroke on the prompt's first frame.
-        self._ekey_prev = getattr(self.input, "last_key", 0) or 0
-        if self.pointer is not None:
-            self.pointer.click = False       # a tap that opened the prompt != OK
+        # (block, slot) to fill with the final name. `kind` routes the shared keypad
+        # (var / num / text); `armed` is the one-frame guard (#29): the prompt ignores
+        # commit/cancel until its first input pass arms it, so the very input that
+        # *selected* "+ new variable" (a held A / Enter, or the tap) can't carry into
+        # the fresh prompt and instantly close it.
+        self.blk_kbd = {"kind": "var", "text": "", "var": name,
+                        "slot_target": slot_target, "armed": False}
+        # Neutralise the triggering input so the prompt's first frame can't consume it
+        # (#29): drop held buttons, wipe this frame's edges, and seed the typed-key
+        # snapshot -- otherwise the still-latched A/Enter edge (or the held Enter byte
+        # on the device) lands on the prompt as commit and it flashes shut.
+        self._blk_arm_prompt()
 
     def _blk_kbd_commit(self):
-        """Confirm the name prompt: rename the new variable to the typed text (falling
-        back to its default if blank/invalid), fill the target slot if any, and close
-        the prompt."""
+        """Confirm a prompt: a name prompt renames the var; a number prompt parses the
+        typed text into a numeric literal and writes it to the slot; a text prompt
+        stores the string. Falls back to the slot's current value on a blank entry."""
         be = self.blocks_ed
         k = self.blk_kbd
         if be is None or k is None:
             self.blk_kbd = None
             self._set_text_mode(False)
             return
-        old = k["var"]
-        typed = k["text"]
-        applied = be.rename_var(old, typed)
-        final = applied if applied else old   # blank/dup/invalid keeps the default
-        bt = k.get("slot_target")
-        if bt is not None and bt[0] is not None:
-            be.set_slot(bt[1], final, bt[0])
+        kind = k.get("kind", "var")
+        if kind == "num":
+            cur = k.get("cur")
+            default = cur if _blocks_mod.is_literal_value(cur) and cur is not None else 0
+            val = _blocks_mod.parse_number_literal(k["text"], default)
+            be.set_slot(k["slot"], val, k["block"])
+            self.blk_status = "= " + str(val)
+        elif kind == "text":
+            be.set_slot(k["slot"], k["text"], k["block"])
+            self.blk_status = "text set"
+        else:                                  # "var": rename the freshly-created var
+            old = k["var"]
+            applied = be.rename_var(old, k["text"])
+            final = applied if applied else old   # blank/dup/invalid keeps the default
+            bt = k.get("slot_target")
+            if bt is not None and bt[0] is not None:
+                be.set_slot(bt[1], final, bt[0])
+            self.blk_status = "var: " + final[:12]
         self.blk_kbd = None
         self._set_text_mode(False)
-        self.blk_status = "var: " + final[:12]
 
     def _blk_kbd_cancel(self):
-        """Cancel the name prompt: keep the default-named variable (it's already
-        declared and usable), just close the prompt + fill the slot with the default."""
+        """Cancel a prompt: a number/text prompt just discards the edit (the slot keeps
+        its old value); a name prompt keeps the default-named variable (it's already
+        declared and usable) and fills the slot with that default."""
         be = self.blocks_ed
         k = self.blk_kbd
-        if be is not None and k is not None:
+        if be is not None and k is not None and k.get("kind", "var") == "var":
             bt = k.get("slot_target")
             if bt is not None and bt[0] is not None:
                 be.set_slot(bt[1], k["var"], bt[0])
@@ -3408,8 +3507,10 @@ class Workstation:
         self._set_text_mode(False)
 
     def _blk_kbd_key(self, ch):
-        """Apply one typed character to the name buffer: backspace deletes, Enter
-        confirms, Esc cancels, and any name-legal char appends."""
+        """Apply one typed character to the prompt buffer: backspace deletes, Enter
+        confirms, Esc cancels, and an allowed char appends. The allowed set depends on
+        the prompt kind -- digits/'-'/'.' for a number, name-legal chars for a var,
+        any printable for free text."""
         k = self.blk_kbd
         if k is None:
             return
@@ -3422,12 +3523,25 @@ class Workstation:
         if ch == 27:                          # Esc -> cancel
             self._blk_kbd_cancel()
             return
-        if 32 <= ch < 127:
-            c = chr(ch)
-            # Keep the buffer to name-legal characters (letters/digits/_/space/dash);
-            # sanitize_var_name finalizes it on commit, but filtering here keeps the
-            # on-screen buffer honest. Cap the length so it always fits a row.
-            if (c.isalpha() or c.isdigit() or c in ("_", " ", "-")) and len(k["text"]) < 16:
+        if not (32 <= ch < 127):
+            return
+        c = chr(ch)
+        if len(k["text"]) >= 16:              # cap so it always fits a row
+            return
+        kind = k.get("kind", "var")
+        if kind == "num":
+            # digits, a single leading '-', and at most one '.' (parse_number_literal
+            # tolerates more, but filtering here keeps the on-screen buffer honest).
+            if c.isdigit():
+                k["text"] += c
+            elif c == "-" and not k["text"]:
+                k["text"] += c
+            elif c == "." and "." not in k["text"]:
+                k["text"] += c
+        elif kind == "text":
+            k["text"] += c                    # any printable char for a text literal
+        else:                                  # "var": name-legal chars only
+            if c.isalpha() or c.isdigit() or c in ("_", " ", "-"):
                 k["text"] += c
 
     def _blk_open_dropdown_picker(self, block, slot):
@@ -3436,11 +3550,12 @@ class Workstation:
                          "block": block, "slot": slot["name"]}
 
     def _blk_open_expr_menu(self, block, name):
-        """Open the expression chooser for an expr slot: the operator / input /
-        variable reporter blocks (everything with an `expr` shape), plus a couple of
-        literal choices. Selecting one writes a nested expression block into the
-        slot."""
-        ids = []
+        """Open the expression chooser for an expr slot. Heads the list with "type a
+        number" (the Scratch white oval -- a typed literal is the DEFAULT a kid wants),
+        then every reporter block (operator / input / variable -- everything with an
+        `expr` shape). Selecting "type a number" opens the number pad; selecting a
+        block writes a fresh nested reporter into the slot."""
+        ids = [_NUM_LITERAL_ITEM]
         for cat in _blocks_mod.categories():
             for bid in _blocks_mod.blocks_in_category(cat):
                 if _blocks_mod.is_expr(bid):
@@ -3596,6 +3711,13 @@ class Workstation:
             self._blk_bump_number(b, slot["name"], -1)
         elif slot["type"] == _blocks_mod.SLOT_DROPDOWN:
             be.cycle_dropdown(slot["name"], -1, b)
+        elif slot["type"] == _blocks_mod.SLOT_EXPR:
+            # quick -1 nudge on an expr slot holding a numeric literal (a block in the
+            # slot is left alone -- you can't decrement an expression).
+            cur = (b.get("p", {}) or {}).get(slot["name"])
+            if _blocks_mod.is_literal_value(cur) and isinstance(cur, (int, float)) \
+                    and not isinstance(cur, bool):
+                self._blk_bump_number(b, slot["name"], -1)
 
     def _blocks_pointer(self, px, py, click):
         if not click:
@@ -3650,13 +3772,16 @@ class Workstation:
             self._blk_menu_select()
 
     def _blk_kbd_click(self, px, py):
-        """Touch handling for the variable name prompt: DEL backspaces, OK confirms,
-        X cancels. (Typing the name itself is the on-screen/T-Deck keyboard.)"""
-        # One-frame guard (#29): the tap that *opened* the prompt (selecting "+ new
-        # variable") must not carry into this first pass and immediately hit OK/X.
+        """Touch handling for the entry prompts. One-frame guard (#29): the tap that
+        OPENED the prompt must not carry into this first pass and immediately commit."""
         if self.blk_kbd is not None and not self.blk_kbd.get("armed"):
             self.blk_kbd["armed"] = True
             return
+        if self.blk_kbd is not None and self.blk_kbd.get("kind") == "num":
+            self._blk_num_click(px, py)
+            return
+        # var / text prompt: DEL backspaces, OK confirms, X cancels (typing is the
+        # on-screen / T-Deck keyboard).
         if _in(px, py, _BLK_KBD_DEL):
             self._blk_kbd_key(8); return
         if _in(px, py, _BLK_KBD_OK):
@@ -3665,6 +3790,41 @@ class Workstation:
             self._blk_kbd_cancel(); return
         # taps inside the panel are ignored (no dismiss-on-tap-outside: a stray tap
         # shouldn't discard a half-typed name).
+
+    def _blk_num_click(self, px, py):
+        """Touch handling for the number pad: the on-screen digit grid types a literal
+        (so it works touch-only / without sym keys), DEL backspaces, OK/X confirm/cancel,
+        and BLOCK (expr slots) swaps in a reporter block instead."""
+        k = self.blk_kbd
+        # the digit grid
+        for idx in range(len(_BLK_NUM_KEYS)):
+            r = idx // _BLK_NUM_BPR
+            c = idx % _BLK_NUM_BPR
+            rx = _BLK_NUM_GX + c * _BLK_NUM_BW
+            ry = _BLK_NUM_GY + r * _BLK_NUM_BH
+            if _in(px, py, (rx, ry, _BLK_NUM_BW - 3, _BLK_NUM_BH - 3)):
+                self._blk_kbd_key(ord(_BLK_NUM_KEYS[idx]))
+                return
+        if _in(px, py, _BLK_NUM_DEL):
+            self._blk_kbd_key(8); return
+        if k is not None and k.get("allow_block") and _in(px, py, _BLK_NUM_BLOCK):
+            self._blk_num_to_block(); return
+        if _in(px, py, _BLK_NUM_OK):
+            self._blk_kbd_commit(); return
+        if _in(px, py, _BLK_NUM_X):
+            self._blk_kbd_cancel(); return
+
+    def _blk_num_to_block(self):
+        """From the number pad, switch to dropping a reporter BLOCK into the slot
+        (the Scratch white-oval -> drop-a-block move). Discards the typed number and
+        opens the expr chooser on the same slot."""
+        k = self.blk_kbd
+        if k is None:
+            return
+        block, name = k["block"], k["slot"]
+        self.blk_kbd = None
+        self._set_text_mode(False)
+        self._blk_open_expr_menu(block, name)
 
     # -- frame + drawing -----------------------------------------------------
 
@@ -4686,14 +4846,19 @@ class Workstation:
             self._draw_blk_kbd()
 
     def _draw_blk_kbd(self):
-        """The variable name-entry prompt: the live name being typed + touch buttons.
-        Indexed API + petme128 only (host == device)."""
+        """Render whichever entry prompt is up: the number pad (kind == 'num') or the
+        variable-name / text prompt. Indexed API + petme128 only (host == device)."""
+        if self.blk_kbd.get("kind") == "num":
+            self._draw_blk_num()
+            return
         cv = self.canvas
         x, y, w, h = _BLK_KBD
         cv.rect(x, y, w, h, NAMES["dark_purple"])
         cv.rectb(x, y, w, h, NAMES["white"])
-        cv.print("NAME YOUR VARIABLE", x + 10, y + 8, NAMES["white"], 1)
-        cv.print("type a name, then OK", x + 10, y + 18, NAMES["light_grey"], 1)
+        is_text = self.blk_kbd.get("kind") == "text"
+        cv.print("TYPE SOME TEXT" if is_text else "NAME YOUR VARIABLE",
+                 x + 10, y + 8, NAMES["white"], 1)
+        cv.print("type, then OK", x + 10, y + 18, NAMES["light_grey"], 1)
         # the live edit buffer in a field with a blinking-ish caret bar
         fx, fy, fw = x + 10, y + 30, w - 20
         cv.rect(fx, fy, fw, 14, NAMES["black"])
@@ -4701,7 +4866,7 @@ class Workstation:
         txt = (self.blk_kbd.get("text") or "")[:24]
         if txt:
             cv.print(txt, fx + 4, fy + 3, NAMES["white"], 1)
-        else:
+        elif not is_text:
             # empty buffer: show the default name as a dim placeholder (OK keeps it)
             cv.print(str(self.blk_kbd.get("var", ""))[:24], fx + 4, fy + 3,
                      NAMES["dark_grey"], 1)
@@ -4709,6 +4874,41 @@ class Workstation:
         self._btn("DEL", _BLK_KBD_DEL, NAMES["red"])
         self._btn("OK", _BLK_KBD_OK, NAMES["green"])
         self._btn("X", _BLK_KBD_X, NAMES["dark_grey"])
+
+    def _draw_blk_num(self):
+        """The number-entry pad: a live value field + an on-screen digit grid (tap a
+        number in, or type it) + DEL/OK/X and a BLOCK swap for expr slots (#29)."""
+        cv = self.canvas
+        k = self.blk_kbd
+        x, y, w, h = _BLK_NUM
+        cv.rect(x, y, w, h, NAMES["dark_purple"])
+        cv.rectb(x, y, w, h, NAMES["white"])
+        cv.print("TYPE A NUMBER", x + 10, y + 6, NAMES["white"], 1)
+        # live value field; an empty buffer shows the slot's current value, dim (OK keeps it)
+        fx, fy, fw = x + 10, y + 18, w - 20
+        cv.rect(fx, fy, fw, 14, NAMES["black"])
+        cv.rectb(fx, fy, fw, 14, NAMES["light_grey"])
+        txt = (k.get("text") or "")[:30]
+        if txt:
+            cv.print(txt, fx + 4, fy + 3, NAMES["white"], 1)
+        else:
+            cur = k.get("cur")
+            ph = str(cur) if _blocks_mod.is_literal_value(cur) and cur is not None else "0"
+            cv.print(ph[:30], fx + 4, fy + 3, NAMES["dark_grey"], 1)
+        cv.rect(fx + 4 + len(txt) * 8, fy + 3, 6, 8, NAMES["yellow"])   # caret
+        # the digit grid (0-9 . -)
+        for idx in range(len(_BLK_NUM_KEYS)):
+            r = idx // _BLK_NUM_BPR
+            c = idx % _BLK_NUM_BPR
+            rx = _BLK_NUM_GX + c * _BLK_NUM_BW
+            ry = _BLK_NUM_GY + r * _BLK_NUM_BH
+            self._btn(_BLK_NUM_KEYS[idx],
+                      (rx, ry, _BLK_NUM_BW - 3, _BLK_NUM_BH - 3), NAMES["indigo"])
+        self._btn("DEL", _BLK_NUM_DEL, NAMES["red"])
+        if k.get("allow_block"):
+            self._btn("BLOCK", _BLK_NUM_BLOCK, NAMES["green"])
+        self._btn("OK", _BLK_NUM_OK, NAMES["green"])
+        self._btn("X", _BLK_NUM_X, NAMES["dark_grey"])
 
     def _blk_hint(self):
         be = self.blocks_ed
@@ -4901,6 +5101,8 @@ class Workstation:
         None for plain pickers (dropdown/variable rows have no category color)."""
         m = self.blk_menu
         item = m["items"][ridx]
+        if item == _NUM_LITERAL_ITEM:
+            return NAMES["white"]      # the white editable-oval look (Scratch)
         if m["mode"] == "cat":
             return NAMES[_blocks_mod.CATEGORY_COLOR.get(item, "dark_grey")]
         if m["mode"] in ("blk", "expr"):

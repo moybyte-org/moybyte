@@ -288,6 +288,18 @@ CATALOG = {
         "slots": [],
         "expr": "_touched()",   # helper: True on a tap this frame
     },
+    "touch_x": {
+        "category": CAT_INPUT, "shape": SHAPE_EXPR,
+        "label": "tap x",
+        "slots": [],
+        "expr": "_touch_x()",   # helper: x of the last tap (so a game can hit-test)
+    },
+    "touch_y": {
+        "category": CAT_INPUT, "shape": SHAPE_EXPR,
+        "label": "tap y",
+        "slots": [],
+        "expr": "_touch_y()",   # helper: y of the last tap
+    },
 
     # -- variables -----------------------------------------------------------
     "set_var": {
@@ -352,7 +364,9 @@ CATALOG = {
     },
     "op_rnd": {
         "category": CAT_OPERATORS, "shape": SHAPE_EXPR, "label": "random to {n}",
-        "slots": [_slot("n", SLOT_NUMBER, default=10)], "expr": "rnd({n})",
+        # a whole number 0..n-1 (int(rnd) -- a kid expects "random to 10" to give a
+        # countable number, not 7.34; perfect for a random screen position too).
+        "slots": [_slot("n", SLOT_EXPR, default=10)], "expr": "int(rnd({n}))",
     },
 
     # -- sound ---------------------------------------------------------------
@@ -708,6 +722,19 @@ _HELPER_TOUCHED = (
     "    t = touch()\n"
     "    return bool(t) and t[2]\n"
 )
+# tap position readers: the x / y of the pointer this frame, or -100 (well off the
+# 320x240 screen) when there's no pointer -- so a hit-test against a target never
+# matches when nothing is touched.
+_HELPER_TOUCH_X = (
+    "def _touch_x():\n"
+    "    t = touch()\n"
+    "    return t[0] if t else -100\n"
+)
+_HELPER_TOUCH_Y = (
+    "def _touch_y():\n"
+    "    t = touch()\n"
+    "    return t[1] if t else -100\n"
+)
 _HELPER_WAIT = (
     "def _wait(_secs):\n"
     "    pass\n"          # frame-based runtime: a real sleep would stall the loop
@@ -814,6 +841,53 @@ def unique_var_name(existing, base="var"):
     return base + str(i)
 
 
+def parse_number_literal(raw, default=0):
+    """Coerce a kid's free-typed text into a STORED numeric literal (int or float)
+    for a number / expr-literal slot. The block editor types into a text buffer; on
+    commit it runs that buffer through here so a slot ALWAYS holds a real number, not
+    a string -- which the compiler then emits bare (`5`), never as code. Accepts a
+    leading '-' and at most one '.', drops every other character (so a slot can never
+    inject code), and falls back to `default` when nothing numeric remains.
+
+    MicroPython-safe (no regex). '-3' -> -3, '4.5' -> 4.5, '1.2.3' -> 1.23 (the
+    second '.' is dropped, its digits kept), 'x9' -> 9, '' / '-' / '.' -> default."""
+    s = str(raw).strip()
+    neg = False
+    if s[:1] == "-":
+        neg = True
+        s = s[1:]
+    digits = ""
+    seen_dot = False
+    for ch in s:
+        if ch.isdigit():
+            digits += ch
+        elif ch == "." and not seen_dot:
+            seen_dot = True
+            digits += "."
+        # everything else (letters, a second dot, punctuation) is dropped
+    # nothing usable (empty, or just a "."): keep the caller's default
+    if not digits or digits == ".":
+        return default
+    if "." in digits:
+        try:
+            val = float(digits)
+        except (TypeError, ValueError):
+            return default
+    else:
+        try:
+            val = int(digits)
+        except (TypeError, ValueError):
+            return default
+    return -val if neg else val
+
+
+def is_literal_value(value):
+    """True if an expr-slot value is a typed LITERAL (number/string/None) rather
+    than a nested reporter block (a dict). The editor uses this to decide whether a
+    slot is currently editable-as-text or holds a block."""
+    return not isinstance(value, dict)
+
+
 def compile_blocks(program):
     """Compile a block program (the schema above) into a cart's main.py source.
 
@@ -839,6 +913,12 @@ def compile_blocks(program):
     if _uses(scripts, "touched"):
         out.append("")
         out.append(_HELPER_TOUCHED.rstrip("\n"))
+    if _uses(scripts, "touch_x"):
+        out.append("")
+        out.append(_HELPER_TOUCH_X.rstrip("\n"))
+    if _uses(scripts, "touch_y"):
+        out.append("")
+        out.append(_HELPER_TOUCH_Y.rstrip("\n"))
     if _uses(scripts, "wait"):
         out.append("")
         out.append(_HELPER_WAIT.rstrip("\n"))
