@@ -107,6 +107,21 @@ if [ -d "${KC_SD_SRC}" ]; then
   fi
 fi
 
+# Stage the KidCode kc_audio native C module (focused PCM mixer for the v0.4
+# console -- see native/kc_audio/modkc_audio.c, #16) into the upstream ext_mod
+# tree, same pattern as kc_sd (ext_mod is wiped on re-clone, so re-stage every
+# build). DeviceAudio prefers it and falls back to the Python mixer when absent.
+KC_AUDIO_SRC="${SCRIPT_DIR}/native/kc_audio"
+KC_AUDIO_DST="${UPSTREAM_DIR}/ext_mod/kc_audio"
+if [ -d "${KC_AUDIO_SRC}" ]; then
+  rm -rf "${KC_AUDIO_DST}"
+  cp -r "${KC_AUDIO_SRC}" "${KC_AUDIO_DST}"
+  EXT_MOD_CMAKE="${UPSTREAM_DIR}/ext_mod/micropython.cmake"
+  if ! grep -q 'kc_audio/micropython.cmake' "${EXT_MOD_CMAKE}"; then
+    sed -i '/kc_sd\/micropython.cmake/a include(${CMAKE_CURRENT_LIST_DIR}/kc_audio/micropython.cmake)' "${EXT_MOD_CMAKE}"
+  fi
+fi
+
 # Stage the shared host/device modules into the frozen modules tree. Canonical
 # sources live in runtime/ (imported by the host as runtime.*); the device freezes
 # these copies as top-level modules, so both consoles run literally the same code:

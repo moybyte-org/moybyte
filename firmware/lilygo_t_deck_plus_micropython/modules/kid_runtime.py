@@ -682,6 +682,19 @@ class DeviceAudio:
         self._buf = 0
         self._busy = False
         self._busy_ticks = 0       # watchdog: frames the busy flag has been stuck set
+        # NATIVE MIXER (#16): the per-sample mix is the device bottleneck (the pure-
+        # Python render_into runs the beeper at ~12 FPS and crackles). When the
+        # native kc_audio C kernel is frozen in, prefer it: Python still owns the
+        # model/control/music scheduler (engine.*), C just runs the heavy inner loop.
+        # A build WITHOUT kc_audio falls straight back to engine.render_into, so the
+        # firmware still works and the host is unaffected.
+        try:
+            import kc_audio
+            self._kc_audio = kc_audio
+            print("KidCode audio: native kc_audio mixer ENABLED")
+        except Exception:   # noqa: BLE001 -- no native module -> Python mixer fallback
+            self._kc_audio = None
+            print("KidCode audio: native kc_audio absent, using Python mixer")
         try:
             from machine import I2S, Pin
             self.i2s = I2S(
@@ -732,6 +745,42 @@ class DeviceAudio:
     def volume(self, level):
         self.engine.set_volume(level)
 
+    def _render_native(self, buf, n):
+        """Render `n` frames into `buf` using the native kc_audio kernel for the heavy
+        per-sample loop, keeping the Python AudioEngine the single source of truth.
+
+        This is the exact same sequence as AudioEngine.render_into, with ONLY the
+        inner sample loop delegated to C:
+          1. advance the music phrase scheduler in Python (it may retrigger SFX),
+          2. push each voice's exact state into the C mirror (voice_set),
+          3. C mixes the whole block (the part that was too slow in MicroPython),
+          4. read the advanced render state back into the Python voices (voice_read)
+             so is_active() / the next block's scheduler see the truth.
+        Because C holds no cross-block state, the output is identical to the pure-
+        Python mixer -- same .kcart, same samples on host and device."""
+        eng = self.engine
+        ka = self._kc_audio
+        # 1. music scheduler (Python) -- same dt_frame math as render_into.
+        eng._advance_music(n / float(eng.rate))
+        voices = eng.voices
+        # 2. push exact voice state into C.
+        for c in range(len(voices)):
+            v = voices[c]
+            ka.voice_set(c, v.active, v.steps, v.step_dur, v.loop,
+                         v.idx, v.t, v.phase, v.noise)
+        # 3. the heavy mix, in C.
+        ka.render(buf, n, eng.rate, eng.volume)
+        # 4. read the advanced state back into the Python voices.
+        for c in range(len(voices)):
+            st = ka.voice_read(c)
+            if st is not None:
+                v = voices[c]
+                v.active = st[0]
+                v.idx = st[1]
+                v.t = st[2]
+                v.phase = st[3]
+                v.noise = st[4]
+
     def tick(self, dt):
         """Render this frame's PCM and stream it to the I2S DMA ring NON-BLOCKINGLY.
         Skips all work when nothing is playing (silent cart ~= free) or when the
@@ -759,11 +808,16 @@ class DeviceAudio:
         if n > AUDIO_MAX_FRAME:
             n = AUDIO_MAX_FRAME
         try:
-            # render_into reuses our persistent buffer (no per-frame allocation, and
-            # the buffer the port holds a pointer to stays alive); memoryview gives
-            # write() exactly the rendered slice.
+            # render reuses our persistent buffer (no per-frame allocation, and the
+            # buffer the port holds a pointer to stays alive); memoryview gives
+            # write() exactly the rendered slice. Prefer the native kc_audio kernel
+            # for the heavy mix; fall back to the pure-Python render_into when the
+            # native module isn't frozen in (so a build without it still works).
             buf = self._bufs[self._buf]
-            self.engine.render_into(buf, n)
+            if self._kc_audio is not None:
+                self._render_native(buf, n)
+            else:
+                self.engine.render_into(buf, n)
             self._buf ^= 1
             self._busy = True
             self.i2s.write(memoryview(buf)[:n * 2])
