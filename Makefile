@@ -9,6 +9,12 @@ MPY_FW_DIR ?= firmware/lilygo_t_deck_plus_micropython
 MPY_BUILD_DIR ?= $(MPY_FW_DIR)/.build/lvgl_micropython/lib/micropython/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT
 MPY_APP_BIN ?= $(MPY_FW_DIR)/dist/current/kidcode-current-app.bin
 MPY_FULL_BIN ?= $(MPY_FW_DIR)/dist/current/kidcode-current-full-dio-0x0.bin
+# OTA (#53): the bootable app partition is ota_0. With the dual-OTA table it sits at
+# 0x20000 (otadata shifted it up from the legacy 0x10000). The app-only flash targets
+# below write here; the FIRST flash of an OTA build must use -full-erase (rewrites the
+# partition table + clears otadata so the bootloader boots ota_0). Override for a
+# non-OTA single-factory build: make ... MPY_APP_OFFSET=0x10000
+MPY_APP_OFFSET ?= 0x20000
 
 MPY_FLASH_MODE ?= dio
 
@@ -51,11 +57,11 @@ firmware-build-lilygo-micropython:
 
 firmware-flash-lilygo-micropython:
 	test -n "$(PORT)"
-	$(IDF_PYTHON) tools/esptool_no_modem.py --chip esp32s3 -p $(PORT) -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size 16MB --flash_freq 80m 0x0 $(MPY_BUILD_DIR)/bootloader/bootloader.bin 0x8000 $(MPY_BUILD_DIR)/partition_table/partition-table.bin 0x10000 $(MPY_APP_BIN)
+	$(IDF_PYTHON) tools/esptool_no_modem.py --chip esp32s3 -p $(PORT) -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size 16MB --flash_freq 80m 0x0 $(MPY_BUILD_DIR)/bootloader/bootloader.bin 0x8000 $(MPY_BUILD_DIR)/partition_table/partition-table.bin $(MPY_APP_OFFSET) $(MPY_APP_BIN)
 
 firmware-flash-lilygo-micropython-no-reset:
 	test -n "$(PORT)"
-	$(IDF_PYTHON) tools/esptool_no_modem.py --chip esp32s3 -p $(PORT) -b 460800 --before no_reset --after no_reset write_flash --flash_mode dio --flash_size 16MB --flash_freq 80m 0x0 $(MPY_BUILD_DIR)/bootloader/bootloader.bin 0x8000 $(MPY_BUILD_DIR)/partition_table/partition-table.bin 0x10000 $(MPY_APP_BIN)
+	$(IDF_PYTHON) tools/esptool_no_modem.py --chip esp32s3 -p $(PORT) -b 460800 --before no_reset --after no_reset write_flash --flash_mode dio --flash_size 16MB --flash_freq 80m 0x0 $(MPY_BUILD_DIR)/bootloader/bootloader.bin 0x8000 $(MPY_BUILD_DIR)/partition_table/partition-table.bin $(MPY_APP_OFFSET) $(MPY_APP_BIN)
 
 firmware-flash-lilygo-micropython-full:
 	test -n "$(PORT)"
