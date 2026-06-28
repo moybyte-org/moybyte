@@ -411,6 +411,16 @@ If the device is online, it can pull the image itself instead of you copying it 
   { "version": 2, "url": "https://your-host/kidcode/kidcode_micropython_tdeck.bin",
     "size": 3332752, "sha256": "<hex sha256 of the .bin>" }
   ```
+  Don't hand-write it — generate it from the built image so `size`/`sha256`/`version`
+  can't drift (`version` is read back out of `kc_ota.FIRMWARE_VERSION`):
+  ```bash
+  make ota-manifest                                   # -> dist/latest.json (http://<LAN-IP>:8000)
+  make ota-manifest OTA_BASE_URL=https://your-host/kidcode
+  make ota-serve                                      # local static server over dist/ (test loop)
+  ```
+  (`make ota-manifest` prints the exact `ota.json` line to drop on the SD card. To
+  *test* the update path without bumping the firmware, pass a higher version:
+  `python tools/gen_ota_manifest.py --version 2`.)
 - **Settings → UPDATE ONLINE** connects (reusing a network the kid already joined via
   the WiFi cart — it never asks for a password), fetches the manifest, and if
   `version > FIRMWARE_VERSION` it **streams the `.bin` straight to `/sd/update/firmware.bin`**
