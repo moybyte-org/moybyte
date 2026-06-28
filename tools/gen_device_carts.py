@@ -36,7 +36,6 @@ CART_ORDER = [
     "tiny_runner",
     "platformer",
     "battle_city",
-    "scroll_demo",
     "tap_red",
     "tap_game",
     "beeper",

@@ -198,38 +198,6 @@ class _FakeGfx:
                                 d[drow + tx] = p
 
     @staticmethod
-    def blit_window(dst, dw, dh, src, src_w, sx, sy):
-        # #54 scroll engine: copy a dw x dh window of `src` (a wider pre-rendered
-        # background, stride src_w) at (sx, sy) into `dst` (stride dw, contiguous) --
-        # a faithful transcription of kc_gfx_blit_window in modkc_gfx.c.
-        d = memoryview(dst).cast("H")
-        s = memoryview(src).cast("H")
-        dcap = len(d)
-        scap = len(s)
-        if dw <= 0 or dh <= 0 or src_w <= 0:
-            return
-        if sx < 0:
-            sx = 0
-        if sy < 0:
-            sy = 0
-        if sx + dw > src_w:                       # clamp window to source width
-            dw = src_w - sx
-        if dw <= 0:
-            return
-        if dw * dh > dcap:                        # dst guard
-            dh = dcap // dw
-        src_rows = scap // src_w
-        if sy + dh > src_rows:                    # src guard
-            dh = src_rows - sy
-        if dh <= 0:
-            return
-        for row in range(dh):
-            d0 = row * dw
-            s0 = (sy + row) * src_w + sx
-            for col in range(dw):
-                d[d0 + col] = s[s0 + col]
-
-    @staticmethod
     def _clip(dw, cap, cx0, cy0, cx1, cy1):
         max_rows = cap // dw
         if cx0 < 0:
@@ -664,40 +632,3 @@ def test_map_camera_clip_matches_host():
         _tilemap_scene(host, sheet_h, tm_h)
         _tilemap_scene(dev, sheet_d, tm_d)
         _assert_same(host, dev, "map gfx=%s" % gfx)
-
-
-# --------------------------------------------------------------------------- #
-# scroll engine (#54): pre-render a wider layer, window-copy it to the screen. #
-# --------------------------------------------------------------------------- #
-def _layer_scene(L):
-    # A distinctive scene spanning the whole (wider-than-screen) layer, drawn with
-    # verbs both Canvas and DeviceCanvas implement, so the window copy carries real
-    # variety across the seam.
-    L.cls(2)
-    L.rect(4, 4, 30, 20, 8)
-    L.circ(W, H // 2, 15, 11)
-    L.circb(W // 2, 10, 8, 14)
-    L.line(0, 0, W * 2, H, 7)
-    L.pix(W + 5, 5, 10)
-
-
-def test_scroll_layer_window_copy_matches_host():
-    # new_layer + blit_window_from: pre-render the same scene into a wider layer on
-    # both backends, then window-copy at a range of camera offsets (including the
-    # right-edge clamp where dw is reduced) and assert the screens match pixel-for-
-    # pixel. Host copies palette indices; device uses kc_gfx.blit_window (gfx=True) or
-    # the memoryview fallback (gfx=False) over RGB565 -- all three must agree.
-    for gfx in (True, False):
-        m, host, dev = _both(gfx)
-        lh = host.new_layer(W * 2, H + 10)
-        ld = dev.new_layer(W * 2, H + 10)
-        assert (lh.w, lh.h) == (W * 2, H + 10)
-        assert (ld.w, ld.h) == (W * 2, H + 10)
-        _layer_scene(lh)
-        _layer_scene(ld)
-        for cam in ((0, 0), (W, 5), (W // 2, 8), (W + 17, 3), (W * 3, H * 3)):
-            host.cls(0)
-            dev.cls(0)
-            host.blit_window_from(lh, cam[0], cam[1])
-            dev.blit_window_from(ld, cam[0], cam[1])
-            _assert_same(host, dev, "scroll gfx=%s cam=%s" % (gfx, cam))

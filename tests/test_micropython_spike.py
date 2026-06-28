@@ -898,29 +898,6 @@ def test_device_canvas_uses_native_kc_gfx():
     assert "def gfx(self):" in comp
 
 
-def test_scroll_engine_wired():
-    # #54 scroll engine: DeviceCanvas exposes new_layer + blit_window_from, the cart
-    # api exposes make_layer/draw_layer, and the native kc_gfx.blit_window primitive
-    # backs the window copy. Device code isn't executed in these tests, so grep the
-    # frozen sources (host==device pixel parity is proved in
-    # test_device_canvas_parity.test_scroll_layer_window_copy_matches_host).
-    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
-    assert "def new_layer(self, w, h):" in runtime
-    assert "def blit_window_from(self, layer" in runtime
-    assert "self._gfx.blit_window(self._buf" in runtime      # native window copy
-    assert "class _LayerComp:" in runtime                    # layer compositor stand-in
-    assert "class _Layer:" in runtime                        # the draw-target wrapper
-    assert '"make_layer": make_layer, "draw_layer": draw_layer,' in runtime
-    c = (ROOT / "native" / "kc_gfx" / "modkc_gfx.c").read_text(encoding="utf-8")
-    assert "kc_gfx_blit_window" in c
-    assert "MP_ROM_QSTR(MP_QSTR_blit_window)" in c
-    # The seed scroll demo cart drives the engine end to end.
-    demo = Path("system_carts/scroll_demo.kcart/main.py")
-    assert demo.exists()
-    src = demo.read_text(encoding="utf-8")
-    assert "make_layer(" in src and "draw_layer(" in src
-
-
 def test_native_blit_map_wired_for_tilemaps():
     # The tilemap blit (#32) is a native kc_gfx op (one C call per map() region) and
     # DeviceCanvas.map drives it from a baked RGB565 tile atlas, with a Python
