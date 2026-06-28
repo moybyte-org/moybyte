@@ -398,8 +398,38 @@ The device flashes the inactive slot and reboots into the new firmware. (App-onl
 reflashes during dev now target the `ota_0` offset `0x20000` via `MPY_APP_OFFSET`; the
 `-full`/`-full-erase` images already bake the correct offsets.)
 
-> Status: host-tested (build wiring, updater API, full confirm→install→done UI). The
-> on-hardware flash/reboot/rollback pass is still **TODO** — verify on a real T-Deck
+### WiFi download (Settings → UPDATE ONLINE, Phase 3)
+
+If the device is online, it can pull the image itself instead of you copying it to SD:
+
+- Put a tiny config on the card at **`/sd/update/ota.json`**:
+  ```json
+  { "manifest_url": "https://your-host/kidcode/latest.json" }
+  ```
+- The **manifest** at that URL describes the latest build:
+  ```json
+  { "version": 2, "url": "https://your-host/kidcode/kidcode_micropython_tdeck.bin",
+    "size": 3332752, "sha256": "<hex sha256 of the .bin>" }
+  ```
+- **Settings → UPDATE ONLINE** connects (reusing a network the kid already joined via
+  the WiFi cart — it never asks for a password), fetches the manifest, and if
+  `version > FIRMWARE_VERSION` it **streams the `.bin` straight to `/sd/update/firmware.bin`**
+  (raw socket → SD, never buffering the whole 3 MB in RAM), verifying `size` + `sha256`.
+  It then hands off to the same confirm → install → reboot path as above.
+- **Bump `FIRMWARE_VERSION` in `modules/kc_ota.py` on every release** and set the
+  manifest `version` to match — the online check only offers an update when the
+  manifest is strictly newer (same convention as cart versioning).
+
+`http://` and `https://` are both supported (TLS via the frozen `ssl`). The downloaded
+image is checksummed before it can be flashed, and a corrupt/truncated download (or a
+bad flash) still falls back to the rollback safety net above.
+
+> Status: the **local SD install** path (UPDATE FW) is host-tested end to end (build
+> wiring, updater API, confirm→install→done UI). The **WiFi download** path (UPDATE
+> ONLINE) is host-tested for orchestration with a fake, but the real socket/TLS + the
+> WiFi↔display RAM coexistence (the #38 caveat — the WLAN stack and the LCD DMA flush
+> compete for internal RAM) are **UNVERIFIED on hardware**. The on-device
+> flash/reboot/rollback/download pass is still **TODO** — verify on a real T-Deck
 > before relying on it.
 
 ## Current limitations
