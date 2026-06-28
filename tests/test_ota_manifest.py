@@ -59,3 +59,54 @@ def test_main_defaults_version_from_kc_ota(tmp_path):
     gom.main([str(b), "--url", "http://h/img.bin", "--out", str(out)])
     m = json.loads(out.read_text(encoding="utf-8"))
     assert m["version"] == gom.read_firmware_version()
+
+
+def test_build_manifest_includes_channel_and_label(tmp_path):
+    # #53 two-channel: the manifest carries channel + a human label (a beta's version
+    # is an epoch int, so the label keeps the update screen readable).
+    b = tmp_path / "f.bin"
+    b.write_bytes(b"\xe9x")
+    m = gom.build_manifest(str(b), "http://h/f.bin", 7)
+    assert m["channel"] == "stable" and m["label"] == "v7"        # defaults
+    m2 = gom.build_manifest(str(b), "u", 1700000000, channel="unstable", label="beta z")
+    assert m2["channel"] == "unstable" and m2["label"] == "beta z"
+
+
+def test_publish_mode_stages_channel_dir(tmp_path):
+    # --root publish: copy the image to ROOT/<channel>/firmware.bin + a matching manifest,
+    # url pointing at the bin. This is what `make ota-publish-unstable` runs.
+    b = tmp_path / "app.bin"
+    b.write_bytes(b"\xe9" + b"\x00" * 500)
+    root = tmp_path / "ota"
+    rc = gom.main([str(b), "--root", str(root), "--channel", "unstable",
+                   "--version", "1700000000", "--label", "beta x", "--base-url", "http://h:8000"])
+    assert rc == 0
+    man = json.loads((root / "unstable" / "latest.json").read_text(encoding="utf-8"))
+    assert man["channel"] == "unstable"
+    assert man["label"] == "beta x"
+    assert man["url"] == "http://h:8000/unstable/firmware.bin"
+    assert man["size"] == 501
+    assert (root / "unstable" / "firmware.bin").read_bytes() == b.read_bytes()
+
+
+def _load_kc_ota():
+    import importlib.util
+    p = ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules" / "kc_ota.py"
+    spec = importlib.util.spec_from_file_location("kc_ota", p)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def test_kc_ota_offer_logic_is_channel_aware():
+    # The device offers an install when the manifest is a different channel (a switch,
+    # incl. beta->stable) OR a newer version within the running channel. Host default
+    # (no _ota_build stamp) is stable / FIRMWARE_VERSION.
+    m = _load_kc_ota()
+    u = m.OtaUpdater(with_sd=lambda fn: fn())
+    assert u.channel() == "stable"
+    assert u.version_label() == "v%d" % m.FIRMWARE_VERSION
+    assert u.offers({"version": m.FIRMWARE_VERSION + 1, "channel": "stable"}) is True
+    assert u.offers({"version": m.FIRMWARE_VERSION, "channel": "stable"}) is False
+    assert u.offers({"version": 0, "channel": "unstable"}) is True      # switch to beta
+    assert u.offers({"version": 0}, "unstable") is True                 # channel from arg

@@ -157,8 +157,8 @@ def test_ota_online_download_streams_to_sd_with_checksum():
     assert 'DOWNLOAD_NAME = "firmware.bin"' in ota
     # capability + manifest + connectivity
     assert "def online_available(self):" in ota
-    assert "def manifest_url(self):" in ota
-    assert "def check_online(self):" in ota
+    assert "def manifest_url(self, channel=None):" in ota   # channel-aware (#53 2-channel)
+    assert "def check_online(self, channel=None):" in ota
     assert "def ensure_online(self):" in ota
     # streaming download API the console drives (mirror of begin/step/finish)
     assert "def begin_download(self" in ota
@@ -1643,3 +1643,28 @@ def test_micropython_offline_diag_wiring():
     assert '_diag_log("frame error", exc, diag)' in runtime
     assert '_diag_log("cart error", _ce, diag)' in runtime
     assert '_diag_note("audio", "I2S' in runtime
+
+
+def test_ota_two_channel_wired():
+    # #53 two-channel OTA: kc_ota learns its channel from a build-stamped _ota_build,
+    # offers cross-channel switches, and the manifest fetch is channel-aware; the shared
+    # console exposes a CHANNEL Settings toggle; build.sh stamps the channel. Device code
+    # isn't executed here (host offer-logic is in test_ota_manifest), so grep the sources.
+    kc = (ROOT / "modules" / "kc_ota.py").read_text(encoding="utf-8")
+    assert "FIRMWARE_CHANNEL" in kc
+    assert "import _ota_build" in kc                     # build-stamped identity
+    assert "def channel(self):" in kc
+    assert "def offers(self, manifest" in kc
+    assert "def version_label(self):" in kc
+    assert "def manifest_url(self, channel=None):" in kc
+    assert "def check_online(self, channel=None):" in kc
+    # The shared console (staged to the device) drives the channel toggle + flow.
+    console = Path("runtime/console.py").read_text(encoding="utf-8")
+    assert '("ota_channel", "CHANNEL", "channel")' in console
+    assert "def _cycle_channel(self, d):" in console
+    assert "u.offers(manifest, ch)" in console
+    # build.sh stamps the channel into a generated _ota_build module + dist manifest.
+    build = (ROOT / "build.sh").read_text(encoding="utf-8")
+    assert "KIDCODE_OTA_CHANNEL" in build
+    assert "_ota_build.py" in build
+    assert "ota_build.json" in build

@@ -1724,6 +1724,11 @@ class Workstation:
 
     def _persist_font_scale(self):
         self.system["font_scale"] = self.font_scale
+        self._persist_system()
+
+    def _persist_system(self):
+        """Write self.system to system.json when a writable store is wired. Shared by the
+        persisting Settings toggles (font, wallpaper, OTA channel)."""
         if not (self.carts_store is not None and self.carts_root is not None
                 and self.can_manage):
             return
@@ -1731,6 +1736,20 @@ class Workstation:
             self._with_sd(lambda: self.carts_store.save_system(self.system, self.carts_root))
         except Exception as exc:  # noqa: BLE001 -- a failed write just isn't remembered
             print("KidCode system save failed:", _err_text(exc))
+
+    def _ota_channel(self):
+        """The selected OTA update channel ("stable" default / "unstable" beta). Drives
+        which manifest UPDATE ONLINE checks; persisted in system.json."""
+        return self.system.get("ota_channel", "stable")
+
+    def _cycle_channel(self, d):
+        """Toggle the OTA channel STABLE<->UNSTABLE and persist. Two channels, so any
+        step flips. This only changes what UPDATE ONLINE checks -- the running firmware
+        is unchanged until a manifest is actually installed (and the bootloader's
+        rollback still guards a bad beta image)."""
+        self.system["ota_channel"] = (
+            "stable" if self._ota_channel() == "unstable" else "unstable")
+        self._persist_system()
 
     def load_achievements(self):
         """Load the unlocked achievements (kid_carts achievements.json) and wire the
@@ -2007,6 +2026,7 @@ class Workstation:
         if self._update_available():
             rows = rows + (("update", "UPDATE FW", "action"),)
         if self._online_update_available():
+            rows = rows + (("ota_channel", "CHANNEL", "channel"),)
             rows = rows + (("update_online", "UPDATE ONLINE", "action"),)
         return rows
 
@@ -2046,6 +2066,9 @@ class Workstation:
         key, _label, kind = self._settings_rows()[self.set_msel]
         if kind == "action":                    # EDIT ICONS / UPDATE FW: open the tool
             self._activate_settings_action(key)
+            return
+        if key == "ota_channel":                # OTA update channel STABLE <-> BETA
+            self._cycle_channel(d)
             return
         if key == "wallpaper":
             self.cycle_wallpaper(d)
@@ -2219,7 +2242,8 @@ class Workstation:
                 self._upd_phase = "error"
                 self._upd_msg = "no updater"
                 return
-            manifest = u.check_online()        # connect (saved creds) + GET the manifest
+            ch = self._ota_channel()
+            manifest = u.check_online(ch)      # connect (saved creds) + GET the manifest
             if u.error:
                 self._upd_phase = "error"
                 self._upd_msg = u.error
@@ -2228,11 +2252,9 @@ class Workstation:
                 self._upd_phase = "error"
                 self._upd_msg = "no manifest"
                 return
-            try:
-                newer = int(manifest.get("version", 0)) > u.version()
-            except Exception:
-                newer = False
-            if not newer:
+            # Offer when the manifest is a different channel (a switch -- incl. beta->
+            # stable) or a newer version within the selected channel (#53).
+            if not u.offers(manifest, ch):
                 self._upd_phase = "uptodate"
                 return
             self._online_manifest = manifest
@@ -2297,27 +2319,41 @@ class Workstation:
         u = self.updater
         slot = u.slot() if u is not None else "?"
         ver = u.version() if u is not None else 0
+        vlabel = u.version_label() if u is not None else "v0"
         x = px + 12 * fs
         y = py + 28 * fs
         phase = self._upd_phase
         if phase == "checking":
             cv.print("CHECKING ONLINE...", x, y, NAMES["yellow"], 1)
             y += 16 * fs
-            cv.print("running: %s v%d" % (slot, ver), x, y, NAMES["light_grey"], 1)
+            beta = self._ota_channel() == "unstable"
+            cv.print("channel: %s" % ("BETA" if beta else "STABLE"), x, y,
+                     NAMES["orange"] if beta else NAMES["green"], 1)
+            y += 14 * fs
+            cv.print("running: %s %s" % (slot, vlabel), x, y, NAMES["light_grey"], 1)
         elif phase == "uptodate":
             cv.print("UP TO DATE", x, y, NAMES["green"], 1)
             y += 14 * fs
-            cv.print("firmware v%d" % ver, x, y, NAMES["white"], 1)
+            cv.print("firmware %s" % vlabel, x, y, NAMES["white"], 1)
             y += 18 * fs
             cv.print("B = BACK", x, y, NAMES["yellow"], 1)
         elif phase == "confirm_online" and self._online_manifest:
             m = self._online_manifest
             newv = int(m.get("version", 0) or 0)
             kb = int(m.get("size", 0) or 0) // 1024
-            cv.print("UPDATE AVAILABLE", x, y, NAMES["light_grey"], 1)
+            run_ch = u.channel() if u is not None else "stable"
+            tgt_ch = m.get("channel") or self._ota_channel()
+            label = str(m.get("label") or ("v%d" % newv))
+            switch = tgt_ch != run_ch
+            tgt_name = "BETA" if tgt_ch == "unstable" else "STABLE"
+            cv.print("SWITCH TO %s" % tgt_name if switch else "UPDATE AVAILABLE",
+                     x, y, NAMES["light_grey"], 1)
             y += 12 * fs
-            cv.print("v%d -> v%d" % (ver, newv), x, y, NAMES["green"], 1)
-            y += 12 * fs
+            if switch:
+                cv.print(label[:22], x, y, NAMES["orange"], 1)
+            else:
+                cv.print("%s -> %s" % (vlabel, label[:13]), x, y, NAMES["green"], 1)
+            y += 14 * fs
             if kb:
                 cv.print("%d KB download" % kb, x, y, NAMES["white"], 1)
                 y += 14 * fs
@@ -5070,8 +5106,12 @@ class Workstation:
         elif kind == "mock-name":
             cv.print(str(self.system.get("name", self._MOCK_NAMES[0]))[:8], vx, y + 5,
                      NAMES["peach"], 1)
-        # Mark not-yet-functional rows clearly (wallpaper + font + EDIT ICONS work).
-        if kind not in ("wallpaper", "font", "action"):
+        elif kind == "channel":            # OTA update channel: STABLE / BETA (#53)
+            beta = self._ota_channel() == "unstable"
+            cv.print("BETA" if beta else "STABLE", vx, y + 5,
+                     NAMES["orange"] if beta else NAMES["green"], 1)
+        # Mark not-yet-functional rows clearly (wallpaper + font + channel + actions work).
+        if kind not in ("wallpaper", "font", "action", "channel"):
             cv.print("soon", x + 4, y + 6 + fw, NAMES["dark_grey"], 1)
 
     def _draw_fps(self):

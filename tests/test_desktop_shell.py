@@ -347,3 +347,38 @@ def test_status_strip_stays_legible_over_an_animated_wallpaper(tmp_path):
     below = lay.status_h + 2
     band = set(sc.buf[below * sc.w:below * sc.w + sc.w])
     assert len(band) >= 1   # rendered without error; backdrop occupies below-strip rows
+
+
+def test_ota_channel_toggle_persists(tmp_path):
+    # #53 two-channel OTA: when an OTA-capable updater with WiFi is wired, Settings gains
+    # a CHANNEL toggle (STABLE <-> BETA). Toggling persists to system.json so a fresh
+    # boot remembers it. (build_workstation injects no updater on the host, so fake one.)
+    from runtime import host_app
+    carts_dir = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts_dir)
+
+    class _FakeUpdater:
+        def available(self):
+            return True
+
+        def online_available(self):
+            return True
+
+    ws.updater = _FakeUpdater()
+    ws._updater_ok = None          # invalidate the cached capability checks
+    ws._online_ok = None
+
+    ws.open_settings()
+    keys = [r[0] for r in ws._settings_rows()]
+    assert "ota_channel" in keys and "update_online" in keys
+    assert ws._ota_channel() == "stable"           # default
+
+    ws.set_msel = keys.index("ota_channel")
+    ws.settings_adjust(1)
+    assert ws._ota_channel() == "unstable" and ws.system.get("ota_channel") == "unstable"
+    ws.settings_adjust(-1)                          # any direction flips (two channels)
+    assert ws._ota_channel() == "stable"
+
+    ws.settings_adjust(1)                           # -> unstable, then check it persisted
+    ws2 = host_app.build_workstation(carts_dir)
+    assert ws2.system.get("ota_channel") == "unstable"

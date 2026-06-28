@@ -36,11 +36,28 @@ UPDATE_DIR = "/sd/update"
 BLOCK = 4096                 # esp32.Partition native block (erase page); writeblocks erases
 IMAGE_MAGIC = 0xE9          # first byte of an ESP32 app image (esp_image_header_t.magic)
 
-# Bump on every released firmware build so an online manifest advertising a higher
-# "version" is recognised as newer (mirrors the cart-versioning convention). The
-# online check only offers an update when manifest["version"] > FIRMWARE_VERSION.
+# Released-build identity (mirrors cart versioning). The online check offers an update
+# when the manifest is for a DIFFERENT channel than the running build (a deliberate
+# stable<->unstable switch -- so a kid can opt into beta and always drop back) OR
+# advertises a higher "version" within the SAME channel.
+#   FIRMWARE_VERSION -- monotonic build number; bump per stable release. Unstable (beta)
+#       builds stamp an auto-incrementing version so every publish reads as newer.
+#   FIRMWARE_CHANNEL -- "stable" (master) or "unstable" (dev/beta). The build STAMPS this
+#       (and the version) via a generated `_ota_build` module from KIDCODE_OTA_CHANNEL, so
+#       the committed default stays "stable" and the channel is a build choice -- clean
+#       across merges, not a per-branch source edit.
 FIRMWARE_VERSION = 1
-OTA_CFG_NAME = "ota.json"        # /sd/update/ota.json -> {"manifest_url": "https://..."}
+FIRMWARE_CHANNEL = "stable"
+FIRMWARE_LABEL = None
+try:
+    import _ota_build                                    # written by build.sh (gitignored)
+    FIRMWARE_CHANNEL = getattr(_ota_build, "CHANNEL", FIRMWARE_CHANNEL) or FIRMWARE_CHANNEL
+    FIRMWARE_VERSION = int(getattr(_ota_build, "VERSION", FIRMWARE_VERSION))
+    FIRMWARE_LABEL = getattr(_ota_build, "LABEL", None) or FIRMWARE_LABEL
+except Exception:
+    pass
+
+OTA_CFG_NAME = "ota.json"        # /sd/update/ota.json -> {"channels": {"stable": url, ...}}
 DOWNLOAD_NAME = "firmware.bin"   # WiFi downloads land here (then the Phase-2 install runs)
 DL_CHUNK = 4096                  # socket read / SD write granularity for the streamed image
 
@@ -108,6 +125,32 @@ class OtaUpdater:
     def version(self):
         """The running firmware version (compared against the online manifest)."""
         return FIRMWARE_VERSION
+
+    def channel(self):
+        """The running release channel ("stable" / "unstable"). A manifest from a
+        DIFFERENT channel is always offered (so a kid can switch to beta and back); a
+        same-channel manifest is offered only when its version is higher."""
+        return FIRMWARE_CHANNEL
+
+    def version_label(self):
+        """A human label for the running build: the stamped label ("beta 2026-06-29
+        14:30") or "v<n>" for a stable release. Beta versions are an epoch int, so the
+        label keeps the update screen readable."""
+        return FIRMWARE_LABEL or ("v%d" % FIRMWARE_VERSION)
+
+    def offers(self, manifest, channel=None):
+        """Decide whether `manifest` should be offered as an install. True when it's for
+        a different channel than the running build (a switch -- including a deliberate
+        beta->stable downgrade) OR a newer version within the running channel. `channel`
+        is the channel that was checked, used when the manifest omits its own."""
+        try:
+            mver = int(manifest.get("version", 0) or 0)
+        except Exception:
+            mver = 0
+        mch = manifest.get("channel") or channel or FIRMWARE_CHANNEL
+        if mch != FIRMWARE_CHANNEL:
+            return True                     # switching channels: always offer
+        return mver > FIRMWARE_VERSION      # same channel: only strictly newer
 
     def online_available(self):
         """True when an online update is possible: OTA-capable build AND a wifi
@@ -269,14 +312,24 @@ class OtaUpdater:
     # whole 3MB in RAM) and verifies size + sha256. Then the normal Phase-2 install
     # path takes the downloaded file. UNVERIFIED on hardware (see the class docstring).
 
-    def manifest_url(self):
-        """The configured update manifest URL (/sd/update/ota.json) or None."""
+    def manifest_url(self, channel=None):
+        """The configured manifest URL for `channel` from /sd/update/ota.json, or None.
+        Schema: {"channels": {"stable": url, "unstable": url}}; falls back to the running
+        channel, then "stable", then any. A legacy {"manifest_url": url} is honoured as
+        the single (stable) channel for back-compat."""
         def _read():
             try:
                 import json
 
                 with open(UPDATE_DIR + "/" + OTA_CFG_NAME) as f:
                     cfg = json.load(f)
+                chans = cfg.get("channels")
+                if chans:
+                    if channel and chans.get(channel):
+                        return chans.get(channel)
+                    return (chans.get(FIRMWARE_CHANNEL)
+                            or chans.get("stable")
+                            or next(iter(chans.values()), None))
                 return cfg.get("manifest_url")
             except Exception:
                 return None
@@ -306,12 +359,13 @@ class OtaUpdater:
                 pass
         return self.wifi_online()
 
-    def check_online(self):
-        """Fetch + parse the manifest. Returns the dict (with at least "version" and
-        "url") or None, setting self.error on any failure. Blocking network call --
-        the console runs it once, between frames, behind a CHECKING... screen."""
+    def check_online(self, channel=None):
+        """Fetch + parse the manifest for `channel` (default the running channel).
+        Returns the dict (with at least "version" and "url") or None, setting self.error
+        on any failure. Blocking network call -- the console runs it once, between
+        frames, behind a CHECKING... screen."""
         self.error = None
-        url = self.manifest_url()
+        url = self.manifest_url(channel)
         if not url:
             self.error = "no manifest url"
             return None
