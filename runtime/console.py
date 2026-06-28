@@ -1961,12 +1961,23 @@ class Workstation:
     _MOCK_NAMES = ("ALEX", "SAM", "KIT", "RAE")
 
     def open_settings(self):
+        if self.screen != "settings":
+            self._settings_return = self.screen   # resume here on exit (cart vs home)
         self._dirty = True             # screen change repaints (#44)
         self.set_msel = 0
         self.screen = "settings"
         self.show_achievements = False
         self._secret_taps = 0              # fresh secret-door run each visit (#21)
         self._set_text_mode(False)
+
+    def _exit_settings(self):
+        # Close Settings back to wherever it was opened from: resume the running cart
+        # if we came from one (the gear on the in-cart bar), else the launcher home.
+        if getattr(self, "_settings_return", "launcher") == "desktop" and self.cart is not None:
+            self.screen = "desktop"
+            self._dirty = True
+        else:
+            self.go_home()
 
     def settings_adjust(self, d):
         """Step the selected Settings row by d. Wallpaper/font apply + persist; the
@@ -2874,7 +2885,9 @@ class Workstation:
             if i.pressed("a") or i.pressed("run"):  # activate an action row (EDIT ICONS)
                 if self._SETTINGS_ROWS[self.set_msel][2] == "action":
                     self.open_theme()
-            if i.pressed("b") or i.pressed("home") or i.pressed("stop"):
+            if i.pressed("b"):
+                self._exit_settings()          # back -> resume the cart if opened from one
+            elif i.pressed("home") or i.pressed("stop"):
                 self.go_home()
         elif self.screen == "desktop":
             if i.pressed("home") or i.pressed("stop"):
@@ -3038,7 +3051,7 @@ class Workstation:
             self._secret_taps = 0
             return
         if _in(px, py, lay.set_back):
-            self.go_home()
+            self._exit_settings()
             return
         # Secret-door Easter egg (#21): tapping the SETTINGS title (not a button)
         # _SECRET_TAP_GOAL times knocks the hidden door open. Reset on any other tap.
@@ -3121,6 +3134,8 @@ class Workstation:
                     self._open_map()
                 elif _in(px, py, _BLOCKS_BTN):
                     self._open_blocks()
+                elif _in(px, py, _BAR_GEAR):
+                    self.open_settings()       # gear on the in-cart bar -> Settings
                 elif self.show_fps and _in(px, py, self._fps_tap_rect()):
                     # Tapping the FPS readout toggles the frame-time breakdown HUD
                     # (#43/#44 perf). Deliberate, no keyboard, doesn't fight game
@@ -4546,7 +4561,7 @@ class Workstation:
         self._icon("paint", _PAINT_BTN[0], _PAINT_BTN[1], cv)
         self._icon("map", _MAP_BTN[0], _MAP_BTN[1], cv)
         self._icon("blocks", _BLOCKS_BTN[0], _BLOCKS_BTN[1], cv)
-        # Right cluster: clock + wifi/batt/gear (gear inert on the cart bar for now).
+        # Right cluster: clock + wifi/batt/gear (gear -> Settings; Back resumes the cart).
         cv.print(self._clock_text(), _BAR_CLOCK[0], 3, NAMES["light_grey"], 1)
         self._icon("wifi", _BAR_WIFI[0], _BAR_WIFI[1], cv)
         self._icon("batt", _BAR_BATT[0], _BAR_BATT[1], cv)

@@ -136,6 +136,25 @@ def test_settings_back_returns_home(tmp_path):
     assert ws.screen == "launcher"
 
 
+def test_gear_in_cart_bar_opens_settings_and_back_resumes_cart(tmp_path):
+    """Settings must be reachable from inside a running cart via the in-cart bar's gear
+    (it was drawn but inert), and Back must RESUME the cart, not strand you at the
+    launcher (#46)."""
+    from runtime import console as C
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.launcher.sel = 0
+    ws.open()
+    assert ws.screen == "desktop"
+    drv.click(C._BAR_GEAR[0] + 2, C._BAR_GEAR[1] + 2)     # gear on the in-cart bar
+    drv.frame(1 / 30)
+    assert ws.screen == "settings"
+    drv.click(C._SET_BACK[0] + 2, C._SET_BACK[1] + 2)     # Back resumes the cart...
+    drv.frame(1 / 30)
+    assert ws.screen == "desktop"                          # ...not the launcher
+
+
 def test_settings_mock_rows_do_not_touch_carts(tmp_path):
     """The mocked rows (volume/brightness/name) step cosmetic values in the system
     dict but are clearly not wired to a backend yet. (The old "theme" mock-choice is
