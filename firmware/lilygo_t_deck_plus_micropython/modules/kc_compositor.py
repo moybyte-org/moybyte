@@ -79,6 +79,12 @@ FLUSH_SAMPLE_EVERY = 30   # log one FLUSHBRK per N flushes (~ every 0.5-1.5 s)
 # esp_lcd access -- deferred (the per-object DRAW cost is the bigger wall: a native
 # sprite-batch, #43). The flush can't be made faster, but the copy is gone.
 #
+# UPDATE (#43): "true overlap needs native esp_lcd" was WRONG -- the async-completion
+# callback DOES exist at the MicroPython level (`bus.register_callback`), it was just
+# unused, so every `last=False` band still busy-waited. The ASYNC_FLUSH path below
+# registers it and finally hides the tx behind render. This block's "tx not hidden"
+# caveat applies only when ASYNC_FLUSH is off.
+#
 # HOW (the buffer/swap design + how completion is tracked).
 # Two DISTINCT PSRAM RGB565 framebuffers, A and B (2 x 153,600 B in PSRAM; we
 # have ~7.7 MB free, so this is fine). At any moment one is the FRONT (being
@@ -115,6 +121,63 @@ FLUSH_SAMPLE_EVERY = 30   # log one FLUSHBRK per N flushes (~ every 0.5-1.5 s)
 # single-buffer banded path, byte-for-byte. FLUSHBRK instrumentation works in
 # BOTH paths so the overlap is measurable either way.
 DOUBLE_BUFFER = True   # device-confirmed stable + the copy-removal win (~13->16-19fps)
+
+
+# --- async DMA completion: the REAL flush/render overlap (#43) ---------------
+#
+# THE BUG #40 BANKED BUT DIDN'T FIX. `lcd_bus.tx_color` BUSY-WAITS for the DMA to
+# drain on EVERY call unless a Python callback is registered -- the `last` arg is
+# IGNORED on the SPI path (ext_mod/lcd_bus/modlcd_bus.c:192 `while !trans_done`;
+# lcd_types.c marks x/y/last LCD_UNUSED for esp_lcd_panel_io_tx_color). So the
+# double-buffer "kick async, drain later" never overlapped: every band blocked and
+# the frame cost render + flush, not max(render, flush). Device FLUSHBRK/PERF
+# proved it: Beeper flush=21 draw=22 -> 22 fps (a real overlap would be ~45).
+#
+# THE FIX. Register a callback on the bus. Then tx_color QUEUES the band and
+# returns immediately; esp_lcd fires on_color_trans_done -> bus_trans_done_cb ->
+# our callback once per band as each DMA completes. _kick_front fires ALL bands
+# async and returns, so the panel DMA runs while the CPU renders the NEXT frame;
+# the next _drain_dma only waits for whatever render didn't already hide (FLUSHBRK
+# `tx` -> ~0 when the overlap lands). Completion is tracked by counting callbacks
+# (`_dma_done_n == _dma_target` == fully on the panel).
+#
+# ISR SAFETY (load-bearing). bus_trans_done_cb runs the callback IN ISR CONTEXT
+# with the GC LOCKED (lcd_types.c cb_isr: gc_lock()), so the callback must not
+# heap-allocate. `self._dma_done_n += 1` is heap-free: small ints are immediate
+# (not heap objects), the STORE_ATTR targets a PRE-EXISTING slot (set in __init__,
+# no dict resize), and the 0-arg call frame falls back to alloca under the lock
+# (objfun.c VM_MAX_STATE_ON_STACK / objboundmeth.c n_total<=4). This is the same
+# mechanism lvgl's own flush-ready callback relies on.
+#
+# Requires DOUBLE_BUFFER (distinct A/B buffers: DMA reads the front while the CPU
+# writes the back). TO REVERT: ASYNC_FLUSH = False -> no callback is registered and
+# the proven held-back-band path runs byte-for-byte (no overlap, but the
+# copy-removal win remains). Registering the callback also makes the region paths
+# (_flush_region via flush_dirty/flush_rect) async, so they wait per band (the
+# shared strip buffer is reused) -- see _flush_region.
+ASYNC_FLUSH = True
+
+
+# --- PSRAM-direct single-transfer flush: the REAL overlap (#43) --------------
+#
+# The banded flush can't overlap render: esp_lcd calls spi_device_acquire_bus at the
+# top of EVERY tx_color, and acquiring the bus lock waits for the device's in-flight
+# DMA -- so each band's acquire blocks on the previous band's transfer. The escape is
+# ONE tx_color for the whole frame (one acquire, all internal chunks queued async),
+# which used to NO_MEM because spi_master BOUNCES PSRAM TX into the tiny internal
+# MALLOC_CAP_DMA heap (153KB won't fit -> the reason it was banded to 30KB).
+#
+# Our esp-idf patch (spi_master.c setup_priv_desc, build patch #43) lets the S3 AHB
+# GDMA read the PSRAM framebuffer DIRECTLY (no bounce) with a cache writeback, so a
+# single full-frame tx_color now works AND queues async -> the panel DMA runs while
+# the CPU renders the next frame (frame ~= max(render, flush)). The framebuffers are
+# already PSRAM (the MEMORY_SPIRAM|MEMORY_DMA alloc), i.e. ext-DMA-capable by address.
+#
+# Requires ASYNC_FLUSH (completion via the registered callback) + the esp-idf patch.
+# TO REVERT: PSRAM_DIRECT_FLUSH = False -> the proven banded path runs (still correct
+# with the patch, just no overlap). If the panel garbles (cache-coherency/alignment),
+# this flag is the first thing to flip.
+PSRAM_DIRECT_FLUSH = True
 
 
 def plan_strips(height, strip_h):
@@ -207,8 +270,21 @@ class Compositor:
         self._h = height
         self._strip_h = strip_h
         self._row_bytes = width * 2
-        # Full-screen RGB565 draw target. On SPIRAM_OCT this lives in PSRAM.
-        self._fb = bytearray(width * height * 2)
+        # Full-screen RGB565 draw target (buffer A). Allocated via kc_alloc so it's the
+        # SAME cache-line-aligned PSRAM as _fb_b/_frame: with PSRAM-direct DMA (#43) an
+        # unaligned base glitched the DMA'd frame tail (the Beeper bottom artifact, only
+        # visible on a flat-colour bottom). Falls back to a plain bytearray if the DMA
+        # allocator / lcd_bus is unavailable (host bring-up).
+        self._fb = None
+        try:
+            import lcd_bus
+            self._fb = kc_alloc.malloc_dma(
+                width * height * 2, lcd_bus.MEMORY_SPIRAM | lcd_bus.MEMORY_DMA
+            )
+        except Exception:
+            self._fb = None
+        if self._fb is None:
+            self._fb = bytearray(width * height * 2)
         self._fb_mv = memoryview(self._fb)
         # DMA-capable strip buffer in INTERNAL SRAM, for small dirty-rect flushes.
         self._strip = kc_alloc.malloc_dma(width * strip_h * 2)
@@ -262,6 +338,24 @@ class Compositor:
         self._front = self._fb
         self._dma_front = None
         self._dma_pending = None
+        # --- async DMA completion (real overlap, #43; see the ASYNC_FLUSH block) ---
+        # `_dma_done_n` is bumped from the SPI completion ISR (GC locked) so it MUST
+        # already exist as an attr slot here -- the ISR only STOREs into it, never
+        # creates it (which could resize the dict = alloc = crash under the lock).
+        # `_dma_target` is the band count of the in-flight front frame; the flush is
+        # fully on the panel when `_dma_done_n == _dma_target`. `_async` gates every
+        # async branch; it stays False (proven held-back-band path) unless ASYNC_FLUSH
+        # is on, double-buffer is active, AND the bus accepts a callback.
+        self._dma_done_n = 0
+        self._dma_target = 0
+        self._async = False
+        if ASYNC_FLUSH and self.double_buffer:
+            try:
+                self._bus.register_callback(self._on_dma_done)
+                self._async = True
+            except Exception as exc:
+                print("KidCode compositor: async flush unavailable:", exc)
+                self._async = False
         # PERF knob: rows per SPI transfer in the full-frame flush. Bigger = fewer
         # transfers = higher FPS, bounded by the per-band DMA bounce fitting internal
         # RAM. 48 -> 5 transfers for 240 rows (24 was 10). Tunable via _flush_rows.
@@ -502,12 +596,31 @@ class Compositor:
             self._fbuf = self._fbuf_b
 
     def _kick_front(self):
-        """Queue every band of `_front` EXCEPT the last as async tx_color (`last=False`,
-        returns immediately), recording the final band in `_dma_pending` so the NEXT
-        flush's _drain_dma issues it `last=True` (the busy-wait completion point). The
-        window is armed once here; the held-back final band reuses the same armed
-        window (RAMWRC continues into it). `_dma_front` marks which buffer is in
-        flight so sync()/_drain_dma know what to wait on."""
+        """Queue `_front`'s bands for DMA and return so the CPU can render the next
+        frame while they transfer. `_dma_front` marks which buffer is in flight so
+        sync()/_drain_dma know what to wait on.
+
+        ASYNC (a callback is registered): fire EVERY band -- tx_color queues + returns,
+        no band blocks -- and record the band count in `_dma_target`. The completion
+        ISR bumps `_dma_done_n`; the next _drain_dma waits until they match. `_dma_done_n`
+        was zeroed by that _drain_dma before this call, so set `_dma_target` only AFTER
+        firing (so a concurrent _await can't see a premature 0==0 match).
+
+        CRITICAL (the actual overlap unlock, #43): only the FIRST band carries a command
+        (RAMWR); bands 2..N are sent with cmd = -1 (NO command). esp_lcd's SPI tx_color
+        QUEUES color data async, but any call that sends a command first BLOCKS until all
+        previously-queued color DMA has drained (esp_lcd_panel_io_spi.c: "before issue a
+        polling transaction, need to wait queued transactions finished"). Sending RAMWRC
+        per band therefore serialized all 5 transfers into the kick (~17 ms, no overlap).
+        With cmd = -1 the continuation bands skip that drain, so all bands queue async and
+        the panel DMA runs while the CPU renders the next frame. The ST7789 keeps writing
+        GRAM from data sent with D/C=data (CS framing between bands is irrelevant), so no
+        RAMWRC is needed -- the CASET/RASET window + the single RAMWR set the write origin.
+
+        NON-ASYNC fallback (no callback -> tx_color busy-waits): queue every band but
+        the LAST as `last=False` and hold the final band in `_dma_pending` so the next
+        flush's _drain_dma issues it `last=True` (the one busy-wait completion point).
+        The window is armed once; the held-back band reuses it via RAMWRC."""
         self._set_window(0, 0, self._w - 1, self._h - 1)
         mv = self._front_mv()
         rb = self._row_bytes
@@ -515,7 +628,33 @@ class Compositor:
         cmd = RAMWR
         yy = 0
         h = self._h
-        # All bands but the last: async. The last band's params are held back.
+        if self._async:
+            if PSRAM_DIRECT_FLUSH:
+                # ONE tx_color for the whole frame (see PSRAM_DIRECT_FLUSH block):
+                # esp_lcd does a single acquire_bus (waits only for the prior frame's
+                # DMA, already overlapped by render), then queues every internal chunk
+                # async straight from the PSRAM buffer -- no bounce, no per-band acquire.
+                # The panel DMA then overlaps the NEXT frame's render. on_color_trans_done
+                # fires once at the end -> _dma_done_n reaches 1.
+                self._bus.tx_color(RAMWR, mv, 0, 0, self._w - 1, self._h - 1, 0, True)
+                self._dma_target = 1
+            else:
+                # Banded fallback: still async-queued, but esp_lcd serializes the bands
+                # via per-tx_color acquire_bus (no overlap). First band RAMWR, rest cmd=-1.
+                n = 0
+                while yy < h:
+                    rows = rows_per if yy + rows_per <= h else (h - yy)
+                    last = (yy + rows >= h)
+                    self._bus.tx_color(cmd, mv[yy * rb:(yy + rows) * rb],
+                                       0, yy, self._w - 1, yy + rows - 1, 0, last)
+                    cmd = -1
+                    yy += rows
+                    n += 1
+                self._dma_target = n      # set AFTER firing
+            self._dma_pending = None
+            self._dma_front = self._front
+            return
+        # All bands but the last: async-queued; the last band's params are held back.
         while yy < h:
             rows = rows_per if yy + rows_per <= h else (h - yy)
             is_last = (yy + rows >= h)
@@ -534,11 +673,44 @@ class Compositor:
         """memoryview of the in-flight FRONT buffer (for the held-back final band)."""
         return self._fb_a_mv if self._front is self._fb else self._fb_b_mv
 
+    def _on_dma_done(self):
+        # SPI completion ISR, GC LOCKED -- must NOT allocate. `+= 1` on a small int
+        # into the pre-existing `_dma_done_n` slot is heap-free (see the ASYNC_FLUSH
+        # block). Counts one finished band; the front is fully shipped when this
+        # reaches `_dma_target`.
+        self._dma_done_n += 1
+
+    def _await_dma(self):
+        """Spin until every fired band's completion ISR has run (`_dma_done_n` reaches
+        `_dma_target`). The callback fires from the SPI ISR (not the MP scheduler), so
+        a plain busy-loop sees the update. Bounded so a (never-observed) lost completion
+        degrades to one possibly-torn frame instead of a permanent hang needing a
+        physical reset -- the worst-case full-frame DMA is ~20 ms, far under this cap."""
+        guard = 0
+        while self._dma_done_n < self._dma_target:
+            guard += 1
+            if guard > 8000000:
+                break
+
     def _drain_dma(self):
-        """Finish the previous frame's in-flight DMA: issue the held-back final band
-        with `last=True`, which busy-waits until the WHOLE queued chain has drained.
-        After this returns the front buffer is fully on the panel and safe to reuse
-        as the next back. No-op when nothing is pending (first frame / after sync())."""
+        """Finish the previous frame's in-flight DMA so the front buffer is fully on
+        the panel and safe to reuse as the next back. No-op when nothing is in flight
+        (first frame / after sync()).
+
+        ASYNC: wait for the fired bands' completion ISRs, then reset the counters to a
+        clean drained state (so the next _kick_front starts from `_dma_done_n == 0`).
+        Most/all of the wait was already hidden behind the render that just ran -- this
+        is only the residual (FLUSHBRK `tx`).
+
+        NON-ASYNC: issue the held-back final band `last=True`, which busy-waits until the
+        whole queued chain has drained."""
+        if self._async:
+            if self._dma_target:
+                self._await_dma()
+            self._dma_done_n = 0
+            self._dma_target = 0
+            self._dma_front = None
+            return
         pending = self._dma_pending
         if pending is None:
             return
@@ -717,9 +889,24 @@ class Compositor:
                     off += rb
             data = strip if nbytes == len(strip) else strip[:nbytes]
             last = (yy + rows >= y + h)
-            self._bus.tx_color(cmd, data, x, yy, x + w - 1, yy + rows - 1, 0, last)
+            if self._async:
+                # A callback is registered, so tx_color no longer blocks -- but the
+                # strip buffer is SHARED and repacked next iteration, so wait for this
+                # band's DMA before reusing it. Arm the counter BEFORE firing so the
+                # completion ISR can't bump it between the fire and the reset.
+                self._dma_done_n = 0
+                self._dma_target = 1
+                self._bus.tx_color(cmd, data, x, yy, x + w - 1, yy + rows - 1, 0, last)
+                self._await_dma()
+            else:
+                self._bus.tx_color(cmd, data, x, yy, x + w - 1, yy + rows - 1, 0, last)
             cmd = RAMWRC
             yy += rows
+        if self._async:
+            # Leave the counters drained so the next _flush_double's _drain_dma is a
+            # no-op rather than waiting on this region's stale target.
+            self._dma_done_n = 0
+            self._dma_target = 0
 
 
 def make_compositor(bus, width=320, height=240, strip_h=40):

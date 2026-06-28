@@ -298,7 +298,11 @@ def _host_rgb565(cv):
 
 
 def _dev_rgb565(dc):
-    return list(memoryview(dc._buf).cast("H"))
+    # The device writes pixels in PANEL byte order (kid_runtime.PAL565_SW, #43 -- the
+    # CPU byte-swap is folded into the LUT so the lcd_bus per-flush swap can be off).
+    # Swap back here so the comparison is against the canonical little-endian RGB565
+    # the host produces. (PAL565 itself stays canonical -- test_pal565_matches_host.)
+    return [((v << 8) | (v >> 8)) & 0xFFFF for v in memoryview(dc._buf).cast("H")]
 
 
 def _both(use_gfx=True):

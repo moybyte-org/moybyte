@@ -223,10 +223,10 @@ def test_go_home_keeps_wallpaper(tmp_path):
 
 def test_perf_breakdown_splits_draw_into_phases(tmp_path):
     """DRAWBRK (#43 follow-up): with perf capture on, a running cart's draw time is
-    split into cart _update / cart _draw / console chrome, exposed by
-    perf_breakdown() (the device diag's DRAWBRK payload). Host frames are sub-ms so
-    the numbers are tiny, but the wiring + shape must hold and the three phases must
-    sum to ~the draw total (= chrome is the remainder)."""
+    split into cart _update (logic) / cart _draw (render) / audio.tick / console
+    chrome, exposed by perf_breakdown() (the device diag's DRAWBRK payload). Host
+    frames are sub-ms so the numbers are tiny, but the wiring + shape must hold and the
+    four phases must sum to ~the draw total (= chrome is the remainder)."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
@@ -236,10 +236,10 @@ def test_perf_breakdown_splits_draw_into_phases(tmp_path):
     for _ in range(5):
         drv.frame(1 / 30)
     assert ws.screen == "desktop"
-    upd, cart, chrome = ws.perf_breakdown()
-    assert all(isinstance(v, float) and v >= 0 for v in (upd, cart, chrome))
+    upd, cart, audio, chrome = ws.perf_breakdown()
+    assert all(isinstance(v, float) and v >= 0 for v in (upd, cart, audio, chrome))
     # the split is the components of draw_ms; their sum tracks it within rounding.
-    assert abs((upd + cart + chrome) - ws._draw_ms) <= 2.0
+    assert abs((upd + cart + audio + chrome) - ws._draw_ms) <= 2.0
 
 
 # -- #46: no bottom dock on the launcher; it returns inside a cart ----------
