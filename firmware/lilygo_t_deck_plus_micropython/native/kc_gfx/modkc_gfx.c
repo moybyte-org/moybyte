@@ -10,6 +10,7 @@
 // STAGE3_PLAN.md.
 
 #include <string.h>
+#include <math.h>
 #include "py/obj.h"
 #include "py/runtime.h"
 
@@ -281,6 +282,155 @@ static mp_obj_t kc_gfx_blit_batch(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(kc_gfx_blit_batch_obj, 15, 15, kc_gfx_blit_batch);
 
+// --- native vector primitives (#43 follow-up) -------------------------------
+//
+// circ/circb/line move the per-scanline / per-pixel rasterizers out of the cart's
+// MicroPython loop (one MP->C call each instead of N) -- the same draw-call win as
+// blit_batch/blit_map, for the carts built from shapes (tap_red etc.). They take a
+// pre-resolved RGB565 `color`, the camera offset (cam_x, cam_y), and the screen-space
+// clip rect [cx0,cy0)..[cx1,cy1), and reproduce the host canvas rasterizers pixel-
+// for-pixel (circ = scanline spans like rect(); circb/line = Bresenham through a
+// clipped pixel put). The clip rect is intersected with the buffer so a bad
+// coordinate clips rather than overrunning.
+
+// Clamp the clip rect to the buffer (cols to dw, rows to capacity/dw). Returns the
+// usable row count via *max_rows; callers then test cx0<=x<cx1 && cy0<=y<cy1.
+static inline void kc_gfx_clip(mp_int_t dw, size_t cap, mp_int_t *cx0, mp_int_t *cy0,
+                               mp_int_t *cx1, mp_int_t *cy1) {
+    mp_int_t max_rows = (mp_int_t)(cap / (size_t)dw);
+    if (*cx0 < 0) *cx0 = 0;
+    if (*cy0 < 0) *cy0 = 0;
+    if (*cx1 > dw) *cx1 = dw;
+    if (*cy1 > max_rows) *cy1 = max_rows;
+}
+
+static inline void kc_gfx_put(uint16_t *dst, mp_int_t dw, mp_int_t x, mp_int_t y,
+                              uint16_t col, mp_int_t cam_x, mp_int_t cam_y,
+                              mp_int_t cx0, mp_int_t cy0, mp_int_t cx1, mp_int_t cy1) {
+    x -= cam_x;
+    y -= cam_y;
+    if (x < cx0 || x >= cx1 || y < cy0 || y >= cy1) return;
+    dst[(size_t)y * (size_t)dw + (size_t)x] = col;
+}
+
+// circ(dst, dw, dh, cx, cy, r, color, cam_x, cam_y, cx0, cy0, cx1, cy1) -- FILLED
+// circle: each scanline a clipped, camera-offset span (matches host canvas circ()).
+static mp_obj_t kc_gfx_circ(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap;
+    uint16_t *dst = kc_gfx_buf_w(a[0], &cap);
+    mp_int_t dw = mp_obj_get_int(a[1]);
+    mp_int_t dh = mp_obj_get_int(a[2]);
+    mp_int_t cx = mp_obj_get_int(a[3]);
+    mp_int_t cy = mp_obj_get_int(a[4]);
+    mp_int_t r = mp_obj_get_int(a[5]);
+    uint16_t col = (uint16_t)(mp_obj_get_int(a[6]) & 0xFFFF);
+    mp_int_t cam_x = mp_obj_get_int(a[7]);
+    mp_int_t cam_y = mp_obj_get_int(a[8]);
+    mp_int_t cx0 = mp_obj_get_int(a[9]);
+    mp_int_t cy0 = mp_obj_get_int(a[10]);
+    mp_int_t cx1 = mp_obj_get_int(a[11]);
+    mp_int_t cy1 = mp_obj_get_int(a[12]);
+    (void)dh;
+    if (dw <= 0 || r < 0) return mp_const_none;
+    kc_gfx_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
+    for (mp_int_t dy = -r; dy <= r; dy++) {
+        mp_int_t span = (mp_int_t)sqrt((double)(r * r - dy * dy));
+        mp_int_t y = cy + dy - cam_y;
+        if (y < cy0 || y >= cy1) continue;
+        mp_int_t x0 = cx - span - cam_x;
+        mp_int_t x1 = x0 + 2 * span + 1;          // exclusive end
+        if (x0 < cx0) x0 = cx0;
+        if (x1 > cx1) x1 = cx1;
+        if (x1 <= x0) continue;
+        uint16_t *line = dst + (size_t)y * (size_t)dw;
+        for (mp_int_t x = x0; x < x1; x++) line[x] = col;
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(kc_gfx_circ_obj, 13, 13, kc_gfx_circ);
+
+// circb(dst, dw, dh, cx, cy, r, color, cam_x, cam_y, cx0, cy0, cx1, cy1) -- circle
+// OUTLINE: Bresenham midpoint circle, 8 octant points per step (matches host circb()).
+static mp_obj_t kc_gfx_circb(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap;
+    uint16_t *dst = kc_gfx_buf_w(a[0], &cap);
+    mp_int_t dw = mp_obj_get_int(a[1]);
+    mp_int_t dh = mp_obj_get_int(a[2]);
+    mp_int_t cx = mp_obj_get_int(a[3]);
+    mp_int_t cy = mp_obj_get_int(a[4]);
+    mp_int_t r = mp_obj_get_int(a[5]);
+    uint16_t col = (uint16_t)(mp_obj_get_int(a[6]) & 0xFFFF);
+    mp_int_t cam_x = mp_obj_get_int(a[7]);
+    mp_int_t cam_y = mp_obj_get_int(a[8]);
+    mp_int_t cx0 = mp_obj_get_int(a[9]);
+    mp_int_t cy0 = mp_obj_get_int(a[10]);
+    mp_int_t cx1 = mp_obj_get_int(a[11]);
+    mp_int_t cy1 = mp_obj_get_int(a[12]);
+    (void)dh;
+    if (dw <= 0 || r < 0) return mp_const_none;
+    kc_gfx_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
+    mp_int_t x = r, y = 0, err = 0;
+    while (x >= y) {
+        kc_gfx_put(dst, dw, cx + x, cy + y, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
+        kc_gfx_put(dst, dw, cx + y, cy + x, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
+        kc_gfx_put(dst, dw, cx - y, cy + x, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
+        kc_gfx_put(dst, dw, cx - x, cy + y, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
+        kc_gfx_put(dst, dw, cx - x, cy - y, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
+        kc_gfx_put(dst, dw, cx - y, cy - x, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
+        kc_gfx_put(dst, dw, cx + y, cy - x, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
+        kc_gfx_put(dst, dw, cx + x, cy - y, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
+        y += 1;
+        if (err <= 0) {
+            err += 2 * y + 1;
+        } else {
+            x -= 1;
+            err -= 2 * x + 1;
+        }
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(kc_gfx_circb_obj, 13, 13, kc_gfx_circb);
+
+// line(dst, dw, dh, x0, y0, x1, y1, color, cam_x, cam_y, cx0, cy0, cx1, cy1) --
+// Bresenham line through a clipped pixel put (matches host canvas line()).
+static mp_obj_t kc_gfx_line(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap;
+    uint16_t *dst = kc_gfx_buf_w(a[0], &cap);
+    mp_int_t dw = mp_obj_get_int(a[1]);
+    mp_int_t dh = mp_obj_get_int(a[2]);
+    mp_int_t x0 = mp_obj_get_int(a[3]);
+    mp_int_t y0 = mp_obj_get_int(a[4]);
+    mp_int_t x1 = mp_obj_get_int(a[5]);
+    mp_int_t y1 = mp_obj_get_int(a[6]);
+    uint16_t col = (uint16_t)(mp_obj_get_int(a[7]) & 0xFFFF);
+    mp_int_t cam_x = mp_obj_get_int(a[8]);
+    mp_int_t cam_y = mp_obj_get_int(a[9]);
+    mp_int_t cx0 = mp_obj_get_int(a[10]);
+    mp_int_t cy0 = mp_obj_get_int(a[11]);
+    mp_int_t cx1 = mp_obj_get_int(a[12]);
+    mp_int_t cy1 = mp_obj_get_int(a[13]);
+    (void)dh;
+    if (dw <= 0) return mp_const_none;
+    kc_gfx_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
+    mp_int_t dx = x1 > x0 ? x1 - x0 : x0 - x1;
+    mp_int_t dy = y1 > y0 ? y0 - y1 : y1 - y0;    // -abs(y1-y0)
+    mp_int_t sx = x0 < x1 ? 1 : -1;
+    mp_int_t sy = y0 < y1 ? 1 : -1;
+    mp_int_t err = dx + dy;
+    for (;;) {
+        kc_gfx_put(dst, dw, x0, y0, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
+        if (x0 == x1 && y0 == y1) break;
+        mp_int_t e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(kc_gfx_line_obj, 14, 14, kc_gfx_line);
+
 // pack_strip(fb, fb_w, x, y, w, rows, dst) -- copy a (w x rows) window of the
 // framebuffer into dst contiguously (row-major). Full-width is one memcpy;
 // cropped rects are packed row-by-row in C (the slow Stage 2 Python path).
@@ -318,6 +468,9 @@ static const mp_rom_map_elem_t kc_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_blit565),    MP_ROM_PTR(&kc_gfx_blit565_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_map),   MP_ROM_PTR(&kc_gfx_blit_map_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_batch), MP_ROM_PTR(&kc_gfx_blit_batch_obj) },
+    { MP_ROM_QSTR(MP_QSTR_circ),       MP_ROM_PTR(&kc_gfx_circ_obj) },
+    { MP_ROM_QSTR(MP_QSTR_circb),      MP_ROM_PTR(&kc_gfx_circb_obj) },
+    { MP_ROM_QSTR(MP_QSTR_line),       MP_ROM_PTR(&kc_gfx_line_obj) },
     { MP_ROM_QSTR(MP_QSTR_pack_strip), MP_ROM_PTR(&kc_gfx_pack_strip_obj) },
 };
 static MP_DEFINE_CONST_DICT(kc_gfx_globals, kc_gfx_globals_table);

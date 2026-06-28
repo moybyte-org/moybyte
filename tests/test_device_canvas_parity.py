@@ -197,6 +197,95 @@ class _FakeGfx:
                                     continue
                                 d[drow + tx] = p
 
+    @staticmethod
+    def _clip(dw, cap, cx0, cy0, cx1, cy1):
+        max_rows = cap // dw
+        if cx0 < 0:
+            cx0 = 0
+        if cy0 < 0:
+            cy0 = 0
+        if cx1 > dw:
+            cx1 = dw
+        if cy1 > max_rows:
+            cy1 = max_rows
+        return cx0, cy0, cx1, cy1
+
+    @staticmethod
+    def _put(d, dw, x, y, col, cam_x, cam_y, cx0, cy0, cx1, cy1):
+        x -= cam_x
+        y -= cam_y
+        if x < cx0 or x >= cx1 or y < cy0 or y >= cy1:
+            return
+        d[y * dw + x] = col
+
+    @staticmethod
+    def circ(dst, dw, dh, cx, cy, r, color, cam_x, cam_y, cx0, cy0, cx1, cy1):
+        d = memoryview(dst).cast("H")
+        if dw <= 0 or r < 0:
+            return
+        cx0, cy0, cx1, cy1 = _FakeGfx._clip(dw, len(d), cx0, cy0, cx1, cy1)
+        col = color & 0xFFFF
+        for dy in range(-r, r + 1):
+            span = int((r * r - dy * dy) ** 0.5)
+            y = cy + dy - cam_y
+            if y < cy0 or y >= cy1:
+                continue
+            x0 = cx - span - cam_x
+            x1 = x0 + 2 * span + 1
+            if x0 < cx0:
+                x0 = cx0
+            if x1 > cx1:
+                x1 = cx1
+            base = y * dw
+            for x in range(x0, x1):
+                d[base + x] = col
+
+    @staticmethod
+    def circb(dst, dw, dh, cx, cy, r, color, cam_x, cam_y, cx0, cy0, cx1, cy1):
+        d = memoryview(dst).cast("H")
+        if dw <= 0 or r < 0:
+            return
+        cx0, cy0, cx1, cy1 = _FakeGfx._clip(dw, len(d), cx0, cy0, cx1, cy1)
+        col = color & 0xFFFF
+        put = _FakeGfx._put
+        x = r
+        y = 0
+        err = 0
+        while x >= y:
+            for px, py in ((x, y), (y, x), (-y, x), (-x, y), (-x, -y), (-y, -x), (y, -x), (x, -y)):
+                put(d, dw, cx + px, cy + py, col, cam_x, cam_y, cx0, cy0, cx1, cy1)
+            y += 1
+            if err <= 0:
+                err += 2 * y + 1
+            else:
+                x -= 1
+                err -= 2 * x + 1
+
+    @staticmethod
+    def line(dst, dw, dh, x0, y0, x1, y1, color, cam_x, cam_y, cx0, cy0, cx1, cy1):
+        d = memoryview(dst).cast("H")
+        if dw <= 0:
+            return
+        cx0, cy0, cx1, cy1 = _FakeGfx._clip(dw, len(d), cx0, cy0, cx1, cy1)
+        col = color & 0xFFFF
+        put = _FakeGfx._put
+        dx = abs(x1 - x0)
+        dy = -abs(y1 - y0)
+        sx = 1 if x0 < x1 else -1
+        sy = 1 if y0 < y1 else -1
+        err = dx + dy
+        while True:
+            put(d, dw, x0, y0, col, cam_x, cam_y, cx0, cy0, cx1, cy1)
+            if x0 == x1 and y0 == y1:
+                break
+            e2 = 2 * err
+            if e2 >= dy:
+                err += dy
+                x0 += sx
+            if e2 <= dx:
+                err += dx
+                y0 += sy
+
 
 # --------------------------------------------------------------------------- #
 # Pure-Python framebuf.FrameBuffer stub (RGB565 over a bytearray).            #
