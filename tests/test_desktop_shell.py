@@ -137,18 +137,18 @@ def test_settings_back_returns_home(tmp_path):
 
 
 def test_settings_mock_rows_do_not_touch_carts(tmp_path):
-    """The mocked rows (volume/brightness/name/theme) step cosmetic values in the
-    system dict but are clearly not wired to a backend yet."""
+    """The mocked rows (volume/brightness/name) step cosmetic values in the system
+    dict but are clearly not wired to a backend yet. (The old "theme" mock-choice is
+    now the functional EDIT ICONS action -- see test_icon_theme.)"""
     ws = _ws(tmp_path)
     ws.open_settings()
-    # theme row
     rows = [r[0] for r in ws._SETTINGS_ROWS]
-    ws.set_msel = rows.index("theme")
-    ws.settings_adjust(1)
-    assert ws.system.get("theme") in ws._MOCK_THEMES
     ws.set_msel = rows.index("volume")
     ws.settings_adjust(1)
     assert 0 <= ws.system.get("volume") <= 5
+    ws.set_msel = rows.index("name")
+    ws.settings_adjust(1)
+    assert ws.system.get("name") in ws._MOCK_NAMES
 
 
 # -- dock keeps the management + open flows working ------------------------

@@ -828,6 +828,38 @@ def test_unified_top_bar_wired_into_device_shell():
     assert "ws.load_icon_sheet()" in runtime
 
 
+def test_icon_theme_editor_wired_into_device_shell():
+    """Stage 2 of the themeable top bar: a kid repaints the SYSTEM icon sheet in the
+    PAINT editor (Settings -> EDIT ICONS) and it persists. The device freezes the same
+    runtime/console.py + kid_carts.py, so grep the canonical sources for the wiring
+    that MUST match the working cart-sprite save path (or the device SD bus hangs)."""
+    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    carts = (Path("runtime") / "kid_carts.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+
+    # Entry point: an "action" Settings row (EDIT ICONS) that opens the theme editor.
+    assert '("icons", "EDIT ICONS", "action")' in console
+    assert "def open_theme(self):" in console
+    assert 'self.menu_view = "theme"' in console
+    assert "self._editing_icons" in console
+
+    # Save: the theme editor persists via save_system_icons through the SAME _with_sd
+    # wrapper the cart sprite save (save_sprites) uses -- on device that's with_sd_live,
+    # the native single-bus path; anything else hangs the panel flush.
+    assert "def save_icons(self):" in console
+    assert "self.carts_store.save_system_icons(hexs, self.carts_root)" in console
+    assert "self._with_sd(lambda: self.carts_store.save_system_icons(" in console
+    # Live re-theme: a save re-adopts the sheet so the bar's per-kind image cache (and
+    # the device's per-Image RGB565 blit cache) is dropped and rebuilt from new pixels.
+    assert "self.set_icon_sheet(self.icon_sheet)" in console
+    assert "def set_icon_sheet(self, sheet):" in console
+
+    # The same persistence wrapper + can_manage gate the device wires for cart saves
+    # already covers the theme save -- with_sd_live is the live SD write path.
+    assert "ws._with_sd = _with_sd_synced" in runtime
+    assert "return kidcode_sd.with_sd_live(fn)" in runtime
+
+
 def test_device_draw_api_uses_tic80_names():
     runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
 
