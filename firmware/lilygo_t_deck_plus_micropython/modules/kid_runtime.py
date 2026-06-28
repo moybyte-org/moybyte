@@ -30,6 +30,17 @@ PAL565 = (
     0x3F9E, 0x3D7E, 0x3B5E, 0x51FE, 0x91FE, 0xD9FE, 0xF1F8, 0xF1F0,
 )
 
+# Same palette, byte-swapped to the PANEL's wire order (#43). PAL565 above is the
+# canonical little-endian RGB565 (the host parity test asserts it == rgb565(KID64));
+# PAL565_SW is what we actually WRITE into the device framebuffer so the per-flush
+# CPU byte-swap in lcd_bus.tx_color can be turned OFF (tdeck_display rgb565_byte_swap
+# =False). That swap was ~17 ms/frame over PSRAM -- the synchronous wall left once the
+# DMA-overlap flush (#43) hid the SPI transfer. Folding it into this LUT makes it free
+# (the index->colour lookup happens anyway), so the kick drops from ~17 ms to ~2 ms and
+# the SPI finally overlaps render. Every buffer-writing path (_col + the sprite/atlas
+# bakes) uses PAL565_SW; PAL565 stays the canonical reference.
+PAL565_SW = tuple(((c << 8) | (c >> 8)) & 0xFFFF for c in PAL565)
+
 # RGB565 colour-key for native sprite blits: transparent sprite pixels are baked
 # to this value so kc_gfx.blit565 skips them. Magenta is absent from KID64; a
 # visible pixel that happens to equal it is nudged by one LSB when the cache is
@@ -161,7 +172,7 @@ class DeviceCanvas:
     def _col(self, c):
         # Resolve a draw index to RGB565 through the pal remap, so cls/pix/line/rect/
         # circ/circb/rectb all honour pal() for free.
-        return PAL565[self._pal_map[c & 63]]
+        return PAL565_SW[self._pal_map[c & 63]]
 
     def _fill(self, x, y, w, h, col):
         # Filled rect of a pre-resolved RGB565 colour, camera-offset and intersected
@@ -298,7 +309,7 @@ class DeviceCanvas:
         buf = bytearray(w * h * 2)
         fb = framebuf.FrameBuffer(buf, w, h, framebuf.RGB565)
         fb.fill(_RGB_KEY)
-        pal = PAL565
+        pal = PAL565_SW
         pmap = self._pal_map
         palt = self._palt
         t = img.transparent
@@ -329,7 +340,7 @@ class DeviceCanvas:
     def _spr_py(self, img, x, y, scale, flip=0):
         # Per-pixel fallback when kc_gfx is absent (image built without it). Honours
         # camera (applied by the caller into x,y), clip, pal, palt, and flip.
-        pal = PAL565
+        pal = PAL565_SW
         pmap = self._pal_map
         palt = self._palt
         t = img.transparent
@@ -401,7 +412,7 @@ class DeviceCanvas:
         ntiles = sheet.count
         tpx = tile * tile
         buf = bytearray(ntiles * tpx * 2)
-        pal = PAL565
+        pal = PAL565_SW
         pmap = self._pal_map
         palt = self._palt
         cols = sheet.cols
@@ -1605,17 +1616,19 @@ def _diag_perf_sample(diag, ws):
 
 
 def _diag_drawbrk(diag, ws):
-    """Log a DRAWBRK line splitting the frame's draw cost into cart _update / cart
-    _draw / console chrome (the dock+cursor+overlays remainder) -- the breakdown
-    that says where draw= goes (cart logic vs sprites/draw vs chrome). Guarded ->
-    a no-op on any failure (and only meaningful while a cart runs)."""
+    """Log a DRAWBRK line splitting the frame's draw cost into cart _update (game
+    LOGIC) / cart _draw (RENDERING) / audio.tick / console chrome (the dock+cursor+
+    overlays remainder) -- the breakdown that says where draw= goes (logic vs render
+    vs audio vs chrome). Guarded -> a no-op on any failure (only meaningful while a
+    cart runs)."""
     if diag is None:
         return
     try:
         if ws.perf_sample() is None:        # only while a cart is actively running
             return
-        b = ws.perf_breakdown()             # (upd_ms, cart_ms, chrome_ms)
-        diag.log("DRAWBRK", "upd=%.2f cart=%.2f chrome=%.2f" % (b[0], b[1], b[2]))
+        b = ws.perf_breakdown()             # (logic, render, audio, chrome) ms
+        diag.log("DRAWBRK", "logic=%.2f render=%.2f audio=%.2f chrome=%.2f"
+                 % (b[0], b[1], b[2], b[3]))
     except Exception:
         pass
 
@@ -1652,7 +1665,7 @@ def _load_carts(session=None):
     return [dict(c) for c in CARTS], None
 
 
-def run_desktop(handler, prefetched=None, fps_cap=30):
+def run_desktop(handler, prefetched=None, fps_cap=60):
     """Boot the workstation on the device: launcher + carts + keyboard.
 
     `prefetched` is the (carts, carts_root) tuple read from SD BEFORE display

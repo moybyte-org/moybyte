@@ -1519,9 +1519,10 @@ class Workstation:
         # DRAWBRK phase split of _draw_ms (#43 follow-up): where the per-frame draw
         # cost actually goes -- cart _update, cart _draw, and the console chrome
         # (dock + cursor + overlays, the remainder). Surfaced via perf_breakdown().
-        self._upd_ms = 0.0            # smoothed cart _update(dt) ms
-        self._cart_ms = 0.0           # smoothed cart _draw()+audio.tick ms
-        self._chrome_ms = 0.0         # smoothed chrome ms (= draw - upd - cart)
+        self._upd_ms = 0.0            # smoothed cart _update(dt) ms (game LOGIC)
+        self._cart_ms = 0.0           # smoothed cart _draw() ms (RENDERING)
+        self._audio_ms = 0.0          # smoothed audio.tick(dt) ms (mixer feed)
+        self._chrome_ms = 0.0         # smoothed chrome ms (= draw - upd - cart - audio)
         # Achievements (#21): a small set of fun milestones + the hidden Easter-egg
         # rewards. Starts empty/volatile; load_achievements() wires the SD store +
         # the unlock beep. The Workstation calls ach.note(event) at the flow points
@@ -4320,8 +4321,9 @@ class Workstation:
         # fires when perf_capture is set (device diag sampling) -- not just the HUD.
         _perf = self.perf_hud or self.perf_capture
         _frame_t0 = _ticks_ms() if _perf else 0
-        _upd = 0          # cart _update(dt) ms this frame (perf split; 0 off the cart path)
-        _cart = 0         # cart _draw()+audio.tick ms this frame
+        _upd = 0          # cart _update(dt) ms (game LOGIC); 0 off the cart path
+        _cart = 0         # cart _draw() ms (RENDERING)
+        _audio = 0        # audio.tick(dt) ms (mixer feed) -- split out so it doesn't hide in render
         if self.screen == "launcher":
             self._draw_desktop_home(dt)
         elif self.screen == "settings":
@@ -4344,11 +4346,13 @@ class Workstation:
                     _tm = _ticks_ms() if _perf else 0
                     if self._draw:
                         self._draw()
+                    _td = _ticks_ms() if _perf else 0
                     if self.audio is not None:
                         self.audio.tick(dt)      # advance/feed playback (#16)
                     if _perf:
-                        _upd = _ticks_diff(_tm, _ts)
-                        _cart = _ticks_diff(_ticks_ms(), _tm)
+                        _upd = _ticks_diff(_tm, _ts)    # cart _update -> game LOGIC
+                        _cart = _ticks_diff(_td, _tm)   # cart _draw -> RENDERING
+                        _audio = _ticks_diff(_ticks_ms(), _td)  # audio.tick (mixer feed)
                 except Exception as exc:  # noqa: BLE001
                     # A cart that raises mid-frame must NOT escape the loop (the
                     # device would hang silently). Capture it, stop running the
@@ -4454,15 +4458,17 @@ class Workstation:
                 else self._flush_ms + (_flush - self._flush_ms) * 0.15
             self._draw_ms = float(_draw) if self._draw_ms <= 0 \
                 else self._draw_ms + (_draw - self._draw_ms) * 0.15
-            # DRAWBRK split: cart _update / cart _draw / console chrome (the
-            # remainder = dock + cursor + overlays). chrome = draw - upd - cart.
-            _chrome = _draw - _upd - _cart
+            # DRAWBRK split: cart _update (logic) / cart _draw (render) / audio.tick /
+            # console chrome (remainder = dock + cursor + overlays).
+            _chrome = _draw - _upd - _cart - _audio
             if _chrome < 0:
                 _chrome = 0
             self._upd_ms = float(_upd) if self._upd_ms <= 0 \
                 else self._upd_ms + (_upd - self._upd_ms) * 0.15
             self._cart_ms = float(_cart) if self._cart_ms <= 0 \
                 else self._cart_ms + (_cart - self._cart_ms) * 0.15
+            self._audio_ms = float(_audio) if self._audio_ms <= 0 \
+                else self._audio_ms + (_audio - self._audio_ms) * 0.15
             self._chrome_ms = float(_chrome) if self._chrome_ms <= 0 \
                 else self._chrome_ms + (_chrome - self._chrome_ms) * 0.15
         else:
@@ -4712,12 +4718,13 @@ class Workstation:
         return (name, self._fps, self._flush_ms, self._draw_ms)
 
     def perf_breakdown(self):
-        """(_upd_ms, _cart_ms, _chrome_ms): the EMA phase split of draw_ms -- cart
-        _update, cart _draw (incl. audio.tick), and console chrome (dock + cursor +
-        overlays, the remainder). Used by the device diag's DRAWBRK line to find
-        where the per-frame draw cost actually goes (cart logic vs sprites/draw vs
-        chrome). Only meaningful while a cart runs with perf_capture/perf_hud on."""
-        return (self._upd_ms, self._cart_ms, self._chrome_ms)
+        """(_upd_ms, _cart_ms, _audio_ms, _chrome_ms): the EMA phase split of draw_ms --
+        cart _update (game LOGIC), cart _draw (RENDERING), audio.tick (mixer feed), and
+        console chrome (dock + cursor + overlays, the remainder). Used by the device
+        diag's DRAWBRK line to find where the per-frame draw cost actually goes (cart
+        logic vs rendering vs audio vs chrome). Only meaningful while a cart runs with
+        perf_capture/perf_hud on."""
+        return (self._upd_ms, self._cart_ms, self._audio_ms, self._chrome_ms)
 
     def _draw_perf_hud(self):
         """Frame-time breakdown (#43/#44 perf), drawn just above the FPS chip when

@@ -196,6 +196,18 @@ if [ -f "${UPSTREAM_DIR}/lib/esp-idf/export.sh" ]; then
   . "${IDF_PATH}/export.sh" >/dev/null 2>&1
 fi
 
+# KidCode #43: patch esp-idf's SPI master so PSRAM TX buffers are DMA'd DIRECTLY (no
+# internal MALLOC_CAP_DMA bounce) -- this lets the full-screen LCD flush ship as ONE
+# async transfer that overlaps render (kc_compositor PSRAM_DIRECT_FLUSH). Guarded by a
+# source marker so it applies exactly once. esp-idf persists in .build; on a fully fresh
+# .build it is fetched DURING make.py below, so a from-scratch build needs a second run
+# to pick this up (the marker check makes re-running safe / idempotent).
+SPI_MASTER_C="${UPSTREAM_DIR}/lib/esp-idf/components/esp_driver_spi/src/gpspi/spi_master.c"
+if [ -f "${SPI_MASTER_C}" ] && ! grep -q "KidCode #43" "${SPI_MASTER_C}"; then
+  echo "KidCode: applying esp-idf PSRAM-TX-DMA patch (#43)"
+  patch -d "${UPSTREAM_DIR}/lib/esp-idf" -p1 < "${PATCH_DIR}/spi_master_psram_tx_dma.patch"
+fi
+
 RUNNER=()
 if command -v ionice >/dev/null 2>&1; then
   RUNNER+=(ionice -c 3)

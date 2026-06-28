@@ -491,6 +491,139 @@ def test_kc_compositor_double_buffer_pingpong_logic():
                 sys.modules[k] = v
 
 
+def test_kc_compositor_async_flush_overlap_logic():
+    """Exercise the ASYNC_FLUSH path (#43): when the bus accepts a callback,
+    `tx_color` is non-blocking, so _kick_front fires EVERY band (none held back) and
+    _drain_dma waits on the completion COUNTER instead of a busy-wait band. Proves:
+    async turns on only when register_callback succeeds; the kick fires all bands and
+    holds none (`_dma_pending` stays None); the completion ISR counter gates the drain;
+    swap recycles the drained buffer; sync() leaves nothing in flight."""
+    import types
+
+    fake_alloc = types.ModuleType("kc_alloc")
+    fake_alloc.malloc_dma = lambda n, flags=0: bytearray(n)
+    fake_lcd = types.ModuleType("lcd_bus")
+    fake_lcd.MEMORY_SPIRAM = 1
+    fake_lcd.MEMORY_DMA = 2
+
+    class _FB:
+        def __init__(self, buf, w, h, fmt):
+            self.buf = buf
+        def fill(self, c):
+            pass
+        def fill_rect(self, *a):
+            pass
+        def text(self, *a):
+            pass
+    fake_framebuf = types.ModuleType("framebuf")
+    fake_framebuf.FrameBuffer = _FB
+    fake_framebuf.RGB565 = 1
+
+    saved = {k: sys.modules.get(k) for k in ("kc_alloc", "lcd_bus", "framebuf", "kc_gfx")}
+    sys.modules["kc_alloc"] = fake_alloc
+    sys.modules["lcd_bus"] = fake_lcd
+    sys.modules["framebuf"] = fake_framebuf
+    sys.modules.pop("kc_gfx", None)
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "kc_compositor_async", ROOT / "modules" / "kc_compositor.py"
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        # Defaults on disk are the device defaults; assert them so the revert knob holds.
+        src = (ROOT / "modules" / "kc_compositor.py").read_text("utf-8")
+        assert "\nASYNC_FLUSH = True" in src
+        assert "\nPSRAM_DIRECT_FLUSH = True" in src
+        assert module.ASYNC_FLUSH is True
+        # This test exercises the BANDED async path (per-band counter logic); the
+        # PSRAM-direct single-transfer path is asserted separately at the end.
+        module.PSRAM_DIRECT_FLUSH = False
+
+        # A bus that records the registered completion callback and DEFERS completion:
+        # tx_color queues (returns immediately, no cb), and complete_all() simulates the
+        # SPI ISR firing the callback once per queued band -- the device's real signal.
+        class FakeAsyncBus:
+            def __init__(self):
+                self.colors = []
+                self.params = []
+                self.cb = None
+                self._inflight = 0
+            def register_callback(self, cb):
+                self.cb = cb
+            def tx_param(self, cmd, data):
+                self.params.append(cmd)
+            def tx_color(self, cmd, data, x0, y0, x1, y1, _z, last):
+                self.colors.append((cmd, len(bytes(data)), y0, y1, last))
+                self._inflight += 1          # queued, not yet "done"
+            def complete_all(self):
+                while self._inflight > 0:
+                    self._inflight -= 1
+                    if self.cb is not None:
+                        self.cb()
+
+        bus = FakeAsyncBus()
+        comp = module.Compositor(bus, 320, 240, strip_h=24)
+        assert comp.double_buffer is True
+        assert comp._async is True                  # register_callback succeeded
+        assert bus.cb == comp._on_dma_done          # our ISR-safe counter bump
+
+        a = comp._fb
+        # FRAME 1: drain(no-op) + swap(front=A, back=B) + kick(A) fires ALL bands async.
+        assert comp.back_buffer() is a
+        n0 = len(bus.colors)
+        comp.flush()
+        fired1 = len(bus.colors) - n0
+        assert comp._front is a
+        assert comp.back_buffer() is comp._fb_b
+        assert comp._dma_pending is None            # async holds NOTHING back
+        assert comp._dma_target == fired1 >= 2      # every band issued this kick
+        assert comp._dma_done_n == 0                # none completed yet (deferred)
+        # The overlap unlock (#43): only the FIRST band carries a command (RAMWR); the
+        # rest stream with cmd = -1 so esp_lcd doesn't drain inflight between bands.
+        kick1 = bus.colors[n0:n0 + fired1]
+        assert kick1[0][0] == module.RAMWR
+        assert all(c[0] == -1 for c in kick1[1:])
+
+        # The panel DMA finishes during the next frame's render (simulated):
+        bus.complete_all()
+        assert comp._dma_done_n == comp._dma_target
+
+        # FRAME 2: drain(A -> instant, counters reset) + swap(front=B, back=A) + kick(B).
+        n1 = len(bus.colors)
+        comp.flush()
+        fired2 = len(bus.colors) - n1
+        assert comp._front is comp._fb_b
+        assert comp.back_buffer() is a              # A recycled, fully drained
+        assert comp._dma_pending is None
+        assert comp._dma_target == fired2           # reset by drain, then B's bands fired
+        assert comp._dma_done_n == 0                # B not yet completed
+
+        # sync() drains B for the SD mutual exclusion, leaving nothing in flight.
+        bus.complete_all()
+        comp.sync()
+        assert comp._dma_target == 0
+        assert comp._dma_done_n == 0
+        comp.sync()                                 # idempotent no-op
+        assert comp._dma_target == 0
+
+        # PSRAM-direct path (#43): the whole frame ships in ONE tx_color (one acquire ->
+        # overlap), not N bands. esp_lcd would chunk it internally; at this layer it's a
+        # single full-frame call, and the completion ISR fires once -> target == 1.
+        module.PSRAM_DIRECT_FLUSH = True
+        n2 = len(bus.colors)
+        comp.flush()
+        fired3 = len(bus.colors) - n2
+        assert fired3 == 1                          # ONE tx_color for the whole frame
+        assert bus.colors[n2][0] == module.RAMWR    # carries RAMWR; window already armed
+        assert comp._dma_target == 1
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = v
+
+
 def test_tdeck_keyboard_latches_event_keys_for_hold_window():
     spec = importlib.util.spec_from_file_location(
         "kidcode_firmware_input", ROOT / "modules" / "kidcode" / "input.py"
@@ -1349,11 +1482,11 @@ def test_micropython_offline_diag_wiring():
     assert "ws.perf_capture = True" in runtime            # device turns capture on
     assert "_perf = self.perf_hud or self.perf_capture" in console
 
-    # DRAWBRK (#43 follow-up): the phase split of draw= into cart _update / cart
-    # _draw / console chrome, sampled alongside PERF so we can see where the
-    # per-frame draw cost actually goes instead of guessing.
+    # DRAWBRK (#43 follow-up): the phase split of draw= into cart _update (logic) /
+    # cart _draw (render) / audio.tick / console chrome, sampled alongside PERF so we
+    # can see where the per-frame draw cost actually goes instead of guessing.
     assert "def perf_breakdown(self):" in console
-    assert 'diag.log("DRAWBRK", "upd=%.2f cart=%.2f chrome=%.2f"' in runtime
+    assert 'diag.log("DRAWBRK", "logic=%.2f render=%.2f audio=%.2f chrome=%.2f"' in runtime
     assert "_diag_drawbrk(diag, ws)" in runtime
     assert "ws.perf_breakdown()" in runtime
 

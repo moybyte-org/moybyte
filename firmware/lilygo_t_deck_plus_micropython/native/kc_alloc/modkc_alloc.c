@@ -38,7 +38,11 @@ static mp_obj_t kc_alloc_malloc_dma(size_t n_args, const mp_obj_t *args) {
     uint32_t caps = (n_args > 1)
         ? (uint32_t)mp_obj_get_int(args[1])
         : (MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-    void *buf = heap_caps_calloc(1, (size_t)size, caps);
+    /* KidCode #43: 64-byte (cache-line) aligned. PSRAM framebuffers are now DMA'd
+     * directly by the SPI master (no internal bounce), and GDMA-from-PSRAM +
+     * esp_cache_msync want a cache-line-aligned base; an unaligned base glitched the
+     * frame tail (the Beeper bottom artifact). 64 covers the S3 32/64B line either way. */
+    void *buf = heap_caps_aligned_calloc(64, 1, (size_t)size, caps);
 #else
     (void)n_args;
     void *buf = m_malloc0((size_t)size);

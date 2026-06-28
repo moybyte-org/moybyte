@@ -74,7 +74,13 @@ def init_display():
         backlight_pin=backlight,
         color_space=lv.COLOR_FORMAT.RGB565,
         color_byte_order=st7789.BYTE_ORDER_BGR,
-        rgb565_byte_swap=True,
+        # PERF (#43): the device framebuffer is now written in PANEL byte order
+        # directly (kid_runtime.PAL565_SW -- the byte-swap is folded into the palette
+        # LUT, free). So the per-flush CPU byte-swap that lcd_bus.tx_color used to do
+        # on the whole 153 KB frame (~17 ms, the synchronous wall once the DMA overlap
+        # landed) is OFF here. REVERT: rgb565_byte_swap=True + use PAL565 (not _SW) in
+        # kid_runtime, if colours come out byte-swapped.
+        rgb565_byte_swap=False,
     )
     display._ORIENTATION_TABLE = (0, 160, 192, 96)
     try:

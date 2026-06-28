@@ -1,0 +1,46 @@
+diff --git a/components/esp_driver_spi/src/gpspi/spi_master.c b/components/esp_driver_spi/src/gpspi/spi_master.c
+index ef7a8ca7..44795637 100644
+--- a/components/esp_driver_spi/src/gpspi/spi_master.c
++++ b/components/esp_driver_spi/src/gpspi/spi_master.c
+@@ -129,6 +129,10 @@ We have two bits to control the interrupt:
+ #include "hal/spi_ll.h"
+ #include "hal/hal_utils.h"
+ #include "esp_heap_caps.h"
++/* KidCode #43: esp_cache_msync is needed unconditionally for the PSRAM-direct TX
++ * writeback (the stock include was gated to SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE,
++ * which is off on the S3). Header guards make the gated include below harmless. */
++#include "esp_cache.h"
+ #if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
+ #include "esp_cache.h"
+ #endif
+@@ -1189,7 +1193,13 @@ static SPI_MASTER_ISR_ATTR esp_err_t setup_priv_desc(spi_host_t *host, spi_trans
+ #endif
+ 
+     if (send_ptr && bus_attr->dma_enabled) {
+-        if ((!esp_ptr_dma_capable(send_ptr) || tx_unaligned)) {
++        /* KidCode #43: allow EXTERNAL (PSRAM) TX buffers to be DMA'd directly instead
++         * of bounced into the small/fragmented internal MALLOC_CAP_DMA heap. The S3 AHB
++         * GDMA can read PSRAM (CONFIG_SOC_AHB_GDMA_SUPPORT_PSRAM=y), but stock esp-idf
++         * only accepts esp_ptr_dma_capable() (internal range), so a 153KB LCD frame
++         * NO_MEM'd and forced tiny banded transfers that can't overlap render. Bounce
++         * ONLY when the buffer is neither internal- nor ext-DMA-capable (or unaligned). */
++        if ((!esp_ptr_dma_capable(send_ptr) && !esp_ptr_dma_ext_capable(send_ptr)) || tx_unaligned) {
+             ESP_RETURN_ON_FALSE(!(trans_desc->flags & SPI_TRANS_DMA_BUFFER_ALIGN_MANUAL), ESP_ERR_INVALID_ARG, SPI_TAG, "Set flag SPI_TRANS_DMA_BUFFER_ALIGN_MANUAL but TX buffer addr&len not align to %d byte, or not dma_capable", alignment);
+             //if txbuf in the desc not DMA-capable, or not bytes aligned to alignment, malloc a new one
+             ESP_EARLY_LOGD(SPI_TAG, "Allocate TX buffer for DMA");
+@@ -1201,6 +1211,15 @@ static SPI_MASTER_ISR_ATTR esp_err_t setup_priv_desc(spi_host_t *host, spi_trans
+ 
+             memcpy(temp, send_ptr, (trans_desc->length + 7) / 8);
+             send_ptr = temp;
++        } else if (esp_ptr_dma_ext_capable(send_ptr)) {
++            /* KidCode #43: PSRAM source DMA'd directly -- flush the CPU's cached writes
++             * to PSRAM so the GDMA reads fresh pixels (the stock writeback below is
++             * gated to SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE, which is off on the S3).
++             * UNALIGNED: esp_lcd splits the frame into arbitrary chunk offsets/sizes,
++             * which the line-granular sync handles. */
++            esp_err_t kc_ret = esp_cache_msync((void *)send_ptr, tx_byte_len,
++                ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
++            (void) kc_ret;  /* bring-up: a sync failure garbles a frame, never aborts */
+         }
+ #if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
+         esp_err_t ret = esp_cache_msync((void *)send_ptr, tx_byte_len, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
