@@ -431,6 +431,40 @@ static mp_obj_t kc_gfx_line(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(kc_gfx_line_obj, 14, 14, kc_gfx_line);
 
+// blit_window(dst, dw, dh, src, src_w, sx, sy) -- copy a dw x dh window from a wider
+// RGB565 `src` (src_w px/row) at (sx, sy) into `dst` (dw px/row, contiguous). The scroll
+// engine's core op (#43): a flat per-row memcpy, no tile lookup / colorkey / scale, so
+// it's far cheaper than re-running map() over a scrolling background -- the cart pre-
+// renders the level into a wide buffer once, then each frame blits the camera window.
+// Bounds-clamped to both buffers.
+static mp_obj_t kc_gfx_blit_window(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t dcap, scap;
+    uint16_t *dst = kc_gfx_buf_w(a[0], &dcap);
+    mp_int_t dw = mp_obj_get_int(a[1]);
+    mp_int_t dh = mp_obj_get_int(a[2]);
+    const uint16_t *src = kc_gfx_buf_r(a[3], &scap);
+    mp_int_t src_w = mp_obj_get_int(a[4]);
+    mp_int_t sx = mp_obj_get_int(a[5]);
+    mp_int_t sy = mp_obj_get_int(a[6]);
+    if (dw <= 0 || dh <= 0 || src_w <= 0) return mp_const_none;
+    if (sx < 0) sx = 0;
+    if (sy < 0) sy = 0;
+    if (sx + dw > src_w) dw = src_w - sx;            // clamp window to source width
+    if (dw <= 0) return mp_const_none;
+    if ((size_t)dw * (size_t)dh > dcap) dh = (mp_int_t)(dcap / (size_t)dw);  // dst guard
+    mp_int_t src_rows = (mp_int_t)(scap / (size_t)src_w);
+    if (sy + dh > src_rows) dh = src_rows - sy;      // src guard
+    if (dh <= 0) return mp_const_none;
+    for (mp_int_t row = 0; row < dh; row++) {
+        memcpy(dst + (size_t)row * (size_t)dw,
+               src + (size_t)(sy + row) * (size_t)src_w + (size_t)sx,
+               (size_t)dw * 2u);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(kc_gfx_blit_window_obj, 7, 7, kc_gfx_blit_window);
+
 // pack_strip(fb, fb_w, x, y, w, rows, dst) -- copy a (w x rows) window of the
 // framebuffer into dst contiguously (row-major). Full-width is one memcpy;
 // cropped rects are packed row-by-row in C (the slow Stage 2 Python path).
@@ -471,6 +505,7 @@ static const mp_rom_map_elem_t kc_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_circ),       MP_ROM_PTR(&kc_gfx_circ_obj) },
     { MP_ROM_QSTR(MP_QSTR_circb),      MP_ROM_PTR(&kc_gfx_circb_obj) },
     { MP_ROM_QSTR(MP_QSTR_line),       MP_ROM_PTR(&kc_gfx_line_obj) },
+    { MP_ROM_QSTR(MP_QSTR_blit_window), MP_ROM_PTR(&kc_gfx_blit_window_obj) },
     { MP_ROM_QSTR(MP_QSTR_pack_strip), MP_ROM_PTR(&kc_gfx_pack_strip_obj) },
 };
 static MP_DEFINE_CONST_DICT(kc_gfx_globals, kc_gfx_globals_table);

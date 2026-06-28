@@ -884,6 +884,11 @@ def test_native_vector_primitives_wired():
     assert "self._gfx.circ(self._buf" in runtime
     assert "self._gfx.circb(self._buf" in runtime
     assert "self._gfx.line(self._buf" in runtime
+    # blit_window is the scroll-engine (Stage 1) primitive -- a flat per-row window copy
+    # from a wide pre-rendered background. Landed in the kernel ahead of the engine that
+    # consumes it (see the scroll-engine issue); assert it's registered.
+    assert "kc_gfx_blit_window" in c
+    assert "MP_ROM_QSTR(MP_QSTR_blit_window)" in c
     # The device cart API exposes map/mget/mset, same names as the host make_api.
     assert '"map": map_, "mget": mget, "mset": mset,' in runtime
 
