@@ -1413,10 +1413,15 @@ class Workstation:
         # "UPDATE FW" row that flashes a new image from /sd/update to the inactive slot.
         self.updater = None
         self._updater_ok = None     # cached updater.available() (cheap, but not per-frame)
-        self._upd_phase = None      # update screen: "confirm" | "install" | "done" | "error"
+        self._online_ok = None      # cached updater.online_available() (#53 Phase 3)
+        # update screen phases: local install -- "confirm" | "install" | "done" | "error";
+        # online (#53 Phase 3) -- "checking" | "uptodate" | "confirm_online" | "downloading".
+        self._upd_phase = None
         self._upd_msg = ""          # update screen: error / status text
-        self._upd_bin = None        # update screen: (path, size) of the found image
+        self._upd_bin = None        # update screen: (path, size) of the found/downloaded image
         self._upd_at = 0            # update screen: timestamp the install finished
+        self._online_manifest = None  # the fetched update manifest dict
+        self._check_armed = False   # one-frame gate so CHECKING... draws before the blocking fetch
         self.launcher = Launcher(carts if carts else [], self.layout)
         # Screen states (#28): "launcher" is now the DESKTOP home (wallpaper + cart
         # icon grid + dock); "desktop" is a running cart; "menu" is the cards/code/
@@ -1982,19 +1987,36 @@ class Workstation:
                 self._updater_ok = False
         return self._updater_ok
 
+    def _online_update_available(self):
+        """True when the updater can also fetch firmware over WiFi (#53 Phase 3):
+        OTA-capable build + an injected wifi service. Cached like _update_available."""
+        if self._online_ok is None:
+            u = self.updater
+            try:
+                self._online_ok = bool(u is not None and u.online_available())
+            except Exception:
+                self._online_ok = False
+        return self._online_ok
+
     def _settings_rows(self):
-        """The Settings rows for this session: the static set, plus an "UPDATE FW"
-        action row when OTA is available (device only). Built on demand so the row
-        appears/disappears with the injected updater without re-statting per draw."""
+        """The Settings rows for this session: the static set, plus "UPDATE FW" (install
+        from SD) and "UPDATE ONLINE" (WiFi download, #53 Phase 3) action rows when the
+        injected updater supports them. Built on demand so the rows appear/disappear with
+        the updater without re-statting per draw."""
+        rows = self._SETTINGS_ROWS
         if self._update_available():
-            return self._SETTINGS_ROWS + (("update", "UPDATE FW", "action"),)
-        return self._SETTINGS_ROWS
+            rows = rows + (("update", "UPDATE FW", "action"),)
+        if self._online_update_available():
+            rows = rows + (("update_online", "UPDATE ONLINE", "action"),)
+        return rows
 
     def _activate_settings_action(self, key):
         """Fire an "action" Settings row by key: EDIT ICONS opens the theme editor,
-        UPDATE FW opens the firmware-update screen (#53)."""
+        UPDATE FW installs a local SD image, UPDATE ONLINE checks WiFi for one (#53)."""
         if key == "update":
             self.open_update()
+        elif key == "update_online":
+            self.open_update_online()
         else:
             self.open_theme()       # EDIT ICONS (#52)
 
@@ -2081,13 +2103,49 @@ class Workstation:
         self._upd_bin = found
         self._upd_phase = "confirm"
 
+    def open_update_online(self):
+        """Open the online-update flow (#53 Phase 3): connect WiFi + fetch the manifest,
+        and if it's newer, download the image to SD. The blocking check runs in
+        _pump_update one frame later so a CHECKING... screen shows first."""
+        self.screen = "update"
+        self._dirty = True
+        self.show_achievements = False
+        self._set_text_mode(False)
+        self._upd_bin = None
+        self._upd_msg = ""
+        self._online_manifest = None
+        if self.updater is None:
+            self._upd_phase = "error"
+            self._upd_msg = "no updater"
+            return
+        self._check_armed = False              # gate: draw CHECKING... before the blocking fetch
+        self._upd_phase = "checking"
+
+    def _start_download(self):
+        """Open the socket + SD file and switch to the streaming download phase."""
+        u = self.updater
+        if u is None or not self._online_manifest:
+            return
+        self._dirty = True
+        try:
+            u.begin_download(self._online_manifest)
+            self._upd_phase = "downloading"
+        except Exception as exc:               # noqa: BLE001 -- shown to the kid
+            self._upd_phase = "error"
+            self._upd_msg = _err_text(exc)[:30]
+
     def _exit_update(self):
         """Leave the update screen back to Settings, dropping any in-progress install
-        (the inactive slot may be half-written, but it was never set bootable)."""
+        (the inactive slot may be half-written, but it was never set bootable) or
+        download (the socket + partial SD file are closed)."""
         u = self.updater
         if u is not None:
             try:
                 u.cancel()
+            except Exception:
+                pass
+            try:
+                u.download_cancel()
             except Exception:
                 pass
         self.screen = "settings"
@@ -2118,10 +2176,15 @@ class Workstation:
                 self._confirm_update()
             elif i.pressed("b"):
                 self._exit_update()
-        elif ph == "install":
-            if i.pressed("b"):                 # abort: slot half-written but not booted
+        elif ph == "confirm_online":
+            if i.pressed("a") or i.pressed("run"):
+                self._start_download()
+            elif i.pressed("b"):
                 self._exit_update()
-        elif ph == "error":
+        elif ph in ("install", "downloading", "checking"):
+            if i.pressed("b"):                 # abort: nothing bootable was committed yet
+                self._exit_update()
+        elif ph in ("error", "uptodate"):
             if i.pressed("b") or i.pressed("a"):
                 self._exit_update()
         # "done": ignore input -- _pump_update reboots into the new image shortly.
@@ -2136,7 +2199,9 @@ class Workstation:
         ph = self._upd_phase
         if ph == "confirm":
             self._confirm_update()             # tap anywhere (besides X) = install
-        elif ph == "error":
+        elif ph == "confirm_online":
+            self._start_download()             # tap anywhere (besides X) = download
+        elif ph in ("error", "uptodate"):
             self._exit_update()
 
     def _pump_update(self, dt):
@@ -2144,7 +2209,53 @@ class Workstation:
         screen). Drives begin->step*N->finish->reset through the updater backend."""
         u = self.updater
         ph = self._upd_phase
-        if ph == "install":
+        if ph == "checking":
+            # Run the blocking connect + manifest fetch ONE frame after entry, so the
+            # CHECKING... screen paints first (this method runs before _draw each frame).
+            if not self._check_armed:
+                self._check_armed = True
+                return
+            if u is None:
+                self._upd_phase = "error"
+                self._upd_msg = "no updater"
+                return
+            manifest = u.check_online()        # connect (saved creds) + GET the manifest
+            if u.error:
+                self._upd_phase = "error"
+                self._upd_msg = u.error
+                return
+            if not manifest:
+                self._upd_phase = "error"
+                self._upd_msg = "no manifest"
+                return
+            try:
+                newer = int(manifest.get("version", 0)) > u.version()
+            except Exception:
+                newer = False
+            if not newer:
+                self._upd_phase = "uptodate"
+                return
+            self._online_manifest = manifest
+            self._upd_phase = "confirm_online"
+        elif ph == "downloading":
+            if u is None:
+                self._upd_phase = "error"
+                self._upd_msg = "no updater"
+                return
+            more = u.download_step()           # one chunk: socket -> SD (+ running sha256)
+            if u.error:
+                self._upd_phase = "error"
+                self._upd_msg = u.error
+                return
+            if not more:
+                path = u.download_finish()     # close + verify size/sha256
+                if u.error or not path:
+                    self._upd_phase = "error"
+                    self._upd_msg = u.error or "verify failed"
+                    return
+                self._upd_bin = (path, u.dl_total or u.dl_done)
+                self._upd_phase = "confirm"    # hand off to the Phase-2 install confirm
+        elif ph == "install":
             if u is None:
                 self._upd_phase = "error"
                 self._upd_msg = "no updater"
@@ -2185,10 +2296,51 @@ class Workstation:
         self._mini_btn("X", lay.set_back, NAMES["red"], cv)
         u = self.updater
         slot = u.slot() if u is not None else "?"
+        ver = u.version() if u is not None else 0
         x = px + 12 * fs
         y = py + 28 * fs
         phase = self._upd_phase
-        if phase == "confirm" and self._upd_bin:
+        if phase == "checking":
+            cv.print("CHECKING ONLINE...", x, y, NAMES["yellow"], 1)
+            y += 16 * fs
+            cv.print("running: %s v%d" % (slot, ver), x, y, NAMES["light_grey"], 1)
+        elif phase == "uptodate":
+            cv.print("UP TO DATE", x, y, NAMES["green"], 1)
+            y += 14 * fs
+            cv.print("firmware v%d" % ver, x, y, NAMES["white"], 1)
+            y += 18 * fs
+            cv.print("B = BACK", x, y, NAMES["yellow"], 1)
+        elif phase == "confirm_online" and self._online_manifest:
+            m = self._online_manifest
+            newv = int(m.get("version", 0) or 0)
+            kb = int(m.get("size", 0) or 0) // 1024
+            cv.print("UPDATE AVAILABLE", x, y, NAMES["light_grey"], 1)
+            y += 12 * fs
+            cv.print("v%d -> v%d" % (ver, newv), x, y, NAMES["green"], 1)
+            y += 12 * fs
+            if kb:
+                cv.print("%d KB download" % kb, x, y, NAMES["white"], 1)
+                y += 14 * fs
+            else:
+                y += 2 * fs
+            cv.print("A = DOWNLOAD", x, y, NAMES["yellow"], 1)
+            y += 12 * fs
+            cv.print("B = CANCEL", x, y, NAMES["light_grey"], 1)
+        elif phase == "downloading":
+            done = u.dl_done if u is not None else 0
+            total = u.dl_total if (u is not None and u.dl_total) else 0
+            cv.print("DOWNLOADING...", x, y, NAMES["yellow"], 1)
+            y += 16 * fs
+            frac = (done / total) if total else 0.0
+            self._draw_progress_bar(px + 12 * fs, y, pw - 24 * fs, 10 * fs, frac)
+            y += 16 * fs
+            if total:
+                cv.print("%d / %d KB" % (done // 1024, total // 1024), x, y, NAMES["white"], 1)
+            else:
+                cv.print("%d KB" % (done // 1024), x, y, NAMES["white"], 1)
+            y += 16 * fs
+            cv.print("B = CANCEL", x, y, NAMES["light_grey"], 1)
+        elif phase == "confirm" and self._upd_bin:
             path, size = self._upd_bin
             name = path.rsplit("/", 1)[-1]
             cv.print("FOUND ON SD:", x, y, NAMES["light_grey"], 1)
@@ -4511,9 +4663,10 @@ class Workstation:
                 and self._wp_update is not None and self._wp_draw is not None and dt > 0:
             return True
         # A firmware install (#53) advances a chunk per frame; "done" runs a short
-        # reboot countdown. Both must keep redrawing so the progress bar animates and
-        # the reset() fires without waiting on input.
-        if self.screen == "update" and self._upd_phase in ("install", "done"):
+        # reboot countdown; "checking"/"downloading" (Phase 3) step the online flow.
+        # All must keep redrawing so progress animates and the work proceeds without input.
+        if self.screen == "update" and self._upd_phase in (
+                "install", "done", "checking", "downloading"):
             return True
         # Transient overlays redraw while they're up.
         if self._confetti_until and _ticks_diff(self._confetti_until, _ticks_ms()) > 0:
@@ -4889,11 +5042,16 @@ class Workstation:
         fg = NAMES["white"] if sel else NAMES["light_grey"]
         cv.print(label, x + 4, y + 5, fg, 1)
         if kind == "action":
-            # An action row (EDIT ICONS / UPDATE FW): no value/stepper -- just an OPEN
-            # affordance at the right so a tap (or A) is the obvious activate. The glyph
-            # cues what it does (paint = repaint the chrome icons; run = go install).
-            g = "run" if key == "update" else "paint"
-            c = NAMES["yellow"] if key == "update" else NAMES["green"]
+            # An action row (EDIT ICONS / UPDATE FW / UPDATE ONLINE): no value/stepper --
+            # just an OPEN affordance at the right so a tap (or A) is the obvious activate.
+            # The glyph cues what it does (paint = repaint chrome; run = install; wifi =
+            # online update).
+            if key == "update":
+                g, c = "run", NAMES["yellow"]
+            elif key == "update_online":
+                g, c = "wifi", NAMES["yellow"]
+            else:
+                g, c = "paint", NAMES["green"]
             self._glyph(g, (x + w - 18 * lay.fs, y + 2, 14 * lay.fs, 14 * lay.fs), c, cv)
             return
         # < value > stepper at the right (the chevrons print at double size = 2*fw).

@@ -147,6 +147,48 @@ def test_console_settings_has_firmware_update_screen():
     assert "def _activate_settings_action" in console
 
 
+def test_ota_online_download_streams_to_sd_with_checksum():
+    # OTA Phase 3 (#53): a WiFi download fetches a manifest, streams the .bin straight
+    # to SD (never buffering the whole image), and verifies sha256 before installing.
+    ota = (ROOT / "modules" / "kc_ota.py").read_text(encoding="utf-8")
+
+    assert "FIRMWARE_VERSION = 1" in ota
+    assert 'OTA_CFG_NAME = "ota.json"' in ota
+    assert 'DOWNLOAD_NAME = "firmware.bin"' in ota
+    # capability + manifest + connectivity
+    assert "def online_available(self):" in ota
+    assert "def manifest_url(self):" in ota
+    assert "def check_online(self):" in ota
+    assert "def ensure_online(self):" in ota
+    # streaming download API the console drives (mirror of begin/step/finish)
+    assert "def begin_download(self" in ota
+    assert "def download_step(self" in ota
+    assert "def download_finish(self" in ota
+    # raw-socket streaming (NOT urequests, which would buffer the whole 3MB) + sha256
+    assert "import socket" in ota
+    assert "hashlib.sha256()" in ota
+    assert "sha256 mismatch" in ota
+    assert "server_hostname=host" in ota          # https path
+    # never holds the full image: writes each chunk through the SD wrapper
+    assert "def _consume(self, chunk):" in ota
+
+
+def test_ota_online_wired_and_console_has_online_flow():
+    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+
+    # run_desktop hands the wifi service to the updater for online updates.
+    assert "ws.updater.set_wifi(ws.wifi, go_online=lambda: autoconnect_wifi(ws.wifi))" in runtime
+    # The shared console grows the UPDATE ONLINE row + the checking/download phases.
+    assert "def _online_update_available" in console
+    assert '"UPDATE ONLINE"' in console
+    assert "def open_update_online" in console
+    assert "def _start_download" in console
+    assert 'ph == "checking"' in console or 'phase == "checking"' in console
+    assert 'self._upd_phase = "downloading"' in console
+    assert 'self._upd_phase = "confirm"' in console   # online hands off to the local install
+
+
 def test_micropython_spike_uses_tdeck_native_panel_geometry():
     display = (ROOT / "modules" / "tdeck_display.py").read_text(encoding="utf-8")
 
@@ -1472,7 +1514,10 @@ def test_device_wifi_wired():
     # run_desktop wires the system service but does NOT bring WiFi up at boot (WLAN
     # reserves the internal RAM the LCD DMA needs -- WiFi<->display coexistence is #38).
     assert "ws.wifi = make_wifi(kid_carts, carts_root)" in runtime
-    assert "autoconnect_wifi(ws.wifi)" not in runtime      # boot autoconnect removed
+    # autoconnect is NOT called eagerly at boot; it is only reused, deferred, by the OTA
+    # online-update path (#53) via the go_online lambda -- never as a bare boot statement.
+    assert "go_online=lambda: autoconnect_wifi(ws.wifi)" in runtime
+    assert runtime.count("autoconnect_wifi(ws.wifi)") == 1
     # Each frame is guarded so one bad flush can't brick the device.
     assert "KidCode frame error:" in runtime
     # The shared console gates injection on the "network" manifest permission.
