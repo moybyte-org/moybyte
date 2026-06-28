@@ -1763,6 +1763,15 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     # Injected into a cart's namespace ONLY when its manifest grants "network".
     # Autoconnect from the saved creds at boot. NEEDS ON-DEVICE VERIFICATION.
     ws.wifi = make_wifi(kid_carts, carts_root)
+    # OTA online update (#53, Phase 3): hand the updater the wifi service so Settings ->
+    # UPDATE ONLINE can fetch a manifest + stream a new image to SD. go_online reuses the
+    # saved-credential autoconnect (autoconnect_wifi) so the kid needn't re-enter wifi to
+    # update -- it only connects to a network they already joined via the WiFi cart.
+    if getattr(ws, "updater", None) is not None:
+        try:
+            ws.updater.set_wifi(ws.wifi, go_online=lambda: autoconnect_wifi(ws.wifi))
+        except Exception as exc:
+            print("KidCode: OTA wifi wiring failed:", exc)
     # WiFi is deliberately NOT brought up at boot: the WLAN stack reserves internal RAM
     # the LCD DMA flush needs, so autoconnecting here starved the panel flush (OSError
     # 257 / ESP_ERR_NO_MEM) and froze the desktop. DeviceWifi is lazy now -- the radio

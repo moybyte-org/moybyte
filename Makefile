@@ -22,7 +22,10 @@ MPY_OTADATA_SIZE ?= 0x2000
 
 MPY_FLASH_MODE ?= dio
 
-.PHONY: setup test run-example run-headless compile-blocks doctor check-portable pack-example export-lilygo-example device-doctor device-port firmware-bundle-lilygo firmware-build-lilygo firmware-build-lilygo-micropython firmware-sim-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-upload-lilygo firmware-monitor-lilygo firmware-smoke-check-lilygo firmware-smoke-lilygo
+# OTA online update (#53 Phase 3): host a manifest + .bin for Settings -> UPDATE ONLINE.
+OTA_PORT ?= 8000
+
+.PHONY: setup test run-example run-headless compile-blocks doctor check-portable pack-example export-lilygo-example device-doctor device-port firmware-bundle-lilygo firmware-build-lilygo firmware-build-lilygo-micropython firmware-sim-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-upload-lilygo firmware-monitor-lilygo firmware-smoke-check-lilygo firmware-smoke-lilygo ota-manifest ota-serve
 
 setup:
 	$(SYSTEM_PYTHON) -m venv --system-site-packages $(VENV)
@@ -58,6 +61,17 @@ pack-example:
 firmware-build-lilygo-micropython:
 	bash firmware/lilygo_t_deck_plus_micropython/build.sh
 
+# OTA (#53 Phase 3): emit dist/latest.json from the built image (auto size + sha256 +
+# version read from kc_ota.FIRMWARE_VERSION). Point it at your host with OTA_BASE_URL;
+# with none it uses http://<LAN-IP>:$(OTA_PORT) for a local test against `make ota-serve`.
+#   make ota-manifest                         # local test
+#   make ota-manifest OTA_BASE_URL=https://you.example.com/kidcode
+ota-manifest:
+	$(PYTHON) tools/gen_ota_manifest.py $(if $(OTA_BASE_URL),--base-url $(OTA_BASE_URL)) --port $(OTA_PORT)
+
+# Serve dist/ (the .bin + latest.json) over plain HTTP for the device to pull from.
+ota-serve:
+	cd $(MPY_FW_DIR)/dist && $(PYTHON) -m http.server $(OTA_PORT)
 
 firmware-flash-lilygo-micropython:
 	test -n "$(PORT)"

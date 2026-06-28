@@ -21,11 +21,28 @@ charge. The host injects no updater, so the shared "UPDATE FW" Settings row simp
 doesn't appear there.
 
 Driven by the console as: find_bin() -> begin(path) -> step()*N -> finish() -> reset().
+
+Phase 3 (#53) adds WiFi download: check_online() fetches a small JSON manifest
+({"version", "url", "sha256", "size"}) over HTTP(S) via the injected wifi service,
+and if it advertises a newer FIRMWARE_VERSION, download_step()*N streams the .bin
+straight to /sd/update (raw socket -> SD, never buffering the whole image in RAM)
+while accumulating a SHA-256 to verify before the same Phase-2 install path runs.
+The network code is the LIVE counterpart of the host fake -- like DeviceWifi it is
+UNVERIFIED on hardware (WiFi + the LCD DMA flush fight for internal RAM, see the
+#38 notes in kid_runtime) -- so treat the socket calls as a sketch until a device pass.
 """
 
 UPDATE_DIR = "/sd/update"
 BLOCK = 4096                 # esp32.Partition native block (erase page); writeblocks erases
 IMAGE_MAGIC = 0xE9          # first byte of an ESP32 app image (esp_image_header_t.magic)
+
+# Bump on every released firmware build so an online manifest advertising a higher
+# "version" is recognised as newer (mirrors the cart-versioning convention). The
+# online check only offers an update when manifest["version"] > FIRMWARE_VERSION.
+FIRMWARE_VERSION = 1
+OTA_CFG_NAME = "ota.json"        # /sd/update/ota.json -> {"manifest_url": "https://..."}
+DOWNLOAD_NAME = "firmware.bin"   # WiFi downloads land here (then the Phase-2 install runs)
+DL_CHUNK = 4096                  # socket read / SD write granularity for the streamed image
 
 
 class OtaUpdater:
@@ -37,8 +54,10 @@ class OtaUpdater:
     each chunk runs inside one with_sd() call.
     """
 
-    def __init__(self, with_sd):
+    def __init__(self, with_sd, wifi=None, go_online=None):
         self._with_sd = with_sd
+        self._wifi = wifi         # injected wifi service (DeviceWifi); None -> no online update
+        self._go_online = go_online  # callable: best-effort connect from saved creds
         self._buf = bytearray(BLOCK)
         self._mv = memoryview(self._buf)
         self._part = None         # the target (inactive) esp32.Partition
@@ -48,6 +67,18 @@ class OtaUpdater:
         self.done = 0             # bytes flashed so far
         self.path = None          # the image being installed
         self.error = None         # last error string (shown by the console)
+        # WiFi download (Phase 3) state:
+        self._sock = None         # open HTTP(S) socket while a download streams
+        self._dl_f = None         # open SD file the download writes to
+        self._hash = None         # running sha256 of the downloaded bytes
+        self._dl_sha = ""         # expected sha256 (hex) from the manifest
+        self.dl_total = 0         # download size in bytes (Content-Length / manifest)
+        self.dl_done = 0          # bytes downloaded so far (for the progress bar)
+
+    def set_wifi(self, wifi, go_online=None):
+        self._wifi = wifi
+        if go_online is not None:
+            self._go_online = go_online
 
     # -- capability + status (cheap, no SD) ----------------------------------
 
@@ -73,6 +104,15 @@ class OtaUpdater:
             return self._running_label()
         except Exception:
             return "?"
+
+    def version(self):
+        """The running firmware version (compared against the online manifest)."""
+        return FIRMWARE_VERSION
+
+    def online_available(self):
+        """True when an online update is possible: OTA-capable build AND a wifi
+        service is injected. The console shows the UPDATE ONLINE row only then."""
+        return self.available() and self._wifi is not None
 
     def mark_valid(self):
         """Confirm the running image is healthy so the bootloader cancels its pending
@@ -218,6 +258,277 @@ class OtaUpdater:
         if f is not None:
             try:
                 f.close()
+            except Exception:
+                pass
+
+    # -- WiFi download (Phase 3, #53): manifest check + streamed .bin --------
+    #
+    # check_online() pulls a small JSON manifest; if it's newer, the console drives
+    # begin_download() -> download_step()*N -> download_finish(), which streams the
+    # image straight from the socket into /sd/update/firmware.bin (never holding the
+    # whole 3MB in RAM) and verifies size + sha256. Then the normal Phase-2 install
+    # path takes the downloaded file. UNVERIFIED on hardware (see the class docstring).
+
+    def manifest_url(self):
+        """The configured update manifest URL (/sd/update/ota.json) or None."""
+        def _read():
+            try:
+                import json
+
+                with open(UPDATE_DIR + "/" + OTA_CFG_NAME) as f:
+                    cfg = json.load(f)
+                return cfg.get("manifest_url")
+            except Exception:
+                return None
+        try:
+            return self._with_sd(_read)
+        except Exception:
+            return None
+
+    def wifi_online(self):
+        if self._wifi is None:
+            return False
+        try:
+            return bool(self._wifi.status()[0])
+        except Exception:
+            return False
+
+    def ensure_online(self):
+        """Best-effort: report connected, else try a saved-credentials autoconnect.
+        Never prompts for a password -- the kid joins a network via the WiFi cart;
+        this only reuses what's already saved."""
+        if self.wifi_online():
+            return True
+        if self._go_online is not None:
+            try:
+                self._go_online()
+            except Exception:
+                pass
+        return self.wifi_online()
+
+    def check_online(self):
+        """Fetch + parse the manifest. Returns the dict (with at least "version" and
+        "url") or None, setting self.error on any failure. Blocking network call --
+        the console runs it once, between frames, behind a CHECKING... screen."""
+        self.error = None
+        url = self.manifest_url()
+        if not url:
+            self.error = "no manifest url"
+            return None
+        if not self.ensure_online():
+            self.error = "wifi offline"
+            return None
+        try:
+            txt = self._http_get_text(url)
+            if txt is None:
+                return None
+            import json
+
+            return json.loads(txt)
+        except Exception as exc:
+            self.error = _short(exc)
+            return None
+
+    def begin_download(self, manifest):
+        """Open the socket + SD file for the manifest's image. Raises on a bad URL or
+        non-200 response; sets dl_total/dl_done for the progress bar."""
+        self.error = None
+        self.dl_done = 0
+        url = manifest.get("url")
+        if not url:
+            raise ValueError("manifest has no url")
+        self.dl_total = int(manifest.get("size", 0) or 0)
+        self._dl_sha = (manifest.get("sha256") or "").lower()
+
+        sock, code, clen, rest = self._http_open(url)
+        if code != 200:
+            try:
+                sock.close()
+            except Exception:
+                pass
+            raise ValueError("http %d" % code)
+        if not self.dl_total and clen:
+            self.dl_total = clen
+
+        import hashlib
+
+        self._hash = hashlib.sha256()
+        self._sock = sock
+
+        def _open():
+            import os
+
+            try:
+                os.mkdir(UPDATE_DIR)
+            except OSError:
+                pass
+            return open(UPDATE_DIR + "/" + DOWNLOAD_NAME, "wb")
+
+        self._dl_f = self._with_sd(_open)
+        self.path = UPDATE_DIR + "/" + DOWNLOAD_NAME
+        if rest:                               # body bytes already read with the headers
+            self._consume(rest)
+
+    def download_step(self, max_bytes=DL_CHUNK):
+        """Stream one chunk socket -> SD. Returns True while more remains, False at EOF
+        (then call download_finish()). One SD session per step (same as install)."""
+        if self._sock is None or self._dl_f is None:
+            return False
+        try:
+            chunk = self._sock.read(max_bytes)
+        except Exception as exc:
+            self.error = _short(exc)
+            self._dl_close()
+            return False
+        if not chunk:
+            return False                       # EOF (server closed the connection)
+        try:
+            self._consume(chunk)
+        except Exception as exc:
+            self.error = _short(exc)
+            self._dl_close()
+            return False
+        return True
+
+    def _consume(self, chunk):
+        self._hash.update(chunk)
+
+        def _w():
+            self._dl_f.write(chunk)
+
+        self._with_sd(_w)
+        self.dl_done += len(chunk)
+
+    def download_finish(self):
+        """Close the stream and verify size + sha256. Returns the .bin path on success,
+        else None with self.error set (and the bad file is left for the kid to inspect)."""
+        self._dl_close()
+        if self.dl_total and self.dl_done != self.dl_total:
+            self.error = "size %d/%d" % (self.dl_done, self.dl_total)
+            return None
+        if self._dl_sha:
+            try:
+                import binascii
+
+                got = binascii.hexlify(self._hash.digest()).decode()
+            except Exception as exc:
+                self.error = _short(exc)
+                return None
+            if got != self._dl_sha:
+                self.error = "sha256 mismatch"
+                return None
+        return self.path
+
+    def download_cancel(self):
+        self._dl_close()
+        self.dl_done = 0
+        self.dl_total = 0
+
+    def _dl_close(self):
+        s = self._sock
+        self._sock = None
+        if s is not None:
+            try:
+                s.close()
+            except Exception:
+                pass
+        f = self._dl_f
+        self._dl_f = None
+        if f is not None:
+            def _c():
+                f.close()
+            try:
+                self._with_sd(_c)
+            except Exception:
+                try:
+                    f.close()
+                except Exception:
+                    pass
+
+    # -- minimal streaming HTTP(S) client (no urequests: it buffers the whole body) --
+
+    def _parse_url(self, url):
+        if url.startswith("https://"):
+            scheme, rest, port = "https", url[8:], 443
+        elif url.startswith("http://"):
+            scheme, rest, port = "http", url[7:], 80
+        else:
+            raise ValueError("bad url")
+        slash = rest.find("/")
+        if slash < 0:
+            hostport, path = rest, "/"
+        else:
+            hostport, path = rest[:slash], rest[slash:]
+        if ":" in hostport:
+            host, p = hostport.split(":", 1)
+            port = int(p)
+        else:
+            host = hostport
+        return scheme, host, port, path
+
+    def _http_open(self, url):
+        """Connect + send GET + read the response headers. Returns
+        (sock, status_code, content_length, leftover_body_bytes)."""
+        import socket
+
+        scheme, host, port, path = self._parse_url(url)
+        ai = socket.getaddrinfo(host, port)[0]
+        sock = socket.socket(ai[0], ai[1], ai[2])
+        sock.settimeout(15)
+        sock.connect(ai[-1])
+        if scheme == "https":
+            import ssl
+
+            sock = ssl.wrap_socket(sock, server_hostname=host)
+        req = ("GET %s HTTP/1.0\r\nHost: %s\r\n"
+               "User-Agent: kidcode-ota\r\nConnection: close\r\n\r\n" % (path, host))
+        sock.write(req.encode())
+
+        hdr = b""
+        while b"\r\n\r\n" not in hdr:
+            b = sock.read(1)                   # headers are small; byte-wise keeps body intact
+            if not b:
+                break
+            hdr += b
+            if len(hdr) > 4096:
+                break
+        head, _, rest = hdr.partition(b"\r\n\r\n")
+        lines = head.split(b"\r\n")
+        code = 0
+        if lines and b" " in lines[0]:
+            try:
+                code = int(lines[0].split(b" ")[1])
+            except Exception:
+                code = 0
+        clen = 0
+        for ln in lines[1:]:
+            if ln.lower().startswith(b"content-length:"):
+                try:
+                    clen = int(ln.split(b":", 1)[1].strip())
+                except Exception:
+                    clen = 0
+        return sock, code, clen, rest
+
+    def _http_get_text(self, url, limit=8192):
+        """Fetch a small text resource (the manifest) fully into RAM."""
+        sock, code, clen, rest = self._http_open(url)
+        try:
+            if code != 200:
+                self.error = "http %d" % code
+                return None
+            body = rest
+            cap = clen if clen else limit
+            while len(body) < cap:
+                chunk = sock.read(512)
+                if not chunk:
+                    break
+                body += chunk
+                if len(body) > limit:
+                    break
+            return body.decode()
+        finally:
+            try:
+                sock.close()
             except Exception:
                 pass
 
