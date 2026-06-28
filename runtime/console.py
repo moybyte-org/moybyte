@@ -1408,11 +1408,20 @@ class Workstation:
         # manifest permissions include "network" (capability-gated -- see _start).
         self.wifi = None            # injected wifi backend (host FakeWifi / device WLAN)
         self.carts_store = None     # injected: cart store module (kid_carts API)
+        # OTA firmware updater (#53): injected by the device (kc_ota.OtaUpdater); None
+        # on the host. When present AND the build is OTA-capable, Settings grows an
+        # "UPDATE FW" row that flashes a new image from /sd/update to the inactive slot.
+        self.updater = None
+        self._updater_ok = None     # cached updater.available() (cheap, but not per-frame)
+        self._upd_phase = None      # update screen: "confirm" | "install" | "done" | "error"
+        self._upd_msg = ""          # update screen: error / status text
+        self._upd_bin = None        # update screen: (path, size) of the found image
+        self._upd_at = 0            # update screen: timestamp the install finished
         self.launcher = Launcher(carts if carts else [], self.layout)
         # Screen states (#28): "launcher" is now the DESKTOP home (wallpaper + cart
         # icon grid + dock); "desktop" is a running cart; "menu" is the cards/code/
         # paint/map editors; "settings" is the Settings app.
-        self.screen = "launcher"      # "launcher" | "desktop" | "menu" | "settings"
+        self.screen = "launcher"      # "launcher" | "desktop" | "menu" | "settings" | "update"
         self.cart = None
         self.config = None
         self.ns = None
@@ -1960,6 +1969,34 @@ class Workstation:
     )
     _MOCK_NAMES = ("ALEX", "SAM", "KIT", "RAE")
 
+    def _update_available(self):
+        """True when an OTA updater is injected AND this build is OTA-capable (the
+        running app is ota_0/ota_1, not a legacy single-`factory` image). Cached: the
+        answer is fixed for a boot, and the check reads a partition (cheap, no SD)."""
+        if self._updater_ok is None:
+            u = self.updater
+            try:
+                self._updater_ok = bool(u is not None and u.available())
+            except Exception:
+                self._updater_ok = False
+        return self._updater_ok
+
+    def _settings_rows(self):
+        """The Settings rows for this session: the static set, plus an "UPDATE FW"
+        action row when OTA is available (device only). Built on demand so the row
+        appears/disappears with the injected updater without re-statting per draw."""
+        if self._update_available():
+            return self._SETTINGS_ROWS + (("update", "UPDATE FW", "action"),)
+        return self._SETTINGS_ROWS
+
+    def _activate_settings_action(self, key):
+        """Fire an "action" Settings row by key: EDIT ICONS opens the theme editor,
+        UPDATE FW opens the firmware-update screen (#53)."""
+        if key == "update":
+            self.open_update()
+        else:
+            self.open_theme()       # EDIT ICONS (#52)
+
     def open_settings(self):
         if self.screen != "settings":
             self._settings_return = self.screen   # resume here on exit (cart vs home)
@@ -1983,9 +2020,9 @@ class Workstation:
         """Step the selected Settings row by d. Wallpaper/font apply + persist; the
         mock rows just move a cosmetic value held in self.system (not acted on); an
         "action" row (EDIT ICONS) fires its action regardless of direction."""
-        key, _label, kind = self._SETTINGS_ROWS[self.set_msel]
-        if kind == "action":                    # EDIT ICONS: open the theme editor (#52)
-            self.open_theme()
+        key, _label, kind = self._settings_rows()[self.set_msel]
+        if kind == "action":                    # EDIT ICONS / UPDATE FW: open the tool
+            self._activate_settings_action(key)
             return
         if key == "wallpaper":
             self.cycle_wallpaper(d)
@@ -2011,6 +2048,191 @@ class Workstation:
         if cart is not None:
             return cart["title"].upper()
         return str(wp).replace("_", " ").upper()
+
+    # -- firmware update screen (#53) -----------------------------------------
+    #
+    # OTA flow: Settings -> UPDATE FW finds a .bin on /sd/update, the kid confirms,
+    # and the injected updater flashes it to the INACTIVE OTA slot one chunk per frame
+    # (so the progress bar animates through the normal frame/flush loop), then reboots
+    # into the new image. The running slot is never touched, and the bootloader rolls
+    # back if the new app doesn't confirm itself healthy -- so a bad/aborted update is
+    # safe. Pure UI here; all SD + flash work lives in the device-only updater backend.
+
+    def open_update(self):
+        """Open the firmware-update screen: scan SD for an image to install. Lands on
+        the "confirm" phase when one is found, else "error" with a friendly reason."""
+        self.screen = "update"
+        self._dirty = True
+        self.show_achievements = False
+        self._set_text_mode(False)             # button-driven, not typing
+        self._upd_bin = None
+        self._upd_msg = ""
+        u = self.updater
+        if u is None:
+            self._upd_phase = "error"
+            self._upd_msg = "no updater"
+            return
+        found = u.find_bin()                    # SD op (between frames)
+        if not found:
+            self._upd_phase = "error"
+            self._upd_msg = "no .bin in /sd/update"
+            return
+        self._upd_bin = found
+        self._upd_phase = "confirm"
+
+    def _exit_update(self):
+        """Leave the update screen back to Settings, dropping any in-progress install
+        (the inactive slot may be half-written, but it was never set bootable)."""
+        u = self.updater
+        if u is not None:
+            try:
+                u.cancel()
+            except Exception:
+                pass
+        self.screen = "settings"
+        self._dirty = True
+
+    def _confirm_update(self):
+        """Begin flashing the found image (validates header + size, opens the slot)."""
+        u = self.updater
+        if u is None or not self._upd_bin:
+            return
+        self._dirty = True
+        try:
+            u.begin(self._upd_bin[0])
+            self._upd_phase = "install"
+        except Exception as exc:               # noqa: BLE001 -- shown to the kid
+            self._upd_phase = "error"
+            self._upd_msg = _err_text(exc)[:30]
+
+    def _update_input(self, i):
+        ph = self._upd_phase
+        if i.pressed("home") or i.pressed("stop"):
+            if ph != "done":                   # "done" is past the point of no return
+                self._exit_update()
+                self.go_home()
+            return
+        if ph == "confirm":
+            if i.pressed("a") or i.pressed("run"):
+                self._confirm_update()
+            elif i.pressed("b"):
+                self._exit_update()
+        elif ph == "install":
+            if i.pressed("b"):                 # abort: slot half-written but not booted
+                self._exit_update()
+        elif ph == "error":
+            if i.pressed("b") or i.pressed("a"):
+                self._exit_update()
+        # "done": ignore input -- _pump_update reboots into the new image shortly.
+
+    def _update_pointer(self, px, py, click):
+        if not click:
+            return
+        if _in(px, py, self.layout.set_back):  # the X in the title row
+            if self._upd_phase != "done":
+                self._exit_update()
+            return
+        ph = self._upd_phase
+        if ph == "confirm":
+            self._confirm_update()             # tap anywhere (besides X) = install
+        elif ph == "error":
+            self._exit_update()
+
+    def _pump_update(self, dt):
+        """Advance the install one chunk (called each painted frame on the update
+        screen). Drives begin->step*N->finish->reset through the updater backend."""
+        u = self.updater
+        ph = self._upd_phase
+        if ph == "install":
+            if u is None:
+                self._upd_phase = "error"
+                self._upd_msg = "no updater"
+                return
+            more = u.step()                    # one SD session: read + flash a chunk
+            if u.error:
+                self._upd_phase = "error"
+                self._upd_msg = u.error
+                return
+            if not more:
+                if u.finish():                 # point the bootloader at the new slot
+                    self._upd_phase = "done"
+                    self._upd_at = _ticks_ms()
+                else:
+                    self._upd_phase = "error"
+                    self._upd_msg = u.error or "set_boot failed"
+        elif ph == "done":
+            # Brief pause so the kid sees "UPDATED!", then reboot into the new image.
+            if _ticks_diff(_ticks_ms(), self._upd_at) >= 1200:
+                try:
+                    u.reset()
+                except Exception:
+                    self._upd_phase = "error"
+                    self._upd_msg = "reset failed"
+
+    def _draw_update(self, dt):
+        """The firmware-update screen: confirm / progress / done / error. On the
+        SYSTEM canvas, same panel chrome as Settings (host == device)."""
+        cv = self.sys_canvas
+        lay = self.layout
+        fs = lay.fs
+        cv.rect(0, 0, lay.w, lay.h, NAMES["black"])
+        px, py, pw, ph = lay.settings_panel
+        cv.rect(px, py, pw, ph, NAMES["dark_purple"])
+        cv.rectb(px, py, pw, ph, NAMES["pink"])
+        self._glyph("gear", (px + 6, py + 2, 14 * fs, 14 * fs), NAMES["yellow"], cv)
+        cv.print("UPDATE", px + 24, py + 4, NAMES["white"], 2)
+        self._mini_btn("X", lay.set_back, NAMES["red"], cv)
+        u = self.updater
+        slot = u.slot() if u is not None else "?"
+        x = px + 12 * fs
+        y = py + 28 * fs
+        phase = self._upd_phase
+        if phase == "confirm" and self._upd_bin:
+            path, size = self._upd_bin
+            name = path.rsplit("/", 1)[-1]
+            cv.print("FOUND ON SD:", x, y, NAMES["light_grey"], 1)
+            y += 12 * fs
+            cv.print(name[:24], x, y, NAMES["green"], 1)
+            y += 12 * fs
+            cv.print("%d KB" % (size // 1024), x, y, NAMES["white"], 1)
+            y += 14 * fs
+            cv.print("running: %s" % slot, x, y, NAMES["light_grey"], 1)
+            y += 18 * fs
+            cv.print("A = INSTALL", x, y, NAMES["yellow"], 1)
+            y += 12 * fs
+            cv.print("B = CANCEL", x, y, NAMES["light_grey"], 1)
+        elif phase == "install":
+            done = u.done if u is not None else 0
+            total = u.total if (u is not None and u.total) else 1
+            cv.print("FLASHING...", x, y, NAMES["yellow"], 1)
+            y += 16 * fs
+            self._draw_progress_bar(px + 12 * fs, y, pw - 24 * fs, 10 * fs, done / total)
+            y += 16 * fs
+            cv.print("%d / %d KB" % (done // 1024, (u.total // 1024) if u else 0),
+                     x, y, NAMES["white"], 1)
+            y += 16 * fs
+            cv.print("DO NOT POWER OFF", x, y, NAMES["red"], 1)
+        elif phase == "done":
+            cv.print("UPDATED!", x, y, NAMES["green"], 2)
+            y += 20 * fs
+            cv.print("rebooting...", x, y, NAMES["white"], 1)
+        else:  # error
+            cv.print("UPDATE FAILED", x, y, NAMES["red"], 1)
+            y += 14 * fs
+            cv.print((self._upd_msg or "?")[:26], x, y, NAMES["light_grey"], 1)
+            y += 18 * fs
+            cv.print("B = BACK", x, y, NAMES["yellow"], 1)
+
+    def _draw_progress_bar(self, x, y, w, h, frac):
+        cv = self.sys_canvas
+        if frac < 0:
+            frac = 0.0
+        elif frac > 1:
+            frac = 1.0
+        cv.rectb(x, y, w, h, NAMES["light_grey"])
+        fill = int((w - 2) * frac)
+        if fill > 0:
+            cv.rect(x + 1, y + 1, fill, h - 2, NAMES["green"])
 
     def _start(self):
         self._dirty = True             # a (re)started cart paints its first frame (#44)
@@ -2874,21 +3096,25 @@ class Workstation:
             if i.pressed("a") or i.pressed("run"):
                 self.open()
         elif self.screen == "settings":
+            rows = self._settings_rows()
             if i.pressed("up"):
-                self.set_msel = (self.set_msel - 1) % len(self._SETTINGS_ROWS)
+                self.set_msel = (self.set_msel - 1) % len(rows)
             if i.pressed("down"):
-                self.set_msel = (self.set_msel + 1) % len(self._SETTINGS_ROWS)
+                self.set_msel = (self.set_msel + 1) % len(rows)
             if i.pressed("left"):
                 self.settings_adjust(-1)
             if i.pressed("right"):
                 self.settings_adjust(1)
-            if i.pressed("a") or i.pressed("run"):  # activate an action row (EDIT ICONS)
-                if self._SETTINGS_ROWS[self.set_msel][2] == "action":
-                    self.open_theme()
+            if i.pressed("a") or i.pressed("run"):  # activate an action row (EDIT ICONS / UPDATE FW)
+                row = rows[self.set_msel % len(rows)]
+                if row[2] == "action":
+                    self._activate_settings_action(row[0])
             if i.pressed("b"):
                 self._exit_settings()          # back -> resume the cart if opened from one
             elif i.pressed("home") or i.pressed("stop"):
                 self.go_home()
+        elif self.screen == "update":
+            self._update_input(i)
         elif self.screen == "desktop":
             if i.pressed("home") or i.pressed("stop"):
                 self.go_home()
@@ -3064,12 +3290,13 @@ class Workstation:
             self._activate_dock(slot)
             return
         edge = 5 * self.layout.font_w           # the "<"/">" hit zone (40px at fs=1)
-        for i in range(len(self._SETTINGS_ROWS)):
+        rows = self._settings_rows()
+        for i in range(len(rows)):
             x, y, w, h = self._settings_row_rect(i)
             if _in(px, py, (x, y, w, h)):
                 self.set_msel = i
-                if self._SETTINGS_ROWS[i][2] == "action":
-                    self.open_theme()           # EDIT ICONS: a tap anywhere opens it
+                if rows[i][2] == "action":
+                    self._activate_settings_action(rows[i][0])  # EDIT ICONS / UPDATE FW
                     return
                 # left third = "<" (decrement), right third = ">" (increment).
                 if px >= x + w - edge:
@@ -3115,6 +3342,8 @@ class Workstation:
             self._launcher_pointer(px, py, click)
         elif self.screen == "settings":
             self._settings_pointer(px, py, click)
+        elif self.screen == "update":
+            self._update_pointer(px, py, click)
         elif self.screen == "desktop":
             px, py = gx, gy
             # While a cart runs the unified TOP BAR (HOME, EDIT/CODE, PAINT, MAP,
@@ -4280,6 +4509,11 @@ class Workstation:
         if self.screen in ("launcher", "settings") and self._wp_live \
                 and self._wp_update is not None and self._wp_draw is not None and dt > 0:
             return True
+        # A firmware install (#53) advances a chunk per frame; "done" runs a short
+        # reboot countdown. Both must keep redrawing so the progress bar animates and
+        # the reset() fires without waiting on input.
+        if self.screen == "update" and self._upd_phase in ("install", "done"):
+            return True
         # Transient overlays redraw while they're up.
         if self._confetti_until and _ticks_diff(self._confetti_until, _ticks_ms()) > 0:
             return True
@@ -4326,6 +4560,9 @@ class Workstation:
             self._draw_desktop_home(dt)
         elif self.screen == "settings":
             self._draw_settings(dt)
+        elif self.screen == "update":
+            self._pump_update(dt)          # advance the install / reboot countdown
+            self._draw_update(dt)
         elif self.screen == "desktop":
             if self.cart_error is None:
                 # Resolve this frame's keyboard edge for the cart's key()/keyp():
@@ -4629,7 +4866,7 @@ class Workstation:
         self._glyph("trophy", (sa[0] - 2, sa[1], 14 * fs, 14 * fs), NAMES["yellow"], cv)
         cv.print(str(self.ach.count()), sa[0] + 13 * fs, sa[1] + 4, NAMES["white"], 1)
         self._mini_btn("X", lay.set_back, NAMES["red"], cv)
-        for i in range(len(self._SETTINGS_ROWS)):
+        for i in range(len(self._settings_rows())):
             self._draw_settings_row(i)
         self._draw_status_strip("settings")
         self._draw_dock("settings")
@@ -4638,7 +4875,7 @@ class Workstation:
         cv = self.sys_canvas
         lay = self.layout
         fw = lay.font_w
-        key, label, kind = self._SETTINGS_ROWS[i]
+        key, label, kind = self._settings_rows()[i]
         x, y, w, h = self._settings_row_rect(i)
         sel = (i == self.set_msel)
         if sel:
@@ -4646,11 +4883,12 @@ class Workstation:
         fg = NAMES["white"] if sel else NAMES["light_grey"]
         cv.print(label, x + 4, y + 5, fg, 1)
         if kind == "action":
-            # An action row (EDIT ICONS): no value/stepper -- just an OPEN affordance
-            # at the right so a tap (or A) is the obvious activate. paint glyph cues
-            # what it does (repaint the chrome icons).
-            self._glyph("paint", (x + w - 18 * lay.fs, y + 2, 14 * lay.fs, 14 * lay.fs),
-                        NAMES["green"], cv)
+            # An action row (EDIT ICONS / UPDATE FW): no value/stepper -- just an OPEN
+            # affordance at the right so a tap (or A) is the obvious activate. The glyph
+            # cues what it does (paint = repaint the chrome icons; run = go install).
+            g = "run" if key == "update" else "paint"
+            c = NAMES["yellow"] if key == "update" else NAMES["green"]
+            self._glyph(g, (x + w - 18 * lay.fs, y + 2, 14 * lay.fs, 14 * lay.fs), c, cv)
             return
         # < value > stepper at the right (the chevrons print at double size = 2*fw).
         cv.print("<", x + w - 11 * fw - 2, y + 5, NAMES["yellow"], 2)

@@ -359,6 +359,49 @@ OpenOCD/JTAG flashing requires the board to expose the ESP USB-JTAG interface
 (`303a:1001`) and host write permission to the raw USB node. The current running
 firmware enumerates as CDC-only `303a:4001`, so OpenOCD is not the default loop.
 
+## OTA firmware updates (#53)
+
+The device can flash a new firmware image **from the SD card** — no USB cable after
+the first install.
+
+How it works:
+
+- The build now ships a **dual-OTA partition table** (`build.sh --ota` →
+  `nvs + otadata + phy_init + ota_0 + ota_1 + vfs`, both app slots 4MB on the 16MB
+  part). A new image is written to the **inactive** slot, then `set_boot()` + reset
+  ping-pongs between `ota_0`/`ota_1` — the running slot is never touched, so a
+  failed/half-written update cannot brick the board.
+- **Rollback is the safety net.** `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`: a
+  freshly-flashed app that never calls `esp32.Partition.mark_app_valid_cancel_rollback()`
+  is reverted by the bootloader on the next boot. `run_desktop` calls it once the
+  desktop is up, so a bad image self-heals back to the previous slot.
+- The image source is `/sd/update/*.bin` (the **app-only** image — i.e.
+  `kidcode_micropython_tdeck.bin`, *not* the merged `..._full_*_0x0.bin`). SD shares
+  the panel SPI host, so the updater reads through the same `with_sd_live` path as
+  cart saves (see the SD section above). Device code: `modules/kc_ota.py`
+  (`OtaUpdater`); the UI is the shared console's **Settings → UPDATE FW** screen,
+  which drives the install one 32K chunk per frame with a progress bar.
+
+### One-time switch to OTA
+
+Switching the partition layout means the **first** flash of an OTA build must be a
+full-image USB flash that also rewrites the partition table and clears `otadata`:
+
+```bash
+KIDCODE_SKIP_VFS_BOOT=1 make firmware-build-lilygo-micropython
+make firmware-flash-lilygo-micropython-full-erase PORT=/dev/ttyACM0   # erases + lays down ota_0
+```
+
+After that, updates are wireless/SD: copy `kidcode_micropython_tdeck.bin` to
+`/sd/update/` on the card, then on the device open **Settings → UPDATE FW → INSTALL**.
+The device flashes the inactive slot and reboots into the new firmware. (App-only USB
+reflashes during dev now target the `ota_0` offset `0x20000` via `MPY_APP_OFFSET`; the
+`-full`/`-full-erase` images already bake the correct offsets.)
+
+> Status: host-tested (build wiring, updater API, full confirm→install→done UI). The
+> on-hardware flash/reboot/rollback pass is still **TODO** — verify on a real T-Deck
+> before relying on it.
+
 ## Current limitations
 
 - This is a spike, not the production runtime.
