@@ -161,6 +161,43 @@ def test_map_mget_mset_via_make_api():
     assert cv.pix(8, 8) == 11                # tile 3 at cell (1,1), pixel (0,0) -> 8,8
 
 
+def test_make_layer_and_draw_layer_via_make_api():
+    # #54 scroll engine through the cart-facing api: make_layer() returns a draw
+    # target (a wider off-screen layer) carrying the full verb set; draw_layer()
+    # window-copies its visible region into the screen canvas at a CLAMPED camera.
+    from runtime import host_app
+
+    class _Input:
+        def held(self, n):
+            return False
+
+        def pressed(self, n):
+            return False
+
+    cv = Canvas(20, 16)
+    api = host_app.make_api(cv, _Input(), {})
+    bg = api["make_layer"](40, 16)           # a 2x-wide world
+    assert (bg.W, bg.H) == (40, 16)
+    bg.rect(0, 0, 20, 16, 8)                  # left half = 8
+    bg.rect(20, 0, 20, 16, 11)               # right half = 11
+
+    cv.cls(0)
+    api["draw_layer"](bg, 0, 0)              # window at world x=0 -> all left half (8)
+    assert set(cv.buf) == {8}
+
+    cv.cls(0)
+    api["draw_layer"](bg, 20, 0)            # window at world x=20 -> all right half (11)
+    assert set(cv.buf) == {11}
+
+    cv.cls(0)
+    api["draw_layer"](bg, 999, 0)          # past the edge -> clamped to x=20 -> 11
+    assert set(cv.buf) == {11}
+
+    cv.cls(0)
+    api["draw_layer"](bg, -5, 0)           # negative -> clamped to x=0 -> 8
+    assert set(cv.buf) == {8}
+
+
 def test_spr_batch_matches_individual_spr_calls():
     # spr_batch (#43) must draw the SAME pixels as the equivalent sequence of spr()
     # calls (the device collapses it to one C call; the host is the per-item reference,
