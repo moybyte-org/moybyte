@@ -41,7 +41,6 @@ TITLE_TO_FOLDER = {
     "Tiny Runner": "tiny_runner",
     "Hop Quest": "platformer",
     "Battle City": "battle_city",
-    "Scroll Demo": "scroll_demo",
     "Tap Only Red": "tap_red",
     "Tap Game": "tap_game",
     "Beeper": "beeper",

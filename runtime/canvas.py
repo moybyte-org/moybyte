@@ -344,50 +344,6 @@ class Canvas:
 
         _font.draw(emit, s, x, y)
 
-    # -- scroll layers (#54) -------------------------------------------------
-
-    def new_layer(self, w, h):
-        """A blank, wider off-screen canvas the cart pre-renders a level into ONCE,
-        then window-copies to the screen per frame (draw_layer -> blit_window_from).
-        Same Canvas type + palette, so every draw verb (map/spr/rect/circ/...) works on
-        it pixel-identically -- the whole point of the scroll engine: replace a
-        per-frame full-background re-render with a flat memory copy."""
-        return Canvas(int(w), int(h), self.palette)
-
-    def blit_window_from(self, layer, cam_x=0, cam_y=0):
-        """Copy the visible self.w x self.h window of `layer` (a wider pre-rendered
-        Canvas) into this canvas at offset (cam_x, cam_y) -- a flat per-row index copy,
-        the host parity of the device kc_gfx.blit_window (which copies RGB565). Clamped
-        to the source bounds exactly like the C kernel; draw_layer keeps cam in range so
-        the full window always lands. Overwrites (no transparency): it's the background,
-        drawn first each frame, and it erases last frame's sprites for free."""
-        cam_x = int(cam_x)
-        cam_y = int(cam_y)
-        if cam_x < 0:
-            cam_x = 0
-        if cam_y < 0:
-            cam_y = 0
-        dst = self.buf
-        src = layer.buf
-        dw = self.w
-        dh = self.h
-        src_w = layer.w
-        if src_w <= 0 or dw <= 0 or dh <= 0:
-            return
-        if cam_x + dw > src_w:            # clamp window to source width
-            dw = src_w - cam_x
-        if dw <= 0:
-            return
-        src_rows = len(src) // src_w
-        if cam_y + dh > src_rows:         # clamp window to source height
-            dh = src_rows - cam_y
-        if dh <= 0:
-            return
-        for row in range(dh):
-            d0 = row * dw
-            s0 = (cam_y + row) * src_w + cam_x
-            dst[d0:d0 + dw] = src[s0:s0 + dw]
-
     # -- output --------------------------------------------------------------
 
     def to_rgb888(self):

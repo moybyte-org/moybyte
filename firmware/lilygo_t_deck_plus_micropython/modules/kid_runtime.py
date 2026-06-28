@@ -522,97 +522,6 @@ class DeviceCanvas:
         # across backends. clip + text is a rare combo; the host clips text per-pixel.
         self._fb.text(str(s), int(x) - self._cam_x, int(y) - self._cam_y, self._col(c))
 
-    # -- scroll layers (#54) -------------------------------------------------
-
-    def new_layer(self, w, h):
-        # A blank, wider RGB565 off-screen canvas the cart pre-renders a level into
-        # ONCE, then window-copies per frame (draw_layer -> blit_window_from). Built
-        # through a tiny _LayerComp so it reuses DeviceCanvas.__init__ verbatim and
-        # shares this canvas's native kc_gfx kernel -- so map/spr/rect/... draw into it
-        # pixel-identically. The buffer is a plain bytearray (the gc heap is PSRAM here,
-        # so a 2x-screen 614KB layer fits); Stage 2 (GDMA) switches it to kc_alloc DMA.
-        return DeviceCanvas(_LayerComp(int(w), int(h), self._gfx))
-
-    def blit_window_from(self, layer, cam_x=0, cam_y=0):
-        # Copy the visible self.w x self.h window of `layer` into the framebuffer at
-        # (cam_x, cam_y): native kc_gfx.blit_window (one flat per-row memcpy, ~7ms for
-        # a full frame) when present, else a memoryview row-copy fallback (no framebuf,
-        # so it also runs under the host parity test). Overwrites -- it's the background,
-        # drawn first each frame, erasing last frame's sprites for free.
-        cam_x = int(cam_x)
-        cam_y = int(cam_y)
-        if cam_x < 0:
-            cam_x = 0
-        if cam_y < 0:
-            cam_y = 0
-        if self._gfx is not None:
-            self._gfx.blit_window(self._buf, self.w, self.h,
-                                  layer._buf, layer.w, cam_x, cam_y)
-            return
-        d = memoryview(self._buf).cast("H")
-        s = memoryview(layer._buf).cast("H")
-        dw = self.w
-        dh = self.h
-        src_w = layer.w
-        if src_w <= 0 or dw <= 0 or dh <= 0:
-            return
-        if cam_x + dw > src_w:
-            dw = src_w - cam_x
-        if dw <= 0:
-            return
-        src_rows = len(s) // src_w
-        if cam_y + dh > src_rows:
-            dh = src_rows - cam_y
-        if dh <= 0:
-            return
-        for row in range(dh):
-            d0 = row * dw
-            s0 = (cam_y + row) * src_w + cam_x
-            d[d0:d0 + dw] = s[s0:s0 + dw]
-
-
-class _LayerComp:
-    """Minimal compositor stand-in so DeviceCanvas can back a scroll layer (#54): a
-    fresh RGB565 buffer of the requested size sharing the parent's kc_gfx kernel. No
-    flush / double-buffer (a layer is a draw SOURCE, never flushed), so back_buffer()
-    just returns the one buffer -- a sync_back() on a layer is a harmless no-op."""
-
-    def __init__(self, w, h, gfx):
-        self._w = w
-        self._h = h
-        self._buf = bytearray(w * h * 2)
-        self._gfx = gfx
-
-    def size(self):
-        return (self._w, self._h)
-
-    def framebuffer(self):
-        return self._buf
-
-    def back_buffer(self):
-        return self._buf
-
-    def gfx(self):
-        return self._gfx
-
-
-class _Layer:
-    """A scroll background (#54): a wider off-screen canvas the cart pre-renders a
-    level into ONCE, then window-copies to the screen per frame via draw_layer. Exposes
-    the draw verbs (sheet/tilemap-aware, pixel-identical to the main api) bound to its
-    OWN canvas, plus W/H. Built by the api's make_layer(w, h)."""
-
-    _VERBS = ("cls", "pix", "line", "rect", "rectb", "circ", "circb",
-              "spr", "spr_batch", "map", "mget", "mset", "print",
-              "camera", "clip", "pal", "palt")
-
-    def __init__(self, canvas, ns):
-        self._canvas = canvas
-        self.W = canvas.w
-        self.H = canvas.h
-        for k in _Layer._VERBS:
-            setattr(self, k, ns[k])
-
 
 def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
              pmem=None, wifi=None):
@@ -773,43 +682,12 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
             return 0
         return pmem.cell(index, value)
 
-    def make_layer(w, h):
-        # make_layer(w, h) -> a scroll background (#54): a wider off-screen canvas the
-        # cart pre-renders a level into ONCE (with the SAME verbs -- cls/map/spr/rect/
-        # circ/print/...), then window-copies to the screen each frame via draw_layer.
-        # Replaces a per-frame full-background re-render (map() over a scrolling level,
-        # ~12-14ms) with a flat memory copy (~7ms) -- the lever for ~60fps scrollers.
-        lc = canvas.new_layer(w, h)
-        lns = make_api(lc, input, config, sheet, audio, tilemap, pmem, wifi)
-        return _Layer(lc, lns)
-
-    def draw_layer(layer, cam_x=0, cam_y=0):
-        # draw_layer(layer, cam_x, cam_y): blit the visible W x H window of `layer` at
-        # the camera offset into the framebuffer (this frame's background; draw actors
-        # on top afterwards). The camera is clamped to [0, layer - screen] so the full
-        # window always lands -- no torn edge at the world boundary.
-        lc = layer._canvas
-        cx = int(cam_x)
-        cy = int(cam_y)
-        maxx = lc.w - canvas.w
-        maxy = lc.h - canvas.h
-        if cx < 0:
-            cx = 0
-        elif maxx > 0 and cx > maxx:
-            cx = maxx
-        if cy < 0:
-            cy = 0
-        elif maxy > 0 and cy > maxy:
-            cy = maxy
-        canvas.blit_window_from(lc, cx, cy)
-
     ns = {
         "W": canvas.w, "H": canvas.h,
         "cls": canvas.cls, "pix": canvas.pix,
         "line": canvas.line, "rect": canvas.rect, "rectb": canvas.rectb,
         "circ": canvas.circ, "circb": canvas.circb, "spr": spr,
         "spr_batch": spr_batch,
-        "make_layer": make_layer, "draw_layer": draw_layer,
         "map": map_, "mget": mget, "mset": mset,
         "print": canvas.print, "touch": touch, "mouse": mouse,
         "clip": canvas.clip, "camera": canvas.camera,
