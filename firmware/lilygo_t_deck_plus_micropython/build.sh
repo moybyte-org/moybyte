@@ -228,6 +228,19 @@ esac
 
 case "${BOARD_CONFIG}" in
   generic)
+    # KidCode OTA (#53): --ota makes the lvgl_micropython builder emit a DUAL-APP
+    # partition table (nvs + otadata + phy_init + ota_0 + ota_1 + vfs) instead of a
+    # single `factory` app. That is what lets the device flash a new image to the
+    # INACTIVE slot from SD and ping-pong between ota_0/ota_1 (esp_ota / esp32.Partition).
+    # --partition-size pins BOTH slots at 4MB (the app is ~3.3MB and growing); vfs takes
+    # the ~8MB that remains on the 16MB part (carts live on SD, so a smaller internal vfs
+    # is fine). Rollback is already on (sdkconfig.base CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE
+    # =y): a freshly-flashed app that never calls
+    # esp32.Partition.mark_app_valid_cancel_rollback() is auto-reverted by the bootloader
+    # on the next boot. The device-side updater is modules/kc_ota.py; see the README OTA
+    # section. NOTE: switching to OTA changes the partition layout, so the first flash of
+    # this build MUST be a full-image USB flash (make firmware-flash-...-full-erase) --
+    # an app-only reflash over the old single-factory layout will not boot.
     BUILD_COMMAND=(
       "${BUILD_PYTHON}" make.py esp32
       BOARD=ESP32_GENERIC_S3
@@ -236,6 +249,7 @@ case "${BOARD_CONFIG}" in
       FROZEN_MANIFEST="${MANIFEST}"
       --flash-size=16
       --partition-size=4194304
+      --ota
       "${REPL_ARGS[@]}"
       --task-stack-size=16384
     )
@@ -309,6 +323,26 @@ else
   ESPTOOL_PY="python3"
 fi
 
+# KidCode OTA (#53): with --ota the bootable app partition is `ota_0`, which no longer
+# sits at the legacy 0x10000 -- otadata is inserted before it, shifting it up (0x20000 on
+# our 16MB table). Derive the real ota_0 offset from the generated partition table so the
+# merged full image lands the app in the slot the bootloader will actually boot.
+# Falls back to `factory` then 0x10000 so a non-OTA build still merges correctly.
+APP_OFFSET="0x10000"
+GEN_PARTITIONS="${UPSTREAM_DIR}/build/partitions.csv"
+if [ -f "${GEN_PARTITIONS}" ]; then
+  echo "Generated partition table (${GEN_PARTITIONS}):"
+  cat "${GEN_PARTITIONS}"
+  _app_off="$(awk -F',' '/^[[:space:]]*ota_0[[:space:]]*,/ { gsub(/[[:space:]]/, "", $4); print $4; exit }' "${GEN_PARTITIONS}")"
+  if [ -z "${_app_off}" ]; then
+    _app_off="$(awk -F',' '/^[[:space:]]*factory[[:space:]]*,/ { gsub(/[[:space:]]/, "", $4); print $4; exit }' "${GEN_PARTITIONS}")"
+  fi
+  if [ -n "${_app_off}" ]; then
+    APP_OFFSET="${_app_off}"
+  fi
+fi
+echo "Merging full image with app (ota_0) offset ${APP_OFFSET}"
+
 "${ESPTOOL_PY}" -m esptool --chip esp32s3 merge_bin \
   -o "${FULL_DIO_BIN}" \
   --flash_mode dio \
@@ -316,7 +350,7 @@ fi
   --flash_freq 80m \
   0x0 "${BOOTLOADER_BIN}" \
   0x8000 "${PARTITION_BIN}" \
-  0x10000 "${MPY_BUILD_DIR}/micropython.bin"
+  "${APP_OFFSET}" "${MPY_BUILD_DIR}/micropython.bin"
 echo "Wrote full flash image: ${FULL_DIO_BIN}"
 cp "${FULL_DIO_BIN}" "${CURRENT_FULL_DIO_BIN}"
 echo "Updated current full DIO alias: ${CURRENT_FULL_DIO_BIN}"
@@ -328,7 +362,7 @@ echo "Updated current full DIO alias: ${CURRENT_FULL_DIO_BIN}"
   --flash_freq 80m \
   0x0 "${BOOTLOADER_BIN}" \
   0x8000 "${PARTITION_BIN}" \
-  0x10000 "${MPY_BUILD_DIR}/micropython.bin"
+  "${APP_OFFSET}" "${MPY_BUILD_DIR}/micropython.bin"
 echo "Wrote full flash image: ${FULL_QIO_BIN}"
 cp "${FULL_QIO_BIN}" "${CURRENT_FULL_QIO_BIN}"
 echo "Updated current full QIO alias: ${CURRENT_FULL_QIO_BIN}"

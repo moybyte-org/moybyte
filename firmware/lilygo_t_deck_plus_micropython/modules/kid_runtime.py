@@ -1715,6 +1715,17 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
         comp.sync()
         return kidcode_sd.with_sd_live(fn)
     ws._with_sd = _with_sd_synced
+    # OTA firmware update (#53): the shared console's Settings -> UPDATE FW row flashes a
+    # new app image from /sd/update into the inactive OTA slot (esp32.Partition) and
+    # reboots. SD shares the panel SPI host, so the updater reads through the SAME
+    # _with_sd_synced wrapper as cart saves (drain panel DMA -> native single-bus mount).
+    # Available only on an --ota build (running slot is ota_0/ota_1); on a legacy single-
+    # factory image available() is False and the row never shows.
+    try:
+        import kc_ota
+        ws.updater = kc_ota.OtaUpdater(_with_sd_synced)
+    except Exception as exc:
+        print("KidCode: OTA updater unavailable:", exc)
     ws.pointer = pointer
     ws.keyboard = keyboard        # lets the code editor switch to text (ASCII) mode
     # WiFi (#38): one SYSTEM service (network.WLAN STA) shared across carts, so the
@@ -1754,6 +1765,18 @@ def run_desktop(handler, prefetched=None, fps_cap=30):
     _diag_log("boot", "desktop running kb=%d ball=%d touch=%d"
               % (1 if keyboard.available else 0, 1 if ball.available else 0,
                  1 if touch.available else 0), diag)
+
+    # OTA rollback confirm (#53): reaching here means this image booted, mounted the
+    # panel + SD + keyboard, and loaded the desktop -- a strong "healthy" signal. Mark
+    # the running app valid so the bootloader cancels the pending rollback it would
+    # otherwise trigger on the next reset (CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE). No-op
+    # if the image was already confirmed or this is a non-OTA build.
+    if getattr(ws, "updater", None) is not None:
+        try:
+            if ws.updater.mark_valid():
+                _diag_log("ota", "marked app valid (slot %s)" % ws.updater.slot(), diag)
+        except Exception as exc:
+            _diag_log("ota", "mark_valid failed: %s" % exc, diag)
 
     import gc
     gc.collect()                                # defrag after the heavy boot so the LCD

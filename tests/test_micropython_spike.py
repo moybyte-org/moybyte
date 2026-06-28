@@ -41,6 +41,11 @@ def test_micropython_spike_build_uses_lvgl_micropython_and_frozen_modules():
     assert "export IDF_PATH" in build
     assert "export.sh" in build
     assert "--partition-size=4194304" in build
+    # OTA (#53): the build asks the lvgl_micropython builder for a dual-app partition
+    # table (otadata + ota_0 + ota_1), and merges the full image at the derived ota_0
+    # offset rather than the legacy hardcoded 0x10000.
+    assert "--ota" in build
+    assert "${APP_OFFSET}" in build
     assert "MPY_BUILD_DIR" in build
     assert "micropython.bin" in build
     assert "full-flash" not in build
@@ -76,7 +81,10 @@ def test_micropython_spike_makefile_has_flash_and_monitor_targets():
     assert "MPY_FULL_BIN" in makefile
     assert "bootloader/bootloader.bin" in makefile
     assert "partition_table/partition-table.bin" in makefile
-    assert "0x10000 $(MPY_APP_BIN)" in makefile
+    # OTA (#53): the app-only flash targets write to the ota_0 offset (0x20000 on the
+    # dual-OTA table), not the legacy 0x10000 -- overridable via MPY_APP_OFFSET.
+    assert "MPY_APP_OFFSET ?= 0x20000" in makefile
+    assert "$(MPY_APP_OFFSET) $(MPY_APP_BIN)" in makefile
     assert "0x0 $(MPY_FULL_BIN)" in makefile
     assert "tools/esptool_no_modem.py" in makefile
     assert "--before default_reset --after hard_reset" in makefile
@@ -86,6 +94,57 @@ def test_micropython_spike_makefile_has_flash_and_monitor_targets():
     assert "rtscts" in wrapper
     assert "False" in wrapper
     assert "ResetStrategy._setDTRandRTS" in wrapper
+
+
+def test_ota_updater_module_flashes_inactive_slot_from_sd():
+    # OTA (#53): the device updater writes an SD .bin into the inactive OTA slot via
+    # esp32.Partition (block-erase writeblocks) and reboots; rollback is the safety net.
+    ota = (ROOT / "modules" / "kc_ota.py").read_text(encoding="utf-8")
+
+    assert "class OtaUpdater" in ota
+    assert 'UPDATE_DIR = "/sd/update"' in ota
+    assert "BLOCK = 4096" in ota
+    assert "IMAGE_MAGIC = 0xE9" in ota
+    # capability + the esp_ota partition dance
+    assert "def available" in ota
+    assert "esp32.Partition.RUNNING" in ota
+    assert "get_next_update()" in ota
+    assert ".writeblocks(" in ota
+    assert ".set_boot()" in ota
+    assert "mark_app_valid_cancel_rollback()" in ota
+    # SD is touched only through the injected (panel-DMA-draining) wrapper
+    assert "self._with_sd(" in ota
+    # stepwise install API the shared console drives
+    assert "def begin(self" in ota
+    assert "def step(self" in ota
+    assert "def finish(self" in ota
+    assert "machine.reset()" in ota
+
+
+def test_ota_updater_wired_into_run_desktop_with_rollback_confirm():
+    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+
+    assert "import kc_ota" in runtime
+    assert "ws.updater = kc_ota.OtaUpdater(_with_sd_synced)" in runtime
+    # the healthy-boot rollback confirm
+    assert "ws.updater.mark_valid()" in runtime
+
+
+def test_console_settings_has_firmware_update_screen():
+    # The shared console owns all OTA pixels (host == device): a Settings UPDATE FW row
+    # (shown only when an updater is injected and OTA-capable) drives a confirm/progress
+    # screen. The host injects no updater, so the row never appears there.
+    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+
+    assert "self.updater = None" in console
+    assert "def _update_available" in console
+    assert "def _settings_rows" in console
+    assert '"UPDATE FW"' in console
+    assert "def open_update" in console
+    assert "def _pump_update" in console
+    assert "def _draw_update" in console
+    assert 'self.screen == "update"' in console
+    assert "def _activate_settings_action" in console
 
 
 def test_micropython_spike_uses_tdeck_native_panel_geometry():
