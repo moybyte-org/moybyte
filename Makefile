@@ -24,8 +24,11 @@ MPY_FLASH_MODE ?= dio
 
 # OTA online update (#53 Phase 3): host a manifest + .bin for Settings -> UPDATE ONLINE.
 OTA_PORT ?= 8000
+# Two-channel publish (#53): stage artifacts under OTA_ROOT/<channel>/ and serve that
+# dir (the systemd host, tools/kidcode-ota.service) so the device pulls stable or beta.
+OTA_ROOT ?= $(HOME)/.kidcode-ota
 
-.PHONY: setup test run-example run-headless compile-blocks doctor check-portable pack-example export-lilygo-example device-doctor device-port firmware-bundle-lilygo firmware-build-lilygo firmware-build-lilygo-micropython firmware-sim-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-upload-lilygo firmware-monitor-lilygo firmware-smoke-check-lilygo firmware-smoke-lilygo ota-manifest ota-serve
+.PHONY: setup test run-example run-headless compile-blocks doctor check-portable pack-example export-lilygo-example device-doctor device-port firmware-bundle-lilygo firmware-build-lilygo firmware-build-lilygo-micropython firmware-sim-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-upload-lilygo firmware-monitor-lilygo firmware-smoke-check-lilygo firmware-smoke-lilygo ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install
 
 setup:
 	$(SYSTEM_PYTHON) -m venv --system-site-packages $(VENV)
@@ -72,6 +75,38 @@ ota-manifest:
 # Serve dist/ (the .bin + latest.json) over plain HTTP for the device to pull from.
 ota-serve:
 	cd $(MPY_FW_DIR)/dist && $(PYTHON) -m http.server $(OTA_PORT)
+
+# Publish the CURRENT working tree (uncommitted OK) as a BETA build the device can pull
+# over WiFi: build with the unstable channel stamp, then copy the image + a matching
+# manifest into OTA_ROOT/unstable/. No commit, no PC needed by the tester -- on the
+# device: Settings -> CHANNEL = BETA -> UPDATE ONLINE. The beta version is the build
+# epoch, so every publish reads as newer than the last.
+ota-publish-unstable:
+	KIDCODE_SKIP_VFS_BOOT=1 KIDCODE_OTA_CHANNEL=unstable $(MAKE) firmware-build-lilygo-micropython
+	$(PYTHON) tools/gen_ota_manifest.py --root $(OTA_ROOT) $(if $(OTA_BASE_URL),--base-url $(OTA_BASE_URL)) --port $(OTA_PORT)
+
+# Publish a STABLE build (normally from master) into OTA_ROOT/stable/.
+ota-publish-stable:
+	KIDCODE_SKIP_VFS_BOOT=1 KIDCODE_OTA_CHANNEL=stable $(MAKE) firmware-build-lilygo-micropython
+	$(PYTHON) tools/gen_ota_manifest.py --root $(OTA_ROOT) $(if $(OTA_BASE_URL),--base-url $(OTA_BASE_URL)) --port $(OTA_PORT)
+
+# Serve OTA_ROOT (both channels) over HTTP for the device. Foreground; for a persistent
+# host use the systemd --user service below.
+ota-host:
+	mkdir -p $(OTA_ROOT)
+	$(PYTHON) -m http.server $(OTA_PORT) --directory $(OTA_ROOT)
+
+# Install + start the OTA host as a systemd --user service so it stays up while the PC
+# is on (linger keeps it across logout). Run this yourself once; re-run after changing
+# OTA_ROOT/OTA_PORT. (loginctl enable-linger may prompt for sudo.)
+ota-serve-install:
+	mkdir -p $(OTA_ROOT) $(HOME)/.config/systemd/user
+	sed -e 's#@PYTHON@#$(abspath $(PYTHON))#g' -e 's#@ROOT@#$(OTA_ROOT)#g' -e 's#@PORT@#$(OTA_PORT)#g' \
+	    tools/kidcode-ota.service > $(HOME)/.config/systemd/user/kidcode-ota.service
+	systemctl --user daemon-reload
+	systemctl --user enable --now kidcode-ota.service
+	loginctl enable-linger $(USER) || true
+	@echo "OTA host: serving $(OTA_ROOT) on :$(OTA_PORT) (systemd --user kidcode-ota)"
 
 firmware-flash-lilygo-micropython:
 	test -n "$(PORT)"
