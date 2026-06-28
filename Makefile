@@ -10,11 +10,15 @@ MPY_BUILD_DIR ?= $(MPY_FW_DIR)/.build/lvgl_micropython/lib/micropython/ports/esp
 MPY_APP_BIN ?= $(MPY_FW_DIR)/dist/current/kidcode-current-app.bin
 MPY_FULL_BIN ?= $(MPY_FW_DIR)/dist/current/kidcode-current-full-dio-0x0.bin
 # OTA (#53): the bootable app partition is ota_0. With the dual-OTA table it sits at
-# 0x20000 (otadata shifted it up from the legacy 0x10000). The app-only flash targets
-# below write here; the FIRST flash of an OTA build must use -full-erase (rewrites the
-# partition table + clears otadata so the bootloader boots ota_0). Override for a
-# non-OTA single-factory build: make ... MPY_APP_OFFSET=0x10000
+# 0x20000 (otadata shifted it up from the legacy 0x10000). The app-only cable flash
+# below writes here AND clears otadata (MPY_OTADATA_OFFSET) so the bootloader boots the
+# slot we just wrote -- not a stale ota_1 left by a prior SD/OTA update. Override for a
+# non-OTA single-factory build: make ... MPY_APP_OFFSET=0x10000 MPY_OTADATA_OFFSET=
 MPY_APP_OFFSET ?= 0x20000
+# OTA boot selector (otadata) region, erased by the cable flash so the bootloader falls
+# back to ota_0 (no factory partition). Empty -> skip the erase (non-OTA factory build).
+MPY_OTADATA_OFFSET ?= 0x1d000
+MPY_OTADATA_SIZE ?= 0x2000
 
 MPY_FLASH_MODE ?= dio
 
@@ -57,6 +61,7 @@ firmware-build-lilygo-micropython:
 
 firmware-flash-lilygo-micropython:
 	test -n "$(PORT)"
+	@[ -z "$(MPY_OTADATA_OFFSET)" ] || $(IDF_PYTHON) tools/esptool_no_modem.py --chip esp32s3 -p $(PORT) -b 460800 --before default_reset --after no_reset erase_region $(MPY_OTADATA_OFFSET) $(MPY_OTADATA_SIZE)
 	$(IDF_PYTHON) tools/esptool_no_modem.py --chip esp32s3 -p $(PORT) -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size 16MB --flash_freq 80m 0x0 $(MPY_BUILD_DIR)/bootloader/bootloader.bin 0x8000 $(MPY_BUILD_DIR)/partition_table/partition-table.bin $(MPY_APP_OFFSET) $(MPY_APP_BIN)
 
 firmware-flash-lilygo-micropython-no-reset:
