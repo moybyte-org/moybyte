@@ -1473,6 +1473,13 @@ class Workstation:
         # alive (one cached blit per icon), the whole point of moving the bar to sprites.
         self.icon_sheet = None
         self._bar_img_cache = {}      # icon kind -> cached _SheetSprite (or None)
+        # Themeable top bar (Stage 2): True while the PAINT editor is repainting the
+        # SYSTEM icon sheet (Settings -> EDIT ICONS) rather than a cart's sprites.
+        # It changes where SAVE writes (system_icons.kgfx, not the cart) and where
+        # CLOSE/back returns (Settings, not the running cart). menu_view == "theme"
+        # reuses the cart PAINT renderer/input over self.icon_sheet (PaintEditor is
+        # tile-size-agnostic, so the 16x16 IconSheet edits natively).
+        self._editing_icons = False
         self.set_msel = 0             # selected row in the Settings screen
         self.carts_root = None        # SD carts dir (reads); set by run_desktop
         self.cart_error = None        # last cart failure text -> on-canvas error panel
@@ -1944,9 +1951,13 @@ class Workstation:
         ("volume", "VOLUME", "mock-gauge"),
         ("brightness", "BRIGHTNESS", "mock-gauge"),
         ("name", "NAME", "mock-name"),
-        ("theme", "THEME", "mock-choice"),
+        # EDIT ICONS (Stage 2): the one FUNCTIONAL "theme" control -- an action row
+        # that opens the PAINT editor on the system icon sheet so a kid can repaint
+        # the top-bar chrome. The dropdown menu that would otherwise host it is
+        # deferred to #52, so it lives in Settings for now. "action" rows aren't
+        # +/- steppers: any tap / left / right activates them (open_theme).
+        ("icons", "EDIT ICONS", "action"),
     )
-    _MOCK_THEMES = ("day", "night", "candy")
     _MOCK_NAMES = ("ALEX", "SAM", "KIT", "RAE")
 
     def open_settings(self):
@@ -1958,20 +1969,20 @@ class Workstation:
         self._set_text_mode(False)
 
     def settings_adjust(self, d):
-        """Step the selected Settings row by d. Wallpaper applies + persists; the
-        mock rows just move a cosmetic value held in self.system (not acted on)."""
-        key = self._SETTINGS_ROWS[self.set_msel][0]
+        """Step the selected Settings row by d. Wallpaper/font apply + persist; the
+        mock rows just move a cosmetic value held in self.system (not acted on); an
+        "action" row (EDIT ICONS) fires its action regardless of direction."""
+        key, _label, kind = self._SETTINGS_ROWS[self.set_msel]
+        if kind == "action":                    # EDIT ICONS: open the theme editor (#52)
+            self.open_theme()
+            return
         if key == "wallpaper":
             self.cycle_wallpaper(d)
             return
         if key == "font_scale":                 # system-UI font size (#39): live + persisted
             self.cycle_font_scale(d)
             return
-        if key == "theme":
-            cur = self.system.get("theme", self._MOCK_THEMES[0])
-            i = self._MOCK_THEMES.index(cur) if cur in self._MOCK_THEMES else 0
-            self.system["theme"] = self._MOCK_THEMES[(i + d) % len(self._MOCK_THEMES)]
-        elif key == "name":
+        if key == "name":
             cur = self.system.get("name", self._MOCK_NAMES[0])
             i = self._MOCK_NAMES.index(cur) if cur in self._MOCK_NAMES else 0
             self.system["name"] = self._MOCK_NAMES[(i + d) % len(self._MOCK_NAMES)]
@@ -2237,8 +2248,30 @@ class Workstation:
 
     def _open_paint(self):
         self.screen = "menu"
+        self._editing_icons = False        # a CART sheet, not the system theme
         self.paint_status = None
         self.set_menu_view("paint")
+
+    def open_theme(self):
+        """Open the PAINT editor on the SYSTEM icon sheet (Settings -> EDIT ICONS,
+        Stage 2 / #52). The same renderer/input as the cart PAINT flow, but pointed
+        at self.icon_sheet: SAVE persists system_icons.kgfx (not a cart) and CLOSE
+        returns to Settings. Starts from the current theme (the baked default if no
+        system_icons.kgfx exists yet); the first SAVE creates the file."""
+        self._dirty = True                 # screen change repaints (#44)
+        self._editing_icons = True
+        self.paint_status = None
+        self.save_status = None
+        self.screen = "menu"
+        self.menu_view = "theme"
+        # Build a PaintEditor over the icon sheet (PaintEditor is tile-size-agnostic,
+        # so the 16x16 IconSheet edits natively). A fresh editor each open so the
+        # brush/tile state doesn't leak in from a cart paint session.
+        if self.icon_sheet is not None:
+            self.paint = PaintEditor(self.icon_sheet)
+        self._paint_drag = None
+        self._set_text_mode(False)         # paint is pointer-driven, raw/game keyboard
+        self.ach.note("editor", "paint")   # repainting the chrome counts toward Toolbox
 
     def _open_map(self):
         self.screen = "menu"
@@ -2425,6 +2458,44 @@ class Workstation:
             self.cart_error = "Could not save sprites -- " + txt
             print("KidCode save sprites failed:", txt)
 
+    def save_icons(self):
+        """Persist the edited system icon sheet to system_icons.kgfx (Stage 2 / #52),
+        the exact mirror of save_sprites/save_shared_sheet: to_hex -> the SAME SD
+        wrapper the cart-sprite save uses (host: direct write; device: with_sd_live).
+        Then invalidate the bar caches so the NEXT bar draw shows the new pixels live:
+        set_icon_sheet drops the per-kind _SheetSprite cache (and with it the device's
+        per-Image RGB565 blit cache), and the sheet's gen already bumped on each pset
+        so any gen-keyed cache rebuilds too. Surfaces a save status like the cart
+        paint editor. A bad store/no SD root is a no-op (writes deferred)."""
+        if not (self.icon_sheet and self.carts_root and self.can_manage):
+            return
+        hexs = self.icon_sheet.to_hex()
+        try:
+            self._with_sd(lambda: self.carts_store.save_system_icons(hexs, self.carts_root))
+            self.icon_sheet.dirty = False
+            self.save_status = "SAVED"
+            # Re-adopt the (same) sheet so the bar's per-kind image cache is dropped and
+            # the next _draw_status_strip rebuilds its sprites from the freshest pixels.
+            self.set_icon_sheet(self.icon_sheet)
+            self.ach.note("paint_save")         # "Little Artist": a theme saved (#21)
+        except Exception as exc:  # noqa: BLE001
+            # Mirror save_sprites: a failed save must be VISIBLE on device (no serial in
+            # the run loop), not silent. _err_text-guarded so a weird __str__ can't escape.
+            txt = _err_text(exc)
+            self.save_status = "SAVE FAILED"
+            self.cart_error = "Could not save icons -- " + txt
+            print("KidCode save icons failed:", txt)
+
+    def _leave_theme(self):
+        """CLOSE/back from the theme editor: return to Settings (not a cart/desktop --
+        the theme editor was opened from there). Drops the editor + clears the
+        editing-icons flag so the cart PAINT flow is untouched next time."""
+        self._dirty = True                 # screen change repaints (#44)
+        self._editing_icons = False
+        self.paint = None
+        self._paint_drag = None
+        self.screen = "settings"
+
     def save_map(self):
         # Persist the cart's tilemap to map.kmap (#32) -- the exact mirror of
         # save_sprites (to_hex -> SD wrapper -> save_map). The running cart already
@@ -2536,6 +2607,7 @@ class Workstation:
         self._set_text_mode(False)    # restore the game-button keyboard mode
         self.editor = None
         self.paint = None
+        self._editing_icons = False    # never carry the theme-editing flag home
         self.mapedit = None
         self.blocks_ed = None
         self.blk_menu = None
@@ -2799,6 +2871,9 @@ class Workstation:
                 self.settings_adjust(-1)
             if i.pressed("right"):
                 self.settings_adjust(1)
+            if i.pressed("a") or i.pressed("run"):  # activate an action row (EDIT ICONS)
+                if self._SETTINGS_ROWS[self.set_msel][2] == "action":
+                    self.open_theme()
             if i.pressed("b") or i.pressed("home") or i.pressed("stop"):
                 self.go_home()
         elif self.screen == "desktop":
@@ -2815,6 +2890,13 @@ class Workstation:
                 return
             if self.menu_view == "paint":
                 return                         # paint is pointer/touch-driven
+            if self.menu_view == "theme":
+                # EDIT ICONS: pointer/touch-driven like PAINT; B closes back to Settings.
+                if i.pressed("b"):
+                    self._leave_theme()
+                elif i.pressed("home"):
+                    self.go_home()
+                return
             if self.menu_view == "map":
                 # The d-pad pans the visible map window (the grid is bigger than the
                 # screen); B leaves (#37). Painting stays pointer/touch-driven.
@@ -2973,6 +3055,9 @@ class Workstation:
             x, y, w, h = self._settings_row_rect(i)
             if _in(px, py, (x, y, w, h)):
                 self.set_msel = i
+                if self._SETTINGS_ROWS[i][2] == "action":
+                    self.open_theme()           # EDIT ICONS: a tap anywhere opens it
+                    return
                 # left third = "<" (decrement), right third = ">" (increment).
                 if px >= x + w - edge:
                     self.settings_adjust(1)
@@ -3060,12 +3145,13 @@ class Workstation:
                         self.editor.place((px - _CODE_X0) // 8,
                                           (py - _CODE_Y0) // _CODE_LH)
                 return
-            if self.menu_view == "paint":
+            if self.menu_view in ("paint", "theme"):
                 # A tap (click) routes through _paint_click (grid OR buttons). A
                 # held drag with no fresh click keeps painting the grid stroke so
                 # press-and-move draws a continuous line -- the same path for a host
                 # mouse drag and a device touch drag (both = pointer.down + moving
-                # position). Releasing resets the stroke origin (#30).
+                # position). Releasing resets the stroke origin (#30). The theme editor
+                # (EDIT ICONS) reuses this exact path over the icon sheet.
                 if click:
                     self._paint_click(px, py)
                 elif p.down:
@@ -3184,14 +3270,16 @@ class Workstation:
             pe.select(1)
         elif _in(px, py, _PAINT_SIZE):         # cycle 1x1 / 2x2 / 3x3 (#30)
             pe.cycle_size()
-        elif _in(px, py, _PAINT_GET):          # import the tile from the shared sheet
-            self.share_tile_get()
-        elif _in(px, py, _PAINT_PUT):          # save the tile to the shared sheet
-            self.share_tile_put()
+        elif _in(px, py, _PAINT_GET) and not self._editing_icons:
+            self.share_tile_get()              # import the tile from the shared sheet
+        elif _in(px, py, _PAINT_PUT) and not self._editing_icons:
+            self.share_tile_put()              # save the tile to the shared sheet
         elif _in(px, py, _PAINT_SAVE):
-            self.save_sprites()
+            # SAVE persists the SYSTEM icon theme (EDIT ICONS) or the cart's sprites.
+            self.save_icons() if self._editing_icons else self.save_sprites()
         elif _in(px, py, _PAINT_CLOSE):
-            self._leave_menu()
+            # CLOSE returns to Settings (theme editor) or runs+leaves to the cart (PAINT).
+            self._leave_theme() if self._editing_icons else self._leave_menu()
 
     def _map_palette_ids(self):
         """The tile ids shown on the current palette page (a window into the sheet,
@@ -4276,6 +4364,13 @@ class Workstation:
             self._draw_code()              # full-screen editor (covers the cart)
         elif self.menu_view == "blocks":
             self._draw_blocks()            # full-screen structured outline (#29)
+        elif self.menu_view == "theme":
+            # EDIT ICONS (Stage 2): the PAINT editor over the system icon sheet. Opened
+            # from Settings, NOT a running cart, so there's no cart backdrop to draw --
+            # just clear the canvas and reuse the cart PAINT renderer (over icon_sheet).
+            self.canvas.cls(NAMES["black"])
+            self._reset_canvas_state()
+            self._draw_paint()
         else:  # cards / paint / map: a panel over the frozen cart
             try:
                 if self._draw:
@@ -4535,6 +4630,13 @@ class Workstation:
             cv.rect(x, y, w, h, NAMES["indigo"])
         fg = NAMES["white"] if sel else NAMES["light_grey"]
         cv.print(label, x + 4, y + 5, fg, 1)
+        if kind == "action":
+            # An action row (EDIT ICONS): no value/stepper -- just an OPEN affordance
+            # at the right so a tap (or A) is the obvious activate. paint glyph cues
+            # what it does (repaint the chrome icons).
+            self._glyph("paint", (x + w - 18 * lay.fs, y + 2, 14 * lay.fs, 14 * lay.fs),
+                        NAMES["green"], cv)
+            return
         # < value > stepper at the right (the chevrons print at double size = 2*fw).
         cv.print("<", x + w - 11 * fw - 2, y + 5, NAMES["yellow"], 2)
         cv.print(">", x + w - 2 * fw + 2, y + 5, NAMES["yellow"], 2)
@@ -4551,11 +4653,8 @@ class Workstation:
         elif kind == "mock-name":
             cv.print(str(self.system.get("name", self._MOCK_NAMES[0]))[:8], vx, y + 5,
                      NAMES["peach"], 1)
-        else:  # mock-choice (theme)
-            cv.print(str(self.system.get("theme", self._MOCK_THEMES[0])).upper()[:8], vx,
-                     y + 5, NAMES["peach"], 1)
-        # Mark not-yet-functional rows clearly (wallpaper + font are FUNCTIONAL).
-        if kind not in ("wallpaper", "font"):
+        # Mark not-yet-functional rows clearly (wallpaper + font + EDIT ICONS work).
+        if kind not in ("wallpaper", "font", "action"):
             cv.print("soon", x + 4, y + 6 + fw, NAMES["dark_grey"], 1)
 
     def _draw_fps(self):
@@ -5019,10 +5118,12 @@ class Workstation:
     def _draw_paint(self):
         cv = self.canvas
         pe = self.paint
-        sheet = self.sheet
+        # Edit the editor's OWN sheet -- the cart sprites for PAINT, the system icon
+        # sheet for the theme editor (EDIT ICONS) -- so one renderer serves both.
+        sheet = pe.sheet if pe is not None else self.sheet
         cv.rect(8, 16, 304, 204, NAMES["black"])
         cv.rectb(8, 16, 304, 204, NAMES["orange"])
-        title = "PAINT  SPR " + str(pe.n if pe else 0)
+        title = ("ICONS  TILE " if self._editing_icons else "PAINT  SPR ") + str(pe.n if pe else 0)
         if sheet is not None and sheet.dirty:
             title = title + " *"
         cv.print(title, 14, 18, NAMES["orange"], 1)
@@ -5075,10 +5176,12 @@ class Workstation:
                 cv.rect(ppx + lx * ps, ppy + ly * ps, ps, ps,
                         sheet.pget(ox + lx, oy + ly))
         cv.rectb(ppx, ppy, dim * ps, dim * ps, NAMES["dark_grey"])
-        # Cross-cart sprite reuse (#18): GET pulls this tile out of the shared
-        # sheet, PUT pushes it in. A small status line shows the last result.
-        self._icon_btn("get", "GET", _PAINT_GET, NAMES["indigo"])
-        self._icon_btn("put", "PUT", _PAINT_PUT, NAMES["dark_green"])
+        # Cross-cart sprite reuse (#18): GET pulls this tile out of the shared sheet,
+        # PUT pushes it in. Hidden in the theme editor -- the shared sheet is 8x8 cart
+        # sprites, not the 16x16 icon theme, so GET/PUT don't apply there.
+        if not self._editing_icons:
+            self._icon_btn("get", "GET", _PAINT_GET, NAMES["indigo"])
+            self._icon_btn("put", "PUT", _PAINT_PUT, NAMES["dark_green"])
         if self.paint_status:
             cv.print(self.paint_status[:18], 110, 196, NAMES["yellow"], 1)
         self._btn("SAVE", _PAINT_SAVE, NAMES["green"])
