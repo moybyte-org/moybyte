@@ -222,6 +222,11 @@ class DeviceCanvas:
         # pixel-for-pixel; framebuf.line can't clip to an arbitrary rect).
         x0 = int(x1); y0 = int(y1); xe = int(x2); ye = int(y2)
         col = self._col(c)
+        if self._gfx is not None:
+            self._gfx.line(self._buf, self.w, self.h, x0, y0, xe, ye, col,
+                           self._cam_x, self._cam_y,
+                           self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+            return
         dx = abs(xe - x0); dy = -abs(ye - y0)
         sx = 1 if x0 < xe else -1
         sy = 1 if y0 < ye else -1
@@ -250,17 +255,29 @@ class DeviceCanvas:
         self._fill(x + w - 1, y, 1, h, col)
 
     def circ(self, cx, cy, r, c):
-        # TIC-80 circ = FILLED circle (each scanline a clipped _fill).
+        # TIC-80 circ = FILLED circle. Native (#43): one kc_gfx.circ call rasterizes
+        # the scanline spans in C (was 2r+1 MP->C _fill calls); else the Python path.
         cx = int(cx); cy = int(cy); r = int(r)
         col = self._col(c)
+        if self._gfx is not None:
+            self._gfx.circ(self._buf, self.w, self.h, cx, cy, r, col,
+                           self._cam_x, self._cam_y,
+                           self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+            return
         for dy in range(-r, r + 1):
             span = int((r * r - dy * dy) ** 0.5)
             self._fill(cx - span, cy + dy, 2 * span + 1, 1, col)
 
     def circb(self, cx, cy, r, c):
-        # TIC-80 circb = circle outline (per-pixel through _put, camera+clip+pal).
+        # TIC-80 circb = circle outline. Native (#43): one kc_gfx.circb call runs the
+        # Bresenham midpoint circle in C (was ~8r MP->C _put calls); else Python.
         cx = int(cx); cy = int(cy); r = int(r)
         col = self._col(c)
+        if self._gfx is not None:
+            self._gfx.circb(self._buf, self.w, self.h, cx, cy, r, col,
+                            self._cam_x, self._cam_y,
+                            self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+            return
         x = r; y = 0; err = 0
         while x >= y:
             for px, py in ((x, y), (y, x), (-y, x), (-x, y), (-x, -y), (-y, -x), (y, -x), (x, -y)):

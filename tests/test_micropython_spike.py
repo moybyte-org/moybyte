@@ -810,6 +810,21 @@ def test_native_blit_map_wired_for_tilemaps():
     assert "self._gfx.blit_map(self._buf" in runtime     # native one-call blit
     assert "def _sheet_atlas(self, sheet, colorkey):" in runtime  # baked RGB565 atlas
     assert "def _map_py(self, tilemap, sheet" in runtime  # no-kc_gfx fallback
+
+
+def test_native_vector_primitives_wired():
+    # circ/circb/line are native kc_gfx ops (#43 follow-up): one C call rasterizes the
+    # whole shape (was N per-scanline / per-pixel MP->C calls), with a Python fallback
+    # when kc_gfx is absent. Grep the C module + the device canvas wiring.
+    c = (ROOT / "native" / "kc_gfx" / "modkc_gfx.c").read_text(encoding="utf-8")
+    for fn in ("kc_gfx_circ", "kc_gfx_circb", "kc_gfx_line"):
+        assert fn in c
+    for q in ("MP_QSTR_circ", "MP_QSTR_circb", "MP_QSTR_line"):
+        assert "MP_ROM_QSTR(%s)" % q in c                 # registered in the module dict
+    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    assert "self._gfx.circ(self._buf" in runtime
+    assert "self._gfx.circb(self._buf" in runtime
+    assert "self._gfx.line(self._buf" in runtime
     # The device cart API exposes map/mget/mset, same names as the host make_api.
     assert '"map": map_, "mget": mget, "mset": mset,' in runtime
 
