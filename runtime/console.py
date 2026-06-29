@@ -317,6 +317,34 @@ _BAR_GEAR = (320 - 2 - _BAR_ICON, _BAR_Y, _BAR_ICON, _BAR_ICON)
 _BAR_BATT = (_BAR_GEAR[0] - _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)
 _BAR_WIFI = (_BAR_BATT[0] - _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)
 _BAR_CLOCK = (_BAR_WIFI[0] - 2 - 5 * 8, 0, 5 * 8, 18)
+# --- Virtual gamepad (#42 Thread 1) -----------------------------------------
+# An on-screen d-pad (bottom-left) + A/B (bottom-right) drawn OVER a running cart
+# so a button-based cart is touch-playable with ZERO cart changes: a touch in a pad
+# zone holds that button down for the frame (feeding btn() + edge-firing btnp()) and
+# is CONSUMED so it never also lands as a touch() tap. GAME-canvas coords (the fixed
+# 320x240 viewport, like the in-cart top bar); edge-docked to intrude minimally.
+# Drawn with the indexed verbs only (rect/rectb/print) -- host == device, no native
+# primitive. A square d-pad cross: a center hub with four arm rects; the A/B pair are
+# two circles. The zones are the *hit-test* rects (a bit larger than the art for fat
+# fingers); the diagonal-corner overlap of the d-pad arms gives a 2-button diagonal.
+_GP_CELL = 16                # one d-pad arm cell (square)
+_GP_DX0 = 8                  # d-pad cross left margin (bottom-left dock)
+# Cross center: column 1 (so LEFT fits the left margin) and a row that keeps the DOWN
+# cell on-screen (DOWN bottom = _GP_DCY + 2*cell <= 240) and UP below the 18px top bar.
+_GP_DCX = _GP_DX0 + _GP_CELL
+_GP_DCY = 240 - 2 * _GP_CELL - 2   # 206: DOWN cell bottom = 238 (2px off the edge)
+# Four d-pad zones (x, y, w, h), each one _GP_CELL square, arranged in a +.
+_GP_UP = (_GP_DCX, _GP_DCY - _GP_CELL, _GP_CELL, _GP_CELL)
+_GP_DOWN = (_GP_DCX, _GP_DCY + _GP_CELL, _GP_CELL, _GP_CELL)
+_GP_LEFT = (_GP_DCX - _GP_CELL, _GP_DCY, _GP_CELL, _GP_CELL)
+_GP_RIGHT = (_GP_DCX + _GP_CELL, _GP_DCY, _GP_CELL, _GP_CELL)
+_GP_HUB = (_GP_DCX, _GP_DCY, _GP_CELL, _GP_CELL)   # center hub (no button; art only)
+_GP_DZONES = (("up", _GP_UP), ("down", _GP_DOWN), ("left", _GP_LEFT), ("right", _GP_RIGHT))
+# A/B buttons bottom-right: two circles. B left-and-up of A (TIC-80/NES order: A right).
+_GP_BTN_R = 13               # button hit/draw radius
+_GP_A = (320 - 8 - _GP_BTN_R, 240 - 8 - _GP_BTN_R)        # (cx, cy) of A (lower-right corner)
+_GP_B = (_GP_A[0] - 2 * _GP_BTN_R - 6, _GP_A[1] - _GP_BTN_R - 4)  # B up-and-left of A
+_GP_ABTN = (("a", _GP_A), ("b", _GP_B))
 _RUN_BTN = (28, 188, 70, 24)
 _CODE_BTN = (104, 188, 84, 24)
 _CLOSE_BTN = (194, 188, 96, 24)
@@ -1436,7 +1464,7 @@ class _SilentAudio:
 
 class Workstation:
     def __init__(self, comp, canvas, input, carts=None, sys_canvas=None,
-                 font_scale=1):
+                 font_scale=1, gamepad_default=False):
         self.comp = comp
         # Two rendering domains (#39). The GAME canvas is the fixed 320x240 indexed
         # surface the cart + cart API draw on -- carts are UNCHANGED. The SYSTEM
@@ -1636,6 +1664,14 @@ class Workstation:
         self._dirty = True
         self._last_ptr = None         # (x, y, visible, down, click) last drawn, or None
         self._frames_drawn = 0        # frames that actually drew+flushed (test witness)
+        # Virtual gamepad (#42 Thread 1): an on-screen d-pad + A/B drawn over a running
+        # cart so button-based carts are touch-playable with ZERO cart changes. The
+        # DEFAULT (whether it shows when the system.json "gamepad" key is unset) is the
+        # backend's call: ON for touch-only/web (no physical buttons), OFF on the T-Deck
+        # (real keyboard + trackball), with a Settings toggle either way. The persisted
+        # system.json value overrides the default when present.
+        self._gamepad_default = bool(gamepad_default)
+        self._gp_zones = ()           # button names lit this frame (for the draw highlight)
 
     @property
     def sys_canvas(self):
@@ -1809,6 +1845,28 @@ class Workstation:
             self._with_sd(lambda: self.carts_store.save_system(self.system, self.carts_root))
         except Exception as exc:  # noqa: BLE001 -- a failed write just isn't remembered
             print("KidCode system save failed:", _err_text(exc))
+
+    # -- virtual gamepad (#42 Thread 1) --------------------------------------
+    #
+    # A persisted on/off (system.json "gamepad"), mirroring the font_scale / wallpaper
+    # settings. When the key is unset, fall back to the backend's gamepad_default (ON
+    # for touch-only/web, OFF on the T-Deck). _gamepad_on() is the single resolver the
+    # input-injection + draw paths read so the rule lives in one place.
+
+    def _gamepad_on(self):
+        """Is the on-screen gamepad enabled? The persisted system.json "gamepad" flag
+        wins; absent it, the backend default (touch-only -> on, T-Deck -> off)."""
+        v = self.system.get("gamepad")
+        if v is None:
+            return self._gamepad_default
+        return bool(v)
+
+    def _toggle_gamepad(self, d):
+        """Flip the gamepad on/off and persist (Settings GAMEPAD row; any < / > step
+        toggles, since it's binary). Marks dirty so the in-cart overlay appears/clears."""
+        self.system["gamepad"] = not self._gamepad_on()
+        self._dirty = True
+        self._persist_system()
 
     def _ota_channel(self):
         """The selected OTA update channel ("stable" default / "unstable" beta). Drives
@@ -2055,6 +2113,9 @@ class Workstation:
     _SETTINGS_ROWS = (
         ("wallpaper", "WALLPAPER", "wallpaper"),
         ("font_scale", "FONT SIZE", "font"),
+        # Virtual gamepad (#42 Thread 1): a real ON/OFF that persists. Defaults per
+        # backend (touch-only on, T-Deck off); the kid can flip it either way.
+        ("gamepad", "GAMEPAD", "toggle"),
         ("volume", "VOLUME", "mock-gauge"),
         ("brightness", "BRIGHTNESS", "mock-gauge"),
         ("name", "NAME", "mock-name"),
@@ -2148,6 +2209,9 @@ class Workstation:
             return
         if key == "font_scale":                 # system-UI font size (#39): live + persisted
             self.cycle_font_scale(d)
+            return
+        if key == "gamepad":                     # on-screen virtual gamepad (#42): on/off
+            self._toggle_gamepad(d)
             return
         if key == "name":
             cur = self.system.get("name", self._MOCK_NAMES[0])
@@ -3407,6 +3471,70 @@ class Workstation:
             cells.append((k, (x0 + k * (cw + gap), top, cw, ch)))
         return cells
 
+    # -- virtual gamepad (#42 Thread 1): hit-test + button injection ----------
+    #
+    # The pad is live only while a cart runs (screen == "desktop") with no error, and
+    # only when _gamepad_on(). Each frame, _gamepad_inject() hit-tests the (single)
+    # pointer against the d-pad/A/B zones and INJECTS the matched buttons into the SAME
+    # _held + _pressed/_released edge sets the keyboard feeds (input.inject_button) --
+    # so btn() reads them held and btnp() fires exactly one press edge. Done here in
+    # handle_input (after begin_frame, before the cart's frame()) so the edges are
+    # correct without reordering the per-frame loop. A pointer-zone touch is recorded in
+    # _gp_zones; handle_pointer reads that to CONSUME the touch (so it never also lands
+    # as a touch() tap), and _draw_gamepad lights those zones.
+
+    def _gamepad_active(self):
+        return (self.screen == "desktop" and self.cart is not None
+                and self.cart_error is None and self._gamepad_on())
+
+    def _gamepad_hit(self, gx, gy):
+        """Which gamepad buttons does game-space point (gx, gy) press? A list (the
+        d-pad arm zones overlap at the corners, so a corner touch yields a diagonal --
+        two adjacent buttons). Empty when the point is on no zone."""
+        hits = []
+        for name, z in _GP_DZONES:
+            if _in(gx, gy, z):
+                hits.append(name)
+        for name, c in _GP_ABTN:
+            dx = gx - c[0]
+            dy = gy - c[1]
+            if dx * dx + dy * dy <= _GP_BTN_R * _GP_BTN_R:
+                hits.append(name)
+        return hits
+
+    def _gamepad_inject(self):
+        """Hit-test the pointer against the pad zones and drive the matched buttons for
+        this frame. The press/release EDGE is computed HERE from the gamepad's own
+        previous-frame held set (_gp_zones) -- not from begin_frame, which ran before
+        the touch was known -- and passed to input.inject_button, which forces this
+        button's held + edge membership (host == device; see InputState.inject_button).
+        Records the lit zones for the draw + the touch-consume. No-op when the pad is
+        off / no cart is running (then it just releases any stale held button)."""
+        prev = self._gp_zones
+        if not self._gamepad_active():
+            # Pad just turned off / cart left: release anything it was holding so a
+            # stale button never sticks down into a cart that reads it.
+            if prev:
+                for name in prev:
+                    self.input.inject_button(name, False, released=True)
+                self._gp_zones = ()
+            return
+        p = self.pointer
+        hits = ()
+        if p is not None and p.down:
+            gx, gy = self._game_xy(p.x, p.y)
+            hits = tuple(self._gamepad_hit(gx, gy))
+        # Edges relative to last frame's pad state: a newly-touched zone fires btnp()
+        # once; a no-longer-touched one fires released() once; a held one does neither.
+        for name in prev:
+            if name not in hits:
+                self.input.inject_button(name, False, released=True)
+        for name in hits:
+            self.input.inject_button(name, True, pressed=(name not in prev))
+        self._gp_zones = hits
+        if hits or prev:
+            self._dirty = True       # a lit/cleared pad changes the picture -> repaint (#44)
+
     def handle_input(self):
         i = self.input
         # Redraw-on-change (#44): a button PRESS edge or a typed key this frame may
@@ -3419,6 +3547,13 @@ class Workstation:
         # but never stale: a press that's a no-op costs one redraw, not a wrong screen.
         if getattr(i, "_pressed", None) or i.last_key:
             self._dirty = True
+        # Virtual gamepad (#42): off the running-cart screen, release anything the pad
+        # was holding so a button never sticks down into the launcher/editors. The
+        # ACTIVE injection happens at the END of the desktop branch below -- after the
+        # in-cart bar's keyboard shortcuts (e.g. B = open editor) read their edges, so a
+        # gamepad B press goes to the CART, not the menu.
+        if not self._gamepad_active() and self._gp_zones:
+            self._gamepad_inject()
         if self.screen == "launcher":
             # Konami Easter egg (#21): watch every button press on the home desktop
             # for the secret sequence (the nav below still runs normally -- the egg
@@ -3463,6 +3598,11 @@ class Workstation:
                 self.go_home()
             elif i.pressed("b"):
                 self._open_menu()
+            # Virtual gamepad (#42): inject the touched pad buttons NOW -- after the
+            # bar's B-opens-editor shortcut above read its edges, so a gamepad B reaches
+            # the cart (btn/btnp) instead of opening the menu. go_home() above may have
+            # left "desktop"; _gamepad_inject re-checks _gamepad_active() and no-ops then.
+            self._gamepad_inject()
         elif self.screen == "menu":
             if self.menu_view == "code":
                 self._editor_input()           # keyboard is in text mode here
@@ -3707,7 +3847,17 @@ class Workstation:
         # pointer into game coords for those (#39). Also publish the game-space
         # pointer so the cart touch()/mouse() API reads the viewport, not the panel.
         gx, gy = self._game_xy(px, py)
-        self.input.game_pointer = (gx, gy, click, p.down)
+        # Virtual gamepad coexistence (#42): a touch that lands on a pad zone is
+        # CONSUMED by the pad -- it must NOT also register as a touch() tap in the play
+        # area. So when the pad is live and the pointer is over a zone, publish the
+        # game pointer with click+down cleared (the position still updates, but tapped
+        # reads False). Touches OUTSIDE the zones pass through unchanged, so a raw
+        # touch() cart still works everywhere the pad isn't.
+        gp_click, gp_down = click, p.down
+        if self._gamepad_active() and (p.down or click) and self._gamepad_hit(gx, gy):
+            gp_click = False
+            gp_down = False
+        self.input.game_pointer = (gx, gy, gp_click, gp_down)
         if self.screen == "launcher":
             self._launcher_pointer(px, py, click)
         elif self.screen == "settings":
@@ -5083,6 +5233,7 @@ class Workstation:
             if self.cart_error is not None:
                 self._draw_error_panel()
             self._draw_status_strip("desktop")     # unified top bar (tool switcher)
+            self._draw_gamepad()                   # on-screen d-pad + A/B overlay (#42)
         elif self.menu_view == "code":
             self._draw_code()              # full-screen editor (covers the cart)
         elif self.menu_view == "blocks":
@@ -5289,6 +5440,40 @@ class Workstation:
         self._icon("batt", _BAR_BATT[0], _BAR_BATT[1], cv)
         self._icon("gear", _BAR_GEAR[0], _BAR_GEAR[1], cv)
 
+    def _draw_gamepad(self):
+        """The on-screen virtual gamepad (#42 Thread 1): a d-pad cross (bottom-left)
+        and A/B buttons (bottom-right) over the running cart, so a button-based cart is
+        touch-playable with ZERO cart changes. Drawn with the indexed verbs only
+        (rect/rectb/circ/circb/print) -- host == device, no native primitive. Edge-docked
+        to intrude minimally on the 320x240 play area; a pressed zone (in _gp_zones)
+        lights up. No-op when the pad is off (_gamepad_on() False)."""
+        if not self._gamepad_on():
+            return
+        cv = self.canvas
+        lit = self._gp_zones
+        base = NAMES["dark_grey"]
+        face = NAMES["light_grey"]
+        hot = NAMES["yellow"]
+        # D-pad: a + of arm cells around a hub, each arm outlined; the pressed arm fills
+        # bright. The hub is drawn flat (no button there).
+        hx, hy, hw, hh = _GP_HUB
+        cv.rect(hx, hy, hw, hh, base)
+        for name, (x, y, w, h) in _GP_DZONES:
+            cv.rect(x, y, w, h, hot if name in lit else base)
+            cv.rectb(x, y, w, h, face)
+        cv.rectb(hx, hy, hw, hh, face)
+        # Direction chevrons on the arms so the cross reads as a d-pad (not 4 blank
+        # boxes). Single chars from the 8x8 font, centered-ish in each 18px cell.
+        cv.print("^", _GP_UP[0] + 5, _GP_UP[1] + 5, NAMES["black"], 1)
+        cv.print("v", _GP_DOWN[0] + 5, _GP_DOWN[1] + 5, NAMES["black"], 1)
+        cv.print("<", _GP_LEFT[0] + 5, _GP_LEFT[1] + 5, NAMES["black"], 1)
+        cv.print(">", _GP_RIGHT[0] + 5, _GP_RIGHT[1] + 5, NAMES["black"], 1)
+        # A / B buttons: filled circles, label centered, pressed lights bright.
+        for name, (cx, cy) in _GP_ABTN:
+            cv.circ(cx, cy, _GP_BTN_R, hot if name in lit else base)
+            cv.circb(cx, cy, _GP_BTN_R, face)
+            cv.print(name.upper(), cx - 3, cy - 3, NAMES["black"], 1)
+
     def _clock_text(self):
         """A wall-clock HH:MM from time.localtime when available, else a mm:ss
         uptime so the strip always shows a live clock (host == device)."""
@@ -5400,8 +5585,12 @@ class Workstation:
             beta = self._ota_channel() == "unstable"
             cv.print("BETA" if beta else "STABLE", vx, y + 5,
                      NAMES["orange"] if beta else NAMES["green"], 1)
-        # Mark not-yet-functional rows clearly (wallpaper + font + channel + actions work).
-        if kind not in ("wallpaper", "font", "action", "channel"):
+        elif kind == "toggle":             # virtual gamepad on/off (#42)
+            on = self._gamepad_on()
+            cv.print("ON" if on else "OFF", vx, y + 5,
+                     NAMES["green"] if on else NAMES["dark_grey"], 1)
+        # Mark not-yet-functional rows clearly (wallpaper + font + channel + toggle + actions work).
+        if kind not in ("wallpaper", "font", "action", "channel", "toggle"):
             cv.print("soon", x + 4, y + 6 + fw, NAMES["dark_grey"], 1)
 
     def _draw_fps(self):
