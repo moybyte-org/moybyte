@@ -45,6 +45,37 @@
     color: #fff1e8; font-size: 10px;
   }
   #status { color: #ffec27; }
+
+  /* ---- On-screen gamepad: a virtual joystick + A/B, below the canvas. -------
+     Touch-friendly: every control uses pointer events with touch-action:none so
+     a drag never scrolls the page or leaks to the canvas's own handlers. */
+  #controls {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 24px; width: min(96vw, 112vh); max-width: 100%;
+    padding: 12px 8px 18px; box-sizing: border-box;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+  }
+  #joystick {
+    position: relative; width: 120px; height: 120px; flex: 0 0 auto;
+    border-radius: 50%; background: #1d2b53;
+    border: 2px solid #29366f; touch-action: none;
+  }
+  #thumb {
+    position: absolute; top: 50%; left: 50%; width: 52px; height: 52px;
+    margin: -26px 0 0 -26px; border-radius: 50%;
+    background: #5f6f9f; border: 2px solid #c2c3c7;
+    transform: translate(0, 0); touch-action: none; pointer-events: none;
+  }
+  #abuttons { display: flex; align-items: center; gap: 18px; flex: 0 0 auto; }
+  .btn {
+    width: 72px; height: 72px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font: 700 26px/1 ui-monospace, Menlo, Consolas, monospace;
+    color: #fff1e8; background: #7e2553; border: 2px solid #c2c3c7;
+    touch-action: none; cursor: pointer;
+  }
+  #btn-b { background: #29366f; }
+  .btn.pressed { background: #ffec27; color: #1d2b53; border-color: #fff1e8; }
 </style>
 </head>
 <body>
@@ -55,8 +86,17 @@
 <div id="stage">
   <canvas id="screen" width="320" height="240" tabindex="0"></canvas>
 </div>
+<div id="controls">
+  <div id="joystick" aria-label="virtual joystick">
+    <div id="thumb"></div>
+  </div>
+  <div id="abuttons">
+    <div id="btn-b" class="btn" aria-label="B button">B</div>
+    <div id="btn-a" class="btn" aria-label="A button">A</div>
+  </div>
+</div>
 <footer>
-  Click/drag = touchscreen &middot;
+  On-screen joystick + <kbd>A</kbd>/<kbd>B</kbd> below &middot; click/drag = touchscreen &middot;
   <kbd>WASD</kbd> nav &middot; <kbd>Enter</kbd> run &middot; <kbd>Z</kbd> select &middot;
   <kbd>X</kbd> menu &middot; <kbd>H</kbd> home &middot; arrows = trackball &middot;
   <kbd>Esc</kbd> close panel. In the code editor, letters type and arrows move the caret.
@@ -327,6 +367,96 @@
   }
   canvas.addEventListener("pointerup", endDrag);
   canvas.addEventListener("pointercancel", endDrag);
+
+  // ---- on-screen gamepad: virtual joystick + A/B ---------------------------
+  // These reuse the SAME hold protocol the WASD keys use: send({type:"hold",
+  // name, down}) -> the server replays driver.hold(name, down). No server change.
+  // Every handler preventDefault()s so a drag neither scrolls the page nor leaks
+  // into the canvas's own pointer/touch handlers above.
+  var joyEl = document.getElementById("joystick");
+  var thumbEl = document.getElementById("thumb");
+  var joyActive = false;             // a pointer is currently driving the stick
+  var joyPointerId = null;
+  var joyHeld = { left: false, right: false, up: false, down: false };
+
+  function joyApply(dirs) {
+    // dirs: the directions that SHOULD be held now. Diff against joyHeld and emit
+    // only the changes (press the newly-on, release the newly-off).
+    ["left", "right", "up", "down"].forEach(function (name) {
+      var want = !!dirs[name];
+      if (want !== joyHeld[name]) {
+        joyHeld[name] = want;
+        send({ type: "hold", name: name, down: want });
+      }
+    });
+  }
+  function joyReleaseAll() {
+    joyApply({});                    // every direction off
+    thumbEl.style.transform = "translate(0px, 0px)";
+  }
+  function joyTrack(e) {
+    var r = joyEl.getBoundingClientRect();
+    var cx = r.left + r.width / 2;
+    var cy = r.top + r.height / 2;
+    var dx = e.clientX - cx;
+    var dy = e.clientY - cy;
+    var radius = r.width / 2;        // base radius -> the thumb clamps to it
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist > radius && dist > 0) { var s = radius / dist; dx *= s; dy *= s; }
+    thumbEl.style.transform = "translate(" + dx + "px, " + dy + "px)";
+    var dz = radius * 0.35;          // deadzone: 35% of the radius
+    joyApply({
+      left:  dx < -dz,
+      right: dx >  dz,
+      up:    dy < -dz,
+      down:  dy >  dz
+    });
+  }
+  joyEl.addEventListener("pointerdown", function (e) {
+    joyActive = true; joyPointerId = e.pointerId;
+    joyEl.setPointerCapture(e.pointerId);
+    joyTrack(e);
+    e.preventDefault();
+  });
+  joyEl.addEventListener("pointermove", function (e) {
+    if (!joyActive || e.pointerId !== joyPointerId) return;
+    joyTrack(e);
+    e.preventDefault();
+  });
+  function joyEnd(e) {
+    if (!joyActive || (e && e.pointerId !== joyPointerId)) return;
+    joyActive = false; joyPointerId = null;
+    joyReleaseAll();
+    if (e) e.preventDefault();
+  }
+  joyEl.addEventListener("pointerup", joyEnd);
+  joyEl.addEventListener("pointercancel", joyEnd);
+
+  // A / B: hold-to-fire (not the one-shot "press"), so a held button keeps btn().
+  function wireButton(id, name) {
+    var el = document.getElementById(id);
+    var down = false;
+    function press(e) {
+      if (down) return; down = true;
+      el.classList.add("pressed");
+      send({ type: "hold", name: name, down: true });
+      if (e) e.preventDefault();
+    }
+    function release(e) {
+      if (!down) return; down = false;
+      el.classList.remove("pressed");
+      send({ type: "hold", name: name, down: false });
+      if (e) e.preventDefault();
+    }
+    el.addEventListener("pointerdown", function (e) {
+      el.setPointerCapture(e.pointerId); press(e);
+    });
+    el.addEventListener("pointerup", release);
+    el.addEventListener("pointercancel", release);
+    el.addEventListener("pointerleave", release);
+  }
+  wireButton("btn-a", "a");
+  wireButton("btn-b", "b");
 
   // ---- keyboard (unchanged from v1: mirrors simulate_desktop.run_live) -----
   var PAN = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };

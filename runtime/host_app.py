@@ -520,8 +520,7 @@ def _seed_system_carts(carts_dir):
                 shutil.copytree(os.path.join(SYSTEM_CARTS, name), dst)
 
 
-def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
-                      gamepad_default=False):
+def build_workstation(carts_dir=None, sys_size=None, font_scale=1):
     """Build the shared console.Workstation wired to host backends.
 
     The two-domain seam (#39): `sys_size` is the SYSTEM canvas size (w, h) -- the
@@ -529,11 +528,7 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
     fixed 320x240 the carts + cart API draw on. When `sys_size` is None or 320x240
     (the T-Deck default) the system canvas IS the game canvas (one object), so the
     desktop is pixel-identical to today. `font_scale` (1/2/3) is the initial
-    system-UI font size (the persisted system.json value overrides it on load).
-
-    `gamepad_default` (#42 Thread 1) is the virtual-gamepad default when system.json
-    has no saved choice: the desktop sim has a real keyboard so it's OFF here, but the
-    touch-only web console passes True (the persisted Settings toggle overrides it)."""
+    system-UI font size (the persisted system.json value overrides it on load)."""
     carts_dir = carts_dir or os.path.expanduser("~/.kidcode/carts")
     _seed_system_carts(carts_dir)
     carts = kid_carts.scan(carts_dir)
@@ -550,8 +545,7 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
         sys_canvas = SystemCanvas(sw, sh, font_scale=font_scale)
     inp = InputState()
     ws = console.Workstation(_NullComp(), canvas, inp, carts,
-                             sys_canvas=sys_canvas, font_scale=font_scale,
-                             gamepad_default=gamepad_default)
+                             sys_canvas=sys_canvas, font_scale=font_scale)
     ws.make_api = make_api
     ws.make_audio = make_audio
     ws.carts_store = kid_carts
