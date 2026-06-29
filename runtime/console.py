@@ -1720,6 +1720,7 @@ class Workstation:
         # tile-size-agnostic, so the 16x16 IconSheet edits natively).
         self._editing_icons = False
         self.set_msel = 0             # selected row in the Settings screen
+        self.set_top = 0              # first visible Settings row (scroll offset, #53)
         self.carts_root = None        # SD carts dir (reads); set by run_desktop
         self.cart_error = None        # last cart failure text -> on-canvas error panel
         self.save_status = None       # last save_code result text (e.g. a syntax error)
@@ -2279,6 +2280,7 @@ class Workstation:
             self._settings_return = self.screen   # resume here on exit (cart vs home)
         self._dirty = True             # screen change repaints (#44)
         self.set_msel = 0
+        self.set_top = 0               # reset the scroll window (#53)
         self.screen = "settings"
         self.show_achievements = False
         self._secret_taps = 0              # fresh secret-door run each visit (#21)
@@ -3685,6 +3687,7 @@ class Workstation:
                 self.set_msel = (self.set_msel - 1) % len(rows)
             if i.pressed("down"):
                 self.set_msel = (self.set_msel + 1) % len(rows)
+            self._settings_scroll()        # keep the selection in view (#53)
             if i.pressed("left"):
                 self.settings_adjust(-1)
             if i.pressed("right"):
@@ -3871,8 +3874,32 @@ class Workstation:
             if i is not None:
                 self.launcher.sel = i
 
+    def _settings_visible(self):
+        """How many Settings rows fit in the panel at the current font scale (#39)."""
+        lay = self.layout
+        _px, py, _pw, ph = lay.settings_panel
+        n = (py + ph - lay.set_row_y0) // lay.set_row_h
+        return max(1, int(n))
+
+    def _settings_scroll(self):
+        """Keep the selected row (set_msel) inside the visible window by moving the
+        scroll offset set_top. The list scrolls once it has more rows than fit -- the
+        #53 OTA rows (UPDATE FW / CHANNEL / UPDATE ONLINE) push it past one screen."""
+        rows = len(self._settings_rows())
+        vis = self._settings_visible()
+        if self.set_msel < self.set_top:
+            self.set_top = self.set_msel
+        elif self.set_msel >= self.set_top + vis:
+            self.set_top = self.set_msel - vis + 1
+        self.set_top = max(0, min(self.set_top, max(0, rows - vis)))
+
+    def _settings_row_visible(self, i):
+        return self.set_top <= i < self.set_top + self._settings_visible()
+
     def _settings_row_rect(self, i):
-        return self.layout.settings_row_rect(i)
+        # Scrolled position: row i sits in on-screen slot (i - set_top). Rows outside
+        # the visible window get an off-panel rect that the draw + pointer loops skip.
+        return self.layout.settings_row_rect(i - self.set_top)
 
     def _settings_pointer(self, px, py, click):
         if not click:
@@ -3903,6 +3930,8 @@ class Workstation:
         edge = 5 * self.layout.font_w           # the "<"/">" hit zone (40px at fs=1)
         rows = self._settings_rows()
         for i in range(len(rows)):
+            if not self._settings_row_visible(i):
+                continue                       # off-screen (scrolled) rows aren't tappable
             x, y, w, h = self._settings_row_rect(i)
             if _in(px, py, (x, y, w, h)):
                 self.set_msel = i
@@ -5665,10 +5694,25 @@ class Workstation:
         self._glyph("trophy", (sa[0] - 2, sa[1], 14 * fs, 14 * fs), NAMES["yellow"], cv)
         cv.print(str(self.ach.count()), sa[0] + 13 * fs, sa[1] + 4, NAMES["white"], 1)
         self._mini_btn("X", lay.set_back, NAMES["red"], cv)
-        for i in range(len(self._settings_rows())):
-            self._draw_settings_row(i)
+        rows = self._settings_rows()
+        for i in range(len(rows)):
+            if self._settings_row_visible(i):
+                self._draw_settings_row(i)
+        self._draw_settings_more(rows)
         self._draw_status_strip("settings")
         self._draw_dock("settings")
+
+    def _draw_settings_more(self, rows):
+        """Up/down chevrons at the panel's right edge when the Settings list scrolls
+        past the visible window (the #53 OTA rows can push it over one screen)."""
+        cv = self.sys_canvas
+        lay = self.layout
+        px, py, pw, ph = lay.settings_panel
+        xr = px + pw - 9 * lay.fs
+        if self.set_top > 0:
+            cv.print("^", xr, lay.set_row_y0, NAMES["white"], 1)
+        if self.set_top + self._settings_visible() < len(rows):
+            cv.print("v", xr, py + ph - 9 * lay.fs, NAMES["white"], 1)
 
     def _draw_settings_row(self, i):
         cv = self.sys_canvas
