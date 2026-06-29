@@ -1340,7 +1340,8 @@ def test_device_audio_wired():
     assert "self.render_into(out, nframes)" in audio
     assert "class AudioBank:" in audio
     # The console builds a per-cart AudioEngine and injects an audio backend.
-    assert "from audio import AudioBank, AudioEngine" in console
+    assert "from audio import" in console
+    assert "AudioBank" in console and "AudioEngine" in console
     assert "def _build_audio(self):" in console
     assert "self.audio.tick(dt)" in console
     # The device make_api binds the same six audio names as the host.
@@ -1365,6 +1366,51 @@ def test_device_audio_wired():
     assert '"sounds": sounds' in carts
     # build.sh stages the shared audio module into the frozen modules tree.
     assert 'cp "${REPO_ROOT}/runtime/audio.py" "${SCRIPT_DIR}/modules/audio.py"' in build
+
+
+def test_music_editor_wired_into_device_shell():
+    # Music/sound editor (#50): the shared MusicEditor core (runtime/editors.py) +
+    # its console wiring (a menu_view, the top-bar switcher, save to sounds.json, the
+    # live preview). It lives in the SAME shared files build.sh freezes onto the
+    # device, so source-level greps prove it's on both ends (host == device).
+    editors = EDITORS_SRC.read_text(encoding="utf-8")
+    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    carts = (Path("runtime") / "kid_carts.py").read_text(encoding="utf-8")
+    build = (ROOT / "build.sh").read_text(encoding="utf-8")
+
+    # The editor CORE is a single shared class (not redefined on the device).
+    assert "class MusicEditor:" in editors
+    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    assert "class MusicEditor:" not in runtime, "device redefines MusicEditor"
+    # editors.py must stay dependency-free (the frozen-module contract): it must NOT
+    # import audio just to edit the bank -- SFX/MusicTrack are injected as factories.
+    assert "import audio" not in editors
+    assert "from audio import" not in editors
+
+    # The console imports the shared core + the audio factories it injects.
+    assert "MusicEditor" in console
+    assert "from audio import" in console and "MusicTrack" in console and "SFX" in console
+    # A new menu sub-view + its open/build path, mirroring map/blocks.
+    assert 'self.musicedit = MusicEditor(bank' in console
+    assert "def _open_music(self):" in console
+    assert 'elif view == "music":' in console
+    assert 'if self.menu_view == "music":' in console     # input + frame dispatch
+    # The top-bar mode switcher (the 6th icon) + its tap action + drawn icon.
+    assert "_MUSIC_BTN = (" in console
+    assert "self._open_music()" in console
+    assert 'self._icon("music"' in console
+    assert '"music": 15' in console                        # IconSheet slot for the icon
+    # SAVE persists to sounds.json through the existing shared store.
+    assert "def save_sounds(self):" in console
+    assert "self.carts_store.save_sounds(self.cart, bank_dict)" in console
+    assert "def save_sounds(cart, bank_dict):" in carts
+    # Live preview drives the SAME injected AudioEngine the cart uses, and the frame
+    # loop ticks the mixer + keeps animating while a preview is up.
+    assert "def _play_music_preview(self):" in console
+    assert "self.audio.tick(dt)" in console
+    # The editor lives in the shared files build.sh freezes onto the device.
+    assert 'cp "${REPO_ROOT}/runtime/editors.py" "${SCRIPT_DIR}/modules/editors.py"' in build
+    assert 'cp "${REPO_ROOT}/runtime/console.py" "${SCRIPT_DIR}/modules/console.py"' in build
 
 
 def test_native_kc_audio_mixer_wired():

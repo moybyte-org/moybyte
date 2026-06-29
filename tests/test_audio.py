@@ -296,3 +296,231 @@ def test_cart_without_audio_backend_still_runs(tmp_path):
     ws.frame(1 / 30)
     assert ws.cart_error is None             # silent no-op, not a crash
     assert isinstance(ws.audio, console._SilentAudio)
+
+
+# -- music / sound editor core (#50) ----------------------------------------
+
+def _music_editor(bank=None):
+    from runtime.editors import MusicEditor
+    b = bank if bank is not None else audio.AudioBank.default()
+    return MusicEditor(b, sfx_factory=audio.SFX, track_factory=audio.MusicTrack), b
+
+
+def test_music_editor_never_faces_empty_bank():
+    # An empty bank seeds a minimal SFX + track so the grid is never blank.
+    me, b = _music_editor(audio.AudioBank())
+    assert b.sfx and b.music
+    assert me.cur_sfx() is not None and me.cur_track() is not None
+    assert me.step_count() >= 1 and me.slot_count() >= 1
+
+
+def test_music_editor_sfx_step_edits_and_clamps():
+    me, b = _music_editor()
+    st = me.cur_step()
+    assert st is not None
+    # pitch nudges clamp into 0..95
+    me.set_pitch(94)
+    me.nudge_pitch(5)
+    assert me.cur_step()[0] == 95
+    me.set_pitch(1)
+    me.nudge_pitch(-5)
+    assert me.cur_step()[0] == 0
+    # wave cycles square->triangle->saw->noise->square (0..3 wrap)
+    me.set_pitch(57)
+    waves = []
+    for _ in range(5):
+        waves.append(me.cur_step()[1])
+        me.cycle_wave(1)
+    assert waves == [waves[0], (waves[0] + 1) % 4, (waves[0] + 2) % 4,
+                     (waves[0] + 3) % 4, waves[0]]
+    # volume cycles with wrap (7 -> 0); nudge clamps at the ends
+    me.cur_step()[2] = 7
+    me.cycle_vol(1)
+    assert me.cur_step()[2] == 0
+    me.nudge_vol(-1)
+    assert me.cur_step()[2] == 0           # clamped, no underflow
+    me.nudge_vol(99)
+    assert me.cur_step()[2] == 7           # clamped at max
+    assert me.dirty
+
+
+def test_music_editor_rest_toggle_roundtrip():
+    me, b = _music_editor()
+    me.set_pitch(57)
+    me.toggle_rest()
+    assert me.cur_step()[0] < 0            # now a rest
+    me.toggle_rest(default_pitch=60)
+    assert me.cur_step()[0] == 60          # restored to the default note
+    # nudging a rest is a no-op (you must un-rest it first)
+    me.set_pitch(-1)
+    me.nudge_pitch(3)
+    assert me.cur_step()[0] < 0
+
+
+def test_music_editor_add_del_steps_keeps_at_least_one():
+    me, b = _music_editor()
+    n0 = me.step_count()
+    me.add_step()
+    assert me.step_count() == n0 + 1 and me.step == 1
+    # delete down to a single step; the last one can't be removed
+    while me.step_count() > 1:
+        me.del_step()
+    assert me.step_count() == 1
+    me.del_step()
+    assert me.step_count() == 1
+
+
+def test_music_editor_select_sfx_grows_bank_past_end():
+    me, b = _music_editor()
+    n = len(b.sfx)
+    me.select_sfx(n)                       # walk past the last SFX
+    assert len(b.sfx) > n                  # a fresh SFX was appended
+    assert me.sfx_idx == len(b.sfx) - 1 and me.step == 0
+    me.select_sfx(-99)                     # clamps at 0
+    assert me.sfx_idx == 0
+
+
+def test_music_editor_song_view_edits():
+    me, b = _music_editor()
+    me.toggle_view()
+    assert me.view == me.SONG_VIEW
+    m0 = me.slot_count()
+    me.add_slot()
+    assert me.slot_count() == m0 + 1 and me.slot == 1
+    # nudge a slot's SFX id, clamped to the bank's SFX range
+    me.set_slot(0)
+    me.nudge_slot(99)
+    assert me.cur_slot_value() == len(b.sfx) - 1
+    me.nudge_slot(-99)
+    assert me.cur_slot_value() == 0
+    while me.slot_count() > 1:
+        me.del_slot()
+    me.del_slot()
+    assert me.slot_count() == 1            # a track always keeps one slot
+
+
+def test_music_editor_speed_and_loop_target_active_view():
+    me, b = _music_editor()
+    sfx_spd = me.cur_sfx().speed
+    me.nudge_speed(2)
+    assert me.cur_sfx().speed == sfx_spd + 2          # sfx view -> SFX tempo
+    me.toggle_view()
+    trk_spd = me.cur_track().speed
+    me.nudge_speed(-1)
+    assert me.cur_track().speed == trk_spd - 1        # song view -> track tempo
+    lo = me.cur_track().loop
+    me.toggle_loop()
+    assert me.cur_track().loop is (not lo)
+
+
+def test_music_editor_cursor_move_clamps():
+    me, b = _music_editor()
+    me.add_step(); me.add_step()                      # >= 3 steps
+    me.move_cursor(-99)
+    assert me.step == 0
+    me.move_cursor(99)
+    assert me.step == me.step_count() - 1
+
+
+def test_music_editor_edits_roundtrip_through_sounds_json(tmp_path):
+    # The editor mutates the bank in place; saving + reloading the cart preserves it.
+    from runtime import kid_carts
+    root = str(tmp_path / "carts")
+    kid_carts.ensure_dirs(root)
+    c = kid_carts.create("Tune", root, src="def _draw():\n    cls(1)\n")
+    bank = audio.AudioBank.default()
+    me, _ = _music_editor(bank)
+    me.set_pitch(72)
+    me.cycle_wave(1)
+    me.nudge_vol(-2)
+    me.add_step()
+    me.toggle_view()
+    me.add_slot()
+    kid_carts.save_sounds(c, me.bank.to_dict())
+    reloaded = kid_carts.load(c["path"])
+    again = audio.AudioBank.from_dict(reloaded["sounds"])
+    assert again.to_dict() == me.bank.to_dict()       # full round-trip, byte-stable
+
+
+def test_audio_bank_backward_compat_schema_unchanged():
+    # A bank authored before #50 (the existing sfx/music schema) still loads, and a
+    # freshly-edited bank still serializes to that same shape (no new keys).
+    legacy = {"sfx": [{"speed": 8, "loop": False, "steps": [[60, 0, 6]]}],
+              "music": [{"speed": 4, "loop": True, "pattern": [0]}]}
+    b = audio.AudioBank.from_dict(legacy)
+    me, _ = _music_editor(b)
+    me.nudge_pitch(1)
+    out = b.to_dict()
+    assert set(out.keys()) == {"sfx", "music"}
+    assert set(out["sfx"][0].keys()) == {"speed", "loop", "steps"}
+    assert set(out["music"][0].keys()) == {"speed", "loop", "pattern"}
+
+
+# -- music editor wired into the shared console (host == device) ------------
+
+def test_music_editor_opens_edits_previews_and_saves_on_console(tmp_path):
+    from runtime import host_app
+    from runtime import console as C
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.launcher.sel = 0
+    ws.open()
+    assert ws.cart_error is None and ws.audio is not None
+
+    ws._open_music()
+    assert ws.screen == "menu" and ws.menu_view == "music"
+    me = ws.musicedit
+    assert me is not None
+    # The editor edits the SAME bank the running cart plays through.
+    assert me.bank is ws.audio.engine.bank
+
+    # A frame in the music view draws without error.
+    ws.frame(1 / 30)
+    assert len(set(ws.canvas.buf)) > 1
+
+    # Tap NOTE+ on the edit pad -> the current step's pitch rises + bank goes dirty.
+    p0 = me.cur_step()[0]
+    r = C._mu_pad_rect(1, 0)                  # (col 1, row 0) = NOTE+
+    ws._music_click(r[0] + 2, r[1] + 2)
+    assert me.cur_step()[0] == p0 + 1 and me.dirty
+
+    # PLAY starts a preview through the live engine; tapping again STOPS it (toggle).
+    ws._music_click(C._MU_PLAY[0] + 2, C._MU_PLAY[1] + 2)
+    assert ws.music_preview is not None
+    rendered0 = ws.audio.rendered
+    ws.frame(1 / 30)                          # a frame ticks the mixer (renders PCM)
+    assert ws.audio.rendered > rendered0
+    ws._music_click(C._MU_PLAY[0] + 2, C._MU_PLAY[1] + 2)
+    assert ws.music_preview is None           # toggled off while still sounding
+
+    # SAVE persists to sounds.json; reload proves it stuck.
+    ws._music_click(C._MU_SAVE[0] + 2, C._MU_SAVE[1] + 2)
+    assert ws.save_status == "SAVED" and not me.dirty
+    from runtime import kid_carts
+    reloaded = kid_carts.load(ws.cart["path"])
+    assert reloaded["sounds"] is not None
+    assert audio.AudioBank.from_dict(reloaded["sounds"]).to_dict() == me.bank.to_dict()
+
+    # Leaving the editor stops any preview and returns to the cart.
+    ws._music_click(C._MU_PLAY[0] + 2, C._MU_PLAY[1] + 2)   # start a preview again
+    ws._leave_menu()
+    assert ws.music_preview is None and ws.screen == "desktop"
+
+
+def test_music_editor_view_toggle_and_song_path_on_console(tmp_path):
+    from runtime import host_app
+    from runtime import console as C
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.launcher.sel = 0
+    ws.open()
+    ws._open_music()
+    me = ws.musicedit
+    # Toggle to SONG view via the view button; a frame draws it.
+    ws._music_click(C._MU_VIEW[0] + 2, C._MU_VIEW[1] + 2)
+    assert me.view == me.SONG_VIEW
+    ws.frame(1 / 30)
+    assert len(set(ws.canvas.buf)) > 1
+    # SFX+ pad button (song view, row 0 col 1) bumps the slot's SFX id.
+    v0 = me.cur_slot_value()
+    r = C._mu_pad_rect(1, 0)
+    ws._music_click(r[0] + 2, r[1] + 2)
+    assert me.cur_slot_value() == min(v0 + 1, len(me.bank.sfx) - 1)
