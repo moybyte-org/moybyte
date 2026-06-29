@@ -99,15 +99,18 @@ def test_settings_screen_opens_and_renders(tmp_path):
     assert len(set(drv.rgb888())) > 4
 
 
-def test_status_strip_gear_opens_settings_from_home(tmp_path):
-    """The launcher has no bottom dock (#46); Settings is reached via the gear button
-    on the status strip. Tapping it opens Settings."""
+def test_status_strip_menu_opens_settings_from_home(tmp_path):
+    """The launcher has no bottom dock (#46) and no gear (#52 -- Settings moved into the
+    ≡ system menu, OS-style). Tapping ≡ opens the menu; its first item SETTINGS opens
+    Settings."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
-    x, y, w, h = ws.layout.set_btn
+    x, y, w, h = ws.layout.sysmenu_btn
     drv.click(x + w // 2, y + h // 2)
     drv.frame(1 / 30)
+    assert ws.sysmenu.open
+    drv.press("a"); drv.frame(1 / 30); drv.frame(1 / 30)   # activate SETTINGS (first item)
     assert ws.screen == "settings"
 
 
@@ -136,10 +139,10 @@ def test_settings_back_returns_home(tmp_path):
     assert ws.screen == "launcher"
 
 
-def test_gear_in_cart_bar_opens_settings_and_back_resumes_cart(tmp_path):
-    """Settings must be reachable from inside a running cart via the in-cart bar's gear
-    (it was drawn but inert), and Back must RESUME the cart, not strand you at the
-    launcher (#46)."""
+def test_in_cart_menu_opens_settings_and_back_resumes_cart(tmp_path):
+    """Settings must be reachable from inside a running cart via the in-cart bar's ≡
+    system menu (#52), and Back must RESUME the cart, not strand you at the launcher
+    (#46). The in-cart menu prepends a CART group, so SETTINGS is two rows down."""
     from runtime import console as C
     from runtime import host_app
     ws = _ws(tmp_path)
@@ -147,12 +150,16 @@ def test_gear_in_cart_bar_opens_settings_and_back_resumes_cart(tmp_path):
     ws.launcher.sel = 0
     ws.open()
     assert ws.screen == "desktop"
-    drv.click(C._BAR_GEAR[0] + 2, C._BAR_GEAR[1] + 2)     # gear on the in-cart bar
+    drv.click(C._SYSMENU_BTN[0] + 2, C._SYSMENU_BTN[1] + 2)   # ≡ on the in-cart bar
     drv.frame(1 / 30)
+    assert ws.sysmenu.open
+    for _ in range(2):                                       # RESTART -> DELETE -> SETTINGS
+        drv.press("down"); drv.frame(1 / 30); drv.frame(1 / 30)
+    drv.press("a"); drv.frame(1 / 30); drv.frame(1 / 30)     # activate SETTINGS
     assert ws.screen == "settings"
-    drv.click(C._SET_BACK[0] + 2, C._SET_BACK[1] + 2)     # Back resumes the cart...
+    drv.click(C._SET_BACK[0] + 2, C._SET_BACK[1] + 2)        # Back resumes the cart...
     drv.frame(1 / 30)
-    assert ws.screen == "desktop"                          # ...not the launcher
+    assert ws.screen == "desktop"                             # ...not the launcher
 
 
 def test_settings_mock_rows_do_not_touch_carts(tmp_path):
@@ -191,7 +198,8 @@ def test_management_buttons_still_create_and_delete(tmp_path):
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     n0 = len(ws.launcher.items)
-    drv.click(C._NEW_BTN[0] + 2, C._NEW_BTN[1] + 2)       # NEW in the status strip
+    x, y, w, h = ws.layout.new_btn                        # NEW (Layout position; #52 put ≡ at slot 0)
+    drv.click(x + w // 2, y + h // 2)
     drv.frame(1 / 30)
     assert len(ws.launcher.items) == n0 + 1
 

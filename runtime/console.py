@@ -316,13 +316,12 @@ _PAINT_BTN = (2 + 3 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)  # paint editor
 _MAP_BTN = (2 + 4 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)   # map (tilemap) editor
 _BLOCKS_BTN = (2 + 5 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)  # block editor (#29)
 _MUSIC_BTN = (2 + 6 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)  # music/sound editor (#50)
-# Right cluster on the running-cart bar (GAME canvas, always 320 wide @ fs 1): gear
-# hard-right, then batt, wifi, then the clock text. Mirrors the launcher Layout's
-# right cluster so both bars read identically. The clock egg hit-test uses _BAR_CLOCK.
-# Literal 320 width / 18px bar / 8px font here (the game canvas is fixed; _STATUS_H /
-# _FONT_W are defined below, so these don't forward-reference them).
-_BAR_GEAR = (320 - 2 - _BAR_ICON, _BAR_Y, _BAR_ICON, _BAR_ICON)
-_BAR_BATT = (_BAR_GEAR[0] - _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)
+# Right cluster on the running-cart bar (GAME canvas, always 320 wide @ fs 1): batt
+# hard-right, then wifi, then the clock text. (Settings moved off the bar into the ≡
+# system menu, OS-style, so there's no gear here any more.) Mirrors the launcher
+# Layout's right cluster so both bars read identically. The clock egg hit-test uses
+# _BAR_CLOCK. Literal 320 width / 18px bar / 8px font here (the game canvas is fixed).
+_BAR_BATT = (320 - 2 - _BAR_ICON, _BAR_Y, _BAR_ICON, _BAR_ICON)
 _BAR_WIFI = (_BAR_BATT[0] - _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)
 _BAR_CLOCK = (_BAR_WIFI[0] - 2 - 5 * 8, 0, 5 * 8, 18)
 _RUN_BTN = (28, 188, 70, 24)
@@ -768,18 +767,20 @@ class Layout:
         self.bar_stride = stride
         edge = 2 * fs                                 # margin from the canvas edges
 
-        # -- right cluster (always): clock text, then wifi, batt, gear, right-aligned.
-        # The gear is hard against the right edge (the home screen's Settings entry,
-        # always drawn -- not gated on can_manage); batt + wifi sit to its left, then
-        # the clock text fills the space before them.
-        self.set_btn = (self.w - edge - ic, _BAR_Y, ic, ic)                 # gear
-        self.batt_btn = (self.set_btn[0] - stride, _BAR_Y, ic, ic)
+        # -- right cluster (always): clock text, then wifi, batt, right-aligned.
+        # (Settings moved into the ≡ system menu, OS-style, so there's no gear here any
+        # more.) batt is hard against the right edge; wifi sits to its left, then the
+        # clock text fills the space before them.
+        self.batt_btn = (self.w - edge - ic, _BAR_Y, ic, ic)
         self.wifi_btn = (self.batt_btn[0] - stride, _BAR_Y, ic, ic)
         self.clock_w = 5 * self.font_w                # "HH:MM" (5 chars)
         self.clock_x = max(edge, self.wifi_btn[0] - edge - self.clock_w)
 
-        # -- left cluster (launcher, can_manage): NEW / DUP / DEL icon buttons.
-        self.new_btn = (edge, _BAR_Y, ic, ic)
+        # -- left cluster: the ≡ system-menu toggle (always, leftmost), then -- when
+        # writable -- NEW / DUP / DEL. ≡ is the launcher's Settings entry now (it opens
+        # the dropdown that holds Settings/About/Reboot), mirroring the in-cart bar.
+        self.sysmenu_btn = (edge, _BAR_Y, ic, ic)
+        self.new_btn = (self.sysmenu_btn[0] + stride, _BAR_Y, ic, ic)
         self.dup_btn = (self.new_btn[0] + stride, _BAR_Y, ic, ic)
         self.del_btn = (self.dup_btn[0] + stride, _BAR_Y, ic, ic)
 
@@ -965,86 +966,102 @@ _ICON = {
 # on the black bar. Kept readable here so the theme is hand-editable; _default_icon_
 # sheet() bakes it into an IconSheet's pixels at the _ICON slots.
 _ICON_ART = {
-    "home": (                                  # a house: roof + body + door/window
-        "................", ".......77.......", "......7887......", ".....78887......",
-        "....7888887.....", "...788888887....", "..78888888887...", ".7888888888887..",
-        ".7666666666667..", ".7677777767667..", ".7677777767667..", ".7677777767667..",
-        ".7677777767667..", ".7666666666667..", ".7777777777777..", "................"),
-    "edit": (                                  # a pencil on the diagonal
-        "............777.", "...........7887.", "..........78887.", ".........788887.",
-        "........788887..", ".......788887...", "......788887....", ".....788887.....",
-        "....788887......", "...788887.......", "..788887........", ".788887.........",
-        ".78887..........", ".7887...........", ".777............", "................"),
-    "code": (                                  # angle brackets < >
-        "................", "................", ".....7....7.....", "....77....77....",
-        "...77......77...", "..77........77..", ".77..........77.", "77............77",
-        ".77..........77.", "..77........77..", "...77......77...", "....77....77....",
-        ".....7....7.....", "................", "................", "................"),
-    "paint": (                                 # a paintbrush (orange handle, pink tip)
-        "............777.", "...........7997.", "..........79997.", ".........799997.",
-        "........799997..", ".......79997....", "......7997......", ".....7997.......",
-        "....7997........", "...7eee7........", "..7eeeee7.......", ".7eeeeeee7......",
-        ".7eeeeeee7......", "..7eeeee7.......", "...7eee7........", "....777........."),
-    "map": (                                   # a 3x3 tile grid
-        "................", ".7777777777777..", ".7...7...7...7..", ".7...7...7...7..",
-        ".7777777777777..", ".7...7...7...7..", ".7...7...7...7..", ".7777777777777..",
-        ".7...7...7...7..", ".7...7...7...7..", ".7777777777777..", "................",
-        "................", "................", "................", "................"),
-    "blocks": (                                # a puzzle piece
-        "................", "..7777..........", "..7..7..........", "..7..7..7777....",
-        ".77..777....7...", ".7..........7...", ".7..........7...", ".77........77...",
-        "..7777..7777....", "..7..7..7.......", "..7..7..7.......", "..7..777........",
-        "..7....7........", "..7....7........", "..777777........", "................"),
-    "gear": (                                  # a cog with a hollow centre
-        "......7777......", "...7..7777..7...", "...77.7777.77...", "...777777777....",
-        ".7777777777777..", ".7777777777777..", "7777.77777.7777.", "7777.7..7..7777.",
-        "7777.7..7..7777.", "7777.77777.7777.", ".7777777777777..", ".7777777777777..",
-        "...777777777....", "...77.7777.77...", "...7..7777..7...", "......7777......"),
-    "wifi": (                                  # three signal arcs over a base dot
-        "................", "................", "....7777777.....", "..77.......77...",
-        ".7....777....7..", "....77...77.....", "...7.......7....", ".....77777......",
-        "....7.....7.....", "................", ".......77.......", "......7887......",
-        ".......77.......", "................", "................", "................"),
-    "batt": (                                  # a battery body + nub + green charge
-        "................", "................", "................", "...........77...",
-        ".77777777777b7..", ".7.........7b7..", ".7.bbbbbb..7b7..", ".7.bbbbbb..777..",
-        ".7.bbbbbb..7b7..", ".7.bbbbbb..7b7..", ".7.........7b7..", ".77777777777b7..",
-        "...........77...", "................", "................", "................"),
-    "new": (                                   # a blank page with a plus
-        ".7777777777.....", ".7........7.....", ".7...77...7.....", ".7...77...7.....",
-        ".7.7777777.7....", ".7.7777777.7....", ".7...77...7.....", ".7...77...7.....",
-        ".7........7.....", ".7........7.....", ".7........7.....", ".7........7.....",
-        ".7........7.....", ".7........7.....", ".7777777777.....", "................"),
-    "dup": (                                   # two overlapping pages
-        "...777777777....", "...7.......7....", ".7777777...7....", ".7.....7...7....",
-        ".7.....7...7....", ".7.....77777....", ".7.........7....", ".7.........7....",
-        ".7.........7....", ".7.........7....", ".7.........7....", ".7.........7....",
-        ".7.........7....", ".7.........7....", ".77777777777....", "................"),
-    "del": (                                   # a trash can with a lid
-        "................", ".....77777......", "...77.....77....", ".7777777777777..",
-        "................", "..77777777777...", "..7.7.7.7.7.7...", "..7.7.7.7.7.7...",
-        "..7.7.7.7.7.7...", "..7.7.7.7.7.7...", "..7.7.7.7.7.7...", "..7.7.7.7.7.7...",
-        "..7.7.7.7.7.7...", "..77777777777...", "...777777777....", "................"),
-    "close": (                                 # an X
-        "................", ".77..........77.", ".877........778.", "..877......778..",
-        "...877....778...", "....877..778....", ".....877778.....", "......8778......",
-        "......8778......", ".....877778.....", "....877..778....", "...877....778...",
-        "..877......778..", ".877........778.", ".77..........77.", "................"),
-    "run": (                                   # a play triangle
-        "................", "....77..........", "....787.........", "....7887........",
-        "....78887.......", "....788887......", "....7888887.....", "....78888887....",
-        "....78888887....", "....7888887.....", "....788887......", "....78887.......",
-        "....7887........", "....787.........", "....77..........", "................"),
-    "save": (                                  # a floppy disk
-        ".77777777777....", ".7.......7.7....", ".7.bbbbb.7.7....", ".7.bbbbb.7.7....",
-        ".7.bbbbb.7.7....", ".7.......7.7....", ".7.......7.7....", ".7777777777.....",
-        ".7.........7....", ".7.7777777.7....", ".7.7.....7.7....", ".7.7.....7.7....",
-        ".7.7.....7.7....", ".7.7.....7.7....", ".77777777777....", "................"),
-    "music": (                                 # a beamed pair of eighth notes
-        "................", "...........777..", "..........77777.", ".........7777777",
-        "........77...777", ".......777....77", ".......777....7.", ".......7.7......",
-        ".......7.7......", ".......7.7......", "..777..7.7......", ".77777.7.7......",
-        "7777777.77......", ".77777..77......", "..777...77......", "................"),
+    "home": (
+        "................", ".......77.......", "......8888......", ".....888888.....",
+        "....88888888....", "...8888888888...", "..888888888888..", ".77777777777777.",
+        ".7ffffffffffff7.", ".7f77ff11ff77f7.", ".7f77ff11ff77f7.", ".7ffffff11ffff7.",
+        ".7ffffff11ffff7.", ".7ffffff11ffff7.", ".77777777777777.", "................",
+    ),
+    "edit": (
+        ".............77.", "............7ee7", "...........7ee7.", "..........7aa7..",
+        ".........7aa7...", "........7aa7....", ".......7aa7.....", "......7aa7......",
+        ".....7aa7.......", "....7aa7........", "...7ff7.........", "..7ff7..........",
+        ".700f...........", "700.............", "................", "................",
+    ),
+    "code": (
+        "................", "................", ".....c....c.....", "....cc....cc....",
+        "...cc......cc...", "..cc........cc..", ".cc..........cc.", "cc............cc",
+        ".cc..........cc.", "..cc........cc..", "...cc......cc...", "....cc....cc....",
+        ".....c....c.....", "................", "................", "................",
+    ),
+    "paint": (
+        "..............77", ".............799", "............7997", "...........7997.",
+        "..........7997..", ".........7997...", "........7997....", ".......7667.....",
+        "......76667.....", ".....7eeee7.....", "....7eeeee7.....", "....7eeeee7.....",
+        ".....7eeee7.....", "......7ee7......", ".......77.......", "................",
+    ),
+    "map": (
+        "................", ".77777777777777.", ".7bbb7ccc7bbb77.", ".7bbb7ccc7bbb77.",
+        ".77777777777777.", ".7ccc7bbb7ccc77.", ".7ccc7bbb7ccc77.", ".77777777777777.",
+        ".7bbb7ccc7bbb77.", ".7bbb7ccc7bbb77.", ".77777777777777.", "................",
+        "................", "................", "................", "................",
+    ),
+    "blocks": (
+        "................", "..bbbbb.........", ".bb...bbbbbb....", ".bbbbbb....b....",
+        ".bccccccccccb...", ".cc........cc...", ".cccccc....cc...", ".ccaaaccccccc...",
+        ".caaaaaaaaaac...", ".aa........aa...", ".aaaaaa....aa...", ".aaaaaaaaaaaa...",
+        "................", "................", "................", "................",
+    ),
+    "gear": (
+        "......6..6......", ".....66..66.....", "..6..666666..6..", "..66666666666...",
+        "..6677777766....", ".66777777776666.", ".667700007766...", "66677000007766..",
+        "66677000007766..", ".667700007766...", ".66777777776666.", "..6677777766....",
+        "..66666666666...", "..6..666666..6..", ".....66..66.....", "......6..6......",
+    ),
+    "wifi": (
+        "................", "....77777777....", "..77........77..", ".7....7777....7.",
+        "....77....77....", "...7........7...", "......7777......", ".....7....7.....",
+        "........7.......", "................", ".......77.......", "......7887......",
+        ".......77.......", "................", "................", "................",
+    ),
+    "batt": (
+        "................", "................", "....77777777.7..", "...7........7.7.",
+        "...7.bbbbbb.7.7.", "...7.bbbbbb.7.7.", "...7.bbbbbb.7.7.", "...7.bbbbbb.7.7.",
+        "...7........7.7.", "....77777777.7..", "................", "................",
+        "................", "................", "................", "................",
+    ),
+    "new": (
+        "..7777777777....", "..7........7....", "..7...bb...7....", "..7...bb...7....",
+        "..7.bbbbbb.7....", "..7.bbbbbb.7....", "..7...bb...7....", "..7...bb...7....",
+        "..7........7....", "..7........7....", "..7........7....", "..7777777777....",
+        "................", "................", "................", "................",
+    ),
+    "dup": (
+        "....7777777.....", "....7......7....", "..7777777..7....", "..7......7.7....",
+        "..7......777....", "..7........7....", "..7........7....", "..7........7....",
+        "..7........7....", "..7........7....", "..77777777777...", "................",
+        "................", "................", "................", "................",
+    ),
+    "del": (
+        "................", ".....88888......", "...888888888....", ".88888888888888.",
+        "................", ".7777777777777..", ".7.7.7.7.7.7.7..", ".7.7.7.7.7.7.7..",
+        ".7.7.7.7.7.7.7..", ".7.7.7.7.7.7.7..", ".7.7.7.7.7.7.7..", "..77777777777...",
+        "..777777777.....", "................", "................", "................",
+    ),
+    "close": (
+        "................", ".88..........88.", "..88........88..", "...88......88...",
+        "....88....88....", ".....88..88.....", "......8888......", "......8888......",
+        ".....88..88.....", "....88....88....", "...88......88...", "..88........88..",
+        ".88..........88.", "................", "................", "................",
+    ),
+    "run": (
+        "................", "...bb...........", "...bbbb.........", "...bbbbbb.......",
+        "...bbbbbbbb.....", "...bbbbbbbbbb...", "...bbbbbbbbbbbb.", "...bbbbbbbbbb...",
+        "...bbbbbbbb.....", "...bbbbbb.......", "...bbbb.........", "...bb...........",
+        "................", "................", "................", "................",
+    ),
+    "save": (
+        "................", ".7777777777777..", ".7cc7777777cc7..", ".7cc7777777cc7..",
+        ".7cc7777777cc7..", ".7ccccccccccc7..", ".7c777777777c7..", ".7c7bbbbbbb7c7..",
+        ".7c7bbbbbbb7c7..", ".7c7777777b7c7..", ".7c7777777b7c7..", ".7ccccccccccc7..",
+        ".77777777777....", "................", "................", "................",
+    ),
+    "music": (
+        ".....77777777...", "....7cccccccc7..", "...7cc......cc..", "...cc.......cc..",
+        "...cc.......cc..", "...cc.......cc..", "...cc.......cc..", "...cc.......cc..",
+        ".7ccc.....7ccc..", "7cccc....7cccc..", "7cccc....7cccc..", ".7cc......7cc...",
+        "................", "................", "................", "................",
+    ),
 }
 
 
@@ -3843,8 +3860,8 @@ class Workstation:
                 self._tap_clock()
                 return
             self._clock_taps = 0                # any other desktop tap resets the run
-            if _in(px, py, lay.set_btn):        # gear -> Settings (replaces the dock)
-                self.open_settings()
+            if _in(px, py, lay.sysmenu_btn):    # ≡ -> system menu (Settings/About/Reboot live here now, #52)
+                self.toggle_sysmenu()
                 return
             if self.can_manage and _in(px, py, lay.new_btn):
                 self.new_cart(); return
@@ -4025,8 +4042,6 @@ class Workstation:
                     self._open_blocks()
                 elif _in(px, py, _MUSIC_BTN):
                     self._open_music()
-                elif _in(px, py, _BAR_GEAR):
-                    self.open_settings()       # gear on the in-cart bar -> Settings
                 elif self.show_fps and _in(px, py, self._fps_tap_rect()):
                     # Tapping the FPS readout toggles the frame-time breakdown HUD
                     # (#43/#44 perf). Deliberate, no keyboard, doesn't fight game
@@ -5586,12 +5601,13 @@ class Workstation:
         lay = self.layout
         cv.rect(0, 0, cv.w, lay.status_h, NAMES["black"])
         cv.rect(0, lay.status_h - 1, cv.w, 1, NAMES["dark_grey"])   # shelf edge line
-        # Right cluster: clock + wifi/batt/gear (gear = the Settings entry, always
-        # drawn -- the launcher has no bottom dock, #46).
+        # Right cluster: clock + wifi/batt (Settings now lives in the ≡ menu, #52).
         cv.print(self._clock_text(), lay.clock_x, 3, NAMES["light_grey"], 1)
         self._icon("wifi", lay.wifi_btn[0], lay.wifi_btn[1], cv)
         self._icon("batt", lay.batt_btn[0], lay.batt_btn[1], cv)
-        self._icon("gear", lay.set_btn[0], lay.set_btn[1], cv)
+        # ≡ system-menu toggle (leftmost, always) -- the launcher's Settings entry now,
+        # a _glyph bitmap like the in-cart bar so an older saved theme can't blank it.
+        self._glyph("menu", lay.sysmenu_btn, NAMES["white"], cv)
         # Left cluster: management icons (when writable) + the selected cart's name.
         if where == "home":
             if self.can_manage:
@@ -5626,11 +5642,10 @@ class Workstation:
         self._icon("map", _MAP_BTN[0], _MAP_BTN[1], cv)
         self._icon("blocks", _BLOCKS_BTN[0], _BLOCKS_BTN[1], cv)
         self._icon("music", _MUSIC_BTN[0], _MUSIC_BTN[1], cv)
-        # Right cluster: clock + wifi/batt/gear (gear -> Settings; Back resumes the cart).
+        # Right cluster: clock + wifi/batt (Settings now lives in the ≡ menu, not a gear).
         cv.print(self._clock_text(), _BAR_CLOCK[0], 3, NAMES["light_grey"], 1)
         self._icon("wifi", _BAR_WIFI[0], _BAR_WIFI[1], cv)
         self._icon("batt", _BAR_BATT[0], _BAR_BATT[1], cv)
-        self._icon("gear", _BAR_GEAR[0], _BAR_GEAR[1], cv)
 
     def _clock_text(self):
         """A wall-clock HH:MM from time.localtime when available, else a mm:ss
