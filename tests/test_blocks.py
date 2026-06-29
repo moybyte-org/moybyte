@@ -107,7 +107,7 @@ def test_catalog_is_wellformed():
         for slot in d["slots"]:
             assert slot["name"] and slot["type"] in (
                 blocks.SLOT_NUMBER, blocks.SLOT_TEXT, blocks.SLOT_VARIABLE,
-                blocks.SLOT_DROPDOWN, blocks.SLOT_EXPR), (tid, slot)
+                blocks.SLOT_LIST, blocks.SLOT_DROPDOWN, blocks.SLOT_EXPR), (tid, slot)
 
 
 def test_every_category_has_blocks():
