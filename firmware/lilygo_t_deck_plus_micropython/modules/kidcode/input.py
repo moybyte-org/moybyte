@@ -33,6 +33,26 @@ class InputState:
         self._released = self._last - self._held
         self._last = set(self._held)
 
+    def inject_button(self, name, down, pressed=False, released=False):
+        """Drive a button from a source that runs AFTER begin_frame -- the virtual
+        gamepad (#42), which hit-tests the pointer in handle_input. It can't rely on
+        begin_frame's _last edge snapshot (that ran before the touch was known, and the
+        keyboard's per-frame release_all rebuilds _held each frame), so the CALLER
+        computes the edge from its own previous-frame state and passes it: `down` sets
+        held(), `pressed`/`released` force the pressed()/released() edge for THIS button.
+        We force this button's membership in the SAME _pressed/_released the keyboard
+        path feeds (no parallel mechanism), overriding begin_frame's (possibly spurious)
+        verdict for it -- the verdict for OTHER (keyboard) buttons is untouched.
+        Single-pointer v1: the gamepad owns its 6 buttons while active."""
+        if name not in BUTTONS:
+            raise ValueError("unknown button: " + name)
+        if down:
+            self._held.add(name)
+        else:
+            self._held.discard(name)
+        (self._pressed.add if pressed else self._pressed.discard)(name)
+        (self._released.add if released else self._released.discard)(name)
+
     def release_all(self):
         self._held.clear()
 

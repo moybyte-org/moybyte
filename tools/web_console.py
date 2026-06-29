@@ -141,8 +141,12 @@ class WebConsole:
         # renders on (default 320x240 = today); the game stays a fixed 320x240,
         # composited as a centered viewport. The browser already reads canvas.w/h,
         # so a larger system canvas just fills more of the page.
+        # gamepad_default=True (#42 Thread 1): the web console is touch-only (no
+        # physical buttons), so the on-screen d-pad + A/B show by default -- the kid
+        # can still toggle it off in Settings (the choice persists in system.json).
         self.ws = host_app.build_workstation(save_dir, sys_size=sys_size,
-                                             font_scale=font_scale)
+                                             font_scale=font_scale,
+                                             gamepad_default=True)
         # The decided architecture: the web is a NEW CANVAS BACKEND. The shared
         # console draws the desktop chrome through the SYSTEM canvas every frame, so
         # we reassign THAT to a recording CommandCanvas WITHOUT touching
