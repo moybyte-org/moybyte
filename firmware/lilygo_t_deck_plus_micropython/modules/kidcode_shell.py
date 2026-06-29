@@ -11,6 +11,15 @@ RUN_TOUCH_CALIBRATE = False     # GT911 touch calibration dump (USB-friendly)
 RUN_KEYBOARD_PROBE = False      # keyboard byte dump over serial (USB-friendly)
 RUN_DESKTOP = True              # the v0.4 console: launcher + carts + editors
 
+# SD <-> display shared-SPI handoff (#56). When True, carts + the diag dump are read from
+# SD BEFORE init_display() via machine.SDCard -- but a successful pre-display mount (card
+# has files) leaves the shared SPI host claimed and intermittently breaks display init
+# ("display init failed: can't convert '' to int"). When False (default), NOTHING touches
+# SD before the panel is up: run_desktop loads carts AFTER init via the bus-safe
+# kc_sd/with_sd_live attach (its _load_carts(with_sd_live) path), so a populated SD can't
+# clobber the display bus. Flip True only to compare against the old pre-display path.
+PREFETCH_SD_BEFORE_DISPLAY = False
+
 BENCH_WINDOW_MS = 3000
 BENCH_BLOCK_PX = 64
 BENCH_BREATHER_MS = 150
@@ -18,13 +27,20 @@ BENCH_BREATHER_MS = 150
 
 def main():
     print("KidCode MicroPython shell starting")
-    # Offline diagnostics (kidcode_diag): the run_desktop takeover loop starves USB
-    # serial, so we persist a RAM log to /sd/kidcode/diag.log during the session and
-    # DUMP the previous session's file here -- BEFORE init_display(), the only window
-    # where (a) serial is alive and (b) the machine.SDCard read path is bus-safe (the
-    # panel isn't up yet, same pre-display window as the cart prefetch). Fully guarded.
-    _dump_diag()
-    prefetched_carts = _prefetch_carts() if (RUN_DESKTOP and not RUN_KEYBOARD_PROBE) else None
+    # SD <-> display handoff (#56): by DEFAULT touch NO SD before init_display(). A
+    # pre-display machine.SDCard mount (the diag dump + the cart prefetch) can leave the
+    # shared SPI host claimed and intermittently break display init on a populated card
+    # ("can't convert '' to int"). Instead, run_desktop loads carts AFTER the panel is up
+    # via the bus-safe with_sd_live attach (prefetched=None -> _load_carts(with_sd_live)),
+    # and on any SD failure it degrades to the built-in carts -- so this can only make
+    # display init MORE reliable, never less. PREFETCH_SD_BEFORE_DISPLAY=True restores the
+    # old pre-display path (which also re-enables the boot diag dump -- it needs that
+    # serial-alive, pre-panel window).
+    if PREFETCH_SD_BEFORE_DISPLAY:
+        _dump_diag()
+        prefetched_carts = _prefetch_carts() if (RUN_DESKTOP and not RUN_KEYBOARD_PROBE) else None
+    else:
+        prefetched_carts = None
     lv, _display, _task_handler = _init_display()
     if lv is None:
         _serial_fallback_loop(None)
