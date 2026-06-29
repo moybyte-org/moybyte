@@ -1894,6 +1894,14 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             ws.updater.set_wifi(ws.wifi, go_online=lambda: autoconnect_wifi(ws.wifi))
         except Exception as exc:
             print("KidCode: OTA wifi wiring failed:", exc)
+    # System menu (#52): the ≡ dropdown's "Reboot" row. On device a real reboot is
+    # machine.reset(); the shared console calls this injected hook (None on host -> a
+    # safe go_home stub). Additive -- it never touches the render/flush path.
+    try:
+        import machine
+        ws.reboot_hook = machine.reset
+    except Exception as exc:
+        print("KidCode: reboot hook unavailable:", exc)
     # WiFi is deliberately NOT brought up at boot: the WLAN stack reserves internal RAM
     # the LCD DMA flush needs, so autoconnecting here starved the panel flush (OSError
     # 257 / ESP_ERR_NO_MEM) and froze the desktop. DeviceWifi is lazy now -- the radio

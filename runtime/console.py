@@ -302,12 +302,20 @@ _BAR_ICON = 16              # icon sprite side (16x16, from the IconSheet)
 _BAR_GAP = 2               # px between adjacent bar icons
 _BAR_STRIDE = _BAR_ICON + _BAR_GAP        # 18: left-edge step between icons
 _BAR_Y = 1                 # icons sit 1px down in the 18px bar (1px top/bottom margin)
-_HOME_BTN = (2, _BAR_Y, _BAR_ICON, _BAR_ICON)                    # back to launcher
-_MENU_BTN = (2 + _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)      # Make-it-mine / code
-_PAINT_BTN = (2 + 2 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)  # paint editor
-_MAP_BTN = (2 + 3 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)   # map (tilemap) editor
-_BLOCKS_BTN = (2 + 4 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)  # block editor (#29)
-_MUSIC_BTN = (2 + 5 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)  # music/sound editor (#50)
+# System menu (#52): the hamburger (≡) is the LEFT-MOST icon (Picotron logo-top-left);
+# tapping it toggles the dropdown. It claims the old _HOME_BTN slot (x=2) and the tool
+# switchers HOME/EDIT/PAINT/MAP/BLOCKS/MUSIC shift one stride right so the bar stays a
+# single uninterrupted row. The hamburger is drawn via the _glyph BITMAP (not the
+# themeable IconSheet) so an already-themed device -- whose saved system_icons.kgfx has
+# no art for a new slot -- never shows a blank tile here. The rightmost switcher is now
+# MUSIC (#50) at slot 6 -> ends at x=126; the right cluster (clock at x=224..) is clear.
+_SYSMENU_BTN = (2, _BAR_Y, _BAR_ICON, _BAR_ICON)                 # ≡ dropdown toggle (slot 0)
+_HOME_BTN = (2 + _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)      # back to launcher
+_MENU_BTN = (2 + 2 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)  # Make-it-mine / code
+_PAINT_BTN = (2 + 3 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)  # paint editor
+_MAP_BTN = (2 + 4 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)   # map (tilemap) editor
+_BLOCKS_BTN = (2 + 5 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)  # block editor (#29)
+_MUSIC_BTN = (2 + 6 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)  # music/sound editor (#50)
 # Right cluster on the running-cart bar (GAME canvas, always 320 wide @ fs 1): gear
 # hard-right, then batt, wifi, then the clock text. Mirrors the launcher Layout's
 # right cluster so both bars read identically. The clock egg hit-test uses _BAR_CLOCK.
@@ -919,6 +927,10 @@ _GLYPHS = {
     "smile":  (0x0F0, 0x308, 0x404, 0x492, 0x492, 0x404, 0x444, 0x438, 0x404, 0x308, 0x0F0, 0x000),
     "key":    (0x000, 0x1C0, 0x220, 0x220, 0x1C0, 0x080, 0x080, 0x0E0, 0x080, 0x0E0, 0x000, 0x000),
     "spark":  (0x000, 0x060, 0x060, 0x060, 0x366, 0x1FC, 0x060, 0x1FC, 0x366, 0x060, 0x060, 0x000),
+    # "menu": the hamburger (≡) -- three full-width bars. The system-menu (#52) toggle;
+    # always a _glyph bitmap (NOT a themeable IconSheet slot) so it can't go blank on a
+    # device whose saved theme predates this icon.
+    "menu":   (0x000, 0x000, 0x7FE, 0x7FE, 0x000, 0x7FE, 0x7FE, 0x000, 0x7FE, 0x7FE, 0x000, 0x000),
 }
 
 
@@ -1472,6 +1484,136 @@ class _SilentAudio:
         pass
 
 
+# --- reusable overlay popup (#52) -------------------------------------------
+# A minimal left-anchored dropdown drawn ON TOP of whatever screen is up, with its
+# OWN open/selected state. It's the primitive the top-bar system menu is built on,
+# and is reusable for #55 (system-as-cart) / future menus. Index-only drawing (the
+# existing cls/rect/rectb/print verbs -- host == device, no new native primitive),
+# petme128 8x8 text, the _glyph fallback contract for an optional per-row icon.
+#
+# Items are tuples; the first element is a kind:
+#   ("header", text)               -- a dim section title; NOT cursor-selectable
+#   ("sep",)                        -- a 1px separator line between groups
+#   ("item", text, action)         -- a selectable row; `action` is called on activate
+# The cursor (`sel`) only ever lands on "item" rows (move()/_clamp skip the rest);
+# activate() runs the selected item's action then closes (close-on-select).
+_POPUP_X = 0                  # panel left edge (flush to the screen left, x = 0)
+_POPUP_Y = _STATUS_H          # top edge flush under the 18px bar (y = 18)
+_POPUP_W = 128                # panel width (~120-140px band; 128 keeps it clear of clock)
+_POPUP_ROW_H = 12             # per-row height (selectable + header rows alike)
+_POPUP_PAD_X = 4              # text inset from the panel left
+_POPUP_SEP_H = 1              # separator line height
+
+
+class Popup:
+    """A self-contained dropdown overlay (#52): owns open/closed + the moving cursor,
+    dismisses on outside-tap / ESC, and draws on top. Backend-agnostic -- the host and
+    the device drive it through the same indexed canvas."""
+
+    def __init__(self):
+        self.open = False
+        self.items = []               # list of row tuples (see module note above)
+        self.sel = 0                  # index of the highlighted SELECTABLE row
+
+    # -- open/close ----------------------------------------------------------
+    def show(self, items):
+        """Open with `items`, cursor on the first selectable row."""
+        self.items = list(items)
+        self.open = True
+        self.sel = self._first_selectable()
+
+    def close(self):
+        self.open = False
+
+    def toggle(self, items):
+        """≡ pressed: open with `items` if closed, else close (the same control
+        toggles it shut)."""
+        if self.open:
+            self.close()
+        else:
+            self.show(items)
+
+    # -- selectable-row helpers ----------------------------------------------
+    def _is_selectable(self, i):
+        return 0 <= i < len(self.items) and self.items[i][0] == "item"
+
+    def _first_selectable(self):
+        for i in range(len(self.items)):
+            if self.items[i][0] == "item":
+                return i
+        return 0
+
+    def _clamp_sel(self):
+        if not self._is_selectable(self.sel):
+            self.sel = self._first_selectable()
+
+    # -- navigation (cursor skips headers/separators; clamps at the ends) -----
+    def move(self, d):
+        """Step the highlight by d (+1 down / -1 up), skipping non-selectable rows.
+        Clamps at the first/last selectable row (no wrap)."""
+        if not self.open or d == 0:
+            return
+        step = 1 if d > 0 else -1
+        i = self.sel + step
+        while 0 <= i < len(self.items):
+            if self.items[i][0] == "item":
+                self.sel = i
+                return
+            i += step
+        # no further selectable row in that direction -> stay put (clamp)
+
+    def activate(self):
+        """Fire the selected row's action, then close (close-on-select). No-op when
+        closed or the cursor isn't on a selectable row."""
+        if not self.open:
+            return
+        self._clamp_sel()
+        if self._is_selectable(self.sel):
+            action = self.items[self.sel][2]
+            self.close()              # close BEFORE running so the action can re-open
+            if action is not None:
+                action()
+
+    # -- geometry + hit-testing ----------------------------------------------
+    def panel_rect(self):
+        """(x, y, w, h) of the whole panel -- height grows with the row count."""
+        h = 0
+        for it in self.items:
+            h += _POPUP_SEP_H if it[0] == "sep" else _POPUP_ROW_H
+        return (_POPUP_X, _POPUP_Y, _POPUP_W, h)
+
+    def row_at(self, px, py):
+        """Index of the row under (px, py), or None when outside the panel."""
+        if not self.open:
+            return None
+        x, y, w, h = self.panel_rect()
+        if not _in(px, py, (x, y, w, h)):
+            return None
+        cy = _POPUP_Y
+        for i in range(len(self.items)):
+            rh = _POPUP_SEP_H if self.items[i][0] == "sep" else _POPUP_ROW_H
+            if cy <= py < cy + rh:
+                return i
+            cy += rh
+        return None
+
+    def click(self, px, py):
+        """Apply a tap: outside the panel -> dismiss; on a selectable row -> move the
+        cursor there AND activate (tap = move+select in one gesture, #52); on a
+        header/separator -> swallow (taps inside the panel never dismiss). Returns
+        True when the tap was consumed (so the caller stops dispatching it)."""
+        if not self.open:
+            return False
+        i = self.row_at(px, py)
+        if i is None:
+            self.close()              # tap OUTSIDE dismisses
+            return True
+        if self.items[i][0] == "item":
+            self.sel = i
+            self.activate()
+        return True                    # tap inside is always consumed
+
+
 class Workstation:
     def __init__(self, comp, canvas, input, carts=None, sys_canvas=None,
                  font_scale=1, gamepad_default=False):
@@ -1662,6 +1804,15 @@ class Workstation:
         self.egg_until = 0            # _ticks_ms the egg popup hides at
         self._confetti_until = 0      # _ticks_ms the Konami confetti effect ends
         self.show_achievements = False  # the locked/unlocked list overlay (Settings entry)
+        # Top-bar system menu (#52): the ≡ dropdown. A reusable Popup owns its own
+        # open/selected state; the SYSTEM group (Settings/About/Reboot) is always
+        # present, a CART group (Restart/Delete) is prepended only while a cart is
+        # open. `_about` is a tiny dismissible info modal the About row pops.
+        self.sysmenu = Popup()
+        self._about = False
+        # Reboot hook: the device injects a callable (machine.reset via the OTA
+        # updater); None on the host -> the Reboot row is a safe no-op (go_home).
+        self.reboot_hook = None
         # Redraw-on-change (#44 step 1): a static UI screen costs ~0 -- frame() only
         # redraws + flushes when something visible changed. `_dirty` is the "redraw
         # this frame" flag; it starts True so the very first frame always paints, and
@@ -2202,6 +2353,67 @@ class Workstation:
             self._dirty = True
         else:
             self.go_home()
+
+    # -- top-bar system menu (#52) -------------------------------------------
+    #
+    # The ≡ dropdown built on the reusable Popup primitive. Contents are rebuilt each
+    # open from the live state: a SYSTEM group always (Settings / About / Reboot), and
+    # -- only when a cart is open -- a CART group PREPENDED (Restart / Delete). The
+    # actions wire to the existing console flows (open_settings, apply = re-run, the SD
+    # delete path). Selecting any row closes the menu (Popup.activate closes first).
+
+    def _sysmenu_items(self):
+        """The rows for this open of the ≡ menu (see class note for the tuple form).
+        The cart group is OMITTED entirely (not greyed) when no cart is open."""
+        rows = []
+        if self.cart is not None:
+            rows.append(("header", "CART"))
+            rows.append(("item", "RESTART CART", self._menu_restart_cart))
+            rows.append(("item", "DELETE CART", self._menu_delete_cart))
+            rows.append(("sep",))
+        rows.append(("header", "SYSTEM"))
+        rows.append(("item", "SETTINGS", self.open_settings))
+        rows.append(("item", "ABOUT", self._menu_about))
+        rows.append(("item", "REBOOT", self._menu_reboot))
+        return rows
+
+    def toggle_sysmenu(self):
+        """≡ tapped (or its keyboard shortcut): open the dropdown if closed, close it
+        if open. Rebuilds the item list so the cart group reflects the current state."""
+        self._dirty = True             # overlay open/close repaints (#44)
+        self.sysmenu.toggle(self._sysmenu_items())
+
+    def _menu_restart_cart(self):
+        # Re-run the open cart from its current config (TIC-80 restart), landing back
+        # on the running-cart screen -- exactly what GO/apply does.
+        if self.cart is not None:
+            self.apply()
+
+    def _menu_delete_cart(self):
+        # Delete the open cart (it IS the launcher selection -- open() set self.cart =
+        # launcher.selected()), then go home. del_cart guards read-only / last-cart.
+        before = len(self.launcher.items)
+        self.del_cart()
+        if len(self.launcher.items) < before:
+            self.go_home()
+
+    def _menu_about(self):
+        # A tiny dismissible info modal (any tap / ESC / B closes it), drawn on top.
+        self._dirty = True
+        self._about = True
+
+    def _menu_reboot(self):
+        # Device: the injected reboot hook (machine.reset). Host / no hook: a safe
+        # fallback to the home launcher (a hard reset would kill the sim window).
+        self._dirty = True
+        hook = self.reboot_hook
+        if hook is not None:
+            try:
+                hook()
+                return
+            except Exception as exc:  # noqa: BLE001
+                print("KidCode reboot failed:", exc)
+        self.go_home()                 # safe stub when no reboot hook is wired
 
     def settings_adjust(self, d):
         """Step the selected Settings row by d. Wallpaper/font apply + persist; the
@@ -3557,6 +3769,26 @@ class Workstation:
         # but never stale: a press that's a no-op costs one redraw, not a wrong screen.
         if getattr(i, "_pressed", None) or i.last_key:
             self._dirty = True
+        # System menu / About modal (#52): when either overlay is up it is MODAL --
+        # it eats this frame's keys (one moving cursor) and returns, so nav never
+        # leaks to the screen underneath. ESC (stop) / B dismiss; Up/Down move
+        # (skipping headers); Enter/A/RUN select (close-on-select). Checked before the
+        # per-screen branches (and before the gamepad housekeeping) so the menu owns
+        # input while open; closed = zero change.
+        if self._about:
+            if i.pressed("b") or i.pressed("stop") or i.pressed("a") or i.pressed("run"):
+                self._about = False
+            return
+        if self.sysmenu.open:
+            if i.pressed("b") or i.pressed("stop"):
+                self.sysmenu.close()
+            elif i.pressed("up"):
+                self.sysmenu.move(-1)
+            elif i.pressed("down"):
+                self.sysmenu.move(1)
+            elif i.pressed("a") or i.pressed("run"):
+                self.sysmenu.activate()
+            return
         # Virtual gamepad (#42): off the running-cart screen, release anything the pad
         # was holding so a button never sticks down into the launcher/editors. The
         # ACTIVE injection happens at the END of the desktop branch below -- after the
@@ -3857,6 +4089,24 @@ class Workstation:
         # pointer into game coords for those (#39). Also publish the game-space
         # pointer so the cart touch()/mouse() API reads the viewport, not the panel.
         gx, gy = self._game_xy(px, py)
+        # System menu / About modal (#52): drawn on the SYSTEM canvas at fixed top-left
+        # coords, so they hit-test in SYSTEM (px, py) -- NOT the game viewport. When
+        # either is up it's MODAL and checked FIRST: the tap is consumed here (a row taps
+        # move+select, a tap OUTSIDE dismisses) and never falls through to the screen
+        # underneath. Clear the game pointer's tap too so a running cart's touch() never
+        # also sees a tap the menu just swallowed.
+        if self._about:
+            if click:
+                self._about = False        # any tap dismisses the About modal
+                self._dirty = True
+            self.input.game_pointer = (gx, gy, False, False)
+            return
+        if self.sysmenu.open:
+            if click:
+                self._dirty = True
+                self.sysmenu.click(px, py)   # row -> move+select; outside -> dismiss
+            self.input.game_pointer = (gx, gy, False, False)
+            return                     # swallow non-click moves too while it's open
         # Virtual gamepad coexistence (#42): a touch that lands on a pad zone is
         # CONSUMED by the pad -- it must NOT also register as a touch() tap in the play
         # area. So when the pad is live and the pointer is over a zone, publish the
@@ -3883,7 +4133,9 @@ class Workstation:
             # _HOME_BTN/_MENU_BTN/... constants the bar draws from, so a tap on an icon
             # fires its action.
             if click:
-                if _in(px, py, _HOME_BTN):
+                if _in(px, py, _SYSMENU_BTN):
+                    self.toggle_sysmenu()      # ≡ -> open the dropdown system menu (#52)
+                elif _in(px, py, _HOME_BTN):
                     self.go_home()
                 elif _in(px, py, _MENU_BTN):
                     self._open_menu()
@@ -5357,6 +5609,13 @@ class Workstation:
             self._draw_egg()
         if self.ach.toast_active():
             self._draw_toast()
+        # System menu dropdown + About modal (#52): drawn on TOP of every screen (after
+        # the cart/editor composite + the egg/achievement overlays) so the dropdown
+        # sits over whatever is underneath, then the cursor goes above even that.
+        if self.sysmenu.open:
+            self._draw_sysmenu()
+        if self._about:
+            self._draw_about()
         self._draw_cursor()
         # Perf HUD (#43/#44): time the panel DMA flush in isolation, then back out
         # the draw span (everything before it this frame). On the host _NullComp the
@@ -5481,6 +5740,9 @@ class Workstation:
         # schema open the cards menu (pencil = EDIT); the rest jump straight to code
         # (the < > glyph = CODE). cart may be None defensively (error panel, no cart).
         has_edit = bool(self.cart.get("edit")) if self.cart else False
+        # ≡ system-menu toggle (#52), leftmost. A _glyph bitmap (not a themeable
+        # IconSheet slot) so it never goes blank on a device with an older saved theme.
+        self._glyph("menu", _SYSMENU_BTN, NAMES["white"], cv)
         self._icon("home", _HOME_BTN[0], _HOME_BTN[1], cv)
         self._icon("edit" if has_edit else "code", _MENU_BTN[0], _MENU_BTN[1], cv)
         self._icon("paint", _PAINT_BTN[0], _PAINT_BTN[1], cv)
@@ -5745,6 +6007,74 @@ class Workstation:
         cv.rectb(x, y, w, h, NAMES["pink"])
         self._glyph(glyph, (x + 4, y + 7, 16, 16), NAMES["peach"], cv)
         cv.print(line, x + 24, y + 11, NAMES["white"], 1)
+
+    def _draw_sysmenu(self):
+        """The ≡ dropdown (#52): a left-anchored panel flush under the bar, one row per
+        item. The selected row gets a full-width bright accent fill + light label;
+        unselected rows sit on the panel base fill; headers read dim grey and a 1px
+        line separates groups. Index-only verbs + petme128 text (host == device). All
+        on the SYSTEM canvas, on top of everything."""
+        cv = self.sys_canvas
+        m = self.sysmenu
+        x, y, w, h = m.panel_rect()
+        cv.rect(x, y, w, h, NAMES["dark_purple"])          # panel base fill
+        cv.rectb(x, y, w, h, NAMES["indigo"])              # framed edge
+        cy = _POPUP_Y
+        for idx in range(len(m.items)):
+            it = m.items[idx]
+            kind = it[0]
+            if kind == "sep":
+                cv.rect(x + 1, cy, w - 2, _POPUP_SEP_H, NAMES["indigo"])
+                cy += _POPUP_SEP_H
+                continue
+            label = it[1]
+            tx = x + _POPUP_PAD_X
+            ty = cy + 2
+            if kind == "header":
+                cv.print(label, tx, ty, NAMES["dark_grey"], 1)   # dim section title
+            elif idx == m.sel:
+                cv.rect(x + 1, cy, w - 2, _POPUP_ROW_H, NAMES["indigo"])  # highlight
+                cv.print(label, tx, ty, NAMES["white"], 1)
+            else:
+                cv.print(label, tx, ty, NAMES["light_grey"], 1)
+            cy += _POPUP_ROW_H
+
+    def _draw_about(self):
+        """The ABOUT info modal (#52): a small centered panel with the console name +
+        firmware version, dismissed by any tap / ESC / B. Drawn on top of everything."""
+        cv = self.sys_canvas
+        lines = ("KIDCODE CONSOLE", "v0.4", "", "TAP TO CLOSE")
+        ver = self._firmware_version_text()
+        if ver:
+            lines = ("KIDCODE CONSOLE", ver, "", "TAP TO CLOSE")
+        w = 0
+        for ln in lines:
+            w = max(w, len(ln) * 8)
+        w += 24
+        w = min(w, cv.w - 16)
+        h = 20 + len(lines) * 12
+        x = (cv.w - w) // 2
+        y = (cv.h - h) // 2
+        cv.rect(x, y, w, h, NAMES["black"])
+        cv.rectb(x, y, w, h, NAMES["pink"])
+        ly = y + 10
+        for ln in lines:
+            cv.print(ln, x + (w - len(ln) * 8) // 2, ly, NAMES["white"], 1)
+            ly += 12
+
+    def _firmware_version_text(self):
+        """A short firmware-version string for ABOUT, or "" when unknown (host). Reads
+        the injected updater's version when present (device kc_ota.FIRMWARE_VERSION)."""
+        u = self.updater
+        if u is not None:
+            v = getattr(u, "version", None)
+            try:
+                v = v() if callable(v) else v
+            except Exception:  # noqa: BLE001
+                v = None
+            if v is not None:
+                return "FW " + str(v)
+        return ""
 
     def _draw_confetti(self):
         """The Konami egg's celebration: a scatter of colored spark glyphs that
