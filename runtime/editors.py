@@ -879,3 +879,344 @@ class BlockEditor:
             if r.kind == "block" and r.block is blk:
                 self.cur = i
                 return
+
+
+# -- music / sound editor (#50) ----------------------------------------------
+
+# Editable bounds for an SFX step, mirrored from runtime/audio.py so this core
+# stays dependency-free (the docstring contract): a step is [pitch, wave, vol].
+# pitch is a semitone index 0..95 (C0..B7) or -1 for a rest; wave is 0..3
+# (square/triangle/saw/noise); vol is 0..7. The console renders pitch as a note
+# name; this core only ever stores/clamps the integers, so it never imports audio.
+_ME_REST = -1
+_ME_PITCH_MIN = 0
+_ME_PITCH_MAX = 95
+_ME_WAVE_MIN = 0
+_ME_WAVE_MAX = 3
+_ME_VOL_MIN = 0
+_ME_VOL_MAX = 7
+_ME_SPEED_MIN = 1
+_ME_SPEED_MAX = 30          # steps/slots per second (kid-sane upper bound)
+_ME_STEPS_MAX = 32          # most steps a single SFX may hold
+_ME_PATTERN_MAX = 32        # most slots a music track may hold
+
+
+def _me_clamp(v, lo, hi):
+    if v < lo:
+        return lo
+    if v > hi:
+        return hi
+    return v
+
+
+class MusicEditor:
+    """Tracker/step-editor state over a cart's AudioBank (#50) -- the sound analogue
+    of MapEditor/PaintEditor. Pure logic: no canvas, no synth, no I/O, so the *same*
+    file backs the host console and the frozen device console. The console wraps it
+    with rendering + input + live preview (it drives the injected AudioEngine; this
+    core never makes sound itself).
+
+    It edits the bank IN PLACE through two views the kid flips between:
+
+      view == "sfx"  -- a column of STEPS for one SFX. Each step is [pitch, wave,
+                        vol]; the cursor picks a step, and nudge_pitch/cycle_wave/
+                        nudge_vol/toggle_rest edit it. select_sfx walks the bank's
+                        SFX list (creating a fresh empty SFX past the end so the kid
+                        can author new effects), and nudge_speed sets playback speed.
+
+      view == "song" -- the looping PHRASE: a row of SLOTS, each an SFX id. The
+                        cursor picks a slot; set_slot / nudge_slot point it at an SFX,
+                        add_slot/del_slot grow/shrink the phrase, nudge_speed sets the
+                        phrase tempo. select_track walks the bank's music tracks.
+
+    The bank is guaranteed non-empty on construction (a default SFX + track are
+    created if missing) so the grid is never blank. `dirty` tracks unsaved edits so
+    the console can show a `*` and SAVE; the bank's own to_dict drives sounds.json."""
+
+    SFX_VIEW = "sfx"
+    SONG_VIEW = "song"
+
+    def __init__(self, bank, sfx_factory=None, track_factory=None):
+        # `bank` is an audio.AudioBank. The factories build a fresh SFX / MusicTrack
+        # WITHOUT importing audio here (dependency-free): the console passes them, or
+        # we fall back to cloning the type of an existing entry. They take no args and
+        # return an empty-ish SFX / MusicTrack.
+        self.bank = bank
+        self._sfx_factory = sfx_factory
+        self._track_factory = track_factory
+        self.view = self.SFX_VIEW
+        self.sfx_idx = 0          # which SFX is being edited (sfx view)
+        self.step = 0             # selected step within that SFX (sfx view)
+        self.track_idx = 0        # which music track is being edited (song view)
+        self.slot = 0             # selected slot within that track (song view)
+        self.dirty = False
+        self._ensure_nonempty()
+
+    # -- bank bootstrapping --------------------------------------------------
+    def _new_sfx(self):
+        """A fresh, single-rest SFX (so a new effect has one editable step)."""
+        if self._sfx_factory is not None:
+            s = self._sfx_factory()
+        elif self.bank.sfx:
+            s = type(self.bank.sfx[0])()      # clone the concrete SFX class, empty
+        else:
+            return None
+        if not s.steps:
+            s.steps = [[_ME_REST, _ME_WAVE_MIN, _ME_VOL_MAX - 1]]
+        return s
+
+    def _new_track(self):
+        """A fresh music track with one slot pointing at SFX 0."""
+        if self._track_factory is not None:
+            t = self._track_factory()
+        elif self.bank.music:
+            t = type(self.bank.music[0])()
+        else:
+            return None
+        if not t.pattern:
+            t.pattern = [0]
+        return t
+
+    def _ensure_nonempty(self):
+        """The editor must never face an empty bank/SFX/track -- seed minimal ones."""
+        if not self.bank.sfx:
+            s = self._new_sfx()
+            if s is not None:
+                self.bank.sfx.append(s)
+        if not self.bank.music:
+            t = self._new_track()
+            if t is not None:
+                self.bank.music.append(t)
+        self._clamp()
+        # A loaded SFX could carry zero steps; give the cursor a real step to land on.
+        s = self.cur_sfx()
+        if s is not None and not s.steps:
+            s.steps.append([_ME_REST, _ME_WAVE_MIN, _ME_VOL_MAX - 1])
+
+    # -- current selection ---------------------------------------------------
+    def cur_sfx(self):
+        if 0 <= self.sfx_idx < len(self.bank.sfx):
+            return self.bank.sfx[self.sfx_idx]
+        return None
+
+    def cur_track(self):
+        if 0 <= self.track_idx < len(self.bank.music):
+            return self.bank.music[self.track_idx]
+        return None
+
+    def cur_step(self):
+        """The [pitch, wave, vol] list under the cursor in the sfx view, or None."""
+        s = self.cur_sfx()
+        if s is not None and 0 <= self.step < len(s.steps):
+            return s.steps[self.step]
+        return None
+
+    def step_count(self):
+        s = self.cur_sfx()
+        return len(s.steps) if s is not None else 0
+
+    def slot_count(self):
+        t = self.cur_track()
+        return len(t.pattern) if t is not None else 0
+
+    def _clamp(self):
+        self.sfx_idx = _me_clamp(self.sfx_idx, 0, max(0, len(self.bank.sfx) - 1))
+        self.track_idx = _me_clamp(self.track_idx, 0, max(0, len(self.bank.music) - 1))
+        n = self.step_count()
+        self.step = _me_clamp(self.step, 0, max(0, n - 1)) if n else 0
+        m = self.slot_count()
+        self.slot = _me_clamp(self.slot, 0, max(0, m - 1)) if m else 0
+
+    # -- view + cursor -------------------------------------------------------
+    def toggle_view(self):
+        """Flip between the SFX step grid and the SONG phrase."""
+        self.view = self.SONG_VIEW if self.view == self.SFX_VIEW else self.SFX_VIEW
+
+    def select_cursor(self, i):
+        """Place the cursor on step / slot index `i` (clamped) for the active view."""
+        if self.view == self.SFX_VIEW:
+            n = self.step_count()
+            if n:
+                self.step = _me_clamp(int(i), 0, n - 1)
+        else:
+            m = self.slot_count()
+            if m:
+                self.slot = _me_clamp(int(i), 0, m - 1)
+
+    def move_cursor(self, d):
+        """Move the step/slot cursor by d (honors magnitude, clamped to the ends)."""
+        if self.view == self.SFX_VIEW:
+            self.select_cursor(self.step + d)
+        else:
+            self.select_cursor(self.slot + d)
+
+    # -- SFX selection -------------------------------------------------------
+    def select_sfx(self, d):
+        """Step the edited-SFX index by d. Walking PAST the last SFX appends a fresh
+        empty one (so the kid grows the bank just by pressing >), then clamps. Going
+        before 0 clamps at 0. Resets the step cursor to the start of the new SFX."""
+        target = self.sfx_idx + d
+        if target >= len(self.bank.sfx):
+            s = self._new_sfx()
+            if s is not None:
+                self.bank.sfx.append(s)
+                self.dirty = True
+        self.sfx_idx = _me_clamp(target, 0, max(0, len(self.bank.sfx) - 1))
+        self.step = 0
+        self._clamp()
+
+    def select_track(self, d):
+        """Step the edited-track index by d; past the end appends a fresh track."""
+        target = self.track_idx + d
+        if target >= len(self.bank.music):
+            t = self._new_track()
+            if t is not None:
+                self.bank.music.append(t)
+                self.dirty = True
+        self.track_idx = _me_clamp(target, 0, max(0, len(self.bank.music) - 1))
+        self.slot = 0
+        self._clamp()
+
+    # -- SFX step edits ------------------------------------------------------
+    def nudge_pitch(self, d):
+        """Raise/lower the current step's pitch by d semitones. A rest stays a rest
+        until toggle_rest gives it a real pitch (so nudging a rest is a no-op)."""
+        st = self.cur_step()
+        if st is None or st[0] < 0:
+            return
+        st[0] = _me_clamp(st[0] + d, _ME_PITCH_MIN, _ME_PITCH_MAX)
+        self.dirty = True
+
+    def set_pitch(self, pitch):
+        """Set the current step to an explicit pitch (a semitone index, or <0 rest)."""
+        st = self.cur_step()
+        if st is None:
+            return
+        st[0] = _ME_REST if pitch < 0 else _me_clamp(int(pitch), _ME_PITCH_MIN, _ME_PITCH_MAX)
+        self.dirty = True
+
+    def toggle_rest(self, default_pitch=57):
+        """Toggle the current step between a rest and a real note. Leaving a rest
+        restores `default_pitch` (A4=57 by default) so the kid hears something."""
+        st = self.cur_step()
+        if st is None:
+            return
+        if st[0] < 0:
+            st[0] = _me_clamp(int(default_pitch), _ME_PITCH_MIN, _ME_PITCH_MAX)
+        else:
+            st[0] = _ME_REST
+        self.dirty = True
+
+    def cycle_wave(self, d=1):
+        """Step the current step's waveform (square/triangle/saw/noise), wrapping."""
+        st = self.cur_step()
+        if st is None:
+            return
+        span = _ME_WAVE_MAX - _ME_WAVE_MIN + 1
+        st[1] = _ME_WAVE_MIN + (st[1] - _ME_WAVE_MIN + d) % span
+        self.dirty = True
+
+    def nudge_vol(self, d):
+        """Raise/lower the current step's volume (0=silent .. 7=loud), clamped."""
+        st = self.cur_step()
+        if st is None:
+            return
+        st[2] = _me_clamp(st[2] + d, _ME_VOL_MIN, _ME_VOL_MAX)
+        self.dirty = True
+
+    def cycle_vol(self, d=1):
+        """Step the current step's volume with wraparound (7 -> 0), so a single
+        tap-only button can cycle through every level (touch UI convenience)."""
+        st = self.cur_step()
+        if st is None:
+            return
+        span = _ME_VOL_MAX - _ME_VOL_MIN + 1
+        st[2] = _ME_VOL_MIN + (st[2] - _ME_VOL_MIN + d) % span
+        self.dirty = True
+
+    def add_step(self):
+        """Append a step (a copy of the current one, or a default) to the current SFX
+        and move the cursor to it. Capped at _ME_STEPS_MAX."""
+        s = self.cur_sfx()
+        if s is None or len(s.steps) >= _ME_STEPS_MAX:
+            return
+        src = self.cur_step()
+        new = list(src) if src is not None else [_ME_REST, _ME_WAVE_MIN, _ME_VOL_MAX - 1]
+        s.steps.insert(self.step + 1, new)
+        self.step += 1
+        self.dirty = True
+
+    def del_step(self):
+        """Remove the current step (keeps at least one step so the grid never empties)."""
+        s = self.cur_sfx()
+        if s is None or len(s.steps) <= 1:
+            return
+        del s.steps[self.step]
+        if self.step >= len(s.steps):
+            self.step = len(s.steps) - 1
+        self.dirty = True
+
+    # -- tempo / length ------------------------------------------------------
+    def nudge_speed(self, d):
+        """Change the playback speed of the ACTIVE object: the current SFX in the sfx
+        view (steps/sec), the current track in the song view (slots/sec). Clamped."""
+        obj = self.cur_sfx() if self.view == self.SFX_VIEW else self.cur_track()
+        if obj is None:
+            return
+        obj.speed = _me_clamp(obj.speed + d, _ME_SPEED_MIN, _ME_SPEED_MAX)
+        self.dirty = True
+
+    def toggle_loop(self):
+        """Flip the loop flag of the active object (SFX in sfx view, track in song)."""
+        obj = self.cur_sfx() if self.view == self.SFX_VIEW else self.cur_track()
+        if obj is None:
+            return
+        obj.loop = not obj.loop
+        self.dirty = True
+
+    # -- song (phrase) edits -------------------------------------------------
+    def cur_slot_value(self):
+        """The SFX id at the cursor slot in the song view, or None."""
+        t = self.cur_track()
+        if t is not None and 0 <= self.slot < len(t.pattern):
+            return t.pattern[self.slot]
+        return None
+
+    def nudge_slot(self, d):
+        """Point the current phrase slot at the next/previous SFX id, clamped to the
+        bank's SFX range (you can only sequence effects that exist)."""
+        t = self.cur_track()
+        if t is None or not (0 <= self.slot < len(t.pattern)):
+            return
+        hi = max(0, len(self.bank.sfx) - 1)
+        t.pattern[self.slot] = _me_clamp(t.pattern[self.slot] + d, 0, hi)
+        self.dirty = True
+
+    def set_slot(self, sfx_id):
+        """Set the current phrase slot to a specific SFX id (clamped to the bank)."""
+        t = self.cur_track()
+        if t is None or not (0 <= self.slot < len(t.pattern)):
+            return
+        hi = max(0, len(self.bank.sfx) - 1)
+        t.pattern[self.slot] = _me_clamp(int(sfx_id), 0, hi)
+        self.dirty = True
+
+    def add_slot(self):
+        """Append a phrase slot (copying the current slot's SFX id) and move to it."""
+        t = self.cur_track()
+        if t is None or len(t.pattern) >= _ME_PATTERN_MAX:
+            return
+        val = t.pattern[self.slot] if 0 <= self.slot < len(t.pattern) else 0
+        t.pattern.insert(self.slot + 1, val)
+        self.slot += 1
+        self.dirty = True
+
+    def del_slot(self):
+        """Remove the current phrase slot (keeps at least one so a track always plays)."""
+        t = self.cur_track()
+        if t is None or len(t.pattern) <= 1:
+            return
+        del t.pattern[self.slot]
+        if self.slot >= len(t.pattern):
+            self.slot = len(t.pattern) - 1
+        self.dirty = True
