@@ -46,7 +46,9 @@ IMAGE_MAGIC = 0xE9          # first byte of an ESP32 app image (esp_image_header
 #       (and the version) via a generated `_ota_build` module from KIDCODE_OTA_CHANNEL, so
 #       the committed default stays "stable" and the channel is a build choice -- clean
 #       across merges, not a per-branch source edit.
-FIRMWARE_VERSION = 1
+FIRMWARE_VERSION = 2            # v2: SD<->display boot fix (#56), Sky Run (#54), the WiFi
+                                # OTA online path confirmed on hardware + 4x faster streamed
+                                # download (#53). Bump on every stable release.
 FIRMWARE_CHANNEL = "stable"
 FIRMWARE_LABEL = None
 try:
@@ -59,7 +61,10 @@ except Exception:
 
 OTA_CFG_NAME = "ota.json"        # /sd/update/ota.json -> {"channels": {"stable": url, ...}}
 DOWNLOAD_NAME = "firmware.bin"   # WiFi downloads land here (then the Phase-2 install runs)
-DL_CHUNK = 4096                  # socket read / SD write granularity for the streamed image
+DL_CHUNK = 16384                 # bytes streamed (and written to SD in ONE op) per frame.
+                                 # The per-frame cost (panel flush + SD sync + repaint) is
+                                 # FIXED, so a bigger block amortizes it: 4K/frame crawled
+                                 # (~100KB/s), 16K is ~4x. Matches the install step's 32K.
 
 
 class OtaUpdater:
@@ -365,22 +370,38 @@ class OtaUpdater:
         on any failure. Blocking network call -- the console runs it once, between
         frames, behind a CHECKING... screen."""
         self.error = None
+        _log("check_online channel=%r running=%s/%s" % (
+            channel, FIRMWARE_CHANNEL, FIRMWARE_VERSION))
         url = self.manifest_url(channel)
+        _log("manifest_url ->", url)
         if not url:
             self.error = "no manifest url"
+            _log("ABORT: no /sd/update/ota.json (or no url for channel)")
             return None
-        if not self.ensure_online():
+        online = self.ensure_online()
+        try:
+            st = self._wifi.status() if self._wifi is not None else None
+        except Exception as exc:
+            st = ("status err", exc)
+        _log("ensure_online ->", online, "wifi.status=", st)
+        if not online:
             self.error = "wifi offline"
             return None
         try:
             txt = self._http_get_text(url)
+            _log("manifest body len=", len(txt) if txt is not None else None,
+                 "err=", self.error)
             if txt is None:
                 return None
             import json
 
-            return json.loads(txt)
+            m = json.loads(txt)
+            _log("manifest parsed: version=%r channel=%r size=%r" % (
+                m.get("version"), m.get("channel"), m.get("size")))
+            return m
         except Exception as exc:
             self.error = _short(exc)
+            _log("manifest fetch/parse FAILED:", self.error)
             return None
 
     def begin_download(self, manifest):
@@ -389,6 +410,7 @@ class OtaUpdater:
         self.error = None
         self.dl_done = 0
         url = manifest.get("url")
+        _log("begin_download url=", url)
         if not url:
             raise ValueError("manifest has no url")
         self.dl_total = int(manifest.get("size", 0) or 0)
@@ -403,6 +425,8 @@ class OtaUpdater:
             raise ValueError("http %d" % code)
         if not self.dl_total and clen:
             self.dl_total = clen
+        _log("download starting size=%d (rest=%d)" % (self.dl_total, len(rest)))
+        self._dl_logged = 0
 
         import hashlib
 
@@ -424,24 +448,41 @@ class OtaUpdater:
             self._consume(rest)
 
     def download_step(self, max_bytes=DL_CHUNK):
-        """Stream one chunk socket -> SD. Returns True while more remains, False at EOF
-        (then call download_finish()). One SD session per step (same as install)."""
+        """Stream up to max_bytes socket -> SD in ONE write per call. Returns True while
+        more remains, False at EOF (then call download_finish()). One SD session per step,
+        so the console repaints the bar between steps. Filling a whole block per frame
+        (vs the old 4K) is the speed lever -- the per-frame flush/sync/repaint cost is
+        fixed, so more bytes per frame divides it down."""
         if self._sock is None or self._dl_f is None:
             return False
+        buf = bytearray()
         try:
-            chunk = self._sock.read(max_bytes)
+            while len(buf) < max_bytes:
+                chunk = self._sock.read(max_bytes - len(buf))
+                if not chunk:
+                    break                      # EOF (server closed) -- flush what we have
+                buf += chunk
         except Exception as exc:
             self.error = _short(exc)
+            _log("download read FAILED at %d/%d:" % (self.dl_done, self.dl_total),
+                 self.error)
             self._dl_close()
             return False
-        if not chunk:
-            return False                       # EOF (server closed the connection)
+        if not buf:
+            _log("download EOF at %d/%d" % (self.dl_done, self.dl_total))
+            return False                       # clean EOF on a block boundary
         try:
-            self._consume(chunk)
+            self._consume(buf)                 # one hash update + one SD write of the block
         except Exception as exc:
             self.error = _short(exc)
+            _log("download SD write FAILED at %d/%d:" % (self.dl_done, self.dl_total),
+                 self.error)
             self._dl_close()
             return False
+        # Progress breadcrumb every ~256K so a stall is visible without spamming serial.
+        if self.dl_done - getattr(self, "_dl_logged", 0) >= 262144:
+            self._dl_logged = self.dl_done
+            _log("download %d/%d" % (self.dl_done, self.dl_total))
         return True
 
     def _consume(self, chunk):
@@ -459,6 +500,7 @@ class OtaUpdater:
         self._dl_close()
         if self.dl_total and self.dl_done != self.dl_total:
             self.error = "size %d/%d" % (self.dl_done, self.dl_total)
+            _log("download_finish SIZE MISMATCH:", self.error)
             return None
         if self._dl_sha:
             try:
@@ -467,10 +509,14 @@ class OtaUpdater:
                 got = binascii.hexlify(self._hash.digest()).decode()
             except Exception as exc:
                 self.error = _short(exc)
+                _log("download_finish hash err:", self.error)
                 return None
             if got != self._dl_sha:
                 self.error = "sha256 mismatch"
+                _log("download_finish SHA MISMATCH got=%s want=%s" % (
+                    got[:12], self._dl_sha[:12]))
                 return None
+        _log("download_finish OK bytes=%d ->" % self.dl_done, self.path)
         return self.path
 
     def download_cancel(self):
@@ -526,17 +572,22 @@ class OtaUpdater:
         import socket
 
         scheme, host, port, path = self._parse_url(url)
+        _log("http_open %s host=%s port=%d path=%s" % (scheme, host, port, path))
         ai = socket.getaddrinfo(host, port)[0]
+        _log("getaddrinfo ->", ai[-1])
         sock = socket.socket(ai[0], ai[1], ai[2])
         sock.settimeout(15)
         sock.connect(ai[-1])
+        _log("connected")
         if scheme == "https":
             import ssl
 
             sock = ssl.wrap_socket(sock, server_hostname=host)
+            _log("tls wrapped")
         req = ("GET %s HTTP/1.0\r\nHost: %s\r\n"
                "User-Agent: kidcode-ota\r\nConnection: close\r\n\r\n" % (path, host))
         sock.write(req.encode())
+        _log("request sent, reading headers")
 
         hdr = b""
         while b"\r\n\r\n" not in hdr:
@@ -561,6 +612,7 @@ class OtaUpdater:
                     clen = int(ln.split(b":", 1)[1].strip())
                 except Exception:
                     clen = 0
+        _log("http status=%d content-length=%d" % (code, clen))
         return sock, code, clen, rest
 
     def _http_get_text(self, url, limit=8192):
@@ -588,7 +640,24 @@ class OtaUpdater:
 
 
 def _short(exc):
+    # Keep the errno/class visible: an OSError's str() is often just the bare errno
+    # (e.g. "113"), so prefix the class name to make the on-screen + serial text legible.
     s = str(exc)
+    cls = exc.__class__.__name__
     if not s:
-        s = exc.__class__.__name__
-    return s[:40]
+        s = cls
+    elif cls in ("OSError", "ValueError") and s[:1].isdigit():
+        s = "%s %s" % (cls, s)
+    return s[:48]
+
+
+def _log(*a):
+    # Verbose OTA-online trace to serial (#53). During check_online / download the
+    # device is mostly blocked in socket I/O (not the tx_color busy-wait that starves
+    # USB), so these prints DO reach a passive `/dev/ttyACM*` reader -- the only window
+    # into the WiFi update path, which the native desktop loop otherwise hides. Guarded
+    # so a logging hiccup can never break an update.
+    try:
+        print("KidCode OTA:", *a)
+    except Exception:
+        pass
