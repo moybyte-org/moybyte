@@ -280,7 +280,7 @@ def test_web_console_font_scale_change_does_not_crash(tmp_path):
     wc.ws.cycle_font_scale(1)                              # 1x -> 2x (was the crash)
     assert wc.ws.font_scale == 2
     assert wc.canvas.font_scale == 2
-    cmds, _ = wc.step_frame()
+    cmds, _, _ = wc.step_frame()
     cv = Canvas(640, 480)
     replay_to_canvas(cmds, cv)                             # scaled text replays cleanly
     assert len(set(cv.buf)) > 4
@@ -295,13 +295,13 @@ def test_web_console_larger_canvas_streams_and_replays(tmp_path):
     from runtime.canvas import Canvas
     wc = WebConsole(str(tmp_path / "carts"), sys_size=(640, 480))
     assert wc.assets()["w"] == 640 and wc.assets()["h"] == 480
-    cmds, _ = wc.step_frame()                       # the launcher (reflowed)
+    cmds, _, _ = wc.step_frame()                       # the launcher (reflowed)
     cv = Canvas(640, 480)
     replay_to_canvas(cmds, cv)
     assert len(set(cv.buf)) > 4                      # the desktop replayed
     wc.ws.launcher.sel = 0
     wc.ws.open()
-    cmds, _ = wc.step_frame()                       # a running cart
+    cmds, _, _ = wc.step_frame()                       # a running cart
     assert "spr" in [c[0] for c in cmds]            # the game viewport blit command
     cv2 = Canvas(640, 480)
     replay_to_canvas(cmds, cv2)

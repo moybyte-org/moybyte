@@ -62,6 +62,7 @@ encode its framebuffer.
 """
 
 import argparse
+import base64
 import json
 import os
 import sys
@@ -72,6 +73,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer  # noqa: E402
 
 from runtime import font  # noqa: E402  (petme128 glyphs -> JSON for the replayer)
+from runtime import audio as _audio  # noqa: E402  (engine sample rate for the browser player)
 from runtime import host_app  # noqa: E402  (runs the SHARED console.Workstation)
 from runtime import palette  # noqa: E402  (KID64 index -> RGB)
 from tools.command_canvas import CommandCanvas  # noqa: E402  (the recording backend)
@@ -236,17 +238,23 @@ class WebConsole:
 
     # -- output --------------------------------------------------------------
     def step_frame(self):
-        """Advance the console one frame and return (commands, cart_title).
+        """Advance the console one frame and return (commands, cart_title, audio_b64).
 
         The console draws into the CommandCanvas during driver.frame(); we take the
         recorded list afterward. We clear any stale commands first so a partially
-        recorded frame (shouldn't happen under the lock) can never leak in."""
+        recorded frame (shouldn't happen under the lock) can never leak in. We also
+        drain the per-cart audio backend's last rendered PCM block (signed-16 LE mono)
+        and base64 it -- the browser plays the FINISHED samples, so there's no second
+        synth in JS. Empty string when nothing played this frame (no cart / silence)."""
         with self._lock:
             self.canvas.take_commands()      # drop anything stale (defensive)
             self.driver.frame(self.dt)
             cmds = self.canvas.take_commands()
             cart = self._cart_title()
-        return cmds, cart
+            au = getattr(self.ws, "audio", None)
+            pcm = au.take_pcm() if (au is not None and hasattr(au, "take_pcm")) else b""
+            audio_b64 = base64.b64encode(pcm).decode("ascii") if (pcm and any(pcm)) else ""
+        return cmds, cart, audio_b64
 
     def assets(self):
         """The static render assets the browser needs: palette + font + the open
@@ -262,6 +270,7 @@ class WebConsole:
             "sheet": sheet,
             "tilemap": tilemap,
             "cart": cart,
+            "audio_rate": _audio.AudioEngine().rate,   # PCM sample rate for the browser player
         }
 
 
@@ -303,11 +312,11 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(200, assets)
         elif path == "/frame":
             try:
-                cmds, cart = self.console.step_frame()
+                cmds, cart, audio = self.console.step_frame()
             except Exception as exc:  # noqa: BLE001 -- a frame error must not kill the server
                 self._send(500, str(exc).encode("utf-8"), "text/plain; charset=utf-8")
                 return
-            self._send_json(200, {"cmds": cmds, "cart": cart})
+            self._send_json(200, {"cmds": cmds, "cart": cart, "audio": audio})
         else:
             self._send(404, b"not found", "text/plain; charset=utf-8")
 

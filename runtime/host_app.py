@@ -49,6 +49,7 @@ class FakeAudio:
         self.engine = engine
         self.calls = []           # [("sfx", n, chan), ("beep", f, d), ...]
         self.rendered = 0         # total PCM frames pulled via tick()
+        self.last_pcm = b""       # most recent tick()'s PCM block (drained by the web console)
 
     def sfx(self, n, chan=None):
         self.calls.append(("sfx", int(n), chan))
@@ -77,8 +78,19 @@ class FakeAudio:
     def tick(self, dt):
         n = int(self.engine.rate * max(0.0, dt))
         if n > 0:
-            self.engine.render(n)
+            # Keep the rendered block (was discarded) so the web console can stream the
+            # FINISHED PCM to the browser -- no second synth in JS (audio.py stays the
+            # single source of truth). The device/headless paths just ignore last_pcm.
+            self.last_pcm = self.engine.render(n)
             self.rendered += n
+
+    def take_pcm(self):
+        """Hand off the last tick()'s PCM (signed-16 LE mono bytes) and clear it. The
+        web console drains this each frame to stream finished audio; empty between
+        renders or when nothing is playing."""
+        pcm = self.last_pcm
+        self.last_pcm = b""
+        return pcm
 
 
 def make_audio(engine):
