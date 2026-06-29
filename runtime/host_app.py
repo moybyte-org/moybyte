@@ -273,6 +273,24 @@ def make_host_wifi(store=None, root=None):
     return HostWifi(store, root)
 
 
+class _Layer:
+    """A scroll background (#54): a wider off-screen canvas the cart pre-renders a
+    level into ONCE, then window-copies to the screen per frame via draw_layer. Exposes
+    the draw verbs (sheet/tilemap-aware, pixel-identical to the main api) bound to its
+    OWN canvas, plus W/H. Built by the api's make_layer(w, h). Mirrors kid_runtime."""
+
+    _VERBS = ("cls", "pix", "line", "rect", "rectb", "circ", "circb",
+              "spr", "spr_batch", "map", "mget", "mset", "print",
+              "camera", "clip", "pal", "palt")
+
+    def __init__(self, canvas, ns):
+        self._canvas = canvas
+        self.W = canvas.w
+        self.H = canvas.h
+        for k in _Layer._VERBS:
+            setattr(self, k, ns[k])
+
+
 def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
              pmem=None, wifi=None):
     """The cartridge global namespace on the host -- same names/signature as the
@@ -425,12 +443,43 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
             return 0
         return pmem.cell(index, value)
 
+    def make_layer(w, h):
+        # make_layer(w, h) -> a scroll background (#54): a wider off-screen canvas the
+        # cart pre-renders a level into ONCE (with the SAME verbs -- cls/map/spr/rect/
+        # circ/print/...), then window-copies to the screen each frame via draw_layer.
+        # Replaces a per-frame full-background re-render (map() over a scrolling level,
+        # ~12-14ms) with a flat memory copy (~7ms) -- the lever for ~60fps scrollers.
+        lc = canvas.new_layer(w, h)
+        lns = make_api(lc, input, config, sheet, audio, tilemap, pmem, wifi)
+        return _Layer(lc, lns)
+
+    def draw_layer(layer, cam_x=0, cam_y=0):
+        # draw_layer(layer, cam_x, cam_y): blit the visible W x H window of `layer` at
+        # the camera offset into the framebuffer (this frame's background; draw actors
+        # on top afterwards). The camera is clamped to [0, layer - screen] so the full
+        # window always lands -- no torn edge at the world boundary.
+        lc = layer._canvas
+        cx = int(cam_x)
+        cy = int(cam_y)
+        maxx = lc.w - canvas.w
+        maxy = lc.h - canvas.h
+        if cx < 0:
+            cx = 0
+        elif maxx > 0 and cx > maxx:
+            cx = maxx
+        if cy < 0:
+            cy = 0
+        elif maxy > 0 and cy > maxy:
+            cy = maxy
+        canvas.blit_window_from(lc, cx, cy)
+
     ns = {
         "W": canvas.w, "H": canvas.h,
         "cls": canvas.cls, "pix": canvas.pix,
         "line": canvas.line, "rect": canvas.rect, "rectb": canvas.rectb,
         "circ": canvas.circ, "circb": canvas.circb, "spr": spr,
         "spr_batch": spr_batch,
+        "make_layer": make_layer, "draw_layer": draw_layer,
         "map": map_, "mget": mget, "mset": mset,
         "print": canvas.print, "touch": touch, "mouse": mouse,
         "clip": canvas.clip, "camera": canvas.camera,
