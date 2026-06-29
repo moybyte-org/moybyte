@@ -164,6 +164,14 @@ class WebConsole:
             # the launcher grid + chrome reflect the recorder's size/scale.
             self.ws._sys_canvas = self.canvas
             self.ws._relayout()
+        # Rebind the wallpaper to the recording canvas we just swapped in. build_workstation
+        # compiled the wallpaper cart's draw API against the ORIGINAL canvas, so without
+        # this its cls()/backdrop draws go to the orphaned canvas and never reach the
+        # stream -- the browser's retained buffer is then never cleared and the chrome
+        # ghosts across redraws (the device clears its framebuffer regardless, so it looks
+        # fine there). Recompiling re-runs make_api against the current ws.canvas.
+        if getattr(self.ws, "wallpaper_id", None):
+            self.ws.select_wallpaper(self.ws.wallpaper_id, persist=False)
         # Live, real-connection-aware WiFi (your PC is online) -- matches the
         # interactive pygame run, so network carts test against real sockets.
         self.ws.wifi = host_app.make_host_wifi(host_app.kid_carts, self.ws.carts_root)
