@@ -811,19 +811,21 @@ class BlockEditor:
     def add_var(self, name):
         """Declare a new variable (so variable slots can reference it). The name is
         sanitized into a safe identifier (kid free-text -> `my_score`), de-duplicated,
-        and blanks are ignored. Returns the variable list."""
+        and blanks / names already used by a list are ignored. Returns the variable
+        list."""
         name = self.blocks.sanitize_var_name(name)
         vars_ = self.program.setdefault("vars", [])
-        if name and name not in vars_:
+        if name and name not in vars_ and name not in self.lists():
             vars_.append(name)
             self.dirty = True
         return vars_
 
     def new_var(self, base="var"):
         """Create a freshly-named variable with a sensible default (var, var2, ...)
-        the kid can rename. Returns the new variable's name (so the UI can drop the
-        kid straight into renaming it)."""
-        name = self.blocks.unique_var_name(self.variables(), base)
+        the kid can rename. The name is unique across BOTH variables and lists (they
+        share the module-level global namespace). Returns the new variable's name."""
+        taken = self.variables() + self.lists()
+        name = self.blocks.unique_var_name(taken, base)
         self.program.setdefault("vars", []).append(name)
         self.dirty = True
         return name
@@ -837,18 +839,17 @@ class BlockEditor:
         vars_ = self.program.setdefault("vars", [])
         if not new or old not in vars_:
             return None
-        if new != old and new in vars_:
-            return None                       # would collide with another variable
+        if new != old and (new in vars_ or new in self.lists()):
+            return None                       # would collide with a var/list
         vars_[vars_.index(old)] = new
-        self._rewrite_var_refs(old, new)
+        self._rewrite_name_refs(old, new, self.blocks.SLOT_VARIABLE)
         self.dirty = True
         return new
 
-    def _rewrite_var_refs(self, old, new):
-        """Walk the tree and rewrite every SLOT_VARIABLE slot value that equals `old`
-        to `new` (statements' params, nested expression params, child bodies)."""
-        SLOT_VARIABLE = self.blocks.SLOT_VARIABLE
-
+    def _rewrite_name_refs(self, old, new, slot_type):
+        """Walk the tree and rewrite every slot of `slot_type` whose value equals `old`
+        to `new` (statements' params, nested expression params, child bodies). Shared by
+        the variable and list renamers (#48)."""
         def walk(node):
             if not isinstance(node, dict):
                 return
@@ -857,7 +858,7 @@ class BlockEditor:
             if d is not None:
                 for slot in d["slots"]:
                     nm = slot["name"]
-                    if slot["type"] == SLOT_VARIABLE and params.get(nm) == old:
+                    if slot["type"] == slot_type and params.get(nm) == old:
                         params[nm] = new
             for v in params.values():
                 walk(v)                       # nested expression blocks in expr slots
@@ -869,6 +870,47 @@ class BlockEditor:
 
     def variables(self):
         return list(self.program.get("vars", []) or [])
+
+    # -- lists (#48) ---------------------------------------------------------
+    # Lists mirror variables: declared at the program level, picked into list slots,
+    # created + named through the same on-screen-keyboard flow. A list and a variable
+    # can't share a name (both compile to module-level globals).
+    def add_list(self, name):
+        """Declare a new list. The name is sanitized into a safe identifier, blanks /
+        duplicates / names already used by a variable are ignored. Returns the list."""
+        name = self.blocks.sanitize_var_name(name)
+        lists_ = self.program.setdefault("lists", [])
+        if name and name not in lists_ and name not in self.variables():
+            lists_.append(name)
+            self.dirty = True
+        return lists_
+
+    def new_list(self, base="list"):
+        """Create a freshly-named list (list, list2, ...) the kid can rename. The name
+        is unique across BOTH lists and variables. Returns the new list's name."""
+        taken = self.lists() + self.variables()
+        name = self.blocks.unique_var_name(taken, base)
+        self.program.setdefault("lists", []).append(name)
+        self.dirty = True
+        return name
+
+    def rename_list(self, old, new):
+        """Rename a declared list AND rewrite every list-slot reference to it. Sanitized;
+        a blank / duplicate / clash with a variable is rejected. Returns the applied
+        name, or None."""
+        new = self.blocks.sanitize_var_name(new)
+        lists_ = self.program.setdefault("lists", [])
+        if not new or old not in lists_:
+            return None
+        if new != old and (new in lists_ or new in self.variables()):
+            return None
+        lists_[lists_.index(old)] = new
+        self._rewrite_name_refs(old, new, self.blocks.SLOT_LIST)
+        self.dirty = True
+        return new
+
+    def lists(self):
+        return list(self.program.get("lists", []) or [])
 
     # -- helpers -------------------------------------------------------------
     def _select_block(self, blk):

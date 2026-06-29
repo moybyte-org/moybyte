@@ -31,10 +31,15 @@
 # A *program* is:
 #
 #     {"vars": [<name str>, ...],
+#      "lists": [<name str>, ...],
 #      "scripts": [<event block>, ...]}
 #
 #   "vars"     declared variables (each becomes a module-level global initialized
 #              to 0; `set_var`/`change_var` write them, `var` reads them).
+#   "lists"    declared lists (#48; each becomes a module-level global initialized
+#              to []; list_add/list_clear/list_remove_at write them, list_get/
+#              list_len read them, and for_each iterates one). OPTIONAL -- an older
+#              blocks.json with no "lists" key loads as having none (back-compat).
 #   "scripts"  the top level: a flat list of EVENT blocks (on_start / on_update /
 #              on_draw). Each event's "c" is its body. The compiler emits one cart
 #              lifecycle function per event kind (_init/_update/_draw), so at most
@@ -86,6 +91,7 @@ except ImportError:  # pragma: no cover
 SLOT_NUMBER = "number"      # a numeric literal (int/float)
 SLOT_TEXT = "text"          # a string literal (rendered quoted)
 SLOT_VARIABLE = "variable"  # a variable NAME (one of program["vars"])
+SLOT_LIST = "list"          # a list NAME (one of program["lists"]) -- #48
 SLOT_DROPDOWN = "dropdown"  # one option from the slot's `options` list
 SLOT_EXPR = "expr"          # a nested expression block (operator/var/input/...)
 
@@ -99,12 +105,13 @@ CAT_CONTROL = "control"
 CAT_DRAW = "draw"
 CAT_INPUT = "input"
 CAT_VARIABLES = "variables"
+CAT_LISTS = "lists"          # #48: the multi-thing data type
 CAT_OPERATORS = "operators"
 CAT_SOUND = "sound"
 
 CATEGORY_ORDER = [
     CAT_EVENTS, CAT_CONTROL, CAT_DRAW, CAT_INPUT,
-    CAT_VARIABLES, CAT_OPERATORS, CAT_SOUND,
+    CAT_VARIABLES, CAT_LISTS, CAT_OPERATORS, CAT_SOUND,
 ]
 
 # Color name (KID64) per category -- the Scratch *look* (Part 2 paints blocks
@@ -115,6 +122,7 @@ CATEGORY_COLOR = {
     CAT_DRAW: "blue",
     CAT_INPUT: "indigo",
     CAT_VARIABLES: "red",
+    CAT_LISTS: "peach",
     CAT_OPERATORS: "green",
     CAT_SOUND: "pink",
 }
@@ -206,6 +214,33 @@ CATALOG = {
         "label": "wait {secs} seconds",
         "slots": [_slot("secs", SLOT_NUMBER, default=1)],
         "emit": "_wait({secs})",
+    },
+    "repeat_until": {
+        "category": CAT_CONTROL, "shape": SHAPE_CBLOCK,
+        "label": "repeat until {cond}",
+        "slots": [_slot("cond", SLOT_EXPR)],
+        "emit": "repeat_until",   # NOTE: emits a bounded loop on-cart (see compiler)
+    },
+    "wait_until": {
+        "category": CAT_CONTROL, "shape": SHAPE_STATEMENT,
+        "label": "wait until {cond}",
+        "slots": [_slot("cond", SLOT_EXPR)],
+        # frame loop: a true block-until can't run (it would freeze the console), so
+        # this is a documented no-op -- the cart's own _update keeps polling each
+        # frame, which is how a kid actually waits for a condition (see _HELPER_WAIT_UNTIL).
+        "emit": "_wait_until({cond})",
+    },
+    "stop": {
+        "category": CAT_CONTROL, "shape": SHAPE_STATEMENT,
+        "label": "stop this script",
+        "slots": [],
+        "emit": "return",   # returns from the current lifecycle function (always valid)
+    },
+    "break_loop": {
+        "category": CAT_CONTROL, "shape": SHAPE_STATEMENT,
+        "label": "break out of loop",
+        "slots": [],
+        "emit": "break",    # only emitted inside a loop; a stray one becomes `pass`
     },
 
     # -- draw ----------------------------------------------------------------
@@ -368,6 +403,110 @@ CATALOG = {
         # countable number, not 7.34; perfect for a random screen position too).
         "slots": [_slot("n", SLOT_EXPR, default=10)], "expr": "int(rnd({n}))",
     },
+    # -- more operators (#48): comparisons + math reporters ------------------
+    "op_le": {
+        "category": CAT_OPERATORS, "shape": SHAPE_EXPR, "label": "{a} <= {b}",
+        "slots": [_slot("a", SLOT_EXPR), _slot("b", SLOT_EXPR)], "expr": "({a} <= {b})",
+    },
+    "op_ge": {
+        "category": CAT_OPERATORS, "shape": SHAPE_EXPR, "label": "{a} >= {b}",
+        "slots": [_slot("a", SLOT_EXPR), _slot("b", SLOT_EXPR)], "expr": "({a} >= {b})",
+    },
+    "op_ne": {
+        "category": CAT_OPERATORS, "shape": SHAPE_EXPR, "label": "{a} != {b}",
+        "slots": [_slot("a", SLOT_EXPR), _slot("b", SLOT_EXPR)], "expr": "({a} != {b})",
+    },
+    "op_mod": {
+        "category": CAT_OPERATORS, "shape": SHAPE_EXPR, "label": "{a} mod {b}",
+        "slots": [_slot("a", SLOT_EXPR), _slot("b", SLOT_EXPR)], "expr": "({a} % {b})",
+    },
+    "op_round": {
+        "category": CAT_OPERATORS, "shape": SHAPE_EXPR, "label": "round {a}",
+        "slots": [_slot("a", SLOT_EXPR)], "expr": "round({a})",
+    },
+    "op_abs": {
+        "category": CAT_OPERATORS, "shape": SHAPE_EXPR, "label": "abs {a}",
+        "slots": [_slot("a", SLOT_EXPR)], "expr": "abs({a})",
+    },
+    "op_min": {
+        "category": CAT_OPERATORS, "shape": SHAPE_EXPR, "label": "min of {a} and {b}",
+        "slots": [_slot("a", SLOT_EXPR), _slot("b", SLOT_EXPR)], "expr": "min({a}, {b})",
+    },
+    "op_max": {
+        "category": CAT_OPERATORS, "shape": SHAPE_EXPR, "label": "max of {a} and {b}",
+        "slots": [_slot("a", SLOT_EXPR), _slot("b", SLOT_EXPR)], "expr": "max({a}, {b})",
+    },
+    "op_sqrt": {
+        # sqrt without importing math (carts import nothing): x ** 0.5 is portable.
+        "category": CAT_OPERATORS, "shape": SHAPE_EXPR, "label": "sqrt {a}",
+        "slots": [_slot("a", SLOT_EXPR)], "expr": "(({a}) ** 0.5)",
+    },
+    # simple string ops (clean, no helpers needed except a safe "letter of")
+    "op_join": {
+        "category": CAT_OPERATORS, "shape": SHAPE_EXPR, "label": "join {a} {b}",
+        "slots": [_slot("a", SLOT_EXPR), _slot("b", SLOT_EXPR)],
+        "expr": "(str({a}) + str({b}))",
+    },
+    "op_text_len": {
+        "category": CAT_OPERATORS, "shape": SHAPE_EXPR, "label": "length of text {a}",
+        "slots": [_slot("a", SLOT_EXPR)], "expr": "len(str({a}))",
+    },
+    "op_letter": {
+        "category": CAT_OPERATORS, "shape": SHAPE_EXPR, "label": "letter {n} of {a}",
+        # 1-based like Scratch; a safe helper returns "" when out of range.
+        "slots": [_slot("n", SLOT_EXPR, default=1), _slot("a", SLOT_EXPR)],
+        "expr": "_letter({a}, {n})",
+    },
+
+    # -- lists (#48): the multi-thing data type ------------------------------
+    # Statements mutate a declared list; reporters read it; for_each iterates it.
+    "list_add": {
+        "category": CAT_LISTS, "shape": SHAPE_STATEMENT,
+        "label": "add {item} to {list}",
+        "slots": [_slot("item", SLOT_EXPR), _slot("list", SLOT_LIST)],
+        "emit": "{list}.append({item})",
+    },
+    "list_clear": {
+        "category": CAT_LISTS, "shape": SHAPE_STATEMENT,
+        "label": "clear {list}",
+        "slots": [_slot("list", SLOT_LIST)],
+        "emit": "{list} = []",          # reassigns -> the function gets `global {list}`
+    },
+    "list_remove_at": {
+        "category": CAT_LISTS, "shape": SHAPE_STATEMENT,
+        "label": "remove item {index} of {list}",
+        # 1-based index; a safe helper ignores an out-of-range index (no crash).
+        "slots": [_slot("index", SLOT_EXPR, default=1), _slot("list", SLOT_LIST)],
+        "emit": "_lremove({list}, {index})",
+    },
+    "list_set_at": {
+        "category": CAT_LISTS, "shape": SHAPE_STATEMENT,
+        "label": "set item {index} of {list} to {item}",
+        # 1-based; a safe helper ignores an out-of-range index.
+        "slots": [_slot("index", SLOT_EXPR, default=1), _slot("list", SLOT_LIST),
+                  _slot("item", SLOT_EXPR)],
+        "emit": "_lset({list}, {index}, {item})",
+    },
+    "list_get": {
+        "category": CAT_LISTS, "shape": SHAPE_EXPR,
+        "label": "item {index} of {list}",
+        # 1-based; the helper returns 0 for an out-of-range index (kid-safe).
+        "slots": [_slot("index", SLOT_EXPR, default=1), _slot("list", SLOT_LIST)],
+        "expr": "_lget({list}, {index})",
+    },
+    "list_len": {
+        "category": CAT_LISTS, "shape": SHAPE_EXPR,
+        "label": "length of {list}",
+        "slots": [_slot("list", SLOT_LIST)],
+        "expr": "len({list})",
+    },
+    "for_each": {
+        "category": CAT_LISTS, "shape": SHAPE_CBLOCK,
+        "label": "for each {var} in {list}",
+        # `var` is a declared variable (the loop var); the body runs once per item.
+        "slots": [_slot("var", SLOT_VARIABLE), _slot("list", SLOT_LIST)],
+        "emit": "for_each",
+    },
 
     # -- sound ---------------------------------------------------------------
     "sfx": {
@@ -471,6 +610,8 @@ def _default_for(slot):
         return ""
     if t == SLOT_VARIABLE:
         return ""
+    if t == SLOT_LIST:
+        return ""
     if t == SLOT_DROPDOWN:
         opts = slot_options(slot)
         return opts[0] if opts else ""
@@ -552,21 +693,36 @@ def _render_number(v):
     return repr(float(v))
 
 
-def _render_value(value, slot, known_vars):
+class _Ctx:
+    """Compile context threaded through the emitters (#48). It carries the declared
+    names (so a variable / list slot is validated against them, never code), the
+    `assigned` map for `global` hoisting, and `loop_depth` so a `break out of loop`
+    block only emits `break` when it really is inside a loop (a stray one becomes a
+    safe `pass`, so the generated Python always parses)."""
+
+    def __init__(self, known_vars, known_lists, assigned):
+        self.vars = known_vars
+        self.lists = known_lists
+        self.assigned = assigned        # name -> True (a function reassigns it -> global)
+        self.loop_depth = 0
+
+
+def _render_value(value, slot, ctx):
     """Render a param VALUE for a slot into a code fragment.
 
     - expr slot: value is either a nested expression block (dict) or a literal.
     - number slot: a numeric literal.
     - text slot: a quoted string literal.
-    - variable slot: a bare variable NAME (validated against known_vars).
+    - variable slot: a bare variable NAME (validated against ctx.vars).
+    - list slot: a bare list NAME (validated against ctx.lists).
     - dropdown slot: a quoted option string (color/button name).
     """
     kind = slot["type"]
     if kind == SLOT_EXPR:
-        return _render_expr(value, known_vars)
+        return _render_expr(value, ctx)
     if kind == SLOT_NUMBER:
         if isinstance(value, dict):              # tolerate an expr in a number slot
-            return _render_expr(value, known_vars)
+            return _render_expr(value, ctx)
         if _is_number(value):
             return _render_number(value)
         # tolerate a numeric string ("10"); else fall back to 0
@@ -578,15 +734,20 @@ def _render_value(value, slot, known_vars):
         return _render_text_literal(value)
     if kind == SLOT_VARIABLE:
         name = str(value)
-        if name not in known_vars:
+        if name not in ctx.vars:
             raise BlockError("unknown variable: " + name)
+        return name
+    if kind == SLOT_LIST:
+        name = str(value)
+        if name not in ctx.lists:
+            raise BlockError("unknown list: " + name)
         return name
     if kind == SLOT_DROPDOWN:
         return _render_text_literal(value)
     return _render_number(0)
 
 
-def _render_expr(value, known_vars):
+def _render_expr(value, ctx):
     """Render an EXPRESSION (an expr-slot value) to a code fragment.
 
     A literal number stays a number; a literal string is quoted; a dict is an
@@ -610,7 +771,7 @@ def _render_expr(value, known_vars):
     for slot in d["slots"]:
         name = slot["name"]
         filled[name] = _render_value(params.get(name, _default_for(slot)),
-                                     slot, known_vars)
+                                     slot, ctx)
     return _fill(template, filled)
 
 
@@ -624,9 +785,21 @@ def _fill(template, parts):
     return out
 
 
-def _emit_statement(block, known_vars, indent, lines, assigned):
+# How many iterations a "bounded" kid loop (forever / repeat until) runs before it
+# gives up -- big enough to feel endless within a frame, small enough never to hang
+# the single-threaded console loop.
+_LOOP_CAP = 100000
+
+# Statements that REASSIGN a name (vs. mutate it in place), so the function that
+# contains them must hoist that name with `global`. set/change write a variable;
+# list_clear rebinds a list (name = []). The in-place list ops (.append, _lset,
+# _lremove) mutate the existing object, so they need NO global.
+_REASSIGN_VAR = ("set_var", "change_var")
+
+
+def _emit_statement(block, ctx, indent, lines):
     """Append the line(s) for one statement/c-block at `indent` to `lines`.
-    Records any variable a statement assigns into `assigned` (for global hoisting)."""
+    Records any name a statement reassigns into ctx.assigned (for global hoisting)."""
     tid = block.get("t")
     d = CATALOG.get(tid)
     if d is None:
@@ -636,26 +809,33 @@ def _emit_statement(block, known_vars, indent, lines, assigned):
     params = block.get("p", {}) or {}
 
     if shape == SHAPE_STATEMENT:
-        # variable-assigning statements: record the target for `global` hoisting.
-        if tid in ("set_var", "change_var"):
-            assigned[str(params.get("var", ""))] = True
+        # reassigning statements: record the target for `global` hoisting.
+        if tid in _REASSIGN_VAR:
+            ctx.assigned[str(params.get("var", ""))] = True
+        elif tid == "list_clear":
+            ctx.assigned[str(params.get("list", ""))] = True
+        # `break out of loop` outside any loop would be a SyntaxError -- degrade it to
+        # a harmless `pass` so a misplaced block never makes the cart fail to compile.
+        if tid == "break_loop" and ctx.loop_depth <= 0:
+            lines.append(pad + "pass")
+            return
         filled = {}
         for slot in d["slots"]:
             name = slot["name"]
             filled[name] = _render_value(params.get(name, _default_for(slot)),
-                                         slot, known_vars)
+                                         slot, ctx)
         lines.append(pad + _fill(d["emit"], filled))
         return
 
     if shape == SHAPE_CBLOCK:
-        _emit_cblock(tid, d, block, known_vars, indent, lines, assigned)
+        _emit_cblock(tid, d, block, ctx, indent, lines)
         return
 
     # an expression block used where a statement is expected -- malformed program.
     raise BlockError("expression block used as a statement: " + str(tid))
 
 
-def _emit_body(children, known_vars, indent, lines, assigned):
+def _emit_body(children, ctx, indent, lines):
     """Emit a list of child statements at `indent`. Empty bodies get `pass` so the
     generated Python always parses."""
     real = [c for c in children if c.get("t") != ELSE_MARKER]
@@ -663,23 +843,31 @@ def _emit_body(children, known_vars, indent, lines, assigned):
         lines.append(_INDENT * indent + "pass")
         return
     for child in real:
-        _emit_statement(child, known_vars, indent, lines, assigned)
+        _emit_statement(child, ctx, indent, lines)
 
 
-def _emit_cblock(tid, d, block, known_vars, indent, lines, assigned):
+def _emit_loop_body(children, ctx, indent, lines):
+    """Emit a loop body, tracking loop nesting so a `break out of loop` inside it
+    emits a real `break` (and one outside any loop degrades to `pass`)."""
+    ctx.loop_depth += 1
+    _emit_body(children, ctx, indent, lines)
+    ctx.loop_depth -= 1
+
+
+def _emit_cblock(tid, d, block, ctx, indent, lines):
     pad = _INDENT * indent
     children = block.get("c", []) or []
     params = block.get("p", {}) or {}
     emit = d["emit"]
 
     if emit == "if":
-        cond = _render_expr(params.get("cond", 0), known_vars)
+        cond = _render_expr(params.get("cond", 0), ctx)
         lines.append(pad + "if " + cond + ":")
-        _emit_body(children, known_vars, indent + 1, lines, assigned)
+        _emit_body(children, ctx, indent + 1, lines)
         return
 
     if emit == "if_else":
-        cond = _render_expr(params.get("cond", 0), known_vars)
+        cond = _render_expr(params.get("cond", 0), ctx)
         # children are split into the if-body and the else-body on the ELSE_MARKER.
         if_body, else_body, seen_else = [], [], False
         for c in children:
@@ -688,19 +876,19 @@ def _emit_cblock(tid, d, block, known_vars, indent, lines, assigned):
                 continue
             (else_body if seen_else else if_body).append(c)
         lines.append(pad + "if " + cond + ":")
-        _emit_body(if_body, known_vars, indent + 1, lines, assigned)
+        _emit_body(if_body, ctx, indent + 1, lines)
         lines.append(pad + "else:")
-        _emit_body(else_body, known_vars, indent + 1, lines, assigned)
+        _emit_body(else_body, ctx, indent + 1, lines)
         return
 
     if emit == "repeat":
         times = _render_value(params.get("times", 10),
-                              {"name": "times", "type": SLOT_NUMBER}, known_vars)
+                              {"name": "times", "type": SLOT_NUMBER}, ctx)
         # int() guards a float count; the loop var is namespaced so nested repeats
         # never collide and it can't clash with a kid's variable.
         lvar = "_i%d" % indent
         lines.append(pad + "for " + lvar + " in range(int(" + times + ")):")
-        _emit_body(children, known_vars, indent + 1, lines, assigned)
+        _emit_loop_body(children, ctx, indent + 1, lines)
         return
 
     if emit == "forever":
@@ -709,8 +897,33 @@ def _emit_cblock(tid, d, block, known_vars, indent, lines, assigned):
         # body still runs "forever" from the kid's point of view within a frame,
         # and the cart's own _update/_draw is what actually repeats each frame.
         lvar = "_i%d" % indent
-        lines.append(pad + "for " + lvar + " in range(100000):")
-        _emit_body(children, known_vars, indent + 1, lines, assigned)
+        lines.append(pad + "for " + lvar + " in range(%d):" % _LOOP_CAP)
+        _emit_loop_body(children, ctx, indent + 1, lines)
+        return
+
+    if emit == "repeat_until":
+        # "repeat until cond" -- like forever, it must stay bounded (a kid can write a
+        # condition that never becomes true, and a true `while` would hang the frame).
+        # So: a bounded loop that breaks as soon as the condition holds, checked at the
+        # TOP each pass (do-nothing-if-already-true, like Scratch's repeat-until).
+        cond = _render_expr(params.get("cond", 0), ctx)
+        lvar = "_i%d" % indent
+        lines.append(pad + "for " + lvar + " in range(%d):" % _LOOP_CAP)
+        lines.append(pad + _INDENT + "if " + cond + ":")
+        lines.append(pad + _INDENT + _INDENT + "break")
+        _emit_loop_body(children, ctx, indent + 1, lines)
+        return
+
+    if emit == "for_each":
+        # iterate a declared list, binding each item to a declared variable. The loop
+        # var is assigned -> the function hoists it `global` (like set_var).
+        vname = _render_value(params.get("var", ""),
+                              {"name": "var", "type": SLOT_VARIABLE}, ctx)
+        lname = _render_value(params.get("list", ""),
+                              {"name": "list", "type": SLOT_LIST}, ctx)
+        ctx.assigned[vname] = True
+        lines.append(pad + "for " + vname + " in " + lname + ":")
+        _emit_loop_body(children, ctx, indent + 1, lines)
         return
 
     raise BlockError("unknown c-block emitter: " + str(emit))
@@ -738,6 +951,40 @@ _HELPER_TOUCH_Y = (
 _HELPER_WAIT = (
     "def _wait(_secs):\n"
     "    pass\n"          # frame-based runtime: a real sleep would stall the loop
+)
+_HELPER_WAIT_UNTIL = (
+    "def _wait_until(_cond):\n"
+    "    pass\n"          # frame loop: can't block; the cart's _update re-checks each frame
+)
+# List helpers (#48). 1-based indexing (kid-friendly, Scratch-style) and bounds-safe
+# so a bad index never crashes the cart: get returns 0, remove/set ignore it.
+_HELPER_LGET = (
+    "def _lget(_lst, _i):\n"
+    "    _i = int(_i) - 1\n"
+    "    if 0 <= _i < len(_lst):\n"
+    "        return _lst[_i]\n"
+    "    return 0\n"
+)
+_HELPER_LREMOVE = (
+    "def _lremove(_lst, _i):\n"
+    "    _i = int(_i) - 1\n"
+    "    if 0 <= _i < len(_lst):\n"
+    "        del _lst[_i]\n"
+)
+_HELPER_LSET = (
+    "def _lset(_lst, _i, _v):\n"
+    "    _i = int(_i) - 1\n"
+    "    if 0 <= _i < len(_lst):\n"
+    "        _lst[_i] = _v\n"
+)
+# "letter N of text" -- 1-based, returns "" when out of range (kid-safe).
+_HELPER_LETTER = (
+    "def _letter(_s, _n):\n"
+    "    _s = str(_s)\n"
+    "    _n = int(_n) - 1\n"
+    "    if 0 <= _n < len(_s):\n"
+    "        return _s[_n]\n"
+    "    return \"\"\n"
 )
 
 
@@ -771,6 +1018,24 @@ def collect_vars(program):
         name = str(raw)
         if not _is_identifier(name):
             raise BlockError("bad variable name: " + name)
+        if name not in seen:
+            seen[name] = True
+            out.append(name)
+    return out
+
+
+def collect_lists(program):
+    """The declared list names (#48), de-duplicated and order-preserving, each a safe
+    Python identifier. A list and a variable can't share a name (both are globals)."""
+    var_set = set(collect_vars(program))
+    out = []
+    seen = {}
+    for raw in program.get("lists", []) or []:
+        name = str(raw)
+        if not _is_identifier(name):
+            raise BlockError("bad list name: " + name)
+        if name in var_set:
+            raise BlockError("list name clashes with a variable: " + name)
         if name not in seen:
             seen[name] = True
             out.append(name)
@@ -899,15 +1164,18 @@ def compile_blocks(program):
     if not isinstance(program, dict):
         raise BlockError("program is not a dict")
     known_vars = collect_vars(program)
+    known_lists = collect_lists(program)
     scripts = program.get("scripts", []) or []
 
     out = [BLOCK_MARKER + " Edit in the block editor (or graduate to code)."]
 
-    # module-level variable declarations (each starts at 0).
-    if known_vars:
+    # module-level declarations: variables start at 0, lists start empty.
+    if known_vars or known_lists:
         out.append("")
         for v in known_vars:
             out.append(v + " = 0")
+        for lst in known_lists:
+            out.append(lst + " = []")
 
     # helper functions, emitted only when used (keeps the cart minimal + readable).
     if _uses(scripts, "touched"):
@@ -922,6 +1190,21 @@ def compile_blocks(program):
     if _uses(scripts, "wait"):
         out.append("")
         out.append(_HELPER_WAIT.rstrip("\n"))
+    if _uses(scripts, "wait_until"):
+        out.append("")
+        out.append(_HELPER_WAIT_UNTIL.rstrip("\n"))
+    if _uses(scripts, "list_get"):
+        out.append("")
+        out.append(_HELPER_LGET.rstrip("\n"))
+    if _uses(scripts, "list_remove_at"):
+        out.append("")
+        out.append(_HELPER_LREMOVE.rstrip("\n"))
+    if _uses(scripts, "list_set_at"):
+        out.append("")
+        out.append(_HELPER_LSET.rstrip("\n"))
+    if _uses(scripts, "op_letter"):
+        out.append("")
+        out.append(_HELPER_LETTER.rstrip("\n"))
 
     # group scripts by lifecycle function, preserving order (so two on_draw hats
     # concatenate into one _draw body in the order they appear).
@@ -944,12 +1227,16 @@ def compile_blocks(program):
 
         # emit the body to a scratch list first so we can compute `global` hoisting.
         body_lines = []
-        assigned = {}
+        ctx = _Ctx(known_vars, known_lists, {})
         for hat in hats:
-            _emit_body(hat.get("c", []) or [], known_vars, 1, body_lines, assigned)
+            _emit_body(hat.get("c", []) or [], ctx, 1, body_lines)
 
-        # hoist globals: any declared var this function assigns must be `global`.
-        glob = [v for v in known_vars if v in assigned]
+        # hoist globals: any declared var/list this function REASSIGNS must be `global`
+        # (set/change a variable, clear a list, bind a for-each loop var). In-place list
+        # mutation -- .append/_lset/_lremove -- touches the existing object, so it needs
+        # none. Order: vars first then lists, matching the module-level inits.
+        glob = [v for v in known_vars if v in ctx.assigned]
+        glob += [lst for lst in known_lists if lst in ctx.assigned]
         if glob:
             out.append(_INDENT + "global " + ", ".join(glob))
         # if the whole function ended up empty (no hat had a body), `pass` it.

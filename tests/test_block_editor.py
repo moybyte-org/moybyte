@@ -923,3 +923,69 @@ def test_left_nudges_an_expr_literal_slot(tmp_path):
     be.set_slot("value", mk("op_add", {"a": 1, "b": 2}), blk)
     ws._blk_left()
     assert isinstance(blk["p"]["value"], dict)
+
+
+# ----------------------------------------------------------------------------
+# #48: Lists -- the list-slot picker + "+ new list" mirror the variable flow.
+# ----------------------------------------------------------------------------
+
+def test_lists_category_block_list_leads_with_new_list(tmp_path):
+    import runtime.console as C
+    ws, _, _ = _ws_with_block_cart(tmp_path)
+    ws._open_blocks()
+    be = ws.blocks_ed
+    _go_to_insert(be, 1)
+    ws._blk_open_categories()
+    ws.blk_menu["sel"] = ws.blk_menu["items"].index(blocks.CAT_LISTS)
+    ws._blk_menu_select()
+    assert ws.blk_menu["mode"] == "blk"
+    assert ws.blk_menu["items"][0] == C._NEW_LIST_ITEM
+    assert ws._blk_menu_label(0) == C._NEW_LIST_LABEL
+
+
+def test_list_slot_picker_leads_with_new_list_and_fills_the_slot(tmp_path):
+    """Opening a {list} slot with no lists yet shows a picker that LEADS with
+    '+ new list': choosing it creates + names a list and fills the slot, so the
+    program compiles (the kid never hits an empty/uncreatable list slot)."""
+    import runtime.console as C
+    ws, _, _ = _ws_with_block_cart(tmp_path)
+    ws._open_blocks()
+    be = ws.blocks_ed
+    _go_to_insert(be, 1)
+    blk = be.insert_block("list_add")               # no lists declared yet
+    assert _select_type(be, "list_add")
+    # step the slot highlight to the {list} slot, then A opens the list picker
+    names = [s["name"] for s in be.slots(blk)]
+    ws.blk_slot = names.index("list")
+    ws._blk_a()
+    assert ws.blk_menu is not None and ws.blk_menu["mode"] == "list"
+    assert ws.blk_menu["items"][0] == C._NEW_LIST_ITEM
+    ws.blk_menu["sel"] = 0
+    ws._blk_menu_select()                           # create + open the name prompt
+    assert ws.blk_menu is None and ws.blk_kbd is not None
+    assert ws.blk_kbd["kind"] == "list"
+    ws._blk_kbd_commit()                            # accept the default name
+    assert ws.blk_kbd is None
+    assert be.lists()                               # a list now exists
+    assert be.selected_block()["p"]["list"] in be.lists()
+    blocks.compile_blocks(be.program)               # and it compiles
+
+
+def test_for_each_block_inserts_and_saves(tmp_path):
+    """A for-each over a list builds, saves, and the compiled cart runs."""
+    ws, cart, _ = _ws_with_block_cart(tmp_path)
+    ws._open_blocks()
+    be = ws.blocks_ed
+    be.add_var("it")
+    be.new_list("nums")
+    _go_to_insert(be, 1)                            # on_start
+    be.insert_block("list_add", {"item": 1, "list": "nums"})
+    _go_to_insert(be, 1)
+    be.insert_block("for_each", {"var": "it", "list": "nums"})
+    _go_to_insert(be, 2)
+    be.insert_block("spr", {"id": 0, "x": mk("var", {"var": "it"}), "y": 0})
+    assert ws.save_blocks() is True
+    reloaded = kid_carts.load(cart["path"])
+    assert "for it in nums:" in reloaded["src"]
+    assert reloaded["blocks"]["lists"] == ["nums"]
+    _run(reloaded["src"], frames=2)

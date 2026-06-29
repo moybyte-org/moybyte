@@ -558,7 +558,7 @@ _BLK_NUM_X = (244, 168, 40, 26)       # cancel
 # Kid-facing category names for the insert menu (the catalog ids are terse keys).
 _CAT_LABEL = {
     "events": "When...", "control": "Control", "draw": "Draw", "input": "Buttons",
-    "variables": "Variables", "operators": "Math", "sound": "Sound",
+    "variables": "Variables", "lists": "Lists", "operators": "Math", "sound": "Sound",
 }
 
 # Sentinel menu row: "make a brand-new variable + name it". It heads the Variables
@@ -566,6 +566,11 @@ _CAT_LABEL = {
 # variable with just ▲▼ + A (no dragging) and then use it everywhere (#29 Bug 2).
 _NEW_VAR_ITEM = "\x00new_var"
 _NEW_VAR_LABEL = "+ new variable"
+
+# The list analogue (#48): heads the Lists block list AND the list-slot picker, so a
+# kid creates + names a list the same way they make a variable.
+_NEW_LIST_ITEM = "\x00new_list"
+_NEW_LIST_LABEL = "+ new list"
 
 # Sentinel menu row in the expr-slot chooser: "type a number" -- the Scratch white
 # editable oval. It heads the reporter list so a typed literal (the common case:
@@ -594,6 +599,11 @@ def _blk_plain_label(label):
 _BLK_HINTS = {
     "forever": "forever = repeats fast every frame (not endless)",
     "wait": "wait = a friendly pause (each frame keeps drawing)",
+    "repeat_until": "repeat until = loops fast until true (not endless)",
+    "wait_until": "wait until = each frame keeps drawing till it's true",
+    "stop": "stop = end this script now (this frame)",
+    "break_loop": "break = jump out of the loop around it",
+    "for_each": "for each = run the body once per item in the list",
 }
 # Trackball cursor sensitivity (#2). _CURSOR_BASE is the per-pulse step; the
 # quadratic _CURSOR_ACCEL term adds light acceleration so a fast roll crosses the
@@ -3973,6 +3983,9 @@ class Workstation:
         # the first, obvious thing in the category (#29 Bug 2).
         if category == _blocks_mod.CAT_VARIABLES:
             ids = [_NEW_VAR_ITEM] + list(ids)
+        # Lists: the same affordance -- "+ new list" heads the category (#48).
+        if category == _blocks_mod.CAT_LISTS:
+            ids = [_NEW_LIST_ITEM] + list(ids)
         self.blk_menu = {"mode": "blk", "cat": category, "sel": 0, "top": 0,
                          "items": ids}
 
@@ -3988,6 +4001,8 @@ class Workstation:
         item = m["items"][i]
         if item == _NEW_VAR_ITEM:
             return _NEW_VAR_LABEL
+        if item == _NEW_LIST_ITEM:
+            return _NEW_LIST_LABEL
         if item == _NUM_LITERAL_ITEM:
             return _NUM_LITERAL_LABEL
         if m["mode"] == "cat":
@@ -3995,7 +4010,7 @@ class Workstation:
         if m["mode"] == "blk":
             d = _blocks_mod.block_def(item)
             return _blk_plain_label(d["label"]) if d else item
-        if m["mode"] in ("dropdown", "variable"):
+        if m["mode"] in ("dropdown", "variable", "list"):
             return str(item)
         return str(item)
 
@@ -4020,6 +4035,10 @@ class Workstation:
             # the on-screen-keyboard name prompt so the kid names it (#29 Bug 2).
             self._blk_new_variable()
             return
+        if item == _NEW_LIST_ITEM:
+            # "+ new list": same flow, for lists (#48).
+            self._blk_new_list()
+            return
         if item == _NUM_LITERAL_ITEM:
             # "type a number": close the chooser and open the number keypad on this
             # expr slot (the Scratch white oval -- a literal instead of a block).
@@ -4034,7 +4053,7 @@ class Workstation:
         elif m["mode"] == "dropdown":
             self.blocks_ed.set_slot(m["slot"], item, m["block"])
             self.blk_menu = None
-        elif m["mode"] == "variable":
+        elif m["mode"] in ("variable", "list"):
             self.blocks_ed.set_slot(m["slot"], item, m["block"])
             self.blk_menu = None
         elif m["mode"] == "expr":
@@ -4079,6 +4098,8 @@ class Workstation:
             self._blk_open_text_prompt(block, name, cur)
         elif t == _blocks_mod.SLOT_VARIABLE:
             self._blk_open_variable_picker(block, name)
+        elif t == _blocks_mod.SLOT_LIST:
+            self._blk_open_list_picker(block, name)
         elif t == _blocks_mod.SLOT_EXPR:
             # Scratch's editable oval: a literal opens the number pad (with an
             # "insert a block" escape hatch); a slot already holding a reporter block
@@ -4168,6 +4189,13 @@ class Workstation:
         self.blk_menu = {"mode": "variable", "sel": 0, "top": 0, "items": items,
                          "block": block, "slot": name}
 
+    def _blk_open_list_picker(self, block, name):
+        # The list-slot picker (#48): "+ new list" first, then every declared list.
+        be = self.blocks_ed
+        items = [_NEW_LIST_ITEM] + be.lists()
+        self.blk_menu = {"mode": "list", "sel": 0, "top": 0, "items": items,
+                         "block": block, "slot": name}
+
     # -- variable create + name (on-screen keyboard) -------------------------
     def _blk_new_variable(self):
         """Create a fresh variable (default name) and open the name-entry prompt so
@@ -4200,6 +4228,23 @@ class Workstation:
         # on the device) lands on the prompt as commit and it flashes shut.
         self._blk_arm_prompt()
 
+    def _blk_new_list(self):
+        """Create a fresh list (default name) and open the name-entry prompt (#48).
+        Mirrors _blk_new_variable: if a list-slot picker was open, that slot gets
+        filled with the named list on confirm; the `list` prompt kind renames it."""
+        be = self.blocks_ed
+        if be is None:
+            return
+        m = self.blk_menu
+        slot_target = None
+        if m is not None and m.get("mode") == "list":
+            slot_target = (m.get("block"), m.get("slot"))
+        name = be.new_list("list")
+        self.blk_menu = None
+        self.blk_kbd = {"kind": "list", "text": "", "var": name,
+                        "slot_target": slot_target, "armed": False}
+        self._blk_arm_prompt()
+
     def _blk_kbd_commit(self):
         """Confirm a prompt: a name prompt renames the var; a number prompt parses the
         typed text into a numeric literal and writes it to the slot; a text prompt
@@ -4220,6 +4265,14 @@ class Workstation:
         elif kind == "text":
             be.set_slot(k["slot"], k["text"], k["block"])
             self.blk_status = "text set"
+        elif kind == "list":                   # "list": rename the freshly-created list
+            old = k["var"]
+            applied = be.rename_list(old, k["text"])
+            final = applied if applied else old
+            bt = k.get("slot_target")
+            if bt is not None and bt[0] is not None:
+                be.set_slot(bt[1], final, bt[0])
+            self.blk_status = "list: " + final[:12]
         else:                                  # "var": rename the freshly-created var
             old = k["var"]
             applied = be.rename_var(old, k["text"])
@@ -4233,11 +4286,11 @@ class Workstation:
 
     def _blk_kbd_cancel(self):
         """Cancel a prompt: a number/text prompt just discards the edit (the slot keeps
-        its old value); a name prompt keeps the default-named variable (it's already
+        its old value); a name prompt keeps the default-named variable/list (it's already
         declared and usable) and fills the slot with that default."""
         be = self.blocks_ed
         k = self.blk_kbd
-        if be is not None and k is not None and k.get("kind", "var") == "var":
+        if be is not None and k is not None and k.get("kind", "var") in ("var", "list"):
             bt = k.get("slot_target")
             if bt is not None and bt[0] is not None:
                 be.set_slot(bt[1], k["var"], bt[0])
