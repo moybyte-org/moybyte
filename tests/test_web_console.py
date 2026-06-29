@@ -234,13 +234,38 @@ def test_launcher_frame_clears_the_buffer_each_redraw(tmp_path):
     console = web_console.WebConsole(str(tmp_path / "carts"), fps=30)
     assert console.ws.screen == "launcher"
     for _ in range(3):                       # let the live wallpaper settle
-        cmds, _ = console.step_frame()
+        cmds, _, _ = console.step_frame()
     assert "cls" in [c[0] for c in cmds], "launcher frame never clears -> browser ghosts"
     # The bug only surfaced after a selection move; assert it still clears then.
     console.apply_events([{"type": "hold", "name": "right", "down": True}])
-    cmds, _ = console.step_frame()
+    cmds, _, _ = console.step_frame()
     console.apply_events([{"type": "hold", "name": "right", "down": False}])
     assert "cls" in [c[0] for c in cmds], "post-nav frame never clears -> browser ghosts"
+
+
+def test_fake_audio_take_pcm_hands_off_the_rendered_block():
+    """Browser audio (#22): FakeAudio.tick already rendered the mixed PCM each frame
+    and discarded it; now it keeps the block and take_pcm() hands it off (and clears,
+    so a stale block is never re-streamed). This is the whole server side -- the
+    browser plays these finished samples, no second synth."""
+    from runtime.audio import AudioBank, AudioEngine
+    au = host_app.FakeAudio(AudioEngine(AudioBank.default()))
+    au.sfx(0)                        # trigger sfx 0 (the coin blip)
+    au.tick(1.0 / 30)                # render one frame's PCM
+    pcm = au.take_pcm()
+    assert pcm and any(pcm), "a playing sound must yield non-silent PCM"
+    assert au.take_pcm() == b"", "take_pcm must clear -> no stale re-send"
+
+
+def test_step_frame_carries_audio_and_assets_advertise_the_rate(tmp_path):
+    """/frame returns (cmds, cart, audio_b64) and /assets carries the engine's PCM
+    sample rate so the browser schedules playback correctly. audio_b64 is '' on the
+    silent launcher (nothing playing), which the browser simply skips."""
+    from runtime.audio import AudioEngine
+    console = web_console.WebConsole(str(tmp_path / "carts"), fps=30)
+    out = console.step_frame()
+    assert len(out) == 3 and isinstance(out[2], str)     # (cmds, cart, audio_b64)
+    assert console.assets()["audio_rate"] == AudioEngine().rate
 
 
 def test_command_canvas_api_matches_canvas():

@@ -121,6 +121,39 @@
   ctx.imageSmoothingEnabled = false;
   var statusEl = document.getElementById("status");
 
+  // --- audio: play the server's FINISHED PCM (no JS synth) ------------------
+  // The server streams base64 signed-16 LE mono PCM on each /frame -- the exact
+  // samples audio.py's engine mixes (sfx + beep + music together), so there's no
+  // second synth here. Decode each block and schedule it gaplessly on a running
+  // clock. Mobile browsers gate audio behind a user gesture, so the AudioContext is
+  // (re)opened on the first touch (ensureAudio, wired at init).
+  var AUDIO_RATE = 11025;          // overwritten from /assets (the engine's rate)
+  var actx = null, audioNext = 0;
+  function ensureAudio() {
+    if (!actx) {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) { try { actx = new AC(); } catch (e) { actx = null; } }
+    }
+    if (actx && actx.state === "suspended") actx.resume();
+  }
+  function playPCM(b64) {
+    if (!actx || !b64) return;
+    var bin = atob(b64), n = bin.length >> 1;
+    if (n <= 0) return;
+    var buf = actx.createBuffer(1, n, AUDIO_RATE), ch = buf.getChannelData(0);
+    for (var i = 0; i < n; i++) {
+      var s = bin.charCodeAt(i * 2) | (bin.charCodeAt(i * 2 + 1) << 8);
+      if (s >= 32768) s -= 65536;            // sign-extend the 16-bit sample
+      ch[i] = s / 32768;
+    }
+    var src = actx.createBufferSource();
+    src.buffer = buf; src.connect(actx.destination);
+    // Back-to-back scheduling; a small lead cushions polling jitter, and if we've
+    // fallen behind (tab throttle / slow poll) we resync to "now" (a brief gap).
+    var t = Math.max(actx.currentTime + 0.02, audioNext);
+    src.start(t); audioNext = t + buf.duration;
+  }
+
   // --- render assets (palette + font + sheet), fetched once + on cart change --
   var W = 320, H = 240;
   var PAL = null;            // [[r,g,b], ...64]
@@ -148,6 +181,7 @@
       PAL = a.palette;
       FONT = a.font;
       assetsCart = a.cart;
+      if (a.audio_rate) AUDIO_RATE = a.audio_rate;
       allocBuffers();
       assetsReady = true;
     });
@@ -527,6 +561,7 @@
       }
       replay(f.cmds || []);
       blit();
+      if (f.audio) playPCM(f.audio);     // stream the engine's finished PCM
       inflight = false;
       if (!ok) { ok = true; statusEl.textContent = "live"; statusEl.style.color = "#00e436"; }
     }).catch(function () {
@@ -543,6 +578,8 @@
     statusEl.textContent = "no assets"; statusEl.style.color = "#ff004d";
   });
   canvas.focus();
+  // Unlock/resume audio on the first user gesture (mobile autoplay policy).
+  document.addEventListener("pointerdown", ensureAudio);
 })();
 </script>
 </body>
