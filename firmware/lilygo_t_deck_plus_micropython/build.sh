@@ -34,8 +34,16 @@ fi
 
 mkdir -p "${BUILD_DIR}" "${DIST_DIR}" "${CURRENT_DIR}"
 
+# Pin lvgl_micropython to a known, tested commit instead of cloning latest `main`.
+# `main` is a rolling branch -- an unpinned clone meant a fresh `.build/` could pull a
+# newer (possibly regressing) upstream and silently change the firmware out from under
+# us. This is the exact commit we've validated on the T-Deck (and it's already past the
+# RGB-bus StoreProhibited fix #514, which is RGB-panel-only and never affected our SPI
+# st7789 panel anyway). Bump deliberately + re-test after wiping `.build/lvgl_micropython`.
+LVGL_MPY_COMMIT="${KIDCODE_LVGL_MPY_COMMIT:-14ad6ce2c5555272398debeff77b69021ca7ddda}"
 if [ ! -d "${UPSTREAM_DIR}/.git" ]; then
-  git clone --depth 1 https://github.com/lvgl-micropython/lvgl_micropython "${UPSTREAM_DIR}"
+  git clone https://github.com/lvgl-micropython/lvgl_micropython "${UPSTREAM_DIR}"
+  git -C "${UPSTREAM_DIR}" checkout "${LVGL_MPY_COMMIT}"
 fi
 
 MPY_MAIN_C="${UPSTREAM_DIR}/lib/micropython/ports/esp32/main.c"
