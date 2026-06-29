@@ -7,6 +7,7 @@ code/paint pixels come from the same `console.Workstation` as the device -- only
 the canvas backend, the cart store's filesystem, and the input source differ.
 """
 
+import json
 import os
 import random
 import shutil
@@ -519,17 +520,49 @@ class _NullComp:
         pass
 
 
+_SEED_PRESERVE = ("config.json", "pmem.json")   # the kid's tuning + saves, kept across a re-seed
+
+
+def _manifest_version(cart_dir):
+    """The integer "version" in a cart folder's manifest.json (0 if missing/unreadable),
+    so a newer shipped version supersedes a stale seeded copy -- mirrors the device's
+    _cart_version (#47)."""
+    try:
+        with open(os.path.join(cart_dir, "manifest.json"), encoding="utf-8") as f:
+            return int(json.load(f).get("version", 0))
+    except (OSError, ValueError, TypeError):
+        return 0
+
+
 def _seed_system_carts(carts_dir):
-    """Copy the read-only system .kcart folders into the user store on first run,
-    so the launcher shows them (and the child duplicates/edits copies)."""
+    """Copy the read-only system .kcart folders into the user store so the launcher shows
+    them (and the child duplicates/edits copies). Version-aware (#47): a built-in whose
+    shipped manifest "version" is newer than the seeded copy is RE-SEEDED -- code + art
+    refreshed, while the kid's tuning + saves (config.json, pmem.json) are preserved --
+    matching the device's seed_builtins, so a bumped cart actually propagates on the host
+    (it used to seed once and ignore version bumps)."""
     os.makedirs(carts_dir, exist_ok=True)
     if not os.path.isdir(SYSTEM_CARTS):
         return
     for name in sorted(os.listdir(SYSTEM_CARTS)):
-        if name.endswith(".kcart"):
-            dst = os.path.join(carts_dir, name)
-            if not os.path.exists(dst):
-                shutil.copytree(os.path.join(SYSTEM_CARTS, name), dst)
+        if not name.endswith(".kcart"):
+            continue
+        src = os.path.join(SYSTEM_CARTS, name)
+        dst = os.path.join(carts_dir, name)
+        if not os.path.exists(dst):
+            shutil.copytree(src, dst)
+        elif _manifest_version(src) > _manifest_version(dst):
+            kept = {}
+            for f in _SEED_PRESERVE:                 # snapshot the kid's data
+                p = os.path.join(dst, f)
+                if os.path.isfile(p):
+                    with open(p, "rb") as fh:
+                        kept[f] = fh.read()
+            shutil.rmtree(dst)
+            shutil.copytree(src, dst)                # refresh code + art
+            for f, data in kept.items():             # restore the kid's data
+                with open(os.path.join(dst, f), "wb") as fh:
+                    fh.write(data)
 
 
 def build_workstation(carts_dir=None, sys_size=None, font_scale=1):

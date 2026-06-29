@@ -41,5 +41,9 @@ def _draw():
     wob = 2 if (int(t * 3) % 2 == 0) else 0
     # spr-flip (#11): the fish faces right by default; flip it horizontally (mode 1)
     # when swimming left so it always faces where it's going -- the live demo of flip.
-    spr(0, int(fish_x), H - 18 - 24 - wob, 1 if fish_dir < 0 else 0, 4)  # fish, 4x, faces travel
+    # spr(id, x, y, COLORKEY, SCALE, FLIP): colorkey 0 keys out the tile's index-0
+    # background so the fish floats over the water; scale 4; FLIP is the LAST arg (this
+    # used to put the flip value in the colorkey slot -> the key went bad facing left).
+    flip = 1 if fish_dir < 0 else 0
+    spr(0, int(fish_x), H - 18 - 24 - wob, 0, 4, flip)   # fish, 4x, faces travel
     print("OCEAN", 10, 10, col("white"), 3)

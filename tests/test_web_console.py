@@ -483,3 +483,33 @@ def test_lan_url_falls_back_to_localhost(monkeypatch):
     assert web_console._lan_url(8080) == "http://127.0.0.1:8080/"
     monkeypatch.setattr(web_console.host_app, "_real_local_ip", lambda: "10.0.0.5")
     assert web_console._lan_url(1234) == "http://10.0.0.5:1234/"
+
+
+def test_host_reseeds_built_in_on_version_bump_preserving_kid_data(tmp_path):
+    """The host store now honors cart version bumps (#47): a seeded built-in older than
+    the shipped manifest version is re-seeded (code/art refreshed) while the kid's
+    config.json / pmem.json are preserved -- matching the device. (Previously the host
+    seeded once and ignored bumps, so a fixed built-in never reached the store.)"""
+    import json
+    import os
+    from runtime import host_app
+    carts = str(tmp_path / "carts")
+    host_app._seed_system_carts(carts)
+    dst = os.path.join(carts, "ocean.kcart")              # ocean ships at version >= 2
+    assert os.path.isdir(dst)
+    # Make the seeded copy STALE (v0), plant a code marker + the kid's tuning.
+    with open(os.path.join(dst, "manifest.json")) as f:
+        man = json.load(f)
+    man["version"] = 0
+    with open(os.path.join(dst, "manifest.json"), "w") as f:
+        json.dump(man, f)
+    with open(os.path.join(dst, "main.py"), "w") as f:
+        f.write("# stale kid edit\n")
+    with open(os.path.join(dst, "config.json"), "w") as f:
+        f.write('{"water": "indigo"}')
+    host_app._seed_system_carts(carts)                    # shipped v2 > stale v0 -> re-seed
+    with open(os.path.join(dst, "main.py")) as f:
+        assert "stale kid edit" not in f.read()           # code refreshed
+    with open(os.path.join(dst, "config.json")) as f:
+        assert json.load(f) == {"water": "indigo"}        # kid tuning preserved
+    assert host_app._manifest_version(dst) >= 2           # manifest refreshed to shipped
