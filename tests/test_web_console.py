@@ -222,6 +222,27 @@ def test_take_commands_clears_per_frame(tmp_path):
     assert len(second) == 1 and second[0][0] == "print"
 
 
+def test_launcher_frame_clears_the_buffer_each_redraw(tmp_path):
+    """Regression: the launcher's command stream MUST contain a cls so the browser's
+    retained index buffer is wiped before each redraw. Otherwise the chrome that has
+    no opaque background -- the selection outline + cart labels -- ghosts as the
+    selection moves (two yellow boxes, doubled text). The cause was the wallpaper cart
+    being compiled against the original canvas during build_workstation, BEFORE
+    WebConsole swaps in the recording canvas, so its cls()/backdrop never reached the
+    stream (the device clears its framebuffer regardless, so it only showed on the web).
+    WebConsole now rebinds the wallpaper to the recording canvas."""
+    console = web_console.WebConsole(str(tmp_path / "carts"), fps=30)
+    assert console.ws.screen == "launcher"
+    for _ in range(3):                       # let the live wallpaper settle
+        cmds, _ = console.step_frame()
+    assert "cls" in [c[0] for c in cmds], "launcher frame never clears -> browser ghosts"
+    # The bug only surfaced after a selection move; assert it still clears then.
+    console.apply_events([{"type": "hold", "name": "right", "down": True}])
+    cmds, _ = console.step_frame()
+    console.apply_events([{"type": "hold", "name": "right", "down": False}])
+    assert "cls" in [c[0] for c in cmds], "post-nav frame never clears -> browser ghosts"
+
+
 def test_command_canvas_api_matches_canvas():
     """CommandCanvas must expose the same public draw surface as the host Canvas, so
     it's a drop-in ws.canvas. Assert every drawing method the console/carts call
