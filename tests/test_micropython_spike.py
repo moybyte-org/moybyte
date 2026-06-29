@@ -152,7 +152,7 @@ def test_ota_online_download_streams_to_sd_with_checksum():
     # to SD (never buffering the whole image), and verifies sha256 before installing.
     ota = (ROOT / "modules" / "kc_ota.py").read_text(encoding="utf-8")
 
-    assert "FIRMWARE_VERSION = 1" in ota
+    assert "FIRMWARE_VERSION = " in ota          # bumped per release (#53), so don't pin the value
     assert 'OTA_CFG_NAME = "ota.json"' in ota
     assert 'DOWNLOAD_NAME = "firmware.bin"' in ota
     # capability + manifest + connectivity
