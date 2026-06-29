@@ -252,3 +252,28 @@ def test_launcher_bar_management_hidden_when_read_only(tmp_path):
     drv.click(*_center(ws.layout.new_btn))
     drv.frame(1 / 30)
     assert len(ws.launcher.items) == n0
+
+
+def test_icon_theme_versioning_reseeds_stale_keeps_current(tmp_path):
+    """A saved icon theme older than _ICON_VERSION is re-seeded to the baked default at
+    load (so shipped icon changes land on an already-themed device/desktop without a
+    manual wipe, #47-style); a theme stamped at the current version is kept (a user's
+    EDIT ICONS edit survives until the next bump)."""
+    from runtime import console as C
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    store, root = ws.carts_store, ws.carts_root
+    default_hex = C._default_icon_sheet().to_hex()
+    other = ("f" if default_hex[0] != "f" else "0") + default_hex[1:]   # valid but different
+    assert other != default_hex
+
+    # STALE (version 0 < _ICON_VERSION): re-seeded to the baked default, version stamped.
+    store.save_system_icons(other, root, 0)
+    ws.load_icon_sheet()
+    assert ws.icon_sheet.to_hex() == default_hex
+    assert store.load_system_icons_version(root) == C._ICON_VERSION
+
+    # CURRENT (>= _ICON_VERSION): the saved theme is kept untouched.
+    store.save_system_icons(other, root, C._ICON_VERSION)
+    ws.load_icon_sheet()
+    assert ws.icon_sheet.to_hex() == other

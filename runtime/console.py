@@ -1064,6 +1064,13 @@ _ICON_ART = {
     ),
 }
 
+# Bump whenever the baked _ICON_ART above changes: a saved system_icons.kgfx theme
+# written at an OLDER version is treated as stale and re-seeded to these new defaults
+# at load (mirrors cart versioning, #47), so an already-themed device/desktop picks up
+# new icons without a manual wipe. A bump discards a user's custom icon edits, exactly
+# like a built-in cart re-seed. (v1 = the first full restyle.)
+_ICON_VERSION = 1
+
 
 def _nibble(ch):
     """One _ICON_ART char -> a palette index, or -1 for transparent ('.')."""
@@ -1901,26 +1908,46 @@ class Workstation:
         self._bar_img_cache = {}
 
     def load_icon_sheet(self):
-        """Build the top-bar IconSheet (Stage 1): load system_icons.kgfx via the store
-        if present, else bake the default theme. Safe on an embedded/no-store boot --
-        then it's the baked default. Adopts it (clears the cache). Called after the
-        store + carts_root are wired (host build_workstation / device run_desktop)."""
-        hexs = None
-        if self.carts_store is not None and self.carts_root is not None:
-            load = getattr(self.carts_store, "load_system_icons", None)
-            if load is not None:
-                try:
-                    hexs = self._with_sd(lambda: load(self.carts_root))
-                except Exception as exc:  # noqa: BLE001 -- a bad theme falls back to default
-                    print("KidCode icons load failed:", _err_text(exc))
-                    hexs = None
+        """Build the top-bar IconSheet (Stage 1): use the saved system_icons.kgfx theme
+        only if its stored version is >= the baked _ICON_VERSION; otherwise bake the
+        default theme. A saved theme older than _ICON_VERSION is STALE (the shipped
+        icons changed) -> re-seed it: bake the new default and overwrite the saved theme
+        + version, so an already-themed device/desktop picks up new icons automatically
+        (mirrors cart versioning, #47). A missing theme stays write-free (the common
+        "absent = default" case). Safe on an embedded/no-store boot (baked default)."""
+        hexs, saved_ver = None, 0
+        store = self.carts_store
+        load = getattr(store, "load_system_icons", None) if store is not None else None
+        if load is not None and self.carts_root is not None:
+            loadver = getattr(store, "load_system_icons_version", None)
+
+            def _read_theme():
+                return (load(self.carts_root),
+                        loadver(self.carts_root) if loadver is not None else _ICON_VERSION)
+            try:
+                hexs, saved_ver = self._with_sd(_read_theme)
+            except Exception as exc:  # noqa: BLE001 -- a bad theme falls back to default
+                print("KidCode icons load failed:", _err_text(exc))
+                hexs = None
         sheet = None
-        if hexs:
+        if hexs and saved_ver >= _ICON_VERSION:        # current/newer saved theme -> keep it
             try:
                 sheet = IconSheet.from_hex(hexs)
             except Exception:  # noqa: BLE001
                 sheet = None
-        self.set_icon_sheet(sheet if sheet is not None else _default_icon_sheet())
+        if sheet is None:
+            sheet = _default_icon_sheet()
+            # Re-seed a STALE (or corrupt) saved theme to the new default so the new
+            # icons land; skip when nothing was saved (no churn) or the store predates
+            # versioning (no loadver -> _read_theme reported current, never stale).
+            if hexs and self.carts_root is not None \
+                    and getattr(store, "save_system_icons", None) is not None:
+                try:
+                    self._with_sd(lambda: store.save_system_icons(
+                        sheet.to_hex(), self.carts_root, _ICON_VERSION))
+                except Exception as exc:  # noqa: BLE001
+                    print("KidCode icons re-seed failed:", _err_text(exc))
+        self.set_icon_sheet(sheet)
 
     # -- system font scale (#39) ---------------------------------------------
     #
@@ -3231,7 +3258,7 @@ class Workstation:
             return
         hexs = self.icon_sheet.to_hex()
         try:
-            self._with_sd(lambda: self.carts_store.save_system_icons(hexs, self.carts_root))
+            self._with_sd(lambda: self.carts_store.save_system_icons(hexs, self.carts_root, _ICON_VERSION))
             self.icon_sheet.dirty = False
             self.save_status = "SAVED"
             # Re-adopt the (same) sheet so the bar's per-kind image cache is dropped and

@@ -529,6 +529,7 @@ def save_shared_sheet(hex_text, root=CARTS_DIR):
 # happens once on-device icon editing lands (Stage 2).
 
 SYSTEM_ICONS_NAME = "system_icons.kgfx"
+SYSTEM_ICONS_VER_NAME = "system_icons.ver"   # the saved theme's icon-set version (#47-style)
 
 
 def system_icons_path(root=CARTS_DIR):
@@ -536,6 +537,13 @@ def system_icons_path(root=CARTS_DIR):
     level up from `root`), so it isn't tied to any single cart."""
     parent = root.rsplit("/", 1)[0]
     return (parent + "/" + SYSTEM_ICONS_NAME) if parent else SYSTEM_ICONS_NAME
+
+
+def system_icons_version_path(root=CARTS_DIR):
+    """Sidecar holding the icon-set version the saved theme was written at (a sibling
+    of system_icons.kgfx). Lets a newer baked icon set re-seed a stale saved theme."""
+    parent = root.rsplit("/", 1)[0]
+    return (parent + "/" + SYSTEM_ICONS_VER_NAME) if parent else SYSTEM_ICONS_VER_NAME
 
 
 def load_system_icons(root=CARTS_DIR):
@@ -548,12 +556,23 @@ def load_system_icons(root=CARTS_DIR):
         return None
 
 
-def save_system_icons(hex_text, root=CARTS_DIR):
-    """Persist the system icon theme's hex (Stage 2 editing). Ensures the parent dir
-    exists. Written atomically (like the shared sheet) -- it's a shared system asset,
-    so an interrupted write must never truncate it."""
+def load_system_icons_version(root=CARTS_DIR):
+    """The icon-set version of the saved theme (0 when absent/unreadable, so a
+    pre-versioning theme always counts as stale and is re-seeded by a versioned set --
+    mirrors _cart_version)."""
+    try:
+        return int(_read(system_icons_version_path(root)).strip())
+    except (OSError, ValueError, AttributeError):
+        return 0
+
+
+def save_system_icons(hex_text, root=CARTS_DIR, version=0):
+    """Persist the system icon theme's hex (Stage 2 editing / a default re-seed) plus
+    its version sidecar. Ensures the parent dir exists. Written atomically (like the
+    shared sheet) -- a shared system asset whose interrupted write must never truncate."""
     ensure_dirs(root)
     _write_atomic(system_icons_path(root), hex_text)
+    _write_atomic(system_icons_version_path(root), str(int(version)))
 
 
 # --- known WiFi networks (system credential store, #38) ---------------------
