@@ -1101,7 +1101,7 @@ def test_icon_theme_editor_wired_into_device_shell():
     # wrapper the cart sprite save (save_sprites) uses -- on device that's with_sd_live,
     # the native single-bus path; anything else hangs the panel flush.
     assert "def save_icons(self):" in console
-    assert "self.carts_store.save_system_icons(hexs, self.carts_root)" in console
+    assert "self.carts_store.save_system_icons(hexs, self.carts_root, _ICON_VERSION)" in console
     assert "self._with_sd(lambda: self.carts_store.save_system_icons(" in console
     # Live re-theme: a save re-adopts the sheet so the bar's per-kind image cache (and
     # the device's per-Image RGB565 blit cache) is dropped and rebuilt from new pixels.
