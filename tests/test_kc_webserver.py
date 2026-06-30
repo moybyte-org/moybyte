@@ -775,6 +775,50 @@ def test_layer_dropped_on_reset_atlas_reships_via_gen():
     assert any(c[0] == "deflayer" for c in _served(rec, server)), "a new cart's layer re-ships"
 
 
+def test_cached_bar_strip_reused_across_cart_change_self_heals_id_collision():
+    """THE on-hardware bug (#54/#41): the console's top-bar strip is cached on the
+    Workstation and REUSED across carts, so it OUTLIVES reset_atlas (the cart change),
+    which clears _layers and restarts the new cart's layers at id 0. Without self-healing
+    the stale bar (still id 0) COLLIDES with a scroll cart's fresh layer (also id 0): both
+    emit ["blit_layer", 0] but reference DIFFERENT buffers, so the bar blits the scroll's
+    pixels and the scroll blits the bar's -- exactly the "only the background / the previous
+    cart's layer bleeds through / duplication" the device showed. _ensure_registered must
+    re-id the orphaned bar so each replays to its OWN buffer (pixel-identical to the panel).
+    Every prior layer test created fresh layers per gen, so none reused one across a reset."""
+    raster = Canvas(WIDTH, HEIGHT)
+    rec = web.DrawRecorder(WIDTH, HEIGHT)
+    tee = web.TeeCanvas(raster, rec)
+    server = _serveable(rec)
+    rec.enabled = True
+    # Cart A: paint + ship the cached bar strip (the console keeps THIS object across carts).
+    bar = tee.new_layer(WIDTH, 18)
+    bar.rect(0, 0, WIDTH, 18, 7)             # a white bar -- visibly != the scroll world
+    bar.print("12:34", 280, 3, 6, 2)
+    rec.begin(); tee.cls(0); tee.blit_strip(bar, 0, 0); rec.commit()
+    _served(rec, server)
+    assert bar.id == 0
+    # Cart change: reset_atlas drops _layers + bumps gen (mirrors WebView.begin_frame).
+    rec.reset_atlas()
+    # Cart B (a scroll cart): a NEW wide layer registers FRESH and reclaims id 0.
+    scroll = tee.new_layer(WIDTH * 2, HEIGHT)
+    scroll.cls(3)
+    scroll.rect(0, 100, WIDTH * 2, 40, 8)
+    assert scroll.id == 0, "the scroll layer claims id 0 in the new gen"
+    # A frame referencing BOTH: the scroll world, then the SAME cached bar (NOT repainted,
+    # so it still carries its stale id 0 -> the collision, unless healed on blit).
+    rec.begin()
+    tee.cls(0)
+    tee.blit_window_from(scroll, 0, 0)
+    tee.blit_strip(bar, 0, 0)
+    rec.commit()
+    served = _served(rec, server)
+    assert bar.id != scroll.id, "the orphaned bar must re-register to a non-colliding id"
+    assert [c[0] for c in served].count("deflayer") == 2, "both layers ship their own stream"
+    replayed = Canvas(WIDTH, HEIGHT)
+    replay_diet(served, replayed)
+    assert bytes(replayed.buf) == bytes(raster.buf), "no collision: bar=bar, world=world"
+
+
 def test_map_replays_pixel_identical_to_panel_via_cached_assets():
     """The strongest map() cross-check (#41): drive a real map() (+ a couple of sprites)
     through the device TeeCanvas over a rasterizing Canvas (the panel stand-in), then

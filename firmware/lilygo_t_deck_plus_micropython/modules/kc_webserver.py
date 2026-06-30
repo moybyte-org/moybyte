@@ -466,16 +466,35 @@ class DrawRecorder:
         self._layers.append(layer)
         return lid
 
+    def _ensure_registered(self, layer):
+        """Self-heal a layer's id before it's referenced. reset_atlas (cart change) clears
+        _layers, so the new cart's layers re-register from id 0 -- but a LONG-LIVED layer
+        that outlives the reset keeps a STALE id. The console's cached top-bar strip
+        (self._cart_bar_strip, reused across carts) is exactly this: after a cart change it
+        still carries (say) id 0, which now COLLIDES with the new cart's freshly-registered
+        scroll layer (also id 0) -> both emit ["blit_layer", 0] but reference DIFFERENT
+        buffers (the bar blits the scroll's pixels and vice-versa: the "only background /
+        previous cart's layer bleeds through / duplication" bug). Re-register an orphan
+        here so its id is current + unique; served_layers reset on the gen bump re-ships its
+        deflayer. Idempotent -- a correctly-registered layer is left untouched."""
+        lid = layer.id
+        if 0 <= lid < len(self._layers) and self._layers[lid] is layer:
+            return
+        layer.id = len(self._layers)
+        self._layers.append(layer)
+
     def blit_layer_window(self, layer, cam_x, cam_y):
         """draw_layer's window-copy -> ["blit_layer", id, cam_x, cam_y] (clamped >=0 to
         mirror DeviceCanvas.blit_window_from). Opaque + full-screen, so the browser's
         copy also clears last frame -> no actor trails."""
+        self._ensure_registered(layer)
         self._cmds.append(["blit_layer", int(layer.id),
                            cam_x if cam_x > 0 else 0, cam_y if cam_y > 0 else 0])
 
     def blit_layer_full(self, layer, dst_x, dst_y):
         """blit_strip's full-copy -> ["blit_layer", id, dst_x, dst_y, "full"]. The cached
         top bar + the scroll layer share this op."""
+        self._ensure_registered(layer)
         self._cmds.append(["blit_layer", int(layer.id), int(dst_x), int(dst_y), "full"])
 
     def deflayer_cmd(self, idx):
@@ -1911,7 +1930,7 @@ function pv(){return[(pH.ArrowRight?1:0)-(pH.ArrowLeft?1:0),(pH.ArrowDown?1:0)-(
 // the device's `gen` (lock-step with its served reset), NOT by the cart change -- so scrolling
 // the launcher (which changes cart_title -> /assets refetch) no longer wipes ATL and strands
 // sprites (the unknown-growth bug, #41).
-function df(f){if(f.gen!==curGen){curGen=f.gen;ATL=[];HUD.unknown=0;}
+function df(f){if(f.gen!==curGen){curGen=f.gen;ATL=[];LAY={};HUD.unknown=0;}
 if(f.cart!==assCart){assCart=f.cart;getA().catch(function(){});}rep(f.cmds||[]);blit();
 var t=(window.performance&&performance.now)?performance.now():Date.now();if(HUD.last){var inst=1000/Math.max(1,t-HUD.last);
 HUD.fps=HUD.fps?HUD.fps+(inst-HUD.fps)*0.2:inst;}HUD.last=t;if(HUD.on)drawHud();

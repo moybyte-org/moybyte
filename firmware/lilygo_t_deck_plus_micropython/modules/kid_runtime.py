@@ -531,6 +531,20 @@ class DeviceCanvas:
         # shares this canvas's native kc_gfx kernel -- so map/spr/rect/... draw into it
         # pixel-identically. The buffer is a plain bytearray (the gc heap is PSRAM here,
         # so a 2x-screen 614KB layer fits); Stage 2 (GDMA) switches it to kc_alloc DMA.
+        #
+        # COMPACT FIRST (#54/#41): a scroll cart re-execs fresh on every entry (lay=None),
+        # so it re-allocates its ~384KB world each time. The previous run's layer is already
+        # unpinned (you exit through the launcher: its ns is dropped + the recorder's atlas/
+        # layer registry was reset) but not yet collected; under the web view's per-frame
+        # JSON/command churn the PSRAM gc heap fragments and a fresh contiguous 384KB
+        # eventually fails (MemoryError). Collecting right before the alloc reclaims the dead
+        # layer + transient strings so the region is contiguous again. Cart-start only (a
+        # layer is built once per run, not per frame), so the ~10ms collect is invisible.
+        try:
+            import gc
+            gc.collect()
+        except Exception:  # noqa: BLE001 -- gc is always present; never block a layer alloc
+            pass
         return DeviceCanvas(_LayerComp(int(w), int(h), self._gfx))
 
     def blit_window_from(self, layer, cam_x=0, cam_y=0):
