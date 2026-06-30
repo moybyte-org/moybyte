@@ -67,6 +67,14 @@ DEFAULT_PORT = 8080
 # back to a pure pass-through). A live browser polls ~30x/s, so this is generous.
 RECORD_IDLE_MS = 2000
 
+# Per-connection socket timeouts (seconds). The accepted conn is BLOCKING with a bound,
+# NOT non-blocking: a non-blocking sendall can't push a multi-KB response over the device's
+# ~72KB/s WiFi and fails [Errno 116] ETIMEDOUT (it only worked on fast localhost in tests).
+# A short READ timeout caps how long a speculative/empty browser preconnect can stall the
+# single-threaded loop; a longer SEND timeout lets the HTML page / assets drain.
+WEB_RECV_TIMEOUT = 0.4
+WEB_SEND_TIMEOUT = 2.0
+
 # petme128 8x8 font (host == device): the SAME glyphs runtime/font.py ships, baked here
 # as a hex blob so the device (whose panel text uses framebuf's own font) can still hand
 # the browser the petme128 glyphs the shared web_console.html renders `print` with. 96
@@ -656,28 +664,30 @@ class WebServer:
         on THIS one connection only (it was just accepted, so the request is en route),
         with a small read budget so a stalled client can't hang the loop. Returns
         (method, path, body) or (None, None, b'')."""
-        conn.setblocking(False)
+        # BLOCKING with a short bound (not non-blocking): a non-blocking sendall later
+        # can't drain a multi-KB response over slow WiFi (-> ETIMEDOUT). The short read
+        # timeout means a speculative/empty preconnect stalls the loop at most
+        # WEB_RECV_TIMEOUT, while a real request (already en route -- we just accepted)
+        # arrives in one or two recvs.
+        try:
+            conn.settimeout(WEB_RECV_TIMEOUT)
+        except Exception:  # noqa: BLE001 -- not all ports expose settimeout
+            pass
         buf = b""
         method = path = None
         clen = 0
         head_end = -1
-        # Bounded poll for the request to arrive (a few short sleeps, not an open wait).
-        for _ in range(40):
+        while len(buf) <= 65536:                  # cap: a runaway client can't OOM us
             try:
                 chunk = conn.recv(512)
-            except Exception:  # noqa: BLE001 -- EAGAIN: nothing yet
-                chunk = b""
-            if chunk:
-                buf += chunk
-                if head_end < 0:
-                    method, path, clen, head_end = parse_request(buf)
-                if head_end >= 0 and len(buf) - head_end >= clen:
-                    break
-            else:
-                if head_end >= 0 and len(buf) - head_end >= clen:
-                    break
-                _sleep_ms(2)
-            if len(buf) > 65536:                  # cap: a runaway client can't OOM us
+            except Exception:  # noqa: BLE001 -- timeout / error: use what we have
+                break
+            if not chunk:                         # peer closed
+                break
+            buf += chunk
+            if head_end < 0:
+                method, path, clen, head_end = parse_request(buf)
+            if head_end >= 0 and len(buf) - head_end >= clen:
                 break
         if head_end < 0:
             return (None, None, b"")
@@ -688,6 +698,11 @@ class WebServer:
         method, path, body = self._recv_request(conn)
         if method is None:
             return
+        # Give the response room to drain over slow WiFi (the read used a short bound).
+        try:
+            conn.settimeout(WEB_SEND_TIMEOUT)
+        except Exception:  # noqa: BLE001
+            pass
         self.requests += 1
         if method == "GET" and path in ("/", "/index.html"):
             conn.sendall(http_response(200, PAGE_HTML, "text/html; charset=utf-8"))
