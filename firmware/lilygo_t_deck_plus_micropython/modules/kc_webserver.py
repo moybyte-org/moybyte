@@ -144,11 +144,16 @@ RECORD_IDLE_MS = 4000
 # always gets the LAST fully-recorded frame. A frame is recorded completely or not at all
 # (the gate is decided once, at begin_frame).
 #
-# 30fps (#41 stream mode): with STREAM MODE the device goes headless while a browser is
-# playing (skips its OWN panel render + flush -- the ~14-20fps render+flush ceiling), so the
-# cart can produce 30+fps of cheap commands. A diet frame is <1KB, so 30fps ~= 19KB/s, well
-# under the ~72KB/s WiFi. The cap is what bounds it; raised 12 -> 30 to take that headroom.
-WEB_FPS_CAP = 30
+# 60fps (#41 stream mode): with STREAM MODE the device goes headless while a browser is
+# playing (skips its OWN panel render + flush), so the cart produces frames at full loop
+# speed. On-device measurement (after the gc.mem_free-per-frame stall was removed) showed
+# the headless loop running ~60fps for games (Battle City/Sky Run, draw ~5ms) with json
+# encode ~1-2ms + send ~2ms. A diet game frame is <1KB, so even 60fps ~= 30-50KB/s -- WiFi
+# was measured at 100+KB/s, so games are loop-bound, not bandwidth-bound. The cap is raised
+# 30 -> 60 so a push happens EVERY loop tick (at 30 the 33ms gate vs the ~16ms loop quantised
+# pushes to every 3rd tick ~= 21fps -- the "stuck at 22fps" symptom). A heavy screen (the
+# launcher, ~7KB/frame) still self-limits on bandwidth/send-time, so this can't make it worse.
+WEB_FPS_CAP = 60
 WEB_FRAME_INTERVAL_MS = 1000 // WEB_FPS_CAP
 
 # Per-connection socket timeouts (seconds). A freshly accepted conn (an HTTP request OR the
