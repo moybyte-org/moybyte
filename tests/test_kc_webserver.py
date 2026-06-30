@@ -657,7 +657,7 @@ def test_cached_top_bar_blit_strip_replays_pixel_identical():
     strip = tee.new_layer(WIDTH, 18)
     strip.rect(0, 0, WIDTH, 18, 0)
     strip.rect(0, 17, WIDTH, 1, 5)
-    strip.print("12:34", 280, 3, 6)
+    strip.print("12:34", 280, 3, 6, 2)   # WITH a scale arg, exactly like the real top bar
     icon = Image(14, 14, [7] * (14 * 14), transparent=-1)   # an icon-like sprite into the bar
     strip.spr(icon, 8, 2)
     # Frame: content under the bar, then stamp the cached bar.
@@ -717,7 +717,7 @@ def test_layer_reships_deflayer_on_redraw():
     rec.enabled = True
     strip = tee.new_layer(WIDTH, 18)
     strip.rect(0, 0, WIDTH, 18, 0)
-    strip.print("12:34", 280, 3, 6)
+    strip.print("12:34", 280, 3, 6, 2)   # WITH a scale arg, exactly like the real top bar
     rec.begin(); tee.cls(0); tee.blit_strip(strip, 0, 0); rec.commit()
     f1 = _served(rec, server)
     assert "12:34" in str(next(c for c in f1 if c[0] == "deflayer"))
@@ -726,7 +726,7 @@ def test_layer_reships_deflayer_on_redraw():
     assert not any(c[0] == "deflayer" for c in _served(rec, server))
     # REDRAW the strip (a new clock minute) -> gen bumps -> re-ship the fresh stream.
     strip.rect(0, 0, WIDTH, 18, 0)
-    strip.print("12:35", 280, 3, 6)
+    strip.print("12:35", 280, 3, 6, 2)   # WITH a scale arg, exactly like the real top bar
     rec.begin(); tee.cls(0); tee.blit_strip(strip, 0, 0); rec.commit()
     f3 = _served(rec, server)
     dl = next((c for c in f3 if c[0] == "deflayer"), None)

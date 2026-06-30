@@ -553,7 +553,13 @@ class _LayerRecorder:
     def circb(self, cx, cy, r, c):
         self._cmds.append(["circb", int(cx), int(cy), int(r), c & 63])
 
-    def print(self, s, x, y, c):
+    def print(self, s, x, y, c, scale=2):
+        # `scale` is accepted but IGNORED, exactly like the main DrawRecorder.print +
+        # the real DeviceCanvas.print recording path (the browser renders petme128 at a
+        # fixed scale). It MUST be in the signature: RecordingLayer._bind forwards a draw
+        # verb's full arg list to this recorder, and the cached top bar prints its clock
+        # with a scale arg (`print(s, x, y, c, scale)`) -- without this param that call
+        # raised "takes 5 positional arguments but 6 were given" every frame.
         self._cmds.append(["print", str(s), int(x), int(y), c & 63])
 
     def spr(self, img, x, y, scale=1, flip=0):
