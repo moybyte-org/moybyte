@@ -1820,6 +1820,11 @@ class Workstation:
         # Reboot hook: the device injects a callable (machine.reset via the OTA
         # updater); None on the host -> the Reboot row is a safe no-op (go_home).
         self.reboot_hook = None
+        # Web view (#41/#22): the device injects a small controller exposing
+        # .enabled (bool), .toggle(), and .url() so Settings can grow a "WEB VIEW"
+        # ON/OFF row that serves the running console to a browser over WiFi. None on
+        # the host (the host already has tools/web_console.py) -> the row is hidden.
+        self.web_hook = None
         # Redraw-on-change (#44 step 1): a static UI screen costs ~0 -- frame() only
         # redraws + flushes when something visible changed. `_dirty` is the "redraw
         # this frame" flag; it starts True so the very first frame always paints, and
@@ -2313,6 +2318,8 @@ class Workstation:
         injected updater supports them. Built on demand so the rows appear/disappear with
         the updater without re-statting per draw."""
         rows = self._SETTINGS_ROWS
+        if self.web_hook is not None:           # device web view (#41): a WiFi browser feed
+            rows = rows + (("web", "WEB VIEW", "web"),)
         if self._update_available():
             rows = rows + (("update", "UPDATE FW", "action"),)
         if self._online_update_available():
@@ -2419,6 +2426,9 @@ class Workstation:
         if kind == "action":                    # EDIT ICONS / UPDATE FW: open the tool
             self._activate_settings_action(key)
             return
+        if key == "web":                        # device web view ON <-> OFF (#41)
+            self._toggle_web_view()
+            return
         if key == "ota_channel":                # OTA update channel STABLE <-> BETA
             self._cycle_channel(d)
             return
@@ -2435,6 +2445,19 @@ class Workstation:
         else:  # mock-gauge (volume / brightness): a 0..5 placeholder
             v = int(self.system.get(key, 3)) + d
             self.system[key] = max(0, min(5, v))
+
+    def _toggle_web_view(self):
+        """Flip the device web view on/off via the injected controller (#41). Guarded
+        so a backend hiccup (e.g. WiFi not up yet -> can't bind) can never crash
+        Settings; the row just stays OFF and the controller may surface a reason."""
+        hook = self.web_hook
+        if hook is None:
+            return
+        self._dirty = True
+        try:
+            hook.toggle()
+        except Exception as exc:  # noqa: BLE001
+            print("KidCode web view toggle failed:", exc)
 
     def _settings_wallpaper_label(self):
         """A friendly label for the current wallpaper: the cart's TITLE for a
@@ -3751,6 +3774,8 @@ class Workstation:
                 row = rows[self.set_msel % len(rows)]
                 if row[2] == "action":
                     self._activate_settings_action(row[0])
+                elif row[2] == "web":               # A/run also toggles the web view (#41)
+                    self._toggle_web_view()
             if i.pressed("b"):
                 self._exit_settings()          # back -> resume the cart if opened from one
             elif i.pressed("home") or i.pressed("stop"):
@@ -3992,6 +4017,9 @@ class Workstation:
                 self.set_msel = i
                 if rows[i][2] == "action":
                     self._activate_settings_action(rows[i][0])  # EDIT ICONS / UPDATE FW
+                    return
+                if rows[i][2] == "web":            # web view: any tap flips ON/OFF (#41)
+                    self._toggle_web_view()
                     return
                 # left third = "<" (decrement), right third = ">" (increment).
                 if px >= x + w - edge:
@@ -5855,8 +5883,21 @@ class Workstation:
             beta = self._ota_channel() == "unstable"
             cv.print("BETA" if beta else "STABLE", vx, y + 5,
                      NAMES["orange"] if beta else NAMES["green"], 1)
-        # Mark not-yet-functional rows clearly (wallpaper + font + channel + actions work).
-        if kind not in ("wallpaper", "font", "action", "channel"):
+        elif kind == "web":                # device web view (#41): ON/OFF + the URL
+            on = False
+            url = ""
+            try:
+                on = bool(self.web_hook.enabled)
+                url = str(self.web_hook.url() or "")
+            except Exception:  # noqa: BLE001 -- a backend hiccup just reads OFF
+                pass
+            cv.print("ON" if on else "OFF", vx, y + 5,
+                     NAMES["green"] if on else NAMES["dark_grey"], 1)
+            if on and url:
+                # The URL to open in a phone/desktop browser, under the row label.
+                cv.print(url[:34], x + 4, y + 6 + fw, NAMES["blue"], 1)
+        # Mark not-yet-functional rows clearly (wallpaper + font + channel + web + actions work).
+        if kind not in ("wallpaper", "font", "action", "channel", "web"):
             cv.print("soon", x + 4, y + 6 + fw, NAMES["dark_grey"], 1)
 
     def _draw_fps(self):

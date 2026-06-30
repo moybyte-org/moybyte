@@ -1846,6 +1846,347 @@ def _load_carts(session=None):
     return [dict(c) for c in CARTS], None
 
 
+class WebView:
+    """Device web view controller (#41/#22): owns the draw-command recorder, the
+    non-blocking HTTP server, and the browser-input injection, and is the small
+    object the shared console's Settings "WEB VIEW" row toggles (it reads .enabled +
+    .url() and calls .toggle()).
+
+    Lifecycle, all driven from run_desktop's single-threaded loop:
+      * It starts OFF: ws.canvas stays the RAW DeviceCanvas, so the normal (no-browser)
+        path has ZERO per-draw overhead. Turning the view ON swaps a recording TeeCanvas
+        in as ws.canvas (and rebinds the wallpaper/running cart to it); even then the
+        recorder only records while a browser is actively polling /frame.
+      * toggle() brings WiFi up (reusing the saved-credential autoconnect), reads the
+        STA IP, and starts/stops the server. It needs WiFi already joined via the WiFi
+        cart; with no saved network it stays OFF and surfaces the reason.
+      * Each loop iteration: begin_frame() (start a recording if wanted) BEFORE the
+        render, feed_input() to inject queued browser events BEFORE inp.begin_frame(),
+        commit_frame() AFTER ws.frame(), and poll() once BETWEEN frames to serve at
+        most one request. None of these ever block the render loop.
+
+    NEEDS ON-DEVICE VERIFICATION: the socket server + WiFi<->LCD-DMA RAM coexistence
+    (#38/#40) are unproven on hardware here."""
+
+    def __init__(self, ws, canvas, inp, pointer, wifi, port=8080):
+        self._ws = ws
+        self._canvas = canvas          # the REAL DeviceCanvas (panel draws here)
+        self._inp = inp
+        self._pointer = pointer
+        self._wifi = wifi
+        self._port = port
+        self.enabled = False
+        self._url = ""
+        self._server = None
+        self._rec = None
+        self._tee = None
+        # Browser one-shot button presses pulsed for exactly one frame (so pressed()
+        # fires once), and the held set the browser drives via {type:"hold"}. The
+        # trackball-style pan accumulates between feeds.
+        self._press_queue = []
+        self._pulsed = []
+        self._pan = [0, 0]
+        self._key_queue = []
+        # Browser pointer intent, applied AFTER the physical touch read each frame so
+        # it isn't clobbered. _br_active True while a browser finger is down (so the
+        # cursor follows the browser drag); _br_click latches a tap edge to consume once.
+        self._br_x = pointer.x
+        self._br_y = pointer.y
+        self._br_active = False
+        self._br_click = False
+        try:
+            import kc_webserver
+            self._web = kc_webserver
+            self._rec = kc_webserver.DrawRecorder(canvas.w, canvas.h)
+            self._tee = kc_webserver.TeeCanvas(canvas, self._rec)
+        except Exception as exc:  # noqa: BLE001 -- no module -> the controller stays inert
+            print("KidCode web: module unavailable:", exc)
+            self._web = None
+
+    def install(self):
+        """Boot wiring: the web view starts OFF, so ws.canvas stays the RAW DeviceCanvas
+        and there is ZERO per-draw overhead in the normal (no-browser) path -- the Tee is
+        only swapped in when Settings turns the view ON (_bind), and swapped back out when
+        it's turned OFF (_unbind). Returns the canvas the loop calls sync_back() on (the
+        raw DeviceCanvas, which both the Tee -- via delegation -- and the off path share).
+        """
+        return self._canvas
+
+    def _bind(self):
+        """Swap the TeeCanvas in as ws.canvas (panel still renders through it -> the Tee
+        forwards every call to the real DeviceCanvas) and rebind the live drawers to it so
+        their draws reach the recorder: recompile the wallpaper, and restart a running cart.
+        Without the rebind the wallpaper/cart draw funcs stay bound to the raw canvas and the
+        browser sees nothing on the home/cart screen (the same gotcha the host web console
+        guards against by recompiling the wallpaper)."""
+        if self._tee is None:
+            return
+        self._ws.canvas = self._tee
+        try:
+            wp = getattr(self._ws, "wallpaper_id", None)
+            if wp:
+                self._ws.select_wallpaper(wp, persist=False)   # rebind backdrop to the Tee
+        except Exception:  # noqa: BLE001 -- a rebind hiccup must not crash the toggle
+            pass
+        self._rebind_running_cart()
+
+    def _unbind(self):
+        """Swap the raw DeviceCanvas back in as ws.canvas (zero per-draw overhead again)
+        and rebind the wallpaper/cart to it, the mirror of _bind."""
+        self._ws.canvas = self._canvas
+        try:
+            wp = getattr(self._ws, "wallpaper_id", None)
+            if wp:
+                self._ws.select_wallpaper(wp, persist=False)
+        except Exception:  # noqa: BLE001
+            pass
+        self._rebind_running_cart()
+
+    def _rebind_running_cart(self):
+        """If a cart is open, re-run it so its namespace recompiles against the current
+        ws.canvas (apply() -> _start() rebuilds make_api). No-op on the home/editor screens
+        (only a running cart binds the draw API). Guarded so a cart restart can't crash the
+        toggle -- if it fails the cart simply isn't mirrored until reopened."""
+        try:
+            if getattr(self._ws, "cart", None) is not None and self._ws.screen == "desktop":
+                self._ws.apply()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def available(self):
+        return self._web is not None
+
+    def url(self):
+        return self._url
+
+    # -- Settings toggle -----------------------------------------------------
+    def toggle(self):
+        if not self.available():
+            return
+        if self.enabled:
+            self._stop()
+        else:
+            self._start()
+
+    def _start(self):
+        # Bring WiFi up (reuse the saved-credential autoconnect: only joins a network
+        # the kid already added via the WiFi cart). No creds -> stay OFF with a reason.
+        ip = None
+        try:
+            connected, _ssid, ip = self._wifi.status()
+            if not connected:
+                if autoconnect_wifi(self._wifi):
+                    _conn, _ssid, ip = self._wifi.status()
+        except Exception as exc:  # noqa: BLE001
+            print("KidCode web: wifi check failed:", exc)
+        if not ip:
+            self._url = "no wifi"
+            self.enabled = False
+            _diag_note("web", "start aborted: no wifi (join via WiFi cart first)")
+            return
+        try:
+            self._server = self._web.WebServer(self._rec, _WebProvider(self), self._port)
+            if self._server.start(ip):
+                self.enabled = True
+                self._url = self._server.url()
+                self._bind()                 # swap the Tee in (records when a browser polls)
+                print("KidCode web view ON:", self._url)
+                _diag_note("web", "serving at %s" % self._url)
+            else:
+                self.enabled = False
+                self._url = "bind failed"
+        except Exception as exc:  # noqa: BLE001
+            print("KidCode web: start failed:", exc)
+            self.enabled = False
+            self._url = "error"
+
+    def _stop(self):
+        if self._server is not None:
+            try:
+                self._server.stop()
+            except Exception:  # noqa: BLE001
+                pass
+        self._server = None
+        self.enabled = False
+        if self._rec is not None:
+            self._rec.enabled = False
+        self._unbind()                       # swap the raw canvas back (zero overhead again)
+        print("KidCode web view OFF")
+        _diag_note("web", "stopped")
+
+    # -- loop hooks (guarded; never block the render loop) -------------------
+    def begin_frame(self):
+        if self._server is None:
+            return
+        was = self._rec.enabled
+        self._server.begin_frame()
+        # When a browser (re)connects, force ONE redraw so it gets a full frame even on
+        # an idle screen (the redraw-on-change gate #44 would otherwise record nothing
+        # until something changes). A running cart redraws every frame regardless.
+        if self._rec.enabled and not was:
+            try:
+                self._ws.mark_dirty()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def commit_frame(self):
+        if self._server is not None:
+            self._server.commit_frame()
+
+    def poll(self):
+        if self._server is not None:
+            try:
+                self._server.poll()
+            except Exception as exc:  # noqa: BLE001 -- a bad request never bricks the loop
+                print("KidCode web: poll error:", exc)
+
+    def feed_input(self, now):
+        """Apply queued browser input. Called once per loop iteration, just BEFORE
+        inp.begin_frame() so a browser button press registers a clean one-frame edge:
+        last frame's pulsed buttons are released first, then this frame's queued ones
+        are held (begin_frame then computes pressed = held - last). The pan nudges the
+        cursor like the trackball does. No-op when nothing's queued (the common path)."""
+        # Release last frame's one-shot presses.
+        for name in self._pulsed:
+            try:
+                self._inp.set_button(name, False)
+            except Exception:  # noqa: BLE001
+                pass
+        self._pulsed = []
+        # Hold this frame's queued one-shot presses (released next feed).
+        if self._press_queue:
+            for name in self._press_queue:
+                try:
+                    self._inp.set_button(name, True)
+                except Exception:  # noqa: BLE001
+                    pass
+            self._pulsed = self._press_queue
+            self._press_queue = []
+        # Browser trackball pan -> cursor move (mirrors the device loop's _cursor_delta).
+        if self._pan[0] or self._pan[1]:
+            self._pointer.move(self._pan[0] * 4, self._pan[1] * 4)
+            self._pan = [0, 0]
+        # Browser typed key -> last_key for THIS frame. Applied here (after the loop's
+        # keyboard.poll() which would otherwise reset last_key to 0) so a cart in
+        # textmode()/the code editor sees it; consumed so it's one byte for one frame.
+        if self._key_queue:
+            try:
+                self._inp.last_key = self._key_queue[-1]
+            except Exception:  # noqa: BLE001
+                pass
+            self._key_queue = []
+
+    def feed_pointer(self, physical_active):
+        """Merge browser pointer intent into the real Pointer. Called in the loop AFTER
+        the physical touch read so it isn't clobbered, and only when the physical touch
+        is NOT active (a real finger on the device wins). Places the cursor at the
+        browser finger and OR-s in a tap edge; returns True if a browser tap fired this
+        frame (so the loop sets pointer.click)."""
+        clicked = False
+        if not physical_active and (self._br_active or self._br_click):
+            self._pointer.place(self._br_x, self._br_y)
+            self._pointer.down = self._br_active
+            if self._br_click:
+                self._br_click = False         # consume the tap edge once
+                clicked = True
+        return clicked
+
+    # -- input event hooks handed to kc_webserver.apply_events ---------------
+    def _on_press(self, name):
+        self._press_queue.append(name)
+
+    def _on_pan(self, dx, dy):
+        self._pan[0] += dx
+        self._pan[1] += dy
+
+    def _on_key(self, code):
+        # Queue a typed key; feed_input applies it AFTER the loop's keyboard.poll() so it
+        # isn't reset to 0 before the cart reads last_key. One byte per frame, like the
+        # T-Deck keyboard's own ASCII path.
+        self._key_queue.append(code)
+
+    def _on_esc(self):
+        # Leave an open editor/menu panel back to the desktop (mirrors the host esc).
+        try:
+            if self._ws.screen == "menu":
+                self._ws._leave_menu()
+        except Exception:  # noqa: BLE001
+            pass
+
+    # -- data the server asks for --------------------------------------------
+    def assets(self):
+        ws = self._ws
+        cart = getattr(ws, "cart", None)
+        title = cart.get("title") if cart else None
+        rate = AUDIO_RATE
+        return self._web.assets_payload(self._canvas.w, self._canvas.h, PAL565,
+                                        getattr(ws, "sheet", None),
+                                        getattr(ws, "tilemap", None), title, rate)
+
+    def frame(self):
+        cart = getattr(self._ws, "cart", None)
+        title = cart.get("title") if cart else None
+        cmds = self._rec.frame() if self._rec is not None else []
+        return (cmds, title)
+
+    def apply(self, events):
+        # Route pointer events through a sink (captured into browser-pointer state and
+        # merged later by feed_pointer, so the per-frame physical touch read doesn't
+        # clobber them); buttons/keys/pan go through the hooks. apply_events guards each
+        # event, so a malformed one is skipped, never raised.
+        sink = _PointerSink(self)
+        self._web.apply_events(events, self._inp, sink,
+                               on_press=self._on_press, on_pan=self._on_pan,
+                               on_key=self._on_key, on_esc=self._on_esc)
+
+
+class _PointerSink:
+    """A Pointer-shaped target for kc_webserver.apply_events: place()/down/click write
+    into the WebView's browser-pointer intent instead of the live cursor, so the loop's
+    physical touch read can't clobber a browser tap (feed_pointer merges it later)."""
+
+    def __init__(self, view):
+        self._v = view
+
+    def place(self, x, y):
+        self._v._br_x = int(x)
+        self._v._br_y = int(y)
+
+    @property
+    def down(self):
+        return self._v._br_active
+
+    @down.setter
+    def down(self, v):
+        self._v._br_active = bool(v)
+
+    @property
+    def click(self):
+        return self._v._br_click
+
+    @click.setter
+    def click(self, v):
+        if v:
+            self._v._br_click = True
+
+
+class _WebProvider:
+    """Thin adapter so kc_webserver.WebServer never holds console refs directly: it
+    asks this for /assets, /frame, and to apply /input -- all delegated to the WebView."""
+
+    def __init__(self, view):
+        self._v = view
+
+    def assets(self):
+        return self._v.assets()
+
+    def frame(self):
+        return self._v.frame()
+
+    def apply(self, events):
+        self._v.apply(events)
+
+
 def run_desktop(handler, prefetched=None, fps_cap=60):
     """Boot the workstation on the device: launcher + carts + keyboard.
 
@@ -1944,6 +2285,17 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         ws.reboot_hook = machine.reset
     except Exception as exc:
         print("KidCode: reboot hook unavailable:", exc)
+    # Web view (#41/#22): serve the running console to a browser on the same WiFi via a
+    # draw-command stream (NOT raw pixels -- WiFi is ~72KB/s, 153KB/frame is unplayable).
+    # It starts OFF: ws.canvas stays the RAW DeviceCanvas so there is ZERO per-draw cost
+    # in the normal (no-browser) path. Only when Settings -> WEB VIEW turns it ON does the
+    # WebView swap a recording TeeCanvas in as ws.canvas (and even then it records only
+    # while a browser is actively polling /frame). web is None on a build without
+    # kc_webserver -> the Settings row is hidden.
+    web = WebView(ws, canvas, inp, pointer, ws.wifi)
+    if web.available():
+        canvas = web.install()        # boot no-op; keeps sync_back() on the real canvas
+        ws.web_hook = web
     # WiFi is deliberately NOT brought up at boot: the WLAN stack reserves internal RAM
     # the LCD DMA flush needs, so autoconnecting here starved the panel flush (OSError
     # 257 / ESP_ERR_NO_MEM) and froze the desktop. DeviceWifi is lazy now -- the radio
@@ -2017,6 +2369,11 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             keyboard.poll()
         except Exception:
             pass
+        # Web view (#41): start this frame's recording (no-op unless a browser is live)
+        # and inject any queued browser button/pan input BEFORE begin_frame, so a
+        # browser press registers a clean one-frame edge like the keyboard's.
+        web.begin_frame()
+        web.feed_input(now)
         inp.begin_frame()                       # keyboard edges (still a fallback)
         counts, click = ball.poll()             # trackball
         nx = counts[3] - counts[2]              # right - left (raw pulses)
@@ -2034,6 +2391,10 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             pointer.place(tp[0], tp[1])
             if tp[2]:                           # press edge = tap = click
                 click = True
+        # Web view (#41): merge a browser finger/tap AFTER the physical touch read (so
+        # it isn't clobbered); a real finger on the device wins over the browser.
+        if web.feed_pointer(tp is not None):
+            click = True
         pointer.click = click
         pointer.tick(now)                       # auto-hide the idle trackball cursor
         # DMA double-buffer (#40, default OFF): point the canvas at the compositor's
@@ -2054,6 +2415,11 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             print("KidCode frame error:", exc)  # print the traceback's reason to serial
             _diag_flush(diag, ws)
             gc.collect()                        # a NO_MEM flush may recover after a collect
+        # Web view (#41): publish this frame's recorded draw commands to the browser --
+        # but ONLY if the frame actually drew (the redraw-on-change gate #44 may skip a
+        # static screen, which would record nothing; keep serving the last full frame).
+        if getattr(ws, "_frames_drawn", 0) != _frames_before:
+            web.commit_frame()
         # DMA double-buffer (#40): finish the displayed frame when the UI goes IDLE.
         # flush() holds back the final band (the busy-wait completion point) for the
         # NEXT flush's drain so render overlaps the DMA -- but the redraw-on-change gate
@@ -2106,6 +2472,11 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         if diag is not None and _ticks_diff(_tnow, _diag_flush_at) >= 0:
             _diag_flush_at = _tnow + 5000
             _diag_flush(diag, ws)
+        # Web view (#41): service AT MOST ONE HTTP request, BETWEEN frames, fully
+        # non-blocking (WiFi STA is a separate peripheral from the display SPI, so this
+        # never touches the SD/panel bus -- it only competes for CPU here). No-op when
+        # the server is off; a slow client is dropped, never waited on.
+        web.poll()
         elapsed = _ticks_diff(_ticks_ms(), now)
         if elapsed < frame_ms:
             time.sleep_ms(frame_ms - elapsed)
