@@ -1169,7 +1169,7 @@ sEl.textContent="reconnecting...";sEl.style.color="#ff004d";});}
 // HUD render: cheap textContent update, only when shown. atlas count = defined ATL slots.
 function drawHud(){var n=0;for(var i=0;i<ATL.length;i++)if(ATL[i])n++;
 var u=HUD.unknown?'<span class=w>'+HUD.unknown+'</span>':'0';
-HUD.el.innerHTML="fps <b>"+HUD.fps.toFixed(1)+"</b>   "+HUD.kb.toFixed(2)+" KB/f\natlas <b>"+n+"</b>   unknown "+u;}
+HUD.el.innerHTML="fps <b>"+HUD.fps.toFixed(1)+"</b>   "+HUD.kb.toFixed(2)+" KB/f<br>atlas <b>"+n+"</b>   unknown "+u;}
 // Toggle the debug HUD with the backtick key, at the WINDOW level so it works whether or
 // not the canvas has focus (and never steals a WASD/arrow movement key from the cart).
 window.addEventListener("keydown",function(e){if(e.key==="`"||e.key==="~"){HUD.on=!HUD.on;
