@@ -1329,6 +1329,9 @@ class WebServer:
         self._frames_pushed = 0       # frames sent down the WS since boot (#41 perf log: the
                                       # browser diffs this to derive device push-rate vs its
                                       # own recv-rate -- a gap = frames dropped over WiFi)
+        self._last_json_ms = 0        # ms spent json-encoding the last pushed frame ...
+        self._last_send_ms = 0        # ... and ms in the socket send (#41 perf log: localizes
+                                      # device-bound stutter -- encode vs transport vs the rest)
         # The PERSISTENT WebSocket client (one at a time). None = no browser connected ->
         # the recorder stays a pure pass-through (zero overhead). A new upgrade drops the
         # old conn (latest-wins). Liveness is keyed off this being non-None + not idle-timed.
@@ -1648,17 +1651,28 @@ class WebServer:
             heap = gc.mem_free() // 1024
         except Exception:  # noqa: BLE001 -- no gc.mem_free on CPython; perf is best-effort
             pass
-        return {"heap": heap, "pf": self._frames_pushed}
+        # js/tx are the PREVIOUS frame's encode/send ms (set at the end of _push_frame), so
+        # the snapshot is one frame stale -- negligible, and it avoids timing ourselves.
+        return {"heap": heap, "pf": self._frames_pushed,
+                "js": self._last_json_ms, "tx": self._last_send_ms}
 
     def _push_frame(self, ws):
         """Send the latest committed frame as a WS text message: the SAME frame_payload (run
         through served_frame for the serve-time defspr prepend + the atlas gen) the HTTP
-        /frame path returned -- only the transport differs."""
+        /frame path returned -- only the transport differs. Times the json-encode + the
+        socket send separately (#41 perf log) so a device-bound stutter is pinned to encode
+        vs transport vs the rest of the loop (total frame period = the browser's 1/dev)."""
         cmds, cart = self.provider.frame()
         cmds = self.served_frame(cmds)
         self._frames_pushed += 1
-        ws.send(json.dumps(frame_payload(cmds, cart, self.recorder.atlas_gen,
-                                         self._perf_snapshot())))
+        t0 = ticks_ms()
+        payload = json.dumps(frame_payload(cmds, cart, self.recorder.atlas_gen,
+                                           self._perf_snapshot()))
+        t1 = ticks_ms()
+        ws.send(payload)
+        t2 = ticks_ms()
+        self._last_json_ms = ticks_diff(t1, t0)
+        self._last_send_ms = ticks_diff(t2, t1)
 
     def _http_send_close(self, conn, data):
         """sendall `data` (with a short send budget) then close -- the one-shot HTTP path."""
@@ -1822,13 +1836,14 @@ var HUD={on:false,fps:0,kb:0,unknown:0,el:document.getElementById("hud"),last:0}
 // render fps, bandwidth, avg/peak payload, AND the device's push-rate + free heap (from
 // f.perf). A single pasted line tells device-bound (low dev fps, small payloads, bw under
 // ~72KB/s) from WiFi-bound (dev fps >> recv fps, bw pinned near ~72KB/s) stutter.
-var PERF_MS=2000,PERF={f:0,b:0,pk:0,t:0,dh:0,pf:0,lpf:0};
+var PERF_MS=2000,PERF={f:0,b:0,pk:0,t:0,dh:0,pf:0,lpf:0,js:0,tx:0};
 function plog(){var now=(window.performance&&performance.now)?performance.now():Date.now();
 if(!PERF.t){PERF.t=now;PERF.lpf=PERF.pf;return;}var dt=(now-PERF.t)/1000;if(dt<=0)return;
 console.log("[kidcode] "+(assCart||"?")+" | recv "+(PERF.f/dt).toFixed(1)+" render "+HUD.fps.toFixed(1)
-+" dev "+((PERF.pf-PERF.lpf)/dt).toFixed(1)+" fps | bw "+(PERF.b/dt/1024).toFixed(1)+" KB/s avg "
-+(PERF.f?(PERF.b/PERF.f/1024):0).toFixed(2)+" peak "+(PERF.pk/1024).toFixed(2)+" KB | heap "+PERF.dh
-+" KB | unknown "+HUD.unknown);PERF.f=0;PERF.b=0;PERF.pk=0;PERF.t=now;PERF.lpf=PERF.pf;}
++" dev "+((PERF.pf-PERF.lpf)/dt).toFixed(1)+" fps (js "+PERF.js+" tx "+PERF.tx+"ms) | bw "
++(PERF.b/dt/1024).toFixed(1)+" KB/s avg "+(PERF.f?(PERF.b/PERF.f/1024):0).toFixed(2)+" peak "
++(PERF.pk/1024).toFixed(2)+" KB | heap "+PERF.dh+" KB | unknown "+HUD.unknown);
+PERF.f=0;PERF.b=0;PERF.pk=0;PERF.t=now;PERF.lpf=PERF.pf;}
 function alloc(){cv.width=W;cv.height=H;cx=cv.getContext("2d");cx.imageSmoothingEnabled=false;
 idx=new Uint8Array(W*H);img=cx.createImageData(W,H);rgba=img.data;}
 function getA(){return fetch("/assets").then(function(r){return r.json();}).then(function(a){
@@ -1964,7 +1979,7 @@ function pv(){return[(pH.ArrowRight?1:0)-(pH.ArrowLeft?1:0),(pH.ArrowDown?1:0)-(
 // the device's `gen` (lock-step with its served reset), NOT by the cart change -- so scrolling
 // the launcher (which changes cart_title -> /assets refetch) no longer wipes ATL and strands
 // sprites (the unknown-growth bug, #41).
-function df(f){if(f.perf){PERF.dh=f.perf.heap;PERF.pf=f.perf.pf;}
+function df(f){if(f.perf){PERF.dh=f.perf.heap;PERF.pf=f.perf.pf;PERF.js=f.perf.js;PERF.tx=f.perf.tx;}
 if(f.gen!==curGen){curGen=f.gen;ATL=[];LAY={};HUD.unknown=0;}
 if(f.cart!==assCart){assCart=f.cart;getA().catch(function(){});}rep(f.cmds||[]);blit();
 var t=(window.performance&&performance.now)?performance.now():Date.now();if(HUD.last){var inst=1000/Math.max(1,t-HUD.last);
