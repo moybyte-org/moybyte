@@ -1125,3 +1125,32 @@ def test_stream_mode_off_path_is_byte_for_byte_normal():
     assert dev.calls == 4, "every draw reaches the panel, exactly as today"
     rec.begin(); rec.commit()
     assert rec.frame() == [], "nothing recorded with no browser"
+
+
+def test_page_html_served_script_is_valid_js():
+    """The embedded browser page must be valid JS *as served* -- i.e. against the
+    EVALUATED PAGE_HTML, not a hand copy. A non-raw Python string once turned a JS-string
+    `\\n` into a real newline, breaking the page with "Invalid or unexpected token"
+    (#41). node --check the actual served <script> so that can't regress. Skips when node
+    isn't installed (CI without node)."""
+    import re
+    import shutil
+    import subprocess
+    import tempfile
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node not available")
+    m = re.search(r"<script>(.*)</script>", web.PAGE_HTML, re.S)
+    assert m, "PAGE_HTML has a <script> block"
+    js = m.group(1)
+    # The bug was a raw newline inside a JS string literal; guard the specific shape too.
+    assert "KB/f\natlas" not in js, "raw newline inside the HUD string (the #41 regression)"
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
+        f.write(js)
+        path = f.name
+    try:
+        r = subprocess.run([node, "--check", path], capture_output=True, text=True)
+        assert r.returncode == 0, "served page JS is invalid:\n" + r.stderr
+    finally:
+        os.unlink(path)
