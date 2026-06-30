@@ -36,6 +36,18 @@
 # Battle City frame drops from tens of KB to <1 KB (one map op + a few dozen 6-int sprite
 # refs + the atlas amortized once over the session).
 #
+# SERVE-TIME defspr (the drop-robust fix, #41): `spr` ALWAYS records a tiny ["spr", idx,
+# ...] and only ENSURES the bitmap is in the recorder's atlas -- it never inlines a defspr
+# based on record-time first-sight. The defspr is injected at SERVE time instead: the
+# WebServer keeps a `served` set of atlas indices it has actually handed to the browser,
+# and when it builds a /frame response it PREPENDS a ["defspr", ...] for every spr index in
+# that frame the browser hasn't received yet (reconstructed via DrawRecorder.defspr_cmd).
+# This is the load-bearing correctness fix: the frame cap DROPS frames and the browser only
+# polls the LATEST /frame, so a defspr inlined at record-time rode a frame that was almost
+# never the one served -> the browser had ["spr", idx] with no atlas entry -> nothing drawn.
+# At serve time every served frame is self-contained for the sprites it references, robust
+# to dropped frames, while still sending each bitmap only ONCE per browser session.
+#
 # SINGLE-THREADED, NON-BLOCKING (a hard device constraint): run_desktop's native loop
 # does one render frame at a time and never services anything mid-frame. So this server
 # uses a NON-BLOCKING listening socket and `poll()` accepts/handles AT MOST ONE request
@@ -93,7 +105,12 @@ RECORD_IDLE_MS = 2000
 # pass-through (the Tee adds nothing, the panel keeps full speed). The browser polls and
 # always gets the LAST fully-recorded frame. A frame is recorded completely or not at all
 # (the gate is decided once, at begin_frame).
-WEB_FPS_CAP = 12
+#
+# 30fps (#41 stream mode): with STREAM MODE the device goes headless while a browser is
+# playing (skips its OWN panel render + flush -- the ~14-20fps render+flush ceiling), so the
+# cart can produce 30+fps of cheap commands. A diet frame is <1KB, so 30fps ~= 19KB/s, well
+# under the ~72KB/s WiFi. The cap is what bounds it; raised 12 -> 30 to take that headroom.
+WEB_FPS_CAP = 30
 WEB_FRAME_INTERVAL_MS = 1000 // WEB_FPS_CAP
 
 # Per-connection socket timeouts (seconds). The accepted conn is BLOCKING with a bound,
@@ -159,26 +176,41 @@ class DrawRecorder:
     frame from the loop.
 
     PAYLOAD DIET (#41): primitives mirror the literal Canvas calls, but bitmaps are
-    deduplicated. `spr` ships a unique bitmap ONCE as ["defspr", index, w, h, t, pix]
-    and then references it by index as ["spr", index, x, y, scale, flip]; a repeated
-    bitmap is just the 6-number ["spr", ...]. `map` records ONE ["map", ...] op (the
-    browser replays it from its cached tilemap + sheet), preceded by a ["settiles",
-    w, h, cells] when the recorder notices the tilemap changed (an mset). The sprite
-    atlas {id(img): index} is keyed by id(img) -- make_api reuses one Image per (tile id,
-    colorkey), so the id is a STABLE key for a unique bitmap; the recorder also holds a
-    reference to each img (self._atlas_keep) so the Image can't be GC'd and its id reused.
-    reset_atlas() drops the atlas + tilemap snapshot when the cart/sheet changes."""
+    deduplicated. `spr` ALWAYS records a tiny ["spr", index, x, y, scale, flip] and just
+    ENSURES the bitmap is in the atlas (assigning it the next dense index the first time
+    the Image is seen). The ["defspr", index, w, h, t, pix] that ships the actual pixels is
+    NOT emitted here -- the WebServer prepends it at SERVE time, once per browser session,
+    for the indices a served frame references but the browser hasn't received yet (see
+    defspr_cmd + WebServer.served). This is drop-robust: the frame cap discards frames and
+    the browser polls only the latest, so a record-time defspr was almost never on the
+    served frame. `map` records ONE ["map", ...] op (the browser replays it from its cached
+    tilemap + sheet), preceded by a ["settiles", w, h, cells] when the recorder notices the
+    tilemap changed (an mset). The sprite atlas {id(img): index} is keyed by id(img) --
+    make_api reuses one Image per (tile id, colorkey), so the id is a STABLE key for a
+    unique bitmap; the recorder also holds a reference to each img (self._atlas_keep) so the
+    Image can't be GC'd and its id reused, AND so defspr_cmd can reconstruct the pixels at
+    serve time. reset_atlas() drops the atlas + tilemap snapshot when the cart/sheet changes."""
 
     def __init__(self, w, h):
         self.w = w
         self.h = h
         self.enabled = False
+        # STREAM MODE (#41 30fps lever): when True, the TeeCanvas RECORDS commands but does
+        # NOT forward draws to the real DeviceCanvas (no rasterization), and run_desktop
+        # skips the panel flush -- so the cart runs logic + records cheap commands and can
+        # outrun the panel's render+flush ceiling. Set by the loop only while a browser is
+        # actively playing; ignored when recording is disabled (no browser -> no streaming).
+        self.record_only = False
         self._cmds = []
         self._frame = []        # the last COMPLETE frame handed to the server
         # Sprite atlas: id(img) -> dense index. _atlas_keep holds the Image objects so a
-        # cached bitmap can't be collected and have its id reused for a different one.
+        # cached bitmap can't be collected and have its id reused for a different one (and
+        # so defspr_cmd can reconstruct the pixels at serve time).
         self._atlas = {}
         self._atlas_keep = []
+        # Atlas generation: bumped by reset_atlas() so the WebServer can notice the atlas
+        # was dropped (cart/sheet change) and re-ship every defspr (its `served` set resets).
+        self.atlas_gen = 0
         # Tilemap-change detection (for map()): the cells snapshot + the .gen counter
         # last shipped to the browser, so an unchanged map doesn't re-ship settiles.
         self._tiles_cells = None
@@ -207,13 +239,15 @@ class DrawRecorder:
         """Drop the sprite atlas + tilemap snapshot. Called when the open cart / sheet /
         tilemap changes, so a new cart's bitmaps start at index 0 and can't collide with
         a previous cart's stale indices, and the next map() re-ships its tiles. The
-        browser mirrors this by clearing its caches when /assets (the cart) changes."""
+        browser mirrors this by clearing its caches when /assets (the cart) changes. Bumps
+        atlas_gen so the WebServer drops its `served` set and re-ships every defspr."""
         self._atlas = {}
         self._atlas_keep = []
         self._tiles_cells = None
         self._tiles_gen = None
         self._batch_imgs = {}
         self._batch_gen = None
+        self.atlas_gen += 1
 
     def batch_tile_image(self, sheet, tid, colorkey):
         """Resolve a sheet tile to a STABLE Image (reused across frames) for spr_batch, so
@@ -279,23 +313,34 @@ class DrawRecorder:
 
     def spr(self, img, x, y, scale=1, flip=0):
         # img is an Image / _SheetSprite (.w/.h/.pix/.transparent); ids are already
-        # resolved to pixels by the time the canvas sees it. PAYLOAD DIET (#41): ship the
-        # bitmap ONCE keyed by id(img) -- a ["defspr", index, w, h, t, pix] the first time
-        # we see this Image, then always a tiny ["spr", index, x, y, scale, flip]. make_api
-        # reuses one Image per (tile id, colorkey) across frames, so id(img) is stable and
-        # an 8x8/16x16 bitmap is sent once per session, not once per sprite per frame.
+        # resolved to pixels by the time the canvas sees it. SERVE-TIME defspr (#41): ALWAYS
+        # record a tiny ["spr", index, x, y, scale, flip] and just ENSURE the bitmap is in
+        # the atlas (assigning the next dense index the first time this Image is seen). The
+        # ["defspr", ...] that carries the pixels is injected by the WebServer at SERVE time
+        # (defspr_cmd), once per browser session, so a dropped frame can never strand a spr
+        # without its bitmap. make_api reuses one Image per (tile id, colorkey) across
+        # frames, so id(img) is a stable key for a unique bitmap.
         key = id(img)
         idx = self._atlas.get(key)
         if idx is None:
             idx = len(self._atlas_keep)
             self._atlas[key] = idx
-            self._atlas_keep.append(img)        # hold a ref so id() can't be reused
-            t = img.transparent
-            if t is None:
-                t = -1
-            self._cmds.append(["defspr", idx, int(img.w), int(img.h), int(t),
-                               list(img.pix)])
+            self._atlas_keep.append(img)        # hold a ref: id() can't be reused AND
+                                                # defspr_cmd can reconstruct the pixels later
         self._cmds.append(["spr", idx, int(x), int(y), int(scale), int(flip)])
+
+    def defspr_cmd(self, idx):
+        """Reconstruct the ["defspr", idx, w, h, t, pix] for an atlas index from the held
+        Image (self._atlas_keep[idx]). The WebServer calls this at SERVE time to prepend the
+        bitmap the first time a served frame references it (see WebServer.served). Returns
+        None for an out-of-range index (defensive: a stale frame referencing a reset atlas)."""
+        if idx < 0 or idx >= len(self._atlas_keep):
+            return None
+        img = self._atlas_keep[idx]
+        t = img.transparent
+        if t is None:
+            t = -1
+        return ["defspr", int(idx), int(img.w), int(img.h), int(t), list(img.pix)]
 
     def settiles(self, tilemap):
         """Sync the browser's cached tilemap when it has CHANGED since last shipped, as a
@@ -346,6 +391,14 @@ class TeeCanvas:
     over a direct delegate call (no list ops, no allocation), so the normal no-browser
     path is effectively free.
 
+    STREAM MODE (#41 30fps lever): when `recorder.record_only` is True (a browser is
+    actively playing -- the loop set it), the pixel-PRODUCING ops (cls/pix-write/line/rect/
+    rectb/circ/circb/spr/spr_batch/map/print) RECORD but do NOT forward to the real canvas,
+    so the device skips rasterizing the panel (run_desktop also skips the flush). The cheap
+    state ops (reset_state/camera/clip/pal/palt) STILL forward, so the canvas's draw state +
+    camera()'s return value stay correct -- they don't touch pixels. record_only only ever
+    matters while enabled is True; with no browser the Tee is the unchanged pass-through.
+
     It mirrors the full Canvas surface the console + carts call. Reads (`pix` with two
     args, attribute reads like `.buf`/`.w`) pass straight through to the real canvas.
     Scroll layers (new_layer) are NOT teed -- a layer is an off-screen pre-render
@@ -393,50 +446,63 @@ class TeeCanvas:
             self._r.palt(c, on)
 
     # -- primitives ----------------------------------------------------------
+    # In STREAM MODE (recorder.record_only) these pixel-producing ops RECORD but skip the
+    # `self._c.<op>()` forward, so the device doesn't rasterize the panel (run_desktop also
+    # skips the flush). `record_only` is honoured only while `enabled` (a browser is live);
+    # otherwise the forward always runs, identical to today.
     def cls(self, c=0):
-        self._c.cls(c)
+        if not self._r.record_only:
+            self._c.cls(c)
         if self._r.enabled:
             self._r.cls(c)
 
     def pix(self, x, y, c=None):
         if c is None:
             return self._c.pix(x, y)           # a read -> the real framebuffer
-        self._c.pix(x, y, c)
+        if not self._r.record_only:
+            self._c.pix(x, y, c)
         if self._r.enabled:
             self._r.pix(x, y, c)
 
     def line(self, x0, y0, x1, y1, c):
-        self._c.line(x0, y0, x1, y1, c)
+        if not self._r.record_only:
+            self._c.line(x0, y0, x1, y1, c)
         if self._r.enabled:
             self._r.line(x0, y0, x1, y1, c)
 
     def rect(self, x, y, w, h, c):
-        self._c.rect(x, y, w, h, c)
+        if not self._r.record_only:
+            self._c.rect(x, y, w, h, c)
         if self._r.enabled:
             self._r.rect(x, y, w, h, c)
 
     def rectb(self, x, y, w, h, c):
-        self._c.rectb(x, y, w, h, c)
+        if not self._r.record_only:
+            self._c.rectb(x, y, w, h, c)
         if self._r.enabled:
             self._r.rectb(x, y, w, h, c)
 
     def circ(self, cx, cy, r, c):
-        self._c.circ(cx, cy, r, c)
+        if not self._r.record_only:
+            self._c.circ(cx, cy, r, c)
         if self._r.enabled:
             self._r.circ(cx, cy, r, c)
 
     def circb(self, cx, cy, r, c):
-        self._c.circb(cx, cy, r, c)
+        if not self._r.record_only:
+            self._c.circb(cx, cy, r, c)
         if self._r.enabled:
             self._r.circb(cx, cy, r, c)
 
     def spr(self, img, x, y, scale=1, flip=0):
-        self._c.spr(img, x, y, scale, flip)
+        if not self._r.record_only:
+            self._c.spr(img, x, y, scale, flip)
         if self._r.enabled:
             self._r.spr(img, x, y, scale, flip)
 
     def spr_batch(self, sheet, items, colorkey=-1, scale=1):
-        self._c.spr_batch(sheet, items, colorkey, scale)
+        if not self._r.record_only:
+            self._c.spr_batch(sheet, items, colorkey, scale)
         if self._r.enabled:
             # Expand to per-tile spr commands (the browser has no batch op). Resolve each
             # tile through the recorder's STABLE tile-image cache (not a per-call dict), so
@@ -454,7 +520,8 @@ class TeeCanvas:
 
     def map(self, tilemap, sheet, mx=0, my=0, w=None, h=None,
             sx=0, sy=0, colorkey=-1, scale=1):
-        self._c.map(tilemap, sheet, mx, my, w, h, sx, sy, colorkey, scale)
+        if not self._r.record_only:
+            self._c.map(tilemap, sheet, mx, my, w, h, sx, sy, colorkey, scale)
         if self._r.enabled:
             # PAYLOAD DIET (#41): record ONE map op (was ~300 fat per-cell sprs). The
             # browser has the sheet + tilemap from /assets and replays the cell walk
@@ -471,7 +538,8 @@ class TeeCanvas:
             self._r.map(mx, my, int(w), int(h), int(sx), int(sy), scale, int(colorkey))
 
     def print(self, s, x, y, c, scale=2):
-        self._c.print(s, x, y, c, scale)
+        if not self._r.record_only:
+            self._c.print(s, x, y, c, scale)
         if self._r.enabled:
             self._r.print(s, x, y, c)
 
@@ -688,6 +756,14 @@ class WebServer:
         self._last_frame_req = 0      # ticks_ms of the last /frame fetch (browser live?)
         self._last_record_ms = 0      # ticks_ms of the last RECORDED frame (the fps cap)
         self.requests = 0             # served-request counter (diag)
+        # SERVE-TIME defspr (#41): the atlas indices we've ALREADY shipped to the browser as
+        # a ["defspr", ...]. When a served /frame references an index not in here we PREPEND
+        # its defspr (once) and add it; the set resets when /assets is (re)served (a page
+        # load / cart change clears the browser's atlas) or when the recorder's atlas_gen
+        # changes (reset_atlas). So each bitmap travels once per browser session, yet every
+        # served frame is self-contained for the sprites it draws -- robust to dropped frames.
+        self._served = set()
+        self._served_gen = recorder.atlas_gen
 
     def start(self, ip=None):
         """Open the non-blocking listening socket. `ip` is the device's STA IP (for
@@ -718,6 +794,7 @@ class WebServer:
                 pass
         self.sock = None
         self.recorder.enabled = False
+        self.recorder.record_only = False
 
     def url(self):
         return "http://%s:%d/" % (self.ip or "0.0.0.0", self.port)
@@ -729,26 +806,81 @@ class WebServer:
             return False
         return ticks_diff(ticks_ms(), self._last_frame_req) < RECORD_IDLE_MS
 
+    def stream_mode(self):
+        """True when the device should go HEADLESS for the web stream this frame -- i.e. a
+        browser is actively playing (recording_wanted), so the loop can skip the device's
+        OWN panel rasterization + flush and let the cart run logic + record cheap commands
+        only, lifting the web frame rate above the panel's render+flush ceiling (#41 30fps
+        lever). Ties to the SAME gate as recording -- no new toggle -- so it's identical to
+        today (normal panel rendering, zero overhead) whenever no browser is connected."""
+        return self.recording_wanted()
+
+    def served_frame(self, cmds):
+        """Build the command list to actually SEND for /frame: PREPEND a ["defspr", ...] for
+        every spr index in `cmds` the browser hasn't received yet (then mark it served), so
+        the frame is self-contained for its sprites even though the recorder no longer inlines
+        defspr (and earlier defspr-carrying frames may have been dropped). The defspr pixels
+        are reconstructed from the recorder's atlas (defspr_cmd). Resets the served set if the
+        recorder's atlas was dropped (reset_atlas bumped atlas_gen) -- the browser does the
+        matching reset by refetching /assets + clearing its atlas on a cart change."""
+        rec = self.recorder
+        if rec.atlas_gen != self._served_gen:
+            self._served = set()
+            self._served_gen = rec.atlas_gen
+        prefix = None
+        for c in cmds:
+            if c and c[0] == "spr":
+                idx = c[1]
+                if idx not in self._served:
+                    d = rec.defspr_cmd(idx)
+                    if d is not None:
+                        if prefix is None:
+                            prefix = []
+                        prefix.append(d)
+                        self._served.add(idx)
+        if prefix is None:
+            return cmds
+        return prefix + cmds
+
+    def reset_served(self):
+        """Forget which defsprs the browser has -- so the next /frame re-ships every sprite
+        bitmap it references. Called when /assets is (re)served (a page load / cart change
+        clears the browser's atlas)."""
+        self._served = set()
+        self._served_gen = self.recorder.atlas_gen
+
     def begin_frame(self):
         """Set the recorder's gate for THIS frame + start a fresh command list when a
         browser is live AND the fps cap allows. Called at the top of the loop, before
         ws.frame(). The cap (WEB_FPS_CAP) decouples the web stream from the cart: the
         panel renders full speed, but we RECORD at most one frame per WEB_FRAME_INTERVAL_MS
-        -- so a 40fps cart still only feeds the ~72KB/s WiFi at ~12fps. The decision is
+        -- so a 40fps cart still only feeds the ~72KB/s WiFi at ~30fps. The decision is
         made ONCE here so a frame is recorded completely or not at all; on a skipped frame
-        the Tee is a pure pass-through (recorder.enabled stays False)."""
+        the Tee is a pure pass-through (recorder.enabled stays False).
+
+        STREAM MODE coupling (#41): `recorder.record_only` is set to True ONLY for a frame
+        we actually record AND while stream_mode() (a browser is live). record_only ALWAYS
+        tracks enabled here: a SKIPPED frame leaves both False so the panel still renders +
+        flushes (the Tee forwards), and only a RECORDED stream frame goes headless. So the
+        invariant `record_only -> enabled` holds, which is what makes the Tee's skip safe."""
         if self.sock is None:
             self.recorder.enabled = False
+            self.recorder.record_only = False
             return
         if not self.recording_wanted():
             self.recorder.enabled = False
+            self.recorder.record_only = False
             return
         now = ticks_ms()
         if ticks_diff(now, self._last_record_ms) < WEB_FRAME_INTERVAL_MS:
             self.recorder.enabled = False     # within the cap interval -> skip this frame
+            self.recorder.record_only = False  # ... and render the panel normally
             return
         self._last_record_ms = now
         self.recorder.enabled = True
+        # Go headless for this recorded frame whenever a browser is live (stream_mode ties
+        # to the SAME gate). The loop reads recorder.record_only to skip the panel flush.
+        self.recorder.record_only = self.stream_mode()
         self.recorder.begin()
 
     def commit_frame(self):
@@ -826,10 +958,16 @@ class WebServer:
         if method == "GET" and path in ("/", "/index.html"):
             conn.sendall(http_response(200, PAGE_HTML, "text/html; charset=utf-8"))
         elif method == "GET" and path == "/assets":
+            # A page load / cart change: the browser clears its atlas + refetches /assets, so
+            # forget what we've shipped -> the next /frame re-ships the defsprs it references.
+            self.reset_served()
             conn.sendall(http_response(200, json.dumps(self.provider.assets())))
         elif method == "GET" and path == "/frame":
             self._last_frame_req = ticks_ms()      # mark the browser live -> keep recording
             cmds, cart = self.provider.frame()
+            # Prepend any not-yet-shipped defsprs so this served frame is self-contained for
+            # its sprites (serve-time defspr -- drop-robust, see served_frame).
+            cmds = self.served_frame(cmds)
             conn.sendall(http_response(200, json.dumps(frame_payload(cmds, cart))))
         elif method == "POST" and path == "/input":
             events = []
@@ -890,8 +1028,13 @@ margin:-26px 0 0 -26px;border-radius:50%;background:#5f6f9f;border:2px solid #c2
 pointer-events:none}.b{width:72px;height:72px;border-radius:50%;display:flex;
 align-items:center;justify-content:center;font:700 26px ui-monospace;color:#fff1e8;
 background:#7e2553;border:2px solid #c2c3c7;margin-left:18px}#bb{background:#29366f}
-.pr{background:#ffec27;color:#1d2b53}</style></head><body>
-<h1>KidCode &mdash; device <span id=s>connecting...</span></h1>
+.pr{background:#ffec27;color:#1d2b53}
+/* Debug HUD (#41): toggled with the `d` key; lightweight live stream stats. */
+#hud{position:fixed;top:6px;left:6px;z-index:9;display:none;padding:6px 8px;border-radius:5px;
+background:rgba(11,15,26,.82);border:1px solid #1d2b53;color:#00e436;font:12px ui-monospace;
+white-space:pre;pointer-events:none}#hud b{color:#ffec27}#hud .w{color:#ff004d}</style></head><body>
+<div id=hud></div>
+<h1>KidCode &mdash; device <span id=s>connecting...</span> <small style="color:#5f6f9f">(press ` for stats)</small></h1>
 <canvas id=cv width=320 height=240 tabindex=0></canvas>
 <div id=ctl><div id=joy><div id=th></div></div>
 <div><span class=b id=bb>B</span><span class=b id=ba>A</span></div></div>
@@ -903,6 +1046,11 @@ var W=320,H=240,PAL=null,FONT=null,ready=false,assCart=undefined,idx=null,img=nu
 // /assets, for map replay); TM = the cart tilemap (w/h/cells, kept current by settiles);
 // ATL = the per-session sprite atlas filled by defspr and referenced by spr index.
 var SHEET=null,TM=null,ATL=[];
+// Debug HUD (#41): toggle with `d`. Live stream stats -- browser render fps (EMA), KB of
+// the last /frame payload, atlas count (defsprs cached), and an unknown-index counter
+// (a spr that references an ATL slot with no defspr -- this would've caught the dropped-
+// defspr bug instantly). All cheap; the overlay only redraws when shown.
+var HUD={on:false,fps:0,kb:0,unknown:0,el:document.getElementById("hud"),last:0};
 function alloc(){cv.width=W;cv.height=H;cx=cv.getContext("2d");cx.imageSmoothingEnabled=false;
 idx=new Uint8Array(W*H);img=cx.createImageData(W,H);rgba=img.data;}
 function getA(){return fetch("/assets").then(function(r){return r.json();}).then(function(a){
@@ -931,8 +1079,9 @@ for(var i=0;i<8;i++)put(cxx+p[i][0],cyy+p[i][1],c);y++;if(er<=0){er+=2*y+1;}else
 function blt(px,sw,sh,t,x,y,sc,fl){x|=0;y|=0;sc|=0;fl|=0;var fx=fl&1,fy=(fl>>1)&1;
 for(var yy=0;yy<sh;yy++){var ry=fy?sh-1-yy:yy,bs=ry*sw;for(var xx=0;xx<sw;xx++){var rx=fx?sw-1-xx:xx,
 p=px[bs+rx];if(p===t||p<0||pt[p&63])continue;if(sc<=1)put(x+xx,y+yy,p);else fr(x+xx*sc,y+yy*sc,sc,sc,p);}}}
-// spr by atlas index: look up the bitmap defspr shipped, blit it. Unknown index = no-op.
-function sp(ix,x,y,sc,fl){var a=ATL[ix];if(!a)return;blt(a.px,a.w,a.h,a.t,x,y,sc,fl);}
+// spr by atlas index: look up the bitmap defspr shipped, blit it. Unknown index = no-op
+// (and bump the HUD's unknown-index counter -- a missing defspr is the dropped-frame bug).
+function sp(ix,x,y,sc,fl){var a=ATL[ix];if(!a){HUD.unknown++;return;}blt(a.px,a.w,a.h,a.t,x,y,sc,fl);}
 // map(): walk the cached tilemap region (mx,my .. +w,+h) over the cached sheet, drawing
 // each non-empty cell's tile at (sx+cx*step, sy+cy*step), colorkey transparent. Mirrors
 // the device map() cell layout (step = tile*scale; tile origin row-major in the sheet).
@@ -1010,10 +1159,21 @@ function pv(){return[(pH.ArrowRight?1:0)-(pH.ArrowLeft?1:0),(pH.ArrowDown?1:0)-(
 function fl(){var v=pv();if(v[0]||v[1])send({type:"pan",dx:v[0],dy:v[1]});if(!q.length)return;
 var b=q;q=[];fetch("/input",{method:"POST",headers:{"Content-Type":"application/json"},
 body:JSON.stringify({events:b})}).catch(function(){});}
-function df(){if(infl||!ready)return;infl=true;fetch("/frame").then(function(r){return r.json();}).then(function(f){
+function df(){if(infl||!ready)return;infl=true;fetch("/frame").then(function(r){return r.text();}).then(function(txt){
+HUD.kb=txt.length/1024;var f=JSON.parse(txt);
 if(f.cart!==assCart){assCart=f.cart;getA().catch(function(){});}rep(f.cmds||[]);blit();infl=false;
+var t=(window.performance&&performance.now)?performance.now():Date.now();if(HUD.last){var inst=1000/Math.max(1,t-HUD.last);
+HUD.fps=HUD.fps?HUD.fps+(inst-HUD.fps)*0.2:inst;}HUD.last=t;if(HUD.on)drawHud();
 if(!ok){ok=true;sEl.textContent="live";sEl.style.color="#00e436";}}).catch(function(){infl=false;
 sEl.textContent="reconnecting...";sEl.style.color="#ff004d";});}
+// HUD render: cheap textContent update, only when shown. atlas count = defined ATL slots.
+function drawHud(){var n=0;for(var i=0;i<ATL.length;i++)if(ATL[i])n++;
+var u=HUD.unknown?'<span class=w>'+HUD.unknown+'</span>':'0';
+HUD.el.innerHTML="fps <b>"+HUD.fps.toFixed(1)+"</b>   "+HUD.kb.toFixed(2)+" KB/f\natlas <b>"+n+"</b>   unknown "+u;}
+// Toggle the debug HUD with the backtick key, at the WINDOW level so it works whether or
+// not the canvas has focus (and never steals a WASD/arrow movement key from the cart).
+window.addEventListener("keydown",function(e){if(e.key==="`"||e.key==="~"){HUD.on=!HUD.on;
+HUD.el.style.display=HUD.on?"block":"none";if(HUD.on)drawHud();e.preventDefault();}});
 function tick(){fl();df();}
 getA().then(function(){setInterval(tick,Math.round(1000/FPS));}).catch(function(){
 sEl.textContent="no assets";sEl.style.color="#ff004d";});cv.focus();

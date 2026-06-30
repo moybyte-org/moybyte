@@ -163,6 +163,16 @@ def test_device_web_view_module_present_and_protocol_shaped():
     assert '"/assets"' in web and '"/frame"' in web and '"/input"' in web
     assert "def assets_payload" in web and "def frame_payload" in web
     assert "def apply_events" in web            # browser events -> InputState/Pointer
+    # SERVE-TIME defspr (#41 BUG-1 fix): the bitmap is delivered when the browser RECEIVES
+    # a frame referencing it (drop-robust), not at record-time first-sight. So the server
+    # reconstructs the defspr (defspr_cmd) and prepends it (served_frame), tracking a
+    # `served` set that resets on /assets (reset_served) and on a dropped atlas (atlas_gen).
+    assert "def defspr_cmd" in web and "def served_frame" in web
+    assert "def reset_served" in web and "atlas_gen" in web
+    # STREAM MODE (#41 30fps lever): headless while a browser plays -- the Tee record-only
+    # path + a 30fps web cap.
+    assert "record_only" in web and "def stream_mode" in web
+    assert "WEB_FPS_CAP = 30" in web
 
 
 def test_device_web_view_wired_into_run_desktop_cooperatively():
@@ -179,6 +189,12 @@ def test_device_web_view_wired_into_run_desktop_cooperatively():
     assert "web.poll()" in runtime              # service one request between frames
     # The recorder must record draw commands, never stream the raw framebuffer.
     assert "DrawRecorder" in runtime
+    # STREAM MODE (#41 30fps lever): the WebView drives the panel headless while a browser
+    # plays -- skip the flush via the compositor (skip_flush) + a one-time enter notice.
+    assert "_apply_stream_mode" in runtime
+    assert "skip_flush" in runtime
+    comp = (ROOT / "modules" / "kc_compositor.py").read_text(encoding="utf-8")
+    assert "self.skip_flush" in comp            # flush() is a no-op while streaming
 
 
 def test_console_settings_has_web_view_toggle():

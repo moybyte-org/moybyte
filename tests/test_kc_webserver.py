@@ -203,6 +203,19 @@ def _build_tee():
     return tee, rec, dev
 
 
+def _serveable(rec):
+    """A WebServer wired to `rec` with no socket -- just to call served_frame()/reset_served()
+    so a test can exercise the SERVE-TIME defspr delivery (the prepend + the `served` set) the
+    way the live /frame handler does, without a real connection."""
+    return web.WebServer(rec, _FakeProvider(), port=0)
+
+
+def _served(rec, server):
+    """The command list the browser actually RECEIVES for the recorder's last committed
+    frame: served_frame() prepends any not-yet-shipped defsprs (serve-time defspr, #41)."""
+    return server.served_frame(rec.frame())
+
+
 # ---------------------------------------------------------------------------
 # The recorder + Tee gate.
 # ---------------------------------------------------------------------------
@@ -277,69 +290,132 @@ def test_recorder_command_format_matches_command_canvas():
     ]
 
 
-def test_recorder_spr_ships_bitmap_once_then_references_by_index():
-    """spr ships a unique bitmap ONCE as ["defspr", index, w, h, t, pix] and then
-    references it by index as ["spr", index, x, y, scale, flip] (#41 payload diet). The
-    bitmap pixels travel only in the defspr; the spr is ~6 numbers."""
+def test_recorder_spr_records_index_only_defspr_delivered_at_serve_time():
+    """SERVE-TIME defspr (#41): the recorder's `spr` records ONLY a tiny ["spr", index, x,
+    y, scale, flip] -- it NEVER inlines the defspr -- and just registers the bitmap in the
+    atlas (defspr_cmd reconstructs it). The WebServer PREPENDS the ["defspr", ...] at serve
+    time, so the FRAME THE BROWSER RECEIVES is self-contained even if the recording frame
+    that first saw the bitmap was dropped. The bitmap pixels travel only in the defspr."""
     tee, rec, _dev = _build_tee()
     rec.enabled = True
     rec.begin()
     img = Image(2, 2, [1, 2, 3, 4], transparent=0)
     tee.spr(img, 5, 6, 2, 1)
     rec.commit()
-    cmds = rec.frame()
-    assert cmds == [
-        ["defspr", 0, 2, 2, 0, [1, 2, 3, 4]],   # the bitmap, shipped once
+    # The recorder's raw frame is index-only (no defspr inlined at record time).
+    assert rec.frame() == [["spr", 0, 5, 6, 2, 1]]
+    # defspr_cmd reconstructs the bitmap for the atlas index from the held Image.
+    assert rec.defspr_cmd(0) == ["defspr", 0, 2, 2, 0, [1, 2, 3, 4]]
+    # The served frame (what the browser gets) prepends that defspr ONCE.
+    server = _serveable(rec)
+    assert _served(rec, server) == [
+        ["defspr", 0, 2, 2, 0, [1, 2, 3, 4]],   # the bitmap, delivered at serve time
         ["spr", 0, 5, 6, 2, 1],                 # index, x, y, scale, flip
     ]
 
 
-def test_recorder_spr_dedups_repeated_bitmap_across_frames():
-    """The SAME Image (id stable -- make_api reuses one per tile) ships its defspr ONCE;
-    every later sighting -- even in a LATER frame -- is just a 6-number spr-by-index. This
-    is the whole 10x: a 16x16 sprite drops from ~600 bytes/frame to ~20."""
+def test_served_defspr_sent_once_then_omitted_across_frames():
+    """The SAME Image (id stable -- make_api reuses one per tile) is delivered as a defspr
+    ONCE per browser session; every later SERVED frame -- including a later one -- is just
+    a 6-number spr-by-index. This is the whole 10x: a 16x16 sprite drops from ~600 bytes/
+    frame to ~20. The `served` set lives on the server (the browser keeps its ATL), so the
+    dedup is across served frames, not record frames."""
     tee, rec, _dev = _build_tee()
+    server = _serveable(rec)
     img = Image(2, 2, [1, 2, 3, 4], transparent=-1)
     rec.enabled = True
-    # Frame 1: two blits of the same Image -> one defspr + two sprs.
+    # Frame 1: two blits of the same Image -> the served frame has one defspr + two sprs.
     rec.begin()
     tee.spr(img, 0, 0)
     tee.spr(img, 8, 0, 2)
     rec.commit()
-    f1 = rec.frame()
+    f1 = _served(rec, server)
     assert [c[0] for c in f1] == ["defspr", "spr", "spr"]
     assert f1[1] == ["spr", 0, 0, 0, 1, 0] and f1[2] == ["spr", 0, 8, 0, 2, 0]
-    # Frame 2: the SAME Image again -> NO defspr, just a spr-by-index (atlas persists).
+    # Frame 2: the SAME Image again -> NO defspr in the served frame (already shipped).
     rec.begin()
     tee.spr(img, 16, 16)
     rec.commit()
-    f2 = rec.frame()
-    assert f2 == [["spr", 0, 16, 16, 1, 0]], "a re-seen bitmap is never re-shipped"
-    # A DIFFERENT Image gets the next index, with its own one-time defspr.
+    f2 = _served(rec, server)
+    assert f2 == [["spr", 0, 16, 16, 1, 0]], "a shipped bitmap is never re-sent"
+    # A DIFFERENT Image gets the next index, with its own one-time defspr at serve time.
     img2 = Image(2, 2, [5, 6, 7, 8], transparent=-1)
     rec.begin()
     tee.spr(img2, 0, 0)
     rec.commit()
-    f3 = rec.frame()
+    f3 = _served(rec, server)
     assert f3 == [["defspr", 1, 2, 2, -1, [5, 6, 7, 8]], ["spr", 1, 0, 0, 1, 0]]
 
 
-def test_recorder_reset_atlas_re_ships_bitmaps():
-    """reset_atlas() (called when the cart/sheet changes) drops the atlas so the next
-    frame re-ships defspr from index 0 -- a new cart's bitmaps never collide with a
-    previous cart's stale indices."""
+def test_served_defspr_survives_a_dropped_frame():
+    """The load-bearing BUG-1 regression: a sprite first referenced in a frame that is
+    DROPPED (never served -- the frame cap discards frames and the browser polls only the
+    latest) still gets its defspr delivered on the NEXT SERVED frame. With record-time
+    defspr the bitmap rode the dropped frame and the browser drew nothing; serve-time
+    defspr keys delivery off what the browser actually RECEIVES, so it can't be stranded."""
     tee, rec, _dev = _build_tee()
+    server = _serveable(rec)
+    img = Image(2, 2, [9, 9, 9, 9], transparent=-1)
+    rec.enabled = True
+    # Frame A: references the sprite -- but this frame is DROPPED (server never serves it).
+    rec.begin()
+    tee.spr(img, 4, 4)
+    rec.commit()
+    # (no _served() call here -> the frame that first saw the bitmap is dropped)
+    # Frame B: the only frame the browser polls. The served frame must STILL carry the
+    # defspr, because the server hasn't actually delivered it yet.
+    rec.begin()
+    tee.spr(img, 5, 5)
+    rec.commit()
+    fb = _served(rec, server)
+    assert fb == [["defspr", 0, 2, 2, -1, [9, 9, 9, 9]], ["spr", 0, 5, 5, 1, 0]], (
+        "a sprite first seen in a dropped frame must get its defspr on the next served frame")
+
+
+def test_served_set_resets_on_assets_so_a_reconnecting_browser_refetches():
+    """A page load / cart change makes the browser clear its atlas + refetch /assets; the
+    server mirrors that with reset_served(), so the NEXT served frame re-ships every defspr
+    its sprites reference (a fresh browser session must not be left with an empty atlas)."""
+    tee, rec, _dev = _build_tee()
+    server = _serveable(rec)
     img = Image(1, 1, [3], transparent=-1)
     rec.enabled = True
     rec.begin()
     tee.spr(img, 0, 0)
     rec.commit()
-    assert rec.frame()[0][:2] == ["defspr", 0]
+    assert _served(rec, server)[0][:2] == ["defspr", 0]      # first delivery ships it
+    rec.begin()
+    tee.spr(img, 1, 1)
+    rec.commit()
+    assert [c[0] for c in _served(rec, server)] == ["spr"]   # already shipped -> omitted
+    # The browser reloads (/assets re-served) -> forget what it has.
+    server.reset_served()
+    rec.begin()
+    tee.spr(img, 2, 2)
+    rec.commit()
+    assert _served(rec, server)[0][:2] == ["defspr", 0], "after /assets the defspr re-ships"
+
+
+def test_recorder_reset_atlas_re_ships_bitmaps():
+    """reset_atlas() (called when the cart/sheet changes) drops the atlas so the next
+    frame re-ships defspr from index 0 -- a new cart's bitmaps never collide with a
+    previous cart's stale indices. It bumps atlas_gen, which the server notices and uses
+    to drop its `served` set, so the next served frame re-delivers the defspr."""
+    tee, rec, _dev = _build_tee()
+    server = _serveable(rec)
+    img = Image(1, 1, [3], transparent=-1)
+    rec.enabled = True
+    rec.begin()
+    tee.spr(img, 0, 0)
+    rec.commit()
+    assert _served(rec, server)[0][:2] == ["defspr", 0]
+    gen0 = rec.atlas_gen
     rec.reset_atlas()                           # cart change
+    assert rec.atlas_gen != gen0, "reset_atlas bumps the gen so the server drops `served`"
     rec.begin()
     tee.spr(img, 0, 0)                          # same Image, but atlas was reset
     rec.commit()
-    assert rec.frame()[0][:2] == ["defspr", 0], "after reset, index 0 ships again"
+    assert _served(rec, server)[0][:2] == ["defspr", 0], "after reset, index 0 ships again"
 
 
 def test_recorder_begin_commit_swap():
@@ -437,6 +513,7 @@ def test_recorded_stream_replays_to_pixels():
     same path the browser performs in JS) and assert it produced a non-blank frame --
     proving the device's command stream is complete + replayable."""
     tee, rec, _dev = _build_tee()
+    server = _serveable(rec)
     rec.enabled = True
     rec.begin()
     tee.cls(1)
@@ -449,7 +526,7 @@ def test_recorded_stream_replays_to_pixels():
     tee.print("HELLO", 8, 200, 7)
     rec.commit()
     cv = Canvas(WIDTH, HEIGHT)
-    replay_diet(rec.frame(), cv)
+    replay_diet(_served(rec, server), cv)       # the browser replays the served frame
     assert len(cv.buf) == WIDTH * HEIGHT
     assert len(set(cv.buf)) > 1, "the recorded frame should not replay to a flat color"
 
@@ -466,6 +543,7 @@ def test_tee_over_real_canvas_is_pixel_identical_to_its_stream():
     raster = Canvas(WIDTH, HEIGHT)
     rec = web.DrawRecorder(WIDTH, HEIGHT)
     tee = web.TeeCanvas(raster, rec)        # the "real" side IS a real rasterizer
+    server = _serveable(rec)                # ... and the served frame carries the defsprs
     rec.enabled = True
     rec.begin()
     tee.cls(1)
@@ -481,8 +559,10 @@ def test_tee_over_real_canvas_is_pixel_identical_to_its_stream():
     tee.print("DEVICE WEB", 8, 220, 7)
     rec.commit()
     replayed = Canvas(WIDTH, HEIGHT)
-    replay_diet(rec.frame(), replayed)
-    assert bytes(raster.buf) == bytes(replayed.buf), "the recorded stream must reproduce the rasterized panel"
+    # The browser replays the SERVED frame (defspr prepended at serve time), not the raw
+    # recorder frame -- so the replayer must apply the serve-time-delivered defsprs.
+    replay_diet(_served(rec, server), replayed)
+    assert bytes(raster.buf) == bytes(replayed.buf), "the served stream must reproduce the rasterized panel"
 
 
 def test_map_replays_pixel_identical_to_panel_via_cached_assets():
@@ -560,10 +640,12 @@ def test_map_settiles_mutation_replays_pixel_identical():
 
 def test_spr_batch_dedups_tiles_across_frames():
     """spr_batch resolves tiles through the recorder's STABLE tile-image cache, so a
-    repeated tile ships its bitmap ONCE (defspr) and every later item -- this frame and
-    later frames -- is a 6-int spr-by-index. Without the stable cache each frame would
-    re-ship a fresh defspr per tile (the explosion-heavy-frame payload bomb)."""
+    repeated tile maps to the SAME atlas index across frames; the SERVED frame ships each
+    bitmap ONCE (defspr) and every later item -- this frame and later frames -- is a 6-int
+    spr-by-index. Without the stable cache each frame would re-key a fresh tile and re-ship
+    its defspr (the explosion-heavy-frame payload bomb)."""
     tee, rec, _dev = _build_tee()
+    server = _serveable(rec)
     sheet = SpriteSheet(4, 4)
     for tid, col in ((1, 8), (2, 11)):
         ox = (tid % sheet.cols) * sheet.TILE
@@ -572,18 +654,19 @@ def test_spr_batch_dedups_tiles_across_frames():
             for xx in range(sheet.TILE):
                 sheet.pset(ox + xx, oy + yy, col)
     rec.enabled = True
-    # Frame 1: four items over two tiles -> two defspr (tiles 1, 2) + four spr.
+    # Frame 1: four items over two tiles -> the served frame has two defspr (tiles 1, 2)
+    # delivered at serve time + four spr.
     rec.begin()
     tee.spr_batch(sheet, [(1, 0, 0), (2, 8, 0), (1, 16, 0), (2, 24, 0)], colorkey=-1)
     rec.commit()
-    f1 = rec.frame()
+    f1 = _served(rec, server)
     assert [c[0] for c in f1].count("defspr") == 2
     assert [c[0] for c in f1].count("spr") == 4
-    # Frame 2: same tiles -> NO new defspr (the bitmaps were shipped once), just sprs.
+    # Frame 2: same tiles -> NO new defspr in the served frame (bitmaps already shipped).
     rec.begin()
     tee.spr_batch(sheet, [(1, 0, 0), (2, 8, 0)], colorkey=-1)
     rec.commit()
-    f2 = rec.frame()
+    f2 = _served(rec, server)
     assert [c[0] for c in f2] == ["spr", "spr"], "batch tiles are not re-shipped per frame"
 
 
@@ -945,3 +1028,100 @@ def test_server_frame_cap_skips_between_intervals(monkeypatch):
         assert rec.enabled is True, "after the interval the next frame records"
     finally:
         srv.stop()
+
+
+# ---------------------------------------------------------------------------
+# STREAM MODE (#41 30fps lever): headless while a browser is actively playing -- the Tee
+# RECORDS commands but does NOT forward draws to the real panel canvas, and run_desktop
+# skips the panel flush. With NO browser, behaviour is identical to today (forward + flush).
+# ---------------------------------------------------------------------------
+
+
+def test_stream_mode_gate_records_only_when_a_browser_is_live(monkeypatch):
+    """begin_frame() sets recorder.record_only True ONLY for a recorded frame while a
+    browser is live (stream_mode). A skipped/in-between frame and the no-browser case leave
+    record_only False, so record_only -> enabled always holds (the invariant the Tee/flush
+    skip rely on). This is the gate that turns the device headless ONLY when watched."""
+    clock = {"t": 100000}
+    monkeypatch.setattr(web, "ticks_ms", lambda: clock["t"])
+    rec = web.DrawRecorder(WIDTH, HEIGHT)
+    srv = web.WebServer(rec, _FakeProvider(), port=0)
+    # No socket yet -> not recording, not streaming.
+    srv.begin_frame()
+    assert rec.enabled is False and rec.record_only is False
+    assert srv.stream_mode() is False
+    assert srv.start("127.0.0.1") is True
+    try:
+        # No /frame fetched -> a browser isn't live -> still no stream.
+        srv.begin_frame()
+        assert rec.enabled is False and rec.record_only is False
+        assert srv.stream_mode() is False
+        # A browser polls -> the recorded frame goes headless (record_only True).
+        srv._last_frame_req = clock["t"]
+        srv.begin_frame()
+        assert rec.enabled is True and rec.record_only is True
+        assert srv.stream_mode() is True
+        # Within the fps-cap interval the frame is SKIPPED -> record_only False so the
+        # panel still renders + flushes that frame (record_only never outlives enabled).
+        clock["t"] += web.WEB_FRAME_INTERVAL_MS // 2
+        srv._last_frame_req = clock["t"]
+        srv.begin_frame()
+        assert rec.enabled is False and rec.record_only is False
+    finally:
+        srv.stop()
+    # stop() clears both flags (a view toggled off mid-stream must resume the panel).
+    assert rec.enabled is False and rec.record_only is False
+
+
+def test_stream_mode_tee_records_only_skips_panel_forward():
+    """While record_only, the Tee RECORDS draw commands but does NOT forward them to the
+    real DeviceCanvas (no rasterization -> the device skips its own panel render). The cheap
+    STATE ops (camera/clip/pal/palt/reset_state) STILL forward so the canvas state +
+    camera()'s return stay correct. With record_only False it's the normal forward+record."""
+    tee, rec, dev = _build_tee()
+    # Normal recording (a browser live, but NOT streaming): forwards AND records.
+    rec.enabled = True
+    rec.record_only = False
+    rec.begin()
+    tee.cls(1)
+    tee.rect(0, 0, 10, 10, 2)
+    tee.spr(Image(2, 2, [1, 2, 3, 4], transparent=-1), 4, 4)
+    rec.commit()
+    assert dev.calls == 3, "not streaming -> every draw still reaches the panel canvas"
+    assert [c[0] for c in rec.frame()] == ["cls", "rect", "spr"], "and is recorded"
+    # STREAM MODE: record_only -> the pixel ops are recorded but NOT forwarded.
+    dev.calls = 0
+    rec.record_only = True
+    rec.begin()
+    tee.cls(3)
+    tee.rect(1, 1, 5, 5, 4)
+    tee.line(0, 0, 9, 9, 5)
+    tee.circ(8, 8, 3, 6)
+    tee.spr(Image(2, 2, [5, 6, 7, 8], transparent=-1), 2, 2)
+    tee.print("HI", 0, 0, 7)
+    rec.commit()
+    assert dev.calls == 0, "streaming -> NO draw reaches the panel (device goes headless)"
+    assert [c[0] for c in rec.frame()] == ["cls", "rect", "line", "circ", "spr", "print"], (
+        "but every op is still recorded for the browser")
+    # Cheap state ops STILL forward (they don't rasterize; camera()'s return must be right).
+    dev.calls = 0
+    tee.camera(2, 3)
+    tee.clip(0, 0, 10, 10)
+    tee.pal(1, 2)
+    tee.palt(3, True)
+    tee.reset_state()
+    assert dev.calls == 5, "state ops forward even while streaming (canvas state stays live)"
+
+
+def test_stream_mode_off_path_is_byte_for_byte_normal():
+    """The whole point: with NO browser (record_only never set, enabled False) the Tee is
+    the unchanged pass-through -- forwards every draw, records nothing, zero allocation."""
+    tee, rec, dev = _build_tee()
+    assert rec.enabled is False and rec.record_only is False
+    tee.cls(1)
+    tee.rect(0, 0, 10, 10, 2)
+    tee.spr(Image(2, 2, [1, 2, 3, 4], transparent=-1), 0, 0)
+    tee.print("x", 0, 0, 7)
+    assert dev.calls == 4, "every draw reaches the panel, exactly as today"
+    rec.begin(); rec.commit()
+    assert rec.frame() == [], "nothing recorded with no browser"
