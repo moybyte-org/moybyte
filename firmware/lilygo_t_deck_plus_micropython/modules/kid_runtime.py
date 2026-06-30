@@ -1894,6 +1894,10 @@ class WebView:
         self._br_y = pointer.y
         self._br_active = False
         self._br_click = False
+        # The cart title whose bitmaps the recorder's atlas currently holds. When the open
+        # cart changes the atlas must reset (a new cart's Images mustn't collide with stale
+        # id()-keyed indices), mirroring the browser refetching /assets + clearing caches.
+        self._atlas_cart = None
         try:
             import kc_webserver
             self._web = kc_webserver
@@ -2020,10 +2024,21 @@ class WebView:
             return
         was = self._rec.enabled
         self._server.begin_frame()
+        if not self._rec.enabled:
+            return
+        # Reset the recorder's sprite atlas when the open cart changes: a new cart's tile
+        # Images are fresh objects whose id() could coincide with a freed one's, so a
+        # stale index would mis-map. The browser does the matching reset (it refetches
+        # /assets + clears its caches on a cart change), so the two stay in lock-step.
+        cart = getattr(self._ws, "cart", None)
+        title = cart.get("title") if cart else None
+        if title != self._atlas_cart:
+            self._atlas_cart = title
+            self._rec.reset_atlas()
         # When a browser (re)connects, force ONE redraw so it gets a full frame even on
         # an idle screen (the redraw-on-change gate #44 would otherwise record nothing
         # until something changes). A running cart redraws every frame regardless.
-        if self._rec.enabled and not was:
+        if not was:
             try:
                 self._ws.mark_dirty()
             except Exception:  # noqa: BLE001

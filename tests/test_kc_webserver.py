@@ -44,9 +44,120 @@ from runtime import font as _font  # noqa: E402
 from runtime import palette as _pal  # noqa: E402
 from runtime.canvas import Canvas, Image  # noqa: E402
 from runtime.editors import SpriteSheet  # noqa: E402
-from tools.command_canvas import replay_to_canvas  # noqa: E402
 
 WIDTH, HEIGHT = 320, 240
+
+
+# ---------------------------------------------------------------------------
+# The PAYLOAD-DIET reference replayer (#41): the Python twin of the browser JS in
+# kc_webserver.PAGE_HTML (the defspr / spr-by-index / map / settiles format). It mirrors
+# the JS exactly so the host test and the browser share the same replay LOGIC, proving the
+# device's recorded stream reproduces the panel pixel-for-pixel. Sprites + map cells go
+# through Canvas.spr (the SAME rasterizer the device/host draw with -- camera/clip/pal/
+# palt/scale/flip), and the atlas/sheet/tilemap caches mirror the browser's ATL/SHEET/TM.
+# `assets` (optional) seeds the sheet + tilemap exactly as the browser's GET /assets does.
+# ---------------------------------------------------------------------------
+
+
+def replay_diet(commands, canvas, assets=None):
+    atlas = {}                                  # index -> Image (browser's ATL)
+    sheet_pix = sheet_cols = sheet_tile = sheet_w = None
+    tm = None                                   # {"w","h","cells"} (browser's TM)
+    if assets is not None:
+        sh = assets.get("sheet")
+        if sh is not None:
+            sheet_pix = list(sh["pix"])
+            sheet_cols = sh["cols"]
+            sheet_tile = sh["tile"]
+            sheet_w = sh["w"]
+        tmp = assets.get("tilemap")
+        if tmp is not None:
+            tm = {"w": tmp["w"], "h": tmp["h"], "cells": list(tmp["cells"])}
+
+    def _tile_image(tid, colorkey):
+        # Build a tile's Image from the cached sheet, exactly like the browser's mp() slice
+        # (and the device SpriteSheet.tile_image): row-major tile origin, colorkey transparent.
+        ox = (tid % sheet_cols) * sheet_tile
+        oy = (tid // sheet_cols) * sheet_tile
+        pix = []
+        for ly in range(sheet_tile):
+            base = (oy + ly) * sheet_w + ox
+            for lx in range(sheet_tile):
+                pix.append(sheet_pix[base + lx])
+        return Image(sheet_tile, sheet_tile, pix, transparent=colorkey)
+
+    for cmd in commands:
+        op = cmd[0]
+        if op == "cls":
+            canvas.cls(cmd[1])
+        elif op == "pix":
+            canvas.pix(cmd[1], cmd[2], cmd[3])
+        elif op == "line":
+            canvas.line(cmd[1], cmd[2], cmd[3], cmd[4], cmd[5])
+        elif op == "rect":
+            canvas.rect(cmd[1], cmd[2], cmd[3], cmd[4], cmd[5])
+        elif op == "rectb":
+            canvas.rectb(cmd[1], cmd[2], cmd[3], cmd[4], cmd[5])
+        elif op == "circ":
+            canvas.circ(cmd[1], cmd[2], cmd[3], cmd[4])
+        elif op == "circb":
+            canvas.circb(cmd[1], cmd[2], cmd[3], cmd[4])
+        elif op == "defspr":
+            idx, w, h, t, pix = cmd[1:6]
+            atlas[idx] = Image(w, h, list(pix), transparent=t)
+        elif op == "spr":
+            idx, x, y, scale = cmd[1:5]
+            flip = cmd[5] if len(cmd) > 5 else 0
+            im = atlas.get(idx)
+            if im is not None:
+                canvas.spr(im, x, y, scale, flip)
+        elif op == "settiles":
+            tm = {"w": cmd[1], "h": cmd[2], "cells": list(cmd[3])}
+        elif op == "map":
+            mx, my, w, h, sx, sy, scale, colorkey = cmd[1:9]
+            if sheet_pix is not None and tm is not None:
+                if scale < 1:
+                    scale = 1
+                step = sheet_tile * scale
+                cache = {}
+                for cy in range(h):
+                    ty = my + cy
+                    for cx in range(w):
+                        gx = mx + cx
+                        if 0 <= gx < tm["w"] and 0 <= ty < tm["h"]:
+                            tid = tm["cells"][ty * tm["w"] + gx] - 1
+                        else:
+                            tid = -1
+                        if tid < 0:
+                            continue
+                        im = cache.get(tid)
+                        if im is None:
+                            im = _tile_image(tid, colorkey)
+                            cache[tid] = im
+                        canvas.spr(im, sx + cx * step, sy + cy * step, scale)
+        elif op == "print":
+            canvas.print(cmd[1], cmd[2], cmd[3], cmd[4])
+        elif op == "reset_state":
+            canvas.reset_state()
+        elif op == "camera":
+            canvas.camera(cmd[1], cmd[2])
+        elif op == "clip":
+            if len(cmd) > 1:
+                canvas.clip(cmd[1], cmd[2], cmd[3], cmd[4])
+            else:
+                canvas.clip()
+        elif op == "pal":
+            if len(cmd) > 1:
+                canvas.pal(cmd[1], cmd[2])
+            else:
+                canvas.pal()
+        elif op == "palt":
+            if len(cmd) > 1:
+                canvas.palt(cmd[1], bool(cmd[2]))
+            else:
+                canvas.palt()
+        # unknown ops ignored (forward-compatible)
+    return canvas
 
 # The device's canonical RGB565 KID64 LUT (a copy of kid_runtime.PAL565 -- the host
 # can't import the device backend, which pulls in framebuf/machine).
@@ -166,17 +277,69 @@ def test_recorder_command_format_matches_command_canvas():
     ]
 
 
-def test_recorder_spr_carries_raw_pixels_and_flip():
-    """spr records [x,y,scale,w,h,t,pix,flip] with the raw indexed pixels, so the
-    stream is self-contained (the browser needs no sheet lookup to be correct)."""
+def test_recorder_spr_ships_bitmap_once_then_references_by_index():
+    """spr ships a unique bitmap ONCE as ["defspr", index, w, h, t, pix] and then
+    references it by index as ["spr", index, x, y, scale, flip] (#41 payload diet). The
+    bitmap pixels travel only in the defspr; the spr is ~6 numbers."""
     tee, rec, _dev = _build_tee()
     rec.enabled = True
     rec.begin()
     img = Image(2, 2, [1, 2, 3, 4], transparent=0)
     tee.spr(img, 5, 6, 2, 1)
     rec.commit()
-    cmd = rec.frame()[0]
-    assert cmd == ["spr", 5, 6, 2, 2, 2, 0, [1, 2, 3, 4], 1]
+    cmds = rec.frame()
+    assert cmds == [
+        ["defspr", 0, 2, 2, 0, [1, 2, 3, 4]],   # the bitmap, shipped once
+        ["spr", 0, 5, 6, 2, 1],                 # index, x, y, scale, flip
+    ]
+
+
+def test_recorder_spr_dedups_repeated_bitmap_across_frames():
+    """The SAME Image (id stable -- make_api reuses one per tile) ships its defspr ONCE;
+    every later sighting -- even in a LATER frame -- is just a 6-number spr-by-index. This
+    is the whole 10x: a 16x16 sprite drops from ~600 bytes/frame to ~20."""
+    tee, rec, _dev = _build_tee()
+    img = Image(2, 2, [1, 2, 3, 4], transparent=-1)
+    rec.enabled = True
+    # Frame 1: two blits of the same Image -> one defspr + two sprs.
+    rec.begin()
+    tee.spr(img, 0, 0)
+    tee.spr(img, 8, 0, 2)
+    rec.commit()
+    f1 = rec.frame()
+    assert [c[0] for c in f1] == ["defspr", "spr", "spr"]
+    assert f1[1] == ["spr", 0, 0, 0, 1, 0] and f1[2] == ["spr", 0, 8, 0, 2, 0]
+    # Frame 2: the SAME Image again -> NO defspr, just a spr-by-index (atlas persists).
+    rec.begin()
+    tee.spr(img, 16, 16)
+    rec.commit()
+    f2 = rec.frame()
+    assert f2 == [["spr", 0, 16, 16, 1, 0]], "a re-seen bitmap is never re-shipped"
+    # A DIFFERENT Image gets the next index, with its own one-time defspr.
+    img2 = Image(2, 2, [5, 6, 7, 8], transparent=-1)
+    rec.begin()
+    tee.spr(img2, 0, 0)
+    rec.commit()
+    f3 = rec.frame()
+    assert f3 == [["defspr", 1, 2, 2, -1, [5, 6, 7, 8]], ["spr", 1, 0, 0, 1, 0]]
+
+
+def test_recorder_reset_atlas_re_ships_bitmaps():
+    """reset_atlas() (called when the cart/sheet changes) drops the atlas so the next
+    frame re-ships defspr from index 0 -- a new cart's bitmaps never collide with a
+    previous cart's stale indices."""
+    tee, rec, _dev = _build_tee()
+    img = Image(1, 1, [3], transparent=-1)
+    rec.enabled = True
+    rec.begin()
+    tee.spr(img, 0, 0)
+    rec.commit()
+    assert rec.frame()[0][:2] == ["defspr", 0]
+    rec.reset_atlas()                           # cart change
+    rec.begin()
+    tee.spr(img, 0, 0)                          # same Image, but atlas was reset
+    rec.commit()
+    assert rec.frame()[0][:2] == ["defspr", 0], "after reset, index 0 ships again"
 
 
 def test_recorder_begin_commit_swap():
@@ -207,32 +370,60 @@ def test_tee_delegates_unknown_attrs_to_device_canvas():
     assert dev.calls == 2
 
 
-def test_tee_map_expands_to_spr_commands():
-    """map() records one spr command per non-empty cell (mirrors CommandCanvas.map), so
-    the browser needs no map op and replays pixel-identically."""
-    tee, rec, _dev = _build_tee()
+def _map_sheet_and_tm():
+    """A 2x1 sheet (tile 1 painted) + a real TileMap with cell (1,0) = tile 1."""
     sheet = SpriteSheet(2, 1)               # 2 tiles of 8x8
-    # paint tile 1 a solid color so it's non-empty; tile 0 stays blank (0).
     for y in range(8):
         for x in range(8, 16):
-            sheet.pset(x, y, 5)
+            sheet.pset(x, y, 5)             # paint tile 1 solid
+    from runtime.editors import TileMap
+    tm = TileMap(2, 1)
+    tm.mset(1, 0, 1)                        # cell (1,0) -> tile 1
+    return sheet, tm
 
-    class _TM:
-        w = 2
-        h = 1
 
-        def mget(self, x, y):
-            return 1 if x == 1 and y == 0 else 0
-
+def test_tee_map_records_one_op_not_per_cell():
+    """map() records ONE ["map", ...] op (was ~one fat spr per cell), preceded by a
+    settiles syncing the browser's tilemap. The browser replays the cell walk itself from
+    its cached sheet + tilemap, so a 20x15 map is ~1 op instead of ~300 fat sprs (#41)."""
+    tee, rec, _dev = _build_tee()
+    sheet, tm = _map_sheet_and_tm()
     rec.enabled = True
     rec.begin()
-    tee.map(_TM(), sheet, 0, 0, 2, 1, 0, 0, -1, 1)
+    tee.map(tm, sheet, 0, 0, 2, 1, 0, 0, -1, 1)
     rec.commit()
     cmds = rec.frame()
-    # Both cells are non-empty (colorkey -1 => tile 0 isn't transparent), so two sprs.
-    sprs = [c for c in cmds if c[0] == "spr"]
-    assert len(sprs) == 2
-    assert sprs[1][1] == 8 and sprs[1][2] == 0      # cell (1,0) at x=8
+    assert [c[0] for c in cmds] == ["settiles", "map"]
+    assert cmds[1] == ["map", 0, 0, 2, 1, 0, 0, 1, -1]   # mx,my,w,h,sx,sy,scale,colorkey
+    # No per-cell spr/defspr commands at all -- that was the payload bomb.
+    assert not any(c[0] in ("spr", "defspr") for c in cmds)
+
+
+def test_tee_map_settiles_only_when_tilemap_changes():
+    """settiles ships the tilemap ONCE (first map after a change); an UNCHANGED tilemap on
+    a later map() does NOT re-ship it. A cart mutation (mset) re-emits settiles. This keeps
+    a static-map cart at ~1 op/frame and only pays the ~w*h cells blob on an actual edit."""
+    tee, rec, _dev = _build_tee()
+    sheet, tm = _map_sheet_and_tm()
+    rec.enabled = True
+    # Frame 1: first map -> settiles + map.
+    rec.begin()
+    tee.map(tm, sheet, 0, 0, 2, 1, 0, 0, -1, 1)
+    rec.commit()
+    assert [c[0] for c in rec.frame()] == ["settiles", "map"]
+    # Frame 2: tilemap UNCHANGED -> just the map op (no settiles re-ship).
+    rec.begin()
+    tee.map(tm, sheet, 0, 0, 2, 1, 0, 0, -1, 1)
+    rec.commit()
+    assert [c[0] for c in rec.frame()] == ["map"], "unchanged tilemap must not re-ship"
+    # Frame 3: cart mutates the map (mset) -> settiles re-emitted before the map.
+    tm.mset(0, 0, 1)                        # destroy/place a tile, like Battle City
+    rec.begin()
+    tee.map(tm, sheet, 0, 0, 2, 1, 0, 0, -1, 1)
+    rec.commit()
+    cmds = rec.frame()
+    assert [c[0] for c in cmds] == ["settiles", "map"]
+    assert cmds[0] == ["settiles", 2, 1, [2, 2]]     # both cells now tile 1 (id+1=2)
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +449,7 @@ def test_recorded_stream_replays_to_pixels():
     tee.print("HELLO", 8, 200, 7)
     rec.commit()
     cv = Canvas(WIDTH, HEIGHT)
-    replay_to_canvas(rec.frame(), cv)
+    replay_diet(rec.frame(), cv)
     assert len(cv.buf) == WIDTH * HEIGHT
     assert len(set(cv.buf)) > 1, "the recorded frame should not replay to a flat color"
 
@@ -290,8 +481,110 @@ def test_tee_over_real_canvas_is_pixel_identical_to_its_stream():
     tee.print("DEVICE WEB", 8, 220, 7)
     rec.commit()
     replayed = Canvas(WIDTH, HEIGHT)
-    replay_to_canvas(rec.frame(), replayed)
+    replay_diet(rec.frame(), replayed)
     assert bytes(raster.buf) == bytes(replayed.buf), "the recorded stream must reproduce the rasterized panel"
+
+
+def test_map_replays_pixel_identical_to_panel_via_cached_assets():
+    """The strongest map() cross-check (#41): drive a real map() (+ a couple of sprites)
+    through the device TeeCanvas over a rasterizing Canvas (the panel stand-in), then
+    replay the ONE map op the browser receives -- against the SAME sheet + tilemap it got
+    from /assets -- onto a fresh Canvas, and assert PIXEL-IDENTICAL. This proves the
+    browser's cached-tilemap replay reproduces what the device panel drew, even though no
+    per-cell pixels crossed the wire."""
+    from runtime.editors import TileMap
+    sheet = SpriteSheet(4, 4)
+    # Paint a few distinct tiles so the map has real content (tiles 1, 2, 5).
+    for tid, col in ((1, 8), (2, 11), (5, 14)):
+        ox = (tid % sheet.cols) * sheet.TILE
+        oy = (tid // sheet.cols) * sheet.TILE
+        for yy in range(sheet.TILE):
+            for xx in range(sheet.TILE):
+                # a 2-colour checker so transparency (index 0 via colorkey) is exercised
+                sheet.pset(ox + xx, oy + yy, col if (xx + yy) & 1 else 0)
+    tm = TileMap(6, 4)
+    tm.mset(0, 0, 1)
+    tm.mset(2, 1, 2)
+    tm.mset(5, 3, 5)
+    tm.mset(3, 2, 1)
+
+    raster = Canvas(WIDTH, HEIGHT)
+    rec = web.DrawRecorder(WIDTH, HEIGHT)
+    tee = web.TeeCanvas(raster, rec)
+    rec.enabled = True
+    rec.begin()
+    tee.cls(1)
+    # map() at scale 2 with colorkey 0 (so the painted-0 checker cells are transparent),
+    # offset on-screen -- the same call a tile cart makes each frame.
+    tee.map(tm, sheet, 0, 0, 6, 4, 16, 24, 0, 2)
+    rec.commit()
+    cmds = rec.frame()
+    # The browser had the sheet + tilemap from /assets; replay the map op against them.
+    assets = web.assets_payload(WIDTH, HEIGHT, PAL565, sheet, tm, "Tiles")
+    replayed = Canvas(WIDTH, HEIGHT)
+    replay_diet(cmds, replayed, assets=assets)
+    assert bytes(raster.buf) == bytes(replayed.buf), "map() replay must match the panel"
+
+
+def test_map_settiles_mutation_replays_pixel_identical():
+    """When a cart mutates the map mid-session (mset), the recorder ships a settiles and
+    the browser's replay -- now driven by the UPDATED cells -- still matches the panel
+    pixel-for-pixel (the Battle City destroyed-brick path)."""
+    from runtime.editors import TileMap
+    sheet = SpriteSheet(2, 1)
+    for yy in range(8):
+        for xx in range(8, 16):
+            sheet.pset(xx, yy, 9)           # tile 1 solid
+    tm = TileMap(4, 2)
+    tm.mset(0, 0, 1)
+    tm.mset(3, 1, 1)
+    # The browser's starting cache is the ORIGINAL /assets tilemap.
+    assets = web.assets_payload(WIDTH, HEIGHT, PAL565, sheet, tm, "BC")
+    # Now the cart destroys a tile and adds another, THEN draws the map.
+    tm.mset(0, 0, -1)                       # clear
+    tm.mset(2, 0, 1)                        # place
+    raster = Canvas(WIDTH, HEIGHT)
+    rec = web.DrawRecorder(WIDTH, HEIGHT)
+    tee = web.TeeCanvas(raster, rec)
+    rec.enabled = True
+    rec.begin()
+    tee.cls(0)
+    tee.map(tm, sheet, 0, 0, 4, 2, 0, 0, -1, 1)
+    rec.commit()
+    cmds = rec.frame()
+    assert any(c[0] == "settiles" for c in cmds), "a mutation must re-ship the tilemap"
+    replayed = Canvas(WIDTH, HEIGHT)
+    replay_diet(cmds, replayed, assets=assets)   # settiles in the stream updates the cache
+    assert bytes(raster.buf) == bytes(replayed.buf)
+
+
+def test_spr_batch_dedups_tiles_across_frames():
+    """spr_batch resolves tiles through the recorder's STABLE tile-image cache, so a
+    repeated tile ships its bitmap ONCE (defspr) and every later item -- this frame and
+    later frames -- is a 6-int spr-by-index. Without the stable cache each frame would
+    re-ship a fresh defspr per tile (the explosion-heavy-frame payload bomb)."""
+    tee, rec, _dev = _build_tee()
+    sheet = SpriteSheet(4, 4)
+    for tid, col in ((1, 8), (2, 11)):
+        ox = (tid % sheet.cols) * sheet.TILE
+        oy = (tid // sheet.cols) * sheet.TILE
+        for yy in range(sheet.TILE):
+            for xx in range(sheet.TILE):
+                sheet.pset(ox + xx, oy + yy, col)
+    rec.enabled = True
+    # Frame 1: four items over two tiles -> two defspr (tiles 1, 2) + four spr.
+    rec.begin()
+    tee.spr_batch(sheet, [(1, 0, 0), (2, 8, 0), (1, 16, 0), (2, 24, 0)], colorkey=-1)
+    rec.commit()
+    f1 = rec.frame()
+    assert [c[0] for c in f1].count("defspr") == 2
+    assert [c[0] for c in f1].count("spr") == 4
+    # Frame 2: same tiles -> NO new defspr (the bitmaps were shipped once), just sprs.
+    rec.begin()
+    tee.spr_batch(sheet, [(1, 0, 0), (2, 8, 0)], colorkey=-1)
+    rec.commit()
+    f2 = rec.frame()
+    assert [c[0] for c in f2] == ["spr", "spr"], "batch tiles are not re-shipped per frame"
 
 
 def test_recorded_print_replays_pixel_identically_to_petme128():
@@ -304,7 +597,7 @@ def test_recorded_print_replays_pixel_identically_to_petme128():
     tee.print("Kid", 20, 20, 7)
     rec.commit()
     cv = Canvas(WIDTH, HEIGHT)
-    replay_to_canvas(rec.frame(), cv)
+    replay_diet(rec.frame(), cv)
     # Rasterize the same text directly with the host font onto a reference buffer.
     ref = Canvas(WIDTH, HEIGHT)
     ref.cls(0)
@@ -588,7 +881,7 @@ def test_server_frame_replays_to_pixels(server):
     _s, _c, body = _get(host, port, "/frame")
     cmds = json.loads(body)["cmds"]
     cv = Canvas(WIDTH, HEIGHT)
-    replay_to_canvas(cmds, cv)
+    replay_diet(cmds, cv)
     assert len(set(cv.buf)) > 1
 
 
@@ -620,5 +913,35 @@ def test_server_recording_gate_idle():
         assert srv.recording_wanted() is False    # no /frame fetched yet
         srv.begin_frame()
         assert rec.enabled is False               # disabled -> no recording
+    finally:
+        srv.stop()
+
+
+def test_server_frame_cap_skips_between_intervals(monkeypatch):
+    """The fps cap (#41) decouples the web stream from the cart: even with a browser live,
+    begin_frame() RECORDS at most one frame per WEB_FRAME_INTERVAL_MS and leaves the
+    recorder DISABLED (pure pass-through) on the in-between frames. A skipped frame is a
+    skipped frame -- the gate is decided once, so a frame records completely or not at all."""
+    clock = {"t": 100000}
+    monkeypatch.setattr(web, "ticks_ms", lambda: clock["t"])
+    rec = web.DrawRecorder(WIDTH, HEIGHT)
+    srv = web.WebServer(rec, _FakeProvider(), port=0)
+    assert srv.start("127.0.0.1") is True
+    try:
+        # Make a browser "live": pretend a /frame fetch just happened.
+        srv._last_frame_req = clock["t"]
+        # First frame after a fetch records (last_record_ms starts at 0, far in the past).
+        srv.begin_frame()
+        assert rec.enabled is True
+        # A few ms later (within the cap interval) -> skipped, pure pass-through.
+        clock["t"] += web.WEB_FRAME_INTERVAL_MS // 2
+        srv._last_frame_req = clock["t"]          # browser still polling
+        srv.begin_frame()
+        assert rec.enabled is False, "within the cap interval the frame is not recorded"
+        # Past the interval -> records again.
+        clock["t"] += web.WEB_FRAME_INTERVAL_MS
+        srv._last_frame_req = clock["t"]
+        srv.begin_frame()
+        assert rec.enabled is True, "after the interval the next frame records"
     finally:
         srv.stop()
