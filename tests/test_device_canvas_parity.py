@@ -701,3 +701,40 @@ def test_scroll_layer_window_copy_matches_host():
             host.blit_window_from(lh, cam[0], cam[1])
             dev.blit_window_from(ld, cam[0], cam[1])
             _assert_same(host, dev, "scroll gfx=%s cam=%s" % (gfx, cam))
+
+
+# --------------------------------------------------------------------------- #
+# blit_strip (#43 chrome cache): stamp a SMALLER layer at a fixed offset.      #
+# --------------------------------------------------------------------------- #
+def _strip_scene(L):
+    # A distinctive scene filling a short, full-width strip (the top-bar shape).
+    L.cls(1)
+    L.rect(0, 0, L.w, 1, 8)
+    L.rect(2, 2, 10, 6, 11)
+    L.circ(L.w - 6, 4, 3, 14)
+    L.line(0, 0, L.w - 1, L.h - 1, 7)
+    L.pix(20, 3, 10)
+
+
+def test_blit_strip_matches_host():
+    # new_layer + blit_strip: render the same strip scene into a SHORT, full-width layer
+    # on both backends, then stamp it at a range of offsets (including off-screen ones the
+    # C kernel clamps) and assert the screens match pixel-for-pixel. Host copies palette
+    # indices; device uses kc_gfx.blit565 with key=-1 (gfx=True) or the memoryview fallback
+    # (gfx=False) over RGB565 -- all three agree. This is the cross-backend proof the
+    # cached top-bar strip lands identically everywhere.
+    STRIP_H = 8
+    for gfx in (True, False):
+        m, host, dev = _both(gfx)
+        lh = host.new_layer(W, STRIP_H)
+        ld = dev.new_layer(W, STRIP_H)
+        assert (lh.w, lh.h) == (W, STRIP_H)
+        assert (ld.w, ld.h) == (W, STRIP_H)
+        _strip_scene(lh)
+        _strip_scene(ld)
+        for pos in ((0, 0), (0, H - STRIP_H), (5, 10), (-4, 2), (W - 6, 3), (0, H + 4)):
+            host.cls(0)
+            dev.cls(0)
+            host.blit_strip(lh, pos[0], pos[1])
+            dev.blit_strip(ld, pos[0], pos[1])
+            _assert_same(host, dev, "strip gfx=%s pos=%s" % (gfx, pos))

@@ -125,6 +125,21 @@ class TeeCanvas:
     def print(self, s, x, y, c, scale=1):
         self.raster.print(s, x, y, c, scale); self.rec.print(s, x, y, c, scale)
 
+    # Offscreen layers (#54 scroll window / #43 cached top bar): one real scratch
+    # Canvas backs the layer (the recorder has no pixels), and the copy is forwarded to
+    # BOTH the rasterizer (pixels) and the recorder (which emits the layer's pixels as a
+    # self-contained command) -- so both views see the same opaque positioned blit.
+    def new_layer(self, w, h):
+        return self.raster.new_layer(w, h)
+
+    def blit_window_from(self, layer, cam_x=0, cam_y=0):
+        self.raster.blit_window_from(layer, cam_x, cam_y)
+        self.rec.blit_window_from(layer, cam_x, cam_y)
+
+    def blit_strip(self, layer, dst_x=0, dst_y=0):
+        self.raster.blit_strip(layer, dst_x, dst_y)
+        self.rec.blit_strip(layer, dst_x, dst_y)
+
     def to_rgb888(self):
         return self.raster.to_rgb888()
 
