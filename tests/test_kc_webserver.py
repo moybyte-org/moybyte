@@ -979,6 +979,22 @@ def test_server_accepts_input(server):
     assert prov.applied and prov.applied[0]["name"] == "a"
 
 
+def test_server_frame_post_applies_input_and_returns_frame(server):
+    """The page now sends input + fetches the frame in ONE round-trip (#41): a POST /frame
+    with an events body applies the input (provider.apply) AND returns the frame -- halving
+    requests/tick vs a separate POST /input + GET /frame, which stalled the view per input."""
+    _srv, prov, host, port = server
+    status, body = _post(host, port, "/frame",
+                         {"events": [{"type": "hold", "name": "left", "down": True}]})
+    assert status == 200
+    f = json.loads(body)
+    assert f["cmds"][0] == ["cls", 1] and f["cart"] == "Demo"   # returned the frame...
+    deadline = time.time() + 3
+    while not prov.applied and time.time() < deadline:
+        time.sleep(0.01)
+    assert prov.applied and prov.applied[0]["name"] == "left"   # ...AND applied the input
+
+
 def test_server_404_for_unknown_path(server):
     _srv, _prov, host, port = server
     status, _ctype, _body = _get(host, port, "/nope")

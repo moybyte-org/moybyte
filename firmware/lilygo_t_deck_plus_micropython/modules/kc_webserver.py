@@ -982,8 +982,21 @@ class WebServer:
             # forget what we've shipped -> the next /frame re-ships the defsprs it references.
             self.reset_served()
             conn.sendall(http_response(200, json.dumps(self.provider.assets())))
-        elif method == "GET" and path == "/frame":
+        elif path == "/frame" and method in ("GET", "POST"):
             self._last_frame_req = ticks_ms()      # mark the browser live -> keep recording
+            # Input rides ALONG with the frame request (one round-trip): a POST body carries
+            # the browser's queued events -- apply them, then return the frame. Halves the
+            # requests/tick vs a separate POST /input + GET /frame, which made every input
+            # stall the view (the device served the two requests serially per frame).
+            if method == "POST" and body:
+                try:
+                    payload = json.loads(body)
+                    events = (payload.get("events", []) if isinstance(payload, dict)
+                              else payload)
+                    if isinstance(events, list):
+                        self.provider.apply(events)
+                except Exception:  # noqa: BLE001 -- a bad body just yields no events
+                    pass
             cmds, cart = self.provider.frame()
             # Prepend any not-yet-shipped defsprs so this served frame is self-contained for
             # its sprites (serve-time defspr -- drop-robust, see served_frame).
@@ -1178,10 +1191,13 @@ cv.addEventListener("keyup",function(e){if(e.key in PAN){delete pH[e.key];e.prev
 var n=nv(e);if(n&&nH[n]){delete nH[n];send({type:"hold",name:n,down:false});}});
 var infl=false,ok=false;
 function pv(){return[(pH.ArrowRight?1:0)-(pH.ArrowLeft?1:0),(pH.ArrowDown?1:0)-(pH.ArrowUp?1:0)];}
-function fl(){var v=pv();if(v[0]||v[1])send({type:"pan",dx:v[0],dy:v[1]});if(!q.length)return;
-var b=q;q=[];fetch("/input",{method:"POST",headers:{"Content-Type":"application/json"},
-body:JSON.stringify({events:b})}).catch(function(){});}
-function df(){if(infl||!ready)return;infl=true;fetch("/frame").then(function(r){return r.text();}).then(function(txt){
+// ONE round-trip per tick: POST our queued events to /frame and render the frame it returns.
+// (Was two competing requests -- POST /input + GET /frame -- which the device served serially
+// per frame, so every input stalled the view. Folding them halves requests/tick.)
+function step(){if(infl||!ready)return;infl=true;
+var v=pv();if(v[0]||v[1])send({type:"pan",dx:v[0],dy:v[1]});var b=q;q=[];
+fetch("/frame",{method:"POST",headers:{"Content-Type":"application/json"},
+body:JSON.stringify({events:b})}).then(function(r){return r.text();}).then(function(txt){
 HUD.kb=txt.length/1024;var f=JSON.parse(txt);
 // Atlas reset is driven by the device's `gen` (lock-step with its served reset), NOT by
 // the cart change -- so scrolling the launcher (which changes cart_title -> /assets refetch)
@@ -1200,7 +1216,7 @@ HUD.el.innerHTML="fps <b>"+HUD.fps.toFixed(1)+"</b>   "+HUD.kb.toFixed(2)+" KB/f
 // not the canvas has focus (and never steals a WASD/arrow movement key from the cart).
 window.addEventListener("keydown",function(e){if(e.key==="`"||e.key==="~"){HUD.on=!HUD.on;
 HUD.el.style.display=HUD.on?"block":"none";if(HUD.on)drawHud();e.preventDefault();}});
-function tick(){fl();df();}
+function tick(){step();}
 getA().then(function(){setInterval(tick,Math.round(1000/FPS));}).catch(function(){
 sEl.textContent="no assets";sEl.style.color="#ff004d";});cv.focus();
 </script></body></html>"""
