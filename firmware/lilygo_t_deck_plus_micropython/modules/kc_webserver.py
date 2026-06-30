@@ -1,14 +1,32 @@
 # KidCode device web view (#41 / #22) -- the DEVICE serves its own console over
-# HTTP so a phone/desktop on the same WiFi can SEE the running cart and PLAY it.
+# HTTP + a persistent WebSocket so a phone/desktop on the same WiFi can SEE the
+# running cart and PLAY it.
 #
 # This is the on-device counterpart of the HOST web console (tools/web_console.py +
 # tools/web_console.html). It speaks the SAME draw-command protocol, so the same
-# browser page renders the device frames:
+# browser page renders the device frames. The static handshake is plain HTTP; the
+# LIVE channel is a WebSocket (frames push down, input pushes up, one socket):
 #
-#   GET  /         -> the HTML page (a scaled <canvas> + JS replayer/poller).
+#   GET  /         -> the HTML page (a scaled <canvas> + JS WebSocket replayer).
 #   GET  /assets   -> palette (KID64 -> RGB) + petme128 font + open cart sheet/tilemap.
-#   GET  /frame    -> {"cmds":[...], "cart":...}: the LAST frame's recorded draw calls.
-#   POST /input    -> browser events injected into the console's InputState/Pointer.
+#   GET  /ws       -> (Upgrade: websocket) the PERSISTENT live channel:
+#                       server -> client: a frame_payload JSON text message per committed
+#                                         frame (capped at WEB_FPS_CAP), the SAME shape
+#                                         GET /frame used to return.
+#                       client -> server: {"events":[...]} text messages (the SAME event
+#                                         batches POST /input carried) -> apply_events.
+#   GET/POST /frame, POST /input  -> the legacy HTTP poll transport, kept as a FALLBACK
+#                                    (the page no longer uses them; the live path is /ws).
+#
+# WHY A WEBSOCKET (the #41 transport swap): the old transport opened a NEW TCP connection
+# per /frame (HTTP, Connection: close) plus a separate POST for input -- that per-frame
+# handshake/teardown capped the browser at ~20-25fps and added an input round-trip per
+# tick. A persistent WebSocket removes the per-frame handshake: frames stream down and
+# input streams up on ONE long-lived socket. It does NOT lift the ~72KB/s WiFi ceiling --
+# light screens (Battle City <1KB/frame) reach ~30-40fps, the heavy launcher (~4KB/frame)
+# stays ~18fps -- but it is smoother + lower-latency than the poll. (The protocol below is
+# UNCHANGED -- this is a TRANSPORT swap only; the draw-command/atlas/stream-mode/input
+# model is byte-identical to the HTTP path.)
 #
 # WHY DRAW COMMANDS, NOT PIXELS (a hard device constraint): WiFi throughput on this
 # board is ~72 KB/s (MicroPython lwIP ceiling), so streaming the raw 320x240 RGB565
@@ -50,15 +68,20 @@
 #
 # SINGLE-THREADED, NON-BLOCKING (a hard device constraint): run_desktop's native loop
 # does one render frame at a time and never services anything mid-frame. So this server
-# uses a NON-BLOCKING listening socket and `poll()` accepts/handles AT MOST ONE request
-# per call, BETWEEN frames. It must never block the render loop -- every socket op is
-# guarded and a slow/partial client is dropped rather than waited on.
+# uses a NON-BLOCKING listening socket and a `service()` (called once per loop iteration,
+# BETWEEN frames) that accepts new connections, drains the persistent WebSocket's queued
+# input frames, and PUSHES at most one committed frame down it -- all without blocking.
+# A WS frame may arrive split across reads, so the conn keeps a small read buffer and a
+# parser that yields only COMPLETE frames (retaining the partial remainder for the next
+# iteration); a multi-KB send that can't fully drain over slow WiFi uses a short blocking
+# send budget, and a stalled client is DROPPED, not waited on.
 #
 # ZERO COST WHEN OFF / NO BROWSER: recording is gated. TeeCanvas only appends commands
 # while `recorder.enabled` is True, which is set only when the server is running AND a
-# browser fetched a frame recently (see WebServer.recording_wanted). With the server off
-# (the default) the Tee is a thin pass-through to the real DeviceCanvas -- one extra
-# attribute check per draw call, no list building, no allocation.
+# WebSocket client is currently connected (see WebServer.recording_wanted). With the
+# server off (the default), or with no browser connected, the Tee is a thin pass-through
+# to the real DeviceCanvas -- one extra attribute check per draw call, no list building,
+# no allocation.
 #
 # WiFi STA and the display SPI are SEPARATE peripherals, so the socket work does NOT
 # collide with the SD/display bus rules -- but it DOES share CPU in the single-threaded
@@ -90,13 +113,28 @@ except Exception:  # noqa: BLE001 -- host / CPython: provide ms-based shims
     def ticks_diff(a, b):
         return a - b
 
+# WebSocket handshake needs sha1 + base64. MicroPython exposes uhashlib/ubinascii; CPython
+# has hashlib/binascii. Both provide sha1 + b2a_base64, which is all the RFC 6455 accept
+# computation uses.
+try:
+    import uhashlib as _hashlib
+except Exception:  # noqa: BLE001 -- host / CPython
+    import hashlib as _hashlib
+
+try:
+    import ubinascii as _binascii
+except Exception:  # noqa: BLE001 -- host / CPython
+    import binascii as _binascii
+
 
 DEFAULT_PORT = 8080
 
-# Drop the recorder back to disabled this many ms after the last /frame fetch, so a
-# browser that closed its tab stops costing the render loop anything (the Tee goes
-# back to a pure pass-through). A live browser polls ~30x/s, so this is generous.
-RECORD_IDLE_MS = 2000
+# Consider a WebSocket client DEAD (and drop it -> stop recording) if we haven't seen any
+# read activity from it for this long. The browser sends input batches every tick and we
+# answer ws pings with pongs, so a live client is never idle this long; this just reaps a
+# half-open conn (closed tab, dropped WiFi) that never sent a TCP close, so the recorder
+# goes back to a pure pass-through. Liveness = "a WS client is connected AND not timed out".
+RECORD_IDLE_MS = 4000
 
 # Web-stream frame-rate cap (#41 payload diet). The device panel runs as fast as it can
 # (~18-42fps), but a browser over the ~72KB/s WiFi can't consume that -- and recording a
@@ -113,18 +151,34 @@ RECORD_IDLE_MS = 2000
 WEB_FPS_CAP = 30
 WEB_FRAME_INTERVAL_MS = 1000 // WEB_FPS_CAP
 
-# Per-connection socket timeouts (seconds). The accepted conn is BLOCKING with a bound,
-# NOT non-blocking: a non-blocking sendall can't push a multi-KB response over the device's
-# ~72KB/s WiFi and fails [Errno 116] ETIMEDOUT (it only worked on fast localhost in tests).
-# A short READ timeout caps how long a speculative/empty browser preconnect can stall the
-# single-threaded loop; a longer SEND timeout lets the HTML page / assets drain.
+# Per-connection socket timeouts (seconds). A freshly accepted conn (an HTTP request OR the
+# WS-upgrade GET) is read BLOCKING with a short bound: the request is already en route (we
+# just accepted), so a real one arrives in a recv or two, while a speculative/empty preconnect
+# stalls the loop at most WEB_RECV_TIMEOUT. A non-blocking sendall can't push a multi-KB body
+# over the device's ~72KB/s WiFi (fails [Errno 116] ETIMEDOUT -- it only worked on fast
+# localhost), so the SEND uses a longer blocking budget to let the HTML page / assets / a WS
+# frame drain. The PERSISTENT WS conn itself is then made NON-blocking for reads (input may
+# arrive split across iterations) but keeps the blocking send budget for pushes.
 WEB_RECV_TIMEOUT = 0.4
 WEB_SEND_TIMEOUT = 2.0
 
-# Max requests poll() drains per frame. The browser fires 2/tick (POST /input + GET /frame),
-# so serving 1/frame backs them up and input lags; draining a few keeps input snappy. accept()
-# EAGAINs the moment nothing's pending, so this only caps a flood -- the common case is 2.
-POLL_MAX = 6
+# Max NEW connections service() accepts per loop iteration. accept() EAGAINs the instant
+# nothing is pending, so this only caps a flood -- the common case (the page load + /assets +
+# the one WS upgrade) is a handful at startup, then nothing (the WS is persistent). The
+# persistent WS conn is serviced once per iteration regardless (its input is drained + one
+# frame pushed); it does NOT go through this accept cap.
+POLL_MAX = 4
+
+# Max bytes a single inbound WS text frame may carry (input batches are tiny -- a few events
+# of a few ints each -- well under 1KB). A frame claiming more than this is treated as a
+# protocol error and the conn is dropped, so a malformed/hostile client can't make us buffer
+# unboundedly while waiting for a "complete" frame that never arrives.
+WS_MAX_FRAME = 8192
+
+# Max bytes we let a WS conn's read buffer grow to before giving up (defensive: a peer that
+# dribbles header bytes without ever completing a frame). Dropping the conn is always safe --
+# the browser auto-reconnects.
+WS_MAX_BUFFER = 16384
 
 # Defensive cap on the sprite atlas. The atlas is keyed by id(img) and assumes stable sprite
 # identity (carts reuse one Image per tile via make_api's cache). A screen that makes FRESH
@@ -751,25 +805,276 @@ def http_response(status, body, content_type="application/json"):
 
 
 # ---------------------------------------------------------------------------
-# The server: a non-blocking listening socket, one request handled per poll().
+# WebSocket transport (RFC 6455): the LIVE channel. Pure functions (no socket) so the
+# handshake + framing are host-unit-testable; _WSConn below wires them to a real socket.
+# ---------------------------------------------------------------------------
+
+# The RFC 6455 magic GUID concatenated with the client's Sec-WebSocket-Key before the
+# sha1; the base64 of that digest is the Sec-WebSocket-Accept the server echoes back.
+WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
+def ws_accept_key(key):
+    """The Sec-WebSocket-Accept value for a client's Sec-WebSocket-Key (RFC 6455 4.2.2):
+    base64(sha1(key + WS_GUID)). `key` is the raw header value (str). Returns the accept
+    string. (Example: "dGhlIHNhbXBsZSBub25jZQ==" -> "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=".)"""
+    digest = _hashlib.sha1((key + WS_GUID).encode("utf-8")).digest()
+    return _binascii.b2a_base64(digest).decode("utf-8").strip()
+
+
+def ws_handshake_response(key):
+    """The full HTTP/1.1 101 Switching Protocols response (bytes) that completes a
+    WebSocket upgrade for the client key. No body; the socket then carries WS frames."""
+    accept = ws_accept_key(key)
+    head = (
+        "HTTP/1.1 101 Switching Protocols\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        "Sec-WebSocket-Accept: %s\r\n\r\n"
+    ) % accept
+    return head.encode("utf-8")
+
+
+def ws_header_key(raw):
+    """Pull the Sec-WebSocket-Key header value out of a raw request (bytes/str), or None.
+    Used by the upgrade path; case-insensitive header name match."""
+    if isinstance(raw, bytes):
+        try:
+            text = raw.decode("utf-8")
+        except Exception:  # noqa: BLE001
+            text = raw.decode("latin-1")
+    else:
+        text = raw
+    for ln in text.replace("\r\n", "\n").split("\n"):
+        c = ln.find(":")
+        if c > 0 and ln[:c].strip().lower() == "sec-websocket-key":
+            return ln[c + 1:].strip()
+    return None
+
+
+def is_ws_upgrade(raw):
+    """True when a raw request asks to upgrade to a WebSocket (an `Upgrade: websocket`
+    header). Case-insensitive; tolerant of a comma-list Connection header."""
+    if isinstance(raw, bytes):
+        try:
+            text = raw.decode("utf-8")
+        except Exception:  # noqa: BLE001
+            text = raw.decode("latin-1")
+    else:
+        text = raw
+    for ln in text.replace("\r\n", "\n").split("\n"):
+        c = ln.find(":")
+        if c > 0 and ln[:c].strip().lower() == "upgrade":
+            if "websocket" in ln[c + 1:].strip().lower():
+                return True
+    return False
+
+
+def ws_encode(payload, opcode=0x1):
+    """Encode an UNMASKED server->client WebSocket frame (RFC 6455 5.2). `payload` is
+    bytes (or str -> utf-8). opcode 0x1 = text (the default, our frame JSON), 0xA = pong.
+    FIN is always set (we never fragment outbound). 7/16/64-bit length forms per the spec;
+    no mask (server frames are never masked)."""
+    if isinstance(payload, str):
+        payload = payload.encode("utf-8")
+    n = len(payload)
+    b0 = 0x80 | (opcode & 0x0F)              # FIN + opcode
+    if n < 126:
+        header = bytes((b0, n))
+    elif n < 65536:
+        header = bytes((b0, 126, (n >> 8) & 0xFF, n & 0xFF))
+    else:
+        header = bytes((b0, 127,
+                        (n >> 56) & 0xFF, (n >> 48) & 0xFF, (n >> 40) & 0xFF,
+                        (n >> 32) & 0xFF, (n >> 24) & 0xFF, (n >> 16) & 0xFF,
+                        (n >> 8) & 0xFF, n & 0xFF))
+    return header + payload
+
+
+def ws_decode(buf):
+    """Decode ONE client->server WebSocket frame from the front of `buf` (bytes).
+
+    Returns (opcode, payload, consumed):
+      * opcode is the frame opcode (0x1 text, 0x8 close, 0x9 ping, 0xA pong, ...),
+        payload the UNMASKED bytes, consumed the number of bytes the frame used.
+      * (None, None, 0)  -> not enough bytes yet for a complete frame (try again next read).
+      * (-1, None, 0)    -> a protocol error (oversize / a server-bound frame that isn't
+                            masked, which a conformant client must always mask) -> drop conn.
+
+    Handles the common case: a single unfragmented client frame. Client frames are ALWAYS
+    masked (RFC 6455 5.3), so the MASK bit must be set; the 4-byte masking key XOR-unmasks
+    the payload. 126/127 extended lengths are supported; anything over WS_MAX_FRAME is a
+    protocol error (we never expect a large inbound frame -- input batches are tiny)."""
+    n = len(buf)
+    if n < 2:
+        return (None, None, 0)
+    b0 = buf[0]
+    b1 = buf[1]
+    opcode = b0 & 0x0F
+    masked = (b1 & 0x80) != 0
+    ln = b1 & 0x7F
+    off = 2
+    if ln == 126:
+        if n < off + 2:
+            return (None, None, 0)
+        ln = (buf[off] << 8) | buf[off + 1]
+        off += 2
+    elif ln == 127:
+        if n < off + 8:
+            return (None, None, 0)
+        ln = 0
+        for i in range(8):
+            ln = (ln << 8) | buf[off + i]
+        off += 8
+    if ln > WS_MAX_FRAME:
+        return (-1, None, 0)                 # oversize -> drop the conn
+    if not masked:
+        return (-1, None, 0)                 # a client frame MUST be masked
+    if n < off + 4 + ln:
+        return (None, None, 0)               # mask key + payload not all here yet
+    mask = buf[off:off + 4]
+    off += 4
+    raw = buf[off:off + ln]
+    # Unmask: payload[i] ^ mask[i % 4]. bytearray for in-place XOR (works on host + MP).
+    out = bytearray(raw)
+    for i in range(ln):
+        out[i] ^= mask[i & 3]
+    return (opcode, bytes(out), off + ln)
+
+
+# WebSocket opcodes we care about.
+WS_OP_TEXT = 0x1
+WS_OP_CLOSE = 0x8
+WS_OP_PING = 0x9
+WS_OP_PONG = 0xA
+
+
+# ---------------------------------------------------------------------------
+# The server: a non-blocking listening socket; HTTP for the page/assets + a persistent
+# WebSocket for the live frame-push / input-up channel. service() runs once per loop.
 # ---------------------------------------------------------------------------
 
 
+class _WSConn:
+    """The persistent WebSocket connection (one client at a time). Non-blocking reads with
+    a cross-iteration read buffer + a parser that yields only COMPLETE inbound frames and
+    retains the partial remainder; blocking-with-a-budget sends so a multi-KB frame can
+    drain over slow WiFi. Every op is guarded -- a closed/stalled peer sets .alive False
+    and the server drops it (the browser auto-reconnects)."""
+
+    def __init__(self, conn):
+        self._c = conn
+        self._buf = b""             # inbound bytes not yet forming a complete frame
+        self.alive = True
+        self.last_recv = ticks_ms()  # for the idle reaper (RECORD_IDLE_MS)
+        try:
+            conn.setblocking(False)  # reads must never block the render loop
+        except Exception:  # noqa: BLE001 -- not all ports expose setblocking
+            pass
+
+    def close(self):
+        self.alive = False
+        try:
+            self._c.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _read_some(self):
+        """Drain whatever bytes are pending on the non-blocking socket into the buffer.
+        Returns False (and marks dead) on a clean peer close; True otherwise. EAGAIN (no
+        data) is the normal case and just returns True with nothing appended."""
+        got_close = False
+        for _ in range(8):           # bounded: don't spin draining a fast firehose forever
+            try:
+                chunk = self._c.recv(1024)
+            except Exception:  # noqa: BLE001 -- EAGAIN / would-block: nothing more pending
+                break
+            if chunk == b"" or chunk is None:
+                got_close = True     # peer closed the TCP connection
+                break
+            self._buf += chunk
+            self.last_recv = ticks_ms()
+            if len(self._buf) > WS_MAX_BUFFER:
+                self.alive = False   # a peer dribbling bytes without completing a frame
+                return False
+            if len(chunk) < 1024:    # short read -> the socket is drained for now
+                break
+        if got_close:
+            self.alive = False
+            return False
+        return True
+
+    def drain_input(self):
+        """Read pending bytes and return a list of decoded inbound TEXT payloads (bytes).
+        Handles ping (reply pong) + close (drop) inline. Non-blocking; returns [] when no
+        complete frame is ready. The render loop calls this once per iteration."""
+        if not self.alive:
+            return []
+        if not self._read_some():
+            return []
+        texts = []
+        while self.alive:
+            opcode, payload, consumed = ws_decode(self._buf)
+            if opcode is None:
+                break                # incomplete frame: keep the buffer, try next iteration
+            if consumed <= 0:        # ws_decode protocol error (-1) -> drop the conn
+                self.alive = False
+                break
+            self._buf = self._buf[consumed:]
+            if opcode == WS_OP_TEXT:
+                texts.append(payload)
+            elif opcode == WS_OP_PING:
+                self.send(payload, opcode=WS_OP_PONG)
+            elif opcode == WS_OP_CLOSE:
+                self.alive = False
+                break
+            # WS_OP_PONG / continuation / other control frames: ignored.
+        return texts
+
+    def send(self, payload, opcode=WS_OP_TEXT):
+        """Send one UNMASKED frame, blocking with a short budget so a multi-KB frame can
+        drain over slow WiFi. A send error (a stalled/closed client) drops the conn rather
+        than waiting on it. Returns True if it went out."""
+        if not self.alive:
+            return False
+        frame = ws_encode(payload, opcode)
+        try:
+            self._c.settimeout(WEB_SEND_TIMEOUT)
+        except Exception:  # noqa: BLE001 -- not all ports expose settimeout
+            pass
+        try:
+            self._c.sendall(frame)
+            ok = True
+        except Exception:  # noqa: BLE001 -- ETIMEDOUT / broken pipe: the client stalled
+            ok = False
+            self.alive = False
+        finally:
+            try:
+                self._c.setblocking(False)   # back to non-blocking for the next read
+            except Exception:  # noqa: BLE001
+                pass
+        return ok
+
+
 class WebServer:
-    """A cooperative, single-request-per-poll HTTP server for the device web view.
+    """A cooperative web-view server: plain HTTP for the page + assets, and a PERSISTENT
+    WebSocket (one client) for the live frame-push / input-up channel.
 
     run_desktop calls:
       * begin_frame()      once at the top of each frame, to start a fresh recording
-                           (only when recording is wanted).
+                           (only when a WS client is live).
       * commit_frame()     after ws.frame(), to publish the frame's draw commands.
-      * poll()             once per loop iteration, BETWEEN frames -- accepts at most
-                           ONE connection and serves one request, fully non-blocking.
+      * poll() / service() once per loop iteration, BETWEEN frames -- accepts new
+                           connections (HTTP one-shot, or a WS upgrade promoted to the
+                           persistent conn), drains the WS's queued input -> apply, and
+                           PUSHES the latest committed frame down it (capped). Fully
+                           non-blocking; a stalled client is dropped, never waited on.
 
     The `provider` is a small object the server queries for live data without holding
     any console references itself:
       provider.assets()    -> the /assets dict
-      provider.frame()     -> (cmds, cart_title) for /frame
-      provider.apply(events)-> inject /input events
+      provider.frame()     -> (cmds, cart_title) for /frame and the WS push
+      provider.apply(events)-> inject browser events
     """
 
     def __init__(self, recorder, provider, port=DEFAULT_PORT):
@@ -778,11 +1083,15 @@ class WebServer:
         self.port = port
         self.sock = None
         self.ip = None
-        self._last_frame_req = 0      # ticks_ms of the last /frame fetch (browser live?)
         self._last_record_ms = 0      # ticks_ms of the last RECORDED frame (the fps cap)
+        self._last_push_ms = 0        # ticks_ms of the last frame PUSHED down the WS (cap)
         self.requests = 0             # served-request counter (diag)
+        # The PERSISTENT WebSocket client (one at a time). None = no browser connected ->
+        # the recorder stays a pure pass-through (zero overhead). A new upgrade drops the
+        # old conn (latest-wins). Liveness is keyed off this being non-None + not idle-timed.
+        self._ws = None
         # SERVE-TIME defspr (#41): the atlas indices we've ALREADY shipped to the browser as
-        # a ["defspr", ...]. When a served /frame references an index not in here we PREPEND
+        # a ["defspr", ...]. When a served frame references an index not in here we PREPEND
         # its defspr (once) and add it; the set resets when /assets is (re)served (a page
         # load / cart change clears the browser's atlas) or when the recorder's atlas_gen
         # changes (reset_atlas). So each bitmap travels once per browser session, yet every
@@ -812,6 +1121,7 @@ class WebServer:
             return False
 
     def stop(self):
+        self._drop_ws()
         if self.sock is not None:
             try:
                 self.sock.close()
@@ -821,19 +1131,32 @@ class WebServer:
         self.recorder.enabled = False
         self.recorder.record_only = False
 
+    def _drop_ws(self):
+        """Close + forget the persistent WS client (a disconnect / latest-wins replacement /
+        a stalled send). The recorder gate then falls back to pass-through next begin_frame."""
+        if self._ws is not None:
+            try:
+                self._ws.close()
+            except Exception:  # noqa: BLE001
+                pass
+            self._ws = None
+
     def url(self):
         return "http://%s:%d/" % (self.ip or "0.0.0.0", self.port)
 
     def recording_wanted(self):
-        """True when a browser fetched a frame within RECORD_IDLE_MS -- the gate that
-        keeps the Tee a pure pass-through unless something is actually watching."""
-        if self.sock is None:
+        """True when a WebSocket client is currently connected AND not idle-timed-out -- the
+        gate that keeps the Tee a pure pass-through unless a browser is actually watching.
+        (The WS transport re-keys this off a LIVE connection instead of a recent /frame poll:
+        no per-frame handshake, so the old 'fetched within RECORD_IDLE_MS' window is replaced
+        by 'a live socket'. RECORD_IDLE_MS now just reaps a half-open conn that went silent.)"""
+        if self.sock is None or self._ws is None or not self._ws.alive:
             return False
-        return ticks_diff(ticks_ms(), self._last_frame_req) < RECORD_IDLE_MS
+        return ticks_diff(ticks_ms(), self._ws.last_recv) < RECORD_IDLE_MS
 
     def stream_mode(self):
         """True when the device should go HEADLESS for the web stream this frame -- i.e. a
-        browser is actively playing (recording_wanted), so the loop can skip the device's
+        browser is actively connected (recording_wanted), so the loop can skip the device's
         OWN panel rasterization + flush and let the cart run logic + record cheap commands
         only, lifting the web frame rate above the panel's render+flush ceiling (#41 30fps
         lever). Ties to the SAME gate as recording -- no new toggle -- so it's identical to
@@ -912,42 +1235,172 @@ class WebServer:
             self.recorder.commit()
 
     def poll(self):
-        """Drain up to POLL_MAX pending requests per call (non-blocking). The browser fires
-        TWO requests per tick (POST /input + GET /frame); serving only ONE per frame backed
-        them up so input lagged badly. Draining a few keeps input responsive. accept() raises
-        EAGAIN the instant nothing is pending, so the common case (1-2 real requests) serves
-        them and breaks immediately -- the cap just bounds a flood. Returns True if any
-        request was handled. Never blocks the loop on a stalled client."""
+        """Run once per loop iteration, BETWEEN frames (kept named poll() for the existing
+        run_desktop wiring; service() is an alias). Two non-blocking jobs, never blocking the
+        render loop:
+          1. ACCEPT new connections (up to POLL_MAX). Each is either a one-shot HTTP request
+             (GET / , GET /assets, the legacy /frame & /input fallbacks) served + closed, or a
+             WebSocket UPGRADE that becomes the PERSISTENT live conn (latest-wins: a new client
+             drops the old).
+          2. SERVICE the persistent WS conn: drain its queued input frames -> provider.apply,
+             then PUSH the latest committed frame down it (capped at WEB_FPS_CAP).
+        Returns True if anything was handled. A stalled client is dropped, never waited on."""
         if self.sock is None:
             return False
-        served = False
+        did = self._accept_new()
+        did = self._service_ws() or did
+        return did
+
+    # service() is the conceptual name; poll() is the established hook in run_desktop.
+    service = poll
+
+    def _accept_new(self):
+        """Accept + dispatch up to POLL_MAX pending NEW connections (non-blocking). accept()
+        EAGAINs the instant nothing is pending, so the steady state (a persistent WS, no new
+        conns) costs one failed accept. A WS upgrade is promoted to the persistent conn; any
+        other request is a one-shot HTTP serve + close."""
+        did = False
         for _ in range(POLL_MAX):
             try:
                 conn, _addr = self.sock.accept()
             except Exception:  # noqa: BLE001 -- EAGAIN: no more pending connections
                 break
+            did = True
             try:
-                self._serve(conn)
-                served = True
+                self._dispatch(conn)
             except Exception as exc:  # noqa: BLE001 -- a bad request must not crash the loop
                 print("KidCode web: request error:", exc)
-            finally:
                 try:
                     conn.close()
                 except Exception:  # noqa: BLE001
                     pass
-        return served
+        return did
+
+    def _dispatch(self, conn):
+        """Read one request head off a freshly accepted conn and route it: a WS upgrade is
+        promoted to the persistent live conn (the conn STAYS OPEN); any HTTP request is served
+        and the conn closed. The read is blocking with a short bound (the request is already
+        en route -- we just accepted)."""
+        method, path, body, raw = self._recv_request(conn)
+        # WebSocket upgrade on /ws (or /): complete the handshake + keep the conn.
+        if method == "GET" and is_ws_upgrade(raw):
+            key = ws_header_key(raw)
+            if key:
+                self._upgrade_ws(conn, key)
+                return
+            # Malformed upgrade (no key) -> 400 + close.
+            self._http_send_close(conn, http_response(400, "bad upgrade",
+                                                      "text/plain; charset=utf-8"))
+            return
+        if method is None:
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+            return
+        self._serve_http(conn, method, path, body)
+
+    def _upgrade_ws(self, conn, key):
+        """Complete the WebSocket handshake (101) and install the conn as the persistent live
+        client, dropping any previous one (latest-wins). The browser's reconnect-on-close means
+        a refresh cleanly replaces the old socket. On a handshake send failure, just close."""
+        try:
+            conn.settimeout(WEB_SEND_TIMEOUT)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            conn.sendall(ws_handshake_response(key))
+        except Exception as exc:  # noqa: BLE001 -- couldn't 101 the client: drop it
+            print("KidCode web: ws handshake failed:", exc)
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+            return
+        self._drop_ws()                            # latest-wins: one client at a time
+        self._ws = _WSConn(conn)
+        # A fresh client starts with an empty atlas + no assets -> re-ship every defspr it
+        # references, exactly as /assets did for the poll transport.
+        self.reset_served()
+        self._last_push_ms = 0                     # push the first frame promptly
+        self.requests += 1
+        _diag = "KidCode web: ws client connected"
+        print(_diag)
+
+    def _service_ws(self):
+        """Drain the persistent WS conn's queued input frames (-> provider.apply) and PUSH the
+        latest committed frame down it (capped at WEB_FPS_CAP). Drops the conn if it died
+        (clean close, stalled send, or idle-timed-out). No-op when no client is connected."""
+        ws = self._ws
+        if ws is None:
+            return False
+        if not ws.alive:
+            self._drop_ws()
+            return False
+        did = False
+        # 1. Inbound: decode queued text frames -> the SAME apply path as POST /input.
+        for payload in ws.drain_input():
+            did = True
+            self._apply_ws_text(payload)
+        if not ws.alive:                           # a close/oversize frame killed it
+            self._drop_ws()
+            return did
+        # Idle reaper: a half-open conn (closed tab, dropped WiFi) that stopped sending.
+        if ticks_diff(ticks_ms(), ws.last_recv) >= RECORD_IDLE_MS:
+            self._drop_ws()
+            return did
+        # 2. Outbound: push the latest committed frame, capped (a frame may be unchanged --
+        # the recorder serves the last committed one regardless, like the poll did).
+        now = ticks_ms()
+        if ticks_diff(now, self._last_push_ms) >= WEB_FRAME_INTERVAL_MS:
+            self._last_push_ms = now
+            self._push_frame(ws)
+            did = True
+            if not ws.alive:                       # the push detected a stalled client
+                self._drop_ws()
+        return did
+
+    def _apply_ws_text(self, payload):
+        """Decode one inbound WS text payload ({"events":[...]}) and feed it through the SAME
+        apply path POST /input used. A bad payload yields no events (never raises)."""
+        try:
+            data = payload.decode("utf-8") if isinstance(payload, (bytes, bytearray)) else payload
+            obj = json.loads(data)
+            events = obj.get("events", []) if isinstance(obj, dict) else obj
+            if isinstance(events, list):
+                self.provider.apply(events)
+        except Exception:  # noqa: BLE001 -- a malformed message just yields no input
+            pass
+
+    def _push_frame(self, ws):
+        """Send the latest committed frame as a WS text message: the SAME frame_payload (run
+        through served_frame for the serve-time defspr prepend + the atlas gen) the HTTP
+        /frame path returned -- only the transport differs."""
+        cmds, cart = self.provider.frame()
+        cmds = self.served_frame(cmds)
+        ws.send(json.dumps(frame_payload(cmds, cart, self.recorder.atlas_gen)))
+
+    def _http_send_close(self, conn, data):
+        """sendall `data` (with a short send budget) then close -- the one-shot HTTP path."""
+        try:
+            conn.settimeout(WEB_SEND_TIMEOUT)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            conn.sendall(data)
+        except Exception:  # noqa: BLE001 -- a stalled client: drop it, nothing to wait on
+            pass
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
 
     def _recv_request(self, conn):
-        """Read one request: headers, then body up to Content-Length. Briefly blocking
-        on THIS one connection only (it was just accepted, so the request is en route),
-        with a small read budget so a stalled client can't hang the loop. Returns
-        (method, path, body) or (None, None, b'')."""
-        # BLOCKING with a short bound (not non-blocking): a non-blocking sendall later
-        # can't drain a multi-KB response over slow WiFi (-> ETIMEDOUT). The short read
-        # timeout means a speculative/empty preconnect stalls the loop at most
-        # WEB_RECV_TIMEOUT, while a real request (already en route -- we just accepted)
-        # arrives in one or two recvs.
+        """Read one request head (+ body up to Content-Length) off a freshly accepted conn.
+        Blocking with a short bound (not non-blocking): the request is already en route, so it
+        arrives in a recv or two, while a speculative/empty preconnect stalls at most
+        WEB_RECV_TIMEOUT. Returns (method, path, body, raw_head) -- raw_head lets the caller
+        sniff a WebSocket upgrade. (None, None, b'', b'') on an unparseable request."""
         try:
             conn.settimeout(WEB_RECV_TIMEOUT)
         except Exception:  # noqa: BLE001 -- not all ports expose settimeout
@@ -969,33 +1422,24 @@ class WebServer:
             if head_end >= 0 and len(buf) - head_end >= clen:
                 break
         if head_end < 0:
-            return (None, None, b"")
+            return (None, None, b"", buf)
         body = buf[head_end:head_end + clen] if clen else b""
-        return (method, path, body)
+        return (method, path, body, buf[:head_end])
 
-    def _serve(self, conn):
-        method, path, body = self._recv_request(conn)
-        if method is None:
-            return
-        # Give the response room to drain over slow WiFi (the read used a short bound).
-        try:
-            conn.settimeout(WEB_SEND_TIMEOUT)
-        except Exception:  # noqa: BLE001
-            pass
+    def _serve_http(self, conn, method, path, body):
+        """Serve a one-shot HTTP request (the page, /assets, or the legacy /frame & /input
+        fallbacks) and close the conn. The LIVE channel is the WebSocket; these stay so the
+        page can still load over HTTP and a poll-only client can fall back."""
         self.requests += 1
         if method == "GET" and path in ("/", "/index.html"):
-            conn.sendall(http_response(200, PAGE_HTML, "text/html; charset=utf-8"))
+            self._http_send_close(conn, http_response(200, PAGE_HTML, "text/html; charset=utf-8"))
         elif method == "GET" and path == "/assets":
             # A page load / cart change: the browser clears its atlas + refetches /assets, so
-            # forget what we've shipped -> the next /frame re-ships the defsprs it references.
+            # forget what we've shipped -> the next frame re-ships the defsprs it references.
             self.reset_served()
-            conn.sendall(http_response(200, json.dumps(self.provider.assets())))
+            self._http_send_close(conn, http_response(200, json.dumps(self.provider.assets())))
         elif path == "/frame" and method in ("GET", "POST"):
-            self._last_frame_req = ticks_ms()      # mark the browser live -> keep recording
-            # Input rides ALONG with the frame request (one round-trip): a POST body carries
-            # the browser's queued events -- apply them, then return the frame. Halves the
-            # requests/tick vs a separate POST /input + GET /frame, which made every input
-            # stall the view (the device served the two requests serially per frame).
+            # LEGACY poll fallback: input rides along on a POST body, then return the frame.
             if method == "POST" and body:
                 try:
                     payload = json.loads(body)
@@ -1006,10 +1450,8 @@ class WebServer:
                 except Exception:  # noqa: BLE001 -- a bad body just yields no events
                     pass
             cmds, cart = self.provider.frame()
-            # Prepend any not-yet-shipped defsprs so this served frame is self-contained for
-            # its sprites (serve-time defspr -- drop-robust, see served_frame).
             cmds = self.served_frame(cmds)
-            conn.sendall(http_response(200, json.dumps(
+            self._http_send_close(conn, http_response(200, json.dumps(
                 frame_payload(cmds, cart, self.recorder.atlas_gen))))
         elif method == "POST" and path == "/input":
             events = []
@@ -1022,9 +1464,10 @@ class WebServer:
                 except Exception:  # noqa: BLE001 -- a bad body -> no events, still 200
                     events = []
             self.provider.apply(events)
-            conn.sendall(http_response(200, '{"ok":true}'))
+            self._http_send_close(conn, http_response(200, '{"ok":true}'))
         else:
-            conn.sendall(http_response(404, "not found", "text/plain; charset=utf-8"))
+            self._http_send_close(conn, http_response(404, "not found",
+                                                      "text/plain; charset=utf-8"))
 
 
 def _sleep_ms(ms):
@@ -1040,9 +1483,10 @@ def _sleep_ms(ms):
 # The page: a self-contained replayer for the PAYLOAD-DIET protocol (#41). It is the
 # matched pair of the DrawRecorder above (NOT the host tools/web_console.html, which
 # stays on the old fat-spr/expanded-map format). It does the load-bearing job: fetch
-# /assets (palette + font + sheet + tilemap), poll /frame, replay the indexed draw
-# commands against the KID64 palette, and POST /input (touch drag + on-screen joystick/
-# A/B + WASD/arrows). Replay must be PIXEL-IDENTICAL to the device panel:
+# /assets (palette + font + sheet + tilemap) ONCE over HTTP, open a persistent WebSocket
+# (/ws), replay the indexed draw commands each pushed frame against the KID64 palette, and
+# send input UP the same socket (touch drag + on-screen joystick/A/B + WASD/arrows) -- no
+# per-frame HTTP handshake. Replay must be PIXEL-IDENTICAL to the device panel:
 #   defspr  -> cache the bitmap by index (ATL[index] = {w,h,t,px}).
 #   spr     -> blit ATL[index] at x,y with browser-side scale/flip + colorkey/palt.
 #   map     -> walk the CACHED tilemap (kept current by settiles + /assets) over the
@@ -1197,25 +1641,35 @@ if(s&&!e.repeat)send({type:"press",name:s});var n=nv(e);if(n&&!nH[n]){nH[n]=true
 if(s||n||cd!==null)e.preventDefault();});
 cv.addEventListener("keyup",function(e){if(e.key in PAN){delete pH[e.key];e.preventDefault();return;}
 var n=nv(e);if(n&&nH[n]){delete nH[n];send({type:"hold",name:n,down:false});}});
-var infl=false,ok=false;
+var ok=false;
 function pv(){return[(pH.ArrowRight?1:0)-(pH.ArrowLeft?1:0),(pH.ArrowDown?1:0)-(pH.ArrowUp?1:0)];}
-// ONE round-trip per tick: POST our queued events to /frame and render the frame it returns.
-// (Was two competing requests -- POST /input + GET /frame -- which the device served serially
-// per frame, so every input stalled the view. Folding them halves requests/tick.)
-function step(){if(infl||!ready)return;infl=true;
-var v=pv();if(v[0]||v[1])send({type:"pan",dx:v[0],dy:v[1]});var b=q;q=[];
-fetch("/frame",{method:"POST",headers:{"Content-Type":"application/json"},
-body:JSON.stringify({events:b})}).then(function(r){return r.text();}).then(function(txt){
-HUD.kb=txt.length/1024;var f=JSON.parse(txt);
-// Atlas reset is driven by the device's `gen` (lock-step with its served reset), NOT by
-// the cart change -- so scrolling the launcher (which changes cart_title -> /assets refetch)
-// no longer wipes ATL and strands sprites (the unknown-growth bug, #41).
-if(f.gen!==curGen){curGen=f.gen;ATL=[];HUD.unknown=0;}
-if(f.cart!==assCart){assCart=f.cart;getA().catch(function(){});}rep(f.cmds||[]);blit();infl=false;
+// df(): render ONE frame payload (the JSON the WebSocket pushes). Atlas reset is driven by
+// the device's `gen` (lock-step with its served reset), NOT by the cart change -- so scrolling
+// the launcher (which changes cart_title -> /assets refetch) no longer wipes ATL and strands
+// sprites (the unknown-growth bug, #41).
+function df(f){if(f.gen!==curGen){curGen=f.gen;ATL=[];HUD.unknown=0;}
+if(f.cart!==assCart){assCart=f.cart;getA().catch(function(){});}rep(f.cmds||[]);blit();
 var t=(window.performance&&performance.now)?performance.now():Date.now();if(HUD.last){var inst=1000/Math.max(1,t-HUD.last);
 HUD.fps=HUD.fps?HUD.fps+(inst-HUD.fps)*0.2:inst;}HUD.last=t;if(HUD.on)drawHud();
-if(!ok){ok=true;sEl.textContent="live";sEl.style.color="#00e436";}}).catch(function(){infl=false;
-sEl.textContent="reconnecting...";sEl.style.color="#ff004d";});}
+if(!ok){ok=true;sEl.textContent="live";sEl.style.color="#00e436";}}
+// THE LIVE CHANNEL (#41 transport swap): a persistent WebSocket. Frames PUSH down
+// (ws.onmessage -> df), input pushes up (flush() sends our queued events as one text
+// message per tick). No per-frame handshake -> smoother + lower-latency than the old poll.
+var ws=null,wsOpen=false,reconn=null;
+function flush(){if(!wsOpen)return;var v=pv();if(v[0]||v[1])send({type:"pan",dx:v[0],dy:v[1]});
+if(!q.length)return;var b=q;q=[];try{ws.send(JSON.stringify({events:b}));}catch(e){}}
+function connect(){if(reconn){clearTimeout(reconn);reconn=null;}
+try{ws=new WebSocket((location.protocol=="https:"?"wss://":"ws://")+location.host+"/ws");}
+catch(e){retry();return;}
+ws.onopen=function(){wsOpen=true;ok=false;sEl.textContent="live";sEl.style.color="#00e436";};
+ws.onmessage=function(ev){HUD.kb=ev.data.length/1024;var f;try{f=JSON.parse(ev.data);}catch(e){return;}df(f);};
+ws.onclose=function(){wsOpen=false;retry();};
+ws.onerror=function(){try{ws.close();}catch(e){}};}
+// Reconnect with a small fixed backoff (the device drops the old socket when a new one
+// connects, so a refresh / WiFi blip just reconnects). assCart is left as-is so the atlas
+// survives a reconnect; the device re-ships defsprs to a fresh socket anyway (reset_served).
+function retry(){wsOpen=false;sEl.textContent="reconnecting...";sEl.style.color="#ff004d";
+if(reconn)return;reconn=setTimeout(function(){reconn=null;connect();},800);}
 // HUD render: cheap textContent update, only when shown. atlas count = defined ATL slots.
 function drawHud(){var n=0;for(var i=0;i<ATL.length;i++)if(ATL[i])n++;
 var u=HUD.unknown?'<span class=w>'+HUD.unknown+'</span>':'0';
@@ -1224,7 +1678,7 @@ HUD.el.innerHTML="fps <b>"+HUD.fps.toFixed(1)+"</b>   "+HUD.kb.toFixed(2)+" KB/f
 // not the canvas has focus (and never steals a WASD/arrow movement key from the cart).
 window.addEventListener("keydown",function(e){if(e.key==="`"||e.key==="~"){HUD.on=!HUD.on;
 HUD.el.style.display=HUD.on?"block":"none";if(HUD.on)drawHud();e.preventDefault();}});
-function tick(){step();}
-getA().then(function(){setInterval(tick,Math.round(1000/FPS));}).catch(function(){
+// Fetch /assets once over HTTP, then open the WebSocket; pump queued input up on a timer.
+getA().then(function(){connect();setInterval(flush,Math.round(1000/FPS));}).catch(function(){
 sEl.textContent="no assets";sEl.style.color="#ff004d";});cv.focus();
 </script></body></html>"""

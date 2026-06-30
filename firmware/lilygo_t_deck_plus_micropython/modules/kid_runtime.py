@@ -1848,7 +1848,7 @@ def _load_carts(session=None):
 
 class WebView:
     """Device web view controller (#41/#22): owns the draw-command recorder, the
-    non-blocking HTTP server, and the browser-input injection, and is the small
+    non-blocking HTTP + WebSocket server, and the browser-input injection, and is the small
     object the shared console's Settings "WEB VIEW" row toggles (it reads .enabled +
     .url() and calls .toggle()).
 
@@ -1856,14 +1856,19 @@ class WebView:
       * It starts OFF: ws.canvas stays the RAW DeviceCanvas, so the normal (no-browser)
         path has ZERO per-draw overhead. Turning the view ON swaps a recording TeeCanvas
         in as ws.canvas (and rebinds the wallpaper/running cart to it); even then the
-        recorder only records while a browser is actively polling /frame.
+        recorder only records while a browser's WebSocket is connected.
       * toggle() brings WiFi up (reusing the saved-credential autoconnect), reads the
         STA IP, and starts/stops the server. It needs WiFi already joined via the WiFi
         cart; with no saved network it stays OFF and surfaces the reason.
-      * Each loop iteration: begin_frame() (start a recording if wanted) BEFORE the
-        render, feed_input() to inject queued browser events BEFORE inp.begin_frame(),
-        commit_frame() AFTER ws.frame(), and poll() once BETWEEN frames to serve at
-        most one request. None of these ever block the render loop.
+      * Each loop iteration: begin_frame() (start a recording if a WS client is live)
+        BEFORE the render, feed_input() to inject queued browser events BEFORE
+        inp.begin_frame(), commit_frame() AFTER ws.frame(), and poll() once BETWEEN frames
+        to accept new connections + service the persistent WebSocket (drain its input ->
+        apply, push the latest committed frame down it). None of these block the render loop.
+
+    TRANSPORT (#41): the live channel is a persistent WebSocket -- frames PUSH down, input
+    pushes up, on one socket (no per-frame HTTP handshake). The page + assets still load over
+    plain HTTP, and the legacy GET/POST /frame + POST /input endpoints remain as a fallback.
 
     NEEDS ON-DEVICE VERIFICATION: the socket server + WiFi<->LCD-DMA RAM coexistence
     (#38/#40) are unproven on hardware here."""
@@ -2590,10 +2595,11 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         if diag is not None and _ticks_diff(_tnow, _diag_flush_at) >= 0:
             _diag_flush_at = _tnow + 5000
             _diag_flush(diag, ws)
-        # Web view (#41): service AT MOST ONE HTTP request, BETWEEN frames, fully
-        # non-blocking (WiFi STA is a separate peripheral from the display SPI, so this
-        # never touches the SD/panel bus -- it only competes for CPU here). No-op when
-        # the server is off; a slow client is dropped, never waited on.
+        # Web view (#41): service the server BETWEEN frames, fully non-blocking -- accept
+        # new connections + drain the persistent WebSocket's queued input and push the
+        # latest committed frame down it (WiFi STA is a separate peripheral from the display
+        # SPI, so this never touches the SD/panel bus -- it only competes for CPU here).
+        # No-op when the server is off; a slow client is dropped, never waited on.
         web.poll()
         elapsed = _ticks_diff(_ticks_ms(), now)
         if elapsed < frame_ms:

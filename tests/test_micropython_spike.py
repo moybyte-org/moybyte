@@ -159,10 +159,20 @@ def test_device_web_view_module_present_and_protocol_shaped():
     assert "class WebServer" in web             # non-blocking, one request per poll()
     assert "self.recorder.enabled" in web       # the gate -> zero cost when no browser
     assert "setblocking(False)" in web          # NON-blocking listening socket
-    # The draw-command protocol routes (same as tools/web_console.py).
+    # The draw-command protocol routes (/assets over HTTP; the legacy /frame & /input HTTP
+    # endpoints remain as a poll fallback alongside the WebSocket live channel).
     assert '"/assets"' in web and '"/frame"' in web and '"/input"' in web
     assert "def assets_payload" in web and "def frame_payload" in web
     assert "def apply_events" in web            # browser events -> InputState/Pointer
+    # WEBSOCKET TRANSPORT (#41 swap): the persistent live channel replaced the per-frame
+    # HTTP poll. The handshake (RFC 6455 accept-key + 101) + frame encode/decode + the
+    # persistent conn (_WSConn) must be present; the page connects to "/ws".
+    assert "def ws_accept_key" in web and "def ws_handshake_response" in web
+    assert "def ws_encode" in web and "def ws_decode" in web
+    assert "class _WSConn" in web               # the persistent, non-blocking WS connection
+    assert "258EAFA5-E914-47DA-95CA-C5AB0DC85B11" in web   # the RFC 6455 magic GUID
+    assert '"/ws"' in web or "/ws" in web       # the WebSocket route the page connects to
+    assert "Switching Protocols" in web         # the 101 upgrade response
     # SERVE-TIME defspr (#41 BUG-1 fix): the bitmap is delivered when the browser RECEIVES
     # a frame referencing it (drop-robust), not at record-time first-sight. So the server
     # reconstructs the defspr (defspr_cmd) and prepends it (served_frame), tracking a
