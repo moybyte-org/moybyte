@@ -1061,12 +1061,14 @@ def test_stream_mode_gate_records_only_when_a_browser_is_live(monkeypatch):
         srv.begin_frame()
         assert rec.enabled is True and rec.record_only is True
         assert srv.stream_mode() is True
-        # Within the fps-cap interval the frame is SKIPPED -> record_only False so the
-        # panel still renders + flushes that frame (record_only never outlives enabled).
+        # Within the fps-cap interval the frame is SKIPPED for RECORDING (enabled False),
+        # but the device STAYS headless (record_only True) -- decoupled from the cap so the
+        # loop's stream-mode edge fires once instead of flapping the panel on every capped
+        # frame (#41 lag bug). A capped headless frame is a Tee no-op (skips panel, no record).
         clock["t"] += web.WEB_FRAME_INTERVAL_MS // 2
         srv._last_frame_req = clock["t"]
         srv.begin_frame()
-        assert rec.enabled is False and rec.record_only is False
+        assert rec.enabled is False and rec.record_only is True
     finally:
         srv.stop()
     # stop() clears both flags (a view toggled off mid-stream must resume the panel).
