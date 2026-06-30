@@ -570,6 +570,48 @@ class DeviceCanvas:
             s0 = (cam_y + row) * src_w + cam_x
             d[d0:d0 + dw] = s[s0:s0 + dw]
 
+    def blit_strip(self, layer, dst_x=0, dst_y=0):
+        # Copy ALL of `layer` (its full layer.w x layer.h RGB565 buffer) into the
+        # framebuffer with its top-left at (dst_x, dst_y), opaquely -- the positioned,
+        # partial-height sibling of blit_window_from (which window-copies a full-screen
+        # slice of a WIDER source). Used to stamp a cached top-bar strip each frame
+        # instead of re-rendering it (#43 chrome cache). Native via kc_gfx.blit565 with
+        # key=-1 (fully opaque) -- the same C kernel the sprite path uses, clamped to the
+        # framebuffer in C; else a memoryview row-copy fallback (mirrors the host index
+        # copy + the parity stub). Ignores camera/clip (it's chrome over a finished frame).
+        dst_x = int(dst_x)
+        dst_y = int(dst_y)
+        sw = layer.w
+        sh = layer.h
+        if self._gfx is not None:
+            self._gfx.blit565(self._buf, self.w, self.h, dst_x, dst_y,
+                              layer._buf, sw, sh, -1)
+            return
+        d = memoryview(self._buf).cast("H")
+        s = memoryview(layer._buf).cast("H")
+        dw = self.w
+        dh = self.h
+        if sw <= 0 or dw <= 0 or dh <= 0:
+            return
+        for row in range(sh):
+            ty = dst_y + row
+            if ty < 0 or ty >= dh:
+                continue
+            s0 = row * sw
+            cw = sw
+            sx0 = 0
+            tx0 = dst_x
+            if tx0 < 0:
+                sx0 = -tx0
+                cw += tx0
+                tx0 = 0
+            if tx0 + cw > dw:
+                cw = dw - tx0
+            if cw <= 0:
+                continue
+            d0 = ty * dw + tx0
+            d[d0:d0 + cw] = s[s0 + sx0:s0 + sx0 + cw]
+
 
 class _LayerComp:
     """Minimal compositor stand-in so DeviceCanvas can back a scroll layer (#54): a

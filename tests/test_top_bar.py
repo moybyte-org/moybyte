@@ -254,6 +254,114 @@ def test_launcher_bar_management_hidden_when_read_only(tmp_path):
     assert len(ws.launcher.items) == n0
 
 
+# -- cached running-cart top bar (#43): render once, blit each frame ---------
+
+def _bar_rows(canvas):
+    """The top-bar band of the GAME canvas as a flat list of palette indices (the
+    _STATUS_H rows the bar occupies)."""
+    from runtime import console as C
+    return list(canvas.buf[:canvas.w * C._STATUS_H])
+
+
+def _run_a_cart(tmp_path):
+    """A workstation with a cart open (screen == 'desktop'), one frame drawn."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.launcher.sel = 0
+    ws.open()
+    assert ws.screen == "desktop"
+    drv.frame(1 / 30)
+    return ws, drv
+
+
+def test_cached_cart_bar_is_pixel_identical_to_direct_render(tmp_path):
+    """The cached strip blitted onto the canvas must equal a DIRECT render of the same
+    bar state. Drive a running-cart frame (cached path), snapshot the bar band, then
+    render the bar straight onto a fresh game-sized canvas via the SAME _render_cart_bar
+    body and compare the band byte-for-byte."""
+    from runtime.canvas import Canvas
+    ws, drv = _run_a_cart(tmp_path)
+    cached = _bar_rows(ws.canvas)                 # what the cache+blit produced
+    # Direct render of the identical state onto a clean canvas.
+    direct = Canvas(ws.canvas.w, ws.canvas.h, ws.canvas.palette)
+    ws._render_cart_bar(direct, ws._cart_bar_key())
+    assert _bar_rows(direct) == cached
+    # And it's a REAL picture (icons + glyph + text), not a blank band.
+    assert len(set(cached)) > 2
+
+
+def test_cart_bar_reuses_cache_when_state_unchanged(tmp_path):
+    """A second running-cart frame with no state change must NOT re-render the bar -- it
+    blits the cached strip. Witness it by counting _render_cart_bar calls across frames."""
+    ws, drv = _run_a_cart(tmp_path)
+    calls = [0]
+    orig = ws._render_cart_bar
+
+    def counting(cv, key):
+        calls[0] += 1
+        return orig(cv, key)
+    ws._render_cart_bar = counting
+    # Several more frames at the same state -> the strip is already built + clean.
+    for _ in range(5):
+        drv.frame(1 / 30)
+    assert calls[0] == 0, "stale-but-clean bar should reuse the cache, not re-render"
+
+
+def test_cart_bar_invalidates_on_theme_change(tmp_path):
+    """A theme/IconSheet swap (set_icon_sheet bumps _bar_cache_gen) forces exactly one
+    bar re-render on the next frame, then the new strip is reused."""
+    ws, drv = _run_a_cart(tmp_path)
+    calls = [0]
+    orig = ws._render_cart_bar
+
+    def counting(cv, key):
+        calls[0] += 1
+        return orig(cv, key)
+    ws._render_cart_bar = counting
+    ws.set_icon_sheet(ws.icon_sheet)              # bumps _bar_cache_gen -> key changes
+    drv.frame(1 / 30)
+    assert calls[0] == 1, "a theme change must re-render the bar once"
+    for _ in range(3):
+        drv.frame(1 / 30)
+    assert calls[0] == 1, "after the re-render the new strip is reused"
+
+
+def test_cart_bar_invalidates_on_clock_change(tmp_path):
+    """When the formatted clock string changes the cached key differs, so the bar
+    re-renders. Force it by monkeypatching _clock_text (the only per-time input to the
+    key) and asserting the next frame rebuilds the strip."""
+    ws, drv = _run_a_cart(tmp_path)
+    calls = [0]
+    orig = ws._render_cart_bar
+
+    def counting(cv, key):
+        calls[0] += 1
+        return orig(cv, key)
+    ws._render_cart_bar = counting
+    drv.frame(1 / 30)
+    assert calls[0] == 0                          # clock unchanged -> reused
+    ws._clock_text = lambda: "99:99"              # the clock "ticked"
+    drv.frame(1 / 30)
+    assert calls[0] == 1, "a clock change must re-render the bar"
+
+
+def test_cart_bar_blit_strip_used_each_frame(tmp_path):
+    """Every running-cart frame stamps the cached strip via blit_strip (the per-frame
+    cost is one flat copy, not a re-render). Count blit_strip calls over several frames."""
+    ws, drv = _run_a_cart(tmp_path)
+    calls = [0]
+    orig = ws.canvas.blit_strip
+
+    def counting(layer, dx=0, dy=0):
+        calls[0] += 1
+        return orig(layer, dx, dy)
+    ws.canvas.blit_strip = counting
+    for _ in range(4):
+        drv.frame(1 / 30)
+    assert calls[0] == 4, "the bar should blit its cached strip once per frame"
+
+
 def test_icon_theme_versioning_reseeds_stale_keeps_current(tmp_path):
     """A saved icon theme older than _ICON_VERSION is re-seeded to the baked default at
     load (so shipped icon changes land on an already-themed device/desktop without a

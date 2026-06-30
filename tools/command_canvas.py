@@ -223,6 +223,35 @@ class CommandCanvas:
 
         _font.draw_scaled(block, s, x, y, fs)
 
+    # -- offscreen layers (#54 scroll engine + #43 cached top bar) -----------
+    # A layer is a SCRATCH buffer the console pre-renders into, then copies to the
+    # screen (blit_window_from for a scroll background, blit_strip for the cached top
+    # bar). A recording canvas has no pixels, so a layer is a REAL rasterizing host
+    # Canvas (same palette); the copy emits the layer's finished pixels as ONE
+    # self-contained command -- exactly like spr emits raw sprite pixels -- so the
+    # browser replay needs no sheet/layer lookup and stays pixel-identical to the host.
+
+    def new_layer(self, w, h):
+        from runtime.canvas import Canvas
+        return Canvas(int(w), int(h), self.palette)
+
+    def blit_window_from(self, layer, cam_x=0, cam_y=0):
+        # Copy the visible w x h window of `layer` (a wider pre-rendered Canvas) at
+        # (cam_x, cam_y). Resolve the window into a screen-sized scratch Canvas using the
+        # SAME rasterizer clamp logic, then emit it as a positioned opaque strip (the
+        # replayer rebuilds + blits it) -- so a future web scroll cart replays identically.
+        sub = self.new_layer(self.w, self.h)
+        sub.blit_window_from(layer, max(0, int(cam_x)), max(0, int(cam_y)))
+        self._cmds.append(["blit_strip", 0, 0, sub.w, sub.h, list(sub.buf)])
+
+    def blit_strip(self, layer, dst_x=0, dst_y=0):
+        # Copy ALL of `layer` (its full w x h) to (dst_x, dst_y), opaquely, as ONE
+        # self-contained command carrying the layer's index pixels -- the replayer
+        # rebuilds a Canvas from them and runs the SAME Canvas.blit_strip, so the web
+        # reproduces the cached top bar pixel-for-pixel.
+        self._cmds.append(["blit_strip", int(dst_x), int(dst_y),
+                          int(layer.w), int(layer.h), list(layer.buf)])
+
     # -- output (parity with Canvas; not used by the web path) ---------------
 
     def to_rgb888(self):
@@ -242,7 +271,7 @@ def replay_to_canvas(commands, canvas):
     minimal Image-like blittable from the raw pixels and feed it through Canvas.spr,
     so the rasterization path (transparency, scaling, clipping) is the very same code
     the original frame used."""
-    from runtime.canvas import Image
+    from runtime.canvas import Image, Canvas
 
     for cmd in commands:
         op = cmd[0]
@@ -267,6 +296,15 @@ def replay_to_canvas(commands, canvas):
             canvas.spr(img, _x, _y, scale, flip)
         elif op == "print":
             canvas.print(cmd[1], cmd[2], cmd[3], cmd[4])
+        elif op == "blit_strip":
+            # A positioned opaque blit of a finished layer (#54 scroll window / #43
+            # cached top bar): rebuild a minimal index-buffer Canvas from the carried
+            # pixels and run the SAME Canvas.blit_strip, so the copy rasterizes
+            # identically to the source frame.
+            dx, dy, lw, lh, pix = cmd[1:6]
+            layer = Canvas(lw, lh, canvas.palette)
+            layer.buf[:] = bytes(pix)
+            canvas.blit_strip(layer, dx, dy)
         # -- draw state (#11): apply in order so the replay tracks clip/camera/pal --
         elif op == "reset_state":
             canvas.reset_state()

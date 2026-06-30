@@ -388,6 +388,46 @@ class Canvas:
             s0 = (cam_y + row) * src_w + cam_x
             dst[d0:d0 + dw] = src[s0:s0 + dw]
 
+    def blit_strip(self, layer, dst_x=0, dst_y=0):
+        """Copy ALL of `layer` (its full layer.w x layer.h) into this canvas with its
+        top-left at (dst_x, dst_y), opaquely (no transparency / colorkey). The positioned,
+        partial-height sibling of blit_window_from: where blit_window_from window-copies a
+        full-screen slice of a WIDER source, blit_strip stamps a SMALLER source (e.g. a
+        cached W x 18px top-bar strip) at a fixed offset. Host copies palette indices; the
+        device (DeviceCanvas.blit_strip) copies RGB565 via the same kc_gfx.blit565 the
+        sprite path uses (key=-1 -> fully opaque). Out-of-bounds rows/cols are clamped to
+        the destination, exactly like the C kernel, so an over-tall/over-wide strip is
+        safe. Ignores camera/clip/pal (it's a chrome blit over a finished frame)."""
+        dst_x = int(dst_x)
+        dst_y = int(dst_y)
+        dst = self.buf
+        src = layer.buf
+        dw = self.w
+        dh = self.h
+        sw = layer.w
+        if sw <= 0 or dw <= 0 or dh <= 0:
+            return
+        sh = len(src) // sw
+        for row in range(sh):
+            ty = dst_y + row
+            if ty < 0 or ty >= dh:
+                continue
+            s0 = row * sw
+            # Clamp the source row's horizontal span to the destination.
+            cw = sw
+            sx0 = 0
+            tx0 = dst_x
+            if tx0 < 0:
+                sx0 = -tx0
+                cw += tx0
+                tx0 = 0
+            if tx0 + cw > dw:
+                cw = dw - tx0
+            if cw <= 0:
+                continue
+            d0 = ty * dw + tx0
+            dst[d0:d0 + cw] = src[s0 + sx0:s0 + sx0 + cw]
+
     # -- output --------------------------------------------------------------
 
     def to_rgb888(self):

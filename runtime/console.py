@@ -1736,6 +1736,16 @@ class Workstation:
         # alive (one cached blit per icon), the whole point of moving the bar to sprites.
         self.icon_sheet = None
         self._bar_img_cache = {}      # icon kind -> cached _SheetSprite (or None)
+        # Cached running-cart top bar (#43): the bar is ~static while a cart runs, so it
+        # is rendered ONCE into an offscreen _STATUS_H-tall strip and blitted each frame
+        # (one flat copy) instead of re-rendering ~9 sprites + glyph + text every frame
+        # (the ~6ms `chrome=` cost). `_cart_bar_strip` is the layer (lazily allocated on
+        # the first running-cart frame, reused across re-renders); `_cart_bar_key_cur` is
+        # the state key the strip currently holds (None = stale -> rebuild). `_bar_cache_gen`
+        # is bumped by the explicit invalidators (set_icon_sheet) so a theme swap repaints.
+        self._cart_bar_strip = None
+        self._cart_bar_key_cur = None
+        self._bar_cache_gen = 0
         # Themeable top bar (Stage 2): True while the PAINT editor is repainting the
         # SYSTEM icon sheet (Settings -> EDIT ICONS) rather than a cart's sprites.
         # It changes where SAVE writes (system_icons.kgfx, not the cart) and where
@@ -1906,6 +1916,7 @@ class Workstation:
         from the new theme. None reverts the bar to the _glyph fallback."""
         self.icon_sheet = sheet
         self._bar_img_cache = {}
+        self._bar_cache_gen += 1      # repaint the cached cart bar with the new theme (#43)
 
     def load_icon_sheet(self):
         """Build the top-bar IconSheet (Stage 1): use the saved system_icons.kgfx theme
@@ -5652,14 +5663,58 @@ class Workstation:
         """The running-cart half of the unified top bar (where == "desktop"). Drawn on
         the GAME canvas with the fixed 320x240 rects: a tool switcher on the left
         (HOME / EDIT|CODE / PAINT / MAP / BLOCKS) + the right cluster (clock + wifi /
-        batt / gear). Same icon vocabulary as the launcher bar so both read alike."""
+        batt / gear). Same icon vocabulary as the launcher bar so both read alike.
+
+        CACHED (#43): a running cart redraws every frame, but this bar is almost entirely
+        static -- the clock changes ~once/min, the icons/menu never mid-play -- so
+        re-rendering ~9 16x16 sprites + a glyph + text each frame was ~6ms of wasted draw
+        (the `chrome=` term in DRAWBRK). Instead the bar's pixels are rendered ONCE into an
+        offscreen _STATUS_H-tall strip (a new_layer, the #54 offscreen primitive) keyed by
+        the state that changes its picture, and each frame we just blit_strip the cached
+        strip onto the canvas (one flat copy, ~0.5ms). When the key changes (cart switch,
+        clock tick, theme edit, font/size change) the strip is re-rendered, then reused.
+        The strip is purely the DRAW; hit-testing still uses the independent _*_BTN rects,
+        so caching can't desync taps."""
         cv = self.canvas
+        key = self._cart_bar_key()
+        strip = self._cart_bar_strip
+        if strip is None or strip.w != cv.w or self._cart_bar_key_cur != key:
+            # (Re)build the cached strip. new_layer gives a same-type/-palette canvas the
+            # bar body draws into at the SAME coords (the bar lives at y in [0, _STATUS_H),
+            # which maps 1:1 onto the strip's rows), so the cached pixels are byte-identical
+            # to drawing straight onto cv. Reuse the buffer across re-renders when the size
+            # is unchanged; only allocate a fresh layer on first build / a resize.
+            if strip is None or strip.w != cv.w:
+                strip = cv.new_layer(cv.w, _STATUS_H)
+                self._cart_bar_strip = strip
+            self._render_cart_bar(strip, key)
+            self._cart_bar_key_cur = key
+        cv.blit_strip(strip, 0, 0)
+
+    def _cart_bar_key(self):
+        """The cache key for the running-cart top bar: every piece of state that changes
+        the bar's PIXELS. A different key forces a strip re-render; an unchanged key reuses
+        the cached strip. Includes the clock text (ticks ~once/min), whether the cart has
+        an edit schema (EDIT vs CODE icon), the icon theme identity + the glyph font scale
+        (a theme edit / resize must repaint), and a generation counter the explicit
+        invalidators bump (set_icon_sheet, etc.). wifi/batt are static placeholder art
+        today; if they gain live state, fold it in here."""
+        has_edit = bool(self.cart.get("edit")) if self.cart else False
+        return (self._clock_text(), has_edit, id(self.icon_sheet),
+                getattr(self.canvas, "font_scale", 1), self._bar_cache_gen)
+
+    def _render_cart_bar(self, cv, key):
+        """Render the running-cart bar's pixels onto `cv` (the offscreen strip, or any
+        canvas) at the fixed 320x240 bar coords. Factored out of _draw_top_bar_cart so the
+        SAME drawing serves both the cache build and the (test/fallback) direct path, which
+        is what makes the cached strip pixel-identical to a direct render. `key` carries the
+        already-computed has_edit (index 1) so the icon choice can't drift from the key."""
+        has_edit = key[1]
         cv.rect(0, 0, cv.w, _STATUS_H, NAMES["black"])
         cv.rect(0, _STATUS_H - 1, cv.w, 1, NAMES["dark_grey"])      # shelf edge line
         # Left cluster: the TIC-80 one-tap tool switcher. Carts with a Make-it-mine
         # schema open the cards menu (pencil = EDIT); the rest jump straight to code
         # (the < > glyph = CODE). cart may be None defensively (error panel, no cart).
-        has_edit = bool(self.cart.get("edit")) if self.cart else False
         # ≡ system-menu toggle (#52), leftmost. A _glyph bitmap (not a themeable
         # IconSheet slot) so it never goes blank on a device with an older saved theme.
         self._glyph("menu", _SYSMENU_BTN, NAMES["white"], cv)
