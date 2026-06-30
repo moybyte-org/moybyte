@@ -442,6 +442,43 @@ bad flash) still falls back to the rollback safety net above.
 > flash/reboot/rollback/download pass is still **TODO** — verify on a real T-Deck
 > before relying on it.
 
+## Web view — play the device in a browser (#41 / #22)
+
+The device can serve its **running console** to a phone/desktop browser on the same
+WiFi: open the device's IP and you SEE the live cart and can PLAY it (touch +
+on-screen joystick/A-B + WASD/arrows). It is the on-device counterpart of the host
+web console (`tools/web_console.py` + `tools/web_console.html`) and speaks the **same
+draw-command protocol**, so the same browser page renders device frames.
+
+**Why draw commands, not pixels:** WiFi here is ~72 KB/s, so the raw 320×240 RGB565
+framebuffer (153 KB/frame) is unplayable. Instead the device records the cart's
+per-frame draw calls (`cls`/`rect`/`spr`/`print`/…, a few KB) and the browser REPLAYS
+them on a `<canvas>` using the KID64 palette + the cart's spritesheet. The device
+keeps drawing to its own panel; the web view is an **additional** consumer.
+
+- **How to use:** join WiFi via the WiFi cart, then **Settings → WEB VIEW → ON**. The
+  served URL (`http://<device-ip>:8080/`) is shown under the row and printed to serial.
+- **Routes:** `GET /` (the page), `GET /assets` (palette + petme128 font + open cart
+  sheet/tilemap, fetched once + on cart change), `GET /frame` (the last frame's
+  recorded draw-command list), `POST /input` (browser events → `InputState`/`Pointer`).
+- **Cooperative, non-blocking:** the listening socket is non-blocking and the
+  single-threaded `run_desktop` loop services **at most one request per frame, BETWEEN
+  frames** — it never blocks the render loop. WiFi STA and the display SPI are separate
+  peripherals, so this does **not** touch the SD/panel bus rules; it only competes for
+  CPU in the loop, so per-frame server work is tiny.
+- **Zero cost when OFF (the default):** `ws.canvas` stays the raw `DeviceCanvas` until
+  the view is turned ON, when a recording `TeeCanvas` is swapped in (and the wallpaper /
+  running cart rebind to it). Even then it records only while a browser is polling.
+- Device code: `modules/kc_webserver.py` (recorder + Tee + non-blocking HTTP server +
+  the embedded page) and the `WebView` controller + loop hooks in `modules/kid_runtime.py`.
+
+> **NEEDS ON-DEVICE VERIFICATION.** The recorder + protocol + routing are host-tested
+> (`tests/test_kc_webserver.py` drives the same code), but the MicroPython socket
+> server, the **WiFi ↔ LCD-DMA RAM coexistence** (#38/#40), and the live throughput are
+> UNPROVEN on hardware here. Scrolling carts that use `make_layer`/`draw_layer` show the
+> composed frame **minus** the layer's static background in the web view (the layer
+> off-screen canvas is not teed) — a known limitation for the device-verification pass.
+
 ## Current limitations
 
 - This is a spike, not the production runtime.

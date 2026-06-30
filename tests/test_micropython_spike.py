@@ -147,6 +147,51 @@ def test_console_settings_has_firmware_update_screen():
     assert "def _activate_settings_action" in console
 
 
+def test_device_web_view_module_present_and_protocol_shaped():
+    # Device web view (#41/#22): a kc_webserver module records the cart's per-frame draw
+    # calls (a TeeCanvas over the real DeviceCanvas) and serves them to a browser over
+    # WiFi via the SAME draw-command protocol the host web console uses, so the same
+    # web_console.html renders device frames. We grep the frozen source (firmware tests
+    # don't execute MicroPython); the executable behaviour is in tests/test_kc_webserver.py.
+    web = (ROOT / "modules" / "kc_webserver.py").read_text(encoding="utf-8")
+    assert "class DrawRecorder" in web          # per-frame draw-command recorder
+    assert "class TeeCanvas" in web             # forwards to the panel canvas + records
+    assert "class WebServer" in web             # non-blocking, one request per poll()
+    assert "self.recorder.enabled" in web       # the gate -> zero cost when no browser
+    assert "setblocking(False)" in web          # NON-blocking listening socket
+    # The draw-command protocol routes (same as tools/web_console.py).
+    assert '"/assets"' in web and '"/frame"' in web and '"/input"' in web
+    assert "def assets_payload" in web and "def frame_payload" in web
+    assert "def apply_events" in web            # browser events -> InputState/Pointer
+
+
+def test_device_web_view_wired_into_run_desktop_cooperatively():
+    # The web view is serviced from run_desktop's single-threaded loop: a TeeCanvas
+    # swapped in as ws.canvas (panel still renders), begin/commit around the frame, and
+    # ONE poll() BETWEEN frames (never mid-flush). The Settings WEB VIEW row toggles it.
+    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    assert "import kc_webserver" in runtime
+    assert "class WebView" in runtime
+    assert "web = WebView(" in runtime
+    assert "ws.web_hook = web" in runtime
+    assert "web.begin_frame()" in runtime       # start a recording before the frame
+    assert "web.commit_frame()" in runtime      # publish the frame's commands
+    assert "web.poll()" in runtime              # service one request between frames
+    # The recorder must record draw commands, never stream the raw framebuffer.
+    assert "DrawRecorder" in runtime
+
+
+def test_console_settings_has_web_view_toggle():
+    # Host == device: the shared console grows a Settings WEB VIEW ON/OFF row (with the
+    # served URL) ONLY when a web_hook is injected -- the device does, the host doesn't
+    # (it has tools/web_console.py), so the row never appears on the host.
+    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    assert "self.web_hook = None" in console
+    assert '"WEB VIEW"' in console
+    assert "def _toggle_web_view" in console
+    assert 'kind == "web"' in console
+
+
 def test_ota_online_download_streams_to_sd_with_checksum():
     # OTA Phase 3 (#53): a WiFi download fetches a manifest, streams the .bin straight
     # to SD (never buffering the whole image), and verifies sha256 before installing.
