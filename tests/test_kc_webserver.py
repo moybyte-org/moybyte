@@ -1002,8 +1002,8 @@ def test_perf_snapshot_shape_and_push_count():
     rec = web.DrawRecorder(WIDTH, HEIGHT)
     server = _serveable(rec)
     snap = server._perf_snapshot()
-    assert set(snap.keys()) == {"heap", "pf"}
-    assert isinstance(snap["heap"], int) and isinstance(snap["pf"], int)
+    assert set(snap.keys()) == {"heap", "pf", "js", "tx"}
+    assert all(isinstance(snap[k], int) for k in ("heap", "pf", "js", "tx"))
     assert snap["pf"] == 0
     server._frames_pushed += 2                       # _push_frame bumps this per sent frame
     assert server._perf_snapshot()["pf"] == 2
