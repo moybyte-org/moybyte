@@ -62,10 +62,12 @@ WIDTH, HEIGHT = 320, 240
 # ---------------------------------------------------------------------------
 
 
-def replay_diet(commands, canvas, assets=None):
+def replay_diet(commands, canvas, assets=None, layers=None):
     atlas = {}                                  # index -> Image (browser's ATL)
     sheet_pix = sheet_cols = sheet_tile = sheet_w = None
     tm = None                                   # {"w","h","cells"} (browser's TM)
+    if layers is None:
+        layers = {}                             # id -> rasterized Canvas (browser's LAY)
     if assets is not None:
         sh = assets.get("sheet")
         if sh is not None:
@@ -109,11 +111,40 @@ def replay_diet(commands, canvas, assets=None):
             idx, w, h, t, pix = cmd[1:6]
             atlas[idx] = Image(w, h, list(pix), transparent=t)
         elif op == "spr":
-            idx, x, y, scale = cmd[1:5]
-            flip = cmd[5] if len(cmd) > 5 else 0
-            im = atlas.get(idx)
-            if im is not None:
-                canvas.spr(im, x, y, scale, flip)
+            # TWO shapes: the main stream's atlas form ["spr", idx, x, y, scale, flip]
+            # and a LAYER stream's self-contained full-pixel form
+            # ["spr", x, y, scale, w, h, t, pix, flip] (a pix list at cmd[7]). Branch on
+            # the pix list so a layer's icon sprites replay without the atlas (#54/#43).
+            if len(cmd) > 7 and isinstance(cmd[7], (list, tuple)):
+                _x, _y, scale, w, h, t, pix = cmd[1:8]
+                flip = cmd[8] if len(cmd) > 8 else 0
+                canvas.spr(Image(w, h, list(pix), transparent=t), _x, _y, scale, flip)
+            else:
+                idx, x, y, scale = cmd[1:5]
+                flip = cmd[5] if len(cmd) > 5 else 0
+                im = atlas.get(idx)
+                if im is not None:
+                    canvas.spr(im, x, y, scale, flip)
+        elif op == "deflayer":
+            # Define / redraw an off-screen layer: rebuild its index Canvas by REPLAYING
+            # its recorded stream into it (the same draw verbs), pixel-identical to the
+            # device/host layer pre-render. Cached by id for later blit_layer ops (#54/#43).
+            lid, lw, lh, lcmds = cmd[1:5]
+            layer = Canvas(int(lw), int(lh), canvas.palette)
+            replay_diet(lcmds, layer, assets, layers)
+            layers[lid] = layer
+        elif op == "blit_layer":
+            # Reference an off-screen layer: a windowed blit (draw_layer / scroll, 4 fields)
+            # or a full blit (blit_strip / cached top bar, a trailing "full"). Runs the SAME
+            # Canvas.blit_window_from / blit_strip -- opaque + full-screen, so the windowed
+            # blit also clears last frame (fixing the scroll cart's trails).
+            lid = cmd[1]
+            layer = layers.get(lid)
+            if layer is not None:
+                if len(cmd) > 4 and cmd[4] == "full":
+                    canvas.blit_strip(layer, cmd[2], cmd[3])
+                else:
+                    canvas.blit_window_from(layer, cmd[2], cmd[3])
         elif op == "settiles":
             tm = {"w": cmd[1], "h": cmd[2], "cells": list(cmd[3])}
         elif op == "map":
@@ -566,6 +597,182 @@ def test_tee_over_real_canvas_is_pixel_identical_to_its_stream():
     # recorder frame -- so the replayer must apply the serve-time-delivered defsprs.
     replay_diet(_served(rec, server), replayed)
     assert bytes(raster.buf) == bytes(replayed.buf), "the served stream must reproduce the rasterized panel"
+
+
+# ---------------------------------------------------------------------------
+# Off-screen LAYERS (#54 scroll + #43 cached top bar): ONE recorded-layer mechanism.
+# The Tee mints a RecordingLayer (a real device-layer Canvas for the panel + a recorded
+# indexed command stream); draw_layer/blit_strip record a tiny blit_layer; the WebServer
+# ships the layer's stream ONCE as a deflayer (serve-time, like defspr). The cross-check
+# drives a layer through the device Tee over a rasterizing Canvas, replays the SERVED
+# stream, and asserts PIXEL-IDENTICAL -- proving the scroll layer + bar reproduce the
+# panel. This is the device half of the Sky Run black-background + trails fix.
+# ---------------------------------------------------------------------------
+
+
+def test_scroll_layer_draw_layer_replays_pixel_identical_at_offset():
+    """A wide scroll layer pre-rendered ONCE, then window-copied at a camera offset
+    (draw_layer -> blit_window_from), replays byte-identically -- and its stream ships as
+    ONE deflayer + a tiny windowed blit_layer per frame (no RGB565 pixels on the wire)."""
+    raster = Canvas(WIDTH, HEIGHT)
+    rec = web.DrawRecorder(WIDTH, HEIGHT)
+    tee = web.TeeCanvas(raster, rec)
+    server = _serveable(rec)
+    rec.enabled = True
+    # Build a layer WIDER than the screen (the #54 scroll world) -- primitives only,
+    # exactly like Sky Run's _build_world.
+    lay = tee.new_layer(WIDTH * 2, HEIGHT)
+    lay.cls(1)
+    lay.rect(0, HEIGHT - 40, WIDTH * 2, 40, 3)
+    for gx in range(0, WIDTH * 2, 60):
+        lay.circ(gx + 10, 40, 8, 7)
+        lay.rect(gx + 30, HEIGHT - 60, 6, 20, 4)
+    # Frame: clear, window-copy the visible slice at a camera offset, actor on top.
+    rec.begin()
+    tee.cls(0)
+    tee.blit_window_from(lay, 137, 0)
+    tee.rect(150, 100, 12, 22, 8)
+    rec.commit()
+    served = _served(rec, server)
+    assert [c[0] for c in served].count("deflayer") == 1, "the layer stream ships ONCE"
+    assert [c[0] for c in served].count("blit_layer") == 1
+    bl = next(c for c in served if c[0] == "blit_layer")
+    assert bl == ["blit_layer", lay.id, 137, 0], "a windowed blit_layer (no 'full')"
+    replayed = Canvas(WIDTH, HEIGHT)
+    replay_diet(served, replayed)
+    assert bytes(raster.buf) == bytes(replayed.buf), "scroll draw_layer replay must match the panel"
+    assert len(set(replayed.buf)) > 1, "the scroll frame must not replay to a flat (black) screen"
+
+
+def test_cached_top_bar_blit_strip_replays_pixel_identical():
+    """The cached top-bar strip (blit_strip) -- which on the device blits icon SPRITES into
+    the layer -- uses the SAME mechanism: rendered once, then full-copied. The served stream
+    carries ONE deflayer + a 'full' blit_layer; the layer's spr is self-contained (full-pixel
+    in the layer stream), so the bar replays exactly with no atlas coupling."""
+    raster = Canvas(WIDTH, HEIGHT)
+    rec = web.DrawRecorder(WIDTH, HEIGHT)
+    tee = web.TeeCanvas(raster, rec)
+    server = _serveable(rec)
+    rec.enabled = True
+    strip = tee.new_layer(WIDTH, 18)
+    strip.rect(0, 0, WIDTH, 18, 0)
+    strip.rect(0, 17, WIDTH, 1, 5)
+    strip.print("12:34", 280, 3, 6)
+    icon = Image(14, 14, [7] * (14 * 14), transparent=-1)   # an icon-like sprite into the bar
+    strip.spr(icon, 8, 2)
+    # Frame: content under the bar, then stamp the cached bar.
+    rec.begin()
+    tee.cls(2)
+    tee.rect(40, 60, 100, 80, 9)
+    tee.blit_strip(strip, 0, 0)
+    rec.commit()
+    served = _served(rec, server)
+    assert [c[0] for c in served].count("deflayer") == 1
+    bl = next(c for c in served if c[0] == "blit_layer")
+    assert bl == ["blit_layer", strip.id, 0, 0, "full"], "a full blit_layer (the cached bar)"
+    # The deflayer carries the icon spr as a SELF-CONTAINED full-pixel command (a pix list).
+    dl = next(c for c in served if c[0] == "deflayer")
+    spr_cmds = [k for k in dl[4] if k[0] == "spr"]
+    assert spr_cmds and isinstance(spr_cmds[0][7], list), "layer spr is self-contained (full-pixel)"
+    replayed = Canvas(WIDTH, HEIGHT)
+    replay_diet(served, replayed)
+    assert bytes(raster.buf) == bytes(replayed.buf), "cached-bar blit_strip replay must match the panel"
+
+
+def test_layer_ships_once_then_reference_only_across_served_frames():
+    """A layer pre-rendered once ships its deflayer on the FIRST served frame referencing
+    it, then every later served frame is a tiny blit_layer (the ship-once WiFi win). The
+    `served_layers` tracking lives on the server (the browser keeps its LAY cache), so the
+    dedup is across SERVED frames -- robust to dropped frames, like the defspr path."""
+    raster = Canvas(WIDTH, HEIGHT)
+    rec = web.DrawRecorder(WIDTH, HEIGHT)
+    tee = web.TeeCanvas(raster, rec)
+    server = _serveable(rec)
+    rec.enabled = True
+    lay = tee.new_layer(WIDTH * 2, HEIGHT)
+    lay.cls(4)
+    lay.rect(0, 100, WIDTH * 2, 40, 8)
+    layers = {}                                  # the persistent browser-side LAY cache
+    # Frame 1: deflayer + blit_layer.
+    rec.begin(); tee.cls(0); tee.blit_window_from(lay, 0, 0); rec.commit()
+    f1 = _served(rec, server)
+    assert [c[0] for c in f1].count("deflayer") == 1
+    r1 = Canvas(WIDTH, HEIGHT); replay_diet(f1, r1, layers=layers)
+    assert bytes(r1.buf) == bytes(raster.buf)
+    # Frame 2: same layer, no redraw -> NO deflayer (already shipped), just blit_layer.
+    rec.begin(); tee.cls(0); tee.blit_window_from(lay, 64, 0); rec.commit()
+    f2 = _served(rec, server)
+    assert not any(c[0] == "deflayer" for c in f2), "a shipped layer is not re-sent"
+    r2 = Canvas(WIDTH, HEIGHT); replay_diet(f2, r2, layers=layers)   # resolves vs cached LAY
+    assert bytes(r2.buf) == bytes(raster.buf)
+
+
+def test_layer_reships_deflayer_on_redraw():
+    """When a layer is REDRAWN (the cached bar repainted on a clock tick / theme change),
+    its gen bumps and the next SERVED frame re-ships the deflayer with the fresh stream."""
+    raster = Canvas(WIDTH, HEIGHT)
+    rec = web.DrawRecorder(WIDTH, HEIGHT)
+    tee = web.TeeCanvas(raster, rec)
+    server = _serveable(rec)
+    rec.enabled = True
+    strip = tee.new_layer(WIDTH, 18)
+    strip.rect(0, 0, WIDTH, 18, 0)
+    strip.print("12:34", 280, 3, 6)
+    rec.begin(); tee.cls(0); tee.blit_strip(strip, 0, 0); rec.commit()
+    f1 = _served(rec, server)
+    assert "12:34" in str(next(c for c in f1 if c[0] == "deflayer"))
+    # No redraw -> no deflayer next frame.
+    rec.begin(); tee.cls(0); tee.blit_strip(strip, 0, 0); rec.commit()
+    assert not any(c[0] == "deflayer" for c in _served(rec, server))
+    # REDRAW the strip (a new clock minute) -> gen bumps -> re-ship the fresh stream.
+    strip.rect(0, 0, WIDTH, 18, 0)
+    strip.print("12:35", 280, 3, 6)
+    rec.begin(); tee.cls(0); tee.blit_strip(strip, 0, 0); rec.commit()
+    f3 = _served(rec, server)
+    dl = next((c for c in f3 if c[0] == "deflayer"), None)
+    assert dl is not None and "12:35" in str(dl), "a redrawn layer re-ships its fresh stream"
+
+
+def test_layer_served_set_resets_on_assets():
+    """A page load / cart change clears the browser's LAY cache; the server mirrors that
+    with reset_served(), so the next served frame re-ships every referenced layer's
+    deflayer (a reconnecting browser must not be left with an empty layer cache)."""
+    raster = Canvas(WIDTH, HEIGHT)
+    rec = web.DrawRecorder(WIDTH, HEIGHT)
+    tee = web.TeeCanvas(raster, rec)
+    server = _serveable(rec)
+    rec.enabled = True
+    lay = tee.new_layer(WIDTH * 2, HEIGHT)
+    lay.cls(2)
+    rec.begin(); tee.cls(0); tee.blit_window_from(lay, 0, 0); rec.commit()
+    assert any(c[0] == "deflayer" for c in _served(rec, server))     # first delivery
+    rec.begin(); tee.cls(0); tee.blit_window_from(lay, 0, 0); rec.commit()
+    assert not any(c[0] == "deflayer" for c in _served(rec, server))  # already shipped
+    server.reset_served()                                            # /assets re-served
+    rec.begin(); tee.cls(0); tee.blit_window_from(lay, 0, 0); rec.commit()
+    assert any(c[0] == "deflayer" for c in _served(rec, server)), "after /assets the deflayer re-ships"
+
+
+def test_layer_dropped_on_reset_atlas_reships_via_gen():
+    """reset_atlas() (a cart change) drops the layer registry so a new cart's layer starts
+    at id 0; it bumps atlas_gen, which the server uses to drop its served-layers set, so the
+    new cart's layer re-ships its deflayer (no collision with the old cart's stale id)."""
+    raster = Canvas(WIDTH, HEIGHT)
+    rec = web.DrawRecorder(WIDTH, HEIGHT)
+    tee = web.TeeCanvas(raster, rec)
+    server = _serveable(rec)
+    rec.enabled = True
+    lay = tee.new_layer(WIDTH, 18)
+    lay.cls(3)
+    rec.begin(); tee.cls(0); tee.blit_strip(lay, 0, 0); rec.commit()
+    assert any(c[0] == "deflayer" for c in _served(rec, server))
+    rec.reset_atlas()                                # cart change drops layers + bumps gen
+    assert rec._layers == []
+    lay2 = tee.new_layer(WIDTH, 18)                  # the new cart's layer -> id 0 again
+    assert lay2.id == 0
+    lay2.cls(5)
+    rec.begin(); tee.cls(0); tee.blit_strip(lay2, 0, 0); rec.commit()
+    assert any(c[0] == "deflayer" for c in _served(rec, server)), "a new cart's layer re-ships"
 
 
 def test_map_replays_pixel_identical_to_panel_via_cached_assets():

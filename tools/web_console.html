@@ -322,6 +322,74 @@
     }
   }
 
+  // ---- off-screen layers (#54 scroll + #43 cached top bar): ONE mechanism --------
+  // A deflayer (re)builds an off-screen index canvas by REPLAYING the layer's recorded
+  // command stream into it (reusing the SAME replay() routine -- pixel-identical to the
+  // main canvas); a blit_layer copies a window (draw_layer / scroll) or the full layer
+  // (blit_strip / cached top bar) into the main idx buffer. The layer's stream ships
+  // ONCE per session (deflayer rides only the frame its gen changed); LAYERS keeps the
+  // built off-screen buffer by id for later blit_layers.
+  var LAYERS = {};            // id -> {w, h, buf:Uint8Array}
+
+  function replayLayer(id, lw, lh, cmds) {
+    // Build the layer's off-screen index buffer by replaying its stream against it.
+    // Swap the shared draw target (idx/W/H + the camera/clip/pal/palt draw state) to
+    // the layer for the duration, then restore -- so put()/fillRect()/spr()/drawText()
+    // draw into the layer with the SAME code, no duplicated rasterizer.
+    var sIdx = idx, sW = W, sH = H, sCamX = camX, sCamY = camY,
+        sX0 = clipX0, sY0 = clipY0, sX1 = clipX1, sY1 = clipY1, sPm = palMap, sPt = palT;
+    var buf = new Uint8Array(lw * lh);
+    idx = buf; W = lw; H = lh;
+    resetState();                       // a fresh layer surface starts at default state
+    replay(cmds);
+    idx = sIdx; W = sW; H = sH; camX = sCamX; camY = sCamY;
+    clipX0 = sX0; clipY0 = sY0; clipX1 = sX1; clipY1 = sY1; palMap = sPm; palT = sPt;
+    LAYERS[id] = { w: lw, h: lh, buf: buf };
+  }
+
+  // Window-copy the W x H screen slice of a layer at (camX,camY) into idx, opaquely --
+  // mirrors runtime/canvas.py Canvas.blit_window_from (clamped to the source bounds).
+  // Opaque + full-screen, so it also clears last frame (fixes the scroll cart's trails).
+  function blitLayerWindow(L, cx, cy) {
+    cx = cx < 0 ? 0 : cx | 0; cy = cy < 0 ? 0 : cy | 0;
+    var dw = W, dh = H, sw = L.w, src = L.buf;
+    if (sw <= 0 || dw <= 0 || dh <= 0) return;
+    if (cx + dw > sw) dw = sw - cx;
+    if (dw <= 0) return;
+    var srcRows = (src.length / sw) | 0;
+    if (cy + dh > srcRows) dh = srcRows - cy;
+    if (dh <= 0) return;
+    for (var row = 0; row < dh; row++) {
+      var d0 = row * W, s0 = (cy + row) * sw + cx;
+      for (var x = 0; x < dw; x++) idx[d0 + x] = src[s0 + x];
+    }
+  }
+
+  // Full-copy the whole layer at (dstX,dstY) into idx, opaquely (clamped per row/col) --
+  // mirrors Canvas.blit_strip (the cached top bar). Ignores camera/clip (chrome blit).
+  function blitLayerFull(L, dstX, dstY) {
+    dstX |= 0; dstY |= 0;
+    var dw = W, dh = H, sw = L.w, sh = L.h, src = L.buf;
+    if (sw <= 0 || dw <= 0 || dh <= 0) return;
+    for (var row = 0; row < sh; row++) {
+      var ty = dstY + row;
+      if (ty < 0 || ty >= dh) continue;
+      var cw = sw, sx0 = 0, tx0 = dstX, s0 = row * sw;
+      if (tx0 < 0) { sx0 = -tx0; cw += tx0; tx0 = 0; }
+      if (tx0 + cw > dw) cw = dw - tx0;
+      if (cw <= 0) continue;
+      var d0 = ty * W + tx0;
+      for (var x = 0; x < cw; x++) idx[d0 + x] = src[s0 + sx0 + x];
+    }
+  }
+
+  function blitLayer(cmd) {
+    var L = LAYERS[cmd[1]];
+    if (!L) return;                     // a blit before its deflayer arrived -> no-op
+    if (cmd.length > 4 && cmd[4] === "full") blitLayerFull(L, cmd[2], cmd[3]);
+    else blitLayerWindow(L, cmd[2], cmd[3]);
+  }
+
   function replay(cmds) {
     for (var i = 0; i < cmds.length; i++) {
       var cmd = cmds[i], op = cmd[0];
@@ -335,6 +403,9 @@
         case "circb": circb(cmd[1], cmd[2], cmd[3], cmd[4]); break;
         case "spr":   spr(cmd[1], cmd[2], cmd[3], cmd[4], cmd[5], cmd[6], cmd[7], cmd[8] || 0); break;
         case "print": drawText(cmd[1], cmd[2], cmd[3], cmd[4]); break;
+        // Off-screen layers (#54 scroll + #43 cached bar): define once, reference per frame.
+        case "deflayer":   replayLayer(cmd[1], cmd[2], cmd[3], cmd[4]); break;
+        case "blit_layer": blitLayer(cmd); break;
         // Draw state (#11): apply in order so the browser tracks clip/camera/pal/palt.
         case "reset_state": resetState(); break;
         case "camera": camX = cmd[1] | 0; camY = cmd[2] | 0; break;

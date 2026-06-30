@@ -258,8 +258,13 @@ class WebConsole:
 
     def assets(self):
         """The static render assets the browser needs: palette + font + the open
-        cart's sheet/tilemap. Re-fetched by the client when the cart changes."""
+        cart's sheet/tilemap. Re-fetched by the client when the cart changes.
+
+        A page load / cart change clears the browser's off-screen-layer cache, so forget
+        which layer streams we've shipped -- the next /frame re-ships every referenced
+        layer's deflayer (the layer twin of refetching the sprite sheet, #54/#43)."""
         with self._lock:
+            self.canvas.reset_served_layers()
             sheet = sheet_json(getattr(self.ws, "sheet", None))
             tilemap = tilemap_json(getattr(self.ws, "tilemap", None))
             cart = self._cart_title()

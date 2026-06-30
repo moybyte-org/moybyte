@@ -183,6 +183,18 @@ def test_device_web_view_module_present_and_protocol_shaped():
     # path + a 30fps web cap.
     assert "record_only" in web and "def stream_mode" in web
     assert "WEB_FPS_CAP = 30" in web
+    # OFF-SCREEN LAYERS (#54 scroll + #43 cached top bar): ONE recorded-layer mechanism.
+    # new_layer() mints a RecordingLayer (real device layer + recorded indexed stream);
+    # draw_layer/blit_strip record a tiny blit_layer; the WebServer ships the layer's stream
+    # ONCE as a deflayer (serve-time, same pattern as defspr) via deflayer_cmd, tracked by a
+    # served-layers set that resets on /assets + atlas_gen. The browser replays it into an
+    # off-screen index buffer. This fixes a scroll cart's web view (black bg + actor trails).
+    assert "class RecordingLayer" in web        # the recorded off-screen layer
+    assert "class _LayerRecorder" in web        # its indexed command stream
+    assert "def deflayer_cmd" in web            # ship the layer's stream once (serve-time)
+    assert '"deflayer"' in web and '"blit_layer"' in web   # define-once + reference-per-frame
+    assert "def new_layer" in web and "def blit_window_from" in web  # the Tee tees layers now
+    assert "_served_layers" in web              # served-once tracking, gen lock-step
 
 
 def test_device_web_view_wired_into_run_desktop_cooperatively():
