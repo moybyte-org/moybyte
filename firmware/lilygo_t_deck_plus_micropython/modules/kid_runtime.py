@@ -1898,6 +1898,12 @@ class WebView:
         # cart changes the atlas must reset (a new cart's Images mustn't collide with stale
         # id()-keyed indices), mirroring the browser refetching /assets + clearing caches.
         self._atlas_cart = None
+        # STREAM MODE (#41 30fps lever): True while the device is headless for a browser
+        # that's actively playing (skip the panel rasterize + flush; the cart still runs
+        # logic + records cheap commands). Tracked here so begin_frame can detect the
+        # enter/exit EDGE: on enter, paint a one-time "playing in browser" notice + flush
+        # it; on exit, force a full redraw + re-light so the device panel resumes cleanly.
+        self._streaming = False
         try:
             import kc_webserver
             self._web = kc_webserver
@@ -2014,6 +2020,10 @@ class WebView:
         self.enabled = False
         if self._rec is not None:
             self._rec.enabled = False
+            self._rec.record_only = False
+        # If we were mid-stream when the view was turned off, resume the panel cleanly
+        # (clears comp.skip_flush, forces a redraw, re-lights) -- no-op if not streaming.
+        self._apply_stream_mode(False)
         self._unbind()                       # swap the raw canvas back (zero overhead again)
         print("KidCode web view OFF")
         _diag_note("web", "stopped")
@@ -2024,6 +2034,11 @@ class WebView:
             return
         was = self._rec.enabled
         self._server.begin_frame()
+        # STREAM MODE edge (#41): the server set recorder.record_only for this frame
+        # (True only when a browser is live + this frame is recorded). Drive the panel:
+        # skip the flush this frame while streaming, and handle the enter/exit transition
+        # so a glance at the device isn't a confusing frozen screen.
+        self._apply_stream_mode(self._rec.record_only)
         if not self._rec.enabled:
             return
         # Reset the recorder's sprite atlas when the open cart changes: a new cart's tile
@@ -2043,6 +2058,65 @@ class WebView:
                 self._ws.mark_dirty()
             except Exception:  # noqa: BLE001
                 pass
+
+    def _comp(self):
+        """The device compositor (owns the panel flush). None on a host/no-comp build."""
+        return getattr(self._ws, "comp", None)
+
+    def _apply_stream_mode(self, streaming):
+        """Drive the panel for STREAM MODE this frame (#41): set comp.skip_flush so the
+        flush inside ws.frame() is a no-op while headless, and handle the enter/exit EDGE.
+        Idempotent + fully guarded -- a transition hiccup must never crash the loop."""
+        comp = self._comp()
+        if comp is not None:
+            try:
+                comp.skip_flush = streaming
+            except Exception:  # noqa: BLE001
+                pass
+        if streaming == self._streaming:
+            return                               # no edge this frame
+        self._streaming = streaming
+        if streaming:
+            self._enter_stream()
+        else:
+            self._exit_stream()
+
+    def _enter_stream(self):
+        """ENTER stream mode: the device goes headless (the panel will freeze on whatever
+        it last showed). Paint a one-time notice + flush it ONCE so a glance at the device
+        reads 'playing in browser', not a confusing frozen frame. The notice is drawn
+        straight on the REAL canvas (not the Tee) and flushed with skip_flush forced off,
+        so it's the last thing the panel shows until the browser disconnects."""
+        try:
+            comp = self._comp()
+            cv = self._canvas
+            cv.cls(NAMES["dark_blue"])
+            cv.rect(0, 104, cv.w, 36, NAMES["indigo"])
+            cv.print("WEB VIEW", 96, 96, NAMES["yellow"], 2)
+            cv.print("playing in browser", 70, 124, NAMES["white"], 1)
+            if comp is not None:
+                save = getattr(comp, "skip_flush", False)
+                comp.skip_flush = False          # force the notice out, once
+                comp.flush()
+                comp.skip_flush = save
+        except Exception as exc:  # noqa: BLE001 -- the notice is cosmetic; never crash
+            print("KidCode web: stream notice failed:", exc)
+        _diag_note("web", "stream mode ON (device headless)")
+
+    def _exit_stream(self):
+        """EXIT stream mode: the browser disconnected, so resume the device panel cleanly.
+        skip_flush is already cleared by _apply_stream_mode; force a full redraw (the cart/
+        UI rasterizes again next frame) and re-light the backlight in case it was off."""
+        try:
+            self._ws.mark_dirty()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            import tdeck_display
+            tdeck_display.set_backlight(True)
+        except Exception:  # noqa: BLE001 -- host / display-less: ignore
+            pass
+        _diag_note("web", "stream mode OFF (panel resumed)")
 
     def commit_frame(self):
         if self._server is not None:
