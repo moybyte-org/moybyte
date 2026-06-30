@@ -1745,6 +1745,8 @@ class Workstation:
         # is bumped by the explicit invalidators (set_icon_sheet) so a theme swap repaints.
         self._cart_bar_strip = None
         self._cart_bar_key_cur = None
+        self._cart_bar_canvas = None   # the canvas the strip was built on; a swap (web view
+                                       # binds a TeeCanvas) forces a rebuild on the new canvas
         self._bar_cache_gen = 0
         # Themeable top bar (Stage 2): True while the PAINT editor is repainting the
         # SYSTEM icon sheet (Settings -> EDIT ICONS) rather than a cart's sprites.
@@ -5706,15 +5708,23 @@ class Workstation:
         cv = self.canvas
         key = self._cart_bar_key()
         strip = self._cart_bar_strip
-        if strip is None or strip.w != cv.w or self._cart_bar_key_cur != key:
+        # The active canvas can SWAP at runtime (the device web view binds a recording
+        # TeeCanvas in place of the raw DeviceCanvas, #41). A strip allocated on the OLD
+        # canvas is the wrong layer type for the new one -- a raw DeviceCanvas strip blitted
+        # through the Tee has no RecordingLayer hooks ('_end_batch' AttributeError), and it
+        # wouldn't be recorded for the browser anyway. So rebuild the layer when the canvas
+        # identity changes, not just on a resize.
+        canvas_changed = self._cart_bar_canvas is not cv
+        if strip is None or strip.w != cv.w or canvas_changed or self._cart_bar_key_cur != key:
             # (Re)build the cached strip. new_layer gives a same-type/-palette canvas the
             # bar body draws into at the SAME coords (the bar lives at y in [0, _STATUS_H),
             # which maps 1:1 onto the strip's rows), so the cached pixels are byte-identical
             # to drawing straight onto cv. Reuse the buffer across re-renders when the size
-            # is unchanged; only allocate a fresh layer on first build / a resize.
-            if strip is None or strip.w != cv.w:
+            # is unchanged; allocate a fresh layer on first build / a resize / a canvas swap.
+            if strip is None or strip.w != cv.w or canvas_changed:
                 strip = cv.new_layer(cv.w, _STATUS_H)
                 self._cart_bar_strip = strip
+                self._cart_bar_canvas = cv
             self._render_cart_bar(strip, key)
             self._cart_bar_key_cur = key
         cv.blit_strip(strip, 0, 0)

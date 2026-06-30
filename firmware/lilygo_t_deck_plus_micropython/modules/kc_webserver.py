@@ -707,20 +707,30 @@ class TeeCanvas:
         real = self._c.new_layer(w, h)
         return RecordingLayer(real, self._r)
 
+    # A layer passed here is normally a RecordingLayer (minted by new_layer above). But a
+    # layer built on the RAW DeviceCanvas BEFORE the web view bound this Tee -- e.g. the
+    # console's cached top-bar strip carried across the canvas swap -- is a plain DeviceCanvas
+    # with no RecordingLayer hooks. Tolerate it (blit it straight to the panel, skip recording
+    # so the browser just misses it for the one frame until it's rebuilt as a RecordingLayer)
+    # instead of crashing the frame on a missing `_end_batch`/`_c`.
     def blit_window_from(self, layer, cam_x=0, cam_y=0):
         cam_x = int(cam_x)
         cam_y = int(cam_y)
-        layer._end_batch()                       # the redraw (if any) is done
+        rl = isinstance(layer, RecordingLayer)
+        if rl:
+            layer._end_batch()                   # the redraw (if any) is done
         if not self._r.record_only:
-            self._c.blit_window_from(layer._c, cam_x, cam_y)
-        if self._r.enabled:
+            self._c.blit_window_from(layer._c if rl else layer, cam_x, cam_y)
+        if self._r.enabled and rl:
             self._r.blit_layer_window(layer, cam_x, cam_y)
 
     def blit_strip(self, layer, dst_x=0, dst_y=0):
-        layer._end_batch()
+        rl = isinstance(layer, RecordingLayer)
+        if rl:
+            layer._end_batch()
         if not self._r.record_only:
-            self._c.blit_strip(layer._c, dst_x, dst_y)
-        if self._r.enabled:
+            self._c.blit_strip(layer._c if rl else layer, dst_x, dst_y)
+        if self._r.enabled and rl:
             self._r.blit_layer_full(layer, dst_x, dst_y)
 
     # -- draw state ----------------------------------------------------------

@@ -819,6 +819,28 @@ def test_cached_bar_strip_reused_across_cart_change_self_heals_id_collision():
     assert bytes(replayed.buf) == bytes(raster.buf), "no collision: bar=bar, world=world"
 
 
+def test_tee_tolerates_plain_non_recording_layer():
+    """A layer built on the RAW canvas BEFORE the web view bound this Tee -- e.g. the console's
+    cached top-bar strip carried across the canvas swap -- is a plain canvas, NOT a
+    RecordingLayer. The Tee must blit it to the panel and skip recording, not crash on a
+    missing _end_batch/_c (the "'DeviceCanvas' object has no attribute '_end_batch'" frame
+    error seen on hardware, which hit EVERY cart since the bar is drawn for all of them)."""
+    raster = Canvas(WIDTH, HEIGHT)
+    rec = web.DrawRecorder(WIDTH, HEIGHT)
+    tee = web.TeeCanvas(raster, rec)
+    rec.enabled = True
+    plain = Canvas(WIDTH, 18)                 # a plain layer (NOT a RecordingLayer)
+    plain.rect(0, 0, WIDTH, 18, 9)
+    rec.begin()
+    tee.cls(0)
+    tee.blit_strip(plain, 0, 0)               # must NOT raise
+    tee.blit_window_from(plain, 0, 0)         # must NOT raise
+    rec.commit()
+    # Forwarded to the panel (the bar is visible there) but NOT recorded -- a plain layer has
+    # no command stream, so it can't ride the deflayer/blit_layer protocol.
+    assert not any(c[0] in ("blit_layer", "deflayer") for c in rec.frame())
+
+
 def test_map_replays_pixel_identical_to_panel_via_cached_assets():
     """The strongest map() cross-check (#41): drive a real map() (+ a couple of sprites)
     through the device TeeCanvas over a rasterizing Canvas (the panel stand-in), then
