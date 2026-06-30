@@ -1342,6 +1342,9 @@ class WebServer:
         self._last_json_ms = 0        # ms spent json-encoding the last pushed frame ...
         self._last_send_ms = 0        # ... and ms in the socket send (#41 perf log: localizes
                                       # device-bound stutter -- encode vs transport vs the rest)
+        self._heap_kb = 0             # cached gc.mem_free KB + when it was last sampled:
+        self._heap_ms = 0             # gc.mem_free WALKS the whole heap (~tens of ms on the
+                                      # 6MB PSRAM heap), so sample it ~1/s, never per frame
         # The PERSISTENT WebSocket client (one at a time). None = no browser connected ->
         # the recorder stays a pure pass-through (zero overhead). A new upgrade drops the
         # old conn (latest-wins). Liveness is keyed off this being non-None + not idle-timed.
@@ -1655,15 +1658,21 @@ class WebServer:
         """A tiny device-side stats dict for the per-frame payload (#41 perf log): free heap
         (KB) + the running pushed-frame count. gc.mem_free is MicroPython-only, so it's
         guarded -- on the host (CPython tests) heap is 0 and nothing raises."""
-        heap = 0
-        try:
-            import gc
-            heap = gc.mem_free() // 1024
-        except Exception:  # noqa: BLE001 -- no gc.mem_free on CPython; perf is best-effort
-            pass
+        # gc.mem_free() WALKS the entire heap (~tens of ms on the 6MB PSRAM heap), so it must
+        # NOT run every frame -- doing so dominated the frame time and capped the stream at
+        # ~13fps (the js=~60ms in the first breakdown was largely THIS call, not json.dumps).
+        # Sample it at most ~1/s and cache; the value is just a diagnostic, staleness is fine.
+        now = ticks_ms()
+        if self._heap_ms == 0 or ticks_diff(now, self._heap_ms) >= 1000:
+            self._heap_ms = now
+            try:
+                import gc
+                self._heap_kb = gc.mem_free() // 1024
+            except Exception:  # noqa: BLE001 -- no gc.mem_free on CPython; perf is best-effort
+                self._heap_kb = 0
         # js/tx are the PREVIOUS frame's encode/send ms (set at the end of _push_frame), so
         # the snapshot is one frame stale -- negligible, and it avoids timing ourselves.
-        return {"heap": heap, "pf": self._frames_pushed,
+        return {"heap": self._heap_kb, "pf": self._frames_pushed,
                 "js": self._last_json_ms, "tx": self._last_send_ms}
 
     def _push_frame(self, ws):
