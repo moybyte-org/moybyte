@@ -126,6 +126,12 @@ WEB_SEND_TIMEOUT = 2.0
 # EAGAINs the moment nothing's pending, so this only caps a flood -- the common case is 2.
 POLL_MAX = 6
 
+# Defensive cap on the sprite atlas. The atlas is keyed by id(img) and assumes stable sprite
+# identity (carts reuse one Image per tile via make_api's cache). A screen that makes FRESH
+# Image objects every frame would grow it unbounded; past this many entries, reset (bump gen,
+# browser re-ships) so memory + per-frame payload stay bounded. Normal carts never hit it.
+MAX_ATLAS = 512
+
 # petme128 8x8 font (host == device): the SAME glyphs runtime/font.py ships, baked here
 # as a hex blob so the device (whose panel text uses framebuf's own font) can still hand
 # the browser the petme128 glyphs the shared web_console.html renders `print` with. 96
@@ -228,7 +234,11 @@ class DrawRecorder:
 
     # -- frame handoff -------------------------------------------------------
     def begin(self):
-        """Start recording a fresh frame (drop a partial one defensively)."""
+        """Start recording a fresh frame (drop a partial one defensively). Reset the atlas
+        if it has grown past MAX_ATLAS (a screen with unstable sprite ids) so it can't leak
+        -- bumps atlas_gen, so the browser re-ships in lock-step."""
+        if len(self._atlas_keep) > MAX_ATLAS:
+            self.reset_atlas()
         self._cmds = []
 
     def commit(self):
@@ -603,11 +613,13 @@ def assets_payload(w, h, pal565, sheet, tilemap, cart_title, audio_rate=8000):
     }
 
 
-def frame_payload(cmds, cart_title):
+def frame_payload(cmds, cart_title, gen=0):
     """The per-frame payload: the recorded draw-command list + the cart title (so the
-    client notices a cart change and refetches /assets). Matches GET /frame on the
-    host (minus audio -- the device doesn't stream PCM over the web view)."""
-    return {"cmds": cmds, "cart": cart_title, "audio": ""}
+    client refetches /assets on a cart change) + the atlas generation `gen`. The browser
+    resets its sprite atlas (ATL) ONLY when `gen` changes -- lock-step with the device's
+    `served` reset -- so a /assets refetch (e.g. scrolling the launcher changes cart_title)
+    no longer wipes the atlas and strand sprites (the launcher unknown-growth bug, #41)."""
+    return {"cmds": cmds, "cart": cart_title, "gen": gen, "audio": ""}
 
 
 # The logical buttons a browser key/joystick maps to (mirrors the host BUTTON_NAMES);
@@ -976,7 +988,8 @@ class WebServer:
             # Prepend any not-yet-shipped defsprs so this served frame is self-contained for
             # its sprites (serve-time defspr -- drop-robust, see served_frame).
             cmds = self.served_frame(cmds)
-            conn.sendall(http_response(200, json.dumps(frame_payload(cmds, cart))))
+            conn.sendall(http_response(200, json.dumps(
+                frame_payload(cmds, cart, self.recorder.atlas_gen))))
         elif method == "POST" and path == "/input":
             events = []
             if body:
@@ -1053,7 +1066,7 @@ var W=320,H=240,PAL=null,FONT=null,ready=false,assCart=undefined,idx=null,img=nu
 // Payload-diet caches (#41): SHEET = the cart sprite sheet (cols/rows/tile/w/h/pix from
 // /assets, for map replay); TM = the cart tilemap (w/h/cells, kept current by settiles);
 // ATL = the per-session sprite atlas filled by defspr and referenced by spr index.
-var SHEET=null,TM=null,ATL=[];
+var SHEET=null,TM=null,ATL=[],curGen=-1;
 // Debug HUD (#41): toggle with `d`. Live stream stats -- browser render fps (EMA), KB of
 // the last /frame payload, atlas count (defsprs cached), and an unknown-index counter
 // (a spr that references an ATL slot with no defspr -- this would've caught the dropped-
@@ -1064,7 +1077,8 @@ idx=new Uint8Array(W*H);img=cx.createImageData(W,H);rgba=img.data;}
 function getA(){return fetch("/assets").then(function(r){return r.json();}).then(function(a){
 W=a.w;H=a.h;PAL=a.palette;FONT=a.font;assCart=a.cart;SHEET=a.sheet||null;
 TM=a.tilemap?{w:a.tilemap.w,h:a.tilemap.h,cells:a.tilemap.cells.slice()}:null;
-ATL=[];alloc();ready=true;});}
+alloc();ready=true;});}  // NB: do NOT clear ATL here -- the atlas resets on `gen` change
+                         // (see df), so a /assets refetch on cart change keeps the atlas.
 var caX=0,caY=0,cl0=0,cm0=0,cl1=W,cm1=H,pm=null,pt=null;
 function rs(){caX=0;caY=0;cl0=0;cm0=0;cl1=W;cm1=H;pm=new Uint8Array(64);pt=new Uint8Array(64);
 for(var i=0;i<64;i++)pm[i]=i;}rs();
@@ -1169,6 +1183,10 @@ var b=q;q=[];fetch("/input",{method:"POST",headers:{"Content-Type":"application/
 body:JSON.stringify({events:b})}).catch(function(){});}
 function df(){if(infl||!ready)return;infl=true;fetch("/frame").then(function(r){return r.text();}).then(function(txt){
 HUD.kb=txt.length/1024;var f=JSON.parse(txt);
+// Atlas reset is driven by the device's `gen` (lock-step with its served reset), NOT by
+// the cart change -- so scrolling the launcher (which changes cart_title -> /assets refetch)
+// no longer wipes ATL and strands sprites (the unknown-growth bug, #41).
+if(f.gen!==curGen){curGen=f.gen;ATL=[];HUD.unknown=0;}
 if(f.cart!==assCart){assCart=f.cart;getA().catch(function(){});}rep(f.cmds||[]);blit();infl=false;
 var t=(window.performance&&performance.now)?performance.now():Date.now();if(HUD.last){var inst=1000/Math.max(1,t-HUD.last);
 HUD.fps=HUD.fps?HUD.fps+(inst-HUD.fps)*0.2:inst;}HUD.last=t;if(HUD.on)drawHud();
