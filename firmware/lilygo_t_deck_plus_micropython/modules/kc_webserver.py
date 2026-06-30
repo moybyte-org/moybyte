@@ -17,6 +17,25 @@
 # <canvas> using the KID64 palette + the cart's spritesheet from /assets. The device
 # keeps rendering to its OWN panel as normal; the web view is an ADDITIONAL consumer.
 #
+# PAYLOAD DIET (#41, the 10x lever): a NAIVE recorder embeds the sprite's full pixel
+# array in every `spr` and expands a `map()` into one fat per-cell spr (a 20x15 map ~=
+# 100 KB/frame -> ~1.4 s/refresh over WiFi -- unplayable for tile carts like Battle
+# City). This recorder ships pixels ONCE and then references them by index:
+#
+#   ["defspr", index, w, h, t, pix]      ship a unique bitmap ONCE (an atlas entry).
+#   ["spr", index, x, y, scale, flip]    blit an already-shipped bitmap (~6 numbers).
+#   ["map", mx, my, w, h, sx, sy, scale, colorkey]   ONE op; the browser replays it from
+#                                        its CACHED tilemap + sheet (both from /assets).
+#   ["settiles", w, h, cells]            sync the browser's tilemap before a map op when
+#                                        the cart mutated it (mset, e.g. a destroyed brick).
+#
+# The atlas is keyed by id(img): make_api reuses one Image per (tile id, colorkey) across
+# frames (the tile cache), so id(img) is a stable key for a unique bitmap. The recorder
+# also HOLDS a reference to each img in the atlas, so the Image can't be GC'd and have its
+# id reused for a different bitmap. The atlas resets when the cart/sheet changes. Net: a
+# Battle City frame drops from tens of KB to <1 KB (one map op + a few dozen 6-int sprite
+# refs + the atlas amortized once over the session).
+#
 # SINGLE-THREADED, NON-BLOCKING (a hard device constraint): run_desktop's native loop
 # does one render frame at a time and never services anything mid-frame. So this server
 # uses a NON-BLOCKING listening socket and `poll()` accepts/handles AT MOST ONE request
@@ -66,6 +85,16 @@ DEFAULT_PORT = 8080
 # browser that closed its tab stops costing the render loop anything (the Tee goes
 # back to a pure pass-through). A live browser polls ~30x/s, so this is generous.
 RECORD_IDLE_MS = 2000
+
+# Web-stream frame-rate cap (#41 payload diet). The device panel runs as fast as it can
+# (~18-42fps), but a browser over the ~72KB/s WiFi can't consume that -- and recording a
+# frame costs the loop list-building + JSON. So we RECORD at most this many frames/sec:
+# at most one frame in every WEB_FRAME_INTERVAL_MS is recorded, the rest are pure
+# pass-through (the Tee adds nothing, the panel keeps full speed). The browser polls and
+# always gets the LAST fully-recorded frame. A frame is recorded completely or not at all
+# (the gate is decided once, at begin_frame).
+WEB_FPS_CAP = 12
+WEB_FRAME_INTERVAL_MS = 1000 // WEB_FPS_CAP
 
 # Per-connection socket timeouts (seconds). The accepted conn is BLOCKING with a bound,
 # NOT non-blocking: a non-blocking sendall can't push a multi-KB response over the device's
@@ -123,11 +152,22 @@ def _font_glyphs():
 
 
 class DrawRecorder:
-    """Records draw calls into a per-frame, JSON-serializable command list, in the
-    SAME format as tools/command_canvas.CommandCanvas. TeeCanvas forwards every draw
-    call here (in addition to the real DeviceCanvas) ONLY while `enabled` is True, so
-    a frame with no browser connected costs nothing. `swap()` hands off the finished
-    frame's commands and starts a fresh list -- called once per frame from the loop."""
+    """Records draw calls into a per-frame, JSON-serializable command list. TeeCanvas
+    forwards every draw call here (in addition to the real DeviceCanvas) ONLY while
+    `enabled` is True, so a frame with no browser connected costs nothing. `commit()`
+    hands off the finished frame's commands and starts a fresh list -- called once per
+    frame from the loop.
+
+    PAYLOAD DIET (#41): primitives mirror the literal Canvas calls, but bitmaps are
+    deduplicated. `spr` ships a unique bitmap ONCE as ["defspr", index, w, h, t, pix]
+    and then references it by index as ["spr", index, x, y, scale, flip]; a repeated
+    bitmap is just the 6-number ["spr", ...]. `map` records ONE ["map", ...] op (the
+    browser replays it from its cached tilemap + sheet), preceded by a ["settiles",
+    w, h, cells] when the recorder notices the tilemap changed (an mset). The sprite
+    atlas {id(img): index} is keyed by id(img) -- make_api reuses one Image per (tile id,
+    colorkey), so the id is a STABLE key for a unique bitmap; the recorder also holds a
+    reference to each img (self._atlas_keep) so the Image can't be GC'd and its id reused.
+    reset_atlas() drops the atlas + tilemap snapshot when the cart/sheet changes."""
 
     def __init__(self, w, h):
         self.w = w
@@ -135,6 +175,19 @@ class DrawRecorder:
         self.enabled = False
         self._cmds = []
         self._frame = []        # the last COMPLETE frame handed to the server
+        # Sprite atlas: id(img) -> dense index. _atlas_keep holds the Image objects so a
+        # cached bitmap can't be collected and have its id reused for a different one.
+        self._atlas = {}
+        self._atlas_keep = []
+        # Tilemap-change detection (for map()): the cells snapshot + the .gen counter
+        # last shipped to the browser, so an unchanged map doesn't re-ship settiles.
+        self._tiles_cells = None
+        self._tiles_gen = None
+        # spr_batch tile-image cache: (tid, colorkey) -> Image, so a batch tile resolves to
+        # a STABLE Image across frames (id() stays put -> the atlas dedups it like spr()
+        # does). Keyed-rebuilt when the sheet's paint gen changes; dropped on reset_atlas.
+        self._batch_imgs = {}
+        self._batch_gen = None
 
     # -- frame handoff -------------------------------------------------------
     def begin(self):
@@ -149,6 +202,33 @@ class DrawRecorder:
     def frame(self):
         """The last committed frame's command list (what GET /frame serves)."""
         return self._frame
+
+    def reset_atlas(self):
+        """Drop the sprite atlas + tilemap snapshot. Called when the open cart / sheet /
+        tilemap changes, so a new cart's bitmaps start at index 0 and can't collide with
+        a previous cart's stale indices, and the next map() re-ships its tiles. The
+        browser mirrors this by clearing its caches when /assets (the cart) changes."""
+        self._atlas = {}
+        self._atlas_keep = []
+        self._tiles_cells = None
+        self._tiles_gen = None
+        self._batch_imgs = {}
+        self._batch_gen = None
+
+    def batch_tile_image(self, sheet, tid, colorkey):
+        """Resolve a sheet tile to a STABLE Image (reused across frames) for spr_batch, so
+        the atlas dedups it. Rebuilds the cache when the sheet's paint gen changes (a live
+        edit), mirroring make_api's tile cache. Returns None for an empty/out-of-range tile."""
+        gen = getattr(sheet, "gen", 0)
+        if gen != self._batch_gen:
+            self._batch_imgs = {}
+            self._batch_gen = gen
+        key = (tid, colorkey)
+        img = self._batch_imgs.get(key)
+        if img is None:
+            img = sheet.tile_image(tid, colorkey)
+            self._batch_imgs[key] = img if img is not None else False
+        return img if img else None
 
     # -- draw state (camera / clip / pal / palt) -----------------------------
     def reset_state(self):
@@ -199,13 +279,54 @@ class DrawRecorder:
 
     def spr(self, img, x, y, scale=1, flip=0):
         # img is an Image / _SheetSprite (.w/.h/.pix/.transparent); ids are already
-        # resolved to pixels by the time the canvas sees it. Carry the raw pixels so
-        # the stream is self-contained (no sheet lookup needed to be correct).
-        t = img.transparent
-        if t is None:
-            t = -1
-        self._cmds.append(["spr", int(x), int(y), int(scale),
-                           int(img.w), int(img.h), int(t), list(img.pix), int(flip)])
+        # resolved to pixels by the time the canvas sees it. PAYLOAD DIET (#41): ship the
+        # bitmap ONCE keyed by id(img) -- a ["defspr", index, w, h, t, pix] the first time
+        # we see this Image, then always a tiny ["spr", index, x, y, scale, flip]. make_api
+        # reuses one Image per (tile id, colorkey) across frames, so id(img) is stable and
+        # an 8x8/16x16 bitmap is sent once per session, not once per sprite per frame.
+        key = id(img)
+        idx = self._atlas.get(key)
+        if idx is None:
+            idx = len(self._atlas_keep)
+            self._atlas[key] = idx
+            self._atlas_keep.append(img)        # hold a ref so id() can't be reused
+            t = img.transparent
+            if t is None:
+                t = -1
+            self._cmds.append(["defspr", idx, int(img.w), int(img.h), int(t),
+                               list(img.pix)])
+        self._cmds.append(["spr", idx, int(x), int(y), int(scale), int(flip)])
+
+    def settiles(self, tilemap):
+        """Sync the browser's cached tilemap when it has CHANGED since last shipped, as a
+        ["settiles", w, h, cells] command. The cart mutates the map via mset (which the
+        Tee never sees directly), so we detect a change cheaply via the TileMap.gen counter
+        (bumped on every mset) when present, falling back to a cells-snapshot compare. We
+        track our OWN last-sent state (gen + a cells copy) and never touch the cart's dirty
+        flag, so other code that relies on it is unaffected. Returns True if it shipped."""
+        gen = getattr(tilemap, "gen", None)
+        cells = tilemap.cells
+        if gen is not None:
+            if gen == self._tiles_gen:
+                return False
+            self._tiles_gen = gen
+        else:
+            # No gen counter: compare against the last-sent cells snapshot.
+            if self._tiles_cells is not None and self._tiles_cells == cells:
+                return False
+        # Snapshot the cells we're shipping (a small ~w*h bytes copy) so a later compare
+        # is against exactly what the browser holds.
+        snap = list(cells)
+        self._tiles_cells = list(cells)
+        self._cmds.append(["settiles", int(tilemap.w), int(tilemap.h), snap])
+        return True
+
+    def map(self, mx, my, w, h, sx, sy, scale, colorkey):
+        # PAYLOAD DIET (#41): ONE ["map", ...] op. The browser already has the sheet +
+        # tilemap from /assets (kept in sync via settiles), so it replays the cell walk
+        # itself instead of receiving ~300 fat per-cell spr commands.
+        self._cmds.append(["map", int(mx), int(my), int(w), int(h),
+                           int(sx), int(sy), int(scale), int(colorkey)])
 
     def print(self, s, x, y, c):
         self._cmds.append(["print", str(s), int(x), int(y), c & 63])
@@ -317,19 +438,17 @@ class TeeCanvas:
     def spr_batch(self, sheet, items, colorkey=-1, scale=1):
         self._c.spr_batch(sheet, items, colorkey, scale)
         if self._r.enabled:
-            # Expand to per-tile spr commands (mirrors CommandCanvas.spr_batch): the
-            # browser replayer has no batch op, so emit one self-contained spr each.
-            cache = {}
+            # Expand to per-tile spr commands (the browser has no batch op). Resolve each
+            # tile through the recorder's STABLE tile-image cache (not a per-call dict), so
+            # a repeated tile maps to the SAME Image across frames -> the atlas dedups its
+            # bitmap to ONE defspr per session, and each batch item is a 6-int spr-by-index.
             for it in items:
                 tid = int(it[0])
                 if tid < 0:
                     continue
                 flip = it[3] if len(it) > 3 else 0
-                img = cache.get(tid)
+                img = self._r.batch_tile_image(sheet, tid, colorkey)
                 if img is None:
-                    img = sheet.tile_image(tid, colorkey)
-                    cache[tid] = img if img is not None else False
-                if not img:
                     continue
                 self._r.spr(img, it[1], it[2], scale, flip)
 
@@ -337,8 +456,10 @@ class TeeCanvas:
             sx=0, sy=0, colorkey=-1, scale=1):
         self._c.map(tilemap, sheet, mx, my, w, h, sx, sy, colorkey, scale)
         if self._r.enabled:
-            # Expand to per-cell spr commands (mirrors CommandCanvas.map), so the
-            # browser needs no map op and stays pixel-identical.
+            # PAYLOAD DIET (#41): record ONE map op (was ~300 fat per-cell sprs). The
+            # browser has the sheet + tilemap from /assets and replays the cell walk
+            # itself. First sync the browser's tilemap if the cart mutated it (mset),
+            # then emit the map op with the resolved (default-None) region.
             mx = int(mx)
             my = int(my)
             scale = int(scale) if int(scale) >= 1 else 1
@@ -346,23 +467,8 @@ class TeeCanvas:
                 w = tilemap.w - mx
             if h is None:
                 h = tilemap.h - my
-            tile = sheet.TILE
-            step = tile * scale
-            cache = {}
-            for cy in range(int(h)):
-                ty = my + cy
-                py = sy + cy * step
-                for cx in range(int(w)):
-                    tid = tilemap.mget(mx + cx, ty)
-                    if tid < 0:
-                        continue
-                    img = cache.get(tid)
-                    if img is None:
-                        img = sheet.tile_image(tid, colorkey)
-                        cache[tid] = img if img is not None else False
-                    if not img:
-                        continue
-                    self._r.spr(img, sx + cx * step, py, scale)
+            self._r.settiles(tilemap)
+            self._r.map(mx, my, int(w), int(h), int(sx), int(sy), scale, int(colorkey))
 
     def print(self, s, x, y, c, scale=2):
         self._c.print(s, x, y, c, scale)
@@ -580,6 +686,7 @@ class WebServer:
         self.sock = None
         self.ip = None
         self._last_frame_req = 0      # ticks_ms of the last /frame fetch (browser live?)
+        self._last_record_ms = 0      # ticks_ms of the last RECORDED frame (the fps cap)
         self.requests = 0             # served-request counter (diag)
 
     def start(self, ip=None):
@@ -624,13 +731,25 @@ class WebServer:
 
     def begin_frame(self):
         """Set the recorder's gate for THIS frame + start a fresh command list when a
-        browser is live. Called at the top of the loop, before ws.frame()."""
+        browser is live AND the fps cap allows. Called at the top of the loop, before
+        ws.frame(). The cap (WEB_FPS_CAP) decouples the web stream from the cart: the
+        panel renders full speed, but we RECORD at most one frame per WEB_FRAME_INTERVAL_MS
+        -- so a 40fps cart still only feeds the ~72KB/s WiFi at ~12fps. The decision is
+        made ONCE here so a frame is recorded completely or not at all; on a skipped frame
+        the Tee is a pure pass-through (recorder.enabled stays False)."""
         if self.sock is None:
             self.recorder.enabled = False
             return
-        self.recorder.enabled = self.recording_wanted()
-        if self.recorder.enabled:
-            self.recorder.begin()
+        if not self.recording_wanted():
+            self.recorder.enabled = False
+            return
+        now = ticks_ms()
+        if ticks_diff(now, self._last_record_ms) < WEB_FRAME_INTERVAL_MS:
+            self.recorder.enabled = False     # within the cap interval -> skip this frame
+            return
+        self._last_record_ms = now
+        self.recorder.enabled = True
+        self.recorder.begin()
 
     def commit_frame(self):
         """Publish the frame's recorded commands (if we recorded this frame)."""
@@ -738,11 +857,20 @@ def _sleep_ms(ms):
 
 
 # ---------------------------------------------------------------------------
-# The page: a minimal embedded replayer that speaks the SAME protocol as
-# tools/web_console.html (so the device serves a self-contained playable view).
-# Kept compact to save frozen flash; it does the load-bearing job: fetch /assets,
-# poll /frame, replay the indexed draw commands against the KID64 palette, and POST
-# /input (touch drag + an on-screen joystick/A/B + WASD/arrows).
+# The page: a self-contained replayer for the PAYLOAD-DIET protocol (#41). It is the
+# matched pair of the DrawRecorder above (NOT the host tools/web_console.html, which
+# stays on the old fat-spr/expanded-map format). It does the load-bearing job: fetch
+# /assets (palette + font + sheet + tilemap), poll /frame, replay the indexed draw
+# commands against the KID64 palette, and POST /input (touch drag + on-screen joystick/
+# A/B + WASD/arrows). Replay must be PIXEL-IDENTICAL to the device panel:
+#   defspr  -> cache the bitmap by index (ATL[index] = {w,h,t,px}).
+#   spr     -> blit ATL[index] at x,y with browser-side scale/flip + colorkey/palt.
+#   map     -> walk the CACHED tilemap (kept current by settiles + /assets) over the
+#              CACHED sheet, mirroring the device map() cell layout (step=tile*scale,
+#              cell (cx,cy) -> screen (sx+cx*step, sy+cy*step), colorkey transparent).
+#   settiles-> overwrite the cached tilemap (cells/w/h) before a map op.
+# On a cart change /frame.cart != assCart -> refetch /assets, which clears ATL + the
+# tilemap cache, in lock-step with the device recorder's reset_atlas().
 # ---------------------------------------------------------------------------
 
 PAGE_HTML = """<!doctype html><html><head><meta charset=utf-8>
@@ -771,10 +899,16 @@ background:#7e2553;border:2px solid #c2c3c7;margin-left:18px}#bb{background:#293
 var FPS=20,cv=document.getElementById("cv"),cx=cv.getContext("2d"),sEl=document.getElementById("s");
 cx.imageSmoothingEnabled=false;
 var W=320,H=240,PAL=null,FONT=null,ready=false,assCart=undefined,idx=null,img=null,rgba=null;
+// Payload-diet caches (#41): SHEET = the cart sprite sheet (cols/rows/tile/w/h/pix from
+// /assets, for map replay); TM = the cart tilemap (w/h/cells, kept current by settiles);
+// ATL = the per-session sprite atlas filled by defspr and referenced by spr index.
+var SHEET=null,TM=null,ATL=[];
 function alloc(){cv.width=W;cv.height=H;cx=cv.getContext("2d");cx.imageSmoothingEnabled=false;
 idx=new Uint8Array(W*H);img=cx.createImageData(W,H);rgba=img.data;}
 function getA(){return fetch("/assets").then(function(r){return r.json();}).then(function(a){
-W=a.w;H=a.h;PAL=a.palette;FONT=a.font;assCart=a.cart;alloc();ready=true;});}
+W=a.w;H=a.h;PAL=a.palette;FONT=a.font;assCart=a.cart;SHEET=a.sheet||null;
+TM=a.tilemap?{w:a.tilemap.w,h:a.tilemap.h,cells:a.tilemap.cells.slice()}:null;
+ATL=[];alloc();ready=true;});}
 var caX=0,caY=0,cl0=0,cm0=0,cl1=W,cm1=H,pm=null,pt=null;
 function rs(){caX=0;caY=0;cl0=0;cm0=0;cl1=W;cm1=H;pm=new Uint8Array(64);pt=new Uint8Array(64);
 for(var i=0;i<64;i++)pm[i]=i;}rs();
@@ -791,9 +925,26 @@ fr(cxx-sp,cyy+dy,2*sp+1,1,c);}}
 function cb(cxx,cyy,r,c){cxx|=0;cyy|=0;r|=0;var x=r,y=0,er=0;while(x>=y){
 var p=[[x,y],[y,x],[-y,x],[-x,y],[-x,-y],[-y,-x],[y,-x],[x,-y]];
 for(var i=0;i<8;i++)put(cxx+p[i][0],cyy+p[i][1],c);y++;if(er<=0){er+=2*y+1;}else{x--;er-=2*x+1;}}}
-function sp(x,y,sc,sw,sh,t,px,fl){x|=0;y|=0;sc|=0;fl|=0;var fx=fl&1,fy=(fl>>1)&1;
+// Blit a bitmap (raw pixels px, sw x sh, transparent index t) at x,y with scale+flip.
+// Mirrors the device DeviceCanvas.spr / host Canvas.spr exactly (camera/clip/pal/palt via
+// put/fr). Used by both spr (atlas lookup) and map (per-cell sheet slice).
+function blt(px,sw,sh,t,x,y,sc,fl){x|=0;y|=0;sc|=0;fl|=0;var fx=fl&1,fy=(fl>>1)&1;
 for(var yy=0;yy<sh;yy++){var ry=fy?sh-1-yy:yy,bs=ry*sw;for(var xx=0;xx<sw;xx++){var rx=fx?sw-1-xx:xx,
 p=px[bs+rx];if(p===t||p<0||pt[p&63])continue;if(sc<=1)put(x+xx,y+yy,p);else fr(x+xx*sc,y+yy*sc,sc,sc,p);}}}
+// spr by atlas index: look up the bitmap defspr shipped, blit it. Unknown index = no-op.
+function sp(ix,x,y,sc,fl){var a=ATL[ix];if(!a)return;blt(a.px,a.w,a.h,a.t,x,y,sc,fl);}
+// map(): walk the cached tilemap region (mx,my .. +w,+h) over the cached sheet, drawing
+// each non-empty cell's tile at (sx+cx*step, sy+cy*step), colorkey transparent. Mirrors
+// the device map() cell layout (step = tile*scale; tile origin row-major in the sheet).
+function mp(mx,my,w,h,sx,sy,sc,ck){if(!SHEET||!TM)return;sc=sc<1?1:sc;
+var tile=SHEET.tile,step=tile*sc,cols=SHEET.cols,sw=SHEET.w,spx=SHEET.pix,tw=TM.w,th=TM.h,cells=TM.cells;
+for(var cy=0;cy<h;cy++){var ty=my+cy;for(var cx=0;cx<w;cx++){var gx=mx+cx;
+var tid=(gx>=0&&gx<tw&&ty>=0&&ty<th)?cells[ty*tw+gx]-1:-1;if(tid<0)continue;
+var ox=(tid%cols)*tile,oy=((tid/cols)|0)*tile,dx=sx+cx*step,dy=sy+cy*step;
+for(var ly=0;ly<tile;ly++){var srow=(oy+ly)*sw+ox;for(var lx=0;lx<tile;lx++){var p=spx[srow+lx];
+if(p===ck||p<0||pt[p&63])continue;if(sc<=1)put(dx+lx,dy+ly,p);else fr(dx+lx*sc,dy+ly*sc,sc,sc,p);}}}}}
+// settiles: overwrite the cached tilemap (a cart mutated it via mset).
+function st(w,h,cells){TM={w:w,h:h,cells:cells};}
 function tx(s,x,y,c){if(!FONT)return;var X=x|0;y|=0;var fi=FONT.first,gw=FONT.w,g=FONT.glyphs,n=g.length;
 for(var k=0;k<s.length;k++){var gi=s.charCodeAt(k)-fi,co=(gi>=0&&gi<n)?g[gi]:g[0];
 for(var j=0;j<gw;j++){var bt=co[j],py=y;while(bt){if(bt&1)put(X+j,py,c);bt>>=1;py++;}}X+=gw;}}
@@ -801,7 +952,10 @@ function rep(cs){for(var i=0;i<cs.length;i++){var c=cs[i],o=c[0];
 if(o=="cls")idx.fill(pm[c[1]&63]);else if(o=="pix")put(c[1],c[2],c[3]);
 else if(o=="line")ln(c[1],c[2],c[3],c[4],c[5]);else if(o=="rect")fr(c[1],c[2],c[3],c[4],c[5]);
 else if(o=="rectb")rb(c[1],c[2],c[3],c[4],c[5]);else if(o=="circ")ci(c[1],c[2],c[3],c[4]);
-else if(o=="circb")cb(c[1],c[2],c[3],c[4]);else if(o=="spr")sp(c[1],c[2],c[3],c[4],c[5],c[6],c[7],c[8]||0);
+else if(o=="circb")cb(c[1],c[2],c[3],c[4]);
+else if(o=="defspr")ATL[c[1]]={w:c[2],h:c[3],t:c[4],px:c[5]};
+else if(o=="spr")sp(c[1],c[2],c[3],c[4],c[5]||0);
+else if(o=="settiles")st(c[1],c[2],c[3]);else if(o=="map")mp(c[1],c[2],c[3],c[4],c[5],c[6],c[7],c[8]);
 else if(o=="print")tx(c[1],c[2],c[3],c[4]);else if(o=="reset_state")rs();
 else if(o=="camera"){caX=c[1]|0;caY=c[2]|0;}
 else if(o=="clip"){if(c.length>1){var a=c[1]|0,b=c[2]|0,w=c[3]|0,h=c[4]|0;cl0=Math.max(0,a);cm0=Math.max(0,b);
