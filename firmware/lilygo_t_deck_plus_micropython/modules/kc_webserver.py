@@ -121,6 +121,11 @@ WEB_FRAME_INTERVAL_MS = 1000 // WEB_FPS_CAP
 WEB_RECV_TIMEOUT = 0.4
 WEB_SEND_TIMEOUT = 2.0
 
+# Max requests poll() drains per frame. The browser fires 2/tick (POST /input + GET /frame),
+# so serving 1/frame backs them up and input lags; draining a few keeps input snappy. accept()
+# EAGAINs the moment nothing's pending, so this only caps a flood -- the common case is 2.
+POLL_MAX = 6
+
 # petme128 8x8 font (host == device): the SAME glyphs runtime/font.py ships, baked here
 # as a hex blob so the device (whose panel text uses framebuf's own font) can still hand
 # the browser the petme128 glyphs the shared web_console.html renders `print` with. 96
@@ -858,29 +863,27 @@ class WebServer:
         made ONCE here so a frame is recorded completely or not at all; on a skipped frame
         the Tee is a pure pass-through (recorder.enabled stays False).
 
-        STREAM MODE coupling (#41): `recorder.record_only` is set to True ONLY for a frame
-        we actually record AND while stream_mode() (a browser is live). record_only ALWAYS
-        tracks enabled here: a SKIPPED frame leaves both False so the panel still renders +
-        flushes (the Tee forwards), and only a RECORDED stream frame goes headless. So the
-        invariant `record_only -> enabled` holds, which is what makes the Tee's skip safe."""
-        if self.sock is None:
+        STREAM MODE (#41): `record_only` (go headless) is DECOUPLED from the record cap.
+        While a browser is live it is True EVERY frame -- so the loop's stream-mode enter/
+        exit edge fires ONCE and the panel stays frozen. (Tying it to the cap made it flap
+        True/False per frame -> the panel "resumed" on every capped frame and the enter/exit
+        churn -- notice force-flush + full redraw -- ran every frame, the lag bug.) The cap
+        only throttles RECORDING (enabled): a capped frame stays headless but records nothing
+        (the Tee skips the panel forward on record_only and only appends on enabled, so a
+        headless-not-recorded frame is a cheap no-op; the browser keeps the last recorded
+        frame)."""
+        if self.sock is None or not self.recording_wanted():
             self.recorder.enabled = False
             self.recorder.record_only = False
             return
-        if not self.recording_wanted():
-            self.recorder.enabled = False
-            self.recorder.record_only = False
-            return
+        # Browser live -> headless EVERY frame (stable across the cap, so no per-frame flap).
+        self.recorder.record_only = self.stream_mode()
         now = ticks_ms()
         if ticks_diff(now, self._last_record_ms) < WEB_FRAME_INTERVAL_MS:
-            self.recorder.enabled = False     # within the cap interval -> skip this frame
-            self.recorder.record_only = False  # ... and render the panel normally
+            self.recorder.enabled = False     # within the cap -> stay headless, don't record
             return
         self._last_record_ms = now
         self.recorder.enabled = True
-        # Go headless for this recorded frame whenever a browser is live (stream_mode ties
-        # to the SAME gate). The loop reads recorder.record_only to skip the panel flush.
-        self.recorder.record_only = self.stream_mode()
         self.recorder.begin()
 
     def commit_frame(self):
@@ -889,26 +892,31 @@ class WebServer:
             self.recorder.commit()
 
     def poll(self):
-        """Accept + serve AT MOST ONE request, fully non-blocking. Returns True if a
-        request was handled (diagnostic), False if there was nothing to do. Never
-        blocks the render loop: a slow/partial client is dropped, not waited on."""
+        """Drain up to POLL_MAX pending requests per call (non-blocking). The browser fires
+        TWO requests per tick (POST /input + GET /frame); serving only ONE per frame backed
+        them up so input lagged badly. Draining a few keeps input responsive. accept() raises
+        EAGAIN the instant nothing is pending, so the common case (1-2 real requests) serves
+        them and breaks immediately -- the cap just bounds a flood. Returns True if any
+        request was handled. Never blocks the loop on a stalled client."""
         if self.sock is None:
             return False
-        try:
-            conn, _addr = self.sock.accept()
-        except Exception:  # noqa: BLE001 -- EAGAIN/no pending connection: the common path
-            return False
-        try:
-            self._serve(conn)
-            return True
-        except Exception as exc:  # noqa: BLE001 -- a bad request must not crash the loop
-            print("KidCode web: request error:", exc)
-            return False
-        finally:
+        served = False
+        for _ in range(POLL_MAX):
             try:
-                conn.close()
-            except Exception:  # noqa: BLE001
-                pass
+                conn, _addr = self.sock.accept()
+            except Exception:  # noqa: BLE001 -- EAGAIN: no more pending connections
+                break
+            try:
+                self._serve(conn)
+                served = True
+            except Exception as exc:  # noqa: BLE001 -- a bad request must not crash the loop
+                print("KidCode web: request error:", exc)
+            finally:
+                try:
+                    conn.close()
+                except Exception:  # noqa: BLE001
+                    pass
+        return served
 
     def _recv_request(self, conn):
         """Read one request: headers, then body up to Content-Length. Briefly blocking
@@ -1039,7 +1047,7 @@ white-space:pre;pointer-events:none}#hud b{color:#ffec27}#hud .w{color:#ff004d}<
 <div id=ctl><div id=joy><div id=th></div></div>
 <div><span class=b id=bb>B</span><span class=b id=ba>A</span></div></div>
 <script>
-var FPS=20,cv=document.getElementById("cv"),cx=cv.getContext("2d"),sEl=document.getElementById("s");
+var FPS=30,cv=document.getElementById("cv"),cx=cv.getContext("2d"),sEl=document.getElementById("s");
 cx.imageSmoothingEnabled=false;
 var W=320,H=240,PAL=null,FONT=null,ready=false,assCart=undefined,idx=null,img=null,rgba=null;
 // Payload-diet caches (#41): SHEET = the cart sprite sheet (cols/rows/tile/w/h/pix from
