@@ -1887,6 +1887,8 @@ class WebView:
         self._pulsed = []
         self._pan = [0, 0]
         self._key_queue = []
+        self._held = set()         # browser-held buttons (joystick/WASD), re-asserted each
+        self._held_last = set()    # frame in feed_input AFTER keyboard.poll clears them
         # Browser pointer intent, applied AFTER the physical touch read each frame so
         # it isn't clobbered. _br_active True while a browser finger is down (so the
         # cursor follows the browser drag); _br_click latches a tap edge to consume once.
@@ -2151,6 +2153,22 @@ class WebView:
                     pass
             self._pulsed = self._press_queue
             self._press_queue = []
+        # Re-assert browser-held buttons (joystick / WASD) on top of the physical keyboard.
+        # feed_input runs AFTER keyboard.poll(), which clears any button with no physical key
+        # down -- so without this the web holds never reach the cart's btn(). Clear ones
+        # released since last frame; assert the current held set.
+        for name in self._held_last:
+            if name not in self._held:
+                try:
+                    self._inp.set_button(name, False)
+                except Exception:  # noqa: BLE001
+                    pass
+        for name in self._held:
+            try:
+                self._inp.set_button(name, True)
+            except Exception:  # noqa: BLE001
+                pass
+        self._held_last = set(self._held)
         # Browser trackball pan -> cursor move (mirrors the device loop's _cursor_delta).
         if self._pan[0] or self._pan[1]:
             self._pointer.move(self._pan[0] * 4, self._pan[1] * 4)
@@ -2187,6 +2205,16 @@ class WebView:
     def _on_pan(self, dx, dy):
         self._pan[0] += dx
         self._pan[1] += dy
+
+    def _on_hold(self, name, down):
+        # Track a browser-held button (joystick/WASD). feed_input re-asserts the held set
+        # AFTER the loop's keyboard.poll() (which clears buttons -- no physical key is down),
+        # so the cart's btn() actually sees it. (Setting it here, in poll(), gets wiped by
+        # the next keyboard.poll before the cart runs -- the joystick/WASD not-reacting bug.)
+        if down:
+            self._held.add(name)
+        else:
+            self._held.discard(name)
 
     def _on_key(self, code):
         # Queue a typed key; feed_input applies it AFTER the loop's keyboard.poll() so it
@@ -2226,7 +2254,8 @@ class WebView:
         sink = _PointerSink(self)
         self._web.apply_events(events, self._inp, sink,
                                on_press=self._on_press, on_pan=self._on_pan,
-                               on_key=self._on_key, on_esc=self._on_esc)
+                               on_key=self._on_key, on_esc=self._on_esc,
+                               on_hold=self._on_hold)
 
 
 class _PointerSink:

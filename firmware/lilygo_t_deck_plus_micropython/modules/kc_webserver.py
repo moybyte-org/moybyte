@@ -628,7 +628,7 @@ BUTTON_NAMES = ("left", "right", "up", "down", "a", "b", "run", "home")
 
 
 def apply_events(events, input, pointer, on_press=None, on_pan=None,
-                 on_key=None, on_esc=None):
+                 on_key=None, on_esc=None, on_hold=None):
     """Inject a batch of browser events into the device's InputState + Pointer, the
     device twin of host_app.ConsoleDriver's event handling. `input` is the InputState,
     `pointer` the cursor; the hooks let run_desktop wire press/pan/key/esc to the same
@@ -666,7 +666,15 @@ def apply_events(events, input, pointer, on_press=None, on_pan=None,
             elif t == "hold":
                 name = ev.get("name")
                 if name in BUTTON_NAMES:
-                    input.set_button(name, bool(ev.get("down")))
+                    # Route to on_hold when wired: the device's per-frame keyboard.poll()
+                    # clears buttons (no physical key down), so a hold set HERE (in poll(),
+                    # before the next keyboard.poll) is wiped before the cart reads btn().
+                    # on_hold lets the loop track + re-assert it in feed_input AFTER the
+                    # keyboard poll (the joystick/WASD fix). Falls back to a direct set.
+                    if on_hold is not None:
+                        on_hold(name, bool(ev.get("down")))
+                    else:
+                        input.set_button(name, bool(ev.get("down")))
             elif t == "key":
                 code = ev.get("code")
                 if isinstance(code, int) and 0 <= code <= 0xFF and on_key is not None:
