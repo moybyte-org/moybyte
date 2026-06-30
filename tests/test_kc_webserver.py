@@ -995,6 +995,27 @@ def test_server_frame_post_applies_input_and_returns_frame(server):
     assert prov.applied and prov.applied[0]["name"] == "left"   # ...AND applied the input
 
 
+def test_apply_events_routes_hold_through_on_hold_hook():
+    """`hold` events must go through on_hold (which the loop re-asserts in feed_input AFTER
+    keyboard.poll) -- NOT a direct set_button, which the per-frame keyboard poll would wipe
+    before the cart reads btn() (the joystick/WASD-not-reacting bug, #41). Falls back to a
+    direct set_button when no hook is wired (back-compat)."""
+    class _Inp:
+        def __init__(self):
+            self.calls = []
+
+        def set_button(self, n, v):
+            self.calls.append((n, v))
+
+    held = []
+    inp = _Inp()
+    web.apply_events([{"type": "hold", "name": "left", "down": True}], inp, None,
+                     on_hold=lambda n, d: held.append((n, d)))
+    assert held == [("left", True)] and inp.calls == []   # routed to the hook, not set_button
+    web.apply_events([{"type": "hold", "name": "right", "down": True}], inp, None)
+    assert inp.calls == [("right", True)]                 # no hook -> direct (back-compat)
+
+
 def test_server_404_for_unknown_path(server):
     _srv, _prov, host, port = server
     status, _ctype, _body = _get(host, port, "/nope")
