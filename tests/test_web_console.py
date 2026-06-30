@@ -125,19 +125,21 @@ class TeeCanvas:
     def print(self, s, x, y, c, scale=1):
         self.raster.print(s, x, y, c, scale); self.rec.print(s, x, y, c, scale)
 
-    # Offscreen layers (#54 scroll window / #43 cached top bar): one real scratch
-    # Canvas backs the layer (the recorder has no pixels), and the copy is forwarded to
-    # BOTH the rasterizer (pixels) and the recorder (which emits the layer's pixels as a
-    # self-contained command) -- so both views see the same opaque positioned blit.
+    # Offscreen layers (#54 scroll window / #43 cached top bar): ONE recorded-layer
+    # mechanism. The recorder mints a RecordingLayer (its OWN real rasterizing Canvas +
+    # its OWN recorded command stream), so a draw into the layer rasterizes AND records;
+    # the copy forwards to BOTH the rasterizer (pixels, off the layer's real Canvas) and
+    # the recorder (the tiny blit_layer reference op). The deflayer that ships the
+    # layer's stream is prepended by rec.take_commands() (ship-once).
     def new_layer(self, w, h):
-        return self.raster.new_layer(w, h)
+        return self.rec.new_layer(w, h)
 
     def blit_window_from(self, layer, cam_x=0, cam_y=0):
-        self.raster.blit_window_from(layer, cam_x, cam_y)
+        self.raster.blit_window_from(layer._canvas, cam_x, cam_y)
         self.rec.blit_window_from(layer, cam_x, cam_y)
 
     def blit_strip(self, layer, dst_x=0, dst_y=0):
-        self.raster.blit_strip(layer, dst_x, dst_y)
+        self.raster.blit_strip(layer._canvas, dst_x, dst_y)
         self.rec.blit_strip(layer, dst_x, dst_y)
 
     def to_rgb888(self):
@@ -155,11 +157,20 @@ def _build_tee(save_dir):
 
 def _assert_frame_identical(ws, drv, tee, dt=1.0 / 30, label=""):
     """Step the console one frame, then assert the rasterized buffer equals a fresh
-    replay of that same frame's recorded command list, byte for byte."""
+    replay of that same frame's recorded command list, byte for byte.
+
+    The replay keeps a PERSISTENT off-screen-layer cache on the tee across frames (the
+    browser's per-id layer canvases): with ship-once layers (#54/#43) a deflayer rides
+    only the frame its gen changed, so a later frame's blit_layer must resolve against
+    the layer the browser already replayed -- exactly as web_console.html does."""
     drv.frame(dt)
     raster = bytes(tee.buf)
     cv = Canvas(WIDTH, HEIGHT)
-    replay_to_canvas(tee.take_commands(), cv)
+    layers = getattr(tee, "_replay_layers", None)
+    if layers is None:
+        layers = {}
+        tee._replay_layers = layers
+    replay_to_canvas(tee.take_commands(), cv, layers)
     replayed = bytes(cv.buf)
     assert len(raster) == len(replayed) == WIDTH * HEIGHT
     if raster != replayed:
@@ -294,6 +305,116 @@ def test_command_canvas_api_matches_canvas():
     assert cv.w == WIDTH and cv.h == HEIGHT
     # pix as a read returns 0 (a command stream has no buffer to read back).
     assert cv.pix(5, 5) == 0
+
+
+# ---------------------------------------------------------------------------
+# Off-screen LAYERS (#54 scroll + #43 cached top bar): ONE recorded-layer mechanism.
+# The recorder mints a RecordingLayer (real Canvas + its own recorded stream); the
+# copy emits a tiny blit_layer; the deflayer ships the stream once. The cross-check
+# replays the SERVED command stream (deflayer prepended) into a fresh Canvas via the
+# persistent layer cache and asserts it equals the rasterizer pixel-for-pixel.
+# ---------------------------------------------------------------------------
+
+
+def test_scroll_draw_layer_replays_pixel_identical_at_camera_offset():
+    """A wide scroll layer pre-rendered ONCE, then window-copied at a camera offset
+    (draw_layer -> blit_window_from) replays byte-identically -- and the layer's stream
+    ships as ONE deflayer, then a tiny blit_layer per frame (no pixels on the wire)."""
+    tee = TeeCanvas(WIDTH, HEIGHT)
+    # Build a layer WIDER than the screen and paint a recognisable world into it once.
+    lay = tee.new_layer(WIDTH * 2, HEIGHT)
+    lay.cls(1)
+    lay.rect(0, HEIGHT - 40, WIDTH * 2, 40, 3)       # ground band
+    for gx in range(0, WIDTH * 2, 60):
+        lay.circ(gx + 10, 40, 8, 7)                  # clouds across the world
+        lay.rect(gx + 30, HEIGHT - 60, 6, 20, 4)     # posts
+    # Frame: window-copy the visible slice at a camera offset + draw an actor on top.
+    tee.cls(0)
+    tee.blit_window_from(lay, 137, 0)                # mid-world camera
+    tee.rect(150, 100, 12, 22, 8)                    # the runner, on top
+    cmds = tee.take_commands()
+    # The served stream carries the layer ONCE: exactly one deflayer + one blit_layer.
+    assert [c[0] for c in cmds].count("deflayer") == 1
+    assert [c[0] for c in cmds].count("blit_layer") == 1
+    bl = next(c for c in cmds if c[0] == "blit_layer")
+    assert bl[1:] == [lay.id, 137, 0], "a windowed blit_layer (no 'full' marker)"
+    # Replay the served stream onto a fresh Canvas and assert pixel-identical.
+    cv = Canvas(WIDTH, HEIGHT)
+    replay_to_canvas(cmds, cv, {})
+    assert bytes(cv.buf) == bytes(tee.buf), "scroll draw_layer replay must match the rasterizer"
+    assert len(set(cv.buf)) > 1, "the scroll frame must not be a flat (black) screen"
+
+
+def test_cached_top_bar_blit_strip_replays_pixel_identical():
+    """The cached top-bar strip (blit_strip) uses the SAME layer mechanism as the scroll
+    layer: rendered once into a short strip layer, then full-copied at a fixed offset.
+    The served stream carries ONE deflayer + a 'full' blit_layer, and replays exactly."""
+    tee = TeeCanvas(WIDTH, HEIGHT)
+    strip = tee.new_layer(WIDTH, 18)                 # an 18px top-bar strip
+    strip.rect(0, 0, WIDTH, 18, 0)                   # black bar
+    strip.rect(0, 17, WIDTH, 1, 5)                   # shelf edge
+    strip.print("12:34", 280, 3, 6)                  # clock
+    strip.rect(8, 2, 14, 14, 7)                      # an icon block
+    # Frame: clear, then stamp the cached bar at the top.
+    tee.cls(2)
+    tee.rect(40, 60, 100, 80, 9)                     # some content under the bar
+    tee.blit_strip(strip, 0, 0)
+    cmds = tee.take_commands()
+    assert [c[0] for c in cmds].count("deflayer") == 1
+    bl = next(c for c in cmds if c[0] == "blit_layer")
+    assert bl == ["blit_layer", strip.id, 0, 0, "full"], "a full blit_layer (the cached bar)"
+    cv = Canvas(WIDTH, HEIGHT)
+    replay_to_canvas(cmds, cv, {})
+    assert bytes(cv.buf) == bytes(tee.buf), "cached-bar blit_strip replay must match the rasterizer"
+
+
+def test_layer_ships_once_then_reference_only_across_frames():
+    """A layer pre-rendered once ships its deflayer on the FIRST frame that references
+    it, then every later frame is a tiny blit_layer (no deflayer) -- the ship-once
+    bandwidth win. The cross-check keeps a persistent layer cache so the later frames
+    still replay correctly (the browser keeps its off-screen layer canvases)."""
+    tee = TeeCanvas(WIDTH, HEIGHT)
+    lay = tee.new_layer(WIDTH * 2, HEIGHT)
+    lay.cls(4)
+    lay.rect(0, 100, WIDTH * 2, 40, 8)
+    layers = {}                                      # the persistent browser-side cache
+    # Frame 1: the deflayer is PREPENDED (like the serve-time defspr) + cls + blit_layer.
+    tee.cls(0); tee.blit_window_from(lay, 0, 0)
+    f1 = tee.take_commands()
+    assert [c[0] for c in f1] == ["deflayer", "cls", "blit_layer"]
+    cv1 = Canvas(WIDTH, HEIGHT)
+    replay_to_canvas(f1, cv1, layers)
+    assert bytes(cv1.buf) == bytes(tee.buf)
+    # Frame 2: the SAME layer, no redraw -> NO deflayer (already shipped), just blit_layer.
+    tee.cls(0); tee.blit_window_from(lay, 64, 0)
+    f2 = tee.take_commands()
+    assert [c[0] for c in f2] == ["cls", "blit_layer"], "a shipped layer is not re-sent"
+    cv2 = Canvas(WIDTH, HEIGHT)
+    replay_to_canvas(f2, cv2, layers)                # resolves against the cached layer
+    assert bytes(cv2.buf) == bytes(tee.buf)
+
+
+def test_layer_reships_deflayer_on_redraw():
+    """When a layer is REDRAWN (the cached bar repainted on a clock tick / theme change),
+    its gen bumps and the next served frame re-ships the deflayer with the fresh stream."""
+    tee = TeeCanvas(WIDTH, HEIGHT)
+    strip = tee.new_layer(WIDTH, 18)
+    strip.rect(0, 0, WIDTH, 18, 0)
+    strip.print("12:34", 280, 3, 6)
+    tee.cls(0); tee.blit_strip(strip, 0, 0)
+    f1 = tee.take_commands()
+    g1 = next(c for c in f1 if c[0] == "deflayer")
+    assert "12:34" in str(g1), "the first deflayer carries the original bar stream"
+    # No redraw -> no deflayer next frame.
+    tee.cls(0); tee.blit_strip(strip, 0, 0)
+    assert not any(c[0] == "deflayer" for c in tee.take_commands())
+    # REDRAW the strip (a new clock minute): re-render its body -> gen bumps -> re-ship.
+    strip.rect(0, 0, WIDTH, 18, 0)
+    strip.print("12:35", 280, 3, 6)
+    tee.cls(0); tee.blit_strip(strip, 0, 0)
+    f3 = tee.take_commands()
+    g3 = next((c for c in f3 if c[0] == "deflayer"), None)
+    assert g3 is not None and "12:35" in str(g3), "a redrawn layer re-ships its fresh stream"
 
 
 # ---------------------------------------------------------------------------

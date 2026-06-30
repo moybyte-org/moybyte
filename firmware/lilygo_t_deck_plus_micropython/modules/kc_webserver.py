@@ -285,6 +285,11 @@ class DrawRecorder:
         # does). Keyed-rebuilt when the sheet's paint gen changes; dropped on reset_atlas.
         self._batch_imgs = {}
         self._batch_gen = None
+        # OFF-SCREEN LAYERS (#54 scroll + #43 cached top bar): RecordingLayers minted via
+        # the Tee, indexed by their dense id. A blit_layer references one; the WebServer
+        # ships its ["deflayer", ...] stream ONCE (serve-time, like defspr). Dropped on
+        # reset_atlas (cart change), in lock-step with the atlas_gen the server keys off.
+        self._layers = []
 
     # -- frame handoff -------------------------------------------------------
     def begin(self):
@@ -316,6 +321,7 @@ class DrawRecorder:
         self._tiles_gen = None
         self._batch_imgs = {}
         self._batch_gen = None
+        self._layers = []           # a new cart's layers start at id 0 (atlas_gen bumps -> re-ship)
         self.atlas_gen += 1
 
     def batch_tile_image(self, sheet, tid, colorkey):
@@ -445,6 +451,183 @@ class DrawRecorder:
     def print(self, s, x, y, c):
         self._cmds.append(["print", str(s), int(x), int(y), c & 63])
 
+    # -- off-screen layers (#54 scroll + #43 cached top bar) -----------------
+    # ONE recorded-layer mechanism: a layer the cart/console pre-renders into ONCE then
+    # window-copies (draw_layer) or full-copies (blit_strip) each frame. The device's
+    # layers are RGB565 (no index buffer kept), so we CANNOT ship the layer's finished
+    # pixels as an indexed image. Instead the RecordingLayer (below) records the layer's
+    # INDEXED DRAW-COMMAND STREAM (cls/rect/circ/line/print/spr -- palette indices), and
+    # the browser REPLAYS that stream into an off-screen index buffer once (deflayer),
+    # then blits a window/full of it (blit_layer). Same mechanism for scroll AND bar.
+    def register_layer(self, layer):
+        """Assign a RecordingLayer the next dense layer id and remember it so a
+        blit reference can ship its stream once. Returns the id."""
+        lid = len(self._layers)
+        self._layers.append(layer)
+        return lid
+
+    def blit_layer_window(self, layer, cam_x, cam_y):
+        """draw_layer's window-copy -> ["blit_layer", id, cam_x, cam_y] (clamped >=0 to
+        mirror DeviceCanvas.blit_window_from). Opaque + full-screen, so the browser's
+        copy also clears last frame -> no actor trails."""
+        self._cmds.append(["blit_layer", int(layer.id),
+                           cam_x if cam_x > 0 else 0, cam_y if cam_y > 0 else 0])
+
+    def blit_layer_full(self, layer, dst_x, dst_y):
+        """blit_strip's full-copy -> ["blit_layer", id, dst_x, dst_y, "full"]. The cached
+        top bar + the scroll layer share this op."""
+        self._cmds.append(["blit_layer", int(layer.id), int(dst_x), int(dst_y), "full"])
+
+    def deflayer_cmd(self, idx):
+        """Reconstruct ["deflayer", id, w, h, cmds] for a registered layer -- the
+        WebServer prepends it at SERVE time the first time a served frame references the
+        layer (and re-ships if its gen changed). None for an out-of-range/dropped id."""
+        if idx < 0 or idx >= len(self._layers):
+            return None
+        layer = self._layers[idx]
+        return ["deflayer", int(idx), int(layer.w), int(layer.h),
+                list(layer.layer_cmds())]
+
+
+class _LayerRecorder:
+    """Records ONE off-screen layer's indexed draw-command stream. Primitives mirror the
+    main DrawRecorder 1:1 (palette indices), but `spr` is recorded SELF-CONTAINED with
+    its raw pixels (["spr", x, y, scale, w, h, t, pix, flip] -- the host command_canvas
+    shape) rather than via the main atlas: a layer's stream ships as ONE deflayer, so it
+    must carry everything it needs with no atlas coupling. (Sky Run's layer is primitives
+    only; the device top-bar layer also blits icon sprites -- both covered.)"""
+
+    def __init__(self):
+        self._cmds = []
+
+    def take(self):
+        c = self._cmds
+        self._cmds = []
+        return c
+
+    def cmds(self):
+        return self._cmds
+
+    def reset_state(self):
+        self._cmds.append(["reset_state"])
+
+    def camera(self, x=0, y=0):
+        self._cmds.append(["camera", int(x), int(y)])
+
+    def clip(self, x=None, y=None, w=None, h=None):
+        if x is None:
+            self._cmds.append(["clip"])
+        else:
+            self._cmds.append(["clip", int(x), int(y), int(w), int(h)])
+
+    def pal(self, c0=None, c1=None):
+        if c0 is None:
+            self._cmds.append(["pal"])
+        else:
+            self._cmds.append(["pal", int(c0) & 63, int(c1) & 63])
+
+    def palt(self, c=None, on=None):
+        if c is None:
+            self._cmds.append(["palt"])
+        else:
+            self._cmds.append(["palt", int(c) & 63, 1 if on else 0])
+
+    def cls(self, c=0):
+        self._cmds.append(["cls", c & 63])
+
+    def pix(self, x, y, c):
+        self._cmds.append(["pix", int(x), int(y), c & 63])
+
+    def line(self, x0, y0, x1, y1, c):
+        self._cmds.append(["line", int(x0), int(y0), int(x1), int(y1), c & 63])
+
+    def rect(self, x, y, w, h, c):
+        self._cmds.append(["rect", int(x), int(y), int(w), int(h), c & 63])
+
+    def rectb(self, x, y, w, h, c):
+        self._cmds.append(["rectb", int(x), int(y), int(w), int(h), c & 63])
+
+    def circ(self, cx, cy, r, c):
+        self._cmds.append(["circ", int(cx), int(cy), int(r), c & 63])
+
+    def circb(self, cx, cy, r, c):
+        self._cmds.append(["circb", int(cx), int(cy), int(r), c & 63])
+
+    def print(self, s, x, y, c):
+        self._cmds.append(["print", str(s), int(x), int(y), c & 63])
+
+    def spr(self, img, x, y, scale=1, flip=0):
+        # SELF-CONTAINED full-pixel spr (the host command_canvas shape) so the layer
+        # stream needs no atlas. img is an Image / _SheetSprite (.w/.h/.pix/.transparent).
+        t = img.transparent
+        if t is None:
+            t = -1
+        self._cmds.append(["spr", int(x), int(y), int(scale),
+                           int(img.w), int(img.h), int(t), list(img.pix), int(flip)])
+
+
+class RecordingLayer:
+    """An off-screen layer that is BOTH a real rasterizing DeviceCanvas layer (so the
+    device PANEL renders the scroll/bar exactly as today) AND a recorder of its own
+    indexed draw-command stream (so the browser can replay it into an off-screen index
+    buffer instead of receiving RGB565 pixels). The ONE mechanism behind both the #54
+    scroll layer (make_layer/draw_layer) and the #43 cached top bar (blit_strip).
+
+    Every draw verb forwards to the real device layer canvas AND to a _LayerRecorder. A
+    stable `id` keys the deflayer; `gen` bumps once at the start of each REDRAW batch
+    (the first draw after the layer was last referenced by a blit), so a layer
+    pre-rendered once then blitted every frame ships its deflayer ONCE -- a periodically
+    rebuilt layer (the top bar repainted on a clock tick) re-ships only on the rebuild.
+
+    RECORDED VERBS: primitives + print + spr (recorded self-contained / full-pixel). A
+    map()/spr_batch() INTO a layer is not in _VERBS -- it falls through __getattr__ to the
+    real device canvas (the panel stays correct) but is NOT recorded into the layer stream;
+    no shipped cart draws a tilemap into a layer (Sky Run is primitives only), so this is a
+    documented follow-up."""
+
+    _VERBS = ("cls", "pix", "line", "rect", "rectb", "circ", "circb",
+              "spr", "print", "camera", "clip", "pal", "palt", "reset_state")
+
+    def __init__(self, canvas, recorder):
+        self._c = canvas               # the real DeviceCanvas backing the layer
+        self._lr = _LayerRecorder()
+        self.w = canvas.w
+        self.h = canvas.h
+        self.id = recorder.register_layer(self)
+        self.gen = 0
+        self._in_batch = False
+        for name in RecordingLayer._VERBS:
+            self._bind(name)
+
+    def _bind(self, name):
+        real = getattr(self._c, name)
+        rec = getattr(self._lr, name)
+
+        def fn(*args):
+            self._begin_batch()
+            r = real(*args)
+            rec(*args)
+            return r
+
+        setattr(self, name, fn)
+
+    def __getattr__(self, name):
+        # Reads not set on the layer (spr_batch/map fallbacks, sizing, _buf) go to the
+        # real device canvas. Never reached for the bound draw verbs (instance attrs).
+        return getattr(self._c, name)
+
+    def _begin_batch(self):
+        if not self._in_batch:
+            self._in_batch = True
+            self.gen += 1
+            self._lr.take()            # drop the previous redraw's stream
+
+    def _end_batch(self):
+        self._in_batch = False
+
+    def layer_cmds(self):
+        return self._lr.cmds()
+
 
 # ---------------------------------------------------------------------------
 # TeeCanvas: forward every draw call to the real DeviceCanvas (the panel still
@@ -470,11 +653,13 @@ class TeeCanvas:
 
     It mirrors the full Canvas surface the console + carts call. Reads (`pix` with two
     args, attribute reads like `.buf`/`.w`) pass straight through to the real canvas.
-    Scroll layers (new_layer) are NOT teed -- a layer is an off-screen pre-render
-    source, not part of the per-frame draw stream; its window-copy into the framebuffer
-    appears in the stream as the cls/draws around it on the main canvas. (A scrolling
-    cart's web view shows the composed frame minus the layer's static background; this
-    is a known limitation, documented for the device-verification follow-up.)"""
+
+    OFF-SCREEN LAYERS (#54 scroll + #43 cached top bar) ARE teed now: new_layer() mints a
+    RecordingLayer (a real DeviceCanvas layer for the panel + a recorded indexed command
+    stream for the browser), and blit_window_from/blit_strip record a tiny ["blit_layer",
+    ...] reference (the layer's stream ships ONCE as a deflayer at serve time). This is
+    what fixes a scroll cart's web view (it used to show black + trailing actors because
+    the layer's draws + the window-copy bypassed the recorder via __getattr__)."""
 
     def __init__(self, canvas, recorder):
         self._c = canvas
@@ -484,9 +669,34 @@ class TeeCanvas:
 
     # framebuffer-shaped reads the console uses (composite, sizing) pass through.
     def __getattr__(self, name):
-        # Only reached for attrs not set on the Tee (e.g. `buf`, `_comp`, `sync_back`,
-        # `new_layer`, `blit_window_from`). Delegate to the wrapped canvas.
+        # Only reached for attrs not set on the Tee (e.g. `buf`, `_comp`, `sync_back`).
+        # Delegate to the wrapped canvas. (new_layer/blit_window_from/blit_strip are now
+        # methods on the Tee -- they record -- so they no longer fall through here.)
         return getattr(self._c, name)
+
+    # -- off-screen layers ---------------------------------------------------
+    def new_layer(self, w, h):
+        # A real DeviceCanvas layer (the panel renders the scroll/bar) wrapped so its
+        # draws ALSO record an indexed command stream. The RecordingLayer registers
+        # itself with the recorder, so a later blit can ship its deflayer once.
+        real = self._c.new_layer(w, h)
+        return RecordingLayer(real, self._r)
+
+    def blit_window_from(self, layer, cam_x=0, cam_y=0):
+        cam_x = int(cam_x)
+        cam_y = int(cam_y)
+        layer._end_batch()                       # the redraw (if any) is done
+        if not self._r.record_only:
+            self._c.blit_window_from(layer._c, cam_x, cam_y)
+        if self._r.enabled:
+            self._r.blit_layer_window(layer, cam_x, cam_y)
+
+    def blit_strip(self, layer, dst_x=0, dst_y=0):
+        layer._end_batch()
+        if not self._r.record_only:
+            self._c.blit_strip(layer._c, dst_x, dst_y)
+        if self._r.enabled:
+            self._r.blit_layer_full(layer, dst_x, dst_y)
 
     # -- draw state ----------------------------------------------------------
     def reset_state(self):
@@ -1098,6 +1308,12 @@ class WebServer:
         # served frame is self-contained for the sprites it draws -- robust to dropped frames.
         self._served = set()
         self._served_gen = recorder.atlas_gen
+        # SERVE-TIME deflayer (#54/#43, the SAME pattern as the sprite atlas above): the
+        # layer ids we've ALREADY shipped as a ["deflayer", ...], mapped id -> the gen we
+        # shipped. A served frame referencing a layer id whose gen differs (new layer OR a
+        # redraw) re-ships its stream once. Resets on /assets (reset_served) + on a dropped
+        # atlas (atlas_gen change) so a reconnecting browser / a new cart re-gets its layers.
+        self._served_layers = {}
 
     def start(self, ip=None):
         """Open the non-blocking listening socket. `ip` is the device's STA IP (for
@@ -1168,16 +1384,22 @@ class WebServer:
         every spr index in `cmds` the browser hasn't received yet (then mark it served), so
         the frame is self-contained for its sprites even though the recorder no longer inlines
         defspr (and earlier defspr-carrying frames may have been dropped). The defspr pixels
-        are reconstructed from the recorder's atlas (defspr_cmd). Resets the served set if the
-        recorder's atlas was dropped (reset_atlas bumped atlas_gen) -- the browser does the
-        matching reset by refetching /assets + clearing its atlas on a cart change."""
+        are reconstructed from the recorder's atlas (defspr_cmd). ALSO prepends a
+        ["deflayer", ...] for every blit_layer whose layer id+gen the browser hasn't received
+        (#54/#43 ship-once layers -- the SAME serve-time mechanism). Resets both served sets
+        if the recorder's atlas was dropped (reset_atlas bumped atlas_gen) -- the browser does
+        the matching reset by refetching /assets + clearing its caches on a cart change."""
         rec = self.recorder
         if rec.atlas_gen != self._served_gen:
             self._served = set()
+            self._served_layers = {}
             self._served_gen = rec.atlas_gen
         prefix = None
         for c in cmds:
-            if c and c[0] == "spr":
+            if not c:
+                continue
+            op = c[0]
+            if op == "spr":
                 idx = c[1]
                 if idx not in self._served:
                     d = rec.defspr_cmd(idx)
@@ -1186,15 +1408,26 @@ class WebServer:
                             prefix = []
                         prefix.append(d)
                         self._served.add(idx)
+            elif op == "blit_layer":
+                lid = c[1]
+                layer = rec._layers[lid] if 0 <= lid < len(rec._layers) else None
+                if layer is not None and self._served_layers.get(lid) != layer.gen:
+                    d = rec.deflayer_cmd(lid)
+                    if d is not None:
+                        if prefix is None:
+                            prefix = []
+                        prefix.append(d)
+                        self._served_layers[lid] = layer.gen
         if prefix is None:
             return cmds
         return prefix + cmds
 
     def reset_served(self):
-        """Forget which defsprs the browser has -- so the next /frame re-ships every sprite
-        bitmap it references. Called when /assets is (re)served (a page load / cart change
-        clears the browser's atlas)."""
+        """Forget which defsprs + deflayers the browser has -- so the next /frame re-ships
+        every sprite bitmap AND layer stream it references. Called when /assets is (re)served
+        (a page load / cart change clears the browser's atlas + layer caches)."""
         self._served = set()
+        self._served_layers = {}
         self._served_gen = self.recorder.atlas_gen
 
     def begin_frame(self):
@@ -1581,6 +1814,27 @@ for(var ly=0;ly<tile;ly++){var srow=(oy+ly)*sw+ox;for(var lx=0;lx<tile;lx++){var
 if(p===ck||p<0||pt[p&63])continue;if(sc<=1)put(dx+lx,dy+ly,p);else fr(dx+lx*sc,dy+ly*sc,sc,sc,p);}}}}}
 // settiles: overwrite the cached tilemap (a cart mutated it via mset).
 function st(w,h,cells){TM={w:w,h:h,cells:cells};}
+// OFF-SCREEN LAYERS (#54 scroll + #43 cached top bar): ONE mechanism. deflayer (re)builds
+// an off-screen index buffer by REPLAYING the layer's recorded stream into it (reusing
+// rep() -- pixel-identical to the main canvas); blit_layer copies a window (draw_layer /
+// scroll) or the full layer (blit_strip / bar) into idx. The stream ships ONCE (deflayer
+// rides only the frame its gen changed); LAY keeps each built buffer by id.
+var LAY={};
+function dfl(id,lw,lh,cmds){var sI=idx,sW=W,sH=H,sX=caX,sY=caY,s0=cl0,s1=cm0,s2=cl1,s3=cm1,sm=pm,spt=pt;
+var buf=new Uint8Array(lw*lh);idx=buf;W=lw;H=lh;rs();rep(cmds);
+idx=sI;W=sW;H=sH;caX=sX;caY=sY;cl0=s0;cm0=s1;cl1=s2;cm1=s3;pm=sm;pt=spt;LAY[id]={w:lw,h:lh,buf:buf};}
+// Window-copy the W x H screen slice at (cx,cy), opaque (mirrors blit_window_from; clamped
+// to the source). Opaque + full-screen, so it also clears last frame -> no actor trails.
+function blw(L,cx,cy){cx=cx<0?0:cx|0;cy=cy<0?0:cy|0;var dw=W,dh=H,sw=L.w,src=L.buf;
+if(sw<=0||dw<=0||dh<=0)return;if(cx+dw>sw)dw=sw-cx;if(dw<=0)return;var sr=(src.length/sw)|0;
+if(cy+dh>sr)dh=sr-cy;if(dh<=0)return;for(var r=0;r<dh;r++){var d0=r*W,o0=(cy+r)*sw+cx;
+for(var x=0;x<dw;x++)idx[d0+x]=src[o0+x];}}
+// Full-copy the whole layer at (dx,dy), opaque, clamped per row/col (mirrors blit_strip).
+function blf(L,dx,dy){dx|=0;dy|=0;var dw=W,dh=H,sw=L.w,sh=L.h,src=L.buf;if(sw<=0||dw<=0||dh<=0)return;
+for(var r=0;r<sh;r++){var ty=dy+r;if(ty<0||ty>=dh)continue;var cw=sw,x0=0,t0=dx,o0=r*sw;
+if(t0<0){x0=-t0;cw+=t0;t0=0;}if(t0+cw>dw)cw=dw-t0;if(cw<=0)continue;var d0=ty*W+t0;
+for(var x=0;x<cw;x++)idx[d0+x]=src[o0+x0+x];}}
+function bl(c){var L=LAY[c[1]];if(!L)return;if(c.length>4&&c[4]==="full")blf(L,c[2],c[3]);else blw(L,c[2],c[3]);}
 function tx(s,x,y,c){if(!FONT)return;var X=x|0;y|=0;var fi=FONT.first,gw=FONT.w,g=FONT.glyphs,n=g.length;
 for(var k=0;k<s.length;k++){var gi=s.charCodeAt(k)-fi,co=(gi>=0&&gi<n)?g[gi]:g[0];
 for(var j=0;j<gw;j++){var bt=co[j],py=y;while(bt){if(bt&1)put(X+j,py,c);bt>>=1;py++;}}X+=gw;}}
@@ -1590,7 +1844,11 @@ else if(o=="line")ln(c[1],c[2],c[3],c[4],c[5]);else if(o=="rect")fr(c[1],c[2],c[
 else if(o=="rectb")rb(c[1],c[2],c[3],c[4],c[5]);else if(o=="circ")ci(c[1],c[2],c[3],c[4]);
 else if(o=="circb")cb(c[1],c[2],c[3],c[4]);
 else if(o=="defspr")ATL[c[1]]={w:c[2],h:c[3],t:c[4],px:c[5]};
-else if(o=="spr")sp(c[1],c[2],c[3],c[4],c[5]||0);
+// spr has TWO shapes: the main stream's atlas form ["spr",idx,x,y,sc,fl] (<=6 fields) and
+// a layer stream's SELF-CONTAINED full-pixel form ["spr",x,y,sc,w,h,t,pix,fl] (a pix array
+// at c[7]). Branch on the pix array so a layer's icon sprites replay without the atlas.
+else if(o=="spr"){if(c.length>7&&c[7]&&c[7].length!==undefined)blt(c[7],c[4],c[5],c[6],c[1],c[2],c[3],c[8]||0);else sp(c[1],c[2],c[3],c[4],c[5]||0);}
+else if(o=="deflayer")dfl(c[1],c[2],c[3],c[4]);else if(o=="blit_layer")bl(c);
 else if(o=="settiles")st(c[1],c[2],c[3]);else if(o=="map")mp(c[1],c[2],c[3],c[4],c[5],c[6],c[7],c[8]);
 else if(o=="print")tx(c[1],c[2],c[3],c[4]);else if(o=="reset_state")rs();
 else if(o=="camera"){caX=c[1]|0;caY=c[2]|0;}
