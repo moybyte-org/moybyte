@@ -14,10 +14,13 @@ OFF-device is exercised here:
   * THE FAITHFULNESS CROSS-CHECK: replay the recorded commands onto a host rasterizing
     Canvas (the Python twin of the browser's JS replayer) and assert it reproduces the
     same pixels the (raster-equivalent) draws would -- proving the stream is complete.
-  * THE PROTOCOL: /assets (palette + petme128 font + sheet/tilemap), /frame (the command
-    list + cart title), and /input event parsing all serialize to the host's shape.
-  * THE SERVER: the HTTP request parser + response builder + non-blocking socket server
-    over a real localhost socket (ephemeral port).
+  * THE PROTOCOL: /assets (palette + petme128 font + sheet/tilemap), the frame command
+    list + cart title, and /input event parsing all serialize to the host's shape.
+  * THE TRANSPORT (#41 WebSocket swap): the RFC 6455 handshake accept-key, WS frame
+    encode/decode (masking + the 7/16/64-bit length forms), the cross-iteration partial-frame
+    buffering, and a real-localhost WebSocket round-trip (input up + a pushed frame down)
+    when a `websockets` client lib is available. The legacy HTTP /frame & /input fallbacks
+    are still exercised over a real localhost socket (ephemeral port).
 
 The MicroPython socket layer + WiFi<->LCD coexistence are NOT exercisable in CI; those
 are called out in the device-verification checklist, not tested here.
@@ -859,6 +862,143 @@ def test_http_response_well_formed():
 
 
 # ---------------------------------------------------------------------------
+# WebSocket transport (#41 transport swap): the RFC 6455 handshake + framing. These are
+# the load-bearing pieces of the persistent live channel that replaced the per-frame HTTP
+# poll; pure functions, so fully host-testable off-device.
+# ---------------------------------------------------------------------------
+
+
+def _mask_client_frame(payload, opcode=0x1, mask=b"\x37\xfa\x21\x3d"):
+    """Build a MASKED client->server WebSocket frame (the shape a browser sends), so a test
+    can feed ws_decode the real wire bytes. Mirrors RFC 6455 5.3: MASK bit set + 4-byte key,
+    payload XOR mask[i%4]. Uses the 7/16/64-bit length form the size demands."""
+    if isinstance(payload, str):
+        payload = payload.encode("utf-8")
+    n = len(payload)
+    b0 = 0x80 | (opcode & 0x0F)
+    if n < 126:
+        hdr = bytes((b0, 0x80 | n))
+    elif n < 65536:
+        hdr = bytes((b0, 0x80 | 126, (n >> 8) & 0xFF, n & 0xFF))
+    else:
+        hdr = bytes((b0, 0x80 | 127)) + bytes((n >> (8 * (7 - i))) & 0xFF for i in range(8))
+    body = bytearray(payload)
+    for i in range(n):
+        body[i] ^= mask[i & 3]
+    return hdr + mask + bytes(body)
+
+
+def test_ws_accept_key_rfc6455_example():
+    """The RFC 6455 4.2.2 worked example: key "dGhlIHNhbXBsZSBub25jZQ==" must produce accept
+    "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=" -- base64(sha1(key + magic GUID)). The handshake response
+    must carry exactly that, plus the Upgrade/Connection switch + the 101 status line."""
+    assert web.ws_accept_key("dGhlIHNhbXBsZSBub25jZQ==") == "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+    resp = web.ws_handshake_response("dGhlIHNhbXBsZSBub25jZQ==")
+    assert resp.startswith(b"HTTP/1.1 101 Switching Protocols\r\n")
+    assert b"Upgrade: websocket\r\n" in resp
+    assert b"Connection: Upgrade\r\n" in resp
+    assert b"Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n" in resp
+
+
+def test_ws_upgrade_header_detection():
+    """The dispatcher sniffs a WebSocket upgrade off the raw request head: an Upgrade:
+    websocket request is detected (case-insensitively) and its Sec-WebSocket-Key pulled out;
+    a plain GET is not an upgrade."""
+    raw = (b"GET /ws HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\n"
+           b"Connection: Upgrade\r\nSec-WebSocket-Key: abc123==\r\n\r\n")
+    assert web.is_ws_upgrade(raw) is True
+    assert web.ws_header_key(raw) == "abc123=="
+    plain = b"GET / HTTP/1.1\r\nHost: x\r\n\r\n"
+    assert web.is_ws_upgrade(plain) is False
+    assert web.ws_header_key(plain) is None
+
+
+def test_ws_encode_is_unmasked_fin_text():
+    """A server->client frame is FIN+text (0x81), UNMASKED (no mask bit, no key), with the
+    payload appended verbatim after the length byte(s)."""
+    f = web.ws_encode("hi")               # 2 bytes < 126 -> 1-byte length
+    assert f == b"\x81\x02hi"
+    pong = web.ws_encode(b"\x01\x02", opcode=web.WS_OP_PONG)
+    assert pong[0] == 0x8A and pong[1] == 0x02 and pong[2:] == b"\x01\x02"
+
+
+def test_ws_encode_length_forms_7_16_64():
+    """ws_encode picks the 7/16/64-bit length form by size (RFC 6455 5.2): <126 inline,
+    <65536 a 126 marker + 2 bytes, else a 127 marker + 8 bytes. No mask in any form."""
+    small = web.ws_encode(b"x" * 10)
+    assert small[1] == 10                                   # 7-bit inline
+    mid = web.ws_encode(b"x" * 200)
+    assert mid[1] == 126 and mid[2] == 0 and mid[3] == 200  # 16-bit ext
+    big = web.ws_encode(b"x" * 70000)
+    assert big[1] == 127                                    # 64-bit ext
+    # 70000 = 0x011170 -> the low bytes of the 8-byte length.
+    n = 0
+    for i in range(8):
+        n = (n << 8) | big[2 + i]
+    assert n == 70000
+
+
+def test_ws_decode_roundtrip_masked_text():
+    """A masked client text frame decodes back to (text opcode, the original payload, the
+    full frame length consumed) -- the XOR-unmask must invert the browser's masking."""
+    wire = _mask_client_frame('{"events":[{"type":"hold","name":"left","down":true}]}')
+    op, payload, consumed = web.ws_decode(wire)
+    assert op == web.WS_OP_TEXT
+    assert json.loads(payload.decode("utf-8"))["events"][0]["name"] == "left"
+    assert consumed == len(wire)
+
+
+def test_ws_decode_16bit_and_64bit_length_paths():
+    """The 126 (16-bit) and 127 (64-bit, here a small value in the wide field) extended
+    length forms both decode -- the parser must read the right number of length bytes."""
+    mid_payload = "e" * 300                                  # > 125 -> 16-bit length
+    op, payload, consumed = web.ws_decode(_mask_client_frame(mid_payload))
+    assert op == web.WS_OP_TEXT and payload.decode("utf-8") == mid_payload and consumed > 300
+    # Force the 64-bit form even for a small payload, like some clients do.
+    p = b"hello"
+    mask = b"\x01\x02\x03\x04"
+    hdr = bytes((0x81, 0x80 | 127)) + bytes((len(p) >> (8 * (7 - i))) & 0xFF for i in range(8))
+    body = bytearray(p)
+    for i in range(len(p)):
+        body[i] ^= mask[i & 3]
+    wire = hdr + mask + bytes(body)
+    op, payload, consumed = web.ws_decode(wire)
+    assert op == web.WS_OP_TEXT and payload == b"hello" and consumed == len(wire)
+
+
+def test_ws_decode_incomplete_frame_yields_none():
+    """A frame split across reads -> ws_decode returns (None, None, 0) so the conn keeps the
+    partial bytes and retries next iteration (the cross-iteration buffering invariant). Every
+    truncation point (header, ext-length, mask, payload) must be 'not yet', never a misparse."""
+    wire = _mask_client_frame("x" * 300)        # uses the 16-bit length form
+    for cut in (1, 2, 3, 5, 8, len(wire) - 1):
+        assert web.ws_decode(wire[:cut]) == (None, None, 0), cut
+    # The whole frame decodes once complete.
+    op, _payload, consumed = web.ws_decode(wire)
+    assert op == web.WS_OP_TEXT and consumed == len(wire)
+
+
+def test_ws_decode_unmasked_client_frame_is_protocol_error():
+    """A client frame MUST be masked (RFC 6455 5.3); an UNMASKED one is a protocol error
+    (-1) so the conn is dropped rather than trusted. (ws_encode makes unmasked SERVER
+    frames -- feeding one back in proves the mask-required guard.)"""
+    server_frame = web.ws_encode("not a client frame")
+    op, payload, consumed = web.ws_decode(server_frame)
+    assert op == -1 and payload is None and consumed == 0
+
+
+def test_ws_decode_oversize_frame_is_protocol_error():
+    """A frame claiming more than WS_MAX_FRAME bytes is rejected (-1) BEFORE buffering its
+    payload, so a malformed/hostile client can't make us wait on an unboundedly large frame."""
+    n = web.WS_MAX_FRAME + 1
+    # A masked 64-bit-length header advertising n bytes (we don't even supply the payload).
+    hdr = bytes((0x81, 0x80 | 127)) + bytes((n >> (8 * (7 - i))) & 0xFF for i in range(8))
+    wire = hdr + b"\x00\x00\x00\x00"            # mask key, no payload
+    op, payload, consumed = web.ws_decode(wire)
+    assert op == -1 and consumed == 0
+
+
+# ---------------------------------------------------------------------------
 # The non-blocking socket server over a real localhost socket.
 # ---------------------------------------------------------------------------
 
@@ -879,6 +1019,24 @@ class _FakeProvider:
 
     def apply(self, events):
         self.applied.extend(events)
+
+
+class _FakeWSConn:
+    """A stand-in for kc_webserver._WSConn so a test can mark the server's persistent
+    WebSocket 'connected' (the recording/stream-mode liveness gate, which now keys off a
+    live WS conn instead of a recent /frame poll) without a real socket. last_recv = now
+    keeps recording_wanted() True; set it in the past to simulate an idle/dead client."""
+
+    def __init__(self, now=None):
+        self.alive = True
+        self.last_recv = web.ticks_ms() if now is None else now
+
+
+def _make_live(srv, now=None):
+    """Mark the server's WS channel live so recording_wanted()/stream_mode() are True --
+    the WS twin of 'a browser just polled /frame' in the old poll-transport tests."""
+    srv._ws = _FakeWSConn(now)
+    return srv._ws
 
 
 @pytest.fixture()
@@ -935,9 +1093,10 @@ def test_server_serves_index_html(server):
     status, ctype, body = _get(host, port, "/")
     assert status == 200 and "text/html" in ctype
     text = body.decode("utf-8")
-    # The embedded page is the replayer thin client.
+    # The embedded page is the replayer thin client -- it fetches /assets once over HTTP
+    # then opens the persistent WebSocket (/ws) for the live channel.
     assert "<canvas" in text
-    assert "/frame" in text and "/assets" in text and "/input" in text
+    assert "/assets" in text and "/ws" in text and "WebSocket" in text
 
 
 def test_server_serves_assets(server):
@@ -995,6 +1154,108 @@ def test_server_frame_post_applies_input_and_returns_frame(server):
     assert prov.applied and prov.applied[0]["name"] == "left"   # ...AND applied the input
 
 
+def test_ws_conn_buffers_partial_frames_across_reads():
+    """The cross-iteration buffering invariant (the tricky part): a _WSConn over a socket
+    pair must yield a complete inbound frame ONLY once all its bytes have arrived, retaining
+    the partial remainder between reads. Feed the masked frame ONE byte at a time and assert
+    drain_input() returns nothing until the last byte, then exactly the decoded payload."""
+    import socket as _sk
+    a, b = _sk.socketpair()
+    try:
+        conn = web._WSConn(a)                  # the device side (non-blocking reads)
+        wire = _mask_client_frame('{"events":[{"type":"press","name":"run"}]}')
+        # All but the last byte: no complete frame yet (each drain returns []).
+        for byte in wire[:-1]:
+            b.send(bytes((byte,)))
+            assert conn.drain_input() == [], "an incomplete frame must not decode early"
+        # The final byte completes it -> exactly one decoded text payload.
+        b.send(bytes((wire[-1],)))
+        got = conn.drain_input()
+        assert len(got) == 1
+        assert json.loads(got[0].decode("utf-8"))["events"][0]["name"] == "run"
+        assert conn.alive is True
+    finally:
+        a.close()
+        b.close()
+
+
+def test_ws_conn_ping_is_answered_with_pong():
+    """A WS ping (opcode 0x9) is answered inline with a pong (0xA) carrying the same payload,
+    and is NOT surfaced as input -- keepalive handled transparently in the conn."""
+    import socket as _sk
+    a, b = _sk.socketpair()
+    try:
+        conn = web._WSConn(a)
+        b.send(_mask_client_frame(b"pingdata", opcode=web.WS_OP_PING))
+        assert conn.drain_input() == [], "a ping is not input"
+        # The device side should have sent an UNMASKED pong back to b.
+        b.setblocking(False)
+        time.sleep(0.05)
+        reply = b.recv(64)
+        op, payload, _ = (reply[0] & 0x0F, reply[2:], 0) if (reply[1] & 0x80) == 0 else (None, None, 0)
+        assert op == web.WS_OP_PONG and payload == b"pingdata"
+    finally:
+        a.close()
+        b.close()
+
+
+def test_ws_end_to_end_over_localhost():
+    """A real WebSocket round-trip against the live server (when the `websockets` client lib
+    is available): connect to /ws, send an input batch UP, receive a pushed frame DOWN, and
+    assert the frame replays to pixels + the input reached the provider. This exercises the
+    actual handshake + framing + the server's _service_ws push/drain over a real socket --
+    everything but the device's MicroPython socket stack + WiFi."""
+    try:
+        import asyncio
+        import websockets
+    except Exception:  # noqa: BLE001 -- client lib not installed in this CI
+        pytest.skip("websockets client lib not available")
+
+    rec = web.DrawRecorder(WIDTH, HEIGHT)
+    prov = _FakeProvider()
+    srv = web.WebServer(rec, prov, port=0)
+    assert srv.start("127.0.0.1") is True
+    port = srv.sock.getsockname()[1]
+    stop = threading.Event()
+
+    def _pump():
+        while not stop.is_set():
+            srv.begin_frame()
+            srv.commit_frame()
+            srv.poll()
+            time.sleep(0.005)
+
+    t = threading.Thread(target=_pump, daemon=True)
+    t.start()
+
+    async def _run():
+        uri = "ws://127.0.0.1:%d/ws" % port
+        async with websockets.connect(uri) as ws:
+            # Input UP the socket.
+            await ws.send(json.dumps({"events": [{"type": "hold", "name": "up", "down": True}]}))
+            # Frame(s) PUSH down; take the first.
+            txt = await asyncio.wait_for(ws.recv(), timeout=5)
+            return txt
+
+    try:
+        txt = asyncio.get_event_loop().run_until_complete(_run())
+    finally:
+        stop.set()
+        t.join(timeout=2)
+        srv.stop()
+
+    f = json.loads(txt)
+    assert f["cmds"][0] == ["cls", 1] and f["cart"] == "Demo"
+    cv = Canvas(WIDTH, HEIGHT)
+    replay_diet(f["cmds"], cv)
+    assert len(set(cv.buf)) > 1, "the pushed frame must replay to a non-blank screen"
+    # The input we sent up must have reached the provider.
+    deadline = time.time() + 1
+    while not prov.applied and time.time() < deadline:
+        time.sleep(0.01)
+    assert prov.applied and prov.applied[0]["name"] == "up"
+
+
 def test_apply_events_routes_hold_through_on_hold_hook():
     """`hold` events must go through on_hold (which the loop re-asserts in feed_input AFTER
     keyboard.poll) -- NOT a direct set_button, which the per-frame keyboard poll would wipe
@@ -1048,19 +1309,19 @@ def test_server_frame_cap_skips_between_intervals(monkeypatch):
     srv = web.WebServer(rec, _FakeProvider(), port=0)
     assert srv.start("127.0.0.1") is True
     try:
-        # Make a browser "live": pretend a /frame fetch just happened.
-        srv._last_frame_req = clock["t"]
-        # First frame after a fetch records (last_record_ms starts at 0, far in the past).
+        # Make a browser "live": a WS client is connected (the WS-transport liveness gate).
+        wsc = _make_live(srv, clock["t"])
+        # First frame with a live client records (last_record_ms starts at 0, far in the past).
         srv.begin_frame()
         assert rec.enabled is True
         # A few ms later (within the cap interval) -> skipped, pure pass-through.
         clock["t"] += web.WEB_FRAME_INTERVAL_MS // 2
-        srv._last_frame_req = clock["t"]          # browser still polling
+        wsc.last_recv = clock["t"]                # client still active
         srv.begin_frame()
         assert rec.enabled is False, "within the cap interval the frame is not recorded"
         # Past the interval -> records again.
         clock["t"] += web.WEB_FRAME_INTERVAL_MS
-        srv._last_frame_req = clock["t"]
+        wsc.last_recv = clock["t"]
         srv.begin_frame()
         assert rec.enabled is True, "after the interval the next frame records"
     finally:
@@ -1089,12 +1350,12 @@ def test_stream_mode_gate_records_only_when_a_browser_is_live(monkeypatch):
     assert srv.stream_mode() is False
     assert srv.start("127.0.0.1") is True
     try:
-        # No /frame fetched -> a browser isn't live -> still no stream.
+        # No WS client connected -> a browser isn't live -> still no stream.
         srv.begin_frame()
         assert rec.enabled is False and rec.record_only is False
         assert srv.stream_mode() is False
-        # A browser polls -> the recorded frame goes headless (record_only True).
-        srv._last_frame_req = clock["t"]
+        # A browser's WebSocket connects -> the recorded frame goes headless (record_only True).
+        wsc = _make_live(srv, clock["t"])
         srv.begin_frame()
         assert rec.enabled is True and rec.record_only is True
         assert srv.stream_mode() is True
@@ -1103,7 +1364,7 @@ def test_stream_mode_gate_records_only_when_a_browser_is_live(monkeypatch):
         # loop's stream-mode edge fires once instead of flapping the panel on every capped
         # frame (#41 lag bug). A capped headless frame is a Tee no-op (skips panel, no record).
         clock["t"] += web.WEB_FRAME_INTERVAL_MS // 2
-        srv._last_frame_req = clock["t"]
+        wsc.last_recv = clock["t"]
         srv.begin_frame()
         assert rec.enabled is False and rec.record_only is True
     finally:
