@@ -902,13 +902,18 @@ def assets_payload(w, h, pal565, sheet, tilemap, cart_title, audio_rate=8000):
     }
 
 
-def frame_payload(cmds, cart_title, gen=0):
+def frame_payload(cmds, cart_title, gen=0, perf=None):
     """The per-frame payload: the recorded draw-command list + the cart title (so the
     client refetches /assets on a cart change) + the atlas generation `gen`. The browser
     resets its sprite atlas (ATL) ONLY when `gen` changes -- lock-step with the device's
     `served` reset -- so a /assets refetch (e.g. scrolling the launcher changes cart_title)
-    no longer wipes the atlas and strand sprites (the launcher unknown-growth bug, #41)."""
-    return {"cmds": cmds, "cart": cart_title, "gen": gen, "audio": ""}
+    no longer wipes the atlas and strand sprites (the launcher unknown-growth bug, #41).
+
+    `perf` (optional) is a tiny device-side stats dict {"heap": free KB, "pf": frames pushed
+    since boot} the browser logs alongside its own render/bandwidth numbers (#41 perf log),
+    so a single pasted line shows BOTH sides: device push-rate vs browser recv-rate (a gap =
+    frames dropped over WiFi) and free heap. None on the host poll path / older callers."""
+    return {"cmds": cmds, "cart": cart_title, "gen": gen, "audio": "", "perf": perf}
 
 
 # The logical buttons a browser key/joystick maps to (mirrors the host BUTTON_NAMES);
@@ -1321,6 +1326,9 @@ class WebServer:
         self._last_record_ms = 0      # ticks_ms of the last RECORDED frame (the fps cap)
         self._last_push_ms = 0        # ticks_ms of the last frame PUSHED down the WS (cap)
         self.requests = 0             # served-request counter (diag)
+        self._frames_pushed = 0       # frames sent down the WS since boot (#41 perf log: the
+                                      # browser diffs this to derive device push-rate vs its
+                                      # own recv-rate -- a gap = frames dropped over WiFi)
         # The PERSISTENT WebSocket client (one at a time). None = no browser connected ->
         # the recorder stays a pure pass-through (zero overhead). A new upgrade drops the
         # old conn (latest-wins). Liveness is keyed off this being non-None + not idle-timed.
@@ -1630,13 +1638,27 @@ class WebServer:
         except Exception:  # noqa: BLE001 -- a malformed message just yields no input
             pass
 
+    def _perf_snapshot(self):
+        """A tiny device-side stats dict for the per-frame payload (#41 perf log): free heap
+        (KB) + the running pushed-frame count. gc.mem_free is MicroPython-only, so it's
+        guarded -- on the host (CPython tests) heap is 0 and nothing raises."""
+        heap = 0
+        try:
+            import gc
+            heap = gc.mem_free() // 1024
+        except Exception:  # noqa: BLE001 -- no gc.mem_free on CPython; perf is best-effort
+            pass
+        return {"heap": heap, "pf": self._frames_pushed}
+
     def _push_frame(self, ws):
         """Send the latest committed frame as a WS text message: the SAME frame_payload (run
         through served_frame for the serve-time defspr prepend + the atlas gen) the HTTP
         /frame path returned -- only the transport differs."""
         cmds, cart = self.provider.frame()
         cmds = self.served_frame(cmds)
-        ws.send(json.dumps(frame_payload(cmds, cart, self.recorder.atlas_gen)))
+        self._frames_pushed += 1
+        ws.send(json.dumps(frame_payload(cmds, cart, self.recorder.atlas_gen,
+                                         self._perf_snapshot())))
 
     def _http_send_close(self, conn, data):
         """sendall `data` (with a short send budget) then close -- the one-shot HTTP path."""
@@ -1709,8 +1731,9 @@ class WebServer:
                     pass
             cmds, cart = self.provider.frame()
             cmds = self.served_frame(cmds)
+            self._frames_pushed += 1
             self._http_send_close(conn, http_response(200, json.dumps(
-                frame_payload(cmds, cart, self.recorder.atlas_gen))))
+                frame_payload(cmds, cart, self.recorder.atlas_gen, self._perf_snapshot()))))
         elif method == "POST" and path == "/input":
             events = []
             if body:
@@ -1795,6 +1818,17 @@ var SHEET=null,TM=null,ATL=[],curGen=-1;
 // (a spr that references an ATL slot with no defspr -- this would've caught the dropped-
 // defspr bug instantly). All cheap; the overlay only redraws when shown.
 var HUD={on:false,fps:0,kb:0,unknown:0,el:document.getElementById("hud"),last:0};
+// Periodic perf LOG (#41): one console.log line every PERF_MS with the client's recv +
+// render fps, bandwidth, avg/peak payload, AND the device's push-rate + free heap (from
+// f.perf). A single pasted line tells device-bound (low dev fps, small payloads, bw under
+// ~72KB/s) from WiFi-bound (dev fps >> recv fps, bw pinned near ~72KB/s) stutter.
+var PERF_MS=2000,PERF={f:0,b:0,pk:0,t:0,dh:0,pf:0,lpf:0};
+function plog(){var now=(window.performance&&performance.now)?performance.now():Date.now();
+if(!PERF.t){PERF.t=now;PERF.lpf=PERF.pf;return;}var dt=(now-PERF.t)/1000;if(dt<=0)return;
+console.log("[kidcode] "+(assCart||"?")+" | recv "+(PERF.f/dt).toFixed(1)+" render "+HUD.fps.toFixed(1)
++" dev "+((PERF.pf-PERF.lpf)/dt).toFixed(1)+" fps | bw "+(PERF.b/dt/1024).toFixed(1)+" KB/s avg "
++(PERF.f?(PERF.b/PERF.f/1024):0).toFixed(2)+" peak "+(PERF.pk/1024).toFixed(2)+" KB | heap "+PERF.dh
++" KB | unknown "+HUD.unknown);PERF.f=0;PERF.b=0;PERF.pk=0;PERF.t=now;PERF.lpf=PERF.pf;}
 function alloc(){cv.width=W;cv.height=H;cx=cv.getContext("2d");cx.imageSmoothingEnabled=false;
 idx=new Uint8Array(W*H);img=cx.createImageData(W,H);rgba=img.data;}
 function getA(){return fetch("/assets").then(function(r){return r.json();}).then(function(a){
@@ -1930,7 +1964,8 @@ function pv(){return[(pH.ArrowRight?1:0)-(pH.ArrowLeft?1:0),(pH.ArrowDown?1:0)-(
 // the device's `gen` (lock-step with its served reset), NOT by the cart change -- so scrolling
 // the launcher (which changes cart_title -> /assets refetch) no longer wipes ATL and strands
 // sprites (the unknown-growth bug, #41).
-function df(f){if(f.gen!==curGen){curGen=f.gen;ATL=[];LAY={};HUD.unknown=0;}
+function df(f){if(f.perf){PERF.dh=f.perf.heap;PERF.pf=f.perf.pf;}
+if(f.gen!==curGen){curGen=f.gen;ATL=[];LAY={};HUD.unknown=0;}
 if(f.cart!==assCart){assCart=f.cart;getA().catch(function(){});}rep(f.cmds||[]);blit();
 var t=(window.performance&&performance.now)?performance.now():Date.now();if(HUD.last){var inst=1000/Math.max(1,t-HUD.last);
 HUD.fps=HUD.fps?HUD.fps+(inst-HUD.fps)*0.2:inst;}HUD.last=t;if(HUD.on)drawHud();
@@ -1945,7 +1980,8 @@ function connect(){if(reconn){clearTimeout(reconn);reconn=null;}
 try{ws=new WebSocket((location.protocol=="https:"?"wss://":"ws://")+location.host+"/ws");}
 catch(e){retry();return;}
 ws.onopen=function(){wsOpen=true;ok=false;sEl.textContent="live";sEl.style.color="#00e436";};
-ws.onmessage=function(ev){HUD.kb=ev.data.length/1024;var f;try{f=JSON.parse(ev.data);}catch(e){return;}df(f);};
+ws.onmessage=function(ev){var n=ev.data.length;HUD.kb=n/1024;PERF.f++;PERF.b+=n;if(n>PERF.pk)PERF.pk=n;
+var f;try{f=JSON.parse(ev.data);}catch(e){return;}df(f);};
 ws.onclose=function(){wsOpen=false;retry();};
 ws.onerror=function(){try{ws.close();}catch(e){}};}
 // Reconnect with a small fixed backoff (the device drops the old socket when a new one
@@ -1962,6 +1998,6 @@ HUD.el.innerHTML="fps <b>"+HUD.fps.toFixed(1)+"</b>   "+HUD.kb.toFixed(2)+" KB/f
 window.addEventListener("keydown",function(e){if(e.key==="`"||e.key==="~"){HUD.on=!HUD.on;
 HUD.el.style.display=HUD.on?"block":"none";if(HUD.on)drawHud();e.preventDefault();}});
 // Fetch /assets once over HTTP, then open the WebSocket; pump queued input up on a timer.
-getA().then(function(){connect();setInterval(flush,Math.round(1000/FPS));}).catch(function(){
+getA().then(function(){connect();setInterval(flush,Math.round(1000/FPS));setInterval(plog,PERF_MS);}).catch(function(){
 sEl.textContent="no assets";sEl.style.color="#ff004d";});cv.focus();
 </script></body></html>"""

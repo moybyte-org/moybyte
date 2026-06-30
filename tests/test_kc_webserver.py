@@ -984,12 +984,29 @@ def test_assets_includes_sheet_when_a_cart_is_open():
 
 
 def test_frame_payload_shape():
-    """/frame is {cmds, cart, audio} -- matches the host minus PCM (the device web view
-    doesn't stream audio)."""
+    """/frame is {cmds, cart, gen, audio, perf} -- matches the host minus PCM (the device
+    web view doesn't stream audio). `perf` defaults to None and carries the device stats."""
     cmds = [["cls", 1], ["rect", 0, 0, 10, 10, 2]]
     p = web.frame_payload(cmds, "Pong")
-    assert p["cmds"] == cmds and p["cart"] == "Pong" and p["audio"] == ""
+    assert p["cmds"] == cmds and p["cart"] == "Pong" and p["audio"] == "" and p["perf"] is None
     json.dumps(p)
+    p2 = web.frame_payload(cmds, "Pong", 3, {"heap": 1234, "pf": 9})
+    assert p2["gen"] == 3 and p2["perf"] == {"heap": 1234, "pf": 9}
+    json.dumps(p2)
+
+
+def test_perf_snapshot_shape_and_push_count():
+    """_perf_snapshot() is the tiny device-stats dict the perf log rides on: {heap, pf}.
+    heap is gc.mem_free KB (0 on CPython -- gc.mem_free is MicroPython-only, guarded), and
+    pf is the running pushed-frame counter that lets the browser derive device push-rate."""
+    rec = web.DrawRecorder(WIDTH, HEIGHT)
+    server = _serveable(rec)
+    snap = server._perf_snapshot()
+    assert set(snap.keys()) == {"heap", "pf"}
+    assert isinstance(snap["heap"], int) and isinstance(snap["pf"], int)
+    assert snap["pf"] == 0
+    server._frames_pushed += 2                       # _push_frame bumps this per sent frame
+    assert server._perf_snapshot()["pf"] == 2
 
 
 # ---------------------------------------------------------------------------
