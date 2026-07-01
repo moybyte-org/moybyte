@@ -846,6 +846,139 @@ class Layout:
         # The clock-text region in the top bar's right cluster (Time Traveler egg #21).
         return (self.clock_x, 0, self.clock_w, self.status_h)
 
+
+class CodeLayout:
+    """Responsive code-editor geometry (#39 step 2): the top bar (title + run/save/
+    close icons), the COLS x ROWS text grid, the caret/gutter, and the bottom symbol
+    palette -- all derived from the SYSTEM canvas size (w, h) + font scale, instead
+    of the hand-placed 320x240 constants. On a larger panel the editor shows MORE
+    visible lines + WIDER columns; at a bigger font everything (cell, bar, palette)
+    grows with the text.
+
+    The single hard contract (mirrors `Layout`): at (w, h, fs) == (320, 240, 1)
+    every field equals the frozen `_CODE_*`/`_SYM_*`/`_ED_*` module constant, byte
+    for byte -- so the degradation path is exactly today. That baseline is
+    reproduced VERBATIM (the `_base` branch); the responsive formulas only run on a
+    larger canvas / bigger font.
+
+    `cell` is the on-screen char-cell width (8 * fs); `lh` the line height. `cols` /
+    `rows` are how many fit -- the CodeEditor's view window adopts them so it scrolls
+    the right span."""
+
+    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1):
+        self.w = int(w)
+        self.h = int(h)
+        self.fs = max(1, int(font_scale))
+        fs = self.fs
+        self.cell = _FONT_W * fs                  # char-cell width (8*fs)
+        self.lh = _CODE_LH * fs                   # line height
+        self._base = (self.w == _BASE_W and self.h == _BASE_H and fs == 1)
+        # -- symbol palette (bottom strip): one cell per coding symbol -----------
+        self.sym_cell = _SYM_CELL * fs
+        self.sym_h = _SYM_H * fs
+        self.sym_y = self.h - self.sym_h
+        self.sym_area = (0, self.sym_y, self.sym_cell * len(_CODE_SYMBOLS), self.sym_h)
+        # -- top bar (title + action icons), code area origin --------------------
+        self.x0 = _CODE_X0 * fs
+        self.y0 = _CODE_Y0 * fs
+        if self._base:
+            self.run_btn, self.save_btn, self.close_btn = _ED_RUN, _ED_SAVE, _ED_CLOSE
+        else:
+            bw = 16 * fs
+            bh = 14 * fs
+            gap = 1 * fs
+            x_close = self.w - (15 * fs)
+            x_save = x_close - bw - gap
+            x_run = x_save - bw - gap
+            self.run_btn = (x_run, 1 * fs, bw, bh)
+            self.save_btn = (x_save, 1 * fs, bw, bh)
+            self.close_btn = (x_close, 1 * fs, 15 * fs, bh)
+        # -- the COLS x ROWS text grid (fills between the top bar + palette) ------
+        if self._base:
+            self.cols = CodeEditor.COLS          # 38
+            self.rows = CodeEditor.ROWS          # 20
+        else:
+            avail_w = self.w - self.x0
+            self.cols = max(8, avail_w // self.cell)
+            avail_h = self.sym_y - self.y0
+            self.rows = max(4, avail_h // self.lh)
+
+    def code_area(self):
+        return (self.x0, self.y0, self.cols * self.cell, self.rows * self.lh)
+
+
+class BlockLayout:
+    """Responsive block-editor geometry (#39 step 2): the scrolling outline (X0/W/
+    Y0, row height + indent, visible ROWS), the bottom action bar, and the modal
+    insert menu -- derived from the SYSTEM canvas size (w, h) + font scale instead of
+    the 320x240 `_BLK_*` constants. A larger panel shows MORE rows + WIDER blocks; a
+    bigger font scales the rows/text/buttons.
+
+    Same hard contract as `Layout`: at (320, 240, 1) every field equals the frozen
+    `_BLK_*` constant verbatim (the `_base` branch), so the degradation path is
+    pixel-identical to today."""
+
+    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1):
+        self.w = int(w)
+        self.h = int(h)
+        self.fs = max(1, int(font_scale))
+        fs = self.fs
+        self.cell = _FONT_W * fs
+        self._base = (self.w == _BASE_W and self.h == _BASE_H and fs == 1)
+        self.title_y = _BLK_TITLE_Y * fs
+        self.status_x = 198 * fs                  # the SAVE-status text x (right side)
+        self.hint_y = 9 * fs
+        self.row_h = _BLK_ROW_H * fs
+        self.indent = _BLK_INDENT * fs
+        self.x0 = _BLK_X0 * fs
+        self.y0 = _BLK_Y0 * fs
+        # -- action bar: a row of buttons anchored to the bottom -----------------
+        if self._base:
+            self.bar_y = 196
+            self.bar_h = 22
+            self.add_btn, self.del_btn = _BLK_ADD, _BLK_DEL
+            self.up_btn, self.dn_btn = _BLK_UP, _BLK_DN
+            self.save_btn, self.code_btn, self.close_btn = \
+                _BLK_SAVE, _BLK_CODE, _BLK_CLOSE
+        else:
+            self.bar_h = 22 * fs
+            self.bar_y = self.h - self.bar_h - 2 * fs
+            by, bh = self.bar_y, self.bar_h
+            # left cluster: ADD / DEL / up / dn ; right cluster: SAVE / CODE / CLOSE
+            x = self.x0
+            self.add_btn = (x, by, 40 * fs, bh); x += 42 * fs
+            self.del_btn = (x, by, 34 * fs, bh); x += 36 * fs
+            self.up_btn = (x, by, 22 * fs, bh); x += 24 * fs
+            self.dn_btn = (x, by, 22 * fs, bh)
+            cx = self.w - self.x0 - 66 * fs
+            self.close_btn = (cx, by, 66 * fs, bh)
+            self.code_btn = (cx - 58 * fs, by, 56 * fs, bh)
+            self.save_btn = (cx - 58 * fs - 52 * fs, by, 50 * fs, bh)
+        # -- outline width + visible rows ----------------------------------------
+        if self._base:
+            self.outline_w = _BLK_W              # 308
+            self.rows = _BLK_ROWS                # 11
+        else:
+            self.outline_w = self.w - 2 * self.x0
+            avail_h = self.bar_y - self.y0
+            self.rows = max(3, avail_h // self.row_h)
+        # -- modal insert menu (centered, scales with the canvas/font) -----------
+        self.menu_row_h = _BLK_MENU_ROW_H * fs
+        if self._base:
+            self.menu = _BLK_MENU                # (40, 24, 240, 192)
+            self.menu_rows = _BLK_MENU_ROWS      # 10
+        else:
+            mw = min(self.w - 16 * fs, 240 * fs)
+            mh = min(self.h - 24 * fs, self.bar_y - 24 * fs)
+            mx = (self.w - mw) // 2
+            my = 24 * fs
+            self.menu = (mx, my, mw, mh)
+            self.menu_rows = max(3, (mh - 16 * fs) // self.menu_row_h)
+
+    def area(self):
+        return (self.x0, self.y0, self.outline_w, self.rows * self.row_h)
+
+
 # --- Button icon glyphs (the pre-literate icon vocabulary) ------------------
 # 1-bit, recolorable pixel bitmaps designed on a 12x12 grid at the native button
 # size (boxes are 14-16px), then centered in each button's rect and blitted in
@@ -1660,6 +1793,16 @@ class Workstation:
             self._sys_canvas.set_font_scale(self.font_scale)
         self.layout = Layout(self.sys_canvas.w, self.sys_canvas.h,
                              self._effective_font_scale())
+        # Responsive editor geometry (#39 step 2): the code + block editors now draw
+        # on the SYSTEM canvas at native size, so their layout (visible cols/rows,
+        # button rects, palette/menu) derives from (w, h, font_scale) -- exactly the
+        # _base-verbatim pattern Layout uses for the desktop. Rebuilt by _relayout on
+        # a size/font change. (Sprite/paint + map editors stay a 320x240 viewport --
+        # step 3.)
+        self.code_layout = CodeLayout(self.sys_canvas.w, self.sys_canvas.h,
+                                      self._effective_font_scale())
+        self.block_layout = BlockLayout(self.sys_canvas.w, self.sys_canvas.h,
+                                        self._effective_font_scale())
         self.input = input
         self.make_api = None       # injected: make_api(canvas, input, cfg, sheet, audio, tilemap, pmem, wifi)->ns
         self.make_audio = None      # injected: make_audio(engine)->audio backend (host/device)
@@ -2035,9 +2178,17 @@ class Workstation:
         """Rebuild the responsive layout from the live system-canvas size + the
         EFFECTIVE font scale and re-push it into the launcher (so its grid reflows).
         Called on a font-scale change (and could be called on a resize)."""
-        self.layout = Layout(self.sys_canvas.w, self.sys_canvas.h,
-                             self._effective_font_scale())
+        w, h, fs = self.sys_canvas.w, self.sys_canvas.h, self._effective_font_scale()
+        self.layout = Layout(w, h, fs)
         self.launcher.set_layout(self.layout)
+        # Editor layouts reflow too (#39 step 2); an open code editor adopts the new
+        # visible window live so a font/size change reflows it without losing the buffer.
+        self.code_layout = CodeLayout(w, h, fs)
+        self.block_layout = BlockLayout(w, h, fs)
+        if self.editor is not None:
+            self.editor.set_view_size(self.code_layout.cols, self.code_layout.rows)
+        if self.blocks_ed is not None:
+            self._blk_reveal()
 
     def _persist_font_scale(self):
         self.system["font_scale"] = self.font_scale
@@ -2969,7 +3120,9 @@ class Workstation:
         self.menu_view = view
         if view == "code":
             if self.editor is None and self.cart is not None:
-                self.editor = CodeEditor(self.cart["src"])
+                self.editor = CodeEditor(self.cart["src"],
+                                         cols=self.code_layout.cols,
+                                         rows=self.code_layout.rows)
                 self._ekey_prev = 0
                 if self.crash_line is not None:
                     # Opened after a runtime crash -> land on the line that raised.
@@ -4136,24 +4289,32 @@ class Workstation:
                     # input -- the touch lands on a small bottom-right corner box.
                     self.perf_hud = not self.perf_hud
         elif self.screen == "menu":
-            px, py = gx, gy                    # editors live in the 320x240 viewport
+            # The code + block editors are responsive (#39 step 2): they draw on the
+            # SYSTEM canvas at native size, so they hit-test in SYSTEM coords (the raw
+            # pointer), NOT the 320x240 game viewport. The sprite/paint + map editors
+            # + cards are still a game-canvas viewport (step 3), so those translate.
             if self.menu_view == "code":
+                lay = self.code_layout
                 self._code_drag(px, py)        # touch/mouse drag pans the viewport
                 if click:
-                    if _in(px, py, _ED_RUN):
+                    if _in(px, py, lay.run_btn):
                         self.run_code()
-                    elif _in(px, py, _ED_SAVE):
+                    elif _in(px, py, lay.save_btn):
                         self.save_code()
-                    elif _in(px, py, _ED_CLOSE):
+                    elif _in(px, py, lay.close_btn):
                         self._leave_menu()
-                    elif _in(px, py, _SYM_AREA) and self.editor is not None:
-                        i = (px - _SYM_AREA[0]) // _SYM_CELL   # tap a coding symbol
+                    elif _in(px, py, lay.sym_area) and self.editor is not None:
+                        i = (px - lay.sym_area[0]) // lay.sym_cell  # tap a coding symbol
                         if 0 <= i < len(_CODE_SYMBOLS):
                             self.editor.key(ord(_CODE_SYMBOLS[i]))
-                    elif self.editor is not None and _in(px, py, _CODE_AREA):
-                        self.editor.place((px - _CODE_X0) // 8,
-                                          (py - _CODE_Y0) // _CODE_LH)
+                    elif self.editor is not None and _in(px, py, lay.code_area()):
+                        self.editor.place((px - lay.x0) // lay.cell,
+                                          (py - lay.y0) // lay.lh)
                 return
+            if self.menu_view == "blocks":
+                self._blocks_pointer(px, py, click)   # outline + insert menu (#29)
+                return
+            px, py = gx, gy                    # paint/map/cards live in the viewport
             if self.menu_view in ("paint", "theme"):
                 # A tap (click) routes through _paint_click (grid OR buttons). A
                 # held drag with no fresh click keeps painting the grid stroke so
@@ -4181,9 +4342,6 @@ class Workstation:
                     self._map_pan_drag(px, py)
                 else:
                     self._map_release(px, py)
-                return
-            if self.menu_view == "blocks":
-                self._blocks_pointer(px, py, click)   # outline + insert menu (#29)
                 return
             if self.menu_view == "music":
                 if click:
@@ -4218,15 +4376,17 @@ class Workstation:
     def _code_drag(self, px, py):
         # Touch/mouse drag inside the code area pans the viewport (content follows
         # the finger): drag down -> see earlier lines, drag right -> see left text.
+        # SYSTEM coords + layout cell/line height (#39 step 2).
         ed = self.editor
-        if ed is None or not self.pointer.down or not _in(px, py, _CODE_AREA):
+        lay = self.code_layout
+        if ed is None or not self.pointer.down or not _in(px, py, lay.code_area()):
             self._drag = None
             return
         if self._drag is None:
             self._drag = (px, py)
             return
-        drows = (py - self._drag[1]) // _CODE_LH
-        dcols = (px - self._drag[0]) // 8
+        drows = (py - self._drag[1]) // lay.lh
+        dcols = (px - self._drag[0]) // lay.cell
         if drows or dcols:
             ed.scroll(-drows, -dcols)
             self._drag = (px, py)
@@ -4576,15 +4736,17 @@ class Workstation:
     # the BlockEditor core (runtime/editors.py) owns the tree edits, this owns the UI.
 
     def _blk_reveal(self):
-        """Keep the block cursor inside the visible outline window (scrolloff)."""
+        """Keep the block cursor inside the visible outline window (scrolloff). The
+        window height is the layout's reflowed row count (#39 step 2)."""
         be = self.blocks_ed
         if be is None:
             return
+        nrows = self.block_layout.rows
         if be.cur < self.blk_top:
             self.blk_top = be.cur
-        elif be.cur > self.blk_top + _BLK_ROWS - 1:
-            self.blk_top = be.cur - _BLK_ROWS + 1
-        maxtop = len(be.rows) - _BLK_ROWS
+        elif be.cur > self.blk_top + nrows - 1:
+            self.blk_top = be.cur - nrows + 1
+        maxtop = len(be.rows) - nrows
         if maxtop < 0:
             maxtop = 0
         self.blk_top = max(0, min(maxtop, self.blk_top))
@@ -4674,11 +4836,12 @@ class Workstation:
         m = self.blk_menu
         if not m or not m["items"]:
             return
+        mrows = self.block_layout.menu_rows
         m["sel"] = max(0, min(len(m["items"]) - 1, m["sel"] + d))
         if m["sel"] < m["top"]:
             m["top"] = m["sel"]
-        elif m["sel"] > m["top"] + _BLK_MENU_ROWS - 1:
-            m["top"] = m["sel"] - _BLK_MENU_ROWS + 1
+        elif m["sel"] > m["top"] + mrows - 1:
+            m["top"] = m["sel"] - mrows + 1
 
     def _blk_menu_select(self):
         """Activate the highlighted menu item (drill in or commit)."""
@@ -5167,6 +5330,7 @@ class Workstation:
                 self._blk_bump_number(b, slot["name"], -1)
 
     def _blocks_pointer(self, px, py, click):
+        # SYSTEM coords + the responsive BlockLayout (#39 step 2).
         if not click:
             return
         if self.blk_kbd is not None:
@@ -5178,25 +5342,26 @@ class Workstation:
         be = self.blocks_ed
         if be is None:
             return
+        lay = self.block_layout
         # Action bar
-        if _in(px, py, _BLK_ADD):
+        if _in(px, py, lay.add_btn):
             self._blk_open_categories(); return
-        if _in(px, py, _BLK_DEL):
+        if _in(px, py, lay.del_btn):
             be.delete(); self.blk_slot = 0; self._blk_reveal(); return
-        if _in(px, py, _BLK_UP):
+        if _in(px, py, lay.up_btn):
             be.move_block(-1); self._blk_reveal(); return
-        if _in(px, py, _BLK_DN):
+        if _in(px, py, lay.dn_btn):
             be.move_block(1); self._blk_reveal(); return
-        if _in(px, py, _BLK_SAVE):
+        if _in(px, py, lay.save_btn):
             self.save_blocks(); return
-        if _in(px, py, _BLK_CODE):
+        if _in(px, py, lay.code_btn):
             self.graduate_to_code(); return
-        if _in(px, py, _BLK_CLOSE):
+        if _in(px, py, lay.close_btn):
             self._leave_menu(); return
         # Tap a row in the outline: select it (and on a block, advance the slot
         # highlight / open the insert menu on a `+` row -- a tap == the A action).
-        if _in(px, py, _BLK_AREA):
-            ridx = self.blk_top + (py - _BLK_Y0) // _BLK_ROW_H
+        if _in(px, py, lay.area()):
+            ridx = self.blk_top + (py - lay.y0) // lay.row_h
             if 0 <= ridx < len(be.rows):
                 if ridx == be.cur:
                     self._blk_a()                # a second tap acts (insert / edit)
@@ -5209,11 +5374,12 @@ class Workstation:
         m = self.blk_menu
         if not m:
             return
-        mx, my, mw, mh = _BLK_MENU
-        if not _in(px, py, _BLK_MENU):
+        lay = self.block_layout
+        mx, my, mw, mh = lay.menu
+        if not _in(px, py, lay.menu):
             self.blk_menu = None                 # tap outside dismisses
             return
-        ridx = m["top"] + (py - (my + 16)) // _BLK_MENU_ROW_H
+        ridx = m["top"] + (py - (my + 16 * lay.fs)) // lay.menu_row_h
         if 0 <= ridx < len(m["items"]):
             m["sel"] = ridx
             self._blk_menu_select()
@@ -5581,13 +5747,16 @@ class Workstation:
             self._draw_fps()
             if self.perf_hud:
                 self._draw_perf_hud()      # frame-time breakdown above the FPS chip
-        # Two-domain seam (#39): the "desktop" (running cart) + "menu" (editors) drew
-        # on the fixed 320x240 GAME canvas above; composite it into the SYSTEM canvas
-        # as a centered, integer-scaled viewport. The "launcher"/"settings" screens
-        # already drew straight on the system canvas, so they skip the composite. A
+        # Two-domain seam (#39): the "desktop" (running cart) + the cards/paint/map
+        # editors drew on the fixed 320x240 GAME canvas above; composite it into the
+        # SYSTEM canvas as a centered, integer-scaled viewport. The launcher/settings
+        # screens -- and now the RESPONSIVE code + block editors (#39 step 2), which
+        # draw straight on the system canvas at native size -- skip the composite. A
         # no-op when the two canvases are the same object (the 320x240 degradation
         # case -> pixel-identical to today).
-        if self.screen in ("desktop", "menu"):
+        composite = self.screen == "desktop" or (
+            self.screen == "menu" and self.menu_view not in ("code", "blocks"))
+        if composite:
             self._composite_game()
         # Achievements + Easter eggs (#21) overlay on TOP of every screen, so an
         # unlock celebration / secret popup is always visible and never disturbs the
@@ -6214,24 +6383,39 @@ class Workstation:
                 cv.print(label, x + 16, y + 3, NAMES["light_grey"], 1)
         cv.print("TAP TO CLOSE", 110, 210, NAMES["light_grey"], 1)
 
-    def _btn(self, label, rect, fill):
+    def _btn(self, label, rect, fill, cv=None):
+        # Defaults to the GAME canvas (paint/map editors -- a 320x240 viewport); the
+        # responsive code/block editors (#39 step 2) pass cv=self.sys_canvas so the
+        # button + its label scale with the system font. On a plain Canvas font_scale
+        # is 1, so this is byte-identical to the original.
+        if cv is None:
+            cv = self.canvas
         x, y, w, h = rect
-        cv = self.canvas
+        fs = getattr(cv, "font_scale", 1)
         cv.rect(x, y, w, h, fill)
         cv.rectb(x, y, w, h, NAMES["white"])
-        cv.print(label, x + 6, y + (h - 8) // 2, NAMES["black"], 2)
+        # Baseline: the game canvas printed the label at scale 2 (16px) but centered
+        # with height 8 (the legacy quirk) -- preserve that VERBATIM at fs==1. On the
+        # system canvas SystemCanvas renders petme128 at font_scale (the `2` arg is
+        # ignored), so the on-screen text is 8*fs tall -- center it with that.
+        if fs <= 1:
+            cv.print(label, x + 6, y + (h - 8) // 2, NAMES["black"], 2)
+        else:
+            cv.print(label, x + 6 * fs, y + (h - 8 * fs) // 2, NAMES["black"], 2)
 
-    def _icon_btn(self, kind, label, rect, fill):
+    def _icon_btn(self, kind, label, rect, fill, cv=None):
         """A button that leads with an icon glyph (pre-literate) and keeps the
         word as a small secondary cue beside it -- so a reader still gets the
         label and a kid who can't read still gets the picture."""
+        if cv is None:
+            cv = self.canvas
         x, y, w, h = rect
-        cv = self.canvas
+        fs = getattr(cv, "font_scale", 1)
         cv.rect(x, y, w, h, fill)
         cv.rectb(x, y, w, h, NAMES["white"])
-        self._glyph(kind, (x + 2, y, 16, h), NAMES["black"])
+        self._glyph(kind, (x + 2 * fs, y, 16 * fs, h), NAMES["black"], cv)
         if label:
-            cv.print(label, x + 19, y + (h - 8) // 2, NAMES["black"], 1)
+            cv.print(label, x + 19 * fs, y + (h - 8 * fs) // 2, NAMES["black"], 1)
 
     def _draw_error_panel(self):
         # A friendly on-canvas crash report (the device never reaches serial, so
@@ -6406,40 +6590,50 @@ class Workstation:
                      NAMES["yellow"] if k == sel_k else NAMES["dark_grey"])
 
     def _draw_code(self):
-        cv = self.canvas
+        # Responsive (#39 step 2): the code editor draws on the SYSTEM canvas at
+        # native size, so a bigger panel shows more lines + wider columns and a
+        # bigger font scales the text. All positions come from CodeLayout (verbatim
+        # baseline at 320x240/1x). The editor's COLS/ROWS already track the layout.
+        cv = self.sys_canvas
+        lay = self.code_layout
+        fs = lay.fs
+        cell = lay.cell                          # on-screen char-cell width (8*fs)
+        lh = lay.lh
         ed = self.editor
         cv.cls(NAMES["black"])                  # full-screen editor
         # top bar: cart title (+ unsaved marker) and the action icons
-        title = self.cart["title"][:31]
+        tclamp = 31 if lay._base else max(8, (lay.run_btn[0] - 2) // cell)
+        title = self.cart["title"][:tclamp]
         if ed is not None and ed.dirty:
             title = title + " *"
-        cv.print(title, 2, 3, NAMES["green"], 1)
-        self._draw_icon("run", _ED_RUN)
-        self._draw_icon("save", _ED_SAVE)
-        self._draw_icon("close", _ED_CLOSE)
+        cv.print(title, 2, 3 if lay._base else 3 * fs, NAMES["green"], 1)
+        self._draw_icon("run", lay.run_btn)
+        self._draw_icon("save", lay.save_btn)
+        self._draw_icon("close", lay.close_btn)
         # code area (horizontal scroll: columns [left, left+COLS))
         if ed is not None:
+            cols = ed.COLS
             vis = ed.visible_lines()
             errrow = self.code_err_row
             for idx in range(len(vis)):
-                y = _CODE_Y0 + idx * _CODE_LH
+                y = lay.y0 + idx * lh
                 full = vis[idx]
                 on_err = errrow is not None and ed.top + idx == errrow
                 if on_err:                      # inline error: gutter mark + underline (#24)
-                    cv.rect(0, y, 3, 8, NAMES["red"])
-                    cv.rect(_CODE_X0, y + 8, CodeEditor.COLS * 8, 1, NAMES["red"])
-                seg = full[ed.left:ed.left + CodeEditor.COLS]
-                segcols = self._hl(full)[ed.left:ed.left + CodeEditor.COLS]
+                    cv.rect(0, y, 3 * fs, 8 * fs, NAMES["red"])
+                    cv.rect(lay.x0, y + 8 * fs, cols * cell, fs, NAMES["red"])
+                seg = full[ed.left:ed.left + cols]
+                segcols = self._hl(full)[ed.left:ed.left + cols]
                 self._draw_code_runs(seg, segcols, y)
                 if on_err and self.code_err:    # short reason after the code, if it fits
                     mcol = len(seg) + 1
-                    if mcol < CodeEditor.COLS - 2:
-                        cv.print(self.code_err[:CodeEditor.COLS - mcol],
-                                 _CODE_X0 + mcol * 8, y, NAMES["red"], 1)
+                    if mcol < cols - 2:
+                        cv.print(self.code_err[:cols - mcol],
+                                 lay.x0 + mcol * cell, y, NAMES["red"], 1)
                 if ed.top + idx == ed.row:      # caret on the cursor's line
                     vcol = ed.col - ed.left
-                    if 0 <= vcol <= CodeEditor.COLS:
-                        cv.rect(_CODE_X0 + vcol * 8, y, 1, 8, NAMES["yellow"])
+                    if 0 <= vcol <= cols:
+                        cv.rect(lay.x0 + vcol * cell, y, fs, 8 * fs, NAMES["yellow"])
         self._draw_symbols()
 
     def _hl(self, line):
@@ -6454,8 +6648,11 @@ class Workstation:
         return cols
 
     def _draw_code_runs(self, seg, segcols, y):
-        """Draw one code line as runs of same-colored text (#24)."""
-        cv = self.canvas
+        """Draw one code line as runs of same-colored text (#24). On the SYSTEM
+        canvas at the layout's char-cell width (8*fs), so it scales with the font."""
+        cv = self.sys_canvas
+        lay = self.code_layout
+        x0, cell = lay.x0, lay.cell
         n = len(seg)
         i = 0
         while i < n:
@@ -6463,26 +6660,34 @@ class Workstation:
             j = i + 1
             while j < n and segcols[j] == cl:
                 j += 1
-            cv.print(seg[i:j], _CODE_X0 + i * 8, y, cl, 1)
+            cv.print(seg[i:j], x0 + i * cell, y, cl, 1)
             i = j
 
     def _draw_symbols(self):
-        # Tappable coding-symbol palette (supplies what the keyboard can't type).
-        cv = self.canvas
+        # Tappable coding-symbol palette (supplies what the keyboard can't type). On
+        # the SYSTEM canvas; cell + text scale with the layout/font (#39 step 2).
+        cv = self.sys_canvas
+        lay = self.code_layout
+        fs = lay.fs
+        sc = lay.sym_cell
+        sy = lay.sym_y
+        sh = lay.sym_h
         for i in range(len(_CODE_SYMBOLS)):
-            x = _SYM_AREA[0] + i * _SYM_CELL
-            cv.rect(x, _SYM_Y, _SYM_CELL - 1, _SYM_H - 1, NAMES["dark_grey"])
-            cv.rectb(x, _SYM_Y, _SYM_CELL - 1, _SYM_H - 1, NAMES["indigo"])
-            cv.print(_CODE_SYMBOLS[i], x + 6, _SYM_Y + 6, NAMES["white"], 1)
+            x = lay.sym_area[0] + i * sc
+            cv.rect(x, sy, sc - 1, sh - 1, NAMES["dark_grey"])
+            cv.rectb(x, sy, sc - 1, sh - 1, NAMES["indigo"])
+            cv.print(_CODE_SYMBOLS[i], x + 6 * fs, sy + 6 * fs, NAMES["white"], 1)
 
     def _draw_icon(self, kind, rect):
         # A glyph on its own colored button background -- the code-editor top bar
         # (run/save/close). The pure glyph vocabulary lives in _glyph(); this just
-        # paints a backing box of a sensible color, then the glyph on top.
+        # paints a backing box of a sensible color, then the glyph on top. Drawn on
+        # the SYSTEM canvas so the glyph follows the font scale (#39 step 2).
         bg = {"run": "green", "save": "blue", "close": "red"}.get(kind, "dark_grey")
+        cv = self.sys_canvas
         x, y, w, h = rect
-        self.canvas.rect(x, y, w, h, NAMES[bg])
-        self._glyph(kind, rect, NAMES["black"] if kind == "run" else NAMES["white"])
+        cv.rect(x, y, w, h, NAMES[bg])
+        self._glyph(kind, rect, NAMES["black"] if kind == "run" else NAMES["white"], cv)
 
     def _glyph(self, kind, rect, c, cv=None):
         # Draw a centered icon glyph in color `c`. Defaults to the GAME canvas (the
@@ -6838,42 +7043,48 @@ class Workstation:
         """The structured outline: a title bar, a scrolling list of Scratch-style
         colored block rows (the flattened script with the cursor highlighted and the
         insert points shown as `+`), and a bottom action bar. Drawn with the indexed
-        API + petme128 font only, so host == device."""
-        cv = self.canvas
+        API + petme128 font only, so host == device. Responsive (#39 step 2): on the
+        SYSTEM canvas at native size, geometry from BlockLayout (verbatim at 320x240/
+        1x) -- a bigger panel shows MORE rows + WIDER blocks, a bigger font scales it."""
+        cv = self.sys_canvas
+        lay = self.block_layout
+        fs = lay.fs
         be = self.blocks_ed
         cv.cls(NAMES["dark_blue"])
-        title = "BLOCKS  " + (self.cart["title"][:18] if self.cart else "")
+        # title clamp: 18 at baseline, else fill the width before the status slot.
+        tclamp = 18 if lay._base else max(6, (lay.status_x - lay.x0) // lay.cell - 8)
+        title = "BLOCKS  " + (self.cart["title"][:tclamp] if self.cart else "")
         if be is not None and be.dirty:
             title = title + " *"
-        cv.print(title, _BLK_X0, _BLK_TITLE_Y, NAMES["white"], 1)
+        cv.print(title, lay.x0, lay.title_y, NAMES["white"], 1)
         if self.blk_status:
-            cv.print(self.blk_status[:20], 198, _BLK_TITLE_Y, NAMES["yellow"], 1)
+            cv.print(self.blk_status[:20], lay.status_x, lay.title_y, NAMES["yellow"], 1)
         if be is None:
             return
         # A kid-facing hint for the surprising blocks (forever-is-bounded / wait).
         hint = self._blk_hint()
         if hint:
-            cv.print(hint[:50], _BLK_X0, 9, NAMES["light_grey"], 1)
+            cv.print(hint[:50], lay.x0, lay.hint_y, NAMES["light_grey"], 1)
         rows = be.rows
-        for vi in range(_BLK_ROWS):
+        for vi in range(lay.rows):
             ridx = self.blk_top + vi
             if ridx >= len(rows):
                 break
             self._draw_blk_row(rows[ridx], vi, ridx == be.cur)
         # scroll cue
         if self.blk_top > 0:
-            cv.print("^", _BLK_X0 + _BLK_W - 8, _BLK_Y0, NAMES["white"], 1)
-        if self.blk_top + _BLK_ROWS < len(rows):
-            cv.print("v", _BLK_X0 + _BLK_W - 8,
-                     _BLK_Y0 + (_BLK_ROWS - 1) * _BLK_ROW_H, NAMES["white"], 1)
+            cv.print("^", lay.x0 + lay.outline_w - 8 * fs, lay.y0, NAMES["white"], 1)
+        if self.blk_top + lay.rows < len(rows):
+            cv.print("v", lay.x0 + lay.outline_w - 8 * fs,
+                     lay.y0 + (lay.rows - 1) * lay.row_h, NAMES["white"], 1)
         # action bar
-        self._icon_btn("plus", "ADD", _BLK_ADD, NAMES["green"])
-        self._btn("DEL", _BLK_DEL, NAMES["red"])
-        self._btn("^", _BLK_UP, NAMES["indigo"])
-        self._btn("v", _BLK_DN, NAMES["indigo"])
-        self._btn("SAVE", _BLK_SAVE, NAMES["blue"])
-        self._icon_btn("code", "CODE", _BLK_CODE, NAMES["dark_purple"])
-        self._btn("CLOSE", _BLK_CLOSE, NAMES["dark_grey"])
+        self._icon_btn("plus", "ADD", lay.add_btn, NAMES["green"], cv)
+        self._btn("DEL", lay.del_btn, NAMES["red"], cv)
+        self._btn("^", lay.up_btn, NAMES["indigo"], cv)
+        self._btn("v", lay.dn_btn, NAMES["indigo"], cv)
+        self._btn("SAVE", lay.save_btn, NAMES["blue"], cv)
+        self._icon_btn("code", "CODE", lay.code_btn, NAMES["dark_purple"], cv)
+        self._btn("CLOSE", lay.close_btn, NAMES["dark_grey"], cv)
         if self.blk_menu is not None:
             self._draw_blk_menu()
         if self.blk_kbd is not None:
@@ -6952,34 +7163,38 @@ class Workstation:
         return None
 
     def _draw_blk_row(self, row, vi, is_cursor):
-        cv = self.canvas
+        cv = self.sys_canvas
+        lay = self.block_layout
+        fs = lay.fs
+        cell = lay.cell
+        rh = lay.row_h
         be = self.blocks_ed
-        y = _BLK_Y0 + vi * _BLK_ROW_H
-        x = _BLK_X0 + row.depth * _BLK_INDENT
-        w = _BLK_W - row.depth * _BLK_INDENT
+        y = lay.y0 + vi * rh
+        x = lay.x0 + row.depth * lay.indent
+        w = lay.outline_w - row.depth * lay.indent
         if row.kind == "insert":
             # an empty insert point: a slim dashed-looking `+` slot
             c = NAMES["yellow"] if is_cursor else NAMES["dark_grey"]
-            cv.rectb(x, y + 2, w - 2, _BLK_ROW_H - 4, c)
-            cv.print("+", x + 4, y + 4, c, 1)
+            cv.rectb(x, y + 2 * fs, w - 2 * fs, rh - 4 * fs, c)
+            cv.print("+", x + 4 * fs, y + 4 * fs, c, 1)
             if is_cursor:
-                cv.print("add a block", x + 16, y + 4, NAMES["light_grey"], 1)
+                cv.print("add a block", x + 16 * fs, y + 4 * fs, NAMES["light_grey"], 1)
             return
         b = row.block
         cat = self._blk_block_cat(b)
         fill = NAMES[_blocks_mod.CATEGORY_COLOR.get(cat, "dark_grey")]
         if row.is_else:
             fill = NAMES["orange"]
-        cv.rect(x, y + 1, w - 2, _BLK_ROW_H - 2, fill)
+        cv.rect(x, y + fs, w - 2 * fs, rh - 2 * fs, fill)
         border = NAMES["white"] if is_cursor else NAMES["black"]
-        cv.rectb(x, y + 1, w - 2, _BLK_ROW_H - 2, border)
+        cv.rectb(x, y + fs, w - 2 * fs, rh - 2 * fs, border)
         # readable text color over the block fill (light on dark, dark on light)
         fg = NAMES["white"] if cat in ("draw", "input", "variables", "control") \
             and not row.is_else else NAMES["black"]
         if row.is_else:
             fg = NAMES["black"]
         label = self._blk_row_text(b, row.is_else)
-        cv.print(label[:(w - 8) // 8], x + 4, y + 4, fg, 1)
+        cv.print(label[:(w - 8 * fs) // cell], x + 4 * fs, y + 4 * fs, fg, 1)
         # highlight the selected block's active slot with a small caret under it
         if is_cursor and not row.is_else:
             self._draw_blk_slot_caret(b, x, y)
@@ -6990,13 +7205,17 @@ class Workstation:
             return
         # underline the active slot's value within the rendered label so the kid
         # sees which one A/left/right will edit.
-        cv = self.canvas
+        cv = self.sys_canvas
+        lay = self.block_layout
+        fs = lay.fs
+        cell = lay.cell
         si = self.blk_slot % len(slots)
         col0 = self._blk_slot_text_col(b, si)
         if col0 is None:
             return
         sval = self._blk_slot_display(b, slots[si])
-        cv.rect(x + 4 + col0 * 8, y + 12, max(8, len(sval) * 8), 1, NAMES["yellow"])
+        cv.rect(x + 4 * fs + col0 * cell, y + 12 * fs,
+                max(cell, len(sval) * cell), fs, NAMES["yellow"])
 
     def _blk_block_cat(self, b):
         d = _blocks_mod.block_def(b.get("t"))
@@ -7098,37 +7317,42 @@ class Workstation:
     def _draw_blk_menu(self):
         """The modal insert/picker menu over the frozen outline: a titled panel with
         a scrolling list of choices (categories, blocks, dropdown options, or
-        variables). Navigated up/down + A; B backs out."""
-        cv = self.canvas
+        variables). Navigated up/down + A; B backs out. On the SYSTEM canvas; panel +
+        rows scale with the layout/font (#39 step 2)."""
+        cv = self.sys_canvas
+        lay = self.block_layout
+        fs = lay.fs
+        cell = lay.cell
+        mrh = lay.menu_row_h
         m = self.blk_menu
-        mx, my, mw, mh = _BLK_MENU
+        mx, my, mw, mh = lay.menu
         cv.rect(mx, my, mw, mh, NAMES["black"])
         cv.rectb(mx, my, mw, mh, NAMES["yellow"])
         titles = {"cat": "PICK A KIND", "blk": "PICK A BLOCK",
                   "dropdown": "PICK ONE", "variable": "PICK A VARIABLE",
                   "expr": "PICK A VALUE"}
-        cv.print(titles.get(m["mode"], "PICK"), mx + 6, my + 4, NAMES["yellow"], 1)
+        cv.print(titles.get(m["mode"], "PICK"), mx + 6 * fs, my + 4 * fs, NAMES["yellow"], 1)
         items = m["items"]
         if not items:
-            cv.print("(nothing here)", mx + 8, my + 22, NAMES["light_grey"], 1)
-            cv.print("B = back", mx + 8, my + mh - 12, NAMES["light_grey"], 1)
+            cv.print("(nothing here)", mx + 8 * fs, my + 22 * fs, NAMES["light_grey"], 1)
+            cv.print("B = back", mx + 8 * fs, my + mh - 12 * fs, NAMES["light_grey"], 1)
             return
-        for vi in range(_BLK_MENU_ROWS):
+        for vi in range(lay.menu_rows):
             ridx = m["top"] + vi
             if ridx >= len(items):
                 break
-            y = my + 16 + vi * _BLK_MENU_ROW_H
+            y = my + 16 * fs + vi * mrh
             sel = ridx == m["sel"]
             if sel:
-                cv.rect(mx + 3, y, mw - 6, _BLK_MENU_ROW_H - 1, NAMES["indigo"])
+                cv.rect(mx + 3 * fs, y, mw - 6 * fs, mrh - fs, NAMES["indigo"])
             # color the category/block swatch chips so the look matches the outline
             chip = self._blk_menu_chip(ridx)
             if chip is not None:
-                cv.rect(mx + 5, y + 2, 8, _BLK_MENU_ROW_H - 5, chip)
+                cv.rect(mx + 5 * fs, y + 2 * fs, 8 * fs, mrh - 5 * fs, chip)
             label = self._blk_menu_label(ridx)
-            cv.print(label[:(mw - 24) // 8], mx + 16, y + 3,
+            cv.print(label[:(mw - 24 * fs) // cell], mx + 16 * fs, y + 3 * fs,
                      NAMES["white"] if sel else NAMES["light_grey"], 1)
-        cv.print("B = back", mx + 6, my + mh - 12, NAMES["light_grey"], 1)
+        cv.print("B = back", mx + 6 * fs, my + mh - 12 * fs, NAMES["light_grey"], 1)
 
     def _blk_menu_chip(self, ridx):
         """The category-color chip for menu row `ridx` (categories + block lists);
