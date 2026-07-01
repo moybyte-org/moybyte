@@ -72,11 +72,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer  # noqa: E402
 
-from runtime import font  # noqa: E402  (petme128 glyphs -> JSON for the replayer)
 from runtime import audio as _audio  # noqa: E402  (engine sample rate for the browser player)
 from runtime import host_app  # noqa: E402  (runs the SHARED console.Workstation)
 from runtime import palette  # noqa: E402  (MOY64 index -> RGB)
-from tools.command_canvas import CommandCanvas  # noqa: E402  (the recording backend)
+# The SHARED web-view core (canonical source; the DEVICE freezes the same file). The host is a
+# thin http.server transport over it: it swaps in web_view.CommandCanvas as the console's
+# system canvas, ships web_view.PAGE_HTML, and routes /frame through web_view.ServedState so it
+# runs the EXACT same serve path (serve-time defspr/deflayer + gen) the device does.
+from runtime import web_view  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_SAVE_DIR = os.path.expanduser("~/.moybyte/projects")
@@ -87,46 +90,6 @@ DEFAULT_FPS = 30
 # sim's WASD nav + Enter/Z/X/H shortcuts). The browser sends a logical `name`; we
 # only forward names the console actually knows so a stray key can't wedge it.
 BUTTON_NAMES = frozenset(("left", "right", "up", "down", "a", "b", "run", "home"))
-
-
-def _read_html():
-    """Serve the static page from tools/web_console.html (next to this file)."""
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web_console.html")
-    with open(path, "rb") as f:
-        return f.read()
-
-
-def font_glyphs():
-    """Export the petme128 font as JSON: each glyph is its 8 column-bytes (LSB =
-    top row, exactly how runtime.font.draw scans it), so the JS replayer renders
-    `print` pixel-identically to the host Canvas.print / device framebuf.text."""
-    glyphs = []
-    n = len(font._FONT) // font.WIDTH
-    for i in range(n):
-        col = font._FONT[i * font.WIDTH:(i + 1) * font.WIDTH]
-        glyphs.append(list(col))
-    return {"first": font.FIRST, "w": font.WIDTH, "h": font.HEIGHT, "glyphs": glyphs}
-
-
-def sheet_json(sheet):
-    """The open cart's sprite sheet as JSON (cols/rows/TILE + flat 16-color pixels).
-    Sent so a future id-based `spr` can resolve on the browser; correctness never
-    depends on it (spr commands carry their own pixels)."""
-    if sheet is None:
-        return None
-    return {
-        "cols": sheet.cols, "rows": sheet.rows, "tile": sheet.TILE,
-        "w": sheet.w, "h": sheet.h,
-        "pix": list(sheet.pix),
-    }
-
-
-def tilemap_json(tilemap):
-    """The open cart's tilemap as JSON (w/h + flat cells, each = tile_id+1, 0=empty)
-    -- mirrors TileMap's storage. Sent for completeness / a future id-based map."""
-    if tilemap is None:
-        return None
-    return {"w": tilemap.w, "h": tilemap.h, "cells": list(tilemap.cells)}
 
 
 class WebConsole:
@@ -151,7 +114,11 @@ class WebConsole:
         # runtime/console.py. (ws.comp stays the host _NullComp; its flush() is a
         # no-op -- nothing to flush on the host.)
         sw, sh = (self.ws.sys_canvas.w, self.ws.sys_canvas.h)
-        self.canvas = CommandCanvas(sw, sh, font_scale=self.ws._effective_font_scale())
+        self.canvas = web_view.CommandCanvas(sw, sh, font_scale=self.ws._effective_font_scale())
+        # SERVE-TIME defspr/deflayer ship-once + gen -- the SAME shared logic the device runs,
+        # against this canvas's recorder. served_frame() prepends any not-yet-shipped deflayer
+        # (host sprites are self-contained, so no defspr) so /frame stays self-contained.
+        self._served = web_view.ServedState(self.canvas._rec)
         if self.ws._sys_canvas is None:
             # Degradation (320x240): one surface -- the game canvas IS the system
             # canvas, so swap ws.canvas (the cart draws into the recorder too). The
@@ -249,7 +216,11 @@ class WebConsole:
         with self._lock:
             self.canvas.take_commands()      # drop anything stale (defensive)
             self.driver.frame(self.dt)
-            cmds = self.canvas.take_commands()
+            # Route through the shared serve path (ServedState.served_frame): prepends a
+            # ["deflayer", ...] the FIRST time a served frame references a layer (ship-once,
+            # #54/#43) -- the exact code the device serves through. Host sprites are
+            # self-contained (pixels inline), so no defspr is prepended.
+            cmds = self._served.served_frame(self.canvas.take_commands())
             cart = self._cart_title()
             au = getattr(self.ws, "audio", None)
             pcm = au.take_pcm() if (au is not None and hasattr(au, "take_pcm")) else b""
@@ -264,19 +235,15 @@ class WebConsole:
         which layer streams we've shipped -- the next /frame re-ships every referenced
         layer's deflayer (the layer twin of refetching the sprite sheet, #54/#43)."""
         with self._lock:
-            self.canvas.reset_served_layers()
-            sheet = sheet_json(getattr(self.ws, "sheet", None))
-            tilemap = tilemap_json(getattr(self.ws, "tilemap", None))
+            self._served.reset()
+            sheet = getattr(self.ws, "sheet", None)
+            tilemap = getattr(self.ws, "tilemap", None)
             cart = self._cart_title()
-        return {
-            "w": self.canvas.w, "h": self.canvas.h,
-            "palette": [list(rgb) for rgb in palette.MOY64],
-            "font": font_glyphs(),
-            "sheet": sheet,
-            "tilemap": tilemap,
-            "cart": cart,
-            "audio_rate": _audio.AudioEngine().rate,   # PCM sample rate for the browser player
-        }
+            # The SHARED assets builder (host passes the MOY64 RGB palette directly; the device
+            # passes its RGB565 LUT and the builder decodes -- detected by element type).
+            return web_view.assets_payload(
+                self.canvas.w, self.canvas.h, palette.MOY64, sheet, tilemap, cart,
+                _audio.AudioEngine().rate)
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -321,7 +288,11 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception as exc:  # noqa: BLE001 -- a frame error must not kill the server
                 self._send(500, str(exc).encode("utf-8"), "text/plain; charset=utf-8")
                 return
-            self._send_json(200, {"cmds": cmds, "cart": cart, "audio": audio})
+            # The SHARED frame_payload shape ({cmds, cart, gen, audio, perf}) the unified page
+            # reads. gen comes from the recorder (host stays 0 -- self-contained, no atlas
+            # reset); audio carries the finished PCM for the browser player; perf is device-only.
+            self._send_json(200, web_view.frame_payload(
+                cmds, cart, self.console.canvas._rec.atlas_gen, audio=audio))
         else:
             self._send(404, b"not found", "text/plain; charset=utf-8")
 
@@ -351,7 +322,10 @@ def make_server(console, host="0.0.0.0", port=DEFAULT_PORT, html=None):
     Pass port=0 for an ephemeral port (tests read server.server_address[1])."""
     handler = type("_BoundHandler", (_Handler,), {
         "console": console,
-        "html": html if html is not None else _read_html(),
+        # The SHARED browser page (web_view.PAGE_HTML): tries the WebSocket first, then falls
+        # back to HTTP polling (GET /frame + POST /input) -- which is all the host serves.
+        "html": (html if html is not None
+                 else web_view.PAGE_HTML.encode("utf-8")),
     })
     return ThreadingHTTPServer((host, port), handler)
 

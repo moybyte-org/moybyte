@@ -138,11 +138,14 @@ fi
 #   console.py    -- launcher + desktop + cards/code/paint UI + Pointer
 #   moy_carts.py  -- the .moy store (scan/load/save/create/duplicate/delete)
 #   blocks.py     -- block model + blocks->Python compiler (#29; moy_carts imports it)
+#   web_view.py   -- shared web-view core (recorder + payloads + serve + page + constants);
+#                    moy_webserver imports it as a frozen top-level `web_view` (#41/#22)
 cp "${REPO_ROOT}/runtime/editors.py" "${SCRIPT_DIR}/modules/editors.py"
 cp "${REPO_ROOT}/runtime/audio.py" "${SCRIPT_DIR}/modules/audio.py"
 cp "${REPO_ROOT}/runtime/console.py" "${SCRIPT_DIR}/modules/console.py"
 cp "${REPO_ROOT}/runtime/moy_carts.py" "${SCRIPT_DIR}/modules/moy_carts.py"
 cp "${REPO_ROOT}/runtime/blocks.py" "${SCRIPT_DIR}/modules/blocks.py"
+cp "${REPO_ROOT}/runtime/web_view.py" "${SCRIPT_DIR}/modules/web_view.py"
 # carts_data.py is GENERATED from system_carts/ (it replaces the ~1800 lines of
 # embedded carts moy_runtime used to hand-duplicate) so the device's seed /
 # fallback carts can never drift from the host source of truth -- moy_runtime

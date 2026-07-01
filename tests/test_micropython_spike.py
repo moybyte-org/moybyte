@@ -148,53 +148,54 @@ def test_console_settings_has_firmware_update_screen():
 
 
 def test_device_web_view_module_present_and_protocol_shaped():
-    # Device web view (#41/#22): a moy_webserver module records the cart's per-frame draw
-    # calls (a TeeCanvas over the real DeviceCanvas) and serves them to a browser over
-    # WiFi via the SAME draw-command protocol the host web console uses, so the same
-    # web_console.html renders device frames. We grep the frozen source (firmware tests
-    # don't execute MicroPython); the executable behaviour is in tests/test_moy_webserver.py.
+    # Device web view (#41/#22): the recorder + payloads + serve logic + page + constants now
+    # live in the SHARED web_view module (canonical runtime/web_view.py; staged into modules/ +
+    # frozen), and moy_webserver is a thin TRANSPORT that imports it. We grep the source
+    # (firmware tests don't execute MicroPython); executable behaviour is in test_moy_webserver.py.
+    wv = (Path("runtime") / "web_view.py").read_text(encoding="utf-8")
     web = (ROOT / "modules" / "moy_webserver.py").read_text(encoding="utf-8")
-    assert "class DrawRecorder" in web          # per-frame draw-command recorder
-    assert "class TeeCanvas" in web             # forwards to the panel canvas + records
+
+    # -- the SHARED core (web_view) --
+    assert "class DrawRecorder" in wv           # per-frame draw-command recorder
+    assert "class TeeCanvas" in wv              # forwards to the panel canvas + records
+    assert "class CommandCanvas" in wv          # the host record-only canvas (reconciled in)
+    assert "class ServedState" in wv            # serve-time defspr/deflayer ship-once
+    assert "def assets_payload" in wv and "def frame_payload" in wv
+    assert "def apply_events" in wv             # browser events -> InputState/Pointer
+    # SERVE-TIME defspr (#41 BUG-1 fix): the bitmap is delivered when the browser RECEIVES a
+    # frame referencing it (drop-robust). served_frame reconstructs it (defspr_cmd) + prepends,
+    # tracking a `served` set that resets on a dropped atlas (atlas_gen).
+    assert "def defspr_cmd" in wv and "def served_frame" in wv
+    assert "atlas_gen" in wv
+    # STREAM MODE (#41): the Tee record-only path + a web frame cap (raised 30 -> 60).
+    assert "record_only" in wv
+    assert "WEB_FPS_CAP = 60" in wv
+    # OFF-SCREEN LAYERS (#54 scroll + #43 cached top bar): ONE recorded-layer mechanism.
+    assert "class RecordingLayer" in wv         # the recorded off-screen layer
+    assert "class _LayerRecorder" in wv         # its indexed command stream
+    assert "def deflayer_cmd" in wv             # ship the layer's stream once (serve-time)
+    assert '"deflayer"' in wv and '"blit_layer"' in wv   # define-once + reference-per-frame
+    assert "def new_layer" in wv and "def blit_window_from" in wv  # the Tee tees layers now
+    assert "_served_layers" in wv               # served-once tracking, gen lock-step
+
+    # -- the DEVICE transport (moy_webserver) imports the shared core + adds the socket layer --
+    assert "import web_view" in web             # the transport imports the frozen shared module
     assert "class WebServer" in web             # non-blocking, one request per poll()
     assert "self.recorder.enabled" in web       # the gate -> zero cost when no browser
     assert "setblocking(False)" in web          # NON-blocking listening socket
+    assert "def stream_mode" in web             # headless-while-watched gate (WebServer)
+    assert "def served_frame" in web and "def reset_served" in web  # delegate to ServedState
     # The draw-command protocol routes (/assets over HTTP; the legacy /frame & /input HTTP
     # endpoints remain as a poll fallback alongside the WebSocket live channel).
     assert '"/assets"' in web and '"/frame"' in web and '"/input"' in web
-    assert "def assets_payload" in web and "def frame_payload" in web
-    assert "def apply_events" in web            # browser events -> InputState/Pointer
-    # WEBSOCKET TRANSPORT (#41 swap): the persistent live channel replaced the per-frame
-    # HTTP poll. The handshake (RFC 6455 accept-key + 101) + frame encode/decode + the
-    # persistent conn (_WSConn) must be present; the page connects to "/ws".
+    # WEBSOCKET TRANSPORT (#41 swap): the persistent live channel replaced the per-frame HTTP
+    # poll. Handshake (RFC 6455 accept-key + 101) + frame encode/decode + the persistent conn.
     assert "def ws_accept_key" in web and "def ws_handshake_response" in web
     assert "def ws_encode" in web and "def ws_decode" in web
     assert "class _WSConn" in web               # the persistent, non-blocking WS connection
     assert "258EAFA5-E914-47DA-95CA-C5AB0DC85B11" in web   # the RFC 6455 magic GUID
     assert '"/ws"' in web or "/ws" in web       # the WebSocket route the page connects to
     assert "Switching Protocols" in web         # the 101 upgrade response
-    # SERVE-TIME defspr (#41 BUG-1 fix): the bitmap is delivered when the browser RECEIVES
-    # a frame referencing it (drop-robust), not at record-time first-sight. So the server
-    # reconstructs the defspr (defspr_cmd) and prepends it (served_frame), tracking a
-    # `served` set that resets on /assets (reset_served) and on a dropped atlas (atlas_gen).
-    assert "def defspr_cmd" in web and "def served_frame" in web
-    assert "def reset_served" in web and "atlas_gen" in web
-    # STREAM MODE (#41): headless while a browser plays -- the Tee record-only path + a
-    # web frame cap (raised 30 -> 60 so games aren't quantised to ~22fps).
-    assert "record_only" in web and "def stream_mode" in web
-    assert "WEB_FPS_CAP = 60" in web
-    # OFF-SCREEN LAYERS (#54 scroll + #43 cached top bar): ONE recorded-layer mechanism.
-    # new_layer() mints a RecordingLayer (real device layer + recorded indexed stream);
-    # draw_layer/blit_strip record a tiny blit_layer; the WebServer ships the layer's stream
-    # ONCE as a deflayer (serve-time, same pattern as defspr) via deflayer_cmd, tracked by a
-    # served-layers set that resets on /assets + atlas_gen. The browser replays it into an
-    # off-screen index buffer. This fixes a scroll cart's web view (black bg + actor trails).
-    assert "class RecordingLayer" in web        # the recorded off-screen layer
-    assert "class _LayerRecorder" in web        # its indexed command stream
-    assert "def deflayer_cmd" in web            # ship the layer's stream once (serve-time)
-    assert '"deflayer"' in web and '"blit_layer"' in web   # define-once + reference-per-frame
-    assert "def new_layer" in web and "def blit_window_from" in web  # the Tee tees layers now
-    assert "_served_layers" in web              # served-once tracking, gen lock-step
 
 
 def test_device_web_view_wired_into_run_desktop_cooperatively():
