@@ -5,14 +5,14 @@ v0.4 logical workstation surface) with a TIC-80-style drawing API
 (cls / pix / line / rect / rectb / circ / circb / spr / print) -- note rect/circ
 are FILLED and rectb/circb are the outlines, per TIC-80. `to_rgb888()` resolves
 indices through the palette for display (pygame) or export (GIF). The same
-index-based API is what the device backend maps onto the native `kc_compositor`
+index-based API is what the device backend maps onto the native `moy_compositor`
 RGB565 framebuffer.
 
 Draw STATE (TIC-80 cluster 2, #11): every primitive respects a `camera` offset
 (subtracted from all coords), a `clip` rectangle (pixels outside are dropped), a
 `pal` index remap (draw-time colour swap), and `palt` per-index sprite
 transparency. These four are kept byte-identical on the device backend
-(`DeviceCanvas`) so a `.kcart` draws the same pixels everywhere.
+(`DeviceCanvas`) so a `.moy` draws the same pixels everywhere.
 """
 
 from . import font as _font
@@ -57,7 +57,7 @@ class Canvas:
     def __init__(self, width=480, height=270, palette=None):
         self.w = width
         self.h = height
-        self.palette = palette or _pal.KID64
+        self.palette = palette or _pal.MOY64
         self.buf = bytearray(width * height)
         # Draw state (TIC-80 cluster 2). reset_state() initialises camera/clip/pal/palt.
         self.reset_state()
@@ -281,7 +281,7 @@ class Canvas:
 
     def spr_batch(self, sheet, items, colorkey=-1, scale=1):
         # Draw many sheet tiles in one call (#43) -- the sprite analogue of map(). The
-        # device collapses this to a single kc_gfx.blit_batch C call (the draw-call
+        # device collapses this to a single moy_gfx.blit_batch C call (the draw-call
         # count is its FPS bottleneck); on the host this readable per-item loop is the
         # reference, and must match the device pixel-for-pixel. `items` is a sequence of
         # (tile, x, y) or (tile, x, y, flip) tuples; tiles resolve through `sheet` like
@@ -301,7 +301,7 @@ class Canvas:
         # TIC-80 map(): blit a w x h cell region of `tilemap` (top-left cell mx,my)
         # over `sheet` to screen (sx, sy). Each non-empty cell draws its 8x8 sheet
         # tile via spr() at `scale` (so scale=2 => 16px world tiles). The native
-        # device path (DeviceCanvas.map -> kc_gfx.blit_map) does this in one C call;
+        # device path (DeviceCanvas.map -> moy_gfx.blit_map) does this in one C call;
         # here it's the readable per-tile reference. Tile images are cached by id so
         # a repeated tile is built once per draw, not once per cell. spr() carries
         # camera/clip/pal/palt, so map inherits the draw state too.
@@ -357,7 +357,7 @@ class Canvas:
     def blit_window_from(self, layer, cam_x=0, cam_y=0):
         """Copy the visible self.w x self.h window of `layer` (a wider pre-rendered
         Canvas) into this canvas at offset (cam_x, cam_y) -- a flat per-row index copy,
-        the host parity of the device kc_gfx.blit_window (which copies RGB565). Clamped
+        the host parity of the device moy_gfx.blit_window (which copies RGB565). Clamped
         to the source bounds exactly like the C kernel; draw_layer keeps cam in range so
         the full window always lands. Overwrites (no transparency): it's the background,
         drawn first each frame, and it erases last frame's sprites for free."""
@@ -394,7 +394,7 @@ class Canvas:
         partial-height sibling of blit_window_from: where blit_window_from window-copies a
         full-screen slice of a WIDER source, blit_strip stamps a SMALLER source (e.g. a
         cached W x 18px top-bar strip) at a fixed offset. Host copies palette indices; the
-        device (DeviceCanvas.blit_strip) copies RGB565 via the same kc_gfx.blit565 the
+        device (DeviceCanvas.blit_strip) copies RGB565 via the same moy_gfx.blit565 the
         sprite path uses (key=-1 -> fully opaque). Out-of-bounds rows/cols are clamped to
         the destination, exactly like the C kernel, so an over-tall/over-wide strip is
         safe. Ignores camera/clip/pal (it's a chrome blit over a finished frame)."""

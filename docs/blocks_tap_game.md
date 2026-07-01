@@ -1,12 +1,12 @@
 # Build a Tap Game in Blocks
 
-This is a step-by-step guide for building **Tap Game** in the KidCode block editor.
+This is a step-by-step guide for building **Tap Game** in the Moybyte block editor.
 A gold coin pops up somewhere on the screen. Tap it to score a point and it jumps
 to a new spot. A timer counts down -- when it hits zero, it's GAME OVER. Tap again
 to play once more.
 
 Everything here uses only blocks and buttons that exist in the editor. The finished
-cart ships as `system_carts/tap_game.kcart` -- you can open it to peek, or build your
+cart ships as `system_carts/tap_game.moy` -- you can open it to peek, or build your
 own from scratch.
 
 ## Controls (host simulator)
@@ -196,7 +196,7 @@ Blocks used here:
 To run the shipped version on the host:
 
 ```bash
-python tools/simulate_desktop.py --cart system_carts/tap_game.kcart
+python tools/simulate_desktop.py --cart system_carts/tap_game.moy
 ```
 
 ## Want to see the code?

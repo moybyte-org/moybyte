@@ -4,13 +4,13 @@
 The MicroPython firmware does NOT ship the `system_carts/` folder; it seeds the
 built-in carts onto SD on first boot from an embedded `CARTS` list and falls
 back to it when SD is unavailable. That list used to be ~1800 lines of cart
-sources/sprite-sheets hand-copied into `kid_runtime.py` and pinned by a parity
+sources/sprite-sheets hand-copied into `moy_runtime.py` and pinned by a parity
 test -- a duplication that drifted (stale art, wrong colorkey) and made every
 cart edit a two-place chore.
 
 This script makes `system_carts/` the single source of truth: `build.sh` runs it
 to emit `modules/carts_data.py` (gitignored, frozen into the firmware), and
-`kid_runtime` just does `from carts_data import CARTS`. Edit `system_carts/`;
+`moy_runtime` just does `from carts_data import CARTS`. Edit `system_carts/`;
 the device follows automatically.
 
 Pure stdlib so it runs under any Python the build has.
@@ -52,11 +52,11 @@ def _read(path):
 
 def build_carts(system_carts_dir):
     """Read each system cart and build its embedded entry (title/type/src/
-    sprites?/sounds?/canvas?/permissions?/cfg/edit) -- the shape kid_runtime
+    sprites?/sounds?/canvas?/permissions?/cfg/edit) -- the shape moy_runtime
     expects (and seed_builtins writes back to SD)."""
     carts = []
     for folder in CART_ORDER:
-        base = os.path.join(system_carts_dir, folder + ".kcart")
+        base = os.path.join(system_carts_dir, folder + ".moy")
         man = json.loads(_read(os.path.join(base, "manifest.json")))
         cart = {
             "title": man["title"],
@@ -66,13 +66,13 @@ def build_carts(system_carts_dir):
             "version": int(man.get("version", 0)),
             "src": _read(os.path.join(base, "main.py")),
         }
-        sheet = os.path.join(base, "sprites.kgfx")
+        sheet = os.path.join(base, "sprites.moygfx")
         if os.path.exists(sheet):
             cart["sprites"] = _read(sheet)
         sounds = os.path.join(base, "sounds.json")     # AudioBank, optional (#16)
         if os.path.exists(sounds):
             cart["sounds"] = json.loads(_read(sounds))
-        tilemap = os.path.join(base, "map.kmap")        # TileMap blob, optional (#32)
+        tilemap = os.path.join(base, "map.moymap")        # TileMap blob, optional (#32)
         if os.path.exists(tilemap):
             cart["map"] = _read(tilemap)
         blocks = os.path.join(base, "blocks.json")      # block source (#29), optional
@@ -102,7 +102,7 @@ def render_module(carts):
 
 
 def as_module(system_carts_dir):
-    """An in-memory `carts_data` module (so host tests can exec kid_runtime,
+    """An in-memory `carts_data` module (so host tests can exec moy_runtime,
     which does `from carts_data import CARTS`, without writing a file)."""
     import types
     mod = types.ModuleType("carts_data")

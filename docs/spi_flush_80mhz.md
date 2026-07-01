@@ -2,7 +2,7 @@
 
 **Status:** research / reference-extraction spike. Output is this doc only — a
 recipe to hand to the flush agent. Nothing here edits the live flush path
-(`kc_compositor.py` / `tdeck_display.py` are owned by another agent). LovyanGFX is
+(`moy_compositor.py` / `tdeck_display.py` are owned by another agent). LovyanGFX is
 studied as a **reference** for how the S3 hits a clean 80 MHz DMA flush; we are not
 adding it as a dependency.
 
@@ -31,7 +31,7 @@ This also **closes the open question in `docs/perf_60fps_architecture.md` §1.3*
 
 ---
 
-## 1. Recipe for OUR path (lcd_bus / esp_lcd + the native kc_compositor)
+## 1. Recipe for OUR path (lcd_bus / esp_lcd + the native moy_compositor)
 
 These are the techniques LovyanGFX and the esp_lcd "best practice" examples use for
 a clean, full-rate DMA flush, mapped onto what we already have. They will **not**
@@ -60,7 +60,7 @@ never re-sending CASET/RASET per band. Re-arming the window per band injects
 command→data turnarounds that stall the pipe and (as our own notes record) glitch
 rows at the boundary.
 
-**Our compositor already does this** (`kc_compositor.Compositor.flush`): `_set_window`
+**Our compositor already does this** (`moy_compositor.Compositor.flush`): `_set_window`
 once, then `tx_color(RAMWR, …)` for the first band and `RAMWRC` (0x3C) for the rest.
 **Keep this exactly.** This is the single most important "LovyanGFX technique" and we
 already have it. Do not regress to per-band windowing.
@@ -80,7 +80,7 @@ floor.
 - The IDF bus is already configured for big transfers:
   `machine_hw_spi.c` sets `max_transfer_sz = SPI_LL_DMA_MAX_BIT_LEN/8` and
   `spi_bus_initialize(..., SPI_DMA_CH_AUTO)`. **No change needed**; do not shrink it.
-- **Actionable:** if internal-SRAM headroom allows (watch the "KidCode mem:" boot
+- **Actionable:** if internal-SRAM headroom allows (watch the "Moybyte mem:" boot
   readout), raising `_flush_rows` toward a single full-frame transfer trims the last
   few command gaps. Marginal at 40 MHz; safe to leave at 48.
 
@@ -96,7 +96,7 @@ MicroPython.**
 
 LovyanGFX DMAs from a buffer that won't be mutated mid-transfer. Our compositor
 copies the framebuffer once into a dedicated PSRAM DMA frame buffer
-(`kc_alloc.malloc_dma(..., MEMORY_SPIRAM | MEMORY_DMA)`) and slices stable,
+(`moy_alloc.malloc_dma(..., MEMORY_SPIRAM | MEMORY_DMA)`) and slices stable,
 non-overlapping bands from it, so the async esp_lcd DMA (trans_queue depth 10) never
 reads a buffer the next band has clobbered. The S3 can DMA from PSRAM. **Keep this**;
 it's why the flush is clean. (This was the fix for the one-band vertical-offset bug.)
@@ -240,5 +240,5 @@ fix.
   streaming, hardware byte-swap, max DMA burst, 80 MHz on IOMUX pins):
   <https://github.com/lovyan03/LovyanGFX> (ST7789/ESP32-S3 config example).
 - Repo context: `docs/perf_60fps_architecture.md` §1.2–§1.3 (flush budget + the
-  80 MHz caveat this spike resolves); `firmware/.../modules/kc_compositor.py`
+  80 MHz caveat this spike resolves); `firmware/.../modules/moy_compositor.py`
   (the banded single-window `tx_color` flush this recipe validates).

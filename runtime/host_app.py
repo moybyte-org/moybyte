@@ -1,6 +1,6 @@
 """Host glue that runs the SHARED console (runtime/console.py -- the exact same UI
 the T-Deck runs) on the PC: a 320x240 host Canvas, the petme128 font, the
-kid_carts .kcart store, a host make_api, and a mouse/keyboard driver.
+moy_carts .moy store, a host make_api, and a mouse/keyboard driver.
 
 This is what makes the simulator a faithful emulator: the launcher/desktop/cards/
 code/paint pixels come from the same `console.Workstation` as the device -- only
@@ -21,10 +21,10 @@ from . import blocks as _blocks
 from . import editors as _editors
 sys.modules.setdefault("editors", _editors)
 sys.modules.setdefault("audio", _audio)
-sys.modules.setdefault("blocks", _blocks)   # kid_carts.save_blocks does `import blocks`
+sys.modules.setdefault("blocks", _blocks)   # moy_carts.save_blocks does `import blocks`
 
 from . import console  # noqa: E402  (after the editors/audio aliases above)
-from . import kid_carts  # noqa: E402  (shared .kcart store; host-clean)
+from . import moy_carts  # noqa: E402  (shared .moy store; host-clean)
 from . import palette  # noqa: E402
 from .canvas import Canvas, Image, SystemCanvas  # noqa: E402
 from .input import InputState  # noqa: E402
@@ -38,8 +38,8 @@ PAN_SPEED = 6            # px/frame the arrow-keys-as-trackball nudge the cursor
 class FakeAudio:
     """Host audio backend (#16) that records every call AND drives the shared
     AudioEngine, so behavior is fully assertable headlessly -- no sound hardware
-    needed. Mirrors the existing sim fakes (kidcode_sim fake audio,
-    kidcode/audio.py AudioService.calls). The optional real-playback backend
+    needed. Mirrors the existing sim fakes (moybyte_sim fake audio,
+    moybyte/audio.py AudioService.calls). The optional real-playback backend
     (SdlAudio, see docs/audio_design_v04.md) is a thin follow-on that pulls
     engine.render() from an SDL stream instead of just recording.
 
@@ -157,7 +157,7 @@ def make_sdl_audio(engine):
 # canned scan results, a fake connect (records creds + reports connected), and a
 # fake IP, so the manager cart is fully assertable headlessly (like FakeAudio).
 #
-# Credentials persist through the SAME store the device uses (kid_carts
+# Credentials persist through the SAME store the device uses (moy_carts
 # load_wifi/remember_wifi/forget_wifi over wifi.json), so a connect() the kid
 # makes in the sim survives a reload -- the host story matches the device story.
 
@@ -165,7 +165,7 @@ def make_sdl_audio(engine):
 class FakeWifi:
     """Host WiFi backend: a faithful stand-in for the device network.WLAN service.
 
-    `store`/`root` are the kid_carts credential store + its carts dir; when given,
+    `store`/`root` are the moy_carts credential store + its carts dir; when given,
     connect()/forget() persist to wifi.json and known() reads it back (so the sim
     exercises the real persistence path). With no store it stays in-memory only."""
 
@@ -200,7 +200,7 @@ class FakeWifi:
             try:
                 self._store.remember_wifi(ssid, password, self._root)
             except Exception as exc:  # noqa: BLE001 -- a save failure must not crash the cart
-                print("KidCode wifi remember failed:", exc)
+                print("Moybyte wifi remember failed:", exc)
         return True
 
     def disconnect(self):
@@ -220,7 +220,7 @@ class FakeWifi:
             try:
                 self._store.forget_wifi(ssid, self._root)
             except Exception as exc:  # noqa: BLE001
-                print("KidCode wifi forget failed:", exc)
+                print("Moybyte wifi forget failed:", exc)
         if self._ssid == ssid:
             self.disconnect()
         return True
@@ -231,12 +231,12 @@ class FakeWifi:
             try:
                 return [n["ssid"] for n in self._store.load_wifi(self._root)]
             except Exception as exc:  # noqa: BLE001
-                print("KidCode wifi known failed:", exc)
+                print("Moybyte wifi known failed:", exc)
         return []
 
 
 def make_wifi(store=None, root=None):
-    """Injected backend factory: the host FakeWifi over the kid_carts store.
+    """Injected backend factory: the host FakeWifi over the moy_carts store.
     build_workstation hands this to the Workstation; the device injects DeviceWifi."""
     return FakeWifi(store, root)
 
@@ -290,7 +290,7 @@ class _Layer:
     """A scroll background (#54): a wider off-screen canvas the cart pre-renders a
     level into ONCE, then window-copies to the screen per frame via draw_layer. Exposes
     the draw verbs (sheet/tilemap-aware, pixel-identical to the main api) bound to its
-    OWN canvas, plus W/H. Built by the api's make_layer(w, h). Mirrors kid_runtime."""
+    OWN canvas, plus W/H. Built by the api's make_layer(w, h). Mirrors moy_runtime."""
 
     _VERBS = ("cls", "pix", "line", "rect", "rectb", "circ", "circb",
               "spr", "spr_batch", "map", "mget", "mset", "print",
@@ -444,7 +444,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # btn() (true hold-to-move) but the keyboard yields no clean typeable ASCII.
         # Call textmode(True) to switch to text mode so key()/keyp() return clean
         # 1-byte ASCII for typing (a password, a name, a chat line); textmode(False)
-        # restores game mode. Same name + behavior on the device (kid_runtime). The
+        # restores game mode. Same name + behavior on the device (moy_runtime). The
         # Workstation applies it: on the host it gates char routing to the cart's
         # key(); on the device it flips the T-Deck keyboard ASCII<->raw. Resets to
         # game mode automatically when the cart exits to the desktop/home.
@@ -535,7 +535,7 @@ def _manifest_version(cart_dir):
 
 
 def _seed_system_carts(carts_dir):
-    """Copy the read-only system .kcart folders into the user store so the launcher shows
+    """Copy the read-only system .moy folders into the user store so the launcher shows
     them (and the child duplicates/edits copies). Version-aware (#47): a built-in whose
     shipped manifest "version" is newer than the seeded copy is RE-SEEDED -- code + art
     refreshed, while the kid's tuning + saves (config.json, pmem.json) are preserved --
@@ -545,7 +545,7 @@ def _seed_system_carts(carts_dir):
     if not os.path.isdir(SYSTEM_CARTS):
         return
     for name in sorted(os.listdir(SYSTEM_CARTS)):
-        if not name.endswith(".kcart"):
+        if not name.endswith(".moy"):
             continue
         src = os.path.join(SYSTEM_CARTS, name)
         dst = os.path.join(carts_dir, name)
@@ -574,9 +574,9 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1):
     (the T-Deck default) the system canvas IS the game canvas (one object), so the
     desktop is pixel-identical to today. `font_scale` (1/2/3) is the initial
     system-UI font size (the persisted system.json value overrides it on load)."""
-    carts_dir = carts_dir or os.path.expanduser("~/.kidcode/carts")
+    carts_dir = carts_dir or os.path.expanduser("~/.moybyte/carts")
     _seed_system_carts(carts_dir)
-    carts = kid_carts.scan(carts_dir)
+    carts = moy_carts.scan(carts_dir)
     canvas = Canvas(WIDTH, HEIGHT)               # the fixed 320x240 GAME canvas
     sw, sh = sys_size if sys_size else (WIDTH, HEIGHT)
     # The system canvas must be at least the game size -- the game is composited into
@@ -593,12 +593,12 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1):
                              sys_canvas=sys_canvas, font_scale=font_scale)
     ws.make_api = make_api
     ws.make_audio = make_audio
-    ws.carts_store = kid_carts
+    ws.carts_store = moy_carts
     ws.carts_root = carts_dir
     # WiFi (#38): one fake system service shared across carts, persisting through
-    # the same kid_carts wifi.json store the device uses. Injected into a cart's
+    # the same moy_carts wifi.json store the device uses. Injected into a cart's
     # namespace ONLY when its manifest grants "network" (see Workstation._start).
-    ws.wifi = make_wifi(kid_carts, carts_dir)
+    ws.wifi = make_wifi(moy_carts, carts_dir)
     ws.can_manage = True
     # The pointer ranges over the SYSTEM canvas (the panel surface the cursor moves
     # on), so size it to that. The api touch() reads it in system coords.
@@ -608,7 +608,7 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1):
     # saved wallpaper so the home screen boots with the chosen backdrop.
     ws.load_system()
     # Unified top bar (Stage 1): build the 16x16 IconSheet the bar draws its chrome
-    # icons from -- from system_icons.kgfx if present, else the baked default theme.
+    # icons from -- from system_icons.moygfx if present, else the baked default theme.
     ws.load_icon_sheet()
     # Achievements (#21): load the unlocked badges (achievements.json) so earned
     # milestones persist across reboots and the toast/view reflect them.

@@ -3,13 +3,13 @@
 clip / camera / spr-flip / pal / palt all change PIXELS, so the only honest proof
 that the two backends agree is to render the SAME scene through both and compare
 the resulting buffers byte-for-byte. The host `runtime.canvas.Canvas` works in
-palette indices; the device `kid_runtime.DeviceCanvas` works in RGB565 over the
-native `kc_gfx` C kernel + `framebuf`.
+palette indices; the device `moy_runtime.DeviceCanvas` works in RGB565 over the
+native `moy_gfx` C kernel + `framebuf`.
 
 This module makes `DeviceCanvas` runnable under CPython by injecting:
   * a pure-Python `framebuf.FrameBuffer` stub (fill / fill_rect / pixel / line /
     text / rect over an RGB565 bytearray), and
-  * a pure-Python `kc_gfx` stub that PORTS the C kernel logic (modkc_gfx.c:
+  * a pure-Python `moy_gfx` stub that PORTS the C kernel logic (modmoy_gfx.c:
     fill / fill_rect / blit565 / blit_map, including the new optional clip args)
     line-for-line -- so this doubles as the cross-check of the C kernel against the
     host rasterizer that #11 asks for. (The real C kernel is compiled into the
@@ -45,7 +45,7 @@ def rgb565(rgb):
 
 
 # --------------------------------------------------------------------------- #
-# Pure-Python kc_gfx -- a faithful transcription of native/kc_gfx/modkc_gfx.c. #
+# Pure-Python moy_gfx -- a faithful transcription of native/moy_gfx/modmoy_gfx.c. #
 # --------------------------------------------------------------------------- #
 class _FakeGfx:
     @staticmethod
@@ -201,7 +201,7 @@ class _FakeGfx:
     def blit_window(dst, dw, dh, src, src_w, sx, sy):
         # #54 scroll engine: copy a dw x dh window of `src` (a wider pre-rendered
         # background, stride src_w) at (sx, sy) into `dst` (stride dw, contiguous) --
-        # a faithful transcription of kc_gfx_blit_window in modkc_gfx.c.
+        # a faithful transcription of moy_gfx_blit_window in modmoy_gfx.c.
         d = memoryview(dst).cast("H")
         s = memoryview(src).cast("H")
         dcap = len(d)
@@ -374,7 +374,7 @@ class _FakeFramebuf(types.ModuleType):
 
 
 class _FakeComp:
-    """Stands in for kc_compositor: an RGB565 buffer + the native gfx kernel."""
+    """Stands in for moy_compositor: an RGB565 buffer + the native gfx kernel."""
 
     def __init__(self, w, h):
         self._w = w
@@ -393,7 +393,7 @@ class _FakeComp:
 
 
 def _load_device_canvas():
-    # Inject the fake framebuf, then load kid_runtime's DeviceCanvas under CPython.
+    # Inject the fake framebuf, then load moy_runtime's DeviceCanvas under CPython.
     sys.modules["framebuf"] = _FakeFramebuf()
     for name in ("editors", "audio", "console"):
         spec = importlib.util.spec_from_file_location(name, ROOT / "runtime" / (name + ".py"))
@@ -403,7 +403,7 @@ def _load_device_canvas():
     sys.path.insert(0, str(ROOT / "tools"))
     import gen_device_carts
     sys.modules["carts_data"] = gen_device_carts.as_module(str(ROOT / "system_carts"))
-    spec = importlib.util.spec_from_file_location("kid_runtime", DEV / "kid_runtime.py")
+    spec = importlib.util.spec_from_file_location("moy_runtime", DEV / "moy_runtime.py")
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     return m
@@ -419,7 +419,7 @@ def _host_rgb565(cv):
 
 
 def _dev_rgb565(dc):
-    # The device writes pixels in PANEL byte order (kid_runtime.PAL565_SW, #43 -- the
+    # The device writes pixels in PANEL byte order (moy_runtime.PAL565_SW, #43 -- the
     # CPU byte-swap is folded into the LUT so the lcd_bus per-flush swap can be off).
     # Swap back here so the comparison is against the canonical little-endian RGB565
     # the host produces. (PAL565 itself stays canonical -- test_pal565_matches_host.)
@@ -448,12 +448,12 @@ def _assert_same(host, dev, label=""):
 
 
 # --------------------------------------------------------------------------- #
-# Sanity: the device PAL565 table equals rgb565(host KID64).                  #
+# Sanity: the device PAL565 table equals rgb565(host MOY64).                  #
 # --------------------------------------------------------------------------- #
 def test_pal565_matches_host_palette():
     m = _load_device_canvas()
     assert len(m.PAL565) == 64
-    for i, c in enumerate(palette.KID64):
+    for i, c in enumerate(palette.MOY64):
         assert m.PAL565[i] == rgb565(c), i
 
 
@@ -685,7 +685,7 @@ def test_scroll_layer_window_copy_matches_host():
     # new_layer + blit_window_from: pre-render the same scene into a wider layer on
     # both backends, then window-copy at a range of camera offsets (including the
     # right-edge clamp where dw is reduced) and assert the screens match pixel-for-
-    # pixel. Host copies palette indices; device uses kc_gfx.blit_window (gfx=True) or
+    # pixel. Host copies palette indices; device uses moy_gfx.blit_window (gfx=True) or
     # the memoryview fallback (gfx=False) over RGB565 -- all three must agree.
     for gfx in (True, False):
         m, host, dev = _both(gfx)
@@ -720,7 +720,7 @@ def test_blit_strip_matches_host():
     # new_layer + blit_strip: render the same strip scene into a SHORT, full-width layer
     # on both backends, then stamp it at a range of offsets (including off-screen ones the
     # C kernel clamps) and assert the screens match pixel-for-pixel. Host copies palette
-    # indices; device uses kc_gfx.blit565 with key=-1 (gfx=True) or the memoryview fallback
+    # indices; device uses moy_gfx.blit565 with key=-1 (gfx=True) or the memoryview fallback
     # (gfx=False) over RGB565 -- all three agree. This is the cross-backend proof the
     # cached top-bar strip lands identically everywhere.
     STRIP_H = 8

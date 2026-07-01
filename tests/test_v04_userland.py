@@ -1,5 +1,5 @@
 """Tests for the v0.4 userland: the indexed canvas, the shared SpriteSheet /
-CodeEditor cores, the `.kcart` store (kid_carts), and the shared console run on the
+CodeEditor cores, the `.moy` store (moy_carts), and the shared console run on the
 host via host_app -- the same console code the device runs."""
 
 import sys
@@ -27,8 +27,8 @@ def _open_cart(ws, title):
 # -- palette ---------------------------------------------------------------
 
 def test_palette_has_64_valid_colors():
-    assert len(palette.KID64) == 64
-    for rgb in palette.KID64:
+    assert len(palette.MOY64) == 64
+    for rgb in palette.MOY64:
         assert len(rgb) == 3
         assert all(0 <= ch <= 255 for ch in rgb)
     assert palette.color("white") == 7
@@ -49,7 +49,7 @@ def test_canvas_cls_pix_and_rgb_resolution():
     rgb = cv.to_rgb888()
     assert len(rgb) == 20 * 10 * 3
     off = (5 * 20 + 5) * 3
-    assert tuple(rgb[off:off + 3]) == palette.KID64[7]
+    assert tuple(rgb[off:off + 3]) == palette.MOY64[7]
 
 
 def test_canvas_rect_is_filled_and_clips_to_bounds():
@@ -295,27 +295,27 @@ def test_spr_indexed_and_image_via_make_api():
     assert cv.pix(10, 10) == 11
 
 
-# -- .kcart store (kid_carts) ----------------------------------------------
+# -- .moy store (moy_carts) ----------------------------------------------
 
-def test_kid_carts_store_roundtrip(tmp_path):
-    from runtime import kid_carts
+def test_moy_carts_store_roundtrip(tmp_path):
+    from runtime import moy_carts
     root = str(tmp_path / "carts")
-    kid_carts.ensure_dirs(root)
-    c = kid_carts.create("My Cart", root, src="def _draw():\n    cls(1)\n",
+    moy_carts.ensure_dirs(root)
+    c = moy_carts.create("My Cart", root, src="def _draw():\n    cls(1)\n",
                          cfg={"a": 1}, type="app")
     assert c["title"] == "My Cart" and c["src"].startswith("def _draw")
-    assert any(i["title"] == "My Cart" for i in kid_carts.scan(root))
+    assert any(i["title"] == "My Cart" for i in moy_carts.scan(root))
     # save edited code + a sprite sheet; reload reflects both
-    kid_carts.save_code(c, "def _draw():\n    cls(2)\n")
-    kid_carts.save_sprites(c, "012\n345\n")
-    kid_carts.save_map(c, TileMap(3, 2).to_hex())   # tilemap blob persists (#32)
-    reloaded = kid_carts.load(c["path"])
+    moy_carts.save_code(c, "def _draw():\n    cls(2)\n")
+    moy_carts.save_sprites(c, "012\n345\n")
+    moy_carts.save_map(c, TileMap(3, 2).to_hex())   # tilemap blob persists (#32)
+    reloaded = moy_carts.load(c["path"])
     assert "cls(2)" in reloaded["src"]
     assert reloaded["sprites"].startswith("012")
     assert reloaded["map"] is not None
-    assert TileMap.from_hex(reloaded["map"]).w == 3  # the saved map.kmap round-trips
+    assert TileMap.from_hex(reloaded["map"]).w == 3  # the saved map.moymap round-trips
     # duplicate makes an independent editable copy
-    dup = kid_carts.duplicate(c, root, new_title="Copy")
+    dup = moy_carts.duplicate(c, root, new_title="Copy")
     assert dup["title"] == "Copy" and dup["path"] != c["path"]
 
 
@@ -370,7 +370,7 @@ def test_hop_quest_uses_tilemap_and_still_plays(tmp_path):
 
 def test_battle_city_runs_with_tilemap_and_autoplay_progresses(tmp_path):
     # Battle City (#35): a top-down tank battle drawn over the cart's brick/steel
-    # tilemap (map.kmap) with map()/mget()/mset(). Verify it loads its tilemap and
+    # tilemap (map.moymap) with map()/mget()/mset(). Verify it loads its tilemap and
     # spawns a wave, then that the attract auto-pilot runs many frames without error
     # and actually PROGRESSES -- destroys enemies (score climbs) and the round ends
     # (a wave is cleared or the base/lives are lost, then it resets).
@@ -639,13 +639,13 @@ def test_key_and_keyp_reflect_current_frame_key():
 
 
 def test_pmem_round_trips_and_persists_to_pmem_json(tmp_path):
-    from runtime import kid_carts
+    from runtime import moy_carts
     from runtime import console as C
     root = str(tmp_path / "carts")
-    kid_carts.ensure_dirs(root)
-    cart = kid_carts.create("Saver", root, src="def _draw():\n    pass\n")
+    moy_carts.ensure_dirs(root)
+    cart = moy_carts.create("Saver", root, src="def _draw():\n    pass\n")
     # Fresh cart: pmem reads all zero.
-    cells = kid_carts.load_pmem(cart["path"])
+    cells = moy_carts.load_pmem(cart["path"])
     assert cells == [0] * 256
 
     writes = []
@@ -661,8 +661,8 @@ def test_pmem_round_trips_and_persists_to_pmem_json(tmp_path):
     assert writes[-1][0] == 1234 and writes[-1][255] == 7
 
     # Persist for real + reload sees it (no pmem.json existed before).
-    kid_carts.save_pmem(cart, pm.cells)
-    reloaded = kid_carts.load_pmem(cart["path"])
+    moy_carts.save_pmem(cart, pm.cells)
+    reloaded = moy_carts.load_pmem(cart["path"])
     assert reloaded[0] == 1234 and reloaded[255] == 7
     # 32-bit unsigned mask: values are stored & re-read masked.
     pm2 = C.Pmem(reloaded)
@@ -671,18 +671,18 @@ def test_pmem_round_trips_and_persists_to_pmem_json(tmp_path):
 
 def test_pmem_persists_through_workstation_open(tmp_path):
     from runtime import host_app
-    from runtime import kid_carts
+    from runtime import moy_carts
     carts_dir = str(tmp_path / "carts")
     # Create a cart whose _init bumps a high-score counter in pmem, before the
     # workstation scans the dir, so the launcher picks it up.
-    kid_carts.ensure_dirs(carts_dir)
+    moy_carts.ensure_dirs(carts_dir)
     src = (
         "def _init():\n"
         "    pmem(0, pmem(0) + 1)\n"
         "def _draw():\n"
         "    pass\n"
     )
-    kid_carts.create("Counter", carts_dir, src=src)
+    moy_carts.create("Counter", carts_dir, src=src)
 
     ws = host_app.build_workstation(carts_dir)
     _open_cart(ws, "Counter")
@@ -697,9 +697,9 @@ def test_key_keyp_plumbed_through_console_driver(tmp_path):
     # End-to-end: a cart reads key()/keyp(); the host ConsoleDriver feeds a typed
     # byte into input.last_key and Workstation.frame resolves the held/edge state.
     from runtime import host_app
-    from runtime import kid_carts
+    from runtime import moy_carts
     carts_dir = str(tmp_path / "carts")
-    kid_carts.ensure_dirs(carts_dir)
+    moy_carts.ensure_dirs(carts_dir)
     src = (
         "log = []\n"
         "def _update(dt):\n"
@@ -707,7 +707,7 @@ def test_key_keyp_plumbed_through_console_driver(tmp_path):
         "def _draw():\n"
         "    pass\n"
     )
-    kid_carts.create("Keys", carts_dir, src=src)
+    moy_carts.create("Keys", carts_dir, src=src)
     ws = host_app.build_workstation(carts_dir)
     drv = host_app.ConsoleDriver(ws)
     _open_cart(ws, "Keys")
@@ -799,7 +799,7 @@ def test_host_console_map_erase_and_pan(tmp_path):
 
 def test_host_console_map_save_roundtrips(tmp_path):
     from runtime import console as C
-    from runtime import host_app, kid_carts
+    from runtime import host_app, moy_carts
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)
     drv = host_app.ConsoleDriver(ws)
@@ -810,7 +810,7 @@ def test_host_console_map_save_roundtrips(tmp_path):
     drv.click(C._MV_X0 + 2, C._MV_Y0 + 2); drv.frame(1 / 30)   # stamp tile 6 at (0,0)
     drv.click(C._MAP_SAVE[0] + 2, C._MAP_SAVE[1] + 2); drv.frame(1 / 30)    # SAVE
     assert ws.save_status == "SAVED"
-    reloaded = kid_carts.load(cart_path)                  # map.kmap persisted on disk
+    reloaded = moy_carts.load(cart_path)                  # map.moymap persisted on disk
     assert reloaded["map"] is not None
     assert TileMap.from_hex(reloaded["map"]).mget(0, 0) == 6
 
@@ -835,13 +835,13 @@ def test_map_edit_seen_by_running_cart_via_gen(tmp_path):
 # -- map editor zoom levels (#37 follow-up) --------------------------------
 
 def _open_cart_map(tmp_path, cart_name):
-    """Build a workstation, open the `<cart_name>.kcart` seed cart, then enter the
+    """Build a workstation, open the `<cart_name>.moy` seed cart, then enter the
     map editor. Returns (C, ws, drv)."""
     import os
     from runtime import console as C
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    want = cart_name + ".kcart"
+    want = cart_name + ".moy"
     sel = None
     for i in range(len(ws.launcher.items)):
         path = ws.launcher.items[i].get("path") or ""
@@ -1068,17 +1068,17 @@ def test_cart_using_clip_camera_flip_runs_and_resets_between_frames(tmp_path):
     import os
     from runtime import host_app
     carts = tmp_path / "carts"
-    os.makedirs(carts / "clipper.kcart")
-    (carts / "clipper.kcart" / "manifest.json").write_text(
+    os.makedirs(carts / "clipper.moy")
+    (carts / "clipper.moy" / "manifest.json").write_text(
         '{"title": "Clipper", "type": "game", "runtime": "python", "main": "main.py"}')
-    (carts / "clipper.kcart" / "main.py").write_text(
+    (carts / "clipper.moy" / "main.py").write_text(
         "def _draw():\n"
         "    cls(0)\n"
         "    camera(5, 5)\n"
         "    clip(0, 0, 20, 20)\n"
         "    pal(8, 11)\n"
         "    rect(0, 0, W, H, 8)\n")
-    (carts / "clipper.kcart" / "config.json").write_text("{}")
+    (carts / "clipper.moy" / "config.json").write_text("{}")
     ws = host_app.build_workstation(str(carts))
     drv = host_app.ConsoleDriver(ws)
     _open_cart(ws, "Clipper")

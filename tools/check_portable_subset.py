@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Check kid project code against the portable KidCode subset."""
+"""Check kid project code against the portable Moybyte subset."""
 
 import argparse
 import sys
 
-from kidcode_cli.portable import check_path
+from moybyte_cli.portable import check_path
 
 
 def main(argv=None):

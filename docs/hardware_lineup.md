@@ -1,9 +1,9 @@
 # MoyByte hardware lineup
 
-Roadmap snapshot of the planned **MoyByte** hardware family. KidCode v0.4 is a host==device
+Roadmap snapshot of the planned **MoyByte** hardware family. Moybyte v0.4 is a host==device
 shared console (`runtime/` → frozen onto each device), so a device is just a **backend**
 (display / input / SD / transport) under one shared UI + cart format. The cart contract —
-**320×240 indexed KID64 canvas** — is identical everywhere, so *one cart runs on every
+**320×240 indexed MOY64 canvas** — is identical everywhere, so *one cart runs on every
 tier*. Adding a tier is a backend port, not a fork.
 
 Status: only the **Player-class** device works today (LilyGO T-Deck). This doc is the
@@ -46,7 +46,7 @@ headless tier (cf. Pi Zero; there's literally an ESP32-S3-Zero board), One = the
 - **SD = the cartridge.** Swap the microSD to swap game libraries — fits the console identity.
 - **Port:** the S3 backend we already ship + a new `BOARD_CONFIG` in `build.sh` (ILI9341
   `DISPLAY=`, GPIO button reader replacing the I2C keyboard/trackball, SD + I2S pins).
-  `kc_gfx`/compositor are panel-agnostic. Flush ceiling ~45–50 fps (SPI) — expected for this
+  `moy_gfx`/compositor are panel-agnostic. Flush ceiling ~45–50 fps (SPI) — expected for this
   tier; the web view / One cover higher perf. (Player-port issue: TBD, parallel to #58.)
 - The **LilyGO T-Deck** stays a Player-class *keyboard* variant (good for on-device typing);
   the Retro-Go handheld is the *gamepad* variant.

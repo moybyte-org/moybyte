@@ -11,22 +11,22 @@ def test_micropython_spike_scaffold_exists():
     assert (ROOT / "README.md").exists()
     assert (ROOT / "build.sh").exists()
     assert (ROOT / "modules" / "main.py").exists()
-    assert (ROOT / "modules" / "kidcode" / "__init__.py").exists()
+    assert (ROOT / "modules" / "moybyte" / "__init__.py").exists()
 
 
 def test_micropython_spike_documents_sd_launcher_bin():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
     assert "launcher-friendly `.bin`" in readme
-    assert "kidcode_micropython_tdeck.bin" in readme
-    assert "use `kidcode_micropython_tdeck.bin`" in readme
+    assert "moybyte_micropython_tdeck.bin" in readme
+    assert "use `moybyte_micropython_tdeck.bin`" in readme
     assert "update error" in readme
     assert "native `240x320` portrait" in readme
     assert "Launcher-based boot is still the preferred quick app-test loop" in readme
     assert "full USB flashing at `0x0` is confirmed to work" in readme
     assert "USB full flashing is valid on this board" in readme
-    assert "KIDCODE_BOARD_CONFIG=tdeck" in readme
-    assert "kidcode_lvgl_tdeck_board_jtag_full_dio_0x0.bin" in readme
+    assert "MOYBYTE_BOARD_CONFIG=tdeck" in readme
+    assert "moybyte_lvgl_tdeck_board_jtag_full_dio_0x0.bin" in readme
 
 
 def test_micropython_spike_build_uses_lvgl_micropython_and_frozen_modules():
@@ -49,23 +49,23 @@ def test_micropython_spike_build_uses_lvgl_micropython_and_frozen_modules():
     assert "MPY_BUILD_DIR" in build
     assert "micropython.bin" in build
     assert "full-flash" not in build
-    assert "KIDCODE_BUILD_JOBS" in build
-    assert "KIDCODE_BUILD_PYTHON" in build
+    assert "MOYBYTE_BUILD_JOBS" in build
+    assert "MOYBYTE_BUILD_PYTHON" in build
     assert "nice -n" in build
     assert "ionice -c 3" in build
-    assert "KIDCODE_SKIP_UPSTREAM_SUBMODULES" in build
-    assert "KIDCODE_EARLY_BOARD_INIT" in build
-    assert "KIDCODE_BOARD_CONFIG" in build
-    assert "KIDCODE_REPL" in build
-    assert "KIDCODE_ARTIFACT_NAME" in build
+    assert "MOYBYTE_SKIP_UPSTREAM_SUBMODULES" in build
+    assert "MOYBYTE_EARLY_BOARD_INIT" in build
+    assert "MOYBYTE_BOARD_CONFIG" in build
+    assert "MOYBYTE_REPL" in build
+    assert "MOYBYTE_ARTIFACT_NAME" in build
     assert "export GEN_SCRIPT" in build
     assert "--custom-board-path=display_configs/LilyGo-TDeck" in build
     assert "boards/sdkconfig\\.usb" in build
     assert "MICROPY_HW_ESP_USB_SERIAL_JTAG" in build
     assert "esp32_tdeck_early_board_init.patch" in build
     assert "patch -R" in build
-    assert "kidcode_tdeck_early_board_init" in patch
-    assert "KIDCODE_TDECK_POWERON   GPIO_NUM_10" in patch
+    assert "moybyte_tdeck_early_board_init" in patch
+    assert "MOYBYTE_TDECK_POWERON   GPIO_NUM_10" in patch
 
 
 def test_micropython_spike_makefile_has_flash_and_monitor_targets():
@@ -99,7 +99,7 @@ def test_micropython_spike_makefile_has_flash_and_monitor_targets():
 def test_ota_updater_module_flashes_inactive_slot_from_sd():
     # OTA (#53): the device updater writes an SD .bin into the inactive OTA slot via
     # esp32.Partition (block-erase writeblocks) and reboots; rollback is the safety net.
-    ota = (ROOT / "modules" / "kc_ota.py").read_text(encoding="utf-8")
+    ota = (ROOT / "modules" / "moy_ota.py").read_text(encoding="utf-8")
 
     assert "class OtaUpdater" in ota
     assert 'UPDATE_DIR = "/sd/update"' in ota
@@ -122,10 +122,10 @@ def test_ota_updater_module_flashes_inactive_slot_from_sd():
 
 
 def test_ota_updater_wired_into_run_desktop_with_rollback_confirm():
-    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
 
-    assert "import kc_ota" in runtime
-    assert "ws.updater = kc_ota.OtaUpdater(_with_sd_synced)" in runtime
+    assert "import moy_ota" in runtime
+    assert "ws.updater = moy_ota.OtaUpdater(_with_sd_synced)" in runtime
     # the healthy-boot rollback confirm
     assert "ws.updater.mark_valid()" in runtime
 
@@ -148,12 +148,12 @@ def test_console_settings_has_firmware_update_screen():
 
 
 def test_device_web_view_module_present_and_protocol_shaped():
-    # Device web view (#41/#22): a kc_webserver module records the cart's per-frame draw
+    # Device web view (#41/#22): a moy_webserver module records the cart's per-frame draw
     # calls (a TeeCanvas over the real DeviceCanvas) and serves them to a browser over
     # WiFi via the SAME draw-command protocol the host web console uses, so the same
     # web_console.html renders device frames. We grep the frozen source (firmware tests
-    # don't execute MicroPython); the executable behaviour is in tests/test_kc_webserver.py.
-    web = (ROOT / "modules" / "kc_webserver.py").read_text(encoding="utf-8")
+    # don't execute MicroPython); the executable behaviour is in tests/test_moy_webserver.py.
+    web = (ROOT / "modules" / "moy_webserver.py").read_text(encoding="utf-8")
     assert "class DrawRecorder" in web          # per-frame draw-command recorder
     assert "class TeeCanvas" in web             # forwards to the panel canvas + records
     assert "class WebServer" in web             # non-blocking, one request per poll()
@@ -201,8 +201,8 @@ def test_device_web_view_wired_into_run_desktop_cooperatively():
     # The web view is serviced from run_desktop's single-threaded loop: a TeeCanvas
     # swapped in as ws.canvas (panel still renders), begin/commit around the frame, and
     # ONE poll() BETWEEN frames (never mid-flush). The Settings WEB VIEW row toggles it.
-    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
-    assert "import kc_webserver" in runtime
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    assert "import moy_webserver" in runtime
     assert "class WebView" in runtime
     assert "web = WebView(" in runtime
     assert "ws.web_hook = web" in runtime
@@ -215,7 +215,7 @@ def test_device_web_view_wired_into_run_desktop_cooperatively():
     # plays -- skip the flush via the compositor (skip_flush) + a one-time enter notice.
     assert "_apply_stream_mode" in runtime
     assert "skip_flush" in runtime
-    comp = (ROOT / "modules" / "kc_compositor.py").read_text(encoding="utf-8")
+    comp = (ROOT / "modules" / "moy_compositor.py").read_text(encoding="utf-8")
     assert "self.skip_flush" in comp            # flush() is a no-op while streaming
 
 
@@ -233,7 +233,7 @@ def test_console_settings_has_web_view_toggle():
 def test_ota_online_download_streams_to_sd_with_checksum():
     # OTA Phase 3 (#53): a WiFi download fetches a manifest, streams the .bin straight
     # to SD (never buffering the whole image), and verifies sha256 before installing.
-    ota = (ROOT / "modules" / "kc_ota.py").read_text(encoding="utf-8")
+    ota = (ROOT / "modules" / "moy_ota.py").read_text(encoding="utf-8")
 
     assert "FIRMWARE_VERSION = " in ota          # bumped per release (#53), so don't pin the value
     assert 'OTA_CFG_NAME = "ota.json"' in ota
@@ -257,7 +257,7 @@ def test_ota_online_download_streams_to_sd_with_checksum():
 
 
 def test_ota_online_wired_and_console_has_online_flow():
-    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
 
     # run_desktop hands the wifi service to the updater for online updates.
@@ -284,7 +284,7 @@ def test_micropython_spike_uses_tdeck_native_panel_geometry():
 
 def test_micropython_spike_has_guarded_sd_project_loader():
     display = (ROOT / "modules" / "tdeck_display.py").read_text(encoding="utf-8")
-    sd_loader = (ROOT / "modules" / "kidcode_sd.py").read_text(encoding="utf-8")
+    sd_loader = (ROOT / "modules" / "moybyte_sd.py").read_text(encoding="utf-8")
 
     assert "def get_spi_bus():" in display
     assert "SD_PROJECT_FILE_PATHS" in sd_loader
@@ -303,41 +303,41 @@ def test_micropython_spike_has_guarded_sd_project_loader():
 
 def test_micropython_native_sd_shares_display_spi_host():
     # The live SD path attaches the card to the host esp_lcd already initialized
-    # (kc_sd) instead of re-running spi_bus_initialize like machine.SDCard, which
-    # hangs the shared bus once the panel is up. See modkc_sd.c header.
-    mod = (ROOT / "native" / "kc_sd" / "modkc_sd.c").read_text(encoding="utf-8")
-    cmake = (ROOT / "native" / "kc_sd" / "micropython.cmake").read_text(encoding="utf-8")
+    # (moy_sd) instead of re-running spi_bus_initialize like machine.SDCard, which
+    # hangs the shared bus once the panel is up. See modmoy_sd.c header.
+    mod = (ROOT / "native" / "moy_sd" / "modmoy_sd.c").read_text(encoding="utf-8")
+    cmake = (ROOT / "native" / "moy_sd" / "micropython.cmake").read_text(encoding="utf-8")
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
-    sd_loader = (ROOT / "modules" / "kidcode_sd.py").read_text(encoding="utf-8")
-    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    sd_loader = (ROOT / "modules" / "moybyte_sd.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
 
     # Native module attaches (init_device) rather than re-initializing the bus.
-    assert "MP_REGISTER_MODULE(MP_QSTR_kc_sd" in mod
+    assert "MP_REGISTER_MODULE(MP_QSTR_moy_sd" in mod
     assert "sdspi_host_init_device" in mod
     assert "sdmmc_read_sectors" in mod and "sdmmc_write_sectors" in mod
-    assert "target_link_libraries(usermod INTERFACE usermod_kc_sd)" in cmake
-    assert "ext_mod/kc_sd" in build
-    assert "kc_sd/micropython.cmake" in build
+    assert "target_link_libraries(usermod INTERFACE usermod_moy_sd)" in cmake
+    assert "ext_mod/moy_sd" in build
+    assert "moy_sd/micropython.cmake" in build
 
-    # Python live-mount path + block device backed by kc_sd.
+    # Python live-mount path + block device backed by moy_sd.
     assert "class _NativeSDBlockDev" in sd_loader
     assert "def with_sd_live(fn):" in sd_loader
     assert "def mount_sd_live(" in sd_loader
-    assert "import kc_sd" in sd_loader
+    assert "import moy_sd" in sd_loader
 
     # Desktop enables management through the live path (no longer hard-disabled).
     # The SD session is wrapped so it drains any in-flight panel DMA first (the
     # #40 double-buffer SD-vs-panel mutual exclusion), but still delegates to the
     # native live-mount path.
     assert "ws._with_sd = _with_sd_synced" in runtime
-    assert "return kidcode_sd.with_sd_live(fn)" in runtime
+    assert "return moybyte_sd.with_sd_live(fn)" in runtime
     assert "ws.can_manage = carts_root is not None" in runtime
     assert "ws.can_manage = False" not in runtime
 
 
 def test_micropython_touch_and_idle_cursor():
-    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
-    shell = (ROOT / "modules" / "kidcode_shell.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    shell = (ROOT / "modules" / "moybyte_shell.py").read_text(encoding="utf-8")
 
     # GT911 touch driver on I2C0 (off the SPI bus), fed into the shared pointer.
     assert "class Touch:" in runtime
@@ -365,9 +365,9 @@ def test_micropython_cart_textmode_flips_keyboard_ascii_raw():
     # `textmode` verb; the device backend then flips the T-Deck keyboard to clean
     # 1-byte ASCII so key()/keyp() yield typeable bytes, and back to raw/game mode
     # otherwise (so games keep hold-to-move). Firmware tests grep the frozen source.
-    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
-    kb = (ROOT / "modules" / "kidcode" / "input.py").read_text(encoding="utf-8")
+    kb = (ROOT / "modules" / "moybyte" / "input.py").read_text(encoding="utf-8")
 
     # The device make_api exposes `textmode`, setting input.text_mode (host parity).
     assert "def textmode(on=True):" in runtime
@@ -406,14 +406,14 @@ def test_micropython_spike_documents_tdeck_reference_paths():
     assert "No LilyGO-maintained MicroPython T-Deck example" in notes
 
 
-def test_kc_compositor_plan_strips_and_host_guard():
+def test_moy_compositor_plan_strips_and_host_guard():
     spec = importlib.util.spec_from_file_location(
-        "kc_compositor", ROOT / "modules" / "kc_compositor.py"
+        "moy_compositor", ROOT / "modules" / "moy_compositor.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
-    # Host guard: no bus -> no compositor (never touches kc_alloc/framebuf).
+    # Host guard: no bus -> no compositor (never touches moy_alloc/framebuf).
     assert module.make_compositor(None) is None
 
     # Even strip height tiles the full panel exactly.
@@ -436,9 +436,9 @@ def test_kc_compositor_plan_strips_and_host_guard():
         pass
 
 
-def test_kc_compositor_dirty_region_math():
+def test_moy_compositor_dirty_region_math():
     spec = importlib.util.spec_from_file_location(
-        "kc_compositor", ROOT / "modules" / "kc_compositor.py"
+        "moy_compositor", ROOT / "modules" / "moy_compositor.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -465,13 +465,13 @@ def test_kc_compositor_dirty_region_math():
     assert dt.is_empty()
 
 
-def test_kc_compositor_flush_breakdown_instrumentation():
+def test_moy_compositor_flush_breakdown_instrumentation():
     """The flush-breakdown instrumentation (perf #33/#12): flush() times its
     sub-steps and logs a `FLUSHBRK copy=.. tx=.. setup=.. n=.. total=..` line via
-    kidcode_diag, so the owner can read live whether the ~28 ms flush is SPI clock
+    moybyte_diag, so the owner can read live whether the ~28 ms flush is SPI clock
     (tx) or non-transfer overhead (copy/setup). Grep the device source (the firmware
     tests assert structure, not execution) + the importable module constants."""
-    comp_src = (ROOT / "modules" / "kc_compositor.py").read_text(encoding="utf-8")
+    comp_src = (ROOT / "modules" / "moy_compositor.py").read_text(encoding="utf-8")
 
     # The revert-able gate + the sample throttle are single named constants.
     assert "FLUSH_INSTRUMENT = True" in comp_src
@@ -493,7 +493,7 @@ def test_kc_compositor_flush_breakdown_instrumentation():
 
     # The module still imports + the gate constant is the importable knob.
     spec = importlib.util.spec_from_file_location(
-        "kc_compositor", ROOT / "modules" / "kc_compositor.py"
+        "moy_compositor", ROOT / "modules" / "moy_compositor.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -509,7 +509,7 @@ def test_kc_compositor_flush_breakdown_instrumentation():
     assert "freq = 80000000" in disp_src
 
 
-def test_kc_compositor_double_buffer_enabled_and_revertible():
+def test_moy_compositor_double_buffer_enabled_and_revertible():
     """DMA double-buffering / flush overlap (#40): a ping-pong of two PSRAM frame
     buffers so the panel DMA runs WHILE the CPU renders the next frame. Device-
     confirmed stable + the copy-removal win (flush 28->20ms, copy=0, ~13->16-19fps),
@@ -517,8 +517,8 @@ def test_kc_compositor_double_buffer_enabled_and_revertible():
     False -> the proven single-buffer banded flush runs byte-for-byte (the #40
     instant fallback). Grep the device source for the design + the gate + the
     SD-vs-panel-DMA mutual exclusion."""
-    comp_src = (ROOT / "modules" / "kc_compositor.py").read_text(encoding="utf-8")
-    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    comp_src = (ROOT / "modules" / "moy_compositor.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
 
     # The gate is a single named constant, now DEFAULT ON (device-confirmed). It
     # stays revertible (a one-flag fallback to the single-buffer path) -- assert the
@@ -526,7 +526,7 @@ def test_kc_compositor_double_buffer_enabled_and_revertible():
     assert "\nDOUBLE_BUFFER = True" in comp_src
     # ... and importable so the flag is verifiable, not just textual.
     spec = importlib.util.spec_from_file_location(
-        "kc_compositor", ROOT / "modules" / "kc_compositor.py"
+        "moy_compositor", ROOT / "modules" / "moy_compositor.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -559,7 +559,7 @@ def test_kc_compositor_double_buffer_enabled_and_revertible():
     assert "def sync(self):" in comp_src
     assert "def _with_sd_synced(fn):" in runtime
     assert "comp.sync()" in runtime
-    assert "return kidcode_sd.with_sd_live(fn)" in runtime
+    assert "return moybyte_sd.with_sd_live(fn)" in runtime
 
     # The canvas follows the back buffer each frame (a stale pointer would draw into
     # the buffer mid-DMA -> tear); run_desktop calls it before drawing.
@@ -568,7 +568,7 @@ def test_kc_compositor_double_buffer_enabled_and_revertible():
     assert "canvas.sync_back()" in runtime
 
 
-def test_kc_compositor_double_buffer_pingpong_logic():
+def test_moy_compositor_double_buffer_pingpong_logic():
     """Exercise the ping-pong flush logic with stub native modules (no hardware):
     verify the buffer SWAP, the DEFERRED completion (final band held back, drained on
     the next flush), that NO per-frame full-frame copy happens, and that sync() drains
@@ -576,10 +576,10 @@ def test_kc_compositor_double_buffer_pingpong_logic():
     of the grep test -- it proves the invariant, not just the structure."""
     import types
 
-    # Stub the device-only natives the Compositor.__init__ imports. kc_alloc.malloc_dma
+    # Stub the device-only natives the Compositor.__init__ imports. moy_alloc.malloc_dma
     # returns a plain bytearray (DMA memory is just RAM on the host); lcd_bus exposes
     # the MEMORY_* flags; framebuf is a no-op FrameBuffer (we drive raw buffers here).
-    fake_alloc = types.ModuleType("kc_alloc")
+    fake_alloc = types.ModuleType("moy_alloc")
     fake_alloc.malloc_dma = lambda n, flags=0: bytearray(n)
     fake_lcd = types.ModuleType("lcd_bus")
     fake_lcd.MEMORY_SPIRAM = 1
@@ -598,14 +598,14 @@ def test_kc_compositor_double_buffer_pingpong_logic():
     fake_framebuf.FrameBuffer = _FB
     fake_framebuf.RGB565 = 1
 
-    saved = {k: sys.modules.get(k) for k in ("kc_alloc", "lcd_bus", "framebuf", "kc_gfx")}
-    sys.modules["kc_alloc"] = fake_alloc
+    saved = {k: sys.modules.get(k) for k in ("moy_alloc", "lcd_bus", "framebuf", "moy_gfx")}
+    sys.modules["moy_alloc"] = fake_alloc
     sys.modules["lcd_bus"] = fake_lcd
     sys.modules["framebuf"] = fake_framebuf
-    sys.modules.pop("kc_gfx", None)   # no native kernel -> framebuf fallback path
+    sys.modules.pop("moy_gfx", None)   # no native kernel -> framebuf fallback path
     try:
         spec = importlib.util.spec_from_file_location(
-            "kc_compositor_pp", ROOT / "modules" / "kc_compositor.py"
+            "moy_compositor_pp", ROOT / "modules" / "moy_compositor.py"
         )
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -675,7 +675,7 @@ def test_kc_compositor_double_buffer_pingpong_logic():
                 sys.modules[k] = v
 
 
-def test_kc_compositor_async_flush_overlap_logic():
+def test_moy_compositor_async_flush_overlap_logic():
     """Exercise the ASYNC_FLUSH path (#43): when the bus accepts a callback,
     `tx_color` is non-blocking, so _kick_front fires EVERY band (none held back) and
     _drain_dma waits on the completion COUNTER instead of a busy-wait band. Proves:
@@ -684,7 +684,7 @@ def test_kc_compositor_async_flush_overlap_logic():
     swap recycles the drained buffer; sync() leaves nothing in flight."""
     import types
 
-    fake_alloc = types.ModuleType("kc_alloc")
+    fake_alloc = types.ModuleType("moy_alloc")
     fake_alloc.malloc_dma = lambda n, flags=0: bytearray(n)
     fake_lcd = types.ModuleType("lcd_bus")
     fake_lcd.MEMORY_SPIRAM = 1
@@ -703,19 +703,19 @@ def test_kc_compositor_async_flush_overlap_logic():
     fake_framebuf.FrameBuffer = _FB
     fake_framebuf.RGB565 = 1
 
-    saved = {k: sys.modules.get(k) for k in ("kc_alloc", "lcd_bus", "framebuf", "kc_gfx")}
-    sys.modules["kc_alloc"] = fake_alloc
+    saved = {k: sys.modules.get(k) for k in ("moy_alloc", "lcd_bus", "framebuf", "moy_gfx")}
+    sys.modules["moy_alloc"] = fake_alloc
     sys.modules["lcd_bus"] = fake_lcd
     sys.modules["framebuf"] = fake_framebuf
-    sys.modules.pop("kc_gfx", None)
+    sys.modules.pop("moy_gfx", None)
     try:
         spec = importlib.util.spec_from_file_location(
-            "kc_compositor_async", ROOT / "modules" / "kc_compositor.py"
+            "moy_compositor_async", ROOT / "modules" / "moy_compositor.py"
         )
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         # Defaults on disk are the device defaults; assert them so the revert knob holds.
-        src = (ROOT / "modules" / "kc_compositor.py").read_text("utf-8")
+        src = (ROOT / "modules" / "moy_compositor.py").read_text("utf-8")
         assert "\nASYNC_FLUSH = True" in src
         assert "\nPSRAM_DIRECT_FLUSH = True" in src
         assert module.ASYNC_FLUSH is True
@@ -810,7 +810,7 @@ def test_kc_compositor_async_flush_overlap_logic():
 
 def test_tdeck_keyboard_latches_event_keys_for_hold_window():
     spec = importlib.util.spec_from_file_location(
-        "kidcode_firmware_input", ROOT / "modules" / "kidcode" / "input.py"
+        "moybyte_firmware_input", ROOT / "modules" / "moybyte" / "input.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -840,7 +840,7 @@ def test_tdeck_keyboard_latches_event_keys_for_hold_window():
 
 def test_tdeck_keyboard_reads_raw_matrix_for_real_holds():
     spec = importlib.util.spec_from_file_location(
-        "kidcode_firmware_input", ROOT / "modules" / "kidcode" / "input.py"
+        "moybyte_firmware_input", ROOT / "modules" / "moybyte" / "input.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -872,7 +872,7 @@ def test_tdeck_keyboard_reads_raw_matrix_for_real_holds():
 
 def test_tdeck_keyboard_keeps_raw_mode_for_physical_a_bit():
     spec = importlib.util.spec_from_file_location(
-        "kidcode_firmware_input", ROOT / "modules" / "kidcode" / "input.py"
+        "moybyte_firmware_input", ROOT / "modules" / "moybyte" / "input.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -897,7 +897,7 @@ def test_tdeck_keyboard_keeps_raw_mode_for_physical_a_bit():
 
 def test_tdeck_keyboard_falls_back_when_raw_mode_is_ignored():
     spec = importlib.util.spec_from_file_location(
-        "kidcode_firmware_input", ROOT / "modules" / "kidcode" / "input.py"
+        "moybyte_firmware_input", ROOT / "modules" / "moybyte" / "input.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -924,7 +924,7 @@ def test_tdeck_keyboard_falls_back_when_raw_mode_is_ignored():
 
 def test_tdeck_keyboard_set_game_mode_toggles_raw():
     spec = importlib.util.spec_from_file_location(
-        "kidcode_firmware_input", ROOT / "modules" / "kidcode" / "input.py"
+        "moybyte_firmware_input", ROOT / "modules" / "moybyte" / "input.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -964,9 +964,9 @@ def test_tdeck_keyboard_set_game_mode_toggles_raw():
     assert not kb.raw_mode and writes == [RAW, KEY]
 
 
-def test_device_canvas_uses_native_kc_gfx():
-    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
-    # The hot drawing ops go through the native kc_gfx kernel (fill/fill_rect/
+def test_device_canvas_uses_native_moy_gfx():
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    # The hot drawing ops go through the native moy_gfx kernel (fill/fill_rect/
     # blit565) writing into the shared framebuffer, not the per-pixel Python loop,
     # so complex carts stay fast.
     assert "self._gfx = compositor.gfx()" in runtime
@@ -977,57 +977,57 @@ def test_device_canvas_uses_native_kc_gfx():
     # across frames so the cache is built once, not rebuilt every frame.
     assert "def _cache_rgb(self, img, scale, flip=0):" in runtime
     assert "tile_cache" in runtime
-    comp = (ROOT / "modules" / "kc_compositor.py").read_text(encoding="utf-8")
+    comp = (ROOT / "modules" / "moy_compositor.py").read_text(encoding="utf-8")
     assert "def gfx(self):" in comp
 
 
 def test_native_blit_map_wired_for_tilemaps():
-    # The tilemap blit (#32) is a native kc_gfx op (one C call per map() region) and
+    # The tilemap blit (#32) is a native moy_gfx op (one C call per map() region) and
     # DeviceCanvas.map drives it from a baked RGB565 tile atlas, with a Python
-    # per-tile fallback when kc_gfx is absent. Grep the frozen device sources +
+    # per-tile fallback when moy_gfx is absent. Grep the frozen device sources +
     # the C module like the other firmware tests.
-    c = (ROOT / "native" / "kc_gfx" / "modkc_gfx.c").read_text(encoding="utf-8")
-    assert "kc_gfx_blit_map" in c
+    c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    assert "moy_gfx_blit_map" in c
     assert "MP_ROM_QSTR(MP_QSTR_blit_map)" in c          # registered in the module dict
-    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     assert "def map(self, tilemap, sheet" in runtime     # DeviceCanvas.map
     assert "self._gfx.blit_map(self._buf" in runtime     # native one-call blit
     assert "def _sheet_atlas(self, sheet, colorkey):" in runtime  # baked RGB565 atlas
-    assert "def _map_py(self, tilemap, sheet" in runtime  # no-kc_gfx fallback
+    assert "def _map_py(self, tilemap, sheet" in runtime  # no-moy_gfx fallback
 
 
 def test_native_vector_primitives_wired():
-    # circ/circb/line are native kc_gfx ops (#43 follow-up): one C call rasterizes the
+    # circ/circb/line are native moy_gfx ops (#43 follow-up): one C call rasterizes the
     # whole shape (was N per-scanline / per-pixel MP->C calls), with a Python fallback
-    # when kc_gfx is absent. Grep the C module + the device canvas wiring.
-    c = (ROOT / "native" / "kc_gfx" / "modkc_gfx.c").read_text(encoding="utf-8")
-    for fn in ("kc_gfx_circ", "kc_gfx_circb", "kc_gfx_line"):
+    # when moy_gfx is absent. Grep the C module + the device canvas wiring.
+    c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    for fn in ("moy_gfx_circ", "moy_gfx_circb", "moy_gfx_line"):
         assert fn in c
     for q in ("MP_QSTR_circ", "MP_QSTR_circb", "MP_QSTR_line"):
         assert "MP_ROM_QSTR(%s)" % q in c                 # registered in the module dict
-    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     assert "self._gfx.circ(self._buf" in runtime
     assert "self._gfx.circb(self._buf" in runtime
     assert "self._gfx.line(self._buf" in runtime
     # blit_window is the scroll-engine (Stage 1) primitive -- a flat per-row window copy
     # from a wide pre-rendered background. Landed in the kernel ahead of the engine that
     # consumes it (see the scroll-engine issue); assert it's registered.
-    assert "kc_gfx_blit_window" in c
+    assert "moy_gfx_blit_window" in c
     assert "MP_ROM_QSTR(MP_QSTR_blit_window)" in c
     # The device cart API exposes map/mget/mset, same names as the host make_api.
     assert '"map": map_, "mget": mget, "mset": mset,' in runtime
 
 
 def test_native_spr_batch_wired_for_sprites():
-    # The sprite-batch blit (#43) is a native kc_gfx op (one C call for N sprites, the
+    # The sprite-batch blit (#43) is a native moy_gfx op (one C call for N sprites, the
     # sprite analogue of blit_map / #32) and DeviceCanvas.spr_batch drives it from the
     # SAME baked RGB565 tile atlas map() uses, with a Python per-item fallback when
-    # kc_gfx is absent. Grep the frozen device sources + the C module, like the other
+    # moy_gfx is absent. Grep the frozen device sources + the C module, like the other
     # firmware tests (this file does not execute device code).
-    c = (ROOT / "native" / "kc_gfx" / "modkc_gfx.c").read_text(encoding="utf-8")
-    assert "kc_gfx_blit_batch" in c
+    c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    assert "moy_gfx_blit_batch" in c
     assert "MP_ROM_QSTR(MP_QSTR_blit_batch)" in c        # registered in the module dict
-    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     assert "def spr_batch(self, sheet, items" in runtime  # DeviceCanvas.spr_batch
     assert "self._gfx.blit_batch(self._buf" in runtime    # native one-call blit
     assert "def spr_batch(items" in runtime               # make_api spr_batch
@@ -1035,13 +1035,13 @@ def test_native_spr_batch_wired_for_sprites():
     # The batch reuses the map() atlas (one bake, keyed on sheet.gen), not per-sprite.
     assert "atlas, ntiles = self._sheet_atlas(sheet, colorkey)" in runtime
     # Battle City adopts it: the moving sprites go out in one batch (#43).
-    battle = (Path("system_carts") / "battle_city.kcart"
+    battle = (Path("system_carts") / "battle_city.moy"
               / "main.py").read_text(encoding="utf-8")
     assert "spr_batch(" in battle
 
 
-def _load_kid_runtime():
-    # kid_runtime does `from editors import ...` and `from console import ...`; the
+def _load_moy_runtime():
+    # moy_runtime does `from editors import ...` and `from console import ...`; the
     # device freezes build-staged copies of runtime/{editors,audio,console}.py as
     # top-level modules. Register those same canonical files so the device module
     # loads under CPython (editors + audio first -- console imports both).
@@ -1051,7 +1051,7 @@ def _load_kid_runtime():
         spec.loader.exec_module(mod)
         sys.modules[name] = mod
 
-    # kid_runtime now does `from carts_data import CARTS` (build-generated from
+    # moy_runtime now does `from carts_data import CARTS` (build-generated from
     # system_carts/ -- see tools/gen_device_carts.py). Register the same generated
     # data so the device module execs under CPython.
     sys.path.insert(0, "tools")
@@ -1059,7 +1059,7 @@ def _load_kid_runtime():
     sys.modules["carts_data"] = gen_device_carts.as_module("system_carts")
 
     spec = importlib.util.spec_from_file_location(
-        "kid_runtime", ROOT / "modules" / "kid_runtime.py"
+        "moy_runtime", ROOT / "modules" / "moy_runtime.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -1067,7 +1067,7 @@ def _load_kid_runtime():
 
 
 def test_code_editor_edits_buffer():
-    CodeEditor = _load_kid_runtime().CodeEditor
+    CodeEditor = _load_moy_runtime().CodeEditor
     ed = CodeEditor("def _draw():\n    cls(1)\n")
     assert ed.lines == ["def _draw():", "    cls(1)", ""]
 
@@ -1100,9 +1100,9 @@ def test_code_editor_edits_buffer():
 
 
 def test_code_editor_wired_into_device_shell():
-    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
-    carts = (Path("runtime") / "kid_carts.py").read_text(encoding="utf-8")
+    carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
 
     # The console + editor cores are shared with the host (imported, not redefined).
     assert "from editors import CodeEditor, PaintEditor, SpriteSheet" in runtime
@@ -1114,7 +1114,7 @@ def test_code_editor_wired_into_device_shell():
     assert "def save_code(cart, src):" in carts
     # run_desktop injects the device make_api + SD cart store into the shared console.
     assert "ws.make_api = make_api" in runtime
-    assert "ws.carts_store = kid_carts" in runtime
+    assert "ws.carts_store = moy_carts" in runtime
 
     # The console flips the keyboard between ASCII (code editor: clean typing) and
     # the raw matrix (running cart: true hold-to-move) on every screen change. It
@@ -1122,7 +1122,7 @@ def test_code_editor_wired_into_device_shell():
     # which knows whether the firmware supports it.
     assert "kb.set_game_mode(not on)" in console
     assert "kb._enable_raw_mode()" not in console
-    inp = (ROOT / "modules" / "kidcode" / "input.py").read_text(encoding="utf-8")
+    inp = (ROOT / "modules" / "moybyte" / "input.py").read_text(encoding="utf-8")
     assert "def set_game_mode(self, on):" in inp       # the per-screen mode toggle
     # The editor/launcher must boot in ASCII -- __init__ never enables raw (raw is
     # only entered later, via set_game_mode, once a cart is running).
@@ -1135,12 +1135,12 @@ def test_unified_top_bar_wired_into_device_shell():
     """The unified, themeable 18px top bar (Stage 1): the launcher's old 14px status
     strip + the running-cart's labeled button row are now ONE bar of 16x16 IconSheet
     sprites on BOTH screens. The device freezes the SAME runtime/console.py +
-    editors.py + kid_carts.py, so grep the canonical sources (staged into modules/ at
+    editors.py + moy_carts.py, so grep the canonical sources (staged into modules/ at
     build) for the new wiring."""
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     editors = EDITORS_SRC.read_text(encoding="utf-8")
-    carts = (Path("runtime") / "kid_carts.py").read_text(encoding="utf-8")
-    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
 
     # The bar is 18px and drawn by ONE unified drawer -- the old per-screen
     # _draw_desktop_buttons is gone, and the running-cart ("desktop") screen now calls
@@ -1168,11 +1168,11 @@ def test_unified_top_bar_wired_into_device_shell():
 def test_icon_theme_editor_wired_into_device_shell():
     """Stage 2 of the themeable top bar: a kid repaints the SYSTEM icon sheet in the
     PAINT editor (Settings -> EDIT ICONS) and it persists. The device freezes the same
-    runtime/console.py + kid_carts.py, so grep the canonical sources for the wiring
+    runtime/console.py + moy_carts.py, so grep the canonical sources for the wiring
     that MUST match the working cart-sprite save path (or the device SD bus hangs)."""
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
-    carts = (Path("runtime") / "kid_carts.py").read_text(encoding="utf-8")
-    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
 
     # Entry point: an "action" Settings row (EDIT ICONS) that opens the theme editor.
     assert '("icons", "EDIT ICONS", "action")' in console
@@ -1194,11 +1194,11 @@ def test_icon_theme_editor_wired_into_device_shell():
     # The same persistence wrapper + can_manage gate the device wires for cart saves
     # already covers the theme save -- with_sd_live is the live SD write path.
     assert "ws._with_sd = _with_sd_synced" in runtime
-    assert "return kidcode_sd.with_sd_live(fn)" in runtime
+    assert "return moybyte_sd.with_sd_live(fn)" in runtime
 
 
 def test_device_draw_api_uses_tic80_names():
-    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
 
     # TIC-80 conventions on the device canvas + api: rect/circ filled, rectb/circb
     # outlines, pix for pixels, print for text. The old PICO-8-ish names are gone.
@@ -1216,7 +1216,7 @@ def test_device_draw_api_uses_tic80_names():
 
 
 def test_device_sprite_sheet_and_paint_editor():
-    m = _load_kid_runtime()
+    m = _load_moy_runtime()
     S, P = m.SpriteSheet, m.PaintEditor
     sh = S(4, 4)                            # 32x32, 16 sprites
     assert sh.count == 16 and (sh.w, sh.h) == (32, 32) and sh.is_blank()
@@ -1236,7 +1236,7 @@ def test_device_sprite_sheet_and_paint_editor():
 
 
 def test_device_spr_is_sheet_indexed_and_accepts_image():
-    m = _load_kid_runtime()
+    m = _load_moy_runtime()
     sheet = m.SpriteSheet(4, 4)
     sheet.tset(3, 0, 0, 11)
     calls = []
@@ -1276,7 +1276,7 @@ def test_device_paint_editor_sizes_and_spans(tmp_path=None):
     # The shared PaintEditor's larger-sprite support (#30) under the device modules:
     # cycle_size steps 1->2->3, the 2x2 region writes the four constituent tiles,
     # and tile_span_image builds the contiguous block.
-    m = _load_kid_runtime()
+    m = _load_moy_runtime()
     cols = 16
     sh = m.SpriteSheet(cols, 16)
     pe = m.PaintEditor(sh)
@@ -1293,7 +1293,7 @@ def test_device_make_api_map_mget_mset(tmp_path=None):
     # The device cart API exposes map()/mget()/mset() bound to the injected TileMap
     # (#32): mget/mset round-trip through it, and map() forwards to canvas.map with
     # the cart's tilemap + sheet. Exercised under CPython via the frozen modules.
-    m = _load_kid_runtime()
+    m = _load_moy_runtime()
     from editors import TileMap
     sheet = m.SpriteSheet(4, 4)
     tm = TileMap(3, 3)
@@ -1331,7 +1331,7 @@ def test_device_make_api_map_mget_mset(tmp_path=None):
 def test_sprite_sheet_pset_bumps_gen():
     # pset bumps a generation counter so a running cart's tile cache can detect a
     # sprite edit and rebuild (host/device parity for live sprite edits).
-    SpriteSheet = _load_kid_runtime().SpriteSheet
+    SpriteSheet = _load_moy_runtime().SpriteSheet
     sh = SpriteSheet(4, 4)
     assert sh.gen == 0
     sh.pset(0, 0, 5)
@@ -1352,7 +1352,7 @@ def test_device_tile_cache_invalidated_on_sprite_edit():
     # pixels. After a kid edits a sprite, the running cart must re-blit fresh art,
     # not the stale cached Image. make_api watches the sheet's gen counter and
     # clears the cache when it changes.
-    m = _load_kid_runtime()
+    m = _load_moy_runtime()
     sheet = m.SpriteSheet(4, 4)
     sheet.tset(0, 0, 0, 3)
     blitted = []
@@ -1389,9 +1389,9 @@ def test_device_tile_cache_invalidated_on_sprite_edit():
 
 
 def test_device_sprite_storage_wired():
-    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
-    carts = (Path("runtime") / "kid_carts.py").read_text(encoding="utf-8")
+    carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
     # device cart API -- also takes the injected audio backend (#16) + tilemap
     # (#32) + persistent memory (pmem, #11).
     # make_api now also takes the capability-gated wifi backend LAST (#38).
@@ -1408,9 +1408,9 @@ def test_device_audio_wired():
     # stub + host==device API surface + sounds.json storage. Source-level checks
     # mirror how the other firmware tests grep the frozen device modules.
     audio = (Path("runtime") / "audio.py").read_text(encoding="utf-8")
-    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
-    carts = (Path("runtime") / "kid_carts.py").read_text(encoding="utf-8")
+    carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
 
     # The shared audio core: dependency-light (math only) synth + mixer + model.
@@ -1458,12 +1458,12 @@ def test_music_editor_wired_into_device_shell():
     # device, so source-level greps prove it's on both ends (host == device).
     editors = EDITORS_SRC.read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
-    carts = (Path("runtime") / "kid_carts.py").read_text(encoding="utf-8")
+    carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
 
     # The editor CORE is a single shared class (not redefined on the device).
     assert "class MusicEditor:" in editors
-    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     assert "class MusicEditor:" not in runtime, "device redefines MusicEditor"
     # editors.py must stay dependency-free (the frozen-module contract): it must NOT
     # import audio just to edit the bank -- SFX/MusicTrack are injected as factories.
@@ -1496,35 +1496,35 @@ def test_music_editor_wired_into_device_shell():
     assert 'cp "${REPO_ROOT}/runtime/console.py" "${SCRIPT_DIR}/modules/console.py"' in build
 
 
-def test_native_kc_audio_mixer_wired():
+def test_native_moy_audio_mixer_wired():
     # Native PCM mixer (#16): the per-sample software mix in runtime/audio.py is the
     # device bottleneck (~12 FPS, crackle), so the heavy inner loop moves into the C
-    # module native/kc_audio (mirror of kc_gfx/kc_sd). DeviceAudio PREFERS it and
+    # module native/moy_audio (mirror of moy_gfx/moy_sd). DeviceAudio PREFERS it and
     # falls back to the Python render_into when it isn't frozen in. Source-level
     # checks, the same way the other firmware tests grep the device sources.
-    c = (ROOT / "native" / "kc_audio" / "modkc_audio.c").read_text(encoding="utf-8")
-    cmake = (ROOT / "native" / "kc_audio" / "micropython.cmake").read_text(encoding="utf-8")
+    c = (ROOT / "native" / "moy_audio" / "modmoy_audio.c").read_text(encoding="utf-8")
+    cmake = (ROOT / "native" / "moy_audio" / "micropython.cmake").read_text(encoding="utf-8")
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
-    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
 
-    # The C module exposes the per-block kernel API + registers as `kc_audio`.
-    assert "MP_REGISTER_MODULE(MP_QSTR_kc_audio" in c
-    assert "kc_audio_voice_set" in c          # push exact Python _Voice state into C
-    assert "kc_audio_voice_read" in c         # read advanced render state back out
-    assert "kc_audio_render" in c             # the heavy per-sample mix loop
-    # cmake links the usermod the kc_gfx/kc_sd way.
-    assert "target_link_libraries(usermod INTERFACE usermod_kc_audio)" in cmake
-    # build.sh stages it into ext_mod next to kc_gfx/kc_sd (re-staged every build).
-    assert "ext_mod/kc_audio" in build
-    assert "kc_audio/micropython.cmake" in build
+    # The C module exposes the per-block kernel API + registers as `moy_audio`.
+    assert "MP_REGISTER_MODULE(MP_QSTR_moy_audio" in c
+    assert "moy_audio_voice_set" in c          # push exact Python _Voice state into C
+    assert "moy_audio_voice_read" in c         # read advanced render state back out
+    assert "moy_audio_render" in c             # the heavy per-sample mix loop
+    # cmake links the usermod the moy_gfx/moy_sd way.
+    assert "target_link_libraries(usermod INTERFACE usermod_moy_audio)" in cmake
+    # build.sh stages it into ext_mod next to moy_gfx/moy_sd (re-staged every build).
+    assert "ext_mod/moy_audio" in build
+    assert "moy_audio/micropython.cmake" in build
 
     # DeviceAudio prefers the native mixer but keeps a Python fallback so a build
-    # WITHOUT kc_audio still works (and the host is unaffected).
-    assert "import kc_audio" in runtime
-    assert "self._kc_audio = kc_audio" in runtime
-    assert "self._kc_audio = None" in runtime                      # fallback branch
+    # WITHOUT moy_audio still works (and the host is unaffected).
+    assert "import moy_audio" in runtime
+    assert "self._moy_audio = moy_audio" in runtime
+    assert "self._moy_audio = None" in runtime                      # fallback branch
     assert "def _render_native(self, buf, n):" in runtime
-    assert "if self._kc_audio is not None:" in runtime
+    assert "if self._moy_audio is not None:" in runtime
     assert "self._render_native(buf, n)" in runtime
     assert "self.engine.render_into(buf, n)" in runtime            # Python fallback path
     # The native path keeps the Python engine the source of truth: it still runs the
@@ -1535,20 +1535,20 @@ def test_native_kc_audio_mixer_wired():
     assert "ka.voice_read(c)" in runtime
 
 
-def test_native_kc_audio_core1_task_wired():
+def test_native_moy_audio_core1_task_wired():
     # CRACKLE FIX (#41): the I2S feed used to be coupled to the render loop -- tick()
     # fed I2S once per ~50-80 ms frame on core 0, so a long draw under-ran the DMA ->
     # crackle. The fix is a dedicated native C task PINNED TO CORE 1 that owns the IDF
     # i2s_std channel and feeds it continuously, decoupled from rendering. core 0 (the
     # MicroPython VM) cannot run Python on core 1; only a pure-C task can. Source-level
     # checks, the same way the other firmware tests grep the device sources.
-    c = (ROOT / "native" / "kc_audio" / "modkc_audio.c").read_text(encoding="utf-8")
-    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    c = (ROOT / "native" / "moy_audio" / "modmoy_audio.c").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     audio_src = (Path("runtime") / "audio.py").read_text(encoding="utf-8")
 
     # The C side spawns a FreeRTOS task PINNED TO CORE 1 that owns the I2S write loop.
     assert "xTaskCreatePinnedToCore(" in c
-    assert "kc_audio_task" in c            # the core-1 feeder task body
+    assert "moy_audio_task" in c            # the core-1 feeder task body
     # pinned to core 1 (the last xTaskCreatePinnedToCore arg); the comment names it too
     assert "1 /* core 1 */" in c
     assert "core 1" in c
@@ -1563,20 +1563,20 @@ def test_native_kc_audio_core1_task_wired():
     assert "xSemaphoreGive(" in c
     # The core-1 task must NEVER call into the MicroPython runtime (no MP heap/GIL from
     # core 1) -- it mixes from a plain-C snapshot of the shared voices.
-    assert "kc_mix_block(snap" in c
+    assert "moy_mix_block(snap" in c
     # MP control surface for the task: start (returns False -> fallback), stop, the
     # commit lock, the live master volume, and the published active mask.
-    for fn in ("kc_audio_audio_start", "kc_audio_audio_stop", "kc_audio_voice_lock",
-               "kc_audio_voice_unlock", "kc_audio_set_master", "kc_audio_active_mask"):
+    for fn in ("moy_audio_audio_start", "moy_audio_audio_stop", "moy_audio_voice_lock",
+               "moy_audio_voice_unlock", "moy_audio_set_master", "moy_audio_active_mask"):
         assert fn in c, fn
     for name in ('MP_QSTR_audio_start', 'MP_QSTR_audio_stop', 'MP_QSTR_voice_lock',
                  'MP_QSTR_voice_unlock', 'MP_QSTR_set_master', 'MP_QSTR_active_mask'):
         assert name in c, name
 
     # The Python DeviceAudio prefers the core-1 task and exposes a revert flag.
-    assert "KC_AUDIO_CORE1 = True" in runtime          # default-on, the crackle fix
-    assert "if KC_AUDIO_CORE1 and self._kc_audio is not None:" in runtime
-    assert "self._kc_audio.audio_start(I2S_BCK, I2S_WS, I2S_DOUT, AUDIO_RATE)" in runtime
+    assert "MOY_AUDIO_CORE1 = True" in runtime          # default-on, the crackle fix
+    assert "if MOY_AUDIO_CORE1 and self._moy_audio is not None:" in runtime
+    assert "self._moy_audio.audio_start(I2S_BCK, I2S_WS, I2S_DOUT, AUDIO_RATE)" in runtime
     assert "self._core1 = True" in runtime
     # In core-1 mode tick() does NO per-frame I2S write / per-sample mix -- it only
     # schedules + commits voice state across to the C task.
@@ -1599,7 +1599,7 @@ def test_native_kc_audio_core1_task_wired():
     assert "v.gen == self._commit_gen[c]" in runtime
     assert "self.gen += 1" in audio_src                 # bumped on play() AND stop()
     # The legacy single-core feed stays as the FALLBACK (machine.I2S) so a bad result
-    # is revert-able (KC_AUDIO_CORE1=False) and a no-kc_audio build still works. It now
+    # is revert-able (MOY_AUDIO_CORE1=False) and a no-moy_audio build still works. It now
     # TOPS the deep DMA ring UP toward full each tick (the single-core crackle fix)
     # instead of feeding exactly rate*dt (which kept the ring near-empty -> under-ran).
     assert "legacy single-core feed (fallback)" in runtime
@@ -1622,9 +1622,9 @@ def test_device_wifi_wired():
     # WiFi (#38): the device network.WLAN service backend + capability-gated `wifi`
     # injection + autoconnect + the shared credential store. Source-level checks
     # mirror how the other firmware tests grep the frozen device modules.
-    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
-    carts = (Path("runtime") / "kid_carts.py").read_text(encoding="utf-8")
+    carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
 
     # make_api takes the gated wifi backend LAST and injects `wifi` only when set.
     assert "def make_api(canvas, input, config, sheet=None, audio=None," in runtime
@@ -1642,13 +1642,13 @@ def test_device_wifi_wired():
     assert "NEEDS ON-DEVICE VERIFICATION" in runtime
     # run_desktop wires the system service but does NOT bring WiFi up at boot (WLAN
     # reserves the internal RAM the LCD DMA needs -- WiFi<->display coexistence is #38).
-    assert "ws.wifi = make_wifi(kid_carts, carts_root)" in runtime
+    assert "ws.wifi = make_wifi(moy_carts, carts_root)" in runtime
     # autoconnect is NOT called eagerly at boot; it is only reused, deferred, by the OTA
     # online-update path (#53) via the go_online lambda -- never as a bare boot statement.
     assert "go_online=lambda: autoconnect_wifi(ws.wifi)" in runtime
     assert runtime.count("autoconnect_wifi(ws.wifi)") == 1
     # Each frame is guarded so one bad flush can't brick the device.
-    assert "KidCode frame error:" in runtime
+    assert "Moybyte frame error:" in runtime
     # The shared console gates injection on the "network" manifest permission.
     assert "def _cart_has_perm(self, name):" in console
     assert 'self.wifi if self._cart_has_perm("network") else None' in console
@@ -1666,7 +1666,7 @@ def test_editor_cores_are_shared_single_source():
     editors = EDITORS_SRC.read_text(encoding="utf-8")
     for cls in ("class CodeEditor:", "class SpriteSheet:", "class PaintEditor:"):
         assert cls in editors, cls
-    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     canvas = Path("runtime/canvas.py").read_text(encoding="utf-8")
     # Neither backend redefines the shared cores.
     for cls in ("class CodeEditor:", "class SpriteSheet:", "class PaintEditor:"):
@@ -1678,21 +1678,21 @@ def test_editor_cores_are_shared_single_source():
 
 
 def test_micropython_offline_diag_wiring():
-    """Offline on-device diagnostics (kidcode_diag): a RAM ring persisted to SD and
+    """Offline on-device diagnostics (moybyte_diag): a RAM ring persisted to SD and
     dumped to serial at the NEXT boot, since run_desktop's takeover loop starves USB
     serial. Grep the frozen device sources for the boot-dump, the with_sd_live flush,
     and the perf-sample wiring (the firmware tests assert structure, not execution)."""
-    diag = (ROOT / "modules" / "kidcode_diag.py").read_text(encoding="utf-8")
-    shell = (ROOT / "modules" / "kidcode_shell.py").read_text(encoding="utf-8")
-    runtime = (ROOT / "modules" / "kid_runtime.py").read_text(encoding="utf-8")
+    diag = (ROOT / "modules" / "moybyte_diag.py").read_text(encoding="utf-8")
+    shell = (ROOT / "modules" / "moybyte_shell.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
 
     # The diag module exists with the bounded ring + the stable dump markers + the
     # single-file (one-session) log path.
     assert "class _Ring(object):" in diag
-    assert 'DUMP_HEADER = "===== KidCode diag dump (previous session) ====="' in diag
+    assert 'DUMP_HEADER = "===== Moybyte diag dump (previous session) ====="' in diag
     assert 'DUMP_FOOTER = "===== end diag dump ====="' in diag
-    assert 'LOG_PATH = "/sd/kidcode/diag.log"' in diag
+    assert 'LOG_PATH = "/sd/moybyte/diag.log"' in diag
     assert "ENABLED = True" in diag                       # default-on, documented toggle
     # The on/off toggle is documented as how to disable.
     assert "DISABLE" in diag
@@ -1700,7 +1700,7 @@ def test_micropython_offline_diag_wiring():
     # addition to buffering -- so reading /dev/ttyACM* DURING a run is a direct test
     # of whether the takeover loop actually starves serial.
     assert "ECHO_LIVE = True" in diag
-    assert 'print("KidCode", line)' in diag
+    assert 'print("Moybyte", line)' in diag
     # No rotation / second file (owner: the file is just the most-recent session).
     assert "diag.prev.log" not in diag
 
@@ -1710,9 +1710,9 @@ def test_micropython_offline_diag_wiring():
     assert "_dump_diag()" in shell
     main_src = shell.split("def main(", 1)[1].split("def ", 1)[0]
     assert main_src.index("_dump_diag()") < main_src.index("_init_display()")
-    # The boot read uses the pre-display machine.SDCard path (kidcode_sd.with_sd),
+    # The boot read uses the pre-display machine.SDCard path (moybyte_sd.with_sd),
     # NOT the live native path -- documented as the safe pre-display read.
-    assert "kidcode_sd.with_sd(" in diag
+    assert "moybyte_sd.with_sd(" in diag
     assert "BEFORE init_display" in diag
 
     # Periodic SD flush goes through the live single-bus path (with_sd_live), runs
@@ -1752,11 +1752,11 @@ def test_micropython_offline_diag_wiring():
 
 
 def test_ota_two_channel_wired():
-    # #53 two-channel OTA: kc_ota learns its channel from a build-stamped _ota_build,
+    # #53 two-channel OTA: moy_ota learns its channel from a build-stamped _ota_build,
     # offers cross-channel switches, and the manifest fetch is channel-aware; the shared
     # console exposes a CHANNEL Settings toggle; build.sh stamps the channel. Device code
     # isn't executed here (host offer-logic is in test_ota_manifest), so grep the sources.
-    kc = (ROOT / "modules" / "kc_ota.py").read_text(encoding="utf-8")
+    kc = (ROOT / "modules" / "moy_ota.py").read_text(encoding="utf-8")
     assert "FIRMWARE_CHANNEL" in kc
     assert "import _ota_build" in kc                     # build-stamped identity
     assert "def channel(self):" in kc
@@ -1771,6 +1771,6 @@ def test_ota_two_channel_wired():
     assert "u.offers(manifest, ch)" in console
     # build.sh stamps the channel into a generated _ota_build module + dist manifest.
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
-    assert "KIDCODE_OTA_CHANNEL" in build
+    assert "MOYBYTE_OTA_CHANNEL" in build
     assert "_ota_build.py" in build
     assert "ota_build.json" in build

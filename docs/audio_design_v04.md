@@ -1,4 +1,4 @@
-# KidCode v0.4 Audio — design + vertical slice
+# Moybyte v0.4 Audio — design + vertical slice
 
 **Issue:** #16 (Audio: sound effects + music, plus an on-device music editor)
 **Status:** host vertical slice landed; device I2S path implemented (non-blocking feed, NEEDS ON-DEVICE VERIFICATION)
@@ -9,14 +9,14 @@ on-device music/SFX editor fits the existing console UI.
 This follows the same **portability contract** as the rest of v0.4 (see
 `CLAUDE.md`): the cart-facing API and the sound *data model* are one codebase
 shared by host and device; only the audio *output backend* differs. The same
-`.kcart` must sound the same on the PC simulator and on the T-Deck.
+`.moy` must sound the same on the PC simulator and on the T-Deck.
 
 ---
 
 ## 1. The cart-facing API (host == device, TIC-80/PICO-8 flavored)
 
 Injected into the cart namespace by `make_api` (host: `runtime/host_app.py`,
-device: `firmware/.../modules/kid_runtime.py`), exactly like the draw API:
+device: `firmware/.../modules/moy_runtime.py`), exactly like the draw API:
 
 ```python
 sfx(n, [chan])         # play sound effect n (0..63) now, optionally on a channel
@@ -139,19 +139,19 @@ samples* from the *same bank*; they differ only in where those bytes go.
 
 ## 3. Storage: where a cart's audio lives
 
-Alongside `main.py` / `sprites.kgfx` / `config.json`, a new file:
+Alongside `main.py` / `sprites.moygfx` / `config.json`, a new file:
 
 ```text
-my_cart.kcart/
+my_cart.moy/
   manifest.json
   main.py
   config.json
-  sprites.kgfx
+  sprites.moygfx
   sounds.json     <-- the AudioBank (sfx + music), JSON
 ```
 
 `sounds.json` is plain JSON (kid-inspectable, diff-friendly, MicroPython
-`json`-only — same constraints as `kid_carts.py`). Added to `runtime/kid_carts.py`:
+`json`-only — same constraints as `moy_carts.py`). Added to `runtime/moy_carts.py`:
 
 - `load()` reads `sounds.json` into `cart["sounds"]` (None if absent).
 - `save_sounds(cart, bank_dict)` writes it **atomically** via the existing
@@ -174,7 +174,7 @@ audio is not yet gated on it — see §1 (the whole permission model is future w
 - **`FakeAudio`** (default for tests/headless): records every call
   (`("sfx", n, chan)`, `("beep", f, d)`, `("music", t, loop)`, ...) and still
   drives the `AudioEngine` so `render()` is exercised. Mirrors the existing sim
-  fakes (`kidcode_sim` fake audio, `kidcode/audio.py` `AudioService.calls`).
+  fakes (`moybyte_sim` fake audio, `moybyte/audio.py` `AudioService.calls`).
   **No sound hardware required** — this is what the headless tests use.
 - **`SdlAudio`** (optional, only when real playback is wanted): opens a pygame/SDL
   audio stream and pushes `engine.render()` from a callback. Gated behind
@@ -205,7 +205,7 @@ is purely CPU budget in the single-threaded loop.
 
 Also crucial: **`BOARD_POWERON` (GPIO 10) must be HIGH** to power the board
 peripherals — the amp *and* the panel sit behind it (the reference sets it in every
-`setup()`). KidCode already drives it at boot (`tdeck_board.init_board_pins`), and
+`setup()`). Moybyte already drives it at boot (`tdeck_board.init_board_pins`), and
 the panel works, so the amp is powered. There is **no separate amp enable / SD-mode
 / gain GPIO** on the T-Deck Plus (the only audio pins are BCK/WS/DOUT; the ES7210 is
 the *mic*, unrelated). So pins + power + format are all correct — silence is the
@@ -223,7 +223,7 @@ I2S *init* or the *feed*, not the wiring.
 > `write()` keeps a *pointer* to the caller buffer until that copy finishes, with a
 > queue depth of 1 (a second in-flight write is silently dropped).
 
-The implemented `DeviceAudio` (`kid_runtime.py`, behind a try/except so a board
+The implemented `DeviceAudio` (`moy_runtime.py`, behind a try/except so a board
 without the amp degrades to silence, never a crash):
 
 ```python
@@ -250,11 +250,11 @@ halve the per-frame mixer cost; `render_into` skips all work when nothing plays.
 hardware spike must confirm:
 
 1. The I2S pins/format above actually drive the MAX98357 audibly (boot log prints
-   `KidCode audio: I2S ready ...` on success, or `I2S UNAVAILABLE, silent: <exc>`
+   `Moybyte audio: I2S ready ...` on success, or `I2S UNAVAILABLE, silent: <exc>`
    if the constructor raised — read it during the ~2 s boot window).
 2. The pure-Python mixer at 8 kHz fits the per-frame CPU budget at 30 FPS without
    dropping the desktop below playable (measure). If still too slow, a native
-   `kc_audio` C mixer (like `kc_gfx`) is the escalation; the model/format/`render_into`
+   `moy_audio` C mixer (like `moy_gfx`) is the escalation; the model/format/`render_into`
    seam stay identical.
 3. Non-blocking `write()` + the `_busy` gate never stalls a frame and never crackles
    (the ibuf should absorb jitter).
@@ -292,7 +292,7 @@ A **Sound** view slots in identically:
   `_open_menu` / `set_menu_view` (build the editor, no keyboard text mode).
 - Layout mirrors the paint editor: a **piano-roll grid** (steps × pitch) the kid
   taps to place notes, wave/vol pickers, a speed gauge, a PLAY button that calls
-  `engine.play_sfx(n)`, and SAVE (→ `kid_carts.save_sounds`) / CLOSE.
+  `engine.play_sfx(n)`, and SAVE (→ `moy_carts.save_sounds`) / CLOSE.
 - A tiny **music** sub-tab: an ordered strip of SFX-id slots (the `pattern`), tap a
   slot to set its SFX, PLAY to loop.
 
@@ -311,17 +311,17 @@ pure-host-verifiable addition the same way the paint editor was.
   synth + mixer + `render()`), dependency-light (only `math`).
 - `runtime/host_app.py`: `sfx`/`beep`/`music`/`music_stop`/`sound_stop`/`volume`
   in `make_api`, bound to a `FakeAudio` backend (records calls + drives the mixer).
-- `runtime/kid_carts.py`: `sounds.json` load + `save_sounds` (atomic) + seed.
-- `system_carts/beeper.kcart`: a tiny demo cart that plays a beep + an SFX on tap.
+- `runtime/moy_carts.py`: `sounds.json` load + `save_sounds` (atomic) + seed.
+- `system_carts/beeper.moy`: a tiny demo cart that plays a beep + an SFX on tap.
 - `tests/test_audio.py`: headless tests of the model, mixer, API surface, store
   round-trip, and the demo cart making sound through the fake backend.
 
 **Deferred (clearly flagged):**
 
-- `DeviceAudio` I2S backend in `kid_runtime.py` is **stubbed and unverified** —
+- `DeviceAudio` I2S backend in `moy_runtime.py` is **stubbed and unverified** —
   needs the hardware spike in §5.
 - The `SoundEditor` UI (§7) is **designed only**.
-- Multi-channel tracker, instruments/envelopes, note slides, a native `kc_audio`
+- Multi-channel tracker, instruments/envelopes, note slides, a native `moy_audio`
   C mixer, and parent volume policy are v2.
 
 ## 9. Sensible next step

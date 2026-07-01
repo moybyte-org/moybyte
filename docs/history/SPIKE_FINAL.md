@@ -1,4 +1,4 @@
-# KidCode MicroPython T-Deck Spike — Final Decision Record
+# Moybyte MicroPython T-Deck Spike — Final Decision Record
 
 Date: 2026-06-22
 Status: Stage 1 complete. Graphics path proven. Runtime identity still an open product decision.
@@ -7,7 +7,7 @@ Status: Stage 1 complete. Graphics path proven. Runtime identity still an open p
 
 Can a MicroPython userland on the LilyGO T-Deck Plus (ESP32-S3 + ST7789) boot,
 load kid projects, draw, poll input, and recover — at an acceptable frame rate —
-so that MicroPython could be a viable cartridge/userland runtime for KidCode?
+so that MicroPython could be a viable cartridge/userland runtime for Moybyte?
 
 ## What was proven
 
@@ -34,16 +34,16 @@ scripting language are decoupled by this evidence.
 
 ## The fix — native DMA canvas blitter (Stage 1)
 
-`modules/kc_canvas.py` (`Blitter`) drives `lcd_bus.SPIBus`'s already-exposed
+`modules/moy_canvas.py` (`Blitter`) drives `lcd_bus.SPIBus`'s already-exposed
 `tx_param` (CASET/RASET) and `tx_color` (RAMWR DMA) directly, blitting the
 128×128 RGB565 framebuffer to the panel and **bypassing LVGL's flush entirely**.
 LVGL is retained only for chrome (the title/status label); the `lv.canvas` is
 never invalidated in native mode, so the two never contend for the panel.
 
 The DMA-capable transfer buffer comes from a tiny C user module
-`native/kc_alloc/` (`malloc_dma` → `MALLOC_CAP_DMA|MALLOC_CAP_INTERNAL`).
+`native/moy_alloc/` (`malloc_dma` → `MALLOC_CAP_DMA|MALLOC_CAP_INTERNAL`).
 `lcd_bus.allocate_framebuffer` could not be used: it is hard-capped at 2 slots,
-both already consumed by the LVGL ST7789 driver's draw buffers. `kc_alloc` is
+both already consumed by the LVGL ST7789 driver's draw buffers. `moy_alloc` is
 staged into the upstream `ext_mod/` tree by `build.sh` (cp + sed-include), the
 same pattern used for the early-board-init patch.
 
@@ -79,15 +79,15 @@ edit now reliably re-freezes.
 - **Open (product call, only the user can make):** runtime identity — Lua-first
   (v0.4's strategic lock) vs MicroPython-first vs hybrid (one native kernel +
   both as first-class runtimes). Performance is no longer a differentiator.
-- **Open (technical gate for MicroPython-primary):** only the `KIDCODE_SKIP_VFS`
+- **Open (technical gate for MicroPython-primary):** only the `MOYBYTE_SKIP_VFS`
   image boots; it disables MicroPython's writable `/` filesystem. Whether the
   normal writable-VFS boot can show a screen is unanswered.
 
 ## Stage 2 gate result (2026-06-23): full-screen compositor — PASS
 
-Built a full-screen 320x240 RGB565 compositor (`modules/kc_compositor.py`,
+Built a full-screen 320x240 RGB565 compositor (`modules/moy_compositor.py`,
 strip-blit over the `lcd_bus` DMA path) + an on-device benchmark
-(`RUN_FULLSCREEN_BENCH` in `kidcode_shell.py`) to answer the one open question:
+(`RUN_FULLSCREEN_BENCH` in `moybyte_shell.py`) to answer the one open question:
 can the full screen flush fast enough for the v0.4 desktop? Measured flush time:
 
 | surface | 40 MHz flush / fps | 80 MHz flush / fps |
@@ -130,7 +130,7 @@ Decisions locked for Stage 3 (the production C compositor):
 
 ## Salvage from the spike
 
-The `from kidcode import *` API surface, the host simulator, the T-Deck pin map
+The `from moybyte import *` API surface, the host simulator, the T-Deck pin map
 + flash tooling, the benchmark harness, and the native framebuffer-draw embryo
 all carry forward into the v0.4 native kernel and the PC simulator (v0.4 Task
 Group A). Nothing is discarded.

@@ -67,8 +67,8 @@ def test_digits_in_identifier_are_not_a_number():
 def _make_ws_with_cart(tmp_path, src, title="E"):
     from runtime import host_app
     carts_dir = str(tmp_path / "carts")
-    host_app.kid_carts.ensure_dirs(carts_dir)
-    host_app.kid_carts.create(title, carts_dir, src=src, type="app", edit=[])
+    host_app.moy_carts.ensure_dirs(carts_dir)
+    host_app.moy_carts.create(title, carts_dir, src=src, type="app", edit=[])
     ws = host_app.build_workstation(carts_dir)
     for i, c in enumerate(ws.launcher.items):
         if c["title"] == title:

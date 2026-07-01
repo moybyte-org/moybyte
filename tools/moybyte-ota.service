@@ -1,0 +1,14 @@
+[Unit]
+# Moybyte OTA host (#53): serves the firmware channels (OTA_ROOT/<channel>/firmware.bin
+# + latest.json) over plain HTTP so the device can pull stable/beta updates over the LAN.
+# Installed as a systemd --user service by `make ota-serve-install`, which fills in the
+# @PYTHON@ / @PORT@ / @ROOT@ placeholders. Plain HTTP on the local network only.
+Description=Moybyte OTA firmware host
+After=network.target
+
+[Service]
+ExecStart=@PYTHON@ -m http.server @PORT@ --directory @ROOT@
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

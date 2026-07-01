@@ -1,4 +1,4 @@
-# KidCode Native Graphics Core — Plan
+# Moybyte Native Graphics Core — Plan
 
 Date: 2026-06-22
 Status: Stage 1 complete (native DMA canvas blitter, 47→90 FPS at 128×128).
@@ -8,15 +8,15 @@ and the full-screen frame rate is an open, bus-bound question.
 
 **Update 2026-06-23:** Stage 2 gate **PASSED** (full-redraw 41/29 ms @40/80 MHz,
 dirty band 11/8 ms → 73/91 FPS; see SPIKE_FINAL.md). Stage 3 is now drafted and
-implemented in v1 — see **STAGE3_PLAN.md** (native `kc_gfx` C kernel +
-dirty-rect `kc_compositor`).
+implemented in v1 — see **STAGE3_PLAN.md** (native `moy_gfx` C kernel +
+dirty-rect `moy_compositor`).
 
 ## Context
 
 The MicroPython T-Deck spike proved the architecture and hit one hard wall: the
 LVGL `lv.canvas` flush was CPU-bound (~13 ms/frame) because LVGL software-rotates
 every flush. Stage 1 bypassed that for the 128×128 game canvas with a native DMA
-blitter (`modules/kc_canvas.py` + `native/kc_alloc/`), reaching ~90 FPS.
+blitter (`modules/moy_canvas.py` + `native/moy_alloc/`), reaching ~90 FPS.
 
 **The wall was native C, below both scripting VMs** — so the production graphics
 path must be a **native core**, and it's needed for *any* userland (Lua or
@@ -32,7 +32,7 @@ Two things to keep distinct (see SPIKE_FINAL.md / project memory):
 
 ## Why the priority changed (was 2b, now first)
 
-The v0.4 product (`KidCode_Console_Plan_v0_4.md`) is a **Living Desktop**, not a
+The v0.4 product (`moybyte_Console_Plan_v0_4.md`) is a **Living Desktop**, not a
 128×128 game. A desktop needs the **full screen** (320×240 on the T-Deck panel;
 480×270 logical later). That makes the old plan's order wrong:
 
@@ -75,11 +75,11 @@ wallpaper + small animated regions) — are exactly what the benchmark measures.
 ```
 ESP32-S3 / FreeRTOS
   └─ Native KidKernel (C): framebuffer, compositor, DMA blitter, font, input, audio…
-       └─ Language-neutral APIs: kc_canvas_clear / kc_canvas_sprite / kc_canvas_text / …
+       └─ Language-neutral APIs: moy_canvas_clear / moy_canvas_sprite / moy_canvas_text / …
             └─ Userland VM (MicroPython today; Lua pluggable later) calls the same APIs
 ```
 
-MicroPython (Lua) `kid.spr()` → native `kc_canvas_sprite()`. The kernel is the
+MicroPython (Lua) `kid.spr()` → native `moy_canvas_sprite()`. The kernel is the
 asset; the VM is interchangeable.
 
 ## Stage 2 — Full-screen native compositor benchmark (DO FIRST; this is the gate)
@@ -101,12 +101,12 @@ the background (`task_handler.py:54-65,166-176,136`) — **independent of any
 
 So the compositor path calls `handler.deinit()` (`task_handler.py:90`) to stop the
 timer and own the bus. The shell currently discards this handle as `_task_handler`
-(`kidcode_shell.py:29`) — keep it and stop it. (This is the one piece of the old
+(`moybyte_shell.py:29`) — keep it and stop it. (This is the one piece of the old
 2a that we still need.)
 
 ### 2.2 The benchmark (acceptance gate)
 
-Build `_run_fullscreen_bench()` in `kidcode_shell.py`, run when a build flag is
+Build `_run_fullscreen_bench()` in `moybyte_shell.py`, run when a build flag is
 set, that after native takeover:
 
 1. **Full-redraw bench (~3 s):** animate a cheap full-screen scene (e.g. a moving
@@ -132,16 +132,16 @@ Run the build at **40 MHz and 80 MHz** SPI (`tdeck_display.freq`) and record bot
 (c) drop logical resolution / revisit the panel. Everything in Stage 3 depends on
 this answer, so it is cheap to get it first.
 
-### 2.3 Compositor design (`modules/kc_compositor.py`)
+### 2.3 Compositor design (`modules/moy_compositor.py`)
 
 - **Framebuffer:** `bytearray(320*240*2)` RGB565. On the `SPIRAM_OCT` build the GC
   heap is in PSRAM, so 150 KB is fine; this is the CPU draw target, wrapped by a
   `framebuf.FrameBuffer(..., RGB565)` for C-speed drawing.
-- **Strip buffer(s):** DMA-capable **internal SRAM** via `kc_alloc.malloc_dma`
+- **Strip buffer(s):** DMA-capable **internal SRAM** via `moy_alloc.malloc_dma`
   (PSRAM is not DMA-safe on this bus — no bounce buffer). Default strip = 40 rows
   → 320×40×2 = 25.6 KB (less than Stage 1's proven 32 KB). `tx_color` byte-swaps
   in place, so we always blit from these scratch buffers, never the live fb
-  (mirrors `kc_canvas.py:50-59`).
+  (mirrors `moy_canvas.py:50-59`).
 - **`flush()` (full):** for each strip, `memoryview`-slice the framebuffer rows
   into the strip buffer, set CASET/RASET for that row band (full width),
   `tx_color(RAMWR, strip, 0, y, w-1, y+rows-1, 0, True)` — the exact call shape
@@ -156,12 +156,12 @@ this answer, so it is cheap to get it first.
   validated on device** (ISR/sched dispatch of the SPI completion callback is not
   host-testable). The benchmark defaults to the **synchronous** path.
 - **Host guard:** `make_compositor(bus)` returns `None` when `bus is None`, so the
-  simulator/tests never touch `kc_alloc`/`framebuf` (mirrors `kc_canvas`).
+  simulator/tests never touch `moy_alloc`/`framebuf` (mirrors `moy_canvas`).
 
 ### 2.4 Persistence spike (parallel, small)
 
 The v0.4 MVP needs save/load of user cartridges, but only the
-`KIDCODE_SKIP_VFS` image boots (writable `/` unanswered — SPIKE_FINAL "Open").
+`MOYBYTE_SKIP_VFS` image boots (writable `/` unanswered — SPIKE_FINAL "Open").
 **Workaround to validate first:** write+reload a file under `/sd/...` (the spike
 already mounts and reads SD). A tiny "write a file to SD, reboot, read it back"
 probe retires the persistence unknown cheaply, without solving the writable-VFS
@@ -179,10 +179,10 @@ until measured.
 
 The gate passed, so Stage 3 is now its own document: **STAGE3_PLAN.md**.
 Implemented in v1 (compiles in the ESP-IDF toolchain; device validation pending):
-- `native/kc_gfx/` — VM-neutral C pixel kernel (`fill`, `fill_rect`, `blit565`,
+- `native/moy_gfx/` — VM-neutral C pixel kernel (`fill`, `fill_rect`, `blit565`,
   `pack_strip`); the C `pack_strip` also fixes the slow/garbled Stage 2 cropped-rect path.
-- `modules/kc_compositor.py` — rewritten as a dirty-rect compositor (union-bbox
-  tracker, draws via `kc_gfx` with `framebuf`/Python fallback, flushes only the
+- `modules/moy_compositor.py` — rewritten as a dirty-rect compositor (union-bbox
+  tracker, draws via `moy_gfx` with `framebuf`/Python fallback, flushes only the
   dirty region over the proven `lcd_bus` DMA path).
 
 Still to do (Stage 3.1 + desktop): native font blitter, full C / FreeRTOS flush
@@ -198,7 +198,7 @@ Living Desktop shell on top. Anti-tearing strategy is **double-buffer + dirty-re
   Do the rest only if/when the 128×128 game surface needs it.
 - **Userland VM choice (Lua vs MicroPython vs both):** perf-neutral product call.
   Language-neutral core keeps it reversible. Resolve once Stage 3's API surface is
-  concrete (see `kidcode-strategy-and-open-decisions` memory).
+  concrete (see `moybyte-strategy-and-open-decisions` memory).
 - **Going bare-ESP-IDF (dropping lvgl_micropython entirely):** not needed to drop
   the LVGL *GUI*. TulipCC keeps MicroPython as a component on a native core —
   that's the model.
@@ -208,8 +208,8 @@ Living Desktop shell on top. Anti-tearing strategy is **double-buffer + dirty-re
 - **Host:** `make test` (compositor is import-guarded; add a test for
   `plan_strips()` + the `None` guard), `make firmware-sim-lilygo-micropython`.
 - **Device (the point of this stage):** build with the bench flag
-  (`KIDCODE_SKIP_VFS_BOOT=1 make firmware-build-lilygo-micropython`), flash, read
-  serial: `KidCode fullscreen bench fps=… flush_ms=…` for full-redraw and
+  (`MOYBYTE_SKIP_VFS_BOOT=1 make firmware-build-lilygo-micropython`), flash, read
+  serial: `Moybyte fullscreen bench fps=… flush_ms=…` for full-redraw and
   dirty-rect, at 40 and 80 MHz. Record both in SPIKE_FINAL.md as the go/no-go.
 - **Regression:** the LVGL/fake-LVGL path still works on host (import-guarded);
   the normal (non-bench) app path is unchanged.

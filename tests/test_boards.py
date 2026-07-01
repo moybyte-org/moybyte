@@ -1,10 +1,10 @@
 import json
 import zipfile
 
-from kidcode_cli.boards import board_profile_json, device_doctor, export_device_project, smoke_check_log
-from kidcode_cli.firmware import write_bundle_header
-from kidcode_cli.main import main
-from kidcode_cli.projects import create_project
+from moybyte_cli.boards import board_profile_json, device_doctor, export_device_project, smoke_check_log
+from moybyte_cli.firmware import write_bundle_header
+from moybyte_cli.main import main
+from moybyte_cli.projects import create_project
 
 
 def test_board_info_contains_lilygo_profile():
@@ -44,7 +44,7 @@ def test_cli_device_commands(capsys, tmp_path):
 
     assert main(["device-doctor", "--board", "lilygo_t_deck_plus"]) == 0
     doctor = capsys.readouterr()
-    assert "KidCode device doctor" in doctor.out
+    assert "Moybyte device doctor" in doctor.out
 
     project = create_project(str(tmp_path / "cli_deck"))
     out_dir = tmp_path / "cli_export"
@@ -56,28 +56,28 @@ def test_cli_device_commands(capsys, tmp_path):
 
 def test_write_bundle_header_creates_c_array(tmp_path):
     project = create_project(str(tmp_path / "header_game"))
-    out = tmp_path / "kidcode_project_bundle.h"
+    out = tmp_path / "moybyte_project_bundle.h"
 
     result = write_bundle_header(project, "lilygo_t_deck_plus", str(out))
     text = out.read_text(encoding="utf-8")
 
     assert result == str(out)
-    assert '#define KIDCODE_PROJECT_ID "header_game"' in text
-    assert "#define KIDCODE_PROJECT_BUNDLE_SIZE " in text
-    assert "static const uint8_t KIDCODE_PROJECT_BUNDLE[]" in text
+    assert '#define MOYBYTE_PROJECT_ID "header_game"' in text
+    assert "#define MOYBYTE_PROJECT_BUNDLE_SIZE " in text
+    assert "static const uint8_t MOYBYTE_PROJECT_BUNDLE[]" in text
 
 
 def test_smoke_check_log_accepts_expected_serial_output(tmp_path):
     log = tmp_path / "serial.log"
     log.write_text(
-        "KidCode firmware smoke test\n"
+        "Moybyte firmware smoke test\n"
         "Board id: lilygo_t_deck_plus\n"
         "Bundled project: tiny_runner\n"
         "Bundle bytes: 123\n"
         "Keyboard: detected\n"
-        "Display: KidCode native tiny_runner canvas\n"
+        "Display: Moybyte native tiny_runner canvas\n"
         "Runtime: native tiny_runner scaffold\n"
-        "KidCode heartbeat 0\n"
+        "Moybyte heartbeat 0\n"
         "Native tiny_runner player_x 62\n"
         "Native tiny_runner player_y 60\n"
         "Native buttons left/right/up/down 0/0/0/0\n",
@@ -90,13 +90,13 @@ def test_smoke_check_log_accepts_expected_serial_output(tmp_path):
 def test_smoke_check_log_rejects_missing_project(tmp_path):
     log = tmp_path / "serial.log"
     log.write_text(
-        "KidCode firmware smoke test\n"
+        "Moybyte firmware smoke test\n"
         "Board id: lilygo_t_deck_plus\n"
         "Bundle bytes: 123\n"
         "Keyboard: detected\n"
-        "Display: KidCode native tiny_runner canvas\n"
+        "Display: Moybyte native tiny_runner canvas\n"
         "Runtime: native tiny_runner scaffold\n"
-        "KidCode heartbeat 0\n"
+        "Moybyte heartbeat 0\n"
         "Native tiny_runner player_x 62\n"
         "Native tiny_runner player_y 60\n"
         "Native buttons left/right/up/down 0/0/0/0\n",

@@ -1,6 +1,6 @@
 """Minimal input state for the v0.4 userland: edge-detected buttons + pointer.
 
-Mirrors the firmware `kidcode` input contract (held / pressed / released) so
+Mirrors the firmware `moybyte` input contract (held / pressed / released) so
 cartridges poll the same way on host and device.
 """
 
