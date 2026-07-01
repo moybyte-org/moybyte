@@ -1432,7 +1432,7 @@ for(var i=0;i<n;i++){var v=bin.charCodeAt(i*2)|(bin.charCodeAt(i*2+1)<<8);if(v>=
 var src=actx.createBufferSource();src.buffer=buf;src.connect(actx.destination);
 var t=Math.max(actx.currentTime+0.02,audioNext);src.start(t);audioNext=t+buf.duration;}
 function alloc(){cv.width=W;cv.height=H;cx=cv.getContext("2d");cx.imageSmoothingEnabled=false;
-idx=new Uint8Array(W*H);img=cx.createImageData(W,H);rgba=img.data;}
+idx=new Uint8Array(W*H);img=cx.createImageData(W,H);rgba=img.data;rs();}
 function getA(){return fetch("/assets").then(function(r){return r.json();}).then(function(a){
 W=a.w;H=a.h;PAL=a.palette;FONT=a.font;assCart=a.cart;SHEET=a.sheet||null;if(a.audio_rate)AUDIO_RATE=a.audio_rate;
 TM=a.tilemap?{w:a.tilemap.w,h:a.tilemap.h,cells:a.tilemap.cells.slice()}:null;
