@@ -185,17 +185,21 @@ def test_device_web_view_module_present_and_protocol_shaped():
     assert "setblocking(False)" in web          # NON-blocking listening socket
     assert "def stream_mode" in web             # headless-while-watched gate (WebServer)
     assert "def served_frame" in web and "def reset_served" in web  # delegate to ServedState
-    # The draw-command protocol routes (/assets over HTTP; the legacy /frame & /input HTTP
-    # endpoints remain as a poll fallback alongside the WebSocket live channel).
-    assert '"/assets"' in web and '"/frame"' in web and '"/input"' in web
-    # WEBSOCKET TRANSPORT (#41 swap): the persistent live channel replaced the per-frame HTTP
-    # poll. Handshake (RFC 6455 accept-key + 101) + frame encode/decode + the persistent conn.
-    assert "def ws_accept_key" in web and "def ws_handshake_response" in web
-    assert "def ws_encode" in web and "def ws_decode" in web
-    assert "class _WSConn" in web               # the persistent, non-blocking WS connection
-    assert "258EAFA5-E914-47DA-95CA-C5AB0DC85B11" in web   # the RFC 6455 magic GUID
-    assert '"/ws"' in web or "/ws" in web       # the WebSocket route the page connects to
-    assert "Switching Protocols" in web         # the 101 upgrade response
+    # The draw-command protocol routes: only the page + /assets load over HTTP; the LIVE channel
+    # is the WebSocket. The legacy /frame & /input HTTP poll endpoints were REMOVED (WS-only now,
+    # matching the host web console) -- so the transport no longer names them.
+    assert '"/assets"' in web
+    assert '"/frame"' not in web and '"/input"' not in web
+    # WEBSOCKET TRANSPORT (#41 swap): the persistent live channel is the ONLY transport. The RFC
+    # 6455 handshake + byte framing now live in the SHARED web_view (canonical home); moy_webserver
+    # RE-EXPORTS them for its _WSConn + upgrade path (relocation + re-export, no local copy).
+    assert "def ws_accept_key" in wv and "def ws_handshake_response" in wv
+    assert "def ws_encode" in wv and "def ws_decode" in wv
+    assert "258EAFA5-E914-47DA-95CA-C5AB0DC85B11" in wv    # the RFC 6455 magic GUID (web_view)
+    assert "Switching Protocols" in wv                     # the 101 upgrade response (web_view)
+    assert "ws_encode = _wv.ws_encode" in web and "ws_decode = _wv.ws_decode" in web  # re-exports
+    assert "class _WSConn" in web               # the persistent, non-blocking WS connection stays
+    assert "/ws" in web                         # the WebSocket route the page connects to
 
 
 def test_device_web_view_wired_into_run_desktop_cooperatively():

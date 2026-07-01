@@ -73,7 +73,11 @@ def test_moved_code_is_re_exported_from_the_shared_module():
                  "palette_rgb", "sheet_payload", "tilemap_payload", "assets_payload",
                  "frame_payload", "apply_events", "PAGE_HTML", "MAX_ATLAS",
                  "MAX_DEFSPR_BYTES_PER_FRAME", "WEB_FPS_CAP", "WEB_FRAME_INTERVAL_MS",
-                 "WEB_MAX_BYTES_PER_SEC"):
+                 "WEB_MAX_BYTES_PER_SEC",
+                 # The WebSocket handshake + byte framing also moved to the shared module (the
+                 # host speaks WS too now), so these are re-exports as well -- not local defs.
+                 "ws_accept_key", "ws_handshake_response", "ws_header_key", "is_ws_upgrade",
+                 "ws_encode", "ws_decode", "WS_GUID", "WS_MAX_FRAME"):
         assert getattr(web, name) is getattr(web._wv, name), name
 
 
@@ -1300,17 +1304,6 @@ def _get(host, port, path):
         conn.close()
 
 
-def _post(host, port, path, obj):
-    conn = http.client.HTTPConnection(host, port, timeout=5)
-    try:
-        body = json.dumps(obj).encode("utf-8")
-        conn.request("POST", path, body, {"Content-Type": "application/json"})
-        r = conn.getresponse()
-        return r.status, r.read()
-    finally:
-        conn.close()
-
-
 def test_server_serves_index_html(server):
     _srv, _prov, host, port = server
     status, ctype, body = _get(host, port, "/")
@@ -1331,50 +1324,11 @@ def test_server_serves_assets(server):
     assert a["font"]["w"] == 8 and a["cart"] == "Demo"
 
 
-def test_server_serves_frame_commands(server):
-    _srv, _prov, host, port = server
-    status, _ctype, body = _get(host, port, "/frame")
-    assert status == 200
-    f = json.loads(body)
-    assert f["cmds"][0] == ["cls", 1] and f["cart"] == "Demo"
-
-
-def test_server_frame_replays_to_pixels(server):
-    """The streamed command list replays (via the Python reference replayer, the JS
-    twin) to a non-blank 320x240 frame -- end-to-end over the wire."""
-    _srv, _prov, host, port = server
-    _s, _c, body = _get(host, port, "/frame")
-    cmds = json.loads(body)["cmds"]
-    cv = Canvas(WIDTH, HEIGHT)
-    replay_diet(cmds, cv)
-    assert len(set(cv.buf)) > 1
-
-
-def test_server_accepts_input(server):
-    _srv, prov, host, port = server
-    status, _ = _post(host, port, "/input",
-                      {"events": [{"type": "hold", "name": "a", "down": True}]})
-    assert status == 200
-    deadline = time.time() + 3
-    while not prov.applied and time.time() < deadline:
-        time.sleep(0.01)
-    assert prov.applied and prov.applied[0]["name"] == "a"
-
-
-def test_server_frame_post_applies_input_and_returns_frame(server):
-    """The page now sends input + fetches the frame in ONE round-trip (#41): a POST /frame
-    with an events body applies the input (provider.apply) AND returns the frame -- halving
-    requests/tick vs a separate POST /input + GET /frame, which stalled the view per input."""
-    _srv, prov, host, port = server
-    status, body = _post(host, port, "/frame",
-                         {"events": [{"type": "hold", "name": "left", "down": True}]})
-    assert status == 200
-    f = json.loads(body)
-    assert f["cmds"][0] == ["cls", 1] and f["cart"] == "Demo"   # returned the frame...
-    deadline = time.time() + 3
-    while not prov.applied and time.time() < deadline:
-        time.sleep(0.01)
-    assert prov.applied and prov.applied[0]["name"] == "left"   # ...AND applied the input
+# (The legacy HTTP poll endpoints -- GET/POST /frame + POST /input -- were REMOVED from the
+# device server; the live channel is WebSocket-only now. The frame-push + input-drain path is
+# covered end-to-end by test_ws_end_to_end_over_localhost + the _WSConn buffering/ping tests
+# below, and a /frame or /input request now falls through to the 404 branch, exercised by
+# test_server_404_for_unknown_path.)
 
 
 def test_ws_conn_buffers_partial_frames_across_reads():
