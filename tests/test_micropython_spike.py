@@ -179,10 +179,10 @@ def test_device_web_view_module_present_and_protocol_shaped():
     # `served` set that resets on /assets (reset_served) and on a dropped atlas (atlas_gen).
     assert "def defspr_cmd" in web and "def served_frame" in web
     assert "def reset_served" in web and "atlas_gen" in web
-    # STREAM MODE (#41 30fps lever): headless while a browser plays -- the Tee record-only
-    # path + a 30fps web cap.
+    # STREAM MODE (#41): headless while a browser plays -- the Tee record-only path + a
+    # web frame cap (raised 30 -> 60 so games aren't quantised to ~22fps).
     assert "record_only" in web and "def stream_mode" in web
-    assert "WEB_FPS_CAP = 30" in web
+    assert "WEB_FPS_CAP = 60" in web
     # OFF-SCREEN LAYERS (#54 scroll + #43 cached top bar): ONE recorded-layer mechanism.
     # new_layer() mints a RecordingLayer (real device layer + recorded indexed stream);
     # draw_layer/blit_strip record a tiny blit_layer; the WebServer ships the layer's stream
