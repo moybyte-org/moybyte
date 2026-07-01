@@ -273,6 +273,7 @@ def main():
             print("ran %d scripted frames" % len(images))
         return
 
+    ws.arm_splash()          # boot logo: show the moybyte mascot before the launcher
     run_live(driver, dt, args.scale)
 
 

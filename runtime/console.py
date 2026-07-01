@@ -13,7 +13,7 @@ import time
 
 from audio import AudioBank, AudioEngine, MusicTrack, SFX
 from editors import (BlockEditor, CodeEditor, IconSheet, MapEditor, MusicEditor,
-                     PaintEditor, SpriteSheet, TileMap)
+                     PaintEditor, SpriteSheet, TileMap, _SheetSprite)
 
 # The block vocabulary/compiler (#29). Imported under whichever name it's known by:
 # bare `blocks` on the device (frozen top-level) and on the host once host_app has
@@ -958,6 +958,7 @@ _ICON = {
     "home": 0, "edit": 1, "code": 2, "paint": 3, "map": 4, "blocks": 5,
     "gear": 6, "wifi": 7, "batt": 8, "new": 9, "dup": 10, "del": 11,
     "close": 12, "run": 13, "save": 14, "music": 15,
+    "moy": 16,          # the moybyte mascot (boot logo); not a bar control
 }
 
 # The baked default theme: each icon is 16 row-strings of 16 chars over the 16-color
@@ -1062,14 +1063,26 @@ _ICON_ART = {
         ".7ccc.....7ccc..", "7cccc....7cccc..", "7cccc....7cccc..", ".7cc......7cc...",
         "................", "................", "................", "................",
     ),
+    # "Moy", the moybyte mascot: one big pixel (a byte) with a square bite chomped
+    # from the top-right corner, two eyes + a smile + stubby feet. "Grape" skin --
+    # body = indigo (d/13), shadow = dark-purple (2), sheen = light-grey (6), eyes
+    # white (7), outlined in black (0). The boot logo (see _draw_splash); not a bar
+    # control, so it has no _glyph fallback (the splash simply omits it if absent).
+    "moy": (
+        "................", "...0000000......", "..0ddddddd0.....", ".0d66ddddd0.....",
+        ".0dddddddd0.....", ".0dddddddd0000..", ".0dd77d77ddddd0.", ".0dd70d70ddddd0.",
+        ".0dddddddddddd0.", ".0dd0ddd0ddddd0.", ".0ddd000dddddd0.", ".0dddddddddddd0.",
+        ".0dddddddddddd0.", "..022222222220..", "..02220002220...", "...000...000....",
+    ),
 }
 
 # Bump whenever the baked _ICON_ART above changes: a saved system_icons.kgfx theme
 # written at an OLDER version is treated as stale and re-seeded to these new defaults
 # at load (mirrors cart versioning, #47), so an already-themed device/desktop picks up
 # new icons without a manual wipe. A bump discards a user's custom icon edits, exactly
-# like a built-in cart re-seed. (v1 = the first full restyle.)
-_ICON_VERSION = 1
+# like a built-in cart re-seed. (v1 = the first full restyle; v2 = added the "moy"
+# mascot slot for the boot logo.)
+_ICON_VERSION = 2
 
 
 def _nibble(ch):
@@ -1610,6 +1623,12 @@ class Popup:
         return True                    # tap inside is always consumed
 
 
+# Boot logo: how long the moybyte splash (Moy + wordmark) holds before the launcher
+# is revealed. Armed only by the real boot entries (device run_desktop, interactive
+# host), never by unit construction, so tests see the launcher on the first frame().
+_SPLASH_MS = 1500
+
+
 class Workstation:
     def __init__(self, comp, canvas, input, carts=None, sys_canvas=None,
                  font_scale=1):
@@ -1670,6 +1689,7 @@ class Workstation:
         # icon grid + dock); "desktop" is a running cart; "menu" is the cards/code/
         # paint/map editors; "settings" is the Settings app.
         self.screen = "launcher"      # "launcher" | "desktop" | "menu" | "settings" | "update"
+        self._splash_until = None     # boot logo deadline (_ticks_ms); None = no splash
         self.cart = None
         self.config = None
         self.ns = None
@@ -5378,6 +5398,10 @@ class Workstation:
           - a live wallpaper on the home/settings backdrop (its _update advances it),
           - the achievement toast / Konami confetti / Easter-egg popup while active.
         A static launcher/editor/menu with a still wallpaper hits none of these."""
+        # The boot logo animates the frame loop until it expires (frame() clears it),
+        # so it keeps painting + flushing for its whole hold without any input.
+        if self._splash_until is not None:
+            return True
         # A running cart on the desktop draws every frame (unless it crashed, when the
         # error panel is static).
         if self.screen == "desktop" and self.cart_error is None and (
@@ -5424,6 +5448,12 @@ class Workstation:
             inst = 1.0 / dt
             # EMA so the readout reflects sustained rate, not single-frame jitter.
             self._fps = inst if self._fps <= 0 else self._fps + (inst - self._fps) * 0.15
+        # Boot logo: expire the splash before the redraw gate so THIS frame reveals the
+        # launcher. While it's live it's an _animating source, so the loop keeps flushing
+        # it; marking dirty on expiry guarantees the launcher paints on the next frame.
+        if self._splash_until is not None and _ticks_diff(self._splash_until, _ticks_ms()) <= 0:
+            self._splash_until = None
+            self._dirty = True
         # Redraw-on-change (#44): a static UI screen (no animation, no pointer change,
         # nothing marked dirty) is skipped entirely -- no draw, no flush. The panel /
         # host window simply retains the last frame, so an idle UI costs ~0 and the
@@ -5441,7 +5471,9 @@ class Workstation:
         _upd = 0          # cart _update(dt) ms (game LOGIC); 0 off the cart path
         _cart = 0         # cart _draw() ms (RENDERING)
         _audio = 0        # audio.tick(dt) ms (mixer feed) -- split out so it doesn't hide in render
-        if self.screen == "launcher":
+        if self._splash_until is not None:
+            self._draw_splash()            # boot logo -- takes precedence over any screen
+        elif self.screen == "launcher":
             self._draw_desktop_home(dt)
         elif self.screen == "settings":
             self._draw_settings(dt)
@@ -5616,6 +5648,61 @@ class Workstation:
         self._dirty = False
         self._last_ptr = self._ptr_state()
         self._frames_drawn += 1
+
+    # -- boot logo ------------------------------------------------------------
+
+    def arm_splash(self, ms=None):
+        """Show the moybyte boot logo for the next `ms` (default _SPLASH_MS) before the
+        launcher appears. Called by the boot entries (device run_desktop, interactive
+        host), NOT by construction -- so unit tests that drive frame() see the launcher
+        on the first frame."""
+        self._splash_until = _ticks_ms() + (int(ms) if ms else _SPLASH_MS)
+        self._dirty = True
+
+    def _splash_image(self):
+        """The Moy mascot as a 16x16 blittable built straight from _ICON_ART with REAL
+        transparency ("." -> -1), cached. Not the icon-sheet tile: an IconSheet is a
+        solid indexed grid where a blank pixel is index 0 (black) -- which is also Moy's
+        outline colour, so a sheet blit can't tell the outside from the outline and
+        boxes the mascot. Building the image here keeps the outline AND lets the dark
+        field (and the corner bite) show through."""
+        img = getattr(self, "_splash_img", None)
+        if img is None:
+            art = _ICON_ART.get("moy", ())
+            pix = []
+            for ly in range(16):
+                row = art[ly] if ly < len(art) else ""
+                for lx in range(16):
+                    pix.append(_nibble(row[lx]) if lx < len(row) else -1)
+            img = _SheetSprite(16, 16, pix, -1)
+            self._splash_img = img
+        return img
+
+    def _draw_splash(self):
+        """Paint the boot logo: 'Moy' (the moybyte mascot) scaled up over a dark field,
+        with the two-tone `moybyte` wordmark below. Drawn on the SYSTEM canvas (like the
+        launcher) so it fills the real panel; host and device share this one path."""
+        cv = self.sys_canvas
+        W, H = cv.w, cv.h
+        cv.cls(NAMES["dark_blue"])
+        scale = min(W, H) // 56                    # Moy ~1/4 of the panel, reflows with size
+        if scale < 3:
+            scale = 3
+        side = 16 * scale
+        # Wordmark is drawn at text scale 1: the device's framebuf text is a fixed 8px
+        # and ignores a scale arg, so scale-1 is the ONLY size that renders identically
+        # on host and device (host==device parity). Kept small + centred under Moy.
+        word = 8                                   # one 8px char cell wide
+        gap = 10
+        block_h = side + gap + word
+        top = (H - block_h) // 2
+        cv.spr(self._splash_image(), (W - side) // 2, top, scale)
+        wy = top + side + gap
+        # Two-tone wordmark: "moy" in cream, "byte" in the mascot's indigo body colour.
+        tw = 7 * word                             # "moybyte" is 7 chars
+        wx = (W - tw) // 2
+        cv.print("moy", wx, wy, NAMES["white"], 1)
+        cv.print("byte", wx + 3 * word, wy, NAMES["indigo"], 1)
 
     # -- desktop shell drawing (#28) -----------------------------------------
 
@@ -6169,6 +6256,8 @@ class Workstation:
         # so the cursor draws on the system canvas, on TOP of the composited viewport
         # (#39). Scaled with the font so it stays visible on a big panel; at scale 1
         # / a 320x240 system canvas this is exactly today's 1x cursor on the canvas.
+        if self._splash_until is not None:
+            return                        # no cursor over the boot logo
         if self.pointer is not None and self.pointer.visible:
             self.sys_canvas.spr(CURSOR, self.pointer.x, self.pointer.y, self.font_scale)
 

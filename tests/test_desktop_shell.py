@@ -390,3 +390,37 @@ def test_ota_channel_toggle_persists(tmp_path):
     ws.settings_adjust(1)                           # -> unstable, then check it persisted
     ws2 = host_app.build_workstation(carts_dir)
     assert ws2.system.get("ota_channel") == "unstable"
+
+
+# -- boot logo (moybyte splash) --------------------------------------------
+
+def test_boot_splash_holds_then_reveals_launcher(tmp_path):
+    """arm_splash() shows the boot logo for a hold, then the launcher takes over.
+    The splash is opt-in (armed by the boot entries), so a bare Workstation still
+    renders the launcher on the first frame -- which every other test relies on."""
+    from runtime import host_app, console
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    assert ws._splash_until is None                 # not armed by construction
+
+    ws.arm_splash(500)
+    assert ws._splash_until is not None
+    drv.frame(1 / 30)                                # paints the boot logo, no error
+    assert ws._splash_until is not None             # still within the hold
+    assert len(set(drv.rgb888())) > 4               # Moy + wordmark => many colors
+
+    ws._splash_until = console._ticks_ms() - 1       # force the deadline into the past
+    drv.frame(1 / 30)                                # this frame expires it...
+    assert ws._splash_until is None
+    drv.frame(1 / 30)                                # ...and the launcher renders after
+    assert len(set(drv.rgb888())) > 4
+
+
+def test_moy_mascot_baked_into_default_icon_sheet():
+    """The 'moy' slot is a real, non-blank 16x16 sprite in the baked theme, so the
+    splash (and any icon-sheet consumer) can blit it."""
+    from runtime import console
+    sheet = console._default_icon_sheet()
+    img = sheet.tile_image(console._ICON["moy"])
+    assert img is not None
+    assert any(p > 0 for p in img.pix)              # mascot has painted pixels
