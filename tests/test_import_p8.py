@@ -1,12 +1,12 @@
-"""Tests for the offline PICO-8 .p8 -> .kcart asset importer (tools/import_p8.py).
+"""Tests for the offline PICO-8 .p8 -> .moy asset importer (tools/import_p8.py).
 
 Feeds a small hand-written synthetic .p8 (a few __gfx__ rows + a tiny __sfx__ +
 one __music__ row) and asserts:
-  * the emitted sprites.kgfx nibbles match the input __gfx__ (round-trip stable),
+  * the emitted sprites.moygfx nibbles match the input __gfx__ (round-trip stable),
   * sounds.json parses via runtime.audio.AudioBank.from_dict and is lossy-correct,
   * manifest.json is valid and well-shaped,
   * main.py keeps the Lua only as a comment (never executable),
-  * the cart load()s cleanly via runtime.kid_carts.
+  * the cart load()s cleanly via runtime.moy_carts.
 """
 
 import json
@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
 import import_p8  # noqa: E402
-from runtime import kid_carts  # noqa: E402
+from runtime import moy_carts  # noqa: E402
 from runtime.audio import AudioBank  # noqa: E402
 from runtime.editors import SpriteSheet  # noqa: E402
 
@@ -82,10 +82,10 @@ def _write_p8(tmp_path):
 
 def test_gfx_nibbles_match_input(tmp_path):
     p8 = _write_p8(tmp_path)
-    out = tmp_path / "out.kcart"
+    out = tmp_path / "out.moy"
     import_p8.import_p8(str(p8), str(out))
 
-    kgfx = (out / "sprites.kgfx").read_text(encoding="utf-8")
+    kgfx = (out / "sprites.moygfx").read_text(encoding="utf-8")
     rows = kgfx.split("\n")
     # Exactly the full 128x128 grid.
     assert len(rows) == 128
@@ -101,16 +101,16 @@ def test_gfx_nibbles_match_input(tmp_path):
 def test_gfx_roundtrip_stable(tmp_path):
     """parse -> kgfx -> SpriteSheet.from_hex -> to_hex is a fixed point."""
     p8 = _write_p8(tmp_path)
-    out = tmp_path / "out.kcart"
+    out = tmp_path / "out.moy"
     import_p8.import_p8(str(p8), str(out))
-    kgfx = (out / "sprites.kgfx").read_text(encoding="utf-8")
+    kgfx = (out / "sprites.moygfx").read_text(encoding="utf-8")
     sheet = SpriteSheet.from_hex(kgfx, cols=16, rows=16)
     assert sheet.to_hex() == kgfx
 
 
 def test_sounds_parse_via_audiobank(tmp_path):
     p8 = _write_p8(tmp_path)
-    out = tmp_path / "out.kcart"
+    out = tmp_path / "out.moy"
     import_p8.import_p8(str(p8), str(out))
 
     data = json.loads((out / "sounds.json").read_text(encoding="utf-8"))
@@ -121,7 +121,7 @@ def test_sounds_parse_via_audiobank(tmp_path):
     assert sfx0.speed == 8
     # the 3 authored notes survive (trailing rests trimmed)
     assert len(sfx0.steps) == 3
-    # pitch maps 1:1 (PICO-8 pitch == KidCode semitone index)
+    # pitch maps 1:1 (PICO-8 pitch == Moybyte semitone index)
     assert sfx0.steps[0][0] == 0x1E
     assert sfx0.steps[1][0] == 0x21
     assert sfx0.steps[2][0] == 0x18
@@ -139,14 +139,14 @@ def test_sounds_parse_via_audiobank(tmp_path):
 
 def test_manifest_valid(tmp_path):
     p8 = _write_p8(tmp_path)
-    out = tmp_path / "out.kcart"
+    out = tmp_path / "out.moy"
     summary = import_p8.import_p8(str(p8), str(out))
 
     man = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
-    assert man["format"] == "kidcode-cart-v1"
+    assert man["format"] == "moybyte-cart-v1"
     assert man["type"] == "game"
     assert man["main"] == "main.py"
-    assert man["canvas"] == {"width": 320, "height": 240, "palette": "kid64"}
+    assert man["canvas"] == {"width": 320, "height": 240, "palette": "moy64"}
     assert "graphics" in man["permissions"]
     assert man["config"] == {}
     assert man["edit"] == []
@@ -157,7 +157,7 @@ def test_manifest_valid(tmp_path):
 
 def test_main_py_keeps_lua_as_comment_only(tmp_path):
     p8 = _write_p8(tmp_path)
-    out = tmp_path / "out.kcart"
+    out = tmp_path / "out.moy"
     import_p8.import_p8(str(p8), str(out))
 
     src = (out / "main.py").read_text(encoding="utf-8")
@@ -173,12 +173,12 @@ def test_main_py_keeps_lua_as_comment_only(tmp_path):
             assert line.lstrip().startswith("#")
 
 
-def test_cart_loads_via_kid_carts(tmp_path):
+def test_cart_loads_via_moy_carts(tmp_path):
     p8 = _write_p8(tmp_path)
-    out = tmp_path / "out.kcart"
+    out = tmp_path / "out.moy"
     import_p8.import_p8(str(p8), str(out))
 
-    cart = kid_carts.load(str(out))
+    cart = moy_carts.load(str(out))
     assert cart is not None
     assert cart["title"] == "my test cart"
     assert cart["type"] == "game"
@@ -192,43 +192,43 @@ def test_cart_loads_via_kid_carts(tmp_path):
 
 def test_deferred_sections_noted_not_imported(tmp_path):
     p8 = _write_p8(tmp_path)
-    out = tmp_path / "out.kcart"
+    out = tmp_path / "out.moy"
     summary = import_p8.import_p8(str(p8), str(out))
 
     # __map__ and __gff__ are reported as deferred, and no files are written.
     deferred = " ".join(summary["deferred"])
     assert "__map__" in deferred
     assert "__gff__" in deferred
-    assert not (out / "map.kmap").exists()
+    assert not (out / "map.moymap").exists()
     # the cart folder holds exactly the v1 importer outputs
     names = sorted(p.name for p in out.iterdir())
     assert names == ["config.json", "main.py", "manifest.json",
-                     "sounds.json", "sprites.kgfx"]
+                     "sounds.json", "sprites.moygfx"]
 
 
 def test_empty_sections_handled(tmp_path):
     """A .p8 with no assets still produces a loadable cart (no sprites/sounds)."""
     p8 = tmp_path / "bare.p8"
     p8.write_text("pico-8 cartridge\nversion 41\n__lua__\ncls(0)\n", encoding="utf-8")
-    out = tmp_path / "bare.kcart"
+    out = tmp_path / "bare.moy"
     summary = import_p8.import_p8(str(p8), str(out))
-    assert not (out / "sprites.kgfx").exists()
+    assert not (out / "sprites.moygfx").exists()
     assert not (out / "sounds.json").exists()
-    assert any("sprites.kgfx" in e for e in summary["empty"])
-    cart = kid_carts.load(str(out))
+    assert any("sprites.moygfx" in e for e in summary["empty"])
+    cart = moy_carts.load(str(out))
     assert cart is not None
     assert cart["sprites"] is None
     assert cart["sounds"] is None
 
 
-# -- guided PICO-8 -> KidCode porting (#36) --------------------------------
+# -- guided PICO-8 -> Moybyte porting (#36) --------------------------------
 
 def test_port_notes_for_used_verbs_only(tmp_path):
     """The synthetic cart's Lua uses rectfill, circ, and btn(0). The generated
     main.py must carry the matching PORT NOTEs (rect inversion + arg-shape, circ
     inversion, btn names) and MUST NOT emit notes for verbs the cart never uses."""
     p8 = _write_p8(tmp_path)
-    out = tmp_path / "out.kcart"
+    out = tmp_path / "out.moy"
     import_p8.import_p8(str(p8), str(out))
     src = (out / "main.py").read_text(encoding="utf-8")
 
@@ -260,7 +260,7 @@ def test_port_notes_for_used_verbs_only(tmp_path):
 
 def test_port_checklist_and_cheatsheet_pointer(tmp_path):
     p8 = _write_p8(tmp_path)
-    out = tmp_path / "out.kcart"
+    out = tmp_path / "out.moy"
     import_p8.import_p8(str(p8), str(out))
     src = (out / "main.py").read_text(encoding="utf-8")
 
@@ -281,7 +281,7 @@ def test_no_port_notes_when_no_known_verbs(tmp_path):
     p8.write_text(
         "pico-8 cartridge\nversion 41\n__lua__\nx = 1 + 2\nfoo = bar(x)\n",
         encoding="utf-8")
-    out = tmp_path / "plain.kcart"
+    out = tmp_path / "plain.moy"
     import_p8.import_p8(str(p8), str(out))
     src = (out / "main.py").read_text(encoding="utf-8")
     assert "# PORT NOTE:" not in src

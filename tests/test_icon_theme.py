@@ -69,12 +69,12 @@ def test_edit_icons_reachable_by_keyboard_a(tmp_path):
 # -- paint a pixel + SAVE persists + round-trips + re-themes the bar ---------
 
 def test_paint_and_save_persists_and_round_trips(tmp_path):
-    """Paint a pixel in the theme editor, SAVE -> system_icons.kgfx exists, loads
+    """Paint a pixel in the theme editor, SAVE -> system_icons.moygfx exists, loads
     back non-None, round-trips the edit, and ws.icon_sheet reflects it."""
-    from runtime import host_app, console as C, kid_carts
+    from runtime import host_app, console as C, moy_carts
     ws = _ws(tmp_path)
     carts_dir = ws.carts_root
-    assert kid_carts.load_system_icons(carts_dir) is None     # nothing saved yet
+    assert moy_carts.load_system_icons(carts_dir) is None     # nothing saved yet
     drv = host_app.ConsoleDriver(ws)
     ws.open_theme()
     drv.frame(1 / 30)
@@ -91,7 +91,7 @@ def test_paint_and_save_persists_and_round_trips(tmp_path):
     drv.frame(1 / 30)
     assert ws.save_status == "SAVED"
     # Persisted: the file now exists, loads non-None, and the edit round-trips.
-    hexs = kid_carts.load_system_icons(carts_dir)
+    hexs = moy_carts.load_system_icons(carts_dir)
     assert hexs is not None
     reloaded = C.IconSheet.from_hex(hexs)
     assert reloaded.pget(0, 0) == 9
@@ -169,14 +169,14 @@ def test_home_key_from_theme_clears_editing_flag(tmp_path):
 # -- the theme editor must NOT touch a cart's sheet --------------------------
 
 def test_editing_icons_does_not_modify_a_cart_sheet(tmp_path):
-    """Editing the system icon sheet leaves every cart's own sprites.kgfx untouched
+    """Editing the system icon sheet leaves every cart's own sprites.moygfx untouched
     (the theme editor is a parallel PaintEditor target, not the cart's)."""
-    from runtime import host_app, console as C, kid_carts
+    from runtime import host_app, console as C, moy_carts
     ws = _ws(tmp_path)
     carts_dir = ws.carts_root
     # Snapshot each on-disk cart sheet before theming.
     before = {}
-    for c in kid_carts.scan(carts_dir):
+    for c in moy_carts.scan(carts_dir):
         before[c["path"]] = c.get("sprites")
     drv = host_app.ConsoleDriver(ws)
     ws.open_theme()
@@ -187,10 +187,10 @@ def test_editing_icons_does_not_modify_a_cart_sheet(tmp_path):
     drv.click(*_center(C._PAINT_SAVE))
     drv.frame(1 / 30)
     # No cart sheet changed on disk.
-    for c in kid_carts.scan(carts_dir):
+    for c in moy_carts.scan(carts_dir):
         assert c.get("sprites") == before.get(c["path"]), c["path"]
     # And the system theme file is what got written instead.
-    assert kid_carts.load_system_icons(carts_dir) is not None
+    assert moy_carts.load_system_icons(carts_dir) is not None
 
 
 def test_cart_paint_flow_still_targets_the_cart_sheet(tmp_path):
@@ -211,11 +211,11 @@ def test_cart_paint_flow_still_targets_the_cart_sheet(tmp_path):
 # -- the theme editor starts from the current (default) theme ----------------
 
 def test_theme_editor_starts_from_default_when_no_file(tmp_path):
-    """With no system_icons.kgfx yet, the editor opens on the baked default IconSheet
+    """With no system_icons.moygfx yet, the editor opens on the baked default IconSheet
     (a real 16x16 themeable sheet), and the first save creates the file."""
-    from runtime import host_app, kid_carts
+    from runtime import host_app, moy_carts
     ws = _ws(tmp_path)
-    assert kid_carts.load_system_icons(ws.carts_root) is None
+    assert moy_carts.load_system_icons(ws.carts_root) is None
     drv = host_app.ConsoleDriver(ws)
     ws.open_theme()
     drv.frame(1 / 30)

@@ -2,7 +2,7 @@
 
 Driven through the SAME shared console the device runs (runtime.host_app +
 ConsoleDriver: mouse == touch, arrows == trackball), plus direct unit tests of the
-backend-agnostic Achievements helper and the kid_carts achievements.json store --
+backend-agnostic Achievements helper and the moy_carts achievements.json store --
 so these assert host==device behavior, not a host-only path.
 """
 
@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT))
 
 # host_app registers the bare `audio`/`editors` module aliases that console.py
 # imports (its frozen device names), so import it BEFORE console.
-from runtime import host_app, kid_carts  # noqa: E402
+from runtime import host_app, moy_carts  # noqa: E402
 from runtime import console as C  # noqa: E402
 
 
@@ -37,24 +37,24 @@ def _press(drv, name):
     drv.frame(1 / 30)
 
 
-# -- the kid_carts achievements.json store ----------------------------------
+# -- the moy_carts achievements.json store ----------------------------------
 
 def test_achievements_store_roundtrip(tmp_path):
     carts = str(tmp_path / "carts")
-    assert kid_carts.load_achievements(carts) == []       # nothing earned yet
-    kid_carts.save_achievements(["first_open", "konami"], carts)
-    assert kid_carts.load_achievements(carts) == ["first_open", "konami"]
+    assert moy_carts.load_achievements(carts) == []       # nothing earned yet
+    moy_carts.save_achievements(["first_open", "konami"], carts)
+    assert moy_carts.load_achievements(carts) == ["first_open", "konami"]
 
 
 def test_achievements_store_dedupes_and_ignores_garbage(tmp_path):
     carts = str(tmp_path / "carts")
-    kid_carts.save_achievements(["a", "a", "b"], carts)
-    assert kid_carts.load_achievements(carts) == ["a", "b"]
+    moy_carts.save_achievements(["a", "a", "b"], carts)
+    assert moy_carts.load_achievements(carts) == ["a", "b"]
     # A corrupt store must never crash -> empty list.
-    path = kid_carts.achievements_store_path(carts)
+    path = moy_carts.achievements_store_path(carts)
     with open(path, "w") as f:
         f.write("{not json")
-    assert kid_carts.load_achievements(carts) == []
+    assert moy_carts.load_achievements(carts) == []
 
 
 # -- the Achievements helper (award-once + toast) ---------------------------

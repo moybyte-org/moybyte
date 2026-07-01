@@ -270,13 +270,13 @@ def test_restart_cart_action_reruns_via_apply(tmp_path):
 
 
 def test_delete_cart_action_deletes_then_goes_home(tmp_path):
-    from runtime import kid_carts
+    from runtime import moy_carts
     ws = _ws(tmp_path)
     drv = _drv(ws)
     # Need >1 cart so del_cart isn't blocked by the keep-at-least-one guard.
-    kid_carts.create("Extra", str(tmp_path / "carts"), src="def _draw():\n    cls(1)\n",
+    moy_carts.create("Extra", str(tmp_path / "carts"), src="def _draw():\n    cls(1)\n",
                      type="app")
-    ws.launcher.set_items(kid_carts.scan(str(tmp_path / "carts")))
+    ws.launcher.set_items(moy_carts.scan(str(tmp_path / "carts")))
     n0 = len(ws.launcher.items)
     _open_cart(ws)
     ws.toggle_sysmenu()

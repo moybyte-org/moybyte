@@ -68,12 +68,12 @@ def _open_cart(ws, title):
 
 def _make_ws_with_carts(tmp_path):
     from runtime import host_app
-    from runtime import kid_carts
+    from runtime import moy_carts
 
     carts_dir = str(tmp_path / "carts")
     os.makedirs(carts_dir, exist_ok=True)
-    kid_carts.create("Typer", carts_dir, src=TEXT_CART_SRC, type="app")
-    kid_carts.create("Mover", carts_dir, src=GAME_CART_SRC, type="game")
+    moy_carts.create("Typer", carts_dir, src=TEXT_CART_SRC, type="app")
+    moy_carts.create("Mover", carts_dir, src=GAME_CART_SRC, type="game")
     return host_app.build_workstation(carts_dir)
 
 
@@ -154,7 +154,7 @@ def test_textmode_off_mid_cart_reverts_to_game(tmp_path):
     # A cart that flips text mode back off (e.g. wifi leaving its password screen)
     # restores game mode for the rest of the run.
     from runtime import host_app
-    from runtime import kid_carts
+    from runtime import moy_carts
 
     src = """
 phase = 0
@@ -169,7 +169,7 @@ def _draw():
 """
     carts_dir = str(tmp_path / "carts")
     os.makedirs(carts_dir, exist_ok=True)
-    kid_carts.create("Toggler", carts_dir, src=src, type="app")
+    moy_carts.create("Toggler", carts_dir, src=src, type="app")
     ws = host_app.build_workstation(carts_dir)
     drv = host_app.ConsoleDriver(ws)
     _open_cart(ws, "Toggler")
@@ -185,7 +185,7 @@ def _draw():
 
 def test_textmode_in_both_make_api_namespaces():
     # host == device contract: `textmode` is a base verb in BOTH backends' namespace
-    # (so a cart authored once runs identically). Loads the device kid_runtime under
+    # (so a cart authored once runs identically). Loads the device moy_runtime under
     # CPython the way the spike/parity tests do.
     import importlib.util
     from runtime import host_app
@@ -199,8 +199,8 @@ def test_textmode_in_both_make_api_namespaces():
     sys.path.insert(0, str(ROOT / "tools"))
     import gen_device_carts
     sys.modules["carts_data"] = gen_device_carts.as_module(str(SYSTEM_CARTS))
-    fw = ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules" / "kid_runtime.py"
-    spec = importlib.util.spec_from_file_location("kid_runtime", fw)
+    fw = ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules" / "moy_runtime.py"
+    spec = importlib.util.spec_from_file_location("moy_runtime", fw)
     dev = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(dev)
 

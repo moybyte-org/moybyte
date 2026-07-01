@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from runtime import blocks  # noqa: E402
-from runtime import kid_carts  # noqa: E402
+from runtime import moy_carts  # noqa: E402
 from runtime.editors import BlockEditor  # noqa: E402
 
 mk = blocks.make_block
@@ -231,8 +231,8 @@ def _ws_with_block_cart(tmp_path, title="UI Block Cart"):
     from runtime import host_app
     root = str(tmp_path / "carts")
     ws = host_app.build_workstation(root)
-    cart = kid_carts.create(title, root, type="game")
-    ws.launcher.items = kid_carts.scan(root)
+    cart = moy_carts.create(title, root, type="game")
+    ws.launcher.items = moy_carts.scan(root)
     for i, c in enumerate(ws.launcher.items):
         if c["title"] == title:
             ws.launcher.sel = i
@@ -311,12 +311,12 @@ def test_save_persists_blocks_and_main_and_reloads(tmp_path):
     be.insert_block("set_var", {"var": "score", "value": 0})
     assert ws.save_blocks() is True and ws.blk_status == "SAVED"
     # both files landed; reload restores the program AND a runnable main.py
-    reloaded = kid_carts.load(cart["path"])
+    reloaded = moy_carts.load(cart["path"])
     assert reloaded["blocks"] == be.program
-    assert reloaded["src"].startswith("# Made with KidCode blocks")
+    assert reloaded["src"].startswith("# Made with Moybyte blocks")
     assert "score = 0" in reloaded["src"]
     # a fresh editor over the reloaded cart restores the same tree
-    again = BlockEditor(blocks, kid_carts.load_blocks(cart["path"]))
+    again = BlockEditor(blocks, moy_carts.load_blocks(cart["path"]))
     assert again.program == be.program
 
 
@@ -389,7 +389,7 @@ def test_block_authored_cart_runs_normally(tmp_path):
     be.insert_block("set_var", {"var": "x", "value": 100})
     ws.save_blocks()
     # reopen the cart fresh from disk and run it
-    ws.launcher.items = kid_carts.scan(root)
+    ws.launcher.items = moy_carts.scan(root)
     for i, c in enumerate(ws.launcher.items):
         if c["title"] == cart["title"]:
             ws.launcher.sel = i
@@ -464,8 +464,8 @@ def _ws_with_code_cart(tmp_path, src, title="Code Cart"):
     from runtime import host_app
     root = str(tmp_path / "carts")
     ws = host_app.build_workstation(root)
-    cart = kid_carts.create(title, root, src=src, type="game")
-    ws.launcher.items = kid_carts.scan(root)
+    cart = moy_carts.create(title, root, src=src, type="game")
+    ws.launcher.items = moy_carts.scan(root)
     for i, c in enumerate(ws.launcher.items):
         if c["title"] == title:
             ws.launcher.sel = i
@@ -487,7 +487,7 @@ def test_blocks_on_handwritten_cart_does_not_lose_code(tmp_path):
     # in-RAM source is untouched...
     assert ws.cart["src"] == _HANDWRITTEN_SRC
     # ...and so is the on-disk main.py (nothing was written, no blocks.json appeared)
-    reloaded = kid_carts.load(cart["path"])
+    reloaded = moy_carts.load(cart["path"])
     assert reloaded["src"] == _HANDWRITTEN_SRC
     assert reloaded["blocks"] is None
     # leaving the editor re-runs the kid's real code (not an empty blocks cart)
@@ -507,7 +507,7 @@ def test_blocks_protect_blocks_graduate_overwrite(tmp_path):
     ws.graduate_to_code()
     assert ws.menu_view == "code" and ws.editor is not None
     assert ws.editor.text() == _HANDWRITTEN_SRC          # the kid's code, not blocks
-    assert "Made with KidCode blocks" not in ws.editor.text()
+    assert "Made with Moybyte blocks" not in ws.editor.text()
 
 
 def test_block_authored_cart_is_not_protected(tmp_path):
@@ -523,7 +523,7 @@ def test_block_authored_cart_is_not_protected(tmp_path):
     assert ws.save_blocks() is True
     # reopen fresh from disk: it loads its blocks.json, so it's NOT protected and
     # saving works again (round-trip unchanged).
-    ws.launcher.items = kid_carts.scan(root)
+    ws.launcher.items = moy_carts.scan(root)
     for i, c in enumerate(ws.launcher.items):
         if c["title"] == cart["title"]:
             ws.launcher.sel = i
@@ -985,7 +985,7 @@ def test_for_each_block_inserts_and_saves(tmp_path):
     _go_to_insert(be, 2)
     be.insert_block("spr", {"id": 0, "x": mk("var", {"var": "it"}), "y": 0})
     assert ws.save_blocks() is True
-    reloaded = kid_carts.load(cart["path"])
+    reloaded = moy_carts.load(cart["path"])
     assert "for it in nums:" in reloaded["src"]
     assert reloaded["blocks"]["lists"] == ["nums"]
     _run(reloaded["src"], frames=2)

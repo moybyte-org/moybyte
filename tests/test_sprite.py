@@ -1,4 +1,4 @@
-from kidcode.sprites import Sprite
+from moybyte.sprites import Sprite
 
 
 def test_sprite_touching():

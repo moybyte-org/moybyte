@@ -2,7 +2,7 @@
 
 These classes are pure logic -- no canvas, framebuf, input, or I/O -- so the
 *same* file backs both the host reference (`runtime/`, imported as
-`runtime.editors`) and the MicroPython device port (`kid_runtime.py`, which
+`runtime.editors`) and the MicroPython device port (`moy_runtime.py`, which
 imports it as the frozen top-level module `editors`). The build stages this file
 into the firmware `modules/` tree; the host imports it directly. Each side adds
 only its own rendering + input glue around these.
@@ -11,7 +11,7 @@ only its own rendering + input glue around these.
   SpriteSheet  -- indexed 8x8 tile sheet + PICO-8 __gfx__-style hex (#4 storage)
   IconSheet    -- SpriteSheet of 16x16 tiles: the editable top-bar icon theme
   PaintEditor  -- pixel-paint state over a sheet tile (#4 editor)
-  TileMap      -- grid of tile ids over a sheet + map.kmap hex (#32 storage)
+  TileMap      -- grid of tile ids over a sheet + map.moymap hex (#32 storage)
   MapEditor    -- tile-placement state over a TileMap (#32 editor)
   BlockEditor  -- structured-outline block program + cursor (#29 Part 2 editor)
 
@@ -196,7 +196,7 @@ class SpriteSheet:
     """An indexed sprite sheet: a grid of cols x rows 8x8 tiles, addressed by
     sprite id (row-major) for TIC-80-style spr(n, x, y). Pixels are 16-color
     indices (0-15, the shared base palette) and serialize to a PICO-8
-    __gfx__-style hex blob (one nibble per pixel) stored as `sprites.kgfx`."""
+    __gfx__-style hex blob (one nibble per pixel) stored as `sprites.moygfx`."""
 
     TILE = 8
 
@@ -335,11 +335,11 @@ class SpriteSheet:
 class IconSheet(SpriteSheet):
     """An indexed sprite sheet of 16x16 tiles -- the editable icon theme behind the
     unified top bar (Stage 1). It IS a SpriteSheet: everything (tile_image, the flat
-    .kgfx hex serialize/parse, copy_tile) drives off self.TILE, so a 16x16 tile is
+    .moygfx hex serialize/parse, copy_tile) drives off self.TILE, so a 16x16 tile is
     automatic. The only overrides are the bigger TILE and a smaller default geometry
     (8 cols x 4 rows = 32 icon slots, a 128x64 sheet). Colors are still the 16-color
     base palette (c & 15), so an icon reads on the dark bar and theme files round-trip
-    through the same hex format as sprites.kgfx / shared.kgfx."""
+    through the same hex format as sprites.moygfx / shared.moygfx."""
 
     TILE = 16
 
@@ -379,9 +379,9 @@ class TileMap:
 
     Storage is a flat bytearray of w*h cells where each byte is `tile_id + 1`
     (so 0 means empty); this keeps the on-disk blob compact and an all-zero map
-    is genuinely blank. Serializes to a `map.kmap` text blob: a header line
+    is genuinely blank. Serializes to a `map.moymap` text blob: a header line
     `w h` followed by `h` rows of `w * 2` hex digits (one byte per cell, "00"
-    = empty), mirroring the PICO-8 __gfx__-style sprites.kgfx pattern. Tile ids
+    = empty), mirroring the PICO-8 __gfx__-style sprites.moygfx pattern. Tile ids
     are capped at 254 (254 distinct tiles is ample for a kid level; the 16x16
     sheet's id 255 simply can't be placed on the map)."""
 
@@ -438,7 +438,7 @@ class TileMap:
 
     @classmethod
     def from_hex(cls, text, default_w=20, default_h=15):
-        """Parse a map.kmap blob (header `w h` + rows of hex byte pairs). Falls
+        """Parse a map.moymap blob (header `w h` + rows of hex byte pairs). Falls
         back to the default dims for a missing/blank header so a truncated blob
         still loads as an empty map rather than throwing."""
         lines = [ln.strip() for ln in str(text).split("\n")]

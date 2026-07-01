@@ -1,6 +1,6 @@
 # LilyGO T-Deck Plus Board Profile
 
-KidCode board id: `lilygo_t_deck_plus`
+Moybyte board id: `lilygo_t_deck_plus`
 
 This profile tracks the user's LilyGO T-Deck Plus as the first concrete hardware
 target.
@@ -11,7 +11,7 @@ Primary upstream source:
 https://github.com/Xinyuan-LilyGO/T-Deck
 ```
 
-Source facts used by the KidCode tooling:
+Source facts used by the Moybyte tooling:
 
 ```text
 PlatformIO environment: T-Deck
@@ -47,11 +47,11 @@ BOARD_BOOT_PIN      0
 Local checks:
 
 ```bash
-kidcode board-info lilygo_t_deck_plus
-kidcode device-doctor --board lilygo_t_deck_plus
-kidcode lilygo-next
-kidcode device-port
-kidcode export-device examples/tiny_runner.kcproj --board lilygo_t_deck_plus --out /tmp/kidcode_lilygo_t_deck_plus
+moybyte board-info lilygo_t_deck_plus
+moybyte device-doctor --board lilygo_t_deck_plus
+moybyte lilygo-next
+moybyte device-port
+moybyte export-device examples/tiny_runner.moyproj --board lilygo_t_deck_plus --out /tmp/moybyte_lilygo_t_deck_plus
 ```
 
 The export step creates a `.kc8` bundle and `deploy.json`. Firmware scaffolding
@@ -62,7 +62,7 @@ project id, non-zero bundle byte count, and a heartbeat. Save monitor output and
 check it with:
 
 ```bash
-kidcode firmware-smoke-check /tmp/kidcode_lilygo_serial.log --board lilygo_t_deck_plus --project-id tiny_runner
+moybyte firmware-smoke-check /tmp/moybyte_lilygo_serial.log --board lilygo_t_deck_plus --project-id tiny_runner
 ```
 
 The smoke firmware now renders a centered 128x128 native `tiny_runner` canvas

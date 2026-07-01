@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from runtime import blocks  # noqa: E402
-from runtime import kid_carts  # noqa: E402
+from runtime import moy_carts  # noqa: E402
 from runtime.editors import BlockEditor  # noqa: E402
 
 mk = blocks.make_block
@@ -79,8 +79,8 @@ def _run_cart(src, frames=1, fake=None):
     return fake
 
 
-# The portable subset / MicroPython-safe gate (same spirit as kidcode_cli/portable.py
-# and tests/test_blocks.py): no f-strings, no forbidden builtins, only kidcode-style
+# The portable subset / MicroPython-safe gate (same spirit as moybyte_cli/portable.py
+# and tests/test_blocks.py): no f-strings, no forbidden builtins, only moybyte-style
 # names. compile_blocks imports nothing, so an Import node would be a red flag too.
 _FORBIDDEN = {"eval", "exec", "getattr", "setattr", "compile", "open",
               "__import__", "globals", "locals", "vars", "dir", "input"}
@@ -377,7 +377,7 @@ def test_pre_v48_program_still_compiles_unchanged():
 
 def test_shipped_tap_game_still_compiles_byte_for_byte():
     import json
-    base = str(ROOT / "system_carts" / "tap_game.kcart")
+    base = str(ROOT / "system_carts" / "tap_game.moy")
     with open(base + "/blocks.json") as f:
         prog = json.loads(f.read())
     with open(base + "/main.py") as f:

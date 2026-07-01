@@ -1,0 +1,1 @@
+"""Moybyte CLI package."""

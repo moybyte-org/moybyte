@@ -1,4 +1,4 @@
-from kidcode_sim.pygame_backend import PALETTE, sprite_color_index
+from moybyte_sim.pygame_backend import PALETTE, sprite_color_index
 
 
 def test_sprite_color_index_is_stable_and_visible():

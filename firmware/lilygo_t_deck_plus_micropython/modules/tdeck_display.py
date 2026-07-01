@@ -20,7 +20,7 @@ def init_display():
     from tdeck_board import init_board_pins
 
     init_board_pins()
-    print("KidCode display board pins ready")
+    print("Moybyte display board pins ready")
 
     # The T-Deck ST7789 is wired in portrait-native geometry. LVGL rotates it
     # to the landscape 320x240 shell after panel init.
@@ -35,7 +35,7 @@ def init_display():
     cs = 12
     # SPI clock. PERF (#33): bumped 40->80 MHz to (try to) halve the full-frame
     # flush. BUT 80 MHz is almost certainly UNREACHABLE on this board's wiring, and
-    # the FLUSHBRK instrumentation (kc_compositor.flush) is here to prove it:
+    # the FLUSHBRK instrumentation (moy_compositor.flush) is here to prove it:
     #
     #   The ESP32-S3's full-speed SPI needs ALL signals on the IOMUX-native FSPI
     #   pins -- on SPI2 those are GPIO 11 (FSPID/MOSI), 12 (FSPICLK/SCLK), 13
@@ -60,12 +60,12 @@ def init_display():
     # over the ST7789's limit on this wiring -> drop to 62500000, then 40000000.
     freq = 80000000
 
-    print("KidCode display SPI starting")
+    print("Moybyte display SPI starting")
     _spi_bus = machine.SPI.Bus(host=host, mosi=mosi, miso=miso, sck=sck)
     display_bus = lcd_bus.SPIBus(spi_bus=_spi_bus, freq=freq, dc=dc, cs=cs)
     _display_bus = display_bus
 
-    print("KidCode display LVGL starting")
+    print("Moybyte display LVGL starting")
     lv.init()
     display = st7789.ST7789(
         data_bus=display_bus,
@@ -75,11 +75,11 @@ def init_display():
         color_space=lv.COLOR_FORMAT.RGB565,
         color_byte_order=st7789.BYTE_ORDER_BGR,
         # PERF (#43): the device framebuffer is now written in PANEL byte order
-        # directly (kid_runtime.PAL565_SW -- the byte-swap is folded into the palette
+        # directly (moy_runtime.PAL565_SW -- the byte-swap is folded into the palette
         # LUT, free). So the per-flush CPU byte-swap that lcd_bus.tx_color used to do
         # on the whole 153 KB frame (~17 ms, the synchronous wall once the DMA overlap
         # landed) is OFF here. REVERT: rgb565_byte_swap=True + use PAL565 (not _SW) in
-        # kid_runtime, if colours come out byte-swapped.
+        # moy_runtime, if colours come out byte-swapped.
         rgb565_byte_swap=False,
     )
     display._ORIENTATION_TABLE = (0, 160, 192, 96)
@@ -87,7 +87,7 @@ def init_display():
         display.set_power(True)
     except AttributeError:
         pass
-    print("KidCode display panel init")
+    print("Moybyte display panel init")
     display.init()
     try:
         display.set_rotation(lv.DISPLAY_ROTATION._270)
@@ -96,7 +96,7 @@ def init_display():
     # Backlight is deliberately LEFT OFF here (#45): the panel is now init'd but its
     # GRAM still holds power-on noise, so lighting it would show the boot "CRT" flash.
     # set_backlight(True) is called from the boot path AFTER the first composed frame
-    # is flushed (kid_runtime.run_desktop) so the user only ever sees the real desktop.
+    # is flushed (moy_runtime.run_desktop) so the user only ever sees the real desktop.
     # Prefer the ST7789 driver's own set_backlight (it owns GPIO `backlight`); only
     # fall back to a raw Pin if the driver lacks it -- creating a competing Pin on a
     # driver-owned GPIO is exactly the kind of dual-ownership the bus notes warn about.
@@ -107,7 +107,7 @@ def init_display():
     except AttributeError:
         _backlight_pin = Pin(backlight, Pin.OUT, value=0)
 
-    print("KidCode display ready (backlight off until first frame)")
+    print("Moybyte display ready (backlight off until first frame)")
     handler = task_handler.TaskHandler(duration=5)
     return lv, display, handler
 
@@ -116,7 +116,7 @@ def set_backlight(on=True):
     """Turn the panel backlight on/off after init.
 
     Kept off through init+prefetch so the ST7789's power-on GRAM garbage never
-    shows (#45); the boot path calls this once the first KidCode frame has been
+    shows (#45); the boot path calls this once the first Moybyte frame has been
     composited and flushed. Uses the LVGL display's set_backlight when available
     (PWM duty, driver-owned GPIO); only falls back to the raw backlight GPIO if the
     driver has no set_backlight (matches the original init fallback)."""
@@ -141,5 +141,5 @@ def get_spi_bus():
 
 def get_display_bus():
     # The lcd_bus.SPIBus exposes the native DMA blitter API (allocate_framebuffer,
-    # tx_param, tx_color) that kc_canvas drives to bypass LVGL's flush.
+    # tx_param, tx_color) that moy_canvas drives to bypass LVGL's flush.
     return _display_bus

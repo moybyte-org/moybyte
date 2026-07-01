@@ -1,9 +1,9 @@
-# 60 FPS Architecture for KidCode on the LilyGO T-Deck Plus (ESP32-S3)
+# 60 FPS Architecture for Moybyte on the LilyGO T-Deck Plus (ESP32-S3)
 
 **Status:** Research findings + recommended architecture (decision doc).
 **Date:** 2026-06-27.
 **Scope:** How fantasy consoles and ESP32 game engines hit 60 fps, and what
-architecture would get the v0.4 `.kcart` console to a 60 fps target on the
+architecture would get the v0.4 `.moy` console to a 60 fps target on the
 T-Deck Plus (ESP32-S3, dual-core Xtensa LX7 @240 MHz, 512 KB internal SRAM,
 8 MB PSRAM, 320×240 ST7789 over SPI @80 MHz).
 
@@ -61,11 +61,11 @@ ceiling), **#44** (extend our own indexed engine), **#11** (full TIC-80 runtime)
 | **TIC-80** | 240×136 | 32,640 | 16-color, ~2× PICO-8's pixel count. 16 KB VRAM of 272 KB total RAM. |
 | **Pyxel** | configurable, retro-small (commonly 128–256 wide) | — | 16 colors; default 60 fps. |
 | **ESP Little Game Engine** (ESP32 PICO-8-like) | 128×128 | 16,384 | 16 colors, 32 sprites, ~20 fps, retained-mode. |
-| **KidCode v0.4 (today)** | **320×240** | **76,800** | RGB565 indexed via KID64. **~4.7× PICO-8, ~2.4× TIC-80.** |
+| **Moybyte v0.4 (today)** | **320×240** | **76,800** | RGB565 indexed via MOY64. **~4.7× PICO-8, ~2.4× TIC-80.** |
 
-The first thing to notice: **KidCode's canvas is far bigger than the consoles it
+The first thing to notice: **Moybyte's canvas is far bigger than the consoles it
 draws inspiration from.** PICO-8 hits its CPU budget at 128×128 (16 K pixels);
-KidCode is asking MicroPython to fill 76.8 K pixels per frame — 4.7× the area —
+Moybyte is asking MicroPython to fill 76.8 K pixels per frame — 4.7× the area —
 which is a large part of why a full redraw is slow.
 
 Sources: PICO-8 128×128 / 16-color
@@ -186,9 +186,9 @@ CALLS per frame.** The script is never in the pixel loop.
   ([#306](https://github.com/kitao/pyxel/issues/306),
   [crate](https://crates.io/crates/pyxel-engine))
 
-**The principle for KidCode:** the per-frame script work must be `O(draw calls)`,
+**The principle for Moybyte:** the per-frame script work must be `O(draw calls)`,
 not `O(pixels)` and ideally not `O(entities)`. Minimize script→native crossings
-per frame, and never cross into the script inside a pixel loop. KidCode's draw API
+per frame, and never cross into the script inside a pixel loop. Moybyte's draw API
 (`cls/rect/circ/spr/print/map`) already has the right *shape*; the gap is (a)
 their per-call MP→C overhead and (b) the Python that runs *between* the calls.
 
@@ -240,7 +240,7 @@ Sources: [MDPI 12(1):143](https://www.mdpi.com/2079-9292/12/1/143);
   Pyboard before any logic — the MP docs warn framebuffer-to-display latency "may
   be too high for game applications."
   ([wiki](https://github.com/micropython/micropython/wiki/Performance))
-- **The local evidence is the strongest:** KidCode's native `map()` collapsed 381
+- **The local evidence is the strongest:** Moybyte's native `map()` collapsed 381
   tile draws → 1 MP→C call and Hop's fps **stayed ~12** (issue #32/#43). If
   draw-call count were the only cost, that should have jumped. It didn't, which
   means the **per-frame MicroPython interpreter cost** (the cart's entity/AI/HUD
@@ -287,7 +287,7 @@ Sources: [MP speed docs](https://docs.micropython.org/en/latest/reference/speed_
 - **Immediate-mode (script draws every frame):** the script calls
   `cls; for each sprite: spr(...); print(...)` each frame. Cheap to *author*,
   but every entity is a script→native crossing **and** the per-entity bookkeeping
-  (positions, animation, AI) runs in the interpreter. This is KidCode today, and
+  (positions, animation, AI) runs in the interpreter. This is Moybyte today, and
   it's why effect-heavy frames (more `spr` calls) dip the fps (#43).
 - **Retained-mode / data-driven (script configures, C draws + updates):** the
   script *registers* sprites/tilemap/entities into a native system once (or on
@@ -315,7 +315,7 @@ projects (µGame ~6–30 fps, MP OLED 7–8 fps, ESP-LGE ~20 fps) sit well below
 the native-loop projects (Anemoia ~60, Game Boy 60) hit it. The dividing line is
 exactly **whether the per-frame loop runs in compiled code or in the interpreter.**
 
-### 4.3 What this means for KidCode
+### 4.3 What this means for Moybyte
 
 The honest implication of the `map()` result (§3.2): a native **draw** batch alone
 is not enough, because the cart's per-frame *Python* (entity updates, AI, HUD) is
@@ -359,7 +359,7 @@ flush jitter make full-res 60 thin. Lower internal res (§1) widens the margin
 of low-res is **margin + render budget, not making 60 possible.** With the flush
 hidden, the **sole remaining wall is `render ≤ 16.6 ms`** (§3–4).
 
-**KidCode's current flush serializes** (issue #40 path): `flush()` does
+**Moybyte's current flush serializes** (issue #40 path): `flush()` does
 `self._frame[:] = self._fb` (a 153 KB PSRAM→PSRAM copy, ~3 ms) and then bands the
 copy out, blocking the loop. True overlap needs a **ping-pong of two PSRAM
 buffers**: render into buffer B while DMA flushes buffer A, swap, and recycle each
@@ -368,7 +368,7 @@ and it is the **first foundational change** — it removes both the ~3 ms copy *
 the flush from the critical path.
 
 Sources: [esp_lcd LCD docs](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/peripherals/lcd/index.html);
-local `firmware/.../modules/kc_compositor.py` `flush()`.
+local `firmware/.../modules/moy_compositor.py` `flush()`.
 
 ### 5.2 PSRAM contention caveat
 
@@ -376,7 +376,7 @@ The win only materializes if CPU rendering doesn't stall on the memory DMA is
 reading. **PSRAM is the trap:** GDMA reading a PSRAM framebuffer contends with CPU
 PSRAM access (~50/50 bandwidth split), and PSRAM can't be written while GDMA reads
 it. The IDF mitigation is **bounce buffers** in internal DRAM ("DMA fetching from
-DRAM bounce buffer is much faster than PSRAM frame buffer"). KidCode already stages
+DRAM bounce buffer is much faster than PSRAM frame buffer"). Moybyte already stages
 DMA through an **internal-SRAM strip/band buffer** — keep that pattern; ideally the
 actively-flushed band lives in internal SRAM even with double-buffering.
 
@@ -396,7 +396,7 @@ The canonical ESP32-S3 move is to **pin the flush/audio to one core** via
 threads on the same core"* — `_thread` only time-slices on one core; the second
 core is reserved for the ESP-IDF runtime. **Implication:** the second LX7 core
 **cannot run the cart's Python in parallel.** It is only useful via **native C
-FreeRTOS tasks**. So the dual-core plan for KidCode is:
+FreeRTOS tasks**. So the dual-core plan for Moybyte is:
 - **Core 0:** the MicroPython VM (cart `_update`/`_draw`, the native draw kernels
   it calls).
 - **Core 1 (native C only):** the **audio (I2S) task** (must never starve — issue
@@ -446,16 +446,16 @@ help is GDMA (copies) and optionally hand-tuned PIE SIMD for the innermost
 fill/blit loop (~40% on the hot kernel, at high implementation cost). There is no
 compositor to lean on — the levers are the software ones: minimize MP→C draw-call
 count, keep the flush on DMA, fit the 80 MHz IOMUX path, and (if pursued) PIE-tune
-the `kc_gfx` fill/blit kernels. **If hardware 2D acceleration is a hard
+the `moy_gfx` fill/blit kernels. **If hardware 2D acceleration is a hard
 requirement for 60 fps heavy games, that's an argument for the P4 (#12), not the
 S3.**
 
 ---
 
-## 7. Recommended 60 FPS architecture for KidCode on the S3
+## 7. Recommended 60 FPS architecture for Moybyte on the S3
 
-A concrete, ranked plan. This extends the existing indexed `kc_gfx` /
-`kc_compositor` engine (consistent with the issue #44 decision to keep our own
+A concrete, ranked plan. This extends the existing indexed `moy_gfx` /
+`moy_compositor` engine (consistent with the issue #44 decision to keep our own
 engine) rather than adopting a foreign framework.
 
 ### 7.0 The frame-budget model to design against
@@ -506,7 +506,7 @@ full-action full-redraw games**, but a large win for the *computer* feeling snap
 core 1 for steady I2S. The MP VM stays single-core on core 0 (it cannot be
 parallelized). Modest direct fps effect; protects audio from stutter as carts grow.
 
-**Rank 7 — PIE/SIMD-tune the `kc_gfx` fill/blit kernels.** ~40% on the innermost
+**Rank 7 — PIE/SIMD-tune the `moy_gfx` fill/blit kernels.** ~40% on the innermost
 kernel, high effort, do last and only if profiling says the C kernel (not the
 Python around it) is the remaining cost.
 

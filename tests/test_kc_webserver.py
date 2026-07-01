@@ -3,7 +3,7 @@ console to a phone/desktop browser over WiFi via the SAME draw-command protocol 
 host web console uses (tools/web_console.py + web_console.html), so the same browser
 page renders the device frames.
 
-The device module firmware/.../modules/kc_webserver.py is written MicroPython-first but
+The device module firmware/.../modules/moy_webserver.py is written MicroPython-first but
 imports + runs on CPython (it has ujson/usocket/utime fallbacks), so everything testable
 OFF-device is exercised here:
 
@@ -41,7 +41,7 @@ MODULES = os.path.join(ROOT, "firmware", "lilygo_t_deck_plus_micropython", "modu
 if MODULES not in sys.path:
     sys.path.insert(0, MODULES)
 
-import kc_webserver as web  # noqa: E402
+import moy_webserver as web  # noqa: E402
 
 from runtime import font as _font  # noqa: E402
 from runtime import palette as _pal  # noqa: E402
@@ -53,7 +53,7 @@ WIDTH, HEIGHT = 320, 240
 
 # ---------------------------------------------------------------------------
 # The PAYLOAD-DIET reference replayer (#41): the Python twin of the browser JS in
-# kc_webserver.PAGE_HTML (the defspr / spr-by-index / map / settiles format). It mirrors
+# moy_webserver.PAGE_HTML (the defspr / spr-by-index / map / settiles format). It mirrors
 # the JS exactly so the host test and the browser share the same replay LOGIC, proving the
 # device's recorded stream reproduces the panel pixel-for-pixel. Sprites + map cells go
 # through Canvas.spr (the SAME rasterizer the device/host draw with -- camera/clip/pal/
@@ -193,7 +193,7 @@ def replay_diet(commands, canvas, assets=None, layers=None):
         # unknown ops ignored (forward-compatible)
     return canvas
 
-# The device's canonical RGB565 KID64 LUT (a copy of kid_runtime.PAL565 -- the host
+# The device's canonical RGB565 MOY64 LUT (a copy of moy_runtime.PAL565 -- the host
 # can't import the device backend, which pulls in framebuf/machine).
 PAL565 = (
     0x0000, 0x194A, 0x792A, 0x042A, 0xAA86, 0x5AA9, 0xC618, 0xFF9D,
@@ -985,14 +985,14 @@ def test_assets_payload_shape_matches_host():
     json.dumps(a)
 
 
-def test_assets_palette_decodes_close_to_kid64():
-    """The device sends its REAL panel colours (RGB565-decoded), which match KID64 to
+def test_assets_palette_decodes_close_to_moy64():
+    """The device sends its REAL panel colours (RGB565-decoded), which match MOY64 to
     within 565 quantization -- so the browser shows what the panel shows."""
     pal = web.palette_rgb(PAL565)
     assert pal[0] == [0, 0, 0]
     for i in range(len(PAL565)):
         for ch in range(3):
-            assert abs(pal[i][ch] - _pal.KID64[i][ch]) <= 8, (i, ch)
+            assert abs(pal[i][ch] - _pal.MOY64[i][ch]) <= 8, (i, ch)
 
 
 def test_assets_includes_sheet_when_a_cart_is_open():
@@ -1361,7 +1361,7 @@ class _FakeProvider:
 
 
 class _FakeWSConn:
-    """A stand-in for kc_webserver._WSConn so a test can mark the server's persistent
+    """A stand-in for moy_webserver._WSConn so a test can mark the server's persistent
     WebSocket 'connected' (the recording/stream-mode liveness gate, which now keys off a
     live WS conn instead of a recent /frame poll) without a real socket. last_recv = now
     keeps recording_wanted() True; set it in the past to simulate an idle/dead client."""

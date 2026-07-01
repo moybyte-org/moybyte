@@ -61,7 +61,7 @@ def test_host_and_device_make_api_keysets_match_except_wifi():
     import importlib.util
     from runtime import host_app
 
-    # Load the device kid_runtime under CPython (mirrors the spike test loader).
+    # Load the device moy_runtime under CPython (mirrors the spike test loader).
     for name in ("editors", "audio", "console"):
         spec = importlib.util.spec_from_file_location(name, ROOT / "runtime" / (name + ".py"))
         mod = importlib.util.module_from_spec(spec)
@@ -70,8 +70,8 @@ def test_host_and_device_make_api_keysets_match_except_wifi():
     sys.path.insert(0, str(ROOT / "tools"))
     import gen_device_carts
     sys.modules["carts_data"] = gen_device_carts.as_module(str(SYSTEM_CARTS))
-    fw = ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules" / "kid_runtime.py"
-    spec = importlib.util.spec_from_file_location("kid_runtime", fw)
+    fw = ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules" / "moy_runtime.py"
+    spec = importlib.util.spec_from_file_location("moy_runtime", fw)
     dev = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(dev)
 
@@ -89,11 +89,11 @@ def test_host_and_device_make_api_keysets_match_except_wifi():
 
 def test_fakewifi_scan_connect_status_forget(tmp_path):
     from runtime import host_app
-    from runtime import kid_carts
+    from runtime import moy_carts
 
     carts = str(tmp_path / "carts")
-    kid_carts.ensure_dirs(carts)
-    w = host_app.FakeWifi(kid_carts, carts)
+    moy_carts.ensure_dirs(carts)
+    w = host_app.FakeWifi(moy_carts, carts)
 
     # scan() returns the canned list of (ssid, signal, locked) tuples.
     aps = w.scan()
@@ -119,58 +119,58 @@ def test_fakewifi_scan_connect_status_forget(tmp_path):
 
 def test_wifi_credentials_persist_and_reload(tmp_path):
     from runtime import host_app
-    from runtime import kid_carts
+    from runtime import moy_carts
 
     carts = str(tmp_path / "carts")
-    kid_carts.ensure_dirs(carts)
+    moy_carts.ensure_dirs(carts)
 
-    w1 = host_app.FakeWifi(kid_carts, carts)
+    w1 = host_app.FakeWifi(moy_carts, carts)
     w1.connect("Coffee Shop", "")           # open net
     w1.connect("Home WiFi", "secretpw")     # locked net (last -> front of store)
 
     # A fresh backend (e.g. next boot) sees the saved networks via the store.
-    w2 = host_app.FakeWifi(kid_carts, carts)
+    w2 = host_app.FakeWifi(moy_carts, carts)
     assert w2.known() == ["Home WiFi", "Coffee Shop"]   # most-recent first
 
     # The on-disk store round-trips the actual password too.
-    nets = kid_carts.load_wifi(carts)
+    nets = moy_carts.load_wifi(carts)
     by_ssid = {n["ssid"]: n["password"] for n in nets}
     assert by_ssid["Home WiFi"] == "secretpw"
     assert by_ssid["Coffee Shop"] == ""
 
 
-def test_kid_carts_wifi_store_remember_forget(tmp_path):
-    from runtime import kid_carts
+def test_moy_carts_wifi_store_remember_forget(tmp_path):
+    from runtime import moy_carts
     carts = str(tmp_path / "carts")
-    kid_carts.ensure_dirs(carts)
+    moy_carts.ensure_dirs(carts)
 
-    assert kid_carts.load_wifi(carts) == []          # nothing saved yet
-    kid_carts.remember_wifi("Net A", "pa", carts)
-    kid_carts.remember_wifi("Net B", "pb", carts)
-    kid_carts.remember_wifi("Net A", "pa2", carts)   # re-remember moves to front, updates pw
-    nets = kid_carts.load_wifi(carts)
+    assert moy_carts.load_wifi(carts) == []          # nothing saved yet
+    moy_carts.remember_wifi("Net A", "pa", carts)
+    moy_carts.remember_wifi("Net B", "pb", carts)
+    moy_carts.remember_wifi("Net A", "pa2", carts)   # re-remember moves to front, updates pw
+    nets = moy_carts.load_wifi(carts)
     assert [n["ssid"] for n in nets] == ["Net A", "Net B"]
     assert nets[0]["password"] == "pa2"
 
-    kid_carts.forget_wifi("Net A", carts)
-    assert [n["ssid"] for n in kid_carts.load_wifi(carts)] == ["Net B"]
+    moy_carts.forget_wifi("Net A", carts)
+    assert [n["ssid"] for n in moy_carts.load_wifi(carts)] == ["Net B"]
     # Forgetting an unknown ssid is a harmless no-op.
-    kid_carts.forget_wifi("Nope", carts)
-    assert [n["ssid"] for n in kid_carts.load_wifi(carts)] == ["Net B"]
+    moy_carts.forget_wifi("Nope", carts)
+    assert [n["ssid"] for n in moy_carts.load_wifi(carts)] == ["Net B"]
 
 
 # -- permission gate through the real Workstation -----------------------------
 
 def test_network_cart_gets_wifi_non_network_cart_does_not(tmp_path):
     from runtime import host_app
-    from runtime import kid_carts
+    from runtime import moy_carts
 
     carts_dir = str(tmp_path / "carts")
-    kid_carts.ensure_dirs(carts_dir)
+    moy_carts.ensure_dirs(carts_dir)
     # A normal cart: no network permission.
-    kid_carts.create("Plain", carts_dir, src="def _draw():\n    cls(0)\n")
+    moy_carts.create("Plain", carts_dir, src="def _draw():\n    cls(0)\n")
     # A privileged cart: declares "network" in its manifest.
-    priv = kid_carts.create("Net Cart", carts_dir, src="def _draw():\n    cls(0)\n")
+    priv = moy_carts.create("Net Cart", carts_dir, src="def _draw():\n    cls(0)\n")
     import json
     man_path = priv["path"] + "/manifest.json"
     man = json.loads(Path(man_path).read_text())
@@ -209,7 +209,7 @@ def test_wifi_manager_cart_loads_and_runs(tmp_path):
 
 def test_wifi_manager_cart_connects_via_touch_and_persists(tmp_path):
     from runtime import host_app
-    from runtime import kid_carts
+    from runtime import moy_carts
 
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)
@@ -234,12 +234,12 @@ def test_wifi_manager_cart_connects_via_touch_and_persists(tmp_path):
     assert connected and got_ssid == ssid and ip
 
     # Persisted: a reload of the store sees the joined network.
-    assert ssid in [n["ssid"] for n in kid_carts.load_wifi(carts_dir)]
+    assert ssid in [n["ssid"] for n in moy_carts.load_wifi(carts_dir)]
 
 
 def test_wifi_manager_cart_password_entry_for_locked_net(tmp_path):
     from runtime import host_app
-    from runtime import kid_carts
+    from runtime import moy_carts
 
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)
@@ -271,5 +271,5 @@ def test_wifi_manager_cart_password_entry_for_locked_net(tmp_path):
 
     connected, got_ssid, _ip = ws.wifi.status()
     assert connected and got_ssid == ssid
-    nets_saved = {n["ssid"]: n["password"] for n in kid_carts.load_wifi(carts_dir)}
+    nets_saved = {n["ssid"]: n["password"] for n in moy_carts.load_wifi(carts_dir)}
     assert nets_saved.get(ssid) == "wonderland"
