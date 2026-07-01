@@ -1031,6 +1031,25 @@ def test_perf_snapshot_shape_and_push_count():
     assert server._perf_snapshot()["pf"] == 2
 
 
+def test_push_interval_floors_on_bandwidth_for_heavy_frames():
+    """The WS push interval is the fps-cap floor, RAISED for a big last frame so a heavy
+    screen (the launcher, ~4.3KB) self-throttles under WEB_MAX_BYTES_PER_SEC instead of
+    saturating WiFi + stalling the loop on a blocked send. A light game frame stays at the
+    fps cap (games unaffected) -- the fix for the "recv bounces 11->40" launcher stutter."""
+    rec = web.DrawRecorder(WIDTH, HEIGHT)
+    server = _serveable(rec)
+    assert server._push_interval_ms() == web.WEB_FRAME_INTERVAL_MS   # nothing sent yet
+    server._last_payload_bytes = 800                                 # a light game frame
+    assert server._push_interval_ms() == web.WEB_FRAME_INTERVAL_MS   # stays at the fps cap
+    server._last_payload_bytes = 4300                                # a heavy launcher frame
+    iv = server._push_interval_ms()
+    assert iv == 4300 * 1000 // web.WEB_MAX_BYTES_PER_SEC
+    assert iv > web.WEB_FRAME_INTERVAL_MS                            # throttled below the cap
+    # ~bandwidth-bounded (integer-floor of the interval lets the rate sit a couple % over the
+    # budget -- fine, 80KB/s already sits under the ~100KB/s ceiling).
+    assert 4300 / (iv / 1000.0) <= web.WEB_MAX_BYTES_PER_SEC * 1.05
+
+
 # ---------------------------------------------------------------------------
 # Input event parsing (apply_events): browser events -> InputState/Pointer/hooks.
 # ---------------------------------------------------------------------------

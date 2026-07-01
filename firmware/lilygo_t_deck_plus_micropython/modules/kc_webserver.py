@@ -155,6 +155,14 @@ RECORD_IDLE_MS = 4000
 # launcher, ~7KB/frame) still self-limits on bandwidth/send-time, so this can't make it worse.
 WEB_FPS_CAP = 60
 WEB_FRAME_INTERVAL_MS = 1000 // WEB_FPS_CAP
+# Bandwidth cap (#41): the fps cap alone let a HEAVY screen saturate WiFi. The launcher pushes
+# ~4.3KB/frame; at 60fps that's ~250KB/s, but WiFi tops out ~100KB/s, so the send blocks and
+# the single-threaded loop stalls -- the "recv bounces 11->40" launcher stutter. So the push
+# interval is ALSO floored by payload size: never stream faster than WEB_MAX_BYTES_PER_SEC.
+# A heavy frame self-throttles (4.3KB / 80KB/s -> ~18fps, steady, no saturation); a light game
+# frame (<1.3KB) stays fps-cap-bound (60), so games are unaffected. 80KB/s leaves headroom
+# under the ~100KB/s measured ceiling so the TX buffer never backs up (no send-block stall).
+WEB_MAX_BYTES_PER_SEC = 80000
 
 # Per-connection socket timeouts (seconds). A freshly accepted conn (an HTTP request OR the
 # WS-upgrade GET) is read BLOCKING with a short bound: the request is already en route (we
@@ -1350,6 +1358,8 @@ class WebServer:
         self._heap_kb = 0             # cached gc.mem_free KB + when it was last sampled:
         self._heap_ms = 0             # gc.mem_free WALKS the whole heap (~tens of ms on the
                                       # 6MB PSRAM heap), so sample it ~1/s, never per frame
+        self._last_payload_bytes = 0  # size of the last pushed frame -> floors the next push
+                                      # interval so a heavy screen can't saturate WiFi (#41)
         # The PERSISTENT WebSocket client (one at a time). None = no browser connected ->
         # the recorder stays a pure pass-through (zero overhead). A new upgrade drops the
         # old conn (latest-wins). Liveness is keyed off this being non-None + not idle-timed.
@@ -1637,9 +1647,10 @@ class WebServer:
             self._drop_ws()
             return did
         # 2. Outbound: push the latest committed frame, capped (a frame may be unchanged --
-        # the recorder serves the last committed one regardless, like the poll did).
+        # the recorder serves the last committed one regardless, like the poll did). The
+        # interval is the fps cap, RAISED for a heavy frame so WiFi never saturates (#41).
         now = ticks_ms()
-        if ticks_diff(now, self._last_push_ms) >= WEB_FRAME_INTERVAL_MS:
+        if ticks_diff(now, self._last_push_ms) >= self._push_interval_ms():
             self._last_push_ms = now
             self._push_frame(ws)
             did = True
@@ -1680,6 +1691,19 @@ class WebServer:
         return {"heap": self._heap_kb, "pf": self._frames_pushed,
                 "js": self._last_json_ms, "tx": self._last_send_ms}
 
+    def _push_interval_ms(self):
+        """Minimum ms between WS pushes: the fps-cap floor (WEB_FRAME_INTERVAL_MS), RAISED for
+        a big last frame so the stream never exceeds WEB_MAX_BYTES_PER_SEC. A heavy screen (the
+        launcher, ~4.3KB) self-throttles (~18fps) instead of saturating WiFi + stalling the
+        loop on a blocked send; a light game frame (<~1.3KB) stays at the fps cap (games
+        unaffected). Keyed on the LAST payload's size -- a cheap 1-frame-lagged estimate."""
+        iv = WEB_FRAME_INTERVAL_MS
+        if self._last_payload_bytes > 0:
+            bw = self._last_payload_bytes * 1000 // WEB_MAX_BYTES_PER_SEC
+            if bw > iv:
+                iv = bw
+        return iv
+
     def _push_frame(self, ws):
         """Send the latest committed frame as a WS text message: the SAME frame_payload (run
         through served_frame for the serve-time defspr prepend + the atlas gen) the HTTP
@@ -1697,6 +1721,7 @@ class WebServer:
         t2 = ticks_ms()
         self._last_json_ms = ticks_diff(t1, t0)
         self._last_send_ms = ticks_diff(t2, t1)
+        self._last_payload_bytes = len(payload)
 
     def _http_send_close(self, conn, data):
         """sendall `data` (with a short send budget) then close -- the one-shot HTTP path."""
