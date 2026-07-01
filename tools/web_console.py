@@ -215,6 +215,13 @@ class WebConsole:
         synth in JS. Empty string when nothing played this frame (no cart / silence)."""
         with self._lock:
             self.canvas.take_commands()      # drop anything stale (defensive)
+            # A streaming web view must send the CURRENT screen on every poll, but the console
+            # is _dirty-gated (#44): it re-records only when something changed. A STATIC screen
+            # (the launcher, a paused cart) would record a full frame ONCE and then nothing, so
+            # a browser polling at 30fps (or one that connects after that first frame) gets
+            # empty frames and shows black. Force a full redraw each frame -- the host has CPU +
+            # localhost/LAN bandwidth to spare, and the browser always gets a complete frame.
+            self.ws._dirty = True
             self.driver.frame(self.dt)
             # Route through the shared serve path (ServedState.served_frame): prepends a
             # ["deflayer", ...] the FIRST time a served frame references a layer (ship-once,
