@@ -32,15 +32,35 @@ _BASE16 = [
 ]
 
 
+def _hsv(h, s, v):
+    r, g, b = colorsys.hsv_to_rgb(h, s, v)
+    return (round(r * 255), round(g * 255), round(b * 255))
+
+
+# Curated extension (indices 16-63): a DESKTOP-GRADE gamut -- soft pastels, earth
+# tones, vivid accents, neutrals and deep shades -- replacing the old mechanical
+# "16 hues x 3 brightness tiers, all sat 0.75" ramp. The v0.4 workstation is a
+# desktop OS, and naturalistic wallpaper/UI art needs desaturated pastels (skies)
+# and warm earth tones (wood/ground) the saturated ramp simply didn't contain.
+# The base 16 (PICO-8) is UNCHANGED, so every named colour and every shipped cart
+# keeps its exact pixels; only the previously-mechanical filler slots gain meaning.
+_PASTEL = [_hsv(h, 0.30, 0.90) for h in          # 16-27: soft skies/atmosphere
+           (0.00, 0.06, 0.12, 0.30, 0.45, 0.55, 0.62, 0.72, 0.80, 0.90, 0.96, 0.50)]
+_EARTH = [_hsv(0.08, 0.45, 0.55), _hsv(0.07, 0.28, 0.66), _hsv(0.10, 0.55, 0.40),  # 28-35: wood/tan
+          _hsv(0.12, 0.22, 0.80), _hsv(0.30, 0.38, 0.45), _hsv(0.05, 0.50, 0.34),
+          _hsv(0.09, 0.18, 0.52), _hsv(0.13, 0.33, 0.62)]
+_VIVID = [_hsv(h, 0.80, 0.88) for h in           # 36-47: saturated accents (not in base 16)
+          (0.04, 0.10, 0.18, 0.33, 0.42, 0.50, 0.58, 0.70, 0.78, 0.86, 0.93, 0.27)]
+_NEUTRAL = [_hsv(0.62, 0.10, 0.95), _hsv(0.62, 0.12, 0.78), _hsv(0.62, 0.15, 0.60),  # 48-55: cool/warm greys
+            _hsv(0.62, 0.18, 0.42), _hsv(0.08, 0.08, 0.90), _hsv(0.08, 0.10, 0.55),
+            _hsv(0.62, 0.20, 0.28), _hsv(0.00, 0.00, 0.16)]
+_SHADOW = [_hsv(h, 0.55, 0.40) for h in          # 56-63: deep shades
+           (0.00, 0.08, 0.45, 0.55, 0.62, 0.72, 0.85, 0.93)]
+_EXTEND48 = _PASTEL + _EARTH + _VIVID + _NEUTRAL + _SHADOW
+
+
 def _build_palette():
-    pal = list(_BASE16)
-    # Fill 16-63 with a hue/value ramp: 16 hues x 3 brightness tiers.
-    for i in range(64 - len(_BASE16)):
-        hue = (i % 16) / 16.0
-        val = 0.45 + 0.25 * (i // 16)  # 0.45, 0.70, 0.95
-        r, g, b = colorsys.hsv_to_rgb(hue, 0.75, val)
-        pal.append((int(r * 255), int(g * 255), int(b * 255)))
-    return pal
+    return list(_BASE16) + _EXTEND48
 
 
 KID64 = _build_palette()
