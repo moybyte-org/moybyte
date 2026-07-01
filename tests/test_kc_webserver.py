@@ -1050,6 +1050,36 @@ def test_push_interval_floors_on_bandwidth_for_heavy_frames():
     assert 4300 / (iv / 1000.0) <= web.WEB_MAX_BYTES_PER_SEC * 1.05
 
 
+def test_defspr_spread_caps_bytes_per_frame_and_defers_rest():
+    """A burst of new sprites (a wave of enemies) must NOT ship all their bitmaps in one frame
+    -- that was the ~10KB frame that stalled the WiFi send ~100ms mid-game (the 'peak 9.77KB,
+    recv drops to 14' hitch). served_frame caps the defspr bytes per frame; the rest ride later
+    frames (a sprite no-ops until its bitmap arrives). Every bitmap still ships EXACTLY once."""
+    rec = web.DrawRecorder(WIDTH, HEIGHT)
+    server = _serveable(rec)
+    rec.enabled = True
+    N = 20
+    imgs = [Image(16, 16, [i % 63] * (16 * 16), transparent=-1) for i in range(N)]
+
+    def draw_burst():
+        rec.begin()
+        for i, im in enumerate(imgs):
+            rec.spr(im, i, 0)                    # atlas index i (distinct Image -> distinct id)
+        rec.commit()
+        return rec.frame()
+
+    served = server.served_frame(draw_burst())
+    first = [c for c in served if c[0] == "defspr"]
+    assert 0 < len(first) < N, "a burst is spread across frames, not all shipped at once"
+    shipped = set(c[1] for c in first)
+    for _ in range(N):                           # keep serving the same burst
+        for c in server.served_frame(draw_burst()):
+            if c[0] == "defspr":
+                assert c[1] not in shipped, "each bitmap ships exactly once"
+                shipped.add(c[1])
+    assert len(shipped) == N, "every bitmap eventually ships"
+
+
 # ---------------------------------------------------------------------------
 # Input event parsing (apply_events): browser events -> InputState/Pointer/hooks.
 # ---------------------------------------------------------------------------

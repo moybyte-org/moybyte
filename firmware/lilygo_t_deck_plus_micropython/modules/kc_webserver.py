@@ -199,6 +199,15 @@ WS_MAX_BUFFER = 16384
 # browser re-ships) so memory + per-frame payload stay bounded. Normal carts never hit it.
 MAX_ATLAS = 512
 
+# Serve-time defspr SPREAD (#41): a burst of new sprites (a wave of enemies, a scene change)
+# would prepend all their bitmaps to ONE frame -- a ~10KB frame that stalls the WiFi send
+# ~100ms -> an in-game hitch (the "peak 9.77KB, recv drops to 14" symptom). Cap the defspr
+# bytes prepended per frame; the rest stay unserved and ride the next frames. A just-appeared
+# sprite is a no-op (invisible) for a frame or two until its bitmap arrives -- a brief flicker,
+# imperceptible in motion, and far better than a freeze. ~1200 bytes ~= 2 tiles/frame, so a
+# 12-tile burst spreads over ~6 frames (~100-150ms) with every frame staying small + smooth.
+MAX_DEFSPR_BYTES_PER_FRAME = 1200
+
 # petme128 8x8 font (host == device): the SAME glyphs runtime/font.py ships, baked here
 # as a hex blob so the device (whose panel text uses framebuf's own font) can still hand
 # the browser the petme128 glyphs the shared web_console.html renders `print` with. 96
@@ -1459,19 +1468,25 @@ class WebServer:
             self._served_layers = {}
             self._served_gen = rec.atlas_gen
         prefix = None
+        budget = MAX_DEFSPR_BYTES_PER_FRAME   # defspr bytes we'll prepend THIS frame; a burst
+                                              # spreads over frames rather than one fat stall
         for c in cmds:
             if not c:
                 continue
             op = c[0]
             if op == "spr":
                 idx = c[1]
-                if idx not in self._served:
+                # Ship this sprite's bitmap only if we're still under the per-frame defspr
+                # budget; else leave it unserved so a later frame ships it (it no-ops in the
+                # browser until then -- a brief flicker, not a stall).
+                if idx not in self._served and budget > 0:
                     d = rec.defspr_cmd(idx)
                     if d is not None:
                         if prefix is None:
                             prefix = []
                         prefix.append(d)
                         self._served.add(idx)
+                        budget -= len(d[5]) * 3 + 24   # ~JSON bytes of the pix list + wrapper
             elif op == "blit_layer":
                 lid = c[1]
                 layer = rec._layers[lid] if 0 <= lid < len(rec._layers) else None
@@ -1482,6 +1497,9 @@ class WebServer:
                             prefix = []
                         prefix.append(d)
                         self._served_layers[lid] = layer.gen
+                        # A deflayer is one big blob + one-time (cart entry); ship it whole but
+                        # then stop prepending defsprs this frame so the frame stays bounded.
+                        budget = 0
         if prefix is None:
             return cmds
         return prefix + cmds
