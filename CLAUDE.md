@@ -106,7 +106,7 @@ re-staged every build, gitignored):
 
 ## Conventions
 
-- The current design doc is **`moybyte_Console_Plan_v0_4.md`** (repo root); superseded v0.1/v0.3 docs are archived under `docs/history/`. API/format specs (the `.moyproj` SDK) live in `docs/`.
+- The current design doc is **`moybyte_Console_Plan_v0_5.md`** (repo root); superseded v0.1/v0.3/v0.4 docs are archived under `docs/history/`. API/format specs (the `.moyproj` SDK) live in `docs/`.
 - Tests run against the host packages only; firmware tests (`tests/test_micropython_spike.py`) grep the frozen device modules' source rather than executing them.
 - **Cart versioning (#47):** every `system_carts/*/manifest.json` carries an integer `"version"`. `seed_builtins` re-seeds an on-SD built-in only when the baked version is **newer**, and preserves the kid's data (`pmem.json` saves + `config.json` tuning) across the re-seed. **Bump a built-in's manifest `version` whenever you change its content**, or an already-seeded device keeps the stale copy.
 - **Device perf ceiling (#43, the next-session lever):** frame time = draw + flush, and flush is a hard ~20ms (153KB PSRAM→SPI), so **full-frame 60fps is physically impossible**; ~18-22fps is the v1 full-res ceiling. The cheap wins are spent (native `spr_batch`, the static chrome cached into the bar, double-buffer flush). The remaining lever is **dirty-rect** (redraw + flush only the changed region) — big for static-background games, ~no help for full-screen scrollers. The MicroPython interpreter is NOT the bottleneck (cart logic ~1-2ms per `DRAWBRK`), so a runtime rewrite (#6) buys no FPS. Diagnostics: `PERF`/`FLUSHBRK`/`DRAWBRK` serial lines, gated behind `perf_capture`.
