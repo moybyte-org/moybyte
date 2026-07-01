@@ -1,4 +1,4 @@
-"""KID64 palette for the v0.4 fantasy-workstation canvas.
+"""MOY64 palette for the v0.4 fantasy-workstation canvas.
 
 64 indexed colors. Indices 0-15 are the well-known PICO-8 base palette (familiar,
 pleasant, and the culture v0.4 targets); 16-63 are a generated HSV ramp so a
@@ -63,7 +63,7 @@ def _build_palette():
     return list(_BASE16) + _EXTEND48
 
 
-KID64 = _build_palette()
+MOY64 = _build_palette()
 
 # Named indices used across the system / carts.
 NAMES = {
@@ -93,7 +93,7 @@ def color(name_or_index):
     return int(name_or_index) & 63
 
 
-def rgb888_table(palette=KID64):
+def rgb888_table(palette=MOY64):
     """Flat bytes table [r,g,b]*len(palette) for fast index->RGB resolution."""
     out = bytearray(len(palette) * 3)
     for i, (r, g, b) in enumerate(palette):

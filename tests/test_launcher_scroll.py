@@ -16,15 +16,15 @@ sys.path.insert(0, str(ROOT))
 
 def _ws_with_carts(tmp_path, n):
     """A workstation whose launcher holds n carts (> one page), via the real store."""
-    from runtime import host_app, kid_carts
+    from runtime import host_app, moy_carts
 
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)        # seeds the system carts
     while len(ws.launcher.items) < n:                 # top up with extra carts
         i = len(ws.launcher.items)
-        kid_carts.create("Extra %02d" % i, carts_dir,
+        moy_carts.create("Extra %02d" % i, carts_dir,
                          src="def _draw():\n    cls(1)\n", type="app")
-        ws.launcher.items = kid_carts.scan(carts_dir)
+        ws.launcher.items = moy_carts.scan(carts_dir)
     ws.launcher.sel = 0
     ws.launcher.page = 0
     return ws

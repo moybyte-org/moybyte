@@ -35,7 +35,7 @@ def test_icon_sheet_is_16x16():
 
 
 def test_icon_sheet_kgfx_roundtrips_for_16x16():
-    """The flat .kgfx hex format serializes/parses a 128x64 (16x16-tile) sheet just
+    """The flat .moygfx hex format serializes/parses a 128x64 (16x16-tile) sheet just
     like an 8x8 SpriteSheet -- one nibble per pixel, h rows of w nibbles."""
     from runtime.editors import IconSheet
     s = IconSheet()
@@ -68,12 +68,12 @@ def test_default_icon_theme_paints_every_chrome_icon():
 
 
 def test_default_theme_loads_when_system_icons_absent(tmp_path):
-    """No system_icons.kgfx on disk => the workstation falls back to the baked default
+    """No system_icons.moygfx on disk => the workstation falls back to the baked default
     IconSheet (a 16x16 themeable sheet, not None)."""
-    from runtime import kid_carts
+    from runtime import moy_carts
     carts_dir = str(tmp_path / "carts")
-    kid_carts.ensure_dirs(carts_dir)
-    assert kid_carts.load_system_icons(carts_dir) is None     # nothing saved
+    moy_carts.ensure_dirs(carts_dir)
+    assert moy_carts.load_system_icons(carts_dir) is None     # nothing saved
     ws = _ws(tmp_path)
     assert ws.icon_sheet is not None
     assert ws.icon_sheet.TILE == 16
@@ -82,14 +82,14 @@ def test_default_theme_loads_when_system_icons_absent(tmp_path):
 
 def test_system_icons_load_save_round_trip(tmp_path):
     """load/save_system_icons round-trip the theme hex through a file beside the carts
-    dir (mirrors shared.kgfx)."""
-    from runtime import kid_carts
+    dir (mirrors shared.moygfx)."""
+    from runtime import moy_carts
     from runtime import console as C
     carts_dir = str(tmp_path / "carts")
-    kid_carts.ensure_dirs(carts_dir)
+    moy_carts.ensure_dirs(carts_dir)
     hexs = C._default_icon_sheet().to_hex()
-    kid_carts.save_system_icons(hexs, carts_dir)
-    assert kid_carts.load_system_icons(carts_dir) == hexs
+    moy_carts.save_system_icons(hexs, carts_dir)
+    assert moy_carts.load_system_icons(carts_dir) == hexs
     # And a workstation built over that store loads the saved theme (not the default).
     ws = _ws(tmp_path)
     assert ws.icon_sheet.to_hex() == hexs
@@ -119,16 +119,16 @@ def test_bar_is_18px_on_both_screens(tmp_path):
 def test_bar_falls_back_to_glyphs_without_an_icon_sheet(tmp_path):
     """A workstation with no icon sheet wired (icon_sheet is None) still draws the bar
     -- _icon falls back to the _glyph bitmap so nothing crashes."""
-    from runtime import console, kid_carts, host_app
+    from runtime import console, moy_carts, host_app
     carts_dir = str(tmp_path / "carts")
-    kid_carts.ensure_dirs(carts_dir)
-    kid_carts.create("Plain", carts_dir, src="def _draw():\n    cls(1)\n", type="app")
-    carts = kid_carts.scan(carts_dir)
+    moy_carts.ensure_dirs(carts_dir)
+    moy_carts.create("Plain", carts_dir, src="def _draw():\n    cls(1)\n", type="app")
+    carts = moy_carts.scan(carts_dir)
     canvas = host_app.Canvas(320, 240)
     inp = host_app.InputState()
     ws = console.Workstation(host_app._NullComp(), canvas, inp, carts)
     ws.make_api = host_app.make_api
-    ws.carts_store = kid_carts
+    ws.carts_store = moy_carts
     ws.carts_root = carts_dir
     ws.pointer = console.Pointer(320, 240)
     ws.load_system()

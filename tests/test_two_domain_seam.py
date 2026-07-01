@@ -186,14 +186,14 @@ def test_font_scale_1x_is_identical_to_plain_canvas(tmp_path):
     sysc = SystemCanvas(320, 240, font_scale=1)
     for cv in (plain, sysc):
         cv.cls(3)
-        cv.print("kidcode 0.4!", 5, 7, C.NAMES["yellow"], 1)
+        cv.print("moybyte 0.4!", 5, 7, C.NAMES["yellow"], 1)
     assert bytes(plain.buf) == bytes(sysc.buf)
 
 
 def test_font_scale_persists_across_reboot(tmp_path):
     """The Settings font-size choice lands in system.json and a fresh boot restores
     it (mirrors the wallpaper persistence, #28)."""
-    from runtime import host_app, kid_carts
+    from runtime import host_app, moy_carts
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir, sys_size=(640, 480))
     ws.open_settings()
@@ -201,7 +201,7 @@ def test_font_scale_persists_across_reboot(tmp_path):
     ws.set_msel = rows.index("font_scale")
     ws.settings_adjust(1)                            # 1x -> 2x via the Settings stepper
     assert ws.font_scale == 2
-    assert kid_carts.load_system(carts_dir).get("font_scale") == 2
+    assert moy_carts.load_system(carts_dir).get("font_scale") == 2
     # A fresh boot restores the saved scale (even with the default 320x240 system
     # canvas: load_system applies the persisted value).
     ws2 = host_app.build_workstation(carts_dir, sys_size=(640, 480))
@@ -228,7 +228,7 @@ def test_font_scale_is_inert_without_a_system_canvas(tmp_path):
     framebuf text can't scale), setting the font scale is remembered + persisted but
     the EFFECTIVE layout scale stays 1, so the chrome geometry keeps matching the 8px
     text actually drawn (no mis-laid-out desktop)."""
-    from runtime import host_app, kid_carts
+    from runtime import host_app, moy_carts
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)         # default 320x240, shared canvas
     assert ws._sys_canvas is None
@@ -237,7 +237,7 @@ def test_font_scale_is_inert_without_a_system_canvas(tmp_path):
     assert ws._effective_font_scale() == 1              # but not applied (can't scale)
     assert ws.layout.fs == 1                             # layout stays the baseline
     assert ws.layout._base                               # i.e. exactly today's geometry
-    assert kid_carts.load_system(carts_dir).get("font_scale") == 3   # persisted
+    assert moy_carts.load_system(carts_dir).get("font_scale") == 3   # persisted
     # It renders without error and the desktop is still the 320x240 baseline grid.
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)

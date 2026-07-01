@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>KidCode web console</title>
+<title>Moybyte web console</title>
 <style>
   :root { color-scheme: dark; }
   html, body {
@@ -80,7 +80,7 @@
 </head>
 <body>
 <header>
-  <h1>KidCode &mdash; web console</h1>
+  <h1>Moybyte &mdash; web console</h1>
   <p>The live desktop, redrawn from the draw-command stream. <span id="status">connecting&hellip;</span></p>
 </header>
 <div id="stage">
@@ -110,7 +110,7 @@
   // The browser is a NEW CANVAS BACKEND, not a pixel viewer. The host console
   // draws through a CommandCanvas that RECORDS each draw call; GET /frame returns
   // that per-frame command list and we REPLAY it here onto an offscreen 320x240
-  // index buffer, resolving indices -> RGB via the KID64 palette from /assets.
+  // index buffer, resolving indices -> RGB via the MOY64 palette from /assets.
   // The replay mirrors runtime/canvas.py's rasterization EXACTLY so the browser
   // pixels equal the host's (the Python cross-check proves this for the same ops).
   // ===========================================================================

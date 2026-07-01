@@ -1,4 +1,4 @@
-from kidcode_cli.main import main
+from moybyte_cli.main import main
 
 
 def test_cli_doctor(capsys):
@@ -6,11 +6,11 @@ def test_cli_doctor(capsys):
     captured = capsys.readouterr()
 
     assert result == 0
-    assert "KidCode doctor" in captured.out
+    assert "Moybyte doctor" in captured.out
 
 
 def test_cli_validate(capsys):
-    result = main(["validate", "examples/tiny_runner.kcproj"])
+    result = main(["validate", "examples/tiny_runner.moyproj"])
     captured = capsys.readouterr()
 
     assert result == 0
@@ -21,7 +21,7 @@ def test_cli_new_creates_project(tmp_path, capsys):
     project = tmp_path / "space game"
     result = main(["new", str(project), "--title", "Space Game"])
     captured = capsys.readouterr()
-    project_dir = tmp_path / "space game.kcproj"
+    project_dir = tmp_path / "space game.moyproj"
 
     assert result == 0
     assert "created:" in captured.out
@@ -44,7 +44,7 @@ def test_cli_new_rejects_existing_project(tmp_path, capsys):
 
 
 def test_cli_compile(capsys):
-    result = main(["compile", "examples/blocks_demo.kcproj"])
+    result = main(["compile", "examples/blocks_demo.moyproj"])
     captured = capsys.readouterr()
 
     assert result == 0
@@ -52,7 +52,7 @@ def test_cli_compile(capsys):
 
 
 def test_cli_run_headless(capsys):
-    result = main(["run", "examples/tiny_runner.kcproj", "--headless", "--frames", "3"])
+    result = main(["run", "examples/tiny_runner.moyproj", "--headless", "--frames", "3"])
     captured = capsys.readouterr()
 
     assert result == 0
@@ -60,7 +60,7 @@ def test_cli_run_headless(capsys):
 
 
 def test_cli_run_accepts_fps_for_headless(capsys):
-    result = main(["run", "examples/tiny_runner.kcproj", "--headless", "--frames", "3", "--fps", "15"])
+    result = main(["run", "examples/tiny_runner.moyproj", "--headless", "--frames", "3", "--fps", "15"])
     captured = capsys.readouterr()
 
     assert result == 0
@@ -68,7 +68,7 @@ def test_cli_run_accepts_fps_for_headless(capsys):
 
 
 def test_cli_run_rejects_invalid_window_options(capsys):
-    result = main(["run", "examples/tiny_runner.kcproj", "--headless", "--frames", "0"])
+    result = main(["run", "examples/tiny_runner.moyproj", "--headless", "--frames", "0"])
     captured = capsys.readouterr()
 
     assert result == 2
@@ -76,7 +76,7 @@ def test_cli_run_rejects_invalid_window_options(capsys):
 
 
 def test_cli_check_portable(capsys):
-    result = main(["check-portable", "examples/tiny_runner.kcproj"])
+    result = main(["check-portable", "examples/tiny_runner.moyproj"])
     captured = capsys.readouterr()
 
     assert result == 0
@@ -88,7 +88,7 @@ def test_cli_firmware_header(capsys, tmp_path):
     result = main(
         [
             "firmware-header",
-            "examples/tiny_runner.kcproj",
+            "examples/tiny_runner.moyproj",
             "--board",
             "lilygo_t_deck_plus",
             "--out",
@@ -105,14 +105,14 @@ def test_cli_firmware_header(capsys, tmp_path):
 def test_cli_firmware_smoke_check(capsys, tmp_path):
     log = tmp_path / "serial.log"
     log.write_text(
-        "KidCode firmware smoke test\n"
+        "Moybyte firmware smoke test\n"
         "Board id: lilygo_t_deck_plus\n"
         "Bundled project: tiny_runner\n"
         "Bundle bytes: 123\n"
         "Keyboard: detected\n"
-        "Display: KidCode native tiny_runner canvas\n"
+        "Display: Moybyte native tiny_runner canvas\n"
         "Runtime: native tiny_runner scaffold\n"
-        "KidCode heartbeat 0\n"
+        "Moybyte heartbeat 0\n"
         "Native tiny_runner player_x 62\n"
         "Native tiny_runner player_y 60\n"
         "Native buttons left/right/up/down 0/0/0/0\n",
@@ -131,4 +131,4 @@ def test_cli_lilygo_next_reports_status(capsys):
     captured = capsys.readouterr()
 
     assert result in [0, 1, 2]
-    assert "KidCode LilyGO next step" in captured.out
+    assert "Moybyte LilyGO next step" in captured.out

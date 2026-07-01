@@ -1,7 +1,7 @@
-# KidCode v0.4 userland runtime (host reference)
+# Moybyte v0.4 userland runtime (host reference)
 
 This is the **"other end" of the stack** from the native graphics core
-(`firmware/.../native/kc_gfx`, `kc_compositor`): the **fantasy-workstation
+(`firmware/.../native/moy_gfx`, `moy_compositor`): the **fantasy-workstation
 userland** a cartridge runs on. It runs entirely on the host (no device), so it's
 the fast Codex/dev loop for the v0.4 product, and it realizes v0.4 plan **Task
 Group A (PC simulator first)** + **Task Group B (cartridge format)** + the first
@@ -17,23 +17,23 @@ the device freezes the identical code) and **host glue**.
 
 | file | role |
 |---|---|
-| `palette.py` | **(shared-ish)** `KID64` 64-color palette (PICO-8 base 16 + ramp), name↔index |
+| `palette.py` | **(shared-ish)** `MOY64` 64-color palette (PICO-8 base 16 + ramp), name↔index |
 | `font.py` | **(host)** petme128 8×8 font extracted byte-for-byte from framebuf, so host text is pixel-identical to the device |
-| `canvas.py` | **(host)** `Canvas` — indexed surface (320×240 in the console), TIC-80 API (`cls/pix/line/rect/rectb/circ/circb/spr/map/print` — `rect`/`circ` filled, `rectb`/`circb` outlines; `map` blits a tilemap region, native one-call `kc_gfx.blit_map` on device), `print` uses `font.py`, `to_rgb888()`; `Image` sprites |
-| `editors.py` | **(shared, staged to device)** `CodeEditor` / `SpriteSheet` (8×8 tiles + `__gfx__` hex) / `TileMap` (`w×h` tile-id grid over a sheet + `map.kmap` hex, `mget`/`mset`, #32) / `PaintEditor` |
+| `canvas.py` | **(host)** `Canvas` — indexed surface (320×240 in the console), TIC-80 API (`cls/pix/line/rect/rectb/circ/circb/spr/map/print` — `rect`/`circ` filled, `rectb`/`circb` outlines; `map` blits a tilemap region, native one-call `moy_gfx.blit_map` on device), `print` uses `font.py`, `to_rgb888()`; `Image` sprites |
+| `editors.py` | **(shared, staged to device)** `CodeEditor` / `SpriteSheet` (8×8 tiles + `__gfx__` hex) / `TileMap` (`w×h` tile-id grid over a sheet + `map.moymap` hex, `mget`/`mset`, #32) / `PaintEditor` |
 | `audio.py` | **(shared, staged to device)** sound data model (`SFX`/`MusicTrack`/`AudioBank`) + `AudioEngine` pure-Python synth/mixer (`render()` → PCM). Backends (host `FakeAudio`/SDL, device I2S) consume `render()`. See `docs/audio_design_v04.md` (#16) |
-| `console.py` | **(shared, staged to device)** `Launcher` + `Pointer` + `Workstation` + cards/code/paint UI + layout/`NAMES`/`CURSOR`. Backend-agnostic: injected `make_api` + `make_audio` + cart store + `wifi` system service. The device's `kid_runtime` imports it; `host_app` runs it on the host. Gates the injected `wifi` API on the cart's `"network"` manifest permission (#38) |
-| `kid_carts.py` | **(shared, staged to device)** the `.kcart` store — scan/load/save_config/save_code/save_sprites/save_sounds/save_map/create/duplicate/delete + the known-WiFi credential store (load_wifi/remember_wifi/forget_wifi → `wifi.json`, #38) (dict carts; `map.kmap` tilemap blob, #32; only `json`+`os`) |
-| `host_app.py` | **(host glue)** host `make_api` (incl. audio + the capability-gated `wifi`), `FakeAudio` + `FakeWifi` backends, `build_workstation()` (320×240 Canvas + `kid_carts` + seeded system carts), and `ConsoleDriver` (mouse/keyboard → the shared console) |
-| `input.py` | **(host)** `InputState` — held/pressed/released + `last_key` (same contract as firmware `kidcode`) |
+| `console.py` | **(shared, staged to device)** `Launcher` + `Pointer` + `Workstation` + cards/code/paint UI + layout/`NAMES`/`CURSOR`. Backend-agnostic: injected `make_api` + `make_audio` + cart store + `wifi` system service. The device's `moy_runtime` imports it; `host_app` runs it on the host. Gates the injected `wifi` API on the cart's `"network"` manifest permission (#38) |
+| `moy_carts.py` | **(shared, staged to device)** the `.moy` store — scan/load/save_config/save_code/save_sprites/save_sounds/save_map/create/duplicate/delete + the known-WiFi credential store (load_wifi/remember_wifi/forget_wifi → `wifi.json`, #38) (dict carts; `map.moymap` tilemap blob, #32; only `json`+`os`) |
+| `host_app.py` | **(host glue)** host `make_api` (incl. audio + the capability-gated `wifi`), `FakeAudio` + `FakeWifi` backends, `build_workstation()` (320×240 Canvas + `moy_carts` + seeded system carts), and `ConsoleDriver` (mouse/keyboard → the shared console) |
+| `input.py` | **(host)** `InputState` — held/pressed/released + `last_key` (same contract as firmware `moybyte`) |
 
 The pre-unification host UI (`shell.py`, `workstation.py`, `engine.py`, `api.py`,
 `cartridge.py`) was **removed** once the shared console replaced it (issue #17); the
-older `.kcproj` SDK lives separately under `kidcode/` / `kidcode_cli/`.
+older `.moyproj` SDK lives separately under `moybyte/` / `moybyte_cli/`.
 
 Content + tooling:
-- `system_carts/` — `wallpaper_space.kcart` (Living Desktop: starfield + pet),
-  `ocean.kcart` (bubbles + fish), `star_catcher.kcart` (a **game**: catch falling
+- `system_carts/` — `wallpaper_space.moy` (Living Desktop: starfield + pet),
+  `ocean.moy` (bubbles + fish), `star_catcher.moy` (a **game**: catch falling
   stars). Each carries `config` defaults, an `edit` schema, and card templates.
 - `tools/simulate_desktop.py` — run the workstation (or a single cart) on the host.
 - `tests/test_v04_userland.py` — canvas, cartridge, desktop, launcher, cards tests.
@@ -49,7 +49,7 @@ python tools/simulate_desktop.py
 python tools/simulate_desktop.py --demo --gif demo.gif
 
 # launch a single cartridge directly (skip the launcher)
-python tools/simulate_desktop.py --cart system_carts/star_catcher.kcart
+python tools/simulate_desktop.py --cart system_carts/star_catcher.moy
 
 # headless custom script
 python tools/simulate_desktop.py --gif out.gif \
@@ -64,12 +64,12 @@ presses once; `name:N` presses then observes N frames; `wait:N` observes N frame
 The canvas works in **palette indices** and the drawing API is plain
 functions over a buffer — no dependency on `framebuf`, LVGL, or even Python in the
 contract. That's deliberate: the same surface maps onto the device's native
-`kc_compositor` RGB565 framebuffer (indices → RGB565 via the palette), and onto a
+`moy_compositor` RGB565 framebuffer (indices → RGB565 via the palette), and onto a
 future Lua VM. Cartridges are portable; only the backend changes.
 
 ## v0.4 MVP status (plan §14.3)
 
-Done here: boot to a cartridge **launcher** (Task A); the `.kcart` model with
+Done here: boot to a cartridge **launcher** (Task A); the `.moy` model with
 duplicate/save and system-vs-user protection (Task B); multiple cartridge types
 running on one runtime — wallpaper + **game** (Task A/G seed); the interactive
 **Make it mine** / **cards editor** with a **See the code** view (Task E);
@@ -77,5 +77,5 @@ on-screen **Run** / **Home** / **Save**; and a friendly error screen.
 
 Next: load the saved user wallpaper on boot; richer cards (add/remove, not just
 adjust); local **share** of a cartridge (Task H); and the big one — port the
-runtime's canvas backend onto the device `kc_compositor` so the *same* `.kcart`
+runtime's canvas backend onto the device `moy_compositor` so the *same* `.moy`
 runs on the T-Deck.

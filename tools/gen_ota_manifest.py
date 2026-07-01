@@ -2,12 +2,12 @@
 """Generate the OTA update manifest (latest.json) for the device's WiFi updater (#53).
 
 The device's Settings -> UPDATE ONLINE flow fetches a small JSON manifest and, if its
-"version" is newer than the running kc_ota.FIRMWARE_VERSION, streams the referenced
+"version" is newer than the running moy_ota.FIRMWARE_VERSION, streams the referenced
 .bin to SD and verifies it against the manifest's size + sha256. This tool computes
 those fields from the built image so the manifest can never drift from the binary.
 
 Per release:
-    1. bump FIRMWARE_VERSION in kc_ota.py, rebuild the firmware
+    1. bump FIRMWARE_VERSION in moy_ota.py, rebuild the firmware
     2. run this tool (it reads FIRMWARE_VERSION back out, so the manifest version
        always matches the image you actually built)
     3. upload the .bin + latest.json to your host
@@ -30,8 +30,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FW_DIR = REPO_ROOT / "firmware" / "lilygo_t_deck_plus_micropython"
-DEFAULT_BIN = FW_DIR / "dist" / "kidcode_micropython_tdeck.bin"
-KC_OTA = FW_DIR / "modules" / "kc_ota.py"
+DEFAULT_BIN = FW_DIR / "dist" / "moybyte_micropython_tdeck.bin"
+MOY_OTA = FW_DIR / "modules" / "moy_ota.py"
 OTA_BUILD_JSON = FW_DIR / "dist" / "current" / "ota_build.json"  # stamped by build.sh
 DEFAULT_PORT = 8000
 
@@ -45,13 +45,13 @@ def read_ota_build(path=OTA_BUILD_JSON):
         return {}
 
 
-def read_firmware_version(kc_ota_path=KC_OTA):
-    """Parse `FIRMWARE_VERSION = N` out of kc_ota.py so the manifest version matches
+def read_firmware_version(moy_ota_path=MOY_OTA):
+    """Parse `FIRMWARE_VERSION = N` out of moy_ota.py so the manifest version matches
     the firmware being shipped. Raises if the constant can't be found."""
-    text = Path(kc_ota_path).read_text(encoding="utf-8")
+    text = Path(moy_ota_path).read_text(encoding="utf-8")
     m = re.search(r"^FIRMWARE_VERSION\s*=\s*(\d+)", text, re.MULTILINE)
     if not m:
-        raise ValueError("FIRMWARE_VERSION not found in %s" % kc_ota_path)
+        raise ValueError("FIRMWARE_VERSION not found in %s" % moy_ota_path)
     return int(m.group(1))
 
 
@@ -93,14 +93,14 @@ def _resolve_url(args, bin_path):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Generate / publish the KidCode OTA manifest.")
+    ap = argparse.ArgumentParser(description="Generate / publish the Moybyte OTA manifest.")
     ap.add_argument("bin", nargs="?", default=str(DEFAULT_BIN),
                     help="path to the app .bin (default: the built T-Deck image)")
     ap.add_argument("--base-url", help="host base URL; the .bin filename is appended "
                     "(default: http://<LAN-IP>:%d)" % DEFAULT_PORT)
     ap.add_argument("--url", help="full URL of the hosted .bin (overrides --base-url)")
     ap.add_argument("--version", type=int, help="manifest version "
-                    "(default: ota_build.json, else FIRMWARE_VERSION from kc_ota.py)")
+                    "(default: ota_build.json, else FIRMWARE_VERSION from moy_ota.py)")
     ap.add_argument("--channel", help="release channel stable|unstable "
                     "(default: ota_build.json, else stable)")
     ap.add_argument("--label", help="human label shown on the update screen "
@@ -115,9 +115,9 @@ def main(argv=None):
     bin_path = Path(args.bin)
     if not bin_path.exists():
         ap.error("image not found: %s\n  build it first: "
-                 "KIDCODE_SKIP_VFS_BOOT=1 make firmware-build-lilygo-micropython" % bin_path)
+                 "MOYBYTE_SKIP_VFS_BOOT=1 make firmware-build-lilygo-micropython" % bin_path)
 
-    # Identity: CLI > the build stamp (ota_build.json) > kc_ota.FIRMWARE_VERSION/stable.
+    # Identity: CLI > the build stamp (ota_build.json) > moy_ota.FIRMWARE_VERSION/stable.
     bld = read_ota_build()
     channel = args.channel or bld.get("channel") or "stable"
     version = (args.version if args.version is not None

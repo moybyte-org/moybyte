@@ -13,7 +13,7 @@ import gen_ota_manifest as gom  # noqa: E402
 
 
 def test_build_manifest_computes_size_and_sha256(tmp_path):
-    blob = b"\xe9kidcode firmware bytes"
+    blob = b"\xe9moybyte firmware bytes"
     b = tmp_path / "fw.bin"
     b.write_bytes(blob)
     m = gom.build_manifest(str(b), "http://host/fw.bin", 7)
@@ -24,7 +24,7 @@ def test_build_manifest_computes_size_and_sha256(tmp_path):
     assert m["filename"] == "fw.bin"
 
 
-def test_read_firmware_version_matches_kc_ota():
+def test_read_firmware_version_matches_moy_ota():
     # The manifest version defaults to the firmware's FIRMWARE_VERSION so they can't drift.
     v = gom.read_firmware_version()
     assert isinstance(v, int) and v >= 1
@@ -33,14 +33,14 @@ def test_read_firmware_version_matches_kc_ota():
 def test_resolve_url_appends_filename_to_base():
     class A:
         url = None
-        base_url = "https://h.example.com/kidcode/"
+        base_url = "https://h.example.com/moybyte/"
         port = 8000
-    assert gom._resolve_url(A(), Path("/d/kidcode_micropython_tdeck.bin")) == \
-        "https://h.example.com/kidcode/kidcode_micropython_tdeck.bin"
+    assert gom._resolve_url(A(), Path("/d/moybyte_micropython_tdeck.bin")) == \
+        "https://h.example.com/moybyte/moybyte_micropython_tdeck.bin"
 
 
 def test_main_writes_manifest_with_explicit_url_and_version(tmp_path):
-    b = tmp_path / "kidcode_micropython_tdeck.bin"
+    b = tmp_path / "moybyte_micropython_tdeck.bin"
     b.write_bytes(b"\xe9" + b"\x00" * 1000)
     out = tmp_path / "latest.json"
     rc = gom.main([str(b), "--url", "https://x/y.bin", "--version", "3", "--out", str(out)])
@@ -52,7 +52,7 @@ def test_main_writes_manifest_with_explicit_url_and_version(tmp_path):
     assert m["sha256"] == hashlib.sha256(b.read_bytes()).hexdigest()
 
 
-def test_main_defaults_version_from_kc_ota(tmp_path):
+def test_main_defaults_version_from_moy_ota(tmp_path):
     b = tmp_path / "img.bin"
     b.write_bytes(b"\xe9abc")
     out = tmp_path / "m.json"
@@ -89,20 +89,20 @@ def test_publish_mode_stages_channel_dir(tmp_path):
     assert (root / "unstable" / "firmware.bin").read_bytes() == b.read_bytes()
 
 
-def _load_kc_ota():
+def _load_moy_ota():
     import importlib.util
-    p = ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules" / "kc_ota.py"
-    spec = importlib.util.spec_from_file_location("kc_ota", p)
+    p = ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules" / "moy_ota.py"
+    spec = importlib.util.spec_from_file_location("moy_ota", p)
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     return m
 
 
-def test_kc_ota_offer_logic_is_channel_aware():
+def test_moy_ota_offer_logic_is_channel_aware():
     # The device offers an install when the manifest is a different channel (a switch,
     # incl. beta->stable) OR a newer version within the running channel. Host default
     # (no _ota_build stamp) is stable / FIRMWARE_VERSION.
-    m = _load_kc_ota()
+    m = _load_moy_ota()
     u = m.OtaUpdater(with_sd=lambda fn: fn())
     assert u.channel() == "stable"
     assert u.version_label() == "v%d" % m.FIRMWARE_VERSION

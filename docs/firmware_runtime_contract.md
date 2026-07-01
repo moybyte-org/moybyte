@@ -1,13 +1,13 @@
 # Firmware Runtime Contract
 
-This is the contract a future device runtime must satisfy so existing KidCode
+This is the contract a future device runtime must satisfy so existing Moybyte
 projects continue to run when moved from the PC simulator to hardware.
 
 The first concrete hardware target is the user's LilyGO T-Deck Plus. Board
 details such as display driver, keyboard scan behavior, speaker path, SD card
 mount, and pin assignments must live in a board profile after they are verified
 against the exact device revision. Do not hardcode those details into the
-portable KidCode API.
+portable Moybyte API.
 
 ## Runtime Layers
 
@@ -16,13 +16,13 @@ Portable project layer:
 ```text
 user main.py
 generated block code
-from kidcode import *
+from moybyte import *
 ```
 
 Device runtime layer:
 
 ```text
-kidcode API shim
+moybyte API shim
 runtime loop
 screen service
 input service
@@ -49,7 +49,7 @@ same child-facing API and lifecycle semantics for packaged projects.
 
 ## Public API Required On Device
 
-The device runtime must expose these names from `kidcode`:
+The device runtime must expose these names from `moybyte`:
 
 ```text
 game
@@ -202,7 +202,7 @@ retries, rate limits, and message framing. User code only sees small messages.
 Project code and generated block code should import only:
 
 ```text
-from kidcode import *
+from moybyte import *
 math
 random
 simple built-ins
@@ -226,7 +226,7 @@ CPython introspection APIs
 The PC checker is:
 
 ```bash
-kidcode check-portable <project.kcproj>
+moybyte check-portable <project.moyproj>
 ```
 
 ## LilyGO T-Deck Plus Bring-Up Target
@@ -234,9 +234,9 @@ kidcode check-portable <project.kcproj>
 The first useful device demo should be smaller than the full simulator:
 
 ```text
-1. boot into a KidCode runner
+1. boot into a Moybyte runner
 2. load one bundled project, initially tiny_runner
-3. map keyboard/D-pad input to KidCode buttons
+3. map keyboard/D-pad input to Moybyte buttons
 4. draw the 128x128 logical canvas on the display
 5. run update/draw at a stable frame rate
 6. show friendly errors over serial or on screen
@@ -262,5 +262,5 @@ The current local board profile lives in `docs/boards/lilygo_t_deck_plus.md` and
 can be inspected with:
 
 ```bash
-kidcode board-info lilygo_t_deck_plus
+moybyte board-info lilygo_t_deck_plus
 ```

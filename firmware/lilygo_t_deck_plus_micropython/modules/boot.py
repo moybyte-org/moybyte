@@ -3,6 +3,6 @@ try:
 
     init_board_pins()
 except Exception as exc:
-    print("KidCode boot power setup skipped:", exc)
+    print("Moybyte boot power setup skipped:", exc)
 
-print("KidCode MicroPython spike boot")
+print("Moybyte MicroPython spike boot")

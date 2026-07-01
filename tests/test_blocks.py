@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from runtime import blocks  # noqa: E402
-from runtime import kid_carts  # noqa: E402
+from runtime import moy_carts  # noqa: E402
 
 
 # ----------------------------------------------------------------------------
@@ -76,7 +76,7 @@ def _run_cart(src, frames=1, fake=None):
 
 def _assert_micropython_safe(src):
     """(b) MicroPython-safe: no f-strings and no forbidden builtins, asserted via
-    a source/AST scan (the same spirit as kidcode_cli/portable.py)."""
+    a source/AST scan (the same spirit as moybyte_cli/portable.py)."""
     assert "f'" not in src and 'f"' not in src, "f-string in generated source"
     tree = ast.parse(src)
     forbidden = {"eval", "exec", "getattr", "setattr", "compile", "open",
@@ -381,33 +381,33 @@ def test_unknown_block_and_bad_var_raise_blockerror():
 
 def test_save_blocks_persists_tree_and_compiled_main(tmp_path):
     root = str(tmp_path / "carts")
-    kid_carts.ensure_dirs(root)
-    cart = kid_carts.create("Block Cart", root)
+    moy_carts.ensure_dirs(root)
+    cart = moy_carts.create("Block Cart", root)
     prog = _the_little_game()
-    status, msg = kid_carts.save_blocks(cart, prog)
-    assert status == kid_carts.SAVE_OK, msg
+    status, msg = moy_carts.save_blocks(cart, prog)
+    assert status == moy_carts.SAVE_OK, msg
     # both files landed; main.py is the compiled, runnable source
-    reloaded = kid_carts.load(cart["path"])
+    reloaded = moy_carts.load(cart["path"])
     assert reloaded["blocks"] == prog                  # blocks.json round-trips
-    assert reloaded["src"].startswith("# Made with KidCode blocks")
+    assert reloaded["src"].startswith("# Made with Moybyte blocks")
     assert "def _draw():" in reloaded["src"]
     # load_blocks reads the tree directly too (by path or cart)
-    assert kid_carts.load_blocks(cart["path"]) == prog
+    assert moy_carts.load_blocks(cart["path"]) == prog
     # the compiled main.py actually runs as a cart
     _run_cart(reloaded["src"], frames=2)
 
 
 def test_save_blocks_rejects_corrupt_program_without_touching_files(tmp_path):
     root = str(tmp_path / "carts")
-    kid_carts.ensure_dirs(root)
-    cart = kid_carts.create("Block Cart", root, src="def _draw():\n    cls(1)\n")
-    good_main = kid_carts.load(cart["path"])["src"]
-    status, msg = kid_carts.save_blocks(cart, _program([], [
+    moy_carts.ensure_dirs(root)
+    cart = moy_carts.create("Block Cart", root, src="def _draw():\n    cls(1)\n")
+    good_main = moy_carts.load(cart["path"])["src"]
+    status, msg = moy_carts.save_blocks(cart, _program([], [
         mk("on_draw", children=[{"t": "bogus", "p": {}}])]))
-    assert status == kid_carts.SAVE_BAD_SYNTAX and msg
+    assert status == moy_carts.SAVE_BAD_SYNTAX and msg
     # neither blocks.json nor main.py was written/truncated
-    assert kid_carts.load_blocks(cart["path"]) is None
-    assert kid_carts.load(cart["path"])["src"] == good_main
+    assert moy_carts.load_blocks(cart["path"]) is None
+    assert moy_carts.load(cart["path"])["src"] == good_main
 
 
 def test_code_authored_cart_has_no_blocks():
@@ -415,9 +415,9 @@ def test_code_authored_cart_has_no_blocks():
     import tempfile
     with tempfile.TemporaryDirectory() as d:
         root = d + "/carts"
-        kid_carts.ensure_dirs(root)
-        c = kid_carts.create("Plain", root, src="def _draw():\n    cls(0)\n")
-        assert kid_carts.load(c["path"])["blocks"] is None
+        moy_carts.ensure_dirs(root)
+        c = moy_carts.create("Plain", root, src="def _draw():\n    cls(0)\n")
+        assert moy_carts.load(c["path"])["blocks"] is None
 
 
 # ----------------------------------------------------------------------------
@@ -428,10 +428,10 @@ def test_block_cart_runs_through_workstation(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     # author a cart from blocks, save (compiles main.py), rescan so the launcher sees it
-    cart = kid_carts.create("My Block Game", str(tmp_path / "carts"), type="game")
-    status, msg = kid_carts.save_blocks(cart, _the_little_game())
-    assert status == kid_carts.SAVE_OK, msg
-    ws.launcher.items = kid_carts.scan(str(tmp_path / "carts"))
+    cart = moy_carts.create("My Block Game", str(tmp_path / "carts"), type="game")
+    status, msg = moy_carts.save_blocks(cart, _the_little_game())
+    assert status == moy_carts.SAVE_OK, msg
+    ws.launcher.items = moy_carts.scan(str(tmp_path / "carts"))
     for i, c in enumerate(ws.launcher.items):
         if c["title"] == "My Block Game":
             ws.launcher.sel = i
@@ -527,12 +527,12 @@ def test_tap_position_readers_compile_and_hit_test():
 
 
 # ----------------------------------------------------------------------------
-# The shipped tap_game.kcart: its blocks.json is the source of truth, compiles to
+# The shipped tap_game.moy: its blocks.json is the source of truth, compiles to
 # the shipped main.py, and the cart plays (tap the target -> score).
 # ----------------------------------------------------------------------------
 
 def _tap_game_dir():
-    return str(ROOT / "system_carts" / "tap_game.kcart")
+    return str(ROOT / "system_carts" / "tap_game.moy")
 
 
 def test_tap_game_blocks_json_compiles_to_shipped_main():
@@ -549,7 +549,7 @@ def test_tap_game_blocks_json_compiles_to_shipped_main():
 
 def test_tap_game_cart_loads_blocks_and_runs():
     base = _tap_game_dir()
-    cart = kid_carts.load(base)
+    cart = moy_carts.load(base)
     assert cart is not None and cart["blocks"] is not None
     # opening it in the block editor would see real blocks
     assert cart["blocks"]["vars"]                       # declared variables present
@@ -559,7 +559,7 @@ def test_tap_game_cart_loads_blocks_and_runs():
 def test_tap_game_scores_on_a_tap_on_the_target(tmp_path):
     from runtime import host_app
     base = _tap_game_dir()
-    cart = kid_carts.load(base)
+    cart = moy_carts.load(base)
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.launcher.items = [cart]
     ws.launcher.sel = 0

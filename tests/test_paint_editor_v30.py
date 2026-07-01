@@ -248,7 +248,7 @@ def test_size_button_cycles_through_the_ui(tmp_path):
 def test_save_persists_a_2x2_sprite(tmp_path):
     # Paint a 2x2 sprite, SAVE, reload from disk: all four constituent tiles survive.
     from runtime import console as C
-    from runtime import host_app, kid_carts
+    from runtime import host_app, moy_carts
     from runtime.editors import SpriteSheet
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
@@ -267,7 +267,7 @@ def test_save_persists_a_2x2_sprite(tmp_path):
     drv.touch_up()
     drv.frame(1 / 30)
 
-    reloaded = SpriteSheet.from_hex(kid_carts.load(ws.cart["path"])["sprites"],
+    reloaded = SpriteSheet.from_hex(moy_carts.load(ws.cart["path"])["sprites"],
                                     cols=cols, rows=ws.sheet.rows)
     assert reloaded.tget(0, 1, 1) == 14
     assert reloaded.tget(1, 1, 1) == 14

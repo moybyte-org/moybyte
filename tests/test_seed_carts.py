@@ -33,17 +33,17 @@ def _run(ws, frames, dt=1 / 30):
         ws.frame(dt)
 
 
-# -- the carts exist as well-formed .kcart folders --------------------------
+# -- the carts exist as well-formed .moy folders --------------------------
 
 def test_seed_cart_folders_present_and_valid():
     import json
 
     for folder in ("pet", "tiny_runner", "platformer", "tap_red"):
-        d = SYSTEM_CARTS / (folder + ".kcart")
+        d = SYSTEM_CARTS / (folder + ".moy")
         assert (d / "manifest.json").is_file(), folder
         assert (d / "main.py").is_file(), folder
         man = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
-        assert man["format"] == "kidcode-cart-v1"
+        assert man["format"] == "moybyte-cart-v1"
         assert man["type"] == "game"
         assert man["main"] == "main.py"
         assert man["edit"], folder + " has no Make-it-mine cards"
@@ -162,7 +162,7 @@ def test_platformer_level_rows_are_equal_width():
     # rows used to give some rows a wall 1 col closer than others (#19 review).
     import re
 
-    src = (SYSTEM_CARTS / "platformer.kcart" / "main.py").read_text(encoding="utf-8")
+    src = (SYSTEM_CARTS / "platformer.moy" / "main.py").read_text(encoding="utf-8")
     block = src.split("LEVEL = [", 1)[1].split("]", 1)[0]
     rows = re.findall(r'"([^"]*)"', block)
     assert rows, "could not parse the LEVEL map"
@@ -229,11 +229,11 @@ def test_tap_red_scores_red_and_penalizes_other(tmp_path):
 # -- character art lives in EDITABLE sprite-sheet tiles (#15 follow-up) ------
 #
 # The carts whose characters used to be inline ASCII Images in main.py now keep
-# them in the cart's sprites.kgfx, so the paint/sprite editor actually shows art
+# them in the cart's sprites.moygfx, so the paint/sprite editor actually shows art
 # to edit (the original bug: "I don't see the sprites that the games use"). These
 # assert the sheet the editor loads is non-empty and the cart still runs.
 
-# Folder -> the sprite tile ids its sprites.kgfx must paint (the editor surface).
+# Folder -> the sprite tile ids its sprites.moygfx must paint (the editor surface).
 CONVERTED_SHEETS = {
     "pet": (0, 1, 2),            # frog / cat / robot pet faces
     "tiny_runner": (0, 1),       # two runner heroes
@@ -241,7 +241,7 @@ CONVERTED_SHEETS = {
 }
 # Tap Only Red stays PRIMITIVE on purpose: its bubbles are variable-radius
 # circles whose color IS the gameplay (red vs lure), set per-bubble at spawn --
-# a fixed 8x8 tile can't express that, so it has no sprites.kgfx.
+# a fixed 8x8 tile can't express that, so it has no sprites.moygfx.
 PRIMITIVE_CARTS = ("tap_red",)
 
 
@@ -249,8 +249,8 @@ def test_converted_carts_have_nonempty_sprite_sheets():
     from runtime.canvas import SpriteSheet
 
     for folder, tiles in CONVERTED_SHEETS.items():
-        f = SYSTEM_CARTS / (folder + ".kcart") / "sprites.kgfx"
-        assert f.is_file(), folder + " is missing sprites.kgfx"
+        f = SYSTEM_CARTS / (folder + ".moy") / "sprites.moygfx"
+        assert f.is_file(), folder + " is missing sprites.moygfx"
         hexs = f.read_text(encoding="utf-8")
         sheet = SpriteSheet.from_hex(hexs)
         assert not sheet.is_blank(), folder + " sprite sheet is blank (editor shows nothing)"
@@ -262,7 +262,7 @@ def test_converted_carts_have_nonempty_sprite_sheets():
 def test_primitive_cart_has_no_sprite_sheet():
     # The genuinely-primitive cart is intentionally left without a sheet.
     for folder in PRIMITIVE_CARTS:
-        assert not (SYSTEM_CARTS / (folder + ".kcart") / "sprites.kgfx").exists(), folder
+        assert not (SYSTEM_CARTS / (folder + ".moy") / "sprites.moygfx").exists(), folder
 
 
 def test_converted_carts_load_their_sheet_and_run_headless(tmp_path):
@@ -310,11 +310,11 @@ def test_pet_picker_selects_a_sprite_tile(tmp_path):
 #
 # Space Desktop (frog/robot pet) and Ocean Desktop (fish) used to hardcode their
 # character as an inline image() ASCII blob in main.py; now each keeps it in the
-# cart's sprites.kgfx and draws with spr(<int tile id>, ...). These assert the
+# cart's sprites.moygfx and draws with spr(<int tile id>, ...). These assert the
 # sheet the editor loads is non-empty and the draw is a real sprite-tile draw.
 import re  # noqa: E402
 
-# Folder -> the sprite tile ids its sprites.kgfx must paint.
+# Folder -> the sprite tile ids its sprites.moygfx must paint.
 WALLPAPER_SHEETS = {
     "wallpaper_space": (0, 1),    # frog / robot pet faces (copied from star_catcher, #18)
     "ocean": (0,),                # the fish
@@ -325,8 +325,8 @@ def test_wallpaper_carts_have_nonempty_sprite_sheets():
     from runtime.canvas import SpriteSheet
 
     for folder, tiles in WALLPAPER_SHEETS.items():
-        f = SYSTEM_CARTS / (folder + ".kcart") / "sprites.kgfx"
-        assert f.is_file(), folder + " is missing sprites.kgfx"
+        f = SYSTEM_CARTS / (folder + ".moy") / "sprites.moygfx"
+        assert f.is_file(), folder + " is missing sprites.moygfx"
         sheet = SpriteSheet.from_hex(f.read_text(encoding="utf-8"))
         assert not sheet.is_blank(), folder + " sprite sheet is blank (editor shows nothing)"
         for n in tiles:
@@ -338,7 +338,7 @@ def test_wallpaper_carts_draw_via_integer_sprite_tile():
     # The character is no longer an inline image(): main.py must spr() an integer
     # tile id (and not reference the old image()/FROG/ROBOT/FISH blobs).
     for folder in WALLPAPER_SHEETS:
-        src = (SYSTEM_CARTS / (folder + ".kcart") / "main.py").read_text(encoding="utf-8")
+        src = (SYSTEM_CARTS / (folder + ".moy") / "main.py").read_text(encoding="utf-8")
         assert "image(" not in src, folder + " still builds an inline image()"
         # at least one spr() call whose first arg is an int literal or the `pet` var
         assert re.search(r"spr\(\s*(?:\d+|pet)\b", src), folder + " has no spr(<int tile>, ...)"

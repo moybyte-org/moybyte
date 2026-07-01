@@ -1,0 +1,23 @@
+{
+  "schema": "moybyte.project.v1",
+  "id": "radio_pong_stub",
+  "title": "Radio Pong Stub",
+  "kind": "game",
+  "age_mode": "text",
+  "entry": "main.py",
+  "canvas": {
+    "width": 128,
+    "height": 128,
+    "scale": 4
+  },
+  "permissions": {
+    "files": "project",
+    "sd_card": false,
+    "audio": false,
+    "radio": true,
+    "wifi": false,
+    "ai": false,
+    "gpio": false,
+    "system": false
+  }
+}

@@ -6,7 +6,7 @@ index ef7a8ca7..44795637 100644
  #include "hal/spi_ll.h"
  #include "hal/hal_utils.h"
  #include "esp_heap_caps.h"
-+/* KidCode #43: esp_cache_msync is needed unconditionally for the PSRAM-direct TX
++/* Moybyte #43: esp_cache_msync is needed unconditionally for the PSRAM-direct TX
 + * writeback (the stock include was gated to SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE,
 + * which is off on the S3). Header guards make the gated include below harmless. */
 +#include "esp_cache.h"
@@ -18,7 +18,7 @@ index ef7a8ca7..44795637 100644
  
      if (send_ptr && bus_attr->dma_enabled) {
 -        if ((!esp_ptr_dma_capable(send_ptr) || tx_unaligned)) {
-+        /* KidCode #43: allow EXTERNAL (PSRAM) TX buffers to be DMA'd directly instead
++        /* Moybyte #43: allow EXTERNAL (PSRAM) TX buffers to be DMA'd directly instead
 +         * of bounced into the small/fragmented internal MALLOC_CAP_DMA heap. The S3 AHB
 +         * GDMA can read PSRAM (CONFIG_SOC_AHB_GDMA_SUPPORT_PSRAM=y), but stock esp-idf
 +         * only accepts esp_ptr_dma_capable() (internal range), so a 153KB LCD frame
@@ -33,14 +33,14 @@ index ef7a8ca7..44795637 100644
              memcpy(temp, send_ptr, (trans_desc->length + 7) / 8);
              send_ptr = temp;
 +        } else if (esp_ptr_dma_ext_capable(send_ptr)) {
-+            /* KidCode #43: PSRAM source DMA'd directly -- flush the CPU's cached writes
++            /* Moybyte #43: PSRAM source DMA'd directly -- flush the CPU's cached writes
 +             * to PSRAM so the GDMA reads fresh pixels (the stock writeback below is
 +             * gated to SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE, which is off on the S3).
 +             * UNALIGNED: esp_lcd splits the frame into arbitrary chunk offsets/sizes,
 +             * which the line-granular sync handles. */
-+            esp_err_t kc_ret = esp_cache_msync((void *)send_ptr, tx_byte_len,
++            esp_err_t moy_ret = esp_cache_msync((void *)send_ptr, tx_byte_len,
 +                ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
-+            (void) kc_ret;  /* bring-up: a sync failure garbles a frame, never aborts */
++            (void) moy_ret;  /* bring-up: a sync failure garbles a frame, never aborts */
          }
  #if SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE
          esp_err_t ret = esp_cache_msync((void *)send_ptr, tx_byte_len, ESP_CACHE_MSYNC_FLAG_DIR_C2M);

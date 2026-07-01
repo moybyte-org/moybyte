@@ -1,30 +1,30 @@
 #!/usr/bin/env python3
-"""Offline PICO-8 `.p8` -> KidCode `.kcart` ASSET importer (no Lua VM).
+"""Offline PICO-8 `.p8` -> Moybyte `.moy` ASSET importer (no Lua VM).
 
-    import_p8.py <cart.p8> <out_dir.kcart>
+    import_p8.py <cart.p8> <out_dir.moy>
 
 Why this exists / what it does (and does NOT do)
 ------------------------------------------------
-KidCode's v0.4 console is "PICO-8-inspired by construction" -- the KID64 palette's
+Moybyte's v0.4 console is "PICO-8-inspired by construction" -- the MOY64 palette's
 first 16 colors *are* PICO-8's base 16 byte-for-byte (`runtime/palette.py`
-`_BASE16`), and `sprites.kgfx` is literally PICO-8 `__gfx__` format (a 16x16 grid
+`_BASE16`), and `sprites.moygfx` is literally PICO-8 `__gfx__` format (a 16x16 grid
 of 8x8 tiles, one hex nibble per pixel). So importing PICO-8 *assets* into a
-`.kcart` is cheap and needs no Lua runtime. (Feasibility analysis: issue #13.)
+`.moy` is cheap and needs no Lua runtime. (Feasibility analysis: issue #13.)
 
-This tool parses the *text* `.p8` and writes a `.kcart` FOLDER:
+This tool parses the *text* `.p8` and writes a `.moy` FOLDER:
 
-  __gfx__   -> sprites.kgfx   NEAR-VERBATIM nibble copy. The palette already
+  __gfx__   -> sprites.moygfx   NEAR-VERBATIM nibble copy. The palette already
                               matches, so the only work is padding/cropping to the
                               16x16 (128x128px) SpriteSheet grid. Round-trips
                               stably through SpriteSheet.from_hex/to_hex.
   __sfx__   -> sounds.json    BEST-EFFORT, LOSSY. PICO-8 SFX = 32 notes x
    __music__                  [pitch, instrument(0-7 builtin + custom), volume,
                               effect] over 8 instruments + 4 channels + an effect
-                              column. KidCode SFX = [pitch, wave(0-3), vol(0-7)]
+                              column. Moybyte SFX = [pitch, wave(0-3), vol(0-7)]
                               steps at one `speed`, 1-channel music. We map the 8
-                              PICO-8 instruments down to the 4 KidCode waveforms,
+                              PICO-8 instruments down to the 4 Moybyte waveforms,
                               DROP the effect column entirely, and FLATTEN the
-                              4-channel music pattern to KidCode's 1-channel
+                              4-channel music pattern to Moybyte's 1-channel
                               `pattern` (taking the first non-empty channel per
                               row). See _IMPORT_INSTRUMENT_TO_WAVE below.
   __lua__   -> main.py        NOT transpiled / NOT executed. The Lua is imported as
@@ -36,8 +36,8 @@ This tool parses the *text* `.p8` and writes a `.kcart` FOLDER:
                               permissions, empty config/edit.
 
 DEFERRED (intentionally, noted rather than guessed):
-  __map__        the `.kmap`/tilemap format is not on master yet (follow-up: #32).
-  __gff__        per-sprite flag bits -- KidCode has no sprite-flag model yet.
+  __map__        the `.moymap`/tilemap format is not on master yet (follow-up: #32).
+  __gff__        per-sprite flag bits -- Moybyte has no sprite-flag model yet.
   .p8.png        the steganographic PNG cart: the text `.p8` is enough for v1; a
                  PNG bit-unpack is an additive follow-up (~100 lines).
 
@@ -110,7 +110,7 @@ def _title_from(sections, p8_path):
 
 
 # --------------------------------------------------------------------------
-# __gfx__  ->  sprites.kgfx   (near-verbatim; palette already matches)
+# __gfx__  ->  sprites.moygfx   (near-verbatim; palette already matches)
 # --------------------------------------------------------------------------
 # PICO-8 __gfx__ is up to 128 rows of up to 128 hex nibbles (one per pixel,
 # value 0-15). That is *exactly* the SpriteSheet 16x16-tile (128x128px) hex
@@ -123,7 +123,7 @@ GFX_H = 128
 
 
 def gfx_to_kgfx(gfx_lines):
-    """Turn PICO-8 `__gfx__` lines into a 128x128 `sprites.kgfx` hex string, or
+    """Turn PICO-8 `__gfx__` lines into a 128x128 `sprites.moygfx` hex string, or
     None if there is no graphics data at all. Non-hex chars are coerced to '0'."""
     rows = []
     any_pixel = False
@@ -166,19 +166,19 @@ def gfx_to_kgfx(gfx_lines):
 #     pitch    = first 2 nibbles, 0..63 (C0..D#5; PICO-8 pitch 0 == note C0)
 #     waveform = next 1 nibble, 0..15 (0..7 builtin instruments, 8..F custom)
 #     volume   = next 1 nibble, 0..7
-#     effect   = last 1 nibble, 0..7  (we DROP this -- KidCode has no effects)
+#     effect   = last 1 nibble, 0..7  (we DROP this -- Moybyte has no effects)
 #
-# KidCode SFX (runtime/audio.py): steps of [pitch, wave, vol] at one `speed`
+# Moybyte SFX (runtime/audio.py): steps of [pitch, wave, vol] at one `speed`
 # (steps/sec), where pitch is a semitone index 0..95 (A4=57), wave is 0..3
 # (square/triangle/saw/noise), vol 0..7. Mapping decisions, all lossy:
-#   * PITCH: PICO-8 pitch 0 == C0. KidCode pitch is a raw semitone index where
+#   * PITCH: PICO-8 pitch 0 == C0. Moybyte pitch is a raw semitone index where
 #     C0 == 0 too (name_to_pitch('C0') -> 0), so PICO-8 pitch maps 1:1 as a
 #     semitone index. A volume-0 note becomes a REST (-1), like PICO-8.
-#   * WAVE: 8 PICO-8 instruments -> 4 KidCode waveforms (table below). The 8
+#   * WAVE: 8 PICO-8 instruments -> 4 Moybyte waveforms (table below). The 8
 #     CUSTOM instruments (waveform 8..15, defined in __sfx__ slots 0..7) are not
 #     modelled; we fold them onto the builtin in the low 3 bits (w & 7).
 #   * SPEED: PICO-8 "note duration" D is ticks-per-row at 120 ticks/sec, so the
-#     row rate is 120/D rows/sec. KidCode `speed` is steps/sec, so speed = round(
+#     row rate is 120/D rows/sec. Moybyte `speed` is steps/sec, so speed = round(
 #     120/D), clamped to >=1. D==0 is treated as 1.
 #   * EFFECTS (slide/vibrato/drop/arp/fades): DROPPED entirely.
 #   * Trailing all-rest notes are trimmed so a mostly-empty SFX stays short.
@@ -186,7 +186,7 @@ def gfx_to_kgfx(gfx_lines):
 PICO8_PITCH_C0 = 0  # PICO-8 pitch index 0 is the note C0
 REST = -1
 
-# 8 PICO-8 builtin instruments -> KidCode waveform (0 square,1 tri,2 saw,3 noise)
+# 8 PICO-8 builtin instruments -> Moybyte waveform (0 square,1 tri,2 saw,3 noise)
 #   0 triangle, 1 tilted saw, 2 saw, 3 square, 4 pulse, 5 organ, 6 noise, 7 phaser
 _IMPORT_INSTRUMENT_TO_WAVE = {
     0: 1,  # triangle  -> triangle
@@ -209,7 +209,7 @@ def _hx(s, lo, hi):
 
 
 def _sfx_line_to_dict(line):
-    """One PICO-8 __sfx__ hex line -> a KidCode SFX dict (or None if all-rest)."""
+    """One PICO-8 __sfx__ hex line -> a Moybyte SFX dict (or None if all-rest)."""
     s = line.strip().lower()
     if len(s) < 8:
         return None
@@ -239,7 +239,7 @@ def _sfx_line_to_dict(line):
 
 
 def _music_line_to_pattern_entry(line):
-    """One PICO-8 __music__ line -> a single SFX id for KidCode's 1-channel
+    """One PICO-8 __music__ line -> a single SFX id for Moybyte's 1-channel
     pattern, or None if the row is empty.
 
     PICO-8 music line on disk is `<flags:2> <space> <ch0:2><ch1:2><ch2:2><ch3:2>`
@@ -267,7 +267,7 @@ def sfx_music_to_sounds(sfx_lines, music_lines, max_sfx=64):
 
     Returns (sounds_dict_or_None, n_sfx, n_music). The SFX list keeps positional
     ids (empty/all-rest SFX become an empty placeholder so music ids still line
-    up). Music patterns map to KidCode 1-channel `pattern` lists."""
+    up). Music patterns map to Moybyte 1-channel `pattern` lists."""
     sfx = []
     n_real = 0
     for i, line in enumerate(sfx_lines):
@@ -307,10 +307,10 @@ def sfx_music_to_sounds(sfx_lines, music_lines, max_sfx=64):
 # --------------------------------------------------------------------------
 # __lua__  ->  main.py   (reference comment + GUIDED porting notes; NOT executed)
 # --------------------------------------------------------------------------
-# KidCode is Python, not Lua (issue #6), so a PICO-8 cart can't "just run" -- the
+# Moybyte is Python, not Lua (issue #6), so a PICO-8 cart can't "just run" -- the
 # kid PORTS it, and that's the lesson (issue #36). We DON'T transpile. Instead we
 # keep the original Lua as a reference comment and scaffold the port with inline
-# `# PORT NOTE:` lines for the real PICO-8 -> KidCode gotchas -- but only for the
+# `# PORT NOTE:` lines for the real PICO-8 -> Moybyte gotchas -- but only for the
 # verbs THIS cart actually uses (scanned from its Lua), so the guidance is
 # relevant, not boilerplate. See docs/porting_pico8.md for the full cheatsheet.
 
@@ -322,104 +322,104 @@ CHEATSHEET = "docs/porting_pico8.md"
 #
 # Grouped by the three "gotcha" rules from the #13 analysis + the not-here-yet set.
 PORT_NOTES = [
-    # -- inverted draw verbs (PICO-8 names are the OPPOSITE fill in KidCode) ----
+    # -- inverted draw verbs (PICO-8 names are the OPPOSITE fill in Moybyte) ----
     ("rectfill", (
-        ["PICO-8 rectfill() = FILLED rect. In KidCode that verb is rect().",
+        ["PICO-8 rectfill() = FILLED rect. In Moybyte that verb is rect().",
          "AND the args change: PICO-8 rectfill(x,y,x1,y1,c) takes the opposite",
-         "CORNER (x1,y1); KidCode rect(x,y,w,h,c) takes WIDTH,HEIGHT. Convert:",
+         "CORNER (x1,y1); Moybyte rect(x,y,w,h,c) takes WIDTH,HEIGHT. Convert:",
          "w = x1-x+1 ; h = y1-y+1."],
         "[ ] rectfill(x,y,x1,y1,c) -> rect(x,y, x1-x+1, y1-y+1, c)")),
     ("rect", (
-        ["PICO-8 rect() = OUTLINE. In KidCode the outline verb is rectb().",
-         "(KidCode rect() is FILLED -- the names are swapped vs PICO-8!)",
+        ["PICO-8 rect() = OUTLINE. In Moybyte the outline verb is rectb().",
+         "(Moybyte rect() is FILLED -- the names are swapped vs PICO-8!)",
          "Args also change from corner (x1,y1) to extent (w,h):",
          "w = x1-x+1 ; h = y1-y+1."],
         "[ ] rect(x,y,x1,y1,c) outline -> rectb(x,y, x1-x+1, y1-y+1, c)")),
     ("circfill", (
-        ["PICO-8 circfill(x,y,r,c) = FILLED circle. In KidCode that is circ().",
+        ["PICO-8 circfill(x,y,r,c) = FILLED circle. In Moybyte that is circ().",
          "(Same x,y,r args -- only the name changes.)"],
         "[ ] circfill -> circ")),
     ("circ", (
-        ["PICO-8 circ(x,y,r,c) = OUTLINE circle. In KidCode the outline verb is",
-         "circb(). (KidCode circ() is FILLED -- swapped vs PICO-8!)"],
+        ["PICO-8 circ(x,y,r,c) = OUTLINE circle. In Moybyte the outline verb is",
+         "circb(). (Moybyte circ() is FILLED -- swapped vs PICO-8!)"],
         "[ ] circ outline -> circb")),
     # -- buttons (numeric -> named) -------------------------------------------
     ("btnp", (
-        ["PICO-8 btnp(i) uses NUMBERS 0..5. KidCode btnp() uses NAMES:",
+        ["PICO-8 btnp(i) uses NUMBERS 0..5. Moybyte btnp() uses NAMES:",
          "0->'left' 1->'right' 2->'up' 3->'down' 4->'a'(O) 5->'b'(X).",
          "e.g. btnp(4) -> btnp('a')."],
         "[ ] btnp(0..5) numbers -> btnp('left'/'right'/'up'/'down'/'a'/'b')")),
     ("btn", (
-        ["PICO-8 btn(i) uses NUMBERS 0..5. KidCode btn() uses NAMES:",
+        ["PICO-8 btn(i) uses NUMBERS 0..5. Moybyte btn() uses NAMES:",
          "0->'left' 1->'right' 2->'up' 3->'down' 4->'a'(O) 5->'b'(X).",
          "e.g. btn(0) -> btn('left')."],
         "[ ] btn(0..5) numbers -> btn('left'/'right'/'up'/'down'/'a'/'b')")),
     # -- renames (same idea, different name) ----------------------------------
     ("pset", (
-        ["PICO-8 pset(x,y,c) sets a pixel. KidCode uses pix(x,y,c) (3 args = set)."],
+        ["PICO-8 pset(x,y,c) sets a pixel. Moybyte uses pix(x,y,c) (3 args = set)."],
         "[ ] pset -> pix")),
     ("pget", (
-        ["PICO-8 pget(x,y) reads a pixel. KidCode uses pix(x,y) (2 args = read)."],
+        ["PICO-8 pget(x,y) reads a pixel. Moybyte uses pix(x,y) (2 args = read)."],
         "[ ] pget -> pix(x,y) (2 args)")),
     ("spr", (
-        ["spr(n,x,y) is mostly the same! KidCode spr(n,x,y) draws tile n.",
-         "KidCode spr(n,x,y, colorkey, scale, flip, w, h): flip 1/2/3 mirrors",
+        ["spr(n,x,y) is mostly the same! Moybyte spr(n,x,y) draws tile n.",
+         "Moybyte spr(n,x,y, colorkey, scale, flip, w, h): flip 1/2/3 mirrors",
          "h/v/both, and w,h give a multi-tile span -- so big/flipped sprites work",
          "directly (PICO-8's flip_x/flip_y -> flip = flip_x + 2*flip_y)."],
         None)),
     ("print", (
-        ["print(s,x,y,c) is mostly 1:1. KidCode print(s,x,y,c, scale) -- but the",
+        ["print(s,x,y,c) is mostly 1:1. Moybyte print(s,x,y,c, scale) -- but the",
          "color is a palette INDEX or col('name'), e.g. col('white')."],
         None)),
     ("cls", (
         ["cls(c) is 1:1. (cls() defaults to color 0 / black on both.)"],
         None)),
     ("line", (
-        ["line(x0,y0,x1,y1,c) is 1:1 in KidCode."],
+        ["line(x0,y0,x1,y1,c) is 1:1 in Moybyte."],
         None)),
     # -- not here (yet) -> adapt or skip --------------------------------------
     ("map", (
-        ["map()/mget()/mset() draw or read a TILEMAP -- KidCode HAS these now (#32):",
+        ["map()/mget()/mset() draw or read a TILEMAP -- Moybyte HAS these now (#32):",
          "map(mx,my,w,h, sx,sy, colorkey, scale), mget(x,y), mset(x,y, id)."],
         None)),
     ("mget", (
-        ["mget(cx,cy) reads a map cell -- KidCode has mget(x,y) (#32)."],
+        ["mget(cx,cy) reads a map cell -- Moybyte has mget(x,y) (#32)."],
         None)),
     ("mset", (
-        ["mset(cx,cy,v) writes a map cell -- KidCode has mset(x,y, id) (#32)."],
+        ["mset(cx,cy,v) writes a map cell -- Moybyte has mset(x,y, id) (#32)."],
         None)),
     ("pal", (
-        ["pal(c0,c1) remaps a draw colour -- KidCode HAS this now (#11), same name;",
+        ["pal(c0,c1) remaps a draw colour -- Moybyte HAS this now (#11), same name;",
          "pal() with no args resets. Per-sprite transparency is also available as",
          "the spr() colorkey arg or palt(c, on)."],
         None)),
     ("palt", (
-        ["palt(c, on) sets a transparent colour -- KidCode HAS this now (#11), same",
+        ["palt(c, on) sets a transparent colour -- Moybyte HAS this now (#11), same",
          "name; palt() resets. spr()'s colorkey arg also works per draw."],
         None)),
     ("camera", (
-        ["camera(x,y) shifts all drawing -- KidCode HAS this now (#11), same name and",
+        ["camera(x,y) shifts all drawing -- Moybyte HAS this now (#11), same name and",
          "semantics; camera() with no args resets to (0,0). clip(x,y,w,h) is here too."],
         None)),
     ("sspr", (
-        ["sspr() stretches part of the sheet. KidCode has no sspr() -- use spr()",
+        ["sspr() stretches part of the sheet. Moybyte has no sspr() -- use spr()",
          "with the scale arg for whole-tile scaling, or skip the stretch."],
         "[ ] sspr: use spr(..., scale=N) or skip")),
     ("fget", (
-        ["fget()/fset() read/write per-sprite FLAG bits. KidCode has no sprite",
+        ["fget()/fset() read/write per-sprite FLAG bits. Moybyte has no sprite",
          "flags -- track those facts in your own Python data instead."],
         "[ ] fget/fset: keep sprite flags in your own Python dict/list")),
     ("fset", (
-        ["fset() sets a sprite flag bit. No sprite flags in KidCode -- use your own",
+        ["fset() sets a sprite flag bit. No sprite flags in Moybyte -- use your own",
          "Python data."],
         None)),
     ("peek", (
-        ["peek()/poke() read/write raw memory. KidCode has NO raw memory access on",
+        ["peek()/poke() read/write raw memory. Moybyte has NO raw memory access on",
          "purpose (it's a kids' console) -- there is no equivalent; rewrite that",
          "part using normal Python variables/lists."],
         "[ ] peek/poke: REMOVE -- rewrite with normal Python variables")),
     ("poke", (
-        ["poke() writes raw memory. Not available in KidCode by design -- rewrite",
+        ["poke() writes raw memory. Not available in Moybyte by design -- rewrite",
          "with normal Python variables/lists."],
         None)),
 ]
@@ -469,13 +469,13 @@ def lua_to_main_py(lua_lines, title):
     head = (
         '# Imported from a PICO-8 .p8 by tools/import_p8.py.\n'
         '#\n'
-        '# Only the ASSETS were imported (sprites.kgfx, and sounds.json if present;\n'
+        '# Only the ASSETS were imported (sprites.moygfx, and sounds.json if present;\n'
         '# audio is a lossy fold and __map__/.p8.png are not imported yet).\n'
-        '# KidCode is PYTHON, not Lua -- so a PICO-8 cart does not "just run": you\n'
+        '# Moybyte is PYTHON, not Lua -- so a PICO-8 cart does not "just run": you\n'
         '# PORT it, and that is the fun part. The original PICO-8 Lua is kept below\n'
         '# as a REFERENCE COMMENT (NOT executed -- running Lua is gated on #6).\n'
         '#\n'
-        '# Cheatsheet (verb-by-verb PICO-8 -> KidCode map): ' + CHEATSHEET + '\n'
+        '# Cheatsheet (verb-by-verb PICO-8 -> Moybyte map): ' + CHEATSHEET + '\n'
         '#\n'
         '# This stub just draws the imported sprites so you can see the art, then\n'
         '# you rewrite _update/_draw in v0.4 Python using the notes below.\n'
@@ -508,7 +508,7 @@ def lua_to_main_py(lua_lines, title):
     head += '\n\n# ----- original PICO-8 __lua__ (reference only; not run) -----\n'
     if used_idx:
         head += (
-            '# Watch out for these PICO-8 -> KidCode differences in the code below\n'
+            '# Watch out for these PICO-8 -> Moybyte differences in the code below\n'
             '# (only the verbs THIS cart uses are listed; full map: ' + CHEATSHEET + '):\n'
         )
         for idx in used_idx:
@@ -527,12 +527,12 @@ def lua_to_main_py(lua_lines, title):
 
 def make_manifest(title):
     return {
-        "format": "kidcode-cart-v1",
+        "format": "moybyte-cart-v1",
         "title": title,
         "type": "game",
         "runtime": "python",
         "main": "main.py",
-        "canvas": {"width": 320, "height": 240, "palette": "kid64"},
+        "canvas": {"width": 320, "height": 240, "palette": "moy64"},
         "permissions": ["graphics", "input", "sound"],
         "safe_to_share": True,
         "config": {},
@@ -541,11 +541,11 @@ def make_manifest(title):
 
 
 # --------------------------------------------------------------------------
-# top-level: parse a .p8 and write a .kcart folder
+# top-level: parse a .p8 and write a .moy folder
 # --------------------------------------------------------------------------
 
 def import_p8(p8_path, out_dir):
-    """Parse `p8_path` and write a `.kcart` folder at `out_dir`. Returns a small
+    """Parse `p8_path` and write a `.moy` folder at `out_dir`. Returns a small
     summary dict describing what was imported / deferred."""
     with open(p8_path, "r", encoding="utf-8", errors="replace") as f:
         text = f.read()
@@ -586,14 +586,14 @@ def import_p8(p8_path, out_dir):
         json.dump({}, f)
     summary["imported"].append("config.json (empty)")
 
-    # sprites.kgfx (near-verbatim from __gfx__)
+    # sprites.moygfx (near-verbatim from __gfx__)
     kgfx = gfx_to_kgfx(sections.get("gfx", []))
     if kgfx is not None:
-        with open(os.path.join(out_dir, "sprites.kgfx"), "w", encoding="utf-8") as f:
+        with open(os.path.join(out_dir, "sprites.moygfx"), "w", encoding="utf-8") as f:
             f.write(kgfx)
-        summary["imported"].append("sprites.kgfx (from __gfx__, palette is identical)")
+        summary["imported"].append("sprites.moygfx (from __gfx__, palette is identical)")
     else:
-        summary["empty"].append("sprites.kgfx (no __gfx__ pixels)")
+        summary["empty"].append("sprites.moygfx (no __gfx__ pixels)")
 
     # sounds.json (lossy from __sfx__/__music__)
     sounds, n_sfx, n_music = sfx_music_to_sounds(
@@ -622,7 +622,7 @@ def import_p8(p8_path, out_dir):
 def main(argv):
     if len(argv) != 3:
         prog = os.path.basename(argv[0]) if argv else "import_p8.py"
-        sys.stderr.write("usage: %s <cart.p8> <out_dir.kcart>\n" % prog)
+        sys.stderr.write("usage: %s <cart.p8> <out_dir.moy>\n" % prog)
         return 2
     p8_path, out_dir = argv[1], argv[2]
     if not os.path.isfile(p8_path):

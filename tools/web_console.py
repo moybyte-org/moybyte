@@ -22,7 +22,7 @@ deps, no hand-rolled WebSockets):
   GET  /          -> the static HTML page (a scaled <canvas> + JS replayer/poller).
   GET  /assets    -> the STATIC stuff the browser needs to render the command list:
                        { "w","h",                       # logical surface size
-                         "palette": [[r,g,b], ...64],    # KID64 index -> RGB
+                         "palette": [[r,g,b], ...64],    # MOY64 index -> RGB
                          "font": {"first","w","h","glyphs":[[col,...8], ...]},
                          "sheet": {...} | null,          # open cart's sprite sheet
                          "tilemap": {...} | null,        # open cart's tilemap
@@ -49,9 +49,9 @@ Run it:
 
     python tools/web_console.py                 # http://<lan-ip>:8080/
     python tools/web_console.py --port 9000
-    python tools/web_console.py --cart system_carts/star_catcher.kcart
+    python tools/web_console.py --cart system_carts/star_catcher.moy
 
-Open the printed URL -> the full KidCode desktop, live in the browser, redrawn from
+Open the printed URL -> the full Moybyte desktop, live in the browser, redrawn from
 the command stream.
 
 The device port (a MicroPython command-recording canvas + an HTTP server over WiFi)
@@ -75,11 +75,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer  # noqa: E40
 from runtime import font  # noqa: E402  (petme128 glyphs -> JSON for the replayer)
 from runtime import audio as _audio  # noqa: E402  (engine sample rate for the browser player)
 from runtime import host_app  # noqa: E402  (runs the SHARED console.Workstation)
-from runtime import palette  # noqa: E402  (KID64 index -> RGB)
+from runtime import palette  # noqa: E402  (MOY64 index -> RGB)
 from tools.command_canvas import CommandCanvas  # noqa: E402  (the recording backend)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_SAVE_DIR = os.path.expanduser("~/.kidcode/projects")
+DEFAULT_SAVE_DIR = os.path.expanduser("~/.moybyte/projects")
 DEFAULT_PORT = 8080
 DEFAULT_FPS = 30
 
@@ -176,21 +176,21 @@ class WebConsole:
             self.ws.select_wallpaper(self.ws.wallpaper_id, persist=False)
         # Live, real-connection-aware WiFi (your PC is online) -- matches the
         # interactive pygame run, so network carts test against real sockets.
-        self.ws.wifi = host_app.make_host_wifi(host_app.kid_carts, self.ws.carts_root)
+        self.ws.wifi = host_app.make_host_wifi(host_app.moy_carts, self.ws.carts_root)
         if cart:
             self._open_named_cart(cart, save_dir)
         self.driver = host_app.ConsoleDriver(self.ws)
         self._lock = threading.Lock()
 
     def _open_named_cart(self, cart_path, carts_dir):
-        """Copy a named .kcart into the store (if needed), select + open it -- the
+        """Copy a named .moy into the store (if needed), select + open it -- the
         same skip-the-launcher path as tools/simulate_desktop._open_named_cart."""
         name = os.path.basename(os.path.normpath(cart_path))
         dst = os.path.join(carts_dir, name)
         if os.path.abspath(cart_path) != os.path.abspath(dst) and not os.path.exists(dst):
             import shutil
             shutil.copytree(cart_path, dst)
-        self.ws.launcher.items = host_app.kid_carts.scan(self.ws.carts_root)
+        self.ws.launcher.items = host_app.moy_carts.scan(self.ws.carts_root)
         for i, c in enumerate(self.ws.launcher.items):
             if os.path.abspath(c["path"]) == os.path.abspath(dst):
                 self.ws.launcher.sel = i
@@ -270,7 +270,7 @@ class WebConsole:
             cart = self._cart_title()
         return {
             "w": self.canvas.w, "h": self.canvas.h,
-            "palette": [list(rgb) for rgb in palette.KID64],
+            "palette": [list(rgb) for rgb in palette.MOY64],
             "font": font_glyphs(),
             "sheet": sheet,
             "tilemap": tilemap,
@@ -364,11 +364,11 @@ def _lan_url(port):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="KidCode web console (#22, draw-command streaming)")
+    ap = argparse.ArgumentParser(description="Moybyte web console (#22, draw-command streaming)")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
     ap.add_argument("--host", default="0.0.0.0",
                     help="bind address (default 0.0.0.0 = reachable on the LAN)")
-    ap.add_argument("--cart", help="open a single .kcart directly (skip the launcher)")
+    ap.add_argument("--cart", help="open a single .moy directly (skip the launcher)")
     ap.add_argument("--save-dir", default=DEFAULT_SAVE_DIR)
     ap.add_argument("--fps", type=int, default=DEFAULT_FPS,
                     help="console step rate (dt = 1/fps per /frame request)")
@@ -385,7 +385,7 @@ def main(argv=None):
                          sys_size=(int(w), int(h)), font_scale=args.font_scale)
     server = make_server(console, host=args.host, port=args.port)
     url = _lan_url(server.server_address[1])
-    print("KidCode web console (draw-command streaming) serving the live desktop at:")
+    print("Moybyte web console (draw-command streaming) serving the live desktop at:")
     print("    %s" % url)
     print("    http://127.0.0.1:%d/  (localhost)" % server.server_address[1])
     print("Open it in a browser to drive the full console. Ctrl-C to stop.")
