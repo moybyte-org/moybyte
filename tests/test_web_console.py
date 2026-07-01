@@ -682,3 +682,19 @@ def test_host_reseeds_built_in_on_version_bump_preserving_moy_data(tmp_path):
     with open(os.path.join(dst, "config.json")) as f:
         assert json.load(f) == {"water": "indigo"}        # kid tuning preserved
     assert host_app._manifest_version(dst) >= 2           # manifest refreshed to shipped
+
+
+def test_page_alloc_resets_clip_on_resize():
+    """Regression (big-canvas web view): the browser page must reset the clip
+    window whenever it (re)allocates the canvas. The clip is first set at load
+    with the 320x240 default; if alloc() doesn't reset it after /assets grows
+    the canvas (e.g. a 960x600 system canvas, #39), every draw op stays clipped
+    to the top-left 320x240 and the rest of the page renders black. The JS can't
+    be unit-tested directly, so guard the served source: alloc() must call rs()."""
+    page = web_view.PAGE_HTML
+    start = page.index("function alloc()")
+    body = page[start:start + 400]
+    assert "rs()" in body, (
+        "web_view.PAGE_HTML alloc() must call rs() to reset the clip on canvas "
+        "resize; without it a >320x240 system canvas clips drawing to the top-left"
+    )
