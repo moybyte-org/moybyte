@@ -41,157 +41,41 @@ MODULES = os.path.join(ROOT, "firmware", "lilygo_t_deck_plus_micropython", "modu
 if MODULES not in sys.path:
     sys.path.insert(0, MODULES)
 
-import moy_webserver as web  # noqa: E402
+import moy_webserver as web  # noqa: E402  (the DEVICE TRANSPORT adapter)
 
 from runtime import font as _font  # noqa: E402
 from runtime import palette as _pal  # noqa: E402
+from runtime import web_view  # noqa: E402  (the SHARED web-view core the transport imports)
 from runtime.canvas import Canvas, Image  # noqa: E402
 from runtime.editors import SpriteSheet  # noqa: E402
 
 WIDTH, HEIGHT = 320, 240
 
-
-# ---------------------------------------------------------------------------
-# The PAYLOAD-DIET reference replayer (#41): the Python twin of the browser JS in
-# moy_webserver.PAGE_HTML (the defspr / spr-by-index / map / settiles format). It mirrors
-# the JS exactly so the host test and the browser share the same replay LOGIC, proving the
-# device's recorded stream reproduces the panel pixel-for-pixel. Sprites + map cells go
-# through Canvas.spr (the SAME rasterizer the device/host draw with -- camera/clip/pal/
-# palt/scale/flip), and the atlas/sheet/tilemap caches mirror the browser's ATL/SHEET/TM.
-# `assets` (optional) seeds the sheet + tilemap exactly as the browser's GET /assets does.
-# ---------------------------------------------------------------------------
+# The PAYLOAD-DIET reference replayer is now the SHARED web_view.replay_to_canvas (the Python
+# twin of the browser JS in web_view.PAGE_HTML): defspr / spr-by-index or self-contained / diet
+# map / settiles / off-screen layers, all through the SAME Canvas rasterizer. Used here (and by
+# the host web-console tests) to prove the device's recorded stream reproduces the panel
+# pixel-for-pixel. `assets` (optional) seeds the sheet + tilemap for the diet map replay.
+replay_diet = web_view.replay_to_canvas
 
 
-def replay_diet(commands, canvas, assets=None, layers=None):
-    atlas = {}                                  # index -> Image (browser's ATL)
-    sheet_pix = sheet_cols = sheet_tile = sheet_w = None
-    tm = None                                   # {"w","h","cells"} (browser's TM)
-    if layers is None:
-        layers = {}                             # id -> rasterized Canvas (browser's LAY)
-    if assets is not None:
-        sh = assets.get("sheet")
-        if sh is not None:
-            sheet_pix = list(sh["pix"])
-            sheet_cols = sh["cols"]
-            sheet_tile = sh["tile"]
-            sheet_w = sh["w"]
-        tmp = assets.get("tilemap")
-        if tmp is not None:
-            tm = {"w": tmp["w"], "h": tmp["h"], "cells": list(tmp["cells"])}
+def test_moved_code_is_re_exported_from_the_shared_module():
+    """The recorder / Tee / payload builders / serve logic / page / constants moved into the
+    SHARED web_view module; the DEVICE moy_webserver is a thin transport that IMPORTS + re-exports
+    them, so every existing `web.X` reference still resolves to the shared module's object (no
+    drift, no stale local copy). The invariant is that the re-exports ALIAS whatever web_view the
+    transport imported (`web._wv`) -- NOT object-identity vs `runtime.web_view`: build.sh COPIES
+    runtime/web_view.py to modules/web_view.py, so after a firmware build the transport's
+    top-level `import web_view` resolves to that (identical) staged copy, a distinct object from
+    `runtime.web_view` yet the same source. `web._wv` must be a real web_view module."""
+    assert web._wv is not None and hasattr(web._wv, "DrawRecorder")
+    for name in ("DrawRecorder", "RecordingLayer", "_LayerRecorder", "TeeCanvas", "ServedState",
+                 "palette_rgb", "sheet_payload", "tilemap_payload", "assets_payload",
+                 "frame_payload", "apply_events", "PAGE_HTML", "MAX_ATLAS",
+                 "MAX_DEFSPR_BYTES_PER_FRAME", "WEB_FPS_CAP", "WEB_FRAME_INTERVAL_MS",
+                 "WEB_MAX_BYTES_PER_SEC"):
+        assert getattr(web, name) is getattr(web._wv, name), name
 
-    def _tile_image(tid, colorkey):
-        # Build a tile's Image from the cached sheet, exactly like the browser's mp() slice
-        # (and the device SpriteSheet.tile_image): row-major tile origin, colorkey transparent.
-        ox = (tid % sheet_cols) * sheet_tile
-        oy = (tid // sheet_cols) * sheet_tile
-        pix = []
-        for ly in range(sheet_tile):
-            base = (oy + ly) * sheet_w + ox
-            for lx in range(sheet_tile):
-                pix.append(sheet_pix[base + lx])
-        return Image(sheet_tile, sheet_tile, pix, transparent=colorkey)
-
-    for cmd in commands:
-        op = cmd[0]
-        if op == "cls":
-            canvas.cls(cmd[1])
-        elif op == "pix":
-            canvas.pix(cmd[1], cmd[2], cmd[3])
-        elif op == "line":
-            canvas.line(cmd[1], cmd[2], cmd[3], cmd[4], cmd[5])
-        elif op == "rect":
-            canvas.rect(cmd[1], cmd[2], cmd[3], cmd[4], cmd[5])
-        elif op == "rectb":
-            canvas.rectb(cmd[1], cmd[2], cmd[3], cmd[4], cmd[5])
-        elif op == "circ":
-            canvas.circ(cmd[1], cmd[2], cmd[3], cmd[4])
-        elif op == "circb":
-            canvas.circb(cmd[1], cmd[2], cmd[3], cmd[4])
-        elif op == "defspr":
-            idx, w, h, t, pix = cmd[1:6]
-            atlas[idx] = Image(w, h, list(pix), transparent=t)
-        elif op == "spr":
-            # TWO shapes: the main stream's atlas form ["spr", idx, x, y, scale, flip]
-            # and a LAYER stream's self-contained full-pixel form
-            # ["spr", x, y, scale, w, h, t, pix, flip] (a pix list at cmd[7]). Branch on
-            # the pix list so a layer's icon sprites replay without the atlas (#54/#43).
-            if len(cmd) > 7 and isinstance(cmd[7], (list, tuple)):
-                _x, _y, scale, w, h, t, pix = cmd[1:8]
-                flip = cmd[8] if len(cmd) > 8 else 0
-                canvas.spr(Image(w, h, list(pix), transparent=t), _x, _y, scale, flip)
-            else:
-                idx, x, y, scale = cmd[1:5]
-                flip = cmd[5] if len(cmd) > 5 else 0
-                im = atlas.get(idx)
-                if im is not None:
-                    canvas.spr(im, x, y, scale, flip)
-        elif op == "deflayer":
-            # Define / redraw an off-screen layer: rebuild its index Canvas by REPLAYING
-            # its recorded stream into it (the same draw verbs), pixel-identical to the
-            # device/host layer pre-render. Cached by id for later blit_layer ops (#54/#43).
-            lid, lw, lh, lcmds = cmd[1:5]
-            layer = Canvas(int(lw), int(lh), canvas.palette)
-            replay_diet(lcmds, layer, assets, layers)
-            layers[lid] = layer
-        elif op == "blit_layer":
-            # Reference an off-screen layer: a windowed blit (draw_layer / scroll, 4 fields)
-            # or a full blit (blit_strip / cached top bar, a trailing "full"). Runs the SAME
-            # Canvas.blit_window_from / blit_strip -- opaque + full-screen, so the windowed
-            # blit also clears last frame (fixing the scroll cart's trails).
-            lid = cmd[1]
-            layer = layers.get(lid)
-            if layer is not None:
-                if len(cmd) > 4 and cmd[4] == "full":
-                    canvas.blit_strip(layer, cmd[2], cmd[3])
-                else:
-                    canvas.blit_window_from(layer, cmd[2], cmd[3])
-        elif op == "settiles":
-            tm = {"w": cmd[1], "h": cmd[2], "cells": list(cmd[3])}
-        elif op == "map":
-            mx, my, w, h, sx, sy, scale, colorkey = cmd[1:9]
-            if sheet_pix is not None and tm is not None:
-                if scale < 1:
-                    scale = 1
-                step = sheet_tile * scale
-                cache = {}
-                for cy in range(h):
-                    ty = my + cy
-                    for cx in range(w):
-                        gx = mx + cx
-                        if 0 <= gx < tm["w"] and 0 <= ty < tm["h"]:
-                            tid = tm["cells"][ty * tm["w"] + gx] - 1
-                        else:
-                            tid = -1
-                        if tid < 0:
-                            continue
-                        im = cache.get(tid)
-                        if im is None:
-                            im = _tile_image(tid, colorkey)
-                            cache[tid] = im
-                        canvas.spr(im, sx + cx * step, sy + cy * step, scale)
-        elif op == "print":
-            canvas.print(cmd[1], cmd[2], cmd[3], cmd[4])
-        elif op == "reset_state":
-            canvas.reset_state()
-        elif op == "camera":
-            canvas.camera(cmd[1], cmd[2])
-        elif op == "clip":
-            if len(cmd) > 1:
-                canvas.clip(cmd[1], cmd[2], cmd[3], cmd[4])
-            else:
-                canvas.clip()
-        elif op == "pal":
-            if len(cmd) > 1:
-                canvas.pal(cmd[1], cmd[2])
-            else:
-                canvas.pal()
-        elif op == "palt":
-            if len(cmd) > 1:
-                canvas.palt(cmd[1], bool(cmd[2]))
-            else:
-                canvas.palt()
-        # unknown ops ignored (forward-compatible)
-    return canvas
 
 # The device's canonical RGB565 MOY64 LUT (a copy of moy_runtime.PAL565 -- the host
 # can't import the device backend, which pulls in framebuf/machine).

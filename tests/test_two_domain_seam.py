@@ -273,7 +273,7 @@ def test_web_console_font_scale_change_does_not_crash(tmp_path):
     CommandCanvas) must not raise -- the recorder honours set_font_scale and records
     scaled text as rect blocks the replayer already understands."""
     from tools.web_console import WebConsole
-    from tools.command_canvas import replay_to_canvas
+    from runtime.web_view import replay_to_canvas
     from runtime.canvas import Canvas
     wc = WebConsole(str(tmp_path / "carts"), sys_size=(640, 480))
     wc.ws.open_settings()
@@ -291,7 +291,7 @@ def test_web_console_larger_canvas_streams_and_replays(tmp_path):
     the bigger size, the launcher command stream replays to valid pixels, and a
     running cart composites into the stream as a single spr viewport command."""
     from tools.web_console import WebConsole
-    from tools.command_canvas import replay_to_canvas
+    from runtime.web_view import replay_to_canvas
     from runtime.canvas import Canvas
     wc = WebConsole(str(tmp_path / "carts"), sys_size=(640, 480))
     assert wc.assets()["w"] == 640 and wc.assets()["h"] == 480
