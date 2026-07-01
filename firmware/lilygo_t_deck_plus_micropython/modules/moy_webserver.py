@@ -12,11 +12,11 @@
 # THE LIVE CHANNEL is a WebSocket; the static handshake is plain HTTP:
 #   GET  /         -> the HTML page (web_view.PAGE_HTML: a scaled <canvas> + JS replayer).
 #   GET  /assets   -> palette (MOY64 -> RGB) + petme128 font + open cart sheet/tilemap.
-#   GET  /ws       -> (Upgrade: websocket) the PERSISTENT live channel: frame_payload text
-#                     messages PUSH down per committed frame (capped), {"events":[...]} text
-#                     messages push up -> apply_events.
-#   GET/POST /frame, POST /input  -> the legacy HTTP poll transport, kept as a FALLBACK (the
-#                     unified page uses it only if the WebSocket never connects).
+#   GET  /ws       -> (Upgrade: websocket) the PERSISTENT live channel + the ONLY transport:
+#                     frame_payload text messages PUSH down per committed frame (capped),
+#                     {"events":[...]} text messages push up -> apply_events. (The legacy HTTP
+#                     poll transport -- GET/POST /frame + POST /input -- was removed; the page
+#                     is WebSocket-only now, matching the host web console.)
 #
 # WHY A WEBSOCKET (the #41 transport swap): the old transport opened a NEW TCP connection per
 # /frame plus a separate POST for input -- that per-frame handshake capped the browser at
@@ -64,18 +64,6 @@ except Exception:  # noqa: BLE001 -- host / CPython: provide ms-based shims
     def ticks_diff(a, b):
         return a - b
 
-# WebSocket handshake needs sha1 + base64. MicroPython exposes uhashlib/ubinascii; CPython has
-# hashlib/binascii. Both provide sha1 + b2a_base64, all the RFC 6455 accept computation uses.
-try:
-    import uhashlib as _hashlib
-except Exception:  # noqa: BLE001 -- host / CPython
-    import hashlib as _hashlib
-
-try:
-    import ubinascii as _binascii
-except Exception:  # noqa: BLE001 -- host / CPython
-    import binascii as _binascii
-
 # The SHARED web-view core: recorder + payload builders + serve logic + page + constants. On
 # the device this is the frozen top-level `web_view` module (staged from runtime/web_view.py by
 # build.sh); on the host / CPython it's runtime.web_view.
@@ -109,6 +97,16 @@ MAX_DEFSPR_BYTES_PER_FRAME = _wv.MAX_DEFSPR_BYTES_PER_FRAME
 WEB_FPS_CAP = _wv.WEB_FPS_CAP
 WEB_FRAME_INTERVAL_MS = _wv.WEB_FRAME_INTERVAL_MS
 WEB_MAX_BYTES_PER_SEC = _wv.WEB_MAX_BYTES_PER_SEC
+# The WebSocket handshake + byte framing now live in the SHARED web_view too (canonical home);
+# re-export them so _WSConn + the upgrade path below reference the module-level names UNCHANGED.
+ws_accept_key = _wv.ws_accept_key
+ws_handshake_response = _wv.ws_handshake_response
+ws_header_key = _wv.ws_header_key
+is_ws_upgrade = _wv.is_ws_upgrade
+ws_encode = _wv.ws_encode
+ws_decode = _wv.ws_decode
+WS_GUID = _wv.WS_GUID
+WS_MAX_FRAME = _wv.WS_MAX_FRAME
 
 
 DEFAULT_PORT = 8080
@@ -131,9 +129,8 @@ WEB_SEND_TIMEOUT = 2.0
 # nothing is pending, so this only caps a flood.
 POLL_MAX = 4
 
-# Max bytes a single inbound WS text frame may carry (input batches are tiny). A frame claiming
-# more than this is a protocol error and the conn is dropped.
-WS_MAX_FRAME = 8192
+# (WS_MAX_FRAME -- the max inbound WS text-frame size -- now lives in web_view alongside
+# ws_decode, which enforces it; it's re-exported above.)
 
 # Max bytes we let a WS conn's read buffer grow to before giving up (a peer that dribbles
 # header bytes without ever completing a frame). Dropping the conn is always safe.
@@ -205,135 +202,12 @@ def http_response(status, body, content_type="application/json"):
 
 
 # ---------------------------------------------------------------------------
-# WebSocket transport (RFC 6455): the LIVE channel. Pure functions (no socket) so the
-# handshake + framing are host-unit-testable; _WSConn below wires them to a real socket.
+# WebSocket transport (RFC 6455): the LIVE channel. The handshake + byte-framing helpers
+# (ws_accept_key / ws_handshake_response / ws_header_key / is_ws_upgrade / ws_encode / ws_decode
+# + WS_GUID / WS_MAX_FRAME) are now the SHARED web_view's -- re-exported above, so _WSConn + the
+# upgrade path reference the same module-level names UNCHANGED. Only the opcodes + _WSConn (the
+# socket wiring) live here.
 # ---------------------------------------------------------------------------
-
-# The RFC 6455 magic GUID concatenated with the client's Sec-WebSocket-Key before the sha1;
-# the base64 of that digest is the Sec-WebSocket-Accept the server echoes back.
-WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-
-
-def ws_accept_key(key):
-    """The Sec-WebSocket-Accept value for a client's Sec-WebSocket-Key (RFC 6455 4.2.2):
-    base64(sha1(key + WS_GUID)). `key` is the raw header value (str)."""
-    digest = _hashlib.sha1((key + WS_GUID).encode("utf-8")).digest()
-    return _binascii.b2a_base64(digest).decode("utf-8").strip()
-
-
-def ws_handshake_response(key):
-    """The full HTTP/1.1 101 Switching Protocols response (bytes) that completes a WebSocket
-    upgrade for the client key. No body; the socket then carries WS frames."""
-    accept = ws_accept_key(key)
-    head = (
-        "HTTP/1.1 101 Switching Protocols\r\n"
-        "Upgrade: websocket\r\n"
-        "Connection: Upgrade\r\n"
-        "Sec-WebSocket-Accept: %s\r\n\r\n"
-    ) % accept
-    return head.encode("utf-8")
-
-
-def ws_header_key(raw):
-    """Pull the Sec-WebSocket-Key header value out of a raw request (bytes/str), or None.
-    Used by the upgrade path; case-insensitive header name match."""
-    if isinstance(raw, bytes):
-        try:
-            text = raw.decode("utf-8")
-        except Exception:  # noqa: BLE001
-            text = raw.decode("latin-1")
-    else:
-        text = raw
-    for ln in text.replace("\r\n", "\n").split("\n"):
-        c = ln.find(":")
-        if c > 0 and ln[:c].strip().lower() == "sec-websocket-key":
-            return ln[c + 1:].strip()
-    return None
-
-
-def is_ws_upgrade(raw):
-    """True when a raw request asks to upgrade to a WebSocket (an `Upgrade: websocket`
-    header). Case-insensitive; tolerant of a comma-list Connection header."""
-    if isinstance(raw, bytes):
-        try:
-            text = raw.decode("utf-8")
-        except Exception:  # noqa: BLE001
-            text = raw.decode("latin-1")
-    else:
-        text = raw
-    for ln in text.replace("\r\n", "\n").split("\n"):
-        c = ln.find(":")
-        if c > 0 and ln[:c].strip().lower() == "upgrade":
-            if "websocket" in ln[c + 1:].strip().lower():
-                return True
-    return False
-
-
-def ws_encode(payload, opcode=0x1):
-    """Encode an UNMASKED server->client WebSocket frame (RFC 6455 5.2). `payload` is bytes
-    (or str -> utf-8). opcode 0x1 = text (the default), 0xA = pong. FIN is always set (we never
-    fragment outbound). 7/16/64-bit length forms per the spec; no mask."""
-    if isinstance(payload, str):
-        payload = payload.encode("utf-8")
-    n = len(payload)
-    b0 = 0x80 | (opcode & 0x0F)              # FIN + opcode
-    if n < 126:
-        header = bytes((b0, n))
-    elif n < 65536:
-        header = bytes((b0, 126, (n >> 8) & 0xFF, n & 0xFF))
-    else:
-        header = bytes((b0, 127,
-                        (n >> 56) & 0xFF, (n >> 48) & 0xFF, (n >> 40) & 0xFF,
-                        (n >> 32) & 0xFF, (n >> 24) & 0xFF, (n >> 16) & 0xFF,
-                        (n >> 8) & 0xFF, n & 0xFF))
-    return header + payload
-
-
-def ws_decode(buf):
-    """Decode ONE client->server WebSocket frame from the front of `buf` (bytes).
-
-    Returns (opcode, payload, consumed):
-      * opcode is the frame opcode, payload the UNMASKED bytes, consumed the frame length.
-      * (None, None, 0)  -> not enough bytes yet for a complete frame (try again next read).
-      * (-1, None, 0)    -> a protocol error (oversize / an unmasked server-bound frame) -> drop.
-
-    Client frames are ALWAYS masked (RFC 6455 5.3), so the MASK bit must be set; the 4-byte key
-    XOR-unmasks the payload. 126/127 extended lengths supported; over WS_MAX_FRAME is an error."""
-    n = len(buf)
-    if n < 2:
-        return (None, None, 0)
-    b0 = buf[0]
-    b1 = buf[1]
-    opcode = b0 & 0x0F
-    masked = (b1 & 0x80) != 0
-    ln = b1 & 0x7F
-    off = 2
-    if ln == 126:
-        if n < off + 2:
-            return (None, None, 0)
-        ln = (buf[off] << 8) | buf[off + 1]
-        off += 2
-    elif ln == 127:
-        if n < off + 8:
-            return (None, None, 0)
-        ln = 0
-        for i in range(8):
-            ln = (ln << 8) | buf[off + i]
-        off += 8
-    if ln > WS_MAX_FRAME:
-        return (-1, None, 0)                 # oversize -> drop the conn
-    if not masked:
-        return (-1, None, 0)                 # a client frame MUST be masked
-    if n < off + 4 + ln:
-        return (None, None, 0)               # mask key + payload not all here yet
-    mask = buf[off:off + 4]
-    off += 4
-    raw = buf[off:off + ln]
-    # Unmask: payload[i] ^ mask[i % 4]. bytearray for in-place XOR (works on host + MP).
-    out = bytearray(raw)
-    for i in range(ln):
-        out[i] ^= mask[i & 3]
-    return (opcode, bytes(out), off + ln)
 
 
 # WebSocket opcodes we care about.
@@ -821,9 +695,9 @@ class WebServer:
         return (method, path, body, buf[:head_end])
 
     def _serve_http(self, conn, method, path, body):
-        """Serve a one-shot HTTP request (the page, /assets, or the legacy /frame & /input
-        fallbacks) and close the conn. The LIVE channel is the WebSocket; these stay so the page
-        can still load over HTTP and a poll-only client can fall back."""
+        """Serve a one-shot HTTP request (the page or /assets) and close the conn. The LIVE
+        channel is the WebSocket; only the page + assets still load over plain HTTP (the legacy
+        /frame & /input poll endpoints were removed -- the page is WebSocket-only now)."""
         self.requests += 1
         if method == "GET" and path in ("/", "/index.html"):
             self._http_send_close(conn, http_response(200, PAGE_HTML, "text/html; charset=utf-8"))
@@ -832,34 +706,6 @@ class WebServer:
             # forget what we've shipped -> the next frame re-ships the defsprs it references.
             self.reset_served()
             self._http_send_close(conn, http_response(200, json.dumps(self.provider.assets())))
-        elif path == "/frame" and method in ("GET", "POST"):
-            # LEGACY poll fallback: input rides along on a POST body, then return the frame.
-            if method == "POST" and body:
-                try:
-                    payload = json.loads(body)
-                    events = (payload.get("events", []) if isinstance(payload, dict)
-                              else payload)
-                    if isinstance(events, list):
-                        self.provider.apply(events)
-                except Exception:  # noqa: BLE001 -- a bad body just yields no events
-                    pass
-            cmds, cart = self.provider.frame()
-            cmds = self.served_frame(cmds)
-            self._frames_pushed += 1
-            self._http_send_close(conn, http_response(200, json.dumps(
-                frame_payload(cmds, cart, self.recorder.atlas_gen, self._perf_snapshot()))))
-        elif method == "POST" and path == "/input":
-            events = []
-            if body:
-                try:
-                    payload = json.loads(body)
-                    events = payload.get("events", []) if isinstance(payload, dict) else payload
-                    if not isinstance(events, list):
-                        events = []
-                except Exception:  # noqa: BLE001 -- a bad body -> no events, still 200
-                    events = []
-            self.provider.apply(events)
-            self._http_send_close(conn, http_response(200, '{"ok":true}'))
         else:
             self._http_send_close(conn, http_response(404, "not found",
                                                       "text/plain; charset=utf-8"))

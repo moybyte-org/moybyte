@@ -938,6 +938,161 @@ def frame_payload(cmds, cart_title, gen=0, perf=None, audio=""):
 
 
 # ---------------------------------------------------------------------------
+# WebSocket transport primitives (RFC 6455): the LIVE channel's handshake + byte framing.
+# CANONICAL HOME for both transports -- the DEVICE raw-socket server (moy_webserver._WSConn,
+# which re-exports these) AND the HOST http.server (tools/web_console). Pure functions, no
+# socket, so the handshake + framing stay host-unit-testable and byte-identical on both.
+#
+# MicroPython-safe: `ws_accept_key` needs sha1 + base64, imported LAZILY inside it
+# (uhashlib/ubinascii on MicroPython, hashlib/binascii on CPython) so this module keeps NO
+# top-level imports beyond json -- the portable-subset rule that lets the device freeze it.
+# The byte framing (ws_encode/ws_decode) is pure and needs no imports at all.
+# ---------------------------------------------------------------------------
+
+# The RFC 6455 magic GUID concatenated with the client's Sec-WebSocket-Key before the sha1;
+# the base64 of that digest is the Sec-WebSocket-Accept the server echoes back.
+WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+# Max bytes a single inbound WS text frame may carry (input batches are tiny). A frame claiming
+# more than this is a protocol error and the conn is dropped (enforced in ws_decode).
+WS_MAX_FRAME = 8192
+
+
+def ws_accept_key(key):
+    """The Sec-WebSocket-Accept value for a client's Sec-WebSocket-Key (RFC 6455 4.2.2):
+    base64(sha1(key + WS_GUID)). `key` is the raw header value (str).
+
+    sha1 + base64 are imported HERE (lazily, not at module top) so web_view stays import-free
+    on both runtimes: MicroPython exposes uhashlib/ubinascii, CPython hashlib/binascii; both
+    provide sha1 + b2a_base64, all the accept computation uses."""
+    try:
+        import uhashlib as _hashlib
+    except Exception:  # noqa: BLE001 -- host / CPython
+        import hashlib as _hashlib
+    try:
+        import ubinascii as _binascii
+    except Exception:  # noqa: BLE001 -- host / CPython
+        import binascii as _binascii
+    digest = _hashlib.sha1((key + WS_GUID).encode("utf-8")).digest()
+    return _binascii.b2a_base64(digest).decode("utf-8").strip()
+
+
+def ws_handshake_response(key):
+    """The full HTTP/1.1 101 Switching Protocols response (bytes) that completes a WebSocket
+    upgrade for the client key. No body; the socket then carries WS frames."""
+    accept = ws_accept_key(key)
+    head = (
+        "HTTP/1.1 101 Switching Protocols\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        "Sec-WebSocket-Accept: %s\r\n\r\n"
+    ) % accept
+    return head.encode("utf-8")
+
+
+def ws_header_key(raw):
+    """Pull the Sec-WebSocket-Key header value out of a raw request (bytes/str), or None.
+    Used by the upgrade path; case-insensitive header name match."""
+    if isinstance(raw, bytes):
+        try:
+            text = raw.decode("utf-8")
+        except Exception:  # noqa: BLE001
+            text = raw.decode("latin-1")
+    else:
+        text = raw
+    for ln in text.replace("\r\n", "\n").split("\n"):
+        c = ln.find(":")
+        if c > 0 and ln[:c].strip().lower() == "sec-websocket-key":
+            return ln[c + 1:].strip()
+    return None
+
+
+def is_ws_upgrade(raw):
+    """True when a raw request asks to upgrade to a WebSocket (an `Upgrade: websocket`
+    header). Case-insensitive; tolerant of a comma-list Connection header."""
+    if isinstance(raw, bytes):
+        try:
+            text = raw.decode("utf-8")
+        except Exception:  # noqa: BLE001
+            text = raw.decode("latin-1")
+    else:
+        text = raw
+    for ln in text.replace("\r\n", "\n").split("\n"):
+        c = ln.find(":")
+        if c > 0 and ln[:c].strip().lower() == "upgrade":
+            if "websocket" in ln[c + 1:].strip().lower():
+                return True
+    return False
+
+
+def ws_encode(payload, opcode=0x1):
+    """Encode an UNMASKED server->client WebSocket frame (RFC 6455 5.2). `payload` is bytes
+    (or str -> utf-8). opcode 0x1 = text (the default), 0xA = pong. FIN is always set (we never
+    fragment outbound). 7/16/64-bit length forms per the spec; no mask."""
+    if isinstance(payload, str):
+        payload = payload.encode("utf-8")
+    n = len(payload)
+    b0 = 0x80 | (opcode & 0x0F)              # FIN + opcode
+    if n < 126:
+        header = bytes((b0, n))
+    elif n < 65536:
+        header = bytes((b0, 126, (n >> 8) & 0xFF, n & 0xFF))
+    else:
+        header = bytes((b0, 127,
+                        (n >> 56) & 0xFF, (n >> 48) & 0xFF, (n >> 40) & 0xFF,
+                        (n >> 32) & 0xFF, (n >> 24) & 0xFF, (n >> 16) & 0xFF,
+                        (n >> 8) & 0xFF, n & 0xFF))
+    return header + payload
+
+
+def ws_decode(buf):
+    """Decode ONE client->server WebSocket frame from the front of `buf` (bytes).
+
+    Returns (opcode, payload, consumed):
+      * opcode is the frame opcode, payload the UNMASKED bytes, consumed the frame length.
+      * (None, None, 0)  -> not enough bytes yet for a complete frame (try again next read).
+      * (-1, None, 0)    -> a protocol error (oversize / an unmasked server-bound frame) -> drop.
+
+    Client frames are ALWAYS masked (RFC 6455 5.3), so the MASK bit must be set; the 4-byte key
+    XOR-unmasks the payload. 126/127 extended lengths supported; over WS_MAX_FRAME is an error."""
+    n = len(buf)
+    if n < 2:
+        return (None, None, 0)
+    b0 = buf[0]
+    b1 = buf[1]
+    opcode = b0 & 0x0F
+    masked = (b1 & 0x80) != 0
+    ln = b1 & 0x7F
+    off = 2
+    if ln == 126:
+        if n < off + 2:
+            return (None, None, 0)
+        ln = (buf[off] << 8) | buf[off + 1]
+        off += 2
+    elif ln == 127:
+        if n < off + 8:
+            return (None, None, 0)
+        ln = 0
+        for i in range(8):
+            ln = (ln << 8) | buf[off + i]
+        off += 8
+    if ln > WS_MAX_FRAME:
+        return (-1, None, 0)                 # oversize -> drop the conn
+    if not masked:
+        return (-1, None, 0)                 # a client frame MUST be masked
+    if n < off + 4 + ln:
+        return (None, None, 0)               # mask key + payload not all here yet
+    mask = buf[off:off + 4]
+    off += 4
+    raw = buf[off:off + ln]
+    # Unmask: payload[i] ^ mask[i % 4]. bytearray for in-place XOR (works on host + MP).
+    out = bytearray(raw)
+    for i in range(ln):
+        out[i] ^= mask[i & 3]
+    return (opcode, bytes(out), off + ln)
+
+
+# ---------------------------------------------------------------------------
 # Input event injection: browser events -> the console's InputState + Pointer + hooks. The
 # host ConsoleDriver and the device run_desktop wire the hooks to their own input paths.
 # ---------------------------------------------------------------------------
@@ -1211,13 +1366,14 @@ def replay_to_canvas(commands, canvas, layers=None, assets=None):
 # The browser page: a self-contained replayer for the payload-diet protocol (#41). ONE page
 # for BOTH transports. It fetches /assets (palette + font + sheet + tilemap) ONCE over HTTP,
 # then opens a persistent WebSocket (/ws) for the live channel (frames PUSH down, input pushes
-# up) -- and if the WS never connects (a poll-only server like the host web console) it FALLS
-# BACK to HTTP polling (GET /frame + POST /input). Replay is PIXEL-IDENTICAL to the panel:
+# up). The live channel is WebSocket-ONLY now -- BOTH the device (raw-socket) and the host
+# (http.server) speak WS, so a closed socket just reconnects; there is no HTTP poll fallback.
+# Replay is PIXEL-IDENTICAL to the panel:
 #   defspr  -> cache the bitmap by index (ATL[index]).
 #   spr     -> atlas form (by index) OR self-contained (full-pixel) -> blit with scale/flip.
 #   map     -> walk the CACHED tilemap over the CACHED sheet (kept current by settiles).
 #   deflayer/blit_layer -> replay a layer's stream into an off-screen buffer once, then blit.
-# On a cart change (/frame.cart != assCart) -> refetch /assets; ATL/LAY reset on `gen` change.
+# On a cart change (a frame's cart != assCart) -> refetch /assets; ATL/LAY reset on `gen` change.
 # ---------------------------------------------------------------------------
 
 PAGE_HTML = """<!doctype html><html><head><meta charset=utf-8>
@@ -1406,33 +1562,24 @@ if(f.audio)playPCM(f.audio);
 var t=(window.performance&&performance.now)?performance.now():Date.now();if(HUD.last){var inst=1000/Math.max(1,t-HUD.last);
 HUD.fps=HUD.fps?HUD.fps+(inst-HUD.fps)*0.2:inst;}HUD.last=t;if(HUD.on)drawHud();
 if(!ok){ok=true;sEl.textContent="live";sEl.style.color="#00e436";}}
-// THE LIVE CHANNEL (#41): a persistent WebSocket. Frames PUSH down (ws.onmessage -> df),
-// input pushes up (pump() sends queued events per tick). If the WS never connects (a
-// poll-only server -- the host web console), fall back to HTTP polling (GET /frame + POST
-// /input) so the SAME page works on both.
-var ws=null,wsOpen=false,reconn=null,wsFails=0,poll=false,pollTimer=null,inflight=false;
+// THE LIVE CHANNEL (#41): a persistent WebSocket, the ONLY transport now. Frames PUSH down
+// (ws.onmessage -> df), input pushes up (pump() sends queued events per tick). BOTH the device
+// and the host speak WS, so a closed/failed socket just reconnects with a small backoff -- no
+// HTTP poll fallback. The onmessage byte-count feeds the perf log's bw/avg on both.
+var ws=null,wsOpen=false,reconn=null;
 function pump(){var v=pv();if(v[0]||v[1])send({type:"pan",dx:v[0],dy:v[1]});
 if(!q.length)return;var b=q;q=[];
-if(poll){fetch("/input",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({events:b})}).catch(function(){});return;}
 if(wsOpen){try{ws.send(JSON.stringify({events:b}));}catch(e){}}}
-function pollFrame(){if(inflight)return;inflight=true;
-fetch("/frame").then(function(r){return r.json();}).then(function(f){inflight=false;
-PERF.f++;df(f);}).catch(function(){inflight=false;sEl.textContent="reconnecting...";sEl.style.color="#ff004d";});}
-function startPoll(){if(poll)return;poll=true;ok=false;sEl.textContent="live";sEl.style.color="#00e436";
-if(pollTimer)clearInterval(pollTimer);pollTimer=setInterval(pollFrame,Math.round(1000/FPS));}
-function connect(){if(poll)return;if(reconn){clearTimeout(reconn);reconn=null;}
+function connect(){if(reconn){clearTimeout(reconn);reconn=null;}
 try{ws=new WebSocket((location.protocol=="https:"?"wss://":"ws://")+location.host+"/ws");}
 catch(e){retry();return;}
-ws.onopen=function(){wsOpen=true;wsFails=0;ok=false;sEl.textContent="live";sEl.style.color="#00e436";};
+ws.onopen=function(){wsOpen=true;ok=false;sEl.textContent="live";sEl.style.color="#00e436";};
 ws.onmessage=function(ev){var n=ev.data.length;HUD.kb=n/1024;PERF.f++;PERF.b+=n;if(n>PERF.pk)PERF.pk=n;
 var f;try{f=JSON.parse(ev.data);}catch(e){return;}df(f);};
 ws.onclose=function(){wsOpen=false;retry();};
 ws.onerror=function(){try{ws.close();}catch(e){}};}
-// Reconnect with a small fixed backoff; after a couple failed connects with no open, the
-// server is poll-only -> fall back to HTTP polling.
-function retry(){if(poll)return;wsOpen=false;wsFails++;
-if(wsFails>=2){startPoll();return;}
-sEl.textContent="reconnecting...";sEl.style.color="#ff004d";
+// Reconnect with a small fixed backoff (the socket dropped / the server restarted).
+function retry(){wsOpen=false;sEl.textContent="reconnecting...";sEl.style.color="#ff004d";
 if(reconn)return;reconn=setTimeout(function(){reconn=null;connect();},800);}
 function drawHud(){var n=0;for(var i=0;i<ATL.length;i++)if(ATL[i])n++;
 var u=HUD.unknown?'<span class=w>'+HUD.unknown+'</span>':'0';
@@ -1440,8 +1587,8 @@ HUD.el.innerHTML="fps <b>"+HUD.fps.toFixed(1)+"</b>   "+HUD.kb.toFixed(2)+" KB/f
 window.addEventListener("keydown",function(e){if(e.key==="`"||e.key==="~"){HUD.on=!HUD.on;
 HUD.el.style.display=HUD.on?"block":"none";if(HUD.on)drawHud();e.preventDefault();}});
 document.addEventListener("pointerdown",ensureAudio);
-// Fetch /assets once over HTTP, then open the WebSocket (poll fallback if it never connects);
-// pump queued input up on a timer.
+// Fetch /assets once over HTTP, then open the WebSocket live channel; pump queued input up on
+// a timer.
 getA().then(function(){connect();setInterval(pump,Math.round(1000/FPS));setInterval(plog,PERF_MS);}).catch(function(){
 sEl.textContent="no assets";sEl.style.color="#ff004d";});cv.focus();
 </script></body></html>"""

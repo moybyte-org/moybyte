@@ -14,22 +14,26 @@ replayer redraws it in the browser. These tests cover both halves:
     way the map() agent validated its C kernel against the Python rasterizer).
 
   * THE SERVER (localhost only, ephemeral port, no external network):
-      GET  /          -> the HTML page (a <canvas> + the replayer/poller JS).
+      GET  /          -> the HTML page (a <canvas> + the replayer JS).
       GET  /assets    -> JSON palette + petme128 font + the open cart's sheet.
-      GET  /frame     -> JSON {"cmds":[...], "cart":...}; each request steps the
-                         console one frame and returns the recorded draw calls.
-      POST /input     -> a tap on a cart tile advances the live Workstation.
+      GET  /ws        -> the persistent WebSocket live channel: the server PUSHES a
+                         stepped frame ({"cmds","cart","gen","audio"}) per tick and
+                         the browser pushes {"events":[...]} input UP -- one socket,
+                         the SAME transport the device speaks (no HTTP poll fallback).
 """
 
+import base64
 import http.client
 import json
 import os
+import socket
 import threading
 import time
 
 import pytest
 
 from runtime import host_app
+from runtime import web_view
 from runtime.canvas import Canvas
 from runtime.web_view import CommandCanvas, ServedState, replay_to_canvas
 from tools import web_console
@@ -485,15 +489,91 @@ def _get_json(host, port, path):
     return status, ctype, json.loads(body.decode("utf-8"))
 
 
-def _post_input(host, port, events):
-    conn = http.client.HTTPConnection(host, port, timeout=5)
-    try:
-        body = json.dumps({"events": events}).encode("utf-8")
-        conn.request("POST", "/input", body, {"Content-Type": "application/json"})
-        resp = conn.getresponse()
-        return resp.status, resp.read()
-    finally:
-        conn.close()
+def _mask_client_frame(payload, opcode=0x1, mask=b"\x21\x9a\x03\x7c"):
+    """Build a MASKED client->server WebSocket frame (the shape a browser sends), so the test
+    client feeds the host server real wire bytes. Mirrors RFC 6455 5.3 + the device test's
+    helper: MASK bit set + 4-byte key, payload XOR mask[i%4], the size-appropriate length form."""
+    if isinstance(payload, str):
+        payload = payload.encode("utf-8")
+    n = len(payload)
+    b0 = 0x80 | (opcode & 0x0F)
+    if n < 126:
+        hdr = bytes((b0, 0x80 | n))
+    elif n < 65536:
+        hdr = bytes((b0, 0x80 | 126, (n >> 8) & 0xFF, n & 0xFF))
+    else:
+        hdr = bytes((b0, 0x80 | 127)) + bytes((n >> (8 * (7 - i))) & 0xFF for i in range(8))
+    body = bytearray(payload)
+    for i in range(n):
+        body[i] ^= mask[i & 3]
+    return hdr + mask + bytes(body)
+
+
+class _WSClient:
+    """A tiny raw-socket WebSocket client for the host server: do the RFC 6455 handshake against
+    /ws (verifying the Sec-WebSocket-Accept via the SHARED web_view.ws_accept_key), then send
+    masked text frames UP and read the server's UNMASKED text frames DOWN. Dependency-free (no
+    `websockets` lib) so it always runs -- the host twin of the device's WS round-trip test."""
+
+    def __init__(self, host, port):
+        self.s = socket.create_connection((host, port), timeout=5)
+        key = base64.b64encode(os.urandom(16)).decode("ascii")
+        req = ("GET /ws HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\n"
+               "Connection: Upgrade\r\nSec-WebSocket-Key: %s\r\n"
+               "Sec-WebSocket-Version: 13\r\n\r\n" % (host, key))
+        self.s.sendall(req.encode("ascii"))
+        resp = b""
+        while b"\r\n\r\n" not in resp:
+            chunk = self.s.recv(4096)
+            if not chunk:
+                raise AssertionError("server closed during the WS handshake")
+            resp += chunk
+        head, _, rest = resp.partition(b"\r\n\r\n")
+        assert head.startswith(b"HTTP/1.1 101"), head
+        assert web_view.ws_accept_key(key).encode("ascii") in head, "bad Sec-WebSocket-Accept"
+        self.buf = rest                       # server bytes read past the 101 (first frame may glue)
+
+    def _need(self, n):
+        while len(self.buf) < n:
+            self.s.settimeout(5)
+            chunk = self.s.recv(4096)
+            if not chunk:
+                raise AssertionError("server closed before a full frame arrived")
+            self.buf += chunk
+
+    def recv_text(self):
+        """Read + return ONE server->client text frame's payload (bytes). Server frames are
+        unmasked; supports the 7/16/64-bit length forms."""
+        self._need(2)
+        ln = self.buf[1] & 0x7F
+        masked = (self.buf[1] & 0x80) != 0
+        off = 2
+        if ln == 126:
+            self._need(4)
+            ln = (self.buf[2] << 8) | self.buf[3]
+            off = 4
+        elif ln == 127:
+            self._need(10)
+            ln = 0
+            for i in range(8):
+                ln = (ln << 8) | self.buf[2 + i]
+            off = 10
+        if masked:
+            self._need(off + 4)
+            off += 4
+        self._need(off + ln)
+        payload = self.buf[off:off + ln]
+        self.buf = self.buf[off + ln:]
+        return payload
+
+    def send_events(self, events):
+        self.s.sendall(_mask_client_frame(json.dumps({"events": events})))
+
+    def close(self):
+        try:
+            self.s.close()
+        except OSError:
+            pass
 
 
 def test_index_serves_html_page(server):
@@ -502,12 +582,12 @@ def test_index_serves_html_page(server):
     assert status == 200
     assert "text/html" in ctype
     text = body.decode("utf-8")
-    # The page is the replayer thin client: a scaled <canvas>, fetches /assets and
-    # /frame, replays commands, and POSTs to /input. Assert the load-bearing pieces.
+    # The page is the replayer thin client: a scaled <canvas>, fetches /assets over HTTP, then
+    # opens the persistent WebSocket (/ws) live channel -- no HTTP poll endpoints anymore.
     assert "<canvas" in text
-    assert "/frame" in text
     assert "/assets" in text
-    assert "/input" in text
+    assert "/ws" in text and "WebSocket" in text
+    assert "/frame" not in text and "/input" not in text
 
 
 def test_assets_returns_palette_font_and_sheet(server):
@@ -528,119 +608,42 @@ def test_assets_returns_palette_font_and_sheet(server):
     assert obj["cart"] is None
 
 
-def test_assets_includes_open_cart_sheet(server):
-    """After opening a cart, /assets carries that cart's sprite sheet + tilemap and
-    the cart title (so the client refetches on a cart change)."""
+def test_ws_roundtrip_pushes_frames_and_applies_input(server):
+    """A real-localhost WebSocket round-trip against the HOST server -- the twin of the device's
+    test_ws_end_to_end_over_localhost. Handshake on /ws, receive a PUSHED frame (which must
+    replay to non-blank pixels -- the pixel cross-check over the wire), then push an input event
+    UP the socket (tap tile 0) and assert the LIVE console reacts (launcher -> desktop), proving
+    browser input reaches the real console. /assets then advertises the freshly opened cart's
+    sheet + title (folding in the open-cart assets path)."""
     console, host, port = server
-    # Open tile 0.
-    _post_input(host, port, [{"type": "down", "x": 160, "y": 52}])
-    _get(host, port, "/frame")
-    _post_input(host, port, [{"type": "up"}])
-    deadline = time.time() + 3
-    while console.ws.screen != "desktop" and time.time() < deadline:
-        _get(host, port, "/frame")
-    assert console.ws.screen == "desktop"
-    status, _ctype, obj = _get_json(host, port, "/assets")
-    assert status == 200
-    assert obj["cart"] is not None
-    assert obj["sheet"] is not None
-    sheet = obj["sheet"]
-    assert sheet["tile"] == 8
-    assert len(sheet["pix"]) == sheet["w"] * sheet["h"]
-
-
-def test_frame_returns_command_list(server):
-    """GET /frame steps the console and returns a JSON command list (the recorded
-    draw calls), not pixels. The launcher draws something, so the list is non-empty
-    and starts with a clear/fill."""
-    _console, host, port = server
-    status, ctype, obj = _get_json(host, port, "/frame")
-    assert status == 200
-    assert "application/json" in ctype
-    cmds = obj["cmds"]
-    assert isinstance(cmds, list) and len(cmds) > 0
-    # Every command is a list whose head is a known op name.
-    ops = {"cls", "pix", "line", "rect", "rectb", "circ", "circb", "spr", "print",
-           "reset_state", "camera", "clip", "pal", "palt"}    # +draw state (#11)
-    assert all(isinstance(c, list) and c[0] in ops for c in cmds)
-    # The frame opens by clearing/painting the wallpaper backdrop.
-    assert any(c[0] in ("cls", "rect") for c in cmds)
-
-
-def test_frame_is_replayable_to_valid_pixels(server):
-    """The streamed command list must replay (via the Python reference replayer) to
-    a non-blank 320x240 frame -- the same render path the browser performs in JS."""
-    _console, host, port = server
-    _s, _c, obj = _get_json(host, port, "/frame")
-    cv = Canvas(WIDTH, HEIGHT)
-    replay_to_canvas(obj["cmds"], cv)
-    assert len(cv.buf) == WIDTH * HEIGHT
-    assert len(set(cv.buf)) > 1, "the launcher frame should not be a single flat color"
-
-
-def test_frame_advances_each_request(server):
-    """Each GET /frame steps the console one frame, so a state change made via POST
-    /input shows up in a later frame's commands (the screen is live)."""
-    console, host, port = server
-    ws = console.ws
-    _post_input(host, port, [{"type": "down", "x": 160, "y": 52}])
-    _get(host, port, "/frame")
-    _post_input(host, port, [{"type": "up"}])
-    deadline = time.time() + 3
-    while time.time() < deadline:
-        _get(host, port, "/frame")
-        if ws.screen == "desktop":
-            break
-    assert ws.screen == "desktop"
-
-
-def test_post_input_tap_opens_a_cart(server):
-    """A tap on a launcher tile advances the live Workstation from launcher into the
-    desktop -- proving browser input reaches the real console (mapped like pygame)."""
-    console, host, port = server
-    ws = console.ws
-    assert ws.screen == "launcher"
-    assert ws.launcher.items, "system carts should be seeded so a tile exists"
-
-    status, _ = _post_input(host, port, [{"type": "down", "x": 160, "y": 52}])
-    assert status == 200
-    _get(host, port, "/frame")
-    status, _ = _post_input(host, port, [{"type": "up"}])
-    assert status == 200
-    deadline = time.time() + 3
-    while ws.screen == "launcher" and time.time() < deadline:
-        _get(host, port, "/frame")
-    assert ws.screen == "desktop"
-
-
-def test_post_input_home_button_returns_to_launcher(server):
-    """The browser key 'H' maps to the `home` button press; from the desktop it
-    returns to the launcher -- a second proof that mapped key input drives state."""
-    console, host, port = server
-    ws = console.ws
-    _post_input(host, port, [{"type": "down", "x": 160, "y": 52}])
-    _get(host, port, "/frame")
-    _post_input(host, port, [{"type": "up"}])
-    deadline = time.time() + 3
-    while ws.screen == "launcher" and time.time() < deadline:
-        _get(host, port, "/frame")
-    assert ws.screen == "desktop"
-
-    _post_input(host, port, [{"type": "press", "name": "home"}])
-    deadline = time.time() + 3
-    while ws.screen != "launcher" and time.time() < deadline:
-        _get(host, port, "/frame")
-    assert ws.screen == "launcher", "the home button should return to the launcher"
-
-
-def test_unknown_button_name_is_ignored(server):
-    """A stray/unknown button name must not reach the console, so a buggy client
-    can't wedge it. The console stays on the launcher and keeps framing."""
-    console, host, port = server
-    status, _ = _post_input(host, port, [{"type": "press", "name": "self_destruct"}])
-    assert status == 200
-    s, c, obj = _get_json(host, port, "/frame")
-    assert s == 200 and isinstance(obj["cmds"], list)
+    assert console.ws.screen == "launcher"
+    assert console.ws.launcher.items, "system carts should be seeded so a tile exists"
+    c = _WSClient(host, port)
+    try:
+        # A frame PUSHES down; it must replay to a non-blank 320x240 screen (the JS twin's path).
+        f = json.loads(c.recv_text().decode("utf-8"))
+        assert isinstance(f["cmds"], list) and f["cmds"], "the pushed frame must carry commands"
+        assert f["cart"] is None                       # launcher home: no open cart yet
+        cv = Canvas(WIDTH, HEIGHT)
+        replay_to_canvas(f["cmds"], cv)
+        assert len(set(cv.buf)) > 1, "the pushed frame must replay to a non-blank screen"
+        # Input pushes UP the same socket: tap tile 0. Send down, let the server drain it + step
+        # a frame or two with the tap held, then release -- mirrors the down -> frame -> up order.
+        c.send_events([{"type": "down", "x": 160, "y": 52}])
+        time.sleep(0.2)
+        c.send_events([{"type": "up"}])
+        deadline = time.time() + 5
+        while console.ws.screen != "desktop" and time.time() < deadline:
+            c.recv_text()                              # keep the socket drained while it transitions
+        assert console.ws.screen == "desktop", (
+            "browser input over the WebSocket must drive the live console")
+    finally:
+        c.close()
+    # /assets now advertises the open cart's sheet + title (the open-cart assets path).
+    _s, _ctype, obj = _get_json(host, port, "/assets")
+    assert obj["cart"] is not None and obj["sheet"] is not None
+    assert obj["sheet"]["tile"] == 8
+    assert len(obj["sheet"]["pix"]) == obj["sheet"]["w"] * obj["sheet"]["h"]
 
 
 def test_lan_url_falls_back_to_localhost(monkeypatch):

@@ -16,10 +16,12 @@ every frame, so after `host_app.build_workstation()` we just reassign
 `ws.canvas = CommandCanvas(...)`. (`ws.comp` stays the host `_NullComp`, whose
 flush() is a no-op -- there's no panel to flush on the host.)
 
-Architecture (a pure-stdlib HTTP server, polling protocol -- no third-party web
-deps, no hand-rolled WebSockets):
+Architecture (a pure-stdlib HTTP server + a hand-rolled WebSocket -- no third-party
+web deps). The page + assets load over plain HTTP; the LIVE channel is a persistent
+WebSocket, the SAME transport the device speaks (the two share web_view.PAGE_HTML +
+the ws_* framing), so there is ONE path -- no HTTP poll fallback:
 
-  GET  /          -> the static HTML page (a scaled <canvas> + JS replayer/poller).
+  GET  /          -> the static HTML page (a scaled <canvas> + JS replayer).
   GET  /assets    -> the STATIC stuff the browser needs to render the command list:
                        { "w","h",                       # logical surface size
                          "palette": [[r,g,b], ...64],    # MOY64 index -> RGB
@@ -28,14 +30,12 @@ deps, no hand-rolled WebSockets):
                          "tilemap": {...} | null,        # open cart's tilemap
                          "cart": "<title or null>" }     # for cart-change detection
                      The page refetches /assets when "cart" changes (new sheet).
-  GET  /frame     -> JSON {"cmds":[...], "cart":"<title>"}: the recorded draw calls
-                     for ONE freshly-stepped frame. Each request: clear the canvas's
-                     buffer, `driver.frame(dt)` (the console draws into CommandCanvas),
-                     then `take_commands()` and return them. "cart" lets the client
-                     notice a cart change and refetch /assets.
-  POST /input     -> JSON of browser events; replayed through the SAME host
-                     `ConsoleDriver` the pygame sim uses, so the console reacts
-                     identically (unchanged from v1):
+  GET  /ws        -> (Upgrade: websocket) the PERSISTENT live channel. Per tick the
+                     server steps the console ONE frame and PUSHES a frame_payload
+                     ({"cmds","cart","gen","audio"}) text message down; the browser
+                     pushes {"events":[...]} text messages UP, replayed through the
+                     SAME host `ConsoleDriver` the pygame sim uses so the console
+                     reacts identically:
                        {"type":"move", "x":..,"y":..}      -> touch_drag
                        {"type":"down", "x":..,"y":..}      -> touch (a tap)
                        {"type":"up"}                       -> touch_up
@@ -65,8 +65,10 @@ import argparse
 import base64
 import json
 import os
+import socket
 import sys
 import threading
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -76,9 +78,10 @@ from runtime import audio as _audio  # noqa: E402  (engine sample rate for the b
 from runtime import host_app  # noqa: E402  (runs the SHARED console.Workstation)
 from runtime import palette  # noqa: E402  (MOY64 index -> RGB)
 # The SHARED web-view core (canonical source; the DEVICE freezes the same file). The host is a
-# thin http.server transport over it: it swaps in web_view.CommandCanvas as the console's
-# system canvas, ships web_view.PAGE_HTML, and routes /frame through web_view.ServedState so it
-# runs the EXACT same serve path (serve-time defspr/deflayer + gen) the device does.
+# thin http.server + WebSocket transport over it: it swaps in web_view.CommandCanvas as the
+# console's system canvas, ships web_view.PAGE_HTML, drives the live channel with the SAME
+# web_view.ws_* framing the device uses, and routes each pushed frame through web_view.ServedState
+# so it runs the EXACT same serve path (serve-time defspr/deflayer + gen) the device does.
 from runtime import web_view  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -117,7 +120,7 @@ class WebConsole:
         self.canvas = web_view.CommandCanvas(sw, sh, font_scale=self.ws._effective_font_scale())
         # SERVE-TIME defspr/deflayer ship-once + gen -- the SAME shared logic the device runs,
         # against this canvas's recorder. served_frame() prepends any not-yet-shipped deflayer
-        # (host sprites are self-contained, so no defspr) so /frame stays self-contained.
+        # (host sprites are self-contained, so no defspr) so each pushed frame stays self-contained.
         self._served = web_view.ServedState(self.canvas._rec)
         if self.ws._sys_canvas is None:
             # Degradation (320x240): one surface -- the game canvas IS the system
@@ -215,12 +218,12 @@ class WebConsole:
         synth in JS. Empty string when nothing played this frame (no cart / silence)."""
         with self._lock:
             self.canvas.take_commands()      # drop anything stale (defensive)
-            # A streaming web view must send the CURRENT screen on every poll, but the console
+            # A streaming web view must send the CURRENT screen on every push, but the console
             # is _dirty-gated (#44): it re-records only when something changed. A STATIC screen
             # (the launcher, a paused cart) would record a full frame ONCE and then nothing, so
-            # a browser polling at 30fps (or one that connects after that first frame) gets
-            # empty frames and shows black. Force a full redraw each frame -- the host has CPU +
-            # localhost/LAN bandwidth to spare, and the browser always gets a complete frame.
+            # the WS loop's per-tick push (or a browser that connects after that first frame)
+            # gets empty frames and shows black. Force a full redraw each frame -- the host has
+            # CPU + localhost/LAN bandwidth to spare, and the browser always gets a complete frame.
             self.ws._dirty = True
             self.driver.frame(self.dt)
             # Route through the shared serve path (ServedState.served_frame): prepends a
@@ -239,7 +242,7 @@ class WebConsole:
         cart's sheet/tilemap. Re-fetched by the client when the cart changes.
 
         A page load / cart change clears the browser's off-screen-layer cache, so forget
-        which layer streams we've shipped -- the next /frame re-ships every referenced
+        which layer streams we've shipped -- the next pushed frame re-ships every referenced
         layer's deflayer (the layer twin of refetching the sprite sheet, #54/#43)."""
         with self._lock:
             self._served.reset()
@@ -266,7 +269,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        # Frames/assets must never be cached -- the page polls the same URLs.
+        # Assets must never be cached -- the page refetches the same URL on a cart change.
         self.send_header("Cache-Control", "no-store")
         for k, v in (extra or {}).items():
             self.send_header(k, v)
@@ -289,37 +292,103 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(500, str(exc).encode("utf-8"), "text/plain; charset=utf-8")
                 return
             self._send_json(200, assets)
-        elif path == "/frame":
-            try:
-                cmds, cart, audio = self.console.step_frame()
-            except Exception as exc:  # noqa: BLE001 -- a frame error must not kill the server
-                self._send(500, str(exc).encode("utf-8"), "text/plain; charset=utf-8")
-                return
-            # The SHARED frame_payload shape ({cmds, cart, gen, audio, perf}) the unified page
-            # reads. gen comes from the recorder (host stays 0 -- self-contained, no atlas
-            # reset); audio carries the finished PCM for the browser player; perf is device-only.
-            self._send_json(200, web_view.frame_payload(
-                cmds, cart, self.console.canvas._rec.atlas_gen, audio=audio))
+        elif path == "/ws":
+            self._serve_ws()
         else:
             self._send(404, b"not found", "text/plain; charset=utf-8")
 
-    def do_POST(self):
-        path = self.path.split("?", 1)[0]
-        if path != "/input":
-            self._send(404, b"not found", "text/plain; charset=utf-8")
+    # -- the WebSocket live channel (the device speaks the SAME protocol) ------
+    def _serve_ws(self):
+        """Upgrade GET /ws to a WebSocket and drive it in THIS handler thread (the live
+        channel). Read Sec-WebSocket-Key, write the 101 handshake straight to the socket, then
+        HIJACK self.connection and run the frame-push / input-drain loop with the SHARED
+        web_view.ws_* framing -- the same wire the device serves. One browser at a time is the
+        expected case; two connections would each run their own loop and interleave safely
+        (WebConsole.step_frame / apply_events already serialize on WebConsole._lock)."""
+        upgrade = (self.headers.get("Upgrade") or "").lower()
+        key = self.headers.get("Sec-WebSocket-Key")
+        if "websocket" not in upgrade or not key:
+            self._send(400, b"expected a websocket upgrade", "text/plain; charset=utf-8")
             return
-        length = int(self.headers.get("Content-Length") or 0)
-        raw = self.rfile.read(length) if length else b""
+        self.close_connection = True            # this conn is now the WS; never reuse for HTTP
         try:
-            payload = json.loads(raw.decode("utf-8")) if raw else {}
-            events = payload.get("events", payload if isinstance(payload, list) else [])
-            if not isinstance(events, list):
-                events = []
-            self.console.apply_events(events)
-        except Exception as exc:  # noqa: BLE001
-            self._send(400, str(exc).encode("utf-8"), "text/plain; charset=utf-8")
+            self.connection.sendall(web_view.ws_handshake_response(key))
+        except OSError:
             return
-        self._send(200, b'{"ok":true}', "application/json")
+        self._ws_loop(self.connection)
+
+    def _ws_loop(self, sock):
+        """Push a stepped frame ~once per 1/fps and drain inbound input, non-blocking, until the
+        peer closes. A short socket timeout paces the loop (no busy-spin) and bounds a slow send;
+        a broken/half-open socket just ends the loop. Robust to a client that closes mid-stream."""
+        interval = self.console.dt              # 1/fps push cadence
+        buf = b""
+        try:
+            sock.settimeout(0.02)               # read timeout -> loop pacing; sends get this budget
+        except OSError:
+            pass
+        next_push = time.monotonic()
+        while True:
+            # 1. Inbound: drain queued input frames (input UP the socket).
+            try:
+                chunk = sock.recv(4096)
+                if chunk == b"":
+                    break                       # clean peer close
+                buf += chunk
+            except socket.timeout:
+                pass                            # no data this tick -> normal (loop pacing)
+            except OSError:
+                break                           # broken socket -> drop
+            drop = False
+            while True:
+                op, payload, consumed = web_view.ws_decode(buf)
+                if op is None:
+                    break                       # partial frame -> keep the bytes, retry next read
+                if consumed <= 0:               # ws_decode protocol error (-1) -> drop
+                    drop = True
+                    break
+                buf = buf[consumed:]
+                if op == 0x1:                   # text: an {"events":[...]} input batch
+                    self._ws_apply(payload)
+                elif op == 0x8:                 # close
+                    drop = True
+                    break
+                elif op == 0x9:                 # ping -> pong
+                    try:
+                        sock.sendall(web_view.ws_encode(payload, 0xA))
+                    except OSError:
+                        drop = True
+                        break
+                # 0xA pong / continuation / other control frames: ignored
+            if drop:
+                break
+            # 2. Outbound: step the console ONE frame and PUSH it down at ~1/fps.
+            now = time.monotonic()
+            if now < next_push:
+                continue
+            next_push = now + interval
+            try:
+                cmds, cart, audio = self.console.step_frame()   # lock-guarded inside
+            except Exception:  # noqa: BLE001 -- a frame error must not kill the socket loop
+                continue
+            gen = self.console.canvas._rec.atlas_gen            # host recorder gen (self-contained)
+            payload = json.dumps(web_view.frame_payload(cmds, cart, gen, audio=audio))
+            try:
+                sock.sendall(web_view.ws_encode(payload))
+            except OSError:
+                break                           # a stalled/closed client -> drop, don't wait
+
+    def _ws_apply(self, payload):
+        """Decode one inbound WS text payload ({"events":[...]}) and inject it through the SAME
+        apply path the old POST /input used. A malformed message just yields no input."""
+        try:
+            data = payload.decode("utf-8") if isinstance(payload, (bytes, bytearray)) else payload
+            obj = json.loads(data)
+            events = obj.get("events", []) if isinstance(obj, dict) else obj
+            if isinstance(events, list):
+                self.console.apply_events(events)
+        except Exception:  # noqa: BLE001 -- a bad message just yields no input
+            pass
 
 
 def make_server(console, host="0.0.0.0", port=DEFAULT_PORT, html=None):
@@ -329,8 +398,8 @@ def make_server(console, host="0.0.0.0", port=DEFAULT_PORT, html=None):
     Pass port=0 for an ephemeral port (tests read server.server_address[1])."""
     handler = type("_BoundHandler", (_Handler,), {
         "console": console,
-        # The SHARED browser page (web_view.PAGE_HTML): tries the WebSocket first, then falls
-        # back to HTTP polling (GET /frame + POST /input) -- which is all the host serves.
+        # The SHARED browser page (web_view.PAGE_HTML): loads /assets over HTTP, then opens the
+        # persistent WebSocket (/ws) live channel -- the SAME transport the host now serves.
         "html": (html if html is not None
                  else web_view.PAGE_HTML.encode("utf-8")),
     })
@@ -352,7 +421,7 @@ def main(argv=None):
     ap.add_argument("--cart", help="open a single .moy directly (skip the launcher)")
     ap.add_argument("--save-dir", default=DEFAULT_SAVE_DIR)
     ap.add_argument("--fps", type=int, default=DEFAULT_FPS,
-                    help="console step rate (dt = 1/fps per /frame request)")
+                    help="console step + WS push rate (dt = 1/fps per pushed frame)")
     # Two-domain seam (#39): the SYSTEM canvas size the desktop fills in the browser
     # (default 320x240 = today). The game is the centered fixed-aspect viewport.
     ap.add_argument("--size", default="320x240", metavar="WxH",
