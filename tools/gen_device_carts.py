@@ -31,6 +31,7 @@ import sys
 CART_ORDER = [
     "wallpaper_space",
     "ocean",
+    "sakura",
     "star_catcher",
     "pet",
     "tiny_runner",

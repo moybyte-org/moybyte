@@ -36,6 +36,7 @@ SYSTEM_CARTS = ROOT / "system_carts"
 TITLE_TO_FOLDER = {
     "Space Desktop": "wallpaper_space",
     "Ocean Desktop": "ocean",
+    "Sakura": "sakura",
     "Star Catcher": "star_catcher",
     "Pixel Pet": "pet",
     "Tiny Runner": "tiny_runner",
