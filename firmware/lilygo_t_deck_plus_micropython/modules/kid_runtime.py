@@ -2498,6 +2498,7 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     _diag_flush_at = _ticks_ms() + 5000
     _diag_perf_at = _ticks_ms() + 3000
     _diag_prev_cart_err = None    # last ws.cart_error we logged, so we log each crash once
+    ws.arm_splash()               # boot logo: show the moybyte mascot before the launcher
     while True:
         now = _ticks_ms()
         dt = max(0.0, min(0.1, _ticks_diff(now, last) / 1000.0))
