@@ -1,12 +1,12 @@
-# KidCode block-programming model + blocks -> Python compiler (issue #29, Part 1).
+# Moybyte block-programming model + blocks -> Python compiler (issue #29, Part 1).
 #
 # This is the data model and the compiler for the structured-outline block editor
 # (a Scratch *look*, device-friendly mechanics: no dragging). A block program is
 # the cart's SOURCE: it is stored as blocks.json beside main.py, and `compile_blocks`
-# turns it into a normal `.kcart` main.py (the icon -> block -> code ladder). The
+# turns it into a normal `.moy` main.py (the icon -> block -> code ladder). The
 # block editor runs ON THE DEVICE, so everything here is MicroPython-safe (no
 # f-strings, no eval/exec/getattr/compile/open, json + plain string building only)
-# and is frozen onto the device alongside console/editors/kid_carts.
+# and is frozen onto the device alongside console/editors/moy_carts.
 #
 # ============================================================================
 # THE SCHEMA  (compact, json-serializable -- this is what blocks.json holds)
@@ -55,7 +55,7 @@
 # A header comment, then `<var> = 0` module-level inits, then the lifecycle
 # functions that exist in the program:
 #
-#     # Made with KidCode blocks.
+#     # Made with Moybyte blocks.
 #     score = 0
 #     x = 0
 #
@@ -114,7 +114,7 @@ CATEGORY_ORDER = [
     CAT_VARIABLES, CAT_LISTS, CAT_OPERATORS, CAT_SOUND,
 ]
 
-# Color name (KID64) per category -- the Scratch *look* (Part 2 paints blocks
+# Color name (MOY64) per category -- the Scratch *look* (Part 2 paints blocks
 # with these; here so host and device agree on the palette).
 CATEGORY_COLOR = {
     CAT_EVENTS: "brown",
@@ -641,7 +641,7 @@ _INDENT = "    "
 # The first line every block-compiled main.py carries. The block editor uses it
 # to tell a block-authored cart (safe to overwrite on SAVE) from a hand-written
 # code cart (whose main.py must NEVER be clobbered by an empty block program).
-BLOCK_MARKER = "# Made with KidCode blocks."
+BLOCK_MARKER = "# Made with Moybyte blocks."
 
 
 def is_block_authored_source(src):
@@ -1249,7 +1249,7 @@ def compile_blocks(program):
 
 
 # ============================================================================
-# Schema (de)serialization (the file IO lives in kid_carts.load/save_blocks)
+# Schema (de)serialization (the file IO lives in moy_carts.load/save_blocks)
 # ============================================================================
 
 def loads(text):

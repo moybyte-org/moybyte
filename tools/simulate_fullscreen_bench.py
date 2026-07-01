@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Visualize the KidCode full-screen compositor benchmark scene on the host.
+"""Visualize the Moybyte full-screen compositor benchmark scene on the host.
 
 This mirrors, pixel-for-pixel, what `_bench_pass()` in
-`firmware/.../modules/kidcode_shell.py` draws into the 320x240 RGB565
+`firmware/.../modules/moybyte_shell.py` draws into the 320x240 RGB565
 framebuffer on the device -- so you can see what the device *should* be showing
 and compare it against any "weird squares" on the real panel. It does NOT
 measure timing (host has no SPI bus); it only reproduces the visuals.
@@ -80,7 +80,7 @@ def run_live(scale, fps):
 
     pygame.init()
     screen = pygame.display.set_mode((W * scale, H * scale))
-    pygame.display.set_caption("KidCode full-screen bench (sim)")
+    pygame.display.set_caption("Moybyte full-screen bench (sim)")
     surf = pygame.Surface((W, H))
     clock = pygame.time.Clock()
     font = pygame.font.SysFont(None, 18 * scale // 2 or 18)

@@ -40,13 +40,13 @@ jobs:
         run: make compile-blocks
 
       - name: Run generated blocks demo
-        run: .venv/bin/kidcode run examples/blocks_demo.kcproj --entry generated/main.generated.py --headless --frames 60
+        run: .venv/bin/moybyte run examples/blocks_demo.moyproj --entry generated/main.generated.py --headless --frames 60
 
       - name: Run music player stub
-        run: .venv/bin/kidcode run examples/music_player_stub.kcproj --headless --frames 30
+        run: .venv/bin/moybyte run examples/music_player_stub.moyproj --headless --frames 30
 
       - name: Run radio pong stub
-        run: .venv/bin/kidcode run examples/radio_pong_stub.kcproj --headless --frames 30
+        run: .venv/bin/moybyte run examples/radio_pong_stub.moyproj --headless --frames 30
 
       - name: Pack tiny runner
         run: make pack-example

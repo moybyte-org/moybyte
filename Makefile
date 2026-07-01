@@ -1,14 +1,14 @@
 VENV ?= .venv
 SYSTEM_PYTHON ?= python3
 PYTHON ?= $(VENV)/bin/python
-KIDCODE ?= $(VENV)/bin/kidcode
+MOYBYTE ?= $(VENV)/bin/moybyte
 MONITOR_SECONDS ?= 12
-LOG ?= /tmp/kidcode_lilygo_serial.log
+LOG ?= /tmp/moybyte_lilygo_serial.log
 IDF_PYTHON ?= $(HOME)/.espressif/python_env/idf5.5_py3.10_env/bin/python
 MPY_FW_DIR ?= firmware/lilygo_t_deck_plus_micropython
 MPY_BUILD_DIR ?= $(MPY_FW_DIR)/.build/lvgl_micropython/lib/micropython/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT
-MPY_APP_BIN ?= $(MPY_FW_DIR)/dist/current/kidcode-current-app.bin
-MPY_FULL_BIN ?= $(MPY_FW_DIR)/dist/current/kidcode-current-full-dio-0x0.bin
+MPY_APP_BIN ?= $(MPY_FW_DIR)/dist/current/moybyte-current-app.bin
+MPY_FULL_BIN ?= $(MPY_FW_DIR)/dist/current/moybyte-current-full-dio-0x0.bin
 # OTA (#53): the bootable app partition is ota_0. With the dual-OTA table it sits at
 # 0x20000 (otadata shifted it up from the legacy 0x10000). The app-only cable flash
 # below writes here AND clears otadata (MPY_OTADATA_OFFSET) so the bootloader boots the
@@ -25,8 +25,8 @@ MPY_FLASH_MODE ?= dio
 # OTA online update (#53 Phase 3): host a manifest + .bin for Settings -> UPDATE ONLINE.
 OTA_PORT ?= 8000
 # Two-channel publish (#53): stage artifacts under OTA_ROOT/<channel>/ and serve that
-# dir (the systemd host, tools/kidcode-ota.service) so the device pulls stable or beta.
-OTA_ROOT ?= $(HOME)/.kidcode-ota
+# dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
+OTA_ROOT ?= $(HOME)/.moybyte-ota
 
 .PHONY: setup test run-example run-headless compile-blocks doctor check-portable pack-example export-lilygo-example device-doctor device-port firmware-bundle-lilygo firmware-build-lilygo firmware-build-lilygo-micropython firmware-sim-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-upload-lilygo firmware-monitor-lilygo firmware-smoke-check-lilygo firmware-smoke-lilygo ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install
 
@@ -38,37 +38,37 @@ test:
 	$(PYTHON) -m pytest
 
 doctor:
-	$(KIDCODE) doctor
+	$(MOYBYTE) doctor
 
 device-doctor:
-	$(KIDCODE) device-doctor --board lilygo_t_deck_plus
+	$(MOYBYTE) device-doctor --board lilygo_t_deck_plus
 
 device-port:
-	$(KIDCODE) device-port
+	$(MOYBYTE) device-port
 
 run-example:
-	$(KIDCODE) run examples/tiny_runner.kcproj
+	$(MOYBYTE) run examples/tiny_runner.moyproj
 
 run-headless:
-	$(KIDCODE) run examples/tiny_runner.kcproj --headless --frames 60
+	$(MOYBYTE) run examples/tiny_runner.moyproj --headless --frames 60
 
 compile-blocks:
-	$(KIDCODE) compile examples/blocks_demo.kcproj
+	$(MOYBYTE) compile examples/blocks_demo.moyproj
 
 check-portable:
-	$(KIDCODE) check-portable examples/tiny_runner.kcproj examples/blocks_demo.kcproj examples/music_player_stub.kcproj examples/radio_pong_stub.kcproj
+	$(MOYBYTE) check-portable examples/tiny_runner.moyproj examples/blocks_demo.moyproj examples/music_player_stub.moyproj examples/radio_pong_stub.moyproj
 
 pack-example:
-	$(KIDCODE) pack examples/tiny_runner.kcproj --out /tmp/tiny_runner.kc8
+	$(MOYBYTE) pack examples/tiny_runner.moyproj --out /tmp/tiny_runner.kc8
 
 firmware-build-lilygo-micropython:
 	bash firmware/lilygo_t_deck_plus_micropython/build.sh
 
 # OTA (#53 Phase 3): emit dist/latest.json from the built image (auto size + sha256 +
-# version read from kc_ota.FIRMWARE_VERSION). Point it at your host with OTA_BASE_URL;
+# version read from moy_ota.FIRMWARE_VERSION). Point it at your host with OTA_BASE_URL;
 # with none it uses http://<LAN-IP>:$(OTA_PORT) for a local test against `make ota-serve`.
 #   make ota-manifest                         # local test
-#   make ota-manifest OTA_BASE_URL=https://you.example.com/kidcode
+#   make ota-manifest OTA_BASE_URL=https://you.example.com/moybyte
 ota-manifest:
 	$(PYTHON) tools/gen_ota_manifest.py $(if $(OTA_BASE_URL),--base-url $(OTA_BASE_URL)) --port $(OTA_PORT)
 
@@ -82,12 +82,12 @@ ota-serve:
 # device: Settings -> CHANNEL = BETA -> UPDATE ONLINE. The beta version is the build
 # epoch, so every publish reads as newer than the last.
 ota-publish-unstable:
-	KIDCODE_SKIP_VFS_BOOT=1 KIDCODE_OTA_CHANNEL=unstable $(MAKE) firmware-build-lilygo-micropython
+	MOYBYTE_SKIP_VFS_BOOT=1 MOYBYTE_OTA_CHANNEL=unstable $(MAKE) firmware-build-lilygo-micropython
 	$(PYTHON) tools/gen_ota_manifest.py --root $(OTA_ROOT) $(if $(OTA_BASE_URL),--base-url $(OTA_BASE_URL)) --port $(OTA_PORT)
 
 # Publish a STABLE build (normally from master) into OTA_ROOT/stable/.
 ota-publish-stable:
-	KIDCODE_SKIP_VFS_BOOT=1 KIDCODE_OTA_CHANNEL=stable $(MAKE) firmware-build-lilygo-micropython
+	MOYBYTE_SKIP_VFS_BOOT=1 MOYBYTE_OTA_CHANNEL=stable $(MAKE) firmware-build-lilygo-micropython
 	$(PYTHON) tools/gen_ota_manifest.py --root $(OTA_ROOT) $(if $(OTA_BASE_URL),--base-url $(OTA_BASE_URL)) --port $(OTA_PORT)
 
 # Serve OTA_ROOT (both channels) over HTTP for the device. Foreground; for a persistent
@@ -102,11 +102,11 @@ ota-host:
 ota-serve-install:
 	mkdir -p $(OTA_ROOT) $(HOME)/.config/systemd/user
 	sed -e 's#@PYTHON@#$(abspath $(PYTHON))#g' -e 's#@ROOT@#$(OTA_ROOT)#g' -e 's#@PORT@#$(OTA_PORT)#g' \
-	    tools/kidcode-ota.service > $(HOME)/.config/systemd/user/kidcode-ota.service
+	    tools/moybyte-ota.service > $(HOME)/.config/systemd/user/moybyte-ota.service
 	systemctl --user daemon-reload
-	systemctl --user enable --now kidcode-ota.service
+	systemctl --user enable --now moybyte-ota.service
 	loginctl enable-linger $(USER) || true
-	@echo "OTA host: serving $(OTA_ROOT) on :$(OTA_PORT) (systemd --user kidcode-ota)"
+	@echo "OTA host: serving $(OTA_ROOT) on :$(OTA_PORT) (systemd --user moybyte-ota)"
 
 firmware-flash-lilygo-micropython:
 	test -n "$(PORT)"

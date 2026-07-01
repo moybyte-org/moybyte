@@ -1,4 +1,4 @@
-"""The shared KidCode v0.4 console UI -- launcher + desktop + cards/code/paint
+"""The shared Moybyte v0.4 console UI -- launcher + desktop + cards/code/paint
 editors + the trackball/touch Pointer. Backend-agnostic: it draws through an
 injected `canvas` (host Canvas or device DeviceCanvas -- identical TIC-80 API +
 petme128 font) and persists through an injected cart store + make_api, so the
@@ -17,9 +17,9 @@ from editors import (BlockEditor, CodeEditor, IconSheet, MapEditor, MusicEditor,
 
 # The block vocabulary/compiler (#29). Imported under whichever name it's known by:
 # bare `blocks` on the device (frozen top-level) and on the host once host_app has
-# aliased it, or `runtime.blocks` when a test loads console/kid_runtime directly
+# aliased it, or `runtime.blocks` when a test loads console/moy_runtime directly
 # without that alias (the device path is plain `import blocks`). Mirrors
-# kid_carts._import_blocks so neither module hard-depends on import order.
+# moy_carts._import_blocks so neither module hard-depends on import order.
 try:
     import blocks as _blocks_mod
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -165,7 +165,7 @@ def color(name_or_index):
 
 # --- code-editor syntax highlighting (#24) ---------------------------------
 # A tiny, MicroPython-safe tokenizer: scans one source line char-by-char and
-# returns a per-character list of KID64 palette indices, so the code view draws
+# returns a per-character list of MOY64 palette indices, so the code view draws
 # colored runs without any re/tokenize dependency (those are heavy/absent on the
 # device). Token classes map to:
 _HL_TEXT = 6        # light_grey -- identifiers, operators, punctuation (default)
@@ -182,7 +182,7 @@ _HL_KEYWORDS = (
     "or", "pass", "raise", "return", "try", "while", "with", "yield",
 )
 # Cart-API verbs + the common builtins a kid actually types. Keep roughly in
-# sync with make_api (host_app / kid_runtime); an extra name here is harmless.
+# sync with make_api (host_app / moy_runtime); an extra name here is harmless.
 _HL_BUILTINS = (
     "cls", "pix", "pset", "line", "rect", "rectb", "circ", "circb", "spr",
     "map", "mget", "mset",
@@ -306,7 +306,7 @@ _BAR_Y = 1                 # icons sit 1px down in the 18px bar (1px top/bottom 
 # tapping it toggles the dropdown. It claims the old _HOME_BTN slot (x=2) and the tool
 # switchers HOME/EDIT/PAINT/MAP/BLOCKS/MUSIC shift one stride right so the bar stays a
 # single uninterrupted row. The hamburger is drawn via the _glyph BITMAP (not the
-# themeable IconSheet) so an already-themed device -- whose saved system_icons.kgfx has
+# themeable IconSheet) so an already-themed device -- whose saved system_icons.moygfx has
 # no art for a new slot -- never shows a blank tile here. The rightmost switcher is now
 # MUSIC (#50) at slot 6 -> ends at x=126; the right cluster (clock at x=224..) is clear.
 _SYSMENU_BTN = (2, _BAR_Y, _BAR_ICON, _BAR_ICON)                 # ≡ dropdown toggle (slot 0)
@@ -685,7 +685,7 @@ _CURSOR_ACCEL = 2
 _BASE_W = 320
 _BASE_H = 240
 _FONT_W = 8                 # petme128 cell width at scale 1 (one char advance)
-# Letterbox/bezel fill (#39): the solid KID64 index the system canvas shows around
+# Letterbox/bezel fill (#39): the solid MOY64 index the system canvas shows around
 # the integer-scaled 320x240 game viewport (the borders of the fixed-aspect frame).
 _VIEWPORT_BEZEL = 0         # black
 
@@ -952,7 +952,7 @@ def _blit_glyph(cv, kind, rect, c):
 # ~120 glyph rect-spans/frame the labeled button rows cost into ~12 cached sprite
 # blits (a measured ~15ms/frame device win). `_ICON` is the slot map: a chrome kind ->
 # its sprite id in the 8x4 IconSheet (row-major). The IconSheet is loaded from
-# system_icons.kgfx when present, else baked from `_ICON_ART` below. The _glyph
+# system_icons.moygfx when present, else baked from `_ICON_ART` below. The _glyph
 # vocabulary stays for NON-chrome uses (the cards/paint/blocks editors).
 _ICON = {
     "home": 0, "edit": 1, "code": 2, "paint": 3, "map": 4, "blocks": 5,
@@ -1076,7 +1076,7 @@ _ICON_ART = {
     ),
 }
 
-# Bump whenever the baked _ICON_ART above changes: a saved system_icons.kgfx theme
+# Bump whenever the baked _ICON_ART above changes: a saved system_icons.moygfx theme
 # written at an OLDER version is treated as stale and re-seeded to these new defaults
 # at load (mirrors cart versioning, #47), so an already-themed device/desktop picks up
 # new icons without a manual wipe. A bump discards a user's custom icon edits, exactly
@@ -1097,8 +1097,8 @@ def _nibble(ch):
 
 def _default_icon_sheet():
     """Bake `_ICON_ART` into a fresh IconSheet at the `_ICON` slots -- the theme used
-    when no system_icons.kgfx exists. Each art entry is painted into its 16x16 tile
-    via tset, so the result serializes/loads through the same .kgfx hex as any sheet.
+    when no system_icons.moygfx exists. Each art entry is painted into its 16x16 tile
+    via tset, so the result serializes/loads through the same .moygfx hex as any sheet.
     Unmapped/short rows just leave that tile blank (transparent)."""
     sheet = IconSheet()
     t = sheet.TILE
@@ -1174,7 +1174,7 @@ _TYPE_GLYPH = {"wallpaper": "paint", "game": "run", "app": "app", "tool": "gear"
 #   hidden -- True hides the name as "???" in the view until it's unlocked, so a
 #             secret stays a surprise (the Easter-egg rewards are all hidden).
 # Backend-agnostic + MicroPython-safe (a plain tuple of tuples, frozen into the
-# device build). The store (kid_carts.load/save_achievements) holds only the
+# device build). The store (moy_carts.load/save_achievements) holds only the
 # unlocked ids; this catalog is the single source of what each one MEANS, so host
 # and device show identical badges.
 ACHIEVEMENTS = (
@@ -1257,7 +1257,7 @@ class Achievements:
             try:
                 self._on_save(list(self.unlocked.keys()))
             except Exception as exc:  # noqa: BLE001 -- a failed save must not crash the UI
-                print("KidCode achievements save failed:", _err_text(exc))
+                print("Moybyte achievements save failed:", _err_text(exc))
         self.toast = (ach_id, ACH_TITLE[ach_id], ACH_GLYPH.get(ach_id, "trophy"))
         self.toast_until = _ticks_ms() + TOAST_MS
         if self._on_unlock is not None:
@@ -1431,7 +1431,7 @@ class Pmem:
     """A cart's persistent memory: 256 x 32-bit unsigned ints, TIC-80 pmem().
 
     Backend-agnostic (host + device share this). The Workstation builds one per
-    cart from kid_carts.load_pmem and injects its `cell` accessor into make_api as
+    cart from moy_carts.load_pmem and injects its `cell` accessor into make_api as
     `pmem(i[, v])`: read pmem(i) -> int, write pmem(i, v) -> persists (when the
     cart is on a writable store). A write only persists if the value actually
     changed, so a cart calling pmem(i, v) every frame doesn't hammer the SD."""
@@ -1440,7 +1440,7 @@ class Pmem:
     MASK = 0xFFFFFFFF
 
     def __init__(self, cells=None, on_write=None):
-        # `cells` is the loaded list (already 256 long from kid_carts.load_pmem);
+        # `cells` is the loaded list (already 256 long from moy_carts.load_pmem);
         # default to all-zero so an embedded/non-SD cart still gets working RAM.
         if cells is None:
             cells = [0] * self.CELLS
@@ -1669,8 +1669,8 @@ class Workstation:
         # the backend here; it's exposed to a cart's namespace ONLY when the cart's
         # manifest permissions include "network" (capability-gated -- see _start).
         self.wifi = None            # injected wifi backend (host FakeWifi / device WLAN)
-        self.carts_store = None     # injected: cart store module (kid_carts API)
-        # OTA firmware updater (#53): injected by the device (kc_ota.OtaUpdater); None
+        self.carts_store = None     # injected: cart store module (moy_carts API)
+        # OTA firmware updater (#53): injected by the device (moy_ota.OtaUpdater); None
         # on the host. When present AND the build is OTA-capable, Settings grows an
         # "UPDATE FW" row that flashes a new image from /sd/update to the inactive slot.
         self.updater = None
@@ -1738,8 +1738,8 @@ class Workstation:
         # Desktop wallpaper (#28): a chosen wallpaper-type cart compiled into its
         # own namespace and run (its _draw, optionally _update) as the BACKDROP each
         # home/settings frame -- the Picotron "wallpaper is a cart" model. None until
-        # _select_wallpaper picks one; a solid KID64 fill is the zero-cart fallback.
-        self.system = {}              # system settings dict (kid_carts system.json)
+        # _select_wallpaper picks one; a solid MOY64 fill is the zero-cart fallback.
+        self.system = {}              # system settings dict (moy_carts system.json)
         self.wallpaper_id = None      # chosen wallpaper: cart slug or "fill:<color>"
         self._wp_ns = None            # wallpaper cart namespace
         self._wp_update = None        # wallpaper _update(dt) (live wallpapers)
@@ -1750,7 +1750,7 @@ class Workstation:
         self._icon_cache = {}         # cart path -> desktop-icon sprite Image (or None)
         # Unified top bar (Stage 1): the editable 16x16 IconSheet the bar draws its
         # chrome icons from. Injected by build_workstation / run_desktop (loaded from
-        # system_icons.kgfx, else the baked default theme); None falls back to _glyph.
+        # system_icons.moygfx, else the baked default theme); None falls back to _glyph.
         # _bar_img_cache memoises tile_image(slot) per kind so the SAME _SheetSprite is
         # reused every frame -- on the device that keeps its per-Image RGB565 blit cache
         # alive (one cached blit per icon), the whole point of moving the bar to sprites.
@@ -1770,7 +1770,7 @@ class Workstation:
         self._bar_cache_gen = 0
         # Themeable top bar (Stage 2): True while the PAINT editor is repainting the
         # SYSTEM icon sheet (Settings -> EDIT ICONS) rather than a cart's sprites.
-        # It changes where SAVE writes (system_icons.kgfx, not the cart) and where
+        # It changes where SAVE writes (system_icons.moygfx, not the cart) and where
         # CLOSE/back returns (Settings, not the running cart). menu_view == "theme"
         # reuses the cart PAINT renderer/input over self.icon_sheet (PaintEditor is
         # tile-size-agnostic, so the 16x16 IconSheet edits natively).
@@ -1789,7 +1789,7 @@ class Workstation:
                                       # whether SD is the cart source (carts_root)
         # SD session wrapper: mounts SD for the duration of fn(), then releases it
         # so the render loop's flushes never collide on the shared bus. On device
-        # run_desktop swaps in kidcode_sd.with_sd_live (native kc_sd attach). The
+        # run_desktop swaps in moybyte_sd.with_sd_live (native moy_sd attach). The
         # default is a host passthrough.
         self._with_sd = lambda fn: fn()
         self.show_fps = True          # bottom-right FPS readout while a cart runs
@@ -1806,7 +1806,7 @@ class Workstation:
         # perf_capture decouples the per-frame timing MEASUREMENT from drawing the
         # HUD: when either perf_hud OR perf_capture is set, frame() records the
         # flush/draw split (the two cheap ticks calls below). The device backend
-        # (kid_runtime.run_desktop) sets perf_capture=True so it can SAMPLE these
+        # (moy_runtime.run_desktop) sets perf_capture=True so it can SAMPLE these
         # numbers into the offline diag log without painting the HUD on screen.
         # Default False -> host behaviour is byte-identical (no extra ticks calls).
         self.perf_capture = False     # measure flush/draw without drawing the HUD
@@ -1870,7 +1870,7 @@ class Workstation:
 
     def _cart_has_perm(self, name):
         """True iff the open cart's manifest permissions include `name` (#38).
-        kid_carts.load() carries the manifest "permissions" list onto the cart;
+        moy_carts.load() carries the manifest "permissions" list onto the cart;
         an embedded/legacy cart with none simply never matches, so it gets no
         gated APIs."""
         perms = self.cart.get("permissions") if self.cart else None
@@ -1882,14 +1882,14 @@ class Workstation:
     # exactly the Picotron model where a wallpaper is just a fullscreen cart. We
     # reuse the cart-run machinery (compile + _init/_update/_draw) but in a SEPARATE
     # namespace so it never collides with the foreground cart. Fallback options are
-    # plain solid KID64 fills ("fill:<color>"), so there's always a valid choice
+    # plain solid MOY64 fills ("fill:<color>"), so there's always a valid choice
     # even with zero wallpaper carts installed (and a cheap option for the device).
 
     _FILL_WALLPAPERS = ("fill:dark_blue", "fill:black", "fill:indigo", "fill:dark_purple")
 
     def wallpaper_carts(self):
         """The wallpaper-type carts available as backdrops (discovery: scan the
-        launcher items by type, KidCode's equivalent of Picotron's wallpapers
+        launcher items by type, Moybyte's equivalent of Picotron's wallpapers
         folder). Returns the cart dicts in launcher order."""
         return [c for c in self.launcher.items if c.get("type") == "wallpaper"]
 
@@ -1908,8 +1908,8 @@ class Workstation:
         path = cart.get("path")
         if path:
             name = path.rsplit("/", 1)[-1]
-            if name.endswith(".kcart"):
-                name = name[:-6]
+            if name.endswith(".moy"):
+                name = name[:-4]
             return name
         return self.carts_store.slug(cart["title"]) if self.carts_store else cart["title"]
 
@@ -1920,7 +1920,7 @@ class Workstation:
         return None
 
     def load_system(self):
-        """Load the system settings (kid_carts system.json) and apply the saved
+        """Load the system settings (moy_carts system.json) and apply the saved
         wallpaper + font scale (#39). Safe no-op if no store/root is wired (embedded
         boot)."""
         if self.carts_store is not None and self.carts_root is not None:
@@ -1928,7 +1928,7 @@ class Workstation:
                 self.system = self._with_sd(
                     lambda: self.carts_store.load_system(self.carts_root)) or {}
             except Exception as exc:  # noqa: BLE001 -- a bad store must not crash boot
-                print("KidCode system load failed:", _err_text(exc))
+                print("Moybyte system load failed:", _err_text(exc))
                 self.system = {}
         # System font scale (#39): apply the persisted choice (1/2/3) so the desktop
         # boots at the saved text size. set_font_scale relays it into the system
@@ -1946,7 +1946,7 @@ class Workstation:
         self._bar_cache_gen += 1      # repaint the cached cart bar with the new theme (#43)
 
     def load_icon_sheet(self):
-        """Build the top-bar IconSheet (Stage 1): use the saved system_icons.kgfx theme
+        """Build the top-bar IconSheet (Stage 1): use the saved system_icons.moygfx theme
         only if its stored version is >= the baked _ICON_VERSION; otherwise bake the
         default theme. A saved theme older than _ICON_VERSION is STALE (the shipped
         icons changed) -> re-seed it: bake the new default and overwrite the saved theme
@@ -1965,7 +1965,7 @@ class Workstation:
             try:
                 hexs, saved_ver = self._with_sd(_read_theme)
             except Exception as exc:  # noqa: BLE001 -- a bad theme falls back to default
-                print("KidCode icons load failed:", _err_text(exc))
+                print("Moybyte icons load failed:", _err_text(exc))
                 hexs = None
         sheet = None
         if hexs and saved_ver >= _ICON_VERSION:        # current/newer saved theme -> keep it
@@ -1984,7 +1984,7 @@ class Workstation:
                     self._with_sd(lambda: store.save_system_icons(
                         sheet.to_hex(), self.carts_root, _ICON_VERSION))
                 except Exception as exc:  # noqa: BLE001
-                    print("KidCode icons re-seed failed:", _err_text(exc))
+                    print("Moybyte icons re-seed failed:", _err_text(exc))
         self.set_icon_sheet(sheet)
 
     # -- system font scale (#39) ---------------------------------------------
@@ -2052,7 +2052,7 @@ class Workstation:
         try:
             self._with_sd(lambda: self.carts_store.save_system(self.system, self.carts_root))
         except Exception as exc:  # noqa: BLE001 -- a failed write just isn't remembered
-            print("KidCode system save failed:", _err_text(exc))
+            print("Moybyte system save failed:", _err_text(exc))
 
     def _ota_channel(self):
         """The selected OTA update channel ("stable" default / "unstable" beta). Drives
@@ -2069,7 +2069,7 @@ class Workstation:
         self._persist_system()
 
     def load_achievements(self):
-        """Load the unlocked achievements (kid_carts achievements.json) and wire the
+        """Load the unlocked achievements (moy_carts achievements.json) and wire the
         store + unlock-beep into a fresh Achievements (#21). Safe no-op on an
         embedded/no-store boot -- then the achievements stay in volatile RAM (still
         awarded + toasted this session, just not remembered). Call after the store +
@@ -2080,7 +2080,7 @@ class Workstation:
                 unlocked = self._with_sd(
                     lambda: self.carts_store.load_achievements(self.carts_root)) or []
             except Exception as exc:  # noqa: BLE001 -- a bad store must not crash boot
-                print("KidCode achievements load failed:", _err_text(exc))
+                print("Moybyte achievements load failed:", _err_text(exc))
                 unlocked = []
         self.ach = Achievements(unlocked, on_save=self._save_achievements,
                                 on_unlock=self._achievement_unlocked)
@@ -2213,7 +2213,7 @@ class Workstation:
             self._wp_update = ns.get("_update")
             self._wp_draw = ns.get("_draw")
         except Exception as exc:  # noqa: BLE001
-            print("KidCode wallpaper error:", _err_text(exc))
+            print("Moybyte wallpaper error:", _err_text(exc))
             self._wp_ns = self._wp_update = self._wp_draw = None
 
     def _persist_wallpaper(self):
@@ -2224,7 +2224,7 @@ class Workstation:
         try:
             self._with_sd(lambda: self.carts_store.save_system(self.system, self.carts_root))
         except Exception as exc:  # noqa: BLE001 -- a failed write just isn't remembered
-            print("KidCode system save failed:", _err_text(exc))
+            print("Moybyte system save failed:", _err_text(exc))
 
     def cycle_wallpaper(self, d):
         """Step the wallpaper choice by d (Settings < / > stepper); applies +
@@ -2268,7 +2268,7 @@ class Workstation:
                 self._reset_canvas_state()
                 return
             except Exception as exc:  # noqa: BLE001 -- drop a broken wallpaper to the fill
-                print("KidCode wallpaper draw error:", _err_text(exc))
+                print("Moybyte wallpaper draw error:", _err_text(exc))
                 self._reset_canvas_state()
                 self._wp_ns = self._wp_update = self._wp_draw = None
         # Solid fill fallback (also the "fill:<color>" built-ins).
@@ -2437,7 +2437,7 @@ class Workstation:
                 hook()
                 return
             except Exception as exc:  # noqa: BLE001
-                print("KidCode reboot failed:", exc)
+                print("Moybyte reboot failed:", exc)
         self.go_home()                 # safe stub when no reboot hook is wired
 
     def settings_adjust(self, d):
@@ -2479,7 +2479,7 @@ class Workstation:
         try:
             hook.toggle()
         except Exception as exc:  # noqa: BLE001
-            print("KidCode web view toggle failed:", exc)
+            print("Moybyte web view toggle failed:", exc)
 
     def _settings_wallpaper_label(self):
         """A friendly label for the current wallpaper: the cart's TITLE for a
@@ -2853,7 +2853,7 @@ class Workstation:
             # become the exact silent device hang the panel exists to prevent.
             self.cart_error = _err_text(exc)
             self.crash_line = _exc_cart_line(exc)
-            print("KidCode cart error:", self.cart_error)
+            print("Moybyte cart error:", self.cart_error)
             return False
         self.cart_error = None
         self.crash_line = None
@@ -2918,7 +2918,7 @@ class Workstation:
             try:
                 cells = self._with_sd(lambda: self.carts_store.load_pmem(path))
             except Exception as exc:  # noqa: BLE001
-                print("KidCode pmem load failed:", exc)
+                print("Moybyte pmem load failed:", exc)
                 cells = None
 
         on_write = None
@@ -2929,11 +2929,11 @@ class Workstation:
                 except Exception as exc:  # noqa: BLE001
                     # No serial in the device run loop, but a failed pmem write must
                     # not crash the cart -- the kid just loses that one save.
-                    print("KidCode pmem save failed:", _err_text(exc))
+                    print("Moybyte pmem save failed:", _err_text(exc))
         return Pmem(cells, on_write)
 
     def _build_tilemap(self, cart=None):
-        """Build `cart`'s TileMap from its map.kmap blob (#32) (default: the open
+        """Build `cart`'s TileMap from its map.moymap blob (#32) (default: the open
         cart), or an empty map when the cart has none -- the mirror of _build_sheet,
         so map()/mget()/mset() are always callable (an empty map just blits
         nothing). The wallpaper runner passes a cart explicitly."""
@@ -3000,7 +3000,7 @@ class Workstation:
                         prog = self._with_sd(
                             lambda: self.carts_store.load_blocks(self.cart))
                     except Exception as exc:  # noqa: BLE001
-                        print("KidCode load blocks failed:", _err_text(exc))
+                        print("Moybyte load blocks failed:", _err_text(exc))
                 if prog is None:
                     prog = self.cart.get("blocks")
                 # DATA-LOSS GUARD (#29): a cart whose main.py is hand-written code
@@ -3087,9 +3087,9 @@ class Workstation:
     def open_theme(self):
         """Open the PAINT editor on the SYSTEM icon sheet (Settings -> EDIT ICONS,
         Stage 2 / #52). The same renderer/input as the cart PAINT flow, but pointed
-        at self.icon_sheet: SAVE persists system_icons.kgfx (not a cart) and CLOSE
+        at self.icon_sheet: SAVE persists system_icons.moygfx (not a cart) and CLOSE
         returns to Settings. Starts from the current theme (the baked default if no
-        system_icons.kgfx exists yet); the first SAVE creates the file."""
+        system_icons.moygfx exists yet); the first SAVE creates the file."""
         self._dirty = True                 # screen change repaints (#44)
         self._editing_icons = True
         self.paint_status = None
@@ -3219,7 +3219,7 @@ class Workstation:
             self.ach.note("code_save")          # "Code Wizard": valid code saved (#21)
             return True
         try:
-            # kid_carts.save_code always returns a (status, message) 2-tuple.
+            # moy_carts.save_code always returns a (status, message) 2-tuple.
             status, smsg = self._with_sd(lambda: self.carts_store.save_code(self.cart, src))
             if status != self.carts_store.SAVE_OK:
                 self.save_status = "SAVE FAILED " + str(smsg)
@@ -3238,7 +3238,7 @@ class Workstation:
             txt = _err_text(exc)
             self.save_status = "SAVE FAILED"
             self.cart_error = "Could not save -- " + txt
-            print("KidCode save code failed:", txt)
+            print("Moybyte save code failed:", txt)
             return False
 
     def _set_code_error(self, msg):
@@ -3299,10 +3299,10 @@ class Workstation:
             txt = _err_text(exc)
             self.save_status = "SAVE FAILED"
             self.cart_error = "Could not save sprites -- " + txt
-            print("KidCode save sprites failed:", txt)
+            print("Moybyte save sprites failed:", txt)
 
     def save_icons(self):
-        """Persist the edited system icon sheet to system_icons.kgfx (Stage 2 / #52),
+        """Persist the edited system icon sheet to system_icons.moygfx (Stage 2 / #52),
         the exact mirror of save_sprites/save_shared_sheet: to_hex -> the SAME SD
         wrapper the cart-sprite save uses (host: direct write; device: with_sd_live).
         Then invalidate the bar caches so the NEXT bar draw shows the new pixels live:
@@ -3327,7 +3327,7 @@ class Workstation:
             txt = _err_text(exc)
             self.save_status = "SAVE FAILED"
             self.cart_error = "Could not save icons -- " + txt
-            print("KidCode save icons failed:", txt)
+            print("Moybyte save icons failed:", txt)
 
     def _leave_theme(self):
         """CLOSE/back from the theme editor: return to Settings (not a cart/desktop --
@@ -3340,7 +3340,7 @@ class Workstation:
         self.screen = "settings"
 
     def save_map(self):
-        # Persist the cart's tilemap to map.kmap (#32) -- the exact mirror of
+        # Persist the cart's tilemap to map.moymap (#32) -- the exact mirror of
         # save_sprites (to_hex -> SD wrapper -> save_map). The running cart already
         # holds this same TileMap, so a save only persists what it's already using.
         if not (self.tilemap and self.cart and self.cart.get("path") and self.can_manage):
@@ -3355,7 +3355,7 @@ class Workstation:
             txt = _err_text(exc)
             self.save_status = "SAVE FAILED"
             self.cart_error = "Could not save map -- " + txt
-            print("KidCode save map failed:", txt)
+            print("Moybyte save map failed:", txt)
 
     # -- music / sound editor (#50) ------------------------------------------
 
@@ -3376,7 +3376,7 @@ class Workstation:
             txt = _err_text(exc)
             self.save_status = "SAVE FAILED"
             self.cart_error = "Could not save sounds -- " + txt
-            print("KidCode save sounds failed:", txt)
+            print("Moybyte save sounds failed:", txt)
 
     def _play_music_preview(self):
         """Preview what the cursor is on: in the SFX view play the current SFX, in
@@ -3416,18 +3416,18 @@ class Workstation:
 
     # -- cross-cart sprite reuse (#18) ---------------------------------------
     #
-    # The shared sheet is a single .kgfx living beside the carts dir. PUT copies
+    # The shared sheet is a single .moygfx living beside the carts dir. PUT copies
     # the tile a kid is painting INTO that shared sheet; GET copies a tile back
     # OUT of it into whatever cart they're painting next -- so a sprite travels
     # between carts without being repainted. Both go through SpriteSheet.copy_tile
-    # (the import primitive) and the kid_carts shared-sheet store.
+    # (the import primitive) and the moy_carts shared-sheet store.
 
     def _load_shared_sheet(self):
         """Read the shared sheet into a SpriteSheet (empty one if never saved)."""
         try:
             hexs = self._with_sd(lambda: self.carts_store.load_shared_sheet(self.carts_root))
         except Exception as exc:  # noqa: BLE001
-            print("KidCode load shared sheet failed:", exc)
+            print("Moybyte load shared sheet failed:", exc)
             return None
         if hexs:
             try:
@@ -3477,7 +3477,7 @@ class Workstation:
             self._with_sd(lambda: self.carts_store.save_shared_sheet(hexs, self.carts_root))
         except Exception as exc:  # noqa: BLE001
             self.paint_status = "PUT FAILED"
-            print("KidCode save shared sheet failed:", exc)
+            print("Moybyte save shared sheet failed:", exc)
             return False
         self.paint_status = "PUT SPR " + str(n)
         return True
@@ -3500,7 +3500,7 @@ class Workstation:
             try:
                 self._with_sd(lambda: self.carts_store.save_config(self.cart))
             except Exception as exc:  # noqa: BLE001
-                print("KidCode save failed:", exc)
+                print("Moybyte save failed:", exc)
 
     def go_home(self):
         self._dirty = True             # screen change repaints (#44)
@@ -3539,7 +3539,7 @@ class Workstation:
                 self.carts_store.new_from_template(self.carts_root),
                 self.carts_store.scan(self.carts_root))[1]))
         except Exception as exc:  # noqa: BLE001
-            print("KidCode new cart failed:", exc)
+            print("Moybyte new cart failed:", exc)
 
     def dup_cart(self):
         if not self.carts_root or not self.can_manage or not self.launcher.selected():
@@ -3550,7 +3550,7 @@ class Workstation:
                 self.carts_store.duplicate(sel, self.carts_root),
                 self.carts_store.scan(self.carts_root))[1]))
         except Exception as exc:  # noqa: BLE001
-            print("KidCode duplicate failed:", exc)
+            print("Moybyte duplicate failed:", exc)
 
     def del_cart(self):
         if not self.carts_root or not self.can_manage or len(self.launcher.items) <= 1:
@@ -3561,7 +3561,7 @@ class Workstation:
                 self.carts_store.delete(sel),
                 self.carts_store.scan(self.carts_root))[1]))
         except Exception as exc:  # noqa: BLE001
-            print("KidCode delete failed:", exc)
+            print("Moybyte delete failed:", exc)
 
     def adjust(self, d):
         f = self.cart["edit"][self.msel]
@@ -5061,7 +5061,7 @@ class Workstation:
             return True
         except Exception as exc:  # noqa: BLE001
             self.blk_status = "SAVE FAILED"
-            print("KidCode save blocks failed:", _err_text(exc))
+            print("Moybyte save blocks failed:", _err_text(exc))
             return False
 
     def graduate_to_code(self):
@@ -5518,7 +5518,7 @@ class Workstation:
                     # cart exception whose __str__ itself raises would otherwise
                     # escape frame() here -> the silent device hang the panel
                     # exists to prevent.
-                    print("KidCode frame error:", self.cart_error)
+                    print("Moybyte frame error:", self.cart_error)
             # Cart text input (#38/#42): apply the keyboard mode the cart's _update may
             # have just requested via textmode(), so the NEXT keyboard poll yields the
             # right bytes (clean ASCII for typing, raw/game for hold-to-move). One-frame
@@ -5574,7 +5574,7 @@ class Workstation:
                     # escape the frame loop -- the device would hang silently with
                     # no error surface. Fall back to a readable panel + CLOSE.
                     self.cart_error = _err_text(exc)
-                    print("KidCode cards error:", exc)
+                    print("Moybyte cards error:", exc)
                     self._draw_error_panel()
                     self._icon_btn("close", "", _CLOSE_BTN, NAMES["red"])
         if self.show_fps and self.screen == "desktop":
@@ -6023,7 +6023,7 @@ class Workstation:
     def perf_sample(self):
         """Snapshot of the current per-frame perf numbers for offline sampling:
         (cart_name, fps, flush_ms, draw_ms). Used by the device backend's diag
-        sampler (kid_runtime.run_desktop) to log a PERF line every few seconds
+        sampler (moy_runtime.run_desktop) to log a PERF line every few seconds
         while a cart runs. flush_ms/draw_ms are only meaningful when perf_capture
         (or perf_hud) is on -- run_desktop sets perf_capture=True at boot. Backend-
         agnostic + host-safe: pure reads, no drawing, no hardware. Returns None
@@ -6132,10 +6132,10 @@ class Workstation:
         """The ABOUT info modal (#52): a small centered panel with the console name +
         firmware version, dismissed by any tap / ESC / B. Drawn on top of everything."""
         cv = self.sys_canvas
-        lines = ("KIDCODE CONSOLE", "v0.4", "", "TAP TO CLOSE")
+        lines = ("MOYBYTE CONSOLE", "v0.4", "", "TAP TO CLOSE")
         ver = self._firmware_version_text()
         if ver:
-            lines = ("KIDCODE CONSOLE", ver, "", "TAP TO CLOSE")
+            lines = ("MOYBYTE CONSOLE", ver, "", "TAP TO CLOSE")
         w = 0
         for ln in lines:
             w = max(w, len(ln) * 8)
@@ -6153,7 +6153,7 @@ class Workstation:
 
     def _firmware_version_text(self):
         """A short firmware-version string for ABOUT, or "" when unknown (host). Reads
-        the injected updater's version when present (device kc_ota.FIRMWARE_VERSION)."""
+        the injected updater's version when present (device moy_ota.FIRMWARE_VERSION)."""
         u = self.updater
         if u is not None:
             v = getattr(u, "version", None)

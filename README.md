@@ -1,11 +1,11 @@
-# KidCode
+# Moybyte
 
-[![CI](https://github.com/nikola-j/kidcode/actions/workflows/ci.yml/badge.svg)](https://github.com/nikola-j/kidcode/actions/workflows/ci.yml)
+[![CI](https://github.com/nikola-j/moybyte/actions/workflows/ci.yml/badge.svg)](https://github.com/nikola-j/moybyte/actions/workflows/ci.yml)
 
-KidCode is a PC-first simulator and SDK for a future ESP32 kids' creative coding console.
+Moybyte is a PC-first simulator and SDK for a future ESP32 kids' creative coding console.
 
-> **Two systems live in this repo** (see `CLAUDE.md`): the original **`.kcproj` SDK**
-> (documented below), and the newer **v0.4 `.kcart` console** — a TIC-80-style
+> **Two systems live in this repo** (see `CLAUDE.md`): the original **`.moyproj` SDK**
+> (documented below), and the newer **v0.4 `.moy` console** — a TIC-80-style
 > "fantasy workstation" where *everything is a cartridge*. The v0.4 console is where
 > current feature work happens.
 
@@ -21,16 +21,16 @@ same pixels on each). Run it on the PC:
 Build + flash the device firmware (MicroPython):
 
 ```bash
-KIDCODE_SKIP_VFS_BOOT=1 make firmware-build-lilygo-micropython
+MOYBYTE_SKIP_VFS_BOOT=1 make firmware-build-lilygo-micropython
 make firmware-flash-lilygo-micropython PORT=/dev/ttyACM0
 ```
 
-Design + current status: [`KidCode_Console_Plan_v0_4.md`](KidCode_Console_Plan_v0_4.md)
+Design + current status: [`moybyte_Console_Plan_v0_4.md`](moybyte_Console_Plan_v0_4.md)
 (see its "Implementation status" section). Working orientation: `CLAUDE.md`.
 
 ---
 
-## `.kcproj` SDK (original)
+## `.moyproj` SDK (original)
 
 The first goal is the edit-run-test loop on a normal computer:
 
@@ -49,20 +49,20 @@ make check-portable
 Create a new project:
 
 ```bash
-.venv/bin/kidcode new my_game
-.venv/bin/kidcode run my_game.kcproj --headless --frames 60
+.venv/bin/moybyte new my_game
+.venv/bin/moybyte run my_game.moyproj --headless --frames 60
 ```
 
 Pack a project bundle:
 
 ```bash
-.venv/bin/kidcode pack examples/tiny_runner.kcproj --out /tmp/tiny_runner.kc8
+.venv/bin/moybyte pack examples/tiny_runner.moyproj --out /tmp/tiny_runner.kc8
 ```
 
 Run a desktop simulator window when pygame is available:
 
 ```bash
-.venv/bin/kidcode run examples/tiny_runner.kcproj --fps 30 --scale 4
+.venv/bin/moybyte run examples/tiny_runner.moyproj --fps 30 --scale 4
 ```
 
 Press `Esc` or close the window to exit.
@@ -70,20 +70,20 @@ Press `Esc` or close the window to exit.
 Bundled examples:
 
 ```text
-examples/tiny_runner.kcproj
-examples/blocks_demo.kcproj
-examples/music_player_stub.kcproj
-examples/radio_pong_stub.kcproj
+examples/tiny_runner.moyproj
+examples/blocks_demo.moyproj
+examples/music_player_stub.moyproj
+examples/radio_pong_stub.moyproj
 ```
 
 The firmware-facing API contract is in
 `docs/firmware_runtime_contract.md`. The first concrete hardware target is the
 LilyGO T-Deck Plus, with board-specific details kept out of the portable API.
 
-Kid projects import the small public API from `kidcode`:
+Kid projects import the small public API from `moybyte`:
 
 ```python
-from kidcode import *
+from moybyte import *
 
 player = sprite("robot", x=60, y=60)
 

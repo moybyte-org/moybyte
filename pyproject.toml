@@ -3,9 +3,9 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "kidcode"
+name = "moybyte"
 version = "0.1.0"
-description = "PC-first SDK and simulator for KidCode projects."
+description = "PC-first SDK and simulator for Moybyte projects."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []
@@ -19,10 +19,10 @@ sim = [
 ]
 
 [project.scripts]
-kidcode = "kidcode_cli.main:main"
+moybyte = "moybyte_cli.main:main"
 
 [tool.setuptools.packages.find]
-include = ["kidcode*", "kidcode_sim*", "kidcode_blocks*", "kidcode_cli*"]
+include = ["moybyte*", "moybyte_sim*", "moybyte_blocks*", "moybyte_cli*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

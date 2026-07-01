@@ -1,6 +1,6 @@
 """Headless tests for the v0.4 audio core (#16): the shared sound data model +
 synth/mixer (runtime/audio.py), the host audio API surface (host_app.make_api +
-FakeAudio), the .kcart sounds.json store (kid_carts), and the Beeper demo cart
+FakeAudio), the .moy sounds.json store (moy_carts), and the Beeper demo cart
 making sound through the fake backend on the shared console (host == device).
 
 No sound hardware: FakeAudio records calls AND drives the real AudioEngine, so the
@@ -233,22 +233,22 @@ def test_fake_audio_tick_renders_frames():
     assert fake.rendered == int(8000 / 30)
 
 
-# -- .kcart store: sounds.json round-trip ----------------------------------
+# -- .moy store: sounds.json round-trip ----------------------------------
 
-def test_kid_carts_saves_and_loads_sounds(tmp_path):
-    from runtime import kid_carts
+def test_moy_carts_saves_and_loads_sounds(tmp_path):
+    from runtime import moy_carts
     root = str(tmp_path / "carts")
-    kid_carts.ensure_dirs(root)
-    c = kid_carts.create("Tune Cart", root, src="def _draw():\n    cls(1)\n")
+    moy_carts.ensure_dirs(root)
+    c = moy_carts.create("Tune Cart", root, src="def _draw():\n    cls(1)\n")
     assert c["sounds"] is None                     # new cart has no bank yet
     bank = audio.AudioBank.default().to_dict()
-    kid_carts.save_sounds(c, bank)
-    reloaded = kid_carts.load(c["path"])
+    moy_carts.save_sounds(c, bank)
+    reloaded = moy_carts.load(c["path"])
     assert reloaded["sounds"] == bank              # persisted + reloaded intact
     # a corrupt sounds.json degrades to None, never a crash
     with open(c["path"] + "/sounds.json", "w") as f:
         f.write("{not json")
-    assert kid_carts.load(c["path"])["sounds"] is None
+    assert moy_carts.load(c["path"])["sounds"] is None
 
 
 # -- the Beeper demo cart, on the shared console ----------------------------
@@ -280,16 +280,16 @@ def test_beeper_demo_cart_makes_sound(tmp_path):
 def test_cart_without_audio_backend_still_runs(tmp_path):
     # A Workstation with no make_audio injected falls back to _SilentAudio so a
     # cart's sfx()/beep() are harmless no-ops (and make_api stays callable).
-    from runtime import console, kid_carts
+    from runtime import console, moy_carts
     from runtime.canvas import Canvas
     from runtime.input import InputState
     from runtime import host_app
     root = str(tmp_path / "carts")
-    kid_carts.ensure_dirs(root)
-    kid_carts.create("Noisy", root,
+    moy_carts.ensure_dirs(root)
+    moy_carts.create("Noisy", root,
                      src="def _draw():\n    sfx(0)\n    beep(440)\n    cls(1)\n")
     ws = console.Workstation(host_app._NullComp(), Canvas(320, 240), InputState(),
-                             kid_carts.scan(root))
+                             moy_carts.scan(root))
     ws.make_api = host_app.make_api          # API present ...
     ws.make_audio = None                     # ... but no audio backend
     ws.open()
@@ -424,10 +424,10 @@ def test_music_editor_cursor_move_clamps():
 
 def test_music_editor_edits_roundtrip_through_sounds_json(tmp_path):
     # The editor mutates the bank in place; saving + reloading the cart preserves it.
-    from runtime import kid_carts
+    from runtime import moy_carts
     root = str(tmp_path / "carts")
-    kid_carts.ensure_dirs(root)
-    c = kid_carts.create("Tune", root, src="def _draw():\n    cls(1)\n")
+    moy_carts.ensure_dirs(root)
+    c = moy_carts.create("Tune", root, src="def _draw():\n    cls(1)\n")
     bank = audio.AudioBank.default()
     me, _ = _music_editor(bank)
     me.set_pitch(72)
@@ -436,8 +436,8 @@ def test_music_editor_edits_roundtrip_through_sounds_json(tmp_path):
     me.add_step()
     me.toggle_view()
     me.add_slot()
-    kid_carts.save_sounds(c, me.bank.to_dict())
-    reloaded = kid_carts.load(c["path"])
+    moy_carts.save_sounds(c, me.bank.to_dict())
+    reloaded = moy_carts.load(c["path"])
     again = audio.AudioBank.from_dict(reloaded["sounds"])
     assert again.to_dict() == me.bank.to_dict()       # full round-trip, byte-stable
 
@@ -495,8 +495,8 @@ def test_music_editor_opens_edits_previews_and_saves_on_console(tmp_path):
     # SAVE persists to sounds.json; reload proves it stuck.
     ws._music_click(C._MU_SAVE[0] + 2, C._MU_SAVE[1] + 2)
     assert ws.save_status == "SAVED" and not me.dirty
-    from runtime import kid_carts
-    reloaded = kid_carts.load(ws.cart["path"])
+    from runtime import moy_carts
+    reloaded = moy_carts.load(ws.cart["path"])
     assert reloaded["sounds"] is not None
     assert audio.AudioBank.from_dict(reloaded["sounds"]).to_dict() == me.bank.to_dict()
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the KidCode v0.4 fantasy workstation on the host.
+"""Run the Moybyte v0.4 fantasy workstation on the host.
 
 Boots into the cartridge **launcher**; open any cartridge (wallpaper / game) into
 the desktop shell, tweak it in "Make it mine", Run, Save, Home back to the
@@ -23,7 +23,7 @@ gallery. No device needed. Drive it live (pygame) or headlessly via a script.
   python tools/simulate_desktop.py --gif out.gif --script "wait:20 right run wait:40 home"
 
   # launch a single cartridge directly (skip the launcher)
-  python tools/simulate_desktop.py --cart system_carts/star_catcher.kcart
+  python tools/simulate_desktop.py --cart system_carts/star_catcher.moy
 
   # a roomy responsive desktop at a larger SYSTEM canvas (#39): the desktop reflows
   # to fill it; the game stays a fixed 320x240, composited as a centered viewport.
@@ -41,7 +41,7 @@ from runtime import host_app  # noqa: E402  (runs the SHARED console.Workstation
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SYSTEM_CARTS = os.path.join(ROOT, "system_carts")
-DEFAULT_SAVE_DIR = os.path.expanduser("~/.kidcode/projects")
+DEFAULT_SAVE_DIR = os.path.expanduser("~/.moybyte/projects")
 # Tour (shared-console buttons): open a cart, Home, move, open another, edit code.
 DEMO_SCRIPT = (
     "wait:18 run wait:40 home wait:8 down run wait:50 home wait:8 "
@@ -104,13 +104,13 @@ def save_gif(images, path, scale):
 
 
 def _open_named_cart(ws, cart_path, carts_dir):
-    """Copy a named .kcart into the store (if needed), select and open it."""
+    """Copy a named .moy into the store (if needed), select and open it."""
     name = os.path.basename(os.path.normpath(cart_path))
     dst = os.path.join(carts_dir, name)
     if os.path.abspath(cart_path) != os.path.abspath(dst) and not os.path.exists(dst):
         import shutil
         shutil.copytree(cart_path, dst)
-    ws.launcher.items = host_app.kid_carts.scan(ws.carts_root)
+    ws.launcher.items = host_app.moy_carts.scan(ws.carts_root)
     for i, c in enumerate(ws.launcher.items):
         if os.path.abspath(c["path"]) == os.path.abspath(dst):
             ws.launcher.sel = i
@@ -125,7 +125,7 @@ def run_live(driver, dt, scale):
     w, h = cv.w, cv.h
     pygame.init()
     screen = pygame.display.set_mode((w * scale, h * scale))
-    pygame.display.set_caption("KidCode workstation")
+    pygame.display.set_caption("Moybyte workstation")
     clock = pygame.time.Clock()
     # Mirror the device's two input devices:
     #   arrows = the TRACKBALL  -> move a (visible) cursor; at the code edges the
@@ -224,7 +224,7 @@ def _force_autoplay_on_open(ws):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--cart", help="launch a single .kcart directly (skip the launcher)")
+    ap.add_argument("--cart", help="launch a single .moy directly (skip the launcher)")
     ap.add_argument("--gif", metavar="PATH")
     ap.add_argument("--script", default=None)
     ap.add_argument("--demo", action="store_true")
@@ -254,7 +254,7 @@ def main():
         ws.make_audio = host_app.make_sdl_audio
         # Live run -> report the desktop's REAL WiFi connection/IP (your PC is online),
         # so network features test against real Python sockets. Headless keeps FakeWifi.
-        ws.wifi = host_app.make_host_wifi(host_app.kid_carts, ws.carts_root)
+        ws.wifi = host_app.make_host_wifi(host_app.moy_carts, ws.carts_root)
     # The scripted demo tour drives no gameplay input, so default it to autoplay
     # (so the GIF is lively); a live, interactive session defaults to PLAY.
     autoplay = args.autoplay if args.autoplay is not None else args.demo

@@ -1,4 +1,4 @@
-import kidcode_shell
+import moybyte_shell
 
-kidcode_shell.main()
+moybyte_shell.main()
 

@@ -85,7 +85,7 @@ class CommandCanvas:
     def __init__(self, width=320, height=240, palette=None, font_scale=1):
         self.w = width
         self.h = height
-        self.palette = palette or _pal.KID64
+        self.palette = palette or _pal.MOY64
         # System-UI font scale (#39): when this recorder stands in for the SYSTEM
         # canvas, the console calls set_font_scale on it and reads font_scale (in
         # _blit_glyph). Scaled text is recorded as rect commands (the replayer already

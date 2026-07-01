@@ -1,8 +1,8 @@
 import pytest
 
-from kidcode.errors import PermissionDenied
-from kidcode.files import FileService
-from kidcode.permissions import Permissions
+from moybyte.errors import PermissionDenied
+from moybyte.files import FileService
+from moybyte.permissions import Permissions
 
 
 def test_audio_permission_denied():

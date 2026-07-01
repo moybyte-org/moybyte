@@ -1,10 +1,10 @@
-from kidcode_cli.main import main
-from kidcode_cli.portable import check_source
+from moybyte_cli.main import main
+from moybyte_cli.portable import check_source
 
 
-def test_portable_checker_accepts_kidcode_math_random():
+def test_portable_checker_accepts_moybyte_math_random():
     issues = check_source(
-        "from kidcode import *\nimport math\nfrom random import randint\n",
+        "from moybyte import *\nimport math\nfrom random import randint\n",
         "ok.py",
     )
 
@@ -20,7 +20,7 @@ def test_portable_checker_rejects_pc_only_imports():
 
 
 def test_portable_checker_rejects_direct_open_call():
-    issues = check_source("from kidcode import *\nopen('save.txt')\n", "bad.py")
+    issues = check_source("from moybyte import *\nopen('save.txt')\n", "bad.py")
 
     assert len(issues) == 1
     assert "open" in issues[0].message
@@ -30,9 +30,9 @@ def test_cli_check_portable_examples(capsys):
     result = main(
         [
             "check-portable",
-            "examples/tiny_runner.kcproj",
-            "examples/blocks_demo.kcproj",
-            "examples/music_player_stub.kcproj",
+            "examples/tiny_runner.moyproj",
+            "examples/blocks_demo.moyproj",
+            "examples/music_player_stub.moyproj",
         ]
     )
     captured = capsys.readouterr()

@@ -45,17 +45,17 @@ def test_wallpaper_backdrop_is_drawn_behind_icons(tmp_path):
 def test_fill_fallback_when_no_wallpaper_carts(tmp_path):
     """With zero wallpaper carts installed, the built-in solid fills are still
     selectable so there is always a valid backdrop (zero-cart fallback)."""
-    from runtime import console, kid_carts, host_app
+    from runtime import console, moy_carts, host_app
     # A store with only a non-wallpaper cart.
     carts_dir = str(tmp_path / "carts")
-    kid_carts.ensure_dirs(carts_dir)
-    kid_carts.create("Plain", carts_dir, src="def _draw():\n    cls(1)\n", type="app")
-    carts = kid_carts.scan(carts_dir)
+    moy_carts.ensure_dirs(carts_dir)
+    moy_carts.create("Plain", carts_dir, src="def _draw():\n    cls(1)\n", type="app")
+    carts = moy_carts.scan(carts_dir)
     canvas = host_app.Canvas(320, 240)
     inp = host_app.InputState()
     ws = console.Workstation(host_app._NullComp(), canvas, inp, carts)
     ws.make_api = host_app.make_api
-    ws.carts_store = kid_carts
+    ws.carts_store = moy_carts
     ws.carts_root = carts_dir
     ws.pointer = console.Pointer(320, 240)
     ws.load_system()
@@ -77,13 +77,13 @@ def test_wallpaper_switch_changes_backdrop(tmp_path):
 
 
 def test_wallpaper_choice_persists_across_reboot(tmp_path):
-    from runtime import host_app, kid_carts
+    from runtime import host_app, moy_carts
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)
     ws.cycle_wallpaper(1)
     chosen = ws.wallpaper_id
     # It lands in system.json beside the carts dir.
-    assert kid_carts.load_system(carts_dir).get("wallpaper") == chosen
+    assert moy_carts.load_system(carts_dir).get("wallpaper") == chosen
     # A fresh boot restores it.
     ws2 = host_app.build_workstation(carts_dir)
     assert ws2.wallpaper_id == chosen
@@ -115,7 +115,7 @@ def test_status_strip_menu_opens_settings_from_home(tmp_path):
 
 
 def test_settings_wallpaper_stepper_applies_and_persists(tmp_path):
-    from runtime import host_app, kid_carts
+    from runtime import host_app, moy_carts
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)
     drv = host_app.ConsoleDriver(ws)
@@ -125,7 +125,7 @@ def test_settings_wallpaper_stepper_applies_and_persists(tmp_path):
     drv.press("right")                                    # step the stepper
     drv.frame(1 / 30)
     assert ws.wallpaper_id != before
-    assert kid_carts.load_system(carts_dir).get("wallpaper") == ws.wallpaper_id
+    assert moy_carts.load_system(carts_dir).get("wallpaper") == ws.wallpaper_id
 
 
 def test_settings_back_returns_home(tmp_path):

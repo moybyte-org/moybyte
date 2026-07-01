@@ -2,10 +2,10 @@ from setuptools import find_packages, setup
 
 
 setup(
-    name="kidcode",
+    name="moybyte",
     version="0.1.0",
-    description="PC-first SDK and simulator for KidCode projects.",
-    packages=find_packages(include=["kidcode*", "kidcode_sim*", "kidcode_blocks*", "kidcode_cli*"]),
+    description="PC-first SDK and simulator for Moybyte projects.",
+    packages=find_packages(include=["moybyte*", "moybyte_sim*", "moybyte_blocks*", "moybyte_cli*"]),
     python_requires=">=3.10",
     install_requires=[],
     extras_require={
@@ -14,7 +14,7 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "kidcode=kidcode_cli.main:main",
+            "moybyte=moybyte_cli.main:main",
         ],
     },
 )

@@ -1,10 +1,10 @@
-"""KidCode v0.4 userland runtime (host reference implementation).
+"""Moybyte v0.4 userland runtime (host reference implementation).
 
 The "other end" of the stack from the native graphics core: the fantasy
 workstation surface a cartridge runs on. 480x270 indexed canvas, PICO-8-style
-drawing API, the .kcart cartridge model, and a Run loop with friendly errors.
+drawing API, the .moy cartridge model, and a Run loop with friendly errors.
 The drawing API is language-neutral by design so it can later sit on the native
-kc_compositor (device) or a Lua VM, not just this host Python reference.
+moy_compositor (device) or a Lua VM, not just this host Python reference.
 """
 
 from . import palette

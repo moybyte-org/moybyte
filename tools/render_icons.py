@@ -26,7 +26,7 @@ from runtime import host_app  # noqa: F401,E402
 from runtime import console as C  # noqa: E402
 from runtime.palette import _BASE16  # noqa: E402
 
-DEFAULT_OUT = ("/tmp/claude-1000/-home-nikola-Documents-Work-kidcode/"
+DEFAULT_OUT = ("/tmp/claude-1000/-home-nikola-Documents-Work-moybyte/"
                "950f1685-037e-4148-b85c-4b08b06bd9eb/scratchpad/icons_preview.png")
 
 SCALE = 4               # px per icon pixel
@@ -34,7 +34,7 @@ PAD = 6                 # padding around each cell
 LABEL_H = 10            # rows reserved under each icon for the kind label
 COLS = 4                # icons per row in the contact sheet
 BG = (24, 24, 28)       # dark background (the bar is black; this reads close)
-FG = (255, 241, 232)    # label text (KID64 white)
+FG = (255, 241, 232)    # label text (MOY64 white)
 
 # A tiny 5x7 bitmap font for the labels (just the chars the kind names use).
 _FONT = {

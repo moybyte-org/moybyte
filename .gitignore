@@ -15,7 +15,7 @@ firmware/lilygo_t_deck_plus_micropython/dist/
 firmware/lilygo_t_deck_plus_micropython/modules/editors.py
 firmware/lilygo_t_deck_plus_micropython/modules/audio.py
 firmware/lilygo_t_deck_plus_micropython/modules/console.py
-firmware/lilygo_t_deck_plus_micropython/modules/kid_carts.py
+firmware/lilygo_t_deck_plus_micropython/modules/moy_carts.py
 firmware/lilygo_t_deck_plus_micropython/modules/blocks.py
 # carts_data.py is generated from system_carts/ by tools/gen_device_carts.py at build
 firmware/lilygo_t_deck_plus_micropython/modules/carts_data.py
@@ -23,4 +23,4 @@ firmware/lilygo_t_deck_plus_micropython/modules/carts_data.py
 firmware/lilygo_t_deck_plus_micropython/modules/_ota_build.py
 firmware/lilygo_t_deck_plus_reference/
 firmware/reference_tulipcc/
-firmware/lilygo_t_deck_plus/include/kidcode_project_bundle.h
+firmware/lilygo_t_deck_plus/include/moybyte_project_bundle.h
