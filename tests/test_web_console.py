@@ -282,6 +282,23 @@ def test_launcher_frame_clears_the_buffer_each_redraw(tmp_path):
     assert "cls" in [c[0] for c in cmds], "post-nav frame never clears -> browser ghosts"
 
 
+def test_static_screen_still_streams_a_full_frame_every_poll(tmp_path):
+    """A streaming web view must send the CURRENT screen on EVERY poll, but the console is
+    _dirty-gated (#44): it re-records only when something changed. A STATIC screen (the
+    launcher, a paused cart) would record a full frame ONCE and then NOTHING, so a browser
+    polling at 30fps -- or one that connects after that first frame -- gets empty frames and
+    shows BLACK (the on-hardware symptom: the desktop launcher was all black). step_frame()
+    forces a redraw each frame. Simulate a settled screen (_dirty already cleared) and assert
+    the next poll is STILL a complete frame. The other launcher tests use a freshly-seeded
+    tmp launcher whose live wallpaper animates (dirty every frame), so they never caught this."""
+    console = web_console.WebConsole(str(tmp_path / "carts"), fps=30)
+    console.step_frame()                         # first frame (consumes the initial dirty)
+    console.ws._dirty = False                    # simulate a fully SETTLED / static screen
+    cmds, _, _ = console.step_frame()            # the next poll must NOT be empty
+    assert cmds, "a static screen streamed an EMPTY frame -> the browser goes black"
+    assert "cls" in [c[0] for c in cmds], "static-screen frame must be a full redraw (has cls)"
+
+
 def test_fake_audio_take_pcm_hands_off_the_rendered_block():
     """Browser audio (#22): FakeAudio.tick already rendered the mixed PCM each frame
     and discarded it; now it keeps the block and take_pcm() hands it off (and clears,
