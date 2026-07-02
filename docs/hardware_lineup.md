@@ -6,14 +6,14 @@ shared console (`runtime/` → frozen onto each device), so a device is just a *
 **320×240 indexed MOY64 canvas** — is identical everywhere, so *one cart runs on every
 tier*. Adding a tier is a backend port, not a fork.
 
-Status: only the **Player-class** device works today (LilyGO T-Deck). This doc is the
-direction; issues track the work.
+Status: the **Player-class** device (LilyGO T-Deck) and now a **Zero-class** device (Seeed
+XIAO ESP32-S3, headless web-view) both work. This doc is the direction; issues track the work.
 
 ## The three tiers
 
 | Tier | Chip | Display | Input | Carts / storage | Role | Status |
 |---|---|---|---|---|---|---|
-| **MoyByte Zero** | ESP32-S3 (WROOM-1 N16R8) | none → **browser** | browser (web view) | flash, over WiFi | cheapest, phone-played companion | planned (enabled by #41) |
+| **MoyByte Zero** | ESP32-S3 (WROOM-1 N16R8) | none → **browser** | browser (web view) | flash, over WiFi | cheapest, phone-played companion | **working** on XIAO ESP32-S3 (headless web-view; AP→WiFi-cart→STA provisioning) — `firmware/seeed_xiao_esp32s3_zero/` |
 | **MoyByte Player** | ESP32-S3 (WROOM-1U N16R8) | 2.4″ IPS 320×240 | **D-pad + A/B + Start/Select** | **microSD ("cartridge")** | pocket game console | dev today on T-Deck; gamepad device picked |
 | **MoyByte One** | ESP32-P4 (+ C6) | 7″ MIPI-DSI 1024×600 | USB-HID kbd → integrated | SDIO microSD | large-screen workstation | porting (#58) — **first bespoke product** |
 
