@@ -11,7 +11,8 @@
 #
 # THE LIVE CHANNEL is a WebSocket; the static handshake is plain HTTP:
 #   GET  /         -> the HTML page (web_view.PAGE_HTML: a scaled <canvas> + JS replayer).
-#   GET  /assets   -> palette (MOY64 -> RGB) + petme128 font + open cart sheet/tilemap.
+#   GET  /assets   -> palette (MOY64 -> RGB) + petme128 font + open cart sheet/tilemap +
+#                     paint images (#63 Fold 4: {name:{w,h,b64}}, referenced by ["imgref",...]).
 #   GET  /ws       -> (Upgrade: websocket) the PERSISTENT live channel + the ONLY transport:
 #                     frame_payload text messages PUSH down per committed frame (capped),
 #                     {"events":[...]} text messages push up -> apply_events. (The legacy HTTP

@@ -1080,6 +1080,8 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
                 w, h, idx = dec
                 im = Image(w, h, idx, -1)      # opaque (no transparent index)
                 im._paint = True               # marks the paint-image bake/ship fast paths
+                im._name = a                   # web view (#63 Fold 4): spr() ships ["imgref",
+                                               # x, y, name]; the pixels ride /assets, not the frame
                 _img_cache[a] = im
             return im
         return Image.from_ascii(a, mapping, transparent)
@@ -2059,6 +2061,36 @@ def _diag_drawbrk(diag, ws):
         pass
 
 
+_GC_BASE = [0]      # #63: last-sample gc.mem_alloc() live-set baseline, for the churn delta.
+
+
+def _diag_gc(diag):
+    """Log a GC line (#63, the sakura ~14fps profiling): the forced-collect PAUSE (what an
+    auto-GC costs when it fires mid-frame -> the render-time variance), free heap, the live
+    set, and the CHURN (bytes allocated since the last sample -> the pressure that sets how
+    OFTEN auto-GC fires). A high churn + a non-trivial collect = GC-bound, and the stutter is
+    that collect landing at random frames.
+
+    gc.mem_alloc()/mem_free() WALK the heap (tens of ms), so this runs ONLY on the ~3s perf
+    cadence -- NEVER per frame (that walk is itself a stall; cf. the web-perf heap-walk fix)."""
+    if diag is None:
+        return
+    try:
+        import gc
+        pre = gc.mem_alloc()                 # live set + garbage accumulated since last GC
+        t = _ticks_ms()
+        gc.collect()
+        collect_ms = _ticks_diff(_ticks_ms(), t)
+        free = gc.mem_free()
+        live = gc.mem_alloc()                # post-collect: the retained (live) set
+        churn = pre - _GC_BASE[0]            # allocated since the last sample (mod auto-GC)
+        _GC_BASE[0] = live
+        diag.log("GC", "collect=%dms free=%dk live=%dk churn=%dk"
+                 % (collect_ms, free >> 10, live >> 10, churn >> 10))
+    except Exception:
+        pass
+
+
 def _load_carts(session=None):
     """Load cartridges from SD (seeding the built-ins on first boot). Returns
     (carts, carts_root); carts_root is None (management disabled) on fallback to
@@ -2486,9 +2518,21 @@ class WebView:
         cart = getattr(ws, "cart", None)
         title = cart.get("title") if cart else None
         rate = AUDIO_RATE
+        # Paint images (#63 Fold 4): decode the open cart's .moyimg text -> (w, h, index bytes)
+        # so /assets ships them ONCE (browser-cached), and the per-frame stream references each
+        # by name via ["imgref", ...]. Decoded here (not in the recorder) so a fat base64 blob
+        # never rides a frame and starve the defspr budget. Threaded through like the sheet.
+        decoded = {}
+        raw = getattr(ws, "images", None)
+        if raw:
+            for name in raw:
+                dec = _decode_moyimg(raw[name])
+                if dec is not None:
+                    decoded[name] = dec
         return self._web.assets_payload(self._canvas.w, self._canvas.h, PAL565,
                                         getattr(ws, "sheet", None),
-                                        getattr(ws, "tilemap", None), title, rate)
+                                        getattr(ws, "tilemap", None), title, rate,
+                                        decoded or None)
 
     def frame(self):
         cart = getattr(self._ws, "cart", None)
@@ -2835,6 +2879,7 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             _diag_perf_at = _tnow + 3000
             _diag_perf_sample(diag, ws)
             _diag_drawbrk(diag, ws)
+            _diag_gc(diag)              # #63: GC pause / churn (sakura ~14fps profiling)
         # Diag SD flush (~5s): overwrite /sd/moybyte/diag.log with the current ring.
         # Runs between frames on the native single-bus path (with_sd_live), never
         # during a panel flush. Guarded -> a flush failure degrades to a no-op.

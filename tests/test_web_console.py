@@ -465,21 +465,21 @@ def test_layer_reships_deflayer_on_redraw():
 # ---------------------------------------------------------------------------
 
 
-def test_paint_image_layer_ships_one_compact_img_not_a_fat_spr():
-    """A paint image (a big MOY64 index bitmap) baked into a layer with spr(bg, 0, 0)
-    -- sakura's background pattern -- must record as ONE compact ["img", ...] (base64
-    indices) inside the layer's deflayer, NOT a self-contained spr with a 76,800-int
-    pix array (the ~1MB stream that wouldn't load in the browser). The served deflayer
-    replays pixel-identically to the rasterizer."""
+def test_nameless_paint_image_layer_ships_one_compact_img_fallback():
+    """FALLBACK path: a paint image with NO asset name (built ad-hoc, not via image('name'),
+    so it has no /assets entry to reference) baked into a layer with spr(bg, 0, 0) must record
+    as ONE compact inline ["img", ...] (base64 indices) inside the layer's deflayer, NOT a
+    self-contained spr with a 76,800-int pix array (the ~1MB stream that wouldn't load in the
+    browser). The served deflayer replays pixel-identically to the rasterizer with NO /assets."""
     from runtime.canvas import Image
 
     tee = TeeCanvas(WIDTH, HEIGHT)
-    # A full-screen paint image (indices), tagged _paint like image('name') produces.
+    # A full-screen paint image (indices), tagged _paint but NAMELESS -> inline img fallback.
     idx = bytearray(WIDTH * HEIGHT)
     for i in range(len(idx)):
         idx[i] = (i * 7) % 63
     bg = Image(WIDTH, HEIGHT, idx, -1)
-    bg._paint = True
+    bg._paint = True                      # no _name -> the inline fallback, not imgref
 
     lay = tee.new_layer(WIDTH, HEIGHT)
     lay.spr(bg, 0, 0)                     # ONE bake into the layer (the #63 path)
@@ -491,7 +491,8 @@ def test_paint_image_layer_ships_one_compact_img_not_a_fat_spr():
     assert len(deflayers) == 1, "the paint bg layer ships exactly one deflayer"
     lcmds = deflayers[0][4]
     imgs = [c for c in lcmds if c[0] == "img"]
-    assert len(imgs) == 1, "the paint bg is ONE img command, not thousands of draws"
+    assert len(imgs) == 1, "the nameless paint bg is ONE inline img command"
+    assert not any(c[0] == "imgref" for c in lcmds), "a nameless image has no name to reference"
     # No fat self-contained spr (9-field, pix array) rode along.
     assert not any(c[0] == "spr" and len(c) > 7 for c in lcmds), "no fat inline spr"
     img = imgs[0]
@@ -500,16 +501,129 @@ def test_paint_image_layer_ships_one_compact_img_not_a_fat_spr():
     # blob -- and MUCH smaller than 76,800 JSON ints (~a few hundred KB to ~1MB).
     assert len(img[5]) < WIDTH * HEIGHT * 2, "img blob must be compact (base64 indices)"
 
-    # Replay the served frame -> pixel-identical to the rasterizer.
+    # Replay the served frame (no /assets) -> pixel-identical to the rasterizer.
     cv = Canvas(WIDTH, HEIGHT)
     replay_to_canvas(served, cv, {})
     assert bytes(cv.buf) == bytes(tee.buf), "paint-image layer replay must match raster"
 
 
-def test_sakura_paint_bg_streams_compact_and_replays_pixel_identical(tmp_path):
-    """End-to-end: the real sakura cart (#63 acceptance) run through the console + web
-    recorder ships its painted background as ONE compact img inside a deflayer that is
-    sent ONCE, and every served frame replays pixel-identically to the rasterizer."""
+def test_named_paint_image_layer_ships_imgref_not_pixels():
+    """The NORMAL path: a NAMED paint image (image('bg') tags img._name) baked into a layer
+    records a tiny ["imgref", x, y, name] inside the deflayer -- NO pixels on the wire. The
+    /assets images dict carries the bytes, and replaying the deflayer against those /assets
+    images is pixel-identical to the rasterizer."""
+    from runtime.canvas import Image
+
+    tee = TeeCanvas(WIDTH, HEIGHT)
+    idx = bytearray(WIDTH * HEIGHT)
+    for i in range(len(idx)):
+        idx[i] = (i * 11) % 63
+    bg = Image(WIDTH, HEIGHT, idx, -1)
+    bg._paint = True
+    bg._name = "bg"                       # image('bg') tags this -> imgref, pixels via /assets
+
+    lay = tee.new_layer(WIDTH, HEIGHT)
+    lay.spr(bg, 0, 0)
+    tee.cls(0)
+    tee.blit_window_from(lay, 0, 0)
+
+    served = _served(tee)
+    deflayers = [c for c in served if c[0] == "deflayer"]
+    assert len(deflayers) == 1
+    lcmds = deflayers[0][4]
+    imgrefs = [c for c in lcmds if c[0] == "imgref"]
+    assert imgrefs == [["imgref", 0, 0, "bg"]], "the named bg is ONE imgref, by name"
+    assert not any(c[0] == "img" for c in lcmds), "a named image ships no inline pixels"
+    assert _longest_str(served) < 1000, "no fat base64 rides the deflayer"
+
+    # The /assets images dict carries the pixels; replay against it -> pixel-identical.
+    from runtime import palette as _pal
+    assets = web_view.assets_payload(
+        WIDTH, HEIGHT, _pal.MOY64, None, None, "T", 8000, {"bg": (WIDTH, HEIGHT, bytes(idx))})
+    cv = Canvas(WIDTH, HEIGHT)
+    replay_to_canvas(served, cv, {}, assets)
+    assert bytes(cv.buf) == bytes(tee.buf), "imgref layer replay must match raster"
+
+
+def test_device_atlas_imgref_frees_the_defspr_budget_so_sprites_ship():
+    """The #63 Fold 4 starvation fix, on the DEVICE atlas path (self_contained=False): a paint
+    background baked into a layer now ships a TINY imgref deflayer, so the fat 110KB blob no
+    longer eats a frame's defspr budget -- the cart's per-tile sprites (sakura's petals) get
+    their defspr bitmaps. Drives the shared DrawRecorder + ServedState directly (the device
+    recorder is grepped, not executed, in firmware tests)."""
+    from runtime.canvas import Canvas as _C, Image
+    from runtime.web_view import DrawRecorder, RecordingLayer
+
+    rec = DrawRecorder(WIDTH, HEIGHT)         # self_contained stays False = the DEVICE atlas path
+    rec.enabled = True
+    st = ServedState(rec)
+
+    bg = Image(WIDTH, HEIGHT, bytes(WIDTH * HEIGHT), -1)
+    bg._paint = True
+    bg._name = "bg"
+    # 8 unique "petal" tiles (the device reuses one Image per tile -> stable id -> atlas dedup).
+    petals = [Image(4, 4, bytes([(k + 1) % 63]) * 16, -1) for k in range(8)]
+
+    lay = RecordingLayer(_C(WIDTH, HEIGHT), rec)   # sakura bakes bg into make_layer(...)
+    lay.spr(bg, 0, 0)
+
+    # Frame 0: the layer's deflayer ships (a tiny imgref); ServedState zeroes the defspr budget
+    # for the frame it ships a deflayer, so the petals' defsprs ride LATER frames.
+    rec.begin()
+    rec.blit_layer_window(lay, 0, 0)               # draw_layer
+    for k, p in enumerate(petals):
+        rec.spr(p, k * 8, 0)
+    rec.commit()
+    f0 = st.served_frame(rec.frame())
+    deflayers = [c for c in f0 if c[0] == "deflayer"]
+    assert len(deflayers) == 1
+    assert [c for c in deflayers[0][4] if c[0] == "imgref"] == [["imgref", 0, 0, "bg"]]
+    assert _longest_str(f0) < 1000, "the deflayer carries a tiny imgref, not a 110KB blob"
+
+    # Frame 1: no new deflayer -> the full defspr budget is free -> every petal bitmap ships.
+    rec.begin()
+    for k, p in enumerate(petals):
+        rec.spr(p, k * 8, 0)
+    rec.commit()
+    f1 = st.served_frame(rec.frame())
+    defsprs = [c for c in f1 if c[0] == "defspr"]
+    assert len(defsprs) == len(petals), \
+        "all petal defsprs ship once the fat blob no longer starves the budget (got %d)" % len(defsprs)
+
+
+def _longest_str(node):
+    """The length of the longest string ANYWHERE in a nested command list -- used to prove no
+    fat base64 image blob rides the served stream / deflayer (the imgref pixels live in /assets)."""
+    if isinstance(node, str):
+        return len(node)
+    if isinstance(node, (list, tuple)):
+        return max((_longest_str(x) for x in node), default=0)
+    return 0
+
+
+def _sakura_assets(ws):
+    """The /assets payload a browser fetches for the open cart -- palette + font + sheet +
+    tilemap + the DECODED paint images (the Fold-4 path: image bytes ship here ONCE, not on the
+    frame stream). Built exactly as tools/web_console.WebConsole.assets does (host provider)."""
+    from runtime import palette as _pal
+    decoded = {}
+    for name, blob in (getattr(ws, "images", None) or {}).items():
+        dec = host_app._decode_moyimg(blob)
+        if dec is not None:
+            decoded[name] = dec
+    return web_view.assets_payload(WIDTH, HEIGHT, _pal.MOY64,
+                                   getattr(ws, "sheet", None), getattr(ws, "tilemap", None),
+                                   "Sakura", 8000, decoded or None)
+
+
+def test_sakura_paint_bg_ships_via_assets_and_replays_pixel_identical(tmp_path):
+    """End-to-end (#63 Fold 4 acceptance): the real sakura cart run through the console + web
+    recorder ships its painted background by NAME -- a tiny ["imgref", ...] inside the deflayer,
+    with the PIXELS in /assets (once, browser-cached) -- NOT the ~110KB base64 blob inline. So:
+      * /assets carries the `bg` image (w/h/b64),
+      * the served frames + deflayer carry NO large base64 (only imgref),
+      * the petals' sprites still ship (no defspr starvation), and
+      * every served frame replays pixel-identically to the rasterizer via imgref + /assets."""
     ws, drv, tee = _build_tee(str(tmp_path / "carts"))
     for i, c in enumerate(ws.launcher.items):
         if os.path.basename(c["path"]) == "sakura.moy":
@@ -520,28 +634,38 @@ def test_sakura_paint_bg_streams_compact_and_replays_pixel_identical(tmp_path):
     ws.open()
     assert ws.screen == "desktop" and ws.cart_error is None
 
+    # /assets carries the decoded bg image (the pixels ship HERE, once per cart).
+    assets = _sakura_assets(ws)
+    assert assets["images"] and "bg" in assets["images"], "/assets must carry the bg image"
+    bg = assets["images"]["bg"]
+    assert bg["w"] == WIDTH and bg["h"] == HEIGHT and isinstance(bg["b64"], str)
+    assert len(bg["b64"]) > 1000, "the bg image bytes really do live in /assets"
+
     tee._replay_layers = {}
     deflayer_frames = []
     for n in range(6):
         drv.frame(1.0 / 30)
         raster = bytes(tee.buf)
         served = _served(tee)
-        # Count img commands (top-level + inside any deflayer this frame).
-        def _imgs(cmds):
-            out = []
+        # The stream references the paint image by NAME, never by pixels: no inline ["img", ...]
+        # anywhere (top-level or inside a deflayer), and no fat base64 blob on the wire.
+        def _walk(cmds):
             for c in cmds:
-                if c[0] == "img":
-                    out.append(c)
-                elif c[0] == "deflayer":
-                    out.extend(x for x in c[4] if x[0] == "img")
-            return out
+                yield c
+                if c and c[0] == "deflayer":
+                    for x in c[4]:
+                        yield x
+        assert not any(c[0] == "img" for c in _walk(served)), "no inline img blob"
+        assert _longest_str(served) < 1000, \
+            "no fat base64 in the served stream (frame %d): got %d" % (n, _longest_str(served))
+        imgrefs = [c for c in _walk(served) if c[0] == "imgref"]
         if any(c[0] == "deflayer" for c in served):
             deflayer_frames.append(n)
-            imgs = _imgs(served)
-            assert len(imgs) == 1, "sakura's bg is one img command"
-            assert imgs[0][3] == WIDTH and imgs[0][4] == HEIGHT
+            assert len(imgrefs) == 1 and imgrefs[0][3] == "bg", \
+                "sakura's bg is ONE imgref, by name"
+        # Replay the SERVED frame against the /assets images -> pixel-identical to the raster.
         cv = Canvas(WIDTH, HEIGHT)
-        replay_to_canvas(served, cv, tee._replay_layers)
+        replay_to_canvas(served, cv, tee._replay_layers, assets)
         assert bytes(cv.buf) == raster, "sakura frame %d replay differs from raster" % n
 
     # The painted bg layer ships its deflayer ONCE (frame 0), not every frame.
