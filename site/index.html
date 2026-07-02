@@ -5,81 +5,59 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Moybyte — your first real little computer</title>
 <meta name="description" content="Moybyte is a kid's first creative computer: a handheld fantasy workstation where the desktop, games, art, and tools are all cartridges a child can open, edit, and remix. Learn to make a computer, not just use one." />
-
-<!-- Open Graph / social. Swap the URL + image for your Porkbun domain when you deploy. -->
 <meta property="og:type" content="website" />
 <meta property="og:title" content="Moybyte — your first real little computer" />
 <meta property="og:description" content="A handheld fantasy workstation for kids where everything is an editable cartridge. Make the computer itself come alive." />
 <meta property="og:image" content="og.png" />
 <meta name="theme-color" content="#1D2B53" />
 <meta name="twitter:card" content="summary_large_image" />
-
-<!-- Favicon: Moy, rendered from the same pixel art the console boots with. -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%231D2B53'/%3E%3Cg fill='%2383769C'%3E%3Crect x='2' y='2' width='7' height='11'/%3E%3Crect x='2' y='5' width='12' height='8'/%3E%3C/g%3E%3Crect x='3' y='6' width='2' height='2' fill='%23FFF1E8'/%3E%3Crect x='6' y='6' width='2' height='2' fill='%23FFF1E8'/%3E%3C/svg%3E" />
-
 <style>
   :root{
-    /* MOY64 base palette (PICO-8 anchors) — the console's identity */
-    --c0:#000000; --c1:#1D2B53; --c2:#7E2553; --c3:#008751;
-    --c4:#AB5236; --c5:#5F574F; --c6:#C2C3C7; --c7:#FFF1E8;
-    --c8:#FF004D; --c9:#FFA300; --c10:#FFEC27; --c11:#00E436;
-    --c12:#29ADFF; --c13:#83769C; --c14:#FF77A8; --c15:#FFCCAA;
+    --c1:#1D2B53; --c5:#5F574F; --c6:#C2C3C7; --c9:#FFA300; --c10:#FFEC27;
+    --c12:#29ADFF; --c13:#83769C; --c15:#FFCCAA;
     --ink:#FFF1E8; --dim:#C2C3C7; --bg:#0b1024;
     --mono:"Courier New",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   }
-
   *{box-sizing:border-box}
   html{scroll-behavior:smooth}
-  body{
-    margin:0; background:var(--bg); color:var(--ink);
-    font-family:var(--mono); line-height:1.6;
-    -webkit-font-smoothing:none;
+  body{margin:0;color:var(--ink);font-family:var(--mono);line-height:1.6;
     background:
       radial-gradient(1200px 600px at 80% -10%, rgba(41,173,255,.10), transparent 60%),
       radial-gradient(900px 500px at 0% 20%, rgba(126,37,83,.18), transparent 55%),
       var(--bg);
-    overflow-x:hidden;
-  }
-  img,canvas{image-rendering:pixelated;image-rendering:crisp-edges}
-  a{color:var(--c12);text-decoration:none}
-  a:hover{color:var(--c10)}
-
-  /* Global CRT scanline veil */
-  body::after{
-    content:""; position:fixed; inset:0; pointer-events:none; z-index:50;
+    overflow-x:hidden;}
+  a{color:var(--c12);text-decoration:none} a:hover{color:var(--c10)}
+  body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:50;
     background:repeating-linear-gradient(to bottom,rgba(0,0,0,0) 0,rgba(0,0,0,0) 2px,rgba(0,0,0,.06) 3px);
-    mix-blend-mode:multiply;
-  }
-
+    mix-blend-mode:multiply;}
   .wrap{max-width:1080px;margin:0 auto;padding:0 20px}
+  .moy-ico{width:34px;height:34px;display:block}
+  .eye{animation:blink 4.2s infinite}
+  @keyframes blink{0%,92%,100%{fill:#FFF1E8}94%,98%{fill:#83769C}}
 
-  /* ---- Nav ---- */
   nav{display:flex;align-items:center;justify-content:space-between;padding:20px 0}
   .brand{display:flex;align-items:center;gap:12px;font-weight:bold}
-  .brand canvas{width:34px;height:34px}
   .brand .wm{font-size:20px;letter-spacing:1px}
   .brand .wm b{color:var(--c15)} .brand .wm i{font-style:normal;color:var(--c13)}
   .nav-links{display:flex;gap:22px;font-size:13px;text-transform:uppercase;letter-spacing:1px}
   .nav-links a{color:var(--dim)}
 
-  /* ---- Hero ---- */
   .hero{display:grid;grid-template-columns:1.05fr .95fr;gap:48px;align-items:center;padding:40px 0 30px}
   .tag{display:inline-block;font-size:11px;letter-spacing:2px;text-transform:uppercase;
     color:var(--c10);border:1px solid rgba(255,236,39,.4);padding:5px 10px;margin-bottom:18px}
   .hero h1{font-size:clamp(34px,5.4vw,58px);line-height:1.05;margin:0 0 18px;letter-spacing:-1px}
   .hero h1 .cream{color:var(--c15)} .hero h1 .grape{color:var(--c13)}
-  .lede{font-size:18px;color:var(--dim);max-width:44ch;margin:0 0 14px}
-  .lede b{color:var(--ink)}
+  .lede{font-size:18px;color:var(--dim);max-width:44ch;margin:0 0 14px} .lede b{color:var(--ink)}
   .sub{font-size:14px;color:var(--c6);max-width:46ch;margin:0 0 28px}
 
   form.notify{display:flex;gap:10px;flex-wrap:wrap;max-width:440px}
-  form.notify input{
-    flex:1 1 200px;min-width:0;background:#060a1c;border:2px solid var(--c1);color:var(--ink);
-    font-family:var(--mono);font-size:14px;padding:12px 14px;border-radius:0;outline:none}
+  form.notify input{flex:1 1 200px;min-width:0;background:#060a1c;border:2px solid var(--c1);color:var(--ink);
+    font-family:var(--mono);font-size:14px;padding:12px 14px;outline:none}
   form.notify input:focus{border-color:var(--c12)}
-  .btn{cursor:pointer;font-family:var(--mono);font-weight:bold;font-size:14px;
-    text-transform:uppercase;letter-spacing:1px;border:0;padding:12px 20px;
-    background:var(--c10);color:#000;box-shadow:4px 4px 0 rgba(0,0,0,.5);transition:transform .08s,box-shadow .08s}
+  .btn{cursor:pointer;font-family:var(--mono);font-weight:bold;font-size:14px;text-transform:uppercase;
+    letter-spacing:1px;border:0;padding:12px 20px;background:var(--c10);color:#000;
+    box-shadow:4px 4px 0 rgba(0,0,0,.5);transition:transform .08s,box-shadow .08s}
   .btn:hover{transform:translate(-1px,-1px);box-shadow:5px 5px 0 rgba(0,0,0,.5)}
   .btn:active{transform:translate(2px,2px);box-shadow:2px 2px 0 rgba(0,0,0,.5)}
   .btn.ghost{background:transparent;color:var(--ink);border:2px solid var(--c5);box-shadow:none}
@@ -87,14 +65,12 @@
   .formnote{font-size:12px;color:var(--c5);margin-top:12px}
   .cta-row{display:flex;gap:12px;align-items:center;margin-top:16px;flex-wrap:wrap}
 
-  /* ---- Device mockup ---- */
   .device{justify-self:center;max-width:420px;width:100%}
-  .bezel{background:linear-gradient(160deg,#2a2536,#15121f);border-radius:22px;
-    padding:22px 22px 30px;box-shadow:0 24px 60px rgba(0,0,0,.55),inset 0 2px 0 rgba(255,255,255,.05);
-    border:1px solid rgba(255,255,255,.06)}
+  .bezel{background:linear-gradient(160deg,#2a2536,#15121f);border-radius:22px;padding:22px 22px 30px;
+    box-shadow:0 24px 60px rgba(0,0,0,.55),inset 0 2px 0 rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.06)}
   .screen{position:relative;background:#000;border-radius:6px;overflow:hidden;
     box-shadow:inset 0 0 0 3px #000, inset 0 0 24px rgba(0,0,0,.9)}
-  .screen canvas{display:block;width:100%;height:auto;aspect-ratio:320/240}
+  .screen .scr{display:block;width:100%;height:auto;aspect-ratio:320/240}
   .screen::after{content:"";position:absolute;inset:0;pointer-events:none;
     background:repeating-linear-gradient(to bottom,transparent 0,transparent 2px,rgba(0,0,0,.18) 3px)}
   .dpad{display:flex;justify-content:space-between;align-items:center;margin-top:18px;padding:0 6px}
@@ -104,28 +80,41 @@
     background:radial-gradient(circle at 35% 30%,#3b3550,#120f1c);box-shadow:inset 0 2px 3px rgba(255,255,255,.08)}
   .dcap{text-align:center;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--c5);margin-top:16px}
 
-  /* ---- Marquee ---- */
-  .marquee{border-top:2px solid var(--c1);border-bottom:2px solid var(--c1);
-    background:#060a1c;overflow:hidden;white-space:nowrap;margin-top:26px}
+  /* launcher animations */
+  .sel{animation:selmove 8s infinite}
+  .ring{animation:ringpulse 0.9s infinite}
+  @keyframes ringpulse{0%,100%{stroke:#FFEC27}50%{stroke:#FFF1E8}}
+  @keyframes selmove{
+    0%,9%{transform:translate(0,0)}
+    12.5%,21.5%{transform:translate(74px,0)}
+    25%,34%{transform:translate(148px,0)}
+    37.5%,46.5%{transform:translate(222px,0)}
+    50%,59%{transform:translate(0,68px)}
+    62.5%,71.5%{transform:translate(74px,68px)}
+    75%,84%{transform:translate(148px,68px)}
+    87.5%,96.5%{transform:translate(222px,68px)}
+    100%{transform:translate(0,0)}
+  }
+  .twk{animation:twinkle 2.4s infinite}
+  @keyframes twinkle{0%,100%{opacity:.25}50%{opacity:1}}
+
+  .marquee{border-top:2px solid var(--c1);border-bottom:2px solid var(--c1);background:#060a1c;
+    overflow:hidden;white-space:nowrap;margin-top:26px}
   .marquee div{display:inline-block;padding:12px 0;animation:scroll 22s linear infinite;font-size:13px;
     letter-spacing:2px;text-transform:uppercase;color:var(--c13)}
   .marquee b{color:var(--c10)}
   @keyframes scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 
-  /* ---- Sections ---- */
   section{padding:64px 0}
   .eyebrow{font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--c9);margin:0 0 10px}
   h2{font-size:clamp(24px,3.5vw,34px);margin:0 0 8px;letter-spacing:-.5px}
   .section-sub{color:var(--dim);max-width:60ch;margin:0 0 34px}
-
   .pillars{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
-  .card{background:#0d1330;border:1px solid var(--c1);padding:20px;position:relative;
-    transition:transform .12s,border-color .12s}
+  .card{background:#0d1330;border:1px solid var(--c1);padding:20px;transition:transform .12s,border-color .12s}
   .card:hover{transform:translateY(-3px);border-color:var(--c12)}
   .card .ico{width:20px;height:20px;margin-bottom:14px;display:block}
   .card h3{margin:0 0 8px;font-size:16px;color:var(--ink)}
   .card p{margin:0;font-size:13px;color:var(--c6)}
-
   .tiers{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
   .tier{background:linear-gradient(180deg,#0f1636,#0a0f26);border:1px solid var(--c1);padding:24px;text-align:center}
   .tier .name{font-size:13px;letter-spacing:2px;text-transform:uppercase;color:var(--c10);margin-bottom:8px}
@@ -133,41 +122,32 @@
   .tier p{font-size:13px;color:var(--c6);margin:0 0 4px;min-height:40px}
   .tier .role{font-size:11px;color:var(--c5);text-transform:uppercase;letter-spacing:1px;
     border-top:1px solid var(--c1);margin-top:14px;padding-top:12px}
-  .tier.one{border-color:var(--c9)}
-  .tier.one .name{color:var(--c9)}
-
+  .tier.one{border-color:var(--c9)} .tier.one .name{color:var(--c9)}
   .closer{text-align:center;background:#060a1c;border-top:2px solid var(--c1);border-bottom:2px solid var(--c1)}
   .closer h2{max-width:20ch;margin:0 auto 18px}
   .closer form.notify{margin:0 auto;justify-content:center}
-
-  footer{padding:40px 0;text-align:center;color:var(--c5);font-size:12px}
-  footer a{color:var(--c13)}
+  footer{padding:40px 0;text-align:center;color:var(--c5);font-size:12px} footer a{color:var(--c13)}
   .footer-brand{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:14px}
-  .footer-brand canvas{width:24px;height:24px}
-
+  .footer-brand .moy-ico{width:24px;height:24px}
   @media(max-width:860px){
     .hero{grid-template-columns:1fr;gap:34px;text-align:center}
-    form.notify{margin:0 auto}
-    .cta-row{justify-content:center}
+    form.notify{margin:0 auto} .cta-row{justify-content:center}
     .lede,.sub{margin-left:auto;margin-right:auto}
-    .pillars{grid-template-columns:repeat(2,1fr)}
-    .tiers{grid-template-columns:1fr}
+    .pillars{grid-template-columns:repeat(2,1fr)} .tiers{grid-template-columns:1fr}
     .nav-links{display:none}
   }
   @media(max-width:480px){.pillars{grid-template-columns:1fr}}
   @media (prefers-reduced-motion: reduce){
-    .marquee div{animation:none}
+    .marquee div,.sel,.ring,.twk,.eye{animation:none}
   }
 </style>
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="moy" viewBox="0 0 16 16"><rect x="3" y="1" width="1.02" height="1.02" fill="#000000"/><rect x="4" y="1" width="1.02" height="1.02" fill="#000000"/><rect x="5" y="1" width="1.02" height="1.02" fill="#000000"/><rect x="6" y="1" width="1.02" height="1.02" fill="#000000"/><rect x="7" y="1" width="1.02" height="1.02" fill="#000000"/><rect x="8" y="1" width="1.02" height="1.02" fill="#000000"/><rect x="9" y="1" width="1.02" height="1.02" fill="#000000"/><rect x="2" y="2" width="1.02" height="1.02" fill="#000000"/><rect x="3" y="2" width="1.02" height="1.02" fill="#83769C"/><rect x="4" y="2" width="1.02" height="1.02" fill="#83769C"/><rect x="5" y="2" width="1.02" height="1.02" fill="#83769C"/><rect x="6" y="2" width="1.02" height="1.02" fill="#83769C"/><rect x="7" y="2" width="1.02" height="1.02" fill="#83769C"/><rect x="8" y="2" width="1.02" height="1.02" fill="#83769C"/><rect x="9" y="2" width="1.02" height="1.02" fill="#83769C"/><rect x="10" y="2" width="1.02" height="1.02" fill="#000000"/><rect x="1" y="3" width="1.02" height="1.02" fill="#000000"/><rect x="2" y="3" width="1.02" height="1.02" fill="#83769C"/><rect x="3" y="3" width="1.02" height="1.02" fill="#C2C3C7"/><rect x="4" y="3" width="1.02" height="1.02" fill="#C2C3C7"/><rect x="5" y="3" width="1.02" height="1.02" fill="#83769C"/><rect x="6" y="3" width="1.02" height="1.02" fill="#83769C"/><rect x="7" y="3" width="1.02" height="1.02" fill="#83769C"/><rect x="8" y="3" width="1.02" height="1.02" fill="#83769C"/><rect x="9" y="3" width="1.02" height="1.02" fill="#83769C"/><rect x="10" y="3" width="1.02" height="1.02" fill="#000000"/><rect x="1" y="4" width="1.02" height="1.02" fill="#000000"/><rect x="2" y="4" width="1.02" height="1.02" fill="#83769C"/><rect x="3" y="4" width="1.02" height="1.02" fill="#83769C"/><rect x="4" y="4" width="1.02" height="1.02" fill="#83769C"/><rect x="5" y="4" width="1.02" height="1.02" fill="#83769C"/><rect x="6" y="4" width="1.02" height="1.02" fill="#83769C"/><rect x="7" y="4" width="1.02" height="1.02" fill="#83769C"/><rect x="8" y="4" width="1.02" height="1.02" fill="#83769C"/><rect x="9" y="4" width="1.02" height="1.02" fill="#83769C"/><rect x="10" y="4" width="1.02" height="1.02" fill="#000000"/><rect x="1" y="5" width="1.02" height="1.02" fill="#000000"/><rect x="2" y="5" width="1.02" height="1.02" fill="#83769C"/><rect x="3" y="5" width="1.02" height="1.02" fill="#83769C"/><rect x="4" y="5" width="1.02" height="1.02" fill="#83769C"/><rect x="5" y="5" width="1.02" height="1.02" fill="#83769C"/><rect x="6" y="5" width="1.02" height="1.02" fill="#83769C"/><rect x="7" y="5" width="1.02" height="1.02" fill="#83769C"/><rect x="8" y="5" width="1.02" height="1.02" fill="#83769C"/><rect x="9" y="5" width="1.02" height="1.02" fill="#83769C"/><rect x="10" y="5" width="1.02" height="1.02" fill="#000000"/><rect x="11" y="5" width="1.02" height="1.02" fill="#000000"/><rect x="12" y="5" width="1.02" height="1.02" fill="#000000"/><rect x="13" y="5" width="1.02" height="1.02" fill="#000000"/><rect x="1" y="6" width="1.02" height="1.02" fill="#000000"/><rect x="2" y="6" width="1.02" height="1.02" fill="#83769C"/><rect x="3" y="6" width="1.02" height="1.02" fill="#83769C"/><rect x="4" y="6" width="1.02" height="1.02" fill="#FFF1E8" class="eye"/><rect x="5" y="6" width="1.02" height="1.02" fill="#FFF1E8" class="eye"/><rect x="6" y="6" width="1.02" height="1.02" fill="#83769C"/><rect x="7" y="6" width="1.02" height="1.02" fill="#FFF1E8" class="eye"/><rect x="8" y="6" width="1.02" height="1.02" fill="#FFF1E8" class="eye"/><rect x="9" y="6" width="1.02" height="1.02" fill="#83769C"/><rect x="10" y="6" width="1.02" height="1.02" fill="#83769C"/><rect x="11" y="6" width="1.02" height="1.02" fill="#83769C"/><rect x="12" y="6" width="1.02" height="1.02" fill="#83769C"/><rect x="13" y="6" width="1.02" height="1.02" fill="#83769C"/><rect x="14" y="6" width="1.02" height="1.02" fill="#000000"/><rect x="1" y="7" width="1.02" height="1.02" fill="#000000"/><rect x="2" y="7" width="1.02" height="1.02" fill="#83769C"/><rect x="3" y="7" width="1.02" height="1.02" fill="#83769C"/><rect x="4" y="7" width="1.02" height="1.02" fill="#FFF1E8" class="eye"/><rect x="5" y="7" width="1.02" height="1.02" fill="#000000"/><rect x="6" y="7" width="1.02" height="1.02" fill="#83769C"/><rect x="7" y="7" width="1.02" height="1.02" fill="#FFF1E8" class="eye"/><rect x="8" y="7" width="1.02" height="1.02" fill="#000000"/><rect x="9" y="7" width="1.02" height="1.02" fill="#83769C"/><rect x="10" y="7" width="1.02" height="1.02" fill="#83769C"/><rect x="11" y="7" width="1.02" height="1.02" fill="#83769C"/><rect x="12" y="7" width="1.02" height="1.02" fill="#83769C"/><rect x="13" y="7" width="1.02" height="1.02" fill="#83769C"/><rect x="14" y="7" width="1.02" height="1.02" fill="#000000"/><rect x="1" y="8" width="1.02" height="1.02" fill="#000000"/><rect x="2" y="8" width="1.02" height="1.02" fill="#83769C"/><rect x="3" y="8" width="1.02" height="1.02" fill="#83769C"/><rect x="4" y="8" width="1.02" height="1.02" fill="#83769C"/><rect x="5" y="8" width="1.02" height="1.02" fill="#83769C"/><rect x="6" y="8" width="1.02" height="1.02" fill="#83769C"/><rect x="7" y="8" width="1.02" height="1.02" fill="#83769C"/><rect x="8" y="8" width="1.02" height="1.02" fill="#83769C"/><rect x="9" y="8" width="1.02" height="1.02" fill="#83769C"/><rect x="10" y="8" width="1.02" height="1.02" fill="#83769C"/><rect x="11" y="8" width="1.02" height="1.02" fill="#83769C"/><rect x="12" y="8" width="1.02" height="1.02" fill="#83769C"/><rect x="13" y="8" width="1.02" height="1.02" fill="#83769C"/><rect x="14" y="8" width="1.02" height="1.02" fill="#000000"/><rect x="1" y="9" width="1.02" height="1.02" fill="#000000"/><rect x="2" y="9" width="1.02" height="1.02" fill="#83769C"/><rect x="3" y="9" width="1.02" height="1.02" fill="#83769C"/><rect x="4" y="9" width="1.02" height="1.02" fill="#000000"/><rect x="5" y="9" width="1.02" height="1.02" fill="#83769C"/><rect x="6" y="9" width="1.02" height="1.02" fill="#83769C"/><rect x="7" y="9" width="1.02" height="1.02" fill="#83769C"/><rect x="8" y="9" width="1.02" height="1.02" fill="#000000"/><rect x="9" y="9" width="1.02" height="1.02" fill="#83769C"/><rect x="10" y="9" width="1.02" height="1.02" fill="#83769C"/><rect x="11" y="9" width="1.02" height="1.02" fill="#83769C"/><rect x="12" y="9" width="1.02" height="1.02" fill="#83769C"/><rect x="13" y="9" width="1.02" height="1.02" fill="#83769C"/><rect x="14" y="9" width="1.02" height="1.02" fill="#000000"/><rect x="1" y="10" width="1.02" height="1.02" fill="#000000"/><rect x="2" y="10" width="1.02" height="1.02" fill="#83769C"/><rect x="3" y="10" width="1.02" height="1.02" fill="#83769C"/><rect x="4" y="10" width="1.02" height="1.02" fill="#83769C"/><rect x="5" y="10" width="1.02" height="1.02" fill="#000000"/><rect x="6" y="10" width="1.02" height="1.02" fill="#000000"/><rect x="7" y="10" width="1.02" height="1.02" fill="#000000"/><rect x="8" y="10" width="1.02" height="1.02" fill="#83769C"/><rect x="9" y="10" width="1.02" height="1.02" fill="#83769C"/><rect x="10" y="10" width="1.02" height="1.02" fill="#83769C"/><rect x="11" y="10" width="1.02" height="1.02" fill="#83769C"/><rect x="12" y="10" width="1.02" height="1.02" fill="#83769C"/><rect x="13" y="10" width="1.02" height="1.02" fill="#83769C"/><rect x="14" y="10" width="1.02" height="1.02" fill="#000000"/><rect x="1" y="11" width="1.02" height="1.02" fill="#000000"/><rect x="2" y="11" width="1.02" height="1.02" fill="#83769C"/><rect x="3" y="11" width="1.02" height="1.02" fill="#83769C"/><rect x="4" y="11" width="1.02" height="1.02" fill="#83769C"/><rect x="5" y="11" width="1.02" height="1.02" fill="#83769C"/><rect x="6" y="11" width="1.02" height="1.02" fill="#83769C"/><rect x="7" y="11" width="1.02" height="1.02" fill="#83769C"/><rect x="8" y="11" width="1.02" height="1.02" fill="#83769C"/><rect x="9" y="11" width="1.02" height="1.02" fill="#83769C"/><rect x="10" y="11" width="1.02" height="1.02" fill="#83769C"/><rect x="11" y="11" width="1.02" height="1.02" fill="#83769C"/><rect x="12" y="11" width="1.02" height="1.02" fill="#83769C"/><rect x="13" y="11" width="1.02" height="1.02" fill="#83769C"/><rect x="14" y="11" width="1.02" height="1.02" fill="#000000"/><rect x="1" y="12" width="1.02" height="1.02" fill="#000000"/><rect x="2" y="12" width="1.02" height="1.02" fill="#83769C"/><rect x="3" y="12" width="1.02" height="1.02" fill="#83769C"/><rect x="4" y="12" width="1.02" height="1.02" fill="#83769C"/><rect x="5" y="12" width="1.02" height="1.02" fill="#83769C"/><rect x="6" y="12" width="1.02" height="1.02" fill="#83769C"/><rect x="7" y="12" width="1.02" height="1.02" fill="#83769C"/><rect x="8" y="12" width="1.02" height="1.02" fill="#83769C"/><rect x="9" y="12" width="1.02" height="1.02" fill="#83769C"/><rect x="10" y="12" width="1.02" height="1.02" fill="#83769C"/><rect x="11" y="12" width="1.02" height="1.02" fill="#83769C"/><rect x="12" y="12" width="1.02" height="1.02" fill="#83769C"/><rect x="13" y="12" width="1.02" height="1.02" fill="#83769C"/><rect x="14" y="12" width="1.02" height="1.02" fill="#000000"/><rect x="2" y="13" width="1.02" height="1.02" fill="#000000"/><rect x="3" y="13" width="1.02" height="1.02" fill="#7E2553"/><rect x="4" y="13" width="1.02" height="1.02" fill="#7E2553"/><rect x="5" y="13" width="1.02" height="1.02" fill="#7E2553"/><rect x="6" y="13" width="1.02" height="1.02" fill="#7E2553"/><rect x="7" y="13" width="1.02" height="1.02" fill="#7E2553"/><rect x="8" y="13" width="1.02" height="1.02" fill="#7E2553"/><rect x="9" y="13" width="1.02" height="1.02" fill="#7E2553"/><rect x="10" y="13" width="1.02" height="1.02" fill="#7E2553"/><rect x="11" y="13" width="1.02" height="1.02" fill="#7E2553"/><rect x="12" y="13" width="1.02" height="1.02" fill="#7E2553"/><rect x="13" y="13" width="1.02" height="1.02" fill="#000000"/><rect x="2" y="14" width="1.02" height="1.02" fill="#000000"/><rect x="3" y="14" width="1.02" height="1.02" fill="#7E2553"/><rect x="4" y="14" width="1.02" height="1.02" fill="#7E2553"/><rect x="5" y="14" width="1.02" height="1.02" fill="#7E2553"/><rect x="6" y="14" width="1.02" height="1.02" fill="#000000"/><rect x="7" y="14" width="1.02" height="1.02" fill="#000000"/><rect x="8" y="14" width="1.02" height="1.02" fill="#000000"/><rect x="9" y="14" width="1.02" height="1.02" fill="#7E2553"/><rect x="10" y="14" width="1.02" height="1.02" fill="#7E2553"/><rect x="11" y="14" width="1.02" height="1.02" fill="#7E2553"/><rect x="12" y="14" width="1.02" height="1.02" fill="#000000"/><rect x="3" y="15" width="1.02" height="1.02" fill="#000000"/><rect x="4" y="15" width="1.02" height="1.02" fill="#000000"/><rect x="5" y="15" width="1.02" height="1.02" fill="#000000"/><rect x="9" y="15" width="1.02" height="1.02" fill="#000000"/><rect x="10" y="15" width="1.02" height="1.02" fill="#000000"/><rect x="11" y="15" width="1.02" height="1.02" fill="#000000"/></symbol></svg>
 
 <div class="wrap">
   <nav>
-    <div class="brand">
-      <canvas id="moy-nav" width="16" height="16" aria-label="Moy, the Moybyte mascot"></canvas>
-      <span class="wm"><b>moy</b><i>byte</i></span>
-    </div>
+    <div class="brand"><svg class="moy-ico" viewBox="0 0 16 16" aria-label="Moy"><use href="#moy"/></svg><span class="wm"><b>moy</b><i>byte</i></span></div>
     <div class="nav-links">
       <a href="#make">The idea</a>
       <a href="#family">The family</a>
@@ -181,7 +161,6 @@
       <h1>Your first <span class="cream">real</span> little <span class="grape">computer.</span></h1>
       <p class="lede">Moybyte is a handheld fantasy workstation for kids where the desktop, games, art, and tools are all <b>cartridges you can open and edit</b>.</p>
       <p class="sub">Not for watching videos — for making the computer itself come alive. Change one thing, press <b>Run</b>, watch it change.</p>
-
       <form class="notify" id="notify-top" novalidate>
         <input type="email" name="email" placeholder="you@email.com" aria-label="Email address" required />
         <button class="btn" type="submit">Notify me</button>
@@ -191,19 +170,12 @@
       </div>
       <p class="formnote" id="note-top">No spam. One email when there's something to see.</p>
     </div>
-
     <div class="device">
       <div class="bezel">
-        <div class="screen">
-          <canvas id="scr" width="320" height="240" role="img" aria-label="Moybyte launcher screen showing a grid of cartridges"></canvas>
-        </div>
+        <div class="screen"><svg class="scr" viewBox="0 0 320 240" preserveAspectRatio="xMidYMid meet" shape-rendering="crispEdges" role="img" aria-label="Moybyte launcher: a grid of cartridges"><rect width="320" height="240" fill="#1D2B53"/><rect width="320" height="240" fill="#29ADFF" opacity="0.05"/><rect class="twk" x="28" y="30" width="2" height="2" fill="#C2C3C7" style="animation-delay:0.0s"/><rect class="twk" x="120" y="26" width="2" height="2" fill="#C2C3C7" style="animation-delay:0.4s"/><rect class="twk" x="250" y="34" width="2" height="2" fill="#C2C3C7" style="animation-delay:0.8s"/><rect class="twk" x="70" y="150" width="2" height="2" fill="#C2C3C7" style="animation-delay:1.2s"/><rect class="twk" x="300" y="120" width="2" height="2" fill="#C2C3C7" style="animation-delay:1.6s"/><rect class="twk" x="16" y="120" width="2" height="2" fill="#C2C3C7" style="animation-delay:2.0s"/><rect class="twk" x="290" y="205" width="2" height="2" fill="#C2C3C7" style="animation-delay:2.4s"/><rect class="twk" x="150" y="214" width="2" height="2" fill="#C2C3C7" style="animation-delay:2.8s"/><rect class="twk" x="200" y="40" width="2" height="2" fill="#C2C3C7" style="animation-delay:3.2s"/><rect x="21" y="51" width="62" height="56" fill="#000" opacity="0.45"/><rect x="18" y="48" width="62" height="56" fill="#29ADFF"/><rect x="68" y="48" width="12" height="8" fill="#1D2B53"/><rect x="18" y="90" width="62" height="14" fill="#FFF1E8"/><rect x="25" y="95" width="8" height="4" fill="#000"/><rect x="38" y="95" width="8" height="4" fill="#000"/><rect x="51" y="95" width="8" height="4" fill="#000"/><rect x="64" y="95" width="8" height="4" fill="#000"/><rect x="45" y="60" width="8" height="8" fill="#FFF1E8"/><rect x="48" y="63" width="2" height="2" fill="#000"/><rect x="95" y="51" width="62" height="56" fill="#000" opacity="0.45"/><rect x="92" y="48" width="62" height="56" fill="#FF004D"/><rect x="142" y="48" width="12" height="8" fill="#1D2B53"/><rect x="92" y="90" width="62" height="14" fill="#FFEC27"/><rect x="99" y="95" width="8" height="4" fill="#000"/><rect x="112" y="95" width="8" height="4" fill="#000"/><rect x="125" y="95" width="8" height="4" fill="#000"/><rect x="138" y="95" width="8" height="4" fill="#000"/><rect x="119" y="60" width="8" height="8" fill="#FFF1E8"/><rect x="122" y="63" width="2" height="2" fill="#000"/><rect x="169" y="51" width="62" height="56" fill="#000" opacity="0.45"/><rect x="166" y="48" width="62" height="56" fill="#00E436"/><rect x="216" y="48" width="12" height="8" fill="#1D2B53"/><rect x="166" y="90" width="62" height="14" fill="#FFF1E8"/><rect x="173" y="95" width="8" height="4" fill="#000"/><rect x="186" y="95" width="8" height="4" fill="#000"/><rect x="199" y="95" width="8" height="4" fill="#000"/><rect x="212" y="95" width="8" height="4" fill="#000"/><rect x="193" y="60" width="8" height="8" fill="#FFF1E8"/><rect x="196" y="63" width="2" height="2" fill="#000"/><rect x="243" y="51" width="62" height="56" fill="#000" opacity="0.45"/><rect x="240" y="48" width="62" height="56" fill="#FFA300"/><rect x="290" y="48" width="12" height="8" fill="#1D2B53"/><rect x="240" y="90" width="62" height="14" fill="#000000"/><rect x="247" y="95" width="8" height="4" fill="#000"/><rect x="260" y="95" width="8" height="4" fill="#000"/><rect x="273" y="95" width="8" height="4" fill="#000"/><rect x="286" y="95" width="8" height="4" fill="#000"/><rect x="267" y="60" width="8" height="8" fill="#FFF1E8"/><rect x="270" y="63" width="2" height="2" fill="#000"/><rect x="21" y="119" width="62" height="56" fill="#000" opacity="0.45"/><rect x="18" y="116" width="62" height="56" fill="#7E2553"/><rect x="68" y="116" width="12" height="8" fill="#1D2B53"/><rect x="18" y="158" width="62" height="14" fill="#FFCCAA"/><rect x="25" y="163" width="8" height="4" fill="#000"/><rect x="38" y="163" width="8" height="4" fill="#000"/><rect x="51" y="163" width="8" height="4" fill="#000"/><rect x="64" y="163" width="8" height="4" fill="#000"/><rect x="45" y="128" width="8" height="8" fill="#FFF1E8"/><rect x="48" y="131" width="2" height="2" fill="#000"/><rect x="95" y="119" width="62" height="56" fill="#000" opacity="0.45"/><rect x="92" y="116" width="62" height="56" fill="#008751"/><rect x="142" y="116" width="12" height="8" fill="#1D2B53"/><rect x="92" y="158" width="62" height="14" fill="#FFEC27"/><rect x="99" y="163" width="8" height="4" fill="#000"/><rect x="112" y="163" width="8" height="4" fill="#000"/><rect x="125" y="163" width="8" height="4" fill="#000"/><rect x="138" y="163" width="8" height="4" fill="#000"/><rect x="119" y="128" width="8" height="8" fill="#FFF1E8"/><rect x="122" y="131" width="2" height="2" fill="#000"/><rect x="169" y="119" width="62" height="56" fill="#000" opacity="0.45"/><rect x="166" y="116" width="62" height="56" fill="#FF77A8"/><rect x="216" y="116" width="12" height="8" fill="#1D2B53"/><rect x="166" y="158" width="62" height="14" fill="#FFF1E8"/><rect x="173" y="163" width="8" height="4" fill="#000"/><rect x="186" y="163" width="8" height="4" fill="#000"/><rect x="199" y="163" width="8" height="4" fill="#000"/><rect x="212" y="163" width="8" height="4" fill="#000"/><rect x="193" y="128" width="8" height="8" fill="#FFF1E8"/><rect x="196" y="131" width="2" height="2" fill="#000"/><rect x="243" y="119" width="62" height="56" fill="#000" opacity="0.45"/><rect x="240" y="116" width="62" height="56" fill="#83769C"/><rect x="290" y="116" width="12" height="8" fill="#1D2B53"/><rect x="240" y="158" width="62" height="14" fill="#FFEC27"/><rect x="247" y="163" width="8" height="4" fill="#000"/><rect x="260" y="163" width="8" height="4" fill="#000"/><rect x="273" y="163" width="8" height="4" fill="#000"/><rect x="286" y="163" width="8" height="4" fill="#000"/><rect x="267" y="128" width="8" height="8" fill="#FFF1E8"/><rect x="270" y="131" width="2" height="2" fill="#000"/><g class="sel"><rect class="ring" x="15" y="45" width="68" height="62" fill="none" stroke="#FFEC27" stroke-width="3"/></g><use href="#moy" x="272" y="196" width="32" height="32"/><rect x="0" y="0" width="320" height="18" fill="#1D2B53"/><rect x="0" y="18" width="320" height="1" fill="#000"/><rect x="6" y="5" width="9" height="9" fill="#FFF1E8"/><rect x="6" y="5" width="9" height="1" fill="#000"/><rect x="21" y="5" width="9" height="9" fill="#29ADFF"/><rect x="21" y="5" width="9" height="1" fill="#000"/><rect x="36" y="5" width="9" height="9" fill="#FF77A8"/><rect x="36" y="5" width="9" height="1" fill="#000"/><rect x="51" y="5" width="9" height="9" fill="#00E436"/><rect x="51" y="5" width="9" height="1" fill="#000"/><rect x="66" y="5" width="9" height="9" fill="#FFA300"/><rect x="66" y="5" width="9" height="1" fill="#000"/><rect x="262" y="5" width="14" height="9" fill="#C2C3C7"/><rect x="280" y="6" width="9" height="7" fill="#29ADFF"/><rect x="294" y="5" width="16" height="9" fill="#00E436"/><rect x="309" y="7" width="2" height="5" fill="#00E436"/></svg></div>
         <div class="dpad">
           <div class="knob" aria-hidden="true"></div>
-          <div class="keys" aria-hidden="true">
-            <span></span><span></span><span></span><span></span><span></span><span></span>
-            <span></span><span></span><span></span><span></span><span></span><span></span>
-            <span></span><span></span><span></span><span></span><span></span><span></span>
-          </div>
+          <div class="keys" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
         </div>
       </div>
       <p class="dcap">Zero · Player · One — one console, three bodies</p>
@@ -211,67 +183,28 @@
   </header>
 </div>
 
-<div class="marquee" aria-hidden="true">
-  <div>
-    EVERYTHING&nbsp;IS&nbsp;A&nbsp;CARTRIDGE&nbsp;&nbsp;<b>◆</b>&nbsp;&nbsp;MAKE&nbsp;DON'T&nbsp;CONSUME&nbsp;&nbsp;<b>◆</b>&nbsp;&nbsp;INSTANT&nbsp;EDIT&nbsp;→&nbsp;RUN&nbsp;&nbsp;<b>◆</b>&nbsp;&nbsp;LOCAL-FIRST&nbsp;&&nbsp;PARENT-SAFE&nbsp;&nbsp;<b>◆</b>&nbsp;&nbsp;
-    EVERYTHING&nbsp;IS&nbsp;A&nbsp;CARTRIDGE&nbsp;&nbsp;<b>◆</b>&nbsp;&nbsp;MAKE&nbsp;DON'T&nbsp;CONSUME&nbsp;&nbsp;<b>◆</b>&nbsp;&nbsp;INSTANT&nbsp;EDIT&nbsp;→&nbsp;RUN&nbsp;&nbsp;<b>◆</b>&nbsp;&nbsp;LOCAL-FIRST&nbsp;&&nbsp;PARENT-SAFE&nbsp;&nbsp;<b>◆</b>&nbsp;&nbsp;
-  </div>
-</div>
+<div class="marquee" aria-hidden="true"><div>EVERYTHING&nbsp;IS&nbsp;A&nbsp;CARTRIDGE&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;MAKE&nbsp;DON'T&nbsp;CONSUME&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;INSTANT&nbsp;EDIT&nbsp;&rarr;&nbsp;RUN&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;LOCAL-FIRST&nbsp;&amp;&nbsp;PARENT-SAFE&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;EVERYTHING&nbsp;IS&nbsp;A&nbsp;CARTRIDGE&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;MAKE&nbsp;DON'T&nbsp;CONSUME&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;INSTANT&nbsp;EDIT&nbsp;&rarr;&nbsp;RUN&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;LOCAL-FIRST&nbsp;&amp;&nbsp;PARENT-SAFE&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;</div></div>
 
 <div class="wrap">
   <section id="make">
     <p class="eyebrow">Learn to make, not just to use</p>
     <h2>A computer a kid can take apart from the inside.</h2>
     <p class="section-sub">Most kids' tech teaches you to <em>operate</em> a screen. Moybyte hands over a whole little workshop: open any cartridge — a game, the wallpaper, a widget, even a tool — read its code, tweak it, and make it yours.</p>
-
     <div class="pillars">
-      <div class="card">
-        <svg class="ico" viewBox="0 0 16 16"><rect x="2" y="4" width="12" height="9" fill="#29ADFF"/><rect x="5" y="2" width="6" height="3" fill="#FFEC27"/></svg>
-        <h3>Everything is a cartridge</h3>
-        <p>Games, wallpapers, widgets, lessons, tools — one editable bundle format. Open any of them.</p>
-      </div>
-      <div class="card">
-        <svg class="ico" viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" fill="#00E436"/><rect x="7" y="4" width="2" height="8" fill="#000"/><rect x="4" y="7" width="8" height="2" fill="#000"/></svg>
-        <h3>Make, don't consume</h3>
-        <p>No passive media, no open internet in kid mode. Creation is the whole point.</p>
-      </div>
-      <div class="card">
-        <svg class="ico" viewBox="0 0 16 16"><rect x="4" y="2" width="4" height="12" fill="#FF004D"/><path d="M4 2 L12 8 L4 14 Z" fill="#FFA300"/></svg>
-        <h3>Instant edit → run</h3>
-        <p>Change one line, press Run, see the computer change. The loop that hooks makers.</p>
-      </div>
-      <div class="card">
-        <svg class="ico" viewBox="0 0 16 16"><path d="M8 2 L13 4 V8 C13 11 8 14 8 14 C8 14 3 11 3 8 V4 Z" fill="#83769C"/><rect x="7" y="6" width="2" height="4" fill="#FFF1E8"/></svg>
-        <h3>Local-first & parent-safe</h3>
-        <p>Offline by default. No accounts, no open chat, no child real-name. Sharing stays local.</p>
-      </div>
+      <div class="card"><svg class="ico" viewBox="0 0 16 16"><rect x="2" y="4" width="12" height="9" fill="#29ADFF"/><rect x="5" y="2" width="6" height="3" fill="#FFEC27"/></svg><h3>Everything is a cartridge</h3><p>Games, wallpapers, widgets, lessons, tools — one editable bundle format. Open any of them.</p></div>
+      <div class="card"><svg class="ico" viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" fill="#00E436"/><rect x="7" y="4" width="2" height="8" fill="#000"/><rect x="4" y="7" width="8" height="2" fill="#000"/></svg><h3>Make, don't consume</h3><p>No passive media, no open internet in kid mode. Creation is the whole point.</p></div>
+      <div class="card"><svg class="ico" viewBox="0 0 16 16"><rect x="4" y="2" width="4" height="12" fill="#FF004D"/><path d="M4 2 L12 8 L4 14 Z" fill="#FFA300"/></svg><h3>Instant edit → run</h3><p>Change one line, press Run, see the computer change. The loop that hooks makers.</p></div>
+      <div class="card"><svg class="ico" viewBox="0 0 16 16"><path d="M8 2 L13 4 V8 C13 11 8 14 8 14 C8 14 3 11 3 8 V4 Z" fill="#83769C"/><rect x="7" y="6" width="2" height="4" fill="#FFF1E8"/></svg><h3>Local-first &amp; parent-safe</h3><p>Offline by default. No accounts, no open chat, no child real-name. Sharing stays local.</p></div>
     </div>
   </section>
-
   <section id="family">
     <p class="eyebrow">One console, three bodies</p>
     <h2>The Moybyte family.</h2>
     <p class="section-sub">Every tier runs the <em>same</em> console and the <em>same</em> cartridges — a 320×240 world in the MOY64 palette. What a child makes on one runs on all of them; only the body differs.</p>
-
     <div class="tiers">
-      <div class="tier zero">
-        <div class="name">Zero</div>
-        <h3>The companion</h3>
-        <p>Cheapest of the family — plays on a phone browser over Wi-Fi.</p>
-        <div class="role">Play anywhere</div>
-      </div>
-      <div class="tier player">
-        <div class="name">Player</div>
-        <h3>The pocket console</h3>
-        <p>A small LCD, D-pad and buttons, cartridges on an SD card.</p>
-        <div class="role">Pocket game console</div>
-      </div>
-      <div class="tier one">
-        <div class="name">One</div>
-        <h3>The workstation</h3>
-        <p>A 7″ screen and integrated keyboard — the make-everything flagship.</p>
-        <div class="role">The make-workstation</div>
-      </div>
+      <div class="tier zero"><div class="name">Zero</div><h3>The companion</h3><p>Cheapest of the family — plays on a phone browser over Wi-Fi.</p><div class="role">Play anywhere</div></div>
+      <div class="tier player"><div class="name">Player</div><h3>The pocket console</h3><p>A small LCD, D-pad and buttons, cartridges on an SD card.</p><div class="role">Pocket game console</div></div>
+      <div class="tier one"><div class="name">One</div><h3>The workstation</h3><p>A 7″ screen and integrated keyboard — the make-everything flagship.</p><div class="role">The make-workstation</div></div>
     </div>
   </section>
 </div>
@@ -291,192 +224,27 @@
 
 <footer>
   <div class="wrap">
-    <div class="footer-brand">
-      <canvas id="moy-foot" width="16" height="16" aria-hidden="true"></canvas>
-      <span class="brand"><span class="wm"><b>moy</b><i>byte</i></span></span>
-    </div>
+    <div class="footer-brand"><svg class="moy-ico" viewBox="0 0 16 16" aria-hidden="true"><use href="#moy"/></svg><span class="brand"><span class="wm"><b>moy</b><i>byte</i></span></span></div>
     <p>A kid's first creative computer. Built in the open — <a href="https://github.com/nikola-j/moybyte" target="_blank" rel="noopener">github.com/nikola-j/moybyte</a></p>
     <p style="color:#3a3550">© 2026 Moybyte · Made with pixels &amp; caffeine</p>
   </div>
 </footer>
 
 <script>
+/* Progressive enhancement only — the page renders fully without JS.
+   Swap this for a real list provider (Buttondown/Formspree/Mailchimp/Porkbun email). */
 (function(){
-  "use strict";
-
-  // MOY64 base palette (indices 0-15), the console's own colors.
-  var PAL = ["#000000","#1D2B53","#7E2553","#008751","#AB5236","#5F574F",
-             "#C2C3C7","#FFF1E8","#FF004D","#FFA300","#FFEC27","#00E436",
-             "#29ADFF","#83769C","#FF77A8","#FFCCAA"];
-
-  // "Moy" — the exact 16x16 boot mascot from runtime/console.py (_ICON_ART["moy"]).
-  // '.' = transparent, hex chars = palette index. Grape body (d=13), dark-purple
-  // shadow (2), light-grey sheen (6), white eyes (7), black outline (0).
-  var MOY = [
-    "................","...0000000......","..0ddddddd0.....",".0d66ddddd0.....",
-    ".0dddddddd0.....",".0dddddddd0000..",".0dd77d77ddddd0.",".0dd70d70ddddd0.",
-    ".0dddddddddddd0.",".0dd0ddd0ddddd0.",".0ddd000dddddd0.",".0dddddddddddd0.",
-    ".0dddddddddddd0.","..022222222220..","..02220002220...","...000...000...."
-  ];
-
-  function nib(ch){ if(ch===".") return -1; var n=parseInt(ch,16); return isNaN(n)?-1:(n&15); }
-
-  // Draw the mascot into a 16x16 canvas. `blink` closes the eyes (rows 6-7 white px).
-  function drawMoy(cv, blink){
-    var g = cv.getContext("2d");
-    g.clearRect(0,0,16,16);
-    for(var y=0;y<16;y++){
-      var row = MOY[y];
-      for(var x=0;x<16;x++){
-        var c = nib(row[x]);
-        if(c<0) continue;
-        // blink: turn the white eye pixels into body color for a couple frames
-        if(blink && c===7) c=13;
-        g.fillStyle = PAL[c];
-        g.fillRect(x,y,1,1);
-      }
-    }
-  }
-
-  var navC = document.getElementById("moy-nav");
-  var footC = document.getElementById("moy-foot");
-  drawMoy(navC,false);
-  if(footC) drawMoy(footC,false);
-
-  // Occasional blink on the nav mascot.
-  var blinkT = 0;
-  setInterval(function(){
-    blinkT = (blinkT+1) % 40;
-    drawMoy(navC, blinkT===0 || blinkT===1);
-  }, 90);
-
-  // ---- Animated launcher on the device screen ----
-  var scr = document.getElementById("scr");
-  var ctx = scr.getContext("2d");
-  var W=320, H=240;
-
-  // A grid of "cartridges": each a 2-tone tile with a colored label band.
-  var COLS=4, ROWS=2, PAD=18, GAP=12, BAR=18;
-  var gridTop = BAR + 30;
-  var cw = Math.floor((W - PAD*2 - GAP*(COLS-1)) / COLS);
-  var ch = 56;
-  // per-cart [bodyColor, bandColor]
-  var carts = [
-    [12,7],[8,10],[11,7],[9,0],
-    [2,15],[3,10],[14,7],[13,10]
-  ];
-  var sel = 0, selT = 0, HOLD = 46; // frames per selection
-  var frame = 0;
-
-  // A few twinkle positions in the "wallpaper".
-  var stars = [[28,30],[120,26],[250,34],[70,150],[300,120],[16,120],[290,200],[150,214]];
-
-  function px(x,y,w,h,c){ ctx.fillStyle=PAL[c]; ctx.fillRect(x,y,w,h); }
-
-  function drawBar(){
-    px(0,0,W,BAR,1);
-    px(0,BAR,W,1,0);
-    // left mode icons
-    var icons=[7,12,14,11,9];
-    for(var i=0;i<icons.length;i++){ px(6+i*15,5,9,9,icons[i]); px(6+i*15,5,9,1,0); }
-    // right: clock/wifi/batt/gear as little blocks
-    px(W-58,5,14,9,6); // clock
-    px(W-40,6,9,7,12); // wifi
-    px(W-26,5,16,9,11); px(W-11,7,2,5,11); // batt
-  }
-
-  function drawCart(i, x, y, on){
-    var body=PAL[carts[i][0]], band=PAL[carts[i][1]];
-    // drop shadow
-    ctx.fillStyle="rgba(0,0,0,.5)"; ctx.fillRect(x+3,y+3,cw,ch);
-    // body
-    ctx.fillStyle=body; ctx.fillRect(x,y,cw,ch);
-    // notch (cartridge top-right bite)
-    ctx.fillStyle=PAL[1]; ctx.fillRect(x+cw-12,y,12,8);
-    // label band
-    ctx.fillStyle=band; ctx.fillRect(x,y+ch-14,cw,14);
-    // faux "label text" pixels
-    ctx.fillStyle=PAL[0];
-    for(var k=0;k<4;k++) ctx.fillRect(x+6+k*9,y+ch-9,6,4);
-    // little sprite dot on the cart face
-    ctx.fillStyle=PAL[7]; ctx.fillRect(x+cw/2-3,y+12,6,6);
-    ctx.fillStyle=PAL[0]; ctx.fillRect(x+cw/2-1,y+14,2,2);
-    // selection ring (animated pulse)
-    if(on){
-      var t = (Math.sin(frame*0.25)+1)/2;      // 0..1 pulse
-      var col = t>0.5 ? 10 : 7;                 // yellow<->white
-      ctx.fillStyle=PAL[col];
-      var b=3;
-      ctx.fillRect(x-b,y-b,cw+b*2,b);
-      ctx.fillRect(x-b,y+ch,cw+b*2,b);
-      ctx.fillRect(x-b,y-b,b,ch+b*2);
-      ctx.fillRect(x+cw,y-b,b,ch+b*2);
-    }
-  }
-
-  function render(){
-    frame++;
-    // wallpaper gradient (indexed-ish): dark blue field
-    px(0,0,W,H,1);
-    // subtle vertical light
-    ctx.fillStyle="rgba(41,173,255,.06)"; ctx.fillRect(0,0,W,H);
-    // twinkles
-    for(var s=0;s<stars.length;s++){
-      if(((frame>>3)+s)%5===0) px(stars[s][0],stars[s][1],2,2,6);
-      else px(stars[s][0],stars[s][1],2,2,13);
-    }
-
-    // grid
-    var idx=0;
-    for(var r=0;r<ROWS;r++){
-      for(var c=0;c<COLS;c++){
-        var x = PAD + c*(cw+GAP);
-        var y = gridTop + r*(ch+GAP);
-        drawCart(idx, x, y, idx===sel);
-        idx++;
-      }
-    }
-
-    // Moy peeking bottom-right corner as a mini sprite
-    var mx=W-40, my=H-38, sc=2;
-    for(var yy=0;yy<16;yy++){
-      var rw=MOY[yy];
-      for(var xx=0;xx<16;xx++){
-        var col=nib(rw[xx]); if(col<0) continue;
-        ctx.fillStyle=PAL[col]; ctx.fillRect(mx+xx*sc, my+yy*sc, sc, sc);
-      }
-    }
-
-    // top bar last (always on top)
-    drawBar();
-
-    // advance selection every HOLD frames, wandering the grid
-    selT++;
-    if(selT>=HOLD){ selT=0; sel=(sel+1)%(COLS*ROWS); }
-
-    requestAnimationFrame(render);
-  }
-  render();
-
-  // ---- Notify form (no backend) ----
-  // Swap this handler for a real endpoint (Buttondown, Formspree, Mailchimp, or
-  // Porkbun email) when you're ready to actually collect addresses.
-  function wireForm(formId, noteId){
-    var f = document.getElementById(formId);
-    if(!f) return;
-    var note = document.getElementById(noteId);
-    f.addEventListener("submit", function(e){
+  function wire(fid,nid){
+    var f=document.getElementById(fid); if(!f) return; var n=document.getElementById(nid);
+    f.addEventListener("submit",function(e){
       e.preventDefault();
-      var email = (f.querySelector("input[name=email]").value||"").trim();
-      var ok = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-      if(!ok){ note.textContent="Hmm — that doesn't look like an email."; note.style.color="#FF004D"; return; }
-      // TODO: POST `email` to your list provider here.
-      f.innerHTML = '<div style="font-size:15px;color:#00E436">✔ You\'re on the list. See you at launch.</div>';
-      if(note){ note.textContent="Thanks! We saved your spot — one email when Moybyte is ready."; note.style.color="#C2C3C7"; }
+      var v=(f.querySelector("input[name=email]").value||"").trim();
+      if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)){n.textContent="Hmm — that doesn't look like an email.";n.style.color="#FF004D";return;}
+      f.innerHTML='<div style="font-size:15px;color:#00E436">✔ You\'re on the list. See you at launch.</div>';
+      if(n){n.textContent="Thanks! One email when Moybyte is ready.";n.style.color="#C2C3C7";}
     });
   }
-  wireForm("notify-top","note-top");
-  wireForm("notify-bottom","note-bottom");
+  wire("notify-top","note-top"); wire("notify-bottom","note-bottom");
 })();
 </script>
 </body>
