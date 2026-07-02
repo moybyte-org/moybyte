@@ -1083,7 +1083,10 @@ def test_paint_image_assets_wired_device_and_carts():
 
     # DeviceCanvas.spr bakes a paint image index->565 ONCE via blit_indices, then blit565s.
     assert "def _bake_indices(self, img):" in runtime
-    assert "self._gfx.blit_indices(buf, w, h, 0, 0, img.pix, w, h, PAL565_SW)" in runtime
+    # pal565 is passed as the array('H') BUFFER form, not the tuple -- the native kernel
+    # reads it via the buffer protocol (a tuple crashes: object with buffer protocol required).
+    assert "self._gfx.blit_indices(buf, w, h, 0, 0, img.pix, w, h, _PAL565_SW_BUF)" in runtime
+    assert '_PAL565_SW_BUF = array("H", PAL565_SW)' in runtime
     assert 'getattr(img, "_paint", False) and scale == 1 and flip == 0' in runtime
 
     # The console threads the cart's images into make_api (open + wallpaper compile).

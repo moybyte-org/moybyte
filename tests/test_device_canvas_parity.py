@@ -290,10 +290,18 @@ class _FakeGfx:
         # #63 Fold 3: place an iw x ih palette-INDEX bitmap at (dx, dy), converting each
         # index -> RGB565 via pal565 -- a faithful transcription of moy_gfx_blit_indices
         # in modmoy_gfx.c (opaque; index past the palette is skipped; clamped to dst).
+        # The C reads `indices` and `pal565` via the BUFFER PROTOCOL, so memoryview them
+        # HERE too -- a tuple/list palette (the "object with buffer protocol required"
+        # crash) then fails in this mirror exactly as it does on device, not silently.
         d = memoryview(dst).cast("H")
+        iv = memoryview(indices)                  # uint8 index bytes -- buffer required
+        # uint16 palette -- buffer required (the C reinterprets its bytes as uint16). Cast
+        # via 'B' so it works whether pal565 is an array('H') (what the device passes) or
+        # raw 565 bytes; a tuple/list has no buffer protocol and fails here, as on device.
+        pv = memoryview(pal565).cast("B").cast("H")
         dcap = len(d)
-        pcap = len(pal565)
-        icap = len(indices)
+        pcap = len(pv)
+        icap = len(iv)
         if dw <= 0 or dh <= 0 or iw <= 0 or ih <= 0 or pcap == 0:
             return
         if dw * dh > dcap:
@@ -311,10 +319,10 @@ class _FakeGfx:
                 si = srow + col
                 if si >= icap:
                     continue
-                p = indices[si]
+                p = iv[si]
                 if p >= pcap:
                     continue
-                d[drow + tx] = pal565[p]
+                d[drow + tx] = pv[p]
 
     @staticmethod
     def _clip(dw, cap, cx0, cy0, cx1, cy1):

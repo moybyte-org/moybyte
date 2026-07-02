@@ -10,6 +10,7 @@
 # v1 embeds the cart sources; loading real .moy files from SD is the follow-on.
 
 import time
+from array import array
 
 # Editor cores (CodeEditor / SpriteSheet / PaintEditor) are backend-agnostic and
 # shared verbatim with the host (canonical: runtime/editors.py; build.sh stages a
@@ -40,6 +41,11 @@ PAL565 = (
 # the SPI finally overlaps render. Every buffer-writing path (_col + the sprite/atlas
 # bakes) uses PAL565_SW; PAL565 stays the canonical reference.
 PAL565_SW = tuple(((c << 8) | (c >> 8)) & 0xFFFF for c in PAL565)
+# Buffer form of PAL565_SW for the native blit_indices kernel (#63): the C reads the
+# palette via the BUFFER PROTOCOL (moy_gfx_buf_r), and a tuple has none ("object with
+# buffer protocol required"). An array("H") is a contiguous uint16 buffer AND still
+# indexes in Python, so it serves both. (The tuple stays for the other PAL565_SW uses.)
+_PAL565_SW_BUF = array("H", PAL565_SW)
 
 # RGB565 colour-key for native sprite blits: transparent sprite pixels are baked
 # to this value so moy_gfx.blit565 skips them. Magenta is absent from MOY64; a
@@ -432,7 +438,7 @@ class DeviceCanvas:
         w = img.w
         h = img.h
         buf = bytearray(w * h * 2)
-        self._gfx.blit_indices(buf, w, h, 0, 0, img.pix, w, h, PAL565_SW)
+        self._gfx.blit_indices(buf, w, h, 0, 0, img.pix, w, h, _PAL565_SW_BUF)
         img._rgb_i = buf
 
     def _spr_py(self, img, x, y, scale, flip=0):
@@ -674,7 +680,7 @@ class DeviceCanvas:
             return
         if self._gfx is not None:
             self._gfx.blit_indices(self._buf, self.w, self.h, x, y,
-                                   indices, iw, ih, PAL565_SW)
+                                   indices, iw, ih, _PAL565_SW_BUF)
             return
         d = memoryview(self._buf).cast("H")
         w = self.w
