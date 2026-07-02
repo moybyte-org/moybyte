@@ -67,6 +67,14 @@ class Canvas:
         self._batch_items = []
         self._batch_colorkey = -1
         self._batch_scale = 1
+        # Auto-batch profiling counters (#63, perf_capture): per frame, how many runs
+        # flush_batch emitted, total sprites drawn via the batch, and the largest single
+        # run -- so a profile can PROVE N sprites coalesced into ONE blit_batch
+        # (flushes=1, maxrun=N) vs were drawn one-by-one (flushes=N, maxrun=1). Reset per
+        # frame by the Workstation when perf capture is on; free otherwise.
+        self._batch_flushes = 0
+        self._batch_sprites = 0
+        self._batch_maxrun = 0
         # Draw state (TIC-80 cluster 2). reset_state() initialises camera/clip/pal/palt.
         self.reset_state()
 
@@ -341,13 +349,25 @@ class Canvas:
         scale = self._batch_scale
         self._batch_items = []
         self._batch_sheet = None
-        if len(items) == 1:
+        n = len(items)                 # profiling: count the run (see batch_reset, #63)
+        self._batch_flushes += 1
+        self._batch_sprites += n
+        if n > self._batch_maxrun:
+            self._batch_maxrun = n
+        if n == 1:
             tile, x, y, flip = items[0]
             img = sheet.tile_image(tile, colorkey)
             if img is not None:
                 self.spr(img, x, y, scale, flip)
         else:
             self.spr_batch(sheet, items, colorkey, scale)
+
+    def batch_reset(self):
+        """Zero the auto-batch profiling counters (#63) at the top of a frame when perf
+        capture is on. Read afterward via the Workstation's perf_batch()."""
+        self._batch_flushes = 0
+        self._batch_sprites = 0
+        self._batch_maxrun = 0
 
     def spr_batch(self, sheet, items, colorkey=-1, scale=1):
         # Draw many sheet tiles in one call (#43) -- the sprite analogue of map(). The

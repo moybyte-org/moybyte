@@ -987,3 +987,36 @@ def test_auto_batch_device_equals_immediate_device():
     b = _dev_rgb565(bat)
     assert a == b, ("device auto-batch differs from immediate in %d px"
                     % sum(1 for x, y in zip(a, b) if x != y))
+
+
+def test_auto_batch_actually_coalesces():
+    # Batching must not just be pixel-correct -- it must COALESCE. The perf_batch counters
+    # (#63) prove the run collapsed to ONE blit_batch, which the pixel-parity tests above
+    # cannot see (N individual sprs draw the same pixels as one blit_batch). This is the
+    # runtime guard that a cart's N-sprite loop (e.g. sakura's 120 petals) is one native
+    # call, not N -- the whole point of Fold 1.
+    m, _, _ = _both(True)
+    sheet_h, sheet_d = _batch_sheets(m)
+    for cv, sh in ((Canvas(W, H), sheet_h),
+                   (m.DeviceCanvas(_FakeComp(W, H)), sheet_d)):
+        # A contiguous run of same sheet/colorkey/scale coalesces into ONE flush.
+        cv.batch_reset()
+        for i in range(20):
+            cv.spr_tile(sh, (i % 3) + 1, i * 3, 5, 0)
+        cv.flush_batch()
+        assert (cv._batch_flushes, cv._batch_sprites, cv._batch_maxrun) == (1, 20, 20)
+        # A non-spr primitive splits the run.
+        cv.batch_reset()
+        for i in range(6):
+            cv.spr_tile(sh, 1, i * 3, 5, 0)
+        cv.rect(0, 0, 4, 4, 3)                       # breaks the batch
+        for i in range(4):
+            cv.spr_tile(sh, 1, i * 3, 30, 0)
+        cv.flush_batch()
+        assert (cv._batch_flushes, cv._batch_sprites, cv._batch_maxrun) == (2, 10, 6)
+        # A scale change also breaks the run (blit_batch bakes one scale per call).
+        cv.batch_reset()
+        cv.spr_tile(sh, 1, 0, 0, -1, 1)
+        cv.spr_tile(sh, 1, 8, 0, -1, 2)              # scale 1 -> 2 breaks
+        cv.flush_batch()
+        assert (cv._batch_flushes, cv._batch_maxrun) == (2, 1)

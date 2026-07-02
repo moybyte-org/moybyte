@@ -102,6 +102,12 @@ class DeviceCanvas:
         self._batch_items = []
         self._batch_colorkey = -1
         self._batch_scale = 1
+        # Auto-batch profiling counters (#63, perf_capture): per frame, run count / total
+        # sprites batched / largest run -- so a profile can PROVE N sprites coalesced into
+        # ONE blit_batch (flushes=1, maxrun=N) vs drawn one-by-one (flushes=N, maxrun=1).
+        self._batch_flushes = 0
+        self._batch_sprites = 0
+        self._batch_maxrun = 0
         self.reset_state()
 
     def sync_back(self):
@@ -541,13 +547,25 @@ class DeviceCanvas:
         scale = self._batch_scale
         self._batch_items = []
         self._batch_sheet = None
-        if len(items) == 1:
+        n = len(items)                 # profiling: count the run (see batch_reset, #63)
+        self._batch_flushes += 1
+        self._batch_sprites += n
+        if n > self._batch_maxrun:
+            self._batch_maxrun = n
+        if n == 1:
             tile, x, y, flip = items[0]
             img = sheet.tile_image(tile, colorkey)
             if img is not None:
                 self.spr(img, x, y, scale, flip)
         else:
             self.spr_batch(sheet, items, colorkey, scale)
+
+    def batch_reset(self):
+        # Zero the auto-batch profiling counters (#63) at the top of a frame when perf
+        # capture is on. Read afterward via the Workstation's perf_batch().
+        self._batch_flushes = 0
+        self._batch_sprites = 0
+        self._batch_maxrun = 0
 
     def spr_batch(self, sheet, items, colorkey=-1, scale=1):
         # Draw N sheet tiles in ONE native moy_gfx.blit_batch call (#43) -- the sprite
@@ -1949,6 +1967,12 @@ def _diag_drawbrk(diag, ws):
         b = ws.perf_breakdown()             # (logic, render, audio, chrome) ms
         diag.log("DRAWBRK", "logic=%.2f render=%.2f audio=%.2f chrome=%.2f"
                  % (b[0], b[1], b[2], b[3]))
+        # #63 auto-batch profiling: flushes=1/maxrun=N means the cart's N-sprite loop
+        # coalesced into ONE native blit_batch; flushes=N/maxrun=1 means it did NOT.
+        pb = getattr(ws, "perf_batch", None)
+        if pb is not None:
+            bt = pb()
+            diag.log("BATCH", "flushes=%d sprites=%d maxrun=%d" % (bt[0], bt[1], bt[2]))
     except Exception:
         pass
 
