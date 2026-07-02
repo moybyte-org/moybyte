@@ -21,9 +21,11 @@
 
 import time
 
-import moy_runtime as mr          # make_api, Image, PAL565, AUDIO_RATE, _decode_moyimg
+import moy_runtime as mr          # make_api, Image, PAL565, AUDIO_RATE, make_wifi, autoconnect_wifi
 import web_view as wv
 import moy_webserver
+import moy_carts
+import zero_net
 from console import Pointer, Workstation
 from moybyte.input import InputState
 from carts_data import CARTS
@@ -31,6 +33,16 @@ from carts_data import CARTS
 W = 320
 H = 240
 AUDIO_RATE = getattr(mr, "AUDIO_RATE", 8000)
+
+# Persistent store on the FLASH filesystem (the Zero has no SD). moy_carts is fully
+# root-parameterized, so pointing `root` at a flash dir gives the same writable store the
+# T-Deck gets on SD -- crucially, the WiFi cart's saved credentials (wifi.json) + system
+# settings live here and survive a reboot, which is what lets the Zero come up in STA mode.
+ZERO_ROOT = "/moybyte"
+
+# mDNS hostname so a STA-mode Zero is reachable at http://moybyte.local without knowing its
+# router-assigned IP (the headless Zero can't show it on a screen).
+HOSTNAME = "moybyte"
 
 
 # ---------------------------------------------------------------------------
@@ -279,18 +291,37 @@ def _ticks_diff(a, b):
 
 def build_workstation():
     """Assemble the headless Workstation + web glue. Returns (ws, web, recorder). Carts are the
-    embedded CARTS (read-only, no filesystem store yet -- M2 adds a flash-backed moy_carts)."""
+    embedded CARTS (read-only for now); the flash store (ZERO_ROOT) holds WiFi creds + system
+    settings so the WiFi cart's saved network survives a reboot."""
     canvas, rec = make_record_canvas()
     inp = InputState()
     pointer = Pointer(W, H)
     inp.pointer = pointer
     ws = Workstation(_NullComp(), canvas, inp, [dict(c) for c in CARTS])
     ws.make_api = mr.make_api          # cart namespace (Image sprites, canvas-agnostic)
-    ws.carts_root = None               # embedded carts -> management disabled
-    ws.can_manage = False
     ws.pointer = pointer
-    # Store/system config is filesystem-backed; with no store root these load their baked
-    # defaults (guarded no-ops), so the launcher still comes up themed.
+    # Flash-backed persistence: ensure the store dir exists, then wire it. moy_carts ops run
+    # directly (no SD bus on the Zero). Carts stay embedded (can_manage off -> cart editing is
+    # M2), but WiFi creds + system settings persist to ZERO_ROOT.
+    root = None
+    try:
+        moy_carts.ensure_dirs(ZERO_ROOT)
+        root = ZERO_ROOT
+    except Exception as exc:
+        print("[zero] flash store unavailable:", exc)
+    ws.carts_store = moy_carts
+    ws.carts_root = root
+    ws.can_manage = False
+    ws._with_sd = lambda fn: fn()
+    # WiFi service (#38): the SAME DeviceWifi the T-Deck uses, over the flash store. The WiFi
+    # cart (a system cart with the "network" permission) scans/connects/saves through this; creds
+    # persist to <root>/wifi.json so autoconnect_wifi() brings up STA on the next boot.
+    ws.wifi = mr.make_wifi(moy_carts, root)
+    try:
+        import machine
+        ws.reboot_hook = machine.reset      # ≡ menu -> Reboot, so a newly-saved network takes effect
+    except Exception:
+        pass
     for setup in ("load_system", "load_icon_sheet", "load_achievements"):
         fn = getattr(ws, setup, None)
         if fn is not None:
@@ -302,16 +333,48 @@ def build_workstation():
     return ws, web, rec
 
 
-def run_zero(ip=None, port=8080, fps_cap=30):
-    """The headless desktop loop: draw the console into the recording canvas and serve the
-    stream to a browser. `ip` is the address to print in the reach-me URL (the AP is 192.168.4.1).
+def _bring_up_network(wifi):
+    """Prefer JOINING a saved WiFi (STA -- the T-Deck's mode, far better streaming than an ESP32
+    SoftAP); fall back to HOSTING our own AP so the WiFi cart can provision one. Returns
+    (ip, label). The AP<->STA gap is why an AP-mode Zero stutters where the T-Deck doesn't."""
+    try:
+        import network
+        network.hostname(HOSTNAME)          # mDNS: reach a STA Zero at http://moybyte.local
+    except Exception:
+        pass
+    if wifi is not None:
+        try:
+            if mr.autoconnect_wifi(wifi):    # tries saved creds, most-recent first
+                connected, ssid, ip = wifi.status()
+                if connected and ip:
+                    return ip, "joined %s -- http://%s  (or http://%s.local)" % (
+                        ssid or "WiFi", ip, HOSTNAME)
+        except Exception as exc:
+            print("[zero] STA autoconnect failed:", exc)
+    # No saved network (or it didn't come up) -> host our own so the WiFi cart can set one.
+    ip = zero_net.start_ap()
+    return ip, "hosting %s (key %s) -- http://%s" % (zero_net.AP_SSID, zero_net.AP_KEY, ip)
+
+
+def _banner(netlabel):
+    print("=" * 46)
+    print("  MoyByte Zero")
+    print("  " + netlabel)
+    print("=" * 46)
+
+
+def run_zero(port=80, fps_cap=30):
+    """The headless desktop loop: bring up the network (STA from saved creds, else host an AP),
+    then draw the console into the recording canvas and serve the stream to a browser.
     Single-threaded; the web server is serviced BETWEEN frames, fully non-blocking."""
     ws, web, rec = build_workstation()
+    ip, netlabel = _bring_up_network(ws.wifi)
+    _banner(netlabel)
     server = moy_webserver.WebServer(rec, web, port)
     if not server.start(ip):
         print("[zero] web server failed to start")
         return
-    print("[zero] console streaming at http://%s:%d/" % (ip or "0.0.0.0", port))
+    print("[zero] console streaming (port %d)" % port)
 
     frame_ms = 1000 // fps_cap
     last = _ticks_ms()
