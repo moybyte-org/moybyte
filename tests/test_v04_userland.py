@@ -319,6 +319,55 @@ def test_moy_carts_store_roundtrip(tmp_path):
     assert dup["title"] == "Copy" and dup["path"] != c["path"]
 
 
+def test_moyimg_asset_roundtrip_and_image_accessor(tmp_path):
+    # Paint-image assets (#63 Fold 3): a .moyimg blob saves to images/<name>.moyimg,
+    # reloads as cart["images"], and the make_api image(name) accessor decodes it into
+    # a big Image whose pixels are the original MOY64 indices -- placed with spr(img,...).
+    import binascii
+    import zlib
+    from runtime import moy_carts, host_app
+
+    root = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(root)
+    c = moy_carts.create("Arty", root, src="def _draw():\n    cls(0)\n")
+
+    # A 4x3 paint image: indices 0..11, zlib+base64 wrapped (the .moyimg envelope).
+    w, h = 4, 3
+    raw = bytes(range(w * h))
+    import json as _json
+    blob = _json.dumps({"format": "moyimg-v1", "w": w, "h": h,
+                        "data": binascii.b2a_base64(zlib.compress(raw)).decode().strip()})
+    moy_carts.save_image(c, "pic", blob)
+    reloaded = moy_carts.load(c["path"])
+    assert reloaded["images"] == {"pic": blob}          # the asset round-trips on disk
+
+    # image("pic") returns the SAME Image across calls (memoised, so its bake cache is
+    # stable), tagged _paint, with the decoded index pixels; image(name) misses -> None.
+    class _Input:
+        def held(self, n):
+            return False
+
+        def pressed(self, n):
+            return False
+
+    cv = Canvas(8, 8)
+    api = host_app.make_api(cv, _Input(), {}, images=reloaded["images"])
+    im = api["image"]("pic")
+    assert im is not None and im.w == w and im.h == h
+    assert bytes(im.pix) == raw and getattr(im, "_paint", False) is True
+    assert api["image"]("pic") is im                    # memoised: same object
+    assert api["image"]("missing") is None              # unknown asset -> None
+    # The ASCII-art form of image() still works (dispatch on str vs rows list).
+    ascii_im = api["image"](["#."], {"#": 8})
+    assert ascii_im.w == 2
+
+    # spr(paint image) places it opaquely in index space (a background at 0,0).
+    cv.cls(0)
+    api["spr"](im, 0, 0)
+    assert [cv.pix(x, 0) for x in range(w)] == [0, 1, 2, 3]
+    assert cv.pix(0, 1) == 4 and cv.pix(0, 2) == 8
+
+
 # -- shared console: carts run, cards edit (host == device) -----------------
 
 def test_console_runs_wallpaper_and_config_drives_content(tmp_path):

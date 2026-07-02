@@ -142,6 +142,27 @@ def test_embedded_map_matches_kmap_or_both_absent():
             assert "map" not in cart, folder + " has no map.moymap but embeds one"
 
 
+def test_embedded_images_match_or_both_absent():
+    # Paint-image assets (#63 Fold 3) mirror system_carts/<cart>/images/*.moyimg
+    # byte-for-byte: gen_device_carts reads the images/ folder into cart["images"]
+    # ({name: blob}), and seed_builtins writes them back, so any drift fails here.
+    # sakura ships images/bg.moyimg; carts without an images/ folder carry no key.
+    carts = _carts_by_title()
+    for title, cart in carts.items():
+        folder = TITLE_TO_FOLDER[title]
+        idir = SYSTEM_CARTS / (folder + ".moy") / "images"
+        on_disk = {}
+        if idir.is_dir():
+            for p in sorted(idir.iterdir()):
+                if p.suffix == ".moyimg":
+                    on_disk[p.stem] = p.read_text(encoding="utf-8")
+        if on_disk:
+            assert cart.get("images") == on_disk, \
+                "embedded images drifted from " + folder + "/images/"
+        else:
+            assert "images" not in cart, folder + " has no images/ but embeds one"
+
+
 def test_embedded_edit_and_cfg_match_manifest():
     carts = _carts_by_title()
     for title, cart in carts.items():
@@ -246,6 +267,26 @@ def test_seed_builtins_writes_map_kmap_when_present(tmp_path):
     d = Path(root) / "mappy_cart.moy"
     assert (d / "map.moymap").read_text(encoding="utf-8") == blob
     assert moy_carts.load(str(d))["map"] == blob
+
+
+def test_seed_builtins_writes_images_when_present(tmp_path):
+    # Paint-image assets (#63) seed the same way as sprites/map: a seed carrying an
+    # "images" dict writes images/<name>.moyimg, and a reload exposes them as
+    # cart["images"] (what the make_api image() accessor decodes).
+    from runtime import moy_carts
+
+    root = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(root)
+    blob = '{"format": "moyimg-v1", "w": 2, "h": 1, "data": "eJxj5QQAABUADw=="}'
+    seed = [{
+        "title": "Arty Cart", "type": "game",
+        "src": "def _draw():\n    cls(0)\n", "cfg": {}, "edit": [],
+        "images": {"bg": blob},
+    }]
+    moy_carts.seed_builtins(seed, root)
+    d = Path(root) / "arty_cart.moy"
+    assert (d / "images" / "bg.moyimg").read_text(encoding="utf-8") == blob
+    assert moy_carts.load(str(d))["images"] == {"bg": blob}
 
 
 def test_seed_builtins_skips_sheet_when_seed_has_none(tmp_path):

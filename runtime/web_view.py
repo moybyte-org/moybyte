@@ -66,6 +66,40 @@ MAX_ATLAS = 512
 MAX_DEFSPR_BYTES_PER_FRAME = 1200
 
 
+# --- paint-image (#63 Fold 3) compact wire encoding -------------------------
+# A paint image (a big MOY64 index bitmap, images/*.moyimg) recorded via spr() must NOT ship
+# as a self-contained spr's JSON int array (up to 76,800 ints ~= 1MB -- the reason sakura's
+# layer wouldn't load in the browser). Instead an ["img", x, y, w, h, b64] command carries the
+# raw index bytes as a base64 STRING (~100KB for a full screen, shipped ONCE inside the layer's
+# deflayer). The browser atob()s it and blits index->palette -- no JS inflate needed (base64 of
+# the RAW indices, not the zlib bytes, keeps the replay synchronous + dependency-free).
+
+
+def _b64_indices(pix):
+    """Base64-encode a paint image's raw MOY64 index bytes for the ["img", ...] command.
+    Lazy binascii import (ubinascii on the device) so the module body stays import-free."""
+    try:
+        import ubinascii as _binascii
+    except Exception:  # noqa: BLE001 -- host / CPython
+        import binascii as _binascii
+    return _binascii.b2a_base64(bytes(pix)).decode("ascii").strip()
+
+
+def _unb64_indices(b64):
+    """Decode an ["img", ...] command's base64 back to raw index bytes (the replay twin)."""
+    try:
+        import ubinascii as _binascii
+    except Exception:  # noqa: BLE001 -- host / CPython
+        import binascii as _binascii
+    return _binascii.a2b_base64(b64)
+
+
+def _is_paint_image(img):
+    """True for a paint-image asset Image (image('name'), tagged _paint). Used by the recorder
+    to pick the compact ["img", ...] wire form over a fat self-contained/atlas spr."""
+    return bool(getattr(img, "_paint", False))
+
+
 # ---------------------------------------------------------------------------
 # petme128 8x8 font (host == device): the SAME glyphs runtime/font.py ships, baked here
 # as a hex blob so the device (whose panel text uses framebuf's own font) can still hand
@@ -272,6 +306,13 @@ class DrawRecorder:
     def spr(self, img, x, y, scale=1, flip=0):
         # img is an Image / _SheetSprite (.w/.h/.pix/.transparent); ids are already resolved
         # to pixels by the time the canvas sees it.
+        # PAINT-IMAGE fast wire (#63 Fold 3): a big MOY64 index bitmap placed 1:1 ships as a
+        # compact ["img", x, y, w, h, b64] (base64 of the raw indices) instead of a fat spr
+        # -- BEFORE either the self-contained or atlas path (both would balloon it to ~1MB).
+        if _is_paint_image(img) and int(scale) == 1 and int(flip) == 0:
+            self._cmds.append(["img", int(x), int(y), int(img.w), int(img.h),
+                               _b64_indices(img.pix)])
+            return
         if self.self_contained:
             # HOST record-only: embed the pixels (the layer-stream / self-contained shape,
             # ["spr", x, y, scale, w, h, t, pix, flip] -- the unified page + replay handle
@@ -447,7 +488,14 @@ class _LayerRecorder:
         self._cmds.append(["print", str(s), int(x), int(y), c & 63])
 
     def spr(self, img, x, y, scale=1, flip=0):
-        # SELF-CONTAINED full-pixel spr so the layer stream needs no atlas.
+        # A paint-image background baked into this layer (sakura's spr(bg, 0, 0)) ships as a
+        # compact ["img", ...] (base64 indices) -- the whole point of #63 Fold 3: the layer's
+        # deflayer is a ~100KB one-time blob, not a 32k-command ~1MB stream. Everything else is
+        # a SELF-CONTAINED full-pixel spr so the layer stream needs no atlas.
+        if _is_paint_image(img) and int(scale) == 1 and int(flip) == 0:
+            self._cmds.append(["img", int(x), int(y), int(img.w), int(img.h),
+                               _b64_indices(img.pix)])
+            return
         t = img.transparent
         if t is None:
             t = -1
@@ -1328,6 +1376,12 @@ def replay_to_canvas(commands, canvas, layers=None, assets=None):
                 im = atlas.get(idx)
                 if im is not None:
                     canvas.spr(im, x, y, scale, flip)
+        elif op == "img":
+            # PAINT-IMAGE (#63 Fold 3): decode the base64 raw MOY64 indices and blit them
+            # (opaque, clamped) via the same blit_indices the device bakes with -- into the
+            # CURRENT canvas (the layer buffer when replayed inside a deflayer).
+            x, y, w, h = cmd[1:5]
+            canvas.blit_indices(_unb64_indices(cmd[5]), int(w), int(h), int(x), int(y))
         elif op == "deflayer":
             lid, lw, lh, lcmds = cmd[1:5]
             layer = Canvas(int(lw), int(lh), canvas.palette)
@@ -1493,6 +1547,12 @@ for(var yy=0;yy<sh;yy++){var ry=fy?sh-1-yy:yy,bs=ry*sw;for(var xx=0;xx<sw;xx++){
 p=px[bs+rx];if(p===t||p<0||pt[p&63])continue;if(sc<=1)put(x+xx,y+yy,p);else fr(x+xx*sc,y+yy*sc,sc,sc,p);}}}
 // spr by atlas index. Unknown index = no-op (a missing defspr is the dropped-frame bug).
 function sp(ix,x,y,sc,fl){var a=ATL[ix];if(!a){HUD.unknown++;return;}blt(a.px,a.w,a.h,a.t,x,y,sc,fl);}
+// img (#63 Fold 3): a paint image (a big MOY64 index bitmap) as base64 of its RAW indices.
+// atob -> write indices OPAQUE (index>=64 skipped) into the CURRENT target (idx/W/H) clamped,
+// the browser twin of blit_indices. Placed inside a deflayer, so it ships ONCE (~100KB) not 1MB.
+function im(x,y,w,h,b64){var s=atob(b64);x|=0;y|=0;w|=0;h|=0;
+for(var yy=0;yy<h;yy++){var ty=y+yy;if(ty<0||ty>=H)continue;var sr=yy*w,dr=ty*W;
+for(var xx=0;xx<w;xx++){var tx=x+xx;if(tx<0||tx>=W)continue;var p=s.charCodeAt(sr+xx);if(p<64)idx[dr+tx]=p;}}}
 // map(): walk the cached tilemap region over the cached sheet (step=tile*scale, colorkey
 // transparent), mirroring the device map() cell layout.
 function mp(mx,my,w,h,sx,sy,sc,ck){if(!SHEET||!TM)return;sc=sc<1?1:sc;
@@ -1532,6 +1592,7 @@ else if(o=="defspr")ATL[c[1]]={w:c[2],h:c[3],t:c[4],px:c[5]};
 // spr has TWO shapes: atlas ["spr",idx,x,y,sc,fl] (<=6 fields) and self-contained
 // ["spr",x,y,sc,w,h,t,pix,fl] (a pix array at c[7]). Branch on the pix array.
 else if(o=="spr"){if(c.length>7&&c[7]&&c[7].length!==undefined)blt(c[7],c[4],c[5],c[6],c[1],c[2],c[3],c[8]||0);else sp(c[1],c[2],c[3],c[4],c[5]||0);}
+else if(o=="img")im(c[1],c[2],c[3],c[4],c[5]);
 else if(o=="deflayer")dfl(c[1],c[2],c[3],c[4]);else if(o=="blit_layer")bl(c);
 else if(o=="settiles")st(c[1],c[2],c[3]);else if(o=="map")mp(c[1],c[2],c[3],c[4],c[5],c[6],c[7],c[8]);
 else if(o=="print")tx(c[1],c[2],c[3],c[4]);else if(o=="reset_state")rs();

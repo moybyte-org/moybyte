@@ -75,6 +75,14 @@ def build_carts(system_carts_dir):
         tilemap = os.path.join(base, "map.moymap")        # TileMap blob, optional (#32)
         if os.path.exists(tilemap):
             cart["map"] = _read(tilemap)
+        images_dir = os.path.join(base, "images")          # paint-image assets, optional (#63)
+        if os.path.isdir(images_dir):
+            images = {}
+            for iname in sorted(os.listdir(images_dir)):
+                if iname.endswith(".moyimg"):
+                    images[iname[:-len(".moyimg")]] = _read(os.path.join(images_dir, iname))
+            if images:
+                cart["images"] = images
         blocks = os.path.join(base, "blocks.json")      # block source (#29), optional
         if os.path.exists(blocks):
             # carry the block program so a block-authored seed (tap_game) opens in

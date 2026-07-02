@@ -72,6 +72,28 @@ class Image:
         return cls(w, h, pix, -1)
 
 
+def _decode_moyimg(text):
+    """Decode a .moyimg paint-image asset (#63 Fold 3) into (w, h, index_bytes), or
+    None on any error (a bad image just doesn't draw). The blob is a JSON header
+    {w, h, data} where `data` is base64 of the zlib-compressed MOY64 index bitmap
+    (1 byte/pixel) -- the SAME base64+zlib envelope sprites author with. The device
+    inflates it with the `deflate` module (MicroPython's zlib), mirroring the host's
+    zlib in host_app._decode_moyimg."""
+    try:
+        import json as _json
+        import ubinascii as _binascii
+        import deflate
+        import io
+        meta = _json.loads(text)
+        w = int(meta["w"])
+        h = int(meta["h"])
+        data = _binascii.a2b_base64(meta["data"])
+        idx = deflate.DeflateIO(io.BytesIO(data), deflate.ZLIB).read()
+        return (w, h, idx)
+    except Exception:  # noqa: BLE001 -- bad/absent image -> caller gets None
+        return None
+
+
 class DeviceCanvas:
     """The kid drawing API. The hot ops (cls/rect/circ/spr) go through the native
     moy_gfx C kernel writing straight into the compositor's RGB565 framebuffer --
@@ -334,6 +356,22 @@ class DeviceCanvas:
         if self._gfx is None:
             self._spr_py(img, x, y, scale, flip)
             return
+        # Paint-image fast path (#63 Fold 3): a big MOY64 index bitmap (images/*.moyimg)
+        # bakes to RGB565 ONCE via the native blit_indices kernel (one C call over the
+        # whole bitmap, NOT the per-pixel _cache_rgb loop over ~77k px), cached on the
+        # Image by identity; then blit565 stamps it opaquely per frame. Only the 1:1
+        # placement under an identity palette takes it (a scaled/flipped/recoloured paint
+        # image falls through to the general cached path -- correct, just slower once).
+        # The clean full-screen-background path is spr(bg, 0, 0) into a make_layer once,
+        # then draw_layer per frame -- the bake happens off the per-frame hot path.
+        if (getattr(img, "_paint", False) and scale == 1 and flip == 0
+                and self._palgen == 0):
+            if getattr(img, "_rgb_i", None) is None:
+                self._bake_indices(img)
+            self._gfx.blit565(self._buf, self.w, self.h, x, y,
+                              img._rgb_i, img.w, img.h, -1,
+                              self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+            return
         # Blit a cached, pre-scaled+flipped+pal-applied RGB565 copy in one C call. The
         # cache lives on the Image (sheet tiles are reused across frames via the
         # make_api tile cache, so the rebuild is once-per-(sprite,scale,flip,pal)).
@@ -385,6 +423,17 @@ class DeviceCanvas:
         img._rgb_scale = scale
         img._rgb_flip = flip
         img._rgb_palgen = self._palgen
+
+    def _bake_indices(self, img):
+        # Bake a paint image's MOY64 indices -> an opaque RGB565 buffer ONCE via the
+        # native blit_indices kernel (index -> PAL565_SW converted in C, ~ms for a full
+        # 320x240), cached on the Image as _rgb_i; spr() then blit565s it every frame.
+        # The "images are data, not draw calls" bake (#63 Fold 3), off the hot path.
+        w = img.w
+        h = img.h
+        buf = bytearray(w * h * 2)
+        self._gfx.blit_indices(buf, w, h, 0, 0, img.pix, w, h, PAL565_SW)
+        img._rgb_i = buf
 
     def _spr_py(self, img, x, y, scale, flip=0):
         # Per-pixel fallback when moy_gfx is absent (image built without it). Honours
@@ -810,9 +859,12 @@ class _Layer:
 
 
 def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
-             pmem=None, wifi=None):
+             pmem=None, wifi=None, images=None):
     import random
 
+    _img_cache = {}        # name -> decoded paint Image (see image() below), so a
+                           # repeated image(name) returns the SAME Image (#63) and its
+                           # RGB565 bake cache survives across frames.
     tile_cache = {}        # (tile id, colorkey) -> Image, so a redrawn sheet sprite
                            # reuses one Image (and its RGB565 blit cache) every frame
                            # instead of rebuilding it. Invalidated when the sheet's
@@ -979,7 +1031,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # Replaces a per-frame full-background re-render (map() over a scrolling level,
         # ~12-14ms) with a flat memory copy (~7ms) -- the lever for ~60fps scrollers.
         lc = canvas.new_layer(w, h)
-        lns = make_api(lc, input, config, sheet, audio, tilemap, pmem, wifi)
+        lns = make_api(lc, input, config, sheet, audio, tilemap, pmem, wifi, images)
         return _Layer(lc, lns)
 
     def draw_layer(layer, cam_x=0, cam_y=0):
@@ -1002,6 +1054,30 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
             cy = maxy
         canvas.blit_window_from(lc, cx, cy)
 
+    def image(a, mapping=None, transparent="."):
+        # Two forms, dispatched on the first arg (str vs ASCII rows) -- host==device:
+        #   image("bg")          -> the cart's paint-image asset images/bg.moyimg as a
+        #     big Image (a 64-colour MOY64 index bitmap), placed with spr(img, x, y).
+        #     The #63 Fold 3 background path; DeviceCanvas.spr bakes it index->565 ONCE
+        #     via blit_indices. None when the cart has no such image; the SAME Image is
+        #     returned across calls (memoised) so its 565 bake survives frames.
+        #   image(rows, mapping) -> build a small Image from ASCII art (kid convenience).
+        if isinstance(a, str):
+            im = _img_cache.get(a)
+            if im is None:
+                blob = images.get(a) if images else None
+                if blob is None:
+                    return None
+                dec = _decode_moyimg(blob)
+                if dec is None:
+                    return None
+                w, h, idx = dec
+                im = Image(w, h, idx, -1)      # opaque (no transparent index)
+                im._paint = True               # marks the paint-image bake/ship fast paths
+                _img_cache[a] = im
+            return im
+        return Image.from_ascii(a, mapping, transparent)
+
     ns = {
         "W": canvas.w, "H": canvas.h,
         "cls": canvas.cls, "pix": canvas.pix,
@@ -1022,7 +1098,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         "rnd": lambda n=1.0: random.random() * n,
         "flr": lambda x: int(x // 1),
         "Image": Image,
-        "image": lambda rows, mapping, transparent=".": Image.from_ascii(rows, mapping, transparent),
+        "image": image,
     }
     # Capability-gated network API (#38): the shared Workstation passes a non-None
     # wifi backend ONLY for a cart with the "network" permission, so a normal kid
