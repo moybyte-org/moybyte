@@ -21,6 +21,15 @@ except ImportError:  # pragma: no cover
 CARTS_DIR = "/sd/moybyte/carts"
 CART_FORMAT = "moybyte-cart-v1"
 
+# Paint-image assets (#63 Fold 3) live in a per-cart images/ subfolder as
+# <name>.moyimg files -- the THIRD asset type (a 64-colour MOY64 index bitmap from
+# the paint app), alongside sprites.moygfx and map.moymap. A .moyimg is a small JSON
+# header {format,w,h,data} where `data` is base64 of the zlib-compressed index
+# bytes (1 byte/pixel) -- the same zlib+base64 envelope sprites already author with,
+# so the loader stays json-only here (the console decodes the blob into an Image).
+IMAGES_DIR = "images"
+IMAGE_EXT = ".moyimg"
+
 # A single shared sprite sheet lives alongside the carts dir (one level up, so
 # it sits beside every <name>.moy folder). Tiles painted here are reusable
 # across carts; the import-tile primitive copies tiles between any two sheets.
@@ -133,6 +142,40 @@ def _read_recover(path):
         raise
 
 
+def load_images(path):
+    """A cart's paint-image assets: {name: text} of every images/<name>.moyimg blob
+    (name = filename without the extension), or {} when the cart has no images/ dir.
+    Kept as raw text (like the sprites/map blobs); the console decodes each into an
+    Image via the make_api image() accessor. Guarded so a missing dir / bad entry just
+    yields fewer images, never a crash (mirrors load()'s degrade-don't-throw contract)."""
+    out = {}
+    d = path + "/" + IMAGES_DIR
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return out                     # no images/ subfolder -> the common case
+    for name in names:
+        if name.endswith(IMAGE_EXT):
+            try:
+                out[name[:-len(IMAGE_EXT)]] = _read(d + "/" + name)
+            except OSError:
+                pass                   # skip an unreadable entry, keep the rest
+    return out
+
+
+def save_image(cart, name, text):
+    """Persist one paint-image asset to images/<name>.moyimg (atomically, like the
+    sprite/map saves) and update cart['images']. Ensures the images/ subfolder exists.
+    `text` is the .moyimg JSON blob ({format,w,h,data})."""
+    _mkdir(cart["path"] + "/" + IMAGES_DIR)
+    _write_atomic(cart["path"] + "/" + IMAGES_DIR + "/" + name + IMAGE_EXT, text)
+    imgs = cart.get("images")
+    if not isinstance(imgs, dict):
+        imgs = {}
+        cart["images"] = imgs
+    imgs[name] = text
+
+
 def slug(title):
     out = ""
     for ch in str(title).lower():
@@ -236,6 +279,11 @@ def seed_builtins(seed_list, root=CARTS_DIR):
         tilemap = cart.get("map")                 # TileMap.to_hex() blob, optional (#32)
         if tilemap:
             _write(d + "/map.moymap", tilemap)
+        images = cart.get("images")               # {name: .moyimg blob}, optional (#63)
+        if images:
+            _mkdir(d + "/" + IMAGES_DIR)
+            for iname, iblob in images.items():
+                _write(d + "/" + IMAGES_DIR + "/" + iname + IMAGE_EXT, iblob)
         blocks = cart.get("blocks")               # block program tree, optional (#29)
         if blocks:
             # a block-authored seed (tap_game) ships its blocks.json so it opens in
@@ -292,6 +340,7 @@ def load(path):
             blocks = json.loads(_read(path + "/blocks.json"))  # block source (#29), optional
         except (OSError, ValueError):
             blocks = None
+        images = load_images(path)                # paint-image assets (#63), {} if none
         return {
             "path": path,
             "title": man.get("title", "cart"),
@@ -312,6 +361,10 @@ def load(path):
             # block editor, or None for a code-authored cart. main.py stays the
             # runnable source either way; blocks.json is the editable origin.
             "blocks": blocks,
+            # Paint-image assets (#63 Fold 3): {name: .moyimg text} from images/, or {}.
+            # A cart references one via the api's image(name) accessor and places it
+            # with spr(img, x, y) -- a big MOY64 index bitmap (a painted background).
+            "images": images,
         }
     except Exception as exc:  # noqa: BLE001  -- never let one bad cart escape
         print("Moybyte cart unreadable:", path, exc)

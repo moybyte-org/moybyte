@@ -1059,6 +1059,44 @@ def test_native_blit_indices_wired_for_paint_images():
     assert "spr_batch(" in battle
 
 
+def test_paint_image_assets_wired_device_and_carts():
+    # Paint-image assets (#63 Fold 3) end-to-end on the device side: the .moyimg loader
+    # in moy_carts, the make_api image(name) accessor + decode, and DeviceCanvas.spr's
+    # bake-ONCE-via-blit_indices fast path. Grep the frozen device modules (this file
+    # does not execute device code) + the moy_carts store + sakura's conversion.
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
+    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+
+    # moy_carts loads/writes a cart's images/ subfolder of .moyimg blobs.
+    assert "def load_images(path):" in carts
+    assert 'IMAGES_DIR = "images"' in carts
+    assert '"images": images,' in carts                 # load() exposes them on the cart
+    assert 'images = cart.get("images")' in carts       # seed_builtins writes them back
+
+    # The device make_api takes `images` and exposes the image(name) accessor, decoding
+    # a .moyimg into an Image via the deflate (zlib) inflate mirror of the host.
+    assert "pmem=None, wifi=None, images=None):" in runtime
+    assert "def _decode_moyimg(text):" in runtime
+    assert "deflate.DeflateIO(io.BytesIO(data), deflate.ZLIB).read()" in runtime
+    assert 'im._paint = True' in runtime                 # tags the bake/ship fast paths
+
+    # DeviceCanvas.spr bakes a paint image index->565 ONCE via blit_indices, then blit565s.
+    assert "def _bake_indices(self, img):" in runtime
+    assert "self._gfx.blit_indices(buf, w, h, 0, 0, img.pix, w, h, PAL565_SW)" in runtime
+    assert 'getattr(img, "_paint", False) and scale == 1 and flip == 0' in runtime
+
+    # The console threads the cart's images into make_api (open + wallpaper compile).
+    assert 'self.images = self.cart.get("images") or {}' in console
+
+    # sakura is converted: no _BG blob / _paint_bg replay; it fetches image("bg") and
+    # bakes it into a layer with ONE spr(bg, 0, 0). The asset ships as images/bg.moyimg.
+    sakura = (Path("system_carts") / "sakura.moy" / "main.py").read_text(encoding="utf-8")
+    assert "_BG" not in sakura and "_paint_bg" not in sakura
+    assert 'bg = image("bg")' in sakura and "lay.spr(bg, 0, 0)" in sakura
+    assert (Path("system_carts") / "sakura.moy" / "images" / "bg.moyimg").is_file()
+
+
 def _load_moy_runtime():
     # moy_runtime does `from editors import ...` and `from console import ...`; the
     # device freezes build-staged copies of runtime/{editors,audio,console}.py as
@@ -1422,7 +1460,7 @@ def test_device_sprite_storage_wired():
     # (#32) + persistent memory (pmem, #11).
     # make_api now also takes the capability-gated wifi backend LAST (#38).
     assert "def make_api(canvas, input, config, sheet=None, audio=None," in runtime
-    assert "pmem=None, wifi=None):" in runtime
+    assert "pmem=None, wifi=None, images=None):" in runtime
     assert "self.sheet = self._build_sheet()" in console                   # shared console
     assert "self.carts_store.save_sprites(self.cart, hexs)" in console
     assert "def save_sprites(cart, hex_text):" in carts
@@ -1654,7 +1692,7 @@ def test_device_wifi_wired():
 
     # make_api takes the gated wifi backend LAST and injects `wifi` only when set.
     assert "def make_api(canvas, input, config, sheet=None, audio=None," in runtime
-    assert "pmem=None, wifi=None):" in runtime
+    assert "pmem=None, wifi=None, images=None):" in runtime
     assert 'ns["wifi"] = wifi' in runtime
     # The device WLAN backend (STUB -- needs hardware verification). LAZY: the WLAN
     # stack is brought up on demand (scan/connect), NEVER at boot -- bringing it up at

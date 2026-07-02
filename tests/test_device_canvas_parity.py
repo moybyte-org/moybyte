@@ -817,6 +817,59 @@ def test_blit_indices_matches_host():
 
 
 # --------------------------------------------------------------------------- #
+# spr(paint image) (#63 Fold 3): a big MOY64 index bitmap placed 1:1. The device #
+# bakes index->565 ONCE via blit_indices (not per-pixel), then blit565s -- and must #
+# match the host index-space spr AND the raw blit_indices, pixel-for-pixel.        #
+# --------------------------------------------------------------------------- #
+def _paint_image(mk, iw, ih):
+    idx = bytearray(iw * ih)
+    for r in range(ih):
+        for c in range(iw):
+            idx[r * iw + c] = (r * 5 + c * 3) % 63       # valid MOY64 indices
+    im = mk(iw, ih, idx, -1)
+    im._paint = True                                     # tags the blit_indices fast path
+    return im
+
+
+def test_spr_paint_image_matches_host():
+    iw, ih = 30, 20
+    for gfx in (True, False):
+        m, host, dev = _both(gfx)
+        hi = _paint_image(lambda w, h, p, t: Image(w, h, p, t), iw, ih)
+        di = _paint_image(lambda w, h, p, t: m.Image(w, h, p, t), iw, ih)
+        # Place it at a few offsets including partly off-screen (clamped) + inside a clip.
+        for pos in ((5, 4), (0, 0), (W - 8, H - 6), (-6, -3)):
+            host.cls(3)
+            dev.cls(3)
+            host.spr(hi, pos[0], pos[1])
+            dev.spr(di, pos[0], pos[1])
+            _assert_same(host, dev, "spr(paint) gfx=%s pos=%s" % (gfx, pos))
+        # The device path baked the index->565 buffer ONCE via blit_indices (gfx only).
+        if gfx:
+            assert getattr(di, "_rgb_i", None) is not None, "no blit_indices bake cache"
+
+
+def test_spr_paint_image_into_layer_matches_host():
+    # The clean full-screen-background path: spr(bg, 0, 0) into a make_layer once, then
+    # draw_layer per frame -- the device bakes the paint image into the layer buffer via
+    # blit_indices. Host copies indices; both must agree after the window copy.
+    iw, ih = W, H
+    for gfx in (True, False):
+        m, host, dev = _both(gfx)
+        hi = _paint_image(lambda w, h, p, t: Image(w, h, p, t), iw, ih)
+        di = _paint_image(lambda w, h, p, t: m.Image(w, h, p, t), iw, ih)
+        lh = host.new_layer(W, H)
+        ld = dev.new_layer(W, H)
+        lh.spr(hi, 0, 0)                                 # bake the paint bg into the layer
+        ld.spr(di, 0, 0)
+        host.cls(0)
+        dev.cls(0)
+        host.blit_window_from(lh, 0, 0)
+        dev.blit_window_from(ld, 0, 0)
+        _assert_same(host, dev, "paint-in-layer gfx=%s" % gfx)
+
+
+# --------------------------------------------------------------------------- #
 # blit_strip (#43 chrome cache): stamp a SMALLER layer at a fixed offset.      #
 # --------------------------------------------------------------------------- #
 def _strip_scene(L):

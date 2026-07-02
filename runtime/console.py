@@ -1844,6 +1844,8 @@ class Workstation:
         self.editor = None            # CodeEditor while menu_view == "code"
         self.sheet = None             # SpriteSheet for the open cart (built on open)
         self.tilemap = None           # TileMap for the open cart (built on open, #32)
+        self.images = None            # {name: .moyimg text} for the open cart (#63);
+                                      # make_api decodes each lazily via image(name)
         self.pmem = None              # Pmem (persistent cart store) for the open cart
         self._cart_start_ms = 0       # _ticks_ms when the running cart last _start()ed
         self._cart_key_prev = 0       # last frame's keyboard byte (key()/keyp() edge)
@@ -2355,7 +2357,7 @@ class Workstation:
             tilemap = self._build_tilemap(cart)
             ns = self.make_api(self.canvas, self.input, dict(cart.get("cfg", {})),
                                sheet, _SilentAudio(AudioEngine(AudioBank.default())),
-                               tilemap, Pmem(), None)
+                               tilemap, Pmem(), None, cart.get("images") or {})
             exec(compile(cart["src"], "<wallpaper>", "exec"), ns)
             if ns.get("_init"):
                 ns["_init"]()
@@ -2989,7 +2991,7 @@ class Workstation:
         # cart namespace iff the backend it receives is non-None.
         wifi = self.wifi if self._cart_has_perm("network") else None
         ns = self.make_api(self.canvas, self.input, self.config, self.sheet,
-                           self.audio, self.tilemap, self.pmem, wifi)
+                           self.audio, self.tilemap, self.pmem, wifi, self.images)
         try:
             # Compile with the "<cart>" filename so a runtime traceback carries
             # cart line numbers (_exc_cart_line reads them to mark the bad line).
@@ -3031,6 +3033,7 @@ class Workstation:
         self.save_status = None
         self.sheet = self._build_sheet()
         self.tilemap = self._build_tilemap()
+        self.images = self.cart.get("images") or {}   # paint-image assets (#63)
         self.pmem = self._build_pmem()
         self._cart_key_prev = 0       # fresh cart: no stale key edge
         self.input.text_mode = False  # a fresh cart starts in game mode (#38/#42);

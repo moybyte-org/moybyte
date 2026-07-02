@@ -286,6 +286,24 @@ def make_host_wifi(store=None, root=None):
     return HostWifi(store, root)
 
 
+def _decode_moyimg(text):
+    """Decode a .moyimg paint-image asset (#63 Fold 3) into (w, h, index_bytes), or
+    None on any error (a bad image just doesn't draw). The blob is a JSON header
+    {w, h, data} where `data` is base64 of the zlib-compressed MOY64 index bitmap
+    (1 byte/pixel) -- the same base64+zlib envelope sprites author with, so the host
+    inflates it with CPython's zlib (the device mirror in moy_runtime uses `deflate`)."""
+    try:
+        import binascii
+        import zlib
+        meta = json.loads(text)
+        w = int(meta["w"])
+        h = int(meta["h"])
+        idx = zlib.decompress(binascii.a2b_base64(meta["data"]))
+        return (w, h, idx)
+    except Exception:  # noqa: BLE001 -- bad/absent image -> caller gets None
+        return None
+
+
 class _Layer:
     """A scroll background (#54): a wider off-screen canvas the cart pre-renders a
     level into ONCE, then window-copies to the screen per frame via draw_layer. Exposes
@@ -305,7 +323,7 @@ class _Layer:
 
 
 def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
-             pmem=None, wifi=None):
+             pmem=None, wifi=None, images=None):
     """The cartridge global namespace on the host -- same names/signature as the
     device make_api (TIC-80 draw API + sheet-or-Image spr + audio + tilemap), bound
     to a host Canvas and audio backend.
@@ -313,7 +331,14 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
     `wifi` is the capability-gated network backend (#38): the Workstation passes it
     ONLY for a cart whose manifest permissions include "network", and we inject the
     `wifi` name into the namespace iff it is non-None -- so a normal kid cart gets
-    no network access at all (the base key-set is identical either way)."""
+    no network access at all (the base key-set is identical either way).
+
+    `images` (#63 Fold 3) is the cart's paint-image assets ({name: .moyimg text});
+    the cart fetches one as a big Image via image(name) and places it with
+    spr(img, x, y). Decoded lazily + memoised so repeated image(name) calls return
+    the SAME Image (its per-image bake cache stays valid)."""
+
+    _img_cache = {}                    # name -> decoded paint Image (see image() below)
 
     def cfg(key, default=None):
         return config.get(key, default)
@@ -467,7 +492,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # Replaces a per-frame full-background re-render (map() over a scrolling level,
         # ~12-14ms) with a flat memory copy (~7ms) -- the lever for ~60fps scrollers.
         lc = canvas.new_layer(w, h)
-        lns = make_api(lc, input, config, sheet, audio, tilemap, pmem, wifi)
+        lns = make_api(lc, input, config, sheet, audio, tilemap, pmem, wifi, images)
         return _Layer(lc, lns)
 
     def draw_layer(layer, cam_x=0, cam_y=0):
@@ -490,6 +515,30 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
             cy = maxy
         canvas.blit_window_from(lc, cx, cy)
 
+    def image(a, mapping=None, transparent="."):
+        # Two forms, dispatched on the first arg (str vs ASCII rows):
+        #   image("bg")            -> the cart's paint-image asset images/bg.moyimg as a
+        #     big Image (a 64-colour MOY64 index bitmap), placed with spr(img, x, y) --
+        #     the #63 Fold 3 background path. None when the cart has no such image. The
+        #     SAME Image is returned across calls (memoised) so its bake cache survives.
+        #   image(rows, mapping)   -> build a small Image from ASCII art (the original
+        #     kid-convenience form, e.g. image(["..##..", ...], {"#": 8})).
+        if isinstance(a, str):
+            im = _img_cache.get(a)
+            if im is None:
+                blob = images.get(a) if images else None
+                if blob is None:
+                    return None
+                dec = _decode_moyimg(blob)
+                if dec is None:
+                    return None
+                w, h, idx = dec
+                im = Image(w, h, idx, -1)      # opaque (no transparent index)
+                im._paint = True               # marks the paint-image bake/ship fast paths
+                _img_cache[a] = im
+            return im
+        return Image.from_ascii(a, mapping, transparent)
+
     ns = {
         "W": canvas.w, "H": canvas.h,
         "cls": canvas.cls, "pix": canvas.pix,
@@ -510,7 +559,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         "rnd": lambda n=1.0: random.random() * n,
         "flr": lambda x: int(x // 1),
         "Image": Image,
-        "image": lambda rows, mapping, transparent=".": Image.from_ascii(rows, mapping, transparent),
+        "image": image,
     }
     if wifi is not None:                 # capability-gated network API (#38)
         ns["wifi"] = wifi
