@@ -136,6 +136,13 @@ class DeviceCanvas:
         self._batch_flushes = 0
         self._batch_sprites = 0
         self._batch_maxrun = 0
+        # #63 DRAW2: per-frame microseconds spent in the two native pixel ops that dominate
+        # a full-frame cart -- the layer window-copy (draw_layer -> blit_window) and the
+        # sprite batch (blit_batch). render (_draw EMA) mixes them; this splits which one
+        # actually costs the time, so an optimisation targets the real hot op. Reset each
+        # frame by batch_reset (perf capture only); read via _diag_draw2.
+        self._t_layer_us = 0
+        self._t_batch_us = 0
         self.reset_state()
 
     def sync_back(self):
@@ -621,6 +628,8 @@ class DeviceCanvas:
         self._batch_flushes = 0
         self._batch_sprites = 0
         self._batch_maxrun = 0
+        self._t_layer_us = 0        # #63 DRAW2: reset the per-frame native-op timers too
+        self._t_batch_us = 0
 
     def spr_batch(self, sheet, items, colorkey=-1, scale=1):
         # Draw N sheet tiles in ONE native moy_gfx.blit_batch call (#43) -- the sprite
@@ -652,10 +661,12 @@ class DeviceCanvas:
                 self.spr(img, it[1], it[2], scale, flip)
             return
         atlas, ntiles = self._sheet_atlas(sheet, colorkey)
+        _t0 = _ticks_us()                           # #63 DRAW2: time the native sprite batch
         self._gfx.blit_batch(self._buf, self.w, self.h, items,
                              atlas, ntiles, tile, scale, _RGB_KEY,
                              self._cam_x, self._cam_y,
                              self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+        self._t_batch_us += _ticks_diff(_ticks_us(), _t0)
 
     def print(self, s, x, y, c, scale=2):
         # camera offsets the text origin (#11). The clip rect is NOT applied to text:
@@ -751,8 +762,10 @@ class DeviceCanvas:
         if cam_y < 0:
             cam_y = 0
         if self._gfx is not None:
+            _t0 = _ticks_us()                       # #63 DRAW2: time the native window-copy
             self._gfx.blit_window(self._buf, self.w, self.h,
                                   layer._buf, layer.w, cam_x, cam_y)
+            self._t_layer_us += _ticks_diff(_ticks_us(), _t0)
             return
         d = memoryview(self._buf).cast("H")
         s = memoryview(layer._buf).cast("H")
@@ -1993,6 +2006,13 @@ def _ticks_diff(a, b):
         return a - b
 
 
+def _ticks_us():
+    try:
+        return time.ticks_us()
+    except AttributeError:
+        return int(time.time() * 1000000)
+
+
 # --- offline diagnostics wiring (moybyte_diag) ------------------------------
 #
 # Thin guarded shims so the run_desktop loop can route prints + perf samples
@@ -2086,6 +2106,25 @@ def _diag_drawbrk(diag, ws):
         if pb is not None:
             bt = pb()
             diag.log("BATCH", "flushes=%d sprites=%d maxrun=%d" % (bt[0], bt[1], bt[2]))
+    except Exception:
+        pass
+
+
+def _diag_draw2(diag, ws):
+    """Log a DRAW2 line (#63): the last frame's microseconds inside the two native pixel ops
+    that dominate a full-frame cart -- layer=the draw_layer window-copy (blit_window),
+    batch=the sprite blit_batch. The DRAWBRK `render` EMA lumps _draw's Python + these C ops
+    together; this says which native op is the real cost (e.g. is sakura's ~120ms render the
+    layer copy or the 120-petal batch?). Cheap (two ticks_us reads per op); guarded."""
+    if diag is None:
+        return
+    try:
+        cv = getattr(ws, "canvas", None)
+        if cv is None or ws.perf_sample() is None:
+            return
+        diag.log("DRAW2", "layer=%.2fms batch=%.2fms"
+                 % (getattr(cv, "_t_layer_us", 0) / 1000.0,
+                    getattr(cv, "_t_batch_us", 0) / 1000.0))
     except Exception:
         pass
 
@@ -2908,6 +2947,7 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             _diag_perf_at = _tnow + 3000
             _diag_perf_sample(diag, ws)
             _diag_drawbrk(diag, ws)
+            _diag_draw2(diag, ws)       # #63: split render into layer-copy vs sprite-batch us
             _diag_gc(diag)              # #63: GC pause / churn (sakura ~14fps profiling)
         # Diag SD flush (~5s): overwrite /sd/moybyte/diag.log with the current ring.
         # Runs between frames on the native single-bus path (with_sd_live), never

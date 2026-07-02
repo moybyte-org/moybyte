@@ -1837,6 +1837,16 @@ def test_micropython_offline_diag_wiring():
     assert 'diag.log("GC", "collect=%dms free=%dk live=%dk churn=%dk"' in runtime
     assert "_diag_gc(diag)" in runtime
 
+    # DRAW2 line (#63): split the render EMA into the two native pixel ops -- the layer
+    # window-copy (blit_window) vs the sprite blit_batch -- so we know which one is the
+    # real cost of a full-frame cart (sakura's ~120ms render). Timed in microseconds
+    # around the native calls, reset per frame by batch_reset.
+    assert "def _diag_draw2(diag, ws):" in runtime
+    assert 'diag.log("DRAW2", "layer=%.2fms batch=%.2fms"' in runtime
+    assert "_diag_draw2(diag, ws)" in runtime
+    assert "self._t_layer_us += _ticks_diff(_ticks_us(), _t0)" in runtime
+    assert "self._t_batch_us += _ticks_diff(_ticks_us(), _t0)" in runtime
+
     # Existing diagnostics routed through diag (printed AND persisted): boot heap,
     # the frame-error trace, the in-cart crash, and the audio I2S status line.
     assert '_diag_log("mem",' in runtime
