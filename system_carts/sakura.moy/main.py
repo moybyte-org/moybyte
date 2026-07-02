@@ -314,23 +314,42 @@ EMIT = [(20, 44), (21, 76), (21, 114), (24, 133), (28, 61), (28, 152), (30, 95),
 # Authored to the device envelope: the static scene is stored ONCE as zlib-packed
 # palette indices, inflated + painted into an off-screen LAYER at _init (make_layer,
 # #54) and copied to the screen each frame as a flat blit (draw_layer) -- no
-# per-frame background work. Each petal is a single draw call; the sway reads a
-# 256-entry sine table built once, so the per-frame loop never calls math.*.
+# per-frame background work. All N petals blit in ONE spr_batch call (#43) rather
+# than up to two per-petal rect/pix calls -- the draw-call count is the device's
+# FPS ceiling. The sway reads a 256-entry sine table built once, so the per-frame
+# loop never calls math.*.
 
 import math
 
 SIN = []            # sine LUT (built once); the hot loop indexes it, never calls sin
 lay = None          # the static scene, inflated + painted once, copied per frame (#54)
 petals = []         # each: [x, y, fall_speed, sway_phase, sway_amp, shade(0 near..2 far)]
+batch = []          # spr_batch items [tile, x, y], one per petal: the tile is fixed at
+                    # _init (blossom + shade), only x/y refresh per frame -> one native call
 t = 0.0
 
-# Falling-petal palette by depth: (near, mid, far). Near gets a white glint.
+# Falling-petal palette by depth: (near, mid, far). Near gets a white glint. These
+# colours are BAKED INTO sprites.moygfx: tile = BLOSSOM_ORDER.index(colour)*3 + shade
+# (shade 0 near / 1 mid / 2 far), the near tile carrying the glint pixel. The petals
+# draw from that sheet via spr_batch, so if you change a colour here, REGENERATE the
+# sheet to match (12 tiles, painted with these indices, colorkey 0).
 BLOSSOMS = {
     "pink":  (14, 14, 2),
     "white": (7, 6, 13),
     "peach": (15, 9, 4),
     "mixed": (14, 15, 7),
 }
+BLOSSOM_ORDER = ("pink", "white", "peach", "mixed")   # sheet column order (base = i*3)
+
+
+def _blossom_base():
+    # A run's blossom colour fixes the sheet column; each petal's tile is base + shade.
+    # Unknown names fall back to pink (base 0), matching BLOSSOMS.get(...) below.
+    name = cfg("blossom", "pink")
+    for i in range(len(BLOSSOM_ORDER)):
+        if BLOSSOM_ORDER[i] == name:
+            return i * 3
+    return 0
 
 
 def _build_sin():
@@ -385,20 +404,23 @@ def _shed(p, fresh):
 
 
 def _init():
-    global lay, petals, t
+    global lay, petals, batch, t
     _build_sin()
     if lay is None:                        # allocate the scene buffer only once
         lay = make_layer(W, H)
     _paint_bg()
     n = int(cfg("petal_count", 120))
     fall = float(cfg("fall_speed", 30))
+    base = _blossom_base()                 # blossom fixes the tile column for the run
     petals = []
+    batch = []
     for i in range(n):
         shade = i % 3
         spd = fall * (1.0 - 0.18 * shade) * (0.7 + rnd(0.6))
         p = [0.0, 0.0, spd, 0.0, 4.0 + rnd(9.0), shade]
         _shed(p, False)
         petals.append(p)
+        batch.append([base + shade, 0, 0])   # tile fixed; x/y refreshed each frame in _draw
     t = 0.0
 
 
@@ -440,20 +462,14 @@ def _update(dt):
 
 
 def _draw():
+    # Background: one flat blit. Petals: refresh each batch item's x/y (its tile was
+    # fixed at _init) and hand the whole list to spr_batch -- ONE native draw call for
+    # all N petals. The tile art bakes the depth colour + the near-petal white glint,
+    # with index 0 as the transparent colorkey (no petal colour is 0).
     draw_layer(lay, 0, 0)
-    cols = BLOSSOMS.get(cfg("blossom", "pink"), BLOSSOMS["pink"])
-    near = cols[0]
-    mid = cols[1]
-    far = cols[2]
-    glint = col("white")
-    for p in petals:
-        x = int(p[0])
-        y = int(p[1])
-        shade = p[5]
-        if shade == 2:
-            pix(x, y, far)
-        elif shade == 1:
-            rect(x, y, 2, 2, mid)
-        else:
-            rect(x, y, 3, 2, near)
-            pix(x, y, glint)
+    b = batch
+    for i, p in enumerate(petals):
+        e = b[i]
+        e[1] = int(p[0])
+        e[2] = int(p[1])
+    spr_batch(b, 0)
