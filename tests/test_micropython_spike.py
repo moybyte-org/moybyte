@@ -1810,6 +1810,12 @@ def test_micropython_offline_diag_wiring():
     assert "_diag_drawbrk(diag, ws)" in runtime
     assert "ws.perf_breakdown()" in runtime
 
+    # GC line (#63, sakura ~14fps profiling): the forced-collect pause + churn, sampled on
+    # the ~3s cadence (gc.mem_alloc/free WALK the heap, so never per frame).
+    assert "def _diag_gc(diag):" in runtime
+    assert 'diag.log("GC", "collect=%dms free=%dk live=%dk churn=%dk"' in runtime
+    assert "_diag_gc(diag)" in runtime
+
     # Existing diagnostics routed through diag (printed AND persisted): boot heap,
     # the frame-error trace, the in-cart crash, and the audio I2S status line.
     assert '_diag_log("mem",' in runtime
