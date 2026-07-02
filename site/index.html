@@ -3,20 +3,23 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Moybyte — your first real little computer</title>
-<meta name="description" content="Moybyte is a kid's first creative computer: a handheld fantasy workstation where the desktop, games, art, and tools are all cartridges a child can open, edit, and remix. Learn to make a computer, not just use one." />
+<title>Moybyte — a little computer kids can open up</title>
+<link rel="canonical" href="https://moybyte.com/" />
+<meta name="description" content="A real little computer for kids where everything — the games, the drawings, even the home screen — can be opened up and changed. Made to learn to make, not just use." />
 <meta property="og:type" content="website" />
-<meta property="og:title" content="Moybyte — your first real little computer" />
-<meta property="og:description" content="A handheld fantasy workstation for kids where everything is an editable cartridge. Make the computer itself come alive." />
-<meta property="og:image" content="og.png" />
-<meta name="theme-color" content="#1D2B53" />
+<meta property="og:url" content="https://moybyte.com/" />
+<meta property="og:title" content="Moybyte — a little computer kids can open up" />
+<meta property="og:description" content="A real little computer for kids where the games, drawings, and tools can all be opened up and changed. Learn to make, not just use." />
+<meta property="og:image" content="https://moybyte.com/og.png" />
+<meta name="theme-color" content="#0b1024" />
 <meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:image" content="https://moybyte.com/og.png" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%231D2B53'/%3E%3Cg fill='%2383769C'%3E%3Crect x='2' y='2' width='7' height='11'/%3E%3Crect x='2' y='5' width='12' height='8'/%3E%3C/g%3E%3Crect x='3' y='6' width='2' height='2' fill='%23FFF1E8'/%3E%3Crect x='6' y='6' width='2' height='2' fill='%23FFF1E8'/%3E%3C/svg%3E" />
 <style>
   :root{
     --c1:#1D2B53; --c5:#5F574F; --c6:#C2C3C7; --c9:#FFA300; --c10:#FFEC27;
     --c12:#29ADFF; --c13:#83769C; --c15:#FFCCAA;
-    --ink:#FFF1E8; --dim:#C2C3C7; --bg:#0b1024;
+    --ink:#FFF1E8; --dim:#C2C3C7; --muted:#9a94a6; --bg:#0b1024;
     --mono:"Courier New",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   }
   *{box-sizing:border-box}
@@ -62,7 +65,7 @@
   .btn:active{transform:translate(2px,2px);box-shadow:2px 2px 0 rgba(0,0,0,.5)}
   .btn.ghost{background:transparent;color:var(--ink);border:2px solid var(--c5);box-shadow:none}
   .btn.ghost:hover{border-color:var(--c12);color:var(--c12)}
-  .formnote{font-size:12px;color:var(--c5);margin-top:12px}
+  .formnote{font-size:12px;color:var(--muted);margin-top:12px}
   .cta-row{display:flex;gap:12px;align-items:center;margin-top:16px;flex-wrap:wrap}
 
   .device{justify-self:center;max-width:420px;width:100%}
@@ -78,7 +81,7 @@
   .dpad .keys span{height:9px;background:#0d0a16;border-radius:2px;box-shadow:inset 0 -1px 0 rgba(255,255,255,.05)}
   .dpad .knob{width:26px;height:26px;border-radius:50%;
     background:radial-gradient(circle at 35% 30%,#3b3550,#120f1c);box-shadow:inset 0 2px 3px rgba(255,255,255,.08)}
-  .dcap{text-align:center;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--c5);margin-top:16px}
+  .dcap{text-align:center;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-top:16px}
 
   /* launcher animations */
   .sel{animation:selmove 8s infinite}
@@ -115,29 +118,36 @@
   .card .ico{width:20px;height:20px;margin-bottom:14px;display:block}
   .card h3{margin:0 0 8px;font-size:16px;color:var(--ink)}
   .card p{margin:0;font-size:13px;color:var(--c6)}
-  .pillars.steps{grid-template-columns:repeat(3,1fr)}
-  .step-n{width:26px;height:26px;margin-bottom:14px;display:flex;align-items:center;justify-content:center;
-    font-weight:bold;font-size:14px;color:#000;background:var(--c10);box-shadow:3px 3px 0 rgba(0,0,0,.5)}
+  .demo{margin:0 0 34px;max-width:480px}
+  .demo img{width:100%;height:auto;display:block;border:1px solid var(--c1);border-radius:4px;image-rendering:pixelated}
+  .demo figcaption{font-size:12px;color:var(--muted);margin-top:10px}
+  .clips{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  .clip{margin:0;background:#0d1330;border:1px solid var(--c1);overflow:hidden}
+  .clip img{width:100%;height:auto;display:block;image-rendering:pixelated;border-bottom:1px solid var(--c1)}
+  .clip-txt{padding:16px 18px 18px}
+  .clip .age{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--c9)}
+  .clip h3{margin:5px 0 8px;font-size:16px;color:var(--ink)}
+  .clip p{margin:0;font-size:13px;color:var(--c6)}
   .tiers{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
   .tier{background:linear-gradient(180deg,#0f1636,#0a0f26);border:1px solid var(--c1);padding:24px;text-align:center}
   .tier .name{font-size:13px;letter-spacing:2px;text-transform:uppercase;color:var(--c10);margin-bottom:8px}
   .tier h3{margin:0 0 6px;font-size:22px}
   .tier p{font-size:13px;color:var(--c6);margin:0 0 4px;min-height:40px}
-  .tier .role{font-size:11px;color:var(--c5);text-transform:uppercase;letter-spacing:1px;
+  .tier .role{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;
     border-top:1px solid var(--c1);margin-top:14px;padding-top:12px}
   .tier .art{width:100%;max-width:190px;height:auto;display:block;margin:2px auto 12px}
   .tier.one{border-color:var(--c9)} .tier.one .name{color:var(--c9)}
   .closer{text-align:center;background:#060a1c;border-top:2px solid var(--c1);border-bottom:2px solid var(--c1)}
   .closer h2{max-width:20ch;margin:0 auto 18px}
   .closer form.notify{margin:0 auto;justify-content:center}
-  footer{padding:40px 0;text-align:center;color:var(--c5);font-size:12px} footer a{color:var(--c13)}
+  footer{padding:40px 0;text-align:center;color:var(--muted);font-size:12px} footer a{color:var(--c13)}
   .footer-brand{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:14px}
   .footer-brand .moy-ico{width:24px;height:24px}
   @media(max-width:860px){
     .hero{grid-template-columns:1fr;gap:34px;text-align:center}
     form.notify{margin:0 auto} .cta-row{justify-content:center}
     .lede,.sub{margin-left:auto;margin-right:auto}
-    .pillars{grid-template-columns:repeat(2,1fr)} .pillars.steps{grid-template-columns:1fr} .tiers{grid-template-columns:1fr}
+    .pillars{grid-template-columns:repeat(2,1fr)} .clips{grid-template-columns:1fr} .tiers{grid-template-columns:1fr}
     .nav-links{display:none}
   }
   @media(max-width:480px){.pillars{grid-template-columns:1fr}}
@@ -162,9 +172,9 @@
   <header class="hero">
     <div class="hero-copy">
       <span class="tag">Coming soon</span>
-      <h1>Your first <span class="cream">real</span> little <span class="grape">computer.</span></h1>
-      <p class="lede">A little computer for kids where <b>everything can be opened up and changed</b> — the games, the drawings, the tools, even the home screen itself.</p>
-      <p class="sub">It's made to be opened up. Change something, press <b>Run</b>, and see what happens.</p>
+      <h1>A little computer kids can <span class="grape">open up</span> and change.</h1>
+      <p class="lede">The games, the drawings, the tools — even the home screen. Kids can open any of it up and make it their own.</p>
+      <p class="sub">Change a number, press <b>Run</b>, and the game changes in front of them.</p>
       <form class="notify" id="notify-top" novalidate>
         <input type="email" name="email" placeholder="you@email.com" aria-label="Email address" required />
         <button class="btn" type="submit">Notify me</button>
@@ -172,7 +182,7 @@
       <div class="cta-row">
         <a class="btn ghost" href="https://github.com/nikola-j/moybyte" target="_blank" rel="noopener">Follow on GitHub ›</a>
       </div>
-      <p class="formnote" id="note-top">No spam. One email when there's something to see.</p>
+      <p class="formnote" id="note-top">No spam — one email when it's ready.</p>
     </div>
     <div class="device">
       <div class="bezel">
@@ -187,29 +197,42 @@
   </header>
 </div>
 
-<div class="marquee" aria-hidden="true"><div>OPEN&nbsp;IT&nbsp;UP&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;CHANGE&nbsp;HOW&nbsp;IT&nbsp;WORKS&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;PRESS&nbsp;RUN&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;WORKS&nbsp;OFFLINE&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;MADE&nbsp;FOR&nbsp;KIDS&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;OPEN&nbsp;IT&nbsp;UP&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;CHANGE&nbsp;HOW&nbsp;IT&nbsp;WORKS&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;PRESS&nbsp;RUN&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;WORKS&nbsp;OFFLINE&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;MADE&nbsp;FOR&nbsp;KIDS&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;</div></div>
+<div class="marquee" aria-hidden="true"><div>OPEN&nbsp;IT&nbsp;UP&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;CHANGE&nbsp;HOW&nbsp;IT&nbsp;WORKS&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;PRESS&nbsp;RUN&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;WORKS&nbsp;OFFLINE&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;YOURS&nbsp;TO&nbsp;KEEP&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;OPEN&nbsp;IT&nbsp;UP&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;CHANGE&nbsp;HOW&nbsp;IT&nbsp;WORKS&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;PRESS&nbsp;RUN&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;WORKS&nbsp;OFFLINE&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;YOURS&nbsp;TO&nbsp;KEEP&nbsp;&nbsp;<b>&#9670;</b>&nbsp;&nbsp;</div></div>
 
 <div class="wrap">
   <section id="make">
     <p class="eyebrow">The idea</p>
-    <h2>A computer that's meant to be taken apart.</h2>
-    <p class="section-sub">Everything on a Moybyte — the games, the drawings, the little tools — can be opened up and changed. Playing with something and remaking it are the same thing here.</p>
+    <h2>A computer that's meant to be opened up.</h2>
+    <p class="section-sub">Nothing on a Moybyte is sealed shut. Open a game, a drawing, or a tool, change it, and see what happens right away.</p>
+    <figure class="demo">
+      <img src="media/paint.gif" alt="Drawing a smile on the pet character in the paint editor, then it appears in the game" loading="lazy" width="640" height="480" />
+      <figcaption>Draw a smile on the pet — it's wearing it back in the game.</figcaption>
+    </figure>
     <div class="pillars">
-      <div class="card"><svg class="ico" viewBox="0 0 16 16"><rect x="2" y="4" width="12" height="9" fill="#29ADFF"/><rect x="5" y="2" width="6" height="3" fill="#FFEC27"/></svg><h3>Everything opens up</h3><p>Every game, tool, and even the home screen can be looked inside and changed. Nothing is sealed shut.</p></div>
-      <div class="card"><svg class="ico" viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" fill="#00E436"/><rect x="7" y="4" width="2" height="8" fill="#000"/><rect x="4" y="7" width="8" height="2" fill="#000"/></svg><h3>Room to make things</h3><p>No feeds, no autoplay, no endless scroll — just space to make something and try it out.</p></div>
-      <div class="card"><svg class="ico" viewBox="0 0 16 16"><rect x="4" y="2" width="4" height="12" fill="#FF004D"/><path d="M4 2 L12 8 L4 14 Z" fill="#FFA300"/></svg><h3>Change it and see it</h3><p>Adjust something, press Run, and it happens right away. Small changes, quick to try.</p></div>
-      <div class="card"><svg class="ico" viewBox="0 0 16 16"><path d="M8 2 L13 4 V8 C13 11 8 14 8 14 C8 14 3 11 3 8 V4 Z" fill="#83769C"/><rect x="7" y="6" width="2" height="4" fill="#FFF1E8"/></svg><h3>Offline and private</h3><p>Works without the internet. No accounts, no sign-ups, no chat. What a child makes stays theirs.</p></div>
+      <div class="card"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="4" width="12" height="9" fill="#29ADFF"/><rect x="5" y="2" width="6" height="3" fill="#FFEC27"/></svg><h3>Everything opens up</h3><p>Every game, tool, and even the home screen can be looked inside and changed. Nothing is sealed shut.</p></div>
+      <div class="card"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" fill="#00E436"/><rect x="7" y="4" width="2" height="8" fill="#000"/><rect x="4" y="7" width="8" height="2" fill="#000"/></svg><h3>Room to make things</h3><p>No feeds, no autoplay, no endless scroll — just space to make something and try it out.</p></div>
+      <div class="card"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="2" width="4" height="12" fill="#FF004D"/><path d="M4 2 L12 8 L4 14 Z" fill="#FFA300"/></svg><h3>Change it and see it</h3><p>Adjust something, press Run, and it happens right away. Small changes, quick to try.</p></div>
+      <div class="card"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2 L13 4 V8 C13 11 8 14 8 14 C8 14 3 11 3 8 V4 Z" fill="#83769C"/><rect x="7" y="6" width="2" height="4" fill="#FFF1E8"/></svg><h3>Offline and private</h3><p>Works without the internet. No accounts, no sign-ups, no chat. What a child makes stays theirs.</p></div>
     </div>
   </section>
 
   <section id="grows">
-    <p class="eyebrow">Grows with your kid</p>
+    <p class="eyebrow">For ages 5–12</p>
     <h2>It grows as they do.</h2>
-    <p class="section-sub">The same little computer suits a five-year-old and a twelve-year-old — they just go as deep as they want. There's no "now learn to code" moment.</p>
-    <div class="pillars steps">
-      <div class="card"><div class="step-n">1</div><h3>Play</h3><p>Pick something and play. That can be the whole of it, for as long as they like.</p></div>
-      <div class="card"><div class="step-n">2</div><h3>Tinker</h3><p>When they get curious, they can open it up and move the pieces around to change what it does.</p></div>
-      <div class="card"><div class="step-n">3</div><h3>Make</h3><p>The games are real programs underneath, there to be rewritten into something of their own.</p></div>
+    <p class="section-sub">The same little computer suits a five-year-old and a twelve-year-old — they just go as deep as they want. There's no "now learn to code" moment; each way of making leads into the next.</p>
+    <div class="clips">
+      <figure class="clip">
+        <img src="media/tap.gif" alt="Tapping the catcher character in a menu, then pressing GO to change it in the game" loading="lazy" width="640" height="480" />
+        <div class="clip-txt"><span class="age">Around age 5</span><h3>Tap to change it</h3><p>Tap a picture to swap the character, press GO, and the game plays the new way.</p></div>
+      </figure>
+      <figure class="clip">
+        <img src="media/blocks.gif" alt="Adding a block in the block editor by picking it from a menu" loading="lazy" width="640" height="480" />
+        <div class="clip-txt"><span class="age">Around age 7</span><h3>Snap blocks together</h3><p>Click blocks into place to build how the game behaves — no typing yet.</p></div>
+      </figure>
+      <figure class="clip">
+        <img src="media/code.gif" alt="Opening the code editor, changing the sprite scale, and running it so the character grows" loading="lazy" width="640" height="480" />
+        <div class="clip-txt"><span class="age">Around age 12</span><h3>Write real code</h3><p>Open the actual code, change a number, press Run — the character grows on screen.</p></div>
+      </figure>
     </div>
   </section>
   <section id="family">
@@ -228,12 +251,12 @@
   <div class="wrap">
     <p class="eyebrow">We're building it now</p>
     <h2>Want to know when it's ready?</h2>
-    <p class="section-sub" style="margin:0 auto 28px">Leave your email and we'll send a single note when there's something to hold — nothing more.</p>
+    <p class="section-sub" style="margin:0 auto 28px">Leave your email and we'll send one note the day it's ready.</p>
     <form class="notify" id="notify-bottom" novalidate>
       <input type="email" name="email" placeholder="you@email.com" aria-label="Email address" required />
       <button class="btn" type="submit">Notify me</button>
     </form>
-    <p class="formnote" id="note-bottom" style="text-align:center">No spam. One email, tops.</p>
+    <p class="formnote" id="note-bottom" style="text-align:center">No spam, ever.</p>
   </div>
 </section>
 
@@ -241,7 +264,7 @@
   <div class="wrap">
     <div class="footer-brand"><svg class="moy-ico" viewBox="0 0 16 16" aria-hidden="true"><use href="#moy"/></svg><span class="brand"><span class="wm"><b>moy</b><i>byte</i></span></span></div>
     <p>A kid's first real computer — one they can make their own. <a href="https://github.com/nikola-j/moybyte" target="_blank" rel="noopener">Follow along on GitHub</a></p>
-    <p style="color:#3a3550">© 2026 Moybyte · Made with pixels &amp; caffeine</p>
+    <p style="color:var(--muted);opacity:.7">© 2026 Moybyte</p>
   </div>
 </footer>
 
