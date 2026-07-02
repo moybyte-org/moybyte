@@ -77,7 +77,7 @@ examples/radio_pong_stub.moyproj
 ```
 
 The firmware-facing API contract is in
-`docs/firmware_runtime_contract.md`. The first concrete hardware target is the
+`docs/history/firmware_runtime_contract.md`. The first concrete hardware target is the
 LilyGO T-Deck Plus, with board-specific details kept out of the portable API.
 
 Kid projects import the small public API from `moybyte`:

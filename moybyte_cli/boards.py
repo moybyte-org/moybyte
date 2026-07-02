@@ -134,7 +134,7 @@ def export_device_project(project_path, board_id, out_dir):
         "project_id": manifest.id,
         "title": manifest.title,
         "bundle": bundle_name,
-        "runner_contract": "docs/firmware_runtime_contract.md",
+        "runner_contract": "docs/history/firmware_runtime_contract.md",
     }
     deploy_path = os.path.join(out_dir, "deploy.json")
     with open(deploy_path, "w", encoding="utf-8") as fh:

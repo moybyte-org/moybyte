@@ -1,5 +1,10 @@
 # Moybyte Project Format
 
+> **Legacy — `.moyproj` SDK format.** This is the older `.moyproj` project folder
+> format. The current console format is **`.moy`** (a folder = `manifest.json` +
+> `main.py` + `config.json`, plus optional sprites/tilemap/sounds); its cart API is in
+> **[`moy_cart_api.md`](../moy_cart_api.md)**. Kept for the maintained `.moyproj` SDK.
+
 Moybyte v0 projects are folders ending in `.moyproj`.
 
 ```text

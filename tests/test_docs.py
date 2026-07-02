@@ -2,7 +2,7 @@ from pathlib import Path
 
 
 def test_firmware_runtime_contract_mentions_lilygo_target():
-    text = Path("docs/firmware_runtime_contract.md").read_text(encoding="utf-8")
+    text = Path("docs/history/firmware_runtime_contract.md").read_text(encoding="utf-8")
 
     assert "LilyGO T-Deck Plus" in text
     assert "moybyte check-portable" in text

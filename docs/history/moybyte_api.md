@@ -1,5 +1,10 @@
 # Moybyte API
 
+> **Legacy — `.moyproj` SDK.** This documents the older `.moyproj` project API
+> (`from moybyte import *`). The current v0.4 `.moy` console uses a different,
+> TIC-80-style API — see **[`moy_cart_api.md`](../moy_cart_api.md)**. This SDK is still
+> maintained (it seeds the block-programming ladder); it is **not** the console cart API.
+
 Kid projects should import from the portable API:
 
 ```python
