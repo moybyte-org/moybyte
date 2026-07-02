@@ -286,6 +286,37 @@ class _FakeGfx:
                 d[d0 + col] = s[s0 + col]
 
     @staticmethod
+    def blit_indices(dst, dw, dh, dx, dy, indices, iw, ih, pal565):
+        # #63 Fold 3: place an iw x ih palette-INDEX bitmap at (dx, dy), converting each
+        # index -> RGB565 via pal565 -- a faithful transcription of moy_gfx_blit_indices
+        # in modmoy_gfx.c (opaque; index past the palette is skipped; clamped to dst).
+        d = memoryview(dst).cast("H")
+        dcap = len(d)
+        pcap = len(pal565)
+        icap = len(indices)
+        if dw <= 0 or dh <= 0 or iw <= 0 or ih <= 0 or pcap == 0:
+            return
+        if dw * dh > dcap:
+            dh = dcap // dw
+        for row in range(ih):
+            ty = dy + row
+            if ty < 0 or ty >= dh:
+                continue
+            srow = row * iw
+            drow = ty * dw
+            for col in range(iw):
+                tx = dx + col
+                if tx < 0 or tx >= dw:
+                    continue
+                si = srow + col
+                if si >= icap:
+                    continue
+                p = indices[si]
+                if p >= pcap:
+                    continue
+                d[drow + tx] = pal565[p]
+
+    @staticmethod
     def _clip(dw, cap, cx0, cy0, cx1, cy1):
         max_rows = cap // dw
         if cx0 < 0:
@@ -757,6 +788,32 @@ def test_scroll_layer_window_copy_matches_host():
             host.blit_window_from(lh, cam[0], cam[1])
             dev.blit_window_from(ld, cam[0], cam[1])
             _assert_same(host, dev, "scroll gfx=%s cam=%s" % (gfx, cam))
+
+
+# --------------------------------------------------------------------------- #
+# blit_indices (#63 Fold 3): bake a palette-index bitmap into the framebuffer. #
+# --------------------------------------------------------------------------- #
+def test_blit_indices_matches_host():
+    # Place an index bitmap (a paint-app image) at a range of offsets -- including
+    # negative and past the right/bottom edge (clamped), plus an index past the palette
+    # (skipped, leaves the background) -- on both backends. Host writes indices; device
+    # converts index -> RGB565 via moy_gfx.blit_indices (gfx=True) or the memoryview
+    # fallback (gfx=False). All three must agree pixel-for-pixel.
+    iw, ih = 20, 12
+    img = bytearray(iw * ih)
+    for row in range(ih):
+        for col in range(iw):
+            img[row * iw + col] = (row * 3 + col) % 63      # valid MOY64 indices 0..62
+    img[0] = 99                                             # past the palette -> skipped
+    img[iw + 1] = 63
+    for gfx in (True, False):
+        m, host, dev = _both(gfx)
+        for pos in ((10, 8), (0, 0), (-5, -4), (W - 6, H - 3), (-100, 50), (W + 5, 2)):
+            host.cls(5)
+            dev.cls(5)
+            host.blit_indices(img, iw, ih, pos[0], pos[1])
+            dev.blit_indices(img, iw, ih, pos[0], pos[1])
+            _assert_same(host, dev, "blit_indices gfx=%s pos=%s" % (gfx, pos))
 
 
 # --------------------------------------------------------------------------- #

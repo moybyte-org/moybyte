@@ -1037,6 +1037,20 @@ def test_native_spr_batch_wired_for_sprites():
     assert "self._gfx.blit_batch(self._buf" in runtime    # native one-call blit
     assert "def spr_batch(items" in runtime               # make_api spr_batch
     assert '"spr_batch": spr_batch,' in runtime           # exposed in the cart namespace
+
+
+def test_native_blit_indices_wired_for_paint_images():
+    # blit_indices (#63 Fold 3) is the native "images are data, not draw calls" bake: one
+    # C call converts a palette-index bitmap -> RGB565, replacing the thousands of rect()
+    # replays the old background-paint anti-pattern used. Landed in the kernel + both
+    # canvases ahead of the paint-image asset flow that will consume it. Grep the C module
+    # + the device canvas wiring (this file does not execute device code).
+    c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    assert "moy_gfx_blit_indices" in c
+    assert "MP_ROM_QSTR(MP_QSTR_blit_indices)" in c       # registered in the module dict
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    assert "def blit_indices(self, indices, iw, ih, x, y)" in runtime   # DeviceCanvas method
+    assert "self._gfx.blit_indices(self._buf" in runtime  # native one-call bake
     # The batch reuses the map() atlas (one bake, keyed on sheet.gen), not per-sprite.
     assert "atlas, ntiles = self._sheet_atlas(sheet, colorkey)" in runtime
     # Battle City adopts it: the moving sprites go out in one batch (#43).

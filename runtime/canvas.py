@@ -468,6 +468,43 @@ class Canvas:
             s0 = (cam_y + row) * src_w + cam_x
             dst[d0:d0 + dw] = src[s0:s0 + dw]
 
+    def blit_indices(self, indices, iw, ih, x, y):
+        """Place an iw x ih palette-INDEX bitmap (1 byte/pixel) at (x, y) -- the host parity
+        of the device moy_gfx.blit_indices kernel. The host is index-space, so this copies
+        indices straight into the buffer (the device converts each index -> RGB565 via its
+        PAL565 table); an index past the palette is skipped. The "images are data, not draw
+        calls" bake (#63 Fold 3): a paint-app image is data + one placement, not thousands of
+        rect() calls. Opaque; clamped to the canvas."""
+        self.flush_batch()             # #63: a non-spr primitive breaks the batch
+        iw = int(iw)
+        ih = int(ih)
+        x = int(x)
+        y = int(y)
+        if iw <= 0 or ih <= 0:
+            return
+        buf = self.buf
+        w = self.w
+        h = self.h
+        pn = len(self.palette)
+        n = len(indices)
+        for row in range(ih):
+            ty = y + row
+            if ty < 0 or ty >= h:
+                continue
+            srow = row * iw
+            drow = ty * w
+            for col in range(iw):
+                tx = x + col
+                if tx < 0 or tx >= w:
+                    continue
+                si = srow + col
+                if si >= n:
+                    continue
+                v = indices[si]
+                if v >= pn:                # index past palette -> skip (match the kernel)
+                    continue
+                buf[drow + tx] = v
+
     def blit_strip(self, layer, dst_x=0, dst_y=0):
         """Copy ALL of `layer` (its full layer.w x layer.h) into this canvas with its
         top-left at (dst_x, dst_y), opaquely (no transparency / colorkey). The positioned,

@@ -465,6 +465,49 @@ static mp_obj_t moy_gfx_blit_window(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit_window_obj, 7, 7, moy_gfx_blit_window);
 
+// blit_indices(dst, dw, dh, dx, dy, indices, iw, ih, pal565) -- place an iw x ih palette-
+// INDEX bitmap (1 byte/pixel, like blit_map's cells) at (dx, dy) into the RGB565 `dst` (dw
+// px/row), converting each index through `pal565` (an index->RGB565 table, 1 uint16/entry).
+// The "images are data, not draw calls" bake (#63 Fold 3): one C call turns a paint-app
+// index bitmap into pixels, replacing the thousands of rect() replays the old background-
+// paint anti-pattern used. Opaque (a painted background fills every pixel -- no colorkey);
+// an index past the palette is skipped (leaves dst). Bounds-clamped to dst.
+static mp_obj_t moy_gfx_blit_indices(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t dcap, pcap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &dcap);
+    mp_int_t dw = mp_obj_get_int(a[1]);
+    mp_int_t dh = mp_obj_get_int(a[2]);
+    mp_int_t dx = mp_obj_get_int(a[3]);
+    mp_int_t dy = mp_obj_get_int(a[4]);
+    mp_buffer_info_t ibi;
+    mp_get_buffer_raise(a[5], &ibi, MP_BUFFER_READ);
+    const uint8_t *idx = (const uint8_t *)ibi.buf;   // index bytes (1 byte/pixel)
+    size_t icap = ibi.len;
+    mp_int_t iw = mp_obj_get_int(a[6]);
+    mp_int_t ih = mp_obj_get_int(a[7]);
+    const uint16_t *pal = moy_gfx_buf_r(a[8], &pcap); // index -> RGB565
+    if (dw <= 0 || dh <= 0 || iw <= 0 || ih <= 0 || pcap == 0) return mp_const_none;
+    if ((size_t)dw * (size_t)dh > dcap) dh = (mp_int_t)(dcap / (size_t)dw);
+    for (mp_int_t row = 0; row < ih; row++) {
+        mp_int_t ty = dy + row;
+        if (ty < 0 || ty >= dh) continue;
+        size_t srow = (size_t)row * (size_t)iw;
+        mp_int_t drow = ty * dw;
+        for (mp_int_t col = 0; col < iw; col++) {
+            mp_int_t tx = dx + col;
+            if (tx < 0 || tx >= dw) continue;
+            size_t si = srow + (size_t)col;
+            if (si >= icap) continue;
+            size_t p = (size_t)idx[si];
+            if (p >= pcap) continue;                 // index past palette -> skip
+            dst[(size_t)drow + (size_t)tx] = pal[p];
+        }
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit_indices_obj, 9, 9, moy_gfx_blit_indices);
+
 // pack_strip(fb, fb_w, x, y, w, rows, dst) -- copy a (w x rows) window of the
 // framebuffer into dst contiguously (row-major). Full-width is one memcpy;
 // cropped rects are packed row-by-row in C (the slow Stage 2 Python path).
@@ -506,6 +549,7 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_circb),      MP_ROM_PTR(&moy_gfx_circb_obj) },
     { MP_ROM_QSTR(MP_QSTR_line),       MP_ROM_PTR(&moy_gfx_line_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_window), MP_ROM_PTR(&moy_gfx_blit_window_obj) },
+    { MP_ROM_QSTR(MP_QSTR_blit_indices), MP_ROM_PTR(&moy_gfx_blit_indices_obj) },
     { MP_ROM_QSTR(MP_QSTR_pack_strip), MP_ROM_PTR(&moy_gfx_pack_strip_obj) },
 };
 static MP_DEFINE_CONST_DICT(moy_gfx_globals, moy_gfx_globals_table);
