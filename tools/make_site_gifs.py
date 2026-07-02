@@ -224,22 +224,16 @@ def scene_paint(fps):
     r.click(*_c(C._PAINT_BTN))                    # DRAW
     r.settle(16)
     pe = r.ws.paint
-    pe.color = 0                                  # black dots read as cheeky eyes
+    pe.color = 8                                  # red
     cell = C._PG_SPAN // pe.dim
 
     def cellxy(gx, gy):
         return (C._PG_X0 + (gx + 0.5) * cell, C._PG_Y0 + (gy + 0.5) * cell)
 
-    d = pe.dim
-    r.click(*cellxy(round(d * 0.30), round(d * 0.40)), steps=16)   # left dot
-    r.settle(8)
-    r.click(*cellxy(round(d * 0.66), round(d * 0.40)), steps=12)   # right dot
-    r.settle(12)
     # continue the existing red mouth (row 5, cols 2-5) into a curved smile
-    pe.color = 8                                  # red
     smile = [(1, 5), (2, 6), (3, 6), (4, 6), (5, 6), (6, 5)]
     r.stroke([cellxy(gx, gy) for gx, gy in smile])
-    r.settle(16)
+    r.settle(18)
     r.click(*_c(C._CLOSE_BTN))                    # back to the game
     r.settle(30)
     return r.frames
