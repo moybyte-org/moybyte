@@ -461,6 +461,94 @@ def test_layer_reships_deflayer_on_redraw():
 
 
 # ---------------------------------------------------------------------------
+# Paint-image assets (#63 Fold 3): a paint image baked into a layer ships COMPACTLY.
+# ---------------------------------------------------------------------------
+
+
+def test_paint_image_layer_ships_one_compact_img_not_a_fat_spr():
+    """A paint image (a big MOY64 index bitmap) baked into a layer with spr(bg, 0, 0)
+    -- sakura's background pattern -- must record as ONE compact ["img", ...] (base64
+    indices) inside the layer's deflayer, NOT a self-contained spr with a 76,800-int
+    pix array (the ~1MB stream that wouldn't load in the browser). The served deflayer
+    replays pixel-identically to the rasterizer."""
+    from runtime.canvas import Image
+
+    tee = TeeCanvas(WIDTH, HEIGHT)
+    # A full-screen paint image (indices), tagged _paint like image('name') produces.
+    idx = bytearray(WIDTH * HEIGHT)
+    for i in range(len(idx)):
+        idx[i] = (i * 7) % 63
+    bg = Image(WIDTH, HEIGHT, idx, -1)
+    bg._paint = True
+
+    lay = tee.new_layer(WIDTH, HEIGHT)
+    lay.spr(bg, 0, 0)                     # ONE bake into the layer (the #63 path)
+    tee.cls(0)
+    tee.blit_window_from(lay, 0, 0)
+
+    served = _served(tee)
+    deflayers = [c for c in served if c[0] == "deflayer"]
+    assert len(deflayers) == 1, "the paint bg layer ships exactly one deflayer"
+    lcmds = deflayers[0][4]
+    imgs = [c for c in lcmds if c[0] == "img"]
+    assert len(imgs) == 1, "the paint bg is ONE img command, not thousands of draws"
+    # No fat self-contained spr (9-field, pix array) rode along.
+    assert not any(c[0] == "spr" and len(c) > 7 for c in lcmds), "no fat inline spr"
+    img = imgs[0]
+    assert img[3] == WIDTH and img[4] == HEIGHT and isinstance(img[5], str)
+    # The compact wire is ~base64 of the raw indices (~4/3 * w*h), a bounded one-time
+    # blob -- and MUCH smaller than 76,800 JSON ints (~a few hundred KB to ~1MB).
+    assert len(img[5]) < WIDTH * HEIGHT * 2, "img blob must be compact (base64 indices)"
+
+    # Replay the served frame -> pixel-identical to the rasterizer.
+    cv = Canvas(WIDTH, HEIGHT)
+    replay_to_canvas(served, cv, {})
+    assert bytes(cv.buf) == bytes(tee.buf), "paint-image layer replay must match raster"
+
+
+def test_sakura_paint_bg_streams_compact_and_replays_pixel_identical(tmp_path):
+    """End-to-end: the real sakura cart (#63 acceptance) run through the console + web
+    recorder ships its painted background as ONE compact img inside a deflayer that is
+    sent ONCE, and every served frame replays pixel-identically to the rasterizer."""
+    ws, drv, tee = _build_tee(str(tmp_path / "carts"))
+    for i, c in enumerate(ws.launcher.items):
+        if os.path.basename(c["path"]) == "sakura.moy":
+            ws.launcher.sel = i
+            break
+    else:
+        pytest.skip("sakura.moy not in the seeded store")
+    ws.open()
+    assert ws.screen == "desktop" and ws.cart_error is None
+
+    tee._replay_layers = {}
+    deflayer_frames = []
+    for n in range(6):
+        drv.frame(1.0 / 30)
+        raster = bytes(tee.buf)
+        served = _served(tee)
+        # Count img commands (top-level + inside any deflayer this frame).
+        def _imgs(cmds):
+            out = []
+            for c in cmds:
+                if c[0] == "img":
+                    out.append(c)
+                elif c[0] == "deflayer":
+                    out.extend(x for x in c[4] if x[0] == "img")
+            return out
+        if any(c[0] == "deflayer" for c in served):
+            deflayer_frames.append(n)
+            imgs = _imgs(served)
+            assert len(imgs) == 1, "sakura's bg is one img command"
+            assert imgs[0][3] == WIDTH and imgs[0][4] == HEIGHT
+        cv = Canvas(WIDTH, HEIGHT)
+        replay_to_canvas(served, cv, tee._replay_layers)
+        assert bytes(cv.buf) == raster, "sakura frame %d replay differs from raster" % n
+
+    # The painted bg layer ships its deflayer ONCE (frame 0), not every frame.
+    assert deflayer_frames == [0], "the paint bg must ship once, got %r" % deflayer_frames
+
+
+# ---------------------------------------------------------------------------
 # The server (localhost only, ephemeral port).
 # ---------------------------------------------------------------------------
 
