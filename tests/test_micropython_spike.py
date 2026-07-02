@@ -1100,6 +1100,27 @@ def test_paint_image_assets_wired_device_and_carts():
     assert (Path("system_carts") / "sakura.moy" / "images" / "bg.moyimg").is_file()
 
 
+def test_scroll_layer_buffer_is_off_gc_heap():
+    # #63 (GC wall): a scroll/paint layer's 150KB RGB565 buffer is the biggest object a
+    # cart keeps live, and collect cost scales with the live set (~0.16ms/KB on device).
+    # _LayerComp must allocate it OFF the gc heap via moy_alloc (PSRAM, same allocator the
+    # compositor framebuffers use) so gc.collect() never marks it -- keeping collect cheap
+    # and the heap unfragmented (kid code untouched: fast by default). It must fall back to
+    # a gc-heap bytearray on the host / if the allocator is absent, so it never regresses.
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    # Grab the _LayerComp.__init__ body.
+    start = runtime.index("class _LayerComp")
+    end = runtime.index("class _Layer:", start)
+    layercomp = runtime[start:end]
+    assert "import moy_alloc" in layercomp
+    # SPIRAM|DMA: off-heap in PSRAM (the GC win) AND DMA-eligible so it stays open to the
+    # #54 Stage-2 GDMA async window-copy (free on S3 -- all PSRAM is DMA-reachable).
+    assert "moy_alloc.malloc_dma(nbytes, lcd_bus.MEMORY_SPIRAM | lcd_bus.MEMORY_DMA)" in layercomp
+    assert "buf = bytearray(nbytes)" in layercomp   # host / no-allocator fallback
+    # The old unconditional gc-heap alloc must be gone.
+    assert "self._buf = bytearray(w * h * 2)" not in layercomp
+
+
 def _load_moy_runtime():
     # moy_runtime does `from editors import ...` and `from console import ...`; the
     # device freezes build-staged copies of runtime/{editors,audio,console}.py as
