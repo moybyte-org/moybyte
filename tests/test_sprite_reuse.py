@@ -26,6 +26,23 @@ def _tile_pixels(sheet, n):
 
 # -- import-tile primitive --------------------------------------------------
 
+def test_tile_image_is_memoised_until_an_edit():
+    """tile_image() returns the SAME object for a tile across calls (stable id() -> the web
+    recorder's atlas dedups it, shipping the defspr ONCE instead of every frame -- the launcher/
+    settings `unknown`-churn + payload fix). A pset bumps `gen`, which drops the cache so the
+    next call reflects the edit."""
+    sheet = _paint_glyph(SpriteSheet(cols=16, rows=16), 3)
+    a = sheet.tile_image(3)
+    assert sheet.tile_image(3) is a                 # memoised: same object across frames
+    assert sheet.tile_image(3, transparent=0) is not a   # a different colorkey is its own entry
+    assert sheet.tile_image(3, transparent=0) is sheet.tile_image(3, transparent=0)
+    before = a.pix
+    sheet.pset(24, 0, 9)                             # edit tile 3 (col 24 = tile 3's origin)
+    b = sheet.tile_image(3)
+    assert b is not a                                # gen bumped -> cache dropped -> rebuilt
+    assert b.pix != before                           # ...and the rebuild sees the new pixel
+
+
 def test_copy_tile_imports_one_sprite_between_sheets():
     src = _paint_glyph(SpriteSheet(cols=8, rows=8), 5)   # 64x64, 64 sprites
     dst = SpriteSheet(cols=16, rows=16)                  # different size sheet
