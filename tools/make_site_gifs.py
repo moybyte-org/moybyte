@@ -234,6 +234,11 @@ def scene_paint(fps):
     r.click(*cellxy(round(d * 0.30), round(d * 0.40)), steps=16)   # left dot
     r.settle(8)
     r.click(*cellxy(round(d * 0.66), round(d * 0.40)), steps=12)   # right dot
+    r.settle(12)
+    # continue the existing red mouth (row 5, cols 2-5) into a curved smile
+    pe.color = 8                                  # red
+    smile = [(1, 5), (2, 6), (3, 6), (4, 6), (5, 6), (6, 5)]
+    r.stroke([cellxy(gx, gy) for gx, gy in smile])
     r.settle(16)
     r.click(*_c(C._CLOSE_BTN))                    # back to the game
     r.settle(30)
