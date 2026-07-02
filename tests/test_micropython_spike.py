@@ -1246,6 +1246,7 @@ def test_device_spr_is_sheet_indexed_and_accepts_image():
     sheet = m.SpriteSheet(4, 4)
     sheet.tset(3, 0, 0, 11)
     calls = []
+    tiles = []
 
     class StubCanvas:
         w = 320
@@ -1253,6 +1254,9 @@ def test_device_spr_is_sheet_indexed_and_accepts_image():
 
         def spr(self, img, x, y, scale=1, flip=0):
             calls.append((img.w, img.h, x, y, scale, flip))
+
+        def spr_tile(self, sheet, tile, x, y, colorkey=-1, scale=1, flip=0):
+            tiles.append((tile, x, y, colorkey, scale, flip))
 
         def __getattr__(self, name):
             return lambda *a, **k: 0
@@ -1265,17 +1269,17 @@ def test_device_spr_is_sheet_indexed_and_accepts_image():
             return False
 
     api = m.make_api(StubCanvas(), StubInput(), {}, sheet)
-    api["spr"](3, 100, 60)                  # TIC-80 indexed sprite from the sheet
-    assert calls[-1] == (8, 8, 100, 60, 1, 0)
-    api["spr"](m.Image.from_ascii(["#"], {"#": 7}), 8, 9, scale=4)  # Image still works
+    api["spr"](3, 100, 60)                  # 1x1 sheet tile -> auto-batch via spr_tile (#63)
+    assert tiles[-1] == (3, 100, 60, -1, 1, 0)
+    api["spr"](m.Image.from_ascii(["#"], {"#": 7}), 8, 9, scale=4)  # Image -> immediate spr
     assert calls[-1] == (1, 1, 8, 9, 4, 0)
     # Multi-tile span (#30): spr(n, x, y, w=2, h=2) blits a 16x16 image from the
-    # sheet (the device path, so host == device for larger sprites).
+    # sheet immediately (the device path, so host == device for larger sprites).
     api["spr"](0, 12, 14, w=2, h=2)
     assert calls[-1] == (16, 16, 12, 14, 1, 0)
-    # Flip (#11): spr(n, x, y, scale=1, flip=3) forwards flip to canvas.spr.
+    # Flip (#11): spr(n, x, y, scale=1, flip=3) on a 1x1 tile forwards flip to spr_tile.
     api["spr"](3, 5, 6, -1, 1, 3)
-    assert calls[-1] == (8, 8, 5, 6, 1, 3)
+    assert tiles[-1] == (3, 5, 6, -1, 1, 3)
 
 
 def test_device_paint_editor_sizes_and_spans(tmp_path=None):
@@ -1357,7 +1361,9 @@ def test_device_tile_cache_invalidated_on_sprite_edit():
     # The device tile cache (and each Image's RGB565 blit cache) snapshots a tile's
     # pixels. After a kid edits a sprite, the running cart must re-blit fresh art,
     # not the stale cached Image. make_api watches the sheet's gen counter and
-    # clears the cache when it changes.
+    # clears the cache when it changes. Checked here on the MULTI-TILE span path (which
+    # still resolves through make_api's tile_cache); plain 1x1 sprites auto-batch (#63)
+    # through the sheet atlas, which is itself keyed on sheet.gen (see the atlas tests).
     m = _load_moy_runtime()
     sheet = m.SpriteSheet(4, 4)
     sheet.tset(0, 0, 0, 3)
@@ -1381,16 +1387,16 @@ def test_device_tile_cache_invalidated_on_sprite_edit():
             return False
 
     api = m.make_api(StubCanvas(), StubInput(), {}, sheet)
-    api["spr"](0, 0, 0)
+    api["spr"](0, 0, 0, w=2, h=2)
     first = blitted[-1]
-    # Same sheet, same id, no edit -> the cached Image is reused (object identity).
-    api["spr"](0, 0, 0)
+    # Same sheet, same id, no edit -> the cached span Image is reused (object identity).
+    api["spr"](0, 0, 0, w=2, h=2)
     assert blitted[-1] is first
 
     # A paint edit bumps sheet.gen -> the cache is invalidated and a fresh Image
     # (rebuilt from the new pixels) is blitted next frame.
     sheet.pset(0, 0, 5)
-    api["spr"](0, 0, 0)
+    api["spr"](0, 0, 0, w=2, h=2)
     assert blitted[-1] is not first
 
 

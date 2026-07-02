@@ -503,6 +503,14 @@ class RecordingLayer:
         # canvas. Never reached for the bound draw verbs (instance attrs).
         return getattr(self._c, name)
 
+    def spr_tile(self, sheet, tile, x, y, colorkey=-1, scale=1, flip=0):
+        # A layer is pre-rendered once, so there's no per-frame batching to win here:
+        # resolve the tile to an Image and record it through the layer's own (bound,
+        # recording) spr -- keeps the layer draw IMMEDIATE and its stream per-spr (#63).
+        img = sheet.tile_image(int(tile), colorkey)
+        if img is not None:
+            self.spr(img, x, y, scale, flip)
+
     def _begin_batch(self):
         if not self._in_batch:
             self._in_batch = True
@@ -654,6 +662,18 @@ class TeeCanvas:
         if self._r.enabled:
             self._r.spr(img, x, y, scale, flip)
 
+    def spr_tile(self, sheet, tile, x, y, colorkey=-1, scale=1, flip=0):
+        # Fold-1 auto-batch (#63): the real DeviceCanvas queues it (coalesced into one
+        # native blit_batch); the browser stream stays PER-SPR, so resolve the tile via
+        # the recorder's STABLE tile-image cache and record one self-contained spr --
+        # exactly like spr_batch's per-item path (wire format unchanged).
+        if not self._r.record_only:
+            self._c.spr_tile(sheet, tile, x, y, colorkey, scale, flip)
+        if self._r.enabled:
+            img = self._r.batch_tile_image(sheet, int(tile), colorkey)
+            if img is not None:
+                self._r.spr(img, x, y, scale, flip)
+
     def spr_batch(self, sheet, items, colorkey=-1, scale=1):
         if not self._r.record_only:
             self._c.spr_batch(sheet, items, colorkey, scale)
@@ -784,6 +804,14 @@ class CommandCanvas:
 
     def spr(self, img, x, y, scale=1, flip=0):
         self._rec.spr(img, x, y, scale, flip)     # self_contained -> pixels inline
+
+    def spr_tile(self, sheet, tile, x, y, colorkey=-1, scale=1, flip=0):
+        # Fold-1 auto-batch queue entry (#63): a recording canvas doesn't batch --
+        # resolve the tile and emit one self-contained spr, so the browser stream stays
+        # per-spr (wire format unchanged), mirroring spr_batch's per-item path.
+        img = sheet.tile_image(int(tile), colorkey)
+        if img is not None:
+            self._rec.spr(img, x, y, scale, flip)
 
     def spr_batch(self, sheet, items, colorkey=-1, scale=1):
         # Mirror Canvas.spr_batch: one self-contained spr per item, resolving each tile through
@@ -1412,15 +1440,20 @@ var W=320,H=240,PAL=null,FONT=null,ready=false,assCart=undefined,idx=null,img=nu
 var SHEET=null,TM=null,ATL=[],curGen=-1;
 var HUD={on:false,fps:0,kb:0,unknown:0,el:document.getElementById("hud"),last:0};
 // Periodic perf LOG (#41): recv + render fps, bandwidth, avg/peak payload, AND the device's
-// push-rate + free heap (from f.perf), one console.log line every PERF_MS.
-var PERF_MS=2000,PERF={f:0,b:0,pk:0,t:0,dh:0,pf:0,lpf:0,js:0,tx:0};
+// push-rate + free heap (from f.perf), one console.log line every PERF_MS. The recv/dev/bw
+// figures are 2s MEANS -- which hide a stutter (a lone slow frame averages away), so we also
+// fold the device's per-frame instants (gap/draw/js/tx) into a window MAX + count throttled
+// frames: mg=worst inter-frame gap ms (THE stutter number), md=worst device draw+commit ms,
+// mj/mt=worst json-encode/socket-send ms, thr=# of bandwidth-throttled pushes this window.
+var PERF_MS=2000,PERF={f:0,b:0,pk:0,t:0,dh:0,pf:0,lpf:0,js:0,tx:0,mg:0,md:0,mj:0,mt:0,thr:0};
 function plog(){var now=(window.performance&&performance.now)?performance.now():Date.now();
 if(!PERF.t){PERF.t=now;PERF.lpf=PERF.pf;return;}var dt=(now-PERF.t)/1000;if(dt<=0)return;
 console.log("[moybyte] "+(assCart||"?")+" | recv "+(PERF.f/dt).toFixed(1)+" render "+HUD.fps.toFixed(1)
-+" dev "+((PERF.pf-PERF.lpf)/dt).toFixed(1)+" fps (js "+PERF.js+" tx "+PERF.tx+"ms) | bw "
-+(PERF.b/dt/1024).toFixed(1)+" KB/s avg "+(PERF.f?(PERF.b/PERF.f/1024):0).toFixed(2)+" peak "
-+(PERF.pk/1024).toFixed(2)+" KB | heap "+PERF.dh+" KB | unknown "+HUD.unknown);
-PERF.f=0;PERF.b=0;PERF.pk=0;PERF.t=now;PERF.lpf=PERF.pf;}
++" dev "+((PERF.pf-PERF.lpf)/dt).toFixed(1)+" fps | worst gap "+PERF.mg+" draw "+PERF.md+" js "+PERF.mj
++" tx "+PERF.mt+" ms | thr "+PERF.thr+" | bw "+(PERF.b/dt/1024).toFixed(1)+" KB/s avg "
++(PERF.f?(PERF.b/PERF.f/1024):0).toFixed(2)+" peak "+(PERF.pk/1024).toFixed(2)
++" KB | heap "+PERF.dh+" KB | unknown "+HUD.unknown);
+PERF.f=0;PERF.b=0;PERF.pk=0;PERF.t=now;PERF.lpf=PERF.pf;PERF.mg=0;PERF.md=0;PERF.mj=0;PERF.mt=0;PERF.thr=0;}
 // Audio (host web console): play the server's FINISHED PCM (no JS synth). The device streams
 // no audio (f.audio ""), so this is a no-op there.
 var AUDIO_RATE=11025,actx=null,audioNext=0;
@@ -1555,7 +1588,11 @@ function pv(){return[(pH.ArrowRight?1:0)-(pH.ArrowLeft?1:0),(pH.ArrowDown?1:0)-(
 // df(): render ONE frame payload. Atlas reset is driven by the device's `gen` (lock-step with
 // its served reset), NOT the cart change -- so scrolling the launcher (cart_title -> /assets
 // refetch) no longer wipes ATL and strands sprites (the unknown-growth bug, #41).
-function df(f){if(f.perf){PERF.dh=f.perf.heap;PERF.pf=f.perf.pf;PERF.js=f.perf.js;PERF.tx=f.perf.tx;}
+function df(f){if(f.perf){var p=f.perf;PERF.dh=p.heap;PERF.pf=p.pf;PERF.js=p.js;PERF.tx=p.tx;
+// Fold this frame's device instants into the window MAX (undefined on a host that omits them
+// stays 0 -- `undefined>0` is false). thr counts bandwidth-throttled pushes.
+if(p.js>PERF.mj)PERF.mj=p.js;if(p.tx>PERF.mt)PERF.mt=p.tx;
+if(p.dr>PERF.md)PERF.md=p.dr;if(p.gap>PERF.mg)PERF.mg=p.gap;if(p.thr)PERF.thr++;}
 if(f.gen!==curGen){curGen=f.gen;ATL=[];LAY={};HUD.unknown=0;}
 if(f.cart!==assCart){assCart=f.cart;getA().catch(function(){});}rep(f.cmds||[]);blit();
 if(f.audio)playPCM(f.audio);

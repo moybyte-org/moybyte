@@ -100,6 +100,15 @@ class TeeCanvas:
     def spr(self, img, x, y, scale=1, flip=0):
         self.raster.spr(img, x, y, scale, flip); self.rec.spr(img, x, y, scale, flip)
 
+    def spr_tile(self, sheet, tile, x, y, colorkey=-1, scale=1, flip=0):
+        # Fold-1 auto-batch (#63): the raster canvas queues + coalesces; the recorder
+        # emits one per-spr command. Both are flushed/complete by frame end.
+        self.raster.spr_tile(sheet, tile, x, y, colorkey, scale, flip)
+        self.rec.spr_tile(sheet, tile, x, y, colorkey, scale, flip)
+
+    def flush_batch(self):
+        self.raster.flush_batch()
+
     def spr_batch(self, sheet, items, colorkey=-1, scale=1):
         self.raster.spr_batch(sheet, items, colorkey, scale)
         self.rec.spr_batch(sheet, items, colorkey, scale)

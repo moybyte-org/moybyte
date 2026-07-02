@@ -5444,10 +5444,22 @@ class Workstation:
     def _reset_canvas_state(self):
         # Reset the canvas's TIC-80 draw state (camera/clip/pal/palt, #11) if the
         # backend supports it. Guarded so a backend without draw state (a test stub,
-        # or a recording canvas) is a no-op.
+        # or a recording canvas) is a no-op. reset_state() also flushes any pending
+        # auto-batch (#63), so cart sprites land before the console overlays draw.
         rs = getattr(self.canvas, "reset_state", None)
         if rs is not None:
             rs()
+
+    def _flush_batches(self):
+        # Draw any sprites still pending in a canvas's auto-batch (Fold 1, #63) before
+        # the frame is composited / flushed to the panel, so nothing queued by the last
+        # spr() in a cart's _draw() (or the chrome) is left unpainted. Guarded + covers
+        # both the game and system canvas (the same object in the 320x240 device case,
+        # so the second flush is a no-op).
+        for cv in (self.canvas, self.sys_canvas):
+            fb = getattr(cv, "flush_batch", None)
+            if fb is not None:
+                fb()
 
     # -- two-domain composite + viewport coords (#39) ------------------------
 
@@ -5482,6 +5494,12 @@ class Workstation:
         into the system buffer, so no palette resolve is needed."""
         gc = self.canvas
         sc = self.sys_canvas
+        # #63: complete any sprites still queued in the game canvas's auto-batch before
+        # its buffer is read (usually already flushed by _reset_canvas_state; belt-and-
+        # suspenders so a missed reset can never drop a cart's last sprite run).
+        _fb = getattr(gc, "flush_batch", None)
+        if _fb is not None:
+            _fb()
         if sc is gc:
             return
         ox, oy, scale = self._viewport()
@@ -5778,6 +5796,11 @@ class Workstation:
         if self._about:
             self._draw_about()
         self._draw_cursor()
+        # #63: nothing should be left in an auto-batch by the time we present. The cart
+        # sprites were flushed at _reset_canvas_state; the console's own chrome draws
+        # Images immediately (never queued). This final flush is the last-line guard so
+        # a queued run can never survive to the next frame's cls().
+        self._flush_batches()
         # Perf HUD (#43/#44): time the panel DMA flush in isolation, then back out
         # the draw span (everything before it this frame). On the host _NullComp the
         # flush is a near-zero no-op (no real panel), so flush reads ~0 and draw ~=

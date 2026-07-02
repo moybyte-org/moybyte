@@ -118,6 +118,13 @@ DEFAULT_PORT = 8080
 # AND not timed out".
 RECORD_IDLE_MS = 4000
 
+# Free-heap sample interval (#41 perf). gc.mem_free() WALKS the whole 6MB PSRAM heap (~tens of
+# ms), and it runs in the single-threaded render loop -- so sampling it every frame (or even 1/s)
+# is itself a periodic ~60ms STALL that shows up as a stutter (and, when timed inside the json
+# encode, masqueraded as a huge `js`). The heap is a slow-moving leak-watch diagnostic, so 5s
+# resolution is plenty and the stall drops 5x. Kept OUT of the js timing (see _push_frame).
+HEAP_SAMPLE_MS = 5000
+
 # Per-connection socket timeouts (seconds). A freshly accepted conn is read BLOCKING with a
 # short bound (the request is already en route). A non-blocking sendall can't push a multi-KB
 # body over the device's ~72KB/s WiFi, so the SEND uses a longer blocking budget. The
@@ -359,6 +366,16 @@ class WebServer:
         self._frames_pushed = 0       # frames sent down the WS since boot (#41 perf log)
         self._last_json_ms = 0        # ms spent json-encoding the last pushed frame ...
         self._last_send_ms = 0        # ... and ms in the socket send (#41 perf log)
+        # Worst-case stutter diag (#41): these are per-frame INSTANTANEOUS samples; the browser
+        # accumulates each into a 2s-window MAX, so a lone slow frame (a hitch) isn't averaged
+        # away the way recv/dev/bw are. A stutter is a tail event, so the max is what matters.
+        self._frame_begin_ms = 0      # ticks at begin_frame -> the draw+commit span below
+        self._last_draw_ms = 0        # device draw+commit ms of the last frame (begin->commit):
+                                      # cart logic + rasterize, separate from the js/tx push cost
+        self._last_gap_ms = 0         # ms since the previous push -- the REAL inter-frame period
+                                      # (max over a window = the worst frame, i.e. the stutter)
+        self._last_throttled = 0      # 1 if the bandwidth cap raised THIS push's interval above
+                                      # the fps floor (resolves throttle-limited vs device-limited)
         self._heap_kb = 0             # cached gc.mem_free KB + when it was last sampled:
         self._heap_ms = 0             # gc.mem_free WALKS the whole heap (~tens of ms), sample ~1/s
         self._last_payload_bytes = 0  # size of the last pushed frame -> floors the next push
@@ -450,6 +467,7 @@ class WebServer:
         STREAM MODE (#41): `record_only` (go headless) is DECOUPLED from the record cap. While a
         browser is live it's True EVERY frame -- so the loop's stream-mode edge fires ONCE and
         the panel stays frozen. The cap only throttles RECORDING (enabled)."""
+        self._frame_begin_ms = ticks_ms()   # start the draw+commit span (perf log, #41)
         if self.sock is None or not self.recording_wanted():
             self.recorder.enabled = False
             self.recorder.record_only = False
@@ -468,6 +486,10 @@ class WebServer:
         """Publish the frame's recorded commands (if we recorded this frame)."""
         if self.recorder.enabled:
             self.recorder.commit()
+        # Device draw+commit ms = the begin_frame->here span (cart logic + rasterize, sans the
+        # push). Reported every frame; the browser keeps the window max (perf log, #41).
+        if self._frame_begin_ms:
+            self._last_draw_ms = ticks_diff(ticks_ms(), self._frame_begin_ms)
 
     def poll(self):
         """Run once per loop iteration, BETWEEN frames. Two non-blocking jobs, never blocking
@@ -581,7 +603,13 @@ class WebServer:
         # 2. Outbound: push the latest committed frame, capped. The interval is the fps cap,
         # RAISED for a heavy frame so WiFi never saturates (#41).
         now = ticks_ms()
-        if ticks_diff(now, self._last_push_ms) >= self._push_interval_ms():
+        interval = self._push_interval_ms()
+        if ticks_diff(now, self._last_push_ms) >= interval:
+            # perf (#41): the ACTUAL inter-push gap (window-max = the worst frame = the stutter),
+            # and whether the bandwidth cap raised this interval above the fps floor (throttle-
+            # limited vs device-limited -- the launcher's low fps could be either).
+            self._last_gap_ms = ticks_diff(now, self._last_push_ms) if self._last_push_ms else 0
+            self._last_throttled = 1 if interval > WEB_FRAME_INTERVAL_MS else 0
             self._last_push_ms = now
             self._push_frame(ws)
             did = True
@@ -605,19 +633,24 @@ class WebServer:
         """A tiny device-side stats dict for the per-frame payload (#41 perf log): free heap
         (KB) + the running pushed-frame count + last encode/send ms. gc.mem_free is
         MicroPython-only, so it's guarded -- on the host (CPython tests) heap is 0."""
-        # gc.mem_free() WALKS the entire heap (~tens of ms on the 6MB PSRAM heap), so it must
-        # NOT run every frame. Sample it at most ~1/s and cache; it's just a diagnostic.
+        # gc.mem_free() WALKS the entire heap (~tens of ms on the 6MB PSRAM heap), so it must NOT
+        # run every frame. Sample it at most once per HEAP_SAMPLE_MS and cache; it's just a
+        # diagnostic. The CALLER (_push_frame) also keeps this out of the js-encode timing.
         now = ticks_ms()
-        if self._heap_ms == 0 or ticks_diff(now, self._heap_ms) >= 1000:
+        if self._heap_ms == 0 or ticks_diff(now, self._heap_ms) >= HEAP_SAMPLE_MS:
             self._heap_ms = now
             try:
                 import gc
                 self._heap_kb = gc.mem_free() // 1024
             except Exception:  # noqa: BLE001 -- no gc.mem_free on CPython; perf is best-effort
                 self._heap_kb = 0
-        # js/tx are the PREVIOUS frame's encode/send ms (set at the end of _push_frame).
+        # js/tx are the PREVIOUS frame's encode/send ms (set at the end of _push_frame); dr/gap
+        # are this frame's draw + inter-push period; thr flags a bandwidth-throttled push. All
+        # per-frame instants -- the browser folds them into a 2s-window MAX (the stutter signal).
         return {"heap": self._heap_kb, "pf": self._frames_pushed,
-                "js": self._last_json_ms, "tx": self._last_send_ms}
+                "js": self._last_json_ms, "tx": self._last_send_ms,
+                "dr": self._last_draw_ms, "gap": self._last_gap_ms,
+                "thr": self._last_throttled}
 
     def _push_interval_ms(self):
         """Minimum ms between WS pushes: the fps-cap floor (WEB_FRAME_INTERVAL_MS), RAISED for a
@@ -639,9 +672,12 @@ class WebServer:
         cmds, cart = self.provider.frame()
         cmds = self.served_frame(cmds)
         self._frames_pushed += 1
+        # Snapshot perf BEFORE the timing: _perf_snapshot may do the gc.mem_free heap walk (tens
+        # of ms), which must NOT be attributed to json.dumps (that made `js` read ~60ms on even a
+        # 0.5KB frame -- a phantom). Now `js` is the pure encode cost.
+        perf = self._perf_snapshot()
         t0 = ticks_ms()
-        payload = json.dumps(frame_payload(cmds, cart, self.recorder.atlas_gen,
-                                           self._perf_snapshot()))
+        payload = json.dumps(frame_payload(cmds, cart, self.recorder.atlas_gen, perf))
         t1 = ticks_ms()
         ws.send(payload)
         t2 = ticks_ms()

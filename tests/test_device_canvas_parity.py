@@ -198,6 +198,62 @@ class _FakeGfx:
                                 d[drow + tx] = p
 
     @staticmethod
+    def blit_batch(dst, dw, dh, items, atlas, ntiles, tile, scale, key,
+                   cam_x, cam_y, cx0, cy0, cx1, cy1):
+        # #43/#63: draw a list of (tile, x, y[, flip]) sheet tiles from an RGB565 atlas
+        # in one call -- a faithful transcription of moy_gfx_blit_batch in modmoy_gfx.c,
+        # so the auto-batch path is cross-checked against the host rasterizer.
+        d = memoryview(dst).cast("H")
+        a = memoryview(atlas).cast("H")
+        acap = len(a)
+        if dw <= 0 or dh <= 0 or tile <= 0 or ntiles <= 0:
+            return
+        if scale < 1:
+            scale = 1
+        if cx0 < 0:
+            cx0 = 0
+        if cy0 < 0:
+            cy0 = 0
+        if cx1 > dw:
+            cx1 = dw
+        if cy1 > dh:
+            cy1 = dh
+        tpx = tile * tile
+        if ntiles * tpx > acap:
+            return
+        for it in items:
+            if len(it) < 3:
+                continue
+            tid = int(it[0])
+            if tid < 0 or tid >= ntiles:
+                continue
+            dx0 = int(it[1]) - cam_x
+            dy0 = int(it[2]) - cam_y
+            flip = int(it[3]) if len(it) > 3 else 0
+            fx = flip & 1
+            fy = (flip >> 1) & 1
+            tsrc = tid * tpx
+            for row in range(tile):
+                ssy = (tile - 1 - row) if fy else row
+                srow = tsrc + ssy * tile
+                for sub_y in range(scale):
+                    ty = dy0 + row * scale + sub_y
+                    if ty < cy0 or ty >= cy1:
+                        continue
+                    drow = ty * dw
+                    for col in range(tile):
+                        ssx = (tile - 1 - col) if fx else col
+                        p = a[srow + ssx]
+                        if key >= 0 and p == (key & 0xFFFF):
+                            continue
+                        bx = dx0 + col * scale
+                        for sub_x in range(scale):
+                            tx = bx + sub_x
+                            if tx < cx0 or tx >= cx1:
+                                continue
+                            d[drow + tx] = p
+
+    @staticmethod
     def blit_window(dst, dw, dh, src, src_w, sx, sy):
         # #54 scroll engine: copy a dw x dh window of `src` (a wider pre-rendered
         # background, stride src_w) at (sx, sy) into `dst` (stride dw, contiguous) --
@@ -738,3 +794,139 @@ def test_blit_strip_matches_host():
             host.blit_strip(lh, pos[0], pos[1])
             dev.blit_strip(ld, pos[0], pos[1])
             _assert_same(host, dev, "strip gfx=%s pos=%s" % (gfx, pos))
+
+
+# --------------------------------------------------------------------------- #
+# spr_batch: the native moy_gfx.blit_batch collapses N sheet tiles into one    #
+# call. Prove it matches the host per-item reference (validates the stub).     #
+# --------------------------------------------------------------------------- #
+def _batch_sheets(m):
+    # A small 4x4 sheet with three asymmetric, non-blank tiles (so flip + z-order show).
+    sheet_h = SpriteSheet(4, 4)
+    sheet_d = m.SpriteSheet(4, 4)
+    for sh in (sheet_h, sheet_d):
+        # tile 1: an L of colours in a corner (asymmetric -> flip is visible)
+        sh.tset(1, 0, 0, 8); sh.tset(1, 1, 0, 9); sh.tset(1, 0, 1, 10); sh.tset(1, 7, 7, 12)
+        # tile 2: a centre block
+        sh.tset(2, 3, 3, 11); sh.tset(2, 4, 3, 14); sh.tset(2, 3, 4, 15)
+        # tile 3: a full-corner marker
+        sh.tset(3, 0, 0, 6); sh.tset(3, 7, 0, 13)
+    return sheet_h, sheet_d
+
+
+def test_spr_batch_matches_host_native_blit_batch():
+    # DeviceCanvas.spr_batch -> moy_gfx.blit_batch vs the host per-item spr() loop, with
+    # camera + clip + flip in play, byte-for-byte. This is the cross-backend proof for the
+    # native batch kernel the auto-batcher (#63) flushes through.
+    m, host, dev = _both(True)
+    sheet_h, sheet_d = _batch_sheets(m)
+    items = [(1, 4, 4), (2, 14, 4, 0), (1, 24, 6, 1), (3, 34, 8), (2, 44, 4, 3)]
+    for c, sh in ((host, sheet_h), (dev, sheet_d)):
+        c.cls(0)
+        c.camera(2, 1)
+        c.clip(6, 4, 50, 30)
+        c.spr_batch(sh, items, colorkey=-1, scale=2)
+    _assert_same(host, dev, "spr_batch native")
+
+
+# --------------------------------------------------------------------------- #
+# Fold 1 auto-batch (#63): a naive per-sprite spr_tile() loop must render       #
+# byte-identically to the equivalent immediate spr() calls -- through every     #
+# state-break that flushes the pending batch -- on BOTH backends.               #
+# --------------------------------------------------------------------------- #
+def _stray_image(mk):
+    # A standalone Image (NOT a sheet tile) whose colours differ from the sheet, so an
+    # interleaved Image blit is distinguishable and its flush point is exercised.
+    return mk(["ZZ.", ".Z.", "..Z"], {"Z": 7})
+
+
+def _drive_sprite_scene(c, sheet, img, use_batch):
+    """One scene that touches every flush trigger from docs/fast_by_default_drawing.md
+    2.2. `use_batch` picks the auto-batch path (spr_tile) or the immediate reference
+    (resolve the tile + spr() now). Both MUST paint the same pixels."""
+    def stile(tile, x, y, ck=-1, scale=1, flip=0):
+        if use_batch:
+            c.spr_tile(sheet, tile, x, y, ck, scale, flip)
+        else:
+            ti = sheet.tile_image(tile, ck)
+            if ti is not None:
+                c.spr(ti, x, y, scale, flip)
+
+    c.cls(0)
+    # (a) a run of sprites broken by a non-spr primitive (rect). flip does NOT break it.
+    stile(1, 3, 3)
+    stile(2, 12, 3)
+    stile(1, 21, 3, flip=1)
+    c.rect(1, 13, 40, 3, 5)
+    # (b) a colorkey change mid-run.
+    stile(1, 3, 18, ck=-1)
+    stile(2, 12, 18, ck=8)
+    stile(1, 21, 18, ck=8)
+    # (c) a scale change mid-run.
+    stile(2, 3, 28, ck=8, scale=1)
+    stile(1, 13, 28, ck=8, scale=2)
+    # (d) a camera change mid-run.
+    stile(1, 3, 40)
+    c.camera(3, 2)
+    stile(2, 3, 40)
+    # (e) a clip change mid-run.
+    stile(1, 12, 40)
+    c.clip(0, 0, W, H)
+    stile(2, 12, 40)
+    c.clip()
+    c.camera()
+    # (f) an Image-object sprite interleaved (flush pending, draw immediately).
+    stile(3, 40, 20)
+    c.spr(img, 44, 22, 1)
+    stile(1, 40, 30)
+    # (g) a multi-tile spr(w>1) interleaved (flush pending, draw immediately).
+    stile(2, 2, 2)
+    span = sheet.tile_span_image(1, 2, 1, -1)
+    if span is not None:
+        c.spr(span, 46, 2, 1)
+    stile(3, 2, 9)
+    # (h) a trailing run with NO following primitive: the end-of-frame flush must emit it.
+    stile(1, 52, 40)
+    stile(2, 58, 40)
+    if use_batch:
+        c.flush_batch()
+
+
+def test_auto_batch_matches_immediate_on_host():
+    # Batching invariance: the auto-batched scene == the same scene drawn immediately,
+    # pixel-for-pixel, on the host reference rasterizer.
+    m, _, _ = _both(True)
+    sheet_h, _ = _batch_sheets(m)
+    a = Canvas(W, H)
+    b = Canvas(W, H)
+    _drive_sprite_scene(a, sheet_h, _stray_image(Image.from_ascii), use_batch=False)
+    _drive_sprite_scene(b, sheet_h, _stray_image(Image.from_ascii), use_batch=True)
+    assert a.buf == b.buf, (
+        "auto-batch differs from immediate on host in %d px"
+        % sum(1 for x, y in zip(a.buf, b.buf) if x != y))
+    assert len(set(b.buf)) > 1                # sanity: it actually drew something
+
+
+def test_auto_batch_host_equals_device():
+    # Cross-backend parity of the auto-batched scene: the host indexed rasterizer and the
+    # device native path (spr_tile -> blit_batch / blit565) agree byte-for-byte.
+    m, host, dev = _both(True)
+    sheet_h, sheet_d = _batch_sheets(m)
+    _drive_sprite_scene(host, sheet_h, _stray_image(Image.from_ascii), use_batch=True)
+    _drive_sprite_scene(dev, sheet_d, _stray_image(m.Image.from_ascii), use_batch=True)
+    _assert_same(host, dev, "auto-batch host==device")
+
+
+def test_auto_batch_device_equals_immediate_device():
+    # And on the DEVICE itself: the auto-batch path == drawing each sprite immediately,
+    # so the native blit_batch / single-item blit565 fallback introduce no drift.
+    m, _, _ = _both(True)
+    _, sheet_d = _batch_sheets(m)
+    imm = m.DeviceCanvas(_FakeComp(W, H))
+    bat = m.DeviceCanvas(_FakeComp(W, H))
+    _drive_sprite_scene(imm, sheet_d, _stray_image(m.Image.from_ascii), use_batch=False)
+    _drive_sprite_scene(bat, sheet_d, _stray_image(m.Image.from_ascii), use_batch=True)
+    a = _dev_rgb565(imm)
+    b = _dev_rgb565(bat)
+    assert a == b, ("device auto-batch differs from immediate in %d px"
+                    % sum(1 for x, y in zip(a, b) if x != y))

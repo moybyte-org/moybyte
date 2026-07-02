@@ -112,6 +112,12 @@ def test_spr_with_wh_span_blits_a_16x16_image():
         def spr(self, img, x, y, scale=1, flip=0):
             calls.append((img.w, img.h, x, y, scale))
 
+        def spr_tile(self, sheet, tile, x, y, colorkey=-1, scale=1, flip=0):
+            # 1x1 sheet tiles now auto-batch (#63): resolve the tile like the flush would
+            # and record it as an 8x8, so the span assertion still exercises canvas.spr.
+            img = sheet.tile_image(int(tile), colorkey)
+            calls.append((img.w, img.h, x, y, scale))
+
         def __getattr__(self, name):
             return lambda *a, **k: 0
 
@@ -126,9 +132,9 @@ def test_spr_with_wh_span_blits_a_16x16_image():
 
     sheet = SpriteSheet(cols=16, rows=16)
     api = host_app.make_api(StubCanvas(), StubInput(), {}, sheet)
-    api["spr"](0, 10, 20)                          # default 8x8
+    api["spr"](0, 10, 20)                          # default 8x8 -> auto-batch (spr_tile)
     assert calls[-1] == (8, 8, 10, 20, 1)
-    api["spr"](0, 10, 20, w=2, h=2)                # 2x2 span -> 16x16
+    api["spr"](0, 10, 20, w=2, h=2)                # 2x2 span -> 16x16 immediate spr
     assert calls[-1] == (16, 16, 10, 20, 1)
 
 
