@@ -289,6 +289,25 @@ def _ticks_diff(a, b):
     return time.ticks_diff(a, b) if hasattr(time, "ticks_diff") else (a - b)
 
 
+def _preseed_config_wifi(root):
+    """Dev / pre-provision escape hatch: a `zero_config.py` on the board carrying WIFI_SSID /
+    WIFI_KEY is written into the store, so the normal saved-creds STA path joins it on boot
+    without needing the WiFi cart (handy for testing STA). No config -> no-op."""
+    if root is None:
+        return
+    try:
+        import zero_config
+    except ImportError:
+        return
+    try:
+        ssid = getattr(zero_config, "WIFI_SSID", "")
+        key = getattr(zero_config, "WIFI_KEY", "")
+        if ssid:
+            moy_carts.remember_wifi(ssid, key, root)
+    except Exception as exc:
+        print("[zero] wifi preseed skipped:", exc)
+
+
 def build_workstation():
     """Assemble the headless Workstation + web glue. Returns (ws, web, recorder). Carts are the
     embedded CARTS (read-only for now); the flash store (ZERO_ROOT) holds WiFi creds + system
@@ -317,6 +336,7 @@ def build_workstation():
     # cart (a system cart with the "network" permission) scans/connects/saves through this; creds
     # persist to <root>/wifi.json so autoconnect_wifi() brings up STA on the next boot.
     ws.wifi = mr.make_wifi(moy_carts, root)
+    _preseed_config_wifi(root)
     try:
         import machine
         ws.reboot_hook = machine.reset      # ≡ menu -> Reboot, so a newly-saved network takes effect

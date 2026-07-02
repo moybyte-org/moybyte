@@ -46,37 +46,67 @@ $PY -m mpremote connect /dev/ttyACM0 cp zero_net.py :zero_net.py + cp main.py :m
 
 ## Files
 
-- `main.py` — boot entry: brings up WiFi (AP by default), then starts the headless console
-  (`moy_zero.run_zero`) serving the web view on port 80. A crash raises to the REPL.
-- `zero_net.py` — WiFi bring-up: `start_ap()` (host `MoyByte-Zero`, join → http://192.168.4.1)
-  or `start_sta(ssid, key)` (join your LAN). Drop a `zero_config.py` on the board with
-  `MODE='sta'`, `WIFI_SSID`, `WIFI_KEY` to override.
+- `main.py` — boot entry: starts the headless console (`moy_zero.run_zero`) on port 80. The
+  network is chosen at boot (see below): **join a saved WiFi (STA)**, else **host the AP**.
+- `zero_net.py` — WiFi bring-up helpers: `start_ap()` (host `MoyByte-Zero` → http://192.168.4.1)
+  and `start_sta(ssid, key)` (join a LAN).
 - `moy_zero.py` — the **headless backend**. Reuses `console.Workstation` +
   `moy_runtime.make_api/Image` + `web_view` (DrawRecorder/TeeCanvas/ServedState) +
-  `moy_webserver.WebServer`. The one new piece is the recording canvas:
-  `TeeCanvas(_NullCanvas, DrawRecorder)` in atlas form — draws never rasterize, they only
-  record atlas-form draw-commands the browser replays. `run_zero()` is the headless loop
-  (draw → record → serve between frames). No native modules, no framebuffer, no flush.
+  `moy_webserver.WebServer` + `moy_carts` (a flash-rooted store). The one new piece is the
+  recording canvas: `TeeCanvas(_NullCanvas, DrawRecorder)` in atlas form — draws never
+  rasterize, they only record atlas-form draw-commands the browser replays. `run_zero()` brings
+  up the network (STA-from-saved-creds → else AP) then runs the headless loop (draw → record →
+  serve between frames). No native modules, no framebuffer, no flush.
+- `stage.sh` — push everything to a XIAO already running MicroPython (see Flashing below).
 
-### Staged shared modules (pushed via mpremote, from the T-Deck `modules/` tree)
+## WiFi: provisioning + why STA matters
 
-`web_view.py`, `moy_webserver.py`, `console.py`, `editors.py`, `blocks.py`, `moy_carts.py`,
-`audio.py`, `carts_data.py`, `moy_runtime.py`, and the `moybyte/` package. All pure Python;
-`moy_runtime` imports cleanly on stock MicroPython (its native `moy_gfx`/compositor use is
-lazy + fallback-guarded, never hit on the Zero). The full chain uses ~600 KB of heap.
+The Zero streams over the **same** web-view infra the T-Deck uses (`web_view` + `moy_webserver`,
+identical modules). An ESP32 **SoftAP** has much weaker throughput than **STA** (joining a
+router), so an AP-mode Zero suffers periodic multi-second send-stalls that trip the server's
+idle-reaper → the browser reconnects. So the Zero prefers STA and only hosts an AP to provision:
 
-> Not yet automated: a `stage.sh` to copy these + a freeze into a custom image (M2). For now
-> the staging command lives in git history / this session.
+1. Boot with no saved network → **hosts `MoyByte-Zero`** (key `moybyte123`, http://192.168.4.1).
+2. Join it, open the console, run the **WiFi** cart (`system_carts/wifi.moy`), pick your network,
+   save. Creds persist to `/moybyte/wifi.json` on flash (a root-parameterized `moy_carts` store —
+   the same store code the T-Deck uses on SD).
+3. Reboot (≡ menu → Reboot, or power-cycle) → it **joins your WiFi (STA)**, reachable at
+   **http://moybyte.local** (mDNS `network.hostname`) or its router IP. Streaming is smooth.
+
+Dev shortcut: drop a `zero_config.py` with `WIFI_SSID`/`WIFI_KEY` to preseed a network into the
+store (STA without the cart) — handy for testing.
+
+## Flashing / staging
+
+One-time: flash stock MicroPython (the esptool block above). Then push the Python:
+
+```bash
+firmware/seeed_xiao_esp32s3_zero/stage.sh [PORT]     # PORT defaults to the first /dev/ttyACM*
+```
+
+`stage.sh` pushes the shared console modules — from the **single source**, the T-Deck `modules/`
+tree, so the two ports can't drift (`web_view` `moy_webserver` `console` `editors` `blocks`
+`moy_carts` `audio` `carts_data` `moy_runtime` + the `moybyte/` package) — plus the Zero's own
+`zero_net`/`moy_zero`/`main`, over mpremote in one connection. `moy_runtime` imports cleanly on
+stock MicroPython (its native `moy_gfx`/compositor use is lazy + fallback-guarded, never hit on
+the headless Zero); the full chain uses ~600 KB of heap. A frozen custom image is a later option;
+pushed `.py` is the fast dev loop.
 
 ## Status
 
-- **M0 (done):** MicroPython flashed; PSRAM + 6 MB VFS confirmed; SoftAP `MoyByte-Zero`
-  auto-starts on boot (`http://192.168.4.1`), verified broadcasting.
-- **M1 (done, on-device verified):** headless console streams to the web view. Verified on
-  the board: full import chain loads; headless frames produce a valid draw-command stream;
-  `assets()`/`frame_payload` serialize; and a real-socket loopback test against the AP IP got
-  `GET /` (page, 200), `GET /assets` (200), a WebSocket `101` handshake, and a live frame push
-  carrying `cmds`. **Browser render is the remaining hand-off (phone test).**
-- **M2 (next):** carts in flash (a `zero_config`-rooted `moy_carts` store + write path), browser
-  input polish (buttons/keys), a `stage.sh` + optional frozen custom image, efficiency
-  (switch launcher to fewer full-frame sprs).
+- **M0 (done):** MicroPython flashed; PSRAM + 6 MB VFS confirmed.
+- **M1 (done, hardware-verified):** headless console streams to a browser — launcher, editors,
+  and carts (Sky Run / Battle City ~30 fps steady). Confirmed on a phone.
+- **WiFi provisioning (done, hardware-verified):** AP-by-default → WiFi cart saves a network →
+  STA on reboot; STA eliminates the AP-mode disconnects.
+- **M2 (next):** on-flash cart CRUD (`can_manage`), browser button/key input polish, an optional
+  frozen image, launcher payload efficiency.
+
+## Known quirks
+
+- The USB-Serial/JTAG REPL is **silent unless the host asserts DTR** (see above); this is why a
+  raw `pyserial` probe and even `mpremote` look dead until DTR is raised.
+- Interrupting the *running* console loop over USB while WiFi is active can reset the board and
+  flip its USB PID (`303a:1001` ↔ `303a:4001`, port `ttyACM0` ↔ `ttyACM1`) — a dev-tooling
+  quirk, not a runtime issue (it streams stably in normal use). Drop to a bare REPL before
+  `stage.sh`, and detect the port dynamically.

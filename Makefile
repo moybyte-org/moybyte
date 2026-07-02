@@ -28,7 +28,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: setup test run-example run-headless compile-blocks site-gifs doctor check-portable pack-example export-lilygo-example device-doctor device-port firmware-bundle-lilygo firmware-build-lilygo firmware-build-lilygo-micropython firmware-sim-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-upload-lilygo firmware-monitor-lilygo firmware-smoke-check-lilygo firmware-smoke-lilygo ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install sync-issues
+.PHONY: setup test run-example run-headless compile-blocks site-gifs doctor check-portable pack-example export-lilygo-example device-doctor device-port firmware-bundle-lilygo firmware-build-lilygo firmware-build-lilygo-micropython firmware-sim-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-stage-xiao-zero firmware-upload-lilygo firmware-monitor-lilygo firmware-smoke-check-lilygo firmware-smoke-lilygo ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install sync-issues
 
 setup:
 	$(SYSTEM_PYTHON) -m venv --system-site-packages $(VENV)
@@ -141,4 +141,10 @@ firmware-run-lilygo-micropython:
 firmware-monitor-lilygo-micropython:
 	test -n "$(PORT)"
 	$(IDF_PYTHON) -m serial.tools.miniterm $(PORT) 115200
+
+# MoyByte Zero (Seeed XIAO ESP32-S3): pure-Python, no native build. One-time flash of stock
+# MicroPython is documented in firmware/seeed_xiao_esp32s3_zero/README.md; this stages the
+# shared console modules + the Zero backend over mpremote (PORT defaults to the first ttyACM*).
+firmware-stage-xiao-zero:
+	bash firmware/seeed_xiao_esp32s3_zero/stage.sh $(PORT)
 
