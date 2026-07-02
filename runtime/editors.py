@@ -223,6 +223,13 @@ class SpriteSheet:
         self.dirty = False
         self.gen = 0          # bumps on every pset, so a running cart's tile cache
                               # can detect a sprite edit and rebuild (host/device parity)
+        # tile_image() memo (keyed by (n, transparent), dropped when `gen` bumps): returns the
+        # SAME _SheetSprite object for a tile across frames. Stable object identity is what lets
+        # the web recorder's id()-keyed atlas dedup a UI tile (ship its defspr ONCE instead of
+        # every frame -> the launcher/settings `unknown`-churn + payload-peak fix), and lets the
+        # device's per-image RGB565 cache survive frames for the console's own tiles too.
+        self._tile_cache = {}
+        self._tile_cache_gen = 0
 
     @property
     def count(self):
@@ -251,9 +258,18 @@ class SpriteSheet:
         self.pset(ox + lx, oy + ly, c)
 
     def tile_image(self, n, transparent=-1):
-        """Build an 8x8 blittable of sprite n for either backend's Canvas.spr."""
+        """The 8x8 blittable of sprite n for either backend's Canvas.spr. Memoised per
+        (n, transparent) and invalidated when `gen` bumps (a pset), so repeated per-frame
+        calls return the SAME object -- see the _tile_cache note in __init__."""
         if n < 0 or n >= self.count:
             return None
+        if self._tile_cache_gen != self.gen:
+            self._tile_cache = {}
+            self._tile_cache_gen = self.gen
+        key = (n, transparent)
+        img = self._tile_cache.get(key)
+        if img is not None:
+            return img
         ox, oy = self.tile_origin(n)
         w = self.w
         pix = []
@@ -261,7 +277,9 @@ class SpriteSheet:
             base = (oy + ly) * w + ox
             for lx in range(self.TILE):
                 pix.append(self.pix[base + lx])
-        return _SheetSprite(self.TILE, self.TILE, pix, transparent)
+        img = _SheetSprite(self.TILE, self.TILE, pix, transparent)
+        self._tile_cache[key] = img
+        return img
 
     def tile_span_image(self, n, tw=1, th=1, transparent=-1):
         """Build a (tw x th)-tile blittable starting at sprite n -- a TIC-80-style
