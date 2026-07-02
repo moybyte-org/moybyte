@@ -712,8 +712,9 @@ class DeviceCanvas:
         # ONCE, then window-copies per frame (draw_layer -> blit_window_from). Built
         # through a tiny _LayerComp so it reuses DeviceCanvas.__init__ verbatim and
         # shares this canvas's native moy_gfx kernel -- so map/spr/rect/... draw into it
-        # pixel-identically. The buffer is a plain bytearray (the gc heap is PSRAM here,
-        # so a 2x-screen 614KB layer fits); Stage 2 (GDMA) switches it to moy_alloc DMA.
+        # pixel-identically. The buffer is allocated OFF the gc heap in PSRAM via moy_alloc
+        # (see _LayerComp) so gc.collect() never marks it -- the GC-wall fix (#63): a layer
+        # cart's live set stays small, keeping collect cheap and the heap unfragmented.
         #
         # COMPACT FIRST (#54/#41): a scroll cart re-execs fresh on every entry (lay=None),
         # so it re-allocates its ~384KB world each time. The previous run's layer is already
@@ -830,7 +831,35 @@ class _LayerComp:
     def __init__(self, w, h, gfx):
         self._w = w
         self._h = h
-        self._buf = bytearray(w * h * 2)
+        # #63 (GC wall): the layer's RGB565 buffer is the single biggest object a
+        # scroll/paint cart keeps live (150KB for a full screen). A plain bytearray
+        # lands in the MicroPython gc heap, so every gc.collect() MARKS it -- and
+        # collect cost scales with the LIVE set (measured ~0.16ms/KB on device: launcher
+        # live=407k -> 71ms, sakura live=902k -> 143ms). So a layer cart pays ~24ms/collect
+        # for this buffer alone, and its bulk fragments the heap -- slowing every transient
+        # float box in the kid's per-frame physics loop (the sustained 29->12fps sag we
+        # measured). Allocate it OFF the gc heap in PSRAM via moy_alloc (the SAME allocator
+        # the compositor framebuffers already use -- so DeviceCanvas drawing into a memoryview
+        # is the proven main-framebuffer path, not a new one). gc then never scans it: the
+        # cart's live set -- and thus its collect cost AND heap fragmentation -- collapses,
+        # kid code untouched (fast by default). draw_layer today CPU-copies the layer into
+        # the framebuffer, so DMA isn't strictly needed -- but we tag the buffer SPIRAM|DMA
+        # anyway: on the S3 all PSRAM is DMA-reachable so it costs nothing, and it keeps the
+        # layer eligible for the #54 Stage-2 GDMA async window-copy (off-CPU draw_layer) --
+        # a SEPARATE draw-ceiling lever, orthogonal to this GC fix. Falls back to a gc-heap
+        # bytearray on the host / if the DMA allocator is unavailable, so this can only match
+        # or beat the old behaviour, never regress.
+        nbytes = w * h * 2
+        buf = None
+        try:
+            import moy_alloc
+            import lcd_bus
+            buf = moy_alloc.malloc_dma(nbytes, lcd_bus.MEMORY_SPIRAM | lcd_bus.MEMORY_DMA)
+        except Exception:  # noqa: BLE001 -- host / no DMA allocator -> gc-heap bytearray
+            buf = None
+        if buf is None:
+            buf = bytearray(nbytes)
+        self._buf = buf
         self._gfx = gfx
 
     def size(self):
