@@ -290,10 +290,18 @@ class _FakeGfx:
         # #63 Fold 3: place an iw x ih palette-INDEX bitmap at (dx, dy), converting each
         # index -> RGB565 via pal565 -- a faithful transcription of moy_gfx_blit_indices
         # in modmoy_gfx.c (opaque; index past the palette is skipped; clamped to dst).
+        # The C reads `indices` and `pal565` via the BUFFER PROTOCOL, so memoryview them
+        # HERE too -- a tuple/list palette (the "object with buffer protocol required"
+        # crash) then fails in this mirror exactly as it does on device, not silently.
         d = memoryview(dst).cast("H")
+        iv = memoryview(indices)                  # uint8 index bytes -- buffer required
+        # uint16 palette -- buffer required (the C reinterprets its bytes as uint16). Cast
+        # via 'B' so it works whether pal565 is an array('H') (what the device passes) or
+        # raw 565 bytes; a tuple/list has no buffer protocol and fails here, as on device.
+        pv = memoryview(pal565).cast("B").cast("H")
         dcap = len(d)
-        pcap = len(pal565)
-        icap = len(indices)
+        pcap = len(pv)
+        icap = len(iv)
         if dw <= 0 or dh <= 0 or iw <= 0 or ih <= 0 or pcap == 0:
             return
         if dw * dh > dcap:
@@ -311,10 +319,10 @@ class _FakeGfx:
                 si = srow + col
                 if si >= icap:
                     continue
-                p = indices[si]
+                p = iv[si]
                 if p >= pcap:
                     continue
-                d[drow + tx] = pal565[p]
+                d[drow + tx] = pv[p]
 
     @staticmethod
     def _clip(dw, cap, cx0, cy0, cx1, cy1):
@@ -814,6 +822,59 @@ def test_blit_indices_matches_host():
             host.blit_indices(img, iw, ih, pos[0], pos[1])
             dev.blit_indices(img, iw, ih, pos[0], pos[1])
             _assert_same(host, dev, "blit_indices gfx=%s pos=%s" % (gfx, pos))
+
+
+# --------------------------------------------------------------------------- #
+# spr(paint image) (#63 Fold 3): a big MOY64 index bitmap placed 1:1. The device #
+# bakes index->565 ONCE via blit_indices (not per-pixel), then blit565s -- and must #
+# match the host index-space spr AND the raw blit_indices, pixel-for-pixel.        #
+# --------------------------------------------------------------------------- #
+def _paint_image(mk, iw, ih):
+    idx = bytearray(iw * ih)
+    for r in range(ih):
+        for c in range(iw):
+            idx[r * iw + c] = (r * 5 + c * 3) % 63       # valid MOY64 indices
+    im = mk(iw, ih, idx, -1)
+    im._paint = True                                     # tags the blit_indices fast path
+    return im
+
+
+def test_spr_paint_image_matches_host():
+    iw, ih = 30, 20
+    for gfx in (True, False):
+        m, host, dev = _both(gfx)
+        hi = _paint_image(lambda w, h, p, t: Image(w, h, p, t), iw, ih)
+        di = _paint_image(lambda w, h, p, t: m.Image(w, h, p, t), iw, ih)
+        # Place it at a few offsets including partly off-screen (clamped) + inside a clip.
+        for pos in ((5, 4), (0, 0), (W - 8, H - 6), (-6, -3)):
+            host.cls(3)
+            dev.cls(3)
+            host.spr(hi, pos[0], pos[1])
+            dev.spr(di, pos[0], pos[1])
+            _assert_same(host, dev, "spr(paint) gfx=%s pos=%s" % (gfx, pos))
+        # The device path baked the index->565 buffer ONCE via blit_indices (gfx only).
+        if gfx:
+            assert getattr(di, "_rgb_i", None) is not None, "no blit_indices bake cache"
+
+
+def test_spr_paint_image_into_layer_matches_host():
+    # The clean full-screen-background path: spr(bg, 0, 0) into a make_layer once, then
+    # draw_layer per frame -- the device bakes the paint image into the layer buffer via
+    # blit_indices. Host copies indices; both must agree after the window copy.
+    iw, ih = W, H
+    for gfx in (True, False):
+        m, host, dev = _both(gfx)
+        hi = _paint_image(lambda w, h, p, t: Image(w, h, p, t), iw, ih)
+        di = _paint_image(lambda w, h, p, t: m.Image(w, h, p, t), iw, ih)
+        lh = host.new_layer(W, H)
+        ld = dev.new_layer(W, H)
+        lh.spr(hi, 0, 0)                                 # bake the paint bg into the layer
+        ld.spr(di, 0, 0)
+        host.cls(0)
+        dev.cls(0)
+        host.blit_window_from(lh, 0, 0)
+        dev.blit_window_from(ld, 0, 0)
+        _assert_same(host, dev, "paint-in-layer gfx=%s" % gfx)
 
 
 # --------------------------------------------------------------------------- #
