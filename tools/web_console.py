@@ -28,6 +28,7 @@ the ws_* framing), so there is ONE path -- no HTTP poll fallback:
                          "font": {"first","w","h","glyphs":[[col,...8], ...]},
                          "sheet": {...} | null,          # open cart's sprite sheet
                          "tilemap": {...} | null,        # open cart's tilemap
+                         "images": {name:{w,h,b64}}|null,# open cart's paint images (#63 F4)
                          "cart": "<title or null>" }     # for cart-change detection
                      The page refetches /assets when "cart" changes (new sheet).
   GET  /ws        -> (Upgrade: websocket) the PERSISTENT live channel. Per tick the
@@ -249,11 +250,21 @@ class WebConsole:
             sheet = getattr(self.ws, "sheet", None)
             tilemap = getattr(self.ws, "tilemap", None)
             cart = self._cart_title()
+            # Paint images (#63 Fold 4): decode the open cart's .moyimg text -> (w, h, index
+            # bytes) so /assets ships them ONCE (browser-cached) and the per-frame stream
+            # references each by name via ["imgref", ...] -- threaded through like the sheet.
+            decoded = {}
+            raw = getattr(self.ws, "images", None)
+            if raw:
+                for name, blob in raw.items():
+                    dec = host_app._decode_moyimg(blob)
+                    if dec is not None:
+                        decoded[name] = dec
             # The SHARED assets builder (host passes the MOY64 RGB palette directly; the device
             # passes its RGB565 LUT and the builder decodes -- detected by element type).
             return web_view.assets_payload(
                 self.canvas.w, self.canvas.h, palette.MOY64, sheet, tilemap, cart,
-                _audio.AudioEngine().rate)
+                _audio.AudioEngine().rate, decoded or None)
 
 
 class _Handler(BaseHTTPRequestHandler):
