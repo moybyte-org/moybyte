@@ -6,7 +6,7 @@ merged.
 
 **Audience:** engine/runtime. Read `docs/perf_60fps_architecture.md` (the perf
 grounding), `docs/porting_pico8.md` (the API-alignment surface), and
-`docs/firmware_runtime_contract.md` (the device API contract) alongside this.
+`docs/moy_cart_api.md` (the current cart/device API) alongside this.
 
 Related issues: #43 (draw-call ceiling / native batch / dirty-rect), #54 (scroll
 engine — `make_layer`/`draw_layer`), #32 (native `map()`), #11 (TIC-80-shaped API +

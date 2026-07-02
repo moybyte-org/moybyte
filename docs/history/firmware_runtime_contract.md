@@ -1,5 +1,11 @@
 # Firmware Runtime Contract
 
+> **Legacy — `.moyproj` device contract.** This describes the old `.moyproj` SDK's
+> device runtime (`from moybyte import *`, `run/sprite/text/clear/button`, a **128×128**
+> canvas). The shipping console is the v0.4 `.moy` runtime — a **320×240** indexed
+> canvas with a TIC-80-style API — documented in **[`moy_cart_api.md`](../moy_cart_api.md)**.
+> Still useful for the `.moyproj` SDK's permission/service model.
+
 This is the contract a future device runtime must satisfy so existing Moybyte
 projects continue to run when moved from the PC simulator to hardware.
 
