@@ -66,13 +66,33 @@ MAX_ATLAS = 512
 MAX_DEFSPR_BYTES_PER_FRAME = 1200
 
 
-# --- paint-image (#63 Fold 3) compact wire encoding -------------------------
+# --- paint-image (#63 Fold 3/4) compact wire encoding -----------------------
 # A paint image (a big MOY64 index bitmap, images/*.moyimg) recorded via spr() must NOT ship
 # as a self-contained spr's JSON int array (up to 76,800 ints ~= 1MB -- the reason sakura's
-# layer wouldn't load in the browser). Instead an ["img", x, y, w, h, b64] command carries the
-# raw index bytes as a base64 STRING (~100KB for a full screen, shipped ONCE inside the layer's
-# deflayer). The browser atob()s it and blits index->palette -- no JS inflate needed (base64 of
-# the RAW indices, not the zlib bytes, keeps the replay synchronous + dependency-free).
+# layer wouldn't load in the browser).
+#
+# NAMED (the normal path): image('bg') tags the Image with ._name, so spr() records a tiny
+# ["imgref", x, y, name] and the PIXELS ride /assets ONCE (browser-cached, index bytes base64'd
+# -- like the sheet + tilemap), NEVER the per-frame stream. This is the Fold 4 fix: shipping the
+# ~110KB blob inline (below) re-json.dumps'd it every frame it rode (~1.3s on the ESP32) and
+# starved the defspr budget, so a cart's sprites (sakura's petals) never got their bitmaps.
+#
+# NAMELESS (fallback): a paint Image with no asset name (built ad-hoc, not via image('name'))
+# has no /assets entry to reference, so it ships inline as ["img", x, y, w, h, b64] -- base64 of
+# the raw index bytes, shipped ONCE inside the layer's deflayer. The browser atob()s it and blits
+# index->palette (no JS inflate: base64 of the RAW indices, not the zlib bytes, keeps the replay
+# synchronous + dependency-free).
+
+
+def _paint_cmd(img, x, y):
+    """The compact wire form for a 1:1 (scale 1, no flip) paint-image blit. A NAMED paint image
+    (image('bg') tags img._name) ships a tiny ["imgref", x, y, name] -- its pixels ride /assets
+    ONCE. A NAMELESS paint image falls back to the inline ["img", x, y, w, h, b64]. Shared by
+    DrawRecorder.spr + _LayerRecorder.spr so the two wire forms can't drift."""
+    name = getattr(img, "_name", None)
+    if name is not None:
+        return ["imgref", int(x), int(y), name]
+    return ["img", int(x), int(y), int(img.w), int(img.h), _b64_indices(img.pix)]
 
 
 def _b64_indices(pix):
@@ -306,12 +326,12 @@ class DrawRecorder:
     def spr(self, img, x, y, scale=1, flip=0):
         # img is an Image / _SheetSprite (.w/.h/.pix/.transparent); ids are already resolved
         # to pixels by the time the canvas sees it.
-        # PAINT-IMAGE fast wire (#63 Fold 3): a big MOY64 index bitmap placed 1:1 ships as a
-        # compact ["img", x, y, w, h, b64] (base64 of the raw indices) instead of a fat spr
-        # -- BEFORE either the self-contained or atlas path (both would balloon it to ~1MB).
+        # PAINT-IMAGE fast wire (#63 Fold 3/4): a big MOY64 index bitmap placed 1:1 ships as a
+        # compact ["imgref", x, y, name] (named -> pixels ride /assets once) or the inline
+        # ["img", x, y, w, h, b64] fallback -- BEFORE either the self-contained or atlas path
+        # (both would balloon it to ~1MB).
         if _is_paint_image(img) and int(scale) == 1 and int(flip) == 0:
-            self._cmds.append(["img", int(x), int(y), int(img.w), int(img.h),
-                               _b64_indices(img.pix)])
+            self._cmds.append(_paint_cmd(img, x, y))
             return
         if self.self_contained:
             # HOST record-only: embed the pixels (the layer-stream / self-contained shape,
@@ -489,12 +509,12 @@ class _LayerRecorder:
 
     def spr(self, img, x, y, scale=1, flip=0):
         # A paint-image background baked into this layer (sakura's spr(bg, 0, 0)) ships as a
-        # compact ["img", ...] (base64 indices) -- the whole point of #63 Fold 3: the layer's
-        # deflayer is a ~100KB one-time blob, not a 32k-command ~1MB stream. Everything else is
-        # a SELF-CONTAINED full-pixel spr so the layer stream needs no atlas.
+        # compact ["imgref", x, y, name] (Fold 4: pixels ride /assets once) or the inline
+        # ["img", ...] fallback for a nameless paint image -- the whole point of #63: the layer's
+        # deflayer is a tiny reference (or a one-time blob), not a 32k-command ~1MB stream.
+        # Everything else is a SELF-CONTAINED full-pixel spr so the layer stream needs no atlas.
         if _is_paint_image(img) and int(scale) == 1 and int(flip) == 0:
-            self._cmds.append(["img", int(x), int(y), int(img.w), int(img.h),
-                               _b64_indices(img.pix)])
+            self._cmds.append(_paint_cmd(img, x, y))
             return
         t = img.transparent
         if t is None:
@@ -982,13 +1002,35 @@ def tilemap_payload(tilemap):
     return {"w": tilemap.w, "h": tilemap.h, "cells": list(tilemap.cells)}
 
 
-def assets_payload(w, h, palette, sheet, tilemap, cart_title, audio_rate=8000):
+def images_payload(images):
+    """The open cart's DECODED paint images as JSON: {name: {"w","h","b64"}} where b64 is
+    base64 of the raw MOY64 index bytes -- shipped ONCE per cart via /assets (like the sheet +
+    tilemap), so a paint image referenced by ["imgref", x, y, name] never carries pixels on the
+    per-frame stream (#63 Fold 4).
+
+    `images` is {name: (w, h, index_bytes)} -- each provider DECODED its .moyimg text with its
+    own zlib/deflate _decode_moyimg (the decompressor differs host vs device), so this shared
+    builder only base64-wraps the raw indices. None/empty -> None (no `images` payload)."""
+    if not images:
+        return None
+    out = {}
+    for name in images:
+        w, h, idx = images[name]
+        out[name] = {"w": int(w), "h": int(h), "b64": _b64_indices(idx)}
+    return out
+
+
+def assets_payload(w, h, palette, sheet, tilemap, cart_title, audio_rate=8000, images=None):
     """The static render assets the browser needs (re-fetched on a cart change): palette +
     petme128 font + the open cart's sheet/tilemap + cart title + PCM rate.
 
     `palette` is EITHER a list of RGB565 ints (the DEVICE panel LUT -> decoded via palette_rgb)
     OR a list of [r,g,b] triples (the HOST MOY64 palette -> used exactly). Detected by the
-    element type so both transports share this builder."""
+    element type so both transports share this builder.
+
+    `images` (#63 Fold 4) is the open cart's DECODED paint images ({name: (w, h, index_bytes)},
+    one per images/*.moyimg); it ships as {name: {"w","h","b64"}} so a ["imgref", ...] draw
+    command references a browser-cached image by name instead of carrying its pixels."""
     if palette and isinstance(palette[0], int):
         pal = palette_rgb(palette)                 # RGB565 ints (device)
     else:
@@ -999,6 +1041,7 @@ def assets_payload(w, h, palette, sheet, tilemap, cart_title, audio_rate=8000):
         "font": {"first": FONT_FIRST, "w": FONT_W, "h": FONT_H, "glyphs": _font_glyphs()},
         "sheet": sheet_payload(sheet),
         "tilemap": tilemap_payload(tilemap),
+        "images": images_payload(images),
         "cart": cart_title,
         "audio_rate": audio_rate,
     }
@@ -1323,6 +1366,7 @@ def replay_to_canvas(commands, canvas, layers=None, assets=None):
     atlas = {}                                     # index -> Image (browser's ATL)
     sheet_pix = sheet_cols = sheet_tile = sheet_w = None
     tm = None
+    imgs = None                                    # name -> {"w","h","b64"} (browser's IMG)
     if assets is not None:
         sh = assets.get("sheet")
         if sh is not None:
@@ -1333,6 +1377,7 @@ def replay_to_canvas(commands, canvas, layers=None, assets=None):
         tmp = assets.get("tilemap")
         if tmp is not None:
             tm = {"w": tmp["w"], "h": tmp["h"], "cells": list(tmp["cells"])}
+        imgs = assets.get("images")
 
     def _tile_image(tid, colorkey):
         ox = (tid % sheet_cols) * sheet_tile
@@ -1377,11 +1422,20 @@ def replay_to_canvas(commands, canvas, layers=None, assets=None):
                 if im is not None:
                     canvas.spr(im, x, y, scale, flip)
         elif op == "img":
-            # PAINT-IMAGE (#63 Fold 3): decode the base64 raw MOY64 indices and blit them
-            # (opaque, clamped) via the same blit_indices the device bakes with -- into the
-            # CURRENT canvas (the layer buffer when replayed inside a deflayer).
+            # PAINT-IMAGE inline fallback (#63 Fold 3): decode the base64 raw MOY64 indices and
+            # blit them (opaque, clamped) via the same blit_indices the device bakes with -- into
+            # the CURRENT canvas (the layer buffer when replayed inside a deflayer).
             x, y, w, h = cmd[1:5]
             canvas.blit_indices(_unb64_indices(cmd[5]), int(w), int(h), int(x), int(y))
+        elif op == "imgref":
+            # PAINT-IMAGE by NAME (#63 Fold 4): resolve the cart image from the /assets `images`
+            # dict (shipped once, browser-cached) and blit its raw indices -- the imgref twin of
+            # img. A missing name (assets not seeded) no-ops, like the browser's IMG cache miss.
+            x, y, name = cmd[1], cmd[2], cmd[3]
+            im = imgs.get(name) if imgs else None
+            if im is not None:
+                canvas.blit_indices(_unb64_indices(im["b64"]),
+                                    int(im["w"]), int(im["h"]), int(x), int(y))
         elif op == "deflayer":
             lid, lw, lh, lcmds = cmd[1:5]
             layer = Canvas(int(lw), int(lh), canvas.palette)
@@ -1454,8 +1508,13 @@ def replay_to_canvas(commands, canvas, layers=None, assets=None):
 #   defspr  -> cache the bitmap by index (ATL[index]).
 #   spr     -> atlas form (by index) OR self-contained (full-pixel) -> blit with scale/flip.
 #   map     -> walk the CACHED tilemap over the CACHED sheet (kept current by settiles).
+#   imgref  -> blit a /assets-cached paint image (IMG[name]) by NAME (#63 Fold 4); img is the
+#              inline-pixel fallback for a nameless paint image.
 #   deflayer/blit_layer -> replay a layer's stream into an off-screen buffer once, then blit.
 # On a cart change (a frame's cart != assCart) -> refetch /assets; ATL/LAY reset on `gen` change.
+# A deflayer may carry an imgref whose IMG isn't loaded yet (a re-shipped layer racing the async
+# /assets fetch); an imgref cache-MISS latches imgWant, and df() re-fetches /assets (which makes
+# the server re-ship the deflayer) until the image is cached -- so a ship-once layer converges.
 # ---------------------------------------------------------------------------
 
 PAGE_HTML = """<!doctype html><html><head><meta charset=utf-8>
@@ -1492,6 +1551,11 @@ var W=320,H=240,PAL=null,FONT=null,ready=false,assCart=undefined,idx=null,img=nu
 // Payload-diet caches (#41): SHEET = the cart sprite sheet; TM = the cart tilemap (kept
 // current by settiles); ATL = the per-session sprite atlas filled by defspr.
 var SHEET=null,TM=null,ATL=[],curGen=-1;
+// Paint-image cache (#63 Fold 4): IMG[name] = {w,h,px:Uint8Array of raw MOY64 indices},
+// loaded from /assets (once per cart) so an ["imgref",x,y,name] blits without carrying pixels.
+// imgWant latches an imgref cache MISS (a deflayer racing the async /assets fetch); assLoading
+// guards a single in-flight /assets fetch so the miss-retry (df) doesn't spam the server.
+var IMG={},imgWant=false,assLoading=false;
 var HUD={on:false,fps:0,kb:0,unknown:0,el:document.getElementById("hud"),last:0};
 // Periodic perf LOG (#41): recv + render fps, bandwidth, avg/peak payload, AND the device's
 // push-rate + free heap (from f.perf), one console.log line every PERF_MS. The recv/dev/bw
@@ -1520,10 +1584,15 @@ var src=actx.createBufferSource();src.buffer=buf;src.connect(actx.destination);
 var t=Math.max(actx.currentTime+0.02,audioNext);src.start(t);audioNext=t+buf.duration;}
 function alloc(){cv.width=W;cv.height=H;cx=cv.getContext("2d");cx.imageSmoothingEnabled=false;
 idx=new Uint8Array(W*H);img=cx.createImageData(W,H);rgba=img.data;rs();}
-function getA(){return fetch("/assets").then(function(r){return r.json();}).then(function(a){
+function getA(){assLoading=true;return fetch("/assets").then(function(r){return r.json();}).then(function(a){
 W=a.w;H=a.h;PAL=a.palette;FONT=a.font;assCart=a.cart;SHEET=a.sheet||null;if(a.audio_rate)AUDIO_RATE=a.audio_rate;
 TM=a.tilemap?{w:a.tilemap.w,h:a.tilemap.h,cells:a.tilemap.cells.slice()}:null;
-alloc();ready=true;});}  // NB: do NOT clear ATL here -- it resets on `gen` change (see df).
+// Decode each paint image's base64 raw indices into a Uint8Array ONCE (#63 Fold 4), so an
+// imgref just blits the cached bytes (index->palette). Keyed by the SAME name image('name') tags.
+IMG={};if(a.images){for(var nm in a.images){var gi=a.images[nm],bs=atob(gi.b64),bn=bs.length,bp=new Uint8Array(bn);
+for(var bk=0;bk<bn;bk++)bp[bk]=bs.charCodeAt(bk);IMG[nm]={w:gi.w,h:gi.h,px:bp};}}
+assLoading=false;alloc();ready=true;}).catch(function(e){assLoading=false;throw e;});}
+// NB: do NOT clear ATL here -- it resets on `gen` change (see df). imgWant is cleared by df's retry.
 var caX=0,caY=0,cl0=0,cm0=0,cl1=W,cm1=H,pm=null,pt=null;
 function rs(){caX=0;caY=0;cl0=0;cm0=0;cl1=W;cm1=H;pm=new Uint8Array(64);pt=new Uint8Array(64);
 for(var i=0;i<64;i++)pm[i]=i;}rs();
@@ -1547,12 +1616,19 @@ for(var yy=0;yy<sh;yy++){var ry=fy?sh-1-yy:yy,bs=ry*sw;for(var xx=0;xx<sw;xx++){
 p=px[bs+rx];if(p===t||p<0||pt[p&63])continue;if(sc<=1)put(x+xx,y+yy,p);else fr(x+xx*sc,y+yy*sc,sc,sc,p);}}}
 // spr by atlas index. Unknown index = no-op (a missing defspr is the dropped-frame bug).
 function sp(ix,x,y,sc,fl){var a=ATL[ix];if(!a){HUD.unknown++;return;}blt(a.px,a.w,a.h,a.t,x,y,sc,fl);}
-// img (#63 Fold 3): a paint image (a big MOY64 index bitmap) as base64 of its RAW indices.
-// atob -> write indices OPAQUE (index>=64 skipped) into the CURRENT target (idx/W/H) clamped,
-// the browser twin of blit_indices. Placed inside a deflayer, so it ships ONCE (~100KB) not 1MB.
+// img (#63 Fold 3): a paint image (a big MOY64 index bitmap) as base64 of its RAW indices --
+// the INLINE FALLBACK for a nameless paint image. atob -> write indices OPAQUE (index>=64
+// skipped) into the CURRENT target (idx/W/H) clamped, the browser twin of blit_indices.
 function im(x,y,w,h,b64){var s=atob(b64);x|=0;y|=0;w|=0;h|=0;
 for(var yy=0;yy<h;yy++){var ty=y+yy;if(ty<0||ty>=H)continue;var sr=yy*w,dr=ty*W;
 for(var xx=0;xx<w;xx++){var tx=x+xx;if(tx<0||tx>=W)continue;var p=s.charCodeAt(sr+xx);if(p<64)idx[dr+tx]=p;}}}
+// imgref (#63 Fold 4): a paint image by NAME, blitted from the /assets IMG cache -- the normal
+// path (pixels shipped once, not per-frame). Same opaque index->target blit as im, but reading
+// the pre-decoded Uint8Array. A cache MISS latches imgWant so df() re-fetches /assets (the layer
+// deflayer re-ships once assets arrive) -- a ship-once layer can otherwise strand its background.
+function imr(x,y,nm){var G=IMG[nm];if(!G){imgWant=true;return;}var s=G.px,w=G.w,h=G.h;x|=0;y|=0;
+for(var yy=0;yy<h;yy++){var ty=y+yy;if(ty<0||ty>=H)continue;var sr=yy*w,dr=ty*W;
+for(var xx=0;xx<w;xx++){var tx=x+xx;if(tx<0||tx>=W)continue;var p=s[sr+xx];if(p<64)idx[dr+tx]=p;}}}
 // map(): walk the cached tilemap region over the cached sheet (step=tile*scale, colorkey
 // transparent), mirroring the device map() cell layout.
 function mp(mx,my,w,h,sx,sy,sc,ck){if(!SHEET||!TM)return;sc=sc<1?1:sc;
@@ -1592,7 +1668,7 @@ else if(o=="defspr")ATL[c[1]]={w:c[2],h:c[3],t:c[4],px:c[5]};
 // spr has TWO shapes: atlas ["spr",idx,x,y,sc,fl] (<=6 fields) and self-contained
 // ["spr",x,y,sc,w,h,t,pix,fl] (a pix array at c[7]). Branch on the pix array.
 else if(o=="spr"){if(c.length>7&&c[7]&&c[7].length!==undefined)blt(c[7],c[4],c[5],c[6],c[1],c[2],c[3],c[8]||0);else sp(c[1],c[2],c[3],c[4],c[5]||0);}
-else if(o=="img")im(c[1],c[2],c[3],c[4],c[5]);
+else if(o=="img")im(c[1],c[2],c[3],c[4],c[5]);else if(o=="imgref")imr(c[1],c[2],c[3]);
 else if(o=="deflayer")dfl(c[1],c[2],c[3],c[4]);else if(o=="blit_layer")bl(c);
 else if(o=="settiles")st(c[1],c[2],c[3]);else if(o=="map")mp(c[1],c[2],c[3],c[4],c[5],c[6],c[7],c[8]);
 else if(o=="print")tx(c[1],c[2],c[3],c[4]);else if(o=="reset_state")rs();
@@ -1656,6 +1732,9 @@ if(p.js>PERF.mj)PERF.mj=p.js;if(p.tx>PERF.mt)PERF.mt=p.tx;
 if(p.dr>PERF.md)PERF.md=p.dr;if(p.gap>PERF.mg)PERF.mg=p.gap;if(p.thr)PERF.thr++;}
 if(f.gen!==curGen){curGen=f.gen;ATL=[];LAY={};HUD.unknown=0;}
 if(f.cart!==assCart){assCart=f.cart;getA().catch(function(){});}rep(f.cmds||[]);blit();
+// A deflayer's imgref cache-MISS (racing the async /assets fetch) latched imgWant: re-fetch
+// /assets (the server re-ships the deflayer on reset) until the paint image is cached (#63 F4).
+if(imgWant&&!assLoading){imgWant=false;getA().catch(function(){});}
 if(f.audio)playPCM(f.audio);
 var t=(window.performance&&performance.now)?performance.now():Date.now();if(HUD.last){var inst=1000/Math.max(1,t-HUD.last);
 HUD.fps=HUD.fps?HUD.fps+(inst-HUD.fps)*0.2:inst;}HUD.last=t;if(HUD.on)drawHud();

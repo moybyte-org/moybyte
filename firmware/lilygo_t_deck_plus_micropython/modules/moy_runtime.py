@@ -1080,6 +1080,8 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
                 w, h, idx = dec
                 im = Image(w, h, idx, -1)      # opaque (no transparent index)
                 im._paint = True               # marks the paint-image bake/ship fast paths
+                im._name = a                   # web view (#63 Fold 4): spr() ships ["imgref",
+                                               # x, y, name]; the pixels ride /assets, not the frame
                 _img_cache[a] = im
             return im
         return Image.from_ascii(a, mapping, transparent)
@@ -2516,9 +2518,21 @@ class WebView:
         cart = getattr(ws, "cart", None)
         title = cart.get("title") if cart else None
         rate = AUDIO_RATE
+        # Paint images (#63 Fold 4): decode the open cart's .moyimg text -> (w, h, index bytes)
+        # so /assets ships them ONCE (browser-cached), and the per-frame stream references each
+        # by name via ["imgref", ...]. Decoded here (not in the recorder) so a fat base64 blob
+        # never rides a frame and starve the defspr budget. Threaded through like the sheet.
+        decoded = {}
+        raw = getattr(ws, "images", None)
+        if raw:
+            for name in raw:
+                dec = _decode_moyimg(raw[name])
+                if dec is not None:
+                    decoded[name] = dec
         return self._web.assets_payload(self._canvas.w, self._canvas.h, PAL565,
                                         getattr(ws, "sheet", None),
-                                        getattr(ws, "tilemap", None), title, rate)
+                                        getattr(ws, "tilemap", None), title, rate,
+                                        decoded or None)
 
     def frame(self):
         cart = getattr(self._ws, "cart", None)

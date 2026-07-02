@@ -535,6 +535,8 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
                 w, h, idx = dec
                 im = Image(w, h, idx, -1)      # opaque (no transparent index)
                 im._paint = True               # marks the paint-image bake/ship fast paths
+                im._name = a                   # web view (#63 Fold 4): spr() ships ["imgref",
+                                               # x, y, name]; the pixels ride /assets, not the frame
                 _img_cache[a] = im
             return im
         return Image.from_ascii(a, mapping, transparent)
