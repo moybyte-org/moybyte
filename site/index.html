@@ -31,7 +31,7 @@
       radial-gradient(900px 500px at 0% 20%, rgba(126,37,83,.18), transparent 55%),
       var(--bg);
     overflow-x:hidden;}
-  a{color:var(--c12);text-decoration:none} a:hover{color:var(--c10)}
+  a{color:var(--c10);text-decoration:none} a:hover{color:var(--c15);text-decoration:underline}
   body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:50;
     background:repeating-linear-gradient(to bottom,rgba(0,0,0,0) 0,rgba(0,0,0,0) 2px,rgba(0,0,0,.035) 3px);
     mix-blend-mode:multiply;}
@@ -45,7 +45,7 @@
   .brand .wm{font-size:20px;letter-spacing:1px}
   .brand .wm b{color:var(--c15)} .brand .wm i{font-style:normal;color:var(--c13)}
   .nav-links{display:flex;gap:22px;font-size:13px;text-transform:uppercase;letter-spacing:1px}
-  .nav-links a{color:var(--dim)}
+  .nav-links a{color:var(--dim)} .nav-links a:hover{color:var(--c10);text-decoration:none}
 
   .hero{display:grid;grid-template-columns:1.05fr .95fr;gap:48px;align-items:center;padding:40px 0 30px}
   .tag{display:inline-block;font-size:11px;letter-spacing:2px;text-transform:uppercase;
@@ -123,7 +123,7 @@
   @keyframes scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 
   section{padding:72px 0} section + section{padding-top:0}
-  .eyebrow{font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--c9);margin:0 0 10px}
+  .eyebrow{font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
   h2{font-size:clamp(24px,3.5vw,34px);margin:0 0 8px;letter-spacing:-.5px}
   .section-sub{color:var(--dim);max-width:60ch;margin:0 0 34px}
   .pillars{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
@@ -139,7 +139,7 @@
   .clip{margin:0;background:#0d1330;border:1px solid var(--c1);overflow:hidden}
   .clip img{width:100%;height:auto;display:block;image-rendering:pixelated;border-bottom:1px solid var(--c1)}
   .clip-txt{padding:16px 18px 18px}
-  .clip .age{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--c9)}
+  .clip .age{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted)}
   .clip h3{margin:5px 0 8px;font-size:16px;color:var(--ink)}
   .clip p{margin:0;font-size:13px;color:var(--c6)}
   .tiers{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
@@ -150,11 +150,11 @@
   .tier .role{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;
     border-top:1px solid var(--c1);margin-top:14px;padding-top:12px}
   .tier .art{width:100%;max-width:190px;height:auto;display:block;margin:2px auto 12px}
-  .tier.one{border-color:var(--c9)} .tier.one .name{color:var(--c9)}
+  .tier.one{border-color:var(--c10)}
   .closer{text-align:center;background:#060a1c;border-top:2px solid var(--c1);border-bottom:2px solid var(--c1)}
   .closer h2{max-width:20ch;margin:0 auto 18px}
   .closer form.notify{margin:0 auto;justify-content:center}
-  footer{padding:40px 0;text-align:center;color:var(--muted);font-size:12px} footer a{color:var(--c13)}
+  footer{padding:40px 0;text-align:center;color:var(--muted);font-size:12px} footer a{color:var(--c10)}
   .footer-brand{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:14px}
   .footer-brand .moy-ico{width:24px;height:24px}
   @media(max-width:860px){
@@ -187,7 +187,7 @@
   #cr3:checked ~ .cart-console .s3,#cr4:checked ~ .cart-console .s4{display:grid;opacity:0;animation:powon .5s ease .42s both}
   @keyframes powon{0%{opacity:0;transform:translateY(10px)}55%{opacity:1}100%{opacity:1;transform:none}}
   .cart-game{width:100%;height:auto;display:block;image-rendering:pixelated;border:1px solid #000;border-radius:3px}
-  .cart-copy .ck{display:block;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--c9);margin:0 0 10px}
+  .cart-copy .ck{display:block;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
   .cblink{margin-left:3px;color:var(--c10);animation:cblink 1s steps(1) infinite}
   @keyframes cblink{0%,55%{opacity:1}56%,100%{opacity:0}}
   .cart-copy h3{font-family:'Petme128',var(--mono);font-weight:normal;font-size:22px;color:var(--c15);margin:0 0 12px;letter-spacing:0}
