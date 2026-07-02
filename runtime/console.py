@@ -5652,6 +5652,10 @@ class Workstation:
         # fires when perf_capture is set (device diag sampling) -- not just the HUD.
         _perf = self.perf_hud or self.perf_capture
         _frame_t0 = _ticks_ms() if _perf else 0
+        if _perf:
+            _bc = getattr(self.canvas, "batch_reset", None)
+            if _bc is not None:
+                _bc()                  # #63: zero this frame's auto-batch profiling counters
         _upd = 0          # cart _update(dt) ms (game LOGIC); 0 off the cart path
         _cart = 0         # cart _draw() ms (RENDERING)
         _audio = 0        # audio.tick(dt) ms (mixer feed) -- split out so it doesn't hide in render
@@ -6236,6 +6240,17 @@ class Workstation:
         logic vs rendering vs audio vs chrome). Only meaningful while a cart runs with
         perf_capture/perf_hud on."""
         return (self._upd_ms, self._cart_ms, self._audio_ms, self._chrome_ms)
+
+    def perf_batch(self):
+        """(flushes, sprites, maxrun) for the auto-batch this frame (#63 profiling). N
+        sprites coalesced into ONE blit_batch read flushes=1 / maxrun=N; drawn one-by-one
+        read flushes=N / maxrun=1 -- so this PROVES the batch stayed intact at runtime,
+        which pixel-parity can't. Counters reset per frame in frame() when perf capture is
+        on; a lone item still counts as a (flushes=1, maxrun=1) direct blit."""
+        cv = self.canvas
+        return (getattr(cv, "_batch_flushes", 0),
+                getattr(cv, "_batch_sprites", 0),
+                getattr(cv, "_batch_maxrun", 0))
 
     def _draw_perf_hud(self):
         """Frame-time breakdown (#43/#44 perf), drawn just above the FPS chip when
