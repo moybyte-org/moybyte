@@ -57,6 +57,20 @@ def main():
         except Exception as exc:
             print("Moybyte backlight on failed:", exc)
 
+    # Perf bench build (#63): a MOYBYTE_BENCH=1 build stamps modules/_moy_bench.py
+    # and boots into the self-terminating pipeline bench instead of the desktop --
+    # it prints BENCH lines and RETURNS to the REPL, so a headless bench board
+    # (XIAO S3, no buttons) stays reflashable. Absent stamp -> normal boot.
+    try:
+        import _moy_bench
+        _bench = getattr(_moy_bench, "BENCH", False)
+    except ImportError:
+        _bench = False
+    if _bench:
+        from moy_runtime import run_perf_bench
+        run_perf_bench(_task_handler)
+        return
+
     if RUN_FULLSCREEN_BENCH:
         _run_fullscreen_bench(_task_handler)
         return

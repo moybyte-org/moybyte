@@ -213,6 +213,13 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit_map_obj, 17, 21, moy_gfx
 // to the un-mirrored block. The clip rect [cx0,cy0)..[cx1,cy1) (#11) bounds the
 // write region, intersected with the buffer. Collapses N per-sprite MicroPython->C
 // blit565 calls into one walk, which is the device's draw-call bottleneck.
+//
+// ARRAY MODE (#63 spr_gate): `items` may instead be the canvas batch array -- an
+// array('h') laid out [next, colorkey, scale, token, (tile x y flip)*N...] with
+// items starting at index 4 and `next` = 4 + 4*N. This is the queue the spr_gate
+// fast path fills from C with ZERO Python-object churn; passing it here draws the
+// whole run without ever materialising tuples. Detected via the buffer protocol
+// (a list/tuple of tuples has no buffer -> classic mode).
 static mp_obj_t moy_gfx_blit_batch(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
     size_t dcap, acap;
@@ -220,8 +227,20 @@ static mp_obj_t moy_gfx_blit_batch(size_t n_args, const mp_obj_t *a) {
     mp_int_t dw = mp_obj_get_int(a[1]);
     mp_int_t dh = mp_obj_get_int(a[2]);
     size_t n_items;
-    mp_obj_t *item_arr;
-    mp_obj_get_array(a[3], &n_items, &item_arr);  // list or tuple of item tuples
+    mp_obj_t *item_arr = NULL;
+    const int16_t *qitems = NULL;          // array-mode int16 quads (or NULL)
+    mp_buffer_info_t qbi;
+    if (mp_get_buffer(a[3], &qbi, MP_BUFFER_READ) && qbi.len >= 2 * 4) {
+        const int16_t *q = (const int16_t *)qbi.buf;
+        size_t qlen = qbi.len / 2u;
+        mp_int_t next = q[0];
+        if (next < 4) next = 4;
+        if ((size_t)next > qlen) next = (mp_int_t)qlen;
+        n_items = (size_t)(next - 4) / 4u;
+        qitems = q + 4;
+    } else {
+        mp_obj_get_array(a[3], &n_items, &item_arr);  // list or tuple of item tuples
+    }
     const uint16_t *atlas = moy_gfx_buf_r(a[4], &acap);
     mp_int_t ntiles = mp_obj_get_int(a[5]);
     mp_int_t tile = mp_obj_get_int(a[6]);
@@ -243,15 +262,24 @@ static mp_obj_t moy_gfx_blit_batch(size_t n_args, const mp_obj_t *a) {
     mp_int_t tpx = tile * tile;                  // pixels per atlas tile
     if ((size_t)ntiles * (size_t)tpx > acap) return mp_const_none;  // atlas too small
     for (size_t i = 0; i < n_items; i++) {
-        size_t ilen;
-        mp_obj_t *ielem;
-        mp_obj_get_array(item_arr[i], &ilen, &ielem);  // (tile, x, y[, flip])
-        if (ilen < 3) continue;
-        mp_int_t tid = mp_obj_get_int(ielem[0]);
+        mp_int_t tid, dx0, dy0, flip;
+        if (qitems != NULL) {
+            const int16_t *it = qitems + i * 4u;   // (tile, x, y, flip) int16 quad
+            tid = it[0];
+            dx0 = (mp_int_t)it[1] - cam_x;
+            dy0 = (mp_int_t)it[2] - cam_y;
+            flip = it[3];
+        } else {
+            size_t ilen;
+            mp_obj_t *ielem;
+            mp_obj_get_array(item_arr[i], &ilen, &ielem);  // (tile, x, y[, flip])
+            if (ilen < 3) continue;
+            tid = mp_obj_get_int(ielem[0]);
+            dx0 = mp_obj_get_int(ielem[1]) - cam_x;
+            dy0 = mp_obj_get_int(ielem[2]) - cam_y;
+            flip = (ilen > 3) ? mp_obj_get_int(ielem[3]) : 0;
+        }
         if (tid < 0 || tid >= ntiles) continue;
-        mp_int_t dx0 = mp_obj_get_int(ielem[1]) - cam_x;
-        mp_int_t dy0 = mp_obj_get_int(ielem[2]) - cam_y;
-        mp_int_t flip = (ilen > 3) ? mp_obj_get_int(ielem[3]) : 0;
         mp_int_t fx = flip & 1;
         mp_int_t fy = (flip >> 1) & 1;
         const uint16_t *tsrc = atlas + (size_t)tid * (size_t)tpx;
@@ -281,6 +309,122 @@ static mp_obj_t moy_gfx_blit_batch(size_t n_args, const mp_obj_t *a) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit_batch_obj, 15, 15, moy_gfx_blit_batch);
+
+// --- spr_gate: the kid-facing native spr() fast path (#63) -------------------
+//
+// WHY THIS EXISTS (measured on ESP32-S3, warm 1MB heap): a MicroPython function
+// whose call frame exceeds ~11 machine words (params + locals + VM stack) heap-
+// allocates that frame on EVERY call, and finding a contiguous multi-block hole
+// in a warm, fragmented gc heap costs ~1.5ms PER CALL. The kid API's 8-param
+// `spr` closure and `spr_tile` both spill, so a kid's innocent
+// `for e in enemies: spr(...)` loop over 120 objects costs ~150ms/frame once the
+// heap warms up (sakura's 29->12fps collapse). A native callable has NO Python
+// frame at all: the same loop lands here at ~2-5us per call, allocation-free.
+//
+// The gate wraps ONE cart sheet + the canvas batch array (array('h'):
+// [next, colorkey, scale, token, (tile x y flip)*N]). The hot path parses
+// (n, x, y[, colorkey[, scale[, flip]]]) -- ints or floats -- clamps to int16
+// and appends a quad; blit_batch (array mode) later draws the whole run in one
+// call. Anything unusual (kwargs, w/h spans, an Image `n`, a weird type) is
+// delegated verbatim to `fallback`, the original Python spr closure, so
+// semantics are IDENTICAL -- this is purely the fast lane. Run state breaks
+// (first item, colorkey/scale change, another writer's token, full queue) call
+// the canvas's Python begin_batch, which flushes any pending run and
+// re-registers -- rare, so its cost is irrelevant.
+typedef struct _moy_gfx_spr_gate_obj_t {
+    mp_obj_base_t base;
+    mp_obj_t canvas;     // DeviceCanvas (begin_batch/flush_batch on rare paths)
+    mp_obj_t sheet;      // the cart's SpriteSheet (registered on run start)
+    mp_obj_t arr;        // the batch array('h') -- held so gc keeps the buffer
+    mp_obj_t fallback;   // the Python spr closure (full semantics)
+    int16_t *q;          // arr's int16 data (stable: MicroPython gc never moves)
+    size_t qlen;         // arr length in int16 elements
+    mp_int_t token;      // unique per-gate run tag, mirrored in q[3]
+} moy_gfx_spr_gate_obj_t;
+
+static mp_obj_t spr_gate_call(mp_obj_t self_in, size_t n_args, size_t n_kw,
+                              const mp_obj_t *args) {
+    moy_gfx_spr_gate_obj_t *g = MP_OBJ_TO_PTR(self_in);
+    if (n_kw != 0 || n_args < 3 || n_args > 6) {
+        // kwargs / w,h span args -> full Python semantics
+        return mp_call_function_n_kw(g->fallback, n_args, n_kw, args);
+    }
+    mp_int_t v[6] = {0, 0, 0, -1, 1, 0};   // n, x, y, colorkey, scale, flip
+    for (size_t i = 0; i < n_args; i++) {
+        mp_obj_t o = args[i];
+        if (mp_obj_is_small_int(o)) {
+            v[i] = MP_OBJ_SMALL_INT_VALUE(o);
+        } else if (mp_obj_is_float(o)) {
+            v[i] = (mp_int_t)mp_obj_get_float(o);   // kid float coords: truncate
+        } else {
+            // an Image (ASCII-art sprite) or anything exotic -> Python path
+            return mp_call_function_n_kw(g->fallback, n_args, n_kw, args);
+        }
+    }
+    int16_t *q = g->q;
+    mp_int_t k = q[0];
+    if (k < 4) k = 4;
+    if (k == 4 || (size_t)(k + 4) > g->qlen
+        || q[3] != (int16_t)g->token
+        || q[1] != (int16_t)v[3] || q[2] != (int16_t)v[4]) {
+        // run break (first item / state change / foreign run / full queue):
+        // canvas.begin_batch flushes any pending run and registers this one.
+        mp_obj_t dest[2 + 4];
+        mp_load_method(g->canvas, MP_QSTR_begin_batch, dest);
+        dest[2] = g->sheet;
+        dest[3] = MP_OBJ_NEW_SMALL_INT(v[3]);
+        dest[4] = MP_OBJ_NEW_SMALL_INT(v[4]);
+        dest[5] = MP_OBJ_NEW_SMALL_INT(g->token);
+        mp_call_method_n_kw(4, 0, dest);
+        k = q[0];
+        if (k < 4 || (size_t)(k + 4) > g->qlen) {
+            return mp_const_none;          // defensive: queue unusable, drop
+        }
+    }
+    // clamp to int16: an off-screen coord clamps to a still-off-screen value
+    // (blit_batch clips), an out-of-range tile id becomes invalid (skipped).
+    mp_int_t tid = v[0];
+    if (tid < -32768 || tid > 32767) tid = -1;
+    mp_int_t x = v[1];
+    if (x < -32768) x = -32768; else if (x > 32767) x = 32767;
+    mp_int_t y = v[2];
+    if (y < -32768) y = -32768; else if (y > 32767) y = 32767;
+    q[k] = (int16_t)tid;
+    q[k + 1] = (int16_t)x;
+    q[k + 2] = (int16_t)y;
+    q[k + 3] = (int16_t)(v[5] & 3);
+    q[0] = (int16_t)(k + 4);
+    return mp_const_none;
+}
+
+static MP_DEFINE_CONST_OBJ_TYPE(
+    moy_gfx_spr_gate_type,
+    MP_QSTR_spr_gate,
+    MP_TYPE_FLAG_NONE,
+    call, spr_gate_call
+);
+
+// make_spr_gate(canvas, sheet, arr, token, fallback) -> spr_gate callable.
+static mp_obj_t moy_gfx_make_spr_gate(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    mp_buffer_info_t bi;
+    mp_get_buffer_raise(a[2], &bi, MP_BUFFER_RW);
+    if (bi.len < 2 * 8) {
+        mp_raise_ValueError(MP_ERROR_TEXT("batch array too small"));
+    }
+    moy_gfx_spr_gate_obj_t *g = mp_obj_malloc(moy_gfx_spr_gate_obj_t,
+                                              &moy_gfx_spr_gate_type);
+    g->canvas = a[0];
+    g->sheet = a[1];
+    g->arr = a[2];
+    g->fallback = a[4];
+    g->q = (int16_t *)bi.buf;
+    g->qlen = bi.len / 2u;
+    g->token = mp_obj_get_int(a[3]);
+    return MP_OBJ_FROM_PTR(g);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_make_spr_gate_obj, 5, 5,
+                                           moy_gfx_make_spr_gate);
 
 // --- native vector primitives (#43 follow-up) -------------------------------
 //
@@ -545,6 +689,7 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_blit565),    MP_ROM_PTR(&moy_gfx_blit565_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_map),   MP_ROM_PTR(&moy_gfx_blit_map_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_batch), MP_ROM_PTR(&moy_gfx_blit_batch_obj) },
+    { MP_ROM_QSTR(MP_QSTR_make_spr_gate), MP_ROM_PTR(&moy_gfx_make_spr_gate_obj) },
     { MP_ROM_QSTR(MP_QSTR_circ),       MP_ROM_PTR(&moy_gfx_circ_obj) },
     { MP_ROM_QSTR(MP_QSTR_circb),      MP_ROM_PTR(&moy_gfx_circb_obj) },
     { MP_ROM_QSTR(MP_QSTR_line),       MP_ROM_PTR(&moy_gfx_line_obj) },

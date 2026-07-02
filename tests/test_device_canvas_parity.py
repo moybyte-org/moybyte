@@ -200,9 +200,12 @@ class _FakeGfx:
     @staticmethod
     def blit_batch(dst, dw, dh, items, atlas, ntiles, tile, scale, key,
                    cam_x, cam_y, cx0, cy0, cx1, cy1):
-        # #43/#63: draw a list of (tile, x, y[, flip]) sheet tiles from an RGB565 atlas
-        # in one call -- a faithful transcription of moy_gfx_blit_batch in modmoy_gfx.c,
-        # so the auto-batch path is cross-checked against the host rasterizer.
+        # #43/#63: draw a run of sheet tiles from an RGB565 atlas in one call -- a
+        # faithful transcription of moy_gfx_blit_batch in modmoy_gfx.c, so the
+        # auto-batch path is cross-checked against the host rasterizer. Like the C,
+        # `items` is EITHER a list of (tile, x, y[, flip]) tuples OR the canvas
+        # batch array('h') [next, ck, scale, token, (tile x y flip)*N...] (#63
+        # spr_gate array mode) -- detected the same way (buffer protocol).
         d = memoryview(dst).cast("H")
         a = memoryview(atlas).cast("H")
         acap = len(a)
@@ -221,6 +224,13 @@ class _FakeGfx:
         tpx = tile * tile
         if ntiles * tpx > acap:
             return
+        try:
+            q = memoryview(items).cast("B").cast("h")   # array mode (int16 quads)
+            nxt = max(4, min(q[0], len(q)))
+            items = [(q[i], q[i + 1], q[i + 2], q[i + 3])
+                     for i in range(4, nxt, 4)]
+        except TypeError:
+            pass                                        # classic list-of-tuples mode
         for it in items:
             if len(it) < 3:
                 continue
