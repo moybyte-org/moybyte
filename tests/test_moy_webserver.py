@@ -112,7 +112,7 @@ class _FakeDeviceCanvas:
         self.calls += 1
 
     cls = pix = line = rect = rectb = circ = circb = spr = print = _bump
-    spr_batch = map = reset_state = camera = clip = pal = palt = _bump
+    spr_batch = spr_tile = map = reset_state = camera = clip = pal = palt = _bump
 
     def sync_back(self):
         self.calls += 1
@@ -906,17 +906,70 @@ def test_frame_payload_shape():
 
 
 def test_perf_snapshot_shape_and_push_count():
-    """_perf_snapshot() is the tiny device-stats dict the perf log rides on: {heap, pf}.
-    heap is gc.mem_free KB (0 on CPython -- gc.mem_free is MicroPython-only, guarded), and
-    pf is the running pushed-frame counter that lets the browser derive device push-rate."""
+    """_perf_snapshot() is the tiny device-stats dict the perf log rides on. heap is gc.mem_free
+    KB (0 on CPython -- gc.mem_free is MicroPython-only, guarded), pf is the running pushed-frame
+    counter, and dr/gap/thr are the per-frame stutter instants the browser folds into a window
+    max (worst draw+commit ms / worst inter-push gap / throttled-push flag)."""
     rec = web.DrawRecorder(WIDTH, HEIGHT)
     server = _serveable(rec)
     snap = server._perf_snapshot()
-    assert set(snap.keys()) == {"heap", "pf", "js", "tx"}
-    assert all(isinstance(snap[k], int) for k in ("heap", "pf", "js", "tx"))
+    keys = ("heap", "pf", "js", "tx", "dr", "gap", "thr")
+    assert set(snap.keys()) == set(keys)
+    assert all(isinstance(snap[k], int) for k in keys)
     assert snap["pf"] == 0
     server._frames_pushed += 2                       # _push_frame bumps this per sent frame
     assert server._perf_snapshot()["pf"] == 2
+
+
+def test_perf_draw_ms_spans_begin_to_commit():
+    """dr = the begin_frame->commit_frame span (device draw + rasterize, sans the push), so a
+    slow cart frame surfaces even with no browser recording. Set unconditionally, so it works
+    on the no-WS path (begin_frame stamps the start, commit_frame closes it)."""
+    rec = web.DrawRecorder(WIDTH, HEIGHT)
+    server = _serveable(rec)
+    server.begin_frame()
+    server.commit_frame()
+    dr = server._perf_snapshot()["dr"]
+    assert isinstance(dr, int) and dr >= 0
+
+
+class _PushWS:
+    """A stand-in persistent WS conn that _service_ws can push through: drains no input and
+    just records sends, so a test can exercise the gap/throttle bookkeeping without a socket."""
+
+    def __init__(self):
+        self.alive = True
+        self.last_recv = web.ticks_ms()
+        self.sent = []
+
+    def drain_input(self):
+        return []
+
+    def send(self, payload):
+        self.sent.append(payload)
+
+
+def test_perf_gap_and_throttle_flag():
+    """A push records the REAL inter-push gap (the stutter signal) and flags whether the
+    bandwidth cap raised its interval above the fps floor -- so the log can tell a
+    throttle-limited launcher from a device-limited one. A light frame is not throttled; a
+    heavy (launcher-sized) one is."""
+    rec = web.DrawRecorder(WIDTH, HEIGHT)
+    server = _serveable(rec)
+    server._ws = _PushWS()
+    # A light frame at the fps cap -> not throttled, and a real gap is recorded.
+    server._last_payload_bytes = 800
+    server._last_push_ms = web.ticks_ms() - 1000     # force the push gate wide open
+    server._service_ws()
+    assert server._ws.sent, "the gate opened -> a frame was pushed"
+    snap = server._perf_snapshot()
+    assert snap["thr"] == 0
+    assert snap["gap"] > 0
+    # A heavy launcher-sized frame -> the interval is raised over the floor -> throttled.
+    server._last_payload_bytes = 4300
+    server._last_push_ms = web.ticks_ms() - 1000
+    server._service_ws()
+    assert server._perf_snapshot()["thr"] == 1
 
 
 def test_push_interval_floors_on_bandwidth_for_heavy_frames():

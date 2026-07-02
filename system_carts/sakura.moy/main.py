@@ -314,24 +314,24 @@ EMIT = [(20, 44), (21, 76), (21, 114), (24, 133), (28, 61), (28, 152), (30, 95),
 # Authored to the device envelope: the static scene is stored ONCE as zlib-packed
 # palette indices, inflated + painted into an off-screen LAYER at _init (make_layer,
 # #54) and copied to the screen each frame as a flat blit (draw_layer) -- no
-# per-frame background work. All N petals blit in ONE spr_batch call (#43) rather
-# than up to two per-petal rect/pix calls -- the draw-call count is the device's
-# FPS ceiling. The sway reads a 256-entry sine table built once, so the per-frame
-# loop never calls math.*.
+# per-frame background work. The N petals are drawn with the naive per-petal spr()
+# loop, which the engine AUTO-BATCHES into ONE native blit_batch (Fold 1, #63) -- so
+# the kid-obvious loop is as fast as a hand-rolled spr_batch, and the draw-call count
+# (the device's FPS ceiling) collapses to one for the whole flurry. The sway reads a
+# 256-entry sine table built once, so the per-frame loop never calls math.*.
 
 import math
 
 SIN = []            # sine LUT (built once); the hot loop indexes it, never calls sin
 lay = None          # the static scene, inflated + painted once, copied per frame (#54)
 petals = []         # each: [x, y, fall_speed, sway_phase, sway_amp, shade(0 near..2 far)]
-batch = []          # spr_batch items [tile, x, y], one per petal: the tile is fixed at
-                    # _init (blossom + shade), only x/y refresh per frame -> one native call
+base = 0            # the run's blossom sheet column (base tile); each petal draws base + shade
 t = 0.0
 
 # Falling-petal palette by depth: (near, mid, far). Near gets a white glint. These
 # colours are BAKED INTO sprites.moygfx: tile = BLOSSOM_ORDER.index(colour)*3 + shade
 # (shade 0 near / 1 mid / 2 far), the near tile carrying the glint pixel. The petals
-# draw from that sheet via spr_batch, so if you change a colour here, REGENERATE the
+# draw from that sheet via spr(), so if you change a colour here, REGENERATE the
 # sheet to match (12 tiles, painted with these indices, colorkey 0).
 BLOSSOMS = {
     "pink":  (14, 14, 2),
@@ -404,7 +404,7 @@ def _shed(p, fresh):
 
 
 def _init():
-    global lay, petals, batch, t
+    global lay, petals, base, t
     _build_sin()
     if lay is None:                        # allocate the scene buffer only once
         lay = make_layer(W, H)
@@ -413,14 +413,12 @@ def _init():
     fall = float(cfg("fall_speed", 30))
     base = _blossom_base()                 # blossom fixes the tile column for the run
     petals = []
-    batch = []
     for i in range(n):
         shade = i % 3
         spd = fall * (1.0 - 0.18 * shade) * (0.7 + rnd(0.6))
         p = [0.0, 0.0, spd, 0.0, 4.0 + rnd(9.0), shade]
         _shed(p, False)
         petals.append(p)
-        batch.append([base + shade, 0, 0])   # tile fixed; x/y refreshed each frame in _draw
     t = 0.0
 
 
@@ -462,14 +460,13 @@ def _update(dt):
 
 
 def _draw():
-    # Background: one flat blit. Petals: refresh each batch item's x/y (its tile was
-    # fixed at _init) and hand the whole list to spr_batch -- ONE native draw call for
-    # all N petals. The tile art bakes the depth colour + the near-petal white glint,
-    # with index 0 as the transparent colorkey (no petal colour is 0).
+    # Background: one flat blit. Petals: the naive per-petal spr() loop -- one call per
+    # petal at (x, y), colorkey 0 (index 0 is transparent in the tile art). This
+    # contiguous run of 1x1 sheet-tile spr()s is AUTO-BATCHED by the engine into ONE
+    # native blit_batch (Fold 1, #63), so it costs the same as a hand-rolled spr_batch
+    # and is pixel-identical -- the kid never has to know spr_batch exists. Each petal's
+    # tile is `base` (the run's blossom column) + its depth shade p[5]; the tile art
+    # bakes the depth colour + the near-petal white glint.
     draw_layer(lay, 0, 0)
-    b = batch
-    for i, p in enumerate(petals):
-        e = b[i]
-        e[1] = int(p[0])
-        e[2] = int(p[1])
-    spr_batch(b, 0)
+    for p in petals:
+        spr(base + p[5], int(p[0]), int(p[1]), 0)

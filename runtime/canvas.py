@@ -59,6 +59,14 @@ class Canvas:
         self.h = height
         self.palette = palette or _pal.MOY64
         self.buf = bytearray(width * height)
+        # Pending sprite batch (Fold 1, #63): spr_tile() queues 1x1 sheet-tile blits
+        # here instead of drawing them immediately, and flush_batch() emits the whole
+        # run in one go (spr_batch -> one native blit_batch on device). Initialised
+        # BEFORE reset_state() so its flush is a safe no-op on the very first call.
+        self._batch_sheet = None
+        self._batch_items = []
+        self._batch_colorkey = -1
+        self._batch_scale = 1
         # Draw state (TIC-80 cluster 2). reset_state() initialises camera/clip/pal/palt.
         self.reset_state()
 
@@ -68,6 +76,9 @@ class Canvas:
         """Restore camera (0,0), clip (full screen), pal (identity), palt (all
         opaque). The console calls this before each cart frame so draw state never
         leaks between carts or between a cart and the UI."""
+        # Draw any queued sprites FIRST: they were spr_tile()'d under the current
+        # camera/clip/pal/palt, so they must be emitted before that state is wiped.
+        self.flush_batch()
         self._cam_x = 0
         self._cam_y = 0
         self._clip_x0 = 0
@@ -86,6 +97,7 @@ class Canvas:
         """TIC-80 camera(x, y): subtract (x, y) from all subsequent draw coords so a
         world-space cart scrolls. camera() with no args resets to (0, 0). Returns the
         previous offset (TIC-80 returns the prior camera)."""
+        self.flush_batch()             # queued sprites belong to the OLD camera (#63)
         prev = (self._cam_x, self._cam_y)
         self._cam_x = int(x)
         self._cam_y = int(y)
@@ -95,6 +107,7 @@ class Canvas:
         """TIC-80 clip(x, y, w, h): restrict drawing to a rectangle (screen space,
         i.e. AFTER the camera offset, like TIC-80). clip() with no args resets to the
         full screen. The rect is clamped to the canvas."""
+        self.flush_batch()             # queued sprites belong to the OLD clip (#63)
         if x is None:
             self._clip_x0 = 0
             self._clip_y0 = 0
@@ -114,6 +127,7 @@ class Canvas:
         """TIC-80 pal(c0, c1): remap draw-time index c0 -> c1 (recolour idiom). pal()
         with no args resets the table to identity. Applies to every primitive AND to
         sprite pixels (so a recoloured sprite draws with swapped palette entries)."""
+        self.flush_batch()             # queued sprites belong to the OLD pal map (#63)
         if c0 is None:
             for i in range(64):
                 self._pal_map[i] = i
@@ -124,6 +138,7 @@ class Canvas:
         """TIC-80 palt(c, on): mark index c transparent (on=True) or opaque for spr().
         palt() with no args resets to the default (all opaque). This is consulted in
         addition to the per-call colorkey / Image.transparent."""
+        self.flush_batch()             # queued sprites belong to the OLD palt (#63)
         if c is None:
             for i in range(64):
                 self._palt[i] = 0
@@ -135,6 +150,7 @@ class Canvas:
     def cls(self, c=0):
         # cls ignores camera/clip (it's a full-surface reset, like TIC-80) but DOES
         # honour the pal remap so a recoloured palette clears consistently.
+        self.flush_batch()             # #63: a non-spr primitive breaks the batch
         self.buf[:] = bytes((self._pal_map[c & 63],)) * (self.w * self.h)
 
     def _put(self, x, y, ci):
@@ -150,6 +166,9 @@ class Canvas:
     def pix(self, x, y, c=None):
         # TIC-80 pix: read the index at (x, y) with two args, set it with three
         # (replaces the old pset/pget pair). Reads are camera-relative too.
+        # Flush the pending sprite batch first so a WRITE keeps draw order and a READ
+        # never samples a stale pixel under a queued-but-unblitted sprite (#63).
+        self.flush_batch()
         x = int(x) - self._cam_x
         y = int(y) - self._cam_y
         if not (0 <= x < self.w and 0 <= y < self.h):
@@ -161,6 +180,7 @@ class Canvas:
         self.buf[y * self.w + x] = self._pal_map[c & 63]
 
     def line(self, x0, y0, x1, y1, c):
+        self.flush_batch()             # #63: a non-spr primitive breaks the batch
         x0 = int(x0)
         y0 = int(y0)
         x1 = int(x1)
@@ -186,6 +206,7 @@ class Canvas:
     def rect(self, x, y, w, h, c):
         # TIC-80 rect = FILLED rectangle (the old rectfill). Camera-offset the corner,
         # then intersect the span with the clip rect so out-of-clip pixels are dropped.
+        self.flush_batch()             # #63: a non-spr primitive breaks the batch
         x = int(x) - self._cam_x
         y = int(y) - self._cam_y
         x0 = max(self._clip_x0, x)
@@ -204,6 +225,7 @@ class Canvas:
 
     def rectb(self, x, y, w, h, c):
         # TIC-80 rectb = rectangle border/outline (the old rect).
+        self.flush_batch()             # #63: a non-spr primitive breaks the batch
         x = int(x)
         y = int(y)
         w = int(w)
@@ -216,6 +238,7 @@ class Canvas:
     def circ(self, cx, cy, r, c):
         # TIC-80 circ = FILLED circle (the old circfill). Each scanline is a rect(),
         # so camera/clip/pal apply through rect().
+        self.flush_batch()             # #63: a non-spr primitive breaks the batch
         cx = int(cx)
         cy = int(cy)
         r = int(r)
@@ -225,6 +248,7 @@ class Canvas:
 
     def circb(self, cx, cy, r, c):
         # TIC-80 circb = circle border/outline (the old circ).
+        self.flush_batch()             # #63: a non-spr primitive breaks the batch
         cx = int(cx)
         cy = int(cy)
         r = int(r)
@@ -245,6 +269,9 @@ class Canvas:
     def spr(self, img, x, y, scale=1, flip=0):
         # TIC-80 flip: 0=none, 1=horizontal, 2=vertical, 3=both. The source pixel
         # read is mirrored per `flip`; camera/clip/pal/palt all apply through _put.
+        # An Image blit is NOT part of an auto-batch (#63): flush any pending sheet-tile
+        # run first (so it lands underneath), then draw this one immediately.
+        self.flush_batch()
         x = int(x)
         y = int(y)
         scale = int(scale)
@@ -279,6 +306,49 @@ class Canvas:
                     continue
                 self.rect(x + sx * scale, y + sy * scale, scale, scale, p)
 
+    def spr_tile(self, sheet, tile, x, y, colorkey=-1, scale=1, flip=0):
+        """Queue a 1x1 sheet-tile sprite into the pending batch instead of blitting it
+        now (Fold 1, #63). A contiguous run of these coalesces into ONE spr_batch (one
+        native blit_batch on device) at flush -- so a kid's naive `for e in enemies:
+        spr(e.tile, ...)` loop is as fast as a hand-rolled spr_batch, automatically.
+
+        `blit_batch` bakes colorkey + scale once per call, so a change in either breaks
+        the run (flush here, start a new batch); a change in camera/clip/pal/palt breaks
+        it via those methods; every non-spr primitive breaks it via its own flush_batch.
+        flip is per-item (blit_batch supports it), so it does NOT break the run."""
+        if self._batch_items and (
+                sheet is not self._batch_sheet
+                or colorkey != self._batch_colorkey
+                or scale != self._batch_scale):
+            self.flush_batch()
+        if not self._batch_items:
+            self._batch_sheet = sheet
+            self._batch_colorkey = colorkey
+            self._batch_scale = scale
+        self._batch_items.append((int(tile), int(x), int(y), int(flip)))
+
+    def flush_batch(self):
+        """Emit the pending spr_tile() batch in queue order, then clear it. A lone item
+        falls back to a direct blit (no batch overhead -- no regression for a single
+        sprite between primitives); a run goes through spr_batch (one native blit_batch
+        on device). The list is cleared BEFORE drawing so the re-entrant flush_batch()
+        inside spr()/spr_batch() is a harmless no-op."""
+        items = self._batch_items
+        if not items:
+            return
+        sheet = self._batch_sheet
+        colorkey = self._batch_colorkey
+        scale = self._batch_scale
+        self._batch_items = []
+        self._batch_sheet = None
+        if len(items) == 1:
+            tile, x, y, flip = items[0]
+            img = sheet.tile_image(tile, colorkey)
+            if img is not None:
+                self.spr(img, x, y, scale, flip)
+        else:
+            self.spr_batch(sheet, items, colorkey, scale)
+
     def spr_batch(self, sheet, items, colorkey=-1, scale=1):
         # Draw many sheet tiles in one call (#43) -- the sprite analogue of map(). The
         # device collapses this to a single moy_gfx.blit_batch C call (the draw-call
@@ -286,6 +356,7 @@ class Canvas:
         # reference, and must match the device pixel-for-pixel. `items` is a sequence of
         # (tile, x, y) or (tile, x, y, flip) tuples; tiles resolve through `sheet` like
         # map(). camera/clip/pal/palt all apply inside self.spr().
+        self.flush_batch()             # #63: emit any auto-batched run first (z-order)
         for it in items:
             tile = it[0]
             x = it[1]
@@ -305,6 +376,7 @@ class Canvas:
         # here it's the readable per-tile reference. Tile images are cached by id so
         # a repeated tile is built once per draw, not once per cell. spr() carries
         # camera/clip/pal/palt, so map inherits the draw state too.
+        self.flush_batch()             # #63: map() is a non-spr primitive -> break batch
         mx = int(mx)
         my = int(my)
         scale = int(scale)
@@ -336,6 +408,7 @@ class Canvas:
         # Render with the shared petme128 8x8 font so host text is pixel-identical
         # to the device's framebuf.text. Fixed 8px like the device -- `scale` is
         # accepted for call-compatibility but ignored (the device can't scale text).
+        self.flush_batch()             # #63: print() is a non-spr primitive -> break batch
         ci = c & 63
         put = self._put
 
@@ -361,6 +434,13 @@ class Canvas:
         to the source bounds exactly like the C kernel; draw_layer keeps cam in range so
         the full window always lands. Overwrites (no transparency): it's the background,
         drawn first each frame, and it erases last frame's sprites for free."""
+        # #63: flush BOTH sides -- this canvas's queued sprites (drawn, then overwritten
+        # by the opaque copy, exactly as immediate mode would) and the source layer's,
+        # so its pixels are complete before we read them.
+        self.flush_batch()
+        _fb = getattr(layer, "flush_batch", None)
+        if _fb is not None:
+            _fb()
         cam_x = int(cam_x)
         cam_y = int(cam_y)
         if cam_x < 0:
@@ -398,6 +478,10 @@ class Canvas:
         sprite path uses (key=-1 -> fully opaque). Out-of-bounds rows/cols are clamped to
         the destination, exactly like the C kernel, so an over-tall/over-wide strip is
         safe. Ignores camera/clip/pal (it's a chrome blit over a finished frame)."""
+        self.flush_batch()             # #63: emit this canvas's queued sprites first
+        _fb = getattr(layer, "flush_batch", None)
+        if _fb is not None:
+            _fb()                      # ... and complete the source strip's pixels
         dst_x = int(dst_x)
         dst_y = int(dst_y)
         dst = self.buf
@@ -431,6 +515,7 @@ class Canvas:
     # -- output --------------------------------------------------------------
 
     def to_rgb888(self):
+        self.flush_batch()             # #63: complete any queued sprites before readout
         pal3 = [bytes(rgb) for rgb in self.palette]
         return b"".join(pal3[i] for i in self.buf)
 

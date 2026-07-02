@@ -352,11 +352,15 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         if sheet is None:
             return
         if w > 1 or h > 1:
+            # Multi-tile sprite: resolve the span Image and draw it immediately (the
+            # canvas flushes any pending 1x1 auto-batch first).
             img = sheet.tile_span_image(int(n), int(w), int(h), colorkey)
-        else:
-            img = sheet.tile_image(int(n), colorkey)
-        if img is not None:
-            canvas.spr(img, x, y, scale, flip)
+            if img is not None:
+                canvas.spr(img, x, y, scale, flip)
+            return
+        # Plain 1x1 sheet tile: auto-batch (#63). The canvas queues it and coalesces a
+        # contiguous run into one spr_batch/blit_batch, flushing on any state break.
+        canvas.spr_tile(sheet, int(n), x, y, colorkey, scale, flip)
 
     def map_(mx=0, my=0, w=None, h=None, sx=0, sy=0, colorkey=-1, scale=1):
         # TIC-80 map(mx, my, w, h, sx, sy, colorkey, scale): blit a w x h region of
