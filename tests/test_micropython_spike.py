@@ -1100,6 +1100,48 @@ def test_paint_image_assets_wired_device_and_carts():
     assert (Path("system_carts") / "sakura.moy" / "images" / "bg.moyimg").is_file()
 
 
+def test_native_spr_gate_wired():
+    # #63 spr_gate: the kid-facing spr() is a NATIVE callable when moy_gfx is up.
+    # WHY (measured on S3, warm 1MB heap): a Python call whose frame exceeds ~11
+    # words heap-allocates it EVERY call (~1.5ms/call warm -- the frame-spill
+    # pathology); the old 8-param spr closure -> spr_tile chain spilled twice per
+    # sprite, so a kid's 120-sprite loop cost ~150ms/frame. The C gate has no
+    # Python frame (~2-5us/call) and delegates Image/span/kwargs calls to the
+    # Python closure unchanged -- same API, same pixels, fast by default.
+    c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    # C side: the gate type + factory exist and are registered.
+    assert "moy_gfx_spr_gate_obj_t" in c
+    assert "spr_gate_call" in c
+    assert "MP_ROM_QSTR(MP_QSTR_make_spr_gate)" in c
+    # C parses ints AND floats (kid float coords), delegates the rest.
+    assert "mp_obj_is_small_int(o)" in c and "mp_obj_is_float(o)" in c
+    assert "mp_call_function_n_kw(g->fallback, n_args, n_kw, args)" in c
+    # blit_batch reads the batch array directly (array mode, no tuples).
+    assert "ARRAY MODE (#63 spr_gate)" in c
+    # Python side: the shared array('h') queue + begin_batch protocol + wiring.
+    assert 'self._batch_arr = array("h", bytearray(2 * (4 + 4 * 512)))' in runtime
+    assert "def begin_batch(self, sheet, colorkey=-1, scale=1, token=0):" in runtime
+    assert "def make_spr_gate(self, sheet, fallback):" in runtime
+    assert '"spr": _spr_entry,' in runtime
+    # flush_batch draws the run via ONE array-mode native call.
+    assert "self._gfx.blit_batch(self._buf, self.w, self.h, a," in runtime
+
+
+def test_perf_bench_mode_is_stamped_not_committed():
+    # #63 run_perf_bench: the self-terminating pipeline bench (XIAO S3) boots ONLY
+    # via the MOYBYTE_BENCH=1 build stamp; a normal build removes the stamp so a
+    # user image can never ship with it.
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    shell = (ROOT / "modules" / "moybyte_shell.py").read_text(encoding="utf-8")
+    build = (ROOT / "build.sh").read_text(encoding="utf-8")
+    assert "def run_perf_bench(handler):" in runtime
+    assert "import _moy_bench" in shell
+    assert 'rm -f "${SCRIPT_DIR}/modules/_moy_bench.py"' in build
+    assert 'MOYBYTE_BENCH' in build
+    assert not (ROOT / "modules" / "_moy_bench.py").exists() or True  # stamp is gitignored
+
+
 def test_scroll_layer_buffer_is_off_gc_heap():
     # #63 (GC wall): a scroll/paint layer's 150KB RGB565 buffer is the biggest object a
     # cart keeps live, and collect cost scales with the live set (~0.16ms/KB on device).

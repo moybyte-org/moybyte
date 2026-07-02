@@ -100,6 +100,9 @@ def _decode_moyimg(text):
         return None
 
 
+_GATE_SEQ = [0]     # spr_gate token counter (#63): unique per gate, int16-safe, never 0.
+
+
 class DeviceCanvas:
     """The kid drawing API. The hot ops (cls/rect/circ/spr) go through the native
     moy_gfx C kernel writing straight into the compositor's RGB565 framebuffer --
@@ -123,13 +126,20 @@ class DeviceCanvas:
         # and pick the matching one on each swap; no per-frame allocation. In
         # single-buffer mode framebuffer() never moves, so sync_back is a cheap no-op.
         self._fb_by_buf = {id(self._buf): self._fb}
-        # Pending sprite batch (Fold 1, #63): spr_tile() queues 1x1 sheet-tile blits
-        # here instead of drawing them now; flush_batch() emits the whole run in one
-        # native moy_gfx.blit_batch. Initialised BEFORE reset_state so its flush no-ops.
+        # Pending sprite batch (Fold 1 -> #63 spr_gate): 1x1 sheet-tile blits queue
+        # into ONE flat array('h') instead of a list of tuples -- layout
+        # [next, colorkey, scale, token, (tile x y flip)*N], items from index 4.
+        # WHY an array: (a) the native spr_gate appends to it straight from C with
+        # zero Python-object churn (the fix for the warm-heap call-frame-spill
+        # pathology -- see make_spr_gate below), and (b) blit_batch reads it
+        # directly (array mode), so a full run draws without ever materialising
+        # tuples. token tags WHICH writer owns the pending run (a C gate's id, or
+        # 0 for the Python spr_tile path) so interleaved writers force a clean
+        # flush+begin instead of silently mixing sheets.
+        # Initialised BEFORE reset_state so its flush no-ops.
         self._batch_sheet = None
-        self._batch_items = []
-        self._batch_colorkey = -1
-        self._batch_scale = 1
+        self._batch_arr = array("h", bytearray(2 * (4 + 4 * 512)))
+        self._batch_arr[0] = 4
         # Auto-batch profiling counters (#63, perf_capture): per frame, run count / total
         # sprites batched / largest run -- so a profile can PROVE N sprites coalesced into
         # ONE blit_batch (flushes=1, maxrun=N) vs drawn one-by-one (flushes=N, maxrun=1).
@@ -576,51 +586,134 @@ class DeviceCanvas:
                     continue
                 self._spr_py(img, sx + cx * step, py, scale)
 
+    def begin_batch(self, sheet, colorkey=-1, scale=1, token=0):
+        # Register a new batch run: flush whatever is pending, then stamp the run
+        # state into the array header. Called on every run BREAK only (first item,
+        # colorkey/scale change, writer change, full queue) -- never per sprite --
+        # by both the Python spr_tile path (token 0) and the native spr_gate (its
+        # own token), so the two writers can interleave safely.
+        a = self._batch_arr
+        if a[0] > 4:
+            self.flush_batch()
+        self._batch_sheet = sheet
+        a[1] = int(colorkey)
+        a[2] = int(scale)
+        a[3] = token
+
     def spr_tile(self, sheet, tile, x, y, colorkey=-1, scale=1, flip=0):
         # Queue a 1x1 sheet-tile sprite into the pending batch instead of blitting it
         # now (Fold 1, #63). A contiguous run coalesces into ONE native moy_gfx.blit_batch
         # at flush -- so a kid's naive `for e in enemies: spr(e.tile, ...)` loop is as
-        # fast as a hand-rolled spr_batch, automatically. blit_batch bakes colorkey +
-        # scale once per call, so a change in either breaks the run (flush, start anew);
-        # camera/clip/pal/palt changes break it via those methods; every non-spr
-        # primitive breaks it via its own flush_batch. flip is per-item -> no break.
-        if self._batch_items and (
-                sheet is not self._batch_sheet
-                or colorkey != self._batch_colorkey
-                or scale != self._batch_scale):
-            self.flush_batch()
-        if not self._batch_items:
-            self._batch_sheet = sheet
-            self._batch_colorkey = colorkey
-            self._batch_scale = scale
-        self._batch_items.append((int(tile), int(x), int(y), int(flip)))
+        # fast as a hand-rolled spr_batch, automatically. A colorkey/scale change breaks
+        # the run (flush, start anew); camera/clip/pal/palt changes break it via those
+        # methods; every non-spr primitive breaks it via its own flush_batch. flip is
+        # per-item -> no break. This is the PYTHON writer (console chrome, no-gfx
+        # parity); a running cart's spr goes through the native spr_gate instead, which
+        # appends to the SAME array from C (token-tagged, see begin_batch).
+        a = self._batch_arr
+        k = a[0]
+        if k == 4:
+            self.begin_batch(sheet, colorkey, scale, 0)
+        elif (sheet is not self._batch_sheet or a[3] != 0
+                or colorkey != a[1] or scale != a[2] or k + 4 > 2052):
+            self.begin_batch(sheet, colorkey, scale, 0)
+            k = 4
+        t = int(tile)
+        if t < -32768 or t > 32767:
+            t = -1                     # invalid tile id -> skipped at draw
+        xi = int(x)
+        if xi < -32768:
+            xi = -32768
+        elif xi > 32767:
+            xi = 32767                 # off-screen clamps stay off-screen (C clips)
+        yi = int(y)
+        if yi < -32768:
+            yi = -32768
+        elif yi > 32767:
+            yi = 32767
+        a[k] = t
+        a[k + 1] = xi
+        a[k + 2] = yi
+        a[k + 3] = int(flip) & 3
+        a[0] = k + 4
+
+    def make_spr_gate(self, sheet, fallback):
+        # Build the native kid-facing spr() callable (#63): a moy_gfx C object that
+        # appends (tile, x, y, flip) quads to _batch_arr with NO Python call frame.
+        # WHY: a Python function whose frame exceeds ~11 words heap-allocates it on
+        # EVERY call, and on a warm fragmented heap that alloc costs ~1.5ms -- so a
+        # kid's 120-sprite loop through the old spr closure -> spr_tile chain cost
+        # ~150ms/frame (sakura's 29->12fps collapse, measured on S3). The C gate is
+        # allocation-free (~2-5us/call) and delegates anything unusual (Image, w/h
+        # spans, kwargs) to `fallback` -- the Python spr closure -- unchanged.
+        # Returns None (caller keeps the Python path) off-gfx or on old firmware.
+        g = self._gfx
+        if g is None or sheet is None:
+            return None
+        mk = getattr(g, "make_spr_gate", None)
+        if mk is None:
+            return None
+        _GATE_SEQ[0] = (_GATE_SEQ[0] & 0x3FFF) + 1     # int16-safe, never 0
+        try:
+            return mk(self, sheet, self._batch_arr, _GATE_SEQ[0], fallback)
+        except Exception:  # noqa: BLE001 -- any C-side refusal -> Python path
+            return None
 
     def flush_batch(self):
-        # Emit the pending spr_tile() batch in queue order, then clear it. A lone item
-        # falls back to a direct blit565 (no batch overhead -- no regression for a single
-        # sprite between primitives); a run goes through spr_batch -> one native
-        # blit_batch. Cleared BEFORE drawing so the re-entrant flush_batch() inside
-        # spr()/spr_batch() is a harmless no-op.
-        items = self._batch_items
-        if not items:
+        # Emit the pending batch in queue order, then clear it. A lone item falls
+        # back to a direct blit565 (no batch overhead -- no regression for a single
+        # sprite between primitives); a run goes through ONE native blit_batch in
+        # ARRAY MODE (the C kernel reads the int16 quads straight from _batch_arr --
+        # no tuples ever exist on this path). Header reset FIRST so the re-entrant
+        # flush_batch() inside spr() is a harmless no-op.
+        a = self._batch_arr
+        k = a[0]
+        if k <= 4:
             return
         sheet = self._batch_sheet
-        colorkey = self._batch_colorkey
-        scale = self._batch_scale
-        self._batch_items = []
+        colorkey = a[1]
+        scale = a[2]
+        a[0] = 4
         self._batch_sheet = None
-        n = len(items)                 # profiling: count the run (see batch_reset, #63)
+        n = (k - 4) >> 2               # profiling: count the run (see batch_reset, #63)
         self._batch_flushes += 1
         self._batch_sprites += n
         if n > self._batch_maxrun:
             self._batch_maxrun = n
+        if sheet is None:
+            return                     # defensive: state lost -> drop the quads
         if n == 1:
-            tile, x, y, flip = items[0]
+            tile, x, y, flip = a[4], a[5], a[6], a[7]
             img = sheet.tile_image(tile, colorkey)
             if img is not None:
                 self.spr(img, x, y, scale, flip)
-        else:
-            self.spr_batch(sheet, items, colorkey, scale)
+            return
+        if self._gfx is None:
+            # Fallback: per-item framebuf spr (camera+clip applied inside spr()).
+            # Tile images cached by id so a repeated tile builds once.
+            cache = {}
+            i = 4
+            while i < k:
+                tid = a[i]
+                if tid >= 0:
+                    img = cache.get(tid)
+                    if img is None:
+                        img = sheet.tile_image(tid, colorkey)
+                        cache[tid] = img if img is not None else False
+                    if img:
+                        self.spr(img, a[i + 1], a[i + 2], scale, a[i + 3])
+                i += 4
+            return
+        atlas, ntiles = self._sheet_atlas(sheet, colorkey)
+        a[0] = k                       # array mode: C reads the count from a[0]
+        _t0 = _ticks_us()              # #63 DRAW2: time the native sprite batch
+        self._gfx.blit_batch(self._buf, self.w, self.h, a,
+                             atlas, ntiles, sheet.TILE, scale, _RGB_KEY,
+                             self._cam_x, self._cam_y,
+                             self._clip_x0, self._clip_y0,
+                             self._clip_x1, self._clip_y1)
+        self._t_batch_us += _ticks_diff(_ticks_us(), _t0)
+        a[0] = 4
 
     def batch_reset(self):
         # Zero the auto-batch profiling counters (#63) at the top of a frame when perf
@@ -1128,11 +1221,25 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
             return im
         return Image.from_ascii(a, mapping, transparent)
 
+    # #63: hand the kid the NATIVE spr fast path when available. The C gate parses
+    # (n, x, y[, colorkey[, scale[, flip]]]) and appends to the canvas batch array
+    # with no Python call frame -- the fix for the warm-heap frame-spill pathology
+    # that made a 120-sprite kid loop cost ~150ms/frame (see make_spr_gate). The
+    # Python closure above stays as its fallback (Image sprites, w/h spans, kwargs)
+    # and as the whole path off-gfx (host parity, web TeeCanvas), so pixels and
+    # semantics are identical either way. Kid code never changes: it's still spr().
+    _spr_entry = spr
+    _mkgate = getattr(canvas, "make_spr_gate", None)
+    if _mkgate is not None:
+        _gate = _mkgate(sheet, spr)
+        if _gate is not None and callable(_gate):
+            _spr_entry = _gate
+
     ns = {
         "W": canvas.w, "H": canvas.h,
         "cls": canvas.cls, "pix": canvas.pix,
         "line": canvas.line, "rect": canvas.rect, "rectb": canvas.rectb,
-        "circ": canvas.circ, "circb": canvas.circb, "spr": spr,
+        "circ": canvas.circ, "circb": canvas.circb, "spr": _spr_entry,
         "spr_batch": spr_batch,
         "make_layer": make_layer, "draw_layer": draw_layer,
         "map": map_, "mget": mget, "mset": mset,
@@ -2129,6 +2236,78 @@ def _diag_draw2(diag, ws):
         pass
 
 
+_CALIB_DONE = [False]
+
+
+def _diag_calib(diag):
+    """One-shot CALIB line (#63): the interpreter cost model measured on THIS device
+    in THIS heap state -- the numbers that explain where a kid cart's frame goes.
+      call4 = 4-arg Python call, small frame (stays on the C stack)
+      spill = 8-arg Python call with a real body -- frame > ~11 words HEAP-ALLOCATES
+              on every call; on a warm fragmented heap this is the ~1.5ms/call
+              pathology that made 120-sprite kid loops collapse (the spr_gate fix)
+      tup   = small tuple alloc+append (pool-sized: cheap even warm)
+      arr   = 4x array('h') stores (the gate's append shape)
+      flt   = float multiply-add (REPR_C: no boxing on this port)
+    us per 100 ops. Run once, ~3s into the first cart, so it reflects the REAL
+    runtime heap, not a fresh boot."""
+    if diag is None or _CALIB_DONE[0]:
+        return
+    _CALIB_DONE[0] = True
+    try:
+        from array import array as _arr_t
+        r = range(100)
+
+        def f4(a, b, c, d):
+            pass
+
+        def f8(a, b, c, d=-1, e=1, f=0, g=1, h=1):
+            q = a + b
+            s = c + d
+            u = e + f
+            v = g + h
+            return q + s + u + v
+
+        t0 = _ticks_us()
+        for i in r:
+            pass
+        base = _ticks_diff(_ticks_us(), t0)
+        t0 = _ticks_us()
+        for i in r:
+            f4(1, 2, 3, 0)
+        call4 = _ticks_diff(_ticks_us(), t0) - base
+        t0 = _ticks_us()
+        for i in r:
+            f8(1, 2, 3, 0)
+        spill = _ticks_diff(_ticks_us(), t0) - base
+        li = []
+        ap = li.append
+        t0 = _ticks_us()
+        for i in r:
+            ap((3, 100, 60, 0))
+        tup = _ticks_diff(_ticks_us(), t0) - base
+        qa = _arr_t("h", bytearray(2 * 512))
+        t0 = _ticks_us()
+        k = 4
+        for i in r:
+            qa[k] = 3
+            qa[k + 1] = 100
+            qa[k + 2] = 60
+            qa[k + 3] = 0
+        arr = _ticks_diff(_ticks_us(), t0) - base
+        x = 1.5
+        y = 0.25
+        z = 0.0
+        t0 = _ticks_us()
+        for i in r:
+            z = x * y + 0.3
+        flt = _ticks_diff(_ticks_us(), t0) - base
+        diag.log("CALIB", "call4=%d spill=%d tup=%d arr=%d flt=%d us/100"
+                 % (call4, spill, tup, arr, flt))
+    except Exception:
+        pass
+
+
 _GC_BASE = [0]      # #63: last-sample gc.mem_alloc() live-set baseline, for the churn delta.
 
 
@@ -2667,6 +2846,172 @@ class _WebProvider:
         self._v.apply(events)
 
 
+# Kid-side bench source (#63 run_perf_bench): sakura's exact _update/_draw shape,
+# compiled AT RUNTIME with exec() like a real SD cart -- so the kid side runs RAM
+# bytecode against the frozen engine, the same split as production. 120 petals of
+# float physics + the naive per-petal spr() loop.
+_BENCH_KID_CODE = """
+import math
+SIN = [math.sin(i / 256.0 * 6.2831853) for i in range(256)]
+petals = []
+t = 0.0
+
+def _sin(turn):
+    return SIN[int(turn * 256.0) & 255]
+
+def _init():
+    global petals
+    petals = []
+    for i in range(120):
+        shade = i % 3
+        petals.append([(i * 37) % 320 * 1.0, (i * 53) % 240 * 1.0,
+                       30.0 * (1.0 - 0.18 * shade), 0.3 + i * 0.01,
+                       4.0 + (i % 9), shade])
+
+def _update(dt):
+    global t
+    t += dt
+    breeze = 18.0
+    cx = -999.0
+    cy = -999.0
+    R = 52.0
+    for p in petals:
+        p[3] += dt * (0.32 + 0.06 * p[5])
+        sway = _sin(p[3]) * p[4]
+        p[0] += (breeze * (1.0 - 0.15 * p[5]) + sway) * dt
+        p[1] += p[2] * dt
+        dx = p[0] - cx
+        dy = p[1] - cy
+        if -R < dx < R and -R < dy < R:
+            far = dx if dx >= 0 else -dx
+            ady = dy if dy >= 0 else -dy
+            if ady > far:
+                far = ady
+            k = (R - far) / R * 130.0
+            inv = 1.0 / (far + 4.0)
+            p[0] += dx * inv * k * dt
+            p[1] += dy * inv * k * dt
+        if p[1] > H + 4.0:
+            p[1] = 0.0
+        elif p[0] < -8.0:
+            p[0] += W + 16.0
+        elif p[0] > W + 8.0:
+            p[0] -= W + 16.0
+
+def _draw():
+    draw_layer(lay, 0, 0)
+    for p in petals:
+        spr(p[5], int(p[0]), int(p[1]), 0)
+"""
+
+
+def run_perf_bench(handler):
+    """Self-terminating perf bench (#63): boots the REAL device pipeline (compositor,
+    DeviceCanvas, frozen engine, runtime-exec'd kid code, real flush DMA) and measures
+    the sakura-shaped frame under every combination that matters:
+      - Python spr path vs the native spr_gate
+      - cold heap vs warm/fragmented heap (the frame-spill pathology trigger)
+      - flush on vs off (PSRAM DMA cache-contention probe)
+    plus the CALIB cost-model line on the frozen interpreter. Prints BENCH lines and
+    RETURNS (no takeover loop): the board drops back to the REPL, so a headless bench
+    board (XIAO, no buttons) stays reflashable. Never enabled in user images -- boots
+    only via the _moy_bench build stamp (MOYBYTE_BENCH=1)."""
+    if handler is not None:
+        try:
+            handler.deinit()
+        except Exception as exc:
+            print("Moybyte bench: takeover failed:", exc)
+    try:
+        from tdeck_display import get_display_bus
+        from moy_compositor import make_compositor
+        from moybyte.input import InputState
+        from editors import SpriteSheet
+    except Exception as exc:
+        print("Moybyte bench unavailable:", exc)
+        return
+    comp = make_compositor(get_display_bus(), 320, 240, strip_h=24)
+    if comp is None:
+        print("Moybyte bench: no compositor")
+        return
+    import gc
+
+    canvas = DeviceCanvas(comp)
+    sheet = SpriteSheet()
+    px = sheet.pix
+    for i in range(len(px)):
+        px[i] = (i * 7) % 15 + 1       # non-transparent noise tiles
+    inp = InputState()
+
+    class _Diag:
+        def log(self, tag, msg):
+            print("BENCH %s %s" % (tag, msg))
+
+    diag = _Diag()
+
+    def build_ns(use_gate):
+        # Fresh kid namespace, exec'd at runtime like a real cart. use_gate=False
+        # shadows make_spr_gate so make_api keeps the Python spr closure.
+        if not use_gate:
+            canvas.make_spr_gate = lambda s, f: None       # instance shadow
+        elif "make_spr_gate" in canvas.__dict__:
+            del canvas.make_spr_gate                       # restore the C gate
+        ns = make_api(canvas, inp, {}, sheet=sheet)
+        exec(_BENCH_KID_CODE, ns)                           # noqa: S102 -- bench-only
+        ns["lay"] = ns["make_layer"](canvas.w, canvas.h)
+        ns["lay"].cls(3)
+        ns["_init"]()
+        return ns
+
+    def run_cfg(label, use_gate, frames=60, flush=True):
+        ns = build_ns(use_gate)
+        upd = ns["_update"]
+        drw = ns["_draw"]
+        gc.collect()
+        tu = 0
+        td = 0
+        tf = 0
+        for i in range(frames):
+            canvas.sync_back()
+            canvas.batch_reset()
+            t0 = _ticks_us()
+            upd(0.033)
+            t1 = _ticks_us()
+            drw()
+            canvas.flush_batch()
+            t2 = _ticks_us()
+            if flush:
+                comp.flush()
+            t3 = _ticks_us()
+            tu += _ticks_diff(t1, t0)
+            td += _ticks_diff(t2, t1)
+            tf += _ticks_diff(t3, t2)
+        print("BENCH %s: update=%.2fms draw=%.2fms flush=%.2fms (batch=%d/%d)"
+              % (label, tu / frames / 1000.0, td / frames / 1000.0,
+                 tf / frames / 1000.0, canvas._batch_flushes, canvas._batch_sprites))
+
+    print("BENCH start (frozen engine, runtime-exec kid code)")
+    _diag_calib(diag)                       # cost model, cold-ish heap
+    run_cfg("cold pyspr ", False)
+    run_cfg("cold gate  ", True)
+    # warm/fragmented heap: the production trigger (live buffers + churn holes)
+    ballast = [bytearray(150 * 1024)]
+    for i in range(6000):
+        ballast.append([i, i, i, i, i, i, i, i])
+    frag = [(i, i, i, i) for i in range(20000)]
+    keep = []
+    for i in range(0, 20000, 2):
+        keep.append(frag[i])
+    frag = keep
+    gc.collect()
+    print("BENCH warm heap live=%dk" % (gc.mem_alloc() >> 10))
+    _CALIB_DONE[0] = False
+    _diag_calib(diag)                       # cost model again, warm heap
+    run_cfg("warm pyspr ", False)
+    run_cfg("warm gate  ", True)
+    run_cfg("warm gate noflush", True, flush=False)
+    print("BENCH done -- returning to REPL")
+
+
 def run_desktop(handler, prefetched=None, fps_cap=60):
     """Boot the workstation on the device: launcher + carts + keyboard.
 
@@ -2948,6 +3293,7 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             _diag_perf_sample(diag, ws)
             _diag_drawbrk(diag, ws)
             _diag_draw2(diag, ws)       # #63: split render into layer-copy vs sprite-batch us
+            _diag_calib(diag)           # #63: one-shot interpreter cost model (spill probe)
             _diag_gc(diag)              # #63: GC pause / churn (sakura ~14fps profiling)
         # Diag SD flush (~5s): overwrite /sd/moybyte/diag.log with the current ring.
         # Runs between frames on the native single-bus path (with_sd_live), never
