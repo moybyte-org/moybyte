@@ -592,6 +592,46 @@ class DeviceCanvas:
         self.flush_batch()             # #63: print() is a non-spr primitive -> break batch
         self._fb.text(str(s), int(x) - self._cam_x, int(y) - self._cam_y, self._col(c))
 
+    def blit_indices(self, indices, iw, ih, x, y):
+        # Place an iw x ih palette-INDEX bitmap (1 byte/pixel) at (x, y), converting each index
+        # to RGB565 via the panel-order PAL565_SW table. The "images are data, not draw calls"
+        # bake (#63 Fold 3): one native moy_gfx.blit_indices call turns a paint-app image into
+        # pixels instead of thousands of rect() replays. Meant for cart load (off the per-frame
+        # hot path). Opaque; bounds-clamped; per-pixel memoryview fallback when moy_gfx absent.
+        self.flush_batch()             # #63: a non-spr primitive breaks the batch
+        x = int(x)
+        y = int(y)
+        iw = int(iw)
+        ih = int(ih)
+        if iw <= 0 or ih <= 0:
+            return
+        if self._gfx is not None:
+            self._gfx.blit_indices(self._buf, self.w, self.h, x, y,
+                                   indices, iw, ih, PAL565_SW)
+            return
+        d = memoryview(self._buf).cast("H")
+        w = self.w
+        h = self.h
+        n = len(indices)
+        pn = len(PAL565_SW)
+        for row in range(ih):
+            ty = y + row
+            if ty < 0 or ty >= h:
+                continue
+            srow = row * iw
+            drow = ty * w
+            for col in range(iw):
+                tx = x + col
+                if tx < 0 or tx >= w:
+                    continue
+                si = srow + col
+                if si >= n:
+                    continue
+                v = indices[si]
+                if v >= pn:
+                    continue
+                d[drow + tx] = PAL565_SW[v]
+
     # -- scroll layers (#54) -------------------------------------------------
 
     def new_layer(self, w, h):
