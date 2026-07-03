@@ -70,7 +70,7 @@ FLUSH_SAMPLE_EVERY = 30   # log one FLUSHBRK per N flushes (~ every 0.5-1.5 s)
 #
 # WHY. Device FLUSHBRK measurement: the old serial flush was ~28 ms = a 10.5 ms
 # `_frame[:]=_fb` PSRAM copy + ~17.4 ms tx (the SPI runs ~80 MHz -- the earlier
-# "40 MHz floor" was wrong; see docs/spi_flush_80mhz.md). Double-buffering deletes
+# "40 MHz floor" was wrong; see docs/history/spi_flush_80mhz.md). Double-buffering deletes
 # the copy outright (A/B distinct buffers, no copy needed) -> measured flush drops
 # to ~20 ms (copy=0), ~13->~16-19 fps. NOTE (measured): the tx is NOT fully hidden
 # behind render -- lcd_bus exposes no async-completion callback, so the deferred

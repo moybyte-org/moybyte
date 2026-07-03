@@ -47,7 +47,7 @@ def init_display():
     #   effective ~40 MHz, and a 153,600-byte (320x240 RGB565) push is ~30 ms --
     #   right on the measured ~28 ms `flush=`. 80 MHz on this wiring is a board
     #   limit, not a tunable bug. (Refs: ESP-IDF SPI Master IOMUX vs GPIO-matrix;
-    #   docs/perf_60fps_architecture.md sec 1.3.)
+    #   docs/history/perf_60fps_architecture.md sec 1.3.)
     #
     # The pins are fixed by the board, so the real flush lever is NOT this clock --
     # it's DMA double-buffering (hide the flush; #40) + lower internal res (#44/#33).

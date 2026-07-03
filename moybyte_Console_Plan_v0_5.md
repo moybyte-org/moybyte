@@ -138,7 +138,7 @@ The One's value prop, stated crisply: **"make without a tether — standalone, b
 
 ### 3.3 The Player — the pocket console (shipping)
 
-ESP32-S3 + SPI ST7789 (320×240) + physical input + SD. Fully working today: carts, on-device editors, audio, OTA (#53), web view (#41). Perf is flush-bound ~45–50fps.
+ESP32-S3 + SPI ST7789 (320×240) + physical input + SD. Fully working today: carts, on-device editors, audio, OTA (#53), web view (#41). Perf: current numbers live in the **#66 performance ledger** (2026-07-03: light carts flush-bound ~47fps; heavy logic/render carts 24–32fps).
 
 - **A D-pad fits better than a keyboard.** Carts read `btn(left/right/up/down/a/b)` — a 1:1 map. The keyboard belongs on the One (for coding); the Player is for *play*. The T-Deck's trackball is a stopgap.
 - **Native 320×240 is the requirement.** A 2.4″ IPS 240×320 (landscape 320×240) panel is the exact canvas — no scaling. This is what disqualifies smaller-screen S3 handhelds (e.g. a 240×135 Cardputer).
@@ -263,7 +263,9 @@ The hard parts (why this is OPEN, not committed):
 
 ### 6.1 MicroPython-first (DECIDED)
 
-The cart runtime is **MicroPython/Python**. Rationale: proven to boot/draw/run carts on real hardware; **exonerated on performance** (the frame wall was native LVGL rotation, not the interpreter — cart logic is ~1–2ms/frame); familiar to parents/schools; already shipping.
+The cart runtime is **MicroPython/Python**. Rationale: proven to boot/draw/run carts on real hardware; familiar to parents/schools; already shipping.
+
+> **2026-07-03 update to the perf rationale:** the original "exonerated on performance (cart logic ~1–2ms)" claim held for sprite-light carts but NOT for float-physics carts — #63 found the interpreter frame-spill pathology made 120-entity logic collapse (10–12fps). It was fixed **engine-side, API unchanged** (native `spr_gate` + doubled S3 caches), which is the doctrine: kid code stays Python-simple, the engine keeps it fast. The decision stands. Lua remains the future *second* cart type; measured on-silicon at **5.0x faster** than MicroPython on the same loop (#6) — a real option if a cart class ever outgrows the engine-side levers. Current numbers: the **#66 performance ledger**.
 
 We adopted **TIC-80-style drawing conventions in place** (filled `rect`/`circ`, outline `rectb`/`circb`, `spr` by sheet index, `print`) without a Lua VM.
 
@@ -467,9 +469,9 @@ Serves the **running console** to a browser on the same WiFi via the **same draw
 
 `.moy` carts on SD (Player) / flash (Zero) / SDIO (One), via `moy_carts` (pure filesystem ops, root-parameterized). On the S3 tiers, live SD access uses the native `moy_sd` attach and `with_sd_live` (mount once, keep resident, run ops between frames).
 
-### 12.4 The perf ceiling (#43)
+### 12.4 The perf ceiling (#43 → the #66 ledger)
 
-Frame time = draw + flush; on the SPI Player, flush is a hard ~20ms (153KB PSRAM→SPI), so **full-res 60fps is physically impossible — ~18–22fps full-screen, ~45–50fps with the wins** (native `spr_batch`, static-chrome bar cache, double-buffer flush, the scroll engine's window-copy #54). The MicroPython interpreter is **not** the bottleneck (~1–2ms cart logic). The remaining SPI-tier lever is dirty-rect. **On the One (P4/DSI), the flush ceiling is gone** — which is a core reason the One is the flagship.
+**Current numbers, the frame-budget model, and the lever ledger live in issue #66** (the living performance ledger — edit its body when hardware numbers land; don't fork the numbers into this doc). The shape of the ceiling (2026-07-03): the ~15–16ms SPI flush is hidden behind render by the double-buffer overlap, so light carts sit at the ~47–50fps flush ceiling; heavy carts are interpreter-logic-bound or Python-prim-render-bound at 24–32fps — the #63 frame-spill discovery corrected the earlier "interpreter is not the bottleneck" belief for float-physics carts (fixed engine-side: native `spr_gate` + doubled caches, API unchanged). Remaining SPI-tier levers, in value order, are in #66. **On the One (P4/DSI), the flush ceiling is gone** — which is a core reason the One is the flagship.
 
 ---
 
