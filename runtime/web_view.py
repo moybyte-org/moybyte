@@ -624,6 +624,16 @@ class TeeCanvas:
         # Only reached for attrs not set on the Tee (e.g. buf, _comp, sync_back).
         return getattr(self._c, name)
 
+    def make_spr_gate(self, sheet, fallback):
+        # #63 spr_gate: explicitly DECLINE the native fast path. Without this,
+        # __getattr__ would forward to the real DeviceCanvas's make_spr_gate and
+        # the C gate would append quads straight to the panel batch -- pixels the
+        # recorder never sees, so the browser would render a cart with NO sprites
+        # (and stream mode would rasterize what it's meant to skip). Returning
+        # None keeps make_api on the Python spr closure -> every call crosses
+        # Tee.spr_tile -> recorded. The web path is the deliberate slow lane.
+        return None
+
     # -- off-screen layers ---------------------------------------------------
     def new_layer(self, w, h):
         real = self._c.new_layer(w, h)

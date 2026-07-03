@@ -1060,6 +1060,94 @@ def test_auto_batch_device_equals_immediate_device():
                     % sum(1 for x, y in zip(a, b) if x != y))
 
 
+class _PyGate:
+    """Faithful Python transcription of moy_gfx spr_gate_call (modmoy_gfx.c, #63):
+    the SAME array-header state machine (begin on empty/state-change/foreign-token/
+    full, int16 clamps, int/float parse, fallback delegation) -- so the protocol the
+    C relies on is cross-checked against the pure-Python spr path on the host.
+    Keep this a line-for-line port; that is what makes the parity meaningful."""
+
+    def __init__(self, canvas, sheet, fallback, token=7):
+        self._cv = canvas
+        self._sheet = sheet
+        self._fb = fallback
+        self._q = canvas._batch_arr
+        self._qlen = len(canvas._batch_arr)
+        self._token = token
+
+    def __call__(self, *args, **kw):
+        if kw or not (3 <= len(args) <= 6):
+            return self._fb(*args, **kw)
+        v = [0, 0, 0, -1, 1, 0]
+        for i, o in enumerate(args):
+            if isinstance(o, bool) or not isinstance(o, (int, float)):
+                return self._fb(*args, **kw)
+            v[i] = int(o)          # C: small-int value / float truncation
+        q = self._q
+        k = q[0]
+        if k < 4:
+            k = 4
+        if (k == 4 or k + 4 > self._qlen
+                or q[3] != self._token or q[1] != v[3] or q[2] != v[4]):
+            self._cv.begin_batch(self._sheet, v[3], v[4], self._token)
+            k = q[0]
+            if k < 4 or k + 4 > self._qlen:
+                return None
+        tid = v[0]
+        if tid < -32768 or tid > 32767:
+            tid = -1
+        x = min(32767, max(-32768, v[1]))
+        y = min(32767, max(-32768, v[2]))
+        q[k] = tid
+        q[k + 1] = x
+        q[k + 2] = y
+        q[k + 3] = v[5] & 3
+        q[0] = k + 4
+        return None
+
+
+def test_spr_gate_protocol_matches_python_path():
+    # The C gate's array-header protocol (#63) must draw pixel-identically to the
+    # plain Python spr_tile path for the SAME mixed scene: contiguous runs, a
+    # colorkey change, a scale change, float coords, huge coords (int16 clamp),
+    # an Image via the fallback, and interleaved non-spr primitives (run breaks).
+    m, _, _ = _both(True)
+    _, sheet_d = _batch_sheets(m)
+    stray = _stray_image(m.Image.from_ascii)
+
+    def scene(cv, spr):
+        cv.cls(1)
+        for i in range(12):
+            spr((i % 3) + 1, i * 9, 5, 0)             # one contiguous run
+        for i in range(5):
+            spr(2, i * 9, 30, 3)                      # colorkey change -> break
+        spr(1, 10.6, 44.9, 0)                          # float coords truncate
+        spr(1, 90000, 10, 0)                           # x clamps (off-screen)
+        spr(90000, 20, 10, 0)                          # tile id -> invalid, skipped
+        cv.rect(60, 60, 8, 8, 5)                       # primitive breaks the run
+        spr(3, 70, 60, 0)
+        spr(2, 80, 60, -1, 2)                          # scale change -> break
+        cv.spr(stray, 100, 60, 2)                      # Image path (gate: fallback)
+        cv.flush_batch()
+
+    gate_cv = m.DeviceCanvas(_FakeComp(W, H))
+    py_cv = m.DeviceCanvas(_FakeComp(W, H))
+
+    def py_spr(n, x, y, colorkey=-1, scale=1, flip=0):
+        py_cv.spr_tile(sheet_d, int(n), x, y, colorkey, scale, flip)
+
+    def gate_fallback(n, x, y, colorkey=-1, scale=1, flip=0):
+        gate_cv.spr_tile(sheet_d, int(n), x, y, colorkey, scale, flip)
+
+    gate = _PyGate(gate_cv, sheet_d, gate_fallback)
+    scene(gate_cv, gate)
+    scene(py_cv, py_spr)
+    a = _dev_rgb565(gate_cv)
+    b = _dev_rgb565(py_cv)
+    assert a == b, ("spr_gate protocol differs from python path in %d px"
+                    % sum(1 for x, y in zip(a, b) if x != y))
+
+
 def test_auto_batch_actually_coalesces():
     # Batching must not just be pixel-correct -- it must COALESCE. The perf_batch counters
     # (#63) prove the run collapsed to ONE blit_batch, which the pixel-parity tests above
