@@ -29,8 +29,29 @@ once the board has finished booting; a raw `pyserial` client must set `s.dtr = T
 
 ## Flash (stock MicroPython)
 
-The XIAO enters ROM download via esptool's `usb_reset`; if a running app holds the port,
-hold **B (BOOT)** + tap **R (RESET)**, release B.
+### Getting into ROM download mode (no physical button, usually)
+
+The XIAO's USB is the ESP32-S3's **USB-Serial/JTAG** (`303a:1001`) — a ROM peripheral that can be
+commanded into download mode over USB, so flashing usually needs no button. Which path works
+depends on what's currently running:
+
+- **From another firmware / a fresh board** (USB is still the ROM JTAG `303a:1001`): esptool's
+  `--before usb_reset` drops it into the bootloader. This is how the initial Meshtastic →
+  MicroPython flash was done. (`--before default_reset` — the classic DTR/RTS auto-reset — can
+  fail with an `Input/output error` when the running app holds the port; use `usb_reset`.)
+- **From running MicroPython** (USB is now the app's TinyUSB **CDC** `303a:4001`): the software
+  reset paths are **unreliable** here. `machine.bootloader()` over the CDC produced *no handoff*
+  in the spike (`docs/history/SPIKE_RESULTS.md`) — try it, but don't count on it.
+
+> ⚠️ **Do NOT run `esptool --before default_reset` against the running CDC (`303a:4001`).** The
+> DTR/RTS dance into TinyUSB can **wedge the CDC at the USB level** — the port then gives
+> `EPROTO` / `Protocol error` on open with no re-enumeration, and is unrecoverable without a
+> `USBDEVFS_RESET` (root) or a physical **replug**.
+
+- **Reliable fallback (always works):** hold **B (BOOT)**, tap **R (RESET)**, release B → the ROM
+  bootloader comes up as `303a:1001`; then flash normally.
+
+### Flash + stage
 
 ```bash
 PY=.venv/bin/python
@@ -40,8 +61,8 @@ $PY -m esptool --port /dev/ttyACM0 --before usb_reset --after no_reset flash_id
 $PY -m esptool --chip esp32s3 -p /dev/ttyACM0 --before no_reset --after no_reset erase_flash
 $PY -m esptool --chip esp32s3 -p /dev/ttyACM0 --before no_reset --after hard_reset \
      write_flash -z 0x0 ESP32_GENERIC_S3-SPIRAM_OCT-*.bin
-# 3. push the Zero files
-$PY -m mpremote connect /dev/ttyACM0 cp zero_net.py :zero_net.py + cp main.py :main.py
+# 3. push the console (shared modules + the Zero backend) -- see "Flashing / staging" below
+firmware/seeed_xiao_esp32s3_zero/stage.sh /dev/ttyACM0
 ```
 
 ## Files
