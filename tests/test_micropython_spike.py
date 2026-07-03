@@ -1165,17 +1165,32 @@ def test_async_layer_copy_wired():
     assert "self._drain_lcopy()" in runtime
     # a layer edited this frame forces a miss (no stale-background frames)
     assert "hit = (not _dirty and pend[0] is layer" in runtime
+    # ... but the kick is OFF by default (hardware 2026-07-03): the PSRAM->PSRAM
+    # GDMA copy runs concurrently with the panel's PSRAM DMA read and starves the
+    # SPI FIFO -> horizontal garbage bands, worst in the one cart using layers
+    # (Sakura). Re-enabling requires re-ordering the kick off the panel-DMA
+    # window (or an internal-SRAM bounce flush) + an on-hardware verification.
+    assert "LAYER_COPY_ASYNC = False" in runtime
+    assert "LAYER_COPY_ASYNC and self._gfx is not None" in runtime
 
 
 def test_cache_geometry_upgraded_in_build():
-    # #63 kid-logic lever: the default S3 cache config (16KB icache / 32KB dcache,
-    # 32B lines) made the interpreter ~2.5x slower than clean silicon (frozen
-    # bytecode from flash + PSRAM heap contending in one small dcache). build.sh
-    # must pin the doubled geometry into the T-Deck sdkconfig every build.
+    # #63 kid-logic lever: the default S3 cache config (16KB icache / 32KB dcache)
+    # made the interpreter ~2.5x slower than clean silicon (frozen bytecode from
+    # flash + PSRAM heap contending in one small dcache). build.sh must pin the
+    # doubled cache SIZES into the T-Deck sdkconfig every build -- but the cache
+    # LINE stays 32B: 64B lines corrupted the PSRAM panel flush on hardware
+    # (horizontal garbage bands on every screen, 2026-07-03) AND were slower for
+    # the interpreter's scattered heap access (Sakura logic 24-39ms on 64B vs
+    # 13-21ms on 32B). MOYBYTE_CACHE_GEOMETRY=stock must exist for on-hardware
+    # A/Bs, and the regeneration guard must check the LINE option (a 64KB-only
+    # check silently kept a stale line width in the generated sdkconfig).
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
     assert "CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y" in build
     assert "CONFIG_ESP32S3_DATA_CACHE_64KB=y" in build
-    assert "CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y" in build
+    assert "'CONFIG_ESP32S3_DATA_CACHE_LINE_32B=y'; do" in build
+    assert 'MOYBYTE_CACHE_GEOMETRY:-fast' in build
+    assert "CONFIG_ESP32S3_DATA_CACHE_LINE_32B=y'" in build.split("WANT_CACHE=", 1)[1]
 
 
 def test_gc_diag_is_low_cadence():

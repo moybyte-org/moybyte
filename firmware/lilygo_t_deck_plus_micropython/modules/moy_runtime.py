@@ -57,6 +57,13 @@ _RGB_KEY = 0xF81F
 # for an FPS A/B comparison against the native-blit build.
 _USE_GFX = True
 
+# GDMA async layer copy (#54 St.2 / #63): DISABLED -- the copy is correct and fast
+# but its PSRAM->PSRAM GDMA traffic runs concurrently with the panel's PSRAM DMA
+# read and starves the SPI FIFO (horizontal garbage bands; hardware-confirmed
+# 2026-07-03, bands worst in the one layer cart). Re-enable only together with a
+# kick re-ordered outside the panel-DMA window, or an internal-SRAM flush.
+LAYER_COPY_ASYNC = False
+
 
 class Image:
     def __init__(self, width, height, pix, transparent=-1):
@@ -132,9 +139,18 @@ class DeviceCanvas:
         # kicked by sync_back at frame start; consumed (copy_wait) by the next
         # blit_window_from. _async_ok latches False on the first driver refusal
         # (old firmware / no gdma / bad alignment) so we never retry per frame.
+        #
+        # LAYER_COPY_ASYNC=False (hardware verdict 2026-07-03): the copy WORKS
+        # (layer= 7ms -> 0.04ms on Sakura) but it is a second GDMA engine doing a
+        # full-throttle PSRAM->PSRAM copy kicked right as the panel DMA starts its
+        # 153KB PSRAM read -- the panel FIFO starves and the SPI clocks out garbage
+        # (horizontal bands, worst exactly in the one cart using layers). Until the
+        # kick is re-ordered off the panel-DMA window (or the flush reads internal
+        # SRAM), stay on the sync window copy: correct pixels beat the 7ms.
         self._lcopy_pred = None
         self._lcopy = None
-        self._async_ok = self._gfx is not None and hasattr(self._gfx, "copy_async")
+        self._async_ok = (LAYER_COPY_ASYNC and self._gfx is not None
+                          and hasattr(self._gfx, "copy_async"))
         # Pending sprite batch (Fold 1 -> #63 spr_gate): 1x1 sheet-tile blits queue
         # into ONE flat array('h') instead of a list of tuples -- layout
         # [next, colorkey, scale, token, (tile x y flip)*N], items from index 4.
