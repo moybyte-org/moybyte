@@ -219,6 +219,27 @@ export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-${BUILD_JOBS}}"
 export MOYBYTE_SKIP_UPSTREAM_SUBMODULES="${MOYBYTE_SKIP_UPSTREAM_SUBMODULES:-1}"
 export GEN_SCRIPT="${GEN_SCRIPT:-python}"
 
+# Cache geometry (#63, the kid-logic interpreter lever): the default build ran the
+# S3's MINIMUM caches (16KB icache, 32KB dcache / 32B lines) while the VM reads
+# frozen bytecode from flash AND the gc heap from PSRAM through that one small
+# dcache -- with the LCD DMA streaming 153KB/frame through the same path. Measured
+# cost: the same kid float loop runs ~13.5ms on clean silicon vs 30-43ms here
+# (~2.5x). Double both caches + widen dcache lines to 64B (better PSRAM bursts).
+# Costs 48KB of internal SRAM (16 icache + 32 dcache) -- verify WiFi/web-view
+# still fits internal RAM on the hardware pass; if NO_MEM, drop the icache bump
+# first (dcache is the bigger lever). Appended to the port-wide sdkconfig.base
+# (the same file the upstream builder itself appends to), so it applies to BOTH
+# board configs (generic + tdeck).
+SDKCONFIG_BASE="${UPSTREAM_DIR}/lib/micropython/ports/esp32/boards/sdkconfig.base"
+for opt in \
+  'CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y' \
+  'CONFIG_ESP32S3_DATA_CACHE_64KB=y' \
+  'CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y'; do
+  if ! grep -q "^${opt}$" "${SDKCONFIG_BASE}"; then
+    printf '%s\n' "${opt}" >> "${SDKCONFIG_BASE}"
+  fi
+done
+
 case "${BOARD_CONFIG}" in
   generic)
     MPY_BUILD_DIR="${UPSTREAM_DIR}/lib/micropython/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT"
@@ -355,23 +376,6 @@ case "${BOARD_CONFIG}" in
         sed -i '/^CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y/d' "${TDECK_SDKCONFIG}"
       fi
     fi
-    # Cache geometry (#63, the kid-logic interpreter lever): the default build ran
-    # the S3's MINIMUM caches (16KB icache, 32KB dcache / 32B lines) while the VM
-    # reads frozen bytecode from flash AND the gc heap from PSRAM through that one
-    # small dcache -- with the LCD DMA streaming 153KB/frame through the same path.
-    # Measured cost: the same kid float loop runs ~13.5ms on clean silicon vs
-    # 30-43ms here (~2.5x). Double both caches + widen dcache lines to 64B (better
-    # PSRAM bursts). Costs 48KB of internal SRAM (16 icache + 32 dcache) -- verify
-    # WiFi/web-view still fits internal RAM on the next hardware pass; if NO_MEM,
-    # drop INSTRUCTION_CACHE_32KB first (dcache is the bigger lever).
-    for opt in \
-      'CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y' \
-      'CONFIG_ESP32S3_DATA_CACHE_64KB=y' \
-      'CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y'; do
-      if ! grep -q "^${opt}$" "${TDECK_SDKCONFIG}"; then
-        printf '%s\n' "${opt}" >> "${TDECK_SDKCONFIG}"
-      fi
-    done
     sed -i "s|^FROZEN_MANIFEST = .*|FROZEN_MANIFEST = \"${MANIFEST}\"|" "${TDECK_TOML}"
     BUILD_COMMAND=(
       "${BUILD_PYTHON}" make.py
@@ -382,6 +386,18 @@ case "${BOARD_CONFIG}" in
     )
     ;;
 esac
+
+# IDF only generates the build's sdkconfig FROM the defaults when the file is
+# ABSENT -- appending options to sdkconfig.base does NOT propagate into an
+# existing build dir (verified: a rebuild silently kept the 16KB/32KB caches).
+# If the generated file is missing the flagship cache option, delete it so the
+# reconfigure regenerates it from the (now-updated) defaults.
+GEN_SDKCONFIG="${MPY_BUILD_DIR}/sdkconfig"
+if [ -f "${GEN_SDKCONFIG}" ] \
+    && ! grep -q '^CONFIG_ESP32S3_DATA_CACHE_64KB=y' "${GEN_SDKCONFIG}"; then
+  echo "sdkconfig missing cache geometry -- forcing regeneration"
+  rm -f "${GEN_SDKCONFIG}"
+fi
 
 "${RUNNER[@]}" "${BUILD_COMMAND[@]}"
 
