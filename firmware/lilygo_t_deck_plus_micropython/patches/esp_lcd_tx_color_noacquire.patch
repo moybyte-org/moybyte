@@ -1,0 +1,36 @@
+diff --git a/components/esp_lcd/spi/esp_lcd_panel_io_spi.c b/components/esp_lcd/spi/esp_lcd_panel_io_spi.c
+index 13a84ca5..a6948999 100644
+--- a/components/esp_lcd/spi/esp_lcd_panel_io_spi.c
++++ b/components/esp_lcd/spi/esp_lcd_panel_io_spi.c
+@@ -320,7 +320,19 @@ static esp_err_t panel_io_spi_tx_color(esp_lcd_panel_io_t *io, int lcd_cmd, cons
+     lcd_spi_trans_descriptor_t *lcd_trans = NULL;
+     esp_lcd_panel_io_spi_t *spi_panel_io = __containerof(io, esp_lcd_panel_io_spi_t, base);
+ 
+-    ESP_RETURN_ON_ERROR(spi_device_acquire_bus(spi_panel_io->spi_dev, portMAX_DELAY), TAG, "acquire spi bus failed");
++    /* Moybyte #66: a continuation color write (lcd_cmd < 0, no command phase) is
++     * queue-only -- skip acquire/release. spi_device_acquire_bus waits for the
++     * device's in-flight queued transactions to drain (bus-lock BG idle), so with
++     * it every banded tx_color BLOCKED until the previous band's DMA finished,
++     * serializing the flush against the caller. Without a command there is no
++     * polling transmit (the only thing that genuinely needs a drained queue), and
++     * spi_device_queue_trans is the ordinary async API that needs no bus lock.
++     * The caller guarantees no other device (SD shares this host) transacts while
++     * color bands are in flight (the console drains before any SD op). */
++    bool moy_noacquire = (lcd_cmd < 0);
++    if (!moy_noacquire) {
++        ESP_RETURN_ON_ERROR(spi_device_acquire_bus(spi_panel_io->spi_dev, portMAX_DELAY), TAG, "acquire spi bus failed");
++    }
+ 
+     bool send_cmd = (lcd_cmd >= 0);
+     if (send_cmd) {
+@@ -401,7 +413,9 @@ static esp_err_t panel_io_spi_tx_color(esp_lcd_panel_io_t *io, int lcd_cmd, cons
+     } while (color_size > 0); // continue while we have remaining data to transmit
+ 
+ err:
+-    spi_device_release_bus(spi_panel_io->spi_dev);
++    if (!moy_noacquire) {   /* Moybyte #66: no acquire -> no release */
++        spi_device_release_bus(spi_panel_io->spi_dev);
++    }
+     return ret;
+ }
+ 

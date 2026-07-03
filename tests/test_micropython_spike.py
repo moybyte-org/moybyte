@@ -723,10 +723,13 @@ def test_moy_compositor_async_flush_overlap_logic():
         src = (ROOT / "modules" / "moy_compositor.py").read_text("utf-8")
         assert "\nASYNC_FLUSH = True" in src
         assert "\nPSRAM_DIRECT_FLUSH = True" in src
+        assert "\nSRAM_BOUNCE_FLUSH = True" in src   # #66: device default is bounce
         assert module.ASYNC_FLUSH is True
-        # This test exercises the BANDED async path (per-band counter logic); the
-        # PSRAM-direct single-transfer path is asserted separately at the end.
+        # This test exercises the LEGACY BANDED async path (per-band counter logic);
+        # the PSRAM-direct single-transfer path is asserted at the end, and the
+        # SRAM-bounce path (#66, the device default) has its own test below.
         module.PSRAM_DIRECT_FLUSH = False
+        module.SRAM_BOUNCE_FLUSH = False
 
         # A bus that records the registered completion callback and DEFERS completion:
         # tx_color queues (returns immediately, no cb), and complete_all() simulates the
@@ -805,6 +808,150 @@ def test_moy_compositor_async_flush_overlap_logic():
         assert fired3 == 1                          # ONE tx_color for the whole frame
         assert bus.colors[n2][0] == module.RAMWR    # carries RAMWR; window already armed
         assert comp._dma_target == 1
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = v
+
+
+def test_moy_compositor_sram_bounce_flush_protocol():
+    """The SRAM-bounce banded flush (#66, the device default): the panel DMA only
+    ever reads the two INTERNAL bounce buffers (PSRAM contention can't starve the
+    SPI FIFO -> no more band artifacts), fed band-by-band by pump(). Proves: the
+    kick queues exactly TWO bands (both bounce slots) and returns; band 0 carries
+    RAMWR, continuations cmd=-1 (queue-only under the esp_lcd no-acquire patch);
+    a bounce slot is reused only after the band TWO back completed (payload
+    integrity: every queued band's bytes equal the FRONT's rows at queue time);
+    the drain feeds the rest itself when no timer pumps (fallback correctness);
+    ping-pong swap + counter reset survive across frames."""
+    import types
+
+    fake_alloc = types.ModuleType("moy_alloc")
+    fake_alloc.malloc_dma = lambda n, flags=0: bytearray(n)
+    fake_lcd = types.ModuleType("lcd_bus")
+    fake_lcd.MEMORY_SPIRAM = 1
+    fake_lcd.MEMORY_DMA = 2
+
+    class _FB:
+        def __init__(self, buf, w, h, fmt):
+            self.buf = buf
+        def fill(self, c):
+            pass
+        def fill_rect(self, *a):
+            pass
+        def text(self, *a):
+            pass
+    fake_framebuf = types.ModuleType("framebuf")
+    fake_framebuf.FrameBuffer = _FB
+    fake_framebuf.RGB565 = 1
+
+    saved = {k: sys.modules.get(k) for k in ("moy_alloc", "lcd_bus", "framebuf", "moy_gfx")}
+    sys.modules["moy_alloc"] = fake_alloc
+    sys.modules["lcd_bus"] = fake_lcd
+    sys.modules["framebuf"] = fake_framebuf
+    sys.modules.pop("moy_gfx", None)
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "moy_compositor_bounce", ROOT / "modules" / "moy_compositor.py"
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        assert module.SRAM_BOUNCE_FLUSH is True     # device default
+        assert 240 % module.BOUNCE_ROWS == 0        # equal bands, no short tail
+
+        class DeferredBus:
+            """Queues without completing; complete(n) simulates the SPI ISR."""
+            def __init__(self):
+                self.colors = []   # (cmd, payload_bytes, y0, y1)
+                self.params = []
+                self.cb = None
+                self._inflight = 0
+            def register_callback(self, cb):
+                self.cb = cb
+            def tx_param(self, cmd, data):
+                self.params.append(cmd)
+            def tx_color(self, cmd, data, x0, y0, x1, y1, _z, last):
+                self.colors.append((cmd, bytes(data), y0, y1))
+                self._inflight += 1
+            def complete(self, n=1):
+                while n > 0 and self._inflight > 0:
+                    self._inflight -= 1
+                    n -= 1
+                    self.cb()
+
+        bus = DeferredBus()
+        comp = module.Compositor(bus, 320, 240, strip_h=24)
+        assert comp._async is True
+        assert comp.bounce_flush is True
+        assert comp._bnc_bands == 240 // module.BOUNCE_ROWS
+        band_bytes = 320 * module.BOUNCE_ROWS * 2
+        assert len(comp._bnc_bufs[0]) == band_bytes
+        # (no pump timer on the host -> the drain fallback is what feeds the tail)
+        assert comp._pump_timer is None
+
+        # Paint the front-to-be (back buffer A) with a per-band byte pattern so
+        # payload integrity is checkable per band.
+        a = comp._fb
+        for k in range(comp._bnc_bands):
+            a[k * band_bytes:(k + 1) * band_bytes] = bytes([k + 1]) * band_bytes
+
+        # FRAME 1 kick: exactly TWO bands queue (both bounce slots), then return.
+        comp.flush()
+        assert comp._front is a
+        assert comp._dma_pending is None
+        assert len(bus.colors) == 2
+        assert comp._bnc_next == 2 and comp._bnc_total == comp._bnc_bands
+        assert comp._dma_target == 2 and comp._dma_done_n == 0
+        (cmd0, pay0, y00, y01), (cmd1, pay1, y10, y11) = bus.colors
+        assert cmd0 == module.RAMWR and cmd1 == -1
+        assert (y00, y01) == (0, module.BOUNCE_ROWS - 1)
+        assert (y10, y11) == (module.BOUNCE_ROWS, 2 * module.BOUNCE_ROWS - 1)
+        assert pay0 == bytes([1]) * band_bytes and pay1 == bytes([2]) * band_bytes
+
+        # Slot gating: no completions -> pump() must NOT queue band 2 (its bounce
+        # slot still carries in-flight band 0).
+        comp.pump()
+        assert len(bus.colors) == 2
+        # One completion frees slot 0 -> pump queues exactly band 2 (and only it).
+        bus.complete(1)
+        comp.pump()
+        assert len(bus.colors) == 3
+        assert bus.colors[2][0] == -1
+        assert bus.colors[2][2] == 2 * module.BOUNCE_ROWS
+        assert bus.colors[2][1] == bytes([3]) * band_bytes
+
+        # Drain fallback: the next flush() must feed the REMAINING bands itself
+        # (host has no pump timer). Completing-on-queue keeps the drain loop live.
+        real_tx = bus.tx_color
+        def tx_and_complete(*args):
+            real_tx(*args)
+            bus.complete(1)
+        bus.tx_color = tx_and_complete
+        bus.complete(2)          # bands 1..2 finish; 0 already did
+        comp.flush()             # frame 2: drain feeds bands 3..9, swap, kick B
+        n = comp._bnc_bands
+        # all 10 of A's bands went out, in order, payload-faithful...
+        assert len(bus.colors) >= n + 2
+        for k in range(n):
+            cmd, pay, y0, _y1 = bus.colors[k]
+            assert cmd == (module.RAMWR if k == 0 else -1)
+            assert y0 == k * module.BOUNCE_ROWS
+            assert pay == bytes([k + 1]) * band_bytes
+        # ...and frame 2 is armed on the OTHER buffer. With the completing-on-queue
+        # bus every slot frees instantly, so the kick's pump runs ALL of frame 2's
+        # bands in one go (on device the deferred ISR limits this to 2 in flight).
+        assert comp._front is comp._fb_b
+        assert comp.back_buffer() is a
+        assert comp._bnc_total == n and comp._bnc_next == n
+        assert comp._dma_target == n and comp._dma_done_n == n
+
+        # sync(): finish frame 2 (drain-fallback again) -> nothing in flight.
+        comp.sync()
+        assert comp._bnc_total == 0 and comp._dma_target == 0
+        comp.sync()   # idempotent
+        assert comp._bnc_total == 0
     finally:
         for k, v in saved.items():
             if v is None:
@@ -1165,13 +1312,43 @@ def test_async_layer_copy_wired():
     assert "self._drain_lcopy()" in runtime
     # a layer edited this frame forces a miss (no stale-background frames)
     assert "hit = (not _dirty and pend[0] is layer" in runtime
-    # ... but the kick is OFF by default (hardware 2026-07-03): the PSRAM->PSRAM
-    # GDMA copy runs concurrently with the panel's PSRAM DMA read and starves the
-    # SPI FIFO -> horizontal garbage bands, worst in the one cart using layers
-    # (Sakura). Re-enabling requires re-ordering the kick off the panel-DMA
-    # window (or an internal-SRAM bounce flush) + an on-hardware verification.
-    assert "LAYER_COPY_ASYNC = False" in runtime
+    # ... and the kick is TIED to the SRAM-bounce flush (#66): against a panel
+    # DMA that reads PSRAM, the PSRAM->PSRAM GDMA copy starves the SPI FIFO into
+    # horizontal garbage bands (hardware 2026-07-03) -- it is only safe when the
+    # panel reads internal SRAM. One flag must feed both, so turning bounce off
+    # turns the layer copy off with it.
+    assert "LAYER_COPY_ASYNC = _SRAM_BOUNCE_FLUSH" in runtime
+    assert "from moy_compositor import SRAM_BOUNCE_FLUSH" in runtime
     assert "LAYER_COPY_ASYNC and self._gfx is not None" in runtime
+
+
+def test_sram_bounce_flush_wired():
+    # #66: the SRAM-bounce flush needs three cooperating pieces -- the esp_lcd
+    # no-acquire patch (continuation tx_color must be queue-only or every band
+    # blocks on the previous one), the compositor default + pump machinery, and
+    # the GDMA layer copy tied to the same flag (it is only artifact-safe when
+    # the panel DMA reads internal SRAM).
+    build = (ROOT / "build.sh").read_text(encoding="utf-8")
+    comp = (ROOT / "modules" / "moy_compositor.py").read_text(encoding="utf-8")
+    assert (ROOT / "patches" / "esp_lcd_tx_color_noacquire.patch").exists()
+    assert "esp_lcd_tx_color_noacquire.patch" in build
+    assert 'grep -q "Moybyte #66"' in build
+    assert "\nSRAM_BOUNCE_FLUSH = True" in comp
+    assert "def pump(self):" in comp
+    assert "def _pump_cb(self, _t):" in comp
+    # the timer is a soft feeder; the drain must be the correctness fallback
+    assert "PUMP_TIMER_MS" in comp
+    assert "self.pump()" in comp.split("def _drain_dma", 1)[1]
+
+
+def test_hitch_logger_wired():
+    # #66: any frame past HITCH_MS logs a HITCH line naming the loop-tail costs
+    # (diag sample / diag SD write / web poll) -- the tool for the Sakura
+    # "micro-stutter every couple of seconds" hunt.
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    assert "HITCH_MS = 80" in runtime
+    assert "def _diag_hitch(" in runtime
+    assert "_diag_hitch(diag, ws, elapsed, _t_diag, _t_sd, _t_web)" in runtime
 
 
 def test_cache_geometry_upgraded_in_build():
