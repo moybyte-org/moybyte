@@ -729,6 +729,23 @@ def test_tee_tolerates_plain_non_recording_layer():
     assert not any(c[0] in ("blit_layer", "deflayer") for c in rec.frame())
 
 
+def test_tee_declines_the_native_spr_gate():
+    """#63 spr_gate: the Tee must explicitly REFUSE the native spr fast path. Its
+    __getattr__ forwards unknown attrs to the real canvas, so without an explicit
+    make_spr_gate override, make_api(tee) would fetch the REAL DeviceCanvas's gate
+    -- and the C gate would append quads straight to the panel batch, pixels the
+    recorder never sees (a browser cart with no sprites; stream mode rasterizing
+    what it should skip). Declining keeps every spr on the recorded Python path."""
+    tee, rec, dev = _build_tee()
+
+    # Even if the real canvas offers a gate, the Tee must say no.
+    dev.make_spr_gate = lambda sheet, fallback: object()
+    assert tee.make_spr_gate(object(), lambda *a: None) is None
+    # ...while ordinary unknown attrs still forward (the Tee contract).
+    dev.some_marker = 42
+    assert tee.some_marker == 42
+
+
 def test_map_replays_pixel_identical_to_panel_via_cached_assets():
     """The strongest map() cross-check (#41): drive a real map() (+ a couple of sprites)
     through the device TeeCanvas over a rasterizing Canvas (the panel stand-in), then
