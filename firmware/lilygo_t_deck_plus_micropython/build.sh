@@ -220,25 +220,43 @@ export MOYBYTE_SKIP_UPSTREAM_SUBMODULES="${MOYBYTE_SKIP_UPSTREAM_SUBMODULES:-1}"
 export GEN_SCRIPT="${GEN_SCRIPT:-python}"
 
 # Cache geometry (#63, the kid-logic interpreter lever): the default build ran the
-# S3's MINIMUM caches (16KB icache, 32KB dcache / 32B lines) while the VM reads
-# frozen bytecode from flash AND the gc heap from PSRAM through that one small
-# dcache -- with the LCD DMA streaming 153KB/frame through the same path. Measured
-# cost: the same kid float loop runs ~13.5ms on clean silicon vs 30-43ms here
-# (~2.5x). Double both caches + widen dcache lines to 64B (better PSRAM bursts).
-# Costs 48KB of internal SRAM (16 icache + 32 dcache) -- verify WiFi/web-view
-# still fits internal RAM on the hardware pass; if NO_MEM, drop the icache bump
-# first (dcache is the bigger lever). Appended to the port-wide sdkconfig.base
-# (the same file the upstream builder itself appends to), so it applies to BOTH
-# board configs (generic + tdeck).
+# S3's MINIMUM caches (16KB icache, 32KB dcache) while the VM reads frozen
+# bytecode from flash AND the gc heap from PSRAM through that one small dcache --
+# with the LCD DMA streaming 153KB/frame through the same path. Measured cost:
+# the same kid float loop runs ~13.5ms on clean silicon vs 30-43ms here (~2.5x).
+# Double both caches. Costs 48KB of internal SRAM (16 icache + 32 dcache) --
+# verify WiFi/web-view still fits internal RAM on the hardware pass; if NO_MEM,
+# drop the icache bump first (dcache is the bigger lever).
+#
+# The cache LINE stays 32B: the first pass also widened lines to 64B and the
+# hardware answered with horizontal garbage bands on EVERY screen (desktop,
+# carts, loading) -- the 64B coherency granularity breaks the CPU<->GDMA
+# handoff somewhere in the PSRAM panel-flush path (observed 2026-07-03, fps
+# gains were intact; only the pixels were wrong). Do not re-widen without an
+# on-hardware A/B.
+#
+# MOYBYTE_CACHE_GEOMETRY=stock builds the upstream default geometry (16/32KB)
+# for bisects. The options land in the port-wide sdkconfig.base (the same file
+# the upstream builder itself appends to), so they apply to BOTH board configs
+# (generic + tdeck). Previously-appended cache lines are stripped first, so a
+# geometry change can never leave two conflicting choice symbols in the
+# defaults (kconfig would silently pick one).
+CACHE_GEOMETRY="${MOYBYTE_CACHE_GEOMETRY:-fast}"
 SDKCONFIG_BASE="${UPSTREAM_DIR}/lib/micropython/ports/esp32/boards/sdkconfig.base"
-for opt in \
-  'CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y' \
-  'CONFIG_ESP32S3_DATA_CACHE_64KB=y' \
-  'CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y'; do
-  if ! grep -q "^${opt}$" "${SDKCONFIG_BASE}"; then
+sed -i \
+  -e '/^CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y$/d' \
+  -e '/^CONFIG_ESP32S3_DATA_CACHE_64KB=y$/d' \
+  -e '/^CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y$/d' \
+  -e '/^CONFIG_ESP32S3_DATA_CACHE_LINE_32B=y$/d' \
+  "${SDKCONFIG_BASE}"
+if [ "${CACHE_GEOMETRY}" = "fast" ]; then
+  for opt in \
+    'CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y' \
+    'CONFIG_ESP32S3_DATA_CACHE_64KB=y' \
+    'CONFIG_ESP32S3_DATA_CACHE_LINE_32B=y'; do
     printf '%s\n' "${opt}" >> "${SDKCONFIG_BASE}"
-  fi
-done
+  done
+fi
 
 case "${BOARD_CONFIG}" in
   generic)
@@ -390,13 +408,29 @@ esac
 # IDF only generates the build's sdkconfig FROM the defaults when the file is
 # ABSENT -- appending options to sdkconfig.base does NOT propagate into an
 # existing build dir (verified: a rebuild silently kept the 16KB/32KB caches).
-# If the generated file is missing the flagship cache option, delete it so the
-# reconfigure regenerates it from the (now-updated) defaults.
+# If the generated file doesn't match the requested cache geometry (any of the
+# three options -- the LINE option is the one a 64KB-only check missed), delete
+# it so the reconfigure regenerates it from the (now-updated) defaults.
 GEN_SDKCONFIG="${MPY_BUILD_DIR}/sdkconfig"
-if [ -f "${GEN_SDKCONFIG}" ] \
-    && ! grep -q '^CONFIG_ESP32S3_DATA_CACHE_64KB=y' "${GEN_SDKCONFIG}"; then
-  echo "sdkconfig missing cache geometry -- forcing regeneration"
-  rm -f "${GEN_SDKCONFIG}"
+if [ "${CACHE_GEOMETRY}" = "fast" ]; then
+  WANT_CACHE='CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
+CONFIG_ESP32S3_DATA_CACHE_64KB=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_32B=y'
+else
+  WANT_CACHE='CONFIG_ESP32S3_INSTRUCTION_CACHE_16KB=y
+CONFIG_ESP32S3_DATA_CACHE_32KB=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_32B=y'
+fi
+if [ -f "${GEN_SDKCONFIG}" ]; then
+  while IFS= read -r opt; do
+    if ! grep -q "^${opt}$" "${GEN_SDKCONFIG}"; then
+      echo "sdkconfig cache geometry stale (missing ${opt}) -- forcing regeneration"
+      rm -f "${GEN_SDKCONFIG}"
+      break
+    fi
+  done <<EOF
+${WANT_CACHE}
+EOF
 fi
 
 "${RUNNER[@]}" "${BUILD_COMMAND[@]}"
