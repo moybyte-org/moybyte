@@ -4,7 +4,9 @@
 recipe to hand to the flush agent. Nothing here edits the live flush path
 (`moy_compositor.py` / `tdeck_display.py` are owned by another agent). LovyanGFX is
 studied as a **reference** for how the S3 hits a clean 80 MHz DMA flush; we are not
-adding it as a dependency.
+adding it as a dependency. **2026-07-03:** current flush numbers + the lever ledger
+live in the **#66 performance ledger** (GitHub issue); this doc remains the wiring
+deep-dive.
 
 **TL;DR / verdict (read this first):**
 
@@ -26,7 +28,7 @@ So the recipe splits in two:
   no one re-spends effort chasing a config that can't exist here. Escapes are a
   hardware-rev concern (P4 / #12).
 
-This also **closes the open question in `docs/perf_60fps_architecture.md` §1.3**
+This also **closes the open question in `docs/history/perf_60fps_architecture.md` §1.3**
 ("confirm the wiring uses IOMUX pins"): it does not.
 
 ---
@@ -208,7 +210,7 @@ data/clock lines. The SCK/MOSI/MISO routing to 40/41/38 is fixed copper. **A rea
 ## 3. What to do instead (the only lever left)
 
 The flush is a fixed ~28–31 ms on this wiring. Don't chase a faster clock — there
-isn't one. The path forward is the one `docs/perf_60fps_architecture.md` already
+isn't one. The path forward is the one `docs/history/perf_60fps_architecture.md` already
 lays out, which this spike confirms is the only remaining lever:
 
 1. **Hide the flush behind render** with async double-buffered DMA → frame period
@@ -239,6 +241,6 @@ fix.
 - LovyanGFX as the reference for the clean-DMA-flush techniques (single-window
   streaming, hardware byte-swap, max DMA burst, 80 MHz on IOMUX pins):
   <https://github.com/lovyan03/LovyanGFX> (ST7789/ESP32-S3 config example).
-- Repo context: `docs/perf_60fps_architecture.md` §1.2–§1.3 (flush budget + the
+- Repo context: `docs/history/perf_60fps_architecture.md` §1.2–§1.3 (flush budget + the
   80 MHz caveat this spike resolves); `firmware/.../modules/moy_compositor.py`
   (the banded single-window `tx_color` flush this recipe validates).

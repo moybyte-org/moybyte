@@ -1,7 +1,10 @@
 # 60 FPS Architecture for Moybyte on the LilyGO T-Deck Plus (ESP32-S3)
 
 **Status:** Research findings + recommended architecture (decision doc).
-**Date:** 2026-06-27.
+**Date:** 2026-06-27. **2026-07-03:** current measured state + the lever ledger
+now live in the **#66 performance ledger** (GitHub issue, mirrored by
+`make sync-issues`); this doc remains the research grounding and carries no
+current numbers.
 **Scope:** How fantasy consoles and ESP32 game engines hit 60 fps, and what
 architecture would get the v0.4 `.moy` console to a 60 fps target on the
 T-Deck Plus (ESP32-S3, dual-core Xtensa LX7 @240 MHz, 512 KB internal SRAM,

@@ -1,10 +1,12 @@
 # Fast-by-default drawing: folding the perf primitives into the canonical API
 
-**Status:** design / proposal. One fold (auto-batch `spr()`) is already demonstrated
-by hand in `system_carts/sakura.moy`; the other two are unbuilt. Nothing here is
-merged.
+**Status:** Fold 1 (auto-batch `spr()`) **SHIPPED** — engine-side and further than
+this doc proposed: `spr()` is a native C callable (`spr_gate`, #63) appending to a
+shared int16 batch array, hardware-confirmed. The other folds remain design.
+Current measured numbers live in the **#66 performance ledger** (GitHub issue,
+mirrored by `make sync-issues`) — not in this doc.
 
-**Audience:** engine/runtime. Read `docs/perf_60fps_architecture.md` (the perf
+**Audience:** engine/runtime. Read `docs/history/perf_60fps_architecture.md` (the perf
 grounding), `docs/porting_pico8.md` (the API-alignment surface), and
 `docs/moy_cart_api.md` (the current cart/device API) alongside this.
 
