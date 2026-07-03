@@ -180,6 +180,41 @@ ASYNC_FLUSH = True
 PSRAM_DIRECT_FLUSH = True
 
 
+# --- SRAM-bounce banded flush (#66): artifact-proof AND overlapped ------------
+#
+# WHY. The PSRAM-direct flush makes the panel DMA read 153KB straight from PSRAM,
+# so ANY other heavy PSRAM traffic during the transfer (the GDMA layer copy; a
+# fast cart's own churn through the dcache) can starve the SPI FIFO, which then
+# clocks out garbage rows -- the 2026-07-03 horizontal-band artifacts. The
+# structural fix: the panel DMA only ever reads INTERNAL SRAM, which cannot be
+# starved by PSRAM contention. The frame is shipped as BOUNCE_ROWS-row bands:
+# each band is memcpy'd front-PSRAM -> one of two internal DMA bounce buffers,
+# then queued (tx_color). Two bands can be in flight, so the copy of band k
+# overlaps the transfer of band k-1.
+#
+# WHO PUMPS. Queueing needs the esp_lcd tx_color no-acquire patch (#66,
+# patches/esp_lcd_tx_color_noacquire.patch): continuation bands (cmd < 0) are
+# queue-only and never block, so pump() costs ~80us per band (one 15KB memcpy +
+# a queue). Bands are fed by a PUMP_TIMER_MS soft machine.Timer (esp32 Timer
+# callbacks run via mp_sched between bytecodes -- they fire DURING the cart's
+# _update, which has no other hook points and can run 20ms+), and by the next
+# flush's drain as the always-correct fallback (a dead timer degrades to a
+# serialized banded flush, never to corruption). The front buffer is immutable
+# while it ships (ping-pong), so bands are tear-free by construction.
+#
+# COSTS. 2 x (320*BOUNCE_ROWS*2)B of internal DMA SRAM (24 rows -> 2x15360B),
+# ~150KB/frame of PSRAM reads through the dcache (the pump memcpy; roughly half
+# the pollution of the old CPU sync layer-copy since the SRAM writes are
+# uncached). If internal RAM is tight (WiFi/web view NO_MEM, #38), this is the
+# first alloc to shrink (12 rows halves it).
+#
+# TO REVERT: SRAM_BOUNCE_FLUSH = False -> the PSRAM-direct single-transfer path
+# above runs unchanged (with its known contention-band risk).
+SRAM_BOUNCE_FLUSH = True
+BOUNCE_ROWS = 24       # rows per band: 24 -> 10 bands of 15360B on 320x240
+PUMP_TIMER_MS = 2      # soft-timer pump period; 0 = drain-fallback only
+
+
 def plan_strips(height, strip_h):
     """Row bands [(y, rows), ...] covering `height`, each <= strip_h rows.
 
@@ -403,6 +438,55 @@ class Compositor:
         # Point the BACK-buffer aliases at A initially (single-buffer => never moves).
         self._back_mv = self._fb_a_mv
         self._fbuf = self._fbuf_a
+        # --- SRAM-bounce banded flush state (#66; see the SRAM_BOUNCE_FLUSH block).
+        # Two internal DMA bounce buffers + pre-sliced per-band views of BOTH
+        # physical framebuffers (created once: pump() must not allocate on its
+        # steady path, it runs from a soft-timer callback). `_bnc_total`/`_bnc_next`
+        # are the in-flight frame's band bookkeeping (0/0 = idle); `_bnc_src`
+        # points at the CURRENT front's band views for one flush's duration.
+        # MUST init after _fb_a_mv/_fb_b_mv above (the band views slice them).
+        self.bounce_flush = False
+        self._bnc_total = 0
+        self._bnc_next = 0
+        self._bnc_src = None
+        self._in_pump = False
+        self._pump_timer = None
+        if SRAM_BOUNCE_FLUSH and self._async:
+            try:
+                rows = BOUNCE_ROWS
+                rb = self._row_bytes
+                self._bnc_bufs = (moy_alloc.malloc_dma(width * rows * 2),
+                                  moy_alloc.malloc_dma(width * rows * 2))
+                self._bnc_mv = (memoryview(self._bnc_bufs[0]),
+                                memoryview(self._bnc_bufs[1]))
+                self._bnc_rows = rows
+                nb = (height + rows - 1) // rows
+                self._bnc_bands = nb
+
+                def _band_views(mv):
+                    out = []
+                    for k in range(nb):
+                        r = rows if (k + 1) * rows <= height else height - k * rows
+                        out.append(mv[k * rows * rb:(k * rows + r) * rb])
+                    return out
+
+                self._bnc_src_a = _band_views(self._fb_a_mv)
+                self._bnc_src_b = _band_views(self._fb_b_mv)
+                self.bounce_flush = True
+            except Exception as exc:
+                print("Moybyte compositor: SRAM bounce flush unavailable:", exc)
+                self.bounce_flush = False
+        if self.bounce_flush and PUMP_TIMER_MS:
+            try:
+                from machine import Timer
+                self._pump_timer = Timer(3)
+                self._pump_timer.init(period=PUMP_TIMER_MS,
+                                      mode=Timer.PERIODIC,
+                                      callback=self._pump_cb)
+            except Exception as exc:
+                print("Moybyte compositor: pump timer unavailable "
+                      "(drain-fallback only):", exc)
+                self._pump_timer = None
 
     # -- introspection -------------------------------------------------------
 
@@ -635,6 +719,22 @@ class Compositor:
         flush's _drain_dma issues it `last=True` (the one busy-wait completion point).
         The window is armed once; the held-back band reuses it via RAMWRC."""
         self._set_window(0, 0, self._w - 1, self._h - 1)
+        if self._async and self.bounce_flush:
+            # SRAM-bounce bands (#66): arm the band bookkeeping for THIS front and
+            # queue the first two bands (both bounce buffers full -> ~3ms of
+            # transfer buffered). The soft pump timer feeds the rest during the
+            # cart's _update/_draw; the next drain is the fallback feeder. Band 0
+            # carries RAMWR (its tx_color acquires a drained bus -- guaranteed,
+            # _drain_dma just ran); bands 1..N-1 go cmd=-1 = queue-only, which the
+            # esp_lcd no-acquire patch makes non-blocking.
+            self._bnc_src = (self._bnc_src_a if self._front is self._fb
+                             else self._bnc_src_b)
+            self._bnc_next = 0
+            self._bnc_total = self._bnc_bands
+            self.pump()
+            self._dma_pending = None
+            self._dma_front = self._front
+            return
         mv = self._front_mv()
         rb = self._row_bytes
         rows_per = self._flush_rows
@@ -686,6 +786,58 @@ class Compositor:
         """memoryview of the in-flight FRONT buffer (for the held-back final band)."""
         return self._fb_a_mv if self._front is self._fb else self._fb_b_mv
 
+    # -- SRAM-bounce band pump (#66; see the SRAM_BOUNCE_FLUSH block) ---------
+
+    def pump(self):
+        """Feed the in-flight SRAM-bounce flush: copy the next band(s) of the FRONT
+        into a free bounce buffer and queue them. Band k's bounce slot (k & 1) is
+        free once band k-2 completed (`_dma_done_n >= k-1`), so at most two bands
+        are ever in flight and the copy of one overlaps the transfer of the other.
+
+        Called from _kick_front (first two bands), the soft pump timer (between
+        the cart's bytecodes -- the only feeder during a long _update), and
+        _drain_dma (the always-correct fallback). Reentrancy-guarded: a timer
+        fire that lands inside a main-thread pump no-ops. Allocation-free on the
+        steady path (band views are pre-sliced in __init__) EXCEPT the tx_color
+        argument tuple machinery itself -- fine, soft-timer context allows alloc.
+        Costs ~80us per band (15KB PSRAM->SRAM memcpy + an async queue; the
+        queue never blocks thanks to the esp_lcd no-acquire patch)."""
+        if self._in_pump or self._bnc_next >= self._bnc_total:
+            return
+        self._in_pump = True
+        try:
+            k = self._bnc_next
+            total = self._bnc_total
+            src = self._bnc_src
+            rows = self._bnc_rows
+            rb = self._row_bytes
+            w1 = self._w - 1
+            while k < total and self._dma_done_n >= k - 1:
+                s = src[k]
+                mv = self._bnc_mv[k & 1]
+                n = len(s)
+                if n == len(mv):
+                    mv[:] = s          # C-level copy PSRAM -> internal SRAM
+                    buf = mv
+                else:                  # short final band (non-multiple heights)
+                    buf = mv[:n]
+                    buf[:] = s
+                y = k * rows
+                self._bus.tx_color(RAMWR if k == 0 else -1, buf,
+                                   0, y, w1, y + (n // rb) - 1, 0, False)
+                self._dma_target += 1
+                k += 1
+                self._bnc_next = k
+        finally:
+            self._in_pump = False
+
+    def _pump_cb(self, _t):
+        # Soft machine.Timer callback (esp32 Timers schedule via mp_sched -> runs
+        # between bytecodes on the main thread, allocation allowed). ~2us no-op
+        # when nothing is in flight.
+        if self._bnc_next < self._bnc_total:
+            self.pump()
+
     def _on_dma_done(self):
         # SPI completion ISR, GC LOCKED -- must NOT allocate. `+= 1` on a small int
         # into the pre-existing `_dma_done_n` slot is heap-free (see the ASYNC_FLUSH
@@ -718,7 +870,22 @@ class Compositor:
         NON-ASYNC: issue the held-back final band `last=True`, which busy-waits until the
         whole queued chain has drained."""
         if self._async:
-            if self._dma_target:
+            if self._bnc_total:
+                # SRAM-bounce frame in flight: finish feeding it ourselves (the
+                # correct fallback when the pump timer is dead or starved), then
+                # wait out the tail. Most of this already happened behind render.
+                guard = 0
+                while (self._bnc_next < self._bnc_total
+                       or self._dma_done_n < self._dma_target):
+                    if self._bnc_next < self._bnc_total:
+                        self.pump()
+                    guard += 1
+                    if guard > 1000000:   # heavier per-iter than _await_dma's spin;
+                        break             # ~1s cap >> the 16ms worst-case transfer
+                self._bnc_total = 0
+                self._bnc_next = 0
+                self._bnc_src = None
+            elif self._dma_target:
                 self._await_dma()
             self._dma_done_n = 0
             self._dma_target = 0

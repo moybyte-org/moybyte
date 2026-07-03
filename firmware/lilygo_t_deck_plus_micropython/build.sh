@@ -305,6 +305,19 @@ if [ -f "${SPI_MASTER_C}" ] && ! grep -q "Moybyte #43" "${SPI_MASTER_C}"; then
   patch -d "${UPSTREAM_DIR}/lib/esp-idf" -p1 < "${PATCH_DIR}/spi_master_psram_tx_dma.patch"
 fi
 
+# Moybyte #66: patch esp_lcd's SPI tx_color so a CONTINUATION color write (cmd < 0)
+# skips spi_device_acquire_bus -- acquire waits for the device's in-flight queued
+# transactions, so every banded tx_color otherwise BLOCKS until the previous band's
+# DMA completes (serializing the flush against the caller). Queue-only continuation
+# bands are what let the SRAM-bounce flush (moy_compositor SRAM_BOUNCE_FLUSH) feed
+# 15KB internal-DMA bands without ever blocking the pumping thread. Same
+# marker-guard pattern as the #43 patch above.
+ESP_LCD_SPI_C="${UPSTREAM_DIR}/lib/esp-idf/components/esp_lcd/spi/esp_lcd_panel_io_spi.c"
+if [ -f "${ESP_LCD_SPI_C}" ] && ! grep -q "Moybyte #66" "${ESP_LCD_SPI_C}"; then
+  echo "Moybyte: applying esp_lcd tx_color no-acquire patch (#66)"
+  patch -d "${UPSTREAM_DIR}/lib/esp-idf" -p1 < "${PATCH_DIR}/esp_lcd_tx_color_noacquire.patch"
+fi
+
 RUNNER=()
 if command -v ionice >/dev/null 2>&1; then
   RUNNER+=(ionice -c 3)

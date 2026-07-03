@@ -57,12 +57,19 @@ _RGB_KEY = 0xF81F
 # for an FPS A/B comparison against the native-blit build.
 _USE_GFX = True
 
-# GDMA async layer copy (#54 St.2 / #63): DISABLED -- the copy is correct and fast
-# but its PSRAM->PSRAM GDMA traffic runs concurrently with the panel's PSRAM DMA
-# read and starves the SPI FIFO (horizontal garbage bands; hardware-confirmed
-# 2026-07-03, bands worst in the one layer cart). Re-enable only together with a
-# kick re-ordered outside the panel-DMA window, or an internal-SRAM flush.
-LAYER_COPY_ASYNC = False
+# GDMA async layer copy (#54 St.2 / #63 / #66): tied to the SRAM-bounce flush.
+# The copy is correct and fast (layer 7ms -> 0.04ms, plus it keeps the dcache
+# warm: Sakura logic 13-21ms vs 29-41ms with the CPU sync copy), but it is a
+# full-throttle PSRAM->PSRAM GDMA blit -- run against a panel DMA that READS
+# PSRAM it starves the SPI FIFO into horizontal garbage bands (hardware,
+# 2026-07-03). Under the #66 SRAM-bounce flush the panel only ever reads
+# internal SRAM, so the contention target is gone and the copy is safe again.
+# One flag feeds both: bounce off -> this must go off with it.
+try:
+    from moy_compositor import SRAM_BOUNCE_FLUSH as _SRAM_BOUNCE_FLUSH
+except Exception:
+    _SRAM_BOUNCE_FLUSH = False
+LAYER_COPY_ASYNC = _SRAM_BOUNCE_FLUSH
 
 
 class Image:
@@ -2289,6 +2296,27 @@ def _diag_perf_sample(diag, ws):
         pass
 
 
+HITCH_MS = 80
+
+
+def _diag_hitch(diag, ws, elapsed, diag_ms, sd_ms, web_ms):
+    """Log a HITCH line (#66): one frame blew past HITCH_MS. Names the loop-tail
+    costs measured directly (diag sample / diag SD write / web poll) plus the EMA
+    phase split and flush as context. If the named parts don't account for the
+    spike, the pause was inside cart logic/render -- most likely an implicit GC
+    collect (alloc-triggered, invisible to the phase timers)."""
+    try:
+        b = ws.perf_breakdown()
+        s = ws.perf_sample()
+        diag.log("HITCH",
+                 "frame=%dms diag=%d sdflush=%d web=%d flush=%.1f "
+                 "ema(logic=%.1f render=%.1f chrome=%.1f)"
+                 % (elapsed, diag_ms, sd_ms, web_ms,
+                    (s[2] if s is not None else -1.0), b[0], b[1], b[3]))
+    except Exception:
+        pass
+
+
 def _diag_drawbrk(diag, ws):
     """Log a DRAWBRK line splitting the frame's draw cost into cart _update (game
     LOGIC) / cart _draw (RENDERING) / audio.tick / console chrome (the dock+cursor+
@@ -3392,6 +3420,7 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         # -> paste the serial" yield per-cart frame timings offline. No SD touch here
         # (just the RAM ring); the 5s flush below is what writes it out.
         _tnow = _ticks_ms()
+        _t_diag = 0
         if diag is not None and _ticks_diff(_tnow, _diag_perf_at) >= 0:
             _diag_perf_at = _tnow + 3000
             _diag_perf_sample(diag, ws)
@@ -3399,19 +3428,33 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             _diag_draw2(diag, ws)       # #63: split render into layer-copy vs sprite-batch us
             _diag_calib(diag)           # #63: one-shot interpreter cost model (spill probe)
             _diag_gc(diag)              # #63: GC pause / churn (sakura ~14fps profiling)
+            _t_diag = _ticks_diff(_ticks_ms(), _tnow)
         # Diag SD flush (~5s): overwrite /sd/moybyte/diag.log with the current ring.
         # Runs between frames on the native single-bus path (with_sd_live), never
         # during a panel flush. Guarded -> a flush failure degrades to a no-op.
+        _t_sd = 0
         if diag is not None and _ticks_diff(_tnow, _diag_flush_at) >= 0:
             _diag_flush_at = _tnow + 5000
+            _t0 = _ticks_ms()
             _diag_flush(diag, ws)
+            _t_sd = _ticks_diff(_ticks_ms(), _t0)
         # Web view (#41): service the server BETWEEN frames, fully non-blocking -- accept
         # new connections + drain the persistent WebSocket's queued input and push the
         # latest committed frame down it (WiFi STA is a separate peripheral from the display
         # SPI, so this never touches the SD/panel bus -- it only competes for CPU here).
         # No-op when the server is off; a slow client is dropped, never waited on.
+        _t0 = _ticks_ms()
         web.poll()
+        _t_web = _ticks_diff(_ticks_ms(), _t0)
         elapsed = _ticks_diff(_ticks_ms(), now)
+        # Hitch logger (#66): any frame past HITCH_MS gets a HITCH line naming the
+        # loop-tail suspects it can see (the 3s diag sample, the 5s diag->SD write,
+        # web.poll) plus the EMA phase context -- the tool for catching the
+        # "micro-stutter every couple of seconds" class of bug. A spike with all
+        # the named parts small = the pause was inside cart/render (e.g. an
+        # implicit GC collect), which is itself the answer.
+        if diag is not None and elapsed >= HITCH_MS:
+            _diag_hitch(diag, ws, elapsed, _t_diag, _t_sd, _t_web)
         if elapsed < frame_ms:
             time.sleep_ms(frame_ms - elapsed)
 
