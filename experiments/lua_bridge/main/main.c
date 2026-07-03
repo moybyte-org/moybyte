@@ -5,6 +5,7 @@
 // every 5s so a late-attached serial reader always catches them.
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <math.h>
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -292,6 +293,145 @@ static const char *LUA_SAKURA_CART =
     "  end\n"
     "end\n";
 
+// ---------------------------------------------------------------------------
+// GC / memory follow-up (#6): how much RAM does the full bridged cart need,
+// and what does Lua's GC cost per frame? This decides whether a Lua state can
+// live alongside the MicroPython console on the T-Deck.
+//
+// A tracking allocator wraps realloc/free and keeps live-bytes + a high-water
+// mark. That watermark is the TRUE budget number: lua_gc(LUA_GCCOUNT) only
+// reports what the GC accounts for, while the allocator sees every byte Lua
+// ever asked the system for (including transient parser/load-time spikes).
+typedef struct {
+    size_t live;
+    size_t peak;
+} alloc_stats_t;
+
+static void *l_alloc_track(void *ud, void *ptr, size_t osize, size_t nsize) {
+    alloc_stats_t *s = (alloc_stats_t *)ud;
+    if (ptr == NULL) {
+        // Per the lua_Alloc contract, when ptr is NULL `osize` holds the TYPE
+        // TAG of the object being created (not a size) -- treat as 0 or the
+        // live-byte accounting corrupts.
+        osize = 0;
+    }
+    if (nsize == 0) {
+        free(ptr);
+        s->live -= osize;
+        return NULL;
+    }
+    void *np = realloc(ptr, nsize);
+    if (np == NULL) {
+        return NULL;                    // Lua handles OOM (emergency GC + retry)
+    }
+    s->live = s->live - osize + nsize;
+    if (s->live > s->peak) {
+        s->peak = s->live;
+    }
+    return np;
+}
+
+static double lua_heap_kb(lua_State *L) {
+    return (double)lua_gc(L, LUA_GCCOUNT)
+         + (double)lua_gc(L, LUA_GCCOUNTB) / 1024.0;
+}
+
+// One full bridged cart frame: _update(dt) -> _draw() -> end_frame().
+static void run_cart_frame(lua_State *L) {
+    lua_getglobal(L, "_update");
+    lua_pushnumber(L, 1.0 / 30.0);
+    lua_call(L, 1, 0);
+    lua_getglobal(L, "_draw");
+    lua_call(L, 0, 0);
+    end_frame();
+}
+
+typedef struct {
+    double heap_warm_kb;    // GC-visible heap after load + 1 warm-up frame
+    double heap_steady_kb;  // GC-visible heap after 2000 full frames
+    double peak_kb;         // allocator high-water mark (default-GC run)
+    double frame_gc_on_ms;  // full frame, default incremental GC
+    double frame_gc_off_ms; // full frame, GC stopped (collect time excluded)
+    double collect_max_ms;  // worst manual full-collect pause
+    double collect_avg_ms;  // mean manual full-collect pause
+    double peak_gc_off_kb;  // allocator high-water mark, GC-stopped run
+    int    collects;        // number of manual collects (2000/60)
+    int    ok;
+} gcmem_result_t;
+
+static alloc_stats_t g_alloc_on;
+static alloc_stats_t g_alloc_off;
+
+static void bench_gcmem(gcmem_result_t *r) {
+    r->ok = 0;
+
+    // --- Run 1: default incremental GC. Heap sizes + peak + frame time. ---
+    g_alloc_on.live = 0;
+    g_alloc_on.peak = 0;
+    lua_State *L = lua_newstate(l_alloc_track, &g_alloc_on);
+    luaL_openlibs(L);
+    bridge_register(L);
+    if (luaL_dostring(L, LUA_SAKURA_CART) != LUA_OK) {
+        printf("GCMEM LUA ERROR (gc on): %s\n", lua_tostring(L, -1));
+        lua_close(L);
+        return;
+    }
+    bridge_batch_reset();
+    run_cart_frame(L);                          // one warm-up frame
+    r->heap_warm_kb = lua_heap_kb(L);
+    int64_t t0 = esp_timer_get_time();
+    for (int f = 0; f < 2000; f++) {
+        run_cart_frame(L);
+    }
+    r->frame_gc_on_ms = (esp_timer_get_time() - t0) / 2000.0 / 1000.0;
+    r->heap_steady_kb = lua_heap_kb(L);
+    lua_close(L);
+    r->peak_kb = g_alloc_on.peak / 1024.0;
+
+    // --- Run 2: GC stopped, manual full collect every 60 frames, each
+    // collect timed separately (the "worst pause" a frame-scheduled collect
+    // would cost). Frame time here EXCLUDES the collects, so
+    // (frame_gc_on - frame_gc_off) = the incremental GC share per frame. ---
+    g_alloc_off.live = 0;
+    g_alloc_off.peak = 0;
+    lua_State *L2 = lua_newstate(l_alloc_track, &g_alloc_off);
+    luaL_openlibs(L2);
+    bridge_register(L2);
+    if (luaL_dostring(L2, LUA_SAKURA_CART) != LUA_OK) {
+        printf("GCMEM LUA ERROR (gc off): %s\n", lua_tostring(L2, -1));
+        lua_close(L2);
+        return;
+    }
+    bridge_batch_reset();
+    run_cart_frame(L2);                         // same warm-up as run 1
+    lua_gc(L2, LUA_GCSTOP);
+    int64_t frame_us = 0;
+    int64_t collect_us_total = 0;
+    int64_t collect_us_max = 0;
+    int ncollect = 0;
+    for (int f = 0; f < 2000; f++) {
+        int64_t fs = esp_timer_get_time();
+        run_cart_frame(L2);
+        frame_us += esp_timer_get_time() - fs;
+        if ((f + 1) % 60 == 0) {
+            int64_t cs = esp_timer_get_time();
+            lua_gc(L2, LUA_GCCOLLECT);          // full cycle; works while user-stopped
+            int64_t cd = esp_timer_get_time() - cs;
+            collect_us_total += cd;
+            if (cd > collect_us_max) collect_us_max = cd;
+            ncollect++;
+        }
+    }
+    r->frame_gc_off_ms = frame_us / 2000.0 / 1000.0;
+    r->collect_max_ms = collect_us_max / 1000.0;
+    r->collect_avg_ms = ncollect
+        ? collect_us_total / (double)ncollect / 1000.0 : 0.0;
+    r->collects = ncollect;
+    lua_close(L2);
+    r->peak_gc_off_kb = g_alloc_off.peak / 1024.0;
+    r->ok = 1;
+}
+
 // Runs `frames` steady-state iterations calling only _update(dt), returns
 // ms/frame. Used both standalone (to reproduce the ~2.7ms baseline inside a
 // bridge-registered state) and as half of the full_frame measurement.
@@ -407,6 +547,11 @@ void app_main(void) {
     uint32_t bridge_checksum = g_checksum;
     uint32_t bridge_sprites = g_last_sprite_count;
 
+    // --- GC / memory budget (#6 follow-up): heap size + allocator watermark
+    // + GC share of frame time, in the full bridged-cart state.
+    gcmem_result_t gm = {0};
+    bench_gcmem(&gm);
+
     while (1) {
         printf("SPIKE RESULT: c=%.4f ms/frame  lua=%.3f ms/frame  "
                "(mpy same board measured 13.5)\n", c_ms, lua_ms);
@@ -414,6 +559,17 @@ void app_main(void) {
                "sprites=%u checksum=0x%08x\n",
                bridge_update_ms, bridge_draw_ms, bridge_full_ms,
                (unsigned)bridge_sprites, (unsigned)bridge_checksum);
+        if (gm.ok) {
+            printf("GCMEM RESULT: heap_warm=%.1fkB heap_steady=%.1fkB "
+                   "peak=%.1fkB frame_gc_on=%.3f frame_gc_off=%.3f "
+                   "full_collect=%.3f ms\n",
+                   gm.heap_warm_kb, gm.heap_steady_kb, gm.peak_kb,
+                   gm.frame_gc_on_ms, gm.frame_gc_off_ms, gm.collect_max_ms);
+            printf("GCMEM DETAIL: collect_avg=%.3f ms collect_max=%.3f ms "
+                   "collects=%d peak_gc_off=%.1fkB\n",
+                   gm.collect_avg_ms, gm.collect_max_ms, gm.collects,
+                   gm.peak_gc_off_kb);
+        }
         vTaskDelay(pdMS_TO_TICKS(5000));
     }
 }
