@@ -14,6 +14,18 @@
 #include "py/obj.h"
 #include "py/runtime.h"
 
+// Async layer copy (#54 Stage 2 / #63): GDMA-driven PSRAM->PSRAM memcpy so the
+// per-frame draw_layer background restore (~7ms CPU for a full screen) can run
+// WHILE the cart's _update executes. Guarded so this file stays VM-neutral: the
+// unix-port build (tools/bench_unix_mp.py) has no esp_async_memcpy.h and simply
+// doesn't export copy_async/copy_wait -- Python falls back to the sync path.
+#if defined(__has_include)
+#if __has_include("esp_async_memcpy.h")
+#include "esp_async_memcpy.h"
+#define MOY_GFX_HAS_ASYNC_COPY 1
+#endif
+#endif
+
 static inline uint16_t *moy_gfx_buf_w(mp_obj_t obj, size_t *npix) {
     mp_buffer_info_t bi;
     mp_get_buffer_raise(obj, &bi, MP_BUFFER_WRITE);
@@ -426,6 +438,73 @@ static mp_obj_t moy_gfx_make_spr_gate(size_t n_args, const mp_obj_t *a) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_make_spr_gate_obj, 5, 5,
                                            moy_gfx_make_spr_gate);
 
+#ifdef MOY_GFX_HAS_ASYNC_COPY
+// --- GDMA async copy (#54 Stage 2 / #63) -------------------------------------
+// copy_async(dst, dst_off_px, src, src_off_px, npix) -> True if the DMA copy
+// started (False -> caller must do the sync copy). copy_wait() blocks until the
+// in-flight copy completes. One copy in flight at a time (the layer restore);
+// the driver is installed lazily on first use and kept for the session.
+static async_memcpy_handle_t moy_gfx_mcp = NULL;
+static volatile int moy_gfx_copy_busy = 0;
+
+static bool moy_gfx_copy_done_cb(async_memcpy_handle_t h,
+                                 async_memcpy_event_t *e, void *arg) {
+    (void)h; (void)e; (void)arg;
+    moy_gfx_copy_busy = 0;
+    return false;                       // ISR context: no ctx switch needed
+}
+
+static mp_obj_t moy_gfx_copy_wait(void) {
+    // Spin on the ISR-set flag. A full-frame PSRAM copy is ~1-2ms of GDMA time;
+    // when the copy overlapped the cart's _update this returns immediately.
+    // Bounded so a lost interrupt can never hang the board.
+    for (uint32_t spins = 0; moy_gfx_copy_busy && spins < 4000000u; spins++) {
+    }
+    moy_gfx_copy_busy = 0;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_gfx_copy_wait_obj, moy_gfx_copy_wait);
+
+static mp_obj_t moy_gfx_copy_async(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    if (moy_gfx_mcp == NULL) {
+        async_memcpy_config_t cfg = ASYNC_MEMCPY_DEFAULT_CONFIG();
+        cfg.backlog = 4;
+        cfg.dma_burst_size = 64;        // widest AHB burst: best PSRAM throughput
+        if (esp_async_memcpy_install(&cfg, &moy_gfx_mcp) != ESP_OK) {
+            moy_gfx_mcp = NULL;
+            return mp_const_false;      // caller falls back to the sync copy
+        }
+    }
+    if (moy_gfx_copy_busy) {            // defensive: never queue a second copy
+        moy_gfx_copy_wait();
+    }
+    size_t dcap, scap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &dcap);
+    mp_int_t dst_off = mp_obj_get_int(a[1]);
+    const uint16_t *src = moy_gfx_buf_r(a[2], &scap);
+    mp_int_t src_off = mp_obj_get_int(a[3]);
+    mp_int_t npix = mp_obj_get_int(a[4]);
+    if (dst_off < 0 || src_off < 0 || npix <= 0
+        || (size_t)(dst_off + npix) > dcap
+        || (size_t)(src_off + npix) > scap) {
+        return mp_const_false;
+    }
+    moy_gfx_copy_busy = 1;
+    esp_err_t err = esp_async_memcpy(moy_gfx_mcp, dst + dst_off,
+                                     (void *)(src + src_off),
+                                     (size_t)npix * 2u,
+                                     moy_gfx_copy_done_cb, NULL);
+    if (err != ESP_OK) {
+        moy_gfx_copy_busy = 0;
+        return mp_const_false;          // e.g. alignment refusal -> sync fallback
+    }
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_copy_async_obj, 5, 5,
+                                           moy_gfx_copy_async);
+#endif // MOY_GFX_HAS_ASYNC_COPY
+
 // --- native vector primitives (#43 follow-up) -------------------------------
 //
 // circ/circb/line move the per-scanline / per-pixel rasterizers out of the cart's
@@ -690,6 +769,10 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_blit_map),   MP_ROM_PTR(&moy_gfx_blit_map_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_batch), MP_ROM_PTR(&moy_gfx_blit_batch_obj) },
     { MP_ROM_QSTR(MP_QSTR_make_spr_gate), MP_ROM_PTR(&moy_gfx_make_spr_gate_obj) },
+    #ifdef MOY_GFX_HAS_ASYNC_COPY
+    { MP_ROM_QSTR(MP_QSTR_copy_async), MP_ROM_PTR(&moy_gfx_copy_async_obj) },
+    { MP_ROM_QSTR(MP_QSTR_copy_wait), MP_ROM_PTR(&moy_gfx_copy_wait_obj) },
+    #endif
     { MP_ROM_QSTR(MP_QSTR_circ),       MP_ROM_PTR(&moy_gfx_circ_obj) },
     { MP_ROM_QSTR(MP_QSTR_circb),      MP_ROM_PTR(&moy_gfx_circb_obj) },
     { MP_ROM_QSTR(MP_QSTR_line),       MP_ROM_PTR(&moy_gfx_line_obj) },

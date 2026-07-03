@@ -1142,6 +1142,50 @@ def test_perf_bench_mode_is_stamped_not_committed():
     assert not (ROOT / "modules" / "_moy_bench.py").exists() or True  # stamp is gitignored
 
 
+def test_async_layer_copy_wired():
+    # #54 Stage 2 (#63 follow-up): the draw_layer background restore can run on the
+    # GDMA engine WHILE the cart's _update executes. C side guarded by __has_include
+    # (the unix-port bench build has no esp_async_memcpy.h and simply lacks the
+    # functions); Python side predicts at blit_window_from, kicks at sync_back
+    # (pre-_update), consumes at the next blit_window_from, and drains at cls /
+    # sync_back so an unconsumed copy never races CPU draws. Sync fallback on any
+    # refusal (_async_ok latch), so old firmware / host parity is untouched.
+    c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    assert 'MOY_GFX_HAS_ASYNC_COPY' in c
+    assert 'esp_async_memcpy_install(&cfg, &moy_gfx_mcp)' in c
+    assert 'MP_ROM_QSTR(MP_QSTR_copy_async)' in c
+    assert 'MP_ROM_QSTR(MP_QSTR_copy_wait)' in c
+    assert "def _arm_layer_pred(self, layer, cam_x, cam_y):" in runtime
+    assert "def _drain_lcopy(self):" in runtime
+    assert 'hasattr(self._gfx, "copy_async")' in runtime
+    # kick happens at sync_back (BEFORE the cart's _update -> real overlap)
+    assert "self._gfx.copy_async(self._buf, 0, layer._buf," in runtime
+    # cls drains an unconsumed in-flight copy (screen switches never race the DMA)
+    assert "self._drain_lcopy()" in runtime
+    # a layer edited this frame forces a miss (no stale-background frames)
+    assert "hit = (not _dirty and pend[0] is layer" in runtime
+
+
+def test_cache_geometry_upgraded_in_build():
+    # #63 kid-logic lever: the default S3 cache config (16KB icache / 32KB dcache,
+    # 32B lines) made the interpreter ~2.5x slower than clean silicon (frozen
+    # bytecode from flash + PSRAM heap contending in one small dcache). build.sh
+    # must pin the doubled geometry into the T-Deck sdkconfig every build.
+    build = (ROOT / "build.sh").read_text(encoding="utf-8")
+    assert "CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y" in build
+    assert "CONFIG_ESP32S3_DATA_CACHE_64KB=y" in build
+    assert "CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y" in build
+
+
+def test_gc_diag_is_low_cadence():
+    # #63: the forced-collect GC sample costs ~130ms on a cart-sized live set --
+    # running it every 3s was a visible periodic hitch. 1-in-10 samples only.
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    assert "_GC_TICK = [0]" in runtime
+    assert "if tick % 10 != 0:" in runtime
+
+
 def test_scroll_layer_buffer_is_off_gc_heap():
     # #63 (GC wall): a scroll/paint layer's 150KB RGB565 buffer is the biggest object a
     # cart keeps live, and collect cost scales with the live set (~0.16ms/KB on device).

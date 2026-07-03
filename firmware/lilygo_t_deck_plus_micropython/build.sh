@@ -355,6 +355,23 @@ case "${BOARD_CONFIG}" in
         sed -i '/^CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y/d' "${TDECK_SDKCONFIG}"
       fi
     fi
+    # Cache geometry (#63, the kid-logic interpreter lever): the default build ran
+    # the S3's MINIMUM caches (16KB icache, 32KB dcache / 32B lines) while the VM
+    # reads frozen bytecode from flash AND the gc heap from PSRAM through that one
+    # small dcache -- with the LCD DMA streaming 153KB/frame through the same path.
+    # Measured cost: the same kid float loop runs ~13.5ms on clean silicon vs
+    # 30-43ms here (~2.5x). Double both caches + widen dcache lines to 64B (better
+    # PSRAM bursts). Costs 48KB of internal SRAM (16 icache + 32 dcache) -- verify
+    # WiFi/web-view still fits internal RAM on the next hardware pass; if NO_MEM,
+    # drop INSTRUCTION_CACHE_32KB first (dcache is the bigger lever).
+    for opt in \
+      'CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y' \
+      'CONFIG_ESP32S3_DATA_CACHE_64KB=y' \
+      'CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y'; do
+      if ! grep -q "^${opt}$" "${TDECK_SDKCONFIG}"; then
+        printf '%s\n' "${opt}" >> "${TDECK_SDKCONFIG}"
+      fi
+    done
     sed -i "s|^FROZEN_MANIFEST = .*|FROZEN_MANIFEST = \"${MANIFEST}\"|" "${TDECK_TOML}"
     BUILD_COMMAND=(
       "${BUILD_PYTHON}" make.py
