@@ -51,6 +51,8 @@ ai_jump = 0.0
 got = 0           # coins collected this round (drives the HUD + goal color)
 sparks = []       # collect/win particles: [x, y, vx, vy, life, color]
 flash = 0.0       # white pop on collect, decays
+lay = None        # pre-rendered background layer (sky + terrain) -- see _build_layer
+_lay_sky = None   # the sky color the layer was painted with (rebuild on change)
 
 
 # The player hero is a sprite-sheet tile (sprites.moygfx): tile 0 and tile 1, both
@@ -102,6 +104,23 @@ def _init():
     got = 0
     sparks = []
     flash = 0.0
+    _build_layer()                     # (re)paint the static background once per round
+
+
+def _build_layer():
+    # PERF HABIT (#66): the terrain never changes during play, so re-running the
+    # full-screen map() every frame (~10ms on device) was pure waste. Paint the
+    # STATIC background -- sky + terrain -- into a screen-sized layer ONCE; each
+    # frame _draw stamps it back with draw_layer (one flat copy that also erases
+    # last frame's sprites, so no cls() is needed either). A layer speaks the
+    # whole drawing API (lay.cls / lay.map / lay.rect ...), and it's built once
+    # per run, so the cost lives at start, not in the frame.
+    global lay, _lay_sky
+    if lay is None:
+        lay = make_layer(W, H)         # allocate once per run (repaints reuse it)
+    _lay_sky = cfg("sky", "dark_blue")
+    lay.cls(col(_lay_sky))
+    lay.map(0, 0, MW, MH, 0, 0, -1, 2)
 
 
 def _respawn():
@@ -242,11 +261,18 @@ def _update(dt):
 
 
 def _draw():
-    cls(col("white") if flash > 0.0 else col(cfg("sky", "dark_blue")))
-    # The whole solid terrain in ONE native map() call (#32): the 20x13 tilemap of
-    # 8x8 ground tiles, drawn at scale 2 so each cell is a 16px (TS) world block.
-    # This replaces the old ~381 rect/rectb-per-tile loop -- the big on-device win.
-    map(0, 0, MW, MH, 0, 0, -1, 2)
+    if flash > 0.0:
+        # collect flash: a 1-2 frame white pop -- keep the immediate path so the
+        # whole sky really flashes (the layer below is the normal frame).
+        cls(col("white"))
+        map(0, 0, MW, MH, 0, 0, -1, 2)
+    else:
+        if cfg("sky", "dark_blue") != _lay_sky:
+            _build_layer()             # "Make it mine" sky change -> repaint once
+        # The whole background -- sky + the static terrain -- in ONE flat copy
+        # (#66 PERF HABIT, see _build_layer). No cls() needed: the opaque layer
+        # stamp erases last frame's sprites for free.
+        draw_layer(lay, 0, 0)
     # coins (a bobbing pulse so they read as collectible)
     for c in coins:
         if not c[2]:

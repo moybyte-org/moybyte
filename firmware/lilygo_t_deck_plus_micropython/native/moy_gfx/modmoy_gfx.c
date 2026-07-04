@@ -114,6 +114,18 @@ static mp_obj_t moy_gfx_blit565(size_t n_args, const mp_obj_t *a) {
         if (ty < cy0 || ty >= cy1) continue;
         const uint16_t *srow = src + (size_t)row * (size_t)sw;
         uint16_t *drow = dst + (size_t)ty * (size_t)dw;
+        if (key < 0) {
+            // OPAQUE fast lane (#66 CHROMEBRK): no colorkey test means the row's
+            // clipped span is one contiguous copy -- memcpy instead of the
+            // per-pixel loop. Matters for blit_strip (the cached top bar stamps
+            // a 320x18 strip every cart frame) and the paint-image bakes.
+            mp_int_t s0 = (dx < cx0) ? (cx0 - dx) : 0;
+            mp_int_t s1 = (dx + sw > cx1) ? (cx1 - dx) : sw;
+            if (s1 > s0) {
+                memcpy(drow + dx + s0, srow + s0, (size_t)(s1 - s0) * 2u);
+            }
+            continue;
+        }
         for (mp_int_t col = 0; col < sw; col++) {
             mp_int_t tx = dx + col;
             if (tx < cx0 || tx >= cx1) continue;

@@ -69,12 +69,13 @@ class TDeckKeyboard:
     # False to force the ASCII path regardless of firmware.
     RAW_GAME_MODE = True
     # #69 experiment knob: the esp32 machine.I2C default clock-stretch timeout is
-    # 50000us -- suspiciously the ceiling of the observed 13-60ms kbd= stalls (the
-    # keyboard C3 stretching SCL while it scans). Set this (us) to cap a stretch:
-    # e.g. 5000 turns a 60ms input stall into a <=5ms failed read (caught -> empty
-    # buttons for one frame). None = driver default. The touch shares this bus/I2C
-    # object, so the knob governs both. Leave None until I2CSTAT sizes the problem.
-    I2C_TIMEOUT_US = None
+    # 50000us -- and I2CSTAT sized the stalls on hardware (2026-07-04): kbd max
+    # 21.6-59.8ms, touch max 41ms, several >20ms per play session, maxima hugging
+    # that 50ms ceiling. 5000 caps a stretch at 5ms: a stall becomes a <=5ms
+    # failed read (caught -> empty buttons for ONE frame) instead of a felt
+    # 60ms input freeze. The touch shares this bus/I2C object, so the knob
+    # governs both. Set None to restore the driver default (the A/B revert).
+    I2C_TIMEOUT_US = 5000
     # #69 per-session I2C latency stats, updated by _timed_read on every keyboard
     # transaction and read by the I2CSTAT diag line (moy_runtime): total reads,
     # worst-case us (+ which mode it happened in), and how many crossed 5ms / 20ms.

@@ -1062,6 +1062,64 @@ def test_moy_compositor_bounce_pacing_stats():
                 sys.modules[k] = v
 
 
+def test_bounce_pump_poked_between_native_draw_ops():
+    # #66 pump-starvation fix: the soft pump timer can't fire while the interpreter
+    # is inside a long native op (hardware: PUMP idle=2-6ms on ~every frame), so the
+    # compositor grows pump_if_pending() and the big DeviceCanvas verbs poke it
+    # right after their native calls (fill/cls/map/batch/layer/text).
+    comp = (ROOT / "modules" / "moy_compositor.py").read_text(encoding="utf-8")
+    assert "def pump_if_pending(self):" in comp
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    assert 'self._pump = getattr(compositor, "pump_if_pending", None)' in runtime
+    assert runtime.count("self._pump()") >= 6      # cls/_fill/map/batch/layer/text
+
+
+def test_kid_mode_gates_diag_frame_eaters():
+    # #68 kid mode: Settings -> PERF DIAG (default OFF, persisted) gates the two
+    # felt diag costs -- the forced GC sample and the periodic diag->SD write --
+    # and hushes the live echo; the ring still flushes on cart exit + crash.
+    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    assert '("diag_live", "PERF DIAG", "diag")' in console
+    assert "def set_diag_live(self, on, persist=True):" in console
+    assert 'self.system.get("diag_live", False)' in console     # persisted + applied
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    assert '_live = bool(getattr(ws, "diag_live", False))' in runtime
+    assert "diag.ECHO_LIVE = _live" in runtime
+    assert "if _live:" in runtime                               # forced GC gated
+    assert "_diag_cart_prev and not _cart_now" in runtime       # cart-exit flush
+    assert "if diag is not None and _live and _ticks_diff" in runtime  # timer flush gated
+
+
+def test_i2c_timeout_knob_engaged():
+    # #69 A/B: the clock-stretch cap is ON (5ms) -- a keyboard/touch stall becomes a
+    # <=5ms failed read (one-frame input drop), not a felt 60ms freeze. None reverts.
+    inp_mod = (ROOT / "modules" / "moybyte" / "input.py").read_text(encoding="utf-8")
+    assert "I2C_TIMEOUT_US = 5000" in inp_mod
+    assert "timeout=self.I2C_TIMEOUT_US" in inp_mod
+
+
+def test_blit565_opaque_row_fast_lane():
+    # #66 CHROMEBRK follow-up: key<0 blits (the cached top-bar strip stamp, paint
+    # bakes) copy each clipped row with ONE memcpy instead of the per-pixel loop.
+    c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    assert "OPAQUE fast lane" in c
+
+
+def test_seed_carts_model_the_fast_draw_habits():
+    # The seed carts ARE the curriculum (#66): kids copy them, so they must model
+    # the fast idioms the docs teach -- background-as-clear-color (Battle City) and
+    # static-scenery-in-a-layer (Hop Quest, like Sky Run).
+    battle = (Path("system_carts") / "battle_city.moy" / "main.py").read_text(encoding="utf-8")
+    assert 'cls(col("dark_blue"))' in battle            # the backdrop IS the clear
+    assert 'rect(0, 0, FIELD, FIELD' not in battle      # no double-paint backdrop
+    hop = (Path("system_carts") / "platformer.moy" / "main.py").read_text(encoding="utf-8")
+    assert "def _build_layer():" in hop
+    assert "lay.map(0, 0, MW, MH" in hop                # terrain rendered once
+    assert "draw_layer(lay, 0, 0)" in hop               # stamped per frame
+    api_doc = (Path("docs") / "moy_cart_api.md").read_text(encoding="utf-8")
+    assert "## Make it fast" in api_doc                 # the habits are documented
+
+
 def test_tdeck_keyboard_latches_event_keys_for_hold_window():
     spec = importlib.util.spec_from_file_location(
         "moybyte_firmware_input", ROOT / "modules" / "moybyte" / "input.py"

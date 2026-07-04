@@ -510,9 +510,11 @@ def _draw():
     if shake > 0.0:
         sx = int(rnd(shake * 2) - shake)
         sy = int(rnd(shake * 2) - shake)
-    cls(col("black"))
-    # battlefield backdrop (a hair lighter than the HUD so the play area reads)
-    rect(0, 0, FIELD, FIELD, col("dark_blue"))
+    # PERF HABIT (#66): the battlefield backdrop IS the clear color. This used to
+    # be cls(black) + a full-screen backdrop rect -- every pixel painted TWICE
+    # before the game even drew, ~7ms/frame of the device's budget for nothing.
+    # One cls does both jobs (the HUD strip below repaints its black over it).
+    cls(col("dark_blue"))
     # the whole brick/steel field in ONE native map() call (#32): 15x15 cells of
     # 8x8 tiles at scale 2 -> 16px world blocks. Destroyed bricks are empty cells.
     map(0, 0, MW, MH, sx, sy, 0, 2)
