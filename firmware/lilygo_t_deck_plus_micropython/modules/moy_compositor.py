@@ -465,6 +465,26 @@ class Compositor:
         # fires included), so a hitch can be attributed to/absolved of pumping.
         self._pump_us = 0
         self.pump_last_us = 0
+        # Bounce-feed PACING stats (#66 lever 4, "measure before touching"): the
+        # question is whether the SPI sits IDLE between bands because the 2ms pump
+        # timer feeds them late (worst case ~2ms x 3 late bands ~= the Sky Run
+        # 40-46 vs ~55-60fps gap). Per frame:
+        #   _bnc_idle_us/_bnc_idle_n -- total us (and count) of gaps where EVERY
+        #       queued band had completed (_dma_done_n == _dma_target, bus idle)
+        #       before pump() fed the next one. THE starvation number: ~0 means
+        #       pacing is fine and the ceiling is real transfer time; big means a
+        #       faster feeder (shorter timer period / third bounce slot) pays.
+        #   _bnc_feed_us -- kick -> last band queued (how long feeding took).
+        # Latched into pump_*_last at the next kick (like pump_last_us); read via
+        # bounce_stats(); printed as the PUMP diag line (moy_runtime._diag_pump).
+        self._bnc_idle_us = 0
+        self._bnc_idle_n = 0
+        self._bnc_feed_us = -1
+        self._bnc_kick_us = 0
+        self._dma_done_us = 0        # stamped by the completion ISR (alloc-free)
+        self.pump_idle_last_us = 0
+        self.pump_idle_last_n = 0
+        self.pump_feed_last_us = -1
         try:
             from time import ticks_us as _tus, ticks_diff as _tdf
             self._pump_tus = _tus
@@ -750,6 +770,16 @@ class Compositor:
             # esp_lcd no-acquire patch makes non-blocking.
             self.pump_last_us = self._pump_us   # previous frame's pump total
             self._pump_us = 0
+            # Latch + reset the pacing stats (#66 lever 4) for the frame that just
+            # fully shipped (_drain_dma ran before this kick, so it's complete).
+            self.pump_idle_last_us = self._bnc_idle_us
+            self.pump_idle_last_n = self._bnc_idle_n
+            self.pump_feed_last_us = self._bnc_feed_us
+            self._bnc_idle_us = 0
+            self._bnc_idle_n = 0
+            self._bnc_feed_us = -1
+            if self._pump_tus is not None:
+                self._bnc_kick_us = self._pump_tus()
             self._bnc_src = (self._bnc_src_a if self._front is self._fb
                              else self._bnc_src_b)
             self._bnc_next = 0
@@ -841,6 +871,16 @@ class Compositor:
             front = self._front      # stable until the post-drain swap
             band_b = rows * rb
             while k < total and self._dma_done_n >= k - 1:
+                # Pacing probe (#66 lever 4): about to feed band k while every
+                # band fired so far has already COMPLETED -> the SPI has been
+                # idle since the last completion ISR. Accumulate that starvation
+                # gap (k>0: band 0 follows a drained bus by design).
+                if (k > 0 and _tus is not None
+                        and self._dma_done_n >= self._dma_target):
+                    _gap = self._pump_tdf(_tus(), self._dma_done_us)
+                    if _gap > 0:
+                        self._bnc_idle_us += _gap
+                        self._bnc_idle_n += 1
                 s = src[k]
                 mv = self._bnc_mv[k & 1]
                 n = len(s)
@@ -865,6 +905,9 @@ class Compositor:
             self._in_pump = False
             if _tus is not None:
                 self._pump_us += self._pump_tdf(_tus(), _pt0)
+                # Feed complete: stamp kick -> last-band-queued once per frame.
+                if self._bnc_next >= self._bnc_total and self._bnc_feed_us < 0:
+                    self._bnc_feed_us = self._pump_tdf(_tus(), self._bnc_kick_us)
 
     def _pump_cb(self, _t):
         # Soft machine.Timer callback (esp32 Timers schedule via mp_sched -> runs
@@ -877,8 +920,24 @@ class Compositor:
         # SPI completion ISR, GC LOCKED -- must NOT allocate. `+= 1` on a small int
         # into the pre-existing `_dma_done_n` slot is heap-free (see the ASYNC_FLUSH
         # block). Counts one finished band; the front is fully shipped when this
-        # reaches `_dma_target`.
+        # reaches `_dma_target`. Also stamps the completion time (#66 lever 4):
+        # ticks_us() returns a small int and the slot pre-exists, so this stays
+        # alloc-free; pump() measures SPI idle gaps against it.
         self._dma_done_n += 1
+        t = self._pump_tus
+        if t is not None:
+            self._dma_done_us = t()
+
+    def bounce_stats(self):
+        """Bounce-feed pacing numbers for the LAST fully-shipped frame (#66 lever
+        4): (pump_us, idle_us, idle_n, feed_us, bands). idle_us/idle_n = time/count
+        the SPI sat starved waiting for pump() to feed the next band (the tunable
+        waste -- ~0 means the flush ceiling is real transfer time and band size /
+        pump period / a third slot won't help); feed_us = kick -> last band queued
+        (-1 = frame not fed to completion via pump, e.g. bounce off); pump_us = CPU
+        time inside pump(). Zeros/-1 when the bounce flush is off."""
+        return (self.pump_last_us, self.pump_idle_last_us, self.pump_idle_last_n,
+                self.pump_feed_last_us, getattr(self, "_bnc_bands", 0))
 
     def _await_dma(self):
         """Spin until every fired band's completion ISR has run (`_dma_done_n` reaches

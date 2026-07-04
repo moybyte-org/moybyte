@@ -19,6 +19,18 @@ from editors import CodeEditor, PaintEditor, SpriteSheet
 from console import NAMES, Pointer, Workstation, _cursor_delta, color
 from carts_data import CARTS  # build-time generated from system_carts/ (tools/gen_device_carts.py)
 
+# petme128 glyph blob for the native moy_gfx.text kernel (#62) -- staged from
+# runtime/font.py as moy_font by build.sh, so device text rasterizes from the SAME
+# bytes the host Canvas.print does (pixel parity). Absent (old build) -> print()
+# stays on framebuf.text (same glyphs, no clip rect).
+try:
+    import moy_font as _moy_font
+    _FONT8 = _moy_font.DATA
+    _FONT8_FIRST = _moy_font.FIRST
+except ImportError:
+    _FONT8 = None
+    _FONT8_FIRST = 0x20
+
 # MOY64 palette as RGB565 (generated from runtime/palette.py; no colorsys here).
 PAL565 = (
     0x0000, 0x194A, 0x792A, 0x042A, 0xAA86, 0x5AA9, 0xC618, 0xFF9D,
@@ -132,6 +144,10 @@ class DeviceCanvas:
         self._buf = compositor.framebuffer()          # raw RGB565 bytearray (for moy_gfx)
         self._fb = framebuf.FrameBuffer(self._buf, self.w, self.h, framebuf.RGB565)
         self._gfx = compositor.gfx() if _USE_GFX else None   # native kernel, or None
+        # Native petme128 text (#62): resolved once -- needs both the moy_gfx.text
+        # op (old firmware lacks it) and the staged moy_font glyph blob.
+        self._gfx_text = (getattr(self._gfx, "text", None)
+                          if (self._gfx is not None and _FONT8 is not None) else None)
         # DMA double-buffer (#40, default OFF): the compositor's BACK buffer ping-pongs
         # between two physical buffers each flush, so this canvas must re-point its
         # draw target at it every frame (sync_back) -- a stale pointer would draw into
@@ -186,6 +202,13 @@ class DeviceCanvas:
         # frame by batch_reset (perf capture only); read via _diag_draw2.
         self._t_layer_us = 0
         self._t_batch_us = 0
+        # #66: the render-bound carts' remaining verbs, so DRAW2 attributes the WHOLE
+        # render ms -- map (blit_map), text (moy_gfx.text), fill (cls + rect/circ spans).
+        # Battle City's ~26ms render is cls + a 240px backdrop rect + a full map() +
+        # one spr_batch + 11 prints; these say which C op actually eats it.
+        self._t_map_us = 0
+        self._t_text_us = 0
+        self._t_fill_us = 0
         self.reset_state()
 
     def sync_back(self):
@@ -313,7 +336,9 @@ class DeviceCanvas:
         if x1 <= x0 or y1 <= y0:
             return
         if self._gfx is not None:
+            _t0 = _ticks_us()          # #66 DRAW2: fill bucket (rect/rectb/circ spans)
             self._gfx.fill_rect(self._buf, self.w, x0, y0, x1 - x0, y1 - y0, col)
+            self._t_fill_us += _ticks_diff(_ticks_us(), _t0)
         else:
             self._fb.fill_rect(x0, y0, x1 - x0, y1 - y0, col)
 
@@ -333,7 +358,9 @@ class DeviceCanvas:
                                        # layer (screen switch) -- drain, don't race
         col = self._col(c)
         if self._gfx is not None:
+            _t0 = _ticks_us()          # #66 DRAW2: fill bucket (cls is its big half)
             self._gfx.fill(self._buf, self.w * self.h, col)
+            self._t_fill_us += _ticks_diff(_ticks_us(), _t0)
         else:
             self._fb.fill(col)
 
@@ -576,11 +603,13 @@ class DeviceCanvas:
             self._map_py(tilemap, sheet, mx, my, int(w), int(h), sx, sy, colorkey, scale)
             return
         atlas, ntiles = self._sheet_atlas(sheet, colorkey)
+        _t0 = _ticks_us()              # #66 DRAW2: time the native tilemap blit
         self._gfx.blit_map(self._buf, self.w, self.h, sx, sy,
                            tilemap.cells, tilemap.w, tilemap.h,
                            mx, my, int(w), int(h),
                            atlas, ntiles, tile, scale, _RGB_KEY,
                            self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+        self._t_map_us += _ticks_diff(_ticks_us(), _t0)
 
     def _sheet_atlas(self, sheet, colorkey):
         # Bake the whole sheet into a contiguous RGB565 tile atlas (ntiles tiles of
@@ -787,6 +816,9 @@ class DeviceCanvas:
         self._batch_maxrun = 0
         self._t_layer_us = 0        # #63 DRAW2: reset the per-frame native-op timers too
         self._t_batch_us = 0
+        self._t_map_us = 0          # #66: the render-bound carts' remaining verbs
+        self._t_text_us = 0
+        self._t_fill_us = 0
 
     def spr_batch(self, sheet, items, colorkey=-1, scale=1):
         # Draw N sheet tiles in ONE native moy_gfx.blit_batch call (#43) -- the sprite
@@ -826,11 +858,22 @@ class DeviceCanvas:
         self._t_batch_us += _ticks_diff(_ticks_us(), _t0)
 
     def print(self, s, x, y, c, scale=2):
-        # camera offsets the text origin (#11). The clip rect is NOT applied to text:
-        # framebuf.text can't clip to an arbitrary rect, and device text already uses
-        # framebuf's 8x8 font (not the host's petme128), so text was never pixel-exact
-        # across backends. clip + text is a rare combo; the host clips text per-pixel.
+        # Native petme128 text (#62): the whole string in ONE moy_gfx.text call,
+        # camera + clip + pal honoured in C -- and pixel parity with the host at
+        # last (same glyph bytes, staged from runtime/font.py). The legacy per-call
+        # `scale` arg stays IGNORED, exactly like the host Canvas.print (system-UI
+        # scaling is the #39 font_scale path, not this arg). framebuf.text (same
+        # glyphs, screen-bounds clip only) remains the no-gfx / old-build fallback.
         self.flush_batch()             # #63: print() is a non-spr primitive -> break batch
+        if self._gfx_text is not None:
+            _t0 = _ticks_us()          # #66 DRAW2: time the native text blit
+            self._gfx_text(self._buf, self.w, self.h, str(s), int(x), int(y),
+                           self._col(c), _FONT8, _FONT8_FIRST, 1,
+                           self._cam_x, self._cam_y,
+                           self._clip_x0, self._clip_y0,
+                           self._clip_x1, self._clip_y1)
+            self._t_text_us += _ticks_diff(_ticks_us(), _t0)
+            return
         self._fb.text(str(s), int(x) - self._cam_x, int(y) - self._cam_y, self._col(c))
 
     def blit_indices(self, indices, iw, ih, x, y):
@@ -2121,6 +2164,14 @@ class Touch:
         self.addr = None
         self._i2c = i2c
         self._down = False
+        # #69 per-session I2C latency stats (same shape as TDeckKeyboard's): the
+        # GT911 shares I2C0 with the keyboard C3, and the observed kbd= stalls
+        # often coincide with inp= spikes -- these counters + the keyboard's let
+        # the I2CSTAT line say whether the bus stalls on one peripheral or both.
+        self.stat_n = 0
+        self.stat_max_us = 0
+        self.stat_over5 = 0
+        self.stat_over20 = 0
         try:
             from machine import I2C, Pin
 
@@ -2146,11 +2197,14 @@ class Touch:
         status register after a ready read so the next sample is produced."""
         if not self.available:
             return None
+        t0 = _ticks_us()                # #69: time the whole I2C span (1-3 transactions)
         try:
             status = self._i2c.readfrom_mem(self.addr, self.REG_STATUS, 1, addrsize=16)[0]
         except Exception:
+            self._stat(t0)
             return None
         if not (status & 0x80):
+            self._stat(t0)
             return None  # buffer not ready yet -- do NOT clear, do NOT change state
         raw = False      # ready sample, default "finger up"
         if (status & 0x0F) >= 1:
@@ -2165,7 +2219,19 @@ class Touch:
             self._i2c.writeto_mem(self.addr, self.REG_STATUS, b"\x00", addrsize=16)
         except Exception:
             pass
+        self._stat(t0)
         return raw
+
+    def _stat(self, t0):
+        # #69 latency bookkeeping for one read_raw I2C span.
+        el = _ticks_diff(_ticks_us(), t0)
+        self.stat_n += 1
+        if el > self.stat_max_us:
+            self.stat_max_us = el
+        if el >= 5000:
+            self.stat_over5 += 1
+            if el >= 20000:
+                self.stat_over20 += 1
 
     def debug_read(self):
         """Calibration only: return (status, 8 raw point bytes) and clear, or None
@@ -2385,9 +2451,82 @@ def _diag_draw2(diag, ws):
         cv = getattr(ws, "canvas", None)
         if cv is None or ws.perf_sample() is None:
             return
-        diag.log("DRAW2", "layer=%.2fms batch=%.2fms"
+        # #66: map/text/fill joined so the WHOLE render ms attributes to named C
+        # ops -- (DRAWBRK render) - (these) = Python dispatch + circ/line/pix.
+        diag.log("DRAW2", "layer=%.2fms batch=%.2fms map=%.2fms text=%.2fms fill=%.2fms"
                  % (getattr(cv, "_t_layer_us", 0) / 1000.0,
-                    getattr(cv, "_t_batch_us", 0) / 1000.0))
+                    getattr(cv, "_t_batch_us", 0) / 1000.0,
+                    getattr(cv, "_t_map_us", 0) / 1000.0,
+                    getattr(cv, "_t_text_us", 0) / 1000.0,
+                    getattr(cv, "_t_fill_us", 0) / 1000.0))
+    except Exception:
+        pass
+
+
+def _diag_chromebrk(diag, ws):
+    """Log a CHROMEBRK line (#66 lever 5, instrument-before-cutting): the sub-split
+    of DRAWBRK's chrome remainder -- bar (_draw_status_strip), cmp (the game->system
+    viewport composite; ~0 on the 320x240 device where the canvases are one object),
+    cur (_draw_cursor), other (textmode sync + state reset + overlays + batch guard).
+    Says which chrome cost a trim should target. Guarded; cart-running only."""
+    if diag is None:
+        return
+    try:
+        if ws.perf_sample() is None:
+            return
+        pc = getattr(ws, "perf_chrome", None)
+        if pc is None:
+            return
+        c = pc()
+        diag.log("CHROMEBRK", "bar=%.2f cmp=%.2f cur=%.2f other=%.2f"
+                 % (c[0], c[1], c[2], c[3]))
+    except Exception:
+        pass
+
+
+def _diag_pump(diag, comp):
+    """Log a PUMP line (#66 lever 4, measure-before-touching): the bounce-flush
+    feed pacing for the last shipped frame -- pump (CPU ms inside pump()), idle
+    (ms the SPI sat starved because every fired band completed before the next
+    was fed -- the tunable waste; ~0 means the flush ceiling is real transfer
+    time and band size / pump period / a third slot won't buy fps), gaps (how
+    many bands were fed late), feed (kick -> last band queued). The data that
+    decides whether the Sky Run 40-46 vs ~55-60fps gap is pacing or physics."""
+    if diag is None:
+        return
+    try:
+        if not getattr(comp, "bounce_flush", False):
+            return
+        st = comp.bounce_stats()
+        diag.log("PUMP", "pump=%.2f idle=%.2f gaps=%d feed=%.2f bands=%d"
+                 % (st[0] / 1000.0, st[1] / 1000.0, st[2],
+                    st[3] / 1000.0, st[4]))
+    except Exception:
+        pass
+
+
+def _diag_i2cstat(diag, keyboard, touch):
+    """Log an I2CSTAT line (#69): per-session I2C latency stats for the two
+    peripherals sharing I2C0 -- the keyboard C3 and the GT911 touch. n=reads,
+    max=worst transaction (kbd: with the mode it happened in), >5/>20=stalls past
+    those ms. A 5-byte read at 400kHz is ~135us nominal, so ms-scale maxima mean
+    clock-stretching/contention -- this line sizes the 13-60ms kbd= HITCH spikes
+    (which only surface inside >80ms frames) across a whole session."""
+    if diag is None:
+        return
+    try:
+        diag.log("I2CSTAT",
+                 "kbd(n=%d max=%.1fms%s >5=%d >20=%d) "
+                 "touch(n=%d max=%.1fms >5=%d >20=%d)"
+                 % (getattr(keyboard, "stat_n", 0),
+                    getattr(keyboard, "stat_max_us", 0) / 1000.0,
+                    " raw" if getattr(keyboard, "stat_max_raw", False) else "",
+                    getattr(keyboard, "stat_over5", 0),
+                    getattr(keyboard, "stat_over20", 0),
+                    getattr(touch, "stat_n", 0),
+                    getattr(touch, "stat_max_us", 0) / 1000.0,
+                    getattr(touch, "stat_over5", 0),
+                    getattr(touch, "stat_over20", 0)))
     except Exception:
         pass
 
@@ -3469,6 +3608,9 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             _diag_perf_sample(diag, ws)
             _diag_drawbrk(diag, ws)
             _diag_draw2(diag, ws)       # #63: split render into layer-copy vs sprite-batch us
+            _diag_chromebrk(diag, ws)   # #66 lever 5: bar/composite/cursor chrome sub-split
+            _diag_pump(diag, comp)      # #66 lever 4: bounce-feed pacing (SPI idle gaps)
+            _diag_i2cstat(diag, keyboard, touch)  # #69: kbd/touch I2C session latency
             _diag_calib(diag)           # #63: one-shot interpreter cost model (spill probe)
             _diag_gc(diag)              # #63: GC pause / churn (sakura ~14fps profiling)
             _t_diag = _ticks_diff(_ticks_ms(), _tnow)

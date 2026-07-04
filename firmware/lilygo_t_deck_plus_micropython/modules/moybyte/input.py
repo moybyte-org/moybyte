@@ -68,6 +68,24 @@ class TDeckKeyboard:
     # detects that and sticks the session back on the ASCII + latch path. Set this
     # False to force the ASCII path regardless of firmware.
     RAW_GAME_MODE = True
+    # #69 experiment knob: the esp32 machine.I2C default clock-stretch timeout is
+    # 50000us -- suspiciously the ceiling of the observed 13-60ms kbd= stalls (the
+    # keyboard C3 stretching SCL while it scans). Set this (us) to cap a stretch:
+    # e.g. 5000 turns a 60ms input stall into a <=5ms failed read (caught -> empty
+    # buttons for one frame). None = driver default. The touch shares this bus/I2C
+    # object, so the knob governs both. Leave None until I2CSTAT sizes the problem.
+    I2C_TIMEOUT_US = None
+    # #69 per-session I2C latency stats, updated by _timed_read on every keyboard
+    # transaction and read by the I2CSTAT diag line (moy_runtime): total reads,
+    # worst-case us (+ which mode it happened in), and how many crossed 5ms / 20ms.
+    # The HITCH kbd= column only sees stalls inside >80ms frames; this sees ALL.
+    # Class-level defaults so every construction path starts zeroed; the first
+    # update shadows them per-instance.
+    stat_n = 0
+    stat_max_us = 0
+    stat_max_raw = False
+    stat_over5 = 0
+    stat_over20 = 0
 
     def __init__(self, input_state):
         self.input = input_state
@@ -80,7 +98,11 @@ class TDeckKeyboard:
         try:
             from machine import I2C, Pin
 
-            self._i2c = I2C(0, scl=Pin(8), sda=Pin(18), freq=400000)
+            if self.I2C_TIMEOUT_US is None:
+                self._i2c = I2C(0, scl=Pin(8), sda=Pin(18), freq=400000)
+            else:
+                self._i2c = I2C(0, scl=Pin(8), sda=Pin(18), freq=400000,
+                                timeout=self.I2C_TIMEOUT_US)
             self._i2c.readfrom(self.KEYBOARD_ADDR, 1)
             # Boot in 1-byte ASCII mode (clean ASCII; verified by the keyboard
             # probe). set_game_mode(True) switches to the raw matrix (0x03) while a
@@ -147,11 +169,28 @@ class TDeckKeyboard:
         self.raw_mode = False
         self._held_buttons = ()
 
+    def _timed_read(self, nbytes):
+        """The one place a keyboard I2C transaction happens: readfrom + #69 latency
+        stats (a 5-byte read at 400kHz is ~135us nominal; anything in the ms range
+        is the C3 clock-stretching or bus contention -- exactly what I2CSTAT sizes)."""
+        t0 = _ticks_us()
+        data = self._i2c.readfrom(self.KEYBOARD_ADDR, nbytes)
+        el = _ticks_diff(_ticks_us(), t0)
+        self.stat_n += 1
+        if el > self.stat_max_us:
+            self.stat_max_us = el
+            self.stat_max_raw = self.raw_mode
+        if el >= 5000:
+            self.stat_over5 += 1
+            if el >= 20000:
+                self.stat_over20 += 1
+        return data
+
     def _read_key(self):
         if not self.available or self._i2c is None:
             return 0
         try:
-            data = self._i2c.readfrom(self.KEYBOARD_ADDR, 1)
+            data = self._timed_read(1)
             if data:
                 return data[0]
         except Exception as exc:
@@ -168,7 +207,7 @@ class TDeckKeyboard:
 
     def _read_raw_buttons(self):
         try:
-            data = self._i2c.readfrom(self.KEYBOARD_ADDR, 5)
+            data = self._timed_read(5)
         except Exception as exc:
             print("Moybyte keyboard raw read failed:", exc)
             self.raw_mode = False
@@ -264,3 +303,10 @@ def _ticks_diff(end_ms, start_ms):
         return time.ticks_diff(end_ms, start_ms)
     except AttributeError:
         return end_ms - start_ms
+
+
+def _ticks_us():
+    try:
+        return time.ticks_us()
+    except AttributeError:
+        return int(time.time() * 1000000)

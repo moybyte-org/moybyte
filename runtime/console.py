@@ -1974,6 +1974,16 @@ class Workstation:
         self._raw_chrome = 0.0
         self._raw_flush = 0.0
         self._raw_draw = 0.0
+        # CHROMEBRK sub-split of _chrome_ms (#66 lever 5, instrument-before-cutting):
+        # what the ~4-6ms of cart-path chrome actually buys -- the top status bar
+        # (_draw_status_strip), the game->system viewport composite (a no-op when the
+        # canvases are one object, i.e. today's 320x240 device), the cursor, and the
+        # unmeasured remainder (textmode sync + state reset + overlays + batch guard).
+        # Only measured on the running-cart path with perf capture on; surfaced via
+        # perf_chrome() -> the device CHROMEBRK diag line.
+        self._bar_ms = 0.0
+        self._cmp_ms = 0.0
+        self._cur_ms = 0.0
         # Achievements (#21): a small set of fun milestones + the hidden Easter-egg
         # rewards. Starts empty/volatile; load_achievements() wires the SD store +
         # the unlock beep. The Workstation calls ach.note(event) at the flow points
@@ -5672,6 +5682,9 @@ class Workstation:
         _upd = 0          # cart _update(dt) ms (game LOGIC); 0 off the cart path
         _cart = 0         # cart _draw() ms (RENDERING)
         _audio = 0        # audio.tick(dt) ms (mixer feed) -- split out so it doesn't hide in render
+        _bar = 0          # CHROMEBRK: _draw_status_strip ms (cart path only)
+        _cmp = 0          # CHROMEBRK: _composite_game ms
+        _cur = 0          # CHROMEBRK: _draw_cursor ms
         if self._splash_until is not None:
             self._draw_splash()            # boot logo -- takes precedence over any screen
         elif self.screen == "launcher":
@@ -5731,7 +5744,10 @@ class Workstation:
             self._reset_canvas_state()
             if self.cart_error is not None:
                 self._draw_error_panel()
+            _tb = _ticks_ms() if _perf else 0
             self._draw_status_strip("desktop")     # unified top bar (tool switcher)
+            if _perf:
+                _bar = _ticks_diff(_ticks_ms(), _tb)   # CHROMEBRK: the bar's share
         elif self.menu_view == "code":
             self._draw_code()              # full-screen editor (covers the cart)
         elif self.menu_view == "blocks":
@@ -5792,7 +5808,10 @@ class Workstation:
         composite = self.screen == "desktop" or (
             self.screen == "menu" and self.menu_view not in ("code", "blocks"))
         if composite:
+            _tc = _ticks_ms() if _perf else 0
             self._composite_game()
+            if _perf:
+                _cmp = _ticks_diff(_ticks_ms(), _tc)   # CHROMEBRK: viewport composite
         # Achievements + Easter eggs (#21) overlay on TOP of every screen, so an
         # unlock celebration / secret popup is always visible and never disturbs the
         # screen underneath (it's drawn last, then expires on its own). These are
@@ -5812,7 +5831,10 @@ class Workstation:
             self._draw_sysmenu()
         if self._about:
             self._draw_about()
+        _tk = _ticks_ms() if _perf else 0
         self._draw_cursor()
+        if _perf:
+            _cur = _ticks_diff(_ticks_ms(), _tk)       # CHROMEBRK: cursor
         # #63: nothing should be left in an auto-batch by the time we present. The cart
         # sprites were flushed at _reset_canvas_state; the console's own chrome draws
         # Images immediately (never queued). This final flush is the last-line guard so
@@ -5857,6 +5879,14 @@ class Workstation:
                 else self._audio_ms + (_audio - self._audio_ms) * 0.15
             self._chrome_ms = float(_chrome) if self._chrome_ms <= 0 \
                 else self._chrome_ms + (_chrome - self._chrome_ms) * 0.15
+            # CHROMEBRK sub-split (#66 lever 5): bar / composite / cursor EMAs, so
+            # a chrome trim targets the real cost instead of guessing.
+            self._bar_ms = float(_bar) if self._bar_ms <= 0 \
+                else self._bar_ms + (_bar - self._bar_ms) * 0.15
+            self._cmp_ms = float(_cmp) if self._cmp_ms <= 0 \
+                else self._cmp_ms + (_cmp - self._cmp_ms) * 0.15
+            self._cur_ms = float(_cur) if self._cur_ms <= 0 \
+                else self._cur_ms + (_cur - self._cur_ms) * 0.15
         else:
             self.comp.flush()
         # We painted this frame: clear the dirty flag and snapshot the pointer state
@@ -6268,6 +6298,19 @@ class Workstation:
         this instead. Only meaningful with perf_capture/perf_hud on."""
         return (self._raw_upd, self._raw_cart, self._raw_audio,
                 self._raw_chrome, self._raw_flush, self._raw_draw)
+
+    def perf_chrome(self):
+        """(bar_ms, composite_ms, cursor_ms, other_ms): the EMA sub-split of the
+        DRAWBRK chrome remainder (#66 lever 5) -- the top status bar, the game->
+        system viewport composite (~0 when the canvases are one object, i.e. the
+        320x240 device), the cursor, and whatever chrome remains unmeasured
+        (textmode sync, canvas-state reset, overlays, the final batch guard).
+        Only meaningful while a cart runs with perf_capture/perf_hud on; feeds
+        the device CHROMEBRK diag line so a chrome trim cuts the real cost."""
+        other = self._chrome_ms - self._bar_ms - self._cmp_ms - self._cur_ms
+        if other < 0:
+            other = 0.0
+        return (self._bar_ms, self._cmp_ms, self._cur_ms, other)
 
     def perf_batch(self):
         """(flushes, sprites, maxrun) for the auto-batch this frame (#63 profiling). N

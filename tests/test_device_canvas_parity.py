@@ -20,8 +20,11 @@ Host indices resolve to RGB565 via the SAME formula the device's PAL565 table wa
 generated with (asserted equal in test_pal565_matches_host_palette), so a host
 buffer mapped through rgb565() is directly comparable to the device buffer.
 
-Text (`print`) is deliberately excluded: the device uses framebuf's built-in 8x8
-font, not the host's petme128, so text was never pixel-identical across backends.
+Text (`print`) joined the parity suite with #62: the device's native moy_gfx.text
+rasterizes the SAME petme128 glyph blob (runtime/font.py, staged as moy_font) the
+host draws from, with camera + clip + pal honoured in C. The no-gfx fallback
+(framebuf.text -- same glyphs, screen-bounds clip only) matches except under an
+active clip rect, so the fallback tests avoid clip().
 """
 
 import sys
@@ -32,6 +35,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from runtime import font as _host_font  # noqa: E402
 from runtime import palette  # noqa: E402
 from runtime.canvas import Canvas, Image  # noqa: E402
 from runtime.editors import SpriteSheet, TileMap  # noqa: E402
@@ -423,6 +427,61 @@ class _FakeGfx:
                 err += dx
                 y0 += sy
 
+    @staticmethod
+    def text(dst, dw, dh, s, x, y, color, font, first, scale,
+             cam_x, cam_y, cx0, cy0, cx1, cy1):
+        # Faithful transcription of moy_gfx_text in modmoy_gfx.c (#62): walk the
+        # string as bytes, each glyph 8 column-bytes (LSB = top row), each set bit
+        # a scale x scale block of `color`, camera-offset and clip-bounded.
+        d = memoryview(dst).cast("H")
+        fb = bytes(font) if not isinstance(font, (bytes, bytearray)) else font
+        nglyphs = len(fb) // 8
+        if dw <= 0 or nglyphs <= 0:
+            return
+        if scale < 1:
+            scale = 1
+        cx0, cy0, cx1, cy1 = _FakeGfx._clip(dw, len(d), cx0, cy0, cx1, cy1)
+        col = color & 0xFFFF
+        x -= cam_x
+        y -= cam_y
+        adv = 8 * scale
+        if y >= cy1 or y + adv <= cy0:
+            return
+        for ch in s.encode("utf-8") if isinstance(s, str) else bytes(s):
+            if x >= cx1:
+                break
+            if x + adv <= cx0:
+                x += adv
+                continue
+            gi = ch - first
+            if gi < 0 or gi >= nglyphs:
+                gi = 0
+            g = fb[gi * 8:gi * 8 + 8]
+            for j in range(8):
+                bits = g[j]
+                if bits == 0:
+                    continue
+                bx = x + j * scale
+                if bx >= cx1 or bx + scale <= cx0:
+                    continue
+                row = 0
+                while bits:
+                    if bits & 1:
+                        by = y + row * scale
+                        for sub_y in range(scale):
+                            ty = by + sub_y
+                            if ty < cy0 or ty >= cy1:
+                                continue
+                            base = ty * dw
+                            for sub_x in range(scale):
+                                tx = bx + sub_x
+                                if tx < cx0 or tx >= cx1:
+                                    continue
+                                d[base + tx] = col
+                    bits >>= 1
+                    row += 1
+            x += adv
+
 
 # --------------------------------------------------------------------------- #
 # Pure-Python framebuf.FrameBuffer stub (RGB565 over a bytearray).            #
@@ -465,7 +524,18 @@ class _FB:
         self.fill_rect(x + w - 1, y, 1, h, col)
 
     def text(self, s, x, y, col):
-        pass  # excluded from parity (device uses framebuf font, not petme128)
+        # Real framebuf.text: the SAME petme128 glyphs, clipped to the buffer
+        # bounds only (no clip-rect awareness) -- the no-gfx fallback's behaviour.
+        c = col & 0xFFFF
+        mv = self._mv
+        w = self._w
+        h = self._h
+
+        def put(px, py):
+            if 0 <= px < w and 0 <= py < h:
+                mv[py * w + px] = c
+
+        _host_font.draw(put, s, x, y)
 
 
 class _FakeFramebuf(types.ModuleType):
@@ -505,6 +575,9 @@ def _load_device_canvas():
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         sys.modules[name] = mod
+    # runtime/font.py is staged as the frozen `moy_font` by build.sh (#62); inject
+    # it under that name so moy_runtime's native-text path activates here too.
+    sys.modules["moy_font"] = _host_font
     sys.path.insert(0, str(ROOT / "tools"))
     import gen_device_carts
     sys.modules["carts_data"] = gen_device_carts.as_module(str(ROOT / "system_carts"))
@@ -638,6 +711,51 @@ def test_clip_with_camera_combines():
             c.clip(10, 10, 20, 20)      # clip is screen space (post-camera)
             c.rect(0, 0, W, H, 9)
         _assert_same(host, dev, "clip+camera gfx=%s" % gfx)
+
+
+# --------------------------------------------------------------------------- #
+# print (#62): native moy_gfx.text vs host petme128 -- pixel parity at last.  #
+# --------------------------------------------------------------------------- #
+def test_text_parity_native_and_fallback():
+    # Plain + edge-overhanging text matches through BOTH device paths: the native
+    # moy_gfx.text kernel (gfx=True) and the framebuf.text fallback (gfx=False --
+    # same glyphs, buffer-bounds clip). The legacy per-call scale arg is ignored
+    # by both backends (pass 3 to prove it).
+    for gfx in (True, False):
+        m, host, dev = _both(gfx)
+        for c in (host, dev):
+            c.cls(0)
+            c.print("Hi moy!", 2, 3, 12)
+            c.print("EDGE", 44, 20, 7, 3)     # runs off the right edge; scale ignored
+            c.print("LOW", -5, H - 4, 9)      # off left + bottom
+        _assert_same(host, dev, "text gfx=%s" % gfx)
+
+
+def test_text_camera_pal_parity():
+    for gfx in (True, False):
+        m, host, dev = _both(gfx)
+        for c in (host, dev):
+            c.cls(1)
+            c.pal(12, 9)                # text colour remaps through pal
+            c.camera(6, -2)
+            c.print("CAM", 10, 10, 12)
+            c.camera()
+            c.pal()
+        _assert_same(host, dev, "text camera+pal gfx=%s" % gfx)
+
+
+def test_text_clip_rect_native():
+    # Arbitrary-rect clipping of text is the native kernel's NEW power (#62) --
+    # framebuf.text can't do it, so this case is gfx=True only (the documented
+    # fallback limitation).
+    m, host, dev = _both(True)
+    for c in (host, dev):
+        c.cls(0)
+        c.clip(12, 8, 24, 12)
+        c.print("CLIPPED WIDE", 0, 6, 14)   # crosses the clip rect on all sides
+        c.print("BELOW", 14, 30, 8)         # entirely outside -> nothing
+        c.clip()
+    _assert_same(host, dev, "text clip gfx=True")
 
 
 # --------------------------------------------------------------------------- #

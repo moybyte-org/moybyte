@@ -64,6 +64,11 @@ _FONT = bytes.fromhex(
 )
 
 
+# Public alias for the raw glyph blob: the device passes these bytes to the native
+# moy_gfx.text kernel (#62), so host and device rasterize from the SAME source.
+DATA = _FONT
+
+
 def glyph(ch):
     """The 8 column-bytes for character `ch` (space for anything out of range)."""
     n = ord(ch) - FIRST
