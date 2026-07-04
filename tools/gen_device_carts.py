@@ -41,6 +41,7 @@ CART_ORDER = [
     "tap_red",
     "tap_game",
     "beeper",
+    "letter_blitz",
     "wifi",
 ]
 
