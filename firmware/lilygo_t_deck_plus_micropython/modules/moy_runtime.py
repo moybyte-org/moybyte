@@ -156,6 +156,7 @@ class DeviceCanvas:
         # SRAM), stay on the sync window copy: correct pixels beat the 7ms.
         self._lcopy_pred = None
         self._lcopy = None
+        self._lcopy_trips = 0     # copy_wait timeouts (#66 HITCH v3 diagnostics)
         self._async_ok = (LAYER_COPY_ASYNC and self._gfx is not None
                           and hasattr(self._gfx, "copy_async"))
         # Pending sprite batch (Fold 1 -> #63 spr_gate): 1x1 sheet-tile blits queue
@@ -228,7 +229,8 @@ class DeviceCanvas:
         # frame changed shape (cart exit, screen switch). Cheap; never raises.
         self._lcopy = None
         try:
-            self._gfx.copy_wait()
+            if self._gfx.copy_wait() is False:
+                self._lcopy_trips += 1    # tripped: count it (#66 diagnostics)
         except Exception:  # noqa: BLE001
             self._async_ok = False
 
@@ -930,12 +932,21 @@ class DeviceCanvas:
         if pend is not None:
             self._lcopy = None
             _t0 = _ticks_us()
+            _ok = True
             try:
-                self._gfx.copy_wait()
+                _ok = self._gfx.copy_wait()
             except Exception:  # noqa: BLE001
                 self._async_ok = False
-            hit = (not _dirty and pend[0] is layer and pend[1] == cam_y
-                   and cam_x == 0 and layer.w == self.w)
+            if _ok is False:
+                # copy_wait TRIPPED (#66): the GDMA copy hadn't finished within
+                # the bounded spin. Count it and force the miss path -- the sync
+                # blit below rewrites the same region, so pixels stay correct
+                # even if the late copy still lands (same source bytes).
+                self._lcopy_trips += 1
+                hit = False
+            else:
+                hit = (not _dirty and pend[0] is layer and pend[1] == cam_y
+                       and cam_x == 0 and layer.w == self.w)
             self._t_layer_us += _ticks_diff(_ticks_us(), _t0)
             if hit:
                 self._arm_layer_pred(layer, cam_x, cam_y)
@@ -2299,23 +2310,41 @@ def _diag_perf_sample(diag, ws):
 HITCH_MS = 80
 
 
-def _diag_hitch(diag, ws, elapsed, kbd_ms, inp_ms, ws_ms, diag_ms, sd_ms, web_ms):
+def _diag_hitch(diag, ws, comp, elapsed, kbd_ms, inp_ms, sb_ms, ws_ms,
+                diag_ms, sd_ms, web_ms):
     """Log a HITCH line (#66): one frame blew past HITCH_MS. Names every measured
-    loop stage: kbd (I2C keyboard poll), inp (trackball + touch + pointer), ws
-    (input handlers + ws.frame = logic/render/chrome/flush), diag sample, diag SD
-    write, web poll -- plus the EMA phase split as context. v2 added kbd/inp/ws
-    after the first hardware pass showed ~188ms hitches every ~1.3s with all the
-    v1-measured parts at zero: the pause was in a then-unmeasured stage. If the
-    named parts STILL don't sum to the spike, the pause is an implicit GC collect
-    (alloc-triggered, invisible to stage timers)."""
+    loop stage: kbd (I2C keyboard poll), inp (trackball + touch + pointer), sb
+    (canvas.sync_back = buffer repoint + GDMA layer kick, unmeasured until v3),
+    ws (input handlers + ws.frame), diag sample, diag SD write, web poll. v3
+    prints the RAW phase split of the hitch frame itself (the v2 EMAs hid which
+    phase a single 150ms spike lived in: alpha=0.15 moves an EMA only 15% of the
+    spike), plus pump= (the bounce-flush band feeding, ms this frame) and lw=
+    (cumulative copy_wait trips). If nothing named sums to the spike, the pause
+    is an implicit GC collect (alloc-triggered, invisible to stage timers)."""
     try:
-        b = ws.perf_breakdown()
         s = ws.perf_sample()
-        diag.log("HITCH",
-                 "frame=%dms kbd=%d inp=%d ws=%d diag=%d sdflush=%d web=%d "
-                 "flush=%.1f ema(logic=%.1f render=%.1f chrome=%.1f)"
-                 % (elapsed, kbd_ms, inp_ms, ws_ms, diag_ms, sd_ms, web_ms,
-                    (s[2] if s is not None else -1.0), b[0], b[1], b[3]))
+        raw = None
+        get_raw = getattr(ws, "perf_breakdown_raw", None)
+        if get_raw is not None:
+            raw = get_raw()
+        pump_ms = getattr(comp, "pump_last_us", 0) / 1000.0
+        trips = getattr(getattr(ws, "canvas", None), "_lcopy_trips", -1)
+        if raw is not None:
+            diag.log("HITCH",
+                     "frame=%dms kbd=%d inp=%d sb=%d ws=%d diag=%d sdflush=%d "
+                     "web=%d pump=%.1f lw=%d raw(logic=%.1f render=%.1f "
+                     "audio=%.1f chrome=%.1f flush=%.1f)"
+                     % (elapsed, kbd_ms, inp_ms, sb_ms, ws_ms, diag_ms, sd_ms,
+                        web_ms, pump_ms, trips,
+                        raw[0], raw[1], raw[2], raw[3], raw[4]))
+        else:
+            b = ws.perf_breakdown()
+            diag.log("HITCH",
+                     "frame=%dms kbd=%d inp=%d sb=%d ws=%d diag=%d sdflush=%d "
+                     "web=%d flush=%.1f ema(logic=%.1f render=%.1f chrome=%.1f)"
+                     % (elapsed, kbd_ms, inp_ms, sb_ms, ws_ms, diag_ms, sd_ms,
+                        web_ms, (s[2] if s is not None else -1.0),
+                        b[0], b[1], b[3]))
     except Exception:
         pass
 
@@ -3370,7 +3399,9 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         # frame's cls/rect/spr/map must target the new back, never the buffer that's
         # mid-DMA. No-op (buffer unchanged) in single-buffer mode or on a skipped frame.
         _frames_before = getattr(ws, "_frames_drawn", 0)
-        canvas.sync_back()
+        _t0 = _ticks_ms()
+        canvas.sync_back()                      # buffer repoint + GDMA layer kick
+        _t_sb = _ticks_diff(_ticks_ms(), _t0)   # (was an unmeasured stage; HITCH v3)
         _t0 = _ticks_ms()
         try:
             ws.handle_input()                   # keyboard W/A/S/D etc.
@@ -3471,7 +3502,7 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         # the named parts small = the pause was between stages (e.g. an implicit
         # GC collect inside an alloc), which is itself the answer.
         if diag is not None and elapsed >= HITCH_MS:
-            _diag_hitch(diag, ws, elapsed, _t_kbd, _t_inp, _t_ws,
+            _diag_hitch(diag, ws, comp, elapsed, _t_kbd, _t_inp, _t_sb, _t_ws,
                         _t_diag, _t_sd, _t_web)
         if elapsed < frame_ms:
             time.sleep_ms(frame_ms - elapsed)

@@ -460,6 +460,18 @@ class Compositor:
         self._bnc_src = None
         self._in_pump = False
         self._pump_timer = None
+        # pump-time accounting (#66 HITCH v3): total us spent inside pump() for
+        # the LAST frame (band memcpys + queues, wherever they ran -- timer
+        # fires included), so a hitch can be attributed to/absolved of pumping.
+        self._pump_us = 0
+        self.pump_last_us = 0
+        try:
+            from time import ticks_us as _tus, ticks_diff as _tdf
+            self._pump_tus = _tus
+            self._pump_tdf = _tdf
+        except Exception:              # host CPython: no ticks_us; skip timing
+            self._pump_tus = None
+            self._pump_tdf = None
         if SRAM_BOUNCE_FLUSH and self._async:
             try:
                 rows = BOUNCE_ROWS
@@ -736,6 +748,8 @@ class Compositor:
             # carries RAMWR (its tx_color acquires a drained bus -- guaranteed,
             # _drain_dma just ran); bands 1..N-1 go cmd=-1 = queue-only, which the
             # esp_lcd no-acquire patch makes non-blocking.
+            self.pump_last_us = self._pump_us   # previous frame's pump total
+            self._pump_us = 0
             self._bnc_src = (self._bnc_src_a if self._front is self._fb
                              else self._bnc_src_b)
             self._bnc_next = 0
@@ -814,6 +828,8 @@ class Compositor:
         if self._in_pump or self._bnc_next >= self._bnc_total:
             return
         self._in_pump = True
+        _tus = self._pump_tus
+        _pt0 = _tus() if _tus is not None else 0
         try:
             k = self._bnc_next
             total = self._bnc_total
@@ -847,6 +863,8 @@ class Compositor:
                 self._bnc_next = k
         finally:
             self._in_pump = False
+            if _tus is not None:
+                self._pump_us += self._pump_tdf(_tus(), _pt0)
 
     def _pump_cb(self, _t):
         # Soft machine.Timer callback (esp32 Timers schedule via mp_sched -> runs

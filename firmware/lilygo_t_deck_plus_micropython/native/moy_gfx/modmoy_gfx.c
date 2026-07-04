@@ -457,11 +457,18 @@ static bool moy_gfx_copy_done_cb(async_memcpy_handle_t h,
 static mp_obj_t moy_gfx_copy_wait(void) {
     // Spin on the ISR-set flag. A full-frame PSRAM copy is ~1-2ms of GDMA time;
     // when the copy overlapped the cart's _update this returns immediately.
-    // Bounded so a lost interrupt can never hang the board.
-    for (uint32_t spins = 0; moy_gfx_copy_busy && spins < 4000000u; spins++) {
+    // Bounded so a lost interrupt can never hang the board. #66: the bound was
+    // 4M iterations (~a whole visible-hitch worth of ms if the flag were ever
+    // missed); now ~250k (~a few ms) and the TRIP is REPORTED: returns True on
+    // completion, False on trip WITHOUT clearing busy (the copy may genuinely
+    // still be running; the caller must fall back to the sync path, which
+    // writes the same bytes, and count the trip for diagnostics).
+    for (uint32_t spins = 0; moy_gfx_copy_busy && spins < 250000u; spins++) {
     }
-    moy_gfx_copy_busy = 0;
-    return mp_const_none;
+    if (moy_gfx_copy_busy) {
+        return mp_const_false;
+    }
+    return mp_const_true;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_gfx_copy_wait_obj, moy_gfx_copy_wait);
 
@@ -477,7 +484,9 @@ static mp_obj_t moy_gfx_copy_async(size_t n_args, const mp_obj_t *a) {
         }
     }
     if (moy_gfx_copy_busy) {            // defensive: never queue a second copy
-        moy_gfx_copy_wait();
+        if (moy_gfx_copy_wait() == mp_const_false) {
+            return mp_const_false;      // prior copy stuck: refuse, caller goes sync
+        }
     }
     size_t dcap, scap;
     uint16_t *dst = moy_gfx_buf_w(a[0], &dcap);
