@@ -1984,6 +1984,17 @@ class Workstation:
         self._bar_ms = 0.0
         self._cmp_ms = 0.0
         self._cur_ms = 0.0
+        # Clock-text cache (#66 CHROMEBRK): (second, string) -- see _clock_text.
+        self._clock_at = -1
+        self._clock_cache = ""
+        # Live diagnostics gate (#68 "kid mode"): False (the kid default) means the
+        # device backend SKIPS the diag costs a player can feel -- the 30s forced GC
+        # sample (~130-230ms) and the periodic diag->SD write (~115ms) -- and hushes
+        # the live serial echo. The RAM ring still collects (us-cheap) and still
+        # flushes on crash / cart exit, so "play -> crash -> read diag.log" works
+        # either way. Settings -> PERF DIAG toggles + persists it (system.json);
+        # run_desktop reads it each cycle. Host: measurement-only, nothing to gate.
+        self.diag_live = False
         # Achievements (#21): a small set of fun milestones + the hidden Easter-egg
         # rewards. Starts empty/volatile; load_achievements() wires the SD store +
         # the unlock beep. The Workstation calls ach.note(event) at the flow points
@@ -2101,6 +2112,8 @@ class Workstation:
         self.set_font_scale(self.system.get("font_scale", self.font_scale),
                             persist=False)
         self.select_wallpaper(self.system.get("wallpaper"), persist=False)
+        # #68: apply the persisted diagnostics gate (kid-mode default OFF).
+        self.set_diag_live(self.system.get("diag_live", False), persist=False)
 
     def set_icon_sheet(self, sheet):
         """Adopt the top-bar IconSheet (Stage 1) and drop the per-kind image cache so
@@ -2215,6 +2228,16 @@ class Workstation:
     def _persist_font_scale(self):
         self.system["font_scale"] = self.font_scale
         self._persist_system()
+
+    def set_diag_live(self, on, persist=True):
+        """Flip the #68 diagnostics gate (Settings -> PERF DIAG) and persist it.
+        The device loop (moy_runtime.run_desktop) reads self.diag_live each cycle,
+        so the change takes effect within a frame -- no reboot."""
+        self.diag_live = bool(on)
+        self._dirty = True
+        if persist:
+            self.system["diag_live"] = self.diag_live
+            self._persist_system()
 
     def _persist_system(self):
         """Write self.system to system.json when a writable store is wired. Shared by the
@@ -2481,6 +2504,12 @@ class Workstation:
         # deferred to #52, so it lives in Settings for now. "action" rows aren't
         # +/- steppers: any tap / left / right activates them (open_theme).
         ("icons", "EDIT ICONS", "action"),
+        # PERF DIAG (#68 "kid mode" gate): OFF (default) skips the diag costs a
+        # player can FEEL on device -- the 30s forced GC sample and the periodic
+        # diag->SD write -- and hushes the live serial echo. Crash/cart-exit
+        # flushes keep working, so OFF still yields a diag.log. Owners flip it ON
+        # for a measurement session.
+        ("diag_live", "PERF DIAG", "diag"),
     )
     _MOCK_NAMES = ("ALEX", "SAM", "KIT", "RAE")
 
@@ -2623,6 +2652,9 @@ class Workstation:
             return
         if key == "web":                        # device web view ON <-> OFF (#41)
             self._toggle_web_view()
+            return
+        if key == "diag_live":                  # perf diagnostics ON <-> OFF (#68)
+            self.set_diag_live(not self.diag_live)
             return
         if key == "ota_channel":                # OTA update channel STABLE <-> BETA
             self._cycle_channel(d)
@@ -3974,6 +4006,8 @@ class Workstation:
                     self._activate_settings_action(row[0])
                 elif row[2] == "web":               # A/run also toggles the web view (#41)
                     self._toggle_web_view()
+                elif row[2] == "diag":              # ... and the PERF DIAG gate (#68)
+                    self.set_diag_live(not self.diag_live)
             if i.pressed("b"):
                 self._exit_settings()          # back -> resume the cart if opened from one
             elif i.pressed("home") or i.pressed("stop"):
@@ -4218,6 +4252,9 @@ class Workstation:
                     return
                 if rows[i][2] == "web":            # web view: any tap flips ON/OFF (#41)
                     self._toggle_web_view()
+                    return
+                if rows[i][2] == "diag":           # PERF DIAG: any tap flips it (#68)
+                    self.set_diag_live(not self.diag_live)
                     return
                 # left third = "<" (decrement), right third = ">" (increment).
                 if px >= x + w - edge:
@@ -6102,13 +6139,22 @@ class Workstation:
 
     def _clock_text(self):
         """A wall-clock HH:MM from time.localtime when available, else a mm:ss
-        uptime so the strip always shows a live clock (host == device)."""
+        uptime so the strip always shows a live clock (host == device). Cached
+        per second (#66 CHROMEBRK): the cart bar's cache KEY calls this every
+        frame, and re-running localtime + %-format 30x/s was a measurable slice
+        of the ~2.3ms bar cost -- the string can only change once a second."""
+        now_s = _ticks_ms() // 1000
+        if now_s == self._clock_at:
+            return self._clock_cache
         try:
             lt = time.localtime()
-            return "%02d:%02d" % (lt[3], lt[4])
+            s = "%02d:%02d" % (lt[3], lt[4])
         except Exception:  # noqa: BLE001
             secs = _ticks_diff(_ticks_ms(), 0) // 1000
-            return "%02d:%02d" % ((secs // 60) % 100, secs % 60)
+            s = "%02d:%02d" % ((secs // 60) % 100, secs % 60)
+        self._clock_at = now_s
+        self._clock_cache = s
+        return s
 
     def _mini_btn(self, label, rect, fill, cv=None):
         x, y, w, h = rect
@@ -6239,8 +6285,13 @@ class Workstation:
             if on and url:
                 # The URL to open in a phone/desktop browser, under the row label.
                 cv.print(url[:34], x + 4, y + 6 + fw, NAMES["blue"], 1)
-        # Mark not-yet-functional rows clearly (wallpaper + font + channel + web + actions work).
-        if kind not in ("wallpaper", "font", "action", "channel", "web"):
+        elif kind == "diag":               # #68 perf-diagnostics gate: ON/OFF
+            on = bool(self.diag_live)
+            cv.print("ON" if on else "OFF", vx, y + 5,
+                     NAMES["orange"] if on else NAMES["dark_grey"], 1)
+        # Mark not-yet-functional rows clearly (wallpaper + font + channel + web +
+        # diag + actions work).
+        if kind not in ("wallpaper", "font", "action", "channel", "web", "diag"):
             cv.print("soon", x + 4, y + 6 + fw, NAMES["dark_grey"], 1)
 
     def _draw_fps(self):

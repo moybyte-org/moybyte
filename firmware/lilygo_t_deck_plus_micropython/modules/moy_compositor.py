@@ -916,6 +916,18 @@ class Compositor:
         if self._bnc_next < self._bnc_total:
             self.pump()
 
+    def pump_if_pending(self):
+        """Feed the in-flight bounce flush if bands remain -- the draw-verb POKE
+        (#66 pump-starvation fix). The soft pump timer runs between bytecodes, so
+        it can NOT fire while the interpreter sits inside one long native draw op
+        (a 15ms fill, a 10ms map, a 7ms layer copy) -- measured on hardware as
+        PUMP idle=2-6ms of starved SPI on virtually every cart frame. Each big
+        DeviceCanvas verb calls this right after its native op instead, so bands
+        queue between ops. ~2us no-op when nothing is pending (bounce off, frame
+        fully fed, or single-buffer mode)."""
+        if self._bnc_next < self._bnc_total:
+            self.pump()
+
     def _on_dma_done(self):
         # SPI completion ISR, GC LOCKED -- must NOT allocate. `+= 1` on a small int
         # into the pre-existing `_dma_done_n` slot is heap-free (see the ASYNC_FLUSH

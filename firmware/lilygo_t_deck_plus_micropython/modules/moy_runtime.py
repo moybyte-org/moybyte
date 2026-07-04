@@ -148,6 +148,13 @@ class DeviceCanvas:
         # op (old firmware lacks it) and the staged moy_font glyph blob.
         self._gfx_text = (getattr(self._gfx, "text", None)
                           if (self._gfx is not None and _FONT8 is not None) else None)
+        # #66 pump poke: feed the in-flight SRAM-bounce flush between native draw
+        # ops. The 2ms pump "timer" is a soft timer (fires between bytecodes) --
+        # it CANNOT fire while the interpreter sits inside one long C op (a 15ms
+        # fill, a 10ms map), which measured as PUMP idle=2-6ms of starved SPI on
+        # virtually every frame. The big verbs call self._pump() right after
+        # their native call instead. None on layers / host fakes (no bounce).
+        self._pump = getattr(compositor, "pump_if_pending", None)
         # DMA double-buffer (#40, default OFF): the compositor's BACK buffer ping-pongs
         # between two physical buffers each flush, so this canvas must re-point its
         # draw target at it every frame (sync_back) -- a stale pointer would draw into
@@ -339,6 +346,8 @@ class DeviceCanvas:
             _t0 = _ticks_us()          # #66 DRAW2: fill bucket (rect/rectb/circ spans)
             self._gfx.fill_rect(self._buf, self.w, x0, y0, x1 - x0, y1 - y0, col)
             self._t_fill_us += _ticks_diff(_ticks_us(), _t0)
+            if self._pump is not None:
+                self._pump()           # #66: feed the bounce flush between native ops
         else:
             self._fb.fill_rect(x0, y0, x1 - x0, y1 - y0, col)
 
@@ -361,6 +370,8 @@ class DeviceCanvas:
             _t0 = _ticks_us()          # #66 DRAW2: fill bucket (cls is its big half)
             self._gfx.fill(self._buf, self.w * self.h, col)
             self._t_fill_us += _ticks_diff(_ticks_us(), _t0)
+            if self._pump is not None:
+                self._pump()           # #66: feed the bounce flush between native ops
         else:
             self._fb.fill(col)
 
@@ -610,6 +621,8 @@ class DeviceCanvas:
                            atlas, ntiles, tile, scale, _RGB_KEY,
                            self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
         self._t_map_us += _ticks_diff(_ticks_us(), _t0)
+        if self._pump is not None:
+            self._pump()               # #66: feed the bounce flush between native ops
 
     def _sheet_atlas(self, sheet, colorkey):
         # Bake the whole sheet into a contiguous RGB565 tile atlas (ntiles tiles of
@@ -807,6 +820,8 @@ class DeviceCanvas:
                              self._clip_x1, self._clip_y1)
         self._t_batch_us += _ticks_diff(_ticks_us(), _t0)
         a[0] = 4
+        if self._pump is not None:
+            self._pump()               # #66: feed the bounce flush between native ops
 
     def batch_reset(self):
         # Zero the auto-batch profiling counters (#63) at the top of a frame when perf
@@ -873,6 +888,8 @@ class DeviceCanvas:
                            self._clip_x0, self._clip_y0,
                            self._clip_x1, self._clip_y1)
             self._t_text_us += _ticks_diff(_ticks_us(), _t0)
+            if self._pump is not None:
+                self._pump()           # #66: feed the bounce flush between native ops
             return
         self._fb.text(str(s), int(x) - self._cam_x, int(y) - self._cam_y, self._col(c))
 
@@ -1000,6 +1017,8 @@ class DeviceCanvas:
                                   layer._buf, layer.w, cam_x, cam_y)
             self._t_layer_us += _ticks_diff(_ticks_us(), _t0)
             self._arm_layer_pred(layer, cam_x, cam_y)
+            if self._pump is not None:
+                self._pump()           # #66: feed the bounce flush between native ops
             return
         d = memoryview(self._buf).cast("H")
         s = memoryview(layer._buf).cast("H")
@@ -3489,6 +3508,7 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     _diag_flush_at = _ticks_ms() + 5000
     _diag_perf_at = _ticks_ms() + 3000
     _diag_prev_cart_err = None    # last ws.cart_error we logged, so we log each crash once
+    _diag_cart_prev = False       # #68: cart-running edge -> flush the ring on cart EXIT
     ws.arm_splash()               # boot logo: show the moybyte mascot before the launcher
     while True:
         now = _ticks_ms()
@@ -3603,8 +3623,19 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         # (just the RAM ring); the 5s flush below is what writes it out.
         _tnow = _ticks_ms()
         _t_diag = 0
+        # #68 "kid mode" gate: Settings -> PERF DIAG (ws.diag_live, persisted,
+        # default OFF). OFF skips the two diag costs a player can FEEL -- the 30s
+        # forced GC sample (~130-230ms) and the periodic diag->SD write (~115ms) --
+        # and hushes the live echo. The RAM ring still collects every line
+        # (us-cheap) and still reaches SD on crash / cart exit below, so
+        # "play -> crash -> read diag.log" works in kid mode too.
+        _live = bool(getattr(ws, "diag_live", False))
         if diag is not None and _ticks_diff(_tnow, _diag_perf_at) >= 0:
             _diag_perf_at = _tnow + 3000
+            try:
+                diag.ECHO_LIVE = _live   # echo follows the toggle (boot lines echoed
+            except Exception:            # before the first 3s tick either way)
+                pass
             _diag_perf_sample(diag, ws)
             _diag_drawbrk(diag, ws)
             _diag_draw2(diag, ws)       # #63: split render into layer-copy vs sprite-batch us
@@ -3612,17 +3643,26 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             _diag_pump(diag, comp)      # #66 lever 4: bounce-feed pacing (SPI idle gaps)
             _diag_i2cstat(diag, keyboard, touch)  # #69: kbd/touch I2C session latency
             _diag_calib(diag)           # #63: one-shot interpreter cost model (spill probe)
-            _diag_gc(diag)              # #63: GC pause / churn (sakura ~14fps profiling)
+            if _live:
+                _diag_gc(diag)          # #63/#68: the FORCED collect sample -- diag-only,
+                                        # never during kid play (it costs a felt frame)
             _t_diag = _ticks_diff(_ticks_ms(), _tnow)
         # Diag SD flush: overwrite /sd/moybyte/diag.log with the current ring.
         # Runs between frames on the native single-bus path (with_sd_live), never
         # during a panel flush. Guarded -> a flush failure degrades to a no-op.
         # CADENCE (#66, hardware-measured): the write costs 80-120ms -- at the old
         # flat 5s that was a visible stutter DURING PLAY (HITCH sdflush=82-118
-        # confirmed it). 20s while a cart runs (gameplay smoothness wins; crashes
-        # still flush immediately via the error paths), 5s otherwise.
+        # confirmed it). #68: the timer flush now runs ONLY with PERF DIAG on
+        # (20s in-cart / 5s otherwise); in kid mode the ring is persisted at cart
+        # EXIT instead (one write, off the play path) + the crash paths.
+        _cart_now = ws.cart is not None
         _t_sd = 0
-        if diag is not None and _ticks_diff(_tnow, _diag_flush_at) >= 0:
+        if diag is not None and _diag_cart_prev and not _cart_now:
+            _t0 = _ticks_ms()
+            _diag_flush(diag, ws)       # #68: cart exited -> persist the session's ring
+            _t_sd = _ticks_diff(_ticks_ms(), _t0)
+        _diag_cart_prev = _cart_now
+        if diag is not None and _live and _ticks_diff(_tnow, _diag_flush_at) >= 0:
             _diag_flush_at = _tnow + (20000 if ws.cart is not None else 5000)
             _t0 = _ticks_ms()
             _diag_flush(diag, ws)

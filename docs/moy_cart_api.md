@@ -105,6 +105,32 @@ re-drawing the background every frame.
 
 ---
 
+## Make it fast (three habits)
+
+Every draw call is native on the device, so the usual cost is not *how* you draw —
+it's painting **more pixels than the frame needs**. Three habits keep any cart smooth
+(measured on hardware, #66):
+
+1. **Your background IS the clear color.** `cls(col("dark_blue"))` already paints
+   every pixel — don't follow it with a full-screen backdrop `rect()`. That paints
+   the whole screen twice and costs ~7ms of the device's ~30ms frame budget for
+   nothing. (Battle City does it right: one `cls` in the field color, then only the
+   HUD strip repaints its own black.)
+2. **Static scenery goes in a layer, once.** If your level or backdrop doesn't change
+   every frame, draw it ONCE into `lay = make_layer(W, H)` — a layer speaks the whole
+   drawing API (`lay.cls` / `lay.map` / `lay.rect` …) — and stamp it back each frame
+   with `draw_layer(lay, 0, 0)`. One flat copy replaces `cls` + a full `map()`
+   re-render, and it erases last frame's sprites for free. For scrolling worlds make
+   the layer wider than the screen and pan with `draw_layer(lay, cam_x, 0)`.
+   (Hop Quest and Sky Run both do exactly this — read their `_build_layer` /
+   `_build_world`.)
+3. **Lots of sprites? Just call `spr()` in a loop.** The engine coalesces consecutive
+   `spr()` calls into one native batch automatically; `spr_batch()` is the manual form
+   when you already build a list. Likewise one `map()` call always beats drawing tiles
+   one by one.
+
+---
+
 ## Input
 
 Buttons are named. The canonical set is `left, right, up, down, a, b, run, home`.

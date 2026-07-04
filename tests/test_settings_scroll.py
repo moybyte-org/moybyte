@@ -1,8 +1,8 @@
 """Settings list scrolls to keep the selection visible (#53 added enough rows --
 UPDATE FW / CHANNEL / UPDATE ONLINE -- that the panel overflows). Before the fix the
-bottom rows were simply unreachable. The host has no OTA updater (6 rows, which fit
-exactly), so we flip the cached availability flags to force the 9-row case the device
-actually hits.
+bottom rows were simply unreachable. The base set itself is 7 rows since #68 added
+PERF DIAG (vs 6 visible at fs=1), so even the host without an OTA updater scrolls
+by one; the availability flags force the 10-row device case on top of that.
 """
 
 import sys
@@ -26,14 +26,18 @@ def _force_ota_rows(ws):
     ws._online_ok = True
 
 
-def test_host_six_rows_fit_without_scrolling(tmp_path):
+def test_host_base_rows_all_reachable(tmp_path):
+    # The base set (7 rows since #68's PERF DIAG) may exceed one screen; the #53
+    # scroll machinery must keep every row reachable, top and bottom.
     ws = _ws(tmp_path)
     rows = ws._settings_rows()
-    assert len(rows) <= ws._settings_visible()          # the base set fits one screen
     ws.set_msel = len(rows) - 1
     ws._settings_scroll()
-    assert ws.set_top == 0                              # never scrolls when it all fits
-    assert all(ws._settings_row_visible(i) for i in range(len(rows)))
+    assert ws._settings_row_visible(len(rows) - 1)      # bottom row scrolls into view
+    ws.set_msel = 0
+    ws._settings_scroll()
+    assert ws.set_top == 0                              # ... and back to the top
+    assert ws._settings_row_visible(0)
 
 
 def test_overflow_scrolls_selection_into_view(tmp_path):
