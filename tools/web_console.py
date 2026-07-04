@@ -90,6 +90,14 @@ DEFAULT_SAVE_DIR = os.path.expanduser("~/.moybyte/projects")
 DEFAULT_PORT = 8080
 DEFAULT_FPS = 30
 
+# How long a slow client may stall one frame push before we drop it. The read
+# timeout that paces _ws_loop (20ms) must NOT double as the send budget: a WiFi
+# client in power-save routinely stalls >20ms, and socket.timeout is an OSError,
+# so every such hiccup used to sever the socket -- the browser page sat in a
+# reconnect loop. Each WS client runs in its own handler thread (unlike the
+# device's single-threaded loop), so a generous budget stalls nobody else.
+WS_SEND_BUDGET = 1.0
+
 # The launcher nav / gameplay buttons a browser key can map to (mirrors the pygame
 # sim's WASD nav + Enter/Z/X/H shortcuts). The browser sends a logical `name`; we
 # only forward names the console actually knows so a stray key can't wedge it.
@@ -330,8 +338,9 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _ws_loop(self, sock):
         """Push a stepped frame ~once per 1/fps and drain inbound input, non-blocking, until the
-        peer closes. A short socket timeout paces the loop (no busy-spin) and bounds a slow send;
-        a broken/half-open socket just ends the loop. Robust to a client that closes mid-stream."""
+        peer closes. A short socket timeout paces the reads (no busy-spin); sends get the larger
+        WS_SEND_BUDGET so a WiFi hiccup doesn't sever the socket. A broken/half-open socket just
+        ends the loop. Robust to a client that closes mid-stream."""
         interval = self.console.dt              # 1/fps push cadence
         buf = b""
         try:
@@ -385,9 +394,19 @@ class _Handler(BaseHTTPRequestHandler):
             gen = self.console.canvas._rec.atlas_gen            # host recorder gen (self-contained)
             payload = json.dumps(web_view.frame_payload(cmds, cart, gen, audio=audio))
             try:
+                # Send under WS_SEND_BUDGET, not the 20ms read-pacing timeout. A
+                # sendall that times out has already written PART of the frame (the
+                # stream is corrupt), so a client still stalled past the budget is
+                # dropped -- but a routine WiFi hiccup no longer severs the socket.
+                sock.settimeout(WS_SEND_BUDGET)
                 sock.sendall(web_view.ws_encode(payload))
             except OSError:
                 break                           # a stalled/closed client -> drop, don't wait
+            finally:
+                try:
+                    sock.settimeout(0.02)       # restore the read-pacing timeout
+                except OSError:
+                    pass
 
     def _ws_apply(self, payload):
         """Decode one inbound WS text payload ({"events":[...]}) and inject it through the SAME
