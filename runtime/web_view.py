@@ -1544,6 +1544,7 @@ margin:-26px 0 0 -26px;border-radius:50%;background:#5f6f9f;border:2px solid #c2
 pointer-events:none}.b{width:72px;height:72px;border-radius:50%;display:flex;
 align-items:center;justify-content:center;font:700 26px ui-monospace;color:#fff1e8;
 background:#7e2553;border:2px solid #c2c3c7;margin-left:18px}#bb{background:#29366f}
+#bh{background:#5f574f;width:52px;height:52px;font-size:20px}
 .pr{background:#ffec27;color:#1d2b53}
 /* Debug HUD (#41): toggled with the ` key; lightweight live stream stats. */
 #hud{position:fixed;top:6px;left:6px;z-index:9;display:none;padding:6px 8px;border-radius:5px;
@@ -1553,7 +1554,7 @@ white-space:pre;pointer-events:none}#hud b{color:#ffec27}#hud .w{color:#ff004d}<
 <h1>Moybyte &mdash; device <span id=s>connecting...</span> <small style="color:#5f6f9f">(press ` for stats)</small></h1>
 <canvas id=cv width=320 height=240 tabindex=0></canvas>
 <div id=ctl><div id=joy><div id=th></div></div>
-<div><span class=b id=bb>B</span><span class=b id=ba>A</span></div></div>
+<div><span class=b id=bh>&#9776;</span><span class=b id=bb>B</span><span class=b id=ba>A</span></div></div>
 <script>
 var FPS=30,cv=document.getElementById("cv"),cx=cv.getContext("2d"),sEl=document.getElementById("s");
 cx.imageSmoothingEnabled=false;
@@ -1725,7 +1726,7 @@ function pr(e){if(dn)return;dn=true;el.classList.add("pr");send({type:"hold",nam
 function rl(e){if(!dn)return;dn=false;el.classList.remove("pr");send({type:"hold",name:nm,down:false});if(e)e.preventDefault();}
 el.addEventListener("pointerdown",function(e){el.setPointerCapture(e.pointerId);pr(e);});
 el.addEventListener("pointerup",rl);el.addEventListener("pointercancel",rl);el.addEventListener("pointerleave",rl);}
-wb("ba","a");wb("bb","b");
+wb("ba","a");wb("bb","b");wb("bh","home");  // &#9776; = HOME: pauses a cart (#71), exits from pause
 var PAN={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]},
 NAV={a:"left",d:"right",w:"up",s:"down"},SC={Enter:"run",z:"a",x:"b",h:"home"},pH={},nH={};
 function nv(e){var k=e.key.length==1?e.key.toLowerCase():e.key;return NAV[k];}

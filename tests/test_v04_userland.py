@@ -602,6 +602,8 @@ def test_host_console_paint_via_mouse(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     drv.press("run")
     drv.frame(1 / 30)
+    ws.cart_paused = True    # bar icons hit-test in the pause menu (#71)
+    ws._dirty = True
     bx, by = C._PAINT_BTN[0], C._PAINT_BTN[1]            # click the PAINT overlay button
     drv.click(bx + 2, by + 2)
     drv.frame(1 / 30)
@@ -809,6 +811,8 @@ def test_host_console_map_open_place_and_render(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     drv.press("run")
     drv.frame(1 / 30)
+    ws.cart_paused = True    # bar icons hit-test in the pause menu (#71)
+    ws._dirty = True
     drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2)      # open the MAP overlay button
     drv.frame(1 / 30)
     assert ws.menu_view == "map" and ws.mapedit is not None
@@ -833,6 +837,8 @@ def test_host_console_map_erase_and_pan(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
     drv.press("run"); drv.frame(1 / 30)
+    ws.cart_paused = True    # bar icons hit-test in the pause menu (#71)
+    ws._dirty = True
     drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2); drv.frame(1 / 30)
     ws.mapedit.n = 3
     drv.click(C._MV_X0 + 2, C._MV_Y0 + 2); drv.frame(1 / 30)   # stamp tile 3 at (0,0)
@@ -858,6 +864,8 @@ def test_host_console_map_save_roundtrips(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     drv.press("run"); drv.frame(1 / 30)
     cart_path = ws.cart["path"]
+    ws.cart_paused = True    # bar icons hit-test in the pause menu (#71)
+    ws._dirty = True
     drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2); drv.frame(1 / 30)
     ws.mapedit.n = 6
     drv.click(C._MV_X0 + 2, C._MV_Y0 + 2); drv.frame(1 / 30)   # stamp tile 6 at (0,0)
@@ -879,6 +887,8 @@ def test_map_edit_seen_by_running_cart_via_gen(tmp_path):
     drv.press("run"); drv.frame(1 / 30)
     tm = ws.tilemap
     before = tm.gen
+    ws.cart_paused = True    # bar icons hit-test in the pause menu (#71)
+    ws._dirty = True
     drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2); drv.frame(1 / 30)
     drv.click(C._MV_X0 + 2, C._MV_Y0 + 2); drv.frame(1 / 30)   # stamp a cell
     assert tm.gen > before                                # mset bumped gen (live pickup)
