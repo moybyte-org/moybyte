@@ -1092,10 +1092,58 @@ def test_kid_mode_gates_diag_frame_eaters():
 
 def test_i2c_timeout_knob_engaged():
     # #69 A/B: the clock-stretch cap is ON (5ms) -- a keyboard/touch stall becomes a
-    # <=5ms failed read (one-frame input drop), not a felt 60ms freeze. None reverts.
+    # <=5ms failed read (one stale input frame), not a felt 60ms freeze. None reverts.
     inp_mod = (ROOT / "modules" / "moybyte" / "input.py").read_text(encoding="utf-8")
     assert "I2C_TIMEOUT_US = 5000" in inp_mod
     assert "timeout=self.I2C_TIMEOUT_US" in inp_mod
+
+
+def test_capped_stall_holds_state_and_never_kills_the_keyboard():
+    # #69: with the timeout cap a stall RAISES. That must cost ONE STALE FRAME --
+    # the last good matrix state is held (returning "no buttons" would fake a
+    # release+re-press, and btnp() would double-fire) -- and must NOT disable the
+    # keyboard (the old any-exception -> available=False would have killed it
+    # within a minute at the measured stall rate). Only ERR_RUN_LIMIT consecutive
+    # failures (a genuinely absent keyboard) end the session.
+    spec = importlib.util.spec_from_file_location(
+        "moybyte_firmware_input", ROOT / "modules" / "moybyte" / "input.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    state = module.InputState()
+    keyboard = module.TDeckKeyboard.__new__(module.TDeckKeyboard)
+    keyboard.input = state
+    keyboard.available = True
+    keyboard.raw_mode = True
+
+    held_frame = bytes([0, 0x04, 0, 0, 0])          # "right" held in the matrix
+
+    class FlakyI2C:
+        def __init__(self):
+            self.fail = False
+        def readfrom(self, _addr, _size):
+            if self.fail:
+                raise OSError(116)                   # ETIMEDOUT (the capped stall)
+            return held_frame
+
+    i2c = FlakyI2C()
+    keyboard._i2c = i2c
+    keyboard.poll()
+    assert state.held("right")                       # baseline: the key is down
+    i2c.fail = True                                  # one capped stall...
+    keyboard.poll()
+    assert state.held("right")                       # ...held state survives the gap
+    assert keyboard.available and keyboard.raw_mode  # nothing was disabled
+    assert keyboard.stat_timeouts >= 1               # ...and it was counted
+    i2c.fail = False
+    keyboard.poll()
+    assert state.held("right")                       # clean resume, no phantom edge
+    assert keyboard._err_run == 0                    # the run counter reset
+    # A genuinely dead keyboard still disables after a solid failure run.
+    i2c.fail = True
+    for _ in range(module.TDeckKeyboard.ERR_RUN_LIMIT):
+        keyboard.poll()
+    assert not keyboard.available
 
 
 def test_blit565_opaque_row_fast_lane():
