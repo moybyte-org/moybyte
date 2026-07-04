@@ -960,6 +960,108 @@ def test_moy_compositor_sram_bounce_flush_protocol():
                 sys.modules[k] = v
 
 
+def test_moy_compositor_bounce_pacing_stats():
+    """Bounce-feed pacing instrumentation (#66 lever 4, measure-first): pump()
+    counts SPI-idle gaps (every fired band completed before the next was fed --
+    the starvation the 2ms pump timer can cause), stamps feed-complete time, and
+    _kick_front latches the numbers per frame for bounce_stats() / the PUMP diag
+    line. Host: drive the counters with an injected fake ticks clock."""
+    import types
+
+    fake_alloc = types.ModuleType("moy_alloc")
+    fake_alloc.malloc_dma = lambda n, flags=0: bytearray(n)
+    fake_lcd = types.ModuleType("lcd_bus")
+    fake_lcd.MEMORY_SPIRAM = 1
+    fake_lcd.MEMORY_DMA = 2
+
+    class _FB:
+        def __init__(self, buf, w, h, fmt):
+            self.buf = buf
+        def fill(self, c):
+            pass
+        def fill_rect(self, *a):
+            pass
+        def text(self, *a):
+            pass
+    fake_framebuf = types.ModuleType("framebuf")
+    fake_framebuf.FrameBuffer = _FB
+    fake_framebuf.RGB565 = 1
+
+    saved = {k: sys.modules.get(k) for k in ("moy_alloc", "lcd_bus", "framebuf", "moy_gfx")}
+    sys.modules["moy_alloc"] = fake_alloc
+    sys.modules["lcd_bus"] = fake_lcd
+    sys.modules["framebuf"] = fake_framebuf
+    sys.modules.pop("moy_gfx", None)
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "moy_compositor_pacing", ROOT / "modules" / "moy_compositor.py"
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        class DeferredBus:
+            def __init__(self):
+                self.colors = []
+                self.cb = None
+                self._inflight = 0
+            def register_callback(self, cb):
+                self.cb = cb
+            def tx_param(self, cmd, data):
+                pass
+            def tx_color(self, cmd, data, x0, y0, x1, y1, _z, last):
+                self.colors.append(cmd)
+                self._inflight += 1
+            def complete(self, n=1):
+                while n > 0 and self._inflight > 0:
+                    self._inflight -= 1
+                    n -= 1
+                    self.cb()
+
+        bus = DeferredBus()
+        comp = module.Compositor(bus, 320, 240, strip_h=24)
+        assert comp.bounce_flush is True
+        # Inject a controllable microsecond clock (CPython has no time.ticks_us,
+        # so the probes are dormant until this).
+        clock = [0]
+        comp._pump_tus = lambda: clock[0]
+        comp._pump_tdf = lambda a, b: a - b
+
+        n = comp._bnc_bands
+        comp.flush()                     # kick at t=0: bands 0+1 queue immediately
+        assert comp._bnc_idle_n == 0     # kick bands never count as starvation
+        clock[0] = 3000
+        bus.complete(2)                  # both in-flight bands done at t=3000 (ISR stamps)
+        assert comp._dma_done_us == 3000
+        clock[0] = 5000
+        comp.pump()                      # band 2 fed 2000us AFTER the bus went idle
+        assert comp._bnc_idle_n == 1
+        assert comp._bnc_idle_us == 2000
+        # band 3's slot was free too, so the same pump() fed it with the bus busy
+        # (band 2 in flight) -> no extra idle gap.
+        assert comp._bnc_next == 4
+
+        # Feed the tail promptly: completions right before the pump -> no new gaps.
+        bus.complete(1)                  # band 2 done at t=5000
+        comp.pump()                      # feeds band 4 while band 3 in flight
+        while comp._bnc_next < n:
+            bus.complete(1)
+            comp.pump()
+        assert comp._bnc_idle_n == 1     # still just the one measured gap
+        assert comp._bnc_feed_us == 5000 - 0    # kick(t=0) -> last band queued (t=5000)
+
+        # Next flush LATCHES the frame's numbers for bounce_stats()/the PUMP line.
+        bus.complete(n)                  # finish everything in flight
+        comp.flush()
+        pump_us, idle_us, idle_n, feed_us, bands = comp.bounce_stats()
+        assert (idle_us, idle_n, feed_us, bands) == (2000, 1, 5000, n)
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = v
+
+
 def test_tdeck_keyboard_latches_event_keys_for_hold_window():
     spec = importlib.util.spec_from_file_location(
         "moybyte_firmware_input", ROOT / "modules" / "moybyte" / "input.py"
@@ -1168,6 +1270,22 @@ def test_native_vector_primitives_wired():
     assert "MP_ROM_QSTR(MP_QSTR_blit_window)" in c
     # The device cart API exposes map/mget/mset, same names as the host make_api.
     assert '"map": map_, "mget": mget, "mset": mset,' in runtime
+
+
+def test_native_text_wired_with_shared_font():
+    # print() is native (#62) -- the LAST draw verb off framebuf: one moy_gfx.text C
+    # call per string, camera + clip + pal honoured, rasterizing the SAME petme128
+    # glyph blob the host draws from (runtime/font.py, staged as the frozen moy_font
+    # by build.sh). framebuf.text (same glyphs, no clip rect) stays the fallback.
+    c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    assert "moy_gfx_text" in c
+    assert "MP_ROM_QSTR(MP_QSTR_text)" in c               # registered in the module dict
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    assert "import moy_font" in runtime                   # shared glyph source
+    assert "self._gfx_text(self._buf" in runtime          # native one-call text
+    assert "self._fb.text(" in runtime                    # framebuf fallback kept
+    build = (ROOT / "build.sh").read_text(encoding="utf-8")
+    assert "runtime/font.py" in build and "moy_font.py" in build   # staged at build
 
 
 def test_native_spr_batch_wired_for_sprites():
@@ -2157,10 +2275,35 @@ def test_micropython_offline_diag_wiring():
     # real cost of a full-frame cart (sakura's ~120ms render). Timed in microseconds
     # around the native calls, reset per frame by batch_reset.
     assert "def _diag_draw2(diag, ws):" in runtime
-    assert 'diag.log("DRAW2", "layer=%.2fms batch=%.2fms"' in runtime
+    assert ('diag.log("DRAW2", "layer=%.2fms batch=%.2fms '
+            'map=%.2fms text=%.2fms fill=%.2fms"') in runtime
     assert "_diag_draw2(diag, ws)" in runtime
     assert "self._t_layer_us += _ticks_diff(_ticks_us(), _t0)" in runtime
     assert "self._t_batch_us += _ticks_diff(_ticks_us(), _t0)" in runtime
+    assert "self._t_map_us += _ticks_diff(_ticks_us(), _t0)" in runtime
+    assert "self._t_text_us += _ticks_diff(_ticks_us(), _t0)" in runtime
+
+    # CHROMEBRK (#66 lever 5): the sub-split of the chrome remainder (bar /
+    # composite / cursor / other) so a trim targets the real cost.
+    assert "def perf_chrome(self):" in console
+    assert 'diag.log("CHROMEBRK", "bar=%.2f cmp=%.2f cur=%.2f other=%.2f"' in runtime
+    assert "_diag_chromebrk(diag, ws)" in runtime
+
+    # PUMP (#66 lever 4): bounce-feed pacing -- SPI idle gaps + feed time, the
+    # measure-first data for band size / pump period / third-slot tuning.
+    compositor = (ROOT / "modules" / "moy_compositor.py").read_text(encoding="utf-8")
+    assert "def bounce_stats(self):" in compositor
+    assert 'diag.log("PUMP", "pump=%.2f idle=%.2f gaps=%d feed=%.2f bands=%d"' in runtime
+    assert "_diag_pump(diag, comp)" in runtime
+
+    # I2CSTAT (#69): per-session kbd/touch I2C latency (max + >5ms/>20ms counts),
+    # so the 13-60ms keyboard stalls are sized across a session, not just inside
+    # >80ms HITCH frames.
+    inp_mod = (ROOT / "modules" / "moybyte" / "input.py").read_text(encoding="utf-8")
+    assert "def _timed_read(self, nbytes):" in inp_mod
+    assert "I2C_TIMEOUT_US" in inp_mod
+    assert 'diag.log("I2CSTAT",' in runtime
+    assert "_diag_i2cstat(diag, keyboard, touch)" in runtime
 
     # Existing diagnostics routed through diag (printed AND persisted): boot heap,
     # the frame-error trace, the in-cart crash, and the audio I2S status line.

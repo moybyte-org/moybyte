@@ -763,6 +763,80 @@ static mp_obj_t moy_gfx_blit_indices(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit_indices_obj, 9, 9, moy_gfx_blit_indices);
 
+// text(dst, dw, dh, s, x, y, color, font, first, scale, cam_x, cam_y,
+//      cx0, cy0, cx1, cy1) -- render a whole string in ONE C call (issue #62): the
+// text analogue of blit_batch. `font` is a petme128-layout glyph blob (8 bytes per
+// glyph, column-major, LSB = top row -- exactly runtime/font.py's _FONT, the SAME
+// bytes the host rasterizes), `first` its first codepoint. Each set glyph pixel
+// becomes a `scale` x `scale` block of the pre-resolved RGB565 `color`; camera
+// offset and the screen-space clip rect [cx0,cy0)..[cx1,cy1) are honoured per
+// pixel like the other vector ops (framebuf.text could do neither). Glyph advance
+// is 8*scale. The string is walked as BYTES (like framebuf.text); an out-of-range
+// byte renders the font's first glyph (space), matching runtime/font.py glyph().
+static mp_obj_t moy_gfx_text(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t dcap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &dcap);
+    mp_int_t dw = mp_obj_get_int(a[1]);
+    mp_int_t dh = mp_obj_get_int(a[2]);
+    mp_buffer_info_t sbi;
+    mp_get_buffer_raise(a[3], &sbi, MP_BUFFER_READ);
+    const uint8_t *s = (const uint8_t *)sbi.buf;
+    size_t slen = sbi.len;
+    mp_int_t x = mp_obj_get_int(a[4]);
+    mp_int_t y = mp_obj_get_int(a[5]);
+    uint16_t col = (uint16_t)(mp_obj_get_int(a[6]) & 0xFFFF);
+    mp_buffer_info_t fbi;
+    mp_get_buffer_raise(a[7], &fbi, MP_BUFFER_READ);
+    const uint8_t *font = (const uint8_t *)fbi.buf;
+    mp_int_t nglyphs = (mp_int_t)(fbi.len / 8u);
+    mp_int_t first = mp_obj_get_int(a[8]);
+    mp_int_t scale = mp_obj_get_int(a[9]);
+    mp_int_t cam_x = mp_obj_get_int(a[10]);
+    mp_int_t cam_y = mp_obj_get_int(a[11]);
+    mp_int_t cx0 = mp_obj_get_int(a[12]);
+    mp_int_t cy0 = mp_obj_get_int(a[13]);
+    mp_int_t cx1 = mp_obj_get_int(a[14]);
+    mp_int_t cy1 = mp_obj_get_int(a[15]);
+    (void)dh;
+    if (dw <= 0 || nglyphs <= 0) return mp_const_none;
+    if (scale < 1) scale = 1;
+    moy_gfx_clip(dw, dcap, &cx0, &cy0, &cx1, &cy1);
+    x -= cam_x;
+    y -= cam_y;
+    mp_int_t adv = 8 * scale;                    // cell advance per character
+    if (y >= cy1 || y + adv <= cy0) return mp_const_none;   // whole line off-clip
+    for (size_t i = 0; i < slen; i++, x += adv) {
+        if (x >= cx1) break;                     // rest of the string is right of clip
+        if (x + adv <= cx0) continue;            // this glyph entirely left of clip
+        mp_int_t gi = (mp_int_t)s[i] - first;
+        if (gi < 0 || gi >= nglyphs) gi = 0;     // out of range -> first glyph (space)
+        const uint8_t *g = font + (size_t)gi * 8u;
+        for (mp_int_t j = 0; j < 8; j++) {
+            uint8_t bits = g[j];
+            if (bits == 0) continue;
+            mp_int_t bx = x + j * scale;
+            if (bx >= cx1 || bx + scale <= cx0) continue;
+            for (mp_int_t row = 0; bits != 0; bits >>= 1, row++) {
+                if (!(bits & 1)) continue;
+                mp_int_t by = y + row * scale;
+                for (mp_int_t sub_y = 0; sub_y < scale; sub_y++) {
+                    mp_int_t ty = by + sub_y;
+                    if (ty < cy0 || ty >= cy1) continue;
+                    uint16_t *drow = dst + (size_t)ty * (size_t)dw;
+                    for (mp_int_t sub_x = 0; sub_x < scale; sub_x++) {
+                        mp_int_t tx = bx + sub_x;
+                        if (tx < cx0 || tx >= cx1) continue;
+                        drow[tx] = col;
+                    }
+                }
+            }
+        }
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_text_obj, 16, 16, moy_gfx_text);
+
 // pack_strip(fb, fb_w, x, y, w, rows, dst) -- copy a (w x rows) window of the
 // framebuffer into dst contiguously (row-major). Full-width is one memcpy;
 // cropped rects are packed row-by-row in C (the slow Stage 2 Python path).
@@ -811,6 +885,7 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_line),       MP_ROM_PTR(&moy_gfx_line_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_window), MP_ROM_PTR(&moy_gfx_blit_window_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_indices), MP_ROM_PTR(&moy_gfx_blit_indices_obj) },
+    { MP_ROM_QSTR(MP_QSTR_text),       MP_ROM_PTR(&moy_gfx_text_obj) },
     { MP_ROM_QSTR(MP_QSTR_pack_strip), MP_ROM_PTR(&moy_gfx_pack_strip_obj) },
 };
 static MP_DEFINE_CONST_DICT(moy_gfx_globals, moy_gfx_globals_table);

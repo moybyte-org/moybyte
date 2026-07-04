@@ -72,7 +72,7 @@ def _draw():                 # every frame; render here
 | `rectb(x, y, w, h, c)` | rectangle **outline** |
 | `circ(cx, cy, r, c)` | **filled** circle |
 | `circb(cx, cy, r, c)` | circle **outline** |
-| `print(s, x, y, c, scale=1)` | text (8×8 petme128 font; `scale=2` = 16px tall) |
+| `print(s, x, y, c, scale=1)` | text (8×8 petme128 font, pixel-identical host↔device). `scale` is accepted but **ignored** — game text is always 8px (the Settings text-size option scales the SYSTEM UI only, #39). Honours `camera`/`clip`/`pal` like every primitive (native on device, #62) |
 | `camera(x=0, y=0)` | offset all subsequent draws by `-x,-y` (world → screen). No args resets |
 | `clip(x=None, y=None, w=None, h=None)` | clip drawing to a rect. No args resets to full screen |
 | `pal(c0=None, c1=None)` | draw color `c0` as `c1` until reset. No args resets |
