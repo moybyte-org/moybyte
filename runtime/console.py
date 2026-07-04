@@ -1964,6 +1964,16 @@ class Workstation:
         self._cart_ms = 0.0           # smoothed cart _draw() ms (RENDERING)
         self._audio_ms = 0.0          # smoothed audio.tick(dt) ms (mixer feed)
         self._chrome_ms = 0.0         # smoothed chrome ms (= draw - upd - cart - audio)
+        # RAW (un-smoothed) copy of THIS frame's phase split (#66 HITCH v3): the
+        # EMAs above hide which phase a single 150ms hitch frame spent its time
+        # in (a one-frame spike moves an alpha=0.15 EMA by only 15% of itself).
+        # The hitch logger prints these instead.
+        self._raw_upd = 0.0
+        self._raw_cart = 0.0
+        self._raw_audio = 0.0
+        self._raw_chrome = 0.0
+        self._raw_flush = 0.0
+        self._raw_draw = 0.0
         # Achievements (#21): a small set of fun milestones + the hidden Easter-egg
         # rewards. Starts empty/volatile; load_achievements() wires the SD store +
         # the unlock beep. The Workstation calls ach.note(event) at the flow points
@@ -5832,6 +5842,13 @@ class Workstation:
             _chrome = _draw - _upd - _cart - _audio
             if _chrome < 0:
                 _chrome = 0
+            # raw per-frame copies for the hitch logger (#66 HITCH v3)
+            self._raw_upd = float(_upd)
+            self._raw_cart = float(_cart)
+            self._raw_audio = float(_audio)
+            self._raw_chrome = float(_chrome)
+            self._raw_flush = float(_flush)
+            self._raw_draw = float(_draw)
             self._upd_ms = float(_upd) if self._upd_ms <= 0 \
                 else self._upd_ms + (_upd - self._upd_ms) * 0.15
             self._cart_ms = float(_cart) if self._cart_ms <= 0 \
@@ -6243,6 +6260,14 @@ class Workstation:
         logic vs rendering vs audio vs chrome). Only meaningful while a cart runs with
         perf_capture/perf_hud on."""
         return (self._upd_ms, self._cart_ms, self._audio_ms, self._chrome_ms)
+
+    def perf_breakdown_raw(self):
+        """(upd, cart, audio, chrome, flush, draw) of the LAST drawn frame,
+        un-smoothed (#66 HITCH v3). The EMA split (perf_breakdown) hides which
+        phase a single hitch frame spent its time in; the hitch logger prints
+        this instead. Only meaningful with perf_capture/perf_hud on."""
+        return (self._raw_upd, self._raw_cart, self._raw_audio,
+                self._raw_chrome, self._raw_flush, self._raw_draw)
 
     def perf_batch(self):
         """(flushes, sprites, maxrun) for the auto-batch this frame (#63 profiling). N

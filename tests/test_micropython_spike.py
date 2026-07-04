@@ -1355,10 +1355,18 @@ def test_hitch_logger_wired():
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     assert "HITCH_MS = 80" in runtime
     assert "def _diag_hitch(" in runtime
-    # v2: the input polls + ws.frame are timed too (the first hardware pass
-    # showed ~188ms hitches with every v1-measured stage at zero).
-    assert "_diag_hitch(diag, ws, elapsed, _t_kbd, _t_inp, _t_ws," in runtime
-    assert "kbd=%d inp=%d ws=%d" in runtime
+    # v2: input polls + ws.frame timed (v1 showed hitches with all stages zero).
+    # v3: sync_back timed (the GDMA layer kick was still unmeasured), RAW phase
+    # split printed (EMAs hid which phase a single spike lived in), pump= and
+    # lw= (copy_wait trips) added; copy_wait is bounded ~250k spins and REPORTS
+    # a trip, with the consume site forcing the sync path on one.
+    assert "_diag_hitch(diag, ws, comp, elapsed, _t_kbd, _t_inp, _t_sb, _t_ws," in runtime
+    assert "pump=%.1f lw=%d raw(logic=%.1f" in runtime
+    assert "self._lcopy_trips += 1" in runtime
+    console_src = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    assert "def perf_breakdown_raw(self):" in console_src
+    gfx_c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    assert "spins < 250000u" in gfx_c
     # the diag->SD write (measured 80-120ms) must NOT run at 5s during play
     assert "20000 if ws.cart is not None else 5000" in runtime
 
