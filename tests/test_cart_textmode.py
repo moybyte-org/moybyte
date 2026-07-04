@@ -128,6 +128,48 @@ def test_game_cart_gets_buttons_and_no_stray_text(tmp_path):
     assert ws.ns["stray"] == ""
 
 
+def test_backspace_pauses_textmode_game_but_not_tool(tmp_path):
+    # #71 pause key for TYPING GAMES (Letter Blitz): text mode suppresses the
+    # q/e->home/stop letter aliases so every letter types -- BACKSPACE is the
+    # one console key that pauses. Gated to manifest type "game": a text-mode
+    # TOOL (the wifi cart's password field) keeps backspace as DELETE.
+    import os
+    from runtime import host_app
+    from runtime import moy_carts
+
+    carts_dir = str(tmp_path / "carts")
+    os.makedirs(carts_dir, exist_ok=True)
+    moy_carts.create("TypeGame", carts_dir, src=TEXT_CART_SRC, type="game")
+    moy_carts.create("TypeTool", carts_dir, src=TEXT_CART_SRC, type="app")
+    ws = host_app.build_workstation(carts_dir)
+    drv = host_app.ConsoleDriver(ws)
+
+    _open_cart(ws, "TypeGame")
+    drv.frame(1.0 / 30)                     # _update ran textmode(True)
+    assert ws.input.text_mode is True
+    drv.type_char(ord("q"))                 # q TYPES (no more home alias)...
+    drv.frame(1.0 / 30)
+    drv.frame(1.0 / 30)
+    assert ws.cart_paused is False          # ...and does NOT pause
+    assert ws.ns["typed"].endswith("q")
+    drv.type_char(0x08)                     # BACKSPACE pauses the game
+    drv.frame(1.0 / 30)
+    assert ws.cart_paused is True
+    drv.frame(1.0 / 30)                     # release frame (edge reset)
+    drv.type_char(0x08)                     # backspace again resumes
+    drv.frame(1.0 / 30)
+    assert ws.cart_paused is False
+
+    ws.go_home()
+    _open_cart(ws, "TypeTool")
+    drv.frame(1.0 / 30)
+    assert ws.input.text_mode is True
+    drv.type_char(0x08)                     # a text-mode TOOL keeps backspace
+    drv.frame(1.0 / 30)                     # as a typed key (delete)...
+    assert ws.cart_paused is False          # ...never a pause
+    assert 0x08 in ws.ns["edges"]           # the cart itself saw the byte
+
+
 def test_textmode_resets_on_cart_exit(tmp_path):
     from runtime import host_app
 

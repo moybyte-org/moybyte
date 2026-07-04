@@ -55,8 +55,13 @@ def _draw():                 # every frame; render here
 
 - **320×240**, indexed. `W` = 320, `H` = 240 are globals (read them; don't assume).
 - **A running cart owns the FULL canvas** — the console's top bar auto-hides during
-  play and appears only in the pause menu (HOME / `q` on the T-Deck, the ☰ button on
-  the web page) and on the crash panel. Don't reserve rows for system chrome.
+  play and appears only in the pause menu and on the crash panel. Pause = HOME (the
+  `q` key in normal game mode; **BACKSPACE if your cart called `textmode(True)`**;
+  the ☰ button on the web page). Don't reserve rows for system chrome.
+- **Typing games: call `textmode(True)`** (e.g. in `_init`). In game mode the device
+  keyboard only produces the 9 d-pad-mapped letters; text mode delivers EVERY letter
+  to `key()`/`keyp()` and no letter is reserved by the console — backspace becomes
+  the pause key (for `"type": "game"` carts; a `"tool"` keeps backspace as delete).
 - Every color is a **MOY64 palette index 0–63**, or a name via `col("red")` (see
   [Palette](#palette)). The canvas stores indices; the host resolves them to RGB for
   the window, the device maps them into the RGB565 framebuffer.

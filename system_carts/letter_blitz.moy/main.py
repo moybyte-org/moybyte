@@ -430,6 +430,11 @@ def _init():
     global rings, rising, fx_text, melody, freeze_t, hint_t, wanted_flash_t
     global trace_covered, trace_was_held, trace_done, aiming, aim
     global boss, streak, best_streak, initials, rec_letters, rec_t, mood_idx
+    # TYPING GAME: ask the console for the text keyboard. Without this the
+    # device keyboard stays in raw game mode, where only the 9 d-pad-mapped
+    # keys produce letters at all -- and q/e got eaten as pause/stop. In text
+    # mode EVERY letter reaches keyp() cleanly; BACKSPACE is the pause key.
+    textmode(True)
     _build_maze()
     n = int(cfg("tank_count", 4))
     n = max(2, min(8, n))

@@ -75,9 +75,12 @@ re-staged every build, gitignored):
   paint UI + layout + the **unified 18px top bar** (icon-only mode switchers home/edit/
   paint/map/blocks left, clock/wifi/batt/gear right, new/dup/del on home — #46), whose
   icons are 16×16 sprites blitted from an editable `IconSheet`. **The bar auto-hides
-  while a cart PLAYS** (#71): a running cart owns the full 320×240; HOME/`q` (or the
-  web page's ☰) opens the PAUSE menu — cart frozen, bar + chrome visible, HOME again
-  exits. Backend-agnostic: injected `make_api` + cart store. (frozen as `console`)
+  while a cart PLAYS** (#71): a running cart owns the full 320×240; HOME opens the
+  PAUSE menu — the physical `q` key in raw/game mode, **BACKSPACE for a text-mode
+  GAME cart** (typing carts like Letter Blitz need every letter, so the q/e→home/stop
+  ASCII aliases were removed; a text-mode TOOL, e.g. the wifi password field, keeps
+  backspace as delete), or the web page's ☰. Cart frozen, bar + chrome visible,
+  HOME again exits. Backend-agnostic: injected `make_api` + cart store. (frozen as `console`)
 - `runtime/editors.py` — `CodeEditor` / `SpriteSheet` / `PaintEditor` cores, plus
   `IconSheet` (16×16 themeable system-bar icon tiles; Settings → EDIT ICONS repaints it). (frozen as `editors`)
 - `runtime/moy_carts.py` — the `.moy` store (scan/load/save_*/create/duplicate/delete;
