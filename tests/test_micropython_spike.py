@@ -1098,6 +1098,21 @@ def test_i2c_timeout_knob_engaged():
     assert "timeout=self.I2C_TIMEOUT_US" in inp_mod
 
 
+def test_i2c_new_driver_knob_wired_default_off():
+    # #69 root cause (source-read + XIAO TO_REG-verified): the legacy esp32
+    # machine.I2C timeout= bounds ONE clock-stretch event (S3 exponential reg;
+    # 5000us -> 6.55ms/event) inside a hardcoded 100ms*(1+len) transaction wait,
+    # so the C3's many sub-cap stretches stall a read 40-60ms "successfully"
+    # (I2CSTAT to=0). The NEW i2c_master driver makes timeout the PER-TRANSACTION
+    # cap. Shipped as a default-OFF A/B build knob (MOYBYTE_I2C_NEW_DRIVER=1),
+    # apply/revert toggle like the early-board-init patch.
+    assert (ROOT / "patches" / "esp32_i2c_new_driver.patch").exists()
+    build = (ROOT / "build.sh").read_text(encoding="utf-8")
+    assert 'I2C_NEW_DRIVER="${MOYBYTE_I2C_NEW_DRIVER:-0}"' in build   # default OFF
+    assert "esp32_i2c_new_driver.patch" in build
+    assert build.count("esp32_i2c_new_driver.patch") >= 2             # apply + revert
+
+
 def test_capped_stall_holds_state_and_never_kills_the_keyboard():
     # #69: with the timeout cap a stall RAISES. That must cost ONE STALE FRAME --
     # the last good matrix state is held (returning "no buttons" would fake a

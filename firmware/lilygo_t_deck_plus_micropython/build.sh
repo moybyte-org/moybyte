@@ -337,6 +337,32 @@ if [ -f "${MPCONFIGPORT_H}" ] && ! grep -q "Moybyte #66" "${MPCONFIGPORT_H}"; th
   patch -d "${UPSTREAM_DIR}/lib/micropython" -p1 < "${PATCH_DIR}/esp32_repr_c_floats.patch"
 fi
 
+# Moybyte #69 (A/B knob, DEFAULT OFF): switch machine.I2C to esp-idf's NEW
+# i2c_master driver. Why: the legacy driver's `timeout=` programs only the S3's
+# per-CLOCK-STRETCH-EVENT hardware register (exponential; 5000us -> 6.55ms per
+# event, XIAO-verified via the TO_REG) while the transaction itself waits a
+# hardcoded 100ms*(1+len) ("TODO proper timeout" in machine_i2c.c) -- so the
+# T-Deck keyboard C3 stretching MANY sub-cap times stalls a 5-byte read
+# 40-60ms "successfully" (I2CSTAT to=0, max 39-61ms, hardware 2026-07-04). The
+# new driver passes timeout as the PER-TRANSACTION cap, turning a stall into a
+# <=5ms ETIMEDOUT that the input layer absorbs as one held-state frame.
+# MOYBYTE_I2C_NEW_DRIVER=1 to apply; default reverts (clean A/B, same toggle
+# pattern as the early-board-init patch). UNVERIFIED on T-Deck hardware.
+I2C_NEW_DRIVER="${MOYBYTE_I2C_NEW_DRIVER:-0}"
+if [ -f "${MPCONFIGPORT_H}" ]; then
+  if [ "${I2C_NEW_DRIVER}" = "1" ]; then
+    if ! grep -q "Moybyte #69" "${MPCONFIGPORT_H}"; then
+      echo "Moybyte: applying NEW i2c_master driver patch (#69, per-transaction timeout)"
+      patch -d "${UPSTREAM_DIR}/lib/micropython" -p1 < "${PATCH_DIR}/esp32_i2c_new_driver.patch"
+    fi
+  else
+    if grep -q "Moybyte #69" "${MPCONFIGPORT_H}"; then
+      echo "Moybyte: reverting NEW i2c_master driver patch (#69)"
+      patch -R -d "${UPSTREAM_DIR}/lib/micropython" -p1 < "${PATCH_DIR}/esp32_i2c_new_driver.patch"
+    fi
+  fi
+fi
+
 RUNNER=()
 if command -v ionice >/dev/null 2>&1; then
   RUNNER+=(ionice -c 3)
