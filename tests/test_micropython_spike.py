@@ -1371,6 +1371,23 @@ def test_hitch_logger_wired():
     assert "20000 if ws.cart is not None else 5000" in runtime
 
 
+def test_repr_c_unboxed_floats_wired():
+    # #66 micro-stutter root cause: REPR_A boxes EVERY float result (16B heap
+    # alloc); sakura's 120-petal _update measured 73KB/frame of garbage -> the
+    # heap-wrap gc collect (130-175ms, live-set-bound) fired every ~1s INSIDE
+    # cart logic = the metronome hitch. REPR_C packs floats into the object
+    # word (30-bit): churn drops to ~800B/frame (92x, XIAO-verified with the
+    # full console booting + float sanity). The patch must be applied by
+    # build.sh every build (lib/micropython is re-cloneable).
+    build = (ROOT / "build.sh").read_text(encoding="utf-8")
+    patch = (ROOT / "patches" / "esp32_repr_c_floats.patch")
+    assert patch.exists()
+    ptext = patch.read_text(encoding="utf-8")
+    assert "+#define MICROPY_OBJ_REPR                    (MICROPY_OBJ_REPR_C)" in ptext
+    assert "esp32_repr_c_floats.patch" in build
+    assert 'grep -q "Moybyte #66" "${MPCONFIGPORT_H}"' in build
+
+
 def test_cache_geometry_upgraded_in_build():
     # #63 kid-logic lever: the default S3 cache config (16KB icache / 32KB dcache)
     # made the interpreter ~2.5x slower than clean silicon (frozen bytecode from
