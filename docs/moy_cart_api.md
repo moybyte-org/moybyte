@@ -54,6 +54,9 @@ def _draw():                 # every frame; render here
 ## The canvas
 
 - **320×240**, indexed. `W` = 320, `H` = 240 are globals (read them; don't assume).
+- **A running cart owns the FULL canvas** — the console's top bar auto-hides during
+  play and appears only in the pause menu (HOME / `q` on the T-Deck, the ☰ button on
+  the web page) and on the crash panel. Don't reserve rows for system chrome.
 - Every color is a **MOY64 palette index 0–63**, or a name via `col("red")` (see
   [Palette](#palette)). The canvas stores indices; the host resolves them to RGB for
   the window, the device maps them into the RGB565 framebuffer.

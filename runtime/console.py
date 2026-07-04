@@ -1838,6 +1838,8 @@ class Workstation:
         self.ns = None
         self._update = None
         self._draw = None
+        self.cart_paused = False      # pause menu (#71): a running cart owns the FULL
+                                      # 320x240 (no bar); HOME/q pauses -> chrome shows
         self.msel = 0                 # selected card in the menu
         self.mtop = 0                 # first card scrolled into view (#3)
         self.menu_view = "cards"      # menu sub-view: "cards" | "code" | "paint" | "map"
@@ -3028,6 +3030,7 @@ class Workstation:
     def open(self):
         self.cart = self.launcher.selected()
         self.config = dict(self.cart["cfg"])
+        self.cart_paused = False
         self.msel = 0
         self.mtop = 0
         self.editor = None
@@ -3670,6 +3673,7 @@ class Workstation:
 
     def go_home(self):
         self._dirty = True             # screen change repaints (#44)
+        self.cart_paused = False
         self._set_text_mode(False)    # restore the game-button keyboard mode
         self.editor = None
         self.paint = None
@@ -3971,8 +3975,17 @@ class Workstation:
         elif self.screen == "update":
             self._update_input(i)
         elif self.screen == "desktop":
-            if i.pressed("home") or i.pressed("stop"):
-                self.go_home()
+            if self.cart_paused:
+                if i.pressed("home") or i.pressed("stop"):
+                    self.go_home()             # HOME again from the pause menu exits
+                elif i.pressed("a") or i.pressed("run"):
+                    self.cart_paused = False   # resume
+                    self._dirty = True
+                elif i.pressed("b"):
+                    self._open_menu()
+            elif i.pressed("home") or i.pressed("stop"):
+                self.cart_paused = True        # first HOME/q PAUSES (#71), not exit
+                self._dirty = True
             elif i.pressed("b"):
                 self._open_menu()
         elif self.screen == "menu":
@@ -4275,13 +4288,13 @@ class Workstation:
             self._update_pointer(px, py, click)
         elif self.screen == "desktop":
             px, py = gx, gy
-            # While a cart runs the unified TOP BAR (HOME, EDIT/CODE, PAINT, MAP,
-            # BLOCKS as 16x16 icons) is the TIC-80 one-tap tool switcher -- it occludes
-            # only the 18px bar at the top so gameplay keeps the rest of the screen (a
-            # bottom dock would cover the play area). The icon rects are the same
-            # _HOME_BTN/_MENU_BTN/... constants the bar draws from, so a tap on an icon
-            # fires its action.
-            if click:
+            # While a cart PLAYS the bar is hidden (#71) -- the game owns the full
+            # 320x240 and every tap belongs to the cart. The unified TOP BAR (HOME,
+            # EDIT/CODE, PAINT, MAP, BLOCKS icons -- the TIC-80 one-tap tool
+            # switcher) hit-tests only in the PAUSE menu (HOME/q or the web page's
+            # menu button) and on the crash panel, where it is drawn.
+            chrome = self.cart_paused or self.cart_error is not None
+            if click and chrome:
                 if _in(px, py, _SYSMENU_BTN):
                     self.toggle_sysmenu()      # ≡ -> open the dropdown system menu (#52)
                 elif _in(px, py, _HOME_BTN):
@@ -4296,7 +4309,14 @@ class Workstation:
                     self._open_blocks()
                 elif _in(px, py, _MUSIC_BTN):
                     self._open_music()
-                elif self.show_fps and _in(px, py, self._fps_tap_rect()):
+                elif self.cart_paused:
+                    # a tap anywhere outside the chrome resumes play -- and must
+                    # NOT leak into the cart as a game tap on the same frame
+                    self.cart_paused = False
+                    self._dirty = True
+                    self.input.game_pointer = (gx, gy, False, False)
+            elif click:
+                if self.show_fps and _in(px, py, self._fps_tap_rect()):
                     # Tapping the FPS readout toggles the frame-time breakdown HUD
                     # (#43/#44 perf). Deliberate, no keyboard, doesn't fight game
                     # input -- the touch lands on a small bottom-right corner box.
@@ -5600,8 +5620,10 @@ class Workstation:
         if self._splash_until is not None:
             return True
         # A running cart on the desktop draws every frame (unless it crashed, when the
-        # error panel is static).
-        if self.screen == "desktop" and self.cart_error is None and (
+        # error panel is static, or it's PAUSED -- the pause menu is a still frame, so
+        # an idle paused game costs ~0 like any static screen, #71).
+        if self.screen == "desktop" and self.cart_error is None \
+                and not self.cart_paused and (
                 self._update is not None or self._draw is not None):
             return True
         # A music-editor preview must keep ticking the mixer + redrawing the PLAY/STOP
@@ -5682,7 +5704,13 @@ class Workstation:
             self._pump_update(dt)          # advance the install / reboot countdown
             self._draw_update(dt)
         elif self.screen == "desktop":
-            if self.cart_error is None:
+            if self.cart_paused and self.cart_error is None:
+                # Paused (#71): the cart is frozen -- no _update, no _draw; the
+                # canvas retains its last frame as the backdrop. Keep the mixer
+                # fed so a mid-flight note decays instead of sticking.
+                if self.audio is not None:
+                    self.audio.tick(dt)
+            elif self.cart_error is None:
                 # Resolve this frame's keyboard edge for the cart's key()/keyp():
                 # last_key is the byte held this frame (0 when nothing is down);
                 # keyp fires only on the 0->key transition. Done here (not in
@@ -5731,7 +5759,15 @@ class Workstation:
             self._reset_canvas_state()
             if self.cart_error is not None:
                 self._draw_error_panel()
-            self._draw_status_strip("desktop")     # unified top bar (tool switcher)
+            # The bar auto-hides while a cart PLAYS (#71): the game owns the full
+            # 320x240. Chrome appears only in the pause menu (HOME/q, or the web
+            # page's menu button) -- and on a crash, so EDIT/CODE stay reachable.
+            if self.cart_paused or self.cart_error is not None:
+                if self.cart_paused:
+                    self._draw_pause_dim()          # scanline shade UNDER the chrome
+                self._draw_status_strip("desktop")  # unified top bar (tool switcher)
+                if self.cart_paused:
+                    self._draw_pause_pill()
         elif self.menu_view == "code":
             self._draw_code()              # full-screen editor (covers the cart)
         elif self.menu_view == "blocks":
@@ -5946,6 +5982,26 @@ class Workstation:
                 px, py = lay.page_next[0], lay.page_next[1]
                 cv.print(">", px + 3, py + 8, NAMES["white"], 2)
         self._draw_status_strip("home")
+
+    def _draw_pause_dim(self):
+        """Darken the frozen cart frame. The canvas is indexed (no alpha), so the
+        shade is 50% scanlines -- every other row black, the classic CRT-era pause
+        look. Idempotent across repaints (black rows stay black), so no entry-once
+        latch; the bar and the pill draw AFTER it and stay full-bright."""
+        cv = self.canvas
+        for y in range(0, cv.h, 2):
+            cv.rect(0, y, cv.w, 1, NAMES["black"])
+
+    def _draw_pause_pill(self):
+        """The pause menu's one line of guidance, over the dimmed frame."""
+        cv = self.canvas
+        msg = "PAUSED - TAP TO PLAY"
+        w = len(msg) * 8 + 16
+        x = (cv.w - w) // 2
+        y = cv.h - 34
+        cv.rect(x, y, w, 18, NAMES["black"])
+        cv.rectb(x, y, w, 18, NAMES["light_grey"])
+        cv.print(msg, x + 8, y + 5, NAMES["white"], 1)
 
     def _draw_status_strip(self, where):
         """The unified 18px top bar (Stage 1), drawn on BOTH the launcher/Settings and

@@ -150,6 +150,8 @@ def test_in_cart_menu_opens_settings_and_back_resumes_cart(tmp_path):
     ws.launcher.sel = 0
     ws.open()
     assert ws.screen == "desktop"
+    ws.cart_paused = True          # the in-cart bar lives in the pause menu (#71)
+    ws._dirty = True
     drv.click(C._SYSMENU_BTN[0] + 2, C._SYSMENU_BTN[1] + 2)   # ≡ on the in-cart bar
     drv.frame(1 / 30)
     assert ws.sysmenu.open
@@ -294,8 +296,9 @@ def test_launcher_does_not_draw_the_bottom_dock(tmp_path):
 
 
 def test_in_cart_dock_returns_when_a_cart_is_open(tmp_path):
-    """Opening a cart brings back the in-cart tool bar (EDIT/PAINT/MAP/HOME). The
-    launcher's removal of the dead dock does not touch the in-cart chrome."""
+    """PAUSING a cart brings up the in-cart tool bar (EDIT/PAINT/MAP/HOME); while it
+    PLAYS the game owns the full canvas with no chrome at all (#71). The launcher's
+    removal of the dead dock does not touch the in-cart chrome."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
@@ -304,9 +307,56 @@ def test_in_cart_dock_returns_when_a_cart_is_open(tmp_path):
     assert ws.screen == "desktop"
     seen = _spy_draw(ws)
     drv.frame(1 / 30)
-    assert seen["incart"] >= 1        # the in-cart tool buttons ARE drawn
+    assert seen["incart"] == 0        # playing: NO bar over the game
+    ws.cart_paused = True
+    ws._dirty = True
+    drv.frame(1 / 30)
+    assert seen["incart"] >= 1        # paused: the in-cart tool buttons ARE drawn
     # The 6-slot bottom dock belongs to home/settings, not a running cart.
     assert seen["dock"] == 0
+
+
+def test_cart_pause_menu_freezes_and_resumes(tmp_path):
+    """#71: HOME (q on the T-Deck) PAUSES a running cart -- the cart freezes, chrome
+    appears -- instead of exiting. A tap outside the chrome resumes without leaking
+    into the cart; HOME from the pause menu exits to the launcher."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.launcher.sel = 0
+    ws.open()
+    assert ws.screen == "desktop"
+    calls = [0]
+    orig_upd = ws._update
+
+    def counting(dt):
+        calls[0] += 1
+        if orig_upd:
+            orig_upd(dt)
+    ws._update = counting
+
+    drv.frame(1 / 30)
+    assert calls[0] == 1               # playing: the cart ticks
+    drv.press("home")
+    drv.frame(1 / 30)
+    assert ws.cart_paused              # first HOME pauses, does NOT exit
+    assert ws.screen == "desktop"
+    ticks = calls[0]
+    for _ in range(5):
+        drv.frame(1 / 30)
+    assert calls[0] == ticks           # paused: the cart is frozen
+    drv.click(160, 200)                # tap outside the chrome -> resume
+    drv.frame(1 / 30)
+    assert not ws.cart_paused
+    drv.frame(1 / 30)
+    assert calls[0] > ticks            # ...and the cart ticks again
+    drv.press("home")
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)                  # release frame -- the edge detector needs it
+    assert ws.cart_paused
+    drv.press("home")                  # HOME from the pause menu exits
+    drv.frame(1 / 30)
+    assert ws.screen == "launcher"
 
 
 def test_launcher_grid_band_reclaims_the_freed_dock_space(tmp_path):
