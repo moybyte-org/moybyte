@@ -138,7 +138,7 @@ The One's value prop, stated crisply: **"make without a tether — standalone, b
 
 ### 3.3 The Player — the pocket console (shipping)
 
-ESP32-S3 + SPI ST7789 (320×240) + physical input + SD. Fully working today: carts, on-device editors, audio, OTA (#53), web view (#41). Perf: current numbers live in the **#66 performance ledger** (2026-07-03: light carts flush-bound ~47fps; heavy logic/render carts 24–32fps).
+ESP32-S3 + SPI ST7789 (320×240) + physical input + SD. Fully working today: carts, on-device editors, audio, OTA (#53), web view (#41). Perf: current numbers live in the **#66 performance ledger** (2026-07-04: Sakura 36–38fps smooth, Sky Run 40–46 at the flush ceiling, render-bound carts 24–29; zero artifacts, micro-stutter fixed at the root).
 
 - **A D-pad fits better than a keyboard.** Carts read `btn(left/right/up/down/a/b)` — a 1:1 map. The keyboard belongs on the One (for coding); the Player is for *play*. The T-Deck's trackball is a stopgap.
 - **Native 320×240 is the requirement.** A 2.4″ IPS 240×320 (landscape 320×240) panel is the exact canvas — no scaling. This is what disqualifies smaller-screen S3 handhelds (e.g. a 240×135 Cardputer).
@@ -265,7 +265,7 @@ The hard parts (why this is OPEN, not committed):
 
 The cart runtime is **MicroPython/Python**. Rationale: proven to boot/draw/run carts on real hardware; familiar to parents/schools; already shipping.
 
-> **2026-07-03 update to the perf rationale:** the original "exonerated on performance (cart logic ~1–2ms)" claim held for sprite-light carts but NOT for float-physics carts — #63 found the interpreter frame-spill pathology made 120-entity logic collapse (10–12fps). It was fixed **engine-side, API unchanged** (native `spr_gate` + doubled S3 caches), which is the doctrine: kid code stays Python-simple, the engine keeps it fast. The decision stands. Lua remains the future *second* cart type; measured on-silicon at **5.0x faster** than MicroPython on the same loop (#6) — a real option if a cart class ever outgrows the engine-side levers. Current numbers: the **#66 performance ledger**.
+> **2026-07-03/04 update to the perf rationale:** the original "exonerated on performance (cart logic ~1–2ms)" claim held for sprite-light carts but NOT for float-physics carts — #63/#66 found THREE interpreter taxes on kid-idiomatic code: the per-draw-call dispatch wall, the call-frame heap-spill pathology (120-entity logic collapsed to 10–12fps), and float boxing (16B heap alloc per float result → a ~150ms gc collect every second = the micro-stutter). All three were fixed **engine-side, API unchanged** (native `spr_gate`, doubled S3 caches, REPR_C unboxed floats), which is the doctrine: kid code stays Python-simple, the engine keeps it fast. Sakura now runs 36–38fps smooth. The decision stands — strengthened. Lua remains the future *second* cart type (~4x faster on the same loop post-REPR_C, #6/#67), with PICO-8/TIC-80 source-compat the likelier trigger than raw speed. Current numbers: the **#66 performance ledger**.
 
 We adopted **TIC-80-style drawing conventions in place** (filled `rect`/`circ`, outline `rectb`/`circb`, `spr` by sheet index, `print`) without a Lua VM.
 
@@ -471,7 +471,7 @@ Serves the **running console** to a browser on the same WiFi via the **same draw
 
 ### 12.4 The perf ceiling (#43 → the #66 ledger)
 
-**Current numbers, the frame-budget model, and the lever ledger live in issue #66** (the living performance ledger — edit its body when hardware numbers land; don't fork the numbers into this doc). The shape of the ceiling (2026-07-03): the ~15–16ms SPI flush is hidden behind render by the double-buffer overlap, so light carts sit at the ~47–50fps flush ceiling; heavy carts are interpreter-logic-bound or Python-prim-render-bound at 24–32fps — the #63 frame-spill discovery corrected the earlier "interpreter is not the bottleneck" belief for float-physics carts (fixed engine-side: native `spr_gate` + doubled caches, API unchanged). Remaining SPI-tier levers, in value order, are in #66. **On the One (P4/DSI), the flush ceiling is gone** — which is a core reason the One is the flagship.
+**Current numbers, the frame-budget model, and the lever ledger live in issue #66** (the living performance ledger — edit its body when hardware numbers land; don't fork the numbers into this doc). The shape of the ceiling (2026-07-04): the ~15–16ms SPI flush is hidden behind render by the double-buffer overlap and now streams from internal-SRAM bounce buffers (PSRAM contention can no longer corrupt it), so light carts sit at the ~45–50fps flush ceiling; float-physics carts run logic-bound but healthy (Sakura ~11ms logic → 36–38fps after the #63/#66 interpreter-tax fixes: native `spr_gate`, doubled caches, REPR_C unboxed floats); Python-prim-render-bound carts sit at 24–29 until native text #62 / map #32. Remaining SPI-tier levers, in value order, are in #66. **On the One (P4/DSI), the flush ceiling is gone** — which is a core reason the One is the flagship.
 
 ---
 
