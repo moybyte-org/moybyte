@@ -318,6 +318,21 @@ if [ -f "${ESP_LCD_SPI_C}" ] && ! grep -q "Moybyte #66" "${ESP_LCD_SPI_C}"; then
   patch -d "${UPSTREAM_DIR}/lib/esp-idf" -p1 < "${PATCH_DIR}/esp_lcd_tx_color_noacquire.patch"
 fi
 
+# Moybyte #66: REPR_C object representation -- floats live UNBOXED in the object
+# word (30-bit). Kid float-physics carts (sakura: 120 petals) otherwise allocate
+# a 16B heap box per float RESULT (~73KB/frame measured), and the periodic
+# heap-wrap gc collect that follows is a 130-175ms visible hitch every ~1s (the
+# micro-stutter, root-caused on-hardware 2026-07-04). REPR_C drops the churn to
+# ~800B/frame (92x) -> a collect every ~5min. Same engine-side doctrine as the
+# spr_gate: the kid's idiomatic code stays; the engine stops punishing it.
+# Verified on the XIAO S3 (full console boot + bench + float sanity). The
+# esp8266 port shipped REPR_C for years on the same Xtensa line.
+MPCONFIGPORT_H="${UPSTREAM_DIR}/lib/micropython/ports/esp32/mpconfigport.h"
+if [ -f "${MPCONFIGPORT_H}" ] && ! grep -q "Moybyte #66" "${MPCONFIGPORT_H}"; then
+  echo "Moybyte: applying REPR_C unboxed-floats patch (#66)"
+  patch -d "${UPSTREAM_DIR}/lib/micropython" -p1 < "${PATCH_DIR}/esp32_repr_c_floats.patch"
+fi
+
 RUNNER=()
 if command -v ionice >/dev/null 2>&1; then
   RUNNER+=(ionice -c 3)
