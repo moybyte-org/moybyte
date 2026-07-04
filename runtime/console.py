@@ -1839,7 +1839,12 @@ class Workstation:
         self._update = None
         self._draw = None
         self.cart_paused = False      # pause menu (#71): a running cart owns the FULL
-                                      # 320x240 (no bar); HOME/q pauses -> chrome shows
+                                      # 320x240 (no bar); HOME (raw-mode q key /
+                                      # BACKSPACE in a text-mode game) pauses
+        self._bks_prev = 0            # last_key edge tracker for the BACKSPACE pause
+                                      # (text-mode GAME carts type letters, so the
+                                      # home/stop letter aliases are suppressed --
+                                      # backspace is the one console key there)
         self.msel = 0                 # selected card in the menu
         self.mtop = 0                 # first card scrolled into view (#3)
         self.menu_view = "cards"      # menu sub-view: "cards" | "code" | "paint" | "map"
@@ -4019,16 +4024,31 @@ class Workstation:
         elif self.screen == "update":
             self._update_input(i)
         elif self.screen == "desktop":
+            # BACKSPACE pause for TEXT-MODE GAME carts (#71): a typing game
+            # (Letter Blitz) needs every letter, so text mode suppresses the
+            # q/e->home/stop aliases -- backspace is the one console key there.
+            # Gated to manifest type "game": a text-mode TOOL (the wifi cart's
+            # password field) keeps backspace as DELETE. Edge-detected on
+            # last_key so one press is one pause, not one per frame.
+            _bks = False
+            if (getattr(self.input, "text_mode", False)
+                    and self.cart is not None
+                    and self.cart.get("type") == "game"):
+                k = self.input.last_key
+                _bks = (k == 0x08 and self._bks_prev != 0x08)
+                self._bks_prev = k
+            else:
+                self._bks_prev = 0
             if self.cart_paused:
                 if i.pressed("home") or i.pressed("stop"):
                     self.go_home()             # HOME again from the pause menu exits
-                elif i.pressed("a") or i.pressed("run"):
-                    self.cart_paused = False   # resume
+                elif _bks or i.pressed("a") or i.pressed("run"):
+                    self.cart_paused = False   # resume (backspace toggles too)
                     self._dirty = True
                 elif i.pressed("b"):
                     self._open_menu()
-            elif i.pressed("home") or i.pressed("stop"):
-                self.cart_paused = True        # first HOME/q PAUSES (#71), not exit
+            elif i.pressed("home") or i.pressed("stop") or _bks:
+                self.cart_paused = True        # first HOME/backspace PAUSES (#71)
                 self._dirty = True
             elif i.pressed("b"):
                 self._open_menu()

@@ -1728,7 +1728,11 @@ el.addEventListener("pointerdown",function(e){el.setPointerCapture(e.pointerId);
 el.addEventListener("pointerup",rl);el.addEventListener("pointercancel",rl);el.addEventListener("pointerleave",rl);}
 wb("ba","a");wb("bb","b");wb("bh","home");  // &#9776; = HOME: pauses a cart (#71), exits from pause
 var PAN={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]},
-NAV={a:"left",d:"right",w:"up",s:"down"},SC={Enter:"run",z:"a",x:"b",h:"home"},pH={},nH={};
+NAV={a:"left",d:"right",w:"up",s:"down"},SC={Enter:"run",z:"a",x:"b"},pH={},nH={};
+// No letter->HOME shortcut: page buttons BYPASS the device's text-mode alias
+// suppression, so h-as-HOME stole the letter h from typing carts (Letter
+// Blitz). Pause from the page = the burger button, or Backspace (typed cd=8,
+// the console's text-mode game pause key).
 function nv(e){var k=e.key.length==1?e.key.toLowerCase():e.key;return NAV[k];}
 cv.addEventListener("keydown",function(e){if(e.key in PAN){pH[e.key]=true;e.preventDefault();return;}
 if(e.key=="Escape"){send({type:"esc"});e.preventDefault();return;}var cd=null;

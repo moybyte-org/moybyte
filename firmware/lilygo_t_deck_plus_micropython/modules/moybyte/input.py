@@ -305,13 +305,21 @@ class TDeckKeyboard:
             return ("down",)
         elif key in (ord("z"), ord("Z"), ord(" "), 0x0D):
             return ("a",)
-        elif key in (ord("x"), ord("X"), 0x08):
+        elif key in (ord("x"), ord("X")):
             return ("b",)
         elif key in (ord("r"), ord("R")):
             return ("run",)
-        elif key in (ord("e"), ord("E"), 0x1B):
+        elif key == 0x1B:
             return ("stop",)
-        elif key in (ord("q"), ord("Q")):
+        elif key == 0x08:
+            # BACKSPACE is the console key (#71 pause / HOME) on the typed-ASCII
+            # path. q/Q and e/E lost their home/stop aliases here: typing carts
+            # (Letter Blitz) read letters via key()/keyp(), and a letter that
+            # ALSO fires console chrome is a stolen letter -- pressing Q paused
+            # the game instead of shooting the Q target. Text-mode screens (code
+            # editor, wifi password) suppress ALL aliases, so backspace still
+            # deletes there; d-pad carts run on the RAW MATRIX path where the
+            # PHYSICAL q key keeps its home/pause role (_read_raw_buttons).
             return ("home",)
         return ()
 
