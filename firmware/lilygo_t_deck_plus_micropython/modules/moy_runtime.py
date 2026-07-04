@@ -1220,13 +1220,15 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
             tilemap.mset(x, y, tile)
 
     def touch():
-        # GT911 pointer exposed to touch-driven carts: (x, y, tapped) this frame,
-        # or None when there is no pointer. `tapped` is the press edge so a cart
-        # scores at most one hit per tap. Same contract as the host make_api.
+        # GT911 pointer exposed to touch-driven carts: (x, y, tapped, held) this
+        # frame, or None when there is no pointer. `tapped` is the press edge so a
+        # cart scores at most one hit per tap; `held` stays True while the finger
+        # is on the glass (run_desktop drives pointer.down from the GT911 poll), so
+        # a cart can track a DRAG (drawing, sliders). Same contract as the host.
         p = getattr(input, "pointer", None)
         if p is None:
             return None
-        return (p.x, p.y, bool(p.click))
+        return (p.x, p.y, bool(p.click), bool(getattr(p, "down", False)))
 
     def mouse():
         # TIC-80-shaped 7-tuple (x, y, left, middle, right, scrollx, scrolly)
