@@ -87,6 +87,12 @@ class TDeckKeyboard:
     stat_max_raw = False
     stat_over5 = 0
     stat_over20 = 0
+    stat_timeouts = 0     # reads that RAISED (capped stalls) -- one stale frame each
+    # A capped stall (#69) raises on ONE read; only this many consecutive
+    # failures mean the keyboard is genuinely gone (see _read_error).
+    ERR_RUN_LIMIT = 10
+    _err_run = 0
+    _raw_last = ()        # last good raw matrix state, held across a capped stall
 
     def __init__(self, input_state):
         self.input = input_state
@@ -187,16 +193,28 @@ class TDeckKeyboard:
                 self.stat_over20 += 1
         return data
 
+    def _read_error(self, exc, label):
+        """One failed keyboard I2C read (#69): with the I2C_TIMEOUT_US cap a C3
+        clock-stretch now RAISES (ETIMEDOUT) instead of blocking 50ms -- that is
+        ONE dropped input frame by design, not a dead keyboard. Only a solid run
+        of consecutive failures (a genuinely absent/wedged keyboard -- the case
+        the old immediate disable protected against) turns the session off."""
+        self._err_run += 1
+        self.stat_timeouts += 1
+        if self._err_run >= self.ERR_RUN_LIMIT:
+            print("Moybyte keyboard %s failed repeatedly:" % label, exc)
+            self.available = False
+
     def _read_key(self):
         if not self.available or self._i2c is None:
             return 0
         try:
             data = self._timed_read(1)
+            self._err_run = 0
             if data:
                 return data[0]
         except Exception as exc:
-            print("Moybyte keyboard read failed:", exc)
-            self.available = False
+            self._read_error(exc, "read")
         return 0
 
     def _enable_raw_mode(self):
@@ -209,15 +227,20 @@ class TDeckKeyboard:
     def _read_raw_buttons(self):
         try:
             data = self._timed_read(5)
+            self._err_run = 0
         except Exception as exc:
-            print("Moybyte keyboard raw read failed:", exc)
-            self.raw_mode = False
-            self.available = False
-            self.input.last_key = 0
-            return ()
+            # Transient (a capped stall): keep raw_mode -- next frame reads again --
+            # and HOLD the last known matrix state for this one frame. Returning ()
+            # would release-then-repress a held button across the gap, which btnp()
+            # reads as a spurious second press edge (double-jump/double-shot). Held
+            # state one frame stale is invisible; a phantom edge is not. Only the
+            # consecutive-failure limit ends the session (see _read_error).
+            self._read_error(exc, "raw read")
+            return self._raw_last
         if len(data) < 5:
             self.raw_mode = False
             self.input.last_key = 0
+            self._raw_last = ()
             return ()
         if data[1] == 0 and data[2] == 0 and data[3] == 0 and data[4] == 0:
             key = data[0]
@@ -264,6 +287,7 @@ class TDeckKeyboard:
             buttons.append("stop")
             key = ord("e")
         self.input.last_key = key
+        self._raw_last = buttons     # held across a capped-stall frame (see above)
         return buttons
 
     def _map_key(self, key):

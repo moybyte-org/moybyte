@@ -2534,14 +2534,18 @@ def _diag_i2cstat(diag, keyboard, touch):
     if diag is None:
         return
     try:
+        # kbd to= counts CAPPED stalls (#69: reads that raised at I2C_TIMEOUT_US and
+        # were held over as one stale frame) -- they never complete, so they are NOT
+        # in n=/max=. Touch failures ARE timed (its _stat runs on the except path).
         diag.log("I2CSTAT",
-                 "kbd(n=%d max=%.1fms%s >5=%d >20=%d) "
+                 "kbd(n=%d max=%.1fms%s >5=%d >20=%d to=%d) "
                  "touch(n=%d max=%.1fms >5=%d >20=%d)"
                  % (getattr(keyboard, "stat_n", 0),
                     getattr(keyboard, "stat_max_us", 0) / 1000.0,
                     " raw" if getattr(keyboard, "stat_max_raw", False) else "",
                     getattr(keyboard, "stat_over5", 0),
                     getattr(keyboard, "stat_over20", 0),
+                    getattr(keyboard, "stat_timeouts", 0),
                     getattr(touch, "stat_n", 0),
                     getattr(touch, "stat_max_us", 0) / 1000.0,
                     getattr(touch, "stat_over5", 0),
