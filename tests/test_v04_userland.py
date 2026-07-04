@@ -602,6 +602,8 @@ def test_host_console_paint_via_mouse(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     drv.press("run")
     drv.frame(1 / 30)
+    ws.cart_paused = True    # bar icons hit-test in the pause menu (#71)
+    ws._dirty = True
     bx, by = C._PAINT_BTN[0], C._PAINT_BTN[1]            # click the PAINT overlay button
     drv.click(bx + 2, by + 2)
     drv.frame(1 / 30)
@@ -636,10 +638,11 @@ class _StubInput:
 
 
 class _Pointer:
-    def __init__(self, x=0, y=0, click=False):
+    def __init__(self, x=0, y=0, click=False, down=False):
         self.x = x
         self.y = y
         self.click = click
+        self.down = down
 
 
 def test_mouse_aliases_touch_as_tic80_tuple():
@@ -652,8 +655,11 @@ def test_mouse_aliases_touch_as_tic80_tuple():
     x, y, left, mid, right, sx, sy = api["mouse"]()
     assert (x, y, left) == (40, 70, True)              # touch (x,y,tapped) -> x,y,left
     assert (mid, right, sx, sy) == (False, False, 0, 0)  # no middle/right/scroll
-    # touch() still returns its own 3-tuple shape unchanged.
-    assert api["touch"]() == (40, 70, True)
+    # touch() returns (x, y, tapped, held): `held` mirrors pointer.down so a
+    # cart can follow a DRAG (drawing); a bare tap edge reads held=False.
+    assert api["touch"]() == (40, 70, True, False)
+    inp.pointer = _Pointer(41, 71, click=False, down=True)   # finger dragging
+    assert api["touch"]() == (41, 71, False, True)
 
 
 def test_time_advances_with_cart_clock():
@@ -805,6 +811,8 @@ def test_host_console_map_open_place_and_render(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     drv.press("run")
     drv.frame(1 / 30)
+    ws.cart_paused = True    # bar icons hit-test in the pause menu (#71)
+    ws._dirty = True
     drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2)      # open the MAP overlay button
     drv.frame(1 / 30)
     assert ws.menu_view == "map" and ws.mapedit is not None
@@ -829,6 +837,8 @@ def test_host_console_map_erase_and_pan(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
     drv.press("run"); drv.frame(1 / 30)
+    ws.cart_paused = True    # bar icons hit-test in the pause menu (#71)
+    ws._dirty = True
     drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2); drv.frame(1 / 30)
     ws.mapedit.n = 3
     drv.click(C._MV_X0 + 2, C._MV_Y0 + 2); drv.frame(1 / 30)   # stamp tile 3 at (0,0)
@@ -854,6 +864,8 @@ def test_host_console_map_save_roundtrips(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     drv.press("run"); drv.frame(1 / 30)
     cart_path = ws.cart["path"]
+    ws.cart_paused = True    # bar icons hit-test in the pause menu (#71)
+    ws._dirty = True
     drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2); drv.frame(1 / 30)
     ws.mapedit.n = 6
     drv.click(C._MV_X0 + 2, C._MV_Y0 + 2); drv.frame(1 / 30)   # stamp tile 6 at (0,0)
@@ -875,6 +887,8 @@ def test_map_edit_seen_by_running_cart_via_gen(tmp_path):
     drv.press("run"); drv.frame(1 / 30)
     tm = ws.tilemap
     before = tm.gen
+    ws.cart_paused = True    # bar icons hit-test in the pause menu (#71)
+    ws._dirty = True
     drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2); drv.frame(1 / 30)
     drv.click(C._MV_X0 + 2, C._MV_Y0 + 2); drv.frame(1 / 30)   # stamp a cell
     assert tm.gen > before                                # mset bumped gen (live pickup)

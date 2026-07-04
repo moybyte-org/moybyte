@@ -1544,6 +1544,7 @@ margin:-26px 0 0 -26px;border-radius:50%;background:#5f6f9f;border:2px solid #c2
 pointer-events:none}.b{width:72px;height:72px;border-radius:50%;display:flex;
 align-items:center;justify-content:center;font:700 26px ui-monospace;color:#fff1e8;
 background:#7e2553;border:2px solid #c2c3c7;margin-left:18px}#bb{background:#29366f}
+#bh{background:#5f574f;width:52px;height:52px;font-size:20px}
 .pr{background:#ffec27;color:#1d2b53}
 /* Debug HUD (#41): toggled with the ` key; lightweight live stream stats. */
 #hud{position:fixed;top:6px;left:6px;z-index:9;display:none;padding:6px 8px;border-radius:5px;
@@ -1553,7 +1554,7 @@ white-space:pre;pointer-events:none}#hud b{color:#ffec27}#hud .w{color:#ff004d}<
 <h1>Moybyte &mdash; device <span id=s>connecting...</span> <small style="color:#5f6f9f">(press ` for stats)</small></h1>
 <canvas id=cv width=320 height=240 tabindex=0></canvas>
 <div id=ctl><div id=joy><div id=th></div></div>
-<div><span class=b id=bb>B</span><span class=b id=ba>A</span></div></div>
+<div><span class=b id=bh>&#9776;</span><span class=b id=bb>B</span><span class=b id=ba>A</span></div></div>
 <script>
 var FPS=30,cv=document.getElementById("cv"),cx=cv.getContext("2d"),sEl=document.getElementById("s");
 cx.imageSmoothingEnabled=false;
@@ -1584,10 +1585,17 @@ console.log("[moybyte] "+(assCart||"?")+" | recv "+(PERF.f/dt).toFixed(1)+" rend
 PERF.f=0;PERF.b=0;PERF.pk=0;PERF.t=now;PERF.lpf=PERF.pf;PERF.mg=0;PERF.md=0;PERF.mj=0;PERF.mt=0;PERF.thr=0;}
 // Audio (host web console): play the server's FINISHED PCM (no JS synth). The device streams
 // no audio (f.audio ""), so this is a no-op there.
-var AUDIO_RATE=11025,actx=null,audioNext=0;
+var AUDIO_RATE=11025,actx=null,audioNext=0,audioBlocked=false;
 function ensureAudio(){if(!actx){var AC=window.AudioContext||window.webkitAudioContext;
 if(AC){try{actx=new AC();}catch(e){actx=null;}}}if(actx&&actx.state==="suspended")actx.resume();}
-function playPCM(b64){if(!actx||!b64)return;var bin=atob(b64),n=bin.length>>1;if(n<=0)return;
+// Audio frames that arrive while the context is blocked by the browser's autoplay
+// policy used to be dropped SILENTLY -- undiagnosable on a phone. Surface the state
+// in the status chip instead, and self-heal once a gesture unlocks the context.
+function playPCM(b64){if(!b64)return;
+if(!actx||actx.state!=="running"){if(!audioBlocked){audioBlocked=true;
+sEl.textContent="tap screen to enable sound";sEl.style.color="#ffa300";}return;}
+if(audioBlocked){audioBlocked=false;ok=false;}
+var bin=atob(b64),n=bin.length>>1;if(n<=0)return;
 var buf=actx.createBuffer(1,n,AUDIO_RATE),ch=buf.getChannelData(0);
 for(var i=0;i<n;i++){var v=bin.charCodeAt(i*2)|(bin.charCodeAt(i*2+1)<<8);if(v>=32768)v-=65536;ch[i]=v/32768;}
 var src=actx.createBufferSource();src.buffer=buf;src.connect(actx.destination);
@@ -1718,7 +1726,7 @@ function pr(e){if(dn)return;dn=true;el.classList.add("pr");send({type:"hold",nam
 function rl(e){if(!dn)return;dn=false;el.classList.remove("pr");send({type:"hold",name:nm,down:false});if(e)e.preventDefault();}
 el.addEventListener("pointerdown",function(e){el.setPointerCapture(e.pointerId);pr(e);});
 el.addEventListener("pointerup",rl);el.addEventListener("pointercancel",rl);el.addEventListener("pointerleave",rl);}
-wb("ba","a");wb("bb","b");
+wb("ba","a");wb("bb","b");wb("bh","home");  // &#9776; = HOME: pauses a cart (#71), exits from pause
 var PAN={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]},
 NAV={a:"left",d:"right",w:"up",s:"down"},SC={Enter:"run",z:"a",x:"b",h:"home"},pH={},nH={};
 function nv(e){var k=e.key.length==1?e.key.toLowerCase():e.key;return NAV[k];}
@@ -1774,6 +1782,8 @@ HUD.el.innerHTML="fps <b>"+HUD.fps.toFixed(1)+"</b>   "+HUD.kb.toFixed(2)+" KB/f
 window.addEventListener("keydown",function(e){if(e.key==="`"||e.key==="~"){HUD.on=!HUD.on;
 HUD.el.style.display=HUD.on?"block":"none";if(HUD.on)drawHud();e.preventDefault();}});
 document.addEventListener("pointerdown",ensureAudio);
+document.addEventListener("touchend",ensureAudio);  // legacy iOS only unlocks here
+document.addEventListener("keydown",ensureAudio);
 // Fetch /assets once over HTTP, then open the WebSocket live channel; pump queued input up on
 // a timer.
 getA().then(function(){connect();setInterval(pump,Math.round(1000/FPS));setInterval(plog,PERF_MS);}).catch(function(){

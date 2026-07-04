@@ -46,6 +46,7 @@ TITLE_TO_FOLDER = {
     "Tap Only Red": "tap_red",
     "Tap Game": "tap_game",
     "Beeper": "beeper",
+    "Letter Blitz": "letter_blitz",
     "WiFi": "wifi",
 }
 

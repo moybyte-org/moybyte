@@ -417,18 +417,21 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
 
     def touch():
         # Pointer (mouse stands in for touch on the host) exposed to touch-driven
-        # carts: (x, y, tapped) this frame, or None when there is no pointer.
-        # `tapped` is the press edge so a cart scores at most one hit per tap. The
+        # carts: (x, y, tapped, held) this frame, or None when there is no pointer.
+        # `tapped` is the press edge so a cart scores at most one hit per tap;
+        # `held` stays True while the finger/button is down, so a cart can track a
+        # DRAG (drawing, sliders) -- the position keeps following the finger. The
         # coords are GAME-canvas space (input.game_pointer, set by handle_pointer
         # from the viewport transform), so a cart in a larger system canvas reads the
         # 320x240 viewport, not the panel (#39). Falls back to the raw pointer.
         gp = getattr(input, "game_pointer", None)
         if gp is not None:
-            return (gp[0], gp[1], bool(gp[2]))
+            held = bool(gp[3]) if len(gp) > 3 else False
+            return (gp[0], gp[1], bool(gp[2]), held)
         p = getattr(input, "pointer", None)
         if p is None:
             return None
-        return (p.x, p.y, bool(p.click))
+        return (p.x, p.y, bool(p.click), bool(getattr(p, "down", False)))
 
     def mouse():
         # TIC-80-shaped 7-tuple (x, y, left, middle, right, scrollx, scrolly)

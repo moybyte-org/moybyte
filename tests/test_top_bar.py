@@ -154,6 +154,8 @@ def test_cart_bar_home_icon_goes_home(tmp_path):
     ws.launcher.sel = 0
     ws.open()
     assert ws.screen == "desktop"
+    ws.cart_paused = True    # the bar hit-tests in the pause menu (#71)
+    ws._dirty = True
     drv.click(*_center(C._HOME_BTN))
     drv.frame(1 / 30)
     assert ws.screen == "launcher"
@@ -168,6 +170,8 @@ def test_cart_bar_edit_icon_opens_editor(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open()
+    ws.cart_paused = True    # the bar hit-tests in the pause menu (#71)
+    ws._dirty = True
     drv.click(*_center(C._MENU_BTN))
     drv.frame(1 / 30)
     assert ws.screen == "menu"
@@ -180,6 +184,8 @@ def test_cart_bar_paint_icon_opens_paint(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open()
+    ws.cart_paused = True    # the bar hit-tests in the pause menu (#71)
+    ws._dirty = True
     drv.click(*_center(C._PAINT_BTN))
     drv.frame(1 / 30)
     assert ws.screen == "menu" and ws.menu_view == "paint"
@@ -192,6 +198,8 @@ def test_cart_bar_map_icon_opens_map(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open()
+    ws.cart_paused = True    # the bar hit-tests in the pause menu (#71)
+    ws._dirty = True
     drv.click(*_center(C._MAP_BTN))
     drv.frame(1 / 30)
     assert ws.screen == "menu" and ws.menu_view == "map"
@@ -204,6 +212,8 @@ def test_cart_bar_blocks_icon_opens_blocks(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open()
+    ws.cart_paused = True    # the bar hit-tests in the pause menu (#71)
+    ws._dirty = True
     drv.click(*_center(C._BLOCKS_BTN))
     drv.frame(1 / 30)
     assert ws.screen == "menu" and ws.menu_view == "blocks"
@@ -264,13 +274,17 @@ def _bar_rows(canvas):
 
 
 def _run_a_cart(tmp_path):
-    """A workstation with a cart open (screen == 'desktop'), one frame drawn."""
+    """A workstation with a cart open and PAUSED, one frame drawn. The bar
+    auto-hides while a cart plays (#71) -- in-cart chrome lives in the pause
+    menu, so bar tests drive the paused state."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open()
     assert ws.screen == "desktop"
+    ws.cart_paused = True
+    ws._dirty = True
     drv.frame(1 / 30)
     return ws, drv
 
@@ -323,6 +337,7 @@ def test_cart_bar_invalidates_on_theme_change(tmp_path):
     drv.frame(1 / 30)
     assert calls[0] == 1, "a theme change must re-render the bar once"
     for _ in range(3):
+        ws._dirty = True                          # force repaints; paused frames are otherwise skipped (#71)
         drv.frame(1 / 30)
     assert calls[0] == 1, "after the re-render the new strip is reused"
 
@@ -342,6 +357,7 @@ def test_cart_bar_invalidates_on_clock_change(tmp_path):
     drv.frame(1 / 30)
     assert calls[0] == 0                          # clock unchanged -> reused
     ws._clock_text = lambda: "99:99"              # the clock "ticked"
+    ws._dirty = True                              # paused screens are static (#71): force a repaint
     drv.frame(1 / 30)
     assert calls[0] == 1, "a clock change must re-render the bar"
 
@@ -358,6 +374,7 @@ def test_cart_bar_blit_strip_used_each_frame(tmp_path):
         return orig(layer, dx, dy)
     ws.canvas.blit_strip = counting
     for _ in range(4):
+        ws._dirty = True                          # paused frames are skipped unless dirty (#71)
         drv.frame(1 / 30)
     assert calls[0] == 4, "the bar should blit its cached strip once per frame"
 
