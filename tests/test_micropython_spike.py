@@ -1339,6 +1339,13 @@ def test_sram_bounce_flush_wired():
     # the timer is a soft feeder; the drain must be the correctness fallback
     assert "PUMP_TIMER_MS" in comp
     assert "self.pump()" in comp.split("def _drain_dma", 1)[1]
+    # hardware round 2 (#66): bands must outlast the 2ms pump timer (24-row
+    # 1.5ms bands starved the SPI -> -30% fps) and the band copy must be the C
+    # memcpy (memoryview slice-assign measured ~1ms+/band = FLUSHBRK setup 2.5ms)
+    assert "\nBOUNCE_ROWS = 48" in comp
+    assert "gfx.copy(self._bnc_bufs[k & 1], 0, front, k * band_b, n)" in comp
+    gfx_c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    assert "MP_ROM_QSTR(MP_QSTR_copy),       MP_ROM_PTR(&moy_gfx_copy_obj)" in gfx_c
 
 
 def test_hitch_logger_wired():
@@ -1348,7 +1355,12 @@ def test_hitch_logger_wired():
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     assert "HITCH_MS = 80" in runtime
     assert "def _diag_hitch(" in runtime
-    assert "_diag_hitch(diag, ws, elapsed, _t_diag, _t_sd, _t_web)" in runtime
+    # v2: the input polls + ws.frame are timed too (the first hardware pass
+    # showed ~188ms hitches with every v1-measured stage at zero).
+    assert "_diag_hitch(diag, ws, elapsed, _t_kbd, _t_inp, _t_ws," in runtime
+    assert "kbd=%d inp=%d ws=%d" in runtime
+    # the diag->SD write (measured 80-120ms) must NOT run at 5s during play
+    assert "20000 if ws.cart is not None else 5000" in runtime
 
 
 def test_cache_geometry_upgraded_in_build():

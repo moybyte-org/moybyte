@@ -505,6 +505,29 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_copy_async_obj, 5, 5,
                                            moy_gfx_copy_async);
 #endif // MOY_GFX_HAS_ASYNC_COPY
 
+// Moybyte #66: synchronous byte copy between buffer-protocol objects at byte
+// offsets -- copy(dst, dst_off, src, src_off, nbytes). The SRAM-bounce flush
+// pump copies 30KB bands PSRAM->internal per call; MicroPython's memoryview
+// slice-assign for that costs ~1ms+ (measured as FLUSHBRK setup=2.5ms for two
+// bands), a plain memcpy ~0.15ms. VM-neutral, no esp-idf dependency.
+static mp_obj_t moy_gfx_copy(size_t n_args, const mp_obj_t *args) {
+    mp_buffer_info_t dst, src;
+    mp_get_buffer_raise(args[0], &dst, MP_BUFFER_WRITE);
+    mp_int_t dst_off = mp_obj_get_int(args[1]);
+    mp_get_buffer_raise(args[2], &src, MP_BUFFER_READ);
+    mp_int_t src_off = mp_obj_get_int(args[3]);
+    mp_int_t nbytes = mp_obj_get_int(args[4]);
+    if (nbytes < 0 || dst_off < 0 || src_off < 0
+        || (size_t)dst_off + (size_t)nbytes > dst.len
+        || (size_t)src_off + (size_t)nbytes > src.len) {
+        mp_raise_ValueError(MP_ERROR_TEXT("copy out of range"));
+    }
+    memcpy((uint8_t *)dst.buf + dst_off,
+           (const uint8_t *)src.buf + src_off, (size_t)nbytes);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_copy_obj, 5, 5, moy_gfx_copy);
+
 // --- native vector primitives (#43 follow-up) -------------------------------
 //
 // circ/circb/line move the per-scanline / per-pixel rasterizers out of the cart's
@@ -773,6 +796,7 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_copy_async), MP_ROM_PTR(&moy_gfx_copy_async_obj) },
     { MP_ROM_QSTR(MP_QSTR_copy_wait), MP_ROM_PTR(&moy_gfx_copy_wait_obj) },
     #endif
+    { MP_ROM_QSTR(MP_QSTR_copy),       MP_ROM_PTR(&moy_gfx_copy_obj) },
     { MP_ROM_QSTR(MP_QSTR_circ),       MP_ROM_PTR(&moy_gfx_circ_obj) },
     { MP_ROM_QSTR(MP_QSTR_circb),      MP_ROM_PTR(&moy_gfx_circb_obj) },
     { MP_ROM_QSTR(MP_QSTR_line),       MP_ROM_PTR(&moy_gfx_line_obj) },

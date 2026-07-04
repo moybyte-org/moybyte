@@ -2299,19 +2299,22 @@ def _diag_perf_sample(diag, ws):
 HITCH_MS = 80
 
 
-def _diag_hitch(diag, ws, elapsed, diag_ms, sd_ms, web_ms):
-    """Log a HITCH line (#66): one frame blew past HITCH_MS. Names the loop-tail
-    costs measured directly (diag sample / diag SD write / web poll) plus the EMA
-    phase split and flush as context. If the named parts don't account for the
-    spike, the pause was inside cart logic/render -- most likely an implicit GC
-    collect (alloc-triggered, invisible to the phase timers)."""
+def _diag_hitch(diag, ws, elapsed, kbd_ms, inp_ms, ws_ms, diag_ms, sd_ms, web_ms):
+    """Log a HITCH line (#66): one frame blew past HITCH_MS. Names every measured
+    loop stage: kbd (I2C keyboard poll), inp (trackball + touch + pointer), ws
+    (input handlers + ws.frame = logic/render/chrome/flush), diag sample, diag SD
+    write, web poll -- plus the EMA phase split as context. v2 added kbd/inp/ws
+    after the first hardware pass showed ~188ms hitches every ~1.3s with all the
+    v1-measured parts at zero: the pause was in a then-unmeasured stage. If the
+    named parts STILL don't sum to the spike, the pause is an implicit GC collect
+    (alloc-triggered, invisible to stage timers)."""
     try:
         b = ws.perf_breakdown()
         s = ws.perf_sample()
         diag.log("HITCH",
-                 "frame=%dms diag=%d sdflush=%d web=%d flush=%.1f "
-                 "ema(logic=%.1f render=%.1f chrome=%.1f)"
-                 % (elapsed, diag_ms, sd_ms, web_ms,
+                 "frame=%dms kbd=%d inp=%d ws=%d diag=%d sdflush=%d web=%d "
+                 "flush=%.1f ema(logic=%.1f render=%.1f chrome=%.1f)"
+                 % (elapsed, kbd_ms, inp_ms, ws_ms, diag_ms, sd_ms, web_ms,
                     (s[2] if s is not None else -1.0), b[0], b[1], b[3]))
     except Exception:
         pass
@@ -3327,11 +3330,17 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             keyboard.poll()
         except Exception:
             pass
+        # HITCH v2 (#66): the first hardware pass showed ~188ms hitches every
+        # ~1.3s with every MEASURED phase normal -- the pause lives in the input
+        # polls (I2C keyboard/touch), the one loop stage that wasn't timed. Time
+        # kbd / (ball+touch) / ws.frame separately so a HITCH line names it.
+        _t_kbd = _ticks_diff(_ticks_ms(), now)
         # Web view (#41): start this frame's recording (no-op unless a browser is live)
         # and inject any queued browser button/pan input BEFORE begin_frame, so a
         # browser press registers a clean one-frame edge like the keyboard's.
         web.begin_frame()
         web.feed_input(now)
+        _t0 = _ticks_ms()
         inp.begin_frame()                       # keyboard edges (still a fallback)
         counts, click = ball.poll()             # trackball
         nx = counts[3] - counts[2]              # right - left (raw pulses)
@@ -3355,12 +3364,14 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             click = True
         pointer.click = click
         pointer.tick(now)                       # auto-hide the idle trackball cursor
+        _t_inp = _ticks_diff(_ticks_ms(), _t0)  # trackball + touch + pointer (HITCH v2)
         # DMA double-buffer (#40, default OFF): point the canvas at the compositor's
         # current BACK buffer before drawing. The previous flush() swapped it, so this
         # frame's cls/rect/spr/map must target the new back, never the buffer that's
         # mid-DMA. No-op (buffer unchanged) in single-buffer mode or on a skipped frame.
         _frames_before = getattr(ws, "_frames_drawn", 0)
         canvas.sync_back()
+        _t0 = _ticks_ms()
         try:
             ws.handle_input()                   # keyboard W/A/S/D etc.
             ws.handle_pointer()                 # cursor hover + click
@@ -3373,6 +3384,7 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             print("Moybyte frame error:", exc)  # print the traceback's reason to serial
             _diag_flush(diag, ws)
             gc.collect()                        # a NO_MEM flush may recover after a collect
+        _t_ws = _ticks_diff(_ticks_ms(), _t0)   # handle_input/pointer + ws.frame (HITCH v2)
         # Web view (#41): publish this frame's recorded draw commands to the browser --
         # but ONLY if the frame actually drew (the redraw-on-change gate #44 may skip a
         # static screen, which would record nothing; keep serving the last full frame).
@@ -3429,12 +3441,16 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             _diag_calib(diag)           # #63: one-shot interpreter cost model (spill probe)
             _diag_gc(diag)              # #63: GC pause / churn (sakura ~14fps profiling)
             _t_diag = _ticks_diff(_ticks_ms(), _tnow)
-        # Diag SD flush (~5s): overwrite /sd/moybyte/diag.log with the current ring.
+        # Diag SD flush: overwrite /sd/moybyte/diag.log with the current ring.
         # Runs between frames on the native single-bus path (with_sd_live), never
         # during a panel flush. Guarded -> a flush failure degrades to a no-op.
+        # CADENCE (#66, hardware-measured): the write costs 80-120ms -- at the old
+        # flat 5s that was a visible stutter DURING PLAY (HITCH sdflush=82-118
+        # confirmed it). 20s while a cart runs (gameplay smoothness wins; crashes
+        # still flush immediately via the error paths), 5s otherwise.
         _t_sd = 0
         if diag is not None and _ticks_diff(_tnow, _diag_flush_at) >= 0:
-            _diag_flush_at = _tnow + 5000
+            _diag_flush_at = _tnow + (20000 if ws.cart is not None else 5000)
             _t0 = _ticks_ms()
             _diag_flush(diag, ws)
             _t_sd = _ticks_diff(_ticks_ms(), _t0)
@@ -3448,13 +3464,15 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         _t_web = _ticks_diff(_ticks_ms(), _t0)
         elapsed = _ticks_diff(_ticks_ms(), now)
         # Hitch logger (#66): any frame past HITCH_MS gets a HITCH line naming the
-        # loop-tail suspects it can see (the 3s diag sample, the 5s diag->SD write,
-        # web.poll) plus the EMA phase context -- the tool for catching the
+        # measured stages -- kbd (I2C keyboard poll), inp (trackball+touch+pointer),
+        # ws (input handlers + frame: logic/render/chrome/flush), the 3s diag
+        # sample, the diag->SD write, web.poll -- the tool for catching the
         # "micro-stutter every couple of seconds" class of bug. A spike with all
-        # the named parts small = the pause was inside cart/render (e.g. an
-        # implicit GC collect), which is itself the answer.
+        # the named parts small = the pause was between stages (e.g. an implicit
+        # GC collect inside an alloc), which is itself the answer.
         if diag is not None and elapsed >= HITCH_MS:
-            _diag_hitch(diag, ws, elapsed, _t_diag, _t_sd, _t_web)
+            _diag_hitch(diag, ws, elapsed, _t_kbd, _t_inp, _t_ws,
+                        _t_diag, _t_sd, _t_web)
         if elapsed < frame_ms:
             time.sleep_ms(frame_ms - elapsed)
 
