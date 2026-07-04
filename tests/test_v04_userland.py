@@ -636,10 +636,11 @@ class _StubInput:
 
 
 class _Pointer:
-    def __init__(self, x=0, y=0, click=False):
+    def __init__(self, x=0, y=0, click=False, down=False):
         self.x = x
         self.y = y
         self.click = click
+        self.down = down
 
 
 def test_mouse_aliases_touch_as_tic80_tuple():
@@ -652,8 +653,11 @@ def test_mouse_aliases_touch_as_tic80_tuple():
     x, y, left, mid, right, sx, sy = api["mouse"]()
     assert (x, y, left) == (40, 70, True)              # touch (x,y,tapped) -> x,y,left
     assert (mid, right, sx, sy) == (False, False, 0, 0)  # no middle/right/scroll
-    # touch() still returns its own 3-tuple shape unchanged.
-    assert api["touch"]() == (40, 70, True)
+    # touch() returns (x, y, tapped, held): `held` mirrors pointer.down so a
+    # cart can follow a DRAG (drawing); a bare tap edge reads held=False.
+    assert api["touch"]() == (40, 70, True, False)
+    inp.pointer = _Pointer(41, 71, click=False, down=True)   # finger dragging
+    assert api["touch"]() == (41, 71, False, True)
 
 
 def test_time_advances_with_cart_clock():
