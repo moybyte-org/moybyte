@@ -1584,10 +1584,17 @@ console.log("[moybyte] "+(assCart||"?")+" | recv "+(PERF.f/dt).toFixed(1)+" rend
 PERF.f=0;PERF.b=0;PERF.pk=0;PERF.t=now;PERF.lpf=PERF.pf;PERF.mg=0;PERF.md=0;PERF.mj=0;PERF.mt=0;PERF.thr=0;}
 // Audio (host web console): play the server's FINISHED PCM (no JS synth). The device streams
 // no audio (f.audio ""), so this is a no-op there.
-var AUDIO_RATE=11025,actx=null,audioNext=0;
+var AUDIO_RATE=11025,actx=null,audioNext=0,audioBlocked=false;
 function ensureAudio(){if(!actx){var AC=window.AudioContext||window.webkitAudioContext;
 if(AC){try{actx=new AC();}catch(e){actx=null;}}}if(actx&&actx.state==="suspended")actx.resume();}
-function playPCM(b64){if(!actx||!b64)return;var bin=atob(b64),n=bin.length>>1;if(n<=0)return;
+// Audio frames that arrive while the context is blocked by the browser's autoplay
+// policy used to be dropped SILENTLY -- undiagnosable on a phone. Surface the state
+// in the status chip instead, and self-heal once a gesture unlocks the context.
+function playPCM(b64){if(!b64)return;
+if(!actx||actx.state!=="running"){if(!audioBlocked){audioBlocked=true;
+sEl.textContent="tap screen to enable sound";sEl.style.color="#ffa300";}return;}
+if(audioBlocked){audioBlocked=false;ok=false;}
+var bin=atob(b64),n=bin.length>>1;if(n<=0)return;
 var buf=actx.createBuffer(1,n,AUDIO_RATE),ch=buf.getChannelData(0);
 for(var i=0;i<n;i++){var v=bin.charCodeAt(i*2)|(bin.charCodeAt(i*2+1)<<8);if(v>=32768)v-=65536;ch[i]=v/32768;}
 var src=actx.createBufferSource();src.buffer=buf;src.connect(actx.destination);
@@ -1774,6 +1781,8 @@ HUD.el.innerHTML="fps <b>"+HUD.fps.toFixed(1)+"</b>   "+HUD.kb.toFixed(2)+" KB/f
 window.addEventListener("keydown",function(e){if(e.key==="`"||e.key==="~"){HUD.on=!HUD.on;
 HUD.el.style.display=HUD.on?"block":"none";if(HUD.on)drawHud();e.preventDefault();}});
 document.addEventListener("pointerdown",ensureAudio);
+document.addEventListener("touchend",ensureAudio);  // legacy iOS only unlocks here
+document.addEventListener("keydown",ensureAudio);
 // Fetch /assets once over HTTP, then open the WebSocket live channel; pump queued input up on
 // a timer.
 getA().then(function(){connect();setInterval(pump,Math.round(1000/FPS));setInterval(plog,PERF_MS);}).catch(function(){
