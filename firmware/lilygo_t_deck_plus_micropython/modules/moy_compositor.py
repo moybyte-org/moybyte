@@ -210,8 +210,17 @@ PSRAM_DIRECT_FLUSH = True
 #
 # TO REVERT: SRAM_BOUNCE_FLUSH = False -> the PSRAM-direct single-transfer path
 # above runs unchanged (with its known contention-band risk).
+#
+# BAND SIZE (hardware round 2, 2026-07-04): 24-row bands transfer in ~1.5ms --
+# FASTER than the 2ms pump timer's period, so the SPI starved between fires and
+# every cart lost ~30% fps to the drain tail. 48-row bands (~3ms each) stay
+# ahead of the timer; the kick pre-queues two (6ms buffered). Costs 2x30720B of
+# internal DMA SRAM (boot mem free ~110KB -> ~50KB: if the web view NO_MEMs,
+# this is the first knob to halve). The band copy itself must be moy_gfx.copy
+# (C memcpy, ~0.15ms): MicroPython's memoryview slice-assign measured ~1ms+ per
+# band (FLUSHBRK setup=2.5ms for two bands).
 SRAM_BOUNCE_FLUSH = True
-BOUNCE_ROWS = 24       # rows per band: 24 -> 10 bands of 15360B on 320x240
+BOUNCE_ROWS = 48       # rows per band: 48 -> 5 bands of 30720B on 320x240
 PUMP_TIMER_MS = 2      # soft-timer pump period; 0 = drain-fallback only
 
 
@@ -812,12 +821,20 @@ class Compositor:
             rows = self._bnc_rows
             rb = self._row_bytes
             w1 = self._w - 1
+            gfx = self._gfx
+            front = self._front      # stable until the post-drain swap
+            band_b = rows * rb
             while k < total and self._dma_done_n >= k - 1:
                 s = src[k]
                 mv = self._bnc_mv[k & 1]
                 n = len(s)
-                if n == len(mv):
-                    mv[:] = s          # C-level copy PSRAM -> internal SRAM
+                if gfx is not None:
+                    # C memcpy PSRAM -> internal SRAM (~0.15ms/band); the
+                    # memoryview slice-assign below measured ~1ms+ per band.
+                    gfx.copy(self._bnc_bufs[k & 1], 0, front, k * band_b, n)
+                    buf = mv if n == len(mv) else mv[:n]
+                elif n == len(mv):
+                    mv[:] = s
                     buf = mv
                 else:                  # short final band (non-multiple heights)
                     buf = mv[:n]
