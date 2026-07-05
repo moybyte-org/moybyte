@@ -15,6 +15,7 @@ firmware/lilygo_t_deck_plus_micropython/.build/
 firmware/lilygo_t_deck_plus_micropython/dist/
 # Shared host/device modules staged from runtime/ by build.sh (canonical lives in runtime/)
 firmware/lilygo_t_deck_plus_micropython/modules/editors.py
+firmware/lilygo_t_deck_plus_micropython/modules/block_editor_ui.py
 firmware/lilygo_t_deck_plus_micropython/modules/audio.py
 firmware/lilygo_t_deck_plus_micropython/modules/console.py
 firmware/lilygo_t_deck_plus_micropython/modules/moy_carts.py
