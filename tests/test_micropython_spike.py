@@ -1876,9 +1876,10 @@ def _load_moy_runtime():
     # moy_runtime does `from editors import ...` and `from console import ...`; the
     # device freezes build-staged copies of runtime/{editors,audio,console}.py as
     # top-level modules. Register those same canonical files so the device module
-    # loads under CPython (editors [+ block_editor_ui #29 Part 2 / map_editor_ui
-    # #32] + audio first -- console imports all of them).
-    for name in ("editors", "block_editor_ui", "map_editor_ui", "audio", "console"):
+    # loads under CPython (editors [+ block_editor_ui #29 Part 2 / map_editor_ui #32
+    # / music_editor_ui #50] + audio first -- console imports all of them).
+    for name in ("editors", "block_editor_ui", "map_editor_ui", "music_editor_ui",
+                 "audio", "console"):
         spec = importlib.util.spec_from_file_location(name, Path("runtime") / (name + ".py"))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
@@ -2293,11 +2294,13 @@ def test_device_audio_wired():
 
 def test_music_editor_wired_into_device_shell():
     # Music/sound editor (#50): the shared MusicEditor core (runtime/editors.py) +
-    # its console wiring (a menu_view, the top-bar switcher, save to sounds.json, the
-    # live preview). It lives in the SAME shared files build.sh freezes onto the
-    # device, so source-level greps prove it's on both ends (host == device).
+    # its UI (runtime/music_editor_ui.py, extracted from console.py) + console's
+    # glue (a menu_view, the top-bar switcher, save to sounds.json). It lives in
+    # the SAME shared files build.sh freezes onto the device, so source-level
+    # greps prove it's on both ends (host == device).
     editors = EDITORS_SRC.read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    music_ui = (Path("runtime") / "music_editor_ui.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
 
@@ -2310,11 +2313,12 @@ def test_music_editor_wired_into_device_shell():
     assert "import audio" not in editors
     assert "from audio import" not in editors
 
-    # The console imports the shared core + the audio factories it injects.
-    assert "MusicEditor" in console
-    assert "from audio import" in console and "MusicTrack" in console and "SFX" in console
+    # The music editor's UI (extracted from console.py) imports the shared core +
+    # the audio factories it injects.
+    assert "MusicEditor" in music_ui
+    assert "from audio import" in music_ui and "MusicTrack" in music_ui and "SFX" in music_ui
     # A new menu sub-view + its open/build path, mirroring map/blocks.
-    assert 'self.musicedit = MusicEditor(bank' in console
+    assert 'self.musicedit = MusicEditor(bank' in music_ui
     assert "def _open_music(self):" in console
     assert 'elif view == "music":' in console
     assert 'if self.menu_view == "music":' in console     # input + frame dispatch
@@ -2323,17 +2327,19 @@ def test_music_editor_wired_into_device_shell():
     assert "self._open_music()" in console
     assert 'self._icon("music"' in console
     assert '"music": 15' in console                        # IconSheet slot for the icon
-    # SAVE persists to sounds.json through the existing shared store.
+    # SAVE persists to sounds.json through the existing shared store (stays on
+    # Workstation, like save_map/save_code -- it uses the shared save_status field).
     assert "def save_sounds(self):" in console
     assert "self.carts_store.save_sounds(self.cart, bank_dict)" in console
     assert "def save_sounds(cart, bank_dict):" in carts
     # Live preview drives the SAME injected AudioEngine the cart uses, and the frame
     # loop ticks the mixer + keeps animating while a preview is up.
-    assert "def _play_music_preview(self):" in console
+    assert "def _play_music_preview(self):" in music_ui
     assert "self.audio.tick(dt)" in console
     # The editor lives in the shared files build.sh freezes onto the device.
     assert 'cp "${REPO_ROOT}/runtime/editors.py" "${SCRIPT_DIR}/modules/editors.py"' in build
     assert 'cp "${REPO_ROOT}/runtime/console.py" "${SCRIPT_DIR}/modules/console.py"' in build
+    assert 'cp "${REPO_ROOT}/runtime/music_editor_ui.py" "${SCRIPT_DIR}/modules/music_editor_ui.py"' in build
 
 
 def test_native_moy_audio_mixer_wired():

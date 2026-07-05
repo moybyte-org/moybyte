@@ -468,7 +468,7 @@ def test_music_editor_opens_edits_previews_and_saves_on_console(tmp_path):
 
     ws._open_music()
     assert ws.screen == "menu" and ws.menu_view == "music"
-    me = ws.musicedit
+    me = ws.music_ui.musicedit
     assert me is not None
     # The editor edits the SAME bank the running cart plays through.
     assert me.bank is ws.audio.engine.bank
@@ -480,20 +480,20 @@ def test_music_editor_opens_edits_previews_and_saves_on_console(tmp_path):
     # Tap NOTE+ on the edit pad -> the current step's pitch rises + bank goes dirty.
     p0 = me.cur_step()[0]
     r = C._mu_pad_rect(1, 0)                  # (col 1, row 0) = NOTE+
-    ws._music_click(r[0] + 2, r[1] + 2)
+    ws.music_ui._music_click(r[0] + 2, r[1] + 2)
     assert me.cur_step()[0] == p0 + 1 and me.dirty
 
     # PLAY starts a preview through the live engine; tapping again STOPS it (toggle).
-    ws._music_click(C._MU_PLAY[0] + 2, C._MU_PLAY[1] + 2)
-    assert ws.music_preview is not None
+    ws.music_ui._music_click(C._MU_PLAY[0] + 2, C._MU_PLAY[1] + 2)
+    assert ws.music_ui.music_preview is not None
     rendered0 = ws.audio.rendered
     ws.frame(1 / 30)                          # a frame ticks the mixer (renders PCM)
     assert ws.audio.rendered > rendered0
-    ws._music_click(C._MU_PLAY[0] + 2, C._MU_PLAY[1] + 2)
-    assert ws.music_preview is None           # toggled off while still sounding
+    ws.music_ui._music_click(C._MU_PLAY[0] + 2, C._MU_PLAY[1] + 2)
+    assert ws.music_ui.music_preview is None           # toggled off while still sounding
 
     # SAVE persists to sounds.json; reload proves it stuck.
-    ws._music_click(C._MU_SAVE[0] + 2, C._MU_SAVE[1] + 2)
+    ws.music_ui._music_click(C._MU_SAVE[0] + 2, C._MU_SAVE[1] + 2)
     assert ws.save_status == "SAVED" and not me.dirty
     from runtime import moy_carts
     reloaded = moy_carts.load(ws.cart["path"])
@@ -501,9 +501,9 @@ def test_music_editor_opens_edits_previews_and_saves_on_console(tmp_path):
     assert audio.AudioBank.from_dict(reloaded["sounds"]).to_dict() == me.bank.to_dict()
 
     # Leaving the editor stops any preview and returns to the cart.
-    ws._music_click(C._MU_PLAY[0] + 2, C._MU_PLAY[1] + 2)   # start a preview again
+    ws.music_ui._music_click(C._MU_PLAY[0] + 2, C._MU_PLAY[1] + 2)   # start a preview again
     ws._leave_menu()
-    assert ws.music_preview is None and ws.screen == "desktop"
+    assert ws.music_ui.music_preview is None and ws.screen == "desktop"
 
 
 def test_music_editor_view_toggle_and_song_path_on_console(tmp_path):
@@ -513,14 +513,14 @@ def test_music_editor_view_toggle_and_song_path_on_console(tmp_path):
     ws.launcher.sel = 0
     ws.open()
     ws._open_music()
-    me = ws.musicedit
+    me = ws.music_ui.musicedit
     # Toggle to SONG view via the view button; a frame draws it.
-    ws._music_click(C._MU_VIEW[0] + 2, C._MU_VIEW[1] + 2)
+    ws.music_ui._music_click(C._MU_VIEW[0] + 2, C._MU_VIEW[1] + 2)
     assert me.view == me.SONG_VIEW
     ws.frame(1 / 30)
     assert len(set(ws.canvas.buf)) > 1
     # SFX+ pad button (song view, row 0 col 1) bumps the slot's SFX id.
     v0 = me.cur_slot_value()
     r = C._mu_pad_rect(1, 0)
-    ws._music_click(r[0] + 2, r[1] + 2)
+    ws.music_ui._music_click(r[0] + 2, r[1] + 2)
     assert me.cur_slot_value() == min(v0 + 1, len(me.bank.sfx) - 1)
