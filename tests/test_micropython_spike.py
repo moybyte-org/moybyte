@@ -1894,6 +1894,15 @@ def _load_moy_runtime():
         spec.loader.exec_module(mod)
         sys.modules[name] = mod
 
+    # moy_runtime now also does `from device_util import ...` -- a device-only leaf
+    # module authored directly in modules/ (NOT staged from runtime/). Register it
+    # from modules/ so the device module execs under CPython.
+    du = importlib.util.spec_from_file_location(
+        "device_util", ROOT / "modules" / "device_util.py")
+    du_mod = importlib.util.module_from_spec(du)
+    du.loader.exec_module(du_mod)
+    sys.modules["device_util"] = du_mod
+
     # moy_runtime now does `from carts_data import CARTS` (build-generated from
     # system_carts/ -- see tools/gen_device_carts.py). Register the same generated
     # data so the device module execs under CPython.
