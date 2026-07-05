@@ -93,6 +93,12 @@ class TDeckKeyboard:
     ERR_RUN_LIMIT = 10
     _err_run = 0
     _raw_last = ()        # last good raw matrix state, held across a capped stall
+    _raw_last_key = 0     # ...and its synthesized key, held for the same reason
+    # #69 input-poller thread: when a poller owns the I2C bus, set_game_mode must
+    # not write I2C from the main thread -- it queues the target here and the
+    # poller applies it between reads (apply_pending_mode).
+    _poller_owned = False
+    _want_game = None
 
     def __init__(self, input_state):
         self.input = input_state
@@ -123,32 +129,48 @@ class TDeckKeyboard:
             print("Moybyte keyboard unavailable:", exc)
 
     def poll(self):
-        if self.raw_mode:
-            buttons = self._read_raw_buttons()
-            self.input.release_all()
-            for button in buttons:
-                self.input.set_button(button, True)
-            return
+        """One synchronous keyboard poll: hardware read + InputState apply. The
+        two halves are split (#69) so the input-poller thread can run the I2C
+        half (_read_stage) off the frame loop while the main thread applies the
+        staged result (_apply) -- poll() is the unthreaded path and behaves
+        exactly as it always did."""
+        self._apply(self._read_stage())
 
+    def _read_stage(self):
+        """The I2C half of a poll: touch the hardware and update kbd-INTERNAL
+        state only (hold latch, raw fallback detection) -- it must NEVER write
+        self.input (that's _apply's job, on the main thread). Returns the staged
+        (buttons_tuple, key) to apply. Runs on the poller thread when threaded,
+        inline from poll() when not."""
+        if self.raw_mode:
+            return self._read_raw_buttons()
         now_ms = _ticks_ms()
         key = self._read_key()
-        self.input.last_key = key
-        # Text mode (a cart's textmode(True) / the code editor): report the key but do
-        # NOT also fire its game-button alias (w/a/s/d/z/x -> up/left/down/right/a/b),
-        # or a typed password/name would also trigger d-pad + A/B shortcut actions
-        # (#38/#42). Clear any latched buttons and stop here -- key()/keyp() still work.
-        if getattr(self.input, "text_mode", False):
-            self._held_buttons = ()
-            self.input.release_all()
-            return
         if key != 0:
             self._held_buttons = self._buttons_for_key(key)
             self._held_until_ms = now_ms + self.KEY_HOLD_MS
         elif _ticks_diff(self._held_until_ms, now_ms) <= 0:
             self._held_buttons = ()
+        return (self._held_buttons, key)
 
+    def _apply(self, staged):
+        """The state half of a poll: write a staged (buttons, key) result into
+        the shared InputState. Cheap (no I2C), always on the main thread, so the
+        console's begin_frame edge math never races the poller's bus reads."""
+        buttons, key = staged
+        self.input.last_key = key
+        # Text mode (a cart's textmode(True) / the code editor): report the key but do
+        # NOT also fire its game-button alias (w/a/s/d/z/x -> up/left/down/right/a/b),
+        # or a typed password/name would also trigger d-pad + A/B shortcut actions
+        # (#38/#42). Clear any latched buttons and stop here -- key()/keyp() still work.
+        # (Raw mode is never active on a text screen; the guard keeps parity with the
+        # old inline poll(), which only text-gated the ASCII path.)
+        if not self.raw_mode and getattr(self.input, "text_mode", False):
+            self._held_buttons = ()
+            self.input.release_all()
+            return
         self.input.release_all()
-        for button in self._held_buttons:
+        for button in buttons:
             self.input.set_button(button, True)
 
     def set_game_mode(self, on):
@@ -160,6 +182,14 @@ class TDeckKeyboard:
         and the hold-latch fallback applies."""
         if not self.available or self._i2c is None:
             return
+        if self._poller_owned:
+            # #69: the input-poller thread owns the I2C bus -- queue the target
+            # and let the poller apply it between reads (a main-thread write here
+            # could collide with a poller read mid-stall). Queuing the RAW target
+            # (not the resolved want) keeps the RAW_GAME_MODE/_raw_unsupported
+            # resolution in one place, at apply time.
+            self._want_game = bool(on)
+            return
         want = bool(on) and self.RAW_GAME_MODE and not self._raw_unsupported
         if want == self.raw_mode:
             return
@@ -167,6 +197,22 @@ class TDeckKeyboard:
             self._enable_raw_mode()      # sends 0x03; sets raw_mode True on success
         else:
             self._disable_raw_mode()     # sends 0x04; back to 1-byte ASCII
+
+    def apply_pending_mode(self):
+        """#69 POLLER THREAD ONLY: apply a set_game_mode target the main thread
+        queued (see above). Runs between reads so mode-switch I2C writes happen
+        on the one thread that owns the bus."""
+        w = self._want_game
+        if w is None:
+            return
+        self._want_game = None
+        want = w and self.RAW_GAME_MODE and not self._raw_unsupported
+        if want == self.raw_mode:
+            return
+        if want:
+            self._enable_raw_mode()
+        else:
+            self._disable_raw_mode()
 
     def _disable_raw_mode(self):
         try:
@@ -225,6 +271,9 @@ class TDeckKeyboard:
             self.raw_mode = False
 
     def _read_raw_buttons(self):
+        """One raw-matrix read -> staged (buttons_tuple, key). Kbd-internal state
+        only (fallback detection, held-stall memory); the caller (_apply, via
+        _read_stage) writes InputState."""
         try:
             data = self._timed_read(5)
             self._err_run = 0
@@ -236,12 +285,12 @@ class TDeckKeyboard:
             # state one frame stale is invisible; a phantom edge is not. Only the
             # consecutive-failure limit ends the session (see _read_error).
             self._read_error(exc, "raw read")
-            return self._raw_last
+            return (self._raw_last, self._raw_last_key)
         if len(data) < 5:
             self.raw_mode = False
-            self.input.last_key = 0
             self._raw_last = ()
-            return ()
+            self._raw_last_key = 0
+            return ((), 0)
         if data[1] == 0 and data[2] == 0 and data[3] == 0 and data[4] == 0:
             key = data[0]
             buttons = self._buttons_for_key(key) if key > 0x20 else ()
@@ -253,8 +302,7 @@ class TDeckKeyboard:
                 self._raw_unsupported = True
                 self._held_buttons = buttons
                 self._held_until_ms = _ticks_ms() + self.KEY_HOLD_MS
-                self.input.last_key = key
-                return buttons
+                return (buttons, key)
 
         d0, d1, _d2, d3, d4 = data[0], data[1], data[2], data[3], data[4]
         buttons = []
@@ -274,21 +322,29 @@ class TDeckKeyboard:
         if (d1 & 0x20) or (d0 & 0x20) or (d3 & 0x08):
             buttons.append("a")
             key = ord("z")
-        if (d1 & 0x10) or (d4 & 0x08):
+        if d1 & 0x10:
             buttons.append("b")
             key = ord("x")
         if _d2 & 0x01:
             buttons.append("run")
             key = ord("r")
+        # q and e are PLAIN LETTERS now (readable via key()/keyp() like the other
+        # decoded letters) -- their old home/stop chrome roles made them stolen
+        # keys (#71). THE one console key in every input mode is BACKSPACE
+        # (matrix [4][3] -> d4 bit 3, the byte the C3 streams per column): it maps
+        # to "home" here exactly like typed 0x08 does on the ASCII path, so pause
+        # is the same physical key whether a cart runs raw, ASCII or text mode.
         if d0 & 0x01:
-            buttons.append("home")
             key = ord("q")
         if d1 & 0x01:
-            buttons.append("stop")
             key = ord("e")
-        self.input.last_key = key
+        if d4 & 0x08:
+            buttons.append("home")
+            key = 0x08
+        buttons = tuple(buttons)
         self._raw_last = buttons     # held across a capped-stall frame (see above)
-        return buttons
+        self._raw_last_key = key
+        return (buttons, key)
 
     def _map_key(self, key):
         for button in self._buttons_for_key(key):
@@ -312,16 +368,154 @@ class TDeckKeyboard:
         elif key == 0x1B:
             return ("stop",)
         elif key == 0x08:
-            # BACKSPACE is the console key (#71 pause / HOME) on the typed-ASCII
-            # path. q/Q and e/E lost their home/stop aliases here: typing carts
-            # (Letter Blitz) read letters via key()/keyp(), and a letter that
-            # ALSO fires console chrome is a stolen letter -- pressing Q paused
-            # the game instead of shooting the Q target. Text-mode screens (code
-            # editor, wifi password) suppress ALL aliases, so backspace still
-            # deletes there; d-pad carts run on the RAW MATRIX path where the
-            # PHYSICAL q key keeps its home/pause role (_read_raw_buttons).
+            # BACKSPACE is THE console key (#71 pause / HOME) -- the same physical
+            # key in every input mode: here on the typed-ASCII path, in
+            # _read_raw_buttons on the raw-matrix path (d4 bit 3), and via the
+            # Workstation's last_key edge for a text-mode cart. q/Q and e/E lost
+            # their old home/stop aliases: typing carts (Letter Blitz) read
+            # letters via key()/keyp(), and a letter that ALSO fires console
+            # chrome is a stolen letter -- pressing Q paused the game instead of
+            # shooting the Q target. Text-mode screens (code editor, wifi
+            # password) suppress ALL aliases, so backspace still deletes there.
             return ("home",)
         return ()
+
+
+class InputPoller:
+    """#69 THE INPUT POLLER THREAD -- the keyboard/touch stall fix.
+
+    THE PROBLEM (root-caused on hardware, #69): the T-Deck keyboard is a
+    bit-banged I2C slave (an ESP32-C3) that CLOCK-STRETCHES its way through a
+    read -- I2CSTAT sized real stalls at 21-60ms on the kbd and up to 41ms on
+    the GT911 sharing the bus. The legacy esp32 machine.I2C `timeout=` only
+    caps a SINGLE stretch EVENT (an exponential HW register) inside a
+    hardcoded 100ms*(1+len) transaction wait, so many sub-cap stretches add up
+    to a 40-60ms "successful" read that used to land INSIDE the frame loop = a
+    felt input/render freeze. (The per-transaction-timeout new i2c_master
+    driver broke the whole bus at boot -- parked DO-NOT-USE in build.sh.)
+
+    THE FIX: this thread OWNS every I2C0 transaction (keyboard reads, GT911
+    reads, deferred set_game_mode writes) and stages results; the frame loop
+    only consumes staged state (consume()/consume_touch -- cheap, I2C-free).
+    A stall then blocks only this thread while the VM keeps rendering -- WHICH
+    REQUIRES the build's I2C GIL-release patch (esp32_i2c_gil_release.patch:
+    machine_i2c.c frees the GIL across the blocking i2c_master_cmd_begin;
+    without it a stall holds the GIL and freezes the loop no matter which
+    thread reads, since MicroPython threads share one GIL on MP_TASK_COREID).
+
+    Staging semantics, per input kind:
+      * raw-matrix buttons are LEVEL state -> latest snapshot wins (tuple swap,
+        atomic under the GIL).
+      * ASCII key bytes are one-shot EVENTS (the C3 reports each press once) ->
+        a small queue delivers each byte for exactly one main frame, inserting
+        a 0-frame between identical bytes so keyp()'s edge detector sees both.
+      * GT911 samples: freshest point this frame, a pending finger-up the frame
+        after, so a sub-frame tap still lands as a clean down->up pair.
+
+    The I2CSTAT counters keep updating from this thread, so stalls stay
+    measurable -- smooth frames + nonzero I2CSTAT maxima is exactly the
+    signature that the isolation works. _poll_once is the whole per-pass body,
+    factored out so host tests drive it without a thread."""
+
+    POLL_MS = 12       # cadence (~80Hz; each pass = 1 kbd read + 1 touch read)
+
+    def __init__(self, keyboard, touch, period_ms=None):
+        self.kbd = keyboard
+        self.touch = touch
+        self.period = self.POLL_MS if period_ms is None else period_ms
+        self.alive = False
+        self._stop = False
+        self._stage = ((), 0, False)   # (buttons, key, is_raw) -- atomic tuple swap
+        self._keyq = []                # one-shot ASCII bytes awaiting delivery
+        self._last_key = 0             # last byte consume() applied (edge gapping)
+        self._tpoint = None            # freshest GT911 point since last consume
+        self._tup = False              # a confirmed finger-up since last consume
+
+    def start(self):
+        """Spawn the thread; True on success. On ANY failure the caller keeps
+        the synchronous path (this must never take input down)."""
+        try:
+            import _thread
+            _thread.start_new_thread(self._run, ())
+            self.alive = True
+            return True
+        except Exception as exc:   # noqa: BLE001 -- no _thread / no RAM -> fallback
+            print("Moybyte input poller unavailable:", exc)
+            return False
+
+    # -- poller thread side ---------------------------------------------
+    def _run(self):
+        self.alive = True
+        while not self._stop:
+            try:
+                self._poll_once()
+            except Exception:   # noqa: BLE001 -- one bad pass must not kill input
+                pass
+            _sleep_ms(self.period)
+        self.alive = False
+
+    def _poll_once(self):
+        """One full bus pass: pending kbd mode switch, one keyboard read, one
+        touch read. ALL I2C lives here (the GIL-release patch makes a stall
+        block only this thread)."""
+        kbd = self.kbd
+        if kbd is not None and kbd.available:
+            kbd.apply_pending_mode()
+            buttons, key = kbd._read_stage()
+            if kbd.raw_mode:
+                self._stage = (buttons, key, True)
+            else:
+                # ASCII bytes are events: queue each (bounded), stage the latch.
+                if key and len(self._keyq) < 16:
+                    self._keyq.append(key)
+                self._stage = (buttons, 0, False)
+        t = self.touch
+        if t is not None and t.available:
+            r = t.read_raw()
+            if r is False:
+                self._tup = True
+            elif r is not None:
+                self._tpoint = r
+
+    # -- main thread side -------------------------------------------------
+    def consume(self):
+        """Apply the staged keyboard state to InputState -- the frame loop's
+        replacement for keyboard.poll(). Cheap and I2C-free."""
+        buttons, key, is_raw = self._stage
+        if not is_raw:
+            key = 0
+            if self._keyq:
+                if self._keyq[0] == self._last_key:
+                    self._last_key = 0     # release frame: give keyp() its edge
+                else:
+                    key = self._keyq.pop(0)
+                    self._last_key = key
+            else:
+                self._last_key = 0
+        self.kbd._apply((buttons, key))
+
+    def consume_touch(self):
+        """One raw GT911 sample per frame (wired as Touch._source): the
+        freshest point first, a pending finger-up the frame after -- a
+        sub-frame tap becomes a clean two-frame down->up."""
+        p = self._tpoint
+        if p is not None:
+            self._tpoint = None
+            return p
+        if self._tup:
+            self._tup = False
+            return False
+        return None
+
+    def stop(self):
+        self._stop = True
+
+
+def _sleep_ms(ms):
+    try:
+        time.sleep_ms(ms)
+    except AttributeError:
+        time.sleep(ms / 1000.0)
 
 
 def _ticks_ms():

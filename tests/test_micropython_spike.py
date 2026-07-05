@@ -396,8 +396,9 @@ def test_micropython_cart_textmode_flips_keyboard_ascii_raw():
     assert "RAW_GAME_MODE" in kb and "_raw_unsupported" in kb
     # In ASCII text mode the keyboard poll reports the key but does NOT latch its
     # game-button alias (w/a/s/d/z/x -> up/left/down/right/a/b), so typing a
-    # password/name can't also trigger d-pad/shortcut actions (#38/#42).
-    assert 'if getattr(self.input, "text_mode", False):' in kb
+    # password/name can't also trigger d-pad/shortcut actions (#38/#42). (The
+    # guard lives in _apply since the #69 poller split raw-gated it for parity.)
+    assert 'if not self.raw_mode and getattr(self.input, "text_mode", False):' in kb
 
 
 def test_micropython_spike_documents_tdeck_reference_paths():
@@ -1243,6 +1244,202 @@ def test_tdeck_keyboard_reads_raw_matrix_for_real_holds():
     keyboard.poll()
     assert not state.held("right")
     assert state.last_key == 0
+
+
+def test_tdeck_raw_backspace_is_the_one_console_key():
+    # THE ONE CONSOLE KEY (#71): BACKSPACE (matrix [4][3] -> d4 bit 3) maps to
+    # "home" on the raw path, mirroring typed 0x08 -- pause is the same physical
+    # key in every input mode. q and e are PLAIN LETTERS now (last_key only, no
+    # home/stop chrome role -- they used to be stolen keys), and b is only the
+    # x key (backspace no longer doubles as B, which collided with home).
+    spec = importlib.util.spec_from_file_location(
+        "moybyte_firmware_input", ROOT / "modules" / "moybyte" / "input.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    def poll_frame(frame):
+        state = module.InputState()
+        keyboard = module.TDeckKeyboard.__new__(module.TDeckKeyboard)
+        keyboard.input = state
+        keyboard.available = True
+        keyboard.raw_mode = True
+        keyboard._i2c = type("F", (), {"readfrom": lambda s, a, n: frame})()
+        keyboard.poll()
+        return state
+
+    st = poll_frame(bytes([0, 0, 0, 0, 0x08]))    # backspace held
+    assert st.held("home")
+    assert st.last_key == 0x08
+
+    st = poll_frame(bytes([0x01, 0, 0, 0, 0]))    # q held: a letter, not a button
+    assert not st._held
+    assert st.last_key == ord("q")
+
+    st = poll_frame(bytes([0, 0x01, 0, 0, 0]))    # e held: a letter, not a button
+    assert not st._held
+    assert st.last_key == ord("e")
+
+    st = poll_frame(bytes([0, 0x10, 0, 0, 0]))    # x held: THE b button
+    assert st.held("b")
+    st = poll_frame(bytes([0, 0, 0, 0, 0x08]))    # backspace is NOT b anymore
+    assert not st.held("b")
+
+
+def _load_fw_input():
+    spec = importlib.util.spec_from_file_location(
+        "moybyte_firmware_input", ROOT / "modules" / "moybyte" / "input.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _bare_kbd(module, state, raw):
+    kbd = module.TDeckKeyboard.__new__(module.TDeckKeyboard)
+    kbd.input = state
+    kbd.available = True
+    kbd.raw_mode = raw
+    kbd._held_buttons = ()
+    kbd._held_until_ms = 0
+    return kbd
+
+
+def test_input_poller_ascii_bytes_deliver_one_frame_each():
+    # #69 poller thread, ASCII staging: key bytes are one-shot EVENTS (the C3
+    # reports each press once), so the poller queues them and consume() delivers
+    # each for exactly one main frame -- with a forced 0-frame between identical
+    # bytes so keyp()'s edge detector fires for both presses. The poller reads
+    # faster than the frame loop consumes; nothing may be lost or doubled.
+    module = _load_fw_input()
+    state = module.InputState()
+    kbd = _bare_kbd(module, state, raw=False)
+    seq = [b"a", b"a", b"\x00"]
+
+    class FakeI2C:
+        def readfrom(self, _a, _n):
+            return seq.pop(0) if seq else b"\x00"
+
+    kbd._i2c = FakeI2C()
+    p = module.InputPoller(kbd, None)
+    p._poll_once()
+    p._poll_once()
+    p._poll_once()                          # two rapid 'a' presses now queued
+    p.consume()
+    assert state.last_key == ord("a")       # frame 1: first press
+    assert state.held("left")               # ...with its latched button alias
+    p.consume()
+    assert state.last_key == 0              # frame 2: forced release gap
+    p.consume()
+    assert state.last_key == ord("a")       # frame 3: second press, not dropped
+    p.consume()
+    assert state.last_key == 0              # queue drained
+
+
+def test_input_poller_raw_holds_state_across_a_stall():
+    # #69 poller thread, raw staging: buttons are LEVEL state (latest snapshot
+    # wins) and a capped I2C stall keeps the last good matrix -- the same
+    # hold-not-release contract the synchronous path has (no phantom edges).
+    module = _load_fw_input()
+    state = module.InputState()
+    kbd = _bare_kbd(module, state, raw=True)
+    seq = [bytes([0x08, 0, 0, 0, 0]), OSError(110), bytes(5)]
+
+    class FlakyI2C:
+        def readfrom(self, _a, _n):
+            r = seq.pop(0)
+            if isinstance(r, Exception):
+                raise r
+            return r
+
+    kbd._i2c = FlakyI2C()
+    p = module.InputPoller(kbd, None)
+    p._poll_once()
+    p.consume()
+    assert state.held("left") and state.last_key == ord("a")
+    p._poll_once()                          # capped stall -> hold, don't release
+    p.consume()
+    assert state.held("left")
+    p._poll_once()                          # clean empty matrix -> real release
+    p.consume()
+    assert not state.held("left")
+
+
+def test_input_poller_touch_subframe_tap_becomes_two_frames():
+    # #69 poller thread, GT911 staging: the poller may see a whole tap (down +
+    # up) between two main frames; consume_touch must deliver the point first
+    # and the finger-up the NEXT frame so the tap edge is never swallowed.
+    module = _load_fw_input()
+
+    class FakeTouch:
+        available = True
+
+        def __init__(self):
+            self.seq = [(100, 50), False]
+
+        def read_raw(self):
+            return self.seq.pop(0) if self.seq else None
+
+    p = module.InputPoller(None, FakeTouch())
+    p._poll_once()
+    p._poll_once()                          # down + up both before one consume
+    assert p.consume_touch() == (100, 50)   # frame 1: the press lands
+    assert p.consume_touch() is False       # frame 2: the release
+    assert p.consume_touch() is None        # steady state after
+
+
+def test_input_poller_defers_mode_switch_to_the_bus_thread():
+    # #69: with the poller owning the bus, set_game_mode from the main thread
+    # must NOT write I2C (a write could collide with a poller read mid-stall) --
+    # it queues the target and the poller applies it between reads.
+    module = _load_fw_input()
+    state = module.InputState()
+    kbd = _bare_kbd(module, state, raw=False)
+    kbd._raw_unsupported = False
+    kbd._poller_owned = True
+    writes = []
+
+    class FakeI2C:
+        def readfrom(self, _a, n):
+            return bytes(n)
+
+        def writeto(self, _a, buf):
+            writes.append(bytes(buf))
+
+    kbd._i2c = FakeI2C()
+    kbd.set_game_mode(True)                 # main thread: queued only
+    assert writes == [] and kbd.raw_mode is False
+    p = module.InputPoller(kbd, None)
+    p._poll_once()                          # poller applies it between reads
+    assert writes[0] == b"\x03" and kbd.raw_mode is True
+
+
+def test_input_poller_wired_with_gil_release_patch():
+    # The poller only isolates a stall when machine.I2C frees the GIL across its
+    # blocking legacy-driver transaction wait -- pin the whole chain: the build
+    # applies the patch by default, the patch wraps the right call, run_desktop
+    # prefers the poller and keeps the synchronous path as a live fallback.
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    kb = (ROOT / "modules" / "moybyte" / "input.py").read_text(encoding="utf-8")
+    build = (ROOT / "build.sh").read_text(encoding="utf-8")
+    patch = (ROOT / "patches" / "esp32_i2c_gil_release.patch").read_text(encoding="utf-8")
+
+    assert "class InputPoller:" in kb
+    assert "def apply_pending_mode(self):" in kb
+    assert "def _poll_once(self):" in kb            # threadless-testable pass body
+    assert "MOY_INPUT_POLLER = True" in runtime      # default ON, revert w/o rebuild
+    assert "poller.consume()" in runtime
+    assert "keyboard.poll()" in runtime              # the synchronous path stays live
+    assert "poller thread died -> synchronous fallback" in runtime
+    assert "touch._source = poller.consume_touch" in runtime
+    assert "keyboard._poller_owned = True" in runtime
+    # the GIL-release patch: applied by default, revertable, wraps cmd_begin
+    assert 'I2C_GIL_RELEASE="${MOYBYTE_I2C_GIL_RELEASE:-1}"' in build
+    assert "esp32_i2c_gil_release.patch" in build
+    assert "Moybyte #69 GIL" in patch
+    assert "MP_THREAD_GIL_EXIT();" in patch
+    assert "i2c_master_cmd_begin(self->port, cmd" in patch
+    assert "MP_THREAD_GIL_ENTER();" in patch
 
 
 def test_tdeck_keyboard_keeps_raw_mode_for_physical_a_bit():

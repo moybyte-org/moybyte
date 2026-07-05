@@ -1839,12 +1839,13 @@ class Workstation:
         self._update = None
         self._draw = None
         self.cart_paused = False      # pause menu (#71): a running cart owns the FULL
-                                      # 320x240 (no bar); HOME (raw-mode q key /
-                                      # BACKSPACE in a text-mode game) pauses
+                                      # 320x240 (no bar); BACKSPACE -- THE one console
+                                      # key in every input mode -- pauses, and again
+                                      # from the pause menu exits to home
         self._bks_prev = 0            # last_key edge tracker for the BACKSPACE pause
-                                      # (text-mode GAME carts type letters, so the
-                                      # home/stop letter aliases are suppressed --
-                                      # backspace is the one console key there)
+                                      # (a text-mode cart types letters, so button
+                                      # aliases are suppressed -- the Workstation
+                                      # edge-detects the console key itself)
         self.msel = 0                 # selected card in the menu
         self.mtop = 0                 # first card scrolled into view (#3)
         self.menu_view = "cards"      # menu sub-view: "cards" | "code" | "paint" | "map"
@@ -4024,34 +4025,43 @@ class Workstation:
         elif self.screen == "update":
             self._update_input(i)
         elif self.screen == "desktop":
-            # BACKSPACE pause for TEXT-MODE GAME carts (#71): a typing game
-            # (Letter Blitz) needs every letter, so text mode suppresses the
-            # q/e->home/stop aliases -- backspace is the one console key there.
-            # Gated to manifest type "game": a text-mode TOOL (the wifi cart's
-            # password field) keeps backspace as DELETE. Edge-detected on
-            # last_key so one press is one pause, not one per frame.
-            _bks = False
-            if (getattr(self.input, "text_mode", False)
-                    and self.cart is not None
-                    and self.cart.get("type") == "game"):
+            # THE ONE CONSOLE KEY (#71): BACKSPACE pauses a running cart, and
+            # BACKSPACE again from the pause menu exits to home -- identical in
+            # every input mode. Raw-matrix and typed-ASCII carts deliver it as
+            # the "home" button (input backends map it); a TEXT-MODE cart
+            # suppresses button aliases, so here we edge-detect last_key
+            # ourselves (one press = one action, not one per frame). While a
+            # text-mode TOOL runs, backspace stays DELETE (the wifi password
+            # field) -- but PAUSED the cart is frozen and sees no bytes, so
+            # backspace is safely the console key for every paused cart.
+            _tk = 0                        # this frame's typed-key press edge
+            _bks = False                   # ...and was it the BACKSPACE console key
+            if getattr(self.input, "text_mode", False) and self.cart is not None:
                 k = self.input.last_key
-                _bks = (k == 0x08 and self._bks_prev != 0x08)
+                _tk = k if (k and k != self._bks_prev) else 0
                 self._bks_prev = k
+                _bks = (_tk == 0x08 and (self.cart_paused
+                                         or self.cart.get("type") == "game"))
             else:
                 self._bks_prev = 0
             if self.cart_paused:
-                if i.pressed("home") or i.pressed("stop"):
-                    self.go_home()             # HOME again from the pause menu exits
-                elif _bks or i.pressed("a") or i.pressed("run"):
-                    self.cart_paused = False   # resume (backspace toggles too)
+                if i.pressed("home") or i.pressed("stop") or _bks:
+                    self.go_home()             # BACKSPACE again from pause exits
+                elif (i.pressed("a") or i.pressed("run")
+                        or _tk in (ord("z"), 0x20, 0x0D, ord("r"))):
+                    # jump back in: A/RUN buttons, or their letters typed in a
+                    # text-mode cart (buttons never fire there)
+                    self.cart_paused = False
                     self._dirty = True
-                elif i.pressed("b"):
+                elif i.pressed("b") or _tk == ord("x"):
                     self._open_menu()
             elif i.pressed("home") or i.pressed("stop") or _bks:
-                self.cart_paused = True        # first HOME/backspace PAUSES (#71)
+                self.cart_paused = True        # first BACKSPACE PAUSES (#71)
                 self._dirty = True
-            elif i.pressed("b"):
-                self._open_menu()
+            # NOTE: no unpaused B handler -- while a cart PLAYS every button
+            # belongs to the game (Star Catcher moves with B; the old
+            # B->editor shortcut hijacked it). The editor is reachable from
+            # the pause menu (B / bar icons) exactly like the other tools.
         elif self.screen == "menu":
             if self.menu_view == "code":
                 self._editor_input()           # keyboard is in text mode here
@@ -4358,8 +4368,8 @@ class Workstation:
             # While a cart PLAYS the bar is hidden (#71) -- the game owns the full
             # 320x240 and every tap belongs to the cart. The unified TOP BAR (HOME,
             # EDIT/CODE, PAINT, MAP, BLOCKS icons -- the TIC-80 one-tap tool
-            # switcher) hit-tests only in the PAUSE menu (HOME/q or the web page's
-            # menu button) and on the crash panel, where it is drawn.
+            # switcher) hit-tests only in the PAUSE menu (BACKSPACE, or the web
+            # page's menu button) and on the crash panel, where it is drawn.
             chrome = self.cart_paused or self.cart_error is not None
             if click and chrome:
                 if _in(px, py, _SYSMENU_BTN):
@@ -5830,8 +5840,8 @@ class Workstation:
             if self.cart_error is not None:
                 self._draw_error_panel()
             # The bar auto-hides while a cart PLAYS (#71): the game owns the full
-            # 320x240. Chrome appears only in the pause menu (HOME/q, or the web
-            # page's menu button) -- and on a crash, so EDIT/CODE stay reachable.
+            # 320x240. Chrome appears only in the pause menu (BACKSPACE, or the
+            # web page's menu button) -- and on a crash, so EDIT/CODE stay reachable.
             if self.cart_paused or self.cart_error is not None:
                 if self.cart_paused:
                     self._draw_pause_dim()          # scanline shade UNDER the chrome
@@ -6080,9 +6090,11 @@ class Workstation:
             cv.rect(0, y, cv.w, 1, NAMES["black"])
 
     def _draw_pause_pill(self):
-        """The pause menu's one line of guidance, over the dimmed frame."""
+        """The pause menu's one line of guidance, over the dimmed frame. Names the
+        two keys of the unified scheme (#71): resume (tap / A) and the one console
+        key (BKSP quits -- same key that paused)."""
         cv = self.canvas
-        msg = "PAUSED - TAP TO PLAY"
+        msg = "PAUSED - TAP TO PLAY - BKSP QUITS"
         w = len(msg) * 8 + 16
         x = (cv.w - w) // 2
         y = cv.h - 34

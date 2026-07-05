@@ -369,6 +369,31 @@ if [ -f "${MPCONFIGPORT_H}" ]; then
   fi
 fi
 
+# Moybyte #69 GIL (DEFAULT ON): release the GIL across machine.I2C's blocking
+# legacy-driver transaction wait (the "TODO proper timeout" i2c_master_cmd_begin).
+# This is what makes the INPUT POLLER THREAD work: a T-Deck keyboard C3
+# clock-stretch stall (40-60ms, I2CSTAT-sized on hardware) then blocks only the
+# poller thread while the VM keeps rendering -- without it the stall holds the
+# GIL and freezes the whole loop no matter which thread reads. Only pure IDF
+# code runs unlocked (the port's SPI/UART blocking waits use the same pattern),
+# so this is safe with or without the poller. MOYBYTE_I2C_GIL_RELEASE=0 reverts
+# for a clean A/B.
+I2C_GIL_RELEASE="${MOYBYTE_I2C_GIL_RELEASE:-1}"
+MACHINE_I2C_C="${UPSTREAM_DIR}/lib/micropython/ports/esp32/machine_i2c.c"
+if [ -f "${MACHINE_I2C_C}" ]; then
+  if [ "${I2C_GIL_RELEASE}" = "1" ]; then
+    if ! grep -q "Moybyte #69 GIL" "${MACHINE_I2C_C}"; then
+      echo "Moybyte: applying I2C GIL-release patch (#69, poller-thread stall isolation)"
+      patch -d "${UPSTREAM_DIR}/lib/micropython" -p1 < "${PATCH_DIR}/esp32_i2c_gil_release.patch"
+    fi
+  else
+    if grep -q "Moybyte #69 GIL" "${MACHINE_I2C_C}"; then
+      echo "Moybyte: reverting I2C GIL-release patch (#69)"
+      patch -R -d "${UPSTREAM_DIR}/lib/micropython" -p1 < "${PATCH_DIR}/esp32_i2c_gil_release.patch"
+    fi
+  fi
+fi
+
 RUNNER=()
 if command -v ionice >/dev/null 2>&1; then
   RUNNER+=(ionice -c 3)

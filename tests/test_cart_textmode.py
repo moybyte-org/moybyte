@@ -129,10 +129,12 @@ def test_game_cart_gets_buttons_and_no_stray_text(tmp_path):
 
 
 def test_backspace_pauses_textmode_game_but_not_tool(tmp_path):
-    # #71 pause key for TYPING GAMES (Letter Blitz): text mode suppresses the
-    # q/e->home/stop letter aliases so every letter types -- BACKSPACE is the
-    # one console key that pauses. Gated to manifest type "game": a text-mode
-    # TOOL (the wifi cart's password field) keeps backspace as DELETE.
+    # THE ONE CONSOLE KEY (#71): BACKSPACE pauses, BACKSPACE again from the pause
+    # menu exits to home, and Z (the A button's letter -- buttons never fire in
+    # text mode) resumes -- the SAME semantics as a raw-mode cart's backspace.
+    # Text mode suppresses every letter alias so a typing game (Letter Blitz)
+    # keeps all 26 letters; a running text-mode TOOL (the wifi cart's password
+    # field) keeps backspace as DELETE.
     import os
     from runtime import host_app
     from runtime import moy_carts
@@ -156,16 +158,24 @@ def test_backspace_pauses_textmode_game_but_not_tool(tmp_path):
     drv.frame(1.0 / 30)
     assert ws.cart_paused is True
     drv.frame(1.0 / 30)                     # release frame (edge reset)
-    drv.type_char(0x08)                     # backspace again resumes
+    drv.type_char(ord("z"))                 # Z resumes (the A letter in text mode)
     drv.frame(1.0 / 30)
     assert ws.cart_paused is False
+    drv.frame(1.0 / 30)                     # release frame
+    drv.type_char(0x08)                     # pause again...
+    drv.frame(1.0 / 30)
+    assert ws.cart_paused is True
+    drv.frame(1.0 / 30)                     # release frame
+    drv.type_char(0x08)                     # ...BACKSPACE from pause EXITS
+    drv.frame(1.0 / 30)
+    assert ws.screen == "launcher"          # the one key backs all the way out
+    assert ws.cart_paused is False
 
-    ws.go_home()
     _open_cart(ws, "TypeTool")
     drv.frame(1.0 / 30)
     assert ws.input.text_mode is True
-    drv.type_char(0x08)                     # a text-mode TOOL keeps backspace
-    drv.frame(1.0 / 30)                     # as a typed key (delete)...
+    drv.type_char(0x08)                     # a RUNNING text-mode TOOL keeps
+    drv.frame(1.0 / 30)                     # backspace as a typed key (delete)...
     assert ws.cart_paused is False          # ...never a pause
     assert 0x08 in ws.ns["edges"]           # the cart itself saw the byte
 
