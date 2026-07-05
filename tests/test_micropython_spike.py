@@ -230,7 +230,7 @@ def test_device_web_view_wired_into_run_desktop_cooperatively():
     # time (off the host-test path: class bodies exec fine, method bodies do not run).
     assert "from device_wifi import autoconnect_wifi" in device_webview
     assert "from device_audio import AUDIO_RATE" in device_webview
-    assert "from moy_runtime import _decode_moyimg, PAL565" in device_webview
+    assert "from device_canvas import _decode_moyimg, PAL565" in device_webview
     assert "skip_flush" in device_webview
     comp = (ROOT / "modules" / "moy_compositor.py").read_text(encoding="utf-8")
     assert "self.skip_flush" in comp            # flush() is a no-op while streaming
@@ -543,6 +543,7 @@ def test_moy_compositor_double_buffer_enabled_and_revertible():
     instant fallback). Grep the device source for the design + the gate + the
     SD-vs-panel-DMA mutual exclusion."""
     comp_src = (ROOT / "modules" / "moy_compositor.py").read_text(encoding="utf-8")
+    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
 
     # The gate is a single named constant, now DEFAULT ON (device-confirmed). It
@@ -589,7 +590,7 @@ def test_moy_compositor_double_buffer_enabled_and_revertible():
     # The canvas follows the back buffer each frame (a stale pointer would draw into
     # the buffer mid-DMA -> tear); run_desktop calls it before drawing.
     assert "def back_buffer(self):" in comp_src
-    assert "def sync_back(self):" in runtime
+    assert "def sync_back(self):" in device_canvas
     assert "canvas.sync_back()" in runtime
 
 
@@ -1088,10 +1089,11 @@ def test_bounce_pump_poked_between_native_draw_ops():
     # compositor grows pump_if_pending() and the big DeviceCanvas verbs poke it
     # right after their native calls (fill/cls/map/batch/layer/text).
     comp = (ROOT / "modules" / "moy_compositor.py").read_text(encoding="utf-8")
+    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
     assert "def pump_if_pending(self):" in comp
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-    assert 'self._pump = getattr(compositor, "pump_if_pending", None)' in runtime
-    assert runtime.count("self._pump()") >= 6      # cls/_fill/map/batch/layer/text
+    assert 'self._pump = getattr(compositor, "pump_if_pending", None)' in device_canvas
+    assert device_canvas.count("self._pump()") >= 6      # cls/_fill/map/batch/layer/text
 
 
 def test_kid_mode_gates_diag_frame_eaters():
@@ -1557,16 +1559,17 @@ def test_tdeck_keyboard_set_game_mode_toggles_raw():
 
 def test_device_canvas_uses_native_moy_gfx():
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
     # The hot drawing ops go through the native moy_gfx kernel (fill/fill_rect/
     # blit565) writing into the shared framebuffer, not the per-pixel Python loop,
     # so complex carts stay fast.
-    assert "self._gfx = compositor.gfx()" in runtime
-    assert "self._gfx.fill(self._buf" in runtime          # cls
-    assert "self._gfx.fill_rect(self._buf" in runtime     # rect / circ
-    assert "self._gfx.blit565(self._buf" in runtime       # spr
+    assert "self._gfx = compositor.gfx()" in device_canvas
+    assert "self._gfx.fill(self._buf" in device_canvas          # cls
+    assert "self._gfx.fill_rect(self._buf" in device_canvas     # rect / circ
+    assert "self._gfx.blit565(self._buf" in device_canvas       # spr
     # Sprites are cached as a pre-scaled RGB565 blit; sheet tiles reuse one Image
     # across frames so the cache is built once, not rebuilt every frame.
-    assert "def _cache_rgb(self, img, scale, flip=0):" in runtime
+    assert "def _cache_rgb(self, img, scale, flip=0):" in device_canvas
     assert "tile_cache" in runtime
     comp = (ROOT / "modules" / "moy_compositor.py").read_text(encoding="utf-8")
     assert "def gfx(self):" in comp
@@ -1578,13 +1581,14 @@ def test_native_blit_map_wired_for_tilemaps():
     # per-tile fallback when moy_gfx is absent. Grep the frozen device sources +
     # the C module like the other firmware tests.
     c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
     assert "moy_gfx_blit_map" in c
     assert "MP_ROM_QSTR(MP_QSTR_blit_map)" in c          # registered in the module dict
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-    assert "def map(self, tilemap, sheet" in runtime     # DeviceCanvas.map
-    assert "self._gfx.blit_map(self._buf" in runtime     # native one-call blit
-    assert "def _sheet_atlas(self, sheet, colorkey):" in runtime  # baked RGB565 atlas
-    assert "def _map_py(self, tilemap, sheet" in runtime  # no-moy_gfx fallback
+    assert "def map(self, tilemap, sheet" in device_canvas     # DeviceCanvas.map
+    assert "self._gfx.blit_map(self._buf" in device_canvas     # native one-call blit
+    assert "def _sheet_atlas(self, sheet, colorkey):" in device_canvas  # baked RGB565 atlas
+    assert "def _map_py(self, tilemap, sheet" in device_canvas  # no-moy_gfx fallback
 
 
 def test_native_vector_primitives_wired():
@@ -1592,14 +1596,15 @@ def test_native_vector_primitives_wired():
     # whole shape (was N per-scanline / per-pixel MP->C calls), with a Python fallback
     # when moy_gfx is absent. Grep the C module + the device canvas wiring.
     c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
     for fn in ("moy_gfx_circ", "moy_gfx_circb", "moy_gfx_line"):
         assert fn in c
     for q in ("MP_QSTR_circ", "MP_QSTR_circb", "MP_QSTR_line"):
         assert "MP_ROM_QSTR(%s)" % q in c                 # registered in the module dict
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-    assert "self._gfx.circ(self._buf" in runtime
-    assert "self._gfx.circb(self._buf" in runtime
-    assert "self._gfx.line(self._buf" in runtime
+    assert "self._gfx.circ(self._buf" in device_canvas
+    assert "self._gfx.circb(self._buf" in device_canvas
+    assert "self._gfx.line(self._buf" in device_canvas
     # blit_window is the scroll-engine (Stage 1) primitive -- a flat per-row window copy
     # from a wide pre-rendered background. Landed in the kernel ahead of the engine that
     # consumes it (see the scroll-engine issue); assert it's registered.
@@ -1615,12 +1620,13 @@ def test_native_text_wired_with_shared_font():
     # glyph blob the host draws from (runtime/font.py, staged as the frozen moy_font
     # by build.sh). framebuf.text (same glyphs, no clip rect) stays the fallback.
     c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
     assert "moy_gfx_text" in c
     assert "MP_ROM_QSTR(MP_QSTR_text)" in c               # registered in the module dict
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-    assert "import moy_font" in runtime                   # shared glyph source
-    assert "self._gfx_text(self._buf" in runtime          # native one-call text
-    assert "self._fb.text(" in runtime                    # framebuf fallback kept
+    assert "import moy_font" in device_canvas                   # shared glyph source
+    assert "self._gfx_text(self._buf" in device_canvas          # native one-call text
+    assert "self._fb.text(" in device_canvas                    # framebuf fallback kept
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
     assert "runtime/font.py" in build and "moy_font.py" in build   # staged at build
 
@@ -1632,11 +1638,12 @@ def test_native_spr_batch_wired_for_sprites():
     # moy_gfx is absent. Grep the frozen device sources + the C module, like the other
     # firmware tests (this file does not execute device code).
     c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
     assert "moy_gfx_blit_batch" in c
     assert "MP_ROM_QSTR(MP_QSTR_blit_batch)" in c        # registered in the module dict
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-    assert "def spr_batch(self, sheet, items" in runtime  # DeviceCanvas.spr_batch
-    assert "self._gfx.blit_batch(self._buf" in runtime    # native one-call blit
+    assert "def spr_batch(self, sheet, items" in device_canvas  # DeviceCanvas.spr_batch
+    assert "self._gfx.blit_batch(self._buf" in device_canvas    # native one-call blit
     assert "def spr_batch(items" in runtime               # make_api spr_batch
     assert '"spr_batch": spr_batch,' in runtime           # exposed in the cart namespace
 
@@ -1648,13 +1655,14 @@ def test_native_blit_indices_wired_for_paint_images():
     # canvases ahead of the paint-image asset flow that will consume it. Grep the C module
     # + the device canvas wiring (this file does not execute device code).
     c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
     assert "moy_gfx_blit_indices" in c
     assert "MP_ROM_QSTR(MP_QSTR_blit_indices)" in c       # registered in the module dict
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-    assert "def blit_indices(self, indices, iw, ih, x, y)" in runtime   # DeviceCanvas method
-    assert "self._gfx.blit_indices(self._buf" in runtime  # native one-call bake
+    assert "def blit_indices(self, indices, iw, ih, x, y)" in device_canvas   # DeviceCanvas method
+    assert "self._gfx.blit_indices(self._buf" in device_canvas  # native one-call bake
     # The batch reuses the map() atlas (one bake, keyed on sheet.gen), not per-sprite.
-    assert "atlas, ntiles = self._sheet_atlas(sheet, colorkey)" in runtime
+    assert "atlas, ntiles = self._sheet_atlas(sheet, colorkey)" in device_canvas
     # Battle City adopts it: the moving sprites go out in one batch (#43).
     battle = (Path("system_carts") / "battle_city.moy"
               / "main.py").read_text(encoding="utf-8")
@@ -1667,6 +1675,7 @@ def test_paint_image_assets_wired_device_and_carts():
     # bake-ONCE-via-blit_indices fast path. Grep the frozen device modules (this file
     # does not execute device code) + the moy_carts store + sakura's conversion.
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
 
@@ -1679,17 +1688,17 @@ def test_paint_image_assets_wired_device_and_carts():
     # The device make_api takes `images` and exposes the image(name) accessor, decoding
     # a .moyimg into an Image via the deflate (zlib) inflate mirror of the host.
     assert "pmem=None, wifi=None, images=None):" in runtime
-    assert "def _decode_moyimg(text):" in runtime
-    assert "deflate.DeflateIO(io.BytesIO(data), deflate.ZLIB).read()" in runtime
+    assert "def _decode_moyimg(text):" in device_canvas
+    assert "deflate.DeflateIO(io.BytesIO(data), deflate.ZLIB).read()" in device_canvas
     assert 'im._paint = True' in runtime                 # tags the bake/ship fast paths
 
     # DeviceCanvas.spr bakes a paint image index->565 ONCE via blit_indices, then blit565s.
-    assert "def _bake_indices(self, img):" in runtime
+    assert "def _bake_indices(self, img):" in device_canvas
     # pal565 is passed as the array('H') BUFFER form, not the tuple -- the native kernel
     # reads it via the buffer protocol (a tuple crashes: object with buffer protocol required).
-    assert "self._gfx.blit_indices(buf, w, h, 0, 0, img.pix, w, h, _PAL565_SW_BUF)" in runtime
-    assert '_PAL565_SW_BUF = array("H", PAL565_SW)' in runtime
-    assert 'getattr(img, "_paint", False) and scale == 1 and flip == 0' in runtime
+    assert "self._gfx.blit_indices(buf, w, h, 0, 0, img.pix, w, h, _PAL565_SW_BUF)" in device_canvas
+    assert '_PAL565_SW_BUF = array("H", PAL565_SW)' in device_canvas
+    assert 'getattr(img, "_paint", False) and scale == 1 and flip == 0' in device_canvas
 
     # The console threads the cart's images into make_api (open + wallpaper compile).
     assert 'self.images = self.cart.get("images") or {}' in console
@@ -1711,6 +1720,7 @@ def test_native_spr_gate_wired():
     # Python frame (~2-5us/call) and delegates Image/span/kwargs calls to the
     # Python closure unchanged -- same API, same pixels, fast by default.
     c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     # C side: the gate type + factory exist and are registered.
     assert "moy_gfx_spr_gate_obj_t" in c
@@ -1722,12 +1732,12 @@ def test_native_spr_gate_wired():
     # blit_batch reads the batch array directly (array mode, no tuples).
     assert "ARRAY MODE (#63 spr_gate)" in c
     # Python side: the shared array('h') queue + begin_batch protocol + wiring.
-    assert 'self._batch_arr = array("h", bytearray(2 * (4 + 4 * 512)))' in runtime
-    assert "def begin_batch(self, sheet, colorkey=-1, scale=1, token=0):" in runtime
-    assert "def make_spr_gate(self, sheet, fallback):" in runtime
+    assert 'self._batch_arr = array("h", bytearray(2 * (4 + 4 * 512)))' in device_canvas
+    assert "def begin_batch(self, sheet, colorkey=-1, scale=1, token=0):" in device_canvas
+    assert "def make_spr_gate(self, sheet, fallback):" in device_canvas
     assert '"spr": _spr_entry,' in runtime
     # flush_batch draws the run via ONE array-mode native call.
-    assert "self._gfx.blit_batch(self._buf, self.w, self.h, a," in runtime
+    assert "self._gfx.blit_batch(self._buf, self.w, self.h, a," in device_canvas
 
 
 def test_perf_bench_mode_is_stamped_not_committed():
@@ -1753,28 +1763,29 @@ def test_async_layer_copy_wired():
     # sync_back so an unconsumed copy never races CPU draws. Sync fallback on any
     # refusal (_async_ok latch), so old firmware / host parity is untouched.
     c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     assert 'MOY_GFX_HAS_ASYNC_COPY' in c
     assert 'esp_async_memcpy_install(&cfg, &moy_gfx_mcp)' in c
     assert 'MP_ROM_QSTR(MP_QSTR_copy_async)' in c
     assert 'MP_ROM_QSTR(MP_QSTR_copy_wait)' in c
-    assert "def _arm_layer_pred(self, layer, cam_x, cam_y):" in runtime
-    assert "def _drain_lcopy(self):" in runtime
-    assert 'hasattr(self._gfx, "copy_async")' in runtime
+    assert "def _arm_layer_pred(self, layer, cam_x, cam_y):" in device_canvas
+    assert "def _drain_lcopy(self):" in device_canvas
+    assert 'hasattr(self._gfx, "copy_async")' in device_canvas
     # kick happens at sync_back (BEFORE the cart's _update -> real overlap)
-    assert "self._gfx.copy_async(self._buf, 0, layer._buf," in runtime
+    assert "self._gfx.copy_async(self._buf, 0, layer._buf," in device_canvas
     # cls drains an unconsumed in-flight copy (screen switches never race the DMA)
-    assert "self._drain_lcopy()" in runtime
+    assert "self._drain_lcopy()" in device_canvas
     # a layer edited this frame forces a miss (no stale-background frames)
-    assert "hit = (not _dirty and pend[0] is layer" in runtime
+    assert "hit = (not _dirty and pend[0] is layer" in device_canvas
     # ... and the kick is TIED to the SRAM-bounce flush (#66): against a panel
     # DMA that reads PSRAM, the PSRAM->PSRAM GDMA copy starves the SPI FIFO into
     # horizontal garbage bands (hardware 2026-07-03) -- it is only safe when the
     # panel reads internal SRAM. One flag must feed both, so turning bounce off
     # turns the layer copy off with it.
-    assert "LAYER_COPY_ASYNC = _SRAM_BOUNCE_FLUSH" in runtime
-    assert "from moy_compositor import SRAM_BOUNCE_FLUSH" in runtime
-    assert "LAYER_COPY_ASYNC and self._gfx is not None" in runtime
+    assert "LAYER_COPY_ASYNC = _SRAM_BOUNCE_FLUSH" in device_canvas
+    assert "from moy_compositor import SRAM_BOUNCE_FLUSH" in device_canvas
+    assert "LAYER_COPY_ASYNC and self._gfx is not None" in device_canvas
 
 
 def test_sram_bounce_flush_wired():
@@ -1808,6 +1819,7 @@ def test_hitch_logger_wired():
     # (diag sample / diag SD write / web poll) -- the tool for the Sakura
     # "micro-stutter every couple of seconds" hunt.
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
     # The _diag_* logging functions (incl. _diag_hitch + HITCH_MS) now live in
     # device_diag.py; run_desktop still CALLS them (assert below stays vs runtime).
     device_diag = (ROOT / "modules" / "device_diag.py").read_text(encoding="utf-8")
@@ -1820,7 +1832,7 @@ def test_hitch_logger_wired():
     # a trip, with the consume site forcing the sync path on one.
     assert "_diag_hitch(diag, ws, comp, elapsed, _t_kbd, _t_inp, _t_sb, _t_ws," in runtime
     assert "pump=%.1f lw=%d raw(logic=%.1f" in device_diag
-    assert "self._lcopy_trips += 1" in runtime
+    assert "self._lcopy_trips += 1" in device_canvas
     console_src = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     assert "def perf_breakdown_raw(self):" in console_src
     gfx_c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
@@ -1876,17 +1888,18 @@ def test_gc_diag_is_low_cadence():
 
 
 def test_scroll_layer_buffer_is_off_gc_heap():
+    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
     # #63 (GC wall): a scroll/paint layer's 150KB RGB565 buffer is the biggest object a
     # cart keeps live, and collect cost scales with the live set (~0.16ms/KB on device).
     # _LayerComp must allocate it OFF the gc heap via moy_alloc (PSRAM, same allocator the
     # compositor framebuffers use) so gc.collect() never marks it -- keeping collect cheap
     # and the heap unfragmented (kid code untouched: fast by default). It must fall back to
     # a gc-heap bytearray on the host / if the allocator is absent, so it never regresses.
-    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    # _LayerComp moved to device_canvas.py (extracted from moy_runtime.py).
     # Grab the _LayerComp.__init__ body.
-    start = runtime.index("class _LayerComp")
-    end = runtime.index("class _Layer:", start)
-    layercomp = runtime[start:end]
+    start = device_canvas.index("class _LayerComp")
+    end = device_canvas.index("class _Layer:", start)
+    layercomp = device_canvas[start:end]
     assert "import moy_alloc" in layercomp
     # SPIRAM|DMA: off-heap in PSRAM (the GC win) AND DMA-eligible so it stays open to the
     # #54 Stage-2 GDMA async window-copy (free on S3 -- all PSRAM is DMA-reachable).
@@ -1897,6 +1910,7 @@ def test_scroll_layer_buffer_is_off_gc_heap():
 
 
 def _load_moy_runtime():
+    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
     # moy_runtime does `from editors import ...` and `from console import ...`; the
     # device freezes build-staged copies of runtime/{editors,audio,console}.py as
     # top-level modules. Register those same canonical files so the device module
@@ -1916,7 +1930,7 @@ def _load_moy_runtime():
     # from runtime/). Register them from modules/ so the device module execs under
     # CPython (device_util first: device_wifi imports it).
     for dname in ("device_util", "device_wifi", "device_input", "device_diag",
-                  "device_webview", "device_audio"):
+                  "device_webview", "device_audio", "device_canvas"):
         ds = importlib.util.spec_from_file_location(
             dname, ROOT / "modules" / (dname + ".py"))
         dmod = importlib.util.module_from_spec(ds)
@@ -2072,19 +2086,23 @@ def test_icon_theme_editor_wired_into_device_shell():
 
 def test_device_draw_api_uses_tic80_names():
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    # The DeviceCanvas draw-method DEFS moved to device_canvas.py; the make_api
+    # namespace bindings ("rect": canvas.rect, ...) stay in moy_runtime.
+    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
 
     # TIC-80 conventions on the device canvas + api: rect/circ filled, rectb/circb
     # outlines, pix for pixels, print for text. The old PICO-8-ish names are gone.
     for name in ("def pix(", "def rect(", "def rectb(", "def circ(", "def circb("):
-        assert name in runtime, name
+        assert name in device_canvas, name
     assert '"rect": canvas.rect, "rectb": canvas.rectb' in runtime
     assert '"circ": canvas.circ, "circb": canvas.circb' in runtime
     assert '"cls": canvas.cls, "pix": canvas.pix' in runtime
     assert '"print": canvas.print' in runtime
     # The canvas no longer exposes the old names (SpriteSheet keeps its own
     # pget/pset for the sheet pixel buffer, which is fine -- check the canvas/api).
-    for gone in ("def rectfill(", "def circfill(", "canvas.pset", "canvas.rectfill",
-                 '"text": canvas.print'):
+    for gone in ("def rectfill(", "def circfill("):
+        assert gone not in device_canvas, gone
+    for gone in ("canvas.pset", "canvas.rectfill", '"text": canvas.print'):
         assert gone not in runtime, gone
 
 
@@ -2600,6 +2618,7 @@ def test_micropython_offline_diag_wiring():
     serial. Grep the frozen device sources for the boot-dump, the with_sd_live flush,
     and the perf-sample wiring (the firmware tests assert structure, not execution)."""
     diag = (ROOT / "modules" / "moybyte_diag.py").read_text(encoding="utf-8")
+    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
     shell = (ROOT / "modules" / "moybyte_shell.py").read_text(encoding="utf-8")
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
@@ -2678,10 +2697,10 @@ def test_micropython_offline_diag_wiring():
     assert ('diag.log("DRAW2", "layer=%.2fms batch=%.2fms '
             'map=%.2fms text=%.2fms fill=%.2fms"') in device_diag
     assert "_diag_draw2(diag, ws)" in runtime
-    assert "self._t_layer_us += _ticks_diff(_ticks_us(), _t0)" in runtime
-    assert "self._t_batch_us += _ticks_diff(_ticks_us(), _t0)" in runtime
-    assert "self._t_map_us += _ticks_diff(_ticks_us(), _t0)" in runtime
-    assert "self._t_text_us += _ticks_diff(_ticks_us(), _t0)" in runtime
+    assert "self._t_layer_us += _ticks_diff(_ticks_us(), _t0)" in device_canvas
+    assert "self._t_batch_us += _ticks_diff(_ticks_us(), _t0)" in device_canvas
+    assert "self._t_map_us += _ticks_diff(_ticks_us(), _t0)" in device_canvas
+    assert "self._t_text_us += _ticks_diff(_ticks_us(), _t0)" in device_canvas
 
     # CHROMEBRK (#66 lever 5): the sub-split of the chrome remainder (bar /
     # composite / cursor / other) so a trim targets the real cost.

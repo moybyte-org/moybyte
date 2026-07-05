@@ -576,14 +576,20 @@ def _load_device_canvas():
         spec.loader.exec_module(mod)
         sys.modules[name] = mod
     # runtime/font.py is staged as the frozen `moy_font` by build.sh (#62); inject
-    # it under that name so moy_runtime's native-text path activates here too.
+    # it under that name so the native-text path activates here too.
     sys.modules["moy_font"] = _host_font
-    sys.path.insert(0, str(ROOT / "tools"))
-    import gen_device_carts
-    sys.modules["carts_data"] = gen_device_carts.as_module(str(ROOT / "system_carts"))
-    spec = importlib.util.spec_from_file_location("moy_runtime", DEV / "moy_runtime.py")
+    # DeviceCanvas + PAL565 + Image + _USE_GFX now live in device_canvas.py
+    # (extracted from moy_runtime.py); it imports the leaf device_util.
+    du = importlib.util.spec_from_file_location("device_util", DEV / "device_util.py")
+    dumod = importlib.util.module_from_spec(du)
+    du.loader.exec_module(dumod)
+    sys.modules["device_util"] = dumod
+    spec = importlib.util.spec_from_file_location("device_canvas", DEV / "device_canvas.py")
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
+    # SpriteSheet lives in editors (the shared core); expose it for the parity
+    # tests that build sheets against the device canvas.
+    m.SpriteSheet = sys.modules["editors"].SpriteSheet
     return m
 
 
