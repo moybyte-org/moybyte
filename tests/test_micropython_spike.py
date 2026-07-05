@@ -350,11 +350,14 @@ def test_micropython_native_sd_shares_display_spi_host():
 def test_micropython_touch_and_idle_cursor():
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     shell = (ROOT / "modules" / "moybyte_shell.py").read_text(encoding="utf-8")
+    # The GT911 Touch driver (+ TrackBall + TOUCH_* consts) now lives in
+    # device_input.py (extracted from moy_runtime.py); run_desktop constructs it.
+    device_input = (ROOT / "modules" / "device_input.py").read_text(encoding="utf-8")
 
     # GT911 touch driver on I2C0 (off the SPI bus), fed into the shared pointer.
-    assert "class Touch:" in runtime
-    assert "0x814E" in runtime and "0x8150" in runtime          # GT911 status/point regs
-    assert "TOUCH_SWAP" in runtime and "TOUCH_FLIP_Y" in runtime
+    assert "class Touch:" in device_input
+    assert "0x814E" in device_input and "0x8150" in device_input  # GT911 status/point regs
+    assert "TOUCH_SWAP" in device_input and "TOUCH_FLIP_Y" in device_input
     assert "touch = Touch(canvas.w, canvas.h" in runtime
     assert "tp = touch.poll()" in runtime
     assert "pointer.place(tp[0], tp[1])" in runtime
@@ -1898,7 +1901,7 @@ def _load_moy_runtime():
     # import ...` -- device-only modules authored directly in modules/ (NOT staged
     # from runtime/). Register them from modules/ so the device module execs under
     # CPython (device_util first: device_wifi imports it).
-    for dname in ("device_util", "device_wifi"):
+    for dname in ("device_util", "device_wifi", "device_input"):
         ds = importlib.util.spec_from_file_location(
             dname, ROOT / "modules" / (dname + ".py"))
         dmod = importlib.util.module_from_spec(ds)
