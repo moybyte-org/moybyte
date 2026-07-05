@@ -1273,6 +1273,23 @@ def _cursor_delta(n):
     return d if n > 0 else -d
 
 
+def _clamp_scroll(top, cur, visible, count):
+    """Nudge a persistent scroll offset `top` the minimum amount needed so `cur`
+    stays inside a window of `visible` rows out of `count` total -- move only when
+    the cursor exits the current window (a stable scrolloff, not a re-center), then
+    clamp to the valid range. Shared by the settings list (_settings_scroll) and
+    the block-editor outline (_blk_reveal) -- verified identical clamp math at both
+    call sites. NOT used by the music editor's _mu_visible_top, which re-centers the
+    window on the cursor every call instead of nudging a persistent offset -- a
+    different (and intentionally different) scrolling feel, not a third copy of
+    this."""
+    if cur < top:
+        top = cur
+    elif cur >= top + visible:
+        top = cur - visible + 1
+    return max(0, min(top, max(0, count - visible)))
+
+
 def _in(px, py, rect):
     x, y, w, h = rect
     return x <= px < x + w and y <= py < y + h
@@ -3961,6 +3978,18 @@ class Workstation:
             cells.append((k, (x0 + k * (cw + gap), top, cw, ch)))
         return cells
 
+    def _leave_or_home(self, leave):
+        """The B-leaves-the-sub-view / HOME-goes-all-the-way-home shape shared by
+        several menu_view input branches (theme/map/music/the default card editor)
+        and the block-editor outline: B calls the view's own `leave` callback (it
+        differs per view -- e.g. `_leave_theme` vs `_leave_menu`), HOME always goes
+        to `go_home`. Verified identical at every call site before extracting."""
+        i = self.input
+        if i.pressed("b"):
+            leave()
+        elif i.pressed("home"):
+            self.go_home()
+
     def handle_input(self):
         i = self.input
         # Redraw-on-change (#44): a button PRESS edge or a typed key this frame may
@@ -4089,10 +4118,7 @@ class Workstation:
                 return                         # paint is pointer/touch-driven
             if self.menu_view == "theme":
                 # EDIT ICONS: pointer/touch-driven like PAINT; B closes back to Settings.
-                if i.pressed("b"):
-                    self._leave_theme()
-                elif i.pressed("home"):
-                    self.go_home()
+                self._leave_or_home(self._leave_theme)
                 return
             if self.menu_view == "map":
                 # The d-pad pans the visible map window (the grid is bigger than the
@@ -4109,10 +4135,7 @@ class Workstation:
                         self._map_pan(1, 0)
                     if i.pressed("a"):          # A cycles the zoom level (#37 follow-up)
                         self._map_cycle_zoom()
-                if i.pressed("b"):
-                    self._leave_menu()
-                elif i.pressed("home"):
-                    self.go_home()
+                self._leave_or_home(self._leave_menu)
                 return
             if self.menu_view == "music":
                 # D-pad navigates the tracker (#50): up/down move the step/slot cursor,
@@ -4135,10 +4158,7 @@ class Workstation:
                             self._stop_music_preview()
                         else:
                             self._play_music_preview()
-                if i.pressed("b"):
-                    self._leave_menu()
-                elif i.pressed("home"):
-                    self.go_home()
+                self._leave_or_home(self._leave_menu)
                 self._dirty = True
                 return
             ed = self.cart.get("edit")
@@ -4158,10 +4178,8 @@ class Workstation:
                 self.set_menu_view("code")
             if i.pressed("run"):
                 self.apply()
-            elif i.pressed("b"):
-                self._leave_menu()
-            elif i.pressed("home"):
-                self.go_home()
+            else:
+                self._leave_or_home(self._leave_menu)
 
     # -- pointer (trackball-as-mouse) ----------------------------------------
 
@@ -4258,11 +4276,7 @@ class Workstation:
         #53 OTA rows (UPDATE FW / CHANNEL / UPDATE ONLINE) push it past one screen."""
         rows = len(self._settings_rows())
         vis = self._settings_visible()
-        if self.set_msel < self.set_top:
-            self.set_top = self.set_msel
-        elif self.set_msel >= self.set_top + vis:
-            self.set_top = self.set_msel - vis + 1
-        self.set_top = max(0, min(self.set_top, max(0, rows - vis)))
+        self.set_top = _clamp_scroll(self.set_top, self.set_msel, vis, rows)
 
     def _settings_row_visible(self, i):
         return self.set_top <= i < self.set_top + self._settings_visible()
@@ -4876,14 +4890,7 @@ class Workstation:
         if be is None:
             return
         nrows = self.block_layout.rows
-        if be.cur < self.blk_top:
-            self.blk_top = be.cur
-        elif be.cur > self.blk_top + nrows - 1:
-            self.blk_top = be.cur - nrows + 1
-        maxtop = len(be.rows) - nrows
-        if maxtop < 0:
-            maxtop = 0
-        self.blk_top = max(0, min(maxtop, self.blk_top))
+        self.blk_top = _clamp_scroll(self.blk_top, be.cur, nrows, len(be.rows))
 
     def _blk_move_cursor(self, d):
         be = self.blocks_ed
@@ -5433,10 +5440,8 @@ class Workstation:
             self._blk_a()
         elif i.pressed("run"):
             self.save_blocks()
-        elif i.pressed("b"):
-            self._leave_menu()
-        elif i.pressed("home"):
-            self.go_home()
+        else:
+            self._leave_or_home(self._leave_menu)
 
     def _blk_left(self):
         be = self.blocks_ed
