@@ -11,6 +11,12 @@ Nothing here should be implemented speculatively; each piece lands when a concre
 `make_system_api` there was derived from a real extraction pass (four chrome surfaces
 pulled into their own UI classes, each recording its `ws.*` dependency profile). The
 *implementation* still waits for its trigger; only the API's shape is now grounded.
+**Enabling foundation, added 2026-07-06:** `docs/shell_layers_refactor_v1.md` is the
+*concrete prerequisite* under both halves below. The further module/cart extraction
+stalled because the remaining surfaces are smeared across `frame`/`handle_input`/
+`handle_pointer` — they need a **Layer boundary** (own draw + input + state) before a
+clean file/cart split is even possible. That refactor is the common foundation: logical
+Layers → { modules, §2 privileged carts, §3 retained-buffer compositor }.
 **Scope of this doc:** two related long-term directions for `runtime/console.py`'s
 shell (`Workstation`) that this session's editor-extraction refactor (block/map/music
 editors → their own classes) turned out to be laying groundwork for, whether or not
