@@ -7,6 +7,10 @@ the seed primitive this builds on).
 **Status:** EXPLORATION / OPEN — this is a target to design toward, not a committed plan.
 Nothing here should be implemented speculatively; each piece lands when a concrete need
 (a system surface migration, or actual One/P4 hardware in hand) makes it worth doing.
+**One exception, added 2026-07-05:** §2.2 is now *evidence, not exploration* — the draft
+`make_system_api` there was derived from a real extraction pass (four chrome surfaces
+pulled into their own UI classes, each recording its `ws.*` dependency profile). The
+*implementation* still waits for its trigger; only the API's shape is now grounded.
 **Scope of this doc:** two related long-term directions for `runtime/console.py`'s
 shell (`Workstation`) that this session's editor-extraction refactor (block/map/music
 editors → their own classes) turned out to be laying groundwork for, whether or not
@@ -77,7 +81,60 @@ everything else here), likely built as a second `make_system_api(ws)` alongside 
 existing `make_api`, returning the small number of privileged callables a system cart's
 `_update`/`_draw` would use.
 
-### 2.2 Crash isolation and lifecycle
+### 2.2 The draft `make_system_api` — derived from the 2026-07-05 extraction pass
+
+This section is **evidence, not proposal.** §2.1 says the privileged API "can't be
+designed in the abstract — the extraction reveals it." The 2026-07-05 refactor did that
+extraction: it pulled four chrome surfaces out of `Workstation` into self-contained UI
+classes (`perf_hud.py`, `update_ui.py`, `system_menu_ui.py`, `achievements_ui.py`), and
+each class's docstring records a **"Dependency profile (the facade lens)"** — the exact
+`ws.*` it touches, split into *shared / non-privileged* vs *privileged*. The list below
+is those profiles consolidated (plus a pre-extraction profiling of the surfaces still in
+`Workstation`), so the draft `make_system_api` is now grounded in what the code provably
+needs rather than guessed.
+
+**Per-surface privileged surface** (what each system surface touches that a kid cart must
+*never* reach — everything else it uses is the shared, sandbox-equivalent drawing/input/
+persistence layer, which is NOT part of `make_system_api`):
+
+| Surface | Module (this session) | Privileged verbs it forces |
+|---|---|---|
+| Perf HUD | `perf_hud.py` (stage 5) | **none** — read-only frame-timing (`perf_snapshot`) |
+| OTA update | `update_ui.py` (stage 6) | **`ota`** — the updater handle (check/download/install/reset) |
+| System menu | `system_menu_ui.py` (stage 7) | **`reboot`**, **`del_cart`**, **`restart_cart`**, **`open_settings`**, open-about |
+| Achievements/eggs | `achievements_ui.py` (stage 8) | **none** — shared `ws.ach` + persistence via the shared `_with_sd` |
+| Settings | *(still in Workstation)* | **`web_view.toggle`**, **`set_diag_live`**, **`set_font_scale`**, **`persist_system`** + delegates into ota/theme/achievements (**the aggregator — its API is the union of the others**) |
+| Theme | *(still in Workstation)* | **`wallpaper.select`/`cycle`**, **`icons.edit`/`save`** (repaints system chrome) |
+| Launcher | *(still in Workstation)* | store-read + **`open(cart)`**, **`new_cart`**, **`dup_cart`** |
+| Top bar | *(still in Workstation)* | mostly reads state; dispatches taps to the verbs above |
+
+**Consolidated draft `make_system_api(ws)`** (the deduped union, grouped by concern):
+
+- **Navigation / lifecycle:** `go_home()`, `open_settings()`, `open(cart)`, screen transitions
+- **Cart store:** `new_cart()`, `dup_cart()`, `del_cart()`, `restart_cart()`/`apply()`
+- **System:** `reboot()`, `ota` (the OTA updater handle), `set_diag_live()`, `set_font_scale()`, `persist_system()`
+- **Theme:** `wallpaper.select()`/`cycle()`, `icons.edit()`/`save()`
+- **Web view:** `web_view.toggle()`
+- **Read-only but system-only:** `perf_snapshot()`, wifi status / credential read
+
+**Findings that fall out of the evidence** (each one shapes §2.3–§2.4):
+
+1. **The privileged surface is small, and it concentrates.** The *dangerous* verbs
+   (`reboot`, `del_cart`) live almost entirely in the **system menu**; the *breadth*
+   lives almost entirely in **Settings** (the aggregator). Everything between is thin.
+2. **Two surfaces need ZERO privileged verbs** (Perf HUD, Achievements) — they're pure
+   read-only / shared-state consumers. So "system surface" ≠ "needs the system
+   namespace": if those ever became carts, they'd run under the *kid* `make_api` plus a
+   read-only snapshot, no privilege at all. A useful narrowing of §2.1's scope.
+3. **Settings' API = the union of the others**, confirmed from its call list — which is
+   independent evidence for §2.4's "migrate Settings last" ordering: its facade isn't
+   fully knowable until the surfaces it aggregates expose theirs.
+4. **The shared primitives are the line.** `canvas`/`pointer`/draw-helpers/`mark_dirty`/
+   `_with_sd` persistence are NOT in `make_system_api` — they're the sandbox-equivalent a
+   kid cart already gets. `make_system_api` is *only* the ~15 privileged callables above,
+   which keeps the trust boundary (§2.1) auditable and small.
+
+### 2.3 Crash isolation and lifecycle
 
 #55 already names this correctly: *the bar/launcher must never go down because a system
 cart threw*. The existing cart-crash path (`Workstation`'s `cart_error` capture, the
@@ -89,7 +146,7 @@ cannot itself fail. This is a small, well-scoped addition, not a new subsystem �
 has to exist before any system surface migrates, or a bug in a "themeable Settings cart"
 could brick the whole console with no way back in except a firmware reflash.
 
-### 2.3 Migration order (only when there's concrete need — not now)
+### 2.4 Migration order (only when there's concrete need — not now)
 
 If/when this gets picked up, the natural order (least to most privileged, matching the
 existing extraction pattern):
