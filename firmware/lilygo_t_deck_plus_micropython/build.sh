@@ -347,7 +347,13 @@ fi
 # new driver passes timeout as the PER-TRANSACTION cap, turning a stall into a
 # <=5ms ETIMEDOUT that the input layer absorbs as one held-state frame.
 # MOYBYTE_I2C_NEW_DRIVER=1 to apply; default reverts (clean A/B, same toggle
-# pattern as the early-board-init patch). UNVERIFIED on T-Deck hardware.
+# pattern as the early-board-init patch).
+# 2026-07-05 T-DECK A/B RESULT: **BREAKS THE I2C BUS AT BOOT** -- keyboard
+# ENODEV + GT911 not found (both peripherals NACK the new driver's probe-first
+# transfer; internal pullups ARE enabled in the port's init, cause TBD --
+# possibly the i2c_master_probe-before-every-transfer pattern or a legacy/new
+# driver mix elsewhere in the image). DO NOT USE until root-caused; the #69
+# path forward is the core-1 input poller / C3 keyboard firmware fix instead.
 I2C_NEW_DRIVER="${MOYBYTE_I2C_NEW_DRIVER:-0}"
 if [ -f "${MPCONFIGPORT_H}" ]; then
   if [ "${I2C_NEW_DRIVER}" = "1" ]; then
