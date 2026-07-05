@@ -1887,7 +1887,8 @@ def _load_moy_runtime():
     # / music_editor_ui #50 / perf_hud #43/#44] + audio first -- console imports
     # all of them).
     for name in ("editors", "block_editor_ui", "map_editor_ui", "music_editor_ui",
-                 "perf_hud", "update_ui", "system_menu_ui", "audio", "console"):
+                 "perf_hud", "update_ui", "system_menu_ui", "achievements_ui",
+                 "audio", "console"):
         spec = importlib.util.spec_from_file_location(name, Path("runtime") / (name + ".py"))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
@@ -2351,6 +2352,7 @@ def test_music_editor_wired_into_device_shell():
     assert 'cp "${REPO_ROOT}/runtime/perf_hud.py" "${SCRIPT_DIR}/modules/perf_hud.py"' in build
     assert 'cp "${REPO_ROOT}/runtime/update_ui.py" "${SCRIPT_DIR}/modules/update_ui.py"' in build
     assert 'cp "${REPO_ROOT}/runtime/system_menu_ui.py" "${SCRIPT_DIR}/modules/system_menu_ui.py"' in build
+    assert 'cp "${REPO_ROOT}/runtime/achievements_ui.py" "${SCRIPT_DIR}/modules/achievements_ui.py"' in build
 
 
 def test_native_moy_audio_mixer_wired():
