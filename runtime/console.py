@@ -127,6 +127,16 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.system_menu_ui import SystemMenuUI
 
+# The Easter-egg subsystem + achievement/egg drawing (#21, extracted from this
+# file): the 3 hidden eggs + their state + _draw_egg/_draw_confetti/
+# _draw_achievements. The achievement CORE (ach, show_achievements,
+# load_achievements/_save_achievements/_achievement_unlocked) stays on Workstation
+# (tested ws.ach.* + device ws.load_achievements()). Same bare-or-package fallback.
+try:
+    from achievements_ui import AchievementsUI
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.achievements_ui import AchievementsUI
+
 # The block vocabulary/compiler (#29). Imported under whichever name it's known by:
 # bare `blocks` on the device (frozen top-level) and on the host once host_app has
 # aliased it, or `runtime.blocks` when a test loads console/moy_runtime directly
@@ -1849,14 +1859,14 @@ class Workstation:
         # the unlock beep. The Workstation calls ach.note(event) at the flow points
         # below (open/run/save_*/editor opens) and draws ach.toast each frame.
         self.ach = Achievements()
-        # Easter-egg trigger state. Kept tiny + reset on screen changes so a stray
-        # sequence never carries between contexts. None of these touch cart data.
-        self._konami_pos = 0          # how far into the Konami sequence we are (desktop)
-        self._clock_taps = 0          # clock taps on the status strip (Time Traveler)
-        self._secret_taps = 0         # SETTINGS-title taps (Secret Finder door)
-        self.egg_msg = None           # (line, glyph) of the live Easter-egg popup, or None
-        self.egg_until = 0            # _ticks_ms the egg popup hides at
-        self._confetti_until = 0      # _ticks_ms the Konami confetti effect ends
+        # The Easter-egg subsystem + achievement/egg drawing (#21, extracted from
+        # this class -- see achievements_ui.py): the 3 hidden eggs + their trigger/
+        # popup state (_konami_pos/_clock_taps/_secret_taps/egg_msg/egg_until/
+        # _confetti_until) + _draw_egg/_draw_confetti/_draw_achievements. The
+        # achievement core (ach/show_achievements/load_achievements/...) stays here.
+        # Egg trigger state is reset on screen changes (go_home/settings/desktop tap)
+        # via self.ach_ui.* so a stray sequence never carries between contexts.
+        self.ach_ui = AchievementsUI(self, NAMES, ACHIEVEMENTS)
         self.show_achievements = False  # the locked/unlocked list overlay (Settings entry)
         # Top-bar system menu (#52): the ≡ dropdown. A reusable Popup owns its own
         # open/selected state; the SYSTEM group (Settings/About/Reboot) is always
@@ -2154,76 +2164,11 @@ class Workstation:
             except Exception:  # noqa: BLE001
                 pass
 
-    # -- hidden Easter eggs (#21) --------------------------------------------
-    #
-    # Three playful, SAFE, reversible secrets, each gated behind a non-obvious
-    # trigger and each awarding a hidden achievement. None touch persistent cart
-    # data; the only state is a short on-canvas popup (egg_msg/egg_until) and a
-    # confetti timer, all of which expire on their own. Triggers reset on screen
-    # changes so a half-entered sequence never carries between contexts.
-    #
-    #   1. Konami code on the home desktop (up up down down left right left right
-    #      b a) -> confetti rain + "OH! YOU FOUND ME!" -> "Secret Coder".
-    #   2. Tapping the desktop clock 7 times -> a time-travel wink -> "Time
-    #      Traveler".
-    #   3. Tapping the SETTINGS title 5 times (the hidden "secret door") -> "knock
-    #      knock... oh! you found me!" -> "Secret Finder".
-
-    _KONAMI = ("up", "up", "down", "down", "left", "right", "left", "right", "b", "a")
-    # Easter-egg hit regions (#21) are now derived from self.layout (clock_hit() /
-    # set_title_hit) so they track the responsive status strip / Settings panel.
-    _CLOCK_TAP_GOAL = 7
-    _SECRET_TAP_GOAL = 5
-
-    def _show_egg(self, line, glyph="smile", ms=2600):
-        """Pop a non-blocking Easter-egg banner (drawn over the current screen for
-        `ms`). Purely cosmetic + self-expiring."""
-        self.egg_msg = (line, glyph)
-        self.egg_until = _ticks_ms() + ms
-
-    def _konami_step(self, name):
-        """Advance the desktop Konami sequence on a button press; the full code in
-        order fires the confetti egg + awards "Secret Coder". A wrong key restarts
-        (but still counts if it's the sequence's first key, so a fresh start works)."""
-        seq = self._KONAMI
-        if name == seq[self._konami_pos]:
-            self._konami_pos += 1
-        else:
-            # restart; the press may itself be the (new) first step
-            self._konami_pos = 1 if name == seq[0] else 0
-        if self._konami_pos >= len(seq):
-            self._konami_pos = 0
-            self._confetti_until = _ticks_ms() + 3000
-            self._show_egg("OH! YOU FOUND ME!", "smile", ms=3000)
-            self.ach.award("konami")
-
-    def _tap_clock(self):
-        """Count a clock tap; the _CLOCK_TAP_GOAL'th in a row fires the time egg +
-        awards "Time Traveler". Any other desktop tap resets the run."""
-        self._clock_taps += 1
-        if self._clock_taps >= self._CLOCK_TAP_GOAL:
-            self._clock_taps = 0
-            self._show_egg("TICK TOCK... TIME TRAVELER!", "smile")
-            self.ach.award("clock_tinker")
-
-    def _tap_secret_door(self):
-        """Count a SETTINGS-title tap (the hidden door); the _SECRET_TAP_GOAL'th
-        knocks it open -> "Secret Finder"."""
-        self._secret_taps += 1
-        if self._secret_taps >= self._SECRET_TAP_GOAL:
-            self._secret_taps = 0
-            self._show_egg("KNOCK KNOCK... OH! YOU FOUND ME!", "key", ms=3000)
-            self.ach.award("secret_door")
-
-    def _egg_active(self, now=None):
-        if self.egg_msg is None:
-            return False
-        if now is None:
-            now = _ticks_ms()
-        if _ticks_diff(self.egg_until, now) <= 0:
-            self.egg_msg = None
-            return False
-        return True
+    # -- hidden Easter eggs (#21) now live on self.ach_ui (achievements_ui.py,
+    # AchievementsUI): the 3 eggs + their trigger/popup state + _show_egg/
+    # _egg_active + _draw_egg/_draw_confetti/_draw_achievements. The achievement
+    # core above (load_achievements/_save_achievements/_achievement_unlocked +
+    # self.ach) stays here.
 
     def select_wallpaper(self, wp_id, persist=True):
         """Choose the desktop backdrop. `wp_id` is a wallpaper cart slug or a
@@ -2421,7 +2366,7 @@ class Workstation:
         self.set_top = 0               # reset the scroll window (#53)
         self.screen = "settings"
         self.show_achievements = False
-        self._secret_taps = 0              # fresh secret-door run each visit (#21)
+        self.ach_ui._secret_taps = 0              # fresh secret-door run each visit (#21)
         self._set_text_mode(False)
 
     def _exit_settings(self):
@@ -3142,8 +3087,8 @@ class Workstation:
         self.cart_error = None
         self.save_status = None
         self.show_achievements = False
-        self._konami_pos = 0          # fresh Konami run on the home desktop (#21)
-        self._clock_taps = 0
+        self.ach_ui._konami_pos = 0          # fresh Konami run on the home desktop (#21)
+        self.ach_ui._clock_taps = 0
 
     # -- cart management (SD) ------------------------------------------------
     #
@@ -3401,9 +3346,9 @@ class Workstation:
             # Konami Easter egg (#21): watch every button press on the home desktop
             # for the secret sequence (the nav below still runs normally -- the egg
             # is a passive observer, so it never blocks the launcher).
-            for _b in self._KONAMI:
+            for _b in self.ach_ui._KONAMI:
                 if i.pressed(_b):
-                    self._konami_step(_b)
+                    self.ach_ui._konami_step(_b)
                     break
             # Grid nav (#28): left/right step a column, up/down a whole row.
             if i.pressed("left"):
@@ -3576,9 +3521,9 @@ class Workstation:
             # tap on the clock never falls through to a button.
             lay = self.layout
             if _in(px, py, lay.clock_hit()):
-                self._tap_clock()
+                self.ach_ui._tap_clock()
                 return
-            self._clock_taps = 0                # any other desktop tap resets the run
+            self.ach_ui._clock_taps = 0                # any other desktop tap resets the run
             if _in(px, py, lay.sysmenu_btn):    # ≡ -> system menu (Settings/About/Reboot live here now, #52)
                 self.toggle_sysmenu()
                 return
@@ -3644,7 +3589,7 @@ class Workstation:
         lay = self.layout
         if _in(px, py, lay.set_ach):           # trophy: open the achievements view (#21)
             self.show_achievements = True
-            self._secret_taps = 0
+            self.ach_ui._secret_taps = 0
             return
         if _in(px, py, lay.set_back):
             self._exit_settings()
@@ -3652,9 +3597,9 @@ class Workstation:
         # Secret-door Easter egg (#21): tapping the SETTINGS title (not a button)
         # _SECRET_TAP_GOAL times knocks the hidden door open. Reset on any other tap.
         if _in(px, py, lay.set_title_hit):
-            self._tap_secret_door()
+            self.ach_ui._tap_secret_door()
             return
-        self._secret_taps = 0
+        self.ach_ui._secret_taps = 0
         slot = self._dock_slot_at(px, py)
         if slot is not None:
             self._activate_dock(slot)
@@ -4119,9 +4064,9 @@ class Workstation:
                 "install", "done", "checking", "downloading"):
             return True
         # Transient overlays redraw while they're up.
-        if self._confetti_until and _ticks_diff(self._confetti_until, _ticks_ms()) > 0:
+        if self.ach_ui._confetti_until and _ticks_diff(self.ach_ui._confetti_until, _ticks_ms()) > 0:
             return True
-        if self._egg_active():
+        if self.ach_ui._egg_active():
             return True
         if self.ach.toast_active():
             return True
@@ -4320,12 +4265,12 @@ class Workstation:
         # unlock celebration / secret popup is always visible and never disturbs the
         # screen underneath (it's drawn last, then expires on its own). These are
         # SYSTEM chrome -> drawn on the system canvas (over the composited viewport).
-        if self._confetti_until and _ticks_diff(self._confetti_until, _ticks_ms()) > 0:
-            self._draw_confetti()
+        if self.ach_ui._confetti_until and _ticks_diff(self.ach_ui._confetti_until, _ticks_ms()) > 0:
+            self.ach_ui._draw_confetti()
         if self.show_achievements:
-            self._draw_achievements()
-        if self._egg_active():
-            self._draw_egg()
+            self.ach_ui._draw_achievements()
+        if self.ach_ui._egg_active():
+            self.ach_ui._draw_egg()
         if self.ach.toast_active():
             self._draw_toast()
         # System menu dropdown + About modal (#52): drawn on TOP of every screen (after
@@ -4865,74 +4810,9 @@ class Workstation:
         self._glyph(glyph, (x + 6, y + 16, 16, 16), NAMES["yellow"], cv)
         cv.print(title[:24], x + 28, y + 20, NAMES["white"], 2)
 
-    def _draw_egg(self):
-        """A non-blocking Easter-egg popup: a friendly character glyph + the secret
-        message, centered low so it reads as a surprise without covering the action.
-        Self-expiring (egg_until); cosmetic only -- touches no cart data."""
-        cv = self.sys_canvas
-        line, glyph = self.egg_msg
-        w = min(cv.w - 16, 24 + len(line) * 8 + 8)
-        x = (cv.w - w) // 2
-        y = 150
-        h = 30
-        cv.rect(x, y, w, h, NAMES["black"])
-        cv.rectb(x, y, w, h, NAMES["pink"])
-        self._glyph(glyph, (x + 4, y + 7, 16, 16), NAMES["peach"], cv)
-        cv.print(line, x + 24, y + 11, NAMES["white"], 1)
-
-    # _draw_sysmenu / _draw_about / _firmware_version_text (the ≡ dropdown +
-    # ABOUT modal drawing) now live on self.menu_ui (system_menu_ui.py,
-    # SystemMenuUI), along with _sysmenu_items + the _menu_* action callbacks.
-    # toggle_sysmenu() + the sysmenu Popup + _about flag + reboot_hook stay here.
-
-    def _draw_confetti(self):
-        """The Konami egg's celebration: a scatter of colored spark glyphs that
-        drift down with the elapsed time. Cheap + deterministic (no RNG state),
-        purely cosmetic, gone when _confetti_until passes."""
-        cv = self.sys_canvas
-        t = (_ticks_diff(_ticks_ms(), 0) // 80) % 240
-        cols = (NAMES["red"], NAMES["yellow"], NAMES["green"], NAMES["blue"],
-                NAMES["pink"], NAMES["orange"])
-        for k in range(18):
-            sx = (k * 53 + 7) % (cv.w - 6)
-            sy = (k * 37 + t + (k * k)) % (cv.h - 6)
-            self._glyph("spark", (sx, sy, 8, 8), cols[k % len(cols)], cv)
-
-    def _draw_achievements(self):
-        """The achievements view (#21): a full panel listing every achievement,
-        unlocked ones with their name + glyph in bright color, locked ones greyed
-        with a lock + "???" (so a hidden secret stays a surprise). A two-column grid
-        so all ~11 fit at 320x240. Tap anywhere to dismiss (see _settings_pointer).
-        Indexed API + the shared glyph vocabulary only (host == device)."""
-        cv = self.sys_canvas
-        cv.rect(6, 14, 308, 212, NAMES["dark_blue"])
-        cv.rectb(6, 14, 308, 212, NAMES["yellow"])
-        self._glyph("trophy", (12, 16, 14, 14), NAMES["yellow"], cv)
-        cv.print("ACHIEVEMENTS", 30, 18, NAMES["white"], 2)
-        cv.print("%d / %d" % (self.ach.count(), len(ACHIEVEMENTS)), 240, 20,
-                 NAMES["yellow"], 1)
-        col_w = 150
-        row_h = 18
-        x0 = 12
-        y0 = 36
-        per_col = 6
-        for k in range(len(ACHIEVEMENTS)):
-            ach_id, title, glyph, hidden = ACHIEVEMENTS[k]
-            col = k // per_col
-            row = k % per_col
-            x = x0 + col * col_w
-            y = y0 + row * row_h
-            got = self.ach.has(ach_id)
-            if got:
-                self._glyph(glyph, (x, y, 14, 14), NAMES["yellow"], cv)
-                cv.print(title[:16], x + 16, y + 3, NAMES["white"], 1)
-            else:
-                self._glyph("lock", (x, y, 14, 14), NAMES["dark_grey"], cv)
-                # A hidden (Easter-egg) achievement stays "???"; a normal locked one
-                # shows its name greyed so a kid knows what's there to earn.
-                label = "???" if hidden else title[:16]
-                cv.print(label, x + 16, y + 3, NAMES["light_grey"], 1)
-        cv.print("TAP TO CLOSE", 110, 210, NAMES["light_grey"], 1)
+    # _draw_egg / _draw_confetti / _draw_achievements (the egg popup, Konami
+    # confetti, and achievements-list overlay) now live on self.ach_ui
+    # (achievements_ui.py, AchievementsUI). frame() calls self.ach_ui._draw_*.
 
     def _btn(self, label, rect, fill, cv=None):
         # Defaults to the GAME canvas (paint/map editors -- a 320x240 viewport); the

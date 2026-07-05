@@ -151,6 +151,9 @@ fi
 #   system_menu_ui.py -- the ≡ dropdown / system menu's UI (#52: SystemMenuUI,
 #                    extracted from console.py); console.py does `from
 #                    system_menu_ui import SystemMenuUI`
+#   achievements_ui.py -- the Easter-egg subsystem + achievement/egg drawing (#21:
+#                    AchievementsUI, extracted from console.py); console.py does
+#                    `from achievements_ui import AchievementsUI`
 #   audio.py      -- sound model + AudioEngine synth/mixer (#16)
 #   console.py    -- launcher + desktop + cards/code/paint UI + Pointer
 #   moy_carts.py  -- the .moy store (scan/load/save/create/duplicate/delete)
@@ -168,6 +171,7 @@ cp "${REPO_ROOT}/runtime/music_editor_ui.py" "${SCRIPT_DIR}/modules/music_editor
 cp "${REPO_ROOT}/runtime/perf_hud.py" "${SCRIPT_DIR}/modules/perf_hud.py"
 cp "${REPO_ROOT}/runtime/update_ui.py" "${SCRIPT_DIR}/modules/update_ui.py"
 cp "${REPO_ROOT}/runtime/system_menu_ui.py" "${SCRIPT_DIR}/modules/system_menu_ui.py"
+cp "${REPO_ROOT}/runtime/achievements_ui.py" "${SCRIPT_DIR}/modules/achievements_ui.py"
 cp "${REPO_ROOT}/runtime/console.py" "${SCRIPT_DIR}/modules/console.py"
 cp "${REPO_ROOT}/runtime/moy_carts.py" "${SCRIPT_DIR}/modules/moy_carts.py"
 cp "${REPO_ROOT}/runtime/blocks.py" "${SCRIPT_DIR}/modules/blocks.py"

@@ -175,10 +175,10 @@ def test_konami_egg_fires_and_awards(tmp_path):
     ws = host_app.build_workstation(carts)
     drv = host_app.ConsoleDriver(ws)
     assert ws.screen == "launcher"
-    for b in C.Workstation._KONAMI:
+    for b in ws.ach_ui._KONAMI:
         _press(drv, b)
     assert ws.ach.has("konami")              # hidden "Secret Coder" awarded
-    assert ws.egg_msg is not None            # "OH! YOU FOUND ME!" popup is up
+    assert ws.ach_ui.egg_msg is not None            # "OH! YOU FOUND ME!" popup is up
     drv.frame(1 / 30)                        # confetti + egg + toast all render
     assert len(set(drv.rgb888())) > 4
     # Persisted across reboot.
@@ -192,7 +192,7 @@ def test_konami_wrong_key_restarts(tmp_path):
     _press(drv, "up")
     _press(drv, "up")
     _press(drv, "left")                      # breaks the sequence
-    assert ws._konami_pos == 0
+    assert ws.ach_ui._konami_pos == 0
     assert not ws.ach.has("konami")
 
 
@@ -201,20 +201,20 @@ def test_clock_tap_egg(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     # The egg hit regions now come from the responsive layout (#39); at the 320x240
     # baseline they are exactly the old _CLOCK_HIT / _SET_TITLE_HIT.
-    for _ in range(ws._CLOCK_TAP_GOAL):
+    for _ in range(ws.ach_ui._CLOCK_TAP_GOAL):
         _tap(drv, ws.layout.clock_hit())
     assert ws.ach.has("clock_tinker")        # hidden "Time Traveler"
-    assert ws.egg_msg is not None
+    assert ws.ach_ui.egg_msg is not None
 
 
 def test_secret_door_egg_in_settings(tmp_path):
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
-    for _ in range(ws._SECRET_TAP_GOAL):
+    for _ in range(ws.ach_ui._SECRET_TAP_GOAL):
         _tap(drv, ws.layout.set_title_hit)
     assert ws.ach.has("secret_door")         # hidden "Secret Finder"
-    assert ws.egg_msg is not None
+    assert ws.ach_ui.egg_msg is not None
 
 
 def test_eggs_do_not_block_normal_nav(tmp_path):
@@ -224,5 +224,5 @@ def test_eggs_do_not_block_normal_nav(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     start = ws.launcher.sel
     _press(drv, "right")                     # first key is "up", so this resets to 0
-    assert ws._konami_pos == 0
+    assert ws.ach_ui._konami_pos == 0
     assert ws.launcher.sel != start or len(ws.launcher.items) == 1
