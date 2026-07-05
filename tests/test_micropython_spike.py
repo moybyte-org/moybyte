@@ -1876,9 +1876,9 @@ def _load_moy_runtime():
     # moy_runtime does `from editors import ...` and `from console import ...`; the
     # device freezes build-staged copies of runtime/{editors,audio,console}.py as
     # top-level modules. Register those same canonical files so the device module
-    # loads under CPython (editors [+ block_editor_ui, #29 Part 2] + audio first --
-    # console imports all three).
-    for name in ("editors", "block_editor_ui", "audio", "console"):
+    # loads under CPython (editors [+ block_editor_ui #29 Part 2 / map_editor_ui
+    # #32] + audio first -- console imports all of them).
+    for name in ("editors", "block_editor_ui", "map_editor_ui", "audio", "console"):
         spec = importlib.util.spec_from_file_location(name, Path("runtime") / (name + ".py"))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)

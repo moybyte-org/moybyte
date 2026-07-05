@@ -824,19 +824,19 @@ def test_host_console_map_open_place_and_render(tmp_path):
     ws._dirty = True
     drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2)      # open the MAP overlay button
     drv.frame(1 / 30)
-    assert ws.menu_view == "map" and ws.mapedit is not None
+    assert ws.menu_view == "map" and ws.map_ui.mapedit is not None
     # pick the 2nd palette tile (id == map_page + 1) ...
     px = C._TP_X0 + 1 * C._TP_CELL
     py = C._TP_Y0
     drv.click(px + 2, py + 2)
     drv.frame(1 / 30)
-    assert ws.mapedit.n == ws.map_page + 1
+    assert ws.map_ui.mapedit.n == ws.map_ui.map_page + 1
     # ... then stamp it onto the top-left visible map cell and confirm mget reflects it
     drv.click(C._MV_X0 + 2, C._MV_Y0 + 2)
     drv.frame(1 / 30)
-    cx = ws.mapedit.cam_x
-    cy = ws.mapedit.cam_y
-    assert ws.tilemap.mget(cx, cy) == ws.mapedit.n
+    cx = ws.map_ui.mapedit.cam_x
+    cy = ws.map_ui.mapedit.cam_y
+    assert ws.tilemap.mget(cx, cy) == ws.map_ui.mapedit.n
     assert len(set(drv.rgb888())) > 1                    # the map view rendered
 
 
@@ -849,20 +849,20 @@ def test_host_console_map_erase_and_pan(tmp_path):
     ws.cart_paused = True    # bar icons hit-test in the pause menu (#71)
     ws._dirty = True
     drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2); drv.frame(1 / 30)
-    ws.mapedit.n = 3
+    ws.map_ui.mapedit.n = 3
     drv.click(C._MV_X0 + 2, C._MV_Y0 + 2); drv.frame(1 / 30)   # stamp tile 3 at (0,0)
     assert ws.tilemap.mget(0, 0) == 3
     drv.click(C._MAP_ERASE[0] + 2, C._MAP_ERASE[1] + 2); drv.frame(1 / 30)  # ERASE on
-    assert ws.map_erase
+    assert ws.map_ui.map_erase
     drv.click(C._MV_X0 + 2, C._MV_Y0 + 2); drv.frame(1 / 30)   # now a tap erases
     assert ws.tilemap.mget(0, 0) == TileMap.EMPTY
     # Zoom IN so the map is bigger than the view, then pan right (the fit-both default
     # shows the whole map -> the camera is pinned at 0 with nothing to scroll).
-    ws.map_zoom = len(C._MV_ZOOMS) - 1
-    x0m, y0m, cell, cols, rows = ws._mv_metrics()
+    ws.map_ui.map_zoom = len(C._MV_ZOOMS) - 1
+    x0m, y0m, cell, cols, rows = ws.map_ui._mv_metrics()
     assert ws.tilemap.w > cols                                 # room to pan at this zoom
     drv.click(C._PAN_RT[0] + 2, C._PAN_RT[1] + 2); drv.frame(1 / 30)        # pan right
-    assert ws.mapedit.cam_x == 1
+    assert ws.map_ui.mapedit.cam_x == 1
 
 
 def test_host_console_map_save_roundtrips(tmp_path):
@@ -876,7 +876,7 @@ def test_host_console_map_save_roundtrips(tmp_path):
     ws.cart_paused = True    # bar icons hit-test in the pause menu (#71)
     ws._dirty = True
     drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2); drv.frame(1 / 30)
-    ws.mapedit.n = 6
+    ws.map_ui.mapedit.n = 6
     drv.click(C._MV_X0 + 2, C._MV_Y0 + 2); drv.frame(1 / 30)   # stamp tile 6 at (0,0)
     drv.click(C._MAP_SAVE[0] + 2, C._MAP_SAVE[1] + 2); drv.frame(1 / 30)    # SAVE
     assert ws.save_status == "SAVED"
@@ -924,7 +924,7 @@ def _open_cart_map(tmp_path, cart_name):
     ws.launcher.sel = sel
     ws.open()
     ws._open_map()
-    assert ws.menu_view == "map" and ws.mapedit is not None
+    assert ws.menu_view == "map" and ws.map_ui.mapedit is not None
     return C, ws, host_app.ConsoleDriver(ws)
 
 
@@ -936,19 +936,19 @@ def test_map_default_zoom_fits_whole_shipped_maps(tmp_path):
     for name, w, h in (("battle_city", 15, 15), ("platformer", 20, 13)):
         _C, ws, _drv = _open_cart_map(tmp_path / name, name)
         assert (ws.tilemap.w, ws.tilemap.h) == (w, h)
-        assert ws.map_zoom == 0                          # opens at the fit-both default
-        assert (ws.mapedit.cam_x, ws.mapedit.cam_y) == (0, 0)   # cam pinned to origin
-        x0, y0, cell, cols, rows = ws._mv_metrics()
+        assert ws.map_ui.map_zoom == 0                          # opens at the fit-both default
+        assert (ws.map_ui.mapedit.cam_x, ws.map_ui.mapedit.cam_y) == (0, 0)   # cam pinned to origin
+        x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
         assert cols >= w and rows >= h                   # the whole map is on screen
         # Every map cell maps to a pixel inside the visible map-view rectangle, so no
         # cell is off-screen at the default zoom.
-        area = ws._mv_area()
+        area = ws.map_ui._mv_area()
         for cy in (0, h - 1):
             for cx in (0, w - 1):
                 px = x0 + cx * cell + cell // 2
                 py = y0 + cy * cell + cell // 2
                 assert C._in(px, py, area)
-                assert ws._map_cell_at(px, py) == (cx, cy)
+                assert ws.map_ui._map_cell_at(px, py) == (cx, cy)
 
 
 def test_map_cycle_zoom_increases_cell_and_shrinks_view(tmp_path):
@@ -958,12 +958,12 @@ def test_map_cycle_zoom_increases_cell_and_shrinks_view(tmp_path):
     _C, ws, drv = _open_cart_map(tmp_path, "battle_city")
     seen = []
     for _ in range(len(C._MV_ZOOMS)):
-        x0, y0, cell, cols, rows = ws._mv_metrics()
-        seen.append((ws.map_zoom, cell, cols * rows))
+        x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
+        seen.append((ws.map_ui.map_zoom, cell, cols * rows))
         drv.click(C._MAP_ZOOM[0] + 2, C._MAP_ZOOM[1] + 2)   # tap ZOOM -> next level
         drv.frame(1 / 30)
     # Back to the default after a full cycle.
-    assert ws.map_zoom == 0
+    assert ws.map_ui.map_zoom == 0
     # Ascending cell size, descending visible-cell count across the levels.
     for k in range(1, len(seen)):
         assert seen[k][1] > seen[k - 1][1]               # bigger cells
@@ -975,18 +975,18 @@ def test_map_tap_and_sky_hit_right_cell_after_zoom(tmp_path):
     # under the pointer -- hit-testing follows the live cell size.
     from runtime import console as C
     _C, ws, drv = _open_cart_map(tmp_path, "battle_city")
-    ws.map_zoom = 2                                       # a zoomed-IN level
-    ws.mapedit.cam_x = ws.mapedit.cam_y = 0
-    x0, y0, cell, cols, rows = ws._mv_metrics()
+    ws.map_ui.map_zoom = 2                                       # a zoomed-IN level
+    ws.map_ui.mapedit.cam_x = ws.map_ui.mapedit.cam_y = 0
+    x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
     # Tap cell (2, 1) with a real brush tile -> exactly that cell gets the tile.
-    ws.mapedit.n = 5
+    ws.map_ui.mapedit.n = 5
     px = x0 + 2 * cell + cell // 2
     py = y0 + 1 * cell + cell // 2
     drv.touch(px, py); drv.frame(1 / 30); drv.touch_up(); drv.frame(1 / 30)
     assert ws.tilemap.mget(2, 1) == 5
     # Pick SKY then tap the same cell -> it clears to EMPTY (the right cell, at zoom).
     drv.click(C._TP_SKY[0] + 2, C._TP_SKY[1] + 2); drv.frame(1 / 30)
-    assert ws.mapedit.n < 0
+    assert ws.map_ui.mapedit.n < 0
     drv.touch(px, py); drv.frame(1 / 30); drv.touch_up(); drv.frame(1 / 30)
     assert ws.tilemap.mget(2, 1) == ws.tilemap.EMPTY
 
@@ -996,18 +996,18 @@ def test_map_pan_works_zoomed_in_and_clamps(tmp_path):
     # clamped so the camera never scrolls the map off the window.
     from runtime import console as C
     _C, ws, drv = _open_cart_map(tmp_path, "battle_city")
-    ws.map_zoom = len(C._MV_ZOOMS) - 1                   # most zoomed-in
-    x0, y0, cell, cols, rows = ws._mv_metrics()
+    ws.map_ui.map_zoom = len(C._MV_ZOOMS) - 1                   # most zoomed-in
+    x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
     assert ws.tilemap.w > cols and ws.tilemap.h > rows   # room to pan
     drv.click(C._PAN_RT[0] + 2, C._PAN_RT[1] + 2); drv.frame(1 / 30)
-    assert ws.mapedit.cam_x == 1
+    assert ws.map_ui.mapedit.cam_x == 1
     drv.click(C._PAN_DN[0] + 2, C._PAN_DN[1] + 2); drv.frame(1 / 30)
-    assert ws.mapedit.cam_y == 1
+    assert ws.map_ui.mapedit.cam_y == 1
     # Pan hard right past the edge: clamps so the last column stays visible.
     for _ in range(40):
         drv.click(C._PAN_RT[0] + 2, C._PAN_RT[1] + 2); drv.frame(1 / 30)
-    assert ws.mapedit.cam_x == ws.tilemap.w - cols       # clamped to the right edge
-    assert ws.mapedit.cam_x + cols == ws.tilemap.w
+    assert ws.map_ui.mapedit.cam_x == ws.tilemap.w - cols       # clamped to the right edge
+    assert ws.map_ui.mapedit.cam_x + cols == ws.tilemap.w
 
 
 # -- TIC-80 draw verbs cluster 2 (#11): clip / camera / spr-flip / pal / palt -
