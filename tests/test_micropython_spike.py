@@ -135,14 +135,17 @@ def test_console_settings_has_firmware_update_screen():
     # (shown only when an updater is injected and OTA-capable) drives a confirm/progress
     # screen. The host injects no updater, so the row never appears there.
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    # The update SCREEN itself now lives in update_ui.py (UpdateUI, extracted from
+    # console.py); the queries/config + dispatch stay in console.py.
+    update_ui = (Path("runtime") / "update_ui.py").read_text(encoding="utf-8")
 
     assert "self.updater = None" in console
     assert "def _update_available" in console
     assert "def _settings_rows" in console
     assert '"UPDATE FW"' in console
-    assert "def open_update" in console
-    assert "def _pump_update" in console
-    assert "def _draw_update" in console
+    assert "def open_update" in update_ui
+    assert "def _pump_update" in update_ui
+    assert "def _draw_update" in update_ui
     assert 'self.screen == "update"' in console
     assert "def _activate_settings_action" in console
 
@@ -264,17 +267,21 @@ def test_ota_online_download_streams_to_sd_with_checksum():
 def test_ota_online_wired_and_console_has_online_flow():
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    # The online update SCREEN (checking/download/install phases) lives in
+    # update_ui.py (UpdateUI); the _online_update_available query + row label
+    # stay in console.py.
+    update_ui = (Path("runtime") / "update_ui.py").read_text(encoding="utf-8")
 
     # run_desktop hands the wifi service to the updater for online updates.
     assert "ws.updater.set_wifi(ws.wifi, go_online=lambda: autoconnect_wifi(ws.wifi))" in runtime
     # The shared console grows the UPDATE ONLINE row + the checking/download phases.
     assert "def _online_update_available" in console
     assert '"UPDATE ONLINE"' in console
-    assert "def open_update_online" in console
-    assert "def _start_download" in console
-    assert 'ph == "checking"' in console or 'phase == "checking"' in console
-    assert 'self._upd_phase = "downloading"' in console
-    assert 'self._upd_phase = "confirm"' in console   # online hands off to the local install
+    assert "def open_update_online" in update_ui
+    assert "def _start_download" in update_ui
+    assert 'ph == "checking"' in update_ui or 'phase == "checking"' in update_ui
+    assert 'self._upd_phase = "downloading"' in update_ui
+    assert 'self._upd_phase = "confirm"' in update_ui   # online hands off to the local install
 
 
 def test_micropython_spike_uses_tdeck_native_panel_geometry():
@@ -1880,7 +1887,7 @@ def _load_moy_runtime():
     # / music_editor_ui #50 / perf_hud #43/#44] + audio first -- console imports
     # all of them).
     for name in ("editors", "block_editor_ui", "map_editor_ui", "music_editor_ui",
-                 "perf_hud", "audio", "console"):
+                 "perf_hud", "update_ui", "audio", "console"):
         spec = importlib.util.spec_from_file_location(name, Path("runtime") / (name + ".py"))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
@@ -2342,6 +2349,7 @@ def test_music_editor_wired_into_device_shell():
     assert 'cp "${REPO_ROOT}/runtime/console.py" "${SCRIPT_DIR}/modules/console.py"' in build
     assert 'cp "${REPO_ROOT}/runtime/music_editor_ui.py" "${SCRIPT_DIR}/modules/music_editor_ui.py"' in build
     assert 'cp "${REPO_ROOT}/runtime/perf_hud.py" "${SCRIPT_DIR}/modules/perf_hud.py"' in build
+    assert 'cp "${REPO_ROOT}/runtime/update_ui.py" "${SCRIPT_DIR}/modules/update_ui.py"' in build
 
 
 def test_native_moy_audio_mixer_wired():
@@ -2680,7 +2688,9 @@ def test_ota_two_channel_wired():
     console = Path("runtime/console.py").read_text(encoding="utf-8")
     assert '("ota_channel", "CHANNEL", "channel")' in console
     assert "def _cycle_channel(self, d):" in console
-    assert "u.offers(manifest, ch)" in console
+    # u.offers(...) is inside _pump_update, which now lives in update_ui.py (UpdateUI).
+    update_ui = Path("runtime/update_ui.py").read_text(encoding="utf-8")
+    assert "u.offers(manifest, ch)" in update_ui
     # build.sh stamps the channel into a generated _ota_build module + dist manifest.
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
     assert "MOYBYTE_OTA_CHANNEL" in build
