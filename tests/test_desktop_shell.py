@@ -453,6 +453,24 @@ def test_ota_channel_toggle_persists(tmp_path):
     assert ws2.system.get("ota_channel") == "unstable"
 
 
+def test_update_screen_animates_across_frames(tmp_path):
+    # Regression (extraction stage 6): Workstation._animating() read self._upd_phase
+    # after that state moved onto self.update_ui, so the SECOND frame on the update
+    # screen crashed with AttributeError -- frame 1 short-circuits on _dirty, so the
+    # bug only surfaces once _needs_redraw actually calls _animating(). The golden
+    # single-frame renders + the rest of the suite never drove the update screen
+    # past its first frame (and never with screen == "update"), which is why it slipped.
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.update_ui.open_update()                 # no updater on host -> screen = "update"
+    assert ws.screen == "update"
+    ws.update_ui._upd_phase = "install"        # an ANIMATING phase: _animating() reads _upd_phase
+    for _ in range(3):
+        drv.frame(1.0 / 30)                    # pre-fix: AttributeError in _animating() on frame 2
+    assert ws.screen == "update"               # survived multiple frames without crashing
+
+
 # -- boot logo (moybyte splash) --------------------------------------------
 
 def test_boot_splash_holds_then_reveals_launcher(tmp_path):

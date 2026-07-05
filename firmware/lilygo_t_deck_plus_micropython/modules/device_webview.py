@@ -15,6 +15,7 @@ its methods. Device-only module (modules/, auto-frozen). WiFi<->LCD-DMA coexiste
 (#38/#40) + the socket/WebSocket layer remain UNVERIFIED on hardware.
 """
 from device_util import _diag_note
+from device_wifi import autoconnect_wifi
 from console import NAMES, Pointer, _cursor_delta
 
 
@@ -409,6 +410,11 @@ class WebView:
 
     # -- data the server asks for --------------------------------------------
     def assets(self):
+        # PAL565 / _decode_moyimg live in moy_runtime's canvas cluster and AUDIO_RATE
+        # in its audio consts (neither extracted yet). Lazy import here (call time,
+        # after both modules are loaded) to reach them without a load-time cycle --
+        # repoint to device_canvas / device_audio when those extract.
+        from moy_runtime import AUDIO_RATE, _decode_moyimg, PAL565
         ws = self._ws
         cart = getattr(ws, "cart", None)
         title = cart.get("title") if cart else None

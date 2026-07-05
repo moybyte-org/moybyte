@@ -225,6 +225,11 @@ def test_device_web_view_wired_into_run_desktop_cooperatively():
     # STREAM MODE (#41 30fps lever): the WebView drives the panel headless while a browser
     # plays -- skip the flush via the compositor (skip_flush) + a one-time enter notice.
     assert "_apply_stream_mode" in device_webview
+    # Regression (extraction stage 13): assets() + _start() reference symbols that
+    # were moy_runtime globals -- the move must carry them or they NameError at CALL
+    # time (off the host-test path: class bodies exec fine, method bodies do not run).
+    assert "from device_wifi import autoconnect_wifi" in device_webview
+    assert "from moy_runtime import AUDIO_RATE, _decode_moyimg, PAL565" in device_webview
     assert "skip_flush" in device_webview
     comp = (ROOT / "modules" / "moy_compositor.py").read_text(encoding="utf-8")
     assert "self.skip_flush" in comp            # flush() is a no-op while streaming
