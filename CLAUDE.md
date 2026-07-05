@@ -77,12 +77,19 @@ re-staged every build, gitignored):
   icons are 16×16 sprites blitted from an editable `IconSheet`. **The bar auto-hides
   while a cart PLAYS** (#71): a running cart owns the full 320×240 and every button —
   **BACKSPACE is THE one console key in every input mode** (raw matrix `d4&0x08`,
-  typed `0x08`, the web page maps it server-side; ☰ on the page = the same HOME):
-  it opens the PAUSE menu, and from pause it exits; A/RUN/tap resumes. `q`/`e` are
-  plain letters everywhere now (their old home/stop roles stole letters from typing
-  carts like Letter Blitz), a text-mode TOOL (wifi password field) keeps backspace
-  as delete while it runs, and the old unpaused B→editor shortcut is gone (Star
-  Catcher plays with B). Backend-agnostic: injected `make_api` + cart store. (frozen as `console`)
+  typed `0x08`, the web page maps it server-side; ☰ on the page = the same HOME), and
+  it does exactly **one** job everywhere: **toggle** the pause screen. It never means
+  "exit" — a second press just un-pauses, no per-cart special case. Quitting is a
+  separate, explicit, always-tappable action: the pause screen draws **CONTINUE** and
+  **QUIT** buttons (`_draw_pause_buttons`/`handle_pointer`); A/RUN is a CONTINUE
+  accelerator where buttons fire. (An earlier version tried "press BACKSPACE twice to
+  exit" and "typed Z/space/Enter/R resumes" — both were special cases that broke:
+  Z/R are live gameplay letters in a typing game, so pausing then typing the next
+  target letter silently un-paused a frame later.) `q`/`e` are plain letters
+  everywhere now (their old home/stop roles stole letters from typing carts like
+  Letter Blitz), a text-mode TOOL (wifi password field) keeps backspace as delete
+  while it runs, and the old unpaused B→editor shortcut is gone (Star Catcher plays
+  with B). Backend-agnostic: injected `make_api` + cart store. (frozen as `console`)
 - `runtime/editors.py` — `CodeEditor` / `SpriteSheet` / `PaintEditor` cores, plus
   `IconSheet` (16×16 themeable system-bar icon tiles; Settings → EDIT ICONS repaints it). (frozen as `editors`)
 - `runtime/moy_carts.py` — the `.moy` store (scan/load/save_*/create/duplicate/delete;

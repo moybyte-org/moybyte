@@ -1274,11 +1274,13 @@ def apply_events(events, input, pointer, on_press=None, on_pan=None,
                 if isinstance(code, int) and 0 <= code <= 0xFF and on_key is not None:
                     on_key(code)
                     # ONE console key on the web too (#71): outside text mode a
-                    # browser Backspace also acts as HOME (pause; pause-again
-                    # quits), mirroring the physical key -- the raw-matrix path
-                    # likewise reports last_key=0x08 AND the home button. In
-                    # text mode it stays a typed 0x08 only (delete for a tool;
-                    # the Workstation edge-detects the game pause itself).
+                    # browser Backspace also acts as HOME (toggles the pause
+                    # screen -- never "exit", which is the pause screen's own
+                    # explicit QUIT button), mirroring the physical key -- the
+                    # raw-matrix path likewise reports last_key=0x08 AND the
+                    # home button. In text mode it stays a typed 0x08 only
+                    # (delete for a tool; the Workstation edge-detects the
+                    # game's pause toggle itself).
                     if (code == 0x08 and on_press is not None
                             and not getattr(input, "text_mode", False)):
                         on_press("home")
@@ -1735,14 +1737,15 @@ function pr(e){if(dn)return;dn=true;el.classList.add("pr");send({type:"hold",nam
 function rl(e){if(!dn)return;dn=false;el.classList.remove("pr");send({type:"hold",name:nm,down:false});if(e)e.preventDefault();}
 el.addEventListener("pointerdown",function(e){el.setPointerCapture(e.pointerId);pr(e);});
 el.addEventListener("pointerup",rl);el.addEventListener("pointercancel",rl);el.addEventListener("pointerleave",rl);}
-wb("ba","a");wb("bb","b");wb("bh","home");  // &#9776; = HOME: pauses a cart (#71), exits from pause
+wb("ba","a");wb("bb","b");wb("bh","home");  // &#9776; = HOME: toggles the pause screen (#71)
 var PAN={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]},
 NAV={a:"left",d:"right",w:"up",s:"down"},SC={Enter:"run",z:"a",x:"b"},pH={},nH={};
 // No letter->HOME shortcut: page buttons BYPASS the device's text-mode alias
 // suppression, so h-as-HOME stole the letter h from typing carts (Letter
 // Blitz). Pause from the page = the burger button, or Backspace: it is sent
 // as typed cd=8 and the SERVER maps it to HOME outside text mode (#71 one
-// console key), so it pauses every cart and stays delete in a text tool.
+// console key) -- either way it only ever TOGGLES the pause screen; QUIT is
+// the pause screen's own explicit button, tapped like any other.
 function nv(e){var k=e.key.length==1?e.key.toLowerCase():e.key;return NAV[k];}
 cv.addEventListener("keydown",function(e){if(e.key in PAN){pH[e.key]=true;e.preventDefault();return;}
 if(e.key=="Escape"){send({type:"esc"});e.preventDefault();return;}var cd=null;

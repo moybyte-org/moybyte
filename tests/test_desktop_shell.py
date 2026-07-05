@@ -317,9 +317,12 @@ def test_in_cart_dock_returns_when_a_cart_is_open(tmp_path):
 
 
 def test_cart_pause_menu_freezes_and_resumes(tmp_path):
-    """#71: HOME (q on the T-Deck) PAUSES a running cart -- the cart freezes, chrome
-    appears -- instead of exiting. A tap outside the chrome resumes without leaking
-    into the cart; HOME from the pause menu exits to the launcher."""
+    """#71: HOME (q on the T-Deck) TOGGLES a running cart's pause screen -- the
+    cart freezes, chrome appears -- it never exits by itself (no per-input-mode
+    special case). A tap outside the chrome (or HOME again) resumes without
+    leaking into the cart; the pause screen's own QUIT button is the one way
+    out to the launcher."""
+    from runtime import console as C
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
@@ -354,7 +357,15 @@ def test_cart_pause_menu_freezes_and_resumes(tmp_path):
     drv.frame(1 / 30)
     drv.frame(1 / 30)                  # release frame -- the edge detector needs it
     assert ws.cart_paused
-    drv.press("home")                  # HOME from the pause menu exits
+    drv.press("home")                  # HOME again just TOGGLES back (no special case)
+    drv.frame(1 / 30)
+    assert not ws.cart_paused
+    assert ws.screen == "desktop"
+    drv.frame(1 / 30)                  # release frame -- the edge detector needs it
+    drv.press("home")                  # pause once more...
+    drv.frame(1 / 30)
+    assert ws.cart_paused
+    drv.click(*C._PAUSE_QUIT_BTN[:2])  # ...and QUIT is the one way out
     drv.frame(1 / 30)
     assert ws.screen == "launcher"
 
