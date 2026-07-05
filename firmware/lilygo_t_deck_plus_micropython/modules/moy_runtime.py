@@ -2185,6 +2185,9 @@ class Touch:
         self.addr = None
         self._i2c = i2c
         self._down = False
+        # #69 input-poller hook: when set, poll() consumes staged raw samples from
+        # the poller thread instead of reading I2C inline (InputPoller wires it).
+        self._source = None
         # #69 per-session I2C latency stats (same shape as TDeckKeyboard's): the
         # GT911 shares I2C0 with the keyboard C3, and the observed kbd= stalls
         # often coincide with inp= spikes -- these counters + the keyboard's let
@@ -2289,7 +2292,9 @@ class Touch:
         return max(0, min(self.w - 1, x)), max(0, min(self.h - 1, y))
 
     def poll(self):
-        raw = self.read_raw()
+        # #69: threaded mode consumes the poller's staged raw sample (no I2C on
+        # the frame loop); unthreaded mode reads the hardware inline as always.
+        raw = self._source() if self._source is not None else self.read_raw()
         if not raw:                 # None (no new sample) or False (finger up)
             if raw is False:        # only a confirmed "up" clears the press state
                 self._down = False
@@ -2298,6 +2303,21 @@ class Touch:
         tap = not self._down        # press edge -> single tap/click
         self._down = True
         return (x, y, tap)
+
+
+# --- #69 the input-poller thread knob ----------------------------------------
+#
+# THE keyboard/touch stall fix: moybyte.input.InputPoller (see its docstring for
+# the full story) owns every I2C0 transaction on a dedicated Python thread; the
+# frame loop only consumes staged state, so a C3 clock-stretch stall (40-60ms,
+# I2CSTAT-sized) blocks the poller thread instead of a frame. Needs the build's
+# I2C GIL-release patch (esp32_i2c_gil_release.patch) to actually isolate the
+# stall -- without it the stall holds the GIL and freezes the loop from any
+# thread (the poller is then harmless, just useless). Set False -- or lose
+# _thread, or let the thread die -- and run_desktop stays on / falls back to
+# the synchronous keyboard.poll()/touch path, exactly the pre-poller behavior
+# (revert with NO rebuild, same pattern as MOY_AUDIO_CORE1).
+MOY_INPUT_POLLER = True
 
 
 def _ticks_ms():
@@ -3355,7 +3375,7 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     try:
         from tdeck_display import get_display_bus
         from moy_compositor import make_compositor
-        from moybyte.input import InputState, TDeckKeyboard
+        from moybyte.input import InputState, TDeckKeyboard, InputPoller
     except Exception as exc:
         print("Moybyte desktop unavailable:", exc)
         return
@@ -3375,6 +3395,23 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     touch = Touch(canvas.w, canvas.h, i2c=getattr(keyboard, "_i2c", None))
     pointer = Pointer(canvas.w, canvas.h)
     inp.pointer = pointer         # touch-driven carts read it via the api touch()
+    # #69 input-poller thread: move EVERY I2C0 transaction (kbd + GT911 + mode
+    # switches) off the frame loop so a C3 clock-stretch stall can't freeze a
+    # frame (needs the build's GIL-release patch to bite; see the class comment).
+    # Any failure leaves the synchronous path untouched.
+    poller = None
+    if MOY_INPUT_POLLER:
+        try:
+            _p = InputPoller(keyboard, touch)
+            if _p.start():
+                poller = _p
+                keyboard._poller_owned = True
+                touch._source = poller.consume_touch
+                _diag_note("input", "poller thread running (#69, %dms cadence)"
+                           % poller.period)
+        except Exception as exc:  # noqa: BLE001 -- input must never fail closed
+            _diag_note("input", "poller setup failed: %s" % (exc,))
+            poller = None
     import moybyte_sd
     # Carts are read from SD before display init; only fall back to a post-display
     # mount (now safe via the native moy_sd path) if the shell didn't prefetch.
@@ -3520,8 +3557,19 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         now = _ticks_ms()
         dt = max(0.0, min(0.1, _ticks_diff(now, last) / 1000.0))
         last = now
+        # #69: with the poller thread live, the frame loop only APPLIES staged
+        # input (no I2C -> no stall can land here). If the thread ever dies,
+        # detach and fall back to the synchronous poll -- input never goes dark.
+        if poller is not None and not poller.alive:
+            _diag_note("input", "poller thread died -> synchronous fallback")
+            keyboard._poller_owned = False
+            touch._source = None
+            poller = None
         try:
-            keyboard.poll()
+            if poller is not None:
+                poller.consume()
+            else:
+                keyboard.poll()
         except Exception:
             pass
         # HITCH v2 (#66): the first hardware pass showed ~188ms hitches every

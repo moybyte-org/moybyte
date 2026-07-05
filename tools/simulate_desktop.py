@@ -10,7 +10,8 @@ gallery. No device needed. Drive it live (pygame) or headlessly via a script.
   #   ARROWS = trackball  -> move the cursor; at the code edges the screen follows.
   #   MOUSE  = touchscreen -> tap/drag to place the pointer + activate.
   #   WASD   = keyboard buttons (launcher nav + gameplay).  Enter=run, Z=select,
-  #            X=menu, H=home, Esc=quit.  The code editor is FULL-SCREEN: letters
+  #            X=B, BACKSPACE=home (pause / pause-again quits, like the device),
+  #            Esc=quit the sim.  The code editor is FULL-SCREEN: letters
   #            type, the bottom symbol palette taps in = ( ) [ ] { } < > etc., ARROWS
   #            move the caret (DRAG scrolls), and the top-bar play/save/X icons
   #            run / save / close.
@@ -43,9 +44,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SYSTEM_CARTS = os.path.join(ROOT, "system_carts")
 DEFAULT_SAVE_DIR = os.path.expanduser("~/.moybyte/projects")
 # Tour (shared-console buttons): open a cart, Home, move, open another, edit code.
+# B belongs to the game while a cart plays (#71), so the editor step pauses first
+# (home = the device's BACKSPACE console key) and opens the menu from the pause bar.
 DEMO_SCRIPT = (
     "wait:18 run wait:40 home wait:8 down run wait:50 home wait:8 "
-    "down down run wait:40 home wait:10 run wait:10 b wait:20 a wait:40"
+    "down down run wait:40 home wait:10 run wait:10 home wait:6 b wait:20 a wait:40"
 )
 
 
@@ -136,8 +139,12 @@ def run_live(driver, dt, scale):
                 pygame.K_UP: (0, -1), pygame.K_DOWN: (0, 1)}
     nav_keys = {pygame.K_a: "left", pygame.K_d: "right",
                 pygame.K_w: "up", pygame.K_s: "down"}
+    # BACKSPACE = the device's one console key (#71): pause, pause-again quits.
+    # (In text mode the branch above routes it as typed 0x08 instead -- same as
+    # the device, where the Workstation edge-detects it.) K_h stays a host-only
+    # convenience alias for home.
     shortcuts = {pygame.K_RETURN: "run", pygame.K_z: "a", pygame.K_x: "b",
-                 pygame.K_h: "home"}
+                 pygame.K_BACKSPACE: "home", pygame.K_h: "home"}
     pan_held = set()
     mouse_down = False
     running = True

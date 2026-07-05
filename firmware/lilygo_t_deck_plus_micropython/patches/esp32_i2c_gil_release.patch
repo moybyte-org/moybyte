@@ -1,0 +1,19 @@
+--- a/ports/esp32/machine_i2c.c	2026-07-05 08:58:12.469094484 +0200
++++ b/ports/esp32/machine_i2c.c	2026-07-05 08:58:12.482094676 +0200
+@@ -305,7 +305,16 @@
+     }
+ 
+     // TODO proper timeout
++    // Moybyte #69 GIL: release the GIL across the blocking transaction wait so a
++    // slave clock-stretch stall (the T-Deck keyboard C3 stretches up to ~50ms per
++    // read) blocks only the CALLING Python thread (the core input poller), never
++    // the whole VM / render loop. Only pure IDF code runs while unlocked -- no MP
++    // state is touched, the legacy driver serializes per-port internally, and the
++    // caller's buffers are non-moving MP heap the calling thread keeps alive.
++    // Same pattern as this port's SPI/UART blocking waits.
++    MP_THREAD_GIL_EXIT();
+     esp_err_t err = i2c_master_cmd_begin(self->port, cmd, 100 * (1 + data_len) / portTICK_PERIOD_MS);
++    MP_THREAD_GIL_ENTER();
+     i2c_cmd_link_delete(cmd);
+ 
+     if (err == ESP_FAIL) {

@@ -1273,6 +1273,15 @@ def apply_events(events, input, pointer, on_press=None, on_pan=None,
                 code = ev.get("code")
                 if isinstance(code, int) and 0 <= code <= 0xFF and on_key is not None:
                     on_key(code)
+                    # ONE console key on the web too (#71): outside text mode a
+                    # browser Backspace also acts as HOME (pause; pause-again
+                    # quits), mirroring the physical key -- the raw-matrix path
+                    # likewise reports last_key=0x08 AND the home button. In
+                    # text mode it stays a typed 0x08 only (delete for a tool;
+                    # the Workstation edge-detects the game pause itself).
+                    if (code == 0x08 and on_press is not None
+                            and not getattr(input, "text_mode", False)):
+                        on_press("home")
             elif t == "esc":
                 if on_esc is not None:
                     on_esc()
@@ -1731,8 +1740,9 @@ var PAN={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]},
 NAV={a:"left",d:"right",w:"up",s:"down"},SC={Enter:"run",z:"a",x:"b"},pH={},nH={};
 // No letter->HOME shortcut: page buttons BYPASS the device's text-mode alias
 // suppression, so h-as-HOME stole the letter h from typing carts (Letter
-// Blitz). Pause from the page = the burger button, or Backspace (typed cd=8,
-// the console's text-mode game pause key).
+// Blitz). Pause from the page = the burger button, or Backspace: it is sent
+// as typed cd=8 and the SERVER maps it to HOME outside text mode (#71 one
+// console key), so it pauses every cart and stays delete in a text tool.
 function nv(e){var k=e.key.length==1?e.key.toLowerCase():e.key;return NAV[k];}
 cv.addEventListener("keydown",function(e){if(e.key in PAN){pH[e.key]=true;e.preventDefault();return;}
 if(e.key=="Escape"){send({type:"esc"});e.preventDefault();return;}var cd=null;

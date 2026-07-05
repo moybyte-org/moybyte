@@ -75,12 +75,14 @@ re-staged every build, gitignored):
   paint UI + layout + the **unified 18px top bar** (icon-only mode switchers home/edit/
   paint/map/blocks left, clock/wifi/batt/gear right, new/dup/del on home — #46), whose
   icons are 16×16 sprites blitted from an editable `IconSheet`. **The bar auto-hides
-  while a cart PLAYS** (#71): a running cart owns the full 320×240; HOME opens the
-  PAUSE menu — the physical `q` key in raw/game mode, **BACKSPACE for a text-mode
-  GAME cart** (typing carts like Letter Blitz need every letter, so the q/e→home/stop
-  ASCII aliases were removed; a text-mode TOOL, e.g. the wifi password field, keeps
-  backspace as delete), or the web page's ☰. Cart frozen, bar + chrome visible,
-  HOME again exits. Backend-agnostic: injected `make_api` + cart store. (frozen as `console`)
+  while a cart PLAYS** (#71): a running cart owns the full 320×240 and every button —
+  **BACKSPACE is THE one console key in every input mode** (raw matrix `d4&0x08`,
+  typed `0x08`, the web page maps it server-side; ☰ on the page = the same HOME):
+  it opens the PAUSE menu, and from pause it exits; A/RUN/tap resumes. `q`/`e` are
+  plain letters everywhere now (their old home/stop roles stole letters from typing
+  carts like Letter Blitz), a text-mode TOOL (wifi password field) keeps backspace
+  as delete while it runs, and the old unpaused B→editor shortcut is gone (Star
+  Catcher plays with B). Backend-agnostic: injected `make_api` + cart store. (frozen as `console`)
 - `runtime/editors.py` — `CodeEditor` / `SpriteSheet` / `PaintEditor` cores, plus
   `IconSheet` (16×16 themeable system-bar icon tiles; Settings → EDIT ICONS repaints it). (frozen as `editors`)
 - `runtime/moy_carts.py` — the `.moy` store (scan/load/save_*/create/duplicate/delete;
@@ -94,7 +96,7 @@ re-staged every build, gitignored):
 ### Device module map (`firmware/lilygo_t_deck_plus_micropython/modules/`)
 
 - `moybyte_shell.py` — boot/`main()`; mode flags `RUN_DESKTOP` / `RUN_FULLSCREEN_BENCH` / `RUN_COMPOSITOR_SMOKE` / `RUN_TOUCH_CALIBRATE` / `RUN_KEYBOARD_PROBE`; SD prefetch; native takeover.
-- `moy_runtime.py` — the **device backend**: `DeviceCanvas` (hot ops `cls`/`rect`/`circ`/`spr` go through the native `moy_gfx` kernel — `fill`/`fill_rect`/`blit565` straight into the compositor's RGB565 buffer — with framebuf for text/lines and as the no-`moy_gfx` fallback; `spr` blits a per-sprite pre-scaled RGB565 cache, and `make_api` reuses one tile `Image` per `(id, colorkey)` so the cache survives across frames), `make_api`, embedded fallback `CARTS`, `TrackBall`, `Touch`, `run_desktop()`, `run_keyboard_probe()`. Imports the shared `console`/`editors`/`moy_carts` and injects the device `make_api` + store into `console.Workstation`.
+- `moy_runtime.py` — the **device backend**: `DeviceCanvas` (hot ops `cls`/`rect`/`circ`/`spr` go through the native `moy_gfx` kernel — `fill`/`fill_rect`/`blit565` straight into the compositor's RGB565 buffer — with framebuf for text/lines and as the no-`moy_gfx` fallback; `spr` blits a per-sprite pre-scaled RGB565 cache, and `make_api` reuses one tile `Image` per `(id, colorkey)` so the cache survives across frames), `make_api`, embedded fallback `CARTS`, `TrackBall`, `Touch`, `run_desktop()`, `run_keyboard_probe()`. Imports the shared `console`/`editors`/`moy_carts` and injects the device `make_api` + store into `console.Workstation`. **Input runs on a poller thread (#69, `MOY_INPUT_POLLER`)**: `moybyte.input.InputPoller` owns every I2C0 transaction (kbd + GT911 + mode switches) off the frame loop, so the C3's 40-60ms clock-stretch stalls block only that thread — requires the build's `esp32_i2c_gil_release.patch` (machine.I2C frees the GIL across its blocking wait); falls back to synchronous polling if `_thread`/the thread dies.
 - `console.py` / `editors.py` / `moy_carts.py` — **staged from `runtime/` at build** (see above).
 - `moybyte_sd.py` — SD mount on the shared SPI bus; `with_sd(fn)` = mount → run → unmount + deselect.
 - `moy_compositor.py` — native RGB565 framebuffer + DMA flush.

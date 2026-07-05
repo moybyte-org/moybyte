@@ -510,7 +510,13 @@ def test_host_runs_shared_console_at_320x240(tmp_path):
     drv.press("run")
     drv.frame(1 / 30)
     assert ws.screen == "desktop"                       # opened a cart
-    drv.press("b")
+    drv.press("b")                                      # B belongs to the GAME while
+    drv.frame(1 / 30)                                   # it plays (#71) -- no menu...
+    assert ws.screen == "desktop" and not ws.cart_paused
+    drv.press("home")                                   # ...pause (the BACKSPACE key)
+    drv.frame(1 / 30)
+    assert ws.cart_paused is True
+    drv.press("b")                                      # ...then B opens the menu
     drv.frame(1 / 30)
     if ws.menu_view == "cards":
         drv.press("a")
@@ -530,6 +536,7 @@ def test_code_view_arrows_move_caret_and_scroll(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
     drv.press("run"); drv.frame(1 / 30)
+    drv.press("home"); drv.frame(1 / 30)     # pause first: B is the game's while playing (#71)
     drv.press("b"); drv.frame(1 / 30)
     if ws.menu_view == "cards":
         drv.press("a"); drv.frame(1 / 30)
@@ -559,6 +566,7 @@ def test_code_editor_drag_scrolls_without_crashing(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
     drv.press("run"); drv.frame(1 / 30)
+    drv.press("home"); drv.frame(1 / 30)     # pause first: B is the game's while playing (#71)
     drv.press("b"); drv.frame(1 / 30)
     if ws.menu_view == "cards":
         drv.press("a"); drv.frame(1 / 30)
@@ -577,6 +585,7 @@ def test_code_editor_symbol_palette_inserts(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
     drv.press("run"); drv.frame(1 / 30)
+    drv.press("home"); drv.frame(1 / 30)     # pause first: B is the game's while playing (#71)
     drv.press("b"); drv.frame(1 / 30)
     if ws.menu_view == "cards":
         drv.press("a"); drv.frame(1 / 30)
