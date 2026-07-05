@@ -210,19 +210,22 @@ def test_device_web_view_wired_into_run_desktop_cooperatively():
     # swapped in as ws.canvas (panel still renders), begin/commit around the frame, and
     # ONE poll() BETWEEN frames (never mid-flush). The Settings WEB VIEW row toggles it.
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-    assert "import moy_webserver" in runtime
-    assert "class WebView" in runtime
+    # WebView + _PointerSink + _WebProvider now live in device_webview.py
+    # (extracted from moy_runtime.py); run_desktop still CALLS the controller.
+    device_webview = (ROOT / "modules" / "device_webview.py").read_text(encoding="utf-8")
+    assert "import moy_webserver" in device_webview
+    assert "class WebView" in device_webview
     assert "web = WebView(" in runtime
     assert "ws.web_hook = web" in runtime
     assert "web.begin_frame()" in runtime       # start a recording before the frame
     assert "web.commit_frame()" in runtime      # publish the frame's commands
     assert "web.poll()" in runtime              # service one request between frames
     # The recorder must record draw commands, never stream the raw framebuffer.
-    assert "DrawRecorder" in runtime
+    assert "DrawRecorder" in device_webview
     # STREAM MODE (#41 30fps lever): the WebView drives the panel headless while a browser
     # plays -- skip the flush via the compositor (skip_flush) + a one-time enter notice.
-    assert "_apply_stream_mode" in runtime
-    assert "skip_flush" in runtime
+    assert "_apply_stream_mode" in device_webview
+    assert "skip_flush" in device_webview
     comp = (ROOT / "modules" / "moy_compositor.py").read_text(encoding="utf-8")
     assert "self.skip_flush" in comp            # flush() is a no-op while streaming
 
@@ -1906,7 +1909,8 @@ def _load_moy_runtime():
     # import ...` -- device-only modules authored directly in modules/ (NOT staged
     # from runtime/). Register them from modules/ so the device module execs under
     # CPython (device_util first: device_wifi imports it).
-    for dname in ("device_util", "device_wifi", "device_input", "device_diag"):
+    for dname in ("device_util", "device_wifi", "device_input", "device_diag",
+                  "device_webview"):
         ds = importlib.util.spec_from_file_location(
             dname, ROOT / "modules" / (dname + ".py"))
         dmod = importlib.util.module_from_spec(ds)
