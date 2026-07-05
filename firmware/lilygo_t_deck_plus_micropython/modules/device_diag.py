@@ -1,0 +1,318 @@
+"""Serial diagnostics for the device desktop loop (extracted from moy_runtime.py).
+
+A set of pure logging functions (#43/#63/#66/#68/#69) the run_desktop loop calls
+between frames when perf capture is on: _diag_flush (ring -> SD), _diag_perf_sample
+(PERF), _diag_hitch (HITCH), _diag_drawbrk / _diag_draw2 / _diag_chromebrk (the
+draw-cost splits), _diag_pump (bounce-feed pacing), _diag_i2cstat (#69 kbd/touch
+I2C latency), _diag_calib (interpreter cost model), _diag_gc (the forced-collect
+sample). Every one takes its inputs explicitly (diag / ws / comp / keyboard /
+touch) and logs via the passed `diag` handle -- no shared class state -- so they
+lift out cleanly and import only the leaf device_util tick helpers (+ local gc /
+array imports). Device-only module (modules/, auto-frozen); no moy_runtime cycle.
+"""
+from device_util import _ticks_ms, _ticks_us, _ticks_diff
+
+
+def _diag_flush(diag, ws):
+    """Flush the diag RAM ring to /sd/moybyte/diag.log via the workstation's live
+    SD session wrapper (with_sd_live). Guarded: a flush failure is a no-op so it
+    can never crash the loop. Skips the write when SD management is disabled (the
+    embedded-carts fallback, where carts_root is None -> no writable SD root).
+    Returns the elapsed ms (0 if skipped/failed) so callers get their _t_sd
+    timing for free instead of each wrapping their own _t0/_ticks_diff pair."""
+    if diag is None:
+        return 0
+    t0 = _ticks_ms()
+    try:
+        if not getattr(ws, "can_manage", False):
+            return 0
+        with_sd = getattr(ws, "_with_sd", None)
+        diag.flush_to_sd(with_sd)
+    except Exception:
+        return 0
+    return _ticks_diff(_ticks_ms(), t0)
+
+
+def _diag_perf_sample(diag, ws):
+    """Log a PERF sample line from the workstation's current frame numbers, if a
+    cart is actively running. Guarded -> a no-op on any failure."""
+    if diag is None:
+        return
+    try:
+        sample = ws.perf_sample()      # (name, fps, flush_ms, draw_ms) or None
+        if sample is not None:
+            diag.log_perf(sample[0], sample[1], sample[2], sample[3])
+    except Exception:
+        pass
+
+
+HITCH_MS = 80
+
+
+def _diag_hitch(diag, ws, comp, elapsed, kbd_ms, inp_ms, sb_ms, ws_ms,
+                diag_ms, sd_ms, web_ms):
+    """Log a HITCH line (#66): one frame blew past HITCH_MS. Names every measured
+    loop stage: kbd (I2C keyboard poll), inp (trackball + touch + pointer), sb
+    (canvas.sync_back = buffer repoint + GDMA layer kick, unmeasured until v3),
+    ws (input handlers + ws.frame), diag sample, diag SD write, web poll. v3
+    prints the RAW phase split of the hitch frame itself (the v2 EMAs hid which
+    phase a single 150ms spike lived in: alpha=0.15 moves an EMA only 15% of the
+    spike), plus pump= (the bounce-flush band feeding, ms this frame) and lw=
+    (cumulative copy_wait trips). If nothing named sums to the spike, the pause
+    is an implicit GC collect (alloc-triggered, invisible to stage timers)."""
+    try:
+        s = ws.perf_sample()
+        raw = None
+        get_raw = getattr(ws, "perf_breakdown_raw", None)
+        if get_raw is not None:
+            raw = get_raw()
+        pump_ms = getattr(comp, "pump_last_us", 0) / 1000.0
+        trips = getattr(getattr(ws, "canvas", None), "_lcopy_trips", -1)
+        if raw is not None:
+            diag.log("HITCH",
+                     "frame=%dms kbd=%d inp=%d sb=%d ws=%d diag=%d sdflush=%d "
+                     "web=%d pump=%.1f lw=%d raw(logic=%.1f render=%.1f "
+                     "audio=%.1f chrome=%.1f flush=%.1f)"
+                     % (elapsed, kbd_ms, inp_ms, sb_ms, ws_ms, diag_ms, sd_ms,
+                        web_ms, pump_ms, trips,
+                        raw[0], raw[1], raw[2], raw[3], raw[4]))
+        else:
+            b = ws.perf_breakdown()
+            diag.log("HITCH",
+                     "frame=%dms kbd=%d inp=%d sb=%d ws=%d diag=%d sdflush=%d "
+                     "web=%d flush=%.1f ema(logic=%.1f render=%.1f chrome=%.1f)"
+                     % (elapsed, kbd_ms, inp_ms, sb_ms, ws_ms, diag_ms, sd_ms,
+                        web_ms, (s[2] if s is not None else -1.0),
+                        b[0], b[1], b[3]))
+    except Exception:
+        pass
+
+
+def _diag_drawbrk(diag, ws):
+    """Log a DRAWBRK line splitting the frame's draw cost into cart _update (game
+    LOGIC) / cart _draw (RENDERING) / audio.tick / console chrome (the dock+cursor+
+    overlays remainder) -- the breakdown that says where draw= goes (logic vs render
+    vs audio vs chrome). Guarded -> a no-op on any failure (only meaningful while a
+    cart runs)."""
+    if diag is None:
+        return
+    try:
+        if ws.perf_sample() is None:        # only while a cart is actively running
+            return
+        b = ws.perf_breakdown()             # (logic, render, audio, chrome) ms
+        diag.log("DRAWBRK", "logic=%.2f render=%.2f audio=%.2f chrome=%.2f"
+                 % (b[0], b[1], b[2], b[3]))
+        # #63 auto-batch profiling: flushes=1/maxrun=N means the cart's N-sprite loop
+        # coalesced into ONE native blit_batch; flushes=N/maxrun=1 means it did NOT.
+        pb = getattr(ws, "perf_batch", None)
+        if pb is not None:
+            bt = pb()
+            diag.log("BATCH", "flushes=%d sprites=%d maxrun=%d" % (bt[0], bt[1], bt[2]))
+    except Exception:
+        pass
+
+
+def _diag_draw2(diag, ws):
+    """Log a DRAW2 line (#63): the last frame's microseconds inside the two native pixel ops
+    that dominate a full-frame cart -- layer=the draw_layer window-copy (blit_window),
+    batch=the sprite blit_batch. The DRAWBRK `render` EMA lumps _draw's Python + these C ops
+    together; this says which native op is the real cost (e.g. is sakura's ~120ms render the
+    layer copy or the 120-petal batch?). Cheap (two ticks_us reads per op); guarded."""
+    if diag is None:
+        return
+    try:
+        cv = getattr(ws, "canvas", None)
+        if cv is None or ws.perf_sample() is None:
+            return
+        # #66: map/text/fill joined so the WHOLE render ms attributes to named C
+        # ops -- (DRAWBRK render) - (these) = Python dispatch + circ/line/pix.
+        diag.log("DRAW2", "layer=%.2fms batch=%.2fms map=%.2fms text=%.2fms fill=%.2fms"
+                 % (getattr(cv, "_t_layer_us", 0) / 1000.0,
+                    getattr(cv, "_t_batch_us", 0) / 1000.0,
+                    getattr(cv, "_t_map_us", 0) / 1000.0,
+                    getattr(cv, "_t_text_us", 0) / 1000.0,
+                    getattr(cv, "_t_fill_us", 0) / 1000.0))
+    except Exception:
+        pass
+
+
+def _diag_chromebrk(diag, ws):
+    """Log a CHROMEBRK line (#66 lever 5, instrument-before-cutting): the sub-split
+    of DRAWBRK's chrome remainder -- bar (_draw_status_strip), cmp (the game->system
+    viewport composite; ~0 on the 320x240 device where the canvases are one object),
+    cur (_draw_cursor), other (textmode sync + state reset + overlays + batch guard).
+    Says which chrome cost a trim should target. Guarded; cart-running only."""
+    if diag is None:
+        return
+    try:
+        if ws.perf_sample() is None:
+            return
+        pc = getattr(ws, "perf_chrome", None)
+        if pc is None:
+            return
+        c = pc()
+        diag.log("CHROMEBRK", "bar=%.2f cmp=%.2f cur=%.2f other=%.2f"
+                 % (c[0], c[1], c[2], c[3]))
+    except Exception:
+        pass
+
+
+def _diag_pump(diag, comp):
+    """Log a PUMP line (#66 lever 4, measure-before-touching): the bounce-flush
+    feed pacing for the last shipped frame -- pump (CPU ms inside pump()), idle
+    (ms the SPI sat starved because every fired band completed before the next
+    was fed -- the tunable waste; ~0 means the flush ceiling is real transfer
+    time and band size / pump period / a third slot won't buy fps), gaps (how
+    many bands were fed late), feed (kick -> last band queued). The data that
+    decides whether the Sky Run 40-46 vs ~55-60fps gap is pacing or physics."""
+    if diag is None:
+        return
+    try:
+        if not getattr(comp, "bounce_flush", False):
+            return
+        st = comp.bounce_stats()
+        diag.log("PUMP", "pump=%.2f idle=%.2f gaps=%d feed=%.2f bands=%d"
+                 % (st[0] / 1000.0, st[1] / 1000.0, st[2],
+                    st[3] / 1000.0, st[4]))
+    except Exception:
+        pass
+
+
+def _diag_i2cstat(diag, keyboard, touch):
+    """Log an I2CSTAT line (#69): per-session I2C latency stats for the two
+    peripherals sharing I2C0 -- the keyboard C3 and the GT911 touch. n=reads,
+    max=worst transaction (kbd: with the mode it happened in), >5/>20=stalls past
+    those ms. A 5-byte read at 400kHz is ~135us nominal, so ms-scale maxima mean
+    clock-stretching/contention -- this line sizes the 13-60ms kbd= HITCH spikes
+    (which only surface inside >80ms frames) across a whole session."""
+    if diag is None:
+        return
+    try:
+        # kbd to= counts CAPPED stalls (#69: reads that raised at I2C_TIMEOUT_US and
+        # were held over as one stale frame) -- they never complete, so they are NOT
+        # in n=/max=. Touch failures ARE timed (its _stat runs on the except path).
+        diag.log("I2CSTAT",
+                 "kbd(n=%d max=%.1fms%s >5=%d >20=%d to=%d) "
+                 "touch(n=%d max=%.1fms >5=%d >20=%d)"
+                 % (getattr(keyboard, "stat_n", 0),
+                    getattr(keyboard, "stat_max_us", 0) / 1000.0,
+                    " raw" if getattr(keyboard, "stat_max_raw", False) else "",
+                    getattr(keyboard, "stat_over5", 0),
+                    getattr(keyboard, "stat_over20", 0),
+                    getattr(keyboard, "stat_timeouts", 0),
+                    getattr(touch, "stat_n", 0),
+                    getattr(touch, "stat_max_us", 0) / 1000.0,
+                    getattr(touch, "stat_over5", 0),
+                    getattr(touch, "stat_over20", 0)))
+    except Exception:
+        pass
+
+
+_CALIB_DONE = [False]
+
+
+def _diag_calib(diag):
+    """One-shot CALIB line (#63): the interpreter cost model measured on THIS device
+    in THIS heap state -- the numbers that explain where a kid cart's frame goes.
+      call4 = 4-arg Python call, small frame (stays on the C stack)
+      spill = 8-arg Python call with a real body -- frame > ~11 words HEAP-ALLOCATES
+              on every call; on a warm fragmented heap this is the ~1.5ms/call
+              pathology that made 120-sprite kid loops collapse (the spr_gate fix)
+      tup   = small tuple alloc+append (pool-sized: cheap even warm)
+      arr   = 4x array('h') stores (the gate's append shape)
+      flt   = float multiply-add (REPR_C: no boxing on this port)
+    us per 100 ops. Run once, ~3s into the first cart, so it reflects the REAL
+    runtime heap, not a fresh boot."""
+    if diag is None or _CALIB_DONE[0]:
+        return
+    _CALIB_DONE[0] = True
+    try:
+        from array import array as _arr_t
+        r = range(100)
+
+        def f4(a, b, c, d):
+            pass
+
+        def f8(a, b, c, d=-1, e=1, f=0, g=1, h=1):
+            q = a + b
+            s = c + d
+            u = e + f
+            v = g + h
+            return q + s + u + v
+
+        t0 = _ticks_us()
+        for i in r:
+            pass
+        base = _ticks_diff(_ticks_us(), t0)
+        t0 = _ticks_us()
+        for i in r:
+            f4(1, 2, 3, 0)
+        call4 = _ticks_diff(_ticks_us(), t0) - base
+        t0 = _ticks_us()
+        for i in r:
+            f8(1, 2, 3, 0)
+        spill = _ticks_diff(_ticks_us(), t0) - base
+        li = []
+        ap = li.append
+        t0 = _ticks_us()
+        for i in r:
+            ap((3, 100, 60, 0))
+        tup = _ticks_diff(_ticks_us(), t0) - base
+        qa = _arr_t("h", bytearray(2 * 512))
+        t0 = _ticks_us()
+        k = 4
+        for i in r:
+            qa[k] = 3
+            qa[k + 1] = 100
+            qa[k + 2] = 60
+            qa[k + 3] = 0
+        arr = _ticks_diff(_ticks_us(), t0) - base
+        x = 1.5
+        y = 0.25
+        z = 0.0
+        t0 = _ticks_us()
+        for i in r:
+            z = x * y + 0.3
+        flt = _ticks_diff(_ticks_us(), t0) - base
+        diag.log("CALIB", "call4=%d spill=%d tup=%d arr=%d flt=%d us/100"
+                 % (call4, spill, tup, arr, flt))
+    except Exception:
+        pass
+
+
+_GC_BASE = [0]      # #63: last-sample gc.mem_alloc() live-set baseline, for the churn delta.
+_GC_TICK = [0]      # #63: sample counter -- the forced collect runs 1-in-10, not every 3s.
+
+
+def _diag_gc(diag):
+    """Log a GC line (#63, the sakura ~14fps profiling): the forced-collect PAUSE (what an
+    auto-GC costs when it fires mid-frame -> the render-time variance), free heap, the live
+    set, and the CHURN (bytes allocated since the last sample -> the pressure that sets how
+    OFTEN auto-GC fires). A high churn + a non-trivial collect = GC-bound, and the stutter is
+    that collect landing at random frames.
+
+    CADENCE: the forced collect costs ~130ms on a cart-sized live set, and gc.mem_alloc()/
+    mem_free() WALK the heap (tens of ms) -- running that every 3s sample was itself a
+    visible periodic hitch (the perf capture is on by default at boot). So the full
+    collect+report now runs on the FIRST sample of a cart run and then 1-in-10 (~30s);
+    other samples skip entirely. Never per frame."""
+    if diag is None:
+        return
+    tick = _GC_TICK[0]
+    _GC_TICK[0] = tick + 1
+    if tick % 10 != 0:
+        return
+    try:
+        import gc
+        pre = gc.mem_alloc()                 # live set + garbage accumulated since last GC
+        t = _ticks_ms()
+        gc.collect()
+        collect_ms = _ticks_diff(_ticks_ms(), t)
+        free = gc.mem_free()
+        live = gc.mem_alloc()                # post-collect: the retained (live) set
+        churn = pre - _GC_BASE[0]            # allocated since the last sample (mod auto-GC)
+        _GC_BASE[0] = live
+        diag.log("GC", "collect=%dms free=%dk live=%dk churn=%dk"
+                 % (collect_ms, free >> 10, live >> 10, churn >> 10))
+    except Exception:
+        pass
