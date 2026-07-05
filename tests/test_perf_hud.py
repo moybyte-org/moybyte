@@ -71,7 +71,7 @@ def test_fps_tap_toggles_the_hud_through_the_driver(tmp_path):
     for _ in range(3):
         drv.frame(DT)               # settle
     assert ws.perf_hud is False
-    rx, ry, rw, rh = ws._fps_tap_rect()
+    rx, ry, rw, rh = ws.perf_ui._fps_tap_rect()
     tx, ty = rx + rw // 2, ry + rh // 2
     drv.click(tx, ty)
     drv.frame(DT)

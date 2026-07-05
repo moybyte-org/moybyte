@@ -1877,9 +1877,10 @@ def _load_moy_runtime():
     # device freezes build-staged copies of runtime/{editors,audio,console}.py as
     # top-level modules. Register those same canonical files so the device module
     # loads under CPython (editors [+ block_editor_ui #29 Part 2 / map_editor_ui #32
-    # / music_editor_ui #50] + audio first -- console imports all of them).
+    # / music_editor_ui #50 / perf_hud #43/#44] + audio first -- console imports
+    # all of them).
     for name in ("editors", "block_editor_ui", "map_editor_ui", "music_editor_ui",
-                 "audio", "console"):
+                 "perf_hud", "audio", "console"):
         spec = importlib.util.spec_from_file_location(name, Path("runtime") / (name + ".py"))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
@@ -2340,6 +2341,7 @@ def test_music_editor_wired_into_device_shell():
     assert 'cp "${REPO_ROOT}/runtime/editors.py" "${SCRIPT_DIR}/modules/editors.py"' in build
     assert 'cp "${REPO_ROOT}/runtime/console.py" "${SCRIPT_DIR}/modules/console.py"' in build
     assert 'cp "${REPO_ROOT}/runtime/music_editor_ui.py" "${SCRIPT_DIR}/modules/music_editor_ui.py"' in build
+    assert 'cp "${REPO_ROOT}/runtime/perf_hud.py" "${SCRIPT_DIR}/modules/perf_hud.py"' in build
 
 
 def test_native_moy_audio_mixer_wired():

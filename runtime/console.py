@@ -98,6 +98,16 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
         _mu_note_name, _mu_pad_rect,
     )
 
+# The perf HUD's rendering layer (#43/#44, extracted from this file): the
+# bottom-right FPS chip + optional frame-time breakdown + its tap target. The
+# perf *query* API (perf_sample/perf_breakdown/...) stays on Workstation (the
+# device diag's measurement contract); only the drawing moves here. Same
+# bare-or-package fallback as the editors above.
+try:
+    from perf_hud import PerfHud
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.perf_hud import PerfHud
+
 # The block vocabulary/compiler (#29). Imported under whichever name it's known by:
 # bare `blocks` on the device (frozen top-level) and on the host once host_app has
 # aliased it, or `runtime.blocks` when a test loads console/moy_runtime directly
@@ -1687,6 +1697,14 @@ class Workstation:
         # handle_pointer/frame's menu_view == "music" branches plus set_menu_view/
         # _open_music/open (NOT go_home -- see music_editor_ui.py's docstring).
         self.music_ui = MusicEditorUI(self, NAMES, _in)
+        # The perf HUD's rendering (#43/#44, extracted from this class -- see
+        # perf_hud.py): the FPS chip + frame-time breakdown drawn in frame() and
+        # the tap target hit-tested in handle_pointer. Named perf_ui (NOT
+        # perf_hud -- that stays the tested boolean flag below for "breakdown
+        # shown?"). The perf query API (perf_sample/perf_breakdown/...) stays on
+        # this class (device diag contract). Pure read-only consumer of the
+        # timing fields.
+        self.perf_ui = PerfHud(self, NAMES)
         self.keyboard = None          # set by run_desktop (for raw/text mode toggle)
         self._ekey_prev = 0           # last consumed keyboard byte (edge detect)
         self._drag = None             # last pointer pos during a code-view drag-scroll
@@ -4094,7 +4112,7 @@ class Workstation:
                     self._dirty = True
                     self.input.game_pointer = (gx, gy, False, False)
             elif click:
-                if self.show_fps and _in(px, py, self._fps_tap_rect()):
+                if self.show_fps and _in(px, py, self.perf_ui._fps_tap_rect()):
                     # Tapping the FPS readout toggles the frame-time breakdown HUD
                     # (#43/#44 perf). Deliberate, no keyboard, doesn't fight game
                     # input -- the touch lands on a small bottom-right corner box.
@@ -4615,9 +4633,9 @@ class Workstation:
                     self._draw_error_panel()
                     self._icon_btn("close", "", _CLOSE_BTN, NAMES["red"])
         if self.show_fps and self.screen == "desktop":
-            self._draw_fps()
+            self.perf_ui._draw_fps()
             if self.perf_hud:
-                self._draw_perf_hud()      # frame-time breakdown above the FPS chip
+                self.perf_ui._draw_perf_hud()      # frame-time breakdown above the FPS chip
         # Two-domain seam (#39): the "desktop" (running cart) + the cards/paint/map
         # editors drew on the fixed 320x240 GAME canvas above; composite it into the
         # SYSTEM canvas as a centered, integer-scaled viewport. The launcher/settings
@@ -5102,28 +5120,9 @@ class Workstation:
         if kind not in ("wallpaper", "font", "action", "channel", "web", "diag"):
             cv.print("soon", x + 4, y + 6 + fw, NAMES["dark_grey"], 1)
 
-    def _draw_fps(self):
-        # Tiny FPS readout in the bottom-right, over a dark chip so it stays legible
-        # on any cart. The desktop overlay buttons all sit along the top, so this
-        # corner is free. Drawn with the indexed API only (host == device).
-        cv = self.canvas
-        s = "%d" % int(self._fps + 0.5)
-        tw = len(s) * 8
-        x = cv.w - tw - 3
-        y = cv.h - 10
-        cv.rect(x - 2, y - 1, tw + 4, 10, NAMES["black"])
-        cv.print(s, x, y, NAMES["yellow"], 1)
-
-    def _fps_tap_rect(self):
-        """The bottom-right corner the FPS readout lives in, used as the tap target
-        that toggles the perf HUD (#43/#44). Generous (a fixed corner box, not just
-        the few-pixel digit chip) so a finger on the device touchscreen lands it; it
-        sits over the FPS chip in GAME-canvas coords (the desktop hit-tests in game
-        space). Kept off the cart's own top-bar tools, so a kid never trips it by
-        accident -- they'd have to deliberately poke the FPS number."""
-        cv = self.canvas
-        w, h = 40, 14
-        return (cv.w - w, cv.h - h, w, h)
+    # _draw_fps / _fps_tap_rect / _draw_perf_hud (the HUD *rendering*) now live on
+    # self.perf_ui (perf_hud.py, PerfHud). The perf *query* API below stays here --
+    # it's the device diag's measurement contract (ws.perf_sample / perf_breakdown).
 
     def perf_sample(self):
         """Snapshot of the current per-frame perf numbers for offline sampling:
@@ -5181,25 +5180,6 @@ class Workstation:
         return (getattr(cv, "_batch_flushes", 0),
                 getattr(cv, "_batch_sprites", 0),
                 getattr(cv, "_batch_maxrun", 0))
-
-    def _draw_perf_hud(self):
-        """Frame-time breakdown (#43/#44 perf), drawn just above the FPS chip when
-        perf_hud is on: "f<flush> d<draw> t<total>" in ms (total = flush + draw).
-        flush is the panel DMA flush (comp.flush(); ~0 on the host's _NullComp, real
-        only on device); draw is everything else (cart _update/_draw + console draw).
-        Indexed API only (host == device); compact so it doesn't overlap the cart's
-        HUD where avoidable."""
-        cv = self.canvas
-        f = int(self._flush_ms + 0.5)
-        d = int(self._draw_ms + 0.5)
-        s = "f%d d%d t%d" % (f, d, f + d)
-        tw = len(s) * 8
-        x = cv.w - tw - 3
-        if x < 1:
-            x = 1
-        y = cv.h - 20            # one 8px row above the FPS chip (which sits at h-10)
-        cv.rect(x - 2, y - 1, tw + 4, 10, NAMES["black"])
-        cv.print(s, x, y, NAMES["white"], 1)
 
     # -- achievements + Easter-egg drawing (#21) -----------------------------
 
