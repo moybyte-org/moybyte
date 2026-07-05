@@ -2260,6 +2260,29 @@ def test_native_moy_audio_core1_task_wired():
     assert "core1 active=%d committed=%d" in runtime
 
 
+def test_core1_writeback_cannot_clobber_a_fresh_trigger():
+    # THE OVERLAPPING-SFX DROP: the core-1 task folds its advanced cursor state back
+    # into the shared moy_voices[] after every ~32 ms block. It must skip voices core 0
+    # re-committed during the block -- and it used to detect that with a CONTENT proxy
+    # (same nsteps + first step + step_dur), which a same-SFX retrigger satisfies
+    # exactly. So "sound 1 is ending (goes inactive inside the block), sound 2 starts
+    # on the reused channel" folded back active=0 over the fresh trigger: sound 2
+    # never played, and DeviceAudio._await_active waited forever for a confirmation
+    # that never came (channel leaked as busy). The fix is the C-side twin of the
+    # Battle City gen fix: an exact per-voice commit counter.
+    c = (ROOT / "native" / "moy_audio" / "modmoy_audio.c").read_text(encoding="utf-8")
+
+    # The shared voice carries a commit sequence number...
+    assert "uint32_t seq;" in c
+    # ...every voice_set (commit) bumps it under the mutex...
+    assert "v->seq += 1;" in c
+    # ...and the task's fold-back is gated on it being unchanged since the snapshot.
+    assert "if (shared->seq == s->seq) {" in c
+    # The aliasing content-proxy is GONE (it can never come back as the guard).
+    assert "int unchanged" not in c
+    assert 'cheap "unchanged" proxy' not in c
+
+
 def test_device_wifi_wired():
     # WiFi (#38): the device network.WLAN service backend + capability-gated `wifi`
     # injection + autoconnect + the shared credential store. Source-level checks

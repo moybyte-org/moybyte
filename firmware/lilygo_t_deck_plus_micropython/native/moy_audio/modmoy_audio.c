@@ -115,6 +115,14 @@ typedef struct _moy_voice_t {
     double   t;                // seconds into the current step
     double   phase;            // oscillator phase 0..1
     uint32_t noise;            // per-voice noise LCG state
+    // Commit sequence: bumped by every voice_set (under the mutex in core-1 mode).
+    // The core-1 task snapshots it with the rest of the voice and folds its advanced
+    // cursor back ONLY while seq is unchanged -- an exact "did core 0 re-commit this
+    // voice during my block?" test. The old proxy (same nsteps + first step +
+    // step_dur) aliased on a SAME-SFX retrigger, so a sound (re)started while the
+    // previous one was ending inside the task's 32 ms block got clobbered back to
+    // inactive at block end and never played (the overlapping-sfx drop).
+    uint32_t seq;
 } moy_voice_t;
 
 // The SHARED voice mirror -- the single handoff between core 0 (writer) and core 1
@@ -288,6 +296,9 @@ static mp_obj_t moy_audio_voice_set(size_t n_args, const mp_obj_t *a) {
     if (v->idx < 0) {
         v->idx = 0;
     }
+    // Mark this commit so the core-1 task's end-of-block fold-back knows the voice
+    // changed under it and must not clobber the fresh state (see moy_voice_t.seq).
+    v->seq += 1;
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_audio_voice_set_obj, 9, 9, moy_audio_voice_set);
@@ -382,20 +393,18 @@ static void moy_audio_task(void *arg) {
             xSemaphoreTake(s_voice_mutex, portMAX_DELAY);
         }
         for (int c = 0; c < MOY_CHANNELS; c++) {
-            // Only fold back voices that core 0 didn't re-trigger underneath us. We
-            // detect a retrigger by the step pointer identity is not available, so be
-            // conservative: only fold back when the shared voice still matches the
-            // snapshot's step list length + first step (a cheap "unchanged" proxy).
+            // Only fold back voices that core 0 didn't re-commit underneath us,
+            // detected EXACTLY by the per-voice commit counter: voice_set bumps
+            // shared->seq (under this same mutex), so seq == snapshot seq means no
+            // commit landed during our block and our advanced cursor is the truth.
+            // (The old proxy -- same nsteps + first step + step_dur -- aliased on a
+            // SAME-SFX retrigger: a sound restarted while its previous play was
+            // ending inside our block compared "unchanged", got folded back to the
+            // finished cursor with active=0, and never made a sample. seq cannot
+            // alias; a clobbered fresh trigger is impossible now.)
             moy_voice_t *shared = &moy_voices[c];
             moy_voice_t *s = &snap[c];
-            int unchanged = (shared->nsteps == s->nsteps);
-            if (unchanged && s->nsteps > 0) {
-                unchanged = (shared->steps[0][0] == s->steps[0][0] &&
-                             shared->steps[0][1] == s->steps[0][1] &&
-                             shared->steps[0][2] == s->steps[0][2] &&
-                             shared->step_dur == s->step_dur);
-            }
-            if (unchanged) {
+            if (shared->seq == s->seq) {
                 shared->active = s->active;
                 shared->idx    = s->idx;
                 shared->t      = s->t;
