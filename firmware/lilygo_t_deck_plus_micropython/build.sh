@@ -137,6 +137,9 @@ fi
 #   block_editor_ui.py -- the block editor's UI (#29 Part 2: BlockEditorUI +
 #                    BlockLayout, extracted from console.py); console.py does
 #                    `from block_editor_ui import BlockEditorUI, ...`
+#   map_editor_ui.py -- the map/tilemap editor's UI (#32: MapEditorUI, extracted
+#                    from console.py); console.py does `from map_editor_ui
+#                    import MapEditorUI, ...`
 #   audio.py      -- sound model + AudioEngine synth/mixer (#16)
 #   console.py    -- launcher + desktop + cards/code/paint UI + Pointer
 #   moy_carts.py  -- the .moy store (scan/load/save/create/duplicate/delete)
@@ -148,6 +151,7 @@ fi
 #                    SAME bytes the host does (pixel parity)
 cp "${REPO_ROOT}/runtime/editors.py" "${SCRIPT_DIR}/modules/editors.py"
 cp "${REPO_ROOT}/runtime/block_editor_ui.py" "${SCRIPT_DIR}/modules/block_editor_ui.py"
+cp "${REPO_ROOT}/runtime/map_editor_ui.py" "${SCRIPT_DIR}/modules/map_editor_ui.py"
 cp "${REPO_ROOT}/runtime/audio.py" "${SCRIPT_DIR}/modules/audio.py"
 cp "${REPO_ROOT}/runtime/console.py" "${SCRIPT_DIR}/modules/console.py"
 cp "${REPO_ROOT}/runtime/moy_carts.py" "${SCRIPT_DIR}/modules/moy_carts.py"
