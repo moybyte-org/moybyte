@@ -159,34 +159,34 @@ def scene_blocks(fps):
     r.settle(20)
     r.click(*_c(C._BLOCKS_BTN))                   # BLOCKS
     r.settle(18)
-    be = r.ws.blocks_ed
-    lay = r.ws.block_layout
+    be = r.ws.block_ui.blocks_ed
+    lay = r.ws.block_ui.block_layout
     # select a real `+` insert slot in the outline
     inserts = [i for i, row in enumerate(be.rows) if row.kind == "insert"]
     be.cur = inserts[1] if len(inserts) > 1 else inserts[0]
-    r.ws.blk_slot = 0
-    r.ws._blk_reveal()
+    r.ws.block_ui.blk_slot = 0
+    r.ws.block_ui._blk_reveal()
     r.ws.mark_dirty(); r.settle(8)
     # tap that `+` row (cursor is already the selected row -> opens the insert menu)
-    ry = lay.y0 + (be.cur - r.ws.blk_top) * lay.row_h + lay.row_h / 2
+    ry = lay.y0 + (be.cur - r.ws.block_ui.blk_top) * lay.row_h + lay.row_h / 2
     ax = lay.area()[0] + lay.area()[2] / 2
     r.click(ax, ry)                              # -> "PICK A KIND"
     r.settle(16)
     # pick the DRAW category, then its first block (cursor hovers the menu for show)
     mx, my, mw, mh = lay.menu
-    if r.ws.blk_menu is not None:
-        cats = r.ws.blk_menu["items"]
+    if r.ws.block_ui.blk_menu is not None:
+        cats = r.ws.block_ui.blk_menu["items"]
         di = cats.index("draw") if "draw" in cats else 0
         r.move_to(mx + mw / 2, my + 16 * lay.fs + (di + 0.5) * lay.menu_row_h)
         r.settle(6)
-        r.ws.blk_menu["sel"] = di
-        r.ws._blk_menu_select(); r.ws.mark_dirty(); r.settle(14)
-    if r.ws.blk_menu is not None:               # now the blocks in that category
+        r.ws.block_ui.blk_menu["sel"] = di
+        r.ws.block_ui._blk_menu_select(); r.ws.mark_dirty(); r.settle(14)
+    if r.ws.block_ui.blk_menu is not None:               # now the blocks in that category
         r.move_to(mx + mw / 2, my + 16 * lay.fs + 0.5 * lay.menu_row_h)
         r.settle(6)
-        r.ws.blk_menu["sel"] = 0
-        r.ws._blk_menu_select(); r.ws.mark_dirty(); r.settle(6)
-    r.ws._blk_reveal(); r.ws.mark_dirty()
+        r.ws.block_ui.blk_menu["sel"] = 0
+        r.ws.block_ui._blk_menu_select(); r.ws.mark_dirty(); r.settle(6)
+    r.ws.block_ui._blk_reveal(); r.ws.mark_dirty()
     r.settle(34)                                # show the new block snapped in
     return r.frames
 

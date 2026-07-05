@@ -97,7 +97,7 @@ def test_block_menu_320x240_is_byte_identical(tmp_path):
     bufs = []
     for ws in (a_ws, b_ws):
         _enter(ws, "blocks")
-        ws._blk_open_categories()          # open the modal insert menu
+        ws.block_ui._blk_open_categories()          # open the modal insert menu
         _quiesce(ws)
         ws.frame(1 / 30)
         bufs.append(bytes(ws.sys_canvas.buf))
@@ -164,8 +164,8 @@ def test_block_editor_shows_more_rows_and_wider_blocks(tmp_path):
     from runtime import console as C
     ws = _ws(tmp_path, sys_size=(960, 600))
     _enter(ws, "blocks")
-    assert ws.block_layout.rows > C._BLK_ROWS         # more than 11 rows
-    assert ws.block_layout.outline_w > C._BLK_W       # wider than 308
+    assert ws.block_ui.block_layout.rows > C._BLK_ROWS         # more than 11 rows
+    assert ws.block_ui.block_layout.outline_w > C._BLK_W       # wider than 308
 
 
 def test_code_editor_renders_without_error_on_large_canvas(tmp_path):
@@ -254,11 +254,11 @@ def test_block_editor_action_bar_tap_opens_menu(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     _enter(ws, "blocks")
     drv.frame(1 / 30)
-    lay = ws.block_layout
+    lay = ws.block_ui.block_layout
     bx, by, bw, bh = lay.add_btn
     drv.touch(bx + bw // 2, by + bh // 2)
     drv.frame(1 / 30)
-    assert ws.blk_menu is not None and ws.blk_menu["mode"] == "cat"
+    assert ws.block_ui.blk_menu is not None and ws.block_ui.blk_menu["mode"] == "cat"
 
 
 def test_block_editor_cursor_nav_works(tmp_path):
@@ -266,9 +266,9 @@ def test_block_editor_cursor_nav_works(tmp_path):
     from runtime import host_app
     ws = _ws(tmp_path, sys_size=(960, 600))
     _enter(ws, "blocks")
-    be = ws.blocks_ed
+    be = ws.block_ui.blocks_ed
     start = be.cur
-    ws._blk_move_cursor(1)
+    ws.block_ui._blk_move_cursor(1)
     assert be.cur != start or len(be.rows) <= 1
 
 

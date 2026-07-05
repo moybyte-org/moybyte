@@ -22,6 +22,13 @@ from . import editors as _editors
 sys.modules.setdefault("editors", _editors)
 sys.modules.setdefault("audio", _audio)
 sys.modules.setdefault("blocks", _blocks)   # moy_carts.save_blocks does `import blocks`
+# block_editor_ui.py is the block editor's UI (issue #29 Part 2, extracted from
+# console.py); it does `from editors import BlockEditor` (needs the alias above)
+# and console.py does `from block_editor_ui import BlockEditorUI, ...` (its own
+# frozen device name), so it needs the same bare-name aliasing -- imported only
+# after the editors/audio/blocks aliases above are in place.
+from . import block_editor_ui as _block_editor_ui
+sys.modules.setdefault("block_editor_ui", _block_editor_ui)
 
 from . import console  # noqa: E402  (after the editors/audio aliases above)
 from . import moy_carts  # noqa: E402  (shared .moy store; host-clean)

@@ -134,6 +134,9 @@ fi
 # sources live in runtime/ (imported by the host as runtime.*); the device freezes
 # these copies as top-level modules, so both consoles run literally the same code:
 #   editors.py    -- CodeEditor / SpriteSheet / PaintEditor
+#   block_editor_ui.py -- the block editor's UI (#29 Part 2: BlockEditorUI +
+#                    BlockLayout, extracted from console.py); console.py does
+#                    `from block_editor_ui import BlockEditorUI, ...`
 #   audio.py      -- sound model + AudioEngine synth/mixer (#16)
 #   console.py    -- launcher + desktop + cards/code/paint UI + Pointer
 #   moy_carts.py  -- the .moy store (scan/load/save/create/duplicate/delete)
@@ -144,6 +147,7 @@ fi
 #                    moy_gfx.text kernel (#62), so device text rasterizes from the
 #                    SAME bytes the host does (pixel parity)
 cp "${REPO_ROOT}/runtime/editors.py" "${SCRIPT_DIR}/modules/editors.py"
+cp "${REPO_ROOT}/runtime/block_editor_ui.py" "${SCRIPT_DIR}/modules/block_editor_ui.py"
 cp "${REPO_ROOT}/runtime/audio.py" "${SCRIPT_DIR}/modules/audio.py"
 cp "${REPO_ROOT}/runtime/console.py" "${SCRIPT_DIR}/modules/console.py"
 cp "${REPO_ROOT}/runtime/moy_carts.py" "${SCRIPT_DIR}/modules/moy_carts.py"
