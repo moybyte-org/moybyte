@@ -1894,14 +1894,16 @@ def _load_moy_runtime():
         spec.loader.exec_module(mod)
         sys.modules[name] = mod
 
-    # moy_runtime now also does `from device_util import ...` -- a device-only leaf
-    # module authored directly in modules/ (NOT staged from runtime/). Register it
-    # from modules/ so the device module execs under CPython.
-    du = importlib.util.spec_from_file_location(
-        "device_util", ROOT / "modules" / "device_util.py")
-    du_mod = importlib.util.module_from_spec(du)
-    du.loader.exec_module(du_mod)
-    sys.modules["device_util"] = du_mod
+    # moy_runtime now also does `from device_util import ...` / `from device_wifi
+    # import ...` -- device-only modules authored directly in modules/ (NOT staged
+    # from runtime/). Register them from modules/ so the device module execs under
+    # CPython (device_util first: device_wifi imports it).
+    for dname in ("device_util", "device_wifi"):
+        ds = importlib.util.spec_from_file_location(
+            dname, ROOT / "modules" / (dname + ".py"))
+        dmod = importlib.util.module_from_spec(ds)
+        ds.loader.exec_module(dmod)
+        sys.modules[dname] = dmod
 
     # moy_runtime now does `from carts_data import CARTS` (build-generated from
     # system_carts/ -- see tools/gen_device_carts.py). Register the same generated
@@ -2516,6 +2518,9 @@ def test_device_wifi_wired():
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
+    # The DeviceWifi backend + make_wifi/autoconnect_wifi now live in device_wifi.py
+    # (extracted from moy_runtime.py); run_desktop still calls them (asserts below).
+    device_wifi = (ROOT / "modules" / "device_wifi.py").read_text(encoding="utf-8")
 
     # make_api takes the gated wifi backend LAST and injects `wifi` only when set.
     assert "def make_api(canvas, input, config, sheet=None, audio=None," in runtime
@@ -2525,12 +2530,12 @@ def test_device_wifi_wired():
     # stack is brought up on demand (scan/connect), NEVER at boot -- bringing it up at
     # boot reserved the internal RAM the LCD DMA flush needs and froze the desktop
     # (OSError 257 / ESP_ERR_NO_MEM). The radio comes up only via _ensure_wlan.
-    assert "class DeviceWifi:" in runtime
-    assert "def _ensure_wlan(self):" in runtime           # lazy radio bring-up
-    assert "network.WLAN(network.STA_IF)" in runtime       # (lives inside _ensure_wlan now)
-    assert "def make_wifi(store=None, root=None):" in runtime
-    assert "def autoconnect_wifi(wifi):" in runtime        # still defined, but NOT called at boot
-    assert "NEEDS ON-DEVICE VERIFICATION" in runtime
+    assert "class DeviceWifi:" in device_wifi
+    assert "def _ensure_wlan(self):" in device_wifi        # lazy radio bring-up
+    assert "network.WLAN(network.STA_IF)" in device_wifi    # (lives inside _ensure_wlan now)
+    assert "def make_wifi(store=None, root=None):" in device_wifi
+    assert "def autoconnect_wifi(wifi):" in device_wifi     # still defined, but NOT called at boot
+    assert "NEEDS ON-DEVICE VERIFICATION" in device_wifi
     # run_desktop wires the system service but does NOT bring WiFi up at boot (WLAN
     # reserves the internal RAM the LCD DMA needs -- WiFi<->display coexistence is #38).
     assert "ws.wifi = make_wifi(moy_carts, carts_root)" in runtime
