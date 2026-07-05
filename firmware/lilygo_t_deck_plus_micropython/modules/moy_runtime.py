@@ -18,6 +18,11 @@ from array import array
 from editors import CodeEditor, PaintEditor, SpriteSheet
 from console import NAMES, Pointer, Workstation, _cursor_delta, color
 from carts_data import CARTS  # build-time generated from system_carts/ (tools/gen_device_carts.py)
+# Leaf tick + diag helpers (extracted to device_util.py so every device cluster can
+# import them without a moy_runtime cycle -- see device_util.py's module docstring).
+from device_util import (
+    _ticks_ms, _ticks_diff, _ticks_us, _diag_note, _diag_log,
+)
 
 # petme128 glyph blob for the native moy_gfx.text kernel (#62) -- staged from
 # runtime/font.py as moy_font by build.sh, so device text rasterizes from the SAME
@@ -2322,70 +2327,9 @@ class Touch:
 MOY_INPUT_POLLER = True
 
 
-def _ticks_ms():
-    try:
-        return time.ticks_ms()
-    except AttributeError:
-        return int(time.time() * 1000)
-
-
-def _ticks_diff(a, b):
-    try:
-        return time.ticks_diff(a, b)
-    except AttributeError:
-        return a - b
-
-
-def _ticks_us():
-    try:
-        return time.ticks_us()
-    except AttributeError:
-        return int(time.time() * 1000000)
-
-
-# --- offline diagnostics wiring (moybyte_diag) ------------------------------
-#
-# Thin guarded shims so the run_desktop loop can route prints + perf samples
-# through diag without each call site needing a try/except. `diag` is the
-# moybyte_diag module or None (import failed -> everything degrades to a no-op).
-# All device-side: the diag SAMPLING/wiring lives here, while the shared
-# runtime/console.py only EXPOSES the numbers (perf_capture + perf_sample), so it
-# stays host-safe.
-
-def _diag_note(tag, msg):
-    """Module-level convenience for call sites that don't hold a `diag` handle
-    (the audio/wifi/keyboard backends): lazily import moybyte_diag and persist +
-    print the line (logp). Falls back to a plain print if diag is unavailable.
-    Fully guarded -- a diag failure here must never affect the caller."""
-    try:
-        import moybyte_diag
-
-        moybyte_diag.logp(tag, msg)
-        return
-    except Exception:
-        pass
-    try:
-        print("Moybyte", tag, msg)
-    except Exception:
-        pass
-
-
-def _diag_log(tag, msg, diag):
-    """Persist a line to the diag ring AND print it live (boot serial is still
-    useful). logp() does both; falls back to a plain print if diag is absent.
-    `diag` is the already-imported module (or None) -- this is the hot-path
-    variant used inside run_desktop, avoiding a per-call import."""
-    if diag is not None:
-        try:
-            diag.logp(tag, msg)
-            return
-        except Exception:
-            pass
-    try:
-        print("Moybyte", tag, msg)
-    except Exception:
-        pass
-
+# _ticks_ms/_ticks_diff/_ticks_us + _diag_note/_diag_log now live in the leaf
+# device_util.py (imported at the top of this module), so extracted device
+# clusters can share them without a moy_runtime import cycle.
 
 def _diag_flush(diag, ws):
     """Flush the diag RAM ring to /sd/moybyte/diag.log via the workstation's live
