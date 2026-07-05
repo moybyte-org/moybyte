@@ -229,7 +229,8 @@ def test_device_web_view_wired_into_run_desktop_cooperatively():
     # were moy_runtime globals -- the move must carry them or they NameError at CALL
     # time (off the host-test path: class bodies exec fine, method bodies do not run).
     assert "from device_wifi import autoconnect_wifi" in device_webview
-    assert "from moy_runtime import AUDIO_RATE, _decode_moyimg, PAL565" in device_webview
+    assert "from device_audio import AUDIO_RATE" in device_webview
+    assert "from moy_runtime import _decode_moyimg, PAL565" in device_webview
     assert "skip_flush" in device_webview
     comp = (ROOT / "modules" / "moy_compositor.py").read_text(encoding="utf-8")
     assert "self.skip_flush" in comp            # flush() is a no-op while streaming
@@ -1915,7 +1916,7 @@ def _load_moy_runtime():
     # from runtime/). Register them from modules/ so the device module execs under
     # CPython (device_util first: device_wifi imports it).
     for dname in ("device_util", "device_wifi", "device_input", "device_diag",
-                  "device_webview"):
+                  "device_webview", "device_audio"):
         ds = importlib.util.spec_from_file_location(
             dname, ROOT / "modules" / (dname + ".py"))
         dmod = importlib.util.module_from_spec(ds)
@@ -2290,6 +2291,7 @@ def test_device_audio_wired():
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
+    device_audio = (ROOT / "modules" / "device_audio.py").read_text(encoding="utf-8")
 
     # The shared audio core: dependency-light (math only) synth + mixer + model.
     assert "class AudioEngine:" in audio
@@ -2311,17 +2313,17 @@ def test_device_audio_wired():
                  '"volume": _volume'):
         assert name in runtime, name
     # The device I2S backend is wired in (NEEDS ON-DEVICE VERIFICATION).
-    assert "class DeviceAudio:" in runtime
-    assert "from machine import I2S, Pin" in runtime
-    assert "mode=I2S.TX" in runtime
+    assert "class DeviceAudio:" in device_audio
+    assert "from machine import I2S, Pin" in device_audio
+    assert "mode=I2S.TX" in device_audio
     assert "ws.make_audio = make_audio" in runtime
     assert "NEEDS ON-DEVICE VERIFICATION" in runtime
     # The feed must be NON-BLOCKING: irq() flips the I2S port into non-blocking mode
     # and a completion flag gates the next write, so write() can never stall the
     # single-threaded render loop (the cause of the reported FPS drop / crackle).
-    assert "self.i2s.irq(self._on_done)" in runtime
-    assert "self.engine.render_into(buf, n)" in runtime
-    assert "if self._busy:" in runtime
+    assert "self.i2s.irq(self._on_done)" in device_audio
+    assert "self.engine.render_into(buf, n)" in device_audio
+    assert "if self._busy:" in device_audio
     # sounds.json storage in the shared cart store.
     assert "def save_sounds(cart, bank_dict):" in carts
     assert '"sounds": sounds' in carts
@@ -2393,6 +2395,7 @@ def test_native_moy_audio_mixer_wired():
     cmake = (ROOT / "native" / "moy_audio" / "micropython.cmake").read_text(encoding="utf-8")
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    device_audio = (ROOT / "modules" / "device_audio.py").read_text(encoding="utf-8")
 
     # The C module exposes the per-block kernel API + registers as `moy_audio`.
     assert "MP_REGISTER_MODULE(MP_QSTR_moy_audio" in c
@@ -2407,19 +2410,19 @@ def test_native_moy_audio_mixer_wired():
 
     # DeviceAudio prefers the native mixer but keeps a Python fallback so a build
     # WITHOUT moy_audio still works (and the host is unaffected).
-    assert "import moy_audio" in runtime
-    assert "self._moy_audio = moy_audio" in runtime
-    assert "self._moy_audio = None" in runtime                      # fallback branch
-    assert "def _render_native(self, buf, n):" in runtime
-    assert "if self._moy_audio is not None:" in runtime
-    assert "self._render_native(buf, n)" in runtime
-    assert "self.engine.render_into(buf, n)" in runtime            # Python fallback path
+    assert "import moy_audio" in device_audio
+    assert "self._moy_audio = moy_audio" in device_audio
+    assert "self._moy_audio = None" in device_audio                      # fallback branch
+    assert "def _render_native(self, buf, n):" in device_audio
+    assert "if self._moy_audio is not None:" in device_audio
+    assert "self._render_native(buf, n)" in device_audio
+    assert "self.engine.render_into(buf, n)" in device_audio            # Python fallback path
     # The native path keeps the Python engine the source of truth: it still runs the
     # music scheduler in Python and pushes/reads voice state around the C mix.
-    assert "eng._advance_music" in runtime
-    assert "ka.voice_set(" in runtime
-    assert "ka.render(buf, n, eng.rate, eng.volume)" in runtime
-    assert "ka.voice_read(c)" in runtime
+    assert "eng._advance_music" in device_audio
+    assert "ka.voice_set(" in device_audio
+    assert "ka.render(buf, n, eng.rate, eng.volume)" in device_audio
+    assert "ka.voice_read(c)" in device_audio
 
 
 def test_native_moy_audio_core1_task_wired():
@@ -2432,6 +2435,7 @@ def test_native_moy_audio_core1_task_wired():
     c = (ROOT / "native" / "moy_audio" / "modmoy_audio.c").read_text(encoding="utf-8")
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     audio_src = (Path("runtime") / "audio.py").read_text(encoding="utf-8")
+    device_audio = (ROOT / "modules" / "device_audio.py").read_text(encoding="utf-8")
 
     # The C side spawns a FreeRTOS task PINNED TO CORE 1 that owns the I2S write loop.
     assert "xTaskCreatePinnedToCore(" in c
@@ -2461,48 +2465,48 @@ def test_native_moy_audio_core1_task_wired():
         assert name in c, name
 
     # The Python DeviceAudio prefers the core-1 task and exposes a revert flag.
-    assert "MOY_AUDIO_CORE1 = True" in runtime          # default-on, the crackle fix
-    assert "if MOY_AUDIO_CORE1 and self._moy_audio is not None:" in runtime
-    assert "self._moy_audio.audio_start(I2S_BCK, I2S_WS, I2S_DOUT, AUDIO_RATE)" in runtime
-    assert "self._core1 = True" in runtime
+    assert "MOY_AUDIO_CORE1 = True" in device_audio          # default-on, the crackle fix
+    assert "if MOY_AUDIO_CORE1 and self._moy_audio is not None:" in device_audio
+    assert "self._moy_audio.audio_start(I2S_BCK, I2S_WS, I2S_DOUT, AUDIO_RATE)" in device_audio
+    assert "self._core1 = True" in device_audio
     # In core-1 mode tick() does NO per-frame I2S write / per-sample mix -- it only
     # schedules + commits voice state across to the C task.
-    assert "def _tick_core1(self, dt):" in runtime
-    assert "if self._core1:" in runtime
-    assert "ka.voice_lock()" in runtime
-    assert "ka.voice_unlock()" in runtime
-    assert "ka.active_mask()" in runtime
-    assert "ka.voice_set(c, v.active, v.steps, v.step_dur, v.loop," in runtime
+    assert "def _tick_core1(self, dt):" in device_audio
+    assert "if self._core1:" in device_audio
+    assert "ka.voice_lock()" in device_audio
+    assert "ka.voice_unlock()" in device_audio
+    assert "ka.active_mask()" in device_audio
+    assert "ka.voice_set(c, v.active, v.steps, v.step_dur, v.loop," in device_audio
     # BATTLE CITY FIX (#41): commit is keyed off the monotonic _Voice.gen counter, NOT
     # (id(steps), active). id(steps) aliases on a GC list-address reuse, so a rapid
     # same-SFX retrigger read as "unchanged" and was never committed (silent). gen
     # bumps on every play()/stop(), so every rapid/overlapping sfx commits.
-    assert "self._commit_gen" in runtime               # gen-keyed dirty tracking
+    assert "self._commit_gen" in device_audio               # gen-keyed dirty tracking
     assert "self.gen" in audio_src                      # _Voice.gen counter (audio.py)
-    assert "voices[c].gen != self._commit_gen[c]" in runtime
-    assert "self._commit_gen[c] = v.gen" in runtime
+    assert "voices[c].gen != self._commit_gen[c]" in device_audio
+    assert "self._commit_gen[c] = v.gen" in device_audio
     # The mask-clear must NOT clobber a voice the cart re-triggered this frame: it only
     # honours a done-clear when gen still matches the last commit (no pending trigger).
-    assert "v.gen == self._commit_gen[c]" in runtime
+    assert "v.gen == self._commit_gen[c]" in device_audio
     assert "self.gen += 1" in audio_src                 # bumped on play() AND stop()
     # The legacy single-core feed stays as the FALLBACK (machine.I2S) so a bad result
     # is revert-able (MOY_AUDIO_CORE1=False) and a no-moy_audio build still works. It now
     # TOPS the deep DMA ring UP toward full each tick (the single-core crackle fix)
     # instead of feeding exactly rate*dt (which kept the ring near-empty -> under-ran).
-    assert "legacy single-core feed (fallback)" in runtime
-    assert "if not self._core1:" in runtime            # only open machine.I2S in fallback
-    assert "self.i2s = I2S(" in runtime
-    assert "AUDIO_IBUF_FRAMES = AUDIO_IBUF // 2" in runtime
-    assert "self._buffered" in runtime                  # software ring-occupancy estimate
-    assert "want = AUDIO_IBUF_FRAMES - self._buffered" in runtime
-    assert "self._buffered += n" in runtime             # account for what we wrote
+    assert "legacy single-core feed (fallback)" in device_audio
+    assert "if not self._core1:" in device_audio            # only open machine.I2S in fallback
+    assert "self.i2s = I2S(" in device_audio
+    assert "AUDIO_IBUF_FRAMES = AUDIO_IBUF // 2" in device_audio
+    assert "self._buffered" in device_audio                  # software ring-occupancy estimate
+    assert "want = AUDIO_IBUF_FRAMES - self._buffered" in device_audio
+    assert "self._buffered += n" in device_audio             # account for what we wrote
     # AUDIO DIAGNOSTICS: each sfx/music trigger logs an event line; core-1 logs a
     # rate-limited active=/committed= sample so Battle City's audio is debuggable blind.
-    assert "AUDIO_DIAG = True" in runtime
-    assert "def _diag_trigger(self, kind, n, chan):" in runtime
-    assert "def _diag_core1_sample(self, mask):" in runtime
-    assert '_diag_note("AUDIO"' in runtime
-    assert "core1 active=%d committed=%d" in runtime
+    assert "AUDIO_DIAG = True" in device_audio
+    assert "def _diag_trigger(self, kind, n, chan):" in device_audio
+    assert "def _diag_core1_sample(self, mask):" in device_audio
+    assert '_diag_note("AUDIO"' in device_audio
+    assert "core1 active=%d committed=%d" in device_audio
 
 
 def test_core1_writeback_cannot_clobber_a_fresh_trigger():
@@ -2696,6 +2700,7 @@ def test_micropython_offline_diag_wiring():
     # so the 13-60ms keyboard stalls are sized across a session, not just inside
     # >80ms HITCH frames.
     inp_mod = (ROOT / "modules" / "moybyte" / "input.py").read_text(encoding="utf-8")
+    device_audio = (ROOT / "modules" / "device_audio.py").read_text(encoding="utf-8")
     assert "def _timed_read(self, nbytes):" in inp_mod
     assert "I2C_TIMEOUT_US" in inp_mod
     assert 'diag.log("I2CSTAT",' in device_diag
@@ -2706,7 +2711,7 @@ def test_micropython_offline_diag_wiring():
     assert '_diag_log("mem",' in runtime
     assert '_diag_log("frame error", exc, diag)' in runtime
     assert '_diag_log("cart error", _ce, diag)' in runtime
-    assert '_diag_note("audio", "I2S' in runtime
+    assert '_diag_note("audio", "I2S' in device_audio
 
 
 def test_ota_two_channel_wired():

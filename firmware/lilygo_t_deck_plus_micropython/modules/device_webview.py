@@ -410,11 +410,12 @@ class WebView:
 
     # -- data the server asks for --------------------------------------------
     def assets(self):
-        # PAL565 / _decode_moyimg live in moy_runtime's canvas cluster and AUDIO_RATE
-        # in its audio consts (neither extracted yet). Lazy import here (call time,
-        # after both modules are loaded) to reach them without a load-time cycle --
-        # repoint to device_canvas / device_audio when those extract.
-        from moy_runtime import AUDIO_RATE, _decode_moyimg, PAL565
+        # AUDIO_RATE now lives in device_audio; PAL565 / _decode_moyimg are still in
+        # moy_runtime's canvas cluster (not extracted yet) -- lazy import at call time
+        # avoids a moy_runtime load cycle; repoint PAL565/_decode_moyimg to
+        # device_canvas when that extracts.
+        from device_audio import AUDIO_RATE
+        from moy_runtime import _decode_moyimg, PAL565
         ws = self._ws
         cart = getattr(ws, "cart", None)
         title = cart.get("title") if cart else None
