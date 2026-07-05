@@ -155,10 +155,11 @@ class DeviceCanvas:
         # virtually every frame. The big verbs call self._pump() right after
         # their native call instead. None on layers / host fakes (no bounce).
         self._pump = getattr(compositor, "pump_if_pending", None)
-        # DMA double-buffer (#40, default OFF): the compositor's BACK buffer ping-pongs
-        # between two physical buffers each flush, so this canvas must re-point its
-        # draw target at it every frame (sync_back) -- a stale pointer would draw into
-        # the buffer that's being DMA'd (tear). framebuf can't retarget its backing
+        # DMA double-buffer (#40, DEFAULT ON -- moy_compositor.DOUBLE_BUFFER, device-
+        # confirmed stable): the compositor's BACK buffer ping-pongs between two
+        # physical buffers each flush, so this canvas must re-point its draw target
+        # at it every frame (sync_back) -- a stale pointer would draw into the
+        # buffer that's being DMA'd (tear). framebuf can't retarget its backing
         # store in place, so cache one framebuf per physical buffer keyed by id(buf)
         # and pick the matching one on each swap; no per-frame allocation. In
         # single-buffer mode framebuffer() never moves, so sync_back is a cheap no-op.
@@ -170,13 +171,14 @@ class DeviceCanvas:
         # blit_window_from. _async_ok latches False on the first driver refusal
         # (old firmware / no gdma / bad alignment) so we never retry per frame.
         #
-        # LAYER_COPY_ASYNC=False (hardware verdict 2026-07-03): the copy WORKS
-        # (layer= 7ms -> 0.04ms on Sakura) but it is a second GDMA engine doing a
-        # full-throttle PSRAM->PSRAM copy kicked right as the panel DMA starts its
-        # 153KB PSRAM read -- the panel FIFO starves and the SPI clocks out garbage
-        # (horizontal bands, worst exactly in the one cart using layers). Until the
-        # kick is re-ordered off the panel-DMA window (or the flush reads internal
-        # SRAM), stay on the sync window copy: correct pixels beat the 7ms.
+        # LAYER_COPY_ASYNC is now DEFAULT ON (tied 1:1 to moy_compositor.SRAM_BOUNCE_
+        # FLUSH, see the module-level comment above): it was hardware-verdict FALSE
+        # on 2026-07-03 because the copy is a second GDMA engine doing a full-
+        # throttle PSRAM->PSRAM blit that, run against a panel DMA reading PSRAM
+        # directly, starved the SPI FIFO into horizontal garbage bands (worst in the
+        # one cart using layers). The #66 SRAM-bounce flush removed the contention
+        # target -- the panel now only ever reads internal SRAM -- so the async copy
+        # (layer= 7ms -> 0.04ms on Sakura) is safe again and shipped as the default.
         self._lcopy_pred = None
         self._lcopy = None
         self._lcopy_trips = 0     # copy_wait timeouts (#66 HITCH v3 diagnostics)
@@ -2389,16 +2391,20 @@ def _diag_flush(diag, ws):
     """Flush the diag RAM ring to /sd/moybyte/diag.log via the workstation's live
     SD session wrapper (with_sd_live). Guarded: a flush failure is a no-op so it
     can never crash the loop. Skips the write when SD management is disabled (the
-    embedded-carts fallback, where carts_root is None -> no writable SD root)."""
+    embedded-carts fallback, where carts_root is None -> no writable SD root).
+    Returns the elapsed ms (0 if skipped/failed) so callers get their _t_sd
+    timing for free instead of each wrapping their own _t0/_ticks_diff pair."""
     if diag is None:
-        return
+        return 0
+    t0 = _ticks_ms()
     try:
         if not getattr(ws, "can_manage", False):
-            return
+            return 0
         with_sd = getattr(ws, "_with_sd", None)
         diag.flush_to_sd(with_sd)
     except Exception:
-        pass
+        return 0
+    return _ticks_diff(_ticks_ms(), t0)
 
 
 def _diag_perf_sample(diag, ws):
@@ -3607,7 +3613,7 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         pointer.click = click
         pointer.tick(now)                       # auto-hide the idle trackball cursor
         _t_inp = _ticks_diff(_ticks_ms(), _t0)  # trackball + touch + pointer (HITCH v2)
-        # DMA double-buffer (#40, default OFF): point the canvas at the compositor's
+        # DMA double-buffer (#40, DEFAULT ON): point the canvas at the compositor's
         # current BACK buffer before drawing. The previous flush() swapped it, so this
         # frame's cls/rect/spr/map must target the new back, never the buffer that's
         # mid-DMA. No-op (buffer unchanged) in single-buffer mode or on a skipped frame.
@@ -3712,15 +3718,11 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         _cart_now = ws.cart is not None
         _t_sd = 0
         if diag is not None and _diag_cart_prev and not _cart_now:
-            _t0 = _ticks_ms()
-            _diag_flush(diag, ws)       # #68: cart exited -> persist the session's ring
-            _t_sd = _ticks_diff(_ticks_ms(), _t0)
+            _t_sd = _diag_flush(diag, ws)  # #68: cart exited -> persist the session's ring
         _diag_cart_prev = _cart_now
         if diag is not None and _live and _ticks_diff(_tnow, _diag_flush_at) >= 0:
             _diag_flush_at = _tnow + (20000 if ws.cart is not None else 5000)
-            _t0 = _ticks_ms()
-            _diag_flush(diag, ws)
-            _t_sd = _ticks_diff(_ticks_ms(), _t0)
+            _t_sd = _diag_flush(diag, ws)
         # Web view (#41): service the server BETWEEN frames, fully non-blocking -- accept
         # new connections + drain the persistent WebSocket's queued input and push the
         # latest committed frame down it (WiFi STA is a separate peripheral from the display

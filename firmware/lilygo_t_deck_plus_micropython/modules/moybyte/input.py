@@ -92,8 +92,7 @@ class TDeckKeyboard:
     # failures mean the keyboard is genuinely gone (see _read_error).
     ERR_RUN_LIMIT = 10
     _err_run = 0
-    _raw_last = ()        # last good raw matrix state, held across a capped stall
-    _raw_last_key = 0     # ...and its synthesized key, held for the same reason
+    _raw_last = ((), 0)   # (buttons, key) held across a capped stall -- see below
     # #69 input-poller thread: when a poller owns the I2C bus, set_game_mode must
     # not write I2C from the main thread -- it queues the target here and the
     # poller applies it between reads (apply_pending_mode).
@@ -187,16 +186,10 @@ class TDeckKeyboard:
             # and let the poller apply it between reads (a main-thread write here
             # could collide with a poller read mid-stall). Queuing the RAW target
             # (not the resolved want) keeps the RAW_GAME_MODE/_raw_unsupported
-            # resolution in one place, at apply time.
+            # resolution in one place, at apply time (_resolve_raw_want).
             self._want_game = bool(on)
             return
-        want = bool(on) and self.RAW_GAME_MODE and not self._raw_unsupported
-        if want == self.raw_mode:
-            return
-        if want:
-            self._enable_raw_mode()      # sends 0x03; sets raw_mode True on success
-        else:
-            self._disable_raw_mode()     # sends 0x04; back to 1-byte ASCII
+        self._apply_raw_want(self._resolve_raw_want(on))
 
     def apply_pending_mode(self):
         """#69 POLLER THREAD ONLY: apply a set_game_mode target the main thread
@@ -206,13 +199,22 @@ class TDeckKeyboard:
         if w is None:
             return
         self._want_game = None
-        want = w and self.RAW_GAME_MODE and not self._raw_unsupported
+        self._apply_raw_want(self._resolve_raw_want(w))
+
+    def _resolve_raw_want(self, on):
+        """Resolve a set_game_mode(on) request into the actual raw-mode target:
+        honours RAW_GAME_MODE (the force-ASCII override) and _raw_unsupported
+        (old-firmware fallback) in exactly one place, whichever thread calls in."""
+        return bool(on) and self.RAW_GAME_MODE and not self._raw_unsupported
+
+    def _apply_raw_want(self, want):
+        """Send the mode-switch I2C command, only on a real transition."""
         if want == self.raw_mode:
             return
         if want:
-            self._enable_raw_mode()
+            self._enable_raw_mode()      # sends 0x03; sets raw_mode True on success
         else:
-            self._disable_raw_mode()
+            self._disable_raw_mode()     # sends 0x04; back to 1-byte ASCII
 
     def _disable_raw_mode(self):
         try:
@@ -285,12 +287,11 @@ class TDeckKeyboard:
             # state one frame stale is invisible; a phantom edge is not. Only the
             # consecutive-failure limit ends the session (see _read_error).
             self._read_error(exc, "raw read")
-            return (self._raw_last, self._raw_last_key)
+            return self._raw_last
         if len(data) < 5:
             self.raw_mode = False
-            self._raw_last = ()
-            self._raw_last_key = 0
-            return ((), 0)
+            self._raw_last = ((), 0)
+            return self._raw_last
         if data[1] == 0 and data[2] == 0 and data[3] == 0 and data[4] == 0:
             key = data[0]
             buttons = self._buttons_for_key(key) if key > 0x20 else ()
@@ -341,14 +342,8 @@ class TDeckKeyboard:
         if d4 & 0x08:
             buttons.append("home")
             key = 0x08
-        buttons = tuple(buttons)
-        self._raw_last = buttons     # held across a capped-stall frame (see above)
-        self._raw_last_key = key
-        return (buttons, key)
-
-    def _map_key(self, key):
-        for button in self._buttons_for_key(key):
-            self.input.set_button(button, True)
+        self._raw_last = (tuple(buttons), key)  # held across a capped stall (see above)
+        return self._raw_last
 
     def _buttons_for_key(self, key):
         if key in (ord("a"), ord("A"), ord("h"), ord("H")):
@@ -425,7 +420,13 @@ class InputPoller:
         self.period = self.POLL_MS if period_ms is None else period_ms
         self.alive = False
         self._stop = False
-        self._stage = ((), 0, False)   # (buttons, key, is_raw) -- atomic tuple swap
+        # Keyboard staging: which mode the LAST pass saw, plus the two state
+        # shapes that mode needs (only one is ever live at a time, but keeping
+        # both named -- instead of one mixed 3-tuple -- makes consume() read
+        # as "raw: use the snapshot; ascii: use the latch + dequeue a byte").
+        self._kbd_is_raw = False
+        self._raw_stage = ((), 0)      # raw-matrix (buttons, key) -- LEVEL state
+        self._ascii_buttons = ()       # ASCII fallback hold-latch -- LEVEL state
         self._keyq = []                # one-shot ASCII bytes awaiting delivery
         self._last_key = 0             # last byte consume() applied (edge gapping)
         self._tpoint = None            # freshest GT911 point since last consume
@@ -462,13 +463,14 @@ class InputPoller:
         if kbd is not None and kbd.available:
             kbd.apply_pending_mode()
             buttons, key = kbd._read_stage()
-            if kbd.raw_mode:
-                self._stage = (buttons, key, True)
+            self._kbd_is_raw = kbd.raw_mode
+            if self._kbd_is_raw:
+                self._raw_stage = (buttons, key)
             else:
-                # ASCII bytes are events: queue each (bounded), stage the latch.
+                self._ascii_buttons = buttons
+                # ASCII bytes are one-shot events: queue each one (bounded).
                 if key and len(self._keyq) < 16:
                     self._keyq.append(key)
-                self._stage = (buttons, 0, False)
         t = self.touch
         if t is not None and t.available:
             r = t.read_raw()
@@ -481,18 +483,28 @@ class InputPoller:
     def consume(self):
         """Apply the staged keyboard state to InputState -- the frame loop's
         replacement for keyboard.poll(). Cheap and I2C-free."""
-        buttons, key, is_raw = self._stage
-        if not is_raw:
-            key = 0
-            if self._keyq:
-                if self._keyq[0] == self._last_key:
-                    self._last_key = 0     # release frame: give keyp() its edge
-                else:
-                    key = self._keyq.pop(0)
-                    self._last_key = key
-            else:
-                self._last_key = 0
+        if self._kbd_is_raw:
+            buttons, key = self._raw_stage
+        else:
+            buttons, key = self._ascii_buttons, self._dequeue_key()
         self.kbd._apply((buttons, key))
+
+    def _dequeue_key(self):
+        """Pop the next queued ASCII byte for delivery this frame -- unless
+        it's an exact repeat of the byte consume() JUST delivered, in which
+        case deliver a 0 (release) frame instead and leave it queued. Without
+        this gap, two rapid same-letter presses ("aa") would read as one
+        continuously-held key to keyp()'s edge detector, silently losing the
+        second press."""
+        if not self._keyq:
+            self._last_key = 0
+            return 0
+        if self._keyq[0] == self._last_key:
+            self._last_key = 0
+            return 0
+        key = self._keyq.pop(0)
+        self._last_key = key
+        return key
 
     def consume_touch(self):
         """One raw GT911 sample per frame (wired as Touch._source): the
