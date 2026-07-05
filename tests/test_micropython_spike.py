@@ -1799,15 +1799,18 @@ def test_hitch_logger_wired():
     # (diag sample / diag SD write / web poll) -- the tool for the Sakura
     # "micro-stutter every couple of seconds" hunt.
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-    assert "HITCH_MS = 80" in runtime
-    assert "def _diag_hitch(" in runtime
+    # The _diag_* logging functions (incl. _diag_hitch + HITCH_MS) now live in
+    # device_diag.py; run_desktop still CALLS them (assert below stays vs runtime).
+    device_diag = (ROOT / "modules" / "device_diag.py").read_text(encoding="utf-8")
+    assert "HITCH_MS = 80" in device_diag
+    assert "def _diag_hitch(" in device_diag
     # v2: input polls + ws.frame timed (v1 showed hitches with all stages zero).
     # v3: sync_back timed (the GDMA layer kick was still unmeasured), RAW phase
     # split printed (EMAs hid which phase a single spike lived in), pump= and
     # lw= (copy_wait trips) added; copy_wait is bounded ~250k spins and REPORTS
     # a trip, with the consume site forcing the sync path on one.
     assert "_diag_hitch(diag, ws, comp, elapsed, _t_kbd, _t_inp, _t_sb, _t_ws," in runtime
-    assert "pump=%.1f lw=%d raw(logic=%.1f" in runtime
+    assert "pump=%.1f lw=%d raw(logic=%.1f" in device_diag
     assert "self._lcopy_trips += 1" in runtime
     console_src = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     assert "def perf_breakdown_raw(self):" in console_src
@@ -1856,9 +1859,11 @@ def test_cache_geometry_upgraded_in_build():
 def test_gc_diag_is_low_cadence():
     # #63: the forced-collect GC sample costs ~130ms on a cart-sized live set --
     # running it every 3s was a visible periodic hitch. 1-in-10 samples only.
-    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-    assert "_GC_TICK = [0]" in runtime
-    assert "if tick % 10 != 0:" in runtime
+    # _diag_gc + its cadence state now live in device_diag.py (extracted from
+    # moy_runtime.py); run_desktop calls _diag_gc(diag) between frames.
+    device_diag = (ROOT / "modules" / "device_diag.py").read_text(encoding="utf-8")
+    assert "_GC_TICK = [0]" in device_diag
+    assert "if tick % 10 != 0:" in device_diag
 
 
 def test_scroll_layer_buffer_is_off_gc_heap():
@@ -1901,7 +1906,7 @@ def _load_moy_runtime():
     # import ...` -- device-only modules authored directly in modules/ (NOT staged
     # from runtime/). Register them from modules/ so the device module execs under
     # CPython (device_util first: device_wifi imports it).
-    for dname in ("device_util", "device_wifi", "device_input"):
+    for dname in ("device_util", "device_wifi", "device_input", "device_diag"):
         ds = importlib.util.spec_from_file_location(
             dname, ROOT / "modules" / (dname + ".py"))
         dmod = importlib.util.module_from_spec(ds)
@@ -2585,6 +2590,10 @@ def test_micropython_offline_diag_wiring():
     shell = (ROOT / "modules" / "moybyte_shell.py").read_text(encoding="utf-8")
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    # The _diag_* logging functions moved to device_diag.py (extracted from
+    # moy_runtime.py); run_desktop still CALLS them (the _diag_X(...) asserts
+    # stay vs runtime, the def/log-format asserts point at device_diag).
+    device_diag = (ROOT / "modules" / "device_diag.py").read_text(encoding="utf-8")
 
     # The diag module exists with the bounded ring + the stable dump markers + the
     # single-file (one-session) log path.
@@ -2619,15 +2628,15 @@ def test_micropython_offline_diag_wiring():
     assert "def flush_to_sd(with_sd):" in diag
     assert 'open(LOG_PATH, "w")' in diag                  # overwrite, never append
     assert "_diag_flush(diag, ws)" in runtime
-    assert 'with_sd = getattr(ws, "_with_sd", None)' in runtime   # = with_sd_live
-    assert "diag.flush_to_sd(with_sd)" in runtime
+    assert 'with_sd = getattr(ws, "_with_sd", None)' in device_diag   # = with_sd_live (in _diag_flush)
+    assert "diag.flush_to_sd(with_sd)" in device_diag
 
     # Perf samples: a structured PERF line sampled every few seconds while a cart
     # runs (the per-cart frame-timing payload for the offline dump).
     assert "def format_perf(cart, fps, flush_ms, draw_ms):" in diag
     assert 'return "PERF cart=%s fps=%d flush=%d draw=%d" % (' in diag
     assert "_diag_perf_sample(diag, ws)" in runtime
-    assert "ws.perf_sample()" in runtime
+    assert "ws.perf_sample()" in device_diag
     # The shared console EXPOSES the numbers host-safely; the device SAMPLES them.
     assert "def perf_sample(self):" in console
     assert "self.perf_capture = False" in console         # default off -> host identical
@@ -2638,23 +2647,23 @@ def test_micropython_offline_diag_wiring():
     # cart _draw (render) / audio.tick / console chrome, sampled alongside PERF so we
     # can see where the per-frame draw cost actually goes instead of guessing.
     assert "def perf_breakdown(self):" in console
-    assert 'diag.log("DRAWBRK", "logic=%.2f render=%.2f audio=%.2f chrome=%.2f"' in runtime
+    assert 'diag.log("DRAWBRK", "logic=%.2f render=%.2f audio=%.2f chrome=%.2f"' in device_diag
     assert "_diag_drawbrk(diag, ws)" in runtime
-    assert "ws.perf_breakdown()" in runtime
+    assert "ws.perf_breakdown()" in device_diag
 
     # GC line (#63, sakura ~14fps profiling): the forced-collect pause + churn, sampled on
     # the ~3s cadence (gc.mem_alloc/free WALK the heap, so never per frame).
-    assert "def _diag_gc(diag):" in runtime
-    assert 'diag.log("GC", "collect=%dms free=%dk live=%dk churn=%dk"' in runtime
+    assert "def _diag_gc(diag):" in device_diag
+    assert 'diag.log("GC", "collect=%dms free=%dk live=%dk churn=%dk"' in device_diag
     assert "_diag_gc(diag)" in runtime
 
     # DRAW2 line (#63): split the render EMA into the two native pixel ops -- the layer
     # window-copy (blit_window) vs the sprite blit_batch -- so we know which one is the
     # real cost of a full-frame cart (sakura's ~120ms render). Timed in microseconds
     # around the native calls, reset per frame by batch_reset.
-    assert "def _diag_draw2(diag, ws):" in runtime
+    assert "def _diag_draw2(diag, ws):" in device_diag
     assert ('diag.log("DRAW2", "layer=%.2fms batch=%.2fms '
-            'map=%.2fms text=%.2fms fill=%.2fms"') in runtime
+            'map=%.2fms text=%.2fms fill=%.2fms"') in device_diag
     assert "_diag_draw2(diag, ws)" in runtime
     assert "self._t_layer_us += _ticks_diff(_ticks_us(), _t0)" in runtime
     assert "self._t_batch_us += _ticks_diff(_ticks_us(), _t0)" in runtime
@@ -2664,14 +2673,14 @@ def test_micropython_offline_diag_wiring():
     # CHROMEBRK (#66 lever 5): the sub-split of the chrome remainder (bar /
     # composite / cursor / other) so a trim targets the real cost.
     assert "def perf_chrome(self):" in console
-    assert 'diag.log("CHROMEBRK", "bar=%.2f cmp=%.2f cur=%.2f other=%.2f"' in runtime
+    assert 'diag.log("CHROMEBRK", "bar=%.2f cmp=%.2f cur=%.2f other=%.2f"' in device_diag
     assert "_diag_chromebrk(diag, ws)" in runtime
 
     # PUMP (#66 lever 4): bounce-feed pacing -- SPI idle gaps + feed time, the
     # measure-first data for band size / pump period / third-slot tuning.
     compositor = (ROOT / "modules" / "moy_compositor.py").read_text(encoding="utf-8")
     assert "def bounce_stats(self):" in compositor
-    assert 'diag.log("PUMP", "pump=%.2f idle=%.2f gaps=%d feed=%.2f bands=%d"' in runtime
+    assert 'diag.log("PUMP", "pump=%.2f idle=%.2f gaps=%d feed=%.2f bands=%d"' in device_diag
     assert "_diag_pump(diag, comp)" in runtime
 
     # I2CSTAT (#69): per-session kbd/touch I2C latency (max + >5ms/>20ms counts),
@@ -2680,7 +2689,7 @@ def test_micropython_offline_diag_wiring():
     inp_mod = (ROOT / "modules" / "moybyte" / "input.py").read_text(encoding="utf-8")
     assert "def _timed_read(self, nbytes):" in inp_mod
     assert "I2C_TIMEOUT_US" in inp_mod
-    assert 'diag.log("I2CSTAT",' in runtime
+    assert 'diag.log("I2CSTAT",' in device_diag
     assert "_diag_i2cstat(diag, keyboard, touch)" in runtime
 
     # Existing diagnostics routed through diag (printed AND persisted): boot heap,
