@@ -118,6 +118,15 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.update_ui import UpdateUI
 
+# The ≡ dropdown / system menu's UI layer (#52, extracted from this file): the row
+# builder + per-item actions + drawing. The sysmenu Popup, _about flag, reboot_hook
+# and toggle_sysmenu() stay on Workstation (tested ws. surface + device). Same
+# bare-or-package fallback as the editors above.
+try:
+    from system_menu_ui import SystemMenuUI
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.system_menu_ui import SystemMenuUI
+
 # The block vocabulary/compiler (#29). Imported under whichever name it's known by:
 # bare `blocks` on the device (frozen top-level) and on the host once host_app has
 # aliased it, or `runtime.blocks` when a test loads console/moy_runtime directly
@@ -1855,6 +1864,11 @@ class Workstation:
         # open. `_about` is a tiny dismissible info modal the About row pops.
         self.sysmenu = Popup()
         self._about = False
+        # The ≡ dropdown / system menu's UI (#52, extracted from this class -- see
+        # system_menu_ui.py): the row builder + per-item actions + drawing.
+        # toggle_sysmenu() + the sysmenu Popup + _about flag stay here (tested ws.
+        # surface); the menu just delegates item-building/drawing to this.
+        self.menu_ui = SystemMenuUI(self, NAMES)
         # Reboot hook: the device injects a callable (machine.reset via the OTA
         # updater); None on the host -> the Reboot row is a safe no-op (go_home).
         self.reboot_hook = None
@@ -2427,58 +2441,13 @@ class Workstation:
     # actions wire to the existing console flows (open_settings, apply = re-run, the SD
     # delete path). Selecting any row closes the menu (Popup.activate closes first).
 
-    def _sysmenu_items(self):
-        """The rows for this open of the ≡ menu (see class note for the tuple form).
-        The cart group is OMITTED entirely (not greyed) when no cart is open."""
-        rows = []
-        if self.cart is not None:
-            rows.append(("header", "CART"))
-            rows.append(("item", "RESTART CART", self._menu_restart_cart))
-            rows.append(("item", "DELETE CART", self._menu_delete_cart))
-            rows.append(("sep",))
-        rows.append(("header", "SYSTEM"))
-        rows.append(("item", "SETTINGS", self.open_settings))
-        rows.append(("item", "ABOUT", self._menu_about))
-        rows.append(("item", "REBOOT", self._menu_reboot))
-        return rows
-
     def toggle_sysmenu(self):
         """≡ tapped (or its keyboard shortcut): open the dropdown if closed, close it
-        if open. Rebuilds the item list so the cart group reflects the current state."""
+        if open. Rebuilds the item list so the cart group reflects the current state.
+        The rows + their action callbacks + the drawing live on self.menu_ui
+        (system_menu_ui.py); this stays here as the tested ws. entry point."""
         self._dirty = True             # overlay open/close repaints (#44)
-        self.sysmenu.toggle(self._sysmenu_items())
-
-    def _menu_restart_cart(self):
-        # Re-run the open cart from its current config (TIC-80 restart), landing back
-        # on the running-cart screen -- exactly what GO/apply does.
-        if self.cart is not None:
-            self.apply()
-
-    def _menu_delete_cart(self):
-        # Delete the open cart (it IS the launcher selection -- open() set self.cart =
-        # launcher.selected()), then go home. del_cart guards read-only / last-cart.
-        before = len(self.launcher.items)
-        self.del_cart()
-        if len(self.launcher.items) < before:
-            self.go_home()
-
-    def _menu_about(self):
-        # A tiny dismissible info modal (any tap / ESC / B closes it), drawn on top.
-        self._dirty = True
-        self._about = True
-
-    def _menu_reboot(self):
-        # Device: the injected reboot hook (machine.reset). Host / no hook: a safe
-        # fallback to the home launcher (a hard reset would kill the sim window).
-        self._dirty = True
-        hook = self.reboot_hook
-        if hook is not None:
-            try:
-                hook()
-                return
-            except Exception as exc:  # noqa: BLE001
-                print("Moybyte reboot failed:", exc)
-        self.go_home()                 # safe stub when no reboot hook is wired
+        self.sysmenu.toggle(self.menu_ui._sysmenu_items())
 
     def settings_adjust(self, d):
         """Step the selected Settings row by d. Wallpaper/font apply + persist; the
@@ -4363,9 +4332,9 @@ class Workstation:
         # the cart/editor composite + the egg/achievement overlays) so the dropdown
         # sits over whatever is underneath, then the cursor goes above even that.
         if self.sysmenu.open:
-            self._draw_sysmenu()
+            self.menu_ui._draw_sysmenu()
         if self._about:
-            self._draw_about()
+            self.menu_ui._draw_about()
         _tk = _ticks_ms() if _perf else 0
         self._draw_cursor()
         if _perf:
@@ -4911,73 +4880,10 @@ class Workstation:
         self._glyph(glyph, (x + 4, y + 7, 16, 16), NAMES["peach"], cv)
         cv.print(line, x + 24, y + 11, NAMES["white"], 1)
 
-    def _draw_sysmenu(self):
-        """The ≡ dropdown (#52): a left-anchored panel flush under the bar, one row per
-        item. The selected row gets a full-width bright accent fill + light label;
-        unselected rows sit on the panel base fill; headers read dim grey and a 1px
-        line separates groups. Index-only verbs + petme128 text (host == device). All
-        on the SYSTEM canvas, on top of everything."""
-        cv = self.sys_canvas
-        m = self.sysmenu
-        x, y, w, h = m.panel_rect()
-        cv.rect(x, y, w, h, NAMES["dark_purple"])          # panel base fill
-        cv.rectb(x, y, w, h, NAMES["indigo"])              # framed edge
-        cy = _POPUP_Y
-        for idx in range(len(m.items)):
-            it = m.items[idx]
-            kind = it[0]
-            if kind == "sep":
-                cv.rect(x + 1, cy, w - 2, _POPUP_SEP_H, NAMES["indigo"])
-                cy += _POPUP_SEP_H
-                continue
-            label = it[1]
-            tx = x + _POPUP_PAD_X
-            ty = cy + 2
-            if kind == "header":
-                cv.print(label, tx, ty, NAMES["dark_grey"], 1)   # dim section title
-            elif idx == m.sel:
-                cv.rect(x + 1, cy, w - 2, _POPUP_ROW_H, NAMES["indigo"])  # highlight
-                cv.print(label, tx, ty, NAMES["white"], 1)
-            else:
-                cv.print(label, tx, ty, NAMES["light_grey"], 1)
-            cy += _POPUP_ROW_H
-
-    def _draw_about(self):
-        """The ABOUT info modal (#52): a small centered panel with the console name +
-        firmware version, dismissed by any tap / ESC / B. Drawn on top of everything."""
-        cv = self.sys_canvas
-        lines = ("MOYBYTE CONSOLE", "v0.4", "", "TAP TO CLOSE")
-        ver = self._firmware_version_text()
-        if ver:
-            lines = ("MOYBYTE CONSOLE", ver, "", "TAP TO CLOSE")
-        w = 0
-        for ln in lines:
-            w = max(w, len(ln) * 8)
-        w += 24
-        w = min(w, cv.w - 16)
-        h = 20 + len(lines) * 12
-        x = (cv.w - w) // 2
-        y = (cv.h - h) // 2
-        cv.rect(x, y, w, h, NAMES["black"])
-        cv.rectb(x, y, w, h, NAMES["pink"])
-        ly = y + 10
-        for ln in lines:
-            cv.print(ln, x + (w - len(ln) * 8) // 2, ly, NAMES["white"], 1)
-            ly += 12
-
-    def _firmware_version_text(self):
-        """A short firmware-version string for ABOUT, or "" when unknown (host). Reads
-        the injected updater's version when present (device moy_ota.FIRMWARE_VERSION)."""
-        u = self.updater
-        if u is not None:
-            v = getattr(u, "version", None)
-            try:
-                v = v() if callable(v) else v
-            except Exception:  # noqa: BLE001
-                v = None
-            if v is not None:
-                return "FW " + str(v)
-        return ""
+    # _draw_sysmenu / _draw_about / _firmware_version_text (the ≡ dropdown +
+    # ABOUT modal drawing) now live on self.menu_ui (system_menu_ui.py,
+    # SystemMenuUI), along with _sysmenu_items + the _menu_* action callbacks.
+    # toggle_sysmenu() + the sysmenu Popup + _about flag + reboot_hook stay here.
 
     def _draw_confetti(self):
         """The Konami egg's celebration: a scatter of colored spark glyphs that
