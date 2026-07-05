@@ -4917,10 +4917,6 @@ class Workstation:
         self.blk_menu = {"mode": "blk", "cat": category, "sel": 0, "top": 0,
                          "items": ids}
 
-    def _blk_menu_items(self):
-        m = self.blk_menu
-        return m["items"] if m else []
-
     def _blk_menu_label(self, i):
         """The display label for menu item i (a category name or a block label)."""
         m = self.blk_menu
