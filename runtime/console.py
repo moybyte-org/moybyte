@@ -4060,7 +4060,7 @@ class Workstation:
         # A firmware install (#53) advances a chunk per frame; "done" runs a short
         # reboot countdown; "checking"/"downloading" (Phase 3) step the online flow.
         # All must keep redrawing so progress animates and the work proceeds without input.
-        if self.screen == "update" and self._upd_phase in (
+        if self.screen == "update" and self.update_ui._upd_phase in (
                 "install", "done", "checking", "downloading"):
             return True
         # Transient overlays redraw while they're up.
