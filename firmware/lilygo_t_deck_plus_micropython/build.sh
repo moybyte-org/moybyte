@@ -140,6 +140,9 @@ fi
 #   map_editor_ui.py -- the map/tilemap editor's UI (#32: MapEditorUI, extracted
 #                    from console.py); console.py does `from map_editor_ui
 #                    import MapEditorUI, ...`
+#   music_editor_ui.py -- the music/sound editor's UI (#50: MusicEditorUI,
+#                    extracted from console.py); console.py does `from
+#                    music_editor_ui import MusicEditorUI, ...`
 #   audio.py      -- sound model + AudioEngine synth/mixer (#16)
 #   console.py    -- launcher + desktop + cards/code/paint UI + Pointer
 #   moy_carts.py  -- the .moy store (scan/load/save/create/duplicate/delete)
@@ -153,6 +156,7 @@ cp "${REPO_ROOT}/runtime/editors.py" "${SCRIPT_DIR}/modules/editors.py"
 cp "${REPO_ROOT}/runtime/block_editor_ui.py" "${SCRIPT_DIR}/modules/block_editor_ui.py"
 cp "${REPO_ROOT}/runtime/map_editor_ui.py" "${SCRIPT_DIR}/modules/map_editor_ui.py"
 cp "${REPO_ROOT}/runtime/audio.py" "${SCRIPT_DIR}/modules/audio.py"
+cp "${REPO_ROOT}/runtime/music_editor_ui.py" "${SCRIPT_DIR}/modules/music_editor_ui.py"
 cp "${REPO_ROOT}/runtime/console.py" "${SCRIPT_DIR}/modules/console.py"
 cp "${REPO_ROOT}/runtime/moy_carts.py" "${SCRIPT_DIR}/modules/moy_carts.py"
 cp "${REPO_ROOT}/runtime/blocks.py" "${SCRIPT_DIR}/modules/blocks.py"

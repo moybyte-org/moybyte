@@ -1,0 +1,442 @@
+"""The music/sound editor's UI layer (issue #50): a tracker-style step editor
+over the cart's AudioBank -- SFX view (note/wave/vol steps) and SONG view (a
+phrase of SFX-id slots), a scrolling step/slot list, a right-hand edit pad, a
+bottom PLAY/SAVE/LOOP/CLOSE bar, and the live preview (routed through the same
+AudioEngine the running cart uses).
+
+Extracted from Workstation (runtime/console.py), mirroring block_editor_ui.py's
+BlockEditorUI / map_editor_ui.py's MapEditorUI: this class owns the music
+editor's UI state (musicedit/music_preview) and its _music_*/_mu_* methods,
+verbatim (no renaming), via a back-reference to the owning Workstation
+(`self.ws`) for the handful of primitives it shares with the rest of the
+console (canvas, _btn, _leave_menu, _leave_or_home, audio, save_sounds --
+the last two stay on Workstation: `audio` is the cart's live AudioEngine
+backend, also used by the running game, and `save_sounds` uses the shared
+`self.save_status` field like save_code/save_sprites/save_map, not a
+dedicated one, so it stays alongside them as a Workstation-level "persist
+this editor's content" method). `NAMES`/`_in` are injected at construction
+instead of imported back from console.py, which would be a real circular
+import: console.py imports MusicEditorUI to build the one instance a
+Workstation holds (same reasoning as BlockEditorUI/MapEditorUI).
+
+Kept name-for-name with the pre-extraction Workstation methods/fields (no
+renaming): Workstation._open_music/set_menu_view/open/handle_input/
+handle_pointer/frame/the redraw-on-change check all just gained one level of
+indirection (`self.music_ui.X` instead of `self.X`), and so did the tests
+that poke the music editor's internals directly.
+
+NOTE one asymmetry versus blocks/map, preserved as-is (not a bug to fix here):
+Workstation.go_home() does NOT reset musicedit/music_preview (blocks/map's
+go_home DOES reset their active editor) -- pre-existing behavior."""
+
+try:
+    from editors import MusicEditor
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.editors import MusicEditor
+try:
+    from audio import MusicTrack, SFX
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.audio import MusicTrack, SFX
+
+# Music / sound editor (#50): a tracker-style step editor over the cart's AudioBank.
+# Two views: SFX (a vertical column of [note, wave, vol] steps for one effect) and
+# SONG (a column of SFX-id slots making the looping phrase). The cursor picks a
+# step/slot; the right-hand button pad edits the value under it; a bottom bar plays/
+# stops the preview + saves. Drawn 320x240 with the indexed API + petme128 font only
+# (host == device); pointer/trackball/keyboard driven, mirroring the map editor's
+# conventions. The step list scrolls when there are more steps than fit.
+_MU_TITLE_Y = 2
+_MU_VIEW = (236, 1, 80, 14)        # SFX <-> SONG view toggle (top-right)
+# Step/slot list (left): a scrolling vertical column. Each row shows the index +
+# the value (a note name + wave letter + a small volume bar, or an SFX id).
+_MU_LIST_X = 8
+_MU_LIST_Y0 = 30
+_MU_ROW_H = 16
+_MU_ROWS = 10                      # visible rows (Y0 .. above the bottom bar)
+_MU_LIST_W = 150
+_MU_LIST_AREA = (_MU_LIST_X, _MU_LIST_Y0, _MU_LIST_W, _MU_ROWS * _MU_ROW_H)
+# Object selector (which SFX / track): < n > stepper under the title.
+_MU_OBJ_PREV = (8, 16, 24, 12)
+_MU_OBJ_NEXT = (124, 16, 24, 12)
+# Edit pad (right): bump the value under the cursor. Two columns of buttons.
+_MU_PAD_X = 168
+_MU_PAD_Y = 30
+_MU_PAD_W = 68                     # one button's width
+_MU_PAD_H = 22
+_MU_PAD_GAP = 4
+# Buttons (filled in by _mu_pad_rect via row index):
+#   row 0: NOTE- / NOTE+  (pitch down/up, or SFX-id down/up in song view)
+#   row 1: WAVE  / VOL    (cycle waveform / cycle volume) -- sfx view only
+#   row 2: REST  / SPEED  (toggle rest / bump tempo)
+#   row 3: ADD   / DEL    (insert/remove a step or slot)
+_MU_SPEED_DN = (240, 16, 16, 12)   # speed - (compact, by the title)
+_MU_SPEED_UP = (300, 16, 16, 12)   # speed +
+# Bottom action bar.
+_MU_PLAY = (8, 198, 70, 24)
+_MU_SAVE = (84, 198, 60, 24)
+_MU_LOOP = (150, 198, 60, 24)
+_MU_CLOSE = (216, 198, 100, 24)
+# Note names for rendering a pitch index (semitone 0..95 -> e.g. "C4"). Sharps only,
+# matching audio._NOTE_OFFSETS; kept here so the console renders labels without
+# reaching into audio's private table.
+_MU_NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F",
+                  "F#", "G", "G#", "A", "A#", "B")
+_MU_WAVE_LABELS = ("SQ", "TRI", "SAW", "NOI")   # WAVE_SQUARE/TRIANGLE/SAW/NOISE
+
+
+def _mu_note_name(pitch):
+    """Render a semitone index as a note name ("C4"), or "--" for a rest (<0)."""
+    if pitch is None or pitch < 0:
+        return "--"
+    return _MU_NOTE_NAMES[pitch % 12] + str(pitch // 12)
+
+
+def _mu_pad_rect(col, row):
+    """The (x, y, w, h) of edit-pad button at (col 0/1, row 0..3)."""
+    x = _MU_PAD_X + col * (_MU_PAD_W + _MU_PAD_GAP)
+    y = _MU_PAD_Y + row * (_MU_PAD_H + _MU_PAD_GAP)
+    return (x, y, _MU_PAD_W, _MU_PAD_H)
+
+
+class MusicEditorUI:
+    """The music/sound editor's UI: step/slot list + edit pad + preview + bottom
+    bar (draw + input/pointer). One instance lives on Workstation
+    (`self.music_ui`), built once in Workstation.__init__; `ws.music_ui.build()`
+    is called lazily from `set_menu_view("music")` the first time a cart's
+    music editor is opened, exactly like the pre-extraction code did inline."""
+
+    def __init__(self, ws, names, in_rect):
+        self.ws = ws
+        # Injected instead of imported back from console.py -- see module docstring.
+        self._NAMES = names
+        self._in = in_rect
+        # `musicedit` is built lazily on first open. `music_preview` tracks what
+        # the live AudioEngine is previewing so the frame loop ticks the mixer
+        # and shows STOP; None when nothing is playing.
+        self.musicedit = None         # MusicEditor while menu_view == "music"
+        self.music_preview = None     # ("sfx", n) | ("song", track) | None (preview)
+
+    def build(self):
+        """Build the MusicEditor over the open cart's live AudioBank (#50): the
+        SAME bank the running cart plays through, so an edit is heard immediately
+        by the preview AND by the cart on resume. The bank lives on the audio
+        backend's engine (ws.audio.engine.bank); SFX/MusicTrack are injected as
+        factories so the editor core stays import-free. Called from
+        Workstation.set_menu_view("music")."""
+        ws = self.ws
+        if self.musicedit is None and ws.audio is not None:
+            bank = ws.audio.engine.bank
+            self.musicedit = MusicEditor(bank, sfx_factory=SFX,
+                                         track_factory=MusicTrack)
+
+    def reset(self):
+        """Drop the active editor + preview flag -- called from Workstation.open()
+        (switching carts). NOTE: unlike blocks/map, Workstation.go_home() does NOT
+        call this (pre-existing asymmetry, preserved as-is)."""
+        self.musicedit = None
+        self.music_preview = None
+
+    # -- preview ---------------------------------------------------------------
+
+    def _play_music_preview(self):
+        """Preview what the cursor is on: in the SFX view play the current SFX, in
+        the SONG view play the current phrase (looping). Routes through the live
+        AudioEngine (the same backend the cart uses), so it sounds on the host and
+        the device. The frame loop ticks the mixer + redraws while a preview is up."""
+        ws = self.ws
+        me = self.musicedit
+        au = ws.audio
+        if me is None or au is None:
+            return
+        au.sound_stop()                          # cut any prior preview first
+        if me.view == MusicEditor.SONG_VIEW:
+            au.music(me.track_idx, True)
+            self.music_preview = ("song", me.track_idx)
+        else:
+            au.sfx(me.sfx_idx)
+            self.music_preview = ("sfx", me.sfx_idx)
+        ws._dirty = True
+
+    def _stop_music_preview(self):
+        """Stop any music-editor preview + clear the preview flag."""
+        ws = self.ws
+        if ws.audio is not None:
+            ws.audio.sound_stop()
+            ws.audio.music_stop()
+        self.music_preview = None
+        ws._dirty = True
+
+    def _music_preview_active(self):
+        """True while a music-editor preview is still producing sound (so the frame
+        loop keeps ticking the mixer + redrawing the PLAY/STOP button)."""
+        if self.music_preview is None:
+            return False
+        au = self.ws.audio
+        if au is None or getattr(au, "engine", None) is None:
+            return False
+        return au.engine.is_active()
+
+    # -- input -------------------------------------------------------------------
+
+    def _music_input(self):
+        """D-pad navigates the tracker (#50): up/down move the step/slot cursor,
+        left/right change the value under it (pitch / SFX-id), A plays/stops the
+        preview, B leaves. Tap remains the primary path; this gives the trackball +
+        keyboard parity with the other editors. Called from Workstation.handle_input's
+        menu_view == "music" branch."""
+        ws = self.ws
+        i = ws.input
+        me = self.musicedit
+        if me is not None:
+            if i.pressed("up"):
+                me.move_cursor(-1)
+            if i.pressed("down"):
+                me.move_cursor(1)
+            song = me.view == MusicEditor.SONG_VIEW
+            if i.pressed("left"):
+                (me.nudge_slot if song else me.nudge_pitch)(-1)
+            if i.pressed("right"):
+                (me.nudge_slot if song else me.nudge_pitch)(1)
+            if i.pressed("a"):
+                if self.music_preview is not None:
+                    self._stop_music_preview()
+                else:
+                    self._play_music_preview()
+        ws._leave_or_home(ws._leave_menu)
+        ws._dirty = True
+
+    def _music_click(self, px, py):
+        """Route a tap in the music editor: the step/slot list places the cursor; the
+        right-hand edit pad bumps the value under it; the title-strip steppers pick the
+        SFX/track + tempo; the bottom bar plays/saves/loops/closes. Mirrors _map_click's
+        button-dispatch shape."""
+        ws = self.ws
+        me = self.musicedit
+        if me is None:
+            if self._in(px, py, _MU_CLOSE):
+                ws._leave_menu()
+            return
+        song = me.view == MusicEditor.SONG_VIEW
+        # The step/slot list: tap a row to select it.
+        if self._in(px, py, _MU_LIST_AREA):
+            total = me.slot_count() if song else me.step_count()
+            cur = me.slot if song else me.step
+            top = self._mu_visible_top(cur, total)
+            row = (py - _MU_LIST_Y0) // _MU_ROW_H
+            me.select_cursor(top + row)
+            return
+        # Title-strip controls.
+        if self._in(px, py, _MU_OBJ_PREV):
+            (me.select_track if song else me.select_sfx)(-1)
+            return
+        if self._in(px, py, _MU_OBJ_NEXT):
+            (me.select_track if song else me.select_sfx)(1)
+            return
+        if self._in(px, py, _MU_SPEED_DN):
+            me.nudge_speed(-1); return
+        if self._in(px, py, _MU_SPEED_UP):
+            me.nudge_speed(1); return
+        if self._in(px, py, _MU_VIEW):
+            me.toggle_view()
+            self._stop_music_preview()         # don't carry a preview across views
+            return
+        # The bottom action bar.
+        if self._in(px, py, _MU_PLAY):
+            if self.music_preview is not None:
+                self._stop_music_preview()
+            else:
+                self._play_music_preview()
+            return
+        if self._in(px, py, _MU_SAVE):
+            ws.save_sounds(); return
+        if self._in(px, py, _MU_LOOP):
+            me.toggle_loop(); return
+        if self._in(px, py, _MU_CLOSE):
+            ws._leave_menu(); return
+        # The right-hand edit pad (per-view button grid).
+        self._music_pad_click(px, py, song)
+
+    def _music_pad_click(self, px, py, song):
+        me = self.musicedit
+        if me is None:
+            return
+        # Find which pad button was hit (col 0/1, row 0..3).
+        for row in range(4):
+            for col in range(2):
+                if self._in(px, py, _mu_pad_rect(col, row)):
+                    self._music_pad_action(row, col, song)
+                    return
+
+    def _music_pad_action(self, row, col, song):
+        """Apply the edit-pad button at (row, col) for the active view (#50). The
+        labels are wired in _draw_music_pad; this is their behavior."""
+        me = self.musicedit
+        if me is None:
+            return
+        if song:
+            if row == 0:                       # SFX- / SFX+
+                me.nudge_slot(-1 if col == 0 else 1)
+            elif row == 3:                     # ADD / DEL
+                me.add_slot() if col == 0 else me.del_slot()
+            return
+        # SFX view.
+        if row == 0:                           # NOTE- / NOTE+
+            me.nudge_pitch(-1 if col == 0 else 1)
+        elif row == 1:                         # WAVE / VOL (both wrap: one tap cycles)
+            me.cycle_wave(1) if col == 0 else me.cycle_vol(1)
+        elif row == 2:                         # REST (col 0) -- col 1 unused
+            if col == 0:
+                me.toggle_rest()
+        elif row == 3:                         # ADD / DEL
+            me.add_step() if col == 0 else me.del_step()
+
+    # -- drawing -------------------------------------------------------------------
+
+    def _draw_music(self):
+        """The tracker-style sound editor (#50): a title row (which SFX/track + its
+        tempo), a scrolling step/slot list with the cursor highlighted, a right-hand
+        edit pad, and a bottom PLAY/SAVE/LOOP/CLOSE bar. Drawn with the indexed API +
+        petme128 font only, so host == device."""
+        ws = self.ws
+        NAMES = self._NAMES
+        cv = ws.canvas
+        me = self.musicedit
+        cv.cls(NAMES["dark_blue"])
+        cv.rect(0, 0, cv.w, 14, NAMES["black"])
+        if me is None:
+            cv.print("NO SOUND BANK", _MU_LIST_X, _MU_TITLE_Y, NAMES["white"], 1)
+            ws._btn("CLOSE", _MU_CLOSE, NAMES["red"])
+            return
+        song = me.view == MusicEditor.SONG_VIEW
+        # Title: which object + its tempo + a dirty *.
+        if song:
+            obj = me.cur_track()
+            title = "SONG " + str(me.track_idx)
+        else:
+            obj = me.cur_sfx()
+            title = "SFX " + str(me.sfx_idx)
+        speed = obj.speed if obj is not None else 0
+        loop = bool(obj.loop) if obj is not None else False
+        if me.dirty:
+            title = title + " *"
+        cv.print(title, 36, _MU_TITLE_Y, NAMES["white"], 1)
+        cv.print("SPD " + str(speed), 258, _MU_TITLE_Y, NAMES["light_grey"], 1)
+        # Object < n > stepper + tempo +/- (compact, in the title strip).
+        ws._btn("<", _MU_OBJ_PREV, NAMES["indigo"])
+        ws._btn(">", _MU_OBJ_NEXT, NAMES["indigo"])
+        self._mu_tick(_MU_SPEED_DN, "-")
+        self._mu_tick(_MU_SPEED_UP, "+")
+        # View toggle (SFX <-> SONG).
+        ws._btn("SONG" if not song else "SFX", _MU_VIEW, NAMES["dark_purple"])
+        # The scrolling step/slot list.
+        if song:
+            self._draw_music_song(me)
+        else:
+            self._draw_music_sfx(me)
+        # Right-hand edit pad.
+        self._draw_music_pad(song)
+        # Bottom bar: PLAY/STOP toggles the preview; SAVE; LOOP flag; CLOSE.
+        playing = self.music_preview is not None
+        ws._btn("STOP" if playing else "PLAY", _MU_PLAY,
+                  NAMES["red"] if playing else NAMES["green"])
+        ws._btn("SAVE", _MU_SAVE, NAMES["green"])
+        ws._btn("LOOP" if loop else "1X", _MU_LOOP,
+                  NAMES["orange"] if loop else NAMES["dark_grey"])
+        ws._btn("CLOSE", _MU_CLOSE, NAMES["red"])
+        if ws.save_status:
+            cv.print(ws.save_status[:14], 150, _MU_TITLE_Y, NAMES["yellow"], 1)
+
+    def _mu_tick(self, rect, label):
+        """A small +/- tick button (smaller text than _btn for the title-strip nudges)."""
+        x, y, w, h = rect
+        NAMES = self._NAMES
+        cv = self.ws.canvas
+        cv.rect(x, y, w, h, NAMES["blue"])
+        cv.rectb(x, y, w, h, NAMES["white"])
+        cv.print(label, x + (w - 8) // 2, y + (h - 8) // 2, NAMES["black"], 1)
+
+    def _mu_visible_top(self, cur, total):
+        """First list row to show so the cursor stays in view (simple scrolloff)."""
+        if total <= _MU_ROWS:
+            return 0
+        top = cur - _MU_ROWS // 2
+        if top < 0:
+            top = 0
+        if top > total - _MU_ROWS:
+            top = total - _MU_ROWS
+        return top
+
+    def _draw_music_sfx(self, me):
+        NAMES = self._NAMES
+        cv = self.ws.canvas
+        s = me.cur_sfx()
+        if s is None:
+            return
+        total = len(s.steps)
+        top = self._mu_visible_top(me.step, total)
+        for vi in range(_MU_ROWS):
+            idx = top + vi
+            if idx >= total:
+                break
+            x = _MU_LIST_X
+            y = _MU_LIST_Y0 + vi * _MU_ROW_H
+            cur = (idx == me.step)
+            if cur:
+                cv.rect(x, y, _MU_LIST_W, _MU_ROW_H - 1, NAMES["indigo"])
+            pitch, wave, vol = s.steps[idx][0], s.steps[idx][1], s.steps[idx][2]
+            tc = NAMES["white"] if cur else NAMES["light_grey"]
+            cv.print("%02d" % idx, x + 2, y + 4, NAMES["dark_grey"]
+                     if not cur else NAMES["light_grey"], 1)
+            note = _mu_note_name(pitch)
+            cv.print(note, x + 24, y + 4, NAMES["peach"] if pitch >= 0 else
+                     NAMES["dark_grey"], 1)
+            cv.print(_MU_WAVE_LABELS[wave & 3], x + 64, y + 4, tc, 1)
+            # a little volume bar (0..7) -> up to 7 ticks
+            bx = x + 96
+            for v in range(7):
+                col = NAMES["green"] if v < vol else NAMES["dark_grey"]
+                cv.rect(bx + v * 7, y + 4, 5, 8, col)
+
+    def _draw_music_song(self, me):
+        NAMES = self._NAMES
+        cv = self.ws.canvas
+        t = me.cur_track()
+        if t is None:
+            return
+        total = len(t.pattern)
+        top = self._mu_visible_top(me.slot, total)
+        for vi in range(_MU_ROWS):
+            idx = top + vi
+            if idx >= total:
+                break
+            x = _MU_LIST_X
+            y = _MU_LIST_Y0 + vi * _MU_ROW_H
+            cur = (idx == me.slot)
+            if cur:
+                cv.rect(x, y, _MU_LIST_W, _MU_ROW_H - 1, NAMES["indigo"])
+            sid = t.pattern[idx]
+            cv.print("%02d" % idx, x + 2, y + 4, NAMES["dark_grey"]
+                     if not cur else NAMES["light_grey"], 1)
+            cv.print("SFX " + str(sid), x + 30, y + 4,
+                     NAMES["white"] if cur else NAMES["light_grey"], 1)
+
+    def _draw_music_pad(self, song):
+        # Two columns x four rows of edit buttons; labels differ per view.
+        NAMES = self._NAMES
+        if song:
+            labels = (("SFX-", "SFX+"), ("", ""), ("", ""), ("ADD", "DEL"))
+            cols = ((NAMES["blue"], NAMES["blue"]), (None, None), (None, None),
+                    (NAMES["dark_green"], NAMES["red"]))
+        else:
+            labels = (("NOTE-", "NOTE+"), ("WAVE", "VOL"), ("REST", ""),
+                      ("ADD", "DEL"))
+            cols = ((NAMES["blue"], NAMES["blue"]),
+                    (NAMES["dark_purple"], NAMES["orange"]),
+                    (NAMES["brown"], None),
+                    (NAMES["dark_green"], NAMES["red"]))
+        for row in range(4):
+            for col in range(2):
+                lbl = labels[row][col]
+                if not lbl:
+                    continue
+                self.ws._btn(lbl, _mu_pad_rect(col, row), cols[row][col])

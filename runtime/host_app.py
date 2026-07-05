@@ -22,16 +22,20 @@ from . import editors as _editors
 sys.modules.setdefault("editors", _editors)
 sys.modules.setdefault("audio", _audio)
 sys.modules.setdefault("blocks", _blocks)   # moy_carts.save_blocks does `import blocks`
-# block_editor_ui.py / map_editor_ui.py are the block + map editors' UI (issues
-# #29 Part 2 / #32, extracted from console.py); each does `from editors import
-# ...` (needs the alias above) and console.py does `from block_editor_ui import
-# BlockEditorUI, ...` / `from map_editor_ui import MapEditorUI, ...` (their own
-# frozen device names), so they need the same bare-name aliasing -- imported
-# only after the editors/audio/blocks aliases above are in place.
+# block_editor_ui.py / map_editor_ui.py / music_editor_ui.py are the block/map/
+# music editors' UI (issues #29 Part 2 / #32 / #50, extracted from console.py);
+# each does `from editors import ...` (needs the alias above, music_editor_ui.py
+# also does `from audio import ...`, needs the alias above too) and console.py
+# does `from block_editor_ui import BlockEditorUI, ...` / `from map_editor_ui
+# import MapEditorUI, ...` / `from music_editor_ui import MusicEditorUI, ...`
+# (their own frozen device names), so they need the same bare-name aliasing --
+# imported only after the editors/audio/blocks aliases above are in place.
 from . import block_editor_ui as _block_editor_ui
 from . import map_editor_ui as _map_editor_ui
+from . import music_editor_ui as _music_editor_ui
 sys.modules.setdefault("block_editor_ui", _block_editor_ui)
 sys.modules.setdefault("map_editor_ui", _map_editor_ui)
+sys.modules.setdefault("music_editor_ui", _music_editor_ui)
 
 from . import console  # noqa: E402  (after the editors/audio aliases above)
 from . import moy_carts  # noqa: E402  (shared .moy store; host-clean)
