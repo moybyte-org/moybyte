@@ -323,6 +323,18 @@ _MUSIC_BTN = (2 + 6 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)  # music/sound 
 # _BAR_CLOCK. Literal 320 width / 18px bar / 8px font here (the game canvas is fixed).
 _BAR_BATT = (320 - 2 - _BAR_ICON, _BAR_Y, _BAR_ICON, _BAR_ICON)
 _BAR_WIFI = (_BAR_BATT[0] - _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)
+# Pause screen (#71 unified key): two explicit, always-tappable buttons so
+# quitting is never ambiguous or keyboard-mode-dependent -- CONTINUE resumes,
+# QUIT goes home. Centered as a pair near the bottom of the 320x240 game
+# viewport, well clear of the top bar (y 0..18).
+_PAUSE_BTN_W = 92
+_PAUSE_BTN_H = 22
+_PAUSE_BTN_GAP = 12
+_PAUSE_BTN_Y = 240 - 40
+_PAUSE_CONTINUE_BTN = ((320 - 2 * _PAUSE_BTN_W - _PAUSE_BTN_GAP) // 2, _PAUSE_BTN_Y,
+                       _PAUSE_BTN_W, _PAUSE_BTN_H)
+_PAUSE_QUIT_BTN = (_PAUSE_CONTINUE_BTN[0] + _PAUSE_BTN_W + _PAUSE_BTN_GAP, _PAUSE_BTN_Y,
+                   _PAUSE_BTN_W, _PAUSE_BTN_H)
 _BAR_CLOCK = (_BAR_WIFI[0] - 2 - 5 * 8, 0, 5 * 8, 18)
 _RUN_BTN = (28, 188, 70, 24)
 _CODE_BTN = (104, 188, 84, 24)
@@ -1840,8 +1852,8 @@ class Workstation:
         self._draw = None
         self.cart_paused = False      # pause menu (#71): a running cart owns the FULL
                                       # 320x240 (no bar); BACKSPACE -- THE one console
-                                      # key in every input mode -- pauses, and again
-                                      # from the pause menu exits to home
+                                      # key in every input mode -- TOGGLES this. Quit
+                                      # is the pause screen's own explicit QUIT button
         self._bks_prev = 0            # last_key edge tracker for the BACKSPACE pause
                                       # (a text-mode cart types letters, so button
                                       # aliases are suppressed -- the Workstation
@@ -4025,39 +4037,43 @@ class Workstation:
         elif self.screen == "update":
             self._update_input(i)
         elif self.screen == "desktop":
-            # THE ONE CONSOLE KEY (#71): BACKSPACE pauses a running cart, and
-            # BACKSPACE again from the pause menu exits to home -- identical in
-            # every input mode. Raw-matrix and typed-ASCII carts deliver it as
+            # THE ONE CONSOLE KEY (#71): BACKSPACE/HOME does exactly ONE thing
+            # in every input mode, every cart type, paused or not: TOGGLE the
+            # pause screen. No special case -- it never means "exit" (that's a
+            # separate, explicit, ALWAYS-TAPPABLE action: the CONTINUE/QUIT
+            # buttons drawn on the pause screen itself, see _draw_pause_buttons
+            # + handle_pointer). Raw-matrix and typed-ASCII carts deliver it as
             # the "home" button (input backends map it); a TEXT-MODE cart
-            # suppresses button aliases, so here we edge-detect last_key
-            # ourselves (one press = one action, not one per frame). While a
-            # text-mode TOOL runs, backspace stays DELETE (the wifi password
-            # field) -- but PAUSED the cart is frozen and sees no bytes, so
-            # backspace is safely the console key for every paused cart.
-            _tk = 0                        # this frame's typed-key press edge
-            _bks = False                   # ...and was it the BACKSPACE console key
+            # suppresses ALL button aliases (so a typed letter is never
+            # mistaken for a shortcut), so here we edge-detect last_key
+            # ourselves to catch backspace specifically -- but the RESULT is
+            # identical either way: flip cart_paused.
+            #
+            # An earlier version tried to make the SAME key also distinguish
+            # "exit" from "resume" (a second press from pause = quit), and
+            # separately tried treating typed Z/space/Enter/R as "resume" --
+            # both were special cases that fell over in practice: Z and R are
+            # live GAMEPLAY LETTERS in a typing game, and a keyboard-only
+            # "press again to quit" is a different rule per cart type. One
+            # button, one job, plus explicit on-screen buttons for the
+            # deliberate action (quitting) is simpler and cannot be confused.
+            _bks = False
             if getattr(self.input, "text_mode", False) and self.cart is not None:
                 k = self.input.last_key
-                _tk = k if (k and k != self._bks_prev) else 0
+                _bks = (k == 0x08 and k != self._bks_prev
+                        and (self.cart_paused or self.cart.get("type") == "game"))
                 self._bks_prev = k
-                _bks = (_tk == 0x08 and (self.cart_paused
-                                         or self.cart.get("type") == "game"))
             else:
                 self._bks_prev = 0
-            if self.cart_paused:
-                if i.pressed("home") or i.pressed("stop") or _bks:
-                    self.go_home()             # BACKSPACE again from pause exits
-                elif (i.pressed("a") or i.pressed("run")
-                        or _tk in (ord("z"), 0x20, 0x0D, ord("r"))):
-                    # jump back in: A/RUN buttons, or their letters typed in a
-                    # text-mode cart (buttons never fire there)
-                    self.cart_paused = False
-                    self._dirty = True
-                elif i.pressed("b") or _tk == ord("x"):
-                    self._open_menu()
-            elif i.pressed("home") or i.pressed("stop") or _bks:
-                self.cart_paused = True        # first BACKSPACE PAUSES (#71)
+            if i.pressed("home") or i.pressed("stop") or _bks:
+                self.cart_paused = not self.cart_paused
                 self._dirty = True
+            elif self.cart_paused:
+                if i.pressed("a") or i.pressed("run"):
+                    self.cart_paused = False   # CONTINUE accelerator (button only)
+                    self._dirty = True
+                elif i.pressed("b"):
+                    self._open_menu()
             # NOTE: no unpaused B handler -- while a cart PLAYS every button
             # belongs to the game (Star Catcher moves with B; the old
             # B->editor shortcut hijacked it). The editor is reachable from
@@ -4386,9 +4402,17 @@ class Workstation:
                     self._open_blocks()
                 elif _in(px, py, _MUSIC_BTN):
                     self._open_music()
+                elif self.cart_paused and _in(px, py, _PAUSE_QUIT_BTN):
+                    # The pause screen's explicit QUIT button (#71): the ONE
+                    # deliberate way to exit, identical for every cart type --
+                    # never inferred from a keyboard key, so it's never
+                    # ambiguous with a typing game's own letters.
+                    self.go_home()
                 elif self.cart_paused:
-                    # a tap anywhere outside the chrome resumes play -- and must
-                    # NOT leak into the cart as a game tap on the same frame
+                    # CONTINUE: the QUIT button's rect is excluded above, so a
+                    # tap ANYWHERE else (including the CONTINUE button itself)
+                    # resumes play -- and must NOT leak into the cart as a
+                    # game tap on the same frame.
                     self.cart_paused = False
                     self._dirty = True
                     self.input.game_pointer = (gx, gy, False, False)
@@ -5846,7 +5870,7 @@ class Workstation:
                 if _perf:
                     _bar = _ticks_diff(_ticks_ms(), _tb)   # CHROMEBRK: the bar's share
                 if self.cart_paused:
-                    self._draw_pause_pill()
+                    self._draw_pause_buttons()
         elif self.menu_view == "code":
             self._draw_code()              # full-screen editor (covers the cart)
         elif self.menu_view == "blocks":
@@ -6085,18 +6109,21 @@ class Workstation:
         for y in range(0, cv.h, 2):
             cv.rect(0, y, cv.w, 1, NAMES["black"])
 
-    def _draw_pause_pill(self):
-        """The pause menu's one line of guidance, over the dimmed frame. Names the
-        two keys of the unified scheme (#71): resume (tap / A) and the one console
-        key (BKSP quits -- same key that paused)."""
+    def _draw_pause_buttons(self):
+        """The pause screen's two EXPLICIT actions (#71), over the dimmed frame:
+        CONTINUE (resume; also any tap outside QUIT, or A/RUN) and QUIT (go
+        home; ONLY this button does that -- never inferred from a keyboard key,
+        so a typing game's own letters can never be mistaken for it)."""
         cv = self.canvas
-        msg = "PAUSED - TAP TO PLAY - BKSP QUITS"
-        w = len(msg) * 8 + 16
-        x = (cv.w - w) // 2
-        y = cv.h - 34
-        cv.rect(x, y, w, 18, NAMES["black"])
-        cv.rectb(x, y, w, 18, NAMES["light_grey"])
-        cv.print(msg, x + 8, y + 5, NAMES["white"], 1)
+        title = "PAUSED"
+        cv.print(title, (cv.w - len(title) * 8) // 2, _PAUSE_BTN_Y - 14,
+                  NAMES["white"], 1)
+        for rect, label in ((_PAUSE_CONTINUE_BTN, "CONTINUE"), (_PAUSE_QUIT_BTN, "QUIT")):
+            x, y, w, h = rect
+            cv.rect(x, y, w, h, NAMES["black"])
+            cv.rectb(x, y, w, h, NAMES["light_grey"])
+            cv.print(label, x + (w - len(label) * 8) // 2, y + (h - 8) // 2,
+                      NAMES["white"], 1)
 
     def _draw_status_strip(self, where):
         """The unified 18px top bar (Stage 1), drawn on BOTH the launcher/Settings and

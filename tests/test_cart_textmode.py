@@ -128,14 +128,22 @@ def test_game_cart_gets_buttons_and_no_stray_text(tmp_path):
     assert ws.ns["stray"] == ""
 
 
-def test_backspace_pauses_textmode_game_but_not_tool(tmp_path):
-    # THE ONE CONSOLE KEY (#71): BACKSPACE pauses, BACKSPACE again from the pause
-    # menu exits to home, and Z (the A button's letter -- buttons never fire in
-    # text mode) resumes -- the SAME semantics as a raw-mode cart's backspace.
-    # Text mode suppresses every letter alias so a typing game (Letter Blitz)
-    # keeps all 26 letters; a running text-mode TOOL (the wifi cart's password
-    # field) keeps backspace as DELETE.
+def test_backspace_toggles_pause_textmode_game_but_not_tool(tmp_path):
+    # THE ONE CONSOLE KEY (#71): BACKSPACE does exactly ONE thing everywhere --
+    # TOGGLE the pause screen. It never means "exit": quitting is the pause
+    # screen's own explicit QUIT button (CONTINUE resumes the same way A/RUN
+    # or any other tap does). Text mode suppresses every letter alias so a
+    # typing game (Letter Blitz) keeps all 26 letters; a running text-mode
+    # TOOL (the wifi cart's password field) keeps backspace as DELETE.
+    #
+    # An earlier version tried to make backspace ALSO mean "exit" on a second
+    # press (a per-cart-type special case), and separately let typed
+    # Z/space/Enter/R resume -- both were removed: Z/R are live GAMEPLAY
+    # LETTERS in a typing game, so pausing then typing the next target letter
+    # silently undid the pause one frame later, and the two-meaning key was
+    # its own source of confusion.
     import os
+    from runtime import console as C
     from runtime import host_app
     from runtime import moy_carts
 
@@ -158,17 +166,24 @@ def test_backspace_pauses_textmode_game_but_not_tool(tmp_path):
     drv.frame(1.0 / 30)
     assert ws.cart_paused is True
     drv.frame(1.0 / 30)                     # release frame (edge reset)
-    drv.type_char(ord("z"))                 # Z resumes (the A letter in text mode)
-    drv.frame(1.0 / 30)
-    assert ws.cart_paused is False
-    drv.frame(1.0 / 30)                     # release frame
-    drv.type_char(0x08)                     # pause again...
+    drv.type_char(ord("z"))                 # Z is a GAMEPLAY LETTER: must NOT
+    drv.frame(1.0 / 30)                     # resume (the regression this pins)
+    assert ws.cart_paused is True
+    drv.type_char(0x20)                     # space: also must NOT resume
     drv.frame(1.0 / 30)
     assert ws.cart_paused is True
     drv.frame(1.0 / 30)                     # release frame
-    drv.type_char(0x08)                     # ...BACKSPACE from pause EXITS
+    drv.type_char(0x08)                     # BACKSPACE again TOGGLES BACK
     drv.frame(1.0 / 30)
-    assert ws.screen == "launcher"          # the one key backs all the way out
+    assert ws.cart_paused is False
+    assert ws.screen == "desktop"           # toggled off, not exited
+    drv.frame(1.0 / 30)                     # release frame
+    drv.type_char(0x08)                     # pause once more...
+    drv.frame(1.0 / 30)
+    assert ws.cart_paused is True
+    drv.click(*C._PAUSE_QUIT_BTN[:2])       # ...and the pause screen's QUIT
+    drv.frame(1.0 / 30)                     # button is the one way out
+    assert ws.screen == "launcher"
     assert ws.cart_paused is False
 
     _open_cart(ws, "TypeTool")
@@ -178,6 +193,31 @@ def test_backspace_pauses_textmode_game_but_not_tool(tmp_path):
     drv.frame(1.0 / 30)                     # backspace as a typed key (delete)...
     assert ws.cart_paused is False          # ...never a pause
     assert 0x08 in ws.ns["edges"]           # the cart itself saw the byte
+
+
+def test_pause_continue_button_resumes(tmp_path):
+    # The pause screen's CONTINUE button (#71) resumes exactly like any other
+    # tap outside QUIT -- pin its rect specifically, not just "click empty
+    # space", so the button hit-test itself is covered.
+    from runtime import console as C
+    from runtime import host_app
+    from runtime import moy_carts
+
+    carts_dir = str(tmp_path / "carts")
+    os.makedirs(carts_dir, exist_ok=True)
+    moy_carts.create("Mover", carts_dir, src=GAME_CART_SRC, type="game")
+    ws = host_app.build_workstation(carts_dir)
+    drv = host_app.ConsoleDriver(ws)
+
+    _open_cart(ws, "Mover")
+    drv.frame(1.0 / 30)
+    drv.press("home")
+    drv.frame(1.0 / 30)
+    assert ws.cart_paused is True
+    drv.click(*C._PAUSE_CONTINUE_BTN[:2])
+    drv.frame(1.0 / 30)
+    assert ws.cart_paused is False
+    assert ws.screen == "desktop"
 
 
 def test_textmode_resets_on_cart_exit(tmp_path):

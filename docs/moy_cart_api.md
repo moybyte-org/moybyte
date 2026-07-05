@@ -57,14 +57,15 @@ def _draw():                 # every frame; render here
 - **A running cart owns the FULL canvas** — the console's top bar auto-hides during
   play and appears only in the pause menu and on the crash panel. **Pause =
   BACKSPACE, the one console key in every input mode** (the ☰ button on the web
-  page does the same): press it to pause, press it again from the pause menu to
-  quit to the launcher; A (or a tap) jumps back in. No letter is reserved — every
-  other key belongs to your cart. Don't reserve rows for system chrome.
+  page does the same): it always just **toggles** the pause screen, nothing more —
+  pressing it again simply un-pauses. To quit, tap the pause screen's own **QUIT**
+  button (**CONTINUE** resumes the same way; A/RUN or any other tap also resumes).
+  No letter is reserved — every other key belongs to your cart.
 - **Typing games: call `textmode(True)`** (e.g. in `_init`). In game mode the device
   keyboard only produces 9 letters (the button-mapped `a d w s z x r` plus plain
-  `q e`); text mode delivers EVERY letter to `key()`/`keyp()`. BACKSPACE still
-  pauses a `"type": "game"` cart; a `"tool"` keeps backspace as delete while it
-  runs (it only becomes the console key when the tool is already paused).
+  `q e`); text mode delivers EVERY letter to `key()`/`keyp()`. BACKSPACE still only
+  toggles pause for a `"type": "game"` cart; a `"tool"` keeps backspace as delete
+  while it runs (it only becomes the pause toggle once the tool is already paused).
 - Every color is a **MOY64 palette index 0–63**, or a name via `col("red")` (see
   [Palette](#palette)). The canvas stores indices; the host resolves them to RGB for
   the window, the device maps them into the RGB565 framebuffer.
