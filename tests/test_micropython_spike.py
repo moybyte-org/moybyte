@@ -374,11 +374,12 @@ def test_micropython_touch_and_idle_cursor():
     assert "tp = touch.poll()" in runtime
     assert "pointer.place(tp[0], tp[1])" in runtime
 
-    # Cursor auto-hide + the Pointer live in the shared console now.
+    # Cursor auto-hide + the Pointer are a shared support widget now (widgets.py).
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
-    assert "class Pointer:" in console
-    assert "def tick(self, now):" in console
-    assert "self.pointer.visible" in console               # draw guard
+    widgets = (Path("runtime") / "widgets.py").read_text(encoding="utf-8")
+    assert "class Pointer:" in widgets
+    assert "def tick(self, now):" in widgets
+    assert "self.pointer.visible" in console               # draw guard (stays on the ws)
     assert "pointer.tick(now)" in runtime
 
     # Touch calibration bring-up mode (serial-only, flush-once).
@@ -1923,7 +1924,7 @@ def _load_moy_runtime():
     # all of them).
     for name in ("editors", "block_editor_ui", "map_editor_ui", "music_editor_ui",
                  "perf_hud", "update_ui", "system_menu_ui", "achievements_ui",
-                 "layers", "bar_layer", "cards_layer", "paint_layer", "settings_layer", "code_layer", "audio", "console"):
+                 "layers", "bar_layer", "cards_layer", "paint_layer", "settings_layer", "code_layer", "widgets", "audio", "console"):
         spec = importlib.util.spec_from_file_location(name, Path("runtime") / (name + ".py"))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
@@ -2793,7 +2794,7 @@ def test_no_undefined_names_in_extracted_modules():
     targets.append(ROOT / "modules" / "moy_runtime.py")
     targets += [Path("runtime") / n for n in (
         "console.py", "perf_hud.py", "update_ui.py", "system_menu_ui.py",
-        "achievements_ui.py", "layers.py", "bar_layer.py", "cards_layer.py", "paint_layer.py", "settings_layer.py", "code_layer.py",
+        "achievements_ui.py", "layers.py", "bar_layer.py", "cards_layer.py", "paint_layer.py", "settings_layer.py", "code_layer.py", "widgets.py",
         "block_editor_ui.py", "map_editor_ui.py", "music_editor_ui.py")]
 
     bad = []
