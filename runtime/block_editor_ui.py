@@ -273,17 +273,17 @@ class BlockEditorUI:
         on. The Part-1 `blocks` module is injected so the editor core stays
         dependency-free."""
         ws = self.ws
-        if self.blocks_ed is not None or ws.cart is None:
+        if self.blocks_ed is not None or ws.project.cart is None:
             return
         prog = None
-        if ws.carts_store is not None and ws.cart.get("path"):
+        if ws.carts_store is not None and ws.project.cart.get("path"):
             try:
                 prog = ws._with_sd(
-                    lambda: ws.carts_store.load_blocks(ws.cart))
+                    lambda: ws.carts_store.load_blocks(ws.project.cart))
             except Exception as exc:  # noqa: BLE001
                 print("Moybyte load blocks failed:", self._err_text(exc))
         if prog is None:
-            prog = ws.cart.get("blocks")
+            prog = ws.project.cart.get("blocks")
         # DATA-LOSS GUARD (#29): a cart whose main.py is hand-written code (no
         # blocks.json, and main.py wasn't emitted by the block compiler) must
         # NEVER have that code clobbered by saving an empty block program. When
@@ -762,7 +762,7 @@ class BlockEditorUI:
         A non-SD/embedded cart just validates + applies in RAM."""
         ws = self.ws
         be = self.blocks_ed
-        if not (be and ws.cart):
+        if not (be and ws.project.cart):
             return False
         if self.blk_protect:
             # DATA-LOSS GUARD (#29): this cart's main.py is hand-written code that a
@@ -780,17 +780,17 @@ class BlockEditorUI:
         if not ok:
             self.blk_status = "SYNTAX " + msg
             return False
-        if not (ws.cart.get("path") and ws.can_manage and ws.carts_store):
+        if not (ws.project.cart.get("path") and ws.can_manage and ws.carts_store):
             # nothing to persist (embedded / writes deferred): apply in RAM so RUN works
-            ws.cart["src"] = src
-            ws.cart["blocks"] = prog
+            ws.project.cart["src"] = src
+            ws.project.cart["blocks"] = prog
             be.dirty = False
             self.blk_status = "SAVED"
             ws.ach.note("code_save")
             return True
         try:
             status, smsg = ws._with_sd(
-                lambda: ws.carts_store.save_blocks(ws.cart, prog))
+                lambda: ws.carts_store.save_blocks(ws.project.cart, prog))
             if status != ws.carts_store.SAVE_OK:
                 self.blk_status = "SAVE BAD " + str(smsg)
                 return False
@@ -811,7 +811,7 @@ class BlockEditorUI:
         switches to the code view on the freshly compiled source."""
         ws = self.ws
         be = self.blocks_ed
-        if not (be and ws.cart):
+        if not (be and ws.project.cart):
             return
         if self.blk_protect:
             # Protected cart: don't compile the (empty) blocks over the kid's real
@@ -827,7 +827,7 @@ class BlockEditorUI:
             self.blk_status = "BAD: " + self._err_text(exc)
             return
         self.save_blocks()                       # persist (best-effort) before leaving
-        ws.cart["src"] = src                     # ensure the editor opens the latest
+        ws.project.cart["src"] = src                     # ensure the editor opens the latest
         ws.editor = None                         # rebuild on the new source
         self.blk_menu = None
         ws.set_menu_view("code")
@@ -1034,7 +1034,7 @@ class BlockEditorUI:
         cv.cls(NAMES["dark_blue"])
         # title clamp: 18 at baseline, else fill the width before the status slot.
         tclamp = 18 if lay._base else max(6, (lay.status_x - lay.x0) // lay.cell - 8)
-        title = "BLOCKS  " + (ws.cart["title"][:tclamp] if ws.cart else "")
+        title = "BLOCKS  " + (ws.project.cart["title"][:tclamp] if ws.project.cart else "")
         if be is not None and be.dirty:
             title = title + " *"
         cv.print(title, lay.x0, lay.title_y, NAMES["white"], 1)
