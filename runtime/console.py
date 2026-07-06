@@ -252,6 +252,15 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.wallpaper import Wallpaper
 
+# The desktop home / launcher surface (#28, extracted -- see launcher_layer.py): the
+# Launcher grid CLASS (its instance stays ws.launcher, the single source everything
+# reads) + LauncherHomeLayer (the "launcher" content Layer -- home composition + grid
+# nav). Launcher takes NAMES + _blit_glyph injected for its tile art; ws.open() stays.
+try:
+    from launcher_layer import Launcher, LauncherHomeLayer
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.launcher_layer import Launcher, LauncherHomeLayer
+
 # The block vocabulary/compiler (#29). Imported under whichever name it's known by:
 # bare `blocks` on the device (frozen top-level) and on the host once host_app has
 # aliased it, or `runtime.blocks` when a test loads console/moy_runtime directly
@@ -386,7 +395,6 @@ NAMES = {
     "dark_grey": 5, "light_grey": 6, "white": 7, "red": 8, "orange": 9,
     "yellow": 10, "green": 11, "blue": 12, "indigo": 13, "pink": 14, "peach": 15,
 }
-_TYPE_COLOR = {"wallpaper": 12, "game": 8, "app": 11, "tool": 9}  # index by type
 
 
 def color(name_or_index):
@@ -1018,8 +1026,8 @@ def _in(px, py, rect):
 # the rest of the paint editor; it was paint-only.)
 
 
-# Per-type icon glyph for a cart tile on the desktop (the pre-literate cue).
-_TYPE_GLYPH = {"wallpaper": "paint", "game": "run", "app": "app", "tool": "gear"}
+# (_TYPE_GLYPH / _TYPE_COLOR -- the launcher tile-type icon/color maps -- moved to
+# launcher_layer.py with the Launcher grid.)
 
 
 # (The Achievements milestone tracker (#21) + its ACHIEVEMENTS catalog moved to
@@ -1027,132 +1035,8 @@ _TYPE_GLYPH = {"wallpaper": "paint", "game": "run", "app": "app", "tool": "gear"
 # AchievementsUI construction + tests.)
 
 
-class Launcher:
-    """The desktop home (#28): carts laid out as a PAGED GRID of tappable icon
-    tiles over the wallpaper backdrop, instead of a flat vertical strip. Keeps the
-    selection model (items/sel/selected/move) the rest of the console relies on;
-    `page`/PAGE is the grid's scroll unit (one screen of COLS x ROWS icons).
-
-    The grid geometry comes from an injected `Layout` (#39) so it reflows with the
-    system canvas size + font scale; COLS/ROWS/PAGE are instance attributes mirrored
-    from the live layout (so callers reading them, and the selection/paging model,
-    track the reflowed grid). A bare Launcher(items) (unit construction) falls back
-    to the 320x240 / scale-1 baseline -- exactly today's 4x2/PAGE=8 grid."""
-
-    def __init__(self, items, layout=None):
-        self.items = items
-        self.sel = 0
-        self.page = 0
-        self.set_layout(layout or Layout())
-
-    def set_layout(self, layout):
-        """Adopt a new grid layout (size/font-scale change) and re-clamp the page so
-        the selection stays on a valid screen. Mirrors COLS/ROWS/PAGE as instance
-        attributes for the callers/tests that read them directly."""
-        self.layout = layout
-        self.COLS = layout.cols
-        self.ROWS = layout.rows
-        self.PAGE = layout.page
-        self._clamp_page()
-
-    # -- selection ----------------------------------------------------------
-    def set_items(self, items):
-        """Replace the cart list (after a create/duplicate/delete) and re-clamp the
-        selection + page so neither dangles past the new end. The public re-sync
-        entry point -- callers must not poke the private page bookkeeping."""
-        self.items = items
-        if self.sel >= len(items):
-            self.sel = max(0, len(items) - 1)
-        self._page_to_sel()
-
-    def nav2d(self, dx, dy):
-        """Grid navigation: dx steps a column, dy steps a row. Clamped within the
-        list (no wrap) so arrow nav feels like a real grid."""
-        n = len(self.items)
-        if not n:
-            return
-        step = dx + dy * self.COLS
-        self.sel = max(0, min(n - 1, self.sel + step))
-        self._page_to_sel()
-
-    def _page_to_sel(self):
-        self.page = self.sel // self.PAGE
-        self._clamp_page()
-
-    def max_page(self):
-        n = len(self.items)
-        return max(0, (n - 1) // self.PAGE) if n else 0
-
-    def _clamp_page(self):
-        self.page = max(0, min(self.max_page(), self.page))
-
-    def flip_page(self, d):
-        """Page the grid by d screens (chevron tap), moving the selection onto the
-        first tile of the new page so keyboard nav continues from there."""
-        self.page = max(0, min(self.max_page(), self.page + d))
-        first = self.page * self.PAGE
-        if self.items and not (first <= self.sel < first + self.PAGE):
-            self.sel = min(len(self.items) - 1, first)
-
-    def selected(self):
-        return self.items[self.sel] if self.items else None
-
-    def _page_range(self):
-        start = self.page * self.PAGE
-        return range(start, min(len(self.items), start + self.PAGE))
-
-    def tile_rect(self, i):
-        """The grid-cell rect for cart index i, or None if it's not on the current
-        page. Cells lay out left-to-right, top-to-bottom in the icon area (geometry
-        from the live Layout, so it reflows with the system canvas / font scale)."""
-        return self.layout.tile_rect(i, self.page)
-
-    def tile_at(self, px, py):
-        for i in self._page_range():
-            r = self.tile_rect(i)
-            if r and _in(px, py, r):
-                return i
-        return None
-
-    def draw(self, cv, sheet_for=None):
-        # Icon tiles only -- the wallpaper backdrop + status strip + dock are drawn
-        # by the Workstation around this (so the wallpaper shows through). For each
-        # cart: a rounded art box (its sprite tile 0 if it has one, else a type
-        # glyph), the selection ring, and a short name beneath. All geometry scales
-        # with the layout (font scale), so a bigger panel shows bigger tiles (#39).
-        lay = self.layout
-        box = lay.icon_box
-        fw = lay.font_w                              # on-screen char-cell width (8*fs)
-        spr_scale = max(1, box // 16)                # fit the 16x16 icon sprite in the box
-        for i in self._page_range():
-            x, y, w, h = self.tile_rect(i)
-            it = self.items[i]
-            sel = (i == self.sel)
-            bx = x + (w - box) // 2
-            by = y + 2
-            cv.rect(bx, by, box, box, NAMES["dark_purple"])
-            cv.rectb(bx, by, box, box,
-                     NAMES["yellow"] if sel else NAMES["dark_grey"])
-            img = sheet_for(it) if sheet_for is not None else None
-            if img is not None:
-                cv.spr(img, bx + (box - 16 * spr_scale) // 2,
-                       by + (box - 16 * spr_scale) // 2, spr_scale)
-            else:
-                self._tile_glyph(cv, it, (bx, by, box, box))
-            # short name (one line, truncated to the tile width: fw-wide cells)
-            name = it["title"]
-            maxc = w // fw
-            if len(name) > maxc:
-                name = name[:maxc]
-            cv.print(name, x + (w - len(name) * fw) // 2, by + box + 3,
-                     NAMES["white"] if sel else NAMES["light_grey"], 1)
-
-    def _tile_glyph(self, cv, it, box):
-        # A type-colored art box with a centered type glyph, for carts with no
-        # sprite. Uses the shared module-level glyph blitter (host == device).
-        x, y, w, h = box
-        cv.rect(x + 6, y + 6, w - 12, h - 12, _TYPE_COLOR.get(it["type"], NAMES["indigo"]))
-        _blit_glyph(cv, _TYPE_GLYPH.get(it["type"], "app"), box, NAMES["black"])
+# (The Launcher grid class moved to launcher_layer.py alongside LauncherHomeLayer;
+# its instance is still ws.launcher, built in __init__ -- the single source.)
 
 
 # (Pmem (cart persistent RAM), the _SilentAudio no-op backend, and the reusable
@@ -1236,7 +1120,7 @@ class Workstation:
         # transient screen state (_upd_phase/_upd_msg/_upd_bin/...) lives on it;
         # the queries + channel config above/below stay here.
         self.update_ui = UpdateUI(self, NAMES, _in, _err_text)
-        self.launcher = Launcher(carts if carts else [], self.layout)
+        self.launcher = Launcher(carts if carts else [], self.layout, NAMES, _blit_glyph)
         # Screen states (#28): "launcher" is now the DESKTOP home (wallpaper + cart
         # icon grid + dock); "desktop" is a running cart; "menu" is the cards/code/
         # paint/map editors; "settings" is the Settings app.
@@ -1290,7 +1174,7 @@ class Workstation:
         # (The code editor's keyboard-edge tracker (_ekey_prev) + drag-scroll origin
         # (_drag) + highlight memo (_hl_cache) live on self.code_layer now.)
         # (The paint drag-stroke origin -- _paint_drag -- lives on self.paint_layer.)
-        self._lhover = (-1, -1)       # last cursor pos used for desktop icon hover-highlight
+        # (The launcher's trackball-hover state (_lhover) lives on self.launcher_layer.)
         self.pointer = None           # set by run_desktop
         # Desktop wallpaper (#28): a chosen wallpaper-type cart compiled into its
         # own namespace and run (its _draw, optionally _update) as the BACKDROP each
@@ -1479,13 +1363,14 @@ class Workstation:
         # + code-UI state (keyboard edge / drag / highlight memo); the shared ws.editor
         # handle + save_code/run_code + code-error state + code_layout stay on ws.
         self.code_layer = CodeLayer(self, NAMES, _in)
-        # Content layers (exactly one active per frame, chosen by screen/menu_view).
-        # The already-object surfaces (blocks/map/music/update) + cards are REAL Layer
-        # adapters; the still-smeared surfaces (launcher/settings/desktop/code/paint/
-        # theme) stay _LegacyLayer shims over Workstation methods until each migrates.
+        # The desktop home / launcher (#28): the home composition + grid nav. The Launcher
+        # GRID instance stays ws.launcher (the single source); this Layer draws it.
+        self.launcher_layer = LauncherHomeLayer(self, NAMES, _in)
+        # Content layers (exactly one active per frame, chosen by screen/menu_view). Every
+        # surface is now its own Layer/component; only the running-cart "desktop" + the
+        # theme wrapper remain thin _LegacyLayer shims over Workstation methods.
         self._content_layers = {
-            "launcher": L("launcher", "system", draw=self._draw_desktop_home,
-                          kbd=self._launcher_input, ptr=self._launcher_pointer_layer),
+            "launcher": self.launcher_layer,
             "settings": self.settings_layer,
             "update": _UpdateLayer(self),
             "desktop": L("desktop", "game", draw=self._draw_content_desktop,
@@ -2671,27 +2556,6 @@ class Workstation:
 
     # -- per-surface keyboard handlers (routed from handle_input) -------------
 
-    def _launcher_input(self, i):
-        # Konami Easter egg (#21): watch every button press on the home desktop
-        # for the secret sequence (the nav below still runs normally -- the egg
-        # is a passive observer, so it never blocks the launcher).
-        for _b in self.ach_ui._KONAMI:
-            if i.pressed(_b):
-                self.ach_ui._konami_step(_b)
-                break
-        # Grid nav (#28): left/right step a column, up/down a whole row.
-        if i.pressed("left"):
-            self.launcher.nav2d(-1, 0)
-        if i.pressed("right"):
-            self.launcher.nav2d(1, 0)
-        if i.pressed("up"):
-            self.launcher.nav2d(0, -1)
-        if i.pressed("down"):
-            self.launcher.nav2d(0, 1)
-        if i.pressed("a") or i.pressed("run"):
-            self.open()
-        return True
-
     def _desktop_input(self, i):
         # THE ONE CONSOLE KEY (#71): BACKSPACE/HOME does exactly ONE thing
         # in every input mode, every cart type, paused or not: TOGGLE the
@@ -2738,41 +2602,6 @@ class Workstation:
 
     # -- pointer (trackball-as-mouse) ----------------------------------------
 
-    def _launcher_pointer(self, px, py, click):
-        # Desktop home (#28): a tap on a cart icon opens it; the gear + management
-        # row + page chevrons fire on the press edge. There's no list drag anymore --
-        # the grid pages instead. Trackball hover still previews the icon under it.
-        # The bottom in-cart dock is no longer drawn on the launcher (#46), so it's not
-        # hit-tested here; Settings is reached via the gear in the status strip.
-        if click:
-            # The top-bar tap slice (clock egg / ≡ / NEW / DUP / DEL) is owned by the
-            # bar surface now (#46 BarLayer); it also runs the clock-run reset for any
-            # non-clock tap, so page/tile taps that fall through stay byte-identical.
-            if self.bar_layer.handle_home_tap(px, py):
-                return
-            lay = self.layout
-            if self.launcher.max_page() > 0 and _in(px, py, lay.page_prev):
-                self.launcher.flip_page(-1); return
-            if self.launcher.max_page() > 0 and _in(px, py, lay.page_next):
-                self.launcher.flip_page(1); return
-            i = self.launcher.tile_at(px, py)
-            if i is not None:
-                self.launcher.sel = i
-                self.open()
-                return
-        # Trackball cursor hover (no click): highlight the icon the cursor MOVED
-        # onto. Only when the position actually changed frame-to-frame, so a
-        # parked cursor doesn't fight keyboard nav. _lhover seeds to the live
-        # pointer position on the first frame so the initial centered cursor isn't
-        # treated as a move (which would clobber the first arrow step).
-        if self._lhover == (-1, -1):
-            self._lhover = (px, py)
-        elif (px, py) != self._lhover:
-            self._lhover = (px, py)
-            i = self.launcher.tile_at(px, py)
-            if i is not None:
-                self.launcher.sel = i
-
     def handle_pointer(self):
         # Router (docs/shell_layers_refactor_v1.md §3): publish the game-space pointer
         # (so a cart's touch()/mouse() reads the 320x240 viewport, not the panel, #39),
@@ -2791,10 +2620,6 @@ class Workstation:
                 return
 
     # -- per-surface pointer handlers (routed from handle_pointer) ------------
-
-    def _launcher_pointer_layer(self, px, py, click):
-        self._launcher_pointer(px, py, click)
-        return True
 
     def _desktop_pointer(self, px, py, click):
         # A running cart + the editors live in the 320x240 GAME viewport, so translate
@@ -3301,31 +3126,6 @@ class Workstation:
         cv.print("byte", wx + 3 * word, wy, NAMES["indigo"], 1)
 
     # -- desktop shell drawing (#28) -----------------------------------------
-
-    def _draw_desktop_home(self, dt):
-        """The home desktop: wallpaper backdrop -> cart icon grid -> top status
-        strip. The wallpaper is drawn first and the rest layer over it, exactly the
-        Picotron model (wallpaper shows through the chrome). All on the SYSTEM canvas,
-        reflowed to its size + font scale (#39).
-
-        The bottom in-cart tool dock is NOT drawn here (#46): on the launcher the
-        code/draw/map/run slots have no cart to act on, so the dock was a dead row.
-        It returns the moment a cart is open (the in-cart top-bar buttons / Settings'
-        dock). Settings stays reachable via the gear button in the status strip; the
-        cart grid reclaims the freed bottom band (Layout.grid_bottom)."""
-        self.wallpaper.draw(dt)
-        cv = self.sys_canvas
-        lay = self.layout
-        self.launcher.draw(cv, self._icon_sheet_for)
-        # page chevrons when more than one page of carts
-        if self.launcher.max_page() > 0:
-            if self.launcher.page > 0:
-                px, py = lay.page_prev[0], lay.page_prev[1]
-                cv.print("<", px + 3, py + 8, NAMES["white"], 2)
-            if self.launcher.page < self.launcher.max_page():
-                px, py = lay.page_next[0], lay.page_next[1]
-                cv.print(">", px + 3, py + 8, NAMES["white"], 2)
-        self.bar_layer._draw_status_strip("home")
 
     def _draw_pause_dim(self):
         """Darken the frozen cart frame. The canvas is indexed (no alpha), so the

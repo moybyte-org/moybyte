@@ -9,11 +9,14 @@ Group A (PC simulator first)** + **Task Group B (cartridge format)** + the first
 
 ## What's here
 
-**The shared console (host == device).** The launcher/desktop/cards/code/paint UI
-is now ONE module (`console.py`) that both the host *and* the T-Deck run — the host
-renders the same 320×240 pixels with the same petme128 font. The files below split
-into **shared** (canonical here, build-staged into the firmware `modules/` tree so
-the device freezes the identical code) and **host glue**.
+**The shared console (host == device).** The launcher/desktop/cards/code/paint UI is
+one codebase that both the host *and* the T-Deck run — the host renders the same
+320×240 pixels with the same petme128 font. `console.py` is the **compositor/router**
+(`frame`/`handle_input`/`handle_pointer` loop over a z-ordered Layer stack + the shared
+draw toolkit + cart lifecycle); each **surface is its own `*_layer.py` module** (the
+`Layer` protocol + the extracted editors below). The files split into **shared**
+(canonical here, build-staged into the firmware `modules/` tree so the device freezes
+the identical code) and **host glue**.
 
 | file | role |
 |---|---|
@@ -22,7 +25,18 @@ the device freezes the identical code) and **host glue**.
 | `canvas.py` | **(host)** `Canvas` — indexed surface (320×240 in the console), TIC-80 API (`cls/pix/line/rect/rectb/circ/circb/spr/map/print` — `rect`/`circ` filled, `rectb`/`circb` outlines; `map` blits a tilemap region, native one-call `moy_gfx.blit_map` on device), `print` uses `font.py`, `to_rgb888()`; `Image` sprites |
 | `editors.py` | **(shared, staged to device)** `CodeEditor` / `SpriteSheet` (8×8 tiles + `__gfx__` hex) / `TileMap` (`w×h` tile-id grid over a sheet + `map.moymap` hex, `mget`/`mset`, #32) / `PaintEditor` |
 | `audio.py` | **(shared, staged to device)** sound data model (`SFX`/`MusicTrack`/`AudioBank`) + `AudioEngine` pure-Python synth/mixer (`render()` → PCM). Backends (host `FakeAudio`/SDL, device I2S) consume `render()`. See `docs/audio_design_v04.md` (#16) |
-| `console.py` | **(shared, staged to device)** `Launcher` + `Pointer` + `Workstation` + cards/code/paint UI + layout/`NAMES`/`CURSOR`. Backend-agnostic: injected `make_api` + `make_audio` + cart store + `wifi` system service. The device's `moy_runtime` imports it; `host_app` runs it on the host. Gates the injected `wifi` API on the cart's `"network"` manifest permission (#38) |
+| `console.py` | **(shared, staged to device)** `Workstation` — the compositor/router (the `frame`/`handle_input`/`handle_pointer` stack loop + `_visible_stack`/`_build_layers` + the #39 game↔system composite), the shared draw toolkit (`_glyph`/`_icon`/`_btn`/`_mini_btn`), cart lifecycle (`open`/`_start`/`go_home`/`set_menu_view`), the pinned handles (`ws.editor`/`ws.paint`, cart `config`/`apply`, `wallpaper_id` + picker API, `nav`), `Layout`/`CodeLayout` (responsive geometry), `NAMES`/`CURSOR`. Backend-agnostic: injected `make_api` + `make_audio` + cart store + `wifi`. The device's `moy_runtime` imports it; `host_app` runs it on the host |
+| `layers.py` | **(shared, staged)** the `Layer` protocol + `_LegacyLayer` shim + the thin object-surface adapters (blocks/map/music/update/sysmenu/about/achievements/perf) |
+| `bar_layer.py` | **(shared, staged)** `BarLayer` — the unified 18px top bar + bottom dock (#46): draw + strip cache + clock cache + dock/bar tap slices + the bar/dock geometry constants |
+| `launcher_layer.py` | **(shared, staged)** the `Launcher` grid class (its instance is `ws.launcher`) + `LauncherHomeLayer` — the home desktop composition (wallpaper → grid → bar) + grid nav (#28) |
+| `cards_layer.py` | **(shared, staged)** `CardsLayer` — the "Make it mine" config-card editor (#3/#15): card draw + layout + scroll (msel/mtop) + taps; cart `config`/`apply`/`adjust` stay on `ws` |
+| `paint_layer.py` | **(shared, staged)** `PaintLayer` (the sprite/icon paint editor #4/#30) + `ThemeLayer` (EDIT ICONS over the system icon sheet) — one renderer keyed on `ws._editing_icons` |
+| `settings_layer.py` | **(shared, staged)** `SettingsLayer` — the Settings aggregator (#28/#39/#53): rows + scroll + draw; owns no config (dispatches every mutation to `ws` setters) |
+| `code_layer.py` | **(shared, staged)** `CodeLayer` — the full-screen code editor (#24/#39): draw + touch/keyboard editing + the MicroPython-safe syntax highlighter; `ws.editor`/`save_code`/`run_code` stay on `ws` |
+| `wallpaper.py` | **(shared, staged)** `Wallpaper` — the desktop backdrop component (#28) the launcher home + Settings both draw; owns the rendering + compiled-cart cache, `wallpaper_id` + picker API stay on `ws` |
+| `widgets.py` | **(shared, staged)** self-contained support classes: `Pointer` (cursor), `Achievements` (#21 tracker + catalog), `Popup` (dropdown #52), `Pmem` (cart RAM), `_SilentAudio`, `_Blit` |
+| `perf_hud.py` / `update_ui.py` / `system_menu_ui.py` / `achievements_ui.py` | **(shared, staged)** the FPS/frame-time HUD (#43), the OTA update screen (#53), the ≡ system-menu drawing (#52), the achievement/Easter-egg drawing (#21) |
+| `block_editor_ui.py` / `map_editor_ui.py` / `music_editor_ui.py` | **(shared, staged)** the block editor (#29), tilemap editor (#32), and music/sound editor (#50) UIs |
 | `moy_carts.py` | **(shared, staged to device)** the `.moy` store — scan/load/save_config/save_code/save_sprites/save_sounds/save_map/create/duplicate/delete + the known-WiFi credential store (load_wifi/remember_wifi/forget_wifi → `wifi.json`, #38) (dict carts; `map.moymap` tilemap blob, #32; only `json`+`os`) |
 | `host_app.py` | **(host glue)** host `make_api` (incl. audio + the capability-gated `wifi`), `FakeAudio` + `FakeWifi` backends, `build_workstation()` (320×240 Canvas + `moy_carts` + seeded system carts), and `ConsoleDriver` (mouse/keyboard → the shared console) |
 | `input.py` | **(host)** `InputState` — held/pressed/released + `last_key` (same contract as firmware `moybyte`) |

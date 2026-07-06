@@ -1924,7 +1924,7 @@ def _load_moy_runtime():
     # all of them).
     for name in ("editors", "block_editor_ui", "map_editor_ui", "music_editor_ui",
                  "perf_hud", "update_ui", "system_menu_ui", "achievements_ui",
-                 "layers", "bar_layer", "cards_layer", "paint_layer", "settings_layer", "code_layer", "widgets", "audio", "wallpaper", "console"):
+                 "layers", "bar_layer", "cards_layer", "paint_layer", "settings_layer", "code_layer", "widgets", "audio", "wallpaper", "launcher_layer", "console"):
         spec = importlib.util.spec_from_file_location(name, Path("runtime") / (name + ".py"))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
@@ -2794,7 +2794,7 @@ def test_no_undefined_names_in_extracted_modules():
     targets.append(ROOT / "modules" / "moy_runtime.py")
     targets += [Path("runtime") / n for n in (
         "console.py", "perf_hud.py", "update_ui.py", "system_menu_ui.py",
-        "achievements_ui.py", "layers.py", "bar_layer.py", "cards_layer.py", "paint_layer.py", "settings_layer.py", "code_layer.py", "widgets.py", "wallpaper.py",
+        "achievements_ui.py", "layers.py", "bar_layer.py", "cards_layer.py", "paint_layer.py", "settings_layer.py", "code_layer.py", "widgets.py", "wallpaper.py", "launcher_layer.py",
         "block_editor_ui.py", "map_editor_ui.py", "music_editor_ui.py")]
 
     bad = []
