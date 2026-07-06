@@ -30,35 +30,35 @@ def test_host_base_rows_all_reachable(tmp_path):
     # The base set (7 rows since #68's PERF DIAG) may exceed one screen; the #53
     # scroll machinery must keep every row reachable, top and bottom.
     ws = _ws(tmp_path)
-    rows = ws._settings_rows()
-    ws.set_msel = len(rows) - 1
-    ws._settings_scroll()
-    assert ws._settings_row_visible(len(rows) - 1)      # bottom row scrolls into view
-    ws.set_msel = 0
-    ws._settings_scroll()
-    assert ws.set_top == 0                              # ... and back to the top
-    assert ws._settings_row_visible(0)
+    rows = ws.settings_layer._settings_rows()
+    ws.settings_layer.set_msel = len(rows) - 1
+    ws.settings_layer._settings_scroll()
+    assert ws.settings_layer._settings_row_visible(len(rows) - 1)      # bottom row scrolls into view
+    ws.settings_layer.set_msel = 0
+    ws.settings_layer._settings_scroll()
+    assert ws.settings_layer.set_top == 0                              # ... and back to the top
+    assert ws.settings_layer._settings_row_visible(0)
 
 
 def test_overflow_scrolls_selection_into_view(tmp_path):
     ws = _ws(tmp_path)
     _force_ota_rows(ws)
-    rows = ws._settings_rows()
-    vis = ws._settings_visible()
+    rows = ws.settings_layer._settings_rows()
+    vis = ws.settings_layer._settings_visible()
     last = len(rows) - 1
     assert last >= vis                                  # genuinely overflows the panel
-    assert not ws._settings_row_visible(last)           # bottom rows start hidden
+    assert not ws.settings_layer._settings_row_visible(last)           # bottom rows start hidden
     # Selecting the last row scrolls it into view, and the top row scrolls off.
-    ws.set_msel = last
-    ws._settings_scroll()
-    assert ws._settings_row_visible(last)
-    assert ws.set_top == len(rows) - vis
-    assert not ws._settings_row_visible(0)
+    ws.settings_layer.set_msel = last
+    ws.settings_layer._settings_scroll()
+    assert ws.settings_layer._settings_row_visible(last)
+    assert ws.settings_layer.set_top == len(rows) - vis
+    assert not ws.settings_layer._settings_row_visible(0)
     # Back to the top scrolls back.
-    ws.set_msel = 0
-    ws._settings_scroll()
-    assert ws.set_top == 0
-    assert ws._settings_row_visible(0)
+    ws.settings_layer.set_msel = 0
+    ws.settings_layer._settings_scroll()
+    assert ws.settings_layer.set_top == 0
+    assert ws.settings_layer._settings_row_visible(0)
 
 
 def test_offscreen_rows_are_not_tappable(tmp_path):
@@ -66,11 +66,11 @@ def test_offscreen_rows_are_not_tappable(tmp_path):
     skips non-visible rows), so its computed rect can't steal a tap."""
     ws = _ws(tmp_path)
     _force_ota_rows(ws)
-    ws.set_msel = len(ws._settings_rows()) - 1
-    ws._settings_scroll()
-    assert ws.set_top > 0
+    ws.settings_layer.set_msel = len(ws.settings_layer._settings_rows()) - 1
+    ws.settings_layer._settings_scroll()
+    assert ws.settings_layer.set_top > 0
     # row 0 is now above the window -> not visible -> excluded from hit-testing
-    assert not ws._settings_row_visible(0)
+    assert not ws.settings_layer._settings_row_visible(0)
 
 
 def test_update_online_reachable_by_keyboard(tmp_path):
@@ -78,7 +78,7 @@ def test_update_online_reachable_by_keyboard(tmp_path):
     from runtime import host_app
     ws = _ws(tmp_path)
     _force_ota_rows(ws)
-    rows = ws._settings_rows()
+    rows = ws.settings_layer._settings_rows()
     assert "UPDATE ONLINE" in [r[1] for r in rows]      # the row that used to be cut off
     drv = host_app.ConsoleDriver(ws)
     last = len(rows) - 1
@@ -86,5 +86,5 @@ def test_update_online_reachable_by_keyboard(tmp_path):
         drv.press("down")
         drv.frame(1 / 30)
         drv.frame(1 / 30)
-    assert ws.set_msel == last
-    assert ws._settings_row_visible(last)               # scrolled into view, reachable
+    assert ws.settings_layer.set_msel == last
+    assert ws.settings_layer._settings_row_visible(last)               # scrolled into view, reachable

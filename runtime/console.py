@@ -199,6 +199,21 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
         _SW_Y0, _SW, _SW_COLS, _SW_AREA, _SPR_PREV, _SPR_NEXT, _PAINT_SIZE, _PAINT_SAVE,
         _PAINT_CLOSE, _PAINT_GET, _PAINT_PUT)
 
+# The Settings app surface (#28/#39/#53, extracted -- see settings_layer.py). The
+# aggregator: rows + scroll + drawing move to SettingsLayer, which owns NO config -- it
+# reads ws state (system/wallpaper_id/font_scale/diag_live/web_hook) and dispatches every
+# mutation to ws setters; the wallpaper cluster stays single-sourced on ws (the launcher
+# shares that backdrop). settings_layer.py is the single source of the _SET_* geometry
+# constants (also used by console's Layout), imported back here for Layout + tests.
+try:
+    from settings_layer import (
+        SettingsLayer, _SET_X, _SET_W, _SET_ROW_Y0, _SET_ROW_H, _SET_BACK, _SET_ACH,
+        _SET_TITLE_HIT)
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.settings_layer import (
+        SettingsLayer, _SET_X, _SET_W, _SET_ROW_Y0, _SET_ROW_H, _SET_BACK, _SET_ACH,
+        _SET_TITLE_HIT)
+
 # The block vocabulary/compiler (#29). Imported under whichever name it's known by:
 # bare `blocks` on the device (frozen top-level) and on the host once host_app has
 # aliased it, or `runtime.blocks` when a test loads console/moy_runtime directly
@@ -527,16 +542,9 @@ _PAGE_NEXT = (304, 110, 14, 24)
 _DOCK_W = 52
 _DOCK_GAP = 1
 _DOCK_X0 = 2
-# Settings screen (#28): wallpaper picker (FUNCTIONAL) + mocked rows. A simple
-# vertical list of rows, each with a < label > stepper; the wallpaper row applies
-# + persists immediately, the rest are clearly-marked no-ops ("soon").
-_SET_X = 18
-_SET_W = 284
-_SET_ROW_Y0 = 40
-_SET_ROW_H = 26
-_SET_BACK = (288, 18, 18, 14)       # close Settings (X), in the panel title row
-_SET_ACH = (262, 18, 22, 14)        # open the achievements view (trophy), title row (#21)
-_SET_TITLE_HIT = (30, 18, 130, 16)  # the "SETTINGS" panel title (secret door, #21)
+# Settings screen (#28) geometry (_SET_*) lives in settings_layer.py (its own surface)
+# and is imported back at the top of this file, so console._X still resolves for the
+# Layout class + tests.
 # Code editor: FULL-SCREEN (320x240). Top bar = title + run/save/close icons;
 # the code area fills the middle; a tappable symbol palette runs along the bottom
 # (the T-Deck keyboard has no `=`/`[]`/`{}`/`<>`/`%`, so the palette supplies them).
@@ -1740,8 +1748,8 @@ class Workstation:
         # reuses the cart PAINT renderer/input over self.icon_sheet (PaintEditor is
         # tile-size-agnostic, so the 16x16 IconSheet edits natively).
         self._editing_icons = False
-        self.set_msel = 0             # selected row in the Settings screen
-        self.set_top = 0              # first visible Settings row (scroll offset, #53)
+        # (The Settings selection/scroll window -- set_msel/set_top -- lives on
+        # self.settings_layer now, built in _build_layers with the rest of the stack.)
         self.carts_root = None        # SD carts dir (reads); set by run_desktop
         self.cart_error = None        # last cart failure text -> on-canvas error panel
         self.save_status = None       # last save_code result text (e.g. a syntax error)
@@ -1888,6 +1896,10 @@ class Workstation:
         # -- it owns the EDIT-ICONS lifecycle + delegates all editing to this PaintLayer.
         self.paint_layer = PaintLayer(self, NAMES, _in)
         self.theme_layer = ThemeLayer(self, self.paint_layer, NAMES)
+        # The Settings app (#28/#39/#53): the aggregator screen. Owns the row list +
+        # scroll window (set_msel/set_top) + drawing; reads ws config/system state +
+        # dispatches every mutation to ws setters (it owns NO config).
+        self.settings_layer = SettingsLayer(self, NAMES, _in, _clamp_scroll)
         # Content layers (exactly one active per frame, chosen by screen/menu_view).
         # The already-object surfaces (blocks/map/music/update) + cards are REAL Layer
         # adapters; the still-smeared surfaces (launcher/settings/desktop/code/paint/
@@ -1895,8 +1907,7 @@ class Workstation:
         self._content_layers = {
             "launcher": L("launcher", "system", draw=self._draw_desktop_home,
                           kbd=self._launcher_input, ptr=self._launcher_pointer_layer),
-            "settings": L("settings", "system", draw=self._draw_settings,
-                          kbd=self._settings_input, ptr=self._settings_pointer_layer),
+            "settings": self.settings_layer,
             "update": _UpdateLayer(self),
             "desktop": L("desktop", "game", draw=self._draw_content_desktop,
                          kbd=self._desktop_input, ptr=self._desktop_pointer),
@@ -2368,26 +2379,6 @@ class Workstation:
     # committing to backends. Each row is (key, label, kind): "wallpaper" is the
     # live one; "mock" rows just step a cosmetic placeholder value.
 
-    _SETTINGS_ROWS = (
-        ("wallpaper", "WALLPAPER", "wallpaper"),
-        ("font_scale", "FONT SIZE", "font"),
-        ("volume", "VOLUME", "mock-gauge"),
-        ("brightness", "BRIGHTNESS", "mock-gauge"),
-        ("name", "NAME", "mock-name"),
-        # EDIT ICONS (Stage 2): the one FUNCTIONAL "theme" control -- an action row
-        # that opens the PAINT editor on the system icon sheet so a kid can repaint
-        # the top-bar chrome. The dropdown menu that would otherwise host it is
-        # deferred to #52, so it lives in Settings for now. "action" rows aren't
-        # +/- steppers: any tap / left / right activates them (open_theme).
-        ("icons", "EDIT ICONS", "action"),
-        # PERF DIAG (#68 "kid mode" gate): OFF (default) skips the diag costs a
-        # player can FEEL on device -- the 30s forced GC sample and the periodic
-        # diag->SD write -- and hushes the live serial echo. Crash/cart-exit
-        # flushes keep working, so OFF still yields a diag.log. Owners flip it ON
-        # for a measurement session.
-        ("diag_live", "PERF DIAG", "diag"),
-    )
-    _MOCK_NAMES = ("ALEX", "SAM", "KIT", "RAE")
 
     def _update_available(self):
         """True when an OTA updater is injected AND this build is OTA-capable (the
@@ -2412,37 +2403,11 @@ class Workstation:
                 self._online_ok = False
         return self._online_ok
 
-    def _settings_rows(self):
-        """The Settings rows for this session: the static set, plus "UPDATE FW" (install
-        from SD) and "UPDATE ONLINE" (WiFi download, #53 Phase 3) action rows when the
-        injected updater supports them. Built on demand so the rows appear/disappear with
-        the updater without re-statting per draw."""
-        rows = self._SETTINGS_ROWS
-        if self.web_hook is not None:           # device web view (#41): a WiFi browser feed
-            rows = rows + (("web", "WEB VIEW", "web"),)
-        if self._update_available():
-            rows = rows + (("update", "UPDATE FW", "action"),)
-        if self._online_update_available():
-            rows = rows + (("ota_channel", "CHANNEL", "channel"),)
-            rows = rows + (("update_online", "UPDATE ONLINE", "action"),)
-        return rows
-
-    def _activate_settings_action(self, key):
-        """Fire an "action" Settings row by key: EDIT ICONS opens the theme editor,
-        UPDATE FW installs a local SD image, UPDATE ONLINE checks WiFi for one (#53)."""
-        if key == "update":
-            self.update_ui.open_update()
-        elif key == "update_online":
-            self.update_ui.open_update_online()
-        else:
-            self.open_theme()       # EDIT ICONS (#52)
-
     def open_settings(self):
         if self.screen != "settings":
             self._settings_return = self.screen   # resume here on exit (cart vs home)
         self._dirty = True             # screen change repaints (#44)
-        self.set_msel = 0
-        self.set_top = 0               # reset the scroll window (#53)
+        self.settings_layer.reset()    # reset the selection + scroll window (#53)
         self.screen = "settings"
         self.show_achievements = False
         self.ach_ui._secret_taps = 0              # fresh secret-door run each visit (#21)
@@ -2473,37 +2438,6 @@ class Workstation:
         self._dirty = True             # overlay open/close repaints (#44)
         self.sysmenu.toggle(self.menu_ui._sysmenu_items())
 
-    def settings_adjust(self, d):
-        """Step the selected Settings row by d. Wallpaper/font apply + persist; the
-        mock rows just move a cosmetic value held in self.system (not acted on); an
-        "action" row (EDIT ICONS) fires its action regardless of direction."""
-        key, _label, kind = self._settings_rows()[self.set_msel]
-        if kind == "action":                    # EDIT ICONS / UPDATE FW: open the tool
-            self._activate_settings_action(key)
-            return
-        if key == "web":                        # device web view ON <-> OFF (#41)
-            self._toggle_web_view()
-            return
-        if key == "diag_live":                  # perf diagnostics ON <-> OFF (#68)
-            self.set_diag_live(not self.diag_live)
-            return
-        if key == "ota_channel":                # OTA update channel STABLE <-> BETA
-            self._cycle_channel(d)
-            return
-        if key == "wallpaper":
-            self.cycle_wallpaper(d)
-            return
-        if key == "font_scale":                 # system-UI font size (#39): live + persisted
-            self.cycle_font_scale(d)
-            return
-        if key == "name":
-            cur = self.system.get("name", self._MOCK_NAMES[0])
-            i = self._MOCK_NAMES.index(cur) if cur in self._MOCK_NAMES else 0
-            self.system["name"] = self._MOCK_NAMES[(i + d) % len(self._MOCK_NAMES)]
-        else:  # mock-gauge (volume / brightness): a 0..5 placeholder
-            v = int(self.system.get(key, 3)) + d
-            self.system[key] = max(0, min(5, v))
-
     def _toggle_web_view(self):
         """Flip the device web view on/off via the injected controller (#41). Guarded
         so a backend hiccup (e.g. WiFi not up yet -> can't bind) can never crash
@@ -2516,17 +2450,6 @@ class Workstation:
             hook.toggle()
         except Exception as exc:  # noqa: BLE001
             print("Moybyte web view toggle failed:", exc)
-
-    def _settings_wallpaper_label(self):
-        """A friendly label for the current wallpaper: the cart's TITLE for a
-        wallpaper cart, or the color name for a built-in solid fill."""
-        wp = self.wallpaper_id or ""
-        if isinstance(wp, str) and wp.startswith("fill:"):
-            return wp[5:].replace("_", " ").upper()
-        cart = self._wp_cart_by_id(wp)
-        if cart is not None:
-            return cart["title"].upper()
-        return str(wp).replace("_", " ").upper()
 
     # -- firmware update screen (#53) -----------------------------------------
     #
@@ -3262,31 +3185,6 @@ class Workstation:
             self.open()
         return True
 
-    def _settings_input(self, i):
-        rows = self._settings_rows()
-        if i.pressed("up"):
-            self.set_msel = (self.set_msel - 1) % len(rows)
-        if i.pressed("down"):
-            self.set_msel = (self.set_msel + 1) % len(rows)
-        self._settings_scroll()        # keep the selection in view (#53)
-        if i.pressed("left"):
-            self.settings_adjust(-1)
-        if i.pressed("right"):
-            self.settings_adjust(1)
-        if i.pressed("a") or i.pressed("run"):  # activate an action row (EDIT ICONS / UPDATE FW)
-            row = rows[self.set_msel % len(rows)]
-            if row[2] == "action":
-                self._activate_settings_action(row[0])
-            elif row[2] == "web":               # A/run also toggles the web view (#41)
-                self._toggle_web_view()
-            elif row[2] == "diag":              # ... and the PERF DIAG gate (#68)
-                self.set_diag_live(not self.diag_live)
-        if i.pressed("b"):
-            self._exit_settings()          # back -> resume the cart if opened from one
-        elif i.pressed("home") or i.pressed("stop"):
-            self.go_home()
-        return True
-
     def _desktop_input(self, i):
         # THE ONE CONSOLE KEY (#71): BACKSPACE/HOME does exactly ONE thing
         # in every input mode, every cart type, paused or not: TOGGLE the
@@ -3372,79 +3270,6 @@ class Workstation:
             if i is not None:
                 self.launcher.sel = i
 
-    def _settings_visible(self):
-        """How many Settings rows fit in the panel at the current font scale (#39)."""
-        lay = self.layout
-        _px, py, _pw, ph = lay.settings_panel
-        n = (py + ph - lay.set_row_y0) // lay.set_row_h
-        return max(1, int(n))
-
-    def _settings_scroll(self):
-        """Keep the selected row (set_msel) inside the visible window by moving the
-        scroll offset set_top. The list scrolls once it has more rows than fit -- the
-        #53 OTA rows (UPDATE FW / CHANNEL / UPDATE ONLINE) push it past one screen."""
-        rows = len(self._settings_rows())
-        vis = self._settings_visible()
-        self.set_top = _clamp_scroll(self.set_top, self.set_msel, vis, rows)
-
-    def _settings_row_visible(self, i):
-        return self.set_top <= i < self.set_top + self._settings_visible()
-
-    def _settings_row_rect(self, i):
-        # Scrolled position: row i sits in on-screen slot (i - set_top). Rows outside
-        # the visible window get an off-panel rect that the draw + pointer loops skip.
-        return self.layout.settings_row_rect(i - self.set_top)
-
-    def _settings_pointer(self, px, py, click):
-        if not click:
-            return
-        # The achievements view is a modal overlay: while it's up, any tap closes it
-        # (it has no controls of its own besides "tap to dismiss").
-        if self.show_achievements:
-            self.show_achievements = False
-            return
-        lay = self.layout
-        if _in(px, py, lay.set_ach):           # trophy: open the achievements view (#21)
-            self.show_achievements = True
-            self.ach_ui._secret_taps = 0
-            return
-        if _in(px, py, lay.set_back):
-            self._exit_settings()
-            return
-        # Secret-door Easter egg (#21): tapping the SETTINGS title (not a button)
-        # _SECRET_TAP_GOAL times knocks the hidden door open. Reset on any other tap.
-        if _in(px, py, lay.set_title_hit):
-            self.ach_ui._tap_secret_door()
-            return
-        self.ach_ui._secret_taps = 0
-        slot = self.bar_layer._dock_slot_at(px, py)
-        if slot is not None:
-            self.bar_layer._activate_dock(slot)
-            return
-        edge = 5 * self.layout.font_w           # the "<"/">" hit zone (40px at fs=1)
-        rows = self._settings_rows()
-        for i in range(len(rows)):
-            if not self._settings_row_visible(i):
-                continue                       # off-screen (scrolled) rows aren't tappable
-            x, y, w, h = self._settings_row_rect(i)
-            if _in(px, py, (x, y, w, h)):
-                self.set_msel = i
-                if rows[i][2] == "action":
-                    self._activate_settings_action(rows[i][0])  # EDIT ICONS / UPDATE FW
-                    return
-                if rows[i][2] == "web":            # web view: any tap flips ON/OFF (#41)
-                    self._toggle_web_view()
-                    return
-                if rows[i][2] == "diag":           # PERF DIAG: any tap flips it (#68)
-                    self.set_diag_live(not self.diag_live)
-                    return
-                # left third = "<" (decrement), right third = ">" (increment).
-                if px >= x + w - edge:
-                    self.settings_adjust(1)
-                elif px <= x + edge:
-                    self.settings_adjust(-1)
-                return
-
     def handle_pointer(self):
         # Router (docs/shell_layers_refactor_v1.md §3): publish the game-space pointer
         # (so a cart's touch()/mouse() reads the 320x240 viewport, not the panel, #39),
@@ -3466,10 +3291,6 @@ class Workstation:
 
     def _launcher_pointer_layer(self, px, py, click):
         self._launcher_pointer(px, py, click)
-        return True
-
-    def _settings_pointer_layer(self, px, py, click):
-        self._settings_pointer(px, py, click)
         return True
 
     def _desktop_pointer(self, px, py, click):
@@ -4076,112 +3897,6 @@ class Workstation:
             cv = self.canvas
         cv.rect(x, y, w, h, fill)
         cv.print(label, x + 2, y + 2, NAMES["black"], 1)
-
-    def _draw_settings(self, dt):
-        """The Settings app (#28): wallpaper picker + font-size picker (both
-        FUNCTIONAL, persist) plus the mocked rows, over the live wallpaper so the
-        backdrop preview is honest. On the SYSTEM canvas; panel + title-row controls
-        reflow with the layout/font scale (#39)."""
-        self._draw_wallpaper(dt)
-        cv = self.sys_canvas
-        lay = self.layout
-        fs = lay.fs
-        px, py, pw, ph = lay.settings_panel
-        cv.rect(px, py, pw, ph, NAMES["dark_purple"])
-        cv.rectb(px, py, pw, ph, NAMES["pink"])
-        self._glyph("gear", (px + 6, py + 2, 14 * fs, 14 * fs), NAMES["yellow"], cv)
-        cv.print("SETTINGS", px + 24, py + 4, NAMES["white"], 2)
-        # Achievements view button (#21): a trophy badge with the unlocked count.
-        sa = lay.set_ach
-        cv.rect(sa[0], sa[1], sa[2], sa[3], NAMES["indigo"])
-        self._glyph("trophy", (sa[0] - 2, sa[1], 14 * fs, 14 * fs), NAMES["yellow"], cv)
-        cv.print(str(self.ach.count()), sa[0] + 13 * fs, sa[1] + 4, NAMES["white"], 1)
-        self._mini_btn("X", lay.set_back, NAMES["red"], cv)
-        rows = self._settings_rows()
-        for i in range(len(rows)):
-            if self._settings_row_visible(i):
-                self._draw_settings_row(i)
-        self._draw_settings_more(rows)
-        self.bar_layer._draw_status_strip("settings")
-        self.bar_layer._draw_dock("settings")
-
-    def _draw_settings_more(self, rows):
-        """Up/down chevrons at the panel's right edge when the Settings list scrolls
-        past the visible window (the #53 OTA rows can push it over one screen)."""
-        cv = self.sys_canvas
-        lay = self.layout
-        px, py, pw, ph = lay.settings_panel
-        xr = px + pw - 9 * lay.fs
-        if self.set_top > 0:
-            cv.print("^", xr, lay.set_row_y0, NAMES["white"], 1)
-        if self.set_top + self._settings_visible() < len(rows):
-            cv.print("v", xr, py + ph - 9 * lay.fs, NAMES["white"], 1)
-
-    def _draw_settings_row(self, i):
-        cv = self.sys_canvas
-        lay = self.layout
-        fw = lay.font_w
-        key, label, kind = self._settings_rows()[i]
-        x, y, w, h = self._settings_row_rect(i)
-        sel = (i == self.set_msel)
-        if sel:
-            cv.rect(x, y, w, h, NAMES["indigo"])
-        fg = NAMES["white"] if sel else NAMES["light_grey"]
-        cv.print(label, x + 4, y + 5, fg, 1)
-        if kind == "action":
-            # An action row (EDIT ICONS / UPDATE FW / UPDATE ONLINE): no value/stepper --
-            # just an OPEN affordance at the right so a tap (or A) is the obvious activate.
-            # The glyph cues what it does (paint = repaint chrome; run = install; wifi =
-            # online update).
-            if key == "update":
-                g, c = "run", NAMES["yellow"]
-            elif key == "update_online":
-                g, c = "wifi", NAMES["yellow"]
-            else:
-                g, c = "paint", NAMES["green"]
-            self._glyph(g, (x + w - 18 * lay.fs, y + 2, 14 * lay.fs, 14 * lay.fs), c, cv)
-            return
-        # < value > stepper at the right (the chevrons print at double size = 2*fw).
-        cv.print("<", x + w - 11 * fw - 2, y + 5, NAMES["yellow"], 2)
-        cv.print(">", x + w - 2 * fw + 2, y + 5, NAMES["yellow"], 2)
-        vx = x + w - 78 * lay.fs           # value column (baseline x+w-78)
-        if kind == "wallpaper":
-            cv.print(self._settings_wallpaper_label()[:9], vx, y + 5, NAMES["green"], 1)
-        elif kind == "font":               # system-UI font size (#39): 1x / 2x / 3x
-            cv.print("%dx" % self.font_scale, vx, y + 5, NAMES["green"], 1)
-        elif kind == "mock-gauge":
-            lvl = int(self.system.get(key, 3))
-            for s in range(5):
-                c = NAMES["green"] if s < lvl else NAMES["dark_grey"]
-                cv.rect(vx + s * 8 * lay.fs, y + 6, 6 * lay.fs, 8 * lay.fs, c)
-        elif kind == "mock-name":
-            cv.print(str(self.system.get("name", self._MOCK_NAMES[0]))[:8], vx, y + 5,
-                     NAMES["peach"], 1)
-        elif kind == "channel":            # OTA update channel: STABLE / BETA (#53)
-            beta = self._ota_channel() == "unstable"
-            cv.print("BETA" if beta else "STABLE", vx, y + 5,
-                     NAMES["orange"] if beta else NAMES["green"], 1)
-        elif kind == "web":                # device web view (#41): ON/OFF + the URL
-            on = False
-            url = ""
-            try:
-                on = bool(self.web_hook.enabled)
-                url = str(self.web_hook.url() or "")
-            except Exception:  # noqa: BLE001 -- a backend hiccup just reads OFF
-                pass
-            cv.print("ON" if on else "OFF", vx, y + 5,
-                     NAMES["green"] if on else NAMES["dark_grey"], 1)
-            if on and url:
-                # The URL to open in a phone/desktop browser, under the row label.
-                cv.print(url[:34], x + 4, y + 6 + fw, NAMES["blue"], 1)
-        elif kind == "diag":               # #68 perf-diagnostics gate: ON/OFF
-            on = bool(self.diag_live)
-            cv.print("ON" if on else "OFF", vx, y + 5,
-                     NAMES["orange"] if on else NAMES["dark_grey"], 1)
-        # Mark not-yet-functional rows clearly (wallpaper + font + channel + web +
-        # diag + actions work).
-        if kind not in ("wallpaper", "font", "action", "channel", "web", "diag"):
-            cv.print("soon", x + 4, y + 6 + fw, NAMES["dark_grey"], 1)
 
     # _draw_fps / _fps_tap_rect / _draw_perf_hud (the HUD *rendering*) now live on
     # self.perf_ui (perf_hud.py, PerfHud). The perf *query* API below stays here --

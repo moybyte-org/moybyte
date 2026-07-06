@@ -44,11 +44,13 @@ sys.modules.setdefault("music_editor_ui", _music_editor_ui)
 from . import bar_layer as _bar_layer
 from . import cards_layer as _cards_layer
 from . import paint_layer as _paint_layer
+from . import settings_layer as _settings_layer
 from . import layers as _layers
 sys.modules.setdefault("layers", _layers)
 sys.modules.setdefault("bar_layer", _bar_layer)
 sys.modules.setdefault("cards_layer", _cards_layer)
 sys.modules.setdefault("paint_layer", _paint_layer)
+sys.modules.setdefault("settings_layer", _settings_layer)
 
 from . import console  # noqa: E402  (after the editors/audio aliases above)
 from . import moy_carts  # noqa: E402  (shared .moy store; host-clean)

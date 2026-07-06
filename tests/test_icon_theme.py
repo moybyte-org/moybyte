@@ -24,14 +24,14 @@ def _center(rect):
 
 
 def _icons_row_index(ws):
-    return [r[0] for r in ws._SETTINGS_ROWS].index("icons")
+    return [r[0] for r in ws.settings_layer._SETTINGS_ROWS].index("icons")
 
 
 # -- the Settings entry point opens the PAINT editor on the icon sheet -------
 
 def test_settings_has_edit_icons_action_row(tmp_path):
     ws = _ws(tmp_path)
-    rows = ws._SETTINGS_ROWS
+    rows = ws.settings_layer._SETTINGS_ROWS
     icons = [r for r in rows if r[0] == "icons"]
     assert icons, "Settings must have an EDIT ICONS row"
     key, label, kind = icons[0]
@@ -46,7 +46,7 @@ def test_edit_icons_opens_paint_on_the_icon_sheet(tmp_path):
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
-    drv.click(*_center(ws._settings_row_rect(_icons_row_index(ws))))
+    drv.click(*_center(ws.settings_layer._settings_row_rect(_icons_row_index(ws))))
     drv.frame(1 / 30)
     assert ws.screen == "menu" and ws.menu_view == "theme"
     assert ws._editing_icons is True
@@ -60,7 +60,7 @@ def test_edit_icons_reachable_by_keyboard_a(tmp_path):
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
-    ws.set_msel = _icons_row_index(ws)
+    ws.settings_layer.set_msel = _icons_row_index(ws)
     drv.press("a")
     drv.frame(1 / 30)
     assert ws.screen == "menu" and ws.menu_view == "theme"
@@ -133,7 +133,7 @@ def test_close_returns_to_settings(tmp_path):
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
-    drv.click(*_center(ws._settings_row_rect(_icons_row_index(ws))))
+    drv.click(*_center(ws.settings_layer._settings_row_rect(_icons_row_index(ws))))
     drv.frame(1 / 30)
     assert ws.screen == "menu" and ws.menu_view == "theme"
     drv.click(*_center(C._PAINT_CLOSE))
