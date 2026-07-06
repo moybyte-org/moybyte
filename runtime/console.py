@@ -2224,28 +2224,9 @@ class Workstation:
             self.save_status = None             # nothing to persist, but src is valid
             self.ach.note("code_save")          # "Code Wizard": valid code saved (#21)
             return True
-        try:
-            # moy_carts.save_code always returns a (status, message) 2-tuple.
-            status, smsg = self._with_sd(lambda: self.carts_store.save_code(self.cart, src))
-            if status != self.carts_store.SAVE_OK:
-                self.save_status = "SAVE FAILED " + str(smsg)
-                self.cart_error = "Could not save -- " + str(smsg)
-                return False
-            self.editor.dirty = False
-            self.save_status = "SAVED"
-            self.ach.note("code_save")          # "Code Wizard": code saved (#21)
-            # A successful save means the source now compiles and persisted: clear
-            # any stale crash text so returning to the desktop re-runs the fixed
-            # cart instead of re-painting the old "crashed" panel. (run_code/the
-            # _leave_menu re-_start() then actually re-exec it.)
-            self.cart_error = None
-            return True
-        except Exception as exc:  # noqa: BLE001
-            txt = _err_text(exc)
-            self.save_status = "SAVE FAILED"
-            self.cart_error = "Could not save -- " + txt
-            print("Moybyte save code failed:", txt)
-            return False
+        # The store-write half moved to Project.commit_code (Stage 1b); the compile-
+        # check + code-UI half above stays here (the code surface).
+        return self.project.commit_code(src)
 
     def _set_code_error(self, msg):
         """Record a syntax error so the code view can mark the offending line
@@ -2290,22 +2271,9 @@ class Workstation:
             self.screen = "desktop"
 
     def save_sprites(self):
-        if not (self.sheet and self.cart and self.cart.get("path") and self.can_manage):
-            return
-        hexs = self.sheet.to_hex()
-        try:
-            self._with_sd(lambda: self.carts_store.save_sprites(self.cart, hexs))
-            self.sheet.dirty = False
-            self.save_status = "SAVED"
-            self.ach.note("paint_save")         # "Little Artist": a sprite saved (#21)
-        except Exception as exc:  # noqa: BLE001
-            # Mirror the save_code contract: a failed sprite save must be VISIBLE on
-            # device (no serial in the run loop), not silent. _err_text-guarded so a
-            # weird exception's __str__ can't itself escape this handler.
-            txt = _err_text(exc)
-            self.save_status = "SAVE FAILED"
-            self.cart_error = "Could not save sprites -- " + txt
-            print("Moybyte save sprites failed:", txt)
+        # Store-write moved to Project.commit_sprites (Stage 1b); this stays as the
+        # tested ws. entry point PaintLayer's SAVE dispatches to.
+        self.project.commit_sprites()
 
     def save_icons(self):
         """Persist the edited system icon sheet to system_icons.moygfx (Stage 2 / #52),
@@ -2341,43 +2309,16 @@ class Workstation:
         self.theme_layer.leave()
 
     def save_map(self):
-        # Persist the cart's tilemap to map.moymap (#32) -- the exact mirror of
-        # save_sprites (to_hex -> SD wrapper -> save_map). The running cart already
-        # holds this same TileMap, so a save only persists what it's already using.
-        if not (self.tilemap and self.cart and self.cart.get("path") and self.can_manage):
-            return
-        hexs = self.tilemap.to_hex()
-        try:
-            self._with_sd(lambda: self.carts_store.save_map(self.cart, hexs))
-            self.tilemap.dirty = False
-            self.save_status = "SAVED"
-            self.ach.note("map_save")           # "Map Maker": a map saved (#21)
-        except Exception as exc:  # noqa: BLE001
-            txt = _err_text(exc)
-            self.save_status = "SAVE FAILED"
-            self.cart_error = "Could not save map -- " + txt
-            print("Moybyte save map failed:", txt)
+        # Store-write moved to Project.commit_map (Stage 1b); this stays as the tested
+        # ws. entry point MapEditorUI's SAVE dispatches to.
+        self.project.commit_map()
 
     # -- music / sound editor (#50) ------------------------------------------
 
     def save_sounds(self):
-        """Persist the cart's AudioBank to sounds.json (#50) -- the mirror of
-        save_map. The MusicEditor edits the LIVE bank (self.audio.engine.bank), so a
-        save just serializes what the cart already plays through."""
-        me = self.music_ui.musicedit
-        if not (me and self.cart and self.cart.get("path") and self.can_manage):
-            return
-        bank_dict = me.bank.to_dict()
-        try:
-            self._with_sd(lambda: self.carts_store.save_sounds(self.cart, bank_dict))
-            me.dirty = False
-            self.save_status = "SAVED"
-            self.ach.note("sound_save")          # "Sound Designer": a bank saved (#21)
-        except Exception as exc:  # noqa: BLE001
-            txt = _err_text(exc)
-            self.save_status = "SAVE FAILED"
-            self.cart_error = "Could not save sounds -- " + txt
-            print("Moybyte save sounds failed:", txt)
+        # Store-write moved to Project.commit_sounds (Stage 1b); this stays as the
+        # tested ws. entry point MusicEditorUI's SAVE dispatches to.
+        self.project.commit_sounds()
 
     # -- cross-cart sprite reuse (#18) ---------------------------------------
     #
@@ -2457,15 +2398,9 @@ class Workstation:
             self._save_config()
 
     def _save_config(self):
-        # Persist edits to the SD cartridge (embedded fallback carts have no path).
-        if self.cart and self.cart.get("path"):
-            self.cart["cfg"] = dict(self.config)   # in-RAM sync (always)
-            if not self.can_manage:
-                return                             # writes deferred on device
-            try:
-                self._with_sd(lambda: self.carts_store.save_config(self.cart))
-            except Exception as exc:  # noqa: BLE001
-                print("Moybyte save failed:", exc)
+        # Moved to Project.commit_config (Stage 1b); this stays as the tested ws. name
+        # apply() dispatches to.
+        self.project.commit_config()
 
     def go_home(self):
         self._dirty = True             # screen change repaints (#44)

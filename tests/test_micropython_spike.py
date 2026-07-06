@@ -1993,6 +1993,7 @@ def test_code_editor_edits_buffer():
 def test_code_editor_wired_into_device_shell():
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    project = (Path("runtime") / "project.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
 
     # The console + editor cores are shared with the host (imported, not redefined).
@@ -2002,7 +2003,9 @@ def test_code_editor_wired_into_device_shell():
     # (#39 step 2 the constructor also takes the responsive cols/rows window.)
     assert "self.editor = CodeEditor(self.cart[\"src\"]," in console
     assert "def save_code(self):" in console
-    assert "self.carts_store.save_code(self.cart, src)" in console
+    # The store-write half moved to Project.commit_code (Stage 1b, project.py -- also
+    # staged onto the device); ws.save_code keeps the compile-check/UI half + delegates.
+    assert "ws.carts_store.save_code(self.cart, src)" in project
     assert "def save_code(cart, src):" in carts
     # run_desktop injects the device make_api + SD cart store into the shared console.
     assert "ws.make_api = make_api" in runtime
@@ -2299,6 +2302,7 @@ def test_device_tile_cache_invalidated_on_sprite_edit():
 def test_device_sprite_storage_wired():
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    project = (Path("runtime") / "project.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
     # device cart API -- also takes the injected audio backend (#16) + tilemap
     # (#32) + persistent memory (pmem, #11).
@@ -2306,7 +2310,9 @@ def test_device_sprite_storage_wired():
     assert "def make_api(canvas, input, config, sheet=None, audio=None," in runtime
     assert "pmem=None, wifi=None, images=None):" in runtime
     assert "self.sheet = self._build_sheet()" in console                   # shared console
-    assert "self.carts_store.save_sprites(self.cart, hexs)" in console
+    # The sprite store-write moved to Project.commit_sprites (Stage 1b, project.py --
+    # also staged onto the device); ws.save_sprites stays as the tested forward.
+    assert "ws.carts_store.save_sprites(self.cart, hexs)" in project
     assert "def save_sprites(cart, hex_text):" in carts
     assert '"sprites": sprites' in carts
 
@@ -2370,6 +2376,7 @@ def test_music_editor_wired_into_device_shell():
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     music_ui = (Path("runtime") / "music_editor_ui.py").read_text(encoding="utf-8")
     bar_layer = (Path("runtime") / "bar_layer.py").read_text(encoding="utf-8")
+    project = (Path("runtime") / "project.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
 
@@ -2397,10 +2404,12 @@ def test_music_editor_wired_into_device_shell():
     assert "ws._open_music()" in bar_layer         # the bar tool-switch tap (BarLayer, #46)
     assert 'ws._icon("music"' in bar_layer
     assert '"music": 15' in console                        # IconSheet slot for the icon
-    # SAVE persists to sounds.json through the existing shared store (stays on
-    # Workstation, like save_map/save_code -- it uses the shared save_status field).
+    # SAVE persists to sounds.json through the existing shared store. The store-write
+    # moved to Project.commit_sounds (Stage 1b, project.py -- also staged onto the
+    # device, like save_map/save_code -- it uses the shared ws.save_status field);
+    # ws.save_sounds stays as the tested forward MusicEditorUI's SAVE dispatches to.
     assert "def save_sounds(self):" in console
-    assert "self.carts_store.save_sounds(self.cart, bank_dict)" in console
+    assert "ws.carts_store.save_sounds(self.cart, bank_dict)" in project
     assert "def save_sounds(cart, bank_dict):" in carts
     # Live preview drives the SAME injected AudioEngine the cart uses, and the frame
     # loop ticks the mixer + keeps animating while a preview is up.
