@@ -36,6 +36,11 @@ from . import music_editor_ui as _music_editor_ui
 sys.modules.setdefault("block_editor_ui", _block_editor_ui)
 sys.modules.setdefault("map_editor_ui", _map_editor_ui)
 sys.modules.setdefault("music_editor_ui", _music_editor_ui)
+# layers.py is the Layer protocol + the self-contained surface adapters (extracted
+# from console.py); console.py does `from layers import ...` (its frozen device
+# name). A dependency-free leaf, so it only needs the same bare-name alias.
+from . import layers as _layers
+sys.modules.setdefault("layers", _layers)
 
 from . import console  # noqa: E402  (after the editors/audio aliases above)
 from . import moy_carts  # noqa: E402  (shared .moy store; host-clean)
