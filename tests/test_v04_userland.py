@@ -502,6 +502,7 @@ def test_console_cards_make_it_mine_edit_and_run(tmp_path):
 def test_host_runs_shared_console_at_320x240(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.system["tap_mode"] = "player"     # this test drives the in-cart flow: launcher RUN plays
     drv = host_app.ConsoleDriver(ws)
     assert (ws.canvas.w, ws.canvas.h) == (320, 240)     # same surface as the device
     assert ws.launcher.items                            # seeded system carts
@@ -534,6 +535,7 @@ def test_host_runs_shared_console_at_320x240(tmp_path):
 def test_code_view_arrows_move_caret_and_scroll(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.system["tap_mode"] = "player"     # this test drives the in-cart flow: launcher RUN plays
     drv = host_app.ConsoleDriver(ws)
     drv.press("run"); drv.frame(1 / 30)
     drv.press("home"); drv.frame(1 / 30)     # pause first: B is the game's while playing (#71)
@@ -564,6 +566,7 @@ def test_code_editor_drag_scrolls_without_crashing(tmp_path):
     from runtime import console as C
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.system["tap_mode"] = "player"     # this test drives the in-cart flow: launcher RUN plays
     drv = host_app.ConsoleDriver(ws)
     drv.press("run"); drv.frame(1 / 30)
     drv.press("home"); drv.frame(1 / 30)     # pause first: B is the game's while playing (#71)
@@ -583,6 +586,7 @@ def test_code_editor_symbol_palette_inserts(tmp_path):
     from runtime import console as C
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.system["tap_mode"] = "player"     # this test drives the in-cart flow: launcher RUN plays
     drv = host_app.ConsoleDriver(ws)
     drv.press("run"); drv.frame(1 / 30)
     drv.press("home"); drv.frame(1 / 30)     # pause first: B is the game's while playing (#71)
@@ -608,6 +612,7 @@ def test_host_console_paint_via_mouse(tmp_path):
     from runtime import console as C
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.system["tap_mode"] = "player"     # this test drives the in-cart flow: launcher RUN plays
     drv = host_app.ConsoleDriver(ws)
     drv.press("run")
     drv.frame(1 / 30)
@@ -817,6 +822,7 @@ def test_host_console_map_open_place_and_render(tmp_path):
     from runtime import console as C
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.system["tap_mode"] = "player"     # this test drives the in-cart flow: launcher RUN plays
     drv = host_app.ConsoleDriver(ws)
     drv.press("run")
     drv.frame(1 / 30)
@@ -844,6 +850,7 @@ def test_host_console_map_erase_and_pan(tmp_path):
     from runtime import console as C
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.system["tap_mode"] = "player"     # this test drives the in-cart flow: launcher RUN plays
     drv = host_app.ConsoleDriver(ws)
     drv.press("run"); drv.frame(1 / 30)
     ws.cart_paused = True    # bar icons hit-test in the pause menu (#71)
@@ -870,6 +877,7 @@ def test_host_console_map_save_roundtrips(tmp_path):
     from runtime import host_app, moy_carts
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)
+    ws.system["tap_mode"] = "player"     # this test drives the in-cart flow: launcher RUN plays
     drv = host_app.ConsoleDriver(ws)
     drv.press("run"); drv.frame(1 / 30)
     cart_path = ws.cart["path"]
@@ -892,6 +900,7 @@ def test_map_edit_seen_by_running_cart_via_gen(tmp_path):
     from runtime import console as C
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.system["tap_mode"] = "player"     # this test drives the in-cart flow: launcher RUN plays
     drv = host_app.ConsoleDriver(ws)
     drv.press("run"); drv.frame(1 / 30)
     tm = ws.tilemap

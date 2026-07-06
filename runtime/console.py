@@ -1626,6 +1626,18 @@ class Workstation:
             self.system["diag_live"] = self.diag_live
             self._persist_system()
 
+    def tap_mode(self):
+        """The launcher's tap default (spec Section 4): "maker" (DEFAULT -- tap opens
+        the Editor on Config) or "player" (tap plays). Read by launch_selected."""
+        return self.system.get("tap_mode", "maker")
+
+    def cycle_tap_mode(self, d):
+        """Toggle the launcher tap default MAKER<->PLAYER and persist it (Settings ->
+        TAP OPENS). Two modes, so any step flips."""
+        self.system["tap_mode"] = "player" if self.tap_mode() == "maker" else "maker"
+        self._dirty = True
+        self._persist_system()
+
     def _persist_system(self):
         """Write self.system to system.json when a writable store is wired. Shared by the
         persisting Settings toggles (font, wallpaper, OTA channel)."""
@@ -2037,7 +2049,10 @@ class Workstation:
         # (cards_layer sets ws.cart_error then calls ws._draw_error_panel()).
         self.player._draw_error_panel()
 
-    def open(self):
+    def _open_workspace(self):
+        # Build a fresh Project for the SELECTED cart + start it (shared by open()
+        # [play] and open_in_editor() [edit] -- the two tap-mode landings, Section 4).
+        # Leaves the cart STARTED so PLAY can run it and the editors have live data.
         self.project = Project(self)   # a fresh workspace for the cart being opened
         self.cart = self.launcher.selected()
         self.config = dict(self.cart["cfg"])
@@ -2059,15 +2074,37 @@ class Workstation:
                                       # it opts into text input via textmode(True)
         self.menu_view = "cards"
         self._set_text_mode(False)
-        # Open to the desktop even if the cart failed to start: frame() shows the
-        # error panel there and the EDIT/CODE button stays reachable so the kid can
-        # fix it (a silent stay-on-launcher would be a dead end on the device).
         self._start()
-        self.run(self.project, self.launcher_layer)   # activate desktop, record caller
         # Achievements (#21): opening a cart is "First Steps"; opening _PLAY_GOAL
         # distinct carts is "Cart Explorer". Key by the cart's path/title so it's
         # the SAME identity the launcher uses (distinct carts, not repeat opens).
         self.ach.note("open", self.cart.get("path") or self.cart.get("title"))
+
+    def open(self):
+        # PLAY landing (Section 4 player mode): build the workspace + run the cart on
+        # the desktop, recording the launcher home as the caller so QUIT pops home.
+        # Open to the desktop even if the cart failed to start: frame() shows the
+        # error panel there and the EDIT/CODE button stays reachable so the kid can
+        # fix it (a silent stay-on-launcher would be a dead end on the device).
+        self._open_workspace()
+        self.run(self.project, self.launcher_layer)   # activate desktop, record caller
+
+    def open_in_editor(self):
+        # EDIT landing (Section 4 maker mode -- the DEFAULT): build the workspace, then
+        # drop into the Editor on Config (spec Section 6). The cart is started (ready
+        # for PLAY) but not shown; the Editor owns the screen until PLAY runs it.
+        self._open_workspace()
+        self.editor_app.open(self.project)
+
+    def launch_selected(self):
+        """A launcher TAP opens the selected cart in the mode chosen by system.json's
+        `tap_mode` (spec Section 4): "player" plays it immediately, "maker" (the
+        DEFAULT) drops into the Editor on the Config page. Both actions stay reachable
+        regardless of mode -- the Editor has PLAY, and a running cart pauses to EDIT."""
+        if self.system.get("tap_mode", "maker") == "player":
+            self.open()
+        else:
+            self.open_in_editor()
 
     # The four builders moved VERBATIM onto Project (Stage 1, project.py); these stay
     # as one-line forwards so ws._build_sheet(cart)/... keep working (the wallpaper

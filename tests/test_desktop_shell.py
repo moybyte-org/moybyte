@@ -208,14 +208,31 @@ def test_management_buttons_still_create_and_delete(tmp_path):
 
 def test_tapping_a_cart_icon_opens_it_from_home(tmp_path):
     """The launcher's primary action: tapping a cart's icon tile opens it. (The old
-    dock 'run' slot was removed from the launcher with the dock, #46.)"""
+    dock 'run' slot was removed from the launcher with the dock, #46.) In the DEFAULT
+    maker mode (spec Section 4) the tap opens the cart in the Editor on Config
+    (screen == "menu"); a player-mode device would play it instead (test below)."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     x, y, w, h = ws.layout.tile_rect(0, ws.launcher.page)
     drv.click(x + w // 2, y + h // 2)
     drv.frame(1 / 30)
-    assert ws.screen == "desktop"
+    assert ws.screen == "menu"                  # maker default: tap -> the Editor
+    assert ws.cart is not None                  # ...with the tapped cart loaded
+
+
+def test_tapping_a_cart_icon_in_player_mode_plays_it(tmp_path):
+    """Player-mode devices (spec Section 4): a tap PLAYS the cart immediately, caller =
+    the launcher home (so its QUIT pops home). The tap-mode setting is the only
+    difference from the maker default above."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    ws.system["tap_mode"] = "player"
+    drv = host_app.ConsoleDriver(ws)
+    x, y, w, h = ws.layout.tile_rect(0, ws.launcher.page)
+    drv.click(x + w // 2, y + h // 2)
+    drv.frame(1 / 30)
+    assert ws.screen == "desktop"               # player mode: tap -> plays
 
 
 def test_go_home_keeps_wallpaper(tmp_path):
@@ -368,6 +385,26 @@ def test_cart_pause_menu_freezes_and_resumes(tmp_path):
     drv.click(*C._PAUSE_QUIT_BTN[:2])  # ...and QUIT is the one way out
     drv.frame(1 / 30)
     assert ws.screen == "launcher"
+
+
+def test_tap_mode_setting_toggles_and_persists(tmp_path):
+    """Section 4 tap-mode: system.json's tap_mode defaults to "maker" (a launcher tap
+    opens the Editor); Settings -> TAP OPENS steps it MAKER <-> PLAYER and persists it
+    across a reload. Drives both the direct setter and the Settings-row dispatch."""
+    from runtime import host_app, moy_carts
+    carts_dir = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts_dir)
+    assert ws.tap_mode() == "maker"                 # default (spec Section 4)
+    keys = [r[0] for r in ws.settings_layer._SETTINGS_ROWS]
+    assert "tap_mode" in keys                       # the Settings row exists
+    # Direct toggle + persistence to system.json (survives a fresh load).
+    ws.cycle_tap_mode(1)
+    assert ws.tap_mode() == "player"
+    assert moy_carts.load_system(carts_dir).get("tap_mode") == "player"
+    # The Settings-row dispatch (select TAP OPENS, step it) flips it back.
+    ws.settings_layer.set_msel = keys.index("tap_mode")
+    ws.settings_layer.settings_adjust(1)
+    assert ws.tap_mode() == "maker"
 
 
 def test_play_from_editor_returns_to_the_editor_tab_on_quit(tmp_path):

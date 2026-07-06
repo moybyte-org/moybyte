@@ -328,7 +328,7 @@ class BarLayer:
             elif slot == "run":
                 ws.run_code() if ws.editor is not None else ws.apply()
         elif slot == "run" and ws.launcher.selected() is not None:
-            ws.open()                            # on the home desktop, run = open selected
+            ws.launch_selected()                 # home run = open selected (tap-mode, #55)
 
     def handle_home_tap(self, px, py):
         """The launcher/home top-bar tap slice: the clock Easter egg, the ≡ system

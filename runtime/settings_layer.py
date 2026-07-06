@@ -59,6 +59,11 @@ class SettingsLayer:
         # flushes keep working, so OFF still yields a diag.log. Owners flip it ON
         # for a measurement session.
         ("diag_live", "PERF DIAG", "diag"),
+        # TAP OPENS (spec Section 4): the launcher's tap default -- MAKER (a maker's own
+        # device: tap -> the Editor, on Config) or PLAYER (a kid's player: tap -> plays).
+        # Persisted in system.json; both Play and Edit stay reachable regardless (#55).
+        # Appended LAST so it never shifts the existing rows' indices.
+        ("tap_mode", "TAP OPENS", "tapmode"),
     )
     _MOCK_NAMES = ("ALEX", "SAM", "KIT", "RAE")
 
@@ -118,6 +123,9 @@ class SettingsLayer:
             return
         if key == "diag_live":                  # perf diagnostics ON <-> OFF (#68)
             ws.set_diag_live(not ws.diag_live)
+            return
+        if key == "tap_mode":                   # launcher tap default MAKER <-> PLAYER
+            ws.cycle_tap_mode(d)
             return
         if key == "ota_channel":                # OTA update channel STABLE <-> BETA
             ws._cycle_channel(d)
@@ -362,7 +370,11 @@ class SettingsLayer:
             on = bool(ws.diag_live)
             cv.print("ON" if on else "OFF", vx, y + 5,
                      NAMES["orange"] if on else NAMES["dark_grey"], 1)
+        elif kind == "tapmode":            # launcher tap default: MAKER / PLAYER (Section 4)
+            maker = ws.tap_mode() != "player"
+            cv.print("MAKER" if maker else "PLAYER", vx, y + 5,
+                     NAMES["green"] if maker else NAMES["orange"], 1)
         # Mark not-yet-functional rows clearly (wallpaper + font + channel + web +
-        # diag + actions work).
-        if kind not in ("wallpaper", "font", "action", "channel", "web", "diag"):
+        # diag + tapmode + actions work).
+        if kind not in ("wallpaper", "font", "action", "channel", "web", "diag", "tapmode"):
             cv.print("soon", x + 4, y + 6 + fw, NAMES["dark_grey"], 1)
