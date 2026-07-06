@@ -232,7 +232,6 @@ class BarLayer:
         re-rendered, then reused. The strip is purely the DRAW; hit-testing goes
         through the independent _*_BTN rects / zone_tap, so caching can't desync
         taps."""
-        ws = self.ws
         cv = self._bar_canvas(where)
         bar_h = self._bar_h(where)
         key = self._cart_bar_key(where)

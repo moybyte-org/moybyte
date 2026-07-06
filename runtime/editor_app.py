@@ -42,9 +42,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editors import CodeEditor, PaintEditor
 
 try:
-    from bar_layer import _BAR_ICON, _BAR_GAP, _BAR_Y, _ZONE_LEFT_GAME
+    from bar_layer import _BAR_ICON, _BAR_GAP, _ZONE_LEFT_GAME
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.bar_layer import _BAR_ICON, _BAR_GAP, _BAR_Y, _ZONE_LEFT_GAME
+    from runtime.bar_layer import _BAR_ICON, _BAR_GAP, _ZONE_LEFT_GAME
 
 
 def _in(px, py, rect):
@@ -83,16 +83,36 @@ class EditorApp:
         self._NAMES = names
         self._in = in_rect if in_rect is not None else _in
         self.project = None           # the open cart's workspace (set by open())
+        # Stage 4 (#46 zoned bar): bumped whenever the active tab ACTUALLY changes --
+        # the ONLY thing that varies in the Editor's lent left zone (which icon is
+        # highlighted). BarLayer folds this into its cache key so the zoned strip
+        # re-renders on a real tab switch and never per frame. Set BEFORE `self.tab`
+        # below, since the `tab` setter reads it (mirrors Launcher.__init__'s
+        # zone_gen-before-sel ordering).
+        self.zone_gen = 0
         self.tab = "cards"            # active view -- ws.menu_view projects onto this:
                                       # "cards" | "code" | "paint" | "map" | "blocks"
                                       # | "music" | "theme" (theme = the EDIT-ICONS
                                       # reuse of the paint renderer, set via the
                                       # menu_view setter, not a cart-editor tab)
-        # Stage 4 (#46 zoned bar): bumped whenever the active tab changes -- the
-        # ONLY thing that varies in the Editor's lent left zone (which icon is
-        # highlighted). BarLayer folds this into its cache key so the zoned strip
-        # re-renders on a real tab switch and never per frame.
-        self.zone_gen = 0
+
+    # -- the active tab (a self-defending property, Stage 4 review fix) -----------
+    #
+    # `tab` bumps zone_gen on every ACTUAL change, regardless of the write site --
+    # set_tab, the ws.menu_view setter (ThemeLayer sets "theme"), _open_workspace all
+    # assign `.tab`/`ws.menu_view` DIRECTLY -- so BarLayer's strip-cache key can trust
+    # zone_gen instead of any writer remembering to bump it (mirrors Launcher.sel).
+    # Idempotent writes (set_tab called with the current tab) don't bump, so the zoned
+    # strip never re-renders on a no-op tab switch.
+    @property
+    def tab(self):
+        return self._tab
+
+    @tab.setter
+    def tab(self, value):
+        if value != getattr(self, "_tab", None):
+            self.zone_gen += 1
+        self._tab = value
 
     # -- open the editor on a project (spec Section 4/Section 6: Config-first) -----
 
@@ -150,8 +170,8 @@ class EditorApp:
         source of truth; ws.menu_view projects onto it."""
         ws = self.ws
         ws._dirty = True             # sub-view change always repaints (#44)
-        self.tab = view
-        self.zone_gen += 1           # Stage 4 (#46): the lent zone's highlight moved
+        self.tab = view              # the `tab` setter bumps zone_gen on a real change
+                                     # (Stage 4, #46: the lent zone's highlight moved)
         if view == "code":
             if ws.editor is None and ws.cart is not None:
                 ws.editor = CodeEditor(ws.cart["src"],
