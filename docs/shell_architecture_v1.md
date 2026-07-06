@@ -17,6 +17,12 @@ stalled because the remaining surfaces are smeared across `frame`/`handle_input`
 `handle_pointer` — they need a **Layer boundary** (own draw + input + state) before a
 clean file/cart split is even possible. That refactor is the common foundation: logical
 Layers → { modules, §2 privileged carts, §3 retained-buffer compositor }.
+**Boundary mechanism, added 2026-07-06:** `docs/shell_os_architecture_v1.md` is the
+concrete "how" under both halves — it grounds §2.2's `make_system_api` in how real OSes
+draw this line (syscall table / capabilities / message passing; Picotron as the
+fantasy-console realization) and defines the migration path (per-surface capability API
+replacing the layers' `ws` reach-through, an event bus, privilege tiers). Read it before
+implementing anything from §2.
 **Scope of this doc:** two related long-term directions for `runtime/console.py`'s
 shell (`Workstation`) that this session's editor-extraction refactor (block/map/music
 editors → their own classes) turned out to be laying groundwork for, whether or not
