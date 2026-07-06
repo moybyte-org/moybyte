@@ -10,8 +10,9 @@ gallery. No device needed. Drive it live (pygame) or headlessly via a script.
   #   ARROWS = trackball  -> move the cursor; at the code edges the screen follows.
   #   MOUSE  = touchscreen -> tap/drag to place the pointer + activate.
   #   WASD   = keyboard buttons (launcher nav + gameplay).  Enter=run, Z=select,
-  #            X=B, BACKSPACE=home (pause / pause-again quits, like the device),
-  #            Esc=quit the sim.  The code editor is FULL-SCREEN: letters
+  #            X=B, BACKSPACE=home (Stage 5 EXIT key: HOLD ~700ms, or tap 3x, to exit a
+  #            running cart -- a plain key while playing otherwise), Esc=quit the sim.
+  #            The code editor is FULL-SCREEN: letters
   #            type, the bottom symbol palette taps in = ( ) [ ] { } < > etc., ARROWS
   #            move the caret (DRAG scrolls), and the top-bar play/save/X icons
   #            run / save / close.
@@ -43,12 +44,12 @@ from runtime import host_app  # noqa: E402  (runs the SHARED console.Workstation
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SYSTEM_CARTS = os.path.join(ROOT, "system_carts")
 DEFAULT_SAVE_DIR = os.path.expanduser("~/.moybyte/projects")
-# Tour (shared-console buttons): open a cart, Home, move, open another, edit code.
-# B belongs to the game while a cart plays (#71), so the editor step pauses first
-# (home = the device's BACKSPACE console key) and opens the menu from the pause bar.
+# Tour (shared-console buttons): open a cart, play it, EXIT, move, open another, play,
+# exit. Stage 5 retired pause -- a running cart is exited by the fw-independent triple-
+# tap "home" (three consecutive home tokens = three BACKSPACE edges within the window).
 DEMO_SCRIPT = (
-    "wait:18 run wait:40 home wait:8 down run wait:50 home wait:8 "
-    "down down run wait:40 home wait:10 run wait:10 home wait:6 b wait:20 a wait:40"
+    "wait:18 run wait:40 home home home wait:8 down run wait:50 home home home wait:8 "
+    "down down run wait:40 home home home wait:20"
 )
 
 
@@ -139,12 +140,14 @@ def run_live(driver, dt, scale):
                 pygame.K_UP: (0, -1), pygame.K_DOWN: (0, 1)}
     nav_keys = {pygame.K_a: "left", pygame.K_d: "right",
                 pygame.K_w: "up", pygame.K_s: "down"}
-    # BACKSPACE = the device's one console key (#71): pause, pause-again quits.
-    # (In text mode the branch above routes it as typed 0x08 instead -- same as
-    # the device, where the Workstation edge-detects it.) K_h stays a host-only
-    # convenience alias for home.
-    shortcuts = {pygame.K_RETURN: "run", pygame.K_z: "a", pygame.K_x: "b",
-                 pygame.K_BACKSPACE: "home", pygame.K_h: "home"}
+    # BACKSPACE = the device's one console key, now the Stage-5 EXIT key. It is mapped
+    # as a HELD "home" button (below, like the WASD nav keys) -- NOT a one-shot press --
+    # so a sustained hold reaches the Player's hold-to-exit (~700ms) and a quick tap is a
+    # single edge (three within 1s = the fw-independent triple-tap exit). In text mode
+    # the branch above routes it as typed 0x08 instead (DELETE for a tool). K_h is a
+    # host-only convenience alias for the same held "home".
+    exit_keys = (pygame.K_BACKSPACE, pygame.K_h)
+    shortcuts = {pygame.K_RETURN: "run", pygame.K_z: "a", pygame.K_x: "b"}
     pan_held = set()
     mouse_down = False
     running = True
@@ -193,12 +196,16 @@ def run_live(driver, dt, scale):
             elif ev.type == pygame.KEYDOWN:
                 if ev.key == pygame.K_ESCAPE:
                     running = False
+                elif ev.key in exit_keys:
+                    driver.hold("home", True)        # held so a sustained hold = the exit gesture
                 elif ev.key in shortcuts:
                     driver.press(shortcuts[ev.key])
                 elif ev.key in nav_keys:
                     driver.hold(nav_keys[ev.key], True)
             elif ev.type == pygame.KEYUP and ev.key in nav_keys:
                 driver.hold(nav_keys[ev.key], False)
+            elif ev.type == pygame.KEYUP and ev.key in exit_keys:
+                driver.hold("home", False)
         # held arrows -> a per-frame trackball nudge
         dx = (1 if pygame.K_RIGHT in pan_held else 0) - (1 if pygame.K_LEFT in pan_held else 0)
         dy = (1 if pygame.K_DOWN in pan_held else 0) - (1 if pygame.K_UP in pan_held else 0)

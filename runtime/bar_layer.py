@@ -96,8 +96,8 @@ class BarLayer:
 
     `where` still selects which screen is asking (`"home"` / `"settings"` /
     `"menu"` / `"desktop"`), but it's no longer three-plus-one hardcoded draw
-    bodies: `"desktop"` stays the running-cart pause/crash chrome VERBATIM (the
-    #71 pause machinery the Player owns until Stage 5 retires it -- see
+    bodies: `"desktop"` stays the running-cart CRASH chrome (Stage 5 retired the
+    #71 pause frame -- the bar shows only on a crash now, never during play -- see
     `_render_cart_bar`'s early branch, which returns before any zone dispatch, so
     `draw_zone` is structurally unreachable while a Player is top-of-stack); the
     other three route through the SAME generalized cache (below) into whichever
@@ -186,7 +186,7 @@ class BarLayer:
 
     def _zone_owner(self, where):
         """The app that owns `where`'s lent left zone, or None ("desktop" -- the
-        Player's pause/crash chrome never lends a zone, see _render_cart_bar)."""
+        Player's crash chrome never lends a zone, see _render_cart_bar)."""
         ws = self.ws
         if where == "home":
             return ws.launcher_layer
@@ -294,11 +294,11 @@ class BarLayer:
         where = key[0]
         has_edit = key[2]
         if where == "desktop":
-            # The running-cart pause/crash chrome (#71): VERBATIM, unchanged by
-            # Stage 4 -- the Player's own chrome, drawn only while paused/crashed
-            # (never during play), never a "zone" (no draw_zone call below this
-            # branch's `return`, which is exactly what keeps the zoned-bar
-            # dispatch off the play frame -- see the Stage-4 guardrail test).
+            # The running-cart CRASH chrome: the Player's own top bar, drawn only on a
+            # crash (Stage 5 retired the #71 pause frame -- never during play), never a
+            # "zone" (no draw_zone call below this branch's `return`, which is exactly
+            # what keeps the zoned-bar dispatch off the play frame -- see the Stage-4
+            # guardrail test, now driven through the crash state).
             cv.rect(0, 0, cv.w, _STATUS_H, NAMES["black"])
             cv.rect(0, _STATUS_H - 1, cv.w, 1, NAMES["dark_grey"])   # shelf edge line
             # Left cluster: the TIC-80 one-tap tool switcher. Carts with a Make-it-mine
@@ -331,25 +331,29 @@ class BarLayer:
     def _render_right_zone(self, cv, where):
         """The OS-owned right zone (Stage 4): clock, wifi, batt, the ≡ system-menu
         toggle (moved off the left edge -- the macOS-menu-bar model keeps every OS
-        control on one side), and a slot reserved for the Stage-5 context X (not
-        drawn/tapped yet). Two geometries: the fixed game-canvas cluster (cards/
-        paint/map, mirrors the pause bar's right cluster) or the responsive
-        Layout-driven one (home/settings/code/blocks)."""
+        control on one side), and -- Stage 5 -- the context X (tap to EXIT the active
+        app back toward the launcher root). Two geometries: the fixed game-canvas
+        cluster (cards/paint/map, mirrors the crash bar's right cluster) or the
+        responsive Layout-driven one (home/settings/code/blocks). The launcher IS the
+        back-stack root, so it draws NO X (spec Section 9) -- only where != "home"."""
         NAMES = self._NAMES
         ws = self.ws
+        show_x = where != "home"          # the launcher root never exits -> no X
         if self._zone_is_game(where):
             cv.print(self._clock_text(), _ZONE_CLOCK[0], 3, NAMES["light_grey"], 1)
             ws._icon("wifi", _ZONE_WIFI[0], _ZONE_WIFI[1], cv)
             ws._icon("batt", _ZONE_BATT[0], _ZONE_BATT[1], cv)
             ws._glyph("menu", _ZONE_GEAR, NAMES["white"], cv)
-            # _ZONE_CONTEXT_X: reserved for Stage 5, deliberately not drawn.
+            if show_x:                    # context X (Stage 5): tap to exit the app
+                ws._icon("close", _ZONE_CONTEXT_X[0], _ZONE_CONTEXT_X[1], cv)
         else:
             lay = ws.layout
             cv.print(self._clock_text(), lay.clock_x, 3, NAMES["light_grey"], 1)
             ws._icon("wifi", lay.wifi_btn[0], lay.wifi_btn[1], cv)
             ws._icon("batt", lay.batt_btn[0], lay.batt_btn[1], cv)
             ws._glyph("menu", lay.sysmenu_btn, NAMES["white"], cv)
-            # lay.context_x_btn: reserved for Stage 5, deliberately not drawn.
+            if show_x:                    # context X (Stage 5): tap to exit the app
+                ws._icon("close", lay.context_x_btn[0], lay.context_x_btn[1], cv)
 
     def _clock_text(self):
         """A wall-clock HH:MM from time.localtime when available, else a mm:ss
@@ -436,21 +440,21 @@ class BarLayer:
 
     def handle_bar_tap(self, where, px, py):
         """The zoned bar's tap slice (Stage 4), shared by every screen it draws on
-        (home/settings/menu): the clock Easter egg + the ≡ system menu are OS/
-        right-zone-owned -- IDENTICAL wherever the bar shows, same as the draw --
-        checked first so a tap on either never falls through to the lent zone.
+        (home/settings/menu): the clock Easter egg, the ≡ system menu, and -- Stage 5 --
+        the context X are OS/right-zone-owned, IDENTICAL wherever the bar shows (same as
+        the draw), checked first so a tap on any never falls through to the lent zone.
         Anything else routes to the active app's zone_tap over its lent left zone.
         Returns True iff the bar (or the app's zone) consumed the tap. The clock-
         run reset runs for ANY non-clock tap (byte-identical to the pre-Stage-4
         launcher pointer), so taps that fall through to the content still reset it."""
         ws = self.ws
         if self._zone_is_game(where):
-            clock_hit, gear_hit = _ZONE_CLOCK, _ZONE_GEAR
+            clock_hit, gear_hit, x_hit = _ZONE_CLOCK, _ZONE_GEAR, _ZONE_CONTEXT_X
         else:
             lay = ws.layout
-            clock_hit, gear_hit = lay.clock_hit(), lay.sysmenu_btn
+            clock_hit, gear_hit, x_hit = lay.clock_hit(), lay.sysmenu_btn, lay.context_x_btn
         # Clock Easter egg (#21): tapping the bar's clock _CLOCK_TAP_GOAL times
-        # wakes the Time Traveler. Checked before the ≡/zone so a tap on the clock
+        # wakes the Time Traveler. Checked before the ≡/X/zone so a tap on the clock
         # never falls through to a button.
         if self._in(px, py, clock_hit):
             ws.ach_ui._tap_clock()
@@ -458,6 +462,12 @@ class BarLayer:
         ws.ach_ui._clock_taps = 0                # any other bar tap resets the run
         if self._in(px, py, gear_hit):           # ≡ -> system menu (Settings/About/Reboot, #52)
             ws.toggle_sysmenu()
+            return True
+        # Context X (Stage 5, spec Section 9): tap to EXIT the active app back toward the
+        # launcher root. The launcher draws no X (where == "home") so it's not tested
+        # there -- it is the root and never exits.
+        if where != "home" and self._in(px, py, x_hit):
+            ws.exit()
             return True
         owner = self._zone_owner(where)
         return bool(owner.zone_tap(px, py)) if owner is not None else False

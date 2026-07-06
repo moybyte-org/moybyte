@@ -1276,11 +1276,13 @@ def test_tdeck_keyboard_reads_raw_matrix_for_real_holds():
 
 
 def test_tdeck_raw_backspace_is_the_one_console_key():
-    # THE ONE CONSOLE KEY (#71): BACKSPACE (matrix [4][3] -> d4 bit 3) maps to
-    # "home" on the raw path, mirroring typed 0x08 -- pause is the same physical
-    # key in every input mode. q and e are PLAIN LETTERS now (last_key only, no
-    # home/stop chrome role -- they used to be stolen keys), and b is only the
-    # x key (backspace no longer doubles as B, which collided with home).
+    # THE ONE CONSOLE KEY: BACKSPACE (matrix [4][3] -> d4 bit 3) maps to the "home"
+    # button on the raw path (AND reports last_key 0x08). Stage 5 makes this the EXIT
+    # key: a held/streamed "home" is exactly what the Player's hold-BACKSPACE + triple-
+    # tap exit gestures watch (raw mode streams the held key each frame, so this held
+    # frame -> st.held("home") is the device wiring the exit relies on). q and e are
+    # PLAIN LETTERS now (last_key only, no chrome role), and b is only the x key
+    # (backspace no longer doubles as B, which collided with home).
     spec = importlib.util.spec_from_file_location(
         "moybyte_firmware_input", ROOT / "modules" / "moybyte" / "input.py"
     )
