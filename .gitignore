@@ -25,6 +25,7 @@ firmware/lilygo_t_deck_plus_micropython/modules/achievements_ui.py
 firmware/lilygo_t_deck_plus_micropython/modules/layers.py
 firmware/lilygo_t_deck_plus_micropython/modules/bar_layer.py
 firmware/lilygo_t_deck_plus_micropython/modules/cards_layer.py
+firmware/lilygo_t_deck_plus_micropython/modules/paint_layer.py
 firmware/lilygo_t_deck_plus_micropython/modules/audio.py
 firmware/lilygo_t_deck_plus_micropython/modules/console.py
 firmware/lilygo_t_deck_plus_micropython/modules/moy_carts.py
