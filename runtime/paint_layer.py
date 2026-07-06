@@ -102,7 +102,7 @@ class PaintLayer:
 
     def draw(self, dt):
         # menu_view == "paint": an editor panel over the frozen cart frame. (The theme
-        # variant clears to black first via ws._draw_content_theme, then calls _draw_paint.)
+        # variant clears to a black field first in ThemeLayer.draw(), then calls _draw_paint.)
         self.ws._draw_menu_backdrop()
         self._draw_paint()
 

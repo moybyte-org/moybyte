@@ -120,7 +120,7 @@ def test_settings_wallpaper_stepper_applies_and_persists(tmp_path):
     ws = host_app.build_workstation(carts_dir)
     drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
-    ws.set_msel = 0                                       # wallpaper row
+    ws.settings_layer.set_msel = 0                                       # wallpaper row
     before = ws.wallpaper_id
     drv.press("right")                                    # step the stepper
     drv.frame(1 / 30)
@@ -170,13 +170,13 @@ def test_settings_mock_rows_do_not_touch_carts(tmp_path):
     now the functional EDIT ICONS action -- see test_icon_theme.)"""
     ws = _ws(tmp_path)
     ws.open_settings()
-    rows = [r[0] for r in ws._SETTINGS_ROWS]
-    ws.set_msel = rows.index("volume")
-    ws.settings_adjust(1)
+    rows = [r[0] for r in ws.settings_layer._SETTINGS_ROWS]
+    ws.settings_layer.set_msel = rows.index("volume")
+    ws.settings_layer.settings_adjust(1)
     assert 0 <= ws.system.get("volume") <= 5
-    ws.set_msel = rows.index("name")
-    ws.settings_adjust(1)
-    assert ws.system.get("name") in ws._MOCK_NAMES
+    ws.settings_layer.set_msel = rows.index("name")
+    ws.settings_layer.settings_adjust(1)
+    assert ws.system.get("name") in ws.settings_layer._MOCK_NAMES
 
 
 # -- dock keeps the management + open flows working ------------------------
@@ -438,17 +438,17 @@ def test_ota_channel_toggle_persists(tmp_path):
     ws._online_ok = None
 
     ws.open_settings()
-    keys = [r[0] for r in ws._settings_rows()]
+    keys = [r[0] for r in ws.settings_layer._settings_rows()]
     assert "ota_channel" in keys and "update_online" in keys
     assert ws._ota_channel() == "stable"           # default
 
-    ws.set_msel = keys.index("ota_channel")
-    ws.settings_adjust(1)
+    ws.settings_layer.set_msel = keys.index("ota_channel")
+    ws.settings_layer.settings_adjust(1)
     assert ws._ota_channel() == "unstable" and ws.system.get("ota_channel") == "unstable"
-    ws.settings_adjust(-1)                          # any direction flips (two channels)
+    ws.settings_layer.settings_adjust(-1)                          # any direction flips (two channels)
     assert ws._ota_channel() == "stable"
 
-    ws.settings_adjust(1)                           # -> unstable, then check it persisted
+    ws.settings_layer.settings_adjust(1)                           # -> unstable, then check it persisted
     ws2 = host_app.build_workstation(carts_dir)
     assert ws2.system.get("ota_channel") == "unstable"
 

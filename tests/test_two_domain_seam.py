@@ -197,9 +197,9 @@ def test_font_scale_persists_across_reboot(tmp_path):
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir, sys_size=(640, 480))
     ws.open_settings()
-    rows = [r[0] for r in ws._SETTINGS_ROWS]
-    ws.set_msel = rows.index("font_scale")
-    ws.settings_adjust(1)                            # 1x -> 2x via the Settings stepper
+    rows = [r[0] for r in ws.settings_layer._SETTINGS_ROWS]
+    ws.settings_layer.set_msel = rows.index("font_scale")
+    ws.settings_layer.settings_adjust(1)                            # 1x -> 2x via the Settings stepper
     assert ws.font_scale == 2
     assert moy_carts.load_system(carts_dir).get("font_scale") == 2
     # A fresh boot restores the saved scale (even with the default 320x240 system
@@ -219,7 +219,7 @@ def test_settings_font_row_renders(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
     drv.frame(1 / 30)
-    assert "font_scale" in [r[0] for r in ws._SETTINGS_ROWS]
+    assert "font_scale" in [r[0] for r in ws.settings_layer._SETTINGS_ROWS]
     assert len(set(drv.rgb888())) > 4
 
 

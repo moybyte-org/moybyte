@@ -135,19 +135,20 @@ def test_console_settings_has_firmware_update_screen():
     # (shown only when an updater is injected and OTA-capable) drives a confirm/progress
     # screen. The host injects no updater, so the row never appears there.
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    settings_layer = (Path("runtime") / "settings_layer.py").read_text(encoding="utf-8")
     # The update SCREEN itself now lives in update_ui.py (UpdateUI, extracted from
     # console.py); the queries/config + dispatch stay in console.py.
     update_ui = (Path("runtime") / "update_ui.py").read_text(encoding="utf-8")
 
     assert "self.updater = None" in console
     assert "def _update_available" in console
-    assert "def _settings_rows" in console
-    assert '"UPDATE FW"' in console
+    assert "def _settings_rows" in settings_layer
+    assert '"UPDATE FW"' in settings_layer
     assert "def open_update" in update_ui
     assert "def _pump_update" in update_ui
     assert "def _draw_update" in update_ui
     assert 'self.screen == "update"' in console
-    assert "def _activate_settings_action" in console
+    assert "def _activate_settings_action" in settings_layer
 
 
 def test_device_web_view_module_present_and_protocol_shaped():
@@ -241,10 +242,11 @@ def test_console_settings_has_web_view_toggle():
     # served URL) ONLY when a web_hook is injected -- the device does, the host doesn't
     # (it has tools/web_console.py), so the row never appears on the host.
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    settings_layer = (Path("runtime") / "settings_layer.py").read_text(encoding="utf-8")
     assert "self.web_hook = None" in console
-    assert '"WEB VIEW"' in console
+    assert '"WEB VIEW"' in settings_layer
     assert "def _toggle_web_view" in console
-    assert 'kind == "web"' in console
+    assert 'kind == "web"' in settings_layer   # the row's draw/handling moved with Settings
 
 
 def test_ota_online_download_streams_to_sd_with_checksum():
@@ -276,6 +278,7 @@ def test_ota_online_download_streams_to_sd_with_checksum():
 def test_ota_online_wired_and_console_has_online_flow():
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    settings_layer = (Path("runtime") / "settings_layer.py").read_text(encoding="utf-8")
     # The online update SCREEN (checking/download/install phases) lives in
     # update_ui.py (UpdateUI); the _online_update_available query + row label
     # stay in console.py.
@@ -285,7 +288,7 @@ def test_ota_online_wired_and_console_has_online_flow():
     assert "ws.updater.set_wifi(ws.wifi, go_online=lambda: autoconnect_wifi(ws.wifi))" in runtime
     # The shared console grows the UPDATE ONLINE row + the checking/download phases.
     assert "def _online_update_available" in console
-    assert '"UPDATE ONLINE"' in console
+    assert '"UPDATE ONLINE"' in settings_layer
     assert "def open_update_online" in update_ui
     assert "def _start_download" in update_ui
     assert 'ph == "checking"' in update_ui or 'phase == "checking"' in update_ui
@@ -1101,7 +1104,8 @@ def test_kid_mode_gates_diag_frame_eaters():
     # felt diag costs -- the forced GC sample and the periodic diag->SD write --
     # and hushes the live echo; the ring still flushes on cart exit + crash.
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
-    assert '("diag_live", "PERF DIAG", "diag")' in console
+    settings_layer = (Path("runtime") / "settings_layer.py").read_text(encoding="utf-8")
+    assert '("diag_live", "PERF DIAG", "diag")' in settings_layer
     assert "def set_diag_live(self, on, persist=True):" in console
     assert 'self.system.get("diag_live", False)' in console     # persisted + applied
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
@@ -1919,7 +1923,7 @@ def _load_moy_runtime():
     # all of them).
     for name in ("editors", "block_editor_ui", "map_editor_ui", "music_editor_ui",
                  "perf_hud", "update_ui", "system_menu_ui", "achievements_ui",
-                 "layers", "bar_layer", "cards_layer", "paint_layer", "audio", "console"):
+                 "layers", "bar_layer", "cards_layer", "paint_layer", "settings_layer", "audio", "console"):
         spec = importlib.util.spec_from_file_location(name, Path("runtime") / (name + ".py"))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
@@ -2059,6 +2063,7 @@ def test_icon_theme_editor_wired_into_device_shell():
     runtime/console.py + moy_carts.py, so grep the canonical sources for the wiring
     that MUST match the working cart-sprite save path (or the device SD bus hangs)."""
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    settings_layer = (Path("runtime") / "settings_layer.py").read_text(encoding="utf-8")
     paint_layer = (Path("runtime") / "paint_layer.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
@@ -2066,7 +2071,7 @@ def test_icon_theme_editor_wired_into_device_shell():
     # Entry point: an "action" Settings row (EDIT ICONS) that opens the theme editor.
     # The EDIT-ICONS lifecycle lives in ThemeLayer (paint_layer.py) now; ws.open_theme
     # stays as the reachable entry point (a thin forwarder).
-    assert '("icons", "EDIT ICONS", "action")' in console
+    assert '("icons", "EDIT ICONS", "action")' in settings_layer
     assert "def open_theme(self):" in console
     assert 'ws.menu_view = "theme"' in paint_layer
     assert "ws._editing_icons = True" in paint_layer
@@ -2755,7 +2760,8 @@ def test_ota_two_channel_wired():
     assert "def check_online(self, channel=None):" in kc
     # The shared console (staged to the device) drives the channel toggle + flow.
     console = Path("runtime/console.py").read_text(encoding="utf-8")
-    assert '("ota_channel", "CHANNEL", "channel")' in console
+    settings_layer = Path("runtime/settings_layer.py").read_text(encoding="utf-8")
+    assert '("ota_channel", "CHANNEL", "channel")' in settings_layer
     assert "def _cycle_channel(self, d):" in console
     # u.offers(...) is inside _pump_update, which now lives in update_ui.py (UpdateUI).
     update_ui = Path("runtime/update_ui.py").read_text(encoding="utf-8")
@@ -2787,7 +2793,7 @@ def test_no_undefined_names_in_extracted_modules():
     targets.append(ROOT / "modules" / "moy_runtime.py")
     targets += [Path("runtime") / n for n in (
         "console.py", "perf_hud.py", "update_ui.py", "system_menu_ui.py",
-        "achievements_ui.py", "layers.py", "bar_layer.py", "cards_layer.py", "paint_layer.py",
+        "achievements_ui.py", "layers.py", "bar_layer.py", "cards_layer.py", "paint_layer.py", "settings_layer.py",
         "block_editor_ui.py", "map_editor_ui.py", "music_editor_ui.py")]
 
     bad = []
