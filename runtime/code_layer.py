@@ -235,7 +235,7 @@ class CodeLayer:
         cv.cls(NAMES["black"])                  # full-screen editor
         # top bar: cart title (+ unsaved marker) and the action icons
         tclamp = 31 if lay._base else max(8, (lay.run_btn[0] - 2) // cell)
-        title = ws.cart["title"][:tclamp]
+        title = ws.project.cart["title"][:tclamp]
         if ed is not None and ed.dirty:
             title = title + " *"
         cv.print(title, 2, 3 if lay._base else 3 * fs, NAMES["green"], 1)
