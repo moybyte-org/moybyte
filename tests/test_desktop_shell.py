@@ -370,6 +370,32 @@ def test_cart_pause_menu_freezes_and_resumes(tmp_path):
     assert ws.screen == "launcher"
 
 
+def test_play_from_editor_returns_to_the_editor_tab_on_quit(tmp_path):
+    """Stage 3b (docs/shell_ux_technical_plan_v1.md Section 3): PLAY runs the cart
+    recording the EDITOR as the run caller, so the cart's QUIT returns to the Editor
+    on the tab it left (spec Section 2/Section 6's launch-and-return) -- NOT the
+    launcher home. This is the deliberate navigation-semantics change: the launcher
+    stays the caller only when it launched the cart (test above), while the Editor's
+    PLAY makes the Editor the second caller, proving the Player is caller-agnostic."""
+    from runtime import console as C
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.launcher.sel = 0
+    ws.open()                          # launcher launch: caller = the home root
+    assert ws.screen == "desktop"
+    ws._open_menu()                    # tap EDIT -> into the Editor (Config/code)
+    assert ws.screen == "menu"
+    tab = ws.menu_view
+    ws._leave_menu()                   # PLAY: run the cart, caller = the Editor now
+    assert ws.screen == "desktop"      # ...still runs fullscreen (transition preserved)
+    ws.cart_paused = True              # pause + QUIT the running cart
+    drv.click(*C._PAUSE_QUIT_BTN[:2])
+    drv.frame(1 / 30)
+    assert ws.screen == "menu"         # QUIT returned to the EDITOR...
+    assert ws.menu_view == tab         # ...on the very tab it left (not the launcher)
+
+
 def test_launcher_grid_band_reclaims_the_freed_dock_space(tmp_path):
     """With the dock gone the launcher cart grid extends below the old dock line: on a
     larger canvas the responsive grid uses the reclaimed band (more rows than it would
