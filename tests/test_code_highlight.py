@@ -6,7 +6,7 @@ like test_safe_edit drives it (host_app + a hand-authored cart).
 """
 
 from runtime import host_app  # noqa: F401  -- registers the `editors` alias console.py needs
-from runtime.console import (
+from runtime.code_layer import (   # the syntax highlighter moved to the code editor's own file
     _highlight,
     _HL_TEXT, _HL_KEYWORD, _HL_STRING, _HL_NUMBER, _HL_COMMENT, _HL_BUILTIN,
 )
@@ -139,6 +139,6 @@ def test_clean_cart_has_no_crash_line(tmp_path):
 
 def test_highlight_cache_reuses_result(tmp_path):
     ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(5)\n")
-    a = ws._hl("cls(7)")
-    b = ws._hl("cls(7)")
+    a = ws.code_layer._hl("cls(7)")
+    b = ws.code_layer._hl("cls(7)")
     assert a is b                          # same line -> cached object
