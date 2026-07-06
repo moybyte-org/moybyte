@@ -214,6 +214,21 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
         SettingsLayer, _SET_X, _SET_W, _SET_ROW_Y0, _SET_ROW_H, _SET_BACK, _SET_ACH,
         _SET_TITLE_HIT)
 
+# The Python code editor surface (#24/#39, extracted -- see code_layer.py). CodeLayer
+# owns the full-screen text view + drawing + code-UI state; the shared ws.editor handle
+# (like ws.paint) + save_code/run_code + the code-error state + code_layout stay on ws.
+# code_layer.py is the single source of the code geometry constants (_CODE_*/_ED_*/
+# _SYM_*/_CODE_SYMBOLS) + the MicroPython-safe syntax highlighter, imported back here for
+# console's CodeLayout + the crash panel (_CODE_LH) + tests.
+try:
+    from code_layer import (
+        CodeLayer, _CODE_X0, _CODE_Y0, _CODE_LH, _CODE_AREA, _ED_RUN, _ED_SAVE, _ED_CLOSE,
+        _CODE_SYMBOLS, _SYM_Y, _SYM_H, _SYM_CELL, _SYM_AREA)
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.code_layer import (
+        CodeLayer, _CODE_X0, _CODE_Y0, _CODE_LH, _CODE_AREA, _ED_RUN, _ED_SAVE, _ED_CLOSE,
+        _CODE_SYMBOLS, _SYM_Y, _SYM_H, _SYM_CELL, _SYM_AREA)
+
 # The block vocabulary/compiler (#29). Imported under whichever name it's known by:
 # bare `blocks` on the device (frozen top-level) and on the host once host_app has
 # aliased it, or `runtime.blocks` when a test loads console/moy_runtime directly
@@ -362,90 +377,8 @@ def color(name_or_index):
     return int(name_or_index) & 63
 
 
-# --- code-editor syntax highlighting (#24) ---------------------------------
-# A tiny, MicroPython-safe tokenizer: scans one source line char-by-char and
-# returns a per-character list of MOY64 palette indices, so the code view draws
-# colored runs without any re/tokenize dependency (those are heavy/absent on the
-# device). Token classes map to:
-_HL_TEXT = 6        # light_grey -- identifiers, operators, punctuation (default)
-_HL_KEYWORD = 12    # blue
-_HL_STRING = 11     # green
-_HL_NUMBER = 9      # orange
-_HL_COMMENT = 5     # dark_grey
-_HL_BUILTIN = 14    # pink -- the cart drawing verbs stand out
-
-_HL_KEYWORDS = (
-    "False", "None", "True", "and", "as", "assert", "break", "class",
-    "continue", "def", "del", "elif", "else", "except", "finally", "for",
-    "from", "global", "if", "import", "in", "is", "lambda", "nonlocal", "not",
-    "or", "pass", "raise", "return", "try", "while", "with", "yield",
-)
-# Cart-API verbs + the common builtins a kid actually types. Keep roughly in
-# sync with make_api (host_app / moy_runtime); an extra name here is harmless.
-_HL_BUILTINS = (
-    "cls", "pix", "pset", "line", "rect", "rectb", "circ", "circb", "spr",
-    "map", "mget", "mset",
-    "print", "btn", "btnp", "touch", "mouse", "key", "keyp", "time", "pmem",
-    "cfg", "col", "rnd", "flr", "abs", "min",
-    "max", "sin", "cos", "range", "len", "int", "str", "float", "round", "sqrt",
-)
-
-
-def _is_alpha(ch):
-    return ch == "_" or ("a" <= ch <= "z") or ("A" <= ch <= "Z")
-
-
-def _highlight(line):
-    """Return a list of palette indices, one per character of `line` (#24).
-    Hand-rolled scanner -- no regex/tokenize, so it runs under MicroPython."""
-    n = len(line)
-    out = [_HL_TEXT] * n
-    i = 0
-    while i < n:
-        ch = line[i]
-        if ch == "#":                          # comment to end of line
-            while i < n:
-                out[i] = _HL_COMMENT
-                i += 1
-            break
-        if ch == '"' or ch == "'":             # string literal (single line)
-            q = ch
-            out[i] = _HL_STRING
-            i += 1
-            while i < n:
-                out[i] = _HL_STRING
-                if line[i] == "\\" and i + 1 < n:   # escape: consume next char too
-                    i += 1
-                    out[i] = _HL_STRING
-                    i += 1
-                    continue
-                if line[i] == q:
-                    i += 1
-                    break
-                i += 1
-            continue
-        if "0" <= ch <= "9":                   # number literal
-            while i < n and (("0" <= line[i] <= "9") or line[i] == "." or line[i] == "x"):
-                out[i] = _HL_NUMBER
-                i += 1
-            continue
-        if _is_alpha(ch):                      # identifier / keyword / builtin
-            j = i
-            while j < n and (_is_alpha(line[j]) or "0" <= line[j] <= "9"):
-                j += 1
-            word = line[i:j]
-            if word in _HL_KEYWORDS:
-                cl = _HL_KEYWORD
-            elif word in _HL_BUILTINS:
-                cl = _HL_BUILTIN
-            else:
-                cl = _HL_TEXT
-            while i < j:
-                out[i] = cl
-                i += 1
-            continue
-        i += 1                                 # operator / punctuation / space
-    return out
+# (The code-editor syntax highlighter -- _highlight + _HL_* -- moved to code_layer.py
+# with the rest of the code editor; it was code-only.)
 
 
 CURSOR_IDLE_MS = 2000  # hide the trackball cursor after this long with no movement
@@ -545,22 +478,10 @@ _DOCK_X0 = 2
 # Settings screen (#28) geometry (_SET_*) lives in settings_layer.py (its own surface)
 # and is imported back at the top of this file, so console._X still resolves for the
 # Layout class + tests.
-# Code editor: FULL-SCREEN (320x240). Top bar = title + run/save/close icons;
-# the code area fills the middle; a tappable symbol palette runs along the bottom
-# (the T-Deck keyboard has no `=`/`[]`/`{}`/`<>`/`%`, so the palette supplies them).
-_CODE_X0 = 4
-_CODE_Y0 = 18
-_CODE_LH = 10
-_CODE_AREA = (_CODE_X0, _CODE_Y0, CodeEditor.COLS * 8, CodeEditor.ROWS * _CODE_LH)
-_ED_RUN = (266, 1, 16, 14)        # top-bar action icons (play / save / close)
-_ED_SAVE = (285, 1, 16, 14)
-_ED_CLOSE = (304, 1, 15, 14)
-# Tappable coding-symbol palette along the bottom edge.
-_CODE_SYMBOLS = "=()[]{}<>:;,.\"_%"
-_SYM_Y = 220
-_SYM_H = 20
-_SYM_CELL = 20
-_SYM_AREA = (0, _SYM_Y, _SYM_CELL * len(_CODE_SYMBOLS), _SYM_H)
+# Code editor (#24) geometry (_CODE_*/_ED_*/_SYM_*/_CODE_SYMBOLS) lives in code_layer.py
+# (its own surface) and is imported back at the top of this file, so console._X resolves
+# for the CodeLayout class + the crash panel (_CODE_LH) + tests. (_CODE_AREA is
+# re-exported too -- test_responsive_editors pins lay.code_area() against it.)
 # Paint editor (#4/#30) geometry (_PG_*/_SW*/_SPR_*/_PAINT_*) lives in paint_layer.py
 # (its own surface) and is imported back at the top of this file, so console._X still
 # resolves for tests + tools. (_PAINT_BTN -- the desktop overlay -- is in bar_layer.py.)
@@ -1709,8 +1630,8 @@ class Workstation:
         # timing fields.
         self.perf_ui = PerfHud(self, NAMES)
         self.keyboard = None          # set by run_desktop (for raw/text mode toggle)
-        self._ekey_prev = 0           # last consumed keyboard byte (edge detect)
-        self._drag = None             # last pointer pos during a code-view drag-scroll
+        # (The code editor's keyboard-edge tracker (_ekey_prev) + drag-scroll origin
+        # (_drag) + highlight memo (_hl_cache) live on self.code_layer now.)
         # (The paint drag-stroke origin -- _paint_drag -- lives on self.paint_layer.)
         self._lhover = (-1, -1)       # last cursor pos used for desktop icon hover-highlight
         self.pointer = None           # set by run_desktop
@@ -1756,7 +1677,6 @@ class Workstation:
         self.code_err = None          # short inline syntax-error message (#24)
         self.code_err_row = None      # 0-based row the syntax error is on (#24)
         self.crash_line = None        # 1-based cart line of the last runtime crash (#24)
-        self._hl_cache = {}           # per-line syntax-highlight memo (#24)
         self.paint_status = None      # last sprite-reuse (GET/PUT) result text (#18)
         self.can_manage = True        # writes enabled? run_desktop sets this from
                                       # whether SD is the cart source (carts_root)
@@ -1900,6 +1820,10 @@ class Workstation:
         # scroll window (set_msel/set_top) + drawing; reads ws config/system state +
         # dispatches every mutation to ws setters (it owns NO config).
         self.settings_layer = SettingsLayer(self, NAMES, _in, _clamp_scroll)
+        # The Python code editor (#24/#39): the full-screen text view. Owns the drawing
+        # + code-UI state (keyboard edge / drag / highlight memo); the shared ws.editor
+        # handle + save_code/run_code + code-error state + code_layout stay on ws.
+        self.code_layer = CodeLayer(self, NAMES, _in)
         # Content layers (exactly one active per frame, chosen by screen/menu_view).
         # The already-object surfaces (blocks/map/music/update) + cards are REAL Layer
         # adapters; the still-smeared surfaces (launcher/settings/desktop/code/paint/
@@ -1911,8 +1835,7 @@ class Workstation:
             "update": _UpdateLayer(self),
             "desktop": L("desktop", "game", draw=self._draw_content_desktop,
                          kbd=self._desktop_input, ptr=self._desktop_pointer),
-            "code": L("code", "system", draw=lambda dt: self._draw_code(),
-                      kbd=self._code_input, ptr=self._code_pointer),
+            "code": self.code_layer,
             "blocks": _BlocksLayer(self),
             "music": _MusicLayer(self),
             "theme": self.theme_layer,
@@ -2616,7 +2539,7 @@ class Workstation:
                 self.editor = CodeEditor(self.cart["src"],
                                          cols=self.code_layout.cols,
                                          rows=self.code_layout.rows)
-                self._ekey_prev = 0
+                self.code_layer.reset()   # fresh keyboard-edge tracker for the new editor
                 if self.crash_line is not None:
                     # Opened after a runtime crash -> land on the line that raised.
                     self._mark_code_error(self.crash_line - 1,
@@ -2771,20 +2694,6 @@ class Workstation:
             if self.cart is not None:
                 self._start()
         self.screen = "desktop"
-
-    def _editor_input(self):
-        # Feed the typed key to the editor, one insert per physical press: the
-        # keyboard reports the byte for the frame it is down then 0, so acting on
-        # the 0->key edge (key != previous) avoids autorepeat.
-        if self.editor is None:
-            return
-        k = self.input.last_key
-        if k and k != self._ekey_prev:
-            if self.editor.key(k):       # text changed -> drop the stale error marker
-                self.code_err = None
-                self.code_err_row = None
-                self.crash_line = None
-        self._ekey_prev = k
 
     def save_code(self):
         """Persist the edited source. Returns True iff it was written. A source
@@ -3229,10 +3138,6 @@ class Workstation:
         # the pause menu (B / bar icons) exactly like the other tools.
         return True
 
-    def _code_input(self, i):
-        self._editor_input()           # keyboard is in text mode here
-        return True
-
     # -- pointer (trackball-as-mouse) ----------------------------------------
 
     def _launcher_pointer(self, px, py, click):
@@ -3332,28 +3237,6 @@ class Workstation:
                 self.perf_hud = not self.perf_hud
         return True
 
-    def _code_pointer(self, px, py, click):
-        # The code editor is responsive (#39 step 2): it draws on the SYSTEM canvas at
-        # native size, so it hit-tests in SYSTEM coords (the raw pointer), NOT the
-        # 320x240 game viewport.
-        lay = self.code_layout
-        self._code_drag(px, py)        # touch/mouse drag pans the viewport
-        if click:
-            if _in(px, py, lay.run_btn):
-                self.run_code()
-            elif _in(px, py, lay.save_btn):
-                self.save_code()
-            elif _in(px, py, lay.close_btn):
-                self._leave_menu()
-            elif _in(px, py, lay.sym_area) and self.editor is not None:
-                i = (px - lay.sym_area[0]) // lay.sym_cell  # tap a coding symbol
-                if 0 <= i < len(_CODE_SYMBOLS):
-                    self.editor.key(ord(_CODE_SYMBOLS[i]))
-            elif self.editor is not None and _in(px, py, lay.code_area()):
-                self.editor.place((px - lay.x0) // lay.cell,
-                                  (py - lay.y0) // lay.lh)
-        return True
-
     def nav(self, dx, dy):
         # Directional input (host arrows / device trackball). In the code editor it
         # moves the CARET (the view follows it); elsewhere the launcher/desktop are
@@ -3362,24 +3245,6 @@ class Workstation:
                 and self.editor is not None and (dx or dy)):
             self.editor.move(dy, dx)
             self._dirty = True             # caret moved -> redraw (#44)
-
-    def _code_drag(self, px, py):
-        # Touch/mouse drag inside the code area pans the viewport (content follows
-        # the finger): drag down -> see earlier lines, drag right -> see left text.
-        # SYSTEM coords + layout cell/line height (#39 step 2).
-        ed = self.editor
-        lay = self.code_layout
-        if ed is None or not self.pointer.down or not _in(px, py, lay.code_area()):
-            self._drag = None
-            return
-        if self._drag is None:
-            self._drag = (px, py)
-            return
-        drows = (py - self._drag[1]) // lay.lh
-        dcols = (px - self._drag[0]) // lay.cell
-        if drows or dcols:
-            ed.scroll(-drows, -dcols)
-            self._drag = (px, py)
 
     # -- frame + drawing -----------------------------------------------------
 
@@ -4042,106 +3907,6 @@ class Workstation:
             return                        # no cursor over the boot logo
         if self.pointer is not None and self.pointer.visible:
             self.sys_canvas.spr(CURSOR, self.pointer.x, self.pointer.y, self.font_scale)
-
-    def _draw_code(self):
-        # Responsive (#39 step 2): the code editor draws on the SYSTEM canvas at
-        # native size, so a bigger panel shows more lines + wider columns and a
-        # bigger font scales the text. All positions come from CodeLayout (verbatim
-        # baseline at 320x240/1x). The editor's COLS/ROWS already track the layout.
-        cv = self.sys_canvas
-        lay = self.code_layout
-        fs = lay.fs
-        cell = lay.cell                          # on-screen char-cell width (8*fs)
-        lh = lay.lh
-        ed = self.editor
-        cv.cls(NAMES["black"])                  # full-screen editor
-        # top bar: cart title (+ unsaved marker) and the action icons
-        tclamp = 31 if lay._base else max(8, (lay.run_btn[0] - 2) // cell)
-        title = self.cart["title"][:tclamp]
-        if ed is not None and ed.dirty:
-            title = title + " *"
-        cv.print(title, 2, 3 if lay._base else 3 * fs, NAMES["green"], 1)
-        self._draw_icon("run", lay.run_btn)
-        self._draw_icon("save", lay.save_btn)
-        self._draw_icon("close", lay.close_btn)
-        # code area (horizontal scroll: columns [left, left+COLS))
-        if ed is not None:
-            cols = ed.COLS
-            vis = ed.visible_lines()
-            errrow = self.code_err_row
-            for idx in range(len(vis)):
-                y = lay.y0 + idx * lh
-                full = vis[idx]
-                on_err = errrow is not None and ed.top + idx == errrow
-                if on_err:                      # inline error: gutter mark + underline (#24)
-                    cv.rect(0, y, 3 * fs, 8 * fs, NAMES["red"])
-                    cv.rect(lay.x0, y + 8 * fs, cols * cell, fs, NAMES["red"])
-                seg = full[ed.left:ed.left + cols]
-                segcols = self._hl(full)[ed.left:ed.left + cols]
-                self._draw_code_runs(seg, segcols, y)
-                if on_err and self.code_err:    # short reason after the code, if it fits
-                    mcol = len(seg) + 1
-                    if mcol < cols - 2:
-                        cv.print(self.code_err[:cols - mcol],
-                                 lay.x0 + mcol * cell, y, NAMES["red"], 1)
-                if ed.top + idx == ed.row:      # caret on the cursor's line
-                    vcol = ed.col - ed.left
-                    if 0 <= vcol <= cols:
-                        cv.rect(lay.x0 + vcol * cell, y, fs, 8 * fs, NAMES["yellow"])
-        self._draw_symbols()
-
-    def _hl(self, line):
-        """Memoized per-line syntax highlight (#24). Lines recur every frame, so
-        cache by text; bound the cache so a long edit session can't grow it."""
-        cols = self._hl_cache.get(line)
-        if cols is None:
-            if len(self._hl_cache) > 400:
-                self._hl_cache.clear()
-            cols = _highlight(line)
-            self._hl_cache[line] = cols
-        return cols
-
-    def _draw_code_runs(self, seg, segcols, y):
-        """Draw one code line as runs of same-colored text (#24). On the SYSTEM
-        canvas at the layout's char-cell width (8*fs), so it scales with the font."""
-        cv = self.sys_canvas
-        lay = self.code_layout
-        x0, cell = lay.x0, lay.cell
-        n = len(seg)
-        i = 0
-        while i < n:
-            cl = segcols[i]
-            j = i + 1
-            while j < n and segcols[j] == cl:
-                j += 1
-            cv.print(seg[i:j], x0 + i * cell, y, cl, 1)
-            i = j
-
-    def _draw_symbols(self):
-        # Tappable coding-symbol palette (supplies what the keyboard can't type). On
-        # the SYSTEM canvas; cell + text scale with the layout/font (#39 step 2).
-        cv = self.sys_canvas
-        lay = self.code_layout
-        fs = lay.fs
-        sc = lay.sym_cell
-        sy = lay.sym_y
-        sh = lay.sym_h
-        for i in range(len(_CODE_SYMBOLS)):
-            x = lay.sym_area[0] + i * sc
-            cv.rect(x, sy, sc - 1, sh - 1, NAMES["dark_grey"])
-            cv.rectb(x, sy, sc - 1, sh - 1, NAMES["indigo"])
-            cv.print(_CODE_SYMBOLS[i], x + 6 * fs, sy + 6 * fs, NAMES["white"], 1)
-
-    def _draw_icon(self, kind, rect):
-        # A glyph on its own colored button background -- the code-editor top bar
-        # (run/save/close). The pure glyph vocabulary lives in _glyph(); this just
-        # paints a backing box of a sensible color, then the glyph on top. Drawn on
-        # the SYSTEM canvas so the glyph follows the font scale (#39 step 2).
-        bg = {"run": "green", "save": "blue", "close": "red"}.get(kind, "dark_grey")
-        cv = self.sys_canvas
-        x, y, w, h = rect
-        cv.rect(x, y, w, h, NAMES[bg])
-        self._glyph(kind, rect, NAMES["black"] if kind == "run" else NAMES["white"], cv)
 
     def _glyph(self, kind, rect, c, cv=None):
         # Draw a centered icon glyph in color `c`. Defaults to the GAME canvas (the
