@@ -2059,13 +2059,17 @@ def test_icon_theme_editor_wired_into_device_shell():
     runtime/console.py + moy_carts.py, so grep the canonical sources for the wiring
     that MUST match the working cart-sprite save path (or the device SD bus hangs)."""
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    paint_layer = (Path("runtime") / "paint_layer.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
 
     # Entry point: an "action" Settings row (EDIT ICONS) that opens the theme editor.
+    # The EDIT-ICONS lifecycle lives in ThemeLayer (paint_layer.py) now; ws.open_theme
+    # stays as the reachable entry point (a thin forwarder).
     assert '("icons", "EDIT ICONS", "action")' in console
     assert "def open_theme(self):" in console
-    assert 'self.menu_view = "theme"' in console
+    assert 'ws.menu_view = "theme"' in paint_layer
+    assert "ws._editing_icons = True" in paint_layer
     assert "self._editing_icons" in console
 
     # Save: the theme editor persists via save_system_icons through the SAME _with_sd

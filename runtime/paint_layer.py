@@ -18,7 +18,12 @@ stroke continuity state (_paint_drag). The paint-only constants live here (singl
 console.py imports them back so tests + tools resolve console._PG_X0 / _PAINT_SAVE / ...).
 `NAMES` (palette) and `_in` (rect hit-test) are injected (the circular-import dodge);
 the shared draw toolkit (ws._btn/_icon_btn) stays on Workstation.
+
+The icon-theme editor (EDIT ICONS) is the same paint flow over the system icon sheet,
+so `ThemeLayer` (below) lives here too: it owns the theme lifecycle + mode flag and
+delegates all the editing to the shared PaintLayer.
 """
+from editors import PaintEditor
 
 
 # -- paint geometry (single source; console.py imports these back) ------------
@@ -263,3 +268,73 @@ class PaintLayer:
             cv.print(ws.paint_status[:18], 110, 196, NAMES["yellow"], 1)
         ws._btn("SAVE", _PAINT_SAVE, NAMES["green"])
         ws._btn("CLOSE", _PAINT_CLOSE, NAMES["red"])
+
+
+class ThemeLayer:
+    """The icon-theme editor (EDIT ICONS, Settings -> #52): the SAME paint flow as the
+    cart sprite editor, pointed at the SYSTEM icon sheet. It owns the theme LIFECYCLE
+    (open/leave + the ws._editing_icons mode flag) and DELEGATES all the editing -- draw
+    + taps -- to the shared PaintLayer (one _paint_drag, one renderer). Game domain.
+
+    The lifecycle stays reachable on Workstation as thin forwarders (ws.open_theme is
+    device/test-pinned; ws._leave_theme is called by PaintLayer's CLOSE tap); the mode
+    flag ws._editing_icons + the sheet/save methods (load_icon_sheet/set_icon_sheet/
+    save_icons) stay on ws (the device backend calls them) -- ThemeLayer dispatches."""
+
+    id = "theme"
+    domain = "game"
+
+    def __init__(self, ws, paint_layer, names):
+        self.ws = ws
+        self._paint = paint_layer
+        self._NAMES = names
+
+    def draw(self, dt):
+        # EDIT ICONS (Stage 2): opened from Settings, NOT a running cart, so there's no
+        # cart backdrop to draw -- clear to black and reuse the shared PAINT renderer
+        # (over ws.icon_sheet, selected by ws._editing_icons).
+        ws = self.ws
+        ws.canvas.cls(self._NAMES["black"])
+        ws._reset_canvas_state()
+        self._paint._draw_paint()
+
+    def handle_input(self, i):
+        # EDIT ICONS is pointer/touch-driven like PAINT; B closes back to Settings.
+        self.ws._leave_or_home(self.leave)
+        return True
+
+    def handle_pointer(self, px, py, click):
+        return self._paint.handle_pointer(px, py, click)
+
+    def open(self):
+        """Open the PAINT editor on the SYSTEM icon sheet (Settings -> EDIT ICONS,
+        Stage 2 / #52). The same renderer/input as the cart PAINT flow, but pointed
+        at ws.icon_sheet: SAVE persists system_icons.moygfx (not a cart) and CLOSE
+        returns to Settings. Starts from the current theme (the baked default if no
+        system_icons.moygfx exists yet); the first SAVE creates the file."""
+        ws = self.ws
+        ws._dirty = True                 # screen change repaints (#44)
+        ws._editing_icons = True
+        ws.paint_status = None
+        ws.save_status = None
+        ws.screen = "menu"
+        ws.menu_view = "theme"
+        # Build a PaintEditor over the icon sheet (PaintEditor is tile-size-agnostic,
+        # so the 16x16 IconSheet edits natively). A fresh editor each open so the
+        # brush/tile state doesn't leak in from a cart paint session.
+        if ws.icon_sheet is not None:
+            ws.paint = PaintEditor(ws.icon_sheet)
+        self._paint.reset_drag()
+        ws._set_text_mode(False)         # paint is pointer-driven, raw/game keyboard
+        ws.ach.note("editor", "paint")   # repainting the chrome counts toward Toolbox
+
+    def leave(self):
+        """CLOSE/back from the theme editor: return to Settings (not a cart/desktop --
+        the theme editor was opened from there). Drops the editor + clears the
+        editing-icons flag so the cart PAINT flow is untouched next time."""
+        ws = self.ws
+        ws._dirty = True                 # screen change repaints (#44)
+        ws._editing_icons = False
+        ws.paint = None
+        self._paint.reset_drag()
+        ws.screen = "settings"
