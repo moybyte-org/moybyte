@@ -101,6 +101,27 @@ class _LegacyLayer(Layer):
 #    generic _LegacyLayer shim. Behavior + draw order are byte-identical.
 
 
+class _PlayerLayer(Layer):
+    """The running cart (Stage 2 of docs/shell_ux_technical_plan_v1.md): a thin
+    adapter over `ws.player` -- the run-loop black box that starts a cart, ticks it
+    each frame, feeds it input, and guarantees it exits. Game domain (drawn on the
+    fixed 320x240 canvas, composited by the router). All the logic lives on the
+    Player; this just gives it the "desktop" content-layer identity the string-keyed
+    router still switches to."""
+
+    id = "desktop"
+    domain = "game"
+
+    def draw(self, dt):
+        self.ws.player.tick(dt)
+
+    def handle_input(self, i):
+        return self.ws.player.handle_input(i)
+
+    def handle_pointer(self, px, py, click):
+        return self.ws.player.handle_pointer(px, py, click)
+
+
 class _BlocksLayer(Layer):
     """The block editor (#29), full-screen on the SYSTEM canvas (covers the cart)."""
 
