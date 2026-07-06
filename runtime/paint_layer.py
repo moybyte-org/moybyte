@@ -22,6 +22,12 @@ the shared draw toolkit (ws._btn/_icon_btn) stays on Workstation.
 The icon-theme editor (EDIT ICONS) is the same paint flow over the system icon sheet,
 so `ThemeLayer` (below) lives here too: it owns the theme lifecycle + mode flag and
 delegates all the editing to the shared PaintLayer.
+
+Stage 4 (#46 zoned bar): PaintLayer.draw() calls ws.bar_layer._draw_status_strip("menu")
+LAST (chrome over content) -- ThemeLayer has its OWN draw(), so this only ever fires for
+the cart-sprite "paint" tab, never EDIT ICONS. handle_pointer IS shared with ThemeLayer,
+so its bar-tap check is guarded on menu_view == "paint" (a theme-editor tap must reach
+the grid, not the Editor's tab ladder).
 """
 from editors import PaintEditor
 
@@ -105,6 +111,10 @@ class PaintLayer:
         # variant clears to a black field first in ThemeLayer.draw(), then calls _draw_paint.)
         self.ws._draw_menu_backdrop()
         self._draw_paint()
+        # The Editor's lent top-bar zone (Stage 4, #46 zoned bar): the tab ladder +
+        # PLAY. ThemeLayer has its OWN draw() (doesn't call this one), so this is
+        # unconditionally the cart-sprite "paint" tab, never the icon theme editor.
+        self.ws.bar_layer._draw_status_strip("menu")
 
     def handle_input(self, i):
         return True                    # paint is pointer/touch-driven
@@ -114,6 +124,13 @@ class PaintLayer:
         # paint lives in the 320x240 viewport, so translate to game coords.
         gx, gy = ws._game_xy(px, py)
         px, py = gx, gy
+        # The Editor's lent zone (Stage 4): ONLY for the cart-sprite "paint" tab --
+        # this handler is reused by ThemeLayer (EDIT ICONS) over the SAME grid/
+        # buttons, which has no bar at all, so guard on menu_view rather than
+        # unconditionally claiming the tap (a stray theme-editor tap must reach the
+        # paint grid, not the Editor's tab ladder).
+        if click and ws.menu_view == "paint" and ws.bar_layer.handle_bar_tap("menu", px, py):
+            return True
         # A tap (click) routes through _paint_click (grid OR buttons). A held drag with
         # no fresh click keeps painting the grid stroke so press-and-move draws a
         # continuous line -- the same path for a host mouse drag and a device touch drag

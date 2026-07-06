@@ -19,6 +19,13 @@ one shared toolkit fn, like bar_layer takes `_in`), and the launcher-only tile-t
 `_TYPE_GLYPH`/`_TYPE_COLOR` live here. `_in` is duplicated (pure/trivial). LauncherHomeLayer
 takes NAMES + `_in` injected too. No circular import: this is a leaf (the only console
 touch is a lazy Layout fallback for a bare Launcher() that no caller ever constructs).
+
+Stage 4 (#46 zoned bar, docs/shell_ux_technical_plan_v1.md): `LauncherHomeLayer` grows
+`draw_zone`/`zone_tap` (the lent left zone -- NEW/DUP/DEL + the selected cart's name,
+the old where=="home" branch of BarLayer._draw_status_strip, unchanged pixels) and a
+`zone_gen` property proxying `Launcher.zone_gen` -- an int the GRID bumps whenever its
+`sel` (a property now) or `items` changes, so BarLayer's strip cache can trust one int
+instead of re-deriving "did the selection move" itself.
 """
 
 
@@ -50,6 +57,13 @@ class Launcher:
 
     def __init__(self, items, layout=None, names=None, blit_glyph=None):
         self.items = items
+        # Stage 4 (#46 zoned bar): bumped whenever anything the lent left zone
+        # shows (the selected cart's title) changes -- the `sel` property below
+        # covers nav/tap/hover; set_items bumps it too (a NEW/DUP/DEL/rename can
+        # change the title under an unchanged sel). Must be set BEFORE `self.sel`
+        # below, since the sel setter reads it. BarLayer folds this into its cache
+        # key so the zoned strip re-renders only on a real change.
+        self.zone_gen = 0
         self.sel = 0
         self.page = 0
         self._NAMES = names
@@ -75,11 +89,28 @@ class Launcher:
         self._clamp_page()
 
     # -- selection ----------------------------------------------------------
+
+    @property
+    def sel(self):
+        return self._sel
+
+    @sel.setter
+    def sel(self, value):
+        # Stage 4 (#46 zoned bar): bump zone_gen on every ACTUAL change, regardless
+        # of call site (nav2d / flip_page / a tap / trackball hover all assign
+        # `.sel` directly) -- this is what lets BarLayer's cache key trust
+        # `zone_gen` instead of re-deriving "did the selection move" itself.
+        if value != getattr(self, "_sel", None):
+            self.zone_gen += 1
+        self._sel = value
+
     def set_items(self, items):
         """Replace the cart list (after a create/duplicate/delete) and re-clamp the
         selection + page so neither dangles past the new end. The public re-sync
         entry point -- callers must not poke the private page bookkeeping."""
         self.items = items
+        self.zone_gen += 1          # a rename/new/dup/del can change the title text
+                                    # the lent zone shows even when sel is unchanged
         if self.sel >= len(items):
             self.sel = max(0, len(items) - 1)
         self._page_to_sel()
@@ -276,3 +307,45 @@ class LauncherHomeLayer:
             if i is not None:
                 ws.launcher.sel = i
         return True
+
+    # -- the lent left zone (Stage 4, #46 zoned bar) --------------------------
+
+    @property
+    def zone_gen(self):
+        """Proxy onto ws.launcher.zone_gen -- the launcher GRID owns sel/items
+        (the state that actually varies the zone's pixels), so this just gives
+        BarLayer a uniform `owner.zone_gen` regardless of which app owns a zone."""
+        return self.ws.launcher.zone_gen
+
+    def draw_zone(self, cv, rect):
+        """The launcher's lent left zone: NEW/DUP/DEL when writable, then the
+        selected cart's name filling the remaining space. Verbatim body of the old
+        where == "home" branch of BarLayer._draw_status_strip, just drawn through
+        the app-lending contract now instead of a hardcoded bar variant."""
+        ws = self.ws
+        NAMES = self._NAMES
+        lay = ws.layout
+        if ws.can_manage:
+            ws._icon("new", lay.new_btn[0], lay.new_btn[1], cv)
+            ws._icon("dup", lay.dup_btn[0], lay.dup_btn[1], cv)
+            ws._icon("del", lay.del_btn[0], lay.del_btn[1], cv)
+        sel = ws.launcher.selected()
+        if sel is not None:
+            name = sel["title"]
+            if len(name) > lay.status_name_maxc:
+                name = name[:lay.status_name_maxc]
+            cv.print(name, lay.status_name_x, 3, NAMES["white"], 1)
+
+    def zone_tap(self, px, py):
+        """The launcher's lent left-zone tap slice: NEW/DUP/DEL. Split out of the
+        old handle_home_tap -- the clock egg + the ≡ system menu stay bar/right-
+        zone-owned, handled by BarLayer.handle_bar_tap before this is ever called."""
+        ws = self.ws
+        lay = ws.layout
+        if ws.can_manage and self._in(px, py, lay.new_btn):
+            ws.new_cart(); return True
+        if ws.can_manage and self._in(px, py, lay.dup_btn):
+            ws.dup_cart(); return True
+        if ws.can_manage and self._in(px, py, lay.del_btn):
+            ws.del_cart(); return True
+        return False

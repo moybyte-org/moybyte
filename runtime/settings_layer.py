@@ -36,10 +36,17 @@ _SET_TITLE_HIT = (30, 18, 130, 16)  # the "SETTINGS" panel title (secret door, #
 class SettingsLayer:
     """The Settings content Layer (system domain): the row list over the live
     wallpaper backdrop. Owns the scroll window (set_msel/set_top) + row geometry +
-    drawing; reads ws config/system state and dispatches every mutation to ws setters."""
+    drawing; reads ws config/system state and dispatches every mutation to ws setters.
+
+    Stage 4 (#46 zoned bar, docs/shell_ux_technical_plan_v1.md): Settings lends the
+    top bar's left zone too, via draw_zone/zone_tap -- but it has nothing to put
+    there today (its own panel already shows a title + row list below the bar), so
+    both are no-ops and `zone_gen` is a constant. Wired now so a future "which
+    section" indicator has somewhere to go without BarLayer needing to change."""
 
     id = "settings"
     domain = "system"
+    zone_gen = 0
 
     _SETTINGS_ROWS = (
         ("wallpaper", "WALLPAPER", "wallpaper"),
@@ -79,6 +86,16 @@ class SettingsLayer:
         """Reset the selection + scroll window (called by ws.open_settings each visit)."""
         self.set_msel = 0
         self.set_top = 0
+
+    # -- the lent left zone (Stage 4, #46 zoned bar) --------------------------
+
+    def draw_zone(self, cv, rect):
+        """Settings' lent left zone: currently empty -- its own panel already
+        shows a title + the row list below the bar, so there's nothing to add
+        here yet. Structurally wired for #46 (see the class docstring)."""
+
+    def zone_tap(self, px, py):
+        return False
 
     # -- rows / actions ------------------------------------------------------
 
@@ -217,6 +234,11 @@ class SettingsLayer:
         # (it has no controls of its own besides "tap to dismiss").
         if ws.show_achievements:
             ws.show_achievements = False
+            return True
+        # The top bar's tap slice (clock egg / ≡) is bar/right-zone-owned (Stage 4,
+        # #46) -- Settings' own lent left zone is empty (draw_zone above), so this
+        # only ever fires the clock egg or ≡, same as home/menu.
+        if ws.bar_layer.handle_bar_tap("settings", px, py):
             return True
         lay = ws.layout
         if self._in(px, py, lay.set_ach):      # trophy: open the achievements view (#21)
