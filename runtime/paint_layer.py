@@ -2,13 +2,13 @@
 (runtime/console.py) as its own Layer -- docs/shell_layers_refactor_v1.md Phase 2.
 
 ONE renderer/input serves BOTH sheets (so the theme chunk reuses it, no duplication):
-  * menu_view == "paint"  -> edits the cart's SpriteSheet   (ws.sheet)
+  * menu_view == "paint"  -> edits the cart's SpriteSheet   (ws.project.sheet)
   * menu_view == "theme"  -> edits the system IconSheet     (ws.icon_sheet, EDIT ICONS)
 The active editor is `ws.paint` (a PaintEditor over whichever sheet); `ws._editing_icons`
 selects the mode (which sheet, where SAVE persists, where CLOSE returns, GET/PUT hidden).
 
 Boundary (the anti-spaghetti line, per the doc): the SHEETS + the current-editor handle
-+ the SAVE persistence stay on Workstation -- `ws.sheet` / `ws.icon_sheet` (single
++ the SAVE persistence stay on Workstation -- `ws.project.sheet` / `ws.icon_sheet` (single
 source of the pixels), `ws.paint` (the PaintEditor handle, device/test-pinned like
 ws.editor), `ws._editing_icons` / `ws.paint_status` (lifecycle mode/status), and
 `ws.save_sprites` / `ws.save_icons` / `ws.share_tile_get` / `ws.share_tile_put` (cart/
@@ -81,7 +81,7 @@ class PaintLayer:
     """The paint editor content Layer (game domain): a panel over the frozen cart
     frame (or a black field for the icon theme). draw = the shared backdrop then the
     paint UI; handle_pointer routes taps to the grid/palette/buttons; keyboard is
-    no-op (paint is pointer-driven). Reads ws.paint / ws.sheet / ws._editing_icons and
+    no-op (paint is pointer-driven). Reads ws.paint / ws.project.sheet / ws._editing_icons and
     dispatches SAVE/GET/PUT/CLOSE to Workstation."""
 
     id = "paint"
@@ -202,7 +202,7 @@ class PaintLayer:
         pe = ws.paint
         # Edit the editor's OWN sheet -- the cart sprites for PAINT, the system icon
         # sheet for the theme editor (EDIT ICONS) -- so one renderer serves both.
-        sheet = pe.sheet if pe is not None else ws.sheet
+        sheet = pe.sheet if pe is not None else ws.project.sheet
         cv.rect(8, 16, 304, 204, NAMES["black"])
         cv.rectb(8, 16, 304, 204, NAMES["orange"])
         title = ("ICONS  TILE " if ws._editing_icons else "PAINT  SPR ") + str(pe.n if pe else 0)
