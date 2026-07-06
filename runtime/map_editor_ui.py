@@ -137,8 +137,8 @@ class MapEditorUI:
         running cart picks them up via tilemap.gen (#32). Called from
         Workstation.set_menu_view("map")."""
         ws = self.ws
-        if self.mapedit is None and ws.tilemap is not None and ws.sheet is not None:
-            self.mapedit = MapEditor(ws.tilemap, ws.sheet)
+        if self.mapedit is None and ws.project.tilemap is not None and ws.project.sheet is not None:
+            self.mapedit = MapEditor(ws.project.tilemap, ws.project.sheet)
 
     def reset(self):
         """Drop the active editor (a stale one must never leak into an unrelated
@@ -181,7 +181,7 @@ class MapEditorUI:
     def _map_palette_ids(self):
         """The tile ids shown on the current palette page (a window into the sheet,
         clamped so the last page never runs past the sheet's tile count)."""
-        sheet = self.ws.sheet
+        sheet = self.ws.project.sheet
         if sheet is None:
             return []
         count = sheet.count
@@ -214,7 +214,7 @@ class MapEditorUI:
         current zoom: the top-left visible cell stays in [0, max(0, dim - visible)],
         so a map smaller than the view always pins to (0, 0) (no panning needed)."""
         me = self.mapedit
-        tm = self.ws.tilemap
+        tm = self.ws.project.tilemap
         if me is None or tm is None:
             return
         x0, y0, cell, cols, rows = self._mv_metrics()
@@ -296,7 +296,7 @@ class MapEditorUI:
         pure pan is side-effect-free (no false '*' dirty flag, no spurious cache
         rebuild in a running cart)."""
         u = self._map_paint_undo
-        tm = self.ws.tilemap
+        tm = self.ws.project.tilemap
         if u is not None and tm is not None:
             cx, cy, prev, dirty, gen = u
             if 0 <= cx < tm.w and 0 <= cy < tm.h:
@@ -326,7 +326,7 @@ class MapEditorUI:
             # Paint immediately so a tap is responsive; remember the cell + its prior
             # byte so a drag-that-becomes-a-pan can revert it (no stray stamp) (#37).
             cell = self._map_cell_at(px, py)
-            tm = ws.tilemap
+            tm = ws.project.tilemap
             if cell is not None and tm is not None:
                 cx, cy = cell
                 if 0 <= cx < tm.w and 0 <= cy < tm.h:
@@ -335,7 +335,7 @@ class MapEditorUI:
                     self._map_paint(cx, cy)
             return
         if self._in(px, py, _TP_SKY):          # the EMPTY/"sky" swatch (#37)
-            me.n = ws.tilemap.EMPTY if ws.tilemap is not None else -1
+            me.n = ws.project.tilemap.EMPTY if ws.project.tilemap is not None else -1
             return
         if self._in(px, py, _TP_AREA):         # pick the brush tile from the palette
             col = (px - _TP_X0) // _TP_CELL
@@ -348,7 +348,7 @@ class MapEditorUI:
         elif self._in(px, py, _TP_PREV):       # page the palette back/forward
             self.map_page = max(0, self.map_page - _TP_PAGE)
         elif self._in(px, py, _TP_NEXT):
-            if ws.sheet is not None and self.map_page + _TP_PAGE < ws.sheet.count:
+            if ws.project.sheet is not None and self.map_page + _TP_PAGE < ws.project.sheet.count:
                 self.map_page += _TP_PAGE
         elif self._in(px, py, _MAP_ZOOM):      # cycle the zoom level (#37 follow-up)
             self._map_cycle_zoom()
@@ -378,7 +378,7 @@ class MapEditorUI:
         NAMES = self._NAMES
         cv = ws.canvas
         me = self.mapedit
-        sheet = ws.sheet
+        sheet = ws.project.sheet
         cv.rect(8, 16, 304, 204, NAMES["black"])
         cv.rectb(8, 16, 304, 204, NAMES["green"])
         # Live zoom metrics (#37 follow-up): one cell size drives the grid, the tile
@@ -389,12 +389,12 @@ class MapEditorUI:
         else:
             title = "MAP  TILE " + str(me.n if me else 0)
         title = title + "  z" + str(self.map_zoom + 1)
-        if ws.tilemap is not None and ws.tilemap.dirty:
+        if ws.project.tilemap is not None and ws.project.tilemap.dirty:
             title = title + " *"
         cv.print(title, 14, 18, NAMES["green"], 1)
-        if me is None or sheet is None or ws.tilemap is None:
+        if me is None or sheet is None or ws.project.tilemap is None:
             return
-        tm = ws.tilemap
+        tm = ws.project.tilemap
         # Visible map region: each cell is the sprite tile placed there, UPSCALED to
         # fill the cell (scale = cell // TILE, crisp pixel-art) and centered, with grid
         # lines so empty cells read as empty. Tile images are cached by id within the
