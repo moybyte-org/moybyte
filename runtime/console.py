@@ -190,14 +190,14 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # stay on Workstation; PaintLayer reads them + dispatches SAVE/GET/PUT/CLOSE to ws.
 try:
     from paint_layer import (
-        PaintLayer, _PG_X0, _PG_Y0, _PG_CELL, _PG_SPAN, _PG_AREA, _SW_X0, _SW_Y0, _SW,
-        _SW_COLS, _SW_AREA, _SPR_PREV, _SPR_NEXT, _PAINT_SIZE, _PAINT_SAVE, _PAINT_CLOSE,
-        _PAINT_GET, _PAINT_PUT)
+        PaintLayer, ThemeLayer, _PG_X0, _PG_Y0, _PG_CELL, _PG_SPAN, _PG_AREA, _SW_X0,
+        _SW_Y0, _SW, _SW_COLS, _SW_AREA, _SPR_PREV, _SPR_NEXT, _PAINT_SIZE, _PAINT_SAVE,
+        _PAINT_CLOSE, _PAINT_GET, _PAINT_PUT)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.paint_layer import (
-        PaintLayer, _PG_X0, _PG_Y0, _PG_CELL, _PG_SPAN, _PG_AREA, _SW_X0, _SW_Y0, _SW,
-        _SW_COLS, _SW_AREA, _SPR_PREV, _SPR_NEXT, _PAINT_SIZE, _PAINT_SAVE, _PAINT_CLOSE,
-        _PAINT_GET, _PAINT_PUT)
+        PaintLayer, ThemeLayer, _PG_X0, _PG_Y0, _PG_CELL, _PG_SPAN, _PG_AREA, _SW_X0,
+        _SW_Y0, _SW, _SW_COLS, _SW_AREA, _SPR_PREV, _SPR_NEXT, _PAINT_SIZE, _PAINT_SAVE,
+        _PAINT_CLOSE, _PAINT_GET, _PAINT_PUT)
 
 # The block vocabulary/compiler (#29). Imported under whichever name it's known by:
 # bare `blocks` on the device (frozen top-level) and on the host once host_app has
@@ -1884,9 +1884,10 @@ class Workstation:
         self.cards_layer = CardsLayer(self, NAMES, _in, _err_text)
         # The PAINT editor surface (#4/#30): one renderer for the cart sheet ("paint")
         # and the icon sheet ("theme"), keyed on ws._editing_icons. It reads ws.paint /
-        # ws.sheet + dispatches SAVE/GET/PUT/CLOSE to ws; the theme content reuses its
-        # _draw_paint + handle_pointer (via _draw_content_theme + the theme ptr below).
+        # ws.sheet + dispatches SAVE/GET/PUT/CLOSE to ws. The theme content is ThemeLayer
+        # -- it owns the EDIT-ICONS lifecycle + delegates all editing to this PaintLayer.
         self.paint_layer = PaintLayer(self, NAMES, _in)
+        self.theme_layer = ThemeLayer(self, self.paint_layer, NAMES)
         # Content layers (exactly one active per frame, chosen by screen/menu_view).
         # The already-object surfaces (blocks/map/music/update) + cards are REAL Layer
         # adapters; the still-smeared surfaces (launcher/settings/desktop/code/paint/
@@ -1903,8 +1904,7 @@ class Workstation:
                       kbd=self._code_input, ptr=self._code_pointer),
             "blocks": _BlocksLayer(self),
             "music": _MusicLayer(self),
-            "theme": L("theme", "game", draw=self._draw_content_theme,
-                       kbd=self._theme_input, ptr=self.paint_layer.handle_pointer),
+            "theme": self.theme_layer,
             "paint": self.paint_layer,
             "map": _MapLayer(self),
             "cards": self.cards_layer,
@@ -2775,25 +2775,9 @@ class Workstation:
         self.set_menu_view("paint")
 
     def open_theme(self):
-        """Open the PAINT editor on the SYSTEM icon sheet (Settings -> EDIT ICONS,
-        Stage 2 / #52). The same renderer/input as the cart PAINT flow, but pointed
-        at self.icon_sheet: SAVE persists system_icons.moygfx (not a cart) and CLOSE
-        returns to Settings. Starts from the current theme (the baked default if no
-        system_icons.moygfx exists yet); the first SAVE creates the file."""
-        self._dirty = True                 # screen change repaints (#44)
-        self._editing_icons = True
-        self.paint_status = None
-        self.save_status = None
-        self.screen = "menu"
-        self.menu_view = "theme"
-        # Build a PaintEditor over the icon sheet (PaintEditor is tile-size-agnostic,
-        # so the 16x16 IconSheet edits natively). A fresh editor each open so the
-        # brush/tile state doesn't leak in from a cart paint session.
-        if self.icon_sheet is not None:
-            self.paint = PaintEditor(self.icon_sheet)
-        self.paint_layer.reset_drag()
-        self._set_text_mode(False)         # paint is pointer-driven, raw/game keyboard
-        self.ach.note("editor", "paint")   # repainting the chrome counts toward Toolbox
+        # EDIT ICONS (#52): the theme editor's lifecycle lives on self.theme_layer now;
+        # this stays as the reachable entry point (Settings + the device/tests call it).
+        self.theme_layer.open()
 
     def _open_map(self):
         self.screen = "menu"
@@ -3014,14 +2998,9 @@ class Workstation:
             print("Moybyte save icons failed:", txt)
 
     def _leave_theme(self):
-        """CLOSE/back from the theme editor: return to Settings (not a cart/desktop --
-        the theme editor was opened from there). Drops the editor + clears the
-        editing-icons flag so the cart PAINT flow is untouched next time."""
-        self._dirty = True                 # screen change repaints (#44)
-        self._editing_icons = False
-        self.paint = None
-        self.paint_layer.reset_drag()
-        self.screen = "settings"
+        # CLOSE/back from the theme editor -> the lifecycle lives on self.theme_layer;
+        # this stays reachable (PaintLayer's CLOSE tap dispatches ws._leave_theme()).
+        self.theme_layer.leave()
 
     def save_map(self):
         # Persist the cart's tilemap to map.moymap (#32) -- the exact mirror of
@@ -3354,11 +3333,6 @@ class Workstation:
 
     def _code_input(self, i):
         self._editor_input()           # keyboard is in text mode here
-        return True
-
-    def _theme_input(self, i):
-        # EDIT ICONS: pointer/touch-driven like PAINT; B closes back to Settings.
-        self._leave_or_home(self._leave_theme)
         return True
 
     # -- pointer (trackball-as-mouse) ----------------------------------------
@@ -3864,14 +3838,6 @@ class Workstation:
         except Exception:
             pass
         self._reset_canvas_state()
-
-    def _draw_content_theme(self, dt):
-        # EDIT ICONS (Stage 2): the PAINT editor over the system icon sheet. Opened
-        # from Settings, NOT a running cart, so there's no cart backdrop to draw --
-        # just clear the canvas and reuse the shared PAINT renderer (over icon_sheet).
-        self.canvas.cls(NAMES["black"])
-        self._reset_canvas_state()
-        self.paint_layer._draw_paint()
 
     def frame(self, dt):
         if dt > 0:
