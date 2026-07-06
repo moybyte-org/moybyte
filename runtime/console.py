@@ -12,7 +12,7 @@ free apart from the shared editor cores below.
 import time
 
 from editors import (CodeEditor, IconSheet,
-                     PaintEditor, SpriteSheet, _SheetSprite)
+                     SpriteSheet, _SheetSprite)
 # The block editor's UI layer (issue #29 Part 2, extracted from this file): the
 # structured-outline screen + BlockLayout (its responsive geometry, #39 step 2) +
 # the module constants/sentinels its rows/menu render. Re-exported under their
@@ -286,6 +286,17 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.player import (Player, _PAUSE_BTN_W, _PAUSE_BTN_H, _PAUSE_BTN_GAP,
                         _PAUSE_BTN_Y, _PAUSE_CONTINUE_BTN, _PAUSE_QUIT_BTN)
+
+# The EDITOR app (Stage 3 of docs/shell_ux_technical_plan_v1.md, extracted from this
+# file -- see editor_app.py). EditorApp owns the tab ladder (Config -> Blocks -> Code
+# -> Sprites -> Map -> Music) + the current-tab state (EditorApp.tab) + the lazy tab
+# builders + the PLAY trigger. ws.menu_view becomes a forwarding projection of
+# EditorApp.tab (the string-keyed router's key, unchanged); ws.set_menu_view/_open_*/
+# _leave_menu stay one-line forwards (tested surface). Same bare-or-package fallback.
+try:
+    from editor_app import EditorApp
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.editor_app import EditorApp
 
 # The block vocabulary/compiler (#29). Imported under whichever name it's known by:
 # bare `blocks` on the device (frozen top-level) and on the host once host_app has
@@ -1093,11 +1104,19 @@ class Workstation:
         # live on it now and are exposed back as forwarding properties (below), so every
         # surface file + test reading ws.cart_error/ws._update/... is unchanged.
         self.player = Player(self, NAMES, _in)
+        # The EDITOR app (Stage 3, editor_app.py): owns the tab ladder + the active-tab
+        # state (EditorApp.tab). Built idle here (BEFORE anything can set menu_view,
+        # which is now a forwarding projection of editor_app.tab -- see below). The tab
+        # machine (set_menu_view/_open_*/_leave_menu) moved onto it; ws keeps one-line
+        # forwards so every surface file + test is unchanged.
+        self.editor_app = EditorApp(self)
         self._run_caller = None       # who to return to on QUIT (run() records it; Stage 2
                                       # only ever the home root, so pop == go_home)
         # (The cards menu's selection/scroll state -- msel/mtop -- lives on
         # self.cards_layer now, built in _build_layers with the rest of the stack.)
-        self.menu_view = "cards"      # menu sub-view: "cards" | "code" | "paint" | "map"
+        # (The active menu sub-view -- "cards"|"code"|"paint"|"map"|"blocks"|"music"|
+        # "theme" -- lives on self.editor_app.tab now (Stage 3); ws.menu_view is a
+        # forwarding projection of it, so every reader/writer is unchanged.)
         self.editor = None            # CodeEditor while menu_view == "code"
         # (cart/config/sheet/tilemap/images/pmem live on self.project now -- Stage 1;
         # ns/_update/_draw/cart_error/crash_line/cart_paused/_cart_start_ms/_cart_key_prev/
@@ -1953,6 +1972,22 @@ class Workstation:
     def _cart_key_prev(self, value):
         self.player._cart_key_prev = value
 
+    # -- active-tab forward (Stage 3, editor_app.py) --------------------------
+    #
+    # The active editor view lives on self.editor_app.tab now; menu_view is a
+    # forwarding PROJECTION of it (read AND write, the same shim ws.sheet got in
+    # Stage 1), so the string-keyed router keeps routing on ws.menu_view unchanged and
+    # every writer (ThemeLayer sets "theme"; open()/set_menu_view set the cart tabs)
+    # keeps working. EditorApp.tab is the source of truth; menu_view is deleted only at
+    # the END of the split Stage 6, once the back-stack routes and nothing reads it.
+    @property
+    def menu_view(self):
+        return self.editor_app.tab
+
+    @menu_view.setter
+    def menu_view(self, value):
+        self.editor_app.tab = value
+
     # -- run / exit (Stage 2: the run/return stack discipline) ----------------
 
     def run(self, project, caller):
@@ -2046,46 +2081,10 @@ class Workstation:
     # -- code / paint editors (#3, #4) ---------------------------------------
 
     def set_menu_view(self, view):
-        """Switch the menu sub-view, building the matching editor and toggling
-        the keyboard between game (raw) and text (ASCII) modes."""
-        self._dirty = True             # sub-view change always repaints (#44)
-        self.menu_view = view
-        if view == "code":
-            if self.editor is None and self.cart is not None:
-                self.editor = CodeEditor(self.cart["src"],
-                                         cols=self.code_layout.cols,
-                                         rows=self.code_layout.rows)
-                self.code_layer.reset()   # fresh keyboard-edge tracker for the new editor
-                if self.crash_line is not None:
-                    # Opened after a runtime crash -> land on the line that raised.
-                    self._mark_code_error(self.crash_line - 1,
-                                          (self.cart_error or "crashed")[:32])
-                else:
-                    self.code_err = None
-                    self.code_err_row = None
-        elif view == "paint":
-            if self.paint is None and self.sheet is not None:
-                self.paint = PaintEditor(self.sheet)
-        elif view == "map":
-            # Mirror the paint branch: build the MapEditor over the cart's TileMap
-            # + sheet (both always exist after open()). Edits go straight into the
-            # live tilemap, so a running cart picks them up via tilemap.gen (#32).
-            self.map_ui.build()
-        elif view == "blocks":
-            # Build the BlockEditor over the cart's block program (#29), lazily --
-            # see BlockEditorUI.build's docstring (block_editor_ui.py) for the
-            # load-or-fresh + data-loss-guard rules (moved verbatim from here).
-            self.block_ui.build()
-        elif view == "music":
-            # Build the MusicEditor over the open cart's live AudioBank (#50): the
-            # SAME bank the running cart plays through, so an edit is heard immediately
-            # by the preview AND by the cart on resume. Edits go straight into that
-            # bank; SAVE persists it to sounds.json.
-            self.music_ui.build()
-        self._set_text_mode(view == "code")
-        # Achievements (#21): visiting each editor (code/paint/map) earns "Toolbox
-        # Master". "cards" isn't an editor, so it's ignored by note().
-        self.ach.note("editor", view)
+        # The tab builder moved to EditorApp.set_tab (Stage 3, editor_app.py); this
+        # stays as the tested ws. entry point (cards_layer/block_editor_ui + tests +
+        # the _open_* forwards call it).
+        self.editor_app.set_tab(view)
 
     def _set_text_mode(self, on):
         # The code editor needs clean 1-byte ASCII (it reads last_key for typing);
@@ -2124,17 +2123,15 @@ class Workstation:
         if kb is not None:
             kb.set_game_mode(not want_text)
 
+    # The per-tab landing entry points moved to EditorApp (Stage 3, editor_app.py);
+    # these stay as the tested ws. entry points (bar_layer's tool switcher + the
+    # player pause-B + tests call them). _open_menu is the Config-first landing --
+    # EditorApp.open(project) -- so it forwards the open workspace.
     def _open_menu(self):
-        self.screen = "menu"
-        # Carts with a Make-it-mine schema open to cards; others go straight to
-        # the code editor (there are no cards to show).
-        self.set_menu_view("cards" if self.cart.get("edit") else "code")
+        self.editor_app.open(self.project)
 
     def _open_paint(self):
-        self.screen = "menu"
-        self._editing_icons = False        # a CART sheet, not the system theme
-        self.paint_status = None
-        self.set_menu_view("paint")
+        self.editor_app.open_paint()
 
     def open_theme(self):
         # EDIT ICONS (#52): the theme editor's lifecycle lives on self.theme_layer now;
@@ -2142,31 +2139,13 @@ class Workstation:
         self.theme_layer.open()
 
     def _open_map(self):
-        self.screen = "menu"
-        self.save_status = None
-        self.map_ui.on_open()          # fresh gesture/zoom state (#37)
-        self.set_menu_view("map")
-        # Open with the camera at the top-left so the whole map shows at the default
-        # (fit-both) zoom with zero panning. set_menu_view builds the MapEditor.
-        if self.map_ui.mapedit is not None:
-            self.map_ui.mapedit.cam_x = 0
-            self.map_ui.mapedit.cam_y = 0
+        self.editor_app.open_map()
 
     def _open_blocks(self):
-        self.screen = "menu"
-        # NB: don't pre-clear blk_status here -- set_menu_view("blocks") sets the
-        # "CODE LOCKED" notice when it builds the editor in protected mode, and
-        # clearing it after would hide the data-loss guard's message.
-        self.set_menu_view("blocks")
+        self.editor_app.open_blocks()
 
     def _open_music(self):
-        """Open the music/sound editor (#50): a tracker-style step grid over the
-        cart's AudioBank. Mirrors _open_map -- reset preview state, then build the
-        editor via set_menu_view("music")."""
-        self.screen = "menu"
-        self.save_status = None
-        self.music_ui._stop_music_preview()
-        self.set_menu_view("music")
+        self.editor_app.open_music()
 
     def _cart_has_handwritten_code(self):
         """True if the current cart's main.py is real, hand-written code that the
@@ -2189,27 +2168,10 @@ class Workstation:
         return bool(src.strip())
 
     def _leave_menu(self):
-        self._dirty = True             # back to the desktop repaints (#44)
-        self._set_text_mode(False)
-        if self.menu_view == "music":
-            self.music_ui._stop_music_preview()   # don't let a preview leak into the cart resume
-        # Returning to the desktop from the code editor must run whatever source is
-        # in the editor now (the kid may have fixed a crash and hit SAVE, or just
-        # edited and closed). Re-_start() with the editor text so the FIXED cart
-        # actually runs -- otherwise a previously-set cart_error would re-paint the
-        # stale "crashed" panel and _update/_draw would stay None forever.
-        if self.menu_view == "code" and self.editor is not None and self.cart is not None:
-            self.cart["src"] = self.editor.text()
-            self._start()
-        elif self.menu_view == "blocks":
-            self.block_ui.on_leave()
-            # A saved block edit already recompiled cart["src"] (save_blocks); re-run
-            # it so leaving the outline runs the freshest program, just like the code
-            # editor does. (Unsaved edits don't touch src, so this re-runs the last
-            # saved version -- the kid SAVEs to keep changes, exactly like code.)
-            if self.cart is not None:
-                self._start()
-        self.run(self.project, self.launcher_layer)   # activate desktop, record caller
+        # PLAY: leaving a tab RUNS the cart -- moved to EditorApp.leave (Stage 3,
+        # editor_app.py). Stays as the tested ws. entry point (cards_layer/map/music/
+        # block/code surfaces + host_app.escape + tests dispatch to it).
+        self.editor_app.leave()
 
     def save_code(self):
         """Persist the edited source. Returns True iff it was written. A source

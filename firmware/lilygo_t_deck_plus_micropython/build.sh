@@ -161,6 +161,9 @@ fi
 #   player.py     -- the cart PLAYER (Stage 2: Player.start/tick/handle_input/
 #                    handle_pointer + crash/pause chrome, extracted from console.py);
 #                    console.py does `from player import Player`
+#   editor_app.py -- the EDITOR app (Stage 3: EditorApp -- the tab ladder + tab state
+#                    + builders + PLAY, extracted from console.py); console.py does
+#                    `from editor_app import EditorApp`
 #   console.py    -- launcher + desktop + cards/code/paint UI + Pointer
 #   moy_carts.py  -- the .moy store (scan/load/save/create/duplicate/delete)
 #   blocks.py     -- block model + blocks->Python compiler (#29; moy_carts imports it)
@@ -189,6 +192,7 @@ cp "${REPO_ROOT}/runtime/wallpaper.py" "${SCRIPT_DIR}/modules/wallpaper.py"
 cp "${REPO_ROOT}/runtime/launcher_layer.py" "${SCRIPT_DIR}/modules/launcher_layer.py"
 cp "${REPO_ROOT}/runtime/project.py" "${SCRIPT_DIR}/modules/project.py"
 cp "${REPO_ROOT}/runtime/player.py" "${SCRIPT_DIR}/modules/player.py"
+cp "${REPO_ROOT}/runtime/editor_app.py" "${SCRIPT_DIR}/modules/editor_app.py"
 cp "${REPO_ROOT}/runtime/console.py" "${SCRIPT_DIR}/modules/console.py"
 cp "${REPO_ROOT}/runtime/moy_carts.py" "${SCRIPT_DIR}/modules/moy_carts.py"
 cp "${REPO_ROOT}/runtime/blocks.py" "${SCRIPT_DIR}/modules/blocks.py"
