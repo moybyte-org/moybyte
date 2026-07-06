@@ -180,6 +180,7 @@ cp "${REPO_ROOT}/runtime/settings_layer.py" "${SCRIPT_DIR}/modules/settings_laye
 cp "${REPO_ROOT}/runtime/code_layer.py" "${SCRIPT_DIR}/modules/code_layer.py"
 cp "${REPO_ROOT}/runtime/widgets.py" "${SCRIPT_DIR}/modules/widgets.py"
 cp "${REPO_ROOT}/runtime/wallpaper.py" "${SCRIPT_DIR}/modules/wallpaper.py"
+cp "${REPO_ROOT}/runtime/launcher_layer.py" "${SCRIPT_DIR}/modules/launcher_layer.py"
 cp "${REPO_ROOT}/runtime/console.py" "${SCRIPT_DIR}/modules/console.py"
 cp "${REPO_ROOT}/runtime/moy_carts.py" "${SCRIPT_DIR}/modules/moy_carts.py"
 cp "${REPO_ROOT}/runtime/blocks.py" "${SCRIPT_DIR}/modules/blocks.py"
