@@ -173,8 +173,11 @@ snapshot moved, then `make sync-issues`.
 state — the `cart` dict (src/cfg/sprites/map/sounds/blocks/path, as loaded by
 `moy_carts.load`), the live `config` dict, the built `SpriteSheet`, `TileMap`,
 `AudioBank`, `Pmem`, and `images` — plus the persistence verbs (`commit_config`,
-`commit_code`, `commit_sprites`, `commit_map`, `commit_sounds`, `commit_blocks`) that
-write through the injected store + `_with_sd`. It is the one object a tab edits and
+`commit_code`, `commit_sprites`, `commit_map`, `commit_sounds`) that
+write through the injected store + `_with_sd`. (Block persistence is NOT among these:
+there is no Workstation-level blocks-save verb to move — `BlockEditorUI.save_blocks`
+reaches `ws.carts_store` directly — so a `commit_blocks` would be dead scaffolding
+until a later stage touches the block surface.) It is the one object a tab edits and
 the one object the Player runs. It is NOT a copy: the editors and a re-run share the
 same live `sheet`/`tilemap`/bank exactly as today (edits are visible to the running
 cart via `gen` bumps — `editors.py:224` — that behavior is load-bearing and kept).
