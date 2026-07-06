@@ -142,11 +142,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # is no circular import back into console. Same bare-or-package fallback as above.
 try:
     from layers import (
-        _LegacyLayer, _BlocksLayer, _UpdateLayer, _MapLayer, _MusicLayer,
+        _LegacyLayer, _PlayerLayer, _BlocksLayer, _UpdateLayer, _MapLayer, _MusicLayer,
         _PerfLayer, _AchOverlayLayer, _SysMenuLayer, _AboutLayer)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layers import (
-        _LegacyLayer, _BlocksLayer, _UpdateLayer, _MapLayer, _MusicLayer,
+        _LegacyLayer, _PlayerLayer, _BlocksLayer, _UpdateLayer, _MapLayer, _MusicLayer,
         _PerfLayer, _AchOverlayLayer, _SysMenuLayer, _AboutLayer)
 
 # The unified top bar + bottom dock surface (#46, extracted from this file -- see
@@ -271,6 +271,22 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.project import Project
 
+# The cart PLAYER (Stage 2 of docs/shell_ux_technical_plan_v1.md, extracted from this
+# file -- see player.py). Player is the run-loop black box: start a cart under the
+# frozen make_api, tick it, feed it input, guarantee it exits. The "desktop" content
+# layer delegates to the one ws.player; ws._start stays a one-line forward, and the
+# nine cart-run fields the Player owns (cart_error/crash_line/cart_paused/ns/_update/
+# _draw/_cart_key_prev + the pause-only _bks_prev/_cart_start_ms) are exposed back as
+# forwarding properties, so every surface file + test is unchanged. The pause-button
+# geometry moved with the pause machinery and is re-exported here so console._PAUSE_*
+# still resolves for tests. Same bare-or-package fallback as project.py.
+try:
+    from player import (Player, _PAUSE_BTN_W, _PAUSE_BTN_H, _PAUSE_BTN_GAP,
+                        _PAUSE_BTN_Y, _PAUSE_CONTINUE_BTN, _PAUSE_QUIT_BTN)
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.player import (Player, _PAUSE_BTN_W, _PAUSE_BTN_H, _PAUSE_BTN_GAP,
+                        _PAUSE_BTN_Y, _PAUSE_CONTINUE_BTN, _PAUSE_QUIT_BTN)
+
 # The block vocabulary/compiler (#29). Imported under whichever name it's known by:
 # bare `blocks` on the device (frozen top-level) and on the host once host_app has
 # aliased it, or `runtime.blocks` when a test loads console/moy_runtime directly
@@ -310,72 +326,8 @@ def _err_text(exc):
     return (name + ": " + msg) if msg else name
 
 
-def _wrap(text, cols):
-    """Word-wrap `text` into a list of lines no wider than `cols` chars. A single
-    word longer than `cols` is hard-split so it still fits the panel."""
-    if cols < 1:
-        cols = 1
-    out = []
-    for para in str(text).split("\n"):
-        line = ""
-        for word in para.split(" "):
-            while len(word) > cols:                 # hard-split an over-long token
-                if line:
-                    out.append(line)
-                    line = ""
-                out.append(word[:cols])
-                word = word[cols:]
-            if not line:
-                line = word
-            elif len(line) + 1 + len(word) <= cols:
-                line = line + " " + word
-            else:
-                out.append(line)
-                line = word
-        out.append(line)
-    return out
-
-
-def _exc_cart_line(exc, fname="<cart>"):
-    """Best-effort: the 1-based source line INSIDE the cart where `exc` was
-    raised, or None -- so a runtime crash can drop the kid on the offending line
-    (#24), like a syntax error does. Both backends rely on the cart being
-    compiled with the filename `fname` (see _start). Host (CPython) walks the
-    traceback objects; the device (MicroPython, which exposes no tb objects)
-    parses sys.print_exception's rendered output. The DEEPEST cart frame wins."""
-    tb = getattr(exc, "__traceback__", None)
-    line = None
-    while tb is not None:
-        try:
-            if tb.tb_frame.f_code.co_filename == fname:
-                line = tb.tb_lineno
-        except AttributeError:
-            pass
-        tb = tb.tb_next
-    if line is not None:
-        return line
-    try:
-        import sys
-        import io
-        buf = io.StringIO()
-        sys.print_exception(exc, buf)              # MicroPython only
-        for ln in buf.getvalue().split("\n"):
-            if fname in ln:
-                p = ln.find("line ")
-                if p >= 0:
-                    num = ""
-                    for ch in ln[p + 5:]:
-                        if "0" <= ch <= "9":
-                            num += ch
-                        elif num:
-                            break
-                    if num:
-                        line = int(num)            # keep the last (deepest) match
-    except Exception:  # noqa: BLE001
-        pass
-    if line is not None:
-        return line
-    return getattr(exc, "lineno", None)            # SyntaxError caught at compile
+# (_wrap + _exc_cart_line -- word-wrap the crash text + find a cart traceback line --
+# moved to player.py (Stage 2) with the crash panel + Player.start, their only users.)
 
 
 # (_Blit -- the minimal cursor/composite blittable -- moved to widgets.py, imported
@@ -425,18 +377,9 @@ def color(name_or_index):
 # _BAR_BATT / _BAR_WIFI / _BAR_CLOCK, and _DOCK_SLOTS / _DOCK_GLYPH / _DOCK_LABEL --
 # now lives in bar_layer.py (its own surface, #46) and is imported back at the top of
 # this file, so console._X still resolves for Layout + the golden harness/tests.
-# Pause screen (#71 unified key): two explicit, always-tappable buttons so
-# quitting is never ambiguous or keyboard-mode-dependent -- CONTINUE resumes,
-# QUIT goes home. Centered as a pair near the bottom of the 320x240 game
-# viewport, well clear of the top bar (y 0..18).
-_PAUSE_BTN_W = 92
-_PAUSE_BTN_H = 22
-_PAUSE_BTN_GAP = 12
-_PAUSE_BTN_Y = 240 - 40
-_PAUSE_CONTINUE_BTN = ((320 - 2 * _PAUSE_BTN_W - _PAUSE_BTN_GAP) // 2, _PAUSE_BTN_Y,
-                       _PAUSE_BTN_W, _PAUSE_BTN_H)
-_PAUSE_QUIT_BTN = (_PAUSE_CONTINUE_BTN[0] + _PAUSE_BTN_W + _PAUSE_BTN_GAP, _PAUSE_BTN_Y,
-                   _PAUSE_BTN_W, _PAUSE_BTN_H)
+# The pause-screen button geometry (_PAUSE_BTN_* / _PAUSE_CONTINUE_BTN /
+# _PAUSE_QUIT_BTN, #71) moved to player.py with the pause machinery (Stage 2) and is
+# imported back at the top of this file, so console._PAUSE_* still resolves for tests.
 # The cards-menu geometry (_RUN_BTN / _CODE_BTN / _CLOSE_BTN + _CARD_*) lives in
 # cards_layer.py (its own surface, #3/#15) and is imported back at the top of this
 # file, so console._X still resolves for tests.
@@ -1143,25 +1086,23 @@ class Workstation:
         # idle here (all fields None -> the boot launcher state) BEFORE anything can set
         # ws.cart, and rebuilt per open() when a cart is opened.
         self.project = Project(self)
-        self.ns = None
-        self._update = None
-        self._draw = None
-        self.cart_paused = False      # pause menu (#71): a running cart owns the FULL
-                                      # 320x240 (no bar); BACKSPACE -- THE one console
-                                      # key in every input mode -- TOGGLES this. Quit
-                                      # is the pause screen's own explicit QUIT button
-        self._bks_prev = 0            # last_key edge tracker for the BACKSPACE pause
-                                      # (a text-mode cart types letters, so button
-                                      # aliases are suppressed -- the Workstation
-                                      # edge-detects the console key itself)
+        # The cart PLAYER (Stage 2, player.py): the run-loop object. Built idle here
+        # (BEFORE anything can set the forwarded cart-run fields below), reused across
+        # runs (start() re-inits it). The nine fields it owns -- ns/_update/_draw,
+        # cart_error/crash_line, cart_paused/_bks_prev, _cart_start_ms/_cart_key_prev --
+        # live on it now and are exposed back as forwarding properties (below), so every
+        # surface file + test reading ws.cart_error/ws._update/... is unchanged.
+        self.player = Player(self, NAMES, _in)
+        self._run_caller = None       # who to return to on QUIT (run() records it; Stage 2
+                                      # only ever the home root, so pop == go_home)
         # (The cards menu's selection/scroll state -- msel/mtop -- lives on
         # self.cards_layer now, built in _build_layers with the rest of the stack.)
         self.menu_view = "cards"      # menu sub-view: "cards" | "code" | "paint" | "map"
         self.editor = None            # CodeEditor while menu_view == "code"
         # (cart/config/sheet/tilemap/images/pmem live on self.project now -- Stage 1;
-        # exposed back as forwarding properties, so ws.sheet/ws.cart/... are unchanged.)
-        self._cart_start_ms = 0       # _ticks_ms when the running cart last _start()ed
-        self._cart_key_prev = 0       # last frame's keyboard byte (key()/keyp() edge)
+        # ns/_update/_draw/cart_error/crash_line/cart_paused/_cart_start_ms/_cart_key_prev/
+        # _bks_prev live on self.player now -- Stage 2; both exposed as forwarding
+        # properties, so ws.sheet/ws.cart_error/... are unchanged.)
         self.paint = None             # PaintEditor while menu_view == "paint"
         # The map (tilemap) editor's UI (#32, extracted from this class -- see
         # map_editor_ui.py): one instance, delegated to from handle_input/
@@ -1223,11 +1164,11 @@ class Workstation:
         # (The Settings selection/scroll window -- set_msel/set_top -- lives on
         # self.settings_layer now, built in _build_layers with the rest of the stack.)
         self.carts_root = None        # SD carts dir (reads); set by run_desktop
-        self.cart_error = None        # last cart failure text -> on-canvas error panel
+        # (cart_error + crash_line live on self.player now -- Stage 2; forwarding
+        # properties below, so ws.cart_error / ws.crash_line are unchanged.)
         self.save_status = None       # last save_code result text (e.g. a syntax error)
         self.code_err = None          # short inline syntax-error message (#24)
         self.code_err_row = None      # 0-based row the syntax error is on (#24)
-        self.crash_line = None        # 1-based cart line of the last runtime crash (#24)
         self.paint_status = None      # last sprite-reuse (GET/PUT) result text (#18)
         self.can_manage = True        # writes enabled? run_desktop sets this from
                                       # whether SD is the cart source (carts_root)
@@ -1385,8 +1326,8 @@ class Workstation:
             "launcher": self.launcher_layer,
             "settings": self.settings_layer,
             "update": _UpdateLayer(self),
-            "desktop": L("desktop", "game", draw=self._draw_content_desktop,
-                         kbd=self._desktop_input, ptr=self._desktop_pointer),
+            "desktop": _PlayerLayer(self),   # Stage 2: the run loop is ws.player
+
             "code": self.code_layer,
             "blocks": _BlocksLayer(self),
             "music": _MusicLayer(self),
@@ -1835,7 +1776,7 @@ class Workstation:
         # Close Settings back to wherever it was opened from: resume the running cart
         # if we came from one (the gear on the in-cart bar), else the launcher home.
         if getattr(self, "_settings_return", "launcher") == "desktop" and self.cart is not None:
-            self.screen = "desktop"
+            self.run(self.project, self.launcher_layer)   # resume the running cart
             self._dirty = True
         else:
             self.go_home()
@@ -1886,46 +1827,10 @@ class Workstation:
     # _cycle_channel) stay here.
 
     def _start(self):
-        self._dirty = True             # a (re)started cart paints its first frame (#44)
-        self._build_audio()
-        # Reset the canvas draw state (camera/clip/pal/palt, #11) so a fresh cart run
-        # never inherits a previous cart's clip rect or palette swap.
-        rs = getattr(self.canvas, "reset_state", None)
-        if rs is not None:
-            rs()
-        # Stamp the cart-start clock so the cart's time() reads ms since this run
-        # began (re-run on apply/run_code/edit-close resets it, like TIC-80).
-        self._cart_start_ms = _ticks_ms()
-        self.input.cart_start_ms = self._cart_start_ms
-        # Capability-permission gate (#38): hand make_api the wifi backend ONLY
-        # when this cart declares the "network" permission, so a normal kid cart
-        # gets NO `wifi` name (sandbox preserved). make_api injects `wifi` into the
-        # cart namespace iff the backend it receives is non-None.
-        wifi = self.wifi if self._cart_has_perm("network") else None
-        ns = self.make_api(self.canvas, self.input, self.config, self.sheet,
-                           self.audio, self.tilemap, self.pmem, wifi, self.images)
-        try:
-            # Compile with the "<cart>" filename so a runtime traceback carries
-            # cart line numbers (_exc_cart_line reads them to mark the bad line).
-            exec(compile(self.cart["src"], "<cart>", "exec"), ns)
-            if ns.get("_init"):
-                ns["_init"]()
-        except Exception as exc:  # noqa: BLE001
-            # The device's native run loop starves USB, so a print() never reaches
-            # serial -- stash the failure so frame() can paint an on-canvas panel.
-            # Print only the _err_text-guarded string, never the raw `exc`: a cart
-            # exception whose __str__ itself raises would otherwise escape here and
-            # become the exact silent device hang the panel exists to prevent.
-            self.cart_error = _err_text(exc)
-            self.crash_line = _exc_cart_line(exc)
-            print("Moybyte cart error:", self.cart_error)
-            return False
-        self.cart_error = None
-        self.crash_line = None
-        self.ns = ns
-        self._update = ns.get("_update")
-        self._draw = ns.get("_draw")
-        return True
+        # The cart-run body moved to Player.start (Stage 2, player.py); this stays as
+        # the tested ws. entry point (tools + apply/run_code/_leave_menu/open call it)
+        # -- run() is the caller-recording wrapper around it (see below).
+        return self.player.start(self.project)
 
     # -- open-cart workspace forwards (Stage 1, project.py) -------------------
     #
@@ -1984,6 +1889,112 @@ class Workstation:
     def pmem(self, value):
         self.project.pmem = value
 
+    # -- cart-run forwards (Stage 2, player.py) ------------------------------
+    #
+    # The Player owns the running cart's live state now; these forwarding properties
+    # delegate reads AND writes to it, so every surface file + test that touches
+    # ws.cart_error / ws.crash_line / ws.cart_paused / ws.ns / ws._update / ws._draw /
+    # ws._cart_key_prev is byte-for-byte unchanged (the exact mirror of the Stage-1
+    # project.* forwards above). (_bks_prev + _cart_start_ms have no external reader --
+    # they stay private on the Player, no forward.)
+    @property
+    def cart_error(self):
+        return self.player.cart_error
+
+    @cart_error.setter
+    def cart_error(self, value):
+        self.player.cart_error = value
+
+    @property
+    def crash_line(self):
+        return self.player.crash_line
+
+    @crash_line.setter
+    def crash_line(self, value):
+        self.player.crash_line = value
+
+    @property
+    def cart_paused(self):
+        return self.player.cart_paused
+
+    @cart_paused.setter
+    def cart_paused(self, value):
+        self.player.cart_paused = value
+
+    @property
+    def ns(self):
+        return self.player.ns
+
+    @ns.setter
+    def ns(self, value):
+        self.player.ns = value
+
+    @property
+    def _update(self):
+        return self.player._update
+
+    @_update.setter
+    def _update(self, value):
+        self.player._update = value
+
+    @property
+    def _draw(self):
+        return self.player._draw
+
+    @_draw.setter
+    def _draw(self, value):
+        self.player._draw = value
+
+    @property
+    def _cart_key_prev(self):
+        return self.player._cart_key_prev
+
+    @_cart_key_prev.setter
+    def _cart_key_prev(self, value):
+        self.player._cart_key_prev = value
+
+    # -- run / exit (Stage 2: the run/return stack discipline) ----------------
+
+    def run(self, project, caller):
+        """Show `project`'s running cart on the desktop, recording `caller` so QUIT
+        knows where to return (spec Section 2's run/return -- a stack discipline, not a
+        blocking call, since the frame loop can't block). The cart itself is started by
+        the explicit _start() at each call site (open/apply/run_code/_leave_menu); run()
+        makes the desktop layer active + records the caller. Today the only caller is
+        the home root (go_home's target), so pop-to-caller == go_home -- behavior is
+        unchanged. Stage 3 makes the Editor a second caller, proving the decoupling."""
+        self._run_caller = caller
+        self.screen = "desktop"
+
+    def _exit_to_caller(self):
+        """Pop the running cart back to whoever launched it (run()'s recorded caller).
+        Stage 2: the only caller is the home root, so this is go_home(); Stage 3 makes
+        the Editor a second caller (PLAY -> exit returns to the editing tab)."""
+        self.go_home()
+
+    def _draw_cart_bar(self):
+        """Draw the unified top bar over the pause/crash frame (the cart-path chrome).
+        The bar is the shell's, not the Player's, so its draw + the _pf_bar (CHROMEBRK)
+        accounting stay here; the Player asks for it via this thin helper so player.py
+        never reaches the bar surface directly (the Stage-2 isolation guarantee)."""
+        _perf = self.perf_hud or self.perf_capture
+        _tb = _ticks_ms() if _perf else 0
+        self.bar_layer._draw_status_strip("desktop")   # unified top bar (tool switcher)
+        if _perf:
+            self._pf_bar = _ticks_diff(_ticks_ms(), _tb)   # CHROMEBRK: the bar's share
+
+    def _cart_bar_tap(self, px, py):
+        """Route a pause/crash-frame tap to the top-bar tool switcher (bar-owned),
+        returning True iff a tool icon consumed it. Same isolation reason as
+        _draw_cart_bar: the Player calls this instead of reaching the bar surface."""
+        return self.bar_layer.handle_cart_tap(px, py)
+
+    def _draw_error_panel(self):
+        # The on-canvas crash report moved to Player (Stage 2); this stays as the tested
+        # ws. entry point the cards surface reuses for its own malformed-card panel
+        # (cards_layer sets ws.cart_error then calls ws._draw_error_panel()).
+        self.player._draw_error_panel()
+
     def open(self):
         self.project = Project(self)   # a fresh workspace for the cart being opened
         self.cart = self.launcher.selected()
@@ -2010,7 +2021,7 @@ class Workstation:
         # error panel there and the EDIT/CODE button stays reachable so the kid can
         # fix it (a silent stay-on-launcher would be a dead end on the device).
         self._start()
-        self.screen = "desktop"
+        self.run(self.project, self.launcher_layer)   # activate desktop, record caller
         # Achievements (#21): opening a cart is "First Steps"; opening _PLAY_GOAL
         # distinct carts is "Cart Explorer". Key by the cart's path/title so it's
         # the SAME identity the launcher uses (distinct carts, not repeat opens).
@@ -2198,7 +2209,7 @@ class Workstation:
             # saved version -- the kid SAVEs to keep changes, exactly like code.)
             if self.cart is not None:
                 self._start()
-        self.screen = "desktop"
+        self.run(self.project, self.launcher_layer)   # activate desktop, record caller
 
     def save_code(self):
         """Persist the edited source. Returns True iff it was written. A source
@@ -2263,11 +2274,11 @@ class Workstation:
         if self._start():
             self.ach.note("run")                # "Lift Off!": a cart was RUN (#21)
             self._set_text_mode(False)
-            self.screen = "desktop"
+            self.run(self.project, self.launcher_layer)
         else:
             # Compiled but raised at exec/_init: show the error panel on the desktop
             # (still reachable -> the kid can reopen the editor to fix it).
-            self.screen = "desktop"
+            self.run(self.project, self.launcher_layer)
 
     def save_sprites(self):
         # Store-write moved to Project.commit_sprites (Stage 1b); this stays as the
@@ -2391,7 +2402,7 @@ class Workstation:
         # Re-run with the new config. Always return to the desktop: on success it
         # runs, on failure frame() paints the error panel there (still reachable).
         ok = self._start()
-        self.screen = "desktop"
+        self.run(self.project, self.launcher_layer)
         if ok:
             self.ach.note("run")                # "Lift Off!": GO re-ran the cart (#21)
             self._save_config()
@@ -2511,51 +2522,9 @@ class Workstation:
             if layer.handle_input(i):
                 return
 
-    # -- per-surface keyboard handlers (routed from handle_input) -------------
-
-    def _desktop_input(self, i):
-        # THE ONE CONSOLE KEY (#71): BACKSPACE/HOME does exactly ONE thing
-        # in every input mode, every cart type, paused or not: TOGGLE the
-        # pause screen. No special case -- it never means "exit" (that's a
-        # separate, explicit, ALWAYS-TAPPABLE action: the CONTINUE/QUIT
-        # buttons drawn on the pause screen itself, see _draw_pause_buttons
-        # + handle_pointer). Raw-matrix and typed-ASCII carts deliver it as
-        # the "home" button (input backends map it); a TEXT-MODE cart
-        # suppresses ALL button aliases (so a typed letter is never
-        # mistaken for a shortcut), so here we edge-detect last_key
-        # ourselves to catch backspace specifically -- but the RESULT is
-        # identical either way: flip cart_paused.
-        #
-        # An earlier version tried to make the SAME key also distinguish
-        # "exit" from "resume" (a second press from pause = quit), and
-        # separately tried treating typed Z/space/Enter/R as "resume" --
-        # both were special cases that fell over in practice: Z and R are
-        # live GAMEPLAY LETTERS in a typing game, and a keyboard-only
-        # "press again to quit" is a different rule per cart type. One
-        # button, one job, plus explicit on-screen buttons for the
-        # deliberate action (quitting) is simpler and cannot be confused.
-        _bks = False
-        if getattr(self.input, "text_mode", False) and self.cart is not None:
-            k = self.input.last_key
-            _bks = (k == 0x08 and k != self._bks_prev
-                    and (self.cart_paused or self.cart.get("type") == "game"))
-            self._bks_prev = k
-        else:
-            self._bks_prev = 0
-        if i.pressed("home") or i.pressed("stop") or _bks:
-            self.cart_paused = not self.cart_paused
-            self._dirty = True
-        elif self.cart_paused:
-            if i.pressed("a") or i.pressed("run"):
-                self.cart_paused = False   # CONTINUE accelerator (button only)
-                self._dirty = True
-            elif i.pressed("b"):
-                self._open_menu()
-        # NOTE: no unpaused B handler -- while a cart PLAYS every button
-        # belongs to the game (Star Catcher moves with B; the old
-        # B->editor shortcut hijacked it). The editor is reachable from
-        # the pause menu (B / bar icons) exactly like the other tools.
-        return True
+    # (The desktop/running-cart keyboard handler -- the #71 BACKSPACE-toggles-pause
+    # logic -- moved to Player.handle_input (Stage 2, player.py); the "desktop"
+    # content layer routes to it via _PlayerLayer.)
 
     # -- pointer (trackball-as-mouse) ----------------------------------------
 
@@ -2576,46 +2545,10 @@ class Workstation:
             if layer.handle_pointer(px, py, click):
                 return
 
-    # -- per-surface pointer handlers (routed from handle_pointer) ------------
-
-    def _desktop_pointer(self, px, py, click):
-        # A running cart + the editors live in the 320x240 GAME viewport, so translate
-        # the panel pointer into game coords (#39; identity in the degradation case).
-        gx, gy = self._game_xy(px, py)
-        px, py = gx, gy
-        # While a cart PLAYS the bar is hidden (#71) -- the game owns the full
-        # 320x240 and every tap belongs to the cart. The unified TOP BAR (HOME,
-        # EDIT/CODE, PAINT, MAP, BLOCKS icons -- the TIC-80 one-tap tool
-        # switcher) hit-tests only in the PAUSE menu (BACKSPACE, or the web
-        # page's menu button) and on the crash panel, where it is drawn.
-        chrome = self.cart_paused or self.cart_error is not None
-        if click and chrome:
-            # The top-bar tool switcher (≡ / HOME / EDIT|CODE / PAINT / MAP / BLOCKS /
-            # MUSIC) is owned by the bar surface now (#46 BarLayer); it consumes the tap
-            # iff a tool icon was hit, otherwise the pause QUIT/CONTINUE handling runs.
-            if self.bar_layer.handle_cart_tap(px, py):
-                pass
-            elif self.cart_paused and _in(px, py, _PAUSE_QUIT_BTN):
-                # The pause screen's explicit QUIT button (#71): the ONE
-                # deliberate way to exit, identical for every cart type --
-                # never inferred from a keyboard key, so it's never
-                # ambiguous with a typing game's own letters.
-                self.go_home()
-            elif self.cart_paused:
-                # CONTINUE: the QUIT button's rect is excluded above, so a
-                # tap ANYWHERE else (including the CONTINUE button itself)
-                # resumes play -- and must NOT leak into the cart as a
-                # game tap on the same frame.
-                self.cart_paused = False
-                self._dirty = True
-                self.input.game_pointer = (gx, gy, False, False)
-        elif click:
-            if self.show_fps and _in(px, py, self.perf_ui._fps_tap_rect()):
-                # Tapping the FPS readout toggles the frame-time breakdown HUD
-                # (#43/#44 perf). Deliberate, no keyboard, doesn't fight game
-                # input -- the touch lands on a small bottom-right corner box.
-                self.perf_hud = not self.perf_hud
-        return True
+    # (The desktop/running-cart pointer handler -- the pause QUIT/CONTINUE + FPS-chip
+    # tap + top-bar tool-switcher routing -- moved to Player.handle_pointer (Stage 2,
+    # player.py); the "desktop" content layer routes to it via _PlayerLayer. The bar
+    # draw/tap it needs stay on the shell, reached via _draw_cart_bar / _cart_bar_tap.)
 
     def nav(self, dx, dy):
         # Directional input (host arrows / device trackball). In the code editor it
@@ -2816,82 +2749,12 @@ class Workstation:
         return False
 
     # -- content-layer draw bodies (routed from the frame() stack loop) -------
-
-    def _draw_content_desktop(self, dt):
-        """The running-cart content layer (game domain): tick the cart _update/_draw +
-        mixer (the game loop), then the pause/crash chrome + FPS chip. Fills the
-        per-frame perf split (self._pf_*) the router's DRAWBRK/CHROMEBRK accounting
-        reads. Drawn on the fixed 320x240 GAME canvas, composited by the router."""
-        _perf = self.perf_hud or self.perf_capture
-        if self.cart_paused and self.cart_error is None:
-            # Paused (#71): the cart is frozen -- no _update, no _draw; the
-            # canvas retains its last frame as the backdrop. Keep the mixer
-            # fed so a mid-flight note decays instead of sticking.
-            if self.audio is not None:
-                self.audio.tick(dt)
-        elif self.cart_error is None:
-            # Resolve this frame's keyboard edge for the cart's key()/keyp():
-            # last_key is the byte held this frame (0 when nothing is down);
-            # keyp fires only on the 0->key transition. Done here (not in
-            # InputState) so it's independent of whether the backend sets
-            # last_key before or after begin_frame().
-            k = self.input.last_key
-            self.input.cart_key = k
-            self.input.cart_keyp = k if (k and k != self._cart_key_prev) else 0
-            self._cart_key_prev = k
-            try:
-                _ts = _ticks_ms() if _perf else 0
-                if self._update:
-                    self._update(dt)
-                _tm = _ticks_ms() if _perf else 0
-                if self._draw:
-                    self._draw()
-                _td = _ticks_ms() if _perf else 0
-                if self.audio is not None:
-                    self.audio.tick(dt)      # advance/feed playback (#16)
-                if _perf:
-                    self._pf_upd = _ticks_diff(_tm, _ts)    # cart _update -> game LOGIC
-                    self._pf_cart = _ticks_diff(_td, _tm)   # cart _draw -> RENDERING
-                    self._pf_audio = _ticks_diff(_ticks_ms(), _td)  # audio.tick (mixer feed)
-            except Exception as exc:  # noqa: BLE001
-                # A cart that raises mid-frame must NOT escape the loop (the
-                # device would hang silently). Capture it, stop running the
-                # broken cart, and fall through to paint the error panel; the
-                # desktop buttons stay so the kid can EDIT/CODE the fix.
-                self.cart_error = _err_text(exc)
-                self.crash_line = _exc_cart_line(exc)   # mark the line on EDIT (#24)
-                self._update = None
-                self._draw = None
-                # Print the _err_text-guarded string, never the raw `exc`: a
-                # cart exception whose __str__ itself raises would otherwise
-                # escape frame() here -> the silent device hang the panel
-                # exists to prevent.
-                print("Moybyte frame error:", self.cart_error)
-        # Cart text input (#38/#42): apply the keyboard mode the cart's _update may
-        # have just requested via textmode(), so the NEXT keyboard poll yields the
-        # right bytes (clean ASCII for typing, raw/game for hold-to-move). One-frame
-        # latency; no-op on the host. Done every running-cart frame so a mid-cart
-        # toggle (e.g. wifi entering/leaving its password screen) takes effect.
-        self._sync_cart_text_mode()
-        # Clear any cart-set camera/clip/pal/palt (#11) before the console paints
-        # its own UI overlays, so they're never offset/clipped/recoloured.
-        self._reset_canvas_state()
-        if self.cart_error is not None:
-            self._draw_error_panel()
-        # The bar auto-hides while a cart PLAYS (#71): the game owns the full
-        # 320x240. Chrome appears only in the pause menu (BACKSPACE, or the
-        # web page's menu button) -- and on a crash, so EDIT/CODE stay reachable.
-        if self.cart_paused or self.cart_error is not None:
-            if self.cart_paused:
-                self._draw_pause_dim()          # scanline shade UNDER the chrome
-            _tb = _ticks_ms() if _perf else 0
-            self.bar_layer._draw_status_strip("desktop")  # unified top bar (tool switcher)
-            if _perf:
-                self._pf_bar = _ticks_diff(_ticks_ms(), _tb)   # CHROMEBRK: the bar's share
-            if self.cart_paused:
-                self._draw_pause_buttons()
-        # (The FPS chip + perf HUD is the game-domain _PerfLayer, drawn right after
-        # this content -- still on the GAME canvas, before the composite.)
+    #
+    # (The running-cart content body -- the cart tick + pause/crash chrome -- moved to
+    # Player.tick (Stage 2, player.py). It still fills the DRAWBRK perf split ws._pf_*
+    # exactly as before, and asks the shell for the top bar via _draw_cart_bar (which
+    # keeps the _pf_bar CHROMEBRK accounting here). The "desktop" content layer routes
+    # to it via _PlayerLayer.)
 
     def _draw_menu_backdrop(self):
         # Draw the frozen cart frame as the backdrop under an editor panel (cards /
@@ -3084,30 +2947,8 @@ class Workstation:
 
     # -- desktop shell drawing (#28) -----------------------------------------
 
-    def _draw_pause_dim(self):
-        """Darken the frozen cart frame. The canvas is indexed (no alpha), so the
-        shade is 50% scanlines -- every other row black, the classic CRT-era pause
-        look. Idempotent across repaints (black rows stay black), so no entry-once
-        latch; the bar and the pill draw AFTER it and stay full-bright."""
-        cv = self.canvas
-        for y in range(0, cv.h, 2):
-            cv.rect(0, y, cv.w, 1, NAMES["black"])
-
-    def _draw_pause_buttons(self):
-        """The pause screen's two EXPLICIT actions (#71), over the dimmed frame:
-        CONTINUE (resume; also any tap outside QUIT, or A/RUN) and QUIT (go
-        home; ONLY this button does that -- never inferred from a keyboard key,
-        so a typing game's own letters can never be mistaken for it)."""
-        cv = self.canvas
-        title = "PAUSED"
-        cv.print(title, (cv.w - len(title) * 8) // 2, _PAUSE_BTN_Y - 14,
-                  NAMES["white"], 1)
-        for rect, label in ((_PAUSE_CONTINUE_BTN, "CONTINUE"), (_PAUSE_QUIT_BTN, "QUIT")):
-            x, y, w, h = rect
-            cv.rect(x, y, w, h, NAMES["black"])
-            cv.rectb(x, y, w, h, NAMES["light_grey"])
-            cv.print(label, x + (w - len(label) * 8) // 2, y + (h - 8) // 2,
-                      NAMES["white"], 1)
+    # (_draw_pause_dim + _draw_pause_buttons -- the #71 pause chrome -- moved to
+    # Player (Stage 2, player.py) with the rest of the pause machinery.)
 
     def _mini_btn(self, label, rect, fill, cv=None):
         # Shared draw toolkit (stays on Workstation per the doc): a tiny labeled button.
@@ -3234,23 +3075,9 @@ class Workstation:
         if label:
             cv.print(label, x + 19 * fs, y + (h - 8 * fs) // 2, NAMES["black"], 1)
 
-    def _draw_error_panel(self):
-        # A friendly on-canvas crash report (the device never reaches serial, so
-        # this is the ONLY error surface). Drawn with the indexed API only: a red
-        # box + a short title + the exception text, word-wrapped and truncated to
-        # fit. The CODE/EDIT button below it stays live so the kid can fix the cart.
-        cv = self.canvas
-        x, y, w, h = 14, 40, 292, 132
-        cv.rect(x, y, w, h, NAMES["dark_purple"])
-        cv.rectb(x, y, w, h, NAMES["red"])
-        cv.rect(x, y, w, 14, NAMES["red"])
-        cv.print("OOPS! THIS CART CRASHED", x + 6, y + 4, NAMES["white"], 1)
-        cols = (w - 16) // 8                       # 8px monospace cells
-        lines = _wrap(self.cart_error or "Unknown error", cols)
-        max_rows = (h - 30) // _CODE_LH
-        for i in range(min(len(lines), max_rows)):
-            cv.print(lines[i], x + 8, y + 20 + i * _CODE_LH, NAMES["peach"], 1)
-        cv.print("TAP CODE TO FIX IT", x + 8, y + h - 12, NAMES["yellow"], 1)
+    # (_draw_error_panel -- the on-canvas crash report -- moved to Player (Stage 2,
+    # player.py): crash chrome is the Player's own UX, per spec Section 2's "guarantees
+    # the cart will exit".)
 
     def _draw_cursor(self):
         # The pointer lives in SYSTEM-canvas space (it ranges over the panel size),

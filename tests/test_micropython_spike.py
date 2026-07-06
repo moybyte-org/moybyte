@@ -395,6 +395,7 @@ def test_micropython_cart_textmode_flips_keyboard_ascii_raw():
     # otherwise (so games keep hold-to-move). Firmware tests grep the frozen source.
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    player = (Path("runtime") / "player.py").read_text(encoding="utf-8")
     kb = (ROOT / "modules" / "moybyte" / "input.py").read_text(encoding="utf-8")
 
     # The device make_api exposes `textmode`, setting input.text_mode (host parity).
@@ -404,8 +405,10 @@ def test_micropython_cart_textmode_flips_keyboard_ascii_raw():
 
     # The shared console derives the keyboard mode from the cart's request each
     # running-cart frame and reverts on exit -- via the existing set_game_mode path.
+    # _sync_cart_text_mode still lives on Workstation (console.py); the per-frame CALL
+    # moved into Player.tick (Stage 2, player.py), so grep the call site there.
     assert "def _sync_cart_text_mode(self):" in console
-    assert "self._sync_cart_text_mode()" in console
+    assert "ws._sync_cart_text_mode()" in player
     assert 'getattr(self.input, "text_mode", False)' in console
     assert "kb.set_game_mode(not want_text)" in console
     # _set_text_mode is the single source of truth: it sets text_mode for the code
@@ -2324,6 +2327,7 @@ def test_device_audio_wired():
     audio = (Path("runtime") / "audio.py").read_text(encoding="utf-8")
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    player = (Path("runtime") / "player.py").read_text(encoding="utf-8")
     project = (Path("runtime") / "project.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
@@ -2343,7 +2347,9 @@ def test_device_audio_wired():
     assert "from audio import" in project
     assert "AudioBank" in project and "AudioEngine" in project
     assert "def _build_audio(self):" in project
-    assert "self.audio.tick(dt)" in console
+    # The cart tick's mixer feed moved to Player.tick (Stage 2, player.py) as
+    # ws.audio.tick(dt); it still runs every running-cart frame.
+    assert "ws.audio.tick(dt)" in player
     # The device make_api binds the same six audio names as the host.
     for name in ('"sfx": _sfx', '"beep": _beep', '"music": _music',
                  '"music_stop": _music_stop', '"sound_stop": _sound_stop',
@@ -2376,6 +2382,7 @@ def test_music_editor_wired_into_device_shell():
     # greps prove it's on both ends (host == device).
     editors = EDITORS_SRC.read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    layers = (Path("runtime") / "layers.py").read_text(encoding="utf-8")
     music_ui = (Path("runtime") / "music_editor_ui.py").read_text(encoding="utf-8")
     bar_layer = (Path("runtime") / "bar_layer.py").read_text(encoding="utf-8")
     project = (Path("runtime") / "project.py").read_text(encoding="utf-8")
@@ -2414,9 +2421,11 @@ def test_music_editor_wired_into_device_shell():
     assert "ws.carts_store.save_sounds(self.cart, bank_dict)" in project
     assert "def save_sounds(cart, bank_dict):" in carts
     # Live preview drives the SAME injected AudioEngine the cart uses, and the frame
-    # loop ticks the mixer + keeps animating while a preview is up.
+    # loop ticks the mixer + keeps animating while a preview is up. The music-editor's
+    # own mixer feed is _MusicLayer.draw (layers.py); the running-cart mixer feed moved
+    # to Player.tick (Stage 2). Grep the music preview's feed in layers.py.
     assert "def _play_music_preview(self):" in music_ui
-    assert "self.audio.tick(dt)" in console
+    assert "ws.audio.tick(dt)" in layers
     # The editor lives in the shared files build.sh freezes onto the device.
     assert 'cp "${REPO_ROOT}/runtime/editors.py" "${SCRIPT_DIR}/modules/editors.py"' in build
     assert 'cp "${REPO_ROOT}/runtime/console.py" "${SCRIPT_DIR}/modules/console.py"' in build
@@ -2580,6 +2589,7 @@ def test_device_wifi_wired():
     # mirror how the other firmware tests grep the frozen device modules.
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    player = (Path("runtime") / "player.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
     # The DeviceWifi backend + make_wifi/autoconnect_wifi now live in device_wifi.py
     # (extracted from moy_runtime.py); run_desktop still calls them (asserts below).
@@ -2609,8 +2619,10 @@ def test_device_wifi_wired():
     # Each frame is guarded so one bad flush can't brick the device.
     assert "Moybyte frame error:" in runtime
     # The shared console gates injection on the "network" manifest permission.
+    # _cart_has_perm stays on Workstation (console.py); the gating call moved into
+    # Player.start (Stage 2, player.py), which reaches it via ws._cart_has_perm.
     assert "def _cart_has_perm(self, name):" in console
-    assert 'self.wifi if self._cart_has_perm("network") else None' in console
+    assert 'ws.wifi if ws._cart_has_perm("network") else None' in player
     # The shared cart store carries permissions + persists known networks.
     assert '"permissions": man.get("permissions", []),' in carts
     assert "def load_wifi(root=CARTS_DIR):" in carts
@@ -2804,7 +2816,7 @@ def test_no_undefined_names_in_extracted_modules():
     targets = sorted((ROOT / "modules").glob("device_*.py"))
     targets.append(ROOT / "modules" / "moy_runtime.py")
     targets += [Path("runtime") / n for n in (
-        "console.py", "project.py", "perf_hud.py", "update_ui.py", "system_menu_ui.py",
+        "console.py", "project.py", "player.py", "perf_hud.py", "update_ui.py", "system_menu_ui.py",
         "achievements_ui.py", "layers.py", "bar_layer.py", "cards_layer.py", "paint_layer.py", "settings_layer.py", "code_layer.py", "widgets.py", "wallpaper.py", "launcher_layer.py",
         "block_editor_ui.py", "map_editor_ui.py", "music_editor_ui.py")]
 
@@ -2817,3 +2829,20 @@ def test_no_undefined_names_in_extracted_modules():
                 bad.append("%s:%d %s" % (path.name, m.lineno,
                                          m.message % m.message_args))
     assert not bad, "undefined names (would NameError at runtime): " + "; ".join(bad)
+
+
+def test_player_isolation_no_forbidden_names():
+    """The Player's bundle (Stage 2 of docs/shell_ux_technical_plan_v1.md Section 2):
+    it receives the Project + the RAW canvas/input/audio/make_api, and NOTHING else --
+    not the cart store, the shell top bar, the home grid, or the layouts. That
+    isolation is what makes the run/return cut real: a cart runs identically whether
+    launched from the home grid or (Stage 3) the editor, because the Player can't reach
+    either. Enforce it structurally -- player.py must never NAME any of those surfaces
+    (the bar draw/tap it needs in the pause frame goes through thin ws helpers). A stray
+    reach-through would compile+pass every behavior test yet quietly re-couple the run
+    loop to the shell, so this source grep is the guard the reviewer + the plan rely on."""
+    player = (Path("runtime") / "player.py").read_text(encoding="utf-8")
+    for forbidden in ("menu_view", "launcher", "bar_layer", "carts_store"):
+        assert forbidden not in player, (
+            "player.py names '%s' -- the Player must not reach the store/bar/home grid/"
+            "layouts (Stage 2 isolation, plan Section 2)" % forbidden)
