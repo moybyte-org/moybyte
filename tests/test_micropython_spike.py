@@ -1997,14 +1997,17 @@ def test_code_editor_wired_into_device_shell():
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     project = (Path("runtime") / "project.py").read_text(encoding="utf-8")
+    editor_app = (Path("runtime") / "editor_app.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
 
     # The console + editor cores are shared with the host (imported, not redefined).
     assert "from editors import CodeEditor, PaintEditor, SpriteSheet" in runtime
     assert "from console import NAMES, Pointer, Workstation" in runtime
     # The editor edits the real source and saves it through the (injected) store.
-    # (#39 step 2 the constructor also takes the responsive cols/rows window.)
-    assert "self.editor = CodeEditor(self.cart[\"src\"]," in console
+    # (#39 step 2 the constructor also takes the responsive cols/rows window.) The tab
+    # builder that constructs the CodeEditor moved to EditorApp.set_tab (Stage 3,
+    # editor_app.py); ws.save_code (the compile-check/UI half) stays on the console.
+    assert 'ws.editor = CodeEditor(ws.cart["src"],' in editor_app
     assert "def save_code(self):" in console
     # The store-write half moved to Project.commit_code (Stage 1b, project.py -- also
     # staged onto the device); ws.save_code keeps the compile-check/UI half + delegates.
@@ -2382,6 +2385,7 @@ def test_music_editor_wired_into_device_shell():
     # greps prove it's on both ends (host == device).
     editors = EDITORS_SRC.read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    editor_app = (Path("runtime") / "editor_app.py").read_text(encoding="utf-8")
     layers = (Path("runtime") / "layers.py").read_text(encoding="utf-8")
     music_ui = (Path("runtime") / "music_editor_ui.py").read_text(encoding="utf-8")
     bar_layer = (Path("runtime") / "bar_layer.py").read_text(encoding="utf-8")
@@ -2402,11 +2406,13 @@ def test_music_editor_wired_into_device_shell():
     # the audio factories it injects.
     assert "MusicEditor" in music_ui
     assert "from audio import" in music_ui and "MusicTrack" in music_ui and "SFX" in music_ui
-    # A new menu sub-view + its open/build path, mirroring map/blocks.
+    # A new menu sub-view + its open/build path, mirroring map/blocks. The tab open +
+    # build path moved to EditorApp (Stage 3, editor_app.py); ws._open_music stays as
+    # the tested forward. The music-preview frame dispatch stayed on the console (ws).
     assert 'self.musicedit = MusicEditor(bank' in music_ui
     assert "def _open_music(self):" in console
-    assert 'elif view == "music":' in console
-    assert 'if self.menu_view == "music":' in console     # input + frame dispatch
+    assert 'elif view == "music":' in editor_app
+    assert 'self.menu_view == "music"' in console         # music-preview frame dispatch
     # The top-bar mode switcher (the 6th icon) + its tap action + drawn icon -- the bar
     # surface + its geometry live in bar_layer.py now (#46 file split).
     assert "_MUSIC_BTN = (" in bar_layer
@@ -2816,7 +2822,7 @@ def test_no_undefined_names_in_extracted_modules():
     targets = sorted((ROOT / "modules").glob("device_*.py"))
     targets.append(ROOT / "modules" / "moy_runtime.py")
     targets += [Path("runtime") / n for n in (
-        "console.py", "project.py", "player.py", "perf_hud.py", "update_ui.py", "system_menu_ui.py",
+        "console.py", "project.py", "player.py", "editor_app.py", "perf_hud.py", "update_ui.py", "system_menu_ui.py",
         "achievements_ui.py", "layers.py", "bar_layer.py", "cards_layer.py", "paint_layer.py", "settings_layer.py", "code_layer.py", "widgets.py", "wallpaper.py", "launcher_layer.py",
         "block_editor_ui.py", "map_editor_ui.py", "music_editor_ui.py")]
 
