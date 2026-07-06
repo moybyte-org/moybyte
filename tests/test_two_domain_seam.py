@@ -119,7 +119,7 @@ def test_dock_and_strip_scale_with_the_canvas(tmp_path):
     ws = _ws(tmp_path, sys_size=(640, 480))
     lay = ws.layout
     assert lay.dock_y == 480 - lay.dock_h          # bottom-anchored
-    last = ws._dock_slot_rect(len(__import__("runtime.console", fromlist=["_DOCK_SLOTS"])._DOCK_SLOTS) - 1)
+    last = ws.bar_layer._dock_slot_rect(len(__import__("runtime.console", fromlist=["_DOCK_SLOTS"])._DOCK_SLOTS) - 1)
     assert last[0] + last[2] <= 640                # the last slot fits the width
     assert lay.status_h >= 14                       # strip at least the baseline height
 

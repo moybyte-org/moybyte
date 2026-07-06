@@ -2034,7 +2034,7 @@ def test_unified_top_bar_wired_into_device_shell():
     # the shared bar.
     assert "_STATUS_H = 18" in console
     assert "def _draw_desktop_buttons" not in console
-    assert 'self._draw_status_strip("desktop")' in console
+    assert 'self.bar_layer._draw_status_strip("desktop")' in console
 
     # The 16x16 IconSheet + its slot map + the bar's icon-blit helper.
     assert "class IconSheet(SpriteSheet):" in editors
@@ -2381,8 +2381,8 @@ def test_music_editor_wired_into_device_shell():
     assert 'if self.menu_view == "music":' in console     # input + frame dispatch
     # The top-bar mode switcher (the 6th icon) + its tap action + drawn icon.
     assert "_MUSIC_BTN = (" in console
-    assert "self._open_music()" in console
-    assert 'self._icon("music"' in console
+    assert "ws._open_music()" in console          # the bar tool-switch tap (BarLayer, #46)
+    assert 'ws._icon("music"' in console
     assert '"music": 15' in console                        # IconSheet slot for the icon
     # SAVE persists to sounds.json through the existing shared store (stays on
     # Workstation, like save_map/save_code -- it uses the shared save_status field).
