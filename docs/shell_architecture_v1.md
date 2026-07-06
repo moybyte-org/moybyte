@@ -1,5 +1,7 @@
 # Moybyte shell architecture — privileged system carts + a layered compositor
 
+**North star above this doc:** `docs/shell_ux_v1.md` — the LOCKED top-of-stack UX spec (the "what the user experiences"); this doc is one layer of the "how" beneath it.
+
 **Issues:** #55 (make the system itself a cart — the privilege half), a new companion
 issue (the compositor/window-manager half, see "Tracking" below), #58 (ESP32-P4 "One"
 port, whose "Desktop look" section defers exactly this), #54 (the layer/scroll engine,
