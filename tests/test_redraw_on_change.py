@@ -145,7 +145,7 @@ def test_live_wallpaper_keeps_launcher_animating(tmp_path):
         import pytest
         pytest.skip("no live wallpaper cart seeded")
     ws.select_wallpaper(cart_opts[0], persist=False)
-    if ws._wp_update is None:
+    if ws.wallpaper._wp_update is None:
         import pytest
         pytest.skip("seeded wallpaper has no _update (static)")
     ws.ach.toast = None

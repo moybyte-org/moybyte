@@ -243,6 +243,15 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
         _Blit, Pointer, Achievements, Pmem, _SilentAudio, Popup, ACHIEVEMENTS,
         _PLAY_GOAL, _POPUP_X, _POPUP_Y, _POPUP_W, _POPUP_ROW_H, _POPUP_PAD_X, _POPUP_SEP_H)
 
+# The desktop wallpaper backdrop component (#28, extracted -- see wallpaper.py). The
+# SHARED backdrop the launcher home + Settings both draw (ws.wallpaper.draw). It owns
+# the rendering + the compiled-cart cache; ws.wallpaper_id + the picker/query API stay
+# on Workstation as the single source (select_wallpaper drives the component).
+try:
+    from wallpaper import Wallpaper
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.wallpaper import Wallpaper
+
 # The block vocabulary/compiler (#29). Imported under whichever name it's known by:
 # bare `blocks` on the device (frozen top-level) and on the host once host_app has
 # aliased it, or `runtime.blocks` when a test loads console/moy_runtime directly
@@ -1288,13 +1297,11 @@ class Workstation:
         # home/settings frame -- the Picotron "wallpaper is a cart" model. None until
         # _select_wallpaper picks one; a solid MOY64 fill is the zero-cart fallback.
         self.system = {}              # system settings dict (moy_carts system.json)
-        self.wallpaper_id = None      # chosen wallpaper: cart slug or "fill:<color>"
-        self._wp_ns = None            # wallpaper cart namespace
-        self._wp_update = None        # wallpaper _update(dt) (live wallpapers)
-        self._wp_draw = None          # wallpaper _draw() (the backdrop layer)
-        self._wp_cart = None          # the wallpaper cart dict currently loaded
-        self._wp_live = True          # run the wallpaper's _update too (set False to
-                                      # save cost: _draw-only static backdrop)
+        self.wallpaper_id = None      # chosen wallpaper: cart slug or "fill:<color>" --
+                                      # the single source; select_wallpaper drives it.
+        # The wallpaper RENDERING + compiled-cart cache is its own component (#28); both
+        # the launcher home + Settings draw it via self.wallpaper.draw(dt).
+        self.wallpaper = Wallpaper(self, NAMES)
         self._icon_cache = {}         # cart path -> desktop-icon sprite Image (or None)
         # Unified top bar (Stage 1): the editable 16x16 IconSheet the bar draws its
         # chrome icons from. Injected by build_workstation / run_desktop (loaded from
@@ -1840,35 +1847,13 @@ class Workstation:
         if wp_id not in opts:
             wp_id = opts[0] if opts else self._FILL_WALLPAPERS[0]
         self.wallpaper_id = wp_id
-        self._wp_ns = self._wp_update = self._wp_draw = None
-        self._wp_cart = None
+        self.wallpaper.clear()
         if not (isinstance(wp_id, str) and wp_id.startswith("fill:")):
             cart = self._wp_cart_by_id(wp_id)
             if cart is not None:
-                self._compile_wallpaper(cart)
+                self.wallpaper.compile(cart)   # compile into the backdrop component (#28)
         if persist:
             self._persist_wallpaper()
-
-    def _compile_wallpaper(self, cart):
-        """Compile a wallpaper cart into its own namespace + grab its _update/_draw,
-        running its _init. Guarded: any failure leaves the backdrop on the solid
-        fill (a broken wallpaper must never take down the desktop)."""
-        try:
-            sheet = self._build_sheet(cart)
-            tilemap = self._build_tilemap(cart)
-            ns = self.make_api(self.canvas, self.input, dict(cart.get("cfg", {})),
-                               sheet, _SilentAudio(AudioEngine(AudioBank.default())),
-                               tilemap, Pmem(), None, cart.get("images") or {})
-            exec(compile(cart["src"], "<wallpaper>", "exec"), ns)
-            if ns.get("_init"):
-                ns["_init"]()
-            self._wp_ns = ns
-            self._wp_cart = cart
-            self._wp_update = ns.get("_update")
-            self._wp_draw = ns.get("_draw")
-        except Exception as exc:  # noqa: BLE001
-            print("Moybyte wallpaper error:", _err_text(exc))
-            self._wp_ns = self._wp_update = self._wp_draw = None
 
     def _persist_wallpaper(self):
         self.system["wallpaper"] = self.wallpaper_id
@@ -1891,44 +1876,9 @@ class Workstation:
         self.select_wallpaper(nxt, persist=True)
         self.ach.note("wallpaper_change")       # "Home Decorator": changed the backdrop (#21)
 
-    def _draw_wallpaper(self, dt):
-        """Paint the backdrop: run the wallpaper cart's _update/_draw, or a solid
-        fill. Always fully clears the canvas so the foreground draws over a clean
-        backdrop. Guarded so a misbehaving wallpaper degrades to a fill.
-
-        Status-strip safe area (#46): on the launcher/settings the strip sits along the
-        top, so a wallpaper that draws art/text near y=0 (the shipped ones print their
-        title at y=10) gets sliced by the strip band. Before running the wallpaper we
-        push its drawing DOWN by the strip height (camera) and clip the art to the rows
-        below the strip, so the wallpaper composites into a known safe area beneath the
-        strip and is never cut into. cls() ignores camera/clip (like TIC-80), so the
-        backdrop FILL still covers the whole surface -- only the foreground art shifts,
-        leaving a clean strip band of the wallpaper's own background colour."""
-        if self._wp_draw is not None:
-            try:
-                if self._wp_live and self._wp_update is not None and dt > 0:
-                    self._wp_update(dt)
-                sh = self.layout.status_h
-                safe = sh if self.screen in ("launcher", "settings") else 0
-                if safe:
-                    # camera(0, -sh): a draw at world y lands at screen y + sh (below
-                    # the strip); clip keeps the art inside the safe rows.
-                    self.canvas.camera(0, -safe)
-                    self.canvas.clip(0, safe, self.canvas.w, self.canvas.h - safe)
-                self._wp_draw()
-                # Clear any camera/clip/pal/palt (#11) the wallpaper cart set (and the
-                # safe-area camera/clip above), so the home/settings foreground (icons,
-                # status strip) draws clean at full extent.
-                self._reset_canvas_state()
-                return
-            except Exception as exc:  # noqa: BLE001 -- drop a broken wallpaper to the fill
-                print("Moybyte wallpaper draw error:", _err_text(exc))
-                self._reset_canvas_state()
-                self._wp_ns = self._wp_update = self._wp_draw = None
-        # Solid fill fallback (also the "fill:<color>" built-ins).
-        wp = self.wallpaper_id or "fill:dark_blue"
-        name = wp[5:] if isinstance(wp, str) and wp.startswith("fill:") else "dark_blue"
-        self.canvas.cls(NAMES.get(name, NAMES["dark_blue"]))
+    # (The wallpaper RENDERING -- _draw_wallpaper + _compile_wallpaper + the compiled-cart
+    # cache -- moved to the Wallpaper component (wallpaper.py); self.wallpaper.draw(dt) is
+    # called by the launcher home + Settings, and select_wallpaper drives it.)
 
     def _icon_sheet_for(self, cart):
         """A cached sprite Image for a cart's desktop icon (its sheet tile 0), or
@@ -3054,8 +3004,7 @@ class Workstation:
                 and self.music_ui.music_preview is not None:
             return True
         # A live wallpaper animates the home/settings backdrop.
-        if self.screen in ("launcher", "settings") and self._wp_live \
-                and self._wp_update is not None and self._wp_draw is not None and dt > 0:
+        if self.screen in ("launcher", "settings") and self.wallpaper.is_animating(dt):
             return True
         # A firmware install (#53) advances a chunk per frame; "done" runs a short
         # reboot countdown; "checking"/"downloading" (Phase 3) step the online flow.
@@ -3364,7 +3313,7 @@ class Workstation:
         It returns the moment a cart is open (the in-cart top-bar buttons / Settings'
         dock). Settings stays reachable via the gear button in the status strip; the
         cart grid reclaims the freed bottom band (Layout.grid_bottom)."""
-        self._draw_wallpaper(dt)
+        self.wallpaper.draw(dt)
         cv = self.sys_canvas
         lay = self.layout
         self.launcher.draw(cv, self._icon_sheet_for)

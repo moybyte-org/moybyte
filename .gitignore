@@ -29,6 +29,7 @@ firmware/lilygo_t_deck_plus_micropython/modules/paint_layer.py
 firmware/lilygo_t_deck_plus_micropython/modules/settings_layer.py
 firmware/lilygo_t_deck_plus_micropython/modules/code_layer.py
 firmware/lilygo_t_deck_plus_micropython/modules/widgets.py
+firmware/lilygo_t_deck_plus_micropython/modules/wallpaper.py
 firmware/lilygo_t_deck_plus_micropython/modules/audio.py
 firmware/lilygo_t_deck_plus_micropython/modules/console.py
 firmware/lilygo_t_deck_plus_micropython/modules/moy_carts.py
