@@ -1613,6 +1613,75 @@ class Popup:
 _SPLASH_MS = 1500
 
 
+class Layer:
+    """One composited surface of the console (docs/shell_layers_refactor_v1.md): it
+    owns its own pixels, input, state, and constants, and plugs into Workstation's
+    z-ordered layer stack. `Workstation` is the compositor/router over the stack; a
+    Layer is a consumer of the shared draw toolkit (`_glyph`/`_icon`/`_btn`/...) and
+    lifecycle verbs (`go_home`/`open`/...) reached through its `self.ws` back-ref.
+
+      id      -- stable router key ("launcher", "cards", "code", "bar", ...).
+      domain  -- "system" (drawn straight on the reflowed sys_canvas) or "game"
+                 (drawn on the fixed 320x240 game canvas, composited into the system
+                 canvas as one viewport, #39). The router owns the single composite.
+
+    handle_input / handle_pointer return a *handled* bool so the router can stop at
+    the top-most layer that claims the event (overlay > content > chrome)."""
+
+    id = "layer"
+    domain = "system"
+
+    def __init__(self, ws):
+        self.ws = ws
+
+    def visible(self):
+        return True
+
+    def draw(self, dt):
+        pass
+
+    def handle_input(self, i):
+        return False
+
+    def handle_pointer(self, px, py, click):
+        return False
+
+    def on_enter(self):
+        pass
+
+    def on_leave(self):
+        pass
+
+
+class _LegacyLayer(Layer):
+    """Phase-0 shim (docs/shell_layers_refactor_v1.md §5): a Layer whose draw / input /
+    pointer just call the EXISTING Workstation `_draw_*` / input methods, so the router
+    can drive the whole shell as a z-ordered stack while every surface's pixels + taps
+    stay byte-identical. Each smeared surface is later promoted to a real Layer
+    (Phase 1/2), replacing its shim in place.
+
+    `draw` is a callable(dt); `kbd` is a callable(i) -> handled bool; `ptr` is a
+    callable(px, py, click) -> handled bool. Any may be None (that facet no-ops)."""
+
+    def __init__(self, ws, id, domain="system", draw=None, kbd=None, ptr=None):
+        self.ws = ws
+        self.id = id
+        self.domain = domain
+        self._draw_fn = draw
+        self._kbd_fn = kbd
+        self._ptr_fn = ptr
+
+    def draw(self, dt):
+        if self._draw_fn is not None:
+            self._draw_fn(dt)
+
+    def handle_input(self, i):
+        return bool(self._kbd_fn(i)) if self._kbd_fn is not None else False
+
+    def handle_pointer(self, px, py, click):
+        return bool(self._ptr_fn(px, py, click)) if self._ptr_fn is not None else False
+
+
 class Workstation:
     def __init__(self, comp, canvas, input, carts=None, sys_canvas=None,
                  font_scale=1):
@@ -1899,6 +1968,120 @@ class Workstation:
         self._dirty = True
         self._last_ptr = None         # (x, y, visible, down, click) last drawn, or None
         self._frames_drawn = 0        # frames that actually drew+flushed (test witness)
+        # Per-frame perf scratch (#43/#66): the running-cart content Layer fills these
+        # during its draw so the router's frame-end DRAWBRK/CHROMEBRK accounting can read
+        # the split without threading it back through the loop. Zeroed each frame().
+        self._pf_upd = 0
+        self._pf_cart = 0
+        self._pf_audio = 0
+        self._pf_bar = 0
+        # The compositor/router layer stack (docs/shell_layers_refactor_v1.md). Built
+        # once here; _visible_stack()/_draw_stack() z-order + gate them per frame.
+        self._build_layers()
+
+    # -- the layer stack (compositor / router) -------------------------------
+
+    def _build_layers(self):
+        """Register the console's surfaces as Layers (Phase 0: `_LegacyLayer` shims
+        over the existing `_draw_*`/input methods, so behavior + draw order are
+        unchanged). `_content_layers` is keyed by screen/menu_view (the active content
+        is a registry lookup, not a 12-arm branch); the overlays + cursor are separate
+        instances gated by `_overlay_stack()`."""
+        L = lambda id, domain, draw=None, kbd=None, ptr=None: _LegacyLayer(
+            self, id, domain, draw=draw, kbd=kbd, ptr=ptr)
+        # Content layers (exactly one active per frame, chosen by screen/menu_view).
+        self._content_layers = {
+            "launcher": L("launcher", "system", draw=self._draw_desktop_home,
+                          kbd=self._launcher_input, ptr=self._launcher_pointer_layer),
+            "settings": L("settings", "system", draw=self._draw_settings,
+                          kbd=self._settings_input, ptr=self._settings_pointer_layer),
+            "update": L("update", "system", draw=self._draw_content_update,
+                        kbd=self._update_input_layer, ptr=self._update_pointer_layer),
+            "desktop": L("desktop", "game", draw=self._draw_content_desktop,
+                         kbd=self._desktop_input, ptr=self._desktop_pointer),
+            "code": L("code", "system", draw=lambda dt: self._draw_code(),
+                      kbd=self._code_input, ptr=self._code_pointer),
+            "blocks": L("blocks", "system", draw=lambda dt: self.block_ui._draw_blocks(),
+                        kbd=self._blocks_input, ptr=self._blocks_pointer_layer),
+            "music": L("music", "game", draw=self._draw_content_music,
+                       kbd=self._music_input_layer, ptr=self._music_pointer),
+            "theme": L("theme", "game", draw=self._draw_content_theme,
+                       kbd=self._theme_input, ptr=self._paint_pointer),
+            "paint": L("paint", "game", draw=self._draw_content_menu,
+                       kbd=self._paint_input, ptr=self._paint_pointer),
+            "map": L("map", "game", draw=self._draw_content_menu,
+                     kbd=self._map_input_layer, ptr=self._map_pointer),
+            "cards": L("cards", "game", draw=self._draw_content_menu,
+                       kbd=self._menu_cards_input, ptr=self._cards_pointer),
+        }
+        # The boot logo is a draw-time takeover of the screen content (input still
+        # routes to the underlying screen), so it's not in _content_layers.
+        self._splash_layer = L("splash", "system", draw=lambda dt: self._draw_splash())
+        # Transient system-domain overlays (gated in _overlay_stack) + the cursor.
+        self._confetti_layer = L("confetti", "system",
+                                 draw=lambda dt: self.ach_ui._draw_confetti())
+        self._ach_layer = L("achievements", "system",
+                            draw=lambda dt: self.ach_ui._draw_achievements())
+        self._egg_layer = L("egg", "system", draw=lambda dt: self.ach_ui._draw_egg())
+        self._toast_layer = L("toast", "system", draw=lambda dt: self._draw_toast())
+        self._sysmenu_layer = L("sysmenu", "system",
+                                draw=lambda dt: self.menu_ui._draw_sysmenu(),
+                                kbd=self._sysmenu_input, ptr=self._sysmenu_pointer)
+        self._about_layer = L("about", "system",
+                              draw=lambda dt: self.menu_ui._draw_about(),
+                              kbd=self._about_input, ptr=self._about_pointer)
+        self._cursor_layer = L("cursor", "system", draw=lambda dt: self._draw_cursor())
+
+    def _content_layer(self):
+        """The active content layer, keyed by screen/menu_view (never the splash --
+        the boot logo is a draw-time takeover, see _draw_stack). This is the layer
+        keyboard input routes to."""
+        if self.screen == "menu":
+            return self._content_layers.get(self.menu_view) or self._content_layers["cards"]
+        return self._content_layers.get(self.screen) or self._content_layers["launcher"]
+
+    @property
+    def _active_content(self):
+        """The active content Layer (spec alias for _content_layer())."""
+        return self._content_layer()
+
+    def _overlay_stack(self):
+        """The transient system-domain overlays drawn on top of the content, in draw
+        order (bottom -> top), plus the always-on cursor. This is the single place the
+        overlay visibility + z-order rules live (mirrors the pre-refactor tail of
+        frame()); the cursor is last so it sits above everything."""
+        out = []
+        au = self.ach_ui
+        if au._confetti_until and _ticks_diff(au._confetti_until, _ticks_ms()) > 0:
+            out.append(self._confetti_layer)
+        if self.show_achievements:
+            out.append(self._ach_layer)
+        if au._egg_active():
+            out.append(self._egg_layer)
+        if self.ach.toast_active():
+            out.append(self._toast_layer)
+        if self.sysmenu.open:
+            out.append(self._sysmenu_layer)
+        if self._about:
+            out.append(self._about_layer)
+        out.append(self._cursor_layer)
+        return out
+
+    def _visible_stack(self):
+        """The full z-ordered layer stack, bottom -> top: the active content layer,
+        the visible overlays, then the cursor. The single source of z-order +
+        visibility -- drawing walks it bottom -> top (with the one game->system
+        composite at the domain boundary), input routing walks it top -> bottom so the
+        overlay that owns the event claims it before the content underneath."""
+        return [self._content_layer()] + self._overlay_stack()
+
+    def _draw_stack(self):
+        """The draw-order stack. Same as _visible_stack() except the boot logo, when
+        armed, takes the content slot (overlays still draw over it; the cursor is
+        suppressed inside _draw_cursor during splash)."""
+        content = self._splash_layer if self._splash_until is not None \
+            else self._content_layer()
+        return [content] + self._overlay_stack()
 
     @property
     def sys_canvas(self):
@@ -3312,6 +3495,11 @@ class Workstation:
             self.go_home()
 
     def handle_input(self):
+        # Router (docs/shell_layers_refactor_v1.md §3): walk the z-ordered layer stack
+        # top -> bottom and hand the frame's keys to the first layer that claims them.
+        # A modal overlay (About / system menu, #52) sits above the content, so it eats
+        # this frame's keys before they can leak to the screen underneath; the active
+        # content layer is at the bottom and always consumes.
         i = self.input
         # Redraw-on-change (#44): a button PRESS edge or a typed key this frame may
         # change visible state (nav, select, screen/menu switch, an edit), so request a
@@ -3323,155 +3511,177 @@ class Workstation:
         # but never stale: a press that's a no-op costs one redraw, not a wrong screen.
         if getattr(i, "_pressed", None) or i.last_key:
             self._dirty = True
-        # System menu / About modal (#52): when either overlay is up it is MODAL --
-        # it eats this frame's keys (one moving cursor) and returns, so nav never
-        # leaks to the screen underneath. ESC (stop) / B dismiss; Up/Down move
-        # (skipping headers); Enter/A/RUN select (close-on-select). Checked before the
-        # per-screen branches so the menu owns input while open; closed = zero change.
-        if self._about:
-            if i.pressed("b") or i.pressed("stop") or i.pressed("a") or i.pressed("run"):
-                self._about = False
-            return
-        if self.sysmenu.open:
-            if i.pressed("b") or i.pressed("stop"):
-                self.sysmenu.close()
-            elif i.pressed("up"):
-                self.sysmenu.move(-1)
-            elif i.pressed("down"):
-                self.sysmenu.move(1)
-            elif i.pressed("a") or i.pressed("run"):
-                self.sysmenu.activate()
-            return
-        if self.screen == "launcher":
-            # Konami Easter egg (#21): watch every button press on the home desktop
-            # for the secret sequence (the nav below still runs normally -- the egg
-            # is a passive observer, so it never blocks the launcher).
-            for _b in self.ach_ui._KONAMI:
-                if i.pressed(_b):
-                    self.ach_ui._konami_step(_b)
-                    break
-            # Grid nav (#28): left/right step a column, up/down a whole row.
-            if i.pressed("left"):
-                self.launcher.nav2d(-1, 0)
-            if i.pressed("right"):
-                self.launcher.nav2d(1, 0)
-            if i.pressed("up"):
-                self.launcher.nav2d(0, -1)
-            if i.pressed("down"):
-                self.launcher.nav2d(0, 1)
+        for layer in reversed(self._visible_stack()):
+            if layer.handle_input(i):
+                return
+
+    # -- per-surface keyboard handlers (routed from handle_input) -------------
+
+    def _launcher_input(self, i):
+        # Konami Easter egg (#21): watch every button press on the home desktop
+        # for the secret sequence (the nav below still runs normally -- the egg
+        # is a passive observer, so it never blocks the launcher).
+        for _b in self.ach_ui._KONAMI:
+            if i.pressed(_b):
+                self.ach_ui._konami_step(_b)
+                break
+        # Grid nav (#28): left/right step a column, up/down a whole row.
+        if i.pressed("left"):
+            self.launcher.nav2d(-1, 0)
+        if i.pressed("right"):
+            self.launcher.nav2d(1, 0)
+        if i.pressed("up"):
+            self.launcher.nav2d(0, -1)
+        if i.pressed("down"):
+            self.launcher.nav2d(0, 1)
+        if i.pressed("a") or i.pressed("run"):
+            self.open()
+        return True
+
+    def _settings_input(self, i):
+        rows = self._settings_rows()
+        if i.pressed("up"):
+            self.set_msel = (self.set_msel - 1) % len(rows)
+        if i.pressed("down"):
+            self.set_msel = (self.set_msel + 1) % len(rows)
+        self._settings_scroll()        # keep the selection in view (#53)
+        if i.pressed("left"):
+            self.settings_adjust(-1)
+        if i.pressed("right"):
+            self.settings_adjust(1)
+        if i.pressed("a") or i.pressed("run"):  # activate an action row (EDIT ICONS / UPDATE FW)
+            row = rows[self.set_msel % len(rows)]
+            if row[2] == "action":
+                self._activate_settings_action(row[0])
+            elif row[2] == "web":               # A/run also toggles the web view (#41)
+                self._toggle_web_view()
+            elif row[2] == "diag":              # ... and the PERF DIAG gate (#68)
+                self.set_diag_live(not self.diag_live)
+        if i.pressed("b"):
+            self._exit_settings()          # back -> resume the cart if opened from one
+        elif i.pressed("home") or i.pressed("stop"):
+            self.go_home()
+        return True
+
+    def _update_input_layer(self, i):
+        self.update_ui._update_input(i)
+        return True
+
+    def _desktop_input(self, i):
+        # THE ONE CONSOLE KEY (#71): BACKSPACE/HOME does exactly ONE thing
+        # in every input mode, every cart type, paused or not: TOGGLE the
+        # pause screen. No special case -- it never means "exit" (that's a
+        # separate, explicit, ALWAYS-TAPPABLE action: the CONTINUE/QUIT
+        # buttons drawn on the pause screen itself, see _draw_pause_buttons
+        # + handle_pointer). Raw-matrix and typed-ASCII carts deliver it as
+        # the "home" button (input backends map it); a TEXT-MODE cart
+        # suppresses ALL button aliases (so a typed letter is never
+        # mistaken for a shortcut), so here we edge-detect last_key
+        # ourselves to catch backspace specifically -- but the RESULT is
+        # identical either way: flip cart_paused.
+        #
+        # An earlier version tried to make the SAME key also distinguish
+        # "exit" from "resume" (a second press from pause = quit), and
+        # separately tried treating typed Z/space/Enter/R as "resume" --
+        # both were special cases that fell over in practice: Z and R are
+        # live GAMEPLAY LETTERS in a typing game, and a keyboard-only
+        # "press again to quit" is a different rule per cart type. One
+        # button, one job, plus explicit on-screen buttons for the
+        # deliberate action (quitting) is simpler and cannot be confused.
+        _bks = False
+        if getattr(self.input, "text_mode", False) and self.cart is not None:
+            k = self.input.last_key
+            _bks = (k == 0x08 and k != self._bks_prev
+                    and (self.cart_paused or self.cart.get("type") == "game"))
+            self._bks_prev = k
+        else:
+            self._bks_prev = 0
+        if i.pressed("home") or i.pressed("stop") or _bks:
+            self.cart_paused = not self.cart_paused
+            self._dirty = True
+        elif self.cart_paused:
             if i.pressed("a") or i.pressed("run"):
-                self.open()
-        elif self.screen == "settings":
-            rows = self._settings_rows()
-            if i.pressed("up"):
-                self.set_msel = (self.set_msel - 1) % len(rows)
-            if i.pressed("down"):
-                self.set_msel = (self.set_msel + 1) % len(rows)
-            self._settings_scroll()        # keep the selection in view (#53)
-            if i.pressed("left"):
-                self.settings_adjust(-1)
-            if i.pressed("right"):
-                self.settings_adjust(1)
-            if i.pressed("a") or i.pressed("run"):  # activate an action row (EDIT ICONS / UPDATE FW)
-                row = rows[self.set_msel % len(rows)]
-                if row[2] == "action":
-                    self._activate_settings_action(row[0])
-                elif row[2] == "web":               # A/run also toggles the web view (#41)
-                    self._toggle_web_view()
-                elif row[2] == "diag":              # ... and the PERF DIAG gate (#68)
-                    self.set_diag_live(not self.diag_live)
-            if i.pressed("b"):
-                self._exit_settings()          # back -> resume the cart if opened from one
-            elif i.pressed("home") or i.pressed("stop"):
-                self.go_home()
-        elif self.screen == "update":
-            self.update_ui._update_input(i)
-        elif self.screen == "desktop":
-            # THE ONE CONSOLE KEY (#71): BACKSPACE/HOME does exactly ONE thing
-            # in every input mode, every cart type, paused or not: TOGGLE the
-            # pause screen. No special case -- it never means "exit" (that's a
-            # separate, explicit, ALWAYS-TAPPABLE action: the CONTINUE/QUIT
-            # buttons drawn on the pause screen itself, see _draw_pause_buttons
-            # + handle_pointer). Raw-matrix and typed-ASCII carts deliver it as
-            # the "home" button (input backends map it); a TEXT-MODE cart
-            # suppresses ALL button aliases (so a typed letter is never
-            # mistaken for a shortcut), so here we edge-detect last_key
-            # ourselves to catch backspace specifically -- but the RESULT is
-            # identical either way: flip cart_paused.
-            #
-            # An earlier version tried to make the SAME key also distinguish
-            # "exit" from "resume" (a second press from pause = quit), and
-            # separately tried treating typed Z/space/Enter/R as "resume" --
-            # both were special cases that fell over in practice: Z and R are
-            # live GAMEPLAY LETTERS in a typing game, and a keyboard-only
-            # "press again to quit" is a different rule per cart type. One
-            # button, one job, plus explicit on-screen buttons for the
-            # deliberate action (quitting) is simpler and cannot be confused.
-            _bks = False
-            if getattr(self.input, "text_mode", False) and self.cart is not None:
-                k = self.input.last_key
-                _bks = (k == 0x08 and k != self._bks_prev
-                        and (self.cart_paused or self.cart.get("type") == "game"))
-                self._bks_prev = k
-            else:
-                self._bks_prev = 0
-            if i.pressed("home") or i.pressed("stop") or _bks:
-                self.cart_paused = not self.cart_paused
+                self.cart_paused = False   # CONTINUE accelerator (button only)
                 self._dirty = True
-            elif self.cart_paused:
-                if i.pressed("a") or i.pressed("run"):
-                    self.cart_paused = False   # CONTINUE accelerator (button only)
-                    self._dirty = True
-                elif i.pressed("b"):
-                    self._open_menu()
-            # NOTE: no unpaused B handler -- while a cart PLAYS every button
-            # belongs to the game (Star Catcher moves with B; the old
-            # B->editor shortcut hijacked it). The editor is reachable from
-            # the pause menu (B / bar icons) exactly like the other tools.
-        elif self.screen == "menu":
-            if self.menu_view == "code":
-                self._editor_input()           # keyboard is in text mode here
-                return
-            if self.menu_view == "blocks":
-                self.block_ui._blocks_input()  # cursor nav + insert menu (#29)
-                return
-            if self.menu_view == "paint":
-                return                         # paint is pointer/touch-driven
-            if self.menu_view == "theme":
-                # EDIT ICONS: pointer/touch-driven like PAINT; B closes back to Settings.
-                self._leave_or_home(self._leave_theme)
-                return
-            if self.menu_view == "map":
-                # The d-pad pans the visible map window (the grid is bigger than the
-                # screen); B leaves (#37). Painting stays pointer/touch-driven.
-                self.map_ui._map_input()
-                return
-            if self.menu_view == "music":
-                # D-pad navigates the tracker (#50): up/down move the step/slot cursor,
-                # left/right change the value under it (pitch / SFX-id), A plays/stops
-                # the preview, B leaves. Tap remains the primary path; this gives the
-                # trackball + keyboard parity with the other editors.
-                self.music_ui._music_input()
-                return
-            ed = self.cart.get("edit")
-            if not ed:
-                return
-            if i.pressed("up"):
-                self.msel = (self.msel - 1) % len(ed)
-                self._reveal_card(self.msel)
-            if i.pressed("down"):
-                self.msel = (self.msel + 1) % len(ed)
-                self._reveal_card(self.msel)
-            if i.pressed("left"):
-                self.adjust(-1)
-            if i.pressed("right"):
-                self.adjust(1)
-            if i.pressed("a"):
-                self.set_menu_view("code")
-            if i.pressed("run"):
-                self.apply()
-            else:
-                self._leave_or_home(self._leave_menu)
+            elif i.pressed("b"):
+                self._open_menu()
+        # NOTE: no unpaused B handler -- while a cart PLAYS every button
+        # belongs to the game (Star Catcher moves with B; the old
+        # B->editor shortcut hijacked it). The editor is reachable from
+        # the pause menu (B / bar icons) exactly like the other tools.
+        return True
+
+    def _code_input(self, i):
+        self._editor_input()           # keyboard is in text mode here
+        return True
+
+    def _blocks_input(self, i):
+        self.block_ui._blocks_input()  # cursor nav + insert menu (#29)
+        return True
+
+    def _paint_input(self, i):
+        return True                    # paint is pointer/touch-driven
+
+    def _theme_input(self, i):
+        # EDIT ICONS: pointer/touch-driven like PAINT; B closes back to Settings.
+        self._leave_or_home(self._leave_theme)
+        return True
+
+    def _map_input_layer(self, i):
+        # The d-pad pans the visible map window (the grid is bigger than the
+        # screen); B leaves (#37). Painting stays pointer/touch-driven.
+        self.map_ui._map_input()
+        return True
+
+    def _music_input_layer(self, i):
+        # D-pad navigates the tracker (#50): up/down move the step/slot cursor,
+        # left/right change the value under it (pitch / SFX-id), A plays/stops
+        # the preview, B leaves. Tap remains the primary path; this gives the
+        # trackball + keyboard parity with the other editors.
+        self.music_ui._music_input()
+        return True
+
+    def _menu_cards_input(self, i):
+        ed = self.cart.get("edit")
+        if not ed:
+            return True
+        if i.pressed("up"):
+            self.msel = (self.msel - 1) % len(ed)
+            self._reveal_card(self.msel)
+        if i.pressed("down"):
+            self.msel = (self.msel + 1) % len(ed)
+            self._reveal_card(self.msel)
+        if i.pressed("left"):
+            self.adjust(-1)
+        if i.pressed("right"):
+            self.adjust(1)
+        if i.pressed("a"):
+            self.set_menu_view("code")
+        if i.pressed("run"):
+            self.apply()
+        else:
+            self._leave_or_home(self._leave_menu)
+        return True
+
+    def _about_input(self, i):
+        # About modal (#52): MODAL -- ESC (stop) / B / A / RUN dismiss; it always
+        # consumes this frame's keys so nav never leaks to the screen underneath.
+        if i.pressed("b") or i.pressed("stop") or i.pressed("a") or i.pressed("run"):
+            self._about = False
+        return True
+
+    def _sysmenu_input(self, i):
+        # System-menu dropdown (#52): MODAL -- ESC (stop) / B dismiss; Up/Down move
+        # (skipping headers); Enter/A/RUN select (close-on-select). Always consumes.
+        if i.pressed("b") or i.pressed("stop"):
+            self.sysmenu.close()
+        elif i.pressed("up"):
+            self.sysmenu.move(-1)
+        elif i.pressed("down"):
+            self.sysmenu.move(1)
+        elif i.pressed("a") or i.pressed("run"):
+            self.sysmenu.activate()
+        return True
 
     # -- pointer (trackball-as-mouse) ----------------------------------------
 
@@ -3651,158 +3861,193 @@ class Workstation:
             return
 
     def handle_pointer(self):
+        # Router (docs/shell_layers_refactor_v1.md §3): publish the game-space pointer
+        # (so a cart's touch()/mouse() reads the 320x240 viewport, not the panel, #39),
+        # then walk the z-ordered stack top -> bottom and let the first layer that
+        # claims the tap handle it. A modal overlay (About / system menu) sits above the
+        # content, so it consumes the tap (and clears the game pointer's tap so a running
+        # cart never also sees a tap the menu swallowed) before it can leak underneath.
         p = self.pointer
         if p is None:
             return
         px, py, click = p.x, p.y, p.click
-        # The desktop chrome (launcher/settings) hit-tests in SYSTEM coords; a running
-        # cart + the editors live in the 320x240 GAME viewport, so translate the
-        # pointer into game coords for those (#39). Also publish the game-space
-        # pointer so the cart touch()/mouse() API reads the viewport, not the panel.
         gx, gy = self._game_xy(px, py)
-        # System menu / About modal (#52): drawn on the SYSTEM canvas at fixed top-left
-        # coords, so they hit-test in SYSTEM (px, py) -- NOT the game viewport. When
-        # either is up it's MODAL and checked FIRST: the tap is consumed here (a row taps
-        # move+select, a tap OUTSIDE dismisses) and never falls through to the screen
-        # underneath. Clear the game pointer's tap too so a running cart's touch() never
-        # also sees a tap the menu just swallowed.
-        if self._about:
-            if click:
-                self._about = False        # any tap dismisses the About modal
-                self._dirty = True
-            self.input.game_pointer = (gx, gy, False, False)
-            return
-        if self.sysmenu.open:
-            if click:
-                self._dirty = True
-                self.sysmenu.click(px, py)   # row -> move+select; outside -> dismiss
-            self.input.game_pointer = (gx, gy, False, False)
-            return                     # swallow non-click moves too while it's open
         self.input.game_pointer = (gx, gy, click, p.down)
-        if self.screen == "launcher":
-            self._launcher_pointer(px, py, click)
-        elif self.screen == "settings":
-            self._settings_pointer(px, py, click)
-        elif self.screen == "update":
-            self.update_ui._update_pointer(px, py, click)
-        elif self.screen == "desktop":
-            px, py = gx, gy
-            # While a cart PLAYS the bar is hidden (#71) -- the game owns the full
-            # 320x240 and every tap belongs to the cart. The unified TOP BAR (HOME,
-            # EDIT/CODE, PAINT, MAP, BLOCKS icons -- the TIC-80 one-tap tool
-            # switcher) hit-tests only in the PAUSE menu (BACKSPACE, or the web
-            # page's menu button) and on the crash panel, where it is drawn.
-            chrome = self.cart_paused or self.cart_error is not None
-            if click and chrome:
-                if _in(px, py, _SYSMENU_BTN):
-                    self.toggle_sysmenu()      # ≡ -> open the dropdown system menu (#52)
-                elif _in(px, py, _HOME_BTN):
-                    self.go_home()
-                elif _in(px, py, _MENU_BTN):
-                    self._open_menu()
-                elif _in(px, py, _PAINT_BTN):
-                    self._open_paint()
-                elif _in(px, py, _MAP_BTN):
-                    self._open_map()
-                elif _in(px, py, _BLOCKS_BTN):
-                    self._open_blocks()
-                elif _in(px, py, _MUSIC_BTN):
-                    self._open_music()
-                elif self.cart_paused and _in(px, py, _PAUSE_QUIT_BTN):
-                    # The pause screen's explicit QUIT button (#71): the ONE
-                    # deliberate way to exit, identical for every cart type --
-                    # never inferred from a keyboard key, so it's never
-                    # ambiguous with a typing game's own letters.
-                    self.go_home()
-                elif self.cart_paused:
-                    # CONTINUE: the QUIT button's rect is excluded above, so a
-                    # tap ANYWHERE else (including the CONTINUE button itself)
-                    # resumes play -- and must NOT leak into the cart as a
-                    # game tap on the same frame.
-                    self.cart_paused = False
-                    self._dirty = True
-                    self.input.game_pointer = (gx, gy, False, False)
-            elif click:
-                if self.show_fps and _in(px, py, self.perf_ui._fps_tap_rect()):
-                    # Tapping the FPS readout toggles the frame-time breakdown HUD
-                    # (#43/#44 perf). Deliberate, no keyboard, doesn't fight game
-                    # input -- the touch lands on a small bottom-right corner box.
-                    self.perf_hud = not self.perf_hud
-        elif self.screen == "menu":
-            # The code + block editors are responsive (#39 step 2): they draw on the
-            # SYSTEM canvas at native size, so they hit-test in SYSTEM coords (the raw
-            # pointer), NOT the 320x240 game viewport. The sprite/paint + map editors
-            # + cards are still a game-canvas viewport (step 3), so those translate.
-            if self.menu_view == "code":
-                lay = self.code_layout
-                self._code_drag(px, py)        # touch/mouse drag pans the viewport
-                if click:
-                    if _in(px, py, lay.run_btn):
-                        self.run_code()
-                    elif _in(px, py, lay.save_btn):
-                        self.save_code()
-                    elif _in(px, py, lay.close_btn):
-                        self._leave_menu()
-                    elif _in(px, py, lay.sym_area) and self.editor is not None:
-                        i = (px - lay.sym_area[0]) // lay.sym_cell  # tap a coding symbol
-                        if 0 <= i < len(_CODE_SYMBOLS):
-                            self.editor.key(ord(_CODE_SYMBOLS[i]))
-                    elif self.editor is not None and _in(px, py, lay.code_area()):
-                        self.editor.place((px - lay.x0) // lay.cell,
-                                          (py - lay.y0) // lay.lh)
+        for layer in reversed(self._visible_stack()):
+            if layer.handle_pointer(px, py, click):
                 return
-            if self.menu_view == "blocks":
-                self.block_ui._blocks_pointer(px, py, click)   # outline + insert menu (#29)
-                return
-            px, py = gx, gy                    # paint/map/cards live in the viewport
-            if self.menu_view in ("paint", "theme"):
-                # A tap (click) routes through _paint_click (grid OR buttons). A
-                # held drag with no fresh click keeps painting the grid stroke so
-                # press-and-move draws a continuous line -- the same path for a host
-                # mouse drag and a device touch drag (both = pointer.down + moving
-                # position). Releasing resets the stroke origin (#30). The theme editor
-                # (EDIT ICONS) reuses this exact path over the icon sheet.
-                if click:
-                    self._paint_click(px, py)
-                elif p.down:
-                    self._paint_stroke(px, py)
-                else:
-                    self._paint_drag = None
-                return
-            if self.menu_view == "map":
-                # Tap = paint one cell, drag = pan (#37). The map grid is bigger
-                # than the on-screen window, so dragging the grid scrolls the view;
-                # only a short press-and-release stamps the brush there. A palette
-                # pick / button press fires on the click edge as usual; a tap on the
-                # MAP VIEW is deferred to release so a drag that turns into a pan
-                # never leaves a stray stamp at its origin.
-                if click:
-                    self.map_ui._map_click(px, py)
-                elif p.down:
-                    self.map_ui._map_pan_drag(px, py)
-                else:
-                    self.map_ui._map_release(px, py)
-                return
-            if self.menu_view == "music":
-                if click:
-                    self.music_ui._music_click(px, py)   # step list + edit pad + actions
-                return
-            ci = self._card_at(px, py)
-            if ci is not None:
-                self.msel = ci                 # hover highlights
-            if click:
-                if _in(px, py, _RUN_BTN):
-                    self.apply()
-                elif _in(px, py, _CODE_BTN):
-                    self.set_menu_view("code")
-                elif _in(px, py, _CLOSE_BTN):
-                    self._leave_menu()
-                elif self._cards_scrollable() and _in(px, py, _CARD_SCROLL_UP):
-                    self.scroll_cards(-1)
-                elif self._cards_scrollable() and _in(px, py, _CARD_SCROLL_DN):
-                    self.scroll_cards(1)
-                elif ci is not None:
-                    self._card_tap(px, py, ci)
+
+    # -- per-surface pointer handlers (routed from handle_pointer) ------------
+
+    def _launcher_pointer_layer(self, px, py, click):
+        self._launcher_pointer(px, py, click)
+        return True
+
+    def _settings_pointer_layer(self, px, py, click):
+        self._settings_pointer(px, py, click)
+        return True
+
+    def _update_pointer_layer(self, px, py, click):
+        self.update_ui._update_pointer(px, py, click)
+        return True
+
+    def _desktop_pointer(self, px, py, click):
+        # A running cart + the editors live in the 320x240 GAME viewport, so translate
+        # the panel pointer into game coords (#39; identity in the degradation case).
+        gx, gy = self._game_xy(px, py)
+        px, py = gx, gy
+        # While a cart PLAYS the bar is hidden (#71) -- the game owns the full
+        # 320x240 and every tap belongs to the cart. The unified TOP BAR (HOME,
+        # EDIT/CODE, PAINT, MAP, BLOCKS icons -- the TIC-80 one-tap tool
+        # switcher) hit-tests only in the PAUSE menu (BACKSPACE, or the web
+        # page's menu button) and on the crash panel, where it is drawn.
+        chrome = self.cart_paused or self.cart_error is not None
+        if click and chrome:
+            if _in(px, py, _SYSMENU_BTN):
+                self.toggle_sysmenu()      # ≡ -> open the dropdown system menu (#52)
+            elif _in(px, py, _HOME_BTN):
+                self.go_home()
+            elif _in(px, py, _MENU_BTN):
+                self._open_menu()
+            elif _in(px, py, _PAINT_BTN):
+                self._open_paint()
+            elif _in(px, py, _MAP_BTN):
+                self._open_map()
+            elif _in(px, py, _BLOCKS_BTN):
+                self._open_blocks()
+            elif _in(px, py, _MUSIC_BTN):
+                self._open_music()
+            elif self.cart_paused and _in(px, py, _PAUSE_QUIT_BTN):
+                # The pause screen's explicit QUIT button (#71): the ONE
+                # deliberate way to exit, identical for every cart type --
+                # never inferred from a keyboard key, so it's never
+                # ambiguous with a typing game's own letters.
+                self.go_home()
+            elif self.cart_paused:
+                # CONTINUE: the QUIT button's rect is excluded above, so a
+                # tap ANYWHERE else (including the CONTINUE button itself)
+                # resumes play -- and must NOT leak into the cart as a
+                # game tap on the same frame.
+                self.cart_paused = False
+                self._dirty = True
+                self.input.game_pointer = (gx, gy, False, False)
+        elif click:
+            if self.show_fps and _in(px, py, self.perf_ui._fps_tap_rect()):
+                # Tapping the FPS readout toggles the frame-time breakdown HUD
+                # (#43/#44 perf). Deliberate, no keyboard, doesn't fight game
+                # input -- the touch lands on a small bottom-right corner box.
+                self.perf_hud = not self.perf_hud
+        return True
+
+    def _code_pointer(self, px, py, click):
+        # The code editor is responsive (#39 step 2): it draws on the SYSTEM canvas at
+        # native size, so it hit-tests in SYSTEM coords (the raw pointer), NOT the
+        # 320x240 game viewport.
+        lay = self.code_layout
+        self._code_drag(px, py)        # touch/mouse drag pans the viewport
+        if click:
+            if _in(px, py, lay.run_btn):
+                self.run_code()
+            elif _in(px, py, lay.save_btn):
+                self.save_code()
+            elif _in(px, py, lay.close_btn):
+                self._leave_menu()
+            elif _in(px, py, lay.sym_area) and self.editor is not None:
+                i = (px - lay.sym_area[0]) // lay.sym_cell  # tap a coding symbol
+                if 0 <= i < len(_CODE_SYMBOLS):
+                    self.editor.key(ord(_CODE_SYMBOLS[i]))
+            elif self.editor is not None and _in(px, py, lay.code_area()):
+                self.editor.place((px - lay.x0) // lay.cell,
+                                  (py - lay.y0) // lay.lh)
+        return True
+
+    def _blocks_pointer_layer(self, px, py, click):
+        self.block_ui._blocks_pointer(px, py, click)   # outline + insert menu (#29)
+        return True
+
+    def _paint_pointer(self, px, py, click):
+        # paint/map/cards live in the 320x240 viewport, so translate to game coords.
+        gx, gy = self._game_xy(px, py)
+        px, py = gx, gy
+        # A tap (click) routes through _paint_click (grid OR buttons). A
+        # held drag with no fresh click keeps painting the grid stroke so
+        # press-and-move draws a continuous line -- the same path for a host
+        # mouse drag and a device touch drag (both = pointer.down + moving
+        # position). Releasing resets the stroke origin (#30). The theme editor
+        # (EDIT ICONS) reuses this exact path over the icon sheet.
+        if click:
+            self._paint_click(px, py)
+        elif self.pointer.down:
+            self._paint_stroke(px, py)
+        else:
+            self._paint_drag = None
+        return True
+
+    def _map_pointer(self, px, py, click):
+        gx, gy = self._game_xy(px, py)
+        px, py = gx, gy
+        # Tap = paint one cell, drag = pan (#37). The map grid is bigger
+        # than the on-screen window, so dragging the grid scrolls the view;
+        # only a short press-and-release stamps the brush there. A palette
+        # pick / button press fires on the click edge as usual; a tap on the
+        # MAP VIEW is deferred to release so a drag that turns into a pan
+        # never leaves a stray stamp at its origin.
+        if click:
+            self.map_ui._map_click(px, py)
+        elif self.pointer.down:
+            self.map_ui._map_pan_drag(px, py)
+        else:
+            self.map_ui._map_release(px, py)
+        return True
+
+    def _music_pointer(self, px, py, click):
+        gx, gy = self._game_xy(px, py)
+        px, py = gx, gy
+        if click:
+            self.music_ui._music_click(px, py)   # step list + edit pad + actions
+        return True
+
+    def _cards_pointer(self, px, py, click):
+        gx, gy = self._game_xy(px, py)
+        px, py = gx, gy
+        ci = self._card_at(px, py)
+        if ci is not None:
+            self.msel = ci                 # hover highlights
+        if click:
+            if _in(px, py, _RUN_BTN):
+                self.apply()
+            elif _in(px, py, _CODE_BTN):
+                self.set_menu_view("code")
+            elif _in(px, py, _CLOSE_BTN):
+                self._leave_menu()
+            elif self._cards_scrollable() and _in(px, py, _CARD_SCROLL_UP):
+                self.scroll_cards(-1)
+            elif self._cards_scrollable() and _in(px, py, _CARD_SCROLL_DN):
+                self.scroll_cards(1)
+            elif ci is not None:
+                self._card_tap(px, py, ci)
+        return True
+
+    def _about_pointer(self, px, py, click):
+        # About modal (#52): drawn on the SYSTEM canvas, hit-tests in SYSTEM coords.
+        # Any tap dismisses it; it always consumes (swallows non-click moves too) and
+        # clears the game pointer's tap so a running cart underneath never sees it.
+        if click:
+            self._about = False
+            self._dirty = True
+        gp = self.input.game_pointer
+        self.input.game_pointer = (gp[0], gp[1], False, False)
+        return True
+
+    def _sysmenu_pointer(self, px, py, click):
+        # System-menu dropdown (#52): a row tap moves+selects, a tap outside dismisses.
+        # Always consumes (swallows non-click moves too) + clears the game pointer's tap.
+        if click:
+            self._dirty = True
+            self.sysmenu.click(px, py)   # row -> move+select; outside -> dismiss
+        gp = self.input.game_pointer
+        self.input.game_pointer = (gp[0], gp[1], False, False)
+        return True
 
     def nav(self, dx, dy):
         # Directional input (host arrows / device trackball). In the code editor it
@@ -4084,6 +4329,138 @@ class Workstation:
             return True
         return False
 
+    # -- content-layer draw bodies (routed from the frame() stack loop) -------
+
+    def _draw_content_desktop(self, dt):
+        """The running-cart content layer (game domain): tick the cart _update/_draw +
+        mixer (the game loop), then the pause/crash chrome + FPS chip. Fills the
+        per-frame perf split (self._pf_*) the router's DRAWBRK/CHROMEBRK accounting
+        reads. Drawn on the fixed 320x240 GAME canvas, composited by the router."""
+        _perf = self.perf_hud or self.perf_capture
+        if self.cart_paused and self.cart_error is None:
+            # Paused (#71): the cart is frozen -- no _update, no _draw; the
+            # canvas retains its last frame as the backdrop. Keep the mixer
+            # fed so a mid-flight note decays instead of sticking.
+            if self.audio is not None:
+                self.audio.tick(dt)
+        elif self.cart_error is None:
+            # Resolve this frame's keyboard edge for the cart's key()/keyp():
+            # last_key is the byte held this frame (0 when nothing is down);
+            # keyp fires only on the 0->key transition. Done here (not in
+            # InputState) so it's independent of whether the backend sets
+            # last_key before or after begin_frame().
+            k = self.input.last_key
+            self.input.cart_key = k
+            self.input.cart_keyp = k if (k and k != self._cart_key_prev) else 0
+            self._cart_key_prev = k
+            try:
+                _ts = _ticks_ms() if _perf else 0
+                if self._update:
+                    self._update(dt)
+                _tm = _ticks_ms() if _perf else 0
+                if self._draw:
+                    self._draw()
+                _td = _ticks_ms() if _perf else 0
+                if self.audio is not None:
+                    self.audio.tick(dt)      # advance/feed playback (#16)
+                if _perf:
+                    self._pf_upd = _ticks_diff(_tm, _ts)    # cart _update -> game LOGIC
+                    self._pf_cart = _ticks_diff(_td, _tm)   # cart _draw -> RENDERING
+                    self._pf_audio = _ticks_diff(_ticks_ms(), _td)  # audio.tick (mixer feed)
+            except Exception as exc:  # noqa: BLE001
+                # A cart that raises mid-frame must NOT escape the loop (the
+                # device would hang silently). Capture it, stop running the
+                # broken cart, and fall through to paint the error panel; the
+                # desktop buttons stay so the kid can EDIT/CODE the fix.
+                self.cart_error = _err_text(exc)
+                self.crash_line = _exc_cart_line(exc)   # mark the line on EDIT (#24)
+                self._update = None
+                self._draw = None
+                # Print the _err_text-guarded string, never the raw `exc`: a
+                # cart exception whose __str__ itself raises would otherwise
+                # escape frame() here -> the silent device hang the panel
+                # exists to prevent.
+                print("Moybyte frame error:", self.cart_error)
+        # Cart text input (#38/#42): apply the keyboard mode the cart's _update may
+        # have just requested via textmode(), so the NEXT keyboard poll yields the
+        # right bytes (clean ASCII for typing, raw/game for hold-to-move). One-frame
+        # latency; no-op on the host. Done every running-cart frame so a mid-cart
+        # toggle (e.g. wifi entering/leaving its password screen) takes effect.
+        self._sync_cart_text_mode()
+        # Clear any cart-set camera/clip/pal/palt (#11) before the console paints
+        # its own UI overlays, so they're never offset/clipped/recoloured.
+        self._reset_canvas_state()
+        if self.cart_error is not None:
+            self._draw_error_panel()
+        # The bar auto-hides while a cart PLAYS (#71): the game owns the full
+        # 320x240. Chrome appears only in the pause menu (BACKSPACE, or the
+        # web page's menu button) -- and on a crash, so EDIT/CODE stay reachable.
+        if self.cart_paused or self.cart_error is not None:
+            if self.cart_paused:
+                self._draw_pause_dim()          # scanline shade UNDER the chrome
+            _tb = _ticks_ms() if _perf else 0
+            self._draw_status_strip("desktop")  # unified top bar (tool switcher)
+            if _perf:
+                self._pf_bar = _ticks_diff(_ticks_ms(), _tb)   # CHROMEBRK: the bar's share
+            if self.cart_paused:
+                self._draw_pause_buttons()
+        # FPS + perf HUD: desktop-only, on the GAME canvas before the composite.
+        if self.show_fps:
+            self.perf_ui._draw_fps()
+            if self.perf_hud:
+                self.perf_ui._draw_perf_hud()      # frame-time breakdown above the FPS chip
+
+    def _draw_content_update(self, dt):
+        self.update_ui._pump_update(dt)          # advance the install / reboot countdown
+        self.update_ui._draw_update(dt)
+
+    def _draw_content_music(self, dt):
+        # Music/sound editor (#50): full-screen tracker over the cart's bank. The
+        # frozen cart isn't drawn (the editor covers it); the live AudioEngine is
+        # ticked here so a PLAY preview keeps sounding, then auto-clears the preview
+        # flag once the (non-looping) effect finishes so PLAY/STOP stays honest.
+        self._reset_canvas_state()
+        if self.audio is not None:
+            self.audio.tick(dt)
+        if self.music_ui.music_preview is not None \
+                and not self.music_ui._music_preview_active():
+            self.music_ui.music_preview = None
+        self.music_ui._draw_music()
+
+    def _draw_content_theme(self, dt):
+        # EDIT ICONS (Stage 2): the PAINT editor over the system icon sheet. Opened
+        # from Settings, NOT a running cart, so there's no cart backdrop to draw --
+        # just clear the canvas and reuse the cart PAINT renderer (over icon_sheet).
+        self.canvas.cls(NAMES["black"])
+        self._reset_canvas_state()
+        self._draw_paint()
+
+    def _draw_content_menu(self, dt):
+        # cards / paint / map: an editor panel over the frozen cart frame.
+        try:
+            if self._draw:
+                self._draw()
+        except Exception:
+            pass
+        # Clear cart-set camera/clip/pal/palt (#11) so the editor panel over the
+        # frozen cart frame draws unaffected.
+        self._reset_canvas_state()
+        if self.menu_view == "paint":
+            self._draw_paint()
+        elif self.menu_view == "map":
+            self.map_ui._draw_map()
+        else:
+            try:
+                self._draw_cards()
+            except Exception as exc:  # noqa: BLE001
+                # A malformed card (e.g. a bad tiles/choices entry) must NOT
+                # escape the frame loop -- the device would hang silently with
+                # no error surface. Fall back to a readable panel + CLOSE.
+                self.cart_error = _err_text(exc)
+                print("Moybyte cards error:", exc)
+                self._draw_error_panel()
+                self._icon_btn("close", "", _CLOSE_BTN, NAMES["red"])
+
     def frame(self, dt):
         if dt > 0:
             inst = 1.0 / dt
@@ -4113,177 +4490,40 @@ class Workstation:
             _bc = getattr(self.canvas, "batch_reset", None)
             if _bc is not None:
                 _bc()                  # #63: zero this frame's auto-batch profiling counters
-        _upd = 0          # cart _update(dt) ms (game LOGIC); 0 off the cart path
-        _cart = 0         # cart _draw() ms (RENDERING)
-        _audio = 0        # audio.tick(dt) ms (mixer feed) -- split out so it doesn't hide in render
-        _bar = 0          # CHROMEBRK: _draw_status_strip ms (cart path only)
-        _cmp = 0          # CHROMEBRK: _composite_game ms
-        _cur = 0          # CHROMEBRK: _draw_cursor ms
-        if self._splash_until is not None:
-            self._draw_splash()            # boot logo -- takes precedence over any screen
-        elif self.screen == "launcher":
-            self._draw_desktop_home(dt)
-        elif self.screen == "settings":
-            self._draw_settings(dt)
-        elif self.screen == "update":
-            self.update_ui._pump_update(dt)          # advance the install / reboot countdown
-            self.update_ui._draw_update(dt)
-        elif self.screen == "desktop":
-            if self.cart_paused and self.cart_error is None:
-                # Paused (#71): the cart is frozen -- no _update, no _draw; the
-                # canvas retains its last frame as the backdrop. Keep the mixer
-                # fed so a mid-flight note decays instead of sticking.
-                if self.audio is not None:
-                    self.audio.tick(dt)
-            elif self.cart_error is None:
-                # Resolve this frame's keyboard edge for the cart's key()/keyp():
-                # last_key is the byte held this frame (0 when nothing is down);
-                # keyp fires only on the 0->key transition. Done here (not in
-                # InputState) so it's independent of whether the backend sets
-                # last_key before or after begin_frame().
-                k = self.input.last_key
-                self.input.cart_key = k
-                self.input.cart_keyp = k if (k and k != self._cart_key_prev) else 0
-                self._cart_key_prev = k
-                try:
-                    _ts = _ticks_ms() if _perf else 0
-                    if self._update:
-                        self._update(dt)
-                    _tm = _ticks_ms() if _perf else 0
-                    if self._draw:
-                        self._draw()
-                    _td = _ticks_ms() if _perf else 0
-                    if self.audio is not None:
-                        self.audio.tick(dt)      # advance/feed playback (#16)
-                    if _perf:
-                        _upd = _ticks_diff(_tm, _ts)    # cart _update -> game LOGIC
-                        _cart = _ticks_diff(_td, _tm)   # cart _draw -> RENDERING
-                        _audio = _ticks_diff(_ticks_ms(), _td)  # audio.tick (mixer feed)
-                except Exception as exc:  # noqa: BLE001
-                    # A cart that raises mid-frame must NOT escape the loop (the
-                    # device would hang silently). Capture it, stop running the
-                    # broken cart, and fall through to paint the error panel; the
-                    # desktop buttons stay so the kid can EDIT/CODE the fix.
-                    self.cart_error = _err_text(exc)
-                    self.crash_line = _exc_cart_line(exc)   # mark the line on EDIT (#24)
-                    self._update = None
-                    self._draw = None
-                    # Print the _err_text-guarded string, never the raw `exc`: a
-                    # cart exception whose __str__ itself raises would otherwise
-                    # escape frame() here -> the silent device hang the panel
-                    # exists to prevent.
-                    print("Moybyte frame error:", self.cart_error)
-            # Cart text input (#38/#42): apply the keyboard mode the cart's _update may
-            # have just requested via textmode(), so the NEXT keyboard poll yields the
-            # right bytes (clean ASCII for typing, raw/game for hold-to-move). One-frame
-            # latency; no-op on the host. Done every running-cart frame so a mid-cart
-            # toggle (e.g. wifi entering/leaving its password screen) takes effect.
-            self._sync_cart_text_mode()
-            # Clear any cart-set camera/clip/pal/palt (#11) before the console paints
-            # its own UI overlays, so they're never offset/clipped/recoloured.
-            self._reset_canvas_state()
-            if self.cart_error is not None:
-                self._draw_error_panel()
-            # The bar auto-hides while a cart PLAYS (#71): the game owns the full
-            # 320x240. Chrome appears only in the pause menu (BACKSPACE, or the
-            # web page's menu button) -- and on a crash, so EDIT/CODE stay reachable.
-            if self.cart_paused or self.cart_error is not None:
-                if self.cart_paused:
-                    self._draw_pause_dim()          # scanline shade UNDER the chrome
-                _tb = _ticks_ms() if _perf else 0
-                self._draw_status_strip("desktop")  # unified top bar (tool switcher)
+        # Per-frame perf scratch (the running-cart content Layer fills self._pf_*).
+        self._pf_upd = 0    # cart _update(dt) ms (game LOGIC); 0 off the cart path
+        self._pf_cart = 0   # cart _draw() ms (RENDERING)
+        self._pf_audio = 0  # audio.tick(dt) ms (mixer feed) -- split out from render
+        self._pf_bar = 0    # CHROMEBRK: _draw_status_strip ms (cart path only)
+        _cmp = 0            # CHROMEBRK: _composite_game ms
+        _cur = 0            # CHROMEBRK: _draw_cursor ms
+        # Compositor / router (docs/shell_layers_refactor_v1.md §3): draw the z-ordered
+        # visible stack bottom -> top. The active content draws first (game-domain
+        # content on the fixed 320x240 game canvas); at the game->system domain boundary
+        # the router composites that viewport into the system canvas ONCE (#39; the
+        # launcher/settings + responsive code/blocks content are system-domain and skip
+        # it); the chrome/overlays + cursor then draw on top on the system canvas. The
+        # cursor is always the top system layer, so a game-domain content is always
+        # composited before it -- reproducing the pre-refactor single composite step.
+        _prev_domain = None
+        for layer in self._draw_stack():
+            if _prev_domain == "game" and layer.domain == "system":
+                _tc = _ticks_ms() if _perf else 0
+                self._composite_game()
                 if _perf:
-                    _bar = _ticks_diff(_ticks_ms(), _tb)   # CHROMEBRK: the bar's share
-                if self.cart_paused:
-                    self._draw_pause_buttons()
-        elif self.menu_view == "code":
-            self._draw_code()              # full-screen editor (covers the cart)
-        elif self.menu_view == "blocks":
-            self.block_ui._draw_blocks()   # full-screen structured outline (#29)
-        elif self.menu_view == "music":
-            # Music/sound editor (#50): full-screen tracker over the cart's bank. The
-            # frozen cart isn't drawn (the editor covers it); the live AudioEngine is
-            # ticked here so a PLAY preview keeps sounding, then auto-clears the preview
-            # flag once the (non-looping) effect finishes so PLAY/STOP stays honest.
-            self._reset_canvas_state()
-            if self.audio is not None:
-                self.audio.tick(dt)
-            if self.music_ui.music_preview is not None \
-                    and not self.music_ui._music_preview_active():
-                self.music_ui.music_preview = None
-            self.music_ui._draw_music()
-        elif self.menu_view == "theme":
-            # EDIT ICONS (Stage 2): the PAINT editor over the system icon sheet. Opened
-            # from Settings, NOT a running cart, so there's no cart backdrop to draw --
-            # just clear the canvas and reuse the cart PAINT renderer (over icon_sheet).
-            self.canvas.cls(NAMES["black"])
-            self._reset_canvas_state()
-            self._draw_paint()
-        else:  # cards / paint / map: a panel over the frozen cart
-            try:
-                if self._draw:
-                    self._draw()
-            except Exception:
-                pass
-            # Clear cart-set camera/clip/pal/palt (#11) so the editor panel over the
-            # frozen cart frame draws unaffected.
-            self._reset_canvas_state()
-            if self.menu_view == "paint":
-                self._draw_paint()
-            elif self.menu_view == "map":
-                self.map_ui._draw_map()
+                    _cmp = _ticks_diff(_ticks_ms(), _tc)   # CHROMEBRK: viewport composite
+            if layer.id == "cursor":
+                _tk = _ticks_ms() if _perf else 0
+                layer.draw(dt)
+                if _perf:
+                    _cur = _ticks_diff(_ticks_ms(), _tk)   # CHROMEBRK: cursor
             else:
-                try:
-                    self._draw_cards()
-                except Exception as exc:  # noqa: BLE001
-                    # A malformed card (e.g. a bad tiles/choices entry) must NOT
-                    # escape the frame loop -- the device would hang silently with
-                    # no error surface. Fall back to a readable panel + CLOSE.
-                    self.cart_error = _err_text(exc)
-                    print("Moybyte cards error:", exc)
-                    self._draw_error_panel()
-                    self._icon_btn("close", "", _CLOSE_BTN, NAMES["red"])
-        if self.show_fps and self.screen == "desktop":
-            self.perf_ui._draw_fps()
-            if self.perf_hud:
-                self.perf_ui._draw_perf_hud()      # frame-time breakdown above the FPS chip
-        # Two-domain seam (#39): the "desktop" (running cart) + the cards/paint/map
-        # editors drew on the fixed 320x240 GAME canvas above; composite it into the
-        # SYSTEM canvas as a centered, integer-scaled viewport. The launcher/settings
-        # screens -- and now the RESPONSIVE code + block editors (#39 step 2), which
-        # draw straight on the system canvas at native size -- skip the composite. A
-        # no-op when the two canvases are the same object (the 320x240 degradation
-        # case -> pixel-identical to today).
-        composite = self.screen == "desktop" or (
-            self.screen == "menu" and self.menu_view not in ("code", "blocks"))
-        if composite:
-            _tc = _ticks_ms() if _perf else 0
-            self._composite_game()
-            if _perf:
-                _cmp = _ticks_diff(_ticks_ms(), _tc)   # CHROMEBRK: viewport composite
-        # Achievements + Easter eggs (#21) overlay on TOP of every screen, so an
-        # unlock celebration / secret popup is always visible and never disturbs the
-        # screen underneath (it's drawn last, then expires on its own). These are
-        # SYSTEM chrome -> drawn on the system canvas (over the composited viewport).
-        if self.ach_ui._confetti_until and _ticks_diff(self.ach_ui._confetti_until, _ticks_ms()) > 0:
-            self.ach_ui._draw_confetti()
-        if self.show_achievements:
-            self.ach_ui._draw_achievements()
-        if self.ach_ui._egg_active():
-            self.ach_ui._draw_egg()
-        if self.ach.toast_active():
-            self._draw_toast()
-        # System menu dropdown + About modal (#52): drawn on TOP of every screen (after
-        # the cart/editor composite + the egg/achievement overlays) so the dropdown
-        # sits over whatever is underneath, then the cursor goes above even that.
-        if self.sysmenu.open:
-            self.menu_ui._draw_sysmenu()
-        if self._about:
-            self.menu_ui._draw_about()
-        _tk = _ticks_ms() if _perf else 0
-        self._draw_cursor()
-        if _perf:
-            _cur = _ticks_diff(_ticks_ms(), _tk)       # CHROMEBRK: cursor
+                layer.draw(dt)
+            _prev_domain = layer.domain
+        _upd = self._pf_upd
+        _cart = self._pf_cart
+        _audio = self._pf_audio
+        _bar = self._pf_bar
         # #63: nothing should be left in an auto-batch by the time we present. The cart
         # sprites were flushed at _reset_canvas_state; the console's own chrome draws
         # Images immediately (never queued). This final flush is the last-line guard so
