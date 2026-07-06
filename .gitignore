@@ -22,6 +22,7 @@ firmware/lilygo_t_deck_plus_micropython/modules/perf_hud.py
 firmware/lilygo_t_deck_plus_micropython/modules/update_ui.py
 firmware/lilygo_t_deck_plus_micropython/modules/system_menu_ui.py
 firmware/lilygo_t_deck_plus_micropython/modules/achievements_ui.py
+firmware/lilygo_t_deck_plus_micropython/modules/layers.py
 firmware/lilygo_t_deck_plus_micropython/modules/audio.py
 firmware/lilygo_t_deck_plus_micropython/modules/console.py
 firmware/lilygo_t_deck_plus_micropython/modules/moy_carts.py
