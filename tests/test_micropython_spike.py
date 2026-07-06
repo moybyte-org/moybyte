@@ -1919,7 +1919,7 @@ def _load_moy_runtime():
     # all of them).
     for name in ("editors", "block_editor_ui", "map_editor_ui", "music_editor_ui",
                  "perf_hud", "update_ui", "system_menu_ui", "achievements_ui",
-                 "layers", "audio", "console"):
+                 "layers", "bar_layer", "audio", "console"):
         spec = importlib.util.spec_from_file_location(name, Path("runtime") / (name + ".py"))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
@@ -2025,14 +2025,15 @@ def test_unified_top_bar_wired_into_device_shell():
     editors.py + moy_carts.py, so grep the canonical sources (staged into modules/ at
     build) for the new wiring."""
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    bar_layer = (Path("runtime") / "bar_layer.py").read_text(encoding="utf-8")
     editors = EDITORS_SRC.read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
 
     # The bar is 18px and drawn by ONE unified drawer -- the old per-screen
     # _draw_desktop_buttons is gone, and the running-cart ("desktop") screen now calls
-    # the shared bar.
-    assert "_STATUS_H = 18" in console
+    # the shared bar (the bar surface + its 18px geometry live in bar_layer.py, #46).
+    assert "_STATUS_H = 18" in bar_layer
     assert "def _draw_desktop_buttons" not in console
     assert 'self.bar_layer._draw_status_strip("desktop")' in console
 
@@ -2358,6 +2359,7 @@ def test_music_editor_wired_into_device_shell():
     editors = EDITORS_SRC.read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     music_ui = (Path("runtime") / "music_editor_ui.py").read_text(encoding="utf-8")
+    bar_layer = (Path("runtime") / "bar_layer.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
 
@@ -2379,10 +2381,11 @@ def test_music_editor_wired_into_device_shell():
     assert "def _open_music(self):" in console
     assert 'elif view == "music":' in console
     assert 'if self.menu_view == "music":' in console     # input + frame dispatch
-    # The top-bar mode switcher (the 6th icon) + its tap action + drawn icon.
-    assert "_MUSIC_BTN = (" in console
-    assert "ws._open_music()" in console          # the bar tool-switch tap (BarLayer, #46)
-    assert 'ws._icon("music"' in console
+    # The top-bar mode switcher (the 6th icon) + its tap action + drawn icon -- the bar
+    # surface + its geometry live in bar_layer.py now (#46 file split).
+    assert "_MUSIC_BTN = (" in bar_layer
+    assert "ws._open_music()" in bar_layer         # the bar tool-switch tap (BarLayer, #46)
+    assert 'ws._icon("music"' in bar_layer
     assert '"music": 15' in console                        # IconSheet slot for the icon
     # SAVE persists to sounds.json through the existing shared store (stays on
     # Workstation, like save_map/save_code -- it uses the shared save_status field).
@@ -2780,7 +2783,8 @@ def test_no_undefined_names_in_extracted_modules():
     targets.append(ROOT / "modules" / "moy_runtime.py")
     targets += [Path("runtime") / n for n in (
         "console.py", "perf_hud.py", "update_ui.py", "system_menu_ui.py",
-        "achievements_ui.py", "layers.py")]
+        "achievements_ui.py", "layers.py", "bar_layer.py",
+        "block_editor_ui.py", "map_editor_ui.py", "music_editor_ui.py")]
 
     bad = []
     for path in targets:
