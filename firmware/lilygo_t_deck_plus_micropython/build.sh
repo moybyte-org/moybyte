@@ -175,6 +175,7 @@ cp "${REPO_ROOT}/runtime/achievements_ui.py" "${SCRIPT_DIR}/modules/achievements
 cp "${REPO_ROOT}/runtime/layers.py" "${SCRIPT_DIR}/modules/layers.py"
 cp "${REPO_ROOT}/runtime/bar_layer.py" "${SCRIPT_DIR}/modules/bar_layer.py"
 cp "${REPO_ROOT}/runtime/cards_layer.py" "${SCRIPT_DIR}/modules/cards_layer.py"
+cp "${REPO_ROOT}/runtime/paint_layer.py" "${SCRIPT_DIR}/modules/paint_layer.py"
 cp "${REPO_ROOT}/runtime/console.py" "${SCRIPT_DIR}/modules/console.py"
 cp "${REPO_ROOT}/runtime/moy_carts.py" "${SCRIPT_DIR}/modules/moy_carts.py"
 cp "${REPO_ROOT}/runtime/blocks.py" "${SCRIPT_DIR}/modules/blocks.py"
