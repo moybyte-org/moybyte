@@ -41,6 +41,35 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editors import CodeEditor, PaintEditor
 
+try:
+    from bar_layer import _BAR_ICON, _BAR_GAP, _BAR_Y, _ZONE_LEFT_GAME
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.bar_layer import _BAR_ICON, _BAR_GAP, _BAR_Y, _ZONE_LEFT_GAME
+
+
+def _in(px, py, rect):
+    x, y, w, h = rect
+    return x <= px < x + w and y <= py < y + h
+
+
+# The Editor's lent left zone (Stage 4 of docs/shell_ux_technical_plan_v1.md, #46
+# zoned bar): the tab ladder + PLAY, in the spec Section 6 order (Config -> Blocks
+# -> Code -> Sprites -> Map -> Music -> PLAY), rendered as icons inside the rect
+# the bar lends it. Each entry is (tab_name_or_None, icon_kind); `tab_name` is
+# what EditorApp.tab equals when that icon's destination is showing (so draw_zone
+# can highlight it); PLAY has no tab of its own -- it's an action, not a
+# destination, so it's never highlighted.
+_ZONE_TABS = (
+    ("cards", "edit"),
+    ("blocks", "blocks"),
+    ("code", "code"),
+    ("paint", "paint"),
+    ("map", "map"),
+    ("music", "music"),
+    (None, "run"),          # PLAY
+)
+_ZONE_STRIDE = _BAR_ICON + _BAR_GAP
+
 
 class EditorApp:
     """The authoring app: a project opened across a tab ladder + PLAY. Holds a `ws`
@@ -49,14 +78,21 @@ class EditorApp:
     projects `menu_view` onto it. The methods are the old `set_menu_view`/`_open_*`/
     `_leave_menu` bodies, moved verbatim with `self.` data reads left reaching `ws`."""
 
-    def __init__(self, ws):
+    def __init__(self, ws, names=None, in_rect=None):
         self.ws = ws
+        self._NAMES = names
+        self._in = in_rect if in_rect is not None else _in
         self.project = None           # the open cart's workspace (set by open())
         self.tab = "cards"            # active view -- ws.menu_view projects onto this:
                                       # "cards" | "code" | "paint" | "map" | "blocks"
                                       # | "music" | "theme" (theme = the EDIT-ICONS
                                       # reuse of the paint renderer, set via the
                                       # menu_view setter, not a cart-editor tab)
+        # Stage 4 (#46 zoned bar): bumped whenever the active tab changes -- the
+        # ONLY thing that varies in the Editor's lent left zone (which icon is
+        # highlighted). BarLayer folds this into its cache key so the zoned strip
+        # re-renders on a real tab switch and never per frame.
+        self.zone_gen = 0
 
     # -- open the editor on a project (spec Section 4/Section 6: Config-first) -----
 
@@ -115,6 +151,7 @@ class EditorApp:
         ws = self.ws
         ws._dirty = True             # sub-view change always repaints (#44)
         self.tab = view
+        self.zone_gen += 1           # Stage 4 (#46): the lent zone's highlight moved
         if view == "code":
             if ws.editor is None and ws.cart is not None:
                 ws.editor = CodeEditor(ws.cart["src"],
@@ -184,3 +221,61 @@ class EditorApp:
             if ws.cart is not None:
                 ws._start()
         ws.run(ws.project, self)     # PLAY: run the cart, caller = the Editor (Stage 3b)
+
+    # -- the lent left zone (Stage 4, #46 zoned bar) --------------------------
+    #
+    # The Editor's tab ladder + PLAY, replacing the pause-only tool switcher for
+    # the game-domain tabs wired to show it: cards_layer.py, paint_layer.py, and
+    # layers.py's _MapLayer each call ws.bar_layer._draw_status_strip("menu") from
+    # their draw() (+ ws.bar_layer.handle_bar_tap("menu", ...) from handle_pointer).
+    # CODE/BLOCKS/MUSIC keep their own pre-existing top-of-screen title + action
+    # row for now and don't call it -- see the Stage-4 report for why.
+
+    def draw_zone(self, cv, rect):
+        """Draw the tab ladder + PLAY inside the rect the bar lent us, highlighting
+        the active tab. `cv` may be the bar's offscreen cache strip (#43) -- this
+        draws the SAME pixels either way, which is what makes the cached strip
+        pixel-identical to a direct render."""
+        ws = self.ws
+        NAMES = self._NAMES
+        x0, y0, w, h = rect
+        for i, (tab, glyph) in enumerate(_ZONE_TABS):
+            x = x0 + i * _ZONE_STRIDE
+            if x + _BAR_ICON > x0 + w:
+                break                       # ran out of lent width -- draw what fits
+            if tab is not None and tab == self.tab:
+                cv.rect(x, y0, _BAR_ICON, _BAR_ICON, NAMES["indigo"])
+            ws._icon(glyph, x, y0, cv)
+
+    def zone_tap(self, px, py):
+        """Hit-test the tab ladder + PLAY and dispatch to the matching landing
+        entry point (or PLAY). Uses the SAME fixed game-canvas rect draw_zone is
+        given today (only the game-domain tabs wire this call -- see the module
+        docstring); a future code/blocks wiring would need to pass/derive the
+        responsive rect the same way BarLayer's draw dispatch does."""
+        x0, y0, w, h = _ZONE_LEFT_GAME
+        for i, (tab, _glyph) in enumerate(_ZONE_TABS):
+            x = x0 + i * _ZONE_STRIDE
+            if x + _BAR_ICON > x0 + w:
+                break
+            if self._in(px, py, (x, y0, _BAR_ICON, _BAR_ICON)):
+                return self._activate_zone_tab(tab)
+        return False
+
+    def _activate_zone_tab(self, tab):
+        ws = self.ws
+        if tab == "cards":
+            ws._open_menu()
+        elif tab == "code":
+            ws.set_menu_view("code")
+        elif tab == "paint":
+            ws._open_paint()
+        elif tab == "map":
+            ws._open_map()
+        elif tab == "blocks":
+            ws._open_blocks()
+        elif tab == "music":
+            ws._open_music()
+        else:                     # PLAY (tab is None)
+            ws._leave_menu()
+        return True

@@ -42,6 +42,25 @@ _BAR_BATT = (320 - 2 - _BAR_ICON, _BAR_Y, _BAR_ICON, _BAR_ICON)
 _BAR_WIFI = (_BAR_BATT[0] - _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)
 _BAR_CLOCK = (_BAR_WIFI[0] - 2 - 5 * 8, 0, 5 * 8, 18)
 _STATUS_H = 18          # unified top bar height (16px icons + 1px top/bottom margin)
+
+# -- the ZONED bar's fixed GAME-canvas right cluster (Stage 4 of
+# docs/shell_ux_technical_plan_v1.md, #46 macOS-menu-bar model): reused by the
+# game-domain Editor tabs (cards/paint/map -- see EditorApp/cards_layer.py/
+# paint_layer.py/layers.py's _MapLayer) that draw on the SAME fixed 320x240 canvas
+# as the running-cart pause/crash bar above. This is a SEPARATE cluster from
+# _SYSMENU_BTN/_HOME_BTN/.../_BAR_WIFI/_BAR_CLOCK -- those stay the pause bar's own
+# fixed rects, untouched until Stage 5 retires the pause screen -- so the two
+# mechanisms can never collide or desync.
+_ZONE_BATT = _BAR_BATT                                          # same rightmost slot
+_ZONE_WIFI = _BAR_WIFI                                           # same slot
+_ZONE_GEAR = (_ZONE_WIFI[0] - _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)
+# Reserved for the Stage-5 context X (tap to exit the active app) -- NOT drawn or
+# tapped yet (that's Stage 5's job); the slot is carved out of the right cluster
+# now so the X's arrival doesn't reflow the clock/gear/wifi/batt again.
+_ZONE_CONTEXT_X = (_ZONE_GEAR[0] - _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)
+_ZONE_CLOCK = (_ZONE_CONTEXT_X[0] - 2 - 5 * 8, 0, 5 * 8, 18)
+_ZONE_LEFT_GAME = (2, _BAR_Y, _ZONE_CLOCK[0] - 4, _BAR_ICON)     # the app-lent rect
+
 # Bottom dock (persistent tool switcher, TIC-80 style): six evenly-spaced slots. The
 # per-slot rects come from Layout (responsive); these are the slot vocabulary + labels.
 _DOCK_SLOTS = ("home", "code", "paint", "map", "run", "settings")
@@ -67,10 +86,30 @@ def _ticks_diff(a, b):
 
 class BarLayer:
     """The unified 18px top bar + bottom dock (#46), migrated out of Workstation as
-    its own surface (docs/shell_layers_refactor_v1.md Phase 2). Owns the bar's DRAW
-    (three variants: launcher 'home', 'settings', running-cart 'desktop'), the dock,
-    the running-cart bar's offscreen strip cache (#43), the per-second clock cache
-    (#66), the dock geometry/activation, and the bar/dock TAP slices.
+    its own surface (docs/shell_layers_refactor_v1.md Phase 2) and reshaped into a
+    ZONED bar (Stage 4 of docs/shell_ux_technical_plan_v1.md, the macOS-menu-bar
+    model): a RIGHT zone (OS-owned: clock/wifi/batt/gear + a slot reserved for the
+    Stage-5 context X) drawn by the bar itself, and a LEFT zone LENT to whichever
+    app is active -- `launcher_layer`/`settings_layer`/`editor_app` each implement
+    `draw_zone(cv, rect)` (paint the lent rect) + `zone_tap(px, py)` (claim a tap
+    inside it) + `zone_gen` (an int bumped whenever their zone's pixels change).
+
+    `where` still selects which screen is asking (`"home"` / `"settings"` /
+    `"menu"` / `"desktop"`), but it's no longer three-plus-one hardcoded draw
+    bodies: `"desktop"` stays the running-cart pause/crash chrome VERBATIM (the
+    #71 pause machinery the Player owns until Stage 5 retires it -- see
+    `_render_cart_bar`'s early branch, which returns before any zone dispatch, so
+    `draw_zone` is structurally unreachable while a Player is top-of-stack); the
+    other three route through the SAME generalized cache (below) into whichever
+    app owns `where`.
+
+    The #43 strip cache is KEPT AND GENERALIZED, not duplicated: `_cart_bar_key`
+    now takes `where` (default `"desktop"`, so the pinned zero-arg tests are
+    unchanged) and folds in the active app's `zone_gen` + `ws.can_manage`, so ONE
+    offscreen strip serves all four `where` values and re-renders only on a real
+    change (app switch / clock tick / zone-content change / theme edit) -- never a
+    bare frame. `_render_cart_bar(cv, key)` branches on `key[0]` (`where`) to
+    render either the untouched desktop body or the new zoned-bar body.
 
     Boundary decisions (deliberate, see the doc):
       * The button-rect + dock CONSTANTS are the module-level single source above --
@@ -79,15 +118,22 @@ class BarLayer:
       * The shared draw toolkit (ws._glyph / ws._icon / ws._mini_btn / ws._bar_image)
         stays on Workstation per the doc; the bar is a CONSUMER of it (via self.ws).
       * `_bar_img_cache` (per-kind icon Image cache backing ws._icon) stays on ws;
-        `_bar_cache_gen` (the running-cart STRIP cache generation) lives here and
+        `_bar_cache_gen` (the strip cache generation) lives here and
         ws.set_icon_sheet bumps it via invalidate().
 
     The bar is CHROME the content composes, not a standalone stack layer: it's
-    SYSTEM-domain on launcher/settings (drawn on sys_canvas) but GAME-domain on the
-    running cart (drawn on the game canvas inside the viewport), and it draws at a
-    fixed point inside each content's paint. So the content draws call
-    _draw_status_strip(where)/_draw_dock(where) and the pointer methods delegate their
-    bar slice to handle_home_tap / handle_cart_tap / _dock_slot_at + _activate_dock.
+    SYSTEM-domain on launcher/settings/the code+blocks editor tabs (drawn on
+    sys_canvas) but GAME-domain on the running cart AND the cards/paint/map editor
+    tabs (drawn on the fixed game canvas), and it draws at a fixed point inside each
+    content's paint. So the content draws call _draw_status_strip(where)/
+    _draw_dock(where) and the pointer methods delegate their bar slice to
+    handle_bar_tap(where, ...) / handle_home_tap / handle_cart_tap /
+    _dock_slot_at + _activate_dock.
+
+    (CODE/BLOCKS/MUSIC keep their own pre-existing top-of-screen chrome for now and
+    don't call the zoned bar -- see the Stage-4 report for why: each already draws
+    its own title + action row in the same y<18 band the zoned bar would occupy,
+    and folding them in cleanly means redesigning THEIR chrome, not just this file.)
 
     `NAMES` (palette) and `_in` (rect hit-test) are injected at construction (the same
     circular-import dodge the other extracted UIs use)."""
@@ -96,13 +142,18 @@ class BarLayer:
         self.ws = ws
         self._NAMES = names
         self._in = in_rect
-        # Cached running-cart top bar (#43): rendered ONCE into an offscreen strip and
-        # blitted each frame (one flat copy) instead of re-rendering ~9 sprites + glyph
-        # + text every frame. `_cart_bar_strip` is the layer; `_cart_bar_key_cur` is the
-        # state key it holds (None = stale); `_cart_bar_canvas` is the canvas it was
-        # built on (a web-view swap forces a rebuild); `_bar_cache_gen` is bumped by the
-        # explicit invalidators (invalidate(), from ws.set_icon_sheet) so a theme swap
-        # repaints.
+        # Cached top bar (#43, generalized in Stage 4 to every `where`): rendered
+        # ONCE into an offscreen strip and blitted each frame (one flat copy)
+        # instead of re-rendering ~9 sprites + glyph + text every frame.
+        # `_cart_bar_strip` is the layer; `_cart_bar_key_cur` is the state key it
+        # holds (None = stale); `_cart_bar_canvas` is the canvas it was built on (a
+        # web-view swap, OR switching between the game canvas and the system canvas
+        # as the active `where` changes, forces a rebuild); `_bar_cache_gen` is
+        # bumped by the explicit invalidators (invalidate(), from ws.set_icon_sheet)
+        # so a theme swap repaints. ONE strip/key slot serves every `where` -- only
+        # one screen is ever on top at a time, so sharing it is exactly as safe as
+        # the single-slot cache already was, and a `where` change is just another
+        # key change the existing compare already catches.
         self._cart_bar_strip = None
         self._cart_bar_key_cur = None
         self._cart_bar_canvas = None
@@ -119,133 +170,187 @@ class BarLayer:
     # -- draw ----------------------------------------------------------------
 
     def _draw_status_strip(self, where):
-        """The unified 18px top bar (Stage 1), drawn on BOTH the launcher/Settings and
-        the running-cart screen. A black backing band (with a thin shelf edge line
-        below) full of 16x16 IconSheet sprites instead of the old labeled glyph
-        buttons. Layers:
+        """Entry point every content Layer calls; `where` is "home" / "settings" /
+        "menu" / "desktop". All four route through the ONE generalized cache
+        mechanism below (_draw_top_bar_cart) -- there is no more per-`where` draw
+        body here; the zoning happens inside _render_cart_bar."""
+        self._draw_top_bar_cart(where)
 
-          * Right cluster (always): the clock text, then wifi, batt, gear icons,
-            right-aligned (wifi/batt keep their placeholder green for now).
-          * Left cluster (launcher home / Settings): NEW / DUP / DEL icons when
-            can_manage; the selected cart's name fills the gap before the clock.
-          * Left cluster (running cart, where == "desktop"): the tool switcher --
-            HOME, then EDIT (or CODE for a no-edit cart), PAINT, MAP, BLOCKS.
+    # -- zone plumbing (Stage 4, #46 zoned bar) -------------------------------
+    #
+    # "where" identifies which screen is asking; these helpers answer the THREE
+    # questions that differ per `where`: who owns the lent left zone, which canvas
+    # + rect it draws into, and (for "menu") whether the CURRENT tab is one of the
+    # game-domain ones this stage wires (cards/paint/map -- code/blocks/music keep
+    # their own pre-existing top-of-screen chrome for now, see the class docstring).
 
-        The launcher/Settings bar draws on the SYSTEM canvas (reflowed by Layout #39);
-        the running-cart bar draws on the GAME canvas (the fixed 320x240 viewport), so
-        it uses the fixed _BAR_* / button-rect constants. Translucency isn't available
-        on the indexed canvas, so the dark band is a deliberate shelf over the
-        wallpaper (whose art is pushed below it, see _draw_wallpaper #46)."""
-        NAMES = self._NAMES
+    def _zone_owner(self, where):
+        """The app that owns `where`'s lent left zone, or None ("desktop" -- the
+        Player's pause/crash chrome never lends a zone, see _render_cart_bar)."""
         ws = self.ws
-        if where == "desktop":
-            self._draw_top_bar_cart()
-            return
-        cv = ws.sys_canvas
-        lay = ws.layout
-        cv.rect(0, 0, cv.w, lay.status_h, NAMES["black"])
-        cv.rect(0, lay.status_h - 1, cv.w, 1, NAMES["dark_grey"])   # shelf edge line
-        # Right cluster: clock + wifi/batt (Settings now lives in the ≡ menu, #52).
-        cv.print(self._clock_text(), lay.clock_x, 3, NAMES["light_grey"], 1)
-        ws._icon("wifi", lay.wifi_btn[0], lay.wifi_btn[1], cv)
-        ws._icon("batt", lay.batt_btn[0], lay.batt_btn[1], cv)
-        # ≡ system-menu toggle (leftmost, always) -- the launcher's Settings entry now,
-        # a _glyph bitmap like the in-cart bar so an older saved theme can't blank it.
-        ws._glyph("menu", lay.sysmenu_btn, NAMES["white"], cv)
-        # Left cluster: management icons (when writable) + the selected cart's name.
         if where == "home":
-            if ws.can_manage:
-                ws._icon("new", lay.new_btn[0], lay.new_btn[1], cv)
-                ws._icon("dup", lay.dup_btn[0], lay.dup_btn[1], cv)
-                ws._icon("del", lay.del_btn[0], lay.del_btn[1], cv)
-            sel = ws.launcher.selected()
-            if sel is not None:
-                name = sel["title"]
-                if len(name) > lay.status_name_maxc:
-                    name = name[:lay.status_name_maxc]
-                cv.print(name, lay.status_name_x, 3, NAMES["white"], 1)
+            return ws.launcher_layer
+        if where == "settings":
+            return ws.settings_layer
+        if where == "menu":
+            return ws.editor_app
+        return None
 
-    def _draw_top_bar_cart(self):
-        """The running-cart half of the unified top bar (where == "desktop"). Drawn on
-        the GAME canvas with the fixed 320x240 rects: a tool switcher on the left
-        (HOME / EDIT|CODE / PAINT / MAP / BLOCKS) + the right cluster (clock + wifi /
-        batt / gear). Same icon vocabulary as the launcher bar so both read alike.
+    def _zone_is_game(self, where):
+        """True for the "menu" screens that draw on the fixed 320x240 GAME canvas
+        (cards/paint/map, like the running cart) rather than the responsive SYSTEM
+        canvas (code/blocks, like the launcher/Settings)."""
+        return where == "menu" and self.ws.menu_view in ("cards", "paint", "map")
 
-        CACHED (#43): a running cart redraws every frame, but this bar is almost entirely
-        static -- the clock changes ~once/min, the icons/menu never mid-play -- so
-        re-rendering ~9 16x16 sprites + a glyph + text each frame was ~6ms of wasted draw
-        (the `chrome=` term in DRAWBRK). Instead the bar's pixels are rendered ONCE into an
-        offscreen _STATUS_H-tall strip (a new_layer, the #54 offscreen primitive) keyed by
-        the state that changes its picture, and each frame we just blit_strip the cached
-        strip onto the canvas (one flat copy, ~0.5ms). When the key changes (cart switch,
-        clock tick, theme edit, font/size change) the strip is re-rendered, then reused.
-        The strip is purely the DRAW; hit-testing still uses the independent _*_BTN rects,
-        so caching can't desync taps."""
+    def _bar_canvas(self, where):
+        if where == "desktop" or self._zone_is_game(where):
+            return self.ws.canvas
+        return self.ws.sys_canvas
+
+    def _bar_h(self, where):
+        if where == "desktop" or self._zone_is_game(where):
+            return _STATUS_H
+        return self.ws.layout.status_h
+
+    def _zone_rect(self, where):
+        """The rect LENT to `where`'s app for its draw_zone/zone_tap (never asked
+        for "desktop", whose branch returns before any zone dispatch)."""
+        if self._zone_is_game(where):
+            return _ZONE_LEFT_GAME
+        return self.ws.layout.zone_left
+
+    # -- draw + cache (the #43 strip, generalized to every `where`) -----------
+
+    def _draw_top_bar_cart(self, where="desktop"):
+        """The ONE cached bar draw for every `where` (Stage 4 generalizes what was
+        the running-cart-only strip cache): render the pixels ONCE into an
+        offscreen strip and blit_strip it each frame (one flat copy) instead of
+        re-rendering ~9 16x16 sprites + a glyph + text every frame -- ~6ms of
+        wasted draw the #43 cache exists to avoid, now paid by every zoned screen,
+        not just the running cart. When the key changes (app switch / clock tick /
+        zone-content change / theme edit / font-size change) the strip is
+        re-rendered, then reused. The strip is purely the DRAW; hit-testing goes
+        through the independent _*_BTN rects / zone_tap, so caching can't desync
+        taps."""
         ws = self.ws
-        cv = ws.canvas
-        key = self._cart_bar_key()
+        cv = self._bar_canvas(where)
+        bar_h = self._bar_h(where)
+        key = self._cart_bar_key(where)
         strip = self._cart_bar_strip
         # The active canvas can SWAP at runtime (the device web view binds a recording
-        # TeeCanvas in place of the raw DeviceCanvas, #41). A strip allocated on the OLD
-        # canvas is the wrong layer type for the new one -- a raw DeviceCanvas strip blitted
-        # through the Tee has no RecordingLayer hooks ('_end_batch' AttributeError), and it
-        # wouldn't be recorded for the browser anyway. So rebuild the layer when the canvas
-        # identity changes, not just on a resize.
+        # TeeCanvas in place of the raw DeviceCanvas, #41) OR change identity/height as
+        # `where` moves between the fixed game canvas and the responsive system canvas
+        # (Stage 4). A strip allocated on the OLD canvas/height is the wrong layer for
+        # the new one (a raw DeviceCanvas strip blitted through the Tee has no
+        # RecordingLayer hooks -- '_end_batch' AttributeError -- and it wouldn't be
+        # recorded for the browser anyway), so rebuild whenever either changes, not
+        # just on a width resize.
         canvas_changed = self._cart_bar_canvas is not cv
-        if strip is None or strip.w != cv.w or canvas_changed or self._cart_bar_key_cur != key:
+        size_changed = strip is None or strip.w != cv.w or strip.h != bar_h
+        if size_changed or canvas_changed or self._cart_bar_key_cur != key:
             # (Re)build the cached strip. new_layer gives a same-type/-palette canvas the
-            # bar body draws into at the SAME coords (the bar lives at y in [0, _STATUS_H),
+            # bar body draws into at the SAME coords (the bar lives at y in [0, bar_h),
             # which maps 1:1 onto the strip's rows), so the cached pixels are byte-identical
             # to drawing straight onto cv. Reuse the buffer across re-renders when the size
             # is unchanged; allocate a fresh layer on first build / a resize / a canvas swap.
-            if strip is None or strip.w != cv.w or canvas_changed:
-                strip = cv.new_layer(cv.w, _STATUS_H)
+            if size_changed or canvas_changed:
+                strip = cv.new_layer(cv.w, bar_h)
                 self._cart_bar_strip = strip
                 self._cart_bar_canvas = cv
             self._render_cart_bar(strip, key)
             self._cart_bar_key_cur = key
         cv.blit_strip(strip, 0, 0)
 
-    def _cart_bar_key(self):
-        """The cache key for the running-cart top bar: every piece of state that changes
-        the bar's PIXELS. A different key forces a strip re-render; an unchanged key reuses
-        the cached strip. Includes the clock text (ticks ~once/min), whether the cart has
-        an edit schema (EDIT vs CODE icon), the icon theme identity + the glyph font scale
-        (a theme edit / resize must repaint), and a generation counter the explicit
-        invalidators bump (set_icon_sheet, etc.). wifi/batt are static placeholder art
-        today; if they gain live state, fold it in here."""
+    def _cart_bar_key(self, where="desktop"):
+        """The cache key for the bar: every piece of state that changes ANY `where`
+        variant's PIXELS. A different key forces a strip re-render; an unchanged key
+        reuses the cached strip. `where` is key[0] (so a screen switch always
+        invalidates); then the clock text (ticks ~once/min), whether the open cart
+        has an edit schema (EDIT vs CODE icon, "desktop" only), the icon theme
+        identity + the glyph font scale (a theme edit / resize must repaint),
+        whether writes are enabled (the launcher's NEW/DUP/DEL visibility), the
+        active app's OWN `zone_gen` (Stage 4: an int the app bumps whenever ITS
+        lent zone's content changes -- e.g. EditorApp.set_tab, Launcher.sel/
+        set_items -- so a real zone-content change is the ONLY thing that forces a
+        re-render beyond the shared dimensions here), and a generation counter the
+        explicit invalidators bump (set_icon_sheet, etc.)."""
         ws = self.ws
+        owner = self._zone_owner(where)
         has_edit = bool(ws.cart.get("edit")) if ws.cart else False
-        return (self._clock_text(), has_edit, id(ws.icon_sheet),
-                getattr(ws.canvas, "font_scale", 1), self._bar_cache_gen)
+        return (where, self._clock_text(), has_edit, id(ws.icon_sheet),
+                getattr(self._bar_canvas(where), "font_scale", 1),
+                bool(ws.can_manage),
+                owner.zone_gen if owner is not None else 0,
+                self._bar_cache_gen)
 
     def _render_cart_bar(self, cv, key):
-        """Render the running-cart bar's pixels onto `cv` (the offscreen strip, or any
-        canvas) at the fixed 320x240 bar coords. Factored out of _draw_top_bar_cart so the
-        SAME drawing serves both the cache build and the (test/fallback) direct path, which
-        is what makes the cached strip pixel-identical to a direct render. `key` carries the
-        already-computed has_edit (index 1) so the icon choice can't drift from the key."""
+        """Render the bar's pixels onto `cv` (the offscreen strip, or any canvas)
+        for `key[0]` (`where`). Factored out of _draw_top_bar_cart so the SAME
+        drawing serves both the cache build and the (test/fallback) direct path,
+        which is what makes the cached strip pixel-identical to a direct render.
+        `key` carries the already-computed has_edit (index 2) so the icon choice
+        can't drift from the key."""
         NAMES = self._NAMES
         ws = self.ws
-        has_edit = key[1]
-        cv.rect(0, 0, cv.w, _STATUS_H, NAMES["black"])
-        cv.rect(0, _STATUS_H - 1, cv.w, 1, NAMES["dark_grey"])      # shelf edge line
-        # Left cluster: the TIC-80 one-tap tool switcher. Carts with a Make-it-mine
-        # schema open the cards menu (pencil = EDIT); the rest jump straight to code
-        # (the < > glyph = CODE). cart may be None defensively (error panel, no cart).
-        # ≡ system-menu toggle (#52), leftmost. A _glyph bitmap (not a themeable
-        # IconSheet slot) so it never goes blank on a device with an older saved theme.
-        ws._glyph("menu", _SYSMENU_BTN, NAMES["white"], cv)
-        ws._icon("home", _HOME_BTN[0], _HOME_BTN[1], cv)
-        ws._icon("edit" if has_edit else "code", _MENU_BTN[0], _MENU_BTN[1], cv)
-        ws._icon("paint", _PAINT_BTN[0], _PAINT_BTN[1], cv)
-        ws._icon("map", _MAP_BTN[0], _MAP_BTN[1], cv)
-        ws._icon("blocks", _BLOCKS_BTN[0], _BLOCKS_BTN[1], cv)
-        ws._icon("music", _MUSIC_BTN[0], _MUSIC_BTN[1], cv)
-        # Right cluster: clock + wifi/batt (Settings now lives in the ≡ menu, not a gear).
-        cv.print(self._clock_text(), _BAR_CLOCK[0], 3, NAMES["light_grey"], 1)
-        ws._icon("wifi", _BAR_WIFI[0], _BAR_WIFI[1], cv)
-        ws._icon("batt", _BAR_BATT[0], _BAR_BATT[1], cv)
+        where = key[0]
+        has_edit = key[2]
+        if where == "desktop":
+            # The running-cart pause/crash chrome (#71): VERBATIM, unchanged by
+            # Stage 4 -- the Player's own chrome, drawn only while paused/crashed
+            # (never during play), never a "zone" (no draw_zone call below this
+            # branch's `return`, which is exactly what keeps the zoned-bar
+            # dispatch off the play frame -- see the Stage-4 guardrail test).
+            cv.rect(0, 0, cv.w, _STATUS_H, NAMES["black"])
+            cv.rect(0, _STATUS_H - 1, cv.w, 1, NAMES["dark_grey"])   # shelf edge line
+            # Left cluster: the TIC-80 one-tap tool switcher. Carts with a Make-it-mine
+            # schema open the cards menu (pencil = EDIT); the rest jump straight to code
+            # (the < > glyph = CODE). cart may be None defensively (error panel, no cart).
+            # ≡ system-menu toggle (#52), leftmost. A _glyph bitmap (not a themeable
+            # IconSheet slot) so it never goes blank on a device with an older saved theme.
+            ws._glyph("menu", _SYSMENU_BTN, NAMES["white"], cv)
+            ws._icon("home", _HOME_BTN[0], _HOME_BTN[1], cv)
+            ws._icon("edit" if has_edit else "code", _MENU_BTN[0], _MENU_BTN[1], cv)
+            ws._icon("paint", _PAINT_BTN[0], _PAINT_BTN[1], cv)
+            ws._icon("map", _MAP_BTN[0], _MAP_BTN[1], cv)
+            ws._icon("blocks", _BLOCKS_BTN[0], _BLOCKS_BTN[1], cv)
+            ws._icon("music", _MUSIC_BTN[0], _MUSIC_BTN[1], cv)
+            # Right cluster: clock + wifi/batt (Settings now lives in the ≡ menu, not a gear).
+            cv.print(self._clock_text(), _BAR_CLOCK[0], 3, NAMES["light_grey"], 1)
+            ws._icon("wifi", _BAR_WIFI[0], _BAR_WIFI[1], cv)
+            ws._icon("batt", _BAR_BATT[0], _BAR_BATT[1], cv)
+            return
+        # -- the zoned bar (Stage 4): a black backing band (with a thin shelf edge
+        # line below), the OS-owned RIGHT zone, then the active app's LENT left zone.
+        bar_h = self._bar_h(where)
+        cv.rect(0, 0, cv.w, bar_h, NAMES["black"])
+        cv.rect(0, bar_h - 1, cv.w, 1, NAMES["dark_grey"])           # shelf edge line
+        self._render_right_zone(cv, where)
+        owner = self._zone_owner(where)
+        if owner is not None:
+            owner.draw_zone(cv, self._zone_rect(where))
+
+    def _render_right_zone(self, cv, where):
+        """The OS-owned right zone (Stage 4): clock, wifi, batt, the ≡ system-menu
+        toggle (moved off the left edge -- the macOS-menu-bar model keeps every OS
+        control on one side), and a slot reserved for the Stage-5 context X (not
+        drawn/tapped yet). Two geometries: the fixed game-canvas cluster (cards/
+        paint/map, mirrors the pause bar's right cluster) or the responsive
+        Layout-driven one (home/settings/code/blocks)."""
+        NAMES = self._NAMES
+        ws = self.ws
+        if self._zone_is_game(where):
+            cv.print(self._clock_text(), _ZONE_CLOCK[0], 3, NAMES["light_grey"], 1)
+            ws._icon("wifi", _ZONE_WIFI[0], _ZONE_WIFI[1], cv)
+            ws._icon("batt", _ZONE_BATT[0], _ZONE_BATT[1], cv)
+            ws._glyph("menu", _ZONE_GEAR, NAMES["white"], cv)
+            # _ZONE_CONTEXT_X: reserved for Stage 5, deliberately not drawn.
+        else:
+            lay = ws.layout
+            cv.print(self._clock_text(), lay.clock_x, 3, NAMES["light_grey"], 1)
+            ws._icon("wifi", lay.wifi_btn[0], lay.wifi_btn[1], cv)
+            ws._icon("batt", lay.batt_btn[0], lay.batt_btn[1], cv)
+            ws._glyph("menu", lay.sysmenu_btn, NAMES["white"], cv)
+            # lay.context_x_btn: reserved for Stage 5, deliberately not drawn.
 
     def _clock_text(self):
         """A wall-clock HH:MM from time.localtime when available, else a mm:ss
@@ -330,31 +435,39 @@ class BarLayer:
         elif slot == "run" and ws.launcher.selected() is not None:
             ws.launch_selected()                 # home run = open selected (tap-mode, #55)
 
-    def handle_home_tap(self, px, py):
-        """The launcher/home top-bar tap slice: the clock Easter egg, the ≡ system
-        menu, and the NEW/DUP/DEL management icons. Returns True if the bar consumed
-        the tap. The clock-run reset runs for ANY non-clock tap (byte-identical to the
-        pre-migration launcher pointer), so page/tile taps that fall through still
-        reset it."""
+    def handle_bar_tap(self, where, px, py):
+        """The zoned bar's tap slice (Stage 4), shared by every screen it draws on
+        (home/settings/menu): the clock Easter egg + the ≡ system menu are OS/
+        right-zone-owned -- IDENTICAL wherever the bar shows, same as the draw --
+        checked first so a tap on either never falls through to the lent zone.
+        Anything else routes to the active app's zone_tap over its lent left zone.
+        Returns True iff the bar (or the app's zone) consumed the tap. The clock-
+        run reset runs for ANY non-clock tap (byte-identical to the pre-Stage-4
+        launcher pointer), so taps that fall through to the content still reset it."""
         ws = self.ws
-        lay = ws.layout
-        # Clock Easter egg (#21): tapping the status-strip clock _CLOCK_TAP_GOAL
-        # times wakes the Time Traveler. Checked before the management row so a
-        # tap on the clock never falls through to a button.
-        if self._in(px, py, lay.clock_hit()):
+        if self._zone_is_game(where):
+            clock_hit, gear_hit = _ZONE_CLOCK, _ZONE_GEAR
+        else:
+            lay = ws.layout
+            clock_hit, gear_hit = lay.clock_hit(), lay.sysmenu_btn
+        # Clock Easter egg (#21): tapping the bar's clock _CLOCK_TAP_GOAL times
+        # wakes the Time Traveler. Checked before the ≡/zone so a tap on the clock
+        # never falls through to a button.
+        if self._in(px, py, clock_hit):
             ws.ach_ui._tap_clock()
             return True
-        ws.ach_ui._clock_taps = 0                # any other desktop tap resets the run
-        if self._in(px, py, lay.sysmenu_btn):    # ≡ -> system menu (Settings/About/Reboot, #52)
+        ws.ach_ui._clock_taps = 0                # any other bar tap resets the run
+        if self._in(px, py, gear_hit):           # ≡ -> system menu (Settings/About/Reboot, #52)
             ws.toggle_sysmenu()
             return True
-        if ws.can_manage and self._in(px, py, lay.new_btn):
-            ws.new_cart(); return True
-        if ws.can_manage and self._in(px, py, lay.dup_btn):
-            ws.dup_cart(); return True
-        if ws.can_manage and self._in(px, py, lay.del_btn):
-            ws.del_cart(); return True
-        return False
+        owner = self._zone_owner(where)
+        return bool(owner.zone_tap(px, py)) if owner is not None else False
+
+    def handle_home_tap(self, px, py):
+        """Backward-compatible name for the launcher's tap slice (launcher_layer.py
+        is the one caller outside this file) -- the launcher's own zone_tap (NEW/
+        DUP/DEL) now lives on LauncherHomeLayer, reached through handle_bar_tap."""
+        return self.handle_bar_tap("home", px, py)
 
     def handle_cart_tap(self, px, py):
         """The running-cart top-bar tap slice (px, py in GAME coords): the TIC-80

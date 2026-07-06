@@ -539,20 +539,24 @@ class Layout:
         self.bar_stride = stride
         edge = 2 * fs                                 # margin from the canvas edges
 
-        # -- right cluster (always): clock text, then wifi, batt, right-aligned.
-        # (Settings moved into the ≡ system menu, OS-style, so there's no gear here any
-        # more.) batt is hard against the right edge; wifi sits to its left, then the
-        # clock text fills the space before them.
+        # -- right zone (OS-owned, Stage 4 #46 zoned bar -- the macOS-menu-bar
+        # model): batt hard against the right edge, then wifi, then the ≡ system-
+        # menu toggle (moved off the left edge so every OS control lives on ONE
+        # side), then a slot RESERVED for the Stage-5 context X (not drawn/tapped
+        # yet -- carved out now so its arrival doesn't reflow the rest of this
+        # cluster again), then the clock text filling the remaining space to
+        # their left.
         self.batt_btn = (self.w - edge - ic, _BAR_Y, ic, ic)
         self.wifi_btn = (self.batt_btn[0] - stride, _BAR_Y, ic, ic)
+        self.sysmenu_btn = (self.wifi_btn[0] - stride, _BAR_Y, ic, ic)
+        self.context_x_btn = (self.sysmenu_btn[0] - stride, _BAR_Y, ic, ic)  # reserved
         self.clock_w = 5 * self.font_w                # "HH:MM" (5 chars)
-        self.clock_x = max(edge, self.wifi_btn[0] - edge - self.clock_w)
+        self.clock_x = max(edge, self.context_x_btn[0] - edge - self.clock_w)
 
-        # -- left cluster: the ≡ system-menu toggle (always, leftmost), then -- when
-        # writable -- NEW / DUP / DEL. ≡ is the launcher's Settings entry now (it opens
-        # the dropdown that holds Settings/About/Reboot), mirroring the in-cart bar.
-        self.sysmenu_btn = (edge, _BAR_Y, ic, ic)
-        self.new_btn = (self.sysmenu_btn[0] + stride, _BAR_Y, ic, ic)
+        # -- left zone (Stage 4: fully LENT to the active app's draw_zone/zone_tap
+        # -- launcher/Settings/the Editor): NEW / DUP / DEL start right at the left
+        # edge now that ≡ isn't there any more.
+        self.new_btn = (edge, _BAR_Y, ic, ic)
         self.dup_btn = (self.new_btn[0] + stride, _BAR_Y, ic, ic)
         self.del_btn = (self.dup_btn[0] + stride, _BAR_Y, ic, ic)
 
@@ -560,6 +564,9 @@ class Layout:
         self.status_name_x = self.del_btn[0] + self.del_btn[2] + edge
         self.status_name_maxc = max(
             4, (self.clock_x - edge - self.status_name_x) // self.font_w)
+        # The full lent left zone (Stage 4): from the left edge to just before the
+        # right zone's clock text -- the rect BarLayer hands to draw_zone/zone_tap.
+        self.zone_left = (edge, _BAR_Y, max(0, self.clock_x - 2 * edge), ic)
 
         # -- page chevrons (centered vertically in the icon band) ----------------
         if self._base:
@@ -1108,8 +1115,11 @@ class Workstation:
         # state (EditorApp.tab). Built idle here (BEFORE anything can set menu_view,
         # which is now a forwarding projection of editor_app.tab -- see below). The tab
         # machine (set_menu_view/_open_*/_leave_menu) moved onto it; ws keeps one-line
-        # forwards so every surface file + test is unchanged.
-        self.editor_app = EditorApp(self)
+        # forwards so every surface file + test is unchanged. NAMES/_in are injected
+        # (Stage 4, docs/shell_ux_technical_plan_v1.md): the Editor now lends the top
+        # bar's left zone (draw_zone/zone_tap, bar_layer.py) so it needs the shared
+        # draw toolkit + rect hit-test, like the other zone-owning surfaces.
+        self.editor_app = EditorApp(self, NAMES, _in)
         self._run_caller = None       # who to return to on QUIT (run() records it; Stage 2
                                       # only ever the home root, so pop == go_home)
         # (The cards menu's selection/scroll state -- msel/mtop -- lives on

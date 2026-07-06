@@ -161,7 +161,12 @@ class _UpdateLayer(Layer):
 
 class _MapLayer(Layer):
     """The map/tilemap editor (#32), a game-canvas viewport panel over the frozen
-    cart. Tap = paint one cell, drag = pan (#37); the d-pad pans the window."""
+    cart. Tap = paint one cell, drag = pan (#37); the d-pad pans the window.
+
+    Stage 4 (#46 zoned bar): draw() calls ws.bar_layer._draw_status_strip("menu")
+    LAST (chrome over content) so the Editor's lent top-bar zone (the tab ladder +
+    PLAY) shows on this tab; handle_pointer routes a tap through
+    ws.bar_layer.handle_bar_tap("menu", ...) FIRST, before the map click/pan."""
 
     id = "map"
     domain = "game"
@@ -170,6 +175,7 @@ class _MapLayer(Layer):
         ws = self.ws
         ws._draw_menu_backdrop()          # frozen cart frame + reset draw state
         ws.map_ui._draw_map()
+        ws.bar_layer._draw_status_strip("menu")
 
     def handle_input(self, i):
         self.ws.map_ui._map_input()
@@ -178,6 +184,8 @@ class _MapLayer(Layer):
     def handle_pointer(self, px, py, click):
         ws = self.ws
         gx, gy = ws._game_xy(px, py)       # the map lives in the 320x240 viewport
+        if click and ws.bar_layer.handle_bar_tap("menu", gx, gy):
+            return True         # the Editor's lent zone (Stage 4) claimed the tap
         if click:
             ws.map_ui._map_click(gx, gy)
         elif ws.pointer.down:

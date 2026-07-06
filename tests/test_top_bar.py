@@ -402,3 +402,204 @@ def test_icon_theme_versioning_reseeds_stale_keeps_current(tmp_path):
     store.save_system_icons(other, root, C._ICON_VERSION)
     ws.load_icon_sheet()
     assert ws.icon_sheet.to_hex() == other
+
+
+# -- the zoned bar (Stage 4 of docs/shell_ux_technical_plan_v1.md, #46): the
+# right zone (clock/wifi/batt/gear) is OS-owned, the left zone is LENT to the
+# active app (launcher_layer/settings_layer/editor_app). The #43 strip cache is
+# GENERALIZED (not duplicated) to cover home/settings/menu too -- these tests are
+# the redraw-count proof the perf guardrail demands, mirroring the existing
+# cached-cart-bar tests above but for _render_zoned_bar's new callers.
+
+def test_zoned_bar_reuses_cache_when_state_unchanged(tmp_path):
+    """Repeated frames on a static zoned screen (the launcher home) must reuse the
+    cached strip, not re-render -- the same proof as the running-cart cache, now
+    for _render_cart_bar's "home" branch."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)              # one clean frame: the strip is built + current
+    calls = [0]
+    orig = ws.bar_layer._render_cart_bar
+
+    def counting(cv, key):
+        calls[0] += 1
+        return orig(cv, key)
+    ws.bar_layer._render_cart_bar = counting
+    for _ in range(5):
+        ws._dirty = True            # force a screen repaint (#44's own gate is not
+                                     # what we're testing -- the BAR's cache is)
+        drv.frame(1 / 30)
+    assert calls[0] == 0, "an unchanged zoned bar should reuse its cached strip"
+
+
+def test_zoned_bar_rerenders_on_app_switch(tmp_path):
+    """Switching the active app (launcher -> the Editor) must re-render the bar
+    exactly once (a new `where` is always a key change), then reuse the new strip."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)
+    calls = [0]
+    orig = ws.bar_layer._render_cart_bar
+
+    def counting(cv, key):
+        calls[0] += 1
+        return orig(cv, key)
+    ws.bar_layer._render_cart_bar = counting
+    ws.launcher.sel = 0
+    ws.open_in_editor()              # maker landing -> screen "menu"
+    ws._dirty = True
+    drv.frame(1 / 30)
+    assert calls[0] == 1, "switching from the launcher to the Editor must re-render once"
+    for _ in range(3):
+        ws._dirty = True
+        drv.frame(1 / 30)
+    assert calls[0] == 1, "after the re-render the new strip is reused"
+
+
+def test_zoned_bar_rerenders_on_editor_tab_switch(tmp_path):
+    """Switching Editor tabs bumps EditorApp.zone_gen, which the cache key folds
+    in -- so a tab switch re-renders the bar exactly once, proving zone_gen (not a
+    per-frame poll) is what invalidates it."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.launcher.sel = 0
+    ws.open_in_editor()
+    drv.frame(1 / 30)
+    calls = [0]
+    orig = ws.bar_layer._render_cart_bar
+
+    def counting(cv, key):
+        calls[0] += 1
+        return orig(cv, key)
+    ws.bar_layer._render_cart_bar = counting
+    ws._open_paint()                 # EditorApp.set_tab bumps zone_gen
+    ws._dirty = True
+    drv.frame(1 / 30)
+    assert calls[0] == 1, "switching Editor tabs must re-render the zoned bar once"
+    for _ in range(3):
+        ws._dirty = True
+        drv.frame(1 / 30)
+    assert calls[0] == 1, "after the re-render the new strip is reused"
+
+
+def test_zoned_bar_rerenders_on_launcher_selection_change(tmp_path):
+    """Moving the launcher selection bumps Launcher.zone_gen (via the `sel`
+    property), so the cached strip picks up the new cart name -- proving the
+    zone_gen wiring covers a raw `.sel = i` assignment (nav/tap/hover), not just a
+    dedicated setter method."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)
+    calls = [0]
+    orig = ws.bar_layer._render_cart_bar
+
+    def counting(cv, key):
+        calls[0] += 1
+        return orig(cv, key)
+    ws.bar_layer._render_cart_bar = counting
+    ws.launcher.nav2d(1, 0)           # move the selection -> zone_gen bumps
+    ws._dirty = True
+    drv.frame(1 / 30)
+    assert calls[0] == 1, "a selection change must re-render the zoned bar once"
+    for _ in range(3):
+        ws._dirty = True
+        drv.frame(1 / 30)
+    assert calls[0] == 1
+
+
+def test_zoned_bar_editor_zone_switches_tabs_and_plays(tmp_path):
+    """The Editor's lent left zone (the tab ladder + PLAY) is really tappable: a
+    tap on the PAINT icon switches menu_view, a tap on PLAY runs the cart."""
+    from runtime import bar_layer as BL
+    from runtime import editor_app as EA
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.launcher.sel = 0
+    ws.open_in_editor()
+    drv.frame(1 / 30)
+    paint_i = [t for t, _g in EA._ZONE_TABS].index("paint")
+    x = BL._ZONE_LEFT_GAME[0] + paint_i * EA._ZONE_STRIDE + BL._BAR_ICON // 2
+    y = BL._ZONE_LEFT_GAME[1] + BL._BAR_ICON // 2
+    drv.click(x, y)
+    drv.frame(1 / 30)
+    assert ws.screen == "menu" and ws.menu_view == "paint"
+    play_i = len(EA._ZONE_TABS) - 1
+    x = BL._ZONE_LEFT_GAME[0] + play_i * EA._ZONE_STRIDE + BL._BAR_ICON // 2
+    drv.click(x, y)
+    drv.frame(1 / 30)
+    assert ws.screen == "desktop", "PLAY must run the cart"
+
+
+def test_zoned_bar_gear_opens_sysmenu_from_every_zoned_screen(tmp_path):
+    """The right zone's ≡ (moved off the left edge, Stage 4) is OS-owned and
+    IDENTICAL everywhere the bar shows: home, Settings, and an Editor game-domain
+    tab all open the same dropdown."""
+    from runtime import bar_layer as BL
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+
+    def _center(rect):
+        x, y, w, h = rect
+        return x + w // 2, y + h // 2
+
+    drv.click(*_center(ws.layout.sysmenu_btn))     # home
+    drv.frame(1 / 30)
+    assert ws.sysmenu.open
+    ws.sysmenu.close()
+
+    ws.open_settings()
+    drv.frame(1 / 30)
+    drv.click(*_center(ws.layout.sysmenu_btn))     # settings
+    drv.frame(1 / 30)
+    assert ws.sysmenu.open
+    ws.sysmenu.close()
+    ws.go_home()
+
+    ws.launcher.sel = 0
+    ws.open_in_editor()
+    ws._open_paint()
+    drv.frame(1 / 30)
+    drv.click(*_center(BL._ZONE_GEAR))             # Editor, game-domain tab
+    drv.frame(1 / 30)
+    assert ws.sysmenu.open
+
+
+def test_draw_zone_never_invoked_while_player_is_top_of_stack(tmp_path):
+    """The #46 zoned bar's dispatch (draw_zone) MUST stay off the play frame: a
+    Player -- playing OR paused/crashed -- owns the "desktop" screen, and
+    _render_cart_bar's "desktop" branch returns before any owner.draw_zone call.
+    Patch every zone owner's draw_zone and drive a running cart through several
+    playing AND paused frames; none may ever fire (this is what keeps the lent-
+    zone dispatch off the 50fps play frame -- a zone drawn during play would be
+    both a pixel regression and a per-frame cost the golden set can't catch)."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    calls = []
+    for owner in (ws.launcher_layer, ws.settings_layer, ws.editor_app):
+        orig = owner.draw_zone
+
+        def spy(cv, rect, _orig=orig, _owner=owner):
+            calls.append(_owner)
+            return _orig(cv, rect)
+        owner.draw_zone = spy
+
+    ws.launcher.sel = 0
+    ws.open()                      # PLAY landing: straight to the running "desktop"
+    assert ws.screen == "desktop"
+    for _ in range(5):             # playing, unpaused
+        ws._dirty = True
+        drv.frame(1 / 30)
+    ws.cart_paused = True
+    for _ in range(5):             # paused chrome (the OLD, untouched pause bar)
+        ws._dirty = True
+        drv.frame(1 / 30)
+    assert calls == [], (
+        "the zoned bar's draw_zone must never fire while a Player is top-of-stack "
+        "(playing or paused) -- got calls from: %r" % calls)

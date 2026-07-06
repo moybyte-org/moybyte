@@ -20,6 +20,11 @@ of console call sites resolve `console._CARD_H` / `_RUN_BTN` / ...). `NAMES` (pa
 `_in` (rect hit-test) and `_err_text` are injected at construction (the same circular-
 import dodge the other extracted UIs use). Shared draw toolkit (ws._glyph/_icon_btn)
 stays on Workstation; the bar draws through it via self.ws.
+
+Stage 4 (#46 zoned bar): draw() calls ws.bar_layer._draw_status_strip("menu") LAST
+(chrome over content) so the Editor's lent top-bar zone (the tab ladder + PLAY,
+EditorApp.draw_zone) shows on this tab; handle_pointer routes a tap through
+ws.bar_layer.handle_bar_tap("menu", ...) FIRST, before the card/button hit-tests.
 """
 
 
@@ -83,6 +88,10 @@ class CardsLayer:
             print("Moybyte cards error:", exc)
             ws._draw_error_panel()
             ws._icon_btn("close", "", _CLOSE_BTN, self._NAMES["red"])
+        # The Editor's lent top-bar zone (Stage 4, #46 zoned bar): the tab ladder +
+        # PLAY, replacing the old pause-only tool switcher for this tab. Drawn LAST
+        # (chrome over content), byte-identical cost to the #43 strip cache.
+        ws.bar_layer._draw_status_strip("menu")
 
     def handle_input(self, i):
         ws = self.ws
@@ -111,6 +120,8 @@ class CardsLayer:
         ws = self.ws
         gx, gy = ws._game_xy(px, py)
         px, py = gx, gy
+        if click and ws.bar_layer.handle_bar_tap("menu", px, py):
+            return True         # the Editor's lent zone (Stage 4) claimed the tap
         ci = self._card_at(px, py)
         if ci is not None:
             self.msel = ci                 # hover highlights
