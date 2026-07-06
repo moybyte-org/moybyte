@@ -188,7 +188,7 @@ def test_dock_home_returns_from_settings(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
     k = C._DOCK_SLOTS.index("home")
-    x, y, w, h = ws._dock_slot_rect(k)
+    x, y, w, h = ws.bar_layer._dock_slot_rect(k)
     drv.click(x + w // 2, y + h // 2)
     drv.frame(1 / 30)
     assert ws.screen == "launcher"
@@ -262,8 +262,8 @@ def _spy_draw(ws):
     on both screens, so "strip" counts the launcher/Settings bar (where home/settings)
     and "incart" counts the running-cart bar (where == "desktop")."""
     seen = {"dock": 0, "incart": 0, "strip": 0}
-    odock = ws._draw_dock
-    ostrip = ws._draw_status_strip
+    odock = ws.bar_layer._draw_dock
+    ostrip = ws.bar_layer._draw_status_strip
 
     def dock(where):
         seen["dock"] += 1
@@ -276,8 +276,8 @@ def _spy_draw(ws):
             seen["strip"] += 1
         return ostrip(where)
 
-    ws._draw_dock = dock
-    ws._draw_status_strip = strip
+    ws.bar_layer._draw_dock = dock
+    ws.bar_layer._draw_status_strip = strip
     return seen
 
 

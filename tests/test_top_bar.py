@@ -299,7 +299,7 @@ def test_cached_cart_bar_is_pixel_identical_to_direct_render(tmp_path):
     cached = _bar_rows(ws.canvas)                 # what the cache+blit produced
     # Direct render of the identical state onto a clean canvas.
     direct = Canvas(ws.canvas.w, ws.canvas.h, ws.canvas.palette)
-    ws._render_cart_bar(direct, ws._cart_bar_key())
+    ws.bar_layer._render_cart_bar(direct, ws.bar_layer._cart_bar_key())
     assert _bar_rows(direct) == cached
     # And it's a REAL picture (icons + glyph + text), not a blank band.
     assert len(set(cached)) > 2
@@ -310,12 +310,12 @@ def test_cart_bar_reuses_cache_when_state_unchanged(tmp_path):
     blits the cached strip. Witness it by counting _render_cart_bar calls across frames."""
     ws, drv = _run_a_cart(tmp_path)
     calls = [0]
-    orig = ws._render_cart_bar
+    orig = ws.bar_layer._render_cart_bar
 
     def counting(cv, key):
         calls[0] += 1
         return orig(cv, key)
-    ws._render_cart_bar = counting
+    ws.bar_layer._render_cart_bar = counting
     # Several more frames at the same state -> the strip is already built + clean.
     for _ in range(5):
         drv.frame(1 / 30)
@@ -327,12 +327,12 @@ def test_cart_bar_invalidates_on_theme_change(tmp_path):
     bar re-render on the next frame, then the new strip is reused."""
     ws, drv = _run_a_cart(tmp_path)
     calls = [0]
-    orig = ws._render_cart_bar
+    orig = ws.bar_layer._render_cart_bar
 
     def counting(cv, key):
         calls[0] += 1
         return orig(cv, key)
-    ws._render_cart_bar = counting
+    ws.bar_layer._render_cart_bar = counting
     ws.set_icon_sheet(ws.icon_sheet)              # bumps _bar_cache_gen -> key changes
     drv.frame(1 / 30)
     assert calls[0] == 1, "a theme change must re-render the bar once"
@@ -348,15 +348,15 @@ def test_cart_bar_invalidates_on_clock_change(tmp_path):
     key) and asserting the next frame rebuilds the strip."""
     ws, drv = _run_a_cart(tmp_path)
     calls = [0]
-    orig = ws._render_cart_bar
+    orig = ws.bar_layer._render_cart_bar
 
     def counting(cv, key):
         calls[0] += 1
         return orig(cv, key)
-    ws._render_cart_bar = counting
+    ws.bar_layer._render_cart_bar = counting
     drv.frame(1 / 30)
     assert calls[0] == 0                          # clock unchanged -> reused
-    ws._clock_text = lambda: "99:99"              # the clock "ticked"
+    ws.bar_layer._clock_text = lambda: "99:99"              # the clock "ticked"
     ws._dirty = True                              # paused screens are static (#71): force a repaint
     drv.frame(1 / 30)
     assert calls[0] == 1, "a clock change must re-render the bar"
