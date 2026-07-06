@@ -150,6 +150,24 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
         _LegacyLayer, _BlocksLayer, _UpdateLayer, _MapLayer, _MusicLayer,
         _PerfLayer, _AchOverlayLayer, _SysMenuLayer, _AboutLayer)
 
+# The unified top bar + bottom dock surface (#46, extracted from this file -- see
+# bar_layer.py). bar_layer.py is the SINGLE SOURCE of the bar/dock geometry constants
+# (_STATUS_H / _BAR_* / the tool-switcher button rects / _DOCK_*); they're imported
+# back here (re-exported under the same names) because console.py's own Layout + a few
+# derived constants + the golden harness/tests reference them as console._X -- rather
+# than duplicate them (drift), the same way block_editor_ui.py owns its _BLK_*. NAMES
+# and _in are injected into the one BarLayer a Workstation builds (circular-import dodge).
+try:
+    from bar_layer import (
+        BarLayer, _BAR_ICON, _BAR_GAP, _BAR_STRIDE, _BAR_Y, _SYSMENU_BTN, _HOME_BTN,
+        _MENU_BTN, _PAINT_BTN, _MAP_BTN, _BLOCKS_BTN, _MUSIC_BTN, _BAR_BATT, _BAR_WIFI,
+        _BAR_CLOCK, _STATUS_H, _DOCK_SLOTS, _DOCK_GLYPH, _DOCK_LABEL)
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.bar_layer import (
+        BarLayer, _BAR_ICON, _BAR_GAP, _BAR_STRIDE, _BAR_Y, _SYSMENU_BTN, _HOME_BTN,
+        _MENU_BTN, _PAINT_BTN, _MAP_BTN, _BLOCKS_BTN, _MUSIC_BTN, _BAR_BATT, _BAR_WIFI,
+        _BAR_CLOCK, _STATUS_H, _DOCK_SLOTS, _DOCK_GLYPH, _DOCK_LABEL)
+
 # The block vocabulary/compiler (#29). Imported under whichever name it's known by:
 # bare `blocks` on the device (frozen top-level) and on the host once host_app has
 # aliased it, or `runtime.blocks` when a test loads console/moy_runtime directly
@@ -425,39 +443,12 @@ class Pointer:
 
 
 # --- Pointer UI layout (320x240) -------------------------------------------
-# The unified top bar (Stage 1): an 18px black strip on BOTH the launcher and the
-# running-cart screen, where every chrome control is a 16x16 sprite from an editable
-# IconSheet (not the old labeled glyph buttons). On the running-cart screen the LEFT
-# cluster is the tool switcher -- HOME, EDIT/CODE, PAINT, MAP, BLOCKS -- a row of
-# icon-only buttons. 16px icons in an 18px bar -> 1px top margin (y=1); icons stride
-# _BAR_STRIDE (16 + 2px gap). These rects are GAME-canvas coords (the running-cart
-# screen hit-tests in the 320x240 viewport); the launcher's NEW/DUP/DEL/gear live in
-# Layout (system-canvas coords) since the home screen hit-tests there.
-_BAR_ICON = 16              # icon sprite side (16x16, from the IconSheet)
-_BAR_GAP = 2               # px between adjacent bar icons
-_BAR_STRIDE = _BAR_ICON + _BAR_GAP        # 18: left-edge step between icons
-_BAR_Y = 1                 # icons sit 1px down in the 18px bar (1px top/bottom margin)
-# System menu (#52): the hamburger (≡) is the LEFT-MOST icon (Picotron logo-top-left);
-# tapping it toggles the dropdown. It claims the old _HOME_BTN slot (x=2) and the tool
-# switchers HOME/EDIT/PAINT/MAP/BLOCKS/MUSIC shift one stride right so the bar stays a
-# single uninterrupted row. The hamburger is drawn via the _glyph BITMAP (not the
-# themeable IconSheet) so an already-themed device -- whose saved system_icons.moygfx has
-# no art for a new slot -- never shows a blank tile here. The rightmost switcher is now
-# MUSIC (#50) at slot 6 -> ends at x=126; the right cluster (clock at x=224..) is clear.
-_SYSMENU_BTN = (2, _BAR_Y, _BAR_ICON, _BAR_ICON)                 # ≡ dropdown toggle (slot 0)
-_HOME_BTN = (2 + _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)      # back to launcher
-_MENU_BTN = (2 + 2 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)  # Make-it-mine / code
-_PAINT_BTN = (2 + 3 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)  # paint editor
-_MAP_BTN = (2 + 4 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)   # map (tilemap) editor
-_BLOCKS_BTN = (2 + 5 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)  # block editor (#29)
-_MUSIC_BTN = (2 + 6 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)  # music/sound editor (#50)
-# Right cluster on the running-cart bar (GAME canvas, always 320 wide @ fs 1): batt
-# hard-right, then wifi, then the clock text. (Settings moved off the bar into the ≡
-# system menu, OS-style, so there's no gear here any more.) Mirrors the launcher
-# Layout's right cluster so both bars read identically. The clock egg hit-test uses
-# _BAR_CLOCK. Literal 320 width / 18px bar / 8px font here (the game canvas is fixed).
-_BAR_BATT = (320 - 2 - _BAR_ICON, _BAR_Y, _BAR_ICON, _BAR_ICON)
-_BAR_WIFI = (_BAR_BATT[0] - _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)
+# The unified top bar's geometry (Stage 1) -- _STATUS_H, _BAR_ICON/_BAR_GAP/
+# _BAR_STRIDE/_BAR_Y, the fixed 320x240 tool-switcher button rects (_SYSMENU_BTN /
+# _HOME_BTN / _MENU_BTN / _PAINT_BTN / _MAP_BTN / _BLOCKS_BTN / _MUSIC_BTN),
+# _BAR_BATT / _BAR_WIFI / _BAR_CLOCK, and _DOCK_SLOTS / _DOCK_GLYPH / _DOCK_LABEL --
+# now lives in bar_layer.py (its own surface, #46) and is imported back at the top of
+# this file, so console._X still resolves for Layout + the golden harness/tests.
 # Pause screen (#71 unified key): two explicit, always-tappable buttons so
 # quitting is never ambiguous or keyboard-mode-dependent -- CONTINUE resumes,
 # QUIT goes home. Centered as a pair near the bottom of the 320x240 game
@@ -470,7 +461,6 @@ _PAUSE_CONTINUE_BTN = ((320 - 2 * _PAUSE_BTN_W - _PAUSE_BTN_GAP) // 2, _PAUSE_BT
                        _PAUSE_BTN_W, _PAUSE_BTN_H)
 _PAUSE_QUIT_BTN = (_PAUSE_CONTINUE_BTN[0] + _PAUSE_BTN_W + _PAUSE_BTN_GAP, _PAUSE_BTN_Y,
                    _PAUSE_BTN_W, _PAUSE_BTN_H)
-_BAR_CLOCK = (_BAR_WIFI[0] - 2 - 5 * 8, 0, 5 * 8, 18)
 _RUN_BTN = (28, 188, 70, 24)
 _CODE_BTN = (104, 188, 84, 24)
 _CLOSE_BTN = (194, 188, 96, 24)
@@ -491,8 +481,7 @@ _CARD_SCROLL_DN = (300, 168, 16, 14)    # tap to scroll cards down
 # NEW/DUP/DEL management icons), and (in Settings) the bottom dock. The top bar's
 # icons are 16x16 sprites from the editable IconSheet (Stage 1); the rest of the
 # chrome uses the indexed API + petme128 font + the _glyph vocabulary, so host ==
-# device.
-_STATUS_H = 18          # unified top bar height (16px icons + 1px top/bottom margin)
+# device. (_STATUS_H lives in bar_layer.py, imported back at the top of this file.)
 _DOCK_Y = 218           # bottom dock strip top
 _DOCK_H = 22
 # Cart icon grid: a page of COLS x ROWS tiles between the status strip and dock.
@@ -505,25 +494,16 @@ _ICON_GAP_Y = 6
 _ICON_X0 = 8            # left margin so the COLS tiles + gaps center in 320px
 _ICON_Y0 = _STATUS_H + 8
 _ICON_BOX = 40          # the inner art box of a tile (the tappable icon proper)
-# Home management actions (create / duplicate / delete) -- 16x16 icon buttons on the
-# LEFT of the top bar's right cluster (the cluster is, L->R: NEW DUP DEL ... wifi batt
-# gear, with the gear hard against the right edge). Only drawn/hit-tested when
-# can_manage. 320x240 baseline; Layout reflows them on a larger system canvas.
-_NEW_BTN = (2, _BAR_Y, _BAR_ICON, _BAR_ICON)        # placeholder; Layout sets the real x
-_DUP_BTN = (2 + _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)
-_DEL_BTN = (2 + 2 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)
+# (The home NEW/DUP/DEL management icons are hit-tested via Layout's responsive
+# lay.new_btn/dup_btn/del_btn -- the old fixed _NEW_BTN/_DUP_BTN/_DEL_BTN placeholders
+# were dead, so they were dropped with the bar-geometry move to bar_layer.py.)
 # Page chevrons (when more carts than one page): tap to flip pages.
 _PAGE_PREV = (2, 110, 14, 24)
 _PAGE_NEXT = (304, 110, 14, 24)
 # Bottom dock (persistent tool switcher, TIC-80 style): one tap to jump between
-# home / code / draw / map / run / settings. On the home screen HOME is the
-# active highlight; while a cart is open the dock stays so a kid hops tools
-# without back-tracking. Six evenly-spaced slots across 320px.
-_DOCK_SLOTS = ("home", "code", "paint", "map", "run", "settings")
-_DOCK_GLYPH = {"home": "home", "code": "code", "paint": "paint",
-               "map": "map", "run": "run", "settings": "gear"}
-_DOCK_LABEL = {"home": "HOME", "code": "CODE", "paint": "DRAW",
-               "map": "MAP", "run": "RUN", "settings": "SET"}
+# home / code / draw / map / run / settings. Six evenly-spaced slots across 320px.
+# (_DOCK_SLOTS/_DOCK_GLYPH/_DOCK_LABEL live in bar_layer.py, imported back above;
+# the per-slot width/gap/geometry below stays here for Layout.)
 _DOCK_W = 52
 _DOCK_GAP = 1
 _DOCK_X0 = 2
@@ -1626,316 +1606,6 @@ class Popup:
 _SPLASH_MS = 1500
 
 
-class BarLayer:
-    """The unified 18px top bar + bottom dock (#46), migrated out of Workstation as
-    its own surface (docs/shell_layers_refactor_v1.md Phase 2). Owns the bar's DRAW
-    (three variants: launcher 'home', 'settings', running-cart 'desktop'), the dock,
-    the running-cart bar's offscreen strip cache (#43), the per-second clock cache
-    (#66), the dock geometry/activation, and the bar/dock TAP slices.
-
-    Boundary decisions (deliberate, see the doc):
-      * The button-rect + dock CONSTANTS stay module-level -- the golden harness +
-        tests reference console._HOME_BTN / _MENU_BTN / _DOCK_SLOTS / ..., and they're
-        foundational chrome geometry the layout also uses. BarLayer references them.
-      * The shared draw toolkit (ws._glyph / ws._icon / ws._mini_btn / ws._bar_image)
-        stays on Workstation per the doc; the bar is a CONSUMER of it.
-      * `_bar_img_cache` (per-kind icon Image cache backing ws._icon) stays on ws;
-        `_bar_cache_gen` (the running-cart STRIP cache generation) lives here and
-        ws.set_icon_sheet bumps it via invalidate().
-
-    The bar is CHROME the content composes, not a standalone stack layer: it's
-    SYSTEM-domain on launcher/settings (drawn on sys_canvas) but GAME-domain on the
-    running cart (drawn on the game canvas inside the viewport), and it draws at a
-    fixed point inside each content's paint. So the content draws call
-    _draw_status_strip(where)/_draw_dock(where) and the pointer methods delegate their
-    bar slice to handle_home_tap / handle_cart_tap / _dock_slot_at + _activate_dock.
-    Method names are kept identical to the pre-migration Workstation ones so the tests
-    just repoint to ws.bar_layer.<name>."""
-
-    def __init__(self, ws):
-        self.ws = ws
-        # Cached running-cart top bar (#43): rendered ONCE into an offscreen strip and
-        # blitted each frame (one flat copy) instead of re-rendering ~9 sprites + glyph
-        # + text every frame. `_cart_bar_strip` is the layer; `_cart_bar_key_cur` is the
-        # state key it holds (None = stale); `_cart_bar_canvas` is the canvas it was
-        # built on (a web-view swap forces a rebuild); `_bar_cache_gen` is bumped by the
-        # explicit invalidators (invalidate(), from ws.set_icon_sheet) so a theme swap
-        # repaints.
-        self._cart_bar_strip = None
-        self._cart_bar_key_cur = None
-        self._cart_bar_canvas = None
-        self._bar_cache_gen = 0
-        # Clock-text cache (#66 CHROMEBRK): (second, string) -- see _clock_text.
-        self._clock_at = -1
-        self._clock_cache = ""
-
-    def invalidate(self):
-        """Repaint the cached running-cart bar on the next frame (a theme/IconSheet
-        swap changed its pixels). Called by ws.set_icon_sheet."""
-        self._bar_cache_gen += 1
-
-    # -- draw ----------------------------------------------------------------
-
-    def _draw_status_strip(self, where):
-        """The unified 18px top bar (Stage 1), drawn on BOTH the launcher/Settings and
-        the running-cart screen. A black backing band (with a thin shelf edge line
-        below) full of 16x16 IconSheet sprites instead of the old labeled glyph
-        buttons. Layers:
-
-          * Right cluster (always): the clock text, then wifi, batt, gear icons,
-            right-aligned (wifi/batt keep their placeholder green for now).
-          * Left cluster (launcher home / Settings): NEW / DUP / DEL icons when
-            can_manage; the selected cart's name fills the gap before the clock.
-          * Left cluster (running cart, where == "desktop"): the tool switcher --
-            HOME, then EDIT (or CODE for a no-edit cart), PAINT, MAP, BLOCKS.
-
-        The launcher/Settings bar draws on the SYSTEM canvas (reflowed by Layout #39);
-        the running-cart bar draws on the GAME canvas (the fixed 320x240 viewport), so
-        it uses the fixed _BAR_* / button-rect constants. Translucency isn't available
-        on the indexed canvas, so the dark band is a deliberate shelf over the
-        wallpaper (whose art is pushed below it, see _draw_wallpaper #46)."""
-        ws = self.ws
-        if where == "desktop":
-            self._draw_top_bar_cart()
-            return
-        cv = ws.sys_canvas
-        lay = ws.layout
-        cv.rect(0, 0, cv.w, lay.status_h, NAMES["black"])
-        cv.rect(0, lay.status_h - 1, cv.w, 1, NAMES["dark_grey"])   # shelf edge line
-        # Right cluster: clock + wifi/batt (Settings now lives in the ≡ menu, #52).
-        cv.print(self._clock_text(), lay.clock_x, 3, NAMES["light_grey"], 1)
-        ws._icon("wifi", lay.wifi_btn[0], lay.wifi_btn[1], cv)
-        ws._icon("batt", lay.batt_btn[0], lay.batt_btn[1], cv)
-        # ≡ system-menu toggle (leftmost, always) -- the launcher's Settings entry now,
-        # a _glyph bitmap like the in-cart bar so an older saved theme can't blank it.
-        ws._glyph("menu", lay.sysmenu_btn, NAMES["white"], cv)
-        # Left cluster: management icons (when writable) + the selected cart's name.
-        if where == "home":
-            if ws.can_manage:
-                ws._icon("new", lay.new_btn[0], lay.new_btn[1], cv)
-                ws._icon("dup", lay.dup_btn[0], lay.dup_btn[1], cv)
-                ws._icon("del", lay.del_btn[0], lay.del_btn[1], cv)
-            sel = ws.launcher.selected()
-            if sel is not None:
-                name = sel["title"]
-                if len(name) > lay.status_name_maxc:
-                    name = name[:lay.status_name_maxc]
-                cv.print(name, lay.status_name_x, 3, NAMES["white"], 1)
-
-    def _draw_top_bar_cart(self):
-        """The running-cart half of the unified top bar (where == "desktop"). Drawn on
-        the GAME canvas with the fixed 320x240 rects: a tool switcher on the left
-        (HOME / EDIT|CODE / PAINT / MAP / BLOCKS) + the right cluster (clock + wifi /
-        batt / gear). Same icon vocabulary as the launcher bar so both read alike.
-
-        CACHED (#43): a running cart redraws every frame, but this bar is almost entirely
-        static -- the clock changes ~once/min, the icons/menu never mid-play -- so
-        re-rendering ~9 16x16 sprites + a glyph + text each frame was ~6ms of wasted draw
-        (the `chrome=` term in DRAWBRK). Instead the bar's pixels are rendered ONCE into an
-        offscreen _STATUS_H-tall strip (a new_layer, the #54 offscreen primitive) keyed by
-        the state that changes its picture, and each frame we just blit_strip the cached
-        strip onto the canvas (one flat copy, ~0.5ms). When the key changes (cart switch,
-        clock tick, theme edit, font/size change) the strip is re-rendered, then reused.
-        The strip is purely the DRAW; hit-testing still uses the independent _*_BTN rects,
-        so caching can't desync taps."""
-        ws = self.ws
-        cv = ws.canvas
-        key = self._cart_bar_key()
-        strip = self._cart_bar_strip
-        # The active canvas can SWAP at runtime (the device web view binds a recording
-        # TeeCanvas in place of the raw DeviceCanvas, #41). A strip allocated on the OLD
-        # canvas is the wrong layer type for the new one -- a raw DeviceCanvas strip blitted
-        # through the Tee has no RecordingLayer hooks ('_end_batch' AttributeError), and it
-        # wouldn't be recorded for the browser anyway. So rebuild the layer when the canvas
-        # identity changes, not just on a resize.
-        canvas_changed = self._cart_bar_canvas is not cv
-        if strip is None or strip.w != cv.w or canvas_changed or self._cart_bar_key_cur != key:
-            # (Re)build the cached strip. new_layer gives a same-type/-palette canvas the
-            # bar body draws into at the SAME coords (the bar lives at y in [0, _STATUS_H),
-            # which maps 1:1 onto the strip's rows), so the cached pixels are byte-identical
-            # to drawing straight onto cv. Reuse the buffer across re-renders when the size
-            # is unchanged; allocate a fresh layer on first build / a resize / a canvas swap.
-            if strip is None or strip.w != cv.w or canvas_changed:
-                strip = cv.new_layer(cv.w, _STATUS_H)
-                self._cart_bar_strip = strip
-                self._cart_bar_canvas = cv
-            self._render_cart_bar(strip, key)
-            self._cart_bar_key_cur = key
-        cv.blit_strip(strip, 0, 0)
-
-    def _cart_bar_key(self):
-        """The cache key for the running-cart top bar: every piece of state that changes
-        the bar's PIXELS. A different key forces a strip re-render; an unchanged key reuses
-        the cached strip. Includes the clock text (ticks ~once/min), whether the cart has
-        an edit schema (EDIT vs CODE icon), the icon theme identity + the glyph font scale
-        (a theme edit / resize must repaint), and a generation counter the explicit
-        invalidators bump (set_icon_sheet, etc.). wifi/batt are static placeholder art
-        today; if they gain live state, fold it in here."""
-        ws = self.ws
-        has_edit = bool(ws.cart.get("edit")) if ws.cart else False
-        return (self._clock_text(), has_edit, id(ws.icon_sheet),
-                getattr(ws.canvas, "font_scale", 1), self._bar_cache_gen)
-
-    def _render_cart_bar(self, cv, key):
-        """Render the running-cart bar's pixels onto `cv` (the offscreen strip, or any
-        canvas) at the fixed 320x240 bar coords. Factored out of _draw_top_bar_cart so the
-        SAME drawing serves both the cache build and the (test/fallback) direct path, which
-        is what makes the cached strip pixel-identical to a direct render. `key` carries the
-        already-computed has_edit (index 1) so the icon choice can't drift from the key."""
-        ws = self.ws
-        has_edit = key[1]
-        cv.rect(0, 0, cv.w, _STATUS_H, NAMES["black"])
-        cv.rect(0, _STATUS_H - 1, cv.w, 1, NAMES["dark_grey"])      # shelf edge line
-        # Left cluster: the TIC-80 one-tap tool switcher. Carts with a Make-it-mine
-        # schema open the cards menu (pencil = EDIT); the rest jump straight to code
-        # (the < > glyph = CODE). cart may be None defensively (error panel, no cart).
-        # ≡ system-menu toggle (#52), leftmost. A _glyph bitmap (not a themeable
-        # IconSheet slot) so it never goes blank on a device with an older saved theme.
-        ws._glyph("menu", _SYSMENU_BTN, NAMES["white"], cv)
-        ws._icon("home", _HOME_BTN[0], _HOME_BTN[1], cv)
-        ws._icon("edit" if has_edit else "code", _MENU_BTN[0], _MENU_BTN[1], cv)
-        ws._icon("paint", _PAINT_BTN[0], _PAINT_BTN[1], cv)
-        ws._icon("map", _MAP_BTN[0], _MAP_BTN[1], cv)
-        ws._icon("blocks", _BLOCKS_BTN[0], _BLOCKS_BTN[1], cv)
-        ws._icon("music", _MUSIC_BTN[0], _MUSIC_BTN[1], cv)
-        # Right cluster: clock + wifi/batt (Settings now lives in the ≡ menu, not a gear).
-        cv.print(self._clock_text(), _BAR_CLOCK[0], 3, NAMES["light_grey"], 1)
-        ws._icon("wifi", _BAR_WIFI[0], _BAR_WIFI[1], cv)
-        ws._icon("batt", _BAR_BATT[0], _BAR_BATT[1], cv)
-
-    def _clock_text(self):
-        """A wall-clock HH:MM from time.localtime when available, else a mm:ss
-        uptime so the strip always shows a live clock (host == device). Cached
-        per second (#66 CHROMEBRK): the cart bar's cache KEY calls this every
-        frame, and re-running localtime + %-format 30x/s was a measurable slice
-        of the ~2.3ms bar cost -- the string can only change once a second."""
-        now_s = _ticks_ms() // 1000
-        if now_s == self._clock_at:
-            return self._clock_cache
-        try:
-            lt = time.localtime()
-            s = "%02d:%02d" % (lt[3], lt[4])
-        except Exception:  # noqa: BLE001
-            secs = _ticks_diff(_ticks_ms(), 0) // 1000
-            s = "%02d:%02d" % ((secs // 60) % 100, secs % 60)
-        self._clock_at = now_s
-        self._clock_cache = s
-        return s
-
-    def _draw_dock(self, where):
-        """The persistent bottom dock: home / code / draw / map / run / settings.
-        The active slot (home on the desktop, settings in Settings) is highlighted;
-        the music slot is greyed (its editor is #16, not yet here). Tool slots that
-        need an open cart read dimmed on the home desktop."""
-        ws = self.ws
-        cv = ws.sys_canvas
-        lay = ws.layout
-        fw = lay.font_w                              # on-screen char-cell width (8*fs)
-        gh = lay.status_gh                           # glyph box (12*fs)
-        cv.rect(0, lay.dock_y, cv.w, cv.h - lay.dock_y, NAMES["dark_grey"])
-        cv.rect(0, lay.dock_y, cv.w, 1, NAMES["black"])
-        for k in range(len(_DOCK_SLOTS)):
-            slot = _DOCK_SLOTS[k]
-            x, y, w, h = self._dock_slot_rect(k)
-            is_active = (slot == "home" and where == "home") or \
-                        (slot == "settings" and where == "settings")
-            # On the home desktop the editor tools have no cart -> dim them.
-            enabled = slot in ("home", "settings", "run") or ws.cart is not None
-            if is_active:
-                cv.rect(x, y, w, h, NAMES["indigo"])
-            gc = NAMES["white"] if enabled else NAMES["dark_blue"]
-            ws._glyph(_DOCK_GLYPH[slot], (x, y, w, gh), gc, cv)
-            label = _DOCK_LABEL[slot]
-            cv.print(label, x + (w - len(label) * fw) // 2, y + gh, gc, 1)
-
-    # -- dock geometry + taps ------------------------------------------------
-
-    def _dock_slot_rect(self, k):
-        return self.ws.layout.dock_slot_rect(k)
-
-    def _dock_slot_at(self, px, py):
-        """Which dock slot ("home"/"code"/.../"settings") was tapped, or None."""
-        if py < self.ws.layout.dock_y:
-            return None
-        for k in range(len(_DOCK_SLOTS)):
-            if _in(px, py, self._dock_slot_rect(k)):
-                return _DOCK_SLOTS[k]
-        return None
-
-    def _activate_dock(self, slot):
-        """Run a dock action. The dock is drawn on home + settings; from the home
-        desktop only home/settings/run apply (no open cart for the editors), but if
-        a cart is still open behind Settings the tool slots switch its active editor
-        (TIC-80 style). run = open the selected cart from home, or re-run the open
-        one from Settings."""
-        ws = self.ws
-        if slot == "home":
-            ws.go_home()
-        elif slot == "settings":
-            ws.open_settings()
-        elif ws.cart is not None:                # tool slots need an open cart
-            if slot == "code":
-                ws._open_menu()
-            elif slot == "paint":
-                ws._open_paint()
-            elif slot == "map":
-                ws._open_map()
-            elif slot == "run":
-                ws.run_code() if ws.editor is not None else ws.apply()
-        elif slot == "run" and ws.launcher.selected() is not None:
-            ws.open()                            # on the home desktop, run = open selected
-
-    def handle_home_tap(self, px, py):
-        """The launcher/home top-bar tap slice: the clock Easter egg, the ≡ system
-        menu, and the NEW/DUP/DEL management icons. Returns True if the bar consumed
-        the tap. The clock-run reset runs for ANY non-clock tap (byte-identical to the
-        pre-migration launcher pointer), so page/tile taps that fall through still
-        reset it."""
-        ws = self.ws
-        lay = ws.layout
-        # Clock Easter egg (#21): tapping the status-strip clock _CLOCK_TAP_GOAL
-        # times wakes the Time Traveler. Checked before the management row so a
-        # tap on the clock never falls through to a button.
-        if _in(px, py, lay.clock_hit()):
-            ws.ach_ui._tap_clock()
-            return True
-        ws.ach_ui._clock_taps = 0                # any other desktop tap resets the run
-        if _in(px, py, lay.sysmenu_btn):    # ≡ -> system menu (Settings/About/Reboot, #52)
-            ws.toggle_sysmenu()
-            return True
-        if ws.can_manage and _in(px, py, lay.new_btn):
-            ws.new_cart(); return True
-        if ws.can_manage and _in(px, py, lay.dup_btn):
-            ws.dup_cart(); return True
-        if ws.can_manage and _in(px, py, lay.del_btn):
-            ws.del_cart(); return True
-        return False
-
-    def handle_cart_tap(self, px, py):
-        """The running-cart top-bar tap slice (px, py in GAME coords): the TIC-80
-        one-tap tool switcher (≡ / HOME / EDIT|CODE / PAINT / MAP / BLOCKS / MUSIC).
-        Returns True if a tool switch consumed the tap (so the pause QUIT/CONTINUE
-        handling in the desktop pointer is skipped)."""
-        ws = self.ws
-        if _in(px, py, _SYSMENU_BTN):
-            ws.toggle_sysmenu()      # ≡ -> open the dropdown system menu (#52)
-        elif _in(px, py, _HOME_BTN):
-            ws.go_home()
-        elif _in(px, py, _MENU_BTN):
-            ws._open_menu()
-        elif _in(px, py, _PAINT_BTN):
-            ws._open_paint()
-        elif _in(px, py, _MAP_BTN):
-            ws._open_map()
-        elif _in(px, py, _BLOCKS_BTN):
-            ws._open_blocks()
-        elif _in(px, py, _MUSIC_BTN):
-            ws._open_music()
-        else:
-            return False
-        return True
-
-
 class Workstation:
     def __init__(self, comp, canvas, input, carts=None, sys_canvas=None,
                  font_scale=1):
@@ -2088,7 +1758,7 @@ class Workstation:
         # of docs/shell_layers_refactor_v1.md): the running-cart strip cache (#43), the
         # per-second clock cache (#66), the dock geometry, and the bar/dock tap slices live
         # on self.bar_layer; set_icon_sheet bumps its cache gen via bar_layer.invalidate().
-        self.bar_layer = BarLayer(self)
+        self.bar_layer = BarLayer(self, NAMES, _in)
         # Themeable top bar (Stage 2): True while the PAINT editor is repainting the
         # SYSTEM icon sheet (Settings -> EDIT ICONS) rather than a cart's sprites.
         # It changes where SAVE writes (system_icons.moygfx, not the cart) and where
