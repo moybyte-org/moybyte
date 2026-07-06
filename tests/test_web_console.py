@@ -209,7 +209,10 @@ def _assert_frame_identical(ws, drv, tee, dt=1.0 / 30, label=""):
 
 
 def _open_tile0(ws, drv):
-    """Tap-open tile 0 (launcher -> desktop) on a TeeCanvas-driven console."""
+    """Tap-open tile 0 (launcher -> desktop) on a TeeCanvas-driven console. Pins
+    player mode so the tap PLAYS the cart (the maker default now taps into the
+    Editor, spec Section 4); this cross-check needs the running cart's draw stream."""
+    ws.system["tap_mode"] = "player"
     drv.touch(160, 52)
     drv.frame(1.0 / 30)
     drv.touch_up()
@@ -839,6 +842,9 @@ def test_ws_roundtrip_pushes_frames_and_applies_input(server):
     console, host, port = server
     assert console.ws.screen == "launcher"
     assert console.ws.launcher.items, "system carts should be seeded so a tile exists"
+    console.ws.system["tap_mode"] = "player"   # the tap must PLAY (maker default taps into
+                                               # the Editor now, Section 4); this asserts a
+                                               # launcher -> desktop transition over the wire
     c = _WSClient(host, port)
     try:
         # A frame PUSHES down; it must replay to a non-blank 320x240 screen (the JS twin's path).

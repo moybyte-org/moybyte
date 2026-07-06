@@ -237,7 +237,7 @@ class LauncherHomeLayer:
         if i.pressed("down"):
             ws.launcher.nav2d(0, 1)
         if i.pressed("a") or i.pressed("run"):
-            ws.open()
+            ws.launch_selected()             # tap-mode dispatch (maker -> Editor, #55)
         return True
 
     def handle_pointer(self, px, py, click):
@@ -261,7 +261,7 @@ class LauncherHomeLayer:
             i = ws.launcher.tile_at(px, py)
             if i is not None:
                 ws.launcher.sel = i
-                ws.open()
+                ws.launch_selected()         # tap-mode dispatch (maker -> Editor, #55)
                 return True
         # Trackball cursor hover (no click): highlight the icon the cursor MOVED
         # onto. Only when the position actually changed frame-to-frame, so a
