@@ -291,10 +291,10 @@ def test_pet_picker_selects_a_sprite_tile(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Pixel Pet")
     ws._open_menu()
-    rows = ws._card_layout()
+    rows = ws.cards_layer._card_layout()
     pet = [r for r in rows if r["f"]["key"] == "pet"][0]
     assert pet["display"] == "sprite-tiles"
-    cells = ws._choice_cells(pet)
+    cells = ws.cards_layer._choice_cells(pet)
     assert len(cells) == 3                               # frog / cat / robot
     _, (cx, cy, cw, ch) = cells[2]                       # tap the robot tile
     ws.pointer.place(cx + cw // 2, cy + ch // 2)
@@ -368,10 +368,10 @@ def test_space_pet_picker_selects_a_sprite_tile(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Space Desktop")
     ws._open_menu()
-    rows = ws._card_layout()
+    rows = ws.cards_layer._card_layout()
     pet = [r for r in rows if r["f"]["key"] == "pet"][0]
     assert pet["display"] == "sprite-tiles"
-    cells = ws._choice_cells(pet)
+    cells = ws.cards_layer._choice_cells(pet)
     assert len(cells) == 2                               # frog / robot
     _, (cx, cy, cw, ch) = cells[1]                       # tap the robot tile
     ws.pointer.place(cx + cw // 2, cy + ch // 2)
