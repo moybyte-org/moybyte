@@ -1682,6 +1682,203 @@ class _LegacyLayer(Layer):
         return bool(self._ptr_fn(px, py, click)) if self._ptr_fn is not None else False
 
 
+# -- Phase-1 adapters: real Layer types for the surfaces that were already their
+#    own objects (BlockEditorUI / MapEditorUI / MusicEditorUI / UpdateUI /
+#    SystemMenuUI / AchievementsUI / PerfHud). Each is thin -- it delegates to the
+#    UI object (+ the minimal Workstation glue: coord translation, the shared
+#    editor-panel backdrop) through its `self.ws` back-ref -- but it gives the
+#    surface a named Layer identity (the step toward its own module) and drops the
+#    generic _LegacyLayer shim. Behavior + draw order are byte-identical.
+
+
+class _BlocksLayer(Layer):
+    """The block editor (#29), full-screen on the SYSTEM canvas (covers the cart)."""
+
+    id = "blocks"
+    domain = "system"
+
+    def draw(self, dt):
+        self.ws.block_ui._draw_blocks()
+
+    def handle_input(self, i):
+        self.ws.block_ui._blocks_input()   # cursor nav + insert menu (#29)
+        return True
+
+    def handle_pointer(self, px, py, click):
+        self.ws.block_ui._blocks_pointer(px, py, click)   # outline + insert menu
+        return True
+
+
+class _UpdateLayer(Layer):
+    """The firmware-update screen (#53): pump the install/reboot flow, then draw it."""
+
+    id = "update"
+    domain = "system"
+
+    def draw(self, dt):
+        self.ws.update_ui._pump_update(dt)   # advance the install / reboot countdown
+        self.ws.update_ui._draw_update(dt)
+
+    def handle_input(self, i):
+        self.ws.update_ui._update_input(i)
+        return True
+
+    def handle_pointer(self, px, py, click):
+        self.ws.update_ui._update_pointer(px, py, click)
+        return True
+
+
+class _MapLayer(Layer):
+    """The map/tilemap editor (#32), a game-canvas viewport panel over the frozen
+    cart. Tap = paint one cell, drag = pan (#37); the d-pad pans the window."""
+
+    id = "map"
+    domain = "game"
+
+    def draw(self, dt):
+        ws = self.ws
+        ws._draw_menu_backdrop()          # frozen cart frame + reset draw state
+        ws.map_ui._draw_map()
+
+    def handle_input(self, i):
+        self.ws.map_ui._map_input()
+        return True
+
+    def handle_pointer(self, px, py, click):
+        ws = self.ws
+        gx, gy = ws._game_xy(px, py)       # the map lives in the 320x240 viewport
+        if click:
+            ws.map_ui._map_click(gx, gy)
+        elif ws.pointer.down:
+            ws.map_ui._map_pan_drag(gx, gy)
+        else:
+            ws.map_ui._map_release(gx, gy)
+        return True
+
+
+class _MusicLayer(Layer):
+    """The music/sound editor (#50), a full-screen tracker on the game canvas. The
+    frozen cart isn't drawn (the editor covers it); the live mixer is ticked so a
+    PLAY preview keeps sounding, then the preview flag auto-clears when it ends."""
+
+    id = "music"
+    domain = "game"
+
+    def draw(self, dt):
+        ws = self.ws
+        ws._reset_canvas_state()
+        if ws.audio is not None:
+            ws.audio.tick(dt)
+        mu = ws.music_ui
+        if mu.music_preview is not None and not mu._music_preview_active():
+            mu.music_preview = None
+        mu._draw_music()
+
+    def handle_input(self, i):
+        # D-pad navigates the tracker (#50): up/down move the step/slot cursor,
+        # left/right change the value under it (pitch / SFX-id), A plays/stops the
+        # preview, B leaves. Tap remains the primary path.
+        self.ws.music_ui._music_input()
+        return True
+
+    def handle_pointer(self, px, py, click):
+        ws = self.ws
+        gx, gy = ws._game_xy(px, py)
+        if click:
+            ws.music_ui._music_click(gx, gy)   # step list + edit pad + actions
+        return True
+
+
+class _PerfLayer(Layer):
+    """The perf HUD (#43/#44): the bottom-right FPS chip + optional frame-time
+    breakdown. Game domain -- drawn on the 320x240 canvas before the composite, so
+    it rides the viewport (a read-only consumer of the timing fields)."""
+
+    id = "perf"
+    domain = "game"
+
+    def draw(self, dt):
+        ws = self.ws
+        ws.perf_ui._draw_fps()
+        if ws.perf_hud:
+            ws.perf_ui._draw_perf_hud()   # frame-time breakdown above the FPS chip
+
+
+class _AchOverlayLayer(Layer):
+    """A draw-only overlay adapter for the AchievementsUI surfaces (#21): the
+    confetti burst, the achievements list view, and the Easter-egg popup -- each a
+    separate z-ordered overlay gated in _overlay_stack, delegating to ach_ui."""
+
+    domain = "system"
+
+    def __init__(self, ws, id, fn):
+        self.ws = ws
+        self.id = id
+        self._fn = fn
+
+    def draw(self, dt):
+        self._fn()
+
+
+class _SysMenuLayer(Layer):
+    """The ≡ dropdown system menu (#52): a modal overlay. Up/Down move (skipping
+    headers), Enter/A/RUN select (close-on-select), ESC/B dismiss; a row tap
+    moves+selects, a tap outside dismisses. Always consumes the event + clears the
+    game pointer's tap so a running cart underneath never also sees it."""
+
+    id = "sysmenu"
+    domain = "system"
+
+    def draw(self, dt):
+        self.ws.menu_ui._draw_sysmenu()
+
+    def handle_input(self, i):
+        m = self.ws.sysmenu
+        if i.pressed("b") or i.pressed("stop"):
+            m.close()
+        elif i.pressed("up"):
+            m.move(-1)
+        elif i.pressed("down"):
+            m.move(1)
+        elif i.pressed("a") or i.pressed("run"):
+            m.activate()
+        return True
+
+    def handle_pointer(self, px, py, click):
+        ws = self.ws
+        if click:
+            ws._dirty = True
+            ws.sysmenu.click(px, py)   # row -> move+select; outside -> dismiss
+        gp = ws.input.game_pointer
+        ws.input.game_pointer = (gp[0], gp[1], False, False)
+        return True
+
+
+class _AboutLayer(Layer):
+    """The ABOUT info modal (#52): any tap / ESC / B / A / RUN dismisses it. Modal --
+    always consumes + clears the game pointer's tap."""
+
+    id = "about"
+    domain = "system"
+
+    def draw(self, dt):
+        self.ws.menu_ui._draw_about()
+
+    def handle_input(self, i):
+        if i.pressed("b") or i.pressed("stop") or i.pressed("a") or i.pressed("run"):
+            self.ws._about = False
+        return True
+
+    def handle_pointer(self, px, py, click):
+        ws = self.ws
+        if click:
+            ws._about = False
+            ws._dirty = True
+        gp = ws.input.game_pointer
+        ws.input.game_pointer = (gp[0], gp[1], False, False)
+        return True
+
+
 class Workstation:
     def __init__(self, comp, canvas, input, carts=None, sys_canvas=None,
                  font_scale=1):
@@ -1990,46 +2187,43 @@ class Workstation:
         L = lambda id, domain, draw=None, kbd=None, ptr=None: _LegacyLayer(
             self, id, domain, draw=draw, kbd=kbd, ptr=ptr)
         # Content layers (exactly one active per frame, chosen by screen/menu_view).
+        # The already-object surfaces (blocks/map/music/update) are REAL Layer
+        # adapters (Phase 1); the still-smeared surfaces (launcher/settings/desktop/
+        # code/paint/theme/cards) stay _LegacyLayer shims over Workstation methods
+        # until Phase 2 promotes each to its own Layer.
         self._content_layers = {
             "launcher": L("launcher", "system", draw=self._draw_desktop_home,
                           kbd=self._launcher_input, ptr=self._launcher_pointer_layer),
             "settings": L("settings", "system", draw=self._draw_settings,
                           kbd=self._settings_input, ptr=self._settings_pointer_layer),
-            "update": L("update", "system", draw=self._draw_content_update,
-                        kbd=self._update_input_layer, ptr=self._update_pointer_layer),
+            "update": _UpdateLayer(self),
             "desktop": L("desktop", "game", draw=self._draw_content_desktop,
                          kbd=self._desktop_input, ptr=self._desktop_pointer),
             "code": L("code", "system", draw=lambda dt: self._draw_code(),
                       kbd=self._code_input, ptr=self._code_pointer),
-            "blocks": L("blocks", "system", draw=lambda dt: self.block_ui._draw_blocks(),
-                        kbd=self._blocks_input, ptr=self._blocks_pointer_layer),
-            "music": L("music", "game", draw=self._draw_content_music,
-                       kbd=self._music_input_layer, ptr=self._music_pointer),
+            "blocks": _BlocksLayer(self),
+            "music": _MusicLayer(self),
             "theme": L("theme", "game", draw=self._draw_content_theme,
                        kbd=self._theme_input, ptr=self._paint_pointer),
             "paint": L("paint", "game", draw=self._draw_content_menu,
                        kbd=self._paint_input, ptr=self._paint_pointer),
-            "map": L("map", "game", draw=self._draw_content_menu,
-                     kbd=self._map_input_layer, ptr=self._map_pointer),
+            "map": _MapLayer(self),
             "cards": L("cards", "game", draw=self._draw_content_menu,
                        kbd=self._menu_cards_input, ptr=self._cards_pointer),
         }
         # The boot logo is a draw-time takeover of the screen content (input still
         # routes to the underlying screen), so it's not in _content_layers.
         self._splash_layer = L("splash", "system", draw=lambda dt: self._draw_splash())
-        # Transient system-domain overlays (gated in _overlay_stack) + the cursor.
-        self._confetti_layer = L("confetti", "system",
-                                 draw=lambda dt: self.ach_ui._draw_confetti())
-        self._ach_layer = L("achievements", "system",
-                            draw=lambda dt: self.ach_ui._draw_achievements())
-        self._egg_layer = L("egg", "system", draw=lambda dt: self.ach_ui._draw_egg())
+        # Transient overlays (gated in _overlay_stack) + the cursor. The perf HUD is
+        # a game-domain overlay (drawn before the composite, riding the viewport); the
+        # rest are system-domain, on top of the composited screen.
+        self._perf_layer = _PerfLayer(self)
+        self._confetti_layer = _AchOverlayLayer(self, "confetti", self.ach_ui._draw_confetti)
+        self._ach_layer = _AchOverlayLayer(self, "achievements", self.ach_ui._draw_achievements)
+        self._egg_layer = _AchOverlayLayer(self, "egg", self.ach_ui._draw_egg)
         self._toast_layer = L("toast", "system", draw=lambda dt: self._draw_toast())
-        self._sysmenu_layer = L("sysmenu", "system",
-                                draw=lambda dt: self.menu_ui._draw_sysmenu(),
-                                kbd=self._sysmenu_input, ptr=self._sysmenu_pointer)
-        self._about_layer = L("about", "system",
-                              draw=lambda dt: self.menu_ui._draw_about(),
-                              kbd=self._about_input, ptr=self._about_pointer)
+        self._sysmenu_layer = _SysMenuLayer(self)
+        self._about_layer = _AboutLayer(self)
         self._cursor_layer = L("cursor", "system", draw=lambda dt: self._draw_cursor())
 
     def _content_layer(self):
@@ -2051,6 +2245,10 @@ class Workstation:
         overlay visibility + z-order rules live (mirrors the pre-refactor tail of
         frame()); the cursor is last so it sits above everything."""
         out = []
+        # Perf HUD first: it's GAME-domain (drawn on the 320x240 canvas right after the
+        # running cart, before the composite), so it must precede any system overlay.
+        if self.show_fps and self.screen == "desktop":
+            out.append(self._perf_layer)
         au = self.ach_ui
         if au._confetti_until and _ticks_diff(au._confetti_until, _ticks_ms()) > 0:
             out.append(self._confetti_layer)
@@ -3563,10 +3761,6 @@ class Workstation:
             self.go_home()
         return True
 
-    def _update_input_layer(self, i):
-        self.update_ui._update_input(i)
-        return True
-
     def _desktop_input(self, i):
         # THE ONE CONSOLE KEY (#71): BACKSPACE/HOME does exactly ONE thing
         # in every input mode, every cart type, paused or not: TOGGLE the
@@ -3615,30 +3809,12 @@ class Workstation:
         self._editor_input()           # keyboard is in text mode here
         return True
 
-    def _blocks_input(self, i):
-        self.block_ui._blocks_input()  # cursor nav + insert menu (#29)
-        return True
-
     def _paint_input(self, i):
         return True                    # paint is pointer/touch-driven
 
     def _theme_input(self, i):
         # EDIT ICONS: pointer/touch-driven like PAINT; B closes back to Settings.
         self._leave_or_home(self._leave_theme)
-        return True
-
-    def _map_input_layer(self, i):
-        # The d-pad pans the visible map window (the grid is bigger than the
-        # screen); B leaves (#37). Painting stays pointer/touch-driven.
-        self.map_ui._map_input()
-        return True
-
-    def _music_input_layer(self, i):
-        # D-pad navigates the tracker (#50): up/down move the step/slot cursor,
-        # left/right change the value under it (pitch / SFX-id), A plays/stops
-        # the preview, B leaves. Tap remains the primary path; this gives the
-        # trackball + keyboard parity with the other editors.
-        self.music_ui._music_input()
         return True
 
     def _menu_cards_input(self, i):
@@ -3661,26 +3837,6 @@ class Workstation:
             self.apply()
         else:
             self._leave_or_home(self._leave_menu)
-        return True
-
-    def _about_input(self, i):
-        # About modal (#52): MODAL -- ESC (stop) / B / A / RUN dismiss; it always
-        # consumes this frame's keys so nav never leaks to the screen underneath.
-        if i.pressed("b") or i.pressed("stop") or i.pressed("a") or i.pressed("run"):
-            self._about = False
-        return True
-
-    def _sysmenu_input(self, i):
-        # System-menu dropdown (#52): MODAL -- ESC (stop) / B dismiss; Up/Down move
-        # (skipping headers); Enter/A/RUN select (close-on-select). Always consumes.
-        if i.pressed("b") or i.pressed("stop"):
-            self.sysmenu.close()
-        elif i.pressed("up"):
-            self.sysmenu.move(-1)
-        elif i.pressed("down"):
-            self.sysmenu.move(1)
-        elif i.pressed("a") or i.pressed("run"):
-            self.sysmenu.activate()
         return True
 
     # -- pointer (trackball-as-mouse) ----------------------------------------
@@ -3887,10 +4043,6 @@ class Workstation:
         self._settings_pointer(px, py, click)
         return True
 
-    def _update_pointer_layer(self, px, py, click):
-        self.update_ui._update_pointer(px, py, click)
-        return True
-
     def _desktop_pointer(self, px, py, click):
         # A running cart + the editors live in the 320x240 GAME viewport, so translate
         # the panel pointer into game coords (#39; identity in the degradation case).
@@ -3961,10 +4113,6 @@ class Workstation:
                                   (py - lay.y0) // lay.lh)
         return True
 
-    def _blocks_pointer_layer(self, px, py, click):
-        self.block_ui._blocks_pointer(px, py, click)   # outline + insert menu (#29)
-        return True
-
     def _paint_pointer(self, px, py, click):
         # paint/map/cards live in the 320x240 viewport, so translate to game coords.
         gx, gy = self._game_xy(px, py)
@@ -3981,30 +4129,6 @@ class Workstation:
             self._paint_stroke(px, py)
         else:
             self._paint_drag = None
-        return True
-
-    def _map_pointer(self, px, py, click):
-        gx, gy = self._game_xy(px, py)
-        px, py = gx, gy
-        # Tap = paint one cell, drag = pan (#37). The map grid is bigger
-        # than the on-screen window, so dragging the grid scrolls the view;
-        # only a short press-and-release stamps the brush there. A palette
-        # pick / button press fires on the click edge as usual; a tap on the
-        # MAP VIEW is deferred to release so a drag that turns into a pan
-        # never leaves a stray stamp at its origin.
-        if click:
-            self.map_ui._map_click(px, py)
-        elif self.pointer.down:
-            self.map_ui._map_pan_drag(px, py)
-        else:
-            self.map_ui._map_release(px, py)
-        return True
-
-    def _music_pointer(self, px, py, click):
-        gx, gy = self._game_xy(px, py)
-        px, py = gx, gy
-        if click:
-            self.music_ui._music_click(px, py)   # step list + edit pad + actions
         return True
 
     def _cards_pointer(self, px, py, click):
@@ -4026,27 +4150,6 @@ class Workstation:
                 self.scroll_cards(1)
             elif ci is not None:
                 self._card_tap(px, py, ci)
-        return True
-
-    def _about_pointer(self, px, py, click):
-        # About modal (#52): drawn on the SYSTEM canvas, hit-tests in SYSTEM coords.
-        # Any tap dismisses it; it always consumes (swallows non-click moves too) and
-        # clears the game pointer's tap so a running cart underneath never sees it.
-        if click:
-            self._about = False
-            self._dirty = True
-        gp = self.input.game_pointer
-        self.input.game_pointer = (gp[0], gp[1], False, False)
-        return True
-
-    def _sysmenu_pointer(self, px, py, click):
-        # System-menu dropdown (#52): a row tap moves+selects, a tap outside dismisses.
-        # Always consumes (swallows non-click moves too) + clears the game pointer's tap.
-        if click:
-            self._dirty = True
-            self.sysmenu.click(px, py)   # row -> move+select; outside -> dismiss
-        gp = self.input.game_pointer
-        self.input.game_pointer = (gp[0], gp[1], False, False)
         return True
 
     def nav(self, dx, dy):
@@ -4404,28 +4507,19 @@ class Workstation:
                 self._pf_bar = _ticks_diff(_ticks_ms(), _tb)   # CHROMEBRK: the bar's share
             if self.cart_paused:
                 self._draw_pause_buttons()
-        # FPS + perf HUD: desktop-only, on the GAME canvas before the composite.
-        if self.show_fps:
-            self.perf_ui._draw_fps()
-            if self.perf_hud:
-                self.perf_ui._draw_perf_hud()      # frame-time breakdown above the FPS chip
+        # (The FPS chip + perf HUD is the game-domain _PerfLayer, drawn right after
+        # this content -- still on the GAME canvas, before the composite.)
 
-    def _draw_content_update(self, dt):
-        self.update_ui._pump_update(dt)          # advance the install / reboot countdown
-        self.update_ui._draw_update(dt)
-
-    def _draw_content_music(self, dt):
-        # Music/sound editor (#50): full-screen tracker over the cart's bank. The
-        # frozen cart isn't drawn (the editor covers it); the live AudioEngine is
-        # ticked here so a PLAY preview keeps sounding, then auto-clears the preview
-        # flag once the (non-looping) effect finishes so PLAY/STOP stays honest.
+    def _draw_menu_backdrop(self):
+        # Draw the frozen cart frame as the backdrop under an editor panel (cards /
+        # paint / map), then clear its camera/clip/pal/palt (#11) so the panel draws
+        # unaffected. Shared by _draw_content_menu (cards/paint) and _MapLayer.
+        try:
+            if self._draw:
+                self._draw()
+        except Exception:
+            pass
         self._reset_canvas_state()
-        if self.audio is not None:
-            self.audio.tick(dt)
-        if self.music_ui.music_preview is not None \
-                and not self.music_ui._music_preview_active():
-            self.music_ui.music_preview = None
-        self.music_ui._draw_music()
 
     def _draw_content_theme(self, dt):
         # EDIT ICONS (Stage 2): the PAINT editor over the system icon sheet. Opened
@@ -4436,19 +4530,10 @@ class Workstation:
         self._draw_paint()
 
     def _draw_content_menu(self, dt):
-        # cards / paint / map: an editor panel over the frozen cart frame.
-        try:
-            if self._draw:
-                self._draw()
-        except Exception:
-            pass
-        # Clear cart-set camera/clip/pal/palt (#11) so the editor panel over the
-        # frozen cart frame draws unaffected.
-        self._reset_canvas_state()
+        # cards / paint: an editor panel over the frozen cart frame (map is _MapLayer).
+        self._draw_menu_backdrop()
         if self.menu_view == "paint":
             self._draw_paint()
-        elif self.menu_view == "map":
-            self.map_ui._draw_map()
         else:
             try:
                 self._draw_cards()
