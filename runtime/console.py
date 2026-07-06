@@ -2002,10 +2002,17 @@ class Workstation:
         self.screen = "desktop"
 
     def _exit_to_caller(self):
-        """Pop the running cart back to whoever launched it (run()'s recorded caller).
-        Stage 2: the only caller is the home root, so this is go_home(); Stage 3 makes
-        the Editor a second caller (PLAY -> exit returns to the editing tab)."""
-        self.go_home()
+        """Pop the running cart back to whoever launched it (run()'s recorded caller,
+        spec Section 2's launch-and-return). The Editor is the second caller now
+        (Stage 3b): a cart run from PLAY returns to the Editor on the tab it left
+        (screen -> "menu"; editor_app.tab is preserved -> the SAME tab), proving the
+        Player has zero knowledge of who launched it. Any other caller (the launcher
+        home root, or None) pops all the way home."""
+        if self._run_caller is self.editor_app:
+            self._dirty = True             # screen change repaints (#44)
+            self.screen = "menu"           # back to the Editor on editor_app.tab
+        else:
+            self.go_home()
 
     def _draw_cart_bar(self):
         """Draw the unified top bar over the pause/crash frame (the cart-path chrome).
@@ -2236,11 +2243,13 @@ class Workstation:
         if self._start():
             self.ach.note("run")                # "Lift Off!": a cart was RUN (#21)
             self._set_text_mode(False)
-            self.run(self.project, self.launcher_layer)
+            # PLAY from the code tab (Stage 3b): caller = the Editor, so the cart's
+            # exit returns to the code tab (not the launcher home).
+            self.run(self.project, self.editor_app)
         else:
             # Compiled but raised at exec/_init: show the error panel on the desktop
             # (still reachable -> the kid can reopen the editor to fix it).
-            self.run(self.project, self.launcher_layer)
+            self.run(self.project, self.editor_app)
 
     def save_sprites(self):
         # Store-write moved to Project.commit_sprites (Stage 1b); this stays as the
@@ -2361,10 +2370,12 @@ class Workstation:
         return True
 
     def apply(self):
-        # Re-run with the new config. Always return to the desktop: on success it
-        # runs, on failure frame() paints the error panel there (still reachable).
+        # GO (Config tab): re-run with the new config. Always return to the desktop:
+        # on success it runs, on failure frame() paints the error panel there (still
+        # reachable). PLAY from the Config tab (Stage 3b): caller = the Editor, so the
+        # cart's exit returns to the Config cards, not the launcher home.
         ok = self._start()
-        self.run(self.project, self.launcher_layer)
+        self.run(self.project, self.editor_app)
         if ok:
             self.ach.note("run")                # "Lift Off!": GO re-ran the cart (#21)
             self._save_config()
