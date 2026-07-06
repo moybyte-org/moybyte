@@ -2758,3 +2758,36 @@ def test_ota_two_channel_wired():
     assert "MOYBYTE_OTA_CHANNEL" in build
     assert "_ota_build.py" in build
     assert "ota_build.json" in build
+
+
+def test_no_undefined_names_in_extracted_modules():
+    """Guard the #1 hazard of the moy_runtime / console extractions: a moved
+    function/closure body referencing a symbol its new namespace never imported
+    back. Those only NameError at CALL time (a cart draws, a browser hits /assets),
+    so the host shim's module-load + the golden single-frame renders can't see them
+    -- they reach hardware as 'NameError: name _X isn't defined'. pyflakes' static
+    undefined-name analysis catches exactly this class across the whole file. It
+    already found the real _Layer regression (make_api's make_layer scroll path)."""
+    try:
+        from pyflakes.checker import Checker
+        from pyflakes.messages import UndefinedName
+    except ImportError:  # pragma: no cover - pyflakes is a dev dep; skip if absent
+        import pytest
+        pytest.skip("pyflakes not installed")
+    import ast
+
+    targets = sorted((ROOT / "modules").glob("device_*.py"))
+    targets.append(ROOT / "modules" / "moy_runtime.py")
+    targets += [Path("runtime") / n for n in (
+        "console.py", "perf_hud.py", "update_ui.py", "system_menu_ui.py",
+        "achievements_ui.py")]
+
+    bad = []
+    for path in targets:
+        src = path.read_text(encoding="utf-8")
+        tree = ast.parse(src, str(path))
+        for m in Checker(tree, str(path)).messages:
+            if isinstance(m, UndefinedName):
+                bad.append("%s:%d %s" % (path.name, m.lineno,
+                                         m.message % m.message_args))
+    assert not bad, "undefined names (would NameError at runtime): " + "; ".join(bad)
