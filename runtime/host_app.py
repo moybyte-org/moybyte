@@ -49,6 +49,7 @@ from . import code_layer as _code_layer
 from . import widgets as _widgets
 from . import wallpaper as _wallpaper
 from . import launcher_layer as _launcher_layer
+from . import project as _project
 from . import layers as _layers
 sys.modules.setdefault("layers", _layers)
 sys.modules.setdefault("bar_layer", _bar_layer)
@@ -59,6 +60,7 @@ sys.modules.setdefault("code_layer", _code_layer)
 sys.modules.setdefault("widgets", _widgets)
 sys.modules.setdefault("wallpaper", _wallpaper)
 sys.modules.setdefault("launcher_layer", _launcher_layer)
+sys.modules.setdefault("project", _project)   # console.py does `from project import Project`
 
 from . import console  # noqa: E402  (after the editors/audio aliases above)
 from . import moy_carts  # noqa: E402  (shared .moy store; host-clean)

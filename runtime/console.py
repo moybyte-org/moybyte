@@ -261,6 +261,17 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.launcher_layer import Launcher, LauncherHomeLayer
 
+# The open cart's live WORKSPACE (Stage 1 of docs/shell_ux_technical_plan_v1.md,
+# extracted from this file -- see project.py). Project holds the open cart's DATA
+# (cart/config/sheet/tilemap/images/pmem) + the builders + the commit_* persistence
+# verbs; the six data fields are exposed back here as forwarding properties, so every
+# surface file + test is unchanged. Project keeps a `ws` back-reference (the seam the
+# plan keeps for Stage 1) and reaches ws.<X> for the Workstation-owned deps.
+try:
+    from project import Project
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.project import Project
+
 # The block vocabulary/compiler (#29). Imported under whichever name it's known by:
 # bare `blocks` on the device (frozen top-level) and on the host once host_app has
 # aliased it, or `runtime.blocks` when a test loads console/moy_runtime directly
@@ -1126,8 +1137,13 @@ class Workstation:
         # paint/map editors; "settings" is the Settings app.
         self.screen = "launcher"      # "launcher" | "desktop" | "menu" | "settings" | "update"
         self._splash_until = None     # boot logo deadline (_ticks_ms); None = no splash
-        self.cart = None
-        self.config = None
+        # The open cart's live WORKSPACE (Stage 1, project.py): the DATA of the cart
+        # currently open -- cart/config/sheet/tilemap/images/pmem. Those six are
+        # forwarding properties (below) delegating to self.project, so every surface
+        # file + test that reads/writes ws.cart/ws.sheet/... is unchanged. Constructed
+        # idle here (all fields None -> the boot launcher state) BEFORE anything can set
+        # ws.cart, and rebuilt per open() when a cart is opened.
+        self.project = Project(self)
         self.ns = None
         self._update = None
         self._draw = None
@@ -1143,11 +1159,8 @@ class Workstation:
         # self.cards_layer now, built in _build_layers with the rest of the stack.)
         self.menu_view = "cards"      # menu sub-view: "cards" | "code" | "paint" | "map"
         self.editor = None            # CodeEditor while menu_view == "code"
-        self.sheet = None             # SpriteSheet for the open cart (built on open)
-        self.tilemap = None           # TileMap for the open cart (built on open, #32)
-        self.images = None            # {name: .moyimg text} for the open cart (#63);
-                                      # make_api decodes each lazily via image(name)
-        self.pmem = None              # Pmem (persistent cart store) for the open cart
+        # (cart/config/sheet/tilemap/images/pmem live on self.project now -- Stage 1;
+        # exposed back as forwarding properties, so ws.sheet/ws.cart/... are unchanged.)
         self._cart_start_ms = 0       # _ticks_ms when the running cart last _start()ed
         self._cart_key_prev = 0       # last frame's keyboard byte (key()/keyp() edge)
         self.paint = None             # PaintEditor while menu_view == "paint"
@@ -1915,7 +1928,65 @@ class Workstation:
         self._draw = ns.get("_draw")
         return True
 
+    # -- open-cart workspace forwards (Stage 1, project.py) -------------------
+    #
+    # The open cart's six live-data fields live on self.project now; these forwarding
+    # properties delegate reads AND writes to it, so every surface file + test that
+    # reads/writes ws.cart/ws.config/ws.sheet/ws.tilemap/ws.images/ws.pmem is byte-for-
+    # byte unchanged. A getter that returns the live object covers in-place mutation
+    # (ws.cart["src"] = ...); the setter covers assignment (ws.cart = ..., ws.sheet =
+    # self._build_sheet()). The plan's §1.2 seam: Project keeps a ws back-reference for
+    # the toolkit/deps; only its DATA moves off ws here.
+    @property
+    def cart(self):
+        return self.project.cart
+
+    @cart.setter
+    def cart(self, value):
+        self.project.cart = value
+
+    @property
+    def config(self):
+        return self.project.config
+
+    @config.setter
+    def config(self, value):
+        self.project.config = value
+
+    @property
+    def sheet(self):
+        return self.project.sheet
+
+    @sheet.setter
+    def sheet(self, value):
+        self.project.sheet = value
+
+    @property
+    def tilemap(self):
+        return self.project.tilemap
+
+    @tilemap.setter
+    def tilemap(self, value):
+        self.project.tilemap = value
+
+    @property
+    def images(self):
+        return self.project.images
+
+    @images.setter
+    def images(self, value):
+        self.project.images = value
+
+    @property
+    def pmem(self):
+        return self.project.pmem
+
+    @pmem.setter
+    def pmem(self, value):
+        self.project.pmem = value
+
     def open(self):
+        self.project = Project(self)   # a fresh workspace for the cart being opened
         self.cart = self.launcher.selected()
         self.config = dict(self.cart["cfg"])
         self.cart_paused = False
@@ -1946,69 +2017,21 @@ class Workstation:
         # the SAME identity the launcher uses (distinct carts, not repeat opens).
         self.ach.note("open", self.cart.get("path") or self.cart.get("title"))
 
+    # The four builders moved VERBATIM onto Project (Stage 1, project.py); these stay
+    # as one-line forwards so ws._build_sheet(cart)/... keep working (the wallpaper
+    # runner + _icon_sheet_for call ws._build_sheet(cart), _start calls _build_audio,
+    # and open() calls all four -- all through self.project now).
     def _build_sheet(self, cart=None):
-        # Build `cart`'s sprite sheet (default: the open cart), or a blank one when
-        # there's no/bad art. The wallpaper runner passes a cart explicitly.
-        cart = cart if cart is not None else self.cart
-        hexs = cart.get("sprites") if cart else None
-        if hexs:
-            try:
-                return SpriteSheet.from_hex(hexs)
-            except Exception:  # noqa: BLE001
-                pass
-        return SpriteSheet()
+        return self.project._build_sheet(cart)
 
     def _build_pmem(self):
-        """Load the open cart's persistent memory (pmem.json) into a Pmem, wiring
-        its writes back through the SD store when the cart is writable. An
-        embedded/non-SD cart still gets working (volatile) RAM."""
-        path = self.cart.get("path") if self.cart else None
-        cells = None
-        if path and self.carts_store is not None:
-            try:
-                cells = self._with_sd(lambda: self.carts_store.load_pmem(path))
-            except Exception as exc:  # noqa: BLE001
-                print("Moybyte pmem load failed:", exc)
-                cells = None
-
-        on_write = None
-        if path and self.carts_store is not None and self.can_manage:
-            def on_write(values, cart=self.cart):
-                try:
-                    self._with_sd(lambda: self.carts_store.save_pmem(cart, values))
-                except Exception as exc:  # noqa: BLE001
-                    # No serial in the device run loop, but a failed pmem write must
-                    # not crash the cart -- the kid just loses that one save.
-                    print("Moybyte pmem save failed:", _err_text(exc))
-        return Pmem(cells, on_write)
+        return self.project._build_pmem()
 
     def _build_tilemap(self, cart=None):
-        """Build `cart`'s TileMap from its map.moymap blob (#32) (default: the open
-        cart), or an empty map when the cart has none -- the mirror of _build_sheet,
-        so map()/mget()/mset() are always callable (an empty map just blits
-        nothing). The wallpaper runner passes a cart explicitly."""
-        cart = cart if cart is not None else self.cart
-        blob = cart.get("map") if cart else None
-        if blob:
-            try:
-                return TileMap.from_hex(blob)
-            except Exception:  # noqa: BLE001
-                pass
-        return TileMap()
+        return self.project._build_tilemap(cart)
 
     def _build_audio(self):
-        """Build the per-cart audio backend (#16): an AudioEngine over the cart's
-        sound bank (sounds.json), wrapped by the injected host/device backend. The
-        mirror of _build_sheet. A cart with no bank gets the friendly default bank
-        so beep()/the editor still work. Falls back to a silent backend if no
-        make_audio was injected (keeps make_api callable everywhere)."""
-        data = self.cart.get("sounds") if self.cart else None
-        bank = AudioBank.from_dict(data) if data else AudioBank.default()
-        engine = AudioEngine(bank)
-        if self.make_audio is not None:
-            self.audio = self.make_audio(engine)
-        else:
-            self.audio = _SilentAudio(engine)
+        return self.project._build_audio()
 
     # -- code / paint editors (#3, #4) ---------------------------------------
 
