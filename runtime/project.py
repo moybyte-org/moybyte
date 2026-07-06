@@ -123,3 +123,110 @@ class Project:
             ws.audio = ws.make_audio(engine)
         else:
             ws.audio = _SilentAudio(engine)
+
+    # -- persistence verbs (moved from Workstation's save_* -- Stage 1b) ------
+    #
+    # These write the cart's live data back through the injected store inside the
+    # SD session (ws._with_sd) exactly as before. The Workstation ws.save_* /
+    # ws._save_config names stay as one-line forwards (tested surface); the
+    # save-status UI fields (ws.save_status/ws.cart_error) + achievements (ws.ach)
+    # they touch stay on Workstation, reached via the ws back-reference.
+
+    def commit_config(self):
+        # Persist edits to the SD cartridge (embedded fallback carts have no path).
+        ws = self.ws
+        if self.cart and self.cart.get("path"):
+            self.cart["cfg"] = dict(self.config)   # in-RAM sync (always)
+            if not ws.can_manage:
+                return                             # writes deferred on device
+            try:
+                ws._with_sd(lambda: ws.carts_store.save_config(self.cart))
+            except Exception as exc:  # noqa: BLE001
+                print("Moybyte save failed:", exc)
+
+    def commit_code(self, src):
+        """Persist validated source through the store -- the store-write half of the
+        old Workstation.save_code. The compile-check + code-UI half stays on the code
+        surface (ws.save_code), which calls this once the source is known to parse.
+        Returns True iff the write succeeded."""
+        ws = self.ws
+        try:
+            # moy_carts.save_code always returns a (status, message) 2-tuple.
+            status, smsg = ws._with_sd(lambda: ws.carts_store.save_code(self.cart, src))
+            if status != ws.carts_store.SAVE_OK:
+                ws.save_status = "SAVE FAILED " + str(smsg)
+                ws.cart_error = "Could not save -- " + str(smsg)
+                return False
+            ws.editor.dirty = False
+            ws.save_status = "SAVED"
+            ws.ach.note("code_save")          # "Code Wizard": code saved (#21)
+            # A successful save means the source now compiles and persisted: clear
+            # any stale crash text so returning to the desktop re-runs the fixed
+            # cart instead of re-painting the old "crashed" panel. (run_code/the
+            # _leave_menu re-_start() then actually re-exec it.)
+            ws.cart_error = None
+            return True
+        except Exception as exc:  # noqa: BLE001
+            txt = _err_text(exc)
+            ws.save_status = "SAVE FAILED"
+            ws.cart_error = "Could not save -- " + txt
+            print("Moybyte save code failed:", txt)
+            return False
+
+    def commit_sprites(self):
+        ws = self.ws
+        if not (self.sheet and self.cart and self.cart.get("path") and ws.can_manage):
+            return
+        hexs = self.sheet.to_hex()
+        try:
+            ws._with_sd(lambda: ws.carts_store.save_sprites(self.cart, hexs))
+            self.sheet.dirty = False
+            ws.save_status = "SAVED"
+            ws.ach.note("paint_save")         # "Little Artist": a sprite saved (#21)
+        except Exception as exc:  # noqa: BLE001
+            # Mirror the save_code contract: a failed sprite save must be VISIBLE on
+            # device (no serial in the run loop), not silent. _err_text-guarded so a
+            # weird exception's __str__ can't itself escape this handler.
+            txt = _err_text(exc)
+            ws.save_status = "SAVE FAILED"
+            ws.cart_error = "Could not save sprites -- " + txt
+            print("Moybyte save sprites failed:", txt)
+
+    def commit_map(self):
+        # Persist the cart's tilemap to map.moymap (#32) -- the exact mirror of
+        # commit_sprites (to_hex -> SD wrapper -> save_map). The running cart already
+        # holds this same TileMap, so a save only persists what it's already using.
+        ws = self.ws
+        if not (self.tilemap and self.cart and self.cart.get("path") and ws.can_manage):
+            return
+        hexs = self.tilemap.to_hex()
+        try:
+            ws._with_sd(lambda: ws.carts_store.save_map(self.cart, hexs))
+            self.tilemap.dirty = False
+            ws.save_status = "SAVED"
+            ws.ach.note("map_save")           # "Map Maker": a map saved (#21)
+        except Exception as exc:  # noqa: BLE001
+            txt = _err_text(exc)
+            ws.save_status = "SAVE FAILED"
+            ws.cart_error = "Could not save map -- " + txt
+            print("Moybyte save map failed:", txt)
+
+    def commit_sounds(self):
+        """Persist the cart's AudioBank to sounds.json (#50) -- the mirror of
+        commit_map. The MusicEditor edits the LIVE bank (ws.audio.engine.bank), so a
+        save just serializes what the cart already plays through."""
+        ws = self.ws
+        me = ws.music_ui.musicedit
+        if not (me and self.cart and self.cart.get("path") and ws.can_manage):
+            return
+        bank_dict = me.bank.to_dict()
+        try:
+            ws._with_sd(lambda: ws.carts_store.save_sounds(self.cart, bank_dict))
+            me.dirty = False
+            ws.save_status = "SAVED"
+            ws.ach.note("sound_save")          # "Sound Designer": a bank saved (#21)
+        except Exception as exc:  # noqa: BLE001
+            txt = _err_text(exc)
+            ws.save_status = "SAVE FAILED"
+            ws.cart_error = "Could not save sounds -- " + txt
+            print("Moybyte save sounds failed:", txt)
