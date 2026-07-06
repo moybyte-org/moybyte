@@ -1,5 +1,7 @@
 # Moybyte shell OS architecture — a syscall boundary for the shell's own surfaces
 
+**North star above this doc:** `docs/shell_ux_v1.md` — the LOCKED top-of-stack UX spec (the "what the user experiences"); this doc is one layer of the "how" beneath it.
+
 **Issues:** #55 (system-as-carts, Picotron-style "everything is a process"), #73 (layered
 compositor → window manager), and the adversarial review of the layers refactor whose #1
 finding this doc answers.

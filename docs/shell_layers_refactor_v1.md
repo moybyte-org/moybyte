@@ -1,5 +1,7 @@
 # Shell layers refactor — decompose `Workstation` into composited Layers
 
+**North star above this doc:** `docs/shell_ux_v1.md` — the LOCKED top-of-stack UX spec (the "what the user experiences"); this doc is one layer of the "how" beneath it.
+
 **Status:** DESIGN / READY-TO-EXECUTE INCREMENTALLY. This is a committed plan for
 *how* to reshape `runtime/console.py`'s core loop, not an exploration. Each step
 lands behind the existing nets (775+ host tests + the golden-frame pixel harness)
