@@ -64,9 +64,10 @@ def _open_cart(ws):
     ws.launcher.sel = 0
     ws.open()
     assert ws.screen == "desktop"
-    # The in-cart ≡/bar is pause-menu chrome now (#71): while a cart PLAYS the
-    # game owns the full canvas, so these tests drive the paused state.
-    ws.cart_paused = True
+    # Stage 5 retired the #71 pause frame: the in-cart ≡/bar is CRASH chrome now (while
+    # a cart PLAYS the game owns the full canvas), so these ≡-dropdown tests drive the
+    # crashed state, where the bar (with the cart group in its ≡ menu) is drawn.
+    ws.cart_error = "boom"
     ws._dirty = True
 
 

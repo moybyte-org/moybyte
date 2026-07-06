@@ -13,22 +13,24 @@ What the Player owns (moved verbatim from Workstation):
     manifest permission, call the injected `make_api`, exec the source, capture
     `_update`/`_draw`, turn any exception into `cart_error`/`crash_line`.
   * `tick(dt)` -- the per-frame game loop: key-edge derivation (cart_key/cart_keyp),
-    `_update(dt)`/`_draw()`/`audio.tick`, the crash capture, then the pause/crash
-    chrome. It fills the DRAWBRK perf split (ws._pf_upd/_pf_cart/_pf_audio) exactly
-    as the old content-layer body did -- that contract stays on `ws`.
-  * `handle_input`/`handle_pointer` -- input + the #71 pause machinery (carried
-    verbatim here so Stage 2 stays pixel-identical; retired in Stage 5).
-  * the crash `_draw_error_panel` + the pause `_draw_pause_dim`/`_draw_pause_buttons`.
+    `_update(dt)`/`_draw()`/`audio.tick`, the crash capture, then the crash chrome +
+    the TRANSIENT hold-to-exit toast. It fills the DRAWBRK perf split
+    (ws._pf_upd/_pf_cart/_pf_audio) exactly as the old content-layer body did -- that
+    contract stays on `ws`.
+  * `handle_input`/`handle_pointer` -- input + the Stage-5 EXIT model: hold-BACKSPACE
+    (~700ms) or a triple-tap BACKSPACE both pop to the run caller
+    (`ws._exit_to_caller`); the #71 pause machinery they replaced is gone.
+  * the crash `_draw_error_panel` + the transient `_draw_hold_progress` toast.
 
 The BUNDLE the Player reaches (spec Section 2): the open `Project` (its live data),
 plus the RAW canvas / input / audio / `make_api` / wifi through its `ws` back-ref --
 the SAME raw objects `Workstation._start` handed `make_api` before, so the hot draw
 path stays injected-direct (the Section 5 perf guardrail: WHO calls make_api moved,
 WHAT it closes over did not). It deliberately does NOT reach the store, the shell
-top bar, the home grid, or the layouts -- the bar draw/tap in the pause frame is
-reached through thin `ws` helpers so this file never names them (a spike-test grep
-enforces the isolation). The nine cart-run fields it owns are exposed back on
-Workstation as forwarding properties, so every surface file + test is unchanged.
+top bar, the home grid, or the layouts -- the crash-frame bar draw/tap is reached
+through thin `ws` helpers so this file never names them (a spike-test grep enforces
+the isolation). The cart-run fields it owns are exposed back on Workstation as
+forwarding properties, so every surface file + test is unchanged.
 
 Canonical home is runtime/; build.sh stages a copy into the firmware modules/ tree
 so the device freezes it (same pattern as console.py/project.py). It stays a leaf --
@@ -144,30 +146,33 @@ def _wrap(text, cols):
     return out
 
 
-# Pause screen (#71 unified key): two explicit, always-tappable buttons so quitting
-# is never ambiguous or keyboard-mode-dependent -- CONTINUE resumes, QUIT pops back
-# to whoever launched the cart. Centered as a pair near the bottom of the 320x240
-# game viewport, well clear of the top bar (y 0..18). Moved here with the pause
-# machinery (Stage 2); re-exported from console.py so console._PAUSE_* still resolves
-# for tests. (The whole pause surface is retired in Stage 5.)
-_PAUSE_BTN_W = 92
-_PAUSE_BTN_H = 22
-_PAUSE_BTN_GAP = 12
-_PAUSE_BTN_Y = 240 - 40
-_PAUSE_CONTINUE_BTN = ((320 - 2 * _PAUSE_BTN_W - _PAUSE_BTN_GAP) // 2, _PAUSE_BTN_Y,
-                       _PAUSE_BTN_W, _PAUSE_BTN_H)
-_PAUSE_QUIT_BTN = (_PAUSE_CONTINUE_BTN[0] + _PAUSE_BTN_W + _PAUSE_BTN_GAP, _PAUSE_BTN_Y,
-                   _PAUSE_BTN_W, _PAUSE_BTN_H)
+# The Player's EXIT gestures (Stage 5 of docs/shell_ux_technical_plan_v1.md, spec
+# Section 9): the #71 pause machinery is GONE. A running cart owns the full 320x240
+# with NO chrome, and BACKSPACE is a plain key the cart reads. Exit is a deliberate,
+# firmware-independent gesture -- two ways out, both popping to the run caller:
+#   * hold BACKSPACE ~700ms -- the PRIMARY, nicer gesture on keyboard fw >= 2025-06-12,
+#     where raw-matrix mode streams the held "home" key each frame; a small TRANSIENT
+#     progress toast fills as you hold, and the pop fires at the threshold.
+#   * tap BACKSPACE 3x within 1s -- the DEFAULT, fw-INDEPENDENT alias: it is edge-
+#     detected, so it needs no held key past the old-fw 260ms ASCII latch and thus
+#     works on EVERY firmware. Deleting the old pause-QUIT button therefore never
+#     strands a cart as unexitable-but-for-reboot (spec Section 9's requirement).
+# A single quick BACKSPACE tap is neither gesture -- it just reaches the cart as a
+# key/button. In TEXT mode "home" is never asserted (BACKSPACE arrives as a typed 0x08
+# the cart's key() reads -- e.g. the wifi password field's DELETE), so neither gesture
+# fires there: exactly the "backspace = delete, zero special-casing" the spec wants.
+_HOLD_EXIT_MS = 700         # sustained BACKSPACE hold to exit
+_TRIPLE_TAP_MS = 1000       # the window three taps must land within
+_TRIPLE_TAP_N = 3           # taps within that window = exit
 
 
 class Player:
     """Runs one cart: start -> tick every frame -> guarantee exit (Stage 2). Holds a
     `ws` back-ref (the shared draw toolkit + services seam every surface uses) and is
-    injected NAMES + `_in` like the other surfaces. The nine cart-run fields it owns
-    (ns/_update/_draw/cart_error/crash_line/cart_paused/_bks_prev/_cart_start_ms/
-    _cart_key_prev) are exposed back on Workstation as forwarding properties, so every
-    reader of ws.cart_error/ws._update/... is byte-for-byte unchanged; they are reset
-    per run in start()."""
+    injected NAMES + `_in` like the other surfaces. The cart-run fields it owns
+    (ns/_update/_draw/cart_error/crash_line/_cart_start_ms/_cart_key_prev) are exposed
+    back on Workstation as forwarding properties, so every reader of ws.cart_error/
+    ws._update/... is byte-for-byte unchanged; they are reset per run in start()."""
 
     def __init__(self, ws, NAMES, _in):
         self.ws = ws
@@ -178,16 +183,23 @@ class Player:
         self._draw = None
         self.cart_error = None        # last cart failure text -> on-canvas error panel
         self.crash_line = None        # 1-based cart line of the last runtime crash (#24)
-        self.cart_paused = False      # pause menu (#71): a running cart owns the FULL
-                                      # 320x240 (no bar); BACKSPACE -- THE one console
-                                      # key in every input mode -- TOGGLES this. Quit
-                                      # is the pause screen's own explicit QUIT button
-        self._bks_prev = 0            # last_key edge tracker for the BACKSPACE pause
-                                      # (a text-mode cart types letters, so button
-                                      # aliases are suppressed -- the Player edge-
-                                      # detects the console key itself)
         self._cart_start_ms = 0       # _ticks_ms when the running cart last start()ed
         self._cart_key_prev = 0       # last frame's keyboard byte (key()/keyp() edge)
+        # Stage 5 exit-gesture state (spec Section 9). Reset per run in start() so a
+        # fresh cart never inherits a stale half-gesture.
+        self._home_held_since = 0     # _ticks_ms when "home" (BACKSPACE) began being held
+        self._home_holding = False    # True while "home" is held -> draw the TRANSIENT
+                                      # hold-progress toast (ONLY while holding, Section 12)
+        self._tap_count = 0           # consecutive BACKSPACE taps inside the window
+        self._last_tap_ms = 0         # _ticks_ms of the last counted tap
+
+    def _reset_exit_state(self):
+        """Clear the hold timer + triple-tap counter (a fresh run, or the moment an
+        exit gesture completes -- so re-entering a cart starts from a clean slate)."""
+        self._home_held_since = 0
+        self._home_holding = False
+        self._tap_count = 0
+        self._last_tap_ms = 0
 
     def start(self, project):
         """Start (or re-run) `project`'s cart under make_api. Resets the canvas draw
@@ -197,6 +209,7 @@ class Player:
         paints the on-canvas panel instead of hanging. Returns True iff it started."""
         ws = self.ws
         ws._dirty = True               # a (re)started cart paints its first frame (#44)
+        self._reset_exit_state()       # a fresh run drops any half-done exit gesture
         project._build_audio()
         # Reset the canvas draw state (camera/clip/pal/palt, #11) so a fresh cart run
         # never inherits a previous cart's clip rect or palette swap.
@@ -239,18 +252,12 @@ class Player:
 
     def tick(self, dt):
         """The running-cart content (game domain): tick the cart _update/_draw + mixer
-        (the game loop), then the pause/crash chrome. Fills the per-frame perf split
-        (ws._pf_*) the router's DRAWBRK/CHROMEBRK accounting reads. Drawn on the fixed
-        320x240 GAME canvas, composited by the router."""
+        (the game loop), then the crash chrome + the transient hold-to-exit toast. Fills
+        the per-frame perf split (ws._pf_*) the router's DRAWBRK/CHROMEBRK accounting
+        reads. Drawn on the fixed 320x240 GAME canvas, composited by the router."""
         ws = self.ws
         _perf = ws.perf_hud or ws.perf_capture
-        if self.cart_paused and self.cart_error is None:
-            # Paused (#71): the cart is frozen -- no _update, no _draw; the
-            # canvas retains its last frame as the backdrop. Keep the mixer
-            # fed so a mid-flight note decays instead of sticking.
-            if ws.audio is not None:
-                ws.audio.tick(dt)
-        elif self.cart_error is None:
+        if self.cart_error is None:
             # Resolve this frame's keyboard edge for the cart's key()/keyp():
             # last_key is the byte held this frame (0 when nothing is down);
             # keyp fires only on the 0->key transition. Done here (not in
@@ -296,65 +303,64 @@ class Player:
         # Clear any cart-set camera/clip/pal/palt (#11) before the console paints
         # its own UI overlays, so they're never offset/clipped/recoloured.
         ws._reset_canvas_state()
-        if self.cart_error is not None:
-            self._draw_error_panel()
-        # The bar auto-hides while a cart PLAYS (#71): the game owns the full
-        # 320x240. Chrome appears only in the pause menu (BACKSPACE, or the
-        # web page's menu button) -- and on a crash, so EDIT/CODE stay reachable.
+        # The bar auto-hides while a cart PLAYS (Stage 5): the game owns the full
+        # 320x240 with NO chrome (the #71 pause frame is gone). The ONLY chrome left
+        # is the CRASH panel + its top bar, so EDIT/CODE stay reachable to fix the cart.
         # The top bar is the shell's (not the Player's), so its draw + _pf_bar
         # (CHROMEBRK) accounting stay on ws; the Player just asks for it here.
-        if self.cart_paused or self.cart_error is not None:
-            if self.cart_paused:
-                self._draw_pause_dim()          # scanline shade UNDER the chrome
-            ws._draw_cart_bar()                 # unified top bar (tool switcher)
-            if self.cart_paused:
-                self._draw_pause_buttons()
+        if self.cart_error is not None:
+            self._draw_error_panel()
+            ws._draw_cart_bar()                 # unified top bar (crash tool switcher)
+        elif self._home_holding:
+            # The TRANSIENT hold-to-exit affordance (spec Section 12): drawn ONLY while
+            # BACKSPACE is being held, never on a plain play frame -- so a frame with no
+            # hold in flight draws exactly the cart's pixels and nothing else (no chrome
+            # re-added to the sacred 50fps path).
+            self._draw_hold_progress()
         # (The FPS chip + perf HUD is the game-domain _PerfLayer, drawn right after
         # this content -- still on the GAME canvas, before the composite.)
 
     def handle_input(self, i):
-        # THE ONE CONSOLE KEY (#71): BACKSPACE/HOME does exactly ONE thing
-        # in every input mode, every cart type, paused or not: TOGGLE the
-        # pause screen. No special case -- it never means "exit" (that's a
-        # separate, explicit, ALWAYS-TAPPABLE action: the CONTINUE/QUIT
-        # buttons drawn on the pause screen itself, see _draw_pause_buttons
-        # + handle_pointer). Raw-matrix and typed-ASCII carts deliver it as
-        # the "home" button (input backends map it); a TEXT-MODE cart
-        # suppresses ALL button aliases (so a typed letter is never
-        # mistaken for a shortcut), so here we edge-detect last_key
-        # ourselves to catch backspace specifically -- but the RESULT is
-        # identical either way: flip cart_paused.
-        #
-        # An earlier version tried to make the SAME key also distinguish
-        # "exit" from "resume" (a second press from pause = quit), and
-        # separately tried treating typed Z/space/Enter/R as "resume" --
-        # both were special cases that fell over in practice: Z and R are
-        # live GAMEPLAY LETTERS in a typing game, and a keyboard-only
-        # "press again to quit" is a different rule per cart type. One
-        # button, one job, plus explicit on-screen buttons for the
-        # deliberate action (quitting) is simpler and cannot be confused.
+        # Stage 5 EXIT model (spec Section 9): the #71 pause machinery is GONE. A running
+        # cart owns the full 320x240 and every button/key -- BACKSPACE ("home") is a plain
+        # key the cart reads via its OWN btn()/key() calls in tick() (a parallel read; the
+        # Player never steals it from the cart). The Player only WATCHES "home" for the
+        # deliberate exit gesture, and there are two ways out, both popping to the run
+        # caller (ws._exit_to_caller):
+        #   * hold ~700ms -- raw-matrix mode streams the held key, so a sustained hold is a
+        #     rising elapsed-since-first-held; a transient progress toast fills as you hold.
+        #   * tap 3x within 1s -- the fw-INDEPENDENT default: edge-detected, so it needs no
+        #     held key past the old-fw 260ms ASCII latch (a dev unit on old kbd fw still
+        #     exits). A single quick tap is NEITHER -> it just reaches the cart.
+        # In TEXT mode "home" is never asserted (BACKSPACE arrives as a typed 0x08 the
+        # cart's key() reads -- the wifi password field's DELETE), so neither gesture fires
+        # there: the "backspace = delete, zero special-casing" the spec wants.
         ws = self.ws
-        _bks = False
-        if getattr(ws.input, "text_mode", False) and ws.cart is not None:
-            k = ws.input.last_key
-            _bks = (k == 0x08 and k != self._bks_prev
-                    and (self.cart_paused or ws.cart.get("type") == "game"))
-            self._bks_prev = k
-        else:
-            self._bks_prev = 0
-        if i.pressed("home") or i.pressed("stop") or _bks:
-            self.cart_paused = not self.cart_paused
+        now = _ticks_ms()
+        if i.held("home"):
+            if not self._home_holding:
+                self._home_holding = True
+                self._home_held_since = now
+                ws._dirty = True               # the toast just appeared -> repaint
+            elif _ticks_diff(now, self._home_held_since) >= _HOLD_EXIT_MS:
+                self._reset_exit_state()
+                ws._exit_to_caller()           # hold complete: pop to the caller
+                return True
+            else:
+                ws._dirty = True               # the toast fills each held frame
+        elif self._home_holding:
+            self._home_holding = False         # released before the threshold -> toast gone
+            self._home_held_since = 0
             ws._dirty = True
-        elif self.cart_paused:
-            if i.pressed("a") or i.pressed("run"):
-                self.cart_paused = False   # CONTINUE accelerator (button only)
-                ws._dirty = True
-            elif i.pressed("b"):
-                ws._open_menu()
-        # NOTE: no unpaused B handler -- while a cart PLAYS every button
-        # belongs to the game (Star Catcher moves with B; the old
-        # B->editor shortcut hijacked it). The editor is reachable from
-        # the pause menu (B / bar icons) exactly like the other tools.
+        if i.pressed("home"):
+            if _ticks_diff(now, self._last_tap_ms) > _TRIPLE_TAP_MS:
+                self._tap_count = 0            # the window lapsed -> start a fresh count
+            self._tap_count += 1
+            self._last_tap_ms = now
+            if self._tap_count >= _TRIPLE_TAP_N:
+                self._reset_exit_state()
+                ws._exit_to_caller()           # triple-tap alias: the fw-independent exit
+                return True
         return True
 
     def handle_pointer(self, px, py, click):
@@ -363,34 +369,14 @@ class Player:
         ws = self.ws
         gx, gy = ws._game_xy(px, py)
         px, py = gx, gy
-        # While a cart PLAYS the bar is hidden (#71) -- the game owns the full
-        # 320x240 and every tap belongs to the cart. The unified TOP BAR (HOME,
-        # EDIT/CODE, PAINT, MAP, BLOCKS icons -- the TIC-80 one-tap tool
-        # switcher) hit-tests only in the PAUSE menu (BACKSPACE, or the web
-        # page's menu button) and on the crash panel, where it is drawn.
-        chrome = self.cart_paused or self.cart_error is not None
-        if click and chrome:
-            # The top-bar tool switcher (drawn by the shell) consumes the tap iff a
-            # tool icon was hit; the Player routes it through a thin ws helper (so
-            # this file never reaches the bar surface directly), otherwise the pause
-            # QUIT/CONTINUE handling runs.
-            if ws._cart_bar_tap(px, py):
-                pass
-            elif self.cart_paused and self._in(px, py, _PAUSE_QUIT_BTN):
-                # The pause screen's explicit QUIT button (#71): the ONE
-                # deliberate way to exit, identical for every cart type --
-                # never inferred from a keyboard key, so it's never
-                # ambiguous with a typing game's own letters. Pops back to
-                # whoever launched this cart (Stage 2: the home root).
-                ws._exit_to_caller()
-            elif self.cart_paused:
-                # CONTINUE: the QUIT button's rect is excluded above, so a
-                # tap ANYWHERE else (including the CONTINUE button itself)
-                # resumes play -- and must NOT leak into the cart as a
-                # game tap on the same frame.
-                self.cart_paused = False
-                ws._dirty = True
-                ws.input.game_pointer = (gx, gy, False, False)
+        # While a cart PLAYS the bar is hidden (Stage 5 retired the pause screen), so the
+        # game owns the full 320x240 and every tap belongs to the cart (published as the
+        # game pointer by the router before this runs). The ONLY chrome that hit-tests a
+        # tap is the CRASH panel's top bar (HOME / EDIT|CODE / PAINT / MAP / BLOCKS /
+        # MUSIC -- the fix-it tool switcher), routed through a thin ws helper so this file
+        # never reaches the bar surface directly.
+        if click and self.cart_error is not None:
+            ws._cart_bar_tap(px, py)            # crash-bar tool switcher (EDIT/CODE reachable)
         elif click:
             if ws.show_fps and self._in(px, py, ws.perf_ui._fps_tap_rect()):
                 # Tapping the FPS readout toggles the frame-time breakdown HUD
@@ -399,7 +385,7 @@ class Player:
                 ws.perf_hud = not ws.perf_hud
         return True
 
-    # -- crash + pause chrome (the Player's own UX -- it guarantees the exit) --
+    # -- crash chrome + the transient exit toast (the Player's own UX) --------
 
     def _draw_error_panel(self):
         # A friendly on-canvas crash report (the device never reaches serial, so
@@ -420,29 +406,34 @@ class Player:
             cv.print(lines[i], x + 8, y + 20 + i * _CODE_LH, NAMES["peach"], 1)
         cv.print("TAP CODE TO FIX IT", x + 8, y + h - 12, NAMES["yellow"], 1)
 
-    def _draw_pause_dim(self):
-        """Darken the frozen cart frame. The canvas is indexed (no alpha), so the
-        shade is 50% scanlines -- every other row black, the classic CRT-era pause
-        look. Idempotent across repaints (black rows stay black), so no entry-once
-        latch; the bar and the pill draw AFTER it and stay full-bright."""
+    def _draw_hold_progress(self):
+        """The TRANSIENT hold-to-exit affordance (Stage 5, spec Section 12): a small
+        pill near the top that fills as BACKSPACE is held toward _HOLD_EXIT_MS. Drawn
+        ONLY while the hold is in flight -- handle_input clears _home_holding on release
+        or exit, so it appears on the first held frame and vanishes on release, like a
+        toast; it is NEVER a persistent per-frame overlay on the play frame. Indexed-API
+        only (host == device). The label sits above a thin progress bar so neither
+        obscures the other."""
         cv = self.ws.canvas
         NAMES = self.NAMES
-        for y in range(0, cv.h, 2):
-            cv.rect(0, y, cv.w, 1, NAMES["black"])
+        w, h = 128, 16
+        x = (cv.w - w) // 2
+        y = 6
+        cv.rect(x, y, w, h, NAMES["black"])
+        cv.rectb(x, y, w, h, NAMES["light_grey"])
+        label = "HOLD TO EXIT"
+        cv.print(label, x + (w - len(label) * 8) // 2, y + 2, NAMES["white"], 1)
+        fill = int((w - 4) * self._hold_frac())
+        if fill > 0:
+            cv.rect(x + 2, y + h - 4, fill, 2, NAMES["yellow"])
 
-    def _draw_pause_buttons(self):
-        """The pause screen's two EXPLICIT actions (#71), over the dimmed frame:
-        CONTINUE (resume; also any tap outside QUIT, or A/RUN) and QUIT (pop to the
-        home root; ONLY this button does that -- never inferred from a keyboard key,
-        so a typing game's own letters can never be mistaken for it)."""
-        cv = self.ws.canvas
-        NAMES = self.NAMES
-        title = "PAUSED"
-        cv.print(title, (cv.w - len(title) * 8) // 2, _PAUSE_BTN_Y - 14,
-                  NAMES["white"], 1)
-        for rect, label in ((_PAUSE_CONTINUE_BTN, "CONTINUE"), (_PAUSE_QUIT_BTN, "QUIT")):
-            x, y, w, h = rect
-            cv.rect(x, y, w, h, NAMES["black"])
-            cv.rectb(x, y, w, h, NAMES["light_grey"])
-            cv.print(label, x + (w - len(label) * 8) // 2, y + (h - 8) // 2,
-                      NAMES["white"], 1)
+    def _hold_frac(self):
+        """0..1 progress of the current BACKSPACE hold toward _HOLD_EXIT_MS (0 when no
+        hold is in flight, capped at 1 so the fill never overruns the pill)."""
+        if not self._home_holding:
+            return 0.0
+        el = _ticks_diff(_ticks_ms(), self._home_held_since)
+        if el <= 0:
+            return 0.0
+        f = el / _HOLD_EXIT_MS
+        return 1.0 if f > 1.0 else f

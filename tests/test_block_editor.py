@@ -261,7 +261,7 @@ def test_desktop_blocks_button_opens_editor(tmp_path):
     ws, _, _ = _ws_with_block_cart(tmp_path)
     drv = _driver(ws)
     drv.frame(1 / 30)                                  # on the desktop (cart running)
-    ws.cart_paused = True    # bar icons hit-test in the pause menu (#71)
+    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
     ws._dirty = True
     bx, by = C._BLOCKS_BTN[0] + 2, C._BLOCKS_BTN[1] + 2
     drv.click(bx, by)

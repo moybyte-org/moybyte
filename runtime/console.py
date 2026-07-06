@@ -275,17 +275,15 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # file -- see player.py). Player is the run-loop black box: start a cart under the
 # frozen make_api, tick it, feed it input, guarantee it exits. The "desktop" content
 # layer delegates to the one ws.player; ws._start stays a one-line forward, and the
-# nine cart-run fields the Player owns (cart_error/crash_line/cart_paused/ns/_update/
-# _draw/_cart_key_prev + the pause-only _bks_prev/_cart_start_ms) are exposed back as
-# forwarding properties, so every surface file + test is unchanged. The pause-button
-# geometry moved with the pause machinery and is re-exported here so console._PAUSE_*
-# still resolves for tests. Same bare-or-package fallback as project.py.
+# cart-run fields the Player owns (cart_error/crash_line/ns/_update/_draw/_cart_key_prev
+# + the private _cart_start_ms) are exposed back as forwarding properties, so every
+# surface file + test is unchanged. Stage 5 retired the #71 pause machinery (the
+# cart_paused/_bks_prev fields + the _PAUSE_* button geometry are gone) -- the Player
+# now exits on hold-BACKSPACE or a triple-tap. Same bare-or-package fallback as project.py.
 try:
-    from player import (Player, _PAUSE_BTN_W, _PAUSE_BTN_H, _PAUSE_BTN_GAP,
-                        _PAUSE_BTN_Y, _PAUSE_CONTINUE_BTN, _PAUSE_QUIT_BTN)
+    from player import Player
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.player import (Player, _PAUSE_BTN_W, _PAUSE_BTN_H, _PAUSE_BTN_GAP,
-                        _PAUSE_BTN_Y, _PAUSE_CONTINUE_BTN, _PAUSE_QUIT_BTN)
+    from runtime.player import Player
 
 # The EDITOR app (Stage 3 of docs/shell_ux_technical_plan_v1.md, extracted from this
 # file -- see editor_app.py). EditorApp owns the tab ladder (Config -> Blocks -> Code
@@ -388,9 +386,8 @@ def color(name_or_index):
 # _BAR_BATT / _BAR_WIFI / _BAR_CLOCK, and _DOCK_SLOTS / _DOCK_GLYPH / _DOCK_LABEL --
 # now lives in bar_layer.py (its own surface, #46) and is imported back at the top of
 # this file, so console._X still resolves for Layout + the golden harness/tests.
-# The pause-screen button geometry (_PAUSE_BTN_* / _PAUSE_CONTINUE_BTN /
-# _PAUSE_QUIT_BTN, #71) moved to player.py with the pause machinery (Stage 2) and is
-# imported back at the top of this file, so console._PAUSE_* still resolves for tests.
+# (The #71 pause-screen button geometry was retired in Stage 5 along with the pause
+# machinery -- the Player exits on hold-BACKSPACE / triple-tap now.)
 # The cards-menu geometry (_RUN_BTN / _CODE_BTN / _CLOSE_BTN + _CARD_*) lives in
 # cards_layer.py (its own surface, #3/#15) and is imported back at the top of this
 # file, so console._X still resolves for tests.
@@ -1106,10 +1103,11 @@ class Workstation:
         self.project = Project(self)
         # The cart PLAYER (Stage 2, player.py): the run-loop object. Built idle here
         # (BEFORE anything can set the forwarded cart-run fields below), reused across
-        # runs (start() re-inits it). The nine fields it owns -- ns/_update/_draw,
-        # cart_error/crash_line, cart_paused/_bks_prev, _cart_start_ms/_cart_key_prev --
-        # live on it now and are exposed back as forwarding properties (below), so every
-        # surface file + test reading ws.cart_error/ws._update/... is unchanged.
+        # runs (start() re-inits it). The fields it owns -- ns/_update/_draw,
+        # cart_error/crash_line, _cart_start_ms/_cart_key_prev + the Stage-5 exit-gesture
+        # state -- live on it now and the cart-run ones are exposed back as forwarding
+        # properties (below), so every surface file + test reading ws.cart_error/
+        # ws._update/... is unchanged. (Stage 5 retired the #71 cart_paused/_bks_prev.)
         self.player = Player(self, NAMES, _in)
         # The EDITOR app (Stage 3, editor_app.py): owns the tab ladder + the active-tab
         # state (EditorApp.tab). Built idle here (BEFORE anything can set menu_view,
@@ -1120,8 +1118,10 @@ class Workstation:
         # bar's left zone (draw_zone/zone_tap, bar_layer.py) so it needs the shared
         # draw toolkit + rect hit-test, like the other zone-owning surfaces.
         self.editor_app = EditorApp(self, NAMES, _in)
-        self._run_caller = None       # who to return to on QUIT (run() records it; Stage 2
-                                      # only ever the home root, so pop == go_home)
+        self._run_caller = None       # who to return to on EXIT (run() records it; the
+                                      # launcher root OR -- Stage 3 -- the Editor. The
+                                      # Stage-5 hold-BACKSPACE / triple-tap / context-X
+                                      # all pop to it via _exit_to_caller / exit())
         # (The cards menu's selection/scroll state -- msel/mtop -- lives on
         # self.cards_layer now, built in _build_layers with the rest of the stack.)
         # (The active menu sub-view -- "cards"|"code"|"paint"|"map"|"blocks"|"music"|
@@ -1129,9 +1129,9 @@ class Workstation:
         # forwarding projection of it, so every reader/writer is unchanged.)
         self.editor = None            # CodeEditor while menu_view == "code"
         # (cart/config/sheet/tilemap/images/pmem live on self.project now -- Stage 1;
-        # ns/_update/_draw/cart_error/crash_line/cart_paused/_cart_start_ms/_cart_key_prev/
-        # _bks_prev live on self.player now -- Stage 2; both exposed as forwarding
-        # properties, so ws.sheet/ws.cart_error/... are unchanged.)
+        # ns/_update/_draw/cart_error/crash_line/_cart_start_ms/_cart_key_prev live on
+        # self.player now -- Stage 2; both exposed as forwarding properties, so
+        # ws.sheet/ws.cart_error/... are unchanged.)
         self.paint = None             # PaintEditor while menu_view == "paint"
         # The map (tilemap) editor's UI (#32, extracted from this class -- see
         # map_editor_ui.py): one instance, delegated to from handle_input/
@@ -1815,9 +1815,14 @@ class Workstation:
 
     def _exit_settings(self):
         # Close Settings back to wherever it was opened from: resume the running cart
-        # if we came from one (the gear on the in-cart bar), else the launcher home.
+        # if we came from one (the gear on the in-cart/crash bar), else the launcher home.
         if getattr(self, "_settings_return", "launcher") == "desktop" and self.cart is not None:
-            self.run(self.project, self.launcher_layer)   # resume the running cart
+            # Resume the running cart WITHOUT clobbering _run_caller (the Stage-3 review
+            # fix): Settings was opened OVER a cart the Editor may have launched via PLAY,
+            # so the cart's exit must still return to that caller (the Editor tab), not be
+            # reset to the launcher here. run() would overwrite _run_caller; a bare
+            # screen flip resumes the same cart and preserves who it pops back to.
+            self.screen = "desktop"
             self._dirty = True
         else:
             self.go_home()
@@ -1934,10 +1939,10 @@ class Workstation:
     #
     # The Player owns the running cart's live state now; these forwarding properties
     # delegate reads AND writes to it, so every surface file + test that touches
-    # ws.cart_error / ws.crash_line / ws.cart_paused / ws.ns / ws._update / ws._draw /
-    # ws._cart_key_prev is byte-for-byte unchanged (the exact mirror of the Stage-1
-    # project.* forwards above). (_bks_prev + _cart_start_ms have no external reader --
-    # they stay private on the Player, no forward.)
+    # ws.cart_error / ws.crash_line / ws.ns / ws._update / ws._draw / ws._cart_key_prev
+    # is byte-for-byte unchanged (the exact mirror of the Stage-1 project.* forwards
+    # above). (_cart_start_ms + the Stage-5 exit-gesture state have no external reader --
+    # they stay private on the Player, no forward. cart_paused was retired in Stage 5.)
     @property
     def cart_error(self):
         return self.player.cart_error
@@ -1953,14 +1958,6 @@ class Workstation:
     @crash_line.setter
     def crash_line(self, value):
         self.player.crash_line = value
-
-    @property
-    def cart_paused(self):
-        return self.player.cart_paused
-
-    @cart_paused.setter
-    def cart_paused(self, value):
-        self.player.cart_paused = value
 
     @property
     def ns(self):
@@ -2013,19 +2010,20 @@ class Workstation:
     # -- run / exit (Stage 2: the run/return stack discipline) ----------------
 
     def run(self, project, caller):
-        """Show `project`'s running cart on the desktop, recording `caller` so QUIT
-        knows where to return (spec Section 2's run/return -- a stack discipline, not a
-        blocking call, since the frame loop can't block). The cart itself is started by
-        the explicit _start() at each call site (open/apply/run_code/_leave_menu); run()
-        makes the desktop layer active + records the caller. Today the only caller is
-        the home root (go_home's target), so pop-to-caller == go_home -- behavior is
-        unchanged. Stage 3 makes the Editor a second caller, proving the decoupling."""
+        """Show `project`'s running cart on the desktop, recording `caller` so the exit
+        gesture knows where to return (spec Section 2's run/return -- a stack discipline,
+        not a blocking call, since the frame loop can't block). The cart itself is started
+        by the explicit _start() at each call site (open/apply/run_code/_leave_menu);
+        run() makes the desktop layer active + records the caller. The launcher home root
+        is one caller (pop == go_home); the Editor is the second (Stage 3), so PLAY
+        returns to the same tab -- proving the Player is caller-agnostic."""
         self._run_caller = caller
         self.screen = "desktop"
 
     def _exit_to_caller(self):
         """Pop the running cart back to whoever launched it (run()'s recorded caller,
-        spec Section 2's launch-and-return). The Editor is the second caller now
+        spec Section 2's launch-and-return). The Player's Stage-5 exit gestures
+        (hold-BACKSPACE, triple-tap) both call this. The Editor is the second caller
         (Stage 3b): a cart run from PLAY returns to the Editor on the tab it left
         (screen -> "menu"; editor_app.tab is preserved -> the SAME tab), proving the
         Player has zero knowledge of who launched it. Any other caller (the launcher
@@ -2036,11 +2034,24 @@ class Workstation:
         else:
             self.go_home()
 
+    def exit(self):
+        """Exit the active TASKBAR app back toward the launcher root (spec Section 9's
+        context X, Stage 5): BarLayer.handle_bar_tap routes a tap on the right-zone X
+        here. The launcher IS the back-stack root and never exits (its bar draws no X,
+        so this is never reached with screen == "launcher"). A pre-Stage-6 shim over the
+        screen strings: Settings closes via its own resume-or-home rule; the Editor (and
+        any other taskbar app) goes home."""
+        if self.screen == "settings":
+            self._exit_settings()
+        elif self.screen != "launcher":
+            self.go_home()
+
     def _draw_cart_bar(self):
-        """Draw the unified top bar over the pause/crash frame (the cart-path chrome).
-        The bar is the shell's, not the Player's, so its draw + the _pf_bar (CHROMEBRK)
-        accounting stay here; the Player asks for it via this thin helper so player.py
-        never reaches the bar surface directly (the Stage-2 isolation guarantee)."""
+        """Draw the unified top bar over the CRASH frame (the only cart-path chrome left
+        after Stage 5 retired the pause frame). The bar is the shell's, not the Player's,
+        so its draw + the _pf_bar (CHROMEBRK) accounting stay here; the Player asks for it
+        via this thin helper so player.py never reaches the bar surface directly (the
+        Stage-2 isolation guarantee)."""
         _perf = self.perf_hud or self.perf_capture
         _tb = _ticks_ms() if _perf else 0
         self.bar_layer._draw_status_strip("desktop")   # unified top bar (tool switcher)
@@ -2048,9 +2059,9 @@ class Workstation:
             self._pf_bar = _ticks_diff(_ticks_ms(), _tb)   # CHROMEBRK: the bar's share
 
     def _cart_bar_tap(self, px, py):
-        """Route a pause/crash-frame tap to the top-bar tool switcher (bar-owned),
-        returning True iff a tool icon consumed it. Same isolation reason as
-        _draw_cart_bar: the Player calls this instead of reaching the bar surface."""
+        """Route a CRASH-frame tap to the top-bar tool switcher (bar-owned), returning
+        True iff a tool icon consumed it. Same isolation reason as _draw_cart_bar: the
+        Player calls this instead of reaching the bar surface."""
         return self.bar_layer.handle_cart_tap(px, py)
 
     def _draw_error_panel(self):
@@ -2066,7 +2077,6 @@ class Workstation:
         self.project = Project(self)   # a fresh workspace for the cart being opened
         self.cart = self.launcher.selected()
         self.config = dict(self.cart["cfg"])
-        self.cart_paused = False
         self.cards_layer.reset()      # fresh card selection/scroll for the new cart
         self.editor = None
         self.paint = None
@@ -2434,7 +2444,6 @@ class Workstation:
 
     def go_home(self):
         self._dirty = True             # screen change repaints (#44)
-        self.cart_paused = False
         self._set_text_mode(False)    # restore the game-button keyboard mode
         self.editor = None
         self.paint = None
@@ -2727,10 +2736,9 @@ class Workstation:
         if self._splash_until is not None:
             return True
         # A running cart on the desktop draws every frame (unless it crashed, when the
-        # error panel is static, or it's PAUSED -- the pause menu is a still frame, so
-        # an idle paused game costs ~0 like any static screen, #71).
-        if self.screen == "desktop" and self.cart_error is None \
-                and not self.cart_paused and (
+        # error panel is static). Stage 5 retired the pause frame, so there is no
+        # paused-but-idle state to exclude here anymore.
+        if self.screen == "desktop" and self.cart_error is None and (
                 self._update is not None or self._draw is not None):
             return True
         # A music-editor preview must keep ticking the mixer + redrawing the PLAY/STOP
@@ -2967,8 +2975,9 @@ class Workstation:
 
     # -- desktop shell drawing (#28) -----------------------------------------
 
-    # (_draw_pause_dim + _draw_pause_buttons -- the #71 pause chrome -- moved to
-    # Player (Stage 2, player.py) with the rest of the pause machinery.)
+    # (The #71 pause chrome -- _draw_pause_dim / _draw_pause_buttons -- was retired in
+    # Stage 5; the Player now exits on hold-BACKSPACE / triple-tap, with a transient
+    # hold-progress toast in its place. See player.py.)
 
     def _mini_btn(self, label, rect, fill, cv=None):
         # Shared draw toolkit (stays on Workstation per the doc): a tiny labeled button.

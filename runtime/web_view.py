@@ -1273,14 +1273,13 @@ def apply_events(events, input, pointer, on_press=None, on_pan=None,
                 code = ev.get("code")
                 if isinstance(code, int) and 0 <= code <= 0xFF and on_key is not None:
                     on_key(code)
-                    # ONE console key on the web too (#71): outside text mode a
-                    # browser Backspace also acts as HOME (toggles the pause
-                    # screen -- never "exit", which is the pause screen's own
-                    # explicit QUIT button), mirroring the physical key -- the
-                    # raw-matrix path likewise reports last_key=0x08 AND the
-                    # home button. In text mode it stays a typed 0x08 only
-                    # (delete for a tool; the Workstation edge-detects the
-                    # game's pause toggle itself).
+                    # ONE console key on the web too: outside text mode a browser
+                    # Backspace also fires the HOME button (Stage 5: HOME is the EXIT
+                    # key -- one edge here contributes a triple-tap; the ☰ button,
+                    # wired as a HELD "home" below, is the hold-to-exit gesture),
+                    # mirroring the physical key -- the raw-matrix path likewise
+                    # reports last_key=0x08 AND the home button. In text mode it stays
+                    # a typed 0x08 only (DELETE for a tool -- zero special-casing).
                     if (code == 0x08 and on_press is not None
                             and not getattr(input, "text_mode", False)):
                         on_press("home")
@@ -1737,15 +1736,16 @@ function pr(e){if(dn)return;dn=true;el.classList.add("pr");send({type:"hold",nam
 function rl(e){if(!dn)return;dn=false;el.classList.remove("pr");send({type:"hold",name:nm,down:false});if(e)e.preventDefault();}
 el.addEventListener("pointerdown",function(e){el.setPointerCapture(e.pointerId);pr(e);});
 el.addEventListener("pointerup",rl);el.addEventListener("pointercancel",rl);el.addEventListener("pointerleave",rl);}
-wb("ba","a");wb("bb","b");wb("bh","home");  // &#9776; = HOME: toggles the pause screen (#71)
+wb("ba","a");wb("bb","b");wb("bh","home");  // &#9776; = HOME (Stage 5 EXIT key): a HELD wb button streams "home" down, so holding it ~700ms is the hold-to-exit gesture (server-side synthesized hold)
 var PAN={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]},
 NAV={a:"left",d:"right",w:"up",s:"down"},SC={Enter:"run",z:"a",x:"b"},pH={},nH={};
 // No letter->HOME shortcut: page buttons BYPASS the device's text-mode alias
 // suppression, so h-as-HOME stole the letter h from typing carts (Letter
-// Blitz). Pause from the page = the burger button, or Backspace: it is sent
-// as typed cd=8 and the SERVER maps it to HOME outside text mode (#71 one
-// console key) -- either way it only ever TOGGLES the pause screen; QUIT is
-// the pause screen's own explicit button, tapped like any other.
+// Blitz). EXIT from the page (Stage 5) = HOLD the burger button ~700ms (it
+// streams a held "home" -> the hold-to-exit gesture), or tap Backspace 3x: it
+// is sent as typed cd=8 and the SERVER maps it to a HOME press outside text
+// mode, so three taps within 1s trigger the fw-independent triple-tap exit. In
+// text mode Backspace stays a typed 0x08 (DELETE for a tool -- never an exit).
 function nv(e){var k=e.key.length==1?e.key.toLowerCase():e.key;return NAV[k];}
 cv.addEventListener("keydown",function(e){if(e.key in PAN){pH[e.key]=true;e.preventDefault();return;}
 if(e.key=="Escape"){send({type:"esc"});e.preventDefault();return;}var cd=null;

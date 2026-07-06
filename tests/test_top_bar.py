@@ -154,7 +154,7 @@ def test_cart_bar_home_icon_goes_home(tmp_path):
     ws.launcher.sel = 0
     ws.open()
     assert ws.screen == "desktop"
-    ws.cart_paused = True    # the bar hit-tests in the pause menu (#71)
+    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
     ws._dirty = True
     drv.click(*_center(C._HOME_BTN))
     drv.frame(1 / 30)
@@ -170,7 +170,7 @@ def test_cart_bar_edit_icon_opens_editor(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open()
-    ws.cart_paused = True    # the bar hit-tests in the pause menu (#71)
+    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
     ws._dirty = True
     drv.click(*_center(C._MENU_BTN))
     drv.frame(1 / 30)
@@ -184,7 +184,7 @@ def test_cart_bar_paint_icon_opens_paint(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open()
-    ws.cart_paused = True    # the bar hit-tests in the pause menu (#71)
+    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
     ws._dirty = True
     drv.click(*_center(C._PAINT_BTN))
     drv.frame(1 / 30)
@@ -198,7 +198,7 @@ def test_cart_bar_map_icon_opens_map(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open()
-    ws.cart_paused = True    # the bar hit-tests in the pause menu (#71)
+    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
     ws._dirty = True
     drv.click(*_center(C._MAP_BTN))
     drv.frame(1 / 30)
@@ -212,7 +212,7 @@ def test_cart_bar_blocks_icon_opens_blocks(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open()
-    ws.cart_paused = True    # the bar hit-tests in the pause menu (#71)
+    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
     ws._dirty = True
     drv.click(*_center(C._BLOCKS_BTN))
     drv.frame(1 / 30)
@@ -274,16 +274,18 @@ def _bar_rows(canvas):
 
 
 def _run_a_cart(tmp_path):
-    """A workstation with a cart open and PAUSED, one frame drawn. The bar
-    auto-hides while a cart plays (#71) -- in-cart chrome lives in the pause
-    menu, so bar tests drive the paused state."""
+    """A workstation with a cart open and CRASHED, one frame drawn. Stage 5 retired the
+    #71 pause frame -- the bar auto-hides while a cart PLAYS and shows only on a CRASH
+    (the surviving in-cart chrome), so the running-cart bar tests drive the crashed
+    state. A crashed frame is static, like the old paused one, so the tests force
+    repaints with ws._dirty."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open()
     assert ws.screen == "desktop"
-    ws.cart_paused = True
+    ws.cart_error = "boom"
     ws._dirty = True
     drv.frame(1 / 30)
     return ws, drv
@@ -337,7 +339,7 @@ def test_cart_bar_invalidates_on_theme_change(tmp_path):
     drv.frame(1 / 30)
     assert calls[0] == 1, "a theme change must re-render the bar once"
     for _ in range(3):
-        ws._dirty = True                          # force repaints; paused frames are otherwise skipped (#71)
+        ws._dirty = True                          # force repaints; crashed frames are otherwise static
         drv.frame(1 / 30)
     assert calls[0] == 1, "after the re-render the new strip is reused"
 
@@ -357,7 +359,7 @@ def test_cart_bar_invalidates_on_clock_change(tmp_path):
     drv.frame(1 / 30)
     assert calls[0] == 0                          # clock unchanged -> reused
     ws.bar_layer._clock_text = lambda: "99:99"              # the clock "ticked"
-    ws._dirty = True                              # paused screens are static (#71): force a repaint
+    ws._dirty = True                              # crashed screens are static: force a repaint
     drv.frame(1 / 30)
     assert calls[0] == 1, "a clock change must re-render the bar"
 
@@ -374,7 +376,7 @@ def test_cart_bar_blit_strip_used_each_frame(tmp_path):
         return orig(layer, dx, dy)
     ws.canvas.blit_strip = counting
     for _ in range(4):
-        ws._dirty = True                          # paused frames are skipped unless dirty (#71)
+        ws._dirty = True                          # crashed frames are static unless dirty
         drv.frame(1 / 30)
     assert calls[0] == 4, "the bar should blit its cached strip once per frame"
 
@@ -570,14 +572,65 @@ def test_zoned_bar_gear_opens_sysmenu_from_every_zoned_screen(tmp_path):
     assert ws.sysmenu.open
 
 
+# -- the context X (Stage 5 of docs/shell_ux_technical_plan_v1.md, spec Section 9):
+# the right zone's X exits the active TASKBAR app back toward the launcher root. The
+# launcher IS the root -> it draws NO X; only the Editor / Settings get one.
+
+def test_context_x_exits_the_editor_to_home(tmp_path):
+    """A tap on the right-zone context X pops the Editor back to the launcher root. Drawn
+    + hit-tested on an Editor game-domain tab via the fixed game-canvas _ZONE_CONTEXT_X."""
+    from runtime import bar_layer as BL
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.launcher.sel = 0
+    ws.open_in_editor()
+    ws._open_paint()                 # a game-domain tab -> the game-canvas zoned bar
+    drv.frame(1 / 30)
+    assert ws.screen == "menu"
+    drv.click(*_center(BL._ZONE_CONTEXT_X))
+    drv.frame(1 / 30)
+    assert ws.screen == "launcher"   # the context X exited the Editor to home
+
+
+def test_context_x_exits_settings_to_home(tmp_path):
+    """The context X on Settings (a taskbar app, not the root) exits it back to the
+    launcher home -- routed through the responsive Layout.context_x_btn on the system
+    canvas, proving the X works on BOTH bar geometries."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.open_settings()               # opened from the launcher home
+    drv.frame(1 / 30)
+    assert ws.screen == "settings"
+    drv.click(*_center(ws.layout.context_x_btn))
+    drv.frame(1 / 30)
+    assert ws.screen == "launcher"   # the X exited Settings to home
+
+
+def test_launcher_draws_no_context_x_and_a_tap_there_is_a_no_op(tmp_path):
+    """The launcher is the back-stack ROOT: its right zone draws NO context X (spec
+    Section 9) and a tap on that slot is a no-op -- there is nowhere to exit to, so the
+    home screen stays put (handle_bar_tap guards the X on where != "home")."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)
+    assert ws.screen == "launcher"
+    drv.click(*_center(ws.layout.context_x_btn))
+    drv.frame(1 / 30)
+    assert ws.screen == "launcher"   # root: no X drawn, tap does not exit
+
+
 def test_draw_zone_never_invoked_while_player_is_top_of_stack(tmp_path):
     """The #46 zoned bar's dispatch (draw_zone) MUST stay off the play frame: a
-    Player -- playing OR paused/crashed -- owns the "desktop" screen, and
-    _render_cart_bar's "desktop" branch returns before any owner.draw_zone call.
-    Patch every zone owner's draw_zone and drive a running cart through several
-    playing AND paused frames; none may ever fire (this is what keeps the lent-
-    zone dispatch off the 50fps play frame -- a zone drawn during play would be
-    both a pixel regression and a per-frame cost the golden set can't catch)."""
+    Player -- playing OR crashed -- owns the "desktop" screen, and _render_cart_bar's
+    "desktop" branch returns before any owner.draw_zone call. Patch every zone owner's
+    draw_zone and drive a running cart through several playing AND crashed frames; none
+    may ever fire (this is what keeps the lent-zone dispatch off the 50fps play frame --
+    a zone drawn during play would be both a pixel regression and a per-frame cost the
+    golden set can't catch). Stage 5 retired the pause frame, so the chrome case here is
+    now the crash bar."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
@@ -593,13 +646,13 @@ def test_draw_zone_never_invoked_while_player_is_top_of_stack(tmp_path):
     ws.launcher.sel = 0
     ws.open()                      # PLAY landing: straight to the running "desktop"
     assert ws.screen == "desktop"
-    for _ in range(5):             # playing, unpaused
+    for _ in range(5):             # playing
         ws._dirty = True
         drv.frame(1 / 30)
-    ws.cart_paused = True
-    for _ in range(5):             # paused chrome (the OLD, untouched pause bar)
+    ws.cart_error = "boom"
+    for _ in range(5):             # crash chrome (the untouched desktop crash bar)
         ws._dirty = True
         drv.frame(1 / 30)
     assert calls == [], (
         "the zoned bar's draw_zone must never fire while a Player is top-of-stack "
-        "(playing or paused) -- got calls from: %r" % calls)
+        "(playing or crashed) -- got calls from: %r" % calls)

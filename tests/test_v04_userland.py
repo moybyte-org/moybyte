@@ -510,18 +510,18 @@ def test_host_runs_shared_console_at_320x240(tmp_path):
     assert len(set(drv.rgb888())) > 1                   # launcher renders
     drv.press("run")
     drv.frame(1 / 30)
-    assert ws.screen == "desktop"                       # opened a cart
-    drv.press("b")                                      # B belongs to the GAME while
-    drv.frame(1 / 30)                                   # it plays (#71) -- no menu...
-    assert ws.screen == "desktop" and not ws.cart_paused
-    drv.press("home")                                   # ...pause (the BACKSPACE key)
-    drv.frame(1 / 30)
-    assert ws.cart_paused is True
-    drv.press("b")                                      # ...then B opens the menu
-    drv.frame(1 / 30)
+    assert ws.screen == "desktop"                       # opened a cart (plays)
+    drv.press("b")                                      # B belongs to the GAME while it
+    drv.frame(1 / 30)                                   # plays -- no chrome, stays playing
+    assert ws.screen == "desktop"
+    # Stage 5 exit model: a triple-tap BACKSPACE pops the cart back to its caller (the
+    # launcher root here). From the launcher, open the cart in the Editor to reach code.
+    for _ in range(3):
+        drv.press("home"); drv.frame(1 / 30); drv.frame(1 / 30)
+    assert ws.screen == "launcher"                      # the triple-tap exited the cart
+    ws.open_in_editor()                                 # maker landing -> the Editor
     if ws.menu_view == "cards":
-        drv.press("a")
-        drv.frame(1 / 30)
+        ws.set_menu_view("code")
     assert ws.menu_view == "code" and ws.editor is not None
     ws.editor.row, ws.editor.col = 0, 0
     for ch in "Z=9":
@@ -538,10 +538,10 @@ def test_code_view_arrows_move_caret_and_scroll(tmp_path):
     ws.system["tap_mode"] = "player"     # this test drives the in-cart flow: launcher RUN plays
     drv = host_app.ConsoleDriver(ws)
     drv.press("run"); drv.frame(1 / 30)
-    drv.press("home"); drv.frame(1 / 30)     # pause first: B is the game's while playing (#71)
-    drv.press("b"); drv.frame(1 / 30)
-    if ws.menu_view == "cards":
-        drv.press("a"); drv.frame(1 / 30)
+    assert ws.screen == "desktop"            # launcher RUN plays the cart
+    ws._open_menu()                          # Stage 5: reach the Editor (maker path -- pause
+    if ws.menu_view == "cards":              # is gone, so no pause+B to open the menu)
+        ws.set_menu_view("code")
     ed = ws.editor
     ed.set_text("\n".join(("c" * 60) + " r%02d" % i for i in range(40)))
     drv.pan(0, 1)                                      # hold "down" -> caret moves down
@@ -569,10 +569,10 @@ def test_code_editor_drag_scrolls_without_crashing(tmp_path):
     ws.system["tap_mode"] = "player"     # this test drives the in-cart flow: launcher RUN plays
     drv = host_app.ConsoleDriver(ws)
     drv.press("run"); drv.frame(1 / 30)
-    drv.press("home"); drv.frame(1 / 30)     # pause first: B is the game's while playing (#71)
-    drv.press("b"); drv.frame(1 / 30)
-    if ws.menu_view == "cards":
-        drv.press("a"); drv.frame(1 / 30)
+    assert ws.screen == "desktop"            # launcher RUN plays the cart
+    ws._open_menu()                          # Stage 5: reach the Editor (maker path -- pause
+    if ws.menu_view == "cards":              # is gone, so no pause+B to open the menu)
+        ws.set_menu_view("code")
     ws.editor.set_text("\n".join("line %02d" % i for i in range(40)))
     drv.touch(C._CODE_X0 + 20, C._CODE_Y0 + 100); drv.frame(1 / 30)   # finger down
     drv.touch_drag(C._CODE_X0 + 20, C._CODE_Y0 + 10); drv.frame(1 / 30)  # drag up
@@ -589,10 +589,10 @@ def test_code_editor_symbol_palette_inserts(tmp_path):
     ws.system["tap_mode"] = "player"     # this test drives the in-cart flow: launcher RUN plays
     drv = host_app.ConsoleDriver(ws)
     drv.press("run"); drv.frame(1 / 30)
-    drv.press("home"); drv.frame(1 / 30)     # pause first: B is the game's while playing (#71)
-    drv.press("b"); drv.frame(1 / 30)
-    if ws.menu_view == "cards":
-        drv.press("a"); drv.frame(1 / 30)
+    assert ws.screen == "desktop"            # launcher RUN plays the cart
+    ws._open_menu()                          # Stage 5: reach the Editor (maker path -- pause
+    if ws.menu_view == "cards":              # is gone, so no pause+B to open the menu)
+        ws.set_menu_view("code")
     ed = ws.editor
     ed.set_text("")
     ed.row = ed.col = 0
@@ -616,7 +616,7 @@ def test_host_console_paint_via_mouse(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     drv.press("run")
     drv.frame(1 / 30)
-    ws.cart_paused = True    # bar icons hit-test in the pause menu (#71)
+    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
     ws._dirty = True
     bx, by = C._PAINT_BTN[0], C._PAINT_BTN[1]            # click the PAINT overlay button
     drv.click(bx + 2, by + 2)
@@ -826,7 +826,7 @@ def test_host_console_map_open_place_and_render(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     drv.press("run")
     drv.frame(1 / 30)
-    ws.cart_paused = True    # bar icons hit-test in the pause menu (#71)
+    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
     ws._dirty = True
     drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2)      # open the MAP overlay button
     drv.frame(1 / 30)
@@ -853,7 +853,7 @@ def test_host_console_map_erase_and_pan(tmp_path):
     ws.system["tap_mode"] = "player"     # this test drives the in-cart flow: launcher RUN plays
     drv = host_app.ConsoleDriver(ws)
     drv.press("run"); drv.frame(1 / 30)
-    ws.cart_paused = True    # bar icons hit-test in the pause menu (#71)
+    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
     ws._dirty = True
     drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2); drv.frame(1 / 30)
     ws.map_ui.mapedit.n = 3
@@ -881,7 +881,7 @@ def test_host_console_map_save_roundtrips(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     drv.press("run"); drv.frame(1 / 30)
     cart_path = ws.cart["path"]
-    ws.cart_paused = True    # bar icons hit-test in the pause menu (#71)
+    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
     ws._dirty = True
     drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2); drv.frame(1 / 30)
     ws.map_ui.mapedit.n = 6
@@ -905,7 +905,7 @@ def test_map_edit_seen_by_running_cart_via_gen(tmp_path):
     drv.press("run"); drv.frame(1 / 30)
     tm = ws.tilemap
     before = tm.gen
-    ws.cart_paused = True    # bar icons hit-test in the pause menu (#71)
+    ws.cart_error = "boom"   # Stage 5: the in-cart bar is CRASH chrome (pause retired)
     ws._dirty = True
     drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2); drv.frame(1 / 30)
     drv.click(C._MV_X0 + 2, C._MV_Y0 + 2); drv.frame(1 / 30)   # stamp a cell
