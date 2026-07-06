@@ -13,7 +13,7 @@ system.json dict), ws.wallpaper_id, ws.font_scale, ws.diag_live, ws.web_hook, th
 updater queries -- and every mutation goes through the ws setters (cycle_wallpaper /
 cycle_font_scale / set_diag_live / _cycle_channel / _toggle_web_view / _persist_system).
 The WALLPAPER cluster is SHARED (the launcher draws the same backdrop), so it stays
-single-sourced on ws -- SettingsLayer just calls ws._draw_wallpaper + the picker verbs.
+single-sourced on ws -- SettingsLayer just calls ws.wallpaper.draw + the picker verbs.
 The actions Settings hosts delegate OUT to other layers (ws.open_theme / ws.update_ui.
 open_update / ws.show_achievements). ws.open_settings / _exit_settings (the lifecycle,
 tested) stay on ws. `NAMES` / `_in` / `_clamp_scroll` are injected (the circular-import
@@ -262,7 +262,7 @@ class SettingsLayer:
         reflow with the layout/font scale (#39)."""
         NAMES = self._NAMES
         ws = self.ws
-        ws._draw_wallpaper(dt)
+        ws.wallpaper.draw(dt)
         cv = ws.sys_canvas
         lay = ws.layout
         fs = lay.fs

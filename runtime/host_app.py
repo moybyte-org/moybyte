@@ -47,6 +47,7 @@ from . import paint_layer as _paint_layer
 from . import settings_layer as _settings_layer
 from . import code_layer as _code_layer
 from . import widgets as _widgets
+from . import wallpaper as _wallpaper
 from . import layers as _layers
 sys.modules.setdefault("layers", _layers)
 sys.modules.setdefault("bar_layer", _bar_layer)
@@ -55,6 +56,7 @@ sys.modules.setdefault("paint_layer", _paint_layer)
 sys.modules.setdefault("settings_layer", _settings_layer)
 sys.modules.setdefault("code_layer", _code_layer)
 sys.modules.setdefault("widgets", _widgets)
+sys.modules.setdefault("wallpaper", _wallpaper)
 
 from . import console  # noqa: E402  (after the editors/audio aliases above)
 from . import moy_carts  # noqa: E402  (shared .moy store; host-clean)
