@@ -46,7 +46,7 @@ from device_audio import DeviceAudio, make_audio
 # The device DRAWING backend (extracted to device_canvas.py): the indexed canvas +
 # scroll layers + sprite images. run_desktop constructs DeviceCanvas(comp);
 # make_api uses Image / _decode_moyimg.
-from device_canvas import DeviceCanvas, Image, _decode_moyimg
+from device_canvas import DeviceCanvas, Image, _decode_moyimg, _Layer
 
 # --- the device DRAWING backend now lives in device_canvas.py (DeviceCanvas +
 # Image + _decode_moyimg + _LayerComp/_Layer + the PAL565/native-detection consts),
