@@ -6,9 +6,13 @@ card the child steps with -/+ (or taps a picture for choice/sprite/bg pickers), 
 GO re-runs the cart. This module owns the card DRAWING, the per-card LAYOUT/geometry,
 the scroll window (msel/mtop), and the tap/scroll/keyboard handling.
 
-Boundary (the anti-spaghetti line, per the doc): CART STATE stays on Workstation --
-`ws.config` (the cart's live config dict) is the single source of truth, and
-`ws.apply` re-runs the cart. CardsLayer never OWNS config; it mutates ws.config in
+Boundary (the anti-spaghetti line, per the doc): CART STATE lives on the open
+Project -- the Config tab reads its DATA through the injected workspace,
+`ws.project.config`/`ws.project.cart`/`ws.project.sheet` (Stage 3 of
+docs/shell_ux_technical_plan_v1.md moved the tabs' data reach-through off the ws.*
+god-API onto Project; the ws.config/ws.cart forwards stay as tested surface). It is
+the single source of truth, and `ws.apply` re-runs the cart. CardsLayer never OWNS
+config; it mutates ws.project.config in
 place and dispatches the stepping through `ws.adjust(...)` (which reads this layer's
 `msel` to know which card is selected) and re-runs via `ws.apply()`. The card-only
 constants live here (single source; console.py imports them back so tests + a couple
@@ -82,7 +86,7 @@ class CardsLayer:
 
     def handle_input(self, i):
         ws = self.ws
-        ed = ws.cart.get("edit")
+        ed = ws.project.cart.get("edit")
         if not ed:
             return True
         if i.pressed("up"):
@@ -129,8 +133,8 @@ class CardsLayer:
 
     def card_text(self, i):
         ws = self.ws
-        f = ws.cart["edit"][i]
-        v = ws.config.get(f["key"], f.get("default"))
+        f = ws.project.cart["edit"][i]
+        v = ws.project.config.get(f["key"], f.get("default"))
         if f["type"] == "choice":
             v = self._choice_label(f, v)
         t = f.get("card")
@@ -188,8 +192,8 @@ class CardsLayer:
         rows = []
         y = _CARD_Y0
         top = self._clamp_mtop()
-        for i in range(top, len(ws.cart["edit"])):
-            f = ws.cart["edit"][i]
+        for i in range(top, len(ws.project.cart["edit"])):
+            f = ws.project.cart["edit"][i]
             h = self._card_height(f)
             if i > top and y + h > _CARD_VIEW_BOTTOM:
                 break                       # next row would spill past the buttons
@@ -200,7 +204,7 @@ class CardsLayer:
 
     def _card_count(self):
         ws = self.ws
-        return len(ws.cart["edit"]) if ws.cart and ws.cart.get("edit") else 0
+        return len(ws.project.cart["edit"]) if ws.project.cart and ws.project.cart.get("edit") else 0
 
     def _max_mtop(self):
         """Topmost card index that still leaves the view full from the bottom up:
@@ -213,7 +217,7 @@ class CardsLayer:
         used = 0
         top = n
         for i in range(n - 1, -1, -1):
-            h = self._card_height(ws.cart["edit"][i])
+            h = self._card_height(ws.project.cart["edit"][i])
             step = h if top == n else h + 2
             if used + step > avail:
                 break
@@ -294,7 +298,7 @@ class CardsLayer:
             if row["display"] in self._CELL_DISPLAYS:
                 for k, cell in self._choice_cells(row):
                     if self._in(px, py, cell):
-                        ws.config[row["f"]["key"]] = row["f"]["choices"][k]
+                        ws.project.config[row["f"]["key"]] = row["f"]["choices"][k]
                         return
             ws.adjust(-1 if px < _CARD_X + _CARD_W // 2 else 1)
             return
@@ -358,7 +362,7 @@ class CardsLayer:
         x, y, w = row["x"], row["y"], row["w"]
         lo = f.get("min", 0)
         hi = f.get("max", lo + 1)
-        cur = ws.config.get(f["key"], f.get("default", lo))
+        cur = ws.project.config.get(f["key"], f.get("default", lo))
         try:
             frac = (float(cur) - lo) / (hi - lo) if hi > lo else 0.0
         except (TypeError, ValueError):
@@ -384,7 +388,7 @@ class CardsLayer:
         ws = self.ws
         f = row["f"]
         x, y, w = row["x"], row["y"], row["w"]
-        cur = ws.config.get(f["key"], f.get("default", 0))
+        cur = ws.project.config.get(f["key"], f.get("default", 0))
         try:
             n = int(cur)
         except (TypeError, ValueError):
@@ -405,7 +409,7 @@ class CardsLayer:
         ws = self.ws
         cv = ws.canvas
         f = row["f"]
-        cur = ws.config.get(f["key"], f.get("default"))
+        cur = ws.project.config.get(f["key"], f.get("default"))
         sel_k = self._choice_index(f, cur)
         tiles = self._resolve_tiles(f) if row["display"] == "sprite-tiles" else None
         icons = f.get("icons") or []
@@ -413,8 +417,8 @@ class CardsLayer:
             chosen = (k == sel_k)
             cv.rect(cx, cy, cw, ch, NAMES["black"] if chosen else NAMES["dark_purple"])
             cv.rectb(cx, cy, cw, ch, NAMES["yellow"] if chosen else NAMES["dark_grey"])
-            if tiles is not None and ws.sheet is not None:
-                img = ws.sheet.tile_image(tiles[k] if k < len(tiles) else 0, -1)
+            if tiles is not None and ws.project.sheet is not None:
+                img = ws.project.sheet.tile_image(tiles[k] if k < len(tiles) else 0, -1)
                 if img is not None:
                     cv.spr(img, cx + (cw - 16) // 2, cy + (ch - 16) // 2, 2)
             else:
@@ -450,7 +454,7 @@ class CardsLayer:
         ws = self.ws
         cv = ws.canvas
         f = row["f"]
-        cur = ws.config.get(f["key"], f.get("default"))
+        cur = ws.project.config.get(f["key"], f.get("default"))
         sel_k = self._choice_index(f, cur)
         for k, (cx, cy, cw, ch) in self._choice_cells(row):
             self._draw_bg_thumb(f["choices"][k], (cx + 1, cy + 1, cw - 2, ch - 2))
