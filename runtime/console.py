@@ -11,9 +11,8 @@ free apart from the shared editor cores below.
 
 import time
 
-from audio import AudioBank, AudioEngine
 from editors import (CodeEditor, IconSheet,
-                     PaintEditor, SpriteSheet, TileMap, _SheetSprite)
+                     PaintEditor, SpriteSheet, _SheetSprite)
 # The block editor's UI layer (issue #29 Part 2, extracted from this file): the
 # structured-outline screen + BlockLayout (its responsive geometry, #39 step 2) +
 # the module constants/sentinels its rows/menu render. Re-exported under their

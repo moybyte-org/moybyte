@@ -2324,6 +2324,7 @@ def test_device_audio_wired():
     audio = (Path("runtime") / "audio.py").read_text(encoding="utf-8")
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    project = (Path("runtime") / "project.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
     device_audio = (ROOT / "modules" / "device_audio.py").read_text(encoding="utf-8")
@@ -2337,10 +2338,11 @@ def test_device_audio_wired():
     assert "def render_into(self, out, nframes):" in audio
     assert "self.render_into(out, nframes)" in audio
     assert "class AudioBank:" in audio
-    # The console builds a per-cart AudioEngine and injects an audio backend.
-    assert "from audio import" in console
-    assert "AudioBank" in console and "AudioEngine" in console
-    assert "def _build_audio(self):" in console
+    # Project builds the per-cart AudioEngine (Stage 1 moved _build_audio there);
+    # the console's cart tick still feeds it via self.audio.tick.
+    assert "from audio import" in project
+    assert "AudioBank" in project and "AudioEngine" in project
+    assert "def _build_audio(self):" in project
     assert "self.audio.tick(dt)" in console
     # The device make_api binds the same six audio names as the host.
     for name in ('"sfx": _sfx', '"beep": _beep', '"music": _music',
