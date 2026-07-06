@@ -9,6 +9,12 @@ and is individually revertible.
 *enabling* step under both of its halves (§2 privileged system carts, §3 layered
 compositor); see "Relationship to the shell architecture doc" below. The kid-facing
 contract (`docs/moy_cart_api.md`) does **not** change.
+**Successor:** `docs/shell_os_architecture_v1.md` — the adversarial review of this
+refactor found its sharpest flaw: the Layer boundary made the coupling *legible* but
+did not *reduce* it (every Layer still reaches through `self.ws` into a ~100-member
+implicit API, including other surfaces' privates). That doc is the plan that fixes it —
+per-surface capability APIs + an event bus, the same boundary the kid carts already
+have via `make_api`.
 
 **One-line thesis:** the remaining console cleanup stalled because we were moving
 surfaces into *files* while they're still smeared across the god-loop. Give each
