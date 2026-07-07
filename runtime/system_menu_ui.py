@@ -66,11 +66,13 @@ class SystemMenuUI:
             self.ws.apply()
 
     def _menu_delete_cart(self):
-        # Delete the open cart (it IS the launcher selection -- open() set self.cart =
-        # launcher.selected()), then go home. del_cart guards read-only / last-cart.
-        before = len(self.ws.launcher.items)
+        # Delete the OPEN cart (del_cart targets self.cart when a cart is open -- which a
+        # picker-opened cart is, even if it's not the launcher selection), then go home.
+        # del_cart guards read-only / last-cart. Count the FULL cart list (a wallpaper
+        # isn't in the launcher run-grid) to detect the deletion.
+        before = len(self.ws._all_carts)
         self.ws.del_cart()
-        if len(self.ws.launcher.items) < before:
+        if len(self.ws._all_carts) < before:
             self.ws.go_home()
 
     def _menu_about(self):

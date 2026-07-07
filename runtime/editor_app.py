@@ -55,18 +55,21 @@ def _in(px, py, rect):
 
 
 # The Editor's lent left zone (Stage 4 of docs/shell_ux_technical_plan_v1.md, #46
-# zoned bar): the tab ladder + PLAY + SAVE, in the spec Section 6 order (Config ->
-# Blocks -> Code -> Sprites -> Map -> Music -> PLAY -> SAVE), rendered as icons
-# inside the rect the bar lends it. Each entry is (tab_name_or_None_or_ACTION,
-# icon_kind); `tab_name` is what EditorApp.tab equals when that icon's destination
-# is showing (so draw_zone can highlight it). PLAY (None) and SAVE (_ZONE_SAVE) are
-# ACTIONS, not destinations, so they're never highlighted -- SAVE dispatches to the
-# active tab's persist verb (save_current), the ONE compact save affordance the
-# unified bar carries so every editor BODY stays chrome-free (fits 320px: 8 icons *
-# 18px = 144px inside the ~202px lent zone). This is what makes the bar identical
-# across all six tabs -- code/blocks/music no longer need their own SAVE/RUN/CLOSE.
-_ZONE_SAVE = "\x00save"     # sentinel: the SAVE action icon (never a real tab)
+# zoned bar): PROJECTS (back to the picker) + the tab ladder + PLAY + SAVE, in the
+# spec Section 6 order (Projects -> Config -> Blocks -> Code -> Sprites -> Map -> Music
+# -> PLAY -> SAVE), rendered as icons inside the rect the bar lends it. Each entry is
+# (tab_name_or_None_or_ACTION, icon_kind); `tab_name` is what EditorApp.tab equals when
+# that icon's destination is showing (so draw_zone can highlight it). PROJECTS
+# (_ZONE_PROJECTS -> open_picker, edit another project), PLAY (None) and SAVE
+# (_ZONE_SAVE) are ACTIONS, not destinations, so they're never highlighted -- SAVE
+# dispatches to the active tab's persist verb (save_current), the ONE compact save
+# affordance the unified bar carries so every editor BODY stays chrome-free (fits 320px:
+# 9 icons * 18px = 162px inside the ~202px lent zone). This is what makes the bar
+# identical across all six tabs -- code/blocks/music no longer need their own SAVE/RUN/CLOSE.
+_ZONE_SAVE = "\x00save"          # sentinel: the SAVE action icon (never a real tab)
+_ZONE_PROJECTS = "\x00projects"  # sentinel: back to the project-picker (never a real tab)
 _ZONE_TABS = (
+    (_ZONE_PROJECTS, "projects"),  # <- back to the PROJECT-PICKER (edit another project)
     ("cards", "edit"),
     ("blocks", "blocks"),
     ("code", "code"),
@@ -307,7 +310,9 @@ class EditorApp:
 
     def _activate_zone_tab(self, tab):
         ws = self.ws
-        if tab == "cards":
+        if tab == _ZONE_PROJECTS:   # <- back to the PROJECT-PICKER (edit another project)
+            ws.open_picker()
+        elif tab == "cards":
             ws._open_menu()
         elif tab == "code":
             ws.set_menu_view("code")

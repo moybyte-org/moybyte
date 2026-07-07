@@ -251,7 +251,7 @@ def test_crosscheck_named_cart_with_map(tmp_path):
         pytest.skip("battle_city.moy not present")
     ws, drv, tee = _build_tee(str(tmp_path / "carts"))
     for i, c in enumerate(ws.launcher.items):
-        if os.path.basename(c["path"]) == "battle_city.moy":
+        if os.path.basename(c.get("path") or "") == "battle_city.moy":
             ws.launcher.sel = i
             break
     else:
@@ -664,7 +664,7 @@ def test_sakura_paint_bg_ships_via_assets_and_replays_pixel_identical(tmp_path):
       * every served frame replays pixel-identically to the rasterizer via imgref + /assets."""
     ws, drv, tee = _build_tee(str(tmp_path / "carts"))
     for i, c in enumerate(ws.launcher.items):
-        if os.path.basename(c["path"]) == "sakura.moy":
+        if os.path.basename(c.get("path") or "") == "sakura.moy":
             ws.launcher.sel = i
             break
     else:

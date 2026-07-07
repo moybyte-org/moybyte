@@ -1,15 +1,19 @@
 """The desktop home / launcher (#28), extracted from Workstation
 (runtime/console.py) as its own Layer -- docs/shell_layers_refactor_v1.md (Move 1b,
-the last surface). Two classes:
+the last surface). Three classes:
 
   * `Launcher`     -- the cart icon GRID model + draw: items/sel/paging/nav + the
-                      tile rendering. The single instance is ws.launcher (built by
-                      Workstation, the single source everything reads via
-                      ws.launcher.items/sel/selected()); this file just holds its class.
+                      tile rendering. Two instances: ws.launcher (the home RUN-grid)
+                      and ws.picker (the Editor's PROJECT-PICKER grid); both reuse the
+                      same class + tile draw. This file just holds the class.
   * `LauncherHomeLayer` -- the "launcher" content Layer: the home composition
                       (wallpaper backdrop -> icon grid -> top bar) + the grid nav /
                       selection input. It reaches everything through self.ws and
-                      dispatches a cart open to ws.open().
+                      dispatches a cart open to ws.launch_selected() (tap = RUN, or the
+                      pinned Make tile -> the Editor project-picker).
+  * `EditorPickerLayer` -- the "picker" content Layer (spec shell_ux_v1.md): the SAME
+                      grid look over ws.picker (every editable cart + a "+ New" tile);
+                      picking a cart opens it in the Editor (ws.pick_selected).
 
 Boundary (single source of truth): ws.launcher (the instance) + ws.open() (open the
 selected cart -- lifecycle, pinned) + the cart store stay on Workstation. The Launcher
@@ -34,10 +38,31 @@ def _in(px, py, rect):
     return x <= px < x + w and y <= py < y + h
 
 
+# The launcher's pinned "Make" tile + the picker's pinned "+ New" tile are PSEUDO-
+# entries (not real carts): a plain dict with a marker `type` + a title, flowing
+# through the SAME grid (nav/sel/tile_at) as real carts, dispatched by their type at
+# tap time. `path` is None so cart management (dup/del) + the icon-sheet loader skip
+# them, and a fresh dict per call avoids aliasing one shared mutable tile.
+MAKE_TILE_TYPE = "make"          # launcher slot 0: tap -> Editor project-picker
+NEW_TILE_TYPE = "new"            # picker slot 0: tap -> create a game + open the Editor
+PSEUDO_TILE_TYPES = (MAKE_TILE_TYPE, NEW_TILE_TYPE)
+
+
+def make_tile():
+    return {"type": MAKE_TILE_TYPE, "title": "Make", "path": None}
+
+
+def new_tile():
+    return {"type": NEW_TILE_TYPE, "title": "New", "path": None}
+
+
 # Per-type icon glyph + art-box color for a cart tile on the desktop (the pre-literate
-# cue), used when a cart has no sprite of its own.
-_TYPE_GLYPH = {"wallpaper": "paint", "game": "run", "app": "app", "tool": "gear"}
-_TYPE_COLOR = {"wallpaper": 12, "game": 8, "app": 11, "tool": 9}  # index by type
+# cue), used when a cart has no sprite of its own. The two pseudo tiles get a
+# distinctive bright box + a clear glyph (pencil = Make, plus = New).
+_TYPE_GLYPH = {"wallpaper": "paint", "game": "run", "app": "app", "tool": "gear",
+               MAKE_TILE_TYPE: "edit", NEW_TILE_TYPE: "plus"}
+_TYPE_COLOR = {"wallpaper": 12, "game": 8, "app": 11, "tool": 9,
+               MAKE_TILE_TYPE: 10, NEW_TILE_TYPE: 14}  # index by type
 
 
 class Launcher:
@@ -350,4 +375,103 @@ class LauncherHomeLayer:
             ws.dup_cart(); return True
         if ws.can_manage and self._in(px, py, lay.del_btn):
             ws.del_cart(); return True
+        return False
+
+
+class EditorPickerLayer:
+    """The Editor's PROJECT-PICKER content Layer (spec shell_ux_v1.md, the Editor's
+    entry state when no project is chosen). It reuses the launcher's cart-grid look --
+    the SAME `Launcher` tile rendering, over `ws.picker` (a second grid instance whose
+    items are the "+ New" pseudo tile followed by every EDITABLE cart: games, tools,
+    apps, wallpapers, built-ins). Picking a cart opens it in the Editor (ws.pick_selected
+    -> ws.open_in_editor); the "+ New" tile creates a game + opens it. Exit (the bar X /
+    B) pops back to the launcher; the Editor's own "projects" affordance returns HERE.
+
+    Mirrors LauncherHomeLayer (grid nav + trackball hover + page chevrons) but dispatches
+    to the picker verbs instead of RUN, and lends the bar a "PICK A PROJECT" title. Owns
+    only the trackball hover state; ws.picker is the single source it reads."""
+
+    id = "picker"
+    domain = "system"
+
+    def __init__(self, ws, names, in_rect):
+        self.ws = ws
+        self._NAMES = names
+        self._in = in_rect
+        self._phover = (-1, -1)       # trackball hover pos (like LauncherHomeLayer._lhover)
+
+    def draw(self, dt):
+        NAMES = self._NAMES
+        ws = self.ws
+        ws.wallpaper.draw(dt)
+        cv = ws.sys_canvas
+        lay = ws.layout
+        ws.picker.draw(cv, ws._icon_sheet_for)
+        if ws.picker.max_page() > 0:
+            if ws.picker.page > 0:
+                px, py = lay.page_prev[0], lay.page_prev[1]
+                cv.print("<", px + 3, py + 8, NAMES["white"], 2)
+            if ws.picker.page < ws.picker.max_page():
+                px, py = lay.page_next[0], lay.page_next[1]
+                cv.print(">", px + 3, py + 8, NAMES["white"], 2)
+        ws.bar_layer._draw_status_strip("picker")
+
+    def handle_input(self, i):
+        ws = self.ws
+        if i.pressed("left"):
+            ws.picker.nav2d(-1, 0)
+        if i.pressed("right"):
+            ws.picker.nav2d(1, 0)
+        if i.pressed("up"):
+            ws.picker.nav2d(0, -1)
+        if i.pressed("down"):
+            ws.picker.nav2d(0, 1)
+        if i.pressed("a") or i.pressed("run"):
+            ws.pick_selected()               # open the picked cart in the Editor (or + New)
+        if i.pressed("b") or i.pressed("home") or i.pressed("stop"):
+            ws.exit()                        # back to the launcher root
+        return True
+
+    def handle_pointer(self, px, py, click):
+        ws = self.ws
+        if click:
+            if ws.bar_layer.handle_bar_tap("picker", px, py):   # clock/≡/wifi/X + lent zone
+                return True
+            lay = ws.layout
+            if ws.picker.max_page() > 0 and self._in(px, py, lay.page_prev):
+                ws.picker.flip_page(-1); return True
+            if ws.picker.max_page() > 0 and self._in(px, py, lay.page_next):
+                ws.picker.flip_page(1); return True
+            i = ws.picker.tile_at(px, py)
+            if i is not None:
+                ws.picker.sel = i
+                ws.pick_selected()
+                return True
+        # Trackball hover (no click): preview the tile the cursor moved onto (mirrors
+        # LauncherHomeLayer -- seed to the live pos so the first centered frame isn't a move).
+        if self._phover == (-1, -1):
+            self._phover = (px, py)
+        elif (px, py) != self._phover:
+            self._phover = (px, py)
+            i = ws.picker.tile_at(px, py)
+            if i is not None:
+                ws.picker.sel = i
+        return True
+
+    # -- the lent left zone (Stage 4, #46 zoned bar) --------------------------
+
+    @property
+    def zone_gen(self):
+        """Proxy onto ws.picker.zone_gen -- the picker GRID owns sel/items, so this
+        gives BarLayer a uniform owner.zone_gen (same trick LauncherHomeLayer uses)."""
+        return self.ws.picker.zone_gen
+
+    def draw_zone(self, cv, rect):
+        """The picker's lent left zone: a title so the screen reads as 'choose a
+        project to edit' rather than another home grid."""
+        NAMES = self._NAMES
+        lay = self.ws.layout
+        cv.print("PICK A PROJECT", lay.zone_left[0] + 2, 3, NAMES["white"], 1)
+
+    def zone_tap(self, px, py, rect=None):
         return False

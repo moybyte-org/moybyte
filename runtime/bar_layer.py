@@ -193,6 +193,8 @@ class BarLayer:
         ws = self.ws
         if where == "home":
             return ws.launcher_layer
+        if where == "picker":
+            return ws.editor_picker
         if where == "settings":
             return ws.settings_layer
         if where == "menu":

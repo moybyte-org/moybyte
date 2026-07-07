@@ -214,11 +214,28 @@ def test_tapping_a_cart_icon_runs_it_from_home(tmp_path):
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
-    x, y, w, h = ws.layout.tile_rect(0, ws.launcher.page)
+    # Slot 0 is the pinned Make tile; the first real cart is slot 1.
+    real = next(i for i, it in enumerate(ws.launcher.items) if it.get("path"))
+    x, y, w, h = ws.launcher.tile_rect(real)
     drv.click(x + w // 2, y + h // 2)
     drv.frame(1 / 30)
     assert ws.screen == "desktop"               # tap -> RUN
-    assert ws.cart is not None                  # ...with the tapped cart loaded
+    assert ws.cart is not None and ws.cart.get("path")  # ...a real cart loaded
+
+
+def test_tapping_the_make_tile_opens_the_project_picker(tmp_path):
+    """The pinned "Make" tile (launcher slot 0, distinctive) opens the Editor's
+    PROJECT-PICKER (screen == "picker"), NOT a running cart (spec shell_ux_v1.md)."""
+    from runtime import host_app
+    from runtime.launcher_layer import MAKE_TILE_TYPE
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    assert ws.launcher.items[0].get("type") == MAKE_TILE_TYPE   # pinned first, a pseudo tile
+    assert ws.launcher.items[0].get("path") is None             # not a real cart
+    x, y, w, h = ws.launcher.tile_rect(0)
+    drv.click(x + w // 2, y + h // 2)
+    drv.frame(1 / 30)
+    assert ws.screen == "picker"                # opened the project-picker, did NOT run
 
 
 _ONE_CARD = [{"key": "c", "type": "choice", "choices": ["red", "blue"], "card": "C IS {value}"}]

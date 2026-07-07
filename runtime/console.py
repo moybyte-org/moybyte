@@ -257,9 +257,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # reads) + LauncherHomeLayer (the "launcher" content Layer -- home composition + grid
 # nav). Launcher takes NAMES + _blit_glyph injected for its tile art; ws.open() stays.
 try:
-    from launcher_layer import Launcher, LauncherHomeLayer
+    from launcher_layer import (Launcher, LauncherHomeLayer, EditorPickerLayer,
+                                make_tile, new_tile, MAKE_TILE_TYPE, NEW_TILE_TYPE)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.launcher_layer import Launcher, LauncherHomeLayer
+    from runtime.launcher_layer import (Launcher, LauncherHomeLayer, EditorPickerLayer,
+                                        make_tile, new_tile, MAKE_TILE_TYPE, NEW_TILE_TYPE)
 
 # The open cart's live WORKSPACE (Stage 1 of docs/shell_ux_technical_plan_v1.md,
 # extracted from this file -- see project.py). Project holds the open cart's DATA
@@ -748,6 +750,10 @@ _GLYPHS = {
     # always a _glyph bitmap (NOT a themeable IconSheet slot) so it can't go blank on a
     # device whose saved theme predates this icon.
     "menu":   (0x000, 0x000, 0x7FE, 0x7FE, 0x000, 0x7FE, 0x7FE, 0x000, 0x7FE, 0x7FE, 0x000, 0x000),
+    # "projects": a 2x2 grid of tiles -- the Editor's "back to the project-picker"
+    # affordance (spec shell_ux_v1.md). Not an IconSheet slot, so it renders via the
+    # _glyph fallback (ws._icon falls back to this 12x12 bitmap for kinds not in _ICON).
+    "projects": (0x000, 0x7BC, 0x7BC, 0x7BC, 0x7BC, 0x000, 0x000, 0x7BC, 0x7BC, 0x7BC, 0x7BC, 0x000),
 }
 
 
@@ -1107,7 +1113,25 @@ class Workstation:
         # transient screen state (_upd_phase/_upd_msg/_upd_bin/...) lives on it;
         # the queries + channel config above/below stay here.
         self.update_ui = UpdateUI(self, NAMES, _in, _err_text)
-        self.launcher = Launcher(carts if carts else [], self.layout, NAMES, _blit_glyph)
+        # The scanned cart list is the single source both grids derive from (#carts):
+        # the LAUNCHER grid is the pinned "Make" tile + the run-grid carts, and the
+        # Editor's PROJECT-PICKER grid is the pinned "+ New" tile + every editable cart.
+        # Kept here so wallpaper discovery + the wifi-tool lookup read the FULL list
+        # rather than either display grid (the Make/New pseudo tiles never leak out).
+        self._all_carts = list(carts) if carts else []
+        self.launcher = Launcher(self._launcher_items(self._all_carts),
+                                 self.layout, NAMES, _blit_glyph)
+        # Default the highlight to the first RUNNABLE cart (skip the pinned Make tile at
+        # slot 0), so a bare RUN/A plays a game rather than opening the picker -- the
+        # launcher is RUN-first (spec shell_ux_v1.md); Make is a tap/nav target.
+        self.launcher.sel = next((i for i, it in enumerate(self.launcher.items)
+                                  if it.get("path")), 0)
+        # The Editor's project-picker grid (spec shell_ux_v1.md): its own Launcher
+        # instance so it keeps an independent selection/page, reusing the SAME tile
+        # rendering. `ws.editor_picker` (the content Layer) draws it; ws.pick_selected
+        # opens the chosen cart in the Editor.
+        self.picker = Launcher(self._picker_items(self._all_carts),
+                               self.layout, NAMES, _blit_glyph)
         # Screen states (#28): "launcher" is now the DESKTOP home (wallpaper + cart
         # icon grid + dock); "desktop" is a running cart; "menu" is the cards/code/
         # paint/map editors; "settings" is the Settings app.
@@ -1382,11 +1406,16 @@ class Workstation:
         # The desktop home / launcher (#28): the home composition + grid nav. The Launcher
         # GRID instance stays ws.launcher (the single source); this Layer draws it.
         self.launcher_layer = LauncherHomeLayer(self, NAMES, _in)
+        # The Editor's project-picker content Layer (spec shell_ux_v1.md): reuses the
+        # launcher grid look over ws.picker; the Make tile opens it, picking a cart opens
+        # the Editor above it.
+        self.editor_picker = EditorPickerLayer(self, NAMES, _in)
         # Content layers (exactly one active per frame, chosen by screen/menu_view). Every
         # surface is now its own Layer/component; only the running-cart "desktop" + the
         # theme wrapper remain thin _LegacyLayer shims over Workstation methods.
         self._content_layers = {
             "launcher": self.launcher_layer,
+            "picker": self.editor_picker,
             "settings": self.settings_layer,
             "update": _UpdateLayer(self),
             "desktop": _PlayerLayer(self),   # Stage 2: the run loop is ws.player
@@ -1474,10 +1503,11 @@ class Workstation:
     _FILL_WALLPAPERS = ("fill:dark_blue", "fill:black", "fill:indigo", "fill:dark_purple")
 
     def wallpaper_carts(self):
-        """The wallpaper-type carts available as backdrops (discovery: scan the
-        launcher items by type, Moybyte's equivalent of Picotron's wallpapers
-        folder). Returns the cart dicts in launcher order."""
-        return [c for c in self.launcher.items if c.get("type") == "wallpaper"]
+        """The wallpaper-type carts available as backdrops (discovery by type, Moybyte's
+        equivalent of Picotron's wallpapers folder). Reads the FULL scanned list, not the
+        launcher grid -- wallpapers are a backdrop category chosen in Settings, so they
+        leave the launcher RUN-grid (spec shell_ux_v1.md) but stay discoverable here."""
+        return [c for c in self._all_carts if c.get("type") == "wallpaper"]
 
     def wallpaper_options(self):
         """All selectable wallpaper ids: each wallpaper cart's slug, then the
@@ -1762,6 +1792,8 @@ class Workstation:
         """A cached sprite Image for a cart's desktop icon (its sheet tile 0), or
         None when the cart has no art (then the type glyph is drawn). Cached per
         cart path so the grid doesn't rebuild a sheet every frame."""
+        if cart.get("path") is None:                # a pinned pseudo tile (Make/New):
+            return None                             # no cart art -> draw its type glyph
         key = cart.get("path") or cart.get("title")
         cache = self._icon_cache
         if key in cache:
@@ -2135,12 +2167,21 @@ class Workstation:
         # (cards_layer sets ws.cart_error then calls ws._draw_error_panel()).
         self.player._draw_error_panel()
 
-    def _open_workspace(self):
-        # Build a fresh Project for the SELECTED cart + start it (shared by open() [RUN,
-        # from a launcher tap] and open_in_editor() [EDIT, from the project-picker]).
+    def _open_workspace(self, cart=None):
+        # Build a fresh Project for `cart` (default: the launcher selection) + start it,
+        # shared by open() [RUN, from a launcher tap, uses the launcher selection] and
+        # open_in_editor() [EDIT, from the project-picker, which passes the PICKED cart].
         # Leaves the cart STARTED so PLAY can run it and the editors have live data.
         self.project = Project(self)   # a fresh workspace for the cart being opened
-        self.cart = self.launcher.selected()
+        if cart is None:
+            cart = self.launcher.selected()
+        # INVARIANT: a workspace only ever opens a REAL cart. The launcher's pinned "Make"
+        # pseudo tile is dispatched to the picker (launch_selected), never run -- but guard
+        # the RUN/EDIT path anyway so a stray open() on the Make selection resolves to the
+        # first real cart instead of crashing on a non-cart (path/cfg-less) tile.
+        if cart is None or cart.get("path") is None:
+            cart = next((c for c in self.launcher.items if c.get("path")), cart)
+        self.cart = cart
         self.config = dict(self.cart["cfg"])
         self.cards_layer.reset()      # fresh card selection/scroll for the new cart
         self.editor = None
@@ -2177,21 +2218,68 @@ class Workstation:
         self._open_workspace()
         self.run(self.project, self.launcher_layer)   # activate desktop, record caller
 
-    def open_in_editor(self):
-        # Open the SELECTED cart in the Editor, landing on Config (spec Section 6). The
-        # cart is started (ready for PLAY) but not shown; the Editor owns the screen until
-        # PLAY runs it. Reached from the Editor's PROJECT-PICKER (the Make tile), never a
-        # launcher tap -- a launcher tap always RUNS (launch_selected -> open).
-        self._open_workspace()
+    def open_in_editor(self, cart=None):
+        # Open `cart` (default: the launcher selection) in the Editor, landing on Config
+        # (spec Section 6). The cart is started (ready for PLAY) but not shown; the Editor
+        # owns the screen until PLAY runs it. Reached from the Editor's PROJECT-PICKER, which
+        # passes the PICKED cart -- never a launcher tap (a launcher tap always RUNS).
+        self._open_workspace(cart)
         self.editor_app.open(self.project)
 
     def launch_selected(self):
         """A launcher TAP RUNS the selected cart (spec shell_ux_v1.md, the locked model:
-        launcher tap = RUN, always, for every cart type). The interim maker/player
-        `tap_mode` type-dispatch is retired: authoring is a launchable Editor app (the
-        launcher's Make tile -> project-picker), not a mode a tap flips into. Both Play and
-        Edit stay reachable -- Play here, Edit through the Make tile."""
+        launcher tap = RUN, always, for every cart type). The one exception is the pinned
+        "Make" pseudo tile (slot 0), which opens the Editor's PROJECT-PICKER rather than
+        running -- authoring is a launchable Editor app, not a mode a tap flips into. Both
+        Play and Edit stay reachable -- Play here, Edit through the Make tile."""
+        sel = self.launcher.selected()
+        if sel is not None and sel.get("type") == MAKE_TILE_TYPE:
+            self.open_picker()
+            return
         self.open()
+
+    # -- the Editor's project-picker (spec shell_ux_v1.md) -------------------
+
+    def open_picker(self):
+        """Open the Editor's PROJECT-PICKER (the Make tile's target): a cart grid of every
+        editable project + a "+ New" tile. Pushed on the back-stack, so its X pops home and
+        picking a cart pushes the Editor above it (so the Editor's "projects" affordance
+        returns HERE)."""
+        self._dirty = True             # screen change repaints (#44)
+        self._set_text_mode(False)     # a grid, not the code editor
+        self.wm.goto("picker")
+
+    def pick_selected(self):
+        """Open the picker's selected entry: a real cart -> open it in the Editor; the
+        pinned "+ New" tile -> create a game + open it (spec shell_ux_v1.md)."""
+        sel = self.picker.selected()
+        if sel is not None and sel.get("type") == NEW_TILE_TYPE:
+            self.new_cart_and_edit()
+            return
+        if sel is not None:
+            self.open_in_editor(sel)
+
+    def new_cart_and_edit(self):
+        """The picker's "+ New": create a fresh GAME cart (NEW_TEMPLATE), re-sync both
+        grids, then open the new cart in the Editor. A no-op on a read-only store (a
+        device without SD writes), leaving the picker up rather than crashing."""
+        if not self.carts_root or not self.can_manage:
+            return
+        try:
+            new, items = self._with_sd(lambda: (
+                self.carts_store.new_from_template(self.carts_root),
+                self.carts_store.scan(self.carts_root)))
+        except Exception as exc:  # noqa: BLE001
+            print("Moybyte new cart failed:", exc)
+            return
+        self._apply_items(items)
+        # Select the new cart in the picker so returning to it (the Editor's "projects"
+        # affordance) lands on the freshly-created project, then open it in the Editor.
+        for i, it in enumerate(self.picker.items):
+            if it.get("path") == new.get("path"):
+                self.picker.sel = i
+                break
+        self.open_in_editor(new)
 
     def launch_wifi_tool(self):
         """Launch the WiFi system tool -- the right-zone wifi icon's tap target (Part 3):
@@ -2624,9 +2712,30 @@ class Workstation:
     # Each action mounts the SD card, mutates, and re-scans within a single
     # _with_sd session, then the card is unmounted before the next flush.
 
+    def _launcher_items(self, carts):
+        """The LAUNCHER run-grid entries: the pinned "Make" tile first (spec shell_ux_v1.md
+        -- tap it to open the Editor project-picker), then the runnable carts."""
+        return [make_tile()] + list(carts)
+
+    def _picker_items(self, carts):
+        """The Editor PROJECT-PICKER grid entries: the pinned "+ New" tile first (create a
+        game + open it), then EVERY editable cart (all types, wallpapers + built-ins
+        included -- everything is editable)."""
+        return [new_tile()] + list(carts)
+
     def _apply_items(self, items):
+        # Re-sync BOTH display grids from a fresh scan (the single source `_all_carts`),
+        # re-deriving the pinned pseudo tiles so a create/dup/delete lands in both.
         if items:
-            self.launcher.set_items(items)
+            self._all_carts = list(items)
+            self.launcher.set_items(self._launcher_items(items))
+            self.picker.set_items(self._picker_items(items))
+
+    def _real_selected(self, grid):
+        """The selected cart on `grid`, or None if it's a pinned pseudo tile (Make/New)
+        -- so cart management (dup/del) never acts on a non-cart."""
+        sel = grid.selected()
+        return sel if (sel and sel.get("path")) else None
 
     def new_cart(self):
         if not self.carts_root or not self.can_manage:
@@ -2639,9 +2748,9 @@ class Workstation:
             print("Moybyte new cart failed:", exc)
 
     def dup_cart(self):
-        if not self.carts_root or not self.can_manage or not self.launcher.selected():
+        sel = self._real_selected(self.launcher)
+        if not self.carts_root or not self.can_manage or sel is None:
             return
-        sel = self.launcher.selected()
         try:
             self._apply_items(self._with_sd(lambda: (
                 self.carts_store.duplicate(sel, self.carts_root),
@@ -2650,12 +2759,17 @@ class Workstation:
             print("Moybyte duplicate failed:", exc)
 
     def del_cart(self):
-        if not self.carts_root or not self.can_manage or len(self.launcher.items) <= 1:
-            return  # keep at least one cartridge
-        sel = self.launcher.selected()
+        # Delete the OPEN cart when one is open (the sysmenu DELETE CART -- a cart opened
+        # from the picker is NOT necessarily the launcher selection), else the launcher
+        # selection (the launcher-bar DEL). Keep at least one real cart on the device.
+        target = self.cart if (self.cart is not None and self.cart.get("path")) \
+            else self._real_selected(self.launcher)
+        if not self.carts_root or not self.can_manage or target is None \
+                or len(self._all_carts) <= 1:
+            return
         try:
             self._apply_items(self._with_sd(lambda: (
-                self.carts_store.delete(sel),
+                self.carts_store.delete(target),
                 self.carts_store.scan(self.carts_root))[1]))
         except Exception as exc:  # noqa: BLE001
             print("Moybyte delete failed:", exc)
