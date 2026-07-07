@@ -34,6 +34,7 @@ firmware/lilygo_t_deck_plus_micropython/modules/launcher_layer.py
 firmware/lilygo_t_deck_plus_micropython/modules/project.py
 firmware/lilygo_t_deck_plus_micropython/modules/player.py
 firmware/lilygo_t_deck_plus_micropython/modules/editor_app.py
+firmware/lilygo_t_deck_plus_micropython/modules/wm.py
 firmware/lilygo_t_deck_plus_micropython/modules/audio.py
 firmware/lilygo_t_deck_plus_micropython/modules/console.py
 firmware/lilygo_t_deck_plus_micropython/modules/moy_carts.py

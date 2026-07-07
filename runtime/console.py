@@ -297,6 +297,18 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editor_app import EditorApp
 
+# The window manager (Stage 6 of docs/shell_ux_technical_plan_v1.md, extracted from
+# this file -- see wm.py). FullscreenStackWM owns the game<->system viewport composite
+# (#39), the process back-stack `screen` projects onto (Stage 6b), and the MEMOIZED
+# visible/draw layer stack (Stage 6c -- rebuilt only on a push/pop or overlay-gate
+# change, so a static top-of-stack allocates no per-frame list). ws._composite_game/
+# _game_xy/_viewport stay one-line forwards (tested surface + many surfaces call
+# ws._game_xy). Same bare-or-package fallback as project.py/player.py/editor_app.py.
+try:
+    from wm import FullscreenStackWM
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.wm import FullscreenStackWM
+
 # The block vocabulary/compiler (#29). Imported under whichever name it's known by:
 # bare `blocks` on the device (frozen top-level) and on the host once host_app has
 # aliased it, or `runtime.blocks` when a test loads console/moy_runtime directly
@@ -455,9 +467,8 @@ _CURSOR_ACCEL = 2
 _BASE_W = 320
 _BASE_H = 240
 _FONT_W = 8                 # petme128 cell width at scale 1 (one char advance)
-# Letterbox/bezel fill (#39): the solid MOY64 index the system canvas shows around
-# the integer-scaled 320x240 game viewport (the borders of the fixed-aspect frame).
-_VIEWPORT_BEZEL = 0         # black
+# (The letterbox/bezel fill _VIEWPORT_BEZEL (#39) moved to wm.py with the viewport
+# composite it belongs to -- FullscreenStackWM.composite_game is its only user.)
 
 
 class Layout:
@@ -1050,6 +1061,11 @@ class Workstation:
         self.font_scale = max(1, int(font_scale))
         if self._sys_canvas is not None:
             self._sys_canvas.set_font_scale(self.font_scale)
+        # The window manager (Stage 6, wm.py): owns the game<->system viewport composite
+        # (#39) + -- from Stage 6b/6c -- the process back-stack `screen` projects onto and
+        # the memoized layer stack. Built here (before anything reads/writes screen or
+        # composites) with a `ws` back-ref to the console's canvases + layer instances.
+        self.wm = FullscreenStackWM(self)
         self.layout = Layout(self.sys_canvas.w, self.sys_canvas.h,
                              self._effective_font_scale())
         # Responsive editor geometry (#39 step 2): the code + block editors now draw
@@ -2678,100 +2694,20 @@ class Workstation:
                 fb()
 
     # -- two-domain composite + viewport coords (#39) ------------------------
+    #
+    # The viewport composite moved to FullscreenStackWM (Stage 6, wm.py); these stay as
+    # the tested ws. entry points -- ws._game_xy is called from many surfaces (layers/
+    # cards/code/paint + the Player), ws._viewport from tests, ws._composite_game from
+    # frame(). Thin forwards to the one ws.wm.
 
     def _viewport(self):
-        """The composited game viewport as (ox, oy, scale) -- the top-left of the
-        320x240 game canvas inside the system canvas, and its integer scale. (0, 0,
-        1) when the two canvases are the same object (degradation)."""
-        gc = self.canvas
-        sc = self.sys_canvas
-        if sc is gc:
-            return (0, 0, 1)
-        scale = min(sc.w // gc.w, sc.h // gc.h)
-        if scale < 1:
-            scale = 1
-        ox = (sc.w - gc.w * scale) // 2
-        oy = (sc.h - gc.h * scale) // 2
-        return (ox, oy, scale)
+        return self.wm.viewport()
 
     def _game_xy(self, px, py):
-        """Map a SYSTEM-canvas point (where the pointer lives) into GAME-canvas
-        coords, so a running cart / the editors (drawn in the 320x240 viewport) hit-
-        test correctly. Identity in the degradation case."""
-        ox, oy, scale = self._viewport()
-        return ((px - ox) // scale, (py - oy) // scale)
+        return self.wm.game_xy(px, py)
 
     def _composite_game(self):
-        """Blit the fixed 320x240 GAME canvas into the SYSTEM canvas as a
-        fixed-aspect, integer-scaled, centered viewport, filling the letterbox with
-        a solid bezel color. A no-op when the two canvases are the same object (the
-        degradation case: 320x240 system canvas == game canvas, pixel-identical to
-        today). Index-only (host == device): reads game indices, writes them scaled
-        into the system buffer, so no palette resolve is needed."""
-        gc = self.canvas
-        sc = self.sys_canvas
-        # #63: complete any sprites still queued in the game canvas's auto-batch before
-        # its buffer is read (usually already flushed by _reset_canvas_state; belt-and-
-        # suspenders so a missed reset can never drop a cart's last sprite run).
-        _fb = getattr(gc, "flush_batch", None)
-        if _fb is not None:
-            _fb()
-        if sc is gc:
-            return
-        ox, oy, scale = self._viewport()
-        sc.cls(_VIEWPORT_BEZEL)                     # letterbox fill
-        gbuf = getattr(gc, "buf", None)
-        sbuf = getattr(sc, "buf", None)
-        if gbuf is None or sbuf is None:
-            # A recording system canvas (the web CommandCanvas) has no framebuffer to
-            # copy into -- blit the whole game frame as one scaled sprite so the draw
-            # stream carries the viewport. The game canvas must expose its pixels.
-            self._composite_via_spr(gc, sc, gbuf, ox, oy, scale)
-            return
-        gw = gc.w
-        sw = sc.w
-        sh = sc.h
-        vw = gw * scale
-        # The viewport always fits a system canvas >= the game (the supported case),
-        # so take the fast row-replication path. A degenerate smaller-than-game system
-        # canvas (negative offset / overflow) falls to a clipped per-pixel path that
-        # can never resize the bytearray.
-        fits = ox >= 0 and oy >= 0 and ox + vw <= sw and oy + gc.h * scale <= sh
-        if fits:
-            for gy in range(gc.h):
-                grow = gy * gw
-                for s in range(scale):
-                    base = (oy + gy * scale + s) * sw + ox
-                    if scale == 1:
-                        sbuf[base:base + gw] = gbuf[grow:grow + gw]
-                    else:
-                        out = base
-                        for gx in range(gw):
-                            sbuf[out:out + scale] = bytes((gbuf[grow + gx],)) * scale
-                            out += scale
-            return
-        for gy in range(gc.h):                      # clipped fallback (defensive)
-            grow = gy * gw
-            for s in range(scale):
-                dy = oy + gy * scale + s
-                if dy < 0 or dy >= sh:
-                    continue
-                dx0 = ox if ox > 0 else 0
-                dx1 = min(sw, ox + vw)
-                if dx1 <= dx0:
-                    continue
-                base = dy * sw
-                for dx in range(dx0, dx1):
-                    sbuf[base + dx] = gbuf[grow + (dx - ox) // scale]
-
-    def _composite_via_spr(self, gc, sc, gbuf, ox, oy, scale):
-        """Composite by blitting the game frame as ONE scaled sprite -- the path for a
-        recording system canvas (the web CommandCanvas) that has no framebuffer to
-        copy into. Records a single spr command per frame carrying the game pixels."""
-        if gbuf is None:
-            return
-        img = _Blit(gc.w, gc.h, list(gbuf), -1)     # opaque (no transparent index)
-        sc.spr(img, ox, oy, scale)
+        return self.wm.composite_game()
 
     # -- redraw-on-change (#44 step 1) ---------------------------------------
 
