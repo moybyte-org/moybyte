@@ -857,3 +857,30 @@ def test_frame_cap_locks_games_to_a_steady_30(tmp_path):
     ws.player.cart_error = None
     ws.go_home()
     assert ws.frame_cap_fps() == 60
+
+
+def test_nativize_maps_crash_lines_back_to_kid_source():
+    # #67 spike: the auto-native rewrite inserts one decorator line above every
+    # top-level def; a crash line reported against the REWRITTEN source must map
+    # back to the kid's original line exactly (#24's drop-on-the-bad-line).
+    from runtime import player as player_mod
+    src = "x = 1\ndef a():\n    boom\ndef b():\n    boom\n"
+    nsrc, ins = player_mod._nativize(src)
+    lines = nsrc.split("\n")
+    assert lines[1] == "@micropython.native" and lines[2] == "def a():"
+    assert lines[4] == "@micropython.native" and lines[5] == "def b():"
+    assert ins == [2, 5]
+
+    class _P:
+        _native_ins = ins
+        _map_crash_line = player_mod.Player._map_crash_line
+    p = _P()
+    # original line 3 ("boom" in a) is new line 4 -> maps back to 3
+    assert p._map_crash_line(4) == 3
+    # original line 5 ("boom" in b) is new line 7 -> maps back to 5
+    assert p._map_crash_line(7) == 5
+    assert p._map_crash_line(None) is None
+    p._native_ins = None                     # pristine bytecode path: identity
+    assert p._map_crash_line(7) == 7
+    # On host CPython the auto-native flag must be OFF (no micropython module).
+    assert player_mod.NATIVE_CARTS is False

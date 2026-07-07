@@ -51,6 +51,42 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 import time
 
+# Auto-native carts (#67 spike): when the runtime HAS the native code emitter
+# (MicroPython on device / unix; never host CPython), every top-level def in a
+# cart is compiled to machine code at load -- the kid writes ordinary Python,
+# the loader applies @micropython.native. Measured on the unix build: -5..-15%
+# cart logic with BYTE-IDENTICAL pixels across all seed carts (the emitter
+# preserves full Python semantics); the S3 delta is expected larger (its
+# per-call dispatch cost dominates kid loops -- see the CALIB line). Guarded:
+# if the emitter refuses a cart (compile-time), the pristine bytecode path
+# runs instead -- a cart can never break because of this flag.
+try:
+    import micropython as _micropython
+    # The decorator is a COMPILER construct (recognized syntactically, stripped
+    # from the runtime module), so probing an attribute can't detect it -- compile
+    # a one-liner through the emitter instead. Raises on a build without it.
+    exec(compile("@micropython.native\ndef _t():\n    pass", "<probe>", "exec"),
+         {"micropython": _micropython})
+    NATIVE_CARTS = True
+except Exception:  # noqa: BLE001 -- host CPython / emitter-less build: bytecode only
+    _micropython = None
+    NATIVE_CARTS = False
+
+
+def _nativize(src):
+    """Insert @micropython.native above every top-level def. Returns the new
+    source plus the 1-based NEW-source line numbers of the inserted decorator
+    lines, so a crash line reported against the rewritten source can be mapped
+    back to the kid's original line (#24 stays exact)."""
+    out = []
+    ins = []
+    for line in src.split("\n"):
+        if line.startswith("def "):
+            out.append("@micropython.native")
+            ins.append(len(out))          # the decorator's own (new) line number
+        out.append(line)
+    return "\n".join(out), ins
+
 
 def _ticks_ms():
     try:
@@ -196,6 +232,23 @@ class Player:
         # each use site it answers exactly what _running_cart_shows_bar answers.
         self._is_tool = False
         self._restore_bg = None       # #63: the api's declared-background restore hook
+        self._native_ins = None       # #67 spike: nativize's inserted-line map (crash-line fix)
+
+    def _map_crash_line(self, line):
+        """Map a crash line reported against the NATIVIZED source back to the
+        kid's original line (#67 spike / #24): subtract the @micropython.native
+        decorator lines inserted at-or-before it. Identity when the cart ran the
+        pristine bytecode path."""
+        ins = self._native_ins
+        if line is None or not ins:
+            return line
+        n = 0
+        for pos in ins:
+            if pos <= line:
+                n += 1
+            else:
+                break
+        return line - n
 
     def _reset_exit_state(self):
         """Clear the hold timer (a fresh run, or the moment the exit gesture completes
@@ -239,10 +292,28 @@ class Player:
         wifi = ws.wifi if ws._cart_has_perm("network") else None
         ns = ws.make_api(ws.canvas, ws.input, project.config, project.sheet,
                          ws.audio, project.tilemap, project.pmem, wifi, project.images)
+        # Compile with the "<cart>" filename so a runtime traceback carries cart
+        # line numbers (_exc_cart_line reads them to mark the bad line). #67 spike:
+        # prefer the AUTO-NATIVE rewrite (machine code per top-level def) when the
+        # emitter exists; if it refuses the cart at compile time, fall back to the
+        # pristine bytecode compile -- the flag can never break a cart. The
+        # inserted-line map keeps crash lines exact (#24) either way.
+        src = project.cart["src"]
+        self._native_ins = None
+        code = None
+        if NATIVE_CARTS:
+            nsrc, ins = _nativize(src)
+            ns["micropython"] = _micropython   # the decorator's global, no import line
+            try:
+                code = compile(nsrc, "<cart>", "exec")
+                self._native_ins = ins
+            except Exception:  # noqa: BLE001 -- emitter limitation -> bytecode path
+                code = None
         try:
-            # Compile with the "<cart>" filename so a runtime traceback carries
-            # cart line numbers (_exc_cart_line reads them to mark the bad line).
-            exec(compile(project.cart["src"], "<cart>", "exec"), ns)
+            if code is None:
+                # The kid's own syntax error surfaces HERE -> the friendly panel.
+                code = compile(src, "<cart>", "exec")
+            exec(code, ns)
             if ns.get("_init"):
                 ns["_init"]()
         except Exception as exc:  # noqa: BLE001
@@ -252,7 +323,7 @@ class Player:
             # exception whose __str__ itself raises would otherwise escape here and
             # become the exact silent device hang the panel exists to prevent.
             self.cart_error = _err_text(exc)
-            self.crash_line = _exc_cart_line(exc)
+            self.crash_line = self._map_crash_line(_exc_cart_line(exc))
             print("Moybyte cart error:", self.cart_error)
             return False
         self.cart_error = None
@@ -308,7 +379,8 @@ class Player:
                 # broken cart, and fall through to paint the error panel; the
                 # desktop buttons stay so the kid can EDIT/CODE the fix.
                 self.cart_error = _err_text(exc)
-                self.crash_line = _exc_cart_line(exc)   # mark the line on EDIT (#24)
+                # mark the line on EDIT (#24; mapped back through the nativize insert)
+                self.crash_line = self._map_crash_line(_exc_cart_line(exc))
                 self._update = None
                 self._draw = None
                 # Print the _err_text-guarded string, never the raw `exc`: a
