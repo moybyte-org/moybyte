@@ -379,6 +379,12 @@ class MapEditorUI:
         cv = ws.canvas
         me = self.mapedit
         sheet = ws.project.sheet
+        # Cover the FULL content area below the 18px bar first (Fix 3): the map tab draws
+        # over _draw_menu_backdrop()'s frozen cart frame, and the panel below only spans
+        # x 8..312 / y 16..220 -- so without this fill the previously-running cart bled
+        # through the 8px side + 20px bottom strips. Match the cards tab (fills the whole
+        # area) so the editor is fully opaque.
+        cv.rect(0, 18, cv.w, cv.h - 18, NAMES["black"])
         cv.rect(8, 16, 304, 204, NAMES["black"])
         cv.rectb(8, 16, 304, 204, NAMES["green"])
         # Live zoom metrics (#37 follow-up): one cell size drives the grid, the tile
