@@ -368,7 +368,9 @@ class _Layer:
 
 
 def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
-             pmem=None, wifi=None, images=None):
+             pmem=None, wifi=None, images=None, owner="cart"):
+    # `owner` tags device-side layer loans for the leak-fix reclaim (#63); the host
+    # Canvas allocates layers on the gc heap, so it is accepted and unused here.
     """The cartridge global namespace on the host -- same names/signature as the
     device make_api (TIC-80 draw API + sheet-or-Image spr + audio + tilemap), bound
     to a host Canvas and audio backend.

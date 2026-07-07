@@ -97,6 +97,17 @@ LAYER_COPY_ASYNC = _SRAM_BOUNCE_FLUSH
 _PAL_IDENTITY = bytes(range(64))
 _PALT_OPAQUE = bytes(64)
 
+# Layer-buffer pool (#63 GC-wall follow-up): moy_alloc has NO free(), so a layer
+# buffer handed back by a dead cart is returned HERE (keyed by byte size) and the
+# next new_layer of the same dims reuses it -- without this, every cart re-run
+# leaked its world (~150-384KB) from the heap_caps PSRAM pool until the allocator
+# started failing (~20-30 opens) and silently degraded to gc-heap buffers (the
+# GC wall back again). Only moy_alloc-backed buffers are pooled (a gc-heap
+# fallback bytearray is the collector's job); nothing is ever dropped from the
+# pool -- the set of distinct layer sizes across carts is small and stable.
+_LAYER_POOL = {}
+
+
 # Fold 2 (#63) revert knob: the map() auto-cache trades the per-cell blit_map walk
 # for a blit565 composite of a cached raster. On x86 that is a wash for SPARSE maps
 # (keyed blits test every pixel; blit_map skips empty cells) and a win for opaque
@@ -251,6 +262,7 @@ class DeviceCanvas:
         self._mapcache = None
         self._map_raster_count = 0
         self._map_hits = 0
+        self._lent_layers = None      # owner -> [(buf, nbytes)] pooled loans (#63 leak fix)
         # A hidden layer (new_layer) sets this True: a layer is a draw-ONCE scratch buffer
         # (the escape hatch's make_layer, or this cache's own hidden layer), so its own map()
         # rasters DIRECTLY -- never a nested cache (which would double the layer's PSRAM and
@@ -841,7 +853,7 @@ class DeviceCanvas:
             if mc is not None and mc[2] == lw and mc[3] == lh:
                 layer = mc[1]
             else:
-                layer = self.new_layer(lw, lh)
+                layer = self.new_layer(lw, lh, owner="_mapcache")
             self._gfx.fill(layer._buf, lw * lh, _RGB_KEY)
             self._blit_map_into(layer._buf, lw, lh, 0, 0,
                                 tilemap, sheet, mx, my, w, h, colorkey, tile, scale,
@@ -1196,7 +1208,7 @@ class DeviceCanvas:
 
     # -- scroll layers (#54) -------------------------------------------------
 
-    def new_layer(self, w, h):
+    def new_layer(self, w, h, owner=None):
         # A blank, wider RGB565 off-screen canvas the cart pre-renders a level into
         # ONCE, then window-copies per frame (draw_layer -> blit_window_from). Built
         # through a tiny _LayerComp so it reuses DeviceCanvas.__init__ verbatim and
@@ -1218,7 +1230,39 @@ class DeviceCanvas:
             gc.collect()
         except Exception:  # noqa: BLE001 -- gc is always present; never block a layer alloc
             pass
-        return DeviceCanvas(_LayerComp(int(w), int(h), self._gfx))
+        lay = DeviceCanvas(_LayerComp(int(w), int(h), self._gfx))
+        lay._nocache = True            # #63: a layer's own map() rasters directly (no nesting)
+        # Layer lending (#63 leak fix): a pooled (moy_alloc-backed) buffer created for a
+        # program (`owner`: "cart" via make_api, "wallpaper" via the wallpaper runner,
+        # "_mapcache" for Fold 2's hidden cache) is recorded so reclaim_layers(owner)
+        # can return it to _LAYER_POOL when that program dies. owner=None (console
+        # chrome, tests) is never reclaimed.
+        comp = lay._comp
+        if owner is not None and comp.pooled:
+            lent = self._lent_layers
+            if lent is None:
+                lent = self._lent_layers = {}
+            lent.setdefault(owner, []).append((comp._buf, comp._nbytes))
+        return lay
+
+    def reclaim_layers(self, owner):
+        """Return a dead program's pooled layer buffers to _LAYER_POOL for reuse
+        (#63 leak fix: moy_alloc has no free(), so without this every cart re-run
+        leaked its world from the heap_caps pool). Also drops the Fold-2 map cache
+        (its hidden layer is program content) and any in-flight async layer copy.
+        Callers probe via getattr (the host Canvas has no pool -- gc reclaims)."""
+        if self._lcopy is not None:
+            self._drain_lcopy()
+        self._lcopy_pred = None
+        self._mapcache = None
+        lent = self._lent_layers
+        if not lent:
+            return
+        for own in (owner, "_mapcache"):
+            lst = lent.pop(own, None)
+            if lst:
+                for buf, n in lst:
+                    _LAYER_POOL.setdefault(n, []).append(buf)
 
     def blit_window_from(self, layer, cam_x=0, cam_y=0):
         # Copy the visible self.w x self.h window of `layer` into the framebuffer at
@@ -1394,15 +1438,24 @@ class _LayerComp:
         # or beat the old behaviour, never regress.
         nbytes = w * h * 2
         buf = None
-        try:
-            import moy_alloc
-            import lcd_bus
-            buf = moy_alloc.malloc_dma(nbytes, lcd_bus.MEMORY_SPIRAM | lcd_bus.MEMORY_DMA)
-        except Exception:  # noqa: BLE001 -- host / no DMA allocator -> gc-heap bytearray
-            buf = None
+        pooled = False
+        free = _LAYER_POOL.get(nbytes)
+        if free:
+            buf = free.pop()          # a dead cart's buffer of the same dims -> reuse
+            pooled = True
+        else:
+            try:
+                import moy_alloc
+                import lcd_bus
+                buf = moy_alloc.malloc_dma(nbytes, lcd_bus.MEMORY_SPIRAM | lcd_bus.MEMORY_DMA)
+                pooled = buf is not None    # heap_caps memory: pool it on reclaim (no free())
+            except Exception:  # noqa: BLE001 -- host / no DMA allocator -> gc-heap bytearray
+                buf = None
         if buf is None:
             buf = bytearray(nbytes)
         self._buf = buf
+        self._nbytes = nbytes
+        self.pooled = pooled
         self._gfx = gfx
 
     def size(self):
