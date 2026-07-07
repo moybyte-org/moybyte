@@ -829,3 +829,31 @@ def test_moy_mascot_baked_into_default_icon_sheet():
     img = sheet.tile_image(console._ICON["moy"])
     assert img is not None
     assert any(p > 0 for p in img.pix)              # mascot has painted pixels
+
+
+def test_frame_cap_locks_games_to_a_steady_30(tmp_path):
+    # Frame pacing (#63): a running GAME locks to 30fps (the SNES consistency rule)
+    # unless its manifest declares "fps": 60; tools/apps and every console screen
+    # keep 60 so the pointer stays responsive.
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    assert ws.frame_cap_fps() == 60                 # launcher
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                           if it.get("path") and it.get("type") == "game"
+                           and not it.get("fps"))
+    ws.open()
+    assert ws.screen == "desktop" and ws.cart_error is None
+    assert ws.frame_cap_fps() == 30                 # a plain game: locked 30
+    ws.cart["fps"] = 60
+    assert ws.frame_cap_fps() == 60                 # manifest fps: 60 (Hop Quest/Sky Run)
+    ws.cart["fps"] = "junk"
+    assert ws.frame_cap_fps() == 30                 # malformed -> the safe default
+    ws.cart["fps"] = 0
+    ws.cart["type"] = "tool"
+    assert ws.frame_cap_fps() == 60                 # tools keep the responsive cap
+    ws.cart["type"] = "game"
+    ws.player.cart_error = "boom"
+    assert ws.frame_cap_fps() == 60                 # the crash panel is a console screen
+    ws.player.cart_error = None
+    ws.go_home()
+    assert ws.frame_cap_fps() == 60

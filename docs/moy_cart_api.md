@@ -51,6 +51,14 @@ def _draw():                 # every frame; render here
 | `_update(dt)` | once per frame, before draw | optional; `dt` is **seconds** (float). Put game logic here |
 | `_draw()` | once per frame | render the frame; called every frame even if `_update` isn't defined |
 
+## Frame pacing
+
+A **game** cart runs at a locked **30fps** — a steady 30 feels smoother than a
+jittery 40, and the headroom absorbs hiccups. If your cart genuinely holds 60
+(measure it!), declare `"fps": 60` in `manifest.json` (Hop Quest and Sky Run do).
+Tools/apps and all console screens run at 60. Your `_update(dt)` gets the real
+`dt` either way — movement written as `speed * dt` is framerate-independent.
+
 ## The canvas
 
 - **320×240**, indexed. `W` = 320, `H` = 240 are globals (read them; don't assume).

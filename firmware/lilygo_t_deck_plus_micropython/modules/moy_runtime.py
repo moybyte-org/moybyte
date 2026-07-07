@@ -983,8 +983,19 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         if diag is not None and elapsed >= HITCH_MS:
             _diag_hitch(diag, ws, comp, elapsed, _t_kbd, _t_inp, _t_sb, _t_ws,
                         _t_diag, _t_sd, _t_web)
-        if elapsed < frame_ms:
-            time.sleep_ms(frame_ms - elapsed)
+        # Frame pacing (#63): a running GAME locks to a steady cadence (30fps
+        # default, manifest "fps": 60 for carts that sustain it) -- a LOCKED 30
+        # feels smoother than a 38-55 swing, and the freed headroom absorbs
+        # GC/SD hitches. Console screens/tools keep the loop's fps_cap (pointer
+        # responsiveness). Re-read per iteration: it changes on cart open/exit.
+        try:
+            _fms = 1000 // ws.frame_cap_fps()
+        except Exception:  # noqa: BLE001 -- pacing must never kill the loop
+            _fms = frame_ms
+        if _fms < frame_ms:
+            _fms = frame_ms                     # never pace FASTER than the loop cap
+        if elapsed < _fms:
+            time.sleep_ms(_fms - elapsed)
 
 
 def run_touch_calibrate(handler):
