@@ -596,6 +596,27 @@ def _journal_total_bytes(jdir, entries):
     return total
 
 
+def _journal_read_snap(jdir, entry):
+    """Read + INTEGRITY-CHECK an entry's snapshot before it is copied over a live file.
+    Returns the snapshot text, or None when it is missing or torn -- so undo/redo can
+    refuse a damaged snapshot instead of overwriting good work with garbage/empty.
+
+    Validated against the recorded `len`: a length mismatch (truncated / 0-byte from a
+    device power loss -- snapshots are non-atomic, no fsync) is rejected; an entry that
+    legitimately snapshotted an empty file (len == 0) still restores cleanly. Legacy
+    entries without a recorded `len` fall back to "reject an empty read as likely-torn"."""
+    try:
+        data = _read(jdir + "/" + entry["snap"])
+    except OSError:
+        return None                            # missing snapshot -> refuse
+    exp = entry.get("len")
+    if exp is None:
+        return data if data else None          # unlabelled: an empty read is likely torn
+    if len(data) != int(exp):
+        return None                            # truncated / torn -> refuse
+    return data
+
+
 def journal_append(cart_dir, file, new_bytes):
     """Record a durable commit event for `file`: snapshot `new_bytes` under journal/s/
     and RAW-append one line to journal.jsonl (O(1)). Returns the new seq, or None when
@@ -635,7 +656,11 @@ def journal_append(cart_dir, file, new_bytes):
     seq = (entries[-1]["seq"] + 1) if entries else 1
     snap = JOURNAL_SNAP_DIR + "/" + _journal_snap_name(seq, file)
     _write(jdir + "/" + snap, new_bytes)              # snapshot BEFORE the log line
-    entry = {"seq": seq, "ts": _journal_ts(), "file": file, "snap": snap}
+    # `len` is the snapshot's recorded length: undo/redo validate the on-disk snapshot
+    # against it before copying it over the live file, so a torn/truncated snapshot (a
+    # device power loss + FAT cache reordering -- snapshots are non-atomic) is REFUSED
+    # rather than silently overwriting good work with garbage/empty.
+    entry = {"seq": seq, "ts": _journal_ts(), "file": file, "snap": snap, "len": len(new_bytes)}
     with open(log_path, "a") as f:                    # RAW append -- O(1), NOT _write_atomic
         f.write(json.dumps(entry) + "\n")
     total += len(new_bytes)
@@ -671,10 +696,9 @@ def journal_undo(cart_dir):
             break
     if target is None:
         return None                        # first snapshot of this file -> the floor
-    try:
-        data = _read(jdir + "/" + target["snap"])
-    except OSError:
-        return None                        # a lost snapshot loses this ONE step, not more
+    data = _journal_read_snap(jdir, target)
+    if data is None:
+        return None                        # snapshot missing/torn -> REFUSE, live file intact
     _write_atomic(cart_dir + "/" + file, data)
     new_cursor = entries[idx - 1]["seq"] if idx > 0 else 0
     _journal_write_cursor(cur_path, new_cursor, _journal_bytes(cur_path))
@@ -696,10 +720,9 @@ def journal_redo(cart_dir):
             break
     if nxt is None:
         return None                        # at the top -> nothing to redo
-    try:
-        data = _read(jdir + "/" + nxt["snap"])
-    except OSError:
-        return None
+    data = _journal_read_snap(jdir, nxt)
+    if data is None:
+        return None                        # snapshot missing/torn -> REFUSE, live file intact
     _write_atomic(cart_dir + "/" + nxt["file"], data)
     _journal_write_cursor(cur_path, nxt["seq"], _journal_bytes(cur_path))
     return nxt["file"]
