@@ -2075,6 +2075,36 @@ class Workstation:
         Player calls this instead of reaching the bar surface."""
         return self.bar_layer.handle_cart_tap(px, py)
 
+    def _running_cart_shows_bar(self):
+        """True while a TOOL/APP cart is PLAYING (screen "desktop", not crashed): it runs
+        WITH a minimal bar (title + status + context-X) so it's EXITABLE (Part 4), unlike a
+        GAME which owns the full 320x240 with NO chrome and exits via hold-BACKSPACE. This
+        is the bar-visibility-by-type rule: game -> hide the bar; tool/app -> show it. The
+        Player reads it to decide whether to draw/route the tool bar and to suppress its
+        own hold-to-exit gesture (a tool's BACKSPACE stays a free text key). False for
+        games, the crash frame (the crash bar handles that), and every non-play screen."""
+        return (self.screen == "desktop" and self.cart_error is None
+                and self.cart is not None
+                and self.cart.get("type") in ("tool", "app"))
+
+    def _draw_tool_bar(self):
+        """Draw the minimal TOOL bar over a running tool/app (Part 4). Same shell-owned
+        draw + _pf_bar accounting as _draw_cart_bar; the Player asks for it via this thin
+        helper so player.py never reaches the bar surface directly (Stage-2 isolation)."""
+        _perf = self.perf_hud or self.perf_capture
+        _tb = _ticks_ms() if _perf else 0
+        self.bar_layer._draw_status_strip("tool")   # minimal bar: title + status + X
+        if _perf:
+            self._pf_bar = _ticks_diff(_ticks_ms(), _tb)   # CHROMEBRK: the bar's share
+
+    def _tool_bar_tap(self, px, py):
+        """Route a running-TOOL tap (px, py in GAME coords) to the minimal bar: the
+        context-X exits the tool, the wifi icon launches the wifi tool, the ≡ opens the
+        system menu, the clock is the Easter egg. Returns True iff the bar consumed the tap
+        (so the tool underneath doesn't also act on it). Reuses handle_bar_tap("tool") --
+        owner is None for "tool", so a non-button tap falls through to the tool."""
+        return self.bar_layer.handle_bar_tap("tool", px, py)
+
     def _draw_error_panel(self):
         # The on-canvas crash report moved to Player (Stage 2); this stays as the tested
         # ws. entry point the cards surface reuses for its own malformed-card panel

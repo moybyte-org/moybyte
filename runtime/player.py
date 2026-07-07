@@ -306,6 +306,11 @@ class Player:
         if self.cart_error is not None:
             self._draw_error_panel()
             ws._draw_cart_bar()                 # unified top bar (crash tool switcher)
+        elif ws._running_cart_shows_bar():
+            # Part 4: a TOOL/APP runs WITH a minimal bar (title + status + context-X) so
+            # it's exitable -- a GAME stays fullscreen-bar-hidden. The bar-visibility-by-
+            # type rule keys on the running cart's manifest type (ws._running_cart_shows_bar).
+            ws._draw_tool_bar()
         elif self._home_holding:
             # The TRANSIENT hold-to-exit affordance (spec Section 12): drawn ONLY while
             # BACKSPACE is being held, never on a plain play frame -- so a frame with no
@@ -327,7 +332,17 @@ class Player:
         # asserted (BACKSPACE arrives as a typed 0x08 the cart's key() reads -- the wifi
         # password field's DELETE), so the gesture never fires there: the "backspace =
         # delete, zero special-casing" the spec wants.
+        #
+        # The hold gesture is for GAMES only. A tool/app runs WITH a minimal bar and exits
+        # via its context-X (ws._running_cart_shows_bar()), so its hold is suppressed --
+        # BACKSPACE stays a free text key (the wifi password field's DELETE).
         ws = self.ws
+        if ws._running_cart_shows_bar():
+            if self._home_holding:              # drop any in-flight hold (no toast on a tool)
+                self._home_holding = False
+                self._home_held_since = 0
+                ws._dirty = True
+            return True
         now = _ticks_ms()
         if i.held("home"):
             if not self._home_holding:
@@ -352,14 +367,22 @@ class Player:
         ws = self.ws
         gx, gy = ws._game_xy(px, py)
         px, py = gx, gy
-        # While a cart PLAYS the bar is hidden (Stage 5 retired the pause screen), so the
+        # While a GAME plays the bar is hidden (Stage 5 retired the pause screen), so the
         # game owns the full 320x240 and every tap belongs to the cart (published as the
-        # game pointer by the router before this runs). The ONLY chrome that hit-tests a
-        # tap is the CRASH panel's top bar (HOME / EDIT|CODE / PAINT / MAP / BLOCKS /
-        # MUSIC -- the fix-it tool switcher), routed through a thin ws helper so this file
-        # never reaches the bar surface directly.
+        # game pointer by the router before this runs). Two chrome cases DO hit-test a tap:
+        # the CRASH panel's top bar (HOME / EDIT|CODE / PAINT / MAP / BLOCKS / MUSIC -- the
+        # fix-it tool switcher) and -- Part 4 -- a running TOOL/APP's minimal bar (its
+        # context-X / wifi / ≡). Both route through thin ws helpers so this file never
+        # reaches the bar surface directly.
         if click and self.cart_error is not None:
             ws._cart_bar_tap(px, py)            # crash-bar tool switcher (EDIT/CODE reachable)
+        elif click and ws._running_cart_shows_bar():
+            if ws._tool_bar_tap(px, py):        # tool bar: X exits, wifi/≡ shortcuts
+                # The bar consumed the tap -> clear the published game pointer's tap so the
+                # tool doesn't ALSO act on it this frame (mirrors the overlay-suppress rule).
+                gp = ws.input.game_pointer
+                ws.input.game_pointer = (gp[0], gp[1], False, False)
+            # else the tap falls through to the tool (game pointer already published)
         elif click:
             if ws.show_fps and self._in(px, py, ws.perf_ui._fps_tap_rect()):
                 # Tapping the FPS readout toggles the frame-time breakdown HUD
