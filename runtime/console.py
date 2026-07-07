@@ -2105,16 +2105,28 @@ class Workstation:
         return self.bar_layer.handle_cart_tap(px, py)
 
     def _running_cart_shows_bar(self):
-        """True while a TOOL/APP cart is PLAYING (screen "desktop", not crashed): it runs
-        WITH a minimal bar (title + status + context-X) so it's EXITABLE (Part 4), unlike a
-        GAME which owns the full 320x240 with NO chrome and exits via hold-BACKSPACE. This
-        is the bar-visibility-by-type rule: game -> hide the bar; tool/app -> show it. The
-        Player reads it to decide whether to draw/route the tool bar and to suppress its
-        own hold-to-exit gesture (a tool's BACKSPACE stays a free text key). False for
-        games, the crash frame (the crash bar handles that), and every non-play screen."""
-        return (self.wm.top_is_player() and self.cart_error is None  # Stage 6d
-                and self.cart is not None
-                and self.cart.get("type") in ("tool", "app"))
+        """True while a cart that PLAYS WITH the minimal bar is running (screen "desktop",
+        not crashed): it gets a minimal bar (title + status + context-X) so it's EXITABLE
+        (Part 4), unlike a bare GAME which owns the full 320x240 with NO chrome and exits via
+        hold-BACKSPACE. The Player reads it to decide whether to draw/route the tool bar and
+        to suppress its own hold-to-exit gesture (so that cart's BACKSPACE stays a free text
+        key). Two cases show the bar:
+          * a TOOL/APP cart (the bar-visibility-by-type rule), and
+          * a GAME that is READING TEXT (textmode(True), e.g. the typing game Letter Blitz).
+            A text-reading game CAN'T use hold-BACKSPACE: in text mode BACKSPACE is delivered
+            as a typed 0x08 (the cart's own key, never the "home" button), and the T-Deck
+            keyboard has no autorepeat, so a held BACKSPACE can never accumulate the ~700ms
+            hold -- the game would be UNEXITABLE. So it runs WITH the same minimal bar
+            (context-X) as a tool: a device-robust, always-tappable exit, and its hold
+            gesture is suppressed so BACKSPACE stays FREE for the cart's text handling.
+        A game that is NOT reading text keeps the fullscreen no-chrome + hold-BACKSPACE model.
+        False for the crash frame (the crash bar handles that) and every non-play screen."""
+        if not (self.wm.top_is_player() and self.cart_error is None  # Stage 6d
+                and self.cart is not None):
+            return False
+        if self.cart.get("type") in ("tool", "app"):
+            return True
+        return bool(getattr(self.input, "text_mode", False))
 
     def _draw_tool_bar(self):
         """Draw the minimal TOOL bar over a running tool/app (Part 4). Same shell-owned
