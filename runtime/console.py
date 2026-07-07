@@ -2118,14 +2118,18 @@ class Workstation:
         self.editor_app.open(self.project)
 
     def launch_selected(self):
-        """A launcher TAP opens the selected cart in the mode chosen by system.json's
-        `tap_mode` (spec Section 4): "player" plays it immediately, "maker" (the
-        DEFAULT) drops into the Editor on the Config page. Both actions stay reachable
-        regardless of mode -- the Editor has PLAY, and a running cart pauses to EDIT."""
-        if self.system.get("tap_mode", "maker") == "player":
-            self.open()
-        else:
+        """A launcher TAP opens the selected cart. ONLY a "game" follows system.json's
+        `tap_mode` (spec Section 4): "player" plays it immediately, "maker" (the DEFAULT)
+        drops into the Editor on the Config page. A "tool"/"app" (and anything non-game --
+        e.g. the wifi tool) ALWAYS LAUNCHES: you run it, you don't edit it on a tap (owner
+        device feedback). Both Play and Edit stay reachable regardless via long-press/menu;
+        the tap default is the only thing this decides."""
+        cart = self.launcher.selected()
+        ctype = cart.get("type") if cart else "game"
+        if ctype == "game" and self.system.get("tap_mode", "maker") == "maker":
             self.open_in_editor()
+        else:
+            self.open()                # player-mode game, or ANY non-game -> launch/run
 
     # The four builders moved VERBATIM onto Project (Stage 1, project.py); these stay
     # as one-line forwards so ws._build_sheet(cart)/... keep working (the wallpaper

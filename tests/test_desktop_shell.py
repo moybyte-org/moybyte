@@ -235,6 +235,35 @@ def test_tapping_a_cart_icon_in_player_mode_plays_it(tmp_path):
     assert ws.screen == "desktop"               # player mode: tap -> plays
 
 
+def test_tool_cart_always_launches_on_tap_even_in_maker_mode(tmp_path):
+    """Part 2 (owner device feedback): a "tool"/"app" cart ALWAYS LAUNCHES on a tap --
+    even in the DEFAULT maker mode, where a GAME opens the Editor. You RUN the wifi tool,
+    you don't edit it on a tap. So launch_selected() on a tool lands on the running cart
+    (screen == "desktop"), never the Editor (screen == "menu"); a game in the same mode
+    still opens the Editor (the contrast). Both Play/Edit stay reachable via menu."""
+    from runtime import host_app, moy_carts
+    carts_dir = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts_dir)
+    assert ws.tap_mode() == "maker"                 # the mode where a GAME would EDIT
+
+    moy_carts.create("MyTool", carts_dir, src="def _draw():\n    cls(1)\n", type="tool")
+    ws.launcher.set_items(moy_carts.scan(carts_dir))
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                           if it.get("title") == "MyTool")
+    ws.launch_selected()                            # the tap dispatch
+    assert ws.screen == "desktop"                   # LAUNCHED (ran), NOT the Editor
+    assert ws.cart is not None and ws.cart.get("type") == "tool"
+
+    # A GAME in the SAME maker mode still opens the Editor (the tap-mode contrast).
+    moy_carts.create("MyGame", carts_dir, src="def _draw():\n    cls(2)\n", type="game")
+    ws.go_home()
+    ws.launcher.set_items(moy_carts.scan(carts_dir))
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                           if it.get("title") == "MyGame")
+    ws.launch_selected()
+    assert ws.screen == "menu"                      # maker default for a GAME: the Editor
+
+
 def test_go_home_keeps_wallpaper(tmp_path):
     """Opening a cart and returning home must leave the wallpaper backdrop intact
     (it is system state, not per-cart)."""
