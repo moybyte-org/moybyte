@@ -78,6 +78,17 @@ class FullscreenStackWM:
         projects `EditorApp.tab`)."""
         return self._stack[-1]
 
+    def top_is(self, kind):
+        """True iff the top-of-stack process is `kind`. The stack query the production
+        readers use in place of `screen == kind` (Stage 6d) -- same answer, phrased as a
+        question to the stack (the source of truth) rather than the projection string."""
+        return self._stack[-1] == kind
+
+    def top_is_player(self):
+        """True iff a cart Player is on top (screen "desktop") -- the running-cart test
+        the bar-visibility rule, the perf sampler, and the FPS overlay gate all key on."""
+        return self._stack[-1] == "desktop"
+
     def goto(self, kind):
         """Navigate the back-stack so `kind` is on top -- the mechanism behind the
         `ws.screen = kind` projection setter (and the explicit push/pop verbs).
