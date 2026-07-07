@@ -97,6 +97,13 @@ LAYER_COPY_ASYNC = _SRAM_BOUNCE_FLUSH
 _PAL_IDENTITY = bytes(range(64))
 _PALT_OPAQUE = bytes(64)
 
+# Fold 2 (#63) revert knob: the map() auto-cache trades the per-cell blit_map walk
+# for a blit565 composite of a cached raster. On x86 that is a wash for SPARSE maps
+# (keyed blits test every pixel; blit_map skips empty cells) and a win for opaque
+# ones (row-memcpy lane); the DEVICE verdict (PSRAM-latency-bound) needs the flash
+# A/B -- flip this False to re-raster directly, exactly the pre-Fold-2 behaviour.
+MAP_AUTO_CACHE = True
+
 
 class Image:
     def __init__(self, width, height, pix, transparent=-1):
@@ -214,6 +221,22 @@ class DeviceCanvas:
         self._pal_dirty = True
         self._pal_map = None
         self._palt = None
+        # Auto-cache for map() (Fold 2, #63): the rasterized tilemap region is cached in a
+        # hidden 565 layer so a camera-only change keyed-blits it (one blit565) instead of a
+        # full re-raster (blit_map over every cell) -- the make_layer/draw_layer win, made
+        # automatic for a naive camera()+map() cart. _mapcache is (key, layer, lw, lh); kept
+        # ACROSS frames (NOT cleared in reset_state, or it could never hit) and rebuilt when
+        # the key -- (tilemap.gen, sheet.gen, region, colorkey, scale) -- changes. Counters
+        # prove it: a re-raster bumps _map_raster_count, a re-use bumps _map_hits
+        # (map_cache_reset). Set BEFORE reset_state so it's live before the first draw.
+        self._mapcache = None
+        self._map_raster_count = 0
+        self._map_hits = 0
+        # A hidden layer (new_layer) sets this True: a layer is a draw-ONCE scratch buffer
+        # (the escape hatch's make_layer, or this cache's own hidden layer), so its own map()
+        # rasters DIRECTLY -- never a nested cache (which would double the layer's PSRAM and
+        # add a redundant composite). The main canvas keeps it False and caches.
+        self._nocache = False
         # Initialised BEFORE reset_state so its flush no-ops.
         self._batch_sheet = None
         self._batch_arr = array("h", bytearray(2 * (4 + 4 * 512)))
@@ -625,38 +648,119 @@ class DeviceCanvas:
                 if x1 > x0 and y1 > y0:
                     self._fb.fill_rect(x0, y0, x1 - x0, y1 - y0, col)
 
+    def _blit_map_into(self, dst, dw, dh, dsx, dsy, tilemap, sheet, mx, my, w, h,
+                       colorkey, tile, scale, cx0, cy0, cx1, cy1):
+        # One native moy_gfx.blit_map into `dst` -- the framebuffer (a direct draw) or a
+        # hidden cache layer (Fold 2 fill). Bakes/reuses the sheet's RGB565 tile atlas
+        # (cached on the sheet, keyed on gen/colorkey/palgen) then walks the w x h region.
+        atlas, ntiles = self._sheet_atlas(sheet, colorkey)
+        self._gfx.blit_map(dst, dw, dh, dsx, dsy,
+                           tilemap.cells, tilemap.w, tilemap.h,
+                           mx, my, w, h,
+                           atlas, ntiles, tile, scale, _RGB_KEY,
+                           cx0, cy0, cx1, cy1)
+
     def map(self, tilemap, sheet, mx=0, my=0, w=None, h=None,
             sx=0, sy=0, colorkey=-1, scale=1):
-        # TIC-80 map(): blit a w x h cell region of the tilemap over `sheet` to
-        # screen (sx, sy) in ONE native moy_gfx.blit_map call (issue #32). The sheet
-        # is baked once into an RGB565 tile atlas (cached on the sheet, rebuilt only
-        # on a paint edit via sheet.gen, a different colorkey, or a pal/palt change),
-        # so per-frame cost is just the C walk. camera offsets (sx,sy); the clip rect
-        # is passed to the kernel (#11).
+        # TIC-80 map(): blit a w x h cell region of the tilemap over `sheet` to screen
+        # (sx, sy). Fold 2 (#63): the rasterized region is CACHED in a hidden 565 layer so a
+        # subsequent camera-only call keyed-blits it (one blit565) instead of re-walking every
+        # cell (blit_map) -- the make_layer win, made automatic for a naive camera()+map()
+        # cart. The cache keys on (tilemap.gen, sheet.gen, region, colorkey, scale); an mset /
+        # sheet paint edit / scale change bumps the key and the region re-rasters.
+        # Camera/clip/sx/sy are COMPOSITE-time (not in the key), so a scroll is a cache HIT.
+        # Mirrors the host Canvas.map cache exactly (palette indices there, RGB565 here).
+        #
+        # pal/palt bake into the 565 layer via the sheet atlas under the parent's identity
+        # state, so caching is gated to identity pal/palt (_palgen == 0); under an active
+        # palette (and in the no-moy_gfx fallback) map() rasters directly to the framebuffer
+        # (correctness over cleverness -- an active palette on a scrolling map is rare). The
+        # sheet atlas is still baked once (cached on the sheet, keyed on gen/colorkey/palgen).
         self.flush_batch()             # #63: map() is a non-spr primitive -> break batch
         mx = int(mx); my = int(my); scale = int(scale)
-        sx = int(sx) - self._cam_x
-        sy = int(sy) - self._cam_y
         if scale < 1:
             scale = 1
         if w is None:
             w = tilemap.w - mx
         if h is None:
             h = tilemap.h - my
+        w = int(w); h = int(h)
+        dsx = int(sx) - self._cam_x
+        dsy = int(sy) - self._cam_y
         tile = sheet.TILE
         if self._gfx is None:
-            self._map_py(tilemap, sheet, mx, my, int(w), int(h), sx, sy, colorkey, scale)
+            self._map_py(tilemap, sheet, mx, my, w, h, dsx, dsy, colorkey, scale)
             return
-        atlas, ntiles = self._sheet_atlas(sheet, colorkey)
-        _t0 = _ticks_us()              # #66 DRAW2: time the native tilemap blit
-        self._gfx.blit_map(self._buf, self.w, self.h, sx, sy,
-                           tilemap.cells, tilemap.w, tilemap.h,
-                           mx, my, int(w), int(h),
-                           atlas, ntiles, tile, scale, _RGB_KEY,
-                           self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+        _t0 = _ticks_us()              # #66 DRAW2: the whole map path (raster or composite)
+        if (self._nocache or self._palgen != 0     # layer / active palette / revert knob
+                or not MAP_AUTO_CACHE):            # -> direct raster
+            self._blit_map_into(self._buf, self.w, self.h, dsx, dsy,
+                                tilemap, sheet, mx, my, w, h, colorkey, tile, scale,
+                                self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+            self._t_map_us += _ticks_diff(_ticks_us(), _t0)
+            if self._pump is not None:
+                self._pump()           # #66: feed the bounce flush between native ops
+            return
+        step = tile * scale
+        lw = w * step
+        lh = h * step
+        if lw <= 0 or lh <= 0:
+            return
+        key = (id(tilemap), tilemap.gen, id(sheet), getattr(sheet, "gen", 0),
+               mx, my, w, h, int(colorkey), scale)
+        mc = self._mapcache
+        if mc is None or mc[0] != key:
+            # MISS -> (re)raster the region into a hidden layer at local (0,0): fill it with
+            # the transparent key so empty/colorkey cells stay transparent, then blit_map.
+            # Re-use the layer buffer when the pixel dims are unchanged (only the content/key
+            # changed) so a live-editing cart doesn't re-allocate (and re-gc.collect) each
+            # rebuild.
+            if mc is not None and mc[2] == lw and mc[3] == lh:
+                layer = mc[1]
+            else:
+                layer = self.new_layer(lw, lh)
+            self._gfx.fill(layer._buf, lw * lh, _RGB_KEY)
+            self._blit_map_into(layer._buf, lw, lh, 0, 0,
+                                tilemap, sheet, mx, my, w, h, colorkey, tile, scale,
+                                0, 0, lw, lh)
+            # OPAQUE lane eligibility: with no colorkey and no empty cells the cached
+            # region has no transparent pixel (palt is identity under the _palgen == 0
+            # gate, and the atlas bake nudges accidental _RGB_KEY collisions off the
+            # key), so the composite can use blit565's opaque row-memcpy lane (key=-1,
+            # the #66 chrome-trim lane) instead of testing every pixel. Decided ONCE
+            # per raster with a cheap cell walk; sparse maps keep the keyed blit.
+            opaque = colorkey < 0
+            if opaque:
+                mg = tilemap.mget
+                for cy in range(h):
+                    for cx in range(w):
+                        if mg(mx + cx, my + cy) < 0:
+                            opaque = False
+                            break
+                    if not opaque:
+                        break
+            self._mapcache = mc = (key, layer, lw, lh, -1 if opaque else _RGB_KEY)
+            self._map_raster_count += 1
+        else:
+            self._map_hits += 1
+        # COMPOSITE: blit the cached region at the camera-offset (dsx, dsy), clipped --
+        # keyed (skips _RGB_KEY) for sparse regions, opaque row-memcpy for full-coverage
+        # ones. Overdrawing the region each frame still erases last frame's actors for
+        # free, exactly like a direct map().
+        layer = mc[1]
+        self._gfx.blit565(self._buf, self.w, self.h, dsx, dsy,
+                          layer._buf, lw, lh, mc[4],
+                          self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
         self._t_map_us += _ticks_diff(_ticks_us(), _t0)
         if self._pump is not None:
             self._pump()               # #66: feed the bounce flush between native ops
+
+    def map_cache_reset(self):
+        # Zero the Fold-2 map-cache profiling counters (#63): after a run of same-key map()
+        # calls _map_raster_count == 1 / _map_hits == (n-1) PROVES the region rasterized ONCE
+        # and every later frame re-used the cache. The map() analogue of batch_reset.
+        self._map_raster_count = 0
+        self._map_hits = 0
 
     def _sheet_atlas(self, sheet, colorkey):
         # Bake the whole sheet into a contiguous RGB565 tile atlas (ntiles tiles of
