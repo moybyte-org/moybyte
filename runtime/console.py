@@ -2920,8 +2920,10 @@ class Workstation:
         if not ok:
             return                        # don't autosave/journal un-parseable source
         prev_status = self.save_status
-        self.project.commit_code(src)     # persists + journals; clears ed.dirty
-        self.save_status = prev_status    # keep the autosave invisible (spec Section 7)
+        self.project.commit_code(src, quiet=True)   # persists + journals; clears ed.dirty
+        self.save_status = prev_status    # keep the autosave invisible (spec Section 7):
+                                          # save_status restored + quiet=True suppresses the
+                                          # "Code Wizard" achievement toast (Stage 7 F2)
 
     def _journal_idle_tick(self):
         """Fire the idle-typing autosave-commit once the code editor has sat quiet for

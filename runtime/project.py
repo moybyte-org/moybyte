@@ -174,11 +174,16 @@ class Project:
                 return
             self._journal("config.json", json.dumps(self.cart["cfg"]))
 
-    def commit_code(self, src):
+    def commit_code(self, src, quiet=False):
         """Persist validated source through the store -- the store-write half of the
         old Workstation.save_code. The compile-check + code-UI half stays on the code
         surface (ws.save_code), which calls this once the source is known to parse.
-        Returns True iff the write succeeded."""
+        Returns True iff the write succeeded.
+
+        `quiet` is set by the Stage-7 idle-debounce autosave (ws._autosave_code): that
+        save is INVISIBLE (spec Section 7), so it must NOT pop the "Code Wizard"
+        achievement toast -- a visible side effect on a nominally-invisible save. The
+        badge stays earnable via the explicit SAVE / PLAY paths (quiet defaults False)."""
         ws = self.ws
         try:
             # moy_carts.save_code always returns a (status, message) 2-tuple.
@@ -190,7 +195,8 @@ class Project:
             ws.editor.dirty = False
             ws.save_status = "SAVED"
             self._journal("main.py", src)     # durable undo (Stage 7): the persisted src
-            ws.ach.note("code_save")          # "Code Wizard": code saved (#21)
+            if not quiet:
+                ws.ach.note("code_save")      # "Code Wizard": manual SAVE/PLAY only (#21)
             # A successful save means the source now compiles and persisted: clear
             # any stale crash text so returning to the desktop re-runs the fixed
             # cart instead of re-painting the old "crashed" panel. (run_code/the
