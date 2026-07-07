@@ -1,5 +1,7 @@
 # Shell layers refactor — decompose `Workstation` into composited Layers
 
+> **STATUS: IMPLEMENTED / ARCHIVED** — the v0.5 shell shipped (branch merged to master); kept for history. See `CLAUDE.md` for the shipped architecture.
+
 **North star above this doc:** `docs/shell_ux_v1.md` — the LOCKED top-of-stack UX spec (the "what the user experiences"); this doc is one layer of the "how" beneath it.
 
 **Status:** DESIGN / READY-TO-EXECUTE INCREMENTALLY. This is a committed plan for
@@ -11,7 +13,7 @@ and is individually revertible.
 *enabling* step under both of its halves (§2 privileged system carts, §3 layered
 compositor); see "Relationship to the shell architecture doc" below. The kid-facing
 contract (`docs/moy_cart_api.md`) does **not** change.
-**Successor:** `docs/shell_os_architecture_v1.md` — the adversarial review of this
+**Successor:** `docs/history/shell_os_architecture_v1.md` — the adversarial review of this
 refactor found its sharpest flaw: the Layer boundary made the coupling *legible* but
 did not *reduce* it (every Layer still reaches through `self.ws` into a ~100-member
 implicit API, including other surfaces' privates). That doc is the plan that fixes it —

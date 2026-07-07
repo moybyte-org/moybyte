@@ -13,8 +13,8 @@ Moybyte is a PC-first SDK + simulator for a future ESP32 kids' coding console, p
    - `moybyte_blocks/` — block-language → Python compiler.
    - Projects (`examples/*.moyproj`) must stay inside a **portable subset** enforced by `moybyte_cli/portable.py`: only `moybyte`/`math`/`random` imports, and no `eval`/`exec`/`open`/`getattr`/etc. `make check-portable` is the gate.
 
-2. **The v0.4 `.moy` console (newer, active direction).** A TIC-80-style "fantasy workstation" where *everything is a cartridge*. This is where current feature work happens.
-   - `runtime/` — the **host reference** of the console (launcher → cartridge → cards editor). Pure host, fast dev loop. See `runtime/README.md` for the per-file map; don't duplicate it.
+2. **The `.moy` console (newer, active direction).** A TIC-80-style "fantasy workstation" where *everything is a cartridge* — now running the shipped **v0.5 shell** (everything-is-a-process: launcher / Player / Editor apps over a fullscreen-stack WM; spec `docs/shell_ux_v1.md`). This is where current feature work happens.
+   - `runtime/` — the **host reference** of the console (launcher → Player → tabbed Editor). Pure host, fast dev loop. See `runtime/README.md` for the per-file map; don't duplicate it.
    - `firmware/lilygo_t_deck_plus_micropython/` — the **device port** of that same console (MicroPython).
    - `system_carts/*.moy` — seed cartridges (folder = `manifest.json` + `main.py` + `config.json`).
 
@@ -43,7 +43,7 @@ make doctor         # environment sanity check via the moybyte CLI
 make check-portable                                                     # portable-subset gate
 ```
 
-v0.4 `.moy` console (host):
+`.moy` console (host):
 ```bash
 python tools/simulate_desktop.py                                  # boots the launcher (needs a display)
 python tools/simulate_desktop.py --cart system_carts/star_catcher.moy
@@ -60,40 +60,76 @@ make firmware-flash-lilygo-micropython PORT=/dev/ttyACM0           # esptool, de
 make firmware-monitor-lilygo-micropython PORT=/dev/ttyACM0         # miniterm @115200
 ```
 
-- The build (`firmware/lilygo_t_deck_plus_micropython/build.sh`) **clones `lvgl_micropython` into `.build/`**, stages the native C modules (`native/moy_gfx`, `moy_alloc`, and `moy_sd`) into its `ext_mod` tree (re-staged every build because `ext_mod` is wiped on re-clone) and the shared `runtime/` modules (`editors`/`console`/`moy_carts`) into `modules/`, freezes the `modules/` Python, and emits `app` + full-flash images to `dist/` (both gitignored). It needs the ESP-IDF 5.5 toolchain (`IDF_PYTHON ?= ~/.espressif/.../idf5.5_py3.10_env/bin/python`).
+- The build (`firmware/lilygo_t_deck_plus_micropython/build.sh`) **clones `lvgl_micropython` into `.build/`**, stages the native C modules (`native/moy_gfx`, `moy_alloc`, and `moy_sd`) into its `ext_mod` tree (re-staged every build because `ext_mod` is wiped on re-clone) and the shared `runtime/` modules (`console` + `project`/`player`/`editor_app`/`wm`, `editors`, `moy_carts`, the `*_layer.py`/`*_ui.py` surfaces, `blocks`, `web_view`, …) into `modules/`, freezes the `modules/` Python, and emits `app` + full-flash images to `dist/` (both gitignored). It needs the ESP-IDF 5.5 toolchain (`IDF_PYTHON ?= ~/.espressif/.../idf5.5_py3.10_env/bin/python`).
 - The MicroPython console is the only firmware. (The older Arduino/PlatformIO serial-smoke firmware and the legacy LVGL `.moyproj` game-loop boot path were removed; git history has them.)
 
 ### Host == device: the shared console (important)
 
-The v0.4 console UI is now **one codebase** that both the host simulator and the
+The console UI is **one codebase** that both the host simulator and the
 device run — they render the *same* 320×240 pixels with the *same* petme128 font.
 The canonical sources live in `runtime/`; `build.sh` **stages copies into the
 firmware `modules/` tree** so the device freezes the identical code (same pattern,
-re-staged every build, gitignored):
+re-staged every build, gitignored). The shipped **v0.5 shell** (spec
+`docs/shell_ux_v1.md`) is everything-is-a-process: two concerns — authoring and
+playing — joined by one primitive, `run(cart)` plays until exit and returns control
+to whoever called it.
 
-- `runtime/console.py` — `Launcher` + `Pointer` + `Workstation` + the cards / code /
-  paint UI + layout + the **unified 18px top bar** (icon-only mode switchers home/edit/
-  paint/map/blocks left, clock/wifi/batt/gear right, new/dup/del on home — #46), whose
-  icons are 16×16 sprites blitted from an editable `IconSheet`. **The bar auto-hides
-  while a cart PLAYS** (#71): a running cart owns the full 320×240 and every button —
-  **BACKSPACE is THE one console key in every input mode** (raw matrix `d4&0x08`,
-  typed `0x08`, the web page maps it server-side; ☰ on the page = the same HOME), and
-  it does exactly **one** job everywhere: **toggle** the pause screen. It never means
-  "exit" — a second press just un-pauses, no per-cart special case. Quitting is a
-  separate, explicit, always-tappable action: the pause screen draws **CONTINUE** and
-  **QUIT** buttons (`_draw_pause_buttons`/`handle_pointer`); A/RUN is a CONTINUE
-  accelerator where buttons fire. (An earlier version tried "press BACKSPACE twice to
-  exit" and "typed Z/space/Enter/R resumes" — both were special cases that broke:
-  Z/R are live gameplay letters in a typing game, so pausing then typing the next
-  target letter silently un-paused a frame later.) `q`/`e` are plain letters
-  everywhere now (their old home/stop roles stole letters from typing carts like
-  Letter Blitz), a text-mode TOOL (wifi password field) keeps backspace as delete
-  while it runs, and the old unpaused B→editor shortcut is gone (Star Catcher plays
-  with B). Backend-agnostic: injected `make_api` + cart store. (frozen as `console`)
+- `runtime/console.py` — the shell **kernel**: `Workstation`, shrunk by the v0.5
+  refactor to a compositor/router — the Layer-stack frame/input/pointer loop, the
+  shared draw toolkit (`_glyph`/`_icon`/`_btn`), store/service attach points
+  (`carts_store`/`wifi`/`updater`/`web_hook`) and the spawn/exit verbs; everything
+  the user sees is an app it runs. Backend-agnostic: injected `make_api` + cart
+  store. (frozen as `console`)
+- `runtime/project.py` / `player.py` / `editor_app.py` / `wm.py` — the v0.5 shell
+  split (build-staged like the rest): **`Project`** = the open cart's live workspace
+  (cart/config/sheet/tilemap/images/pmem + the `commit_*` persistence verbs; a commit
+  also appends the undo journal and runs graduation detection). **`Player`** = the
+  `run(cart) → plays → returns` black box: starts the cart under the frozen
+  `make_api`, ticks it, turns any crash into the error panel, owns the transient
+  hold-to-exit toast — zero knowledge of who launched it; exit pops to the run
+  CALLER (launcher→launcher; Editor-PLAY→the same tab). **`EditorApp`** = ONE
+  authoring app opened on a `Project`: the tab ladder Config→Blocks→Code→Sprites→
+  Map→Music (+ PROJECTS/PLAY/SAVE in its lent bar zone), whose tabs ARE the
+  extracted `*_layer.py` surfaces. **`FullscreenStackWM`** = the only tier-specific
+  layer: the process back-stack (`screen` is a read-only projection of its top), the
+  **memoized** visible/draw stack (zero per-frame list churn, #66), and the
+  game↔system viewport composite.
+- **Editor-as-an-app UX (this replaced the maker/player tap-mode):** a launcher tap
+  **always RUNS the cart** — no mode, no type dispatch. The pinned **"Make ✏️"
+  tile** opens the Editor **project-picker** (the same grid over every editable cart
+  + a ＋New tile), which owns project management (＋New / Copy / Delete — delete is
+  a two-tap confirm); the launcher home has no new/dup/del. **Wallpapers are
+  backdrop-only**: excluded from the run-grid, chosen in Settings → WALLPAPER,
+  still editable via the picker.
+- **The zoned top bar (#46, macOS-menu-bar model):** one OS-owned 18px bar. RIGHT
+  zone = OS status (clock/wifi/batt/≡ + a **context-X** that exits the active app;
+  the launcher root draws no X). LEFT zone = LENT to the active app (`draw_zone`):
+  the launcher shows the selected cart's name, the Editor its PROJECTS/tab-ladder/
+  PLAY/SAVE icons. Icons stay 16×16 sprites from the editable `IconSheet`
+  (Settings → EDIT ICONS). **The bar hides entirely while a GAME plays** (the cart
+  owns all 320×240); tools/apps run WITH a minimal bar (title + status + X) so
+  they're always exitable.
+- **Exit model (#71's pause machinery is retired):** a fullscreen GAME exits on a
+  sustained **hold-BACKSPACE (~700ms)** — raw-matrix mode streams the held key, a
+  transient progress toast fills, the pop returns to the caller; a quick tap is a
+  plain cart key. Taskbar tools/apps exit via the context-X, so BACKSPACE stays an
+  ordinary key there (the wifi password field's delete works with zero
+  special-casing). A `textmode(True)` game provides its OWN exit via the additive
+  cart verb **`quit()`** (in text mode BACKSPACE arrives as a typed delete and the
+  keyboard has no autorepeat, so the console's gesture can't reach it) — Letter
+  Blitz models it with a tap-✕. (The plan's triple-tap alias was dropped after
+  on-device testing.)
 - `runtime/editors.py` — `CodeEditor` / `SpriteSheet` / `PaintEditor` cores, plus
   `IconSheet` (16×16 themeable system-bar icon tiles; Settings → EDIT ICONS repaints it). (frozen as `editors`)
 - `runtime/moy_carts.py` — the `.moy` store (scan/load/save_*/create/duplicate/delete;
-  versioned `seed_builtins` re-seed; `system_icons.moygfx` bar theme; only `json`+`os`). (frozen as `moy_carts`)
+  versioned `seed_builtins` re-seed; `system_icons.moygfx` bar theme; only `json`+`os`)
+  plus the **per-project undo/redo journal** (`journal.jsonl` append-only + full-file
+  snapshots + an atomic cursor, torn-snapshot-safe; commits fire on a typing-idle
+  autosave debounce + hard commits on tab-leave/PLAY; Ctrl+Z/Y walks it in the code
+  editor) and **blocks↔code graduation** (MakeCode model: a diverging code commit —
+  conservative recompile-and-normalize compare — stores `"graduated": true` in the
+  manifest with a journal rider; the Blocks tab goes read-only + celebrates; undoing
+  past the graduating commit un-graduates). (frozen as `moy_carts`)
 - `runtime/font.py` — petme128 8×8 font, the ONE glyph source both backends rasterize (#62): the host draws it per-pixel, the device passes its blob to the native `moy_gfx.text` kernel (staged as `moy_font` at build; framebuf.text — same glyphs, no clip rect — is the no-gfx fallback).
 - `runtime/host_app.py` — host glue: host `make_api`, `build_workstation()`, `ConsoleDriver` (mouse=touch, arrows=trackball). Not on device.
 
@@ -104,12 +140,12 @@ re-staged every build, gitignored):
 
 - `moybyte_shell.py` — boot/`main()`; mode flags `RUN_DESKTOP` / `RUN_FULLSCREEN_BENCH` / `RUN_COMPOSITOR_SMOKE` / `RUN_TOUCH_CALIBRATE` / `RUN_KEYBOARD_PROBE`; SD prefetch; native takeover.
 - `moy_runtime.py` — the **device backend**: `DeviceCanvas` (hot ops `cls`/`rect`/`circ`/`spr` go through the native `moy_gfx` kernel — `fill`/`fill_rect`/`blit565` straight into the compositor's RGB565 buffer — with framebuf for text/lines and as the no-`moy_gfx` fallback; `spr` blits a per-sprite pre-scaled RGB565 cache, and `make_api` reuses one tile `Image` per `(id, colorkey)` so the cache survives across frames), `make_api`, embedded fallback `CARTS`, `TrackBall`, `Touch`, `run_desktop()`, `run_keyboard_probe()`. Imports the shared `console`/`editors`/`moy_carts` and injects the device `make_api` + store into `console.Workstation`. **Input runs on a poller thread (#69, `MOY_INPUT_POLLER`)**: `moybyte.input.InputPoller` owns every I2C0 transaction (kbd + GT911 + mode switches) off the frame loop, so the C3's 40-60ms clock-stretch stalls block only that thread — requires the build's `esp32_i2c_gil_release.patch` (machine.I2C frees the GIL across its blocking wait); falls back to synchronous polling if `_thread`/the thread dies.
-- `console.py` / `editors.py` / `moy_carts.py` — **staged from `runtime/` at build** (see above).
+- `console.py` / `project.py` / `player.py` / `editor_app.py` / `wm.py` / `editors.py` / `moy_carts.py` (+ the `*_layer.py`/`*_ui.py` surfaces, `blocks.py`, `web_view.py`) — **staged from `runtime/` at build** (see above).
 - `moybyte_sd.py` — SD mount on the shared SPI bus; `with_sd(fn)` = mount → run → unmount + deselect.
 - `moy_compositor.py` — native RGB565 framebuffer + DMA flush.
 - `tdeck_display.py` — display/LVGL + SPI bus bootstrap.
 - `moy_ota.py` — OTA firmware updater (#53): `OtaUpdater` flashes a new app image from `/sd/update/*.bin` into the **inactive** OTA slot via `esp32.Partition` (block-erase `writeblocks`), then `set_boot` + `machine.reset`. Phase 3 adds WiFi download — `check_online`/`begin_download`/`download_step` stream a manifest-described `.bin` over a raw socket straight to SD (sha256-verified, never buffering the whole 3MB), reusing the injected `wifi` service. Device-only; `run_desktop` injects it into the shared `Workstation` (which owns all the update-screen pixels), wires the wifi service, and calls `mark_valid()` at a healthy boot to cancel rollback.
-- `moy_webserver.py` — device WEB VIEW (#41/#22): serves the **running console** to a browser on the same WiFi via the **same draw-command protocol** (`defspr`/`spr`-by-index/`map`/`settiles`/primitives, serve-time defspr, atlas `gen` lock-step), so the device page renders device frames. The **live channel is a persistent WebSocket** (`GET /ws`, RFC 6455 handshake): frames PUSH down as text messages, input pushes up as `{"events":[...]}` text — one socket, **no per-frame HTTP handshake** (the #41 transport swap; the old transport opened a new TCP conn per `/frame`, capping ~20-25fps). The page + assets still load over plain HTTP (`GET /`, `GET /assets`); the legacy `GET/POST /frame` + `POST /input` remain as a poll **fallback**. Records the cart's per-frame draw calls (a `DrawRecorder` fed by a `TeeCanvas` that forwards to the real `DeviceCanvas`, format identical to `tools/command_canvas.py`) — **never** the raw framebuffer (WiFi ~72KB/s, 153KB/frame is unplayable). Non-blocking listening socket + a non-blocking persistent `_WSConn` (cross-iteration read buffer for split frames; blocking-budget sends, stalled client dropped); `moy_runtime.run_desktop`'s single-threaded loop services it **BETWEEN frames** via the `WebView` controller (`begin_frame`/`commit_frame`/`poll`). **Liveness/stream-mode now key on a connected WebSocket** (not a recent `/frame` poll). **Off by default → `ws.canvas` stays the raw `DeviceCanvas` (zero per-draw cost); Settings → WEB VIEW swaps the Tee in** (and rebinds wallpaper/cart). WiFi STA ≠ display SPI, so it doesn't touch the SD/panel bus — but **WiFi↔LCD-DMA RAM coexistence (#38/#40) + the socket/WebSocket layer are UNVERIFIED on hardware** (host-tested via `tests/test_moy_webserver.py`, incl. a real-localhost WS round-trip). WS removes the per-frame handshake (smoother, lower-latency input) but **not** the ~72KB/s ceiling: light screens ~30-40fps, the heavy launcher ~18fps.
+- `moy_webserver.py` — device WEB VIEW (#41/#22): serves the **running console** to a browser on the same WiFi via the **same draw-command protocol** (`defspr`/`spr`-by-index/`map`/`settiles`/primitives, serve-time defspr, atlas `gen` lock-step), so the device page renders device frames. The **live channel is a persistent WebSocket** (`GET /ws`, RFC 6455 handshake): frames PUSH down as text messages, input pushes up as `{"events":[...]}` text — one socket, **no per-frame HTTP handshake** (the #41 transport swap; the old transport opened a new TCP conn per `/frame`, capping ~20-25fps). The page + assets still load over plain HTTP (`GET /`, `GET /assets`); the legacy `GET/POST /frame` + `POST /input` remain as a poll **fallback**. Records the cart's per-frame draw calls (a `DrawRecorder` fed by a `TeeCanvas` that forwards to the real `DeviceCanvas`, format identical to `tools/command_canvas.py`) — **never** the raw framebuffer (WiFi ~72KB/s, 153KB/frame is unplayable). Non-blocking listening socket + a non-blocking persistent `_WSConn` (cross-iteration read buffer for split frames; blocking-budget sends, stalled client dropped); `moy_runtime.run_desktop`'s single-threaded loop services it **BETWEEN frames** via the `WebView` controller (`begin_frame`/`commit_frame`/`poll`). **Liveness/stream-mode now key on a connected WebSocket** (not a recent `/frame` poll). **Off by default → `ws.canvas` stays the raw `DeviceCanvas` (zero per-draw cost); Settings → WEB VIEW swaps the Tee in** (and rebinds wallpaper/cart). WiFi STA ≠ display SPI, so it doesn't touch the SD/panel bus — but **WiFi↔LCD-DMA RAM coexistence (#38/#40) + the socket/WebSocket layer are UNVERIFIED on hardware** (host-tested via `tests/test_moy_webserver.py`, incl. a real-localhost WS round-trip). WS removes the per-frame handshake (smoother, lower-latency input) but **not** the ~72KB/s ceiling: light screens ~30-40fps, the heavy launcher ~18fps. **Per-WM-surface streams (v0.5 shell Stage 9):** the shared recorder can slice each frame into one command stream per WM surface (`web_view.surfaces_on` — bar / app content / player viewport, a view over the same flat stream); the **host** web console renders them, the **device keeps the flag off** (flat frames) — wiring the device transport to per-surface render is a standing gate.
 
 ### Hard device constraints (learned the painful way — respect these)
 
@@ -120,7 +156,7 @@ re-staged every build, gitignored):
 
 ## Conventions
 
-- The current design doc is **`moybyte_Console_Plan_v0_5.md`** (repo root); superseded v0.1/v0.3/v0.4 docs are archived under `docs/history/`. The **current `.moy` cart API** is documented in **`docs/moy_cart_api.md`**; the legacy `.moyproj` SDK specs (api / project-format / runtime-contract) are archived under `docs/history/` too.
+- The current design doc is **`moybyte_Console_Plan_v0_5.md`** (repo root); superseded v0.1/v0.3/v0.4 docs are archived under `docs/history/`. The **current `.moy` cart API** is documented in **`docs/moy_cart_api.md`**; the legacy `.moyproj` SDK specs (api / project-format / runtime-contract) are archived under `docs/history/` too. The shipped v0.5 shell's UX reference is **`docs/shell_ux_v1.md`** (corrected to the as-built reality); `docs/shell_architecture_v1.md` (privileged system carts + layered compositor) is the standing direction doc; the three implemented shell plan docs (`shell_ux_technical_plan_v1` / `shell_os_architecture_v1` / `shell_layers_refactor_v1`) are archived under `docs/history/`.
 - **Issue mirror (`docs/issues/`, gitignored):** a **local, un-committed** snapshot of every GitHub issue, split into `open/` and `closed/` (files named `NNNN-slug.md`) plus `INDEX.md`, so an issue number referenced in a commit, doc, or chat resolves without network access. GitHub is the source of truth — this is a generated read-only mirror (not in git, to avoid churn), so a fresh checkout won't have it: **build it with `make sync-issues`** (wrapper over `tools/sync_issues.py`; needs the `gh` CLI, authed). The script wipes and rewrites both folders from `gh`, so state changes and edits never leave a stale copy. **Run `make sync-issues` at the start of any session that reads or reasons about issues, and again after EVERY issue you open/close/comment/edit** — the mirror is only trustworthy if syncing is a reflex, and living-body issues (like the #66 performance ledger) go stale locally the moment the body is edited on GitHub. Don't hand-edit the files.
 - Tests run against the host packages only; firmware tests (`tests/test_micropython_spike.py`) grep the frozen device modules' source rather than executing them.
 - **Cart versioning (#47):** every `system_carts/*/manifest.json` carries an integer `"version"`. `seed_builtins` re-seeds an on-SD built-in only when the baked version is **newer**, and preserves the kid's data (`pmem.json` saves + `config.json` tuning) across the re-seed. **Bump a built-in's manifest `version` whenever you change its content**, or an already-seeded device keeps the stale copy.

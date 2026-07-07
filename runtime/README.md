@@ -11,12 +11,15 @@ Group A (PC simulator first)** + **Task Group B (cartridge format)** + the first
 
 **The shared console (host == device).** The launcher/desktop/cards/code/paint UI is
 one codebase that both the host *and* the T-Deck run — the host renders the same
-320×240 pixels with the same petme128 font. `console.py` is the **compositor/router**
-(`frame`/`handle_input`/`handle_pointer` loop over a z-ordered Layer stack + the shared
-draw toolkit + cart lifecycle); each **surface is its own `*_layer.py` module** (the
-`Layer` protocol + the extracted editors below). The files split into **shared**
-(canonical here, build-staged into the firmware `modules/` tree so the device freezes
-the identical code) and **host glue**.
+320×240 pixels with the same petme128 font. Since the **v0.5 shell** refactor
+(`docs/shell_ux_v1.md`) the console is everything-is-a-process: `console.py` is the
+**kernel** (compositor/router — the `frame`/`handle_input`/`handle_pointer` loop over
+a z-ordered Layer stack + the shared draw toolkit), the apps it runs live in
+`project.py`/`player.py`/`editor_app.py`, the back-stack window manager in `wm.py`,
+and each **surface is its own `*_layer.py` module** (the `Layer` protocol + the
+extracted editors below). The files split into **shared** (canonical here,
+build-staged into the firmware `modules/` tree so the device freezes the identical
+code) and **host glue**.
 
 | file | role |
 |---|---|
@@ -25,10 +28,14 @@ the identical code) and **host glue**.
 | `canvas.py` | **(host)** `Canvas` — indexed surface (320×240 in the console), TIC-80 API (`cls/pix/line/rect/rectb/circ/circb/spr/map/print` — `rect`/`circ` filled, `rectb`/`circb` outlines; `map` blits a tilemap region, native one-call `moy_gfx.blit_map` on device), `print` uses `font.py`, `to_rgb888()`; `Image` sprites |
 | `editors.py` | **(shared, staged to device)** `CodeEditor` / `SpriteSheet` (8×8 tiles + `__gfx__` hex) / `TileMap` (`w×h` tile-id grid over a sheet + `map.moymap` hex, `mget`/`mset`, #32) / `PaintEditor` |
 | `audio.py` | **(shared, staged to device)** sound data model (`SFX`/`MusicTrack`/`AudioBank`) + `AudioEngine` pure-Python synth/mixer (`render()` → PCM). Backends (host `FakeAudio`/SDL, device I2S) consume `render()`. See `docs/audio_design_v04.md` (#16) |
-| `console.py` | **(shared, staged to device)** `Workstation` — the compositor/router (the `frame`/`handle_input`/`handle_pointer` stack loop + `_visible_stack`/`_build_layers` + the #39 game↔system composite), the shared draw toolkit (`_glyph`/`_icon`/`_btn`/`_mini_btn`), cart lifecycle (`open`/`_start`/`go_home`/`set_menu_view`), the pinned handles (`ws.editor`/`ws.paint`, cart `config`/`apply`, `wallpaper_id` + picker API, `nav`), `Layout`/`CodeLayout` (responsive geometry), `NAMES`/`CURSOR`. Backend-agnostic: injected `make_api` + `make_audio` + cart store + `wifi`. The device's `moy_runtime` imports it; `host_app` runs it on the host |
+| `console.py` | **(shared, staged to device)** `Workstation` — the v0.5 shell **kernel**: the compositor/router (the `frame`/`handle_input`/`handle_pointer` stack loop, delegating the memoized stack + composite to `wm.py`), the shared draw toolkit (`_glyph`/`_icon`/`_btn`/`_mini_btn`), the spawn/exit + navigation verbs (`open`/`run`/`go_home`/`open_picker`/`launch_selected`), the pinned handles (cart `config`/`apply`, `wallpaper_id` + picker API, `nav`), `Layout`/`CodeLayout` (responsive geometry), `NAMES`/`CURSOR`. Backend-agnostic: injected `make_api` + `make_audio` + cart store + `wifi`. The device's `moy_runtime` imports it; `host_app` runs it on the host |
+| `project.py` | **(shared, staged)** `Project` — the open cart's live workspace (cart/config/sheet/tilemap/images/pmem + the `commit_*` persistence verbs); a commit also appends the undo journal and runs blocks↔code graduation detection |
+| `player.py` | **(shared, staged)** `Player` — the `run(cart) → plays → returns` black box: starts a cart under the frozen `make_api`, ticks it, turns crashes into the error panel, owns the hold-BACKSPACE exit gesture + its transient toast; exit pops to the run caller |
+| `editor_app.py` | **(shared, staged)** `EditorApp` — the ONE authoring app, opened on a `Project` from the launcher's Make tile → project-picker: the tab ladder Config→Blocks→Code→Sprites→Map→Music (+ PROJECTS/PLAY/SAVE in its lent bar zone); the tabs are the `*_layer.py`/`*_ui.py` surfaces |
+| `wm.py` | **(shared, staged)** `FullscreenStackWM` — the only tier-specific layer: the process back-stack (`screen` is a projection of its top), the **memoized** visible/draw stack (zero per-frame list churn, #66), and the #39 game↔system viewport composite |
 | `layers.py` | **(shared, staged)** the `Layer` protocol + `_LegacyLayer` shim + the thin object-surface adapters (blocks/map/music/update/sysmenu/about/achievements/perf) |
 | `bar_layer.py` | **(shared, staged)** `BarLayer` — the unified 18px top bar + bottom dock (#46): draw + strip cache + clock cache + dock/bar tap slices + the bar/dock geometry constants |
-| `launcher_layer.py` | **(shared, staged)** the `Launcher` grid class (its instance is `ws.launcher`) + `LauncherHomeLayer` — the home desktop composition (wallpaper → grid → bar) + grid nav (#28) |
+| `launcher_layer.py` | **(shared, staged)** the `Launcher` grid class (two instances: `ws.launcher`, the home RUN-grid with the pinned Make tile and no wallpapers, and `ws.picker`) + `LauncherHomeLayer` — the home desktop composition (wallpaper → grid → bar; a tap always RUNS) + `EditorPickerLayer` — the Editor's project-picker (every editable cart + ＋New; owns New/Copy/two-tap-Delete) (#28) |
 | `cards_layer.py` | **(shared, staged)** `CardsLayer` — the "Make it mine" config-card editor (#3/#15): card draw + layout + scroll (msel/mtop) + taps; cart `config`/`apply`/`adjust` stay on `ws` |
 | `paint_layer.py` | **(shared, staged)** `PaintLayer` (the sprite/icon paint editor #4/#30) + `ThemeLayer` (EDIT ICONS over the system icon sheet) — one renderer keyed on `ws._editing_icons` |
 | `settings_layer.py` | **(shared, staged)** `SettingsLayer` — the Settings aggregator (#28/#39/#53): rows + scroll + draw; owns no config (dispatches every mutation to `ws` setters) |

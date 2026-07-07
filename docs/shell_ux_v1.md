@@ -1,23 +1,30 @@
 # Moybyte shell UX v1 — what the user experiences
 
-**Status:** LOCKED / TOP OF STACK — this is the UX north star the shell converges on.
-It is the "what the user experiences"; the three existing shell docs
-(`shell_layers_refactor_v1.md`, `shell_os_architecture_v1.md`,
-`shell_architecture_v1.md`) are the "how" and sit **beneath** it. Where a "how" doc
-and this doc disagree about the experience, this doc wins. This doc deliberately does
-NOT contain module design, migration phases, or code — the implementation plan is a
-separate successor doc. What is locked here is the experience and the contracts;
-mechanisms are named only where the UX guarantee is meaningless without one.
+**Status:** SHIPPED (v0.5) / CURRENT UX REFERENCE — the shell described here is
+implemented (branch `refactor/shell-ux`), and this doc has been corrected where the
+build deliberately diverged from the original lock: §4 (the maker/player tap-mode was
+RETIRED in favour of the Editor-as-an-app model), §7 (the bar keeps one compact SAVE),
+and §9 (tools/apps run with a minimal bar; text-mode games exit via the new `quit()`
+cart verb). It remains the "what the user experiences"; the "how" docs beneath it are
+implemented and archived under `docs/history/` (`shell_ux_technical_plan_v1.md`,
+`shell_layers_refactor_v1.md`, `shell_os_architecture_v1.md`), while
+`docs/shell_architecture_v1.md` stays the standing direction doc. The shipped module
+map (`runtime/project.py` / `player.py` / `editor_app.py` / `wm.py` + the shrunk
+`Workstation` kernel) lives in `CLAUDE.md`. This doc deliberately does NOT contain
+module design, migration phases, or code; mechanisms are named only where the UX
+guarantee is meaningless without one.
 **Issues:** #29 (blocks — becomes a graduating Editor tab), #46 (the unified bar —
 becomes the zoned OS shell), #71 (exit/pause — resolved by the taskbar-vs-fullscreen
 split), #55 (Editor/Settings as privileged system carts), #22/#41 (the web view — one
 more window-manager surface), #58 (the P4 "One" — the big-screen presentation), #66
 (the perf guardrails §11 bakes in).
-**Companion docs (the "how", beneath this one):** `docs/shell_layers_refactor_v1.md`
-(the Layer decomposition), `docs/shell_os_architecture_v1.md` (the capability/syscall
-boundary), `docs/shell_architecture_v1.md` (privileged system carts + layered
-compositor). The kid-facing cart contract (`docs/moy_cart_api.md`) is **frozen** and
-unaffected.
+**Companion docs (the "how", beneath this one — implemented, archived):**
+`docs/history/shell_ux_technical_plan_v1.md` (the staged migration that shipped this
+spec), `docs/history/shell_layers_refactor_v1.md` (the Layer decomposition),
+`docs/history/shell_os_architecture_v1.md` (the capability/syscall boundary; its
+per-surface API track remains open). `docs/shell_architecture_v1.md` (privileged
+system carts + layered compositor) is current. The kid-facing cart contract
+(`docs/moy_cart_api.md`) stayed frozen; the one addition is the `quit()` verb (§9).
 **One-line thesis:** there are exactly two concerns — *authoring* a cart and *playing*
 a cart — joined by exactly one primitive: `run(cart)` plays until exit and returns
 control to whoever called it. Everything else in the shell is an app the OS runs, and
@@ -97,22 +104,35 @@ compromise UI; it is the mechanism by which games hit their #66 numbers.
 
 ---
 
-## 4. Two personas — the launcher's tap default is a mode setting
+## 4. Two personas — making is an app, a tap always plays
+
+*(As originally locked, this section was a per-device "tap-mode" setting — maker vs
+player. That was built, then RETIRED during implementation: a modal tap is invisible
+state, and dispatching on cart type made a tap unpredictable. What shipped is
+simpler and mode-free.)*
 
 The console serves two kids (often the same kid at different hours): the one who wants
-to **play** and the one who wants to **make**. The launcher honors both with one
-setting — what a tap on a cart does by default:
+to **play** and the one who wants to **make**. Both get a first-class, always-visible
+door — no setting, no mode:
 
-- **Maker mode** (the dev T-Deck, the P4): tap a cart → opens the **Editor, landing on
-  the Config page first**. Config is the "Make it mine" cards — pick your character,
-  the stars-falling rate, the colors. Intrigue-first: a kid customizes a game before
-  ever seeing a line of code, and the path from "I changed the color" to "what else
-  can I change?" runs straight through the rest of the Editor's tab ladder (§6).
-- **Player mode** (a kid's player device): tap → **plays**.
+- **A launcher tap always RUNS the cart.** Every cart type, no per-device default,
+  no type dispatch. The launcher home is for playing.
+- **Making is an app you launch:** the launcher's first tile is a pinned
+  **"Make ✏️" tile** → the Editor's **project-picker** — the same launcher-grid look
+  over EVERY editable cart (wallpapers and built-ins included) plus a pinned **＋New**
+  tile. Picking a project opens it in the Editor, **landing on Config first** — the
+  "Make it mine" cards, intrigue-first: a kid customizes a game before ever seeing a
+  line of code, and the path from "I changed the color" to "what else can I change?"
+  runs straight through the Editor's tab ladder (§6).
+- **The picker manages projects:** ＋New (create a game and open it), Copy, and
+  Delete (a two-tap confirm) live in the picker — cart management moved OFF the
+  launcher home, which no longer has new/dup/del.
+- **Wallpapers are backdrop-only:** they are not run-grid tiles at all. The backdrop
+  is chosen in Settings → wallpaper; wallpaper carts stay editable through the
+  picker.
 
-Both actions (Play / Edit) always exist on every cart in both modes; the setting only
-flips which one a bare tap means. Nothing is ever locked away — Player mode is a
-default, not a parental wall.
+Nothing is ever locked away: Play is a tap, Make is a tile, and both are visible from
+every screen a kid starts on.
 
 ---
 
@@ -123,15 +143,18 @@ bar, re-framed: it stops being a hardcoded strip of mode buttons and becomes an 
 shell with an app-populated region.
 
 - **LEFT zone = the active app's toolbar.** The OS *lends* the app this region. The
-  Editor loads its tab ladder + PLAY here (§6); the launcher fills it with its own
-  controls (new/dup/del today); Settings fills it with its sections. The app owns the
-  pixels and the taps inside the zone; the OS owns the zone's existence and bounds.
+  Editor loads PROJECTS + its tab ladder + PLAY + SAVE here (§6); the launcher shows
+  the selected cart's name (its management verbs live in the picker, §4); Settings
+  fills it with its sections. The app owns the pixels and the taps inside the zone;
+  the OS owns the zone's existence and bounds.
 - **RIGHT zone = OS-owned system status**: wifi / clock / battery — each tappable as a
   shortcut into the matching Settings page — **plus a context X** that exits the
   current app (§9). Apps cannot draw here; the right zone is how the OS stays present
   and trustworthy no matter which app is active.
 - **The bar HIDES entirely while a fullscreen game plays.** The game owns all of
   320×240 and every input. The bar is authoring/system chrome; play is sacred.
+  (A running *tool/app* cart is the exception: it keeps a minimal bar — title +
+  status + the context X — so it is always exitable by tap, §9.)
 
 This is exactly the macOS menu-bar deal: one bar, always in the same place, whose left
 half belongs to whoever is frontmost and whose right half is the system's — except
@@ -146,7 +169,7 @@ ladder**, ordered easy → deep, so the leftmost thing a kid sees is always the
 gentlest:
 
 ```
-Config → Blocks → Code → Sprites → Map → Music        [ PLAY ]
+[ PROJECTS ]  Config → Blocks → Code → Sprites → Map → Music   [ PLAY ] [ SAVE ]
 ```
 
 - **Config** — the default landing tab (§4) and the intrigue rung: the "Make it mine"
@@ -157,13 +180,17 @@ Config → Blocks → Code → Sprites → Map → Music        [ PLAY ]
 - **Code** — the real Python source. The Blocks tab's output, and eventually the kid's
   own hands.
 - **Sprites / Map / Music** — the existing asset editors, unchanged in what they do;
-  they become tabs of the one Editor rather than global console modes. (In the
-  codebase these are the already-extracted layer modules — `code_layer` /
-  `paint_layer` / `map_editor_ui` / `music_editor_ui` — which become the Editor's
-  tabs; see §13.)
-- **PLAY** — literally `save(); run(current)` (§2). The cart plays fullscreen; exit
+  they are tabs of the one Editor rather than global console modes. (In the
+  codebase these are the extracted layer modules — `code_layer` / `paint_layer` /
+  `map_editor_ui` / `music_editor_ui` — owned as tabs by `runtime/editor_app.py`;
+  see §13.)
+- **PLAY** — literally `commit(); run(current)` (§2). The cart plays fullscreen; exit
   returns to the Editor **on the tab you were on**. Test-play is a round trip, not a
   context switch.
+- **PROJECTS** — back to the project-picker (§4): switch projects without going home.
+- **SAVE** — the one compact persist-now affordance the bar carries (it dispatches to
+  the active tab's commit verb), so every editor body stays chrome-free; edits also
+  autosave on the §7 idle debounce, so forgetting it costs nothing.
 
 The ladder is the icons → blocks → code progression (#29) made spatial: growth is
 "one tab to the right," and every rung is visible from every other rung.
@@ -174,21 +201,25 @@ The ladder is the icons → blocks → code progression (#29) made spatial: grow
 
 Two guarantees, stated as UX law:
 
-- **There is no Save.** No Save button, no "unsaved changes" state, no save prompt on
-  exit — edits persist continuously, always. A kid can pull the battery mid-edit and
-  lose nothing. (`commit` in the §10 contract is the app telling the OS "persist
-  this"; the kid never sees it.)
+- **Save is never required.** No "unsaved changes" state, no save prompt on exit —
+  edits persist continuously: a typing-idle autosave debounce plus hard commits on
+  tab-leave and PLAY. A kid can pull the battery mid-edit and lose (at most) the last
+  idle-debounce window. (`commit` in the §10 contract is the app telling the OS
+  "persist this"; the bar's compact SAVE icon (§6) is an optional "persist now" —
+  forgetting it costs nothing.)
 - **Undo is real, step-by-step, and survives reboots.** Every project carries an
   undo/redo journal persisted on SD **per project**: step-by-step undo AND redo, so a
   kid walks back a mistake one change at a time — including after power-off, including
   days later. "I broke my game yesterday" is recoverable by a nine-year-old, alone.
 
-The model to note (so the technical plan builds the right thing): an **append-only
-edit journal beside the project** — the Google-Docs model, where the document is
-always saved *and* always steppable. This paragraph is a UX guarantee, not a design;
-journal format, granularity, and compaction are the technical plan's job. The honest
-tradeoff is also its job: a durable journal costs SD writes and space, and the
-guarantee above is the bar those costs must clear, not an invitation to weaken it.
+As shipped: an **append-only edit journal beside the project** — the Google-Docs
+model, where the document is always saved *and* always steppable
+(`<cart>.moy/journal/`: an append-only `journal.jsonl` + full-file snapshots + an
+atomic cursor, torn-snapshot-safe; Ctrl+Z / Ctrl+Y walk it in the code editor).
+Durable steps are commit-granular — one journal entry per idle-debounce/tab-leave/
+PLAY commit, not per keystroke; finer undo stays in-RAM per editor. The format,
+cadence, and compaction details live in the archived technical plan
+(`docs/history/shell_ux_technical_plan_v1.md`, Stage 7).
 
 ---
 
@@ -229,9 +260,10 @@ fullscreen game → hold-BACKSPACE exits.**
 | App | Presentation | Exit affordance | BACKSPACE is… |
 |---|---|---|---|
 | Launcher (back-stack root) | taskbar | **no X** — it's home; nothing beneath it | a plain key |
-| Editor | taskbar | X → back to launcher | a plain key |
+| Editor | taskbar | X → pop back (picker → launcher) | a plain key |
 | Settings (incl. wifi setup) | taskbar | X → back | a plain key — **delete in the password field just works** |
-| Running game | fullscreen | **hold**-BACKSPACE → return to caller (§2) | a game key on a quick tap |
+| Running game | fullscreen | **hold**-BACKSPACE (~700ms) → return to caller (§2) | a game key on a quick tap |
+| Running tool/app cart | minimal bar (title + status + X) | X → return to caller | a plain key — delete in text fields |
 
 Why this kills the keyboard special cases: because taskbar apps exit via a **tap**,
 BACKSPACE is never reserved in them — it stays an ordinary key everywhere a taskbar
@@ -242,10 +274,20 @@ the interlock that made BACKSPACE precious was the bar being one global mode-mac
 zone the bar (§5) and the preciousness dissolves.
 
 For a fullscreen game, a quick BACKSPACE tap still reaches the game (carts may use it
-as a key); only a sustained HOLD exits, returning control to whoever called `run` —
-launcher or Editor. One niche edge, on the record: a game that wants *autorepeat*
-backspace-delete (hold to erase) collides with hold-to-exit. Accepted; it is rarer
-and cheaper than every alternative tried (see #71's history of what "clever" cost).
+as a key); only a sustained HOLD (~700ms, with a transient on-screen progress toast)
+exits, returning control to whoever called `run` — launcher or Editor. One niche edge,
+on the record: a game that wants *autorepeat* backspace-delete (hold to erase)
+collides with hold-to-exit. Accepted; it is rarer and cheaper than every alternative
+tried (see #71's history of what "clever" cost).
+
+The second edge is resolved by an additive cart verb: a **`textmode(True)` game**
+receives BACKSPACE as a typed delete (and the T-Deck keyboard has no autorepeat), so
+the console's hold gesture can never fire there — such a cart provides its **own**
+exit by calling **`quit()`** (the one post-freeze addition to `docs/moy_cart_api.md`),
+bound to a spare key or an on-screen affordance; Letter Blitz models it with a
+tap-anytime ✕. (The plan's firmware-independent triple-tap alias was dropped after
+on-device testing — tools/apps keep their bar X, so no cart is ever
+strandable-but-for-reboot.)
 
 ---
 
@@ -268,7 +310,7 @@ works with no carve-out. The wifi keyboard problem is not solved by Settings —
 
 The whole conversation between the OS and an app is about ten verbs — versus the
 93-distinct-member implicit `ws.*` surface it replaces (measured in
-`shell_os_architecture_v1.md` §1):
+`docs/history/shell_os_architecture_v1.md` §1):
 
 | Direction | Verb | Meaning |
 |---|---|---|
@@ -284,11 +326,14 @@ The whole conversation between the OS and an app is about ten verbs — versus t
 manager (§3), the Player invocation and its exit guarantee (§2), and the project
 store + per-project undo journal on SD (§7).
 
-**Privilege tiers stay as designed** (`shell_os_architecture_v1.md` §5.3): kid game
-carts talk only to the Player through the frozen `make_api` — not one name changes.
-System carts (the Editor, Settings) additionally receive `make_system_api`. The
-contract above is the *shape* of the boundary; the per-surface grant lists and their
-evidence live in the "how" docs.
+**Privilege tiers stay as designed** (`docs/history/shell_os_architecture_v1.md`
+§5.3): kid game carts talk only to the Player through the frozen `make_api` — the one
+addition is `quit()` (§9). System carts (the Editor, Settings) additionally receive
+`make_system_api` — the per-surface capability track is the part of the OS-arch doc
+that remains open (the shipped shell moved the tabs' *data* access onto `Project`;
+the draw toolkit still rides the `ws` seam). The contract above is the *shape* of the
+boundary; the per-surface grant lists and their evidence live in the archived "how"
+docs.
 
 ---
 
@@ -316,17 +361,23 @@ clean its boundaries are.
 
 ## 13. Relationship to the other docs, and tracking
 
-**The stack, top to bottom:** this doc (the locked "what") → the three "how" docs —
-`shell_layers_refactor_v1.md` (the Layer decomposition that made surfaces movable),
-`shell_os_architecture_v1.md` (the capability boundary + event bus that make them
-honest processes), `shell_architecture_v1.md` (privileged system carts §2 + the
-layered compositor §3) → the implementation plan (a separate successor doc, written
-next; it sequences the work, this doc does not).
+**The stack, top to bottom:** this doc (the "what") → the implemented "how" docs, now
+archived under `docs/history/` — `shell_ux_technical_plan_v1.md` (the staged migration
+that shipped the v0.5 shell), `shell_layers_refactor_v1.md` (the Layer decomposition
+that made surfaces movable), `shell_os_architecture_v1.md` (the capability boundary;
+its per-surface `make_system_api` track remains open) — plus
+`docs/shell_architecture_v1.md` (privileged system carts §2 + the layered compositor
+§3), which stays current.
 
-Concretely: the already-extracted layer modules (`runtime/code_layer.py`,
-`runtime/paint_layer.py`, `runtime/map_editor_ui.py`, `runtime/music_editor_ui.py`)
-become the Editor's tabs (§6). The launcher/settings/bar layers become the launcher
-app, the Settings cart, and the zoned OS bar respectively.
+Concretely, as shipped: the extracted layer modules (`runtime/code_layer.py`,
+`runtime/paint_layer.py`, `runtime/map_editor_ui.py`, `runtime/music_editor_ui.py`,
+`runtime/cards_layer.py`, `runtime/block_editor_ui.py`) ARE the Editor's tabs, owned
+by `runtime/editor_app.py` (§6); `runtime/player.py` is the Player (§2);
+`runtime/project.py` is the project workspace + commit verbs (§7, §11);
+`runtime/wm.py` (`FullscreenStackWM`) is the small-screen window manager (§3); the
+launcher/settings/bar layers are the launcher app, the Settings app, and the zoned OS
+bar. `Workstation` (`runtime/console.py`) is the kernel — see `CLAUDE.md` for the
+module map.
 
 **Issue map:**
 

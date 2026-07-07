@@ -54,13 +54,13 @@ def _draw():                 # every frame; render here
 ## The canvas
 
 - **320×240**, indexed. `W` = 320, `H` = 240 are globals (read them; don't assume).
-- **A running cart owns the FULL canvas** — the console's top bar auto-hides during
-  play and appears only in the pause menu and on the crash panel. **Pause =
-  BACKSPACE, the one console key in every input mode** (the ☰ button on the web
-  page does the same): it always just **toggles** the pause screen, nothing more —
-  pressing it again simply un-pauses. To quit, tap the pause screen's own **QUIT**
-  button (**CONTINUE** resumes the same way; A/RUN or any other tap also resumes).
-  No letter is reserved — every other key belongs to your cart.
+- **A running GAME owns the FULL canvas** — the console's top bar hides during play
+  (it reappears only on the crash panel). There is no pause screen and no reserved
+  letter: **every key belongs to your cart**. To exit, the player **holds BACKSPACE
+  (~700ms)** — a quick tap reaches your cart as a plain key; a sustained hold shows a
+  small progress toast and returns to whoever launched the cart (the launcher, or
+  the editor's PLAY). A `"tool"`/`"app"` cart runs WITH a minimal console bar
+  (title + status + ✕) instead, and exits via that ✕.
 - **Typing games: call `textmode(True)`** (e.g. in `_init`). In game mode the device
   keyboard only produces 9 letters (the button-mapped `a d w s z x r` plus plain
   `q e`); text mode delivers EVERY letter to `key()`/`keyp()`.

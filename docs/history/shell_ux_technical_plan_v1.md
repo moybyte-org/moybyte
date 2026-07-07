@@ -1,11 +1,13 @@
 # Moybyte shell UX — the technical implementation plan (v1)
 
+> **STATUS: IMPLEMENTED / ARCHIVED** — the v0.5 shell shipped (branch merged to master); kept for history. See `CLAUDE.md` for the shipped architecture.
+
 **North star above this doc:** `docs/shell_ux_v1.md` — the LOCKED top-of-stack UX spec.
 This doc is the "HOW": the staged, bisectable migration from today's code to that UX.
 Its §11 (the ~7-verb OS↔app contract) and §12 (perf guardrails) are binding on every
 stage below; where this plan and that spec could be read to disagree, the spec wins.
 
-**Status:** PLAN / STAGED — nothing here is implemented yet. Each stage is one (or a
+**Status:** IMPLEMENTED (see the banner above) — all stages landed. As planned, each stage was one (or a
 few) bisectable commits, each shippable and green on all three nets (the 777-test host
 suite, the golden-frame pixel harness, the pyflakes undefined-name gate). This doc
 contains NO product code; it names what moves, from where (file:line, measured on
@@ -22,8 +24,8 @@ Player-first cut, and the shim discipline are unchanged — both reviews rated t
 plan executable-with-changes and re-verified its file:line citations.
 
 **Companion docs (context, beneath the spec):**
-`docs/shell_os_architecture_v1.md` (the syscall/capability boundary + the measured
-93-member `ws.*` god-API this migration shrinks), `docs/shell_layers_refactor_v1.md`
+`docs/history/shell_os_architecture_v1.md` (the syscall/capability boundary + the measured
+93-member `ws.*` god-API this migration shrinks), `docs/history/shell_layers_refactor_v1.md`
 (the just-completed Layer decomposition this plan builds on — its surfaces are the
 Editor's tabs), `docs/shell_architecture_v1.md` (privileged system carts + layered
 compositor). The kid-facing cart contract (`docs/moy_cart_api.md`, realized as

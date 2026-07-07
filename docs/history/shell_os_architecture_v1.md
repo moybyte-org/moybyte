@@ -1,5 +1,7 @@
 # Moybyte shell OS architecture — a syscall boundary for the shell's own surfaces
 
+> **STATUS: IMPLEMENTED / ARCHIVED** — the v0.5 shell shipped (branch merged to master); kept for history. See `CLAUDE.md` for the shipped architecture. (The per-surface `make_system_api` capability track sketched here remains an open direction; the tabs' data reach-through was removed via `runtime/project.py`.)
+
 **North star above this doc:** `docs/shell_ux_v1.md` — the LOCKED top-of-stack UX spec (the "what the user experiences"); this doc is one layer of the "how" beneath it.
 
 **Issues:** #55 (system-as-carts, Picotron-style "everything is a process"), #73 (layered
@@ -14,7 +16,7 @@ later steps escalate from "cheap and worth doing soon" to "aspirational endgame"
 labeled as such.
 **Companion docs:** `docs/shell_architecture_v1.md` (§2 privileged system carts — this
 doc supplies the *boundary mechanism* §2 needs; §3 layered compositor — this doc's
-endgame), `docs/shell_layers_refactor_v1.md` (the just-completed refactor this doc is
+endgame), `docs/history/shell_layers_refactor_v1.md` (the just-completed refactor this doc is
 the successor to), `docs/moy_cart_api.md` (the kid-facing cart contract, which is
 **frozen** and unaffected by everything below).
 **One-line thesis:** the layers refactor made the shell's coupling *legible* but did not
@@ -28,7 +30,7 @@ surfaces the same treatment.
 
 ## 1. The problem — legible coupling is still coupling
 
-The layers refactor (`docs/shell_layers_refactor_v1.md`) did what it promised: every
+The layers refactor (`docs/history/shell_layers_refactor_v1.md`) did what it promised: every
 surface now owns its draw + input + state + constants in one class in one file
 (`runtime/bar_layer.py`, `settings_layer.py`, `cards_layer.py`, `code_layer.py`,
 `paint_layer.py`, `launcher_layer.py`, plus the earlier-extracted `*_ui.py` surfaces),
@@ -361,7 +363,7 @@ Locked-in means honest about the bill:
 
 ## 7. Relationship to the other docs, and tracking
 
-- **`docs/shell_layers_refactor_v1.md` (predecessor).** That refactor built the Layer
+- **`docs/history/shell_layers_refactor_v1.md` (predecessor).** That refactor built the Layer
   boundary and (its own words) left the `ws` back-ref as "the exact seam the extracted
   UIs already use." The adversarial review of it found the seam is a ~100-member god-API
   — this doc is the successor that turns that #1 finding into a plan. The refactor's
