@@ -164,6 +164,10 @@ fi
 #   editor_app.py -- the EDITOR app (Stage 3: EditorApp -- the tab ladder + tab state
 #                    + builders + PLAY, extracted from console.py); console.py does
 #                    `from editor_app import EditorApp`
+#   wm.py         -- the window manager (Stage 6: FullscreenStackWM -- the game<->system
+#                    viewport composite + the back-stack screen projects onto + the
+#                    memoized layer stack, extracted from console.py); console.py does
+#                    `from wm import FullscreenStackWM`
 #   console.py    -- launcher + desktop + cards/code/paint UI + Pointer
 #   moy_carts.py  -- the .moy store (scan/load/save/create/duplicate/delete)
 #   blocks.py     -- block model + blocks->Python compiler (#29; moy_carts imports it)
@@ -193,6 +197,7 @@ cp "${REPO_ROOT}/runtime/launcher_layer.py" "${SCRIPT_DIR}/modules/launcher_laye
 cp "${REPO_ROOT}/runtime/project.py" "${SCRIPT_DIR}/modules/project.py"
 cp "${REPO_ROOT}/runtime/player.py" "${SCRIPT_DIR}/modules/player.py"
 cp "${REPO_ROOT}/runtime/editor_app.py" "${SCRIPT_DIR}/modules/editor_app.py"
+cp "${REPO_ROOT}/runtime/wm.py" "${SCRIPT_DIR}/modules/wm.py"
 cp "${REPO_ROOT}/runtime/console.py" "${SCRIPT_DIR}/modules/console.py"
 cp "${REPO_ROOT}/runtime/moy_carts.py" "${SCRIPT_DIR}/modules/moy_carts.py"
 cp "${REPO_ROOT}/runtime/blocks.py" "${SCRIPT_DIR}/modules/blocks.py"

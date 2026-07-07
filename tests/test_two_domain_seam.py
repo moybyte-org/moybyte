@@ -138,8 +138,9 @@ def test_running_cart_is_a_centered_integer_viewport(tmp_path):
     assert scale == 2
     assert ox == (960 - 320 * 2) // 2 and oy == (600 - 240 * 2) // 2
     # The bezel corner (outside the viewport) is the solid bezel color.
-    from runtime import console as C
-    assert ws.sys_canvas.buf[0] == C._VIEWPORT_BEZEL
+    # (_VIEWPORT_BEZEL moved to wm.py with the viewport composite -- Stage 6.)
+    from runtime import wm as WM
+    assert ws.sys_canvas.buf[0] == WM._VIEWPORT_BEZEL
     # A pixel inside the viewport differs from the bezel for a drawing cart.
     cx = (oy + 1) * 960 + (ox + 1)
     # (Not asserting a specific color -- just that the viewport area was written.)

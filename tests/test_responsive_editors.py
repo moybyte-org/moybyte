@@ -298,7 +298,7 @@ def test_paint_and_map_still_use_the_game_viewport(tmp_path):
     a running paint/map frame composites (the game buffer differs from a flat fill)
     while the system canvas shows the centered viewport with a letterbox bezel."""
     from runtime import host_app
-    from runtime import console as C
+    from runtime import wm as WM     # _VIEWPORT_BEZEL moved to wm.py (Stage 6)
     ws = _ws(tmp_path, sys_size=(960, 600))
     drv = host_app.ConsoleDriver(ws)
     ws._open_paint()
@@ -306,6 +306,6 @@ def test_paint_and_map_still_use_the_game_viewport(tmp_path):
     ox, oy, scale = ws._viewport()
     assert scale == 2                                  # the fixed-aspect 320x240 viewport
     # The bezel corner (outside the viewport) is the solid bezel color (letterboxed).
-    assert ws.sys_canvas.buf[0] == C._VIEWPORT_BEZEL
+    assert ws.sys_canvas.buf[0] == WM._VIEWPORT_BEZEL
     # The paint editor drew on the GAME canvas (not the system canvas directly).
     assert len(set(ws.canvas.buf)) > 4

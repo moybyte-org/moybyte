@@ -52,6 +52,7 @@ from . import launcher_layer as _launcher_layer
 from . import project as _project
 from . import player as _player
 from . import editor_app as _editor_app
+from . import wm as _wm
 from . import layers as _layers
 sys.modules.setdefault("layers", _layers)
 sys.modules.setdefault("bar_layer", _bar_layer)
@@ -65,6 +66,7 @@ sys.modules.setdefault("launcher_layer", _launcher_layer)
 sys.modules.setdefault("project", _project)   # console.py does `from project import Project`
 sys.modules.setdefault("player", _player)     # console.py does `from player import Player`
 sys.modules.setdefault("editor_app", _editor_app)  # console.py does `from editor_app import EditorApp`
+sys.modules.setdefault("wm", _wm)             # console.py does `from wm import FullscreenStackWM`
 
 from . import console  # noqa: E402  (after the editors/audio aliases above)
 from . import moy_carts  # noqa: E402  (shared .moy store; host-clean)
