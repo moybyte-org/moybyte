@@ -129,6 +129,62 @@ def test_journal_torn_tail_line_is_dropped(tmp_path):
     assert _live(path) == "one\n"
 
 
+# -- (b2) F1: a torn/truncated snapshot is REFUSED, never copied over good work ------
+
+def test_journal_undo_refuses_torn_snapshot(tmp_path):
+    # A device power loss can leave a snapshot 0-byte / truncated (non-atomic writes,
+    # no fsync). undo must validate it against the recorded `len` and REFUSE rather than
+    # overwrite the live file with garbage -- "one bad snapshot loses one step, never the
+    # whole history."
+    mc, path = _cart(tmp_path)
+    mc.journal_append(path, "main.py", "good-one\n"); (Path(path) / "main.py").write_text("good-one\n")
+    mc.journal_append(path, "main.py", "good-two\n"); (Path(path) / "main.py").write_text("good-two\n")
+
+    # Corrupt the snapshot undo WOULD restore (seq 1 = good-one): truncate it to garbage.
+    _jdir, log_path, _cur, snap_dir = mc._journal_paths(path)
+    seq1 = mc._journal_load_entries(log_path)[0]
+    (Path(snap_dir) / Path(seq1["snap"]).name).write_text("go")   # len 2 != recorded 9
+
+    assert mc.journal_undo(path) is None                # refused -- snapshot damaged
+    assert _live(path) == "good-two\n"                  # the good live file is UNTOUCHED
+
+
+def test_journal_undo_refuses_empty_snapshot(tmp_path):
+    mc, path = _cart(tmp_path)
+    mc.journal_append(path, "main.py", "keep-me\n"); (Path(path) / "main.py").write_text("keep-me\n")
+    mc.journal_append(path, "main.py", "current\n"); (Path(path) / "main.py").write_text("current\n")
+    _jdir, log_path, _cur, snap_dir = mc._journal_paths(path)
+    seq1 = mc._journal_load_entries(log_path)[0]
+    (Path(snap_dir) / Path(seq1["snap"]).name).write_text("")     # 0-byte snapshot
+
+    assert mc.journal_undo(path) is None
+    assert _live(path) == "current\n"                   # not blanked out
+
+
+def test_journal_redo_refuses_torn_snapshot(tmp_path):
+    mc, path = _cart(tmp_path)
+    mc.journal_append(path, "main.py", "r1\n"); (Path(path) / "main.py").write_text("r1\n")
+    mc.journal_append(path, "main.py", "r2\n"); (Path(path) / "main.py").write_text("r2\n")
+    assert mc.journal_undo(path) == "main.py" and _live(path) == "r1\n"
+
+    # Corrupt the redo target (seq 2 = r2) and confirm redo won't overwrite r1 with junk.
+    _jdir, log_path, _cur, snap_dir = mc._journal_paths(path)
+    seq2 = mc._journal_load_entries(log_path)[1]
+    (Path(snap_dir) / Path(seq2["snap"]).name).write_text("XYZLONGER")   # len != recorded
+    assert mc.journal_redo(path) is None
+    assert _live(path) == "r1\n"                          # untouched
+
+
+def test_journal_undo_restores_a_legit_empty_snapshot(tmp_path):
+    # An entry that snapshotted a genuinely EMPTY file (len == 0) still restores -- the
+    # length check must not reject a valid empty state.
+    mc, path = _cart(tmp_path)
+    mc.journal_append(path, "notes.txt", ""); (Path(path) / "notes.txt").write_text("")
+    mc.journal_append(path, "notes.txt", "hello\n"); (Path(path) / "notes.txt").write_text("hello\n")
+    assert mc.journal_undo(path) == "notes.txt"
+    assert _live(path, "notes.txt") == ""                # restored the empty state cleanly
+
+
 # -- (c) the cap / compaction: oldest entries + their snapshots are dropped ---------
 
 def test_journal_compaction_drops_oldest(tmp_path, monkeypatch):
