@@ -306,12 +306,39 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         if _gate is not None and callable(_gate):
             _spr_entry = _gate
 
+    # Declared background (#63 fast-by-default -- the "software PPU layer 0", mirrors
+    # host_app.make_api): the cart names its backdrop ONCE (a color or a painted
+    # Image); the engine restores it at the START of every frame via the Player's
+    # ns["_moy_restore_bg"] hook. An Image bakes into a hidden full-screen layer once;
+    # the per-frame restore is one draw_layer window copy -- the full-screen shape the
+    # async GDMA restore predicts, so on-device the backdrop costs ~0 visible ms.
+    _bg = [None]
+
+    def background(x=None):
+        if x is None:
+            _bg[0] = None
+        elif isinstance(x, Image):
+            lay = make_layer(canvas.w, canvas.h)
+            lay.spr(x, 0, 0)               # bake once (paint images take blit_indices)
+            _bg[0] = ("l", lay)
+        else:
+            _bg[0] = ("c", color(x))
+
+    def _restore_bg():
+        b = _bg[0]
+        if b is not None:
+            if b[0] == "c":
+                canvas.cls(b[1])
+            else:
+                draw_layer(b[1], 0, 0)
+
     ns = {
         "W": canvas.w, "H": canvas.h,
         "cls": canvas.cls, "pix": canvas.pix,
         "line": canvas.line, "rect": canvas.rect, "rectb": canvas.rectb,
         "circ": canvas.circ, "circb": canvas.circb, "spr": _spr_entry,
         "spr_batch": spr_batch,
+        "background": background, "_moy_restore_bg": _restore_bg,
         "make_layer": make_layer, "draw_layer": draw_layer,
         "map": map_, "mget": mget, "mset": mset,
         "print": canvas.print, "touch": touch, "mouse": mouse,

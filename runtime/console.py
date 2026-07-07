@@ -2327,7 +2327,12 @@ class Workstation:
         # Draw the frozen cart frame as the backdrop under an editor panel (cards /
         # paint / map), then clear its camera/clip/pal/palt (#11) so the panel draws
         # unaffected. Shared by _draw_content_menu (cards/paint) and _MapLayer.
+        # A declared background (#63) restores first, exactly as the Player does --
+        # a background()-only cart may have no cls in _draw at all.
         try:
+            rb = self.player._restore_bg
+            if rb is not None:
+                rb()
             if self._draw:
                 self._draw()
         except Exception:
