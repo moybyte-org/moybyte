@@ -1111,7 +1111,13 @@ class Workstation:
         # Screen states (#28): "launcher" is now the DESKTOP home (wallpaper + cart
         # icon grid + dock); "desktop" is a running cart; "menu" is the cards/code/
         # paint/map editors; "settings" is the Settings app.
-        self.screen = "launcher"      # "launcher" | "desktop" | "menu" | "settings" | "update"
+        # (Stage 6b) `screen` is now a read-only PROJECTION of the WM back-stack top
+        # (self.wm.top_kind() -- see the property below), not a plain attribute: the
+        # back-stack (built with the WM above, root "launcher") is the state of record.
+        # Every `self.screen = X` / `ws.screen = X` still works -- the setter routes it
+        # into the stack via wm.goto (the same read-write shim ws.menu_view is over
+        # editor_app.tab). No initial assignment needed: the WM inits the stack to
+        # ["launcher"], so the projection already reads "launcher" here.
         self._splash_until = None     # boot logo deadline (_ticks_ms); None = no splash
         # The open cart's live WORKSPACE (Stage 1, project.py): the DATA of the cart
         # currently open -- cart/config/sheet/tilemap/images/pmem. Those six are
@@ -2033,6 +2039,25 @@ class Workstation:
     @menu_view.setter
     def menu_view(self, value):
         self.editor_app.tab = value
+
+    # -- screen projection over the WM back-stack (Stage 6b, wm.py) ------------
+    #
+    # `screen` is now a PROJECTION of the WM process back-stack top (self.wm.top_kind()),
+    # not a plain attribute -- the back-stack is the state of record (plan Section 6). The
+    # getter reads the stack top; the setter routes a `screen = X` write into the stack
+    # via wm.goto (a RETURN to an already-open screen pops back to it, a new screen is
+    # pushed), the same read-write projection shim ws.menu_view is over editor_app.tab.
+    # This keeps the single string-keyed router dispatching unchanged (_content_layer
+    # still keys on ws.screen/ws.menu_view) -- the stack is a data structure it READS, not
+    # a second dispatcher. Production readers migrate to wm queries over the next commits
+    # (Stage 6d); the projection stays as tested surface (many tests assert ws.screen).
+    @property
+    def screen(self):
+        return self.wm.top_kind()
+
+    @screen.setter
+    def screen(self, value):
+        self.wm.goto(value)
 
     # -- run / exit (Stage 2: the run/return stack discipline) ----------------
 
