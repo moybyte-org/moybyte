@@ -255,6 +255,7 @@ class BlockEditorUI:
         self.blk_menu = None          # active insert menu state dict, or None
         self.blk_status = None        # last block-editor SAVE result text
         self.blk_protect = False      # block editor opened on a hand-written-code cart
+        self.blk_graduated = False    # cart has GRADUATED (Stage 8): blocks read-only
         self.blk_kbd = None           # inline name-entry prompt state dict, or None
         self.block_layout = BlockLayout()
 
@@ -294,12 +295,22 @@ class BlockEditorUI:
         # blocks.json) -- or an empty/new-template cart with no real code -- is
         # unprotected and round-trips exactly as before.
         self.blk_protect = (prog is None and ws._cart_has_handwritten_code())
+        # GRADUATION (Stage 8, spec Section 8): a STORED, one-way project fact (read
+        # from the manifest via cart["graduated"]), NOT the re-derived blk_protect
+        # heuristic. A graduated cart's blocks.json is FROZEN -- it still opens (so the
+        # kid sees the last-good program), but renders read-only + celebrates, and
+        # SAVE/graduate refuse to overwrite the diverged main.py (see save_blocks).
+        self.blk_graduated = bool(ws.project.cart.get("graduated"))
         self.blocks_ed = BlockEditor(_blocks_mod, prog)
         self.blk_top = 0
         self.blk_slot = 0
         self.blk_menu = None
-        self.blk_status = ("CODE LOCKED -- can't blockify"
-                           if self.blk_protect else None)
+        if self.blk_graduated:
+            self.blk_status = None            # the celebration banner carries the message
+        elif self.blk_protect:
+            self.blk_status = "CODE LOCKED -- can't blockify"
+        else:
+            self.blk_status = None
 
     def reset(self):
         """Drop the active editor + any open menu/prompt (a stale one must never
@@ -309,6 +320,7 @@ class BlockEditorUI:
         self.blk_menu = None
         self.blk_kbd = None
         self.blk_protect = False
+        self.blk_graduated = False
 
     def on_leave(self):
         """Called from Workstation._leave_menu() when menu_view == "blocks"."""
@@ -765,6 +777,13 @@ class BlockEditorUI:
         be = self.blocks_ed
         if not (be and ws.project.cart):
             return False
+        if self.blk_graduated:
+            # GRADUATED (Stage 8, spec Section 8): the kid has leveled up to code; the
+            # blocks are a FROZEN, read-only render. Regenerating from them would
+            # discard the diverged main.py, so SAVE refuses (the one-way door). The
+            # only way back is undoing past the graduating commit (Stage 7 journal).
+            self.blk_status = "LEVELED UP TO CODE"
+            return False
         if self.blk_protect:
             # DATA-LOSS GUARD (#29): this cart's main.py is hand-written code that a
             # block save would replace. Refuse and tell the kid -- their code stays.
@@ -814,10 +833,11 @@ class BlockEditorUI:
         be = self.blocks_ed
         if not (be and ws.project.cart):
             return
-        if self.blk_protect:
-            # Protected cart: don't compile the (empty) blocks over the kid's real
-            # main.py. Just open the code editor on the EXISTING source -- "graduate"
-            # here simply means "go edit the code you already have".
+        if self.blk_protect or self.blk_graduated:
+            # Protected (hand-written main.py) OR already GRADUATED (Stage 8): don't
+            # recompile the blocks over the kid's real/diverged main.py. Just open the
+            # code editor on the EXISTING source -- "graduate" here means "go edit the
+            # code you already have" (for a graduated cart, that door is one-way).
             ws.editor = None
             self.blk_menu = None
             ws.set_menu_view("code")
@@ -1038,15 +1058,21 @@ class BlockEditorUI:
         # The old "BLOCKS <title>" row was dissolved into the unified bar (Stage-4
         # rollout). Just below the bar sits a thin hint/status strip: the kid-facing
         # hint for surprising blocks on the left, the SAVE-status / "CODE LOCKED"
-        # notice on the right (a dirty * rides the status).
-        if self.blk_status:
-            cv.print(self.blk_status[:14], lay.status_x, lay.hint_y, NAMES["yellow"], 1)
-        elif be is not None and be.dirty:
-            cv.print("*", lay.status_x, lay.hint_y, NAMES["yellow"], 1)
+        # notice on the right (a dirty * rides the status). A GRADUATED cart (Stage 8)
+        # replaces that whole strip with a celebration banner -- it's a read-only
+        # render now, so there's no edit hint/status to show, just the good news.
+        if self.blk_graduated:
+            self._draw_grad_banner()
+        else:
+            if self.blk_status:
+                cv.print(self.blk_status[:14], lay.status_x, lay.hint_y, NAMES["yellow"], 1)
+            elif be is not None and be.dirty:
+                cv.print("*", lay.status_x, lay.hint_y, NAMES["yellow"], 1)
         if be is None:
             return
         # A kid-facing hint for the surprising blocks (forever-is-bounded / wait).
-        hint = self._blk_hint()
+        # Suppressed on a graduated cart -- the banner owns that row.
+        hint = None if self.blk_graduated else self._blk_hint()
         if hint:
             # truncate to leave the right end for the status slot
             hmax = max(8, (lay.status_x - lay.x0) // lay.cell - 1)
@@ -1077,6 +1103,28 @@ class BlockEditorUI:
             self._draw_blk_menu()
         if self.blk_kbd is not None:
             self._draw_blk_kbd()
+
+    def _draw_grad_banner(self):
+        """The celebration banner for a GRADUATED cart (Stage 8, spec Section 8):
+        'YOU LEVELED UP TO CODE!' in place of the edit hint/status strip. Graduation
+        is a one-way door the Editor CELEBRATES rather than apologizes for; the
+        blocks below render read-only. Drawn ONLY when blk_graduated, so a
+        non-graduated blocks screen is pixel-identical (the golden star_catcher
+        blocks screen -- code-only, never graduated -- is untouched). Indexed API +
+        petme128 only (host == device), responsive via BlockLayout."""
+        NAMES = self._NAMES
+        cv = self.ws.sys_canvas
+        lay = self.block_layout
+        fs = lay.fs
+        x = lay.x0
+        y = lay.hint_y - 2 * fs
+        w = lay.outline_w
+        h = 11 * fs
+        cv.rect(x, y, w, h, NAMES["dark_purple"])
+        cv.rectb(x, y, w, h, NAMES["yellow"])
+        msg = "YOU LEVELED UP TO CODE!"
+        mmax = max(8, w // lay.cell - 1)
+        cv.print(msg[:mmax], x + 2 * fs, lay.hint_y, NAMES["yellow"], 1)
 
     def _draw_blk_kbd(self):
         """Render whichever entry prompt is up: the number pad (kind == 'num') or the

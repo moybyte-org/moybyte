@@ -281,3 +281,57 @@ def test_undo_past_graduation_restores_source_and_flag(tmp_path):
     assert "score = 999" in (Path(path) / "main.py").read_text()
     assert ws.cart["graduated"] is True
     assert moy_carts.load(path)["graduated"] is True
+
+
+# ----------------------------------------------------------------------------
+# Layer 4: the Blocks tab renders a graduated cart read-only + celebrates.
+# ----------------------------------------------------------------------------
+
+def _graduate(ws):
+    diverged = ws.cart["src"].replace("score = 7", "score = 999")
+    assert _commit_code(ws, diverged) is True
+    assert ws.cart["graduated"] is True
+    return diverged
+
+
+def test_graduated_blocks_tab_is_read_only_and_celebrates(tmp_path):
+    """§8 on graduation: the Blocks tab still opens on the FROZEN program (the read-
+    only render source), refuses SAVE (won't overwrite the diverged main.py), and
+    renders the celebration banner without error."""
+    ws, _ = _block_cart(tmp_path)
+    _graduate(ws)
+    ws._open_blocks()
+    assert ws.menu_view == "blocks"
+    assert ws.block_ui.blk_graduated is True
+    assert ws.block_ui.blocks_ed is not None            # frozen program still renders
+    # SAVE refuses -- the one-way door
+    assert ws.block_ui.save_blocks() is False
+    assert ws.block_ui.blk_status == "LEVELED UP TO CODE"
+    # the diverged main.py is untouched by the refused save
+    assert "score = 999" in (Path(ws.cart["path"]) / "main.py").read_text()
+    # renders cleanly (the celebration banner draws)
+    for _ in range(2):
+        ws.frame(1 / 30)
+    assert ws.cart_error is None
+
+
+def test_graduated_graduate_button_opens_diverged_code(tmp_path):
+    """§8 the CODE rung on a graduated cart opens the kid's DIVERGED source (never
+    recompiles the frozen blocks over it)."""
+    ws, _ = _block_cart(tmp_path)
+    _graduate(ws)
+    ws._open_blocks()
+    assert ws.block_ui.blk_graduated is True
+    ws.block_ui.graduate_to_code()
+    assert ws.menu_view == "code" and ws.editor is not None
+    assert "score = 999" in ws.editor.text()            # the kid's code, not a re-gen
+
+
+def test_non_graduated_block_cart_stays_editable(tmp_path):
+    """Regression: a block cart that has NOT graduated is neither protected nor
+    graduated -- blocks stay fully editable + saveable (the round trip is intact)."""
+    ws, _ = _block_cart(tmp_path)
+    ws._open_blocks()
+    assert ws.block_ui.blk_graduated is False
+    assert ws.block_ui.blk_protect is False
+    assert ws.block_ui.save_blocks() is True
