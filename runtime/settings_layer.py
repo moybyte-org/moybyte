@@ -66,6 +66,10 @@ class SettingsLayer:
         # flushes keep working, so OFF still yields a diag.log. Owners flip it ON
         # for a measurement session.
         ("diag_live", "PERF DIAG", "diag"),
+        # The periodic diag->SD write is its own gate (owner call 2026-07-08):
+        # PERF DIAG ON + this OFF = serial-only measurement, no 20s sdflush
+        # stutter. ON restores the offline play-then-read-diag.log workflow.
+        ("diag_sd", "DIAG SD LOG", "diag"),
     )
     _MOCK_NAMES = ("ALEX", "SAM", "KIT", "RAE")
 
@@ -135,6 +139,9 @@ class SettingsLayer:
             return
         if key == "diag_live":                  # perf diagnostics ON <-> OFF (#68)
             ws.set_diag_live(not ws.diag_live)
+            return
+        if key == "diag_sd":                    # periodic diag->SD write ON <-> OFF
+            ws.set_diag_sd(not ws.diag_sd)
             return
         if key == "ota_channel":                # OTA update channel STABLE <-> BETA
             ws._cycle_channel(d)
@@ -210,8 +217,11 @@ class SettingsLayer:
                 self._activate_settings_action(row[0])
             elif row[2] == "web":               # A/run also toggles the web view (#41)
                 ws._toggle_web_view()
-            elif row[2] == "diag":              # ... and the PERF DIAG gate (#68)
-                ws.set_diag_live(not ws.diag_live)
+            elif row[2] == "diag":              # ... and the diag gates (#68)
+                if row[0] == "diag_sd":
+                    ws.set_diag_sd(not ws.diag_sd)
+                else:
+                    ws.set_diag_live(not ws.diag_live)
         if i.pressed("b"):
             ws._exit_settings()          # back -> resume the cart if opened from one
         elif i.pressed("home") or i.pressed("stop"):
@@ -264,8 +274,11 @@ class SettingsLayer:
                 if rows[i][2] == "web":            # web view: any tap flips ON/OFF (#41)
                     ws._toggle_web_view()
                     return True
-                if rows[i][2] == "diag":           # PERF DIAG: any tap flips it (#68)
-                    ws.set_diag_live(not ws.diag_live)
+                if rows[i][2] == "diag":           # diag gates: any tap flips (#68)
+                    if rows[i][0] == "diag_sd":
+                        ws.set_diag_sd(not ws.diag_sd)
+                    else:
+                        ws.set_diag_live(not ws.diag_live)
                     return True
                 # left third = "<" (decrement), right third = ">" (increment).
                 if px >= x + w - edge:
@@ -380,8 +393,8 @@ class SettingsLayer:
             if on and url:
                 # The URL to open in a phone/desktop browser, under the row label.
                 cv.print(url[:34], x + 4, y + 6 + fw, NAMES["blue"], 1)
-        elif kind == "diag":               # #68 perf-diagnostics gate: ON/OFF
-            on = bool(ws.diag_live)
+        elif kind == "diag":               # #68 diag gates: ON/OFF (key-driven)
+            on = bool(getattr(ws, key, False))
             cv.print("ON" if on else "OFF", vx, y + 5,
                      NAMES["orange"] if on else NAMES["dark_grey"], 1)
         # Mark not-yet-functional rows clearly (wallpaper + font + channel + web +

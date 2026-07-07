@@ -268,6 +268,8 @@ def seed_builtins(seed_list, root=CARTS_DIR):
             "runtime": "python", "main": "main.py", "edit": cart.get("edit", []),
             "version": seed_ver,
         }
+        if cart.get("fps"):               # frame pacing (#63): "fps": 60 opt-out
+            manifest["fps"] = cart["fps"]
         if cart.get("canvas") is not None:
             manifest["canvas"] = cart["canvas"]
         if cart.get("permissions") is not None:
@@ -357,6 +359,9 @@ def load(path):
             # not graduated). Un-set only through the undo journal (the grad rider).
             "graduated": bool(man.get("graduated", False)),
             "src": src,
+            # Frame pacing (#63): a GAME cart locks to 30fps unless its manifest
+            # says "fps": 60 (only carts that SUSTAIN 60 should -- frame_cap_fps).
+            "fps": man.get("fps", 0),
             "cfg": cfg,
             "edit": man.get("edit", []),
             # Manifest capability permissions (#38): a cart only gets a gated API

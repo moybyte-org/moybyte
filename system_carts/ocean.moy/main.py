@@ -11,6 +11,7 @@ t = 0.0
 
 
 def _init():
+    background(col(cfg("water", "blue")))  # re-declared when a config card re-runs _init
     global bubbles, fish_x
     n = int(cfg("bubble_count", 60))
     spd = cfg("rise_speed", 25)
@@ -34,7 +35,6 @@ def _update(dt):
 
 
 def _draw():
-    cls(col(cfg("water", "blue")))
     for b in bubbles:
         circb(int(b[0]), int(b[1]), b[2], col("white"))   # bubble outlines
     rect(0, H - 18, W, 18, col("brown"))          # seabed

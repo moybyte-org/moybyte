@@ -92,6 +92,33 @@ except Exception:
     _SRAM_BOUNCE_FLUSH = False
 LAYER_COPY_ASYNC = _SRAM_BOUNCE_FLUSH
 
+# #75: immutable templates the per-frame reset_state restores the pal tables from
+# IN PLACE (no per-frame bytearray allocation; 0 == identity map / all-opaque).
+_PAL_IDENTITY = bytes(range(64))
+_PALT_OPAQUE = bytes(64)
+
+# Layer-buffer pool (#63 GC-wall follow-up): moy_alloc has NO free(), so a layer
+# buffer handed back by a dead cart is returned HERE (keyed by byte size) and the
+# next new_layer of the same dims reuses it -- without this, every cart re-run
+# leaked its world (~150-384KB) from the heap_caps PSRAM pool until the allocator
+# started failing (~20-30 opens) and silently degraded to gc-heap buffers (the
+# GC wall back again). Only moy_alloc-backed buffers are pooled (a gc-heap
+# fallback bytearray is the collector's job); nothing is ever dropped from the
+# pool -- the set of distinct layer sizes across carts is small and stable.
+_LAYER_POOL = {}
+
+
+# Fold 2 (#63) knob: the map() auto-cache trades the per-cell blit_map walk for a
+# blit565 composite of a cached raster. HARDWARE VERDICT (T-Deck, 2026-07-07 owner
+# flash): the composite LOSES -- Battle City map 4.3-5.7ms direct -> 13.4ms cached
+# steady state (the keyed blit reads every pixel of the 240x240 region; blit_map
+# skips empty cells and PSRAM magnifies that), 32-55ms on brick-destruction
+# re-rasters, fps 29-33 -> 24-25. Even the opaque row-memcpy lane only breaks even
+# (~5ms for 115KB PSRAM->PSRAM). So the cache ships DEFAULT OFF; the machinery +
+# counters stay for a future native keyed-blit kernel or the P4's 2D DMA (#58),
+# and the parity tests force it on to keep the logic pinned.
+MAP_AUTO_CACHE = False
+
 
 class Image:
     def __init__(self, width, height, pix, transparent=-1):
@@ -203,6 +230,48 @@ class DeviceCanvas:
         # tuples. token tags WHICH writer owns the pending run (a C gate's id, or
         # 0 for the Python spr_tile path) so interleaved writers force a clean
         # flush+begin instead of silently mixing sheets.
+        # Pal/palt state (#75): the tables are built by the first reset_state (below)
+        # and afterwards restored IN PLACE only when a pal()/palt() dirtied them, so
+        # the per-frame reset never allocates. Initialised BEFORE reset_state.
+        self._pal_dirty = True
+        self._pal_map = None
+        self._palt = None
+        # Content-keyed pal-state ids (#63 fast-by-default): _palgen is no longer a
+        # monotonic counter but the STABLE id of the current (pal map, palt) CONTENT --
+        # identity is always 0, and returning to a previously-seen remap returns its
+        # old id. Every cache keyed on _palgen (per-sprite RGB bakes, the sheet atlas,
+        # the Fold-2 identity gate) therefore survives a pal()/spr()/pal() tint
+        # sandwich: the kid idiom that used to re-bake every sprite every frame
+        # (#72's Letter Blitz disease) now re-bakes once per distinct tint.
+        self._pal_state_ids = None    # state key -> id (lazy; identity = 0)
+        self._pal_state_next = 1
+        self._rgb_bakes = 0           # per-pixel bake count (test/diag proof)
+        # Alloc-free state keys for the COMMON tints: a running count of entries that
+        # differ from identity (pal) / opaque (palt), and the single differing index
+        # while exactly one does (-1 none, -2 unknown/multi). A one-entry remap -- the
+        # kid tint sandwich -- then keys as a smallint (no bytes build per pal() call);
+        # only multi-entry states pay the 128-byte content key.
+        self._pal_delta = 0
+        self._palt_delta = 0
+        self._pal_single = -1
+        self._palt_single = -1
+        # Auto-cache for map() (Fold 2, #63): the rasterized tilemap region is cached in a
+        # hidden 565 layer so a camera-only change keyed-blits it (one blit565) instead of a
+        # full re-raster (blit_map over every cell) -- the make_layer/draw_layer win, made
+        # automatic for a naive camera()+map() cart. _mapcache is (key, layer, lw, lh); kept
+        # ACROSS frames (NOT cleared in reset_state, or it could never hit) and rebuilt when
+        # the key -- (tilemap.gen, sheet.gen, region, colorkey, scale) -- changes. Counters
+        # prove it: a re-raster bumps _map_raster_count, a re-use bumps _map_hits
+        # (map_cache_reset). Set BEFORE reset_state so it's live before the first draw.
+        self._mapcache = None
+        self._map_raster_count = 0
+        self._map_hits = 0
+        self._lent_layers = None      # owner -> [(buf, nbytes)] pooled loans (#63 leak fix)
+        # A hidden layer (new_layer) sets this True: a layer is a draw-ONCE scratch buffer
+        # (the escape hatch's make_layer, or this cache's own hidden layer), so its own map()
+        # rasters DIRECTLY -- never a nested cache (which would double the layer's PSRAM and
+        # add a redundant composite). The main canvas keeps it False and caches.
+        self._nocache = False
         # Initialised BEFORE reset_state so its flush no-ops.
         self._batch_sheet = None
         self._batch_arr = array("h", bytearray(2 * (4 + 4 * 512)))
@@ -293,9 +362,25 @@ class DeviceCanvas:
         self._clip_y0 = 0
         self._clip_x1 = self.w
         self._clip_y1 = self.h
-        self._pal_map = bytearray(range(64))
-        self._palt = bytearray(64)          # 0 opaque, 1 transparent (default opaque)
-        self._palgen = 0
+        # #75: this runs EVERY cart frame (ws._reset_canvas_state), and rebuilding the
+        # two 64-byte tables was two heap allocations per frame. The tables are created
+        # once (first call: the attributes don't exist yet) and afterwards restored
+        # IN PLACE, and only when a pal()/palt() actually touched them (_pal_dirty) --
+        # a cart that never remaps pays two int compares. _palgen returns to 0 exactly
+        # as before (0 == identity map: the cached sprite RGB fast path keys on it).
+        if self._pal_dirty:
+            self._pal_dirty = False
+            if self._pal_map is None:
+                self._pal_map = bytearray(_PAL_IDENTITY)
+                self._palt = bytearray(64)  # 0 opaque, 1 transparent (default opaque)
+            else:
+                self._pal_map[:] = _PAL_IDENTITY
+                self._palt[:] = _PALT_OPAQUE
+            self._palgen = 0
+            self._pal_delta = 0           # #63: back to identity content (state id 0)
+            self._palt_delta = 0
+            self._pal_single = -1
+            self._palt_single = -1
 
     def camera(self, x=0, y=0):
         self.flush_batch()             # queued sprites belong to the OLD camera (#63)
@@ -318,23 +403,91 @@ class DeviceCanvas:
         self._clip_x1 = min(self.w, x + w)
         self._clip_y1 = min(self.h, y + h)
 
+    def _pal_state_id(self):
+        # The stable id of the CURRENT (pal map, palt) content: identity is 0, any
+        # other state gets a small int the first time it is seen and the SAME int
+        # every time after -- so pal-keyed caches hit when a cart returns to a tint
+        # it used before (the pal()/spr()/pal() sandwich). Computed only on a
+        # pal()/palt() CALL (never per draw); the common single-entry remap keys as
+        # a SMALLINT (alloc-free -- the tint sandwich runs dozens of pal calls per
+        # frame and must not feed the GC), only multi-entry states build the 128-byte
+        # content key. A runaway animated palette (>64 distinct states) drops the
+        # learned table and re-learns; ids keep rising so a stale bake can never
+        # alias a new state. (An int-keyed and a bytes-keyed id for the same content
+        # can coexist after a multi->single transition -- that costs one redundant
+        # bake, never a wrong pixel.)
+        pd = self._pal_delta
+        td = self._palt_delta
+        if pd == 0 and td == 0:
+            return 0
+        if td == 0 and pd == 1 and self._pal_single >= 0:
+            c = self._pal_single
+            key = 0x10000 + (c << 6) + self._pal_map[c]
+        elif pd == 0 and td == 1 and self._palt_single >= 0:
+            key = 0x20000 + self._palt_single
+        else:
+            key = bytes(self._pal_map) + bytes(self._palt)
+        ids = self._pal_state_ids
+        if ids is None:
+            ids = self._pal_state_ids = {}
+        i = ids.get(key)
+        if i is None:
+            if len(ids) > 64:
+                ids.clear()
+            i = self._pal_state_next
+            self._pal_state_next += 1
+            ids[key] = i
+        return i
+
     def pal(self, c0=None, c1=None):
         self.flush_batch()             # queued sprites belong to the OLD pal map (#63)
+        pm = self._pal_map
         if c0 is None:
-            for i in range(64):
-                self._pal_map[i] = i
+            if self._pal_delta:
+                pm[:] = _PAL_IDENTITY
+                self._pal_delta = 0
+            self._pal_single = -1
         else:
-            self._pal_map[int(c0) & 63] = int(c1) & 63
-        self._palgen += 1                   # invalidate cached sprite RGB (pal baked in)
+            c = int(c0) & 63
+            v = int(c1) & 63
+            old = pm[c]
+            if old != v:
+                pm[c] = v
+                was = old != c
+                now = v != c
+                if was != now:                # identity-membership flipped at c
+                    if now:
+                        self._pal_delta += 1
+                        self._pal_single = c if self._pal_delta == 1 else -2
+                    else:
+                        self._pal_delta -= 1
+                        self._pal_single = -2 if self._pal_delta else -1
+                # was == now (True): value changed at an already-remapped index --
+                # delta/single unchanged, the id below keys on the new value.
+        self._palgen = self._pal_state_id()   # content id: re-seen tints reuse bakes
+        self._pal_dirty = True              # #75: the next reset_state must restore
 
     def palt(self, c=None, on=None):
         self.flush_batch()             # queued sprites belong to the OLD palt (#63)
+        pt = self._palt
         if c is None:
-            for i in range(64):
-                self._palt[i] = 0
+            if self._palt_delta:
+                pt[:] = _PALT_OPAQUE
+                self._palt_delta = 0
+            self._palt_single = -1
         else:
-            self._palt[int(c) & 63] = 1 if on else 0
-        self._palgen += 1                   # invalidate cached sprite RGB (palt baked in)
+            i = int(c) & 63
+            v = 1 if on else 0
+            if pt[i] != v:
+                pt[i] = v
+                if v:
+                    self._palt_delta += 1
+                    self._palt_single = i if self._palt_delta == 1 else -2
+                else:
+                    self._palt_delta -= 1
+                    self._palt_single = -2 if self._palt_delta else -1
+        self._palgen = self._pal_state_id()   # content id: re-seen tints reuse bakes
+        self._pal_dirty = True              # #75: the next reset_state must restore
 
     def _col(self, c):
         # Resolve a draw index to RGB565 through the pal remap, so cls/pix/line/rect/
@@ -511,14 +664,35 @@ class DeviceCanvas:
         # Blit a cached, pre-scaled+flipped+pal-applied RGB565 copy in one C call. The
         # cache lives on the Image (sheet tiles are reused across frames via the
         # make_api tile cache, so the rebuild is once-per-(sprite,scale,flip,pal)).
+        # #63 fast-by-default: the last-used bake is the hot single slot; on a miss the
+        # per-Image VARIANT dict ((scale, flip, pal-state-id) -> bake) is consulted
+        # before re-baking, so a sprite drawn at alternating tints/scales each frame
+        # (the pal()/spr()/pal() kid idiom, glyphs at 2 sizes, ...) bakes each variant
+        # ONCE and swaps, instead of the per-frame per-pixel rebake #72 diagnosed.
         if (getattr(img, "_rgb", None) is None
                 or getattr(img, "_rgb_scale", 0) != scale
                 or getattr(img, "_rgb_flip", -1) != flip
                 or getattr(img, "_rgb_palgen", -1) != self._palgen):
-            self._cache_rgb(img, scale, flip)
+            if not self._rgb_variant(img, scale, flip):
+                self._cache_rgb(img, scale, flip)
         self._gfx.blit565(self._buf, self.w, self.h, x, y,
                           img._rgb, img._rgb_w, img._rgb_h, _RGB_KEY,
                           self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+
+    def _rgb_variant(self, img, scale, flip):
+        # Promote a previously-baked (scale, flip, pal-state) variant into the hot
+        # single slot (reference swaps, no pixel work). False -> the caller re-bakes.
+        var = getattr(img, "_rgb_variants", None)
+        if var is None:
+            return False
+        v = var.get((scale, flip, self._palgen))
+        if v is None:
+            return False
+        img._rgb, img._rgb_w, img._rgb_h = v
+        img._rgb_scale = scale
+        img._rgb_flip = flip
+        img._rgb_palgen = self._palgen
+        return True
 
     def _cache_rgb(self, img, scale, flip=0):
         # Bake the indexed sprite into an RGB565 buffer at `scale`, mirrored per
@@ -559,6 +733,17 @@ class DeviceCanvas:
         img._rgb_scale = scale
         img._rgb_flip = flip
         img._rgb_palgen = self._palgen
+        # #63 fast-by-default: remember this bake in the per-Image variant dict so a
+        # later return to this (scale, flip, tint) swaps references instead of
+        # re-baking. Capped small: sprites are tiny (a variant is w*h*scale^2*2B) but
+        # a pathological cart could churn states -- past 6 variants, drop and re-learn.
+        var = getattr(img, "_rgb_variants", None)
+        if var is None:
+            var = img._rgb_variants = {}
+        elif len(var) >= 6:
+            var.clear()
+        var[(scale, flip, self._palgen)] = (buf, w, h)
+        self._rgb_bakes += 1
 
     def _bake_indices(self, img):
         # Bake a paint image's MOY64 indices -> an opaque RGB565 buffer ONCE via the
@@ -602,38 +787,119 @@ class DeviceCanvas:
                 if x1 > x0 and y1 > y0:
                     self._fb.fill_rect(x0, y0, x1 - x0, y1 - y0, col)
 
+    def _blit_map_into(self, dst, dw, dh, dsx, dsy, tilemap, sheet, mx, my, w, h,
+                       colorkey, tile, scale, cx0, cy0, cx1, cy1):
+        # One native moy_gfx.blit_map into `dst` -- the framebuffer (a direct draw) or a
+        # hidden cache layer (Fold 2 fill). Bakes/reuses the sheet's RGB565 tile atlas
+        # (cached on the sheet, keyed on gen/colorkey/palgen) then walks the w x h region.
+        atlas, ntiles = self._sheet_atlas(sheet, colorkey)
+        self._gfx.blit_map(dst, dw, dh, dsx, dsy,
+                           tilemap.cells, tilemap.w, tilemap.h,
+                           mx, my, w, h,
+                           atlas, ntiles, tile, scale, _RGB_KEY,
+                           cx0, cy0, cx1, cy1)
+
     def map(self, tilemap, sheet, mx=0, my=0, w=None, h=None,
             sx=0, sy=0, colorkey=-1, scale=1):
-        # TIC-80 map(): blit a w x h cell region of the tilemap over `sheet` to
-        # screen (sx, sy) in ONE native moy_gfx.blit_map call (issue #32). The sheet
-        # is baked once into an RGB565 tile atlas (cached on the sheet, rebuilt only
-        # on a paint edit via sheet.gen, a different colorkey, or a pal/palt change),
-        # so per-frame cost is just the C walk. camera offsets (sx,sy); the clip rect
-        # is passed to the kernel (#11).
+        # TIC-80 map(): blit a w x h cell region of the tilemap over `sheet` to screen
+        # (sx, sy). Fold 2 (#63): the rasterized region is CACHED in a hidden 565 layer so a
+        # subsequent camera-only call keyed-blits it (one blit565) instead of re-walking every
+        # cell (blit_map) -- the make_layer win, made automatic for a naive camera()+map()
+        # cart. The cache keys on (tilemap.gen, sheet.gen, region, colorkey, scale); an mset /
+        # sheet paint edit / scale change bumps the key and the region re-rasters.
+        # Camera/clip/sx/sy are COMPOSITE-time (not in the key), so a scroll is a cache HIT.
+        # Mirrors the host Canvas.map cache exactly (palette indices there, RGB565 here).
+        #
+        # pal/palt bake into the 565 layer via the sheet atlas under the parent's identity
+        # state, so caching is gated to identity pal/palt (_palgen == 0); under an active
+        # palette (and in the no-moy_gfx fallback) map() rasters directly to the framebuffer
+        # (correctness over cleverness -- an active palette on a scrolling map is rare). The
+        # sheet atlas is still baked once (cached on the sheet, keyed on gen/colorkey/palgen).
         self.flush_batch()             # #63: map() is a non-spr primitive -> break batch
         mx = int(mx); my = int(my); scale = int(scale)
-        sx = int(sx) - self._cam_x
-        sy = int(sy) - self._cam_y
         if scale < 1:
             scale = 1
         if w is None:
             w = tilemap.w - mx
         if h is None:
             h = tilemap.h - my
+        w = int(w); h = int(h)
+        dsx = int(sx) - self._cam_x
+        dsy = int(sy) - self._cam_y
         tile = sheet.TILE
         if self._gfx is None:
-            self._map_py(tilemap, sheet, mx, my, int(w), int(h), sx, sy, colorkey, scale)
+            self._map_py(tilemap, sheet, mx, my, w, h, dsx, dsy, colorkey, scale)
             return
-        atlas, ntiles = self._sheet_atlas(sheet, colorkey)
-        _t0 = _ticks_us()              # #66 DRAW2: time the native tilemap blit
-        self._gfx.blit_map(self._buf, self.w, self.h, sx, sy,
-                           tilemap.cells, tilemap.w, tilemap.h,
-                           mx, my, int(w), int(h),
-                           atlas, ntiles, tile, scale, _RGB_KEY,
-                           self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+        _t0 = _ticks_us()              # #66 DRAW2: the whole map path (raster or composite)
+        if (self._nocache or self._palgen != 0     # layer / active palette / revert knob
+                or not MAP_AUTO_CACHE):            # -> direct raster
+            self._blit_map_into(self._buf, self.w, self.h, dsx, dsy,
+                                tilemap, sheet, mx, my, w, h, colorkey, tile, scale,
+                                self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+            self._t_map_us += _ticks_diff(_ticks_us(), _t0)
+            if self._pump is not None:
+                self._pump()           # #66: feed the bounce flush between native ops
+            return
+        step = tile * scale
+        lw = w * step
+        lh = h * step
+        if lw <= 0 or lh <= 0:
+            return
+        key = (id(tilemap), tilemap.gen, id(sheet), getattr(sheet, "gen", 0),
+               mx, my, w, h, int(colorkey), scale)
+        mc = self._mapcache
+        if mc is None or mc[0] != key:
+            # MISS -> (re)raster the region into a hidden layer at local (0,0): fill it with
+            # the transparent key so empty/colorkey cells stay transparent, then blit_map.
+            # Re-use the layer buffer when the pixel dims are unchanged (only the content/key
+            # changed) so a live-editing cart doesn't re-allocate (and re-gc.collect) each
+            # rebuild.
+            if mc is not None and mc[2] == lw and mc[3] == lh:
+                layer = mc[1]
+            else:
+                layer = self.new_layer(lw, lh, owner="_mapcache")
+            self._gfx.fill(layer._buf, lw * lh, _RGB_KEY)
+            self._blit_map_into(layer._buf, lw, lh, 0, 0,
+                                tilemap, sheet, mx, my, w, h, colorkey, tile, scale,
+                                0, 0, lw, lh)
+            # OPAQUE lane eligibility: with no colorkey and no empty cells the cached
+            # region has no transparent pixel (palt is identity under the _palgen == 0
+            # gate, and the atlas bake nudges accidental _RGB_KEY collisions off the
+            # key), so the composite can use blit565's opaque row-memcpy lane (key=-1,
+            # the #66 chrome-trim lane) instead of testing every pixel. Decided ONCE
+            # per raster with a cheap cell walk; sparse maps keep the keyed blit.
+            opaque = colorkey < 0
+            if opaque:
+                mg = tilemap.mget
+                for cy in range(h):
+                    for cx in range(w):
+                        if mg(mx + cx, my + cy) < 0:
+                            opaque = False
+                            break
+                    if not opaque:
+                        break
+            self._mapcache = mc = (key, layer, lw, lh, -1 if opaque else _RGB_KEY)
+            self._map_raster_count += 1
+        else:
+            self._map_hits += 1
+        # COMPOSITE: blit the cached region at the camera-offset (dsx, dsy), clipped --
+        # keyed (skips _RGB_KEY) for sparse regions, opaque row-memcpy for full-coverage
+        # ones. Overdrawing the region each frame still erases last frame's actors for
+        # free, exactly like a direct map().
+        layer = mc[1]
+        self._gfx.blit565(self._buf, self.w, self.h, dsx, dsy,
+                          layer._buf, lw, lh, mc[4],
+                          self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
         self._t_map_us += _ticks_diff(_ticks_us(), _t0)
         if self._pump is not None:
             self._pump()               # #66: feed the bounce flush between native ops
+
+    def map_cache_reset(self):
+        # Zero the Fold-2 map-cache profiling counters (#63): after a run of same-key map()
+        # calls _map_raster_count == 1 / _map_hits == (n-1) PROVES the region rasterized ONCE
+        # and every later frame re-used the cache. The map() analogue of batch_reset.
+        self._map_raster_count = 0
+        self._map_hits = 0
 
     def _sheet_atlas(self, sheet, colorkey):
         # Bake the whole sheet into a contiguous RGB565 tile atlas (ntiles tiles of
@@ -946,7 +1212,7 @@ class DeviceCanvas:
 
     # -- scroll layers (#54) -------------------------------------------------
 
-    def new_layer(self, w, h):
+    def new_layer(self, w, h, owner=None):
         # A blank, wider RGB565 off-screen canvas the cart pre-renders a level into
         # ONCE, then window-copies per frame (draw_layer -> blit_window_from). Built
         # through a tiny _LayerComp so it reuses DeviceCanvas.__init__ verbatim and
@@ -968,7 +1234,39 @@ class DeviceCanvas:
             gc.collect()
         except Exception:  # noqa: BLE001 -- gc is always present; never block a layer alloc
             pass
-        return DeviceCanvas(_LayerComp(int(w), int(h), self._gfx))
+        lay = DeviceCanvas(_LayerComp(int(w), int(h), self._gfx))
+        lay._nocache = True            # #63: a layer's own map() rasters directly (no nesting)
+        # Layer lending (#63 leak fix): a pooled (moy_alloc-backed) buffer created for a
+        # program (`owner`: "cart" via make_api, "wallpaper" via the wallpaper runner,
+        # "_mapcache" for Fold 2's hidden cache) is recorded so reclaim_layers(owner)
+        # can return it to _LAYER_POOL when that program dies. owner=None (console
+        # chrome, tests) is never reclaimed.
+        comp = lay._comp
+        if owner is not None and comp.pooled:
+            lent = self._lent_layers
+            if lent is None:
+                lent = self._lent_layers = {}
+            lent.setdefault(owner, []).append((comp._buf, comp._nbytes))
+        return lay
+
+    def reclaim_layers(self, owner):
+        """Return a dead program's pooled layer buffers to _LAYER_POOL for reuse
+        (#63 leak fix: moy_alloc has no free(), so without this every cart re-run
+        leaked its world from the heap_caps pool). Also drops the Fold-2 map cache
+        (its hidden layer is program content) and any in-flight async layer copy.
+        Callers probe via getattr (the host Canvas has no pool -- gc reclaims)."""
+        if self._lcopy is not None:
+            self._drain_lcopy()
+        self._lcopy_pred = None
+        self._mapcache = None
+        lent = self._lent_layers
+        if not lent:
+            return
+        for own in (owner, "_mapcache"):
+            lst = lent.pop(own, None)
+            if lst:
+                for buf, n in lst:
+                    _LAYER_POOL.setdefault(n, []).append(buf)
 
     def blit_window_from(self, layer, cam_x=0, cam_y=0):
         # Copy the visible self.w x self.h window of `layer` into the framebuffer at
@@ -1144,15 +1442,24 @@ class _LayerComp:
         # or beat the old behaviour, never regress.
         nbytes = w * h * 2
         buf = None
-        try:
-            import moy_alloc
-            import lcd_bus
-            buf = moy_alloc.malloc_dma(nbytes, lcd_bus.MEMORY_SPIRAM | lcd_bus.MEMORY_DMA)
-        except Exception:  # noqa: BLE001 -- host / no DMA allocator -> gc-heap bytearray
-            buf = None
+        pooled = False
+        free = _LAYER_POOL.get(nbytes)
+        if free:
+            buf = free.pop()          # a dead cart's buffer of the same dims -> reuse
+            pooled = True
+        else:
+            try:
+                import moy_alloc
+                import lcd_bus
+                buf = moy_alloc.malloc_dma(nbytes, lcd_bus.MEMORY_SPIRAM | lcd_bus.MEMORY_DMA)
+                pooled = buf is not None    # heap_caps memory: pool it on reclaim (no free())
+            except Exception:  # noqa: BLE001 -- host / no DMA allocator -> gc-heap bytearray
+                buf = None
         if buf is None:
             buf = bytearray(nbytes)
         self._buf = buf
+        self._nbytes = nbytes
+        self.pooled = pooled
         self._gfx = gfx
 
     def size(self):

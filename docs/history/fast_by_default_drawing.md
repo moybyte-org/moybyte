@@ -1,10 +1,15 @@
 # Fast-by-default drawing: folding the perf primitives into the canonical API
 
-**Status:** Fold 1 (auto-batch `spr()`) **SHIPPED** — engine-side and further than
-this doc proposed: `spr()` is a native C callable (`spr_gate`, #63) appending to a
-shared int16 batch array, hardware-confirmed. The other folds remain design.
-Current measured numbers live in the **#66 performance ledger** (GitHub issue,
-mirrored by `make sync-issues`) — not in this doc.
+**Status: ARCHIVED (2026-07-08) — every fold now has a verdict; this doc is
+design history.** Fold 1 (auto-batch `spr()`) SHIPPED as the native `spr_gate`
+(#63). Fold 2 (auto map cache) was built, A/B'd on hardware, and **REVERTED**
+(Battle City map 4.3–5.7 → 13.4ms: the keyed full-region composite reads every
+pixel where the direct raster skips transparent tiles; machinery stays behind
+`MAP_AUTO_CACHE=False`). Fold 3 landed as the **`background()`** declared-backdrop
+verb (docs/moy_cart_api.md). Fold 4's spirit landed as pal-state-id variant
+caching (#72). Frame pacing shipped as the governor machinery
+(`console.FPS_GOVERNOR`, policy currently OFF — owner measurement mode).
+Current numbers + verdicts live ONLY in the **#66 performance ledger**.
 
 **Audience:** engine/runtime. Read `docs/history/perf_60fps_architecture.md` (the perf
 grounding), `docs/porting_pico8.md` (the API-alignment surface), and

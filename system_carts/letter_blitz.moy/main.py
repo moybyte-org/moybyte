@@ -253,11 +253,18 @@ trace_covered = set()  # glyph ink cells the strokes have touched (progress)
 trace_was_held = False
 trace_done = False
 
-_glyph_cache = {}
-_tank_v_img = None
-_tank_h_img = None
-_cannon_img = None
-_brick_img = None
+# Sprite caches, keyed by EVERYTHING that changes the pixels -- letter, ink
+# color, scale, orientation. "Make it fast" rule this cart models: never wrap
+# spr() in pal() on the play path. pal() invalidates the engine's baked sprite
+# cache, so every draw re-bakes the sprite pixel by pixel (that alone cost this
+# cart most of its frame budget); baking a tinted copy ONCE per color and
+# reusing it keeps every frame a cheap cached blit. Scale is in the key because
+# the engine caches one baked scale per Image -- drawing one Image at two
+# scales every frame would re-bake it twice a frame.
+_glyph_cache = {}      # (letter, ink, scale) -> Image
+_tank_cache = {}       # (horizontal, body, scale) -> Image (treads baked dark)
+_cannon_imgs = [None, None]   # [ready, reloading]
+_brick_cache = {}      # brick color -> Image
 _star_img = None
 
 # The floor + standing bricks live in a full-screen #54 layer: one window-copy
@@ -267,41 +274,47 @@ _star_img = None
 _bg = None
 _bg_dirty = True
 
+# HUD text cache: [found_str, for_lifetime, best_str, for_best, for_initials]
+_hud_strs = ["", -1, "", -1, ""]
 
-def _glyph(letter):
-    img = _glyph_cache.get(letter)
+
+def _glyph(letter, ink, scale):
+    key = (letter, ink, scale)
+    img = _glyph_cache.get(key)
     if img is None:
-        img = image(GLYPH_ROWS[letter], {"#": col("white")})
-        _glyph_cache[letter] = img
+        img = image(GLYPH_ROWS[letter], {"#": ink})
+        _glyph_cache[key] = img
     return img
 
 
 def _draw_glyph(letter, x, y, ink, scale=1):
-    pal(col("white"), ink)
-    spr(_glyph(letter), x, y, scale)
-    pal()
+    spr(_glyph(letter, ink, scale), x, y, scale)
 
 
-def _tank_sprite(horizontal):
-    global _tank_v_img, _tank_h_img
-    if _tank_v_img is None:
-        _tank_v_img = image(TANK_V_ROWS, {"B": col("white"), "T": col("light_grey")})
-        _tank_h_img = image(TANK_H_ROWS, {"B": col("white"), "T": col("light_grey")})
-    return _tank_h_img if horizontal else _tank_v_img
+def _tank_sprite(horizontal, body, scale):
+    key = (horizontal, body, scale)
+    img = _tank_cache.get(key)
+    if img is None:
+        rows = TANK_H_ROWS if horizontal else TANK_V_ROWS
+        img = image(rows, {"B": body, "T": col("dark_grey")})
+        _tank_cache[key] = img
+    return img
 
 
-def _cannon_sprite():
-    global _cannon_img
-    if _cannon_img is None:
-        _cannon_img = image(CANNON_ROWS, {"B": col("light_grey")})
-    return _cannon_img
+def _cannon_sprite(reloading):
+    i = 1 if reloading else 0
+    if _cannon_imgs[i] is None:
+        ink = col("dark_grey") if reloading else col("light_grey")
+        _cannon_imgs[i] = image(CANNON_ROWS, {"B": ink})
+    return _cannon_imgs[i]
 
 
-def _brick_sprite():
-    global _brick_img
-    if _brick_img is None:
-        _brick_img = image(BRICK_ROWS, {"B": col("orange")})
-    return _brick_img
+def _brick_sprite(ink):
+    img = _brick_cache.get(ink)
+    if img is None:
+        img = image(BRICK_ROWS, {"B": ink})
+        _brick_cache[ink] = img
+    return img
 
 
 def _star_sprite():
@@ -371,10 +384,9 @@ def _redraw_bg():
     if _bg is None:
         _bg = make_layer(W, H)
     _bg.cls(col(floor))
-    _bg.pal(col("orange"), col(brick))
+    img = _brick_sprite(col(brick))   # pre-tinted per mood (no pal on the layer)
     for (r, c) in walls:
-        _bg.spr(_brick_sprite(), c * CELL, GRID_Y0 + r * CELL, BRICK_SCALE)
-    _bg.pal()
+        _bg.spr(img, c * CELL, GRID_Y0 + r * CELL, BRICK_SCALE)
     _bg_dirty = False
 
 
@@ -563,7 +575,7 @@ def _move_tanks(dt):
 
 def _update_tank_bullets(dt):
     global _bg_dirty
-    keep = []
+    n = 0
     for b in tank_bullets:
         b[0] += b[2] * dt
         b[1] += b[3] * dt
@@ -575,8 +587,9 @@ def _update_tank_bullets(dt):
                 _bg_dirty = True
                 _burst(b[0], b[1], _brick_color())
             continue  # consumed either way (brick or arena edge)
-        keep.append(b)
-    tank_bullets[:] = keep
+        tank_bullets[n] = b
+        n += 1
+    del tank_bullets[n:]
 
 
 def _burst(x, y, color, n=8):
@@ -586,46 +599,54 @@ def _burst(x, y, color, n=8):
 
 def _tick_fx(dt):
     # Celebration bookkeeping -- runs in BOTH modes so an arpeggio queued at a
-    # pop keeps playing into the trace bonus.
+    # pop keeps playing into the trace bonus. Expired entries are squeezed out
+    # IN PLACE (write-index + del of the tail) -- "Make it fast": reuse the
+    # list, don't build a new one every frame (each fresh list is garbage the
+    # collector eventually stops the game to sweep).
     global wanted_flash_t
-    keep = []
+    n = 0
     for m in melody:
         m[0] -= dt
         if m[0] <= 0.0:
             beep(m[1], m[2])
         else:
-            keep.append(m)
-    melody[:] = keep
-    keep = []
+            melody[n] = m
+            n += 1
+    del melody[n:]
+    n = 0
     for p in sparks:
         p[4] -= dt
         if p[4] > 0.0:
             p[0] += p[2] * dt
             p[1] += p[3] * dt
             p[3] += 200.0 * dt
-            keep.append(p)
-    sparks[:] = keep
-    keep = []
+            sparks[n] = p
+            n += 1
+    del sparks[n:]
+    n = 0
     for g in rings:
         g[2] += 90.0 * dt
         g[3] -= dt
         if g[3] > 0.0:
-            keep.append(g)
-    rings[:] = keep
-    keep = []
+            rings[n] = g
+            n += 1
+    del rings[n:]
+    n = 0
     for r in rising:
         r[2] -= 30.0 * dt
         r[3] -= dt
         if r[3] > 0.0:
-            keep.append(r)
-    rising[:] = keep
-    keep = []
+            rising[n] = r
+            n += 1
+    del rising[n:]
+    n = 0
     for f in fx_text:
         f[2] -= 20.0 * dt
         f[3] -= dt
         if f[3] > 0.0:
-            keep.append(f)
-    fx_text[:] = keep
+            fx_text[n] = f
+            n += 1
+    del fx_text[n:]
     if wanted_flash_t > 0.0:
         wanted_flash_t = max(0.0, wanted_flash_t - dt)
 
@@ -1075,10 +1096,8 @@ def _draw_tank(t):
     elif fy:
         by = y + fy * (TANK_HALF + 3)
         rect(x - 1, min(y, by), 3, abs(by - y), col("dark_grey"))
-    pal(col("white"), body)
-    pal(col("light_grey"), col("dark_grey"))
-    spr(_tank_sprite(fx != 0), x - TANK_DRAW_W // 2, y - TANK_DRAW_H // 2, TANK_SCALE)
-    pal()
+    spr(_tank_sprite(fx != 0, body, TANK_SCALE),
+        x - TANK_DRAW_W // 2, y - TANK_DRAW_H // 2, TANK_SCALE)
     _draw_glyph(t[4], x - GLYPH_W, y - GLYPH_H, col("white"), 2)
 
 
@@ -1095,10 +1114,8 @@ def _draw_boss():
     elif fy:
         by = y + fy * (BOSS_HALF + 6)
         rect(x - 2, min(y, by), 5, abs(by - y), col("dark_grey"))
-    pal(col("white"), body)
-    pal(col("light_grey"), col("dark_grey"))
-    spr(_tank_sprite(fx != 0), x - TANK_DRAW_W, y - TANK_DRAW_H, TANK_SCALE * 2)
-    pal()
+    spr(_tank_sprite(fx != 0, body, TANK_SCALE * 2),
+        x - TANK_DRAW_W, y - TANK_DRAW_H, TANK_SCALE * 2)
     _draw_glyph(b[4], x - (GLYPH_W * 3) // 2, y - (GLYPH_H * 3) // 2, col("white"), 3)
     for i in range(b[11]):  # hp pips: how many hits are left
         rect(x - 10 + i * 8, y - TANK_DRAW_H - 8, 5, 5, col("yellow"))
@@ -1147,9 +1164,7 @@ def _draw_fx():
 def _draw_trace():
     cls(col("black"))
     gx, gy = _trace_origin()
-    pal(col("white"), col("dark_grey"))
-    spr(_glyph(trace_letter), gx, gy, TRACE_SCALE)
-    pal()
+    spr(_glyph(trace_letter, col("dark_grey"), TRACE_SCALE), gx, gy, TRACE_SCALE)
     for stroke in trace_strokes:
         lx = -1
         ly = -1
@@ -1182,11 +1197,9 @@ def _draw_cannon():
     line(CANNON_X, y, mx, my, bcol)
     line(CANNON_X + 1, y, mx + 1, my, bcol)
     circ(mx, my, 2, bcol)
-    if cooldown_t > 0.0:
-        pal(col("light_grey"), col("dark_grey"))
-    spr(_cannon_sprite(), CANNON_X - CANNON_IMG_W * CANNON_SCALE // 2,
+    spr(_cannon_sprite(cooldown_t > 0.0),
+        CANNON_X - CANNON_IMG_W * CANNON_SCALE // 2,
         y - CANNON_IMG_H * CANNON_SCALE // 2, CANNON_SCALE)
-    pal()
     if firing:
         circ(mx, my, 5, col("yellow"))   # muzzle flash rides the barrel tip
         circ(mx, my, 2, col("white"))
@@ -1240,9 +1253,18 @@ def _draw():
     _draw_glyph(wanted, 50, HUD_Y, col("white") if flashing else col("yellow"), 4)
     for i in range(min(streak, 8)):  # the streak: one star per correct in a row
         spr(_star_sprite(), 84 + i * 8, HUD_Y + 11, 1)
-    found = str(lifetime) + " FOUND"
+    # HUD strings are rebuilt only when the number behind them changes --
+    # "Make it fast": building a string every frame is invisible garbage.
+    if _hud_strs[1] != lifetime:
+        _hud_strs[1] = lifetime
+        _hud_strs[0] = str(lifetime) + " FOUND"
+    found = _hud_strs[0]
     print(found, W - 10 - len(found) * 8, HUD_Y + 4, col("light_grey"), 1)
     if best_streak > 0:
-        b = "BEST " + str(best_streak) + " " + initials
+        if _hud_strs[3] != best_streak or _hud_strs[4] != initials:
+            _hud_strs[3] = best_streak
+            _hud_strs[4] = initials
+            _hud_strs[2] = "BEST " + str(best_streak) + " " + initials
+        b = _hud_strs[2]
         print(b, W - 10 - len(b) * 8, HUD_Y + 16, col("dark_grey"), 1)
     _draw_exit()  # the cart's own tap-to-quit X (a text-mode cart must provide its exit)

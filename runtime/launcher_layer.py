@@ -265,9 +265,18 @@ class LauncherHomeLayer:
         cart grid reclaims the freed bottom band (Layout.grid_bottom)."""
         NAMES = self._NAMES
         ws = self.ws
-        ws.wallpaper.draw(dt)
         cv = ws.sys_canvas
+        # #76 sub-surface marks: on a RECORDING canvas, partition the home into
+        # wallpaper / grid / bar streams so the web delta can skip the static grid +
+        # bar while a live wallpaper animates underneath (they were one "launcher"
+        # surface -- the wallpaper's motion re-shipped everything each frame). The
+        # marks are positional slices of the same flat stream: replayed in order the
+        # pixels are identical, and on the RAW canvas _surf is None (zero cost).
+        _surf = getattr(cv, "begin_surface", None)
+        ws.wallpaper.draw(dt)
         lay = ws.layout
+        if _surf is not None:
+            _surf("home-grid", "system")
         ws.launcher.draw(cv, ws._icon_sheet_for)
         # page chevrons when more than one page of carts
         if ws.launcher.max_page() > 0:
@@ -277,6 +286,8 @@ class LauncherHomeLayer:
             if ws.launcher.page < ws.launcher.max_page():
                 px, py = lay.page_next[0], lay.page_next[1]
                 cv.print(">", px + 3, py + 8, NAMES["white"], 2)
+        if _surf is not None:
+            _surf("home-bar", "system")
         ws.bar_layer._draw_status_strip("home")
 
     def handle_input(self, i):
@@ -425,8 +436,14 @@ class EditorPickerLayer:
     def draw(self, dt):
         NAMES = self._NAMES
         ws = self.ws
-        ws.wallpaper.draw(dt)
         cv = ws.sys_canvas
+        # The picker is a TOOL space (owner call, 2026-07-08): a static black
+        # backdrop instead of the animated wallpaper -- "it's software". Besides
+        # the look, this makes the screen FREE under the redraw gate (#44): with
+        # no live wallpaper forcing per-frame repaints, an idle picker draws only
+        # on input, instead of re-rendering the grid at wallpaper rate (~100ms
+        # chrome frames measured on the launcher's live backdrop).
+        cv.cls(NAMES["black"])
         lay = ws.layout
         ws.picker.draw(cv, ws._icon_sheet_for)
         if ws.picker.max_page() > 0:

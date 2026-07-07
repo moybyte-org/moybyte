@@ -168,11 +168,19 @@ fi
 #                    viewport composite + the back-stack screen projects onto + the
 #                    memoized layer stack, extracted from console.py); console.py does
 #                    `from wm import FullscreenStackWM`
+#   chrome.py     -- the console's stateless base layer (MOY64 palette, Layout/CodeLayout
+#                    geometry, the icon-glyph vocabulary + themeable IconSheet defaults,
+#                    the small pure helpers), extracted from console.py; console.py does
+#                    `from chrome import (...)` and re-exports under the old console.X names
 #   console.py    -- launcher + desktop + cards/code/paint UI + Pointer
 #   moy_carts.py  -- the .moy store (scan/load/save/create/duplicate/delete)
 #   blocks.py     -- block model + blocks->Python compiler (#29; moy_carts imports it)
-#   web_view.py   -- shared web-view core (recorder + payloads + serve + page + constants);
+#   web_view.py   -- shared web-view core (recorder + payloads + serve + constants);
 #                    moy_webserver imports it as a frozen top-level `web_view` (#41/#22)
+#   web_view_ws.py   -- the WS transport primitives (RFC 6455 handshake + framing),
+#                    extracted from web_view.py; web_view re-imports + re-exports them
+#   web_view_page.py -- the browser page (PAGE_HTML: <canvas> + JS replayer), extracted
+#                    from web_view.py; web_view re-imports + re-exports it
 #   moy_font.py   -- petme128 glyph blob (runtime/font.py) for the native
 #                    moy_gfx.text kernel (#62), so device text rasterizes from the
 #                    SAME bytes the host does (pixel parity)
@@ -198,9 +206,12 @@ cp "${REPO_ROOT}/runtime/project.py" "${SCRIPT_DIR}/modules/project.py"
 cp "${REPO_ROOT}/runtime/player.py" "${SCRIPT_DIR}/modules/player.py"
 cp "${REPO_ROOT}/runtime/editor_app.py" "${SCRIPT_DIR}/modules/editor_app.py"
 cp "${REPO_ROOT}/runtime/wm.py" "${SCRIPT_DIR}/modules/wm.py"
+cp "${REPO_ROOT}/runtime/chrome.py" "${SCRIPT_DIR}/modules/chrome.py"
 cp "${REPO_ROOT}/runtime/console.py" "${SCRIPT_DIR}/modules/console.py"
 cp "${REPO_ROOT}/runtime/moy_carts.py" "${SCRIPT_DIR}/modules/moy_carts.py"
 cp "${REPO_ROOT}/runtime/blocks.py" "${SCRIPT_DIR}/modules/blocks.py"
+cp "${REPO_ROOT}/runtime/web_view_ws.py" "${SCRIPT_DIR}/modules/web_view_ws.py"
+cp "${REPO_ROOT}/runtime/web_view_page.py" "${SCRIPT_DIR}/modules/web_view_page.py"
 cp "${REPO_ROOT}/runtime/web_view.py" "${SCRIPT_DIR}/modules/web_view.py"
 cp "${REPO_ROOT}/runtime/font.py" "${SCRIPT_DIR}/modules/moy_font.py"
 # carts_data.py is GENERATED from system_carts/ (it replaces the ~1800 lines of

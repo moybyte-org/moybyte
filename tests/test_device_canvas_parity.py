@@ -1303,3 +1303,260 @@ def test_auto_batch_actually_coalesces():
         cv.spr_tile(sh, 1, 8, 0, -1, 2)              # scale 1 -> 2 breaks
         cv.flush_batch()
         assert (cv._batch_flushes, cv._batch_maxrun) == (2, 1)
+
+
+# --------------------------------------------------------------------------- #
+# map auto-cache (#63 Fold 2): a naive camera()+map() re-uses a hidden cached    #
+# raster on a camera-only change (window/keyed blit) and re-rasters only on a     #
+# (tilemap.gen, sheet.gen, scale) bump. The cache must be BYTE-IDENTICAL to a     #
+# direct raster across camera moves and after mset/pal/scale edits, host-index == #
+# device-565, both gfx modes -- and it must actually KICK IN (counter proof).     #
+# --------------------------------------------------------------------------- #
+def _mapcache_world(m):
+    # A sheet + a WIDER-THAN-SCREEN tilemap (a Hop-Quest-style scroller) with EMPTY cells
+    # (transparency) AND a colorkey'd tile (index-0 holes under colorkey=0), so the cache's
+    # KEYED composite is exercised, not just an opaque background copy.
+    sheet_h = SpriteSheet(4, 4)
+    sheet_d = m.SpriteSheet(4, 4)
+    for sh in (sheet_h, sheet_d):
+        for ly in range(8):                          # tile 1: a solid block (no holes)
+            for lx in range(8):
+                sh.tset(1, lx, ly, 6)
+        sh.tset(1, 0, 0, 8); sh.tset(1, 7, 7, 12)    # ... with asymmetric markers
+        sh.tset(2, 1, 1, 11); sh.tset(2, 2, 2, 14)   # tile 2: sparse -> index-0 = colorkey holes
+        sh.tset(2, 5, 5, 9)
+    tm_h = TileMap(12, 10)
+    tm_d = TileMap(12, 10)
+    for tm in (tm_h, tm_d):
+        for cx in range(12):
+            tm.mset(cx, 9, 1)                        # a full solid ground row
+        tm.mset(2, 5, 2); tm.mset(7, 3, 1); tm.mset(9, 6, 2)
+    return sheet_h, sheet_d, tm_h, tm_d
+
+
+def _play_map(c, sheet, tm, cam, colorkey=0, scale=1, direct=False):
+    # Draw the whole tilemap over `sheet` at camera `cam`. `direct=True` forces the UNCACHED
+    # raster by first setting an identity pal(5, 5): that bumps _palgen (so map() rasters
+    # straight to the buffer) WITHOUT changing any pixel -- an in-test direct-raster reference.
+    c.cls(3)
+    if direct:
+        c.pal(5, 5)
+    c.camera(cam[0], cam[1])
+    c.map(tm, sheet, 0, 0, tm.w, tm.h, 0, 0, colorkey, scale)
+    c.camera()
+    if direct:
+        c.pal()
+
+
+def _map_cache_on(m, monkeypatch):
+    # Fold 2 ships DEFAULT OFF on device (the hardware A/B verdict lives on the
+    # MAP_AUTO_CACHE comment); the cache tests force it ON so the logic stays
+    # pinned for a future native keyed-blit kernel / the P4 (#58).
+    monkeypatch.setitem(m.DeviceCanvas.__init__.__globals__, "MAP_AUTO_CACHE", True)
+
+
+def test_map_autocache_host_equals_device_across_camera_and_edits(monkeypatch):
+    # Cross-backend parity of the AUTO-CACHED map(): the host indexed rasterizer and the device
+    # native path agree byte-for-byte across a camera sweep (cache hits), after an mset
+    # (tilemap.gen bump -> re-raster) and under an active pal (both bypass to a direct raster).
+    for gfx in (True, False):
+        m, host, dev = _both(gfx)
+        _map_cache_on(m, monkeypatch)
+        sh_h, sh_d, tm_h, tm_d = _mapcache_world(m)
+        for cam in ((0, 0), (10, 4), (30, 20), (48, 32), (5, 0)):
+            _play_map(host, sh_h, tm_h, cam)
+            _play_map(dev, sh_d, tm_d, cam)
+            _assert_same(host, dev, "autocache gfx=%s cam=%s" % (gfx, cam))
+        tm_h.mset(4, 4, 2); tm_d.mset(4, 4, 2)       # edit the map -> both re-raster
+        _play_map(host, sh_h, tm_h, (12, 6))
+        _play_map(dev, sh_d, tm_d, (12, 6))
+        _assert_same(host, dev, "autocache post-mset gfx=%s" % gfx)
+        # An active palette on map() must still match (both backends bypass the cache).
+        host.pal(6, 14); dev.pal(6, 14)
+        _play_map(host, sh_h, tm_h, (8, 2))
+        _play_map(dev, sh_d, tm_d, (8, 2))
+        _assert_same(host, dev, "autocache pal-active gfx=%s" % gfx)
+
+
+def test_map_autocache_equals_direct_raster(monkeypatch):
+    # The cached path must be byte-identical to a DIRECT (uncached) raster of the SAME scene,
+    # on EACH backend, across camera moves and after an mset. This is the Fold-2 acceptance:
+    # auto-cached map() output == direct-raster map() output, byte-for-byte.
+    for gfx in (True, False):
+        m, _, _ = _both(gfx)
+        _map_cache_on(m, monkeypatch)
+        sh_h, sh_d, tm_h, tm_d = _mapcache_world(m)
+        tm_h.mset(4, 4, 2); tm_d.mset(4, 4, 2)       # (also proves the post-edit raster matches)
+        for cam in ((0, 0), (10, 4), (33, 18), (48, 30)):
+            # Host (index space).
+            cached = Canvas(W, H)
+            direct = Canvas(W, H)
+            _play_map(cached, sh_h, tm_h, cam)
+            _play_map(direct, sh_h, tm_h, cam, direct=True)
+            assert cached.buf == direct.buf, (
+                "host cache != direct gfx=%s cam=%s in %d px"
+                % (gfx, cam, sum(1 for a, b in zip(cached.buf, direct.buf) if a != b)))
+            # Device (RGB565).
+            dc_cached = m.DeviceCanvas(_FakeComp(W, H))
+            dc_direct = m.DeviceCanvas(_FakeComp(W, H))
+            _play_map(dc_cached, sh_d, tm_d, cam)
+            _play_map(dc_direct, sh_d, tm_d, cam, direct=True)
+            a = _dev_rgb565(dc_cached)
+            b = _dev_rgb565(dc_direct)
+            assert a == b, ("device cache != direct gfx=%s cam=%s in %d px"
+                            % (gfx, cam, sum(1 for x, y in zip(a, b) if x != y)))
+
+
+def test_map_autocache_actually_caches(monkeypatch):
+    # The cache must not just be pixel-correct -- it must KICK IN. The _map_raster_count /
+    # _map_hits counters (#63) prove a camera-only change re-uses the cached region (one
+    # blit565 / spr composite) instead of a full per-cell re-raster, which pixel-parity can't
+    # see. The Fold-2 analogue of test_auto_batch_actually_coalesces (device gfx-only cache).
+    m, _, _ = _both(True)
+    _map_cache_on(m, monkeypatch)
+    sh_h, sh_d, tm_h, tm_d = _mapcache_world(m)
+    for c, sh, tm in ((Canvas(W, H), sh_h, tm_h),
+                      (m.DeviceCanvas(_FakeComp(W, H)), sh_d, tm_d)):
+        c.map_cache_reset()
+        # First map() rasterizes; three camera-moved frames of the SAME region re-use it.
+        for cam in ((0, 0), (8, 0), (16, 4), (24, 6)):
+            c.cls(3)
+            c.camera(cam[0], cam[1])
+            c.map(tm, sh, 0, 0, 12, 10, 0, 0, 0, 1)
+            c.camera()
+        assert c._map_raster_count == 1, "camera move re-rastered (%d)" % c._map_raster_count
+        assert c._map_hits == 3, "expected 3 cache hits, got %d" % c._map_hits
+        # An mset (tilemap.gen bump) drops the cache -> the next map() re-rasters.
+        tm.mset(1, 1, 2)
+        c.cls(3)
+        c.map(tm, sh, 0, 0, 12, 10, 0, 0, 0, 1)
+        assert c._map_raster_count == 2, "mset didn't re-raster (%d)" % c._map_raster_count
+        # A scale change (different pixel dims / key) re-rasters.
+        c.cls(3)
+        c.map(tm, sh, 0, 0, 12, 10, 0, 0, 0, 2)
+        assert c._map_raster_count == 3, "scale change didn't re-raster (%d)" % c._map_raster_count
+        c.cls(3)                                     # ... then the scale-2 region caches too
+        c.map(tm, sh, 0, 0, 12, 10, 0, 0, 0, 2)
+        assert c._map_raster_count == 3 and c._map_hits == 4
+        # A sheet paint edit (sheet.gen bump) also drops the cache.
+        sh.pset(0, 0, 5)
+        c.cls(3)
+        c.map(tm, sh, 0, 0, 12, 10, 0, 0, 0, 2)
+        assert c._map_raster_count == 4, "sheet edit didn't re-raster (%d)" % c._map_raster_count
+        # An active pal bypasses the cache entirely (direct raster, counters unchanged).
+        # (A REAL remap: pal(3, 3) is identity CONTENT, and _palgen is a content id
+        # now -- identity would legitimately keep using the cache.)
+        c.pal(3, 5)
+        c.cls(3)
+        c.map(tm, sh, 0, 0, 12, 10, 0, 0, 0, 2)
+        assert c._map_raster_count == 4, "pal-active path touched the cache (%d)" % c._map_raster_count
+        c.pal()
+
+
+def test_map_autocache_opaque_lane_full_coverage(monkeypatch):
+    # A FULL-COVERAGE region with no colorkey has no transparent pixel, so the device
+    # composite may take blit565's opaque row-memcpy lane (key=-1, the #66 chrome-trim
+    # lane) instead of testing every pixel -- and it must stay byte-identical to the
+    # direct raster. A sparse region (empty cells) must keep the keyed composite.
+    m, _, _ = _both(True)
+    _map_cache_on(m, monkeypatch)
+    sh_h, sh_d, tm_h, tm_d = _mapcache_world(m)
+    for tm in (tm_h, tm_d):
+        for cy in range(10):                     # fill EVERY cell -> full coverage
+            for cx in range(12):
+                if tm.mget(cx, cy) < 0:
+                    tm.mset(cx, cy, 1)
+    for cam in ((0, 0), (12, 6)):
+        cached = m.DeviceCanvas(_FakeComp(W, H))
+        direct = m.DeviceCanvas(_FakeComp(W, H))
+        for c, tm in ((cached, tm_d), (direct, tm_d)):
+            c.cls(3)
+            c.camera(cam[0], cam[1])
+            if c is direct:
+                c._nocache = True                # force the direct raster path
+            c.map(tm, sh_d, 0, 0, 12, 10, 0, 0, -1, 1)   # colorkey=-1: opaque-eligible
+            c.camera()
+        assert cached._mapcache is not None and cached._mapcache[4] == -1, (
+            "full-coverage colorkey=-1 region should composite via the opaque lane")
+        assert _dev_rgb565(cached) == _dev_rgb565(direct), "opaque lane changed pixels"
+    # Sparse (default world has empty cells): the keyed composite must be chosen.
+    _, _, _ = _both(True)
+    sh_h2, sh_d2, tm_h2, tm_d2 = _mapcache_world(m)
+    c = m.DeviceCanvas(_FakeComp(W, H))
+    c.cls(3)
+    c.map(tm_d2, sh_d2, 0, 0, 12, 10, 0, 0, -1, 1)
+    assert c._mapcache[4] != -1, "a sparse region must keep the keyed composite"
+
+
+def test_pal_tint_sandwich_bakes_each_variant_once():
+    # #63 fast-by-default (the #72 Letter Blitz disease, fixed ENGINE-side): a sprite
+    # drawn through the pal()/spr()/pal() tint sandwich -- alternating tints across
+    # frames -- must bake each (tint, scale) variant ONCE, then swap cached bakes.
+    # _palgen is a content id (identity == 0, a re-seen remap gets its old id back),
+    # and the per-Image variant dict keeps the bakes alive across tint switches.
+    # Pixels must stay byte-identical to the always-rebake behaviour.
+    m, _, _ = _both(True)
+    cv = m.DeviceCanvas(_FakeComp(W, H))
+    ref = m.DeviceCanvas(_FakeComp(W, H))
+    img = m.Image(4, 4, [7, 7, 0, 0, 7, 7, 0, 0, 0, 0, 8, 8, 0, 0, 8, 8], -1)
+    ref_img = m.Image(4, 4, [7, 7, 0, 0, 7, 7, 0, 0, 0, 0, 8, 8, 0, 0, 8, 8], -1)
+
+    def frame(c, im):
+        # two tinted draws + an untinted one -- the Letter Blitz shape
+        c.cls(1)
+        c.pal(7, 11)
+        c.spr(im, 10, 10, 2)
+        c.pal()
+        c.pal(7, 3)
+        c.spr(im, 40, 10, 2)
+        c.pal()
+        c.spr(im, 70, 10, 2)
+
+    for _ in range(4):                    # 4 identical frames
+        frame(cv, img)
+    bakes = cv._rgb_bakes
+    assert bakes == 3, "expected ONE bake per tint variant, got %d" % bakes
+    for _ in range(4):                    # more frames -> zero new bakes
+        frame(cv, img)
+    assert cv._rgb_bakes == bakes, "a re-seen tint re-baked (variant cache miss)"
+    # Pixels identical to a fresh canvas that never reused anything.
+    frame(ref, ref_img)
+    assert _dev_rgb565(cv) == _dev_rgb565(ref), "variant reuse changed pixels"
+
+
+def test_layer_pool_reclaims_cart_buffers_across_runs(monkeypatch):
+    # #63 leak fix: moy_alloc has no free(), so a dead cart's layer buffers must
+    # return to the pool and the next same-dims new_layer must REUSE them (without
+    # this, every cart re-run leaked its world from the heap_caps pool). Stub
+    # moy_alloc/lcd_bus so the CPython-run device module takes the pooled path.
+    import sys
+    import types
+    m, _, _ = _both(True)
+    _map_cache_on(m, monkeypatch)
+    fake_alloc = types.ModuleType("moy_alloc")
+    fake_alloc.malloc_dma = lambda n, caps=0: bytearray(n)
+    fake_bus = types.ModuleType("lcd_bus")
+    fake_bus.MEMORY_SPIRAM = 1
+    fake_bus.MEMORY_DMA = 2
+    monkeypatch.setitem(sys.modules, "moy_alloc", fake_alloc)
+    monkeypatch.setitem(sys.modules, "lcd_bus", fake_bus)
+    g = m.DeviceCanvas.__init__.__globals__       # the device module's namespace
+    monkeypatch.setitem(g, "_LAYER_POOL", {})
+    cv = m.DeviceCanvas(_FakeComp(W, H))
+    lay1 = cv.new_layer(64, 32, owner="cart")
+    assert lay1._comp.pooled, "the stubbed allocator path must mark the buffer pooled"
+    buf1 = lay1._comp._buf
+    # An unowned (console) layer is never lent/reclaimed.
+    lay_console = cv.new_layer(64, 32)
+    cv.reclaim_layers("cart")                     # the cart died (Player.start)
+    assert g["_LAYER_POOL"].get(64 * 32 * 2), "the cart buffer returns to the pool"
+    lay2 = cv.new_layer(64, 32, owner="cart")     # next run, same dims
+    assert lay2._comp._buf is buf1, "the next same-dims layer must REUSE the buffer"
+    assert lay_console._comp._buf is not buf1, "console layers stay untouched"
+    # The Fold-2 hidden map cache is program content: reclaim drops + pools it.
+    sh_h, sh_d, tm_h, tm_d = _mapcache_world(m)
+    cv.cls(3)
+    cv.map(tm_d, sh_d, 0, 0, 12, 10, 0, 0, 0, 1)
+    assert cv._mapcache is not None
+    cv.reclaim_layers("cart")
+    assert cv._mapcache is None, "reclaim must drop the map cache (its layer is pooled)"

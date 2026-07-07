@@ -368,7 +368,9 @@ class _Layer:
 
 
 def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
-             pmem=None, wifi=None, images=None):
+             pmem=None, wifi=None, images=None, owner="cart"):
+    # `owner` tags device-side layer loans for the leak-fix reclaim (#63); the host
+    # Canvas allocates layers on the gc heap, so it is accepted and unused here.
     """The cartridge global namespace on the host -- same names/signature as the
     device make_api (TIC-80 draw API + sheet-or-Image spr + audio + tilemap), bound
     to a host Canvas and audio backend.
@@ -603,12 +605,44 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
             return im
         return Image.from_ascii(a, mapping, transparent)
 
+    # Declared background (#63 fast-by-default -- the "software PPU layer 0"): the
+    # cart names its backdrop ONCE -- a color, or a painted Image -- and the engine
+    # restores it at the START of every frame, so a naive cart never writes a
+    # per-frame cls()/backdrop blit (and can't overdraw it). An Image bakes into a
+    # hidden full-screen layer once; the per-frame restore is then one flat window
+    # copy (draw_layer), which the device hides behind the cart's logic on the async
+    # GDMA path. background() with no args clears the declaration. The restore hook
+    # rides the namespace (ns["_moy_restore_bg"]) so each running program (cart,
+    # wallpaper) owns its OWN declaration; the Player / wallpaper runner calls it
+    # before the frame's first draw. Built from the public verbs (make_layer /
+    # draw_layer / cls), so the web recorder ships it with the existing protocol.
+    _bg = [None]
+
+    def background(x=None):
+        if x is None:
+            _bg[0] = None
+        elif isinstance(x, Image):
+            lay = make_layer(canvas.w, canvas.h)
+            lay.spr(x, 0, 0)               # bake once (paint images take the fast path)
+            _bg[0] = ("l", lay)
+        else:
+            _bg[0] = ("c", palette.color(x))
+
+    def _restore_bg():
+        b = _bg[0]
+        if b is not None:
+            if b[0] == "c":
+                canvas.cls(b[1])
+            else:
+                draw_layer(b[1], 0, 0)
+
     ns = {
         "W": canvas.w, "H": canvas.h,
         "cls": canvas.cls, "pix": canvas.pix,
         "line": canvas.line, "rect": canvas.rect, "rectb": canvas.rectb,
         "circ": canvas.circ, "circb": canvas.circb, "spr": spr,
         "spr_batch": spr_batch,
+        "background": background, "_moy_restore_bg": _restore_bg,
         "make_layer": make_layer, "draw_layer": draw_layer,
         "map": map_, "mget": mget, "mset": mset,
         "print": canvas.print, "touch": touch, "mouse": mouse,
@@ -717,6 +751,7 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1):
     # namespace ONLY when its manifest grants "network" (see Workstation._start).
     ws.wifi = make_wifi(moy_carts, carts_dir)
     ws.can_manage = True
+    ws.slim_carts()   # #66 live-set diet: drop heavy payloads now the store can reload them
     # The pointer ranges over the SYSTEM canvas (the panel surface the cursor moves
     # on), so size it to that. The api touch() reads it in system coords.
     ws.pointer = console.Pointer(ws.sys_canvas.w, ws.sys_canvas.h)
