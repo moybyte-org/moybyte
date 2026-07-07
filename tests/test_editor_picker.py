@@ -208,3 +208,68 @@ def test_del_cart_deletes_the_pickers_selection_when_no_cart_is_open(tmp_path):
     ws.del_cart()
     assert len(ws._all_carts) == n0 - 1
     assert all(c.get("title") != "Extra" for c in ws._all_carts)
+
+
+# -- the DELETE two-tap confirm guard ----------------------------------------
+# A project sits right next to its icon in the picker's grid now, so a single
+# accidental DEL tap must not delete it (#the picker delete-guard).
+
+def test_picker_delete_is_two_tap_guarded(tmp_path):
+    """A DEL tap on the picker's zone ARMS a confirm ("DELETE? TAP AGAIN") rather than
+    deleting immediately -- a project sits right next to its icon in this grid, so one
+    accidental tap must not be one-tap-gone. A second tap (still armed) confirms."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.open_picker()
+    ws.picker.sel = _first_real(ws.picker)
+    n0 = len(ws.picker.items)
+    x, y, w, h = ws.layout.del_btn
+    drv.click(x + w // 2, y + h // 2)
+    drv.frame(1 / 30)
+    assert ws.editor_picker._del_armed is True
+    assert len(ws.picker.items) == n0                  # armed, NOT deleted yet
+    drv.click(x + w // 2, y + h // 2)
+    drv.frame(1 / 30)
+    assert ws.editor_picker._del_armed is False
+    assert len(ws.picker.items) == n0 - 1              # second tap confirmed it
+
+
+def test_picker_delete_confirm_disarms_on_navigation(tmp_path):
+    """Moving the selection while a delete is armed cancels the confirm -- arming DEL
+    then navigating away must not leave a delete primed for whatever cart the kid
+    lands on next."""
+    ws = _ws(tmp_path)
+    ws.open_picker()
+    ws.picker.sel = _first_real(ws.picker)
+    x, y, w, h = ws.layout.del_btn
+    ws.editor_picker.zone_tap(x + w // 2, y + h // 2)
+    assert ws.editor_picker._del_armed is True
+    ws.editor_picker.handle_input(_FakeInput({"right"}))
+    assert ws.editor_picker._del_armed is False
+
+
+def test_picker_delete_confirm_resets_on_reopen(tmp_path):
+    """Arming a delete, leaving the picker without confirming, then reopening it must
+    not leave a stale "DELETE? TAP AGAIN" armed for the next visit."""
+    ws = _ws(tmp_path)
+    ws.open_picker()
+    ws.picker.sel = _first_real(ws.picker)
+    x, y, w, h = ws.layout.del_btn
+    ws.editor_picker.zone_tap(x + w // 2, y + h // 2)
+    assert ws.editor_picker._del_armed is True
+    ws.exit()                          # back to the launcher, confirm never fired
+    ws.open_picker()                   # a fresh visit
+    assert ws.editor_picker._del_armed is False
+
+
+class _FakeInput:
+    """Minimal `i.pressed(name)` stub for driving EditorPickerLayer.handle_input
+    directly (mirrors the pattern host_app.ConsoleDriver's real input object
+    satisfies) without needing a full ConsoleDriver frame."""
+
+    def __init__(self, pressed):
+        self._pressed = set(pressed)
+
+    def pressed(self, name):
+        return name in self._pressed

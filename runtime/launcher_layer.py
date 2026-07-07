@@ -389,7 +389,12 @@ class EditorPickerLayer:
     the picker is for MANAGING projects) -- DUP/DEL act on the picker's SELECTED cart
     via the lent zone (ws.dup_cart/ws.del_cart, which read `ws.picker`'s selection
     instead of the launcher's -- see console.py). "+ New" was already picker-only (the
-    pinned grid tile)."""
+    pinned grid tile). DEL is two-tap guarded (`_del_armed`): a project sits right next
+    to its icon in this grid, so a single accidental tap must not delete it -- the
+    first DEL tap arms a "DELETE? TAP AGAIN" prompt (folded into `zone_gen` so the bar
+    cache repaints), the second confirms. Any navigation/selection change (nav2d, a
+    tile tap/hover, paging, exiting) disarms it, and `reset()` (called by
+    ws.open_picker()) clears it fresh on every visit."""
 
     id = "picker"
     domain = "system"
@@ -399,6 +404,23 @@ class EditorPickerLayer:
         self._NAMES = names
         self._in = in_rect
         self._phover = (-1, -1)       # trackball hover pos (like LauncherHomeLayer._lhover)
+        self._del_armed = False       # DEL confirm-guard: first tap arms, second confirms
+        self._confirm_gen = 0         # bumped on arm/disarm so zone_gen reflects it too
+
+    def reset(self):
+        """Clear any armed delete-confirm state -- called by ws.open_picker() so a
+        stale "DELETE? TAP AGAIN" from a previous visit never carries into a fresh
+        one."""
+        self._disarm_delete()
+
+    def _arm_delete(self):
+        self._del_armed = True
+        self._confirm_gen += 1
+
+    def _disarm_delete(self):
+        if self._del_armed:
+            self._del_armed = False
+            self._confirm_gen += 1
 
     def draw(self, dt):
         NAMES = self._NAMES
@@ -419,16 +441,18 @@ class EditorPickerLayer:
     def handle_input(self, i):
         ws = self.ws
         if i.pressed("left"):
-            ws.picker.nav2d(-1, 0)
+            self._disarm_delete(); ws.picker.nav2d(-1, 0)
         if i.pressed("right"):
-            ws.picker.nav2d(1, 0)
+            self._disarm_delete(); ws.picker.nav2d(1, 0)
         if i.pressed("up"):
-            ws.picker.nav2d(0, -1)
+            self._disarm_delete(); ws.picker.nav2d(0, -1)
         if i.pressed("down"):
-            ws.picker.nav2d(0, 1)
+            self._disarm_delete(); ws.picker.nav2d(0, 1)
         if i.pressed("a") or i.pressed("run"):
+            self._disarm_delete()
             ws.pick_selected()               # open the picked cart in the Editor (or + New)
         if i.pressed("b") or i.pressed("home") or i.pressed("stop"):
+            self._disarm_delete()
             ws.exit()                        # back to the launcher root
         return True
 
@@ -439,11 +463,12 @@ class EditorPickerLayer:
                 return True
             lay = ws.layout
             if ws.picker.max_page() > 0 and self._in(px, py, lay.page_prev):
-                ws.picker.flip_page(-1); return True
+                self._disarm_delete(); ws.picker.flip_page(-1); return True
             if ws.picker.max_page() > 0 and self._in(px, py, lay.page_next):
-                ws.picker.flip_page(1); return True
+                self._disarm_delete(); ws.picker.flip_page(1); return True
             i = ws.picker.tile_at(px, py)
             if i is not None:
+                self._disarm_delete()
                 ws.picker.sel = i
                 ws.pick_selected()
                 return True
@@ -455,6 +480,7 @@ class EditorPickerLayer:
             self._phover = (px, py)
             i = ws.picker.tile_at(px, py)
             if i is not None:
+                self._disarm_delete()
                 ws.picker.sel = i
         return True
 
@@ -462,15 +488,19 @@ class EditorPickerLayer:
 
     @property
     def zone_gen(self):
-        """Proxy onto ws.picker.zone_gen -- the picker GRID owns sel/items, so this
-        gives BarLayer a uniform owner.zone_gen (same trick LauncherHomeLayer uses)."""
-        return self.ws.picker.zone_gen
+        """Proxy onto ws.picker.zone_gen PLUS the local delete-confirm generation --
+        the picker GRID owns sel/items (same trick LauncherHomeLayer uses), but
+        arming/disarming DELETE changes the zone's pixels (the title <-> "DELETE? TAP
+        AGAIN") without necessarily touching sel/items, so it needs its own counter
+        folded in so BarLayer's cache repaints on that transition too."""
+        return self.ws.picker.zone_gen + self._confirm_gen
 
     def draw_zone(self, cv, rect):
         """The picker's lent left zone: DUP/DEL icons over the picker's SELECTED cart
         (when can_manage and a real cart -- not the pinned "+ New" tile -- is picked),
-        then a "PICK A PROJECT" title -- the picker is the one place a kid creates/
-        copies/deletes/edits a project (docs/shell_ux_v1.md)."""
+        then a title: "DELETE? TAP AGAIN" while a delete is armed, else "PICK A
+        PROJECT" -- the picker is the one place a kid creates/copies/deletes/edits a
+        project (docs/shell_ux_v1.md)."""
         ws = self.ws
         NAMES = self._NAMES
         lay = ws.layout
@@ -478,17 +508,30 @@ class EditorPickerLayer:
         if ws.can_manage and real is not None:
             ws._icon("dup", lay.dup_btn[0], lay.dup_btn[1], cv)
             ws._icon("del", lay.del_btn[0], lay.del_btn[1], cv)
-        cv.print("PICK A PROJECT", lay.status_name_x, 3, NAMES["white"], 1)
+        armed = self._del_armed and real is not None
+        title = "DELETE? TAP AGAIN" if armed else "PICK A PROJECT"
+        cv.print(title, lay.status_name_x, 3,
+                 NAMES["yellow"] if armed else NAMES["white"], 1)
 
     def zone_tap(self, px, py, rect=None):
-        """The picker's lent left-zone tap slice: DUP (copy) + DEL (delete) act on the
-        picker's SELECTED cart. No-op when read-only or the selection is the pinned
-        "+ New" tile (there is no real cart to act on)."""
+        """The picker's lent left-zone tap slice: DUP (copy) fires immediately on the
+        picker's selected cart -- a copy only ADDS, so it needs no guard. DEL is
+        two-tap guarded: the first tap arms "DELETE? TAP AGAIN" (draw_zone shows it),
+        the second (while still armed) confirms and deletes; nothing lower ever sees a
+        raw one-tap delete. Both no-op when read-only or the selection is the pinned
+        "+ New" tile."""
         ws = self.ws
         lay = ws.layout
         real = ws._real_selected(ws.picker)
         if ws.can_manage and real is not None and self._in(px, py, lay.dup_btn):
-            ws.dup_cart(); return True
+            self._disarm_delete()
+            ws.dup_cart()
+            return True
         if ws.can_manage and real is not None and self._in(px, py, lay.del_btn):
-            ws.del_cart(); return True
+            if self._del_armed:
+                self._disarm_delete()
+                ws.del_cart()
+            else:
+                self._arm_delete()
+            return True
         return False

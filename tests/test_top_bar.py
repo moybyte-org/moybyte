@@ -238,9 +238,12 @@ def test_launcher_bar_menu_opens_settings(tmp_path):
 # for the launcher-side regression guard.
 
 def test_picker_bar_dup_del_when_manageable(tmp_path):
-    """DUP/DEL icons fire on the picker's lent zone when can_manage: DUP duplicates
-    the picker's SELECTED cart, DEL deletes it -- the same actions the old launcher-
-    bar buttons fired, now acting on the picker's grid instead of the launcher's."""
+    """Cart management moved off the launcher home into the Editor picker's lent
+    zone (docs/shell_ux_v1.md: the launcher is for PLAYING, the picker is for
+    MANAGING projects). DUP/DEL icons fire there when can_manage: DUP duplicates
+    the picker's SELECTED cart immediately (a copy only ADDS, so it needs no
+    guard); DEL is two-tap guarded -- the first tap arms, only the second deletes
+    (see test_editor_picker.py for the "DELETE? TAP AGAIN" prompt + disarm rules)."""
     from runtime import host_app
     ws = _ws(tmp_path)
     assert ws.can_manage
@@ -252,7 +255,10 @@ def test_picker_bar_dup_del_when_manageable(tmp_path):
     drv.frame(1 / 30)
     assert len(ws.picker.items) == n0 + 1
     ws.picker.sel = next(i for i, it in enumerate(ws.picker.items) if it.get("path"))
-    drv.click(*_center(ws.layout.del_btn))           # DEL
+    drv.click(*_center(ws.layout.del_btn))           # DEL tap 1: arms, does NOT delete
+    drv.frame(1 / 30)
+    assert len(ws.picker.items) == n0 + 1
+    drv.click(*_center(ws.layout.del_btn))           # DEL tap 2: confirms
     drv.frame(1 / 30)
     assert len(ws.picker.items) == n0
 

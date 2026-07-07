@@ -2250,9 +2250,11 @@ class Workstation:
         """Open the Editor's PROJECT-PICKER (the Make tile's target): a cart grid of every
         editable project + a "+ New" tile. Pushed on the back-stack, so its X pops home and
         picking a cart pushes the Editor above it (so the Editor's "projects" affordance
-        returns HERE)."""
+        returns HERE). Resets the picker's armed delete-confirm (if any) so a stale
+        "DELETE? TAP AGAIN" from a previous visit never carries into a fresh one."""
         self._dirty = True             # screen change repaints (#44)
         self._set_text_mode(False)     # a grid, not the code editor
+        self.editor_picker.reset()
         self.wm.goto("picker")
 
     def pick_selected(self):
