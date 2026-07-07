@@ -530,11 +530,87 @@ def test_zoned_bar_editor_zone_switches_tabs_and_plays(tmp_path):
     drv.click(x, y)
     drv.frame(1 / 30)
     assert ws.screen == "menu" and ws.menu_view == "paint"
-    play_i = len(EA._ZONE_TABS) - 1
+    play_i = [t for t, _g in EA._ZONE_TABS].index(None)   # PLAY (SAVE now follows it)
     x = BL._ZONE_LEFT_GAME[0] + play_i * EA._ZONE_STRIDE + BL._BAR_ICON // 2
     drv.click(x, y)
     drv.frame(1 / 30)
     assert ws.screen == "desktop", "PLAY must run the cart"
+
+
+# -- the unified bar on the CODE/BLOCKS/MUSIC editors (Stage-4 rollout): the tab
+# ladder + PLAY + SAVE + X shows on these tabs too, so navigation is IDENTICAL to
+# the cards/paint/map tabs. code/blocks are SYSTEM-canvas (responsive layout.zone_left),
+# so the tab-ladder icons hit-test in system coords (no _game_xy translation).
+
+def _sys_zone_center(ws, target):
+    """Center of the tab-ladder / PLAY / SAVE icon `target` on the SYSTEM-canvas bar
+    (the code + blocks tabs). `target` is a tab name, None (PLAY) or EA._ZONE_SAVE."""
+    from runtime import editor_app as EA, bar_layer as BL
+    i = [t for t, _g in EA._ZONE_TABS].index(target)
+    zx, zy, _zw, _zh = ws.layout.zone_left
+    return (zx + i * EA._ZONE_STRIDE + BL._BAR_ICON // 2, zy + BL._BAR_ICON // 2)
+
+
+def test_code_tab_shows_unified_bar_ladder_switches(tmp_path):
+    """The CODE tab shows the SAME zoned bar: tapping the tab ladder switches views
+    (proves the system-canvas responsive-rect zone_tap wiring)."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.launcher.sel = 0
+    ws.open_in_editor()
+    ws.set_menu_view("code")                 # land on the code tab (system canvas)
+    drv.frame(1 / 30)
+    assert ws.screen == "menu" and ws.menu_view == "code"
+    drv.click(*_sys_zone_center(ws, "paint"))    # the ladder switches code -> paint
+    drv.frame(1 / 30)
+    assert ws.menu_view == "paint"
+
+
+def test_code_tab_bar_play_runs_the_cart(tmp_path):
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.launcher.sel = 0
+    ws.open_in_editor()
+    ws.set_menu_view("code")
+    drv.frame(1 / 30)
+    drv.click(*_sys_zone_center(ws, None))       # PLAY
+    drv.frame(1 / 30)
+    assert ws.screen == "desktop"
+
+
+def test_code_tab_context_x_exits_to_home(tmp_path):
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.launcher.sel = 0
+    ws.open_in_editor()
+    ws.set_menu_view("code")
+    drv.frame(1 / 30)
+    drv.click(*_center(ws.layout.context_x_btn))  # the right-zone X (system canvas)
+    drv.frame(1 / 30)
+    assert ws.screen == "launcher"
+
+
+def test_bar_save_icon_persists_the_active_tab(tmp_path):
+    """The bar's SAVE icon dispatches to the ACTIVE tab's persist verb (the ONE save
+    affordance the unified bar carries). On the code tab it must reach ws.save_code."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.launcher.sel = 0
+    ws.open_in_editor()
+    ws.set_menu_view("code")
+    drv.frame(1 / 30)
+    ws.editor.set_text("def _draw():\n    cls(3)\n")     # a valid edit to persist
+    calls = []
+    orig = ws.save_code
+    ws.save_code = lambda: (calls.append(1), orig())[-1]
+    from runtime import editor_app as EA
+    drv.click(*_sys_zone_center(ws, EA._ZONE_SAVE))       # the bar's SAVE icon
+    drv.frame(1 / 30)
+    assert calls == [1], "the bar SAVE must dispatch to the code tab's save_code"
 
 
 def test_zoned_bar_gear_opens_sysmenu_from_every_zoned_screen(tmp_path):

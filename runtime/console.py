@@ -221,11 +221,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # console's CodeLayout + the crash panel (_CODE_LH) + tests.
 try:
     from code_layer import (
-        CodeLayer, _CODE_X0, _CODE_Y0, _CODE_LH, _CODE_AREA, _ED_RUN, _ED_SAVE, _ED_CLOSE,
+        CodeLayer, _CODE_X0, _CODE_Y0, _CODE_LH, _CODE_AREA,
         _CODE_SYMBOLS, _SYM_Y, _SYM_H, _SYM_CELL, _SYM_AREA)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.code_layer import (
-        CodeLayer, _CODE_X0, _CODE_Y0, _CODE_LH, _CODE_AREA, _ED_RUN, _ED_SAVE, _ED_CLOSE,
+        CodeLayer, _CODE_X0, _CODE_Y0, _CODE_LH, _CODE_AREA,
         _CODE_SYMBOLS, _SYM_Y, _SYM_H, _SYM_CELL, _SYM_AREA)
 
 # Self-contained support widgets (extracted -- see widgets.py): the cursor blittable
@@ -654,22 +654,14 @@ class CodeLayout:
         self.sym_h = _SYM_H * fs
         self.sym_y = self.h - self.sym_h
         self.sym_area = (0, self.sym_y, self.sym_cell * len(_CODE_SYMBOLS), self.sym_h)
-        # -- top bar (title + action icons), code area origin --------------------
+        # -- code area origin (below the unified 18px bar) -----------------------
+        # The old RUN/SAVE/CLOSE top-band icons are gone (Stage-4 bar rollout): the
+        # unified zoned bar owns the top 18px, so CodeLayout no longer carries their
+        # rects. y0 stays 18 (the text begins right under the bar), so the body is
+        # fullscreen text + the symbol palette with no chrome of its own.
         self.x0 = _CODE_X0 * fs
         self.y0 = _CODE_Y0 * fs
-        if self._base:
-            self.run_btn, self.save_btn, self.close_btn = _ED_RUN, _ED_SAVE, _ED_CLOSE
-        else:
-            bw = 16 * fs
-            bh = 14 * fs
-            gap = 1 * fs
-            x_close = self.w - (15 * fs)
-            x_save = x_close - bw - gap
-            x_run = x_save - bw - gap
-            self.run_btn = (x_run, 1 * fs, bw, bh)
-            self.save_btn = (x_save, 1 * fs, bw, bh)
-            self.close_btn = (x_close, 1 * fs, 15 * fs, bh)
-        # -- the COLS x ROWS text grid (fills between the top bar + palette) ------
+        # -- the COLS x ROWS text grid (fills between the bar + palette) ---------
         if self._base:
             self.cols = CodeEditor.COLS          # 38
             self.rows = CodeEditor.ROWS          # 20

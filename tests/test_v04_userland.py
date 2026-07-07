@@ -603,7 +603,13 @@ def test_code_editor_symbol_palette_inserts(tmp_path):
         drv.click(C._SYM_AREA[0] + i * C._SYM_CELL + 4, C._SYM_Y + 6)
         drv.frame(1 / 30)
     assert ed.text() == "x=[]"
-    drv.click(C._ED_RUN[0] + 2, C._ED_RUN[1] + 2)   # top-bar RUN icon applies it
+    # RUN dissolved into the unified bar (Stage-4 rollout): the code tab shows the SAME
+    # zoned bar as every editor, so PLAY (in the bar's lent left zone) runs the cart.
+    # The code tab is system-canvas, so the bar uses the responsive layout.zone_left.
+    from runtime import editor_app as EA, bar_layer as BL
+    play_i = [t for t, _g in EA._ZONE_TABS].index(None)     # PLAY entry (tab is None)
+    zx, zy, _zw, _zh = ws.layout.zone_left
+    drv.click(zx + play_i * EA._ZONE_STRIDE + BL._BAR_ICON // 2, zy + BL._BAR_ICON // 2)
     drv.frame(1 / 30)
     assert ws.screen == "desktop"
 
