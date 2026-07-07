@@ -1841,6 +1841,14 @@ class Workstation:
         The rows + their action callbacks + the drawing live on self.menu_ui
         (system_menu_ui.py); this stays here as the tested ws. entry point."""
         self._dirty = True             # overlay open/close repaints (#44)
+        # Anchor the dropdown under the ≡ button's NEW right-zone position (Stage 4
+        # moved ≡ off the left edge): right-align the panel to the button so it hangs
+        # down-LEFT and stays on screen, clamped to [0, canvas_w - _POPUP_W]. The
+        # sysmenu draws on the SYSTEM canvas, so anchor to the responsive Layout's
+        # ≡ rect (the launcher/Settings/Editor bar), not the fixed crash-bar slot.
+        bx, _by, bw, _bh = self.layout.sysmenu_btn
+        ax = bx + bw - _POPUP_W
+        self.sysmenu.anchor_x = max(0, min(ax, self.sys_canvas.w - _POPUP_W))
         self.sysmenu.toggle(self.menu_ui._sysmenu_items())
 
     def _toggle_web_view(self):

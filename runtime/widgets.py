@@ -342,6 +342,12 @@ class Popup:
         self.open = False
         self.items = []               # list of row tuples (see module note above)
         self.sel = 0                  # index of the highlighted SELECTABLE row
+        # Panel left edge. Stage 4 moved the ≡ toggle to the bar's RIGHT zone, so the
+        # dropdown anchors UNDER it (hanging down-left to stay on screen) instead of the
+        # old flush-left x=0. toggle_sysmenu sets this from the live ≡ button rect before
+        # opening; it defaults to _POPUP_X so a Popup opened without an anchor (tests /
+        # any future caller) still lands flush-left.
+        self.anchor_x = _POPUP_X
 
     # -- open/close ----------------------------------------------------------
     def show(self, items):
@@ -404,11 +410,13 @@ class Popup:
 
     # -- geometry + hit-testing ----------------------------------------------
     def panel_rect(self):
-        """(x, y, w, h) of the whole panel -- height grows with the row count."""
+        """(x, y, w, h) of the whole panel -- height grows with the row count. The
+        left edge is `anchor_x` (set under the ≡ button by toggle_sysmenu, Stage 4);
+        defaults to _POPUP_X (flush left)."""
         h = 0
         for it in self.items:
             h += _POPUP_SEP_H if it[0] == "sep" else _POPUP_ROW_H
-        return (_POPUP_X, _POPUP_Y, _POPUP_W, h)
+        return (self.anchor_x, _POPUP_Y, _POPUP_W, h)
 
     def row_at(self, px, py):
         """Index of the row under (px, py), or None when outside the panel."""
