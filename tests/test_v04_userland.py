@@ -440,6 +440,36 @@ def test_enter_in_config_plays_the_cart(tmp_path):
     assert ws.menu_view != "code"                    # ...did NOT "just enter code"
 
 
+def test_paint_and_map_editors_fully_cover_the_running_cart(tmp_path):
+    """Fix 3: the Sprites (paint) and Map editor tabs must fully cover the content area
+    below the 18px bar -- no previously-running cart bleeding through. Both tabs draw over
+    _draw_menu_backdrop()'s frozen cart frame, and their panels only span x 8..312 / y
+    16..220, so before the fix the running cart leaked through the 8px side + 20px bottom
+    strips. (Cards/code/blocks/music never leaked -- they fill the whole area.)"""
+    from runtime import host_app, moy_carts
+    carts_dir = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts_dir)
+    # A cart whose _draw floods the ENTIRE screen with a bright, unmistakable color.
+    FLOOD = 8                                  # a non-black palette index; editor bg is 0
+    moy_carts.create("Flood", carts_dir, src="def _draw():\n    cls(%d)\n" % FLOOD,
+                     type="game", edit=[{"key": "c", "type": "int", "min": 0, "max": 9,
+                                         "card": "C {value}"}])
+    ws.launcher.set_items(moy_carts.scan(carts_dir))
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                           if it["title"] == "Flood")
+    ws.open_in_editor()                        # starts the cart, lands on the cards tab
+    # The leak zones: 8px left/right strips (in the content area) + the 20px bottom strip.
+    strips = [(3, 100), (316, 100), (3, 230), (160, 235)]
+    for open_tab in (ws._open_paint, ws._open_map):
+        open_tab()
+        ws.mark_dirty()
+        ws.frame(1 / 30)
+        cv = ws.canvas
+        for (x, y) in strips:
+            assert cv.pix(x, y) != FLOOD, \
+                "%s leaked the cart at %d,%d" % (open_tab.__name__, x, y)
+
+
 def test_hop_quest_uses_tilemap_and_still_plays(tmp_path):
     # Hop Quest now draws its level with map() and reads collision with mget() (#32).
     # Verify the cart loads its tilemap, draws ground through map(), and the attract

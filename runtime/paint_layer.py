@@ -220,6 +220,13 @@ class PaintLayer:
         # Edit the editor's OWN sheet -- the cart sprites for PAINT, the system icon
         # sheet for the theme editor (EDIT ICONS) -- so one renderer serves both.
         sheet = pe.sheet if pe is not None else ws.project.sheet
+        # Cover the FULL content area below the 18px bar first (Fix 3): the paint tab draws
+        # over _draw_menu_backdrop()'s frozen cart frame, and the panel below only spans
+        # x 8..312 / y 16..220 -- so without this fill the previously-running cart bled
+        # through the 8px side + 20px bottom strips. Match the cards tab (which fills the
+        # whole area) so the editor is fully opaque. (Harmless on the EDIT-ICONS path, which
+        # already cls()'d to black.)
+        cv.rect(0, 18, cv.w, cv.h - 18, NAMES["black"])
         cv.rect(8, 16, 304, 204, NAMES["black"])
         cv.rectb(8, 16, 304, 204, NAMES["orange"])
         title = ("ICONS  TILE " if ws._editing_icons else "PAINT  SPR ") + str(pe.n if pe else 0)
