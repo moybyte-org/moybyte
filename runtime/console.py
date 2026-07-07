@@ -2158,18 +2158,22 @@ class Workstation:
         self.editor_app.open(self.project)
 
     def launch_selected(self):
-        """A launcher TAP opens the selected cart. ONLY a "game" follows system.json's
-        `tap_mode` (spec Section 4): "player" plays it immediately, "maker" (the DEFAULT)
-        drops into the Editor on the Config page. A "tool"/"app" (and anything non-game --
-        e.g. the wifi tool) ALWAYS LAUNCHES: you run it, you don't edit it on a tap (owner
-        device feedback). Both Play and Edit stay reachable regardless via long-press/menu;
+        """A launcher TAP opens the selected cart. Whether the tap EDITS or RUNS keys on
+        EDITABILITY, not manifest type: a cart WITH an `edit` schema (the "Make it mine"
+        cards -- games AND the NEW-cart wallpaper template) follows system.json's `tap_mode`
+        (spec Section 4): "player" plays it, "maker" (the DEFAULT) drops into the Editor on
+        the Config page. A cart with NO edit schema (a pure tool like wifi.moy -- nothing to
+        customize) ALWAYS LAUNCHES: you run it, you don't edit it on a tap (owner device
+        feedback). "Editing is for editable things" -- so a kid's brand-new cart (type
+        wallpaper, but with edit cards) still opens its Config on a maker tap instead of
+        running bar-less with no way back. Both Play and Edit stay reachable via the menu;
         the tap default is the only thing this decides."""
         cart = self.launcher.selected()
-        ctype = cart.get("type") if cart else "game"
-        if ctype == "game" and self.system.get("tap_mode", "maker") == "maker":
+        editable = bool(cart.get("edit")) if cart else False
+        if editable and self.system.get("tap_mode", "maker") == "maker":
             self.open_in_editor()
         else:
-            self.open()                # player-mode game, or ANY non-game -> launch/run
+            self.open()                # player-mode, or a non-editable cart -> launch/run
 
     def launch_wifi_tool(self):
         """Launch the WiFi system tool -- the right-zone wifi icon's tap target (Part 3):

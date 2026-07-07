@@ -235,33 +235,59 @@ def test_tapping_a_cart_icon_in_player_mode_plays_it(tmp_path):
     assert ws.screen == "desktop"               # player mode: tap -> plays
 
 
+_ONE_CARD = [{"key": "c", "type": "choice", "choices": ["red", "blue"], "card": "C IS {value}"}]
+
+
 def test_tool_cart_always_launches_on_tap_even_in_maker_mode(tmp_path):
-    """Part 2 (owner device feedback): a "tool"/"app" cart ALWAYS LAUNCHES on a tap --
-    even in the DEFAULT maker mode, where a GAME opens the Editor. You RUN the wifi tool,
-    you don't edit it on a tap. So launch_selected() on a tool lands on the running cart
-    (screen == "desktop"), never the Editor (screen == "menu"); a game in the same mode
-    still opens the Editor (the contrast). Both Play/Edit stay reachable via menu."""
+    """Part 2 (owner device feedback): a NON-EDITABLE cart (no `edit` schema -- e.g. the
+    wifi tool: nothing to customize) ALWAYS LAUNCHES on a tap, even in the DEFAULT maker
+    mode where an EDITABLE cart opens the Editor. You RUN the wifi tool, you don't edit it.
+    So launch_selected() on a schema-less tool lands on the running cart (screen ==
+    "desktop"), never the Editor; an EDITABLE cart in the same mode still opens the Editor
+    (the contrast). Dispatch keys on editability, not manifest type."""
     from runtime import host_app, moy_carts
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)
-    assert ws.tap_mode() == "maker"                 # the mode where a GAME would EDIT
+    assert ws.tap_mode() == "maker"                 # the mode where an EDITABLE cart EDITs
 
     moy_carts.create("MyTool", carts_dir, src="def _draw():\n    cls(1)\n", type="tool")
     ws.launcher.set_items(moy_carts.scan(carts_dir))
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("title") == "MyTool")
+    assert not ws.launcher.selected().get("edit")   # no edit schema -> nothing to customize
     ws.launch_selected()                            # the tap dispatch
     assert ws.screen == "desktop"                   # LAUNCHED (ran), NOT the Editor
     assert ws.cart is not None and ws.cart.get("type") == "tool"
 
-    # A GAME in the SAME maker mode still opens the Editor (the tap-mode contrast).
-    moy_carts.create("MyGame", carts_dir, src="def _draw():\n    cls(2)\n", type="game")
+    # An EDITABLE game in the SAME maker mode still opens the Editor (the contrast).
+    moy_carts.create("MyGame", carts_dir, src="def _draw():\n    cls(2)\n",
+                     type="game", edit=_ONE_CARD)
     ws.go_home()
     ws.launcher.set_items(moy_carts.scan(carts_dir))
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("title") == "MyGame")
     ws.launch_selected()
-    assert ws.screen == "menu"                      # maker default for a GAME: the Editor
+    assert ws.screen == "menu"                      # maker default for an EDITABLE cart
+
+
+def test_editable_wallpaper_cart_opens_editor_on_maker_tap(tmp_path):
+    """The HIGH regression guard: a kid's brand-new cart is `type=="wallpaper"` but carries
+    the "Make it mine" edit cards (moy_carts.NEW_TEMPLATE). Dispatching on TYPE would run it
+    bar-less with no tap path back to its Config -- the trap. Dispatching on EDITABILITY,
+    a maker-mode tap opens the Editor (Config) because it HAS an edit schema, even though
+    its type is wallpaper (not a game)."""
+    from runtime import host_app, moy_carts
+    carts_dir = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts_dir)
+    assert ws.tap_mode() == "maker"
+    new = moy_carts.new_from_template(carts_dir, title="Freshie")
+    assert new["type"] == "wallpaper" and new["edit"]   # wallpaper type, BUT has edit cards
+    ws.launcher.set_items(moy_carts.scan(carts_dir))
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                           if it.get("title") == "Freshie")
+    ws.launch_selected()
+    assert ws.screen == "menu"                      # opened the Editor (Config), did NOT run
+    assert ws.menu_view == "cards"                  # ...landing on the Make-it-mine cards
 
 
 def test_go_home_keeps_wallpaper(tmp_path):
