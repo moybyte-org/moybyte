@@ -667,6 +667,14 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     import moy_carts
     ws = Workstation(comp, canvas, inp, carts)
     ws.make_api = make_api        # device cart namespace (DeviceCanvas + Image + color)
+    # #67 spike: say ONCE whether the auto-native cart loader engaged (the emitter
+    # probe in player.py), so a serial capture can attribute logic-ms deltas.
+    try:
+        import player as _player_mod
+        _diag_note("carts", "auto-native %s"
+                   % ("ON" if _player_mod.NATIVE_CARTS else "OFF"))
+    except Exception:  # noqa: BLE001 -- diagnostic only
+        pass
     ws.make_audio = make_audio    # device I2S audio backend (#16, NEEDS HW VERIFICATION)
     ws.carts_store = moy_carts    # SD .moy store (scan/load/save/create/dup/delete)
     ws.carts_root = carts_root
