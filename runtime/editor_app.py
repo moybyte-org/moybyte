@@ -16,9 +16,11 @@ map/blocks/music builds), the per-tab landing entry points (`open`/`open_paint`/
 `menu_view` is NOT deleted -- it becomes a projection. `EditorApp.tab` is the
 source of truth for the active view; `Workstation.menu_view` stays the string-keyed
 router's routing key as a forwarding shim over `EditorApp.tab` (the same trick
-`ws.sheet` got in Stage 1), so the router keeps working unmodified through Stages
-3-5. It is deleted only at the END of the split Stage 6, once the back-stack is the
-router and nothing reads it.
+`ws.sheet` got in Stage 1), so the router keeps working unmodified. Stage 6 made the
+WM back-stack the source of truth for `screen` and retired every PRODUCTION reader/
+writer of the `screen` string (they ask the stack / call wm.goto now); `menu_view`
+and `screen` are kept as faithful tested-surface projections (plan Section 6 keeps
+these shims deliberately -- the future OS-arch capability track is the removal list).
 
 Boundary (Section 1.2): this app switches the tabs' DATA access onto the injected
 `Project`, NOT the draw toolkit. The shared UI plumbing (`_glyph`, layouts, pointer,
@@ -135,19 +137,19 @@ class EditorApp:
         editor (there are no cards to show). The old Workstation._open_menu."""
         self.project = project
         ws = self.ws
-        ws.screen = "menu"
+        ws.wm.goto("menu")       # Stage 6e: spawn/return the Editor on the back-stack
         ws.set_menu_view("cards" if ws.cart.get("edit") else "code")
 
     def open_paint(self):
         ws = self.ws
-        ws.screen = "menu"
+        ws.wm.goto("menu")       # Stage 6e: spawn/return the Editor on the back-stack
         ws._editing_icons = False        # a CART sheet, not the system theme
         ws.paint_status = None
         ws.set_menu_view("paint")
 
     def open_map(self):
         ws = self.ws
-        ws.screen = "menu"
+        ws.wm.goto("menu")       # Stage 6e: spawn/return the Editor on the back-stack
         ws.save_status = None
         ws.map_ui.on_open()          # fresh gesture/zoom state (#37)
         ws.set_menu_view("map")
@@ -159,7 +161,7 @@ class EditorApp:
 
     def open_blocks(self):
         ws = self.ws
-        ws.screen = "menu"
+        ws.wm.goto("menu")       # Stage 6e: spawn/return the Editor on the back-stack
         # NB: don't pre-clear blk_status here -- set_menu_view("blocks") sets the
         # "CODE LOCKED" notice when it builds the editor in protected mode, and
         # clearing it after would hide the data-loss guard's message.
@@ -170,7 +172,7 @@ class EditorApp:
         cart's AudioBank. Mirrors open_map -- reset preview state, then build the
         editor via set_menu_view("music")."""
         ws = self.ws
-        ws.screen = "menu"
+        ws.wm.goto("menu")       # Stage 6e: spawn/return the Editor on the back-stack
         ws.save_status = None
         ws.music_ui._stop_music_preview()
         ws.set_menu_view("music")

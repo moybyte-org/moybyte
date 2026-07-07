@@ -1810,7 +1810,7 @@ class Workstation:
             self._settings_return = self.wm.top_kind()  # resume here on exit (cart vs home)
         self._dirty = True             # screen change repaints (#44)
         self.settings_layer.reset()    # reset the selection + scroll window (#53)
-        self.screen = "settings"
+        self.wm.goto("settings")       # Stage 6e: push Settings onto the back-stack
         self.show_achievements = False
         self.ach_ui._secret_taps = 0              # fresh secret-door run each visit (#21)
         self._set_text_mode(False)
@@ -1822,9 +1822,9 @@ class Workstation:
             # Resume the running cart WITHOUT clobbering _run_caller (the Stage-3 review
             # fix): Settings was opened OVER a cart the Editor may have launched via PLAY,
             # so the cart's exit must still return to that caller (the Editor tab), not be
-            # reset to the launcher here. run() would overwrite _run_caller; a bare
-            # screen flip resumes the same cart and preserves who it pops back to.
-            self.screen = "desktop"
+            # reset to the launcher here. run() would overwrite _run_caller; popping
+            # Settings off the stack reveals the cart below + preserves who it pops to.
+            self.wm.goto("desktop")    # Stage 6e: pop Settings, resume the cart below
             self._dirty = True
         else:
             self.go_home()
@@ -2007,8 +2007,10 @@ class Workstation:
     # forwarding PROJECTION of it (read AND write, the same shim ws.sheet got in
     # Stage 1), so the string-keyed router keeps routing on ws.menu_view unchanged and
     # every writer (ThemeLayer sets "theme"; open()/set_menu_view set the cart tabs)
-    # keeps working. EditorApp.tab is the source of truth; menu_view is deleted only at
-    # the END of the split Stage 6, once the back-stack routes and nothing reads it.
+    # keeps working. EditorApp.tab is the source of truth; menu_view stays a faithful
+    # tested-surface projection of it (like ws.screen over the WM back-stack -- plan
+    # Section 6 keeps these shims as tested surface, the future OS-arch capability track
+    # is what finally removes them; the router still consults it as the "menu" tab key).
     @property
     def menu_view(self):
         return self.editor_app.tab
@@ -2047,7 +2049,7 @@ class Workstation:
         is one caller (pop == go_home); the Editor is the second (Stage 3), so PLAY
         returns to the same tab -- proving the Player is caller-agnostic."""
         self._run_caller = caller
-        self.screen = "desktop"
+        self.wm.goto("desktop")        # Stage 6e: push the Player process onto the back-stack
 
     def _exit_to_caller(self):
         """Pop the running cart back to whoever launched it (run()'s recorded caller,
@@ -2059,7 +2061,7 @@ class Workstation:
         home root, or None) pops all the way home."""
         if self._run_caller is self.editor_app:
             self._dirty = True             # screen change repaints (#44)
-            self.screen = "menu"           # back to the Editor on editor_app.tab
+            self.wm.goto("menu")           # Stage 6e: pop the Player, back to the Editor tab
         else:
             self.go_home()
 
@@ -2535,7 +2537,7 @@ class Workstation:
         self._editing_icons = False    # never carry the theme-editing flag home
         self.map_ui.reset()
         self.block_ui.reset()
-        self.screen = "launcher"
+        self.wm.goto("launcher")       # Stage 6e: pop back to the launcher root
         self.cart = None
         self.ns = None
         self.cart_error = None
