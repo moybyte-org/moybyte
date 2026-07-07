@@ -1406,12 +1406,16 @@ class Workstation:
         self._cursor_layer = L("cursor", "system", draw=lambda dt: self._draw_cursor())
 
     def _content_layer(self):
-        """The active content layer, keyed by screen/menu_view (never the splash --
-        the boot logo is a draw-time takeover, see _draw_stack). This is the layer
-        keyboard input routes to."""
-        if self.screen == "menu":
+        """The active content layer, keyed by the back-stack top / menu_view (never the
+        splash -- the boot logo is a draw-time takeover, see draw_stack). This is the
+        layer keyboard input routes to. Stage 6d: the router asks the WM stack top (the
+        source of truth) directly rather than the `screen` projection string -- same
+        answer, one fewer production reader of the string. Still ONE string-keyed
+        registry lookup: the stack is a data structure it reads, not a second router."""
+        kind = self.wm.top_kind()
+        if kind == "menu":
             return self._content_layers.get(self.menu_view) or self._content_layers["cards"]
-        return self._content_layers.get(self.screen) or self._content_layers["launcher"]
+        return self._content_layers.get(kind) or self._content_layers["launcher"]
 
     @property
     def _active_content(self):
@@ -1802,8 +1806,8 @@ class Workstation:
         return self._online_ok
 
     def open_settings(self):
-        if self.screen != "settings":
-            self._settings_return = self.screen   # resume here on exit (cart vs home)
+        if not self.wm.top_is("settings"):        # Stage 6d: ask the stack top
+            self._settings_return = self.wm.top_kind()  # resume here on exit (cart vs home)
         self._dirty = True             # screen change repaints (#44)
         self.settings_layer.reset()    # reset the selection + scroll window (#53)
         self.screen = "settings"
@@ -2066,9 +2070,9 @@ class Workstation:
         so this is never reached with screen == "launcher"). A pre-Stage-6 shim over the
         screen strings: Settings closes via its own resume-or-home rule; the Editor (and
         any other taskbar app) goes home."""
-        if self.screen == "settings":
+        if self.wm.top_is("settings"):            # Stage 6d: ask the stack top
             self._exit_settings()
-        elif self.screen != "launcher":
+        elif not self.wm.top_is("launcher"):
             self.go_home()
 
     def _draw_cart_bar(self):
@@ -2097,7 +2101,7 @@ class Workstation:
         Player reads it to decide whether to draw/route the tool bar and to suppress its
         own hold-to-exit gesture (a tool's BACKSPACE stays a free text key). False for
         games, the crash frame (the crash bar handles that), and every non-play screen."""
-        return (self.screen == "desktop" and self.cart_error is None
+        return (self.wm.top_is_player() and self.cart_error is None  # Stage 6d
                 and self.cart is not None
                 and self.cart.get("type") in ("tool", "app"))
 
