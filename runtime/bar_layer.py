@@ -496,9 +496,15 @@ class BarLayer:
             return True
         # Context X (Stage 5, spec Section 9): tap to EXIT the active app back toward the
         # launcher root. The launcher draws no X (where == "home") so it's not tested
-        # there -- it is the root and never exits.
+        # there -- it is the root and never exits. A running TOOL (Part 4) pops to its RUN
+        # caller (spec Section 6's test-play round trip -- go_home for a launcher-launched
+        # tool, but the Editor tab if a tool is ever PLAYed from the editor); every other
+        # taskbar app (Editor/Settings) uses the screen-string exit.
         if where != "home" and self._in(px, py, x_hit):
-            ws.exit()
+            if where == "tool":
+                ws._exit_to_caller()
+            else:
+                ws.exit()
             return True
         owner = self._zone_owner(where)
         # Pass the SAME lent rect the draw used (game-canvas _ZONE_LEFT_GAME for

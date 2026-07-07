@@ -149,7 +149,8 @@ def _update(dt):
 
 def _draw():
     cls(col("dark_blue"))
-    print("WIFI", 8, 8, col("white"), 2)
+    # (No title draw: as a TOOL this runs WITH the console's minimal bar, which shows its
+    # own "WiFi" title in the top 18px -- a cart-drawn title at y=8 would sit under it.)
 
     # status line: connected SSID + IP (the live link other features use).
     if _has_wifi():
