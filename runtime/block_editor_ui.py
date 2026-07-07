@@ -52,27 +52,29 @@ _BASE_W = 320
 _BASE_H = 240
 _FONT_W = 8                 # petme128 cell width at scale 1 (one char advance)
 
-# Block editor (#29 Part 2): the structured outline. A title bar + a vertical
-# scrolling list of Scratch-style colored block rows (the flattened script) over a
-# bottom action bar. Built 320x240-first (the responsive pass is #39 step 2), drawn
-# on the GAME canvas through the same primitives as the other editors so host ==
-# device. Pressing A on an insert `+` row opens the category->block insert menu.
-_BLK_TITLE_Y = 2
+# Block editor (#29 Part 2): the structured outline. A vertical scrolling list of
+# Scratch-style colored block rows (the flattened script) under the unified zoned bar
+# (Stage-4 rollout: the old title bar was dissolved into it) and over a bottom action
+# bar. Built 320x240-first (the responsive pass is #39 step 2), drawn on the SYSTEM
+# canvas through the same primitives as the other editors so host == device. Pressing
+# A on an insert `+` row opens the category->block insert menu.
+_BLK_HINT_Y = 20         # hint/status strip, just below the 18px unified bar
 _BLK_X0 = 6                # left edge of the outline
 _BLK_W = 308              # outline width
-_BLK_Y0 = 16             # first row's top
+_BLK_Y0 = 30             # first row's top (below the bar + the hint/status strip)
 _BLK_ROW_H = 16          # one block row's height (8px text + padding)
 _BLK_INDENT = 12         # px of indent per nesting depth
-_BLK_ROWS = 11           # visible rows (Y0 .. just above the action bar)
+_BLK_ROWS = 10           # visible rows (Y0 .. just above the action bar)
 _BLK_AREA = (_BLK_X0, _BLK_Y0, _BLK_W, _BLK_ROWS * _BLK_ROW_H)
-# Bottom action bar: ADD / DEL / up / down on the left, SAVE / CODE / CLOSE right.
+# Bottom action bar: ADD / DEL / up / down on the left, then CODE (graduate). SAVE and
+# CLOSE dissolved into the unified bar (Stage-4 rollout): SAVE -> the bar's SAVE icon
+# (save_current -> save_blocks), CLOSE -> the bar's context X. CODE stays -- it's the
+# one-way #29 GRADUATION action, not navigation.
 _BLK_ADD = (6, 196, 40, 22)
 _BLK_DEL = (48, 196, 34, 22)
 _BLK_UP = (84, 196, 22, 22)
 _BLK_DN = (108, 196, 22, 22)
-_BLK_SAVE = (138, 196, 50, 22)
-_BLK_CODE = (190, 196, 56, 22)   # graduate to code
-_BLK_CLOSE = (248, 196, 66, 22)
+_BLK_CODE = (138, 196, 56, 22)   # graduate to code
 # The insert menu: a modal list overlay (category list, then the block list for the
 # chosen category, then for some slots a small option picker). Drawn over a frozen
 # outline; navigated with up/down + A, B backs out one level.
@@ -173,35 +175,34 @@ class BlockLayout:
         fs = self.fs
         self.cell = _FONT_W * fs
         self._base = (self.w == _BASE_W and self.h == _BASE_H and fs == 1)
-        self.title_y = _BLK_TITLE_Y * fs
+        # The hint + SAVE-status strip sits just below the 18px unified bar (the old
+        # title row was dissolved into the bar, Stage-4 rollout).
+        self.hint_y = _BLK_HINT_Y * fs
         self.status_x = 198 * fs                  # the SAVE-status text x (right side)
-        self.hint_y = 9 * fs
         self.row_h = _BLK_ROW_H * fs
         self.indent = _BLK_INDENT * fs
         self.x0 = _BLK_X0 * fs
         self.y0 = _BLK_Y0 * fs
         # -- action bar: a row of buttons anchored to the bottom -----------------
+        # SAVE/CLOSE moved to the unified bar (Stage-4 rollout); only ADD / DEL / up /
+        # dn + CODE (the #29 graduation action) stay in the body.
         if self._base:
             self.bar_y = 196
             self.bar_h = 22
             self.add_btn, self.del_btn = _BLK_ADD, _BLK_DEL
             self.up_btn, self.dn_btn = _BLK_UP, _BLK_DN
-            self.save_btn, self.code_btn, self.close_btn = \
-                _BLK_SAVE, _BLK_CODE, _BLK_CLOSE
+            self.code_btn = _BLK_CODE
         else:
             self.bar_h = 22 * fs
             self.bar_y = self.h - self.bar_h - 2 * fs
             by, bh = self.bar_y, self.bar_h
-            # left cluster: ADD / DEL / up / dn ; right cluster: SAVE / CODE / CLOSE
+            # left cluster: ADD / DEL / up / dn ; CODE (graduate) after them.
             x = self.x0
             self.add_btn = (x, by, 40 * fs, bh); x += 42 * fs
             self.del_btn = (x, by, 34 * fs, bh); x += 36 * fs
             self.up_btn = (x, by, 22 * fs, bh); x += 24 * fs
-            self.dn_btn = (x, by, 22 * fs, bh)
-            cx = self.w - self.x0 - 66 * fs
-            self.close_btn = (cx, by, 66 * fs, bh)
-            self.code_btn = (cx - 58 * fs, by, 56 * fs, bh)
-            self.save_btn = (cx - 58 * fs - 52 * fs, by, 50 * fs, bh)
+            self.dn_btn = (x, by, 22 * fs, bh); x += 24 * fs
+            self.code_btn = (x, by, 56 * fs, bh)
         # -- outline width + visible rows ----------------------------------------
         if self._base:
             self.outline_w = _BLK_W              # 308
@@ -916,11 +917,17 @@ class BlockEditorUI:
         if self.blk_menu is not None:
             self._blk_menu_click(px, py)
             return
+        # No modal up: the unified bar (tab ladder + PLAY + SAVE + X) claims its slice
+        # FIRST (Stage-4 rollout), before any outline/action-bar tap -- SAVE here
+        # dispatches to save_blocks, X exits, PLAY runs. System coords (blocks is a
+        # system-canvas tab), same space the bar drew in.
+        if self.ws.bar_layer.handle_bar_tap("menu", px, py):
+            return
         be = self.blocks_ed
         if be is None:
             return
         lay = self.block_layout
-        # Action bar
+        # Action bar: editing controls + CODE (graduate) only (SAVE/CLOSE in the bar).
         if self._in(px, py, lay.add_btn):
             self._blk_open_categories(); return
         if self._in(px, py, lay.del_btn):
@@ -929,12 +936,8 @@ class BlockEditorUI:
             be.move_block(-1); self._blk_reveal(); return
         if self._in(px, py, lay.dn_btn):
             be.move_block(1); self._blk_reveal(); return
-        if self._in(px, py, lay.save_btn):
-            self.save_blocks(); return
         if self._in(px, py, lay.code_btn):
             self.graduate_to_code(); return
-        if self._in(px, py, lay.close_btn):
-            self.ws._leave_menu(); return
         # Tap a row in the outline: select it (and on a block, advance the slot
         # highlight / open the insert menu on a `+` row -- a tap == the A action).
         if self._in(px, py, lay.area()):
@@ -1032,20 +1035,22 @@ class BlockEditorUI:
         fs = lay.fs
         be = self.blocks_ed
         cv.cls(NAMES["dark_blue"])
-        # title clamp: 18 at baseline, else fill the width before the status slot.
-        tclamp = 18 if lay._base else max(6, (lay.status_x - lay.x0) // lay.cell - 8)
-        title = "BLOCKS  " + (ws.project.cart["title"][:tclamp] if ws.project.cart else "")
-        if be is not None and be.dirty:
-            title = title + " *"
-        cv.print(title, lay.x0, lay.title_y, NAMES["white"], 1)
+        # The old "BLOCKS <title>" row was dissolved into the unified bar (Stage-4
+        # rollout). Just below the bar sits a thin hint/status strip: the kid-facing
+        # hint for surprising blocks on the left, the SAVE-status / "CODE LOCKED"
+        # notice on the right (a dirty * rides the status).
         if self.blk_status:
-            cv.print(self.blk_status[:20], lay.status_x, lay.title_y, NAMES["yellow"], 1)
+            cv.print(self.blk_status[:14], lay.status_x, lay.hint_y, NAMES["yellow"], 1)
+        elif be is not None and be.dirty:
+            cv.print("*", lay.status_x, lay.hint_y, NAMES["yellow"], 1)
         if be is None:
             return
         # A kid-facing hint for the surprising blocks (forever-is-bounded / wait).
         hint = self._blk_hint()
         if hint:
-            cv.print(hint[:50], lay.x0, lay.hint_y, NAMES["light_grey"], 1)
+            # truncate to leave the right end for the status slot
+            hmax = max(8, (lay.status_x - lay.x0) // lay.cell - 1)
+            cv.print(hint[:hmax], lay.x0, lay.hint_y, NAMES["light_grey"], 1)
         rows = be.rows
         for vi in range(lay.rows):
             ridx = self.blk_top + vi
@@ -1058,14 +1063,16 @@ class BlockEditorUI:
         if self.blk_top + lay.rows < len(rows):
             cv.print("v", lay.x0 + lay.outline_w - 8 * fs,
                      lay.y0 + (lay.rows - 1) * lay.row_h, NAMES["white"], 1)
-        # action bar
+        # action bar: editing controls + the #29 graduation action only (SAVE/CLOSE
+        # moved to the unified bar).
         ws._icon_btn("plus", "ADD", lay.add_btn, NAMES["green"], cv)
         ws._btn("DEL", lay.del_btn, NAMES["red"], cv)
         ws._btn("^", lay.up_btn, NAMES["indigo"], cv)
         ws._btn("v", lay.dn_btn, NAMES["indigo"], cv)
-        ws._btn("SAVE", lay.save_btn, NAMES["blue"], cv)
         ws._icon_btn("code", "CODE", lay.code_btn, NAMES["dark_purple"], cv)
-        ws._btn("CLOSE", lay.close_btn, NAMES["dark_grey"], cv)
+        # The unified zoned bar (tab ladder + PLAY + SAVE + X), drawn BEFORE the modal
+        # insert menu / entry prompt so those still sit on top (Stage-4 rollout).
+        ws.bar_layer._draw_status_strip("menu")
         if self.blk_menu is not None:
             self._draw_blk_menu()
         if self.blk_kbd is not None:

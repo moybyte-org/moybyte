@@ -123,8 +123,11 @@ def test_block_editor_baseline_layout_constants(tmp_path):
     lay = C.BlockLayout(320, 240, 1)
     assert lay._base
     assert lay.rows == C._BLK_ROWS and lay.menu_rows == C._BLK_MENU_ROWS
-    assert lay.add_btn == C._BLK_ADD and lay.close_btn == C._BLK_CLOSE
-    assert lay.save_btn == C._BLK_SAVE and lay.code_btn == C._BLK_CODE
+    assert lay.add_btn == C._BLK_ADD and lay.code_btn == C._BLK_CODE
+    # SAVE/CLOSE dissolved into the unified bar (Stage-4 rollout): the outline shifted
+    # below the bar + a hint/status strip (y0=30, 10 rows), and BlockLayout no longer
+    # carries save_btn/close_btn (SAVE -> bar SAVE, CLOSE -> bar context X).
+    assert not hasattr(lay, "save_btn") and not hasattr(lay, "close_btn")
     assert lay.area() == C._BLK_AREA and lay.menu == C._BLK_MENU
 
 

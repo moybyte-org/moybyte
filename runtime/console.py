@@ -28,9 +28,9 @@ from editors import (CodeEditor, IconSheet,
 try:
     from block_editor_ui import (
         BlockEditorUI, BlockLayout,
-        _BLK_TITLE_Y, _BLK_X0, _BLK_W, _BLK_Y0, _BLK_ROW_H, _BLK_INDENT, _BLK_ROWS,
-        _BLK_AREA, _BLK_ADD, _BLK_DEL, _BLK_UP, _BLK_DN, _BLK_SAVE, _BLK_CODE,
-        _BLK_CLOSE, _BLK_MENU, _BLK_MENU_ROW_H, _BLK_MENU_ROWS, _BLK_KBD,
+        _BLK_HINT_Y, _BLK_X0, _BLK_W, _BLK_Y0, _BLK_ROW_H, _BLK_INDENT, _BLK_ROWS,
+        _BLK_AREA, _BLK_ADD, _BLK_DEL, _BLK_UP, _BLK_DN, _BLK_CODE,
+        _BLK_MENU, _BLK_MENU_ROW_H, _BLK_MENU_ROWS, _BLK_KBD,
         _BLK_KBD_DEL, _BLK_KBD_OK, _BLK_KBD_X, _BLK_NUM, _BLK_NUM_GX, _BLK_NUM_GY,
         _BLK_NUM_BW, _BLK_NUM_BH, _BLK_NUM_BPR, _BLK_NUM_KEYS, _BLK_NUM_DEL,
         _BLK_NUM_BLOCK, _BLK_NUM_OK, _BLK_NUM_X, _CAT_LABEL, _NEW_VAR_ITEM,
@@ -40,9 +40,9 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.block_editor_ui import (
         BlockEditorUI, BlockLayout,
-        _BLK_TITLE_Y, _BLK_X0, _BLK_W, _BLK_Y0, _BLK_ROW_H, _BLK_INDENT, _BLK_ROWS,
-        _BLK_AREA, _BLK_ADD, _BLK_DEL, _BLK_UP, _BLK_DN, _BLK_SAVE, _BLK_CODE,
-        _BLK_CLOSE, _BLK_MENU, _BLK_MENU_ROW_H, _BLK_MENU_ROWS, _BLK_KBD,
+        _BLK_HINT_Y, _BLK_X0, _BLK_W, _BLK_Y0, _BLK_ROW_H, _BLK_INDENT, _BLK_ROWS,
+        _BLK_AREA, _BLK_ADD, _BLK_DEL, _BLK_UP, _BLK_DN, _BLK_CODE,
+        _BLK_MENU, _BLK_MENU_ROW_H, _BLK_MENU_ROWS, _BLK_KBD,
         _BLK_KBD_DEL, _BLK_KBD_OK, _BLK_KBD_X, _BLK_NUM, _BLK_NUM_GX, _BLK_NUM_GY,
         _BLK_NUM_BW, _BLK_NUM_BH, _BLK_NUM_BPR, _BLK_NUM_KEYS, _BLK_NUM_DEL,
         _BLK_NUM_BLOCK, _BLK_NUM_OK, _BLK_NUM_X, _CAT_LABEL, _NEW_VAR_ITEM,
