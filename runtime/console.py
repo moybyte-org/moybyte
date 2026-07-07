@@ -2672,7 +2672,7 @@ class Workstation:
         # Directional input (host arrows / device trackball). In the code editor it
         # moves the CARET (the view follows it); elsewhere the launcher/desktop are
         # pointer-driven, so this is a no-op there.
-        if (self.screen == "menu" and self.menu_view == "code"
+        if (self.wm.top_is("menu") and self.menu_view == "code"    # Stage 6d
                 and self.editor is not None and (dx or dy)):
             self.editor.move(dy, dx)
             self._dirty = True             # caret moved -> redraw (#44)
@@ -2744,24 +2744,27 @@ class Workstation:
         # so it keeps painting + flushing for its whole hold without any input.
         if self._splash_until is not None:
             return True
+        # Stage 6d: the animation gates ask the WM stack top (the source of truth), not
+        # the `screen` projection string -- same answers, hoisted once per call.
+        kind = self.wm.top_kind()
         # A running cart on the desktop draws every frame (unless it crashed, when the
         # error panel is static). Stage 5 retired the pause frame, so there is no
         # paused-but-idle state to exclude here anymore.
-        if self.screen == "desktop" and self.cart_error is None and (
+        if kind == "desktop" and self.cart_error is None and (
                 self._update is not None or self._draw is not None):
             return True
         # A music-editor preview must keep ticking the mixer + redrawing the PLAY/STOP
         # button (and clearing the flag when the effect ends) without input (#50).
-        if self.screen == "menu" and self.menu_view == "music" \
+        if kind == "menu" and self.menu_view == "music" \
                 and self.music_ui.music_preview is not None:
             return True
         # A live wallpaper animates the home/settings backdrop.
-        if self.screen in ("launcher", "settings") and self.wallpaper.is_animating(dt):
+        if kind in ("launcher", "settings") and self.wallpaper.is_animating(dt):
             return True
         # A firmware install (#53) advances a chunk per frame; "done" runs a short
         # reboot countdown; "checking"/"downloading" (Phase 3) step the online flow.
         # All must keep redrawing so progress animates and the work proceeds without input.
-        if self.screen == "update" and self.update_ui._upd_phase in (
+        if kind == "update" and self.update_ui._upd_phase in (
                 "install", "done", "checking", "downloading"):
             return True
         # Transient overlays redraw while they're up.
@@ -3008,7 +3011,7 @@ class Workstation:
         (or perf_hud) is on -- run_desktop sets perf_capture=True at boot. Backend-
         agnostic + host-safe: pure reads, no drawing, no hardware. Returns None
         when no cart is actively running (nothing useful to sample)."""
-        running = (self.screen == "desktop" and self.cart is not None
+        running = (self.wm.top_is_player() and self.cart is not None  # Stage 6d
                    and self.cart_error is None)
         if not running:
             return None
