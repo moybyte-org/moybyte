@@ -119,23 +119,29 @@ re-drawing the background every frame.
 
 | call | does |
 |---|---|
+| `background(x)` | **declare the backdrop once** — a color (`background(col("dark_blue"))`) or a painted Image (`background(image("bg"))`) — and the engine repaints it at the start of every frame automatically. Your `_draw` then only draws the moving things: no `cls`, no backdrop blit, nothing to overdraw. `background()` with no args clears it |
 | `make_layer(w, h)` | create an off-screen layer (wider than the screen). Draw into it once with the **same verbs** (`cls`/`map`/`spr`/`rect`/…) via the layer's methods |
 | `draw_layer(layer, cam_x=0, cam_y=0)` | blit the visible `W×H` window of `layer` at the camera offset (clamped to the layer bounds). Draw actors on top afterwards |
 
 ---
 
-## Make it fast (four habits)
+## Make it fast (five habits)
 
 Every draw call is native on the device, so the usual cost is not *how* you draw —
-it's painting **more pixels than the frame needs**. Four habits keep any cart smooth
+it's painting **more pixels than the frame needs**. Five habits keep any cart smooth
 (measured on hardware, #66):
 
-1. **Your background IS the clear color.** `cls(col("dark_blue"))` already paints
+1. **Better yet: declare the background, don't draw it.** `background(col("dark_blue"))`
+   (or `background(image("bg"))` for a painted backdrop) once in `_init` and the
+   engine repaints it every frame for you — on the device the restore rides the
+   async copy engine, so the backdrop costs (almost) nothing. The habits below are
+   for when you draw the backdrop yourself:
+2. **Your background IS the clear color.** `cls(col("dark_blue"))` already paints
    every pixel — don't follow it with a full-screen backdrop `rect()`. That paints
    the whole screen twice and costs ~7ms of the device's ~30ms frame budget for
    nothing. (Battle City does it right: one `cls` in the field color, then only the
    HUD strip repaints its own black.)
-2. **Static scenery goes in a layer, once.** If your level or backdrop doesn't change
+3. **Static scenery goes in a layer, once.** If your level or backdrop doesn't change
    every frame, draw it ONCE into `lay = make_layer(W, H)` — a layer speaks the whole
    drawing API (`lay.cls` / `lay.map` / `lay.rect` …) — and stamp it back each frame
    with `draw_layer(lay, 0, 0)`. One flat copy replaces `cls` + a full `map()`
@@ -143,11 +149,11 @@ it's painting **more pixels than the frame needs**. Four habits keep any cart sm
    the layer wider than the screen and pan with `draw_layer(lay, cam_x, 0)`.
    (Hop Quest and Sky Run both do exactly this — read their `_build_layer` /
    `_build_world`.)
-3. **Lots of sprites? Just call `spr()` in a loop.** The engine coalesces consecutive
+4. **Lots of sprites? Just call `spr()` in a loop.** The engine coalesces consecutive
    `spr()` calls into one native batch automatically; `spr_batch()` is the manual form
    when you already build a list. Likewise one `map()` call always beats drawing tiles
    one by one.
-4. **Never wrap `spr()` in `pal()` every frame — bake tinted copies once.** The
+5. **Never wrap `spr()` in `pal()` every frame — bake tinted copies once.** The
    engine caches each image pre-baked at one scale under the current palette; a
    `pal()` call invalidates that cache, so a `pal(...)`/`spr(...)`/`pal()` sandwich
    re-bakes the sprite pixel by pixel on EVERY draw (this alone once cost Letter

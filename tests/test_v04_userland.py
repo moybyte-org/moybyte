@@ -1248,3 +1248,59 @@ def test_cart_using_clip_camera_flip_runs_and_resets_between_frames(tmp_path):
     assert ws.canvas._cam_x == 0 and ws.canvas._cam_y == 0
     assert ws.canvas._clip_x1 == ws.canvas.w and ws.canvas._clip_y1 == ws.canvas.h
     assert list(ws.canvas._pal_map) == list(range(64))
+
+
+def test_background_declares_color_and_image_backdrops():
+    # #63 fast-by-default: background(x) declares the backdrop ONCE; the api's
+    # _moy_restore_bg hook repaints it (a color cls, or a baked full-screen layer)
+    # so a naive cart never writes a per-frame cls/backdrop blit.
+    from runtime import host_app, palette
+    cv = Canvas(64, 48)
+    api = host_app.make_api(cv, _StubInput(), {})
+    red = palette.color("red")
+    white = palette.color("white")
+    api["background"](red)
+    api["_moy_restore_bg"]()
+    assert cv.buf[0] == red and cv.buf[47 * 64 + 63] == red
+    cv.rect(0, 0, 8, 8, white)                    # an actor scribbles the frame...
+    api["_moy_restore_bg"]()
+    assert cv.buf[0] == red, "the color backdrop must reclaim the frame"
+    # An Image backdrop bakes to a hidden layer once and restores by window copy.
+    img = api["image"](["##", "##"], {"#": white})
+    api["background"](img)
+    api["_moy_restore_bg"]()
+    assert cv.buf[0] == white, "the image pixels land at (0,0)"
+    cv.rect(0, 0, 4, 4, red)
+    api["_moy_restore_bg"]()
+    assert cv.buf[0] == white, "the image backdrop must reclaim the frame"
+    # background() clears the declaration -> the restore is a no-op.
+    api["background"]()
+    cv.rect(0, 0, 4, 4, red)
+    api["_moy_restore_bg"]()
+    assert cv.buf[0] == red, "a cleared declaration must not repaint"
+
+
+def test_player_restores_declared_background_each_frame(tmp_path):
+    # The Player calls the restore hook BEFORE the cart's frame, so a cart with
+    # background() and NO cls still gets a clean backdrop every frame.
+    from runtime import host_app, palette
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                           if it.get("path"))
+    ws.open()
+    ws.project.cart["src"] = (
+        "def _init():\n"
+        "    background(col('red'))\n"
+        "def _draw():\n"
+        "    rect(0, 0, 8, 8, col('white'))\n"
+    )
+    assert ws._start()
+    ws.player.tick(1 / 30)
+    red = palette.color("red")
+    white = palette.color("white")
+    assert ws.canvas.buf[0] == white              # the actor drew over the backdrop
+    assert ws.canvas.buf[100 * 320 + 100] == red  # backdrop painted with NO cls in the cart
+    ws.canvas.buf[100 * 320 + 100] = white        # scribble...
+    ws.player.tick(1 / 30)
+    assert ws.canvas.buf[100 * 320 + 100] == red, (
+        "the declared background must reclaim the frame before each tick")

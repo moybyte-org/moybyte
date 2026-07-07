@@ -63,6 +63,7 @@ class Wallpaper:
         ws.select_wallpaper before it (re)compiles the new choice."""
         self._wp_ns = self._wp_update = self._wp_draw = None
         self._wp_cart = None
+        self._wp_restore_bg = None
 
     def compile(self, cart):
         """Compile a wallpaper cart into its own namespace + grab its _update/_draw,
@@ -82,6 +83,7 @@ class Wallpaper:
             self._wp_cart = cart
             self._wp_update = ns.get("_update")
             self._wp_draw = ns.get("_draw")
+            self._wp_restore_bg = ns.get("_moy_restore_bg")   # #63 declared background
         except Exception as exc:  # noqa: BLE001
             print("Moybyte wallpaper error:", _err_text(exc))
             self._wp_ns = self._wp_update = self._wp_draw = None
@@ -110,6 +112,9 @@ class Wallpaper:
         ws = self.ws
         if self._wp_draw is not None:
             try:
+                rb = getattr(self, "_wp_restore_bg", None)
+                if rb is not None:
+                    rb()            # #63: restore the wallpaper's declared backdrop
                 if self._wp_live and self._wp_update is not None and dt > 0:
                     self._wp_update(dt)
                 sh = ws.layout.status_h

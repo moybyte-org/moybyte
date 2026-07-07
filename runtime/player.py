@@ -195,6 +195,7 @@ class Player:
         # chain) on the sacred play path. Combined with the live cart_error check at
         # each use site it answers exactly what _running_cart_shows_bar answers.
         self._is_tool = False
+        self._restore_bg = None       # #63: the api's declared-background restore hook
 
     def _reset_exit_state(self):
         """Clear the hold timer (a fresh run, or the moment the exit gesture completes
@@ -253,6 +254,9 @@ class Player:
         self.ns = ns
         self._update = ns.get("_update")
         self._draw = ns.get("_draw")
+        # Declared background (#63): the api's frame-start restore hook. Cached here so
+        # tick() pays one attribute read; it early-outs when the cart declared nothing.
+        self._restore_bg = ns.get("_moy_restore_bg")
         return True
 
     def tick(self, dt):
@@ -273,6 +277,12 @@ class Player:
             ws.input.cart_keyp = k if (k and k != self._cart_key_prev) else 0
             self._cart_key_prev = k
             try:
+                # Declared background (#63): restore the cart's named backdrop BEFORE
+                # its frame runs, so a naive cart draws only its actors. No-op (one
+                # early-out) when the cart never called background().
+                rb = self._restore_bg
+                if rb is not None:
+                    rb()
                 _ts = _ticks_ms() if _perf else 0
                 if self._update:
                     self._update(dt)
