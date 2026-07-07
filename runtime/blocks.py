@@ -1249,6 +1249,104 @@ def compile_blocks(program):
 
 
 # ============================================================================
+# GRADUATION (spec Section 8, the MakeCode model): does a code commit still
+# round-trip to the blocks, or has the kid written past the vocabulary?
+# ============================================================================
+#
+# Blocks and code are two views of ONE program: the blocks GENERATE the code. A
+# block-authored cart round-trips as long as its committed main.py still MATCHES
+# the source its blocks.json regenerates. The moment a hand-edit diverges past
+# what the blocks express, the kid has GRADUATED (a one-way door, spec Section 8):
+# blocks go read-only and `manifest.graduated` is set.
+#
+# There is NO code -> blocks parser here, so "still within the vocabulary" is
+# decided the only honest way we can: recompile the FROZEN blocks.json and compare
+# its output to the committed source, up to a NORMALIZATION that erases exactly the
+# differences a round trip (or a kid's cosmetic edit) is ALLOWED to introduce
+# without changing the program. That normalization IS the heuristic, and it is
+# tuned SHIP-CONSERVATIVE (plan Section 3 Stage 8): it eats cosmetics aggressively
+# so a stray newline/comment can NEVER graduate a kid, and touches nothing
+# structural so a genuine edit still does. A missed graduation is harmless (the
+# next real divergence catches it); a false one locks a kid out of blocks, so the
+# heuristic must EARN a graduation, never assume one.
+
+
+def _strip_inline_comment(line):
+    """Return `line` with any trailing `# ...` comment removed, respecting string
+    literals (a `#` inside a quoted string is NOT a comment). MicroPython-safe: a
+    plain left-to-right character scan, no `re`/`tokenize`. Handles ' and " strings
+    with backslash escapes. The block compiler never emits triple-quoted strings, so
+    a per-line scan is sufficient; a line with an unterminated quote just yields "no
+    comment here", which is safe -- it can only KEEP more text, never cut the kid's
+    code mid-string."""
+    quote = None
+    i = 0
+    n = len(line)
+    while i < n:
+        ch = line[i]
+        if quote:
+            if ch == "\\":
+                i += 2                   # skip the escaped char
+                continue
+            if ch == quote:
+                quote = None
+        elif ch == "#":
+            return line[:i]
+        elif ch == "'" or ch == '"':
+            quote = ch
+        i += 1
+    return line
+
+
+def normalize_for_roundtrip(src):
+    """Normalize `src` for the graduation round-trip compare (spec Section 8).
+
+    The compare asks: "does this source still match what the blocks regenerate?" So
+    we erase ONLY the differences a block round trip -- or a kid's COSMETIC edit --
+    is allowed to introduce without changing the program, and keep everything
+    semantic. The exact, documented rules (the fuzzy heart of Stage 8):
+
+      * each line's TRAILING whitespace is stripped
+      * a trailing `#...` comment is stripped, string-literal-aware (so the
+        BLOCK_MARKER line -- itself a comment -- and any comment a kid adds do NOT
+        count: graduation is CONTENT-based, not marker-based, exactly as the plan
+        requires)
+      * a line that is now EMPTY (blank, or comment-only) is DROPPED entirely --
+        spacing/comment lines never graduate
+      * LEADING whitespace (indentation) is PRESERVED verbatim -- indentation is
+        semantic in Python, so a re-indent IS a real change and MUST still graduate
+
+    Bias (ship-conservative): aggressive on cosmetics, untouched on structure. What
+    survives normalization is the program's actual statements, indent included; two
+    sources normalize equal iff they are the same program modulo whitespace and
+    comments."""
+    out = []
+    for raw in str(src).split("\n"):
+        line = _strip_inline_comment(raw).rstrip()
+        if line == "":
+            continue                     # blank / comment-only line: cosmetic -> drop
+        out.append(line)
+    return "\n".join(out)
+
+
+def source_roundtrips(program, src):
+    """True if `src` still matches the source `program` (a blocks.json tree)
+    regenerates, both normalized (normalize_for_roundtrip). This is the graduation
+    oracle (spec Section 8): a block-authored cart whose code commit does NOT
+    round-trip has diverged past the block vocabulary and should GRADUATE.
+
+    Conservative on failure: a program that won't compile (a corrupt/partial tree
+    raising BlockError) is treated as STILL round-tripping (returns True), so a
+    transient compile problem can never graduate -- and thus lock out -- a kid by
+    accident. When in doubt, do NOT graduate (plan Section 3 Stage 8)."""
+    try:
+        regen = compile_blocks(program)
+    except Exception:  # noqa: BLE001 -- BlockError / bad tree: never graduate on it
+        return True
+    return normalize_for_roundtrip(regen) == normalize_for_roundtrip(src)
+
+
+# ============================================================================
 # Schema (de)serialization (the file IO lives in moy_carts.load/save_blocks)
 # ============================================================================
 
