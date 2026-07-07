@@ -13,14 +13,15 @@ Nothing here should be implemented speculatively; each piece lands when a concre
 `make_system_api` there was derived from a real extraction pass (four chrome surfaces
 pulled into their own UI classes, each recording its `ws.*` dependency profile). The
 *implementation* still waits for its trigger; only the API's shape is now grounded.
-**Enabling foundation, added 2026-07-06:** `docs/shell_layers_refactor_v1.md` is the
-*concrete prerequisite* under both halves below. The further module/cart extraction
+**Enabling foundation, added 2026-07-06:** `docs/history/shell_layers_refactor_v1.md`
+(implemented, archived) is the *concrete prerequisite* under both halves below. The further module/cart extraction
 stalled because the remaining surfaces are smeared across `frame`/`handle_input`/
 `handle_pointer` — they need a **Layer boundary** (own draw + input + state) before a
 clean file/cart split is even possible. That refactor is the common foundation: logical
 Layers → { modules, §2 privileged carts, §3 retained-buffer compositor }.
-**Boundary mechanism, added 2026-07-06:** `docs/shell_os_architecture_v1.md` is the
-concrete "how" under both halves — it grounds §2.2's `make_system_api` in how real OSes
+**Boundary mechanism, added 2026-07-06:** `docs/history/shell_os_architecture_v1.md`
+(archived — its data-decoupling half shipped with the v0.5 shell, its per-surface
+capability track remains open) is the concrete "how" under both halves — it grounds §2.2's `make_system_api` in how real OSes
 draw this line (syscall table / capabilities / message passing; Picotron as the
 fantasy-console realization) and defines the migration path (per-surface capability API
 replacing the layers' `ws` reach-through, an event bus, privilege tiers). Read it before
