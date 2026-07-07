@@ -110,8 +110,9 @@ def test_code_editor_baseline_layout_constants(tmp_path):
     lay = C.CodeLayout(320, 240, 1)
     assert lay._base
     assert lay.cols == C.CodeEditor.COLS and lay.rows == C.CodeEditor.ROWS
-    assert lay.run_btn == C._ED_RUN and lay.save_btn == C._ED_SAVE
-    assert lay.close_btn == C._ED_CLOSE
+    # The RUN/SAVE/CLOSE top-band icons were dissolved into the unified bar (Stage-4
+    # rollout): CodeLayout no longer carries their rects (PLAY/SAVE/X live in the bar).
+    assert not hasattr(lay, "run_btn")
     assert lay.code_area() == C._CODE_AREA
     assert lay.sym_area == C._SYM_AREA
 

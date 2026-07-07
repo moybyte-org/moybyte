@@ -53,12 +53,17 @@ def _in(px, py, rect):
 
 
 # The Editor's lent left zone (Stage 4 of docs/shell_ux_technical_plan_v1.md, #46
-# zoned bar): the tab ladder + PLAY, in the spec Section 6 order (Config -> Blocks
-# -> Code -> Sprites -> Map -> Music -> PLAY), rendered as icons inside the rect
-# the bar lends it. Each entry is (tab_name_or_None, icon_kind); `tab_name` is
-# what EditorApp.tab equals when that icon's destination is showing (so draw_zone
-# can highlight it); PLAY has no tab of its own -- it's an action, not a
-# destination, so it's never highlighted.
+# zoned bar): the tab ladder + PLAY + SAVE, in the spec Section 6 order (Config ->
+# Blocks -> Code -> Sprites -> Map -> Music -> PLAY -> SAVE), rendered as icons
+# inside the rect the bar lends it. Each entry is (tab_name_or_None_or_ACTION,
+# icon_kind); `tab_name` is what EditorApp.tab equals when that icon's destination
+# is showing (so draw_zone can highlight it). PLAY (None) and SAVE (_ZONE_SAVE) are
+# ACTIONS, not destinations, so they're never highlighted -- SAVE dispatches to the
+# active tab's persist verb (save_current), the ONE compact save affordance the
+# unified bar carries so every editor BODY stays chrome-free (fits 320px: 8 icons *
+# 18px = 144px inside the ~202px lent zone). This is what makes the bar identical
+# across all six tabs -- code/blocks/music no longer need their own SAVE/RUN/CLOSE.
+_ZONE_SAVE = "\x00save"     # sentinel: the SAVE action icon (never a real tab)
 _ZONE_TABS = (
     ("cards", "edit"),
     ("blocks", "blocks"),
@@ -67,6 +72,7 @@ _ZONE_TABS = (
     ("map", "map"),
     ("music", "music"),
     (None, "run"),          # PLAY
+    (_ZONE_SAVE, "save"),   # SAVE -> save_current() (persist the active tab)
 )
 _ZONE_STRIDE = _BAR_ICON + _BAR_GAP
 
@@ -244,18 +250,18 @@ class EditorApp:
 
     # -- the lent left zone (Stage 4, #46 zoned bar) --------------------------
     #
-    # The Editor's tab ladder + PLAY, replacing the pause-only tool switcher for
-    # the game-domain tabs wired to show it: cards_layer.py, paint_layer.py, and
-    # layers.py's _MapLayer each call ws.bar_layer._draw_status_strip("menu") from
-    # their draw() (+ ws.bar_layer.handle_bar_tap("menu", ...) from handle_pointer).
-    # CODE/BLOCKS/MUSIC keep their own pre-existing top-of-screen title + action
-    # row for now and don't call it -- see the Stage-4 report for why.
+    # The Editor's tab ladder + PLAY + SAVE, shown on EVERY tab now (Stage-4 rollout):
+    # cards_layer.py, paint_layer.py, layers.py's _MapLayer/_MusicLayer, code_layer.py
+    # and block_editor_ui.py each call ws.bar_layer._draw_status_strip("menu") from
+    # their draw() (+ ws.bar_layer.handle_bar_tap("menu", ...) from handle_pointer), so
+    # the bar is identical across all six Editor tabs and each tab's own RUN/CLOSE
+    # chrome was dissolved into it (SAVE routes through save_current above).
 
     def draw_zone(self, cv, rect):
-        """Draw the tab ladder + PLAY inside the rect the bar lent us, highlighting
-        the active tab. `cv` may be the bar's offscreen cache strip (#43) -- this
-        draws the SAME pixels either way, which is what makes the cached strip
-        pixel-identical to a direct render."""
+        """Draw the tab ladder + PLAY + SAVE inside the rect the bar lent us,
+        highlighting the active tab. `cv` may be the bar's offscreen cache strip
+        (#43) -- this draws the SAME pixels either way, which is what makes the
+        cached strip pixel-identical to a direct render."""
         ws = self.ws
         NAMES = self._NAMES
         x0, y0, w, h = rect
@@ -267,13 +273,13 @@ class EditorApp:
                 cv.rect(x, y0, _BAR_ICON, _BAR_ICON, NAMES["indigo"])
             ws._icon(glyph, x, y0, cv)
 
-    def zone_tap(self, px, py):
-        """Hit-test the tab ladder + PLAY and dispatch to the matching landing
-        entry point (or PLAY). Uses the SAME fixed game-canvas rect draw_zone is
-        given today (only the game-domain tabs wire this call -- see the module
-        docstring); a future code/blocks wiring would need to pass/derive the
-        responsive rect the same way BarLayer's draw dispatch does."""
-        x0, y0, w, h = _ZONE_LEFT_GAME
+    def zone_tap(self, px, py, rect=None):
+        """Hit-test the tab ladder + PLAY + SAVE and dispatch. `rect` is the lent
+        left-zone rect BarLayer drew into -- the fixed game-canvas _ZONE_LEFT_GAME
+        for the cards/paint/map/music tabs, or the responsive layout.zone_left for
+        the system-canvas code/blocks tabs (both hit-test in the same coord space
+        the bar drew in). Defaults to _ZONE_LEFT_GAME so a bare call is unchanged."""
+        x0, y0, w, h = rect if rect is not None else _ZONE_LEFT_GAME
         for i, (tab, _glyph) in enumerate(_ZONE_TABS):
             x = x0 + i * _ZONE_STRIDE
             if x + _BAR_ICON > x0 + w:
@@ -296,6 +302,31 @@ class EditorApp:
             ws._open_blocks()
         elif tab == "music":
             ws._open_music()
+        elif tab == _ZONE_SAVE:   # SAVE: persist the active tab (bar's one save affordance)
+            self.save_current()
         else:                     # PLAY (tab is None)
             ws._leave_menu()
         return True
+
+    def save_current(self):
+        """Persist the ACTIVE tab -- the SAVE bar icon's dispatch (spec Section 7's
+        commit; auto-save is a later stage). Each tab keeps its own persist verb; the
+        bar just routes to whichever tab is up, so every editor BODY drops its SAVE
+        button. Config persists via commit_config (no re-run -- PLAY runs). The theme
+        (EDIT ICONS) tab has no bar, so it's never routed here; paint/map keep their
+        own body SAVE too (the theme reuse pins paint's), so a bar SAVE on those tabs
+        is a harmless second route to the same verb."""
+        ws = self.ws
+        tab = self.tab
+        if tab == "code":
+            ws.save_code()
+        elif tab == "paint":
+            ws.save_sprites()
+        elif tab == "map":
+            ws.save_map()
+        elif tab == "music":
+            ws.save_sounds()
+        elif tab == "blocks":
+            ws.block_ui.save_blocks()
+        elif tab == "cards":
+            ws._save_config()

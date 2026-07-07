@@ -336,10 +336,12 @@ class LauncherHomeLayer:
                 name = name[:lay.status_name_maxc]
             cv.print(name, lay.status_name_x, 3, NAMES["white"], 1)
 
-    def zone_tap(self, px, py):
+    def zone_tap(self, px, py, rect=None):
         """The launcher's lent left-zone tap slice: NEW/DUP/DEL. Split out of the
         old handle_home_tap -- the clock egg + the ≡ system menu stay bar/right-
-        zone-owned, handled by BarLayer.handle_bar_tap before this is ever called."""
+        zone-owned, handled by BarLayer.handle_bar_tap before this is ever called.
+        `rect` (the lent zone, Stage 4) is accepted for the uniform owner.zone_tap
+        signature but unused here -- NEW/DUP/DEL hit-test the fixed layout rects."""
         ws = self.ws
         lay = ws.layout
         if ws.can_manage and self._in(px, py, lay.new_btn):

@@ -94,7 +94,7 @@ class SettingsLayer:
         shows a title + the row list below the bar, so there's nothing to add
         here yet. Structurally wired for #46 (see the class docstring)."""
 
-    def zone_tap(self, px, py):
+    def zone_tap(self, px, py, rect=None):
         return False
 
     # -- rows / actions ------------------------------------------------------

@@ -130,10 +130,11 @@ class BarLayer:
     handle_bar_tap(where, ...) / handle_home_tap / handle_cart_tap /
     _dock_slot_at + _activate_dock.
 
-    (CODE/BLOCKS/MUSIC keep their own pre-existing top-of-screen chrome for now and
-    don't call the zoned bar -- see the Stage-4 report for why: each already draws
-    its own title + action row in the same y<18 band the zoned bar would occupy,
-    and folding them in cleanly means redesigning THEIR chrome, not just this file.)
+    (Stage-4 ROLLOUT: CODE now draws the SAME zoned bar too -- its title + RUN/SAVE/
+    CLOSE band was dissolved into it (BLOCKS/MUSIC fold in next). CODE is on the SYSTEM
+    canvas like the launcher/Settings bar, so `_zone_is_game` stays False for it and the
+    app's zone_tap takes the lent rect as a parameter; the game-canvas tabs
+    (cards/paint/map, MUSIC next) keep the fixed _ZONE_LEFT_GAME rect.)
 
     `NAMES` (palette) and `_in` (rect hit-test) are injected at construction (the same
     circular-import dodge the other extracted UIs use)."""
@@ -180,9 +181,9 @@ class BarLayer:
     #
     # "where" identifies which screen is asking; these helpers answer the THREE
     # questions that differ per `where`: who owns the lent left zone, which canvas
-    # + rect it draws into, and (for "menu") whether the CURRENT tab is one of the
-    # game-domain ones this stage wires (cards/paint/map -- code/blocks/music keep
-    # their own pre-existing top-of-screen chrome for now, see the class docstring).
+    # + rect it draws into, and (for "menu") whether the CURRENT tab draws on the
+    # fixed 320x240 GAME canvas (cards/paint/map, MUSIC next) or the responsive SYSTEM
+    # canvas (code, like the launcher/Settings) -- both show the SAME bar now.
 
     def _zone_owner(self, where):
         """The app that owns `where`'s lent left zone, or None ("desktop" -- the
@@ -197,9 +198,10 @@ class BarLayer:
         return None
 
     def _zone_is_game(self, where):
-        """True for the "menu" screens that draw on the fixed 320x240 GAME canvas
+        """True for the "menu" tabs that draw on the fixed 320x240 GAME canvas
         (cards/paint/map, like the running cart) rather than the responsive SYSTEM
-        canvas (code/blocks, like the launcher/Settings)."""
+        canvas (code/blocks, like the launcher/Settings). MUSIC joins the game-canvas
+        set when its bar is wired (next commit)."""
         return where == "menu" and self.ws.menu_view in ("cards", "paint", "map")
 
     def _bar_canvas(self, where):
@@ -470,7 +472,11 @@ class BarLayer:
             ws.exit()
             return True
         owner = self._zone_owner(where)
-        return bool(owner.zone_tap(px, py)) if owner is not None else False
+        # Pass the SAME lent rect the draw used (game-canvas _ZONE_LEFT_GAME for
+        # cards/paint/map/music, the responsive layout.zone_left for the system-canvas
+        # code/blocks tabs + launcher/Settings), so an app's zone_tap hit-tests its
+        # icons at the exact positions draw_zone drew them regardless of canvas.
+        return bool(owner.zone_tap(px, py, self._zone_rect(where))) if owner is not None else False
 
     def handle_home_tap(self, px, py):
         """Backward-compatible name for the launcher's tap slice (launcher_layer.py

@@ -2,22 +2,31 @@
 as its own Layer -- docs/shell_layers_refactor_v1.md Phase 2 (the last surface).
 
 The full-screen code view: the responsive text area (drawn on the SYSTEM canvas at the
-CodeLayout geometry), the syntax-highlighted line rendering, the run/save/close top-bar
-icons, the coding-symbol palette (the T-Deck keyboard can't type `=[]{}<>%`, so a
-tappable palette supplies them), and the touch/keyboard editing.
+CodeLayout geometry), the syntax-highlighted line rendering, the coding-symbol palette
+(the T-Deck keyboard can't type `=[]{}<>%`, so a tappable palette supplies them), and
+the touch/keyboard editing.
+
+Stage-4 bar rollout (docs/shell_ux_technical_plan_v1.md): the code editor's OWN top
+band -- the cart title + the RUN/SAVE/CLOSE icons -- is GONE. draw() now paints the
+unified zoned bar (the tab ladder + PLAY + SAVE + X) over the top 18px like every other
+editor tab, so the body below it is fullscreen text + the symbol palette with no chrome
+of its own. PLAY runs (EditorApp.leave), SAVE persists (EditorApp.save_current ->
+ws.save_code), X exits -- all in the bar. The text area already began at y0 == 18 (below
+the bar), so nothing shifted.
 
 Boundary (the anti-spaghetti line, per the doc): the shared CodeEditor handle stays on
 Workstation -- `ws.editor` (device/test-pinned, ~38 refs, exactly like ws.paint), built
 by ws.set_menu_view. The SAVE/RUN API + the code-error state stay on ws too:
-ws.save_code / ws.run_code (device/test-pinned), ws.code_err / code_err_row / crash_line
-+ _set_code_error / _mark_code_error / _cart_has_handwritten_code, and ws.code_layout
-(the CodeLayout). CodeLayer READS ws.editor + code_layout + the error state and
-DISPATCHES to ws.save_code / run_code / _leave_menu; it owns only the code-UI state (the
-keyboard edge tracker _ekey_prev, the drag-scroll origin _drag, the highlight memo
-_hl_cache). ws.nav (the trackball-caret handler, called by both the host + device input
-drivers) stays on ws -- it just reads ws.editor. The code-only constants + the
-MicroPython-safe syntax highlighter live here (single source; console.py imports the
-constants back for its CodeLayout + the crash panel + tests). `NAMES` / `_in` injected.
+ws.save_code / ws.run_code (device/test-pinned, now reached via the bar's SAVE/PLAY),
+ws.code_err / code_err_row / crash_line + _set_code_error / _mark_code_error /
+_cart_has_handwritten_code, and ws.code_layout (the CodeLayout). CodeLayer READS
+ws.editor + code_layout + the error state and DISPATCHES to the bar; it owns only the
+code-UI state (the keyboard edge tracker _ekey_prev, the drag-scroll origin _drag, the
+highlight memo _hl_cache). ws.nav (the trackball-caret handler, called by both the host
++ device input drivers) stays on ws -- it just reads ws.editor. The code-only constants
++ the MicroPython-safe syntax highlighter live here (single source; console.py imports
+the constants back for its CodeLayout + the crash panel + tests). `NAMES` / `_in`
+injected.
 """
 from editors import CodeEditor
 
@@ -29,9 +38,6 @@ _CODE_X0 = 4
 _CODE_Y0 = 18
 _CODE_LH = 10
 _CODE_AREA = (_CODE_X0, _CODE_Y0, CodeEditor.COLS * 8, CodeEditor.ROWS * _CODE_LH)
-_ED_RUN = (266, 1, 16, 14)        # top-bar action icons (play / save / close)
-_ED_SAVE = (285, 1, 16, 14)
-_ED_CLOSE = (304, 1, 15, 14)
 # The T-Deck keyboard has no `=`/`[]`/`{}`/`<>`/`%` keys, so the code editor shows a
 # tappable palette of them along the bottom.
 _CODE_SYMBOLS = "=()[]{}<>:;,.\"_%"
@@ -153,6 +159,12 @@ class CodeLayer:
 
     def draw(self, dt):
         self._draw_code()
+        # The unified zoned bar (Stage 4 rollout): the tab ladder + PLAY + SAVE + X,
+        # drawn LAST (chrome over the full-screen text) so the code editor shows the
+        # SAME bar every other tab does. System canvas + responsive layout, like the
+        # launcher/Settings bar. This replaces the code editor's old title + RUN/SAVE/
+        # CLOSE band: PLAY/SAVE/X all live in the bar now.
+        self.ws.bar_layer._draw_status_strip("menu")
 
     def handle_input(self, i):
         self._editor_input()           # keyboard is in text mode here
@@ -161,18 +173,17 @@ class CodeLayer:
     def handle_pointer(self, px, py, click):
         # The code editor is responsive (#39 step 2): it draws on the SYSTEM canvas at
         # native size, so it hit-tests in SYSTEM coords (the raw pointer), NOT the
-        # 320x240 game viewport.
+        # 320x240 game viewport. That's also the coord space the system-canvas zoned bar
+        # draws in, so the bar tap goes straight through (no _game_xy translation).
         ws = self.ws
         lay = ws.code_layout
+        # The unified bar's tab ladder + PLAY + SAVE + X claims its slice FIRST (Stage 4
+        # rollout), before any code-body tap -- SAVE here dispatches to ws.save_code.
+        if click and ws.bar_layer.handle_bar_tap("menu", px, py):
+            return True
         self._code_drag(px, py)        # touch/mouse drag pans the viewport
         if click:
-            if self._in(px, py, lay.run_btn):
-                ws.run_code()
-            elif self._in(px, py, lay.save_btn):
-                ws.save_code()
-            elif self._in(px, py, lay.close_btn):
-                ws._leave_menu()
-            elif self._in(px, py, lay.sym_area) and ws.editor is not None:
+            if self._in(px, py, lay.sym_area) and ws.editor is not None:
                 i = (px - lay.sym_area[0]) // lay.sym_cell  # tap a coding symbol
                 if 0 <= i < len(_CODE_SYMBOLS):
                     ws.editor.key(ord(_CODE_SYMBOLS[i]))
@@ -233,15 +244,10 @@ class CodeLayer:
         lh = lay.lh
         ed = ws.editor
         cv.cls(NAMES["black"])                  # full-screen editor
-        # top bar: cart title (+ unsaved marker) and the action icons
-        tclamp = 31 if lay._base else max(8, (lay.run_btn[0] - 2) // cell)
-        title = ws.project.cart["title"][:tclamp]
-        if ed is not None and ed.dirty:
-            title = title + " *"
-        cv.print(title, 2, 3 if lay._base else 3 * fs, NAMES["green"], 1)
-        self._draw_icon("run", lay.run_btn)
-        self._draw_icon("save", lay.save_btn)
-        self._draw_icon("close", lay.close_btn)
+        # The old title + RUN/SAVE/CLOSE top band is gone (Stage 4 rollout): the unified
+        # bar (drawn after this in draw()) owns the top 18px -- PLAY runs, SAVE persists,
+        # X exits, and the tab ladder switches views. The text area already starts at
+        # y0 == 18 (below the bar), so the body is fullscreen with no chrome of its own.
         # code area (horizontal scroll: columns [left, left+COLS))
         if ed is not None:
             cols = ed.COLS
@@ -310,16 +316,3 @@ class CodeLayer:
             cv.rect(x, sy, sc - 1, sh - 1, NAMES["dark_grey"])
             cv.rectb(x, sy, sc - 1, sh - 1, NAMES["indigo"])
             cv.print(_CODE_SYMBOLS[i], x + 6 * fs, sy + 6 * fs, NAMES["white"], 1)
-
-    def _draw_icon(self, kind, rect):
-        # A glyph on its own colored button background -- the code-editor top bar
-        # (run/save/close). The pure glyph vocabulary lives in ws._glyph(); this just
-        # paints a backing box of a sensible color, then the glyph on top. Drawn on
-        # the SYSTEM canvas so the glyph follows the font scale (#39 step 2).
-        NAMES = self._NAMES
-        ws = self.ws
-        bg = {"run": "green", "save": "blue", "close": "red"}.get(kind, "dark_grey")
-        cv = ws.sys_canvas
-        x, y, w, h = rect
-        cv.rect(x, y, w, h, NAMES[bg])
-        ws._glyph(kind, rect, NAMES["black"] if kind == "run" else NAMES["white"], cv)
