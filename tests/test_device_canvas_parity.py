@@ -1434,7 +1434,9 @@ def test_map_autocache_actually_caches():
         c.map(tm, sh, 0, 0, 12, 10, 0, 0, 0, 2)
         assert c._map_raster_count == 4, "sheet edit didn't re-raster (%d)" % c._map_raster_count
         # An active pal bypasses the cache entirely (direct raster, counters unchanged).
-        c.pal(3, 3)
+        # (A REAL remap: pal(3, 3) is identity CONTENT, and _palgen is a content id
+        # now -- identity would legitimately keep using the cache.)
+        c.pal(3, 5)
         c.cls(3)
         c.map(tm, sh, 0, 0, 12, 10, 0, 0, 0, 2)
         assert c._map_raster_count == 4, "pal-active path touched the cache (%d)" % c._map_raster_count
@@ -1473,3 +1475,39 @@ def test_map_autocache_opaque_lane_full_coverage():
     c.cls(3)
     c.map(tm_d2, sh_d2, 0, 0, 12, 10, 0, 0, -1, 1)
     assert c._mapcache[4] != -1, "a sparse region must keep the keyed composite"
+
+
+def test_pal_tint_sandwich_bakes_each_variant_once():
+    # #63 fast-by-default (the #72 Letter Blitz disease, fixed ENGINE-side): a sprite
+    # drawn through the pal()/spr()/pal() tint sandwich -- alternating tints across
+    # frames -- must bake each (tint, scale) variant ONCE, then swap cached bakes.
+    # _palgen is a content id (identity == 0, a re-seen remap gets its old id back),
+    # and the per-Image variant dict keeps the bakes alive across tint switches.
+    # Pixels must stay byte-identical to the always-rebake behaviour.
+    m, _, _ = _both(True)
+    cv = m.DeviceCanvas(_FakeComp(W, H))
+    ref = m.DeviceCanvas(_FakeComp(W, H))
+    img = m.Image(4, 4, [7, 7, 0, 0, 7, 7, 0, 0, 0, 0, 8, 8, 0, 0, 8, 8], -1)
+    ref_img = m.Image(4, 4, [7, 7, 0, 0, 7, 7, 0, 0, 0, 0, 8, 8, 0, 0, 8, 8], -1)
+
+    def frame(c, im):
+        # two tinted draws + an untinted one -- the Letter Blitz shape
+        c.cls(1)
+        c.pal(7, 11)
+        c.spr(im, 10, 10, 2)
+        c.pal()
+        c.pal(7, 3)
+        c.spr(im, 40, 10, 2)
+        c.pal()
+        c.spr(im, 70, 10, 2)
+
+    for _ in range(4):                    # 4 identical frames
+        frame(cv, img)
+    bakes = cv._rgb_bakes
+    assert bakes == 3, "expected ONE bake per tint variant, got %d" % bakes
+    for _ in range(4):                    # more frames -> zero new bakes
+        frame(cv, img)
+    assert cv._rgb_bakes == bakes, "a re-seen tint re-baked (variant cache miss)"
+    # Pixels identical to a fresh canvas that never reused anything.
+    frame(ref, ref_img)
+    assert _dev_rgb565(cv) == _dev_rgb565(ref), "variant reuse changed pixels"
