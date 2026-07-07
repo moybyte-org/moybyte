@@ -161,9 +161,11 @@ def test_letter_blitz_letters_unlocked_stepper_expands_pool(tmp_path):
     ws.config["letters_unlocked"] = 26
     assert ws.ns["_unlocked"]() == "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-    # every glyph a tank could show must actually be drawable
+    # every glyph a tank could show must actually be drawable (#72: glyphs are
+    # baked per (letter, ink, scale) so the play path never pal()-retints)
+    white = ws.ns["col"]("white")
     for ch in ws.ns["ALPHABET"]:
-        img = ws.ns["_glyph"](ch)
+        img = ws.ns["_glyph"](ch, white, 2)
         assert img.w == 5 and img.h == 7, ch
 
 

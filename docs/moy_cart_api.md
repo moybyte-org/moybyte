@@ -124,10 +124,10 @@ re-drawing the background every frame.
 
 ---
 
-## Make it fast (three habits)
+## Make it fast (four habits)
 
 Every draw call is native on the device, so the usual cost is not *how* you draw —
-it's painting **more pixels than the frame needs**. Three habits keep any cart smooth
+it's painting **more pixels than the frame needs**. Four habits keep any cart smooth
 (measured on hardware, #66):
 
 1. **Your background IS the clear color.** `cls(col("dark_blue"))` already paints
@@ -147,6 +147,16 @@ it's painting **more pixels than the frame needs**. Three habits keep any cart s
    `spr()` calls into one native batch automatically; `spr_batch()` is the manual form
    when you already build a list. Likewise one `map()` call always beats drawing tiles
    one by one.
+4. **Never wrap `spr()` in `pal()` every frame — bake tinted copies once.** The
+   engine caches each image pre-baked at one scale under the current palette; a
+   `pal()` call invalidates that cache, so a `pal(...)`/`spr(...)`/`pal()` sandwich
+   re-bakes the sprite pixel by pixel on EVERY draw (this alone once cost Letter
+   Blitz most of its frame, #72). If you want the same art in several colors or
+   sizes, build each variant once with `image(rows, {"#": the_color})` and keep it
+   in a dict keyed by `(color, scale)` — then the play path is all cheap cached
+   blits. `pal()` is still fine for one-off moments (a flash of damage on a
+   full-screen repaint) — just not inside your per-frame sprite loop. (Letter
+   Blitz's `_glyph`/`_tank_sprite` caches model the pattern.)
 
 ---
 
