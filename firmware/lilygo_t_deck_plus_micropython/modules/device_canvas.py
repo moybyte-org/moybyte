@@ -221,6 +221,25 @@ class DeviceCanvas:
         self._pal_dirty = True
         self._pal_map = None
         self._palt = None
+        # Content-keyed pal-state ids (#63 fast-by-default): _palgen is no longer a
+        # monotonic counter but the STABLE id of the current (pal map, palt) CONTENT --
+        # identity is always 0, and returning to a previously-seen remap returns its
+        # old id. Every cache keyed on _palgen (per-sprite RGB bakes, the sheet atlas,
+        # the Fold-2 identity gate) therefore survives a pal()/spr()/pal() tint
+        # sandwich: the kid idiom that used to re-bake every sprite every frame
+        # (#72's Letter Blitz disease) now re-bakes once per distinct tint.
+        self._pal_state_ids = None    # state key -> id (lazy; identity = 0)
+        self._pal_state_next = 1
+        self._rgb_bakes = 0           # per-pixel bake count (test/diag proof)
+        # Alloc-free state keys for the COMMON tints: a running count of entries that
+        # differ from identity (pal) / opaque (palt), and the single differing index
+        # while exactly one does (-1 none, -2 unknown/multi). A one-entry remap -- the
+        # kid tint sandwich -- then keys as a smallint (no bytes build per pal() call);
+        # only multi-entry states pay the 128-byte content key.
+        self._pal_delta = 0
+        self._palt_delta = 0
+        self._pal_single = -1
+        self._palt_single = -1
         # Auto-cache for map() (Fold 2, #63): the rasterized tilemap region is cached in a
         # hidden 565 layer so a camera-only change keyed-blits it (one blit565) instead of a
         # full re-raster (blit_map over every cell) -- the make_layer/draw_layer win, made
@@ -342,6 +361,10 @@ class DeviceCanvas:
                 self._pal_map[:] = _PAL_IDENTITY
                 self._palt[:] = _PALT_OPAQUE
             self._palgen = 0
+            self._pal_delta = 0           # #63: back to identity content (state id 0)
+            self._palt_delta = 0
+            self._pal_single = -1
+            self._palt_single = -1
 
     def camera(self, x=0, y=0):
         self.flush_batch()             # queued sprites belong to the OLD camera (#63)
@@ -364,22 +387,90 @@ class DeviceCanvas:
         self._clip_x1 = min(self.w, x + w)
         self._clip_y1 = min(self.h, y + h)
 
+    def _pal_state_id(self):
+        # The stable id of the CURRENT (pal map, palt) content: identity is 0, any
+        # other state gets a small int the first time it is seen and the SAME int
+        # every time after -- so pal-keyed caches hit when a cart returns to a tint
+        # it used before (the pal()/spr()/pal() sandwich). Computed only on a
+        # pal()/palt() CALL (never per draw); the common single-entry remap keys as
+        # a SMALLINT (alloc-free -- the tint sandwich runs dozens of pal calls per
+        # frame and must not feed the GC), only multi-entry states build the 128-byte
+        # content key. A runaway animated palette (>64 distinct states) drops the
+        # learned table and re-learns; ids keep rising so a stale bake can never
+        # alias a new state. (An int-keyed and a bytes-keyed id for the same content
+        # can coexist after a multi->single transition -- that costs one redundant
+        # bake, never a wrong pixel.)
+        pd = self._pal_delta
+        td = self._palt_delta
+        if pd == 0 and td == 0:
+            return 0
+        if td == 0 and pd == 1 and self._pal_single >= 0:
+            c = self._pal_single
+            key = 0x10000 + (c << 6) + self._pal_map[c]
+        elif pd == 0 and td == 1 and self._palt_single >= 0:
+            key = 0x20000 + self._palt_single
+        else:
+            key = bytes(self._pal_map) + bytes(self._palt)
+        ids = self._pal_state_ids
+        if ids is None:
+            ids = self._pal_state_ids = {}
+        i = ids.get(key)
+        if i is None:
+            if len(ids) > 64:
+                ids.clear()
+            i = self._pal_state_next
+            self._pal_state_next += 1
+            ids[key] = i
+        return i
+
     def pal(self, c0=None, c1=None):
         self.flush_batch()             # queued sprites belong to the OLD pal map (#63)
+        pm = self._pal_map
         if c0 is None:
-            self._pal_map[:] = _PAL_IDENTITY
+            if self._pal_delta:
+                pm[:] = _PAL_IDENTITY
+                self._pal_delta = 0
+            self._pal_single = -1
         else:
-            self._pal_map[int(c0) & 63] = int(c1) & 63
-        self._palgen += 1                   # invalidate cached sprite RGB (pal baked in)
+            c = int(c0) & 63
+            v = int(c1) & 63
+            old = pm[c]
+            if old != v:
+                pm[c] = v
+                was = old != c
+                now = v != c
+                if was != now:                # identity-membership flipped at c
+                    if now:
+                        self._pal_delta += 1
+                        self._pal_single = c if self._pal_delta == 1 else -2
+                    else:
+                        self._pal_delta -= 1
+                        self._pal_single = -2 if self._pal_delta else -1
+                # was == now (True): value changed at an already-remapped index --
+                # delta/single unchanged, the id below keys on the new value.
+        self._palgen = self._pal_state_id()   # content id: re-seen tints reuse bakes
         self._pal_dirty = True              # #75: the next reset_state must restore
 
     def palt(self, c=None, on=None):
         self.flush_batch()             # queued sprites belong to the OLD palt (#63)
+        pt = self._palt
         if c is None:
-            self._palt[:] = _PALT_OPAQUE
+            if self._palt_delta:
+                pt[:] = _PALT_OPAQUE
+                self._palt_delta = 0
+            self._palt_single = -1
         else:
-            self._palt[int(c) & 63] = 1 if on else 0
-        self._palgen += 1                   # invalidate cached sprite RGB (palt baked in)
+            i = int(c) & 63
+            v = 1 if on else 0
+            if pt[i] != v:
+                pt[i] = v
+                if v:
+                    self._palt_delta += 1
+                    self._palt_single = i if self._palt_delta == 1 else -2
+                else:
+                    self._palt_delta -= 1
+                    self._palt_single = -2 if self._palt_delta else -1
+        self._palgen = self._pal_state_id()   # content id: re-seen tints reuse bakes
         self._pal_dirty = True              # #75: the next reset_state must restore
 
     def _col(self, c):
@@ -557,14 +648,35 @@ class DeviceCanvas:
         # Blit a cached, pre-scaled+flipped+pal-applied RGB565 copy in one C call. The
         # cache lives on the Image (sheet tiles are reused across frames via the
         # make_api tile cache, so the rebuild is once-per-(sprite,scale,flip,pal)).
+        # #63 fast-by-default: the last-used bake is the hot single slot; on a miss the
+        # per-Image VARIANT dict ((scale, flip, pal-state-id) -> bake) is consulted
+        # before re-baking, so a sprite drawn at alternating tints/scales each frame
+        # (the pal()/spr()/pal() kid idiom, glyphs at 2 sizes, ...) bakes each variant
+        # ONCE and swaps, instead of the per-frame per-pixel rebake #72 diagnosed.
         if (getattr(img, "_rgb", None) is None
                 or getattr(img, "_rgb_scale", 0) != scale
                 or getattr(img, "_rgb_flip", -1) != flip
                 or getattr(img, "_rgb_palgen", -1) != self._palgen):
-            self._cache_rgb(img, scale, flip)
+            if not self._rgb_variant(img, scale, flip):
+                self._cache_rgb(img, scale, flip)
         self._gfx.blit565(self._buf, self.w, self.h, x, y,
                           img._rgb, img._rgb_w, img._rgb_h, _RGB_KEY,
                           self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+
+    def _rgb_variant(self, img, scale, flip):
+        # Promote a previously-baked (scale, flip, pal-state) variant into the hot
+        # single slot (reference swaps, no pixel work). False -> the caller re-bakes.
+        var = getattr(img, "_rgb_variants", None)
+        if var is None:
+            return False
+        v = var.get((scale, flip, self._palgen))
+        if v is None:
+            return False
+        img._rgb, img._rgb_w, img._rgb_h = v
+        img._rgb_scale = scale
+        img._rgb_flip = flip
+        img._rgb_palgen = self._palgen
+        return True
 
     def _cache_rgb(self, img, scale, flip=0):
         # Bake the indexed sprite into an RGB565 buffer at `scale`, mirrored per
@@ -605,6 +717,17 @@ class DeviceCanvas:
         img._rgb_scale = scale
         img._rgb_flip = flip
         img._rgb_palgen = self._palgen
+        # #63 fast-by-default: remember this bake in the per-Image variant dict so a
+        # later return to this (scale, flip, tint) swaps references instead of
+        # re-baking. Capped small: sprites are tiny (a variant is w*h*scale^2*2B) but
+        # a pathological cart could churn states -- past 6 variants, drop and re-learn.
+        var = getattr(img, "_rgb_variants", None)
+        if var is None:
+            var = img._rgb_variants = {}
+        elif len(var) >= 6:
+            var.clear()
+        var[(scale, flip, self._palgen)] = (buf, w, h)
+        self._rgb_bakes += 1
 
     def _bake_indices(self, img):
         # Bake a paint image's MOY64 indices -> an opaque RGB565 buffer ONCE via the

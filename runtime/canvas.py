@@ -135,6 +135,10 @@ class Canvas:
             # keeping the cached region pal-independent and byte-identical to a direct
             # raster (correctness first).
             self._palgen = 0
+            self._pal_delta = 0           # #63: back to identity content (state id 0)
+            self._palt_delta = 0
+            self._pal_single = -1
+            self._palt_single = -1
 
     def camera(self, x=0, y=0):
         """TIC-80 camera(x, y): subtract (x, y) from all subsequent draw coords so a
@@ -166,17 +170,66 @@ class Canvas:
         self._clip_x1 = min(self.w, x + w)
         self._clip_y1 = min(self.h, y + h)
 
+    def _pal_state_id(self):
+        # The stable id of the CURRENT (pal map, palt) content (mirrors
+        # DeviceCanvas._pal_state_id exactly): identity is 0, any other state gets a
+        # small int the first time and the SAME int thereafter, so pal-gated caches
+        # (the Fold-2 map cache here; the device's sprite bakes) hit when a cart
+        # returns to a tint it used before. The common single-entry remap keys as a
+        # smallint (alloc-free -- the tint sandwich runs dozens of pal calls per
+        # frame); only multi-entry states build the 128-byte content key.
+        pd = self._pal_delta
+        td = self._palt_delta
+        if pd == 0 and td == 0:
+            return 0
+        if td == 0 and pd == 1 and self._pal_single >= 0:
+            c = self._pal_single
+            key = 0x10000 + (c << 6) + self._pal_map[c]
+        elif pd == 0 and td == 1 and self._palt_single >= 0:
+            key = 0x20000 + self._palt_single
+        else:
+            key = bytes(self._pal_map) + bytes(self._palt)
+        ids = getattr(self, "_pal_state_ids", None)
+        if ids is None:
+            ids = self._pal_state_ids = {}
+            self._pal_state_next = 1
+        i = ids.get(key)
+        if i is None:
+            if len(ids) > 64:
+                ids.clear()
+            i = self._pal_state_next
+            self._pal_state_next += 1
+            ids[key] = i
+        return i
+
     def pal(self, c0=None, c1=None):
         """TIC-80 pal(c0, c1): remap draw-time index c0 -> c1 (recolour idiom). pal()
         with no args resets the table to identity. Applies to every primitive AND to
         sprite pixels (so a recoloured sprite draws with swapped palette entries)."""
         self.flush_batch()             # queued sprites belong to the OLD pal map (#63)
         self._pal_dirty = True         # #75: the next reset_state must restore
-        self._palgen += 1              # #63: invalidate the map auto-cache's identity gate
+        pm = self._pal_map
         if c0 is None:
-            self._pal_map[:] = _PAL_IDENTITY
-            return
-        self._pal_map[int(c0) & 63] = int(c1) & 63
+            if self._pal_delta:
+                pm[:] = _PAL_IDENTITY
+                self._pal_delta = 0
+            self._pal_single = -1
+        else:
+            c = int(c0) & 63
+            v = int(c1) & 63
+            old = pm[c]
+            if old != v:
+                pm[c] = v
+                was = old != c
+                now = v != c
+                if was != now:                # identity-membership flipped at c
+                    if now:
+                        self._pal_delta += 1
+                        self._pal_single = c if self._pal_delta == 1 else -2
+                    else:
+                        self._pal_delta -= 1
+                        self._pal_single = -2 if self._pal_delta else -1
+        self._palgen = self._pal_state_id()   # #63: content id gates the map cache
 
     def palt(self, c=None, on=None):
         """TIC-80 palt(c, on): mark index c transparent (on=True) or opaque for spr().
@@ -184,11 +237,24 @@ class Canvas:
         addition to the per-call colorkey / Image.transparent."""
         self.flush_batch()             # queued sprites belong to the OLD palt (#63)
         self._pal_dirty = True         # #75: the next reset_state must restore
-        self._palgen += 1              # #63: invalidate the map auto-cache's identity gate
+        pt = self._palt
         if c is None:
-            self._palt[:] = _PALT_OPAQUE
-            return
-        self._palt[int(c) & 63] = 1 if on else 0
+            if self._palt_delta:
+                pt[:] = _PALT_OPAQUE
+                self._palt_delta = 0
+            self._palt_single = -1
+        else:
+            i = int(c) & 63
+            v = 1 if on else 0
+            if pt[i] != v:
+                pt[i] = v
+                if v:
+                    self._palt_delta += 1
+                    self._palt_single = i if self._palt_delta == 1 else -2
+                else:
+                    self._palt_delta -= 1
+                    self._palt_single = -2 if self._palt_delta else -1
+        self._palgen = self._pal_state_id()   # #63: content id gates the map cache
 
     # -- primitives ----------------------------------------------------------
 
