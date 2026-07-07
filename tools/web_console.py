@@ -127,6 +127,13 @@ class WebConsole:
         # no-op -- nothing to flush on the host.)
         sw, sh = (self.ws.sys_canvas.w, self.ws.sys_canvas.h)
         self.canvas = web_view.CommandCanvas(sw, sh, font_scale=self.ws._effective_font_scale())
+        # Per-WM-surface recording (Stage 9): the host web console IS the web view, so record one
+        # stream per wm.draw_stack() surface (bar / app-content / player-viewport). The console's
+        # frame loop marks each surface via canvas.begin_surface (a no-op unless this is set), so
+        # step_frame() ships the browser a per-surface frame it composites (a second WM backend).
+        self.canvas._rec.surfaces_on = True
+        self._last_surfaces = None    # the last stepped frame's served per-surface streams
+
         # SERVE-TIME defspr/deflayer ship-once + gen -- the SAME shared logic the device runs,
         # against this canvas's recorder. served_frame() prepends any not-yet-shipped deflayer
         # (host sprites are self-contained, so no defspr) so each pushed frame stays self-contained.
@@ -235,11 +242,19 @@ class WebConsole:
             # CPU + localhost/LAN bandwidth to spare, and the browser always gets a complete frame.
             self.ws._dirty = True
             self.driver.frame(self.dt)
-            # Route through the shared serve path (ServedState.served_frame): prepends a
-            # ["deflayer", ...] the FIRST time a served frame references a layer (ship-once,
-            # #54/#43) -- the exact code the device serves through. Host sprites are
-            # self-contained (pixels inline), so no defspr is prepended.
-            cmds = self._served.served_frame(self.canvas.take_commands())
+            # Route through the shared serve path. Per-WM-surface (Stage 9): served_surfaces()
+            # runs the ship-once deflayer bookkeeping ONCE over the flat stream and returns BOTH
+            # the flat served frame (kept as the step_frame return, so this stays a 3-tuple for
+            # the existing callers) AND the per-surface streams the browser composites, with the
+            # ship-once prefix delivered as a leading "_defs" surface. Host sprites are
+            # self-contained (pixels inline), so no defspr is prepended -- only deflayers.
+            flat = self.canvas.take_commands()
+            surfaces = self.canvas.take_surfaces()      # per-WM-surface slices, or None
+            if surfaces is not None:
+                cmds, self._last_surfaces = self._served.served_surfaces(flat, surfaces)
+            else:
+                cmds = self._served.served_frame(flat)
+                self._last_surfaces = None
             cart = self._cart_title()
             au = getattr(self.ws, "audio", None)
             pcm = au.take_pcm() if (au is not None and hasattr(au, "take_pcm")) else b""
@@ -392,7 +407,10 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception:  # noqa: BLE001 -- a frame error must not kill the socket loop
                 continue
             gen = self.console.canvas._rec.atlas_gen            # host recorder gen (self-contained)
-            payload = json.dumps(web_view.frame_payload(cmds, cart, gen, audio=audio))
+            # Stage 9: ship the per-WM-surface streams (the browser composites them); step_frame
+            # stashed them on the console. None -> a flat frame (nothing changes for that path).
+            payload = json.dumps(web_view.frame_payload(
+                cmds, cart, gen, audio=audio, surfaces=self.console._last_surfaces))
             try:
                 # Send under WS_SEND_BUDGET, not the 20ms read-pacing timeout. A
                 # sendall that times out has already written PART of the frame (the

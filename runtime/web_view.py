@@ -698,6 +698,14 @@ class TeeCanvas:
         # Tee.spr_tile -> recorded. The web path is the deliberate slow lane.
         return None
 
+    def begin_surface(self, sid, domain="system"):
+        # Stage 9 WM-surface mark (host == device API parity): forward to the recorder, which
+        # only slices while surfaces_on. The DEVICE keeps surfaces_on False -- per-surface render
+        # in the browser + the WiFi<->LCD-DMA coexistence are a STANDING HARDWARE GATE (#38/#40)
+        # this stage does not close -- so this is a NO-OP there and the device stream stays a
+        # byte-identical flat frame. Only the host web console turns surfaces on.
+        self._r.begin_surface(sid, domain)
+
     # -- off-screen layers ---------------------------------------------------
     def new_layer(self, w, h):
         real = self._c.new_layer(w, h)
@@ -892,14 +900,35 @@ class CommandCanvas:
     def set_font_scale(self, scale):
         self.font_scale = max(1, int(scale))
 
+    def begin_surface(self, sid, domain="system"):
+        """Stage 9: forward the console's per-WM-surface mark to the recorder so the frame is
+        sliced per surface (the browser composites them). A no-op unless the recorder's
+        surfaces_on is set (web_console turns it on). See DrawRecorder.begin_surface."""
+        self._rec.begin_surface(sid, domain)
+
     # -- frame handoff -------------------------------------------------------
     def take_commands(self):
         """Return this frame's command list and start a fresh one. The deflayer ship-once
         prepend is done by ServedState.served_frame (the host web console routes through it),
-        so this returns the raw recorded commands."""
-        cmds = self._rec._cmds
-        self._rec._cmds = []
+        so this returns the raw recorded commands.
+
+        Stage 9: when surfaces_on, ALSO slice the frame into per-surface streams from the marks
+        recorded THIS frame, BEFORE the buffer is cleared, so take_surfaces() (called right
+        after) returns them. The CommandCanvas records straight into _cmds (no begin/commit
+        cycle), so the slice lives here rather than in DrawRecorder.commit()."""
+        rec = self._rec
+        cmds = rec._cmds
+        rec._frame_surfaces = (_slice_surfaces(cmds, rec._surf_marks)
+                               if rec.surfaces_on else None)
+        rec._cmds = []
+        rec._surf_marks = []
         return cmds
+
+    def take_surfaces(self):
+        """Stage 9: the per-surface streams ([[sid, domain, cmds], ...]) for the frame
+        take_commands() last returned, or None when surfaces_on is off. Call right after
+        take_commands()."""
+        return self._rec._frame_surfaces
 
     # -- draw state ----------------------------------------------------------
     def reset_state(self):

@@ -2990,12 +2990,21 @@ class Workstation:
         # cursor is always the top system layer, so a game-domain content is always
         # composited before it -- reproducing the pre-refactor single composite step.
         _prev_domain = None
+        # WM-surface mark (Stage 9, docs/shell_ux_technical_plan_v1.md): when a RECORDING system
+        # canvas is installed (the opt-in web view), tag each WM-stack surface so the recorder
+        # slices the frame into ONE stream per surface (bar / app-content / player-viewport) --
+        # the browser then composites them (a second WM backend). `begin_surface` exists only on
+        # the recording canvas, so on the RAW canvas (the default) `_surf` is None: no call, no
+        # allocation, byte-identical pixels -- the golden set can't move. Probed ONCE per frame.
+        _surf = getattr(self.sys_canvas, "begin_surface", None)
         for layer in self.wm.draw_stack():          # memoized (Stage 6c) -- no per-frame alloc
             if _prev_domain == "game" and layer.domain == "system":
                 _tc = _ticks_ms() if _perf else 0
                 self._composite_game()
                 if _perf:
                     _cmp = _ticks_diff(_ticks_ms(), _tc)   # CHROMEBRK: viewport composite
+            if _surf is not None:
+                _surf(layer.id, layer.domain)       # start this surface's command stream
             if layer.id == "cursor":
                 _tk = _ticks_ms() if _perf else 0
                 layer.draw(dt)

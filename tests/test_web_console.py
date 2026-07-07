@@ -298,6 +298,42 @@ def test_launcher_frame_clears_the_buffer_each_redraw(tmp_path):
     assert "cls" in [c[0] for c in cmds], "post-nav frame never clears -> browser ghosts"
 
 
+def test_step_frame_partitions_into_wm_surfaces(tmp_path):
+    """End-to-end host wiring (Stage 9): the console frame loop marks each wm.draw_stack()
+    surface via canvas.begin_surface, so WebConsole.step_frame ships the browser ONE stream
+    PER window-manager surface (bar / app-content / player-viewport) -- the browser becomes a
+    second WM backend that composites them. Assert the launcher frame splits into >= 2 tagged
+    surfaces whose composite reproduces the FLAT served frame pixel-for-pixel (they are a slice
+    of it), and that a running cart yields the 'desktop' player-viewport surface."""
+    console = web_console.WebConsole(str(tmp_path / "carts"), fps=30)
+    assert console.ws.screen == "launcher"
+    cmds, _, _ = console.step_frame()
+    surfaces = console._last_surfaces
+    assert surfaces is not None and len(surfaces) >= 2, "the launcher splits into WM surfaces"
+    assert "cursor" in [s["id"] for s in surfaces], "the cursor is its own WM surface"
+    # Compositing the surfaces IN ORDER reproduces the flat served frame pixel-for-pixel (both
+    # replay the same command sequence: the "_defs" prefix + the sliced surfaces == the flat cmds).
+    flat_cv = Canvas(WIDTH, HEIGHT)
+    replay_to_canvas(cmds, flat_cv)
+    surf_cv = Canvas(WIDTH, HEIGHT)
+    web_view.replay_surfaces_to_canvas(surfaces, surf_cv)
+    assert bytes(surf_cv.buf) == bytes(flat_cv.buf), "surface composite must match the flat frame"
+    assert len(set(surf_cv.buf)) > 1, "the composited launcher must not be blank"
+    # Open a cart -> the running cart is the 'desktop' player-viewport surface.
+    console.ws.system["tap_mode"] = "player"
+    console.apply_events([{"type": "down", "x": 160, "y": 52}])
+    console.step_frame()
+    console.apply_events([{"type": "up"}])
+    for _ in range(8):
+        console.step_frame()
+        if console.ws.screen == "desktop":
+            break
+    assert console.ws.screen == "desktop"
+    console.step_frame()
+    assert "desktop" in [s["id"] for s in console._last_surfaces], (
+        "the running cart is the 'desktop' player-viewport surface")
+
+
 def test_static_screen_still_streams_a_full_frame_every_poll(tmp_path):
     """A streaming web view must send the CURRENT screen on EVERY poll, but the console is
     _dirty-gated (#44): it re-records only when something changed. A STATIC screen (the
@@ -854,6 +890,13 @@ def test_ws_roundtrip_pushes_frames_and_applies_input(server):
         cv = Canvas(WIDTH, HEIGHT)
         replay_to_canvas(f["cmds"], cv)
         assert len(set(cv.buf)) > 1, "the pushed frame must replay to a non-blank screen"
+        # Stage 9: the pushed frame ALSO carries per-WM-surface streams the browser composites
+        # (a second WM backend); over the real socket they reproduce the SAME pixels as the flat
+        # cmds -- the flat frame stays as a graceful fallback for a pre-surface client.
+        assert "surfaces" in f and len(f["surfaces"]) >= 2, "the wire carries per-surface streams"
+        scv = Canvas(WIDTH, HEIGHT)
+        web_view.replay_surfaces_to_canvas(f["surfaces"], scv)
+        assert bytes(scv.buf) == bytes(cv.buf), "the surface composite matches the flat frame over the wire"
         # Input pushes UP the same socket: tap tile 0. Send down, let the server drain it + step
         # a frame or two with the tap held, then release -- mirrors the down -> frame -> up order.
         c.send_events([{"type": "down", "x": 160, "y": 52}])
