@@ -147,7 +147,9 @@ def test_console_settings_has_firmware_update_screen():
     assert "def open_update" in update_ui
     assert "def _pump_update" in update_ui
     assert "def _draw_update" in update_ui
-    assert 'self.screen == "update"' in console
+    # Stage 6d routed the console's screen readers at the WM stack top, so the update
+    # branch is now `kind == "update"` (kind = self.wm.top_kind()) not `self.screen ==`.
+    assert 'kind == "update"' in console
     assert "def _activate_settings_action" in settings_layer
 
 
