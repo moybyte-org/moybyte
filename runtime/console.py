@@ -649,6 +649,10 @@ class Workstation:
         # either way. Settings -> PERF DIAG toggles + persists it (system.json);
         # run_desktop reads it each cycle. Host: measurement-only, nothing to gate.
         self.diag_live = False
+        # #68 follow-up (owner call 2026-07-08): the periodic diag->SD write is its
+        # OWN gate -- PERF DIAG ON + DIAG SD OFF = serial-only measurement with no
+        # 20s sdflush stutter. Crash/cart-exit flushes stay unconditional.
+        self.diag_sd = False
         # Achievements (#21): a small set of fun milestones + the hidden Easter-egg
         # rewards. Starts empty/volatile; load_achievements() wires the SD store +
         # the unlock beep. The Workstation calls ach.note(event) at the flow points
@@ -883,6 +887,7 @@ class Workstation:
         self.select_wallpaper(self.system.get("wallpaper"), persist=False)
         # #68: apply the persisted diagnostics gate (kid-mode default OFF).
         self.set_diag_live(self.system.get("diag_live", False), persist=False)
+        self.set_diag_sd(self.system.get("diag_sd", False), persist=False)
 
     def set_icon_sheet(self, sheet):
         """Adopt the top-bar IconSheet (Stage 1) and drop the per-kind image cache so
@@ -1004,6 +1009,18 @@ class Workstation:
         self._dirty = True
         if persist:
             self.system["diag_live"] = self.diag_live
+            self._persist_system()
+
+    def set_diag_sd(self, on, persist=True):
+        """Flip the periodic diag->SD write gate (Settings -> DIAG SD LOG) and
+        persist it. Separate from PERF DIAG so a measurement session can stream
+        serial samples WITHOUT the ~115ms 20s sdflush stutter; the offline
+        play-then-read-diag.log workflow flips this ON too. Crash/cart-exit
+        flushes are unconditional either way (the safety net)."""
+        self.diag_sd = bool(on)
+        self._dirty = True
+        if persist:
+            self.system["diag_sd"] = self.diag_sd
             self._persist_system()
 
     def _persist_system(self):
