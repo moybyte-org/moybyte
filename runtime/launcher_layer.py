@@ -25,11 +25,16 @@ takes NAMES + `_in` injected too. No circular import: this is a leaf (the only c
 touch is a lazy Layout fallback for a bare Launcher() that no caller ever constructs).
 
 Stage 4 (#46 zoned bar, docs/shell_ux_technical_plan_v1.md): `LauncherHomeLayer` grows
-`draw_zone`/`zone_tap` (the lent left zone -- NEW/DUP/DEL + the selected cart's name,
-the old where=="home" branch of BarLayer._draw_status_strip, unchanged pixels) and a
+`draw_zone`/`zone_tap` (the lent left zone -- originally NEW/DUP/DEL + the selected
+cart's name, the old where=="home" branch of BarLayer._draw_status_strip) and a
 `zone_gen` property proxying `Launcher.zone_gen` -- an int the GRID bumps whenever its
 `sel` (a property now) or `items` changes, so BarLayer's strip cache can trust one int
 instead of re-deriving "did the selection move" itself.
+
+Cart management moves off the launcher home (docs/shell_ux_v1.md's "Editor-as-an-app"
+model: the launcher is for PLAYING, the Editor picker is for MANAGING projects): the
+launcher's lent zone now only shows the selected cart's name. NEW/DUP/DEL move to
+`EditorPickerLayer`'s zone (a later stage).
 """
 
 
@@ -343,38 +348,26 @@ class LauncherHomeLayer:
         return self.ws.launcher.zone_gen
 
     def draw_zone(self, cv, rect):
-        """The launcher's lent left zone: NEW/DUP/DEL when writable, then the
-        selected cart's name filling the remaining space. Verbatim body of the old
-        where == "home" branch of BarLayer._draw_status_strip, just drawn through
-        the app-lending contract now instead of a hardcoded bar variant."""
+        """The launcher's lent left zone: just the selected cart's name (or empty
+        when there is none) -- cart management (create/copy/delete) moved to the
+        Editor picker's zone (docs/shell_ux_v1.md: the launcher is for PLAYING, the
+        picker is for MANAGING projects), so NEW/DUP/DEL no longer draw here. Starts
+        flush at the zone's left edge now that nothing else shares the space."""
         ws = self.ws
         NAMES = self._NAMES
         lay = ws.layout
-        if ws.can_manage:
-            ws._icon("new", lay.new_btn[0], lay.new_btn[1], cv)
-            ws._icon("dup", lay.dup_btn[0], lay.dup_btn[1], cv)
-            ws._icon("del", lay.del_btn[0], lay.del_btn[1], cv)
         sel = ws.launcher.selected()
         if sel is not None:
             name = sel["title"]
-            if len(name) > lay.status_name_maxc:
-                name = name[:lay.status_name_maxc]
-            cv.print(name, lay.status_name_x, 3, NAMES["white"], 1)
+            maxc = max(4, rect[2] // lay.font_w)
+            if len(name) > maxc:
+                name = name[:maxc]
+            cv.print(name, rect[0] + 2, 3, NAMES["white"], 1)
 
     def zone_tap(self, px, py, rect=None):
-        """The launcher's lent left-zone tap slice: NEW/DUP/DEL. Split out of the
-        old handle_home_tap -- the clock egg + the ≡ system menu stay bar/right-
-        zone-owned, handled by BarLayer.handle_bar_tap before this is ever called.
-        `rect` (the lent zone, Stage 4) is accepted for the uniform owner.zone_tap
-        signature but unused here -- NEW/DUP/DEL hit-test the fixed layout rects."""
-        ws = self.ws
-        lay = ws.layout
-        if ws.can_manage and self._in(px, py, lay.new_btn):
-            ws.new_cart(); return True
-        if ws.can_manage and self._in(px, py, lay.dup_btn):
-            ws.dup_cart(); return True
-        if ws.can_manage and self._in(px, py, lay.del_btn):
-            ws.del_cart(); return True
+        """The launcher's lent left zone is display-only now (just the selected
+        cart's name) -- NEW/DUP/DEL moved to EditorPickerLayer.zone_tap, so there is
+        nothing left to claim here."""
         return False
 
 

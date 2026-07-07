@@ -194,16 +194,21 @@ def test_dock_home_returns_from_settings(tmp_path):
     assert ws.screen == "launcher"
 
 
-def test_management_buttons_still_create_and_delete(tmp_path):
-    from runtime import console as C
+def test_launcher_home_no_longer_manages_carts(tmp_path):
+    """Cart management (create/copy/delete) moved off the launcher home into the
+    Editor picker's zone (docs/shell_ux_v1.md: the launcher is for PLAYING, the
+    picker is for MANAGING projects) -- a tap at the old NEW/DUP/DEL bar positions
+    on the launcher screen is now a no-op (see tests/test_top_bar.py for the
+    picker's DUP/DEL coverage)."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     n0 = len(ws.launcher.items)
-    x, y, w, h = ws.layout.new_btn                        # NEW (Layout position; #52 put ≡ at slot 0)
-    drv.click(x + w // 2, y + h // 2)
-    drv.frame(1 / 30)
-    assert len(ws.launcher.items) == n0 + 1
+    for rect in (ws.layout.new_btn, ws.layout.dup_btn, ws.layout.del_btn):
+        x, y, w, h = rect
+        drv.click(x + w // 2, y + h // 2)
+        drv.frame(1 / 30)
+    assert len(ws.launcher.items) == n0
 
 
 def test_tapping_a_cart_icon_runs_it_from_home(tmp_path):

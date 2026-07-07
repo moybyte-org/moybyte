@@ -232,36 +232,11 @@ def test_launcher_bar_menu_opens_settings(tmp_path):
     assert ws.screen == "settings"
 
 
-def test_launcher_bar_new_dup_del_when_manageable(tmp_path):
-    """NEW/DUP/DEL icons fire on the home bar when can_manage. NEW creates, DUP
-    duplicates, DEL deletes -- the same actions the old labeled buttons fired."""
-    from runtime import host_app
-    ws = _ws(tmp_path)
-    assert ws.can_manage
-    drv = host_app.ConsoleDriver(ws)
-    n0 = len(ws.launcher.items)
-    drv.click(*_center(ws.layout.new_btn))           # NEW
-    drv.frame(1 / 30)
-    assert len(ws.launcher.items) == n0 + 1
-    drv.click(*_center(ws.layout.dup_btn))           # DUP
-    drv.frame(1 / 30)
-    assert len(ws.launcher.items) == n0 + 2
-    drv.click(*_center(ws.layout.del_btn))           # DEL
-    drv.frame(1 / 30)
-    assert len(ws.launcher.items) == n0 + 1
-
-
-def test_launcher_bar_management_hidden_when_read_only(tmp_path):
-    """With writes disabled (can_manage False) a tap on the NEW icon position does
-    nothing -- the management cluster isn't active (it's not drawn either)."""
-    from runtime import host_app
-    ws = _ws(tmp_path)
-    ws.can_manage = False
-    drv = host_app.ConsoleDriver(ws)
-    n0 = len(ws.launcher.items)
-    drv.click(*_center(ws.layout.new_btn))
-    drv.frame(1 / 30)
-    assert len(ws.launcher.items) == n0
+# NEW/DUP/DEL moved off the launcher bar into the Editor picker's zone
+# (docs/shell_ux_v1.md: the launcher is for PLAYING, the picker is for MANAGING
+# projects) -- see the picker-zone dup/del coverage further down this file, and
+# tests/test_desktop_shell.py::test_launcher_home_no_longer_manages_carts for the
+# launcher-side regression guard.
 
 
 # -- Part 3: the wifi icon is a STATUS glyph + a shortcut to the wifi tool ----
