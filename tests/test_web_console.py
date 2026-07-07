@@ -209,10 +209,9 @@ def _assert_frame_identical(ws, drv, tee, dt=1.0 / 30, label=""):
 
 
 def _open_tile0(ws, drv):
-    """Tap-open tile 0 (launcher -> desktop) on a TeeCanvas-driven console. Pins
-    player mode so the tap PLAYS the cart (the maker default now taps into the
-    Editor, spec Section 4); this cross-check needs the running cart's draw stream."""
-    ws.system["tap_mode"] = "player"
+    """Tap-open tile 0 (launcher -> desktop) on a TeeCanvas-driven console. A launcher
+    tap RUNS the cart (spec shell_ux_v1.md, the locked model); this cross-check needs
+    the running cart's draw stream."""
     drv.touch(160, 52)
     drv.frame(1.0 / 30)
     drv.touch_up()
@@ -319,8 +318,8 @@ def test_step_frame_partitions_into_wm_surfaces(tmp_path):
     web_view.replay_surfaces_to_canvas(surfaces, surf_cv)
     assert bytes(surf_cv.buf) == bytes(flat_cv.buf), "surface composite must match the flat frame"
     assert len(set(surf_cv.buf)) > 1, "the composited launcher must not be blank"
-    # Open a cart -> the running cart is the 'desktop' player-viewport surface.
-    console.ws.system["tap_mode"] = "player"
+    # Open a cart -> the running cart is the 'desktop' player-viewport surface (a
+    # launcher tap RUNS the cart, spec shell_ux_v1.md).
     console.apply_events([{"type": "down", "x": 160, "y": 52}])
     console.step_frame()
     console.apply_events([{"type": "up"}])
@@ -878,9 +877,8 @@ def test_ws_roundtrip_pushes_frames_and_applies_input(server):
     console, host, port = server
     assert console.ws.screen == "launcher"
     assert console.ws.launcher.items, "system carts should be seeded so a tile exists"
-    console.ws.system["tap_mode"] = "player"   # the tap must PLAY (maker default taps into
-                                               # the Editor now, Section 4); this asserts a
-                                               # launcher -> desktop transition over the wire
+    # A launcher tap RUNS the cart (spec shell_ux_v1.md): this asserts a launcher ->
+    # desktop transition over the wire.
     c = _WSClient(host, port)
     try:
         # A frame PUSHES down; it must replay to a non-blank 320x240 screen (the JS twin's path).

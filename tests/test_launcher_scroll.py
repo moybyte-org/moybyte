@@ -153,18 +153,15 @@ def test_tap_icon_opens_cart(tmp_path):
 
     ws = _ws_with_carts(tmp_path, 10)
     drv = host_app.ConsoleDriver(ws)
-    # Tap the second icon -> opens it. Dispatch keys on manifest TYPE (spec Section 4): only
-    # a `type=="game"` cart follows tap_mode (the maker default opens the Editor); everything
-    # else (tool/app/wallpaper) LAUNCHES. The "Extra" top-up carts are `type=="app"`, so they
-    # LAUNCH; assert per the tapped cart's type.
+    # Tap the second icon -> RUNS it. The locked model (spec shell_ux_v1.md): a launcher
+    # tap RUNS the cart, always, for every type -- no maker/player tap_mode dispatch.
     r = ws.launcher.tile_rect(1)
     cx, cy = r[0] + r[2] // 2, r[1] + r[3] // 2
-    expect = "menu" if ws.launcher.items[1].get("type") == "game" else "desktop"
     drv.touch(cx, cy)
     drv.frame(1 / 30)
     drv.touch_up()
     drv.frame(1 / 30)
-    assert ws.screen == expect                           # the tap opened the cart
+    assert ws.screen == "desktop"                        # the tap RAN the cart
     assert ws.launcher.sel == 1
 
 
@@ -178,14 +175,12 @@ def test_tap_icon_on_second_page_opens_the_right_cart(tmp_path):
     target = ws.launcher.items[first_on_page]["title"]
     r = ws.launcher.tile_rect(first_on_page)
     cx, cy = r[0] + r[2] // 2, r[1] + r[3] // 2
-    # Dispatch keys on manifest TYPE (spec Section 4): only a `type=="game"` cart follows
-    # tap_mode (maker default opens the Editor); everything else LAUNCHES.
-    expect = "menu" if ws.launcher.items[first_on_page].get("type") == "game" else "desktop"
+    # The locked model (spec shell_ux_v1.md): a launcher tap RUNS the cart, always.
     drv.touch(cx, cy)
     drv.frame(1 / 30)
     drv.touch_up()
     drv.frame(1 / 30)
-    assert ws.screen == expect                           # opened the tapped cart
+    assert ws.screen == "desktop"                        # RAN the tapped cart
     assert ws.launcher.items[ws.launcher.sel]["title"] == target
 
 

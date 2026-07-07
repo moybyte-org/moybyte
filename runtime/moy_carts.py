@@ -1192,10 +1192,10 @@ def save_achievements(unlocked, root=CARTS_DIR):
 
 # --- cart management (create / duplicate / delete) --------------------------
 
-# A friendly starter cartridge: an editable colored dot, as a GAME project (the
-# maker default). `type=="game"` so a maker tap on a kid's brand-new cart opens the
-# Editor (launch_selected keys on type) instead of running it bar-less with no way
-# back -- a wallpaper default was a weird choice; a new creation is a game project.
+# A friendly starter cartridge: an editable colored dot, as a GAME project. The
+# Editor's project-picker "+ New" tile creates one of these and opens it in the Editor
+# (spec shell_ux_v1.md) -- `type=="game"` so a kid's brand-new creation is a real
+# game project with "Make it mine" cards, not a wallpaper.
 NEW_TEMPLATE = {
     "type": "game",
     "src": (
