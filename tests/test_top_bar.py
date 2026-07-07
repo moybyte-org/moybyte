@@ -613,6 +613,44 @@ def test_bar_save_icon_persists_the_active_tab(tmp_path):
     assert calls == [1], "the bar SAVE must dispatch to the code tab's save_code"
 
 
+def test_blocks_tab_shows_unified_bar_ladder_play_and_x(tmp_path):
+    """The BLOCKS tab (system canvas, like code) shows the SAME zoned bar: the tab
+    ladder switches, PLAY runs, the context X exits."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.launcher.sel = 0
+    ws.open_in_editor()
+    ws._open_blocks()
+    drv.frame(1 / 30)
+    assert ws.screen == "menu" and ws.menu_view == "blocks"
+    drv.click(*_sys_zone_center(ws, "code"))     # ladder: blocks -> code
+    drv.frame(1 / 30)
+    assert ws.menu_view == "code"
+    ws._open_blocks()
+    drv.frame(1 / 30)
+    drv.click(*_sys_zone_center(ws, None))       # PLAY
+    drv.frame(1 / 30)
+    assert ws.screen == "desktop"
+
+
+def test_blocks_tab_bar_save_dispatches_to_save_blocks(tmp_path):
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.launcher.sel = 0
+    ws.open_in_editor()
+    ws._open_blocks()
+    drv.frame(1 / 30)
+    calls = []
+    orig = ws.block_ui.save_blocks
+    ws.block_ui.save_blocks = lambda: (calls.append(1), orig())[-1]
+    from runtime import editor_app as EA
+    drv.click(*_sys_zone_center(ws, EA._ZONE_SAVE))
+    drv.frame(1 / 30)
+    assert calls == [1], "the bar SAVE on the blocks tab must reach save_blocks"
+
+
 def test_zoned_bar_gear_opens_sysmenu_from_every_zoned_screen(tmp_path):
     """The right zone's ≡ (moved off the left edge, Stage 4) is OS-owned and
     IDENTICAL everywhere the bar shows: home, Settings, and an Editor game-domain
