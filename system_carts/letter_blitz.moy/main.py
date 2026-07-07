@@ -147,6 +147,38 @@ HUD_Y = 20
 HUD_H = 28
 GRID_Y0 = 48
 
+# This is a TYPING game -- it calls textmode(True) so every letter reaches keyp()
+# cleanly. But that means the console's usual game exit (hold BACKSPACE) can't
+# reach it: in text mode BACKSPACE is a plain typed key (delete), and the T-Deck
+# keyboard has no autorepeat, so a held BACKSPACE never accumulates the hold. A
+# textmode(True) cart MUST provide its OWN exit (see docs/moy_cart_api.md). Ours
+# is a tap-anytime X button in the top-right corner -- above the HUD (row < 20),
+# clear of the maze (which starts at GRID_Y0), and touch-only so it never depends
+# on the keyboard. Tapping it calls quit() to return to the launcher.
+EXIT_W = 16
+EXIT_H = 14
+EXIT_PAD = 3
+
+
+def _exit_rect():
+    return W - EXIT_W - EXIT_PAD, EXIT_PAD, EXIT_W, EXIT_H
+
+
+def _exit_tapped(tp):
+    if tp is None or not tp[2]:
+        return False
+    ex, ey, ew, eh = _exit_rect()
+    return ex <= tp[0] < ex + ew and ey <= tp[1] < ey + eh
+
+
+def _draw_exit():
+    ex, ey, ew, eh = _exit_rect()
+    rect(ex, ey, ew, eh, col("black"))
+    rectb(ex, ey, ew, eh, col("light_grey"))
+    line(ex + 4, ey + 3, ex + ew - 5, ey + eh - 4, col("white"))
+    line(ex + ew - 5, ey + 3, ex + 4, ey + eh - 4, col("white"))
+
+
 DIRS = ((1, 0), (-1, 0), (0, 1), (0, -1))
 TANK_BULLET_SPEED = 130.0
 
@@ -433,7 +465,9 @@ def _init():
     # TYPING GAME: ask the console for the text keyboard. Without this the
     # device keyboard stays in raw game mode, where only the 9 d-pad-mapped
     # keys produce letters at all -- and q/e got eaten as pause/stop. In text
-    # mode EVERY letter reaches keyp() cleanly; BACKSPACE is the pause key.
+    # mode EVERY letter reaches keyp() cleanly. That also means the console's
+    # hold-BACKSPACE game exit can't reach us, so we provide our OWN exit: the
+    # top-right X button (tap it -> quit()), drawn + handled below.
     textmode(True)
     _build_maze()
     n = int(cfg("tank_count", 4))
@@ -975,6 +1009,10 @@ def _update(dt):
         _update_record(dt)
         return
 
+    if _exit_tapped(touch()):  # the cart's own exit (text-mode carts must provide one)
+        quit()
+        return
+
     if freeze_t > 0.0:  # hitstop: sparks fly, everything else holds
         freeze_t = max(0.0, freeze_t - dt)
         return
@@ -1207,3 +1245,4 @@ def _draw():
     if best_streak > 0:
         b = "BEST " + str(best_streak) + " " + initials
         print(b, W - 10 - len(b) * 8, HUD_Y + 16, col("dark_grey"), 1)
+    _draw_exit()  # the cart's own tap-to-quit X (a text-mode cart must provide its exit)
