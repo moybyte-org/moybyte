@@ -27,6 +27,8 @@ same bare-or-package import fallback console.py uses -- bare names on the device
 once host_app has aliased them, `runtime.X` when a test loads this module directly).
 """
 
+import json
+
 try:
     from editors import SpriteSheet, TileMap
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -124,6 +126,32 @@ class Project:
         else:
             ws.audio = _SilentAudio(engine)
 
+    # -- the undo journal (Stage 7 of docs/shell_ux_technical_plan_v1.md) -------
+    #
+    # A commit PERSISTS and JOURNALS: after each successful store write below, the
+    # exact bytes that landed on disk are appended to the cart's durable undo journal
+    # (moy_carts.journal_append). The journal store owns the O(1) raw append, the
+    # snapshot ceiling (no-op commits write nothing), and rotation; here we only feed
+    # it the (file, bytes) each commit produced, in the SAME between-frames SD-session
+    # discipline (ws._with_sd) as the save it shadows.
+
+    def _journal(self, file, new_bytes):
+        """Append a durable undo-journal entry for `file`. Best-effort: a journal
+        failure must NEVER break the save it shadows -- the edit is already on disk,
+        the kid just loses one undo step. The store's dedup drops a no-op commit, so
+        journaling an unchanged file costs nothing."""
+        ws = self.ws
+        store = ws.carts_store
+        if store is None or not self.cart or new_bytes is None:
+            return
+        path = self.cart.get("path")
+        if not path or not ws.can_manage or not hasattr(store, "journal_append"):
+            return
+        try:
+            ws._with_sd(lambda: store.journal_append(path, file, new_bytes))
+        except Exception as exc:  # noqa: BLE001 -- journaling can't be allowed to fail a save
+            print("Moybyte journal append failed:", _err_text(exc))
+
     # -- persistence verbs (moved from Workstation's save_* -- Stage 1b) ------
     #
     # These write the cart's live data back through the injected store inside the
@@ -143,6 +171,8 @@ class Project:
                 ws._with_sd(lambda: ws.carts_store.save_config(self.cart))
             except Exception as exc:  # noqa: BLE001
                 print("Moybyte save failed:", exc)
+                return
+            self._journal("config.json", json.dumps(self.cart["cfg"]))
 
     def commit_code(self, src):
         """Persist validated source through the store -- the store-write half of the
@@ -159,6 +189,7 @@ class Project:
                 return False
             ws.editor.dirty = False
             ws.save_status = "SAVED"
+            self._journal("main.py", src)     # durable undo (Stage 7): the persisted src
             ws.ach.note("code_save")          # "Code Wizard": code saved (#21)
             # A successful save means the source now compiles and persisted: clear
             # any stale crash text so returning to the desktop re-runs the fixed
@@ -182,6 +213,7 @@ class Project:
             ws._with_sd(lambda: ws.carts_store.save_sprites(self.cart, hexs))
             self.sheet.dirty = False
             ws.save_status = "SAVED"
+            self._journal("sprites.moygfx", hexs)   # durable undo (Stage 7)
             ws.ach.note("paint_save")         # "Little Artist": a sprite saved (#21)
         except Exception as exc:  # noqa: BLE001
             # Mirror the save_code contract: a failed sprite save must be VISIBLE on
@@ -204,6 +236,7 @@ class Project:
             ws._with_sd(lambda: ws.carts_store.save_map(self.cart, hexs))
             self.tilemap.dirty = False
             ws.save_status = "SAVED"
+            self._journal("map.moymap", hexs)       # durable undo (Stage 7)
             ws.ach.note("map_save")           # "Map Maker": a map saved (#21)
         except Exception as exc:  # noqa: BLE001
             txt = _err_text(exc)
@@ -224,6 +257,7 @@ class Project:
             ws._with_sd(lambda: ws.carts_store.save_sounds(self.cart, bank_dict))
             me.dirty = False
             ws.save_status = "SAVED"
+            self._journal("sounds.json", json.dumps(bank_dict))   # durable undo (Stage 7)
             ws.ach.note("sound_save")          # "Sound Designer": a bank saved (#21)
         except Exception as exc:  # noqa: BLE001
             txt = _err_text(exc)
