@@ -42,25 +42,31 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # Two views: SFX (a vertical column of [note, wave, vol] steps for one effect) and
 # SONG (a column of SFX-id slots making the looping phrase). The cursor picks a
 # step/slot; the right-hand button pad edits the value under it; a bottom bar plays/
-# stops the preview + saves. Drawn 320x240 with the indexed API + petme128 font only
-# (host == device); pointer/trackball/keyboard driven, mirroring the map editor's
-# conventions. The step list scrolls when there are more steps than fit.
-_MU_TITLE_Y = 2
-_MU_VIEW = (236, 1, 80, 14)        # SFX <-> SONG view toggle (top-right)
+# stops the preview. Drawn 320x240 with the indexed API + petme128 font only (host ==
+# device); pointer/trackball/keyboard driven, mirroring the map editor's conventions.
+#
+# Stage-4 bar rollout: the music editor's own top title band was dissolved into the
+# unified zoned bar (tab ladder + PLAY + SAVE + X). The editing controls that used to
+# live in that band -- the SFX<->SONG toggle, the object <n> stepper and the speed
+# +/- -- moved DOWN into a control row in the body just below the 18px bar (they're
+# editing tools, not chrome); SAVE -> the bar's SAVE icon (save_sounds), CLOSE -> the
+# bar's context X. The list/pad shift to y=34 (below that control row) and keep 10 rows.
+_MU_TITLE_Y = 21                   # title/SPD/status text baseline (the control row)
+_MU_VIEW = (2, 19, 46, 14)         # SFX <-> SONG view toggle (control row, far left)
 # Step/slot list (left): a scrolling vertical column. Each row shows the index +
 # the value (a note name + wave letter + a small volume bar, or an SFX id).
 _MU_LIST_X = 8
-_MU_LIST_Y0 = 30
+_MU_LIST_Y0 = 34                   # below the control row + the unified bar
 _MU_ROW_H = 16
 _MU_ROWS = 10                      # visible rows (Y0 .. above the bottom bar)
 _MU_LIST_W = 150
 _MU_LIST_AREA = (_MU_LIST_X, _MU_LIST_Y0, _MU_LIST_W, _MU_ROWS * _MU_ROW_H)
-# Object selector (which SFX / track): < n > stepper under the title.
-_MU_OBJ_PREV = (8, 16, 24, 12)
-_MU_OBJ_NEXT = (124, 16, 24, 12)
+# Object selector (which SFX / track): < n > stepper in the control row, around the title.
+_MU_OBJ_PREV = (52, 19, 16, 14)
+_MU_OBJ_NEXT = (134, 19, 16, 14)
 # Edit pad (right): bump the value under the cursor. Two columns of buttons.
 _MU_PAD_X = 168
-_MU_PAD_Y = 30
+_MU_PAD_Y = 34
 _MU_PAD_W = 68                     # one button's width
 _MU_PAD_H = 22
 _MU_PAD_GAP = 4
@@ -69,13 +75,11 @@ _MU_PAD_GAP = 4
 #   row 1: WAVE  / VOL    (cycle waveform / cycle volume) -- sfx view only
 #   row 2: REST  / SPEED  (toggle rest / bump tempo)
 #   row 3: ADD   / DEL    (insert/remove a step or slot)
-_MU_SPEED_DN = (240, 16, 16, 12)   # speed - (compact, by the title)
-_MU_SPEED_UP = (300, 16, 16, 12)   # speed +
-# Bottom action bar.
-_MU_PLAY = (8, 198, 70, 24)
-_MU_SAVE = (84, 198, 60, 24)
-_MU_LOOP = (150, 198, 60, 24)
-_MU_CLOSE = (216, 198, 100, 24)
+_MU_SPEED_DN = (206, 19, 16, 14)   # speed - (control row, right of the SPD label)
+_MU_SPEED_UP = (228, 19, 16, 14)   # speed +
+# Bottom action bar: PLAY (preview) + LOOP only (SAVE/CLOSE moved to the unified bar).
+_MU_PLAY = (8, 198, 100, 24)
+_MU_LOOP = (116, 198, 100, 24)
 # Note names for rendering a pitch index (semitone 0..95 -> e.g. "C4"). Sharps only,
 # matching audio._NOTE_OFFSETS; kept here so the console renders labels without
 # reaching into audio's private table.
@@ -213,9 +217,7 @@ class MusicEditorUI:
         ws = self.ws
         me = self.musicedit
         if me is None:
-            if self._in(px, py, _MU_CLOSE):
-                ws._leave_menu()
-            return
+            return                         # nothing to edit; exit via the bar's X
         song = me.view == MusicEditor.SONG_VIEW
         # The step/slot list: tap a row to select it.
         if self._in(px, py, _MU_LIST_AREA):
@@ -247,12 +249,8 @@ class MusicEditorUI:
             else:
                 self._play_music_preview()
             return
-        if self._in(px, py, _MU_SAVE):
-            ws.save_sounds(); return
         if self._in(px, py, _MU_LOOP):
             me.toggle_loop(); return
-        if self._in(px, py, _MU_CLOSE):
-            ws._leave_menu(); return
         # The right-hand edit pad (per-view button grid).
         self._music_pad_click(px, py, song)
 
@@ -302,11 +300,12 @@ class MusicEditorUI:
         cv = ws.canvas
         me = self.musicedit
         cv.cls(NAMES["dark_blue"])
-        cv.rect(0, 0, cv.w, 14, NAMES["black"])
+        # The old black title band is gone -- the unified bar owns the top 18px (drawn
+        # by _MusicLayer AFTER this). The controls that were in it now sit in a control
+        # row just below the bar (_MU_TITLE_Y=21).
         if me is None:
             cv.print("NO SOUND BANK", _MU_LIST_X, _MU_TITLE_Y, NAMES["white"], 1)
-            ws._btn("CLOSE", _MU_CLOSE, NAMES["red"])
-            return
+            return                         # exit via the bar's context X
         song = me.view == MusicEditor.SONG_VIEW
         # Title: which object + its tempo + a dirty *.
         if song:
@@ -319,15 +318,14 @@ class MusicEditorUI:
         loop = bool(obj.loop) if obj is not None else False
         if me.dirty:
             title = title + " *"
-        cv.print(title, 36, _MU_TITLE_Y, NAMES["white"], 1)
-        cv.print("SPD " + str(speed), 258, _MU_TITLE_Y, NAMES["light_grey"], 1)
-        # Object < n > stepper + tempo +/- (compact, in the title strip).
+        # View toggle (far left) | < obj > + title | SPD + tempo +/- | save status.
+        ws._btn("SONG" if not song else "SFX", _MU_VIEW, NAMES["dark_purple"])
         ws._btn("<", _MU_OBJ_PREV, NAMES["indigo"])
+        cv.print(title, 74, _MU_TITLE_Y, NAMES["white"], 1)
         ws._btn(">", _MU_OBJ_NEXT, NAMES["indigo"])
+        cv.print("SPD " + str(speed), 160, _MU_TITLE_Y, NAMES["light_grey"], 1)
         self._mu_tick(_MU_SPEED_DN, "-")
         self._mu_tick(_MU_SPEED_UP, "+")
-        # View toggle (SFX <-> SONG).
-        ws._btn("SONG" if not song else "SFX", _MU_VIEW, NAMES["dark_purple"])
         # The scrolling step/slot list.
         if song:
             self._draw_music_song(me)
@@ -335,16 +333,14 @@ class MusicEditorUI:
             self._draw_music_sfx(me)
         # Right-hand edit pad.
         self._draw_music_pad(song)
-        # Bottom bar: PLAY/STOP toggles the preview; SAVE; LOOP flag; CLOSE.
+        # Bottom bar: PLAY/STOP toggles the preview; LOOP flag (SAVE/CLOSE in the bar).
         playing = self.music_preview is not None
         ws._btn("STOP" if playing else "PLAY", _MU_PLAY,
                   NAMES["red"] if playing else NAMES["green"])
-        ws._btn("SAVE", _MU_SAVE, NAMES["green"])
         ws._btn("LOOP" if loop else "1X", _MU_LOOP,
                   NAMES["orange"] if loop else NAMES["dark_grey"])
-        ws._btn("CLOSE", _MU_CLOSE, NAMES["red"])
         if ws.save_status:
-            cv.print(ws.save_status[:14], 150, _MU_TITLE_Y, NAMES["yellow"], 1)
+            cv.print(ws.save_status[:8], 250, _MU_TITLE_Y, NAMES["yellow"], 1)
 
     def _mu_tick(self, rect, label):
         """A small +/- tick button (smaller text than _btn for the title-strip nudges)."""

@@ -651,6 +651,67 @@ def test_blocks_tab_bar_save_dispatches_to_save_blocks(tmp_path):
     assert calls == [1], "the bar SAVE on the blocks tab must reach save_blocks"
 
 
+def _game_zone_center(target):
+    """Center of the ladder/PLAY/SAVE icon `target` on the GAME-canvas bar
+    (cards/paint/map/music). `target` is a tab name, None (PLAY) or EA._ZONE_SAVE."""
+    from runtime import editor_app as EA, bar_layer as BL
+    i = [t for t, _g in EA._ZONE_TABS].index(target)
+    return (BL._ZONE_LEFT_GAME[0] + i * EA._ZONE_STRIDE + BL._BAR_ICON // 2,
+            BL._ZONE_LEFT_GAME[1] + BL._BAR_ICON // 2)
+
+
+def test_music_tab_shows_unified_bar_ladder_play_and_x(tmp_path):
+    """The MUSIC tab (game canvas, like cards/paint/map) shows the SAME zoned bar:
+    the tab ladder switches, PLAY runs, the context X exits."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.launcher.sel = 0
+    ws.open_in_editor()
+    ws._open_music()
+    drv.frame(1 / 30)
+    assert ws.screen == "menu" and ws.menu_view == "music"
+    drv.click(*_game_zone_center("paint"))       # ladder: music -> paint
+    drv.frame(1 / 30)
+    assert ws.menu_view == "paint"
+    ws._open_music()
+    drv.frame(1 / 30)
+    drv.click(*_game_zone_center(None))          # PLAY
+    drv.frame(1 / 30)
+    assert ws.screen == "desktop"
+
+
+def test_music_tab_bar_save_dispatches_to_save_sounds(tmp_path):
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.launcher.sel = 0
+    ws.open_in_editor()
+    ws._open_music()
+    drv.frame(1 / 30)
+    calls = []
+    orig = ws.save_sounds
+    ws.save_sounds = lambda: (calls.append(1), orig())[-1]
+    from runtime import editor_app as EA
+    drv.click(*_game_zone_center(EA._ZONE_SAVE))
+    drv.frame(1 / 30)
+    assert calls == [1], "the bar SAVE on the music tab must reach save_sounds"
+
+
+def test_music_tab_context_x_exits_to_home(tmp_path):
+    from runtime import bar_layer as BL
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.launcher.sel = 0
+    ws.open_in_editor()
+    ws._open_music()
+    drv.frame(1 / 30)
+    drv.click(*_center(BL._ZONE_CONTEXT_X))       # game-canvas right-zone X
+    drv.frame(1 / 30)
+    assert ws.screen == "launcher"
+
+
 def test_zoned_bar_gear_opens_sysmenu_from_every_zoned_screen(tmp_path):
     """The right zone's ≡ (moved off the left edge, Stage 4) is OS-owned and
     IDENTICAL everywhere the bar shows: home, Settings, and an Editor game-domain
