@@ -437,3 +437,33 @@ def test_letter_blitz_trace_completes_early_when_letter_drawn(tmp_path):
     assert ws.ns["trace_done"]
     _run(ws, 45)                              # the cheer plays out...
     assert ws.ns["mode"] == "gallery"         # ...and we're back in the gallery
+
+
+def test_letter_blitz_exit_button_quits_to_launcher(tmp_path):
+    """Letter Blitz is a TEXT-mode typing game (it calls textmode(True)), so the console's
+    hold-BACKSPACE game exit can't reach it (BACKSPACE is a typed delete, and the T-Deck
+    keyboard has no autorepeat). The cart provides its OWN exit: a tap-anytime X button in
+    the top-right corner that calls quit(). Tapping it pops back to the launcher."""
+    from runtime import host_app
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_cart(ws, "Letter Blitz")
+    assert ws.screen == "desktop"
+    assert ws.input.text_mode is True              # the typing game asked for text input
+
+    ex, ey, ew, eh = ws.ns["_exit_rect"]()         # the X's rect (top-right corner)
+    _tap(ws, ex + ew // 2, ey + eh // 2)           # tap its center
+    assert ws.screen == "launcher"                 # quit() popped the game home
+
+
+def test_letter_blitz_exit_button_sits_above_the_maze(tmp_path):
+    """The exit X lives in the strip above the HUD (row < HUD_Y) and above the maze (which
+    starts at GRID_Y0), so it never overlaps a letter-tank -- a tap there is unambiguous and
+    the console's own 18px top bar (which auto-hides while a cart plays) is gone."""
+    from runtime import host_app
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_cart(ws, "Letter Blitz")
+    ex, ey, ew, eh = ws.ns["_exit_rect"]()
+    assert ey + eh <= ws.ns["HUD_Y"]               # entirely above the cart's HUD band
+    assert ey + eh <= ws.ns["GRID_Y0"]             # ...and above the maze (no tank overlap)
