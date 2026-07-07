@@ -153,14 +153,16 @@ def test_tap_icon_opens_cart(tmp_path):
 
     ws = _ws_with_carts(tmp_path, 10)
     drv = host_app.ConsoleDriver(ws)
-    # Tap the second icon -> opens it (maker default: into the Editor, spec Section 4).
+    # Tap the second icon -> opens it. A GAME opens the Editor (maker default, spec
+    # Section 4); a tool/app LAUNCHES (Part 2). Assert per the tapped cart's type.
     r = ws.launcher.tile_rect(1)
     cx, cy = r[0] + r[2] // 2, r[1] + r[3] // 2
+    expect = "menu" if ws.launcher.items[1].get("type") == "game" else "desktop"
     drv.touch(cx, cy)
     drv.frame(1 / 30)
     drv.touch_up()
     drv.frame(1 / 30)
-    assert ws.screen == "menu"                           # the tap opened the cart (Editor)
+    assert ws.screen == expect                           # the tap opened the cart
     assert ws.launcher.sel == 1
 
 
@@ -174,11 +176,13 @@ def test_tap_icon_on_second_page_opens_the_right_cart(tmp_path):
     target = ws.launcher.items[first_on_page]["title"]
     r = ws.launcher.tile_rect(first_on_page)
     cx, cy = r[0] + r[2] // 2, r[1] + r[3] // 2
+    # A GAME opens the Editor (maker default); a tool/app LAUNCHES (Part 2).
+    expect = "menu" if ws.launcher.items[first_on_page].get("type") == "game" else "desktop"
     drv.touch(cx, cy)
     drv.frame(1 / 30)
     drv.touch_up()
     drv.frame(1 / 30)
-    assert ws.screen == "menu"                           # opened (maker default: Editor)
+    assert ws.screen == expect                           # opened the tapped cart
     assert ws.launcher.items[ws.launcher.sel]["title"] == target
 
 
