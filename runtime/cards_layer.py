@@ -3,8 +3,11 @@
 
 The cards surface is the kid's read-light way to tune a cart: each `edit` field is a
 card the child steps with -/+ (or taps a picture for choice/sprite/bg pickers), then
-GO re-runs the cart. This module owns the card DRAWING, the per-card LAYOUT/geometry,
-the scroll window (msel/mtop), and the tap/scroll/keyboard handling.
+PLAY (in the unified bar) re-runs + persists the cart. This module owns the card
+DRAWING, the per-card LAYOUT/geometry, the scroll window (msel/mtop), and the tap/
+scroll/keyboard handling. Stage-4 bar rollout / fix B dissolved its own GO/CODE/CLOSE
+buttons into the bar (PLAY / the Code tab / the context X) and reflowed the cards to
+fill the FULL width below the 18px bar (no centered mini-panel).
 
 Boundary (the anti-spaghetti line, per the doc): CART STATE lives on the open
 Project -- the Config tab reads its DATA through the injected workspace,
@@ -29,19 +32,20 @@ ws.bar_layer.handle_bar_tap("menu", ...) FIRST, before the card/button hit-tests
 
 
 # -- card geometry (single source; console.py imports these back) -------------
-_RUN_BTN = (28, 188, 70, 24)
-_CODE_BTN = (104, 188, 84, 24)
-_CLOSE_BTN = (194, 188, 96, 24)
-_CARD_X = 24
-_CARD_W = 272
-_CARD_Y0 = 52
+# Stage-4 bar rollout / fix B: the Config screen's own GO / CODE / CLOSE buttons are
+# GONE -- PLAY (bar) runs + persists the config, the Code tab is in the ladder, and the
+# context X exits. Freed of that bottom button bar, the "Make it mine" cards fill the
+# FULL 320 x (240-18) below the unified bar (fix C), not a small centered panel.
+_CARD_X = 12
+_CARD_W = 286
+_CARD_Y0 = 44
 _CARD_H = 20
 # Cards-menu scroll window (#3): cards lay out from _CARD_Y0 down; rows whose bottom
-# would pass _CARD_VIEW_BOTTOM are scrolled off rather than drawn over the RUN/CODE/
-# CLOSE bar (y=188). A small up/down chevron strip on the right scrolls.
-_CARD_VIEW_BOTTOM = 186
-_CARD_SCROLL_UP = (300, 38, 16, 14)     # tap to scroll cards up (toward the top)
-_CARD_SCROLL_DN = (300, 168, 16, 14)    # tap to scroll cards down
+# would pass _CARD_VIEW_BOTTOM are scrolled off. With the button bar gone the view now
+# runs almost to the screen floor. A small up/down chevron strip on the right scrolls.
+_CARD_VIEW_BOTTOM = 232
+_CARD_SCROLL_UP = (300, 44, 16, 14)     # tap to scroll cards up (toward the top)
+_CARD_SCROLL_DN = (300, 214, 16, 14)    # tap to scroll cards down
 
 
 class CardsLayer:
@@ -83,11 +87,11 @@ class CardsLayer:
         except Exception as exc:  # noqa: BLE001
             # A malformed card (e.g. a bad tiles/choices entry) must NOT escape the
             # frame loop -- the device would hang silently with no error surface. Fall
-            # back to a readable panel + CLOSE.
+            # back to a readable panel; the unified bar (drawn below) keeps the context
+            # X reachable so the kid can exit.
             ws.cart_error = self._err_text(exc)
             print("Moybyte cards error:", exc)
             ws._draw_error_panel()
-            ws._icon_btn("close", "", _CLOSE_BTN, self._NAMES["red"])
         # The Editor's lent top-bar zone (Stage 4, #46 zoned bar): the tab ladder +
         # PLAY, replacing the old pause-only tool switcher for this tab. Drawn LAST
         # (chrome over content), byte-identical cost to the #43 strip cache.
@@ -126,13 +130,9 @@ class CardsLayer:
         if ci is not None:
             self.msel = ci                 # hover highlights
         if click:
-            if self._in(px, py, _RUN_BTN):
-                ws.apply()
-            elif self._in(px, py, _CODE_BTN):
-                ws.set_menu_view("code")
-            elif self._in(px, py, _CLOSE_BTN):
-                ws._leave_menu()
-            elif self._cards_scrollable() and self._in(px, py, _CARD_SCROLL_UP):
+            # GO/CODE/CLOSE dissolved into the unified bar (fix B): PLAY runs+persists,
+            # the Code tab is in the ladder, the context X exits.
+            if self._cards_scrollable() and self._in(px, py, _CARD_SCROLL_UP):
                 self.scroll_cards(-1)
             elif self._cards_scrollable() and self._in(px, py, _CARD_SCROLL_DN):
                 self.scroll_cards(1)
@@ -320,10 +320,13 @@ class CardsLayer:
         NAMES = self._NAMES
         ws = self.ws
         cv = ws.canvas
-        cv.rect(20, 16, 280, 206, NAMES["dark_purple"])
-        cv.rectb(20, 16, 280, 206, NAMES["pink"])
-        ws._glyph("edit", (28, 20, 14, 14), NAMES["yellow"])   # pencil = "make it yours"
-        cv.print("MAKE IT MINE", 46, 22, NAMES["white"], 2)
+        # Fullscreen "Make it mine" panel below the 18px unified bar (fix B/C): edge to
+        # edge, no centered mini-card. GO/CODE/CLOSE are gone -- PLAY/Code-tab/X are all
+        # in the bar (drawn after this by the layer).
+        cv.rect(0, 18, cv.w, cv.h - 18, NAMES["dark_purple"])
+        cv.rectb(0, 18, cv.w, cv.h - 18, NAMES["pink"])
+        ws._glyph("edit", (8, 22, 14, 14), NAMES["yellow"])    # pencil = "make it yours"
+        cv.print("MAKE IT MINE", 26, 22, NAMES["white"], 2)
         for row in self._card_layout():
             self._draw_card(row)
         if self._cards_scrollable():           # up/down chevrons when cards overflow
@@ -331,9 +334,6 @@ class CardsLayer:
                 cv.print("^", _CARD_SCROLL_UP[0], _CARD_SCROLL_UP[1], NAMES["yellow"], 2)
             if self.mtop < self._max_mtop():
                 cv.print("v", _CARD_SCROLL_DN[0], _CARD_SCROLL_DN[1], NAMES["yellow"], 2)
-        ws._icon_btn("run", "GO", _RUN_BTN, NAMES["green"])
-        ws._icon_btn("edit", "CODE", _CODE_BTN, NAMES["blue"])
-        ws._icon_btn("close", "", _CLOSE_BTN, NAMES["red"])
 
     def _draw_card(self, row):
         NAMES = self._NAMES

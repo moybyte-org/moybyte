@@ -169,16 +169,17 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 # The "Make it mine" config-card editor surface (#3/#15, extracted -- see
 # cards_layer.py). cards_layer.py is the single source of the card geometry constants
-# (_RUN_BTN/_CODE_BTN/_CLOSE_BTN + _CARD_*); imported back here so tests + a couple of
-# console call sites resolve console._X. CART STATE stays on Workstation: ws.config /
-# ws.apply / ws.adjust; CardsLayer mutates ws.config in place + dispatches through them.
+# (_CARD_*); imported back here so tests + a couple of console call sites resolve
+# console._X. Its own GO/CODE/CLOSE buttons were dissolved into the unified bar
+# (fix B); CART STATE stays on Workstation: ws.config / ws.apply / ws.adjust; CardsLayer
+# mutates ws.config in place + dispatches through them.
 try:
     from cards_layer import (
-        CardsLayer, _RUN_BTN, _CODE_BTN, _CLOSE_BTN, _CARD_X, _CARD_W, _CARD_Y0,
+        CardsLayer, _CARD_X, _CARD_W, _CARD_Y0,
         _CARD_H, _CARD_VIEW_BOTTOM, _CARD_SCROLL_UP, _CARD_SCROLL_DN)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.cards_layer import (
-        CardsLayer, _RUN_BTN, _CODE_BTN, _CLOSE_BTN, _CARD_X, _CARD_W, _CARD_Y0,
+        CardsLayer, _CARD_X, _CARD_W, _CARD_Y0,
         _CARD_H, _CARD_VIEW_BOTTOM, _CARD_SCROLL_UP, _CARD_SCROLL_DN)
 
 # The sprite/icon PAINT editor surface (#4/#30, extracted -- see paint_layer.py). ONE
@@ -388,9 +389,9 @@ def color(name_or_index):
 # this file, so console._X still resolves for Layout + the golden harness/tests.
 # (The #71 pause-screen button geometry was retired in Stage 5 along with the pause
 # machinery -- the Player exits on hold-BACKSPACE / triple-tap now.)
-# The cards-menu geometry (_RUN_BTN / _CODE_BTN / _CLOSE_BTN + _CARD_*) lives in
-# cards_layer.py (its own surface, #3/#15) and is imported back at the top of this
-# file, so console._X still resolves for tests.
+# The cards-menu geometry (_CARD_*) lives in cards_layer.py (its own surface, #3/#15)
+# and is imported back at the top of this file, so console._X still resolves for tests.
+# (GO/CODE/CLOSE dissolved into the unified bar in fix B -- PLAY/Code-tab/context X.)
 # --- Desktop shell (#28): home = wallpaper + cart icon grid + dock ----------
 # The home screen is now a Picotron/TIC-80-style desktop: a wallpaper backdrop, a
 # grid of tappable cart icons, the unified 18px top bar (clock + wifi/batt/gear +
