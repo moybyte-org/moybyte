@@ -175,6 +175,40 @@ BUTTON_NAMES = ("left", "right", "up", "down", "a", "b", "run", "home")
 
 
 # ---------------------------------------------------------------------------
+# WM-surface partitioning (Stage 9 of docs/shell_ux_technical_plan_v1.md): one command
+# stream PER window-manager surface (the wm.draw_stack() layers -- bar / app-content /
+# player-viewport) instead of one flat frame, so the browser page becomes a SECOND window
+# manager (the spec Section 3 tier table: the S3 fullscreen stack + the browser). The
+# surfaces are a VIEW of the SAME flat _cmds -- the recorder just remembers WHERE in the
+# stream each surface begins, and _slice_surfaces cuts the frame at those offsets. So the
+# flat frame (and every serve/replay/test path over it) is byte-identical; surfaces are
+# just sliced out when asked. OFF by default -> the flat stream is the only output.
+# ---------------------------------------------------------------------------
+
+
+def _slice_surfaces(cmds, marks):
+    """Cut a flat frame `cmds` into per-surface streams at the recorded start offsets.
+
+    `marks` is [(start_index_into_cmds, sid, domain), ...] in draw order. Returns
+    [[sid, domain, sub_cmds], ...] whose sub_cmds CONCATENATE back to exactly `cmds`
+    (so the surfaces composite to the same pixels as the flat frame). Any commands drawn
+    BEFORE the first surface was begun ride a leading "_pre" surface so nothing is dropped;
+    a frame with no surface marks at all becomes one implicit "_all" surface."""
+    if not marks:
+        return [["_all", "system", cmds]] if cmds else []
+    out = []
+    first = marks[0][0]
+    if first > 0:
+        out.append(["_pre", "system", cmds[:first]])
+    n = len(marks)
+    for i in range(n):
+        start, sid, domain = marks[i]
+        end = marks[i + 1][0] if i + 1 < n else len(cmds)
+        out.append([sid, domain, cmds[start:end]])
+    return out
+
+
+# ---------------------------------------------------------------------------
 # The recorder: a draw-command list. The command format is the SINGLE source of truth for
 # both the browser JS replayer (PAGE_HTML) and the Python cross-check (replay_to_canvas).
 # ---------------------------------------------------------------------------
@@ -231,6 +265,15 @@ class DrawRecorder:
         # Tee/CommandCanvas, indexed by their dense id. Dropped on reset_atlas (cart change),
         # in lock-step with the atlas_gen the serve logic keys off.
         self._layers = []
+        # WM-SURFACE PARTITION (Stage 9): when surfaces_on, the console marks each WM-stack
+        # surface (begin_surface) and commit() slices the flat frame into one stream per
+        # surface (bar / app-content / player-viewport). OFF by default -> begin_surface is a
+        # no-op and frame_surfaces() is None, so the flat frame + every path over it are
+        # byte-identical (zero cost when the web view is off). Only the host web console turns
+        # it on; the DEVICE keeps it off (per-surface browser render is a hardware gate).
+        self.surfaces_on = False
+        self._surf_marks = []          # [(start_index, sid, domain), ...] for this frame
+        self._frame_surfaces = None    # the last committed frame's [[sid, domain, cmds], ...]
 
     # -- frame handoff -------------------------------------------------------
     def begin(self):
@@ -239,15 +282,36 @@ class DrawRecorder:
         if len(self._atlas_keep) > MAX_ATLAS:
             self.reset_atlas()
         self._cmds = []
+        self._surf_marks = []
+
+    def begin_surface(self, sid, domain="system"):
+        """Mark the start of a WM surface's command run (Stage 9). The injected recording
+        canvas forwards the console's per-draw-stack-layer begin_surface here; while
+        surfaces_on the recorder remembers WHERE in the flat stream this surface begins, so
+        commit() can slice the frame WITHOUT a second command list -- the flat _cmds every
+        existing path uses is untouched. A NO-OP while surfaces_on is False (the default) ->
+        zero cost + byte-identical when the web view is off."""
+        if self.surfaces_on:
+            self._surf_marks.append((len(self._cmds), str(sid), str(domain)))
 
     def commit(self):
-        """Finish the frame: the accumulated commands become the served frame."""
+        """Finish the frame: the accumulated commands become the served frame. While
+        surfaces_on, ALSO slice the flat stream into per-surface streams at the marked offsets
+        (Stage 9) -- a view of the same commands, so the flat frame stays identical."""
         self._frame = self._cmds
+        self._frame_surfaces = (_slice_surfaces(self._cmds, self._surf_marks)
+                                if self.surfaces_on else None)
         self._cmds = []
 
     def frame(self):
         """The last committed frame's command list."""
         return self._frame
+
+    def frame_surfaces(self):
+        """The last committed frame's per-surface streams ([[sid, domain, cmds], ...]) or None
+        when surfaces_on was False for that frame (Stage 9). The flat frame() is always
+        available; the surfaces are just a sliced view of it."""
+        return self._frame_surfaces
 
     def reset_atlas(self):
         """Drop the sprite atlas + tilemap snapshot + layers. Called when the open cart /
@@ -1057,13 +1121,21 @@ def assets_payload(w, h, palette, sheet, tilemap, cart_title, audio_rate=8000, i
     }
 
 
-def frame_payload(cmds, cart_title, gen=0, perf=None, audio=""):
+def frame_payload(cmds, cart_title, gen=0, perf=None, audio="", surfaces=None):
     """The per-frame payload: the recorded draw-command list + the cart title (so the client
     refetches /assets on a cart change) + the atlas generation `gen` (the browser resets its
     ATL/LAY caches ONLY when gen changes, lock-step with the served reset). `perf` (device) is
     a tiny stats dict the browser logs; `audio` (host) is base64 PCM for the browser player
-    (the device streams no audio -> "")."""
-    return {"cmds": cmds, "cart": cart_title, "gen": gen, "audio": audio, "perf": perf}
+    (the device streams no audio -> "").
+
+    `surfaces` (Stage 9): when present it's the per-WM-surface streams
+    ([{"id","domain","cmds"}, ...]) the browser composites IN ORDER (bottom->top) instead of
+    the flat `cmds` -- the browser as a second window manager. None keeps the flat-frame shape
+    unchanged (the device + web-view-off path), so every existing consumer is untouched."""
+    p = {"cmds": cmds, "cart": cart_title, "gen": gen, "audio": audio, "perf": perf}
+    if surfaces is not None:
+        p["surfaces"] = surfaces
+    return p
 
 
 # ---------------------------------------------------------------------------
@@ -1354,6 +1426,31 @@ class ServedState:
             return cmds
         return prefix + cmds
 
+    def served_surfaces(self, flat_cmds, surfaces):
+        """Stage 9: serve a frame as per-WM-surface streams. Runs the SAME ship-once
+        defspr/deflayer bookkeeping as served_frame() -- ONCE, over the flat stream -- and
+        returns (served_flat, surface_dicts):
+
+          * served_flat   = served_frame(flat_cmds) (prefix + flat) -- the flat wire form,
+                            handy for callers that also want it and for the faithfulness cross-
+                            check (its pixels are the target the surfaces must reproduce).
+          * surface_dicts = [{"id","domain","cmds"}, ...]: the ship-once prefix delivered as a
+                            LEADING "_defs" surface, then each recorder surface ([sid, domain,
+                            cmds]) as a dict. A browser replaying the surfaces IN ORDER thus
+                            populates its atlas/layer caches (the "_defs" surface) BEFORE the
+                            sprs/blits that reference them -- exactly as the flat served frame
+                            does (the surfaces are a slice of the flat stream, "_defs" prepended).
+
+        `surfaces` is the recorder's frame_surfaces() ([[sid, domain, cmds], ...])."""
+        served = self.served_frame(flat_cmds)
+        prefix_len = len(served) - len(flat_cmds)
+        out = []
+        if prefix_len > 0:
+            out.append({"id": "_defs", "domain": "system", "cmds": served[:prefix_len]})
+        for sid, domain, cmds in (surfaces or []):
+            out.append({"id": sid, "domain": domain, "cmds": cmds})
+        return served, out
+
     def reset(self):
         """Forget which defsprs + deflayers the browser has -- so the next served frame
         re-ships everything it references. Called when /assets is (re)served (a page load /
@@ -1516,6 +1613,20 @@ def replay_to_canvas(commands, canvas, layers=None, assets=None):
                 canvas.palt()
         # unknown ops are ignored (forward-compatible)
     return canvas
+
+
+def replay_surfaces_to_canvas(surfaces, canvas, layers=None, assets=None):
+    """Replay per-WM-surface streams ([{"id","domain","cmds"}, ...] OR [[sid, domain, cmds],
+    ...]) onto `canvas` by compositing them IN ORDER (bottom -> top) -- the Python twin of the
+    browser page's per-surface compositor (Stage 9). Because the surfaces are an in-order slice
+    of the flat frame (with the ship-once "_defs" prefix leading), replaying their command runs
+    back-to-back through ONE replay pass shares the atlas / layer cache across surfaces -- so a
+    defspr in the leading surface populates the atlas the later surfaces' sprs reference, exactly
+    as the browser's global ATL/LAY do. Pixel-identical to replaying the flat served frame."""
+    flat = []
+    for s in (surfaces or []):
+        flat.extend(s["cmds"] if isinstance(s, dict) else s[2])
+    return replay_to_canvas(flat, canvas, layers=layers, assets=assets)
 
 
 # ---------------------------------------------------------------------------
@@ -1767,7 +1878,14 @@ function df(f){if(f.perf){var p=f.perf;PERF.dh=p.heap;PERF.pf=p.pf;PERF.js=p.js;
 if(p.js>PERF.mj)PERF.mj=p.js;if(p.tx>PERF.mt)PERF.mt=p.tx;
 if(p.dr>PERF.md)PERF.md=p.dr;if(p.gap>PERF.mg)PERF.mg=p.gap;if(p.thr)PERF.thr++;}
 if(f.gen!==curGen){curGen=f.gen;ATL=[];LAY={};HUD.unknown=0;}
-if(f.cart!==assCart){assCart=f.cart;getA().catch(function(){});}rep(f.cmds||[]);blit();
+if(f.cart!==assCart){assCart=f.cart;getA().catch(function(){});}
+// Stage 9: the browser as a SECOND window manager -- when the frame carries per-WM-surface
+// streams (f.surfaces: bar / app-content / player-viewport, each id-tagged), COMPOSITE them
+// in order (bottom->top) reusing the same rep() interpreter + global ATL/LAY caches; the
+// leading "_defs" surface ships the ship-once bitmaps/layers first. A flat frame (the device
+// + web-view-off path) has no f.surfaces and replays f.cmds unchanged.
+if(f.surfaces){for(var si=0;si<f.surfaces.length;si++)rep(f.surfaces[si].cmds||[]);}else{rep(f.cmds||[]);}
+blit();
 // A deflayer's imgref cache-MISS (racing the async /assets fetch) latched imgWant: re-fetch
 // /assets (the server re-ships the deflayer on reset) until the paint image is cached (#63 F4).
 if(imgWant&&!assLoading){imgWant=false;getA().catch(function(){});}

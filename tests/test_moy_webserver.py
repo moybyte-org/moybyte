@@ -870,6 +870,175 @@ def test_recorded_print_replays_pixel_identically_to_petme128():
 
 
 # ---------------------------------------------------------------------------
+# WM-SURFACE PARTITION (Stage 9 of docs/shell_ux_technical_plan_v1.md): one command
+# stream PER window-manager surface (the wm.draw_stack() layers -- bar / app-content /
+# player-viewport), tagged by id+domain, so the browser page becomes a SECOND window
+# manager that COMPOSITES the surfaces (spec Section 3: the S3 fullscreen stack + the
+# browser). OFF by default: the flat stream stays byte-identical and the surfaces are a
+# sliced VIEW of it that composites (in order) to the SAME pixels.
+# ---------------------------------------------------------------------------
+
+
+def test_recorder_partitions_the_frame_into_wm_surfaces():
+    """With surfaces_on, begin_surface(sid, domain) marks each WM-stack layer; commit() slices
+    the flat frame into [[sid, domain, cmds], ...]. Each surface holds ONLY its layer's draws,
+    and the surfaces CONCATENATE back to exactly the flat frame (they are a view of the same
+    commands), so compositing them reproduces the flat frame's pixels."""
+    rec = web.DrawRecorder(WIDTH, HEIGHT)
+    rec.enabled = True
+    rec.surfaces_on = True
+    rec.begin()
+    rec.begin_surface("desktop", "game")     # the player/cart viewport
+    rec.cls(1)
+    rec.rect(10, 10, 20, 20, 8)
+    rec.begin_surface("perf", "game")        # a game-domain overlay
+    rec.print("60", 300, 230, 7)
+    rec.begin_surface("cursor", "system")    # the always-on cursor
+    rec.spr(Image(2, 2, [7, 7, 7, 7], transparent=-1), 100, 100)
+    rec.commit()
+    surfs = rec.frame_surfaces()
+    assert [(s[0], s[1]) for s in surfs] == [
+        ("desktop", "game"), ("perf", "game"), ("cursor", "system")]
+    assert [c[0] for c in surfs[0][2]] == ["cls", "rect"]
+    assert [c[0] for c in surfs[1][2]] == ["print"]
+    assert [c[0] for c in surfs[2][2]] == ["spr"]
+    # Concatenation == the flat frame (so surfaces composite to the same pixels).
+    assert [c for s in surfs for c in s[2]] == rec.frame()
+
+
+def test_recorder_surfaces_off_is_flat_and_byte_identical():
+    """surfaces_on defaults False: begin_surface is a NO-OP (marks nothing, never raises),
+    frame_surfaces() is None, and the flat frame is exactly what it was before Stage 9 -- the
+    zero-cost, byte-identical web-view-off path (the golden guarantee)."""
+    rec = web.DrawRecorder(WIDTH, HEIGHT)
+    rec.enabled = True
+    assert rec.surfaces_on is False
+    rec.begin()
+    rec.begin_surface("desktop", "game")     # a no-op while off
+    rec.cls(2)
+    rec.rect(0, 0, 5, 5, 4)
+    rec.commit()
+    assert rec.frame_surfaces() is None
+    assert rec._surf_marks == []
+    assert rec.frame() == [["cls", 2], ["rect", 0, 0, 5, 5, 4]]
+
+
+def test_recorder_pre_surface_captures_draws_before_the_first_mark():
+    """A draw recorded BEFORE any begin_surface rides a leading "_pre" surface, so nothing is
+    dropped and the surfaces still concatenate to the flat frame."""
+    rec = web.DrawRecorder(WIDTH, HEIGHT)
+    rec.enabled = True
+    rec.surfaces_on = True
+    rec.begin()
+    rec.cls(0)                               # drawn before any surface begun
+    rec.begin_surface("launcher", "system")
+    rec.rect(1, 1, 2, 2, 3)
+    rec.commit()
+    surfs = rec.frame_surfaces()
+    assert surfs[0][0] == "_pre" and [c[0] for c in surfs[0][2]] == ["cls"]
+    assert surfs[1][0] == "launcher" and [c[0] for c in surfs[1][2]] == ["rect"]
+    assert [c for s in surfs for c in s[2]] == rec.frame()
+
+
+def test_served_surfaces_prepend_defs_and_composite_pixel_identical():
+    """served_surfaces() delivers the ship-once defspr prefix as a LEADING "_defs" surface,
+    then each WM surface; a browser replaying the surfaces IN ORDER (the shared
+    replay_surfaces_to_canvas twin) reproduces the panel PIXEL-IDENTICALLY -- and identically
+    to replaying the flat served frame (the surfaces ARE a slice of it, "_defs" prepended).
+    Primitives + atlas sprites (serve-time defspr) + text across three surfaces."""
+    raster = Canvas(WIDTH, HEIGHT)
+    rec = web.DrawRecorder(WIDTH, HEIGHT)
+    tee = web.TeeCanvas(raster, rec)
+    st = web.ServedState(rec)
+    rec.enabled = True
+    rec.surfaces_on = True
+    spr = Image(4, 4, [0, 8, 8, 0, 8, 7, 7, 8, 8, 7, 7, 8, 0, 8, 8, 0], transparent=0)
+    rec.begin()
+    rec.begin_surface("desktop", "game")     # the player viewport
+    tee.cls(1)
+    tee.rect(10, 10, 60, 40, 8)
+    tee.spr(spr, 100, 100, 3)                 # atlas sprite -> its defspr rides "_defs"
+    rec.begin_surface("perf", "game")
+    tee.print("60 FPS", 8, 220, 7)
+    rec.begin_surface("cursor", "system")
+    tee.spr(spr, 150, 100, 2, 1)             # same bitmap -> reuses the atlas index
+    rec.commit()
+    served_flat, surfaces = st.served_surfaces(rec.frame(), rec.frame_surfaces())
+    assert surfaces[0]["id"] == "_defs"
+    assert any(c[0] == "defspr" for c in surfaces[0]["cmds"]), "the ship-once bitmap leads"
+    assert [s["id"] for s in surfaces[1:]] == ["desktop", "perf", "cursor"]
+    # Compositing the surfaces IN ORDER reproduces the panel pixel-for-pixel...
+    comp = Canvas(WIDTH, HEIGHT)
+    web_view.replay_surfaces_to_canvas(surfaces, comp)
+    assert bytes(comp.buf) == bytes(raster.buf), "surface composite must match the panel"
+    # ...and equals replaying the flat served frame.
+    flatcv = Canvas(WIDTH, HEIGHT)
+    replay_diet(served_flat, flatcv)
+    assert bytes(flatcv.buf) == bytes(comp.buf)
+    assert len(set(comp.buf)) > 1, "the composited frame must not be flat"
+
+
+def test_surface_scroll_layer_deflayer_rides_the_defs_surface():
+    """A scroll layer spanning the player surface ships its stream ONCE as a deflayer in the
+    leading "_defs" surface (serve-time, like defspr); the tiny blit_layer reference stays in
+    the surface that drew it. The composited surfaces replay pixel-identically to the panel."""
+    raster = Canvas(WIDTH, HEIGHT)
+    rec = web.DrawRecorder(WIDTH, HEIGHT)
+    tee = web.TeeCanvas(raster, rec)
+    st = web.ServedState(rec)
+    rec.enabled = True
+    rec.surfaces_on = True
+    lay = tee.new_layer(WIDTH * 2, HEIGHT)
+    lay.cls(1)
+    lay.rect(0, HEIGHT - 40, WIDTH * 2, 40, 3)
+    for gx in range(0, WIDTH * 2, 60):
+        lay.circ(gx + 10, 40, 8, 7)
+    rec.begin()
+    rec.begin_surface("desktop", "game")     # the scroll world + an actor
+    tee.cls(0)
+    tee.blit_window_from(lay, 137, 0)
+    tee.rect(150, 100, 12, 22, 8)
+    rec.begin_surface("cursor", "system")
+    tee.rect(4, 4, 6, 6, 9)
+    rec.commit()
+    served_flat, surfaces = st.served_surfaces(rec.frame(), rec.frame_surfaces())
+    assert surfaces[0]["id"] == "_defs"
+    assert [c[0] for c in surfaces[0]["cmds"]].count("deflayer") == 1
+    assert [s["id"] for s in surfaces[1:]] == ["desktop", "cursor"]
+    assert any(c[0] == "blit_layer" for c in surfaces[1]["cmds"]), "the blit stays in its surface"
+    comp = Canvas(WIDTH, HEIGHT)
+    web_view.replay_surfaces_to_canvas(surfaces, comp)
+    assert bytes(comp.buf) == bytes(raster.buf), "scroll surface composite must match the panel"
+    flatcv = Canvas(WIDTH, HEIGHT)
+    replay_diet(served_flat, flatcv)
+    assert bytes(flatcv.buf) == bytes(comp.buf)
+
+
+def test_frame_payload_carries_surfaces_only_when_present():
+    """frame_payload gains an optional `surfaces` field (Stage 9): present -> the payload
+    carries the per-surface streams the browser composites; absent (None) -> the exact flat
+    shape as before (device + web-view-off), so no existing consumer changes."""
+    flat = web.frame_payload([["cls", 1]], "Demo")
+    assert "surfaces" not in flat and flat["cmds"] == [["cls", 1]]
+    json.dumps(flat)
+    surfs = [{"id": "desktop", "domain": "game", "cmds": [["cls", 1]]},
+             {"id": "cursor", "domain": "system", "cmds": [["spr", 0, 1, 2, 1, 0]]}]
+    p = web.frame_payload([], "Demo", 2, surfaces=surfs)
+    assert p["surfaces"] == surfs and p["gen"] == 2
+    json.dumps(p)
+
+
+def test_page_composites_per_surface_streams():
+    """The browser page (the SECOND window manager) composites per-surface streams: df() reads
+    f.surfaces and replays each surface's cmds in order, falling back to the flat f.cmds when a
+    frame carries none. Guard the served source (the JS can't be unit-tested here)."""
+    page = web.PAGE_HTML
+    assert "f.surfaces" in page, "the page must branch on per-surface streams"
+    assert "f.surfaces[si].cmds" in page, "the page replays each surface's cmds in order"
+    assert "rep(f.cmds||[])" in page, "the flat fallback (device + web-view-off) stays"
+
+
+# ---------------------------------------------------------------------------
 # The protocol payloads (shape parity with tools/web_console.py).
 # ---------------------------------------------------------------------------
 
