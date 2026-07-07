@@ -303,3 +303,16 @@ def test_journal_no_dir_until_first_append(tmp_path):
     assert not (Path(path) / "journal").exists()
     mc.journal_append(path, "main.py", "x\n")
     assert (Path(path) / "journal" / "journal.jsonl").exists()
+
+
+def test_noop_append_does_not_mkdir(tmp_path, monkeypatch):
+    # F3: a no-op append (content-dedup skip) must touch NOTHING -- the mkdir happens
+    # only once we're committing to a write, so an idle tick that changes nothing leaves
+    # no empty folders (and does no filesystem work at all beyond the dedup read).
+    mc, path = _cart(tmp_path)
+    mc.journal_append(path, "main.py", "same\n")   # first real append creates the dirs
+    calls = []
+    real_mkdir = mc._mkdir
+    monkeypatch.setattr(mc, "_mkdir", lambda p: (calls.append(p), real_mkdir(p))[1])
+    assert mc.journal_append(path, "main.py", "same\n") is None   # no-op (deduped)
+    assert calls == []                              # no mkdir on a no-op append

@@ -629,13 +629,12 @@ def journal_append(cart_dir, file, new_bytes):
     if new_bytes is None:
         return None
     jdir, log_path, cur_path, snap_dir = _journal_paths(cart_dir)
-    _mkdir(jdir)
-    _mkdir(snap_dir)
-    entries = _journal_load_entries(log_path)
+    entries = _journal_load_entries(log_path)   # empty when there's no journal/ yet
     cursor = _journal_cursor(cur_path, entries)
     total = _journal_bytes(cur_path)
     # -- ceiling / no-op dedup: identical to the current state -> write NOTHING (a
-    #    debounce that fires with nothing changed must not touch the card).
+    #    debounce that fires with nothing changed must not touch the card). Checked
+    #    BEFORE any _mkdir so a no-op append leaves no empty journal/ folder behind.
     cur_snap = _journal_current_snap(entries, cursor, file)
     if cur_snap is not None:
         try:
@@ -643,6 +642,9 @@ def journal_append(cart_dir, file, new_bytes):
                 return None
         except OSError:
             pass
+    # We are committing to a WRITE now -> create the journal dirs lazily.
+    _mkdir(jdir)
+    _mkdir(snap_dir)
     # -- Google-Docs rule: a commit while rewound truncates the redo tail. This is the
     #    ONE non-append rewrite on the commit path (rare -- only right after an undo).
     tail = [e for e in entries if e["seq"] > cursor]
