@@ -381,8 +381,15 @@ class EditorPickerLayer:
     B) pops back to the launcher; the Editor's own "projects" affordance returns HERE.
 
     Mirrors LauncherHomeLayer (grid nav + trackball hover + page chevrons) but dispatches
-    to the picker verbs instead of RUN, and lends the bar a "PICK A PROJECT" title. Owns
-    only the trackball hover state; ws.picker is the single source it reads."""
+    to the picker verbs instead of RUN, and lends the bar a "PICK A PROJECT" title (or
+    DUP/DEL, see below). Owns the trackball hover state; ws.picker is the single source
+    of truth for items/selection.
+
+    Cart management lives HERE now (docs/shell_ux_v1.md: the launcher is for PLAYING,
+    the picker is for MANAGING projects) -- DUP/DEL act on the picker's SELECTED cart
+    via the lent zone (ws.dup_cart/ws.del_cart, which read `ws.picker`'s selection
+    instead of the launcher's -- see console.py). "+ New" was already picker-only (the
+    pinned grid tile)."""
 
     id = "picker"
     domain = "system"
@@ -460,11 +467,28 @@ class EditorPickerLayer:
         return self.ws.picker.zone_gen
 
     def draw_zone(self, cv, rect):
-        """The picker's lent left zone: a title so the screen reads as 'choose a
-        project to edit' rather than another home grid."""
+        """The picker's lent left zone: DUP/DEL icons over the picker's SELECTED cart
+        (when can_manage and a real cart -- not the pinned "+ New" tile -- is picked),
+        then a "PICK A PROJECT" title -- the picker is the one place a kid creates/
+        copies/deletes/edits a project (docs/shell_ux_v1.md)."""
+        ws = self.ws
         NAMES = self._NAMES
-        lay = self.ws.layout
-        cv.print("PICK A PROJECT", lay.zone_left[0] + 2, 3, NAMES["white"], 1)
+        lay = ws.layout
+        real = ws._real_selected(ws.picker)
+        if ws.can_manage and real is not None:
+            ws._icon("dup", lay.dup_btn[0], lay.dup_btn[1], cv)
+            ws._icon("del", lay.del_btn[0], lay.del_btn[1], cv)
+        cv.print("PICK A PROJECT", lay.status_name_x, 3, NAMES["white"], 1)
 
     def zone_tap(self, px, py, rect=None):
+        """The picker's lent left-zone tap slice: DUP (copy) + DEL (delete) act on the
+        picker's SELECTED cart. No-op when read-only or the selection is the pinned
+        "+ New" tile (there is no real cart to act on)."""
+        ws = self.ws
+        lay = ws.layout
+        real = ws._real_selected(ws.picker)
+        if ws.can_manage and real is not None and self._in(px, py, lay.dup_btn):
+            ws.dup_cart(); return True
+        if ws.can_manage and real is not None and self._in(px, py, lay.del_btn):
+            ws.del_cart(); return True
         return False

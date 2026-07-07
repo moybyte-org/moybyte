@@ -234,9 +234,42 @@ def test_launcher_bar_menu_opens_settings(tmp_path):
 
 # NEW/DUP/DEL moved off the launcher bar into the Editor picker's zone
 # (docs/shell_ux_v1.md: the launcher is for PLAYING, the picker is for MANAGING
-# projects) -- see the picker-zone dup/del coverage further down this file, and
-# tests/test_desktop_shell.py::test_launcher_home_no_longer_manages_carts for the
-# launcher-side regression guard.
+# projects) -- see tests/test_desktop_shell.py::test_launcher_home_no_longer_manages_carts
+# for the launcher-side regression guard.
+
+def test_picker_bar_dup_del_when_manageable(tmp_path):
+    """DUP/DEL icons fire on the picker's lent zone when can_manage: DUP duplicates
+    the picker's SELECTED cart, DEL deletes it -- the same actions the old launcher-
+    bar buttons fired, now acting on the picker's grid instead of the launcher's."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    assert ws.can_manage
+    drv = host_app.ConsoleDriver(ws)
+    ws.open_picker()
+    ws.picker.sel = next(i for i, it in enumerate(ws.picker.items) if it.get("path"))
+    n0 = len(ws.picker.items)
+    drv.click(*_center(ws.layout.dup_btn))           # DUP
+    drv.frame(1 / 30)
+    assert len(ws.picker.items) == n0 + 1
+    ws.picker.sel = next(i for i, it in enumerate(ws.picker.items) if it.get("path"))
+    drv.click(*_center(ws.layout.del_btn))           # DEL
+    drv.frame(1 / 30)
+    assert len(ws.picker.items) == n0
+
+
+def test_picker_bar_management_hidden_when_read_only(tmp_path):
+    """With writes disabled (can_manage False), a tap on the picker's DUP icon
+    position does nothing -- the management cluster isn't active (it's not drawn
+    either)."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    ws.can_manage = False
+    drv = host_app.ConsoleDriver(ws)
+    ws.open_picker()
+    n0 = len(ws.picker.items)
+    drv.click(*_center(ws.layout.dup_btn))
+    drv.frame(1 / 30)
+    assert len(ws.picker.items) == n0
 
 
 # -- Part 3: the wifi icon is a STATUS glyph + a shortcut to the wifi tool ----
