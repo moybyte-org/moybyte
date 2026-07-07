@@ -953,30 +953,34 @@ def test_moy_compositor_sram_bounce_flush_protocol():
         for k in range(comp._bnc_bands):
             a[k * band_bytes:(k + 1) * band_bytes] = bytes([k + 1]) * band_bytes
 
-        # FRAME 1 kick: exactly TWO bands queue (both bounce slots), then return.
+        # FRAME 1 kick: exactly `slots` bands queue (every bounce slot -- 3 by
+        # default since #66 lever 2, ~9.2ms of transfer absorbing pump latency),
+        # then return.
+        slots = comp._bnc_slots
+        assert slots == module.BOUNCE_SLOTS == 3    # the shipped default
         comp.flush()
         assert comp._front is a
         assert comp._dma_pending is None
-        assert len(bus.colors) == 2
-        assert comp._bnc_next == 2 and comp._bnc_total == comp._bnc_bands
-        assert comp._dma_target == 2 and comp._dma_done_n == 0
-        (cmd0, pay0, y00, y01), (cmd1, pay1, y10, y11) = bus.colors
-        assert cmd0 == module.RAMWR and cmd1 == -1
-        assert (y00, y01) == (0, module.BOUNCE_ROWS - 1)
-        assert (y10, y11) == (module.BOUNCE_ROWS, 2 * module.BOUNCE_ROWS - 1)
-        assert pay0 == bytes([1]) * band_bytes and pay1 == bytes([2]) * band_bytes
+        assert len(bus.colors) == slots
+        assert comp._bnc_next == slots and comp._bnc_total == comp._bnc_bands
+        assert comp._dma_target == slots and comp._dma_done_n == 0
+        for k, (cmd, pay, y0, y1) in enumerate(bus.colors):
+            assert cmd == (module.RAMWR if k == 0 else -1)
+            assert (y0, y1) == (k * module.BOUNCE_ROWS,
+                                (k + 1) * module.BOUNCE_ROWS - 1)
+            assert pay == bytes([k + 1]) * band_bytes
 
-        # Slot gating: no completions -> pump() must NOT queue band 2 (its bounce
-        # slot still carries in-flight band 0).
+        # Slot gating: no completions -> pump() must NOT queue band `slots` (its
+        # bounce slot still carries in-flight band 0).
         comp.pump()
-        assert len(bus.colors) == 2
-        # One completion frees slot 0 -> pump queues exactly band 2 (and only it).
+        assert len(bus.colors) == slots
+        # One completion frees slot 0 -> pump queues exactly the next band.
         bus.complete(1)
         comp.pump()
-        assert len(bus.colors) == 3
-        assert bus.colors[2][0] == -1
-        assert bus.colors[2][2] == 2 * module.BOUNCE_ROWS
-        assert bus.colors[2][1] == bytes([3]) * band_bytes
+        assert len(bus.colors) == slots + 1
+        assert bus.colors[slots][0] == -1
+        assert bus.colors[slots][2] == slots * module.BOUNCE_ROWS
+        assert bus.colors[slots][1] == bytes([slots + 1]) * band_bytes
 
         # Drain fallback: the next flush() must feed the REMAINING bands itself
         # (host has no pump timer). Completing-on-queue keeps the drain loop live.
@@ -985,11 +989,11 @@ def test_moy_compositor_sram_bounce_flush_protocol():
             real_tx(*args)
             bus.complete(1)
         bus.tx_color = tx_and_complete
-        bus.complete(2)          # bands 1..2 finish; 0 already did
+        bus.complete(slots)      # bands 1..slots finish; 0 already did
         comp.flush()             # frame 2: drain feeds bands 3..9, swap, kick B
         n = comp._bnc_bands
-        # all 10 of A's bands went out, in order, payload-faithful...
-        assert len(bus.colors) >= n + 2
+        # all of A's bands went out, in order, payload-faithful...
+        assert len(bus.colors) >= n + slots
         for k in range(n):
             cmd, pay, y0, _y1 = bus.colors[k]
             assert cmd == (module.RAMWR if k == 0 else -1)
@@ -1083,22 +1087,24 @@ def test_moy_compositor_bounce_pacing_stats():
         comp._pump_tdf = lambda a, b: a - b
 
         n = comp._bnc_bands
-        comp.flush()                     # kick at t=0: bands 0+1 queue immediately
+        slots = comp._bnc_slots          # 3 since #66 lever 2
+        comp.flush()                     # kick at t=0: every slot's band queues
+        assert comp._bnc_next == slots
         assert comp._bnc_idle_n == 0     # kick bands never count as starvation
         clock[0] = 3000
-        bus.complete(2)                  # both in-flight bands done at t=3000 (ISR stamps)
+        bus.complete(slots)              # all in-flight bands done at t=3000 (ISR stamps)
         assert comp._dma_done_us == 3000
         clock[0] = 5000
-        comp.pump()                      # band 2 fed 2000us AFTER the bus went idle
+        comp.pump()                      # next band fed 2000us AFTER the bus went idle
         assert comp._bnc_idle_n == 1
         assert comp._bnc_idle_us == 2000
-        # band 3's slot was free too, so the same pump() fed it with the bus busy
-        # (band 2 in flight) -> no extra idle gap.
-        assert comp._bnc_next == 4
+        # the following bands' slots were free too, so the same pump() fed them
+        # with the bus busy (previous band in flight) -> no extra idle gap.
+        assert comp._bnc_next == min(n, slots + slots)
 
         # Feed the tail promptly: completions right before the pump -> no new gaps.
-        bus.complete(1)                  # band 2 done at t=5000
-        comp.pump()                      # feeds band 4 while band 3 in flight
+        bus.complete(1)                  # another band done at t=5000
+        comp.pump()                      # feeds the next while others are in flight
         while comp._bnc_next < n:
             bus.complete(1)
             comp.pump()
@@ -1859,7 +1865,8 @@ def test_sram_bounce_flush_wired():
     # 1.5ms bands starved the SPI -> -30% fps) and the band copy must be the C
     # memcpy (memoryview slice-assign measured ~1ms+/band = FLUSHBRK setup 2.5ms)
     assert "\nBOUNCE_ROWS = 48" in comp
-    assert "gfx.copy(self._bnc_bufs[k & 1], 0, front, k * band_b, n)" in comp
+    assert "gfx.copy(self._bnc_bufs[k % slots], 0, front, k * band_b, n)" in comp
+    assert "\nBOUNCE_SLOTS = 3" in comp    # #66 lever 2: third slot is the default
     gfx_c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
     assert "MP_ROM_QSTR(MP_QSTR_copy),       MP_ROM_PTR(&moy_gfx_copy_obj)" in gfx_c
 
