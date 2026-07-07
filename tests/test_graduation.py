@@ -156,3 +156,128 @@ def test_journal_entry_without_grad_leaves_flag_untouched(tmp_path):
     moy_carts.journal_append(path, "main.py", "b\n")            # no grad rider
     assert moy_carts.journal_undo(path) == "main.py"
     assert moy_carts.load(path)["graduated"] is True            # untouched
+
+
+# ----------------------------------------------------------------------------
+# Layer 3: the console WIRING -- a code commit graduates a block cart, and an
+# undo past the graduating commit un-graduates it (the full §8 edge matrix,
+# driven through the real Workstation).
+# ----------------------------------------------------------------------------
+
+def _select(ws, title):
+    for i, c in enumerate(ws.launcher.items):
+        if c["title"] == title:
+            ws.launcher.sel = i
+            return
+
+
+def _block_cart(tmp_path, title="Grad Cart"):
+    """A workstation open on a genuine block-authored cart: blocks.json + a
+    round-tripping main.py both on disk (a real program saved through the store),
+    reopened so ws.cart['blocks'] is loaded."""
+    from runtime import host_app
+    root = str(tmp_path / "carts")
+    ws = host_app.build_workstation(root)
+    cart = moy_carts.create(title, root, type="game")
+    prog = {
+        "vars": ["score"],
+        "scripts": [
+            blocks.make_block("on_draw", children=[
+                blocks.make_block("cls", {"color": "black"}),
+                blocks.make_block("set_var", {"var": "score", "value": 7}),
+            ]),
+        ],
+    }
+    status, _ = moy_carts.save_blocks(cart, prog)
+    assert status == moy_carts.SAVE_OK
+    ws.launcher.items = moy_carts.scan(root)
+    _select(ws, title)
+    ws.open()
+    assert ws.cart["blocks"] is not None
+    return ws, root
+
+
+def _commit_code(ws, text):
+    """Drive a code-tab commit (the graduation trigger point) end to end."""
+    ws.set_menu_view("code")
+    ws.screen = "menu"
+    ws.editor.set_text(text)
+    return ws.save_code()
+
+
+def test_template_block_cart_does_not_graduate(tmp_path):
+    """§8 template-only: a block cart whose main.py is the untouched generated source
+    stays blockifiable -- committing it does NOT graduate."""
+    ws, _ = _block_cart(tmp_path)
+    gen = ws.cart["src"]
+    assert _commit_code(ws, gen) is True
+    assert not ws.cart.get("graduated")
+    assert moy_carts.load(ws.cart["path"])["graduated"] is False
+
+
+def test_code_edit_past_vocabulary_graduates(tmp_path):
+    """§8 marker kept + code hand-edited past the vocabulary -> GRADUATES (content-
+    based: the BLOCK_MARKER line is left intact, yet the divergence is detected)."""
+    ws, _ = _block_cart(tmp_path)
+    diverged = ws.cart["src"].replace("score = 7", "score = 999")
+    assert "Made with Moybyte blocks" in diverged            # marker deliberately kept
+    assert _commit_code(ws, diverged) is True
+    assert ws.cart["graduated"] is True                      # RAM synced immediately
+    assert moy_carts.load(ws.cart["path"])["graduated"] is True   # persisted
+    # blocks.json is left FROZEN as the read-only render source (not deleted)
+    assert moy_carts.load_blocks(ws.cart["path"]) is not None
+
+
+def test_cosmetic_then_reverted_never_graduates(tmp_path):
+    """§8 cosmetic-only edit AND code-edited-then-reverted-byte-identical: neither
+    graduates (aggressive normalization eats the cosmetics; a revert round-trips)."""
+    ws, _ = _block_cart(tmp_path)
+    gen = ws.cart["src"]
+    cosmetic = gen.replace("\n\n", "\n\n\n", 1) + "# a comment the generator would not emit\n"
+    assert _commit_code(ws, cosmetic) is True
+    assert not ws.cart.get("graduated")
+    # hand-revert to byte-identical generated source: still no graduation
+    assert _commit_code(ws, gen) is True
+    assert not ws.cart.get("graduated")
+    assert moy_carts.load(ws.cart["path"])["graduated"] is False
+
+
+def test_code_only_cart_never_graduates(tmp_path):
+    """§8 a code-only cart (never had blocks) never 'graduates' -- it has no block
+    program; today's protected mode, not a one-way door."""
+    from runtime import host_app
+    root = str(tmp_path / "carts")
+    ws = host_app.build_workstation(root)
+    cart = moy_carts.create("Plain", root, src="def _draw():\n    cls(1)\n")
+    ws.launcher.items = moy_carts.scan(root)
+    _select(ws, "Plain")
+    ws.open()
+    assert ws.cart["blocks"] is None
+    assert _commit_code(ws, "def _draw():\n    cls(2)  # edited freely\n") is True
+    assert not ws.cart.get("graduated")
+    assert moy_carts.load(cart["path"])["graduated"] is False
+
+
+def test_undo_past_graduation_restores_source_and_flag(tmp_path):
+    """§8 undo past a graduating commit -> source AND graduated:false BOTH restored;
+    redo re-graduates (the one honest back-door, riding the Stage-7 journal)."""
+    ws, _ = _block_cart(tmp_path)
+    path = ws.cart["path"]
+    diverged = ws.cart["src"].replace("score = 7", "score = 999")
+    assert _commit_code(ws, diverged) is True
+    assert ws.cart["graduated"] is True
+    assert "score = 999" in (Path(path) / "main.py").read_text()
+
+    # undo the graduating commit: source falls back to the block-generated baseline
+    # AND graduated flips false, in ONE step
+    assert ws.undo() is True
+    restored = (Path(path) / "main.py").read_text()
+    assert "score = 999" not in restored and "score = 7" in restored
+    assert ws.cart["graduated"] is False
+    assert moy_carts.load(path)["graduated"] is False
+
+    # redo re-applies the divergence AND re-graduates
+    assert ws.redo() is True
+    assert "score = 999" in (Path(path) / "main.py").read_text()
+    assert ws.cart["graduated"] is True
+    assert moy_carts.load(path)["graduated"] is True
