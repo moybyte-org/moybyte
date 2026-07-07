@@ -1223,6 +1223,15 @@ class Workstation:
         self.save_status = None       # last save_code result text (e.g. a syntax error)
         self.code_err = None          # short inline syntax-error message (#24)
         self.code_err_row = None      # 0-based row the syntax error is on (#24)
+        # Undo-journal idle-typing debounce (Stage 7 of docs/shell_ux_technical_plan_v1.md):
+        # _edit_ms is the ticks of the last keystroke in the code editor (None = no
+        # pending edit); frame() fires a durable, INVISIBLE autosave-commit once
+        # _edit_debounce_ms of no keystroke elapse, so the SD write lands in a typing
+        # GAP (never mid-burst, where it would stall the keystroke echo) -- the soft
+        # trigger alongside the hard SAVE/PLAY/tab-leave commits. The ~1.5s default is
+        # v1.1's pinned starting point, TO BE CONFIRMED BY THE STAGE-7 HARDWARE MEASUREMENT.
+        self._edit_ms = None
+        self._edit_debounce_ms = 1500
         self.paint_status = None      # last sprite-reuse (GET/PUT) result text (#18)
         self.can_manage = True        # writes enabled? run_desktop sets this from
                                       # whether SD is the cart source (carts_root)
@@ -2634,6 +2643,15 @@ class Workstation:
         # but never stale: a press that's a no-op costs one redraw, not a wrong screen.
         if getattr(i, "_pressed", None) or i.last_key:
             self._dirty = True
+        # Undo journal (Stage 7): any activity in the code editor (re)arms the idle
+        # autosave-commit debounce -- frame() fires the durable commit once the kid
+        # STOPS typing for _edit_debounce_ms, so the SD write lands in a gap. Marked
+        # here (before routing) so it tracks the last keystroke regardless of who
+        # consumes it; frame() only actually commits when the editor is dirty.
+        if (self.editor is not None and self.wm.top_is("menu")
+                and self.menu_view == "code"
+                and (i.last_key or getattr(i, "_pressed", None))):
+            self._edit_ms = _ticks_ms()
         # Walk the MEMOIZED visible stack top -> bottom (Stage 6c): the WM caches it
         # pre-reversed, so this hot per-frame routing allocates neither the list nor a
         # reversed() iterator on a static top-of-stack.
@@ -2809,11 +2827,52 @@ class Workstation:
             pass
         self._reset_canvas_state()
 
+    def _autosave_code(self):
+        """The idle-debounce autosave-COMMIT (Stage 7): persist + journal the code
+        editor's buffer once the kid has stopped typing, WITHOUT the SAVE UI (save is
+        invisible, spec Section 7). Only commits parseable source -- a mid-edit syntax
+        error just waits (no nag) -- and only a real, writable edit. commit_code does
+        the persist + the durable journal append + clears editor.dirty."""
+        ed = self.editor
+        if ed is None or not getattr(ed, "dirty", False):
+            return
+        if (self.carts_store is None or not self.cart
+                or not self.cart.get("path") or not self.can_manage):
+            ed.dirty = False              # nothing persistable (embedded/non-SD) -> disarm
+            return
+        src = ed.text()
+        ok, _msg = self.carts_store.compile_check(src)
+        if not ok:
+            return                        # don't autosave/journal un-parseable source
+        prev_status = self.save_status
+        self.project.commit_code(src)     # persists + journals; clears ed.dirty
+        self.save_status = prev_status    # keep the autosave invisible (spec Section 7)
+
+    def _journal_idle_tick(self):
+        """Fire the idle-typing autosave-commit once the code editor has sat quiet for
+        _edit_debounce_ms (Stage 7 soft trigger). Called every frame BEFORE the redraw
+        gate so it runs even while a static editor screen is skipping its redraw -- the
+        exact idle moment the between-frames SD write should land. Cheap: one early-out
+        on the common no-pending-edit path."""
+        if self._edit_ms is None:
+            return
+        ed = self.editor
+        if ed is None or not getattr(ed, "dirty", False):
+            self._edit_ms = None          # the edit was saved/cleared elsewhere -> disarm
+            return
+        if _ticks_diff(_ticks_ms(), self._edit_ms) < self._edit_debounce_ms:
+            return                        # not idle long enough -- the kid is still typing
+        self._edit_ms = None
+        self._autosave_code()
+
     def frame(self, dt):
         if dt > 0:
             inst = 1.0 / dt
             # EMA so the readout reflects sustained rate, not single-frame jitter.
             self._fps = inst if self._fps <= 0 else self._fps + (inst - self._fps) * 0.15
+        # Undo journal (Stage 7): the idle-typing autosave debounce runs BEFORE the
+        # redraw gate below, so it fires even on a static (redraw-skipped) editor frame.
+        self._journal_idle_tick()
         # Boot logo: expire the splash before the redraw gate so THIS frame reveals the
         # launcher. While it's live it's an _animating source, so the loop keeps flushing
         # it; marking dirty on expiry guarantees the launcher paints on the next frame.
