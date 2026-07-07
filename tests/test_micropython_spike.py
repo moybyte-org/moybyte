@@ -957,7 +957,10 @@ def test_moy_compositor_sram_bounce_flush_protocol():
         # default since #66 lever 2, ~9.2ms of transfer absorbing pump latency),
         # then return.
         slots = comp._bnc_slots
-        assert slots == module.BOUNCE_SLOTS == 3    # the shipped default
+        # Shipped default is 2 (the 2026-07-08 hardware A/B: 3 closed the SPI
+        # idle gap but moved zero fps -- the idle overlapped VM work -- and
+        # added queue-full blocking jitter); the protocol below stays N-slot.
+        assert slots == module.BOUNCE_SLOTS == 2
         comp.flush()
         assert comp._front is a
         assert comp._dma_pending is None
@@ -1866,7 +1869,7 @@ def test_sram_bounce_flush_wired():
     # memcpy (memoryview slice-assign measured ~1ms+/band = FLUSHBRK setup 2.5ms)
     assert "\nBOUNCE_ROWS = 48" in comp
     assert "gfx.copy(self._bnc_bufs[k % slots], 0, front, k * band_b, n)" in comp
-    assert "\nBOUNCE_SLOTS = 3" in comp    # #66 lever 2: third slot is the default
+    assert "\nBOUNCE_SLOTS = 2" in comp    # #66 lever 2: tried 3, reverted (see A/B)
     gfx_c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
     assert "MP_ROM_QSTR(MP_QSTR_copy),       MP_ROM_PTR(&moy_gfx_copy_obj)" in gfx_c
 

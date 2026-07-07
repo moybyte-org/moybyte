@@ -226,11 +226,18 @@ BOUNCE_ROWS = 48       # rows per band: 48 -> 5 bands of 30720B on 320x240
 # within that window -- measured as PUMP idle=3-6ms/gaps=1 on most carts (the
 # soft timer's mp_sched latency lands the feed late in the input/logic window).
 # A THIRD slot queues ~9.2ms at the kick, absorbing that latency outright.
-# COST: +30720B of internal DMA SRAM (#40 budget: ~43KB free on the mem line);
-# the alloc DEGRADES gracefully -- if the extra slot doesn't fit (e.g. WiFi up),
-# the proven 2-slot protocol runs unchanged. Escalation if idle>0 persists:
-# the core-1 present task (C-side band feeder, the moy_audio pattern).
-BOUNCE_SLOTS = 3
+#
+# HARDWARE VERDICT (2026-07-08 A/B, third flash): 3 slots DID close the gap
+# (Sky Run idle=0.00 gaps=0 everywhere, BC 0-2.4ms vs 3-6; feed 16-19 -> 7.6-10)
+# and fps DID NOT MOVE (BC 25-33, Sky 46-49, Hop 53 -- all in their 2-slot
+# bands): the idle overlapped VM work, so it was never on the critical path.
+# Worse, the extra in-flight band intermittently hits a full SPI transaction
+# queue and blocks INSIDE the VM thread (pump=14-25ms / setup=10-25ms spikes,
+# HITCH flush=57-84 -- jitter that didn't exist at 2). So 2 is the shipped
+# value; the N-slot machinery + tests stay for any future panel/bus where
+# transfer IS the limiter. The same verdict retires the core-1 present-task
+# escalation: a perfect feeder buys the same idle=0 for the same zero fps.
+BOUNCE_SLOTS = 2
 PUMP_TIMER_MS = 2      # soft-timer pump period; 0 = drain-fallback only
 
 
