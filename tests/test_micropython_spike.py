@@ -429,6 +429,29 @@ def test_micropython_cart_textmode_flips_keyboard_ascii_raw():
     assert 'if not self.raw_mode and getattr(self.input, "text_mode", False):' in kb
 
 
+def test_micropython_cart_quit_verb_pops_to_the_caller():
+    # A cart ENDS itself via the quit() verb (make_api): the exit a TEXT-mode cart MUST
+    # provide, since hold-BACKSPACE can't reach it (typed 0x08 delete, no keyboard
+    # autorepeat). host==device: the device make_api exposes the SAME `quit` name, and
+    # the shared Player (frozen player.py) honors the flag. Firmware tests grep the source.
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    host = (Path("runtime") / "host_app.py").read_text(encoding="utf-8")
+    player = (Path("runtime") / "player.py").read_text(encoding="utf-8")
+    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+
+    # Both backends expose the SAME verb, setting the SAME input flag (host parity).
+    for src in (runtime, host):
+        assert "def _quit():" in src
+        assert '"quit": _quit,' in src
+        assert "input.cart_quit = True" in src
+
+    # The shared Player honors the flag AFTER the cart's _update ran and pops to the
+    # run caller; opening a fresh cart clears any stale flag (console._open_workspace).
+    assert 'getattr(ws.input, "cart_quit", False)' in player
+    assert "ws._exit_to_caller()" in player
+    assert "self.input.cart_quit = False" in console
+
+
 def test_micropython_spike_documents_tdeck_reference_paths():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     notes = (Path("docs/history") / "SPIKE_RESULTS.md").read_text(encoding="utf-8")

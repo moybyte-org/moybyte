@@ -527,6 +527,20 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # game mode automatically when the cart exits to the desktop/home.
         input.text_mode = bool(on)
 
+    def _quit():
+        # quit() -> END this cart and return to whoever launched it (the launcher, or
+        # the Editor). A cart calls it from a key or an on-screen affordance it draws.
+        # This is how a TEXT-mode cart exits: once it calls textmode(True), the console's
+        # hold-BACKSPACE game-exit can't reach it (BACKSPACE is a typed 0x08 the cart
+        # reads as delete, and the T-Deck keyboard has no autorepeat, so the ~700ms hold
+        # never accumulates) -- so a textmode(True) cart MUST provide its own exit via
+        # quit(). ADDITIVE to the frozen kid API, works for ANY cart type, same name +
+        # behavior on the device (moy_runtime). Sets a flag the Player honors AFTER this
+        # frame's _update runs (player.tick), popping to the run caller via
+        # ws._exit_to_caller(). `quit` shadows the site builtin inside the cart's exec
+        # namespace, resolving to this closure.
+        input.cart_quit = True
+
     def pmem_fn(index, value=None):
         # TIC-80 pmem(i[, v]): read pmem(i) -> int, write pmem(i, v) -> persists.
         if pmem is None:
@@ -602,7 +616,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         "pal": canvas.pal, "palt": canvas.palt,
         "btn": input.held, "btnp": input.pressed,
         "key": key, "keyp": keyp, "time": time, "pmem": pmem_fn,
-        "textmode": textmode,
+        "textmode": textmode, "quit": _quit,
         "cfg": cfg, "col": palette.color,
         "sfx": _sfx, "beep": _beep, "music": _music,
         "music_stop": _music_stop, "sound_stop": _sound_stop, "volume": _volume,
