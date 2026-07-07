@@ -315,9 +315,9 @@ def test_launcher_does_not_draw_the_bottom_dock(tmp_path):
 def test_in_cart_bar_shows_only_on_crash_never_while_playing(tmp_path):
     """Stage 5 retired the #71 pause frame: while a cart PLAYS the game owns the full
     canvas with NO chrome at all -- the in-cart tool bar (EDIT/PAINT/MAP/HOME) appears
-    ONLY on a CRASH, so the fix-it tools stay reachable. (Exit while playing is the
-    hold-BACKSPACE / triple-tap gesture, not a bar tap.) The launcher's removal of the
-    dead dock does not touch this in-cart chrome."""
+    ONLY on a CRASH, so the fix-it tools stay reachable. (Exit while playing a game is the
+    hold-BACKSPACE gesture, not a bar tap.) The launcher's removal of the dead dock does
+    not touch this in-cart chrome."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
@@ -338,8 +338,8 @@ def test_in_cart_bar_shows_only_on_crash_never_while_playing(tmp_path):
 def test_single_backspace_tap_reaches_the_cart_never_exits(tmp_path):
     """Stage 5 exit model (spec Section 9): the #71 pause frame is GONE -- a running cart
     owns the full 320x240 and BACKSPACE ("home") is a plain key/button the cart reads. A
-    single quick tap keeps playing (it is neither the hold nor the triple-tap gesture);
-    the cart keeps ticking (no freeze), proving there is no pause state left."""
+    single quick tap keeps playing (it is not the hold-to-exit gesture); the cart keeps
+    ticking (no freeze), proving there is no pause state left."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
@@ -390,22 +390,30 @@ def test_hold_backspace_exits_to_caller(tmp_path, monkeypatch):
     drv.hold("home", False)
 
 
-def test_triple_tap_backspace_exits_to_caller(tmp_path):
-    """Stage 5's fw-INDEPENDENT default: three BACKSPACE taps within 1s pop the cart to
-    its caller. Edge-detected (no held key needed), so it works even on old keyboard fw
-    past the 260ms ASCII latch -- the guarantee that deleting the pause-QUIT button never
-    strands a cart. Each drv.press is a one-frame 'home' edge."""
+def test_triple_backspace_tap_does_not_exit_reaches_the_cart(tmp_path):
+    """The triple-tap BACKSPACE exit alias was DROPPED (owner tested on device): quick
+    BACKSPACE taps are plain 'home' key edges the running GAME reads -- even three of them
+    in a row do NOT exit. Hold-BACKSPACE (test above) is the only game exit now; tools/apps
+    exit via their bar X (Part 4). Each drv.press is a one-frame 'home' edge the cart sees;
+    the cart keeps ticking and stays on the desktop."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open()
     assert ws.screen == "desktop"
-    for _ in range(2):                 # two taps: not enough yet
+    calls = [0]
+    orig_upd = ws._update
+
+    def counting(dt):
+        calls[0] += 1
+        if orig_upd:
+            orig_upd(dt)
+    ws._update = counting
+    for _ in range(3):                 # three quick BACKSPACE taps in a row...
         drv.press("home"); drv.frame(1 / 30); drv.frame(1 / 30)
-    assert ws.screen == "desktop"
-    drv.press("home"); drv.frame(1 / 30)   # the third tap within the window -> exit
-    assert ws.screen == "launcher"
+    assert ws.screen == "desktop"      # ...does NOT exit (triple-tap gesture is gone)
+    assert calls[0] > 0                # ...and the cart kept ticking (never froze/popped)
 
 
 def test_hold_progress_toast_is_transient(tmp_path, monkeypatch):
@@ -464,14 +472,15 @@ def test_tap_mode_setting_toggles_and_persists(tmp_path):
     assert ws.tap_mode() == "maker"
 
 
-def test_play_from_editor_returns_to_the_editor_tab_on_exit(tmp_path):
+def test_play_from_editor_returns_to_the_editor_tab_on_exit(tmp_path, monkeypatch):
     """Stage 3b + Stage 5: PLAY runs the cart recording the EDITOR as the run caller, so
-    the cart's EXIT gesture (a triple-tap BACKSPACE here) returns to the Editor on the
-    tab it left (spec Section 2/Section 6's launch-and-return) -- NOT the launcher home.
-    The launcher stays the caller only when IT launched the cart (test above), while the
-    Editor's PLAY makes the Editor the second caller, proving the Player is
-    caller-agnostic and the exit gesture pops to whoever launched it."""
+    the cart's EXIT gesture (hold-BACKSPACE here) returns to the Editor on the tab it left
+    (spec Section 2/Section 6's launch-and-return) -- NOT the launcher home. The launcher
+    stays the caller only when IT launched the cart (test above), while the Editor's PLAY
+    makes the Editor the second caller, proving the Player is caller-agnostic and the exit
+    gesture pops to whoever launched it."""
     from runtime import host_app
+    from runtime import player as P
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
@@ -482,8 +491,13 @@ def test_play_from_editor_returns_to_the_editor_tab_on_exit(tmp_path):
     tab = ws.menu_view
     ws._leave_menu()                   # PLAY: run the cart, caller = the Editor now
     assert ws.screen == "desktop"      # ...still runs fullscreen (transition preserved)
-    for _ in range(3):                 # triple-tap BACKSPACE = the fw-independent exit
-        drv.press("home"); drv.frame(1 / 30); drv.frame(1 / 30)
+    clock = [10_000]
+    monkeypatch.setattr(P, "_ticks_ms", lambda: clock[0])   # deterministic hold timer
+    drv.hold("home", True)             # hold-BACKSPACE = the game exit gesture
+    drv.frame(1 / 30)                  # first held frame (timer starts)
+    clock[0] += P._HOLD_EXIT_MS + 1    # elapse past the hold threshold
+    drv.frame(1 / 30)
+    drv.hold("home", False)
     assert ws.screen == "menu"         # exit returned to the EDITOR...
     assert ws.menu_view == tab         # ...on the very tab it left (not the launcher)
 

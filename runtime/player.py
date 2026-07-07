@@ -17,9 +17,11 @@ What the Player owns (moved verbatim from Workstation):
     the TRANSIENT hold-to-exit toast. It fills the DRAWBRK perf split
     (ws._pf_upd/_pf_cart/_pf_audio) exactly as the old content-layer body did -- that
     contract stays on `ws`.
-  * `handle_input`/`handle_pointer` -- input + the Stage-5 EXIT model: hold-BACKSPACE
-    (~700ms) or a triple-tap BACKSPACE both pop to the run caller
-    (`ws._exit_to_caller`); the #71 pause machinery they replaced is gone.
+  * `handle_input`/`handle_pointer` -- input + the Stage-5 EXIT model: for a GAME a
+    sustained hold-BACKSPACE (~700ms) pops to the run caller (`ws._exit_to_caller`);
+    the #71 pause machinery it replaced is gone. (Tool/app carts run WITH a minimal
+    bar and exit via its context-X instead -- see Workstation; their hold gesture is
+    suppressed so BACKSPACE stays a free text key.)
   * the crash `_draw_error_panel` + the transient `_draw_hold_progress` toast.
 
 The BUNDLE the Player reaches (spec Section 2): the open `Project` (its live data),
@@ -146,24 +148,21 @@ def _wrap(text, cols):
     return out
 
 
-# The Player's EXIT gestures (Stage 5 of docs/shell_ux_technical_plan_v1.md, spec
-# Section 9): the #71 pause machinery is GONE. A running cart owns the full 320x240
-# with NO chrome, and BACKSPACE is a plain key the cart reads. Exit is a deliberate,
-# firmware-independent gesture -- two ways out, both popping to the run caller:
-#   * hold BACKSPACE ~700ms -- the PRIMARY, nicer gesture on keyboard fw >= 2025-06-12,
-#     where raw-matrix mode streams the held "home" key each frame; a small TRANSIENT
-#     progress toast fills as you hold, and the pop fires at the threshold.
-#   * tap BACKSPACE 3x within 1s -- the DEFAULT, fw-INDEPENDENT alias: it is edge-
-#     detected, so it needs no held key past the old-fw 260ms ASCII latch and thus
-#     works on EVERY firmware. Deleting the old pause-QUIT button therefore never
-#     strands a cart as unexitable-but-for-reboot (spec Section 9's requirement).
-# A single quick BACKSPACE tap is neither gesture -- it just reaches the cart as a
+# The Player's EXIT gesture (Stage 5 of docs/shell_ux_technical_plan_v1.md, spec
+# Section 9): the #71 pause machinery is GONE. A running GAME owns the full 320x240
+# with NO chrome, and BACKSPACE is a plain key the cart reads. Exit is a single
+# deliberate gesture that pops to the run caller:
+#   * hold BACKSPACE ~700ms -- raw-matrix mode (keyboard fw >= 2025-06-12) streams the
+#     held "home" key each frame; a small TRANSIENT progress toast fills as you hold,
+#     and the pop fires at the threshold.
+# A single quick BACKSPACE tap is NOT the gesture -- it just reaches the cart as a
 # key/button. In TEXT mode "home" is never asserted (BACKSPACE arrives as a typed 0x08
-# the cart's key() reads -- e.g. the wifi password field's DELETE), so neither gesture
-# fires there: exactly the "backspace = delete, zero special-casing" the spec wants.
+# the cart's key() reads -- e.g. the wifi password field's DELETE), so the gesture
+# never fires there: exactly the "backspace = delete, zero special-casing" the spec
+# wants. (The old triple-tap fw-independent alias was DROPPED after on-device testing --
+# tools/apps now run WITH a minimal bar whose context-X exits them, so a cart is never
+# strandable-but-for-reboot without needing a keyboard fallback.)
 _HOLD_EXIT_MS = 700         # sustained BACKSPACE hold to exit
-_TRIPLE_TAP_MS = 1000       # the window three taps must land within
-_TRIPLE_TAP_N = 3           # taps within that window = exit
 
 
 class Player:
@@ -190,16 +189,12 @@ class Player:
         self._home_held_since = 0     # _ticks_ms when "home" (BACKSPACE) began being held
         self._home_holding = False    # True while "home" is held -> draw the TRANSIENT
                                       # hold-progress toast (ONLY while holding, Section 12)
-        self._tap_count = 0           # consecutive BACKSPACE taps inside the window
-        self._last_tap_ms = 0         # _ticks_ms of the last counted tap
 
     def _reset_exit_state(self):
-        """Clear the hold timer + triple-tap counter (a fresh run, or the moment an
-        exit gesture completes -- so re-entering a cart starts from a clean slate)."""
+        """Clear the hold timer (a fresh run, or the moment the exit gesture completes
+        -- so re-entering a cart starts from a clean slate)."""
         self._home_held_since = 0
         self._home_holding = False
-        self._tap_count = 0
-        self._last_tap_ms = 0
 
     def start(self, project):
         """Start (or re-run) `project`'s cart under make_api. Resets the canvas draw
@@ -322,19 +317,16 @@ class Player:
 
     def handle_input(self, i):
         # Stage 5 EXIT model (spec Section 9): the #71 pause machinery is GONE. A running
-        # cart owns the full 320x240 and every button/key -- BACKSPACE ("home") is a plain
+        # GAME owns the full 320x240 and every button/key -- BACKSPACE ("home") is a plain
         # key the cart reads via its OWN btn()/key() calls in tick() (a parallel read; the
         # Player never steals it from the cart). The Player only WATCHES "home" for the
-        # deliberate exit gesture, and there are two ways out, both popping to the run
-        # caller (ws._exit_to_caller):
-        #   * hold ~700ms -- raw-matrix mode streams the held key, so a sustained hold is a
-        #     rising elapsed-since-first-held; a transient progress toast fills as you hold.
-        #   * tap 3x within 1s -- the fw-INDEPENDENT default: edge-detected, so it needs no
-        #     held key past the old-fw 260ms ASCII latch (a dev unit on old kbd fw still
-        #     exits). A single quick tap is NEITHER -> it just reaches the cart.
-        # In TEXT mode "home" is never asserted (BACKSPACE arrives as a typed 0x08 the
-        # cart's key() reads -- the wifi password field's DELETE), so neither gesture fires
-        # there: the "backspace = delete, zero special-casing" the spec wants.
+        # deliberate exit gesture: hold ~700ms -> pop to the run caller (ws._exit_to_caller).
+        # Raw-matrix mode streams the held key, so a sustained hold is a rising elapsed-
+        # since-first-held; a transient progress toast fills as you hold. A single quick tap
+        # is NOT the gesture -> it just reaches the cart. In TEXT mode "home" is never
+        # asserted (BACKSPACE arrives as a typed 0x08 the cart's key() reads -- the wifi
+        # password field's DELETE), so the gesture never fires there: the "backspace =
+        # delete, zero special-casing" the spec wants.
         ws = self.ws
         now = _ticks_ms()
         if i.held("home"):
@@ -352,15 +344,6 @@ class Player:
             self._home_holding = False         # released before the threshold -> toast gone
             self._home_held_since = 0
             ws._dirty = True
-        if i.pressed("home"):
-            if _ticks_diff(now, self._last_tap_ms) > _TRIPLE_TAP_MS:
-                self._tap_count = 0            # the window lapsed -> start a fresh count
-            self._tap_count += 1
-            self._last_tap_ms = now
-            if self._tap_count >= _TRIPLE_TAP_N:
-                self._reset_exit_state()
-                ws._exit_to_caller()           # triple-tap alias: the fw-independent exit
-                return True
         return True
 
     def handle_pointer(self, px, py, click):

@@ -137,8 +137,8 @@ def test_backspace_is_a_plain_key_zero_special_casing(tmp_path):
     #     typed key, not the "home" button, in text mode -- so the exit gesture, which
     #     watches "home", simply never fires here);
     #   * a typing game keeps all 26 letters (q types, never a shortcut).
-    # Exit is the deliberate hold / triple-tap "home" gesture (tested in
-    # test_desktop_shell.py), not a single BACKSPACE anywhere.
+    # Exit is the deliberate hold-"home" gesture for games (tested in
+    # test_desktop_shell.py) / the bar X for tools, not a single BACKSPACE anywhere.
     import os
     from runtime import host_app
     from runtime import moy_carts
