@@ -663,13 +663,15 @@ def test_sakura_paint_bg_ships_via_assets_and_replays_pixel_identical(tmp_path):
       * the petals' sprites still ship (no defspr starvation), and
       * every served frame replays pixel-identically to the rasterizer via imgref + /assets."""
     ws, drv, tee = _build_tee(str(tmp_path / "carts"))
-    for i, c in enumerate(ws.launcher.items):
-        if os.path.basename(c.get("path") or "") == "sakura.moy":
-            ws.launcher.sel = i
-            break
-    else:
+    # Sakura is a WALLPAPER, so it leaves the launcher run-grid (spec shell_ux_v1.md); it
+    # stays a real editable cart in the full store, so open it by reference (the same
+    # _open_workspace + run that ws.open() does, just for a non-run-grid cart).
+    sakura = next((c for c in ws._all_carts
+                   if os.path.basename(c.get("path") or "") == "sakura.moy"), None)
+    if sakura is None:
         pytest.skip("sakura.moy not in the seeded store")
-    ws.open()
+    ws._open_workspace(sakura)
+    ws.run(ws.project, ws.launcher_layer)
     assert ws.screen == "desktop" and ws.cart_error is None
 
     # /assets carries the decoded bg image (the pixels ship HERE, once per cart).

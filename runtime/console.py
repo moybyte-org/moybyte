@@ -2714,8 +2714,10 @@ class Workstation:
 
     def _launcher_items(self, carts):
         """The LAUNCHER run-grid entries: the pinned "Make" tile first (spec shell_ux_v1.md
-        -- tap it to open the Editor project-picker), then the runnable carts."""
-        return [make_tile()] + list(carts)
+        -- tap it to open the Editor project-picker), then the runnable carts. WALLPAPERS
+        are excluded -- they're a backdrop category chosen in Settings -> wallpaper, not
+        run-grid apps (they stay in the Editor picker + the Settings wallpaper picker)."""
+        return [make_tile()] + [c for c in carts if c.get("type") != "wallpaper"]
 
     def _picker_items(self, carts):
         """The Editor PROJECT-PICKER grid entries: the pinned "+ New" tile first (create a

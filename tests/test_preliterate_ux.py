@@ -177,7 +177,13 @@ def _open(ws, title):
             ws.launcher.sel = i
             ws.open()
             return
-    raise AssertionError("cart not found: " + title)
+    # Not in the launcher run-grid (a WALLPAPER leaves it, spec shell_ux_v1.md): still a
+    # real editable cart in the store, so open it by reference (as ws.open() does).
+    cart = next((c for c in ws._all_carts if c["title"] == title), None)
+    if cart is None:
+        raise AssertionError("cart not found: " + title)
+    ws._open_workspace(cart)
+    ws.run(ws.project, ws.launcher_layer)
 
 
 def test_showcase_star_catcher_opens_and_runs_headless(tmp_path):

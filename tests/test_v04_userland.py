@@ -16,12 +16,18 @@ SYSTEM_CARTS = ROOT / "system_carts"
 
 
 def _open_cart(ws, title):
-    """Select a seeded system cart by title and open it in the shared console."""
+    """Open a seeded system cart by title in the shared console. Games/tools/apps live in
+    the launcher run-grid; a WALLPAPER leaves it (spec shell_ux_v1.md) but stays a real
+    editable cart in the store, so fall back to opening it by reference (as ws.open() does)."""
     for i, c in enumerate(ws.launcher.items):
         if c["title"] == title:
             ws.launcher.sel = i
-            break
-    ws.open()
+            ws.open()
+            return
+    cart = next((c for c in ws._all_carts if c["title"] == title), None)
+    assert cart is not None, "seed cart not found: " + title
+    ws._open_workspace(cart)
+    ws.run(ws.project, ws.launcher_layer)
 
 
 # -- palette ---------------------------------------------------------------
