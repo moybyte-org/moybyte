@@ -153,12 +153,13 @@ def test_tap_icon_opens_cart(tmp_path):
 
     ws = _ws_with_carts(tmp_path, 10)
     drv = host_app.ConsoleDriver(ws)
-    # Tap the second icon -> opens it. An EDITABLE cart (has an `edit` schema) opens the
-    # Editor (maker default, spec Section 4); a non-editable cart LAUNCHES (Part 2). The
-    # "Extra" top-up carts carry no edit schema, so assert per the tapped cart's edit-ness.
+    # Tap the second icon -> opens it. Dispatch keys on manifest TYPE (spec Section 4): only
+    # a `type=="game"` cart follows tap_mode (the maker default opens the Editor); everything
+    # else (tool/app/wallpaper) LAUNCHES. The "Extra" top-up carts are `type=="app"`, so they
+    # LAUNCH; assert per the tapped cart's type.
     r = ws.launcher.tile_rect(1)
     cx, cy = r[0] + r[2] // 2, r[1] + r[3] // 2
-    expect = "menu" if ws.launcher.items[1].get("edit") else "desktop"
+    expect = "menu" if ws.launcher.items[1].get("type") == "game" else "desktop"
     drv.touch(cx, cy)
     drv.frame(1 / 30)
     drv.touch_up()
@@ -177,9 +178,9 @@ def test_tap_icon_on_second_page_opens_the_right_cart(tmp_path):
     target = ws.launcher.items[first_on_page]["title"]
     r = ws.launcher.tile_rect(first_on_page)
     cx, cy = r[0] + r[2] // 2, r[1] + r[3] // 2
-    # An EDITABLE cart (has an `edit` schema) opens the Editor (maker default); a
-    # non-editable cart LAUNCHES (Part 2).
-    expect = "menu" if ws.launcher.items[first_on_page].get("edit") else "desktop"
+    # Dispatch keys on manifest TYPE (spec Section 4): only a `type=="game"` cart follows
+    # tap_mode (maker default opens the Editor); everything else LAUNCHES.
+    expect = "menu" if ws.launcher.items[first_on_page].get("type") == "game" else "desktop"
     drv.touch(cx, cy)
     drv.frame(1 / 30)
     drv.touch_up()

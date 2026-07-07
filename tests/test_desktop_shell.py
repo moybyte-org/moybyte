@@ -239,12 +239,11 @@ _ONE_CARD = [{"key": "c", "type": "choice", "choices": ["red", "blue"], "card": 
 
 
 def test_tool_cart_always_launches_on_tap_even_in_maker_mode(tmp_path):
-    """Part 2 (owner device feedback): a NON-EDITABLE cart (no `edit` schema -- e.g. the
-    wifi tool: nothing to customize) ALWAYS LAUNCHES on a tap, even in the DEFAULT maker
-    mode where an EDITABLE cart opens the Editor. You RUN the wifi tool, you don't edit it.
-    So launch_selected() on a schema-less tool lands on the running cart (screen ==
-    "desktop"), never the Editor; an EDITABLE cart in the same mode still opens the Editor
-    (the contrast). Dispatch keys on editability, not manifest type."""
+    """Part 2 (owner device feedback): a non-game cart (e.g. the `type=="tool"` wifi tool)
+    ALWAYS LAUNCHES on a tap, even in the DEFAULT maker mode where a GAME opens the Editor.
+    You RUN the wifi tool, you don't edit it. So launch_selected() on a tool lands on the
+    running cart (screen == "desktop"), never the Editor; a game in the same mode still opens
+    the Editor (the contrast). Dispatch keys on manifest TYPE -- only `type=="game"` edits."""
     from runtime import host_app, moy_carts
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)
@@ -270,24 +269,43 @@ def test_tool_cart_always_launches_on_tap_even_in_maker_mode(tmp_path):
     assert ws.screen == "menu"                      # maker default for an EDITABLE cart
 
 
-def test_editable_wallpaper_cart_opens_editor_on_maker_tap(tmp_path):
-    """The HIGH regression guard: a kid's brand-new cart is `type=="wallpaper"` but carries
-    the "Make it mine" edit cards (moy_carts.NEW_TEMPLATE). Dispatching on TYPE would run it
-    bar-less with no tap path back to its Config -- the trap. Dispatching on EDITABILITY,
-    a maker-mode tap opens the Editor (Config) because it HAS an edit schema, even though
-    its type is wallpaper (not a game)."""
+def test_new_cart_opens_editor_on_maker_tap(tmp_path):
+    """The HIGH anti-trap regression guard: a kid's brand-new cart (moy_carts.NEW_TEMPLATE)
+    is `type=="game"` -- the maker project you tweak. Dispatch keys on TYPE, so a maker-mode
+    tap opens the Editor (Config) instead of running it bar-less with no way back. (The
+    template used to be a `wallpaper`, which -- once dispatch keyed on type -- would have run
+    with no tap path to its cards; making the NEW default a game closes that trap.)"""
     from runtime import host_app, moy_carts
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)
     assert ws.tap_mode() == "maker"
     new = moy_carts.new_from_template(carts_dir, title="Freshie")
-    assert new["type"] == "wallpaper" and new["edit"]   # wallpaper type, BUT has edit cards
+    assert new["type"] == "game" and new["edit"]    # a game project WITH edit cards
     ws.launcher.set_items(moy_carts.scan(carts_dir))
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("title") == "Freshie")
     ws.launch_selected()
     assert ws.screen == "menu"                      # opened the Editor (Config), did NOT run
     assert ws.menu_view == "cards"                  # ...landing on the Make-it-mine cards
+
+
+def test_game_without_edit_schema_opens_editor_on_maker_tap(tmp_path):
+    """The Fix 1 regression guard: a `type=="game"` cart with NO "Make it mine" cards
+    (edit schema empty/absent -- e.g. system_carts/tap_game.moy, `edit: []`) used to
+    LAUNCH on a maker tap because the old dispatch keyed on the edit-schema. Dispatch now
+    keys on manifest TYPE: a non-tool cart follows tap_mode, so a maker tap opens the
+    Editor even with no cards -- editing is for everything that isn't a pure tool."""
+    from runtime import host_app, moy_carts
+    carts_dir = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts_dir)
+    assert ws.tap_mode() == "maker"
+    moy_carts.create("Cardless", carts_dir, src="def _draw():\n    cls(3)\n", type="game")
+    ws.launcher.set_items(moy_carts.scan(carts_dir))
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                           if it.get("title") == "Cardless")
+    assert not ws.launcher.selected().get("edit")   # no cards -> old logic would LAUNCH
+    ws.launch_selected()
+    assert ws.screen == "menu"                      # ...now opens the Editor (Fix 1)
 
 
 def test_go_home_keeps_wallpaper(tmp_path):
