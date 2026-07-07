@@ -1275,8 +1275,8 @@ def apply_events(events, input, pointer, on_press=None, on_pan=None,
                     on_key(code)
                     # ONE console key on the web too: outside text mode a browser
                     # Backspace also fires the HOME button (Stage 5: HOME is the EXIT
-                    # key -- one edge here contributes a triple-tap; the ☰ button,
-                    # wired as a HELD "home" below, is the hold-to-exit gesture),
+                    # key -- a single edge the running cart reads; the ☰ button, wired
+                    # as a HELD "home" below, is the hold-to-exit gesture for games),
                     # mirroring the physical key -- the raw-matrix path likewise
                     # reports last_key=0x08 AND the home button. In text mode it stays
                     # a typed 0x08 only (DELETE for a tool -- zero special-casing).
@@ -1741,11 +1741,12 @@ var PAN={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]},
 NAV={a:"left",d:"right",w:"up",s:"down"},SC={Enter:"run",z:"a",x:"b"},pH={},nH={};
 // No letter->HOME shortcut: page buttons BYPASS the device's text-mode alias
 // suppression, so h-as-HOME stole the letter h from typing carts (Letter
-// Blitz). EXIT from the page (Stage 5) = HOLD the burger button ~700ms (it
-// streams a held "home" -> the hold-to-exit gesture), or tap Backspace 3x: it
-// is sent as typed cd=8 and the SERVER maps it to a HOME press outside text
-// mode, so three taps within 1s trigger the fw-independent triple-tap exit. In
-// text mode Backspace stays a typed 0x08 (DELETE for a tool -- never an exit).
+// Blitz). EXIT from the page (Stage 5) = HOLD the burger button ~700ms for a
+// game (it streams a held "home" -> the hold-to-exit gesture), or tap the tool
+// bar's X for a tool. A single Backspace outside text mode is sent as typed cd=8
+// and the SERVER also maps it to a HOME press (a plain key edge the cart reads,
+// mirroring the physical key). In text mode Backspace stays a typed 0x08 (DELETE
+// for a tool -- never an exit).
 function nv(e){var k=e.key.length==1?e.key.toLowerCase():e.key;return NAV[k];}
 cv.addEventListener("keydown",function(e){if(e.key in PAN){pH[e.key]=true;e.preventDefault();return;}
 if(e.key=="Escape"){send({type:"esc"});e.preventDefault();return;}var cd=null;

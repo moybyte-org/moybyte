@@ -280,7 +280,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # + the private _cart_start_ms) are exposed back as forwarding properties, so every
 # surface file + test is unchanged. Stage 5 retired the #71 pause machinery (the
 # cart_paused/_bks_prev fields + the _PAUSE_* button geometry are gone) -- the Player
-# now exits on hold-BACKSPACE or a triple-tap. Same bare-or-package fallback as project.py.
+# now exits on hold-BACKSPACE (games) / the bar X (tools). Same bare-or-package fallback as project.py.
 try:
     from player import Player
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -388,7 +388,7 @@ def color(name_or_index):
 # now lives in bar_layer.py (its own surface, #46) and is imported back at the top of
 # this file, so console._X still resolves for Layout + the golden harness/tests.
 # (The #71 pause-screen button geometry was retired in Stage 5 along with the pause
-# machinery -- the Player exits on hold-BACKSPACE / triple-tap now.)
+# machinery -- the Player exits on hold-BACKSPACE now.)
 # The cards-menu geometry (_CARD_*) lives in cards_layer.py (its own surface, #3/#15)
 # and is imported back at the top of this file, so console._X still resolves for tests.
 # (GO/CODE/CLOSE dissolved into the unified bar in fix B -- PLAY/Code-tab/context X.)
@@ -1113,7 +1113,7 @@ class Workstation:
         self.editor_app = EditorApp(self, NAMES, _in)
         self._run_caller = None       # who to return to on EXIT (run() records it; the
                                       # launcher root OR -- Stage 3 -- the Editor. The
-                                      # Stage-5 hold-BACKSPACE / triple-tap / context-X
+                                      # Stage-5 hold-BACKSPACE / context-X
                                       # all pop to it via _exit_to_caller / exit())
         # (The cards menu's selection/scroll state -- msel/mtop -- lives on
         # self.cards_layer now, built in _build_layers with the rest of the stack.)
@@ -2024,7 +2024,7 @@ class Workstation:
     def _exit_to_caller(self):
         """Pop the running cart back to whoever launched it (run()'s recorded caller,
         spec Section 2's launch-and-return). The Player's Stage-5 exit gestures
-        (hold-BACKSPACE, triple-tap) both call this. The Editor is the second caller
+        (hold-BACKSPACE) calls this. The Editor is the second caller
         (Stage 3b): a cart run from PLAY returns to the Editor on the tab it left
         (screen -> "menu"; editor_app.tab is preserved -> the SAME tab), proving the
         Player has zero knowledge of who launched it. Any other caller (the launcher
@@ -2977,7 +2977,7 @@ class Workstation:
     # -- desktop shell drawing (#28) -----------------------------------------
 
     # (The #71 pause chrome -- _draw_pause_dim / _draw_pause_buttons -- was retired in
-    # Stage 5; the Player now exits on hold-BACKSPACE / triple-tap, with a transient
+    # Stage 5; the Player now exits on hold-BACKSPACE, with a transient
     # hold-progress toast in its place. See player.py.)
 
     def _mini_btn(self, label, rect, fill, cv=None):

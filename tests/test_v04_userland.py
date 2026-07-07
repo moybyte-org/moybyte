@@ -514,11 +514,11 @@ def test_host_runs_shared_console_at_320x240(tmp_path):
     drv.press("b")                                      # B belongs to the GAME while it
     drv.frame(1 / 30)                                   # plays -- no chrome, stays playing
     assert ws.screen == "desktop"
-    # Stage 5 exit model: a triple-tap BACKSPACE pops the cart back to its caller (the
-    # launcher root here). From the launcher, open the cart in the Editor to reach code.
-    for _ in range(3):
-        drv.press("home"); drv.frame(1 / 30); drv.frame(1 / 30)
-    assert ws.screen == "launcher"                      # the triple-tap exited the cart
+    # Stage 5 exit model: a running game exits via hold-BACKSPACE (covered in
+    # test_desktop_shell); here we just leave to the launcher via go_home() (the ≡ HOME
+    # action) -- robust regardless of the seed cart's type -- then open it in the Editor.
+    ws.go_home()
+    assert ws.screen == "launcher"                      # left the cart, back home
     ws.open_in_editor()                                 # maker landing -> the Editor
     if ws.menu_view == "cards":
         ws.set_menu_view("code")
