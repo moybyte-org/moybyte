@@ -216,6 +216,12 @@ class Player:
         cart = project.cart
         self._is_tool = (cart is not None
                          and cart.get("type") in ("tool", "app"))
+        # #63 leak fix: the PREVIOUS cart is dead -- return its pooled layer buffers
+        # (make_layer worlds, the Fold-2 map cache) for reuse before the new run
+        # allocates. Probe: the host Canvas has no pool (gc reclaims its layers).
+        rl = getattr(ws.canvas, "reclaim_layers", None)
+        if rl is not None:
+            rl("cart")
         project._build_audio()
         # Reset the canvas draw state (camera/clip/pal/palt, #11) so a fresh cart run
         # never inherits a previous cart's clip rect or palette swap.

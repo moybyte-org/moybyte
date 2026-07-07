@@ -64,6 +64,10 @@ class Wallpaper:
         self._wp_ns = self._wp_update = self._wp_draw = None
         self._wp_cart = None
         self._wp_restore_bg = None
+        # #63 leak fix: return the dead wallpaper's pooled layer buffers for reuse.
+        rl = getattr(self.ws.canvas, "reclaim_layers", None)
+        if rl is not None:
+            rl("wallpaper")
 
     def compile(self, cart):
         """Compile a wallpaper cart into its own namespace + grab its _update/_draw,
@@ -75,7 +79,8 @@ class Wallpaper:
             tilemap = ws._build_tilemap(cart)
             ns = ws.make_api(ws.canvas, ws.input, dict(cart.get("cfg", {})),
                              sheet, _SilentAudio(AudioEngine(AudioBank.default())),
-                             tilemap, Pmem(), None, cart.get("images") or {})
+                             tilemap, Pmem(), None, cart.get("images") or {},
+                             owner="wallpaper")   # #63: layer loans reclaimed on clear()
             exec(compile(cart["src"], "<wallpaper>", "exec"), ns)
             if ns.get("_init"):
                 ns["_init"]()

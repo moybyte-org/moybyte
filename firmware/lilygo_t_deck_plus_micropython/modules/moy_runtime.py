@@ -55,7 +55,7 @@ from device_canvas import DeviceCanvas, Image, _decode_moyimg, _Layer
 
 
 def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
-             pmem=None, wifi=None, images=None):
+             pmem=None, wifi=None, images=None, owner="cart"):
     import random
 
     _img_cache = {}        # name -> decoded paint Image (see image() below), so a
@@ -242,8 +242,9 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # circ/print/...), then window-copies to the screen each frame via draw_layer.
         # Replaces a per-frame full-background re-render (map() over a scrolling level,
         # ~12-14ms) with a flat memory copy (~7ms) -- the lever for ~60fps scrollers.
-        lc = canvas.new_layer(w, h)
-        lns = make_api(lc, input, config, sheet, audio, tilemap, pmem, wifi, images)
+        lc = canvas.new_layer(w, h, owner=owner)   # #63: lent to this program (leak fix)
+        lns = make_api(lc, input, config, sheet, audio, tilemap, pmem, wifi, images,
+                       owner=owner)
         return _Layer(lc, lns)
 
     def draw_layer(layer, cam_x=0, cam_y=0):

@@ -1511,3 +1511,40 @@ def test_pal_tint_sandwich_bakes_each_variant_once():
     # Pixels identical to a fresh canvas that never reused anything.
     frame(ref, ref_img)
     assert _dev_rgb565(cv) == _dev_rgb565(ref), "variant reuse changed pixels"
+
+
+def test_layer_pool_reclaims_cart_buffers_across_runs(monkeypatch):
+    # #63 leak fix: moy_alloc has no free(), so a dead cart's layer buffers must
+    # return to the pool and the next same-dims new_layer must REUSE them (without
+    # this, every cart re-run leaked its world from the heap_caps pool). Stub
+    # moy_alloc/lcd_bus so the CPython-run device module takes the pooled path.
+    import sys
+    import types
+    m, _, _ = _both(True)
+    fake_alloc = types.ModuleType("moy_alloc")
+    fake_alloc.malloc_dma = lambda n, caps=0: bytearray(n)
+    fake_bus = types.ModuleType("lcd_bus")
+    fake_bus.MEMORY_SPIRAM = 1
+    fake_bus.MEMORY_DMA = 2
+    monkeypatch.setitem(sys.modules, "moy_alloc", fake_alloc)
+    monkeypatch.setitem(sys.modules, "lcd_bus", fake_bus)
+    g = m.DeviceCanvas.__init__.__globals__       # the device module's namespace
+    monkeypatch.setitem(g, "_LAYER_POOL", {})
+    cv = m.DeviceCanvas(_FakeComp(W, H))
+    lay1 = cv.new_layer(64, 32, owner="cart")
+    assert lay1._comp.pooled, "the stubbed allocator path must mark the buffer pooled"
+    buf1 = lay1._comp._buf
+    # An unowned (console) layer is never lent/reclaimed.
+    lay_console = cv.new_layer(64, 32)
+    cv.reclaim_layers("cart")                     # the cart died (Player.start)
+    assert g["_LAYER_POOL"].get(64 * 32 * 2), "the cart buffer returns to the pool"
+    lay2 = cv.new_layer(64, 32, owner="cart")     # next run, same dims
+    assert lay2._comp._buf is buf1, "the next same-dims layer must REUSE the buffer"
+    assert lay_console._comp._buf is not buf1, "console layers stay untouched"
+    # The Fold-2 hidden map cache is program content: reclaim drops + pools it.
+    sh_h, sh_d, tm_h, tm_d = _mapcache_world(m)
+    cv.cls(3)
+    cv.map(tm_d, sh_d, 0, 0, 12, 10, 0, 0, 0, 1)
+    assert cv._mapcache is not None
+    cv.reclaim_layers("cart")
+    assert cv._mapcache is None, "reclaim must drop the map cache (its layer is pooled)"
