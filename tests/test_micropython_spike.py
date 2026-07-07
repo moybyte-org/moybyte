@@ -1623,10 +1623,16 @@ def test_native_blit_map_wired_for_tilemaps():
     assert "moy_gfx_blit_map" in c
     assert "MP_ROM_QSTR(MP_QSTR_blit_map)" in c          # registered in the module dict
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    assert runtime  # moy_runtime still imports the canvas (the code moved to device_canvas)
     assert "def map(self, tilemap, sheet" in device_canvas     # DeviceCanvas.map
-    assert "self._gfx.blit_map(self._buf" in device_canvas     # native one-call blit
+    assert "self._gfx.blit_map(dst" in device_canvas           # native one-call blit (via _blit_map_into)
+    assert "def _blit_map_into(self" in device_canvas          # #63 Fold 2: shared blit_map helper
     assert "def _sheet_atlas(self, sheet, colorkey):" in device_canvas  # baked RGB565 atlas
     assert "def _map_py(self, tilemap, sheet" in device_canvas  # no-moy_gfx fallback
+    # #63 Fold 2: map() auto-caches the rasterized region (blit565 composite of a hidden
+    # 565 layer) so a camera-only change re-uses it instead of re-walking every cell.
+    assert "self._mapcache" in device_canvas
+    assert "def map_cache_reset(self):" in device_canvas
 
 
 def test_native_vector_primitives_wired():
