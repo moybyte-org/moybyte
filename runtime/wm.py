@@ -27,9 +27,9 @@ into console (no circular import).
 """
 
 try:
-    from widgets import _Blit
+    from widgets import _Blit, _ticks_ms, _ticks_diff
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import _Blit
+    from runtime.widgets import _Blit, _ticks_ms, _ticks_diff
 
 
 _VIEWPORT_BEZEL = 0         # black -- the letterbox fill around a scaled game viewport
@@ -56,6 +56,19 @@ class FullscreenStackWM:
         # switches bump it via EditorApp.tab; overlay-gate changes are caught separately
         # by the per-call signature -- see _ensure_stack.)
         self.content_gen = 0
+        # The memoized visible/draw/overlay layer stacks (Stage 6c). Rebuilt ONLY on a
+        # real change -- a back-stack push/pop (content_gen), a menu_view tab switch
+        # (content layer identity), or an overlay-gate/splash flip (the int signature).
+        # On a static top-of-stack every frame's frame()/handle_input()/handle_pointer()
+        # reuses the SAME list objects, so the per-frame router walk allocates NOTHING
+        # (this retires the ~9-lists/frame churn the layers refactor introduced -- #66).
+        self._cache_content = None    # the content Layer the caches were built for
+        self._cache_gen = -1          # content_gen the caches were built at
+        self._cache_sig = -1          # _overlay_sig() the caches were built at
+        self._cache_visible = None    # [content] + overlays (draw/route order, bottom->top)
+        self._cache_visible_rev = None  # visible reversed (top->bottom, input routing)
+        self._cache_draw = None       # [splash-or-content] + overlays (draw order)
+        self._cache_overlay = None    # the transient overlays + cursor
 
     # -- the process back-stack (Stage 6b) -----------------------------------
 
@@ -98,6 +111,122 @@ class FullscreenStackWM:
         the memoized stack rebuilds; folding it here keeps all content-change signals on
         the WM (the memo's single owner)."""
         self.content_gen += 1
+
+    # -- the memoized visible/draw/overlay layer stack (Stage 6c) ------------
+    #
+    # The single source of z-order + visibility (mirrors the pre-refactor tail of
+    # frame()). Bottom -> top: the active content layer, the visible transient overlays,
+    # then the always-on cursor. Drawing walks it bottom -> top (with the one game->system
+    # composite at the domain boundary); input routing walks it top -> bottom so the
+    # overlay that owns the event claims it before the content underneath.
+    #
+    # The whole point of Stage 6c: this used to be rebuilt from scratch on EVERY access
+    # (_visible_stack/_draw_stack each allocated a fresh [content] + overlays list, walked
+    # THRICE per frame -- ~9 fresh lists/frame even during play). Now it is memoized and
+    # rebuilt ONLY on a real change, so a static top-of-stack allocates zero new lists.
+
+    def _overlay_sig(self):
+        """A cheap, allocation-free signature (int bitmask) of the splash state + which
+        transient overlays are gated ON this frame. Together with the content-layer
+        identity + content_gen it is the memo key: while it is unchanged the cached
+        stacks are reused verbatim. Only small-int ops + boolean reads (no list/tuple
+        alloc), so computing it every access is free on the hot path."""
+        ws = self.ws
+        au = ws.ach_ui
+        sig = 0
+        if ws._splash_until is not None:
+            sig |= 1
+        if ws.show_fps and self._stack[-1] == "desktop":
+            sig |= 2
+        if au._confetti_until and _ticks_diff(au._confetti_until, _ticks_ms()) > 0:
+            sig |= 4
+        if ws.show_achievements:
+            sig |= 8
+        if au._egg_active():
+            sig |= 16
+        if ws.ach.toast_active():
+            sig |= 32
+        if ws.sysmenu.open:
+            sig |= 64
+        if ws._about:
+            sig |= 128
+        return sig
+
+    def _ensure_stack(self):
+        """Reuse the cached stacks when nothing changed, else rebuild once. The cache is
+        valid iff the active content Layer is the same object, content_gen is unchanged
+        (no push/pop/tab-switch), and the overlay/splash signature matches. On a static
+        frame all three match and this returns without building a single list -- so the
+        stack accessors below hand back the SAME objects every frame (zero allocation)."""
+        content = self.ws._content_layer()
+        sig = self._overlay_sig()
+        if (self._cache_visible is not None
+                and content is self._cache_content
+                and self.content_gen == self._cache_gen
+                and sig == self._cache_sig):
+            return
+        self._rebuild(content, sig)
+
+    def _rebuild(self, content, sig):
+        """Build the overlay list once, then the visible/reversed/draw lists off it, and
+        cache them with the key that produced them. This is the ONLY place the per-change
+        stack lists are allocated -- the Stage-6c guardrail test asserts it is NOT reached
+        on repeat static frames (the memo returns the cached objects instead)."""
+        ws = self.ws
+        overlays = []
+        # Perf HUD first: it's GAME-domain (drawn on the 320x240 canvas right after the
+        # running cart, before the composite), so it must precede any system overlay.
+        if sig & 2:
+            overlays.append(ws._perf_layer)
+        if sig & 4:
+            overlays.append(ws._confetti_layer)
+        if sig & 8:
+            overlays.append(ws._ach_layer)
+        if sig & 16:
+            overlays.append(ws._egg_layer)
+        if sig & 32:
+            overlays.append(ws._toast_layer)
+        if sig & 64:
+            overlays.append(ws._sysmenu_layer)
+        if sig & 128:
+            overlays.append(ws._about_layer)
+        overlays.append(ws._cursor_layer)          # cursor last -> above everything
+        # The boot logo is a draw-time takeover of the content slot (input still routes to
+        # the content underneath -- so _cache_visible keeps `content`, only the draw slot
+        # swaps in the splash).
+        draw_content = ws._splash_layer if (sig & 1) else content
+        self._cache_overlay = overlays
+        self._cache_visible = [content] + overlays
+        self._cache_draw = [draw_content] + overlays
+        rev = list(self._cache_visible)
+        rev.reverse()                              # top -> bottom for input routing
+        self._cache_visible_rev = rev
+        self._cache_content = content
+        self._cache_gen = self.content_gen
+        self._cache_sig = sig
+
+    def overlay_stack(self):
+        """The transient overlays + cursor, in draw order (bottom -> top). Memoized."""
+        self._ensure_stack()
+        return self._cache_overlay
+
+    def visible_stack(self):
+        """The full z-ordered stack, bottom -> top: content, overlays, cursor. Memoized."""
+        self._ensure_stack()
+        return self._cache_visible
+
+    def visible_stack_rev(self):
+        """The visible stack top -> bottom (input routing order) -- cached pre-reversed, so
+        the hot handle_input/handle_pointer path allocates neither a list nor a reversed()
+        iterator."""
+        self._ensure_stack()
+        return self._cache_visible_rev
+
+    def draw_stack(self):
+        """The draw-order stack: same as visible_stack() except the boot logo, when armed,
+        takes the content slot. Memoized."""
+        self._ensure_stack()
+        return self._cache_draw
 
     # -- two-domain composite + viewport coords (#39) ------------------------
 
