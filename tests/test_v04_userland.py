@@ -394,6 +394,52 @@ def test_console_runs_game_cart_and_scores(tmp_path):
     assert ws.ns["best"] >= 1
 
 
+def _select_by_title(ws, title):
+    for i, c in enumerate(ws.launcher.items):
+        if c["title"] == title:
+            ws.launcher.sel = i
+            return
+    raise AssertionError("no seed cart titled " + title)
+
+
+def test_enter_in_config_plays_the_cart(tmp_path):
+    """Fix 2: in the Config (cards) tab, the RUN/Enter key must PLAY the cart (re-run with
+    the freshly-tuned config), NOT open the code editor. The device keyboard delivers Enter
+    as the "a" button and the host delivers it as "run", so BOTH must play -- _leave_menu()
+    -> EditorApp.leave()'s cards branch (_start with the tuned config + _save_config + run).
+    The old cards handler mapped "a" -> the code editor, which is why a device tap of Enter
+    "just entered code" instead of playing."""
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    drv = host_app.ConsoleDriver(ws)
+
+    # Open a GAME with edit cards in the Editor -> lands on the Config (cards) tab.
+    _select_by_title(ws, "Star Catcher")
+    ws.open_in_editor()
+    assert ws.screen == "menu" and ws.menu_view == "cards"
+
+    # Tweak a Config card, then press RUN (== the host's Enter): the cart PLAYS and the
+    # tuned value is committed (leave()'s cards branch = GO's old job), NOT the code editor.
+    ws.cards_layer.msel = 0
+    before = dict(ws.config)
+    ws.adjust(1)
+    assert dict(ws.config) != before                 # a card value changed
+    drv.press("run"); drv.frame(1 / 30); drv.frame(1 / 30)
+    assert ws.screen == "desktop"                    # PLAYED the cart...
+    assert ws.menu_view != "code"                    # ...did NOT open the code editor
+    assert ws.cart["cfg"] == ws.config               # ...and the tuned config was saved
+
+    # The device delivers Enter as the "a" button (0x0D -> "a"): it must ALSO play, which
+    # is the exact bug the owner hit (Enter -> "a" -> code editor).
+    ws.go_home()
+    _select_by_title(ws, "Star Catcher")
+    ws.open_in_editor()
+    assert ws.menu_view == "cards"
+    drv.press("a"); drv.frame(1 / 30); drv.frame(1 / 30)
+    assert ws.screen == "desktop"                    # "a" (the device's Enter) PLAYED...
+    assert ws.menu_view != "code"                    # ...did NOT "just enter code"
+
+
 def test_hop_quest_uses_tilemap_and_still_plays(tmp_path):
     # Hop Quest now draws its level with map() and reads collision with mget() (#32).
     # Verify the cart loads its tilemap, draws ground through map(), and the attract
