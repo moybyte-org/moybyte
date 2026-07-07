@@ -92,6 +92,11 @@ except Exception:
     _SRAM_BOUNCE_FLUSH = False
 LAYER_COPY_ASYNC = _SRAM_BOUNCE_FLUSH
 
+# #75: immutable templates the per-frame reset_state restores the pal tables from
+# IN PLACE (no per-frame bytearray allocation; 0 == identity map / all-opaque).
+_PAL_IDENTITY = bytes(range(64))
+_PALT_OPAQUE = bytes(64)
+
 
 class Image:
     def __init__(self, width, height, pix, transparent=-1):
@@ -203,6 +208,12 @@ class DeviceCanvas:
         # tuples. token tags WHICH writer owns the pending run (a C gate's id, or
         # 0 for the Python spr_tile path) so interleaved writers force a clean
         # flush+begin instead of silently mixing sheets.
+        # Pal/palt state (#75): the tables are built by the first reset_state (below)
+        # and afterwards restored IN PLACE only when a pal()/palt() dirtied them, so
+        # the per-frame reset never allocates. Initialised BEFORE reset_state.
+        self._pal_dirty = True
+        self._pal_map = None
+        self._palt = None
         # Initialised BEFORE reset_state so its flush no-ops.
         self._batch_sheet = None
         self._batch_arr = array("h", bytearray(2 * (4 + 4 * 512)))
@@ -293,9 +304,21 @@ class DeviceCanvas:
         self._clip_y0 = 0
         self._clip_x1 = self.w
         self._clip_y1 = self.h
-        self._pal_map = bytearray(range(64))
-        self._palt = bytearray(64)          # 0 opaque, 1 transparent (default opaque)
-        self._palgen = 0
+        # #75: this runs EVERY cart frame (ws._reset_canvas_state), and rebuilding the
+        # two 64-byte tables was two heap allocations per frame. The tables are created
+        # once (first call: the attributes don't exist yet) and afterwards restored
+        # IN PLACE, and only when a pal()/palt() actually touched them (_pal_dirty) --
+        # a cart that never remaps pays two int compares. _palgen returns to 0 exactly
+        # as before (0 == identity map: the cached sprite RGB fast path keys on it).
+        if self._pal_dirty:
+            self._pal_dirty = False
+            if self._pal_map is None:
+                self._pal_map = bytearray(_PAL_IDENTITY)
+                self._palt = bytearray(64)  # 0 opaque, 1 transparent (default opaque)
+            else:
+                self._pal_map[:] = _PAL_IDENTITY
+                self._palt[:] = _PALT_OPAQUE
+            self._palgen = 0
 
     def camera(self, x=0, y=0):
         self.flush_batch()             # queued sprites belong to the OLD camera (#63)
@@ -321,20 +344,20 @@ class DeviceCanvas:
     def pal(self, c0=None, c1=None):
         self.flush_batch()             # queued sprites belong to the OLD pal map (#63)
         if c0 is None:
-            for i in range(64):
-                self._pal_map[i] = i
+            self._pal_map[:] = _PAL_IDENTITY
         else:
             self._pal_map[int(c0) & 63] = int(c1) & 63
         self._palgen += 1                   # invalidate cached sprite RGB (pal baked in)
+        self._pal_dirty = True              # #75: the next reset_state must restore
 
     def palt(self, c=None, on=None):
         self.flush_batch()             # queued sprites belong to the OLD palt (#63)
         if c is None:
-            for i in range(64):
-                self._palt[i] = 0
+            self._palt[:] = _PALT_OPAQUE
         else:
             self._palt[int(c) & 63] = 1 if on else 0
         self._palgen += 1                   # invalidate cached sprite RGB (palt baked in)
+        self._pal_dirty = True              # #75: the next reset_state must restore
 
     def _col(self, c):
         # Resolve a draw index to RGB565 through the pal remap, so cls/pix/line/rect/

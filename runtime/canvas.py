@@ -19,6 +19,11 @@ from . import font as _font
 from . import palette as _pal
 from .editors import SpriteSheet  # noqa: F401  (canonical home; re-exported here)
 
+# #75: immutable templates the per-frame reset_state restores the pal tables from
+# IN PLACE (no per-frame bytearray allocation; identity map / all-opaque).
+_PAL_IDENTITY = bytes(range(64))
+_PALT_OPAQUE = bytes(64)
+
 
 class Image:
     """A small indexed sprite. `pix` is a flat list/bytes of palette indices."""
@@ -93,13 +98,21 @@ class Canvas:
         self._clip_y0 = 0
         self._clip_x1 = self.w
         self._clip_y1 = self.h
-        # pal remap: index i draws as _pal_map[i]. Identity by default.
-        self._pal_map = bytearray(range(64))
-        # palt: per-index sprite transparency. TIC-80 defaults index 0 transparent,
-        # but v0.4's spr() has always used an explicit colorkey (default -1 = none),
-        # so to keep existing carts pixel-identical the default here is ALL OPAQUE.
-        # A cart opts in via palt(c, True).
-        self._palt = bytearray(64)        # 0 = opaque, 1 = transparent
+        # pal remap: index i draws as _pal_map[i]. Identity by default. palt: per-index
+        # sprite transparency. TIC-80 defaults index 0 transparent, but v0.4's spr()
+        # has always used an explicit colorkey (default -1 = none), so to keep existing
+        # carts pixel-identical the default here is ALL OPAQUE; a cart opts in via
+        # palt(c, True). #75 (mirrors device_canvas): this runs EVERY cart frame, so
+        # the tables are built once and afterwards restored IN PLACE, only when a
+        # pal()/palt() actually dirtied them -- no per-frame allocation.
+        if getattr(self, "_pal_dirty", True):
+            self._pal_dirty = False
+            if getattr(self, "_pal_map", None) is None:
+                self._pal_map = bytearray(_PAL_IDENTITY)
+                self._palt = bytearray(64)    # 0 = opaque, 1 = transparent
+            else:
+                self._pal_map[:] = _PAL_IDENTITY
+                self._palt[:] = _PALT_OPAQUE
 
     def camera(self, x=0, y=0):
         """TIC-80 camera(x, y): subtract (x, y) from all subsequent draw coords so a
@@ -136,9 +149,9 @@ class Canvas:
         with no args resets the table to identity. Applies to every primitive AND to
         sprite pixels (so a recoloured sprite draws with swapped palette entries)."""
         self.flush_batch()             # queued sprites belong to the OLD pal map (#63)
+        self._pal_dirty = True         # #75: the next reset_state must restore
         if c0 is None:
-            for i in range(64):
-                self._pal_map[i] = i
+            self._pal_map[:] = _PAL_IDENTITY
             return
         self._pal_map[int(c0) & 63] = int(c1) & 63
 
@@ -147,9 +160,9 @@ class Canvas:
         palt() with no args resets to the default (all opaque). This is consulted in
         addition to the per-call colorkey / Image.transparent."""
         self.flush_batch()             # queued sprites belong to the OLD palt (#63)
+        self._pal_dirty = True         # #75: the next reset_state must restore
         if c is None:
-            for i in range(64):
-                self._palt[i] = 0
+            self._palt[:] = _PALT_OPAQUE
             return
         self._palt[int(c) & 63] = 1 if on else 0
 

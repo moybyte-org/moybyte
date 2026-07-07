@@ -189,6 +189,12 @@ class Player:
         self._home_held_since = 0     # _ticks_ms when "home" (BACKSPACE) began being held
         self._home_holding = False    # True while "home" is held -> draw the TRANSIENT
                                       # hold-progress toast (ONLY while holding, Section 12)
+        # #75: the tool/app-vs-game decision is a per-run CONSTANT (the manifest type
+        # can't change mid-run), cached at start() so the per-frame tick/input paths
+        # don't re-derive it through ws._running_cart_shows_bar (a property-forward
+        # chain) on the sacred play path. Combined with the live cart_error check at
+        # each use site it answers exactly what _running_cart_shows_bar answers.
+        self._is_tool = False
 
     def _reset_exit_state(self):
         """Clear the hold timer (a fresh run, or the moment the exit gesture completes
@@ -205,6 +211,10 @@ class Player:
         ws = self.ws
         ws._dirty = True               # a (re)started cart paints its first frame (#44)
         self._reset_exit_state()       # a fresh run drops any half-done exit gesture
+        # #75: cache the bar-visibility-by-type rule for this run (see __init__).
+        cart = project.cart
+        self._is_tool = (cart is not None
+                         and cart.get("type") in ("tool", "app"))
         project._build_audio()
         # Reset the canvas draw state (camera/clip/pal/palt, #11) so a fresh cart run
         # never inherits a previous cart's clip rect or palette swap.
@@ -318,7 +328,7 @@ class Player:
         if self.cart_error is not None:
             self._draw_error_panel()
             ws._draw_cart_bar()                 # unified top bar (crash tool switcher)
-        elif ws._running_cart_shows_bar():
+        elif self._is_tool:                     # #75: cached at start(); error is None here
             # Part 4: a TOOL/APP runs WITH a minimal bar (title + status + context-X) so
             # it's exitable -- a GAME stays fullscreen-bar-hidden. The bar-visibility-by-
             # type rule keys on the running cart's manifest type (ws._running_cart_shows_bar).
@@ -349,7 +359,7 @@ class Player:
         # via its context-X (ws._running_cart_shows_bar()), so its hold is suppressed --
         # BACKSPACE stays a free text key (the wifi password field's DELETE).
         ws = self.ws
-        if ws._running_cart_shows_bar():
+        if self._is_tool and self.cart_error is None:   # #75: cached type + live error
             if self._home_holding:              # drop any in-flight hold (no toast on a tool)
                 self._home_holding = False
                 self._home_held_since = 0
@@ -388,7 +398,7 @@ class Player:
         # reaches the bar surface directly.
         if click and self.cart_error is not None:
             ws._cart_bar_tap(px, py)            # crash-bar tool switcher (EDIT/CODE reachable)
-        elif click and ws._running_cart_shows_bar():
+        elif click and self._is_tool:           # #75: cached type; error is None past the if
             if ws._tool_bar_tap(px, py):        # tool bar: X exits, wifi/≡ shortcuts
                 # The bar consumed the tap -> clear the published game pointer's tap so the
                 # tool doesn't ALSO act on it this frame (mirrors the overlay-suppress rule).

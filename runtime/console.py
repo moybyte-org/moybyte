@@ -2905,10 +2905,15 @@ class Workstation:
         # Draw any sprites still pending in a canvas's auto-batch (Fold 1, #63) before
         # the frame is composited / flushed to the panel, so nothing queued by the last
         # spr() in a cart's _draw() (or the chrome) is left unpainted. Guarded + covers
-        # both the game and system canvas (the same object in the 320x240 device case,
-        # so the second flush is a no-op).
-        for cv in (self.canvas, self.sys_canvas):
-            fb = getattr(cv, "flush_batch", None)
+        # both the game and system canvas -- one probe when they are the same object
+        # (the 320x240 device case; #75: no per-frame tuple, no duplicate probe).
+        cv = self.canvas
+        fb = getattr(cv, "flush_batch", None)
+        if fb is not None:
+            fb()
+        sc = self.sys_canvas
+        if sc is not cv:
+            fb = getattr(sc, "flush_batch", None)
             if fb is not None:
                 fb()
 
@@ -3088,17 +3093,20 @@ class Workstation:
         # fires when perf_capture is set (device diag sampling) -- not just the HUD.
         _perf = self.perf_hud or self.perf_capture
         _frame_t0 = _ticks_ms() if _perf else 0
+        _cmp = 0            # CHROMEBRK: _composite_game ms
+        _cur = 0            # CHROMEBRK: _draw_cursor ms
         if _perf:
             _bc = getattr(self.canvas, "batch_reset", None)
             if _bc is not None:
                 _bc()                  # #63: zero this frame's auto-batch profiling counters
-        # Per-frame perf scratch (the running-cart content Layer fills self._pf_*).
-        self._pf_upd = 0    # cart _update(dt) ms (game LOGIC); 0 off the cart path
-        self._pf_cart = 0   # cart _draw() ms (RENDERING)
-        self._pf_audio = 0  # audio.tick(dt) ms (mixer feed) -- split out from render
-        self._pf_bar = 0    # CHROMEBRK: _draw_status_strip ms (cart path only)
-        _cmp = 0            # CHROMEBRK: _composite_game ms
-        _cur = 0            # CHROMEBRK: _draw_cursor ms
+            # Per-frame perf scratch (the running-cart content Layer fills self._pf_*).
+            # #75: zeroed ONLY under _perf -- the writers (Player.tick / the bar draws)
+            # only fill them under _perf too, and the reads below are _perf-gated, so a
+            # kid-mode play frame skips the four attribute stores entirely.
+            self._pf_upd = 0    # cart _update(dt) ms (game LOGIC); 0 off the cart path
+            self._pf_cart = 0   # cart _draw() ms (RENDERING)
+            self._pf_audio = 0  # audio.tick(dt) ms (mixer feed) -- split out from render
+            self._pf_bar = 0    # CHROMEBRK: _draw_status_strip ms (cart path only)
         # Compositor / router (docs/shell_layers_refactor_v1.md §3): draw the z-ordered
         # visible stack bottom -> top. The active content draws first (game-domain
         # content on the fixed 320x240 game canvas); at the game->system domain boundary
@@ -3131,10 +3139,6 @@ class Workstation:
             else:
                 layer.draw(dt)
             _prev_domain = layer.domain
-        _upd = self._pf_upd
-        _cart = self._pf_cart
-        _audio = self._pf_audio
-        _bar = self._pf_bar
         # #63: nothing should be left in an auto-batch by the time we present. The cart
         # sprites were flushed at _reset_canvas_state; the console's own chrome draws
         # Images immediately (never queued). This final flush is the last-line guard so
@@ -3148,6 +3152,10 @@ class Workstation:
         # calls gated on perf_hud OR perf_capture (device diag sampling), so the
         # render path itself is unchanged.
         if _perf:
+            _upd = self._pf_upd
+            _cart = self._pf_cart
+            _audio = self._pf_audio
+            _bar = self._pf_bar
             _flush_t0 = _ticks_ms()
             self.comp.flush()
             _flush = _ticks_diff(_ticks_ms(), _flush_t0)
