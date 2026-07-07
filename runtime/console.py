@@ -2404,6 +2404,81 @@ class Workstation:
             # (still reachable -> the kid can reopen the editor to fix it).
             self.run(self.project, self.editor_app)
 
+    # -- durable undo/redo (Stage 7 of docs/shell_ux_technical_plan_v1.md) ------
+    #
+    # The kid-facing verbs over the moy_carts journal walk. UI TRIGGER (a design call
+    # for the owner, spec Section 7): the left bar zone is full (8 icons), so undo/redo
+    # ride a KEYBOARD SHORTCUT in the code editor -- Ctrl+Z / Ctrl+Y (code_layer.py),
+    # which draws NO pixels (golden-safe) and is host-testable. The ON-DEVICE binding
+    # (which T-Deck key combo, or an in-body control) is UNRESOLVED and left to the
+    # owner; ws.undo()/ws.redo() are the mechanism either affordance drives.
+
+    def undo(self):
+        """Undo the last durable commit: restore the previous snapshot over the live
+        file, then rebuild the affected editor so the revert is visible. Returns True
+        iff a step was taken (False at the floor -- finer, in-session undo is the
+        editor's RAM). A DURABLE step = one commit, not one keystroke (spec Section 7)."""
+        return self._journal_walk(False)
+
+    def redo(self):
+        """Re-apply the next durable commit (the inverse of undo). Returns True iff a
+        step was taken (False at the top)."""
+        return self._journal_walk(True)
+
+    def _journal_walk(self, redo):
+        store = self.carts_store
+        if store is None or not self.cart:
+            return False
+        path = self.cart.get("path")
+        if not (path and self.can_manage and hasattr(store, "journal_undo")):
+            return False
+        fn = store.journal_redo if redo else store.journal_undo
+        try:
+            changed = self._with_sd(lambda: fn(path))
+        except Exception as exc:  # noqa: BLE001 -- a walk failure must never crash the shell
+            print("Moybyte journal walk failed:", _err_text(exc))
+            return False
+        if not changed:
+            return False           # at a floor/ceiling -- nothing to restore
+        self._reload_after_walk(changed)
+        self._dirty = True
+        return True
+
+    def _reload_after_walk(self, file):
+        """After the journal rewrote a live cart file on SD (undo/redo), re-adopt the
+        fresh data into the OPEN workspace and rebuild the affected editor so the kid
+        SEES the revert. Reloads the whole cart (uniform across file types) but keeps
+        the current tab; re-_start()s so a running preview reflects the restored code.
+        `file` is which live file the walk touched (informational -- the reload is
+        wholesale)."""
+        store = self.carts_store
+        path = self.cart["path"]
+        try:
+            fresh = self._with_sd(lambda: store.load(path))
+        except Exception as exc:  # noqa: BLE001
+            print("Moybyte reload after undo failed:", _err_text(exc))
+            return
+        if not fresh:
+            return
+        self.cart = fresh
+        self.config = dict(fresh.get("cfg", {}))
+        self.sheet = self._build_sheet()
+        self.tilemap = self._build_tilemap()
+        self.images = fresh.get("images") or {}
+        self.cart_error = None
+        self.crash_line = None
+        # Drop the editor cores + rebuild the ACTIVE tab's over the fresh data, then
+        # re-run so a running cart / a subsequent PLAY uses the restored source/art.
+        self.editor = None
+        self.paint = None
+        self.map_ui.reset()
+        self.music_ui.reset()
+        self.block_ui.reset()
+        view = self.menu_view
+        if self.wm.top_is("menu") and view in ("code", "paint", "map", "blocks", "music"):
+            self.set_menu_view(view)     # rebuild the active editor from fresh data
+        self._start()
+
     def save_sprites(self):
         # Store-write moved to Project.commit_sprites (Stage 1b); this stays as the
         # tested ws. entry point PaintLayer's SAVE dispatches to.
