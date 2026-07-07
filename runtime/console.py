@@ -1439,6 +1439,26 @@ class Workstation:
         Player calls this instead of reaching the bar surface."""
         return self.bar_layer.handle_cart_tap(px, py)
 
+    def frame_cap_fps(self):
+        """The frame-loop cap for THIS moment (#63 frame pacing, the SNES rule:
+        a LOCKED cadence feels smoother than a swing). A running GAME locks to a
+        steady 30fps by default -- most carts land in the 29-45 band, and holding
+        the fast frames to the slow ones' pace turns "38-55 and jittery" into
+        "30 and rock solid", with the freed headroom absorbing GC/SD hitches. A
+        cart that sustains more declares `"fps": 60` in its manifest (Hop Quest,
+        Sky Run). Tools/apps and every console screen keep 60 -- the pointer must
+        stay responsive. The device loop re-reads this every iteration; the host
+        simulator paces via its own --fps flag."""
+        if self.wm.top_is_player() and self.cart_error is None:
+            cart = self.cart
+            if cart is not None and cart.get("type") == "game":
+                try:
+                    f = int(cart.get("fps") or 30)
+                except (TypeError, ValueError):
+                    f = 30
+                return 60 if f >= 60 else 30
+        return 60
+
     def _running_cart_shows_bar(self):
         """True while a TOOL/APP cart is PLAYING (screen "desktop", not crashed): it runs
         WITH a minimal bar (title + status + context-X) so it's EXITABLE (Part 4), unlike a

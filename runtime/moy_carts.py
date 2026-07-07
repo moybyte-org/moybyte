@@ -357,6 +357,9 @@ def load(path):
             # not graduated). Un-set only through the undo journal (the grad rider).
             "graduated": bool(man.get("graduated", False)),
             "src": src,
+            # Frame pacing (#63): a GAME cart locks to 30fps unless its manifest
+            # says "fps": 60 (only carts that SUSTAIN 60 should -- frame_cap_fps).
+            "fps": man.get("fps", 0),
             "cfg": cfg,
             "edit": man.get("edit", []),
             # Manifest capability permissions (#38): a cart only gets a gated API
