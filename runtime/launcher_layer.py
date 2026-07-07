@@ -436,8 +436,14 @@ class EditorPickerLayer:
     def draw(self, dt):
         NAMES = self._NAMES
         ws = self.ws
-        ws.wallpaper.draw(dt)
         cv = ws.sys_canvas
+        # The picker is a TOOL space (owner call, 2026-07-08): a static black
+        # backdrop instead of the animated wallpaper -- "it's software". Besides
+        # the look, this makes the screen FREE under the redraw gate (#44): with
+        # no live wallpaper forcing per-frame repaints, an idle picker draws only
+        # on input, instead of re-rendering the grid at wallpaper rate (~100ms
+        # chrome frames measured on the launcher's live backdrop).
+        cv.cls(NAMES["black"])
         lay = ws.layout
         ws.picker.draw(cv, ws._icon_sheet_for)
         if ws.picker.max_page() > 0:
