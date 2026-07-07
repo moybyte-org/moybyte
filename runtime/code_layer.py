@@ -203,7 +203,18 @@ class CodeLayer:
             return
         k = ws.input.last_key
         if k and k != self._ekey_prev:
-            if ws.editor.key(k):       # text changed -> drop the stale error marker
+            # Durable undo/redo (Stage 7): the code editor's keyboard shortcut for the
+            # journal walk -- Ctrl+Z (0x1A) / Ctrl+Y (0x19). These control bytes are
+            # never inserted as text (editor.key ignores them), so they can't corrupt
+            # the buffer. DESIGN CALL FOR THE OWNER (spec Section 7): the on-DEVICE
+            # affordance -- which T-Deck key combo, or an in-body control -- is
+            # unresolved; this wires the host's Ctrl+Z/Y and ws.undo()/redo() are the
+            # mechanism whatever device affordance the owner picks will drive.
+            if k == 0x1A:
+                ws.undo()
+            elif k == 0x19:
+                ws.redo()
+            elif ws.editor.key(k):     # text changed -> drop the stale error marker
                 ws.code_err = None
                 ws.code_err_row = None
                 ws.crash_line = None
