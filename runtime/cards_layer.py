@@ -112,10 +112,15 @@ class CardsLayer:
             ws.adjust(-1)
         if i.pressed("right"):
             ws.adjust(1)
-        if i.pressed("a"):
-            ws.set_menu_view("code")
-        if i.pressed("run"):
-            ws.apply()
+        # Enter / RUN in Config = PLAY the cart (the bar's PLAY path). The device keyboard
+        # maps Enter (0x0D) to the "a" button and the host maps it to "run", so BOTH must
+        # play here: _leave_menu() -> EditorApp.leave()'s cards branch re-runs the cart with
+        # the freshly-tuned config, persists config.json, and hands it to the Player with the
+        # Editor as the caller (so the cart's exit returns to these cards). This replaces the
+        # old "a" -> Code-editor shortcut (Code is one tap away on the bar ladder) -- that
+        # shortcut is why a device tap of Enter "just entered code" instead of playing.
+        if i.pressed("a") or i.pressed("run"):
+            ws._leave_menu()
         else:
             ws._leave_or_home(ws._leave_menu)
         return True
