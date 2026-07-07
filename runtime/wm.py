@@ -69,6 +69,10 @@ class FullscreenStackWM:
         self._cache_visible_rev = None  # visible reversed (top->bottom, input routing)
         self._cache_draw = None       # [splash-or-content] + overlays (draw order)
         self._cache_overlay = None    # the transient overlays + cursor
+        # #75: composite_game's per-frame flush_batch probe, cached by canvas identity
+        # (the canvas only changes on a web-view Tee swap, never mid-play).
+        self._fb_for = None
+        self._fb_fn = None
 
     # -- the process back-stack (Stage 6b) -----------------------------------
 
@@ -165,18 +169,24 @@ class FullscreenStackWM:
 
     def _ensure_stack(self):
         """Reuse the cached stacks when nothing changed, else rebuild once. The cache is
-        valid iff the active content Layer is the same object, content_gen is unchanged
-        (no push/pop/tab-switch), and the overlay/splash signature matches. On a static
-        frame all three match and this returns without building a single list -- so the
-        stack accessors below hand back the SAME objects every frame (zero allocation)."""
-        content = self.ws._content_layer()
+        valid iff content_gen is unchanged (no push/pop/tab-switch) and the overlay/
+        splash signature matches. On a static frame both match and this returns without
+        building a single list -- so the stack accessors below hand back the SAME objects
+        every frame (zero allocation).
+
+        #75: content_gen alone stands in for the content-layer identity on the hot path
+        (no per-access ws._content_layer() call). The contract that makes this sound:
+        EVERY writer that can change what _content_layer() resolves to bumps the gen --
+        a back-stack push/pop/return goes through goto() -> _on_nav(), and an Editor tab
+        switch (screen stays "menu", the resolved tab layer changes) goes through
+        EditorApp.tab's setter -> note_content_change(). The memo guardrail test
+        (tests/test_wm_stack_memo.py) pins both invalidation paths."""
         sig = self._overlay_sig()
         if (self._cache_visible is not None
-                and content is self._cache_content
                 and self.content_gen == self._cache_gen
                 and sig == self._cache_sig):
             return
-        self._rebuild(content, sig)
+        self._rebuild(self.ws._content_layer(), sig)
 
     def _rebuild(self, content, sig):
         """Build the overlay list once, then the visible/reversed/draw lists off it, and
@@ -275,9 +285,13 @@ class FullscreenStackWM:
         # #63: complete any sprites still queued in the game canvas's auto-batch before
         # its buffer is read (usually already flushed by _reset_canvas_state; belt-and-
         # suspenders so a missed reset can never drop a cart's last sprite run).
-        _fb = getattr(gc, "flush_batch", None)
-        if _fb is not None:
-            _fb()
+        # #75: the flush_batch probe is cached by canvas identity -- this runs every
+        # play frame, and the canvas only changes on a web-view Tee swap.
+        if gc is not self._fb_for:
+            self._fb_for = gc
+            self._fb_fn = getattr(gc, "flush_batch", None)
+        if self._fb_fn is not None:
+            self._fb_fn()
         if sc is gc:
             return
         ox, oy, scale = self.viewport()
