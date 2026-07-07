@@ -1228,10 +1228,13 @@ def test_blit565_opaque_row_fast_lane():
 
 def test_seed_carts_model_the_fast_draw_habits():
     # The seed carts ARE the curriculum (#66): kids copy them, so they must model
-    # the fast idioms the docs teach -- background-as-clear-color (Battle City) and
+    # the fast idioms the docs teach -- a DECLARED background (#63 habit 1: Battle
+    # City names its backdrop once; the engine restores it every frame) and
     # static-scenery-in-a-layer (Hop Quest, like Sky Run).
     battle = (Path("system_carts") / "battle_city.moy" / "main.py").read_text(encoding="utf-8")
-    assert 'cls(col("dark_blue"))' in battle            # the backdrop IS the clear
+    assert 'background(col("dark_blue"))' in battle     # the backdrop is DECLARED
+    assert 'cls(' not in battle.split("def _draw()")[1].split("def ")[0], (
+        "the play frame must not clear -- the engine restores the declared backdrop")
     assert 'rect(0, 0, FIELD, FIELD' not in battle      # no double-paint backdrop
     hop = (Path("system_carts") / "platformer.moy" / "main.py").read_text(encoding="utf-8")
     assert "def _build_layer():" in hop
