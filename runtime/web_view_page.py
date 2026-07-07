@@ -63,6 +63,10 @@ var W=320,H=240,PAL=null,FONT=null,ready=false,assCart=undefined,idx=null,img=nu
 // Payload-diet caches (#41): SHEET = the cart sprite sheet; TM = the cart tilemap (kept
 // current by settiles); ATL = the per-session sprite atlas filled by defspr.
 var SHEET=null,TM=null,ATL=[],curGen=-1;
+// #76 per-surface DELTA: the last full command list per WM-surface id. A frame entry
+// {"same":1} replays from here instead of re-shipping the commands; wiped with ATL/LAY
+// on a gen change (the server's SurfaceDelta resets in lock-step on connect/reset).
+var SURF={};
 // Paint-image cache (#63 Fold 4): IMG[name] = {w,h,px:Uint8Array of raw MOY64 indices},
 // loaded from /assets (once per cart) so an ["imgref",x,y,name] blits without carrying pixels.
 // imgWant latches an imgref cache MISS (a deflayer racing the async /assets fetch); assLoading
@@ -257,14 +261,18 @@ function df(f){if(f.perf){var p=f.perf;PERF.dh=p.heap;PERF.pf=p.pf;PERF.js=p.js;
 // stays 0 -- `undefined>0` is false). thr counts bandwidth-throttled pushes.
 if(p.js>PERF.mj)PERF.mj=p.js;if(p.tx>PERF.mt)PERF.mt=p.tx;
 if(p.dr>PERF.md)PERF.md=p.dr;if(p.gap>PERF.mg)PERF.mg=p.gap;if(p.thr)PERF.thr++;}
-if(f.gen!==curGen){curGen=f.gen;ATL=[];LAY={};HUD.unknown=0;}
+if(f.gen!==curGen){curGen=f.gen;ATL=[];LAY={};SURF={};HUD.unknown=0;}
 if(f.cart!==assCart){assCart=f.cart;getA().catch(function(){});}
 // Stage 9: the browser as a SECOND window manager -- when the frame carries per-WM-surface
 // streams (f.surfaces: bar / app-content / player-viewport, each id-tagged), COMPOSITE them
 // in order (bottom->top) reusing the same rep() interpreter + global ATL/LAY caches; the
 // leading "_defs" surface ships the ship-once bitmaps/layers first. A flat frame (the device
 // + web-view-off path) has no f.surfaces and replays f.cmds unchanged.
-if(f.surfaces){for(var si=0;si<f.surfaces.length;si++)rep(f.surfaces[si].cmds||[]);}else{rep(f.cmds||[]);}
+// #76 delta: a {"same":1} surface replays its cached commands; a full one updates the
+// cache ("_defs" is ship-once-incremental, never cached) then replays.
+if(f.surfaces){for(var si=0;si<f.surfaces.length;si++){var s=f.surfaces[si];
+if(s.same){rep(SURF[s.id]||[]);}else{if(s.id!=="_defs")SURF[s.id]=s.cmds||[];rep(s.cmds||[]);}}}
+else{rep(f.cmds||[]);}
 blit();
 // A deflayer's imgref cache-MISS (racing the async /assets fetch) latched imgWant: re-fetch
 // /assets (the server re-ships the deflayer on reset) until the paint image is cached (#63 F4).

@@ -81,6 +81,7 @@ _LayerRecorder = _wv._LayerRecorder
 RecordingLayer = _wv.RecordingLayer
 TeeCanvas = _wv.TeeCanvas
 ServedState = _wv.ServedState
+SurfaceDelta = _wv.SurfaceDelta
 palette_rgb = _wv.palette_rgb
 sheet_payload = _wv.sheet_payload
 tilemap_payload = _wv.tilemap_payload
@@ -389,6 +390,9 @@ class WebServer:
         # frame is self-contained (drop-robust). Resets on /assets (reset_served) + on a dropped
         # atlas (atlas_gen change).
         self._served_state = ServedState(recorder)
+        # Per-surface DELTA (#76): mirrors what the ONE live WS client's page holds
+        # (its SURF cache); reset with the served state (fresh client / /assets).
+        self._surf_delta = SurfaceDelta()
 
     def start(self, ip=None):
         """Open the non-blocking listening socket. `ip` is the device's STA IP (for the printed
@@ -456,8 +460,10 @@ class WebServer:
 
     def reset_served(self):
         """Forget which defsprs + deflayers the browser has -- so the next /frame re-ships every
-        sprite bitmap AND layer stream it references. Called when /assets is (re)served."""
+        sprite bitmap AND layer stream it references. Called when /assets is (re)served.
+        The surface delta resets in lock-step (#76): a fresh page has an empty SURF cache."""
         self._served_state.reset()
+        self._surf_delta.reset()
 
     def begin_frame(self):
         """Set the recorder's gate for THIS frame + start a fresh command list when a browser is
@@ -472,15 +478,22 @@ class WebServer:
         if self.sock is None or not self.recording_wanted():
             self.recorder.enabled = False
             self.recorder.record_only = False
+            self.recorder.surfaces_on = False   # #76: no client -> no marks accumulate
             return
         # Browser live -> headless EVERY frame (stable across the cap, so no per-frame flap).
         self.recorder.record_only = self.stream_mode()
         now = ticks_ms()
         if ticks_diff(now, self._last_record_ms) < WEB_FRAME_INTERVAL_MS:
             self.recorder.enabled = False     # within the cap -> stay headless, don't record
+            self.recorder.surfaces_on = False   # (begin_surface still forwards when not recording)
             return
         self._last_record_ms = now
         self.recorder.enabled = True
+        # #76: record the frame PARTITIONED by WM surface, so the push can delta --
+        # only a surface whose commands changed re-ships (the launcher's static grid
+        # + bar stop re-transmitting at wallpaper rate). Costs a few marks per frame,
+        # only while a browser is live.
+        self.recorder.surfaces_on = True
         self.recorder.begin()
 
     def commit_frame(self):
@@ -671,14 +684,30 @@ class WebServer:
         path returned -- only the transport differs. Times the json-encode + the socket send
         separately (#41 perf log)."""
         cmds, cart = self.provider.frame()
-        cmds = self.served_frame(cmds)
+        # #76: when the committed frame carries per-WM-surface slices, serve + DELTA
+        # them -- an unchanged surface (static grid/bar/chrome) ships as a ~30-byte
+        # {"same":1} stub instead of its whole command list. served_surfaces runs the
+        # same ship-once defspr/deflayer bookkeeping served_frame would, exactly once.
+        surfaces = self.recorder.frame_surfaces()
+        wire = None
+        if surfaces is not None:
+            _flat, dicts = self._served_state.served_surfaces(cmds, surfaces)
+            wire = self._surf_delta.encode(dicts, gen=self.recorder.atlas_gen)
+        else:
+            cmds = self.served_frame(cmds)
         self._frames_pushed += 1
         # Snapshot perf BEFORE the timing: _perf_snapshot may do the gc.mem_free heap walk (tens
         # of ms), which must NOT be attributed to json.dumps (that made `js` read ~60ms on even a
         # 0.5KB frame -- a phantom). Now `js` is the pure encode cost.
         perf = self._perf_snapshot()
         t0 = ticks_ms()
-        payload = json.dumps(frame_payload(cmds, cart, self.recorder.atlas_gen, perf))
+        if wire is not None:
+            # surfaces mode: the page composites f.surfaces and ignores f.cmds -> send
+            # an empty flat list rather than double-shipping the same commands.
+            payload = json.dumps(frame_payload([], cart, self.recorder.atlas_gen, perf,
+                                               surfaces=wire))
+        else:
+            payload = json.dumps(frame_payload(cmds, cart, self.recorder.atlas_gen, perf))
         t1 = ticks_ms()
         ws.send(payload)
         t2 = ticks_ms()

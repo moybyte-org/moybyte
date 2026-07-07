@@ -978,6 +978,83 @@ def test_served_surfaces_prepend_defs_and_composite_pixel_identical():
     assert len(set(comp.buf)) > 1, "the composited frame must not be flat"
 
 
+def test_surface_delta_stubs_unchanged_surfaces():
+    """SurfaceDelta (#76): the second push of an unchanged surface is a {"same":1} stub
+    (no cmds on the wire); a changed surface re-ships in full; "_defs" is never stubbed;
+    a gen change or reset() forgets the cache (the page wiped SURF with ATL/LAY)."""
+    delta = web.SurfaceDelta()
+    frame1 = [
+        {"id": "_defs", "domain": "system", "cmds": [["defspr", 0, 1, 1, -1, [7]]]},
+        {"id": "launcher", "domain": "system", "cmds": [["cls", 1], ["rect", 1, 1, 2, 2, 3]]},
+        {"id": "cursor", "domain": "system", "cmds": [["spr", 0, 5, 5, 1, 0]]},
+    ]
+    wire1 = delta.encode(frame1, gen=0)
+    assert wire1 == frame1, "a fresh client gets every surface in full"
+    # Same content next frame -> stubs (except _defs, which is incremental by nature).
+    frame2 = [
+        {"id": "launcher", "domain": "system", "cmds": [["cls", 1], ["rect", 1, 1, 2, 2, 3]]},
+        {"id": "cursor", "domain": "system", "cmds": [["spr", 0, 5, 5, 1, 0]]},
+    ]
+    wire2 = delta.encode(frame2, gen=0)
+    assert wire2 == [{"id": "launcher", "domain": "system", "same": 1},
+                     {"id": "cursor", "domain": "system", "same": 1}]
+    # One surface changes -> only it re-ships.
+    frame3 = [
+        {"id": "launcher", "domain": "system", "cmds": [["cls", 2], ["rect", 1, 1, 2, 2, 3]]},
+        {"id": "cursor", "domain": "system", "cmds": [["spr", 0, 5, 5, 1, 0]]},
+    ]
+    wire3 = delta.encode(frame3, gen=0)
+    assert wire3[0] == frame3[0] and wire3[1] == {"id": "cursor", "domain": "system", "same": 1}
+    # A gen bump (cart change wiped the browser's caches) re-ships everything.
+    wire4 = delta.encode(frame3, gen=1)
+    assert wire4 == frame3
+    # reset() (fresh connection) likewise.
+    delta.reset()
+    assert delta.encode(frame3, gen=1) == frame3
+
+
+def test_surface_delta_replay_pixel_identical_across_frames():
+    """The wire-level proof (#76): two consecutive frames delta-encoded per connection,
+    replayed through the browser twin (replay_delta_surfaces_to_canvas + a persistent
+    SURF cache), reproduce the rasterized panel PIXEL-IDENTICALLY -- including a frame
+    whose static surfaces arrived only as {"same":1} stubs."""
+    raster = Canvas(WIDTH, HEIGHT)
+    rec = web.DrawRecorder(WIDTH, HEIGHT)
+    tee = web.TeeCanvas(raster, rec)
+    st = web.ServedState(rec)
+    delta = web.SurfaceDelta()
+    spr = Image(4, 4, [0, 8, 8, 0, 8, 7, 7, 8, 8, 7, 7, 8, 0, 8, 8, 0], transparent=0)
+    rec.enabled = True
+    rec.surfaces_on = True
+
+    def record(rect_x):
+        rec.begin()
+        rec.begin_surface("desktop", "game")      # the animating surface
+        tee.cls(1)
+        tee.rect(rect_x, 10, 60, 40, 8)
+        rec.begin_surface("bar", "system")        # the static chrome surface
+        tee.print("12:00", 8, 2, 7)
+        tee.spr(spr, 300, 2, 1)
+        rec.commit()
+        _flat, dicts = st.served_surfaces(rec.frame(), rec.frame_surfaces())
+        return delta.encode(dicts, gen=rec.atlas_gen)
+
+    cache = {}
+    atlas = {}                                    # the browser's persistent ATL twin
+    wire1 = record(10)
+    cv1 = Canvas(WIDTH, HEIGHT)
+    web_view.replay_delta_surfaces_to_canvas(wire1, cache, cv1, atlas=atlas)
+    assert bytes(cv1.buf) == bytes(raster.buf), "frame 1 (full) must match the panel"
+    wire2 = record(50)                            # desktop moved; bar unchanged
+    ids = {s["id"]: s for s in wire2}
+    assert "cmds" in ids["desktop"], "the changed surface re-ships"
+    assert ids["bar"].get("same") == 1, "the static chrome ships as a stub"
+    cv2 = Canvas(WIDTH, HEIGHT)
+    web_view.replay_delta_surfaces_to_canvas(wire2, cache, cv2, atlas=atlas)
+    assert bytes(cv2.buf) == bytes(raster.buf), (
+        "frame 2 composited from the delta + the SURF cache must match the panel")
+
+
 def test_surface_scroll_layer_deflayer_rides_the_defs_surface():
     """A scroll layer spanning the player surface ships its stream ONCE as a deflayer in the
     leading "_defs" surface (serve-time, like defspr); the tiny blit_layer reference stays in
@@ -1030,11 +1107,16 @@ def test_frame_payload_carries_surfaces_only_when_present():
 
 def test_page_composites_per_surface_streams():
     """The browser page (the SECOND window manager) composites per-surface streams: df() reads
-    f.surfaces and replays each surface's cmds in order, falling back to the flat f.cmds when a
-    frame carries none. Guard the served source (the JS can't be unit-tested here)."""
+    f.surfaces and replays each surface in order -- a {"same":1} entry from its SURF cache, a
+    full one updating the cache first (#76 delta) -- falling back to the flat f.cmds when a
+    frame carries none. The SURF cache wipes with ATL/LAY on a gen change (lock-step with the
+    server's SurfaceDelta). Guard the served source (the JS can't be unit-tested here)."""
     page = web.PAGE_HTML
     assert "f.surfaces" in page, "the page must branch on per-surface streams"
-    assert "f.surfaces[si].cmds" in page, "the page replays each surface's cmds in order"
+    assert "s.same" in page, "the page replays a same-stub from its SURF cache (#76)"
+    assert "SURF[s.id]=s.cmds" in page, "a full surface updates the SURF cache"
+    assert 'if(s.id!=="_defs")' in page, "the ship-once _defs surface is never cached"
+    assert "SURF={};HUD.unknown=0;}" in page, "a gen change wipes SURF with ATL/LAY"
     assert "rep(f.cmds||[])" in page, "the flat fallback (device + web-view-off) stays"
 
 

@@ -363,6 +363,10 @@ class _Handler(BaseHTTPRequestHandler):
         except OSError:
             pass
         next_push = time.monotonic()
+        # Per-surface DELTA (#76): one SurfaceDelta per WS connection -- it mirrors
+        # THIS browser's SURF cache, so a fresh connection starts full and unchanged
+        # surfaces ship as {"same":1} stubs afterwards (same wire the device speaks).
+        delta = web_view.SurfaceDelta()
         while True:
             # 1. Inbound: drain queued input frames (input UP the socket).
             try:
@@ -409,8 +413,15 @@ class _Handler(BaseHTTPRequestHandler):
             gen = self.console.canvas._rec.atlas_gen            # host recorder gen (self-contained)
             # Stage 9: ship the per-WM-surface streams (the browser composites them); step_frame
             # stashed them on the console. None -> a flat frame (nothing changes for that path).
-            payload = json.dumps(web_view.frame_payload(
-                cmds, cart, gen, audio=audio, surfaces=self.console._last_surfaces))
+            # #76: delta-encode them per connection -- unchanged surfaces ship as stubs; the
+            # flat cmds are dropped in surfaces mode (the page ignores them) to halve the wire.
+            surfaces = self.console._last_surfaces
+            if surfaces is not None:
+                payload = json.dumps(web_view.frame_payload(
+                    [], cart, gen, audio=audio, surfaces=delta.encode(surfaces, gen=gen)))
+            else:
+                payload = json.dumps(web_view.frame_payload(
+                    cmds, cart, gen, audio=audio))
             try:
                 # Send under WS_SEND_BUDGET, not the 20ms read-pacing timeout. A
                 # sendall that times out has already written PART of the frame (the
