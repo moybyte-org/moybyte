@@ -142,10 +142,9 @@ def run_live(driver, dt, scale):
                 pygame.K_w: "up", pygame.K_s: "down"}
     # BACKSPACE = the device's one console key, now the Stage-5 EXIT key. It is mapped
     # as a HELD "home" button (below, like the WASD nav keys) -- NOT a one-shot press --
-    # so a sustained hold reaches the Player's hold-to-exit (~700ms) and a quick tap is a
-    # single edge (three within 1s = the fw-independent triple-tap exit). In text mode
-    # the branch above routes it as typed 0x08 instead (DELETE for a tool). K_h is a
-    # host-only convenience alias for the same held "home".
+    # so a sustained hold reaches the Player's hold-to-exit (~700ms) for a game and a quick
+    # tap is a single edge the cart reads. In text mode the branch above routes it as typed
+    # 0x08 instead (DELETE for a tool). K_h is a host-only convenience alias for held "home".
     exit_keys = (pygame.K_BACKSPACE, pygame.K_h)
     shortcuts = {pygame.K_RETURN: "run", pygame.K_z: "a", pygame.K_x: "b"}
     pan_held = set()
