@@ -2169,6 +2169,8 @@ class Workstation:
         self._cart_key_prev = 0       # fresh cart: no stale key edge
         self.input.text_mode = False  # a fresh cart starts in game mode (#38/#42);
                                       # it opts into text input via textmode(True)
+        self.input.cart_quit = False  # clear any prior cart's quit() flag so it can't
+                                      # immediately pop the freshly opened cart (make_api)
         self.menu_view = "cards"
         self._set_text_mode(False)
         self._start()

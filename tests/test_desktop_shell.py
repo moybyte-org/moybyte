@@ -604,6 +604,60 @@ def test_tool_bar_does_not_lend_a_zone_during_play(tmp_path):
     assert calls == [], "the tool bar must not lend an editor zone during play: %r" % calls
 
 
+# -- a cart can end ITSELF via the quit() verb (the exit a text-mode cart must provide) --
+
+def test_cart_quit_verb_pops_to_the_launcher(tmp_path):
+    """A cart calls quit() (make_api) to END itself and return to the launcher -- the
+    self-exit a text-mode cart MUST provide (once it textmode(True)s, hold-BACKSPACE can't
+    reach it: BACKSPACE is a typed delete, no keyboard autorepeat). The verb is ADDITIVE to
+    the frozen kid API and works for ANY cart type; the Player honors the flag AFTER the
+    cart's _update runs (player.tick) and pops to the run caller (ws._exit_to_caller)."""
+    from runtime import host_app, moy_carts
+    carts_dir = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts_dir)
+    drv = host_app.ConsoleDriver(ws)
+    # A game that quits itself on its 2nd frame -- stands in for a key/affordance the cart
+    # binds to quit() (here a frame counter so the exit is deterministic).
+    src = ("_n = 0\n"
+           "def _update(dt):\n"
+           "    global _n\n"
+           "    _n += 1\n"
+           "    if _n >= 2:\n"
+           "        quit()\n"
+           "def _draw():\n    cls(1)\n")
+    moy_carts.create("Quitter", carts_dir, src=src, type="game")
+    ws.launcher.set_items(moy_carts.scan(carts_dir))
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                           if it.get("title") == "Quitter")
+    ws.open()                                # PLAY it
+    assert ws.screen == "desktop"
+    drv.frame(1 / 30)                        # frame 1: _n -> 1, quit() not yet called
+    assert ws.screen == "desktop"            # still running
+    drv.frame(1 / 30)                        # frame 2: _n -> 2 -> quit()
+    assert ws.screen == "launcher"           # quit() popped the cart home
+
+
+def test_cart_quit_flag_is_cleared_for_the_next_cart(tmp_path):
+    """A stale quit() flag must NOT carry into the next cart: opening a cart resets
+    input.cart_quit (console._open_workspace), so a freshly opened cart is not popped on
+    its first frame by a previous cart's quit()."""
+    from runtime import host_app, moy_carts
+    carts_dir = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts_dir)
+    drv = host_app.ConsoleDriver(ws)
+    moy_carts.create("Plain", carts_dir,
+                     src="def _update(dt):\n    pass\ndef _draw():\n    cls(2)\n",
+                     type="game")
+    ws.launcher.set_items(moy_carts.scan(carts_dir))
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                           if it.get("title") == "Plain")
+    ws.input.cart_quit = True                # a leftover flag from some prior run
+    ws.open()                                # opening must clear it
+    assert getattr(ws.input, "cart_quit", False) is False
+    drv.frame(1 / 30)
+    assert ws.screen == "desktop"            # the plain cart keeps running (not popped)
+
+
 def test_tap_mode_setting_toggles_and_persists(tmp_path):
     """Section 4 tap-mode: system.json's tap_mode defaults to "maker" (a launcher tap
     opens the Editor); Settings -> TAP OPENS steps it MAKER <-> PLAYER and persists it

@@ -289,6 +289,18 @@ class Player:
                 # cart exception whose __str__ itself raises would otherwise
                 # escape here -> the silent device hang the panel exists to prevent.
                 print("Moybyte frame error:", self.cart_error)
+        # A cart ENDS ITSELF by calling quit() (make_api), which sets input.cart_quit.
+        # Honor it now that this frame's _update has run: pop to the run caller and stop
+        # (screen leaves "desktop", so this cart won't tick again -- skip the text-mode
+        # sync + chrome below). This is the exit a TEXT-mode cart MUST provide -- once it
+        # calls textmode(True), hold-BACKSPACE can't reach it (BACKSPACE is a typed delete
+        # there, no keyboard autorepeat) -- but ANY cart may call quit(). Reset the
+        # cart-set camera/clip/pal first so whatever paints underneath is clean.
+        if self.cart_error is None and getattr(ws.input, "cart_quit", False):
+            ws.input.cart_quit = False
+            ws._reset_canvas_state()
+            ws._exit_to_caller()
+            return
         # Cart text input (#38/#42): apply the keyboard mode the cart's _update may
         # have just requested via textmode(), so the NEXT keyboard poll yields the
         # right bytes (clean ASCII for typing, raw/game for hold-to-move). One-frame
