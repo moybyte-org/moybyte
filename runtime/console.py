@@ -2188,21 +2188,24 @@ class Workstation:
 
     def launch_selected(self):
         """A launcher TAP opens the selected cart. Whether the tap EDITS or RUNS keys on
-        EDITABILITY, not manifest type: a cart WITH an `edit` schema (the "Make it mine"
-        cards -- games AND the NEW-cart wallpaper template) follows system.json's `tap_mode`
-        (spec Section 4): "player" plays it, "maker" (the DEFAULT) drops into the Editor on
-        the Config page. A cart with NO edit schema (a pure tool like wifi.moy -- nothing to
-        customize) ALWAYS LAUNCHES: you run it, you don't edit it on a tap (owner device
-        feedback). "Editing is for editable things" -- so a kid's brand-new cart (type
-        wallpaper, but with edit cards) still opens its Config on a maker tap instead of
-        running bar-less with no way back. Both Play and Edit stay reachable via the menu;
-        the tap default is the only thing this decides."""
+        manifest TYPE: only a `type=="game"` cart follows system.json's `tap_mode` (spec
+        Section 4) -- "player" plays it, "maker" (the DEFAULT) drops into the Editor on the
+        Config page. EVERYTHING ELSE (tool / app / wallpaper) ALWAYS LAUNCHES: a game is the
+        maker project you tweak, but a tool/app/wallpaper is something you RUN, not edit, on
+        a tap (owner device feedback). Keying on type (not the edit-schema) fixes a game with
+        NO "Make it mine" cards (e.g. tap_game.moy, `edit: []`) -- it used to LAUNCH on a
+        maker tap because it had no schema; now it opens the Editor like any other game. The
+        NEW-cart template is `type=="game"` (moy_carts.NEW_TEMPLATE), so a kid's brand-new
+        creation still opens its Config on a maker tap instead of running bar-less with no
+        way back. Editing a non-game currently has no tap path -- a secondary affordance
+        (long-press / a Play-Edit menu) is a separate owner decision. Both Play and Edit stay
+        reachable via the menu; the tap default is the only thing this decides."""
         cart = self.launcher.selected()
-        editable = bool(cart.get("edit")) if cart else False
-        if editable and self.system.get("tap_mode", "maker") == "maker":
+        ctype = cart.get("type") if cart else None
+        if ctype == "game" and self.system.get("tap_mode", "maker") == "maker":
             self.open_in_editor()
         else:
-            self.open()                # player-mode, or a non-editable cart -> launch/run
+            self.open()                # player-mode, or a non-game cart -> launch/run
 
     def launch_wifi_tool(self):
         """Launch the WiFi system tool -- the right-zone wifi icon's tap target (Part 3):
