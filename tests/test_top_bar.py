@@ -264,6 +264,83 @@ def test_launcher_bar_management_hidden_when_read_only(tmp_path):
     assert len(ws.launcher.items) == n0
 
 
+# -- Part 3: the wifi icon is a STATUS glyph + a shortcut to the wifi tool ----
+
+def test_wifi_off_glyph_is_a_distinct_nonblank_tile():
+    """The new "wifi_off" (wifi-with-a-red-slash) icon is a real, non-blank 16x16 tile
+    at its own slot, and it DIFFERS from the connected "wifi" tile (the two states must be
+    visually distinguishable). It also carries red (index 8) -- the slash."""
+    from runtime import host_app  # noqa: F401 -- registers the editors aliases
+    from runtime import console as C
+    assert "wifi_off" in C._ICON and C._ICON["wifi_off"] < 32
+    sheet = C._default_icon_sheet()
+    off = sheet.tile_image(C._ICON["wifi_off"])
+    on = sheet.tile_image(C._ICON["wifi"])
+    assert off is not None and any(p for p in off.pix)     # non-blank
+    assert list(off.pix) != list(on.pix)                   # distinct from connected wifi
+    assert 8 in off.pix                                    # the red slash is present
+
+
+def test_wifi_icon_kind_tracks_connection_state(tmp_path):
+    """ws._wifi_icon_kind() -- the glyph the bar draws -- is "wifi_off" when there's no
+    connection and "wifi" once the injected wifi service reports a link. FakeWifi boots
+    disconnected, so the host default is deterministic ("wifi_off")."""
+    ws = _ws(tmp_path)
+    assert ws.wifi.status()[0] is False        # host FakeWifi boots offline
+    assert ws._wifi_icon_kind() == "wifi_off"  # ...so the status glyph is the slashed wifi
+    ws.wifi.connect("Home WiFi", "pw")         # now associated
+    assert ws.wifi.status()[0] is True
+    assert ws._wifi_icon_kind() == "wifi"      # connected -> the plain wifi glyph
+    ws.wifi.disconnect()
+    assert ws._wifi_icon_kind() == "wifi_off"  # back offline -> slashed again
+
+
+def test_wifi_status_change_repaints_the_bar_strip(tmp_path):
+    """The wifi kind is folded into the bar's cache key, so a connect/disconnect forces
+    exactly the strip re-render that shows the new glyph (the #43 cache can't go stale)."""
+    ws, drv = _run_a_cart(tmp_path)
+    calls = [0]
+    orig = ws.bar_layer._render_cart_bar
+
+    def counting(cv, key):
+        calls[0] += 1
+        return orig(cv, key)
+    ws.bar_layer._render_cart_bar = counting
+    drv.frame(1 / 30)
+    assert calls[0] == 0                        # unchanged state -> cache reused
+    ws.wifi.connect("Home WiFi", "pw")          # link comes up -> the wifi glyph changes
+    ws._dirty = True                            # crashed frames are static: force a repaint
+    drv.frame(1 / 30)
+    assert calls[0] == 1, "a wifi status change must re-render the bar once"
+
+
+def test_tapping_the_wifi_icon_launches_the_wifi_tool(tmp_path):
+    """Part 3: the right-zone wifi icon is a shortcut -- tapping it LAUNCHES the wifi.moy
+    tool (runs it; never the editor). From the launcher home the tap lands on the running
+    tool (screen "desktop", cart type "tool")."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    assert ws.screen == "launcher"
+    drv.click(*_center(ws.layout.wifi_btn))     # tap the wifi status icon
+    drv.frame(1 / 30)
+    assert ws.screen == "desktop"               # launched the wifi tool (ran it)
+    assert ws.cart is not None and ws.cart.get("type") == "tool"
+    assert (ws.cart.get("path") or "").endswith("wifi.moy")
+
+
+def test_launch_wifi_tool_is_a_noop_when_absent(tmp_path):
+    """launch_wifi_tool() degrades cleanly (returns False, no crash, no screen change)
+    when no wifi tool is installed -- so the shortcut is safe on a stripped device."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    # Drop every wifi tool from the launcher store view.
+    ws.launcher.set_items([it for it in ws.launcher.items
+                           if not (it.get("path") or "").endswith("wifi.moy")])
+    assert ws.launch_wifi_tool() is False
+    assert ws.screen == "launcher"
+
+
 # -- cached running-cart top bar (#43): render once, blit each frame ---------
 
 def _bar_rows(canvas):
