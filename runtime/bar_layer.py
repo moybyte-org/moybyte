@@ -95,13 +95,15 @@ class BarLayer:
     inside it) + `zone_gen` (an int bumped whenever their zone's pixels change).
 
     `where` still selects which screen is asking (`"home"` / `"settings"` /
-    `"menu"` / `"desktop"`), but it's no longer three-plus-one hardcoded draw
+    `"menu"` / `"desktop"` / `"tool"`), but it's no longer a set of hardcoded draw
     bodies: `"desktop"` stays the running-cart CRASH chrome (Stage 5 retired the
-    #71 pause frame -- the bar shows only on a crash now, never during play -- see
-    `_render_cart_bar`'s early branch, which returns before any zone dispatch, so
-    `draw_zone` is structurally unreachable while a Player is top-of-stack); the
-    other three route through the SAME generalized cache (below) into whichever
-    app owns `where`.
+    #71 pause frame -- for a GAME the bar shows only on a crash, never during play);
+    `"tool"` (Part 4) is the minimal bar a running TOOL/APP shows so it's exitable
+    (title + status + context-X, NO tab ladder). BOTH the `"desktop"` and `"tool"`
+    branches return before any `owner.draw_zone` call, so `draw_zone` stays
+    structurally unreachable while a Player is top-of-stack (the perf guardrail); the
+    home/settings/menu three route through the SAME generalized cache (below) into
+    whichever app owns `where`.
 
     The #43 strip cache is KEPT AND GENERALIZED, not duplicated: `_cart_bar_key`
     now takes `where` (default `"desktop"`, so the pinned zero-arg tests are
@@ -198,10 +200,12 @@ class BarLayer:
         return None
 
     def _zone_is_game(self, where):
-        """True for the "menu" tabs that draw on the fixed 320x240 GAME canvas
-        (cards/paint/map/music, like the running cart) rather than the responsive
-        SYSTEM canvas (code/blocks, like the launcher/Settings)."""
-        return where == "menu" and self.ws.menu_view in ("cards", "paint", "map", "music")
+        """True for the surfaces that draw on the fixed 320x240 GAME canvas: the "menu"
+        tabs (cards/paint/map/music, like the running cart) and the Part-4 "tool" bar (a
+        running tool/app is on the game canvas), rather than the responsive SYSTEM canvas
+        (code/blocks, like the launcher/Settings)."""
+        return where == "tool" or (
+            where == "menu" and self.ws.menu_view in ("cards", "paint", "map", "music"))
 
     def _bar_canvas(self, where):
         if where == "desktop" or self._zone_is_game(where):
@@ -282,6 +286,7 @@ class BarLayer:
                 bool(ws.can_manage),
                 owner.zone_gen if owner is not None else 0,
                 ws._wifi_icon_kind(),      # Part 3: wifi status glyph (connect/disconnect repaints)
+                (ws.cart.get("title") if ws.cart else None),   # Part 4: the tool bar's left-zone title
                 self._bar_cache_gen)
 
     def _render_cart_bar(self, cv, key):
@@ -319,6 +324,21 @@ class BarLayer:
             cv.print(self._clock_text(), _BAR_CLOCK[0], 3, NAMES["light_grey"], 1)
             ws._icon(ws._wifi_icon_kind(), _BAR_WIFI[0], _BAR_WIFI[1], cv)
             ws._icon("batt", _BAR_BATT[0], _BAR_BATT[1], cv)
+            return
+        if where == "tool":
+            # Part 4: the minimal TOOL bar. A tool/app runs WITH a bar so it's EXITABLE
+            # (games stay fullscreen-bar-hidden). It draws on the fixed 320x240 GAME canvas
+            # like the running cart. RIGHT zone = the OS status cluster + the context-X (the
+            # X exits the tool -- handle_bar_tap("tool") routes it); LEFT zone = the tool's
+            # TITLE only, NO tab ladder (a tool isn't an editor with tabs). No owner.draw_zone
+            # call here, so the play-frame guardrail (draw_zone never during a Player) holds.
+            cv.rect(0, 0, cv.w, _STATUS_H, NAMES["black"])
+            cv.rect(0, _STATUS_H - 1, cv.w, 1, NAMES["dark_grey"])   # shelf edge line
+            self._render_right_zone(cv, where)                       # clock/wifi/batt/≡ + X
+            title = (ws.cart.get("title") if ws.cart else "") or ""
+            maxc = _ZONE_LEFT_GAME[2] // 8                           # 8px cells in the lent rect
+            if maxc > 0:
+                cv.print(title[:maxc], _ZONE_LEFT_GAME[0], 3, NAMES["light_grey"], 1)
             return
         # -- the zoned bar (Stage 4): a black backing band (with a thin shelf edge
         # line below), the OS-owned RIGHT zone, then the active app's LENT left zone.
