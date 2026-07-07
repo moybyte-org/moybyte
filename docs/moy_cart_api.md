@@ -53,11 +53,15 @@ def _draw():                 # every frame; render here
 
 ## Frame pacing
 
-A **game** cart runs at a locked **30fps** — a steady 30 feels smoother than a
-jittery 40, and the headroom absorbs hiccups. If your cart genuinely holds 60
-(measure it!), declare `"fps": 60` in `manifest.json` (Hop Quest and Sky Run do).
-Tools/apps and all console screens run at 60. Your `_update(dt)` gets the real
-`dt` either way — movement written as `speed * dt` is framerate-independent.
+The console has a frame governor: a **game** cart locks to a steady **30fps** —
+a steady 30 feels smoother than a jittery 40, and the headroom absorbs hiccups.
+If your cart genuinely holds 60 (measure it!), declare `"fps": 60` in
+`manifest.json` (Hop Quest and Sky Run do). Tools/apps and all console screens
+run at 60. *(The governor currently ships **disabled** — `console.FPS_GOVERNOR
+= False`, an owner measurement mode so every cart shows its real uncapped fps;
+the manifest field and the policy are live the moment the flag flips back.)*
+Your `_update(dt)` gets the real `dt` either way — movement written as
+`speed * dt` is framerate-independent.
 
 ## The canvas
 
