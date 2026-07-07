@@ -492,8 +492,9 @@ def test_music_editor_opens_edits_previews_and_saves_on_console(tmp_path):
     ws.music_ui._music_click(C._MU_PLAY[0] + 2, C._MU_PLAY[1] + 2)
     assert ws.music_ui.music_preview is None           # toggled off while still sounding
 
-    # SAVE persists to sounds.json; reload proves it stuck.
-    ws.music_ui._music_click(C._MU_SAVE[0] + 2, C._MU_SAVE[1] + 2)
+    # SAVE persists to sounds.json; reload proves it stuck. SAVE moved to the unified
+    # bar (Stage-4 rollout): the music tab's bar SAVE dispatches through save_current.
+    ws.editor_app.save_current()
     assert ws.save_status == "SAVED" and not me.dirty
     from runtime import moy_carts
     reloaded = moy_carts.load(ws.cart["path"])

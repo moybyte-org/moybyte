@@ -84,7 +84,7 @@ try:
         _MU_TITLE_Y, _MU_VIEW, _MU_LIST_X, _MU_LIST_Y0, _MU_ROW_H, _MU_ROWS,
         _MU_LIST_W, _MU_LIST_AREA, _MU_OBJ_PREV, _MU_OBJ_NEXT, _MU_PAD_X,
         _MU_PAD_Y, _MU_PAD_W, _MU_PAD_H, _MU_PAD_GAP, _MU_SPEED_DN, _MU_SPEED_UP,
-        _MU_PLAY, _MU_SAVE, _MU_LOOP, _MU_CLOSE, _MU_NOTE_NAMES, _MU_WAVE_LABELS,
+        _MU_PLAY, _MU_LOOP, _MU_NOTE_NAMES, _MU_WAVE_LABELS,
         _mu_note_name, _mu_pad_rect,
     )
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -93,7 +93,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
         _MU_TITLE_Y, _MU_VIEW, _MU_LIST_X, _MU_LIST_Y0, _MU_ROW_H, _MU_ROWS,
         _MU_LIST_W, _MU_LIST_AREA, _MU_OBJ_PREV, _MU_OBJ_NEXT, _MU_PAD_X,
         _MU_PAD_Y, _MU_PAD_W, _MU_PAD_H, _MU_PAD_GAP, _MU_SPEED_DN, _MU_SPEED_UP,
-        _MU_PLAY, _MU_SAVE, _MU_LOOP, _MU_CLOSE, _MU_NOTE_NAMES, _MU_WAVE_LABELS,
+        _MU_PLAY, _MU_LOOP, _MU_NOTE_NAMES, _MU_WAVE_LABELS,
         _mu_note_name, _mu_pad_rect,
     )
 

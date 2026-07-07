@@ -199,10 +199,9 @@ class BarLayer:
 
     def _zone_is_game(self, where):
         """True for the "menu" tabs that draw on the fixed 320x240 GAME canvas
-        (cards/paint/map, like the running cart) rather than the responsive SYSTEM
-        canvas (code/blocks, like the launcher/Settings). MUSIC joins the game-canvas
-        set when its bar is wired (next commit)."""
-        return where == "menu" and self.ws.menu_view in ("cards", "paint", "map")
+        (cards/paint/map/music, like the running cart) rather than the responsive
+        SYSTEM canvas (code/blocks, like the launcher/Settings)."""
+        return where == "menu" and self.ws.menu_view in ("cards", "paint", "map", "music")
 
     def _bar_canvas(self, where):
         if where == "desktop" or self._zone_is_game(where):

@@ -198,7 +198,13 @@ class _MapLayer(Layer):
 class _MusicLayer(Layer):
     """The music/sound editor (#50), a full-screen tracker on the game canvas. The
     frozen cart isn't drawn (the editor covers it); the live mixer is ticked so a
-    PLAY preview keeps sounding, then the preview flag auto-clears when it ends."""
+    PLAY preview keeps sounding, then the preview flag auto-clears when it ends.
+
+    Stage-4 bar rollout (#46 zoned bar): draw() calls ws.bar_layer._draw_status_strip
+    ("menu") LAST (chrome over the tracker) so the Editor's lent top-bar zone (the tab
+    ladder + PLAY + SAVE + X) shows on this tab; handle_pointer routes a tap through
+    ws.bar_layer.handle_bar_tap("menu", ...) FIRST, before the tracker click. Music is
+    game-canvas, so it uses the fixed _ZONE_LEFT_GAME rect (like cards/paint/map)."""
 
     id = "music"
     domain = "game"
@@ -212,6 +218,7 @@ class _MusicLayer(Layer):
         if mu.music_preview is not None and not mu._music_preview_active():
             mu.music_preview = None
         mu._draw_music()
+        ws.bar_layer._draw_status_strip("menu")
 
     def handle_input(self, i):
         # D-pad navigates the tracker (#50): up/down move the step/slot cursor,
@@ -222,7 +229,9 @@ class _MusicLayer(Layer):
 
     def handle_pointer(self, px, py, click):
         ws = self.ws
-        gx, gy = ws._game_xy(px, py)
+        gx, gy = ws._game_xy(px, py)       # the tracker lives in the 320x240 viewport
+        if click and ws.bar_layer.handle_bar_tap("menu", gx, gy):
+            return True         # the Editor's lent zone (Stage 4) claimed the tap
         if click:
             ws.music_ui._music_click(gx, gy)   # step list + edit pad + actions
         return True
