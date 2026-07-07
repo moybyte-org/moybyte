@@ -351,6 +351,11 @@ def load(path):
             "title": man.get("title", "cart"),
             "type": man.get("type", "app"),
             "version": int(man.get("version", 0)),   # 0 = pre-versioning (re-seedable)
+            # Graduation (#29 / spec Section 8): a STORED, one-way project fact. Set
+            # when a block-authored cart's code commit diverges past the block
+            # vocabulary; makes the block editor read-only. Default False (absent =
+            # not graduated). Un-set only through the undo journal (the grad rider).
+            "graduated": bool(man.get("graduated", False)),
             "src": src,
             "cfg": cfg,
             "edit": man.get("edit", []),
@@ -400,6 +405,50 @@ def scan(root=CARTS_DIR):
 def save_config(cart):
     """Persist a cart's edited config back to its config.json (needs cart['path'])."""
     _write_atomic(cart["path"] + "/config.json", json.dumps(cart["cfg"]))
+
+
+# --- graduation flag (#29 / spec Section 8): a stored, one-way project fact ---
+#
+# The `graduated` boolean lives in manifest.json (a project fact, not per-file
+# data). _manifest_set_graduated is the low-level read-modify-write that the public
+# setter AND the undo journal (journal_undo/redo, via the entry's `grad` rider)
+# both use, so a graduation and its undo touch the manifest through one code path.
+# It PRESERVES every other manifest field (title/version/edit/permissions/...) and
+# writes atomically like every other save. A missing/bad manifest is a no-op.
+
+def _manifest_set_graduated(cart_dir, value):
+    """Set manifest.json's `graduated` flag to `value` (a bool), preserving all
+    other fields. Returns True iff the manifest was rewritten (changed), False on a
+    no-op or an unreadable/bad manifest. Atomic (its rename is the torn-write
+    proofing)."""
+    path = cart_dir + "/manifest.json"
+    try:
+        man = json.loads(_read_recover(path))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(man, dict):
+        return False
+    want = bool(value)
+    if bool(man.get("graduated", False)) == want:
+        return False                         # already at the target -> write nothing
+    if want:
+        man["graduated"] = True
+    else:
+        man.pop("graduated", None)           # absent == not graduated (keep manifests clean)
+    _write_atomic(path, json.dumps(man))
+    return True
+
+
+def set_graduated(cart_or_path, value=True):
+    """Public one-way graduation setter (spec Section 8). Persists the manifest flag
+    and, when passed a cart dict, syncs cart['graduated'] so the open workspace
+    reflects it immediately. `cart_or_path` is a cart dict or a .moy folder path.
+    Returns True iff the manifest changed."""
+    path = cart_or_path["path"] if isinstance(cart_or_path, dict) else cart_or_path
+    changed = _manifest_set_graduated(path, value)
+    if isinstance(cart_or_path, dict):
+        cart_or_path["graduated"] = bool(value)
+    return changed
 
 
 # save_code() outcomes -- the caller (Workstation) surfaces these to the kid:
@@ -617,7 +666,20 @@ def _journal_read_snap(jdir, entry):
     return data
 
 
-def journal_append(cart_dir, file, new_bytes):
+def _journal_apply_grad(cart_dir, entry):
+    """Sync the manifest's `graduated` flag to `entry`'s grad rider (Stage 8) after an
+    undo/redo restores its snapshot. Only main.py entries carry `grad`; an entry
+    without one leaves the flag untouched (never guesses). Best-effort -- a manifest
+    hiccup must not fail the walk (the live file is already restored)."""
+    if "grad" not in entry:
+        return
+    try:
+        _manifest_set_graduated(cart_dir, int(entry["grad"]))
+    except Exception as exc:  # noqa: BLE001
+        print("Moybyte graduation flag walk failed:", exc)
+
+
+def journal_append(cart_dir, file, new_bytes, grad=None):
     """Record a durable commit event for `file`: snapshot `new_bytes` under journal/s/
     and RAW-append one line to journal.jsonl (O(1)). Returns the new seq, or None when
     nothing was written (a no-op: the content already matches the current state).
@@ -625,7 +687,14 @@ def journal_append(cart_dir, file, new_bytes):
     Order (torn-write safe): snapshot first, THEN the log line, THEN the cursor -- so a
     crash never leaves a log line pointing at a torn snapshot (the orphan snapshot is
     simply unreferenced). A commit made while the cursor is rewound truncates the redo
-    tail first (Google-Docs rule). Rotation runs at the end when over cap."""
+    tail first (Google-Docs rule). Rotation runs at the end when over cap.
+
+    `grad` (Stage 8, spec Section 8): an optional 0/1 GRADUATION rider that rides a
+    main.py commit -- the graduated state of the cart AT this commit. When an entry is
+    actually appended with a grad rider, the manifest's `graduated` flag is set to it
+    (so the one-way flip rides the exact same durable step as the source), and
+    journal_undo/redo re-apply the target entry's grad -- which is how an undo past a
+    graduating commit restores BOTH the source and graduated:false."""
     if new_bytes is None:
         return None
     jdir, log_path, cur_path, snap_dir = _journal_paths(cart_dir)
@@ -663,10 +732,20 @@ def journal_append(cart_dir, file, new_bytes):
     # device power loss + FAT cache reordering -- snapshots are non-atomic) is REFUSED
     # rather than silently overwriting good work with garbage/empty.
     entry = {"seq": seq, "ts": _journal_ts(), "file": file, "snap": snap, "len": len(new_bytes)}
+    if grad is not None:
+        entry["grad"] = int(grad)                     # Stage 8 graduation rider
     with open(log_path, "a") as f:                    # RAW append -- O(1), NOT _write_atomic
         f.write(json.dumps(entry) + "\n")
     total += len(new_bytes)
     _journal_write_cursor(cur_path, seq, total)       # cursor advances (atomic)
+    # -- graduation flip rides this exact durable step (Stage 8): the manifest's
+    #    `graduated` follows the appended entry's grad. Guarded -- a manifest hiccup
+    #    must not undo the append that just succeeded (the entry is already durable).
+    if grad is not None:
+        try:
+            _manifest_set_graduated(cart_dir, int(grad))
+        except Exception as exc:  # noqa: BLE001
+            print("Moybyte graduation flag write failed:", exc)
     # -- rotation: keep within the per-project cap (drops oldest, between frames).
     if len(entries) + 1 > JOURNAL_MAX_ENTRIES or total > JOURNAL_MAX_BYTES:
         journal_compact(cart_dir)
@@ -704,6 +783,7 @@ def journal_undo(cart_dir):
     _write_atomic(cart_dir + "/" + file, data)
     new_cursor = entries[idx - 1]["seq"] if idx > 0 else 0
     _journal_write_cursor(cur_path, new_cursor, _journal_bytes(cur_path))
+    _journal_apply_grad(cart_dir, target)  # Stage 8: un-graduate past a graduating commit
     return file
 
 
@@ -727,6 +807,7 @@ def journal_redo(cart_dir):
         return None                        # snapshot missing/torn -> REFUSE, live file intact
     _write_atomic(cart_dir + "/" + nxt["file"], data)
     _journal_write_cursor(cur_path, nxt["seq"], _journal_bytes(cur_path))
+    _journal_apply_grad(cart_dir, nxt)     # Stage 8: re-graduate on redo past the commit
     return nxt["file"]
 
 

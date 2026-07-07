@@ -91,3 +91,68 @@ def test_corrupt_program_never_graduates():
     # a transient compile error must never lock a kid out of blocks)
     bad = {"scripts": [{"t": "not_a_real_block"}]}
     assert blocks.source_roundtrips(bad, "anything at all") is True
+
+
+# ----------------------------------------------------------------------------
+# Layer 2: the stored graduated fact + journal rider (moy_carts.py)
+# ----------------------------------------------------------------------------
+
+def test_load_reads_graduated_flag(tmp_path):
+    root = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(root)
+    cart = moy_carts.create("Grad", root, src="def _draw():\n    cls(1)\n")
+    assert cart["graduated"] is False           # default: not graduated
+    # flip it in the manifest and reload
+    assert moy_carts.set_graduated(cart, True) is True
+    assert cart["graduated"] is True            # the cart dict is synced in place
+    reloaded = moy_carts.load(cart["path"])
+    assert reloaded["graduated"] is True
+    # the other manifest fields survive the flag write
+    assert reloaded["title"] == "Grad"
+    assert reloaded["src"] == "def _draw():\n    cls(1)\n"
+
+
+def test_set_graduated_idempotent_and_reversible(tmp_path):
+    root = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(root)
+    cart = moy_carts.create("Grad2", root, src="def _draw():\n    cls(1)\n")
+    assert moy_carts.set_graduated(cart, True) is True
+    assert moy_carts.set_graduated(cart, True) is False    # idempotent: no rewrite
+    assert moy_carts.load(cart["path"])["graduated"] is True
+    assert moy_carts.set_graduated(cart, False) is True    # the journal back-door
+    assert moy_carts.load(cart["path"])["graduated"] is False
+
+
+def test_journal_grad_rider_flips_manifest_on_append_and_walk(tmp_path):
+    # A main.py journal entry carries a `grad` rider; the append flips the manifest,
+    # and undo/redo re-apply it so graduated rides the same one-way door as the source.
+    root = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(root)
+    cart = moy_carts.create("J", root, src="v1\n")
+    path = cart["path"]
+    moy_carts.journal_append(path, "main.py", "v1\n", grad=0)   # baseline, grad=0
+    assert moy_carts.load(path)["graduated"] is False
+    moy_carts.journal_append(path, "main.py", "v2\n", grad=1)   # graduating, grad=1
+    assert moy_carts.load(path)["graduated"] is True            # the append flipped it
+    # undo: source back to v1 AND graduated back to false
+    assert moy_carts.journal_undo(path) == "main.py"
+    assert (Path(path) / "main.py").read_text() == "v1\n"
+    assert moy_carts.load(path)["graduated"] is False
+    # redo: source to v2 AND graduated back to true
+    assert moy_carts.journal_redo(path) == "main.py"
+    assert (Path(path) / "main.py").read_text() == "v2\n"
+    assert moy_carts.load(path)["graduated"] is True
+
+
+def test_journal_entry_without_grad_leaves_flag_untouched(tmp_path):
+    # a plain (non-main.py / pre-Stage-8) entry has no grad rider -> undo/redo never
+    # guess at the graduated flag (they leave whatever the manifest holds).
+    root = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(root)
+    cart = moy_carts.create("K", root, src="a\n")
+    path = cart["path"]
+    moy_carts.set_graduated(cart, True)
+    moy_carts.journal_append(path, "main.py", "a\n")            # no grad rider
+    moy_carts.journal_append(path, "main.py", "b\n")            # no grad rider
+    assert moy_carts.journal_undo(path) == "main.py"
+    assert moy_carts.load(path)["graduated"] is True            # untouched
