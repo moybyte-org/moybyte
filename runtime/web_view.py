@@ -1351,6 +1351,63 @@ class ServedState:
         self._served_gen = self.recorder.atlas_gen
 
 
+class SurfaceDelta:
+    """Per-client surface DELTA (#76): only re-send a WM surface whose command stream
+    actually changed since the last push to THIS client. The browser keeps a per-id
+    surface cache (the page's SURF) and replays a `{"same": 1}` entry from it, so an
+    unchanged surface costs ~30 wire bytes instead of its whole command list -- on the
+    launcher that stops the static grid + bar re-transmitting at wallpaper rate (the
+    #76 bandwidth ceiling), while a play frame (whose cart surface changes every frame)
+    degrades gracefully to the full stream.
+
+    One instance per CLIENT CONNECTION (the cache mirrors what that browser holds):
+    reset() on a fresh connection and whenever the serve-side ship-once state resets
+    (reset_served -> the browser's caches are assumed gone). The "_defs" surface is
+    never cached -- it is incremental by construction (only not-yet-shipped defsprs).
+
+    The change test is a deep == over the sliced command lists: C-driven elementwise
+    compare, and an actually-changed surface (a playing cart) usually differs in the
+    first few commands, so the compare cost stays negligible on-device."""
+
+    def __init__(self):
+        self._last = {}
+        self._gen = None
+
+    def reset(self):
+        """A fresh client (or a serve-state reset): forget everything -- the next
+        encode() ships every surface in full."""
+        self._last = {}
+        self._gen = None
+
+    def encode(self, surface_dicts, gen=None):
+        """The wire form of `surface_dicts` ([{"id","domain","cmds"}, ...], the
+        served_surfaces output): unchanged surfaces become {"id","domain","same":1},
+        changed/new ones ship their full cmds (and update the cache). Order is
+        preserved -- the browser composites the entries in the order sent.
+
+        `gen` is the atlas generation shipped in the same payload: the page wipes its
+        SURF cache when f.gen changes (with ATL/LAY), so the delta forgets in exact
+        lock-step -- this also covers ServedState's INTERNAL gen auto-reset, which
+        never goes through reset_served()."""
+        if gen is not None and gen != self._gen:
+            self._gen = gen
+            self._last = {}
+        out = []
+        last = self._last
+        for s in surface_dicts:
+            sid = s["id"]
+            if sid == "_defs":
+                out.append(s)              # ship-once defs: always fresh, never cached
+                continue
+            cmds = s["cmds"]
+            if last.get(sid) == cmds:
+                out.append({"id": sid, "domain": s["domain"], "same": 1})
+            else:
+                last[sid] = cmds
+                out.append(s)
+        return out
+
+
 # ---------------------------------------------------------------------------
 # Reference replayer (the Python twin of the browser JS): execute a command list onto a real
 # rasterizing runtime.canvas.Canvas. Used by the tests to prove the stream reproduces the
@@ -1360,7 +1417,7 @@ class ServedState:
 # ---------------------------------------------------------------------------
 
 
-def replay_to_canvas(commands, canvas, layers=None, assets=None):
+def replay_to_canvas(commands, canvas, layers=None, assets=None, atlas=None):
     """Replay `commands` onto `canvas` (a runtime.canvas.Canvas of the same size).
 
     `layers` is the off-screen layer cache (id -> rasterized Canvas), the twin of the
@@ -1371,7 +1428,10 @@ def replay_to_canvas(commands, canvas, layers=None, assets=None):
 
     if layers is None:
         layers = {}
-    atlas = {}                                     # index -> Image (browser's ATL)
+    if atlas is None:
+        atlas = {}                                 # index -> Image (browser's ATL); pass a
+                                                   # dict to persist it across frames (#76:
+                                                   # ship-once defsprs span delta frames)
     sheet_pix = sheet_cols = sheet_tile = sheet_w = None
     tm = None
     imgs = None                                    # name -> {"w","h","b64"} (browser's IMG)
@@ -1518,3 +1578,25 @@ def replay_surfaces_to_canvas(surfaces, canvas, layers=None, assets=None):
     for s in (surfaces or []):
         flat.extend(s["cmds"] if isinstance(s, dict) else s[2])
     return replay_to_canvas(flat, canvas, layers=layers, assets=assets)
+
+
+def replay_delta_surfaces_to_canvas(wire, cache, canvas, layers=None, assets=None,
+                                    atlas=None):
+    """The Python twin of the browser's SURF cache (#76): replay a SurfaceDelta wire
+    frame ([{"id","domain","cmds"} | {"id","domain","same":1}, ...]) onto `canvas`,
+    pulling a `same` entry's commands from `cache` (a dict persisted across frames --
+    the browser's SURF) and updating it from full entries ("_defs" is never cached,
+    matching the page). Pass persistent `layers`/`atlas` dicts too -- ship-once
+    defsprs/deflayers arrive once and must survive across delta frames, exactly as
+    the browser's global ATL/LAY do. Used by the tests to prove a delta-encoded
+    frame composites pixel-identically to the full per-surface frame."""
+    flat = []
+    for s in (wire or []):
+        if s.get("same"):
+            flat.extend(cache.get(s["id"], []))
+            continue
+        cmds = s.get("cmds") or []
+        if s["id"] != "_defs":
+            cache[s["id"]] = cmds
+        flat.extend(cmds)
+    return replay_to_canvas(flat, canvas, layers=layers, assets=assets, atlas=atlas)
