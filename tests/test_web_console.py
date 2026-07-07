@@ -884,19 +884,29 @@ def test_ws_roundtrip_pushes_frames_and_applies_input(server):
     c = _WSClient(host, port)
     try:
         # A frame PUSHES down; it must replay to a non-blank 320x240 screen (the JS twin's path).
+        # #76: in surfaces mode the flat cmds are DROPPED from the wire (the page composites
+        # f.surfaces and ignores f.cmds; double-shipping would defeat the bandwidth win) and
+        # the surfaces are DELTA-encoded per connection -- the FIRST frame to a fresh client
+        # ships every surface in full, later frames stub unchanged ones as {"same": 1}.
         f = json.loads(c.recv_text().decode("utf-8"))
-        assert isinstance(f["cmds"], list) and f["cmds"], "the pushed frame must carry commands"
         assert f["cart"] is None                       # launcher home: no open cart yet
-        cv = Canvas(WIDTH, HEIGHT)
-        replay_to_canvas(f["cmds"], cv)
-        assert len(set(cv.buf)) > 1, "the pushed frame must replay to a non-blank screen"
-        # Stage 9: the pushed frame ALSO carries per-WM-surface streams the browser composites
-        # (a second WM backend); over the real socket they reproduce the SAME pixels as the flat
-        # cmds -- the flat frame stays as a graceful fallback for a pre-surface client.
         assert "surfaces" in f and len(f["surfaces"]) >= 2, "the wire carries per-surface streams"
-        scv = Canvas(WIDTH, HEIGHT)
-        web_view.replay_surfaces_to_canvas(f["surfaces"], scv)
-        assert bytes(scv.buf) == bytes(cv.buf), "the surface composite matches the flat frame over the wire"
+        assert f["cmds"] == [], "surfaces mode drops the flat cmds from the wire (#76)"
+        assert not any(s.get("same") for s in f["surfaces"]), \
+            "the first frame to a fresh client ships full surfaces"
+        surf_cache = {}
+        cv = Canvas(WIDTH, HEIGHT)
+        web_view.replay_delta_surfaces_to_canvas(f["surfaces"], surf_cache, cv)
+        assert len(set(cv.buf)) > 1, "the pushed frame must replay to a non-blank screen"
+        # A follow-up frame on the same (static-ish launcher) screen deltas: at least one
+        # surface arrives as a {"same":1} stub, and the cached replay still composites clean.
+        f2 = json.loads(c.recv_text().decode("utf-8"))
+        if "surfaces" in f2:
+            assert any(s.get("same") for s in f2["surfaces"]), \
+                "an unchanged surface must ship as a same-stub on the next frame (#76)"
+            cv2 = Canvas(WIDTH, HEIGHT)
+            web_view.replay_delta_surfaces_to_canvas(f2["surfaces"], surf_cache, cv2)
+            assert len(set(cv2.buf)) > 1, "a delta frame must still composite a full screen"
         # Input pushes UP the same socket: tap tile 0. Send down, let the server drain it + step
         # a frame or two with the tap held, then release -- mirrors the down -> frame -> up order.
         c.send_events([{"type": "down", "x": 160, "y": 52}])

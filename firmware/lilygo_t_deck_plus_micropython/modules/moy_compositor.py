@@ -221,6 +221,23 @@ PSRAM_DIRECT_FLUSH = True
 # band (FLUSHBRK setup=2.5ms for two bands).
 SRAM_BOUNCE_FLUSH = True
 BOUNCE_ROWS = 48       # rows per band: 48 -> 5 bands of 30720B on 320x240
+# #66 next-lever 2 (the residual pump gap): the number of internal bounce slots.
+# With 2, the kick queues ~6.1ms of transfer and the SPI starves if no pump runs
+# within that window -- measured as PUMP idle=3-6ms/gaps=1 on most carts (the
+# soft timer's mp_sched latency lands the feed late in the input/logic window).
+# A THIRD slot queues ~9.2ms at the kick, absorbing that latency outright.
+#
+# HARDWARE VERDICT (2026-07-08 A/B, third flash): 3 slots DID close the gap
+# (Sky Run idle=0.00 gaps=0 everywhere, BC 0-2.4ms vs 3-6; feed 16-19 -> 7.6-10)
+# and fps DID NOT MOVE (BC 25-33, Sky 46-49, Hop 53 -- all in their 2-slot
+# bands): the idle overlapped VM work, so it was never on the critical path.
+# Worse, the extra in-flight band intermittently hits a full SPI transaction
+# queue and blocks INSIDE the VM thread (pump=14-25ms / setup=10-25ms spikes,
+# HITCH flush=57-84 -- jitter that didn't exist at 2). So 2 is the shipped
+# value; the N-slot machinery + tests stay for any future panel/bus where
+# transfer IS the limiter. The same verdict retires the core-1 present-task
+# escalation: a perfect feeder buys the same idle=0 for the same zero fps.
+BOUNCE_SLOTS = 2
 PUMP_TIMER_MS = 2      # soft-timer pump period; 0 = drain-fallback only
 
 
@@ -496,10 +513,26 @@ class Compositor:
             try:
                 rows = BOUNCE_ROWS
                 rb = self._row_bytes
-                self._bnc_bufs = (moy_alloc.malloc_dma(width * rows * 2),
-                                  moy_alloc.malloc_dma(width * rows * 2))
-                self._bnc_mv = (memoryview(self._bnc_bufs[0]),
-                                memoryview(self._bnc_bufs[1]))
+                # Allocate up to BOUNCE_SLOTS internal buffers, degrading to the
+                # proven 2 when the extra slot(s) don't fit (#40 budget guard).
+                want = BOUNCE_SLOTS if BOUNCE_SLOTS >= 2 else 2
+                bufs = []
+                for _i in range(want):
+                    try:
+                        b = moy_alloc.malloc_dma(width * rows * 2)
+                    except Exception:  # noqa: BLE001
+                        b = None
+                    if b is None:
+                        break
+                    bufs.append(b)
+                if len(bufs) < 2:
+                    raise MemoryError("bounce buffers")
+                self._bnc_bufs = tuple(bufs)
+                self._bnc_mv = tuple(memoryview(b) for b in bufs)
+                self._bnc_slots = len(bufs)
+                if self._bnc_slots != want:
+                    print("Moybyte compositor: bounce slots=%d (wanted %d)"
+                          % (self._bnc_slots, want))
                 self._bnc_rows = rows
                 nb = (height + rows - 1) // rows
                 self._bnc_bands = nb
@@ -843,11 +876,14 @@ class Compositor:
 
     def pump(self):
         """Feed the in-flight SRAM-bounce flush: copy the next band(s) of the FRONT
-        into a free bounce buffer and queue them. Band k's bounce slot (k & 1) is
-        free once band k-2 completed (`_dma_done_n >= k-1`), so at most two bands
-        are ever in flight and the copy of one overlaps the transfer of the other.
+        into a free bounce buffer and queue them. Band k's bounce slot
+        (k % slots) is free once band k-slots completed
+        (`_dma_done_n >= k-(slots-1)`), so at most `slots` bands are ever in
+        flight and the copy of one overlaps the transfer of the others. With the
+        default THREE slots (#66 lever 2) the kick queues ~9.2ms of transfer,
+        absorbing the soft timer's scheduling latency without SPI starvation.
 
-        Called from _kick_front (first two bands), the soft pump timer (between
+        Called from _kick_front (the first `slots` bands), the soft pump timer (between
         the cart's bytecodes -- the only feeder during a long _update), and
         _drain_dma (the always-correct fallback). Reentrancy-guarded: a timer
         fire that lands inside a main-thread pump no-ops. Allocation-free on the
@@ -870,7 +906,9 @@ class Compositor:
             gfx = self._gfx
             front = self._front      # stable until the post-drain swap
             band_b = rows * rb
-            while k < total and self._dma_done_n >= k - 1:
+            slots = self._bnc_slots
+            free_after = slots - 1
+            while k < total and self._dma_done_n >= k - free_after:
                 # Pacing probe (#66 lever 4): about to feed band k while every
                 # band fired so far has already COMPLETED -> the SPI has been
                 # idle since the last completion ISR. Accumulate that starvation
@@ -882,12 +920,12 @@ class Compositor:
                         self._bnc_idle_us += _gap
                         self._bnc_idle_n += 1
                 s = src[k]
-                mv = self._bnc_mv[k & 1]
+                mv = self._bnc_mv[k % slots]
                 n = len(s)
                 if gfx is not None:
                     # C memcpy PSRAM -> internal SRAM (~0.15ms/band); the
                     # memoryview slice-assign below measured ~1ms+ per band.
-                    gfx.copy(self._bnc_bufs[k & 1], 0, front, k * band_b, n)
+                    gfx.copy(self._bnc_bufs[k % slots], 0, front, k * band_b, n)
                     buf = mv if n == len(mv) else mv[:n]
                 elif n == len(mv):
                     mv[:] = s

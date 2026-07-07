@@ -829,3 +829,100 @@ def test_moy_mascot_baked_into_default_icon_sheet():
     img = sheet.tile_image(console._ICON["moy"])
     assert img is not None
     assert any(p > 0 for p in img.pix)              # mascot has painted pixels
+
+
+def test_frame_cap_locks_games_to_a_steady_30(tmp_path, monkeypatch):
+    # Frame pacing (#63): with the governor ON, a running GAME locks to 30fps (the
+    # SNES consistency rule) unless its manifest declares "fps": 60; tools/apps and
+    # every console screen keep 60. The knob currently SHIPS OFF (uncapped -- the
+    # owner wants real per-cart numbers while the engine work settles), so the test
+    # pins BOTH: the default-off behaviour and the ON policy.
+    from runtime import host_app, console as console_mod
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                           if it.get("path") and it.get("type") == "game"
+                           and not it.get("fps"))
+    ws.open()
+    assert ws.screen == "desktop" and ws.cart_error is None
+    assert console_mod.FPS_GOVERNOR is False
+    assert ws.frame_cap_fps() == 60                 # knob OFF: uncapped everywhere
+    monkeypatch.setattr(console_mod, "FPS_GOVERNOR", True)
+    assert ws.frame_cap_fps() == 30                 # a plain game: locked 30
+    ws.cart["fps"] = 60
+    assert ws.frame_cap_fps() == 60                 # manifest fps: 60 (Hop Quest/Sky Run)
+    ws.cart["fps"] = "junk"
+    assert ws.frame_cap_fps() == 30                 # malformed -> the safe default
+    ws.cart["fps"] = 0
+    ws.cart["type"] = "tool"
+    assert ws.frame_cap_fps() == 60                 # tools keep the responsive cap
+    ws.cart["type"] = "game"
+    ws.player.cart_error = "boom"
+    assert ws.frame_cap_fps() == 60                 # the crash panel is a console screen
+    ws.player.cart_error = None
+    ws.go_home()
+    assert ws.frame_cap_fps() == 60
+
+
+def test_nativize_maps_crash_lines_back_to_kid_source():
+    # #67 spike: the auto-native rewrite inserts one decorator line above every
+    # top-level def; a crash line reported against the REWRITTEN source must map
+    # back to the kid's original line exactly (#24's drop-on-the-bad-line).
+    from runtime import player as player_mod
+    src = "x = 1\ndef a():\n    boom\ndef b():\n    boom\n"
+    nsrc, ins = player_mod._nativize(src)
+    lines = nsrc.split("\n")
+    assert lines[1] == "@micropython.native" and lines[2] == "def a():"
+    assert lines[4] == "@micropython.native" and lines[5] == "def b():"
+    assert ins == [2, 5]
+
+    class _P:
+        _native_ins = ins
+        _map_crash_line = player_mod.Player._map_crash_line
+    p = _P()
+    # original line 3 ("boom" in a) is new line 4 -> maps back to 3
+    assert p._map_crash_line(4) == 3
+    # original line 5 ("boom" in b) is new line 7 -> maps back to 5
+    assert p._map_crash_line(7) == 5
+    assert p._map_crash_line(None) is None
+    p._native_ins = None                     # pristine bytecode path: identity
+    assert p._map_crash_line(7) == 7
+    # On host CPython the auto-native flag must be OFF (no micropython module).
+    assert player_mod.NATIVE_CARTS is False
+
+
+def test_live_set_diet_slims_rehydrates_and_reslims(tmp_path):
+    # #66 live-set diet: after boot the scanned carts hold only metadata + the
+    # cached icon (the heavy payloads are ~0.2ms/KB of GC mark cost EVERY collect);
+    # opening rehydrates from the store in place, switching re-slims the previous.
+    from runtime import host_app
+    from runtime.console import _HEAVY_CART_KEYS
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    sd = [c for c in ws._all_carts if c.get("path")]
+    assert sd, "seeded carts expected"
+    for c in sd:
+        assert c.get("lazy") is True
+        for k in _HEAVY_CART_KEYS:
+            assert k not in c, "%s survived slimming on %s" % (k, c["title"])
+    # icons were baked BEFORE slimming, so the grid never needs the sheet back
+    assert any(ws._icon_cache.values()), "icon cache should be populated"
+    # RUN rehydrates in place and the cart actually plays
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                           if it.get("path"))
+    ws.open()
+    a = ws.cart
+    assert a.get("lazy") is False and "src" in a
+    assert ws.cart_error is None
+    ws.player.tick(1 / 30)
+    assert ws.cart_error is None
+    # switching to a different cart re-slims the previous one
+    other = next(c for c in ws._all_carts if c.get("path") and c is not a)
+    ws.open_in_editor(other)
+    assert other.get("lazy") is False and "src" in other
+    assert a.get("lazy") is True and "src" not in a, "previous cart must re-slim"
+    # a slim wallpaper cart compiles (transient rehydrate) and re-slims after
+    wp = [c for c in ws._all_carts if c.get("type") == "wallpaper"]
+    if wp:
+        slug = wp[0]["path"].rsplit("/", 1)[-1][:-len(".moy")]
+        ws.select_wallpaper(slug, persist=False)
+        assert ws.wallpaper._wp_draw is not None, "wallpaper must compile from a slim cart"
+        assert wp[0] is ws._fat_cart or wp[0].get("lazy") is True

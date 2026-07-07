@@ -14,7 +14,7 @@ its synchronous fallback remain orchestration in run_desktop.
 
 Device-only module (authored in modules/, not staged from runtime/).
 """
-from device_util import _ticks_us, _ticks_diff, _diag_note
+from device_util import _ticks_us, _ticks_ms, _ticks_diff, _diag_note
 
 
 class TrackBall:
@@ -103,6 +103,12 @@ class Touch:
         self.stat_max_us = 0
         self.stat_over5 = 0
         self.stat_over20 = 0
+        # #74: the FIRST catastrophic stall's context, captured once -- (boot-relative
+        # ms, the transaction phase that ate the time: status/point/clear, the status
+        # byte if the read got that far, how many reads preceded it). The earlier
+        # sessions showed one 1.3-2.5s stall early then a plateau; this says WHERE
+        # inside read_raw it lives (wake? status clock-stretch? the clear write?).
+        self.stat_first_big = None
         try:
             from machine import I2C, Pin
 
@@ -125,17 +131,24 @@ class Touch:
         """One GT911 read. Returns (rx, ry) when a finger is down, False when the
         controller reports a fresh sample with no touch (finger up), or None when
         no new sample is ready (state unknown -- keep whatever we had). Clears the
-        status register after a ready read so the next sample is produced."""
+        status register after a ready read so the next sample is produced.
+
+        #74: each of the up-to-3 transactions is timed separately, so a stall is
+        attributed to the phase that ate it (status read / point read / clear
+        write), not just the whole span -- the earlier sessions couldn't say WHERE
+        the 1.3-2.5s stall lived."""
         if not self.available:
             return None
-        t0 = _ticks_us()                # #69: time the whole I2C span (1-3 transactions)
+        t0 = _ticks_us()
+        status = None
         try:
             status = self._i2c.readfrom_mem(self.addr, self.REG_STATUS, 1, addrsize=16)[0]
         except Exception:
-            self._stat(t0)
+            self._stat(t0, _ticks_us(), 0, 0, "status", status)
             return None
+        t1 = _ticks_us()
         if not (status & 0x80):
-            self._stat(t0)
+            self._stat(t0, t1, 0, 0, "status", status)
             return None  # buffer not ready yet -- do NOT clear, do NOT change state
         raw = False      # ready sample, default "finger up"
         if (status & 0x0F) >= 1:
@@ -146,16 +159,29 @@ class Touch:
                 raw = (d[2] | (d[3] << 8), d[0] | (d[1] << 8))
             except Exception:
                 raw = None
+        t2 = _ticks_us()
         try:
             self._i2c.writeto_mem(self.addr, self.REG_STATUS, b"\x00", addrsize=16)
         except Exception:
             pass
-        self._stat(t0)
+        t3 = _ticks_us()
+        sp = _ticks_diff(t1, t0)
+        pp = _ticks_diff(t2, t1)
+        cp = _ticks_diff(t3, t2)
+        phase = "status"
+        worst = sp
+        if pp > worst:
+            phase = "point"
+            worst = pp
+        if cp > worst:
+            phase = "clear"
+        self._stat(t0, t3, pp, cp, phase, status)
         return raw
 
-    def _stat(self, t0):
-        # #69 latency bookkeeping for one read_raw I2C span.
-        el = _ticks_diff(_ticks_us(), t0)
+    def _stat(self, t0, t_end=None, pp=0, cp=0, phase="status", status=None):
+        # #69 latency bookkeeping for one read_raw I2C span; #74 adds the phase
+        # attribution + the one-shot first-big-stall context capture.
+        el = _ticks_diff(t_end if t_end is not None else _ticks_us(), t0)
         self.stat_n += 1
         if el > self.stat_max_us:
             self.stat_max_us = el
@@ -163,6 +189,12 @@ class Touch:
             self.stat_over5 += 1
             if el >= 20000:
                 self.stat_over20 += 1
+        if el >= 200000 and self.stat_first_big is None:
+            # The first catastrophic stall (>=200ms): remember WHEN (boot ms), WHICH
+            # transaction ate it, the status byte (None = the status read itself
+            # failed/stalled), and how many reads preceded it -- the #74 fingerprint
+            # that says boot-wake vs steady-state and which register access to blame.
+            self.stat_first_big = (_ticks_ms(), phase, status, self.stat_n)
 
     def debug_read(self):
         """Calibration only: return (status, 8 raw point bytes) and clear, or None

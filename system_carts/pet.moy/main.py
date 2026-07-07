@@ -29,6 +29,7 @@ def _pet_tile():
 
 
 def _init():
+    background(col(cfg("bg", "dark_purple")))  # re-declared when a config card re-runs _init
     global food, joy, t, idle, pet, bob, blink, hearts
     food = 80.0
     joy = 80.0
@@ -120,7 +121,6 @@ def _smiley(cx, cy, mood):
 
 
 def _draw():
-    cls(col(cfg("bg", "dark_purple")))
     mood = min(food, joy)
     # ground
     rect(0, H - 26, W, 26, col("dark_green"))

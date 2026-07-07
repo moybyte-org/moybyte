@@ -159,6 +159,7 @@ def test_device_web_view_module_present_and_protocol_shaped():
     # frozen), and moy_webserver is a thin TRANSPORT that imports it. We grep the source
     # (firmware tests don't execute MicroPython); executable behaviour is in test_moy_webserver.py.
     wv = (Path("runtime") / "web_view.py").read_text(encoding="utf-8")
+    wv_ws = (Path("runtime") / "web_view_ws.py").read_text(encoding="utf-8")
     web = (ROOT / "modules" / "moy_webserver.py").read_text(encoding="utf-8")
 
     # -- the SHARED core (web_view) --
@@ -197,12 +198,14 @@ def test_device_web_view_module_present_and_protocol_shaped():
     assert '"/assets"' in web
     assert '"/frame"' not in web and '"/input"' not in web
     # WEBSOCKET TRANSPORT (#41 swap): the persistent live channel is the ONLY transport. The RFC
-    # 6455 handshake + byte framing now live in the SHARED web_view (canonical home); moy_webserver
-    # RE-EXPORTS them for its _WSConn + upgrade path (relocation + re-export, no local copy).
-    assert "def ws_accept_key" in wv and "def ws_handshake_response" in wv
-    assert "def ws_encode" in wv and "def ws_decode" in wv
-    assert "258EAFA5-E914-47DA-95CA-C5AB0DC85B11" in wv    # the RFC 6455 magic GUID (web_view)
-    assert "Switching Protocols" in wv                     # the 101 upgrade response (web_view)
+    # 6455 handshake + byte framing live in the SHARED web_view_ws leaf (extracted from web_view;
+    # web_view re-imports + re-exports them). moy_webserver RE-EXPORTS them onto its _WSConn +
+    # upgrade path (relocation + re-export, no local copy).
+    assert "def ws_accept_key" in wv_ws and "def ws_handshake_response" in wv_ws
+    assert "def ws_encode" in wv_ws and "def ws_decode" in wv_ws
+    assert "258EAFA5-E914-47DA-95CA-C5AB0DC85B11" in wv_ws  # the RFC 6455 magic GUID (web_view_ws)
+    assert "Switching Protocols" in wv_ws                   # the 101 upgrade response (web_view_ws)
+    assert "from web_view_ws import" in wv                  # web_view re-imports the ws primitives
     assert "ws_encode = _wv.ws_encode" in web and "ws_decode = _wv.ws_decode" in web  # re-exports
     assert "class _WSConn" in web               # the persistent, non-blocking WS connection stays
     assert "/ws" in web                         # the WebSocket route the page connects to
@@ -950,30 +953,37 @@ def test_moy_compositor_sram_bounce_flush_protocol():
         for k in range(comp._bnc_bands):
             a[k * band_bytes:(k + 1) * band_bytes] = bytes([k + 1]) * band_bytes
 
-        # FRAME 1 kick: exactly TWO bands queue (both bounce slots), then return.
+        # FRAME 1 kick: exactly `slots` bands queue (every bounce slot -- 3 by
+        # default since #66 lever 2, ~9.2ms of transfer absorbing pump latency),
+        # then return.
+        slots = comp._bnc_slots
+        # Shipped default is 2 (the 2026-07-08 hardware A/B: 3 closed the SPI
+        # idle gap but moved zero fps -- the idle overlapped VM work -- and
+        # added queue-full blocking jitter); the protocol below stays N-slot.
+        assert slots == module.BOUNCE_SLOTS == 2
         comp.flush()
         assert comp._front is a
         assert comp._dma_pending is None
-        assert len(bus.colors) == 2
-        assert comp._bnc_next == 2 and comp._bnc_total == comp._bnc_bands
-        assert comp._dma_target == 2 and comp._dma_done_n == 0
-        (cmd0, pay0, y00, y01), (cmd1, pay1, y10, y11) = bus.colors
-        assert cmd0 == module.RAMWR and cmd1 == -1
-        assert (y00, y01) == (0, module.BOUNCE_ROWS - 1)
-        assert (y10, y11) == (module.BOUNCE_ROWS, 2 * module.BOUNCE_ROWS - 1)
-        assert pay0 == bytes([1]) * band_bytes and pay1 == bytes([2]) * band_bytes
+        assert len(bus.colors) == slots
+        assert comp._bnc_next == slots and comp._bnc_total == comp._bnc_bands
+        assert comp._dma_target == slots and comp._dma_done_n == 0
+        for k, (cmd, pay, y0, y1) in enumerate(bus.colors):
+            assert cmd == (module.RAMWR if k == 0 else -1)
+            assert (y0, y1) == (k * module.BOUNCE_ROWS,
+                                (k + 1) * module.BOUNCE_ROWS - 1)
+            assert pay == bytes([k + 1]) * band_bytes
 
-        # Slot gating: no completions -> pump() must NOT queue band 2 (its bounce
-        # slot still carries in-flight band 0).
+        # Slot gating: no completions -> pump() must NOT queue band `slots` (its
+        # bounce slot still carries in-flight band 0).
         comp.pump()
-        assert len(bus.colors) == 2
-        # One completion frees slot 0 -> pump queues exactly band 2 (and only it).
+        assert len(bus.colors) == slots
+        # One completion frees slot 0 -> pump queues exactly the next band.
         bus.complete(1)
         comp.pump()
-        assert len(bus.colors) == 3
-        assert bus.colors[2][0] == -1
-        assert bus.colors[2][2] == 2 * module.BOUNCE_ROWS
-        assert bus.colors[2][1] == bytes([3]) * band_bytes
+        assert len(bus.colors) == slots + 1
+        assert bus.colors[slots][0] == -1
+        assert bus.colors[slots][2] == slots * module.BOUNCE_ROWS
+        assert bus.colors[slots][1] == bytes([slots + 1]) * band_bytes
 
         # Drain fallback: the next flush() must feed the REMAINING bands itself
         # (host has no pump timer). Completing-on-queue keeps the drain loop live.
@@ -982,11 +992,11 @@ def test_moy_compositor_sram_bounce_flush_protocol():
             real_tx(*args)
             bus.complete(1)
         bus.tx_color = tx_and_complete
-        bus.complete(2)          # bands 1..2 finish; 0 already did
+        bus.complete(slots)      # bands 1..slots finish; 0 already did
         comp.flush()             # frame 2: drain feeds bands 3..9, swap, kick B
         n = comp._bnc_bands
-        # all 10 of A's bands went out, in order, payload-faithful...
-        assert len(bus.colors) >= n + 2
+        # all of A's bands went out, in order, payload-faithful...
+        assert len(bus.colors) >= n + slots
         for k in range(n):
             cmd, pay, y0, _y1 = bus.colors[k]
             assert cmd == (module.RAMWR if k == 0 else -1)
@@ -1080,22 +1090,24 @@ def test_moy_compositor_bounce_pacing_stats():
         comp._pump_tdf = lambda a, b: a - b
 
         n = comp._bnc_bands
-        comp.flush()                     # kick at t=0: bands 0+1 queue immediately
+        slots = comp._bnc_slots          # 3 since #66 lever 2
+        comp.flush()                     # kick at t=0: every slot's band queues
+        assert comp._bnc_next == slots
         assert comp._bnc_idle_n == 0     # kick bands never count as starvation
         clock[0] = 3000
-        bus.complete(2)                  # both in-flight bands done at t=3000 (ISR stamps)
+        bus.complete(slots)              # all in-flight bands done at t=3000 (ISR stamps)
         assert comp._dma_done_us == 3000
         clock[0] = 5000
-        comp.pump()                      # band 2 fed 2000us AFTER the bus went idle
+        comp.pump()                      # next band fed 2000us AFTER the bus went idle
         assert comp._bnc_idle_n == 1
         assert comp._bnc_idle_us == 2000
-        # band 3's slot was free too, so the same pump() fed it with the bus busy
-        # (band 2 in flight) -> no extra idle gap.
-        assert comp._bnc_next == 4
+        # the following bands' slots were free too, so the same pump() fed them
+        # with the bus busy (previous band in flight) -> no extra idle gap.
+        assert comp._bnc_next == min(n, slots + slots)
 
         # Feed the tail promptly: completions right before the pump -> no new gaps.
-        bus.complete(1)                  # band 2 done at t=5000
-        comp.pump()                      # feeds band 4 while band 3 in flight
+        bus.complete(1)                  # another band done at t=5000
+        comp.pump()                      # feeds the next while others are in flight
         while comp._bnc_next < n:
             bus.complete(1)
             comp.pump()
@@ -1142,7 +1154,10 @@ def test_kid_mode_gates_diag_frame_eaters():
     assert "diag.ECHO_LIVE = _live" in runtime
     assert "if _live:" in runtime                               # forced GC gated
     assert "_diag_cart_prev and not _cart_now" in runtime       # cart-exit flush
-    assert "if diag is not None and _live and _ticks_diff" in runtime  # timer flush gated
+    # The periodic diag->SD flush needs BOTH gates now (owner call 2026-07-08):
+    # PERF DIAG (_live) AND Settings -> DIAG SD LOG (ws.diag_sd) -- serial-only
+    # measurement has no 20s sdflush stutter.
+    assert 'getattr(ws, "diag_sd", False)' in runtime               # timer flush gated
 
 
 def test_i2c_timeout_knob_engaged():
@@ -1225,10 +1240,13 @@ def test_blit565_opaque_row_fast_lane():
 
 def test_seed_carts_model_the_fast_draw_habits():
     # The seed carts ARE the curriculum (#66): kids copy them, so they must model
-    # the fast idioms the docs teach -- background-as-clear-color (Battle City) and
+    # the fast idioms the docs teach -- a DECLARED background (#63 habit 1: Battle
+    # City names its backdrop once; the engine restores it every frame) and
     # static-scenery-in-a-layer (Hop Quest, like Sky Run).
     battle = (Path("system_carts") / "battle_city.moy" / "main.py").read_text(encoding="utf-8")
-    assert 'cls(col("dark_blue"))' in battle            # the backdrop IS the clear
+    assert 'background(col("dark_blue"))' in battle     # the backdrop is DECLARED
+    assert 'cls(' not in battle.split("def _draw()")[1].split("def ")[0], (
+        "the play frame must not clear -- the engine restores the declared backdrop")
     assert 'rect(0, 0, FIELD, FIELD' not in battle      # no double-paint backdrop
     hop = (Path("system_carts") / "platformer.moy" / "main.py").read_text(encoding="utf-8")
     assert "def _build_layer():" in hop
@@ -1620,10 +1638,16 @@ def test_native_blit_map_wired_for_tilemaps():
     assert "moy_gfx_blit_map" in c
     assert "MP_ROM_QSTR(MP_QSTR_blit_map)" in c          # registered in the module dict
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    assert runtime  # moy_runtime still imports the canvas (the code moved to device_canvas)
     assert "def map(self, tilemap, sheet" in device_canvas     # DeviceCanvas.map
-    assert "self._gfx.blit_map(self._buf" in device_canvas     # native one-call blit
+    assert "self._gfx.blit_map(dst" in device_canvas           # native one-call blit (via _blit_map_into)
+    assert "def _blit_map_into(self" in device_canvas          # #63 Fold 2: shared blit_map helper
     assert "def _sheet_atlas(self, sheet, colorkey):" in device_canvas  # baked RGB565 atlas
     assert "def _map_py(self, tilemap, sheet" in device_canvas  # no-moy_gfx fallback
+    # #63 Fold 2: map() auto-caches the rasterized region (blit565 composite of a hidden
+    # 565 layer) so a camera-only change re-uses it instead of re-walking every cell.
+    assert "self._mapcache" in device_canvas
+    assert "def map_cache_reset(self):" in device_canvas
 
 
 def test_native_vector_primitives_wired():
@@ -1722,7 +1746,7 @@ def test_paint_image_assets_wired_device_and_carts():
 
     # The device make_api takes `images` and exposes the image(name) accessor, decoding
     # a .moyimg into an Image via the deflate (zlib) inflate mirror of the host.
-    assert "pmem=None, wifi=None, images=None):" in runtime
+    assert "pmem=None, wifi=None, images=None, owner=\"cart\"):" in runtime
     assert "def _decode_moyimg(text):" in device_canvas
     assert "deflate.DeflateIO(io.BytesIO(data), deflate.ZLIB).read()" in device_canvas
     assert 'im._paint = True' in runtime                 # tags the bake/ship fast paths
@@ -1844,7 +1868,8 @@ def test_sram_bounce_flush_wired():
     # 1.5ms bands starved the SPI -> -30% fps) and the band copy must be the C
     # memcpy (memoryview slice-assign measured ~1ms+/band = FLUSHBRK setup 2.5ms)
     assert "\nBOUNCE_ROWS = 48" in comp
-    assert "gfx.copy(self._bnc_bufs[k & 1], 0, front, k * band_b, n)" in comp
+    assert "gfx.copy(self._bnc_bufs[k % slots], 0, front, k * band_b, n)" in comp
+    assert "\nBOUNCE_SLOTS = 2" in comp    # #66 lever 2: tried 3, reverted (see A/B)
     gfx_c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
     assert "MP_ROM_QSTR(MP_QSTR_copy),       MP_ROM_PTR(&moy_gfx_copy_obj)" in gfx_c
 
@@ -2066,6 +2091,7 @@ def test_unified_top_bar_wired_into_device_shell():
     editors.py + moy_carts.py, so grep the canonical sources (staged into modules/ at
     build) for the new wiring."""
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    chrome = (Path("runtime") / "chrome.py").read_text(encoding="utf-8")
     bar_layer = (Path("runtime") / "bar_layer.py").read_text(encoding="utf-8")
     editors = EDITORS_SRC.read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
@@ -2081,7 +2107,7 @@ def test_unified_top_bar_wired_into_device_shell():
     # The 16x16 IconSheet + its slot map + the bar's icon-blit helper.
     assert "class IconSheet(SpriteSheet):" in editors
     assert "TILE = 16" in editors
-    assert "_ICON = {" in console
+    assert "_ICON = {" in chrome            # the bar's icon-slot map lives in chrome.py now
     assert "def _icon(self, kind, x, y, cv=None):" in console
     assert "self.icon_sheet" in console
 
@@ -2341,7 +2367,7 @@ def test_device_sprite_storage_wired():
     # (#32) + persistent memory (pmem, #11).
     # make_api now also takes the capability-gated wifi backend LAST (#38).
     assert "def make_api(canvas, input, config, sheet=None, audio=None," in runtime
-    assert "pmem=None, wifi=None, images=None):" in runtime
+    assert "pmem=None, wifi=None, images=None, owner=\"cart\"):" in runtime
     assert "self.sheet = self._build_sheet()" in console                   # shared console
     # The sprite store-write moved to Project.commit_sprites (Stage 1b, project.py --
     # also staged onto the device); ws.save_sprites stays as the tested forward.
@@ -2415,6 +2441,7 @@ def test_music_editor_wired_into_device_shell():
     editor_app = (Path("runtime") / "editor_app.py").read_text(encoding="utf-8")
     layers = (Path("runtime") / "layers.py").read_text(encoding="utf-8")
     music_ui = (Path("runtime") / "music_editor_ui.py").read_text(encoding="utf-8")
+    chrome = (Path("runtime") / "chrome.py").read_text(encoding="utf-8")
     bar_layer = (Path("runtime") / "bar_layer.py").read_text(encoding="utf-8")
     project = (Path("runtime") / "project.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
@@ -2445,7 +2472,7 @@ def test_music_editor_wired_into_device_shell():
     assert "_MUSIC_BTN = (" in bar_layer
     assert "ws._open_music()" in bar_layer         # the bar tool-switch tap (BarLayer, #46)
     assert 'ws._icon("music"' in bar_layer
-    assert '"music": 15' in console                        # IconSheet slot for the icon
+    assert '"music": 15' in chrome                          # IconSheet slot for the icon (chrome.py)
     # SAVE persists to sounds.json through the existing shared store. The store-write
     # moved to Project.commit_sounds (Stage 1b, project.py -- also staged onto the
     # device, like save_map/save_code -- it uses the shared ws.save_status field);
@@ -2630,7 +2657,7 @@ def test_device_wifi_wired():
 
     # make_api takes the gated wifi backend LAST and injects `wifi` only when set.
     assert "def make_api(canvas, input, config, sheet=None, audio=None," in runtime
-    assert "pmem=None, wifi=None, images=None):" in runtime
+    assert "pmem=None, wifi=None, images=None, owner=\"cart\"):" in runtime
     assert 'ns["wifi"] = wifi' in runtime
     # The device WLAN backend (STUB -- needs hardware verification). LAZY: the WLAN
     # stack is brought up on demand (scan/connect), NEVER at boot -- bringing it up at

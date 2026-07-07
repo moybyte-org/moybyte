@@ -40,6 +40,7 @@ def _spawn(s):
 
 
 def _init():
+    background(col("black"))  # the night sky, restored by the engine each frame
     global score, combo, lives, bx, stars, catcher, sparks, flash, shake, over
     score = 0
     combo = 0
@@ -150,7 +151,8 @@ def _draw():
     sx = 0
     if shake > 0.0:
         sx = int(rnd(shake * 2) - shake)
-    cls(col("white") if flash > 0.0 else col("black"))
+    if flash > 0.0:
+        cls(col("white"))     # the catch flash overrides the declared backdrop
     for s in stars:
         circ(int(s[0]) + sx, int(s[1]), 3, col("yellow"))
         pix(int(s[0]) + sx, int(s[1]) - 4, col("white"))   # tiny sparkle tail

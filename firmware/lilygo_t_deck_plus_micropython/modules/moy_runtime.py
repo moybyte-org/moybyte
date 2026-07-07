@@ -55,7 +55,7 @@ from device_canvas import DeviceCanvas, Image, _decode_moyimg, _Layer
 
 
 def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
-             pmem=None, wifi=None, images=None):
+             pmem=None, wifi=None, images=None, owner="cart"):
     import random
 
     _img_cache = {}        # name -> decoded paint Image (see image() below), so a
@@ -242,8 +242,9 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # circ/print/...), then window-copies to the screen each frame via draw_layer.
         # Replaces a per-frame full-background re-render (map() over a scrolling level,
         # ~12-14ms) with a flat memory copy (~7ms) -- the lever for ~60fps scrollers.
-        lc = canvas.new_layer(w, h)
-        lns = make_api(lc, input, config, sheet, audio, tilemap, pmem, wifi, images)
+        lc = canvas.new_layer(w, h, owner=owner)   # #63: lent to this program (leak fix)
+        lns = make_api(lc, input, config, sheet, audio, tilemap, pmem, wifi, images,
+                       owner=owner)
         return _Layer(lc, lns)
 
     def draw_layer(layer, cam_x=0, cam_y=0):
@@ -306,12 +307,39 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         if _gate is not None and callable(_gate):
             _spr_entry = _gate
 
+    # Declared background (#63 fast-by-default -- the "software PPU layer 0", mirrors
+    # host_app.make_api): the cart names its backdrop ONCE (a color or a painted
+    # Image); the engine restores it at the START of every frame via the Player's
+    # ns["_moy_restore_bg"] hook. An Image bakes into a hidden full-screen layer once;
+    # the per-frame restore is one draw_layer window copy -- the full-screen shape the
+    # async GDMA restore predicts, so on-device the backdrop costs ~0 visible ms.
+    _bg = [None]
+
+    def background(x=None):
+        if x is None:
+            _bg[0] = None
+        elif isinstance(x, Image):
+            lay = make_layer(canvas.w, canvas.h)
+            lay.spr(x, 0, 0)               # bake once (paint images take blit_indices)
+            _bg[0] = ("l", lay)
+        else:
+            _bg[0] = ("c", color(x))
+
+    def _restore_bg():
+        b = _bg[0]
+        if b is not None:
+            if b[0] == "c":
+                canvas.cls(b[1])
+            else:
+                draw_layer(b[1], 0, 0)
+
     ns = {
         "W": canvas.w, "H": canvas.h,
         "cls": canvas.cls, "pix": canvas.pix,
         "line": canvas.line, "rect": canvas.rect, "rectb": canvas.rectb,
         "circ": canvas.circ, "circb": canvas.circb, "spr": _spr_entry,
         "spr_batch": spr_batch,
+        "background": background, "_moy_restore_bg": _restore_bg,
         "make_layer": make_layer, "draw_layer": draw_layer,
         "map": map_, "mget": mget, "mset": mset,
         "print": canvas.print, "touch": touch, "mouse": mouse,
@@ -639,6 +667,14 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     import moy_carts
     ws = Workstation(comp, canvas, inp, carts)
     ws.make_api = make_api        # device cart namespace (DeviceCanvas + Image + color)
+    # #67 spike: say ONCE whether the auto-native cart loader engaged (the emitter
+    # probe in player.py), so a serial capture can attribute logic-ms deltas.
+    try:
+        import player as _player_mod
+        _diag_note("carts", "auto-native %s"
+                   % ("ON" if _player_mod.NATIVE_CARTS else "OFF"))
+    except Exception:  # noqa: BLE001 -- diagnostic only
+        pass
     ws.make_audio = make_audio    # device I2S audio backend (#16, NEEDS HW VERIFICATION)
     ws.carts_store = moy_carts    # SD .moy store (scan/load/save/create/dup/delete)
     ws.carts_root = carts_root
@@ -670,6 +706,10 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         ws.updater = moy_ota.OtaUpdater(_with_sd_synced)
     except Exception as exc:
         print("Moybyte: OTA updater unavailable:", exc)
+    # #66 live-set diet: the scanned cart list keeps ~300-500KB of src/sprite
+    # strings permanently live -- most of a GC collect's mark cost. Drop them now
+    # that the store + _with_sd can reload a cart on open (icons bake first).
+    ws.slim_carts()
     ws.pointer = pointer
     ws.keyboard = keyboard        # lets the code editor switch to text (ASCII) mode
     # WiFi (#38): one SYSTEM service (network.WLAN STA) shared across carts, so the
@@ -933,7 +973,11 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         if diag is not None and _diag_cart_prev and not _cart_now:
             _t_sd = _diag_flush(diag, ws)  # #68: cart exited -> persist the session's ring
         _diag_cart_prev = _cart_now
-        if diag is not None and _live and _ticks_diff(_tnow, _diag_flush_at) >= 0:
+        # The periodic flush now ALSO needs Settings -> DIAG SD LOG (ws.diag_sd,
+        # owner call 2026-07-08): PERF DIAG alone streams serial samples with no
+        # 20s SD-write stutter; crash/cart-exit flushes below stay unconditional.
+        if (diag is not None and _live and getattr(ws, "diag_sd", False)
+                and _ticks_diff(_tnow, _diag_flush_at) >= 0):
             _diag_flush_at = _tnow + (20000 if ws.cart is not None else 5000)
             _t_sd = _diag_flush(diag, ws)
         # Web view (#41): service the server BETWEEN frames, fully non-blocking -- accept
@@ -955,8 +999,19 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         if diag is not None and elapsed >= HITCH_MS:
             _diag_hitch(diag, ws, comp, elapsed, _t_kbd, _t_inp, _t_sb, _t_ws,
                         _t_diag, _t_sd, _t_web)
-        if elapsed < frame_ms:
-            time.sleep_ms(frame_ms - elapsed)
+        # Frame pacing (#63): a running GAME locks to a steady cadence (30fps
+        # default, manifest "fps": 60 for carts that sustain it) -- a LOCKED 30
+        # feels smoother than a 38-55 swing, and the freed headroom absorbs
+        # GC/SD hitches. Console screens/tools keep the loop's fps_cap (pointer
+        # responsiveness). Re-read per iteration: it changes on cart open/exit.
+        try:
+            _fms = 1000 // ws.frame_cap_fps()
+        except Exception:  # noqa: BLE001 -- pacing must never kill the loop
+            _fms = frame_ms
+        if _fms < frame_ms:
+            _fms = frame_ms                     # never pace FASTER than the loop cap
+        if elapsed < _fms:
+            time.sleep_ms(_fms - elapsed)
 
 
 def run_touch_calibrate(handler):

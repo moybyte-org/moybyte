@@ -51,6 +51,18 @@ def _draw():                 # every frame; render here
 | `_update(dt)` | once per frame, before draw | optional; `dt` is **seconds** (float). Put game logic here |
 | `_draw()` | once per frame | render the frame; called every frame even if `_update` isn't defined |
 
+## Frame pacing
+
+The console has a frame governor: a **game** cart locks to a steady **30fps** —
+a steady 30 feels smoother than a jittery 40, and the headroom absorbs hiccups.
+If your cart genuinely holds 60 (measure it!), declare `"fps": 60` in
+`manifest.json` (Hop Quest and Sky Run do). Tools/apps and all console screens
+run at 60. *(The governor currently ships **disabled** — `console.FPS_GOVERNOR
+= False`, an owner measurement mode so every cart shows its real uncapped fps;
+the manifest field and the policy are live the moment the flag flips back.)*
+Your `_update(dt)` gets the real `dt` either way — movement written as
+`speed * dt` is framerate-independent.
+
 ## The canvas
 
 - **320×240**, indexed. `W` = 320, `H` = 240 are globals (read them; don't assume).
@@ -119,23 +131,29 @@ re-drawing the background every frame.
 
 | call | does |
 |---|---|
+| `background(x)` | **declare the backdrop once** — a color (`background(col("dark_blue"))`) or a painted Image (`background(image("bg"))`) — and the engine repaints it at the start of every frame automatically. Your `_draw` then only draws the moving things: no `cls`, no backdrop blit, nothing to overdraw. `background()` with no args clears it |
 | `make_layer(w, h)` | create an off-screen layer (wider than the screen). Draw into it once with the **same verbs** (`cls`/`map`/`spr`/`rect`/…) via the layer's methods |
 | `draw_layer(layer, cam_x=0, cam_y=0)` | blit the visible `W×H` window of `layer` at the camera offset (clamped to the layer bounds). Draw actors on top afterwards |
 
 ---
 
-## Make it fast (three habits)
+## Make it fast (five habits)
 
 Every draw call is native on the device, so the usual cost is not *how* you draw —
-it's painting **more pixels than the frame needs**. Three habits keep any cart smooth
+it's painting **more pixels than the frame needs**. Five habits keep any cart smooth
 (measured on hardware, #66):
 
-1. **Your background IS the clear color.** `cls(col("dark_blue"))` already paints
+1. **Better yet: declare the background, don't draw it.** `background(col("dark_blue"))`
+   (or `background(image("bg"))` for a painted backdrop) once in `_init` and the
+   engine repaints it every frame for you — on the device the restore rides the
+   async copy engine, so the backdrop costs (almost) nothing. The habits below are
+   for when you draw the backdrop yourself:
+2. **Your background IS the clear color.** `cls(col("dark_blue"))` already paints
    every pixel — don't follow it with a full-screen backdrop `rect()`. That paints
    the whole screen twice and costs ~7ms of the device's ~30ms frame budget for
    nothing. (Battle City does it right: one `cls` in the field color, then only the
    HUD strip repaints its own black.)
-2. **Static scenery goes in a layer, once.** If your level or backdrop doesn't change
+3. **Static scenery goes in a layer, once.** If your level or backdrop doesn't change
    every frame, draw it ONCE into `lay = make_layer(W, H)` — a layer speaks the whole
    drawing API (`lay.cls` / `lay.map` / `lay.rect` …) — and stamp it back each frame
    with `draw_layer(lay, 0, 0)`. One flat copy replaces `cls` + a full `map()`
@@ -143,10 +161,20 @@ it's painting **more pixels than the frame needs**. Three habits keep any cart s
    the layer wider than the screen and pan with `draw_layer(lay, cam_x, 0)`.
    (Hop Quest and Sky Run both do exactly this — read their `_build_layer` /
    `_build_world`.)
-3. **Lots of sprites? Just call `spr()` in a loop.** The engine coalesces consecutive
+4. **Lots of sprites? Just call `spr()` in a loop.** The engine coalesces consecutive
    `spr()` calls into one native batch automatically; `spr_batch()` is the manual form
    when you already build a list. Likewise one `map()` call always beats drawing tiles
    one by one.
+5. **Never wrap `spr()` in `pal()` every frame — bake tinted copies once.** The
+   engine caches each image pre-baked at one scale under the current palette; a
+   `pal()` call invalidates that cache, so a `pal(...)`/`spr(...)`/`pal()` sandwich
+   re-bakes the sprite pixel by pixel on EVERY draw (this alone once cost Letter
+   Blitz most of its frame, #72). If you want the same art in several colors or
+   sizes, build each variant once with `image(rows, {"#": the_color})` and keep it
+   in a dict keyed by `(color, scale)` — then the play path is all cheap cached
+   blits. `pal()` is still fine for one-off moments (a flash of damage on a
+   full-screen repaint) — just not inside your per-frame sprite loop. (Letter
+   Blitz's `_glyph`/`_tank_sprite` caches model the pattern.)
 
 ---
 

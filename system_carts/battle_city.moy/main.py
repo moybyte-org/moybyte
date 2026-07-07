@@ -140,6 +140,9 @@ def _wave_size():
 
 
 def _init():
+    # Declare the battlefield backdrop ONCE -- the engine restores it every frame
+    # ("Make it fast" habit 1), so _draw never clears the screen itself.
+    background(col("dark_blue"))
     global players, enemies, bullets, booms, spawn_q, spawn_t
     global base_alive, score, state, state_t, t, shake
     # rebuild the brick/steel field from the cart's tilemap source (map.moymap),
@@ -510,11 +513,9 @@ def _draw():
     if shake > 0.0:
         sx = int(rnd(shake * 2) - shake)
         sy = int(rnd(shake * 2) - shake)
-    # PERF HABIT (#66): the battlefield backdrop IS the clear color. This used to
-    # be cls(black) + a full-screen backdrop rect -- every pixel painted TWICE
-    # before the game even drew, ~7ms/frame of the device's budget for nothing.
-    # One cls does both jobs (the HUD strip below repaints its black over it).
-    cls(col("dark_blue"))
+    # PERF HABIT (#63/#66): the backdrop is DECLARED (background() in _init), so
+    # the engine repaints it before every frame -- no cls here at all. (The HUD
+    # strip below repaints its own black over it.)
     # the whole brick/steel field in ONE native map() call (#32): 15x15 cells of
     # 8x8 tiles at scale 2 -> 16px world blocks. Destroyed bricks are empty cells.
     map(0, 0, MW, MH, sx, sy, 0, 2)

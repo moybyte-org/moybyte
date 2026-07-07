@@ -63,6 +63,11 @@ class Wallpaper:
         ws.select_wallpaper before it (re)compiles the new choice."""
         self._wp_ns = self._wp_update = self._wp_draw = None
         self._wp_cart = None
+        self._wp_restore_bg = None
+        # #63 leak fix: return the dead wallpaper's pooled layer buffers for reuse.
+        rl = getattr(self.ws.canvas, "reclaim_layers", None)
+        if rl is not None:
+            rl("wallpaper")
 
     def compile(self, cart):
         """Compile a wallpaper cart into its own namespace + grab its _update/_draw,
@@ -74,7 +79,8 @@ class Wallpaper:
             tilemap = ws._build_tilemap(cart)
             ns = ws.make_api(ws.canvas, ws.input, dict(cart.get("cfg", {})),
                              sheet, _SilentAudio(AudioEngine(AudioBank.default())),
-                             tilemap, Pmem(), None, cart.get("images") or {})
+                             tilemap, Pmem(), None, cart.get("images") or {},
+                             owner="wallpaper")   # #63: layer loans reclaimed on clear()
             exec(compile(cart["src"], "<wallpaper>", "exec"), ns)
             if ns.get("_init"):
                 ns["_init"]()
@@ -82,6 +88,7 @@ class Wallpaper:
             self._wp_cart = cart
             self._wp_update = ns.get("_update")
             self._wp_draw = ns.get("_draw")
+            self._wp_restore_bg = ns.get("_moy_restore_bg")   # #63 declared background
         except Exception as exc:  # noqa: BLE001
             print("Moybyte wallpaper error:", _err_text(exc))
             self._wp_ns = self._wp_update = self._wp_draw = None
@@ -110,6 +117,9 @@ class Wallpaper:
         ws = self.ws
         if self._wp_draw is not None:
             try:
+                rb = getattr(self, "_wp_restore_bg", None)
+                if rb is not None:
+                    rb()            # #63: restore the wallpaper's declared backdrop
                 if self._wp_live and self._wp_update is not None and dt > 0:
                     self._wp_update(dt)
                 sh = ws.layout.status_h
