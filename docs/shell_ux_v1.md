@@ -130,6 +130,10 @@ door — no setting, no mode:
 - **Wallpapers are backdrop-only:** they are not run-grid tiles at all. The backdrop
   is chosen in Settings → wallpaper; wallpaper carts stay editable through the
   picker.
+- **The picker sits on a static black backdrop** (2026-07-08): the launcher home is
+  the kid's decorated desk (live wallpaper), the Make space is the workbench —
+  "it's software". Side effect: with no animated backdrop forcing repaints, an idle
+  picker costs zero under the redraw-on-change gate.
 
 Nothing is ever locked away: Play is a tap, Make is a tile, and both are visible from
 every screen a kid starts on.
@@ -303,6 +307,13 @@ Wifi setup lives inside it, and here the exit model (§9) pays off directly: Set
 is a taskbar app, so it exits via the X, so its password field's BACKSPACE=delete
 works with no carve-out. The wifi keyboard problem is not solved by Settings — it is
 *dissolved* by Settings being an ordinary taskbar app under §9's rule.
+
+Two owner-facing diagnostics rows live here too (#68, both persisted, both default
+OFF — together they are "kid mode"): **PERF DIAG** turns on the measurement
+machinery (serial samplers + the 30s forced-GC sample — it costs felt hitches, so
+it is never on for play), and **DIAG SD LOG** separately gates the periodic
+diag→SD write (~115ms every 20s) so a serial-attached measurement session runs
+stutter-free; crash/cart-exit diag flushes happen regardless.
 
 ---
 
