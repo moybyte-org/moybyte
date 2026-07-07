@@ -281,6 +281,7 @@ class BarLayer:
                 getattr(self._bar_canvas(where), "font_scale", 1),
                 bool(ws.can_manage),
                 owner.zone_gen if owner is not None else 0,
+                ws._wifi_icon_kind(),      # Part 3: wifi status glyph (connect/disconnect repaints)
                 self._bar_cache_gen)
 
     def _render_cart_bar(self, cv, key):
@@ -316,7 +317,7 @@ class BarLayer:
             ws._icon("music", _MUSIC_BTN[0], _MUSIC_BTN[1], cv)
             # Right cluster: clock + wifi/batt (Settings now lives in the ≡ menu, not a gear).
             cv.print(self._clock_text(), _BAR_CLOCK[0], 3, NAMES["light_grey"], 1)
-            ws._icon("wifi", _BAR_WIFI[0], _BAR_WIFI[1], cv)
+            ws._icon(ws._wifi_icon_kind(), _BAR_WIFI[0], _BAR_WIFI[1], cv)
             ws._icon("batt", _BAR_BATT[0], _BAR_BATT[1], cv)
             return
         # -- the zoned bar (Stage 4): a black backing band (with a thin shelf edge
@@ -342,7 +343,7 @@ class BarLayer:
         show_x = where != "home"          # the launcher root never exits -> no X
         if self._zone_is_game(where):
             cv.print(self._clock_text(), _ZONE_CLOCK[0], 3, NAMES["light_grey"], 1)
-            ws._icon("wifi", _ZONE_WIFI[0], _ZONE_WIFI[1], cv)
+            ws._icon(ws._wifi_icon_kind(), _ZONE_WIFI[0], _ZONE_WIFI[1], cv)
             ws._icon("batt", _ZONE_BATT[0], _ZONE_BATT[1], cv)
             ws._glyph("menu", _ZONE_GEAR, NAMES["white"], cv)
             if show_x:                    # context X (Stage 5): tap to exit the app
@@ -350,7 +351,7 @@ class BarLayer:
         else:
             lay = ws.layout
             cv.print(self._clock_text(), lay.clock_x, 3, NAMES["light_grey"], 1)
-            ws._icon("wifi", lay.wifi_btn[0], lay.wifi_btn[1], cv)
+            ws._icon(ws._wifi_icon_kind(), lay.wifi_btn[0], lay.wifi_btn[1], cv)
             ws._icon("batt", lay.batt_btn[0], lay.batt_btn[1], cv)
             ws._glyph("menu", lay.sysmenu_btn, NAMES["white"], cv)
             if show_x:                    # context X (Stage 5): tap to exit the app
@@ -441,9 +442,10 @@ class BarLayer:
 
     def handle_bar_tap(self, where, px, py):
         """The zoned bar's tap slice (Stage 4), shared by every screen it draws on
-        (home/settings/menu): the clock Easter egg, the ≡ system menu, and -- Stage 5 --
-        the context X are OS/right-zone-owned, IDENTICAL wherever the bar shows (same as
-        the draw), checked first so a tap on any never falls through to the lent zone.
+        (home/settings/menu): the clock Easter egg, the ≡ system menu, the wifi status
+        icon (Part 3: taps LAUNCH the wifi tool), and -- Stage 5 -- the context X are
+        OS/right-zone-owned, IDENTICAL wherever the bar shows (same as the draw), checked
+        first so a tap on any never falls through to the lent zone.
         Anything else routes to the active app's zone_tap over its lent left zone.
         Returns True iff the bar (or the app's zone) consumed the tap. The clock-
         run reset runs for ANY non-clock tap (byte-identical to the pre-Stage-4
@@ -451,9 +453,11 @@ class BarLayer:
         ws = self.ws
         if self._zone_is_game(where):
             clock_hit, gear_hit, x_hit = _ZONE_CLOCK, _ZONE_GEAR, _ZONE_CONTEXT_X
+            wifi_hit = _ZONE_WIFI
         else:
             lay = ws.layout
             clock_hit, gear_hit, x_hit = lay.clock_hit(), lay.sysmenu_btn, lay.context_x_btn
+            wifi_hit = lay.wifi_btn
         # Clock Easter egg (#21): tapping the bar's clock _CLOCK_TAP_GOAL times
         # wakes the Time Traveler. Checked before the ≡/X/zone so a tap on the clock
         # never falls through to a button.
@@ -463,6 +467,12 @@ class BarLayer:
         ws.ach_ui._clock_taps = 0                # any other bar tap resets the run
         if self._in(px, py, gear_hit):           # ≡ -> system menu (Settings/About/Reboot, #52)
             ws.toggle_sysmenu()
+            return True
+        # WiFi status icon (Part 3): tap -> LAUNCH the wifi.moy tool (you run it, you don't
+        # edit it). Consumes the tap even if the tool isn't installed, so it never leaks to
+        # the lent zone underneath the OS-owned right cluster.
+        if self._in(px, py, wifi_hit):
+            ws.launch_wifi_tool()
             return True
         # Context X (Stage 5, spec Section 9): tap to EXIT the active app back toward the
         # launcher root. The launcher draws no X (where == "home") so it's not tested

@@ -792,6 +792,8 @@ _ICON = {
     "gear": 6, "wifi": 7, "batt": 8, "new": 9, "dup": 10, "del": 11,
     "close": 12, "run": 13, "save": 14, "music": 15,
     "moy": 16,          # the moybyte mascot (boot logo); not a bar control
+    "wifi_off": 17,     # wifi-with-a-red-slash: the right-zone status glyph when
+                        # there's NO connection (ws._wifi_icon_kind picks it, #Part3)
 }
 
 # The baked default theme: each icon is 16 row-strings of 16 chars over the 16-color
@@ -847,6 +849,14 @@ _ICON_ART = {
         "....77....77....", "...7........7...", "......7777......", ".....7....7.....",
         "........7.......", "................", ".......77.......", "......7887......",
         ".......77.......", "................", "................", "................",
+    ),
+    # "wifi_off": the wifi signal with a bold red (8) diagonal slash through it -- the
+    # right-zone STATUS glyph shown when there is NO connection (ws._wifi_icon_kind).
+    "wifi_off": (
+        "................", "....77777777....", ".887........77..", ".788..7777....7.",
+        "...887....77....", "...788......7...", ".....88777......", ".....788..7.....",
+        ".......88.......", "........88......", ".......7788.....", "......788788....",
+        ".......77..88...", "............88..", "................", "................",
     ),
     "batt": (
         "................", "................", "....77777777.7..", "...7........7.7.",
@@ -914,8 +924,8 @@ _ICON_ART = {
 # at load (mirrors cart versioning, #47), so an already-themed device/desktop picks up
 # new icons without a manual wipe. A bump discards a user's custom icon edits, exactly
 # like a built-in cart re-seed. (v1 = the first full restyle; v2 = added the "moy"
-# mascot slot for the boot logo.)
-_ICON_VERSION = 2
+# mascot slot for the boot logo; v3 = added the "wifi_off" no-connection status slot.)
+_ICON_VERSION = 3
 
 
 def _nibble(ch):
@@ -2131,6 +2141,24 @@ class Workstation:
         else:
             self.open()                # player-mode game, or ANY non-game -> launch/run
 
+    def launch_wifi_tool(self):
+        """Launch the WiFi system tool -- the right-zone wifi icon's tap target (Part 3):
+        find the wifi.moy tool in the launcher store, SELECT it, and RUN it (tools always
+        launch, never the editor -- like launch_selected on a tool). Returns True iff it
+        was found + launched; a no-op (False) when the tool isn't installed, so a device
+        without it just doesn't respond to the tap rather than crashing. The launcher home
+        is the run caller, so exiting the tool (its bar X) returns to wherever we were is
+        NOT guaranteed -- it pops home, which is the safe default for an OS shortcut."""
+        for i in range(len(self.launcher.items)):
+            it = self.launcher.items[i]
+            path = it.get("path") or ""
+            if it.get("type") == "tool" and (path.endswith("wifi.moy")
+                                             or path.endswith("wifi")):
+                self.launcher.sel = i
+                self.open()            # tools always LAUNCH (Part 2)
+                return True
+        return False
+
     # The four builders moved VERBATIM onto Project (Stage 1, project.py); these stay
     # as one-line forwards so ws._build_sheet(cart)/... keep working (the wallpaper
     # runner + _icon_sheet_for call ws._build_sheet(cart), _start calls _build_audio,
@@ -3130,6 +3158,23 @@ class Workstation:
         # blit + the glyph encoding live in the module-level _blit_glyph so Launcher
         # (canvas-only) renders the identical vocabulary.
         _blit_glyph(cv if cv is not None else self.canvas, kind, rect, c)
+
+    def _wifi_icon_kind(self):
+        """The right-zone wifi STATUS glyph (Part 3): "wifi" when the injected wifi
+        service reports a live link, "wifi_off" (wifi-with-a-red-slash) when there's no
+        connection. Reads the backend's status() -> (connected, ssid, ip); defaults to
+        disconnected on no backend / any status error, so the host + tests are
+        deterministic (FakeWifi boots disconnected -> "wifi_off"). Folded into the bar's
+        cache key so a real connect/disconnect repaints the strip. Only ever called on a
+        chrome/tool frame (the bar hides while a GAME plays), so it never touches the #66
+        game frame budget."""
+        w = self.wifi
+        if w is None:
+            return "wifi_off"
+        try:
+            return "wifi" if w.status()[0] else "wifi_off"
+        except Exception:  # noqa: BLE001 -- a status hiccup must not blank the bar
+            return "wifi_off"
 
     def _bar_image(self, kind):
         """The cached 16x16 _SheetSprite for top-bar icon `kind`, or None when the
