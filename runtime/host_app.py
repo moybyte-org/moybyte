@@ -751,6 +751,7 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1):
     # namespace ONLY when its manifest grants "network" (see Workstation._start).
     ws.wifi = make_wifi(moy_carts, carts_dir)
     ws.can_manage = True
+    ws.slim_carts()   # #66 live-set diet: drop heavy payloads now the store can reload them
     # The pointer ranges over the SYSTEM canvas (the panel surface the cursor moves
     # on), so size it to that. The api touch() reads it in system coords.
     ws.pointer = console.Pointer(ws.sys_canvas.w, ws.sys_canvas.h)

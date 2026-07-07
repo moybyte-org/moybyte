@@ -353,6 +353,19 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     )
 
 
+# The heavy per-cart payloads the launcher list does NOT need (#66 live-set diet):
+# kept resident they are ~300-500KB of permanently-live strings the GC MARK phase
+# pays for on every collect (~0.2ms/KB on device -- most of the 93-161ms pauses).
+# slim_carts() strips them after the icons are cached; opening a cart rehydrates
+# from the store, and switching carts re-slims the previous one.
+_HEAVY_CART_KEYS = ("src", "sprites", "sounds", "map", "images", "blocks")
+
+# Frame pacing knob (#63): True locks GAME carts to a steady cadence (30 default,
+# manifest "fps": 60 opt-out); False runs everything uncapped at the loop's own
+# fps cap -- the measurement mode (owner call 2026-07-08: uncapped for now, we
+# want the REAL per-cart numbers while the engine work settles).
+FPS_GOVERNOR = False
+
 class Workstation:
     def __init__(self, comp, canvas, input, carts=None, sys_canvas=None,
                  font_scale=1):
@@ -434,6 +447,7 @@ class Workstation:
         # Kept here so wallpaper discovery + the wifi-tool lookup read the FULL list
         # rather than either display grid (the Make/New pseudo tiles never leak out).
         self._all_carts = list(carts) if carts else []
+        self._fat_cart = None         # #66 live-set diet: the one rehydrated cart
         self.launcher = Launcher(self._launcher_items(self._all_carts),
                                  self.layout, NAMES, _blit_glyph)
         # Default the highlight to the first RUNNABLE cart (skip the pinned Make tile at
@@ -1074,7 +1088,13 @@ class Workstation:
         if not (isinstance(wp_id, str) and wp_id.startswith("fill:")):
             cart = self._wp_cart_by_id(wp_id)
             if cart is not None:
+                # #66 live-set diet: a slimmed wallpaper cart rehydrates for the
+                # compile (which bakes src/sheet into the wallpaper's own ns), then
+                # re-slims -- unless it IS the open project's cart (stays fat).
+                self._rehydrate_cart(cart)
                 self.wallpaper.compile(cart)   # compile into the backdrop component (#28)
+                if cart is not getattr(self, "_fat_cart", None):
+                    self._reslim_cart(cart)
         if persist:
             self._persist_wallpaper()
 
@@ -1449,7 +1469,8 @@ class Workstation:
         Sky Run). Tools/apps and every console screen keep 60 -- the pointer must
         stay responsive. The device loop re-reads this every iteration; the host
         simulator paces via its own --fps flag."""
-        if self.wm.top_is_player() and self.cart_error is None:
+        if (FPS_GOVERNOR and self.wm.top_is_player()
+                and self.cart_error is None):
             cart = self.cart
             if cart is not None and cart.get("type") == "game":
                 try:
@@ -1502,6 +1523,58 @@ class Workstation:
         # (cards_layer sets ws.cart_error then calls ws._draw_error_panel()).
         self.player._draw_error_panel()
 
+    def slim_carts(self):
+        """The #66 live-set diet: after the backend wires the cart store, drop every
+        SD-backed cart's heavy payloads (source/sprites/sounds/map/images/blocks)
+        from the scanned list -- the launcher only needs metadata + the icon, which
+        is baked into the icon cache here first. Cuts the permanently-live heap by
+        ~300-500KB, which is most of a GC collect's mark cost (~0.2ms/KB on device).
+        Embedded carts (no path / no store) stay fat -- they cannot be reloaded."""
+        if self.carts_store is None:
+            return
+        for cart in self._all_carts:
+            if not cart.get("path") or cart.get("lazy"):
+                continue
+            try:
+                self._icon_sheet_for(cart)     # bake the grid icon while the art is here
+            except Exception:  # noqa: BLE001 -- a bad sheet just gets the type glyph
+                pass
+            for k in _HEAVY_CART_KEYS:
+                if k in cart:
+                    del cart[k]
+            cart["lazy"] = True
+        try:
+            import gc
+            gc.collect()                       # reclaim the dropped payloads NOW
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _rehydrate_cart(self, cart):
+        """Load a slimmed cart's full payloads back from the store IN PLACE (the
+        launcher/picker hold the same dict, so every reference fattens at once).
+        No-op for fat/embedded carts; a failed load leaves the cart slim and the
+        caller's error handling surfaces it (missing src -> the crash panel)."""
+        if not cart.get("lazy") or self.carts_store is None or not cart.get("path"):
+            return cart
+        try:
+            full = self._with_sd(lambda: self.carts_store.load(cart["path"]))
+        except Exception:  # noqa: BLE001 -- SD hiccup: stay slim, surface downstream
+            full = None
+        if full:
+            cart.update(full)
+            cart["lazy"] = False
+        return cart
+
+    def _reslim_cart(self, cart):
+        # Re-slim a previously-opened cart when the workspace moves on (keeps at
+        # most ~one fat cart live). Only SD-backed carts that slim_carts managed.
+        if cart is None or not cart.get("path") or cart.get("lazy") is not False:
+            return
+        for k in _HEAVY_CART_KEYS:
+            if k in cart:
+                del cart[k]
+        cart["lazy"] = True
+
     def _open_workspace(self, cart=None):
         # Build a fresh Project for `cart` (default: the launcher selection) + start it,
         # shared by open() [RUN, from a launcher tap, uses the launcher selection] and
@@ -1516,6 +1589,11 @@ class Workstation:
         # first real cart instead of crashing on a non-cart (path/cfg-less) tile.
         if cart is None or cart.get("path") is None:
             cart = next((c for c in self.launcher.items if c.get("path")), cart)
+        prev = getattr(self, "_fat_cart", None)
+        if prev is not None and prev is not cart:
+            self._reslim_cart(prev)            # at most ~one fat cart stays live (#66)
+        self._rehydrate_cart(cart)
+        self._fat_cart = cart
         self.cart = cart
         self.config = dict(self.cart["cfg"])
         self.cards_layer.reset()      # fresh card selection/scroll for the new cart
@@ -2067,6 +2145,7 @@ class Workstation:
         # re-deriving the pinned pseudo tiles so a create/dup/delete lands in both.
         if items:
             self._all_carts = list(items)
+            self.slim_carts()              # #66: a rescan reloads FULL carts -- re-slim
             self.launcher.set_items(self._launcher_items(items))
             self.picker.set_items(self._picker_items(items))
 
@@ -2093,6 +2172,7 @@ class Workstation:
         sel = self._real_selected(self.picker)
         if not self.carts_root or not self.can_manage or sel is None:
             return
+        self._rehydrate_cart(sel)   # #66: duplicate() copies src/cfg FROM the dict
         try:
             self._apply_items(self._with_sd(lambda: (
                 self.carts_store.duplicate(sel, self.carts_root),

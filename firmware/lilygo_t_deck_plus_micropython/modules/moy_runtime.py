@@ -706,6 +706,10 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         ws.updater = moy_ota.OtaUpdater(_with_sd_synced)
     except Exception as exc:
         print("Moybyte: OTA updater unavailable:", exc)
+    # #66 live-set diet: the scanned cart list keeps ~300-500KB of src/sprite
+    # strings permanently live -- most of a GC collect's mark cost. Drop them now
+    # that the store + _with_sd can reload a cart on open (icons bake first).
+    ws.slim_carts()
     ws.pointer = pointer
     ws.keyboard = keyboard        # lets the code editor switch to text (ASCII) mode
     # WiFi (#38): one SYSTEM service (network.WLAN STA) shared across carts, so the
