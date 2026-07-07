@@ -191,9 +191,16 @@ def _diag_i2cstat(diag, keyboard, touch):
         # kbd to= counts CAPPED stalls (#69: reads that raised at I2C_TIMEOUT_US and
         # were held over as one stale frame) -- they never complete, so they are NOT
         # in n=/max=. Touch failures ARE timed (its _stat runs on the except path).
+        # #74: the one-shot first-big-stall fingerprint -- boot ms, the transaction
+        # phase that ate it (status/point/clear), the status byte (None = the status
+        # read itself stalled/failed), and how many reads preceded it. Answers the
+        # issue's "boot wake or steady state, and WHERE inside read_raw".
+        fb = getattr(touch, "stat_first_big", None)
+        first = ("" if fb is None
+                 else " tfirst(t=%dms %s st=%s n=%d)" % (fb[0], fb[1], fb[2], fb[3]))
         diag.log("I2CSTAT",
                  "kbd(n=%d max=%.1fms%s >5=%d >20=%d to=%d) "
-                 "touch(n=%d max=%.1fms >5=%d >20=%d)"
+                 "touch(n=%d max=%.1fms >5=%d >20=%d)%s"
                  % (getattr(keyboard, "stat_n", 0),
                     getattr(keyboard, "stat_max_us", 0) / 1000.0,
                     " raw" if getattr(keyboard, "stat_max_raw", False) else "",
@@ -203,7 +210,8 @@ def _diag_i2cstat(diag, keyboard, touch):
                     getattr(touch, "stat_n", 0),
                     getattr(touch, "stat_max_us", 0) / 1000.0,
                     getattr(touch, "stat_over5", 0),
-                    getattr(touch, "stat_over20", 0)))
+                    getattr(touch, "stat_over20", 0),
+                    first))
     except Exception:
         pass
 
