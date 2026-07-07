@@ -66,7 +66,7 @@ class UpdateUI:
     def open_update(self):
         """Open the firmware-update screen: scan SD for an image to install. Lands on
         the "confirm" phase when one is found, else "error" with a friendly reason."""
-        self.ws.screen = "update"
+        self.ws.wm.goto("update")     # Stage 6e: push the update screen onto the back-stack
         self.ws._dirty = True
         self.ws.show_achievements = False
         self.ws._set_text_mode(False)             # button-driven, not typing
@@ -89,7 +89,7 @@ class UpdateUI:
         """Open the online-update flow (#53 Phase 3): connect WiFi + fetch the manifest,
         and if it's newer, download the image to SD. The blocking check runs in
         _pump_update one frame later so a CHECKING... screen shows first."""
-        self.ws.screen = "update"
+        self.ws.wm.goto("update")     # Stage 6e: push the update screen onto the back-stack
         self.ws._dirty = True
         self.ws.show_achievements = False
         self.ws._set_text_mode(False)
@@ -130,7 +130,7 @@ class UpdateUI:
                 u.download_cancel()
             except Exception:
                 pass
-        self.ws.screen = "settings"
+        self.ws.wm.goto("settings")   # Stage 6e: pop the update screen, back to Settings
         self.ws._dirty = True
 
     def _confirm_update(self):

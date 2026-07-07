@@ -334,7 +334,7 @@ class ThemeLayer:
         ws._editing_icons = True
         ws.paint_status = None
         ws.save_status = None
-        ws.screen = "menu"
+        ws.wm.goto("menu")               # Stage 6e: theme editor spawns on the back-stack
         ws.menu_view = "theme"
         # Build a PaintEditor over the icon sheet (PaintEditor is tile-size-agnostic,
         # so the 16x16 IconSheet edits natively). A fresh editor each open so the
@@ -354,4 +354,4 @@ class ThemeLayer:
         ws._editing_icons = False
         ws.paint = None
         self._paint.reset_drag()
-        ws.screen = "settings"
+        ws.wm.goto("settings")           # Stage 6e: pop the theme editor, back to Settings
