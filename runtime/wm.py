@@ -43,6 +43,61 @@ class FullscreenStackWM:
 
     def __init__(self, ws):
         self.ws = ws
+        # The process back-stack (Stage 6b): launcher root -> spawned app -> Player/tool.
+        # A list of "kind" strings (the same vocabulary the flat `screen` attribute used:
+        # "launcher" | "menu" | "settings" | "update" | "desktop"); the TOP is what
+        # `Workstation.screen` now projects onto (`top_kind`). It is a DATA STRUCTURE the
+        # string-keyed router READS (via ws._content_layer), NOT a second dispatcher --
+        # source-of-truth != dispatch, so "one router at all times" holds (plan Section 6).
+        # The launcher is the permanent root (index 0, never popped).
+        self._stack = ["launcher"]
+        # Content-change generation (Stage 6c): bumped whenever the top-of-stack kind
+        # actually changes, so the memoized layer stack knows to rebuild. (menu_view tab
+        # switches bump it via EditorApp.tab; overlay-gate changes are caught separately
+        # by the per-call signature -- see _ensure_stack.)
+        self.content_gen = 0
+
+    # -- the process back-stack (Stage 6b) -----------------------------------
+
+    def top_kind(self):
+        """The kind of the top-of-stack process -- what `Workstation.screen` projects
+        onto (a read-only projection of the back-stack top, exactly as `menu_view`
+        projects `EditorApp.tab`)."""
+        return self._stack[-1]
+
+    def goto(self, kind):
+        """Navigate the back-stack so `kind` is on top -- the mechanism behind the
+        `ws.screen = kind` projection setter (and the explicit push/pop verbs).
+        A `kind` already open BELOW the top is a RETURN (pop back to it, truncating
+        everything above); a new `kind` is a PUSH. This reproduces the old flat-string
+        `screen` transitions exactly at the top (golden-identical) while giving the
+        stack an honest launcher-root -> ... -> top shape."""
+        st = self._stack
+        if st and st[-1] == kind:
+            return                      # already on top -- no navigation, no gen bump
+        idx = None
+        for i in range(len(st) - 1, -1, -1):
+            if st[i] == kind:
+                idx = i
+                break
+        if idx is not None:
+            del st[idx + 1:]            # RETURN: pop back to the already-open screen
+        else:
+            st.append(kind)             # PUSH: a newly-spawned screen
+        self._on_nav()
+
+    def _on_nav(self):
+        """A real top-of-stack change happened: bump the content generation so the
+        memoized layer stack (Stage 6c) rebuilds on the next access."""
+        self.content_gen += 1
+
+    def note_content_change(self):
+        """Signal that the ACTIVE content layer changed WITHOUT a stack push/pop -- the
+        one case being a menu_view/tab switch within the Editor (screen stays "menu" but
+        _content_layer resolves to a different tab). EditorApp.tab's setter calls this so
+        the memoized stack rebuilds; folding it here keeps all content-change signals on
+        the WM (the memo's single owner)."""
+        self.content_gen += 1
 
     # -- two-domain composite + viewport coords (#39) ------------------------
 
