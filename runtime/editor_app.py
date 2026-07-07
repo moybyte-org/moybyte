@@ -118,6 +118,13 @@ class EditorApp:
     def tab(self, value):
         if value != getattr(self, "_tab", None):
             self.zone_gen += 1
+            # Stage 6c: a real tab switch keeps screen == "menu" but resolves
+            # _content_layer to a different tab, so tell the WM its memoized layer stack
+            # is stale (the content layer identity would catch it too, but signalling
+            # here keeps every content-change on the WM -- the memo's single owner).
+            wm = getattr(self.ws, "wm", None)
+            if wm is not None:
+                wm.note_content_change()
         self._tab = value
 
     # -- open the editor on a project (spec Section 4/Section 6: Config-first) -----

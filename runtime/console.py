@@ -1418,47 +1418,20 @@ class Workstation:
         """The active content Layer (spec alias for _content_layer())."""
         return self._content_layer()
 
+    # The overlay/visible/draw stacks are now built + MEMOIZED by the WM (Stage 6c,
+    # wm.py) -- rebuilt only on a back-stack push/pop, a menu_view tab switch, or an
+    # overlay-gate/splash flip, so a static top-of-stack allocates no per-frame list
+    # (the #66 perf-recovery win). These stay as the tested ws. entry points; frame()
+    # walks self.wm.draw_stack() and handle_input/pointer walk the cached reversed
+    # visible stack (wm.visible_stack_rev()) directly, so the hot path never allocates.
     def _overlay_stack(self):
-        """The transient system-domain overlays drawn on top of the content, in draw
-        order (bottom -> top), plus the always-on cursor. This is the single place the
-        overlay visibility + z-order rules live (mirrors the pre-refactor tail of
-        frame()); the cursor is last so it sits above everything."""
-        out = []
-        # Perf HUD first: it's GAME-domain (drawn on the 320x240 canvas right after the
-        # running cart, before the composite), so it must precede any system overlay.
-        if self.show_fps and self.screen == "desktop":
-            out.append(self._perf_layer)
-        au = self.ach_ui
-        if au._confetti_until and _ticks_diff(au._confetti_until, _ticks_ms()) > 0:
-            out.append(self._confetti_layer)
-        if self.show_achievements:
-            out.append(self._ach_layer)
-        if au._egg_active():
-            out.append(self._egg_layer)
-        if self.ach.toast_active():
-            out.append(self._toast_layer)
-        if self.sysmenu.open:
-            out.append(self._sysmenu_layer)
-        if self._about:
-            out.append(self._about_layer)
-        out.append(self._cursor_layer)
-        return out
+        return self.wm.overlay_stack()
 
     def _visible_stack(self):
-        """The full z-ordered layer stack, bottom -> top: the active content layer,
-        the visible overlays, then the cursor. The single source of z-order +
-        visibility -- drawing walks it bottom -> top (with the one game->system
-        composite at the domain boundary), input routing walks it top -> bottom so the
-        overlay that owns the event claims it before the content underneath."""
-        return [self._content_layer()] + self._overlay_stack()
+        return self.wm.visible_stack()
 
     def _draw_stack(self):
-        """The draw-order stack. Same as _visible_stack() except the boot logo, when
-        armed, takes the content slot (overlays still draw over it; the cursor is
-        suppressed inside _draw_cursor during splash)."""
-        content = self._splash_layer if self._splash_until is not None \
-            else self._content_layer()
-        return [content] + self._overlay_stack()
+        return self.wm.draw_stack()
 
     @property
     def sys_canvas(self):
@@ -2655,7 +2628,10 @@ class Workstation:
         # but never stale: a press that's a no-op costs one redraw, not a wrong screen.
         if getattr(i, "_pressed", None) or i.last_key:
             self._dirty = True
-        for layer in reversed(self._visible_stack()):
+        # Walk the MEMOIZED visible stack top -> bottom (Stage 6c): the WM caches it
+        # pre-reversed, so this hot per-frame routing allocates neither the list nor a
+        # reversed() iterator on a static top-of-stack.
+        for layer in self.wm.visible_stack_rev():
             if layer.handle_input(i):
                 return
 
@@ -2678,7 +2654,8 @@ class Workstation:
         px, py, click = p.x, p.y, p.click
         gx, gy = self._game_xy(px, py)
         self.input.game_pointer = (gx, gy, click, p.down)
-        for layer in reversed(self._visible_stack()):
+        # Memoized, pre-reversed visible stack (Stage 6c) -- no per-frame allocation.
+        for layer in self.wm.visible_stack_rev():
             if layer.handle_pointer(px, py, click):
                 return
 
@@ -2868,7 +2845,7 @@ class Workstation:
         # cursor is always the top system layer, so a game-domain content is always
         # composited before it -- reproducing the pre-refactor single composite step.
         _prev_domain = None
-        for layer in self._draw_stack():
+        for layer in self.wm.draw_stack():          # memoized (Stage 6c) -- no per-frame alloc
             if _prev_domain == "game" and layer.domain == "system":
                 _tc = _ticks_ms() if _perf else 0
                 self._composite_game()
