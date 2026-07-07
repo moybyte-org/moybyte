@@ -63,9 +63,16 @@ def _draw():                 # every frame; render here
   No letter is reserved — every other key belongs to your cart.
 - **Typing games: call `textmode(True)`** (e.g. in `_init`). In game mode the device
   keyboard only produces 9 letters (the button-mapped `a d w s z x r` plus plain
-  `q e`); text mode delivers EVERY letter to `key()`/`keyp()`. BACKSPACE still only
-  toggles pause for a `"type": "game"` cart; a `"tool"` keeps backspace as delete
-  while it runs (it only becomes the pause toggle once the tool is already paused).
+  `q e`); text mode delivers EVERY letter to `key()`/`keyp()`.
+- **A `textmode(True)` game MUST provide its own exit** — the console can't reach it.
+  In text mode BACKSPACE is a plain typed key your cart reads (a delete), so the
+  console's standard BACKSPACE exit never reaches the cart, and the T-Deck keyboard
+  has no autorepeat so a *held* BACKSPACE doesn't register either. So bind **`quit()`**
+  (see [State & utility](#state--utility)) to a spare key or a small on-screen
+  affordance you draw. Letter Blitz models this with a tap-anytime ✕ in the top-right
+  corner (above its HUD, clear of the play area) — a touch exit never depends on the
+  keyboard. (A `"tool"`/`"app"` cart already runs with the console's own context-✕
+  bar, so it's exitable without this; but `quit()` works for any cart.)
 - Every color is a **MOY64 palette index 0–63**, or a name via `col("red")` (see
   [Palette](#palette)). The canvas stores indices; the host resolves them to RGB for
   the window, the device maps them into the RGB565 framebuffer.
@@ -173,6 +180,7 @@ Buttons are named. The canonical set is `left, right, up, down, a, b, run, home`
 | call | does |
 |---|---|
 | `time()` | milliseconds since the cart started |
+| `quit()` | END this cart and return to the launcher (or the editor it was run from). Bind it to a key or an on-screen ✕/back button. **Required** for a `textmode(True)` game — the console's BACKSPACE exit can't reach text mode |
 | `pmem(index, value=None)` | persistent memory: `pmem(i)` reads an int, `pmem(i, v)` writes+persists (high scores, saves) |
 | `cfg(key, default=None)` | read a value from the cart's `config.json` — the **"Make it mine"** tuning a kid edits (speed, counts, colors…) |
 | `col(name_or_index)` | resolve a color **name** (0–15) or int to a `0–63` palette index |
