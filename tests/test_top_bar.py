@@ -712,6 +712,51 @@ def test_music_tab_context_x_exits_to_home(tmp_path):
     assert ws.screen == "launcher"
 
 
+def _open_edit_cart(ws):
+    """Copy a system cart that HAS a config ('edit') schema into the carts dir and
+    select it, so open_in_editor lands on the Config (cards) tab."""
+    import os
+    import shutil
+    from runtime import host_app
+    src = os.path.join(str(ROOT), "system_carts", "star_catcher.moy")
+    dst = os.path.join(ws.carts_root, "star_catcher.moy")
+    if os.path.exists(dst):
+        shutil.rmtree(dst)
+    shutil.copytree(src, dst)
+    ws.launcher.items = host_app.moy_carts.scan(ws.carts_root)
+    ws.launcher.sel = [i for i, c in enumerate(ws.launcher.items)
+                       if "star_catcher" in c["path"]][0]
+
+
+def test_config_tab_play_runs_and_persists_config(tmp_path):
+    """Fix B: the Config screen's GO button is gone -- PLAY (bar) must do GO's job:
+    re-run the cart with the tuned config AND persist config.json. So PLAY on the
+    Config tab reaches _save_config (the old GO), and the cart runs."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    _open_edit_cart(ws)
+    ws.open_in_editor()
+    assert ws.screen == "menu" and ws.menu_view == "cards"   # Config-first landing
+    saved = []
+    orig = ws._save_config
+    ws._save_config = lambda: (saved.append(1), orig())[-1]
+    drv.click(*_game_zone_center(None))          # PLAY (game-canvas bar)
+    drv.frame(1 / 30)
+    assert ws.screen == "desktop", "PLAY must run the cart"
+    assert saved == [1], "PLAY on Config must persist config (the old GO)"
+
+
+def test_config_tab_body_has_no_go_code_close_buttons(tmp_path):
+    """Fix B: the Config body drops its own GO / CODE / CLOSE -- those actions all
+    live in the unified bar now (PLAY / the Code tab / the context X). The cards_layer
+    module no longer defines their rects."""
+    from runtime import cards_layer
+    assert not hasattr(cards_layer, "_RUN_BTN")
+    assert not hasattr(cards_layer, "_CODE_BTN")
+    assert not hasattr(cards_layer, "_CLOSE_BTN")
+
+
 def test_zoned_bar_gear_opens_sysmenu_from_every_zoned_screen(tmp_path):
     """The right zone's ≡ (moved off the left edge, Stage 4) is OS-owned and
     IDENTICAL everywhere the bar shows: home, Settings, and an Editor game-domain

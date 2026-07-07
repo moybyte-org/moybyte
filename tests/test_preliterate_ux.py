@@ -83,19 +83,17 @@ def test_all_display_types_render_without_error():
     _draw_once(ws)                          # must not raise
     assert len(set(ws.canvas.buf)) > 1      # something was drawn
 
-    # _card_layout() now returns only the VISIBLE cards (cards-menu scrolling, #3):
-    # the four tall visual cards overflow one screen, so the last is scrolled off.
+    # The fullscreen Config panel (fix B/C: no GO/CODE/CLOSE button bar) fits all four
+    # tall visual cards on one screen now -- the extra vertical room the removed buttons
+    # freed. All four display types are laid out + the sprite-tiles row is the tallest.
     rows = ws.cards_layer._card_layout()
-    assert [r["display"] for r in rows] == ["count", "gauge", "choice-icons"]
-    assert ws.cards_layer._cards_scrollable()           # an overflow -> the chevrons are live
-
-    # ...and scrolling down brings the sprite-tiles card into view (still tallest).
-    ws.cards_layer.scroll_cards(1)
-    visible = ws.cards_layer._card_layout()
-    assert "sprite-tiles" in {r["display"] for r in visible}
-    spr = [r for r in visible if r["display"] == "sprite-tiles"][0]
+    assert [r["display"] for r in rows] == ["count", "gauge", "choice-icons", "sprite-tiles"]
+    assert not ws.cards_layer._cards_scrollable()        # all four fit -> no scroll needed
+    spr = [r for r in rows if r["display"] == "sprite-tiles"][0]
     assert spr["h"] > console._CARD_H       # sprite-tiles row is tallest
-    _draw_once(ws)                          # the scrolled view also renders cleanly
+    _draw_once(ws)                          # the full view renders cleanly
+    # (cards-menu overflow scrolling itself is covered by
+    # test_cards_menu_scroll_clamps_and_keeps_rows_on_panel, which uses 6 tall cards.)
 
 
 def test_missing_display_falls_back_to_text_card():

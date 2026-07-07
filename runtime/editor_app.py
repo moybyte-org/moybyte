@@ -246,6 +246,14 @@ class EditorApp:
             # saved version -- the kid SAVEs to keep changes, exactly like code.)
             if ws.cart is not None:
                 ws._start()
+        elif self.tab == "cards":
+            # PLAY on Config = the old GO (fix B retired that button): re-run the cart
+            # with the freshly-tuned config AND persist config.json. Config binds at
+            # _start (make_api), so a re-start is what makes card edits take effect;
+            # _save_config commits them (mirrors ws.apply()). Only persist on a clean
+            # start so a crash doesn't overwrite config with a half-applied edit.
+            if ws.cart is not None and ws._start():
+                ws._save_config()
         ws.run(ws.project, self)     # PLAY: run the cart, caller = the Editor (Stage 3b)
 
     # -- the lent left zone (Stage 4, #46 zoned bar) --------------------------
