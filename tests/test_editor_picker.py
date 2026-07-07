@@ -57,6 +57,25 @@ def test_wallpaper_is_present_in_the_picker(tmp_path):
     assert "Sakura" in titles or "Ocean Desktop" in titles
 
 
+def test_wallpapers_leave_the_launcher_grid(tmp_path):
+    """Wallpapers are a backdrop category (spec shell_ux_v1.md): they leave the launcher
+    RUN-grid, but stay in the Editor PICKER (editable) AND the Settings wallpaper picker
+    (choose as backdrop). The launcher grid = Make tile + games/tools/apps only."""
+    ws = _ws(tmp_path)
+    # ABSENT from the launcher run-grid...
+    assert all(c.get("type") != "wallpaper" for c in ws.launcher.items)
+    # ...but the run-grid still carries the runnable cart types + the Make tile
+    grid_types = {c.get("type") for c in ws.launcher.items}
+    assert "make" in grid_types and {"game", "tool", "app"} <= grid_types
+    # PRESENT in the Editor picker (editable) and the Settings wallpaper picker (backdrop)
+    assert any(c.get("type") == "wallpaper" for c in ws.picker.items if c.get("path"))
+    assert any(c.get("type") == "wallpaper" for c in ws.wallpaper_carts())
+    # every wallpaper in the store is discoverable as a backdrop
+    store_wp = {c["path"] for c in ws._all_carts if c.get("type") == "wallpaper"}
+    picker_wp = {c["path"] for c in ws.wallpaper_carts()}
+    assert store_wp and store_wp == picker_wp
+
+
 # -- tap: Make -> picker -> pick -> Editor ----------------------------------
 
 def test_tapping_make_tile_opens_the_picker(tmp_path):

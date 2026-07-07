@@ -21,10 +21,15 @@ def _open_cart(ws, title):
     for i, c in enumerate(ws.launcher.items):
         if c["title"] == title:
             ws.launcher.sel = i
-            break
-    else:  # pragma: no cover - guards a typo in the title
+            ws.open()
+            return
+    # Not in the launcher run-grid (a WALLPAPER leaves it, spec shell_ux_v1.md): still a
+    # real editable cart in the store, so open it by reference (as ws.open() does).
+    cart = next((c for c in ws._all_carts if c["title"] == title), None)
+    if cart is None:  # pragma: no cover - guards a typo in the title
         raise AssertionError("seed cart not found: " + title)
-    ws.open()
+    ws._open_workspace(cart)
+    ws.run(ws.project, ws.launcher_layer)
 
 
 def _run(ws, frames, dt=1 / 30):
