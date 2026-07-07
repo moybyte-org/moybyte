@@ -604,6 +604,84 @@ def test_tool_bar_does_not_lend_a_zone_during_play(tmp_path):
     assert calls == [], "the tool bar must not lend an editor zone during play: %r" % calls
 
 
+# -- Fix 4: a text-reading GAME is always exitable (Letter Blitz was trapped) -----
+
+def _text_game_ws(tmp_path, title="Typer"):
+    """A workstation running a minimal GAME that opts into text input (textmode(True)),
+    like the typing game Letter Blitz."""
+    from runtime import host_app, moy_carts
+    carts_dir = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts_dir)
+    drv = host_app.ConsoleDriver(ws)
+    src = ("def _init():\n    textmode(True)\n\n"
+           "def _update(dt):\n    pass\n\ndef _draw():\n    cls(1)\n")
+    moy_carts.create(title, carts_dir, src=src, type="game")
+    ws.launcher.set_items(moy_carts.scan(carts_dir))
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                           if it.get("title") == title)
+    ws.open()                                          # PLAY it
+    assert ws.screen == "desktop"
+    assert ws.input.text_mode is True                  # the cart asked for text input
+    return ws, drv
+
+
+def test_text_reading_game_is_exitable_via_bar_and_keeps_backspace(tmp_path, monkeypatch):
+    """Fix 4: a typing GAME (textmode(True), e.g. Letter Blitz) must ALWAYS be exitable. In
+    text mode BACKSPACE arrives as a typed 0x08 the cart reads (never the "home" button) and
+    the T-Deck keyboard has no autorepeat, so hold-BACKSPACE can't accumulate the ~700ms hold
+    -- the game was TRAPPED. Fix: a text-reading game runs WITH the same minimal bar
+    (context-X) as a tool -- a device-robust, always-tappable exit -- and its hold gesture is
+    suppressed so BACKSPACE stays FREE for the cart's own text handling."""
+    from runtime import player as P
+    from runtime import bar_layer as BL
+    ws, drv = _text_game_ws(tmp_path)
+
+    # 1) The minimal exit bar IS shown while the text game plays (a bare game shows none).
+    assert ws._running_cart_shows_bar() is True
+    where_seen = []
+    orig = ws.bar_layer._draw_status_strip
+
+    def spy(where):
+        where_seen.append(where)
+        return orig(where)
+    ws.bar_layer._draw_status_strip = spy
+    drv.frame(1 / 30)
+    assert "tool" in where_seen                         # the minimal (context-X) bar draws
+
+    # 2) BACKSPACE is NOT stolen as a hold-to-exit: a sustained hold-"home" does NOT pop the
+    #    game (backspace must stay free for the cart's typing).
+    clock = [10_000]
+    monkeypatch.setattr(P, "_ticks_ms", lambda: clock[0])
+    drv.hold("home", True)
+    drv.frame(1 / 30)
+    clock[0] += P._HOLD_EXIT_MS + 100                   # well past a bare game's hold threshold
+    drv.frame(1 / 30)
+    drv.hold("home", False)
+    assert ws.screen == "desktop"                       # did NOT exit on hold-BACKSPACE
+
+    # 3) The context-X EXITS the game (a device-robust touch exit that never depends on the
+    #    keyboard), so the typing game can always be left.
+    x, y, w, h = BL._ZONE_CONTEXT_X
+    drv.touch(x + w // 2, y + h // 2)
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert ws.screen == "launcher"                      # the X popped the game home
+
+
+def test_letter_blitz_seed_cart_shows_the_exit_bar(tmp_path):
+    """The exact reported cart: system_carts/letter_blitz.moy calls textmode(True) in _init,
+    so it runs as a text-reading game -- it MUST show the minimal exit bar (never trapped)."""
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.launcher.sel = next(i for i, c in enumerate(ws.launcher.items)
+                           if c["title"] == "Letter Blitz")
+    ws.open()
+    assert ws.screen == "desktop"
+    assert ws.input.text_mode is True                   # the typing game asked for text input
+    assert ws._running_cart_shows_bar() is True         # ...so it shows the always-tappable X
+
+
 def test_tap_mode_setting_toggles_and_persists(tmp_path):
     """Section 4 tap-mode: system.json's tap_mode defaults to "maker" (a launcher tap
     opens the Editor); Settings -> TAP OPENS steps it MAKER <-> PLAYER and persists it
