@@ -49,13 +49,16 @@ def _labels(ws):
 
 
 def _row_center(ws, label):
-    """Pointer center of the named selectable row in the open dropdown."""
+    """Pointer center of the named selectable row in the open dropdown. The panel
+    now anchors under the right-zone ≡ button (Stage 4), so take the live left edge
+    from panel_rect() rather than the flush-left _POPUP_X."""
     from runtime import console as C
+    px = ws.sysmenu.panel_rect()[0]      # anchored left edge (right-side ≡, Stage 4)
     cy = C._POPUP_Y
     for it in ws.sysmenu.items:
         rh = C._POPUP_SEP_H if it[0] == "sep" else C._POPUP_ROW_H
         if it[0] == "item" and it[1] == label:
-            return (C._POPUP_X + 10, cy + rh // 2)
+            return (px + 10, cy + rh // 2)
         cy += rh
     raise AssertionError("no row %r" % label)
 
@@ -138,6 +141,24 @@ def test_popup_outside_tap_dismisses_inside_does_not():
     p.show([("header", "H"), ("item", "A", None)])
     assert p.click(x + 2, C._POPUP_Y + 1) is True       # header row
     assert p.open
+
+
+def test_sysmenu_popup_anchors_under_the_right_side_hamburger(tmp_path):
+    """Fix A: Stage 4 moved the ≡ toggle to the bar's RIGHT zone, so the dropdown must
+    open UNDER it (right-aligned, hanging down-left), not at the old flush-left x=0.
+    toggle_sysmenu right-aligns the panel to the live ≡ button and clamps it on-screen."""
+    from runtime import console as C
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.toggle_sysmenu()
+    assert ws.sysmenu.open
+    x, y, w, h = ws.sysmenu.panel_rect()
+    bx, by, bw, bh = ws.layout.sysmenu_btn
+    # Panel right edge aligns with the ≡ button's right edge (down-left drop), and it
+    # sits well right of the old x=0 anchor -- the whole point of the fix.
+    assert x + w == bx + bw
+    assert x > C._POPUP_X                      # no longer flush-left
+    assert 0 <= x and x + w <= ws.sys_canvas.w  # fully on screen
 
 
 # -- the ≡ icon placement (no overlap) --------------------------------------
