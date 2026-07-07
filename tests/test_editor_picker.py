@@ -160,9 +160,51 @@ def test_exiting_the_picker_returns_to_the_launcher(tmp_path):
 
 def test_picker_bar_lends_a_title_and_shows_an_exit_x(tmp_path):
     """The picker is a taskbar app: its bar shows the OS right-zone X (exit) -- unlike the
-    launcher ROOT which draws none. The lent left zone carries a title, not NEW/DUP/DEL."""
+    launcher ROOT which draws none. The lent left zone carries a title (+ DUP/DEL over the
+    picker's selection now -- cart management moved here, see the dup/del tests below)."""
     from runtime import bar_layer as BL
     ws = _ws(tmp_path)
     # the picker owns the "picker" zone; it's system-canvas (not the fixed game canvas)
     assert ws.bar_layer._zone_owner("picker") is ws.editor_picker
     assert ws.bar_layer._zone_is_game("picker") is False
+
+
+# -- cart management moved here: DUP/DEL act on the PICKER's selection -------
+# (docs/shell_ux_v1.md: the launcher is for PLAYING, the picker is for MANAGING
+# projects -- see tests/test_top_bar.py for the icon-tap coverage; these drive the
+# ws.* verbs directly, proving they now read the PICKER's grid, not the launcher's).
+
+def test_dup_cart_duplicates_the_pickers_selection_not_the_launchers(tmp_path):
+    """ws.dup_cart() now reads ws.picker's selection, not ws.launcher's -- the two
+    grids can point at different carts (the picker lists every editable cart,
+    including wallpapers/built-ins the launcher run-grid excludes), so a stale
+    launcher selection must never leak into a picker-triggered duplicate."""
+    ws = _ws(tmp_path)
+    # Point the launcher at some OTHER cart than the one we'll duplicate via the picker.
+    ws.launcher.sel = _first_real(ws.launcher)
+    launcher_target = ws.launcher.selected()["path"]
+    picker_idx = next(i for i, it in enumerate(ws.picker.items)
+                      if it.get("path") and it["path"] != launcher_target)
+    ws.picker.sel = picker_idx
+    target = ws.picker.selected()
+    n0 = len(ws._all_carts)
+    ws.dup_cart()
+    assert len(ws._all_carts) == n0 + 1
+    assert any(c["title"] == target["title"] + " copy" for c in ws._all_carts)
+
+
+def test_del_cart_deletes_the_pickers_selection_when_no_cart_is_open(tmp_path):
+    """ws.del_cart()'s fallback (no cart currently open, self.cart is None) now reads
+    ws.picker's selection instead of ws.launcher's."""
+    from runtime import moy_carts
+    ws = _ws(tmp_path)
+    moy_carts.create("Extra", str(ws.carts_root), src="def _draw():\n    cls(1)\n",
+                     type="app")
+    ws._apply_items(moy_carts.scan(str(ws.carts_root)))
+    assert ws.cart is None
+    idx = next(i for i, it in enumerate(ws.picker.items) if it.get("title") == "Extra")
+    ws.picker.sel = idx
+    n0 = len(ws._all_carts)
+    ws.del_cart()
+    assert len(ws._all_carts) == n0 - 1
+    assert all(c.get("title") != "Extra" for c in ws._all_carts)

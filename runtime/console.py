@@ -565,13 +565,19 @@ class Layout:
         self.clock_x = max(edge, self.context_x_btn[0] - edge - self.clock_w)
 
         # -- left zone (Stage 4: fully LENT to the active app's draw_zone/zone_tap
-        # -- launcher/Settings/the Editor): NEW / DUP / DEL start right at the left
-        # edge now that ≡ isn't there any more.
+        # -- launcher/Settings/the Editor): a row of icon slots starting right at the
+        # left edge now that ≡ isn't there any more. Cart management (create/copy/
+        # delete) now lives in the Editor picker's zone, not the launcher's -- DUP/DEL
+        # are drawn at dup_btn/del_btn there (new_btn's slot is unused: "+ New" is a
+        # pinned grid tile, not a bar icon).
         self.new_btn = (edge, _BAR_Y, ic, ic)
         self.dup_btn = (self.new_btn[0] + stride, _BAR_Y, ic, ic)
         self.del_btn = (self.dup_btn[0] + stride, _BAR_Y, ic, ic)
 
-        # -- selected-cart name slot: between the management cluster and the clock.
+        # -- title/selected-name slot: between the (picker's) DUP/DEL cluster and the
+        # clock. Used by EditorPickerLayer's zone title ("PICK A PROJECT"); the
+        # launcher's zone (just the selected cart's name, no icons) starts at
+        # zone_left's own edge instead (see LauncherHomeLayer.draw_zone).
         self.status_name_x = self.del_btn[0] + self.del_btn[2] + edge
         self.status_name_maxc = max(
             4, (self.clock_x - edge - self.status_name_x) // self.font_w)
@@ -2750,7 +2756,10 @@ class Workstation:
             print("Moybyte new cart failed:", exc)
 
     def dup_cart(self):
-        sel = self._real_selected(self.launcher)
+        # DUP now fires from the Editor picker's zone (docs/shell_ux_v1.md: the picker
+        # manages projects, the launcher only plays) -- so it acts on the PICKER's
+        # selection, not the launcher's.
+        sel = self._real_selected(self.picker)
         if not self.carts_root or not self.can_manage or sel is None:
             return
         try:
@@ -2762,10 +2771,12 @@ class Workstation:
 
     def del_cart(self):
         # Delete the OPEN cart when one is open (the sysmenu DELETE CART -- a cart opened
-        # from the picker is NOT necessarily the launcher selection), else the launcher
-        # selection (the launcher-bar DEL). Keep at least one real cart on the device.
+        # from the picker is NOT necessarily the picker's current selection), else the
+        # picker's selection (the picker-zone DEL, docs/shell_ux_v1.md -- moved off the
+        # launcher, which no longer has a management cluster at all). Keep at least one
+        # real cart on the device.
         target = self.cart if (self.cart is not None and self.cart.get("path")) \
-            else self._real_selected(self.launcher)
+            else self._real_selected(self.picker)
         if not self.carts_root or not self.can_manage or target is None \
                 or len(self._all_carts) <= 1:
             return
