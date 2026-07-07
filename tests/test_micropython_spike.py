@@ -1145,7 +1145,10 @@ def test_kid_mode_gates_diag_frame_eaters():
     assert "diag.ECHO_LIVE = _live" in runtime
     assert "if _live:" in runtime                               # forced GC gated
     assert "_diag_cart_prev and not _cart_now" in runtime       # cart-exit flush
-    assert "if diag is not None and _live and _ticks_diff" in runtime  # timer flush gated
+    # The periodic diag->SD flush needs BOTH gates now (owner call 2026-07-08):
+    # PERF DIAG (_live) AND Settings -> DIAG SD LOG (ws.diag_sd) -- serial-only
+    # measurement has no 20s sdflush stutter.
+    assert 'getattr(ws, "diag_sd", False)' in runtime               # timer flush gated
 
 
 def test_i2c_timeout_knob_engaged():

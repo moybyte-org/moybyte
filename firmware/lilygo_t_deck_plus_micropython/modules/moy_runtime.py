@@ -973,7 +973,11 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         if diag is not None and _diag_cart_prev and not _cart_now:
             _t_sd = _diag_flush(diag, ws)  # #68: cart exited -> persist the session's ring
         _diag_cart_prev = _cart_now
-        if diag is not None and _live and _ticks_diff(_tnow, _diag_flush_at) >= 0:
+        # The periodic flush now ALSO needs Settings -> DIAG SD LOG (ws.diag_sd,
+        # owner call 2026-07-08): PERF DIAG alone streams serial samples with no
+        # 20s SD-write stutter; crash/cart-exit flushes below stay unconditional.
+        if (diag is not None and _live and getattr(ws, "diag_sd", False)
+                and _ticks_diff(_tnow, _diag_flush_at) >= 0):
             _diag_flush_at = _tnow + (20000 if ws.cart is not None else 5000)
             _t_sd = _diag_flush(diag, ws)
         # Web view (#41): service the server BETWEEN frames, fully non-blocking -- accept
