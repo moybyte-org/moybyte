@@ -41,6 +41,14 @@ try:
     from widgets import Pmem, _SilentAudio, _err_text
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import Pmem, _SilentAudio, _err_text
+# The block vocabulary/compiler (#29) -- graduation detection recompiles the cart's
+# frozen blocks.json + normalize-compares (Stage 8). Same bare-or-package fallback
+# console.py/block_editor_ui use: bare `blocks` on the device / once host_app aliased
+# it, `runtime.blocks` when a test imports this module directly.
+try:
+    import blocks as _blocks_mod
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import blocks as _blocks_mod
 
 
 class Project:
@@ -135,11 +143,12 @@ class Project:
     # it the (file, bytes) each commit produced, in the SAME between-frames SD-session
     # discipline (ws._with_sd) as the save it shadows.
 
-    def _journal(self, file, new_bytes):
+    def _journal(self, file, new_bytes, grad=None):
         """Append a durable undo-journal entry for `file`. Best-effort: a journal
         failure must NEVER break the save it shadows -- the edit is already on disk,
         the kid just loses one undo step. The store's dedup drops a no-op commit, so
-        journaling an unchanged file costs nothing."""
+        journaling an unchanged file costs nothing. `grad` (Stage 8) is the optional
+        0/1 graduation rider on a main.py commit (see _journal_code)."""
         ws = self.ws
         store = ws.carts_store
         if store is None or not self.cart or new_bytes is None:
@@ -148,9 +157,50 @@ class Project:
         if not path or not ws.can_manage or not hasattr(store, "journal_append"):
             return
         try:
-            ws._with_sd(lambda: store.journal_append(path, file, new_bytes))
+            ws._with_sd(lambda: store.journal_append(path, file, new_bytes, grad=grad))
         except Exception as exc:  # noqa: BLE001 -- journaling can't be allowed to fail a save
             print("Moybyte journal append failed:", _err_text(exc))
+
+    def _journal_code(self, src):
+        """Journal a main.py code commit, DETECTING GRADUATION for a block-authored
+        cart (spec Section 8, the MakeCode model). Bound to the code-commit path (so
+        it rides Stage 7's idle-debounce, never a keystroke), it is the ONE place a
+        block cart can graduate:
+
+          * code-only cart (no blocks.json) -> a plain journal; it has no block
+            program, so it never 'graduates'.
+          * already-graduated block cart -> sticky: journal with grad=1 (a one-way
+            door; every later code commit stays graduated).
+          * block cart that still round-trips (source_roundtrips) -> journal grad=0;
+            stays blockifiable.
+          * block cart whose commit DIVERGED past the vocabulary -> GRADUATE: journal
+            a grad=0 BASELINE (the frozen block program's own regenerated source, the
+            pre-graduation round-tripping state) so an undo restores it, THEN the
+            diverged src as grad=1 (which flips the manifest flag on the same durable
+            step). Undoing past the graduating commit lands on the grad=0 baseline ->
+            source AND graduated:false both restored (the §8 back-door).
+
+        Conservative by construction: source_roundtrips treats an un-recompilable tree
+        as still round-tripping, so a transient block problem never graduates a kid."""
+        cart = self.cart
+        prog = cart.get("blocks") if cart else None
+        if prog is None:
+            self._journal("main.py", src)                 # code-only: never graduates
+            return
+        if bool(cart.get("graduated")):
+            self._journal("main.py", src, grad=1)         # sticky one-way door
+            return
+        if _blocks_mod.source_roundtrips(prog, src):
+            self._journal("main.py", src, grad=0)         # still blockifiable
+            return
+        # DIVERGED -> GRADUATE. Baseline first (restore point), then the diverged src.
+        try:
+            baseline = _blocks_mod.compile_blocks(prog)
+            self._journal("main.py", baseline, grad=0)    # no-op if already the current state
+        except Exception as exc:  # noqa: BLE001 -- shouldn't raise (it just compiled), be safe
+            print("Moybyte graduation baseline failed:", _err_text(exc))
+        self._journal("main.py", src, grad=1)             # flips manifest graduated -> True
+        cart["graduated"] = True                          # sync the open workspace in RAM
 
     # -- persistence verbs (moved from Workstation's save_* -- Stage 1b) ------
     #
@@ -194,7 +244,7 @@ class Project:
                 return False
             ws.editor.dirty = False
             ws.save_status = "SAVED"
-            self._journal("main.py", src)     # durable undo (Stage 7): the persisted src
+            self._journal_code(src)           # durable undo (Stage 7) + graduation (Stage 8)
             if not quiet:
                 ws.ach.note("code_save")      # "Code Wizard": manual SAVE/PLAY only (#21)
             # A successful save means the source now compiles and persisted: clear
