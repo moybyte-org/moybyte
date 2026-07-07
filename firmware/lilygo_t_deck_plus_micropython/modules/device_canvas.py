@@ -108,12 +108,16 @@ _PALT_OPAQUE = bytes(64)
 _LAYER_POOL = {}
 
 
-# Fold 2 (#63) revert knob: the map() auto-cache trades the per-cell blit_map walk
-# for a blit565 composite of a cached raster. On x86 that is a wash for SPARSE maps
-# (keyed blits test every pixel; blit_map skips empty cells) and a win for opaque
-# ones (row-memcpy lane); the DEVICE verdict (PSRAM-latency-bound) needs the flash
-# A/B -- flip this False to re-raster directly, exactly the pre-Fold-2 behaviour.
-MAP_AUTO_CACHE = True
+# Fold 2 (#63) knob: the map() auto-cache trades the per-cell blit_map walk for a
+# blit565 composite of a cached raster. HARDWARE VERDICT (T-Deck, 2026-07-07 owner
+# flash): the composite LOSES -- Battle City map 4.3-5.7ms direct -> 13.4ms cached
+# steady state (the keyed blit reads every pixel of the 240x240 region; blit_map
+# skips empty cells and PSRAM magnifies that), 32-55ms on brick-destruction
+# re-rasters, fps 29-33 -> 24-25. Even the opaque row-memcpy lane only breaks even
+# (~5ms for 115KB PSRAM->PSRAM). So the cache ships DEFAULT OFF; the machinery +
+# counters stay for a future native keyed-blit kernel or the P4's 2D DMA (#58),
+# and the parity tests force it on to keep the logic pinned.
+MAP_AUTO_CACHE = False
 
 
 class Image:

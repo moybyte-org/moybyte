@@ -67,6 +67,8 @@ def build_carts(system_carts_dir):
             "version": int(man.get("version", 0)),
             "src": _read(os.path.join(base, "main.py")),
         }
+        if man.get("fps"):                 # frame pacing (#63): "fps": 60 opt-out
+            cart["fps"] = int(man["fps"])
         sheet = os.path.join(base, "sprites.moygfx")
         if os.path.exists(sheet):
             cart["sprites"] = _read(sheet)

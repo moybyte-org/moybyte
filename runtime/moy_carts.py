@@ -268,6 +268,8 @@ def seed_builtins(seed_list, root=CARTS_DIR):
             "runtime": "python", "main": "main.py", "edit": cart.get("edit", []),
             "version": seed_ver,
         }
+        if cart.get("fps"):               # frame pacing (#63): "fps": 60 opt-out
+            manifest["fps"] = cart["fps"]
         if cart.get("canvas") is not None:
             manifest["canvas"] = cart["canvas"]
         if cart.get("permissions") is not None:

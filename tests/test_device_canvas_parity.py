@@ -1348,12 +1348,20 @@ def _play_map(c, sheet, tm, cam, colorkey=0, scale=1, direct=False):
         c.pal()
 
 
-def test_map_autocache_host_equals_device_across_camera_and_edits():
+def _map_cache_on(m, monkeypatch):
+    # Fold 2 ships DEFAULT OFF on device (the hardware A/B verdict lives on the
+    # MAP_AUTO_CACHE comment); the cache tests force it ON so the logic stays
+    # pinned for a future native keyed-blit kernel / the P4 (#58).
+    monkeypatch.setitem(m.DeviceCanvas.__init__.__globals__, "MAP_AUTO_CACHE", True)
+
+
+def test_map_autocache_host_equals_device_across_camera_and_edits(monkeypatch):
     # Cross-backend parity of the AUTO-CACHED map(): the host indexed rasterizer and the device
     # native path agree byte-for-byte across a camera sweep (cache hits), after an mset
     # (tilemap.gen bump -> re-raster) and under an active pal (both bypass to a direct raster).
     for gfx in (True, False):
         m, host, dev = _both(gfx)
+        _map_cache_on(m, monkeypatch)
         sh_h, sh_d, tm_h, tm_d = _mapcache_world(m)
         for cam in ((0, 0), (10, 4), (30, 20), (48, 32), (5, 0)):
             _play_map(host, sh_h, tm_h, cam)
@@ -1370,12 +1378,13 @@ def test_map_autocache_host_equals_device_across_camera_and_edits():
         _assert_same(host, dev, "autocache pal-active gfx=%s" % gfx)
 
 
-def test_map_autocache_equals_direct_raster():
+def test_map_autocache_equals_direct_raster(monkeypatch):
     # The cached path must be byte-identical to a DIRECT (uncached) raster of the SAME scene,
     # on EACH backend, across camera moves and after an mset. This is the Fold-2 acceptance:
     # auto-cached map() output == direct-raster map() output, byte-for-byte.
     for gfx in (True, False):
         m, _, _ = _both(gfx)
+        _map_cache_on(m, monkeypatch)
         sh_h, sh_d, tm_h, tm_d = _mapcache_world(m)
         tm_h.mset(4, 4, 2); tm_d.mset(4, 4, 2)       # (also proves the post-edit raster matches)
         for cam in ((0, 0), (10, 4), (33, 18), (48, 30)):
@@ -1398,12 +1407,13 @@ def test_map_autocache_equals_direct_raster():
                             % (gfx, cam, sum(1 for x, y in zip(a, b) if x != y)))
 
 
-def test_map_autocache_actually_caches():
+def test_map_autocache_actually_caches(monkeypatch):
     # The cache must not just be pixel-correct -- it must KICK IN. The _map_raster_count /
     # _map_hits counters (#63) prove a camera-only change re-uses the cached region (one
     # blit565 / spr composite) instead of a full per-cell re-raster, which pixel-parity can't
     # see. The Fold-2 analogue of test_auto_batch_actually_coalesces (device gfx-only cache).
     m, _, _ = _both(True)
+    _map_cache_on(m, monkeypatch)
     sh_h, sh_d, tm_h, tm_d = _mapcache_world(m)
     for c, sh, tm in ((Canvas(W, H), sh_h, tm_h),
                       (m.DeviceCanvas(_FakeComp(W, H)), sh_d, tm_d)):
@@ -1443,12 +1453,13 @@ def test_map_autocache_actually_caches():
         c.pal()
 
 
-def test_map_autocache_opaque_lane_full_coverage():
+def test_map_autocache_opaque_lane_full_coverage(monkeypatch):
     # A FULL-COVERAGE region with no colorkey has no transparent pixel, so the device
     # composite may take blit565's opaque row-memcpy lane (key=-1, the #66 chrome-trim
     # lane) instead of testing every pixel -- and it must stay byte-identical to the
     # direct raster. A sparse region (empty cells) must keep the keyed composite.
     m, _, _ = _both(True)
+    _map_cache_on(m, monkeypatch)
     sh_h, sh_d, tm_h, tm_d = _mapcache_world(m)
     for tm in (tm_h, tm_d):
         for cy in range(10):                     # fill EVERY cell -> full coverage
@@ -1521,6 +1532,7 @@ def test_layer_pool_reclaims_cart_buffers_across_runs(monkeypatch):
     import sys
     import types
     m, _, _ = _both(True)
+    _map_cache_on(m, monkeypatch)
     fake_alloc = types.ModuleType("moy_alloc")
     fake_alloc.malloc_dma = lambda n, caps=0: bytearray(n)
     fake_bus = types.ModuleType("lcd_bus")
