@@ -1647,18 +1647,6 @@ class Workstation:
             self.system["diag_live"] = self.diag_live
             self._persist_system()
 
-    def tap_mode(self):
-        """The launcher's tap default (spec Section 4): "maker" (DEFAULT -- tap opens
-        the Editor on Config) or "player" (tap plays). Read by launch_selected."""
-        return self.system.get("tap_mode", "maker")
-
-    def cycle_tap_mode(self, d):
-        """Toggle the launcher tap default MAKER<->PLAYER and persist it (Settings ->
-        TAP OPENS). Two modes, so any step flips."""
-        self.system["tap_mode"] = "player" if self.tap_mode() == "maker" else "maker"
-        self._dirty = True
-        self._persist_system()
-
     def _persist_system(self):
         """Write self.system to system.json when a writable store is wired. Shared by the
         persisting Settings toggles (font, wallpaper, OTA channel)."""
@@ -2148,8 +2136,8 @@ class Workstation:
         self.player._draw_error_panel()
 
     def _open_workspace(self):
-        # Build a fresh Project for the SELECTED cart + start it (shared by open()
-        # [play] and open_in_editor() [edit] -- the two tap-mode landings, Section 4).
+        # Build a fresh Project for the SELECTED cart + start it (shared by open() [RUN,
+        # from a launcher tap] and open_in_editor() [EDIT, from the project-picker]).
         # Leaves the cart STARTED so PLAY can run it and the editors have live data.
         self.project = Project(self)   # a fresh workspace for the cart being opened
         self.cart = self.launcher.selected()
@@ -2180,41 +2168,30 @@ class Workstation:
         self.ach.note("open", self.cart.get("path") or self.cart.get("title"))
 
     def open(self):
-        # PLAY landing (Section 4 player mode): build the workspace + run the cart on
-        # the desktop, recording the launcher home as the caller so QUIT pops home.
-        # Open to the desktop even if the cart failed to start: frame() shows the
-        # error panel there and the EDIT/CODE button stays reachable so the kid can
-        # fix it (a silent stay-on-launcher would be a dead end on the device).
+        # RUN landing (spec shell_ux_v1.md Section 2): build the workspace + run the
+        # cart on the desktop, recording the launcher home as the caller so QUIT pops
+        # home. Open to the desktop even if the cart failed to start: frame() shows the
+        # error panel there so the kid isn't stranded (a silent stay-on-launcher would
+        # be a dead end on the device). Authoring is a separate app (the Editor), reached
+        # via the launcher's Make tile -> project-picker, not a tap-mode on the launcher.
         self._open_workspace()
         self.run(self.project, self.launcher_layer)   # activate desktop, record caller
 
     def open_in_editor(self):
-        # EDIT landing (Section 4 maker mode -- the DEFAULT): build the workspace, then
-        # drop into the Editor on Config (spec Section 6). The cart is started (ready
-        # for PLAY) but not shown; the Editor owns the screen until PLAY runs it.
+        # Open the SELECTED cart in the Editor, landing on Config (spec Section 6). The
+        # cart is started (ready for PLAY) but not shown; the Editor owns the screen until
+        # PLAY runs it. Reached from the Editor's PROJECT-PICKER (the Make tile), never a
+        # launcher tap -- a launcher tap always RUNS (launch_selected -> open).
         self._open_workspace()
         self.editor_app.open(self.project)
 
     def launch_selected(self):
-        """A launcher TAP opens the selected cart. Whether the tap EDITS or RUNS keys on
-        manifest TYPE: only a `type=="game"` cart follows system.json's `tap_mode` (spec
-        Section 4) -- "player" plays it, "maker" (the DEFAULT) drops into the Editor on the
-        Config page. EVERYTHING ELSE (tool / app / wallpaper) ALWAYS LAUNCHES: a game is the
-        maker project you tweak, but a tool/app/wallpaper is something you RUN, not edit, on
-        a tap (owner device feedback). Keying on type (not the edit-schema) fixes a game with
-        NO "Make it mine" cards (e.g. tap_game.moy, `edit: []`) -- it used to LAUNCH on a
-        maker tap because it had no schema; now it opens the Editor like any other game. The
-        NEW-cart template is `type=="game"` (moy_carts.NEW_TEMPLATE), so a kid's brand-new
-        creation still opens its Config on a maker tap instead of running bar-less with no
-        way back. Editing a non-game currently has no tap path -- a secondary affordance
-        (long-press / a Play-Edit menu) is a separate owner decision. Both Play and Edit stay
-        reachable via the menu; the tap default is the only thing this decides."""
-        cart = self.launcher.selected()
-        ctype = cart.get("type") if cart else None
-        if ctype == "game" and self.system.get("tap_mode", "maker") == "maker":
-            self.open_in_editor()
-        else:
-            self.open()                # player-mode, or a non-game cart -> launch/run
+        """A launcher TAP RUNS the selected cart (spec shell_ux_v1.md, the locked model:
+        launcher tap = RUN, always, for every cart type). The interim maker/player
+        `tap_mode` type-dispatch is retired: authoring is a launchable Editor app (the
+        launcher's Make tile -> project-picker), not a mode a tap flips into. Both Play and
+        Edit stay reachable -- Play here, Edit through the Make tile."""
+        self.open()
 
     def launch_wifi_tool(self):
         """Launch the WiFi system tool -- the right-zone wifi icon's tap target (Part 3):

@@ -206,106 +206,58 @@ def test_management_buttons_still_create_and_delete(tmp_path):
     assert len(ws.launcher.items) == n0 + 1
 
 
-def test_tapping_a_cart_icon_opens_it_from_home(tmp_path):
-    """The launcher's primary action: tapping a cart's icon tile opens it. (The old
-    dock 'run' slot was removed from the launcher with the dock, #46.) In the DEFAULT
-    maker mode (spec Section 4) the tap opens the cart in the Editor on Config
-    (screen == "menu"); a player-mode device would play it instead (test below)."""
+def test_tapping_a_cart_icon_runs_it_from_home(tmp_path):
+    """The launcher's LOCKED primary action (spec shell_ux_v1.md): tapping ANY cart's
+    icon tile RUNS it (screen == "desktop"), caller = the launcher home (so its QUIT pops
+    home). There is no maker/player tap_mode: authoring is a separate Editor app reached
+    via the Make tile -> project-picker, never a tap on the launcher grid."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     x, y, w, h = ws.layout.tile_rect(0, ws.launcher.page)
     drv.click(x + w // 2, y + h // 2)
     drv.frame(1 / 30)
-    assert ws.screen == "menu"                  # maker default: tap -> the Editor
+    assert ws.screen == "desktop"               # tap -> RUN
     assert ws.cart is not None                  # ...with the tapped cart loaded
-
-
-def test_tapping_a_cart_icon_in_player_mode_plays_it(tmp_path):
-    """Player-mode devices (spec Section 4): a tap PLAYS the cart immediately, caller =
-    the launcher home (so its QUIT pops home). The tap-mode setting is the only
-    difference from the maker default above."""
-    from runtime import host_app
-    ws = _ws(tmp_path)
-    ws.system["tap_mode"] = "player"
-    drv = host_app.ConsoleDriver(ws)
-    x, y, w, h = ws.layout.tile_rect(0, ws.launcher.page)
-    drv.click(x + w // 2, y + h // 2)
-    drv.frame(1 / 30)
-    assert ws.screen == "desktop"               # player mode: tap -> plays
 
 
 _ONE_CARD = [{"key": "c", "type": "choice", "choices": ["red", "blue"], "card": "C IS {value}"}]
 
 
-def test_tool_cart_always_launches_on_tap_even_in_maker_mode(tmp_path):
-    """Part 2 (owner device feedback): a non-game cart (e.g. the `type=="tool"` wifi tool)
-    ALWAYS LAUNCHES on a tap, even in the DEFAULT maker mode where a GAME opens the Editor.
-    You RUN the wifi tool, you don't edit it. So launch_selected() on a tool lands on the
-    running cart (screen == "desktop"), never the Editor; a game in the same mode still opens
-    the Editor (the contrast). Dispatch keys on manifest TYPE -- only `type=="game"` edits."""
+def test_launcher_tap_runs_every_cart_type(tmp_path):
+    """The locked model: a launcher tap RUNS the cart regardless of manifest TYPE -- a
+    tool, an app, AND a game all land on the running cart (screen == "desktop"), never the
+    Editor. The retired interim `tap_mode` used to send a game to the Editor on a maker tap;
+    that type-dispatch is gone -- tap always runs, edit is the Make tile's job."""
     from runtime import host_app, moy_carts
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)
-    assert ws.tap_mode() == "maker"                 # the mode where an EDITABLE cart EDITs
 
-    moy_carts.create("MyTool", carts_dir, src="def _draw():\n    cls(1)\n", type="tool")
-    ws.launcher.set_items(moy_carts.scan(carts_dir))
-    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                           if it.get("title") == "MyTool")
-    assert not ws.launcher.selected().get("edit")   # no edit schema -> nothing to customize
-    ws.launch_selected()                            # the tap dispatch
-    assert ws.screen == "desktop"                   # LAUNCHED (ran), NOT the Editor
-    assert ws.cart is not None and ws.cart.get("type") == "tool"
-
-    # An EDITABLE game in the SAME maker mode still opens the Editor (the contrast).
-    moy_carts.create("MyGame", carts_dir, src="def _draw():\n    cls(2)\n",
-                     type="game", edit=_ONE_CARD)
-    ws.go_home()
-    ws.launcher.set_items(moy_carts.scan(carts_dir))
-    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                           if it.get("title") == "MyGame")
-    ws.launch_selected()
-    assert ws.screen == "menu"                      # maker default for an EDITABLE cart
+    for title, ctype, edit in (("MyTool", "tool", None),
+                               ("MyApp", "app", None),
+                               ("MyGame", "game", _ONE_CARD)):
+        moy_carts.create(title, carts_dir, src="def _draw():\n    cls(1)\n",
+                         type=ctype, edit=edit)
+        ws.go_home()
+        ws.launcher.set_items(moy_carts.scan(carts_dir))
+        ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                               if it.get("title") == title)
+        ws.launch_selected()                        # the launcher tap
+        assert ws.screen == "desktop", title        # RAN, never the Editor
+        assert ws.cart is not None and ws.cart.get("type") == ctype
 
 
-def test_new_cart_opens_editor_on_maker_tap(tmp_path):
-    """The HIGH anti-trap regression guard: a kid's brand-new cart (moy_carts.NEW_TEMPLATE)
-    is `type=="game"` -- the maker project you tweak. Dispatch keys on TYPE, so a maker-mode
-    tap opens the Editor (Config) instead of running it bar-less with no way back. (The
-    template used to be a `wallpaper`, which -- once dispatch keyed on type -- would have run
-    with no tap path to its cards; making the NEW default a game closes that trap.)"""
-    from runtime import host_app, moy_carts
+def test_new_template_is_an_editable_game(tmp_path):
+    """A kid's brand-new cart (moy_carts.NEW_TEMPLATE) is `type=="game"` WITH "Make it
+    mine" cards -- the project the "+ New" picker tile creates + opens in the Editor (spec
+    shell_ux_v1.md). It's a real game project, not a wallpaper. (Tapping it in the launcher
+    RUNS it like any cart; editing is reached via the Make tile -> picker.)"""
+    import os
+    from runtime import moy_carts
     carts_dir = str(tmp_path / "carts")
-    ws = host_app.build_workstation(carts_dir)
-    assert ws.tap_mode() == "maker"
+    os.makedirs(carts_dir, exist_ok=True)
     new = moy_carts.new_from_template(carts_dir, title="Freshie")
     assert new["type"] == "game" and new["edit"]    # a game project WITH edit cards
-    ws.launcher.set_items(moy_carts.scan(carts_dir))
-    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                           if it.get("title") == "Freshie")
-    ws.launch_selected()
-    assert ws.screen == "menu"                      # opened the Editor (Config), did NOT run
-    assert ws.menu_view == "cards"                  # ...landing on the Make-it-mine cards
-
-
-def test_game_without_edit_schema_opens_editor_on_maker_tap(tmp_path):
-    """The Fix 1 regression guard: a `type=="game"` cart with NO "Make it mine" cards
-    (edit schema empty/absent -- e.g. system_carts/tap_game.moy, `edit: []`) used to
-    LAUNCH on a maker tap because the old dispatch keyed on the edit-schema. Dispatch now
-    keys on manifest TYPE: a non-tool cart follows tap_mode, so a maker tap opens the
-    Editor even with no cards -- editing is for everything that isn't a pure tool."""
-    from runtime import host_app, moy_carts
-    carts_dir = str(tmp_path / "carts")
-    ws = host_app.build_workstation(carts_dir)
-    assert ws.tap_mode() == "maker"
-    moy_carts.create("Cardless", carts_dir, src="def _draw():\n    cls(3)\n", type="game")
-    ws.launcher.set_items(moy_carts.scan(carts_dir))
-    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                           if it.get("title") == "Cardless")
-    assert not ws.launcher.selected().get("edit")   # no cards -> old logic would LAUNCH
-    ws.launch_selected()
-    assert ws.screen == "menu"                      # ...now opens the Editor (Fix 1)
 
 
 def test_go_home_keeps_wallpaper(tmp_path):
@@ -658,24 +610,17 @@ def test_cart_quit_flag_is_cleared_for_the_next_cart(tmp_path):
     assert ws.screen == "desktop"            # the plain cart keeps running (not popped)
 
 
-def test_tap_mode_setting_toggles_and_persists(tmp_path):
-    """Section 4 tap-mode: system.json's tap_mode defaults to "maker" (a launcher tap
-    opens the Editor); Settings -> TAP OPENS steps it MAKER <-> PLAYER and persists it
-    across a reload. Drives both the direct setter and the Settings-row dispatch."""
-    from runtime import host_app, moy_carts
+def test_tap_mode_is_retired_from_settings(tmp_path):
+    """The maker/player `tap_mode` is GONE (spec shell_ux_v1.md, the locked model): no
+    Settings row, no ws.tap_mode/cycle_tap_mode verbs. A launcher tap always RUNS; the
+    only authoring path is the Make tile -> Editor project-picker."""
+    from runtime import host_app
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)
-    assert ws.tap_mode() == "maker"                 # default (spec Section 4)
     keys = [r[0] for r in ws.settings_layer._SETTINGS_ROWS]
-    assert "tap_mode" in keys                       # the Settings row exists
-    # Direct toggle + persistence to system.json (survives a fresh load).
-    ws.cycle_tap_mode(1)
-    assert ws.tap_mode() == "player"
-    assert moy_carts.load_system(carts_dir).get("tap_mode") == "player"
-    # The Settings-row dispatch (select TAP OPENS, step it) flips it back.
-    ws.settings_layer.set_msel = keys.index("tap_mode")
-    ws.settings_layer.settings_adjust(1)
-    assert ws.tap_mode() == "maker"
+    assert "tap_mode" not in keys                   # the Settings row is gone
+    assert not hasattr(ws, "tap_mode")
+    assert not hasattr(ws, "cycle_tap_mode")
 
 
 def test_play_from_editor_returns_to_the_editor_tab_on_exit(tmp_path, monkeypatch):

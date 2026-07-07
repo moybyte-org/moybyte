@@ -458,7 +458,7 @@ class BarLayer:
             elif slot == "run":
                 ws.run_code() if ws.editor is not None else ws.apply()
         elif slot == "run" and ws.launcher.selected() is not None:
-            ws.launch_selected()                 # home run = open selected (tap-mode, #55)
+            ws.launch_selected()                 # home run = RUN the selected cart
 
     def handle_bar_tap(self, where, px, py):
         """The zoned bar's tap slice (Stage 4), shared by every screen it draws on
