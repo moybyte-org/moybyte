@@ -102,6 +102,15 @@ apps, so a playing cart owns the entire frame budget — full 320×240, no chrom
 sibling app stealing milliseconds. "One fullscreen app + a back-stack" is not a
 compromise UI; it is the mechanism by which games hit their #66 numbers.
 
+*(Status 2026-07-08: the windowed tier is IMPLEMENTED host-side —
+`runtime/wm_windowed.py`, also served over the web transport — with three
+owner-directed refinements to this section's sketch: the picker + Editor share
+ONE "Make" window; INPUT FOCUS is decoupled from the back-stack (clicking a
+window never pops anything — a playtest keeps running beside a focused editor,
+and only an explicit exit ends a run); and closes are surgical (closing one
+window never closes another). One cart still runs at a time (#73's multi-cart
+boundary). The P4 device port of this tier rides #58.)*
+
 ---
 
 ## 4. Two personas — making is an app, a tap always plays
@@ -307,6 +316,13 @@ Wifi setup lives inside it, and here the exit model (§9) pays off directly: Set
 is a taskbar app, so it exits via the X, so its password field's BACKSPACE=delete
 works with no carve-out. The wifi keyboard problem is not solved by Settings — it is
 *dissolved* by Settings being an ordinary taskbar app under §9's rule.
+
+*(Status 2026-07-08: implemented — Settings carries a WIFI row + panel
+(scan/pick/password/connect/forget over the injected wifi service), and because
+Settings is an app, wifi setup works while a game keeps running; the bar's wifi
+status icon deep-links here on the windowed tier, exactly this section's model.
+The standalone wifi.moy tool cart remains the launcher-grid path. Settings also
+gained a THEME row — selectable panel colorways, `chrome.THEMES`.)*
 
 Two owner-facing diagnostics rows live here too (#68, both persisted, both default
 OFF — together they are "kid mode"): **PERF DIAG** turns on the measurement

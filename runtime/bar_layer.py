@@ -148,18 +148,17 @@ class BarLayer:
         # Cached top bar (#43, generalized in Stage 4 to every `where`): rendered
         # ONCE into an offscreen strip and blitted each frame (one flat copy)
         # instead of re-rendering ~9 sprites + glyph + text every frame.
-        # `_cart_bar_strip` is the layer; `_cart_bar_key_cur` is the state key it
-        # holds (None = stale); `_cart_bar_canvas` is the canvas it was built on (a
-        # web-view swap, OR switching between the game canvas and the system canvas
-        # as the active `where` changes, forces a rebuild); `_bar_cache_gen` is
-        # bumped by the explicit invalidators (invalidate(), from ws.set_icon_sheet)
-        # so a theme swap repaints. ONE strip/key slot serves every `where` -- only
-        # one screen is ever on top at a time, so sharing it is exactly as safe as
-        # the single-slot cache already was, and a `where` change is just another
-        # key change the existing compare already catches.
-        self._cart_bar_strip = None
-        self._cart_bar_key_cur = None
-        self._cart_bar_canvas = None
+        # `_bar_strips` maps `where` -> [strip, key, canvas]: the offscreen layer,
+        # the state key it holds (None = stale) and the canvas it was built on (a
+        # web-view swap, OR switching between the game canvas and the system canvas,
+        # forces a rebuild); `_bar_cache_gen` is bumped by the explicit invalidators
+        # (invalidate(), from ws.set_icon_sheet) so a theme swap repaints. Keyed per
+        # `where` (was one shared slot) because the windowed WM (wm_windowed.py)
+        # draws TWO bars per frame -- the desktop root's "home" bar and the focused
+        # window's own -- and a shared slot would rebuild both every frame. On the
+        # fullscreen-stack tiers only one `where` is ever active, so the dict holds
+        # one live entry, exactly as cheap as the old single slot.
+        self._bar_strips = {}
         self._bar_cache_gen = 0
         # Clock-text cache (#66 CHROMEBRK): (second, string) -- see _clock_text.
         self._clock_at = -1
@@ -202,12 +201,11 @@ class BarLayer:
         return None
 
     def _zone_is_game(self, where):
-        """True for the surfaces that draw on the fixed 320x240 GAME canvas: the "menu"
-        tabs (cards/paint/map/music, like the running cart) and the Part-4 "tool" bar (a
-        running tool/app is on the game canvas), rather than the responsive SYSTEM canvas
-        (code/blocks, like the launcher/Settings)."""
-        return where == "tool" or (
-            where == "menu" and self.ws.menu_view in ("cards", "paint", "map", "music"))
+        """True for the surfaces that draw on the fixed 320x240 GAME canvas -- since
+        the #39 step-3 conversions moved every Editor tab onto the responsive SYSTEM
+        canvas, that's only the Part-4 "tool" bar (a running tool/app is on the game
+        canvas, like the running cart's crash chrome)."""
+        return where == "tool"
 
     def _bar_canvas(self, where):
         if where == "desktop" or self._zone_is_game(where):
@@ -226,6 +224,15 @@ class BarLayer:
             return _ZONE_LEFT_GAME
         return self.ws.layout.zone_left
 
+    def _in_window(self, where):
+        """True when `where`'s bar is being drawn INSIDE a window of the windowed
+        WM (#73): every zoned screen except the desktop root's "home" bar. The
+        window bar then suppresses the OS right zone (no copied taskbar) -- the
+        WM's title strip carries min/max/close instead. Always False on the
+        fullscreen-stack tiers (ws.windowed_chrome stays False there)."""
+        return getattr(self.ws, "windowed_chrome", False) and where not in (
+            "home", "desktop", "tool")
+
     # -- draw + cache (the #43 strip, generalized to every `where`) -----------
 
     def _draw_top_bar_cart(self, where="desktop"):
@@ -242,18 +249,31 @@ class BarLayer:
         cv = self._bar_canvas(where)
         bar_h = self._bar_h(where)
         key = self._cart_bar_key(where)
-        strip = self._cart_bar_strip
+        if hasattr(cv, "_lr"):
+            # The canvas is itself a RecordingLayer (a windowed-WM window buffer on
+            # the web console): a strip cache NESTED in a recorded layer can't ship
+            # (blit_strip of a raw strip isn't a recordable op), so render the bar
+            # directly -- a live window re-records its whole stream anyway, and the
+            # dozen icon/text commands are far lighter than an inlined pixel strip.
+            self._render_cart_bar(cv, key)
+            return
+        slot = self._bar_strips.get(where)
+        if slot is None:
+            slot = [None, None, None]              # [strip, key, canvas]
+            self._bar_strips[where] = slot
+        strip = slot[0]
         # The active canvas can SWAP at runtime (the device web view binds a recording
         # TeeCanvas in place of the raw DeviceCanvas, #41) OR change identity/height as
         # `where` moves between the fixed game canvas and the responsive system canvas
-        # (Stage 4). A strip allocated on the OLD canvas/height is the wrong layer for
-        # the new one (a raw DeviceCanvas strip blitted through the Tee has no
-        # RecordingLayer hooks -- '_end_batch' AttributeError -- and it wouldn't be
-        # recorded for the browser anyway), so rebuild whenever either changes, not
-        # just on a width resize.
-        canvas_changed = self._cart_bar_canvas is not cv
+        # (Stage 4) or between the root canvas and a window buffer (wm_windowed.py).
+        # A strip allocated on the OLD canvas/height is the wrong layer for the new
+        # one (a raw DeviceCanvas strip blitted through the Tee has no RecordingLayer
+        # hooks -- '_end_batch' AttributeError -- and it wouldn't be recorded for the
+        # browser anyway), so rebuild whenever either changes, not just on a width
+        # resize.
+        canvas_changed = slot[2] is not cv
         size_changed = strip is None or strip.w != cv.w or strip.h != bar_h
-        if size_changed or canvas_changed or self._cart_bar_key_cur != key:
+        if size_changed or canvas_changed or slot[1] != key:
             # (Re)build the cached strip. new_layer gives a same-type/-palette canvas the
             # bar body draws into at the SAME coords (the bar lives at y in [0, bar_h),
             # which maps 1:1 onto the strip's rows), so the cached pixels are byte-identical
@@ -261,10 +281,10 @@ class BarLayer:
             # is unchanged; allocate a fresh layer on first build / a resize / a canvas swap.
             if size_changed or canvas_changed:
                 strip = cv.new_layer(cv.w, bar_h)
-                self._cart_bar_strip = strip
-                self._cart_bar_canvas = cv
+                slot[0] = strip
+                slot[2] = cv
             self._render_cart_bar(strip, key)
-            self._cart_bar_key_cur = key
+            slot[1] = key
         cv.blit_strip(strip, 0, 0)
 
     def _cart_bar_key(self, where="desktop"):
@@ -344,10 +364,15 @@ class BarLayer:
             return
         # -- the zoned bar (Stage 4): a black backing band (with a thin shelf edge
         # line below), the OS-owned RIGHT zone, then the active app's LENT left zone.
+        # Inside a WINDOW (the windowed WM, #73) the right zone is SUPPRESSED: the
+        # desktop's full-width bar is the one OS bar, and the window's WM title strip
+        # carries min/max/close -- so an app window's bar is purely its toolbar (the
+        # tab ladder / title), never a copied taskbar.
         bar_h = self._bar_h(where)
         cv.rect(0, 0, cv.w, bar_h, NAMES["black"])
         cv.rect(0, bar_h - 1, cv.w, 1, NAMES["dark_grey"])           # shelf edge line
-        self._render_right_zone(cv, where)
+        if not self._in_window(where):
+            self._render_right_zone(cv, where)
         owner = self._zone_owner(where)
         if owner is not None:
             owner.draw_zone(cv, self._zone_rect(where))
@@ -402,7 +427,11 @@ class BarLayer:
         """The persistent bottom dock: home / code / draw / map / run / settings.
         The active slot (home on the desktop, settings in Settings) is highlighted;
         the music slot is greyed (its editor is #16, not yet here). Tool slots that
-        need an open cart read dimmed on the home desktop."""
+        need an open cart read dimmed on the home desktop. Suppressed entirely in
+        the windowed WM (#73): the dock is desktop-level chrome, not something a
+        Settings WINDOW should carry a copy of."""
+        if getattr(self.ws, "windowed_chrome", False):
+            return
         NAMES = self._NAMES
         ws = self.ws
         cv = ws.sys_canvas
@@ -431,7 +460,10 @@ class BarLayer:
         return self.ws.layout.dock_slot_rect(k)
 
     def _dock_slot_at(self, px, py):
-        """Which dock slot ("home"/"code"/.../"settings") was tapped, or None."""
+        """Which dock slot ("home"/"code"/.../"settings") was tapped, or None.
+        None in the windowed WM -- the dock isn't drawn there (#73)."""
+        if getattr(self.ws, "windowed_chrome", False):
+            return None
         if py < self.ws.layout.dock_y:
             return None
         for k in range(len(_DOCK_SLOTS)):
@@ -473,6 +505,13 @@ class BarLayer:
         run reset runs for ANY non-clock tap (byte-identical to the pre-Stage-4
         launcher pointer), so taps that fall through to the content still reset it."""
         ws = self.ws
+        if self._in_window(where):
+            # Inside a WM window (#73) the bar has NO right zone (suppressed in the
+            # draw), so there is nothing OS-owned to hit -- the tap goes straight to
+            # the app's lent zone; closing lives on the WM title strip.
+            owner = self._zone_owner(where)
+            return bool(owner.zone_tap(px, py, self._zone_rect(where))) \
+                if owner is not None else False
         if self._zone_is_game(where):
             clock_hit, gear_hit, x_hit = _ZONE_CLOCK, _ZONE_GEAR, _ZONE_CONTEXT_X
             wifi_hit = _ZONE_WIFI
@@ -490,11 +529,17 @@ class BarLayer:
         if self._in(px, py, gear_hit):           # ≡ -> system menu (Settings/About/Reboot, #52)
             ws.toggle_sysmenu()
             return True
-        # WiFi status icon (Part 3): tap -> LAUNCH the wifi.moy tool (you run it, you don't
-        # edit it). Consumes the tap even if the tool isn't installed, so it never leaks to
-        # the lent zone underneath the OS-owned right cluster.
+        # WiFi status icon: on the WINDOWED desktop it deep-links into Settings ->
+        # WIFI (spec Section 5's "status icons shortcut into Settings" -- Settings is
+        # a system APP, so wifi setup coexists with a running cart, #38); on the
+        # fullscreen tiers it launches the wifi.moy tool (Part 3, unchanged device
+        # behavior). Consumes the tap either way so it never leaks to the lent zone.
         if self._in(px, py, wifi_hit):
-            ws.launch_wifi_tool()
+            if getattr(ws, "windowed_chrome", False):
+                ws.open_settings()
+                ws.settings_layer.open_wifi()
+            else:
+                ws.launch_wifi_tool()
             return True
         # Context X (Stage 5, spec Section 9): tap to EXIT the active app back toward the
         # launcher root. The launcher draws no X (where == "home") so it's not tested

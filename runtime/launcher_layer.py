@@ -98,6 +98,8 @@ class Launcher:
         self.page = 0
         self._NAMES = names
         self._blit_glyph = blit_glyph
+        self.theme = None             # chrome THEME tokens (ws.set_theme pushes them);
+                                      # None -> the yellow default accent
         if layout is None:
             # Defensive default for a bare Launcher(items) (no caller does this); lazy so
             # there's no launcher_layer<->console module-load cycle.
@@ -205,6 +207,9 @@ class Launcher:
         box = lay.icon_box
         fw = lay.font_w                              # on-screen char-cell width (8*fs)
         spr_scale = max(1, box // 16)                # fit the 16x16 icon sprite in the box
+        # The selection accent follows the panel THEME when one is pushed (Settings
+        # -> THEME); the default is the frozen yellow (byte-identical baseline).
+        acc = (self.theme or {}).get("accent", NAMES["yellow"])
         for i in self._page_range():
             x, y, w, h = self.tile_rect(i)
             it = self.items[i]
@@ -213,7 +218,7 @@ class Launcher:
             by = y + 2
             cv.rect(bx, by, box, box, NAMES["dark_purple"])
             cv.rectb(bx, by, box, box,
-                     NAMES["yellow"] if sel else NAMES["dark_grey"])
+                     acc if sel else NAMES["dark_grey"])
             img = sheet_for(it) if sheet_for is not None else None
             if img is not None:
                 cv.spr(img, bx + (box - 16 * spr_scale) // 2,
@@ -225,8 +230,20 @@ class Launcher:
             maxc = w // fw
             if len(name) > maxc:
                 name = name[:maxc]
-            cv.print(name, x + (w - len(name) * fw) // 2, by + box + 3,
-                     NAMES["white"] if sel else NAMES["light_grey"], 1)
+            nx = x + (w - len(name) * fw) // 2
+            ny = by + box + 3
+            if lay._base:
+                cv.print(name, nx, ny,
+                         NAMES["white"] if sel else NAMES["light_grey"], 1)
+            else:
+                # DESKTOP density (big-canvas tiers): a Picotron-style label PILL --
+                # dark text on a light chip -- so names read over any wallpaper.
+                # The selected pill takes the theme accent.
+                fs = lay.fs
+                ph = 8 * fs + 4 * fs
+                cv.rect(nx - 3 * fs, ny - 2 * fs, len(name) * fw + 6 * fs, ph,
+                        acc if sel else NAMES["white"])
+                cv.print(name, nx, ny, NAMES["black"], 1)
 
     def _tile_glyph(self, cv, it, box):
         # A type-colored art box with a centered type glyph, for carts with no
@@ -437,14 +454,21 @@ class EditorPickerLayer:
         NAMES = self._NAMES
         ws = self.ws
         cv = ws.sys_canvas
-        # The picker is a TOOL space (owner call, 2026-07-08): a static black
-        # backdrop instead of the animated wallpaper -- "it's software". Besides
-        # the look, this makes the screen FREE under the redraw gate (#44): with
-        # no live wallpaper forcing per-frame repaints, an idle picker draws only
-        # on input, instead of re-rendering the grid at wallpaper rate (~100ms
-        # chrome frames measured on the launcher's live backdrop).
-        cv.cls(NAMES["black"])
+        # The picker is a TOOL space (owner call, 2026-07-08): a STATIC backdrop
+        # instead of the animated wallpaper -- "it's software". Besides the look,
+        # this makes the screen FREE under the redraw gate (#44): nothing here
+        # animates, so an idle picker draws only on input. Styled to the panel
+        # THEME (Settings -> THEME; the "night" default is the moybyte site
+        # colorway): the theme's panel field with a faint dot-grid texture,
+        # matching the desktop shell + Settings (still one fill + a few hundred
+        # pix -- static, so effectively free).
+        th = ws.theme_colors
+        cv.cls(th["panel"])
         lay = ws.layout
+        _fs = lay.fs
+        for gy in range(8 * _fs, cv.h, 24 * _fs):
+            for gx in range(8 * _fs, cv.w, 24 * _fs):
+                cv.pix(gx, gy, th["dim"])
         ws.picker.draw(cv, ws._icon_sheet_for)
         if ws.picker.max_page() > 0:
             if ws.picker.page > 0:

@@ -112,7 +112,7 @@ class WebConsole:
     single-threaded, like the device loop)."""
 
     def __init__(self, save_dir, fps=DEFAULT_FPS, cart=None, sys_size=None,
-                 font_scale=1):
+                 font_scale=1, windowed=False):
         self.dt = 1.0 / max(1, fps)
         # Two-domain seam (#39): `sys_size` is the SYSTEM canvas size the desktop
         # renders on (default 320x240 = today); the game stays a fixed 320x240,
@@ -163,6 +163,14 @@ class WebConsole:
         # Live, real-connection-aware WiFi (your PC is online) -- matches the
         # interactive pygame run, so network carts test against real sockets.
         self.ws.wifi = host_app.make_host_wifi(host_app.moy_carts, self.ws.carts_root)
+        # The Picotron-style windowed desktop (#73) over the web transport: install
+        # the windowed WM AFTER the recorder swap above, so it anchors its root
+        # context (and its window buffers, via root.new_layer -> RecordingLayer)
+        # to the RECORDING canvas -- window contents then ship to the browser as
+        # cached off-screen layers. Needs the distinct big canvas path.
+        if windowed and self.ws._sys_canvas is not None:
+            from runtime.wm_windowed import WindowedWM
+            self.ws.wm = WindowedWM(self.ws)
         if cart:
             self._open_named_cart(cart, save_dir)
         self.driver = host_app.ConsoleDriver(self.ws)
@@ -225,6 +233,11 @@ class WebConsole:
     # -- output --------------------------------------------------------------
     def step_frame(self):
         """Advance the console one frame and return (commands, cart_title, audio_b64).
+        `commands` is None when the console SKIPPED the redraw (#44's dirty gate: a
+        static screen changed nothing) -- the WS loop then pushes nothing, so an idle
+        desktop costs ~zero bandwidth (the VPN/remote case). The browser retains its
+        last frame; a (re)connecting page gets a keyframe because its /assets fetch
+        arms ws._dirty (see assets()), forcing the next step to record in full.
 
         The console draws into the CommandCanvas during driver.frame(); we take the
         recorded list afterward. We clear any stale commands first so a partially
@@ -234,13 +247,6 @@ class WebConsole:
         synth in JS. Empty string when nothing played this frame (no cart / silence)."""
         with self._lock:
             self.canvas.take_commands()      # drop anything stale (defensive)
-            # A streaming web view must send the CURRENT screen on every push, but the console
-            # is _dirty-gated (#44): it re-records only when something changed. A STATIC screen
-            # (the launcher, a paused cart) would record a full frame ONCE and then nothing, so
-            # the WS loop's per-tick push (or a browser that connects after that first frame)
-            # gets empty frames and shows black. Force a full redraw each frame -- the host has
-            # CPU + localhost/LAN bandwidth to spare, and the browser always gets a complete frame.
-            self.ws._dirty = True
             self.driver.frame(self.dt)
             # Route through the shared serve path. Per-WM-surface (Stage 9): served_surfaces()
             # runs the ship-once deflayer bookkeeping ONCE over the flat stream and returns BOTH
@@ -249,16 +255,20 @@ class WebConsole:
             # ship-once prefix delivered as a leading "_defs" surface. Host sprites are
             # self-contained (pixels inline), so no defspr is prepended -- only deflayers.
             flat = self.canvas.take_commands()
+            cart = self._cart_title()
+            au = getattr(self.ws, "audio", None)
+            pcm = au.take_pcm() if (au is not None and hasattr(au, "take_pcm")) else b""
+            audio_b64 = base64.b64encode(pcm).decode("ascii") if (pcm and any(pcm)) else ""
+            if not flat:
+                # Redraw skipped (static screen): nothing recorded, nothing to serve.
+                self._last_surfaces = None
+                return None, cart, audio_b64
             surfaces = self.canvas.take_surfaces()      # per-WM-surface slices, or None
             if surfaces is not None:
                 cmds, self._last_surfaces = self._served.served_surfaces(flat, surfaces)
             else:
                 cmds = self._served.served_frame(flat)
                 self._last_surfaces = None
-            cart = self._cart_title()
-            au = getattr(self.ws, "audio", None)
-            pcm = au.take_pcm() if (au is not None and hasattr(au, "take_pcm")) else b""
-            audio_b64 = base64.b64encode(pcm).decode("ascii") if (pcm and any(pcm)) else ""
         return cmds, cart, audio_b64
 
     def assets(self):
@@ -267,9 +277,12 @@ class WebConsole:
 
         A page load / cart change clears the browser's off-screen-layer cache, so forget
         which layer streams we've shipped -- the next pushed frame re-ships every referenced
-        layer's deflayer (the layer twin of refetching the sprite sheet, #54/#43)."""
+        layer's deflayer (the layer twin of refetching the sprite sheet, #54/#43). The fetch
+        also arms ws._dirty: the console must record ONE full keyframe for this (re)connected
+        page, since idle frames otherwise push nothing at all (see step_frame)."""
         with self._lock:
             self._served.reset()
+            self.ws._dirty = True
             sheet = getattr(self.ws, "sheet", None)
             tilemap = getattr(self.ws, "tilemap", None)
             cart = self._cart_title()
@@ -363,6 +376,7 @@ class _Handler(BaseHTTPRequestHandler):
         except OSError:
             pass
         next_push = time.monotonic()
+        last_sent = 0.0                     # last actual push (for the idle keepalive)
         # Per-surface DELTA (#76): one SurfaceDelta per WS connection -- it mirrors
         # THIS browser's SURF cache, so a fresh connection starts full and unchanged
         # surfaces ship as {"same":1} stubs afterwards (same wire the device speaks).
@@ -411,6 +425,15 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception:  # noqa: BLE001 -- a frame error must not kill the socket loop
                 continue
             gen = self.console.canvas._rec.atlas_gen            # host recorder gen (self-contained)
+            if cmds is None:
+                # The console skipped the redraw (a static screen): push NOTHING --
+                # this is what makes an idle desktop ~free over a VPN. A 1s empty
+                # keepalive frame still flows so the page's socket never looks dead
+                # (and carries any stray audio tail).
+                if not audio and now - last_sent < 1.0:
+                    continue
+                cmds = []
+            last_sent = now
             # Stage 9: ship the per-WM-surface streams (the browser composites them); step_frame
             # stashed them on the console. None -> a flat frame (nothing changes for that path).
             # #76: delta-encode them per connection -- unchanged surfaces ship as stubs; the
@@ -487,11 +510,14 @@ def main(argv=None):
                     help="system canvas size (default 320x240)")
     ap.add_argument("--font-scale", type=int, default=1, choices=(1, 2, 3),
                     help="initial system-UI font scale 1/2/3 (system.json overrides)")
+    ap.add_argument("--windowed", action="store_true",
+                    help="Picotron-style windowed desktop WM (#73; needs a big --size)")
     args = ap.parse_args(argv)
 
     w, _, h = args.size.lower().partition("x")
     console = WebConsole(args.save_dir, fps=args.fps, cart=args.cart,
-                         sys_size=(int(w), int(h)), font_scale=args.font_scale)
+                         sys_size=(int(w), int(h)), font_scale=args.font_scale,
+                         windowed=args.windowed)
     server = make_server(console, host=args.host, port=args.port)
     url = _lan_url(server.server_address[1])
     print("Moybyte web console (draw-command streaming) serving the live desktop at:")

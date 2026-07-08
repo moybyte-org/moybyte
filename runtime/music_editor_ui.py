@@ -96,10 +96,82 @@ def _mu_note_name(pitch):
 
 
 def _mu_pad_rect(col, row):
-    """The (x, y, w, h) of edit-pad button at (col 0/1, row 0..3)."""
+    """The (x, y, w, h) of edit-pad button at (col 0/1, row 0..3) -- the frozen
+    320x240 baseline (MusicLayout.pad_rect is the responsive equivalent)."""
     x = _MU_PAD_X + col * (_MU_PAD_W + _MU_PAD_GAP)
     y = _MU_PAD_Y + row * (_MU_PAD_H + _MU_PAD_GAP)
     return (x, y, _MU_PAD_W, _MU_PAD_H)
+
+
+_BASE_W = 320
+_BASE_H = 240
+
+
+class MusicLayout:
+    """Responsive music-editor geometry (#39 step 3): the control row (view toggle /
+    object stepper / speed ticks), the scrolling step/slot list, the right-hand edit
+    pad and the bottom PLAY/LOOP bar, derived from the SYSTEM canvas size (w, h) +
+    font scale.
+
+    The single hard contract (mirrors Layout/CodeLayout/PaintLayout/MapLayout): at
+    (w, h, fs) == (320, 240, 1) every field equals the frozen `_MU_*` module
+    constant, byte for byte (the `_base` branch); the responsive formulas only run
+    on a larger canvas / bigger font. The LIST is the star of the reflow: a bigger
+    panel shows more steps/slots at once."""
+
+    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1):
+        self.w = int(w)
+        self.h = int(h)
+        self.fs = max(1, int(font_scale))
+        fs = self.fs
+        self._base = (self.w == _BASE_W and self.h == _BASE_H and fs == 1)
+        if self._base:
+            self.title_y = _MU_TITLE_Y
+            self.view_btn = _MU_VIEW
+            self.obj_prev, self.obj_next = _MU_OBJ_PREV, _MU_OBJ_NEXT
+            self.title_x = 74
+            self.spd_x = 160
+            self.speed_dn, self.speed_up = _MU_SPEED_DN, _MU_SPEED_UP
+            self.status_x = 250
+            self.list_x, self.list_y0 = _MU_LIST_X, _MU_LIST_Y0
+            self.row_h, self.rows, self.list_w = _MU_ROW_H, _MU_ROWS, _MU_LIST_W
+            self.list_area = _MU_LIST_AREA
+            self.pad_x, self.pad_y = _MU_PAD_X, _MU_PAD_Y
+            self.pad_w, self.pad_h, self.pad_gap = _MU_PAD_W, _MU_PAD_H, _MU_PAD_GAP
+            self.play_btn, self.loop_btn = _MU_PLAY, _MU_LOOP
+            return
+        # -- responsive: the control row hangs under the bar, the bottom bar anchors
+        # to the canvas floor, and the list gains rows to fill the band between ----
+        bar_h = 18 * fs
+        ctl_y = bar_h + 1 * fs
+        self.title_y = bar_h + 3 * fs
+        self.view_btn = (2 * fs, ctl_y, 46 * fs, 14 * fs)
+        self.obj_prev = (52 * fs, ctl_y, 16 * fs, 14 * fs)
+        self.obj_next = (134 * fs, ctl_y, 16 * fs, 14 * fs)
+        self.title_x = 74 * fs
+        self.spd_x = 160 * fs
+        self.speed_dn = (206 * fs, ctl_y, 16 * fs, 14 * fs)
+        self.speed_up = (228 * fs, ctl_y, 16 * fs, 14 * fs)
+        self.status_x = 250 * fs
+        bot_y = self.h - 42 * fs                  # PLAY/LOOP row (base 198)
+        self.list_x = _MU_LIST_X * fs
+        self.list_y0 = bar_h + 16 * fs
+        self.row_h = _MU_ROW_H * fs
+        self.rows = max(4, (bot_y - 4 * fs - self.list_y0) // self.row_h)
+        self.list_w = _MU_LIST_W * fs
+        self.list_area = (self.list_x, self.list_y0, self.list_w,
+                          self.rows * self.row_h)
+        self.pad_x = self.list_x + self.list_w + 10 * fs
+        self.pad_y = self.list_y0
+        self.pad_w, self.pad_h, self.pad_gap = 68 * fs, 22 * fs, 4 * fs
+        self.play_btn = (8 * fs, bot_y, 100 * fs, 24 * fs)
+        self.loop_btn = (116 * fs, bot_y, 100 * fs, 24 * fs)
+
+    def pad_rect(self, col, row):
+        """The (x, y, w, h) of edit-pad button at (col 0/1, row 0..3)."""
+        x = self.pad_x + col * (self.pad_w + self.pad_gap)
+        y = self.pad_y + row * (self.pad_h + self.pad_gap)
+        return (x, y, self.pad_w, self.pad_h)
 
 
 class MusicEditorUI:
@@ -119,6 +191,13 @@ class MusicEditorUI:
         # and shows STOP; None when nothing is playing.
         self.musicedit = None         # MusicEditor while menu_view == "music"
         self.music_preview = None     # ("sfx", n) | ("song", track) | None (preview)
+        sc = ws.sys_canvas
+        self.layout = MusicLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
+
+    def relayout(self, w, h, fs):
+        """Rebuild the responsive geometry (#39 step 3) -- called by ws._relayout on
+        a font-scale change."""
+        self.layout = MusicLayout(w, h, fs)
 
     def build(self):
         """Build the MusicEditor over the open cart's live AudioBank (#50): the
@@ -216,40 +295,41 @@ class MusicEditorUI:
         button-dispatch shape."""
         ws = self.ws
         me = self.musicedit
+        lay = self.layout
         if me is None:
             return                         # nothing to edit; exit via the bar's X
         song = me.view == MusicEditor.SONG_VIEW
         # The step/slot list: tap a row to select it.
-        if self._in(px, py, _MU_LIST_AREA):
+        if self._in(px, py, lay.list_area):
             total = me.slot_count() if song else me.step_count()
             cur = me.slot if song else me.step
             top = self._mu_visible_top(cur, total)
-            row = (py - _MU_LIST_Y0) // _MU_ROW_H
+            row = (py - lay.list_y0) // lay.row_h
             me.select_cursor(top + row)
             return
         # Title-strip controls.
-        if self._in(px, py, _MU_OBJ_PREV):
+        if self._in(px, py, lay.obj_prev):
             (me.select_track if song else me.select_sfx)(-1)
             return
-        if self._in(px, py, _MU_OBJ_NEXT):
+        if self._in(px, py, lay.obj_next):
             (me.select_track if song else me.select_sfx)(1)
             return
-        if self._in(px, py, _MU_SPEED_DN):
+        if self._in(px, py, lay.speed_dn):
             me.nudge_speed(-1); return
-        if self._in(px, py, _MU_SPEED_UP):
+        if self._in(px, py, lay.speed_up):
             me.nudge_speed(1); return
-        if self._in(px, py, _MU_VIEW):
+        if self._in(px, py, lay.view_btn):
             me.toggle_view()
             self._stop_music_preview()         # don't carry a preview across views
             return
         # The bottom action bar.
-        if self._in(px, py, _MU_PLAY):
+        if self._in(px, py, lay.play_btn):
             if self.music_preview is not None:
                 self._stop_music_preview()
             else:
                 self._play_music_preview()
             return
-        if self._in(px, py, _MU_LOOP):
+        if self._in(px, py, lay.loop_btn):
             me.toggle_loop(); return
         # The right-hand edit pad (per-view button grid).
         self._music_pad_click(px, py, song)
@@ -261,7 +341,7 @@ class MusicEditorUI:
         # Find which pad button was hit (col 0/1, row 0..3).
         for row in range(4):
             for col in range(2):
-                if self._in(px, py, _mu_pad_rect(col, row)):
+                if self._in(px, py, self.layout.pad_rect(col, row)):
                     self._music_pad_action(row, col, song)
                     return
 
@@ -297,14 +377,15 @@ class MusicEditorUI:
         petme128 font only, so host == device."""
         ws = self.ws
         NAMES = self._NAMES
-        cv = ws.canvas
+        cv = ws.sys_canvas
+        lay = self.layout
         me = self.musicedit
         cv.cls(NAMES["dark_blue"])
-        # The old black title band is gone -- the unified bar owns the top 18px (drawn
-        # by _MusicLayer AFTER this). The controls that were in it now sit in a control
-        # row just below the bar (_MU_TITLE_Y=21).
+        # The old black title band is gone -- the unified bar owns the top strip
+        # (drawn by _MusicLayer AFTER this). The controls that were in it now sit in
+        # a control row just below the bar (lay.title_y).
         if me is None:
-            cv.print("NO SOUND BANK", _MU_LIST_X, _MU_TITLE_Y, NAMES["white"], 1)
+            cv.print("NO SOUND BANK", lay.list_x, lay.title_y, NAMES["white"], 1)
             return                         # exit via the bar's context X
         song = me.view == MusicEditor.SONG_VIEW
         # Title: which object + its tempo + a dirty *.
@@ -319,13 +400,13 @@ class MusicEditorUI:
         if me.dirty:
             title = title + " *"
         # View toggle (far left) | < obj > + title | SPD + tempo +/- | save status.
-        ws._btn("SONG" if not song else "SFX", _MU_VIEW, NAMES["dark_purple"])
-        ws._btn("<", _MU_OBJ_PREV, NAMES["indigo"])
-        cv.print(title, 74, _MU_TITLE_Y, NAMES["white"], 1)
-        ws._btn(">", _MU_OBJ_NEXT, NAMES["indigo"])
-        cv.print("SPD " + str(speed), 160, _MU_TITLE_Y, NAMES["light_grey"], 1)
-        self._mu_tick(_MU_SPEED_DN, "-")
-        self._mu_tick(_MU_SPEED_UP, "+")
+        ws._btn("SONG" if not song else "SFX", lay.view_btn, NAMES["dark_purple"], cv)
+        ws._btn("<", lay.obj_prev, NAMES["indigo"], cv)
+        cv.print(title, lay.title_x, lay.title_y, NAMES["white"], 1)
+        ws._btn(">", lay.obj_next, NAMES["indigo"], cv)
+        cv.print("SPD " + str(speed), lay.spd_x, lay.title_y, NAMES["light_grey"], 1)
+        self._mu_tick(lay.speed_dn, "-")
+        self._mu_tick(lay.speed_up, "+")
         # The scrolling step/slot list.
         if song:
             self._draw_music_song(me)
@@ -335,90 +416,97 @@ class MusicEditorUI:
         self._draw_music_pad(song)
         # Bottom bar: PLAY/STOP toggles the preview; LOOP flag (SAVE/CLOSE in the bar).
         playing = self.music_preview is not None
-        ws._btn("STOP" if playing else "PLAY", _MU_PLAY,
-                  NAMES["red"] if playing else NAMES["green"])
-        ws._btn("LOOP" if loop else "1X", _MU_LOOP,
-                  NAMES["orange"] if loop else NAMES["dark_grey"])
+        ws._btn("STOP" if playing else "PLAY", lay.play_btn,
+                  NAMES["red"] if playing else NAMES["green"], cv)
+        ws._btn("LOOP" if loop else "1X", lay.loop_btn,
+                  NAMES["orange"] if loop else NAMES["dark_grey"], cv)
         if ws.save_status:
-            cv.print(ws.save_status[:8], 250, _MU_TITLE_Y, NAMES["yellow"], 1)
+            cv.print(ws.save_status[:8], lay.status_x, lay.title_y, NAMES["yellow"], 1)
 
     def _mu_tick(self, rect, label):
         """A small +/- tick button (smaller text than _btn for the title-strip nudges)."""
         x, y, w, h = rect
         NAMES = self._NAMES
-        cv = self.ws.canvas
+        cv = self.ws.sys_canvas
+        fs = self.layout.fs
         cv.rect(x, y, w, h, NAMES["blue"])
         cv.rectb(x, y, w, h, NAMES["white"])
-        cv.print(label, x + (w - 8) // 2, y + (h - 8) // 2, NAMES["black"], 1)
+        cv.print(label, x + (w - 8 * fs) // 2, y + (h - 8 * fs) // 2, NAMES["black"], 1)
 
     def _mu_visible_top(self, cur, total):
         """First list row to show so the cursor stays in view (simple scrolloff)."""
-        if total <= _MU_ROWS:
+        rows = self.layout.rows
+        if total <= rows:
             return 0
-        top = cur - _MU_ROWS // 2
+        top = cur - rows // 2
         if top < 0:
             top = 0
-        if top > total - _MU_ROWS:
-            top = total - _MU_ROWS
+        if top > total - rows:
+            top = total - rows
         return top
 
     def _draw_music_sfx(self, me):
         NAMES = self._NAMES
-        cv = self.ws.canvas
+        cv = self.ws.sys_canvas
+        lay = self.layout
+        fs = lay.fs
         s = me.cur_sfx()
         if s is None:
             return
         total = len(s.steps)
         top = self._mu_visible_top(me.step, total)
-        for vi in range(_MU_ROWS):
+        for vi in range(lay.rows):
             idx = top + vi
             if idx >= total:
                 break
-            x = _MU_LIST_X
-            y = _MU_LIST_Y0 + vi * _MU_ROW_H
+            x = lay.list_x
+            y = lay.list_y0 + vi * lay.row_h
             cur = (idx == me.step)
             if cur:
-                cv.rect(x, y, _MU_LIST_W, _MU_ROW_H - 1, NAMES["indigo"])
+                cv.rect(x, y, lay.list_w, lay.row_h - 1, NAMES["indigo"])
             pitch, wave, vol = s.steps[idx][0], s.steps[idx][1], s.steps[idx][2]
             tc = NAMES["white"] if cur else NAMES["light_grey"]
-            cv.print("%02d" % idx, x + 2, y + 4, NAMES["dark_grey"]
+            cv.print("%02d" % idx, x + 2 * fs, y + 4 * fs, NAMES["dark_grey"]
                      if not cur else NAMES["light_grey"], 1)
             note = _mu_note_name(pitch)
-            cv.print(note, x + 24, y + 4, NAMES["peach"] if pitch >= 0 else
+            cv.print(note, x + 24 * fs, y + 4 * fs, NAMES["peach"] if pitch >= 0 else
                      NAMES["dark_grey"], 1)
-            cv.print(_MU_WAVE_LABELS[wave & 3], x + 64, y + 4, tc, 1)
+            cv.print(_MU_WAVE_LABELS[wave & 3], x + 64 * fs, y + 4 * fs, tc, 1)
             # a little volume bar (0..7) -> up to 7 ticks
-            bx = x + 96
+            bx = x + 96 * fs
             for v in range(7):
                 col = NAMES["green"] if v < vol else NAMES["dark_grey"]
-                cv.rect(bx + v * 7, y + 4, 5, 8, col)
+                cv.rect(bx + v * 7 * fs, y + 4 * fs, 5 * fs, 8 * fs, col)
 
     def _draw_music_song(self, me):
         NAMES = self._NAMES
-        cv = self.ws.canvas
+        cv = self.ws.sys_canvas
+        lay = self.layout
+        fs = lay.fs
         t = me.cur_track()
         if t is None:
             return
         total = len(t.pattern)
         top = self._mu_visible_top(me.slot, total)
-        for vi in range(_MU_ROWS):
+        for vi in range(lay.rows):
             idx = top + vi
             if idx >= total:
                 break
-            x = _MU_LIST_X
-            y = _MU_LIST_Y0 + vi * _MU_ROW_H
+            x = lay.list_x
+            y = lay.list_y0 + vi * lay.row_h
             cur = (idx == me.slot)
             if cur:
-                cv.rect(x, y, _MU_LIST_W, _MU_ROW_H - 1, NAMES["indigo"])
+                cv.rect(x, y, lay.list_w, lay.row_h - 1, NAMES["indigo"])
             sid = t.pattern[idx]
-            cv.print("%02d" % idx, x + 2, y + 4, NAMES["dark_grey"]
+            cv.print("%02d" % idx, x + 2 * fs, y + 4 * fs, NAMES["dark_grey"]
                      if not cur else NAMES["light_grey"], 1)
-            cv.print("SFX " + str(sid), x + 30, y + 4,
+            cv.print("SFX " + str(sid), x + 30 * fs, y + 4 * fs,
                      NAMES["white"] if cur else NAMES["light_grey"], 1)
 
     def _draw_music_pad(self, song):
         # Two columns x four rows of edit buttons; labels differ per view.
         NAMES = self._NAMES
+        cv = self.ws.sys_canvas
         if song:
             labels = (("SFX-", "SFX+"), ("", ""), ("", ""), ("ADD", "DEL"))
             cols = ((NAMES["blue"], NAMES["blue"]), (None, None), (None, None),
@@ -435,4 +523,4 @@ class MusicEditorUI:
                 lbl = labels[row][col]
                 if not lbl:
                     continue
-                self.ws._btn(lbl, _mu_pad_rect(col, row), cols[row][col])
+                self.ws._btn(lbl, self.layout.pad_rect(col, row), cols[row][col], cv)

@@ -289,23 +289,271 @@ def test_font_scale_change_reflows_open_code_editor(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Sprite/paint + map editors stay a 320x240 viewport (step 3, NOT this step).
+# Step 3: the PAINT + MAP editors are system-domain responsive too.
 # ---------------------------------------------------------------------------
 
-def test_paint_and_map_still_use_the_game_viewport(tmp_path):
-    """The paint + map editors still draw on the fixed 320x240 GAME canvas and are
-    composited as a viewport -- they are explicitly OUT OF SCOPE for step 2. Proof:
-    a running paint/map frame composites (the game buffer differs from a flat fill)
-    while the system canvas shows the centered viewport with a letterbox bezel."""
+
+def test_paint_editor_320x240_is_byte_identical(tmp_path):
+    """The paint editor on a DISTINCT 320x240 system canvas (font 1x) renders
+    exactly the same pixels as the shared-canvas (today) path."""
+    a_ws = _ws_shared(tmp_path / "a")
+    b_ws = _ws_distinct_320(tmp_path / "b")
+    bufs = []
+    for ws in (a_ws, b_ws):
+        ws._open_paint()
+        _quiesce(ws)
+        ws.frame(1 / 30)
+        bufs.append(bytes(ws.sys_canvas.buf))
+    assert bufs[0] == bufs[1]
+
+
+def test_paint_layout_baseline_constants(tmp_path):
+    """PaintLayout at (320, 240, 1) reproduces the frozen module constants."""
+    from runtime import paint_layer as P
+    lay = P.PaintLayout(320, 240, 1)
+    assert lay._base
+    assert lay.pg_area == P._PG_AREA and lay.pg_span == P._PG_SPAN
+    assert lay.sw_area == P._SW_AREA
+    assert lay.spr_prev == P._SPR_PREV and lay.spr_next == P._SPR_NEXT
+    assert lay.size_btn == P._PAINT_SIZE
+    assert lay.get_btn == P._PAINT_GET and lay.put_btn == P._PAINT_PUT
+    assert lay.save_btn == P._PAINT_SAVE and lay.close_btn == P._PAINT_CLOSE
+
+
+def test_paint_editor_grid_grows_on_large_canvas(tmp_path):
+    """At 960x600 the zoomed pixel grid grows (a multiple of 48px, so every sprite
+    size still edits in whole on-screen pixels) and the editor renders valid pixels
+    on the system canvas with no viewport bezel."""
+    from runtime import paint_layer as P
     from runtime import host_app
-    from runtime import wm as WM     # _VIEWPORT_BEZEL moved to wm.py (Stage 6)
+    ws = _ws(tmp_path, sys_size=(960, 600))
+    drv = host_app.ConsoleDriver(ws)
+    ws._open_paint()
+    lay = ws.paint_layer.layout
+    assert lay.pg_span > P._PG_SPAN and lay.pg_span % 48 == 0
+    drv.frame(1 / 30)
+    buf = drv.rgb888()
+    assert len(buf) == 960 * 600 * 3
+    assert len(set(buf)) > 4
+
+
+def test_paint_editor_tap_paints_in_system_coords(tmp_path):
+    """A tap inside the (reflowed) grid paints the right sheet pixel, hit-tested in
+    SYSTEM coords -- and a swatch tap picks a color at the layout's position."""
+    from runtime import host_app
     ws = _ws(tmp_path, sys_size=(960, 600))
     drv = host_app.ConsoleDriver(ws)
     ws._open_paint()
     drv.frame(1 / 30)
-    ox, oy, scale = ws._viewport()
-    assert scale == 2                                  # the fixed-aspect 320x240 viewport
-    # The bezel corner (outside the viewport) is the solid bezel color (letterboxed).
-    assert ws.sys_canvas.buf[0] == WM._VIEWPORT_BEZEL
-    # The paint editor drew on the GAME canvas (not the system canvas directly).
-    assert len(set(ws.canvas.buf)) > 4
+    pe = ws.paint
+    lay = ws.paint_layer.layout
+    # Pick color 12 from the swatch column.
+    sx = lay.sw_x0 + (12 % lay.sw_cols) * lay.sw + 1
+    sy = lay.sw_y0 + (12 // lay.sw_cols) * lay.sw + 1
+    drv.touch(sx, sy)
+    drv.frame(1 / 30)
+    assert pe.color == 12
+    # Paint pixel (0, 0) of the tile via the top-left grid cell.
+    drv.touch(lay.pg_x0 + 2, lay.pg_y0 + 2)
+    drv.frame(1 / 30)
+    ox, oy = ws.project.sheet.tile_origin(pe.n)
+    assert ws.project.sheet.pget(ox, oy) == 12
+
+
+def test_map_editor_320x240_is_byte_identical(tmp_path):
+    """The map editor on a DISTINCT 320x240 system canvas (font 1x) renders
+    exactly the same pixels as the shared-canvas (today) path."""
+    a_ws = _ws_shared(tmp_path / "a")
+    b_ws = _ws_distinct_320(tmp_path / "b")
+    bufs = []
+    for ws in (a_ws, b_ws):
+        ws._open_map()
+        _quiesce(ws)
+        ws.frame(1 / 30)
+        bufs.append(bytes(ws.sys_canvas.buf))
+    assert bufs[0] == bufs[1]
+
+
+def test_map_layout_baseline_constants(tmp_path):
+    """MapLayout at (320, 240, 1) reproduces the frozen module constants."""
+    from runtime import map_editor_ui as M
+    lay = M.MapLayout(320, 240, 1)
+    assert lay._base
+    assert (lay.mv_x0, lay.mv_y0) == (M._MV_X0, M._MV_Y0)
+    assert (lay.mv_avail_w, lay.mv_avail_h) == (M._MV_AVAIL_W, M._MV_AVAIL_H)
+    assert lay.zooms == tuple(M._MV_ZOOMS)
+    assert lay.tp_area == M._TP_AREA and lay.tp_page == M._TP_PAGE
+    assert lay.tp_prev == M._TP_PREV and lay.tp_next == M._TP_NEXT
+    assert lay.sky_btn == M._TP_SKY and lay.zoom_btn == M._MAP_ZOOM
+    assert (lay.pan_up, lay.pan_lf, lay.pan_rt, lay.pan_dn) == \
+        (M._PAN_UP, M._PAN_LF, M._PAN_RT, M._PAN_DN)
+    assert (lay.erase_btn, lay.save_btn, lay.close_btn) == \
+        (M._MAP_ERASE, M._MAP_SAVE, M._MAP_CLOSE)
+
+
+def test_map_editor_shows_more_cells_on_large_canvas(tmp_path):
+    """At 960x600 the map view rectangle grows (more visible cells at the fit zoom)
+    and the fit-both default cell is recomputed for the bigger view."""
+    from runtime import map_editor_ui as M
+    from runtime import host_app
+    ws = _ws(tmp_path, sys_size=(960, 600))
+    drv = host_app.ConsoleDriver(ws)
+    ws._open_map()
+    lay = ws.map_ui.layout
+    assert lay.mv_avail_w > M._MV_AVAIL_W and lay.mv_avail_h > M._MV_AVAIL_H
+    assert lay.zooms[0] > M._MV_ZOOMS[0]           # bigger fit cell on a bigger view
+    x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
+    assert cols >= M._MV_FIT_COLS and rows >= M._MV_FIT_ROWS
+    drv.frame(1 / 30)
+    buf = drv.rgb888()
+    assert len(buf) == 960 * 600 * 3
+    assert len(set(buf)) > 4
+
+
+def test_map_editor_tap_paints_in_system_coords(tmp_path):
+    """A tap inside the reflowed map view stamps the brush at the right cell,
+    hit-tested in SYSTEM coords."""
+    from runtime import host_app
+    ws = _ws(tmp_path, sys_size=(960, 600))
+    drv = host_app.ConsoleDriver(ws)
+    ws._open_map()
+    drv.frame(1 / 30)
+    me = ws.map_ui.mapedit
+    tm = ws.project.tilemap
+    if me is None or tm is None:
+        return                                     # cart without a map -- nothing to pin
+    me.n = 3                                       # pick a brush tile
+    x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
+    drv.touch(x0 + 2, y0 + 2)                      # stamp cell (0, 0)
+    drv.frame(1 / 30)
+    assert tm.mget(0, 0) == 3
+
+
+def test_music_editor_320x240_is_byte_identical(tmp_path):
+    """The music editor on a DISTINCT 320x240 system canvas (font 1x) renders
+    exactly the same pixels as the shared-canvas (today) path."""
+    a_ws = _ws_shared(tmp_path / "a")
+    b_ws = _ws_distinct_320(tmp_path / "b")
+    bufs = []
+    for ws in (a_ws, b_ws):
+        ws._open_music()
+        _quiesce(ws)
+        ws.frame(1 / 30)
+        bufs.append(bytes(ws.sys_canvas.buf))
+    assert bufs[0] == bufs[1]
+
+
+def test_music_layout_baseline_constants(tmp_path):
+    """MusicLayout at (320, 240, 1) reproduces the frozen module constants."""
+    from runtime import music_editor_ui as M
+    lay = M.MusicLayout(320, 240, 1)
+    assert lay._base
+    assert lay.title_y == M._MU_TITLE_Y and lay.view_btn == M._MU_VIEW
+    assert (lay.obj_prev, lay.obj_next) == (M._MU_OBJ_PREV, M._MU_OBJ_NEXT)
+    assert (lay.speed_dn, lay.speed_up) == (M._MU_SPEED_DN, M._MU_SPEED_UP)
+    assert lay.list_area == M._MU_LIST_AREA and lay.rows == M._MU_ROWS
+    assert lay.pad_rect(0, 0) == M._mu_pad_rect(0, 0)
+    assert lay.pad_rect(1, 3) == M._mu_pad_rect(1, 3)
+    assert (lay.play_btn, lay.loop_btn) == (M._MU_PLAY, M._MU_LOOP)
+
+
+def test_music_editor_shows_more_rows_on_large_canvas(tmp_path):
+    """At 960x600 the tracker list shows MORE visible rows than the baseline 10,
+    and the editor renders valid pixels on the system canvas."""
+    from runtime import music_editor_ui as M
+    from runtime import host_app
+    ws = _ws(tmp_path, sys_size=(960, 600))
+    drv = host_app.ConsoleDriver(ws)
+    ws._open_music()
+    assert ws.music_ui.layout.rows > M._MU_ROWS
+    drv.frame(1 / 30)
+    buf = drv.rgb888()
+    assert len(buf) == 960 * 600 * 3
+    assert len(set(buf)) > 4
+
+
+def test_music_editor_tap_works_in_system_coords(tmp_path):
+    """Tapping the PLAY button at the layout's position starts a preview on a big
+    canvas (system-coord hit-testing)."""
+    from runtime import host_app
+    ws = _ws(tmp_path, sys_size=(960, 600))
+    drv = host_app.ConsoleDriver(ws)
+    ws._open_music()
+    drv.frame(1 / 30)
+    if ws.music_ui.musicedit is None:
+        return                                     # no audio bank -- nothing to pin
+    lay = ws.music_ui.layout
+    bx, by, bw, bh = lay.play_btn
+    drv.touch(bx + bw // 2, by + bh // 2)
+    drv.frame(1 / 30)
+    assert ws.music_ui.music_preview is not None
+
+
+def test_cards_editor_320x240_is_byte_identical(tmp_path):
+    """The Config/cards editor on a DISTINCT 320x240 system canvas (font 1x)
+    renders exactly the same pixels as the shared-canvas (today) path."""
+    a = _render_editor(_ws_shared(tmp_path / "a"), "cards")
+    b = _render_editor(_ws_distinct_320(tmp_path / "b"), "cards")
+    assert a == b
+
+
+def test_cards_layout_baseline_constants(tmp_path):
+    """CardsLayout at (320, 240, 1) reproduces the frozen module constants."""
+    from runtime import cards_layer as CL
+    lay = CL.CardsLayout(320, 240, 1)
+    assert lay._base
+    assert (lay.card_x, lay.card_w) == (CL._CARD_X, CL._CARD_W)
+    assert (lay.card_y0, lay.card_h) == (CL._CARD_Y0, CL._CARD_H)
+    assert lay.view_bottom == CL._CARD_VIEW_BOTTOM
+    assert (lay.scroll_up, lay.scroll_dn) == (CL._CARD_SCROLL_UP, CL._CARD_SCROLL_DN)
+
+
+def test_cards_editor_shows_more_cards_on_large_canvas(tmp_path):
+    """At 960x600 the cards view band grows (more cards visible before scrolling)
+    and the cards span the full width."""
+    from runtime import cards_layer as CL
+    from runtime import host_app
+    ws = _ws(tmp_path, sys_size=(960, 600))
+    drv = host_app.ConsoleDriver(ws)
+    _enter(ws, "cards")
+    lay = ws.cards_layer.layout
+    assert lay.view_bottom - lay.card_y0 > CL._CARD_VIEW_BOTTOM - CL._CARD_Y0
+    assert lay.card_w > CL._CARD_W
+    drv.frame(1 / 30)
+    buf = drv.rgb888()
+    assert len(buf) == 960 * 600 * 3
+    assert len(set(buf)) > 4
+
+
+def test_cards_editor_tap_steps_in_system_coords(tmp_path):
+    """A tap on a plain card's right half increments its config value, hit-tested
+    in SYSTEM coords on a big canvas."""
+    from runtime import host_app
+    ws = _ws(tmp_path, sys_size=(960, 600))
+    drv = host_app.ConsoleDriver(ws)
+    _enter(ws, "cards")
+    drv.frame(1 / 30)
+    rows = ws.cards_layer._card_layout()
+    plain = next((r for r in rows if r["display"] is None), None)
+    if plain is None:
+        return                                     # no plain stepper card to pin
+    f = plain["f"]
+    before = ws.project.config.get(f["key"], f.get("default"))
+    drv.touch(plain["x"] + plain["w"] - 20, plain["y"] + 2)   # right half -> +1
+    drv.frame(1 / 30)
+    after = ws.project.config.get(f["key"], f.get("default"))
+    assert after != before
+
+
+def test_theme_editor_320x240_is_byte_identical(tmp_path):
+    """EDIT ICONS (the theme reuse of the paint renderer) is byte-identical at
+    320x240 too."""
+    a_ws = _ws_shared(tmp_path / "a")
+    b_ws = _ws_distinct_320(tmp_path / "b")
+    bufs = []
+    for ws in (a_ws, b_ws):
+        ws.open_theme()
+        _quiesce(ws)
+        ws.frame(1 / 30)
+        bufs.append(bytes(ws.sys_canvas.buf))
+    assert bufs[0] == bufs[1]

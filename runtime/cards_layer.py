@@ -47,15 +47,65 @@ _CARD_VIEW_BOTTOM = 232
 _CARD_SCROLL_UP = (300, 44, 16, 14)     # tap to scroll cards up (toward the top)
 _CARD_SCROLL_DN = (300, 214, 16, 14)    # tap to scroll cards down
 
+_BASE_W = 320
+_BASE_H = 240
+
+
+class CardsLayout:
+    """Responsive "Make it mine" geometry (#39 step 3): the full-width panel, the
+    card column + scroll chevrons, the per-display card heights and the picture-cell
+    sizes, derived from the SYSTEM canvas size (w, h) + font scale.
+
+    The single hard contract (mirrors Layout/CodeLayout/PaintLayout/...): at
+    (w, h, fs) == (320, 240, 1) every field equals the frozen `_CARD_*` module
+    constant, byte for byte (the `_base` branch); the responsive formulas only run
+    on a larger canvas / bigger font. A bigger panel shows MORE cards at once (the
+    view band grows) and the cards span its full width."""
+
+    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1):
+        self.w = int(w)
+        self.h = int(h)
+        self.fs = max(1, int(font_scale))
+        fs = self.fs
+        self._base = (self.w == _BASE_W and self.h == _BASE_H and fs == 1)
+        if self._base:
+            self.body = (0, 18, _BASE_W, _BASE_H - 18)
+            self.head_glyph = (8, 22, 14, 14)
+            self.head_xy = (26, 22)
+            self.card_x, self.card_w = _CARD_X, _CARD_W
+            self.card_y0, self.card_h = _CARD_Y0, _CARD_H
+            self.view_bottom = _CARD_VIEW_BOTTOM
+            self.scroll_up, self.scroll_dn = _CARD_SCROLL_UP, _CARD_SCROLL_DN
+            self.gap = 2
+            self.h_cells, self.h_icons, self.h_meter = 44, 36, 32
+            return
+        bar_h = 18 * fs
+        self.body = (0, bar_h, self.w, self.h - bar_h)
+        self.head_glyph = (8 * fs, bar_h + 4 * fs, 14 * fs, 14 * fs)
+        self.head_xy = (26 * fs, bar_h + 4 * fs)
+        self.card_x = _CARD_X * fs
+        self.card_w = self.w - 34 * fs
+        self.card_y0 = bar_h + 26 * fs
+        self.card_h = _CARD_H * fs
+        self.view_bottom = self.h - 8 * fs
+        self.scroll_up = (self.w - 20 * fs, self.card_y0, 16 * fs, 14 * fs)
+        self.scroll_dn = (self.w - 20 * fs, self.view_bottom - 18 * fs,
+                          16 * fs, 14 * fs)
+        self.gap = 2 * fs
+        # Per-display card heights (#15): sprite/bg picker cells, icon choices,
+        # gauge/count meters -- all scale with the font so the pictures stay tappable.
+        self.h_cells, self.h_icons, self.h_meter = 44 * fs, 36 * fs, 32 * fs
+
 
 class CardsLayer:
-    """The cards ("Make it mine") content Layer (game domain): an editor panel over
-    the frozen cart frame. draw = the shared cart backdrop (ws._draw_menu_backdrop)
-    then the cards; handle_input/handle_pointer own the selection + scroll and
-    dispatch config edits to ws.adjust / the run to ws.apply."""
+    """The cards ("Make it mine") content Layer (SYSTEM domain, responsive #39
+    step 3): a full-screen panel on the reflowed system canvas (the frozen-cart
+    backdrop is gone -- the panel always covered every pixel of it anyway).
+    handle_input/handle_pointer own the selection + scroll and dispatch config
+    edits to ws.adjust / the run to ws.apply, hit-testing in SYSTEM coords."""
 
     id = "cards"
-    domain = "game"
+    domain = "system"
 
     # A card field MAY carry an optional `display` hint -- "gauge" | "count" |
     # "choice-icons" | "sprite-tiles" | "bg-thumbs" -- that draws the VALUE as a
@@ -71,6 +121,13 @@ class CardsLayer:
         self._err_text = err_text
         self.msel = 0                 # selected card in the menu
         self.mtop = 0                 # first card scrolled into view (#3)
+        sc = ws.sys_canvas
+        self.layout = CardsLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
+
+    def relayout(self, w, h, fs):
+        """Rebuild the responsive geometry (#39 step 3) -- called by ws._relayout on
+        a font-scale change."""
+        self.layout = CardsLayout(w, h, fs)
 
     def reset(self):
         """Reset the scroll/selection state (called by ws.open on a fresh cart)."""
@@ -81,17 +138,18 @@ class CardsLayer:
 
     def draw(self, dt):
         ws = self.ws
-        ws._draw_menu_backdrop()          # frozen cart frame + reset draw state
+        ws._reset_canvas_state()          # game-canvas hygiene (degradation shares it)
         try:
             self._draw_cards()
         except Exception as exc:  # noqa: BLE001
             # A malformed card (e.g. a bad tiles/choices entry) must NOT escape the
             # frame loop -- the device would hang silently with no error surface. Fall
-            # back to a readable panel; the unified bar (drawn below) keeps the context
-            # X reachable so the kid can exit.
+            # back to a readable panel (on the SYSTEM canvas, where this layer lives);
+            # the unified bar (drawn below) keeps the context X reachable so the kid
+            # can exit.
             ws.cart_error = self._err_text(exc)
             print("Moybyte cards error:", exc)
-            ws._draw_error_panel()
+            ws.player._draw_error_panel(ws.sys_canvas)
         # The Editor's lent top-bar zone (Stage 4, #46 zoned bar): the tab ladder +
         # PLAY, replacing the old pause-only tool switcher for this tab. Drawn LAST
         # (chrome over content), byte-identical cost to the #43 strip cache.
@@ -127,8 +185,7 @@ class CardsLayer:
 
     def handle_pointer(self, px, py, click):
         ws = self.ws
-        gx, gy = ws._game_xy(px, py)
-        px, py = gx, gy
+        # SYSTEM coords (#39 step 3): hit-test the raw pointer, no _game_xy.
         if click and ws.bar_layer.handle_bar_tap("menu", px, py):
             return True         # the Editor's lent zone (Stage 4) claimed the tap
         ci = self._card_at(px, py)
@@ -137,9 +194,9 @@ class CardsLayer:
         if click:
             # GO/CODE/CLOSE dissolved into the unified bar (fix B): PLAY runs+persists,
             # the Code tab is in the ladder, the context X exits.
-            if self._cards_scrollable() and self._in(px, py, _CARD_SCROLL_UP):
+            if self._cards_scrollable() and self._in(px, py, self.layout.scroll_up):
                 self.scroll_cards(-1)
-            elif self._cards_scrollable() and self._in(px, py, _CARD_SCROLL_DN):
+            elif self._cards_scrollable() and self._in(px, py, self.layout.scroll_dn):
                 self.scroll_cards(1)
             elif ci is not None:
                 self._card_tap(px, py, ci)
@@ -189,33 +246,34 @@ class CardsLayer:
     # -- geometry / scroll ---------------------------------------------------
 
     def _card_height(self, f):
+        lay = self.layout
         d = self._card_display(f)
         if d in ("sprite-tiles", "bg-thumbs"):
-            return 44
+            return lay.h_cells
         if d == "choice-icons":
-            return 36         # cells are 22px tall at y+12 -> bottom y+34 fits in 36
+            return lay.h_icons    # cells are 22px tall at y+12 -> bottom y+34 fits
         if d in ("gauge", "count"):
-            return 32
-        return _CARD_H
+            return lay.h_meter
+        return lay.card_h
 
     def _card_layout(self):
         """Pure (no-draw) per-card geometry for the VISIBLE cards so draw and
-        hit-test agree (#3). Cards lay out top-down from _CARD_Y0 starting at the
-        scrolled-in index self.mtop; a row is included only while its bottom stays
-        within _CARD_VIEW_BOTTOM (so cards never overlap the RUN/CODE/CLOSE bar).
-        Returns dicts: {i, f, display, x, y, w, h}."""
+        hit-test agree (#3). Cards lay out top-down from layout.card_y0 starting at
+        the scrolled-in index self.mtop; a row is included only while its bottom
+        stays within layout.view_bottom. Returns dicts: {i, f, display, x, y, w, h}."""
         ws = self.ws
+        lay = self.layout
         rows = []
-        y = _CARD_Y0
+        y = lay.card_y0
         top = self._clamp_mtop()
         for i in range(top, len(ws.project.cart["edit"])):
             f = ws.project.cart["edit"][i]
             h = self._card_height(f)
-            if i > top and y + h > _CARD_VIEW_BOTTOM:
+            if i > top and y + h > lay.view_bottom:
                 break                       # next row would spill past the buttons
             rows.append({"i": i, "f": f, "display": self._card_display(f),
-                         "x": _CARD_X, "y": y, "w": _CARD_W, "h": h})
-            y += h + 2
+                         "x": lay.card_x, "y": y, "w": lay.card_w, "h": h})
+            y += h + lay.gap
         return rows
 
     def _card_count(self):
@@ -226,15 +284,16 @@ class CardsLayer:
         """Topmost card index that still leaves the view full from the bottom up:
         walk heights backwards, summing until the next card would no longer fit."""
         ws = self.ws
+        lay = self.layout
         n = self._card_count()
         if n == 0:
             return 0
-        avail = _CARD_VIEW_BOTTOM - _CARD_Y0
+        avail = lay.view_bottom - lay.card_y0
         used = 0
         top = n
         for i in range(n - 1, -1, -1):
             h = self._card_height(ws.project.cart["edit"][i])
-            step = h if top == n else h + 2
+            step = h if top == n else h + lay.gap
             if used + step > avail:
                 break
             used += step
@@ -277,18 +336,19 @@ class CardsLayer:
         choice, laid out left-to-right under the label. Returns a list of
         (choice_index, cell_rect)."""
         f = row["f"]
+        fs = self.layout.fs
         n = len(f.get("choices", []))
         if n <= 0:
             return []
         if row["display"] == "bg-thumbs":
-            cw, ch = 40, 26                # wide thumbnails for background previews
+            cw, ch = 40 * fs, 26 * fs      # wide thumbnails for background previews
         elif row["display"] == "sprite-tiles":
-            cw = ch = 26
+            cw = ch = 26 * fs
         else:
-            cw = ch = 22
-        gap = 4
-        x0 = row["x"] + 4
-        top = row["y"] + 12
+            cw = ch = 22 * fs
+        gap = 4 * fs
+        x0 = row["x"] + 4 * fs
+        top = row["y"] + 12 * fs
         cells = []
         for k in range(n):
             cells.append((k, (x0 + k * (cw + gap), top, cw, ch)))
@@ -316,7 +376,7 @@ class CardsLayer:
                     if self._in(px, py, cell):
                         ws.project.config[row["f"]["key"]] = row["f"]["choices"][k]
                         return
-            ws.adjust(-1 if px < _CARD_X + _CARD_W // 2 else 1)
+            ws.adjust(-1 if px < self.layout.card_x + self.layout.card_w // 2 else 1)
             return
 
     # -- draw ----------------------------------------------------------------
@@ -324,40 +384,42 @@ class CardsLayer:
     def _draw_cards(self):
         NAMES = self._NAMES
         ws = self.ws
-        cv = ws.canvas
-        # Fullscreen "Make it mine" panel below the 18px unified bar (fix B/C): edge to
+        cv = ws.sys_canvas
+        lay = self.layout
+        # Fullscreen "Make it mine" panel below the unified bar (fix B/C): edge to
         # edge, no centered mini-card. GO/CODE/CLOSE are gone -- PLAY/Code-tab/X are all
         # in the bar (drawn after this by the layer).
-        cv.rect(0, 18, cv.w, cv.h - 18, NAMES["dark_purple"])
-        cv.rectb(0, 18, cv.w, cv.h - 18, NAMES["pink"])
-        ws._glyph("edit", (8, 22, 14, 14), NAMES["yellow"])    # pencil = "make it yours"
-        cv.print("MAKE IT MINE", 26, 22, NAMES["white"], 2)
+        cv.rect(*(lay.body + (NAMES["dark_purple"],)))
+        cv.rectb(*(lay.body + (NAMES["pink"],)))
+        ws._glyph("edit", lay.head_glyph, NAMES["yellow"], cv)  # pencil = "make it yours"
+        cv.print("MAKE IT MINE", lay.head_xy[0], lay.head_xy[1], NAMES["white"], 2)
         for row in self._card_layout():
             self._draw_card(row)
         if self._cards_scrollable():           # up/down chevrons when cards overflow
             if self.mtop > 0:
-                cv.print("^", _CARD_SCROLL_UP[0], _CARD_SCROLL_UP[1], NAMES["yellow"], 2)
+                cv.print("^", lay.scroll_up[0], lay.scroll_up[1], NAMES["yellow"], 2)
             if self.mtop < self._max_mtop():
-                cv.print("v", _CARD_SCROLL_DN[0], _CARD_SCROLL_DN[1], NAMES["yellow"], 2)
+                cv.print("v", lay.scroll_dn[0], lay.scroll_dn[1], NAMES["yellow"], 2)
 
     def _draw_card(self, row):
         NAMES = self._NAMES
         ws = self.ws
-        cv = ws.canvas
+        cv = ws.sys_canvas
+        fs = self.layout.fs
         i, f = row["i"], row["f"]
         x, y, w, h = row["x"], row["y"], row["w"], row["h"]
         sel = (i == self.msel)
         if sel:
-            cv.rect(x, y - 1, w, h, NAMES["indigo"])
+            cv.rect(x, y - 1 * fs, w, h, NAMES["indigo"])
         fg = NAMES["white"] if sel else NAMES["light_grey"]
         disp = row["display"]
         if disp is None:                                # today's plain text card
-            ws._glyph("minus", (x, y, 14, 14), NAMES["yellow"])
-            cv.print(self.card_text(i), x + 18, y, fg, 2)
-            ws._glyph("plus", (x + w - 14, y, 14, 14), NAMES["yellow"])
+            ws._glyph("minus", (x, y, 14 * fs, 14 * fs), NAMES["yellow"], cv)
+            cv.print(self.card_text(i), x + 18 * fs, y, fg, 2)
+            ws._glyph("plus", (x + w - 14 * fs, y, 14 * fs, 14 * fs), NAMES["yellow"], cv)
             return
         # Visual card: a small label line (the SECONDARY text cue) + a picture row.
-        cv.print(self.card_text(i), x + 2, y, fg, 1)
+        cv.print(self.card_text(i), x + 2 * fs, y, fg, 1)
         if disp == "gauge":
             self._draw_gauge(row)
         elif disp == "count":
@@ -373,7 +435,8 @@ class CardsLayer:
         # card to step it (the -/+ contract is preserved by _card_tap).
         NAMES = self._NAMES
         ws = self.ws
-        cv = ws.canvas
+        cv = ws.sys_canvas
+        fs = self.layout.fs
         f = row["f"]
         x, y, w = row["x"], row["y"], row["w"]
         lo = f.get("min", 0)
@@ -385,16 +448,18 @@ class CardsLayer:
             frac = 0.0
         frac = max(0.0, min(1.0, frac))
         ends = f.get("gauge", {}) if isinstance(f.get("gauge"), dict) else {}
-        ty = y + 18
-        tx0 = x + 18
-        tx1 = x + w - 18
+        ty = y + 18 * fs
+        tx0 = x + 18 * fs
+        tx1 = x + w - 18 * fs
         tw = tx1 - tx0
-        ws._glyph(ends.get("low", "turtle"), (x, ty - 6, 16, 14), NAMES["green"])
-        ws._glyph(ends.get("high", "rabbit"), (x + w - 16, ty - 6, 16, 14), NAMES["peach"])
-        cv.rect(tx0, ty, tw, 3, NAMES["dark_grey"])                 # track
-        cv.rect(tx0, ty, int(tw * frac), 3, NAMES["yellow"])        # filled portion
+        ws._glyph(ends.get("low", "turtle"), (x, ty - 6 * fs, 16 * fs, 14 * fs),
+                  NAMES["green"], cv)
+        ws._glyph(ends.get("high", "rabbit"),
+                  (x + w - 16 * fs, ty - 6 * fs, 16 * fs, 14 * fs), NAMES["peach"], cv)
+        cv.rect(tx0, ty, tw, 3 * fs, NAMES["dark_grey"])            # track
+        cv.rect(tx0, ty, int(tw * frac), 3 * fs, NAMES["yellow"])   # filled portion
         kx = tx0 + int(tw * frac)
-        cv.rect(kx - 1, ty - 3, 3, 9, NAMES["white"])               # knob
+        cv.rect(kx - 1 * fs, ty - 3 * fs, 3 * fs, 9 * fs, NAMES["white"])   # knob
 
     def _draw_count(self, row):
         # N repeated icons == the value, so a count reads at a glance. Kept to ONE
@@ -402,6 +467,7 @@ class CardsLayer:
         # spill into the next card. The number itself is the label cue above, so an
         # over-cap value still reads correctly even when not every icon fits.
         ws = self.ws
+        fs = self.layout.fs
         f = row["f"]
         x, y, w = row["x"], row["y"], row["w"]
         cur = ws.project.config.get(f["key"], f.get("default", 0))
@@ -410,20 +476,22 @@ class CardsLayer:
         except (TypeError, ValueError):
             n = 0
         glyph = f.get("icon", "star")
-        step = 16
-        per_row = max(1, (w - 4) // step)
+        step = 16 * fs
+        per_row = max(1, (w - 4 * fs) // step)
         cap = int(f.get("count_max", min(f.get("max", 12), 14)))
         shown = max(0, min(n, cap, per_row))    # clamp to a single row
         for k in range(shown):
-            gx = x + 2 + k * step
-            ws._glyph(glyph, (gx, y + 14, 14, 14), self._NAMES["yellow"])
+            gx = x + 2 * fs + k * step
+            ws._glyph(glyph, (gx, y + 14 * fs, 14 * fs, 14 * fs),
+                      self._NAMES["yellow"], ws.sys_canvas)
 
     def _draw_choice_icons(self, row):
         # Each choice is its own tappable cell -- a glyph (choice-icons) or a real
         # sprite tile from the cart sheet (sprite-tiles). The current pick is boxed.
         NAMES = self._NAMES
         ws = self.ws
-        cv = ws.canvas
+        cv = ws.sys_canvas
+        fs = self.layout.fs
         f = row["f"]
         cur = ws.project.config.get(f["key"], f.get("default"))
         sel_k = self._choice_index(f, cur)
@@ -436,11 +504,12 @@ class CardsLayer:
             if tiles is not None and ws.project.sheet is not None:
                 img = ws.project.sheet.tile_image(tiles[k] if k < len(tiles) else 0, -1)
                 if img is not None:
-                    cv.spr(img, cx + (cw - 16) // 2, cy + (ch - 16) // 2, 2)
+                    cv.spr(img, cx + (cw - 16 * fs) // 2, cy + (ch - 16 * fs) // 2,
+                           2 * fs)
             else:
                 glyph = icons[k] if k < len(icons) else "dot"
-                ws._glyph(glyph, (cx + (cw - 14) // 2, cy + (ch - 14) // 2, 14, 14),
-                          NAMES["white"])
+                ws._glyph(glyph, (cx + (cw - 14 * fs) // 2, cy + (ch - 14 * fs) // 2,
+                                  14 * fs, 14 * fs), NAMES["white"], cv)
 
     # Each bg-thumbs choice is drawn as a tiny "what the screen will look like"
     # preview. A cart reads the chosen name in cfg("bg") and paints to match.
@@ -451,16 +520,20 @@ class CardsLayer:
     def _draw_bg_thumb(self, name, rect):
         """Paint a small preview of background preset `name` inside `rect`."""
         NAMES = self._NAMES
-        cv = self.ws.canvas
+        cv = self.ws.sys_canvas
+        fs = self.layout.fs
         x, y, w, h = rect
         if name == "night":                              # starfield
             cv.rect(x, y, w, h, NAMES["black"])
             for sx, sy in ((4, 4), (14, 9), (24, 5), (30, 15), (9, 17), (20, 12)):
-                cv.pix(x + sx, y + sy, NAMES["white"])
+                if fs <= 1:
+                    cv.pix(x + sx, y + sy, NAMES["white"])
+                else:
+                    cv.rect(x + sx * fs, y + sy * fs, fs, fs, NAMES["white"])
         elif name == "stripes":
-            for i in range(0, w, 6):
-                cv.rect(x + i, y, 3, h, NAMES["indigo"])
-                cv.rect(x + i + 3, y, 3, h, NAMES["dark_blue"])
+            for i in range(0, w, 6 * fs):
+                cv.rect(x + i, y, 3 * fs, h, NAMES["indigo"])
+                cv.rect(x + i + 3 * fs, y, 3 * fs, h, NAMES["dark_blue"])
         else:                                            # a solid color swatch
             cv.rect(x, y, w, h, NAMES.get(name, NAMES["black"]))
 
@@ -468,11 +541,13 @@ class CardsLayer:
         # Each choice is a tappable thumbnail of the resulting background (#15 P3).
         NAMES = self._NAMES
         ws = self.ws
-        cv = ws.canvas
+        cv = ws.sys_canvas
+        fs = self.layout.fs
         f = row["f"]
         cur = ws.project.config.get(f["key"], f.get("default"))
         sel_k = self._choice_index(f, cur)
         for k, (cx, cy, cw, ch) in self._choice_cells(row):
-            self._draw_bg_thumb(f["choices"][k], (cx + 1, cy + 1, cw - 2, ch - 2))
+            self._draw_bg_thumb(f["choices"][k],
+                                (cx + 1 * fs, cy + 1 * fs, cw - 2 * fs, ch - 2 * fs))
             cv.rectb(cx, cy, cw, ch,
                      NAMES["yellow"] if k == sel_k else NAMES["dark_grey"])

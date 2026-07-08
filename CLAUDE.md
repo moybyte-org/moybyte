@@ -90,10 +90,52 @@ to whoever called it.
   CALLER (launcher→launcher; Editor-PLAY→the same tab). **`EditorApp`** = ONE
   authoring app opened on a `Project`: the tab ladder Config→Blocks→Code→Sprites→
   Map→Music (+ PROJECTS/PLAY/SAVE in its lent bar zone), whose tabs ARE the
-  extracted `*_layer.py` surfaces. **`FullscreenStackWM`** = the only tier-specific
-  layer: the process back-stack (`screen` is a read-only projection of its top), the
-  **memoized** visible/draw stack (zero per-frame list churn, #66), and the
-  game↔system viewport composite.
+  extracted `*_layer.py` surfaces — all six tabs are **system-domain responsive**
+  (#39 step 3: `PaintLayout`/`MapLayout`/`MusicLayout`/`CardsLayout` join
+  `CodeLayout`/`BlockLayout`, each `_base`-verbatim byte-identical at 320×240/1×),
+  so the whole Editor reflows to any panel/window size and only a RUNNING CART still
+  draws on the fixed 320×240 game canvas. **`FullscreenStackWM`** = the small-screen
+  tier's WM: the process back-stack (`screen` is a read-only projection of its top),
+  the **memoized** visible/draw stack (zero per-frame list churn, #66), and the
+  game↔system viewport composite. **`runtime/wm_windowed.py`** (`WindowedWM` —
+  host/P4 only, deliberately NOT staged to the S3 build) is the second presentation
+  tier (#73/#58 "Desktop look"): the Picotron-style windowed desktop — launcher =
+  the desktop root, every pushed process a window with a WM title strip
+  (minimize/maximize/close), draggable by the strip and resizable by the
+  bottom-right grip (apply-on-release rubber band); open windows appear as
+  **taskbar chips** in the desktop's OS bar. The **picker + Editor share ONE
+  "Make" window** (`_GROUP`): picking a project swaps its content to the Editor,
+  PROJECTS/its X swap back (the back-stack keeps both kinds — presentation-only
+  merge). **Input focus is decoupled from the back-stack**: clicking a window or
+  its chip moves keyboard+highlight WITHOUT popping — a playtest keeps ticking
+  (it stays the stack top) while the Editor beside it is typed in, its pointer
+  feed click-stripped so the background cart never eats editor taps; only an
+  explicit exit ends a run (strip X / hold-BACKSPACE while focused / app verb).
+  True multi-cart (N games ticking) stays out of scope per #73.
+  `ws.windowed_chrome` makes the zoned bar suppress its OS right zone + the dock
+  inside windows, so a window's bar row is purely the app's toolbar — the desktop
+  bar is the ONE taskbar. A running cart composites integer-scaled + centered in
+  its window (no minimize — hiding a game would silently pause it); per-window
+  **layout contexts** re-run the #39 responsive layouts at each window's size,
+  and `Wallpaper.draw` composites/fills the SYSTEM canvas (cover-crop backdrop)
+  so the big desktop backdrop is real. **Panel THEMES** (`chrome.THEMES`,
+  Settings → THEME, persisted): named token sets (`panel`/`edge`/`title`/
+  `title_ink`/`accent`/`hilite`/`dim`) that every panel surface reads per draw —
+  Settings panel, picker backdrop, window strips/chips, launcher selection
+  accents; the default "night" is the moybyte site colorway and keeps the frozen
+  colors byte-identical. **WiFi setup lives in Settings** (#38, spec §10): a
+  WIFI row + panel (scan/password/connect/forget over the injected `ws.wifi`),
+  so it works while a game runs — the bar's wifi icon deep-links there in
+  windowed mode (fullscreen tiers keep launching the wifi.moy tool). The default
+  wallpaper is **`moy_night.moy`** (static brand-colorway scene — a static
+  wallpaper keeps the idle desktop free under the redraw gate AND ~0 KB/s on the
+  web view). Works over the WEB transport too
+  (`tools/web_console.py --windowed`): window buffers become `RecordingLayer`s
+  (retained windows blit by reference, the #54/#43 deflayer mechanism), the
+  game/wallpaper composites ship as one self-contained spr, scaled system text
+  records as rect blocks (incl. inside layers), and the bar renders direct
+  (uncached) on recording layers. Try it:
+  `python tools/simulate_desktop.py --size 1024x600 --font-scale 2 --windowed`.
 - **Editor-as-an-app UX (this replaced the maker/player tap-mode):** a launcher tap
   **always RUNS the cart** — no mode, no type dispatch. The pinned **"Make ✏️"
   tile** opens the Editor **project-picker** (the same grid over every editable cart

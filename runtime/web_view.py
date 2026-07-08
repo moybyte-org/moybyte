@@ -101,15 +101,23 @@ MAX_DEFSPR_BYTES_PER_FRAME = 1200
 # synchronous + dependency-free).
 
 
-def _paint_cmd(img, x, y):
-    """The compact wire form for a 1:1 (scale 1, no flip) paint-image blit. A NAMED paint image
-    (image('bg') tags img._name) ships a tiny ["imgref", x, y, name] -- its pixels ride /assets
-    ONCE. A NAMELESS paint image falls back to the inline ["img", x, y, w, h, b64]. Shared by
-    DrawRecorder.spr + _LayerRecorder.spr so the two wire forms can't drift."""
+def _paint_cmd(img, x, y, scale=1):
+    """The compact wire form for an unflipped paint-image blit. A NAMED paint image
+    (image('bg') tags img._name) placed 1:1 ships a tiny ["imgref", x, y, name] -- its pixels
+    ride /assets ONCE. A NAMELESS paint image falls back to the inline ["img", x, y, w, h,
+    b64] -- base64 raw indices, ~2.4x lighter on the wire than a self-contained spr's JSON
+    int list. `scale` > 1 appends a 7th element (["img", ..., b64, scale]) -- the backwards-
+    compatible form the full-frame composites use (the game viewport / wallpaper backdrop on
+    a recording canvas, the webview's heaviest ops). Shared by DrawRecorder.spr +
+    _LayerRecorder.spr so the wire forms can't drift."""
+    scale = int(scale)
     name = getattr(img, "_name", None)
-    if name is not None:
+    if name is not None and scale == 1:
         return ["imgref", int(x), int(y), name]
-    return ["img", int(x), int(y), int(img.w), int(img.h), _b64_indices(img.pix)]
+    cmd = ["img", int(x), int(y), int(img.w), int(img.h), _b64_indices(img.pix)]
+    if scale != 1:
+        cmd.append(scale)
+    return cmd
 
 
 def _b64_indices(pix):
@@ -407,12 +415,13 @@ class DrawRecorder:
     def spr(self, img, x, y, scale=1, flip=0):
         # img is an Image / _SheetSprite (.w/.h/.pix/.transparent); ids are already resolved
         # to pixels by the time the canvas sees it.
-        # PAINT-IMAGE fast wire (#63 Fold 3/4): a big MOY64 index bitmap placed 1:1 ships as a
-        # compact ["imgref", x, y, name] (named -> pixels ride /assets once) or the inline
-        # ["img", x, y, w, h, b64] fallback -- BEFORE either the self-contained or atlas path
-        # (both would balloon it to ~1MB).
-        if _is_paint_image(img) and int(scale) == 1 and int(flip) == 0:
-            self._cmds.append(_paint_cmd(img, x, y))
+        # PAINT-IMAGE fast wire (#63 Fold 3/4): a big MOY64 index bitmap placed unflipped
+        # ships as a compact ["imgref", x, y, name] (named 1:1 -> pixels ride /assets once)
+        # or the inline ["img", x, y, w, h, b64(, scale)] fallback -- BEFORE either the
+        # self-contained or atlas path (both would balloon it to ~1MB). Scaled paint blits
+        # (the full-frame game/wallpaper composites) ride the same b64 form.
+        if _is_paint_image(img) and int(scale) >= 1 and int(flip) == 0:
+            self._cmds.append(_paint_cmd(img, x, y, scale))
             return
         if self.self_contained:
             # HOST record-only: embed the pixels (the layer-stream / self-contained shape,
@@ -475,8 +484,13 @@ class DrawRecorder:
         self._cmds.append(["map", int(mx), int(my), int(w), int(h),
                            int(sx), int(sy), int(scale), int(colorkey)])
 
-    def print(self, s, x, y, c):
-        self._cmds.append(["print", str(s), int(x), int(y), c & 63])
+    def print(self, s, x, y, c, fs=1):
+        # `fs` > 1 (#39, the big-font system canvas) ships as a 5th element -- the
+        # replayers render petme128 scaled, so big text costs characters, not rects.
+        if int(fs) > 1:
+            self._cmds.append(["print", str(s), int(x), int(y), c & 63, int(fs)])
+        else:
+            self._cmds.append(["print", str(s), int(x), int(y), c & 63])
 
     # -- off-screen layers (#54 scroll + #43 cached top bar) -----------------
     def register_layer(self, layer):
@@ -528,6 +542,7 @@ class _LayerRecorder:
 
     def __init__(self):
         self._cmds = []
+        self.font_scale = 1            # #39: >1 records scaled prints as rect blocks
 
     def take(self):
         c = self._cmds
@@ -583,10 +598,19 @@ class _LayerRecorder:
         self._cmds.append(["circb", int(cx), int(cy), int(r), c & 63])
 
     def print(self, s, x, y, c, scale=2):
-        # `scale` is accepted but IGNORED (the browser renders petme128 at a fixed scale). It
-        # MUST be in the signature: RecordingLayer forwards a draw verb's full arg list, and
-        # the cached top bar prints its clock with a scale arg.
-        self._cmds.append(["print", str(s), int(x), int(y), c & 63])
+        # `scale` (the legacy per-call arg) is accepted but IGNORED (the browser renders
+        # petme128 at a fixed scale). It MUST be in the signature: RecordingLayer forwards a
+        # draw verb's full arg list, and the cached top bar prints its clock with a scale arg.
+        # `font_scale` (#39, set by RecordingLayer when its backing canvas is a scaled
+        # SystemCanvas) ships as a 5th wire element (["print", s, x, y, c, fs]) so a big-font
+        # strip/window layer's text costs CHARACTERS on the wire, not per-glyph rects -- the
+        # replayers render petme128 scaled. Always 1 on the device (its system font scale is
+        # fixed at 1, so the wire form there never grows the element).
+        fs = getattr(self, "font_scale", 1)
+        if fs <= 1:
+            self._cmds.append(["print", str(s), int(x), int(y), c & 63])
+            return
+        self._cmds.append(["print", str(s), int(x), int(y), c & 63, int(fs)])
 
     def spr(self, img, x, y, scale=1, flip=0):
         # A paint-image background baked into this layer (sakura's spr(bg, 0, 0)) ships as a
@@ -594,8 +618,8 @@ class _LayerRecorder:
         # ["img", ...] fallback for a nameless paint image -- the whole point of #63: the layer's
         # deflayer is a tiny reference (or a one-time blob), not a 32k-command ~1MB stream.
         # Everything else is a SELF-CONTAINED full-pixel spr so the layer stream needs no atlas.
-        if _is_paint_image(img) and int(scale) == 1 and int(flip) == 0:
-            self._cmds.append(_paint_cmd(img, x, y))
+        if _is_paint_image(img) and int(scale) >= 1 and int(flip) == 0:
+            self._cmds.append(_paint_cmd(img, x, y, scale))
             return
         t = img.transparent
         if t is None:
@@ -627,6 +651,9 @@ class RecordingLayer:
     def __init__(self, canvas, recorder):
         self._c = canvas               # the real backing canvas (DeviceCanvas or host Canvas)
         self._lr = _LayerRecorder()
+        # #39: a scaled SystemCanvas backing (a big-font strip / a windowed-WM window
+        # buffer) records its prints as scaled rect blocks, matching the raster side.
+        self._lr.font_scale = getattr(canvas, "font_scale", 1)
         self.w = canvas.w
         self.h = canvas.h
         self.id = recorder.register_layer(self)
@@ -1050,25 +1077,19 @@ class CommandCanvas:
 
     def print(self, s, x, y, c, scale=1):
         # At font_scale 1 record a `print` op (petme128, pixel-identical to font.draw). At
-        # font_scale > 1 (the resizable system font, #39) record the scaled glyph as rect
-        # blocks -- exactly what SystemCanvas.print rasterizes.
-        fs = self.font_scale
-        if fs <= 1:
-            self._rec.print(s, x, y, c)
-            return
-        from runtime import font as _font        # host-only lazy import
-        ci = c & 63
-        rec = self._rec
-
-        def block(bx, by, n):
-            rec.rect(bx, by, n, n, ci)
-
-        _font.draw_scaled(block, s, x, y, fs)
+        # font_scale > 1 (the resizable system font, #39) the op carries the scale as its
+        # 5th element and the replayers render petme128 scaled -- big text costs characters
+        # on the wire, not per-glyph rect blocks.
+        self._rec.print(s, x, y, c, self.font_scale)
 
     # -- offscreen layers ----------------------------------------------------
     def new_layer(self, w, h):
-        from runtime.canvas import Canvas          # host-only lazy import
-        real = Canvas(int(w), int(h), self.palette)
+        # A SystemCanvas backing at THIS recorder's font scale (#39), so a cached
+        # strip / a windowed-WM window buffer rasterizes AND records scaled text
+        # (the _LayerRecorder picks the scale up from the backing canvas). At
+        # font_scale 1 SystemCanvas is byte-identical to Canvas.
+        from runtime.canvas import SystemCanvas    # host-only lazy import
+        real = SystemCanvas(int(w), int(h), self.palette, font_scale=self.font_scale)
         return RecordingLayer(real, self._rec)
 
     def blit_window_from(self, layer, cam_x=0, cam_y=0):
@@ -1492,9 +1513,16 @@ def replay_to_canvas(commands, canvas, layers=None, assets=None, atlas=None):
         elif op == "img":
             # PAINT-IMAGE inline fallback (#63 Fold 3): decode the base64 raw MOY64 indices and
             # blit them (opaque, clamped) via the same blit_indices the device bakes with -- into
-            # the CURRENT canvas (the layer buffer when replayed inside a deflayer).
+            # the CURRENT canvas (the layer buffer when replayed inside a deflayer). A scaled
+            # form (cmd[6] > 1: the full-frame game/wallpaper composites) draws via spr with no
+            # transparent index -- the same opaque result, integer-upscaled.
             x, y, w, h = cmd[1:5]
-            canvas.blit_indices(_unb64_indices(cmd[5]), int(w), int(h), int(x), int(y))
+            sc = int(cmd[6]) if len(cmd) > 6 else 1
+            if sc == 1:
+                canvas.blit_indices(_unb64_indices(cmd[5]), int(w), int(h), int(x), int(y))
+            else:
+                pix = list(_unb64_indices(cmd[5]))
+                canvas.spr(Image(int(w), int(h), pix, transparent=None), int(x), int(y), sc)
         elif op == "imgref":
             # PAINT-IMAGE by NAME (#63 Fold 4): resolve the cart image from the /assets `images`
             # dict (shipped once, browser-cached) and blit its raw indices -- the imgref twin of
@@ -1542,7 +1570,19 @@ def replay_to_canvas(commands, canvas, layers=None, assets=None, atlas=None):
                             cache[tid] = im
                         canvas.spr(im, sx + cx * step, sy + cy * step, scale)
         elif op == "print":
-            canvas.print(cmd[1], cmd[2], cmd[3], cmd[4])
+            fs = int(cmd[5]) if len(cmd) > 5 else 1
+            if fs <= 1:
+                canvas.print(cmd[1], cmd[2], cmd[3], cmd[4])
+            else:
+                # Scaled system text (#39): render petme128 at fs via rect blocks --
+                # exactly what SystemCanvas.print rasterizes.
+                from runtime import font as _font   # host-only lazy import
+                ci = cmd[4] & 63
+
+                def _block(bx, by, n):
+                    canvas.rect(bx, by, n, n, ci)
+
+                _font.draw_scaled(_block, cmd[1], cmd[2], cmd[3], fs)
         elif op == "reset_state":
             canvas.reset_state()
         elif op == "camera":

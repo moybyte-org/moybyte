@@ -27,6 +27,17 @@ def _icons_row_index(ws):
     return [r[0] for r in ws.settings_layer._SETTINGS_ROWS].index("icons")
 
 
+def _click_icons_row(ws, drv):
+    """Scroll the EDIT ICONS row into view (the WIFI row pushed it below the
+    320x240 fold, #38) then click it -- the same scroll a kid's d-pad does."""
+    sl = ws.settings_layer
+    idx = _icons_row_index(ws)
+    sl.set_msel = idx
+    sl._settings_scroll()
+    drv.frame(1 / 30)
+    drv.click(*_center(sl._settings_row_rect(idx)))
+
+
 # -- the Settings entry point opens the PAINT editor on the icon sheet -------
 
 def test_settings_has_edit_icons_action_row(tmp_path):
@@ -46,7 +57,7 @@ def test_edit_icons_opens_paint_on_the_icon_sheet(tmp_path):
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
-    drv.click(*_center(ws.settings_layer._settings_row_rect(_icons_row_index(ws))))
+    _click_icons_row(ws, drv)
     drv.frame(1 / 30)
     assert ws.screen == "menu" and ws.menu_view == "theme"
     assert ws._editing_icons is True
@@ -133,7 +144,7 @@ def test_close_returns_to_settings(tmp_path):
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
-    drv.click(*_center(ws.settings_layer._settings_row_rect(_icons_row_index(ws))))
+    _click_icons_row(ws, drv)
     drv.frame(1 / 30)
     assert ws.screen == "menu" and ws.menu_view == "theme"
     drv.click(*_center(C._PAINT_CLOSE))

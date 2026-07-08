@@ -1,0 +1,908 @@
+"""The WINDOWED window manager -- the big-screen / P4 "One" presentation tier
+(#73 / #58 "Desktop look"; spec docs/shell_ux_v1.md §3's tier table).
+
+`WindowedWM` presents the SAME everything-is-a-process shell as an OS desktop,
+Picotron-style (owner direction, 2026-07-08):
+
+  * the LAUNCHER is the DESKTOP -- the permanent back-stack root draws full-canvas
+    (live wallpaper + cart grid + the ONE full-width OS bar), always beneath;
+  * every process pushed above it (picker / Editor / Settings / update / a running
+    cart) is a floating WINDOW: a WM-drawn TITLE STRIP (title + minimize /
+    maximize / close), a border + drop shadow, draggable by the strip and
+    resizable by the bottom-right grip;
+  * a window's body is PURELY the app: in windowed mode the zoned bar suppresses
+    its OS right zone and the dock (ws.windowed_chrome -- see bar_layer.py), so
+    an app window's own bar row is just its toolbar (the Editor's tab ladder),
+    never a copied taskbar;
+  * a RUNNING CART composites integer-scaled and centered in its window -- the
+    game itself never draws chrome, exactly as on the fullscreen tiers, and the
+    editor stays VISIBLE beneath a playtest (spec §3's canonical picture);
+  * the PICKER and the EDITOR share one "Make" window (_GROUP): picking a
+    project swaps that window's content to the Editor, PROJECTS / its X swap it
+    back -- the back-stack keeps both kinds, only the presentation merges;
+  * INPUT FOCUS is decoupled from the back-stack: clicking a window (or its
+    taskbar chip) moves the keyboard + highlight there WITHOUT popping anything
+    -- a playtest keeps ticking (it stays the stack top, the running process)
+    while the editor beside it is being typed in, and its pointer feed is
+    click-stripped so the background cart never eats the editor's taps. Only an
+    explicit exit ends a run: the strip X, hold-BACKSPACE while focused, or an
+    app verb. Chips: click to focus, click the focused chip to minimize, click
+    a minimized chip to restore.
+
+  ONE cart still runs at a time -- true multi-cart execution (N games ticking
+  concurrently) stays out of scope per #73 (per-cart VM state / canvases / audio
+  mixing / scheduling, revisited once the P4 is proven).
+
+It subclasses `FullscreenStackWM`, so the back-stack, the memoized stack rebuild
+and the overlay gating are inherited; only presentation differs. With a single
+stack entry (just the launcher) every path defers to the parent, and the WM is
+only ever installed on a console with a DISTINCT big system canvas -- the S3 /
+320x240 tiers never see this class (it is deliberately NOT staged into the
+device build until the P4 port lands).
+
+The one mechanism of note is the LAYOUT CONTEXT: the responsive surfaces read
+their geometry from ws.layout / ws.code_layout / the per-editor layouts (#39),
+all derived from ws.sys_canvas. A window's content renders at the WINDOW's size,
+so the WM keeps one `_LayoutCtx` per window (captured by running ws._relayout()
+with the window's buffer installed) plus the ROOT context (the real canvas), and
+installs the right one around every content draw / input dispatch. The ambient
+context between dispatches is always the ROOT's, so the desktop root, the
+overlays and the cursor always draw full-canvas. A resize/maximize rebuilds the
+window's buffer + context (apply-on-release, so the drag itself allocates
+nothing -- a rubber-band outline previews the new size).
+"""
+
+try:
+    from wm import FullscreenStackWM
+    from layers import Layer
+    from canvas import SystemCanvas
+    from palette import NAMES
+    from widgets import _Blit
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.wm import FullscreenStackWM
+    from runtime.layers import Layer
+    from runtime.canvas import SystemCanvas
+    from runtime.palette import NAMES
+    from runtime.widgets import _Blit
+
+
+# Window-chrome colors: the fixed ones live here; everything THEMEABLE (panel /
+# title strip / accents / dim texture) reads the ws.theme_colors tokens per draw
+# (chrome.THEMES, Settings -> THEME; the "night" default is the moybyte site
+# colorway -- midnight navy panels, lavender strips, the yellow CTA accent).
+_SHADOW = NAMES["black"]
+_BORDER_TOP = NAMES["white"]          # focused window border (cream ring, all themes)
+_BTN_X_FG = NAMES["red"]
+_CHIP_FG = NAMES["white"]
+_DRAG_MIN = 4                         # px of travel before a press becomes a drag
+
+# WM title-strip labels per process kind (the player shows the cart title).
+_TITLES = {"menu": "EDITOR", "picker": "PROJECTS",
+           "settings": "SETTINGS", "update": "UPDATE"}
+
+# Window GROUPS: back-stack kinds that share ONE window slot. The project picker
+# and the Editor are one "Make" flow (spec shell_ux_v1.md §4/§6 -- the picker IS
+# the Editor's entry state), so picking a project swaps the window's CONTENT to
+# the Editor instead of stacking a second window, and PROJECTS / the editor's X
+# swap it back. The back-stack itself is untouched (launcher -> picker -> menu
+# still pops one level at a time); only the presentation merges.
+_GROUP = {"picker": "make", "menu": "make"}
+
+
+class _LayoutCtx:
+    """A snapshot of every layout object the responsive surfaces read, plus the
+    system canvas they draw on -- captured once per window (or for the root) and
+    re-installed around each dispatch. Install is a handful of attribute stores
+    (no allocation), so swapping contexts twice per frame costs nothing."""
+
+    @classmethod
+    def capture(cls, ws):
+        ctx = cls()
+        ctx.sys_canvas = ws._sys_canvas
+        ctx.layout = ws.layout
+        ctx.code_layout = ws.code_layout
+        ctx.block_layout = ws.block_ui.block_layout
+        ctx.paint_layout = ws.paint_layer.layout
+        ctx.map_layout = ws.map_ui.layout
+        ctx.music_layout = ws.music_ui.layout
+        ctx.cards_layout = ws.cards_layer.layout
+        return ctx
+
+    def install(self, ws):
+        ws._sys_canvas = self.sys_canvas
+        ws.layout = self.layout
+        ws.code_layout = self.code_layout
+        ws.block_ui.block_layout = self.block_layout
+        ws.paint_layer.layout = self.paint_layout
+        ws.map_ui.layout = self.map_layout
+        ws.music_ui.layout = self.music_layout
+        ws.cards_layer.layout = self.cards_layout
+        ws.launcher.set_layout(self.layout)
+        ws.picker.set_layout(self.layout)
+
+
+class _Win:
+    """One open window: the back-stack kind it presents, its outer rect on the
+    desktop, the WM title strip, and -- for app windows -- the retained content
+    buffer + layout context its surfaces render with. The player window has no
+    buffer: its content IS the fixed 320x240 game canvas, blitted integer-scaled
+    and centered (and since nothing but the Player draws on the game canvas any
+    more, a NON-top player window keeps showing its frozen last frame for free)."""
+
+    def __init__(self, kind, x, y, w, h, title_h, buf=None, ctx=None):
+        self.kind = kind
+        self.x = x
+        self.y = y
+        self.w = w                    # outer size (incl. border + title strip)
+        self.h = h
+        self.title_h = title_h        # the WM strip (title + min/max/X)
+        self.buf = buf                # SystemCanvas (apps) | None (player)
+        self.ctx = ctx                # _LayoutCtx (apps) | None (player)
+        self.minimized = False        # hidden; lives on as a taskbar chip
+        self.saved = None             # pre-maximize rect (x, y, w, h) | None
+
+    def content_rect(self):
+        """The inner rect the content occupies (below the WM title strip)."""
+        return (self.x + 1, self.y + 1 + self.title_h,
+                self.w - 2, self.h - 2 - self.title_h)
+
+
+class _WindowStackLayer(Layer):
+    """The single Layer that presents the whole window stack: draws every open
+    window (retained buffers + the live top) + the taskbar chips, owns pointer
+    routing (drag / resize / raise / min-max-close / content dispatch with
+    layout-context swaps) and forwards keyboard to the focused window's content.
+    Sits between the desktop root and the overlays in the WM's z-order."""
+
+    id = "windows"
+    domain = "system"
+
+    def __init__(self, wm):
+        self.ws = wm.ws
+        self.wm = wm
+
+    def draw(self, dt):
+        self.wm._draw_windows(dt)
+
+    def handle_input(self, i):
+        return self.wm._route_key(i)
+
+    def handle_pointer(self, px, py, click):
+        return self.wm._route_pointer(px, py, click)
+
+
+class WindowedWM(FullscreenStackWM):
+    """The windowed presentation of the back-stack (spec shell_ux_v1.md §3):
+    launcher = the desktop root, every pushed process = a floating window, focus =
+    top of stack. Install with `ws.wm = WindowedWM(ws)` right after construction
+    (host_app.build_workstation(windowed=True)); requires a DISTINCT system
+    canvas bigger than the 320x240 game canvas."""
+
+    def __init__(self, ws):
+        FullscreenStackWM.__init__(self, ws)
+        if ws._sys_canvas is None:
+            raise ValueError("WindowedWM needs a distinct (big) system canvas")
+        ws.windowed_chrome = True     # bar/dock: suppress OS chrome inside windows
+        self._root_canvas = ws._sys_canvas
+        self._root_ctx = _LayoutCtx.capture(ws)
+        self._win_layer = _WindowStackLayer(self)
+        self._wins = {}               # slot key -> _Win
+        self._order = []              # window slots, bottom -> top (stack-shaped)
+        # INPUT FOCUS -- decoupled from the back-stack (the owner call that fixed
+        # "clicking anything else kills my playtest"): the stack still owns what's
+        # OPEN and who TICKS (the Player ticks while it's the stack top), but the
+        # keyboard and window highlight follow _focus, which moves on click without
+        # popping anything. A running game now keeps running while the editor
+        # beside it is being typed in; only its X / hold-BACKSPACE (when focused)
+        # / an exit verb ends it. None = the desktop root has focus.
+        self._focus = None
+        self._drag = None             # (kind, grab_dx, grab_dy) while dragging
+        self._drag_armed = None       # (kind, ox, oy, wx, wy) press-in-strip origin
+        self._resize = None           # (kind, ox, oy, ow, oh, cur_w, cur_h) in-flight
+        self._ctx_switching = False   # reentrancy guard for internal _relayout runs
+
+    # -- layout-context plumbing ----------------------------------------------
+
+    def on_relayout(self):
+        """Hook called by ws._relayout() (a font-scale change / future resize).
+        Re-anchors the relayout to the ROOT canvas if it ran while a window
+        context was ambient, recaptures the root context, and drops every window
+        so it rebuilds at the new scale on the next frame."""
+        if self._ctx_switching:
+            return                    # an internal (window-building) relayout
+        ws = self.ws
+        if ws._sys_canvas is not self._root_canvas:
+            self._ctx_switching = True
+            ws._sys_canvas = self._root_canvas
+            ws._relayout()
+            self._ctx_switching = False
+        self._root_ctx = _LayoutCtx.capture(ws)
+        self._wins.clear()
+        self._order = []
+        self._focus = None
+        self.content_gen += 1
+
+    def _install(self, ctx):
+        ctx.install(self.ws)
+
+    def _make_ctx(self, buf):
+        """Build the layout set for a window buffer: run the console's own
+        _relayout with the buffer installed (so every responsive surface derives
+        its geometry from the WINDOW size), capture it, then restore the root."""
+        ws = self.ws
+        self._ctx_switching = True
+        ws._sys_canvas = buf
+        ws._relayout()
+        ctx = _LayoutCtx.capture(ws)
+        self._root_ctx.install(ws)
+        self._ctx_switching = False
+        return ctx
+
+    # -- window records --------------------------------------------------------
+
+    def _fs(self):
+        return self.ws._effective_font_scale()
+
+    def _bar_h(self):
+        """The desktop OS bar's height -- windows never overlap it (the taskbar
+        row is OS-owned, chips included)."""
+        return self._root_ctx.layout.status_h
+
+    def _slots(self):
+        """Collapse the back-stack (above the root) into window SLOTS: consecutive
+        kinds in the same _GROUP share one slot, and the slot's content is the
+        TOPMOST of its kinds (picker+menu -> one "make" window showing whichever
+        is up). Returns [[slot_key, kind], ...] bottom -> top."""
+        slots = []
+        for k in self._stack[1:]:
+            g = _GROUP.get(k, k)
+            if slots and slots[-1][0] == g:
+                slots[-1][1] = k        # the higher kind takes the window over
+            else:
+                slots.append([g, k])
+        return slots
+
+    def _sync_windows(self):
+        """Mirror the back-stack into window records: drop windows whose slot was
+        popped, create records (buffer + layout context + cascade position) for
+        newly-pushed ones, and keep each shared slot pointed at its TOP kind (so
+        the Make window's content follows picker <-> editor navigation)."""
+        slots = self._slots()
+        keys = [g for g, _k in slots]
+        if keys != self._order:
+            alive = set(keys)
+            for g in list(self._wins):
+                if g not in alive:
+                    del self._wins[g]
+            for depth, (g, k) in enumerate(slots):
+                if g not in self._wins:
+                    self._wins[g] = self._make_window(g, k, depth)
+            self._order = keys
+            # A stack change (spawn/pop) moves focus to the newest top window --
+            # the one navigation just revealed/opened. Click moves it after that.
+            self._focus = keys[-1] if keys else None
+        for g, k in slots:              # content follows the group's top kind
+            self._wins[g].kind = k
+
+    def _win_size(self, key, full, fs):
+        """Default window OUTER size per window slot."""
+        th = 18 * fs
+        if key == "desktop":
+            s = max(1, min((full.w - 24) // self.ws.canvas.w,
+                           (full.h - 24 - th - self._bar_h()) // self.ws.canvas.h))
+            return (self.ws.canvas.w * s + 2, self.ws.canvas.h * s + 2 + th)
+        if key in ("make", "menu", "picker"):
+            return (full.w - full.w // 8, full.h - full.h // 10)
+        if key == "update":
+            return (full.w // 2, full.h // 2)
+        # Settings + default: a compact floating panel (the Picotron proportion),
+        # never a near-fullscreen sheet.
+        return (max(340 * fs, full.w * 2 // 5), max(300 * fs, full.h * 3 // 5))
+
+    def _make_window(self, key, kind, depth):
+        full = self._root_canvas
+        fs = self._fs()
+        w, h = self._win_size(key, full, fs)
+        title_h = 18 * fs
+        bar_h = self._bar_h()
+        # A default can exceed a small desktop (e.g. the fs-scaled Settings minimum
+        # at font 2x on 600px) -- clamp so the whole window, grip included, fits
+        # below the OS bar.
+        w = min(w, full.w - 4 * fs)
+        h = min(h, full.h - bar_h - 8 * fs)
+        # Cascade: centered, each deeper window stepping down-right, clamped so
+        # the title strip always stays reachable below the OS bar.
+        x = (full.w - w) // 2 + depth * 12 * fs
+        y = bar_h + (full.h - bar_h - h) * 2 // 5 + depth * 10 * fs
+        x = max(0, min(x, full.w - w // 2))
+        y = max(bar_h, min(y, full.h - 24 * fs))
+        win = _Win(kind, x, y, w, h, title_h)
+        self._build_content(win)
+        # Prewarm: render the content ONCE into the fresh buffer, so a window
+        # created BEHIND another (e.g. the picker when picker+editor spawn in one
+        # navigation) shows its app instead of a black retained buffer.
+        self._prewarm(win)
+        return win
+
+    def _prewarm(self, win):
+        """One-shot render of an app window's content into its buffer (defensive:
+        a content error just leaves the buffer blank -- the live path will report
+        it when the window is focused)."""
+        if win.buf is None or win.ctx is None:
+            return
+        content = self._content_for(win.kind)
+        if content is None:
+            return
+        self._install(win.ctx)
+        try:
+            content.draw(0)
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            self._install(self._root_ctx)
+
+    def _build_content(self, win):
+        """(Re)build a window's content backing for its CURRENT size: the buffer +
+        layout context for an app window; nothing for the player (its content is
+        the game canvas, scaled/centered per draw).
+
+        On a RECORDING root canvas (the web console's CommandCanvas) the buffer
+        comes from root.new_layer() -- a RecordingLayer that rasterizes AND
+        records its own stream, so blit_strip ships the window to the browser as
+        a cached off-screen layer (the #54/#43 deflayer mechanism: a retained
+        background window blits by reference, only a live window re-ships)."""
+        if win.kind == "desktop":
+            win.buf = None
+            win.ctx = None
+            return
+        full = self._root_canvas
+        cw = max(64, win.w - 2)
+        ch = max(40, win.h - 2 - win.title_h)
+        if hasattr(full, "take_commands"):        # a recording (web) root canvas
+            win.buf = full.new_layer(cw, ch)
+        else:
+            win.buf = SystemCanvas(cw, ch, full.palette,
+                                   font_scale=getattr(full, "font_scale", 1))
+        win.ctx = self._make_ctx(win.buf)
+
+    def _resize_window(self, win, w, h):
+        """Apply a new OUTER size (resize grip release / maximize): clamp to a
+        usable minimum, then rebuild the content buffer + layout context so the
+        app reflows to the new window size."""
+        fs = self._fs()
+        win.w = max(160 * fs, min(w, self._root_canvas.w))
+        win.h = max(90 * fs + win.title_h, min(h, self._root_canvas.h - self._bar_h()))
+        self._build_content(win)
+        self.ws._dirty = True
+
+    def _toggle_max(self, win):
+        """Maximize <-> restore: fill the desktop below the OS bar (the taskbar
+        stays visible), remembering the rect to restore to."""
+        full = self._root_canvas
+        bar_h = self._bar_h()
+        if win.saved is None:
+            win.saved = (win.x, win.y, win.w, win.h)
+            win.x, win.y = 0, bar_h
+            self._resize_window(win, full.w, full.h - bar_h)
+        else:
+            x, y, w, h = win.saved
+            win.saved = None
+            win.x, win.y = x, y
+            self._resize_window(win, w, h)
+
+    def _top_win(self):
+        return self._wins.get(self._order[-1]) if self._order else None
+
+    def _focus_win(self):
+        """The window holding INPUT focus, or None (the desktop root)."""
+        return self._wins.get(self._focus) if self._focus else None
+
+    def player_has_pointer(self):
+        """Console hook: whether the game-space pointer publication should carry
+        live click/down state. False while a window OTHER than the playtest holds
+        focus, so a background running cart never eats the taps meant for the
+        editor beside it."""
+        if not self._order:
+            return True
+        win = self._focus_win()
+        return win is not None and win.kind == "desktop"
+
+    def keeps_animating(self, dt):
+        """Console hook (the #44 redraw gate): keep frames flowing while a RUNNING
+        cart's window is open anywhere on the desktop -- not just while it's the
+        stack top -- so a game visibly keeps playing under Settings / beside a
+        focused editor. Mirrors _animating's own desktop branch conditions."""
+        ws = self.ws
+        return ("desktop" in self._stack and ws.cart_error is None
+                and (ws._update is not None or ws._draw is not None))
+
+    def _content_for(self, kind):
+        """The content Layer a window presents (the router's registry lookup,
+        window-kind-aware): the active Editor tab for "menu", the registry entry
+        otherwise -- same resolution ws._content_layer() does for the stack top."""
+        ws = self.ws
+        if kind == "menu":
+            return ws._content_layers.get(ws.menu_view) or ws._content_layers["cards"]
+        return ws._content_layers.get(kind)
+
+    # -- the memoized stacks (parent memo, windowed shape) ---------------------
+
+    def _rebuild(self, content, sig):
+        if len(self._stack) == 1:
+            # Just the launcher root: byte-identical to the fullscreen tier.
+            if self._wins:
+                self._wins.clear()
+                self._order = []
+            FullscreenStackWM._rebuild(self, content, sig)
+            return
+        self._sync_windows()
+        ws = self.ws
+        overlays = []
+        # Game-domain overlays (the perf HUD) draw on the 320x240 game canvas and
+        # must land BEFORE the window blit composites it into the player window.
+        pre = []
+        if sig & 2:
+            pre.append(ws._perf_layer)
+        if sig & 4:
+            overlays.append(ws._confetti_layer)
+        if sig & 8:
+            overlays.append(ws._ach_layer)
+        if sig & 16:
+            overlays.append(ws._egg_layer)
+        if sig & 32:
+            overlays.append(ws._toast_layer)
+        if sig & 64:
+            overlays.append(ws._sysmenu_layer)
+        if sig & 128:
+            overlays.append(ws._about_layer)
+        overlays.append(ws._cursor_layer)
+        base = [ws.launcher_layer] + pre + [self._win_layer]
+        draw_base = [ws._splash_layer] if (sig & 1) else base
+        self._cache_overlay = overlays
+        self._cache_visible = base + overlays
+        self._cache_draw = draw_base + overlays
+        rev = list(self._cache_visible)
+        rev.reverse()
+        self._cache_visible_rev = rev
+        self._cache_content = content
+        self._cache_gen = self.content_gen
+        self._cache_sig = sig
+
+    # -- game viewport == the player window (#39 mapping) ----------------------
+
+    def _player_view(self, win):
+        """(ox, oy, scale) of the game canvas centered in the player window's
+        content rect -- the windowed viewport."""
+        gc = self.ws.canvas
+        cx, cy, cw, ch = win.content_rect()
+        scale = max(1, min(cw // gc.w, ch // gc.h))
+        ox = cx + (cw - gc.w * scale) // 2
+        oy = cy + (ch - gc.h * scale) // 2
+        return (ox, oy, scale)
+
+    def viewport(self):
+        win = self._wins.get("desktop")
+        if win is None:
+            return FullscreenStackWM.viewport(self)
+        return self._player_view(win)
+
+    def composite_game(self):
+        # The frame router's game->system boundary composite: a no-op here -- the
+        # window layer blits the game canvas into the player WINDOW itself, and
+        # stamping it full-viewport would paint over the desktop.
+        if not self._order:
+            FullscreenStackWM.composite_game(self)
+
+    # -- drawing ---------------------------------------------------------------
+
+    def _draw_windows(self, dt):
+        self._sync_windows()
+        n = len(self._order)
+        for i in range(n):
+            key = self._order[i]
+            win = self._wins[key]
+            focused = (key == self._focus)
+            if win.minimized:
+                continue
+            if win.kind == "desktop":
+                # The Player TICKS whenever its window is open, independent of
+                # input focus AND of what sits above it on the back-stack -- a
+                # game keeps running while the editor beside it is typed in or
+                # while Settings floats over it (wifi setup mid-game, #38). The
+                # one exception: the crash-editor flow keeps the frozen frame
+                # (cart_error -> tick just repaints the error panel, harmless).
+                self._draw_player_window(win, True, focused, dt)
+            else:
+                self._draw_app_window(win, focused, dt)
+        self._draw_taskbar_chips()
+        if self._resize is not None:               # rubber-band resize preview
+            kind, _ox, _oy, _ow, _oh, cw, chh = self._resize
+            win = self._wins.get(kind)
+            if win is not None:
+                self._root_canvas.rectb(win.x, win.y, cw, chh,
+                                        self.ws.theme_colors["accent"])
+
+    def _win_chrome(self, win, focused):
+        """Title strip (title + min/max/X) + border + drop shadow + resize grip.
+        The highlight follows INPUT FOCUS (which moves on click), not the stack."""
+        sc = self._root_canvas
+        ws = self.ws
+        th = ws.theme_colors
+        fs = self._fs()
+        sh = 3
+        sc.rect(win.x + sh, win.y + win.h, win.w, sh, _SHADOW)     # bottom shadow
+        sc.rect(win.x + win.w, win.y + sh, sh, win.h, _SHADOW)     # right shadow
+        sc.rectb(win.x, win.y, win.w, win.h,
+                 _BORDER_TOP if focused else th["dim"])
+        # Title strip: label left, [minimize][maximize][close] right. Focused =
+        # the theme's title tint with its ink (the active-title cue, Picotron-
+        # style); unfocused = the theme's panel field with dim ink.
+        strip_bg = th["title"] if focused else th["panel"]
+        strip_fg = th["title_ink"] if focused else NAMES["light_grey"]
+        sc.rect(win.x + 1, win.y + 1, win.w - 2, win.title_h, strip_bg)
+        sc.rect(win.x + 1, win.y + win.title_h, win.w - 2, 1,
+                _BORDER_TOP if focused else th["dim"])
+        title = self._win_title(win)
+        btns = self._strip_buttons(win)
+        first_btn_x = btns[-1][1][0] if btns else win.x + win.w
+        maxc = max(0, (first_btn_x - (win.x + 4 * fs)) // (8 * fs))
+        if maxc > 0:
+            sc.print(title[:maxc], win.x + 4 * fs, win.y + 1 + 5 * fs, strip_fg, 1)
+        for name, rect in btns:
+            glyph = {"close": "close", "max": "app", "min": "minus"}[name]
+            ws._glyph(glyph, rect, _BTN_X_FG if name == "close" else strip_fg, sc)
+        # Resize grip (focused window only): three diagonal steps in the corner.
+        if focused:
+            gx, gy, gw, gh = self._grip_rect(win)
+            for i in range(3):
+                d = (i + 1) * (gw // 4)
+                sc.rect(gx + gw - d, gy + gh - 2 * fs, d, fs, _BORDER_TOP)
+
+    def _win_title(self, win):
+        ws = self.ws
+        if win.kind == "desktop":
+            return str((ws.cart.get("title") if ws.cart else "") or "GAME")
+        base = _TITLES.get(win.kind, win.kind.upper())
+        if win.kind == "menu" and ws.cart:
+            t = ws.cart.get("title")
+            if t:
+                return base + " - " + str(t)
+        return base
+
+    def _strip_buttons(self, win):
+        """The title-strip buttons as (name, rect), laid RIGHT to LEFT: close,
+        maximize, and -- app windows only -- minimize (a running game can't
+        minimize: hiding it would mean silently pausing it)."""
+        fs = self._fs()
+        ic = 16 * fs
+        y = win.y + 1 + (win.title_h - ic) // 2
+        x = win.x + win.w - 2 - ic
+        out = [("close", (x, y, ic, ic))]
+        x -= ic + 2 * fs
+        out.append(("max", (x, y, ic, ic)))
+        if win.kind != "desktop":
+            x -= ic + 2 * fs
+            out.append(("min", (x, y, ic, ic)))
+        return out
+
+    def _grip_rect(self, win):
+        fs = self._fs()
+        g = 12 * fs
+        return (win.x + win.w - g, win.y + win.h - g, g, g)
+
+    def _draw_app_window(self, win, focused, dt):
+        if focused:
+            # Live: render the focused app into its buffer at the window's layout.
+            self._install(win.ctx)
+            try:
+                self._content_for(win.kind).draw(dt)
+            finally:
+                self._install(self._root_ctx)
+        # Retained (or just-rendered) buffer -> desktop, then chrome.
+        self._root_canvas.blit_strip(win.buf, win.x + 1, win.y + 1 + win.title_h)
+        self._win_chrome(win, focused)
+
+    def _draw_player_window(self, win, running, focused, dt):
+        ws = self.ws
+        if running:
+            # The Player ticks while it's the STACK top (the running process),
+            # focused or not -- editing beside a live playtest keeps it alive.
+            self._content_for("desktop").draw(dt)  # Player.tick -> the game canvas
+        gc = ws.canvas
+        fb = getattr(gc, "flush_batch", None)
+        if fb is not None:
+            fb()
+        cx, cy, cw, ch = win.content_rect()
+        self._root_canvas.rect(cx, cy, cw, ch, _SHADOW)   # letterbox bezel
+        ox, oy, scale = self._player_view(win)
+        self._blit_game(self._root_canvas, gc, ox, oy, scale)
+        self._win_chrome(win, focused)
+
+    def _blit_game(self, sc, gc, ox, oy, scale):
+        """Integer-scale the 320x240 game canvas into the desktop at (ox, oy) --
+        the windowed sibling of the parent's centered composite_game. On a
+        RECORDING desktop (the web console) there is no framebuffer to copy into:
+        ship the game frame as ONE scaled self-contained spr instead (the same
+        move as FullscreenStackWM._composite_via_spr)."""
+        gbuf = getattr(gc, "buf", None)
+        sbuf = getattr(sc, "buf", None)
+        if gbuf is None:
+            return
+        if sbuf is None:
+            img = _Blit(gc.w, gc.h, bytes(gbuf), -1)
+            img._paint = True              # -> the compact b64 wire form (~2.4x lighter)
+            sc.spr(img, ox, oy, scale)
+            return
+        gw, gh = gc.w, gc.h
+        sw, sh = sc.w, sc.h
+        for gy in range(gh):
+            grow = gy * gw
+            for s in range(scale):
+                dy = oy + gy * scale + s
+                if dy < 0 or dy >= sh:
+                    continue
+                base = dy * sw + ox
+                if scale == 1:
+                    end = min(gw, sw - ox)
+                    if end > 0:
+                        sbuf[base:base + end] = gbuf[grow:grow + end]
+                else:
+                    out = base
+                    for gx in range(gw):
+                        if out + scale <= (dy + 1) * sw:
+                            sbuf[out:out + scale] = bytes((gbuf[grow + gx],)) * scale
+                        out += scale
+
+    # -- the taskbar chips (open windows in the desktop bar) --------------------
+
+    def _chip_rects(self):
+        """One chip per open window, centered in the OS bar between the launcher's
+        selected-name zone and the right status cluster. Returns
+        [(kind, rect, label)] in stack order; deterministic, so draw + hit-test
+        share it without stored state."""
+        if not self._order:
+            return []
+        lay = self._root_ctx.layout
+        fs = lay.fs
+        out = []
+        widths = []
+        labels = []
+        for k in self._order:
+            label = self._win_title(self._wins[k])[:8]
+            labels.append(label)
+            widths.append(len(label) * lay.font_w + 8 * fs)
+        total = sum(widths) + (len(widths) - 1) * 2 * fs
+        left_edge = self._root_canvas.w // 4          # clear of the selected name
+        x = max(left_edge, (self._root_canvas.w - total) // 2)
+        y = 1 * fs
+        h = lay.status_h - 2 * fs
+        for i, k in enumerate(self._order):
+            if x + widths[i] > lay.clock_x - 4 * fs:
+                break                                  # out of bar space -- stop
+            out.append((k, (x, y, widths[i], h), labels[i]))
+            x += widths[i] + 2 * fs
+        return out
+
+    def _draw_taskbar_chips(self):
+        sc = self._root_canvas
+        fs = self._fs()
+        th = self.ws.theme_colors
+        for key, (x, y, w, h), label in self._chip_rects():
+            win = self._wins[key]
+            focused = (key == self._focus and not win.minimized)
+            bg = th["accent"] if focused else th["panel"]
+            if focused:
+                fg = NAMES["black"]                # ink on the accent CTA chip
+            else:
+                fg = th["edge"] if win.minimized else _CHIP_FG
+            sc.rect(x, y, w, h, bg)
+            sc.rectb(x, y, w, h, th["dim"] if win.minimized else _BORDER_TOP)
+            sc.print(label, x + 4 * fs, y + (h - 8 * fs) // 2, fg, 1)
+
+    def _chip_tap(self, key):
+        """Taskbar chip click -- pure FOCUS verbs, never a pop: restore a
+        minimized window (and focus it), minimize the focused one (apps only),
+        or just move focus to it. Nothing closes from the taskbar."""
+        ws = self.ws
+        win = self._wins.get(key)
+        if win is None:
+            return
+        ws._dirty = True
+        if win.minimized:
+            win.minimized = False
+            self._focus = key
+        elif key == self._focus:
+            if win.kind != "desktop":              # a running game never minimizes
+                win.minimized = True
+        else:
+            self._focus = key
+
+    # -- input routing ----------------------------------------------------------
+
+    def _route_key(self, i):
+        """Keyboard goes to the FOCUSED window's content -- focus moves on click,
+        independent of the back-stack, so typing lands in the editor while a
+        playtest keeps running beside it. No focused window (the desktop root) ->
+        return False and the launcher layer takes the keys."""
+        if not self._order:
+            return False
+        win = self._focus_win()
+        if win is None or win.minimized:
+            return False
+        content = self._content_for(win.kind)
+        if content is None:
+            return False
+        if win.ctx is not None:
+            self._install(win.ctx)
+            try:
+                return bool(content.handle_input(i))
+            finally:
+                self._install(self._root_ctx)
+        return bool(content.handle_input(i))
+
+    def _win_at(self, px, py):
+        """The slot key of the topmost VISIBLE window under the pointer (incl.
+        its border), or None."""
+        for k in reversed(self._order):
+            win = self._wins[k]
+            if win.minimized:
+                continue
+            if win.x <= px < win.x + win.w and win.y <= py < win.y + win.h:
+                return k
+        return None
+
+    def _route_pointer(self, px, py, click):
+        ws = self.ws
+        self._sync_windows()
+        p = ws.pointer
+        # An in-flight RESIZE follows the pointer; released -> apply the new size.
+        if self._resize is not None:
+            kind, ox, oy, ow, oh, _cw, _ch = self._resize
+            win = self._wins.get(kind)
+            if win is None:
+                self._resize = None
+            elif p.down:
+                fs = self._fs()
+                nw = max(160 * fs, ow + (px - ox))
+                nh = max(90 * fs + win.title_h, oh + (py - oy))
+                self._resize = (kind, ox, oy, ow, oh, nw, nh)
+                ws._dirty = True
+                return True
+            else:
+                self._resize = None
+                win.saved = None                   # a manual size clears "maximized"
+                self._resize_window(win, _cw, _ch)
+                return True
+        # An in-flight DRAG follows the pointer until release.
+        if self._drag is not None:
+            kind, gdx, gdy = self._drag
+            win = self._wins.get(kind)
+            if win is None or not p.down:
+                self._drag = None
+            else:
+                self._move_window(win, px - gdx, py - gdy)
+                return True
+        # A pressed-but-not-yet-moved strip grab becomes a drag after _DRAG_MIN px.
+        if self._drag_armed is not None:
+            kind, ox, oy, wx, wy = self._drag_armed
+            win = self._wins.get(kind)
+            if win is None or not p.down:
+                self._drag_armed = None
+            elif abs(px - ox) >= _DRAG_MIN or abs(py - oy) >= _DRAG_MIN:
+                self._drag_armed = None
+                self._drag = (kind, ox - wx, oy - wy)
+                self._move_window(win, px - (ox - wx), py - (oy - wy))
+                return True
+        if not self._order:
+            return False
+        # Taskbar chips live in the OS bar row, above every window.
+        if click:
+            for key, rect, _label in self._chip_rects():
+                if self._hit(px, py, rect):
+                    self._chip_tap(key)
+                    return True
+        key = self._win_at(px, py)
+        if key is None:
+            # The desktop root stays interactive beneath the windows (root layout
+            # context is ambient, so the launcher hit-tests correctly). Clicking
+            # the desktop moves focus to it (keys go to the launcher grid).
+            if click and self._focus is not None:
+                self._focus = None
+                ws._dirty = True
+            return bool(ws.launcher_layer.handle_pointer(px, py, click))
+        win = self._wins[key]
+        # A click FOCUSES the window it lands in -- and never pops anything (the
+        # owner call: looking at the editor must not end the playtest beside it).
+        # Closing is explicit: the strip X, hold-BACKSPACE in a focused game, or
+        # an app's own exit verb.
+        if click and key != self._focus:
+            self._focus = key
+            ws._dirty = True
+        focused = (key == self._focus)
+        if click:
+            for name, rect in self._strip_buttons(win):
+                if self._hit(px, py, rect):
+                    ws._dirty = True
+                    if name == "close":
+                        self._close_window(win.kind)
+                    elif name == "max":
+                        self._toggle_max(win)
+                    elif name == "min" and win.kind != "desktop":
+                        win.minimized = True
+                        if focused:
+                            self._focus = None
+                    return True
+            if self._hit(px, py, self._grip_rect(win)):
+                self._resize = (key, px, py, win.w, win.h, win.w, win.h)
+                return True
+            if py < win.y + 1 + win.title_h:
+                self._drag_armed = (key, px, py, win.x, win.y)
+                return True
+        elif not focused:
+            return True         # hovers/drags only reach the focused window
+        if win.kind == "desktop":
+            # Content: the Player translates system->game coords itself via
+            # ws._game_xy, which this WM maps onto the window's viewport.
+            return bool(self._content_for("desktop").handle_pointer(px, py, click))
+        # App window: dispatch the content in WINDOW-LOCAL coords under the
+        # window's layout context (the app's own bar row is its toolbar).
+        lx, ly = px - (win.x + 1), py - (win.y + 1 + win.title_h)
+        content = self._content_for(win.kind)
+        if content is None:
+            return True
+        self._install(win.ctx)
+        try:
+            content.handle_pointer(lx, ly, click)
+        finally:
+            self._install(self._root_ctx)
+        return True
+
+    def _remove_kind(self, kind):
+        """SURGICALLY remove one process from the back-stack -- the windowed
+        close verb. The fullscreen tiers can only pop from the top (goto
+        truncates everything above), but on a desktop closing one window must
+        never take unrelated windows with it (the owner-reported bug: closing
+        Make also closed Settings). The launcher root is never removable."""
+        st = self._stack
+        if kind in st and kind != "launcher":
+            st.remove(kind)
+            self._on_nav()
+
+    def close_player(self):
+        """Close the playtest window (its X, or hold-BACKSPACE routed through
+        ws._exit_to_caller): remove ONLY the player from the stack, then hand
+        focus back to the run CALLER's window when it's open (the Editor for a
+        PLAY run) -- the launch-and-return contract, without collateral pops."""
+        ws = self.ws
+        self._remove_kind("desktop")
+        self._sync_windows()
+        if (getattr(ws, "_run_caller", None) is ws.editor_app
+                and "make" in self._order):
+            self._focus = "make"
+        ws._dirty = True
+
+    def close_window_kind(self, kind):
+        """Close one window by its process kind -- the console's windowed exit
+        hook (_exit_to_caller / _exit_settings route here) and the title-strip
+        X's dispatch. Closing the Make window's EDITOR pops one level (the same
+        window flips back to the picker); everything else just closes."""
+        ws = self.ws
+        ws._dirty = True
+        if kind == "desktop":
+            self.close_player()
+        else:
+            self._remove_kind(kind)
+
+    def _close_window(self, kind):
+        self.close_window_kind(kind)
+
+    def _move_window(self, win, nx, ny):
+        full = self._root_canvas
+        fs = self._fs()
+        win.x = max(-win.w + 40 * fs, min(nx, full.w - 40 * fs))
+        win.y = max(self._bar_h(), min(ny, full.h - 24 * fs))
+        self.ws._dirty = True
+
+    def _hit(self, px, py, rect):
+        x, y, w, h = rect
+        return x <= px < x + w and y <= py < y + h

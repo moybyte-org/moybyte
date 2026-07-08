@@ -23,9 +23,9 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.audio import AudioBank, AudioEngine
 try:
-    from widgets import Pmem, _SilentAudio
+    from widgets import Pmem, _SilentAudio, _Blit
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import Pmem, _SilentAudio
+    from runtime.widgets import Pmem, _SilentAudio, _Blit
 
 
 def _err_text(exc):
@@ -134,12 +134,73 @@ class Wallpaper:
                 # safe-area camera/clip above), so the home/settings foreground (icons,
                 # status strip) draws clean at full extent.
                 ws._reset_canvas_state()
+                # Two-domain seam (#39): a wallpaper CART draws on the fixed 320x240
+                # game canvas (it runs under the kid cart API). On a DISTINCT (big)
+                # system canvas the desktop backdrop lives on the SYSTEM canvas, so
+                # composite the cart's frame up into it (centered integer scale over
+                # a black bezel) -- without this the big desktop showed whatever was
+                # left on the system canvas (the windowed WM exposed it as stale
+                # pixels). One object on the 320x240 tiers -> this never runs there.
+                sc = ws.sys_canvas
+                if sc is not ws.canvas:
+                    self._backdrop_blit(sc, ws.canvas)
                 return
             except Exception as exc:  # noqa: BLE001 -- drop a broken wallpaper to the fill
                 print("Moybyte wallpaper draw error:", _err_text(exc))
                 ws._reset_canvas_state()
                 self._wp_ns = self._wp_update = self._wp_draw = None
-        # Solid fill fallback (also the "fill:<color>" built-ins).
+        # Solid fill fallback (also the "fill:<color>" built-ins). Fill the SYSTEM
+        # canvas -- the surface the desktop actually shows (#39; the same object as
+        # the game canvas on the 320x240 tiers, so byte-identical there).
         wp = ws.wallpaper_id or "fill:dark_blue"
         name = wp[5:] if isinstance(wp, str) and wp.startswith("fill:") else "dark_blue"
-        ws.canvas.cls(NAMES.get(name, NAMES["dark_blue"]))
+        ws.sys_canvas.cls(NAMES.get(name, NAMES["dark_blue"]))
+
+    def _backdrop_blit(self, sc, gc):
+        """Composite the 320x240 wallpaper frame into the big system canvas as the
+        desktop backdrop, COVER-style (the Picotron model): the smallest integer
+        upscale that covers the whole desktop, centered and cropped -- a real
+        full-bleed backdrop, never a letterboxed rectangle floating in black.
+        (Always full-desktop -- never routed through the WM, whose viewport may be
+        a player WINDOW in windowed mode.) On a RECORDING system canvas (the web
+        console) there is no framebuffer to copy into: ship the frame as ONE scaled
+        self-contained b64 img instead (the replayers clip the crop)."""
+        fb = getattr(gc, "flush_batch", None)
+        if fb is not None:
+            fb()
+        gbuf = getattr(gc, "buf", None)
+        sbuf = getattr(sc, "buf", None)
+        if gbuf is None:
+            return
+        gw, gh = gc.w, gc.h
+        sw, sh = sc.w, sc.h
+        scale = max(1, (sw + gw - 1) // gw, (sh + gh - 1) // gh)   # cover, not fit
+        ox = (sw - gw * scale) // 2                                # <= 0 (crop)
+        oy = (sh - gh * scale) // 2
+        if sbuf is None:
+            img = _Blit(gw, gh, bytes(gbuf), -1)
+            img._paint = True              # -> the compact b64 wire form (~2.4x lighter)
+            sc.spr(img, ox, oy, scale)
+            return
+        # Raster: expand each source row ONCE, then slice the visible crop into every
+        # destination row it covers -- row-level copies, no per-pixel inner loop.
+        crop_x = -ox if ox < 0 else 0
+        dst_x = ox if ox > 0 else 0
+        span = min(sw - dst_x, gw * scale - crop_x)
+        for gy in range(gh):
+            grow = gy * gw
+            if scale == 1:
+                er = gbuf[grow:grow + gw]
+            else:
+                er = bytearray(gw * scale)
+                out = 0
+                for gx in range(gw):
+                    er[out:out + scale] = bytes((gbuf[grow + gx],)) * scale
+                    out += scale
+            seg = er[crop_x:crop_x + span]
+            for s in range(scale):
+                dy = oy + gy * scale + s
+                if dy < 0 or dy >= sh:
+                    continue
+                base = dy * sw + dst_x
+                sbuf[base:base + span] = seg

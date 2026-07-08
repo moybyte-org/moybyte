@@ -188,7 +188,13 @@ def _assert_frame_identical(ws, drv, tee, dt=1.0 / 30, label=""):
     The replay keeps a PERSISTENT off-screen-layer cache on the tee across frames (the
     browser's per-id layer canvases): with ship-once layers (#54/#43) a deflayer rides
     only the frame its gen changed, so a later frame's blit_layer must resolve against
-    the layer the browser already replayed -- exactly as the browser page does."""
+    the layer the browser already replayed -- exactly as the browser page does.
+
+    The cross-check needs a RECORDED frame to compare, so force the redraw: a static
+    screen (the default Moy Night wallpaper doesn't animate) legitimately records
+    nothing under the #44 dirty gate, which is streaming behavior, not a parity
+    subject."""
+    ws._dirty = True
     drv.frame(dt)
     raster = bytes(tee.buf)
     cv = Canvas(WIDTH, HEIGHT)
@@ -287,6 +293,7 @@ def test_launcher_frame_clears_the_buffer_each_redraw(tmp_path):
     WebConsole now rebinds the wallpaper to the recording canvas."""
     console = web_console.WebConsole(str(tmp_path / "carts"), fps=30)
     assert console.ws.screen == "launcher"
+    console.ws.select_wallpaper("ocean", persist=False)   # a LIVE wallpaper (animates)
     for _ in range(3):                       # let the live wallpaper settle
         cmds, _, _ = console.step_frame()
     assert "cls" in [c[0] for c in cmds], "launcher frame never clears -> browser ghosts"
@@ -333,21 +340,24 @@ def test_step_frame_partitions_into_wm_surfaces(tmp_path):
         "the running cart is the 'desktop' player-viewport surface")
 
 
-def test_static_screen_still_streams_a_full_frame_every_poll(tmp_path):
-    """A streaming web view must send the CURRENT screen on EVERY poll, but the console is
-    _dirty-gated (#44): it re-records only when something changed. A STATIC screen (the
-    launcher, a paused cart) would record a full frame ONCE and then NOTHING, so a browser
-    polling at 30fps -- or one that connects after that first frame -- gets empty frames and
-    shows BLACK (the on-hardware symptom: the desktop launcher was all black). step_frame()
-    forces a redraw each frame. Simulate a settled screen (_dirty already cleared) and assert
-    the next poll is STILL a complete frame. The other launcher tests use a freshly-seeded
-    tmp launcher whose live wallpaper animates (dirty every frame), so they never caught this."""
+def test_streaming_contract_static_skips_live_streams(tmp_path):
+    """The streaming contract (the VPN-bandwidth fix): a STATIC screen streams
+    NOTHING (step_frame -> None; the browser retains its last frame and the
+    keyframe rides the /assets fetch -- see test_idle_static_screen_pushes_nothing),
+    while an ANIMATING screen (a live wallpaper, a running cart) streams a COMPLETE
+    frame every poll (has a cls, so the browser's retained buffer never ghosts)."""
     console = web_console.WebConsole(str(tmp_path / "carts"), fps=30)
-    console.step_frame()                         # first frame (consumes the initial dirty)
-    console.ws._dirty = False                    # simulate a fully SETTLED / static screen
-    cmds, _, _ = console.step_frame()            # the next poll must NOT be empty
-    assert cmds, "a static screen streamed an EMPTY frame -> the browser goes black"
-    assert "cls" in [c[0] for c in cmds], "static-screen frame must be a full redraw (has cls)"
+    # Static: the Moy Night default doesn't animate -> nothing on the wire.
+    console.ws.select_wallpaper("moy_night", persist=False)
+    console.step_frame()                         # the /assets-armed keyframe
+    cmds, _, _ = console.step_frame()
+    assert cmds is None, "a static screen must stream nothing (idle = free)"
+    # Animating: the ocean wallpaper redraws -> every poll is a full frame.
+    console.ws.select_wallpaper("ocean", persist=False)
+    console.step_frame()
+    cmds, _, _ = console.step_frame()
+    assert cmds, "an animating screen must stream every poll"
+    assert "cls" in [c[0] for c in cmds], "animated frame must be a full redraw (has cls)"
 
 
 def test_fake_audio_take_pcm_hands_off_the_rendered_block():
@@ -978,3 +988,133 @@ def test_page_alloc_resets_clip_on_resize():
         "web_view.PAGE_HTML alloc() must call rs() to reset the clip on canvas "
         "resize; without it a >320x240 system canvas clips drawing to the top-left"
     )
+
+
+# ---------------------------------------------------------------------------
+# The windowed desktop over the web transport (#73: the webview as a WM tier).
+# ---------------------------------------------------------------------------
+
+def _replay_frames(console, screen, layers, atlas, assets, frames=2):
+    """Step + replay `frames` like the browser: EVERY served frame lands in the
+    persistent layers/atlas caches (ship-once deflayers span frames). A skipped
+    (static, cmds=None) frame streams nothing -- the browser retains, so we do."""
+    cmds = None
+    for _ in range(frames):
+        got, _cart, _au = console.step_frame()
+        if got is None:
+            continue
+        cmds = got
+        replay_to_canvas(cmds, screen, layers=layers, assets=assets, atlas=atlas)
+    return cmds
+
+
+def test_windowed_web_console_installs_the_windowed_wm(tmp_path):
+    from runtime.wm_windowed import WindowedWM
+    console = web_console.WebConsole(str(tmp_path / "carts"), fps=30,
+                                     sys_size=(1024, 600), font_scale=2,
+                                     windowed=True)
+    assert isinstance(console.ws.wm, WindowedWM)
+    # The WM anchors to the RECORDING canvas -- window streams reach the wire.
+    assert console.ws.wm._root_canvas is console.canvas
+
+
+def test_windowed_window_ships_as_a_recorded_layer(tmp_path):
+    """An app window's buffer is a RecordingLayer: the browser receives its
+    content as a deflayer + blit (the #54/#43 layer mechanism), and the replayed
+    frame actually shows the window (pixels differ from the bare desktop)."""
+    console = web_console.WebConsole(str(tmp_path / "carts"), fps=30,
+                                     sys_size=(1024, 600), font_scale=2,
+                                     windowed=True)
+    ws = console.ws
+    ws.pointer.visible = False
+    screen = Canvas(1024, 600)
+    layers = {}
+    atlas = {}
+    assets = console.assets()
+    _replay_frames(console, screen, layers, atlas, assets)
+    desktop = bytes(screen.buf)
+    ws.open_settings()
+    _replay_frames(console, screen, layers, atlas, assets)
+    win = ws.wm._wins["settings"]
+    assert hasattr(win.buf, "_lr")            # a RecordingLayer, not a raw canvas
+    assert layers                              # its deflayer landed in the cache
+    framed = bytes(screen.buf)
+    assert framed != desktop                   # the window visibly composited
+    # The window's border row exists at the window rect in the replayed pixels.
+    row = framed[win.y * 1024 + win.x: win.y * 1024 + win.x + win.w]
+    assert len(set(row)) >= 1 and framed != desktop
+
+
+def test_windowed_playtest_streams_the_game_as_one_b64_img(tmp_path):
+    """The player window's content ships as ONE scaled BASE64 img op per frame
+    (the recording _blit_game fallback tags the frame as a paint image -- ~2.4x
+    lighter on the wire than a JSON int-list spr), and the replayed screen shows
+    the cart's pixels inside the window."""
+    console = web_console.WebConsole(str(tmp_path / "carts"), fps=30,
+                                     sys_size=(1024, 600), font_scale=2,
+                                     windowed=True)
+    ws = console.ws
+    ws.pointer.visible = False
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                           if it.get("path"))
+    screen = Canvas(1024, 600)
+    layers = {}
+    atlas = {}
+    assets = console.assets()
+    ws.open()                                  # run the selected cart
+    cmds = _replay_frames(console, screen, layers, atlas, assets, frames=4)
+    assert ws.wm._order[-1] == "desktop"
+    win = ws.wm._wins["desktop"]
+    ox, oy, scale = ws.wm._player_view(win)
+    # A full-game-frame b64 img at the viewport origin + scale is on the wire.
+    imgs = [c for c in cmds if c[0] == "img" and c[1] == ox and c[2] == oy
+            and c[3] == 320 and c[4] == 240 and len(c) > 6 and c[6] == scale]
+    assert imgs, "expected the game frame as one scaled b64 img op"
+    # And the replayed window region isn't flat black (the cart drew something).
+    mid = (oy + 120 * scale) * 1024 + ox
+    assert len(set(screen.buf[mid:mid + 320 * scale])) > 1
+
+
+def test_scaled_img_replays_pixel_identical_to_raster_blit():
+    """The ["img", ..., b64, scale] op (the b64 full-frame composite) replays
+    pixel-identically to the raster scaled blit it replaces."""
+    from runtime.widgets import _Blit
+    from runtime.canvas import Image
+    src = Canvas(8, 6)
+    for i in range(8 * 6):
+        src.buf[i] = i % 64
+    # Raster reference: the plain scaled spr blit.
+    want = Canvas(64, 48)
+    want.cls(0)
+    want.spr(Image(8, 6, list(src.buf), transparent=None), 5, 3, 4)
+    # The wire: record via the paint-tagged path, replay.
+    cc = CommandCanvas(64, 48)
+    img = _Blit(8, 6, bytes(src.buf), -1)
+    img._paint = True
+    cc.cls(0)
+    cc.spr(img, 5, 3, 4)
+    cmds = cc.take_commands()
+    assert any(c[0] == "img" and len(c) > 6 and c[6] == 4 for c in cmds)
+    got = Canvas(64, 48)
+    replay_to_canvas(cmds, got)
+    assert bytes(got.buf) == bytes(want.buf)
+
+
+def test_idle_static_screen_pushes_nothing(tmp_path):
+    """A static screen (nothing dirty, no animation) makes step_frame return None
+    -- the WS loop then pushes nothing, so an idle desktop is ~free over a VPN. A
+    page (re)connect re-arms a full keyframe via its /assets fetch."""
+    console = web_console.WebConsole(str(tmp_path / "carts"), fps=30,
+                                     sys_size=(1024, 600), font_scale=2,
+                                     windowed=True)
+    ws = console.ws
+    ws.pointer.visible = False
+    ws.select_wallpaper("fill:black", persist=False)   # static backdrop
+    cmds, _cart, _au = console.step_frame()
+    assert cmds                                         # first frame: the keyframe
+    for _ in range(3):
+        cmds, _cart, _au = console.step_frame()
+        assert cmds is None                             # static -> nothing on the wire
+    console.assets()                                    # a page (re)connects
+    cmds, _cart, _au = console.step_frame()
+    assert cmds                                         # -> one full keyframe again

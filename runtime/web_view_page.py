@@ -142,9 +142,14 @@ function sp(ix,x,y,sc,fl){var a=ATL[ix];if(!a){HUD.unknown++;return;}blt(a.px,a.
 // img (#63 Fold 3): a paint image (a big MOY64 index bitmap) as base64 of its RAW indices --
 // the INLINE FALLBACK for a nameless paint image. atob -> write indices OPAQUE (index>=64
 // skipped) into the CURRENT target (idx/W/H) clamped, the browser twin of blit_indices.
-function im(x,y,w,h,b64){var s=atob(b64);x|=0;y|=0;w|=0;h|=0;
-for(var yy=0;yy<h;yy++){var ty=y+yy;if(ty<0||ty>=H)continue;var sr=yy*w,dr=ty*W;
-for(var xx=0;xx<w;xx++){var tx=x+xx;if(tx<0||tx>=W)continue;var p=s.charCodeAt(sr+xx);if(p<64)idx[dr+tx]=p;}}}
+function im(x,y,w,h,b64,sc){var s=atob(b64);x|=0;y|=0;w|=0;h|=0;sc=(sc|0)||1;
+if(sc==1){for(var yy=0;yy<h;yy++){var ty=y+yy;if(ty<0||ty>=H)continue;var sr=yy*w,dr=ty*W;
+for(var xx=0;xx<w;xx++){var tx=x+xx;if(tx<0||tx>=W)continue;var p=s.charCodeAt(sr+xx);if(p<64)idx[dr+tx]=p;}}return;}
+// scaled (the full-frame game/wallpaper composite, ["img",...,b64,scale]): each source
+// pixel paints an sc x sc block, clamped -- the browser twin of the scaled spr blit.
+for(var yy=0;yy<h;yy++){var sr=yy*w;for(var r=0;r<sc;r++){var ty=y+yy*sc+r;if(ty<0||ty>=H)continue;var dr=ty*W;
+for(var xx=0;xx<w;xx++){var p=s.charCodeAt(sr+xx);if(p>=64)continue;var t0=x+xx*sc;
+for(var q=0;q<sc;q++){var tx=t0+q;if(tx>=0&&tx<W)idx[dr+tx]=p;}}}}}
 // imgref (#63 Fold 4): a paint image by NAME, blitted from the /assets IMG cache -- the normal
 // path (pixels shipped once, not per-frame). Same opaque index->target blit as im, but reading
 // the pre-decoded Uint8Array. A cache MISS latches imgWant so df() re-fetches /assets (the layer
@@ -179,9 +184,14 @@ for(var r=0;r<sh;r++){var ty=dy+r;if(ty<0||ty>=dh)continue;var cw=sw,x0=0,t0=dx,
 if(t0<0){x0=-t0;cw+=t0;t0=0;}if(t0+cw>dw)cw=dw-t0;if(cw<=0)continue;var d0=ty*W+t0;
 for(var x=0;x<cw;x++)idx[d0+x]=src[o0+x0+x];}}
 function bl(c){var L=LAY[c[1]];if(!L)return;if(c.length>4&&c[4]==="full")blf(L,c[2],c[3]);else blw(L,c[2],c[3]);}
-function tx(s,x,y,c){if(!FONT)return;var X=x|0;y|=0;var fi=FONT.first,gw=FONT.w,g=FONT.glyphs,n=g.length;
+function tx(s,x,y,c,sc){if(!FONT)return;var X=x|0;y|=0;sc=(sc|0)||1;
+var fi=FONT.first,gw=FONT.w,g=FONT.glyphs,n=g.length;
+if(sc==1){for(var k=0;k<s.length;k++){var gi=s.charCodeAt(k)-fi,co=(gi>=0&&gi<n)?g[gi]:g[0];
+for(var j=0;j<gw;j++){var bt=co[j],py=y;while(bt){if(bt&1)put(X+j,py,c);bt>>=1;py++;}}X+=gw;}return;}
+// scaled system text (#39): each glyph bit paints an sc x sc block (fr respects clip/camera,
+// like the host SystemCanvas.print's rect blocks).
 for(var k=0;k<s.length;k++){var gi=s.charCodeAt(k)-fi,co=(gi>=0&&gi<n)?g[gi]:g[0];
-for(var j=0;j<gw;j++){var bt=co[j],py=y;while(bt){if(bt&1)put(X+j,py,c);bt>>=1;py++;}}X+=gw;}}
+for(var j=0;j<gw;j++){var bt=co[j],row=0;while(bt){if(bt&1)fr(X+j*sc,y+row*sc,sc,sc,c);bt>>=1;row++;}}X+=gw*sc;}}
 function rep(cs){for(var i=0;i<cs.length;i++){var c=cs[i],o=c[0];
 if(o=="cls")idx.fill(pm[c[1]&63]);else if(o=="pix")put(c[1],c[2],c[3]);
 else if(o=="line")ln(c[1],c[2],c[3],c[4],c[5]);else if(o=="rect")fr(c[1],c[2],c[3],c[4],c[5]);
@@ -191,10 +201,10 @@ else if(o=="defspr")ATL[c[1]]={w:c[2],h:c[3],t:c[4],px:c[5]};
 // spr has TWO shapes: atlas ["spr",idx,x,y,sc,fl] (<=6 fields) and self-contained
 // ["spr",x,y,sc,w,h,t,pix,fl] (a pix array at c[7]). Branch on the pix array.
 else if(o=="spr"){if(c.length>7&&c[7]&&c[7].length!==undefined)blt(c[7],c[4],c[5],c[6],c[1],c[2],c[3],c[8]||0);else sp(c[1],c[2],c[3],c[4],c[5]||0);}
-else if(o=="img")im(c[1],c[2],c[3],c[4],c[5]);else if(o=="imgref")imr(c[1],c[2],c[3]);
+else if(o=="img")im(c[1],c[2],c[3],c[4],c[5],c[6]);else if(o=="imgref")imr(c[1],c[2],c[3]);
 else if(o=="deflayer")dfl(c[1],c[2],c[3],c[4]);else if(o=="blit_layer")bl(c);
 else if(o=="settiles")st(c[1],c[2],c[3]);else if(o=="map")mp(c[1],c[2],c[3],c[4],c[5],c[6],c[7],c[8]);
-else if(o=="print")tx(c[1],c[2],c[3],c[4]);else if(o=="reset_state")rs();
+else if(o=="print")tx(c[1],c[2],c[3],c[4],c[5]);else if(o=="reset_state")rs();
 else if(o=="camera"){caX=c[1]|0;caY=c[2]|0;}
 else if(o=="clip"){if(c.length>1){var a=c[1]|0,b=c[2]|0,w=c[3]|0,h=c[4]|0;cl0=Math.max(0,a);cm0=Math.max(0,b);
 cl1=Math.min(W,a+w);cm1=Math.min(H,b+h);}else{cl0=0;cm0=0;cl1=W;cm1=H;}}
