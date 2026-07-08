@@ -261,6 +261,12 @@ class Layout:
             self.cols, self.rows = _ICON_COLS, _ICON_ROWS
             self.icon_x0 = _ICON_X0
         else:
+            # DESKTOP density (the big-canvas tiers, Picotron model): wider tiles
+            # (room for a ~10-char label pill under the art) + airier gaps, so the
+            # home grid reads as spaced desktop icons, not a packed launcher strip.
+            self.icon_w = 88 * fs
+            self.icon_gap_x = 22 * fs
+            self.icon_gap_y = 18 * fs
             self.cols = max(1, (self.w + self.icon_gap_x) //
                             (self.icon_w + self.icon_gap_x))
             band = self.grid_bottom - self.icon_y0
@@ -681,6 +687,44 @@ _ICON_ART = {
 # like a built-in cart re-seed. (v1 = the first full restyle; v2 = added the "moy"
 # mascot slot for the boot logo; v3 = added the "wifi_off" no-connection status slot.)
 _ICON_VERSION = 3
+
+
+# --- Panel THEMES (owner ask, 2026-07-08) -----------------------------------
+# Named token sets for the console's PANEL chrome -- the Settings panel, the Make
+# picker backdrop, the windowed WM's title strips / borders / taskbar chips, and
+# the launcher's selection accents. Selectable in Settings -> THEME, persisted in
+# system.json. Every token is a MOY64 index:
+#   panel     -- panel / window-strip background (the dark field)
+#   edge      -- panel border + secondary chrome ink (the theme's tint family)
+#   title     -- the FOCUSED window title strip (windowed WM)
+#   title_ink -- ink on that strip
+#   accent    -- the CTA: focused taskbar chip, selected tile ring/pill, rubber band
+#   hilite    -- row/tile selection background
+#   dim       -- faint texture (picker dots, unfocused window borders)
+# "night" is the moybyte brand colorway (the site palette) and MUST keep today's
+# exact values -- it's the default, and the golden/parity nets pin its pixels.
+THEMES = (
+    ("night",  {"panel": 60, "edge": 13, "title": 13, "title_ink": 0,
+                "accent": 10, "hilite": 13, "dim": 1}),
+    ("indigo", {"panel": 61, "edge": 13, "title": 13, "title_ink": 0,
+                "accent": 10, "hilite": 13, "dim": 1}),
+    ("berry",  {"panel": 62, "edge": 14, "title": 14, "title_ink": 0,
+                "accent": 10, "hilite": 2, "dim": 63}),
+    ("forest", {"panel": 58, "edge": 11, "title": 11, "title_ink": 0,
+                "accent": 10, "hilite": 3, "dim": 59}),
+    ("slate",  {"panel": 54, "edge": 6, "title": 6, "title_ink": 0,
+                "accent": 9, "hilite": 5, "dim": 55}),
+)
+DEFAULT_THEME = "night"
+
+
+def theme_colors(name):
+    """The token dict for theme `name`, falling back to the default. Returns the
+    shared dict (treat as read-only)."""
+    for n, tokens in THEMES:
+        if n == name:
+            return tokens
+    return THEMES[0][1]
 
 
 def _nibble(ch):

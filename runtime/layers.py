@@ -160,8 +160,10 @@ class _UpdateLayer(Layer):
 
 
 class _MapLayer(Layer):
-    """The map/tilemap editor (#32), a game-canvas viewport panel over the frozen
-    cart. Tap = paint one cell, drag = pan (#37); the d-pad pans the window.
+    """The map/tilemap editor (#32), SYSTEM-domain responsive (#39 step 3): a
+    full-screen panel on the reflowed system canvas (the frozen-cart backdrop is
+    gone -- the panel always covered every pixel of it anyway). Tap = paint one
+    cell, drag = pan (#37); the d-pad pans the window.
 
     Stage 4 (#46 zoned bar): draw() calls ws.bar_layer._draw_status_strip("menu")
     LAST (chrome over content) so the Editor's lent top-bar zone (the tab ladder +
@@ -169,11 +171,11 @@ class _MapLayer(Layer):
     ws.bar_layer.handle_bar_tap("menu", ...) FIRST, before the map click/pan."""
 
     id = "map"
-    domain = "game"
+    domain = "system"
 
     def draw(self, dt):
         ws = self.ws
-        ws._draw_menu_backdrop()          # frozen cart frame + reset draw state
+        ws._reset_canvas_state()          # game-canvas hygiene (degradation shares it)
         ws.map_ui._draw_map()
         ws.bar_layer._draw_status_strip("menu")
 
@@ -183,31 +185,32 @@ class _MapLayer(Layer):
 
     def handle_pointer(self, px, py, click):
         ws = self.ws
-        gx, gy = ws._game_xy(px, py)       # the map lives in the 320x240 viewport
-        if click and ws.bar_layer.handle_bar_tap("menu", gx, gy):
+        # SYSTEM coords (#39 step 3): the editor draws on the system canvas at
+        # native size, so it hit-tests the raw pointer -- no _game_xy translation.
+        if click and ws.bar_layer.handle_bar_tap("menu", px, py):
             return True         # the Editor's lent zone (Stage 4) claimed the tap
         if click:
-            ws.map_ui._map_click(gx, gy)
+            ws.map_ui._map_click(px, py)
         elif ws.pointer.down:
-            ws.map_ui._map_pan_drag(gx, gy)
+            ws.map_ui._map_pan_drag(px, py)
         else:
-            ws.map_ui._map_release(gx, gy)
+            ws.map_ui._map_release(px, py)
         return True
 
 
 class _MusicLayer(Layer):
-    """The music/sound editor (#50), a full-screen tracker on the game canvas. The
-    frozen cart isn't drawn (the editor covers it); the live mixer is ticked so a
-    PLAY preview keeps sounding, then the preview flag auto-clears when it ends.
+    """The music/sound editor (#50), SYSTEM-domain responsive (#39 step 3): a
+    full-screen tracker on the reflowed system canvas (a bigger panel shows more
+    steps/slots). The live mixer is ticked so a PLAY preview keeps sounding, then
+    the preview flag auto-clears when it ends.
 
     Stage-4 bar rollout (#46 zoned bar): draw() calls ws.bar_layer._draw_status_strip
     ("menu") LAST (chrome over the tracker) so the Editor's lent top-bar zone (the tab
     ladder + PLAY + SAVE + X) shows on this tab; handle_pointer routes a tap through
-    ws.bar_layer.handle_bar_tap("menu", ...) FIRST, before the tracker click. Music is
-    game-canvas, so it uses the fixed _ZONE_LEFT_GAME rect (like cards/paint/map)."""
+    ws.bar_layer.handle_bar_tap("menu", ...) FIRST, before the tracker click."""
 
     id = "music"
-    domain = "game"
+    domain = "system"
 
     def draw(self, dt):
         ws = self.ws
@@ -229,11 +232,11 @@ class _MusicLayer(Layer):
 
     def handle_pointer(self, px, py, click):
         ws = self.ws
-        gx, gy = ws._game_xy(px, py)       # the tracker lives in the 320x240 viewport
-        if click and ws.bar_layer.handle_bar_tap("menu", gx, gy):
+        # SYSTEM coords (#39 step 3): hit-test the raw pointer, no _game_xy.
+        if click and ws.bar_layer.handle_bar_tap("menu", px, py):
             return True         # the Editor's lent zone (Stage 4) claimed the tap
         if click:
-            ws.music_ui._music_click(gx, gy)   # step list + edit pad + actions
+            ws.music_ui._music_click(px, py)   # step list + edit pad + actions
         return True
 
 

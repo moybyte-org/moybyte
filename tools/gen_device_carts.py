@@ -29,6 +29,7 @@ import sys
 # tiny ordered list is the only thing still maintained by hand -- vs. the ~1800
 # lines of duplicated cart bodies it replaces).
 CART_ORDER = [
+    "moy_night",
     "wallpaper_space",
     "ocean",
     "sakura",

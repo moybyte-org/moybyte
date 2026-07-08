@@ -503,12 +503,16 @@ class Player:
 
     # -- crash chrome + the transient exit toast (the Player's own UX) --------
 
-    def _draw_error_panel(self):
+    def _draw_error_panel(self, cv=None):
         # A friendly on-canvas crash report (the device never reaches serial, so
         # this is the ONLY error surface). Drawn with the indexed API only: a red
         # box + a short title + the exception text, word-wrapped and truncated to
         # fit. The CODE/EDIT button below it stays live so the kid can fix the cart.
-        cv = self.ws.canvas
+        # `cv` defaults to the GAME canvas (a crashed running cart); the system-
+        # domain cards tab passes ws.sys_canvas so its defensive fallback stays
+        # visible on a distinct system canvas (#39 step 3).
+        if cv is None:
+            cv = self.ws.canvas
         NAMES = self.NAMES
         x, y, w, h = 14, 40, 292, 132
         cv.rect(x, y, w, h, NAMES["dark_purple"])

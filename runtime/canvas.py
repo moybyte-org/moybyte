@@ -742,9 +742,10 @@ class SystemCanvas(Canvas):
     """The SYSTEM canvas (the panel/window surface): identical to `Canvas` except
     its `print` honours a settings-chosen `font_scale` (petme128 nearest-neighbor
     x1/x2/x3). The two-domain seam (#39): the desktop/launcher/settings + status
-    strip + dock draw here at native resolution and reflow with the size; the
-    running cart (and, for now, the editors) draw on the fixed 320x240 GAME canvas
-    (a plain `Canvas`, text always 8px) and are composited in as a viewport.
+    strip + dock + EVERY editor tab (step 3: cards/code/blocks/paint/map/music)
+    draw here at native resolution and reflow with the size; the running cart
+    draws on the fixed 320x240 GAME canvas (a plain `Canvas`, text always 8px)
+    and is composited in as a viewport.
 
     At font_scale == 1 every drawn pixel is byte-identical to Canvas.print -- the
     graceful-degradation guarantee (a 320x240 system canvas at scale 1 is exactly
@@ -757,6 +758,16 @@ class SystemCanvas(Canvas):
 
     def set_font_scale(self, scale):
         self.font_scale = max(1, int(scale))
+
+    def new_layer(self, w, h):
+        """An off-screen layer that keeps THIS canvas's font scale, so chrome
+        rendered through a cached strip (the #43 top bar) scales its text like
+        everything else drawn on the system canvas (#39). At font_scale 1 a
+        SystemCanvas layer prints byte-identically to the plain Canvas layer the
+        base method returns, so the 320x240 tiers can't drift."""
+        lay = SystemCanvas(int(w), int(h), self.palette, font_scale=self.font_scale)
+        lay._nocache = True            # #63: match Canvas.new_layer (no nested map cache)
+        return lay
 
     def print(self, s, x, y, c, scale=1):
         # System text: render petme128 at `font_scale` (nearest-neighbor). At scale

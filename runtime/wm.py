@@ -343,8 +343,11 @@ class FullscreenStackWM:
     def _composite_via_spr(self, gc, sc, gbuf, ox, oy, scale):
         """Composite by blitting the game frame as ONE scaled sprite -- the path for a
         recording system canvas (the web CommandCanvas) that has no framebuffer to
-        copy into. Records a single spr command per frame carrying the game pixels."""
+        copy into. Records a single command per frame carrying the game pixels;
+        tagged as a paint image so the recorder ships it BASE64 (["img", ..., b64,
+        scale], ~2.4x lighter than a JSON int-list spr -- the webview's heaviest op)."""
         if gbuf is None:
             return
-        img = _Blit(gc.w, gc.h, list(gbuf), -1)     # opaque (no transparent index)
+        img = _Blit(gc.w, gc.h, bytes(gbuf), -1)    # opaque (no transparent index)
+        img._paint = True                           # -> the compact b64 wire form
         sc.spr(img, ox, oy, scale)

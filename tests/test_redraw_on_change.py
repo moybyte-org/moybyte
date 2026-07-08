@@ -139,15 +139,16 @@ def test_live_wallpaper_keeps_launcher_animating(tmp_path):
     live wallpaper."""
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
-    # Pick a wallpaper CART (not a fill) so it has a live _update, if one is seeded.
+    # Pick a wallpaper CART with a live _update (a STATIC cart -- Moy Night --
+    # deliberately has none, so walk the options until an animating one is found).
     cart_opts = [o for o in ws.wallpaper_options() if not str(o).startswith("fill:")]
-    if not cart_opts:
+    for opt in cart_opts:
+        ws.select_wallpaper(opt, persist=False)
+        if ws.wallpaper._wp_update is not None:
+            break
+    else:
         import pytest
-        pytest.skip("no live wallpaper cart seeded")
-    ws.select_wallpaper(cart_opts[0], persist=False)
-    if ws.wallpaper._wp_update is None:
-        import pytest
-        pytest.skip("seeded wallpaper has no _update (static)")
+        pytest.skip("no live (animating) wallpaper cart seeded")
     ws.ach.toast = None
     base = _settle(ws, drv)
     for _ in range(30):

@@ -120,7 +120,8 @@ def test_settings_wallpaper_stepper_applies_and_persists(tmp_path):
     ws = host_app.build_workstation(carts_dir)
     drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
-    ws.settings_layer.set_msel = 0                                       # wallpaper row
+    ws.settings_layer.set_msel = [r[0] for r in
+                                  ws.settings_layer._SETTINGS_ROWS].index("wallpaper")
     before = ws.wallpaper_id
     drv.press("right")                                    # step the stepper
     drv.frame(1 / 30)

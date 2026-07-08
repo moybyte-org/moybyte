@@ -716,7 +716,7 @@ def _seed_system_carts(carts_dir):
                     fh.write(data)
 
 
-def build_workstation(carts_dir=None, sys_size=None, font_scale=1):
+def build_workstation(carts_dir=None, sys_size=None, font_scale=1, windowed=False):
     """Build the shared console.Workstation wired to host backends.
 
     The two-domain seam (#39): `sys_size` is the SYSTEM canvas size (w, h) -- the
@@ -724,7 +724,12 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1):
     fixed 320x240 the carts + cart API draw on. When `sys_size` is None or 320x240
     (the T-Deck default) the system canvas IS the game canvas (one object), so the
     desktop is pixel-identical to today. `font_scale` (1/2/3) is the initial
-    system-UI font size (the persisted system.json value overrides it on load)."""
+    system-UI font size (the persisted system.json value overrides it on load).
+
+    `windowed=True` installs the Picotron-style windowed WM (wm_windowed.py --
+    the big-screen / P4 presentation, #73/#58): the launcher is the desktop and
+    every pushed app is a floating window. Needs a distinct big `sys_size`;
+    silently ignored on the shared-canvas 320x240 build."""
     carts_dir = carts_dir or os.path.expanduser("~/.moybyte/carts")
     _seed_system_carts(carts_dir)
     carts = moy_carts.scan(carts_dir)
@@ -765,6 +770,11 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1):
     # Achievements (#21): load the unlocked badges (achievements.json) so earned
     # milestones persist across reboots and the toast/view reflect them.
     ws.load_achievements()
+    # The Picotron-style windowed WM (#73): swap the presentation tier in before
+    # the first frame. Only meaningful with a distinct (big) system canvas.
+    if windowed and ws._sys_canvas is not None:
+        from runtime.wm_windowed import WindowedWM
+        ws.wm = WindowedWM(ws)
     return ws
 
 

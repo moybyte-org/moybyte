@@ -32,6 +32,9 @@ _SET_BACK = (288, 18, 18, 14)       # close Settings (X), in the panel title row
 _SET_ACH = (262, 18, 22, 14)        # open the achievements view (trophy), title row (#21)
 _SET_TITLE_HIT = (30, 18, 130, 16)  # the "SETTINGS" panel title (secret door, #21)
 
+# (The panel colors moved to the selectable THEME tokens -- chrome.THEMES,
+# Settings -> THEME; the "night" default is the moybyte site colorway.)
+
 
 class SettingsLayer:
     """The Settings content Layer (system domain): the row list over the live
@@ -49,7 +52,15 @@ class SettingsLayer:
     zone_gen = 0
 
     _SETTINGS_ROWS = (
+        # WIFI (#38, spec shell_ux_v1.md §10: wifi setup lives in Settings): a
+        # status row that opens the wifi PANEL below -- scan/pick/password/connect
+        # over the injected ws.wifi service. Settings is a system APP (not a
+        # cart), so this works while a game keeps running in the one cart slot.
+        ("wifi", "WIFI", "wifi-net"),
         ("wallpaper", "WALLPAPER", "wallpaper"),
+        # Panel THEME (owner ask 2026-07-08): cycles chrome.THEMES -- the token
+        # set the panels / window chrome / selection accents read. Persisted.
+        ("theme", "THEME", "theme"),
         ("font_scale", "FONT SIZE", "font"),
         ("volume", "VOLUME", "mock-gauge"),
         ("brightness", "BRIGHTNESS", "mock-gauge"),
@@ -80,11 +91,269 @@ class SettingsLayer:
         self._clamp_scroll = clamp_scroll
         self.set_msel = 0             # selected row in the Settings screen
         self.set_top = 0              # first visible Settings row (scroll offset, #53)
+        # The WIFI panel (#38, spec §10): a Settings SUB-VIEW over the injected
+        # ws.wifi service -- scan list -> pick -> (password) -> connect/forget.
+        self.wifi_view = False        # the wifi panel replaces the row list
+        self.wifi_nets = []           # [(ssid, signal, locked), ...] last scan
+        self.wifi_sel = 0
+        self.wifi_pick = None         # ssid being typed for (password mode)
+        self.wifi_pw = ""
+        self.wifi_msg = ""
+        self.wifi_known = []
+        self._wifi_kprev = 0          # keyboard edge detect (password typing)
 
     def reset(self):
         """Reset the selection + scroll window (called by ws.open_settings each visit)."""
         self.set_msel = 0
         self.set_top = 0
+        if self.wifi_view:
+            self.close_wifi()
+
+    # -- the WIFI panel (#38; spec shell_ux_v1.md §10) -------------------------
+
+    def open_wifi(self):
+        """Open the wifi panel (the WIFI row / the bar wifi icon's windowed
+        deep-link). Rescans on entry so the list is fresh."""
+        ws = self.ws
+        self.wifi_view = True
+        self.wifi_pick = None
+        self.wifi_pw = ""
+        self._wifi_kprev = 0
+        self._wifi_rescan()
+        ws._dirty = True
+
+    def close_wifi(self):
+        """Back from the wifi panel to the Settings rows (NOT out of Settings)."""
+        ws = self.ws
+        self.wifi_view = False
+        self.wifi_pick = None
+        ws._set_text_mode(False)
+        ws._dirty = True
+
+    def _wifi_rescan(self):
+        ws = self.ws
+        if ws.wifi is None:
+            self.wifi_nets = []
+            self.wifi_known = []
+            self.wifi_msg = "NO WIFI SERVICE"
+            return
+        try:
+            self.wifi_nets = list(ws.wifi.scan())
+            self.wifi_known = list(ws.wifi.known())
+            self.wifi_msg = "TAP A NETWORK"
+        except Exception as exc:  # noqa: BLE001 -- a radio hiccup must not crash Settings
+            self.wifi_nets = []
+            self.wifi_msg = ("SCAN FAILED: " + str(exc))[:34]
+        if self.wifi_sel >= len(self.wifi_nets):
+            self.wifi_sel = max(0, len(self.wifi_nets) - 1)
+
+    def _wifi_activate(self):
+        """CONNECT the selected network: open networks (or already-saved ones)
+        connect straight away; a locked, unknown one opens the password prompt."""
+        ws = self.ws
+        if not self.wifi_nets:
+            return
+        ssid, _sig, locked = self.wifi_nets[self.wifi_sel % len(self.wifi_nets)]
+        if locked and ssid not in self.wifi_known:
+            self.wifi_pick = ssid
+            self.wifi_pw = ""
+            self._wifi_kprev = 0
+            self.wifi_msg = "TYPE THE PASSWORD"
+            ws._set_text_mode(True)      # clean ASCII typing (device keyboard)
+        else:
+            self._wifi_connect(ssid, "")
+        ws._dirty = True
+
+    def _wifi_connect(self, ssid, pw):
+        ws = self.ws
+        ok = False
+        try:
+            ok = bool(ws.wifi.connect(ssid, pw)) if ws.wifi is not None else False
+        except Exception as exc:  # noqa: BLE001
+            self.wifi_msg = ("CONNECT FAILED: " + str(exc))[:34]
+        else:
+            self.wifi_msg = ("CONNECTED TO " + str(ssid))[:34] if ok \
+                else "COULD NOT CONNECT"
+        self.wifi_pick = None
+        ws._set_text_mode(False)
+        if ws.wifi is not None:
+            try:
+                self.wifi_known = list(ws.wifi.known())
+            except Exception:  # noqa: BLE001
+                pass
+        ws._dirty = True
+        return ok
+
+    def _wifi_forget(self):
+        ws = self.ws
+        if not self.wifi_nets or ws.wifi is None:
+            return
+        ssid = self.wifi_nets[self.wifi_sel % len(self.wifi_nets)][0]
+        try:
+            ws.wifi.forget(ssid)
+            self.wifi_known = list(ws.wifi.known())
+            self.wifi_msg = ("FORGOT " + str(ssid))[:34]
+        except Exception as exc:  # noqa: BLE001
+            self.wifi_msg = ("FORGET FAILED: " + str(exc))[:34]
+        ws._dirty = True
+
+    def _wifi_input(self, i):
+        """Keyboard for the wifi panel. In PASSWORD mode typed bytes edit the
+        password (ENTER connects, BACKSPACE deletes, ESC cancels -- Settings is a
+        taskbar app, so BACKSPACE is an ordinary key, spec §9); in LIST mode the
+        d-pad moves, A connects, B backs out to the Settings rows."""
+        ws = self.ws
+        if self.wifi_pick is not None:
+            k = ws.input.last_key
+            if k and k != self._wifi_kprev:
+                if k in (10, 13):                       # ENTER -> connect
+                    self._wifi_connect(self.wifi_pick, self.wifi_pw)
+                elif k == 8:                            # BACKSPACE -> delete
+                    self.wifi_pw = self.wifi_pw[:-1]
+                elif k == 27:                           # ESC -> cancel the prompt
+                    self.wifi_pick = None
+                    ws._set_text_mode(False)
+                elif 32 <= k <= 126 and len(self.wifi_pw) < 32:
+                    self.wifi_pw += chr(k)
+                ws._dirty = True
+            self._wifi_kprev = k
+            return True
+        if i.pressed("up") and self.wifi_nets:
+            self.wifi_sel = (self.wifi_sel - 1) % len(self.wifi_nets)
+            ws._dirty = True
+        if i.pressed("down") and self.wifi_nets:
+            self.wifi_sel = (self.wifi_sel + 1) % len(self.wifi_nets)
+            ws._dirty = True
+        if i.pressed("a") or i.pressed("run"):
+            self._wifi_activate()
+        if i.pressed("b") or i.pressed("stop"):
+            self.close_wifi()
+        return True
+
+    # wifi panel geometry (panel-derived; per-call, no stored rects)
+    def _wifi_btns(self):
+        """The bottom action row: CONNECT / FORGET / RESCAN / BACK rects."""
+        lay = self.ws.layout
+        fs = lay.fs
+        px, py, pw, ph = lay.settings_panel
+        bw = (pw - 10 * fs * 5) // 4
+        bh = 20 * fs
+        y = py + ph - bh - 6 * fs
+        out = []
+        x = px + 10 * fs
+        for name in ("connect", "forget", "rescan", "back"):
+            out.append((name, (x, y, bw, bh)))
+            x += bw + 10 * fs
+        return out
+
+    def _wifi_row_rect(self, slot):
+        return self.ws.layout.settings_row_rect(slot + 1)   # slot 0 = the status line
+
+    def _wifi_pointer(self, px, py, click):
+        ws = self.ws
+        if not click:
+            return True
+        for name, rect in self._wifi_btns():
+            if self._in(px, py, rect):
+                if name == "connect":
+                    if self.wifi_pick is not None:
+                        self._wifi_connect(self.wifi_pick, self.wifi_pw)
+                    else:
+                        self._wifi_activate()
+                elif name == "forget":
+                    self._wifi_forget()
+                elif name == "rescan":
+                    self._wifi_rescan()
+                    ws._dirty = True
+                else:
+                    if self.wifi_pick is not None:  # BACK inside the prompt -> list
+                        self.wifi_pick = None
+                        ws._set_text_mode(False)
+                        ws._dirty = True
+                    else:
+                        self.close_wifi()
+                return True
+        if self.wifi_pick is None:
+            for k in range(len(self.wifi_nets)):
+                if self._in(px, py, self._wifi_row_rect(k)):
+                    if self.wifi_sel == k:
+                        self._wifi_activate()       # second tap = connect
+                    else:
+                        self.wifi_sel = k
+                        ws._dirty = True
+                    return True
+        return True
+
+    def _draw_wifi(self):
+        """The wifi panel body (drawn instead of the Settings rows): a status
+        line, the scanned network list (signal bars + lock + SAVED markers), the
+        password prompt when one is being typed, and the bottom action row."""
+        NAMES = self._NAMES
+        ws = self.ws
+        cv = ws.sys_canvas
+        lay = ws.layout
+        fs = lay.fs
+        fw = lay.font_w
+        px, py, pw, ph = lay.settings_panel
+        # Status line (slot 0).
+        x, y, w, h = lay.settings_row_rect(0)
+        connected, ssid, ip = (False, None, None)
+        if ws.wifi is not None:
+            try:
+                connected, ssid, ip = ws.wifi.status()
+            except Exception:  # noqa: BLE001
+                pass
+        ws._icon("wifi" if connected else "wifi_off", x, y, cv)
+        if connected:
+            cv.print(("ON  " + str(ssid))[:22], x + 20 * fs, y + 5, NAMES["green"], 1)
+            if ip:
+                cv.print(str(ip)[:15], x + w - 15 * fw, y + 5, NAMES["blue"], 1)
+        else:
+            cv.print("NOT CONNECTED", x + 20 * fs, y + 5, NAMES["light_grey"], 1)
+        if self.wifi_pick is not None:
+            # Password prompt: the picked ssid + the typed password + a caret.
+            x, y, w, h = self._wifi_row_rect(0)
+            cv.print(("PASSWORD FOR " + str(self.wifi_pick))[:30], x + 4, y + 5,
+                     NAMES["white"], 1)
+            bx, by, bw2, bh2 = self._wifi_row_rect(1)
+            cv.rect(bx, by, bw2, bh2 - 2, NAMES["black"])
+            cv.rectb(bx, by, bw2, bh2 - 2, ws.theme_colors["edge"])
+            shown = self.wifi_pw[-max(4, bw2 // fw - 3):]
+            cv.print(shown, bx + 4, by + 5, NAMES["yellow"], 1)
+            cv.rect(bx + 4 + len(shown) * fw, by + 3, fs, bh2 - 8, NAMES["yellow"])
+            x, y, w, h = self._wifi_row_rect(2)
+            cv.print("ENTER = CONNECT   ESC = BACK", x + 4, y + 5,
+                     NAMES["dark_grey"], 1)
+        else:
+            # The network list.
+            for k in range(len(self.wifi_nets)):
+                ssid_k, sig, locked = self.wifi_nets[k]
+                x, y, w, h = self._wifi_row_rect(k)
+                if y + h > py + ph - 30 * fs:
+                    break                          # keep clear of the button row
+                sel = (k == self.wifi_sel)
+                if sel:
+                    cv.rect(x, y, w, h, ws.theme_colors["hilite"])
+                fg = NAMES["white"] if sel else NAMES["light_grey"]
+                cv.print(str(ssid_k)[:16], x + 4, y + 5, fg, 1)
+                bars = max(0, min(4, int(sig) // 25 + 1))
+                for s in range(4):
+                    c = NAMES["green"] if s < bars else NAMES["dark_grey"]
+                    cv.rect(x + w - 46 * fs + s * 8 * fs, y + h - 6 * fs - 2 * fs * s,
+                            5 * fs, (2 + 2 * s) * fs, c)
+                if locked:
+                    ws._glyph("lock", (x + w - 62 * fs, y + 2, 12 * fs, 12 * fs),
+                              NAMES["orange"], cv)
+                if str(ssid_k) in self.wifi_known:
+                    cv.print("SAVED", x + w - 110 * fs, y + 5, NAMES["blue"], 1)
+        if self.wifi_msg:
+            mx, my = px + 10 * fs, py + ph - 30 * fs - 10 * fs
+            cv.print(self.wifi_msg[:36], mx, my, NAMES["yellow"], 1)
+        for name, rect in self._wifi_btns():
+            label = name.upper()
+            color = {"connect": NAMES["green"], "forget": NAMES["red"],
+                     "rescan": NAMES["blue"], "back": NAMES["dark_grey"]}[name]
+            ws._btn(label, rect, color, cv)
 
     # -- the lent left zone (Stage 4, #46 zoned bar) --------------------------
 
@@ -131,6 +400,9 @@ class SettingsLayer:
         "action" row (EDIT ICONS) fires its action regardless of direction."""
         ws = self.ws
         key, _label, kind = self._settings_rows()[self.set_msel]
+        if kind == "wifi-net":                  # WIFI: any step/tap opens the panel (#38)
+            self.open_wifi()
+            return
         if kind == "action":                    # EDIT ICONS / UPDATE FW: open the tool
             self._activate_settings_action(key)
             return
@@ -148,6 +420,9 @@ class SettingsLayer:
             return
         if key == "wallpaper":
             ws.cycle_wallpaper(d)
+            return
+        if key == "theme":                      # panel THEME: cycle chrome.THEMES
+            ws.cycle_theme(d)
             return
         if key == "font_scale":                 # system-UI font size (#39): live + persisted
             ws.cycle_font_scale(d)
@@ -201,6 +476,8 @@ class SettingsLayer:
 
     def handle_input(self, i):
         ws = self.ws
+        if self.wifi_view:
+            return self._wifi_input(i)
         rows = self._settings_rows()
         if i.pressed("up"):
             self.set_msel = (self.set_msel - 1) % len(rows)
@@ -213,7 +490,9 @@ class SettingsLayer:
             self.settings_adjust(1)
         if i.pressed("a") or i.pressed("run"):  # activate an action row (EDIT ICONS / UPDATE FW)
             row = rows[self.set_msel % len(rows)]
-            if row[2] == "action":
+            if row[2] == "wifi-net":            # WIFI: open the panel (#38)
+                self.open_wifi()
+            elif row[2] == "action":
                 self._activate_settings_action(row[0])
             elif row[2] == "web":               # A/run also toggles the web view (#41)
                 ws._toggle_web_view()
@@ -242,19 +521,24 @@ class SettingsLayer:
         # only ever fires the clock egg or ≡, same as home/menu.
         if ws.bar_layer.handle_bar_tap("settings", px, py):
             return True
+        if self.wifi_view:                     # the wifi panel owns the body (#38)
+            return self._wifi_pointer(px, py, click)
         lay = ws.layout
         if self._in(px, py, lay.set_ach):      # trophy: open the achievements view (#21)
             ws.show_achievements = True
             ws.ach_ui._secret_taps = 0
             return True
-        if self._in(px, py, lay.set_back):
-            ws._exit_settings()
-            return True
-        # Secret-door Easter egg (#21): tapping the SETTINGS title (not a button)
-        # _SECRET_TAP_GOAL times knocks the hidden door open. Reset on any other tap.
-        if self._in(px, py, lay.set_title_hit):
-            ws.ach_ui._tap_secret_door()
-            return True
+        # The panel's own X + title only exist outside a WM window (the strip owns
+        # both there -- see _draw_settings), so their taps are gated the same way.
+        if not getattr(ws, "windowed_chrome", False):
+            if self._in(px, py, lay.set_back):
+                ws._exit_settings()
+                return True
+            # Secret-door Easter egg (#21): tapping the SETTINGS title (not a button)
+            # _SECRET_TAP_GOAL times knocks the hidden door open. Reset on any other tap.
+            if self._in(px, py, lay.set_title_hit):
+                ws.ach_ui._tap_secret_door()
+                return True
         ws.ach_ui._secret_taps = 0
         slot = ws.bar_layer._dock_slot_at(px, py)
         if slot is not None:
@@ -268,6 +552,9 @@ class SettingsLayer:
             x, y, w, h = self._settings_row_rect(i)
             if self._in(px, py, (x, y, w, h)):
                 self.set_msel = i
+                if rows[i][2] == "wifi-net":       # WIFI: any tap opens the panel (#38)
+                    self.open_wifi()
+                    return True
                 if rows[i][2] == "action":
                     self._activate_settings_action(rows[i][0])  # EDIT ICONS / UPDATE FW
                     return True
@@ -302,16 +589,27 @@ class SettingsLayer:
         lay = ws.layout
         fs = lay.fs
         px, py, pw, ph = lay.settings_panel
-        cv.rect(px, py, pw, ph, NAMES["dark_purple"])
-        cv.rectb(px, py, pw, ph, NAMES["pink"])
-        ws._glyph("gear", (px + 6, py + 2, 14 * fs, 14 * fs), NAMES["yellow"], cv)
-        cv.print("SETTINGS", px + 24, py + 4, NAMES["white"], 2)
+        th = ws.theme_colors
+        cv.rect(px, py, pw, ph, th["panel"])
+        cv.rectb(px, py, pw, ph, th["edge"])
+        # Inside a WM window (#73) the title strip already says SETTINGS and carries
+        # the closing X, so the panel's own header + X are suppressed (no doubled
+        # chrome); the trophy (the achievements door, #21) stays either way.
+        if not getattr(ws, "windowed_chrome", False):
+            ws._glyph("gear", (px + 6, py + 2, 14 * fs, 14 * fs), NAMES["yellow"], cv)
+            cv.print("SETTINGS", px + 24, py + 4, NAMES["white"], 2)
+            ws._mini_btn("X", lay.set_back, NAMES["red"], cv)
+        if self.wifi_view:
+            # The WIFI panel (#38) replaces the row list (its BACK returns here).
+            self._draw_wifi()
+            ws.bar_layer._draw_status_strip("settings")
+            ws.bar_layer._draw_dock("settings")
+            return
         # Achievements view button (#21): a trophy badge with the unlocked count.
         sa = lay.set_ach
-        cv.rect(sa[0], sa[1], sa[2], sa[3], NAMES["indigo"])
+        cv.rect(sa[0], sa[1], sa[2], sa[3], ws.theme_colors["hilite"])
         ws._glyph("trophy", (sa[0] - 2, sa[1], 14 * fs, 14 * fs), NAMES["yellow"], cv)
         cv.print(str(ws.ach.count()), sa[0] + 13 * fs, sa[1] + 4, NAMES["white"], 1)
-        ws._mini_btn("X", lay.set_back, NAMES["red"], cv)
         rows = self._settings_rows()
         for i in range(len(rows)):
             if self._settings_row_visible(i):
@@ -344,9 +642,24 @@ class SettingsLayer:
         x, y, w, h = self._settings_row_rect(i)
         sel = (i == self.set_msel)
         if sel:
-            cv.rect(x, y, w, h, NAMES["indigo"])
+            cv.rect(x, y, w, h, ws.theme_colors["hilite"])
         fg = NAMES["white"] if sel else NAMES["light_grey"]
         cv.print(label, x + 4, y + 5, fg, 1)
+        if kind == "wifi-net":
+            # WIFI (#38): the connected SSID (or OFF) + the status icon as the OPEN
+            # affordance -- a tap / A opens the wifi panel, no stepper.
+            connected, ssid = False, None
+            if ws.wifi is not None:
+                try:
+                    connected, ssid, _ip = ws.wifi.status()
+                except Exception:  # noqa: BLE001
+                    pass
+            cv.print((str(ssid)[:12] if connected else "OFF"),
+                     x + w - 78 * lay.fs, y + 5,
+                     NAMES["green"] if connected else NAMES["dark_grey"], 1)
+            ws._icon("wifi" if connected else "wifi_off",
+                     x + w - 18 * lay.fs, y + 1, cv)
+            return
         if kind == "action":
             # An action row (EDIT ICONS / UPDATE FW / UPDATE ONLINE): no value/stepper --
             # just an OPEN affordance at the right so a tap (or A) is the obvious activate.
@@ -364,7 +677,10 @@ class SettingsLayer:
         cv.print("<", x + w - 11 * fw - 2, y + 5, NAMES["yellow"], 2)
         cv.print(">", x + w - 2 * fw + 2, y + 5, NAMES["yellow"], 2)
         vx = x + w - 78 * lay.fs           # value column (baseline x+w-78)
-        if kind == "wallpaper":
+        if kind == "theme":                # panel THEME: the current name, tinted
+            cv.print(str(ws.theme_name)[:9].upper(), vx, y + 5,
+                     ws.theme_colors["edge"], 1)
+        elif kind == "wallpaper":
             cv.print(self._settings_wallpaper_label()[:9], vx, y + 5, NAMES["green"], 1)
         elif kind == "font":               # system-UI font size (#39): 1x / 2x / 3x
             cv.print("%dx" % ws.font_scale, vx, y + 5, NAMES["green"], 1)
@@ -397,7 +713,8 @@ class SettingsLayer:
             on = bool(getattr(ws, key, False))
             cv.print("ON" if on else "OFF", vx, y + 5,
                      NAMES["orange"] if on else NAMES["dark_grey"], 1)
-        # Mark not-yet-functional rows clearly (wallpaper + font + channel + web +
-        # diag + actions work).
-        if kind not in ("wallpaper", "font", "action", "channel", "web", "diag"):
+        # Mark not-yet-functional rows clearly (wifi + wallpaper + font + channel +
+        # web + diag + actions work).
+        if kind not in ("wifi-net", "wallpaper", "font", "action", "channel",
+                        "web", "diag", "theme"):
             cv.print("soon", x + 4, y + 6 + fw, NAMES["dark_grey"], 1)

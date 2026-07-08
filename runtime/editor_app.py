@@ -281,30 +281,40 @@ class EditorApp:
         """Draw the tab ladder + PLAY + SAVE inside the rect the bar lent us,
         highlighting the active tab. `cv` may be the bar's offscreen cache strip
         (#43) -- this draws the SAME pixels either way, which is what makes the
-        cached strip pixel-identical to a direct render."""
+        cached strip pixel-identical to a direct render.
+
+        The icon side + stride derive from the lent rect's HEIGHT (16*fs -- the
+        bar hands over an icon-high rect), so the ladder scales with the system
+        font (#39): at fs=1 this is byte-identical to the frozen 16px/18px
+        constants, at fs=2+ the icons no longer overlap."""
         ws = self.ws
         NAMES = self._NAMES
         x0, y0, w, h = rect
+        ic = h if h > 0 else _BAR_ICON      # icon side (16*fs)
+        stride = ic + (ic // 8)             # _BAR_GAP (2) scaled: 2*fs == ic//8
         for i, (tab, glyph) in enumerate(_ZONE_TABS):
-            x = x0 + i * _ZONE_STRIDE
-            if x + _BAR_ICON > x0 + w:
+            x = x0 + i * stride
+            if x + ic > x0 + w:
                 break                       # ran out of lent width -- draw what fits
             if tab is not None and tab == self.tab:
-                cv.rect(x, y0, _BAR_ICON, _BAR_ICON, NAMES["indigo"])
+                cv.rect(x, y0, ic, ic, NAMES["indigo"])
             ws._icon(glyph, x, y0, cv)
 
     def zone_tap(self, px, py, rect=None):
         """Hit-test the tab ladder + PLAY + SAVE and dispatch. `rect` is the lent
         left-zone rect BarLayer drew into -- the fixed game-canvas _ZONE_LEFT_GAME
-        for the cards/paint/map/music tabs, or the responsive layout.zone_left for
-        the system-canvas code/blocks tabs (both hit-test in the same coord space
-        the bar drew in). Defaults to _ZONE_LEFT_GAME so a bare call is unchanged."""
+        for a game-canvas tab, or the responsive layout.zone_left for the
+        system-canvas tabs (both hit-test in the same coord space the bar drew
+        in). Defaults to _ZONE_LEFT_GAME so a bare call is unchanged. The icon
+        side + stride derive from the rect height, matching draw_zone."""
         x0, y0, w, h = rect if rect is not None else _ZONE_LEFT_GAME
+        ic = h if h > 0 else _BAR_ICON
+        stride = ic + (ic // 8)
         for i, (tab, _glyph) in enumerate(_ZONE_TABS):
-            x = x0 + i * _ZONE_STRIDE
-            if x + _BAR_ICON > x0 + w:
+            x = x0 + i * stride
+            if x + ic > x0 + w:
                 break
-            if self._in(px, py, (x, y0, _BAR_ICON, _BAR_ICON)):
+            if self._in(px, py, (x, y0, ic, ic)):
                 return self._activate_zone_tab(tab)
         return False
 

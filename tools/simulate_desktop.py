@@ -31,6 +31,11 @@ gallery. No device needed. Drive it live (pygame) or headlessly via a script.
   # to fill it; the game stays a fixed 320x240, composited as a centered viewport.
   python tools/simulate_desktop.py --size 960x600
   python tools/simulate_desktop.py --size 960x600 --font-scale 2
+
+  # the Picotron-style windowed desktop (#73 -- the P4 "One" presentation):
+  # launcher = the desktop, apps open as draggable windows, a playtest runs in a
+  # window beside the editor.
+  python tools/simulate_desktop.py --size 1024x600 --font-scale 2 --windowed
 """
 
 import argparse
@@ -255,12 +260,18 @@ def main():
                     help="system canvas size (default 320x240 = the T-Deck panel)")
     ap.add_argument("--font-scale", type=int, default=1, choices=(1, 2, 3),
                     help="initial system-UI font scale 1/2/3 (system.json overrides)")
+    # The Picotron-style windowed WM (#73, the P4 "One" presentation tier): the
+    # launcher is the desktop and every app opens as a draggable window. Needs a
+    # big --size (ignored at 320x240).
+    ap.add_argument("--windowed", action="store_true",
+                    help="windowed desktop WM (Picotron-style; needs a big --size)")
     args = ap.parse_args()
 
     dt = 1.0 / args.fps
     sys_size = parse_size(args.size)
     ws = host_app.build_workstation(args.save_dir, sys_size=sys_size,
-                                    font_scale=args.font_scale)
+                                    font_scale=args.font_scale,
+                                    windowed=args.windowed)
     # Live windowed run -> stream real audio to the speakers (#16). Headless /
     # scripted runs keep the silent FakeAudio so they stay deterministic + device-free.
     if not args.demo and args.script is None:

@@ -28,14 +28,23 @@ LAST (chrome over content) -- ThemeLayer has its OWN draw(), so this only ever f
 the cart-sprite "paint" tab, never EDIT ICONS. handle_pointer IS shared with ThemeLayer,
 so its bar-tap check is guarded on menu_view == "paint" (a theme-editor tap must reach
 the grid, not the Editor's tab ladder).
+
+Responsive (#39 step 3): the paint editor is SYSTEM-domain now -- it draws on the
+reflowed system canvas at the panel's native size via `PaintLayout` (the CodeLayout
+pattern: every field equals the frozen module constant at (320, 240, 1), byte for
+byte, and the responsive formulas only run on a larger canvas / bigger font). On a
+big panel the zoomed pixel grid GROWS to fill the space (a multiple of 48px so the
+1x1/2x2/3x3 sprite sizes all divide it into whole pixels) and the chrome scales with
+the font. Hit-testing is in SYSTEM coords (no _game_xy translation).
 """
 from editors import PaintEditor
 
 
 # -- paint geometry (single source; console.py imports these back) ------------
-# Zoomed pixel grid: a fixed _PG_SPAN square; the per-pixel cell shrinks as the sprite
-# size grows (1x1 -> 18px cells; 2x2 -> 9px; 3x3 -> 6px), so a bigger sprite (#30)
-# edits in the same on-screen footprint.
+# The frozen 320x240 baseline PaintLayout reproduces VERBATIM (#39 graceful
+# degradation). Zoomed pixel grid: a fixed _PG_SPAN square; the per-pixel cell
+# shrinks as the sprite size grows (1x1 -> 18px cells; 2x2 -> 9px; 3x3 -> 6px), so
+# a bigger sprite (#30) edits in the same on-screen footprint.
 _PG_X0 = 14
 _PG_Y0 = 32
 _PG_CELL = 18                      # cell size at size 1 (8x8); _PG_SPAN derives from it
@@ -55,6 +64,86 @@ _PAINT_CLOSE = (200, 190, 102, 26)
 # PUT saves it TO the shared sheet. Hidden in the theme (icon) editor.
 _PAINT_GET = (210, 130, 92, 20)
 _PAINT_PUT = (210, 154, 92, 20)
+
+_BASE_W = 320
+_BASE_H = 240
+
+
+class PaintLayout:
+    """Responsive paint-editor geometry (#39 step 3): the panel, the zoomed pixel
+    grid, the 16-color swatch column, the sprite-selector / SIZE / GET / PUT buttons
+    and the SAVE/CLOSE row, derived from the SYSTEM canvas size (w, h) + font scale.
+
+    The single hard contract (mirrors Layout/CodeLayout): at (w, h, fs) ==
+    (320, 240, 1) every field equals the frozen `_PG_*`/`_SW_*`/`_PAINT_*` module
+    constant, byte for byte -- reproduced VERBATIM in the `_base` branch so no
+    reflow formula's integer-floor can drift a pixel on the T-Deck. The responsive
+    formulas only run on a larger canvas / bigger font.
+
+    The grid span is the star of the reflow: it grows to the largest multiple of
+    48px that fits (48 = lcm of the 8/16/24 sprite dims, so every zoom level keeps
+    whole on-screen pixels), which is what "a larger editing app" means for paint --
+    a hugely bigger drawing surface, not just scaled chrome."""
+
+    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1):
+        self.w = int(w)
+        self.h = int(h)
+        self.fs = max(1, int(font_scale))
+        fs = self.fs
+        self._base = (self.w == _BASE_W and self.h == _BASE_H and fs == 1)
+        if self._base:
+            self.body_fill = (0, 18, _BASE_W, _BASE_H - 18)
+            self.panel = (8, 16, 304, 204)
+            self.title_xy = (14, 18)
+            self.pg_x0, self.pg_y0, self.pg_span = _PG_X0, _PG_Y0, _PG_SPAN
+            self.pg_area = _PG_AREA
+            self.sw_x0, self.sw_y0, self.sw, self.sw_cols = _SW_X0, _SW_Y0, _SW, _SW_COLS
+            self.sw_area = _SW_AREA
+            self.spr_prev = _SPR_PREV
+            self.spr_next = _SPR_NEXT
+            self.size_btn = _PAINT_SIZE
+            self.prev_xy = (240, 92)
+            self.prev_box = 32
+            self.get_btn = _PAINT_GET
+            self.put_btn = _PAINT_PUT
+            self.save_btn = _PAINT_SAVE
+            self.close_btn = _PAINT_CLOSE
+            self.status_xy = (110, 196)
+            self.status_maxc = 18
+            return
+        # -- responsive: anchor the panel to the canvas, the swatch/button column to
+        # the panel's right edge, and grow the grid to fill what's left ------------
+        bar_h = 18 * fs
+        px, py = 8 * fs, bar_h - 2 * fs
+        pw, ph = self.w - 16 * fs, self.h - (bar_h - 2 * fs) - 20 * fs
+        self.body_fill = (0, bar_h, self.w, self.h - bar_h)
+        self.panel = (px, py, pw, ph)
+        p_right = px + pw
+        p_bottom = py + ph
+        self.title_xy = (px + 6 * fs, py + 2 * fs)
+        rc_x = p_right - 142 * fs                 # right column origin (base 170)
+        row_y = p_bottom - 30 * fs                # SAVE/CLOSE row (base 190)
+        self.pg_x0 = px + 6 * fs
+        self.pg_y0 = py + 16 * fs
+        avail = min(rc_x - self.pg_x0 - 8 * fs, row_y - self.pg_y0 - 4 * fs)
+        self.pg_span = max(48, 48 * (avail // 48))
+        self.pg_area = (self.pg_x0, self.pg_y0, self.pg_span, self.pg_span)
+        self.sw_x0, self.sw_y0 = rc_x, self.pg_y0
+        self.sw = _SW * fs
+        self.sw_cols = _SW_COLS
+        self.sw_area = (self.sw_x0, self.sw_y0, self.sw_cols * self.sw,
+                        (16 // self.sw_cols) * self.sw)
+        self.spr_prev = (rc_x + 44 * fs, self.pg_y0 + 8 * fs, 40 * fs, 24 * fs)
+        self.spr_next = (rc_x + 92 * fs, self.pg_y0 + 8 * fs, 40 * fs, 24 * fs)
+        self.size_btn = (rc_x + 44 * fs, self.pg_y0 + 36 * fs, 88 * fs, 20 * fs)
+        self.prev_xy = (rc_x + 70 * fs, self.pg_y0 + 60 * fs)
+        self.prev_box = 32 * fs
+        self.get_btn = (rc_x + 40 * fs, self.pg_y0 + 98 * fs, 92 * fs, 20 * fs)
+        self.put_btn = (rc_x + 40 * fs, self.pg_y0 + 122 * fs, 92 * fs, 20 * fs)
+        self.save_btn = (self.pg_x0, row_y, 88 * fs, 26 * fs)
+        self.close_btn = (p_right - 112 * fs, row_y, 102 * fs, 26 * fs)
+        self.status_xy = (self.pg_x0 + 96 * fs, row_y + 6 * fs)
+        self.status_maxc = max(4, (self.close_btn[0] - self.status_xy[0]) // (8 * fs))
 
 
 def _line_cells(x0, y0, x1, y1):
@@ -84,20 +173,29 @@ def _line_cells(x0, y0, x1, y1):
 
 
 class PaintLayer:
-    """The paint editor content Layer (game domain): a panel over the frozen cart
-    frame (or a black field for the icon theme). draw = the shared backdrop then the
-    paint UI; handle_pointer routes taps to the grid/palette/buttons; keyboard is
-    no-op (paint is pointer-driven). Reads ws.paint / ws.project.sheet / ws._editing_icons and
-    dispatches SAVE/GET/PUT/CLOSE to Workstation."""
+    """The paint editor content Layer (SYSTEM domain, responsive #39 step 3): a
+    full-screen panel on the reflowed system canvas (the frozen-cart backdrop is
+    gone -- the panel always covered every pixel of it anyway). draw = the paint UI
+    at the PaintLayout geometry; handle_pointer routes taps to the grid/palette/
+    buttons in SYSTEM coords; keyboard is no-op (paint is pointer-driven). Reads
+    ws.paint / ws.project.sheet / ws._editing_icons and dispatches SAVE/GET/PUT/
+    CLOSE to Workstation."""
 
     id = "paint"
-    domain = "game"
+    domain = "system"
 
     def __init__(self, ws, names, in_rect):
         self.ws = ws
         self._NAMES = names
         self._in = in_rect
         self._paint_drag = None       # last painted grid cell during a drag (#30)
+        sc = ws.sys_canvas
+        self.layout = PaintLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
+
+    def relayout(self, w, h, fs):
+        """Rebuild the responsive geometry (#39) -- called by ws._relayout on a
+        font-scale change (and, later, a window resize)."""
+        self.layout = PaintLayout(w, h, fs)
 
     def reset_drag(self):
         """Clear the drag-stroke origin (called by ws lifecycle: open_theme /
@@ -107,9 +205,14 @@ class PaintLayer:
     # -- Layer facets --------------------------------------------------------
 
     def draw(self, dt):
-        # menu_view == "paint": an editor panel over the frozen cart frame. (The theme
-        # variant clears to a black field first in ThemeLayer.draw(), then calls _draw_paint.)
-        self.ws._draw_menu_backdrop()
+        # menu_view == "paint": a full-screen editor panel on the SYSTEM canvas (#39
+        # step 3). The frozen-cart backdrop (_draw_menu_backdrop) is gone: the body
+        # fill + the bar cover every pixel it ever painted, so the pixels are
+        # identical and the cart's _draw() no longer runs on editor frames. The game
+        # canvas still gets its state reset (degradation shares one canvas). (The
+        # theme variant clears to a black field first in ThemeLayer.draw(), then
+        # calls _draw_paint.)
+        self.ws._reset_canvas_state()
         self._draw_paint()
         # The Editor's lent top-bar zone (Stage 4, #46 zoned bar): the tab ladder +
         # PLAY. ThemeLayer has its OWN draw() (doesn't call this one), so this is
@@ -121,9 +224,8 @@ class PaintLayer:
 
     def handle_pointer(self, px, py, click):
         ws = self.ws
-        # paint lives in the 320x240 viewport, so translate to game coords.
-        gx, gy = ws._game_xy(px, py)
-        px, py = gx, gy
+        # SYSTEM coords (#39 step 3): the editor draws on the system canvas at
+        # native size, so it hit-tests the raw pointer -- no _game_xy translation.
         # The Editor's lent zone (Stage 4): ONLY for the cart-sprite "paint" tab --
         # this handler is reused by ThemeLayer (EDIT ICONS) over the SAME grid/
         # buttons, which has no bar at all, so guard on menu_view rather than
@@ -149,15 +251,16 @@ class PaintLayer:
     def _paint_grid_cell(self, px, py):
         """Grid-local pixel (lx, ly) under (px, py), or None when outside the grid.
         The cell size shrinks as the sprite grows so the size*8 region always fills
-        the fixed _PG_SPAN footprint (#30)."""
+        the layout's grid footprint (#30; responsive span #39)."""
         pe = self.ws.paint
-        if pe is None or not self._in(px, py, _PG_AREA):
+        lay = self.layout
+        if pe is None or not self._in(px, py, lay.pg_area):
             return None
-        cell = _PG_SPAN // pe.dim
+        cell = lay.pg_span // pe.dim
         if cell < 1:
             cell = 1
-        lx = (px - _PG_X0) // cell
-        ly = (py - _PG_Y0) // cell
+        lx = (px - lay.pg_x0) // cell
+        ly = (py - lay.pg_y0) // cell
         if 0 <= lx < pe.dim and 0 <= ly < pe.dim:
             return (lx, ly)
         return None
@@ -185,28 +288,29 @@ class PaintLayer:
         # A tap (press edge). Paint the grid cell, or hit a button/palette swatch.
         ws = self.ws
         pe = ws.paint
+        lay = self.layout
         if pe is None:
             return
         if self._paint_stroke(px, py):         # paint a pixel in the zoomed grid
             return
-        if self._in(px, py, _SW_AREA):              # pick a palette color
-            idx = ((py - _SW_Y0) // _SW) * _SW_COLS + ((px - _SW_X0) // _SW)
+        if self._in(px, py, lay.sw_area):           # pick a palette color
+            idx = ((py - lay.sw_y0) // lay.sw) * lay.sw_cols + ((px - lay.sw_x0) // lay.sw)
             if 0 <= idx < 16:
                 pe.color = idx
-        elif self._in(px, py, _SPR_PREV):
+        elif self._in(px, py, lay.spr_prev):
             pe.select(-1)
-        elif self._in(px, py, _SPR_NEXT):
+        elif self._in(px, py, lay.spr_next):
             pe.select(1)
-        elif self._in(px, py, _PAINT_SIZE):         # cycle 1x1 / 2x2 / 3x3 (#30)
+        elif self._in(px, py, lay.size_btn):        # cycle 1x1 / 2x2 / 3x3 (#30)
             pe.cycle_size()
-        elif self._in(px, py, _PAINT_GET) and not ws._editing_icons:
+        elif self._in(px, py, lay.get_btn) and not ws._editing_icons:
             ws.share_tile_get()              # import the tile from the shared sheet
-        elif self._in(px, py, _PAINT_PUT) and not ws._editing_icons:
+        elif self._in(px, py, lay.put_btn) and not ws._editing_icons:
             ws.share_tile_put()              # save the tile to the shared sheet
-        elif self._in(px, py, _PAINT_SAVE):
+        elif self._in(px, py, lay.save_btn):
             # SAVE persists the SYSTEM icon theme (EDIT ICONS) or the cart's sprites.
             ws.save_icons() if ws._editing_icons else ws.save_sprites()
-        elif self._in(px, py, _PAINT_CLOSE):
+        elif self._in(px, py, lay.close_btn):
             # CLOSE returns to Settings (theme editor) or runs+leaves to the cart (PAINT).
             ws._leave_theme() if ws._editing_icons else ws._leave_menu()
 
@@ -215,68 +319,70 @@ class PaintLayer:
     def _draw_paint(self):
         NAMES = self._NAMES
         ws = self.ws
-        cv = ws.canvas
+        cv = ws.sys_canvas
+        lay = self.layout
         pe = ws.paint
         # Edit the editor's OWN sheet -- the cart sprites for PAINT, the system icon
         # sheet for the theme editor (EDIT ICONS) -- so one renderer serves both.
         sheet = pe.sheet if pe is not None else ws.project.sheet
-        # Cover the FULL content area below the 18px bar first (Fix 3): the paint tab draws
-        # over _draw_menu_backdrop()'s frozen cart frame, and the panel below only spans
-        # x 8..312 / y 16..220 -- so without this fill the previously-running cart bled
-        # through the 8px side + 20px bottom strips. Match the cards tab (which fills the
-        # whole area) so the editor is fully opaque. (Harmless on the EDIT-ICONS path, which
-        # already cls()'d to black.)
-        cv.rect(0, 18, cv.w, cv.h - 18, NAMES["black"])
-        cv.rect(8, 16, 304, 204, NAMES["black"])
-        cv.rectb(8, 16, 304, 204, NAMES["orange"])
+        # Cover the FULL content area below the bar first (Fix 3): the panel below
+        # doesn't span edge to edge, so without this fill stale pixels would bleed
+        # through the side/bottom strips. Match the cards tab (which fills the whole
+        # area) so the editor is fully opaque. (Harmless on the EDIT-ICONS path,
+        # which already cls()'d to black.)
+        cv.rect(*(lay.body_fill + (NAMES["black"],)))
+        cv.rect(*(lay.panel + (NAMES["black"],)))
+        cv.rectb(*(lay.panel + (NAMES["orange"],)))
         title = ("ICONS  TILE " if ws._editing_icons else "PAINT  SPR ") + str(pe.n if pe else 0)
         if sheet is not None and sheet.dirty:
             title = title + " *"
-        cv.print(title, 14, 18, NAMES["orange"], 1)
+        cv.print(title, lay.title_xy[0], lay.title_xy[1], NAMES["orange"], 1)
         if pe is None or sheet is None:
             return
-        # Zoomed pixel grid: a fixed _PG_SPAN square, cells shrink as the sprite
+        # Zoomed pixel grid: a fixed lay.pg_span square, cells shrink as the sprite
         # grows so a 1x1/2x2/3x3 sprite (#30) all edit in the same footprint. Pixels
         # come from the sheet's flat buffer at the sprite's tile origin, so the grid
         # spans the constituent tiles for sizes > 1. Grid lines are drawn only when
         # the cell is big enough to read (skip them once cells get tiny).
         dim = pe.dim
-        cell = _PG_SPAN // dim
+        span = lay.pg_span
+        gx0, gy0 = lay.pg_x0, lay.pg_y0
+        cell = span // dim
         if cell < 1:
             cell = 1
         ox, oy = sheet.tile_origin(pe.n)
         lines = cell >= 6
         for ly in range(dim):
             for lx in range(dim):
-                x = _PG_X0 + lx * cell
-                y = _PG_Y0 + ly * cell
+                x = gx0 + lx * cell
+                y = gy0 + ly * cell
                 cv.rect(x, y, cell, cell, sheet.pget(ox + lx, oy + ly))
                 if lines:
                     cv.rectb(x, y, cell, cell, NAMES["dark_grey"])
         # Outline the whole grid + the tile boundaries (so a 2x2/3x3 sprite shows
         # where its constituent sheet tiles divide).
-        cv.rectb(_PG_X0, _PG_Y0, _PG_SPAN, _PG_SPAN, NAMES["orange"])
+        cv.rectb(gx0, gy0, span, span, NAMES["orange"])
         if pe.size > 1:
-            tpx = _PG_SPAN // pe.size
+            tpx = span // pe.size
             for t in range(1, pe.size):
-                cv.line(_PG_X0 + t * tpx, _PG_Y0,
-                        _PG_X0 + t * tpx, _PG_Y0 + _PG_SPAN - 1, NAMES["light_grey"])
-                cv.line(_PG_X0, _PG_Y0 + t * tpx,
-                        _PG_X0 + _PG_SPAN - 1, _PG_Y0 + t * tpx, NAMES["light_grey"])
+                cv.line(gx0 + t * tpx, gy0,
+                        gx0 + t * tpx, gy0 + span - 1, NAMES["light_grey"])
+                cv.line(gx0, gy0 + t * tpx,
+                        gx0 + span - 1, gy0 + t * tpx, NAMES["light_grey"])
         # 16-color palette (2x8), the selected swatch outlined white.
         for idx in range(16):
-            x = _SW_X0 + (idx % _SW_COLS) * _SW
-            y = _SW_Y0 + (idx // _SW_COLS) * _SW
-            cv.rect(x, y, _SW, _SW, idx)
-            cv.rectb(x, y, _SW, _SW,
+            x = lay.sw_x0 + (idx % lay.sw_cols) * lay.sw
+            y = lay.sw_y0 + (idx // lay.sw_cols) * lay.sw
+            cv.rect(x, y, lay.sw, lay.sw, idx)
+            cv.rectb(x, y, lay.sw, lay.sw,
                      NAMES["white"] if idx == pe.color else NAMES["dark_grey"])
         # Sprite selector + a SIZE cycle button (#30) + a preview of the sprite,
-        # scaled so the whole NxN span fits a fixed ~32px box.
-        ws._btn("<", _SPR_PREV, NAMES["blue"])
-        ws._btn(">", _SPR_NEXT, NAMES["blue"])
-        ws._btn("SIZE %dx%d" % (pe.size, pe.size), _PAINT_SIZE, NAMES["dark_purple"])
-        ppx, ppy = 240, 92
-        ps = max(1, 32 // dim)
+        # scaled so the whole NxN span fits the layout's preview box.
+        ws._btn("<", lay.spr_prev, NAMES["blue"], cv)
+        ws._btn(">", lay.spr_next, NAMES["blue"], cv)
+        ws._btn("SIZE %dx%d" % (pe.size, pe.size), lay.size_btn, NAMES["dark_purple"], cv)
+        ppx, ppy = lay.prev_xy
+        ps = max(1, lay.prev_box // dim)
         for ly in range(dim):
             for lx in range(dim):
                 cv.rect(ppx + lx * ps, ppy + ly * ps, ps, ps,
@@ -286,19 +392,21 @@ class PaintLayer:
         # PUT pushes it in. Hidden in the theme editor -- the shared sheet is 8x8 cart
         # sprites, not the 16x16 icon theme, so GET/PUT don't apply there.
         if not ws._editing_icons:
-            ws._icon_btn("get", "GET", _PAINT_GET, NAMES["indigo"])
-            ws._icon_btn("put", "PUT", _PAINT_PUT, NAMES["dark_green"])
+            ws._icon_btn("get", "GET", lay.get_btn, NAMES["indigo"], cv)
+            ws._icon_btn("put", "PUT", lay.put_btn, NAMES["dark_green"], cv)
         if ws.paint_status:
-            cv.print(ws.paint_status[:18], 110, 196, NAMES["yellow"], 1)
-        ws._btn("SAVE", _PAINT_SAVE, NAMES["green"])
-        ws._btn("CLOSE", _PAINT_CLOSE, NAMES["red"])
+            cv.print(ws.paint_status[:lay.status_maxc],
+                     lay.status_xy[0], lay.status_xy[1], NAMES["yellow"], 1)
+        ws._btn("SAVE", lay.save_btn, NAMES["green"], cv)
+        ws._btn("CLOSE", lay.close_btn, NAMES["red"], cv)
 
 
 class ThemeLayer:
     """The icon-theme editor (EDIT ICONS, Settings -> #52): the SAME paint flow as the
     cart sprite editor, pointed at the SYSTEM icon sheet. It owns the theme LIFECYCLE
     (open/leave + the ws._editing_icons mode flag) and DELEGATES all the editing -- draw
-    + taps -- to the shared PaintLayer (one _paint_drag, one renderer). Game domain.
+    + taps -- to the shared PaintLayer (one _paint_drag, one renderer). System domain,
+    like the paint tab it reuses (#39 step 3).
 
     The lifecycle stays reachable on Workstation as thin forwarders (ws.open_theme is
     device/test-pinned; ws._leave_theme is called by PaintLayer's CLOSE tap); the mode
@@ -306,7 +414,7 @@ class ThemeLayer:
     save_icons) stay on ws (the device backend calls them) -- ThemeLayer dispatches."""
 
     id = "theme"
-    domain = "game"
+    domain = "system"
 
     def __init__(self, ws, paint_layer, names):
         self.ws = ws
@@ -316,9 +424,9 @@ class ThemeLayer:
     def draw(self, dt):
         # EDIT ICONS (Stage 2): opened from Settings, NOT a running cart, so there's no
         # cart backdrop to draw -- clear to black and reuse the shared PAINT renderer
-        # (over ws.icon_sheet, selected by ws._editing_icons).
+        # (over ws.icon_sheet, selected by ws._editing_icons), on the system canvas.
         ws = self.ws
-        ws.canvas.cls(self._NAMES["black"])
+        ws.sys_canvas.cls(self._NAMES["black"])
         ws._reset_canvas_state()
         self._paint._draw_paint()
 

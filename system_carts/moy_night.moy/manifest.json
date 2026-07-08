@@ -1,0 +1,23 @@
+{
+  "format": "moybyte-cart-v1",
+  "version": 1,
+  "title": "Moy Night",
+  "type": "wallpaper",
+  "runtime": "python",
+  "main": "main.py",
+  "system": true,
+  "canvas": { "width": 320, "height": 240, "palette": "moy64" },
+  "permissions": ["graphics", "input"],
+  "age_mode": "cards",
+  "safe_to_share": true,
+  "config": {
+    "stars": 70,
+    "accent": "yellow",
+    "moy": 1
+  },
+  "edit": [
+    { "key": "stars", "label": "STARS", "type": "int", "min": 20, "max": 160, "step": 10, "card": "SKY HAS {value} STARS" },
+    { "key": "accent", "label": "GLOW", "type": "choice", "choices": ["yellow", "pink", "blue", "green"], "display": "bg-thumbs", "card": "MOON GLOWS {value}" },
+    { "key": "moy", "label": "MOY", "type": "int", "min": 0, "max": 1, "step": 1, "card": "MOY IS HOME: {value}" }
+  ]
+}

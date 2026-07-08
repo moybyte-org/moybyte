@@ -340,6 +340,7 @@ try:
         _BASE_W, _BASE_H, _FONT_W, Layout, CodeLayout, _GLYPH_SIZE, _GLYPHS,
         _blit_glyph, _ICON, _ICON_ART, _ICON_VERSION, _nibble, _default_icon_sheet,
         _cursor_delta, _clamp_scroll, _in, _SPLASH_MS,
+        THEMES, DEFAULT_THEME, theme_colors,
     )
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import (
@@ -350,6 +351,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
         _BASE_W, _BASE_H, _FONT_W, Layout, CodeLayout, _GLYPH_SIZE, _GLYPHS,
         _blit_glyph, _ICON, _ICON_ART, _ICON_VERSION, _nibble, _default_icon_sheet,
         _cursor_delta, _clamp_scroll, _in, _SPLASH_MS,
+        THEMES, DEFAULT_THEME, theme_colors,
     )
 
 
@@ -400,6 +402,17 @@ class Workstation:
         # the memoized layer stack. Built here (before anything reads/writes screen or
         # composites) with a `ws` back-ref to the console's canvases + layer instances.
         self.wm = FullscreenStackWM(self)
+        # Windowed-desktop chrome mode (#73, wm_windowed.py): True when the windowed
+        # WM is installed. The bar + dock consult it to keep OS chrome (the right-zone
+        # status cluster, the dock) OFF app windows -- the desktop's own full-width
+        # bar is the one OS bar and each window's WM title strip carries min/max/X.
+        # Always False on the fullscreen-stack tiers.
+        self.windowed_chrome = False
+        # Panel THEME (Settings -> THEME): the chrome token set the panels/window
+        # chrome/selection accents read each draw. Default = the moybyte "night"
+        # colorway (today's exact colors); load_system applies the persisted pick.
+        self.theme_name = DEFAULT_THEME
+        self.theme_colors = theme_colors(DEFAULT_THEME)
         self.layout = Layout(self.sys_canvas.w, self.sys_canvas.h,
                              self._effective_font_scale())
         # Responsive editor geometry (#39 step 2): the code + block editors now draw
@@ -885,6 +898,7 @@ class Workstation:
         self.set_font_scale(self.system.get("font_scale", self.font_scale),
                             persist=False)
         self.select_wallpaper(self.system.get("wallpaper"), persist=False)
+        self.set_theme(self.system.get("theme", self.theme_name), persist=False)
         # #68: apply the persisted diagnostics gate (kid-mode default OFF).
         self.set_diag_live(self.system.get("diag_live", False), persist=False)
         self.set_diag_sd(self.system.get("diag_sd", False), persist=False)
@@ -983,6 +997,29 @@ class Workstation:
         nxt = scales[(scales.index(cur) + d) % len(scales)]
         self.set_font_scale(nxt, persist=True)
 
+    def set_theme(self, name, persist=True):
+        """Pick the panel THEME (Settings -> THEME): swap the chrome token set
+        (chrome.THEMES) the panels/window chrome/selection accents read each draw,
+        and persist the choice. An unknown name falls back to the default."""
+        if not any(n == name for n, _t in THEMES):
+            name = DEFAULT_THEME
+        self.theme_name = name
+        self.theme_colors = theme_colors(name)
+        # The launcher grids read the accent for their selection ring/pill.
+        self.launcher.theme = self.theme_colors
+        if getattr(self, "picker", None) is not None:
+            self.picker.theme = self.theme_colors
+        self._dirty = True
+        if persist:
+            self.system["theme"] = self.theme_name
+            self._persist_system()
+
+    def cycle_theme(self, d):
+        """Step Settings -> THEME through chrome.THEMES (applies + persists)."""
+        names = [n for n, _t in THEMES]
+        cur = self.theme_name if self.theme_name in names else names[0]
+        self.set_theme(names[(names.index(cur) + d) % len(names)], persist=True)
+
     def _relayout(self):
         """Rebuild the responsive layout from the live system-canvas size + the
         EFFECTIVE font scale and re-push it into the launcher (so its grid reflows).
@@ -996,6 +1033,17 @@ class Workstation:
         self.block_ui.relayout(w, h, fs)
         if self.editor is not None:
             self.editor.set_view_size(self.code_layout.cols, self.code_layout.rows)
+        # The step-3 responsive editors (#39): each converted layer owns its layout;
+        # guarded, since _relayout is first called before _build_layers registers them.
+        for _lyr in ("paint_layer", "map_ui", "music_ui", "cards_layer"):
+            _obj = getattr(self, _lyr, None)
+            if _obj is not None:
+                _obj.relayout(w, h, fs)
+        # The windowed WM (wm_windowed.py, big-screen tier) re-anchors its layout
+        # contexts after any relayout; a no-op hook on the fullscreen-stack WM.
+        _hook = getattr(self.wm, "on_relayout", None) if hasattr(self, "wm") else None
+        if _hook is not None:
+            _hook()
 
     def _persist_font_scale(self):
         self.system["font_scale"] = self.font_scale
@@ -1197,6 +1245,13 @@ class Workstation:
         self._set_text_mode(False)
 
     def _exit_settings(self):
+        # Windowed WM (#73): close JUST the Settings window -- whatever else is
+        # open (a running game, the Make window) stays. No hook on the fullscreen WM.
+        _ck = getattr(self.wm, "close_window_kind", None)
+        if _ck is not None:
+            self._dirty = True
+            _ck("settings")
+            return
         # Close Settings back to wherever it was opened from: resume the running cart
         # if we came from one (the gear on the in-cart/crash bar), else the launcher home.
         if getattr(self, "_settings_return", "launcher") == "desktop" and self.cart is not None:
@@ -1440,6 +1495,14 @@ class Workstation:
         (screen -> "menu"; editor_app.tab is preserved -> the SAME tab), proving the
         Player has zero knowledge of who launched it. Any other caller (the launcher
         home root, or None) pops all the way home."""
+        # Windowed WM (#73): closing the playtest must never truncate unrelated
+        # windows stacked above it (e.g. Settings) -- the WM removes ONLY the
+        # player and refocuses the caller's window. No hook on the fullscreen WM.
+        _cp = getattr(self.wm, "close_player", None)
+        if _cp is not None:
+            self._dirty = True
+            _cp()
+            return
         if self._run_caller is self.editor_app:
             self._dirty = True             # screen change repaints (#44)
             self.wm.goto("menu")           # Stage 6e: pop the Player, back to the Editor tab
@@ -2296,7 +2359,13 @@ class Workstation:
             return
         px, py, click = p.x, p.y, p.click
         gx, gy = self._game_xy(px, py)
-        self.input.game_pointer = (gx, gy, click, p.down)
+        # Windowed WM (#73): while a window OTHER than the playtest holds input
+        # focus, the game-space pointer publishes with click/down stripped, so a
+        # background running cart never eats the taps meant for the editor beside
+        # it. The fullscreen-stack WM has no hook -> unchanged.
+        _pp = getattr(self.wm, "player_has_pointer", None)
+        _live = _pp() if _pp is not None else True
+        self.input.game_pointer = (gx, gy, click and _live, p.down and _live)
         # Memoized, pre-reversed visible stack (Stage 6c) -- no per-frame allocation.
         for layer in self.wm.visible_stack_rev():
             if layer.handle_pointer(px, py, click):
@@ -2397,6 +2466,12 @@ class Workstation:
         if kind == "desktop" and self.cart_error is None and (
                 self._update is not None or self._draw is not None):
             return True
+        # Windowed WM (#73): a running cart's WINDOW keeps animating even when
+        # another window sits above it on the stack (Settings over a game, the
+        # editor beside a playtest). No hook on the fullscreen-stack WM.
+        _ka = getattr(self.wm, "keeps_animating", None)
+        if _ka is not None and _ka(dt):
+            return True
         # A music-editor preview must keep ticking the mixer + redrawing the PLAY/STOP
         # button (and clearing the flag when the effect ends) without input (#50).
         if kind == "menu" and self.menu_view == "music" \
@@ -2440,21 +2515,10 @@ class Workstation:
     # keeps the _pf_bar CHROMEBRK accounting here). The "desktop" content layer routes
     # to it via _PlayerLayer.)
 
-    def _draw_menu_backdrop(self):
-        # Draw the frozen cart frame as the backdrop under an editor panel (cards /
-        # paint / map), then clear its camera/clip/pal/palt (#11) so the panel draws
-        # unaffected. Shared by _draw_content_menu (cards/paint) and _MapLayer.
-        # A declared background (#63) restores first, exactly as the Player does --
-        # a background()-only cart may have no cls in _draw at all.
-        try:
-            rb = self.player._restore_bg
-            if rb is not None:
-                rb()
-            if self._draw:
-                self._draw()
-        except Exception:
-            pass
-        self._reset_canvas_state()
+    # (_draw_menu_backdrop -- the frozen-cart backdrop under the cards/paint/map
+    # panels -- was removed by the #39 step-3 conversions: every Editor tab is
+    # system-domain now and always fully covered the backdrop anyway, so the tabs
+    # just reset the game canvas's draw state and paint their own opaque body.)
 
     def _autosave_code(self):
         """The idle-debounce autosave-COMMIT (Stage 7): persist + journal the code
