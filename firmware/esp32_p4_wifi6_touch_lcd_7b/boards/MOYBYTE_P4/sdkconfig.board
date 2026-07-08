@@ -1,0 +1,11 @@
+# Waveshare P4-7B board fragment (#58).
+
+# PSRAM at 200MHz: the 1024x600@60Hz DPI scan-out streams ~104MB/s from the
+# PSRAM framebuffer; at the default speed the DSI fetcher underruns
+# ("can't fetch data from external memory fast enough" -- confirmed on
+# hardware). Matches Waveshare's demo sdkconfig.
+CONFIG_SPIRAM_SPEED_200M=y
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+
+# The board has 32MB flash (the generic P4 board assumes 16MB).
+CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y

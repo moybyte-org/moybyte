@@ -16,6 +16,7 @@ Moybyte is a PC-first SDK + simulator for a future ESP32 kids' coding console, p
 2. **The `.moy` console (newer, active direction).** A TIC-80-style "fantasy workstation" where *everything is a cartridge* — now running the shipped **v0.5 shell** (everything-is-a-process: launcher / Player / Editor apps over a fullscreen-stack WM; spec `docs/shell_ux_v1.md`). This is where current feature work happens.
    - `runtime/` — the **host reference** of the console (launcher → Player → tabbed Editor). Pure host, fast dev loop. See `runtime/README.md` for the per-file map; don't duplicate it.
    - `firmware/lilygo_t_deck_plus_micropython/` — the **device port** of that same console (MicroPython).
+   - `firmware/esp32_p4_wifi6_touch_lcd_7b/` — the **second device target** (#58, bring-up stage): the 7″ 1024×600 MIPI-DSI "desktop workstation" board. Panel/touch/SD/WiFi are hardware-confirmed; the console isn't staged onto it yet.
    - `system_carts/*.moy` — seed cartridges (folder = `manifest.json` + `main.py` + `config.json`).
 
 The two systems share a design intent but **not code**. `.moyproj` is the old format; `.moy` is the v0.4 format.
@@ -62,6 +63,10 @@ make firmware-monitor-lilygo-micropython PORT=/dev/ttyACM0         # miniterm @1
 
 - The build (`firmware/lilygo_t_deck_plus_micropython/build.sh`) **clones `lvgl_micropython` into `.build/`**, stages the native C modules (`native/moy_gfx`, `moy_alloc`, and `moy_sd`) into its `ext_mod` tree (re-staged every build because `ext_mod` is wiped on re-clone) and the shared `runtime/` modules (`console` + `project`/`player`/`editor_app`/`wm`, `editors`, `moy_carts`, the `*_layer.py`/`*_ui.py` surfaces, `blocks`, `web_view`, …) into `modules/`, freezes the `modules/` Python, and emits `app` + full-flash images to `dist/` (both gitignored). It needs the ESP-IDF 5.5 toolchain (`IDF_PYTHON ?= ~/.espressif/.../idf5.5_py3.10_env/bin/python`).
 - The MicroPython console is the only firmware. (The older Arduino/PlatformIO serial-smoke firmware and the legacy LVGL `.moyproj` game-loop boot path were removed; git history has them.)
+
+### Second device target: ESP32-P4 (Waveshare 7B) — bring-up (#58)
+
+- `firmware/esp32_p4_wifi6_touch_lcd_7b/` — the desktop-tier board (7″ 1024×600 MIPI-DSI, GT911 touch, C6 WiFi over SDIO, 32MB PSRAM/flash). **NOT lvgl_micropython** (no P4/DSI support there): mainline MicroPython v1.28 with an out-of-tree board def (`boards/MOYBYTE_P4`) + `native/moy_dsi` (vendored EK79007 driver; DPI mode — the DSI peripheral scans a PSRAM framebuffer continuously, so there is **no per-frame flush** and the T-Deck's tx_color ceiling doesn't exist). Build `firmware/esp32_p4_wifi6_touch_lcd_7b/build.sh` → `dist/p4/moybyte_p4.bin`, flash at offset **0x2000**; serial = CH343 on `/dev/ttyACM0`, REPL stays alive (no native-takeover USB starvation). **Read that dir's README before touching the P4** — it records the hardware-learned constraints (SD power comes from the P4's internal LDO4 which stock MicroPython never enables; SDMMC slot 1 belongs to the C6 and claiming it panics the board; PSRAM must run at 200MHz or the DSI scan-out underruns; WiFi needs no C6 flash). #58 is the living port status; the next step is staging `runtime/` + a P4 `DeviceCanvas`/`moy_gfx` re-home so the launcher boots (then `WindowedWM` gets its intended hardware).
 
 ### Host == device: the shared console (important)
 
