@@ -326,6 +326,44 @@ if [ "${CACHE_GEOMETRY}" = "fast" ]; then
   done
 fi
 
+# External MSPI speed (#66, T-Deck S3): run octal flash + octal PSRAM at 120MHz.
+# PSRAM 120 selects a 240MHz MSPI timing tuple; leaving flash at 80MHz hit an
+# unsupported ESP-IDF 240/80 timing-table path, so the tested build moves both
+# memories together. Keep the temperature retune OFF: on the T-Deck sample it
+# aborts at secondary init because IDF only allows that hook for verified flash
+# vendor IDs. MOYBYTE_EXTMEM_SPEED=stock restores the upstream 80/80 defaults for
+# board-stability bisects.
+EXTMEM_SPEED="${MOYBYTE_EXTMEM_SPEED:-fast}"
+SDKCONFIG_SPIRAM_OCT="${UPSTREAM_DIR}/lib/micropython/ports/esp32/boards/sdkconfig.spiram_oct"
+sed -i \
+  -e '/^CONFIG_IDF_EXPERIMENTAL_FEATURES=y$/d' \
+  -e '/^CONFIG_ESPTOOLPY_FLASHFREQ_80M=$/d' \
+  -e '/^CONFIG_ESPTOOLPY_FLASHFREQ_120M=y$/d' \
+  -e '/^CONFIG_SPIRAM_SPEED_80M=$/d' \
+  -e '/^CONFIG_SPIRAM_SPEED_120M=y$/d' \
+  -e '/^CONFIG_SPIRAM_TIMING_TUNING_POINT_VIA_TEMPERATURE_SENSOR=$/d' \
+  -e '/^CONFIG_SPIRAM_TIMING_MEASURE_TEMPERATURE_INTERVAL_SECOND=/d' \
+  "${SDKCONFIG_SPIRAM_OCT}"
+case "${EXTMEM_SPEED}" in
+  fast)
+    for opt in \
+      'CONFIG_IDF_EXPERIMENTAL_FEATURES=y' \
+      'CONFIG_ESPTOOLPY_FLASHFREQ_80M=' \
+      'CONFIG_ESPTOOLPY_FLASHFREQ_120M=y' \
+      'CONFIG_SPIRAM_SPEED_80M=' \
+      'CONFIG_SPIRAM_SPEED_120M=y' \
+      'CONFIG_SPIRAM_TIMING_TUNING_POINT_VIA_TEMPERATURE_SENSOR='; do
+      printf '%s\n' "${opt}" >> "${SDKCONFIG_SPIRAM_OCT}"
+    done
+    ;;
+  stock)
+    ;;
+  *)
+    echo "Unknown MOYBYTE_EXTMEM_SPEED=${EXTMEM_SPEED}; expected fast or stock" >&2
+    exit 1
+    ;;
+esac
+
 case "${BOARD_CONFIG}" in
   generic)
     MPY_BUILD_DIR="${UPSTREAM_DIR}/lib/micropython/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT"
@@ -574,15 +612,27 @@ else
 CONFIG_ESP32S3_DATA_CACHE_32KB=y
 CONFIG_ESP32S3_DATA_CACHE_LINE_32B=y'
 fi
+if [ "${EXTMEM_SPEED}" = "fast" ]; then
+  WANT_EXTMEM='CONFIG_ESPTOOLPY_FLASHFREQ_120M=y
+CONFIG_SPIRAM_SPEED_120M=y
+# CONFIG_SPIRAM_TIMING_TUNING_POINT_VIA_TEMPERATURE_SENSOR is not set
+CONFIG_SPIRAM_SPEED=120
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y'
+else
+  WANT_EXTMEM='CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_SPEED=80'
+fi
 if [ -f "${GEN_SDKCONFIG}" ]; then
   while IFS= read -r opt; do
     if ! grep -q "^${opt}$" "${GEN_SDKCONFIG}"; then
-      echo "sdkconfig cache geometry stale (missing ${opt}) -- forcing regeneration"
+      echo "sdkconfig generated options stale (missing ${opt}) -- forcing regeneration"
       rm -f "${GEN_SDKCONFIG}"
       break
     fi
   done <<EOF
 ${WANT_CACHE}
+${WANT_EXTMEM}
 EOF
 fi
 
