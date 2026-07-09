@@ -195,6 +195,91 @@ def run_touch_calibrate():
         time.sleep_ms(20)
 
 
+def run_ppa_smoke(scale=2, iters=60):
+    """A/B the P4 hardware PPA vs the CPU moy_gfx blit for the game->window
+    composite (#58 perf). Ctrl-C the desktop to the REPL first, then:
+
+        import moy_runtime; moy_runtime.run_ppa_smoke()
+
+    Draws a 320x240 test pattern (colored quadrants + label), then times `iters`
+    integer-upscale composites into the 1024x600 framebuffer TWO ways --
+    moy_gfx.blit565_scale (CPU) and moy_ppa.blit_scale (PPA DMA) -- showing each
+    result so correctness (colors/scale/position) is eyeballable over serial +
+    glass, and printing per-blit timings + the speedup. The composite is the
+    exact op wm_windowed._blit_game runs every game frame, so the speedup here is
+    the headline lever for both game play and window drags.
+
+    moy_dsi.init() is idempotent, so a fresh P4Compositor reuses the live panel
+    the interrupted desktop left up (no re-init, no reflash)."""
+    from p4_display import P4Compositor, set_backlight
+
+    comp = P4Compositor()
+    gfx = comp.gfx()
+    W, H = comp.size()
+    sw, sh = GAME_W, GAME_H
+    game = DeviceCanvas(_LayerComp(sw, sh, gfx))
+    # A pattern whose colors + orientation make a wrong byte-order / mirror
+    # instantly obvious: red TL, green TR, blue BL, yellow BR, white label.
+    game.cls(0)
+    game.rect(0, 0, sw // 2, sh // 2, 8)            # red
+    game.rect(sw // 2, 0, sw // 2, sh // 2, 11)     # green
+    game.rect(0, sh // 2, sw // 2, sh // 2, 12)     # blue
+    game.rect(sw // 2, sh // 2, sw // 2, sh // 2, 10)  # yellow
+    game.rectb(0, 0, sw, sh, 7)
+    game.print("PPA", sw // 2 - 12, sh // 2 - 4, 7)
+    game.flush_batch()
+
+    ox = (W - sw * scale) // 2
+    oy = (H - sh * scale) // 2
+    set_backlight(True)
+
+    # Clear BOTH ping-pong buffers to a dark bg so the letterbox is clean.
+    for _ in range(2):
+        gfx.fill(comp.framebuffer(), W * H, 1)
+        comp.flush()
+
+    def _time(label, blit):
+        fb = comp.framebuffer()      # write the SAME back buffer each iter (no
+        gfx.fill(fb, W * H, 1)       # flush inside the loop) to isolate the blit
+        try:
+            import gc
+            gc.collect()
+        except Exception:  # noqa: BLE001
+            pass
+        t0 = _ticks_ms()
+        for _ in range(iters):
+            blit(fb)
+        ms = _ticks_diff(_ticks_ms(), t0)
+        comp.flush()                 # show the composited result for eyeballing
+        per = ms / (iters or 1)
+        print("PPA SMOKE %s: %.2f ms/blit (%d iters, %d ms total)"
+              % (label, per, iters, ms))
+        return per
+
+    cpu = _time("CPU  blit565_scale",
+                lambda fb: gfx.blit565_scale(fb, W, H, ox, oy,
+                                             game._buf, sw, sh, scale))
+    import time
+    time.sleep(2)                    # a beat to see the CPU frame on glass
+
+    ppa_per = None
+    try:
+        import moy_ppa
+        ok = moy_ppa.init()
+        print("PPA SMOKE moy_ppa.init() ->", ok)
+        if ok:
+            ppa_per = _time("PPA  blit_scale",
+                            lambda fb: moy_ppa.blit_scale(fb, W, H, ox, oy,
+                                                          game._buf, sw, sh, scale))
+    except Exception as exc:  # noqa: BLE001
+        print("PPA SMOKE moy_ppa unavailable:", exc)
+
+    if ppa_per is not None and ppa_per > 0:
+        print("PPA SMOKE RESULT scale=%d: cpu=%.2fms ppa=%.2fms speedup=%.1fx"
+              % (scale, cpu, ppa_per, cpu / ppa_per))
+    print("PPA SMOKE done -> REPL")
+
+
 def run_desktop(fps_cap=60):
     """Boot the shared console on the P4: launcher-as-desktop under WindowedWM,
     GT911 touch as the pointer, carts on internal flash. Ctrl-C over the CH343
