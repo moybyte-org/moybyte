@@ -618,7 +618,12 @@ class WindowedWM(FullscreenStackWM):
             self._backdrop = None
 
     def _blit_backdrop_cache(self):
-        """Stamp the cached backdrop into the current (ping-pong) back buffer."""
+        """Stamp the cached backdrop into the current (ping-pong) back buffer.
+        A full-screen 1:1 copy -- PSRAM-bandwidth-bound (measured ~identical on
+        the P4's CPU blit and its hardware PPA, since both read+write the whole
+        1.2MB against the DSI scan-out), so there's no accelerator to reach for
+        here; the win from caching is skipping the wallpaper cover + grid RENDER,
+        not the copy."""
         if self._backdrop is not None:
             self._root_canvas.blit_strip(self._backdrop, 0, 0)
 
