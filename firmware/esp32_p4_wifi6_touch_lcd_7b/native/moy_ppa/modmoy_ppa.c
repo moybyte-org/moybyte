@@ -21,6 +21,19 @@
 
 static ppa_client_handle_t s_srm = NULL;
 
+// Async fence (the composite-overlap lever): every submitted transaction bumps
+// s_submitted; the PPA's done ISR bumps s_done. sync() spins until they meet.
+// Single-writer per counter (main thread writes s_submitted, ISR writes s_done),
+// so no atomics needed -- just volatile for fresh reads across the spin.
+static volatile uint32_t s_submitted = 0;
+static volatile uint32_t s_done = 0;
+
+static bool ppa_trans_done_cb(ppa_client_handle_t client,
+                              ppa_event_data_t *edata, void *user_data) {
+    s_done++;
+    return false;   // no higher-priority task to wake
+}
+
 // init() -> True once the SRM client is registered (idempotent). False on
 // failure (no PPA / OOM), so the caller can fall back to the CPU kernel.
 static mp_obj_t moy_ppa_init(void) {
@@ -41,6 +54,10 @@ static mp_obj_t moy_ppa_init(void) {
         s_srm = NULL;
         return mp_const_false;
     }
+    ppa_event_callbacks_t cbs = { .on_trans_done = ppa_trans_done_cb };
+    ppa_client_register_event_callbacks(s_srm, &cbs);
+    s_submitted = 0;
+    s_done = 0;
     return mp_const_true;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_init_obj, moy_ppa_init);
@@ -112,13 +129,26 @@ static mp_obj_t srm_blit(const mp_obj_t *args, ppa_trans_mode_t mode) {
         .alpha_update_mode = PPA_ALPHA_NO_CHANGE,
         .mode = mode,
     };
+    s_submitted++;
     esp_err_t err = ppa_do_scale_rotate_mirror(s_srm, &op);
     if (err != ESP_OK) {
+        s_submitted--;   // no transaction queued -> no done callback will fire
         mp_raise_msg_varg(&mp_type_OSError,
                           MP_ERROR_TEXT("ppa srm failed: %d"), (int)err);
     }
     return mp_const_none;
 }
+
+// sync(): block until every submitted transaction has completed (the fence for a
+// non-blocking composite). The PPA DMA runs on its own; this is a short busy-wait
+// only reached when the caller deliberately overlaps then fences.
+static mp_obj_t moy_ppa_sync(void) {
+    while (s_done != s_submitted) {
+        // volatile reload each iteration; the done ISR advances s_done
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_sync_obj, moy_ppa_sync);
 
 // blit_scale(...): blocking -- returns after the DMA + cache sync completes.
 static mp_obj_t moy_ppa_blit_scale(size_t n_args, const mp_obj_t *args) {
@@ -143,6 +173,7 @@ static const mp_rom_map_elem_t moy_ppa_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_deinit), MP_ROM_PTR(&moy_ppa_deinit_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_scale), MP_ROM_PTR(&moy_ppa_blit_scale_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_async), MP_ROM_PTR(&moy_ppa_blit_async_obj) },
+    { MP_ROM_QSTR(MP_QSTR_sync), MP_ROM_PTR(&moy_ppa_sync_obj) },
 };
 static MP_DEFINE_CONST_DICT(moy_ppa_module_globals, moy_ppa_module_globals_table);
 

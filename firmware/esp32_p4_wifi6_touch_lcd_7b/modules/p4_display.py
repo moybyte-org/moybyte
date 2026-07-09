@@ -64,6 +64,13 @@ class P4Compositor:
         else:
             moy_dsi.flush()
             self._back = 0
+        # Deferred present (#58 composite-overlap): a quiet game frame kicks the
+        # game->window composite on the PPA async and DEFERS its show one step, so
+        # the DMA overlaps the next frame's input poll. _pending holds the fb index
+        # of a composited-but-not-yet-shown frame; _composite_pending is set by
+        # blit_game for the current frame.
+        self._pending = None
+        self._composite_pending = False
 
     def size(self):
         return (self._w, self._h)
@@ -78,11 +85,32 @@ class P4Compositor:
         return self._gfx
 
     def flush(self):
-        if len(self._fbs) > 1:
-            self._dsi.show(self._back)   # msync + zero-copy scan-out switch
-            self._back ^= 1              # next frame draws the other buffer
-        else:
+        if len(self._fbs) <= 1:
             self._dsi.flush()            # single-buffer: CPU-cache msync only
+            return
+        if self._composite_pending:
+            # A quiet game frame kicked the composite async: hold the show for the
+            # NEXT present_pending (after the following input poll), so the DMA
+            # runs concurrently. The buffer stays _back until then (nothing else
+            # draws it -- blit_game was this frame's last framebuffer op).
+            self._pending = self._back
+            self._composite_pending = False
+            return
+        self._dsi.show(self._back)       # msync + zero-copy scan-out switch
+        self._back ^= 1                  # next frame draws the other buffer
+
+    def present_pending(self):
+        """Show a deferred (async-composited) frame: wait for its PPA DMA, then
+        switch scan-out to it and free the other buffer for the next frame. Called
+        by the desktop loop AFTER the input poll, so the poll overlapped the DMA.
+        No-op when nothing was deferred (non-game frames present in flush())."""
+        if self._pending is None:
+            return
+        import moy_ppa
+        moy_ppa.sync()                   # fence the async composite
+        self._dsi.show(self._pending)
+        self._back ^= 1                  # the other buffer is now free to draw
+        self._pending = None
 
     def sync(self):
         pass                             # no in-flight DMA to drain

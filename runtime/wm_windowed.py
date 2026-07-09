@@ -783,11 +783,15 @@ class WindowedWM(FullscreenStackWM):
         if full:
             self._root_canvas.rect(cx, cy, cw, ch, _SHADOW)   # letterbox bezel
         ox, oy, scale = self._player_view(win)
-        self._blit_game(self._root_canvas, gc, ox, oy, scale)
+        # On a quiet game frame (full=False) the composite is this frame's LAST
+        # framebuffer write, so a device backend may run it async and defer the
+        # present (the #58 composite-overlap budget lever). A full paint draws
+        # chrome AFTER it, so it must stay synchronous -- defer=not full.
+        self._blit_game(self._root_canvas, gc, ox, oy, scale, defer=not full)
         if full:
             self._win_chrome(win, focused)
 
-    def _blit_game(self, sc, gc, ox, oy, scale):
+    def _blit_game(self, sc, gc, ox, oy, scale, defer=False):
         """Integer-scale the 320x240 game canvas into the desktop at (ox, oy) --
         the windowed sibling of the parent's centered composite_game. A device
         system canvas (the P4, #58) exposes a native blit_game (RGB565 scaled
@@ -798,7 +802,7 @@ class WindowedWM(FullscreenStackWM):
         FullscreenStackWM._composite_via_spr)."""
         bg = getattr(sc, "blit_game", None)
         if bg is not None:
-            bg(gc, ox, oy, scale)
+            bg(gc, ox, oy, scale, defer)
             return
         gbuf = getattr(gc, "buf", None)
         sbuf = getattr(sc, "buf", None)
