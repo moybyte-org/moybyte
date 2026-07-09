@@ -14,6 +14,18 @@
 #include "py/obj.h"
 #include "py/runtime.h"
 
+// #77: build the pixel kernel at -O3 (the ports default to -O2). In-source
+// pragma, NOT cmake: source-file properties are directory-scoped and the linked
+// object is compiled by the micropython.elf target, which never sees them
+// (verified via build.ninja -- the cmake route left the linked object at -O2).
+// -O3 not -Ofast: -ffast-math would perturb the one sqrt() in circ. Measured
+// NULL on the P4 (render slice is MP dispatch, not C compute); kept as the S3
+// experiment -- its slower PSRAM (120MHz OCT vs 200MHz HEX) and smaller flash
+// cache make the compute/bandwidth split land differently there.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC optimize("O3")
+#endif
+
 // Async layer copy (#54 Stage 2 / #63): GDMA-driven PSRAM->PSRAM memcpy so the
 // per-frame draw_layer background restore (~7ms CPU for a full screen) can run
 // WHILE the cart's _update executes. Guarded so this file stays VM-neutral: the
