@@ -235,6 +235,76 @@ def test_window_drag_moves_it(tmp_path):
     assert win.x > x0 and win.y > y0
 
 
+def _engage_drag(ws, drv):
+    """Open Settings and get its window into an in-flight drag, settled at a
+    fixed position (the drag stays engaged while the pointer is held, so a repeat
+    tick at the same point is the same state). Returns the window."""
+    ws.open_settings()
+    drv.frame(0.0)
+    _quiesce(ws)
+    win = ws.wm._wins["settings"]
+    gx, gy = win.x + win.w // 2, win.y + 4
+    drv.touch(gx, gy)
+    drv.frame(0.0)                       # press edge: arms the drag
+    drv.touch_drag(gx + 80, gy + 50)
+    drv.frame(0.0)                       # travel > _DRAG_MIN: the drag engages
+    assert ws.wm._drag is not None
+    win._hold = (gx + 80, gy + 50)       # the settled grab point (stash for reuse)
+    return win
+
+
+def test_drag_backdrop_cache_engages(tmp_path):
+    """During a drag the retained backdrop cache is built and reused: the first
+    drag frame allocates + validates it, and steady drag frames don't re-render
+    the launcher (they blit the cache)."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    win = _engage_drag(ws, drv)
+    hx, hy = win._hold
+    # The drag engaged on the last _engage_drag frame -> the cache is built (the
+    # capture runs in the same frame handle_pointer sets _drag).
+    assert ws.wm._backdrop_valid and ws.wm._backdrop is not None
+
+    calls = [0]
+    real_draw = ws.launcher_layer.draw
+    ws.launcher_layer.draw = lambda dt: (calls.__setitem__(0, calls[0] + 1),
+                                         real_draw(dt))[1]
+    # Steady drag frames: cache reused, launcher NOT re-rendered.
+    for _ in range(3):
+        drv.touch_drag(hx, hy)
+        drv.frame(0.0)
+    assert calls[0] == 0
+    # Release: the next frame renders the launcher live again (cache invalidated).
+    drv.touch_up()
+    ws._dirty = True
+    drv.frame(0.0)
+    assert not ws.wm._backdrop_valid
+    assert calls[0] == 1
+    ws.launcher_layer.draw = real_draw
+
+
+def test_drag_backdrop_cache_matches_live_render(tmp_path):
+    """The cached drag frame is PIXEL-IDENTICAL to a live re-render of the same
+    frame -- the cache faithfully reproduces the wallpaper + grid backdrop, so
+    the optimization is invisible."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    win = _engage_drag(ws, drv)
+    hx, hy = win._hold
+    # A settled drag frame using the cache.
+    drv.touch_drag(hx, hy)
+    drv.frame(0.0)
+    assert ws.wm._backdrop_valid
+    cached = bytes(ws.sys_canvas.buf)
+    # Force a live re-render of the identical frame (cache off), no window move.
+    ws.wm._backdrop_valid = False
+    ws._dirty = True
+    drv.touch_drag(hx, hy)
+    drv.frame(0.0)
+    live = bytes(ws.sys_canvas.buf)
+    assert cached == live
+
+
 def test_click_moves_focus_without_popping_the_playtest(tmp_path):
     """The owner call that retired raise-by-pop: clicking the editor window while
     a playtest runs beside it moves FOCUS to the editor -- the back-stack is
