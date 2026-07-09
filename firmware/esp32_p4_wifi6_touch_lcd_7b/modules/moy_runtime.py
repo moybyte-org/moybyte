@@ -116,12 +116,18 @@ class P4SystemCanvas(DeviceCanvas):
 
     # -- the native composite hooks (probed via getattr by the shared code) ----
 
-    def blit_game(self, gc, ox, oy, scale):
+    def blit_game(self, gc, ox, oy, scale, defer=False):
         """wm_windowed._blit_game's device path (#58/#73): integer-scale the
         320x240 game canvas into this surface at (ox, oy). Hardware PPA (DMA,
         ~2.6x faster than the CPU blit -- measured) when available, else the
         moy_gfx CPU kernel. Both write the same RGB565 bytes (glass-verified
-        pixel-identical), so the fallback is graceful."""
+        pixel-identical), so the fallback is graceful.
+
+        defer=True (a QUIET game frame, where this is the frame's LAST framebuffer
+        write) kicks the PPA async and hands the show to P4Compositor.flush ->
+        present_pending, so the DMA overlaps the next frame's input poll (#58
+        composite-overlap budget lever). full-paint frames pass defer=False so
+        the following chrome never races the DMA."""
         fb = getattr(gc, "flush_batch", None)
         if fb is not None:
             fb()
@@ -138,8 +144,13 @@ class P4SystemCanvas(DeviceCanvas):
         if ppa is not None and ox >= 0 and oy >= 0 \
                 and ox + gc.w * scale <= self.w and oy + gc.h * scale <= self.h:
             try:
-                ppa.blit_scale(self._buf, self.w, self.h, ox, oy,
-                               gc._buf, gc.w, gc.h, scale)
+                if defer:
+                    ppa.blit_async(self._buf, self.w, self.h, ox, oy,
+                                   gc._buf, gc.w, gc.h, scale)
+                    self._comp._composite_pending = True   # flush() will defer
+                else:
+                    ppa.blit_scale(self._buf, self.w, self.h, ox, oy,
+                                   gc._buf, gc.w, gc.h, scale)
                 return
             except Exception as exc:  # noqa: BLE001 -- real error -> CPU forever
                 print("Moybyte P4 PPA blit failed -> CPU:", exc)
@@ -551,6 +562,12 @@ def run_desktop(fps_cap=60):
                 s["i"] = i + 1
         pointer.click = click
         pointer.tick(now)
+        # Present the PREVIOUS quiet game frame now (its async composite has been
+        # DMAing through the input poll above): wait the DMA, switch scan-out to
+        # it, free the other buffer. No-op unless the last frame deferred (#58
+        # composite-overlap). Must precede sync_back, which re-points at the freed
+        # buffer.
+        comp.present_pending()
         game.sync_back()           # off-screen: contract no-op
         sys_canvas.sync_back()     # double-buffer: re-point at the new BACK fb
         try:
