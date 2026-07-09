@@ -111,6 +111,8 @@ AUDIO_MAX_FRAME = AUDIO_IBUF_FRAMES
 AUDIO_DIAG = True
 AUDIO_DIAG_SAMPLE_MS = 1000
 
+_AUDIO_BACKEND_SEQ = 0
+
 
 class DeviceAudio:
     """I2S audio backend for the T-Deck. Wraps the shared AudioEngine. Two feeds:
@@ -133,13 +135,17 @@ class DeviceAudio:
     unproven on hardware in this environment (see the module comment above)."""
 
     def __init__(self, engine):
+        global _AUDIO_BACKEND_SEQ
+        _AUDIO_BACKEND_SEQ += 1
         self.engine = engine
+        self._diag_seq = _AUDIO_BACKEND_SEQ
         # The shared engine is built at its default 11025 Hz; the device renders at
         # 8 kHz to halve the per-frame mixer cost (only render_into reads .rate, live,
         # so retuning it here is safe) and to match the I2S port's configured rate.
         engine.rate = AUDIO_RATE
         self.i2s = None
         self._core1 = False        # True once the core-1 feeder task is running
+        self._reused_core1 = False # True when audio_start found the global task alive
         # Core-1 commit tracking: the C task owns per-sample advancement (idx/t/phase)
         # once a voice is committed, so we must NOT re-commit a voice's (now stale)
         # Python cursor every frame -- that would reset it to step 0 and stutter. We
@@ -199,12 +205,20 @@ class DeviceAudio:
         if MOY_AUDIO_CORE1 and self._moy_audio is not None:
             try:
                 self._moy_audio.set_master(engine.volume)
+                already = False
+                try:
+                    already = bool(self._moy_audio.running())
+                except Exception:
+                    already = False
                 if self._moy_audio.audio_start(I2S_BCK, I2S_WS, I2S_DOUT, AUDIO_RATE):
                     self._core1 = True
-                    _diag_note("audio", "core-1 I2S task running (%d Hz mono, "
+                    self._reused_core1 = already
+                    verb = "reused" if already else "started"
+                    _diag_note("audio", "core-1 I2S task %s (%d Hz mono, "
                                "BCK=%d WS=%d DOUT=%d)"
-                               % (AUDIO_RATE, I2S_BCK, I2S_WS, I2S_DOUT))
-                    print("Moybyte audio: core-1 I2S feeder ENABLED")
+                               % (verb, AUDIO_RATE, I2S_BCK, I2S_WS, I2S_DOUT))
+                    print("Moybyte audio: core-1 I2S feeder %s"
+                          % ("REUSED" if already else "ENABLED"))
                 else:
                     _diag_note("audio", "core-1 task unavailable, legacy feed")
             except Exception as exc:  # noqa: BLE001 -- any failure -> legacy feed
@@ -245,6 +259,35 @@ class DeviceAudio:
         the next one. Runs via mp_sched (between bytecodes), so just clears the flag."""
         self._busy = False
         self._busy_ticks = 0
+
+    def diag_state(self):
+        """Tuple consumed by Player diagnostics:
+        (backend_seq, core1, reused_task, native_running, active_voices,
+        committed_since_sample). Guarded so profiling never affects playback."""
+        running = -1
+        active = -1
+        try:
+            if self._moy_audio is not None:
+                try:
+                    running = 1 if self._moy_audio.running() else 0
+                except Exception:
+                    running = -1
+                try:
+                    mask = self._moy_audio.active_mask()
+                    active = 0
+                    while mask:
+                        active += mask & 1
+                        mask >>= 1
+                except Exception:
+                    active = -1
+        except Exception:
+            pass
+        return (self._diag_seq,
+                1 if self._core1 else 0,
+                1 if self._reused_core1 else 0,
+                running,
+                active,
+                self._diag_committed)
 
     # control surface (mirrors host FakeAudio / _SilentAudio) -------------
     def sfx(self, n, chan=None):
