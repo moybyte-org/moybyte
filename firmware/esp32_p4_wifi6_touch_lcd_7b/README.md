@@ -5,12 +5,39 @@ tier next to the T-Deck pocket handheld. **Not** an lvgl_micropython build —
 this is mainline MicroPython v1.28.0 (`ESP32_GENERIC_P4`, C6 WiFi variant baked
 into our out-of-tree board def) + our native modules via `USER_C_MODULES`.
 
-Status (2026-07-08): REPL / WiFi-via-C6 / GT911 touch / SD / **DSI panel first
-light** all hardware-confirmed. The **console is staged and boots** — launcher
-under `WindowedWM`, `moy_gfx`/`moy_alloc` re-homed to `USER_C_MODULES`, 15
-carts seeded on the internal-flash VFS, error-free frame loop, Ctrl-C drops to
-the REPL (serial-verified; the first eyes-on-glass pass — visuals + touch
-orientation — is still pending). See #58 for the living status.
+Status (2026-07-09): REPL / WiFi-via-C6 / GT911 touch / SD / DSI panel / **the
+console on glass** all hardware-confirmed. Launcher runs under `WindowedWM`;
+colors (canonical RGB565 vs the T-Deck's byte-swapped wire order → `PAL565_WIRE`),
+flicker (DPI `num_fbs=2` ping-pong scan-out), touch (180° panel mount →
+`p4_input.FLIP_X/Y`), popup/wallpaper geometry all fixed on-glass. Games
+composite at ~35fps (`WindowedWM.draw_stack` quiet-frame partial repaint);
+app-window drags ~14fps (`_BackdropLayer` retained backdrop cache). See #58 for
+the living status.
+
+**The open perf lever is the P4 hardware PPA (Pixel-Processing Accelerator).**
+All compositing is currently CPU (`moy_gfx` `blit565`/`blit565_scale`/`fill`),
+and the drag/composite floor is the full-screen framebuffer *write* — PSRAM
+bandwidth shared with the continuous DSI scan-out (~73MB/s). ESP-IDF 5.5.1 ships
+`esp_driver_ppa`; `ppa_do_scale_rotate_mirror`/`blend`/`fill` are DMA-offloaded
+equivalents of `blit565_scale`/`spr`/`fill` (a `moy_ppa` native module, IDF
+component wired like `moy_dsi`). Also open: USB-HID keyboard, audio (ES8311),
+OTA/web-view wiring.
+
+### Serial dev commands (the REPL-alive board's affordance)
+
+`run_desktop`'s loop reads whole lines from `sys.stdin` (the CH343 never
+starves under the desktop, unlike the T-Deck), so a host script can drive the
+UI while watching the glass:
+
+- `tap <x> <y>` / `tap sysmenu` — synthetic tap at system coords / a named bar button
+- `open settings|picker` — pop an app window deterministically
+- `run <name>` — select the first cart whose title matches and RUN it
+- `drag [frames]` — grab the top window's title strip and oscillate it (measure drag-time fps)
+- `cache 0|1` — A/B the drag backdrop cache
+- `quit` — leave the desktop for the REPL
+
+`moy_runtime.run_touch_calibrate()` (REPL-invokable) draws corner targets and
+dumps raw/mapped GT911 samples for re-calibrating the `p4_input` knobs.
 
 ## Build / flash
 
