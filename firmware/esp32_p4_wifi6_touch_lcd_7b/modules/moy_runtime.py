@@ -367,6 +367,11 @@ def run_desktop(fps_cap=60):
     print("Moybyte P4 PPA:", "enabled" if P4SystemCanvas.enable_ppa() else "CPU-only")
     # The fixed 320x240 GAME canvas (#39): off-screen RGB565 sharing the same
     # native kernel; the windowed WM composites it into the player window.
+    # (#77: -O3 on moy_gfx and an internal-SRAM game canvas were A/B'd here --
+    # individually AND combined -- and all measured render-slice no-ops: the
+    # slice is MicroPython per-draw-call dispatch, not C compute or framebuffer
+    # bandwidth. So the canvas stays in PSRAM (internal SRAM is wanted for
+    # WiFi/audio DMA). See docs/perf_native_gap_v1.md.)
     game = DeviceCanvas(_LayerComp(GAME_W, GAME_H, gfx))
     inp = InputState()
     touch = Touch(sys_canvas.w, sys_canvas.h)
@@ -506,6 +511,13 @@ def run_desktop(fps_cap=60):
                 ws.show_fps = on
                 ws._dirty = True
                 print("REMOTE diag %s" % ("on" if on else "off"))
+            if parts and parts[0] == "skip":
+                # `skip 0|1`: A/B the #77 frameskip gate (logic full-rate, render
+                # halved) without walking to Settings. persist=False: a serial A/B
+                # must not rewrite the kid's system.json.
+                on = not (len(parts) == 2 and parts[1] == "0")
+                ws.set_frameskip(on, persist=False)
+                print("REMOTE skip %s" % ("on" if on else "off"))
             if parts and parts[0] == "cache":
                 # `cache 0|1`: A/B the drag backdrop cache on glass (1=on).
                 on = not (len(parts) == 2 and parts[1] == "0")
