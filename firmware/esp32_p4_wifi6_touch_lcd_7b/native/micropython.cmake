@@ -3,5 +3,6 @@
 # (native/.staged/, gitignored -- single source of truth stays in
 # firmware/lilygo_t_deck_plus_micropython/native/).
 include(${CMAKE_CURRENT_LIST_DIR}/moy_dsi/micropython.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/moy_ppa/micropython.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/.staged/moy_gfx/micropython.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/.staged/moy_alloc/micropython.cmake)

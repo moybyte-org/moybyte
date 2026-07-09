@@ -68,6 +68,12 @@ if ! grep -q "^    esp_lcd$" "${COMMON_CMAKE}"; then
   sed -i '/^list(APPEND IDF_COMPONENTS$/a\    esp_lcd' "${COMMON_CMAKE}"
   echo "== patched esp32_common.cmake: added esp_lcd to IDF_COMPONENTS"
 fi
+# moy_ppa needs esp_driver_ppa (the P4 pixel accelerator) in REQUIRES -- same
+# early-expansion reason as esp_lcd above, so patch the port list too.
+if ! grep -q "^    esp_driver_ppa$" "${COMMON_CMAKE}"; then
+  sed -i '/^list(APPEND IDF_COMPONENTS$/a\    esp_driver_ppa' "${COMMON_CMAKE}"
+  echo "== patched esp32_common.cmake: added esp_driver_ppa to IDF_COMPONENTS"
+fi
 
 # 2c) Stage the shared NATIVE modules from the T-Deck tree (single source of
 #     truth: firmware/lilygo_t_deck_plus_micropython/native/). moy_gfx is the
