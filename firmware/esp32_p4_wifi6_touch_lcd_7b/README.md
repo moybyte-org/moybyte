@@ -9,18 +9,22 @@ Status (2026-07-09): REPL / WiFi-via-C6 / GT911 touch / SD / DSI panel / **the
 console on glass** all hardware-confirmed. Launcher runs under `WindowedWM`;
 colors (canonical RGB565 vs the T-Deck's byte-swapped wire order → `PAL565_WIRE`),
 flicker (DPI `num_fbs=2` ping-pong scan-out), touch (180° panel mount →
-`p4_input.FLIP_X/Y`), popup/wallpaper geometry all fixed on-glass. Games
-composite at ~35fps (`WindowedWM.draw_stack` quiet-frame partial repaint);
-app-window drags ~14fps (`_BackdropLayer` retained backdrop cache). See #58 for
-the living status.
+`p4_input.FLIP_X/Y`), popup/wallpaper geometry all fixed on-glass. The
+quiet-frame partial repaint (`WindowedWM.draw_stack`) + the hardware-PPA game
+composite give ~51fps play; the `_BackdropLayer` retained backdrop cache gives
+~15fps app-window drags. See #58 for the living status.
 
-**The open perf lever is the P4 hardware PPA (Pixel-Processing Accelerator).**
-All compositing is currently CPU (`moy_gfx` `blit565`/`blit565_scale`/`fill`),
-and the drag/composite floor is the full-screen framebuffer *write* — PSRAM
-bandwidth shared with the continuous DSI scan-out (~73MB/s). ESP-IDF 5.5.1 ships
-`esp_driver_ppa`; `ppa_do_scale_rotate_mirror`/`blend`/`fill` are DMA-offloaded
-equivalents of `blit565_scale`/`spr`/`fill` (a `moy_ppa` native module, IDF
-component wired like `moy_dsi`). Also open: USB-HID keyboard, audio (ES8311),
+**The hardware PPA (Pixel-Processing Accelerator) is wired for the game
+composite** (`moy_ppa`, ESP-IDF `esp_driver_ppa` SRM client → `blit_scale`,
+patched into IDF_COMPONENTS like `esp_lcd`; `P4SystemCanvas.blit_game` uses it
+with a CPU fallback). Colors verified pixel-identical via framebuffer readback.
+Key finding: **the PPA only wins on UPSCALE composites** — the game→window scale
+is 2.6× (12.95→4.98ms; tiny source read + hardware scale) — but a full-screen
+1:1 copy (the drag backdrop restore) is ~identical CPU vs PPA (~26ms),
+PSRAM-bandwidth-bound against the continuous DSI scan-out (read+write the whole
+1.2MB), so it stays on the CPU. `moy_runtime.run_ppa_smoke()` A/Bs the composite
+on glass. Perf follow-up: a PPA cover-crop each drag frame (input-side crop,
+write-bound) for drags. Also open: USB-HID keyboard, audio (ES8311),
 OTA/web-view wiring.
 
 ### Serial dev commands (the REPL-alive board's affordance)
