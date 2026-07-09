@@ -71,6 +71,12 @@ class SettingsLayer:
         # deferred to #52, so it lives in Settings for now. "action" rows aren't
         # +/- steppers: any tap / left / right activates them (open_theme).
         ("icons", "EDIT ICONS", "action"),
+        # FRAMESKIP (#77): while a GAME plays, tick its logic + input at the full
+        # loop rate but render every SECOND frame -- halves the whole render-side
+        # cost (per-draw-call dispatch, the measured tax) for 30Hz motion. Default
+        # OFF pending the on-glass feel verdict. Reads ws.frameskip (the "diag"
+        # kind's generic getattr ON/OFF rendering).
+        ("frameskip", "FRAMESKIP", "diag"),
         # PERF DIAG (#68 "kid mode" gate): OFF (default) skips the diag costs a
         # player can FEEL on device -- the 30s forced GC sample and the periodic
         # diag->SD write -- and hushes the live serial echo. Crash/cart-exit
@@ -394,6 +400,18 @@ class SettingsLayer:
         else:
             ws.open_theme()       # EDIT ICONS (#52)
 
+    def _toggle_diag_row(self, key):
+        """Flip one of the "diag"-kind ON/OFF gate rows (any tap/step/A toggles):
+        PERF DIAG + DIAG SD LOG (#68) and FRAMESKIP (#77). One dispatch shared by
+        the step/key/tap paths so a new gate row is wired in exactly one place."""
+        ws = self.ws
+        if key == "diag_sd":
+            ws.set_diag_sd(not ws.diag_sd)
+        elif key == "frameskip":
+            ws.set_frameskip(not ws.frameskip)
+        else:
+            ws.set_diag_live(not ws.diag_live)
+
     def settings_adjust(self, d):
         """Step the selected Settings row by d. Wallpaper/font apply + persist; the
         mock rows just move a cosmetic value held in ws.system (not acted on); an
@@ -409,11 +427,8 @@ class SettingsLayer:
         if key == "web":                        # device web view ON <-> OFF (#41)
             ws._toggle_web_view()
             return
-        if key == "diag_live":                  # perf diagnostics ON <-> OFF (#68)
-            ws.set_diag_live(not ws.diag_live)
-            return
-        if key == "diag_sd":                    # periodic diag->SD write ON <-> OFF
-            ws.set_diag_sd(not ws.diag_sd)
+        if kind == "diag":                      # the ON/OFF gates (#68 diag, #77 frameskip)
+            self._toggle_diag_row(key)
             return
         if key == "ota_channel":                # OTA update channel STABLE <-> BETA
             ws._cycle_channel(d)
@@ -496,11 +511,8 @@ class SettingsLayer:
                 self._activate_settings_action(row[0])
             elif row[2] == "web":               # A/run also toggles the web view (#41)
                 ws._toggle_web_view()
-            elif row[2] == "diag":              # ... and the diag gates (#68)
-                if row[0] == "diag_sd":
-                    ws.set_diag_sd(not ws.diag_sd)
-                else:
-                    ws.set_diag_live(not ws.diag_live)
+            elif row[2] == "diag":              # ... and the ON/OFF gates (#68/#77)
+                self._toggle_diag_row(row[0])
         if i.pressed("b"):
             ws._exit_settings()          # back -> resume the cart if opened from one
         elif i.pressed("home") or i.pressed("stop"):
@@ -561,11 +573,8 @@ class SettingsLayer:
                 if rows[i][2] == "web":            # web view: any tap flips ON/OFF (#41)
                     ws._toggle_web_view()
                     return True
-                if rows[i][2] == "diag":           # diag gates: any tap flips (#68)
-                    if rows[i][0] == "diag_sd":
-                        ws.set_diag_sd(not ws.diag_sd)
-                    else:
-                        ws.set_diag_live(not ws.diag_live)
+                if rows[i][2] == "diag":           # ON/OFF gates: any tap flips (#68/#77)
+                    self._toggle_diag_row(rows[i][0])
                     return True
                 # left third = "<" (decrement), right third = ">" (increment).
                 if px >= x + w - edge:

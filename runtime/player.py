@@ -466,11 +466,18 @@ class Player:
         self._print_run_diag("RUNSTART")
         return True
 
-    def tick(self, dt):
+    def tick(self, dt, render=True):
         """The running-cart content (game domain): tick the cart _update/_draw + mixer
         (the game loop), then the crash chrome + the transient hold-to-exit toast. Fills
         the per-frame perf split (ws._pf_*) the router's DRAWBRK/CHROMEBRK accounting
-        reads. Drawn on the fixed 320x240 GAME canvas, composited by the router."""
+        reads. Drawn on the fixed 320x240 GAME canvas, composited by the router.
+
+        render=False is the #77 frameskip's logic-only tick (ws.frame's skip frames):
+        the cart's _update + audio + exit/textmode handling run as normal, but the
+        backdrop restore, the cart's _draw and every chrome draw are skipped -- the
+        game canvas keeps the last rendered frame's pixels and nothing composites or
+        flushes this frame, so input/logic hold the full loop rate while the render
+        cost is halved."""
         ws = self.ws
         _perf = ws.perf_hud or ws.perf_capture
         if self.cart_error is None:
@@ -486,15 +493,16 @@ class Player:
             try:
                 # Declared background (#63): restore the cart's named backdrop BEFORE
                 # its frame runs, so a naive cart draws only its actors. No-op (one
-                # early-out) when the cart never called background().
+                # early-out) when the cart never called background(). Skipped on a
+                # frameskip logic-only tick (nothing draws over it this frame).
                 rb = self._restore_bg
-                if rb is not None:
+                if render and rb is not None:
                     rb()
                 _ts = _ticks_ms() if _perf else 0
                 if self._update:
                     self._update(dt)
                 _tm = _ticks_ms() if _perf else 0
-                if self._draw:
+                if render and self._draw:
                     self._draw()
                 _td = _ticks_ms() if _perf else 0
                 if ws.audio is not None:
@@ -542,6 +550,12 @@ class Player:
         # Clear any cart-set camera/clip/pal/palt (#11) before the console paints
         # its own UI overlays, so they're never offset/clipped/recoloured.
         ws._reset_canvas_state()
+        # Frameskip logic-only tick (#77): nothing below draws pixels this frame --
+        # the crash panel/tool bar/hold toast all repaint on the next rendered frame
+        # (a crash mid-skip disables the skip gate itself: ws.frame requires
+        # cart_error None to skip, so the panel is never starved).
+        if not render:
+            return
         # The bar auto-hides while a cart PLAYS (Stage 5): the game owns the full
         # 320x240 with NO chrome (the #71 pause frame is gone). The ONLY chrome left
         # is the CRASH panel + its top bar, so EDIT/CODE stay reachable to fix the cart.

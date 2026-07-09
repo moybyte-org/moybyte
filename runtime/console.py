@@ -666,6 +666,15 @@ class Workstation:
         # OWN gate -- PERF DIAG ON + DIAG SD OFF = serial-only measurement with no
         # 20s sdflush stutter. Crash/cart-exit flushes stay unconditional.
         self.diag_sd = False
+        # Frameskip (#77): while a GAME plays, run the cart's _update + audio every
+        # frame but its _draw + the composite + the flush only every SECOND frame --
+        # logic/input stay at the full loop rate, pixels present at half. This
+        # halves the whole render-side cost (which the #77 A/B measured to be
+        # MicroPython per-draw-call dispatch -- the one tax left) at the price of
+        # 30Hz motion. Settings -> FRAMESKIP toggles + persists it; default OFF
+        # until the on-glass feel verdict. _fs_phase is the alternation bit.
+        self.frameskip = False
+        self._fs_phase = False
         # Achievements (#21): a small set of fun milestones + the hidden Easter-egg
         # rewards. Starts empty/volatile; load_achievements() wires the SD store +
         # the unlock beep. The Workstation calls ach.note(event) at the flow points
@@ -902,6 +911,8 @@ class Workstation:
         # #68: apply the persisted diagnostics gate (kid-mode default OFF).
         self.set_diag_live(self.system.get("diag_live", False), persist=False)
         self.set_diag_sd(self.system.get("diag_sd", False), persist=False)
+        # #77: apply the persisted frameskip gate (default OFF).
+        self.set_frameskip(self.system.get("frameskip", False), persist=False)
 
     def set_icon_sheet(self, sheet):
         """Adopt the top-bar IconSheet (Stage 1) and drop the per-kind image cache so
@@ -1069,6 +1080,17 @@ class Workstation:
         self._dirty = True
         if persist:
             self.system["diag_sd"] = self.diag_sd
+            self._persist_system()
+
+    def set_frameskip(self, on, persist=True):
+        """Flip the #77 frameskip gate (Settings -> FRAMESKIP) and persist it.
+        Takes effect on the next frame; the phase bit resets so the first frame
+        after a toggle always renders (no one-frame blank on enable)."""
+        self.frameskip = bool(on)
+        self._fs_phase = False
+        self._dirty = True
+        if persist:
+            self.system["frameskip"] = self.frameskip
             self._persist_system()
 
     def _persist_system(self):
@@ -2577,6 +2599,26 @@ class Workstation:
         if self._splash_until is not None and _ticks_diff(self._splash_until, _ticks_ms()) <= 0:
             self._splash_until = None
             self._dirty = True
+        # Frameskip (#77): with the gate ON and a GAME playing (not crashed), every
+        # SECOND frame ticks only the cart's logic + audio (player.tick(render=False))
+        # and presents nothing -- the panel simply retains the last frame, so the
+        # whole render side (cart _draw + composite + flush -- measured to be
+        # per-draw-call dispatch, the one tax left) is halved while input/logic keep
+        # the full loop rate. Sits BEFORE the redraw gate so a skip frame never
+        # consumes dirty state (a pending repaint in a background window survives to
+        # the next rendered frame). Games only: tools/apps are event-driven (the
+        # redraw gate already keeps them ~free) and their cursor must stay 60.
+        if (self.frameskip and self.wm.top_is_player()
+                and self.cart_error is None
+                and self.cart is not None and self.cart.get("type") == "game"):
+            # phase True = render, False = logic-only; the setter resets it False,
+            # so the first frame after a toggle (or a fresh run) always RENDERS.
+            self._fs_phase = not self._fs_phase
+            if not self._fs_phase:
+                self.player.tick(dt, render=False)
+                return
+        else:
+            self._fs_phase = False
         # Redraw-on-change (#44): a static UI screen (no animation, no pointer change,
         # nothing marked dirty) is skipped entirely -- no draw, no flush. The panel /
         # host window simply retains the last frame, so an idle UI costs ~0 and the
