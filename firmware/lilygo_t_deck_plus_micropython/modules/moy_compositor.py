@@ -221,6 +221,14 @@ PSRAM_DIRECT_FLUSH = True
 # band (FLUSHBRK setup=2.5ms for two bands).
 SRAM_BOUNCE_FLUSH = True
 BOUNCE_ROWS = 48       # rows per band: 48 -> 5 bands of 30720B on 320x240
+# #77 S3 experiment: draw-target framebuffer(s) in INTERNAL SRAM when they fit
+# (see the __init__ FB_INTERNAL block). On the current T-Deck build this CANNOT
+# engage -- boot internal free is ~110KB (see the bounce-slot note above) vs the
+# 2x150KB + reserve needed -- so it logs the shortfall and stays PSRAM; the flag
+# + guard exist so the experiment is measured (boot log), not assumed, and so a
+# leaner future build engages it automatically.
+FB_INTERNAL = True
+FB_INTERNAL_RESERVE = 120 * 1024   # WiFi (#38) + slack must survive the grab
 # #66 next-lever 2 (the residual pump gap): the number of internal bounce slots.
 # With 2, the kick queues ~6.1ms of transfer and the SPI starves if no pump runs
 # within that window -- measured as PUMP idle=3-6ms/gaps=1 on most carts (the
@@ -336,16 +344,55 @@ class Compositor:
         # unaligned base glitched the DMA'd frame tail (the Beeper bottom artifact, only
         # visible on a flat-colour bottom). Falls back to a plain bytearray if the DMA
         # allocator / lcd_bus is unavailable (host bring-up).
+        #
+        # #77 S3 experiment (FB_INTERNAL): try INTERNAL SRAM for the draw target --
+        # it's the cart's per-frame WRITE target and the bounce flush's READ
+        # source, and the S3's PSRAM (120MHz OCT) is slow enough that both sides
+        # could win (the same lever measured NULL on the P4, whose 200MHz HEX
+        # PSRAM isn't the wall). BOTH-OR-NOTHING with DOUBLE_BUFFER: the canvas
+        # ping-pongs A/B every frame, so a lone internal A would make alternate
+        # frames fast/slow (cadence swing) -- internal only engages when BOTH
+        # ping-pong buffers fit. Also GUARDED by a WiFi reserve: internal is
+        # taken only if >= FB_INTERNAL_RESERVE stays free after, so a later WLAN
+        # init (#38) still has its ~60-80KB + slack. Internal SRAM is a superset
+        # of PSRAM for DMA, so every tx_color path (bounce, full-frame,
+        # PSRAM-direct) works unchanged. self.fb_mem records the outcome; the
+        # boot print is the experiment's evidence either way (on a build where
+        # free-int can't cover 2x150KB + reserve, the log documents exactly that).
         self._fb = None
-        try:
-            import lcd_bus
-            self._fb = moy_alloc.malloc_dma(
-                width * height * 2, lcd_bus.MEMORY_SPIRAM | lcd_bus.MEMORY_DMA
-            )
-        except Exception:
-            self._fb = None
+        self.fb_mem = "heap"
+        _fb_note = ""
+        if FB_INTERNAL:
+            try:
+                import esp32
+                # internal data regions only (SPIRAM shows as one >=1MB region)
+                free_int = sum(r[1] for r in esp32.idf_heap_info(esp32.HEAP_DATA)
+                               if r[0] < 0x100000)
+                nfbs = 2 if DOUBLE_BUFFER else 1
+                need = nfbs * width * height * 2 + FB_INTERNAL_RESERVE
+                _fb_note = " free-int=%dKB need=%dKB" % (free_int // 1024,
+                                                         need // 1024)
+                if free_int >= need:
+                    self._fb = moy_alloc.malloc_dma(width * height * 2)  # INTERNAL|DMA
+                    self.fb_mem = "internal"
+            except Exception:  # noqa: BLE001 -- no esp32 module / no room -> PSRAM
+                self._fb = None
+        if self._fb is None:
+            try:
+                import lcd_bus
+                self._fb = moy_alloc.malloc_dma(
+                    width * height * 2, lcd_bus.MEMORY_SPIRAM | lcd_bus.MEMORY_DMA
+                )
+                self.fb_mem = "psram"
+            except Exception:
+                self._fb = None
         if self._fb is None:
             self._fb = bytearray(width * height * 2)
+            self.fb_mem = "heap"
+        # The one recorded-evidence line (after the WHOLE fallback chain, so the
+        # label is the buffer's true region -- 2026-07-10 measured: free-int=164KB
+        # vs need=420KB, so the T-Deck stays fb=psram; see #77).
+        print("Moybyte compositor: fb=%s%s" % (self.fb_mem, _fb_note))
         self._fb_mv = memoryview(self._fb)
         # DMA-capable strip buffer in INTERNAL SRAM, for small dirty-rect flushes.
         self._strip = moy_alloc.malloc_dma(width * strip_h * 2)
@@ -381,15 +428,26 @@ class Compositor:
         # DMA-double-buffer block for the full design + completion-tracking rationale.
         self._fb_b = None
         if self.double_buffer:
-            try:
-                import lcd_bus
-                self._fb_b = moy_alloc.malloc_dma(
-                    width * height * 2, lcd_bus.MEMORY_SPIRAM | lcd_bus.MEMORY_DMA
-                )
-            except Exception as exc:
-                print("Moybyte compositor: 2nd framebuffer unavailable, "
-                      "double-buffer OFF:", exc)
-                self._fb_b = None
+            # #77: B follows A's region -- the ping-pong buffers must match or
+            # alternate frames draw at different speeds (see the FB_INTERNAL
+            # note above; the reserve check already sized for both).
+            if self.fb_mem == "internal":
+                try:
+                    self._fb_b = moy_alloc.malloc_dma(width * height * 2)  # INTERNAL|DMA
+                except Exception as exc:  # noqa: BLE001 -- shouldn't happen post-check
+                    print("Moybyte compositor: internal 2nd fb failed (%s), "
+                          "PSRAM B (mixed!)" % exc)
+                    self._fb_b = None
+            if self._fb_b is None:
+                try:
+                    import lcd_bus
+                    self._fb_b = moy_alloc.malloc_dma(
+                        width * height * 2, lcd_bus.MEMORY_SPIRAM | lcd_bus.MEMORY_DMA
+                    )
+                except Exception as exc:
+                    print("Moybyte compositor: 2nd framebuffer unavailable, "
+                          "double-buffer OFF:", exc)
+                    self._fb_b = None
         if self._fb_b is None:
             self.double_buffer = False     # no 2nd buffer -> single-buffer path
         # ping-pong state: A is _fb, B is _fb_b. `_back` is the bytearray the canvas
