@@ -662,6 +662,20 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         _cart_now = ws.cart is not None
         _t_sd = 0
         if diag is not None and _diag_cart_prev and not _cart_now:
+            # #66 repeat-run accumulation instrumentation (sakura fresh 53fps vs
+            # warm 37-42): the host CPython console AND the bare unix-MP engine
+            # path both measured NO accumulation (2026-07-10) -- whatever grows
+            # lives only in the on-device console/cache interplay. So log the
+            # live set at every cart EXIT (a timed collect is fine here -- off
+            # the play path, same place the diag ring flushes): the MEMX curve
+            # across a play-several-carts session names the growth transition.
+            if _live:
+                _t0 = _ticks_ms()
+                gc.collect()
+                _c_ms = _ticks_diff(_ticks_ms(), _t0)
+                print("Moybyte %d MEMX live=%dk free=%dk collect=%dms"
+                      % (_ticks_ms(), gc.mem_alloc() // 1024,
+                         gc.mem_free() // 1024, _c_ms))
             _t_sd = _diag_flush(diag, ws)  # #68: cart exited -> persist the session's ring
         _diag_cart_prev = _cart_now
         # The periodic flush now ALSO needs Settings -> DIAG SD LOG (ws.diag_sd,
