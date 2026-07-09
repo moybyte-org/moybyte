@@ -1285,8 +1285,11 @@ class Workstation:
         # sysmenu draws on the SYSTEM canvas, so anchor to the responsive Layout's
         # ≡ rect (the launcher/Settings/Editor bar), not the fixed crash-bar slot.
         bx, _by, bw, _bh = self.layout.sysmenu_btn
-        ax = bx + bw - _POPUP_W
-        self.sysmenu.anchor_x = max(0, min(ax, self.sys_canvas.w - _POPUP_W))
+        fs = self._effective_font_scale()
+        self.sysmenu.fs = fs          # rows hold fs-scaled text -> fs-scaled geometry
+        pw = _POPUP_W * fs
+        ax = bx + bw - pw
+        self.sysmenu.anchor_x = max(0, min(ax, self.sys_canvas.w - pw))
         self.sysmenu.toggle(self.menu_ui._sysmenu_items())
 
     def _toggle_web_view(self):

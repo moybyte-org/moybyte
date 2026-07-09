@@ -17,8 +17,20 @@ MPY_TAG="${MPY_TAG:-v1.28.0}"
 BOARD="MOYBYTE_P4"
 BOARD_DIR="${SCRIPT_DIR}/boards/${BOARD}"
 DIST_DIR="${REPO_ROOT}/dist/p4"
+TDECK_DIR="${REPO_ROOT}/firmware/lilygo_t_deck_plus_micropython"
+MODULES_DIR="${SCRIPT_DIR}/modules"
+MANIFEST="${BUILD_DIR}/moybyte_p4_manifest.py"
+BUILD_PYTHON="${MOYBYTE_BUILD_PYTHON:-}"
 
-mkdir -p "${BUILD_DIR}" "${DIST_DIR}"
+if [ -z "${BUILD_PYTHON}" ]; then
+  if [ -x "${REPO_ROOT}/.venv/bin/python" ]; then
+    BUILD_PYTHON="${REPO_ROOT}/.venv/bin/python"
+  else
+    BUILD_PYTHON="python3"
+  fi
+fi
+
+mkdir -p "${BUILD_DIR}" "${DIST_DIR}" "${MODULES_DIR}"
 
 # 1) MicroPython checkout (pinned tag).
 if [ ! -d "${MPY_DIR}" ]; then
@@ -57,6 +69,76 @@ if ! grep -q "^    esp_lcd$" "${COMMON_CMAKE}"; then
   echo "== patched esp32_common.cmake: added esp_lcd to IDF_COMPONENTS"
 fi
 
+# 2c) Stage the shared NATIVE modules from the T-Deck tree (single source of
+#     truth: firmware/lilygo_t_deck_plus_micropython/native/). moy_gfx is the
+#     VM-neutral RGB565 pixel kernel every draw verb runs through; moy_alloc is
+#     the off-gc-heap PSRAM allocator the layer/window buffers use. Both are
+#     plain-C usermods (the S3-specific pieces are include-guarded), so they
+#     compile unchanged on the P4's RISC-V. native/micropython.cmake includes
+#     moy_dsi + these staged copies.
+STAGED_NATIVE="${SCRIPT_DIR}/native/.staged"
+rm -rf "${STAGED_NATIVE}"
+mkdir -p "${STAGED_NATIVE}"
+cp -r "${TDECK_DIR}/native/moy_gfx" "${STAGED_NATIVE}/moy_gfx"
+cp -r "${TDECK_DIR}/native/moy_alloc" "${STAGED_NATIVE}/moy_alloc"
+
+# 2d) Stage the shared PYTHON modules (#58 console staging).
+#     From runtime/ (canonical, same list the T-Deck build stages) -- the whole
+#     shared console -- PLUS wm_windowed.py: the P4 is the windowed presentation
+#     tier (#73), deliberately NOT staged into the S3 build.
+for f in editors.py block_editor_ui.py map_editor_ui.py audio.py \
+         music_editor_ui.py perf_hud.py update_ui.py system_menu_ui.py \
+         achievements_ui.py layers.py bar_layer.py cards_layer.py \
+         paint_layer.py settings_layer.py code_layer.py widgets.py \
+         wallpaper.py launcher_layer.py project.py player.py editor_app.py \
+         wm.py wm_windowed.py chrome.py console.py moy_carts.py blocks.py \
+         web_view_ws.py web_view_page.py web_view.py; do
+  cp "${REPO_ROOT}/runtime/${f}" "${MODULES_DIR}/${f}"
+done
+cp "${REPO_ROOT}/runtime/font.py" "${MODULES_DIR}/moy_font.py"
+#     From the T-Deck modules tree (canonical home of the device-shared backend
+#     units): the drawing backend + the cart namespace + wifi + the leaf utils +
+#     the moybyte input package (InputState). These are board-agnostic by
+#     construction (their lvgl/S3-only imports are guarded).
+for f in device_util.py device_canvas.py device_api.py device_wifi.py; do
+  cp "${TDECK_DIR}/modules/${f}" "${MODULES_DIR}/${f}"
+done
+rm -rf "${MODULES_DIR}/moybyte"
+mkdir -p "${MODULES_DIR}/moybyte"
+cp "${TDECK_DIR}/modules/moybyte/__init__.py" "${TDECK_DIR}/modules/moybyte/input.py" \
+   "${MODULES_DIR}/moybyte/"
+#     carts_data.py is GENERATED from system_carts/ (same as the T-Deck) so the
+#     P4's seed/fallback carts can never drift from the host source of truth.
+"${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_device_carts.py" "${MODULES_DIR}/carts_data.py"
+#     A stray host-side import can drop __pycache__ into modules/; the freeze
+#     ignores it but keep the tree clean anyway.
+rm -rf "${MODULES_DIR}/__pycache__" "${MODULES_DIR}/moybyte/__pycache__"
+
+# 2e) Frozen manifest: the port's default frozen stdlib + our modules/ tree.
+#     The md5 fingerprint makes the manifest content change whenever any frozen
+#     source changes, so the build can never freeze stale .mpy (same trick as
+#     the T-Deck build).
+cat > "${MANIFEST}" <<EOF
+include("\$(PORT_DIR)/boards/manifest.py")
+freeze("${MODULES_DIR}", opt=3)
+EOF
+echo "# frozen-source fingerprint: $(find "${MODULES_DIR}" -type f -name '*.py' -exec md5sum {} + 2>/dev/null | sort | md5sum | cut -d' ' -f1)" >> "${MANIFEST}"
+
+# 2f) Custom partition table (#58): OTA-shaped 2x4MB app slots + auto-vfs tail
+#     (the default 4MiBplus table's ~1.94MB app can't hold the frozen console).
+#     CONFIG_PARTITION_TABLE_CUSTOM_FILENAME resolves relative to ports/esp32, so
+#     stage the board CSV there. IDF only (re)generates the build's sdkconfig
+#     from the defaults when the file is ABSENT (the T-Deck build learned this),
+#     so if an existing sdkconfig doesn't carry our table, delete it to force the
+#     reconfigure.
+cp "${BOARD_DIR}/partitions-moybyte-p4.csv" "${MPY_DIR}/ports/esp32/partitions-moybyte-p4.csv"
+GEN_SDKCONFIG="${MPY_DIR}/ports/esp32/build-${BOARD}/sdkconfig"
+if [ -f "${GEN_SDKCONFIG}" ] && \
+   ! grep -q '^CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-p4.csv"$' "${GEN_SDKCONFIG}"; then
+  echo "== sdkconfig lacks the custom partition table -- forcing regeneration"
+  rm -f "${GEN_SDKCONFIG}"
+fi
+
 # 3) mpy-cross (host tool, needed by the port build).
 make -C "${MPY_DIR}/mpy-cross" -j"$(nproc)"
 
@@ -64,7 +146,8 @@ make -C "${MPY_DIR}/mpy-cross" -j"$(nproc)"
 cd "${MPY_DIR}/ports/esp32"
 make submodules BOARD_DIR="${BOARD_DIR}"
 make BOARD_DIR="${BOARD_DIR}" \
-  USER_C_MODULES="${SCRIPT_DIR}/native/moy_dsi/micropython.cmake"
+  USER_C_MODULES="${SCRIPT_DIR}/native/micropython.cmake" \
+  FROZEN_MANIFEST="${MANIFEST}"
 
 # 5) Collect the merged image (bootloader+partitions+app; flash at 0x2000).
 BOUT="build-${BOARD}"

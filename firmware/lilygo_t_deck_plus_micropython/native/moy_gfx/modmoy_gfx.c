@@ -138,6 +138,69 @@ static mp_obj_t moy_gfx_blit565(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit565_obj, 9, 13, moy_gfx_blit565);
 
+// blit565_scale(dst, dw, dh, dx, dy, src, sw, sh, scale) -- integer-upscale an
+// RGB565 source into dst with its top-left at (dx, dy). dx/dy may be NEGATIVE
+// (the cover-crop wallpaper backdrop overhangs the desktop); writes clamp to the
+// destination. Opaque, no colorkey. This is the P4 windowed composite primitive
+// (#58/#73): the 320x240 game frame -> its window viewport, and the wallpaper
+// frame -> the full-desktop cover backdrop, each in ONE C call (the host does
+// these with Python index-buffer loops; an RGB565 device canvas has no index
+// buffer, and a per-frame Python expansion of ~600k pixels is unusable). Each
+// expanded source row is built once, then memcpy'd to its scale-1 duplicates.
+static mp_obj_t moy_gfx_blit565_scale(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t dcap, scap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &dcap);
+    mp_int_t dw = mp_obj_get_int(a[1]);
+    mp_int_t dh = mp_obj_get_int(a[2]);
+    mp_int_t dx = mp_obj_get_int(a[3]);
+    mp_int_t dy = mp_obj_get_int(a[4]);
+    const uint16_t *src = moy_gfx_buf_r(a[5], &scap);
+    mp_int_t sw = mp_obj_get_int(a[6]);
+    mp_int_t sh = mp_obj_get_int(a[7]);
+    mp_int_t scale = mp_obj_get_int(a[8]);
+    if (scale < 1) scale = 1;
+    if (dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0) return mp_const_none;
+    if ((size_t)dw * (size_t)dh > dcap) dh = (mp_int_t)(dcap / (size_t)dw);
+    if ((size_t)sw * (size_t)sh > scap) sh = (mp_int_t)(scap / (size_t)sw);
+    // Visible destination-x span of the scaled image, clamped to the buffer.
+    mp_int_t x0 = dx < 0 ? 0 : dx;
+    mp_int_t x1 = dx + sw * scale;
+    if (x1 > dw) x1 = dw;
+    if (x1 <= x0) return mp_const_none;
+    for (mp_int_t row = 0; row < sh; row++) {
+        mp_int_t ty0 = dy + row * scale;         // first dst row of this src row
+        mp_int_t ty1 = ty0 + scale;              // one past its last dst row
+        if (ty1 <= 0 || ty0 >= dh) continue;
+        if (ty1 > dh) ty1 = dh;
+        const uint16_t *srow = src + (size_t)row * (size_t)sw;
+        mp_int_t wy = ty0 < 0 ? 0 : ty0;         // first VISIBLE dst row
+        uint16_t *first = dst + (size_t)wy * (size_t)dw;
+        // Expand the source row once into the first visible dst row (run-length
+        // stepped: no per-pixel division)...
+        mp_int_t off = x0 - dx;                  // >= 0 by construction
+        const uint16_t *sp = srow + off / scale;
+        mp_int_t rep = scale - (off % scale);    // copies left of the first col
+        uint16_t *out = first + x0;
+        mp_int_t remaining = x1 - x0;
+        while (remaining > 0) {
+            uint16_t v = *sp++;
+            mp_int_t n = rep < remaining ? rep : remaining;
+            for (mp_int_t i = 0; i < n; i++) out[i] = v;
+            out += n;
+            remaining -= n;
+            rep = scale;
+        }
+        // ...then duplicate it to the band's remaining visible rows.
+        for (mp_int_t ty = wy + 1; ty < ty1; ty++) {
+            memcpy(dst + (size_t)ty * (size_t)dw + x0, first + x0,
+                   (size_t)(x1 - x0) * 2u);
+        }
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit565_scale_obj, 9, 9, moy_gfx_blit565_scale);
+
 // blit_map(dst, dw, dh, sx, sy, cells, map_w, map_h, mx, my, rw, rh,
 //          atlas, ntiles, tile, scale, key[, cx0, cy0, cx1, cy1]) -- blit a (rw x rh)
 // cell region of a tilemap in ONE C call (issue #32). `cells` is a byte grid where
@@ -884,6 +947,7 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_fill),       MP_ROM_PTR(&moy_gfx_fill_obj) },
     { MP_ROM_QSTR(MP_QSTR_fill_rect),  MP_ROM_PTR(&moy_gfx_fill_rect_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit565),    MP_ROM_PTR(&moy_gfx_blit565_obj) },
+    { MP_ROM_QSTR(MP_QSTR_blit565_scale), MP_ROM_PTR(&moy_gfx_blit565_scale_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_map),   MP_ROM_PTR(&moy_gfx_blit_map_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_batch), MP_ROM_PTR(&moy_gfx_blit_batch_obj) },
     { MP_ROM_QSTR(MP_QSTR_make_spr_gate), MP_ROM_PTR(&moy_gfx_make_spr_gate_obj) },

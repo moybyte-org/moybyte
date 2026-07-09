@@ -5,9 +5,12 @@ tier next to the T-Deck pocket handheld. **Not** an lvgl_micropython build —
 this is mainline MicroPython v1.28.0 (`ESP32_GENERIC_P4`, C6 WiFi variant baked
 into our out-of-tree board def) + our native modules via `USER_C_MODULES`.
 
-Status (2026-07-08, all hardware-confirmed): REPL / WiFi-via-C6 / GT911 touch /
-SD / **DSI panel first light** work. The console itself (launcher, `WindowedWM`,
-`moy_gfx` re-home) is not staged yet — see #58 for the living status.
+Status (2026-07-08): REPL / WiFi-via-C6 / GT911 touch / SD / **DSI panel first
+light** all hardware-confirmed. The **console is staged and boots** — launcher
+under `WindowedWM`, `moy_gfx`/`moy_alloc` re-homed to `USER_C_MODULES`, 15
+carts seeded on the internal-flash VFS, error-free frame loop, Ctrl-C drops to
+the REPL (serial-verified; the first eyes-on-glass pass — visuals + touch
+orientation — is still pending). See #58 for the living status.
 
 ## Build / flash
 
@@ -28,7 +31,11 @@ firmware/esp32_p4_wifi6_touch_lcd_7b/build.sh     # -> dist/p4/moybyte_p4.bin
 ## What's here
 
 - `boards/MOYBYTE_P4/` — out-of-tree board def: the `C6_WIFI` variant's
-  sdkconfig fragments + `sdkconfig.board` (PSRAM @ 200MHz, 32MB flash).
+  sdkconfig fragments + `sdkconfig.board` (PSRAM @ 200MHz, 32MB flash, the
+  custom partition table) + `partitions-moybyte-p4.csv` (OTA-shaped 2×4MB app
+  slots — the default 4MiBplus table's ~1.94MB app can't hold the frozen
+  console — with the ~24MB tail left unlisted so mainline auto-builds the vfs
+  over it).
 - `native/moy_dsi/` — the panel module: vendored `esp_lcd_ek79007` v2.0.2
   (Apache-2.0, ESP component registry) + `modmoy_dsi.c` exposing
   `init() / fb() / flush() / set_pattern() / deinit()` and `WIDTH/HEIGHT`.
@@ -38,6 +45,38 @@ firmware/esp32_p4_wifi6_touch_lcd_7b/build.sh     # -> dist/p4/moybyte_p4.bin
   scan-out DMA sees writes. Native `framebuf` over `fb()` does a full-screen
   redraw in ~29ms; MicroPython memoryview slice writes are the usual
   interpreted tax (~10s/screen) — real rendering goes through native code.
+- `native/micropython.cmake` — the `USER_C_MODULES` entry point: `moy_dsi` +
+  the shared `moy_gfx`/`moy_alloc` staged from the T-Deck tree into
+  `native/.staged/` by build.sh (single source of truth stays in
+  `firmware/lilygo_t_deck_plus_micropython/native/`; both are plain-C usermods
+  whose S3-only pieces are include-guarded, so they compile unchanged on the
+  P4's RISC-V). `moy_gfx` grew `blit565_scale` for this port — the ONE-call
+  integer-upscale composite the windowed presentation needs.
+- `modules/` — the P4-authored device backend (tracked) + build-staged copies
+  (gitignored; see `.gitignore`'s whitelist):
+  - `moybyte_shell.py` — boot entry (`main()`); `RUN_PANEL_SMOKE` flips to the
+    DSI hardware test pattern. Ctrl-C in the desktop loop drops to the REPL
+    (no native-takeover USB starvation on this board).
+  - `p4_display.py` — `P4Compositor`: the compositor shim over `moy_dsi`
+    (size/framebuffer/back_buffer/gfx/flush/sync; single-buffered, flush =
+    cache msync) + the active-low GPIO32 backlight (held dark until the first
+    composed frame).
+  - `p4_input.py` — GT911 polling driver (I2C0 SDA7/SCL8 @ 0x5D, native
+    1024×600 coords; `FLIP_X`/`FLIP_Y` knobs for the 180° panel mount if touch
+    lands mirrored).
+  - `moy_runtime.py` — the P4 backend: `P4SystemCanvas` (a `DeviceCanvas` over
+    the DSI framebuffer + the system-surface contract: `font_scale` text via
+    the native text kernel, font-scale window layers, and the `blit_game` /
+    `blit_cover` native composite hooks `wm_windowed`/`wallpaper` probe for)
+    and `run_desktop()` — constructs the shared `Workstation` with a distinct
+    1024×600 system canvas + the fixed 320×240 off-screen game canvas and
+    installs **`WindowedWM`** (#73's tier, on its intended hardware). Carts
+    live on the internal-flash VFS (`/moybyte/carts`); SD is optional here.
+  - Staged at build (canonical sources elsewhere): the whole shared console
+    from `runtime/` (incl. `wm_windowed.py`, which is deliberately NOT staged
+    to the S3 build), `device_canvas`/`device_api`/`device_wifi`/`device_util`
+    + the `moybyte` input package from the T-Deck modules tree, and the
+    generated `carts_data.py`.
 
 ## Hard board constraints (hardware-confirmed; don't re-learn these)
 
@@ -62,6 +101,11 @@ firmware/esp32_p4_wifi6_touch_lcd_7b/build.sh     # -> dist/p4/moybyte_p4.bin
   during idf.py's early-expansion phase, which is when component `REQUIRES`
   are collected. `build.sh` patches `esp32_common.cmake`'s `IDF_COMPONENTS`
   list instead (idempotent sed).
+- **A root-level VFS dir named like a frozen module SHADOWS it** (`''` precedes
+  `.frozen` on `sys.path`): the first console boot seeded `/moybyte/carts` and
+  the next boot died with `ImportError: no module named 'moybyte.input'`. The
+  flash store root is therefore **`/moy/carts`** — never name a VFS root dir
+  after an importable module.
 
 ## Board map (from the factory xiaozhi boot log + Waveshare/xiaozhi sources)
 

@@ -102,28 +102,33 @@ class SystemMenuUI:
         NAMES = self._NAMES
         cv = self.ws.sys_canvas
         m = self.ws.sysmenu
+        # Geometry scales with the popup's fs (set by toggle_sysmenu from the
+        # effective font scale, #39/#58): the rows hold fs-scaled petme128 text,
+        # so unscaled 12px rows overlap at font 2 (glass-found on the P4). fs=1
+        # keeps every product byte-identical (the 320x240 baseline).
+        fs = m.fs
         x, y, w, h = m.panel_rect()
         cv.rect(x, y, w, h, NAMES["dark_purple"])          # panel base fill
         cv.rectb(x, y, w, h, NAMES["indigo"])              # framed edge
-        cy = _POPUP_Y
+        cy = _POPUP_Y * fs
         for idx in range(len(m.items)):
             it = m.items[idx]
             kind = it[0]
             if kind == "sep":
-                cv.rect(x + 1, cy, w - 2, _POPUP_SEP_H, NAMES["indigo"])
-                cy += _POPUP_SEP_H
+                cv.rect(x + 1, cy, w - 2, _POPUP_SEP_H * fs, NAMES["indigo"])
+                cy += _POPUP_SEP_H * fs
                 continue
             label = it[1]
-            tx = x + _POPUP_PAD_X
-            ty = cy + 2
+            tx = x + _POPUP_PAD_X * fs
+            ty = cy + 2 * fs
             if kind == "header":
                 cv.print(label, tx, ty, NAMES["dark_grey"], 1)   # dim section title
             elif idx == m.sel:
-                cv.rect(x + 1, cy, w - 2, _POPUP_ROW_H, NAMES["indigo"])  # highlight
+                cv.rect(x + 1, cy, w - 2, _POPUP_ROW_H * fs, NAMES["indigo"])  # highlight
                 cv.print(label, tx, ty, NAMES["white"], 1)
             else:
                 cv.print(label, tx, ty, NAMES["light_grey"], 1)
-            cy += _POPUP_ROW_H
+            cy += _POPUP_ROW_H * fs
 
     def _draw_about(self):
         """The ABOUT info modal (#52): a small centered panel with the console name +
@@ -134,20 +139,22 @@ class SystemMenuUI:
         ver = self._firmware_version_text()
         if ver:
             lines = ("MOYBYTE CONSOLE", ver, "", "TAP TO CLOSE")
+        fs = getattr(cv, "font_scale", 1)   # scaled text -> scaled panel (#39/#58)
+        fw = 8 * fs
         w = 0
         for ln in lines:
-            w = max(w, len(ln) * 8)
-        w += 24
-        w = min(w, cv.w - 16)
-        h = 20 + len(lines) * 12
+            w = max(w, len(ln) * fw)
+        w += 24 * fs
+        w = min(w, cv.w - 16 * fs)
+        h = 20 * fs + len(lines) * 12 * fs
         x = (cv.w - w) // 2
         y = (cv.h - h) // 2
         cv.rect(x, y, w, h, NAMES["black"])
         cv.rectb(x, y, w, h, NAMES["pink"])
-        ly = y + 10
+        ly = y + 10 * fs
         for ln in lines:
-            cv.print(ln, x + (w - len(ln) * 8) // 2, ly, NAMES["white"], 1)
-            ly += 12
+            cv.print(ln, x + (w - len(ln) * fw) // 2, ly, NAMES["white"], 1)
+            ly += 12 * fs
 
     def _firmware_version_text(self):
         """A short firmware-version string for ABOUT, or "" when unknown (host). Reads

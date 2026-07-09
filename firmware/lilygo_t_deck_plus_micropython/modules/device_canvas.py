@@ -8,7 +8,7 @@ compositor's RGB565 framebuffer. The hot verbs go through the native moy_gfx ker
 framebuf is the text/line + no-moy_gfx fallback; moy_alloc gives _LayerComp its
 off-GC-heap DMA buffer. Also here: Image (indexed sprite), _decode_moyimg (.moyimg
 paint asset), _LayerComp/_Layer (the scroll-layer compositor), the MOY64 RGB565
-palette LUTs (PAL565 / PAL565_SW / _PAL565_SW_BUF), and the native-detection flags
+palette LUTs (PAL565 / PAL565_SW / PAL565_WIRE / _PAL565_WIRE_BUF), and the native-detection flags
 (_USE_GFX / LAYER_COPY_ASYNC / _RGB_KEY / _FONT8).
 
 Imports: `array` + the leaf device_util tick helpers; the native modules
@@ -20,7 +20,7 @@ NEEDS ON-DEVICE SMOKE BEFORE TRUSTING -- this is a pure code move, but EVERY pix
 the device draws flows through here and the native moy_gfx/moy_alloc/lcd_bus paths
 cannot be exercised by the host test shim (those modules are absent under CPython).
 Host tests prove the import DAG + structure; only a board confirms the panel still
-draws. The module-load reads (_PAL565_SW_BUF buffer, _SRAM_BOUNCE_FLUSH->
+draws. The module-load reads (_PAL565_WIRE_BUF buffer, _SRAM_BOUNCE_FLUSH->
 LAYER_COPY_ASYNC) must stay intact -- they travelled with the block verbatim.
 """
 from array import array
@@ -52,21 +52,34 @@ PAL565 = (
     0x6165, 0x6245, 0x2B2A, 0x2AAC, 0x29EC, 0x416C, 0x616C, 0x6168,
 )
 
-# Same palette, byte-swapped to the PANEL's wire order (#43). PAL565 above is the
-# canonical little-endian RGB565 (the host parity test asserts it == rgb565(MOY64));
-# PAL565_SW is what we actually WRITE into the device framebuffer so the per-flush
+# Same palette, byte-swapped to the T-Deck PANEL's wire order (#43). PAL565 above is
+# the canonical little-endian RGB565 (the host parity test asserts it == rgb565(MOY64));
+# PAL565_SW is what the T-Deck WRITEs into the device framebuffer so the per-flush
 # CPU byte-swap in lcd_bus.tx_color can be turned OFF (tdeck_display rgb565_byte_swap
 # =False). That swap was ~17 ms/frame over PSRAM -- the synchronous wall left once the
 # DMA-overlap flush (#43) hid the SPI transfer. Folding it into this LUT makes it free
 # (the index->colour lookup happens anyway), so the kick drops from ~17 ms to ~2 ms and
-# the SPI finally overlaps render. Every buffer-writing path (_col + the sprite/atlas
-# bakes) uses PAL565_SW; PAL565 stays the canonical reference.
+# the SPI finally overlaps render. PAL565 stays the canonical reference.
 PAL565_SW = tuple(((c << 8) | (c >> 8)) & 0xFFFF for c in PAL565)
-# Buffer form of PAL565_SW for the native blit_indices kernel (#63): the C reads the
+
+# The WIRE-order LUT every buffer-writing path (_col + the sprite/atlas bakes)
+# actually uses. T-Deck (SPI panel): the byte-swapped PAL565_SW, per the above.
+# P4 (#58, MIPI-DSI DPI mode): the scan-out hardware reads the framebuffer
+# directly as little-endian RGB565, so the CANONICAL PAL565 -- byte-swapped
+# writes render every color wrong (glass-confirmed 2026-07-08). moy_dsi exists
+# only on the DPI build, so its importability IS the board answer; under CPython
+# (parity tests) it is absent, so the host harness keeps the swapped order the
+# tests swap back from.
+try:
+    import moy_dsi as _moy_dsi_probe  # noqa: F401 -- presence probe only
+    PAL565_WIRE = PAL565
+except ImportError:
+    PAL565_WIRE = PAL565_SW
+# Buffer form of PAL565_WIRE for the native blit_indices kernel (#63): the C reads the
 # palette via the BUFFER PROTOCOL (moy_gfx_buf_r), and a tuple has none ("object with
 # buffer protocol required"). An array("H") is a contiguous uint16 buffer AND still
-# indexes in Python, so it serves both. (The tuple stays for the other PAL565_SW uses.)
-_PAL565_SW_BUF = array("H", PAL565_SW)
+# indexes in Python, so it serves both. (The tuple stays for the other PAL565_WIRE uses.)
+_PAL565_WIRE_BUF = array("H", PAL565_WIRE)
 
 # RGB565 colour-key for native sprite blits: transparent sprite pixels are baked
 # to this value so moy_gfx.blit565 skips them. Magenta is absent from MOY64; a
@@ -492,7 +505,7 @@ class DeviceCanvas:
     def _col(self, c):
         # Resolve a draw index to RGB565 through the pal remap, so cls/pix/line/rect/
         # circ/circb/rectb all honour pal() for free.
-        return PAL565_SW[self._pal_map[c & 63]]
+        return PAL565_WIRE[self._pal_map[c & 63]]
 
     def _fill(self, x, y, w, h, col):
         # Filled rect of a pre-resolved RGB565 colour, camera-offset and intersected
@@ -706,7 +719,7 @@ class DeviceCanvas:
         buf = bytearray(w * h * 2)
         fb = framebuf.FrameBuffer(buf, w, h, framebuf.RGB565)
         fb.fill(_RGB_KEY)
-        pal = PAL565_SW
+        pal = PAL565_WIRE
         pmap = self._pal_map
         palt = self._palt
         t = img.transparent
@@ -747,19 +760,19 @@ class DeviceCanvas:
 
     def _bake_indices(self, img):
         # Bake a paint image's MOY64 indices -> an opaque RGB565 buffer ONCE via the
-        # native blit_indices kernel (index -> PAL565_SW converted in C, ~ms for a full
+        # native blit_indices kernel (index -> PAL565_WIRE converted in C, ~ms for a full
         # 320x240), cached on the Image as _rgb_i; spr() then blit565s it every frame.
         # The "images are data, not draw calls" bake (#63 Fold 3), off the hot path.
         w = img.w
         h = img.h
         buf = bytearray(w * h * 2)
-        self._gfx.blit_indices(buf, w, h, 0, 0, img.pix, w, h, _PAL565_SW_BUF)
+        self._gfx.blit_indices(buf, w, h, 0, 0, img.pix, w, h, _PAL565_WIRE_BUF)
         img._rgb_i = buf
 
     def _spr_py(self, img, x, y, scale, flip=0):
         # Per-pixel fallback when moy_gfx is absent (image built without it). Honours
         # camera (applied by the caller into x,y), clip, pal, palt, and flip.
-        pal = PAL565_SW
+        pal = PAL565_WIRE
         pmap = self._pal_map
         palt = self._palt
         t = img.transparent
@@ -917,7 +930,7 @@ class DeviceCanvas:
         ntiles = sheet.count
         tpx = tile * tile
         buf = bytearray(ntiles * tpx * 2)
-        pal = PAL565_SW
+        pal = PAL565_WIRE
         pmap = self._pal_map
         palt = self._palt
         cols = sheet.cols
@@ -1172,7 +1185,7 @@ class DeviceCanvas:
 
     def blit_indices(self, indices, iw, ih, x, y):
         # Place an iw x ih palette-INDEX bitmap (1 byte/pixel) at (x, y), converting each index
-        # to RGB565 via the panel-order PAL565_SW table. The "images are data, not draw calls"
+        # to RGB565 via the panel-wire-order PAL565_WIRE table. The "images are data, not draw calls"
         # bake (#63 Fold 3): one native moy_gfx.blit_indices call turns a paint-app image into
         # pixels instead of thousands of rect() replays. Meant for cart load (off the per-frame
         # hot path). Opaque; bounds-clamped; per-pixel memoryview fallback when moy_gfx absent.
@@ -1185,13 +1198,13 @@ class DeviceCanvas:
             return
         if self._gfx is not None:
             self._gfx.blit_indices(self._buf, self.w, self.h, x, y,
-                                   indices, iw, ih, _PAL565_SW_BUF)
+                                   indices, iw, ih, _PAL565_WIRE_BUF)
             return
         d = memoryview(self._buf).cast("H")
         w = self.w
         h = self.h
         n = len(indices)
-        pn = len(PAL565_SW)
+        pn = len(PAL565_WIRE)
         for row in range(ih):
             ty = y + row
             if ty < 0 or ty >= h:
@@ -1208,7 +1221,7 @@ class DeviceCanvas:
                 v = indices[si]
                 if v >= pn:
                     continue
-                d[drow + tx] = PAL565_SW[v]
+                d[drow + tx] = PAL565_WIRE[v]
 
     # -- scroll layers (#54) -------------------------------------------------
 
@@ -1450,8 +1463,11 @@ class _LayerComp:
         else:
             try:
                 import moy_alloc
-                import lcd_bus
-                buf = moy_alloc.malloc_dma(nbytes, lcd_bus.MEMORY_SPIRAM | lcd_bus.MEMORY_DMA)
+                try:
+                    import lcd_bus as _mem      # lvgl build (T-Deck): caps live here
+                except ImportError:             # mainline build (P4 #58): moy_alloc
+                    _mem = moy_alloc            # exports the same MEMORY_* constants
+                buf = moy_alloc.malloc_dma(nbytes, _mem.MEMORY_SPIRAM | _mem.MEMORY_DMA)
                 pooled = buf is not None    # heap_caps memory: pool it on reclaim (no free())
             except Exception:  # noqa: BLE001 -- host / no DMA allocator -> gc-heap bytearray
                 buf = None

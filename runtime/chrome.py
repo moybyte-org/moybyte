@@ -274,6 +274,11 @@ class Layout:
                             (self.icon_h + self.icon_gap_y))
             grid_w = self.cols * self.icon_w + (self.cols - 1) * self.icon_gap_x
             self.icon_x0 = max(0, (self.w - grid_w) // 2)
+            # Center the rows in the band too: the floor division above can leave a
+            # large dead strip under the last row (170px at 1024x600/2x -- the grid
+            # read top-heavy on the P4's glass), so split the slack evenly.
+            grid_h = self.rows * self.icon_h + (self.rows - 1) * self.icon_gap_y
+            self.icon_y0 += max(0, (band - grid_h) // 2)
         self.page = self.cols * self.rows
 
         # -- unified top bar: icon size + clusters (Stage 1) -------------------

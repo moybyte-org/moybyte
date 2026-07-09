@@ -27,7 +27,11 @@ static esp_ldo_channel_handle_t s_phy_ldo;
 static esp_lcd_dsi_bus_handle_t s_bus;
 static esp_lcd_panel_io_handle_t s_io;
 static esp_lcd_panel_handle_t s_panel;
-static void *s_fb;
+static void *s_fb;          // fb 0 (kept for the single-buffer flush() compat path)
+static void *s_fbs[2];      // DOUBLE-BUFFER (#58): the DPI panel owns 2 framebuffers;
+static int s_nfbs;          // show(n) switches scan-out zero-copy (draw_bitmap with an
+                            // internal fb pointer), so a full redraw never races the
+                            // scan (the "everything visibly refreshes" tearing).
 
 static void moy_dsi_check(esp_err_t err, const char *what) {
     if (err != ESP_OK) {
@@ -53,6 +57,7 @@ static mp_obj_t moy_dsi_init(void) {
     moy_dsi_check(esp_lcd_new_panel_io_dbi(s_bus, &dbi_cfg, &s_io), "dbi io");
 
     esp_lcd_dpi_panel_config_t dpi_cfg = EK79007_1024_600_PANEL_60HZ_CONFIG(LCD_COLOR_PIXEL_FORMAT_RGB565);
+    dpi_cfg.num_fbs = 2;    // double-buffer: 2x 1.2MB PSRAM (the board has 32MB)
     ek79007_vendor_config_t vendor_cfg = {
         .mipi_config = {
             .dsi_bus = s_bus,
@@ -69,7 +74,9 @@ static mp_obj_t moy_dsi_init(void) {
     moy_dsi_check(esp_lcd_new_panel_ek79007(s_io, &panel_cfg, &s_panel), "panel new");
     moy_dsi_check(esp_lcd_panel_reset(s_panel), "panel reset");
     moy_dsi_check(esp_lcd_panel_init(s_panel), "panel init");
-    moy_dsi_check(esp_lcd_dpi_panel_get_frame_buffer(s_panel, 1, &s_fb), "get fb");
+    moy_dsi_check(esp_lcd_dpi_panel_get_frame_buffer(s_panel, 2, &s_fbs[0], &s_fbs[1]), "get fbs");
+    s_nfbs = 2;
+    s_fb = s_fbs[0];
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_dsi_init_obj, moy_dsi_init);
@@ -79,6 +86,8 @@ static mp_obj_t moy_dsi_deinit(void) {
         esp_lcd_panel_del(s_panel);
         s_panel = NULL;
         s_fb = NULL;
+        s_fbs[0] = s_fbs[1] = NULL;
+        s_nfbs = 0;
     }
     if (s_io) {
         esp_lcd_panel_io_del(s_io);
@@ -96,13 +105,41 @@ static mp_obj_t moy_dsi_deinit(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_dsi_deinit_obj, moy_dsi_deinit);
 
-static mp_obj_t moy_dsi_fb(void) {
-    if (s_fb == NULL) {
+// fb([n]) -> writable memoryview over framebuffer n (default 0).
+static mp_obj_t moy_dsi_fb(size_t n_args, const mp_obj_t *a) {
+    if (s_nfbs == 0) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_dsi not initialized"));
     }
-    return mp_obj_new_memoryview('B' | MP_OBJ_ARRAY_TYPECODE_FLAG_RW, MOY_DSI_FB_BYTES, s_fb);
+    mp_int_t n = (n_args > 0) ? mp_obj_get_int(a[0]) : 0;
+    if (n < 0 || n >= s_nfbs) {
+        mp_raise_ValueError(MP_ERROR_TEXT("fb index"));
+    }
+    return mp_obj_new_memoryview('B' | MP_OBJ_ARRAY_TYPECODE_FLAG_RW, MOY_DSI_FB_BYTES, s_fbs[n]);
 }
-static MP_DEFINE_CONST_FUN_OBJ_0(moy_dsi_fb_obj, moy_dsi_fb);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_dsi_fb_obj, 0, 1, moy_dsi_fb);
+
+static mp_obj_t moy_dsi_nfbs(void) {
+    return MP_OBJ_NEW_SMALL_INT(s_nfbs);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_dsi_nfbs_obj, moy_dsi_nfbs);
+
+// show(n): make framebuffer n the scan-out source -- msync its CPU-cached writes,
+// then a zero-copy draw_bitmap (the DPI driver recognizes its own fb pointer and
+// just switches buffers at the next VSYNC; no pixel copy).
+static mp_obj_t moy_dsi_show(mp_obj_t n_in) {
+    if (s_panel == NULL) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_dsi not initialized"));
+    }
+    mp_int_t n = mp_obj_get_int(n_in);
+    if (n < 0 || n >= s_nfbs) {
+        mp_raise_ValueError(MP_ERROR_TEXT("fb index"));
+    }
+    moy_dsi_check(esp_cache_msync(s_fbs[n], MOY_DSI_FB_BYTES, ESP_CACHE_MSYNC_FLAG_DIR_C2M), "msync");
+    moy_dsi_check(esp_lcd_panel_draw_bitmap(s_panel, 0, 0, MOY_DSI_H_RES, MOY_DSI_V_RES, s_fbs[n]),
+                  "show");
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(moy_dsi_show_obj, moy_dsi_show);
 
 // Push CPU cache to memory so the DPI scan-out DMA sees the writes.
 static mp_obj_t moy_dsi_flush(void) {
@@ -136,6 +173,8 @@ static const mp_rom_map_elem_t moy_dsi_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_init), MP_ROM_PTR(&moy_dsi_init_obj) },
     { MP_ROM_QSTR(MP_QSTR_deinit), MP_ROM_PTR(&moy_dsi_deinit_obj) },
     { MP_ROM_QSTR(MP_QSTR_fb), MP_ROM_PTR(&moy_dsi_fb_obj) },
+    { MP_ROM_QSTR(MP_QSTR_nfbs), MP_ROM_PTR(&moy_dsi_nfbs_obj) },
+    { MP_ROM_QSTR(MP_QSTR_show), MP_ROM_PTR(&moy_dsi_show_obj) },
     { MP_ROM_QSTR(MP_QSTR_flush), MP_ROM_PTR(&moy_dsi_flush_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_pattern), MP_ROM_PTR(&moy_dsi_set_pattern_obj) },
     { MP_ROM_QSTR(MP_QSTR_WIDTH), MP_ROM_INT(MOY_DSI_H_RES) },
