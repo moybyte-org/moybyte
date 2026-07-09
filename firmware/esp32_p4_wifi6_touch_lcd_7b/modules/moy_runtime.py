@@ -484,6 +484,17 @@ def run_desktop(fps_cap=60):
                     print("REMOTE run %s" % items[idx].get("title"))
                 else:
                     print("REMOTE run: no cart match")
+            if parts and parts[0] == "diag":
+                # `diag 0|1`: toggle the diagnostic frame-eaters (perf_capture +
+                # the on-screen FPS chip) to measure the TRUE shipping fps. The
+                # fps= field of the PERF line reads _frames_drawn either way, so
+                # it stays valid with perf_capture off (only the ms EMAs go
+                # stale). Default here is ON (a measurement build).
+                on = not (len(parts) == 2 and parts[1] == "0")
+                ws.perf_capture = on
+                ws.show_fps = on
+                ws._dirty = True
+                print("REMOTE diag %s" % ("on" if on else "off"))
             if parts and parts[0] == "cache":
                 # `cache 0|1`: A/B the drag backdrop cache on glass (1=on).
                 on = not (len(parts) == 2 and parts[1] == "0")
