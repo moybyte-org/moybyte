@@ -84,8 +84,10 @@ The generic ESP-IDF speed-guide knobs are mostly already set:
 | caches | I 32KB + D 64KB — **max** ✅ | L2 128KB (not max) |
 
 This is *why* the T-Deck's PSRAM bump only "helped a bit" — it was one of the
-last generic knobs. The T-Deck is near its architectural ceiling on these; the
-P4 has more headroom (L2 cache, and the working-set-in-SRAM idea below).
+last generic knobs. The T-Deck is near its architectural ceiling on these, and
+the P4's two "obvious" remaining knobs (`-O3` on the kernel, game canvas in
+internal SRAM) both **measured null** on glass (next section) — the generic
+build-tuning chapter is closed on both boards.
 
 ## 6. The lever roadmap
 
@@ -101,14 +103,63 @@ are estimates; anything not "shipped/reverted" needs on-glass measurement.
 | async-composite overlap (defer show past input poll) | +2–5fps (→56) |
 | retained backdrop cache (`_BackdropLayer`) | app-drags 8→14fps |
 
+### Measured NULL on the P4 (2026-07-09 A/B — don't re-explore)
+
+Both "cheap hardware-side" levers were built, flashed, and A/B'd on glass —
+**individually and combined** — against a 4-cart baseline (Battle City / Letter
+Blitz / Hop Quest / Sky Run, 5×2s PERF samples each, fresh boot per run):
+
+| lever | render slice | fps | verdict |
+|---|---|---|---|
+| **`-O3` on `moy_gfx`** (in-source `#pragma GCC optimize`) | unchanged (±0.2ms) | unchanged | the C kernel isn't compute-bound *or* isn't the slice |
+| **game canvas → internal SRAM** (`moy_alloc` `MEMORY_INTERNAL`, fit confirmed: "internal (150 KB)") | unchanged | unchanged | the render target isn't bandwidth-bound *or* isn't the slice |
+| **both combined** | unchanged | unchanged | kills the "balanced bottleneck" explanation |
+
+The elimination is the finding: with C compute *and* framebuffer bandwidth both
+accelerated simultaneously and the render slice not moving 1ms, what's left of
+the slice is the **MicroPython per-draw-call dispatch** (arg unboxing, api
+wrapper bodies, call overhead between the cart's verbs and the kernel entry) —
+the same verdict #43/#63 reached on the T-Deck by counting calls, now re-proven
+on the P4 with hardware levers. Consequences:
+
+- **`moy_gfx` in IRAM is predicted null on the P4** (it accelerates the same C
+  that just measured as a minor fraction of the slice) — deprioritized, not worth
+  a build unless the T-Deck (SPI flush profile, different cache) wants it.
+- Levers that reduce **how often dispatch runs** get promoted: frameskip halves
+  the number of dispatched `_draw` calls per second, and the Lua/native tier
+  (#67) cheapens each one. Everything else render-side is noise.
+- Two build-cycle gotchas recorded: cmake `set_source_files_properties` does
+  NOT reach `moy_gfx` (directory-scoped; the linked object compiles in the
+  `micropython.elf` target's dir — verified via build.ninja; use an in-source
+  pragma), and the A/B was only trustworthy because the boot log printed which
+  memory region the canvas landed in.
+
+### The S3 counterpoint (2026-07-10) — the same levers land differently
+
+The P4 elimination does NOT transfer wholesale to the T-Deck. The 2026-07-10
+S3 build (master + the `-O3` pragma) **halved Battle City's render slice**
+(10.8–14.0 → 5.8–7.3ms; BC 34–37 → 50–61fps) — and BC's render is pure
+`moy_gfx` C (fill+map per DRAW2), so **the S3 render slice is compute-bound
+where the P4's is dispatch-bound** (slower PSRAM wait-states inside per-pixel
+loops + Xtensa vs RISC-V codegen). `-O3` therefore ships in the kernel
+(in-source pragma; harmless-null on P4) — clean drift-vs-pragma attribution
+still needs one A/B flash (#66). The **fb-in-internal-SRAM** lever measured
+**cannot engage** on the T-Deck: `fb=psram free-int=164KB need=420KB` (both
+ping-pong buffers + WiFi reserve); the guard + boot line stay self-documenting.
+
+### Shipped 2026-07-10 — frameskip (#77, both boards)
+
+Settings → FRAMESKIP (default OFF, persisted; P4 serial `skip 0|1`): a GAME's
+`_update`+input+audio tick every loop frame, `_draw`+composite+flush every
+SECOND. On-glass: P4 BC logic 55→60Hz / render locked 30 / busy 17.6→9.0ms;
+Letter Blitz logic 49→60Hz. Trade: 30Hz motion + doubled logic rate ⇒ ~2×
+alloc churn ⇒ GC collects ~2× as often. Default ON/OFF is an open product
+call — on the fast S3 build most carts sit near 60 skip-OFF.
+
 ### Open — API-preserving (do these first)
 
 | lever | targets | board | payoff | effort/risk |
 |---|---|---|---|---|
-| **`-Ofast`/`-O3` on `moy_gfx`** | render | both | Anemoia saw +14% from `-Ofast`+flags; ours modest | low — one cmake line, A/B |
-| **`moy_gfx` in IRAM** | render (flash-cache-miss stalls) | both | modest (loop is partly cache-resident) | low |
-| **game canvas → internal SRAM** | render + composite-read (PSRAM/DSI contention) | P4 (768KB internal) | plausibly significant — the emulator's whole trick | low-med (change one alloc; verify fit) |
-| **frameskip / decouple logic(60) from render(30)** | render + flush (halved) | both | large for heavy carts — the emulator's actual trick; keeps input/motion at 60 | med (loop restructure; a "feel" call) |
 | **dual-core: audio (+input) on core 1** | frees core 0 for logic+render | P4 (unwired), T-Deck (tried, reverted) | real parallelism | med |
 | **FPS chip off by default** | overhead | both | ~1ms + cleaner kid UX | trivial |
 | **render-overlap (composite ∥ next render)** | composite fully hidden | P4 | ~5ms (lock 60 on heaviest) | high — double game canvas + triple framebuffer + async cadence; tearing needs eyes-on-glass |
@@ -125,11 +176,12 @@ are estimates; anything not "shipped/reverted" needs on-glass measurement.
 
 Kids write ordinary code and shouldn't have to know the expert idioms. The path
 there is NOT hardware acceleration (the PPA dead-ended for everything but the
-composite) and NOT "faster sprites" (already fast). It is: **give kids more
-budget by shedding the fixed taxes** (frameskip, SRAM working set, compiler/IRAM,
-the composite overlaps) and **lower the interpreter cost** (Lua/native tier). The
-plain-ESP32 NES emulator is the proof the hardware has the grunt — the ceiling is
-the layers we put on top of it.
+composite), NOT "faster sprites" (already fast), and — as of the 2026-07-09 A/B —
+NOT compiler flags or SRAM placement either (both measured null; the render
+slice is dispatch). What's left is: **run the dispatch less often** (frameskip,
+the composite overlaps) and **make each dispatch cheaper** (Lua/native tier,
+#67). The plain-ESP32 NES emulator is the proof the hardware has the grunt — the
+ceiling is the layers we put on top of it.
 
 ## References
 
