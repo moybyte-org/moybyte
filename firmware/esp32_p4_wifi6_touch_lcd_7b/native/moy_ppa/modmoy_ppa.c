@@ -29,7 +29,12 @@ static mp_obj_t moy_ppa_init(void) {
     }
     ppa_client_config_t cfg = {
         .oper_type = PPA_OPERATION_SRM,
-        .max_pending_trans_num = 1,   // blocking transactions only
+        // A few pending slots: enough for the composite-overlap lever (double
+        // buffer + slack). Sprite BATCHING via the queue was measured a dead end
+        // -- 64x 16x16 queued = 4.57ms vs 0.70ms for the CPU (~10x vs spr_batch);
+        // per-op submit overhead dwarfs a tiny blit. The PPA is a SCALE
+        // accelerator (the upscale composite), not a sprite compositor.
+        .max_pending_trans_num = 3,
     };
     esp_err_t err = ppa_register_client(&cfg, &s_srm);
     if (err != ESP_OK) {
@@ -57,7 +62,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_deinit_obj, moy_ppa_deinit);
 //   scaled block (sw*scale x sh*scale) must land inside it (no clip yet -- the
 //   in-bounds game->window composite; cover-crop's negative offset is a
 //   follow-up that crops on the INPUT side).
-static mp_obj_t moy_ppa_blit_scale(size_t n_args, const mp_obj_t *args) {
+static mp_obj_t srm_blit(const mp_obj_t *args, ppa_trans_mode_t mode) {
     if (s_srm == NULL) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_ppa not init"));
     }
@@ -105,7 +110,7 @@ static mp_obj_t moy_ppa_blit_scale(size_t n_args, const mp_obj_t *args) {
         .rgb_swap = false,
         .byte_swap = false,
         .alpha_update_mode = PPA_ALPHA_NO_CHANGE,
-        .mode = PPA_TRANS_MODE_BLOCKING,
+        .mode = mode,
     };
     esp_err_t err = ppa_do_scale_rotate_mirror(s_srm, &op);
     if (err != ESP_OK) {
@@ -114,14 +119,30 @@ static mp_obj_t moy_ppa_blit_scale(size_t n_args, const mp_obj_t *args) {
     }
     return mp_const_none;
 }
+
+// blit_scale(...): blocking -- returns after the DMA + cache sync completes.
+static mp_obj_t moy_ppa_blit_scale(size_t n_args, const mp_obj_t *args) {
+    return srm_blit(args, PPA_TRANS_MODE_BLOCKING);
+}
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_blit_scale_obj, 9, 9,
                                            moy_ppa_blit_scale);
+
+// blit_async(...): non-blocking -- enqueues and returns (blocks only if the
+// pending queue is full). Drain with a following blocking blit_scale (FIFO), so
+// N-1 async + 1 blocking = a batch fence. Measures whether queued submission
+// beats the CPU batch blitter.
+static mp_obj_t moy_ppa_blit_async(size_t n_args, const mp_obj_t *args) {
+    return srm_blit(args, PPA_TRANS_MODE_NON_BLOCKING);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_blit_async_obj, 9, 9,
+                                           moy_ppa_blit_async);
 
 static const mp_rom_map_elem_t moy_ppa_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_ppa) },
     { MP_ROM_QSTR(MP_QSTR_init), MP_ROM_PTR(&moy_ppa_init_obj) },
     { MP_ROM_QSTR(MP_QSTR_deinit), MP_ROM_PTR(&moy_ppa_deinit_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_scale), MP_ROM_PTR(&moy_ppa_blit_scale_obj) },
+    { MP_ROM_QSTR(MP_QSTR_blit_async), MP_ROM_PTR(&moy_ppa_blit_async_obj) },
 };
 static MP_DEFINE_CONST_DICT(moy_ppa_module_globals, moy_ppa_module_globals_table);
 
