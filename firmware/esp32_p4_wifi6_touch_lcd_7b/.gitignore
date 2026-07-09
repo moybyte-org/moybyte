@@ -1,1 +1,14 @@
 .build/
+# Shared native modules staged from the T-Deck tree by build.sh (canonical:
+# firmware/lilygo_t_deck_plus_micropython/native/).
+native/.staged/
+# modules/ mixes P4-authored files (tracked, whitelisted below) with copies
+# staged at build time from runtime/ and the T-Deck modules tree (ignored --
+# the canonical sources live there) plus the generated carts_data.py.
+modules/*
+!modules/boot.py
+!modules/main.py
+!modules/moybyte_shell.py
+!modules/p4_display.py
+!modules/p4_input.py
+!modules/moy_runtime.py

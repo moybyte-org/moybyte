@@ -228,6 +228,11 @@ class Launcher:
             # short name (one line, truncated to the tile width: fw-wide cells)
             name = it["title"]
             maxc = w // fw
+            if not lay._base:
+                # DESKTOP density: the label pill may borrow most of the column gap
+                # before truncating -- "Star Catcher"/"Letter Blitz" fit whole on the
+                # big tiers instead of losing their last letters (P4 glass feedback).
+                maxc = (w + lay.icon_gap_x - 6 * lay.fs) // fw
             if len(name) > maxc:
                 name = name[:maxc]
             nx = x + (w - len(name) * fw) // 2

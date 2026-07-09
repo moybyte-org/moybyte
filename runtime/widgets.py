@@ -348,6 +348,12 @@ class Popup:
         # opening; it defaults to _POPUP_X so a Popup opened without an anchor (tests /
         # any future caller) still lands flush-left.
         self.anchor_x = _POPUP_X
+        # Geometry scale (#39/#58): the popup's rows hold fs-scaled petme128 text,
+        # so the panel/row/hit geometry must scale WITH the system font or the rows
+        # overlap (glass-found on the P4 at font scale 2). toggle_sysmenu sets this
+        # from _effective_font_scale(); 1 keeps every product byte-identical (the
+        # T-Deck / 320x240 baseline).
+        self.fs = 1
 
     # -- open/close ----------------------------------------------------------
     def show(self, items):
@@ -412,11 +418,13 @@ class Popup:
     def panel_rect(self):
         """(x, y, w, h) of the whole panel -- height grows with the row count. The
         left edge is `anchor_x` (set under the ≡ button by toggle_sysmenu, Stage 4);
-        defaults to _POPUP_X (flush left)."""
+        defaults to _POPUP_X (flush left). All geometry scales by `fs` (1 = the
+        byte-identical baseline)."""
+        fs = self.fs
         h = 0
         for it in self.items:
-            h += _POPUP_SEP_H if it[0] == "sep" else _POPUP_ROW_H
-        return (self.anchor_x, _POPUP_Y, _POPUP_W, h)
+            h += _POPUP_SEP_H * fs if it[0] == "sep" else _POPUP_ROW_H * fs
+        return (self.anchor_x, _POPUP_Y * fs, _POPUP_W * fs, h)
 
     def row_at(self, px, py):
         """Index of the row under (px, py), or None when outside the panel."""
@@ -425,9 +433,10 @@ class Popup:
         x, y, w, h = self.panel_rect()
         if not _in(px, py, (x, y, w, h)):
             return None
-        cy = _POPUP_Y
+        fs = self.fs
+        cy = _POPUP_Y * fs
         for i in range(len(self.items)):
-            rh = _POPUP_SEP_H if self.items[i][0] == "sep" else _POPUP_ROW_H
+            rh = _POPUP_SEP_H * fs if self.items[i][0] == "sep" else _POPUP_ROW_H * fs
             if cy <= py < cy + rh:
                 return i
             cy += rh

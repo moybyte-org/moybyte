@@ -124,6 +124,13 @@ class Wallpaper:
                     self._wp_update(dt)
                 sh = ws.layout.status_h
                 safe = sh if ws.screen in ("launcher", "settings") else 0
+                # Two-domain tiers (#39/#58): the wallpaper cart draws on the 320x240
+                # GAME canvas but status_h is SYSTEM-layout units (36px at font 2) --
+                # shifting 240 game rows by that cut the scene's bottom clean off
+                # (glass-found on the P4). The cover-crop composite + the bar drawn
+                # OVER the backdrop make the safe area moot there anyway.
+                if ws.sys_canvas is not ws.canvas:
+                    safe = 0
                 if safe:
                     # camera(0, -sh): a draw at world y lands at screen y + sh (below
                     # the strip); clip keeps the art inside the safe rows.
@@ -168,6 +175,13 @@ class Wallpaper:
         fb = getattr(gc, "flush_batch", None)
         if fb is not None:
             fb()
+        bc = getattr(sc, "blit_cover", None)
+        if bc is not None:
+            # A device system canvas (the P4, #58): native cover-crop blit in one
+            # moy_gfx call -- an RGB565 canvas has no index buffer for the loops
+            # below, and a per-frame Python expansion of ~600k px is unusable.
+            bc(gc)
+            return
         gbuf = getattr(gc, "buf", None)
         sbuf = getattr(sc, "buf", None)
         if gbuf is None:

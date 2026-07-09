@@ -1,0 +1,18 @@
+# Moybyte P4 (#58) partition table -- 32MB flash.
+#
+# The mainline default (partitions-4MiBplus.csv) caps the app at 0x1F0000
+# (~1.94MB); the frozen console overflows that. This table is OTA-SHAPED from
+# day one -- two 4MB app slots, mirroring the T-Deck's #53 layout -- so the
+# eventual P4 OTA lands without the partition-layout migration reflash the
+# T-Deck had to eat. The tail (~24MB from 0x810000) is deliberately UNLISTED:
+# mainline MicroPython auto-builds the vfs over the unallocated remainder
+# (the "plus" table behavior; this is where the bring-up's 31.5MB internal
+# filesystem came from). build.sh copies this file into ports/esp32/ at stage
+# time (CONFIG_PARTITION_TABLE_CUSTOM_FILENAME resolves project-relative).
+#
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x4000,
+otadata,  data, ota,     0xd000,   0x2000,
+phy_init, data, phy,     0xf000,   0x1000,
+ota_0,    app,  ota_0,   0x10000,  0x400000,
+ota_1,    app,  ota_1,   0x410000, 0x400000,

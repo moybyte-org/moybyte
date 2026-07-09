@@ -23,6 +23,9 @@
 #ifndef MALLOC_CAP_INTERNAL
 #define MALLOC_CAP_INTERNAL 0
 #endif
+#ifndef MALLOC_CAP_SPIRAM
+#define MALLOC_CAP_SPIRAM 0
+#endif
 #endif
 
 // malloc_dma(size, caps=DMA|INTERNAL) -> writable memoryview of `size` bytes.
@@ -62,6 +65,9 @@ static const mp_rom_map_elem_t moy_alloc_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_malloc_dma),      MP_ROM_PTR(&moy_alloc_malloc_dma_obj) },
     { MP_ROM_QSTR(MP_QSTR_MEMORY_DMA),      MP_ROM_INT(MALLOC_CAP_DMA) },
     { MP_ROM_QSTR(MP_QSTR_MEMORY_INTERNAL), MP_ROM_INT(MALLOC_CAP_INTERNAL) },
+    // MEMORY_SPIRAM mirrors lcd_bus's constant so a mainline build (P4 #58, no
+    // lcd_bus module) can request PSRAM layer buffers through moy_alloc alone.
+    { MP_ROM_QSTR(MP_QSTR_MEMORY_SPIRAM),   MP_ROM_INT(MALLOC_CAP_SPIRAM) },
 };
 
 static MP_DEFINE_CONST_DICT(moy_alloc_globals, moy_alloc_globals_table);

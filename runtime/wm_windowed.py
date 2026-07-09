@@ -55,14 +55,12 @@ nothing -- a rubber-band outline previews the new size).
 try:
     from wm import FullscreenStackWM
     from layers import Layer
-    from canvas import SystemCanvas
-    from palette import NAMES
-    from widgets import _Blit
+    from chrome import NAMES          # not palette: chrome is the device-safe home
+    from widgets import _Blit         # (runtime/palette.py needs colorsys -- host-only)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.wm import FullscreenStackWM
     from runtime.layers import Layer
-    from runtime.canvas import SystemCanvas
-    from runtime.palette import NAMES
+    from runtime.chrome import NAMES
     from runtime.widgets import _Blit
 
 
@@ -171,6 +169,32 @@ class _WindowStackLayer(Layer):
         return self.wm._route_pointer(px, py, click)
 
 
+class _PlayerWindowLayer(Layer):
+    """The QUIET-FRAME partial repaint (#58 P4 perf): while a game window is the
+    only thing animating, this stand-in draw stack repaints JUST the player
+    window (Player.tick + the scaled game blit + its chrome) into the back
+    buffer -- the rest of that buffer already holds pixel-identical desktop
+    content from two frames ago. On the P4's glass the full-desktop repaint
+    (wallpaper cart + cover-crop + launcher grid + bar) measured ~124ms/frame
+    around a 7ms game -- 7fps; this path drops the static ~85% of it. DRAW
+    ONLY: input routing keeps using the full memoized visible stack."""
+
+    id = "player_window"
+    domain = "system"
+
+    def __init__(self, wm):
+        self.wm = wm
+
+    def draw(self, dt):
+        wm = self.wm
+        win = wm._wins.get("desktop")
+        if win is not None and not win.minimized:
+            # full=False: the letterbox bezel + strip/shadow chrome are static and
+            # already present in BOTH ping-pong buffers (the two full paints any
+            # change costs); repainting them measured ~half the quiet frame.
+            wm._draw_player_window(win, True, wm._focus == "desktop", dt, full=False)
+
+
 class WindowedWM(FullscreenStackWM):
     """The windowed presentation of the back-stack (spec shell_ux_v1.md §3):
     launcher = the desktop root, every pushed process = a floating window, focus =
@@ -200,6 +224,18 @@ class WindowedWM(FullscreenStackWM):
         self._drag_armed = None       # (kind, ox, oy, wx, wy) press-in-strip origin
         self._resize = None           # (kind, ox, oy, ow, oh, cur_w, cur_h) in-flight
         self._ctx_switching = False   # reentrancy guard for internal _relayout runs
+        # Quiet-frame fast path (#58): the stand-in stacks + the ping-pong
+        # full-paint debt. After ANY full repaint the NEXT drawn frame must also be
+        # full -- a double-buffered panel alternates physical buffers, so one full
+        # paint only updates ONE of them; a partial frame on the other would swap
+        # in its pre-change desktop (visible flicker between old/new chrome).
+        # The FPS chip (sig bit 2, show_fps default ON) draws on the GAME canvas
+        # before the window blit, so it rides the quiet path too -- mirroring the
+        # full stack's [.., perf, windows] order.
+        _pw = _PlayerWindowLayer(self)
+        self._quiet_stack = [_pw]
+        self._quiet_stack_fps = [ws._perf_layer, _pw]
+        self._full_debt = 0
 
     # -- layout-context plumbing ----------------------------------------------
 
@@ -346,11 +382,15 @@ class WindowedWM(FullscreenStackWM):
         layout context for an app window; nothing for the player (its content is
         the game canvas, scaled/centered per draw).
 
-        On a RECORDING root canvas (the web console's CommandCanvas) the buffer
-        comes from root.new_layer() -- a RecordingLayer that rasterizes AND
-        records its own stream, so blit_strip ships the window to the browser as
-        a cached off-screen layer (the #54/#43 deflayer mechanism: a retained
-        background window blits by reference, only a live window re-ships)."""
+        The buffer is the ROOT canvas's own new_layer(), so every tier gets its
+        native window surface from one call: the host SystemCanvas returns a
+        font-scale-carrying SystemCanvas layer (what this method used to build by
+        hand), a RECORDING root (the web console's CommandCanvas) returns a
+        RecordingLayer that rasterizes AND records its own stream -- blit_strip
+        then ships the window to the browser as a cached off-screen layer (the
+        #54/#43 deflayer mechanism: a retained background window blits by
+        reference, only a live window re-ships) -- and the P4's device system
+        canvas (#58) returns an RGB565 layer sharing its native moy_gfx kernel."""
         if win.kind == "desktop":
             win.buf = None
             win.ctx = None
@@ -358,11 +398,7 @@ class WindowedWM(FullscreenStackWM):
         full = self._root_canvas
         cw = max(64, win.w - 2)
         ch = max(40, win.h - 2 - win.title_h)
-        if hasattr(full, "take_commands"):        # a recording (web) root canvas
-            win.buf = full.new_layer(cw, ch)
-        else:
-            win.buf = SystemCanvas(cw, ch, full.palette,
-                                   font_scale=getattr(full, "font_scale", 1))
+        win.buf = full.new_layer(cw, ch)
         win.ctx = self._make_ctx(win.buf)
 
     def _resize_window(self, win, w, h):
@@ -467,6 +503,38 @@ class WindowedWM(FullscreenStackWM):
         self._cache_content = content
         self._cache_gen = self.content_gen
         self._cache_sig = sig
+
+    # -- the quiet-frame draw stack (#58 P4 perf) -------------------------------
+
+    def draw_stack(self):
+        """The frame router's draw list. QUIET frames -- a running game window is
+        the only animation: no dirty flag, no pointer change, no cursor, no
+        overlays/splash, no drag/resize in flight -- return the one-layer partial
+        stack (just the player window; see _PlayerWindowLayer). Everything else
+        falls through to the full memoized stack, and every full paint leaves a
+        one-frame debt so BOTH ping-pong buffers carry the change before partial
+        frames resume."""
+        ws = self.ws
+        self._ensure_stack()
+        # NOTE deliberately NO pointer-state condition: a finger playing a touch
+        # cart moves the (hidden) pointer every frame, and the desktop shows no
+        # hover feedback while the cursor is hidden -- real UI reactions all set
+        # ws._dirty. Requiring a still pointer would forfeit the fast path for
+        # exactly the games that need it.
+        quiet = (not ws._dirty
+                 and "desktop" in self._wins
+                 and (self._cache_sig & ~2) == 0    # FPS chip (bit 2) rides along
+                 and ws.cart_error is None
+                 and self._drag is None and self._drag_armed is None
+                 and self._resize is None
+                 and not getattr(ws.pointer, "visible", False))
+        if quiet and self._full_debt <= 0:
+            return self._quiet_stack_fps if (self._cache_sig & 2) else self._quiet_stack
+        if quiet:
+            self._full_debt -= 1      # paying the second-buffer debt: full paint
+        else:
+            self._full_debt = 1       # a change painted: the OTHER buffer owes one
+        return self._cache_draw
 
     # -- game viewport == the player window (#39 mapping) ----------------------
 
@@ -602,7 +670,7 @@ class WindowedWM(FullscreenStackWM):
         self._root_canvas.blit_strip(win.buf, win.x + 1, win.y + 1 + win.title_h)
         self._win_chrome(win, focused)
 
-    def _draw_player_window(self, win, running, focused, dt):
+    def _draw_player_window(self, win, running, focused, dt, full=True):
         ws = self.ws
         if running:
             # The Player ticks while it's the STACK top (the running process),
@@ -613,17 +681,26 @@ class WindowedWM(FullscreenStackWM):
         if fb is not None:
             fb()
         cx, cy, cw, ch = win.content_rect()
-        self._root_canvas.rect(cx, cy, cw, ch, _SHADOW)   # letterbox bezel
+        if full:
+            self._root_canvas.rect(cx, cy, cw, ch, _SHADOW)   # letterbox bezel
         ox, oy, scale = self._player_view(win)
         self._blit_game(self._root_canvas, gc, ox, oy, scale)
-        self._win_chrome(win, focused)
+        if full:
+            self._win_chrome(win, focused)
 
     def _blit_game(self, sc, gc, ox, oy, scale):
         """Integer-scale the 320x240 game canvas into the desktop at (ox, oy) --
-        the windowed sibling of the parent's centered composite_game. On a
-        RECORDING desktop (the web console) there is no framebuffer to copy into:
-        ship the game frame as ONE scaled self-contained spr instead (the same
-        move as FullscreenStackWM._composite_via_spr)."""
+        the windowed sibling of the parent's centered composite_game. A device
+        system canvas (the P4, #58) exposes a native blit_game (RGB565 scaled
+        blit in one moy_gfx call) -- the Python index loops below can't run there
+        (no index buffer) and would be far too slow anyway. On a RECORDING
+        desktop (the web console) there is no framebuffer to copy into: ship the
+        game frame as ONE scaled self-contained spr instead (the same move as
+        FullscreenStackWM._composite_via_spr)."""
+        bg = getattr(sc, "blit_game", None)
+        if bg is not None:
+            bg(gc, ox, oy, scale)
+            return
         gbuf = getattr(gc, "buf", None)
         sbuf = getattr(sc, "buf", None)
         if gbuf is None:
