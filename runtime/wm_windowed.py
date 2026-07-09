@@ -195,6 +195,50 @@ class _PlayerWindowLayer(Layer):
             wm._draw_player_window(win, True, wm._focus == "desktop", dt, full=False)
 
 
+class _BackdropLayer(Layer):
+    """The desktop root (launcher wallpaper + cart grid) with a DRAG cache (#58
+    drag perf). Stands in for ws.launcher_layer in the windowed draw stack and
+    draws it verbatim EXCEPT during a drag/resize, when the backdrop is invariant
+    -- only the dragged window's POSITION changes, so the wallpaper cover-crop +
+    grid render the same pixels every frame. The first drag frame renders the
+    launcher and CAPTURES the composite; every later drag frame BLITS the cache
+    instead, turning a full wallpaper+grid re-render into one full-screen copy.
+
+    Correctness: this layer precedes _win_layer in the z-order, so the capture
+    snapshots the launcher backdrop with NO windows on it; each drag frame blits
+    that clean backdrop (erasing the dragged window's old position for free) and
+    _win_layer then stamps the windows at their current spots. Double-buffer-safe
+    -- the cache is its own off-screen buffer, re-blitted into whichever ping-pong
+    buffer the frame targets. Input forwards to the launcher unchanged so the
+    desktop root stays interactive beneath the windows."""
+
+    id = "launcher"
+    domain = "system"
+
+    def __init__(self, wm):
+        self.wm = wm
+        self.ws = wm.ws
+
+    def draw(self, dt):
+        wm = self.wm
+        launcher = self.ws.launcher_layer
+        if (wm._drag is None and wm._resize is None) or wm._backdrop_disabled:
+            wm._backdrop_valid = False        # live: no drag, always re-render
+            launcher.draw(dt)
+            return
+        if wm._backdrop_valid:
+            wm._blit_backdrop_cache()
+            return
+        launcher.draw(dt)                     # first drag frame: render + snapshot
+        wm._capture_backdrop()
+
+    def handle_input(self, i):
+        return self.ws.launcher_layer.handle_input(i)
+
+    def handle_pointer(self, px, py, click):
+        return self.ws.launcher_layer.handle_pointer(px, py, click)
+
+
 class WindowedWM(FullscreenStackWM):
     """The windowed presentation of the back-stack (spec shell_ux_v1.md §3):
     launcher = the desktop root, every pushed process = a floating window, focus =
@@ -236,6 +280,15 @@ class WindowedWM(FullscreenStackWM):
         self._quiet_stack = [_pw]
         self._quiet_stack_fps = [ws._perf_layer, _pw]
         self._full_debt = 0
+        # Retained desktop-backdrop cache (#58 drag perf): during a DRAG/RESIZE the
+        # wallpaper + cart grid are invariant, so the first such frame captures
+        # their composite and every later one blits it (see _BackdropLayer). Its
+        # own full-screen off-screen buffer, allocated lazily on the first drag and
+        # dropped on relayout (the size can change with the font scale).
+        self._backdrop_layer = _BackdropLayer(self)
+        self._backdrop = None
+        self._backdrop_valid = False
+        self._backdrop_disabled = False   # A/B measurement knob (P4 remote `cache`)
 
     # -- layout-context plumbing ----------------------------------------------
 
@@ -257,6 +310,8 @@ class WindowedWM(FullscreenStackWM):
         self._order = []
         self._focus = None
         self.content_gen += 1
+        self._backdrop = None             # size may have changed: drop the drag cache
+        self._backdrop_valid = False
 
     def _install(self, ctx):
         ctx.install(self.ws)
@@ -492,7 +547,7 @@ class WindowedWM(FullscreenStackWM):
         if sig & 128:
             overlays.append(ws._about_layer)
         overlays.append(ws._cursor_layer)
-        base = [ws.launcher_layer] + pre + [self._win_layer]
+        base = [self._backdrop_layer] + pre + [self._win_layer]
         draw_base = [ws._splash_layer] if (sig & 1) else base
         self._cache_overlay = overlays
         self._cache_visible = base + overlays
@@ -535,6 +590,37 @@ class WindowedWM(FullscreenStackWM):
         else:
             self._full_debt = 1       # a change painted: the OTHER buffer owes one
         return self._cache_draw
+
+    # -- the drag backdrop cache (#58 drag perf) -------------------------------
+
+    def _ensure_backdrop(self):
+        """The full-screen off-screen cache buffer (lazily allocated, re-made if
+        the root canvas size changed under it)."""
+        sc = self._root_canvas
+        cache = self._backdrop
+        if cache is None or cache.w != sc.w or cache.h != sc.h:
+            cache = self._backdrop = sc.new_layer(sc.w, sc.h)
+            self._backdrop_valid = False
+        return cache
+
+    def _capture_backdrop(self):
+        """Snapshot the just-rendered launcher backdrop -- the root canvas with NO
+        windows on it yet (_BackdropLayer precedes _win_layer) -- into the cache:
+        one opaque full-frame copy via the cache canvas's own blit_strip reading
+        the root canvas AS a source layer (native moy_gfx.blit565 on the device,
+        host index slice otherwise -- the same kernel both directions)."""
+        try:
+            cache = self._ensure_backdrop()
+            cache.blit_strip(self._root_canvas, 0, 0)
+            self._backdrop_valid = True
+        except Exception:  # noqa: BLE001 -- a failed capture (OOM) forfeits the
+            self._backdrop_valid = False   # cache; the drag just re-renders live
+            self._backdrop = None
+
+    def _blit_backdrop_cache(self):
+        """Stamp the cached backdrop into the current (ping-pong) back buffer."""
+        if self._backdrop is not None:
+            self._root_canvas.blit_strip(self._backdrop, 0, 0)
 
     # -- game viewport == the player window (#39 mapping) ----------------------
 
@@ -659,7 +745,15 @@ class WindowedWM(FullscreenStackWM):
         return (win.x + win.w - g, win.y + win.h - g, g, g)
 
     def _draw_app_window(self, win, focused, dt):
-        if focused:
+        # Freeze the content render while THIS window is being dragged/resized
+        # (#58 drag perf): its buffer can't change under a drag (no input reaches
+        # the content, and a resize only rubber-bands until release), so re-running
+        # the editor-tab layout every drag frame is pure waste -- blit the retained
+        # buffer at the new position instead. A drag of ANOTHER window still lets
+        # this one render live (it's not the one moving).
+        moving = ((self._drag is not None and self._drag[0] == win.kind)
+                  or (self._resize is not None and self._resize[0] == win.kind))
+        if focused and not moving:
             # Live: render the focused app into its buffer at the window's layout.
             self._install(win.ctx)
             try:

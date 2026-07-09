@@ -265,6 +265,7 @@ def run_desktop(fps_cap=60):
     frame_ms = 1000 // fps_cap
     last = _ticks_ms()
     _backlight_on = False          # dark until the first composed frame (#45)
+    _drag_script = None            # remote `drag` playback state (see below)
     # Perf sampler (#58 fps-ledger groundwork): serial is free on this board, so
     # print a PERF line every ~2s -- drawn-fps, average busy loop ms, and the
     # console's own draw/flush/logic/render/chrome EMAs (filled because
@@ -315,6 +316,84 @@ def run_desktop(fps_cap=60):
                     print("REMOTE tap %d %d" % r)
                 else:
                     print("REMOTE ? %s" % line)
+            if parts and parts[0] == "run":
+                # `run <name>`: select the first cart whose title matches and RUN
+                # it (the launcher tap path) -- deterministic game launch without
+                # tile-hunting, for measuring the play + game-window-drag paths.
+                name = (" ".join(parts[1:])).lower() if len(parts) > 1 else ""
+                items = getattr(ws.launcher, "items", [])
+                idx = None
+                for i in range(len(items)):
+                    it = items[i]
+                    if not it.get("path"):
+                        continue
+                    t = str(it.get("title") or "").lower()
+                    if not name:
+                        idx = i
+                        break
+                    if name in t:
+                        idx = i
+                        break
+                if idx is not None:
+                    ws.launcher.sel = idx
+                    ws.launch_selected()
+                    print("REMOTE run %s" % items[idx].get("title"))
+                else:
+                    print("REMOTE run: no cart match")
+            if parts and parts[0] == "cache":
+                # `cache 0|1`: A/B the drag backdrop cache on glass (1=on).
+                on = not (len(parts) == 2 and parts[1] == "0")
+                ws.wm._backdrop_disabled = not on
+                print("REMOTE cache %s" % ("on" if on else "off"))
+            if parts and parts[0] == "open":
+                # `open settings|picker`: pop an app window deterministically (no
+                # tile-hunting) so a drag can be measured against a known window.
+                fn = {"settings": getattr(ws, "open_settings", None),
+                      "picker": getattr(ws, "open_picker", None)}.get(
+                          parts[1] if len(parts) > 1 else "")
+                if fn is not None:
+                    fn()
+                    print("REMOTE open %s" % parts[1])
+                else:
+                    print("REMOTE open ? %s" % line)
+            if parts and parts[0] == "drag":
+                # `drag [frames]`: grab the TOP window's title strip and oscillate
+                # it for `frames` frames (default 120), so the PERF sampler reports
+                # DRAG-time fps -- the backdrop-cache lever's target. No window open
+                # -> a no-op note.
+                order = getattr(ws.wm, "_order", None) or []
+                if order:
+                    win = ws.wm._wins[order[-1]]
+                    n = 120
+                    if len(parts) == 2:
+                        try:
+                            n = max(8, int(parts[1]))
+                        except ValueError:
+                            pass
+                    _drag_script = {"i": 0, "n": n,
+                                    "cx": win.x + 30,
+                                    "cy": win.y + max(6, win.title_h // 2)}
+                    print("REMOTE drag win=%s cx=%d cy=%d frames=%d"
+                          % (order[-1], _drag_script["cx"], _drag_script["cy"], n))
+                else:
+                    print("REMOTE drag: no window open")
+        if _drag_script is not None:
+            s = _drag_script
+            i = s["i"]
+            if i >= s["n"]:
+                pointer.down = False
+                _drag_script = None
+                print("REMOTE drag done")
+            else:
+                # Triangle wave around the grab point: continuous movement so the
+                # drag stays engaged and every frame is dirty (the drag path).
+                t = i % 40
+                tri = t if t < 20 else 40 - t          # 0..20..0
+                off = 0 if i == 0 else (tri - 10) * 6   # -60..+60, 0 on the arm frame
+                pointer.place(s["cx"] + off, s["cy"])
+                pointer.down = True
+                click = (i == 0)                        # frame 0 arms the drag
+                s["i"] = i + 1
         pointer.click = click
         pointer.tick(now)
         game.sync_back()           # off-screen: contract no-op
