@@ -116,6 +116,24 @@ def _err_text(exc):
     return (name + ": " + msg) if msg else name
 
 
+def _safe_len(obj):
+    try:
+        return len(obj)
+    except Exception:  # noqa: BLE001
+        return -1
+
+
+def _heap_stats():
+    """Return (free, alloc) for MicroPython, (-1, -1) on host/unsupported builds."""
+    try:
+        import gc
+        free = gc.mem_free()
+        alloc = gc.mem_alloc()
+        return free, alloc
+    except Exception:  # noqa: BLE001
+        return -1, -1
+
+
 def _exc_cart_line(exc, fname="<cart>"):
     """Best-effort: the 1-based source line INSIDE the cart where `exc` was
     raised, or None -- so a runtime crash can drop the kid on the offending line
@@ -233,6 +251,14 @@ class Player:
         self._is_tool = False
         self._restore_bg = None       # #63: the api's declared-background restore hook
         self._native_ins = None       # #67 spike: nativize's inserted-line map (crash-line fix)
+        # Diagnostics for repeat-run regressions (#66 follow-up): one line on cart
+        # start and rate-limited slow-logic lines while PERF DIAG is on. Kept here
+        # instead of moy_runtime so it tracks the actual lifecycle without touching
+        # the device loop.
+        self._run_seq = 0
+        self._start_diag = None       # (reclaim,audio,api,compile,exec,init,total,free0,free1,alloc0,alloc1)
+        self._slow_logic_next = 0
+        self._native_fail = None      # reason for bytecode fallback, when auto-native fails
 
     def _map_crash_line(self, line):
         """Map a crash line reported against the NATIVIZED source back to the
@@ -256,6 +282,77 @@ class Player:
         self._home_held_since = 0
         self._home_holding = False
 
+    def _diag_enabled(self):
+        """Only emit the extra lifecycle/profiling lines in measurement mode."""
+        try:
+            return bool(getattr(self.ws, "diag_live", False) or getattr(self.ws, "perf_hud", False))
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _audio_diag(self):
+        try:
+            au = getattr(self.ws, "audio", None)
+            fn = getattr(au, "diag_state", None)
+            if fn is None:
+                return "audio=na"
+            st = fn()
+            if st is None:
+                return "audio=na"
+            return ("audio(seq=%d core1=%d reused=%d running=%d mask=%d committed=%d)"
+                    % (st[0], st[1], st[2], st[3], st[4], st[5]))
+        except Exception:  # noqa: BLE001
+            return "audio=err"
+
+    def _cart_state_diag(self):
+        """Small generic namespace snapshot. The Sakura fields are intentional:
+        they prove whether the repeated-open drop is cart-state growth or runtime
+        overhead while staying harmless for every other cart."""
+        ns = self.ns or {}
+        petals = _safe_len(ns.get("petals"))
+        sin = _safe_len(ns.get("SIN"))
+        lay = 1 if ns.get("lay") is not None else 0
+        return "ns=%d petals=%d sin=%d lay=%d native=%d" % (
+            _safe_len(ns), petals, sin, lay, 1 if self._native_ins else 0)
+
+    def _print_run_diag(self, tag, extra=""):
+        if not self._diag_enabled():
+            return
+        try:
+            cart = self.ws.cart or {}
+            name = str(cart.get("title") or cart.get("path") or "?")
+            typ = str(cart.get("type") or "?")
+            d = self._start_diag
+            if d is None:
+                phases = ""
+            else:
+                phases = (" phases(reclaim=%d audio=%d api=%d compile=%d exec=%d "
+                          "init=%d total=%d) heap(free=%d->%d alloc=%d->%d)"
+                          % (d[0], d[1], d[2], d[3], d[4], d[5], d[6],
+                             d[7], d[8], d[9], d[10]))
+            if self._native_fail:
+                phases += " nfail=%s" % str(self._native_fail).replace(" ", "_")
+            if extra:
+                extra = " " + extra
+            print("Moybyte %d %s cart=%s type=%s run=%d %s %s%s%s"
+                  % (_ticks_ms(), tag, name.replace(" ", "_"), typ, self._run_seq,
+                     self._cart_state_diag(), self._audio_diag(), phases, extra))
+        except Exception:  # noqa: BLE001 -- diagnostics must never affect play
+            pass
+
+    def _maybe_diag_slow_logic(self, upd_ms, render_ms, audio_ms):
+        if upd_ms < 10 or not self._diag_enabled():
+            return
+        now = _ticks_ms()
+        if self._slow_logic_next and _ticks_diff(now, self._slow_logic_next) < 0:
+            return
+        self._slow_logic_next = now + 2000
+        free, alloc = _heap_stats()
+        self._print_run_diag(
+            "SLOWLOGIC",
+            "upd=%d render=%d audio=%d heap(free=%d alloc=%d)"
+            % (upd_ms, render_ms, audio_ms, free, alloc),
+        )
+
     def start(self, project):
         """Start (or re-run) `project`'s cart under make_api. Resets the canvas draw
         state, stamps the cart clock, gates `wifi` by the manifest permission, execs
@@ -263,8 +360,12 @@ class Player:
         crash_line (returned False) so the caller opens to the desktop and frame()
         paints the on-canvas panel instead of hanging. Returns True iff it started."""
         ws = self.ws
+        self._run_seq += 1
+        t0 = _ticks_ms()
+        h0 = _heap_stats()
         ws._dirty = True               # a (re)started cart paints its first frame (#44)
         self._reset_exit_state()       # a fresh run drops any half-done exit gesture
+        self._slow_logic_next = 0
         # #75: cache the bar-visibility-by-type rule for this run (see __init__).
         cart = project.cart
         self._is_tool = (cart is not None
@@ -275,7 +376,10 @@ class Player:
         rl = getattr(ws.canvas, "reclaim_layers", None)
         if rl is not None:
             rl("cart")
+        t_reclaim = _ticks_diff(_ticks_ms(), t0)
+        t1 = _ticks_ms()
         project._build_audio()
+        t_audio = _ticks_diff(_ticks_ms(), t1)
         # Reset the canvas draw state (camera/clip/pal/palt, #11) so a fresh cart run
         # never inherits a previous cart's clip rect or palette swap.
         rs = getattr(ws.canvas, "reset_state", None)
@@ -290,8 +394,10 @@ class Player:
         # gets NO `wifi` name (sandbox preserved). make_api injects `wifi` into the
         # cart namespace iff the backend it receives is non-None.
         wifi = ws.wifi if ws._cart_has_perm("network") else None
+        t2 = _ticks_ms()
         ns = ws.make_api(ws.canvas, ws.input, project.config, project.sheet,
                          ws.audio, project.tilemap, project.pmem, wifi, project.images)
+        t_api = _ticks_diff(_ticks_ms(), t2)
         # Compile with the "<cart>" filename so a runtime traceback carries cart
         # line numbers (_exc_cart_line reads them to mark the bad line). #67 spike:
         # prefer the AUTO-NATIVE rewrite (machine code per top-level def) when the
@@ -300,22 +406,32 @@ class Player:
         # inserted-line map keeps crash lines exact (#24) either way.
         src = project.cart["src"]
         self._native_ins = None
+        self._native_fail = None
         code = None
+        t3 = _ticks_ms()
         if NATIVE_CARTS:
             nsrc, ins = _nativize(src)
             ns["micropython"] = _micropython   # the decorator's global, no import line
             try:
                 code = compile(nsrc, "<cart>", "exec")
                 self._native_ins = ins
-            except Exception:  # noqa: BLE001 -- emitter limitation -> bytecode path
+            except Exception as exc:  # noqa: BLE001 -- emitter limitation -> bytecode path
+                self._native_fail = _err_text(exc)
                 code = None
+        t_compile_native = _ticks_diff(_ticks_ms(), t3)
         try:
+            t4 = _ticks_ms()
             if code is None:
                 # The kid's own syntax error surfaces HERE -> the friendly panel.
                 code = compile(src, "<cart>", "exec")
+            t_compile = t_compile_native + _ticks_diff(_ticks_ms(), t4)
+            t5 = _ticks_ms()
             exec(code, ns)
+            t_exec = _ticks_diff(_ticks_ms(), t5)
+            t6 = _ticks_ms()
             if ns.get("_init"):
                 ns["_init"]()
+            t_init = _ticks_diff(_ticks_ms(), t6)
         except Exception as exc:  # noqa: BLE001
             # The device's native run loop starves USB, so a print() never reaches
             # serial -- stash the failure so tick() can paint an on-canvas panel.
@@ -324,6 +440,15 @@ class Player:
             # become the exact silent device hang the panel exists to prevent.
             self.cart_error = _err_text(exc)
             self.crash_line = self._map_crash_line(_exc_cart_line(exc))
+            h1 = _heap_stats()
+            self.ns = ns
+            self._start_diag = (t_reclaim, t_audio, t_api,
+                                locals().get("t_compile", t_compile_native),
+                                locals().get("t_exec", -1),
+                                locals().get("t_init", -1),
+                                _ticks_diff(_ticks_ms(), t0),
+                                h0[0], h1[0], h0[1], h1[1])
+            self._print_run_diag("RUNERR", "err=%s" % self.cart_error)
             print("Moybyte cart error:", self.cart_error)
             return False
         self.cart_error = None
@@ -334,6 +459,11 @@ class Player:
         # Declared background (#63): the api's frame-start restore hook. Cached here so
         # tick() pays one attribute read; it early-outs when the cart declared nothing.
         self._restore_bg = ns.get("_moy_restore_bg")
+        h1 = _heap_stats()
+        self._start_diag = (t_reclaim, t_audio, t_api, t_compile, t_exec, t_init,
+                            _ticks_diff(_ticks_ms(), t0),
+                            h0[0], h1[0], h0[1], h1[1])
+        self._print_run_diag("RUNSTART")
         return True
 
     def tick(self, dt):
@@ -370,9 +500,13 @@ class Player:
                 if ws.audio is not None:
                     ws.audio.tick(dt)      # advance/feed playback (#16)
                 if _perf:
-                    ws._pf_upd = _ticks_diff(_tm, _ts)    # cart _update -> game LOGIC
-                    ws._pf_cart = _ticks_diff(_td, _tm)   # cart _draw -> RENDERING
-                    ws._pf_audio = _ticks_diff(_ticks_ms(), _td)  # audio.tick (mixer feed)
+                    upd = _ticks_diff(_tm, _ts)           # cart _update -> game LOGIC
+                    cart = _ticks_diff(_td, _tm)          # cart _draw -> RENDERING
+                    aud = _ticks_diff(_ticks_ms(), _td)   # audio.tick (mixer feed)
+                    ws._pf_upd = upd
+                    ws._pf_cart = cart
+                    ws._pf_audio = aud
+                    self._maybe_diag_slow_logic(upd, cart, aud)
             except Exception as exc:  # noqa: BLE001
                 # A cart that raises mid-frame must NOT escape the loop (the
                 # device would hang silently). Capture it, stop running the
