@@ -28,7 +28,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: setup test run-example run-headless compile-blocks site-gifs doctor check-portable pack-example export-lilygo-example device-doctor device-port firmware-bundle-lilygo firmware-build-lilygo firmware-build-lilygo-micropython firmware-sim-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-stage-xiao-zero firmware-upload-lilygo firmware-monitor-lilygo firmware-smoke-check-lilygo firmware-smoke-lilygo ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install sync-issues
+.PHONY: setup test run-example run-headless compile-blocks site-gifs doctor check-portable pack-example export-lilygo-example device-doctor device-port firmware-bundle-lilygo firmware-build-lilygo firmware-build-lilygo-micropython firmware-sim-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-build-p4 firmware-flash-p4 firmware-monitor-p4 firmware-stage-xiao-zero firmware-upload-lilygo firmware-monitor-lilygo firmware-smoke-check-lilygo firmware-smoke-lilygo ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install sync-issues
 
 setup:
 	$(SYSTEM_PYTHON) -m venv --system-site-packages $(VENV)
@@ -128,7 +128,7 @@ firmware-flash-lilygo-micropython-no-reset:
 
 firmware-flash-lilygo-micropython-full:
 	test -n "$(PORT)"
-	$(IDF_PYTHON) tools/esptool_no_modem.py --chip esp32s3 -p $(PORT) -b 460800 --before no_reset --after hard_reset write_flash 0x0 $(MPY_FULL_BIN)
+	$(IDF_PYTHON) tools/esptool_no_modem.py --chip esp32s3 -p $(PORT) -b 460800 --before default_reset --after hard_reset write_flash 0x0 $(MPY_FULL_BIN)
 
 firmware-flash-lilygo-micropython-full-erase:
 	test -n "$(PORT)"
@@ -141,6 +141,23 @@ firmware-run-lilygo-micropython:
 firmware-monitor-lilygo-micropython:
 	test -n "$(PORT)"
 	$(IDF_PYTHON) -m serial.tools.miniterm $(PORT) 115200
+
+# ESP32-P4 (Waveshare 7B, #58): mainline-MicroPython build via the board dir's
+# build.sh -> dist/p4/moybyte_p4.bin, flashed at 0x2000 (the P4's app offset).
+# Serial = CH343 (no native-takeover starvation, REPL stays alive), so plain
+# esptool auto-reset works; esptool comes from the project venv.
+P4_BIN ?= dist/p4/moybyte_p4.bin
+
+firmware-build-p4:
+	firmware/esp32_p4_wifi6_touch_lcd_7b/build.sh
+
+firmware-flash-p4:
+	test -n "$(PORT)"
+	$(PYTHON) -m esptool --chip esp32p4 --port $(PORT) --baud 921600 write_flash 0x2000 $(P4_BIN)
+
+firmware-monitor-p4:
+	test -n "$(PORT)"
+	$(PYTHON) -m serial.tools.miniterm $(PORT) 115200
 
 # MoyByte Zero (Seeed XIAO ESP32-S3): pure-Python, no native build. One-time flash of stock
 # MicroPython is documented in firmware/seeed_xiao_esp32s3_zero/README.md; this stages the

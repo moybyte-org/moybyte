@@ -59,10 +59,13 @@ dumps raw/mapped GT911 samples for re-calibrating the `p4_input` knobs.
 ## Build / flash
 
 ```bash
-firmware/esp32_p4_wifi6_touch_lcd_7b/build.sh     # -> dist/p4/moybyte_p4.bin
-.venv/bin/python -m esptool --port /dev/ttyACM0 --baud 921600 \
-    write_flash 0x2000 dist/p4/moybyte_p4.bin      # P4 flashes at 0x2000
+make firmware-build-p4                             # -> dist/p4/moybyte_p4.bin
+make firmware-flash-p4 PORT=/dev/ttyACM0           # esptool @0x2000 (the P4 app offset)
+make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
 ```
+
+(Raw equivalent: `.venv/bin/python -m esptool --chip esp32p4 --port /dev/ttyACM0
+--baud 921600 write_flash 0x2000 dist/p4/moybyte_p4.bin`.)
 
 - `build.sh` clones MicroPython v1.28.0 into `.build/`, reuses the T-Deck
   build's ESP-IDF v5.5.1 checkout when present (clones its own otherwise),
