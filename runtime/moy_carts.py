@@ -36,6 +36,7 @@ IMAGES_DIR = "images"
 IMAGE_EXT = ".moyimg"
 ARTWORK_NAME = "artwork.moyimg"
 NOTES_NAME = "notes.json"
+DECK_NAME = "deck.json"
 
 # A single shared sprite sheet lives alongside the carts dir (one level up, so
 # it sits beside every <name>.moy folder). Tiles painted here are reusable
@@ -279,6 +280,19 @@ def load_artwork(root=CARTS_DIR):
 def save_artwork(text, root=CARTS_DIR):
     ensure_dirs(root)
     _write_atomic(artwork_path(root), text)
+
+
+def load_deck(cart):
+    """The Storybook deck (a `moydeck-v1` JSON blob) inside a story cart's
+    folder, or None for carts that were never decks (#78)."""
+    try:
+        return _read(cart["path"] + "/" + DECK_NAME)
+    except OSError:
+        return None
+
+
+def save_deck(cart, text):
+    _write_atomic(cart["path"] + "/" + DECK_NAME, text)
 
 
 def notes_path(root=CARTS_DIR):

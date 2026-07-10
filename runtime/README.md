@@ -66,7 +66,11 @@ Content + tooling:
   live wallpaper carts, and panel themes.
   `writer.moy` (title: Writer) opens the kid notebook (`runtime/writer_app.py`):
   a notes list + ruled text page over the shared `CodeEditor` core, autosaving
-  one crash-safe `notes.json` beside `artwork.moyimg`. Each seed
+  one crash-safe `notes.json` beside `artwork.moyimg`.
+  `storybook.moy` (title: Storybook, #78) opens `runtime/storybook_app.py`:
+  decks of art+words pages that COMPILE to real story carts (`deck.json` + a
+  generated, readable `main.py`; Paint art attaches per page; hand-editing the
+  code past the deck graduates the story to read-only-in-Storybook). Each seed
   carries its own `config` defaults and edit schema where applicable.
 - `tools/simulate_desktop.py` — run the workstation (or a single cart) on the host.
 - `tests/test_v04_userland.py` — canvas, cartridge, desktop, launcher, cards tests.
