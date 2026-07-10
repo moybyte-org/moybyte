@@ -287,7 +287,7 @@ class Player:
         repeat-run fragmentation fix, glass-fingerprinted 2026-07-10): the ns
         used to linger until the NEXT cart's start() -- go_home() nulled ws.ns
         but never _update/_draw, whose function objects close over the ns dict
-        and keep the whole ~300-400KB world alive at the launcher. The next
+        and keep the whole ~300-400KB world alive at the home screen. The next
         cart then BUILT ITS WORLD AROUND the lingering one; when that finally
         freed, the new world sat in a minefield of holes, and MicroPython's gc
         never compacts -- measured: sakura logic 6.5ms fresh vs 13-14ms after
