@@ -1560,6 +1560,10 @@ class Workstation:
         (screen -> "menu"; editor_app.tab is preserved -> the SAME tab), proving the
         Player has zero knowledge of who launched it. Any other caller (the launcher
         home root, or None) pops all the way home."""
+        # Drop the dead run's world NOW (#66 repeat-run fragmentation fix): the
+        # next cart must build into a compact heap, not around this one's corpse
+        # (see Player.release_world's docstring for the measured mechanism).
+        self.player.release_world()
         # Windowed WM (#73): closing the playtest must never truncate unrelated
         # windows stacked above it (e.g. Settings) -- the WM removes ONLY the
         # player and refocuses the caller's window. No hook on the fullscreen WM.
@@ -2304,7 +2308,9 @@ class Workstation:
         self.block_ui.reset()
         self.wm.goto("launcher")       # Stage 6e: pop back to the launcher root
         self.cart = None
-        self.ns = None
+        # #66 fragmentation fix: ns = None alone kept the world alive through
+        # player._update's closure; release clears the dict in place + collects.
+        self.player.release_world()
         self.cart_error = None
         self.save_status = None
         self.show_achievements = False

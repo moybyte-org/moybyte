@@ -114,3 +114,35 @@ def test_frameskip_crash_frame_still_renders_the_panel(tmp_path):
     ws._dirty = True
     ws.frame(1 / 60)                             # crashed cart: gate is OFF ->
     assert ws._frames_drawn - drawn0 == 1        # the error panel paints every frame
+
+
+def test_release_world_on_exit_drops_the_cart_world(tmp_path):
+    """#66 repeat-run fragmentation fix: exiting a run releases the WORLD at
+    exit (ns cleared in place + _update/_draw dropped), so the next cart builds
+    into a compact heap instead of around the previous world's corpse. go_home's
+    old `ns = None` kept everything alive through _update's closure."""
+    import gc
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_game(ws)
+    for _ in range(10):
+        ws.frame(1 / 60)
+    assert ws.player._update is not None
+    ns = ws.player.ns
+    assert ns and "_update" in ns
+    ws.go_home()
+    # The run's world is gone: hooks nulled, the ns dict itself emptied (so any
+    # lingering function object no longer pins its globals).
+    assert ws.player._update is None and ws.player._draw is None
+    assert ws.player.ns is None
+    assert len(ns) == 0
+    gc.collect()
+    # And the hold-to-exit path funnels through the same release.
+    _open_game(ws)
+    for _ in range(5):
+        ws.frame(1 / 60)
+    ns2 = ws.player.ns
+    assert ns2 and ws.player._update is not None
+    ws._exit_to_caller()
+    assert ws.player._update is None
+    assert len(ns2) == 0

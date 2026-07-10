@@ -282,6 +282,42 @@ class Player:
         self._home_held_since = 0
         self._home_holding = False
 
+    def release_world(self):
+        """Drop the dead run's WORLD at EXIT, not at the next start (#66 the
+        repeat-run fragmentation fix, glass-fingerprinted 2026-07-10): the ns
+        used to linger until the NEXT cart's start() -- go_home() nulled ws.ns
+        but never _update/_draw, whose function objects close over the ns dict
+        and keep the whole ~300-400KB world alive at the launcher. The next
+        cart then BUILT ITS WORLD AROUND the lingering one; when that finally
+        freed, the new world sat in a minefield of holes, and MicroPython's gc
+        never compacts -- measured: sakura logic 6.5ms fresh vs 13-14ms after
+        three other carts, with an IDENTICAL live set. Clearing the ns dict IN
+        PLACE breaks the globals for every retained function ref; the layer
+        reclaim + collect leave a compact heap for the next build. Idempotent;
+        safe on the crash path (the error panel reads cart_error, never ns)."""
+        ns = self.ns
+        if ns:
+            try:
+                ns.clear()
+            except Exception:  # noqa: BLE001
+                pass
+        self.ns = None
+        self._update = None
+        self._draw = None
+        self._restore_bg = None
+        ws = self.ws
+        rl = getattr(ws.canvas, "reclaim_layers", None)
+        if rl is not None:
+            try:
+                rl()               # pool the dead run's layer buffers now
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            import gc
+            gc.collect()           # off the play path: the run just ended
+        except Exception:  # noqa: BLE001
+            pass
+
     def _diag_enabled(self):
         """Only emit the extra lifecycle/profiling lines in measurement mode."""
         try:
