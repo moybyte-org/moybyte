@@ -166,6 +166,37 @@ class P4SystemCanvas(DeviceCanvas):
     # the bus), so the accelerator only wins on UPSCALE composites (small source
     # read) -- exactly blit_game above / blit_cover below.
 
+    def blit_strip_async(self, layer, x, y):
+        """The #58 drag stamp-defer hook (probed by wm_windowed._draw_app_window):
+        kick `layer`'s 1:1 stamp at (x, y) on the PPA NON-BLOCKING and defer the
+        scan-out switch (the same composite-pending/present_pending machinery as
+        the quiet-game-frame composite). A 1:1 PPA copy is a wall-time WASH vs
+        the CPU (PSRAM-bound both ways) -- but async it runs on the DMA engine
+        while the loop does input/logic, hiding the drag frame's dominant cost
+        (the ~24ms window-content stamp, measured 2026-07-10). Returns False (no
+        PPA / non-fit / hardware refusal) so the caller falls back to the sync
+        CPU stamp. MUST be the frame's LAST framebuffer write (the caller draws
+        the chrome FIRST; regions are disjoint, and the PPA driver's dest cache
+        writeback at submit covers the shared edge cache lines)."""
+        ppa = self._ppa
+        x = int(x)
+        y = int(y)
+        if (ppa is None or x < 0 or y < 0
+                or x + layer.w > self.w or y + layer.h > self.h):
+            return False
+        fb = getattr(layer, "flush_batch", None)
+        if fb is not None:
+            fb()
+        self.flush_batch()
+        try:
+            ppa.blit_async(self._buf, self.w, self.h, x, y,
+                           layer._buf, layer.w, layer.h, 1)
+        except Exception as exc:  # noqa: BLE001 -- refusal -> sync CPU stamp
+            print("Moybyte P4 PPA strip-async failed -> CPU:", exc)
+            return False
+        self._comp._composite_pending = True    # flush() defers -> present_pending
+        return True
+
     def blit_cover(self, gc):
         """wallpaper._backdrop_blit's device path (#58): the smallest integer
         upscale of the 320x240 wallpaper frame that COVERS the whole desktop,
@@ -606,11 +637,14 @@ def run_desktop(fps_cap=60):
         if _ticks_diff(_ticks_ms(), _pf_at) >= 0:
             _drawn = getattr(ws, "_frames_drawn", 0)
             print("PERF fps=%d/%d busy=%dms draw=%.0f flush=%.0f logic=%.0f "
-                  "render=%.0f chrome=%.0f cart=%s"
+                  "render=%.0f chrome=%.0f wmr=%d wmw=%d wms=%d cart=%s"
                   % ((_drawn - _pf_drawn) // 2, _pf_n // 2,
                      _pf_busy // (_pf_n or 1),
                      ws._draw_ms, ws._flush_ms, ws._upd_ms, ws._cart_ms,
                      ws._chrome_ms,
+                     getattr(ws, "_pf_wm_restore", 0),   # drag backdrop restore ms
+                     getattr(ws, "_pf_wm_windows", 0),   # window-stack pass ms
+                     getattr(ws, "_pf_wm_stamp", 0),     # window content stamp ms
                      (ws.cart or {}).get("title", "-")))
             _pf_at = _ticks_ms() + 2000
             _pf_n = 0
