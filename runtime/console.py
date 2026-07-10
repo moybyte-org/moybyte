@@ -267,6 +267,11 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.writer_app import WriterAppLayer
 
+try:
+    from storybook_app import StorybookAppLayer
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.storybook_app import StorybookAppLayer
+
 # The desktop home / launcher surface (#28, extracted -- see launcher_layer.py): the
 # Launcher grid CLASS (its instance stays ws.launcher, the single source everything
 # reads) + LauncherHomeLayer (the "launcher" content Layer -- home composition + grid
@@ -777,6 +782,9 @@ class Workstation:
         # Writer (the kid notebook): notes list + a ruled text page over the shared
         # CodeEditor core; autosaves its notes.json through the cart store.
         self.writer_app = WriterAppLayer(self, NAMES, _in)
+        # Storybook (#78): decks of art+words pages that COMPILE to story carts
+        # (deck.json + a generated, readable main.py -- the blocks->code model).
+        self.storybook_app = StorybookAppLayer(self, NAMES, _in)
         # The Python code editor (#24/#39): the full-screen text view. Owns the drawing
         # + code-UI state (keyboard edge / drag / highlight memo); the shared ws.editor
         # handle + save_code/run_code + code-error state + code_layout stay on ws.
@@ -798,6 +806,7 @@ class Workstation:
             "artwork": self.artwork_app,
             "appearance": self.appearance_app,
             "writer": self.writer_app,
+            "storybook": self.storybook_app,
             "update": _UpdateLayer(self),
             "desktop": _PlayerLayer(self),   # Stage 2: the run loop is ws.player
 
@@ -1076,7 +1085,8 @@ class Workstation:
         # The step-3 responsive editors (#39): each converted layer owns its layout;
         # guarded, since _relayout is first called before _build_layers registers them.
         for _lyr in ("paint_layer", "map_ui", "music_ui", "cards_layer",
-                     "artwork_app", "appearance_app", "writer_app"):
+                     "artwork_app", "appearance_app", "writer_app",
+                     "storybook_app"):
             _obj = getattr(self, _lyr, None)
             if _obj is not None:
                 _obj.relayout(w, h, fs)
@@ -1792,6 +1802,15 @@ class Workstation:
             self._set_text_mode(True)
             self.ach.note("open", selected.get("path") or selected.get("title"))
             return
+        if self.storybook_app.is_app(selected):
+            # Storybook (#78): lists/pages navigate in button mode; the page
+            # editor flips text mode on itself when the kid types the words.
+            self.cart = selected
+            self.input.text_mode = False
+            self.storybook_app.open()
+            self.wm.goto("storybook")
+            self.ach.note("open", selected.get("path") or selected.get("title"))
+            return
         self._open_workspace()
         self.run(self.project, self.launcher_layer)   # activate desktop, record caller
 
@@ -2275,6 +2294,9 @@ class Workstation:
         _writer = getattr(self, "writer_app", None)
         if _writer is not None:
             _writer.flush()            # never lose typed notes on ANY home pop
+        _story = getattr(self, "storybook_app", None)
+        if _story is not None:
+            _story._commit_deck()      # same rule for an open story (clean = no-op)
         self.editor = None
         self.paint = None
         self._editing_icons = False    # never carry the theme-editing flag home

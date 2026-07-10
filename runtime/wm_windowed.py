@@ -77,6 +77,7 @@ _DRAG_MIN = 4                         # px of travel before a press becomes a dr
 # WM title-strip labels per process kind (the player shows the cart title).
 _TITLES = {"menu": "EDITOR", "picker": "PROJECTS", "artwork": "PAINT",
            "appearance": "APPEARANCE", "writer": "WRITER",
+           "storybook": "STORYBOOK",
            "settings": "SETTINGS", "update": "UPDATE"}
 
 # Window GROUPS: back-stack kinds that share ONE window slot. The project picker
@@ -108,6 +109,7 @@ class _LayoutCtx:
         ctx.artwork_layout = ws.artwork_app.layout
         ctx.appearance_layout = ws.appearance_app.layout
         ctx.writer_layout = ws.writer_app.layout
+        ctx.storybook_layout = ws.storybook_app.layout
         return ctx
 
     def install(self, ws):
@@ -122,6 +124,7 @@ class _LayoutCtx:
         ws.artwork_app.layout = self.artwork_layout
         ws.appearance_app.layout = self.appearance_layout
         ws.writer_app.layout = self.writer_layout
+        ws.storybook_app.layout = self.storybook_layout
         ws.launcher.set_layout(self.layout)
         ws.picker.set_layout(self.layout)
 
@@ -403,7 +406,7 @@ class WindowedWM(FullscreenStackWM):
             return (self.ws.canvas.w * s + 2, self.ws.canvas.h * s + 2 + th)
         if key in ("make", "menu", "picker"):
             return (full.w - full.w // 8, full.h - full.h // 10)
-        if key in ("artwork", "appearance", "writer"):
+        if key in ("artwork", "appearance", "writer", "storybook"):
             return (full.w - full.w // 8, full.h - full.h // 10)
         if key == "update":
             return (full.w // 2, full.h // 2)
@@ -1183,6 +1186,8 @@ class WindowedWM(FullscreenStackWM):
         ws._dirty = True
         if kind == "writer":
             ws.writer_app.flush(force=True)   # the strip X must never lose typed notes
+        if kind == "storybook":
+            ws.storybook_app._commit_deck()   # same rule for an open story
         if kind == "desktop":
             self.close_player()
         else:

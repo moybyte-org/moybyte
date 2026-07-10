@@ -96,7 +96,7 @@ for f in editors.py block_editor_ui.py map_editor_ui.py audio.py \
          music_editor_ui.py perf_hud.py update_ui.py system_menu_ui.py \
          achievements_ui.py layers.py bar_layer.py cards_layer.py \
          paint_layer.py settings_layer.py code_layer.py widgets.py \
-         wallpaper.py artwork.py appearance_app.py writer_app.py launcher_layer.py project.py player.py editor_app.py \
+         wallpaper.py artwork.py appearance_app.py writer_app.py storybook_app.py launcher_layer.py project.py player.py editor_app.py \
          wm.py wm_windowed.py chrome.py console.py moy_carts.py blocks.py \
          web_view_ws.py web_view_page.py web_view.py; do
   cp "${REPO_ROOT}/runtime/${f}" "${MODULES_DIR}/${f}"

@@ -65,8 +65,10 @@ def new_tile():
 # cue), used when a cart has no sprite of its own. The two pseudo tiles get a
 # distinctive bright box + a clear glyph (pencil = Make, plus = New).
 _TYPE_GLYPH = {"wallpaper": "paint", "game": "run", "app": "app", "tool": "gear",
+               "story": "run",
                MAKE_TILE_TYPE: "edit", NEW_TILE_TYPE: "plus"}
 _TYPE_COLOR = {"wallpaper": 12, "game": 8, "app": 11, "tool": 9,
+               "story": 15,     # a kid's Storybook cart (#78): peach, playable
                MAKE_TILE_TYPE: 10, NEW_TILE_TYPE: 14}  # index by type
 
 
