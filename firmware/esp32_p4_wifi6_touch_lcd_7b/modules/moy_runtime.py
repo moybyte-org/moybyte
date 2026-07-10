@@ -188,13 +188,14 @@ class P4SystemCanvas(DeviceCanvas):
         if fb is not None:
             fb()
         self.flush_batch()
-        try:
-            ppa.blit_async(self._buf, self.w, self.h, x, y,
-                           layer._buf, layer.w, layer.h, 1)
-        except Exception as exc:  # noqa: BLE001 -- refusal -> sync CPU stamp
-            print("Moybyte P4 PPA strip-async failed -> CPU:", exc)
-            return False
-        self._comp._composite_pending = True    # flush() defers -> present_pending
+        # DON'T kick the DMA here: the bar / chips / cursor layers still CPU-draw
+        # AFTER the window stack, and any of their writes near the in-flight DMA
+        # region get clobbered by stale cache-line evictions (glass-confirmed
+        # 2026-07-10: persistent desktop droppings during drags, cleaned by the
+        # release repaint). REGISTER the stamp instead; P4Compositor.flush()
+        # kicks it after the WHOLE frame has drawn -- the true last write.
+        self._comp._stamp_pending = (self._buf, self.w, self.h, x, y,
+                                     layer._buf, layer.w, layer.h)
         return True
 
     def blit_cover(self, gc):
@@ -580,16 +581,23 @@ def run_desktop(fps_cap=60):
                 if order:
                     win = ws.wm._wins[order[-1]]
                     n = 120
-                    if len(parts) == 2:
+                    step = 6
+                    if len(parts) >= 2:
                         try:
                             n = max(8, int(parts[1]))
                         except ValueError:
                             pass
-                    _drag_script = {"i": 0, "n": n,
+                    if len(parts) >= 3:
+                        try:
+                            step = max(1, int(parts[2]))  # px/frame amplitude scale
+                        except ValueError:
+                            pass
+                    _drag_script = {"i": 0, "n": n, "step": step,
                                     "cx": win.x + 30,
                                     "cy": win.y + max(6, win.title_h // 2)}
-                    print("REMOTE drag win=%s cx=%d cy=%d frames=%d"
-                          % (order[-1], _drag_script["cx"], _drag_script["cy"], n))
+                    print("REMOTE drag win=%s cx=%d cy=%d frames=%d step=%d"
+                          % (order[-1], _drag_script["cx"], _drag_script["cy"],
+                             n, step))
                 else:
                     print("REMOTE drag: no window open")
         if _drag_script is not None:
@@ -604,7 +612,7 @@ def run_desktop(fps_cap=60):
                 # drag stays engaged and every frame is dirty (the drag path).
                 t = i % 40
                 tri = t if t < 20 else 40 - t          # 0..20..0
-                off = 0 if i == 0 else (tri - 10) * 6   # -60..+60, 0 on the arm frame
+                off = 0 if i == 0 else (tri - 10) * s["step"]  # amplitude = step*10
                 pointer.place(s["cx"] + off, s["cy"])
                 pointer.down = True
                 click = (i == 0)                        # frame 0 arms the drag

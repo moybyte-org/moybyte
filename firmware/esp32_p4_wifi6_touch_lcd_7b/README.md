@@ -47,7 +47,7 @@ UI while watching the glass:
 - `tap <x> <y>` / `tap sysmenu` — synthetic tap at system coords / a named bar button
 - `open settings|picker` — pop an app window deterministically
 - `run <name>` — select the first cart whose title matches and RUN it
-- `drag [frames]` — grab the top window's title strip and oscillate it (measure drag-time fps)
+- `drag [frames] [step]` — grab the top window's title strip and oscillate it (step = px/frame amplitude scale, default 6; 30 ≈ a violent finger drag)
 - `cache 0|1` — A/B the drag backdrop cache
 - `union 0|1` — A/B the dirty-union gesture restore (window-sized backdrop re-stamp vs full-screen)
 - `skip 0|1` — A/B the #77 frameskip (logic full-rate, render halved; non-persisting)
@@ -153,6 +153,13 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
   the next boot died with `ImportError: no module named 'moybyte.input'`. The
   flash store root is therefore **`/moy/carts`** — never name a VFS root dir
   after an importable module.
+- **The PPA driver INVALIDATES the whole out-picture buffer at submit** — any
+  CPU frame writes not yet flushed from cache are silently DISCARDED (pixels
+  revert to stale PSRAM content; glass-confirmed as speed-scaled desktop
+  droppings during drags). `moy_ppa.srm_blit` therefore does a C2M writeback of
+  the dst buffer before every submit, and an async op must still be the frame's
+  LAST framebuffer write (the WM registers the drag stamp; `P4Compositor.flush`
+  kicks it after the bar/chips/cursor have drawn).
 
 ## Board map (from the factory xiaozhi boot log + Waveshare/xiaozhi sources)
 

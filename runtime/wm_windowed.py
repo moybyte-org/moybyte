@@ -885,6 +885,16 @@ class WindowedWM(FullscreenStackWM):
         g = 12 * fs
         return (win.x + win.w - g, win.y + win.h - g, g, g)
 
+    def _grip_hit_rect(self, win):
+        """The grip's TOUCH target -- twice the drawn grip plus an overhang past
+        the window corner (owner report 2026-07-10: the 24px visual grip is too
+        small for a finger on the 7\" panel; ~48px is the usual touch minimum).
+        Drawing keeps _grip_rect, only the pointer hit-test uses this."""
+        fs = self._fs()
+        g = 24 * fs
+        over = 4 * fs
+        return (win.x + win.w - g, win.y + win.h - g, g + over, g + over)
+
     def _live_resize_ok(self):
         """Live-body resize needs the rect-clipped stamp (see _blit_backdrop_cache);
         without it (the web RecordingLayer) the rubber-band outline preview stays."""
@@ -1202,7 +1212,7 @@ class WindowedWM(FullscreenStackWM):
                         if focused:
                             self._focus = None
                     return True
-            if self._hit(px, py, self._grip_rect(win)):
+            if self._hit(px, py, self._grip_hit_rect(win)):
                 self._resize = (key, px, py, win.w, win.h, win.w, win.h)
                 self._seed_gesture_hist()   # #58: pre-resize footprint, both buffers
                 return True
