@@ -162,10 +162,13 @@ def _decode_moyimg(text):
     zlib in host_app._decode_moyimg."""
     try:
         import json as _json
+        meta = _json.loads(text)
+        if meta.get("codec") == "rle":
+            import moy_carts as _moy_carts
+            return _moy_carts.decode_moyimg(text)
         import ubinascii as _binascii
         import deflate
         import io
-        meta = _json.loads(text)
         w = int(meta["w"])
         h = int(meta["h"])
         data = _binascii.a2b_base64(meta["data"])

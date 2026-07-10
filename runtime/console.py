@@ -252,6 +252,21 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.wallpaper import Wallpaper
 
+try:
+    from artwork import ArtworkService, PaintAppLayer
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.artwork import ArtworkService, PaintAppLayer
+
+try:
+    from appearance_app import AppearanceAppLayer
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.appearance_app import AppearanceAppLayer
+
+try:
+    from writer_app import WriterAppLayer
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.writer_app import WriterAppLayer
+
 # The desktop home / launcher surface (#28, extracted -- see launcher_layer.py): the
 # Launcher grid CLASS (its instance stays ws.launcher, the single source everything
 # reads) + LauncherHomeLayer (the "launcher" content Layer -- home composition + grid
@@ -433,6 +448,7 @@ class Workstation:
                                self._effective_font_scale())
         self.input = input
         self.make_api = None       # injected: make_api(canvas, input, cfg, sheet, audio, tilemap, pmem, wifi)->ns
+        self.artwork = ArtworkService(self)  # narrow capability for the shipped Paint app
         self.make_audio = None      # injected: make_audio(engine)->audio backend (host/device)
         self.audio = None           # the per-cart audio backend (built on open, #16)
         # WiFi (#38): a SYSTEM service shared across carts (the connection persists
@@ -754,6 +770,13 @@ class Workstation:
         # scroll window (set_msel/set_top) + drawing; reads ws config/system state +
         # dispatches every mutation to ws setters (it owns NO config).
         self.settings_layer = SettingsLayer(self, NAMES, _in, _clamp_scroll)
+        # Full-canvas Paint is a system-domain app process: its 320x240/512x300
+        # document stays indexed, while its chrome/view reflows to each window.
+        self.artwork_app = PaintAppLayer(self, NAMES, _in)
+        self.appearance_app = AppearanceAppLayer(self, NAMES, _in)
+        # Writer (the kid notebook): notes list + a ruled text page over the shared
+        # CodeEditor core; autosaves its notes.json through the cart store.
+        self.writer_app = WriterAppLayer(self, NAMES, _in)
         # The Python code editor (#24/#39): the full-screen text view. Owns the drawing
         # + code-UI state (keyboard edge / drag / highlight memo); the shared ws.editor
         # handle + save_code/run_code + code-error state + code_layout stay on ws.
@@ -772,6 +795,9 @@ class Workstation:
             "launcher": self.launcher_layer,
             "picker": self.editor_picker,
             "settings": self.settings_layer,
+            "artwork": self.artwork_app,
+            "appearance": self.appearance_app,
+            "writer": self.writer_app,
             "update": _UpdateLayer(self),
             "desktop": _PlayerLayer(self),   # Stage 2: the run loop is ws.player
 
@@ -906,6 +932,9 @@ class Workstation:
         # canvas + relayouts; persist=False so loading doesn't re-write the store.
         self.set_font_scale(self.system.get("font_scale", self.font_scale),
                             persist=False)
+        # Paint's shared document lives outside the re-seeded built-in cart. Restore
+        # My Art's bg asset before compiling a persisted My Art wallpaper.
+        self.artwork.sync_wallpaper()
         self.select_wallpaper(self.system.get("wallpaper"), persist=False)
         self.set_theme(self.system.get("theme", self.theme_name), persist=False)
         # #68: apply the persisted diagnostics gate (kid-mode default OFF).
@@ -1046,7 +1075,8 @@ class Workstation:
             self.editor.set_view_size(self.code_layout.cols, self.code_layout.rows)
         # The step-3 responsive editors (#39): each converted layer owns its layout;
         # guarded, since _relayout is first called before _build_layers registers them.
-        for _lyr in ("paint_layer", "map_ui", "music_ui", "cards_layer"):
+        for _lyr in ("paint_layer", "map_ui", "music_ui", "cards_layer",
+                     "artwork_app", "appearance_app", "writer_app"):
             _obj = getattr(self, _lyr, None)
             if _obj is not None:
                 _obj.relayout(w, h, fs)
@@ -1733,6 +1763,35 @@ class Workstation:
         # error panel there so the kid isn't stranded (a silent stay-on-launcher would
         # be a dead end on the device). Authoring is a separate app (the Editor), reached
         # via the launcher's Make tile -> project-picker, not a tap-mode on the launcher.
+        selected = self.launcher.selected()
+        if self.artwork.is_paint_app(selected):
+            # Paint is a cartridge identity backed by a responsive system process.
+            # It deliberately does not enter Player: Player is the fixed 320x240
+            # contract, while this editor must reflow to a P4/web window.
+            self.cart = selected
+            self.input.text_mode = False
+            self.artwork_app.open()
+            self.wm.goto("artwork")
+            self.ach.note("open", selected.get("path") or selected.get("title"))
+            return
+        if self.appearance_app.is_app(selected):
+            self.cart = selected
+            self.input.text_mode = False
+            self.appearance_app.open()
+            self.wm.goto("appearance")
+            self.ach.note("open", selected.get("path") or selected.get("title"))
+            return
+        if self.writer_app.is_app(selected):
+            # Writer is the same cartridge-identity-over-system-process pattern as
+            # Paint/Appearance -- but it's a TYPING app, so the keyboard goes to
+            # clean ASCII text mode (the code-editor precedent: BACKSPACE is a
+            # plain delete, the bar's context-X is the exit).
+            self.cart = selected
+            self.writer_app.open()
+            self.wm.goto("writer")
+            self._set_text_mode(True)
+            self.ach.note("open", selected.get("path") or selected.get("title"))
+            return
         self._open_workspace()
         self.run(self.project, self.launcher_layer)   # activate desktop, record caller
 
@@ -2213,6 +2272,9 @@ class Workstation:
     def go_home(self):
         self._dirty = True             # screen change repaints (#44)
         self._set_text_mode(False)    # restore the game-button keyboard mode
+        _writer = getattr(self, "writer_app", None)
+        if _writer is not None:
+            _writer.flush()            # never lose typed notes on ANY home pop
         self.editor = None
         self.paint = None
         self._editing_icons = False    # never carry the theme-editing flag home
@@ -2504,6 +2566,8 @@ class Workstation:
             return True
         # A live wallpaper animates the home/settings backdrop.
         if kind in ("launcher", "settings") and self.wallpaper.is_animating(dt):
+            return True
+        if kind == "appearance" and self.wallpaper.is_animating(dt):
             return True
         # A firmware install (#53) advances a chunk per frame; "done" runs a short
         # reboot countdown; "checking"/"downloading" (Phase 3) step the online flow.

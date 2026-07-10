@@ -397,6 +397,12 @@ class Player:
         t2 = _ticks_ms()
         ns = ws.make_api(ws.canvas, ws.input, project.config, project.sheet,
                          ws.audio, project.tilemap, project.pmem, wifi, project.images)
+        # Paint is a regular cartridge with one narrow shell capability. Keep it out
+        # of the kid API and inject it only into the shipped app identity that asks
+        # for the artwork permission; copied/renamed carts do not inherit it.
+        if (getattr(ws, "artwork", None) is not None
+                and ws.artwork.is_paint_app(cart)):
+            ns["artwork"] = ws.artwork
         t_api = _ticks_diff(_ticks_ms(), t2)
         # Compile with the "<cart>" filename so a runtime traceback carries cart
         # line numbers (_exc_cart_line reads them to mark the bad line). #67 spike:

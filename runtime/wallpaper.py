@@ -115,6 +115,19 @@ class Wallpaper:
         leaving a clean strip band of the wallpaper's own background colour."""
         NAMES = self._NAMES
         ws = self.ws
+        # Paint's desktop document is a SYSTEM-domain wallpaper. In particular the
+        # 512x300 preset maps exactly 2x onto the P4's 1024x600 panel instead of being
+        # forced through the fixed 320x240 cart canvas and cover-cropped. My Art still
+        # has a wallpaper cartridge identity for discovery/settings; only its pixels
+        # take this direct, resolution-aware path.
+        art = getattr(ws, "artwork", None)
+        if art is not None and art.owns_wallpaper(ws.wallpaper_id):
+            try:
+                if art.draw_wallpaper(ws.sys_canvas):
+                    ws._reset_canvas_state()
+                    return
+            except Exception as exc:  # noqa: BLE001 -- fall back to the wallpaper cart
+                print("Moybyte artwork wallpaper error:", _err_text(exc))
         if self._wp_draw is not None:
             try:
                 rb = getattr(self, "_wp_restore_bg", None)
