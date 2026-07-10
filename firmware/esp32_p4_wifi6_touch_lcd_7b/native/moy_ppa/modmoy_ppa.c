@@ -18,6 +18,7 @@
 #include "py/runtime.h"
 
 #include "driver/ppa.h"
+#include "esp_cache.h"
 
 static ppa_client_handle_t s_srm = NULL;
 
@@ -129,6 +130,16 @@ static mp_obj_t srm_blit(const mp_obj_t *args, ppa_trans_mode_t mode) {
         .alpha_update_mode = PPA_ALPHA_NO_CHANGE,
         .mode = mode,
     };
+    // WRITE BACK the destination's dirty CPU cache lines BEFORE submitting: the
+    // IDF driver INVALIDATES the whole out-picture buffer at submit, which
+    // otherwise DISCARDS every not-yet-flushed CPU write of the current frame
+    // (glass-confirmed 2026-07-10: drag frames draw strips/chrome/bar/cursor by
+    // CPU and then kick the deferred window stamp -- those writes vanished and
+    // the pixels reverted two frames, leaving speed-scaled desktop trails). The
+    // quiet-game composite never hit this because nothing else CPU-draws on
+    // those frames. C2M writeback of a 1.2MB range costs well under a ms.
+    esp_cache_msync(dst.buf, dst.len,
+                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
     s_submitted++;
     esp_err_t err = ppa_do_scale_rotate_mirror(s_srm, &op);
     if (err != ESP_OK) {

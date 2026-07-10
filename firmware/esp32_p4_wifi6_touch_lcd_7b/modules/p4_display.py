@@ -71,6 +71,13 @@ class P4Compositor:
         # blit_game for the current frame.
         self._pending = None
         self._composite_pending = False
+        # Deferred drag stamp (#58 stamp-defer): the WM registers the dragged
+        # window's content stamp here (P4SystemCanvas.blit_strip_async) instead
+        # of drawing it mid-stack; flush() kicks it on the PPA as the frame's
+        # TRUE last write -- after the bar/chips/cursor -- so no CPU draw can
+        # race the DMA (the mid-stack kick left cache-eviction droppings on the
+        # desktop, glass-confirmed). Tuple: (dst, dw, dh, x, y, src, sw, sh).
+        self._stamp_pending = None
 
     def size(self):
         return (self._w, self._h)
@@ -85,6 +92,25 @@ class P4Compositor:
         return self._gfx
 
     def flush(self):
+        if self._stamp_pending is not None:
+            # Kick the registered drag stamp NOW -- every layer (incl. cursor)
+            # has drawn, so the DMA can't race any CPU write. Falls back to the
+            # deferred-present machinery below exactly like the game composite.
+            args = self._stamp_pending
+            self._stamp_pending = None
+            try:
+                import moy_ppa
+                moy_ppa.blit_async(args[0], args[1], args[2], args[3], args[4],
+                                   args[5], args[6], args[7], 1)
+                self._composite_pending = True
+            except Exception as exc:  # noqa: BLE001 -- refusal -> draw it sync
+                print("Moybyte P4 stamp kick failed -> CPU:", exc)
+                try:
+                    import moy_gfx
+                    moy_gfx.blit565(args[0], args[1], args[2], args[3], args[4],
+                                    args[5], args[6], args[7], -1)
+                except Exception:  # noqa: BLE001 -- worst case: one stale frame
+                    pass
         if len(self._fbs) <= 1:
             self._dsi.flush()            # single-buffer: CPU-cache msync only
             return
