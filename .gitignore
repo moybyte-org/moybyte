@@ -31,6 +31,10 @@ firmware/lilygo_t_deck_plus_micropython/modules/settings_layer.py
 firmware/lilygo_t_deck_plus_micropython/modules/code_layer.py
 firmware/lilygo_t_deck_plus_micropython/modules/widgets.py
 firmware/lilygo_t_deck_plus_micropython/modules/wallpaper.py
+firmware/lilygo_t_deck_plus_micropython/modules/artwork.py
+firmware/lilygo_t_deck_plus_micropython/modules/appearance_app.py
+firmware/lilygo_t_deck_plus_micropython/modules/writer_app.py
+firmware/lilygo_t_deck_plus_micropython/modules/storybook_app.py
 firmware/lilygo_t_deck_plus_micropython/modules/launcher_layer.py
 firmware/lilygo_t_deck_plus_micropython/modules/project.py
 firmware/lilygo_t_deck_plus_micropython/modules/player.py
