@@ -219,6 +219,13 @@ def _wrap(text, cols):
 _HOLD_EXIT_MS = 700         # sustained BACKSPACE hold to exit
 
 
+# Compiled-code cache (#66 exec-arena fix, see Player.start): one entry per
+# cart, keyed by the source's (len, hash) -- so the native emitter runs once
+# per source VERSION, not once per PLAY. Module-level: survives Player runs,
+# dies with the VM (exactly the arena's own lifetime).
+_CODE_CACHE = {}
+
+
 class Player:
     """Runs one cart: start -> tick every frame -> guarantee exit (Stage 2). Holds a
     `ws` back-ref (the shared draw toolkit + services seam every surface uses) and is
@@ -451,7 +458,31 @@ class Player:
         self._native_fail = None
         code = None
         t3 = _ticks_ms()
-        if NATIVE_CARTS:
+        # #66 THE repeat-run cliff fix (glass-fingerprinted 2026-07-11): the esp32
+        # port's exec arena (esp_native_code_commit, MALLOC_CAP_EXEC internal
+        # IRAM) is a GROW-ONLY list -- every @micropython.native compile leaks its
+        # machine-code blobs until soft reset. Recompiling the SAME source on
+        # every PLAY (the kid's edit->PLAY->edit loop!) exhausted it in ~5 runs of
+        # a heavy cart; the emitter then died on a ~300-byte MemoryError and the
+        # silent bytecode fallback HALVED the cart's logic speed ("the floor",
+        # logic 6.5 -> 13-17ms; nfail= in RUNSTART names it). So compile ONCE per
+        # (cart, source version): the cache key is the source's (len, hash) and
+        # re-PLAYs of unchanged source re-exec the SAME code object -- its blobs
+        # are immortal in the arena anyway, so reuse costs nothing and saves the
+        # ~110-210ms recompile per PLAY too. An EDIT legitimately recompiles (new
+        # hash -> one new blob-set; the old one still leaks -- the arena has no
+        # free -- so a marathon edit session can still exhaust it, but at the
+        # per-edit rate instead of the per-PLAY rate; the fallback stays graceful).
+        _ckey = project.cart.get("path") or id(project.cart)
+        _csig = (len(src), hash(src))
+        _hit = _CODE_CACHE.get(_ckey)
+        if _hit is not None and _hit[0] == _csig:
+            code = _hit[1]
+            self._native_ins = _hit[2]
+            self._native_fail = _hit[3]
+            if NATIVE_CARTS and self._native_ins is not None:
+                ns["micropython"] = _micropython
+        elif NATIVE_CARTS:
             nsrc, ins = _nativize(src)
             ns["micropython"] = _micropython   # the decorator's global, no import line
             try:
@@ -466,6 +497,9 @@ class Player:
             if code is None:
                 # The kid's own syntax error surfaces HERE -> the friendly panel.
                 code = compile(src, "<cart>", "exec")
+            # Cache the outcome (native OR bytecode-fallback) for this source
+            # version -- a repeat PLAY re-execs the same code object (see above).
+            _CODE_CACHE[_ckey] = (_csig, code, self._native_ins, self._native_fail)
             t_compile = t_compile_native + _ticks_diff(_ticks_ms(), t4)
             t5 = _ticks_ms()
             exec(code, ns)
