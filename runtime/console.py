@@ -2311,6 +2311,20 @@ class Workstation:
         # #66 fragmentation fix: ns = None alone kept the world alive through
         # player._update's closure; release clears the dict in place + collects.
         self.player.release_world()
+        # #66 pin-field fix (the repeat-run CLIFF's other half): going HOME drops
+        # the whole workspace. The fat cart re-slims NOW (not at the next open --
+        # reopening the SAME cart otherwise stays fat forever, and its rehydrated
+        # src/sprites strings are mid-heap pins that fragment every later run's
+        # churn arena; reopen costs one SD read) and a FRESH empty Project
+        # replaces the old one's sheet/tilemap/images/pmem (ws.project is
+        # never-None by design, so surfaces keep their invariant). The EDITOR
+        # return path (\_exit_to_caller -> menu) keeps both -- that's live
+        # editing state, not a corpse.
+        _fat = getattr(self, "_fat_cart", None)
+        if _fat is not None:
+            self._reslim_cart(_fat)
+            self._fat_cart = None
+        self.project = Project(self)
         self.cart_error = None
         self.save_status = None
         self.show_achievements = False

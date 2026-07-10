@@ -146,3 +146,29 @@ def test_release_world_on_exit_drops_the_cart_world(tmp_path):
     ws._exit_to_caller()
     assert ws.player._update is None
     assert len(ns2) == 0
+
+
+def test_go_home_drops_the_workspace_pins(tmp_path):
+    """#66 pin-field fix: returning HOME re-slims the fat cart (its rehydrated
+    src/sprites strings were permanent mid-heap pins when the same cart was
+    reopened) and swaps in a fresh empty Project (the old sheet/tilemap/images
+    were pins too). The editor path is untouched -- only go_home."""
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_game(ws)
+    cart = ws.cart
+    proj = ws.project
+    assert cart.get("lazy") is False          # rehydrated fat for the run
+    assert proj.sheet is not None
+    ws.go_home()
+    assert cart.get("lazy") is True           # re-slimmed at exit
+    assert "src" not in cart
+    assert ws.project is not proj             # fresh empty workspace
+    assert ws.project.sheet is None
+    assert ws._fat_cart is None
+    # And the cart still reopens fine (rehydrates from the store).
+    _open_game(ws)
+    assert ws.cart.get("lazy") is False
+    for _ in range(3):
+        ws.frame(1 / 60)
+    assert ws.cart_error is None
