@@ -37,6 +37,7 @@ TITLE_TO_FOLDER = {
     "Space Desktop": "wallpaper_space",
     "Ocean Desktop": "ocean",
     "Moy Night": "moy_night",
+    "Open Machine": "open_machine",
     "My Art": "my_art",
     "Sakura": "sakura",
     "Star Catcher": "star_catcher",
