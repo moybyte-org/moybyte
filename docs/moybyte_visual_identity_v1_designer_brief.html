@@ -1,0 +1,773 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Moybyte visual identity v1 — designer brief</title>
+<style>
+  :root {
+    --black: #000000;
+    --dark-blue: #1d2b53;
+    --purple: #7e2553;
+    --grey: #c2c3c7;
+    --cream: #fff1e8;
+    --orange: #ffa300;
+    --yellow: #ffec27;
+    --green: #00e436;
+    --grape: #83769c;
+    --peach: #ffccaa;
+    --cool-paper: #dae1f2;
+    --warm-paper: #e6dcd3;
+    --dim-ink: #8c857e;
+    --navy: #2e3e66;
+    --deep: #0b1024;
+  }
+
+  * { box-sizing: border-box; }
+
+  @page { size: 13.333in 7.5in; margin: 0; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--deep);
+    color: var(--cream);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+      "Liberation Mono", monospace;
+  }
+
+  .slide {
+    width: 13.333in;
+    height: 7.5in;
+    position: relative;
+    overflow: hidden;
+    break-after: page;
+    background:
+      radial-gradient(circle at 1px 1px, rgba(131,118,156,.18) 1px, transparent 1px),
+      var(--deep);
+    background-size: 18px 18px;
+    padding: .48in .58in .42in;
+  }
+
+  .slide:last-child { break-after: auto; }
+
+  .light {
+    color: var(--black);
+    background:
+      linear-gradient(rgba(29,43,83,.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(29,43,83,.035) 1px, transparent 1px),
+      var(--cream);
+    background-size: 16px 16px;
+  }
+
+  .slide-no {
+    position: absolute;
+    right: .32in;
+    bottom: .2in;
+    color: var(--grape);
+    font-size: 9pt;
+    letter-spacing: .08em;
+  }
+
+  .eyebrow {
+    margin: 0 0 .12in;
+    color: var(--yellow);
+    font-size: 10pt;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+  }
+
+  .light .eyebrow { color: var(--purple); }
+
+  h1, h2, h3, p { margin-top: 0; }
+
+  h1 {
+    max-width: 9.8in;
+    margin-bottom: .2in;
+    color: var(--cream);
+    font-size: 45pt;
+    line-height: 1.02;
+    letter-spacing: -.045em;
+  }
+
+  h2 {
+    margin-bottom: .22in;
+    font-size: 27pt;
+    line-height: 1.08;
+    letter-spacing: -.035em;
+  }
+
+  h3 {
+    margin-bottom: .1in;
+    font-size: 14pt;
+    line-height: 1.2;
+  }
+
+  p, li {
+    font-size: 12pt;
+    line-height: 1.48;
+  }
+
+  .muted { color: var(--grey); }
+  .light .muted { color: #585d6b; }
+  .yellow { color: var(--yellow); }
+  .grape { color: #aa9bc4; }
+  .green { color: var(--green); }
+
+  .rule {
+    height: 1px;
+    background: var(--navy);
+    margin: .18in 0;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: .14in;
+    font-size: 18pt;
+    font-weight: 700;
+    letter-spacing: -.04em;
+  }
+
+  .moy {
+    position: relative;
+    width: .38in;
+    height: .34in;
+    background: var(--grape);
+    border: 3px solid var(--black);
+    box-shadow: inset 0 -.07in 0 var(--purple);
+  }
+
+  .moy::before {
+    content: "";
+    position: absolute;
+    right: -3px;
+    top: -3px;
+    width: .12in;
+    height: .1in;
+    background: var(--deep);
+    border-left: 3px solid var(--black);
+    border-bottom: 3px solid var(--black);
+  }
+
+  .moy::after {
+    content: "··";
+    position: absolute;
+    left: .09in;
+    top: .035in;
+    color: var(--cream);
+    font-size: 17pt;
+    font-weight: 900;
+    letter-spacing: .01in;
+  }
+
+  .cover {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+
+  .cover::after {
+    content: "";
+    position: absolute;
+    width: 5.1in;
+    height: 5.1in;
+    right: -1.1in;
+    bottom: -1.55in;
+    border: 1px solid rgba(131,118,156,.32);
+    transform: rotate(45deg);
+  }
+
+  .cover .thesis {
+    width: 7.6in;
+    margin: .08in 0 0;
+    color: var(--grey);
+    font-size: 16pt;
+    line-height: 1.5;
+  }
+
+  .cover .thesis strong { color: var(--cream); }
+
+  .cover-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    padding-top: .18in;
+    border-top: 1px solid var(--navy);
+    color: var(--grey);
+    font-size: 9pt;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: .35in;
+  }
+
+  .three-col {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: .22in;
+  }
+
+  .panel {
+    background: var(--cream);
+    color: var(--black);
+    border: 1px solid var(--dark-blue);
+    padding: .2in;
+    box-shadow: 4px 4px 0 rgba(0,0,0,.35);
+  }
+
+  .light .panel {
+    background: rgba(255,253,247,.84);
+    box-shadow: 4px 4px 0 rgba(29,43,83,.16);
+  }
+
+  .panel.dark {
+    background: var(--dark-blue);
+    color: var(--cream);
+    border-color: var(--grape);
+  }
+
+  .surface-card {
+    min-height: 3.6in;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .surface-label {
+    display: inline-block;
+    width: max-content;
+    margin-bottom: .18in;
+    padding: .05in .09in;
+    background: var(--yellow);
+    color: var(--black);
+    font-size: 9pt;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+  }
+
+  .surface-card:nth-child(2) .surface-label { background: var(--grape); color: var(--cream); }
+  .surface-card:nth-child(3) .surface-label { background: var(--green); }
+
+  .surface-card ul {
+    margin: .08in 0 0;
+    padding-left: .19in;
+  }
+
+  .surface-card li { margin-bottom: .08in; font-size: 11pt; }
+
+  .quote {
+    margin-top: .3in;
+    padding: .18in .24in;
+    border-left: 5px solid var(--yellow);
+    background: rgba(29,43,83,.8);
+    color: var(--cream);
+    font-size: 18pt;
+    line-height: 1.35;
+  }
+
+  .mockup-slide {
+    padding: .35in .42in .34in;
+  }
+
+  .mockup-head {
+    height: .52in;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: .2in;
+  }
+
+  .mockup-head h2 { margin: 0; font-size: 22pt; }
+
+  .mockup-head p {
+    margin: 0;
+    color: var(--grey);
+    font-size: 9pt;
+    text-align: right;
+  }
+
+  .mockup-frame {
+    height: 5.88in;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #060a18;
+    border: 1px solid var(--navy);
+    overflow: hidden;
+  }
+
+  .mockup-frame img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+
+  .note-strip {
+    height: .38in;
+    display: flex;
+    align-items: center;
+    gap: .16in;
+    color: var(--grey);
+    font-size: 8.5pt;
+  }
+
+  .note-strip strong {
+    color: var(--yellow);
+    letter-spacing: .08em;
+  }
+
+  .flow {
+    display: grid;
+    grid-template-columns: 1fr .45in 1fr .45in 1fr;
+    align-items: stretch;
+    gap: .08in;
+    margin-top: .28in;
+  }
+
+  .flow-card {
+    min-height: 2.2in;
+    padding: .2in;
+    background: var(--cream);
+    color: var(--black);
+    border: 1px solid var(--dark-blue);
+  }
+
+  .flow-card h3 {
+    display: flex;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--grey);
+    padding-bottom: .09in;
+  }
+
+  .flow-card p { font-size: 10.5pt; }
+
+  .arrow {
+    align-self: center;
+    color: var(--yellow);
+    font-size: 28pt;
+    text-align: center;
+  }
+
+  .flow-actions {
+    display: flex;
+    gap: .08in;
+    margin-top: .12in;
+  }
+
+  .btn {
+    padding: .06in .12in;
+    border: 1px solid var(--black);
+    background: var(--cream);
+    color: var(--black);
+    font-size: 9pt;
+    font-weight: 700;
+  }
+
+  .btn.play { background: var(--green); }
+  .btn.change { background: var(--grape); color: var(--cream); }
+
+  .flow-caption {
+    margin-top: .35in;
+    text-align: center;
+    font-size: 18pt;
+  }
+
+  .swatches {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: .08in;
+    margin-top: .18in;
+  }
+
+  .swatch {
+    height: 1.28in;
+    position: relative;
+    border: 1px solid var(--dark-blue);
+  }
+
+  .swatch span {
+    position: absolute;
+    left: .07in;
+    right: .07in;
+    bottom: .06in;
+    padding: .04in .05in;
+    background: rgba(0,0,0,.76);
+    color: white;
+    font-size: 7.5pt;
+    line-height: 1.25;
+  }
+
+  .palette-note {
+    margin-top: .24in;
+    padding: .18in;
+    background: var(--dark-blue);
+    color: var(--cream);
+    border-left: 5px solid var(--yellow);
+  }
+
+  .palette-note p { margin: 0; font-size: 11pt; }
+
+  .rules {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: .2in;
+    margin-top: .14in;
+  }
+
+  .rule-card {
+    min-height: 1.4in;
+    padding: .18in;
+    border: 1px solid rgba(131,118,156,.65);
+    background: rgba(29,43,83,.82);
+  }
+
+  .rule-card h3 { color: var(--peach); }
+  .rule-card p { margin: 0; color: var(--grey); font-size: 10.5pt; }
+
+  .tiers {
+    display: grid;
+    grid-template-columns: 1fr 1.3fr 1fr;
+    gap: .18in;
+    margin-top: .2in;
+  }
+
+  .tier {
+    min-height: 3.8in;
+    padding: .2in;
+    background: rgba(29,43,83,.88);
+    border: 1px solid var(--grape);
+  }
+
+  .tier:nth-child(2) { border-color: var(--yellow); }
+
+  .tier .size {
+    color: var(--yellow);
+    font-size: 9pt;
+    letter-spacing: .08em;
+  }
+
+  .tier ul { padding-left: .18in; }
+  .tier li { margin-bottom: .1in; color: var(--grey); font-size: 10.5pt; }
+
+  .locked-open {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: .25in;
+    margin-top: .16in;
+  }
+
+  .decision {
+    min-height: 4.6in;
+    padding: .22in;
+    border: 1px solid var(--dark-blue);
+    background: rgba(255,253,247,.88);
+  }
+
+  .decision h3 {
+    display: inline-block;
+    padding: .05in .09in;
+    color: var(--black);
+    background: var(--green);
+  }
+
+  .decision.open h3 { background: var(--yellow); }
+  .decision ul { padding-left: .2in; }
+  .decision li { margin-bottom: .1in; font-size: 10.5pt; }
+
+  .handoff {
+    position: absolute;
+    left: .58in;
+    right: .58in;
+    bottom: .42in;
+    display: flex;
+    justify-content: space-between;
+    padding-top: .14in;
+    border-top: 1px solid rgba(29,43,83,.3);
+    color: #585d6b;
+    font-size: 8.5pt;
+  }
+</style>
+</head>
+<body>
+
+<section class="slide cover">
+  <div>
+    <div class="brand"><span class="moy"></span><span>moybyte</span></div>
+    <p class="eyebrow" style="margin-top:.7in">Visual identity v1 · designer brief · July 2026</p>
+    <h1>Open Machine</h1>
+    <p class="thesis">A friendly computer whose structure is visible—and whose
+      contents invite children to <strong>play, open, and change</strong> them.</p>
+  </div>
+  <div class="cover-footer">
+    <span>Working design direction · not shipped UI</span>
+    <span>moybyte.com · github.com/nikola-j/moybyte</span>
+  </div>
+  <span class="slide-no">01 / 10</span>
+</section>
+
+<section class="slide light">
+  <p class="eyebrow">The product model</p>
+  <h2>One identity. Three surfaces.</h2>
+  <div class="three-col">
+    <article class="panel surface-card">
+      <span class="surface-label">Library</span>
+      <h3>Familiar front door</h3>
+      <p>Large visual cartridges, immediate play, low density, and one obvious route
+        into making.</p>
+      <ul>
+        <li>Primary card action: PLAY</li>
+        <li>Secondary action: CHANGE</li>
+        <li>Pinned MAKE entry</li>
+        <li>Library is Home</li>
+      </ul>
+    </article>
+    <article class="panel surface-card">
+      <span class="surface-label">Studio</span>
+      <h3>Productive workspace</h3>
+      <p>A precise desktop/workbench with real projects, tabs, files, tools, undo,
+        saving, and playtesting.</p>
+      <ul>
+        <li>One tabbed Make/Editor app</li>
+        <li>Config → Blocks → Code → art</li>
+        <li>Editor beside playtest on P4</li>
+        <li>Fullscreen tabs on T-Deck</li>
+      </ul>
+    </article>
+    <article class="panel surface-card">
+      <span class="surface-label">Player</span>
+      <h3>The cartridge owns the screen</h3>
+      <p>Play is a black-box run-and-return action. Moybyte does not decorate or
+        normalize the child's game while it runs.</p>
+      <ul>
+        <li>Fullscreen from Library</li>
+        <li>Windowed playtest from Studio</li>
+        <li>Exit returns to the caller</li>
+        <li>No shell chrome over games</li>
+      </ul>
+    </article>
+  </div>
+  <div class="quote">Use the Library to invite them in. Use Studio to turn them into makers.</div>
+  <span class="slide-no">02 / 10</span>
+</section>
+
+<section class="slide mockup-slide">
+  <header class="mockup-head">
+    <h2>Identity direction · Open Machine</h2>
+    <p>Relationship reference: dark construction field + warm-light tools + grape Moy</p>
+  </header>
+  <div class="mockup-frame">
+    <img src="visual_identity_v1/open_machine_direction.png" alt="Open Machine identity concept board">
+  </div>
+  <div class="note-strip"><strong>CONCEPT REFERENCE</strong><span>Use the visual relationships, not every generated object or control.</span></div>
+  <span class="slide-no">03 / 10</span>
+</section>
+
+<section class="slide mockup-slide">
+  <header class="mockup-head">
+    <h2>Library · familiar, visual, immediate</h2>
+    <p>Large targets and rich cartridge art inside the same precision-pixel OS</p>
+  </header>
+  <div class="mockup-frame">
+    <img src="visual_identity_v1/library_concept.png" alt="Moybyte Library concept">
+  </div>
+  <div class="note-strip">
+    <strong>OVERRIDES</strong>
+    <span>EDIT → CHANGE · remove Favorites/New/Options · no bottom nav · Settings appears once, upper-right</span>
+  </div>
+  <span class="slide-no">04 / 10</span>
+</section>
+
+<section class="slide mockup-slide">
+  <header class="mockup-head">
+    <h2>Studio · a real computer opens underneath</h2>
+    <p>Precision-pixel desktop; one tabbed Editor plus a separate playtest</p>
+  </header>
+  <div class="mockup-frame">
+    <img src="visual_identity_v1/studio_concept.png" alt="Moybyte Studio concept">
+  </div>
+  <div class="note-strip">
+    <strong>OVERRIDES</strong>
+    <span>No fake Trash/meters/menu commands · no independent Code/Map/Sprites processes</span>
+  </div>
+  <span class="slide-no">05 / 10</span>
+</section>
+
+<section class="slide">
+  <p class="eyebrow">The core journey</p>
+  <h2>See it. Play it. Open it. Change it.</h2>
+  <div class="flow">
+    <article class="flow-card">
+      <h3><span>Library</span><span>01</span></h3>
+      <p>Selecting a cartridge reveals two clear verbs. Activating the card itself
+        always plays.</p>
+      <div class="flow-actions"><span class="btn play">PLAY</span><span class="btn change">CHANGE</span></div>
+    </article>
+    <div class="arrow">→</div>
+    <article class="flow-card">
+      <h3><span>Config</span><span>02</span></h3>
+      <p>CHANGE edits the existing project in place and opens the gentlest Editor tab.
+        There is no separate disposable beginner editor.</p>
+    </article>
+    <div class="arrow">→</div>
+    <article class="flow-card">
+      <h3><span>Studio</span><span>03</span></h3>
+      <p>The same project exposes Blocks, Code, Sprites, Map, and Music. PLAY returns
+        to the same workspace and tab.</p>
+    </article>
+  </div>
+  <p class="flow-caption"><span class="yellow">Play is the doorway.</span> Making is what the room is built for.</p>
+  <div class="two-col" style="margin-top:.35in">
+    <div class="panel dark">
+      <h3>MAKE</h3>
+      <p style="margin:0">The pinned MAKE tile opens the project picker. New, Copy,
+        and Delete live there—not on the Library shelf.</p>
+    </div>
+    <div class="panel dark">
+      <h3>SETTINGS</h3>
+      <p style="margin:0">One global Settings entry lives in the upper-right OS area,
+        in the same place in Library and Studio.</p>
+    </div>
+  </div>
+  <span class="slide-no">06 / 10</span>
+</section>
+
+<section class="slide light">
+  <p class="eyebrow">Color system</p>
+  <h2>Keep MOY64. Give system colors strict jobs.</h2>
+  <p class="muted" style="max-width:10.8in">MOY64 remains the only runtime palette and
+    the portability contract across host, device, web transport, and cartridges. The
+    shell uses a restrained subset; cartridge art may use all 64 colors.</p>
+  <div class="swatches">
+    <div class="swatch" style="background:#1d2b53"><span>1 · DARK BLUE<br>desktop / border</span></div>
+    <div class="swatch" style="background:#fff1e8"><span>7 · CREAM<br>tool surface</span></div>
+    <div class="swatch" style="background:#83769c"><span>13 · GRAPE<br>Moy / selected tab</span></div>
+    <div class="swatch" style="background:#ffec27"><span>10 · YELLOW<br>focus</span></div>
+    <div class="swatch" style="background:#00e436"><span>11 · GREEN<br>play / success</span></div>
+    <div class="swatch" style="background:#ffa300"><span>9 · ORANGE<br>authoring attention</span></div>
+    <div class="swatch" style="background:#2e3e66"><span>60 · NAVY<br>raised dark field</span></div>
+  </div>
+  <div class="three-col" style="margin-top:.28in">
+    <div class="panel"><h3>System subset</h3><p style="font-size:10pt;margin:0">Quiet,
+      semantic, consistent. Color tells the user what a control does.</p></div>
+    <div class="panel"><h3>Cartridge freedom</h3><p style="font-size:10pt;margin:0">Games,
+      covers, art, and child-created work remain the richest color on screen.</p></div>
+    <div class="panel"><h3>Website translation</h3><p style="font-size:10pt;margin:0">CSS
+      may use a deeper surround; actual UI screenshots stay faithful to MOY64.</p></div>
+  </div>
+  <div class="palette-note"><p>Red is danger/error only. Green is PLAY/healthy state,
+    not decorative branding. Yellow is focus—not a glow effect.</p></div>
+  <span class="slide-no">07 / 10</span>
+</section>
+
+<section class="slide">
+  <p class="eyebrow">Visual language</p>
+  <h2>Pixel-native, not retro.</h2>
+  <div class="rules">
+    <article class="rule-card"><h3>Geometry</h3><p>4px base rhythm; 8px primary layout
+      unit; native 1px borders; square by default; 2–4px corners only where large
+      Library targets benefit.</p></article>
+    <article class="rule-card"><h3>Type</h3><p>Petme128 remains canonical until another
+      bitmap face proves itself on both 320×240 and 1024×600. No antialiased mockup
+      assumptions.</p></article>
+    <article class="rule-card"><h3>Icons and Moy</h3><p>One- or two-color 16×16 system
+      icons. Moy keeps the grape body, dark-purple feet, cream eyes, dark outline, and
+      identity-critical upper-right bite.</p></article>
+    <article class="rule-card"><h3>Focus</h3><p>Yellow border plus shape/state change;
+      always visible without hover. No glow, continuous pulse, or color-only state.</p></article>
+    <article class="rule-card"><h3>Surfaces</h3><p>Warm cream tools over a dark navy
+      construction field. Optional hard 1–2px offset shadow. No blur, glass, or
+      translucency.</p></article>
+    <article class="rule-card"><h3>Voice</h3><p>Short, concrete verbs: PLAY, CHANGE,
+      MAKE, SAVE, LIBRARY. Capable and warm; no baby talk, school scoring, streaks, or
+      engagement language.</p></article>
+  </div>
+  <div class="quote" style="margin-top:.24in">The OS is precise. The things children create are expressive.</div>
+  <span class="slide-no">08 / 10</span>
+</section>
+
+<section class="slide">
+  <p class="eyebrow">Responsive product</p>
+  <h2>Same ideas. Presentation fitted to the device.</h2>
+  <div class="tiers">
+    <article class="tier">
+      <p class="size">320 × 240 · T-DECK</p>
+      <h3>Fullscreen stack</h3>
+      <ul>
+        <li>Paged Library grid</li>
+        <li>Selected PLAY / CHANGE actions</li>
+        <li>One responsive Editor tab fullscreen</li>
+        <li>Game owns every play frame</li>
+      </ul>
+    </article>
+    <article class="tier">
+      <p class="size">1024 × 600 · P4 / HOST</p>
+      <h3>Windowed Studio</h3>
+      <ul>
+        <li>Large visual Library shelf</li>
+        <li>Pinned MAKE entry</li>
+        <li>One Make/Editor window</li>
+        <li>Playtest beside the Editor</li>
+        <li>Taskbar represents real processes</li>
+      </ul>
+    </article>
+    <article class="tier">
+      <p class="size">RESPONSIVE · WEB</p>
+      <h3>Stack or windows</h3>
+      <ul>
+        <li>Same Library and Studio vocabulary</li>
+        <li>Viewport chooses presentation</li>
+        <li>Real runtime pixels and screenshots</li>
+        <li>No separate web-only product model</li>
+      </ul>
+    </article>
+  </div>
+  <div class="quote" style="font-size:14pt">The large mockups are not downscaled onto the handheld. Layout reflows; behavior stays learned.</div>
+  <span class="slide-no">09 / 10</span>
+</section>
+
+<section class="slide light">
+  <p class="eyebrow">Designer handoff</p>
+  <h2>What is locked—and where design work remains.</h2>
+  <div class="locked-open">
+    <article class="decision">
+      <h3>Locked direction</h3>
+      <ul>
+        <li>Open Machine identity</li>
+        <li>Library / Studio / Player separation</li>
+        <li>Library is Home; no persistent bottom nav</li>
+        <li>PLAY is primary; CHANGE opens Config</li>
+        <li>CHANGE edits the existing project in place</li>
+        <li>One upper-right global Settings entry</li>
+        <li>MOY64 runtime palette</li>
+        <li>Canonical grape Moy</li>
+        <li>One tabbed Editor + separate playtest</li>
+      </ul>
+    </article>
+    <article class="decision open">
+      <h3>Explore and validate</h3>
+      <ul>
+        <li>MAKE versus MAKE STUDIO wording</li>
+        <li>Cartridge-cover dimensions and fallback</li>
+        <li>Exact 1024×600 density and minimum targets</li>
+        <li>Light-surface contrast on the physical P4</li>
+        <li>Whether Petme128 is sufficient for dense Studio UI</li>
+        <li>Library-to-Studio transition language and motion</li>
+        <li>320×240 Library reflow</li>
+        <li>Child comprehension: play, change, create, return</li>
+      </ul>
+    </article>
+  </div>
+  <div class="handoff">
+    <span>Full product/implementation contract: docs/visual_identity_v1.md</span>
+    <span>Working direction · July 2026</span>
+  </div>
+  <span class="slide-no">10 / 10</span>
+</section>
+
+</body>
+</html>
