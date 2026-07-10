@@ -59,19 +59,19 @@ try:
     from map_editor_ui import (
         MapEditorUI,
         _MV_X0, _MV_Y0, _MV_AVAIL_W, _MV_AVAIL_H, _MV_FIT_COLS, _MV_FIT_ROWS,
-        _mv_default_cell, _MV_ZOOMS, _MAP_ZOOM, _TP_X0, _TP_Y0, _TP_CELL,
-        _TP_COLS, _TP_ROWS, _TP_PAGE, _TP_AREA, _TP_PREV, _TP_NEXT, _TP_SKY,
-        _PAN_UP, _PAN_LF, _PAN_RT, _PAN_DN, _MAP_ERASE, _MAP_SAVE, _MAP_CLOSE,
-        _MAP_PAN_THRESH,
+        _mv_default_cell, _MV_ZOOMS, _MAP_ZOOM, _MAP_SIZE, _TP_X0, _TP_Y0,
+        _TP_CELL, _TP_COLS, _TP_ROWS, _TP_PAGE, _TP_AREA, _TP_PREV, _TP_NEXT,
+        _TP_SKY, _PAN_UP, _PAN_LF, _PAN_RT, _PAN_DN, _MAP_ERASE, _MAP_SAVE,
+        _MAP_CLOSE, _MAP_PAN_THRESH,
     )
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.map_editor_ui import (
         MapEditorUI,
         _MV_X0, _MV_Y0, _MV_AVAIL_W, _MV_AVAIL_H, _MV_FIT_COLS, _MV_FIT_ROWS,
-        _mv_default_cell, _MV_ZOOMS, _MAP_ZOOM, _TP_X0, _TP_Y0, _TP_CELL,
-        _TP_COLS, _TP_ROWS, _TP_PAGE, _TP_AREA, _TP_PREV, _TP_NEXT, _TP_SKY,
-        _PAN_UP, _PAN_LF, _PAN_RT, _PAN_DN, _MAP_ERASE, _MAP_SAVE, _MAP_CLOSE,
-        _MAP_PAN_THRESH,
+        _mv_default_cell, _MV_ZOOMS, _MAP_ZOOM, _MAP_SIZE, _TP_X0, _TP_Y0,
+        _TP_CELL, _TP_COLS, _TP_ROWS, _TP_PAGE, _TP_AREA, _TP_PREV, _TP_NEXT,
+        _TP_SKY, _PAN_UP, _PAN_LF, _PAN_RT, _PAN_DN, _MAP_ERASE, _MAP_SAVE,
+        _MAP_CLOSE, _MAP_PAN_THRESH,
     )
 
 # The music/sound editor's UI layer (issue #50, extracted from this file): the

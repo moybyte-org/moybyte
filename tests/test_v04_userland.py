@@ -901,6 +901,126 @@ def test_map_editor_place_erase_select_pick_pan():
     assert me.cam_x == tm.w - 1 and me.cam_y == tm.h - 1
 
 
+def test_map_editor_size_brush_stamps_and_erases_blocks():
+    # #57: SIZE=2 places a 16x16 sprite's 4 CONSECUTIVE tile ids in one tap --
+    # n / n+1 / n+cols / n+cols+1, the same contiguous layout spr(w=2, h=2) and
+    # tile_span_image read -- and erase clears the whole block. Size 1 stays the
+    # old single-cell behavior; cycle_size wraps 1 -> 2 -> 3 -> 1.
+    from runtime.editors import MapEditor
+    tm = TileMap(20, 15)
+    sheet = SpriteSheet()                    # 16 cols -> the row stride is 16
+    me = MapEditor(tm, sheet)
+    assert me.size == 1                      # default: no behavior change
+    me.n = 7
+    me.cycle_size()
+    assert me.size == 2
+    me.place(2, 3)
+    assert tm.mget(2, 3) == 7 and tm.mget(3, 3) == 8
+    assert tm.mget(2, 4) == 7 + 16 and tm.mget(3, 4) == 8 + 16
+    me.erase(2, 3)                           # the eraser covers the same block
+    for dy in range(2):
+        for dx in range(2):
+            assert tm.mget(2 + dx, 3 + dy) == TileMap.EMPTY
+    me.cycle_size()
+    assert me.size == 3
+    me.cycle_size()                          # wraps back to a single tile
+    assert me.size == 1
+    # The EMPTY brush with SIZE > 1 clears the block (place == erase, like before).
+    me.size = 2
+    for dy in range(2):
+        for dx in range(2):
+            tm.mset(8 + dx, 8 + dy, 9)
+    me.n = -1
+    me.place(8, 8)
+    for dy in range(2):
+        for dx in range(2):
+            assert tm.mget(8 + dx, 8 + dy) == TileMap.EMPTY
+
+
+def test_map_editor_size_brush_clamps_at_map_and_sheet_edges():
+    # #57 acceptance: the stamp clamps at BOTH edges. Cells past the map edge are
+    # simply dropped, and a brush near the sheet's right/bottom edge must never
+    # wrap ids into the next tile row -- the span clamps exactly like
+    # tile_span_image, so the stamp still matches what spr() would draw.
+    from runtime.editors import MapEditor
+    sheet = SpriteSheet()                    # 16x16 tiles
+    tm = TileMap(20, 15)
+    me = MapEditor(tm, sheet)
+    me.size = 2
+    me.n = 0
+    me.place(19, 14)                         # bottom-right map corner
+    assert tm.mget(19, 14) == 0              # the in-map cell landed, the rest dropped
+    me.n = 15                                # last sheet COLUMN: only 1 tile fits right
+    assert me.stamp_span() == (1, 2)
+    me.place(5, 5)
+    assert tm.mget(5, 5) == 15 and tm.mget(5, 6) == 15 + 16
+    assert tm.mget(6, 5) == TileMap.EMPTY    # no id wrap into the next sheet row
+    me.n = 15 * 16                           # last sheet ROW: only 1 tile fits down
+    assert me.stamp_span() == (2, 1)
+    me.place(10, 10)
+    assert tm.mget(10, 10) == 240 and tm.mget(11, 10) == 241
+    assert tm.mget(10, 11) == TileMap.EMPTY
+
+
+def test_map_size_stamp_renders_identical_to_spr_multitile():
+    # #57 acceptance: the stamped block renders byte-identical to the code-drawn
+    # spr(n, x, y, w=2, h=2) -- map() over the stamped cells vs one spr() of the
+    # same tile span at the same pixel origin.
+    from runtime.editors import MapEditor
+    sheet = SpriteSheet()
+    for t, c in ((7, 1), (8, 2), (7 + 16, 3), (8 + 16, 4)):
+        for py in range(8):
+            for px in range(8):
+                sheet.tset(t, px, py, c)
+    tm = TileMap(4, 4)
+    me = MapEditor(tm, sheet)
+    me.n = 7
+    me.size = 2
+    me.place(1, 1)
+    a = Canvas(40, 40)
+    a.cls(0)
+    a.map(tm, sheet, 0, 0, 4, 4, 0, 0, -1, 1)
+    b = Canvas(40, 40)
+    b.cls(0)
+    b.spr(sheet.tile_span_image(7, 2, 2, -1), 8, 8, 1)
+    pix_a = [a.pix(x, y) for y in range(40) for x in range(40)]
+    pix_b = [b.pix(x, y) for y in range(40) for x in range(40)]
+    assert pix_a == pix_b
+    assert set(pix_a) >= {0, 1, 2, 3, 4}     # all four tiles actually rendered
+
+
+def test_host_console_map_size_brush_stamps_block_via_taps(tmp_path):
+    # #57 in the shell: the SIZE button cycles the stamp size, one tap with
+    # SIZE=2 places the sprite's 4 tiles, and an ERASE tap clears the block.
+    from runtime import console as C
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.launcher.sel = 0
+    ws.open()
+    ws._open_map()
+    assert ws.menu_view == "map"
+    drv = host_app.ConsoleDriver(ws)
+    me = ws.map_ui.mapedit
+    drv.click(C._MAP_SIZE[0] + 2, C._MAP_SIZE[1] + 2)
+    drv.frame(1 / 30)
+    assert me.size == 2
+    me.n = 5
+    cols = ws.project.sheet.cols
+    cx, cy = me.cam_x, me.cam_y
+    drv.click(C._MV_X0 + 2, C._MV_Y0 + 2)    # tap the top-left visible cell
+    drv.frame(1 / 30)
+    assert ws.tilemap.mget(cx, cy) == 5 and ws.tilemap.mget(cx + 1, cy) == 6
+    assert ws.tilemap.mget(cx, cy + 1) == 5 + cols
+    assert ws.tilemap.mget(cx + 1, cy + 1) == 6 + cols
+    drv.click(C._MAP_ERASE[0] + 2, C._MAP_ERASE[1] + 2)
+    drv.frame(1 / 30)
+    drv.click(C._MV_X0 + 2, C._MV_Y0 + 2)    # the eraser clears the whole block
+    drv.frame(1 / 30)
+    for dy in range(2):
+        for dx in range(2):
+            assert ws.tilemap.mget(cx + dx, cy + dy) == TileMap.EMPTY
+
+
 def test_host_console_map_open_place_and_render(tmp_path):
     from runtime import console as C
     from runtime import host_app

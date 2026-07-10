@@ -385,6 +385,7 @@ def test_map_layout_baseline_constants(tmp_path):
     assert lay.tp_area == M._TP_AREA and lay.tp_page == M._TP_PAGE
     assert lay.tp_prev == M._TP_PREV and lay.tp_next == M._TP_NEXT
     assert lay.sky_btn == M._TP_SKY and lay.zoom_btn == M._MAP_ZOOM
+    assert lay.size_btn == M._MAP_SIZE
     assert (lay.pan_up, lay.pan_lf, lay.pan_rt, lay.pan_dn) == \
         (M._PAN_UP, M._PAN_LF, M._PAN_RT, M._PAN_DN)
     assert (lay.erase_btn, lay.save_btn, lay.close_btn) == \
