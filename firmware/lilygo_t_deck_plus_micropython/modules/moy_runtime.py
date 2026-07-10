@@ -492,22 +492,6 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
                   % (gc.mem_free(), esp32.idf_heap_info(esp32.HEAP_DATA)), diag)
     except Exception as _e:                     # noqa: BLE001 -- diagnostic only
         _diag_log("mem", "gc_free=%d (esp32 n/a: %s)" % (gc.mem_free(), _e), diag)
-    # Serial dev commands over USB-CDC stdin (the P4 affordance, ported to TEST
-    # the "takeover starves USB" lore): TinyUSB's RX runs on its OWN FreeRTOS
-    # task (preemptive over this loop -- the same reason the PERF/MEMX TX stream
-    # works fine during play), so a non-blocking stdin poll between frames may
-    # simply work here too. Guarded: if select/stdin is unsupported the poll is
-    # None and the loop is byte-identical to before. Commands: `run <name>` /
-    # `skip 0|1` / `diag 0|1` / `mem` / `quit` (quit = clean exit to the REPL --
-    # no reflash/reset needed if RX works).
-    _sin = None
-    try:
-        import select
-        import sys as _sys
-        _sin = select.poll()
-        _sin.register(_sys.stdin, select.POLLIN)
-    except Exception:  # noqa: BLE001 -- no select/stdin: loop unchanged
-        _sin = None
     frame_ms = 1000 // fps_cap
     last = _ticks_ms()
     _backlight_on = False         # #45: panel stays dark until the first frame ships
@@ -523,49 +507,6 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         now = _ticks_ms()
         dt = max(0.0, min(0.1, _ticks_diff(now, last) / 1000.0))
         last = now
-        # Serial dev commands (see the _sin setup above; the P4 command set).
-        if _sin is not None and _sin.poll(0):
-            line = ""
-            try:
-                import sys as _sys
-                line = _sys.stdin.readline().strip()
-            except Exception:  # noqa: BLE001
-                pass
-            parts = line.split() if line else []
-            if parts and parts[0] == "quit":
-                print("REMOTE quit -> REPL")
-                return
-            if parts and parts[0] == "run":
-                name = (" ".join(parts[1:])).lower() if len(parts) > 1 else ""
-                items = getattr(ws.launcher, "items", [])
-                idx = None
-                for i in range(len(items)):
-                    it = items[i]
-                    if not it.get("path"):
-                        continue
-                    if not name or name in str(it.get("title") or "").lower():
-                        idx = i
-                        break
-                if idx is not None:
-                    ws.launcher.sel = idx
-                    ws.launch_selected()
-                    print("REMOTE run %s" % items[idx].get("title"))
-                else:
-                    print("REMOTE run: no cart match")
-            if parts and parts[0] == "skip":
-                on = not (len(parts) == 2 and parts[1] == "0")
-                ws.set_frameskip(on, persist=False)
-                print("REMOTE skip %s" % ("on" if on else "off"))
-            if parts and parts[0] == "diag":
-                on = not (len(parts) == 2 and parts[1] == "0")
-                ws.diag_live = on            # non-persisting (the serial A/B knob)
-                ws.show_fps = on
-                ws._dirty = True
-                print("REMOTE diag %s" % ("on" if on else "off"))
-            if parts and parts[0] == "mem":
-                gc.collect()
-                print("REMOTE mem live=%dk free=%dk"
-                      % (gc.mem_alloc() // 1024, gc.mem_free() // 1024))
         # #69: with the poller thread live, the frame loop only APPLIES staged
         # input (no I2C -> no stall can land here). If the thread ever dies,
         # detach and fall back to the synchronous poll -- input never goes dark.
