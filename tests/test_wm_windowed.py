@@ -735,3 +735,132 @@ def test_theme_setting_cycles_and_persists(tmp_path):
     # And an unknown persisted name falls back to the default.
     ws.set_theme("nonsense", persist=False)
     assert ws.theme_name == "night"
+
+
+def _engage_resize(ws, drv, dx=60, dy=-40):
+    """Open Settings and get its window into an in-flight grip resize, grown by
+    (dx, dy). Returns (win, cw, ch) -- the window and the rubber size."""
+    ws.open_settings()
+    drv.frame(0.0)
+    _quiesce(ws)
+    win = ws.wm._wins["settings"]
+    gx0, gy0, gw, gh = ws.wm._grip_rect(win)
+    gx, gy = gx0 + gw // 2, gy0 + gh // 2
+    drv.touch(gx, gy)
+    drv.frame(0.0)                       # press in the grip: resize engages
+    assert ws.wm._resize is not None
+    drv.touch_drag(gx + dx, gy + dy)
+    drv.frame(0.0)
+    assert ws.wm._resize is not None
+    cw, ch = ws.wm._resize[5], ws.wm._resize[6]
+    return win, cw, ch
+
+
+def test_union_restore_engages_and_is_partial(tmp_path):
+    """Steady drag frames restore the backdrop via the RECT-clipped stamp with a
+    window-sized union -- never the full-screen copy (#58 dirty-union restore)."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    win = _engage_drag(ws, drv)
+    hx, hy = win._hold
+    rects = []
+    full = [0]
+    cache = ws.wm._backdrop
+    real_rect = ws.sys_canvas.blit_strip_rect
+    real_full = ws.sys_canvas.blit_strip
+
+    def spy_rect(layer, dst_x, dst_y, rx, ry, rw, rh):
+        if layer is cache:
+            rects.append((rx, ry, rw, rh))
+        return real_rect(layer, dst_x, dst_y, rx, ry, rw, rh)
+
+    def spy_full(layer, dst_x=0, dst_y=0):
+        if layer is cache:
+            full[0] += 1
+        return real_full(layer, dst_x, dst_y)
+
+    ws.sys_canvas.blit_strip_rect = spy_rect
+    ws.sys_canvas.blit_strip = spy_full
+    try:
+        for i in range(4):
+            drv.touch_drag(hx + i * 10, hy)
+            drv.frame(0.0)
+    finally:
+        ws.sys_canvas.blit_strip_rect = real_rect
+        ws.sys_canvas.blit_strip = real_full
+    assert full[0] == 0                       # never the 1.2MB full restore
+    assert len(rects) == 4
+    for rx, ry, rw, rh in rects:
+        # Window-sized plus the engage jump (+80/+50) the history still spans --
+        # never anywhere near the full screen (the point of the union).
+        assert rw <= win.w + 140 and rh <= win.h + 90
+        assert rw < ws.sys_canvas.w - 100
+
+
+def test_union_restore_matches_full_restore_while_moving(tmp_path):
+    """A MOVING drag under the union restore is pixel-identical to the same drag
+    under the full-screen restore -- the damage history covers every trail the
+    window leaves (compared below the bar row; the bar clock is time-dependent)."""
+    def run(union_on):
+        ws = _ws(tmp_path)
+        drv = _drv(ws)
+        win = _engage_drag(ws, drv)
+        ws.wm._union_disabled = not union_on
+        hx, hy = win._hold
+        frames = []
+        for i in range(5):
+            drv.touch_drag(hx + i * 17, hy + i * 9)
+            drv.frame(0.0)
+            skip = 60 * ws.sys_canvas.w      # exclude the bar strip (live clock)
+            frames.append(bytes(ws.sys_canvas.buf[skip:]))
+        return frames
+
+    a = run(True)
+    b = run(False)
+    for i, (fa, fb) in enumerate(zip(a, b)):
+        assert fa == fb, "union restore diverged at drag frame %d" % i
+
+
+def test_live_resize_body_follows_grip(tmp_path):
+    """During a grip resize the window BODY tracks the rubber size (the 'real OS'
+    feel, #58): the focused border lands at the rubber corner, grown area shows
+    the panel field, the real relayout still only happens on release."""
+    from runtime.wm_windowed import _BORDER_TOP
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    win, cw, ch = _engage_resize(ws, drv)
+    ow, oh = win.w, win.h
+    assert (cw, ch) != (ow, oh)              # the rubber actually grew
+    assert win.w == ow and win.h == oh       # no mid-gesture relayout
+    buf, W = ws.sys_canvas.buf, ws.sys_canvas.w
+    # Focused border drawn at the RUBBER corner, not the old one.
+    corner = buf[(win.y + ch - 1) * W + (win.x + cw - 1)]
+    assert corner == _BORDER_TOP
+    # A grown-area probe (beyond the old width, inside the new content rect)
+    # shows the panel field fill -- the content crop anchored top-left.
+    px = win.x + ow + 10
+    py = win.y + win.title_h + 20
+    assert px < win.x + cw - 1
+    assert buf[py * W + px] == ws.theme_colors["panel"]
+    # Release applies the REAL resize (the existing apply-on-release contract).
+    drv.touch_up()
+    drv.frame(0.0)
+    assert ws.wm._resize is None
+    assert (win.w, win.h) == (cw, ch)
+
+
+def test_resize_outline_fallback_without_rect_stamp(tmp_path):
+    """A canvas without blit_strip_rect (the web RecordingLayer) keeps the old
+    rubber-band OUTLINE preview and the full-screen backdrop restore."""
+    from runtime.wm_windowed import _BORDER_TOP
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.sys_canvas.blit_strip_rect = None     # instance attr shadows the method
+    win, cw, ch = _engage_resize(ws, drv)
+    buf, W = ws.sys_canvas.buf, ws.sys_canvas.w
+    # The accent outline is drawn at the rubber rect...
+    accent = ws.theme_colors["accent"]
+    assert buf[(win.y + ch - 1) * W + (win.x + cw - 1)] == accent
+    # ... and the body was NOT drawn at the rubber size (the border at the
+    # rubber corner would be _BORDER_TOP under live-body).
+    assert buf[(win.y + ch - 1) * W + (win.x + cw - 1)] != _BORDER_TOP

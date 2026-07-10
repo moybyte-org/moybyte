@@ -224,6 +224,8 @@ class _BackdropLayer(Layer):
         launcher = self.ws.launcher_layer
         if (wm._drag is None and wm._resize is None) or wm._backdrop_disabled:
             wm._backdrop_valid = False        # live: no drag, always re-render
+            if wm._gesture_hist:
+                wm._gesture_hist = []         # gesture over: drop the damage trail
             launcher.draw(dt)
             return
         if wm._backdrop_valid:
@@ -289,6 +291,16 @@ class WindowedWM(FullscreenStackWM):
         self._backdrop = None
         self._backdrop_valid = False
         self._backdrop_disabled = False   # A/B measurement knob (P4 remote `cache`)
+        # Dirty-union gesture restore (#58 "smooth like a real OS"): during a
+        # drag/resize only the moving window's recent footprint needs the backdrop
+        # re-stamped -- a full-screen 1.2MB restore per frame is the drag path's
+        # dominant cost on the P4 (PSRAM-bandwidth-bound, no accelerator helps a
+        # 1:1 copy). _gesture_hist holds the last TWO frames' damage extents (two:
+        # a ping-pong back buffer is two frames stale; a single-buffer host needs
+        # one -- the superset covers both). Seeded with the window's extent at
+        # gesture START (both physical buffers hold its pre-gesture stamp).
+        self._gesture_hist = []
+        self._union_disabled = False      # A/B measurement knob (P4 remote `union`)
 
     # -- layout-context plumbing ----------------------------------------------
 
@@ -617,15 +629,60 @@ class WindowedWM(FullscreenStackWM):
             self._backdrop_valid = False   # cache; the drag just re-renders live
             self._backdrop = None
 
+    def _gesture_extent(self):
+        """The moving window's CURRENT damage bbox (x, y, w, h) -- everything the
+        gesture draws this frame: the window body (at the resize rubber size when
+        larger OR smaller -- max covers the no-live-resize outline mode too), its
+        border and the 3px drop shadow, padded a couple px for safety. None when
+        no gesture is in flight."""
+        g = self._drag if self._drag is not None else self._resize
+        if g is None:
+            return None
+        win = self._wins.get(g[0])
+        if win is None:
+            return None
+        w, h = win.w, win.h
+        if self._resize is not None and self._resize[0] == win.kind:
+            w = max(w, self._resize[5])
+            h = max(h, self._resize[6])
+        return (win.x - 2, win.y - 2, w + 7, h + 7)
+
+    def _seed_gesture_hist(self):
+        """Prime the damage history at gesture START: both physical buffers hold
+        the window's pre-gesture stamp, so the first two restores must cover it."""
+        ext = self._gesture_extent()
+        self._gesture_hist = [ext, ext] if ext is not None else []
+
     def _blit_backdrop_cache(self):
-        """Stamp the cached backdrop into the current (ping-pong) back buffer.
-        A full-screen 1:1 copy -- PSRAM-bandwidth-bound (measured ~identical on
-        the P4's CPU blit and its hardware PPA, since both read+write the whole
-        1.2MB against the DSI scan-out), so there's no accelerator to reach for
-        here; the win from caching is skipping the wallpaper cover + grid RENDER,
-        not the copy."""
-        if self._backdrop is not None:
-            self._root_canvas.blit_strip(self._backdrop, 0, 0)
+        """Stamp the cached backdrop into the current (ping-pong) back buffer --
+        restricted to the DIRTY UNION of the gesture's recent damage extents when
+        the canvas supports a rect-clipped stamp (#58: a full-screen 1:1 copy is
+        ~26ms PSRAM-bandwidth-bound on the P4 and no accelerator helps it; the
+        union is window-sized, so the restore cost follows the WINDOW, not the
+        screen). Everything outside the union is either untouched since that
+        buffer's last frame or opaquely redrawn every frame (the other windows,
+        the bar strip, the chips), so the partial restore is pixel-safe. Falls
+        back to the full copy when the canvas lacks blit_strip_rect (the web
+        RecordingLayer) or via the `union` A/B knob."""
+        if self._backdrop is None:
+            return
+        rc = self._root_canvas
+        stamp = getattr(rc, "blit_strip_rect", None)
+        ext = self._gesture_extent()
+        if (stamp is None or self._union_disabled or ext is None
+                or not self._gesture_hist):
+            rc.blit_strip(self._backdrop, 0, 0)
+            if ext is not None:
+                self._gesture_hist = [self._gesture_hist[-1], ext] \
+                    if self._gesture_hist else [ext, ext]
+            return
+        rects = self._gesture_hist + [ext]
+        x0 = min(r[0] for r in rects)
+        y0 = min(r[1] for r in rects)
+        x1 = max(r[0] + r[2] for r in rects)
+        y1 = max(r[1] + r[3] for r in rects)
+        stamp(self._backdrop, 0, 0, x0, y0, x1 - x0, y1 - y0)
+        self._gesture_hist = [self._gesture_hist[-1], ext]
 
     # -- game viewport == the player window (#39 mapping) ----------------------
 
@@ -677,7 +734,13 @@ class WindowedWM(FullscreenStackWM):
         if self._resize is not None:               # rubber-band resize preview
             kind, _ox, _oy, _ow, _oh, cw, chh = self._resize
             win = self._wins.get(kind)
-            if win is not None:
+            # App windows resize LIVE-BODY (drawn in _draw_app_window, #58 "real
+            # OS" feel); the outline preview remains for the game window (its
+            # content is the scaled composite -- cropping it mid-gesture reads as
+            # glitch, and the scale recomputes on release anyway) and for
+            # canvases without the rect stamp (the web RecordingLayer).
+            if win is not None and (win.kind == "desktop"
+                                    or not self._live_resize_ok()):
                 self._root_canvas.rectb(win.x, win.y, cw, chh,
                                         self.ws.theme_colors["accent"])
 
@@ -749,6 +812,30 @@ class WindowedWM(FullscreenStackWM):
         g = 12 * fs
         return (win.x + win.w - g, win.y + win.h - g, g, g)
 
+    def _live_resize_ok(self):
+        """Live-body resize needs the rect-clipped stamp (see _blit_backdrop_cache);
+        without it (the web RecordingLayer) the rubber-band outline preview stays."""
+        return getattr(self._root_canvas, "blit_strip_rect", None) is not None
+
+    def _draw_resizing_window(self, win, focused, cw, ch):
+        """The 'real OS' resize feel (#58): during the gesture the window BODY
+        follows the grip -- frame + title strip + grip at the rubber size, the
+        RETAINED content cropped into the new content rect (anchored top-left;
+        grow reveals the panel field -- no re-layout mid-gesture, the real reflow
+        still lands on release via _resize_window). Draws via a temporary w/h
+        swap so _win_chrome/content_rect need no size plumbing."""
+        sc = self._root_canvas
+        ow, oh = win.w, win.h
+        win.w, win.h = cw, ch
+        try:
+            cx, cy, cwid, chei = win.content_rect()
+            if cwid > 0 and chei > 0:
+                sc.rect(cx, cy, cwid, chei, self.ws.theme_colors["panel"])
+                sc.blit_strip_rect(win.buf, cx, cy, cx, cy, cwid, chei)
+            self._win_chrome(win, focused)
+        finally:
+            win.w, win.h = ow, oh
+
     def _draw_app_window(self, win, focused, dt):
         # Freeze the content render while THIS window is being dragged/resized
         # (#58 drag perf): its buffer can't change under a drag (no input reaches
@@ -756,6 +843,12 @@ class WindowedWM(FullscreenStackWM):
         # the editor-tab layout every drag frame is pure waste -- blit the retained
         # buffer at the new position instead. A drag of ANOTHER window still lets
         # this one render live (it's not the one moving).
+        if self._resize is not None and self._resize[0] == win.kind \
+                and self._live_resize_ok():
+            # Live-body resize: the frame follows the grip, content crops.
+            self._draw_resizing_window(win, focused,
+                                       self._resize[5], self._resize[6])
+            return
         moving = ((self._drag is not None and self._drag[0] == win.kind)
                   or (self._resize is not None and self._resize[0] == win.kind))
         if focused and not moving:
@@ -971,6 +1064,7 @@ class WindowedWM(FullscreenStackWM):
             elif abs(px - ox) >= _DRAG_MIN or abs(py - oy) >= _DRAG_MIN:
                 self._drag_armed = None
                 self._drag = (kind, ox - wx, oy - wy)
+                self._seed_gesture_hist()   # #58: pre-move footprint, both buffers
                 self._move_window(win, px - (ox - wx), py - (oy - wy))
                 return True
         if not self._order:
@@ -1014,6 +1108,7 @@ class WindowedWM(FullscreenStackWM):
                     return True
             if self._hit(px, py, self._grip_rect(win)):
                 self._resize = (key, px, py, win.w, win.h, win.w, win.h)
+                self._seed_gesture_hist()   # #58: pre-resize footprint, both buffers
                 return True
             if py < win.y + 1 + win.title_h:
                 self._drag_armed = (key, px, py, win.x, win.y)

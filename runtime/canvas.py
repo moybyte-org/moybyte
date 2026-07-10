@@ -730,6 +730,49 @@ class Canvas:
             d0 = ty * dw + tx0
             dst[d0:d0 + cw] = src[s0 + sx0:s0 + sx0 + cw]
 
+    def blit_strip_rect(self, layer, dst_x, dst_y, rx, ry, rw, rh):
+        """blit_strip restricted to the destination rect (rx, ry, rw, rh): stamp
+        `layer` at (dst_x, dst_y) but only write pixels inside the rect. The #58
+        dirty-union drag/resize restore primitive -- the WM re-stamps only the
+        region a moving window recently occupied instead of the whole cached
+        backdrop (a full-screen copy is the drag path's dominant cost on device).
+        Device twin: DeviceCanvas.blit_strip_rect (moy_gfx.blit565's dest-space
+        clip rect). The WM probes for this method, so a canvas without it (the
+        web RecordingLayer) just keeps the full-restore path."""
+        self.flush_batch()             # #63: emit this canvas's queued sprites first
+        _fb = getattr(layer, "flush_batch", None)
+        if _fb is not None:
+            _fb()
+        dst_x = int(dst_x)
+        dst_y = int(dst_y)
+        dst = self.buf
+        src = layer.buf
+        dw = self.w
+        dh = self.h
+        sw = layer.w
+        if sw <= 0 or dw <= 0 or dh <= 0 or rw <= 0 or rh <= 0:
+            return
+        # Intersect the clip rect with the destination bounds.
+        cx0 = max(0, int(rx))
+        cy0 = max(0, int(ry))
+        cx1 = min(dw, int(rx) + int(rw))
+        cy1 = min(dh, int(ry) + int(rh))
+        if cx0 >= cx1 or cy0 >= cy1:
+            return
+        sh = len(src) // sw
+        for row in range(sh):
+            ty = dst_y + row
+            if ty < cy0 or ty >= cy1:
+                continue
+            # Source span whose destination lands inside [cx0, cx1).
+            sx0 = max(0, cx0 - dst_x)
+            sx1 = min(sw, cx1 - dst_x)
+            if sx0 >= sx1:
+                continue
+            s0 = row * sw
+            d0 = ty * dw + (dst_x + sx0)
+            dst[d0:d0 + (sx1 - sx0)] = src[s0 + sx0:s0 + sx1]
+
     # -- output --------------------------------------------------------------
 
     def to_rgb888(self):

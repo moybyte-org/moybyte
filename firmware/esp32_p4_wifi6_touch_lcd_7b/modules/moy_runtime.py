@@ -518,6 +518,12 @@ def run_desktop(fps_cap=60):
                 on = not (len(parts) == 2 and parts[1] == "0")
                 ws.set_frameskip(on, persist=False)
                 print("REMOTE skip %s" % ("on" if on else "off"))
+            if parts and parts[0] == "union":
+                # `union 0|1`: A/B the dirty-union gesture restore (#58; 1=on,
+                # 0=full-screen restore) -- pairs with `drag [frames]`.
+                on = not (len(parts) == 2 and parts[1] == "0")
+                ws.wm._union_disabled = not on
+                print("REMOTE union %s" % ("on" if on else "off"))
             if parts and parts[0] == "cache":
                 # `cache 0|1`: A/B the drag backdrop cache on glass (1=on).
                 on = not (len(parts) == 2 and parts[1] == "0")
