@@ -136,14 +136,17 @@ on the P4 with hardware levers. Consequences:
 
 ### The S3 counterpoint (2026-07-10) — the same levers land differently
 
-The P4 elimination does NOT transfer wholesale to the T-Deck. The 2026-07-10
-S3 build (master + the `-O3` pragma) **halved Battle City's render slice**
-(10.8–14.0 → 5.8–7.3ms; BC 34–37 → 50–61fps) — and BC's render is pure
-`moy_gfx` C (fill+map per DRAW2), so **the S3 render slice is compute-bound
-where the P4's is dispatch-bound** (slower PSRAM wait-states inside per-pixel
-loops + Xtensa vs RISC-V codegen). `-O3` therefore ships in the kernel
-(in-source pragma; harmless-null on P4) — clean drift-vs-pragma attribution
-still needs one A/B flash (#66). The **fb-in-internal-SRAM** lever measured
+The P4 elimination does NOT transfer wholesale to the T-Deck. **Confirmed by
+the 2026-07-10 two-flash A/B** (same session, identical build minus the
+pragma): Battle City **without** `-O3` = 33–36fps / render 10.7–15.3ms (the
+old ledger band — master drift ≈ 0); **with** it = 51–54fps / render
+6.6–7.4ms. One pragma line = −40% render / +50% fps, chrome (also moy_gfx
+blits) halved too. BC's render is pure `moy_gfx` C (fill+map per DRAW2), so
+**the S3 render slice is compute-bound where the P4's is dispatch-bound**
+(slower PSRAM wait-states inside per-pixel loops + Xtensa vs RISC-V codegen).
+`-O3` ships in the kernel (in-source pragma; harmless-null on P4). The
+takeaway that generalizes: **per-board lever verdicts don't transfer — A/B on
+each.** The **fb-in-internal-SRAM** lever measured
 **cannot engage** on the T-Deck: `fb=psram free-int=164KB need=420KB` (both
 ping-pong buffers + WiFi reserve); the guard + boot line stay self-documenting.
 
