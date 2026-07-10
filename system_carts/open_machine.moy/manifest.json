@@ -1,0 +1,25 @@
+{
+  "format": "moybyte-cart-v1",
+  "version": 1,
+  "title": "Open Machine",
+  "type": "wallpaper",
+  "runtime": "python",
+  "main": "main.py",
+  "system": true,
+  "canvas": { "width": 320, "height": 240, "palette": "moy64" },
+  "permissions": ["graphics", "input"],
+  "age_mode": "cards",
+  "safe_to_share": true,
+  "config": {
+    "grid": 8,
+    "field": "black",
+    "accent": "indigo",
+    "marks": 1
+  },
+  "edit": [
+    { "key": "grid", "label": "GRID", "type": "int", "min": 6, "max": 24, "step": 2, "card": "GRID SPACE IS {value}" },
+    { "key": "field", "label": "FIELD", "type": "choice", "choices": ["black", "dark_blue"], "display": "bg-thumbs", "card": "FIELD IS {value}" },
+    { "key": "accent", "label": "NODES", "type": "choice", "choices": ["indigo", "yellow", "orange", "green"], "display": "bg-thumbs", "card": "NODES ARE {value}" },
+    { "key": "marks", "label": "MARKS", "type": "int", "min": 0, "max": 1, "step": 1, "card": "CORNER MARKS: {value}" }
+  ]
+}

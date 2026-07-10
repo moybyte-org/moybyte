@@ -239,6 +239,23 @@ class AppearanceAppLayer:
             cv.line(x + w // 3, y + h, x + w // 2, y + h // 4, 28)
             cv.circ(x + w // 2, y + h // 3, max(3, h // 4), self.names["pink"])
             cv.circ(x + w * 2 // 3, y + h // 3, max(2, h // 6), self.names["peach"])
+        elif "Machine" in title:
+            cv.rect(x, y, w, h, self.names["black"])
+            step = max(4 * self.layout.fs, min(w, h) // 6)
+            for gy in range(y + step // 2, y + h, step):
+                for gx in range(x + step // 2, x + w, step):
+                    cv.rect(gx, gy, self.layout.fs, self.layout.fs,
+                            self.names["dark_blue"])
+            cv.line(x + w * 2 // 3, y, x + w - 1, y + h // 3,
+                    self.names["indigo"])
+            cv.line(x + w - 1, y + h // 3, x + w * 2 // 3, y + h - 1,
+                    self.names["indigo"])
+            cv.line(x + 3 * self.layout.fs, y + 3 * self.layout.fs,
+                    x + 9 * self.layout.fs, y + 3 * self.layout.fs,
+                    self.names["yellow"])
+            cv.line(x + 6 * self.layout.fs, y,
+                    x + 6 * self.layout.fs, y + 6 * self.layout.fs,
+                    self.names["yellow"])
         elif "Space" in title or "Night" in title:
             cv.rect(x, y, w, h, 60)
             for i in range(12):

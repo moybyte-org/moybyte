@@ -30,6 +30,7 @@ import sys
 # lines of duplicated cart bodies it replaces).
 CART_ORDER = [
     "moy_night",
+    "open_machine",
     "my_art",
     "wallpaper_space",
     "ocean",

@@ -56,6 +56,8 @@ older `.moyproj` SDK lives separately under `moybyte/` / `moybyte_cli/`.
 Content + tooling:
 - `system_carts/` — `moy_night.moy` (the default: a STATIC brand-colorway night
   scene — free under the redraw gate, incl. the web view),
+  `open_machine.moy` (the STATIC MOY64 construction-grid backdrop from the visual
+  identity — also free under the redraw gate),
   `wallpaper_space.moy` (Living Desktop: starfield + pet),
   `ocean.moy` (bubbles + fish), `star_catcher.moy` (a **game**: catch falling
   stars), and `paint.moy` (the full-canvas Paint app; saves a shared `.moyimg`,
