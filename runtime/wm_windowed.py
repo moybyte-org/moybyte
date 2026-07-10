@@ -68,6 +68,17 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # title strip / accents / dim texture) reads the ws.theme_colors tokens per draw
 # (chrome.THEMES, Settings -> THEME; the "night" default is the moybyte site
 # colorway -- midnight navy panels, lavender strips, the yellow CTA accent).
+import time as _time
+
+
+def _wt():
+    # ms tick for the WM's drag-path perf split (gated on ws.perf_capture)
+    try:
+        return _time.ticks_ms()
+    except AttributeError:
+        return int(_time.time() * 1000)
+
+
 _SHADOW = NAMES["black"]
 _BORDER_TOP = NAMES["white"]          # focused window border (cream ring, all themes)
 _BTN_X_FG = NAMES["red"]
@@ -170,7 +181,11 @@ class _WindowStackLayer(Layer):
         self.wm = wm
 
     def draw(self, dt):
+        _perf = getattr(self.ws, "perf_capture", False)
+        _t0 = _wt() if _perf else 0
         self.wm._draw_windows(dt)
+        if _perf:
+            self.ws._pf_wm_windows = _wt() - _t0
 
     def handle_input(self, i):
         return self.wm._route_key(i)
@@ -239,7 +254,11 @@ class _BackdropLayer(Layer):
             launcher.draw(dt)
             return
         if wm._backdrop_valid:
+            _perf = getattr(self.ws, "perf_capture", False)
+            _t0 = _wt() if _perf else 0
             wm._blit_backdrop_cache()
+            if _perf:
+                self.ws._pf_wm_restore = _wt() - _t0
             return
         launcher.draw(dt)                     # first drag frame: render + snapshot
         wm._capture_backdrop()
@@ -702,7 +721,40 @@ class WindowedWM(FullscreenStackWM):
         y0 = min(r[1] for r in rects)
         x1 = max(r[0] + r[2] for r in rects)
         y1 = max(r[1] + r[3] for r in rects)
-        stamp(self._backdrop, 0, 0, x0, y0, x1 - x0, y1 - y0)
+        # Subtract the window's CURRENT opaque body from the union (measured on
+        # glass 2026-07-10: the union alone bought ~nothing for a near-full-screen
+        # window -- the default windows are ~60% of the desktop, so "window-sized"
+        # ~= "screen-sized"). The body rect gets fully covered THIS frame anyway
+        # (content stamp + chrome fills + shadow are all opaque), so only the
+        # EXPOSED margin -- the thin trail strips the window just left -- needs
+        # the backdrop back: for a real finger drag that's a few px of perimeter,
+        # ~KBs instead of the window's ~700KB, making restore cost independent of
+        # window size. Decomposed as up to 4 strips (top/bottom/left/right of the
+        # union minus the body); the resize body is the rubber rect (live-body
+        # covers it opaquely too).
+        g = self._drag if self._drag is not None else self._resize
+        win = self._wins.get(g[0]) if g is not None else None
+        bx0 = by0 = bx1 = by1 = 0
+        if win is not None:
+            bw, bh = win.w, win.h
+            if self._resize is not None and self._resize[0] == win.kind \
+                    and self._live_resize_ok() and win.kind != "desktop":
+                bw, bh = self._resize[5], self._resize[6]
+            bx0 = max(x0, win.x)
+            by0 = max(y0, win.y)
+            bx1 = min(x1, win.x + bw)
+            by1 = min(y1, win.y + bh)
+        if win is None or bx0 >= bx1 or by0 >= by1:
+            stamp(self._backdrop, 0, 0, x0, y0, x1 - x0, y1 - y0)
+        else:
+            if by0 > y0:                                       # top strip
+                stamp(self._backdrop, 0, 0, x0, y0, x1 - x0, by0 - y0)
+            if by1 < y1:                                       # bottom strip
+                stamp(self._backdrop, 0, 0, x0, by1, x1 - x0, y1 - by1)
+            if bx0 > x0:                                       # left strip
+                stamp(self._backdrop, 0, 0, x0, by0, bx0 - x0, by1 - by0)
+            if bx1 < x1:                                       # right strip
+                stamp(self._backdrop, 0, 0, bx1, by0, x1 - bx1, by1 - by0)
         self._gesture_hist = [self._gesture_hist[-1], ext]
 
     # -- game viewport == the player window (#39 mapping) ----------------------
@@ -879,8 +931,31 @@ class WindowedWM(FullscreenStackWM):
                 self._content_for(win.kind).draw(dt)
             finally:
                 self._install(self._root_ctx)
+        # Drag stamp-defer (#58): while THIS window drags on a device with an
+        # async 1:1 blitter (P4SystemCanvas.blit_strip_async -> PPA DMA), draw
+        # the chrome FIRST -- strip/borders/shadow/title are all DISJOINT from
+        # the content rect -- and kick the content stamp as the frame's LAST
+        # framebuffer write; the deferred present (present_pending) then overlaps
+        # the ~24ms DMA with the next loop's input poll, the same machinery as
+        # the quiet-game-frame composite. Only the TOP-drawn window during a
+        # DRAG (a resize redraws live-body above; the grip drawn under the stamp
+        # simply hides while dragging, which is fine). Host/web canvases lack
+        # the hook, so their path is byte-identical.
+        if (self._drag is not None and self._drag[0] == win.kind
+                and self._order and self._order[-1] == win.kind):
+            asb = getattr(self._root_canvas, "blit_strip_async", None)
+            if asb is not None:
+                self._win_chrome(win, focused)
+                if asb(win.buf, win.x + 1, win.y + 1 + win.title_h):
+                    return
+                # non-fit / refusal: fall through to the sync stamp (the chrome
+                # is already down; the second draw below is harmless overdraw).
         # Retained (or just-rendered) buffer -> desktop, then chrome.
+        _perf = getattr(self.ws, "perf_capture", False)
+        _t0 = _wt() if _perf else 0
         self._root_canvas.blit_strip(win.buf, win.x + 1, win.y + 1 + win.title_h)
+        if _perf:
+            self.ws._pf_wm_stamp = _wt() - _t0
         self._win_chrome(win, focused)
 
     def _draw_player_window(self, win, running, focused, dt, full=True):

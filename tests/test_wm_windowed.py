@@ -789,12 +789,15 @@ def test_union_restore_engages_and_is_partial(tmp_path):
         ws.sys_canvas.blit_strip_rect = real_rect
         ws.sys_canvas.blit_strip = real_full
     assert full[0] == 0                       # never the 1.2MB full restore
-    assert len(rects) == 4
-    for rx, ry, rw, rh in rects:
-        # Window-sized plus the engage jump (+80/+50) the history still spans --
-        # never anywhere near the full screen (the point of the union).
-        assert rw <= win.w + 140 and rh <= win.h + 90
-        assert rw < ws.sys_canvas.w - 100
+    assert rects                              # the strip stamps ran
+    # Body subtraction: the window's own footprint is NOT restored (the stamp
+    # covers it opaquely every frame), so the total restored area per frame is
+    # the thin EXPOSED margin -- a small fraction of the window, let alone the
+    # screen. 4 frames of 10px moves: allow a generous margin budget.
+    area = sum(rw * rh for _rx, _ry, rw, rh in rects)
+    frames = 4
+    assert area < frames * (win.w + win.h) * 130   # ~margin strips, not bodies
+    assert area < ws.sys_canvas.w * ws.sys_canvas.h  # sanity: << one full screen
 
 
 def test_union_restore_matches_full_restore_while_moving(tmp_path):
