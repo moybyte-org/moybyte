@@ -1425,6 +1425,51 @@ class DeviceCanvas:
             d0 = ty * dw + tx0
             d[d0:d0 + cw] = s[s0 + sx0:s0 + sx0 + cw]
 
+    def blit_strip_rect(self, layer, dst_x, dst_y, rx, ry, rw, rh):
+        # blit_strip restricted to the destination rect (rx, ry, rw, rh) -- the
+        # #58 dirty-union drag/resize restore primitive (see the host twin in
+        # runtime/canvas.py). Native: moy_gfx.blit565's dest-space clip rect, so
+        # only the rect's bytes are copied (the opaque lane memcpys the clipped
+        # span per row); rows outside the clip are one compare each. Fallback:
+        # the blit_strip row loop with the extra bounds.
+        self.flush_batch()             # #63: emit this canvas's queued sprites first
+        _fb = getattr(layer, "flush_batch", None)
+        if _fb is not None:
+            _fb()
+        dst_x = int(dst_x)
+        dst_y = int(dst_y)
+        rx = int(rx)
+        ry = int(ry)
+        if rw <= 0 or rh <= 0:
+            return
+        sw = layer.w
+        sh = layer.h
+        if self._gfx is not None:
+            self._gfx.blit565(self._buf, self.w, self.h, dst_x, dst_y,
+                              layer._buf, sw, sh, -1, rx, ry, rx + rw, ry + rh)
+            return
+        d = memoryview(self._buf).cast("H")
+        s = memoryview(layer._buf).cast("H")
+        dw = self.w
+        dh = self.h
+        if sw <= 0 or dw <= 0 or dh <= 0:
+            return
+        cx0 = max(0, rx)
+        cy0 = max(0, ry)
+        cx1 = min(dw, rx + rw)
+        cy1 = min(dh, ry + rh)
+        for row in range(sh):
+            ty = dst_y + row
+            if ty < cy0 or ty >= cy1:
+                continue
+            sx0 = max(0, cx0 - dst_x)
+            sx1 = min(sw, cx1 - dst_x)
+            if sx0 >= sx1:
+                continue
+            s0 = row * sw
+            d0 = ty * dw + (dst_x + sx0)
+            d[d0:d0 + (sx1 - sx0)] = s[s0 + sx0:s0 + sx1]
+
 
 class _LayerComp:
     """Minimal compositor stand-in so DeviceCanvas can back a scroll layer (#54): a

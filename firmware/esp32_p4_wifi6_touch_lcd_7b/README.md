@@ -49,6 +49,7 @@ UI while watching the glass:
 - `run <name>` — select the first cart whose title matches and RUN it
 - `drag [frames]` — grab the top window's title strip and oscillate it (measure drag-time fps)
 - `cache 0|1` — A/B the drag backdrop cache
+- `union 0|1` — A/B the dirty-union gesture restore (window-sized backdrop re-stamp vs full-screen)
 - `skip 0|1` — A/B the #77 frameskip (logic full-rate, render halved; non-persisting)
 - `quit` — leave the desktop for the REPL
 
