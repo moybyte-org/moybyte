@@ -1,0 +1,14 @@
+{
+  "format": "moybyte-cart-v1",
+  "version": 1,
+  "title": "Writer",
+  "type": "app",
+  "runtime": "python",
+  "main": "main.py",
+  "system": true,
+  "canvas": { "width": 320, "height": 240, "palette": "moy64" },
+  "permissions": ["graphics", "input", "notebook"],
+  "safe_to_share": false,
+  "config": {},
+  "edit": []
+}

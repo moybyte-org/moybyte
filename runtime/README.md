@@ -58,7 +58,16 @@ Content + tooling:
   scene — free under the redraw gate, incl. the web view),
   `wallpaper_space.moy` (Living Desktop: starfield + pet),
   `ocean.moy` (bubbles + fish), `star_catcher.moy` (a **game**: catch falling
-  stars). Each carries `config` defaults, an `edit` schema, and card templates.
+  stars), and `paint.moy` (the full-canvas Paint app; saves a shared `.moyimg`,
+  publishes it through the `my_art.moy` wallpaper, and can attach it to a game as
+  `images/bg.moyimg`). Paint's high-level store actions live behind the narrow
+  shell-owned `ArtworkService`; they are not part of the kid cart API.
+  `theme_picker.moy` (title: Appearance) opens the responsive visual picker for image wallpapers,
+  live wallpaper carts, and panel themes.
+  `writer.moy` (title: Writer) opens the kid notebook (`runtime/writer_app.py`):
+  a notes list + ruled text page over the shared `CodeEditor` core, autosaving
+  one crash-safe `notes.json` beside `artwork.moyimg`. Each seed
+  carries its own `config` defaults and edit schema where applicable.
 - `tools/simulate_desktop.py` — run the workstation (or a single cart) on the host.
 - `tests/test_v04_userland.py` — canvas, cartridge, desktop, launcher, cards tests.
 

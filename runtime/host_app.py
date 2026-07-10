@@ -338,6 +338,9 @@ def _decode_moyimg(text):
     (1 byte/pixel) -- the same base64+zlib envelope sprites author with, so the host
     inflates it with CPython's zlib (the device mirror in moy_runtime uses `deflate`)."""
     try:
+        shared = moy_carts.decode_moyimg(text)
+        if shared is not None:
+            return shared
         import binascii
         import zlib
         meta = json.loads(text)

@@ -29,16 +29,98 @@ CART_FORMAT = "moybyte-cart-v1"
 # Paint-image assets (#63 Fold 3) live in a per-cart images/ subfolder as
 # <name>.moyimg files -- the THIRD asset type (a 64-colour MOY64 index bitmap from
 # the paint app), alongside sprites.moygfx and map.moymap. A .moyimg is a small JSON
-# header {format,w,h,data} where `data` is base64 of the zlib-compressed index
-# bytes (1 byte/pixel) -- the same zlib+base64 envelope sprites already author with,
-# so the loader stays json-only here (the console decodes the blob into an Image).
+# header {format,w,h,data}. Existing assets use zlib-compressed indices; Paint writes
+# a MicroPython-safe RLE form selected by `codec:"rle"`. Both remain one byte/pixel
+# after decode and are accepted by the host/device image accessors.
 IMAGES_DIR = "images"
 IMAGE_EXT = ".moyimg"
+ARTWORK_NAME = "artwork.moyimg"
+NOTES_NAME = "notes.json"
 
 # A single shared sprite sheet lives alongside the carts dir (one level up, so
 # it sits beside every <name>.moy folder). Tiles painted here are reusable
 # across carts; the import-tile primitive copies tiles between any two sheets.
 SHARED_SHEET_NAME = "shared.moygfx"
+
+
+def _b64_encode(data):
+    """MicroPython/CPython-compatible base64 text without a trailing newline."""
+    try:
+        import ubinascii as _binascii
+    except ImportError:  # pragma: no cover - CPython
+        import binascii as _binascii
+    out = _binascii.b2a_base64(data)
+    if not isinstance(out, str):
+        out = out.decode("ascii")
+    return out.strip()
+
+
+def _b64_decode(text):
+    try:
+        import ubinascii as _binascii
+    except ImportError:  # pragma: no cover - CPython
+        import binascii as _binascii
+    return _binascii.a2b_base64(text)
+
+
+def encode_moyimg(width, height, indices):
+    """Encode an indexed bitmap as a portable ``moyimg-v1`` blob.
+
+    Paint uses a tiny RLE codec instead of zlib so saving works in the shared
+    runtime without depending on a board-specific compressor. Existing zlib
+    assets remain valid; decoders dispatch on the optional ``codec`` field.
+    Runs are stored as ``count, palette_index`` byte pairs.
+    """
+    w = int(width)
+    h = int(height)
+    if w <= 0 or h <= 0 or len(indices) != w * h:
+        raise ValueError("bad artwork size")
+    packed = bytearray()
+    pos = 0
+    total = len(indices)
+    while pos < total:
+        value = int(indices[pos]) & 63
+        count = 1
+        while pos + count < total and count < 255 \
+                and (int(indices[pos + count]) & 63) == value:
+            count += 1
+        packed.append(count)
+        packed.append(value)
+        pos += count
+    return json.dumps({
+        "format": "moyimg-v1", "w": w, "h": h,
+        "codec": "rle", "data": _b64_encode(packed),
+    })
+
+
+def decode_moyimg(text):
+    """Decode Paint's RLE ``.moyimg`` form into ``(w, h, bytes)``.
+
+    The host/device drawing backends retain their legacy-zlib fallback. Keeping
+    the shared-store decoder focused on RLE avoids importing compression support
+    merely to load Paint's own persisted artwork.
+    """
+    try:
+        meta = json.loads(text)
+        w = int(meta["w"])
+        h = int(meta["h"])
+        if w <= 0 or h <= 0 or meta.get("codec") != "rle":
+            return None
+        packed = _b64_decode(meta["data"])
+        out = bytearray()
+        if len(packed) & 1:
+            return None
+        for i in range(0, len(packed), 2):
+            count = packed[i]
+            value = packed[i + 1]
+            if count < 1 or value > 63 or len(out) + count > w * h:
+                return None
+            out.extend(bytes((value,)) * count)
+        if len(out) != w * h:
+            return None
+        return (w, h, bytes(out))
+    except Exception:  # noqa: BLE001 -- a corrupt drawing is treated as absent
+        return None
 
 
 def _mkdir(path):
@@ -179,6 +261,43 @@ def save_image(cart, name, text):
         imgs = {}
         cart["images"] = imgs
     imgs[name] = text
+
+
+def artwork_path(root=CARTS_DIR):
+    """The shared Paint document, beside the carts directory."""
+    parent = root.rsplit("/", 1)[0]
+    return (parent + "/" + ARTWORK_NAME) if parent else ARTWORK_NAME
+
+
+def load_artwork(root=CARTS_DIR):
+    try:
+        return _read(artwork_path(root))
+    except OSError:
+        return None
+
+
+def save_artwork(text, root=CARTS_DIR):
+    ensure_dirs(root)
+    _write_atomic(artwork_path(root), text)
+
+
+def notes_path(root=CARTS_DIR):
+    """The Writer app's notebook (a `moynotes-v1` JSON blob), beside the carts
+    directory like Paint's shared artwork.moyimg."""
+    parent = root.rsplit("/", 1)[0]
+    return (parent + "/" + NOTES_NAME) if parent else NOTES_NAME
+
+
+def load_notes(root=CARTS_DIR):
+    try:
+        return _read(notes_path(root))
+    except OSError:
+        return None
+
+
+def save_notes(text, root=CARTS_DIR):
+    ensure_dirs(root)
+    _write_atomic(notes_path(root), text)
 
 
 def slug(title):

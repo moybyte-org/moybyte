@@ -37,6 +37,7 @@ TITLE_TO_FOLDER = {
     "Space Desktop": "wallpaper_space",
     "Ocean Desktop": "ocean",
     "Moy Night": "moy_night",
+    "My Art": "my_art",
     "Sakura": "sakura",
     "Star Catcher": "star_catcher",
     "Pixel Pet": "pet",
@@ -48,6 +49,9 @@ TITLE_TO_FOLDER = {
     "Tap Game": "tap_game",
     "Beeper": "beeper",
     "Letter Blitz": "letter_blitz",
+    "Paint": "paint",
+    "Appearance": "theme_picker",
+    "Writer": "writer",
     "WiFi": "wifi",
 }
 
