@@ -374,6 +374,41 @@ def test_map_drag_pans_view_while_tap_still_paints(tmp_path):
     assert ws.tilemap.mget(me.cam_x + 1, me.cam_y + 1) == 4
 
 
+def test_map_drag_with_size_brush_reverts_the_whole_block(tmp_path):
+    # #57 x #37: with SIZE=2 the press edge stamps a 2x2 block; when the gesture
+    # crosses the pan threshold, ALL of the block's cells revert (plus the map's
+    # dirty flag and gen counter) -- not just the anchor cell -- so a pan with a
+    # big brush is still completely side-effect-free.
+    from runtime import console as C
+    from runtime import host_app
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.launcher.sel = 0
+    ws.open()
+    ws._open_map()
+    drv = host_app.ConsoleDriver(ws)
+    me = ws.map_ui.mapedit
+    me.n = 4
+    me.size = 2
+    ws.map_ui.map_zoom = len(C._MV_ZOOMS) - 1      # zoom in so a pan has room
+    x0m, y0m, cell, cols, rows = ws.map_ui._mv_metrics()
+    assert ws.tilemap.w > cols and ws.tilemap.h > rows
+    cells_before = bytes(ws.tilemap.cells)
+    gen0 = ws.tilemap.gen
+
+    x0, y0 = _map_cell_center(ws, 4, 3)
+    drv.touch(x0, y0)                              # press edge stamps 4 cells...
+    drv.frame(1 / 30)
+    drv.touch_drag(x0 - 3 * cell, y0 - 2 * cell)   # ...then the drag latches PAN
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+
+    assert bytes(ws.tilemap.cells) == cells_before  # every stamped cell reverted
+    assert not ws.tilemap.dirty
+    assert ws.tilemap.gen == gen0
+
+
 def test_map_empty_sky_tile_is_selectable_and_clears_a_cell(tmp_path):
     # The empty/"sky" swatch (#37) is a first-class palette pick: selecting it sets
     # the brush to EMPTY (-1), and tapping a filled cell with it clears the cell so

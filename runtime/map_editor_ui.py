@@ -94,6 +94,10 @@ _TP_NEXT = (_TP_X0 + 46, _TP_Y0 + _TP_ROWS * _TP_CELL + 2, 42, 18)   # page forw
 # button row (right of CLOSE). Picking it sets the brush to EMPTY so a tap paints
 # "nothing" -- the transparent/background cell map() skips -- like any other tile.
 _TP_SKY = (206, 198, 100, 20)
+# SIZE brush (#57): cycles the stamp size 1/2/3 (one tile / a 16x16 sprite's 2x2
+# block / 24x24), mirroring the paint editor's SIZE. Sits in the free top-left
+# corner slot of the pan d-pad cluster, styled like the ZOOM button ("S2" ~ "Z2").
+_MAP_SIZE = (218, 146, 24, 16)
 # Pan d-pad (right column, under the palette): 4 arrow buttons that scroll the
 # view. Kept clear of the map view (x < 196) and the bottom button row (y = 198).
 _PAN_UP = (244, 146, 24, 16)
@@ -150,6 +154,7 @@ class MapLayout:
             self.tp_prev, self.tp_next = _TP_PREV, _TP_NEXT
             self.sky_btn = _TP_SKY
             self.zoom_btn = _MAP_ZOOM
+            self.size_btn = _MAP_SIZE
             self.pan_up, self.pan_lf, self.pan_rt, self.pan_dn = \
                 _PAN_UP, _PAN_LF, _PAN_RT, _PAN_DN
             self.erase_btn, self.save_btn, self.close_btn = \
@@ -184,6 +189,7 @@ class MapLayout:
         self.pan_rt = (rc_x + 64 * fs, pan_mid_y, bw, bh)
         self.pan_dn = (rc_x + 38 * fs, pan_dn_y, bw, bh)
         self.zoom_btn = (rc_x + 38 * fs, pan_mid_y, bw, bh)
+        self.size_btn = (rc_x + 12 * fs, pan_up_y, bw, bh)
         # Tile palette fills the column between the title band and the d-pad.
         self.tp_x0 = rc_x + 4 * fs
         self.tp_y0 = self.mv_y0
@@ -222,8 +228,10 @@ class MapEditorUI:
         self._map_drag = None          # last pointer (px,py) during a map pan drag (#37)
         self._map_press = None         # gesture origin (px,py); set on press, None on release
         self._map_panning = False      # this gesture has crossed the pan threshold (#37)
-        self._map_paint_undo = None    # (cx,cy,prev_byte,dirty,gen) painted on press;
-                                       # reverted if the gesture turns out to be a pan
+        self._map_paint_undo = None    # ([(cx,cy,prev_byte),...],dirty,gen) for the
+                                       # block painted on press (#57: the SIZE brush
+                                       # stamps s x s cells); reverted if the gesture
+                                       # turns out to be a pan
         sc = ws.sys_canvas
         self.layout = MapLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
 
@@ -358,7 +366,8 @@ class MapEditorUI:
     def _map_paint(self, cx, cy):
         """Stamp the brush at map cell (cx, cy): the EMPTY brush (#37) clears the
         cell (paints sky/background), otherwise the brush's tile is placed. The
-        ERASE toggle still forces a clear regardless of the brush."""
+        ERASE toggle still forces a clear regardless of the brush. With SIZE > 1
+        (#57) both stamp and erase cover the brush's whole cell block."""
         me = self.mapedit
         if me is None:
             return
@@ -366,6 +375,27 @@ class MapEditorUI:
             me.erase(cx, cy)
         else:
             me.place(cx, cy)
+
+    def _map_stamp_cells(self, cx, cy):
+        """Every in-map cell the press-edge paint at (cx, cy) will touch, with its
+        prior byte: [(cx, cy, prev), ...] -- the snapshot _map_revert_paint puts
+        back when the gesture turns out to be a pan. Size 1 is one cell, the SIZE
+        brush (#57) an s x s block (erase always the full square, a stamp the
+        sheet-clamped stamp_span)."""
+        me = self.mapedit
+        tm = self.ws.project.tilemap
+        if self.map_erase or me.n < 0:
+            tw = th = me.size
+        else:
+            tw, th = me.stamp_span()
+        cells = []
+        for dy in range(th):
+            for dx in range(tw):
+                x = cx + dx
+                y = cy + dy
+                if 0 <= x < tm.w and 0 <= y < tm.h:
+                    cells.append((x, y, tm.cells[y * tm.w + x]))
+        return cells
 
     def _map_pan_drag(self, px, py):
         """Held-drag handler for the map view (#37): once a drag that began inside
@@ -398,15 +428,16 @@ class MapEditorUI:
             self._map_drag = (last[0] - dcx * cell, last[1] - dcy * cell)
 
     def _map_revert_paint(self):
-        """Undo the cell stamped on the press edge (used when a press turns into a
-        pan): restore the cell's previous byte AND the map's dirty/gen counters so a
-        pure pan is side-effect-free (no false '*' dirty flag, no spurious cache
-        rebuild in a running cart)."""
+        """Undo the block stamped on the press edge (used when a press turns into a
+        pan): restore every touched cell's previous byte AND the map's dirty/gen
+        counters so a pure pan is side-effect-free (no false '*' dirty flag, no
+        spurious cache rebuild in a running cart). The snapshot's cells were
+        validated in-map when _map_stamp_cells built it."""
         u = self._map_paint_undo
         tm = self.ws.project.tilemap
         if u is not None and tm is not None:
-            cx, cy, prev, dirty, gen = u
-            if 0 <= cx < tm.w and 0 <= cy < tm.h:
+            cells, dirty, gen = u
+            for cx, cy, prev in cells:
                 tm.cells[cy * tm.w + cx] = prev
             tm.dirty = dirty
             tm.gen = gen
@@ -437,7 +468,7 @@ class MapEditorUI:
             if cell is not None and tm is not None:
                 cx, cy = cell
                 if 0 <= cx < tm.w and 0 <= cy < tm.h:
-                    self._map_paint_undo = (cx, cy, tm.cells[cy * tm.w + cx],
+                    self._map_paint_undo = (self._map_stamp_cells(cx, cy),
                                             tm.dirty, tm.gen)
                     self._map_paint(cx, cy)
             return
@@ -458,6 +489,8 @@ class MapEditorUI:
         elif self._in(px, py, lay.tp_next):
             if ws.project.sheet is not None and self.map_page + lay.tp_page < ws.project.sheet.count:
                 self.map_page += lay.tp_page
+        elif self._in(px, py, lay.size_btn):   # cycle the SIZE brush 1/2/3 (#57)
+            me.cycle_size()
         elif self._in(px, py, lay.zoom_btn):   # cycle the zoom level (#37 follow-up)
             self._map_cycle_zoom()
         elif self._in(px, py, lay.pan_up):
@@ -541,6 +574,15 @@ class MapEditorUI:
         # page via extra rows, and the fs-scaled cell just gives it more air).
         ids = self._map_palette_ids()
         tscale = max(1, lay.tp_cell // (sheet.TILE + 6))
+        # SIZE-brush footprint (#57): the OTHER tiles of the brush's stamp block
+        # get a lighter outline in the palette, so a 2x2/3x3 pick visibly shows
+        # which consecutive tiles will land on the map with it.
+        block = set()
+        if me.n >= 0 and me.size > 1:
+            tw, th = me.stamp_span()
+            for dy in range(th):
+                for dx in range(tw):
+                    block.add(me.n + dy * sheet.cols + dx)
         for k in range(len(ids)):
             tid = ids[k]
             x = lay.tp_x0 + (k % lay.tp_cols) * lay.tp_cell
@@ -551,9 +593,13 @@ class MapEditorUI:
                 cv.spr(img, x + (lay.tp_cell - sheet.TILE * tscale) // 2,
                        y + (lay.tp_cell - sheet.TILE * tscale) // 2, tscale)
             cv.rectb(x, y, lay.tp_cell, lay.tp_cell,
-                     NAMES["white"] if tid == me.n else NAMES["dark_grey"])
+                     NAMES["white"] if tid == me.n else
+                     (NAMES["light_grey"] if tid in block else NAMES["dark_grey"]))
         ws._btn("<", lay.tp_prev, NAMES["blue"], cv)
         ws._btn(">", lay.tp_next, NAMES["blue"], cv)
+        # SIZE brush (#57): cycles the stamp size (top-left d-pad corner slot);
+        # labeled like the zoom button ("S2" ~ "Z2").
+        ws._btn("S" + str(me.size), lay.size_btn, NAMES["dark_purple"], cv)
         # ZOOM control (#37 follow-up): cycles the zoom level (in the d-pad center);
         # the title's "z<level>" badge shows which level is active.
         ws._btn("Z" + str(self.map_zoom + 1), lay.zoom_btn, NAMES["dark_purple"], cv)

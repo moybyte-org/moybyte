@@ -571,22 +571,64 @@ class MapEditor:
     Holds the current tile id to stamp + a (cam_x, cam_y) view offset in cells, so
     a map larger than the on-screen window can be panned. `place` stamps the
     current tile, `erase` clears a cell, `pick` samples the cell under a tap into
-    the brush, and `select(d)` steps the brush through the sheet's tile ids."""
+    the brush, and `select(d)` steps the brush through the sheet's tile ids.
+
+    `size` is the SIZE brush (#57), mirroring PaintEditor's: the stamp side length
+    in tiles (1 = one 8x8 tile, 2 = a 16x16 sprite's 2x2 tile block, 3 = 24x24).
+    `place` stamps the whole block of CONSECUTIVE tile ids in one tap -- the same
+    contiguous layout spr(n, x, y, w, h)/tile_span_image read -- so a map-placed
+    big sprite renders identical to the code-drawn one."""
+
+    SIZES = (1, 2, 3)     # selectable stamp sizes (side length in tiles)
 
     def __init__(self, tilemap, sheet):
         self.tilemap = tilemap
         self.sheet = sheet
         self.n = 0            # current tile id to stamp (a sprite id in the sheet)
+        self.size = 1         # stamp side length in tiles (#57; 1 = today's cell)
         self.cam_x = 0        # top-left visible cell (pan offset), in cells
         self.cam_y = 0
 
+    def stamp_span(self):
+        """The (tw, th) tile block the current brush stamps: `size` clamped
+        independently to what fits the sheet right of / below tile n -- the SAME
+        clamp tile_span_image applies, so the stamped block always matches what
+        spr(n, x, y, w=size, h=size) draws. The EMPTY brush has no sheet
+        footprint and spans size x size."""
+        s = self.size
+        if self.n < 0:
+            return s, s
+        max_tw = self.sheet.cols - (self.n % self.sheet.cols)
+        max_th = self.sheet.rows - (self.n // self.sheet.cols)
+        return (s if s < max_tw else max_tw), (s if s < max_th else max_th)
+
     def place(self, cell_x, cell_y):
-        """Stamp the current tile id at map cell (cell_x, cell_y)."""
-        self.tilemap.mset(cell_x, cell_y, self.n)
+        """Stamp the brush at map cell (cell_x, cell_y): the stamp_span() block of
+        consecutive tile ids, n + dy*cols + dx per cell (#57; size 1 is exactly
+        the old single mset). Cells past the map edge are dropped by mset; the
+        EMPTY brush clears like erase (its pre-#57 behavior)."""
+        if self.n < 0:
+            self.erase(cell_x, cell_y)
+            return
+        tw, th = self.stamp_span()
+        cols = self.sheet.cols
+        for dy in range(th):
+            for dx in range(tw):
+                self.tilemap.mset(cell_x + dx, cell_y + dy,
+                                  self.n + dy * cols + dx)
 
     def erase(self, cell_x, cell_y):
-        """Clear map cell (cell_x, cell_y) to empty (no tile)."""
-        self.tilemap.mset(cell_x, cell_y, self.tilemap.EMPTY)
+        """Clear the size x size block at map cell (cell_x, cell_y) to empty (no
+        tile). Always the full square -- an eraser should be predictable, so it
+        ignores the stamp's sheet-edge clamp."""
+        for dy in range(self.size):
+            for dx in range(self.size):
+                self.tilemap.mset(cell_x + dx, cell_y + dy, self.tilemap.EMPTY)
+
+    def cycle_size(self):
+        """Step to the next stamp size (1 -> 2 -> 3 -> 1), PaintEditor-style."""
+        i = self.SIZES.index(self.size) if self.size in self.SIZES else 0
+        self.size = self.SIZES[(i + 1) % len(self.SIZES)]
 
     def pick(self, cell_x, cell_y):
         """Sample the tile at a map cell into the brush (skip empty cells, so a
