@@ -861,6 +861,24 @@ def test_index_serves_html_page(server):
     assert "/frame" not in text and "/input" not in text
 
 
+def test_browser_page_sends_neutral_pan_on_arrow_release():
+    """Regression: arrows are a held pan velocity; release must send dx=0/dy=0."""
+    text = web_view.PAGE_HTML
+    assert "panWas=false" in text
+    assert 'send({type:"pan",dx:0,dy:0})' in text
+
+
+def test_web_console_pan_zero_stops_arrow_velocity(tmp_path):
+    """The host driver keeps pan as a held velocity until a neutral pan arrives."""
+    console = web_console.WebConsole(str(tmp_path / "carts"), fps=30)
+    console.apply_events([{"type": "pan", "dx": 1, "dy": 0}])
+    assert console.driver._pan == (1, 0)
+    console.step_frame()
+    assert console.driver._pan == (1, 0)
+    console.apply_events([{"type": "pan", "dx": 0, "dy": 0}])
+    assert console.driver._pan == (0, 0)
+
+
 def test_assets_returns_palette_font_and_sheet(server):
     _console, host, port = server
     status, ctype, obj = _get_json(host, port, "/assets")

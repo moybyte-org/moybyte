@@ -295,8 +295,9 @@ if(!ok){ok=true;sEl.textContent="live";sEl.style.color="#00e436";}}
 // (ws.onmessage -> df), input pushes up (pump() sends queued events per tick). BOTH the device
 // and the host speak WS, so a closed/failed socket just reconnects with a small backoff -- no
 // HTTP poll fallback. The onmessage byte-count feeds the perf log's bw/avg on both.
-var ws=null,wsOpen=false,reconn=null;
-function pump(){var v=pv();if(v[0]||v[1])send({type:"pan",dx:v[0],dy:v[1]});
+var ws=null,wsOpen=false,reconn=null,panWas=false;
+function pump(){var v=pv();if(v[0]||v[1]){panWas=true;send({type:"pan",dx:v[0],dy:v[1]});}
+else if(panWas){panWas=false;send({type:"pan",dx:0,dy:0});}
 if(!q.length)return;var b=q;q=[];
 if(wsOpen){try{ws.send(JSON.stringify({events:b}));}catch(e){}}}
 function connect(){if(reconn){clearTimeout(reconn);reconn=null;}
