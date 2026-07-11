@@ -278,10 +278,12 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # nav). Launcher takes NAMES + _blit_glyph injected for its tile art; ws.open() stays.
 try:
     from launcher_layer import (Launcher, LauncherHomeLayer, EditorPickerLayer,
-                                make_tile, new_tile, MAKE_TILE_TYPE, NEW_TILE_TYPE)
+                                make_tile, new_tile, MAKE_TILE_TYPE, NEW_TILE_TYPE,
+                                PSEUDO_TILE_TYPES)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.launcher_layer import (Launcher, LauncherHomeLayer, EditorPickerLayer,
-                                        make_tile, new_tile, MAKE_TILE_TYPE, NEW_TILE_TYPE)
+                                        make_tile, new_tile, MAKE_TILE_TYPE,
+                                        NEW_TILE_TYPE, PSEUDO_TILE_TYPES)
 
 # The open cart's live WORKSPACE (Stage 1 of docs/shell_ux_technical_plan_v1.md,
 # extracted from this file -- see project.py). Project holds the open cart's DATA
@@ -484,6 +486,10 @@ class Workstation:
         self._fat_cart = None         # #66 live-set diet: the one rehydrated cart
         self.launcher = Launcher(self._launcher_items(self._all_carts),
                                  self.layout, NAMES, _blit_glyph)
+        # The HOME grid exposes the selected card's PLAY/CHANGE row on the desktop-
+        # density tiers (visual identity v1 Section 1.2); the picker below keeps the
+        # single-verb pick, so the flag stays off there.
+        self.launcher.actions = True
         # Default the highlight to the first RUNNABLE cart (skip the pinned Make tile at
         # slot 0), so a bare RUN/A plays a game rather than opening the picker -- the
         # launcher is RUN-first (spec shell_ux_v1.md); Make is a tap/nav target.
@@ -1058,6 +1064,11 @@ class Workstation:
         self.launcher.theme = self.theme_colors
         if getattr(self, "picker", None) is not None:
             self.picker.theme = self.theme_colors
+        # The cached bar strip now paints theme-colored pixels (the launcher zone's
+        # PLAY/CHANGE chips), and its cache key doesn't fold the theme name -- bump
+        # the explicit generation so a theme switch repaints it.
+        if getattr(self, "bar_layer", None) is not None:
+            self.bar_layer.invalidate()
         self._dirty = True
         if persist:
             self.system["theme"] = self.theme_name
@@ -1837,6 +1848,18 @@ class Workstation:
             self.open_picker()
             return
         self.open()
+
+    def change_selected(self):
+        """CHANGE (visual identity v1 Sections 1.2-1.3): open the launcher's selected
+        cartridge IN PLACE in the Studio/Editor, landing on Config (or the gentlest
+        editable tab when the cart has no edit schema -- editor_app.open decides,
+        deterministically per project). The bridge from playing to making: same
+        Project, same persistence path, never a surprise duplicate (Copy stays an
+        explicit picker verb). No-op for the pseudo Make tile (one verb: its tap)."""
+        sel = self.launcher.selected()
+        if sel is None or sel.get("type") in PSEUDO_TILE_TYPES:
+            return
+        self.open_in_editor(sel)
 
     # -- the Editor's project-picker (spec shell_ux_v1.md) -------------------
 

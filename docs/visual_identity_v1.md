@@ -6,6 +6,16 @@ shipped shell reference. Where it changes behavior described by
 `docs/shell_ux_v1.md`, the change must land in code and tests before that reference is
 updated.
 
+**Implementation status (2026-07-11):** the §10 Phase 1 + Phase 2 vertical slice is
+CODED and host-tested (`tests/test_visual_identity.py`): the §4.3 semantic theme
+roles (frozen-literal fallbacks; `night` byte-identical), the opt-in **"machine"**
+Open Machine theme (`chrome.THEMES`, selectable in Settings/Appearance), the
+Library card's PLAY/CHANGE verbs on both tiers (on-card at desktop density, bar-zone
+chips at 320×240, `C` key), `Workstation.change_selected` → Editor-on-Config, and the
+§6.2 MAKE tile authoring accent. Phases 3-5 (warm-light Studio surfaces, small-screen
+reflow beyond the verbs, system-app/website sweep) remain open, as does on-glass
+validation on the P4 panel.
+
 **Scope:** the Moybyte OS shell, Library, Studio/system apps, Player boundary, and
 website expression. Kid cartridges keep their own visual identities and the frozen
 `.moy` drawing contract.

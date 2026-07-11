@@ -708,6 +708,21 @@ _ICON_VERSION = 3
 #   dim       -- faint texture (picker dots, unfocused window borders)
 # "night" is the moybyte brand colorway (the site palette) and MUST keep today's
 # exact values -- it's the default, and the golden/parity nets pin its pixels.
+#
+# Visual identity v1 (docs/visual_identity_v1.md Section 4.3) adds SEMANTIC roles on
+# top of the original seven: a theme dict may also carry any of the keys below, and
+# theme_colors() fills every missing role from the base tokens / the frozen literals
+# (see _SEMANTIC_ALIAS / _SEMANTIC_STATIC), so legacy themes resolve them without
+# repeating themselves and "night" stays byte-identical. Surfaces migrating off
+# scattered literal indices read the roles; the defaults ARE today's literals.
+#   desktop / desktop_pattern -- the construction field + its sparse dot grid
+#   surface / surface_alt / ink / ink_dim -- tool surface + text (Phase 3 Studio)
+#   border    -- 1px panel/window border
+#   selection -- selected row/tile background
+#   focus     -- keyboard/pointer focus (yellow in every shipped theme)
+#   play      -- the PLAY verb / success / healthy state (signal green)
+#   author    -- the MAKE/CHANGE authoring accent
+#   danger    -- destructive confirm / errors only (red)
 THEMES = (
     ("night",  {"panel": 60, "edge": 13, "title": 13, "title_ink": 0,
                 "accent": 10, "hilite": 13, "dim": 1}),
@@ -719,17 +734,61 @@ THEMES = (
                 "accent": 10, "hilite": 3, "dim": 59}),
     ("slate",  {"panel": 54, "edge": 6, "title": 6, "title_ink": 0,
                 "accent": 9, "hilite": 5, "dim": 55}),
+    # Open Machine (docs/visual_identity_v1.md, the chosen direction): the dark-blue
+    # construction field with a navy dot grid + raised chrome (Section 4.2's strict
+    # jobs: 1 = field, 60 = raised dark panel/inactive chrome), grape for identity/
+    # selection (Moy, focused titles, selected tabs), and the signal verbs -- yellow
+    # focus, green PLAY, orange authoring. Opt-in (Settings -> THEME), never a
+    # mutation of the "night" default.
+    ("machine", {"panel": 1, "edge": 60, "title": 13, "title_ink": 0,
+                 "accent": 10, "hilite": 60, "dim": 60,
+                 "desktop": 1, "desktop_pattern": 60, "surface": 7,
+                 "surface_alt": 52, "ink": 7, "ink_dim": 6, "border": 60,
+                 "selection": 13, "focus": 10, "play": 11, "author": 9,
+                 "danger": 8}),
 )
 DEFAULT_THEME = "night"
 
+# Semantic-role fallbacks (visual identity v1 Section 4.3). Aliases resolve a missing
+# role from the theme's own base tokens; statics are the frozen literals the surfaces
+# hardcode today, so a legacy theme keeps its exact pixels when a surface switches
+# from the literal to the role.
+_SEMANTIC_ALIAS = (("desktop", "panel"), ("desktop_pattern", "dim"),
+                   ("surface", "panel"), ("surface_alt", "panel"),
+                   ("border", "edge"), ("selection", "hilite"),
+                   ("focus", "accent"))
+_SEMANTIC_STATIC = (("ink", 7), ("ink_dim", 6),      # white / light-grey text
+                    ("play", 11),                    # signal green: PLAY/healthy
+                    ("author", 10),                  # today's Make-tile yellow
+                    ("danger", 8))                   # red: errors/destructive only
+_THEME_CACHE = {}
+
 
 def theme_colors(name):
-    """The token dict for theme `name`, falling back to the default. Returns the
-    shared dict (treat as read-only)."""
-    for n, tokens in THEMES:
+    """The full token dict for theme `name` (base tokens + every semantic role,
+    missing roles resolved per _SEMANTIC_ALIAS/_SEMANTIC_STATIC), falling back to
+    the default theme. Returns a shared cached dict (treat as read-only)."""
+    resolved = DEFAULT_THEME
+    for n, _tokens in THEMES:
         if n == name:
-            return tokens
-    return THEMES[0][1]
+            resolved = name
+            break
+    cached = _THEME_CACHE.get(resolved)
+    if cached is None:
+        tokens = None
+        for n, t in THEMES:
+            if n == resolved:
+                tokens = t
+                break
+        cached = dict(tokens)
+        for role, base in _SEMANTIC_ALIAS:
+            if role not in cached:
+                cached[role] = tokens[base]
+        for role, idx in _SEMANTIC_STATIC:
+            if role not in cached:
+                cached[role] = idx
+        _THEME_CACHE[resolved] = cached
+    return cached
 
 
 def _nibble(ch):
