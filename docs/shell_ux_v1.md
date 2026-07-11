@@ -126,6 +126,12 @@ door — no setting, no mode:
 
 - **A launcher tap always RUNS the cart.** Every cart type, no per-device default,
   no type dispatch. The launcher home is for playing.
+- **The selected card also exposes the two verbs PLAY / CHANGE** (visual identity
+  v1 §1.2, the Library contract): PLAY runs it (same as the tap), CHANGE opens the
+  SAME project in the Editor landing on Config — the bridge from playing to making,
+  in place, never a surprise duplicate. On the 320×240 tier the verbs ride the
+  lent bar zone as chips; on the desktop-density tiers they draw on the selected
+  card itself (`Launcher.action_rects`). The `C` (code) key is the keyboard route.
 - **Making is an app you launch:** the launcher's first tile is a pinned
   **"Make ✏️" tile** → the Editor's **project-picker** — the same launcher-grid look
   over EVERY editable cart (wallpapers and built-ins included) plus a pinned **＋New**
@@ -322,7 +328,13 @@ works with no carve-out. The wifi keyboard problem is not solved by Settings —
 Settings is an app, wifi setup works while a game keeps running; the bar's wifi
 status icon deep-links here on the windowed tier, exactly this section's model.
 The standalone wifi.moy tool cart remains the launcher-grid path. Settings also
-gained a THEME row — selectable panel colorways, `chrome.THEMES`.)*
+gained a THEME row — selectable panel colorways, `chrome.THEMES`. 2026-07-11:
+the theme tokens grew the visual-identity-v1 §4.3 SEMANTIC roles — desktop /
+surface / ink / focus / play / author / danger etc., resolved for every theme
+with the frozen literals as fallbacks — and an opt-in **"machine"** theme ships
+the Open Machine colorway: dark-blue construction field, navy dot grid/chrome,
+grape identity, green PLAY / orange authoring / yellow focus. "night" stays the
+byte-identical default.)*
 
 Two owner-facing diagnostics rows live here too (#68, both persisted, both default
 OFF — together they are "kid mode"): **PERF DIAG** turns on the measurement

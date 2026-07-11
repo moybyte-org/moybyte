@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from runtime import host_app, moy_carts
+from runtime import chrome, host_app, moy_carts
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -101,6 +101,6 @@ def test_small_theme_grid_stays_inside_catalog(tmp_path):
     app = _open_appearance(ws)
     app._set_mode("themes")
     cards = app.layout.cards(len(app._items()))
-    assert len(cards) == 5
+    assert len(cards) == len(chrome.THEMES)     # one card per shipped theme
     bottom = app.layout.catalog[1] + app.layout.catalog[3]
     assert max(y + h for _x, y, _w, h in cards) <= bottom

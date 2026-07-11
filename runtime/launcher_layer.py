@@ -89,6 +89,11 @@ class Launcher:
 
     def __init__(self, items, layout=None, names=None, blit_glyph=None):
         self.items = items
+        # Visual identity v1 (docs/visual_identity_v1.md Section 1.2): the HOME grid
+        # exposes PLAY/CHANGE on the selected card on the desktop-density tiers
+        # (console sets this True on ws.launcher). The picker keeps it False -- a
+        # pick has ONE meaning there (open in the Editor).
+        self.actions = False
         # Stage 4 (#46 zoned bar): bumped whenever anything the lent left zone
         # shows (the selected cart's title) changes -- the `sel` property below
         # covers nav/tap/hover; set_items bumps it too (a NEW/DUP/DEL/rename can
@@ -198,6 +203,35 @@ class Launcher:
                 return i
         return None
 
+    def action_rects(self):
+        """The selected card's PLAY / CHANGE button rects as {"play": r, "change": r}
+        (visual identity v1 Sections 1.2/6.1: the selected cartridge exposes the two
+        verbs; primary activation still always plays). DESKTOP-density tiers only:
+        returns None on the 320x240 baseline (the lent bar zone carries the verbs
+        there -- LauncherHomeLayer.draw_zone), when `actions` is off (the picker),
+        for a pseudo tile (Make has one verb, its tap), or when the selection is off
+        the current page. Draw and hit-test both read this, so they can't desync."""
+        lay = self.layout
+        if lay._base or not self.actions or not self.items:
+            return None
+        it = self.items[self.sel]
+        if it.get("type") in PSEUDO_TILE_TYPES:
+            return None
+        r = self.tile_rect(self.sel)
+        if r is None:
+            return None
+        x, y, w, h = r
+        fs = lay.fs
+        fw = lay.font_w
+        bh = 14 * fs                          # 8*fs glyph row + 3*fs pad above/below
+        gap = 4 * fs
+        pw = 4 * fw + 6 * fs                  # "PLAY"
+        cw = 6 * fw + 6 * fs                  # "CHANGE"
+        bx = x + (w - (pw + gap + cw)) // 2   # may borrow the column gap, like the pill
+        by = y + 2 + lay.icon_box + 3 + 10 * fs + 3 * fs   # just under the label pill
+        return {"play": (bx, by, pw, bh),
+                "change": (bx + pw + gap, by, cw, bh)}
+
     def draw(self, cv, sheet_for=None):
         # Icon tiles only -- the wallpaper backdrop + status strip + dock are drawn
         # by the Workstation around this (so the wallpaper shows through). For each
@@ -251,14 +285,39 @@ class Launcher:
                 cv.rect(nx - 3 * fs, ny - 2 * fs, len(name) * fw + 6 * fs, ph,
                         acc if sel else NAMES["white"])
                 cv.print(name, nx, ny, NAMES["black"], 1)
+        # The selected card's PLAY / CHANGE row (visual identity v1 Sections 1.2 /
+        # 6.1) -- desktop-density tiers, home grid only (action_rects gates). Signal
+        # colors do the semantic work: green = PLAY, the authoring accent = CHANGE.
+        ar = self.action_rects()
+        if ar is not None:
+            th = self.theme or {}
+            fs = lay.fs
+            for verb, label, bg in (("play", "PLAY", th.get("play", 11)),
+                                    ("change", "CHANGE", th.get("author", 10))):
+                x, y, w, h = ar[verb]
+                cv.rect(x, y, w, h, bg)
+                cv.rectb(x, y, w, h, NAMES["black"])
+                cv.print(label, x + 3 * fs, y + 3 * fs, NAMES["black"], 1)
 
     def _tile_glyph(self, cv, it, box):
         # A type-colored art box with a centered type glyph, for carts with no
         # sprite. Uses the injected shared glyph blitter (host == device).
         NAMES = self._NAMES
         x, y, w, h = box
-        cv.rect(x + 6, y + 6, w - 12, h - 12, _TYPE_COLOR.get(it["type"], NAMES["indigo"]))
-        self._blit_glyph(cv, _TYPE_GLYPH.get(it["type"], "app"), box, NAMES["black"])
+        ttype = it["type"]
+        fill = _TYPE_COLOR.get(ttype, NAMES["indigo"])
+        if ttype == MAKE_TILE_TYPE:
+            # Visual identity v1 Section 6.2: MAKE wears the theme's AUTHORING accent
+            # (the frozen default keeps today's yellow), and on the desktop-density
+            # tiers the whole art box fills with it so the pinned tile reads
+            # unmistakably primary next to the cartridge covers.
+            fill = (self.theme or {}).get("author", _TYPE_COLOR[MAKE_TILE_TYPE])
+            if not self.layout._base:
+                cv.rect(x, y, w, h, fill)
+                self._blit_glyph(cv, _TYPE_GLYPH[MAKE_TILE_TYPE], box, NAMES["black"])
+                return
+        cv.rect(x + 6, y + 6, w - 12, h - 12, fill)
+        self._blit_glyph(cv, _TYPE_GLYPH.get(ttype, "app"), box, NAMES["black"])
 
 
 class LauncherHomeLayer:
@@ -334,6 +393,11 @@ class LauncherHomeLayer:
             ws.launcher.nav2d(0, 1)
         if i.pressed("a") or i.pressed("run"):
             ws.launch_selected()             # launcher tap = RUN the selected cart
+        if i.pressed("code"):
+            # CHANGE (visual identity v1 Section 1.2): open the selected cartridge
+            # in place in the Studio/Editor, landing on Config. The keyboard route
+            # to the second verb; PLAY stays the primary activation above.
+            ws.change_selected()
         return True
 
     def handle_pointer(self, px, py, click):
@@ -354,6 +418,17 @@ class LauncherHomeLayer:
                 ws.launcher.flip_page(-1); return True
             if ws.launcher.max_page() > 0 and self._in(px, py, lay.page_next):
                 ws.launcher.flip_page(1); return True
+            # The selected card's PLAY / CHANGE buttons (desktop-density tiers).
+            # Checked before the tile hit so a button tap never falls through to
+            # the card's primary activation underneath it.
+            ar = ws.launcher.action_rects()
+            if ar is not None:
+                if self._in(px, py, ar["play"]):
+                    ws.launch_selected()
+                    return True
+                if self._in(px, py, ar["change"]):
+                    ws.change_selected()
+                    return True
             i = ws.launcher.tile_at(px, py)
             if i is not None:
                 ws.launcher.sel = i
@@ -382,27 +457,76 @@ class LauncherHomeLayer:
         BarLayer a uniform `owner.zone_gen` regardless of which app owns a zone."""
         return self.ws.launcher.zone_gen
 
+    def _zone_action_rects(self, rect):
+        """PLAY / CHANGE chip rects inside the lent bar zone -- the 320x240-baseline
+        home of the selected card's two verbs (visual identity v1 Section 7: on the
+        small tier 'selected actions use the zoned bar'; the desktop-density tiers
+        draw them on the card itself, Launcher.action_rects). None off-baseline,
+        with no real cart selected (the Make tile has one verb, its tap), or when
+        the zone is too narrow to keep any room for the name."""
+        ws = self.ws
+        lay = ws.layout
+        if not lay._base:
+            return None
+        sel = ws.launcher.selected()
+        if sel is None or sel.get("type") in PSEUDO_TILE_TYPES:
+            return None
+        fw = lay.font_w
+        pw = 4 * fw + 6                     # "PLAY"
+        cw = 6 * fw + 6                     # "CHANGE"
+        cx = rect[0] + rect[2] - cw         # CHANGE flush right, PLAY beside it
+        px_ = cx - 4 - pw
+        if px_ < rect[0] + 6 * fw:          # keep some room for the name
+            return None
+        return {"play": (px_, 2, pw, 13), "change": (cx, 2, cw, 13)}
+
     def draw_zone(self, cv, rect):
-        """The launcher's lent left zone: just the selected cart's name (or empty
-        when there is none) -- cart management (create/copy/delete) moved to the
-        Editor picker's zone (docs/shell_ux_v1.md: the launcher is for PLAYING, the
-        picker is for MANAGING projects), so NEW/DUP/DEL no longer draw here. Starts
-        flush at the zone's left edge now that nothing else shares the space."""
+        """The launcher's lent left zone: the selected cart's name (or empty when
+        there is none) -- cart management (create/copy/delete) moved to the Editor
+        picker's zone (docs/shell_ux_v1.md: the launcher is for PLAYING, the picker
+        is for MANAGING projects), so NEW/DUP/DEL no longer draw here. On the
+        320x240 baseline the zone also carries the selected card's PLAY / CHANGE
+        chips (visual identity v1 Section 1.2), right-aligned so the name keeps its
+        flush-left spot."""
         ws = self.ws
         NAMES = self._NAMES
         lay = ws.layout
         sel = ws.launcher.selected()
-        if sel is not None:
-            name = sel["title"]
-            maxc = max(4, rect[2] // lay.font_w)
-            if len(name) > maxc:
-                name = name[:maxc]
-            cv.print(name, rect[0] + 2, 3, NAMES["white"], 1)
+        if sel is None:
+            return
+        chips = self._zone_action_rects(rect)
+        limit = rect[2]
+        if chips is not None:
+            limit = chips["play"][0] - 4 - rect[0]
+        name = sel["title"]
+        maxc = max(4, limit // lay.font_w)
+        if len(name) > maxc:
+            name = name[:maxc]
+        cv.print(name, rect[0] + 2, 3, NAMES["white"], 1)
+        if chips is not None:
+            th = ws.theme_colors
+            for verb, label, bg in (("play", "PLAY", th["play"]),
+                                    ("change", "CHANGE", th["author"])):
+                x, y, w, h = chips[verb]
+                cv.rect(x, y, w, h, bg)
+                cv.rectb(x, y, w, h, NAMES["black"])
+                cv.print(label, x + 3, y + 3, NAMES["black"], 1)
 
     def zone_tap(self, px, py, rect=None):
-        """The launcher's lent left zone is display-only now (just the selected
-        cart's name) -- NEW/DUP/DEL moved to EditorPickerLayer.zone_tap, so there is
-        nothing left to claim here."""
+        """The launcher's lent left-zone tap slice: the PLAY / CHANGE chips on the
+        320x240 baseline (visual identity v1 Section 1.2 -- PLAY runs the selected
+        cart, CHANGE opens it in the Studio/Editor on Config). Anything else falls
+        through (the rest of the zone is display-only)."""
+        ws = self.ws
+        chips = self._zone_action_rects(
+            rect if rect is not None else ws.layout.zone_left)
+        if chips is not None:
+            if self._in(px, py, chips["play"]):
+                ws.launch_selected()
+                return True
+            if self._in(px, py, chips["change"]):
+                ws.change_selected()
+                return True
         return False
 
 
