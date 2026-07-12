@@ -121,6 +121,7 @@ class CardsLayer:
         self._err_text = err_text
         self.msel = 0                 # selected card in the menu
         self.mtop = 0                 # first card scrolled into view (#3)
+        self._t = None                # per-draw tone map (set by _draw_cards)
         sc = ws.sys_canvas
         self.layout = CardsLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
 
@@ -381,42 +382,63 @@ class CardsLayer:
 
     # -- draw ----------------------------------------------------------------
 
-    def _draw_cards(self):
+    def _tones(self):
+        """Per-draw color roles: the frozen literals on the 320x240 baseline
+        (byte-identical), the semantic theme tokens on the shelf tiers -- the
+        Phase 3 warm tool surface (visual identity v1 Section 10): cream body,
+        dark ink, the orange authoring accent on the value controls."""
         NAMES = self._NAMES
+        if self.layout._base:
+            return {"body": NAMES["dark_purple"], "edge": NAMES["pink"],
+                    "head": NAMES["white"], "text": NAMES["light_grey"],
+                    "sel_text": NAMES["white"], "row": NAMES["indigo"],
+                    "accent": NAMES["yellow"], "track": NAMES["dark_grey"],
+                    "knob": NAMES["white"], "cell": NAMES["dark_purple"],
+                    "cell_edge": NAMES["dark_grey"]}
+        th = self.ws.theme_colors
+        return {"body": th["surface"], "edge": th["border"],
+                "head": th["ink"], "text": th["ink"],
+                "sel_text": NAMES["white"], "row": th["hilite"],
+                "accent": th["author"], "track": th["ink_dim"],
+                "knob": th["ink"], "cell": th["dim"],
+                "cell_edge": th["ink_dim"]}
+
+    def _draw_cards(self):
         ws = self.ws
         cv = ws.sys_canvas
         lay = self.layout
+        t = self._t = self._tones()
         # Fullscreen "Make it mine" panel below the unified bar (fix B/C): edge to
         # edge, no centered mini-card. GO/CODE/CLOSE are gone -- PLAY/Code-tab/X are all
         # in the bar (drawn after this by the layer).
-        cv.rect(*(lay.body + (NAMES["dark_purple"],)))
-        cv.rectb(*(lay.body + (NAMES["pink"],)))
-        ws._glyph("edit", lay.head_glyph, NAMES["yellow"], cv)  # pencil = "make it yours"
-        cv.print("MAKE IT MINE", lay.head_xy[0], lay.head_xy[1], NAMES["white"], 2)
+        cv.rect(*(lay.body + (t["body"],)))
+        cv.rectb(*(lay.body + (t["edge"],)))
+        ws._glyph("edit", lay.head_glyph, t["accent"], cv)  # pencil = "make it yours"
+        cv.print("MAKE IT MINE", lay.head_xy[0], lay.head_xy[1], t["head"], 2)
         for row in self._card_layout():
             self._draw_card(row)
         if self._cards_scrollable():           # up/down chevrons when cards overflow
             if self.mtop > 0:
-                cv.print("^", lay.scroll_up[0], lay.scroll_up[1], NAMES["yellow"], 2)
+                cv.print("^", lay.scroll_up[0], lay.scroll_up[1], t["accent"], 2)
             if self.mtop < self._max_mtop():
-                cv.print("v", lay.scroll_dn[0], lay.scroll_dn[1], NAMES["yellow"], 2)
+                cv.print("v", lay.scroll_dn[0], lay.scroll_dn[1], t["accent"], 2)
 
     def _draw_card(self, row):
-        NAMES = self._NAMES
         ws = self.ws
         cv = ws.sys_canvas
         fs = self.layout.fs
+        t = self._t
         i, f = row["i"], row["f"]
         x, y, w, h = row["x"], row["y"], row["w"], row["h"]
         sel = (i == self.msel)
         if sel:
-            cv.rect(x, y - 1 * fs, w, h, NAMES["indigo"])
-        fg = NAMES["white"] if sel else NAMES["light_grey"]
+            cv.rect(x, y - 1 * fs, w, h, t["row"])
+        fg = t["sel_text"] if sel else t["text"]
         disp = row["display"]
         if disp is None:                                # today's plain text card
-            ws._glyph("minus", (x, y, 14 * fs, 14 * fs), NAMES["yellow"], cv)
+            ws._glyph("minus", (x, y, 14 * fs, 14 * fs), t["accent"], cv)
             cv.print(self.card_text(i), x + 18 * fs, y, fg, 2)
-            ws._glyph("plus", (x + w - 14 * fs, y, 14 * fs, 14 * fs), NAMES["yellow"], cv)
+            ws._glyph("plus", (x + w - 14 * fs, y, 14 * fs, 14 * fs), t["accent"], cv)
             return
         # Visual card: a small label line (the SECONDARY text cue) + a picture row.
         cv.print(self.card_text(i), x + 2 * fs, y, fg, 1)
@@ -456,10 +478,11 @@ class CardsLayer:
                   NAMES["green"], cv)
         ws._glyph(ends.get("high", "rabbit"),
                   (x + w - 16 * fs, ty - 6 * fs, 16 * fs, 14 * fs), NAMES["peach"], cv)
-        cv.rect(tx0, ty, tw, 3 * fs, NAMES["dark_grey"])            # track
-        cv.rect(tx0, ty, int(tw * frac), 3 * fs, NAMES["yellow"])   # filled portion
+        t = self._t
+        cv.rect(tx0, ty, tw, 3 * fs, t["track"])                    # track
+        cv.rect(tx0, ty, int(tw * frac), 3 * fs, t["accent"])       # filled portion
         kx = tx0 + int(tw * frac)
-        cv.rect(kx - 1 * fs, ty - 3 * fs, 3 * fs, 9 * fs, NAMES["white"])   # knob
+        cv.rect(kx - 1 * fs, ty - 3 * fs, 3 * fs, 9 * fs, t["knob"])   # knob
 
     def _draw_count(self, row):
         # N repeated icons == the value, so a count reads at a glance. Kept to ONE
@@ -483,7 +506,7 @@ class CardsLayer:
         for k in range(shown):
             gx = x + 2 * fs + k * step
             ws._glyph(glyph, (gx, y + 14 * fs, 14 * fs, 14 * fs),
-                      self._NAMES["yellow"], ws.sys_canvas)
+                      self._t["accent"], ws.sys_canvas)
 
     def _draw_choice_icons(self, row):
         # Each choice is its own tappable cell -- a glyph (choice-icons) or a real
@@ -499,8 +522,9 @@ class CardsLayer:
         icons = f.get("icons") or []
         for k, (cx, cy, cw, ch) in self._choice_cells(row):
             chosen = (k == sel_k)
-            cv.rect(cx, cy, cw, ch, NAMES["black"] if chosen else NAMES["dark_purple"])
-            cv.rectb(cx, cy, cw, ch, NAMES["yellow"] if chosen else NAMES["dark_grey"])
+            t = self._t
+            cv.rect(cx, cy, cw, ch, NAMES["black"] if chosen else t["cell"])
+            cv.rectb(cx, cy, cw, ch, NAMES["yellow"] if chosen else t["cell_edge"])
             if tiles is not None and ws.project.sheet is not None:
                 img = ws.project.sheet.tile_image(tiles[k] if k < len(tiles) else 0, -1)
                 if img is not None:
@@ -550,4 +574,4 @@ class CardsLayer:
             self._draw_bg_thumb(f["choices"][k],
                                 (cx + 1 * fs, cy + 1 * fs, cw - 2 * fs, ch - 2 * fs))
             cv.rectb(cx, cy, cw, ch,
-                     NAMES["yellow"] if k == sel_k else NAMES["dark_grey"])
+                     NAMES["yellow"] if k == sel_k else self._t["cell_edge"])
