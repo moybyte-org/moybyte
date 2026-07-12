@@ -38,7 +38,10 @@ from device_canvas import DeviceCanvas, _LayerComp, _FONT8, _FONT8_FIRST
 from device_wifi import make_wifi
 
 GAME_W, GAME_H = 320, 240
-FONT_SCALE = 2                     # 7" 1024x600 default; persisted system.json overrides
+FONT_SCALE = 1                     # 1x everywhere (owner call, 2026-07-12): the 7"
+                                   # 1024x600 fits CONTENT, not magnification --
+                                   # geometry is resolution-driven; persisted
+                                   # system.json still overrides (Settings FONT SIZE)
 # Internal-flash store root. NOT "/moybyte/..." -- a root-level dir named like an
 # importable module SHADOWS the frozen module of that name ('' precedes '.frozen'
 # on sys.path), and the first boot's seeded /moybyte dir broke the next boot's

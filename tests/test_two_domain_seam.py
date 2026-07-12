@@ -103,9 +103,11 @@ def test_desktop_reflows_on_a_larger_canvas(tmp_path):
     ws = _ws(tmp_path, sys_size=(640, 480))
     assert ws.sys_canvas is not ws.canvas
     assert (ws.sys_canvas.w, ws.sys_canvas.h) == (640, 480)
-    # More columns than the 4x2 baseline (the Library shelf fills the bigger band:
-    # one tall featured slot + ROWS x (COLS-1) cartridge cards per page).
-    assert ws.launcher.COLS > 4 and ws.launcher.ROWS >= 2
+    # The Library shelf reflows to the canvas (one tall featured slot + ROWS x
+    # (COLS-1) cartridge cards per page). Columns are RESOLUTION-driven (cards
+    # target ~w/5, the mockup's proportions) -- a bigger canvas buys bigger
+    # cards and crisper 1x text, not magnification.
+    assert ws.launcher.COLS >= 4 and ws.launcher.ROWS >= 2
     assert ws.launcher.PAGE == ws.launcher.ROWS * (ws.launcher.COLS - 1) + 1
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)

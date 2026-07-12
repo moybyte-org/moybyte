@@ -269,8 +269,8 @@ class Launcher:
             return None
         x, y, w, h = r
         fs = lay.fs
-        pad = 2 * fs
-        bh = 13 * fs
+        pad = max(2 * fs, 3)
+        bh = max(13 * fs, 22)          # touch-target floor: 1x text, full-size button
         # Asymmetric split (the mockup's proportions): PLAY compact, CHANGE wide
         # enough for its six-glyph label at every shelf card width.
         avail = w - 3 * pad
@@ -346,9 +346,11 @@ class Launcher:
         lay = self.layout
         fs = lay.fs
         x, y, w, h = rect
-        band_h = 14 * fs
+        band_h = max(14 * fs, 20)
         ar = self.action_rects() if selected else None
-        btn_area = (13 * fs + 6 * fs) if ar is not None else 0
+        btn_area = 0
+        if ar is not None:
+            btn_area = max(13 * fs, 22) + 2 * max(2 * fs, 3)
         cover_h = h - band_h - btn_area
         # Cover: the cart's own sprite art scaled up on the dark field, else its
         # type glyph in the type color (the pre-literate cue, now cover-sized).
@@ -437,15 +439,16 @@ class Launcher:
         heading = ("MAKE", "STUDIO") if make else ("NEW",)
         caption = "Open or create a project" if make else "Start a fresh project"
         ty = y + h * 11 // 20
+        mult = getattr(lay, "lib_mult", 2)           # ~32px display type at any fs
         for line in heading:
-            tw = _text_w(cv, line, 2)
+            tw = _text_w(cv, line, mult)
             if tw > w - 4 * fs:                      # narrow card -> body size
                 tw = _text_w(cv, line, 1)
                 cv.print(line, x + (w - tw) // 2, ty, NAMES["black"], 1)
                 ty += 10 * fs
             else:
-                _print_scaled(cv, line, x + (w - tw) // 2, ty, NAMES["black"], 2)
-                ty += 18 * fs
+                _print_scaled(cv, line, x + (w - tw) // 2, ty, NAMES["black"], mult)
+                ty += 8 * fs * mult + 2 * fs
         ty += 2 * fs
         maxc = max(6, (w - 4 * fs) // lay.font_w)
         for line in _wrap_words(caption, maxc):
@@ -582,12 +585,18 @@ class LauncherHomeLayer:
         cv.rect(x, y, w, h, th["surface"])
         for i in range(fs):
             cv.rectb(x - i, y - i, w + 2 * i, h + 2 * i, th["border"])
-        # Header: the mascot + display-type "LIBRARY".
-        hx = x + 12 * fs
-        hy = y + (lay.lib_header_h - 16 * fs) // 2
-        ws._icon("moy", hx, hy, cv)
-        _print_scaled(cv, "LIBRARY", hx + 22 * fs,
-                      y + (lay.lib_header_h - 16 * fs) // 2, th["ink"], 2)
+        # Header: the mascot + display-type "LIBRARY", both sized by the shelf's
+        # display multiplier (resolution-locked ~32px, whatever the body fs).
+        mult = getattr(lay, "lib_mult", 2)
+        hx = x + max(10 * fs, 20)
+        moy = getattr(ws, "_icon_image_keyed", lambda kind: None)("moy")
+        isc = max(1, (8 * fs * mult) // 16)          # mascot ~= the type height
+        if moy is not None:
+            cv.spr(moy, hx, y + (lay.lib_header_h - 16 * isc) // 2, isc)
+        else:
+            ws._icon("moy", hx, y + (lay.lib_header_h - 16 * fs) // 2, cv)
+        _print_scaled(cv, "LIBRARY", hx + 16 * isc + 6 * fs,
+                      y + (lay.lib_header_h - 8 * fs * mult) // 2, th["ink"], mult)
         # Footer: "N CARTRIDGES" centered between thin rules.
         n = 0
         for it in ws.launcher.items:
