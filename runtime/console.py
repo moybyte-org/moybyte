@@ -1575,6 +1575,12 @@ class Workstation:
         if self._run_caller is self.editor_app:
             self._dirty = True             # screen change repaints (#44)
             self.wm.goto("menu")           # Stage 6e: pop the Player, back to the Editor tab
+            # #80: returning DIRECTLY to the code tab is not a tab CHANGE, so
+            # set_menu_view's text-mode flip never fires here -- the keyboard
+            # stayed in the cart's raw-matrix mode, where plain letters still
+            # map but the sym layer doesn't exist (sym+digit typed NOTHING in
+            # the code editor after a PLAY). Restore the returned-to tab's mode.
+            self._set_text_mode(getattr(self.editor_app, "tab", None) == "code")
         else:
             self.go_home()
 
