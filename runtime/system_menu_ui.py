@@ -30,6 +30,21 @@ the same duplication BlockEditorUI's `_BLK_*`/`_BASE_W` use) so the drawing bodi
 stay byte-for-byte identical to the pre-extraction versions.
 """
 
+# ui (the shared widget toolkit), bound lazily (the chrome-cycle dodge).
+_ui_mod = None
+
+
+def _toolkit():
+    global _ui_mod
+    if _ui_mod is None:
+        try:
+            import ui as mod
+        except ImportError:  # pragma: no cover - host fallback
+            from runtime import ui as mod
+        _ui_mod = mod
+    return _ui_mod
+
+
 # Mirrors console.py's _POPUP_* (the ≡ dropdown geometry); duplicated rather than
 # imported back to avoid the circular import console.py -> system_menu_ui -> console.
 _POPUP_Y = 18                 # top edge flush under the 18px bar (== _STATUS_H)
@@ -108,8 +123,7 @@ class SystemMenuUI:
         # keeps every product byte-identical (the 320x240 baseline).
         fs = m.fs
         x, y, w, h = m.panel_rect()
-        cv.rect(x, y, w, h, NAMES["dark_purple"])          # panel base fill
-        cv.rectb(x, y, w, h, NAMES["indigo"])              # framed edge
+        _toolkit().dialog(cv, (x, y, w, h), ring=NAMES["indigo"])   # panel shell
         cy = _POPUP_Y * fs
         for idx in range(len(m.items)):
             it = m.items[idx]

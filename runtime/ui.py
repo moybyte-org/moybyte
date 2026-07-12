@@ -343,6 +343,38 @@ def status_row(cv, th, rect, items):
         tx += (len(s) + 2) * fw
 
 
+def toolbar(cv, th, rect):
+    """The app toolbar band (Writer/Storybook): the theme's title surface --
+    chips and status text draw over it in title_ink."""
+    x, y, w, h = rect
+    cv.rect(x, y, w, h, th.get("title", 13))
+    return rect
+
+
+def dialog(cv, rect, ring=_WHITE, fill=2):
+    """The dark MODAL panel shell (the blocks prompts/insert menu, the system
+    menu, the graduation banner): dark-purple base + a colored frame. Geometry
+    stays the caller's (their hit rects are test-pinned constants); only the
+    shell drawing is shared."""
+    x, y, w, h = rect
+    cv.rect(x, y, w, h, fill)
+    cv.rectb(x, y, w, h, ring)
+
+
+def text_field(cv, rect, text, placeholder=""):
+    """The modal prompts' text-entry field at the game canvas's fixed 1x metrics
+    (both block prompts draw there): black field, light-grey ring, cream text or
+    a dim placeholder, and the yellow caret bar after the text."""
+    x, y, w, h = rect
+    cv.rect(x, y, w, h, _BLACK)
+    cv.rectb(x, y, w, h, 6)
+    if text:
+        cv.print(text, x + 4, y + 3, _WHITE, 1)
+    elif placeholder:
+        cv.print(placeholder, x + 4, y + 3, 5, 1)
+    cv.rect(x + 4 + len(text) * 8, y + 3, 6, 8, 10)
+
+
 def panel(cv, th, rect, title=None, fs=None):
     """A tool panel: the warm surface + thin border, optionally a compact title
     strip (title bg / title ink tokens). Returns the CONTENT rect (inside the
