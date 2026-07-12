@@ -498,7 +498,11 @@ class SettingsLayer:
         area = (lay.set_x, lay.set_row_y0, lay.set_w,
                 self._settings_visible() * lay.set_row_h)
         self.scroll.set(area, len(rows) * lay.set_row_h)
-        self.scroll.offset = self.set_top * lay.set_row_h
+        # Keep the sub-row remainder while a drag is active.  Re-snapping from
+        # set_top on every pointer sample discards normal 3-5px finger movement,
+        # so a gradual drag can never accumulate enough travel to cross a row.
+        if self.scroll._drag_y is None:
+            self.scroll.offset = self.set_top * lay.set_row_h
         return self.scroll
 
     def _rows_drag(self, px, py):

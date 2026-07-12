@@ -255,6 +255,25 @@ def test_settings_rows_drag_scrolls(tmp_path):
     assert sl.set_top < top                                # drag down -> back up
 
 
+def test_settings_rows_drag_accumulates_small_pointer_moves(tmp_path):
+    """Real touch samples arrive a few pixels apart; their remainder must survive
+    between events until it crosses a row boundary."""
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.open_settings()
+    sl = ws.settings_layer
+    view = sl._scroll_region().view
+    cx = view[0] + view[2] // 2
+    cy = view[1] + view[3] - 4
+    ws.pointer.down = True
+    sl.handle_pointer(cx, cy, False)
+    step = 5
+    moves = ws.layout.set_row_h // step + 2
+    for i in range(moves):
+        sl.handle_pointer(cx, cy - (i + 1) * step, False)
+    assert sl.set_top > 0
+
+
 # -- ScrollRegion ------------------------------------------------------------------
 
 def test_scroll_region_clamps_and_shows():
