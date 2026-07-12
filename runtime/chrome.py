@@ -281,24 +281,37 @@ class Layout:
             # featured cart on later pages) + rows x (cols-1) cartridge cards with
             # cover art, a title band, and the selected card's PLAY/CHANGE row.
             self.icon_x0 = _ICON_X0 * fs                 # legacy attr (unused here)
-            mx = 24 * fs
-            pt = self.status_h + 12 * fs
-            self.lib_panel = (mx, pt, self.w - 2 * mx, self.h - pt - 22 * fs)
-            self.lib_header_h = 28 * fs
-            self.lib_footer_h = 24 * fs
-            self.lib_gap = 8 * fs
-            inset = 12 * fs
+            # RESOLUTION-driven, not font-scale-driven (owner call, 2026-07-12:
+            # "everything is 1x; two resolutions"): the shelf's proportions come
+            # from the canvas size -- the mockup's 4 big columns at 1024x600 --
+            # with fs-multiples only as floors so a kid who picks a bigger
+            # Settings font never gets clipped chrome. At 1024x600 the geometry
+            # is near-identical at fs 1 and 2; fs 1 just fits crisper text.
+            mx = max(16 * fs, self.w // 20)
+            pt = self.status_h + max(8 * fs, self.h // 24)
+            pb = max(16 * fs, self.h // 14)
+            self.lib_panel = (mx, pt, self.w - 2 * mx, self.h - pt - pb)
+            self.lib_header_h = max(26 * fs, self.h // 12)
+            self.lib_footer_h = max(20 * fs, self.h // 15)
+            self.lib_gap = max(6 * fs, self.w // 64)
+            # Display-type multiplier: the shelf's headings hold ~32px regardless
+            # of the body font scale (petme128 x4 at fs1, x2 at fs2).
+            self.lib_mult = max(1, 4 // fs)
+            inset = max(10 * fs, self.w // 42)
             px_, py_, pw_, ph_ = self.lib_panel
             gx = px_ + inset
             gy = py_ + self.lib_header_h
             gw = pw_ - 2 * inset
             gh = ph_ - self.lib_header_h - self.lib_footer_h - 4 * fs
-            self.lib_grid = (gx, gy, gw, gh)
-            self.cols = max(3, min(7, (gw + self.lib_gap) //
-                                   (104 * fs + self.lib_gap)))
+            self.cols = max(3, min(6, (gw + self.lib_gap) //
+                                   (self.w // 5 + self.lib_gap)))
             self.rows = 2
             self.lib_card_w = (gw - (self.cols - 1) * self.lib_gap) // self.cols
             self.lib_card_h = (gh - self.lib_gap) // 2
+            # Center the integer-division slack so the grid sits square in the panel.
+            span = self.cols * self.lib_card_w + (self.cols - 1) * self.lib_gap
+            gx += max(0, (gw - span) // 2)
+            self.lib_grid = (gx, gy, gw, gh)
             self.page = self.rows * (self.cols - 1) + 1   # tall slot + 2x(cols-1)
 
         # -- unified top bar: icon size + clusters (Stage 1) -------------------
@@ -355,10 +368,12 @@ class Layout:
             self.page_prev, self.page_next = _PAGE_PREV, _PAGE_NEXT
         else:
             px_, py_, pw_, ph_ = self.lib_panel
-            ah = 16 * fs
+            ah = max(16 * fs, self.lib_footer_h * 2 // 3)   # touch-target floor at fs1
+            aw = max(22 * fs, 30)
+            am = max(10 * fs, 20)
             ay = py_ + ph_ - self.lib_footer_h + (self.lib_footer_h - ah) // 2
-            self.page_prev = (px_ + 12 * fs, ay, 22 * fs, ah)
-            self.page_next = (px_ + pw_ - 12 * fs - 22 * fs, ay, 22 * fs, ah)
+            self.page_prev = (px_ + am, ay, aw, ah)
+            self.page_next = (px_ + pw_ - am - aw, ay, aw, ah)
 
         # -- Settings rows + panel (scale row height with the font) --------------
         self.set_row_h = _SET_ROW_H * fs
