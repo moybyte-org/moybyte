@@ -30,6 +30,22 @@ injected.
 """
 from editors import CodeEditor
 
+# ui (the shared widget toolkit) is imported LAZILY: ui imports chrome, and
+# chrome imports THIS module's geometry constants, so a module-level import
+# here would re-enter chrome half-initialized whichever side loads first.
+_ui = None
+
+
+def _toolkit():
+    global _ui
+    if _ui is None:
+        try:
+            import ui as mod
+        except ImportError:  # pragma: no cover - host fallback
+            from runtime import ui as mod
+        _ui = mod
+    return _ui
+
 
 # -- code-editor geometry (single source; console.py imports these back) ------
 # The area/line-height feed console's CodeLayout (responsive) + the crash panel; the
@@ -149,6 +165,7 @@ class CodeLayer:
         self._ekey_prev = 0           # last consumed keyboard byte (editor edge detect)
         self._drag = None             # last pointer pos during a code-view drag-scroll
         self._hl_cache = {}           # per-line syntax-highlight memo (#24)
+        self._t = None                # per-draw tone map (set by _draw_code)
 
     def reset(self):
         """Reset the keyboard edge tracker (called by ws.set_menu_view when the editor
@@ -241,6 +258,35 @@ class CodeLayer:
 
     # -- draw ----------------------------------------------------------------
 
+    # Light-surface syntax set (visual identity v1 Phase 3): the dark-background
+    # highlight colors above don't read on the warm cream surface, so runs remap
+    # through this at draw time (per RUN, not per char -- the _hl memo stays
+    # untouched). Deep, §4.2-friendly hues: black text, deep teal keywords, dark
+    # green strings, brown numbers, dim warm comments, dark purple cart verbs.
+    _HL_LIGHT = {_HL_TEXT: 0, _HL_KEYWORD: 59, _HL_STRING: 3,
+                 _HL_NUMBER: 4, _HL_COMMENT: 53, _HL_BUILTIN: 2}
+
+    def _tones(self):
+        """Per-draw color roles: frozen literals on the 320x240 baseline
+        (byte-identical); theme tokens on the shelf tiers. The syntax remap only
+        engages on a LIGHT surface (dark ink token), so the dark themes keep the
+        shipped highlight set on their own panel color."""
+        NAMES = self._NAMES
+        if self.ws.code_layout._base:
+            return {"bg": NAMES["black"], "caret": NAMES["yellow"],
+                    "sym_bg": NAMES["dark_grey"], "sym_edge": NAMES["indigo"],
+                    "sym_ink": NAMES["white"], "hl": None}
+        th = self.ws.theme_colors
+        if th.get("ink", NAMES["white"]) != 0:      # dark surface -> dark set
+            return {"bg": th.get("surface", NAMES["black"]),
+                    "caret": NAMES["yellow"],
+                    "sym_bg": NAMES["dark_grey"], "sym_edge": NAMES["indigo"],
+                    "sym_ink": NAMES["white"], "hl": None}
+        return {"bg": th["surface"], "caret": th["ink"],
+                "sym_bg": th.get("surface_alt", NAMES["dark_grey"]),
+                "sym_edge": th["border"], "sym_ink": th["ink"],
+                "hl": self._HL_LIGHT}
+
     def _draw_code(self):
         # Responsive (#39 step 2): the code editor draws on the SYSTEM canvas at
         # native size, so a bigger panel shows more lines + wider columns and a
@@ -254,7 +300,8 @@ class CodeLayer:
         cell = lay.cell                          # on-screen char-cell width (8*fs)
         lh = lay.lh
         ed = ws.editor
-        cv.cls(NAMES["black"])                  # full-screen editor
+        t = self._t = self._tones()
+        cv.cls(t["bg"])                         # full-screen editor
         # The old title + RUN/SAVE/CLOSE top band is gone (Stage 4 rollout): the unified
         # bar (drawn after this in draw()) owns the top 18px -- PLAY runs, SAVE persists,
         # X exits, and the tab ladder switches views. The text area already starts at
@@ -282,7 +329,13 @@ class CodeLayer:
                 if ed.top + idx == ed.row:      # caret on the cursor's line
                     vcol = ed.col - ed.left
                     if 0 <= vcol <= cols:
-                        cv.rect(lay.x0 + vcol * cell, y, fs, 8 * fs, NAMES["yellow"])
+                        cv.rect(lay.x0 + vcol * cell, y, fs, 8 * fs, t["caret"])
+        # Status band (Phase 3, shelf tiers): the mockup's "Ln 13, Col 1" strip.
+        if lay.status_band is not None and ed is not None:
+            issues = "1 ISSUE" if ws.code_err else "NO ISSUES"
+            _toolkit().status_row(cv, ws.theme_colors, lay.status_band,
+                           ("LN " + str(ed.row + 1) + ", COL " + str(ed.col + 1),
+                            str(len(ed.lines)) + " LINES", issues))
         self._draw_symbols()
 
     def _hl(self, line):
@@ -302,6 +355,7 @@ class CodeLayer:
         cv = self.ws.sys_canvas
         lay = self.ws.code_layout
         x0, cell = lay.x0, lay.cell
+        hl = (self._t or {}).get("hl")
         n = len(seg)
         i = 0
         while i < n:
@@ -309,7 +363,8 @@ class CodeLayer:
             j = i + 1
             while j < n and segcols[j] == cl:
                 j += 1
-            cv.print(seg[i:j], x0 + i * cell, y, cl, 1)
+            cv.print(seg[i:j], x0 + i * cell, y,
+                     hl.get(cl, cl) if hl else cl, 1)
             i = j
 
     def _draw_symbols(self):
@@ -322,8 +377,9 @@ class CodeLayer:
         sc = lay.sym_cell
         sy = lay.sym_y
         sh = lay.sym_h
+        t = self._t if self._t is not None else self._tones()
         for i in range(len(_CODE_SYMBOLS)):
             x = lay.sym_area[0] + i * sc
-            cv.rect(x, sy, sc - 1, sh - 1, NAMES["dark_grey"])
-            cv.rectb(x, sy, sc - 1, sh - 1, NAMES["indigo"])
-            cv.print(_CODE_SYMBOLS[i], x + 6 * fs, sy + 6 * fs, NAMES["white"], 1)
+            cv.rect(x, sy, sc - 1, sh - 1, t["sym_bg"])
+            cv.rectb(x, sy, sc - 1, sh - 1, t["sym_edge"])
+            cv.print(_CODE_SYMBOLS[i], x + 6 * fs, sy + 6 * fs, t["sym_ink"], 1)
