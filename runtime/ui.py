@@ -343,6 +343,46 @@ def status_row(cv, th, rect, items):
         tx += (len(s) + 2) * fw
 
 
+# --- the classic game-canvas button family -----------------------------------
+# The pre-toolkit Workstation draw trio (_btn/_icon_btn/_mini_btn), moved here
+# verbatim (the v0.5 kernel-shrink direction: console stays compositor/router);
+# Workstation keeps thin delegates so every call site and test is untouched.
+# These are the EDITOR-body vocabulary (paint/map/music/blocks action bars and
+# the block prompts' pads): caller-colored fill, cream ring, black label.
+
+def game_btn(cv, rect, label, fill):
+    """A labeled action button. Preserves the frozen baseline quirk VERBATIM:
+    at font scale 1 the label prints with the legacy scale-2 arg but centers
+    with height 8 (byte-identical to the shipped pixels)."""
+    x, y, w, h = rect
+    fs = _fs(cv)
+    cv.rect(x, y, w, h, fill)
+    cv.rectb(x, y, w, h, _WHITE)
+    if fs <= 1:
+        cv.print(label, x + 6, y + (h - 8) // 2, _BLACK, 2)
+    else:
+        cv.print(label, x + 6 * fs, y + (h - 8 * fs) // 2, _BLACK, 2)
+
+
+def game_icon_btn(cv, rect, kind, label, fill):
+    """A button that leads with an icon glyph (pre-literate) and keeps the word
+    as a small secondary cue beside it."""
+    x, y, w, h = rect
+    fs = _fs(cv)
+    cv.rect(x, y, w, h, fill)
+    cv.rectb(x, y, w, h, _WHITE)
+    _blit_glyph(cv, kind, (x + 2 * fs, y, 16 * fs, h), _BLACK)
+    if label:
+        cv.print(label, x + 19 * fs, y + (h - 8 * fs) // 2, _BLACK, 1)
+
+
+def mini_btn(cv, rect, label, fill):
+    """A tiny labeled chip (no ring) -- the Settings steppers' vocabulary."""
+    x, y, w, h = rect
+    cv.rect(x, y, w, h, fill)
+    cv.print(label, x + 2, y + 2, _BLACK, 1)
+
+
 def toolbar(cv, th, rect):
     """The app toolbar band (Writer/Storybook): the theme's title surface --
     chips and status text draw over it in title_ink."""

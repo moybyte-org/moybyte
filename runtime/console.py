@@ -286,9 +286,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                         NEW_TILE_TYPE, PSEUDO_TILE_TYPES)
 
 try:
-    from ui import is_light as _ui_is_light
+    import ui as _uimod
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.ui import is_light as _ui_is_light
+    from runtime import ui as _uimod
+_ui_is_light = _uimod.is_light
 
 
 class _CoverImage:
@@ -3009,12 +3010,9 @@ class Workstation:
     # hold-progress toast in its place. See player.py.)
 
     def _mini_btn(self, label, rect, fill, cv=None):
-        # Shared draw toolkit (stays on Workstation per the doc): a tiny labeled button.
-        x, y, w, h = rect
-        if cv is None:
-            cv = self.canvas
-        cv.rect(x, y, w, h, fill)
-        cv.print(label, x + 2, y + 2, NAMES["black"], 1)
+        # Shared draw toolkit -- the implementation moved to ui.mini_btn (the
+        # v0.5 kernel-shrink direction); this stays the tested ws entry point.
+        _uimod.mini_btn(cv if cv is not None else self.canvas, rect, label, fill)
 
     # _draw_fps / _fps_tap_rect / _draw_perf_hud (the HUD *rendering*) now live on
     # self.perf_ui (perf_hud.py, PerfHud). The perf *query* API below stays here --
@@ -3101,37 +3099,18 @@ class Workstation:
 
     def _btn(self, label, rect, fill, cv=None):
         # Defaults to the GAME canvas (paint/map editors -- a 320x240 viewport); the
-        # responsive code/block editors (#39 step 2) pass cv=self.sys_canvas so the
-        # button + its label scale with the system font. On a plain Canvas font_scale
-        # is 1, so this is byte-identical to the original.
-        if cv is None:
-            cv = self.canvas
-        x, y, w, h = rect
-        fs = getattr(cv, "font_scale", 1)
-        cv.rect(x, y, w, h, fill)
-        cv.rectb(x, y, w, h, NAMES["white"])
-        # Baseline: the game canvas printed the label at scale 2 (16px) but centered
-        # with height 8 (the legacy quirk) -- preserve that VERBATIM at fs==1. On the
-        # system canvas SystemCanvas renders petme128 at font_scale (the `2` arg is
-        # ignored), so the on-screen text is 8*fs tall -- center it with that.
-        if fs <= 1:
-            cv.print(label, x + 6, y + (h - 8) // 2, NAMES["black"], 2)
-        else:
-            cv.print(label, x + 6 * fs, y + (h - 8 * fs) // 2, NAMES["black"], 2)
+        # responsive code/block editors (#39 step 2) pass cv=self.sys_canvas. The
+        # implementation (incl. the frozen scale-2 baseline quirk) moved to
+        # ui.game_btn; this stays the tested ws entry point.
+        _uimod.game_btn(cv if cv is not None else self.canvas, rect, label, fill)
 
     def _icon_btn(self, kind, label, rect, fill, cv=None):
         """A button that leads with an icon glyph (pre-literate) and keeps the
         word as a small secondary cue beside it -- so a reader still gets the
-        label and a kid who can't read still gets the picture."""
-        if cv is None:
-            cv = self.canvas
-        x, y, w, h = rect
-        fs = getattr(cv, "font_scale", 1)
-        cv.rect(x, y, w, h, fill)
-        cv.rectb(x, y, w, h, NAMES["white"])
-        self._glyph(kind, (x + 2 * fs, y, 16 * fs, h), NAMES["black"], cv)
-        if label:
-            cv.print(label, x + 19 * fs, y + (h - 8 * fs) // 2, NAMES["black"], 1)
+        label and a kid who can't read still gets the picture. Implementation:
+        ui.game_icon_btn."""
+        _uimod.game_icon_btn(cv if cv is not None else self.canvas, rect,
+                             kind, label, fill)
 
     # (_draw_error_panel -- the on-canvas crash report -- moved to Player (Stage 2,
     # player.py): crash chrome is the Player's own UX, per spec Section 2's "guarantees
