@@ -266,7 +266,7 @@ def tab_row_rects(rect, tabs, fs, gap=None):
     return out
 
 
-def tab_row(cv, th, rect, tabs, active, icon_for=None, hits=None):
+def tab_row(cv, th, rect, tabs, active, icon_for=None, hits=None, ink=None):
     """The labeled tab ladder (mockup: Config | Blocks | Code | ...). `tabs` is
     a sequence of (id, label, icon_kind); the ACTIVE tab wears the selection
     color (grape in the shipped themes) with its title ink, inactive tabs stay
@@ -284,7 +284,8 @@ def tab_row(cv, th, rect, tabs, active, icon_for=None, hits=None):
         on = (tid == active)
         if on:
             cv.rect(x, y, w, h, th.get("selection", th.get("hilite", 13)))
-        ink = th.get("title_ink", _BLACK) if on else _WHITE
+        ink_i = th.get("title_ink", _BLACK) if on else (
+            ink if ink is not None else _WHITE)
         img = icon_for(icons[tid]) if icon_for is not None else None
         pad = 3 * fs
         if img is not None:
@@ -292,7 +293,7 @@ def tab_row(cv, th, rect, tabs, active, icon_for=None, hits=None):
                    y + (h - 16 * fs) // 2, fs)
         if labels_on:
             cv.print(str(_tab_label(tabs, tid)),
-                     x + pad + 16 * fs + pad, y + (h - 8 * fs) // 2, ink, 1)
+                     x + pad + 16 * fs + pad, y + (h - 8 * fs) // 2, ink_i, 1)
         if hits is not None:
             hits.add(r, "tab", tid)
     return rects
