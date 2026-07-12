@@ -35,6 +35,10 @@ html,body{margin:0;height:100%;background:#0b0f1a;color:#c2c3c7;
 font:14px ui-monospace,Menlo,Consolas,monospace;display:flex;flex-direction:column;
 align-items:center}
 h1{font-size:14px;color:#fff1e8;margin:8px}#s{color:#ffec27}
+/* Presentation scale: the OS renders 1x at its DESIGN resolution (320x240 /
+   1024x600) and the page INTEGER-upscales the framebuffer to the viewport --
+   crisp square pixels at any monitor size (fit() below snaps; this fluid rule
+   is only the pre-JS fallback and the sub-1x fit). */
 canvas{image-rendering:pixelated;background:#000;border:1px solid #1d2b53;border-radius:6px;
 width:min(96vw,112vh);height:auto;max-width:100%;touch-action:none;cursor:crosshair}
 #ctl{display:flex;justify-content:space-between;gap:24px;width:min(96vw,112vh);
@@ -105,8 +109,17 @@ var buf=actx.createBuffer(1,n,AUDIO_RATE),ch=buf.getChannelData(0);
 for(var i=0;i<n;i++){var v=bin.charCodeAt(i*2)|(bin.charCodeAt(i*2+1)<<8);if(v>=32768)v-=65536;ch[i]=v/32768;}
 var src=actx.createBufferSource();src.buffer=buf;src.connect(actx.destination);
 var t=Math.max(actx.currentTime+0.02,audioNext);src.start(t);audioNext=t+buf.duration;}
+function fit(){/* largest INTEGER scale of the design resolution that fits the
+viewport (crisp square pixels at 1080p/4K alike); below 1x fall back to a
+fluid fractional fit so a small phone still sees the whole screen. */
+var hh=document.querySelector("h1"),ct=document.getElementById("ctl");
+var rw=Math.max(64,window.innerWidth-16);
+var rh=Math.max(64,window.innerHeight-((hh?hh.offsetHeight:0)+(ct?ct.offsetHeight:0)+28));
+var s=Math.min(rw/W,rh/H);if(s>=1)s=Math.floor(s);
+cv.style.width=Math.round(W*s)+"px";cv.style.height=Math.round(H*s)+"px";}
+window.addEventListener("resize",fit);
 function alloc(){cv.width=W;cv.height=H;cx=cv.getContext("2d");cx.imageSmoothingEnabled=false;
-idx=new Uint8Array(W*H);img=cx.createImageData(W,H);rgba=img.data;rs();}
+idx=new Uint8Array(W*H);img=cx.createImageData(W,H);rgba=img.data;rs();fit();}
 function getA(){assLoading=true;return fetch("/assets").then(function(r){return r.json();}).then(function(a){
 W=a.w;H=a.h;PAL=a.palette;FONT=a.font;assCart=a.cart;SHEET=a.sheet||null;if(a.audio_rate)AUDIO_RATE=a.audio_rate;
 TM=a.tilemap?{w:a.tilemap.w,h:a.tilemap.h,cells:a.tilemap.cells.slice()}:null;

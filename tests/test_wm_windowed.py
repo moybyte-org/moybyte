@@ -203,13 +203,20 @@ def test_window_local_tap_hits_the_apps_bar(tmp_path):
     drv.frame(1 / 30)
     assert ws.menu_view == "cards"        # Config-first landing
     win = ws.wm._wins["make"]
-    # The Editor's lent zone: icon slot 3 is the CODE tab (projects, cards,
-    # blocks, code, ... -- editor_app._ZONE_TABS order), stride 18*fs. The app's
-    # bar row sits below the WM title strip.
-    fs = ws._effective_font_scale()
-    lx = win.ctx.layout.zone_left[0] + 3 * (16 + 2) * fs + 2
-    ly = win.ctx.layout.zone_left[1] + 2
-    drv.touch(win.x + 1 + lx, win.y + 1 + win.title_h + ly)
+    # The Editor's lent zone at shelf density: the labeled CODE tab chip (visual
+    # identity v1 Phase 3) -- resolve its rect through the SAME geometry the
+    # draw/tap path uses (editor_app._zone_parts + ui.tab_row_rects), so this
+    # test tracks the layout instead of a hardcoded stride. The app's bar row
+    # sits below the WM title strip.
+    from runtime import ui as _ui
+    from runtime import editor_app as _ea
+    zone = win.ctx.layout.zone_left
+    _proj, tabs_area, _save, _play = ws.editor_app._zone_parts(zone)
+    slim = [(tid, label) for tid, label, _ic in _ea._TAB_CHIPS]
+    rects = dict((tid, r) for tid, r, _l in
+                 _ui.tab_row_rects(tabs_area, slim, max(1, zone[3] // 16)))
+    cx, cy = rects["code"][0] + 2, rects["code"][1] + 2
+    drv.touch(win.x + 1 + cx, win.y + 1 + win.title_h + cy)
     drv.frame(1 / 30)
     assert ws.menu_view == "code"
 
