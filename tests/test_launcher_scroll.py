@@ -72,6 +72,8 @@ def test_flip_page_reveals_later_carts(tmp_path):
     assert lz.tile_rect(last) is None                    # not on page 0
     lz.flip_page(1)
     assert lz.page == 1
+    while lz.tile_rect(last) is None and lz.page < lz.max_page():
+        lz.flip_page(1)                                  # walk to the last page
     assert lz.tile_rect(last) is not None                # now visible
 
 

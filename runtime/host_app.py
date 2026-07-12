@@ -44,6 +44,8 @@ sys.modules.setdefault("music_editor_ui", _music_editor_ui)
 from . import ui as _ui
 sys.modules.setdefault("ui", _ui)   # the shared widget toolkit: editor_app + the
                                     # apps do `import ui` (their frozen device name)
+from . import calc_app as _calc_app
+sys.modules.setdefault("calc_app", _calc_app)   # console does `from calc_app import ...`
 from . import bar_layer as _bar_layer
 from . import cards_layer as _cards_layer
 from . import paint_layer as _paint_layer

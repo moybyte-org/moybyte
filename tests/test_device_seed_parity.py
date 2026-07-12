@@ -53,6 +53,7 @@ TITLE_TO_FOLDER = {
     "Paint": "paint",
     "Appearance": "theme_picker",
     "Writer": "writer",
+    "Calc": "calc",
     "Storybook": "storybook",
     "WiFi": "wifi",
 }

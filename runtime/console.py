@@ -268,6 +268,18 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.writer_app import WriterAppLayer
 
 try:
+    from calc_app import CalcAppLayer
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.calc_app import CalcAppLayer
+
+try:
+    from artwork import PaintAppLayout
+    from appearance_app import AppearanceLayout
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.artwork import PaintAppLayout
+    from runtime.appearance_app import AppearanceLayout
+
+try:
     from storybook_app import StorybookAppLayer
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.storybook_app import StorybookAppLayer
@@ -832,14 +844,12 @@ class Workstation:
         # Content layers (exactly one active per frame, chosen by screen/menu_view). Every
         # surface is now its own Layer/component; only the running-cart "desktop" + the
         # theme wrapper remain thin _LegacyLayer shims over Workstation methods.
+        # SYSTEM APPS (docs/app_api_v1.md) are NOT listed here -- register_app below
+        # adds each one's kind to this table.
         self._content_layers = {
             "launcher": self.launcher_layer,
             "picker": self.editor_picker,
             "settings": self.settings_layer,
-            "artwork": self.artwork_app,
-            "appearance": self.appearance_app,
-            "writer": self.writer_app,
-            "storybook": self.storybook_app,
             "update": _UpdateLayer(self),
             "desktop": _PlayerLayer(self),   # Stage 2: the run loop is ws.player
 
@@ -851,6 +861,21 @@ class Workstation:
             "map": _MapLayer(self),
             "cards": self.cards_layer,
         }
+        # -- SYSTEM APPS (docs/app_api_v1.md): a cartridge identity backed by a
+        # responsive system process. ONE registration wires everything an app
+        # needs -- the launcher dispatch (is_app claims the cart), the router
+        # entry (kind -> layer), the back-stack/window kind, keyboard text mode,
+        # the windowed resize minimum, and the relayout fan-out. Insertion order
+        # is dispatch precedence.
+        self._apps = []
+        self._app_min_sizes = {}
+        self.register_app(self.artwork_app,
+                          min_size=(PaintAppLayout.MIN_W, PaintAppLayout.MIN_H))
+        self.register_app(self.appearance_app,
+                          min_size=(AppearanceLayout.MIN_W, AppearanceLayout.MIN_H))
+        self.register_app(self.writer_app, text_mode=True)
+        self.register_app(self.storybook_app)
+        self.register_app(CalcAppLayer(self, NAMES, _in))
         # The boot logo is a draw-time takeover of the screen content (input still
         # routes to the underlying screen), so it's not in _content_layers.
         self._splash_layer = L("splash", "system", draw=lambda dt: self._draw_splash())
@@ -1122,12 +1147,14 @@ class Workstation:
             self.editor.set_view_size(self.code_layout.cols, self.code_layout.rows)
         # The step-3 responsive editors (#39): each converted layer owns its layout;
         # guarded, since _relayout is first called before _build_layers registers them.
-        for _lyr in ("paint_layer", "map_ui", "music_ui", "cards_layer",
-                     "artwork_app", "appearance_app", "writer_app",
-                     "storybook_app"):
+        for _lyr in ("paint_layer", "map_ui", "music_ui", "cards_layer"):
             _obj = getattr(self, _lyr, None)
             if _obj is not None:
                 _obj.relayout(w, h, fs)
+        for _app, _t in getattr(self, "_apps", ()):   # registered system apps
+            _relay = getattr(_app, "relayout", None)
+            if _relay is not None:
+                _relay(w, h, fs)
         # The windowed WM (wm_windowed.py, big-screen tier) re-anchors its layout
         # contexts after any relayout; a no-op hook on the fullscreen-stack WM.
         _hook = getattr(self.wm, "on_relayout", None) if hasattr(self, "wm") else None
@@ -1856,6 +1883,29 @@ class Workstation:
         # the SAME identity the launcher uses (distinct carts, not repeat opens).
         self.ach.note("open", self.cart.get("path") or self.cart.get("title"))
 
+    def register_app(self, app, text_mode=False, min_size=None):
+        """Register a SYSTEM APP (docs/app_api_v1.md). `app` is a content Layer
+        exposing:
+
+          id            -- the process kind (router / back-stack / window key)
+          is_app(cart)  -- claim a launcher cart as this app's identity
+          open()        -- (re)enter the app on every launch
+          relayout(w, h, fs)  -- adopt a new canvas size / font scale
+
+        `text_mode=True` marks a TYPING app (clean ASCII keyboard, the Writer
+        precedent); `min_size=(w, h)` is the windowed-WM resize minimum in
+        fs-scaled units (the ui.py convention). A launcher tap on the claimed
+        cart opens the app instead of the Player; everything else (window
+        chrome, taskbar chip, theme tokens, the ui toolkit) comes free."""
+        self._apps.append((app, bool(text_mode)))
+        self._content_layers[app.id] = app
+        if min_size is not None:
+            self._app_min_sizes[app.id] = min_size
+
+    def app_min_size(self, kind):
+        """The registered windowed resize minimum for app `kind`, or None."""
+        return self._app_min_sizes.get(kind)
+
     def open(self):
         # RUN landing (spec shell_ux_v1.md Section 2): build the workspace + run the
         # cart on the desktop, recording the launcher home as the caller so QUIT pops
@@ -1864,43 +1914,21 @@ class Workstation:
         # be a dead end on the device). Authoring is a separate app (the Editor), reached
         # via the launcher's Make tile -> project-picker, not a tap-mode on the launcher.
         selected = self.launcher.selected()
-        if self.artwork.is_paint_app(selected):
-            # Paint is a cartridge identity backed by a responsive system process.
-            # It deliberately does not enter Player: Player is the fixed 320x240
-            # contract, while this editor must reflow to a P4/web window.
-            self.cart = selected
-            self.input.text_mode = False
-            self.artwork_app.open()
-            self.wm.goto("artwork")
-            self.ach.note("open", selected.get("path") or selected.get("title"))
-            return
-        if self.appearance_app.is_app(selected):
-            self.cart = selected
-            self.input.text_mode = False
-            self.appearance_app.open()
-            self.wm.goto("appearance")
-            self.ach.note("open", selected.get("path") or selected.get("title"))
-            return
-        if self.writer_app.is_app(selected):
-            # Writer is the same cartridge-identity-over-system-process pattern as
-            # Paint/Appearance -- but it's a TYPING app, so the keyboard goes to
-            # clean ASCII text mode (the code-editor precedent: BACKSPACE is a
-            # plain delete, the bar's context-X is the exit).
-            self.cart = selected
-            self.writer_app.open()
-            self.wm.goto("writer")
-            self._set_text_mode(True)
-            self.ach.note("open", selected.get("path") or selected.get("title"))
-            return
-        if self.storybook_app.is_app(selected):
-            # Storybook (#78): lists/pages navigate in button mode; the page
-            # editor flips text mode on itself when the kid types the words.
-            self.cart = selected
-            self.input.text_mode = False
-            self.storybook_app.open()
-            self.wm.goto("storybook")
-            self.ach.note("open", selected.get("path") or selected.get("title"))
-            return
+        # SYSTEM APPS (docs/app_api_v1.md): a cartridge identity backed by a
+        # responsive system process. Deliberately NOT the Player: the Player is
+        # the fixed 320x240 contract, while an app reflows to a P4/web window.
+        # A TYPING app (register_app text_mode=True, the Writer precedent) gets
+        # the clean ASCII keyboard after it opens; the rest stay in button mode.
+        for _app, _text in self._apps:
+            if _app.is_app(selected):
+                self.cart = selected
+                self.input.text_mode = False
+                _app.open()
+                self.wm.goto(_app.id)
+                if _text:
+                    self._set_text_mode(True)
+                self.ach.note("open", selected.get("path") or selected.get("title"))
+                return
         self._open_workspace()
         self.run(self.project, self.launcher_layer)   # activate desktop, record caller
 

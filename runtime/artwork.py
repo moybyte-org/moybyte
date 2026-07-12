@@ -390,6 +390,12 @@ class PaintAppLayer:
         self.layout = PaintAppLayout(w, h, fs, self.ws.windowed_chrome)
         self.display = None
 
+    def is_app(self, cart):
+        """The app-API matcher (docs/app_api_v1.md): Paint's cartridge identity
+        check lives on the ArtworkService; this delegates so the registry sees
+        the uniform app protocol."""
+        return self.ws.artwork.is_paint_app(cart)
+
     def open(self):
         loaded = self.ws.artwork.load()
         if self.doc.load(loaded):
