@@ -575,7 +575,7 @@ class StorybookAppLayer:
         lay = self.layout
         th = self.ws.theme_colors
         cv.cls(th["panel"])
-        cv.rect(0, lay.bar_h, lay.w, lay.band_h, th["title"])
+        _ui.toolbar(cv, th, (0, lay.bar_h, lay.w, lay.band_h))
         fs = lay.fs
         if self.mode == "shelf":
             cv.print(self.status[:max(1, lay.w // (8 * fs) - 2)],

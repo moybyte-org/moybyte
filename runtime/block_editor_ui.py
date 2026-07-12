@@ -1180,8 +1180,7 @@ class BlockEditorUI:
         y = lay.hint_y - 2 * fs
         w = lay.outline_w
         h = 11 * fs
-        cv.rect(x, y, w, h, NAMES["dark_purple"])
-        cv.rectb(x, y, w, h, NAMES["yellow"])
+        _toolkit().dialog(cv, (x, y, w, h), ring=NAMES["yellow"])
         msg = "YOU LEVELED UP TO CODE!"
         mmax = max(8, w // lay.cell - 1)
         cv.print(msg[:mmax], x + 2 * fs, lay.hint_y, NAMES["yellow"], 1)
@@ -1195,24 +1194,17 @@ class BlockEditorUI:
         NAMES = self._NAMES
         cv = self.ws.canvas
         x, y, w, h = _BLK_KBD
-        cv.rect(x, y, w, h, NAMES["dark_purple"])
-        cv.rectb(x, y, w, h, NAMES["white"])
+        _toolkit().dialog(cv, (x, y, w, h))
         is_text = self.blk_kbd.get("kind") == "text"
         cv.print("TYPE SOME TEXT" if is_text else "NAME YOUR VARIABLE",
                  x + 10, y + 8, NAMES["white"], 1)
         cv.print("type, then OK", x + 10, y + 18, NAMES["light_grey"], 1)
         # the live edit buffer in a field with a blinking-ish caret bar
         fx, fy, fw = x + 10, y + 30, w - 20
-        cv.rect(fx, fy, fw, 14, NAMES["black"])
-        cv.rectb(fx, fy, fw, 14, NAMES["light_grey"])
         txt = (self.blk_kbd.get("text") or "")[:24]
-        if txt:
-            cv.print(txt, fx + 4, fy + 3, NAMES["white"], 1)
-        elif not is_text:
-            # empty buffer: show the default name as a dim placeholder (OK keeps it)
-            cv.print(str(self.blk_kbd.get("var", ""))[:24], fx + 4, fy + 3,
-                     NAMES["dark_grey"], 1)
-        cv.rect(fx + 4 + len(txt) * 8, fy + 3, 6, 8, NAMES["yellow"])   # caret
+        # empty buffer: the default name shows as a dim placeholder (OK keeps it)
+        ph = "" if is_text else str(self.blk_kbd.get("var", ""))[:24]
+        _toolkit().text_field(cv, (fx, fy, fw, 14), txt, ph)
         self.ws._btn("DEL", _BLK_KBD_DEL, NAMES["red"])
         self.ws._btn("OK", _BLK_KBD_OK, NAMES["green"])
         self.ws._btn("X", _BLK_KBD_X, NAMES["dark_grey"])
@@ -1224,21 +1216,14 @@ class BlockEditorUI:
         cv = self.ws.canvas
         k = self.blk_kbd
         x, y, w, h = _BLK_NUM
-        cv.rect(x, y, w, h, NAMES["dark_purple"])
-        cv.rectb(x, y, w, h, NAMES["white"])
+        _toolkit().dialog(cv, (x, y, w, h))
         cv.print("TYPE A NUMBER", x + 10, y + 6, NAMES["white"], 1)
         # live value field; an empty buffer shows the slot's current value, dim (OK keeps it)
         fx, fy, fw = x + 10, y + 18, w - 20
-        cv.rect(fx, fy, fw, 14, NAMES["black"])
-        cv.rectb(fx, fy, fw, 14, NAMES["light_grey"])
         txt = (k.get("text") or "")[:30]
-        if txt:
-            cv.print(txt, fx + 4, fy + 3, NAMES["white"], 1)
-        else:
-            cur = k.get("cur")
-            ph = str(cur) if _blocks_mod.is_literal_value(cur) and cur is not None else "0"
-            cv.print(ph[:30], fx + 4, fy + 3, NAMES["dark_grey"], 1)
-        cv.rect(fx + 4 + len(txt) * 8, fy + 3, 6, 8, NAMES["yellow"])   # caret
+        cur = k.get("cur")
+        ph = str(cur) if _blocks_mod.is_literal_value(cur) and cur is not None else "0"
+        _toolkit().text_field(cv, (fx, fy, fw, 14), txt, ph[:30])
         # the digit grid (0-9 . -)
         for idx in range(len(_BLK_NUM_KEYS)):
             r = idx // _BLK_NUM_BPR

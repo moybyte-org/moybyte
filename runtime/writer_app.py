@@ -351,7 +351,7 @@ class WriterAppLayer:
         lay = self.layout
         th = self.ws.theme_colors
         cv.cls(th["panel"])
-        cv.rect(0, lay.bar_h, lay.w, lay.toolbar_h, th["title"])
+        _ui.toolbar(cv, th, (0, lay.bar_h, lay.w, lay.toolbar_h))
         if self.mode == "edit":
             self._button(cv, "NOTES", lay.back_btn)
             self._button(cv, "TEAR OUT", lay.del_btn, hot=self.del_armed)
