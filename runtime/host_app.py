@@ -41,6 +41,9 @@ sys.modules.setdefault("music_editor_ui", _music_editor_ui)
 # (extracted from console.py). console.py does `from layers import ...` / `from
 # bar_layer import ...` (its frozen device names). Both are dependency-free leaves, so
 # they only need the same bare-name alias.
+from . import ui as _ui
+sys.modules.setdefault("ui", _ui)   # the shared widget toolkit: editor_app + the
+                                    # apps do `import ui` (their frozen device name)
 from . import bar_layer as _bar_layer
 from . import cards_layer as _cards_layer
 from . import paint_layer as _paint_layer

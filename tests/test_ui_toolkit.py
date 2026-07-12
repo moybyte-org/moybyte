@@ -79,6 +79,36 @@ def test_button_kinds_paint_their_tokens():
     assert cv.pix(112, 12) == TH["accent"]
 
 
+def test_chip_states_match_the_legacy_button_pixels():
+    """ui.chip replaced the four per-app `_button` copies -- pin the three
+    states to the exact colors those drew (panel/title_ink/dim quiet chip,
+    accent/black/edge toggle, danger/white armed action)."""
+    cv = _cv()
+    ui.chip(cv, TH, (10, 10, 80, 20), "SAVE")
+    assert cv.pix(12, 12) == TH["panel"]
+    assert cv.pix(10, 10) == TH["dim"]                 # quiet border
+    ui.chip(cv, TH, (10, 40, 80, 20), "IMAGES", on=True)
+    assert cv.pix(12, 42) == TH["accent"]
+    assert cv.pix(10, 40) == TH["edge"]                # toggle border
+    ui.chip(cv, TH, (10, 70, 80, 20), "DELETE?", hot=True)
+    assert cv.pix(12, 72) == TH["danger"]
+
+
+def test_apps_button_delegates_to_chip(tmp_path):
+    """The Appearance app's toolbar button (one of the four migrated copies)
+    still paints its exact legacy pixels through the delegate."""
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    cv = ws.sys_canvas
+    ws.appearance_app._button(cv, "CARTS", (10, 100, 60, 16), on=True)
+    th = ws.theme_colors
+    assert cv.pix(12, 102) == th["accent"]
+    assert cv.pix(10, 100) == th["edge"]
+    ws.appearance_app._button(cv, "CARTS", (10, 120, 60, 16), on=False)
+    assert cv.pix(12, 122) == th["panel"]
+    assert cv.pix(10, 120) == th["dim"]
+
+
 def test_tab_row_geometry_and_overflow():
     tabs = [("cards", "CONFIG"), ("code", "CODE"), ("map", "MAP")]
     wide = ui.tab_row_rects((0, 0, 400, 18), tabs, 1)
