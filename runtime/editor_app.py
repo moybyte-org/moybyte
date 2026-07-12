@@ -49,11 +49,6 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.bar_layer import _BAR_ICON, _BAR_GAP, _ZONE_LEFT_GAME
 
 
-def _in(px, py, rect):
-    x, y, w, h = rect
-    return x <= px < x + w and y <= py < y + h
-
-
 # The Editor's lent left zone (Stage 4 of docs/shell_ux_technical_plan_v1.md, #46
 # zoned bar): PROJECTS (back to the picker) + the tab ladder + PLAY + SAVE, in the
 # spec Section 6 order (Projects -> Config -> Blocks -> Code -> Sprites -> Map -> Music
@@ -98,6 +93,7 @@ try:
     import ui as _ui
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
+_in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
 class EditorApp:

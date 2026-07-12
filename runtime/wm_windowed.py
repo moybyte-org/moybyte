@@ -63,6 +63,16 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import NAMES
     from runtime.widgets import _Blit
 
+try:
+    from appearance_app import AppearanceLayout as _AppearLay
+    from artwork import PaintAppLayout as _PaintAppLay
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.appearance_app import AppearanceLayout as _AppearLay
+    from runtime.artwork import PaintAppLayout as _PaintAppLay
+# Window kind -> the layout class that declares its resize minimums (the ui.py
+# min-size convention: MIN_W/MIN_H live with the geometry they protect).
+_KIND_MIN = {"appearance": _AppearLay, "artwork": _PaintAppLay}
+
 
 # Window-chrome colors: the fixed ones live here; everything THEMEABLE (panel /
 # title strip / accents / dim texture) reads the ws.theme_colors tokens per draw
@@ -508,11 +518,14 @@ class WindowedWM(FullscreenStackWM):
         max_h = self._root_canvas.h - self._bar_h()
         min_w = 160 * fs
         min_h = 90 * fs + win.title_h
-        if win.kind in ("artwork", "appearance"):
-            # Their visual rails/catalogs need a little more room at font scale 2.
-            # The cap keeps the same apps usable on a 320x240 windowed host.
-            min_w = min(max_w, 310 * fs)
-            min_h = min(max_h, 230 * fs)
+        # Min-size convention (ui.py): an app's LAYOUT class declares MIN_W/MIN_H
+        # (fs-scaled) and the WM clamps to them -- the minimums live with the
+        # geometry they protect, not in a WM if-ladder. The cap keeps the same
+        # apps usable on a 320x240 windowed host.
+        lay_cls = _KIND_MIN.get(win.kind)
+        if lay_cls is not None:
+            min_w = min(max_w, lay_cls.MIN_W * fs)
+            min_h = min(max_h, lay_cls.MIN_H * fs)
         win.w = max(min_w, min(w, max_w))
         win.h = max(min_h, min(h, max_h))
         self._build_content(win)
