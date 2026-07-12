@@ -152,6 +152,83 @@ def test_focus_ring_paints_focus_token():
     assert cv.pix(50 - 2, 50 - 2) == TH["focus"]
 
 
+def test_is_light_gate():
+    """THE Phase 3 gate: light iff the theme's ink token is dark."""
+    assert ui.is_light(theme_colors("machine"))
+    assert not ui.is_light(theme_colors("night"))
+
+
+def test_scroll_cues_draw_what_can_move():
+    cv = _cv()
+    ui.scroll_cues(cv, (10, 10), (10, 100), True, False, 7)
+    # '^' drew at (10,10); 'v' suppressed at (10,100).
+    assert any(cv.pix(10 + dx, 10 + dy) == 7
+               for dx in range(8) for dy in range(8))
+    assert not any(cv.pix(10 + dx, 100 + dy) == 7
+                   for dx in range(8) for dy in range(8))
+
+
+def _drag(ws, layer_pointer, x, y0, y1, steps=6):
+    """Feed a held vertical drag through a layer's pointer handler."""
+    ws.pointer.down = True
+    layer_pointer(x, y0, False)
+    for i in range(1, steps + 1):
+        layer_pointer(x, y0 + (y1 - y0) * i // steps, False)
+    ws.pointer.down = False
+    layer_pointer(x, y1, False)
+
+
+def test_cards_drag_scrolls(tmp_path):
+    """A held drag on the Config card column scrolls mtop (one card per base
+    card height of travel)."""
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    target = None
+    for i, it in enumerate(ws.launcher.items):
+        if it.get("path") and it.get("edit"):
+            ws.launcher.sel = i
+            target = it
+            break
+    assert target is not None
+    ws.change_selected()
+    # Guarantee overflow: a long edit schema on the OPEN cart (the workspace
+    # rehydrates from the store on open, so mutate after) -- the list scrolls.
+    ws.cart["edit"] = [{"key": "k%d" % i, "label": "KNOB %d" % i,
+                       "min": 0, "max": 9, "default": 1} for i in range(14)]
+    cl = ws.cards_layer
+    assert cl._cards_scrollable()
+    lay = cl.layout
+    x = lay.card_x + 10
+    y0 = lay.view_bottom - 6
+    _drag(ws, cl.handle_pointer, x, y0, y0 - 4 * (lay.card_h + lay.gap))
+    assert cl.mtop > 0
+
+
+def test_blocks_outline_drag_scrolls(tmp_path):
+    """A held drag on the Blocks outline scrolls blk_top when rows overflow."""
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    for i, it in enumerate(ws.launcher.items):
+        if it.get("path"):
+            ws.launcher.sel = i
+            break
+    ws.change_selected()
+    ws.set_menu_view("blocks")
+    bu = ws.block_ui
+    be = bu.blocks_ed
+    if be is None:
+        import pytest
+        pytest.skip("no block editor for this cart")
+    lay = bu.block_layout
+    # Guarantee overflow: pad the program past one screen of rows.
+    while len(be.rows) <= lay.rows + 3:
+        be.rows.append(be.rows[-1])
+    x = lay.x0 + 4
+    y0 = lay.y0 + lay.rows * lay.row_h - 4
+    _drag(ws, bu._blocks_pointer, x, y0, y0 - 4 * lay.row_h)
+    assert bu.blk_top > 0
+
+
 def test_settings_rows_drag_scrolls(tmp_path):
     """The Settings list is ScrollRegion's first consumer: a held drag on the
     rows moves the scroll window (set_top stays the row-slot state of record)."""

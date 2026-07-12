@@ -28,6 +28,22 @@ and so did the handful of tests that poke the block editor's internals
 directly, and tools/make_site_gifs.py's demo-recording script.
 """
 
+# ui (the shared widget toolkit) is bound LAZILY: ui imports chrome, and chrome
+# imports this module's constants at load (the established cycle dodge).
+_ui_mod = None
+
+
+def _toolkit():
+    global _ui_mod
+    if _ui_mod is None:
+        try:
+            import ui as mod
+        except ImportError:  # pragma: no cover - host fallback
+            from runtime import ui as mod
+        _ui_mod = mod
+    return _ui_mod
+
+
 from editors import BlockEditor
 # The block vocabulary/compiler (#29). Mirrors console.py's own import (see its
 # comment there): bare `blocks` on the device (frozen top-level) and once
@@ -251,6 +267,7 @@ class BlockEditorUI:
         # the structured-outline UI state. `blocks_ed` is built lazily on first open.
         self.blocks_ed = None         # BlockEditor while menu_view == "blocks"
         self.blk_top = 0              # first outline row scrolled into view
+        self._dragv = None            # drag-to-scroll anchor (held vertical drag)
         self.blk_slot = 0             # which slot of the selected block is highlighted
         self.blk_menu = None          # active insert menu state dict, or None
         self.blk_status = None        # last block-editor SAVE result text
@@ -927,8 +944,43 @@ class BlockEditorUI:
                     and not isinstance(cur, bool):
                 self._blk_bump_number(b, slot["name"], -1)
 
+    def _outline_drag(self, px, py):
+        """A held vertical drag on the outline scrolls it one row per row-height
+        of travel (the Settings-rows drag contract: must start on the rows, may
+        continue past the edge). Keyboard nav re-clamps around the cursor as
+        before -- the drag just moves the window."""
+        ws = self.ws
+        lay = self.block_layout
+        be = self.blocks_ed
+        if not ws.pointer.down or be is None or self.blk_kbd is not None \
+                or self.blk_menu is not None:
+            self._dragv = None
+            return
+        if self._dragv is None:
+            area = (lay.x0, lay.y0, lay.outline_w, lay.rows * lay.row_h)
+            if len(be.rows) <= lay.rows or not self._in(px, py, area):
+                return
+            self._dragv = py
+            return
+        step = max(1, lay.row_h)
+        delta = self._dragv - py
+        top_max = max(0, len(be.rows) - lay.rows)
+        moved = False
+        while delta >= step and self.blk_top < top_max:
+            self.blk_top += 1
+            delta -= step
+            moved = True
+        while delta <= -step and self.blk_top > 0:
+            self.blk_top -= 1
+            delta += step
+            moved = True
+        self._dragv = py + delta
+        if moved:
+            ws._dirty = True
+
     def _blocks_pointer(self, px, py, click):
         # SYSTEM coords + the responsive BlockLayout (#39 step 2).
+        self._outline_drag(px, py)         # held drag scrolls the outline
         if not click:
             return
         if self.blk_kbd is not None:
@@ -1058,7 +1110,7 @@ class BlockEditorUI:
         # shelf tiers; the frozen dark-blue body at 320x240, byte-identical. The
         # block PIECES keep their own colorful language (self-backed rows).
         th = ws.theme_colors
-        light = (not lay._base) and th.get("ink", NAMES["white"]) == 0
+        light = (not lay._base) and ws.light_chrome()
         cv.cls(th["surface"] if light else NAMES["dark_blue"])
         # The old "BLOCKS <title>" row was dissolved into the unified bar (Stage-4
         # rollout). Just below the bar sits a thin hint/status strip: the kid-facing
@@ -1092,13 +1144,11 @@ class BlockEditorUI:
                 break
             self._draw_blk_row(rows[ridx], vi, ridx == be.cur)
         # scroll cue
-        if self.blk_top > 0:
-            cv.print("^", lay.x0 + lay.outline_w - 8 * fs, lay.y0,
-                     th["ink"] if light else NAMES["white"], 1)
-        if self.blk_top + lay.rows < len(rows):
-            cv.print("v", lay.x0 + lay.outline_w - 8 * fs,
-                     lay.y0 + (lay.rows - 1) * lay.row_h,
-                     th["ink"] if light else NAMES["white"], 1)
+        _toolkit().scroll_cues(
+            cv, (lay.x0 + lay.outline_w - 8 * fs, lay.y0),
+            (lay.x0 + lay.outline_w - 8 * fs, lay.y0 + (lay.rows - 1) * lay.row_h),
+            self.blk_top > 0, self.blk_top + lay.rows < len(rows),
+            th["ink"] if light else NAMES["white"])
         # action bar: editing controls + the #29 graduation action only (SAVE/CLOSE
         # moved to the unified bar).
         ws._icon_btn("plus", "ADD", lay.add_btn, NAMES["green"], cv)

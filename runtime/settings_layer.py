@@ -20,6 +20,22 @@ tested) stay on ws. `NAMES` / `_in` / `_clamp_scroll` are injected (the circular
 dodge). Shared draw toolkit (ws._glyph/_mini_btn) + the bar (ws.bar_layer) stay put.
 """
 
+# ui (the shared widget toolkit) is bound LAZILY: ui imports chrome, and chrome
+# imports this module's constants at load (the established cycle dodge).
+_ui_mod = None
+
+
+def _toolkit():
+    global _ui_mod
+    if _ui_mod is None:
+        try:
+            import ui as mod
+        except ImportError:  # pragma: no cover - host fallback
+            from runtime import ui as mod
+        _ui_mod = mod
+    return _ui_mod
+
+
 
 # -- settings-screen geometry (single source; console.py imports these back) --
 # These are ALSO used by console's Layout (the responsive lay.set_* fields), so they're
@@ -465,6 +481,9 @@ class SettingsLayer:
 
     # -- scroll window -------------------------------------------------------
 
+    def _toolkit(self):
+        return _toolkit()
+
     def _scroll_region(self):
         """The rows' ui.ScrollRegion (lazy: ui imports chrome, and chrome imports
         THIS module's constants, so a module-level import would re-enter chrome
@@ -472,11 +491,7 @@ class SettingsLayer:
         is the touch INTERACTION model (drag) + the shelf-tier scrollbar, synced
         from set_top each use."""
         if self.scroll is None:
-            try:
-                import ui as mod
-            except ImportError:  # pragma: no cover - host fallback
-                from runtime import ui as mod
-            self.scroll = mod.ScrollRegion()
+            self.scroll = self._toolkit().ScrollRegion()
         ws = self.ws
         lay = ws.layout
         rows = self._settings_rows()
@@ -680,10 +695,10 @@ class SettingsLayer:
         lay = ws.layout
         px, py, pw, ph = lay.settings_panel
         xr = px + pw - 9 * lay.fs
-        if self.set_top > 0:
-            cv.print("^", xr, lay.set_row_y0, NAMES["white"], 1)
-        if self.set_top + self._settings_visible() < len(rows):
-            cv.print("v", xr, py + ph - 9 * lay.fs, NAMES["white"], 1)
+        vis = self._settings_visible()
+        self._toolkit().scroll_cues(
+            cv, (xr, lay.set_row_y0), (xr, py + ph - 9 * lay.fs),
+            self.set_top > 0, self.set_top + vis < len(rows), NAMES["white"])
         if not lay._base:
             # Shelf tiers: the toolkit scrollbar alongside (base keeps the frozen
             # chevron-only pixels).

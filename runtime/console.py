@@ -285,6 +285,12 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                         make_tile, new_tile, MAKE_TILE_TYPE,
                                         NEW_TILE_TYPE, PSEUDO_TILE_TYPES)
 
+try:
+    from ui import is_light as _ui_is_light
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.ui import is_light as _ui_is_light
+
+
 class _CoverImage:
     """Minimal blittable for a card's COVER art (visual identity v1 Section
     11.4): both canvas backends' spr() read only .w/.h/.pix/.transparent, the
@@ -1295,6 +1301,13 @@ class Workstation:
         img = sheet.tile_image(0, -1) if not sheet.is_blank() else None
         cache[key] = img
         return img
+
+    def light_chrome(self):
+        """True when the live theme's tool surface is LIGHT (visual identity v1
+        Phase 3) -- THE gate every surface's light branch reads (ui.is_light over
+        the live tokens). A method on ws so the layers inside the chrome import
+        cycle need no ui import of their own."""
+        return _ui_is_light(self.theme_colors)
 
     def _cover_for(self, cart, w, h):
         """The cart's COVER ART (visual identity v1 Section 11.4) as a blittable

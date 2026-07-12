@@ -43,6 +43,24 @@ def _fs(cv):
     return fs if fs >= 1 else 1
 
 
+def is_light(th):
+    """True when the theme's tool surface is LIGHT (its ink token is dark) --
+    THE Phase 3 gate. Surfaces read it through ws.light_chrome() (the layers
+    inside the chrome import cycle can't import this module at load time);
+    everything else may call it directly."""
+    return th.get("ink", 7) == 0
+
+
+def scroll_cues(cv, up_xy, dn_xy, can_up, can_dn, c, scale=1):
+    """The list-overflow chevrons ('^' above, 'v' below) -- one implementation
+    for every scrolling surface; positions/color stay the caller's (they are
+    part of each surface's frozen geometry)."""
+    if can_up:
+        cv.print("^", up_xy[0], up_xy[1], c, scale)
+    if can_dn:
+        cv.print("v", dn_xy[0], dn_xy[1], c, scale)
+
+
 # --- rect algebra (pure tuple math; every rect is (x, y, w, h)) --------------
 
 def inset(rect, dx, dy=None):

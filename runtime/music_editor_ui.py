@@ -383,7 +383,7 @@ class MusicEditorUI:
         # Phase 3 (visual identity v1): the warm tool surface + dark ink on the
         # shelf tiers; the frozen dark-blue body at 320x240, byte-identical.
         th = ws.theme_colors
-        light = (not lay._base) and th.get("ink", NAMES["white"]) == 0
+        light = (not lay._base) and ws.light_chrome()
         self._light = light
         ink = th["ink"] if light else NAMES["white"]
         ink_dim = th["ink_dim"] if light else NAMES["light_grey"]

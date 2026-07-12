@@ -30,6 +30,22 @@ EditorApp.draw_zone) shows on this tab; handle_pointer routes a tap through
 ws.bar_layer.handle_bar_tap("menu", ...) FIRST, before the card/button hit-tests.
 """
 
+# ui (the shared widget toolkit) is bound LAZILY: ui imports chrome, and chrome
+# imports this module's constants at load (the established cycle dodge).
+_ui_mod = None
+
+
+def _toolkit():
+    global _ui_mod
+    if _ui_mod is None:
+        try:
+            import ui as mod
+        except ImportError:  # pragma: no cover - host fallback
+            from runtime import ui as mod
+        _ui_mod = mod
+    return _ui_mod
+
+
 
 # -- card geometry (single source; console.py imports these back) -------------
 # Stage-4 bar rollout / fix B: the Config screen's own GO / CODE / CLOSE buttons are
@@ -122,6 +138,7 @@ class CardsLayer:
         self.msel = 0                 # selected card in the menu
         self.mtop = 0                 # first card scrolled into view (#3)
         self._t = None                # per-draw tone map (set by _draw_cards)
+        self._dragv = None            # drag-to-scroll anchor (held vertical drag)
         sc = ws.sys_canvas
         self.layout = CardsLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
 
@@ -184,9 +201,43 @@ class CardsLayer:
             ws._leave_or_home(ws._leave_menu)
         return True
 
+    def _cards_drag(self, px, py):
+        """A held vertical drag on the card column scrolls the list, one card per
+        base-card-height of travel (row heights vary per display kind, so the
+        base height is the step unit; the sub-step remainder stays anchored).
+        Starts on the column, may continue past its edge -- the Settings-rows
+        drag contract."""
+        ws = self.ws
+        lay = self.layout
+        if not ws.pointer.down:
+            self._dragv = None
+            return
+        if self._dragv is None:
+            area = (lay.card_x, lay.card_y0, lay.card_w,
+                    lay.view_bottom - lay.card_y0)
+            if not self._cards_scrollable() or not self._in(px, py, area):
+                return
+            self._dragv = py
+            return
+        step = max(1, lay.card_h + lay.gap)
+        delta = self._dragv - py           # finger up -> content down
+        moved = False
+        while delta >= step and self.mtop < self._max_mtop():
+            self.mtop += 1
+            delta -= step
+            moved = True
+        while delta <= -step and self.mtop > 0:
+            self.mtop -= 1
+            delta += step
+            moved = True
+        self._dragv = py + delta           # keep the sub-step remainder
+        if moved:
+            ws._dirty = True
+
     def handle_pointer(self, px, py, click):
         ws = self.ws
         # SYSTEM coords (#39 step 3): hit-test the raw pointer, no _game_xy.
+        self._cards_drag(px, py)           # held drag scrolls the card column
         if click and ws.bar_layer.handle_bar_tap("menu", px, py):
             return True         # the Editor's lent zone (Stage 4) claimed the tap
         ci = self._card_at(px, py)
@@ -418,10 +469,10 @@ class CardsLayer:
         for row in self._card_layout():
             self._draw_card(row)
         if self._cards_scrollable():           # up/down chevrons when cards overflow
-            if self.mtop > 0:
-                cv.print("^", lay.scroll_up[0], lay.scroll_up[1], t["accent"], 2)
-            if self.mtop < self._max_mtop():
-                cv.print("v", lay.scroll_dn[0], lay.scroll_dn[1], t["accent"], 2)
+            _toolkit().scroll_cues(
+                cv, (lay.scroll_up[0], lay.scroll_up[1]),
+                (lay.scroll_dn[0], lay.scroll_dn[1]),
+                self.mtop > 0, self.mtop < self._max_mtop(), t["accent"], 2)
 
     def _draw_card(self, row):
         ws = self.ws

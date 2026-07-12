@@ -529,7 +529,7 @@ class MapEditorUI:
         # Phase 3 (visual identity v1): warm body on the shelf tiers, dark map
         # canvas kept on every tier. Baseline literals byte-identical.
         th = ws.theme_colors
-        light = (not lay._base) and th.get("ink", NAMES["white"]) == 0
+        light = (not lay._base) and ws.light_chrome()
         cv.rect(*(lay.body_fill + ((th["surface"] if light else NAMES["black"]),)))
         # Map cells + the tile-palette strip back themselves (dark map field),
         # so the panel joins the surface on the light tiers too.
