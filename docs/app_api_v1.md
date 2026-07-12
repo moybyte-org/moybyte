@@ -47,6 +47,10 @@ A system APP is two artifacts:
                    min_size=(310, 230))    # windowed resize floor, fs-scaled
    ```
 
+   `min_size` may be omitted when the app's live layout exposes `MIN_W` and
+   `MIN_H`; registration adopts those constants. `TITLE` is likewise captured
+   by the registry, so the WM never needs an app-id/title ladder.
+
 Everything else follows from the registration — **apps never edit console.py**:
 
 - a launcher tap on the claimed cart opens the app instead of the Player;

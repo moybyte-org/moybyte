@@ -61,6 +61,7 @@ class AppearanceAppLayer:
 
     id = "appearance"
     domain = "system"
+    TITLE = "APPEARANCE"
     MODES = ("images", "carts", "themes")
 
     def __init__(self, ws, names, in_rect):

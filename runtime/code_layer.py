@@ -30,21 +30,10 @@ injected.
 """
 from editors import CodeEditor
 
-# ui (the shared widget toolkit) is imported LAZILY: ui imports chrome, and
-# chrome imports THIS module's geometry constants, so a module-level import
-# here would re-enter chrome half-initialized whichever side loads first.
-_ui = None
-
-
-def _toolkit():
-    global _ui
-    if _ui is None:
-        try:
-            import ui as mod
-        except ImportError:  # pragma: no cover - host fallback
-            from runtime import ui as mod
-        _ui = mod
-    return _ui
+try:
+    import ui as _ui
+except ImportError:  # pragma: no cover - host fallback
+    from runtime import ui as _ui
 
 
 # -- code-editor geometry (single source; console.py imports these back) ------
@@ -333,7 +322,7 @@ class CodeLayer:
         # Status band (Phase 3, shelf tiers): the mockup's "Ln 13, Col 1" strip.
         if lay.status_band is not None and ed is not None:
             issues = "1 ISSUE" if ws.code_err else "NO ISSUES"
-            _toolkit().status_row(cv, ws.theme_colors, lay.status_band,
+            _ui.status_row(cv, ws.theme_colors, lay.status_band,
                            ("LN " + str(ed.row + 1) + ", COL " + str(ed.col + 1),
                             str(len(ed.lines)) + " LINES", issues))
         self._draw_symbols()

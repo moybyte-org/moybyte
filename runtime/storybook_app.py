@@ -160,6 +160,7 @@ class StorybookAppLayer:
 
     id = "storybook"
     domain = "system"
+    TITLE = "STORYBOOK"
 
     def __init__(self, ws, names, in_rect):
         self.ws = ws

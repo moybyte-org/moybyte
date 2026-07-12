@@ -226,7 +226,7 @@ class BarLayer:
 
     def zone_band_light(self, where):
         """True when `where`'s bar band is the LIGHT in-window band (windowed
-        chrome + a light theme, ink token == 0) -- zone owners pick their band
+        chrome + a theme marked surface_light) -- zone owners pick their band
         ink with this so lent-zone text stays readable on either band."""
         return self._in_window(where) and self.ws.light_chrome()
 

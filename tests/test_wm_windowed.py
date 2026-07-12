@@ -8,7 +8,8 @@ presentation's contracts:
   * install/degradation -- the windowed WM only mounts on a distinct big system
     canvas; at 320x240 the fullscreen-stack WM stays (byte-identical tier);
   * the back-stack <-> window mapping -- every pushed process gets a window,
-    pops drop it, the launcher root is the desktop (never a window);
+    pops drop it, and the Library gives way to the wallpaper desktop while any
+    window is open;
   * launch-and-return presented spatially -- PLAY opens a playtest window above
     the still-visible editor window; exit pops back to the editor;
   * input routing -- keyboard to the focused window, taps in WINDOW-LOCAL
@@ -118,16 +119,33 @@ def test_picker_and_editor_share_one_make_window(tmp_path):
     assert ws.wm._order == ["make"] and win.kind == "picker"
 
 
-def test_desktop_root_still_draws_beneath_windows(tmp_path):
-    """The launcher home (the desktop) keeps drawing at FULL canvas size while a
-    window is open -- its layout stays the root's."""
+def test_change_leaves_library_for_desktop_backdrop(tmp_path):
+    """CHANGE opens Studio over the wallpaper desktop; the Library is a launch
+    surface, not an interactive backdrop behind process windows."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_settings()
+    ws.change_selected()
+    launcher_draws = []
+    original_draw = ws.launcher.draw
+
+    def tracked_draw(*args, **kwargs):
+        launcher_draws.append(1)
+        return original_draw(*args, **kwargs)
+
+    ws.launcher.draw = tracked_draw
     _quiesce(ws)
     drv.frame(1 / 30)
+    assert ws.screen == "menu"
+    assert ws.wm._order == ["make"]
+    assert launcher_draws == []       # wallpaper + OS bar, no hidden Library grid
     assert ws.layout.w == 1024      # ambient (root) layout after the frame
     assert ws.launcher.layout.w == 1024
+
+    # Even a direct background dispatch at the old selected-card coordinates
+    # cannot activate the hidden Library.
+    tile = ws.launcher.tile_rect(ws.launcher.sel)
+    ws.wm._backdrop_layer.handle_pointer(tile[0] + 2, tile[1] + 2, True)
+    assert ws.screen == "menu"
 
 
 # ---------------------------------------------------------------------------
@@ -263,7 +281,7 @@ def _engage_drag(ws, drv):
 def test_drag_backdrop_cache_engages(tmp_path):
     """During a drag the retained backdrop cache is built and reused: the first
     drag frame allocates + validates it, and steady drag frames don't re-render
-    the launcher (they blit the cache)."""
+    the desktop wallpaper/bar (they blit the cache)."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     win = _engage_drag(ws, drv)
@@ -273,21 +291,22 @@ def test_drag_backdrop_cache_engages(tmp_path):
     assert ws.wm._backdrop_valid and ws.wm._backdrop is not None
 
     calls = [0]
-    real_draw = ws.launcher_layer.draw
-    ws.launcher_layer.draw = lambda dt: (calls.__setitem__(0, calls[0] + 1),
+    backdrop = ws.wm._backdrop_layer
+    real_draw = backdrop._draw_desktop
+    backdrop._draw_desktop = lambda dt: (calls.__setitem__(0, calls[0] + 1),
                                          real_draw(dt))[1]
-    # Steady drag frames: cache reused, launcher NOT re-rendered.
+    # Steady drag frames: cache reused, desktop NOT re-rendered.
     for _ in range(3):
         drv.touch_drag(hx, hy)
         drv.frame(0.0)
     assert calls[0] == 0
-    # Release: the next frame renders the launcher live again (cache invalidated).
+    # Release: the next frame renders the desktop live again (cache invalidated).
     drv.touch_up()
     ws._dirty = True
     drv.frame(0.0)
     assert not ws.wm._backdrop_valid
     assert calls[0] == 1
-    ws.launcher_layer.draw = real_draw
+    backdrop._draw_desktop = real_draw
 
 
 def test_drag_backdrop_cache_matches_live_render(tmp_path):

@@ -32,7 +32,7 @@ def test_builtin_apps_are_registered(tmp_path):
     for kind in kinds:
         assert ws._content_layers[kind] is not None       # router wired
     assert ws.app_min_size("artwork") == (310, 230)       # registered minimum
-    assert ws.app_min_size("calc") is None                # default clamp
+    assert ws.app_min_size("calc") == (170, 190)          # inferred from CalcLayout
 
 
 def test_register_app_dispatches_a_custom_app(tmp_path):
@@ -42,6 +42,7 @@ def test_register_app_dispatches_a_custom_app(tmp_path):
     class Demo:
         id = "demo"
         domain = "system"
+        TITLE = "BATTLE DEMO"
         opened = 0
 
         def is_app(self, cart):
@@ -63,10 +64,35 @@ def test_register_app_dispatches_a_custom_app(tmp_path):
     ws.register_app(demo, min_size=(200, 100))
     assert ws._content_layers["demo"] is demo
     assert ws.app_min_size("demo") == (200, 100)
+    assert ws.app_title("demo") == "BATTLE DEMO"
     _select(ws, "Battle City")
     ws.launch_selected()
     assert demo.opened == 1
     assert ws.screen == "demo"                            # back-stack kind
+
+
+def test_late_app_metadata_reaches_windowed_wm(tmp_path):
+    """TITLE and layout minimums are registry metadata, not WM id ladders."""
+    ws = _ws(tmp_path, sys_size=(1024, 600), windowed=True)
+
+    class DemoLayout:
+        MIN_W = 210
+        MIN_H = 130
+
+    class Demo:
+        id = "story_editor"
+        domain = "system"
+        TITLE = "Story Editor"
+
+        def __init__(self):
+            self.layout = DemoLayout()
+
+    demo = Demo()
+    ws.register_app(demo)
+    assert ws.app_min_size(demo.id) == (210, 130)
+    assert ws.wm._root_ctx.app_layouts[demo.id] is demo.layout
+    win = type("Win", (), {"kind": demo.id})()
+    assert ws.wm._win_title(win) == "Story Editor"
 
 
 def test_writer_registration_keeps_text_mode(tmp_path):
