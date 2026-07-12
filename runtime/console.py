@@ -304,6 +304,14 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 _ui_is_light = _uimod.is_light
 
 
+# Derived Library covers are sizeable on the desktop tier and DeviceCanvas adds a
+# 2-byte RGB565 bake to each cached indexed image.  Keep the cache comfortably
+# bounded for the P4 heap while retaining enough variants for the root Library,
+# the Make window, and selected/unselected card heights at the same time.
+_COVER_CACHE_MAX_ENTRIES = 64
+_COVER_CACHE_MAX_PIXELS = 768 * 1024
+
+
 class _CoverImage:
     """Minimal blittable for a card's COVER art (visual identity v1 Section
     11.4): both canvas backends' spr() read only .w/.h/.pix/.transparent, the
@@ -314,6 +322,10 @@ class _CoverImage:
         self.h = h
         self.pix = pix
         self.transparent = -1
+        # Covers are opaque MOY64 bitmaps, just like Paint images.  This marker
+        # selects DeviceCanvas's native blit_indices bake and the web recorder's
+        # compact base64 image command instead of the generic per-pixel paths.
+        self._paint = True
 
 
 # The open cart's live WORKSPACE (Stage 1 of docs/shell_ux_technical_plan_v1.md,
@@ -626,6 +638,8 @@ class Workstation:
         self.wallpaper = Wallpaper(self, NAMES)
         self._icon_cache = {}         # cart path -> desktop-icon sprite Image (or None)
         self._cover_cache = {}        # (path, w, h) -> shelf-card cover blittable (or None)
+        self._cover_cache_order = []  # LRU keys (oldest first); bounds resize variants
+        self._cover_cache_pixels = 0  # indexed pixels; device RGB bakes add 2B each
         # Unified top bar (Stage 1): the editable 16x16 IconSheet the bar draws its
         # chrome icons from. Injected by build_workstation / run_desktop (loaded from
         # system_icons.moygfx, else the baked default theme); None falls back to _glyph.
@@ -1350,6 +1364,12 @@ class Workstation:
         key = (path, w, h)
         cache = self._cover_cache
         if key in cache:
+            order = self._cover_cache_order
+            try:
+                order.remove(key)
+            except ValueError:
+                pass
+            order.append(key)
             return cache[key]
         img = None
         loader = getattr(self.carts_store, "load_image", None)
@@ -1376,6 +1396,16 @@ class Workstation:
                         di += 1
                 img = _CoverImage(w, h, out)
         cache[key] = img
+        order = self._cover_cache_order
+        order.append(key)
+        if img is not None:
+            self._cover_cache_pixels += len(img.pix)
+        while (len(order) > _COVER_CACHE_MAX_ENTRIES
+               or self._cover_cache_pixels > _COVER_CACHE_MAX_PIXELS):
+            old_key = order.pop(0)
+            old_img = cache.pop(old_key, None)
+            if old_img is not None:
+                self._cover_cache_pixels -= len(old_img.pix)
         return img
 
     # -- Settings screen (#28) -----------------------------------------------
@@ -2482,6 +2512,8 @@ class Workstation:
             self._all_carts = list(items)
             self.slim_carts()              # #66: a rescan reloads FULL carts -- re-slim
             self._cover_cache = {}         # a re-scan may carry new/changed cover art
+            self._cover_cache_order = []
+            self._cover_cache_pixels = 0
             self.launcher.set_items(self._launcher_items(items))
             self.picker.set_items(self._picker_items(items))
 

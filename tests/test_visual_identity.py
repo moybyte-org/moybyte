@@ -255,9 +255,31 @@ def test_cover_art_contract(tmp_path):
     assert img is not None and (img.w, img.h) == (200, 150)
     assert len(img.pix) == 200 * 150
     assert max(img.pix) < 64              # valid MOY64 indices only (Section 12)
+    assert img._paint                     # native device + compact web bitmap paths
     assert ws._cover_for(covered, 200, 150) is img       # memoised
     if fallback is not None:
         assert ws._cover_for(fallback, 200, 150) is None  # deterministic fallback
+
+
+def test_cover_cache_is_bounded_across_resize_variants(tmp_path):
+    """Repeated Make-window resizes must not retain every derived indexed+RGB
+    cover forever on the P4 heap."""
+    from runtime import console, moy_carts, web_view
+    ws = _ws(tmp_path, sys_size=(1024, 600))
+    covered = next(it for it in ws.launcher.items
+                   if it.get("path") and
+                   moy_carts.load_image(it["path"], moy_carts.COVER_IMAGE))
+    first = ws._cover_for(covered, 120, 90)
+    rec = web_view.DrawRecorder(1024, 600)
+    rec.self_contained = True
+    rec.spr(first, 0, 0)
+    assert rec._cmds[0][0] == "img"        # not the generic JSON pixel-list spr
+
+    for i in range(80):
+        ws._cover_for(covered, 120 + i, 90 + i)
+    assert len(ws._cover_cache) <= console._COVER_CACHE_MAX_ENTRIES
+    assert ws._cover_cache_pixels <= console._COVER_CACHE_MAX_PIXELS
+    assert len(ws._cover_cache_order) == len(ws._cover_cache)
 
 
 def test_home_draw_includes_action_row_desktop(tmp_path):
