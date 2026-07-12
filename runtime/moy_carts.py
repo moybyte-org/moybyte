@@ -35,6 +35,12 @@ CART_FORMAT = "moybyte-cart-v1"
 IMAGES_DIR = "images"
 IMAGE_EXT = ".moyimg"
 ARTWORK_NAME = "artwork.moyimg"
+# Cartridge COVER ART (visual identity v1 Section 11.4): a cart folder may carry
+# images/cover.moyimg -- static authored cover art the Library shelf draws
+# full-bleed on the card. The deterministic fallback when absent is the cart's
+# sprite tile 0 / type glyph (the pre-cover look). tools/gen_covers.py captures a
+# gameplay frame for the seed games; Paint art or any moyimg works the same.
+COVER_IMAGE = "cover"
 NOTES_NAME = "notes.json"
 DECK_NAME = "deck.json"
 
@@ -228,6 +234,16 @@ def _read_recover(path):
                 pass
             return data
         raise
+
+
+def load_image(path, name):
+    """One paint-image blob (images/<name>.moyimg) for the cart at `path`, or
+    None. The Library shelf reads covers through this (COVER_IMAGE) so a
+    slimmed cart (#66 live-set diet) never needs rehydrating for its card."""
+    try:
+        return _read(path + "/" + IMAGES_DIR + "/" + name + IMAGE_EXT)
+    except OSError:
+        return None
 
 
 def load_images(path):

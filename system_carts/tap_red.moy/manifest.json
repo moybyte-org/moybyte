@@ -1,13 +1,20 @@
 {
   "format": "moybyte-cart-v1",
-  "version": 1,
+  "version": 3,
   "title": "Tap Only Red",
   "type": "game",
   "runtime": "python",
   "main": "main.py",
   "system": true,
-  "canvas": { "width": 320, "height": 240, "palette": "moy64" },
-  "permissions": ["graphics", "input"],
+  "canvas": {
+    "width": 320,
+    "height": 240,
+    "palette": "moy64"
+  },
+  "permissions": [
+    "graphics",
+    "input"
+  ],
   "safe_to_share": true,
   "config": {
     "rise": 45,
@@ -16,9 +23,47 @@
     "autoplay": 0
   },
   "edit": [
-    { "key": "rise", "label": "SPEED", "type": "int", "min": 20, "max": 110, "step": 5, "card": "BUBBLES RISE AT {value}" },
-    { "key": "red_share", "label": "REDS", "type": "int", "min": 15, "max": 80, "step": 5, "card": "{value}% ARE RED" },
-    { "key": "max_bubbles", "label": "CROWD", "type": "int", "min": 4, "max": 16, "step": 1, "card": "UP TO {value} BUBBLES" },
-    { "key": "autoplay", "label": "AUTOPLAY", "type": "choice", "choices": [0, 1], "icons": ["close", "run"], "display": "choice-icons", "card": "AUTOPLAY {value}" }
+    {
+      "key": "rise",
+      "label": "SPEED",
+      "type": "int",
+      "min": 20,
+      "max": 110,
+      "step": 5,
+      "card": "BUBBLES RISE AT {value}"
+    },
+    {
+      "key": "red_share",
+      "label": "REDS",
+      "type": "int",
+      "min": 15,
+      "max": 80,
+      "step": 5,
+      "card": "{value}% ARE RED"
+    },
+    {
+      "key": "max_bubbles",
+      "label": "CROWD",
+      "type": "int",
+      "min": 4,
+      "max": 16,
+      "step": 1,
+      "card": "UP TO {value} BUBBLES"
+    },
+    {
+      "key": "autoplay",
+      "label": "AUTOPLAY",
+      "type": "choice",
+      "choices": [
+        0,
+        1
+      ],
+      "icons": [
+        "close",
+        "run"
+      ],
+      "display": "choice-icons",
+      "card": "AUTOPLAY {value}"
+    }
   ]
 }

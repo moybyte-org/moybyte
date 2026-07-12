@@ -285,6 +285,18 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                         make_tile, new_tile, MAKE_TILE_TYPE,
                                         NEW_TILE_TYPE, PSEUDO_TILE_TYPES)
 
+class _CoverImage:
+    """Minimal blittable for a card's COVER art (visual identity v1 Section
+    11.4): both canvas backends' spr() read only .w/.h/.pix/.transparent, the
+    same contract as editors._SheetSprite."""
+
+    def __init__(self, w, h, pix):
+        self.w = w
+        self.h = h
+        self.pix = pix
+        self.transparent = -1
+
+
 # The open cart's live WORKSPACE (Stage 1 of docs/shell_ux_technical_plan_v1.md,
 # extracted from this file -- see project.py). Project holds the open cart's DATA
 # (cart/config/sheet/tilemap/images/pmem) + the builders + the commit_* persistence
@@ -494,6 +506,7 @@ class Workstation:
         # IconSheet pencil/plus sprite big -- keyed so the sheet's 0-filled
         # backdrop doesn't plate the card.
         self.launcher.icon_for = self._icon_image_keyed
+        self.launcher.cover_for = self._cover_for
         # Default the highlight to the first RUNNABLE cart (skip the pinned Make tile at
         # slot 0), so a bare RUN/A plays a game rather than opening the picker -- the
         # launcher is RUN-first (spec shell_ux_v1.md); Make is a tap/nav target.
@@ -506,6 +519,7 @@ class Workstation:
         self.picker = Launcher(self._picker_items(self._all_carts),
                                self.layout, NAMES, _blit_glyph)
         self.picker.icon_for = self._icon_image_keyed
+        self.picker.cover_for = self._cover_for
         # Screen states (#28): "launcher" is now the DESKTOP home (wallpaper + cart
         # icon grid + dock); "desktop" is a running cart; "menu" is the cards/code/
         # paint/map editors; "settings" is the Settings app.
@@ -592,6 +606,7 @@ class Workstation:
         # the launcher home + Settings draw it via self.wallpaper.draw(dt).
         self.wallpaper = Wallpaper(self, NAMES)
         self._icon_cache = {}         # cart path -> desktop-icon sprite Image (or None)
+        self._cover_cache = {}        # (path, w, h) -> shelf-card cover blittable (or None)
         # Unified top bar (Stage 1): the editable 16x16 IconSheet the bar draws its
         # chrome icons from. Injected by build_workstation / run_desktop (loaded from
         # system_icons.moygfx, else the baked default theme); None falls back to _glyph.
@@ -1278,6 +1293,47 @@ class Workstation:
             return cache[key]
         sheet = self._build_sheet(cart)             # shared sprite-load + fallback
         img = sheet.tile_image(0, -1) if not sheet.is_blank() else None
+        cache[key] = img
+        return img
+
+    def _cover_for(self, cart, w, h):
+        """The cart's COVER ART (visual identity v1 Section 11.4) as a blittable
+        sized exactly (w, h) -- images/cover.moyimg cover-cropped (fill + center
+        crop, nearest sample) -- or None when the cart carries none (the shelf
+        card falls back to sprite/glyph, the deterministic pre-cover look).
+        Cached per (path, w, h); read through the store so a slimmed cart (#66)
+        never rehydrates, and cleared with the icon cache on a store re-scan."""
+        path = cart.get("path")
+        if path is None or self.carts_store is None or w <= 0 or h <= 0:
+            return None
+        key = (path, w, h)
+        cache = self._cover_cache
+        if key in cache:
+            return cache[key]
+        img = None
+        loader = getattr(self.carts_store, "load_image", None)
+        cover_name = getattr(self.carts_store, "COVER_IMAGE", "cover")
+        blob = loader(path, cover_name) if loader is not None else None
+        if blob:
+            try:
+                sw, sh, pix = self.carts_store.decode_moyimg(blob)
+            except Exception:  # noqa: BLE001 - a bad blob just means no cover
+                sw = 0
+            if sw > 0 and sh > 0:
+                # Cover-crop: match the card's aspect with a centered source
+                # window, then nearest-sample it to exactly (w, h).
+                cw_ = min(sw, sh * w // h) or 1
+                ch_ = min(sh, sw * h // w) or 1
+                ox = (sw - cw_) // 2
+                oy = (sh - ch_) // 2
+                out = bytearray(w * h)
+                di = 0
+                for dy in range(h):
+                    row = (oy + dy * ch_ // h) * sw + ox
+                    for dx in range(w):
+                        out[di] = pix[row + dx * cw_ // w]
+                        di += 1
+                img = _CoverImage(w, h, out)
         cache[key] = img
         return img
 
@@ -2383,6 +2439,7 @@ class Workstation:
         if items:
             self._all_carts = list(items)
             self.slim_carts()              # #66: a rescan reloads FULL carts -- re-slim
+            self._cover_cache = {}         # a re-scan may carry new/changed cover art
             self.launcher.set_items(self._launcher_items(items))
             self.picker.set_items(self._picker_items(items))
 

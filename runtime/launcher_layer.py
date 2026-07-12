@@ -136,6 +136,8 @@ class Launcher:
         self.icon_for = None          # optional kind -> 16x16 IconSheet Image (console
                                       # wires ws._bar_image) -- the shelf's pseudo cards
                                       # draw the real themeable pencil/plus icon big
+        self.cover_for = None         # optional (cart, w, h) -> full-bleed cover
+                                      # blittable (visual identity v1 Section 11.4)
         if layout is None:
             # Defensive default for a bare Launcher(items) (no caller does this); lazy so
             # there's no launcher_layer<->console module-load cycle.
@@ -352,21 +354,26 @@ class Launcher:
         if ar is not None:
             btn_area = max(13 * fs, 22) + 2 * max(2 * fs, 3)
         cover_h = h - band_h - btn_area
-        # Cover: the cart's own sprite art scaled up on the dark field, else its
-        # type glyph in the type color (the pre-literate cue, now cover-sized).
-        # The field is the theme's `dim` tint: the one token that contrasts BOTH
-        # the home shelf's light surface and the picker's dark tool backdrop in
-        # every shipped theme (night 1-on-60, machine 60-on-7 / 60-on-1).
-        cv.rect(x, y, w, cover_h, th.get("dim", NAMES["dark_blue"]))
-        img = sheet_for(it) if sheet_for is not None else None
-        if img is not None:
-            sc = max(1, min((w - 6 * fs) // 16, (cover_h - 4 * fs) // 16))
-            cv.spr(img, x + (w - 16 * sc) // 2, y + (cover_h - 16 * sc) // 2, sc)
+        # Cover: authored images/cover.moyimg art FULL-BLEED when the cart has
+        # one (Section 11.4), else the cart's own sprite scaled up on the dark
+        # field, else its type glyph in the type color (both the deterministic
+        # fallback). The field is the theme's `dim` tint: the one token that
+        # contrasts BOTH the home shelf's light surface and the picker's dark
+        # tool backdrop in every shipped theme.
+        cover = self.cover_for(it, w, cover_h) if self.cover_for is not None else None
+        if cover is not None:
+            cv.spr(cover, x, y, 1)
         else:
-            gs = max(1, min((w - 12 * fs) // 12, (cover_h - 8 * fs) // 12))
-            self._blit_glyph(cv, _TYPE_GLYPH.get(it["type"], "app"),
-                             (x, y, w, cover_h),
-                             _TYPE_COLOR.get(it["type"], NAMES["indigo"]), gs)
+            cv.rect(x, y, w, cover_h, th.get("dim", NAMES["dark_blue"]))
+            img = sheet_for(it) if sheet_for is not None else None
+            if img is not None:
+                sc = max(1, min((w - 6 * fs) // 16, (cover_h - 4 * fs) // 16))
+                cv.spr(img, x + (w - 16 * sc) // 2, y + (cover_h - 16 * sc) // 2, sc)
+            else:
+                gs = max(1, min((w - 12 * fs) // 12, (cover_h - 8 * fs) // 12))
+                self._blit_glyph(cv, _TYPE_GLYPH.get(it["type"], "app"),
+                                 (x, y, w, cover_h),
+                                 _TYPE_COLOR.get(it["type"], NAMES["indigo"]), gs)
         # Title band: cream text centered on the strongest ink.
         cv.rect(x, y + cover_h, w, band_h, NAMES["black"])
         name = it["title"]
