@@ -281,6 +281,10 @@ class PaintDocument:
 class PaintAppLayout:
     """Responsive system-domain Paint chrome for one window/content size."""
 
+    # Min-size convention (ui.py): the WM clamps window resizes to these.
+    MIN_W = 310
+    MIN_H = 230
+
     def __init__(self, w, h, fs=1, windowed=False):
         self.w = int(w)
         self.h = int(h)

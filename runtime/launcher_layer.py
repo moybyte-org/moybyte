@@ -38,9 +38,11 @@ launcher's lent zone now only shows the selected cart's name. NEW/DUP/DEL move t
 """
 
 
-def _in(px, py, rect):
-    x, y, w, h = rect
-    return x <= px < x + w and y <= py < y + h
+try:
+    import ui as _ui
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import ui as _ui
+_in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 
 # Display-type helpers for the Library shelf (visual identity v1's library-concept

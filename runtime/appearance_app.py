@@ -12,6 +12,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 
 class AppearanceLayout:
+    # Min-size convention (ui.py): the WM clamps window resizes to these
+    # (fs-scaled) -- the visual rails/catalog need the room at font scale 2.
+    MIN_W = 310
+    MIN_H = 230
+
     def __init__(self, w, h, fs=1, windowed=False):
         self.w = int(w)
         self.h = int(h)
