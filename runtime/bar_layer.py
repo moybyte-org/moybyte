@@ -228,8 +228,7 @@ class BarLayer:
         """True when `where`'s bar band is the LIGHT in-window band (windowed
         chrome + a light theme, ink token == 0) -- zone owners pick their band
         ink with this so lent-zone text stays readable on either band."""
-        return self._in_window(where) and \
-            self.ws.theme_colors.get("ink", 7) == 0
+        return self._in_window(where) and self.ws.light_chrome()
 
     def _in_window(self, where):
         """True when `where`'s bar is being drawn INSIDE a window of the windowed

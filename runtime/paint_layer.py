@@ -334,7 +334,7 @@ class PaintLayer:
         # the shelf tiers; the PANEL stays the dark work canvas (the sprite art's
         # own field) on every tier. Baseline literals byte-identical.
         th = ws.theme_colors
-        light = (not lay._base) and th.get("ink", NAMES["white"]) == 0
+        light = (not lay._base) and ws.light_chrome()
         cv.rect(*(lay.body_fill + ((th["surface"] if light else NAMES["black"]),)))
         # The panel joins the surface on the light tiers -- the pixel grid and
         # swatch/preview cells all back themselves, so only the frozen dark
