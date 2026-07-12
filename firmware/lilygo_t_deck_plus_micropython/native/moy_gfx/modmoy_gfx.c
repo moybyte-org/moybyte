@@ -954,8 +954,28 @@ static mp_obj_t moy_gfx_pack_strip(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_pack_strip_obj, 7, 7, moy_gfx_pack_strip);
 
+// native_code_free_all() -> bool: reclaim the esp32 port's @micropython.native
+// exec arena (#66 repeat-run cliff fix -- the arena is GROW-ONLY until soft
+// reset; the cart loader frees it on a compile miss, when no cart native
+// function objects are live). The symbol gains external linkage via the
+// build's esp32_native_code_free.patch; declared WEAK here so this same file
+// still links on builds without the patch (the unix bench port, the mainline
+// P4 until its build.sh applies the twin patch) -- there the address is NULL
+// and the call reports False (no reclaim available).
+extern void esp_native_code_free_all(void) __attribute__((weak));
+
+static mp_obj_t moy_gfx_native_code_free_all(void) {
+    if (&esp_native_code_free_all == NULL) {
+        return mp_const_false;
+    }
+    esp_native_code_free_all();
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_gfx_native_code_free_all_obj, moy_gfx_native_code_free_all);
+
 static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__),   MP_OBJ_NEW_QSTR(MP_QSTR_moy_gfx) },
+    { MP_ROM_QSTR(MP_QSTR_native_code_free_all), MP_ROM_PTR(&moy_gfx_native_code_free_all_obj) },
     { MP_ROM_QSTR(MP_QSTR_fill),       MP_ROM_PTR(&moy_gfx_fill_obj) },
     { MP_ROM_QSTR(MP_QSTR_fill_rect),  MP_ROM_PTR(&moy_gfx_fill_rect_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit565),    MP_ROM_PTR(&moy_gfx_blit565_obj) },

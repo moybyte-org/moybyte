@@ -443,6 +443,16 @@ if [ -f "${MPCONFIGPORT_H}" ] && ! grep -q "Moybyte #66" "${MPCONFIGPORT_H}"; th
   patch -d "${UPSTREAM_DIR}/lib/micropython" -p1 < "${PATCH_DIR}/esp32_repr_c_floats.patch"
 fi
 
+# Moybyte #66: un-static esp_native_code_free_all so the cart loader can reclaim
+# the @micropython.native exec arena (MALLOC_CAP_EXEC IRAM, otherwise GROW-ONLY
+# until soft reset) on a compile miss -- the fix for the repeat-run cliff (the
+# arena exhausted after ~5 heavy-cart compiles; the emitter then fell back to
+# bytecode at half the logic speed). moy_gfx.native_code_free_all binds it.
+if ! grep -q "moybyte_native_code_free" "${UPSTREAM_DIR}/lib/micropython/ports/esp32/mpconfigport.h"; then
+  echo "Moybyte: applying native-code-free patch (#66)"
+  patch -d "${UPSTREAM_DIR}/lib/micropython" -p1 < "${PATCH_DIR}/esp32_native_code_free.patch"
+fi
+
 # Moybyte #69 (A/B knob, DEFAULT OFF): switch machine.I2C to esp-idf's NEW
 # i2c_master driver. Why: the legacy driver's `timeout=` programs only the S3's
 # per-CLOCK-STRETCH-EVENT hardware register (exponential; 5000us -> 6.55ms per

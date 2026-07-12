@@ -1,0 +1,50 @@
+Moybyte #66: expose the esp32 port's native-code arena reclaim.
+
+esp_native_code_commit() allocates every @micropython.native blob from
+MALLOC_CAP_EXEC (internal IRAM) into a GROW-ONLY linked list, freed only at
+soft reset. The auto-native cart loader (#67) compiles per cart run, so an
+edit->PLAY->edit session exhausts the arena (glass-measured: ~5 heavy-cart
+compiles), the emitter dies on a ~300-byte MemoryError, and the silent
+bytecode fallback halves cart logic speed -- the #66 "repeat-run cliff".
+
+Un-static esp_native_code_free_all() and declare it in mpconfigport.h so a
+usermod (moy_gfx.native_code_free_all) can reclaim the arena at a safe point:
+the cart loader frees it on a compile MISS (source changed / cache purged),
+when no native function objects are live. The soft-reset call site keeps
+working; the symbol simply gains external linkage. Marker for the build.sh
+idempotence guard: moybyte_native_code_free.
+
+diff --git a/ports/esp32/main.c b/ports/esp32/main.c
+index 12835f3..9e51924 100644
+--- a/ports/esp32/main.c
++++ b/ports/esp32/main.c
+@@ -83,7 +83,7 @@ typedef struct _native_code_node_t {
+ 
+ static native_code_node_t *native_code_head = NULL;
+ 
+-static void esp_native_code_free_all(void);
++void esp_native_code_free_all(void); // moybyte_native_code_free (#66): external linkage for the cart loader's arena reclaim
+ 
+ int vprintf_null(const char *format, va_list ap) {
+     // do nothing: this is used as a log target during raw repl mode
+@@ -286,7 +286,7 @@ MP_WEAK void nlr_jump_fail(void *val) {
+     esp_restart();
+ }
+ 
+-static void esp_native_code_free_all(void) {
++void esp_native_code_free_all(void) { // moybyte_native_code_free (#66)
+     while (native_code_head != NULL) {
+         native_code_node_t *next = native_code_head->next;
+         heap_caps_free(native_code_head);
+diff --git a/ports/esp32/mpconfigport.h b/ports/esp32/mpconfigport.h
+index 55503ff..3507b4e 100644
+--- a/ports/esp32/mpconfigport.h
++++ b/ports/esp32/mpconfigport.h
+@@ -294,6 +294,7 @@
+ #else
+ void *esp_native_code_commit(void *, size_t, void *);
+ #define MP_PLAT_COMMIT_EXEC(buf, len, reloc) esp_native_code_commit(buf, len, reloc)
++void esp_native_code_free_all(void); // moybyte_native_code_free (#66): cart-exit exec-arena reclaim
+ #endif
+ #define MP_SSIZE_MAX (0x7fffffff)
+ 

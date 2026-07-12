@@ -483,6 +483,21 @@ class Player:
             if NATIVE_CARTS and self._native_ins is not None:
                 ns["micropython"] = _micropython
         elif NATIVE_CARTS:
+            # Compile MISS (new cart or edited source): reclaim the exec arena
+            # FIRST (#66 -- it is grow-only otherwise; the port patch exposes
+            # the free through moy_gfx). Safe here: the cache is being purged
+            # (its code objects' native blobs die with the arena) and no cart
+            # world is live (the previous run's release_world dropped it; the
+            # wallpaper compiles plain, never native). The arena then holds
+            # exactly ONE cart's current-version blobs at any time -- unlimited
+            # edit->PLAY cycles. On builds without the patch the call reports
+            # False and behavior is the pre-patch cache-only mitigation.
+            _CODE_CACHE.clear()
+            try:
+                import moy_gfx
+                moy_gfx.native_code_free_all()
+            except Exception:  # noqa: BLE001 -- host / bench builds: no reclaim
+                pass
             nsrc, ins = _nativize(src)
             ns["micropython"] = _micropython   # the decorator's global, no import line
             try:
