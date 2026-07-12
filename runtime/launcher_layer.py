@@ -43,6 +43,32 @@ def _in(px, py, rect):
     return x <= px < x + w and y <= py < y + h
 
 
+# Display-type helpers for the Library shelf (visual identity v1's library-concept
+# mockup): block-scaled petme128 headings that render identically on every canvas.
+try:
+    from chrome import _print_scaled, _text_w
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.chrome import _print_scaled, _text_w
+
+
+def _wrap_words(text, maxc):
+    """Greedy word-wrap of `text` into lines of at most `maxc` chars (an
+    over-long single word gets its own truncated line)."""
+    lines = []
+    cur = ""
+    for word in str(text).split():
+        cand = word if not cur else cur + " " + word
+        if len(cand) <= maxc:
+            cur = cand
+        else:
+            if cur:
+                lines.append(cur)
+            cur = word[:maxc]
+    if cur:
+        lines.append(cur)
+    return lines
+
+
 # The launcher's pinned "Make" tile + the picker's pinned "+ New" tile are PSEUDO-
 # entries (not real carts): a plain dict with a marker `type` + a title, flowing
 # through the SAME grid (nav/sel/tile_at) as real carts, dispatched by their type at
@@ -156,12 +182,29 @@ class Launcher:
 
     def nav2d(self, dx, dy):
         """Grid navigation: dx steps a column, dy steps a row. Clamped within the
-        list (no wrap) so arrow nav feels like a real grid."""
+        list (no wrap) so arrow nav feels like a real grid. On the shelf tiers
+        (non-base) slot 0 spans both rows (the tall featured card), so horizontal
+        nav walks the linear order and vertical nav hops between the two card
+        rows -- the tall card itself has no vertical neighbor."""
         n = len(self.items)
         if not n:
             return
-        step = dx + dy * self.COLS
-        self.sel = max(0, min(n - 1, self.sel + step))
+        if self.layout._base:
+            step = dx + dy * self.COLS
+            self.sel = max(0, min(n - 1, self.sel + step))
+            self._page_to_sel()
+            return
+        cols = self.COLS
+        base = self.page * self.PAGE
+        k = self.sel - base
+        if dx:
+            self.sel = max(0, min(n - 1, self.sel + dx))
+        elif dy > 0 and 1 <= k <= cols - 1:            # row 0 -> row 1
+            nk = k + (cols - 1)
+            if base + nk < n:
+                self.sel = base + nk
+        elif dy < 0 and k >= cols:                     # row 1 -> row 0
+            self.sel = base + (k - (cols - 1))
         self._page_to_sel()
 
     def _page_to_sel(self):
@@ -206,7 +249,8 @@ class Launcher:
     def action_rects(self):
         """The selected card's PLAY / CHANGE button rects as {"play": r, "change": r}
         (visual identity v1 Sections 1.2/6.1: the selected cartridge exposes the two
-        verbs; primary activation still always plays). DESKTOP-density tiers only:
+        verbs; primary activation still always plays). The mockup's in-card row along
+        the card's bottom edge, under the title band. DESKTOP-density tiers only:
         returns None on the 320x240 baseline (the lent bar zone carries the verbs
         there -- LauncherHomeLayer.draw_zone), when `actions` is off (the picker),
         for a pseudo tile (Make has one verb, its tap), or when the selection is off
@@ -222,24 +266,26 @@ class Launcher:
             return None
         x, y, w, h = r
         fs = lay.fs
-        fw = lay.font_w
-        bh = 14 * fs                          # 8*fs glyph row + 3*fs pad above/below
-        gap = 4 * fs
-        pw = 4 * fw + 6 * fs                  # "PLAY"
-        cw = 6 * fw + 6 * fs                  # "CHANGE"
-        bx = x + (w - (pw + gap + cw)) // 2   # may borrow the column gap, like the pill
-        by = y + 2 + lay.icon_box + 3 + 10 * fs + 3 * fs   # just under the label pill
-        return {"play": (bx, by, pw, bh),
-                "change": (bx + pw + gap, by, cw, bh)}
+        pad = 2 * fs
+        bh = 13 * fs
+        # Asymmetric split (the mockup's proportions): PLAY compact, CHANGE wide
+        # enough for its six-glyph label at every shelf card width.
+        avail = w - 3 * pad
+        pw = avail * 45 // 100
+        by = y + h - pad - bh
+        return {"play": (x + pad, by, pw, bh),
+                "change": (x + 2 * pad + pw, by, avail - pw, bh)}
 
     def draw(self, cv, sheet_for=None):
         # Icon tiles only -- the wallpaper backdrop + status strip + dock are drawn
-        # by the Workstation around this (so the wallpaper shows through). For each
-        # cart: a rounded art box (its sprite tile 0 if it has one, else a type
-        # glyph), the selection ring, and a short name beneath. All geometry scales
-        # with the layout (font scale), so a bigger panel shows bigger tiles (#39).
+        # by the Workstation around this (so the wallpaper shows through). The
+        # 320x240 baseline keeps the frozen tile look; the desktop-density tiers
+        # render the Library SHELF cards (visual identity v1's library mockup).
         NAMES = self._NAMES
         lay = self.layout
+        if not lay._base:
+            self._draw_shelf(cv, sheet_for)
+            return
         box = lay.icon_box
         fw = lay.font_w                              # on-screen char-cell width (8*fs)
         spr_scale = max(1, box // 16)                # fit the 16x16 icon sprite in the box
@@ -264,58 +310,184 @@ class Launcher:
             # short name (one line, truncated to the tile width: fw-wide cells)
             name = it["title"]
             maxc = w // fw
-            if not lay._base:
-                # DESKTOP density: the label pill may borrow most of the column gap
-                # before truncating -- "Star Catcher"/"Letter Blitz" fit whole on the
-                # big tiers instead of losing their last letters (P4 glass feedback).
-                maxc = (w + lay.icon_gap_x - 6 * lay.fs) // fw
             if len(name) > maxc:
                 name = name[:maxc]
             nx = x + (w - len(name) * fw) // 2
             ny = by + box + 3
-            if lay._base:
-                cv.print(name, nx, ny,
-                         NAMES["white"] if sel else NAMES["light_grey"], 1)
+            cv.print(name, nx, ny,
+                     NAMES["white"] if sel else NAMES["light_grey"], 1)
+
+    # -- the Library shelf cards (visual identity v1, desktop density) ----------
+
+    def _draw_shelf(self, cv, sheet_for):
+        """The mockup's card grid: the tall featured slot (MAKE STUDIO / +New / a
+        featured cart) + cover-art cartridge cards, plus the footer pager arrows.
+        The framed panel around this is the home layer's (the picker draws the same
+        cards over its own tool backdrop)."""
+        for i in self._page_range():
+            rect = self.tile_rect(i)
+            it = self.items[i]
+            if it.get("type") in PSEUDO_TILE_TYPES:
+                self._draw_pseudo_card(cv, it, rect, i == self.sel)
             else:
-                # DESKTOP density (big-canvas tiers): a Picotron-style label PILL --
-                # dark text on a light chip -- so names read over any wallpaper.
-                # The selected pill takes the theme accent.
-                fs = lay.fs
-                ph = 8 * fs + 4 * fs
-                cv.rect(nx - 3 * fs, ny - 2 * fs, len(name) * fw + 6 * fs, ph,
-                        acc if sel else NAMES["white"])
-                cv.print(name, nx, ny, NAMES["black"], 1)
-        # The selected card's PLAY / CHANGE row (visual identity v1 Sections 1.2 /
-        # 6.1) -- desktop-density tiers, home grid only (action_rects gates). Signal
-        # colors do the semantic work: green = PLAY, the authoring accent = CHANGE.
-        ar = self.action_rects()
+                self._draw_cart_card(cv, it, rect, i == self.sel, sheet_for)
+        if self.max_page() > 0:
+            self._draw_pager(cv)
+
+    def _draw_cart_card(self, cv, it, rect, selected, sheet_for):
+        """One cartridge card: cover art over the dark field, a title band, a thin
+        border -- and, when selected, the focus ring plus the PLAY / CHANGE button
+        row (home grid only; the picker's selected card gets just the ring)."""
+        NAMES = self._NAMES
+        th = self.theme or {}
+        lay = self.layout
+        fs = lay.fs
+        x, y, w, h = rect
+        band_h = 14 * fs
+        ar = self.action_rects() if selected else None
+        btn_area = (13 * fs + 6 * fs) if ar is not None else 0
+        cover_h = h - band_h - btn_area
+        # Cover: the cart's own sprite art scaled up on the dark field, else its
+        # type glyph in the type color (the pre-literate cue, now cover-sized).
+        # The field is the theme's `dim` tint: the one token that contrasts BOTH
+        # the home shelf's light surface and the picker's dark tool backdrop in
+        # every shipped theme (night 1-on-60, machine 60-on-7 / 60-on-1).
+        cv.rect(x, y, w, cover_h, th.get("dim", NAMES["dark_blue"]))
+        img = sheet_for(it) if sheet_for is not None else None
+        if img is not None:
+            sc = max(1, min((w - 6 * fs) // 16, (cover_h - 4 * fs) // 16))
+            cv.spr(img, x + (w - 16 * sc) // 2, y + (cover_h - 16 * sc) // 2, sc)
+        else:
+            gs = max(1, min((w - 12 * fs) // 12, (cover_h - 8 * fs) // 12))
+            self._blit_glyph(cv, _TYPE_GLYPH.get(it["type"], "app"),
+                             (x, y, w, cover_h),
+                             _TYPE_COLOR.get(it["type"], NAMES["indigo"]), gs)
+        # Title band: cream text centered on the strongest ink.
+        cv.rect(x, y + cover_h, w, band_h, NAMES["black"])
+        name = it["title"]
+        fw = lay.font_w
+        maxc = max(3, (w - 4 * fs) // fw)
+        if len(name) > maxc:
+            name = name[:maxc]
+        cv.print(name, x + (w - len(name) * fw) // 2,
+                 y + cover_h + (band_h - 8 * fs) // 2, NAMES["white"], 1)
+        # PLAY / CHANGE (mockup: green PLAY, warm-light CHANGE, both dark-edged).
         if ar is not None:
-            th = self.theme or {}
-            fs = lay.fs
-            for verb, label, bg in (("play", "PLAY", th.get("play", 11)),
-                                    ("change", "CHANGE", th.get("author", 10))):
-                x, y, w, h = ar[verb]
-                cv.rect(x, y, w, h, bg)
-                cv.rectb(x, y, w, h, NAMES["black"])
-                cv.print(label, x + 3 * fs, y + 3 * fs, NAMES["black"], 1)
+            bx, by, bw, bh = ar["play"]
+            cv.rect(bx, by, bw, bh, th.get("play", NAMES["green"]))
+            cv.rectb(bx, by, bw, bh, NAMES["black"])
+            tw = 4 * fw + 14 * fs                    # run glyph + "PLAY"
+            if tw > bw - 2 * fs:                     # narrow card -> text only
+                cv.print("PLAY", bx + max(fs, (bw - 4 * fw) // 2),
+                         by + (bh - 8 * fs) // 2, NAMES["white"], 1)
+            else:
+                tx = bx + (bw - tw) // 2
+                self._blit_glyph(cv, "run", (tx, by, 12 * fs, bh),
+                                 NAMES["white"], fs)
+                cv.print("PLAY", tx + 14 * fs, by + (bh - 8 * fs) // 2,
+                         NAMES["white"], 1)
+            bx, by, bw, bh = ar["change"]
+            cv.rect(bx, by, bw, bh, NAMES["white"])
+            cv.rectb(bx, by, bw, bh, NAMES["black"])
+            label = "CHANGE"
+            maxc = max(2, (bw - 2 * fs) // fw)
+            if len(label) > maxc:
+                label = label[:maxc]
+            cv.print(label, bx + max(fs, (bw - len(label) * fw) // 2),
+                     by + (bh - 8 * fs) // 2, NAMES["black"], 1)
+        self._card_frame(cv, rect, selected)
+
+    def _draw_pseudo_card(self, cv, it, rect, selected):
+        """The pinned tall card: MAKE STUDIO on the home shelf (the mockup's yellow
+        pencil card), + New on the picker. Focus-yellow field, big tool glyph, a
+        display-type heading and a small caption, and the corner pin."""
+        NAMES = self._NAMES
+        th = self.theme or {}
+        lay = self.layout
+        fs = lay.fs
+        x, y, w, h = rect
+        make = it.get("type") == MAKE_TILE_TYPE
+        cv.rect(x, y, w, h, th.get("focus", NAMES["yellow"]))
+        # Big tool glyph in the card's upper half (pencil = Make, plus = New).
+        gs = max(fs, min((w - 16 * fs) // 12, (h // 2 - 8 * fs) // 12))
+        self._blit_glyph(cv, _TYPE_GLYPH[it["type"]],
+                         (x, y + 4 * fs, w, h // 2), NAMES["black"], gs)
+        # Corner pushpin (the mockup's "pinned" cue).
+        px_, py_ = x + w - 8 * fs, y + 7 * fs
+        cv.circ(px_, py_, 2 * fs, NAMES["black"])
+        cv.line(px_, py_ + 2 * fs, px_ - 2 * fs, py_ + 5 * fs, NAMES["black"])
+        # Heading (display type) + caption, centered in the lower half.
+        heading = ("MAKE", "STUDIO") if make else ("NEW",)
+        caption = "Open or create a project" if make else "Start a fresh project"
+        ty = y + h * 11 // 20
+        for line in heading:
+            tw = _text_w(cv, line, 2)
+            if tw > w - 4 * fs:                      # narrow card -> body size
+                tw = _text_w(cv, line, 1)
+                cv.print(line, x + (w - tw) // 2, ty, NAMES["black"], 1)
+                ty += 10 * fs
+            else:
+                _print_scaled(cv, line, x + (w - tw) // 2, ty, NAMES["black"], 2)
+                ty += 18 * fs
+        ty += 2 * fs
+        maxc = max(6, (w - 4 * fs) // lay.font_w)
+        for line in _wrap_words(caption, maxc):
+            tw = _text_w(cv, line, 1)
+            cv.print(line, x + (w - tw) // 2, ty, NAMES["dark_grey"], 1)
+            ty += 10 * fs
+        self._card_frame(cv, rect, selected, ring=th.get("author", NAMES["orange"]))
+
+    def _card_frame(self, cv, rect, selected, ring=None):
+        """The card's thin border, plus the selection focus ring (Section 5.2:
+        focus = signal yellow + a shape change, visible without hover). `ring`
+        overrides the ring color where yellow would vanish (the yellow MAKE card)."""
+        NAMES = self._NAMES
+        th = self.theme or {}
+        lay = self.layout
+        fs = lay.fs
+        x, y, w, h = rect
+        for i in range(fs):
+            cv.rectb(x - i, y - i, w + 2 * i, h + 2 * i,
+                     th.get("border", NAMES["black"]))
+        if selected:
+            color = ring if ring is not None else th.get("focus", NAMES["yellow"])
+            for i in range(max(2, fs)):
+                d = fs + 1 + i
+                cv.rectb(x - d, y - d, w + 2 * d, h + 2 * d, color)
+
+    def _draw_pager(self, cv):
+        """The footer pager arrows (boxed, mockup-style), drawn at the layout's
+        page_prev/page_next hit rects -- dimmed at the ends of the page range.
+        The HOME grid (actions on) sits on the light shelf panel, so it uses the
+        surface ink; the picker sits on its dark tool backdrop, so it keeps the
+        light chrome ink."""
+        NAMES = self._NAMES
+        th = self.theme or {}
+        lay = self.layout
+        if self.actions:
+            ink = th.get("ink", NAMES["white"])
+            dim = th.get("ink_dim", NAMES["light_grey"])
+        else:
+            ink = NAMES["white"]
+            dim = NAMES["light_grey"]
+        for rect, glyph, on in ((lay.page_prev, "<", self.page > 0),
+                                (lay.page_next, ">", self.page < self.max_page())):
+            x, y, w, h = rect
+            cv.rectb(x, y, w, h, ink if on else dim)
+            cv.print(glyph, x + (w - lay.font_w) // 2,
+                     y + (h - 8 * lay.fs) // 2, ink if on else dim, 1)
 
     def _tile_glyph(self, cv, it, box):
         # A type-colored art box with a centered type glyph, for carts with no
-        # sprite. Uses the injected shared glyph blitter (host == device).
+        # sprite (320x240 baseline tiles). Uses the injected shared glyph blitter
+        # (host == device). MAKE wears the theme's AUTHORING accent (the frozen
+        # default keeps today's yellow), per visual identity v1 Section 6.2.
         NAMES = self._NAMES
         x, y, w, h = box
         ttype = it["type"]
         fill = _TYPE_COLOR.get(ttype, NAMES["indigo"])
         if ttype == MAKE_TILE_TYPE:
-            # Visual identity v1 Section 6.2: MAKE wears the theme's AUTHORING accent
-            # (the frozen default keeps today's yellow), and on the desktop-density
-            # tiers the whole art box fills with it so the pinned tile reads
-            # unmistakably primary next to the cartridge covers.
             fill = (self.theme or {}).get("author", _TYPE_COLOR[MAKE_TILE_TYPE])
-            if not self.layout._base:
-                cv.rect(x, y, w, h, fill)
-                self._blit_glyph(cv, _TYPE_GLYPH[MAKE_TILE_TYPE], box, NAMES["black"])
-                return
         cv.rect(x + 6, y + 6, w - 12, h - 12, fill)
         self._blit_glyph(cv, _TYPE_GLYPH.get(ttype, "app"), box, NAMES["black"])
 
@@ -360,9 +532,16 @@ class LauncherHomeLayer:
         lay = ws.layout
         if _surf is not None:
             _surf("home-grid", "system")
+        if not lay._base:
+            # The Library shelf panel (visual identity v1's library mockup): the
+            # warm tool surface framed over the construction field, with the
+            # "LIBRARY" header and the footer cartridge count. The grid + pager
+            # arrows draw inside it (Launcher._draw_shelf).
+            self._draw_shelf_panel(cv)
         ws.launcher.draw(cv, ws._icon_sheet_for)
-        # page chevrons when more than one page of carts
-        if ws.launcher.max_page() > 0:
+        # page chevrons when more than one page of carts (baseline tier; the
+        # shelf tiers draw boxed pager arrows in the panel footer instead)
+        if lay._base and ws.launcher.max_page() > 0:
             if ws.launcher.page > 0:
                 px, py = lay.page_prev[0], lay.page_prev[1]
                 cv.print("<", px + 3, py + 8, NAMES["white"], 2)
@@ -372,6 +551,43 @@ class LauncherHomeLayer:
         if _surf is not None:
             _surf("home-bar", "system")
         ws.bar_layer._draw_status_strip("home")
+
+    def _draw_shelf_panel(self, cv):
+        """The framed Library panel: surface fill + border, the Moy + "LIBRARY"
+        header, and the footer's centered cartridge count between thin rules
+        (the pager arrows are drawn by the grid, at the layout's footer rects)."""
+        ws = self.ws
+        NAMES = self._NAMES
+        th = ws.theme_colors
+        lay = ws.layout
+        fs = lay.fs
+        x, y, w, h = lay.lib_panel
+        cv.rect(x, y, w, h, th["surface"])
+        for i in range(fs):
+            cv.rectb(x - i, y - i, w + 2 * i, h + 2 * i, th["border"])
+        # Header: the mascot + display-type "LIBRARY".
+        hx = x + 12 * fs
+        hy = y + (lay.lib_header_h - 16 * fs) // 2
+        ws._icon("moy", hx, hy, cv)
+        _print_scaled(cv, "LIBRARY", hx + 22 * fs,
+                      y + (lay.lib_header_h - 16 * fs) // 2, th["ink"], 2)
+        # Footer: "N CARTRIDGES" centered between thin rules.
+        n = 0
+        for it in ws.launcher.items:
+            if it.get("path"):
+                n += 1
+        label = str(n) + (" CARTRIDGE" if n == 1 else " CARTRIDGES")
+        fw = lay.font_w
+        tw = len(label) * fw
+        ty = y + h - lay.lib_footer_h + (lay.lib_footer_h - 8 * fs) // 2
+        tx = x + (w - tw) // 2
+        cv.print(label, tx, ty, th["ink_dim"], 1)
+        ly = ty + 4 * fs
+        lx0 = lay.page_prev[0] + lay.page_prev[2] + 10 * fs
+        lx1 = lay.page_next[0] - 10 * fs
+        cv.rect(lx0, ly, max(0, tx - 8 * fs - lx0), fs, th["ink_dim"])
+        cv.rect(tx + tw + 8 * fs, ly, max(0, lx1 - (tx + tw + 8 * fs)), fs,
+                th["ink_dim"])
 
     def handle_input(self, i):
         ws = self.ws
@@ -491,6 +707,15 @@ class LauncherHomeLayer:
         ws = self.ws
         NAMES = self._NAMES
         lay = ws.layout
+        if not lay._base:
+            # Shelf tiers: the OS wordmark (the mockup's top-left "moybyte") --
+            # the selected cart's name reads on the card itself, and the verbs
+            # are the card's own PLAY/CHANGE row.
+            fs = lay.fs
+            ws._icon("moy", rect[0] + 2, rect[1], cv)
+            cv.print("moybyte", rect[0] + 2 + 20 * fs,
+                     rect[1] + (16 * fs - 8 * fs) // 2, NAMES["white"], 1)
+            return
         sel = ws.launcher.selected()
         if sel is None:
             return
@@ -601,11 +826,13 @@ class EditorPickerLayer:
             for gx in range(8 * _fs, cv.w, 24 * _fs):
                 cv.pix(gx, gy, th["dim"])
         ws.picker.draw(cv, ws._icon_sheet_for)
-        if ws.picker.max_page() > 0:
+        # Baseline chevrons only -- the shelf tiers draw boxed pager arrows
+        # inside Launcher._draw_shelf.
+        if lay._base and ws.picker.max_page() > 0:
             if ws.picker.page > 0:
                 px, py = lay.page_prev[0], lay.page_prev[1]
                 cv.print("<", px + 3, py + 8, NAMES["white"], 2)
-            if ws.picker.page < ws.picker.max_page():
+            if ws.picker.max_page() > 0 and ws.picker.page < ws.picker.max_page():
                 px, py = lay.page_next[0], lay.page_next[1]
                 cv.print(">", px + 3, py + 8, NAMES["white"], 2)
         ws.bar_layer._draw_status_strip("picker")

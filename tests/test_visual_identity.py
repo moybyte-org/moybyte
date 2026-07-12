@@ -202,6 +202,39 @@ def test_base_tier_zone_chips_dispatch(tmp_path):
     assert not home.zone_tap(x + 1, y + 1, ws.layout.zone_left)
 
 
+def test_library_shelf_geometry(tmp_path):
+    """The desktop-density Library shelf (the library-concept mockup): a framed
+    panel whose grid has one TALL featured slot (column 0, both rows -- the pinned
+    MAKE card) plus rows x (cols-1) cartridge cards per page."""
+    ws = _ws(tmp_path, sys_size=(1024, 600), font_scale=2)
+    lay = ws.layout
+    assert lay.page == lay.rows * (lay.cols - 1) + 1
+    gx, gy, gw, gh = lay.lib_grid
+    assert lay.tile_rect(0, 0) == (gx, gy, lay.lib_card_w, gh)   # tall featured slot
+    assert lay.tile_rect(1, 0)[3] == lay.lib_card_h              # ordinary card
+    px, py, pw, ph = lay.lib_panel                               # panel frames grid
+    assert px <= gx and py <= gy and gx + gw <= px + pw and gy + gh <= py + ph
+    # Vertical nav hops between the two card rows (the tall slot spans both).
+    ws.launcher.sel = 1
+    ws.launcher.nav2d(0, 1)
+    assert ws.launcher.sel == 1 + (lay.cols - 1)
+    ws.launcher.nav2d(0, -1)
+    assert ws.launcher.sel == 1
+
+
+def test_library_shelf_panel_paints_surface(tmp_path):
+    """The machine theme's Library panel is the warm-light tool surface (cream)
+    over the dark construction field."""
+    ws = _ws(tmp_path, sys_size=(1024, 600), font_scale=2)
+    ws.set_theme("machine")
+    ws.frame(1 / 30)
+    px, py, pw, ph = ws.layout.lib_panel
+    th = ws.theme_colors
+    assert th["surface"] == 7
+    # A point in the panel header band (left of the LIBRARY heading's start).
+    assert ws.sys_canvas.pix(px + 2, py + 2) == th["surface"]
+
+
 def test_home_draw_includes_action_row_desktop(tmp_path):
     """The desktop-density home frame actually paints the PLAY row (signal green
     is reserved for PLAY, so its presence is a faithful marker)."""
@@ -212,5 +245,6 @@ def test_home_draw_includes_action_row_desktop(tmp_path):
     x, y, w, h = ar["play"]
     th = ws.theme_colors
     assert ws.sys_canvas.pix(x + 2, y + 2) == th["play"]
+    # CHANGE is the mockup's warm-light button (cream field, dark ink).
     x, y, w, h = ar["change"]
-    assert ws.sys_canvas.pix(x + 2, y + 2) == th["author"]
+    assert ws.sys_canvas.pix(x + 2, y + 2) == 7

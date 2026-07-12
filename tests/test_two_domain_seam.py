@@ -103,9 +103,10 @@ def test_desktop_reflows_on_a_larger_canvas(tmp_path):
     ws = _ws(tmp_path, sys_size=(640, 480))
     assert ws.sys_canvas is not ws.canvas
     assert (ws.sys_canvas.w, ws.sys_canvas.h) == (640, 480)
-    # More columns and rows than the 4x2 baseline (the grid fills the bigger band).
+    # More columns than the 4x2 baseline (the Library shelf fills the bigger band:
+    # one tall featured slot + ROWS x (COLS-1) cartridge cards per page).
     assert ws.launcher.COLS > 4 and ws.launcher.ROWS >= 2
-    assert ws.launcher.PAGE == ws.launcher.COLS * ws.launcher.ROWS
+    assert ws.launcher.PAGE == ws.launcher.ROWS * (ws.launcher.COLS - 1) + 1
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)
     buf = drv.rgb888()
