@@ -31,6 +31,18 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import _Blit
 
+# The shared petme128 glyph source (#62) -- the Library shelf's display type
+# (_print_scaled) rasterizes it through plain rect blocks so it renders identically
+# on every canvas (host SystemCanvas, device, web recording). Staged as `moy_font`
+# on the device builds, `font`/`runtime.font` on host trees.
+try:
+    import moy_font as _font
+except ImportError:  # pragma: no cover - host fallback
+    try:
+        import font as _font
+    except ImportError:
+        from runtime import font as _font
+
 # Surface geometry constants the Layout classes derive their responsive rects from.
 # bar_layer/settings_layer/code_layer OWN these (see their modules); imported here the
 # same way console.py imports them, so Layout/CodeLayout reflow off the same numbers.
@@ -260,26 +272,34 @@ class Layout:
         if self._base:
             self.cols, self.rows = _ICON_COLS, _ICON_ROWS
             self.icon_x0 = _ICON_X0
+            self.page = self.cols * self.rows
         else:
-            # DESKTOP density (the big-canvas tiers, Picotron model): wider tiles
-            # (room for a ~10-char label pill under the art) + airier gaps, so the
-            # home grid reads as spaced desktop icons, not a packed launcher strip.
-            self.icon_w = 88 * fs
-            self.icon_gap_x = 22 * fs
-            self.icon_gap_y = 18 * fs
-            self.cols = max(1, (self.w + self.icon_gap_x) //
-                            (self.icon_w + self.icon_gap_x))
-            band = self.grid_bottom - self.icon_y0
-            self.rows = max(1, (band + self.icon_gap_y) //
-                            (self.icon_h + self.icon_gap_y))
-            grid_w = self.cols * self.icon_w + (self.cols - 1) * self.icon_gap_x
-            self.icon_x0 = max(0, (self.w - grid_w) // 2)
-            # Center the rows in the band too: the floor division above can leave a
-            # large dead strip under the last row (170px at 1024x600/2x -- the grid
-            # read top-heavy on the P4's glass), so split the slack evenly.
-            grid_h = self.rows * self.icon_h + (self.rows - 1) * self.icon_gap_y
-            self.icon_y0 += max(0, (band - grid_h) // 2)
-        self.page = self.cols * self.rows
+            # DESKTOP density: the Library SHELF (visual identity v1's library
+            # concept mockup) -- a framed panel (header "LIBRARY" + footer pager)
+            # over the dark construction field, whose grid has ONE tall FEATURED
+            # slot (column 0, spanning both rows: the pinned MAKE/+New card, or a
+            # featured cart on later pages) + rows x (cols-1) cartridge cards with
+            # cover art, a title band, and the selected card's PLAY/CHANGE row.
+            self.icon_x0 = _ICON_X0 * fs                 # legacy attr (unused here)
+            mx = 24 * fs
+            pt = self.status_h + 12 * fs
+            self.lib_panel = (mx, pt, self.w - 2 * mx, self.h - pt - 22 * fs)
+            self.lib_header_h = 28 * fs
+            self.lib_footer_h = 24 * fs
+            self.lib_gap = 8 * fs
+            inset = 12 * fs
+            px_, py_, pw_, ph_ = self.lib_panel
+            gx = px_ + inset
+            gy = py_ + self.lib_header_h
+            gw = pw_ - 2 * inset
+            gh = ph_ - self.lib_header_h - self.lib_footer_h - 4 * fs
+            self.lib_grid = (gx, gy, gw, gh)
+            self.cols = max(3, min(7, (gw + self.lib_gap) //
+                                   (104 * fs + self.lib_gap)))
+            self.rows = 2
+            self.lib_card_w = (gw - (self.cols - 1) * self.lib_gap) // self.cols
+            self.lib_card_h = (gh - self.lib_gap) // 2
+            self.page = self.rows * (self.cols - 1) + 1   # tall slot + 2x(cols-1)
 
         # -- unified top bar: icon size + clusters (Stage 1) -------------------
         # Every bar control is a 16x16 IconSheet sprite (16px icons, 1px margin in the
@@ -328,13 +348,17 @@ class Layout:
         # right zone's clock text -- the rect BarLayer hands to draw_zone/zone_tap.
         self.zone_left = (edge, _BAR_Y, max(0, self.clock_x - 2 * edge), ic)
 
-        # -- page chevrons (centered vertically in the icon band) ----------------
+        # -- page chevrons ---------------------------------------------------
+        # Base: the frozen mid-band hit rects. Shelf tiers: boxed arrow buttons
+        # in the Library panel footer's corners (the mockup's pager).
         if self._base:
             self.page_prev, self.page_next = _PAGE_PREV, _PAGE_NEXT
         else:
-            cy = (self.icon_y0 + self.grid_bottom) // 2 - 12 * fs
-            self.page_prev = (2, cy, 14 * fs, 24 * fs)
-            self.page_next = (self.w - 2 - 14 * fs, cy, 14 * fs, 24 * fs)
+            px_, py_, pw_, ph_ = self.lib_panel
+            ah = 16 * fs
+            ay = py_ + ph_ - self.lib_footer_h + (self.lib_footer_h - ah) // 2
+            self.page_prev = (px_ + 12 * fs, ay, 22 * fs, ah)
+            self.page_next = (px_ + pw_ - 12 * fs - 22 * fs, ay, 22 * fs, ah)
 
         # -- Settings rows + panel (scale row height with the font) --------------
         self.set_row_h = _SET_ROW_H * fs
@@ -370,11 +394,21 @@ class Layout:
                 self.set_w, self.set_row_h - 2)
 
     def tile_rect(self, i, page):
-        """Grid-cell rect for cart index `i` on `page`, or None if off that page."""
+        """Grid-cell rect for cart index `i` on `page`, or None if off that page.
+        On the shelf tiers (non-base) slot 0 of every page is the TALL featured
+        card (column 0, both rows); the rest fill rows x (cols-1) card cells."""
         start = page * self.page
         if i < start or i >= start + self.page:
             return None
         k = i - start
+        if not self._base:
+            gx, gy, gw, gh = self.lib_grid
+            cw, ch, gap = self.lib_card_w, self.lib_card_h, self.lib_gap
+            if k == 0:
+                return (gx, gy, cw, gh)
+            row = 0 if k <= self.cols - 1 else 1
+            col = k if row == 0 else k - (self.cols - 1)
+            return (gx + col * (cw + gap), gy + row * (ch + gap), cw, ch)
         col = k % self.cols
         row = k // self.cols
         x = self.icon_x0 + col * (self.icon_w + self.icon_gap_x)
@@ -506,14 +540,18 @@ _GLYPHS = {
 }
 
 
-def _blit_glyph(cv, kind, rect, c):
+def _blit_glyph(cv, kind, rect, c, scale=None):
     """Draw an icon glyph (no background) centered in `rect`, in color `c`, onto
     canvas `cv`. The shared pre-literate icon vocabulary -- a 12x12 1-bit pixel
     bitmap (see _GLYPHS) blitted via the indexed primitives only (rect spans), so
     it renders identically on host and device. Unknown kinds draw NOTHING, so
     every caller can keep a text label as the guaranteed fallback. Module-level so
     both Workstation._glyph and Launcher (which only holds a canvas) share one
-    implementation -- the glyph encoding lives in exactly one loop."""
+    implementation -- the glyph encoding lives in exactly one loop.
+
+    `scale` (visual identity v1): an explicit pixel scale overriding the canvas
+    font scale -- the Library's cover-art-sized type glyphs. Default None keeps
+    every existing call byte-identical."""
     bits = _GLYPHS.get(kind)
     if bits is None:                                # unknown -> nothing (fallback contract)
         return
@@ -522,7 +560,7 @@ def _blit_glyph(cv, kind, rect, c):
     # Scale the icon mask with the canvas's system font scale (#39) so glyphs grow
     # alongside text on a larger system canvas. A plain (game) Canvas has font_scale
     # 1, so this is byte-identical to the original 1x path everywhere else.
-    fs = getattr(cv, "font_scale", 1)
+    fs = int(scale) if scale else getattr(cv, "font_scale", 1)
     if fs < 1:
         fs = 1
     span = n * fs
@@ -542,6 +580,32 @@ def _blit_glyph(cv, kind, rect, c):
                 run = 0
         if run:
             cv.rect(ox + (n - run) * fs, yy, run * fs, fs, c)
+
+
+def _print_scaled(cv, s, x, y, c, mult=2):
+    """System DISPLAY type (visual identity v1): print `s` at `mult` x the canvas's
+    system font scale, each glyph pixel a filled block via cv.rect -- so the Library
+    shelf's headings ("LIBRARY", the MAKE card) render identically on the host
+    SystemCanvas, a recording canvas, and the device. cv.print ignores its legacy
+    per-call scale arg (one system size), which is why this helper exists; at an
+    effective scale of 1 it defers to cv.print (byte-identical petme128)."""
+    fs = getattr(cv, "font_scale", 1)
+    if fs < 1:
+        fs = 1
+    sc = fs * max(1, int(mult))
+    if sc <= 1:
+        cv.print(s, x, y, c, 1)
+        return
+    ci = c & 63
+    _font.draw_scaled(lambda bx, by, n: cv.rect(bx, by, n, n, ci), s, x, y, sc)
+
+
+def _text_w(cv, s, mult=1):
+    """The on-screen width of `s` printed at `mult` x the canvas font scale."""
+    fs = getattr(cv, "font_scale", 1)
+    if fs < 1:
+        fs = 1
+    return len(str(s)) * 8 * fs * max(1, int(mult))
 
 
 # --- the unified top bar's icon theme (Stage 1) -----------------------------
@@ -743,7 +807,7 @@ THEMES = (
     ("machine", {"panel": 1, "edge": 60, "title": 13, "title_ink": 0,
                  "accent": 10, "hilite": 60, "dim": 60,
                  "desktop": 1, "desktop_pattern": 60, "surface": 7,
-                 "surface_alt": 52, "ink": 7, "ink_dim": 6, "border": 60,
+                 "surface_alt": 52, "ink": 0, "ink_dim": 53, "border": 1,
                  "selection": 13, "focus": 10, "play": 11, "author": 9,
                  "danger": 8}),
 )

@@ -12,9 +12,16 @@ roles (frozen-literal fallbacks; `night` byte-identical), the opt-in **"machine"
 Open Machine theme (`chrome.THEMES`, selectable in Settings/Appearance), the
 Library card's PLAY/CHANGE verbs on both tiers (on-card at desktop density, bar-zone
 chips at 320×240, `C` key), `Workstation.change_selected` → Editor-on-Config, and the
-§6.2 MAKE tile authoring accent. Phases 3-5 (warm-light Studio surfaces, small-screen
-reflow beyond the verbs, system-app/website sweep) remain open, as does on-glass
-validation on the P4 panel.
+§6.2 MAKE tile authoring accent. The desktop-density launcher renders the library
+concept mockup's **Library shelf** (2026-07-12): a framed tool-surface panel (Moy +
+"LIBRARY" display-type header; footer pager with the cartridge count) over the
+construction field, a grid with one tall featured slot — the pinned yellow MAKE
+STUDIO card (pencil, pin, caption) — plus cover-art cartridge cards with title
+bands, the selected card carrying the focus ring and its in-card PLAY/CHANGE row;
+the home bar's lent zone shows the moybyte wordmark. The 320×240 baseline stays
+byte-identical. Phases 3-5 (warm-light Studio surfaces, small-screen reflow beyond
+the verbs, system-app/website sweep) remain open, as does on-glass validation on
+the P4 panel.
 
 **Scope:** the Moybyte OS shell, Library, Studio/system apps, Player boundary, and
 website expression. Kid cartridges keep their own visual identities and the frozen
