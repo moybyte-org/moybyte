@@ -477,10 +477,14 @@ class CodeLayout:
         if self._base:
             self.cols = CodeEditor.COLS          # 38
             self.rows = CodeEditor.ROWS          # 20
+            self.status_band = None              # no room on the 320x240 baseline
         else:
             avail_w = self.w - self.x0
             self.cols = max(8, avail_w // self.cell)
-            avail_h = self.sym_y - self.y0
+            # Status band (visual identity v1 Phase 3, the Studio mockup's
+            # "Ln 13, Col 1" strip) between the text grid and the symbol palette.
+            self.status_band = (0, self.sym_y - 12 * fs, self.w, 12 * fs)
+            avail_h = self.status_band[1] - self.y0
             self.rows = max(4, avail_h // self.lh)
 
     def code_area(self):
@@ -819,7 +823,10 @@ THEMES = (
     # selection (Moy, focused titles, selected tabs), and the signal verbs -- yellow
     # focus, green PLAY, orange authoring. Opt-in (Settings -> THEME), never a
     # mutation of the "night" default.
-    ("machine", {"panel": 1, "edge": 60, "title": 13, "title_ink": 0,
+    # (title = cool paper 48: the mockup's warm-LIGHT window strips/toolbars with
+    # dark ink; grape stays the SELECTION color -- tabs read "selection", not
+    # "title", so the two roles diverge cleanly.)
+    ("machine", {"panel": 1, "edge": 60, "title": 48, "title_ink": 0,
                  "accent": 10, "hilite": 60, "dim": 60,
                  "desktop": 1, "desktop_pattern": 60, "surface": 7,
                  "surface_alt": 52, "ink": 0, "ink_dim": 53, "border": 1,
