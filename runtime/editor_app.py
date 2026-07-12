@@ -81,6 +81,24 @@ _ZONE_TABS = (
 )
 _ZONE_STRIDE = _BAR_ICON + _BAR_GAP
 
+# The SHELF-density zone (visual identity v1 Phase 3, the Studio mockup): the six
+# tabs as LABELED chips (icon + name) via ui.tab_row, PROJECTS as an icon chip on
+# the left, PLAY/SAVE as labeled buttons on the right. The 320x240 baseline keeps
+# the frozen 9-icon ladder above, byte-identical.
+_TAB_CHIPS = (
+    ("cards", "CONFIG", "edit"),
+    ("blocks", "BLOCKS", "blocks"),
+    ("code", "CODE", "code"),
+    ("paint", "SPRITES", "paint"),
+    ("map", "MAP", "map"),
+    ("music", "MUSIC", "music"),
+)
+
+try:
+    import ui as _ui
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import ui as _ui
+
 
 class EditorApp:
     """The authoring app: a project opened across a tab ladder + PLAY. Holds a `ws`
@@ -289,6 +307,17 @@ class EditorApp:
         constants, at fs=2+ the icons no longer overlap."""
         ws = self.ws
         NAMES = self._NAMES
+        if not ws.layout._base:
+            # SHELF density (visual identity v1 Phase 3): labeled tabs + labeled
+            # PLAY/SAVE buttons -- the Studio mockup's tab row, on the zoned bar.
+            th = ws.theme_colors
+            proj, tabs_area, save_r, play_r = self._zone_parts(rect)
+            _ui.button(cv, th, proj, "", glyph="projects", kind="normal")
+            _ui.tab_row(cv, th, tabs_area, _TAB_CHIPS, self.tab,
+                        icon_for=getattr(ws, "_icon_image_keyed", None))
+            _ui.button(cv, th, save_r, "SAVE", kind="normal")
+            _ui.button(cv, th, play_r, "PLAY", kind="play", glyph="run")
+            return
         x0, y0, w, h = rect
         ic = h if h > 0 else _BAR_ICON      # icon side (16*fs)
         stride = ic + (ic // 8)             # _BAR_GAP (2) scaled: 2*fs == ic//8
@@ -300,13 +329,43 @@ class EditorApp:
                 cv.rect(x, y0, ic, ic, NAMES["indigo"])
             ws._icon(glyph, x, y0, cv)
 
+    def _zone_parts(self, rect):
+        """PURE shelf-zone geometry (shared by draw_zone and zone_tap so a strip-
+        cached draw and a later tap can't desync): PROJECTS chip | labeled tab row
+        | SAVE | PLAY, the buttons right-aligned. Scales off the lent rect's
+        height (16*fs, like the frozen ladder)."""
+        fs = max(1, rect[3] // 16)
+        gap = 4 * fs
+        proj, rest = _ui.cut_left(rect, 22 * fs)
+        play_r, rest = _ui.cut_right(rest, 54 * fs)
+        _pad, rest = _ui.cut_right(rest, gap)
+        save_r, rest = _ui.cut_right(rest, 46 * fs)
+        _pad, rest = _ui.cut_right(rest, gap)
+        tabs_area = (rest[0] + gap, rest[1], max(0, rest[2] - 2 * gap), rest[3])
+        return proj, tabs_area, save_r, play_r
+
     def zone_tap(self, px, py, rect=None):
         """Hit-test the tab ladder + PLAY + SAVE and dispatch. `rect` is the lent
         left-zone rect BarLayer drew into -- the fixed game-canvas _ZONE_LEFT_GAME
         for a game-canvas tab, or the responsive layout.zone_left for the
         system-canvas tabs (both hit-test in the same coord space the bar drew
         in). Defaults to _ZONE_LEFT_GAME so a bare call is unchanged. The icon
-        side + stride derive from the rect height, matching draw_zone."""
+        side + stride derive from the rect height, matching draw_zone; the shelf
+        tiers resolve against the SAME _zone_parts geometry the draw used."""
+        if rect is not None and not self.ws.layout._base:
+            proj, tabs_area, save_r, play_r = self._zone_parts(rect)
+            if self._in(px, py, proj):
+                return self._activate_zone_tab(_ZONE_PROJECTS)
+            if self._in(px, py, play_r):
+                return self._activate_zone_tab(None)
+            if self._in(px, py, save_r):
+                return self._activate_zone_tab(_ZONE_SAVE)
+            fs = max(1, rect[3] // 16)
+            slim = [(tid, label) for tid, label, _ic in _TAB_CHIPS]
+            for tid, r, _labels_on in _ui.tab_row_rects(tabs_area, slim, fs):
+                if self._in(px, py, r):
+                    return self._activate_zone_tab(tid)
+            return False
         x0, y0, w, h = rect if rect is not None else _ZONE_LEFT_GAME
         ic = h if h > 0 else _BAR_ICON
         stride = ic + (ic // 8)
