@@ -133,6 +133,9 @@ class Launcher:
         self._blit_glyph = blit_glyph
         self.theme = None             # chrome THEME tokens (ws.set_theme pushes them);
                                       # None -> the yellow default accent
+        self.icon_for = None          # optional kind -> 16x16 IconSheet Image (console
+                                      # wires ws._bar_image) -- the shelf's pseudo cards
+                                      # draw the real themeable pencil/plus icon big
         if layout is None:
             # Defensive default for a bare Launcher(items) (no caller does this); lazy so
             # there's no launcher_layer<->console module-load cycle.
@@ -408,10 +411,24 @@ class Launcher:
         x, y, w, h = rect
         make = it.get("type") == MAKE_TILE_TYPE
         cv.rect(x, y, w, h, th.get("focus", NAMES["yellow"]))
-        # Big tool glyph in the card's upper half (pencil = Make, plus = New).
-        gs = max(fs, min((w - 16 * fs) // 12, (h // 2 - 8 * fs) // 12))
-        self._blit_glyph(cv, _TYPE_GLYPH[it["type"]],
-                         (x, y + 4 * fs, w, h // 2), NAMES["black"], gs)
+        # Big tool art in the card's upper half: the real themeable IconSheet
+        # PENCIL (Make) / plus (New) sprite when the console wired icon_for --
+        # pal-remapped so it reads on the yellow field (white outline -> black,
+        # yellow body -> the orange of the mockup's pencil). The 12x12 glyph
+        # stays as the no-sheet fallback.
+        img = self.icon_for("edit" if make else "new") \
+            if self.icon_for is not None else None
+        if img is not None:
+            sc = max(fs, min((w - 12 * fs) // 16, (h // 2 - 4 * fs) // 16))
+            cv.pal(NAMES["white"], NAMES["black"])
+            cv.pal(NAMES["yellow"], NAMES["orange"])
+            cv.spr(img, x + (w - 16 * sc) // 2,
+                   y + 4 * fs + (h // 2 - 16 * sc) // 2, sc)
+            cv.pal()
+        else:
+            gs = max(fs, min((w - 16 * fs) // 12, (h // 2 - 8 * fs) // 12))
+            self._blit_glyph(cv, _TYPE_GLYPH[it["type"]],
+                             (x, y + 4 * fs, w, h // 2), NAMES["black"], gs)
         # Corner pushpin (the mockup's "pinned" cue).
         px_, py_ = x + w - 8 * fs, y + 7 * fs
         cv.circ(px_, py_, 2 * fs, NAMES["black"])

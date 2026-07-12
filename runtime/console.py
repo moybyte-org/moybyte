@@ -490,6 +490,10 @@ class Workstation:
         # density tiers (visual identity v1 Section 1.2); the picker below keeps the
         # single-verb pick, so the flag stays off there.
         self.launcher.actions = True
+        # The shelf's pseudo cards (MAKE STUDIO / + New) draw the real themeable
+        # IconSheet pencil/plus sprite big -- keyed so the sheet's 0-filled
+        # backdrop doesn't plate the card.
+        self.launcher.icon_for = self._icon_image_keyed
         # Default the highlight to the first RUNNABLE cart (skip the pinned Make tile at
         # slot 0), so a bare RUN/A plays a game rather than opening the picker -- the
         # launcher is RUN-first (spec shell_ux_v1.md); Make is a tap/nav target.
@@ -501,6 +505,7 @@ class Workstation:
         # opens the chosen cart in the Editor.
         self.picker = Launcher(self._picker_items(self._all_carts),
                                self.layout, NAMES, _blit_glyph)
+        self.picker.icon_for = self._icon_image_keyed
         # Screen states (#28): "launcher" is now the DESKTOP home (wallpaper + cart
         # icon grid + dock); "desktop" is a running cart; "menu" is the cards/code/
         # paint/map editors; "settings" is the Settings app.
@@ -3111,6 +3116,19 @@ class Workstation:
                 img = self.icon_sheet.tile_image(slot)   # transparent -1 (icons keyed)
         self._bar_img_cache[kind] = img
         return img
+
+    def _icon_image_keyed(self, kind):
+        """Like _bar_image but with palette index 0 keyed TRANSPARENT -- for drawing
+        a bar icon over a non-black surface (the Library shelf's pseudo cards). The
+        sheet's untouched pixels are 0: invisible on the black bar, a black plate
+        anywhere else. tile_image memoises per (slot, transparent), so this shares
+        the sheet's own cache."""
+        if self.icon_sheet is None:
+            return None
+        slot = _ICON.get(kind)
+        if slot is None:
+            return None
+        return self.icon_sheet.tile_image(slot, transparent=0)
 
     def _icon(self, kind, x, y, cv=None):
         """Blit the top-bar icon `kind` (a 16x16 IconSheet sprite) at (x, y). The
