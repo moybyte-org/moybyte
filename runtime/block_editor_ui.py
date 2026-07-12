@@ -28,20 +28,10 @@ and so did the handful of tests that poke the block editor's internals
 directly, and tools/make_site_gifs.py's demo-recording script.
 """
 
-# ui (the shared widget toolkit) is bound LAZILY: ui imports chrome, and chrome
-# imports this module's constants at load (the established cycle dodge).
-_ui_mod = None
-
-
-def _toolkit():
-    global _ui_mod
-    if _ui_mod is None:
-        try:
-            import ui as mod
-        except ImportError:  # pragma: no cover - host fallback
-            from runtime import ui as mod
-        _ui_mod = mod
-    return _ui_mod
+try:
+    import ui as _ui
+except ImportError:  # pragma: no cover - host fallback
+    from runtime import ui as _ui
 
 
 from editors import BlockEditor
@@ -1144,7 +1134,7 @@ class BlockEditorUI:
                 break
             self._draw_blk_row(rows[ridx], vi, ridx == be.cur)
         # scroll cue
-        _toolkit().scroll_cues(
+        _ui.scroll_cues(
             cv, (lay.x0 + lay.outline_w - 8 * fs, lay.y0),
             (lay.x0 + lay.outline_w - 8 * fs, lay.y0 + (lay.rows - 1) * lay.row_h),
             self.blk_top > 0, self.blk_top + lay.rows < len(rows),
@@ -1180,7 +1170,7 @@ class BlockEditorUI:
         y = lay.hint_y - 2 * fs
         w = lay.outline_w
         h = 11 * fs
-        _toolkit().dialog(cv, (x, y, w, h), ring=NAMES["yellow"])
+        _ui.dialog(cv, (x, y, w, h), ring=NAMES["yellow"])
         msg = "YOU LEVELED UP TO CODE!"
         mmax = max(8, w // lay.cell - 1)
         cv.print(msg[:mmax], x + 2 * fs, lay.hint_y, NAMES["yellow"], 1)
@@ -1194,7 +1184,7 @@ class BlockEditorUI:
         NAMES = self._NAMES
         cv = self.ws.canvas
         x, y, w, h = _BLK_KBD
-        _toolkit().dialog(cv, (x, y, w, h))
+        _ui.dialog(cv, (x, y, w, h))
         is_text = self.blk_kbd.get("kind") == "text"
         cv.print("TYPE SOME TEXT" if is_text else "NAME YOUR VARIABLE",
                  x + 10, y + 8, NAMES["white"], 1)
@@ -1204,7 +1194,7 @@ class BlockEditorUI:
         txt = (self.blk_kbd.get("text") or "")[:24]
         # empty buffer: the default name shows as a dim placeholder (OK keeps it)
         ph = "" if is_text else str(self.blk_kbd.get("var", ""))[:24]
-        _toolkit().text_field(cv, (fx, fy, fw, 14), txt, ph)
+        _ui.text_field(cv, (fx, fy, fw, 14), txt, ph)
         self.ws._btn("DEL", _BLK_KBD_DEL, NAMES["red"])
         self.ws._btn("OK", _BLK_KBD_OK, NAMES["green"])
         self.ws._btn("X", _BLK_KBD_X, NAMES["dark_grey"])
@@ -1216,14 +1206,14 @@ class BlockEditorUI:
         cv = self.ws.canvas
         k = self.blk_kbd
         x, y, w, h = _BLK_NUM
-        _toolkit().dialog(cv, (x, y, w, h))
+        _ui.dialog(cv, (x, y, w, h))
         cv.print("TYPE A NUMBER", x + 10, y + 6, NAMES["white"], 1)
         # live value field; an empty buffer shows the slot's current value, dim (OK keeps it)
         fx, fy, fw = x + 10, y + 18, w - 20
         txt = (k.get("text") or "")[:30]
         cur = k.get("cur")
         ph = str(cur) if _blocks_mod.is_literal_value(cur) and cur is not None else "0"
-        _toolkit().text_field(cv, (fx, fy, fw, 14), txt, ph[:30])
+        _ui.text_field(cv, (fx, fy, fw, 14), txt, ph[:30])
         # the digit grid (0-9 . -)
         for idx in range(len(_BLK_NUM_KEYS)):
             r = idx // _BLK_NUM_BPR

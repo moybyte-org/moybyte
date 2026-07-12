@@ -882,7 +882,9 @@ class Workstation:
         # the windowed resize minimum, and the relayout fan-out. Insertion order
         # is dispatch precedence.
         self._apps = []
+        self._apps_by_id = {}
         self._app_min_sizes = {}
+        self._app_titles = {}
         self.register_app(self.artwork_app,
                           min_size=(PaintAppLayout.MIN_W, PaintAppLayout.MIN_H))
         self.register_app(self.appearance_app,
@@ -1924,17 +1926,35 @@ class Workstation:
 
         `text_mode=True` marks a TYPING app (clean ASCII keyboard, the Writer
         precedent); `min_size=(w, h)` is the windowed-WM resize minimum in
-        fs-scaled units (the ui.py convention). A launcher tap on the claimed
-        cart opens the app instead of the Player; everything else (window
-        chrome, taskbar chip, theme tokens, the ui toolkit) comes free."""
+        fs-scaled units (the ui.py convention). When omitted, MIN_W/MIN_H on
+        the app's layout are adopted. TITLE supplies window/taskbar text. A
+        launcher tap on the claimed cart opens the app instead of the Player;
+        everything else (window chrome, theme tokens, toolkit) comes free."""
+        if app.id in self._apps_by_id:
+            raise ValueError("duplicate app id: " + str(app.id))
         self._apps.append((app, bool(text_mode)))
+        self._apps_by_id[app.id] = app
         self._content_layers[app.id] = app
+        self._app_titles[app.id] = str(getattr(app, "TITLE", app.id.upper()))
+        if min_size is None:
+            layout = getattr(app, "layout", None)
+            min_w = getattr(layout, "MIN_W", None)
+            min_h = getattr(layout, "MIN_H", None)
+            if min_w is not None and min_h is not None:
+                min_size = (int(min_w), int(min_h))
         if min_size is not None:
             self._app_min_sizes[app.id] = min_size
+        hook = getattr(self.wm, "on_app_registered", None)
+        if hook is not None:
+            hook(app)
 
     def app_min_size(self, kind):
         """The registered windowed resize minimum for app `kind`, or None."""
         return self._app_min_sizes.get(kind)
+
+    def app_title(self, kind):
+        """The registered app's requested window/taskbar title, or None."""
+        return self._app_titles.get(kind)
 
     def open(self):
         # RUN landing (spec shell_ux_v1.md Section 2): build the workspace + run the
@@ -3170,7 +3190,7 @@ class Workstation:
         label and a kid who can't read still gets the picture. Implementation:
         ui.game_icon_btn."""
         _uimod.game_icon_btn(cv if cv is not None else self.canvas, rect,
-                             kind, label, fill)
+                             kind, label, fill, self._glyph)
 
     # (_draw_error_panel -- the on-canvas crash report -- moved to Player (Stage 2,
     # player.py): crash chrome is the Player's own UX, per spec Section 2's "guarantees

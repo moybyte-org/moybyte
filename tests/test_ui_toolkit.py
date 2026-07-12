@@ -153,9 +153,11 @@ def test_focus_ring_paints_focus_token():
 
 
 def test_is_light_gate():
-    """THE Phase 3 gate: light iff the theme's ink token is dark."""
+    """The presentation class is explicit, independent of palette choices."""
     assert ui.is_light(theme_colors("machine"))
     assert not ui.is_light(theme_colors("night"))
+    assert ui.is_light({"surface_light": True, "ink": 1})
+    assert not ui.is_light({"surface_light": False, "ink": 0})
 
 
 def test_scroll_cues_draw_what_can_move():

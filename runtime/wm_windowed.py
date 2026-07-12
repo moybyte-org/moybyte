@@ -4,8 +4,9 @@
 `WindowedWM` presents the SAME everything-is-a-process shell as an OS desktop,
 Picotron-style (owner direction, 2026-07-08):
 
-  * the LAUNCHER is the DESKTOP -- the permanent back-stack root draws full-canvas
-    (live wallpaper + cart grid + the ONE full-width OS bar), always beneath;
+  * with no processes open, the LIBRARY is the full-screen launch surface. Once
+    PLAY/CHANGE opens a process, it gives way to the DESKTOP root (live wallpaper
+    + the ONE full-width OS bar) beneath the process windows;
   * every process pushed above it (picker / Editor / Settings / update / a running
     cart) is a floating WINDOW: a WM-drawn TITLE STRIP (title + minimize /
     maximize / close), a border + drop shadow, draggable by the strip and
@@ -85,10 +86,9 @@ _BTN_X_FG = NAMES["red"]
 _CHIP_FG = NAMES["white"]
 _DRAG_MIN = 4                         # px of travel before a press becomes a drag
 
-# WM title-strip labels per process kind (the player shows the cart title).
-_TITLES = {"menu": "EDITOR", "picker": "PROJECTS", "artwork": "PAINT",
-           "appearance": "APPEARANCE", "writer": "WRITER",
-           "storybook": "STORYBOOK",
+# Shell-process title strips (registered apps contribute TITLE through the app
+# registry instead; the player shows the live cart title).
+_TITLES = {"menu": "EDITOR", "picker": "PROJECTS",
            "settings": "SETTINGS", "update": "UPDATE"}
 
 # Window GROUPS: back-stack kinds that share ONE window slot. The project picker
@@ -207,10 +207,11 @@ class _PlayerWindowLayer(Layer):
     only thing animating, this stand-in draw stack repaints JUST the player
     window (Player.tick + the scaled game blit + its chrome) into the back
     buffer -- the rest of that buffer already holds pixel-identical desktop
-    content from two frames ago. On the P4's glass the full-desktop repaint
-    (wallpaper cart + cover-crop + launcher grid + bar) measured ~124ms/frame
-    around a 7ms game -- 7fps; this path drops the static ~85% of it. DRAW
-    ONLY: input routing keeps using the full memoized visible stack."""
+    content from two frames ago. The original Library-backed root measured
+    ~124ms/frame around a 7ms game on P4 glass; the real desktop removes the
+    hidden grid tax, and this path also skips its remaining static wallpaper,
+    bar, and other windows. DRAW ONLY: input routing keeps using the full
+    memoized visible stack."""
 
     id = "player_window"
     domain = "system"
@@ -229,21 +230,20 @@ class _PlayerWindowLayer(Layer):
 
 
 class _BackdropLayer(Layer):
-    """The desktop root (launcher wallpaper + cart grid) with a DRAG cache (#58
-    drag perf). Stands in for ws.launcher_layer in the windowed draw stack and
-    draws it verbatim EXCEPT during a drag/resize, when the backdrop is invariant
-    -- only the dragged window's POSITION changes, so the wallpaper cover-crop +
-    grid render the same pixels every frame. The first drag frame renders the
-    launcher and CAPTURES the composite; every later drag frame BLITS the cache
-    instead, turning a full wallpaper+grid re-render into one full-screen copy.
+    """The real desktop root (wallpaper + ONE OS bar) with a DRAG cache (#58).
+    The Library is a launch surface only while the process stack has no windows;
+    as soon as PLAY/CHANGE pushes one, this layer replaces it so the Library
+    never reads as wallpaper behind Studio. During a drag/resize only the window
+    position changes, so the first frame captures the desktop and later frames
+    blit the retained backdrop.
 
     Correctness: this layer precedes _win_layer in the z-order, so the capture
-    snapshots the launcher backdrop with NO windows on it; each drag frame blits
+    snapshots the desktop backdrop with NO windows on it; each drag frame blits
     that clean backdrop (erasing the dragged window's old position for free) and
     _win_layer then stamps the windows at their current spots. Double-buffer-safe
     -- the cache is its own off-screen buffer, re-blitted into whichever ping-pong
-    buffer the frame targets. Input forwards to the launcher unchanged so the
-    desktop root stays interactive beneath the windows."""
+    buffer the frame targets. The desktop background routes only its OS bar;
+    hidden Library cards cannot be activated through it."""
 
     id = "launcher"
     domain = "system"
@@ -254,12 +254,11 @@ class _BackdropLayer(Layer):
 
     def draw(self, dt):
         wm = self.wm
-        launcher = self.ws.launcher_layer
         if (wm._drag is None and wm._resize is None) or wm._backdrop_disabled:
             wm._backdrop_valid = False        # live: no drag, always re-render
             if wm._gesture_hist:
                 wm._gesture_hist = []         # gesture over: drop the damage trail
-            launcher.draw(dt)
+            self._draw_desktop(dt)
             return
         if wm._backdrop_valid:
             _perf = getattr(self.ws, "perf_capture", False)
@@ -268,20 +267,27 @@ class _BackdropLayer(Layer):
             if _perf:
                 self.ws._pf_wm_restore = _wt() - _t0
             return
-        launcher.draw(dt)                     # first drag frame: render + snapshot
+        self._draw_desktop(dt)                # first drag frame: render + snapshot
         wm._capture_backdrop()
 
+    def _draw_desktop(self, dt):
+        self.ws.wallpaper.draw(dt)
+        self.ws.bar_layer._draw_status_strip("home")
+
     def handle_input(self, i):
-        return self.ws.launcher_layer.handle_input(i)
+        return True
 
     def handle_pointer(self, px, py, click):
-        return self.ws.launcher_layer.handle_pointer(px, py, click)
+        if click:
+            self.ws.bar_layer.handle_home_tap(px, py)
+        return True
 
 
 class WindowedWM(FullscreenStackWM):
     """The windowed presentation of the back-stack (spec shell_ux_v1.md §3):
-    launcher = the desktop root, every pushed process = a floating window, focus =
-    top of stack. Install with `ws.wm = WindowedWM(ws)` right after construction
+    Library = the launch surface; every pushed process = a floating window over
+    the wallpaper desktop, focus = top of stack. Install with
+    `ws.wm = WindowedWM(ws)` right after construction
     (host_app.build_workstation(windowed=True)); requires a DISTINCT system
     canvas bigger than the 320x240 game canvas."""
 
@@ -320,7 +326,7 @@ class WindowedWM(FullscreenStackWM):
         self._quiet_stack_fps = [ws._perf_layer, _pw]
         self._full_debt = 0
         # Retained desktop-backdrop cache (#58 drag perf): during a DRAG/RESIZE the
-        # wallpaper + cart grid are invariant, so the first such frame captures
+        # wallpaper + OS bar are invariant, so the first such frame captures
         # their composite and every later one blits it (see _BackdropLayer). Its
         # own full-screen off-screen buffer, allocated lazily on the first drag and
         # dropped on relayout (the size can change with the font scale).
@@ -361,6 +367,14 @@ class WindowedWM(FullscreenStackWM):
         self.content_gen += 1
         self._backdrop = None             # size may have changed: drop the drag cache
         self._backdrop_valid = False
+
+    def on_app_registered(self, app):
+        """Extend the root layout snapshot for an app registered after the
+        WindowedWM was installed. Built-ins register before installation, but
+        the public seam explicitly permits later shell registrations."""
+        layout = getattr(app, "layout", None)
+        if layout is not None:
+            self._root_ctx.app_layouts[app.id] = layout
 
     def _install(self, ctx):
         ctx.install(self.ws)
@@ -668,7 +682,7 @@ class WindowedWM(FullscreenStackWM):
         return cache
 
     def _capture_backdrop(self):
-        """Snapshot the just-rendered launcher backdrop -- the root canvas with NO
+        """Snapshot the just-rendered desktop backdrop -- the root canvas with NO
         windows on it yet (_BackdropLayer precedes _win_layer) -- into the cache:
         one opaque full-frame copy via the cache canvas's own blit_strip reading
         the root canvas AS a source layer (native moy_gfx.blit565 on the device,
@@ -869,7 +883,7 @@ class WindowedWM(FullscreenStackWM):
         ws = self.ws
         if win.kind == "desktop":
             return str((ws.cart.get("title") if ws.cart else "") or "GAME")
-        base = _TITLES.get(win.kind, win.kind.upper())
+        base = ws.app_title(win.kind) or _TITLES.get(win.kind, win.kind.upper())
         if win.kind == "menu" and ws.cart:
             t = ws.cart.get("title")
             if t:
@@ -1195,13 +1209,12 @@ class WindowedWM(FullscreenStackWM):
                     return True
         key = self._win_at(px, py)
         if key is None:
-            # The desktop root stays interactive beneath the windows (root layout
-            # context is ambient, so the launcher hit-tests correctly). Clicking
-            # the desktop moves focus to it (keys go to the launcher grid).
+            # Clicking the desktop moves focus to it. Only its OS bar is
+            # interactive; the Library is not invisibly present underneath.
             if click and self._focus is not None:
                 self._focus = None
                 ws._dirty = True
-            return bool(ws.launcher_layer.handle_pointer(px, py, click))
+            return bool(self._backdrop_layer.handle_pointer(px, py, click))
         win = self._wins[key]
         # A click FOCUSES the window it lands in -- and never pops anything (the
         # owner call: looking at the editor must not end the playtest beside it).

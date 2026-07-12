@@ -35,10 +35,10 @@ html,body{margin:0;height:100%;background:#0b0f1a;color:#c2c3c7;
 font:14px ui-monospace,Menlo,Consolas,monospace;display:flex;flex-direction:column;
 align-items:center}
 h1{font-size:14px;color:#fff1e8;margin:8px}#s{color:#ffec27}
-/* Presentation scale: the OS renders 1x at its DESIGN resolution (320x240 /
-   1024x600) and the page INTEGER-upscales the framebuffer to the viewport --
-   crisp square pixels at any monitor size (fit() below snaps; this fluid rule
-   is only the pre-JS fallback and the sub-1x fit). */
+/* Presentation scale: the OS renders at its DESIGN resolution (320x240 /
+   1024x600); fit() uses the whole available viewport while the browser keeps
+   nearest-neighbour sampling. Desktop users have real keyboard/pointer input,
+   so the touch controls do not consume a permanent 120px-tall band there. */
 canvas{image-rendering:pixelated;background:#000;border:1px solid #1d2b53;border-radius:6px;
 width:min(96vw,112vh);height:auto;max-width:100%;touch-action:none;cursor:crosshair}
 #ctl{display:flex;justify-content:space-between;gap:24px;width:min(96vw,112vh);
@@ -51,6 +51,7 @@ align-items:center;justify-content:center;font:700 26px ui-monospace;color:#fff1
 background:#7e2553;border:2px solid #c2c3c7;margin-left:18px}#bb{background:#29366f}
 #bh{background:#5f574f;width:52px;height:52px;font-size:20px}
 .pr{background:#ffec27;color:#1d2b53}
+@media (hover:hover) and (pointer:fine){#ctl{display:none}}
 /* Debug HUD (#41): toggled with the ` key; lightweight live stream stats. */
 #hud{position:fixed;top:6px;left:6px;z-index:9;display:none;padding:6px 8px;border-radius:5px;
 background:rgba(11,15,26,.82);border:1px solid #1d2b53;color:#00e436;font:12px ui-monospace;
@@ -109,13 +110,12 @@ var buf=actx.createBuffer(1,n,AUDIO_RATE),ch=buf.getChannelData(0);
 for(var i=0;i<n;i++){var v=bin.charCodeAt(i*2)|(bin.charCodeAt(i*2+1)<<8);if(v>=32768)v-=65536;ch[i]=v/32768;}
 var src=actx.createBufferSource();src.buffer=buf;src.connect(actx.destination);
 var t=Math.max(actx.currentTime+0.02,audioNext);src.start(t);audioNext=t+buf.duration;}
-function fit(){/* largest INTEGER scale of the design resolution that fits the
-viewport (crisp square pixels at 1080p/4K alike); below 1x fall back to a
-fluid fractional fit so a small phone still sees the whole screen. */
+function fit(){/* Fill the available viewport without the old integer-scale
+cliff (e.g. 1.95x used to collapse all the way to 1x on an ultrawide). */
 var hh=document.querySelector("h1"),ct=document.getElementById("ctl");
 var rw=Math.max(64,window.innerWidth-16);
 var rh=Math.max(64,window.innerHeight-((hh?hh.offsetHeight:0)+(ct?ct.offsetHeight:0)+28));
-var s=Math.min(rw/W,rh/H);if(s>=1)s=Math.floor(s);
+var s=Math.min(rw/W,rh/H);
 cv.style.width=Math.round(W*s)+"px";cv.style.height=Math.round(H*s)+"px";}
 window.addEventListener("resize",fit);
 function alloc(){cv.width=W;cv.height=H;cx=cv.getContext("2d");cx.imageSmoothingEnabled=false;

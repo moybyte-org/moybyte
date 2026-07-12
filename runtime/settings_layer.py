@@ -16,24 +16,15 @@ The WALLPAPER cluster is SHARED (the launcher draws the same backdrop), so it st
 single-sourced on ws -- SettingsLayer just calls ws.wallpaper.draw + the picker verbs.
 The actions Settings hosts delegate OUT to other layers (ws.open_theme / ws.update_ui.
 open_update / ws.show_achievements). ws.open_settings / _exit_settings (the lifecycle,
-tested) stay on ws. `NAMES` / `_in` / `_clamp_scroll` are injected (the circular-import
-dodge). Shared draw toolkit (ws._glyph/_mini_btn) + the bar (ws.bar_layer) stay put.
+tested) stay on ws. `NAMES` / `_in` / `_clamp_scroll` are injected to keep the
+surface independent of console.py. Shared draw toolkit (ws._glyph/_mini_btn) +
+the bar (ws.bar_layer) stay put.
 """
 
-# ui (the shared widget toolkit) is bound LAZILY: ui imports chrome, and chrome
-# imports this module's constants at load (the established cycle dodge).
-_ui_mod = None
-
-
-def _toolkit():
-    global _ui_mod
-    if _ui_mod is None:
-        try:
-            import ui as mod
-        except ImportError:  # pragma: no cover - host fallback
-            from runtime import ui as mod
-        _ui_mod = mod
-    return _ui_mod
+try:
+    import ui as _ui
+except ImportError:  # pragma: no cover - host fallback
+    from runtime import ui as _ui
 
 
 
@@ -481,17 +472,12 @@ class SettingsLayer:
 
     # -- scroll window -------------------------------------------------------
 
-    def _toolkit(self):
-        return _toolkit()
-
     def _scroll_region(self):
-        """The rows' ui.ScrollRegion (lazy: ui imports chrome, and chrome imports
-        THIS module's constants, so a module-level import would re-enter chrome
-        half-initialized). set_top stays the row-slot source of truth; the region
-        is the touch INTERACTION model (drag) + the shelf-tier scrollbar, synced
-        from set_top each use."""
+        """The rows' ui.ScrollRegion. set_top stays the row-slot source of truth;
+        the region is the touch INTERACTION model (drag) + the shelf-tier
+        scrollbar, synced from set_top when a drag is not active."""
         if self.scroll is None:
-            self.scroll = self._toolkit().ScrollRegion()
+            self.scroll = _ui.ScrollRegion()
         ws = self.ws
         lay = ws.layout
         rows = self._settings_rows()
@@ -700,7 +686,7 @@ class SettingsLayer:
         px, py, pw, ph = lay.settings_panel
         xr = px + pw - 9 * lay.fs
         vis = self._settings_visible()
-        self._toolkit().scroll_cues(
+        _ui.scroll_cues(
             cv, (xr, lay.set_row_y0), (xr, py + ph - 9 * lay.fs),
             self.set_top > 0, self.set_top + vis < len(rows), NAMES["white"])
         if not lay._base:

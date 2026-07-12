@@ -85,6 +85,7 @@ class WriterAppLayer:
 
     id = "writer"
     domain = "system"
+    TITLE = "WRITER"
 
     def __init__(self, ws, names, in_rect):
         self.ws = ws

@@ -781,7 +781,7 @@ _ICON_VERSION = 3
 # Named token sets for the console's PANEL chrome -- the Settings panel, the Make
 # picker backdrop, the windowed WM's title strips / borders / taskbar chips, and
 # the launcher's selection accents. Selectable in Settings -> THEME, persisted in
-# system.json. Every token is a MOY64 index:
+# system.json. Color tokens are MOY64 indices; presentation flags are booleans:
 #   panel     -- panel / window-strip background (the dark field)
 #   edge      -- panel border + secondary chrome ink (the theme's tint family)
 #   title     -- the FOCUSED window title strip (windowed WM)
@@ -795,11 +795,13 @@ _ICON_VERSION = 3
 # Visual identity v1 (docs/visual_identity_v1.md Section 4.3) adds SEMANTIC roles on
 # top of the original seven: a theme dict may also carry any of the keys below, and
 # theme_colors() fills every missing role from the base tokens / the frozen literals
-# (see _SEMANTIC_ALIAS / _SEMANTIC_STATIC), so legacy themes resolve them without
-# repeating themselves and "night" stays byte-identical. Surfaces migrating off
-# scattered literal indices read the roles; the defaults ARE today's literals.
+# (see _SEMANTIC_ALIAS / _SEMANTIC_STATIC / _SEMANTIC_FLAGS), so legacy themes
+# resolve them without repeating themselves and "night" stays byte-identical.
+# Surfaces migrating off scattered literal indices read the roles; the defaults
+# ARE today's literals.
 #   desktop / desktop_pattern -- the construction field + its sparse dot grid
 #   surface / surface_alt / ink / ink_dim -- tool surface + text (Phase 3 Studio)
+#   surface_light -- boolean presentation class; never inferred from a color index
 #   border    -- 1px panel/window border
 #   selection -- selected row/tile background
 #   focus     -- keyboard/pointer focus (yellow in every shipped theme)
@@ -831,7 +833,7 @@ THEMES = (
                  "desktop": 1, "desktop_pattern": 60, "surface": 7,
                  "surface_alt": 52, "ink": 0, "ink_dim": 53, "border": 1,
                  "selection": 13, "focus": 10, "play": 11, "author": 9,
-                 "danger": 8}),
+                 "danger": 8, "surface_light": True}),
 )
 DEFAULT_THEME = "night"
 
@@ -847,6 +849,7 @@ _SEMANTIC_STATIC = (("ink", 7), ("ink_dim", 6),      # white / light-grey text
                     ("play", 11),                    # signal green: PLAY/healthy
                     ("author", 10),                  # today's Make-tile yellow
                     ("danger", 8))                   # red: errors/destructive only
+_SEMANTIC_FLAGS = (("surface_light", False),)
 _THEME_CACHE = {}
 
 
@@ -873,6 +876,9 @@ def theme_colors(name):
         for role, idx in _SEMANTIC_STATIC:
             if role not in cached:
                 cached[role] = idx
+        for role, value in _SEMANTIC_FLAGS:
+            if role not in cached:
+                cached[role] = value
         _THEME_CACHE[resolved] = cached
     return cached
 

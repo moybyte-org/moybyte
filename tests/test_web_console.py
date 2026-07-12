@@ -868,6 +868,13 @@ def test_browser_page_sends_neutral_pan_on_arrow_release():
     assert 'send({type:"pan",dx:0,dy:0})' in text
 
 
+def test_browser_page_fills_large_viewports_without_integer_scale_cliff():
+    text = web_view.PAGE_HTML
+    assert "Math.floor(s)" not in text
+    assert "Math.min(rw/W,rh/H)" in text
+    assert "(hover:hover) and (pointer:fine)" in text
+
+
 def test_web_console_pan_zero_stops_arrow_velocity(tmp_path):
     """The host driver keeps pan as a held velocity until a neutral pan arrives."""
     console = web_console.WebConsole(str(tmp_path / "carts"), fps=30)

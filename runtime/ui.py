@@ -21,18 +21,14 @@ the redesign thread):
     `action_rects` pattern, generalized) -- a cached bar strip can draw once
     while taps keep resolving.
 
-Min-size convention: a window-content layout may expose `min_w` / `min_h`
-attributes; the windowed WM clamps resizes to them (wired per-app as surfaces
-adopt the toolkit).
+Min-size convention: a window-content layout may expose `MIN_W` / `MIN_H`
+constants; app registration adopts them and the windowed WM clamps resizes to
+the registered floor.
 
-MicroPython-safe: tuples/lists/dicts, no f-strings, no stdlib beyond what the
-other staged modules already use.
+MicroPython-safe: tuples/lists/dicts, no f-strings, and no imports from the
+shell/surface graph. Glyph drawing is injected by callers that want it, keeping
+this toolkit a leaf module that chrome and every surface can safely import.
 """
-
-try:
-    from chrome import _blit_glyph, _print_scaled, _text_w
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.chrome import _blit_glyph, _print_scaled, _text_w
 
 _BLACK = 0
 _WHITE = 7          # MOY64 cream
@@ -44,11 +40,10 @@ def _fs(cv):
 
 
 def is_light(th):
-    """True when the theme's tool surface is LIGHT (its ink token is dark) --
-    THE Phase 3 gate. Surfaces read it through ws.light_chrome() (the layers
-    inside the chrome import cycle can't import this module at load time);
-    everything else may call it directly."""
-    return th.get("ink", 7) == 0
+    """The theme's explicit tool-surface presentation class. Color indices are
+    not luminance: a future light theme may use navy/brown ink rather than index
+    0, so surfaces must not infer this branch from one palette value."""
+    return bool(th.get("surface_light", False))
 
 
 def scroll_cues(cv, up_xy, dn_xy, can_up, can_dn, c, scale=1):
@@ -182,9 +177,10 @@ def _resolve(th, token_or_literal, fallback):
 
 
 def button(cv, th, rect, label, kind="normal", on=False, icon_img=None,
-           glyph=None):
+           glyph=None, glyph_draw=None):
     """One themed chip button: filled field, thin dark edge, centered label
     (truncated to fit), optional 16x16 icon image or 12x12 glyph at the left.
+    Glyphs require the caller's leaf-safe `glyph_draw(kind, rect, color, cv)`;
     `on` swaps to the accent (the pressed/active look)."""
     fs = _fs(cv)
     x, y, w, h = rect
@@ -199,7 +195,8 @@ def button(cv, th, rect, label, kind="normal", on=False, icon_img=None,
     fw = 8 * fs
     pad = 2 * fs
     iw = 0
-    if icon_img is not None or glyph is not None:
+    has_glyph = glyph is not None and glyph_draw is not None
+    if icon_img is not None or has_glyph:
         iw = (16 if icon_img is not None else 12) * fs + pad
     label = str(label)
     maxc = max(0, (w - 2 * pad - iw) // fw)
@@ -209,8 +206,8 @@ def button(cv, th, rect, label, kind="normal", on=False, icon_img=None,
     tx = x + max(pad, (w - tw) // 2)
     if icon_img is not None:
         cv.spr(icon_img, tx, y + (h - 16 * fs) // 2, fs)
-    elif glyph is not None:
-        _blit_glyph(cv, glyph, (tx, y, 12 * fs, h), ink, fs)
+    elif has_glyph:
+        glyph_draw(glyph, (tx, y, 12 * fs, h), ink, cv)
     if label:
         cv.print(label, tx + iw, y + (h - 8 * fs) // 2, ink, 1)
 
@@ -364,14 +361,15 @@ def game_btn(cv, rect, label, fill):
         cv.print(label, x + 6 * fs, y + (h - 8 * fs) // 2, _BLACK, 2)
 
 
-def game_icon_btn(cv, rect, kind, label, fill):
+def game_icon_btn(cv, rect, kind, label, fill, glyph_draw=None):
     """A button that leads with an icon glyph (pre-literate) and keeps the word
     as a small secondary cue beside it."""
     x, y, w, h = rect
     fs = _fs(cv)
     cv.rect(x, y, w, h, fill)
     cv.rectb(x, y, w, h, _WHITE)
-    _blit_glyph(cv, kind, (x + 2 * fs, y, 16 * fs, h), _BLACK)
+    if glyph_draw is not None:
+        glyph_draw(kind, (x + 2 * fs, y, 16 * fs, h), _BLACK, cv)
     if label:
         cv.print(label, x + 19 * fs, y + (h - 8 * fs) // 2, _BLACK, 1)
 

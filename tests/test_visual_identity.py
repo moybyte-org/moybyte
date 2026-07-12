@@ -39,6 +39,7 @@ def test_every_theme_resolves_every_semantic_role():
         for role in roles:
             assert role in th, (name, role)
             assert 0 <= th[role] <= 63
+        assert isinstance(th["surface_light"], bool)
 
 
 def test_night_base_tokens_are_byte_identical():

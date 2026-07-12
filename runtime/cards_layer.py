@@ -30,20 +30,10 @@ EditorApp.draw_zone) shows on this tab; handle_pointer routes a tap through
 ws.bar_layer.handle_bar_tap("menu", ...) FIRST, before the card/button hit-tests.
 """
 
-# ui (the shared widget toolkit) is bound LAZILY: ui imports chrome, and chrome
-# imports this module's constants at load (the established cycle dodge).
-_ui_mod = None
-
-
-def _toolkit():
-    global _ui_mod
-    if _ui_mod is None:
-        try:
-            import ui as mod
-        except ImportError:  # pragma: no cover - host fallback
-            from runtime import ui as mod
-        _ui_mod = mod
-    return _ui_mod
+try:
+    import ui as _ui
+except ImportError:  # pragma: no cover - host fallback
+    from runtime import ui as _ui
 
 
 
@@ -469,7 +459,7 @@ class CardsLayer:
         for row in self._card_layout():
             self._draw_card(row)
         if self._cards_scrollable():           # up/down chevrons when cards overflow
-            _toolkit().scroll_cues(
+            _ui.scroll_cues(
                 cv, (lay.scroll_up[0], lay.scroll_up[1]),
                 (lay.scroll_dn[0], lay.scroll_dn[1]),
                 self.mtop > 0, self.mtop < self._max_mtop(), t["accent"], 2)

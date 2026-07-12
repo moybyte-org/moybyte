@@ -6,7 +6,7 @@ shipped shell reference. Where it changes behavior described by
 `docs/shell_ux_v1.md`, the change must land in code and tests before that reference is
 updated.
 
-**Implementation status (2026-07-11):** the §10 Phase 1 + Phase 2 vertical slice is
+**Implementation status (2026-07-12):** the §10 Phase 1 + Phase 2 vertical slice is
 CODED and host-tested (`tests/test_visual_identity.py`): the §4.3 semantic theme
 roles (frozen-literal fallbacks; `night` byte-identical), the opt-in **"machine"**
 Open Machine theme (`chrome.THEMES`, selectable in Settings/Appearance), the
@@ -18,10 +18,10 @@ concept mockup's **Library shelf** (2026-07-12): a framed tool-surface panel (Mo
 construction field, a grid with one tall featured slot — the pinned yellow MAKE
 STUDIO card (pencil, pin, caption) — plus cover-art cartridge cards with title
 bands, the selected card carrying the focus ring and its in-card PLAY/CHANGE row;
-the home bar's lent zone shows the moybyte wordmark. The 320×240 baseline stays
-byte-identical. Phases 3-5 (warm-light Studio surfaces, small-screen reflow beyond
-the verbs, system-app/website sweep) remain open, as does on-glass validation on
-the P4 panel.
+the home bar's lent zone shows the moybyte wordmark. Phase 3's shared `ui` toolkit,
+warm-light Studio surfaces, responsive app seam, and reference Calc app are also
+implemented. The 320×240 baseline stays byte-identical. Phases 4-5 and on-glass
+validation on the P4 panel remain open.
 
 **Scope:** the Moybyte OS shell, Library, Studio/system apps, Player boundary, and
 website expression. Kid cartridges keep their own visual identities and the frozen
@@ -282,6 +282,7 @@ surface_alt
 border
 ink
 ink_dim
+surface_light  (boolean presentation class, not a palette index)
 title_active
 title_inactive
 selection
