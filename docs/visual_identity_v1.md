@@ -585,6 +585,12 @@ authored code, but changing the copy model is not part of this visual redesign.
 six games in the Library to synthesize live covers. Define the manifest/store contract
 only after the visual slice proves the required dimensions.
 
+*Status (2026-07-12): SHIPPED.* The contract is `images/cover.moyimg` in the cart
+folder (any MOY64 `.moyimg`); the Library shelf cover-crops it full-bleed onto the
+card, and carts without one keep the sprite/glyph fallback deterministically.
+`tools/gen_covers.py` captures a clean gameplay frame for each seed game (committed
+artifacts, hand-replaceable; manifest versions bumped for the #47 re-seed).
+
 ### 11.5 A second system UI font?
 
 **Recommendation: defer.** First render Open Machine with Petme128 on real panels. If

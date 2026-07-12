@@ -235,6 +235,31 @@ def test_library_shelf_panel_paints_surface(tmp_path):
     assert ws.sys_canvas.pix(px + 2, py + 2) == th["surface"]
 
 
+def test_cover_art_contract(tmp_path):
+    """Section 11.4: a cart's images/cover.moyimg is its static Library cover,
+    cover-cropped to the exact card size; carts without one fall back (None ->
+    sprite/glyph). Cached per (path, size)."""
+    ws = _ws(tmp_path, sys_size=(1024, 600))
+    covered = fallback = None
+    from runtime import moy_carts
+    for it in ws.launcher.items:
+        if not it.get("path"):
+            continue
+        has = moy_carts.load_image(it["path"], moy_carts.COVER_IMAGE)
+        if has and covered is None:
+            covered = it
+        elif not has and fallback is None:
+            fallback = it
+    assert covered is not None            # the seed games ship covers now
+    img = ws._cover_for(covered, 200, 150)
+    assert img is not None and (img.w, img.h) == (200, 150)
+    assert len(img.pix) == 200 * 150
+    assert max(img.pix) < 64              # valid MOY64 indices only (Section 12)
+    assert ws._cover_for(covered, 200, 150) is img       # memoised
+    if fallback is not None:
+        assert ws._cover_for(fallback, 200, 150) is None  # deterministic fallback
+
+
 def test_home_draw_includes_action_row_desktop(tmp_path):
     """The desktop-density home frame actually paints the PLAY row (signal green
     is reserved for PLAY, so its presence is a faithful marker)."""
