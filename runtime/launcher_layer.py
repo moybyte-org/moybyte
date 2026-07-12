@@ -935,8 +935,12 @@ class EditorPickerLayer:
             ws._icon("del", lay.del_btn[0], lay.del_btn[1], cv)
         armed = self._del_armed and real is not None
         title = "DELETE? TAP AGAIN" if armed else "PICK A PROJECT"
-        cv.print(title, lay.status_name_x, 3,
-                 NAMES["yellow"] if armed else NAMES["white"], 1)
+        th = ws.theme_colors
+        if ws.bar_layer.zone_band_light("picker"):
+            ink = th["danger"] if armed else th["ink"]
+        else:
+            ink = NAMES["yellow"] if armed else NAMES["white"]
+        cv.print(title, lay.status_name_x, 3, ink, 1)
 
     def zone_tap(self, px, py, rect=None):
         """The picker's lent left-zone tap slice: DUP (copy) fires immediately on the

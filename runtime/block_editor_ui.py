@@ -1054,7 +1054,12 @@ class BlockEditorUI:
         lay = self.block_layout
         fs = lay.fs
         be = self.blocks_ed
-        cv.cls(NAMES["dark_blue"])
+        # Phase 3 (visual identity v1): the warm tool surface + dark ink on the
+        # shelf tiers; the frozen dark-blue body at 320x240, byte-identical. The
+        # block PIECES keep their own colorful language (self-backed rows).
+        th = ws.theme_colors
+        light = (not lay._base) and th.get("ink", NAMES["white"]) == 0
+        cv.cls(th["surface"] if light else NAMES["dark_blue"])
         # The old "BLOCKS <title>" row was dissolved into the unified bar (Stage-4
         # rollout). Just below the bar sits a thin hint/status strip: the kid-facing
         # hint for surprising blocks on the left, the SAVE-status / "CODE LOCKED"
@@ -1065,9 +1070,11 @@ class BlockEditorUI:
             self._draw_grad_banner()
         else:
             if self.blk_status:
-                cv.print(self.blk_status[:14], lay.status_x, lay.hint_y, NAMES["yellow"], 1)
+                cv.print(self.blk_status[:14], lay.status_x, lay.hint_y,
+                         th["author"] if light else NAMES["yellow"], 1)
             elif be is not None and be.dirty:
-                cv.print("*", lay.status_x, lay.hint_y, NAMES["yellow"], 1)
+                cv.print("*", lay.status_x, lay.hint_y,
+                         th["author"] if light else NAMES["yellow"], 1)
         if be is None:
             return
         # A kid-facing hint for the surprising blocks (forever-is-bounded / wait).
@@ -1076,7 +1083,8 @@ class BlockEditorUI:
         if hint:
             # truncate to leave the right end for the status slot
             hmax = max(8, (lay.status_x - lay.x0) // lay.cell - 1)
-            cv.print(hint[:hmax], lay.x0, lay.hint_y, NAMES["light_grey"], 1)
+            cv.print(hint[:hmax], lay.x0, lay.hint_y,
+                     th["ink_dim"] if light else NAMES["light_grey"], 1)
         rows = be.rows
         for vi in range(lay.rows):
             ridx = self.blk_top + vi
@@ -1085,10 +1093,12 @@ class BlockEditorUI:
             self._draw_blk_row(rows[ridx], vi, ridx == be.cur)
         # scroll cue
         if self.blk_top > 0:
-            cv.print("^", lay.x0 + lay.outline_w - 8 * fs, lay.y0, NAMES["white"], 1)
+            cv.print("^", lay.x0 + lay.outline_w - 8 * fs, lay.y0,
+                     th["ink"] if light else NAMES["white"], 1)
         if self.blk_top + lay.rows < len(rows):
             cv.print("v", lay.x0 + lay.outline_w - 8 * fs,
-                     lay.y0 + (lay.rows - 1) * lay.row_h, NAMES["white"], 1)
+                     lay.y0 + (lay.rows - 1) * lay.row_h,
+                     th["ink"] if light else NAMES["white"], 1)
         # action bar: editing controls + the #29 graduation action only (SAVE/CLOSE
         # moved to the unified bar).
         ws._icon_btn("plus", "ADD", lay.add_btn, NAMES["green"], cv)

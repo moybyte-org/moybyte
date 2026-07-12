@@ -312,9 +312,11 @@ class EditorApp:
             # PLAY/SAVE buttons -- the Studio mockup's tab row, on the zoned bar.
             th = ws.theme_colors
             proj, tabs_area, save_r, play_r = self._zone_parts(rect)
+            band_ink = th["ink"] if ws.bar_layer.zone_band_light("menu") else None
             _ui.button(cv, th, proj, "", glyph="projects", kind="normal")
             _ui.tab_row(cv, th, tabs_area, _TAB_CHIPS, self.tab,
-                        icon_for=getattr(ws, "_icon_image_keyed", None))
+                        icon_for=getattr(ws, "_icon_image_keyed", None),
+                        ink=band_ink)
             _ui.button(cv, th, save_r, "SAVE", kind="normal")
             _ui.button(cv, th, play_r, "PLAY", kind="play", glyph="run")
             return
