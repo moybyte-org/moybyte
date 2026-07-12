@@ -18,6 +18,12 @@ the blocks machinery is follow-up (#78).
 Same app pattern as Paint/Appearance/Writer: a `.moy` cartridge identity
 (`storybook.moy`) backed by this responsive system process."""
 
+try:
+    import ui as _ui
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import ui as _ui
+
+
 import json
 
 try:
@@ -561,14 +567,8 @@ class StorybookAppLayer:
     # -- draw -------------------------------------------------------------------------
 
     def _button(self, cv, label, r, hot=False):
-        th = self.ws.theme_colors
-        fs = self.layout.fs
-        bg = self.names["red"] if hot else th["panel"]
-        fg = self.names["white"] if hot else th["title_ink"]
-        cv.rect(r[0], r[1], r[2], r[3], bg)
-        cv.rectb(r[0], r[1], r[2], r[3], th["dim"])
-        cv.print(label, r[0] + max(2, (r[2] - len(label) * 8 * fs) // 2),
-                 r[1] + max(1, (r[3] - 8 * fs) // 2), fg, 1)
+        # One shared implementation now (ui.chip) -- pixel-identical delegate.
+        _ui.chip(cv, self.ws.theme_colors, r, label, hot=hot, fs=self.layout.fs)
 
     def draw(self, dt):
         cv = self.ws.sys_canvas

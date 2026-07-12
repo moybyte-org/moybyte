@@ -197,6 +197,39 @@ def button(cv, th, rect, label, kind="normal", on=False, icon_img=None,
         cv.print(label, tx + iw, y + (h - 8 * fs) // 2, ink, 1)
 
 
+def chip(cv, th, rect, label, on=False, hot=False, fs=None):
+    """The app-toolbar CHIP -- the one implementation of the `_button` the
+    Appearance/Writer/Storybook/Artwork apps each used to carry a local copy
+    of (pixel-identical to those). A quiet field on the panel color with the
+    theme's title ink; `on` swaps to the accent toggle look (edge border);
+    `hot` to danger red with light ink (an armed destructive action).
+
+    `chip` vs `button`: chip is the PANEL-chrome vocabulary (toolbars inside
+    the dark app chrome, theme-quiet); button is the Open Machine STUDIO
+    vocabulary (dark-edged verb chips -- PLAY/CHANGE/SAVE)."""
+    if fs is None:
+        fs = _fs(cv)
+    x, y, w, h = rect
+    if hot:
+        bg = th.get("danger", 8)
+        ink = _WHITE
+        edge = th.get("dim", 1)
+    elif on:
+        bg = th.get("accent", 10)
+        ink = _BLACK
+        edge = th.get("edge", 13)
+    else:
+        bg = th.get("panel", 60)
+        ink = th.get("title_ink", _BLACK)
+        edge = th.get("dim", 1)
+    cv.rect(x, y, w, h, bg)
+    cv.rectb(x, y, w, h, edge)
+    fw = 8 * fs
+    label = str(label)
+    cv.print(label, x + max(2, (w - len(label) * fw) // 2),
+             y + max(1, (h - 8 * fs) // 2), ink, 1)
+
+
 def tab_row_rects(rect, tabs, fs, gap=None):
     """PURE geometry for a labeled tab row: [(id, rect, labels_on), ...] laid
     left-to-right in `rect`. Overflow policy (resizable windows): if the fully
