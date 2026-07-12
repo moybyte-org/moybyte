@@ -75,6 +75,18 @@ if ! grep -q "^    esp_driver_ppa$" "${COMMON_CMAKE}"; then
   echo "== patched esp32_common.cmake: added esp_driver_ppa to IDF_COMPONENTS"
 fi
 
+# 2b2) Moybyte #66: the same native-code-arena reclaim patch as the T-Deck
+#      build -- mainline's ports/esp32/main.c has the identical grow-only
+#      esp_native_code_commit list, and the P4's RV32 native emitter feeds it
+#      (MICROPY_EMIT_RV32=1), so edit->PLAY sessions would hit the same cliff,
+#      just later (bigger internal pool). One shared patch file; the moy_gfx
+#      weak-symbol binding goes strong once this is applied.
+NATIVE_FREE_PATCH="${REPO_ROOT}/firmware/lilygo_t_deck_plus_micropython/patches/esp32_native_code_free.patch"
+if ! grep -q "moybyte_native_code_free" "${MPY_DIR}/ports/esp32/mpconfigport.h"; then
+  echo "== applying native-code-free patch (#66)"
+  patch -d "${MPY_DIR}" -p1 < "${NATIVE_FREE_PATCH}"
+fi
+
 # 2c) Stage the shared NATIVE modules from the T-Deck tree (single source of
 #     truth: firmware/lilygo_t_deck_plus_micropython/native/). moy_gfx is the
 #     VM-neutral RGB565 pixel kernel every draw verb runs through; moy_alloc is
