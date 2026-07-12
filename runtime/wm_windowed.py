@@ -63,16 +63,6 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import NAMES
     from runtime.widgets import _Blit
 
-try:
-    from appearance_app import AppearanceLayout as _AppearLay
-    from artwork import PaintAppLayout as _PaintAppLay
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.appearance_app import AppearanceLayout as _AppearLay
-    from runtime.artwork import PaintAppLayout as _PaintAppLay
-# Window kind -> the layout class that declares its resize minimums (the ui.py
-# min-size convention: MIN_W/MIN_H live with the geometry they protect).
-_KIND_MIN = {"appearance": _AppearLay, "artwork": _PaintAppLay}
-
 
 # Window-chrome colors: the fixed ones live here; everything THEMEABLE (panel /
 # title strip / accents / dim texture) reads the ws.theme_colors tokens per draw
@@ -127,10 +117,18 @@ class _LayoutCtx:
         ctx.map_layout = ws.map_ui.layout
         ctx.music_layout = ws.music_ui.layout
         ctx.cards_layout = ws.cards_layer.layout
-        ctx.artwork_layout = ws.artwork_app.layout
-        ctx.appearance_layout = ws.appearance_app.layout
-        ctx.writer_layout = ws.writer_app.layout
-        ctx.storybook_layout = ws.storybook_app.layout
+        # Registered SYSTEM APPS (docs/app_api_v1.md): capture each app's layout
+        # generically, so a new register_app'd app reflows per window with no WM
+        # edits. (The legacy per-app attrs remain as views for the pinned tests.)
+        ctx.app_layouts = {}
+        for _app, _t in getattr(ws, "_apps", ()):
+            _lay = getattr(_app, "layout", None)
+            if _lay is not None:
+                ctx.app_layouts[_app.id] = _lay
+        ctx.artwork_layout = ctx.app_layouts.get("artwork")
+        ctx.appearance_layout = ctx.app_layouts.get("appearance")
+        ctx.writer_layout = ctx.app_layouts.get("writer")
+        ctx.storybook_layout = ctx.app_layouts.get("storybook")
         return ctx
 
     def install(self, ws):
@@ -142,10 +140,10 @@ class _LayoutCtx:
         ws.map_ui.layout = self.map_layout
         ws.music_ui.layout = self.music_layout
         ws.cards_layer.layout = self.cards_layout
-        ws.artwork_app.layout = self.artwork_layout
-        ws.appearance_app.layout = self.appearance_layout
-        ws.writer_app.layout = self.writer_layout
-        ws.storybook_app.layout = self.storybook_layout
+        for _app, _t in getattr(ws, "_apps", ()):
+            _lay = self.app_layouts.get(_app.id)
+            if _lay is not None:
+                _app.layout = _lay
         ws.launcher.set_layout(self.layout)
         ws.picker.set_layout(self.layout)
 
@@ -518,14 +516,15 @@ class WindowedWM(FullscreenStackWM):
         max_h = self._root_canvas.h - self._bar_h()
         min_w = 160 * fs
         min_h = 90 * fs + win.title_h
-        # Min-size convention (ui.py): an app's LAYOUT class declares MIN_W/MIN_H
-        # (fs-scaled) and the WM clamps to them -- the minimums live with the
-        # geometry they protect, not in a WM if-ladder. The cap keeps the same
-        # apps usable on a 320x240 windowed host.
-        lay_cls = _KIND_MIN.get(win.kind)
-        if lay_cls is not None:
-            min_w = min(max_w, lay_cls.MIN_W * fs)
-            min_h = min(max_h, lay_cls.MIN_H * fs)
+        # Min-size convention (ui.py + the app API): a registered app declares
+        # its resize minimum (fs-scaled) at register_app time -- the minimums
+        # live with the app, not in a WM if-ladder. The cap keeps the same apps
+        # usable on a 320x240 windowed host.
+        ms = self.ws.app_min_size(win.kind) \
+            if hasattr(self.ws, "app_min_size") else None
+        if ms is not None:
+            min_w = min(max_w, ms[0] * fs)
+            min_h = min(max_h, ms[1] * fs)
         win.w = max(min_w, min(w, max_w))
         win.h = max(min_h, min(h, max_h))
         self._build_content(win)

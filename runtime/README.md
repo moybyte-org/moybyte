@@ -46,6 +46,8 @@ code) and **host glue**.
 | `perf_hud.py` / `update_ui.py` / `system_menu_ui.py` / `achievements_ui.py` | **(shared, staged)** the FPS/frame-time HUD (#43), the OTA update screen (#53), the ≡ system-menu drawing (#52), the achievement/Easter-egg drawing (#21) |
 | `block_editor_ui.py` / `map_editor_ui.py` / `music_editor_ui.py` | **(shared, staged)** the block editor (#29), tilemap editor (#32), and music/sound editor (#50) UIs |
 | `moy_carts.py` | **(shared, staged to device)** the `.moy` store — scan/load/save_config/save_code/save_sprites/save_sounds/save_map/create/duplicate/delete + the known-WiFi credential store (load_wifi/remember_wifi/forget_wifi → `wifi.json`, #38) (dict carts; `map.moymap` tilemap blob, #32; only `json`+`os`) |
+| `ui.py` | **(shared, staged)** the immediate-mode widget toolkit + rect algebra + Hits + ScrollRegion + the `is_light` gate (visual identity v1 Phase 3; see `docs/app_api_v1.md`) |
+| `calc_app.py` | **(shared, staged)** Calc -- the reference SYSTEM APP for the app API (`ws.register_app`, docs/app_api_v1.md): identity cart `system_carts/calc.moy`, geometry via the ui rect algebra, taps via ui.Hits |
 | `host_app.py` | **(host glue)** host `make_api` (incl. audio + the capability-gated `wifi`), `FakeAudio` + `FakeWifi` backends, `build_workstation()` (320×240 Canvas + `moy_carts` + seeded system carts), and `ConsoleDriver` (mouse/keyboard → the shared console) |
 | `input.py` | **(host)** `InputState` — held/pressed/released + `last_key` (same contract as firmware `moybyte`) |
 

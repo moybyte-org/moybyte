@@ -48,6 +48,7 @@ CART_ORDER = [
     "paint",
     "theme_picker",
     "writer",
+    "calc",
     "storybook",
     "wifi",
 ]
