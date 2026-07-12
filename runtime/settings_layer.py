@@ -97,6 +97,7 @@ class SettingsLayer:
         self._clamp_scroll = clamp_scroll
         self.set_msel = 0             # selected row in the Settings screen
         self.set_top = 0              # first visible Settings row (scroll offset, #53)
+        self.scroll = None            # lazy ui.ScrollRegion (drag + scrollbar)
         # The WIFI panel (#38, spec §10): a Settings SUB-VIEW over the injected
         # ws.wifi service -- scan list -> pick -> (password) -> connect/forget.
         self.wifi_view = False        # the wifi panel replaces the row list
@@ -464,6 +465,47 @@ class SettingsLayer:
 
     # -- scroll window -------------------------------------------------------
 
+    def _scroll_region(self):
+        """The rows' ui.ScrollRegion (lazy: ui imports chrome, and chrome imports
+        THIS module's constants, so a module-level import would re-enter chrome
+        half-initialized). set_top stays the row-slot source of truth; the region
+        is the touch INTERACTION model (drag) + the shelf-tier scrollbar, synced
+        from set_top each use."""
+        if self.scroll is None:
+            try:
+                import ui as mod
+            except ImportError:  # pragma: no cover - host fallback
+                from runtime import ui as mod
+            self.scroll = mod.ScrollRegion()
+        ws = self.ws
+        lay = ws.layout
+        rows = self._settings_rows()
+        area = (lay.set_x, lay.set_row_y0, lay.set_w,
+                self._settings_visible() * lay.set_row_h)
+        self.scroll.set(area, len(rows) * lay.set_row_h)
+        self.scroll.offset = self.set_top * lay.set_row_h
+        return self.scroll
+
+    def _rows_drag(self, px, py):
+        """Touch drag on the row list scrolls it (rows follow the finger), snapped
+        to whole rows -- set_top stays the state of record. Pure behavior: no
+        pixels change on a tier that doesn't draw the scrollbar."""
+        ws = self.ws
+        sr = self._scroll_region()
+        if not ws.pointer.down:
+            sr.drag_end()
+            return
+        if sr._drag_y is None:
+            if not self._in(px, py, sr.view):
+                return                     # a drag must START on the rows...
+            sr.drag_start(py)
+            return
+        sr.drag_move(py)                   # ...but may continue past the edge
+        rows = len(self._settings_rows())
+        vis = self._settings_visible()
+        top = sr.offset // ws.layout.set_row_h
+        self.set_top = max(0, min(max(0, rows - vis), top))
+
     def _settings_visible(self):
         """How many Settings rows fit in the panel at the current font scale (#39)."""
         lay = self.ws.layout
@@ -521,6 +563,8 @@ class SettingsLayer:
 
     def handle_pointer(self, px, py, click):
         ws = self.ws
+        if not self.wifi_view and not ws.show_achievements:
+            self._rows_drag(px, py)       # touch drag scrolls the row list
         if not click:
             return True
         # The achievements view is a modal overlay: while it's up, any tap closes it
@@ -640,6 +684,10 @@ class SettingsLayer:
             cv.print("^", xr, lay.set_row_y0, NAMES["white"], 1)
         if self.set_top + self._settings_visible() < len(rows):
             cv.print("v", xr, py + ph - 9 * lay.fs, NAMES["white"], 1)
+        if not lay._base:
+            # Shelf tiers: the toolkit scrollbar alongside (base keeps the frozen
+            # chevron-only pixels).
+            self._scroll_region().draw_bar(cv, ws.theme_colors)
 
     def _draw_settings_row(self, i):
         NAMES = self._NAMES

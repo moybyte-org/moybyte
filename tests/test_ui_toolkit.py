@@ -152,6 +152,32 @@ def test_focus_ring_paints_focus_token():
     assert cv.pix(50 - 2, 50 - 2) == TH["focus"]
 
 
+def test_settings_rows_drag_scrolls(tmp_path):
+    """The Settings list is ScrollRegion's first consumer: a held drag on the
+    rows moves the scroll window (set_top stays the row-slot state of record)."""
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.open_settings()
+    sl = ws.settings_layer
+    rows = len(sl._settings_rows())
+    vis = sl._settings_visible()
+    assert rows > vis                      # the #53 OTA rows overflow one screen
+    view = sl._scroll_region().view
+    cx = view[0] + view[2] // 2
+    cy = view[1] + view[3] - 4
+    ws.pointer.down = True
+    sl.handle_pointer(cx, cy, False)                       # anchor the drag
+    sl.handle_pointer(cx, cy - 3 * ws.layout.set_row_h, False)   # pull up 3 rows
+    assert sl.set_top > 0
+    ws.pointer.down = False
+    sl.handle_pointer(cx, cy, False)                       # release is inert
+    top = sl.set_top
+    ws.pointer.down = True
+    sl.handle_pointer(cx, view[1] + 4, False)              # new anchor
+    sl.handle_pointer(cx, view[1] + 4 + 10 * ws.layout.set_row_h, False)
+    assert sl.set_top < top                                # drag down -> back up
+
+
 # -- ScrollRegion ------------------------------------------------------------------
 
 def test_scroll_region_clamps_and_shows():
