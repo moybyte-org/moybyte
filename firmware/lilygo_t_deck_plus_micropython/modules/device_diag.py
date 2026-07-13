@@ -198,9 +198,13 @@ def _diag_i2cstat(diag, keyboard, touch):
         fb = getattr(touch, "stat_first_big", None)
         first = ("" if fb is None
                  else " tfirst(t=%dms %s st=%s n=%d)" % (fb[0], fb[1], fb[2], fb[3]))
+        # #74 INT-gate verdict fields: int= GT911 INT edges observed (stuck at 0
+        # all session = the line never fired -> miswired/mispolarized, the gate
+        # never engaged and polling stayed blind); skip= passes the gate saved
+        # (climbing skip + quiet touch maxima is the fix working).
         diag.log("I2CSTAT",
                  "kbd(n=%d max=%.1fms%s >5=%d >20=%d to=%d) "
-                 "touch(n=%d max=%.1fms >5=%d >20=%d)%s"
+                 "touch(n=%d max=%.1fms >5=%d >20=%d int=%d skip=%d)%s"
                  % (getattr(keyboard, "stat_n", 0),
                     getattr(keyboard, "stat_max_us", 0) / 1000.0,
                     " raw" if getattr(keyboard, "stat_max_raw", False) else "",
@@ -211,6 +215,8 @@ def _diag_i2cstat(diag, keyboard, touch):
                     getattr(touch, "stat_max_us", 0) / 1000.0,
                     getattr(touch, "stat_over5", 0),
                     getattr(touch, "stat_over20", 0),
+                    getattr(touch, "stat_int_edges", 0),
+                    getattr(touch, "stat_skipped", 0),
                     first))
     except Exception:
         pass

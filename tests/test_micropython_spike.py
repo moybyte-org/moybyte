@@ -1528,6 +1528,148 @@ def test_input_poller_defers_mode_switch_to_the_bus_thread():
     assert writes[0] == b"\x03" and kbd.raw_mode is True
 
 
+def _load_fw_device_input():
+    # device_input imports the leaf device_util at module top; stage it into
+    # sys.modules first (the test_device_canvas_parity loader pattern).
+    du = importlib.util.spec_from_file_location(
+        "device_util", ROOT / "modules" / "device_util.py"
+    )
+    dumod = importlib.util.module_from_spec(du)
+    du.loader.exec_module(dumod)
+    sys.modules["device_util"] = dumod
+    spec = importlib.util.spec_from_file_location(
+        "moybyte_device_input", ROOT / "modules" / "device_input.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _bare_touch(module):
+    t = module.Touch.__new__(module.Touch)
+    t.available = True
+    t.addr = 0x5D
+    t._i2c = None
+    t._down = False
+    t._source = None
+    t.stat_n = 0
+    t.stat_max_us = 0
+    t.stat_over5 = 0
+    t.stat_over20 = 0
+    t.stat_first_big = None
+    t.stat_int_edges = 0
+    t.stat_skipped = 0
+    t._int_pin = None
+    t._int_count = [0]
+    t._int_last = 0
+    t._int_seen = False
+    t._touching = False
+    t._last_read_ms = module._ticks_ms()
+    return t
+
+
+def test_touch_int_gate_semantics():
+    # #74 INT gate: reads are skipped ONLY once the pin has proven itself with a
+    # first edge AND nothing is pending -- INT activity, a touch in progress and
+    # the safety heartbeat all still read; no pin at all = today's blind polling.
+    module = _load_fw_device_input()
+    t = _bare_touch(module)
+    assert t.should_read()                    # no INT pin -> always read
+
+    t._int_pin = object()                     # pin came up, but no edge ever
+    assert t.should_read()                    # gate not engaged -> still reads
+    assert t.stat_skipped == 0
+
+    t._int_count[0] += 1                      # first edge: data ready
+    assert t.should_read()                    # ... consumed, gate now engaged
+    assert t._int_seen
+    t._last_read_ms = module._ticks_ms()      # a recent read
+    assert not t.should_read()                # idle + no edge -> skipped
+    assert t.stat_skipped == 1
+
+    t._int_count[0] += 1                      # tap: an edge arrives
+    assert t.should_read()                    # -> read this pass
+    t._touching = True                        # finger down (read_raw saw a point)
+    assert t.should_read()                    # full rate while touching, no edge needed
+    t._touching = False
+    t._last_read_ms = module._ticks_ms() - 1000
+    assert t.should_read()                    # safety heartbeat past SAFETY_POLL_MS
+
+
+def test_touch_read_raw_tracks_gate_state():
+    # read_raw feeds the gate: a point sets _touching (full rate until the
+    # release report lands), a fresh no-point sample clears it, and a not-ready
+    # read changes nothing (it says nothing about the finger).
+    module = _load_fw_device_input()
+    t = _bare_touch(module)
+
+    class FakeGT911:
+        def __init__(self):
+            self.frames = [(0x81, bytes([50, 0, 100, 0])),   # ready, 1 point
+                           (0x80, b""),                       # ready, 0 points: up
+                           (0x00, b"")]                       # not ready
+
+        def readfrom_mem(self, _a, reg, _n, addrsize=16):
+            st, pt = self.frames[0]
+            return bytes([st]) if reg == module.Touch.REG_STATUS else pt
+
+        def writeto_mem(self, _a, _reg, _buf, addrsize=16):
+            self.frames.pop(0)                # the status clear consumes a frame
+
+    t._i2c = FakeGT911()
+    assert t.read_raw() == (100, 50)          # y(lo,hi) then x(lo,hi) layout
+    assert t._touching
+    assert t.read_raw() is False
+    assert not t._touching
+    t._touching = True                        # pretend mid-touch...
+    assert t.read_raw() is None               # not-ready says nothing
+    assert t._touching                        # ...state untouched
+
+
+def test_input_poller_touch_respects_int_gate():
+    # #69/#74: the poller consults Touch.should_read() before spending a GT911
+    # transaction; a gated pass does zero touch I2C, and a fake without the
+    # method (the older Touch shape) keeps the every-pass behaviour.
+    module = _load_fw_input()
+
+    class GatedTouch:
+        available = True
+
+        def __init__(self):
+            self.reads = 0
+            self.gate = [False, True]
+
+        def should_read(self):
+            return self.gate.pop(0) if self.gate else False
+
+        def read_raw(self):
+            self.reads += 1
+            return (10, 20)
+
+    t = GatedTouch()
+    p = module.InputPoller(None, t)
+    p._poll_once()                            # gated -> no I2C
+    assert t.reads == 0 and p.consume_touch() is None
+    p._poll_once()                            # gate opens -> one read
+    assert t.reads == 1 and p.consume_touch() == (10, 20)
+
+
+def test_touch_int_gate_wired():
+    # Pin the #74 chain in the frozen sources: the GT911 INT pin (16, per the
+    # T-Deck reference's BOARD_TOUCH_INT), both-edge counting (polarity-agnostic),
+    # the poller consulting the gate, and the I2CSTAT verdict fields.
+    device_input = (ROOT / "modules" / "device_input.py").read_text(encoding="utf-8")
+    assert "INT_PIN = 16" in device_input
+    assert "INT_GATE = True" in device_input                  # the A/B revert knob
+    assert "SAFETY_POLL_MS" in device_input
+    assert "Pin.IRQ_RISING | Pin.IRQ_FALLING" in device_input
+    assert "def should_read(self):" in device_input
+    poller = (ROOT / "modules" / "moybyte" / "input.py").read_text(encoding="utf-8")
+    assert 'getattr(t, "should_read", None)' in poller
+    diag = (ROOT / "modules" / "device_diag.py").read_text(encoding="utf-8")
+    assert "int=%d skip=%d" in diag
+
+
 def test_input_poller_wired_with_gil_release_patch():
     # The poller only isolates a stall when machine.I2C frees the GIL across its
     # blocking legacy-driver transaction wait -- pin the whole chain: the build

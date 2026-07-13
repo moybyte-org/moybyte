@@ -473,11 +473,21 @@ class InputPoller:
                     self._keyq.append(key)
         t = self.touch
         if t is not None and t.available:
-            r = t.read_raw()
-            if r is False:
-                self._tup = True
-            elif r is not None:
-                self._tpoint = r
+            # #74 INT gate: skip the GT911 transaction entirely on quiet passes.
+            # On-glass verdict (2026-07-13): the >20ms clock-stretch stalls live
+            # in the finger-DOWN reads (~75-90% of them stall; idle heartbeat
+            # reads ~27%) -- the GT911 stretches while actively scanning, so the
+            # gate can't shorten a tap's own read; its win is cutting idle bus
+            # traffic ~10x. Touch.should_read() owns the decision -- INT edge
+            # pending, touch in progress, safety heartbeat, or gate-not-engaged
+            # all read; a fake/legacy touch object without the method always reads.
+            sr = getattr(t, "should_read", None)
+            if sr is None or sr():
+                r = t.read_raw()
+                if r is False:
+                    self._tup = True
+                elif r is not None:
+                    self._tpoint = r
 
     # -- main thread side -------------------------------------------------
     def consume(self):

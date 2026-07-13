@@ -84,6 +84,17 @@ class Touch:
     ADDRS = (0x5D, 0x14)      # GT911 default / alternate I2C addresses
     REG_STATUS = 0x814E       # touch status: bit7 ready, low nibble = point count
     REG_POINT0 = 0x8150       # point 0: [track, xl, xh, yl, yh, sizel, ...]
+    # #74 INT gate: the GT911's INT line (BOARD_TOUCH_INT=16 in every T-Deck
+    # reference example) pulses when the controller has a fresh report, so a
+    # poll pass can skip the I2C transaction entirely when nothing happened --
+    # the chronic 15-20%-of-reads >20ms clock-stretch stalls live exactly in
+    # those blind no-data polls. INT also straps the I2C address at reset
+    # (low=0x5D), so it is input-only here (never driven, no pull -- the GT911
+    # pushes both levels); counting BOTH edges makes the gate polarity-agnostic.
+    # INT_GATE=False is the A/B revert to blind every-pass polling.
+    INT_PIN = 16
+    INT_GATE = True
+    SAFETY_POLL_MS = 250      # gated idle still reads at ~4Hz (miswire/missed-INT net)
 
     def __init__(self, w, h, i2c=None):
         self.w = w
@@ -109,6 +120,21 @@ class Touch:
         # sessions showed one 1.3-2.5s stall early then a plateau; this says WHERE
         # inside read_raw it lives (wake? status clock-stretch? the clear write?).
         self.stat_first_big = None
+        # #74 INT-gate state (fields live even when the pin never comes up, so
+        # should_read()/read_raw() need no guards): _int_count is a one-element
+        # list bumped by the IRQ handler (list item + small int: ISR-safe, no
+        # allocation -- the TrackBall idiom); _int_seen stays False until the
+        # pin PROVES itself with a first edge, and until then the gate never
+        # engages -- a miswired/mispolarized INT line degrades to today's
+        # every-pass polling, never to dead touch.
+        self._int_pin = None
+        self._int_count = [0]
+        self._int_last = 0
+        self._int_seen = False
+        self._touching = False
+        self._last_read_ms = _ticks_ms()
+        self.stat_int_edges = 0
+        self.stat_skipped = 0
         try:
             from machine import I2C, Pin
 
@@ -124,8 +150,43 @@ class Touch:
                     pass
             if not self.available:
                 _diag_note("touch", "GT911 not found on I2C0")
+            elif self.INT_GATE:
+                try:
+                    counts = self._int_count
+                    def _h(_pin):
+                        counts[0] += 1   # list item + small int: ISR-safe
+                    p = Pin(self.INT_PIN, Pin.IN)
+                    p.irq(_h, Pin.IRQ_RISING | Pin.IRQ_FALLING)
+                    self._int_pin = p
+                except Exception as exc:  # noqa: BLE001 -- the gate is optional
+                    _diag_note("touch", "INT pin unavailable: %s" % (exc,))
         except Exception as exc:  # noqa: BLE001
             _diag_note("touch", "unavailable: %s" % (exc,))
+
+    def should_read(self):
+        """#74: should this pass spend a GT911 I2C transaction? True on INT
+        activity since the last check, while a touch is in progress (full rate
+        until the release report lands -- a missed finger-up would wedge the
+        pointer down), on the SAFETY_POLL_MS heartbeat, and always while the
+        gate hasn't engaged (no pin, or no edge ever seen). Both the poller
+        thread and the synchronous poll() fallback consult this, so a skipped
+        pass costs zero bus time either way."""
+        if self._int_pin is None:
+            return True
+        n = self._int_count[0]
+        self.stat_int_edges = n
+        if n != self._int_last:
+            self._int_last = n
+            self._int_seen = True
+            return True
+        if not self._int_seen:
+            return True
+        if self._touching:
+            return True
+        if _ticks_diff(_ticks_ms(), self._last_read_ms) >= self.SAFETY_POLL_MS:
+            return True
+        self.stat_skipped += 1
+        return False
 
     def read_raw(self):
         """One GT911 read. Returns (rx, ry) when a finger is down, False when the
@@ -139,6 +200,7 @@ class Touch:
         the 1.3-2.5s stall lived."""
         if not self.available:
             return None
+        self._last_read_ms = _ticks_ms()   # #74: feeds the gate's safety heartbeat
         t0 = _ticks_us()
         status = None
         try:
@@ -176,6 +238,12 @@ class Touch:
         if cp > worst:
             phase = "clear"
         self._stat(t0, t3, pp, cp, phase, status)
+        # #74 gate state: only a confirmed sample moves it -- a not-ready read
+        # (the early returns above) says nothing about the finger.
+        if raw is False:
+            self._touching = False   # confirmed up -> the idle gate may engage
+        elif raw is not None:
+            self._touching = True    # finger down -> stay at full poll rate
         return raw
 
     def _stat(self, t0, t_end=None, pp=0, cp=0, phase="status", status=None):
@@ -232,8 +300,12 @@ class Touch:
 
     def poll(self):
         # #69: threaded mode consumes the poller's staged raw sample (no I2C on
-        # the frame loop); unthreaded mode reads the hardware inline as always.
-        raw = self._source() if self._source is not None else self.read_raw()
+        # the frame loop); unthreaded mode reads the hardware inline as always
+        # (#74: through the same INT gate the poller uses).
+        if self._source is not None:
+            raw = self._source()
+        else:
+            raw = self.read_raw() if self.should_read() else None
         if not raw:                 # None (no new sample) or False (finger up)
             if raw is False:        # only a confirmed "up" clears the press state
                 self._down = False
