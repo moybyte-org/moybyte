@@ -15,6 +15,12 @@ exit tap, and every few dozen keystrokes -- because a kid never presses save.
 A note's title is its first non-empty line (real-notebook rule): renaming is
 just editing the first line, so there is no rename UI to learn."""
 
+try:
+    import ui as _ui
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import ui as _ui
+
+
 import json
 
 try:
@@ -79,6 +85,7 @@ class WriterAppLayer:
 
     id = "writer"
     domain = "system"
+    TITLE = "WRITER"
 
     def __init__(self, ws, names, in_rect):
         self.ws = ws
@@ -337,21 +344,15 @@ class WriterAppLayer:
     # -- draw --------------------------------------------------------------------
 
     def _button(self, cv, label, r, hot=False):
-        th = self.ws.theme_colors
-        fs = self.layout.fs
-        bg = self.names["red"] if hot else th["panel"]
-        fg = self.names["white"] if hot else th["title_ink"]
-        cv.rect(r[0], r[1], r[2], r[3], bg)
-        cv.rectb(r[0], r[1], r[2], r[3], th["dim"])
-        cv.print(label, r[0] + max(2, (r[2] - len(label) * 8 * fs) // 2),
-                 r[1] + max(1, (r[3] - 8 * fs) // 2), fg, 1)
+        # One shared implementation now (ui.chip) -- pixel-identical delegate.
+        _ui.chip(cv, self.ws.theme_colors, r, label, hot=hot, fs=self.layout.fs)
 
     def draw(self, dt):
         cv = self.ws.sys_canvas
         lay = self.layout
         th = self.ws.theme_colors
         cv.cls(th["panel"])
-        cv.rect(0, lay.bar_h, lay.w, lay.toolbar_h, th["title"])
+        _ui.toolbar(cv, th, (0, lay.bar_h, lay.w, lay.toolbar_h))
         if self.mode == "edit":
             self._button(cv, "NOTES", lay.back_btn)
             self._button(cv, "TEAR OUT", lay.del_btn, hot=self.del_armed)

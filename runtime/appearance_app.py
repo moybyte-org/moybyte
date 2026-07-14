@@ -5,8 +5,18 @@ try:
 except ImportError:  # pragma: no cover - direct host import
     from runtime.chrome import THEMES
 
+try:
+    import ui as _ui
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import ui as _ui
+
 
 class AppearanceLayout:
+    # Min-size convention (ui.py): the WM clamps window resizes to these
+    # (fs-scaled) -- the visual rails/catalog need the room at font scale 2.
+    MIN_W = 310
+    MIN_H = 230
+
     def __init__(self, w, h, fs=1, windowed=False):
         self.w = int(w)
         self.h = int(h)
@@ -51,6 +61,7 @@ class AppearanceAppLayer:
 
     id = "appearance"
     domain = "system"
+    TITLE = "APPEARANCE"
     MODES = ("images", "carts", "themes")
 
     def __init__(self, ws, names, in_rect):
@@ -160,14 +171,8 @@ class AppearanceAppLayer:
         return True
 
     def _button(self, cv, label, r, on=False):
-        th = self.ws.theme_colors
-        bg = th["accent"] if on else th["panel"]
-        fg = self.names["black"] if on else th["title_ink"]
-        cv.rect(r[0], r[1], r[2], r[3], bg)
-        cv.rectb(r[0], r[1], r[2], r[3], th["edge"] if on else th["dim"])
-        fw = 8 * self.layout.fs
-        cv.print(label, r[0] + max(2, (r[2] - len(label) * fw) // 2),
-                 r[1] + max(1, (r[3] - 8 * self.layout.fs) // 2), fg, 1)
+        # One shared implementation now (ui.chip) -- pixel-identical delegate.
+        _ui.chip(cv, self.ws.theme_colors, r, label, on=on, fs=self.layout.fs)
 
     def draw(self, dt):
         cv = self.ws.sys_canvas

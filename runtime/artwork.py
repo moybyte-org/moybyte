@@ -10,6 +10,12 @@ requests the ``artwork`` permission. Ordinary kid cartridges keep the frozen car
 API unchanged and cannot reach the store through this object.
 """
 
+try:
+    import ui as _ui
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import ui as _ui
+
+
 
 class _Bitmap:
     """Duck-typed indexed image accepted by host and device system canvases."""
@@ -275,6 +281,10 @@ class PaintDocument:
 class PaintAppLayout:
     """Responsive system-domain Paint chrome for one window/content size."""
 
+    # Min-size convention (ui.py): the WM clamps window resizes to these.
+    MIN_W = 310
+    MIN_H = 230
+
     def __init__(self, w, h, fs=1, windowed=False):
         self.w = int(w)
         self.h = int(h)
@@ -342,6 +352,7 @@ class PaintAppLayer:
 
     id = "artwork"
     domain = "system"
+    TITLE = "PAINT"
     TOOLS = ("PENCIL", "BRUSH", "ERASER", "FILL", "PICK",
              "LINE", "BOX", "CIRCLE", "SPRAY", "PAN")
     GLYPHS = ("P", "B", "E", "F", "I", "/", "#", "O", "*", "+")
@@ -380,6 +391,12 @@ class PaintAppLayer:
         self.layout = PaintAppLayout(w, h, fs, self.ws.windowed_chrome)
         self.display = None
 
+    def is_app(self, cart):
+        """The app-API matcher (docs/app_api_v1.md): Paint's cartridge identity
+        check lives on the ArtworkService; this delegates so the registry sees
+        the uniform app protocol."""
+        return self.ws.artwork.is_paint_app(cart)
+
     def open(self):
         loaded = self.ws.artwork.load()
         if self.doc.load(loaded):
@@ -398,14 +415,8 @@ class PaintAppLayer:
         self.ws._dirty = True
 
     def _button(self, cv, label, r, on=False):
-        th = self.ws.theme_colors
-        cv.rect(r[0], r[1], r[2], r[3], th["accent"] if on else th["panel"])
-        cv.rectb(r[0], r[1], r[2], r[3], th["edge"] if on else th["dim"])
-        fw = 8 * self.layout.fs
-        tw = len(label) * fw
-        cv.print(label, r[0] + max(2, (r[2] - tw) // 2),
-                 r[1] + max(1, (r[3] - 8 * self.layout.fs) // 2),
-                 self.names["black"] if on else th["title_ink"], 1)
+        # One shared implementation now (ui.chip) -- pixel-identical delegate.
+        _ui.chip(cv, self.ws.theme_colors, r, label, on=on, fs=self.layout.fs)
 
     def _display_spec(self):
         vx, vy, vw, vh = self.layout.view

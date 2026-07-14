@@ -526,8 +526,14 @@ class MapEditorUI:
         # span edge to edge, so without this fill stale pixels would bleed through
         # the side/bottom strips. Match the cards tab (fills the whole area) so the
         # editor is fully opaque.
-        cv.rect(*(lay.body_fill + (NAMES["black"],)))
-        cv.rect(*(lay.panel + (NAMES["black"],)))
+        # Phase 3 (visual identity v1): warm body on the shelf tiers, dark map
+        # canvas kept on every tier. Baseline literals byte-identical.
+        th = ws.theme_colors
+        light = (not lay._base) and ws.light_chrome()
+        cv.rect(*(lay.body_fill + ((th["surface"] if light else NAMES["black"]),)))
+        # Map cells + the tile-palette strip back themselves (dark map field),
+        # so the panel joins the surface on the light tiers too.
+        cv.rect(*(lay.panel + ((th["surface"] if light else NAMES["black"]),)))
         cv.rectb(*(lay.panel + (NAMES["green"],)))
         # Live zoom metrics (#37 follow-up): one cell size drives the grid, the tile
         # upscale and the title's "z<level>" badge.
@@ -539,7 +545,8 @@ class MapEditorUI:
         title = title + "  z" + str(self.map_zoom + 1)
         if ws.project.tilemap is not None and ws.project.tilemap.dirty:
             title = title + " *"
-        cv.print(title, lay.title_xy[0], lay.title_xy[1], NAMES["green"], 1)
+        cv.print(title, lay.title_xy[0], lay.title_xy[1],
+                 th["ink"] if light else NAMES["green"], 1)
         if me is None or sheet is None or ws.project.tilemap is None:
             return
         tm = ws.project.tilemap

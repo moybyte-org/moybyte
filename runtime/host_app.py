@@ -41,6 +41,11 @@ sys.modules.setdefault("music_editor_ui", _music_editor_ui)
 # (extracted from console.py). console.py does `from layers import ...` / `from
 # bar_layer import ...` (its frozen device names). Both are dependency-free leaves, so
 # they only need the same bare-name alias.
+from . import ui as _ui
+sys.modules.setdefault("ui", _ui)   # the shared widget toolkit: editor_app + the
+                                    # apps do `import ui` (their frozen device name)
+from . import calc_app as _calc_app
+sys.modules.setdefault("calc_app", _calc_app)   # console does `from calc_app import ...`
 from . import bar_layer as _bar_layer
 from . import cards_layer as _cards_layer
 from . import paint_layer as _paint_layer
@@ -795,6 +800,7 @@ class ConsoleDriver:
         self._typed = 0
         self._click = False
         self._down = False      # touch/button currently held (for drag-scroll)
+        self._tap = False       # click(): auto-release at the end of the frame
         self._pan = (0, 0)      # held-arrow trackball velocity (dx, dy in [-1,1])
 
     # -- input the sim feeds in ---------------------------------------------
@@ -826,7 +832,13 @@ class ConsoleDriver:
         self._down = False
 
     def click(self, x, y):
-        self.touch(x, y)                      # a tap, for tests/scripts
+        """A full TAP for tests/scripts: the press edge this frame PLUS a release
+        pass at the end of the same frame() call. Grid cards activate on release
+        (Launcher.pointer_frame's drag/tap disambiguation), so a click must not
+        leave the finger down the way touch() deliberately does -- touch()/
+        touch_drag()/touch_up() remain the held-gesture verbs."""
+        self.touch(x, y)
+        self._tap = True
 
     @property
     def menu_view(self):
@@ -870,6 +882,19 @@ class ConsoleDriver:
         self._typed = 0
         self._click = False
         self.input.last_key = 0
+        if self._tap:
+            # click()'s release pass: lift the synthetic finger and route one
+            # more pointer pass so release-activated surfaces (the launcher/
+            # picker card grids) complete the tap within this frame() call.
+            # The #44 gate's pointer snapshot never samples this intermediate
+            # state (the next click restores it exactly), so mark the repaint
+            # explicitly -- whatever the release changed must reach the pixels.
+            self._tap = False
+            self._down = False
+            self.pointer.down = False
+            self.pointer.click = False
+            self.ws.handle_pointer()
+            self.ws.mark_dirty()
 
     def rgb888(self):
         # The SYSTEM canvas is what the panel/window shows (the composited viewport +

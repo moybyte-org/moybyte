@@ -268,6 +268,18 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.writer_app import WriterAppLayer
 
 try:
+    from calc_app import CalcAppLayer
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.calc_app import CalcAppLayer
+
+try:
+    from artwork import PaintAppLayout
+    from appearance_app import AppearanceLayout
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.artwork import PaintAppLayout
+    from runtime.appearance_app import AppearanceLayout
+
+try:
     from storybook_app import StorybookAppLayer
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.storybook_app import StorybookAppLayer
@@ -278,10 +290,146 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # nav). Launcher takes NAMES + _blit_glyph injected for its tile art; ws.open() stays.
 try:
     from launcher_layer import (Launcher, LauncherHomeLayer, EditorPickerLayer,
-                                make_tile, new_tile, MAKE_TILE_TYPE, NEW_TILE_TYPE)
+                                make_tile, new_tile, MAKE_TILE_TYPE, NEW_TILE_TYPE,
+                                PSEUDO_TILE_TYPES)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.launcher_layer import (Launcher, LauncherHomeLayer, EditorPickerLayer,
-                                        make_tile, new_tile, MAKE_TILE_TYPE, NEW_TILE_TYPE)
+                                        make_tile, new_tile, MAKE_TILE_TYPE,
+                                        NEW_TILE_TYPE, PSEUDO_TILE_TYPES)
+
+try:
+    import ui as _uimod
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import ui as _uimod
+_ui_is_light = _uimod.is_light
+
+
+# Derived Library covers are sizeable on the desktop tier and DeviceCanvas adds a
+# 2-byte RGB565 bake to each cached indexed image.  Keep the cache comfortably
+# bounded for the P4 heap while retaining enough variants for the root Library,
+# the Make window, and selected/unselected card heights at the same time.
+_COVER_CACHE_MAX_ENTRIES = 64
+_COVER_CACHE_MAX_PIXELS = 768 * 1024
+
+
+class _CoverImage:
+    """Minimal blittable for a card's COVER art (visual identity v1 Section
+    11.4): both canvas backends' spr() read only .w/.h/.pix/.transparent, the
+    same contract as editors._SheetSprite."""
+
+    def __init__(self, w, h, pix):
+        self.w = w
+        self.h = h
+        self.pix = pix
+        self.transparent = -1
+        # Covers are opaque MOY64 bitmaps, just like Paint images.  This marker
+        # selects DeviceCanvas's native blit_indices bake and the web recorder's
+        # compact base64 image command instead of the generic per-pixel paths.
+        self._paint = True
+
+
+# How long one _CoverJob.step may run inside a frame. Small enough to hide in
+# any frame budget; big enough that a 320x240 cover lands in a couple dozen
+# frames (~a second of pop-in at UI rates).
+_COVER_SLICE_MS = 8
+# Per-palette-index run templates for the RLE fill (built lazily, 64 x 255B):
+# a run decodes as ONE C-level slice copy instead of a per-pixel loop.
+_COVER_RUNS = None
+
+
+class _CoverJob:
+    """A RESUMABLE cover build. Decoding a 320x240 RLE cover + cover-cropping
+    it to the card in one go measured 0.5-1.7s per cover on the T-Deck (#66)
+    -- one frozen frame per cover even under the one-build-per-frame budget.
+    So the build is a little state machine instead: step(t0) advances the
+    decode (RLE runs -> the full indexed bitmap, slice-assign fills) and then
+    the crop (nearest-sample rows via a precomputed column map) until
+    _COVER_SLICE_MS of the frame is spent, and _cover_for re-steps it on the
+    following frames until `done`. Any malformed input just finishes with
+    img=None -- a corrupt cover means no cover, never a crash."""
+
+    def __init__(self, runs, w, h):
+        global _COVER_RUNS
+        self.done = False
+        self.img = None
+        self.w = int(w)
+        self.h = int(h)
+        self.sw, self.sh, self.packed = runs
+        self.pix = bytearray(self.sw * self.sh)
+        self.pos = 0                  # decode write cursor (pixels)
+        self.i = 0                    # decode read cursor (packed bytes)
+        self.out = None               # crop dest (created when decode ends)
+        self.dy = 0                   # crop row cursor
+        self.xmap = None
+        if _COVER_RUNS is None:
+            _COVER_RUNS = tuple(bytes((v,)) * 255 for v in range(64))
+
+    def step(self, t0):
+        """Advance until ~_COVER_SLICE_MS after t0. Sets self.done (and
+        self.img) when the build finishes or the input turns out corrupt."""
+        try:
+            self._step(t0)
+        except Exception:  # noqa: BLE001 -- corrupt cover -> no cover
+            self.img = None
+            self.done = True
+
+    def _step(self, t0):
+        packed = self.packed
+        n = len(packed)
+        pix = self.pix
+        total = self.sw * self.sh
+        while self.i < n:
+            i = self.i
+            pos = self.pos
+            for _ in range(128):      # a batch of runs between clock checks
+                if i >= n:
+                    break
+                count = packed[i]
+                value = packed[i + 1]
+                if count < 1 or value > 63 or pos + count > total:
+                    self.img = None
+                    self.done = True
+                    return
+                if count == 1:
+                    pix[pos] = value
+                else:
+                    pix[pos:pos + count] = _COVER_RUNS[value][:count]
+                pos += count
+                i += 2
+            self.i = i
+            self.pos = pos
+            if _ticks_diff(_ticks_ms(), t0) >= _COVER_SLICE_MS:
+                return
+        if self.pos != total:         # short stream: corrupt -> no cover
+            self.img = None
+            self.done = True
+            return
+        # -- crop phase: match the card's aspect with a centered source
+        # window, then nearest-sample it to exactly (w, h), a row per check.
+        w, h, sw, sh = self.w, self.h, self.sw, self.sh
+        if self.xmap is None:
+            cw_ = min(sw, sh * w // h) or 1
+            ch_ = min(sh, sw * h // w) or 1
+            ox = (sw - cw_) // 2
+            self._oy = (sh - ch_) // 2
+            self._ch = ch_
+            self.xmap = [ox + dx * cw_ // w for dx in range(w)]
+            self.out = bytearray(w * h)
+        xmap = self.xmap
+        out = self.out
+        while self.dy < h:
+            dy = self.dy
+            base = (self._oy + dy * self._ch // h) * sw
+            di = dy * w
+            for dx in range(w):
+                out[di] = pix[base + xmap[dx]]
+                di += 1
+            self.dy = dy + 1
+            if _ticks_diff(_ticks_ms(), t0) >= _COVER_SLICE_MS:
+                return
+        self.img = _CoverImage(w, h, bytes(out))
+        self.done = True
+
 
 # The open cart's live WORKSPACE (Stage 1 of docs/shell_ux_technical_plan_v1.md,
 # extracted from this file -- see project.py). Project holds the open cart's DATA
@@ -484,6 +632,15 @@ class Workstation:
         self._fat_cart = None         # #66 live-set diet: the one rehydrated cart
         self.launcher = Launcher(self._launcher_items(self._all_carts),
                                  self.layout, NAMES, _blit_glyph)
+        # The HOME grid exposes the selected card's PLAY/CHANGE row on the desktop-
+        # density tiers (visual identity v1 Section 1.2); the picker below keeps the
+        # single-verb pick, so the flag stays off there.
+        self.launcher.actions = True
+        # The shelf's pseudo cards (MAKE STUDIO / + New) draw the real themeable
+        # IconSheet pencil/plus sprite big -- keyed so the sheet's 0-filled
+        # backdrop doesn't plate the card.
+        self.launcher.icon_for = self._icon_image_keyed
+        self.launcher.cover_for = self._cover_for
         # Default the highlight to the first RUNNABLE cart (skip the pinned Make tile at
         # slot 0), so a bare RUN/A plays a game rather than opening the picker -- the
         # launcher is RUN-first (spec shell_ux_v1.md); Make is a tap/nav target.
@@ -495,6 +652,8 @@ class Workstation:
         # opens the chosen cart in the Editor.
         self.picker = Launcher(self._picker_items(self._all_carts),
                                self.layout, NAMES, _blit_glyph)
+        self.picker.icon_for = self._icon_image_keyed
+        self.picker.cover_for = self._cover_for
         # Screen states (#28): "launcher" is now the DESKTOP home (wallpaper + cart
         # icon grid + dock); "desktop" is a running cart; "menu" is the cards/code/
         # paint/map editors; "settings" is the Settings app.
@@ -581,6 +740,12 @@ class Workstation:
         # the launcher home + Settings draw it via self.wallpaper.draw(dt).
         self.wallpaper = Wallpaper(self, NAMES)
         self._icon_cache = {}         # cart path -> desktop-icon sprite Image (or None)
+        self._cover_cache = {}        # (path, w, h) -> shelf-card cover blittable (or None)
+        self._cover_cache_order = []  # LRU keys (oldest first); bounds resize variants
+        self._cover_cache_pixels = 0  # indexed pixels; device RGB bakes add 2B each
+        self._cover_jobs = {}         # (path, w, h) -> in-flight _CoverJob (time-sliced)
+        self._cover_built = False     # per-frame cover-build budget (one; see _cover_for)
+        self._covers_deferred = False # a build was pushed past the budget -> stay dirty
         # Unified top bar (Stage 1): the editable 16x16 IconSheet the bar draws its
         # chrome icons from. Injected by build_workstation / run_desktop (loaded from
         # system_icons.moygfx, else the baked default theme); None falls back to _glyph.
@@ -799,14 +964,12 @@ class Workstation:
         # Content layers (exactly one active per frame, chosen by screen/menu_view). Every
         # surface is now its own Layer/component; only the running-cart "desktop" + the
         # theme wrapper remain thin _LegacyLayer shims over Workstation methods.
+        # SYSTEM APPS (docs/app_api_v1.md) are NOT listed here -- register_app below
+        # adds each one's kind to this table.
         self._content_layers = {
             "launcher": self.launcher_layer,
             "picker": self.editor_picker,
             "settings": self.settings_layer,
-            "artwork": self.artwork_app,
-            "appearance": self.appearance_app,
-            "writer": self.writer_app,
-            "storybook": self.storybook_app,
             "update": _UpdateLayer(self),
             "desktop": _PlayerLayer(self),   # Stage 2: the run loop is ws.player
 
@@ -818,6 +981,23 @@ class Workstation:
             "map": _MapLayer(self),
             "cards": self.cards_layer,
         }
+        # -- SYSTEM APPS (docs/app_api_v1.md): a cartridge identity backed by a
+        # responsive system process. ONE registration wires everything an app
+        # needs -- the launcher dispatch (is_app claims the cart), the router
+        # entry (kind -> layer), the back-stack/window kind, keyboard text mode,
+        # the windowed resize minimum, and the relayout fan-out. Insertion order
+        # is dispatch precedence.
+        self._apps = []
+        self._apps_by_id = {}
+        self._app_min_sizes = {}
+        self._app_titles = {}
+        self.register_app(self.artwork_app,
+                          min_size=(PaintAppLayout.MIN_W, PaintAppLayout.MIN_H))
+        self.register_app(self.appearance_app,
+                          min_size=(AppearanceLayout.MIN_W, AppearanceLayout.MIN_H))
+        self.register_app(self.writer_app, text_mode=True)
+        self.register_app(self.storybook_app)
+        self.register_app(CalcAppLayer(self, NAMES, _in))
         # The boot logo is a draw-time takeover of the screen content (input still
         # routes to the underlying screen), so it's not in _content_layers.
         self._splash_layer = L("splash", "system", draw=lambda dt: self._draw_splash())
@@ -1058,6 +1238,11 @@ class Workstation:
         self.launcher.theme = self.theme_colors
         if getattr(self, "picker", None) is not None:
             self.picker.theme = self.theme_colors
+        # The cached bar strip now paints theme-colored pixels (the launcher zone's
+        # PLAY/CHANGE chips), and its cache key doesn't fold the theme name -- bump
+        # the explicit generation so a theme switch repaints it.
+        if getattr(self, "bar_layer", None) is not None:
+            self.bar_layer.invalidate()
         self._dirty = True
         if persist:
             self.system["theme"] = self.theme_name
@@ -1084,12 +1269,14 @@ class Workstation:
             self.editor.set_view_size(self.code_layout.cols, self.code_layout.rows)
         # The step-3 responsive editors (#39): each converted layer owns its layout;
         # guarded, since _relayout is first called before _build_layers registers them.
-        for _lyr in ("paint_layer", "map_ui", "music_ui", "cards_layer",
-                     "artwork_app", "appearance_app", "writer_app",
-                     "storybook_app"):
+        for _lyr in ("paint_layer", "map_ui", "music_ui", "cards_layer"):
             _obj = getattr(self, _lyr, None)
             if _obj is not None:
                 _obj.relayout(w, h, fs)
+        for _app, _t in getattr(self, "_apps", ()):   # registered system apps
+            _relay = getattr(_app, "relayout", None)
+            if _relay is not None:
+                _relay(w, h, fs)
         # The windowed WM (wm_windowed.py, big-screen tier) re-anchors its layout
         # contexts after any relayout; a no-op hook on the fullscreen-stack WM.
         _hook = getattr(self.wm, "on_relayout", None) if hasattr(self, "wm") else None
@@ -1263,6 +1450,95 @@ class Workstation:
         sheet = self._build_sheet(cart)             # shared sprite-load + fallback
         img = sheet.tile_image(0, -1) if not sheet.is_blank() else None
         cache[key] = img
+        return img
+
+    def light_chrome(self):
+        """True when the live theme's tool surface is LIGHT (visual identity v1
+        Phase 3) -- THE gate every surface's light branch reads (ui.is_light over
+        the live tokens). A method on ws so the layers inside the chrome import
+        cycle need no ui import of their own."""
+        return _ui_is_light(self.theme_colors)
+
+    def _cover_for(self, cart, w, h):
+        """The cart's COVER ART (visual identity v1 Section 11.4) as a blittable
+        sized exactly (w, h) -- images/cover.moyimg cover-cropped (fill + center
+        crop, nearest sample) -- or None when the cart carries none (the shelf
+        card falls back to sprite/glyph, the deterministic pre-cover look) OR
+        while its build is still in flight. Cached per (path, w, h); read
+        through the store so a slimmed cart (#66) never rehydrates, and cleared
+        with the icon cache on a store re-scan.
+
+        Builds are TIME-SLICED and BUDGETED (#66, hardware-measured): decoding
+        one 320x240 RLE cover in interpreted code costs 0.5-1.7s on the T-Deck,
+        so a miss starts a resumable _CoverJob and each frame advances at most
+        ONE job by ~_COVER_SLICE_MS. Cards draw their sprite/glyph fallback
+        until their cover lands (covers pop in over frames, no frozen frames);
+        frame() re-arms the redraw gate while any build is pending."""
+        path = cart.get("path")
+        if path is None or self.carts_store is None or w <= 0 or h <= 0:
+            return None
+        key = (path, w, h)
+        cache = self._cover_cache
+        if key in cache:
+            order = self._cover_cache_order
+            try:
+                order.remove(key)
+            except ValueError:
+                pass
+            order.append(key)
+            return cache[key]
+        if self._cover_built:              # this frame's slice is already spent
+            self._covers_deferred = True
+            return None
+        self._cover_built = True
+        t0 = _ticks_ms()
+        jobs = self._cover_jobs
+        job = jobs.get(key)
+        if job is None:
+            loader = getattr(self.carts_store, "load_image", None)
+            cover_name = getattr(self.carts_store, "COVER_IMAGE", "cover")
+            blob = loader(path, cover_name) if loader is not None else None
+            runs = None
+            if blob:
+                parse = getattr(self.carts_store, "moyimg_runs", None)
+                runs = parse(blob) if parse is not None else None
+            if runs is None:                # no cover / not RLE -> cache the miss
+                return self._cover_finish(key, None)
+            job = _CoverJob(runs, w, h)
+            jobs[key] = job
+            # Bound the half-built set: a card scrolled out of view stops
+            # being stepped -- drop some OTHER job (it just rebuilds if it
+            # ever scrolls back into view).
+            while len(jobs) > 8:
+                for old in jobs:
+                    if old != key:
+                        jobs.pop(old)
+                        break
+                else:
+                    break
+        if not job.done:
+            job.step(t0)
+        if not job.done:
+            self._covers_deferred = True    # keep frames coming until it lands
+            return None
+        jobs.pop(key, None)
+        return self._cover_finish(key, job.img)
+
+    def _cover_finish(self, key, img):
+        """Insert a finished cover (or a definitive miss) into the bounded
+        LRU cache and return it."""
+        cache = self._cover_cache
+        cache[key] = img
+        order = self._cover_cache_order
+        order.append(key)
+        if img is not None:
+            self._cover_cache_pixels += len(img.pix)
+        while (len(order) > _COVER_CACHE_MAX_ENTRIES
+               or self._cover_cache_pixels > _COVER_CACHE_MAX_PIXELS):
+            old_key = order.pop(0)
+            old_img = cache.pop(old_key, None)
+            if old_img is not None:
+                self._cover_cache_pixels -= len(old_img.pix)
         return img
 
     # -- Settings screen (#28) -----------------------------------------------
@@ -1776,6 +2052,47 @@ class Workstation:
         # the SAME identity the launcher uses (distinct carts, not repeat opens).
         self.ach.note("open", self.cart.get("path") or self.cart.get("title"))
 
+    def register_app(self, app, text_mode=False, min_size=None):
+        """Register a SYSTEM APP (docs/app_api_v1.md). `app` is a content Layer
+        exposing:
+
+          id            -- the process kind (router / back-stack / window key)
+          is_app(cart)  -- claim a launcher cart as this app's identity
+          open()        -- (re)enter the app on every launch
+          relayout(w, h, fs)  -- adopt a new canvas size / font scale
+
+        `text_mode=True` marks a TYPING app (clean ASCII keyboard, the Writer
+        precedent); `min_size=(w, h)` is the windowed-WM resize minimum in
+        fs-scaled units (the ui.py convention). When omitted, MIN_W/MIN_H on
+        the app's layout are adopted. TITLE supplies window/taskbar text. A
+        launcher tap on the claimed cart opens the app instead of the Player;
+        everything else (window chrome, theme tokens, toolkit) comes free."""
+        if app.id in self._apps_by_id:
+            raise ValueError("duplicate app id: " + str(app.id))
+        self._apps.append((app, bool(text_mode)))
+        self._apps_by_id[app.id] = app
+        self._content_layers[app.id] = app
+        self._app_titles[app.id] = str(getattr(app, "TITLE", app.id.upper()))
+        if min_size is None:
+            layout = getattr(app, "layout", None)
+            min_w = getattr(layout, "MIN_W", None)
+            min_h = getattr(layout, "MIN_H", None)
+            if min_w is not None and min_h is not None:
+                min_size = (int(min_w), int(min_h))
+        if min_size is not None:
+            self._app_min_sizes[app.id] = min_size
+        hook = getattr(self.wm, "on_app_registered", None)
+        if hook is not None:
+            hook(app)
+
+    def app_min_size(self, kind):
+        """The registered windowed resize minimum for app `kind`, or None."""
+        return self._app_min_sizes.get(kind)
+
+    def app_title(self, kind):
+        """The registered app's requested window/taskbar title, or None."""
+        return self._app_titles.get(kind)
+
     def open(self):
         # RUN landing (spec shell_ux_v1.md Section 2): build the workspace + run the
         # cart on the desktop, recording the launcher home as the caller so QUIT pops
@@ -1784,43 +2101,21 @@ class Workstation:
         # be a dead end on the device). Authoring is a separate app (the Editor), reached
         # via the launcher's Make tile -> project-picker, not a tap-mode on the launcher.
         selected = self.launcher.selected()
-        if self.artwork.is_paint_app(selected):
-            # Paint is a cartridge identity backed by a responsive system process.
-            # It deliberately does not enter Player: Player is the fixed 320x240
-            # contract, while this editor must reflow to a P4/web window.
-            self.cart = selected
-            self.input.text_mode = False
-            self.artwork_app.open()
-            self.wm.goto("artwork")
-            self.ach.note("open", selected.get("path") or selected.get("title"))
-            return
-        if self.appearance_app.is_app(selected):
-            self.cart = selected
-            self.input.text_mode = False
-            self.appearance_app.open()
-            self.wm.goto("appearance")
-            self.ach.note("open", selected.get("path") or selected.get("title"))
-            return
-        if self.writer_app.is_app(selected):
-            # Writer is the same cartridge-identity-over-system-process pattern as
-            # Paint/Appearance -- but it's a TYPING app, so the keyboard goes to
-            # clean ASCII text mode (the code-editor precedent: BACKSPACE is a
-            # plain delete, the bar's context-X is the exit).
-            self.cart = selected
-            self.writer_app.open()
-            self.wm.goto("writer")
-            self._set_text_mode(True)
-            self.ach.note("open", selected.get("path") or selected.get("title"))
-            return
-        if self.storybook_app.is_app(selected):
-            # Storybook (#78): lists/pages navigate in button mode; the page
-            # editor flips text mode on itself when the kid types the words.
-            self.cart = selected
-            self.input.text_mode = False
-            self.storybook_app.open()
-            self.wm.goto("storybook")
-            self.ach.note("open", selected.get("path") or selected.get("title"))
-            return
+        # SYSTEM APPS (docs/app_api_v1.md): a cartridge identity backed by a
+        # responsive system process. Deliberately NOT the Player: the Player is
+        # the fixed 320x240 contract, while an app reflows to a P4/web window.
+        # A TYPING app (register_app text_mode=True, the Writer precedent) gets
+        # the clean ASCII keyboard after it opens; the rest stay in button mode.
+        for _app, _text in self._apps:
+            if _app.is_app(selected):
+                self.cart = selected
+                self.input.text_mode = False
+                _app.open()
+                self.wm.goto(_app.id)
+                if _text:
+                    self._set_text_mode(True)
+                self.ach.note("open", selected.get("path") or selected.get("title"))
+                return
         self._open_workspace()
         self.run(self.project, self.launcher_layer)   # activate desktop, record caller
 
@@ -1843,6 +2138,18 @@ class Workstation:
             self.open_picker()
             return
         self.open()
+
+    def change_selected(self):
+        """CHANGE (visual identity v1 Sections 1.2-1.3): open the launcher's selected
+        cartridge IN PLACE in the Studio/Editor, landing on Config (or the gentlest
+        editable tab when the cart has no edit schema -- editor_app.open decides,
+        deterministically per project). The bridge from playing to making: same
+        Project, same persistence path, never a surprise duplicate (Copy stays an
+        explicit picker verb). No-op for the pseudo Make tile (one verb: its tap)."""
+        sel = self.launcher.selected()
+        if sel is None or sel.get("type") in PSEUDO_TILE_TYPES:
+            return
+        self.open_in_editor(sel)
 
     # -- the Editor's project-picker (spec shell_ux_v1.md) -------------------
 
@@ -2361,6 +2668,10 @@ class Workstation:
         if items:
             self._all_carts = list(items)
             self.slim_carts()              # #66: a rescan reloads FULL carts -- re-slim
+            self._cover_cache = {}         # a re-scan may carry new/changed cover art
+            self._cover_cache_order = []
+            self._cover_cache_pixels = 0
+            self._cover_jobs = {}          # in-flight builds may read stale blobs
             self.launcher.set_items(self._launcher_items(items))
             self.picker.set_items(self._picker_items(items))
 
@@ -2702,6 +3013,8 @@ class Workstation:
             inst = 1.0 / dt
             # EMA so the readout reflects sustained rate, not single-frame jitter.
             self._fps = inst if self._fps <= 0 else self._fps + (inst - self._fps) * 0.15
+        self._cover_built = False     # reset the per-frame cover-build budget
+        self._pf_home = None          # home-frame split (launcher_layer, perf_capture)
         # Undo journal (Stage 7): the idle-typing autosave debounce runs BEFORE the
         # redraw gate below, so it fires even on a static (redraw-skipped) editor frame.
         self._journal_idle_tick()
@@ -2852,6 +3165,12 @@ class Workstation:
         # We painted this frame: clear the dirty flag and snapshot the pointer state
         # we just drew, so the NEXT frame only repaints if something changes again.
         self._dirty = False
+        if self._covers_deferred:
+            # A shelf cover build was pushed past this frame's budget -- stay
+            # dirty so the remaining covers land on the following frames (the
+            # flag is set during the draw, AFTER the gate consumed _dirty).
+            self._covers_deferred = False
+            self._dirty = True
         self._last_ptr = self._ptr_state()
         self._frames_drawn += 1
 
@@ -2917,12 +3236,9 @@ class Workstation:
     # hold-progress toast in its place. See player.py.)
 
     def _mini_btn(self, label, rect, fill, cv=None):
-        # Shared draw toolkit (stays on Workstation per the doc): a tiny labeled button.
-        x, y, w, h = rect
-        if cv is None:
-            cv = self.canvas
-        cv.rect(x, y, w, h, fill)
-        cv.print(label, x + 2, y + 2, NAMES["black"], 1)
+        # Shared draw toolkit -- the implementation moved to ui.mini_btn (the
+        # v0.5 kernel-shrink direction); this stays the tested ws entry point.
+        _uimod.mini_btn(cv if cv is not None else self.canvas, rect, label, fill)
 
     # _draw_fps / _fps_tap_rect / _draw_perf_hud (the HUD *rendering*) now live on
     # self.perf_ui (perf_hud.py, PerfHud). The perf *query* API below stays here --
@@ -3009,37 +3325,18 @@ class Workstation:
 
     def _btn(self, label, rect, fill, cv=None):
         # Defaults to the GAME canvas (paint/map editors -- a 320x240 viewport); the
-        # responsive code/block editors (#39 step 2) pass cv=self.sys_canvas so the
-        # button + its label scale with the system font. On a plain Canvas font_scale
-        # is 1, so this is byte-identical to the original.
-        if cv is None:
-            cv = self.canvas
-        x, y, w, h = rect
-        fs = getattr(cv, "font_scale", 1)
-        cv.rect(x, y, w, h, fill)
-        cv.rectb(x, y, w, h, NAMES["white"])
-        # Baseline: the game canvas printed the label at scale 2 (16px) but centered
-        # with height 8 (the legacy quirk) -- preserve that VERBATIM at fs==1. On the
-        # system canvas SystemCanvas renders petme128 at font_scale (the `2` arg is
-        # ignored), so the on-screen text is 8*fs tall -- center it with that.
-        if fs <= 1:
-            cv.print(label, x + 6, y + (h - 8) // 2, NAMES["black"], 2)
-        else:
-            cv.print(label, x + 6 * fs, y + (h - 8 * fs) // 2, NAMES["black"], 2)
+        # responsive code/block editors (#39 step 2) pass cv=self.sys_canvas. The
+        # implementation (incl. the frozen scale-2 baseline quirk) moved to
+        # ui.game_btn; this stays the tested ws entry point.
+        _uimod.game_btn(cv if cv is not None else self.canvas, rect, label, fill)
 
     def _icon_btn(self, kind, label, rect, fill, cv=None):
         """A button that leads with an icon glyph (pre-literate) and keeps the
         word as a small secondary cue beside it -- so a reader still gets the
-        label and a kid who can't read still gets the picture."""
-        if cv is None:
-            cv = self.canvas
-        x, y, w, h = rect
-        fs = getattr(cv, "font_scale", 1)
-        cv.rect(x, y, w, h, fill)
-        cv.rectb(x, y, w, h, NAMES["white"])
-        self._glyph(kind, (x + 2 * fs, y, 16 * fs, h), NAMES["black"], cv)
-        if label:
-            cv.print(label, x + 19 * fs, y + (h - 8 * fs) // 2, NAMES["black"], 1)
+        label and a kid who can't read still gets the picture. Implementation:
+        ui.game_icon_btn."""
+        _uimod.game_icon_btn(cv if cv is not None else self.canvas, rect,
+                             kind, label, fill, self._glyph)
 
     # (_draw_error_panel -- the on-canvas crash report -- moved to Player (Stage 2,
     # player.py): crash chrome is the Player's own UX, per spec Section 2's "guarantees
@@ -3094,6 +3391,19 @@ class Workstation:
                 img = self.icon_sheet.tile_image(slot)   # transparent -1 (icons keyed)
         self._bar_img_cache[kind] = img
         return img
+
+    def _icon_image_keyed(self, kind):
+        """Like _bar_image but with palette index 0 keyed TRANSPARENT -- for drawing
+        a bar icon over a non-black surface (the Library shelf's pseudo cards). The
+        sheet's untouched pixels are 0: invisible on the black bar, a black plate
+        anywhere else. tile_image memoises per (slot, transparent), so this shares
+        the sheet's own cache."""
+        if self.icon_sheet is None:
+            return None
+        slot = _ICON.get(kind)
+        if slot is None:
+            return None
+        return self.icon_sheet.tile_image(slot, transparent=0)
 
     def _icon(self, kind, x, y, cv=None):
         """Blit the top-bar icon `kind` (a 16x16 IconSheet sprite) at (x, y). The

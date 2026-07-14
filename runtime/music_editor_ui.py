@@ -380,12 +380,19 @@ class MusicEditorUI:
         cv = ws.sys_canvas
         lay = self.layout
         me = self.musicedit
-        cv.cls(NAMES["dark_blue"])
+        # Phase 3 (visual identity v1): the warm tool surface + dark ink on the
+        # shelf tiers; the frozen dark-blue body at 320x240, byte-identical.
+        th = ws.theme_colors
+        light = (not lay._base) and ws.light_chrome()
+        self._light = light
+        ink = th["ink"] if light else NAMES["white"]
+        ink_dim = th["ink_dim"] if light else NAMES["light_grey"]
+        cv.cls(th["surface"] if light else NAMES["dark_blue"])
         # The old black title band is gone -- the unified bar owns the top strip
         # (drawn by _MusicLayer AFTER this). The controls that were in it now sit in
         # a control row just below the bar (lay.title_y).
         if me is None:
-            cv.print("NO SOUND BANK", lay.list_x, lay.title_y, NAMES["white"], 1)
+            cv.print("NO SOUND BANK", lay.list_x, lay.title_y, ink, 1)
             return                         # exit via the bar's context X
         song = me.view == MusicEditor.SONG_VIEW
         # Title: which object + its tempo + a dirty *.
@@ -402,9 +409,9 @@ class MusicEditorUI:
         # View toggle (far left) | < obj > + title | SPD + tempo +/- | save status.
         ws._btn("SONG" if not song else "SFX", lay.view_btn, NAMES["dark_purple"], cv)
         ws._btn("<", lay.obj_prev, NAMES["indigo"], cv)
-        cv.print(title, lay.title_x, lay.title_y, NAMES["white"], 1)
+        cv.print(title, lay.title_x, lay.title_y, ink, 1)
         ws._btn(">", lay.obj_next, NAMES["indigo"], cv)
-        cv.print("SPD " + str(speed), lay.spd_x, lay.title_y, NAMES["light_grey"], 1)
+        cv.print("SPD " + str(speed), lay.spd_x, lay.title_y, ink_dim, 1)
         self._mu_tick(lay.speed_dn, "-")
         self._mu_tick(lay.speed_up, "+")
         # The scrolling step/slot list.
@@ -421,7 +428,8 @@ class MusicEditorUI:
         ws._btn("LOOP" if loop else "1X", lay.loop_btn,
                   NAMES["orange"] if loop else NAMES["dark_grey"], cv)
         if ws.save_status:
-            cv.print(ws.save_status[:8], lay.status_x, lay.title_y, NAMES["yellow"], 1)
+            cv.print(ws.save_status[:8], lay.status_x, lay.title_y,
+                     th["author"] if light else NAMES["yellow"], 1)
 
     def _mu_tick(self, rect, label):
         """A small +/- tick button (smaller text than _btn for the title-strip nudges)."""
@@ -462,20 +470,29 @@ class MusicEditorUI:
             x = lay.list_x
             y = lay.list_y0 + vi * lay.row_h
             cur = (idx == me.step)
+            light = getattr(self, "_light", False)
+            row_bg = self.ws.theme_colors["hilite"] if light else NAMES["indigo"]
             if cur:
-                cv.rect(x, y, lay.list_w, lay.row_h - 1, NAMES["indigo"])
+                cv.rect(x, y, lay.list_w, lay.row_h - 1, row_bg)
             pitch, wave, vol = s.steps[idx][0], s.steps[idx][1], s.steps[idx][2]
-            tc = NAMES["white"] if cur else NAMES["light_grey"]
-            cv.print("%02d" % idx, x + 2 * fs, y + 4 * fs, NAMES["dark_grey"]
+            # The CURSOR row keeps light ink on its dark highlight; quiet rows use
+            # the surface ink (dark on the warm surface at shelf density).
+            base_ink = self.ws.theme_colors["ink"] if light else NAMES["light_grey"]
+            base_dim = self.ws.theme_colors["ink_dim"] if light else NAMES["dark_grey"]
+            tc = NAMES["white"] if cur else base_ink
+            cv.print("%02d" % idx, x + 2 * fs, y + 4 * fs, base_dim
                      if not cur else NAMES["light_grey"], 1)
             note = _mu_note_name(pitch)
-            cv.print(note, x + 24 * fs, y + 4 * fs, NAMES["peach"] if pitch >= 0 else
-                     NAMES["dark_grey"], 1)
+            note_c = NAMES["peach"] if cur else (
+                NAMES["brown"] if light else NAMES["peach"])
+            cv.print(note, x + 24 * fs, y + 4 * fs, note_c if pitch >= 0 else
+                     base_dim, 1)
             cv.print(_MU_WAVE_LABELS[wave & 3], x + 64 * fs, y + 4 * fs, tc, 1)
             # a little volume bar (0..7) -> up to 7 ticks
             bx = x + 96 * fs
             for v in range(7):
-                col = NAMES["green"] if v < vol else NAMES["dark_grey"]
+                off = base_dim if light else NAMES["dark_grey"]
+                col = NAMES["green"] if v < vol else off
                 cv.rect(bx + v * 7 * fs, y + 4 * fs, 5 * fs, 8 * fs, col)
 
     def _draw_music_song(self, me):
@@ -495,13 +512,18 @@ class MusicEditorUI:
             x = lay.list_x
             y = lay.list_y0 + vi * lay.row_h
             cur = (idx == me.slot)
+            light = getattr(self, "_light", False)
+            th = self.ws.theme_colors
             if cur:
-                cv.rect(x, y, lay.list_w, lay.row_h - 1, NAMES["indigo"])
+                cv.rect(x, y, lay.list_w, lay.row_h - 1,
+                        th["hilite"] if light else NAMES["indigo"])
             sid = t.pattern[idx]
-            cv.print("%02d" % idx, x + 2 * fs, y + 4 * fs, NAMES["dark_grey"]
+            cv.print("%02d" % idx, x + 2 * fs, y + 4 * fs,
+                     (th["ink_dim"] if light else NAMES["dark_grey"])
                      if not cur else NAMES["light_grey"], 1)
             cv.print("SFX " + str(sid), x + 30 * fs, y + 4 * fs,
-                     NAMES["white"] if cur else NAMES["light_grey"], 1)
+                     NAMES["white"] if cur else
+                     (th["ink"] if light else NAMES["light_grey"]), 1)
 
     def _draw_music_pad(self, song):
         # Two columns x four rows of edit buttons; labels differ per view.

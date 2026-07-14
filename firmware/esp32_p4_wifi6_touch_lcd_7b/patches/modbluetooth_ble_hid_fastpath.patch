@@ -1,0 +1,19 @@
+diff --git a/extmod/modbluetooth.c b/extmod/modbluetooth.c
+--- a/extmod/modbluetooth.c
++++ b/extmod/modbluetooth.c
+@@ -39,0 +40,7 @@
++// Moybyte P4: consume registered small HID notifications in a native queue
++// before synchronous Python IRQ dispatch has to acquire the VM GIL.
++#if defined(MICROPY_HW_MOYBYTE_P4_BLE_HID_QUEUE) && MICROPY_HW_MOYBYTE_P4_BLE_HID_QUEUE
++bool moy_ble_hid_queue_on_notify(uint16_t conn_handle, uint16_t value_handle,
++    const uint8_t **data, uint16_t *data_len, size_t num);
++#endif
++
+@@ -1443,0 +1451,7 @@ void mp_bluetooth_gattc_on_data_available(uint8_t event, uint16_t conn_handle, uint16_t value_handle, const uint8_t **data, uint16_t *data_len, size_t num) {
++    #if defined(MICROPY_HW_MOYBYTE_P4_BLE_HID_QUEUE) && MICROPY_HW_MOYBYTE_P4_BLE_HID_QUEUE
++    if (event == MP_BLUETOOTH_IRQ_GATTC_NOTIFY
++        && moy_ble_hid_queue_on_notify(conn_handle, value_handle, data, data_len, num)) {
++        return;
++    }
++    #endif
++

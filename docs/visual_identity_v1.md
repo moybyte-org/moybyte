@@ -6,6 +6,33 @@ shipped shell reference. Where it changes behavior described by
 `docs/shell_ux_v1.md`, the change must land in code and tests before that reference is
 updated.
 
+**Implementation status (2026-07-12):** the §10 Phase 1 + Phase 2 vertical slice is
+CODED and host-tested (`tests/test_visual_identity.py`): the §4.3 semantic theme
+roles (frozen-literal fallbacks; `night` byte-identical), the opt-in **"machine"**
+Open Machine theme (`chrome.THEMES`, selectable in Settings/Appearance), the
+Library card's PLAY/CHANGE verbs on both tiers (on-card at desktop density, bar-zone
+chips at 320×240, `C` key), `Workstation.change_selected` → Editor-on-Config, and the
+§6.2 MAKE tile authoring accent. The launcher renders the library concept
+mockup's **Library shelf** on EVERY tier — the 320×240 T-Deck included
+(2026-07-13; this retired the baseline's frozen icon-tile grid): a framed
+tool-surface panel (Moy + "LIBRARY" display-type header; footer with the
+cartridge count) over the construction field, whose card grid **scrolls
+continuously left-right** (2026-07-13 — paging is gone; a shelf slides
+sideways): the ONE tall featured slot — the pinned yellow MAKE STUDIO card
+(pencil, pin, caption) — heads the list and scrolls away with it, cover-art
+cartridge cards with title bands stack the columns marching right (cards clip
+to the grid viewport), and the scroll is driven by touch drag (tap-vs-drag
+disambiguated on release via the shared `ui.DragTap`, so a scroll never
+launches a cart), the footer's left/right column-nudge arrows, the slim
+scrollbar along the grid's bottom edge, and keyboard nav (the view follows
+the selection). The selected card
+carries the focus ring and — where the card is tall enough — its in-card
+PLAY/CHANGE row; small-card tiers (320×240) keep the verbs as bar-zone chips
+and the home bar's lent zone shows the selected cart's name (wide-card tiers
+show the moybyte wordmark). Phase 3's shared `ui` toolkit, warm-light Studio
+surfaces, responsive app seam, and reference Calc app are also implemented.
+Phases 4-5 and on-glass validation on the P4 panel remain open.
+
 **Scope:** the Moybyte OS shell, Library, Studio/system apps, Player boundary, and
 website expression. Kid cartridges keep their own visual identities and the frozen
 `.moy` drawing contract.
@@ -265,6 +292,7 @@ surface_alt
 border
 ink
 ink_dim
+surface_light  (boolean presentation class, not a palette index)
 title_active
 title_inactive
 selection
@@ -418,9 +446,9 @@ The functionality and names remain constant across tiers; presentation changes.
 
 | Tier | Library | Studio | Player |
 |---|---|---|---|
-| T-Deck, 320x240 | fullscreen paged grid; selected actions use the zoned bar or compact action row | one responsive Editor tab fullscreen | fullscreen 320x240 |
-| P4/host, 1024x600 | large visual shelf with pinned MAKE and cartridge covers | WindowedWM workbench; Editor beside playtest | fullscreen from Library; windowed playtest from Studio |
-| Web | stack or shelf according to viewport | stack or windows according to viewport | viewport owned by game |
+| T-Deck, 320x240 | the same scrolling shelf at small-card density; selected actions use the zoned bar | one responsive Editor tab fullscreen | fullscreen 320x240 |
+| P4/host, 1024x600 | large visual shelf with the pinned MAKE card heading the sideways-scrolling list, cartridge covers, in-card PLAY/CHANGE | WindowedWM workbench; Editor beside playtest | fullscreen from Library; windowed playtest from Studio |
+| Web | the shelf at the viewport's density | stack or windows according to viewport | viewport owned by game |
 
 The large-screen mockups are not downscaled screenshots for the T-Deck. Each layout
 must be authored responsively while preserving the same flow and vocabulary.
@@ -567,6 +595,12 @@ authored code, but changing the copy model is not part of this visual redesign.
 **Recommendation: static authored cover art with a deterministic fallback.** Do not run
 six games in the Library to synthesize live covers. Define the manifest/store contract
 only after the visual slice proves the required dimensions.
+
+*Status (2026-07-12): SHIPPED.* The contract is `images/cover.moyimg` in the cart
+folder (any MOY64 `.moyimg`); the Library shelf cover-crops it full-bleed onto the
+card, and carts without one keep the sprite/glyph fallback deterministically.
+`tools/gen_covers.py` captures a clean gameplay frame for each seed game (committed
+artifacts, hand-replaceable; manifest versions bumped for the #47 re-seed).
 
 ### 11.5 A second system UI font?
 

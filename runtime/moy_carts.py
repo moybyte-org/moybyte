@@ -35,6 +35,12 @@ CART_FORMAT = "moybyte-cart-v1"
 IMAGES_DIR = "images"
 IMAGE_EXT = ".moyimg"
 ARTWORK_NAME = "artwork.moyimg"
+# Cartridge COVER ART (visual identity v1 Section 11.4): a cart folder may carry
+# images/cover.moyimg -- static authored cover art the Library shelf draws
+# full-bleed on the card. The deterministic fallback when absent is the cart's
+# sprite tile 0 / type glyph (the pre-cover look). tools/gen_covers.py captures a
+# gameplay frame for the seed games; Paint art or any moyimg works the same.
+COVER_IMAGE = "cover"
 NOTES_NAME = "notes.json"
 DECK_NAME = "deck.json"
 
@@ -92,6 +98,26 @@ def encode_moyimg(width, height, indices):
         "format": "moyimg-v1", "w": w, "h": h,
         "codec": "rle", "data": _b64_encode(packed),
     })
+
+
+def moyimg_runs(text):
+    """Parse a ``.moyimg`` into ``(w, h, packed_rle_bytes)`` WITHOUT decoding
+    the pixels -- the JSON header + base64 only. The Library shelf's
+    time-sliced cover builder (console._CoverJob) walks the returned
+    (count, value) run pairs incrementally across frames; ``decode_moyimg``
+    below stays the one-shot decoder. None on any malformed input."""
+    try:
+        meta = json.loads(text)
+        w = int(meta["w"])
+        h = int(meta["h"])
+        if w <= 0 or h <= 0 or meta.get("codec") != "rle":
+            return None
+        packed = _b64_decode(meta["data"])
+        if len(packed) & 1:
+            return None
+        return (w, h, packed)
+    except Exception:  # noqa: BLE001 -- a corrupt drawing is treated as absent
+        return None
 
 
 def decode_moyimg(text):
@@ -228,6 +254,16 @@ def _read_recover(path):
                 pass
             return data
         raise
+
+
+def load_image(path, name):
+    """One paint-image blob (images/<name>.moyimg) for the cart at `path`, or
+    None. The Library shelf reads covers through this (COVER_IMAGE) so a
+    slimmed cart (#66 live-set diet) never needs rehydrating for its card."""
+    try:
+        return _read(path + "/" + IMAGES_DIR + "/" + name + IMAGE_EXT)
+    except OSError:
+        return None
 
 
 def load_images(path):

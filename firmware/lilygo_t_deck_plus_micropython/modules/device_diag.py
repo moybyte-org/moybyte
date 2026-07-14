@@ -68,14 +68,20 @@ def _diag_hitch(diag, ws, comp, elapsed, kbd_ms, inp_ms, sb_ms, ws_ms,
             raw = get_raw()
         pump_ms = getattr(comp, "pump_last_us", 0) / 1000.0
         trips = getattr(getattr(ws, "canvas", None), "_lcopy_trips", -1)
+        # Launcher-frame section split (#66 instrument-before-cutting): the
+        # home layer stashes (wallpaper, shelf grid, bar) ms under perf_capture
+        # -- DRAWBRK/CHROMEBRK are cart-gated, so this is the one split a
+        # launcher hitch gets.
+        home = getattr(ws, "_pf_home", None)
+        home_s = (" home(wp=%d grid=%d bar=%d)" % home) if home else ""
         if raw is not None:
             diag.log("HITCH",
                      "frame=%dms kbd=%d inp=%d sb=%d ws=%d diag=%d sdflush=%d "
                      "web=%d pump=%.1f lw=%d raw(logic=%.1f render=%.1f "
-                     "audio=%.1f chrome=%.1f flush=%.1f)"
+                     "audio=%.1f chrome=%.1f flush=%.1f)%s"
                      % (elapsed, kbd_ms, inp_ms, sb_ms, ws_ms, diag_ms, sd_ms,
                         web_ms, pump_ms, trips,
-                        raw[0], raw[1], raw[2], raw[3], raw[4]))
+                        raw[0], raw[1], raw[2], raw[3], raw[4], home_s))
         else:
             b = ws.perf_breakdown()
             diag.log("HITCH",
@@ -153,6 +159,23 @@ def _diag_chromebrk(diag, ws):
         c = pc()
         diag.log("CHROMEBRK", "bar=%.2f cmp=%.2f cur=%.2f other=%.2f"
                  % (c[0], c[1], c[2], c[3]))
+    except Exception:
+        pass
+
+
+def _diag_homebrk(diag, ws):
+    """Log a HOMEBRK line: the LAUNCHER frame's section split (wallpaper /
+    shelf grid / bar ms, stashed by launcher_layer under perf_capture). The
+    steady scroll-drag frames sit UNDER the HITCH threshold, so this periodic
+    line is how the launcher's repaint cost gets named on-glass (DRAWBRK /
+    CHROMEBRK are cart-gated). Prints only when the LAST frame actually drew
+    the home screen -- silent while idle or inside a cart/app."""
+    if diag is None:
+        return
+    try:
+        home = getattr(ws, "_pf_home", None)
+        if home:
+            diag.log("HOMEBRK", "wp=%d grid=%d bar=%d" % home)
     except Exception:
         pass
 

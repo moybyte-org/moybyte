@@ -1,1 +1,89 @@
-{"format": "moybyte-cart-v1", "version": 4, "title": "Hop Quest", "type": "game", "runtime": "python", "main": "main.py", "system": true, "canvas": {"width": 320, "height": 240, "palette": "moy64"}, "permissions": ["graphics", "input"], "safe_to_share": true, "config": {"speed": 90, "jump": 230, "hero": 0, "sky": "dark_blue", "autoplay": 0}, "edit": [{"key": "speed", "label": "SPEED", "type": "int", "min": 40, "max": 180, "step": 10, "card": "WALK AT {value}"}, {"key": "jump", "label": "JUMP", "type": "int", "min": 150, "max": 340, "step": 10, "card": "JUMP POWER {value}"}, {"key": "hero", "label": "HERO", "type": "choice", "choices": [0, 1], "tiles": [0, 1], "display": "sprite-tiles", "card": "HERO IS {value}"}, {"key": "sky", "label": "SKY", "type": "choice", "choices": ["dark_blue", "indigo", "dark_purple", "black"], "card": "SKY IS {value}"}, {"key": "autoplay", "label": "AUTOPLAY", "type": "choice", "choices": [0, 1], "icons": ["close", "run"], "display": "choice-icons", "card": "AUTOPLAY {value}"}], "fps": 60}
+{
+  "format": "moybyte-cart-v1",
+  "version": 6,
+  "title": "Hop Quest",
+  "type": "game",
+  "runtime": "python",
+  "main": "main.py",
+  "system": true,
+  "canvas": {
+    "width": 320,
+    "height": 240,
+    "palette": "moy64"
+  },
+  "permissions": [
+    "graphics",
+    "input"
+  ],
+  "safe_to_share": true,
+  "config": {
+    "speed": 90,
+    "jump": 230,
+    "hero": 0,
+    "sky": "dark_blue",
+    "autoplay": 0
+  },
+  "edit": [
+    {
+      "key": "speed",
+      "label": "SPEED",
+      "type": "int",
+      "min": 40,
+      "max": 180,
+      "step": 10,
+      "card": "WALK AT {value}"
+    },
+    {
+      "key": "jump",
+      "label": "JUMP",
+      "type": "int",
+      "min": 150,
+      "max": 340,
+      "step": 10,
+      "card": "JUMP POWER {value}"
+    },
+    {
+      "key": "hero",
+      "label": "HERO",
+      "type": "choice",
+      "choices": [
+        0,
+        1
+      ],
+      "tiles": [
+        0,
+        1
+      ],
+      "display": "sprite-tiles",
+      "card": "HERO IS {value}"
+    },
+    {
+      "key": "sky",
+      "label": "SKY",
+      "type": "choice",
+      "choices": [
+        "dark_blue",
+        "indigo",
+        "dark_purple",
+        "black"
+      ],
+      "card": "SKY IS {value}"
+    },
+    {
+      "key": "autoplay",
+      "label": "AUTOPLAY",
+      "type": "choice",
+      "choices": [
+        0,
+        1
+      ],
+      "icons": [
+        "close",
+        "run"
+      ],
+      "display": "choice-icons",
+      "card": "AUTOPLAY {value}"
+    }
+  ],
+  "fps": 60
+}

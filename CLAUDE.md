@@ -140,7 +140,7 @@ to whoever called it.
   game/wallpaper composites ship as one self-contained spr, scaled system text
   records as rect blocks (incl. inside layers), and the bar renders direct
   (uncached) on recording layers. Try it:
-  `python tools/simulate_desktop.py --size 1024x600 --font-scale 2 --windowed`.
+  `python tools/simulate_desktop.py --size 1024x600 --windowed`.
 - **Editor-as-an-app UX (this replaced the maker/player tap-mode):** a launcher tap
   **always RUNS the cart** — no mode, no type dispatch. The pinned **"Make ✏️"
   tile** opens the Editor **project-picker** (the same grid over every editable cart

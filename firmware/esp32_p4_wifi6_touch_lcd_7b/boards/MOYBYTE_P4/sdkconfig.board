@@ -15,3 +15,10 @@ CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y
 # slots + auto-vfs tail; the CSV lives in boards/MOYBYTE_P4/ and build.sh copies
 # it into ports/esp32/ (the filename resolves project-relative).
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-p4.csv"
+
+# BLE notifications arrive from the C6 over ESP-Hosted while MicroPython's
+# synchronous Bluetooth IRQ may be waiting for the VM/GIL during a long display
+# draw.  The upstream 24-buffer pool exhausts under keyboard autorepeat and the
+# hosted VHCI driver then drops reports ("alloc_acl_from_ll failed").  Keep enough
+# host-bound ACL buffers to absorb those render bursts.
+CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=64

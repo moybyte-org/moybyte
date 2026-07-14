@@ -1,13 +1,21 @@
 {
   "format": "moybyte-cart-v1",
-  "version": 9,
+  "version": 11,
   "title": "Letter Blitz",
   "type": "game",
   "runtime": "python",
   "main": "main.py",
   "system": true,
-  "canvas": { "width": 320, "height": 240, "palette": "moy64" },
-  "permissions": ["graphics", "input", "audio"],
+  "canvas": {
+    "width": 320,
+    "height": 240,
+    "palette": "moy64"
+  },
+  "permissions": [
+    "graphics",
+    "input",
+    "audio"
+  ],
   "safe_to_share": true,
   "config": {
     "letters_unlocked": 6,
@@ -16,9 +24,56 @@
     "trace_bonus": 1
   },
   "edit": [
-    { "key": "letters_unlocked", "label": "LETTERS", "type": "int", "min": 3, "max": 26, "step": 1, "display": "count", "icon": "dot", "card": "KNOWS {value} LETTERS" },
-    { "key": "tank_count", "label": "TANKS", "type": "int", "min": 2, "max": 8, "step": 1, "display": "count", "icon": "dot", "card": "SHOW {value} TANKS" },
-    { "key": "speed", "label": "SPEED", "type": "int", "min": 10, "max": 100, "step": 10, "display": "gauge", "gauge": { "low": "turtle", "high": "rabbit" }, "card": "TANKS DRIFT AT {value}" },
-    { "key": "trace_bonus", "label": "TRACE", "type": "choice", "choices": [0, 1], "icons": ["close", "run"], "display": "choice-icons", "card": "TRACE BONUS {value}" }
+    {
+      "key": "letters_unlocked",
+      "label": "LETTERS",
+      "type": "int",
+      "min": 3,
+      "max": 26,
+      "step": 1,
+      "display": "count",
+      "icon": "dot",
+      "card": "KNOWS {value} LETTERS"
+    },
+    {
+      "key": "tank_count",
+      "label": "TANKS",
+      "type": "int",
+      "min": 2,
+      "max": 8,
+      "step": 1,
+      "display": "count",
+      "icon": "dot",
+      "card": "SHOW {value} TANKS"
+    },
+    {
+      "key": "speed",
+      "label": "SPEED",
+      "type": "int",
+      "min": 10,
+      "max": 100,
+      "step": 10,
+      "display": "gauge",
+      "gauge": {
+        "low": "turtle",
+        "high": "rabbit"
+      },
+      "card": "TANKS DRIFT AT {value}"
+    },
+    {
+      "key": "trace_bonus",
+      "label": "TRACE",
+      "type": "choice",
+      "choices": [
+        0,
+        1
+      ],
+      "icons": [
+        "close",
+        "run"
+      ],
+      "display": "choice-icons",
+      "card": "TRACE BONUS {value}"
+    }
   ]
 }

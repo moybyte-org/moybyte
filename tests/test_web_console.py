@@ -214,18 +214,28 @@ def _assert_frame_identical(ws, drv, tee, dt=1.0 / 30, label=""):
                        raster[first], replayed[first]))
 
 
+def _real_tile_center(ws):
+    """Center of the first REAL cart's shelf card (slot 0 is the pinned Make
+    pseudo tile) -- computed from the live scrolled grid, since the shelf's
+    card geometry is layout-derived rather than a frozen constant."""
+    i = next(i for i, it in enumerate(ws.launcher.items) if it.get("path"))
+    x, y, w, h = ws.launcher.tile_rect(i)
+    return x + w // 2, y + h // 2
+
+
 def _open_tile0(ws, drv):
-    """Tap-open tile 0 (launcher -> desktop) on a TeeCanvas-driven console. A launcher
-    tap RUNS the cart (spec shell_ux_v1.md, the locked model); this cross-check needs
-    the running cart's draw stream."""
-    drv.touch(160, 52)
+    """Tap-open the first real cart (launcher -> desktop) on a TeeCanvas-driven
+    console. A launcher tap RUNS the cart (spec shell_ux_v1.md, the locked model);
+    this cross-check needs the running cart's draw stream."""
+    tx, ty = _real_tile_center(ws)
+    drv.touch(tx, ty)
     drv.frame(1.0 / 30)
     drv.touch_up()
     for _ in range(8):
         drv.frame(1.0 / 30)
         if ws.screen == "desktop":
             return
-    raise AssertionError("tile 0 should open into the desktop")
+    raise AssertionError("the first real cart should open into the desktop")
 
 
 def test_crosscheck_launcher_is_pixel_identical(tmp_path):
@@ -327,7 +337,8 @@ def test_step_frame_partitions_into_wm_surfaces(tmp_path):
     assert len(set(surf_cv.buf)) > 1, "the composited launcher must not be blank"
     # Open a cart -> the running cart is the 'desktop' player-viewport surface (a
     # launcher tap RUNS the cart, spec shell_ux_v1.md).
-    console.apply_events([{"type": "down", "x": 160, "y": 52}])
+    tx, ty = _real_tile_center(console.ws)
+    console.apply_events([{"type": "down", "x": tx, "y": ty}])
     console.step_frame()
     console.apply_events([{"type": "up"}])
     for _ in range(8):
@@ -350,8 +361,15 @@ def test_streaming_contract_static_skips_live_streams(tmp_path):
     # Static: the Moy Night default doesn't animate -> nothing on the wire.
     console.ws.select_wallpaper("moy_night", persist=False)
     console.step_frame()                         # the /assets-armed keyframe
-    cmds, _, _ = console.step_frame()
+    # The shelf's cover art builds ONE per frame (the T-Deck hitch budget), so
+    # the first paints keep the gate dirty until every visible cover landed.
+    for _ in range(160):
+        cmds, _, _ = console.step_frame()
+        if cmds is None:
+            break
     assert cmds is None, "a static screen must stream nothing (idle = free)"
+    cmds, _, _ = console.step_frame()
+    assert cmds is None, "... and stay idle"
     # Animating: the ocean wallpaper redraws -> every poll is a full frame.
     console.ws.select_wallpaper("ocean", persist=False)
     console.step_frame()
@@ -868,6 +886,13 @@ def test_browser_page_sends_neutral_pan_on_arrow_release():
     assert 'send({type:"pan",dx:0,dy:0})' in text
 
 
+def test_browser_page_fills_large_viewports_without_integer_scale_cliff():
+    text = web_view.PAGE_HTML
+    assert "Math.floor(s)" not in text
+    assert "Math.min(rw/W,rh/H)" in text
+    assert "(hover:hover) and (pointer:fine)" in text
+
+
 def test_web_console_pan_zero_stops_arrow_velocity(tmp_path):
     """The host driver keeps pan as a held velocity until a neutral pan arrives."""
     console = web_console.WebConsole(str(tmp_path / "carts"), fps=30)
@@ -935,9 +960,11 @@ def test_ws_roundtrip_pushes_frames_and_applies_input(server):
             cv2 = Canvas(WIDTH, HEIGHT)
             web_view.replay_delta_surfaces_to_canvas(f2["surfaces"], surf_cache, cv2)
             assert len(set(cv2.buf)) > 1, "a delta frame must still composite a full screen"
-        # Input pushes UP the same socket: tap tile 0. Send down, let the server drain it + step
-        # a frame or two with the tap held, then release -- mirrors the down -> frame -> up order.
-        c.send_events([{"type": "down", "x": 160, "y": 52}])
+        # Input pushes UP the same socket: tap the first real cart's card. Send down, let the
+        # server drain it + step a frame or two with the tap held (held still = no drag, so the
+        # release completes the tap), then release -- mirrors the down -> frame -> up order.
+        tx, ty = _real_tile_center(console.ws)
+        c.send_events([{"type": "down", "x": tx, "y": ty}])
         time.sleep(0.2)
         c.send_events([{"type": "up"}])
         deadline = time.time() + 5
@@ -1130,6 +1157,11 @@ def test_idle_static_screen_pushes_nothing(tmp_path):
     ws.select_wallpaper("fill:black", persist=False)   # static backdrop
     cmds, _cart, _au = console.step_frame()
     assert cmds                                         # first frame: the keyframe
+    # Let the shelf's one-cover-per-frame budget settle, then idle is free.
+    for _ in range(160):
+        cmds, _cart, _au = console.step_frame()
+        if cmds is None:
+            break
     for _ in range(3):
         cmds, _cart, _au = console.step_frame()
         assert cmds is None                             # static -> nothing on the wire

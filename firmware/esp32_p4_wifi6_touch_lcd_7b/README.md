@@ -16,6 +16,25 @@ async-composite overlap. Battle City 35→51→56; most carts ~60fps. The
 `_BackdropLayer` retained backdrop cache gives ~15fps app-window drags. See #58
 for the living status.
 
+**BLE-HID keyboard support is hardware-paired (2026-07-13; latency fast path
+2026-07-14).** `p4_ble_keyboard.py` uses the C6_WIFI build's existing
+MicroPython NimBLE central/GATT-client path over ESP-Hosted SDIO: it discovers
+HOGP service `0x1812`, bonds, prefers the profile's deterministic Boot Host path
+(writes Protocol Mode `0x00`, then subscribes only to Boot Keyboard Input), and
+feeds real make/break state + ASCII into the shared `InputState`. Put a **BLE**
+keyboard in pairing mode before boot; serial shows `scanning → connected → boot
+protocol → native input queue → ready`. Steady-state notifications bypass the
+ESP32 port's synchronous Python BLE IRQ/GIL path: the P4-only `moy_ble_hid`
+module copies registered HID reports immediately on the NimBLE host task into a
+64-entry native queue, then `keyboard.poll()` drains it before the frame's input
+edge snapshot. `bt status` reports `(received, dropped, queued, max_depth,
+enabled)` for that queue; `bt trace 1` adds host-queue age in microseconds to
+each decoded report. Fast make+break pairs are preserved across the frame
+boundary instead of losing the tap. Report-only keyboards remain on a traced
+standard-report fallback; arbitrary/NKRO Report Maps, Classic-Bluetooth-only
+keyboards, mouse, media keys and gamepads are not supported. USB-HID remains
+#83's wired/multi-device path.
+
 **The hardware PPA (Pixel-Processing Accelerator) is wired for the game
 composite** (`moy_ppa`, ESP-IDF `esp_driver_ppa` SRM client, patched into
 IDF_COMPONENTS like `esp_lcd`; `P4SystemCanvas.blit_game` uses it, CPU fallback).
@@ -36,7 +55,8 @@ record:
 `moy_runtime.run_ppa_smoke()` A/Bs the composite on glass. Perf follow-ups: the
 RENDER overlap (double game canvas + triple framebuffer) to lock 60 on the
 heaviest carts (Battle City 56, Letter Blitz 53); a PPA cover-crop for drags.
-Also open: USB-HID keyboard, audio (ES8311), OTA/web-view wiring.
+Also open: wired USB-HID keyboard/mouse/gamepad, audio (ES8311), OTA/web-view
+wiring.
 
 ### Serial dev commands (the REPL-alive board's affordance)
 
@@ -51,6 +71,8 @@ UI while watching the glass:
 - `cache 0|1` — A/B the drag backdrop cache
 - `union 0|1` — A/B the dirty-union gesture restore (window-sized backdrop re-stamp vs full-screen)
 - `skip 0|1` — A/B the #77 frameskip (logic full-rate, render halved; non-persisting)
+- `bt status|scan|forget` — inspect/restart BLE-keyboard discovery or clear its local bond keys (`fast=(rx, drops, queued, peak, enabled)`)
+- `bt trace 0|1` — print raw HID notification bytes, native queue age, and decoded held input state
 - `quit` — leave the desktop for the REPL
 
 `moy_runtime.run_touch_calibrate()` (REPL-invokable) draws corner targets and
@@ -111,6 +133,10 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
   - `p4_input.py` — GT911 polling driver (I2C0 SDA7/SCL8 @ 0x5D, native
     1024×600 coords; `FLIP_X`/`FLIP_Y` knobs for the 180° panel mount if touch
     lands mirrored).
+  - `p4_ble_keyboard.py` — pure-MicroPython BLE HID central over the hosted C6:
+    scan/pair/bond/discover/subscribe plus standard keyboard-report →
+    `InputState`/`last_key` mapping. Bond keys persist in
+    `/moy/ble_keyboard.json`; radio or protocol failures degrade to touch-only.
   - `moy_runtime.py` — the P4 backend: `P4SystemCanvas` (a `DeviceCanvas` over
     the DSI framebuffer + the system-surface contract: `font_scale` text via
     the native text kernel, font-scale window layers, and the `blit_game` /
@@ -144,6 +170,20 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
 - **WiFi needs NO C6 flash**: the factory ESP-Hosted slave firmware on the C6
   is compatible with v1.28's hosted host and the wiring matches the Espressif
   Function EV board the stock config targets.
+- **Bluetooth is C6-hosted BLE, not Classic Bluetooth.** The board definition
+  already enables MicroPython Bluetooth central/GATT client + pairing/bonding
+  (`CONFIG_ESP_HOSTED_NIMBLE_HCI_VHCI`); HCI shares the C6's SDIO transport with
+  WiFi. Only BLE/HOGP keyboards can work — a Bluetooth 3.0/BR-EDR-only keyboard
+  will never appear in the scan. Discovery retries with a 5-second idle gap so
+  an absent keyboard does not keep the shared radio in a continuous scan. Keep
+  `CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=64` in `sdkconfig.board`: the
+  upstream 24-packet host pool was hardware-confirmed to exhaust during keyboard
+  autorepeat while a synchronous MicroPython BLE IRQ waited behind a long render
+  (`vhci_drv: Rx: alloc_acl_from_ll failed`), dropping HID input reports. The
+  larger ACL pool is burst protection, not the latency solution: registered HID
+  notifications are intercepted by `moy_ble_hid_queue_on_notify` before Python
+  IRQ dispatch and drained by the frame loop. Pairing/bonding/discovery still use
+  the normal synchronous MicroPython path.
 - **USER_C_MODULES cannot add IDF components** — the usermod cmake is skipped
   during idf.py's early-expansion phase, which is when component `REQUIRES`
   are collected. `build.sh` patches `esp32_common.cmake`'s `IDF_COMPONENTS`

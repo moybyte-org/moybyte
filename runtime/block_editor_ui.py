@@ -28,6 +28,12 @@ and so did the handful of tests that poke the block editor's internals
 directly, and tools/make_site_gifs.py's demo-recording script.
 """
 
+try:
+    import ui as _ui
+except ImportError:  # pragma: no cover - host fallback
+    from runtime import ui as _ui
+
+
 from editors import BlockEditor
 # The block vocabulary/compiler (#29). Mirrors console.py's own import (see its
 # comment there): bare `blocks` on the device (frozen top-level) and once
@@ -251,6 +257,7 @@ class BlockEditorUI:
         # the structured-outline UI state. `blocks_ed` is built lazily on first open.
         self.blocks_ed = None         # BlockEditor while menu_view == "blocks"
         self.blk_top = 0              # first outline row scrolled into view
+        self._dragv = None            # drag-to-scroll anchor (held vertical drag)
         self.blk_slot = 0             # which slot of the selected block is highlighted
         self.blk_menu = None          # active insert menu state dict, or None
         self.blk_status = None        # last block-editor SAVE result text
@@ -927,8 +934,43 @@ class BlockEditorUI:
                     and not isinstance(cur, bool):
                 self._blk_bump_number(b, slot["name"], -1)
 
+    def _outline_drag(self, px, py):
+        """A held vertical drag on the outline scrolls it one row per row-height
+        of travel (the Settings-rows drag contract: must start on the rows, may
+        continue past the edge). Keyboard nav re-clamps around the cursor as
+        before -- the drag just moves the window."""
+        ws = self.ws
+        lay = self.block_layout
+        be = self.blocks_ed
+        if not ws.pointer.down or be is None or self.blk_kbd is not None \
+                or self.blk_menu is not None:
+            self._dragv = None
+            return
+        if self._dragv is None:
+            area = (lay.x0, lay.y0, lay.outline_w, lay.rows * lay.row_h)
+            if len(be.rows) <= lay.rows or not self._in(px, py, area):
+                return
+            self._dragv = py
+            return
+        step = max(1, lay.row_h)
+        delta = self._dragv - py
+        top_max = max(0, len(be.rows) - lay.rows)
+        moved = False
+        while delta >= step and self.blk_top < top_max:
+            self.blk_top += 1
+            delta -= step
+            moved = True
+        while delta <= -step and self.blk_top > 0:
+            self.blk_top -= 1
+            delta += step
+            moved = True
+        self._dragv = py + delta
+        if moved:
+            ws._dirty = True
+
     def _blocks_pointer(self, px, py, click):
         # SYSTEM coords + the responsive BlockLayout (#39 step 2).
+        self._outline_drag(px, py)         # held drag scrolls the outline
         if not click:
             return
         if self.blk_kbd is not None:
@@ -1054,7 +1096,12 @@ class BlockEditorUI:
         lay = self.block_layout
         fs = lay.fs
         be = self.blocks_ed
-        cv.cls(NAMES["dark_blue"])
+        # Phase 3 (visual identity v1): the warm tool surface + dark ink on the
+        # shelf tiers; the frozen dark-blue body at 320x240, byte-identical. The
+        # block PIECES keep their own colorful language (self-backed rows).
+        th = ws.theme_colors
+        light = (not lay._base) and ws.light_chrome()
+        cv.cls(th["surface"] if light else NAMES["dark_blue"])
         # The old "BLOCKS <title>" row was dissolved into the unified bar (Stage-4
         # rollout). Just below the bar sits a thin hint/status strip: the kid-facing
         # hint for surprising blocks on the left, the SAVE-status / "CODE LOCKED"
@@ -1065,9 +1112,11 @@ class BlockEditorUI:
             self._draw_grad_banner()
         else:
             if self.blk_status:
-                cv.print(self.blk_status[:14], lay.status_x, lay.hint_y, NAMES["yellow"], 1)
+                cv.print(self.blk_status[:14], lay.status_x, lay.hint_y,
+                         th["author"] if light else NAMES["yellow"], 1)
             elif be is not None and be.dirty:
-                cv.print("*", lay.status_x, lay.hint_y, NAMES["yellow"], 1)
+                cv.print("*", lay.status_x, lay.hint_y,
+                         th["author"] if light else NAMES["yellow"], 1)
         if be is None:
             return
         # A kid-facing hint for the surprising blocks (forever-is-bounded / wait).
@@ -1076,7 +1125,8 @@ class BlockEditorUI:
         if hint:
             # truncate to leave the right end for the status slot
             hmax = max(8, (lay.status_x - lay.x0) // lay.cell - 1)
-            cv.print(hint[:hmax], lay.x0, lay.hint_y, NAMES["light_grey"], 1)
+            cv.print(hint[:hmax], lay.x0, lay.hint_y,
+                     th["ink_dim"] if light else NAMES["light_grey"], 1)
         rows = be.rows
         for vi in range(lay.rows):
             ridx = self.blk_top + vi
@@ -1084,11 +1134,11 @@ class BlockEditorUI:
                 break
             self._draw_blk_row(rows[ridx], vi, ridx == be.cur)
         # scroll cue
-        if self.blk_top > 0:
-            cv.print("^", lay.x0 + lay.outline_w - 8 * fs, lay.y0, NAMES["white"], 1)
-        if self.blk_top + lay.rows < len(rows):
-            cv.print("v", lay.x0 + lay.outline_w - 8 * fs,
-                     lay.y0 + (lay.rows - 1) * lay.row_h, NAMES["white"], 1)
+        _ui.scroll_cues(
+            cv, (lay.x0 + lay.outline_w - 8 * fs, lay.y0),
+            (lay.x0 + lay.outline_w - 8 * fs, lay.y0 + (lay.rows - 1) * lay.row_h),
+            self.blk_top > 0, self.blk_top + lay.rows < len(rows),
+            th["ink"] if light else NAMES["white"])
         # action bar: editing controls + the #29 graduation action only (SAVE/CLOSE
         # moved to the unified bar).
         ws._icon_btn("plus", "ADD", lay.add_btn, NAMES["green"], cv)
@@ -1120,8 +1170,7 @@ class BlockEditorUI:
         y = lay.hint_y - 2 * fs
         w = lay.outline_w
         h = 11 * fs
-        cv.rect(x, y, w, h, NAMES["dark_purple"])
-        cv.rectb(x, y, w, h, NAMES["yellow"])
+        _ui.dialog(cv, (x, y, w, h), ring=NAMES["yellow"])
         msg = "YOU LEVELED UP TO CODE!"
         mmax = max(8, w // lay.cell - 1)
         cv.print(msg[:mmax], x + 2 * fs, lay.hint_y, NAMES["yellow"], 1)
@@ -1135,24 +1184,17 @@ class BlockEditorUI:
         NAMES = self._NAMES
         cv = self.ws.canvas
         x, y, w, h = _BLK_KBD
-        cv.rect(x, y, w, h, NAMES["dark_purple"])
-        cv.rectb(x, y, w, h, NAMES["white"])
+        _ui.dialog(cv, (x, y, w, h))
         is_text = self.blk_kbd.get("kind") == "text"
         cv.print("TYPE SOME TEXT" if is_text else "NAME YOUR VARIABLE",
                  x + 10, y + 8, NAMES["white"], 1)
         cv.print("type, then OK", x + 10, y + 18, NAMES["light_grey"], 1)
         # the live edit buffer in a field with a blinking-ish caret bar
         fx, fy, fw = x + 10, y + 30, w - 20
-        cv.rect(fx, fy, fw, 14, NAMES["black"])
-        cv.rectb(fx, fy, fw, 14, NAMES["light_grey"])
         txt = (self.blk_kbd.get("text") or "")[:24]
-        if txt:
-            cv.print(txt, fx + 4, fy + 3, NAMES["white"], 1)
-        elif not is_text:
-            # empty buffer: show the default name as a dim placeholder (OK keeps it)
-            cv.print(str(self.blk_kbd.get("var", ""))[:24], fx + 4, fy + 3,
-                     NAMES["dark_grey"], 1)
-        cv.rect(fx + 4 + len(txt) * 8, fy + 3, 6, 8, NAMES["yellow"])   # caret
+        # empty buffer: the default name shows as a dim placeholder (OK keeps it)
+        ph = "" if is_text else str(self.blk_kbd.get("var", ""))[:24]
+        _ui.text_field(cv, (fx, fy, fw, 14), txt, ph)
         self.ws._btn("DEL", _BLK_KBD_DEL, NAMES["red"])
         self.ws._btn("OK", _BLK_KBD_OK, NAMES["green"])
         self.ws._btn("X", _BLK_KBD_X, NAMES["dark_grey"])
@@ -1164,21 +1206,14 @@ class BlockEditorUI:
         cv = self.ws.canvas
         k = self.blk_kbd
         x, y, w, h = _BLK_NUM
-        cv.rect(x, y, w, h, NAMES["dark_purple"])
-        cv.rectb(x, y, w, h, NAMES["white"])
+        _ui.dialog(cv, (x, y, w, h))
         cv.print("TYPE A NUMBER", x + 10, y + 6, NAMES["white"], 1)
         # live value field; an empty buffer shows the slot's current value, dim (OK keeps it)
         fx, fy, fw = x + 10, y + 18, w - 20
-        cv.rect(fx, fy, fw, 14, NAMES["black"])
-        cv.rectb(fx, fy, fw, 14, NAMES["light_grey"])
         txt = (k.get("text") or "")[:30]
-        if txt:
-            cv.print(txt, fx + 4, fy + 3, NAMES["white"], 1)
-        else:
-            cur = k.get("cur")
-            ph = str(cur) if _blocks_mod.is_literal_value(cur) and cur is not None else "0"
-            cv.print(ph[:30], fx + 4, fy + 3, NAMES["dark_grey"], 1)
-        cv.rect(fx + 4 + len(txt) * 8, fy + 3, 6, 8, NAMES["yellow"])   # caret
+        cur = k.get("cur")
+        ph = str(cur) if _blocks_mod.is_literal_value(cur) and cur is not None else "0"
+        _ui.text_field(cv, (fx, fy, fw, 14), txt, ph[:30])
         # the digit grid (0-9 . -)
         for idx in range(len(_BLK_NUM_KEYS)):
             r = idx // _BLK_NUM_BPR

@@ -224,6 +224,12 @@ class BarLayer:
             return _ZONE_LEFT_GAME
         return self.ws.layout.zone_left
 
+    def zone_band_light(self, where):
+        """True when `where`'s bar band is the LIGHT in-window band (windowed
+        chrome + a theme marked surface_light) -- zone owners pick their band
+        ink with this so lent-zone text stays readable on either band."""
+        return self._in_window(where) and self.ws.light_chrome()
+
     def _in_window(self, where):
         """True when `where`'s bar is being drawn INSIDE a window of the windowed
         WM (#73): every zoned screen except the desktop root's "home" bar. The
@@ -369,8 +375,16 @@ class BarLayer:
         # carries min/max/close -- so an app window's bar is purely its toolbar (the
         # tab ladder / title), never a copied taskbar.
         bar_h = self._bar_h(where)
-        cv.rect(0, 0, cv.w, bar_h, NAMES["black"])
-        cv.rect(0, bar_h - 1, cv.w, 1, NAMES["dark_grey"])           # shelf edge line
+        if self.zone_band_light(where):
+            # Phase 3 (visual identity v1): inside a WM window under a light
+            # theme the bar row is the app's TOOLBAR on the warm surface (the
+            # mockup's in-window tab band); the OS/desktop bar stays black.
+            th = ws.theme_colors
+            cv.rect(0, 0, cv.w, bar_h, th["surface"])
+            cv.rect(0, bar_h - 1, cv.w, 1, th["border"])
+        else:
+            cv.rect(0, 0, cv.w, bar_h, NAMES["black"])
+            cv.rect(0, bar_h - 1, cv.w, 1, NAMES["dark_grey"])       # shelf edge line
         if not self._in_window(where):
             self._render_right_zone(cv, where)
         owner = self._zone_owner(where)
