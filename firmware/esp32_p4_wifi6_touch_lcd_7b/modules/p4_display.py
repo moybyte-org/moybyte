@@ -140,3 +140,9 @@ class P4Compositor:
 
     def sync(self):
         pass                             # no in-flight DMA to drain
+
+    def underruns(self):
+        try:
+            return self._dsi.underruns()
+        except Exception:
+            return None

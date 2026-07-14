@@ -531,11 +531,13 @@ def run_desktop(fps_cap=60):
                     print("REMOTE bt forgot keyboard + local bonds")
                 elif action == "status":
                     print("REMOTE bt status state=%s name=%s passkey=%s "
-                          "protocol=%s interval_ms=%s notify=%s fast=%s error=%s"
+                          "protocol=%s interval_ms=%s notify=%s fast=%s "
+                          "dsi_underruns=%s error=%s"
                           % (keyboard.status()[0], keyboard.status()[1],
                              keyboard.status()[2], keyboard.protocol,
                              keyboard._conn_interval_ms, keyboard._notify_count,
-                             keyboard.fast_status(), keyboard.error))
+                             keyboard.fast_status(), comp.underruns(),
+                             keyboard.error))
                 elif action == "trace":
                     on = not (len(parts) > 2 and parts[2] == "0")
                     print("REMOTE bt trace ->", keyboard.trace(on))

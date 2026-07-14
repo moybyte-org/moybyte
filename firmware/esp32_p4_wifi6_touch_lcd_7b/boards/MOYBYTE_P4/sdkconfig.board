@@ -7,6 +7,11 @@
 CONFIG_SPIRAM_SPEED_200M=y
 CONFIG_IDF_EXPERIMENTAL_FEATURES=y
 
+# The DSI driver restarts its full-frame DW-GDMA transfer from the completion
+# ISR every refresh. Keep that path in internal RAM so scan-out remains viable
+# during cache-disabled operations and when it runs at the #106 level-3 priority.
+CONFIG_LCD_DSI_ISR_IRAM_SAFE=y
+
 # The board has 32MB flash (the generic P4 board assumes 16MB).
 CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y
 

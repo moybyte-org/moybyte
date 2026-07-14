@@ -15,6 +15,7 @@
 #include "esp_lcd_mipi_dsi.h"
 #include "esp_lcd_ek79007.h"
 #include "esp_cache.h"
+#include "esp_attr.h"
 
 #define MOY_DSI_H_RES        1024
 #define MOY_DSI_V_RES        600
@@ -32,6 +33,13 @@ static void *s_fbs[2];      // DOUBLE-BUFFER (#58): the DPI panel owns 2 framebu
 static int s_nfbs;          // show(n) switches scan-out zero-copy (draw_bitmap with an
                             // internal fb pointer), so a full redraw never races the
                             // scan (the "everything visibly refreshes" tearing).
+static volatile uint32_t s_underruns;
+
+// Strong implementation of ESP-IDF's P4-build weak diagnostic hook. ISR-safe:
+// one internal-RAM counter increment, with all Python/serial work deferred.
+IRAM_ATTR void moy_dsi_note_underrun(void) {
+    s_underruns++;
+}
 
 static void moy_dsi_check(esp_err_t err, const char *what) {
     if (err != ESP_OK) {
@@ -43,6 +51,8 @@ static mp_obj_t moy_dsi_init(void) {
     if (s_panel != NULL) {
         return mp_const_none;
     }
+
+    s_underruns = 0;
 
     esp_ldo_channel_config_t ldo_cfg = {
         .chan_id = MOY_DSI_PHY_LDO_CHAN,
@@ -123,6 +133,11 @@ static mp_obj_t moy_dsi_nfbs(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_dsi_nfbs_obj, moy_dsi_nfbs);
 
+static mp_obj_t moy_dsi_underruns(void) {
+    return mp_obj_new_int_from_uint(s_underruns);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_dsi_underruns_obj, moy_dsi_underruns);
+
 // show(n): make framebuffer n the scan-out source -- msync its CPU-cached writes,
 // then a zero-copy draw_bitmap (the DPI driver recognizes its own fb pointer and
 // just switches buffers at the next VSYNC; no pixel copy).
@@ -174,6 +189,7 @@ static const mp_rom_map_elem_t moy_dsi_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_deinit), MP_ROM_PTR(&moy_dsi_deinit_obj) },
     { MP_ROM_QSTR(MP_QSTR_fb), MP_ROM_PTR(&moy_dsi_fb_obj) },
     { MP_ROM_QSTR(MP_QSTR_nfbs), MP_ROM_PTR(&moy_dsi_nfbs_obj) },
+    { MP_ROM_QSTR(MP_QSTR_underruns), MP_ROM_PTR(&moy_dsi_underruns_obj) },
     { MP_ROM_QSTR(MP_QSTR_show), MP_ROM_PTR(&moy_dsi_show_obj) },
     { MP_ROM_QSTR(MP_QSTR_flush), MP_ROM_PTR(&moy_dsi_flush_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_pattern), MP_ROM_PTR(&moy_dsi_set_pattern_obj) },

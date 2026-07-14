@@ -180,7 +180,16 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
   (`CONFIG_ESP_HOSTED_NIMBLE_HCI_VHCI`); HCI shares the C6's SDIO transport with
   WiFi. Only BLE/HOGP keyboards can work — a Bluetooth 3.0/BR-EDR-only keyboard
   will never appear in the scan. Discovery retries with a 5-second idle gap so
-  an absent keyboard does not keep the shared radio in a continuous scan. Keep
+  an absent keyboard does not keep the shared radio in a continuous scan. The
+  ESP-IDF 5.5 DPI driver restarts its full-frame DSI DW-GDMA transfer from a
+  default low-priority completion interrupt; ESP-Hosted SDIO bursts during BLE
+  connection could delay that restart past vertical blank and briefly turn the
+  panel blue even though both framebuffers were valid (#106). The build's
+  `esp_lcd_dsi_underrun_hook.patch` backports the dedicated DSI bridge interrupt
+  used by current ESP-IDF and raises only the scan-out DMA restart interrupt to
+  priority 3. `CONFIG_LCD_DSI_ISR_IRAM_SAFE` keeps that path in IRAM. Repeated
+  hardware connects produced no blue frames and left the bridge-underrun counter
+  at zero. Keep
   `CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=64` in `sdkconfig.board`: the
   upstream 24-packet host pool was hardware-confirmed to exhaust during keyboard
   autorepeat while a synchronous MicroPython BLE IRQ waited behind a long render

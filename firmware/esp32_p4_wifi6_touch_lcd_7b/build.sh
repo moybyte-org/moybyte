@@ -71,6 +71,17 @@ set +u
 source "${IDF_DIR}/export.sh" >/dev/null
 set -u
 
+# #106: backport current ESP-IDF's dedicated DSI bridge-underrun ISR and keep
+# the frame-restart DW-GDMA interrupt above ESP-Hosted's SDIO interrupt. IDF
+# v5.5 checks the bridge only from the DMA callback; if SDIO delays that callback,
+# the display has already gone blue and the status can be cleared unseen.
+# Marker-guarded because the reused IDF checkout persists.
+DSI_DPI_C="${IDF_DIR}/components/esp_lcd/dsi/esp_lcd_panel_dpi.c"
+if [ -f "${DSI_DPI_C}" ] && \
+   ! grep -q "Moybyte P4: dedicated DSI bridge underrun IRQ" "${DSI_DPI_C}"; then
+  echo "== applying P4 DSI bridge IRQ/priority fix (#106)"
+  patch -d "${IDF_DIR}" -p1 < "${PATCH_DIR}/esp_lcd_dsi_underrun_hook.patch"
+fi
 # 2b) moy_dsi needs esp_lcd in the main component's REQUIRES. The
 #     USER_C_MODULES cmake is skipped during idf.py's early-expansion phase --
 #     exactly when REQUIRES are collected -- so appending IDF_COMPONENTS there
@@ -170,7 +181,8 @@ GEN_SDKCONFIG="${MPY_DIR}/ports/esp32/build-${BOARD}/sdkconfig"
 if [ -f "${GEN_SDKCONFIG}" ]; then
   if ! grep -q '^CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-p4.csv"$' "${GEN_SDKCONFIG}" || \
      ! grep -q '^CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=64$' "${GEN_SDKCONFIG}" || \
-     ! grep -q '^CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=12288$' "${GEN_SDKCONFIG}"; then
+     ! grep -q '^CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=12288$' "${GEN_SDKCONFIG}" || \
+     ! grep -q '^CONFIG_LCD_DSI_ISR_IRAM_SAFE=y$' "${GEN_SDKCONFIG}"; then
     echo "== sdkconfig lacks a required P4 board override -- forcing regeneration"
     rm -f "${GEN_SDKCONFIG}"
   fi
