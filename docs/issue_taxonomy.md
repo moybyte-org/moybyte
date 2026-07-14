@@ -105,9 +105,12 @@ after any label change** (the mirror is gitignored, so a fresh checkout rebuilds
 
 ## Housekeeping
 
-- Colors/descriptions aren't set by the tooling (the API path used here can't set them).
-  Colorize the axes in the GitHub label UI if desired — suggested: `area:*` blue,
-  `maturity:*` a green gradient idea→hardened, `status:*` orange, `tracker` purple.
+- Colors are APPLIED (2026-07-14, via `gh label edit --color`): `area:*` all
+  `1d76db` (blue); `maturity:*` a green gradient idea→hardened (`c2e0c6` →
+  `9fd6a5` → `6cc370` → `3fb950` → `1a7f37` → `0d5424`); `status:blocked`
+  `d93f0b`, `status:pending-decision` `f0871f`, `status:pending-testing`
+  `fbca04`; `tracker` `6f42c1` (purple). A new `area:*`/rung should follow the
+  same scheme (`gh label create --color ...`).
 - Superseded loose labels (`enhancement`, `input`, `runtime`, `sharing`, `ai`,
   `blocked`, `pending decision`, `pending testing`) were replaced by the axes above and
   can be deleted in the GitHub label UI once you're happy with the new scheme.
