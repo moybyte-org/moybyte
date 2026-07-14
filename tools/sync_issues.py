@@ -235,7 +235,10 @@ def write_status(out: Path, slug: str, issues: list[dict]) -> None:
     body.append("## By area")
     body.append("")
     for area in ordered_areas:
-        items = sorted(by_area[area], key=lambda i: (-_mat(i["_maturity"])[0], i["number"]))
+        # Umbrella tracker first, then most-mature first.
+        items = sorted(by_area[area],
+                       key=lambda i: (0 if i["_tracker"] else 1,
+                                      -_mat(i["_maturity"])[0], i["number"]))
         body += [f"### area:{area} ({len(items)})", "",
                  "| Maturity | Issue | What |", "|---|---|---|"]
         for i in items:

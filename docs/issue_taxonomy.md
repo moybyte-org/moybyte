@@ -74,6 +74,27 @@ product-lineup vision (#59). Tag these `tracker`. The dashboard rolls them into 
 **"Living trackers"** section and marks them ⏳ elsewhere so they're never mistaken for
 closeable work. Read a tracker for current state; don't try to finish it.
 
+## Umbrella trackers + native sub-issues
+
+Each subsystem has a `tracker` **umbrella issue** whose body carries the current
+status, a maturity rung, and a **"known gaps / wishlist"** checklist — so a gap can
+be recorded even when no standalone issue exists yet (e.g. "the code editor has no
+jump-to-definition"). Concrete work items are **GitHub native sub-issues** of the
+umbrella (parent shows a live progress checklist; each child links back to its
+parent). A child has exactly **one** parent — pick the primary area; any secondary
+area stays a plain `area:*` label, so the dashboard still lists it under both.
+
+Current umbrellas: Authoring & editors (#88) → Code (#89) / Sprite-Paint (#90) /
+Map (#91) / Music (#92) / Blocks (#93) / Config (#94); Carts (#95); Apps (#96);
+Audio (#97); Input (#98); Multiplayer (#99); Web view (#100); OTA (#101); AI (#102);
+Tooling (#103); Brand (#104); Launcher (#105); plus the pre-existing P4 (#58),
+Product lineup (#59), and Compositor/WM (#73). Perf (#66/#77/#86) stays a
+cross-cutting axis, not a task-parent.
+
+To add a new subsystem tracker: open an issue titled `[tracker] <name> — …`, label it
+`tracker` + its `area:*` + a `maturity:*`, give it a status + gaps body, and nest the
+related issues under it as sub-issues.
+
 ## How the dashboard is generated
 
 `tools/sync_issues.py` (run via `make sync-issues`, needs the `gh` CLI, authed) mirrors
