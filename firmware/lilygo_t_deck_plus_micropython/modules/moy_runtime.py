@@ -34,8 +34,8 @@ from device_input import TrackBall, Touch
 # the loop's hitch threshold + one-shot calib flag (mutated in place).
 from device_diag import (
     _diag_flush, _diag_perf_sample, _diag_hitch, _diag_drawbrk, _diag_draw2,
-    _diag_chromebrk, _diag_pump, _diag_i2cstat, _diag_calib, _diag_gc,
-    HITCH_MS, _CALIB_DONE,
+    _diag_chromebrk, _diag_homebrk, _diag_pump, _diag_i2cstat, _diag_calib,
+    _diag_gc, HITCH_MS, _CALIB_DONE,
 )
 # The device WEB VIEW controller (#41/#22, extracted to device_webview.py).
 # run_desktop constructs WebView(...) and services it between frames.
@@ -644,6 +644,8 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             _diag_drawbrk(diag, ws)
             _diag_draw2(diag, ws)       # #63: split render into layer-copy vs sprite-batch us
             _diag_chromebrk(diag, ws)   # #66 lever 5: bar/composite/cursor chrome sub-split
+            _diag_homebrk(diag, ws)     # launcher wallpaper/grid/bar split (cart-gated
+                                        # DRAWBRK never fires on the home screen)
             _diag_pump(diag, comp)      # #66 lever 4: bounce-feed pacing (SPI idle gaps)
             _diag_i2cstat(diag, keyboard, touch)  # #69: kbd/touch I2C session latency
             _diag_calib(diag)           # #63: one-shot interpreter cost model (spill probe)

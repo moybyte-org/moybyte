@@ -126,6 +126,15 @@ door — no setting, no mode:
 
 - **A launcher tap always RUNS the cart.** Every cart type, no per-device default,
   no type dispatch. The launcher home is for playing.
+- **The Library shelf scrolls continuously LEFT-RIGHT** (2026-07-13 — paging
+  retired; a shelf slides sideways): the ONE tall pinned MAKE card heads the list
+  and scrolls away with it; every other card stacks the columns marching right.
+  Touch drag scrolls the grid — a card tap activates on RELEASE (tap-vs-drag slop,
+  the shared `ui.DragTap` machine the Settings rows ride too), so a scroll can
+  never launch a cart — with footer left/right arrows (one column per tap), a slim
+  scrollbar along the grid's bottom edge, and keyboard nav pulling the view along.
+  The SAME shelf renders on every tier, the 320×240 T-Deck included (its frozen
+  icon-tile grid is retired).
 - **The selected card also exposes the two verbs PLAY / CHANGE** (visual identity
   v1 §1.2, the Library contract): PLAY runs it (same as the tap), CHANGE opens the
   SAME project in the Editor landing on Config — the bridge from playing to making,

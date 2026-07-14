@@ -449,26 +449,33 @@ def focus_ring(cv, th, rect, fs=None):
 # --- scrolling ------------------------------------------------------------------
 
 class ScrollRegion:
-    """The one scroll model: a view rect over taller content. The caller draws
-    rows at (row_y - self.offset) and clips to the view; this owns the offset
-    bookkeeping, clamping, wheel/drag deltas, and the slim scrollbar (drawn +
-    hit through the same geometry)."""
+    """The one scroll model: a view rect over larger content, on either AXIS
+    (vertical by default -- the Settings rows; `horizontal=True` for the
+    Library shelf). The caller draws items at (item_pos - self.offset) along
+    the scroll axis and clips to the view; this owns the offset bookkeeping,
+    clamping, drag deltas, and the slim scrollbar (drawn + hit through the
+    same geometry -- along the right edge vertically, the bottom edge
+    horizontally)."""
 
     BAR_W = 4           # scaled by fs at draw
 
-    def __init__(self):
+    def __init__(self, horizontal=False):
+        self.horizontal = bool(horizontal)
         self.view = (0, 0, 0, 0)
-        self.content_h = 0
+        self.content = 0            # content extent along the scroll axis
         self.offset = 0
-        self._drag_y = None
+        self._drag = None           # last drag sample's axis coordinate
 
-    def set(self, view_rect, content_h):
+    def set(self, view_rect, content):
         self.view = view_rect
-        self.content_h = max(0, int(content_h))
+        self.content = max(0, int(content))
         self._clamp()
 
+    def _extent(self):
+        return self.view[2] if self.horizontal else self.view[3]
+
     def _max_offset(self):
-        return max(0, self.content_h - self.view[3])
+        return max(0, self.content - self._extent())
 
     def _clamp(self):
         m = self._max_offset()
@@ -477,33 +484,39 @@ class ScrollRegion:
         elif self.offset > m:
             self.offset = m
 
-    def scroll_by(self, dy):
-        self.offset += int(dy)
+    def scroll_by(self, d):
+        self.offset += int(d)
         self._clamp()
 
-    def scroll_to_show(self, y, h):
-        """Nudge the offset so the content span [y, y+h) is inside the view."""
-        vh = self.view[3]
-        if y < self.offset:
-            self.offset = y
-        elif y + h > self.offset + vh:
-            self.offset = y + h - vh
+    def scroll_to_show(self, p, size):
+        """Nudge the offset so the content span [p, p+size) is inside the view."""
+        vis = self._extent()
+        if p < self.offset:
+            self.offset = p
+        elif p + size > self.offset + vis:
+            self.offset = p + size - vis
         self._clamp()
 
     # -- drag (touch) ------------------------------------------------------
+    # drag_* take the AXIS coordinate (py vertically, px horizontally);
+    # DragTap below picks it for callers that feed whole pointer samples.
 
-    def drag_start(self, py):
-        self._drag_y = py
+    def drag_start(self, p):
+        self._drag = p
 
-    def drag_move(self, py):
-        if self._drag_y is None:
+    def drag_move(self, p):
+        if self._drag is None:
             return False
-        self.scroll_by(self._drag_y - py)
-        self._drag_y = py
+        self.scroll_by(self._drag - p)
+        self._drag = p
         return True
 
     def drag_end(self):
-        self._drag_y = None
+        self._drag = None
+
+    @property
+    def drag_active(self):
+        return self._drag is not None
 
     # -- scrollbar -----------------------------------------------------------
 
@@ -511,12 +524,15 @@ class ScrollRegion:
         """The scrollbar thumb rect, or None when everything fits."""
         x, y, w, h = self.view
         m = self._max_offset()
-        if m <= 0 or h <= 0:
+        vis = self._extent()
+        if m <= 0 or vis <= 0:
             return None
         bw = self.BAR_W * fs
-        th_ = max(8 * fs, h * h // self.content_h)
-        ty = y + (h - th_) * self.offset // m
-        return (x + w - bw, ty, bw, th_)
+        th_ = max(8 * fs, vis * vis // self.content)
+        tp = (vis - th_) * self.offset // m
+        if self.horizontal:
+            return (x + tp, y + h - bw, th_, bw)
+        return (x + w - bw, y + tp, bw, th_)
 
     def draw_bar(self, cv, th):
         fs = _fs(cv)
@@ -525,5 +541,56 @@ class ScrollRegion:
             return
         x, y, w, h = self.view
         bw = self.BAR_W * fs
-        cv.rect(x + w - bw, y, bw, h, th.get("dim", 1))
+        if self.horizontal:
+            cv.rect(x, y + h - bw, w, bw, th.get("dim", 1))
+        else:
+            cv.rect(x + w - bw, y, bw, h, th.get("dim", 1))
         cv.rect(r[0], r[1], r[2], r[3], th.get("ink_dim", 6))
+
+
+class DragTap:
+    """Press/drag/release disambiguation over a ScrollRegion -- the ONE
+    touch-list gesture machine (the Library shelf and the Settings rows both
+    ride it). A press inside the region's view arms a pending tap and starts
+    a drag; finger travel past the slop turns the gesture into a SCROLL (the
+    pending tap dies); a clean release -- press and release with no drag --
+    FIRES the tap. Callers feed every pointer sample to frame() and activate
+    ONLY on its result, so scrolling can never 'click' whatever happens to be
+    under the finger (the press-edge-activation bug this class retires)."""
+
+    def __init__(self, region):
+        self.region = region
+        self._press = None          # (x, y) at the press edge, while pending
+        self._dragging = False
+
+    @property
+    def dragging(self):
+        return self._dragging
+
+    def frame(self, px, py, click, down, slop=6):
+        """One pointer sample: `click` is the press edge, `down` the held
+        state. Returns the press-edge (x, y) on a clean tap release, else
+        None. While a drag is live the region's offset follows the finger --
+        the caller syncs its scroll state from region.offset."""
+        region = self.region
+        axis = px if region.horizontal else py
+        if click:
+            if rect_in(px, py, region.view):
+                self._press = (px, py)
+                self._dragging = False
+                region.drag_start(axis)
+            return None
+        if down:
+            if self._press is not None and not self._dragging:
+                sx, sy = self._press
+                if abs(px - sx) > slop or abs(py - sy) > slop:
+                    self._dragging = True
+            if self._dragging:
+                region.drag_move(axis)     # the region owns the offset mid-drag
+            return None
+        region.drag_end()
+        press, self._press = self._press, None
+        was_drag, self._dragging = self._dragging, False
+        if press is None or was_drag:
+            return None
+        return press

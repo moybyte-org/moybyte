@@ -205,20 +205,30 @@ def test_base_tier_zone_chips_dispatch(tmp_path):
 
 def test_library_shelf_geometry(tmp_path):
     """The desktop-density Library shelf (the library-concept mockup): a framed
-    panel whose grid has one TALL featured slot (column 0, both rows -- the pinned
-    MAKE card) plus rows x (cols-1) cartridge cards per page."""
+    panel whose grid SCROLLS left-right with one TALL featured slot (column 0,
+    spanning both visible rows -- the pinned MAKE card); every other card
+    stacks the columns marching right, two per column."""
     ws = _ws(tmp_path, sys_size=(1024, 600), font_scale=2)
     lay = ws.layout
-    assert lay.page == lay.rows * (lay.cols - 1) + 1
     gx, gy, gw, gh = lay.lib_grid
-    assert lay.tile_rect(0, 0) == (gx, gy, lay.lib_card_w, gh)   # tall featured slot
+    tall_h = 2 * lay.lib_card_h + lay.lib_gap
+    assert lay.tile_rect(0, 0) == (gx, gy, lay.lib_card_w, tall_h)  # tall featured slot
     assert lay.tile_rect(1, 0)[3] == lay.lib_card_h              # ordinary card
+    # The packing stacks each column top-to-bottom, then steps right.
+    assert lay.tile_cell(1) == (0, 1)
+    assert lay.tile_cell(2) == (1, 1)                            # below, same column
+    assert lay.tile_cell(3) == (0, 2)                            # next column's top
+    # Scrolling shifts every cell left; a half-scrolled card still returns its
+    # (clipped) rect, and far enough the card leaves the viewport entirely.
+    half = lay.lib_card_w // 2
+    assert lay.tile_rect(1, half)[0] == gx + lay.lib_step - half
+    assert lay.tile_rect(1, lay.lib_step + lay.lib_card_w) is None  # scrolled off
     px, py, pw, ph = lay.lib_panel                               # panel frames grid
     assert px <= gx and py <= gy and gx + gw <= px + pw and gy + gh <= py + ph
-    # Vertical nav hops between the two card rows (the tall slot spans both).
+    # Vertical nav steps within a card column (the tall slot spans both rows).
     ws.launcher.sel = 1
     ws.launcher.nav2d(0, 1)
-    assert ws.launcher.sel == 1 + (lay.cols - 1)
+    assert ws.launcher.sel == 2
     ws.launcher.nav2d(0, -1)
     assert ws.launcher.sel == 1
 
@@ -234,6 +244,19 @@ def test_library_shelf_panel_paints_surface(tmp_path):
     assert th["surface"] == 7
     # A point in the panel header band (left of the LIBRARY heading's start).
     assert ws.sys_canvas.pix(px + 2, py + 2) == th["surface"]
+
+
+def _cover_sync(ws, cart, w, h):
+    """Pump the TIME-SLICED cover build to completion -- one slice per call,
+    exactly as successive frames would -- and return the finished cache entry
+    (the image, or None for a definitive no-cover miss)."""
+    key = (cart.get("path"), w, h)
+    for _ in range(500):
+        ws._cover_built = False           # what frame() resets each frame
+        ws._cover_for(cart, w, h)
+        if key in ws._cover_cache:
+            return ws._cover_cache[key]
+    raise AssertionError("cover build never finished")
 
 
 def test_cover_art_contract(tmp_path):
@@ -252,14 +275,57 @@ def test_cover_art_contract(tmp_path):
         elif not has and fallback is None:
             fallback = it
     assert covered is not None            # the seed games ship covers now
-    img = ws._cover_for(covered, 200, 150)
+    img = _cover_sync(ws, covered, 200, 150)
     assert img is not None and (img.w, img.h) == (200, 150)
     assert len(img.pix) == 200 * 150
     assert max(img.pix) < 64              # valid MOY64 indices only (Section 12)
     assert img._paint                     # native device + compact web bitmap paths
     assert ws._cover_for(covered, 200, 150) is img       # memoised
     if fallback is not None:
-        assert ws._cover_for(fallback, 200, 150) is None  # deterministic fallback
+        assert _cover_sync(ws, fallback, 200, 150) is None  # deterministic fallback
+
+
+def test_cover_builds_are_time_sliced_and_faithful(tmp_path):
+    """#66: decoding one 320x240 cover in one go measured 0.5-1.7s on the
+    T-Deck, so _cover_for runs a RESUMABLE job -- at most one ~8ms slice per
+    frame -- and the finished pixels must equal the one-shot decode + crop."""
+    from runtime import moy_carts
+    ws = _ws(tmp_path, sys_size=(1024, 600))
+    covered = next(it for it in ws.launcher.items
+                   if it.get("path") and
+                   moy_carts.load_image(it["path"], moy_carts.COVER_IMAGE))
+    other = next(it for it in ws.launcher.items
+                 if it.get("path") and it is not covered)
+    key = (covered["path"], 200, 150)
+    ws._cover_built = False
+    ws._cover_for(covered, 200, 150)
+    # The first ask either finished within its slice or left a job in flight
+    # (with the redraw gate re-armed) -- it never blocks the frame open-ended.
+    assert key in ws._cover_cache or key in ws._cover_jobs
+    if key not in ws._cover_cache:
+        assert ws._covers_deferred
+        # The frame budget is ONE build slice: a second cart's ask this frame
+        # defers without even starting its job.
+        before = dict(ws._cover_jobs)
+        assert ws._cover_for(other, 200, 150) is None
+        assert list(ws._cover_jobs) == list(before)
+    img = _cover_sync(ws, covered, 200, 150)
+    # Reference: the one-shot decode + centered cover-crop (the pre-slicing
+    # implementation, inlined).
+    blob = moy_carts.load_image(covered["path"], moy_carts.COVER_IMAGE)
+    sw, sh, pix = moy_carts.decode_moyimg(blob)
+    w, h = 200, 150
+    cw_ = min(sw, sh * w // h) or 1
+    ch_ = min(sh, sw * h // w) or 1
+    ox, oy = (sw - cw_) // 2, (sh - ch_) // 2
+    want = bytearray(w * h)
+    di = 0
+    for dy in range(h):
+        row = (oy + dy * ch_ // h) * sw + ox
+        for dx in range(w):
+            want[di] = pix[row + dx * cw_ // w]
+            di += 1
+    assert bytes(img.pix) == bytes(want)
 
 
 def test_cover_cache_is_bounded_across_resize_variants(tmp_path):
@@ -270,14 +336,14 @@ def test_cover_cache_is_bounded_across_resize_variants(tmp_path):
     covered = next(it for it in ws.launcher.items
                    if it.get("path") and
                    moy_carts.load_image(it["path"], moy_carts.COVER_IMAGE))
-    first = ws._cover_for(covered, 120, 90)
+    first = _cover_sync(ws, covered, 120, 90)
     rec = web_view.DrawRecorder(1024, 600)
     rec.self_contained = True
     rec.spr(first, 0, 0)
     assert rec._cmds[0][0] == "img"        # not the generic JSON pixel-list spr
 
     for i in range(80):
-        ws._cover_for(covered, 120 + i, 90 + i)
+        _cover_sync(ws, covered, 120 + i, 90 + i)
     assert len(ws._cover_cache) <= console._COVER_CACHE_MAX_ENTRIES
     assert ws._cover_cache_pixels <= console._COVER_CACHE_MAX_PIXELS
     assert len(ws._cover_cache_order) == len(ws._cover_cache)

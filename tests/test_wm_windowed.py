@@ -412,7 +412,7 @@ def test_desktop_click_launches_a_cart_with_a_window_open(tmp_path):
     for i, it in enumerate(ws.launcher.items):
         if not it.get("path"):
             continue
-        r = ws.launcher.layout.tile_rect(i, ws.launcher.page)
+        r = ws.launcher.tile_rect(i)
         if r is None:
             continue
         tx, ty = r[0] + r[2] // 2, r[1] + r[3] // 2
@@ -422,9 +422,9 @@ def test_desktop_click_launches_a_cart_with_a_window_open(tmp_path):
     if tile is None:
         return                             # window covers the whole grid -- skip
     i, tx, ty = tile
-    drv.touch(tx, ty)                      # select
+    drv.click(tx, ty)                      # select (focus hops to the desktop)
     drv.frame(1 / 30)
-    drv.touch(tx, ty)                      # confirm-tap runs it (launcher rule)
+    drv.click(tx, ty)                      # confirm-tap runs it (launcher rule)
     drv.frame(1 / 30)
     assert ws.wm._order[-1] == "desktop"   # a playtest window opened
 

@@ -100,6 +100,26 @@ def encode_moyimg(width, height, indices):
     })
 
 
+def moyimg_runs(text):
+    """Parse a ``.moyimg`` into ``(w, h, packed_rle_bytes)`` WITHOUT decoding
+    the pixels -- the JSON header + base64 only. The Library shelf's
+    time-sliced cover builder (console._CoverJob) walks the returned
+    (count, value) run pairs incrementally across frames; ``decode_moyimg``
+    below stays the one-shot decoder. None on any malformed input."""
+    try:
+        meta = json.loads(text)
+        w = int(meta["w"])
+        h = int(meta["h"])
+        if w <= 0 or h <= 0 or meta.get("codec") != "rle":
+            return None
+        packed = _b64_decode(meta["data"])
+        if len(packed) & 1:
+            return None
+        return (w, h, packed)
+    except Exception:  # noqa: BLE001 -- a corrupt drawing is treated as absent
+        return None
+
+
 def decode_moyimg(text):
     """Decode Paint's RLE ``.moyimg`` form into ``(w, h, bytes)``.
 

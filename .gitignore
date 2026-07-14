@@ -49,6 +49,8 @@ firmware/lilygo_t_deck_plus_micropython/modules/chrome.py
 firmware/lilygo_t_deck_plus_micropython/modules/web_view_page.py
 firmware/lilygo_t_deck_plus_micropython/modules/web_view_ws.py
 firmware/lilygo_t_deck_plus_micropython/modules/moy_font.py
+firmware/lilygo_t_deck_plus_micropython/modules/ui.py
+firmware/lilygo_t_deck_plus_micropython/modules/calc_app.py
 # carts_data.py is generated from system_carts/ by tools/gen_device_carts.py at build
 firmware/lilygo_t_deck_plus_micropython/modules/carts_data.py
 # _ota_build.py is stamped by build.sh (OTA channel/version/label, #53)

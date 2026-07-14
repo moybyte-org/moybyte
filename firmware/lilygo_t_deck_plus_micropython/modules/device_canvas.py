@@ -188,6 +188,12 @@ class DeviceCanvas:
     over the same buffer still serves text/lines/pixels and is the fallback on an
     image built without moy_gfx."""
 
+    # PARTIAL-repaint capability (the Library shelf's drag fast path, see
+    # runtime/canvas.py): with the #40 ping-pong double buffer the back buffer
+    # holds the frame BEFORE last -> 2. (Single-buffer mode retains frame-1;
+    # advertising 2 stays conservative-correct there too.)
+    RETAINED_FRAMES = 2
+
     def __init__(self, compositor):
         import framebuf
 

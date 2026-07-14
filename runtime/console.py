@@ -328,6 +328,109 @@ class _CoverImage:
         self._paint = True
 
 
+# How long one _CoverJob.step may run inside a frame. Small enough to hide in
+# any frame budget; big enough that a 320x240 cover lands in a couple dozen
+# frames (~a second of pop-in at UI rates).
+_COVER_SLICE_MS = 8
+# Per-palette-index run templates for the RLE fill (built lazily, 64 x 255B):
+# a run decodes as ONE C-level slice copy instead of a per-pixel loop.
+_COVER_RUNS = None
+
+
+class _CoverJob:
+    """A RESUMABLE cover build. Decoding a 320x240 RLE cover + cover-cropping
+    it to the card in one go measured 0.5-1.7s per cover on the T-Deck (#66)
+    -- one frozen frame per cover even under the one-build-per-frame budget.
+    So the build is a little state machine instead: step(t0) advances the
+    decode (RLE runs -> the full indexed bitmap, slice-assign fills) and then
+    the crop (nearest-sample rows via a precomputed column map) until
+    _COVER_SLICE_MS of the frame is spent, and _cover_for re-steps it on the
+    following frames until `done`. Any malformed input just finishes with
+    img=None -- a corrupt cover means no cover, never a crash."""
+
+    def __init__(self, runs, w, h):
+        global _COVER_RUNS
+        self.done = False
+        self.img = None
+        self.w = int(w)
+        self.h = int(h)
+        self.sw, self.sh, self.packed = runs
+        self.pix = bytearray(self.sw * self.sh)
+        self.pos = 0                  # decode write cursor (pixels)
+        self.i = 0                    # decode read cursor (packed bytes)
+        self.out = None               # crop dest (created when decode ends)
+        self.dy = 0                   # crop row cursor
+        self.xmap = None
+        if _COVER_RUNS is None:
+            _COVER_RUNS = tuple(bytes((v,)) * 255 for v in range(64))
+
+    def step(self, t0):
+        """Advance until ~_COVER_SLICE_MS after t0. Sets self.done (and
+        self.img) when the build finishes or the input turns out corrupt."""
+        try:
+            self._step(t0)
+        except Exception:  # noqa: BLE001 -- corrupt cover -> no cover
+            self.img = None
+            self.done = True
+
+    def _step(self, t0):
+        packed = self.packed
+        n = len(packed)
+        pix = self.pix
+        total = self.sw * self.sh
+        while self.i < n:
+            i = self.i
+            pos = self.pos
+            for _ in range(128):      # a batch of runs between clock checks
+                if i >= n:
+                    break
+                count = packed[i]
+                value = packed[i + 1]
+                if count < 1 or value > 63 or pos + count > total:
+                    self.img = None
+                    self.done = True
+                    return
+                if count == 1:
+                    pix[pos] = value
+                else:
+                    pix[pos:pos + count] = _COVER_RUNS[value][:count]
+                pos += count
+                i += 2
+            self.i = i
+            self.pos = pos
+            if _ticks_diff(_ticks_ms(), t0) >= _COVER_SLICE_MS:
+                return
+        if self.pos != total:         # short stream: corrupt -> no cover
+            self.img = None
+            self.done = True
+            return
+        # -- crop phase: match the card's aspect with a centered source
+        # window, then nearest-sample it to exactly (w, h), a row per check.
+        w, h, sw, sh = self.w, self.h, self.sw, self.sh
+        if self.xmap is None:
+            cw_ = min(sw, sh * w // h) or 1
+            ch_ = min(sh, sw * h // w) or 1
+            ox = (sw - cw_) // 2
+            self._oy = (sh - ch_) // 2
+            self._ch = ch_
+            self.xmap = [ox + dx * cw_ // w for dx in range(w)]
+            self.out = bytearray(w * h)
+        xmap = self.xmap
+        out = self.out
+        while self.dy < h:
+            dy = self.dy
+            base = (self._oy + dy * self._ch // h) * sw
+            di = dy * w
+            for dx in range(w):
+                out[di] = pix[base + xmap[dx]]
+                di += 1
+            self.dy = dy + 1
+            if _ticks_diff(_ticks_ms(), t0) >= _COVER_SLICE_MS:
+                return
+        self.img = _CoverImage(w, h, bytes(out))
+        self.done = True
+
+
 # The open cart's live WORKSPACE (Stage 1 of docs/shell_ux_technical_plan_v1.md,
 # extracted from this file -- see project.py). Project holds the open cart's DATA
 # (cart/config/sheet/tilemap/images/pmem) + the builders + the commit_* persistence
@@ -640,6 +743,9 @@ class Workstation:
         self._cover_cache = {}        # (path, w, h) -> shelf-card cover blittable (or None)
         self._cover_cache_order = []  # LRU keys (oldest first); bounds resize variants
         self._cover_cache_pixels = 0  # indexed pixels; device RGB bakes add 2B each
+        self._cover_jobs = {}         # (path, w, h) -> in-flight _CoverJob (time-sliced)
+        self._cover_built = False     # per-frame cover-build budget (one; see _cover_for)
+        self._covers_deferred = False # a build was pushed past the budget -> stay dirty
         # Unified top bar (Stage 1): the editable 16x16 IconSheet the bar draws its
         # chrome icons from. Injected by build_workstation / run_desktop (loaded from
         # system_icons.moygfx, else the baked default theme); None falls back to _glyph.
@@ -1357,9 +1463,17 @@ class Workstation:
         """The cart's COVER ART (visual identity v1 Section 11.4) as a blittable
         sized exactly (w, h) -- images/cover.moyimg cover-cropped (fill + center
         crop, nearest sample) -- or None when the cart carries none (the shelf
-        card falls back to sprite/glyph, the deterministic pre-cover look).
-        Cached per (path, w, h); read through the store so a slimmed cart (#66)
-        never rehydrates, and cleared with the icon cache on a store re-scan."""
+        card falls back to sprite/glyph, the deterministic pre-cover look) OR
+        while its build is still in flight. Cached per (path, w, h); read
+        through the store so a slimmed cart (#66) never rehydrates, and cleared
+        with the icon cache on a store re-scan.
+
+        Builds are TIME-SLICED and BUDGETED (#66, hardware-measured): decoding
+        one 320x240 RLE cover in interpreted code costs 0.5-1.7s on the T-Deck,
+        so a miss starts a resumable _CoverJob and each frame advances at most
+        ONE job by ~_COVER_SLICE_MS. Cards draw their sprite/glyph fallback
+        until their cover lands (covers pop in over frames, no frozen frames);
+        frame() re-arms the redraw gate while any build is pending."""
         path = cart.get("path")
         if path is None or self.carts_store is None or w <= 0 or h <= 0:
             return None
@@ -1373,30 +1487,47 @@ class Workstation:
                 pass
             order.append(key)
             return cache[key]
-        img = None
-        loader = getattr(self.carts_store, "load_image", None)
-        cover_name = getattr(self.carts_store, "COVER_IMAGE", "cover")
-        blob = loader(path, cover_name) if loader is not None else None
-        if blob:
-            try:
-                sw, sh, pix = self.carts_store.decode_moyimg(blob)
-            except Exception:  # noqa: BLE001 - a bad blob just means no cover
-                sw = 0
-            if sw > 0 and sh > 0:
-                # Cover-crop: match the card's aspect with a centered source
-                # window, then nearest-sample it to exactly (w, h).
-                cw_ = min(sw, sh * w // h) or 1
-                ch_ = min(sh, sw * h // w) or 1
-                ox = (sw - cw_) // 2
-                oy = (sh - ch_) // 2
-                out = bytearray(w * h)
-                di = 0
-                for dy in range(h):
-                    row = (oy + dy * ch_ // h) * sw + ox
-                    for dx in range(w):
-                        out[di] = pix[row + dx * cw_ // w]
-                        di += 1
-                img = _CoverImage(w, h, out)
+        if self._cover_built:              # this frame's slice is already spent
+            self._covers_deferred = True
+            return None
+        self._cover_built = True
+        t0 = _ticks_ms()
+        jobs = self._cover_jobs
+        job = jobs.get(key)
+        if job is None:
+            loader = getattr(self.carts_store, "load_image", None)
+            cover_name = getattr(self.carts_store, "COVER_IMAGE", "cover")
+            blob = loader(path, cover_name) if loader is not None else None
+            runs = None
+            if blob:
+                parse = getattr(self.carts_store, "moyimg_runs", None)
+                runs = parse(blob) if parse is not None else None
+            if runs is None:                # no cover / not RLE -> cache the miss
+                return self._cover_finish(key, None)
+            job = _CoverJob(runs, w, h)
+            jobs[key] = job
+            # Bound the half-built set: a card scrolled out of view stops
+            # being stepped -- drop some OTHER job (it just rebuilds if it
+            # ever scrolls back into view).
+            while len(jobs) > 8:
+                for old in jobs:
+                    if old != key:
+                        jobs.pop(old)
+                        break
+                else:
+                    break
+        if not job.done:
+            job.step(t0)
+        if not job.done:
+            self._covers_deferred = True    # keep frames coming until it lands
+            return None
+        jobs.pop(key, None)
+        return self._cover_finish(key, job.img)
+
+    def _cover_finish(self, key, img):
+        """Insert a finished cover (or a definitive miss) into the bounded
+        LRU cache and return it."""
+        cache = self._cover_cache
         cache[key] = img
         order = self._cover_cache_order
         order.append(key)
@@ -2534,6 +2665,7 @@ class Workstation:
             self._cover_cache = {}         # a re-scan may carry new/changed cover art
             self._cover_cache_order = []
             self._cover_cache_pixels = 0
+            self._cover_jobs = {}          # in-flight builds may read stale blobs
             self.launcher.set_items(self._launcher_items(items))
             self.picker.set_items(self._picker_items(items))
 
@@ -2875,6 +3007,8 @@ class Workstation:
             inst = 1.0 / dt
             # EMA so the readout reflects sustained rate, not single-frame jitter.
             self._fps = inst if self._fps <= 0 else self._fps + (inst - self._fps) * 0.15
+        self._cover_built = False     # reset the per-frame cover-build budget
+        self._pf_home = None          # home-frame split (launcher_layer, perf_capture)
         # Undo journal (Stage 7): the idle-typing autosave debounce runs BEFORE the
         # redraw gate below, so it fires even on a static (redraw-skipped) editor frame.
         self._journal_idle_tick()
@@ -3025,6 +3159,12 @@ class Workstation:
         # We painted this frame: clear the dirty flag and snapshot the pointer state
         # we just drew, so the NEXT frame only repaints if something changes again.
         self._dirty = False
+        if self._covers_deferred:
+            # A shelf cover build was pushed past this frame's budget -- stay
+            # dirty so the remaining covers land on the following frames (the
+            # flag is set during the draw, AFTER the gate consumed _dirty).
+            self._covers_deferred = False
+            self._dirty = True
         self._last_ptr = self._ptr_state()
         self._frames_drawn += 1
 

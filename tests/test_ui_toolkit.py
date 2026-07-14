@@ -232,8 +232,9 @@ def test_blocks_outline_drag_scrolls(tmp_path):
 
 
 def test_settings_rows_drag_scrolls(tmp_path):
-    """The Settings list is ScrollRegion's first consumer: a held drag on the
-    rows moves the scroll window (set_top stays the row-slot state of record)."""
+    """The Settings list rides the shared DragTap machine: a held drag on the
+    rows moves the scroll window (set_top stays the row-slot state of record).
+    Drags anchor on the press EDGE, exactly as the hardware delivers them."""
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     ws.open_settings()
@@ -245,14 +246,14 @@ def test_settings_rows_drag_scrolls(tmp_path):
     cx = view[0] + view[2] // 2
     cy = view[1] + view[3] - 4
     ws.pointer.down = True
-    sl.handle_pointer(cx, cy, False)                       # anchor the drag
+    sl.handle_pointer(cx, cy, True)                        # press edge anchors
     sl.handle_pointer(cx, cy - 3 * ws.layout.set_row_h, False)   # pull up 3 rows
     assert sl.set_top > 0
     ws.pointer.down = False
-    sl.handle_pointer(cx, cy, False)                       # release is inert
+    sl.handle_pointer(cx, cy, False)                       # release after a drag
     top = sl.set_top
     ws.pointer.down = True
-    sl.handle_pointer(cx, view[1] + 4, False)              # new anchor
+    sl.handle_pointer(cx, view[1] + 4, True)               # new press anchor
     sl.handle_pointer(cx, view[1] + 4 + 10 * ws.layout.set_row_h, False)
     assert sl.set_top < top                                # drag down -> back up
 
@@ -268,7 +269,7 @@ def test_settings_rows_drag_accumulates_small_pointer_moves(tmp_path):
     cx = view[0] + view[2] // 2
     cy = view[1] + view[3] - 4
     ws.pointer.down = True
-    sl.handle_pointer(cx, cy, False)
+    sl.handle_pointer(cx, cy, True)                        # press edge anchors
     step = 5
     moves = ws.layout.set_row_h // step + 2
     for i in range(moves):
@@ -276,27 +277,61 @@ def test_settings_rows_drag_accumulates_small_pointer_moves(tmp_path):
     assert sl.set_top > 0
 
 
+def test_settings_drag_release_never_clicks_a_row(tmp_path):
+    """The bug the shared machine retires: scrolling the Settings rows and
+    letting go must NOT activate the row under the finger (WIFI used to open,
+    steppers used to step). A clean tap (press + release, no travel) still
+    activates the row it landed on."""
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.open_settings()
+    sl = ws.settings_layer
+    view = sl._scroll_region().view
+    cx = view[0] + view[2] // 2
+    cy = view[1] + view[3] - 4
+    ws.pointer.down = True
+    sl.handle_pointer(cx, cy, True)                        # press on a row
+    sl.handle_pointer(cx, cy - 3 * ws.layout.set_row_h, False)  # drag = scroll
+    assert sl.set_top > 0
+    ws.pointer.down = False
+    sl.handle_pointer(cx, cy - 3 * ws.layout.set_row_h, False)  # let go
+    assert not sl.wifi_view                # no row fired on the release
+    assert ws.screen == "settings"
+    # A clean tap (press + release, no travel) still selects the row it landed
+    # on -- activation just moved from the press edge to the release.
+    sl.set_top = 0
+    sl.set_msel = 0
+    idx = 1                                # WALLPAPER (row 0 is WIFI -- avoid it)
+    assert sl._settings_row_visible(idx)
+    x, y, w, h = sl._settings_row_rect(idx)
+    ws.pointer.down = True
+    sl.handle_pointer(x + w // 2, y + h // 2, True)        # press...
+    ws.pointer.down = False
+    sl.handle_pointer(x + w // 2, y + h // 2, False)       # ...clean release
+    assert sl.set_msel == idx              # the tap landed (release-fired)
+
+
 # -- ScrollRegion ------------------------------------------------------------------
 
 def test_scroll_region_clamps_and_shows():
     sr = ui.ScrollRegion()
-    sr.set((0, 0, 100, 50), content_h=200)
+    sr.set((0, 0, 100, 50), 200)
     sr.scroll_by(-10)
     assert sr.offset == 0                              # clamped at the top
     sr.scroll_by(500)
-    assert sr.offset == 150                            # content_h - view_h
+    assert sr.offset == 150                            # content - view extent
     sr.scroll_to_show(0, 10)
     assert sr.offset == 0
     sr.scroll_to_show(120, 10)
     assert sr.offset == 80                             # bottom edge visible
-    sr.set((0, 0, 100, 50), content_h=30)              # fits -> no bar, offset 0
+    sr.set((0, 0, 100, 50), 30)                        # fits -> no bar, offset 0
     assert sr.offset == 0
     assert sr.bar_rect() is None
 
 
 def test_scroll_region_drag_and_bar():
     sr = ui.ScrollRegion()
-    sr.set((0, 0, 100, 50), content_h=200)
+    sr.set((0, 0, 100, 50), 200)
     sr.drag_start(40)
     assert sr.drag_move(30)                            # finger up -> content down
     assert sr.offset == 10
@@ -308,3 +343,47 @@ def test_scroll_region_drag_and_bar():
     assert x + w <= 100 and h >= 8
     cv = _cv()
     sr.draw_bar(cv, TH)                                # draws without error
+
+
+def test_scroll_region_horizontal_axis():
+    """The Library shelf's axis: offsets clamp against the view WIDTH, drags
+    track x, and the bar lies along the bottom edge."""
+    sr = ui.ScrollRegion(horizontal=True)
+    sr.set((10, 20, 100, 50), 300)
+    sr.scroll_by(999)
+    assert sr.offset == 200                            # content - view width
+    sr.drag_start(80)
+    sr.drag_move(60)                                   # finger left -> content right
+    assert sr.offset == 200                            # already at the far end
+    sr.offset = 0
+    sr.drag_start(60)
+    sr.drag_move(35)
+    assert sr.offset == 25
+    sr.drag_end()
+    bar = sr.bar_rect()
+    assert bar is not None
+    x, y, w, h = bar
+    assert y + h == 20 + 50                            # bottom edge
+    assert w >= 8 and h == ui.ScrollRegion.BAR_W
+
+
+def test_drag_tap_disambiguates():
+    """ui.DragTap: a clean press+release fires the tap; travel past the slop
+    scrolls the region instead and the release is inert."""
+    sr = ui.ScrollRegion()
+    sr.set((0, 0, 100, 100), 400)
+    dt = ui.DragTap(sr)
+    # Clean tap: press, hold without travel, release -> the press point.
+    assert dt.frame(50, 50, True, True) is None
+    assert dt.frame(51, 50, False, True) is None
+    assert dt.frame(51, 50, False, False) == (50, 50)
+    assert sr.offset == 0
+    # Drag: press, travel past the slop, release -> None, offset moved.
+    assert dt.frame(50, 90, True, True) is None
+    assert dt.frame(50, 60, False, True) is None
+    assert dt.dragging
+    assert dt.frame(50, 60, False, False) is None
+    assert sr.offset == 30
+    # A press OUTSIDE the view arms nothing.
+    assert dt.frame(200, 200, True, True) is None
+    assert dt.frame(200, 200, False, False) is None
