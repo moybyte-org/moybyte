@@ -22,3 +22,9 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-p4.csv"
 # hosted VHCI driver then drops reports ("alloc_acl_from_ll failed").  Keep enough
 # host-bound ACL buffers to absorb those render bursts.
 CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=64
+
+# MicroPython's ESP32 binding executes synchronous BLE callbacks as Python on
+# the NimBLE host task.  The upstream 6144-byte stack is marginal for the P4's
+# HID discovery/subscription state machine (hardware panics symbolized inside
+# mp_execute_bytecode/mp_obj_print_helper during connect).  Keep ample headroom.
+CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=12288

@@ -30,7 +30,11 @@ module copies registered HID reports immediately on the NimBLE host task into a
 edge snapshot. `bt status` reports `(received, dropped, queued, max_depth,
 enabled)` for that queue; `bt trace 1` adds host-queue age in microseconds to
 each decoded report. Fast make+break pairs are preserved across the frame
-boundary instead of losing the tap. Report-only keyboards remain on a traced
+boundary instead of losing the tap. **Settings → BLUETOOTH KEYBOARD** exposes
+the normal user path: input ON/OFF, a full nearby-HOGP scan, explicit device
+selection, and forget. The chosen address, enabled gate and display name persist
+beside the NimBLE bond keys in `/moy/ble_keyboard.json`; boot reconnects only to
+that saved keyboard (v1 name+bond stores migrate without re-pairing). Report-only keyboards remain on a traced
 standard-report fallback; arbitrary/NKRO Report Maps, Classic-Bluetooth-only
 keyboards, mouse, media keys and gamepads are not supported. USB-HID remains
 #83's wired/multi-device path.
@@ -135,8 +139,9 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
     lands mirrored).
   - `p4_ble_keyboard.py` — pure-MicroPython BLE HID central over the hosted C6:
     scan/pair/bond/discover/subscribe plus standard keyboard-report →
-    `InputState`/`last_key` mapping. Bond keys persist in
-    `/moy/ble_keyboard.json`; radio or protocol failures degrade to touch-only.
+    `InputState`/`last_key` mapping. Settings can enable/disable, scan/pick and
+    forget; the preferred address + gate + bond keys persist in
+    `/moy/ble_keyboard.json`. Radio or protocol failures degrade to touch-only.
   - `moy_runtime.py` — the P4 backend: `P4SystemCanvas` (a `DeviceCanvas` over
     the DSI framebuffer + the system-surface contract: `font_scale` text via
     the native text kernel, font-scale window layers, and the `blit_game` /

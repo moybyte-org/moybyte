@@ -6,6 +6,7 @@ machine with a fake BLE object, and verify the exact shared InputState contract.
 """
 
 import importlib.util
+import json
 import sys
 import types
 from pathlib import Path
@@ -338,7 +339,95 @@ def test_boot_keyboard_is_selected_and_protocol_mode_is_written(monkeypatch):
     assert not any(call[:3] == ("write", 4, 9) for call in radio.calls)
 
 
+def test_picker_lists_all_hid_devices_and_connects_only_the_picked_one(monkeypatch):
+    fake_module = types.SimpleNamespace(UUID=FakeUUID, BLE=FakeBLE)
+    monkeypatch.setitem(sys.modules, "bluetooth", fake_module)
+    radio = FakeBLE()
+    keyboard = blekbd.BleHidKeyboard(InputState(), ble=radio, store_path=None)
+
+    # Replace the boot auto-scan with the user-facing full picker scan.
+    assert keyboard.discover_devices()
+    keyboard._irq(blekbd._IRQ_SCAN_DONE, None)
+    assert keyboard.state == "scanning"
+    addr_a = b"\x01\x02\x03\x04\x05\x06"
+    addr_b = b"\x11\x12\x13\x14\x15\x16"
+    hid = bytes((3, 0x03, 0x12, 0x18))
+    keyboard._irq(blekbd._IRQ_SCAN_RESULT, (0, addr_a, 0, -35, hid))
+    keyboard._irq(blekbd._IRQ_SCAN_RESULT, (1, addr_b, 0, -48, hid))
+    keyboard._irq(blekbd._IRQ_SCAN_DONE, None)
+    rows = keyboard.settings_devices()
+    assert keyboard.state == "choose"
+    assert [row[0] for row in rows] == [(0, addr_a), (1, addr_b)]
+
+    assert keyboard.connect_device(rows[1][0])
+    assert ("connect", 1, addr_b) in radio.calls
+    assert not any(call == ("connect", 0, addr_a) for call in radio.calls)
+    assert keyboard.settings_status()[3] == (1, addr_b)
+
+
+def test_saved_enabled_preferred_address_and_bond_round_trip(tmp_path):
+    store = tmp_path / "ble_keyboard.json"
+    keyboard = blekbd.BleHidKeyboard(
+        InputState(), store_path=str(store), auto_start=False)
+    keyboard.name = "Pocket Keys"
+    keyboard._preferred = (1, b"\xaa\xbb\xcc\xdd\xee\xff")
+    keyboard._secrets[(2, b"peer")] = b"bond-key"
+    keyboard._enabled = False
+    keyboard._store_dirty = True
+    keyboard.poll()
+
+    raw = json.loads(store.read_text())
+    assert raw["version"] == 2
+    assert raw["enabled"] is False
+    assert raw["preferred"] == [1, "aabbccddeeff"]
+
+    restored = blekbd.BleHidKeyboard(
+        InputState(), store_path=str(store), auto_start=False)
+    assert restored.settings_status()[:4] == (
+        False, "off", "Pocket Keys", (1, b"\xaa\xbb\xcc\xdd\xee\xff"))
+    assert restored._secrets[(2, b"peer")] == b"bond-key"
+    rows = restored.settings_devices()
+    assert rows[0][:4] == ((1, b"\xaa\xbb\xcc\xdd\xee\xff"),
+                           "Pocket Keys", -127, True)
+
+
+def test_version_one_bond_store_migrates_without_forgetting_keys(tmp_path):
+    store = tmp_path / "ble_keyboard.json"
+    store.write_text(json.dumps({
+        "version": 1,
+        "name": "Old Bond",
+        "secrets": [[3, "70656572", "736563726574"]],
+    }))
+    keyboard = blekbd.BleHidKeyboard(
+        InputState(), store_path=str(store), auto_start=False)
+    assert keyboard.settings_status()[:4] == (True, "off", "Old Bond", None)
+    assert keyboard._secrets[(3, b"peer")] == b"secret"
+
+
+def test_disable_disconnects_without_forgetting_and_enable_rescans(monkeypatch):
+    fake_module = types.SimpleNamespace(UUID=FakeUUID, BLE=FakeBLE)
+    monkeypatch.setitem(sys.modules, "bluetooth", fake_module)
+    radio = FakeBLE()
+    keyboard = blekbd.BleHidKeyboard(InputState(), ble=radio, store_path=None)
+    keyboard._conn = 7
+    keyboard._candidate = (0, b"\x01\x02\x03\x04\x05\x06")
+    keyboard._preferred = keyboard._candidate
+    keyboard._secrets[(1, b"peer")] = b"bond"
+
+    assert keyboard.set_enabled(False) is False
+    assert ("disconnect", 7) in radio.calls
+    assert keyboard.settings_status()[0:2] == (False, "disabled")
+    assert keyboard._preferred is not None and keyboard._secrets
+    keyboard._irq(blekbd._IRQ_PERIPHERAL_DISCONNECT,
+                  (7, 0, b"\x01\x02\x03\x04\x05\x06"))
+
+    assert keyboard.set_enabled(True) is True
+    assert keyboard.settings_status()[0] is True
+    assert keyboard.state == "scanning"
+
+
 def test_p4_board_enables_hosted_ble_and_runtime_polls_before_edge_snapshot():
+    driver = SOURCE.read_text()
     board_cmake = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "boards"
                    / "MOYBYTE_P4" / "mpconfigboard.cmake").read_text()
     board_sdkconfig = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "boards"
@@ -360,11 +449,16 @@ def test_p4_board_enables_hosted_ble_and_runtime_polls_before_edge_snapshot():
     assert "MICROPY_PY_BLUETOOTH=1" in board_cmake
     assert "MICROPY_HW_MOYBYTE_P4_BLE_HID_QUEUE=1" in board_cmake
     assert "CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=64" in board_sdkconfig
+    assert "CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=12288" in board_sdkconfig
     assert "CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=64" in build_script
+    assert "CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=12288" in build_script
     assert "moy_ble_hid/micropython.cmake" in native_cmake
     assert "moy_ble_hid_queue_on_notify" in native_queue
     assert "moy_ble_hid_queue_on_notify" in bt_patch
     assert "modbluetooth_ble_hid_fastpath.patch" in build_script
+    # BLE IRQs execute on NimBLE's core-0 task. Serial output must be deferred
+    # to poll() on the main task; print() here caused hardware stack panics.
+    assert "print(" not in driver[driver.index("    def _irq("):]
     # The upstream fragment may not exist in a clean checkout, so the durable
     # contract is the selected C6_WIFI variant + Bluetooth module define. If the
     # checkout is present, pin the hosted VHCI setting too.

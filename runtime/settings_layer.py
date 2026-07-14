@@ -116,6 +116,15 @@ class SettingsLayer:
         self.wifi_msg = ""
         self.wifi_known = []
         self._wifi_kprev = 0          # keyboard edge detect (password typing)
+        # P4-only Bluetooth keyboard panel.  It is capability-gated through
+        # keyboard.settings_capable, so the host and local T-Deck keyboard keep
+        # the exact Settings rows/pixels they have today.
+        self.bt_view = False
+        self.bt_devices = []          # service rows; opaque address stays opaque
+        self.bt_sel = 0
+        self.bt_msg = ""
+        self._bt_state = None
+        self._bt_hits = _ui.Hits()    # visual-identity v1: draw pass == tap map
 
     def reset(self):
         """Reset the selection + scroll window (called by ws.open_settings each visit)."""
@@ -123,6 +132,133 @@ class SettingsLayer:
         self.set_top = 0
         if self.wifi_view:
             self.close_wifi()
+        if self.bt_view:
+            self.close_bluetooth()
+
+    # -- BLUETOOTH KEYBOARD panel (P4 capability; visual identity v1) ---------
+
+    def _bt_service(self):
+        keyboard = getattr(self.ws, "keyboard", None)
+        return keyboard if getattr(keyboard, "settings_capable", False) else None
+
+    def open_bluetooth(self):
+        """Open the Bluetooth keyboard picker without disrupting a live link."""
+        self.bt_view = True
+        self.bt_msg = ""
+        self._bt_state = None
+        self._bt_refresh()
+        self.ws._dirty = True
+
+    def close_bluetooth(self):
+        self.bt_view = False
+        self.ws._dirty = True
+
+    def _bt_refresh(self):
+        svc = self._bt_service()
+        if svc is None:
+            self.bt_devices = []
+            self.bt_msg = "NO BLUETOOTH KEYBOARD SERVICE"
+            return (False, "off", None, None, self.bt_msg)
+        try:
+            status = svc.settings_status()
+            self.bt_devices = list(svc.settings_devices())
+        except Exception as exc:  # noqa: BLE001 -- Settings must stay usable
+            self.bt_devices = []
+            self.bt_msg = ("KEYBOARD ERROR: " + str(exc))[:40]
+            return (False, "error", None, None, self.bt_msg)
+        if self.bt_sel >= len(self.bt_devices):
+            self.bt_sel = max(0, len(self.bt_devices) - 1)
+        state = status[1]
+        if state != self._bt_state:
+            if not status[0]:
+                self.bt_msg = "KEYBOARD INPUT IS OFF"
+            elif status[4]:
+                self.bt_msg = ("ERROR: " + str(status[4]))[:40]
+            elif state == "ready":
+                self.bt_msg = "CONNECTED + SAVED"
+            elif state == "scanning":
+                self.bt_msg = "LOOKING FOR KEYBOARDS..."
+            elif state in ("connecting", "pairing", "discovering",
+                           "subscribe-retry", "found"):
+                self.bt_msg = "CONNECTING..."
+            elif state == "choose":
+                self.bt_msg = "PICK A KEYBOARD"
+            else:
+                self.bt_msg = "READY TO SCAN"
+            self._bt_state = state
+        return status
+
+    def _bt_action(self, action, address=None):
+        svc = self._bt_service()
+        if action == "back":
+            self.close_bluetooth()
+            return
+        if svc is None:
+            self.bt_msg = "NO BLUETOOTH KEYBOARD SERVICE"
+            return
+        try:
+            if action == "toggle":
+                on = not bool(svc.settings_status()[0])
+                svc.set_enabled(on)
+                self.bt_msg = "KEYBOARD INPUT ON" if on else "KEYBOARD INPUT OFF"
+            elif action == "scan":
+                svc.discover_devices()
+                self.bt_msg = "LOOKING FOR KEYBOARDS..."
+            elif action == "forget":
+                svc.forget()
+                self.bt_devices = []
+                self.bt_sel = 0
+                self.bt_msg = "FORGOT SAVED KEYBOARD"
+            elif action == "connect":
+                if address is None and self.bt_devices:
+                    address = self.bt_devices[self.bt_sel][0]
+                if address is None:
+                    self.bt_msg = "SCAN, THEN PICK A KEYBOARD"
+                elif svc.connect_device(address):
+                    self.bt_msg = "CONNECTING + SAVING..."
+                else:
+                    self.bt_msg = "COULD NOT PICK KEYBOARD"
+        except Exception as exc:  # noqa: BLE001
+            self.bt_msg = ("KEYBOARD ERROR: " + str(exc))[:40]
+        self._bt_state = None
+        self.ws._dirty = True
+
+    def _bt_input(self, i):
+        if i.pressed("up") and self.bt_devices:
+            self.bt_sel = (self.bt_sel - 1) % len(self.bt_devices)
+            self.ws._dirty = True
+        if i.pressed("down") and self.bt_devices:
+            self.bt_sel = (self.bt_sel + 1) % len(self.bt_devices)
+            self.ws._dirty = True
+        if i.pressed("a"):
+            self._bt_action("connect")
+        if i.pressed("run"):
+            self._bt_action("scan")
+        if i.pressed("left"):
+            svc = self._bt_service()
+            if svc is not None and svc.settings_status()[0]:
+                self._bt_action("toggle")
+        if i.pressed("right"):
+            svc = self._bt_service()
+            if svc is not None and not svc.settings_status()[0]:
+                self._bt_action("toggle")
+        if i.pressed("b") or i.pressed("stop"):
+            self.close_bluetooth()
+        return True
+
+    def bluetooth_animating(self):
+        """Keep a quiet Settings window repainting while async BLE state moves."""
+        if not self.bt_view:
+            return False
+        svc = self._bt_service()
+        if svc is None:
+            return False
+        try:
+            state = svc.settings_status()[1]
+        except Exception:  # noqa: BLE001
+            return False
+        return state in ("scanning", "found", "connecting", "pairing",
+                         "discovering", "subscribe-retry")
 
     # -- the WIFI panel (#38; spec shell_ux_v1.md §10) -------------------------
 
@@ -370,6 +506,91 @@ class SettingsLayer:
                      "rescan": NAMES["blue"], "back": NAMES["dark_grey"]}[name]
             ws._btn(label, rect, color, cv)
 
+    def _draw_bluetooth(self):
+        """Responsive Bluetooth keyboard picker in the visual-identity v1
+        vocabulary: semantic panel/status/buttons, focus ring, and Hits where
+        the draw pass itself registers every pointer target."""
+        ws = self.ws
+        cv = ws.sys_canvas
+        th = ws.theme_colors
+        lay = ws.layout
+        fs = lay.fs
+        fw = lay.font_w
+        px, py, pw, ph = lay.settings_panel
+        status = self._bt_refresh()
+
+        # Occupy the Settings body below its own title strip. ui.panel returns
+        # the exact content rect; every remaining band is cut responsively.
+        body = (lay.set_x, lay.set_row_y0, lay.set_w,
+                max(1, py + ph - lay.set_row_y0 - 4 * fs))
+        content = _ui.panel(cv, th, body, title="BLUETOOTH KEYBOARD", fs=fs)
+        status_r, content = _ui.cut_top(content, 18 * fs)
+        msg_r, content = _ui.cut_top(content, 14 * fs)
+        actions_r, list_r = _ui.cut_bottom(content, 24 * fs)
+        list_r = _ui.inset(list_r, 4 * fs, 3 * fs)
+
+        enabled, state, name, _preferred, _error = status
+        _ui.status_row(cv, th, status_r,
+                       (("ON" if enabled else "OFF"), state.upper(), name or "NO DEVICE"))
+        cv.print(self.bt_msg[:max(1, msg_r[2] // fw - 1)],
+                 msg_r[0] + 3 * fs, msg_r[1] + (msg_r[3] - 8 * fs) // 2,
+                 th["ink_dim"], 1)
+
+        self._bt_hits.clear()
+        row_h = 24 * fs
+        visible = max(1, list_r[3] // row_h)
+        top = 0
+        if self.bt_sel >= visible:
+            top = self.bt_sel - visible + 1
+        end = min(len(self.bt_devices), top + visible)
+        if not self.bt_devices:
+            label = "SCANNING..." if state == "scanning" else "NO KEYBOARDS FOUND"
+            cv.print(label, list_r[0] + 3 * fs, list_r[1] + 6 * fs,
+                     th["ink_dim"], 1)
+        for i in range(top, end):
+            address, dev_name, rssi, preferred, connected = self.bt_devices[i]
+            rect = (list_r[0], list_r[1] + (i - top) * row_h,
+                    list_r[2], row_h - 3 * fs)
+            prefix = "ONLINE " if connected else ("SAVED " if preferred else "")
+            tail = "  %d" % int(rssi) if int(rssi) > -127 else ""
+            _ui.button(cv, th, rect, prefix + str(dev_name) + tail,
+                       kind="play" if connected else "normal", on=preferred)
+            self._bt_hits.add(rect, "device", address)
+            if i == self.bt_sel:
+                _ui.focus_ring(cv, th, rect, fs)
+
+        action_defs = (("toggle", "OFF" if enabled else "ON", "normal"),
+                       ("connect", "USE", "play"),
+                       ("scan", "SCAN", "author"),
+                       ("forget", "FORGET", "danger"),
+                       ("back", "BACK", "normal"))
+        rects = _ui.hsplit(_ui.inset(actions_r, 3 * fs), len(action_defs), 3 * fs)
+        for j in range(len(action_defs)):
+            action, label, kind = action_defs[j]
+            _ui.button(cv, th, rects[j], label, kind=kind,
+                       on=(action == "toggle" and enabled))
+            self._bt_hits.add(rects[j], action)
+
+    def _bt_pointer(self, px, py, click):
+        if not click:
+            return True
+        hit = self._bt_hits.at(px, py)
+        if hit is None:
+            return True
+        action, arg = hit
+        if action == "device":
+            for i in range(len(self.bt_devices)):
+                if self.bt_devices[i][0] == arg:
+                    if i == self.bt_sel:
+                        self._bt_action("connect", arg)  # second tap = USE
+                    else:
+                        self.bt_sel = i
+                        self.ws._dirty = True
+                    break
+        else:
+            self._bt_action(action)
+        return True
+
     # -- the lent left zone (Stage 4, #46 zoned bar) --------------------------
 
     def draw_zone(self, cv, rect):
@@ -389,6 +610,11 @@ class SettingsLayer:
         the updater without re-statting per draw."""
         ws = self.ws
         rows = self._SETTINGS_ROWS
+        if self._bt_service() is not None:
+            # Keep network/input together. Dynamic capability gating preserves
+            # the non-P4 Settings row indices and frozen 320x240 pixels.
+            rows = rows[:1] + (("bluetooth", "BLUETOOTH KEYBOARD", "bluetooth"),) \
+                + rows[1:]
         if ws.web_hook is not None:           # device web view (#41): a WiFi browser feed
             rows = rows + (("web", "WEB VIEW", "web"),)
         if ws._update_available():
@@ -429,6 +655,9 @@ class SettingsLayer:
         key, _label, kind = self._settings_rows()[self.set_msel]
         if kind == "wifi-net":                  # WIFI: any step/tap opens the panel (#38)
             self.open_wifi()
+            return
+        if kind == "bluetooth":
+            self.open_bluetooth()
             return
         if kind == "action":                    # EDIT ICONS / UPDATE FW: open the tool
             self._activate_settings_action(key)
@@ -541,6 +770,8 @@ class SettingsLayer:
         ws = self.ws
         if self.wifi_view:
             return self._wifi_input(i)
+        if self.bt_view:
+            return self._bt_input(i)
         rows = self._settings_rows()
         if i.pressed("up"):
             self.set_msel = (self.set_msel - 1) % len(rows)
@@ -555,6 +786,8 @@ class SettingsLayer:
             row = rows[self.set_msel % len(rows)]
             if row[2] == "wifi-net":            # WIFI: open the panel (#38)
                 self.open_wifi()
+            elif row[2] == "bluetooth":
+                self.open_bluetooth()
             elif row[2] == "action":
                 self._activate_settings_action(row[0])
             elif row[2] == "web":               # A/run also toggles the web view (#41)
@@ -569,7 +802,7 @@ class SettingsLayer:
 
     def handle_pointer(self, px, py, click):
         ws = self.ws
-        if not self.wifi_view and not ws.show_achievements:
+        if not self.wifi_view and not self.bt_view and not ws.show_achievements:
             # The rows' shared press/drag/release machine: scrolls on drag,
             # activates a row only on a clean tap release.
             if self._rows_pointer(px, py, click):
@@ -588,6 +821,8 @@ class SettingsLayer:
             return True
         if self.wifi_view:                     # the wifi panel owns the body (#38)
             return self._wifi_pointer(px, py, click)
+        if self.bt_view:
+            return self._bt_pointer(px, py, click)
         lay = ws.layout
         if self._in(px, py, lay.set_ach):      # trophy: open the achievements view (#21)
             ws.show_achievements = True
@@ -625,6 +860,9 @@ class SettingsLayer:
                 self.set_msel = i
                 if rows[i][2] == "wifi-net":       # WIFI: any tap opens the panel (#38)
                     self.open_wifi()
+                    return True
+                if rows[i][2] == "bluetooth":
+                    self.open_bluetooth()
                     return True
                 if rows[i][2] == "action":
                     self._activate_settings_action(rows[i][0])  # EDIT ICONS / UPDATE FW
@@ -670,6 +908,11 @@ class SettingsLayer:
         if self.wifi_view:
             # The WIFI panel (#38) replaces the row list (its BACK returns here).
             self._draw_wifi()
+            ws.bar_layer._draw_status_strip("settings")
+            ws.bar_layer._draw_dock("settings")
+            return
+        if self.bt_view:
+            self._draw_bluetooth()
             ws.bar_layer._draw_status_strip("settings")
             ws.bar_layer._draw_dock("settings")
             return
@@ -732,6 +975,19 @@ class SettingsLayer:
             ws._icon("wifi" if connected else "wifi_off",
                      x + w - 18 * lay.fs, y + 1, cv)
             return
+        if kind == "bluetooth":
+            # Capability-gated P4 row: exact selected name when available,
+            # otherwise the radio/input gate. No legacy +/- stepper.
+            try:
+                enabled, state, name, _preferred, _error = \
+                    self._bt_service().settings_status()
+            except Exception:  # noqa: BLE001 -- a radio hiccup reads OFF
+                enabled, state, name = False, "error", None
+            value = (str(name)[:12] if name else state.upper()) if enabled else "OFF"
+            cv.print(value, x + w - 106 * lay.fs, y + 5,
+                     NAMES["green"] if state == "ready" else NAMES["dark_grey"], 1)
+            cv.print("OPEN", x + w - 38 * lay.fs, y + 5, NAMES["blue"], 1)
+            return
         if kind == "action":
             # An action row (EDIT ICONS / UPDATE FW / UPDATE ONLINE): no value/stepper --
             # just an OPEN affordance at the right so a tap (or A) is the obvious activate.
@@ -787,6 +1043,6 @@ class SettingsLayer:
                      NAMES["orange"] if on else NAMES["dark_grey"], 1)
         # Mark not-yet-functional rows clearly (wifi + wallpaper + font + channel +
         # web + diag + actions work).
-        if kind not in ("wifi-net", "wallpaper", "font", "action", "channel",
+        if kind not in ("wifi-net", "bluetooth", "wallpaper", "font", "action", "channel",
                         "web", "diag", "theme"):
             cv.print("soon", x + 4, y + 6 + fw, NAMES["dark_grey"], 1)

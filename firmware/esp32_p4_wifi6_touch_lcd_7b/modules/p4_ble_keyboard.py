@@ -68,7 +68,7 @@ _CCCD = const(0x2902)
 _ADV_IND = const(0x00)
 _ADV_DIRECT_IND = const(0x01)
 
-_STORE_VERSION = const(1)
+_STORE_VERSION = const(2)
 
 
 def _ticks_ms():
@@ -224,6 +224,11 @@ _DIRECT_BUTTON = {
 class BleHidKeyboard:
     """One auto-discovered BLE HID keyboard feeding a Moybyte InputState."""
 
+    # Settings uses this explicit capability instead of guessing from the
+    # keyboard object.  The T-Deck keyboard is local hardware and therefore
+    # never grows a Bluetooth row merely because it also has set_game_mode().
+    settings_capable = True
+
     SCAN_MS = 5000
     RETRY_MS = 5000       # don't keep the shared C6 radio in near-continuous scan
     CONNECT_TIMEOUT_MS = 12000
@@ -274,9 +279,25 @@ class BleHidKeyboard:
         self._caps = False
         self._secrets = {}
         self._store_dirty = False
+        # User-facing Bluetooth settings.  Version-1 stores contained only the
+        # bond keys + display name; they migrate with enabled=True and learn the
+        # exact preferred address on their next successful connection.
+        self._enabled = True
+        self._preferred = None       # (addr_type, six address bytes)
+        self._devices = {}           # address tuple -> [display name, RSSI]
+        self._device_order = []
+        self._scan_picker = False
+        self._pending_scan = None    # None or bool picker mode after stop/disconnect
+        self._pending_connect = None # (address tuple, display name)
+        self._manual_hold = False    # picker/forget waits for an explicit choice
         self._fast = None
         self._fast_active = False
         self._conn_interval_ms = None
+        # The ESP32 port invokes BLE IRQ handlers on NimBLE's core-0 task.
+        # Never print there: MicroPython's print path is stack-heavy and serial
+        # output can overlap the core-1 desktop.  IRQ-side code only appends
+        # small tuples; poll() emits them later on the main VM task.
+        self._log_queue = []
         self._state_at = _ticks_ms()
         self._retry_at = self._state_at
 
@@ -294,6 +315,9 @@ class BleHidKeyboard:
 
     def start(self):
         if self.available:
+            if self._enabled and self.state == "disabled":
+                self._manual_hold = False
+                self._start_scan()
             return True
         try:
             import bluetooth
@@ -319,16 +343,116 @@ class BleHidKeyboard:
                 pass
             self.ble.active(True)
             self.available = True
-            self._start_scan()
+            if self._enabled:
+                self._start_scan()
+            else:
+                self.state = "disabled"
             return True
         except Exception as exc:
             self.error = str(exc)
             self.state = "off"
-            print("Moybyte P4 BLE keyboard unavailable:", exc)
+            self._log("Moybyte P4 BLE keyboard unavailable:", exc)
             return False
 
     def status(self):
         return self.state, self.name, self.passkey
+
+    def settings_status(self):
+        """Stable, allocation-small status contract consumed by Settings."""
+        return (self._enabled, self.state, self.name, self._preferred, self.error)
+
+    def settings_devices(self):
+        """Return discovered keyboards in display order.
+
+        Each row is ``(opaque_address, name, rssi, preferred, connected)``.
+        The address tuple is deliberately opaque to the shared UI; only this
+        service interprets it, while persistence serializes it as hex.
+        """
+        out = []
+        preferred = self._preferred
+        if preferred is not None and preferred not in self._devices:
+            self._remember_device(preferred[0], preferred[1], self.name, -127)
+        for key in self._device_order:
+            item = self._devices.get(key)
+            if item is None:
+                continue
+            out.append((key, item[0], item[1], key == preferred,
+                        self._conn is not None and key == self._candidate))
+        return tuple(out)
+
+    def set_enabled(self, on):
+        """Enable/disable Bluetooth keyboard input without forgetting its bond."""
+        on = bool(on)
+        if on == self._enabled:
+            return on
+        self._enabled = on
+        self._store_dirty = True
+        self._pending_scan = None
+        self._pending_connect = None
+        self._manual_hold = False
+        if not on:
+            self._clear_reports()
+            if self.state in ("scanning", "found"):
+                try:
+                    self.ble.gap_scan(None)
+                except Exception:
+                    pass
+            if self._conn is not None:
+                try:
+                    self.ble.gap_disconnect(self._conn)
+                except Exception:
+                    self._reset_connection()
+            else:
+                self._reset_connection()
+            self.state = "disabled"
+            return False
+        if not self.available:
+            self.start()
+        else:
+            self.state = "idle"
+            self._retry_at = _ticks_ms()
+            self._start_scan()
+        return True
+
+    def discover_devices(self):
+        """Scan for every nearby HOGP keyboard and wait for an explicit pick."""
+        if not self._enabled:
+            return False
+        self._manual_hold = True
+        return self._request_scan(True)
+
+    def connect_device(self, address):
+        """Persist + connect the opaque address returned by settings_devices()."""
+        try:
+            key = (int(address[0]), bytes(address[1]))
+        except Exception:
+            return False
+        item = self._devices.get(key)
+        if item is None:
+            return False
+        self._preferred = key
+        self.name = item[0] or self.name or "BLE keyboard"
+        self._store_dirty = True
+        self._manual_hold = False
+        self._pending_scan = None
+        self._pending_connect = (key, self.name)
+        if self._conn is not None:
+            if key == self._candidate and self.state == "ready":
+                self._pending_connect = None
+                return True
+            try:
+                self.ble.gap_disconnect(self._conn)
+                return True
+            except Exception:
+                self._reset_connection()
+        if self.state in ("scanning", "found"):
+            try:
+                self.ble.gap_scan(None)
+                return True
+            except Exception:
+                pass
+        self._begin_pending_connect()
+        return True
 
     def fast_status(self):
         if self._fast is None:
@@ -337,6 +461,10 @@ class BleHidKeyboard:
             return self._fast.stats()
         except Exception:
             return None
+
+    def _log(self, *parts):
+        if len(self._log_queue) < 32:
+            self._log_queue.append(parts)
 
     def trace(self, on=True):
         """Toggle raw notification diagnostics, printed safely from poll()."""
@@ -358,8 +486,14 @@ class BleHidKeyboard:
         """Forget the selected keyboard and local bond keys (REPL affordance)."""
         conn = self._conn
         self._secrets = {}
+        self._preferred = None
+        self._devices = {}
+        self._device_order = []
         self.name = None
         self._store_dirty = True
+        self._manual_hold = True
+        self._pending_scan = None
+        self._pending_connect = None
         self._clear_reports()
         if conn is not None:
             try:
@@ -367,30 +501,33 @@ class BleHidKeyboard:
             except Exception:
                 pass
         self._reset_connection()
-        self.state = "idle"
-        self._retry_at = _ticks_ms()
+        self.state = "choose" if self._enabled else "disabled"
 
     def scan(self):
         """Restart discovery now (REPL affordance)."""
-        if not self.available:
+        if not self.available or not self._enabled:
             return False
-        if self._conn is not None:
-            try:
-                self.ble.gap_disconnect(self._conn)
-            except Exception:
-                pass
-        self._reset_connection()
-        return self._start_scan()
+        self._manual_hold = False
+        return self._request_scan(False)
 
     # -- per-frame bridge -------------------------------------------------
 
     def poll(self):
         """Apply latest report level-state before InputState.begin_frame()."""
+        logs = self._log_queue
+        self._log_queue = []
+        for parts in logs:
+            try:
+                print(*parts)
+            except Exception:
+                pass
+
         if self._store_dirty:
             self._save_store()
 
         now = _ticks_ms()
-        if self.available and self._conn is None and self.state == "idle" \
+        if self.available and self._enabled and not self._manual_hold \
+                and self._conn is None and self.state == "idle" \
                 and _ticks_diff(now, self._retry_at) >= 0:
             self._start_scan()
         elif self._conn is None and self.state == "connecting" \
@@ -469,11 +606,67 @@ class BleHidKeyboard:
         self.state = state
         self._state_at = _ticks_ms()
 
-    def _start_scan(self):
-        if not self.available or self._conn is not None:
+    def _remember_device(self, addr_type, addr, name=None, rssi=-127):
+        key = (int(addr_type), bytes(addr))
+        item = self._devices.get(key)
+        if item is None:
+            item = [name or "BLE keyboard", int(rssi)]
+            self._devices[key] = item
+            # Keep the saved keyboard at the top; append all newly-seen peers.
+            if key == self._preferred:
+                self._device_order.insert(0, key)
+            else:
+                self._device_order.append(key)
+        else:
+            if name and name != "?":
+                item[0] = name
+            item[1] = int(rssi)
+        return key
+
+    def _request_scan(self, picker):
+        if not self.available or not self._enabled:
+            return False
+        self._pending_connect = None
+        if self._conn is not None:
+            self._pending_scan = bool(picker)
+            try:
+                self.ble.gap_disconnect(self._conn)
+                return True
+            except Exception:
+                self._reset_connection()
+        if self.state in ("scanning", "found"):
+            self._pending_scan = bool(picker)
+            try:
+                self.ble.gap_scan(None)
+                return True
+            except Exception:
+                self._pending_scan = None
+        self._reset_connection()
+        return self._start_scan(picker)
+
+    def _begin_pending_connect(self):
+        pending = self._pending_connect
+        self._pending_connect = None
+        if pending is None or not self._enabled:
+            return False
+        self._candidate, self._candidate_name = pending
+        self._connect_candidate()
+        return True
+
+    def _start_scan(self, picker=False):
+        if not self.available or not self._enabled or self._conn is not None:
             return False
         self._candidate = None
         self._candidate_name = None
+        self._scan_picker = bool(picker)
+        if picker:
+            # Retain only the saved identity while fresh results arrive. This
+            # gives the panel immediate context without presenting stale peers.
+            self._devices = {}
+            self._device_order = []
+            if self._preferred is not None:
+                self._remember_device(self._preferred[0], self._preferred[1],
+                                      self.name, -127)
         self.error = None
         self._set_state("scanning")
         try:
@@ -481,18 +674,19 @@ class BleHidKeyboard:
                 self.ble.gap_scan(self.SCAN_MS, 30000, 30000, True)
             except TypeError:
                 self.ble.gap_scan(self.SCAN_MS, 30000, 30000)
-            print("Moybyte P4 BLE keyboard: scanning")
+            self._log("Moybyte P4 BLE keyboard: scanning%s"
+                      % (" for devices" if picker else ""))
             return True
         except Exception as exc:
             self.error = str(exc)
             self.state = "idle"
             self._retry_at = _ticks_ms() + self.RETRY_MS
-            print("Moybyte P4 BLE keyboard scan failed:", exc)
+            self._log("Moybyte P4 BLE keyboard scan failed:", exc)
             return False
 
     def _connect_candidate(self):
         candidate = self._candidate
-        if candidate is None:
+        if candidate is None or not self._enabled:
             self.state = "idle"
             self._retry_at = _ticks_ms() + self.RETRY_MS
             return
@@ -597,10 +791,10 @@ class BleHidKeyboard:
         try:
             # Protocol Mode is a Write Without Response characteristic in HIDS.
             self.ble.gattc_write(self._conn, self._protocol_handle, b"\x00", 0)
-            print("Moybyte P4 BLE keyboard: boot protocol")
+            self._log("Moybyte P4 BLE keyboard: boot protocol")
             return True
         except Exception as exc:
-            print("Moybyte P4 BLE keyboard boot protocol failed:", exc)
+            self._log("Moybyte P4 BLE keyboard boot protocol failed:", exc)
             return False
 
     def _write_next(self):
@@ -610,7 +804,7 @@ class BleHidKeyboard:
             self._write_pending = None
             self._enable_fastpath()
             self._set_state("ready")
-            print("Moybyte P4 BLE keyboard ready:", self.name or "?")
+            self._log("Moybyte P4 BLE keyboard ready:", self.name or "?")
             return
         handle = self._subscribe_queue.pop(0)
         self._write_pending = handle
@@ -633,7 +827,7 @@ class BleHidKeyboard:
     def _disconnect(self, reason=None):
         if reason:
             self.error = reason
-            print("Moybyte P4 BLE keyboard:", reason)
+            self._log("Moybyte P4 BLE keyboard:", reason)
         conn = self._conn
         if conn is not None:
             try:
@@ -642,13 +836,17 @@ class BleHidKeyboard:
             except Exception:
                 pass
         self._reset_connection()
-        self.state = "idle"
-        self._retry_at = _ticks_ms() + self.RETRY_MS
+        if self._enabled:
+            self.state = "idle"
+            self._retry_at = _ticks_ms() + self.RETRY_MS
+        else:
+            self.state = "disabled"
 
     def _reset_connection(self):
         self._disable_fastpath()
         self._conn = None
         self._candidate = None
+        self._candidate_name = None
         self._hid_range = None
         self._protocol_handle = None
         self._chars = []
@@ -681,11 +879,11 @@ class BleHidKeyboard:
         try:
             self._fast.configure(self._conn, tuple(self._input_handles))
             self._fast_active = True
-            print("Moybyte P4 BLE keyboard: native input queue")
+            self._log("Moybyte P4 BLE keyboard: native input queue")
             return True
         except Exception as exc:
             self._fast_active = False
-            print("Moybyte P4 BLE keyboard native queue unavailable:", exc)
+            self._log("Moybyte P4 BLE keyboard native queue unavailable:", exc)
             return False
 
     def _disable_fastpath(self):
@@ -709,7 +907,7 @@ class BleHidKeyboard:
         except Exception as exc:
             # Disable interception so subsequent reports fall back to the
             # ordinary MicroPython IRQ rather than leaving input stuck.
-            print("Moybyte P4 BLE keyboard native queue failed:", exc)
+            self._log("Moybyte P4 BLE keyboard native queue failed:", exc)
             self._disable_fastpath()
 
     def _consume_report(self, value_handle, payload, age_us=-1):
@@ -735,16 +933,28 @@ class BleHidKeyboard:
 
     def _irq(self, event, data):
         if event == _IRQ_SCAN_RESULT:
-            addr_type, addr, adv_type, _rssi, payload = data
+            addr_type, addr, adv_type, rssi, payload = data
             if self.state != "scanning":
                 return
-            if adv_type not in (_ADV_IND, _ADV_DIRECT_IND) and not adv_has_hid(payload):
+            key = (int(addr_type), bytes(addr))
+            has_hid = adv_has_hid(payload)
+            known = key in self._devices
+            preferred = key == self._preferred
+            # A scan response often carries only the name, after the preceding
+            # advertisement established HIDS. Remember/update that same peer.
+            if not has_hid and not known and not preferred:
                 return
             name = adv_name(payload)
-            if name:
-                self._candidate_name = name
-            if adv_has_hid(payload):
-                self._candidate = (addr_type, bytes(addr))
+            key = self._remember_device(addr_type, addr, name, rssi)
+            item = self._devices[key]
+            if self._scan_picker:
+                return
+            # Once a keyboard has been picked, reconnect ONLY that address.
+            # A version-1 store has no preferred address, so its first HOGP
+            # connection migrates naturally and becomes the saved identity.
+            if (self._preferred is None and has_hid) or preferred:
+                self._candidate = key
+                self._candidate_name = item[0]
                 self._set_state("found")
                 try:
                     self.ble.gap_scan(None)
@@ -752,7 +962,18 @@ class BleHidKeyboard:
                     self._connect_candidate()
 
         elif event == _IRQ_SCAN_DONE:
-            if self.state == "found":
+            if not self._enabled:
+                self.state = "disabled"
+            elif self._pending_connect is not None:
+                self._begin_pending_connect()
+            elif self._pending_scan is not None:
+                picker = self._pending_scan
+                self._pending_scan = None
+                self._start_scan(picker)
+            elif self._scan_picker:
+                self.state = "choose"
+                self._manual_hold = True
+            elif self.state == "found":
                 self._connect_candidate()
             elif self.state == "scanning":
                 self.state = "idle"
@@ -760,6 +981,12 @@ class BleHidKeyboard:
 
         elif event == _IRQ_PERIPHERAL_CONNECT:
             conn_handle, addr_type, addr = data
+            if not self._enabled:
+                try:
+                    self.ble.gap_disconnect(conn_handle)
+                except Exception:
+                    pass
+                return
             candidate = self._candidate
             if candidate is not None \
                     and (addr_type != candidate[0] or bytes(addr) != candidate[1]):
@@ -767,25 +994,38 @@ class BleHidKeyboard:
             self._conn = conn_handle
             self._encrypted = False
             self.name = self._candidate_name or self.name or "BLE keyboard"
+            self._preferred = (int(addr_type), bytes(addr))
+            self._remember_device(addr_type, addr, self.name, -127)
             self._store_dirty = True
             self._set_state("pairing")
-            print("Moybyte P4 BLE keyboard connected:", self.name)
+            self._log("Moybyte P4 BLE keyboard connected:", self.name)
             # Pairing and ATT discovery can proceed together.  Cheap keyboards
             # commonly use unauthenticated (Just Works) encryption; encrypted
             # CCCD writes complete once SMP has established the link keys.
             try:
                 self.ble.gap_pair(conn_handle)
             except Exception as exc:
-                print("Moybyte P4 BLE keyboard pair start:", exc)
+                self._log("Moybyte P4 BLE keyboard pair start:", exc)
             self._discover()
 
         elif event == _IRQ_PERIPHERAL_DISCONNECT:
             conn_handle, _addr_type, _addr = data
             if conn_handle == self._conn:
-                print("Moybyte P4 BLE keyboard disconnected")
+                self._log("Moybyte P4 BLE keyboard disconnected")
                 self._reset_connection()
-                self.state = "idle"
-                self._retry_at = _ticks_ms() + self.RETRY_MS
+                if not self._enabled:
+                    self.state = "disabled"
+                elif self._pending_connect is not None:
+                    self._begin_pending_connect()
+                elif self._pending_scan is not None:
+                    picker = self._pending_scan
+                    self._pending_scan = None
+                    self._start_scan(picker)
+                elif self._manual_hold:
+                    self.state = "choose"
+                else:
+                    self.state = "idle"
+                    self._retry_at = _ticks_ms() + self.RETRY_MS
 
         elif event == _IRQ_GATTC_SERVICE_RESULT:
             conn_handle, start_handle, end_handle, uuid = data
@@ -872,8 +1112,8 @@ class BleHidKeyboard:
             conn_handle, encrypted, _authenticated, bonded, _key_size = data
             if conn_handle == self._conn:
                 self._encrypted = bool(encrypted)
-                print("Moybyte P4 BLE keyboard security: encrypted=%s bonded=%s"
-                      % (encrypted, bonded))
+                self._log("Moybyte P4 BLE keyboard security: encrypted=%s bonded=%s"
+                          % (encrypted, bonded))
                 if bonded:
                     self._store_dirty = True
                 # A security-gated CCCD may have rejected the first write.  The
@@ -891,15 +1131,15 @@ class BleHidKeyboard:
                 # but keep a deterministic response + serial diagnostic for a
                 # peripheral that insists on passkey entry.
                 self.passkey = (_ticks_ms() ^ (conn_handle << 8)) % 1000000
-                print("Moybyte P4 BLE keyboard passkey: %06d" % self.passkey)
+                self._log("Moybyte P4 BLE keyboard passkey: %06d" % self.passkey)
                 self.ble.gap_passkey(conn_handle, action, self.passkey)
             elif action == _PASSKEY_ACTION_NUMCMP:
                 self.passkey = passkey
-                print("Moybyte P4 BLE keyboard compare: %06d (accepted)" % passkey)
+                self._log("Moybyte P4 BLE keyboard compare: %06d (accepted)" % passkey)
                 self.ble.gap_passkey(conn_handle, action, 1)
             elif action == _PASSKEY_ACTION_INPUT:
                 self.error = "keyboard asks console to enter a passkey"
-                print("Moybyte P4 BLE keyboard cannot enter remote passkey")
+                self._log("Moybyte P4 BLE keyboard cannot enter remote passkey")
 
         elif event == _IRQ_SET_SECRET:
             sec_type, key, value = data
@@ -936,9 +1176,22 @@ class BleHidKeyboard:
             import json
             with open(self.store_path, "r") as src:
                 data = json.load(src)
-            if data.get("version") != _STORE_VERSION:
+            # v1 stored only name + NimBLE secrets. Keep those bonds and learn
+            # the preferred address on the next connection instead of forcing
+            # an already-working keyboard through pairing again.
+            if data.get("version") not in (1, _STORE_VERSION):
                 return
+            self._enabled = bool(data.get("enabled", True))
             self.name = data.get("name") or None
+            preferred = data.get("preferred")
+            if preferred and len(preferred) == 2:
+                try:
+                    self._preferred = (int(preferred[0]),
+                                       binascii.unhexlify(preferred[1]))
+                    self._remember_device(self._preferred[0], self._preferred[1],
+                                          self.name, -127)
+                except Exception:
+                    self._preferred = None
             for item in data.get("secrets", ()):
                 if len(item) != 3:
                     continue
@@ -962,7 +1215,12 @@ class BleHidKeyboard:
                 secrets.append((sec_type,
                                 binascii.hexlify(key).decode(),
                                 binascii.hexlify(value).decode()))
-            data = {"version": _STORE_VERSION, "name": self.name,
+            preferred = None
+            if self._preferred is not None:
+                preferred = (self._preferred[0],
+                             binascii.hexlify(self._preferred[1]).decode())
+            data = {"version": _STORE_VERSION, "enabled": self._enabled,
+                    "name": self.name, "preferred": preferred,
                     "secrets": secrets}
             tmp = self.store_path + ".tmp"
             with open(tmp, "w") as dst:
@@ -977,4 +1235,4 @@ class BleHidKeyboard:
             # Do not retry every 16ms if storage is unavailable; the live bond
             # still works for this boot and the next key change must stay cheap.
             self._store_dirty = False
-            print("Moybyte P4 BLE keyboard bond save failed:", exc)
+            self._log("Moybyte P4 BLE keyboard bond save failed:", exc)

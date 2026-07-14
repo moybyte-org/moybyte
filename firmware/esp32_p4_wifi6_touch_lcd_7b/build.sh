@@ -165,7 +165,8 @@ cp "${BOARD_DIR}/partitions-moybyte-p4.csv" "${MPY_DIR}/ports/esp32/partitions-m
 GEN_SDKCONFIG="${MPY_DIR}/ports/esp32/build-${BOARD}/sdkconfig"
 if [ -f "${GEN_SDKCONFIG}" ]; then
   if ! grep -q '^CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-p4.csv"$' "${GEN_SDKCONFIG}" || \
-     ! grep -q '^CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=64$' "${GEN_SDKCONFIG}"; then
+     ! grep -q '^CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=64$' "${GEN_SDKCONFIG}" || \
+     ! grep -q '^CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=12288$' "${GEN_SDKCONFIG}"; then
     echo "== sdkconfig lacks a required P4 board override -- forcing regeneration"
     rm -f "${GEN_SDKCONFIG}"
   fi

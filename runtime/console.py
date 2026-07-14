@@ -2926,6 +2926,11 @@ class Workstation:
         # A live wallpaper animates the home/settings backdrop.
         if kind in ("launcher", "settings") and self.wallpaper.is_animating(dt):
             return True
+        # The P4 Bluetooth keyboard picker advances through scan/pair/discovery
+        # asynchronously. A static wallpaper would otherwise close the redraw
+        # gate after its first frame and hide newly-found devices/status changes.
+        if kind == "settings" and self.settings_layer.bluetooth_animating():
+            return True
         if kind == "appearance" and self.wallpaper.is_animating(dt):
             return True
         # A firmware install (#53) advances a chunk per frame; "done" runs a short
