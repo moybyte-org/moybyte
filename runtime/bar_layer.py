@@ -440,8 +440,7 @@ class BarLayer:
     def _draw_dock(self, where):
         """The persistent bottom dock: home / code / draw / map / run / settings.
         The active slot (home on the desktop, settings in Settings) is highlighted;
-        the music slot is greyed (its editor is #16, not yet here). Tool slots that
-        need an open cart read dimmed on the home desktop. Suppressed entirely in
+        tool slots that need an open cart read dimmed on the home desktop. Suppressed entirely in
         the windowed WM (#73): the dock is desktop-level chrome, not something a
         Settings WINDOW should carry a copy of."""
         if getattr(self.ws, "windowed_chrome", False):

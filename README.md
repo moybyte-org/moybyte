@@ -5,11 +5,12 @@
 Moybyte is a PC-first simulator and SDK for a future ESP32 kids' creative coding console.
 
 > **Two systems live in this repo** (see `CLAUDE.md`): the original **`.moyproj` SDK**
-> (documented below), and the newer **v0.4 `.moy` console** — a TIC-80-style
-> "fantasy workstation" where *everything is a cartridge*. The v0.4 console is where
-> current feature work happens.
+> (documented below), and the newer **`.moy` console** — a TIC-80-style
+> "fantasy workstation" where *everything is a cartridge*, now running the shipped
+> **v0.5 shell** (everything-is-a-process). The `.moy` console is where current
+> feature work happens.
 
-## v0.4 console (current direction)
+## v0.5 console (current direction)
 
 One shared console runs on both the PC and the LilyGO T-Deck Plus (it renders the
 same pixels on each). Run it on the PC:
@@ -25,8 +26,10 @@ MOYBYTE_SKIP_VFS_BOOT=1 make firmware-build-lilygo-micropython
 make firmware-flash-lilygo-micropython PORT=/dev/ttyACM0
 ```
 
-Design + current status: [`moybyte_Console_Plan_v0_4.md`](moybyte_Console_Plan_v0_4.md)
-(see its "Implementation status" section). Working orientation: `CLAUDE.md`.
+Design + current status: [`moybyte_Console_Plan_v0_5.md`](moybyte_Console_Plan_v0_5.md)
+and the shell UX reference [`docs/shell_ux_v1.md`](docs/shell_ux_v1.md). Working
+orientation: `CLAUDE.md`. Issue status at a glance: run `make sync-issues` and open
+`docs/issues/STATUS.md` (see [`docs/issue_taxonomy.md`](docs/issue_taxonomy.md)).
 
 ---
 
