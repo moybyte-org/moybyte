@@ -16,6 +16,7 @@ MPY_DIR="${BUILD_DIR}/micropython"
 MPY_TAG="${MPY_TAG:-v1.28.0}"
 BOARD="MOYBYTE_P4"
 BOARD_DIR="${SCRIPT_DIR}/boards/${BOARD}"
+PATCH_DIR="${SCRIPT_DIR}/patches"
 DIST_DIR="${REPO_ROOT}/dist/p4"
 TDECK_DIR="${REPO_ROOT}/firmware/lilygo_t_deck_plus_micropython"
 MODULES_DIR="${SCRIPT_DIR}/modules"
@@ -36,6 +37,17 @@ mkdir -p "${BUILD_DIR}" "${DIST_DIR}" "${MODULES_DIR}"
 if [ ! -d "${MPY_DIR}" ]; then
   echo "== cloning micropython ${MPY_TAG}"
   git clone --depth 1 -b "${MPY_TAG}" https://github.com/micropython/micropython "${MPY_DIR}"
+fi
+
+# Steady-state BLE keyboard notifications must not wait behind MicroPython's
+# synchronous NimBLE IRQ/GIL path. The P4-only native queue consumes registered
+# HID handles before Python dispatch; pairing/bonding/discovery remain on the
+# supported synchronous path. Marker-guarded because .build persists.
+MODBLUETOOTH_C="${MPY_DIR}/extmod/modbluetooth.c"
+if [ -f "${MODBLUETOOTH_C}" ] && \
+   ! grep -q "moy_ble_hid_queue_on_notify" "${MODBLUETOOTH_C}"; then
+  echo "== applying P4 BLE-HID native notification fast-path patch"
+  patch -d "${MPY_DIR}" -p1 < "${PATCH_DIR}/modbluetooth_ble_hid_fastpath.patch"
 fi
 
 # 2) ESP-IDF v5.5.1: reuse the T-Deck build's checkout when present (same
@@ -134,15 +146,17 @@ echo "# frozen-source fingerprint: $(find "${MODULES_DIR}" -type f -name '*.py' 
 #     (the default 4MiBplus table's ~1.94MB app can't hold the frozen console).
 #     CONFIG_PARTITION_TABLE_CUSTOM_FILENAME resolves relative to ports/esp32, so
 #     stage the board CSV there. IDF only (re)generates the build's sdkconfig
-#     from the defaults when the file is ABSENT (the T-Deck build learned this),
-#     so if an existing sdkconfig doesn't carry our table, delete it to force the
-#     reconfigure.
+#     from the defaults when the file is ABSENT (the T-Deck build learned this).
+#     Force regeneration when an existing config lacks either critical board
+#     override; otherwise edits to sdkconfig.board silently leave a stale image.
 cp "${BOARD_DIR}/partitions-moybyte-p4.csv" "${MPY_DIR}/ports/esp32/partitions-moybyte-p4.csv"
 GEN_SDKCONFIG="${MPY_DIR}/ports/esp32/build-${BOARD}/sdkconfig"
-if [ -f "${GEN_SDKCONFIG}" ] && \
-   ! grep -q '^CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-p4.csv"$' "${GEN_SDKCONFIG}"; then
-  echo "== sdkconfig lacks the custom partition table -- forcing regeneration"
-  rm -f "${GEN_SDKCONFIG}"
+if [ -f "${GEN_SDKCONFIG}" ]; then
+  if ! grep -q '^CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-p4.csv"$' "${GEN_SDKCONFIG}" || \
+     ! grep -q '^CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=64$' "${GEN_SDKCONFIG}"; then
+    echo "== sdkconfig lacks a required P4 board override -- forcing regeneration"
+    rm -f "${GEN_SDKCONFIG}"
+  fi
 fi
 
 # 3) mpy-cross (host tool, needed by the port build).

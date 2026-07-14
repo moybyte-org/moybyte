@@ -3,8 +3,8 @@
 This is the P4 sibling of the T-Deck's moy_runtime, an order of magnitude
 smaller because the board removed the walls the T-Deck backend exists to fight:
 no flush ceiling (DPI scan-out), no SD<->display bus war (separate buses), no
-keyboard mode-flipping (no keyboard yet -- USB-HID is the #58 follow-up), no
-input-poller thread (nothing stalls the loop).
+keyboard mode-flipping (BLE HID has real make/break reports), no input-poller
+thread (nothing stalls the loop).
 
 The two-domain seam (#39) runs for real here for the first time on hardware:
 
@@ -383,10 +383,12 @@ def run_ppa_smoke(scale=2, iters=60):
 
 def run_desktop(fps_cap=60):
     """Boot the shared console on the P4: launcher-as-desktop under WindowedWM,
-    GT911 touch as the pointer, carts on internal flash. Ctrl-C over the CH343
-    REPL interrupts the loop (no USB starvation on this board)."""
+    GT911 touch as the pointer, a BLE HID keyboard over the companion C6, and
+    carts on internal flash. Ctrl-C over the CH343 REPL interrupts the loop (no
+    USB starvation on this board)."""
     from p4_display import P4Compositor, set_backlight
     from p4_input import Touch
+    from p4_ble_keyboard import BleHidKeyboard
     from moybyte.input import InputState
     from wm_windowed import WindowedWM
     import moy_carts
@@ -414,6 +416,12 @@ def run_desktop(fps_cap=60):
     inp.pointer = pointer          # touch-driven carts read it via the api touch()
 
     carts, carts_root = _load_carts()
+    # P4 keyboard (#26): the C6_WIFI MicroPython variant already exposes NimBLE
+    # central/GATT-client bindings over ESP-Hosted SDIO. Keep construction lazy
+    # until /moy exists (the bond store lives beside the carts), and start the
+    # radio after the Workstation has finished its boot allocations below.
+    keyboard = BleHidKeyboard(inp, store_path="/moy/ble_keyboard.json",
+                              auto_start=False)
     ws = Workstation(comp, game, inp, carts,
                      sys_canvas=sys_canvas, font_scale=FONT_SCALE)
     ws.make_api = make_api
@@ -423,6 +431,7 @@ def run_desktop(fps_cap=60):
     #                                          _with_sd stays the direct-call default
     ws.wifi = make_wifi(moy_carts, carts_root)   # C6-hosted WLAN is transparent
     #                                              to network.WLAN (bring-up-confirmed)
+    ws.keyboard = keyboard
     ws.slim_carts()
     ws.pointer = pointer
     try:
@@ -437,6 +446,7 @@ def run_desktop(fps_cap=60):
     # Installed AFTER load_system (same order as host build_workstation) so the
     # persisted font scale is applied before the root layout context is captured.
     ws.wm = WindowedWM(ws)
+    keyboard.start()               # failure is touch-only, never a boot failure
 
     # Remote input over serial (#58 dev affordance): the CH343 REPL stays alive
     # under the desktop (no USB starvation on this board), so complete LINES piped
@@ -444,6 +454,7 @@ def run_desktop(fps_cap=60):
     #   tap <x> <y>   synthetic tap at system-canvas coords
     #   tap sysmenu   tap a named bar button (any ws.layout.<name>_btn rect:
     #                 sysmenu / wifi / batt / context_x)
+    #   bt status|scan|forget|trace [0|1]  BLE keyboard diagnostics
     #   quit          leave the desktop for the REPL
     # Ctrl-C still interrupts as before (handled below the stdin read).
     try:
@@ -475,6 +486,14 @@ def run_desktop(fps_cap=60):
         now = _ticks_ms()
         dt = max(0.0, min(0.1, _ticks_diff(now, last) / 1000.0))
         last = now
+        # BLE notifications arrive asynchronously; applying their latest level
+        # state before begin_frame gives InputState clean press/release edges.
+        # poll() also advances scan/reconnect and flushes a newly-created bond
+        # once, outside the NimBLE IRQ.
+        try:
+            keyboard.poll()
+        except Exception as exc:  # noqa: BLE001 -- keyboard must fail touch-only
+            print("Moybyte P4 BLE keyboard poll failed:", exc)
         inp.begin_frame()
         click = False
         tp = touch.poll()
@@ -493,6 +512,25 @@ def run_desktop(fps_cap=60):
             if parts and parts[0] == "quit":
                 print("REMOTE quit -> REPL")
                 return
+            if parts and parts[0] == "bt":
+                action = parts[1] if len(parts) > 1 else "status"
+                if action == "scan":
+                    print("REMOTE bt scan ->", keyboard.scan())
+                elif action == "forget":
+                    keyboard.forget()
+                    print("REMOTE bt forgot keyboard + local bonds")
+                elif action == "status":
+                    print("REMOTE bt status state=%s name=%s passkey=%s "
+                          "protocol=%s interval_ms=%s notify=%s fast=%s error=%s"
+                          % (keyboard.status()[0], keyboard.status()[1],
+                             keyboard.status()[2], keyboard.protocol,
+                             keyboard._conn_interval_ms, keyboard._notify_count,
+                             keyboard.fast_status(), keyboard.error))
+                elif action == "trace":
+                    on = not (len(parts) > 2 and parts[2] == "0")
+                    print("REMOTE bt trace ->", keyboard.trace(on))
+                else:
+                    print("REMOTE bt ? %s" % line)
             if parts and parts[0] == "tap":
                 r = None
                 if len(parts) == 3:
@@ -647,8 +685,13 @@ def run_desktop(fps_cap=60):
         _pf_busy += elapsed
         if _ticks_diff(_ticks_ms(), _pf_at) >= 0:
             _drawn = getattr(ws, "_frames_drawn", 0)
+            # home(wp/grid/bar): the LAUNCHER frame's section split (stashed by
+            # the shared launcher_layer under perf_capture) -- names where a
+            # slow desktop repaint goes; empty when the last frame wasn't the
+            # home screen.
+            _home = getattr(ws, "_pf_home", None)
             print("PERF fps=%d/%d busy=%dms draw=%.0f flush=%.0f logic=%.0f "
-                  "render=%.0f chrome=%.0f wmr=%d wmw=%d wms=%d cart=%s"
+                  "render=%.0f chrome=%.0f wmr=%d wmw=%d wms=%d cart=%s%s"
                   % ((_drawn - _pf_drawn) // 2, _pf_n // 2,
                      _pf_busy // (_pf_n or 1),
                      ws._draw_ms, ws._flush_ms, ws._upd_ms, ws._cart_ms,
@@ -656,7 +699,8 @@ def run_desktop(fps_cap=60):
                      getattr(ws, "_pf_wm_restore", 0),   # drag backdrop restore ms
                      getattr(ws, "_pf_wm_windows", 0),   # window-stack pass ms
                      getattr(ws, "_pf_wm_stamp", 0),     # window content stamp ms
-                     (ws.cart or {}).get("title", "-")))
+                     (ws.cart or {}).get("title", "-"),
+                     (" home(wp=%d grid=%d bar=%d)" % _home) if _home else ""))
             _pf_at = _ticks_ms() + 2000
             _pf_n = 0
             _pf_busy = 0
