@@ -251,9 +251,13 @@ class Pmem:
 
     Backend-agnostic (host + device share this). The Workstation builds one per
     cart from moy_carts.load_pmem and injects its `cell` accessor into make_api as
-    `pmem(i[, v])`: read pmem(i) -> int, write pmem(i, v) -> persists (when the
-    cart is on a writable store). A write only persists if the value actually
-    changed, so a cart calling pmem(i, v) every frame doesn't hammer the SD."""
+    `pmem(i[, v])`: read pmem(i) -> int, write pmem(i, v) -> RAM + a dirty mark.
+    Persistence is DEFERRED to flush() (#66, measured on glass 2026-07-14: the
+    old per-write SD save was Letter Blitz's 81-130ms mid-play hitch on every
+    letter pop -- a FAT-over-SD write can't be made fast, only moved off the
+    play path). The Player guarantees a flush on cart exit + crash and runs a
+    periodic one while dirty; a no-change write never dirties, so a cart calling
+    pmem(i, v) with the same value every frame stays clean."""
 
     CELLS = 256
     MASK = 0xFFFFFFFF
@@ -265,6 +269,7 @@ class Pmem:
             cells = [0] * self.CELLS
         self.cells = cells
         self._on_write = on_write   # called(cells) to persist; None = volatile
+        self._dirty = False
 
     def cell(self, index, value=None):
         i = int(index)
@@ -275,9 +280,19 @@ class Pmem:
         v = int(value) & self.MASK
         if self.cells[i] != v:
             self.cells[i] = v
-            if self._on_write is not None:
-                self._on_write(self.cells)
+            self._dirty = True
         return v
+
+    def flush(self):
+        """Persist the cells IF a write changed them since the last flush.
+        Returns True when a save actually ran (the PMEM diag line's cadence).
+        Cleared before writing: a failed save loses that one snapshot (the
+        pre-#66 semantics), never retries per frame."""
+        if not self._dirty or self._on_write is None:
+            return False
+        self._dirty = False
+        self._on_write(self.cells)
+        return True
 
 
 class _SilentAudio:

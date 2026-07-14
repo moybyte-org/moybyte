@@ -610,6 +610,11 @@ class Workstation:
         # manifest permissions include "network" (capability-gated -- see _start).
         self.wifi = None            # injected wifi backend (host FakeWifi / device WLAN)
         self.carts_store = None     # injected: cart store module (moy_carts API)
+        # #67 dual-runtime seam: factory(ns, src) -> a running Lua cart handle
+        # (.init/.update/.draw callables + .close()). build_workstation injects
+        # the lupa-backed runtime/lua_host.py; the device injects moy_lua once
+        # Phase 1 lands. None = "runtime": "lua" carts open the error panel.
+        self.lua_runtime = None
         # OTA firmware updater (#53): injected by the device (moy_ota.OtaUpdater); None
         # on the host. When present AND the build is OTA-capable, Settings grows an
         # "UPDATE FW" row that flashes a new image from /sd/update to the inactive slot.
@@ -1504,7 +1509,22 @@ class Workstation:
                 runs = parse(blob) if parse is not None else None
             if runs is None:                # no cover / not RLE -> cache the miss
                 return self._cover_finish(key, None)
+            # Persistent thumb sidecar (#66 "decode covers ONCE"): a crop this
+            # size finished in ANY earlier session loads in one small read here
+            # instead of re-running the 0.5-1.7s time-sliced decode -- so a
+            # boot / re-scan / LRU-evicted shelf refills in a frame per card,
+            # not seconds. Stamped against the blob, so an edited cover
+            # rebuilds; store fns are optional so a bare store still works.
+            sig_fn = getattr(self.carts_store, "cover_sig", None)
+            sig = sig_fn(blob) if sig_fn is not None else None
+            if sig is not None:
+                load_thumb = getattr(self.carts_store, "load_cover_thumb", None)
+                pix = (load_thumb(path, w, h, sig)
+                       if load_thumb is not None else None)
+                if pix is not None:
+                    return self._cover_finish(key, _CoverImage(w, h, pix))
             job = _CoverJob(runs, w, h)
+            job.sig = sig                   # stamps the sidecar when it lands
             jobs[key] = job
             # Bound the half-built set: a card scrolled out of view stops
             # being stepped -- drop some OTHER job (it just rebuilds if it
@@ -1522,6 +1542,19 @@ class Workstation:
             self._covers_deferred = True    # keep frames coming until it lands
             return None
         jobs.pop(key, None)
+        # Persist the finished crop (#66): the decode this size never runs
+        # again for this cover version -- next session's shelf reads the
+        # sidecar. Best-effort (save_cover_thumb never raises); _with_sd so
+        # the device write rides the resident SD session like every store write.
+        if (job.img is not None and getattr(job, "sig", None) is not None
+                and self.can_manage):
+            save_thumb = getattr(self.carts_store, "save_cover_thumb", None)
+            if save_thumb is not None:
+                try:
+                    self._with_sd(lambda: save_thumb(path, w, h,
+                                                     job.sig, job.img.pix))
+                except Exception:  # noqa: BLE001 -- regenerable cache
+                    pass
         return self._cover_finish(key, job.img)
 
     def _cover_finish(self, key, img):
@@ -2011,6 +2044,15 @@ class Workstation:
         # shared by open() [RUN, from a launcher tap, uses the launcher selection] and
         # open_in_editor() [EDIT, from the project-picker, which passes the PICKED cart].
         # Leaves the cart STARTED so PLAY can run it and the editors have live data.
+        # Deferred pmem (#66): persist the OUTGOING project's unsaved cells before
+        # the fresh Project replaces it -- a re-open otherwise reloads pmem.json
+        # over progress that only ever reached RAM.
+        _old = getattr(self, "project", None)
+        if _old is not None and _old.pmem is not None:
+            try:
+                _old.pmem.flush()
+            except Exception:  # noqa: BLE001
+                pass
         self.project = Project(self)   # a fresh workspace for the cart being opened
         if cart is None:
             cart = self.launcher.selected()

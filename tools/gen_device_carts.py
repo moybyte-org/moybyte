@@ -40,6 +40,7 @@ CART_ORDER = [
     "tiny_runner",
     "platformer",
     "scroll_demo",
+    "sakura_lua",
     "battle_city",
     "tap_red",
     "tap_game",
@@ -73,8 +74,13 @@ def build_carts(system_carts_dir):
             # cart content version (#47): seed_builtins overwrites a stale on-SD copy
             # when this is newer. Pre-versioning carts default to 0.
             "version": int(man.get("version", 0)),
-            "src": _read(os.path.join(base, "main.py")),
+            "src": _read(os.path.join(base, man.get("main", "main.py"))),
         }
+        if man.get("runtime", "python") != "python":
+            # #67 dual-runtime seam: a lua built-in seeds/loads with its runtime +
+            # main filename intact (defaults stay implicit to keep the blob lean).
+            cart["runtime"] = man["runtime"]
+            cart["main"] = man.get("main", "main.py")
         if man.get("fps"):                 # frame pacing (#63): "fps": 60 opt-out
             cart["fps"] = int(man["fps"])
         sheet = os.path.join(base, "sprites.moygfx")

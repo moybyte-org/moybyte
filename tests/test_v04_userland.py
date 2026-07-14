@@ -806,11 +806,14 @@ def test_pmem_round_trips_and_persists_to_pmem_json(tmp_path):
     assert pm.cell(0, 1234) == 1234 and pm.cell(0) == 1234   # write then read back
     assert pm.cell(255, 7) == 7                              # last cell works
     assert pm.cell(256, 9) == 0 and pm.cell(-1, 9) == 0      # out of range -> 0, no-op
-    # A no-change write must NOT re-persist (no per-frame SD hammering).
-    n_before = len(writes)
-    pm.cell(0, 1234)
-    assert len(writes) == n_before
+    # Writes are RAM-only until flush() (#66 deferred persistence: the per-write
+    # SD save was Letter Blitz's measured 81-130ms mid-play hitch).
+    assert writes == []
+    assert pm.flush() is True and len(writes) == 1
     assert writes[-1][0] == 1234 and writes[-1][255] == 7
+    # A no-change write must NOT re-dirty (a clean flush never touches the SD).
+    pm.cell(0, 1234)
+    assert pm.flush() is False and len(writes) == 1
 
     # Persist for real + reload sees it (no pmem.json existed before).
     moy_carts.save_pmem(cart, pm.cells)

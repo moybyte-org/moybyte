@@ -150,6 +150,63 @@ def decode_moyimg(text):
         return None
 
 
+# --- cover thumbnails (#66 launcher shelf): decoded-crop sidecars -------------
+#
+# Decoding a 320x240 RLE cover costs 0.5-1.7s interpreted on the T-Deck, so the
+# console (console._cover_for) builds each card-sized crop ONCE and persists it
+# here as raw indexed pixels: <cart>/thumbs/<w>x<h>.mct = b"MCT1" + a 4-byte LE
+# stamp of the cover blob it was built from (cover_sig) + the w*h pix bytes.
+# An edited cover changes the stamp -> the stale thumb is ignored and rebuilt;
+# a deleted cart takes its thumbs with it; a re-seed wipe just regenerates.
+# Regenerable cache, so: plain writes (no atomic dance), best-effort saves, and
+# every reader validates magic + size + stamp before trusting a byte.
+
+THUMBS_DIR = "thumbs"
+
+
+def cover_sig(text):
+    """A cheap content stamp for a cover blob (NOT a hash): its length mixed
+    with head+tail character sums -- a paint edit virtually always moves one of
+    them. A collision only ever means one stale thumbnail, never a crash."""
+    s = 0
+    for ch in text[:64]:
+        s += ord(ch)
+    for ch in text[-64:]:
+        s = (s * 3 + ord(ch)) & 0xFFFFFF
+    return (len(text) * 2654435761 + s) & 0xFFFFFFFF
+
+
+def _thumb_file(path, w, h):
+    return (path + "/" + THUMBS_DIR + "/"
+            + str(int(w)) + "x" + str(int(h)) + ".mct")
+
+
+def load_cover_thumb(path, w, h, sig):
+    """The pre-decoded (w, h) cover crop for the cart at `path` -- the raw
+    indexed pix bytes (len == w*h) -- or None when absent, stale or corrupt."""
+    try:
+        with open(_thumb_file(path, w, h), "rb") as f:
+            data = f.read()
+    except OSError:
+        return None
+    if (len(data) != 8 + int(w) * int(h) or data[:4] != b"MCT1"
+            or int.from_bytes(data[4:8], "little") != (sig & 0xFFFFFFFF)):
+        return None
+    return data[8:]
+
+
+def save_cover_thumb(path, w, h, sig, pix):
+    """Persist a finished cover crop. Best-effort and never raises: a full SD
+    just means that crop decodes again next session."""
+    try:
+        _mkdir(path + "/" + THUMBS_DIR)
+        with open(_thumb_file(path, w, h), "wb") as f:
+            f.write(b"MCT1" + (sig & 0xFFFFFFFF).to_bytes(4, "little"))
+            f.write(pix)
+    except Exception:  # noqa: BLE001 -- regenerable cache
+        pass
+
+
 def _mkdir(path):
     try:
         os.mkdir(path)
@@ -434,7 +491,11 @@ def seed_builtins(seed_list, root=CARTS_DIR):
         _mkdir(d)
         manifest = {
             "format": CART_FORMAT, "title": cart["title"], "type": cart["type"],
-            "runtime": "python", "main": "main.py", "edit": cart.get("edit", []),
+            # #67 dual-runtime passthrough: a baked "lua" built-in seeds with its
+            # runtime + main.lua intact (this manifest is REGENERATED, not copied).
+            "runtime": cart.get("runtime", "python"),
+            "main": cart.get("main", "main.py"),
+            "edit": cart.get("edit", []),
             "version": seed_ver,
         }
         if cart.get("fps"):               # frame pacing (#63): "fps": 60 opt-out
@@ -444,7 +505,7 @@ def seed_builtins(seed_list, root=CARTS_DIR):
         if cart.get("permissions") is not None:
             manifest["permissions"] = cart["permissions"]
         _write(d + "/manifest.json", json.dumps(manifest))
-        _write(d + "/main.py", cart["src"])
+        _write(d + "/" + cart.get("main", "main.py"), cart["src"])
         _write(d + "/config.json", json.dumps(cart["cfg"]))
         sprites = cart.get("sprites")
         if sprites:
@@ -521,6 +582,11 @@ def load(path):
             "path": path,
             "title": man.get("title", "cart"),
             "type": man.get("type", "app"),
+            # The #67 dual-runtime seam: which VM runs this cart ("python" today,
+            # "lua" via the injected runtime), and which file `src` came from --
+            # save_code/duplicate/seed must write THAT file back, never main.py.
+            "runtime": man.get("runtime", "python"),
+            "main": man.get("main", "main.py"),
             "version": int(man.get("version", 0)),   # 0 = pre-versioning (re-seedable)
             # Graduation (#29 / spec Section 8): a STORED, one-way project fact. Set
             # when a block-authored cart's code commit diverges past the block
@@ -651,11 +717,17 @@ def save_code(cart, src):
     """Persist edited source to the cart's main file, ATOMICALLY and only if it
     compiles. Returns (status, message): status is SAVE_OK on success, or
     SAVE_BAD_SYNTAX with a message (and the previous good file is left intact)
-    when `src` won't parse, so a kid's broken edit can never truncate the cart."""
-    ok, msg = compile_check(src)
-    if not ok:
-        return SAVE_BAD_SYNTAX, msg
-    _write_atomic(cart["path"] + "/main.py", src)
+    when `src` won't parse, so a kid's broken edit can never truncate the cart.
+
+    compile_check is the PYTHON compiler, so it only gates python-runtime carts;
+    a "lua" cart (#67) saves unchecked -- its syntax errors surface at PLAY
+    through the runtime's own load error -> the cart-error panel. (A Lua-side
+    pre-save check is the Phase 5 polish, needs the runtime present to check.)"""
+    if cart.get("runtime", "python") == "python":
+        ok, msg = compile_check(src)
+        if not ok:
+            return SAVE_BAD_SYNTAX, msg
+    _write_atomic(cart["path"] + "/" + cart.get("main", "main.py"), src)
     cart["src"] = src
     return SAVE_OK, ""
 
@@ -1404,16 +1476,19 @@ def _unique_dir(root, base):
     return root + "/" + base + "_" + str(i) + ".moy"
 
 
-def create(title, root=CARTS_DIR, src=None, cfg=None, edit=None, type="app"):
-    """Create a new .moy folder and return its loaded cart dict."""
+def create(title, root=CARTS_DIR, src=None, cfg=None, edit=None, type="app",
+           runtime="python", main="main.py"):
+    """Create a new .moy folder and return its loaded cart dict. `runtime`/`main`
+    default to a python cart; duplicate() passes a source cart's through so a
+    copied "lua" cart (#67) stays a lua cart with its source in main.lua."""
     d = _unique_dir(root, slug(title))
     _mkdir(d)
     manifest = {
         "format": CART_FORMAT, "title": title, "type": type,
-        "runtime": "python", "main": "main.py", "edit": edit or [],
+        "runtime": runtime, "main": main, "edit": edit or [],
     }
     _write(d + "/manifest.json", json.dumps(manifest))
-    _write(d + "/main.py", src if src is not None else NEW_TEMPLATE["src"])
+    _write(d + "/" + main, src if src is not None else NEW_TEMPLATE["src"])
     _write(d + "/config.json", json.dumps(cfg or {}))
     return load(d)
 
@@ -1425,7 +1500,8 @@ def new_from_template(root=CARTS_DIR, title="New Cart"):
 
 def duplicate(cart, root=CARTS_DIR, new_title=None):
     return create(new_title or (cart["title"] + " copy"), root,
-                  src=cart["src"], cfg=dict(cart["cfg"]), edit=cart["edit"], type=cart["type"])
+                  src=cart["src"], cfg=dict(cart["cfg"]), edit=cart["edit"], type=cart["type"],
+                  runtime=cart.get("runtime", "python"), main=cart.get("main", "main.py"))
 
 
 def delete(cart):

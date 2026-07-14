@@ -88,6 +88,14 @@ def _nativize(src):
     return "\n".join(out), ins
 
 
+# Deferred pmem persistence (#66): how often a DIRTY pmem persists mid-play.
+# The guaranteed saves are cart exit + crash; this only bounds progress lost to
+# a power pull. Each flush is a ~80-130ms SD write on the T-Deck (measured on
+# glass 2026-07-14, the Letter Blitz "word-event spike"), so the cadence IS the
+# hitch cadence -- keep it a minute, not seconds.
+PMEM_FLUSH_MS = 60000
+
+
 def _ticks_ms():
     try:
         return time.ticks_ms()
@@ -257,6 +265,10 @@ class Player:
         # each use site it answers exactly what _running_cart_shows_bar answers.
         self._is_tool = False
         self._restore_bg = None       # #63: the api's declared-background restore hook
+        self._lua = None              # #67: the running "lua" cart's runtime state (a
+                                      # ws.lua_runtime handle; _close_lua() on exit so a
+                                      # cart's whole Lua heap dies with its run)
+        self._pmem_last = 0           # #66 deferred pmem: last periodic flush (_ticks_ms)
         self._native_ins = None       # #67 spike: nativize's inserted-line map (crash-line fix)
         # Diagnostics for repeat-run regressions (#66 follow-up): one line on cart
         # start and rate-limited slow-logic lines while PERF DIAG is on. Kept here
@@ -289,6 +301,18 @@ class Player:
         self._home_held_since = 0
         self._home_holding = False
 
+    def _close_lua(self):
+        """Tear down the previous run's Lua state (#67), if any. Idempotent and
+        exception-proof: a close() failure must never block the next start or
+        the exit path -- the state is unreachable either way and gc finishes it."""
+        lua = self._lua
+        self._lua = None
+        if lua is not None:
+            try:
+                lua.close()
+            except Exception:  # noqa: BLE001
+                pass
+
     def release_world(self):
         """Drop the dead run's WORLD at EXIT, not at the next start (#66 the
         repeat-run fragmentation fix, glass-fingerprinted 2026-07-10): the ns
@@ -302,6 +326,15 @@ class Player:
         PLACE breaks the globals for every retained function ref; the layer
         reclaim + collect leave a compact heap for the next build. Idempotent;
         safe on the crash path (the error panel reads cart_error, never ns)."""
+        # Deferred pmem (#66): the dying run's last save, BEFORE the world drops
+        # (ws.project still points at this run's Project here -- both exit call
+        # sites run release_world ahead of replacing/slimming it).
+        pm = getattr(self.ws, "pmem", None)
+        if pm is not None:
+            try:
+                pm.flush()
+            except Exception:  # noqa: BLE001
+                pass
         ns = self.ns
         if ns:
             try:
@@ -312,6 +345,7 @@ class Player:
         self._update = None
         self._draw = None
         self._restore_bg = None
+        self._close_lua()          # #67: the dead run's Lua heap goes with its world
         ws = self.ws
         rl = getattr(ws.canvas, "reclaim_layers", None)
         if rl is not None:
@@ -408,6 +442,8 @@ class Player:
         h0 = _heap_stats()
         ws._dirty = True               # a (re)started cart paints its first frame (#44)
         self._reset_exit_state()       # a fresh run drops any half-done exit gesture
+        self._close_lua()              # a re-run replaces the previous run's Lua state
+        self._pmem_last = t0           # periodic pmem flush counts from this run's start
         self._slow_logic_next = 0
         # #75: cache the bar-visibility-by-type rule for this run (see __init__).
         cart = project.cart
@@ -454,6 +490,13 @@ class Player:
         # pristine bytecode compile -- the flag can never break a cart. The
         # inserted-line map keeps crash lines exact (#24) either way.
         src = project.cart["src"]
+        # #67 dual-runtime seam (Phase 2): a non-python cart never touches the
+        # Python compile / auto-native / code-cache path below -- it starts
+        # through the injected Lua runtime instead (same ns, same error panel).
+        _rt = project.cart.get("runtime", "python")
+        if _rt != "python":
+            return self._start_lua(_rt, ns, src, t0, h0,
+                                   (t_reclaim, t_audio, t_api))
         self._native_ins = None
         self._native_fail = None
         code = None
@@ -557,6 +600,69 @@ class Player:
         self._print_run_diag("RUNSTART")
         return True
 
+    def _start_lua(self, runtime, ns, src, t0, h0, t_pre):
+        """Start a "runtime": "lua" cart (#67 Phase 2) through the injected
+        `ws.lua_runtime` factory -- runtime/lua_host.py (lupa) on the host, the
+        moy_lua native module on the device once Phase 1 lands. The cart gets
+        the SAME make_api namespace a Python cart got (the factory registers
+        those callables as the cart's Lua globals), so permission gating, pmem,
+        audio and quit() semantics are identical by construction. No
+        auto-native, no code cache -- those are Python-compiler concerns. A
+        missing runtime or a Lua load/_init error lands on the normal cart
+        error panel (crash-line mapping for Lua tracebacks is Phase 5)."""
+        ws = self.ws
+        t_reclaim, t_audio, t_api = t_pre
+        self._native_ins = None        # RUNSTART diag: no auto-native on this path
+        self._native_fail = None
+        make_lua = getattr(ws, "lua_runtime", None)
+        t5 = _ticks_ms()
+        t_exec = -1
+        t_init = -1
+        lua = None
+        try:
+            if runtime != "lua":
+                raise ValueError("unknown cart runtime '%s'" % runtime)
+            if make_lua is None:
+                # The graceful floor: a lua cart on a build without the runtime
+                # (today: every device build) opens the panel, never a hang.
+                raise RuntimeError("needs the Lua runtime "
+                                   "(not in this build yet)")
+            lua = make_lua(ns, src)
+            t_exec = _ticks_diff(_ticks_ms(), t5)
+            t6 = _ticks_ms()
+            if lua.init is not None:
+                lua.init()
+            t_init = _ticks_diff(_ticks_ms(), t6)
+        except Exception as exc:  # noqa: BLE001 -- load/_init error -> the panel
+            if lua is not None:
+                try:
+                    lua.close()
+                except Exception:  # noqa: BLE001
+                    pass
+            self.cart_error = _err_text(exc)
+            self.crash_line = None
+            self.ns = ns
+            h1 = _heap_stats()
+            self._start_diag = (t_reclaim, t_audio, t_api, 0, t_exec, t_init,
+                                _ticks_diff(_ticks_ms(), t0),
+                                h0[0], h1[0], h0[1], h1[1])
+            self._print_run_diag("RUNERR", "err=%s" % self.cart_error)
+            print("Moybyte cart error:", self.cart_error)
+            return False
+        self._lua = lua
+        self.cart_error = None
+        self.crash_line = None
+        self.ns = ns
+        self._update = lua.update
+        self._draw = lua.draw
+        self._restore_bg = ns.get("_moy_restore_bg")
+        h1 = _heap_stats()
+        self._start_diag = (t_reclaim, t_audio, t_api, 0, t_exec, t_init,
+                            _ticks_diff(_ticks_ms(), t0),
+                            h0[0], h1[0], h0[1], h1[1])
+        self._print_run_diag("RUNSTART")
+        return True
+
     def tick(self, dt, render=True):
         """The running-cart content (game domain): tick the cart _update/_draw + mixer
         (the game loop), then the crash chrome + the transient hold-to-exit toast. Fills
@@ -620,6 +726,27 @@ class Player:
                 # cart exception whose __str__ itself raises would otherwise
                 # escape here -> the silent device hang the panel exists to prevent.
                 print("Moybyte frame error:", self.cart_error)
+                # Deferred pmem (#66): the crash must not eat saved progress --
+                # the cart stops ticking now, so this is its last chance to
+                # persist. Guarded: the panel must paint even if SD is gone.
+                pm = getattr(ws, "pmem", None)
+                if pm is not None:
+                    try:
+                        pm.flush()
+                    except Exception:  # noqa: BLE001
+                        pass
+        # Deferred pmem periodic flush (#66, the Letter Blitz attribution): a
+        # dirty pmem persists at most once per PMEM_FLUSH_MS while the cart
+        # plays -- the guaranteed saves are exit (release_world) and the crash
+        # capture above. Running here, after the frame's update/draw, the
+        # ~100ms SD write lands at a frame boundary (one bounded hitch per
+        # minute) instead of inside the logic slice on every pmem() call.
+        if self.cart_error is None:
+            if _ticks_diff(_ticks_ms(), self._pmem_last) >= PMEM_FLUSH_MS:
+                self._pmem_last = _ticks_ms()
+                pm = getattr(ws, "pmem", None)
+                if pm is not None:
+                    pm.flush()
         # A cart ENDS ITSELF by calling quit() (make_api), which sets input.cart_quit.
         # Honor it now that this frame's _update has run: pop to the run caller and stop
         # (screen leaves "desktop", so this cart won't tick again -- skip the text-mode

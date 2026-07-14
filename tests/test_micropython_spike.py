@@ -3191,3 +3191,31 @@ def test_player_isolation_no_forbidden_names():
         assert forbidden not in player, (
             "player.py names '%s' -- the Player must not reach the store/bar/home grid/"
             "layouts (Stage 2 isolation, plan Section 2)" % forbidden)
+
+
+def test_moy_lua_phase1_wired():
+    """#67 Phase 1: the moy_lua native module exists, is staged by the build,
+    and moy_runtime injects the Lua cart runtime when it imports."""
+    mod = (ROOT / "native" / "moy_lua" / "modmoy_lua.c").read_text(encoding="utf-8")
+    assert "MP_REGISTER_MODULE(MP_QSTR_moy_lua" in mod
+    assert "MP_REGISTER_ROOT_POINTER" in mod          # gc-rooted canvas/sheet/callables
+    assert "begin_batch" in mod                       # the spr_gate run-break upcall
+    assert "luaopen_base" in mod and "luaopen_io" not in mod   # safe stdlib only
+    # vendored VM present (library sources, no standalone mains)
+    lua_dir = ROOT / "native" / "moy_lua" / "lua"
+    assert (lua_dir / "lvm.c").exists() and not (lua_dir / "lua.c").exists()
+    build = (ROOT / "build.sh").read_text(encoding="utf-8")
+    assert "moy_lua/micropython.cmake" in build       # staged into ext_mod
+    # the glue is SHARED (device_api.py stages to the P4 tree); each board's
+    # moy_runtime only wires it, guarded so no-moy_lua builds still boot
+    api_src = (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8")
+    assert "class LuaCartRun" in api_src
+    assert "_LUA_TOKEN" in api_src                    # the Lua writer's batch token
+    runtime_src = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    assert "ws.lua_runtime = make_lua_runtime(ws)" in runtime_src
+    assert "except ImportError" in runtime_src
+    p4 = Path("firmware/esp32_p4_wifi6_touch_lcd_7b")
+    p4_runtime = (p4 / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    assert "ws.lua_runtime = make_lua_runtime(ws)" in p4_runtime
+    assert "moy_lua" in (p4 / "native" / "micropython.cmake").read_text(encoding="utf-8")
+    assert "moy_lua" in (p4 / "build.sh").read_text(encoding="utf-8")

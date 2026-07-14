@@ -130,6 +130,22 @@ if [ -d "${MOY_AUDIO_SRC}" ]; then
   fi
 fi
 
+# Stage the Moybyte moy_lua native C module (#67 Phase 1: vendored Lua 5.4 +
+# the cart bridge -- see native/moy_lua/modmoy_lua.c) into the upstream ext_mod
+# tree, same pattern as moy_audio (ext_mod is wiped on re-clone, so re-stage
+# every build). moy_runtime injects the Lua cart runtime only when this module
+# imports, so a build without it still boots (lua carts panel gracefully).
+MOY_LUA_SRC="${SCRIPT_DIR}/native/moy_lua"
+MOY_LUA_DST="${UPSTREAM_DIR}/ext_mod/moy_lua"
+if [ -d "${MOY_LUA_SRC}" ]; then
+  rm -rf "${MOY_LUA_DST}"
+  cp -r "${MOY_LUA_SRC}" "${MOY_LUA_DST}"
+  EXT_MOD_CMAKE="${UPSTREAM_DIR}/ext_mod/micropython.cmake"
+  if ! grep -q 'moy_lua/micropython.cmake' "${EXT_MOD_CMAKE}"; then
+    sed -i '/moy_audio\/micropython.cmake/a include(${CMAKE_CURRENT_LIST_DIR}/moy_lua/micropython.cmake)' "${EXT_MOD_CMAKE}"
+  fi
+fi
+
 # Stage the shared host/device modules into the frozen modules tree. Canonical
 # sources live in runtime/ (imported by the host as runtime.*); the device freezes
 # these copies as top-level modules, so both consoles run literally the same code:

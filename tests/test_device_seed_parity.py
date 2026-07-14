@@ -40,6 +40,7 @@ TITLE_TO_FOLDER = {
     "Open Machine": "open_machine",
     "My Art": "my_art",
     "Sakura": "sakura",
+    "Sakura Lua": "sakura_lua",
     "Star Catcher": "star_catcher",
     "Pixel Pet": "pet",
     "Tiny Runner": "tiny_runner",
@@ -99,12 +100,16 @@ def test_every_system_cart_has_an_embedded_entry():
         assert TITLE_TO_FOLDER[man["title"]] == folder
 
 
-def test_embedded_src_matches_main_py_byte_for_byte():
+def test_embedded_src_matches_main_byte_for_byte():
+    # The manifest's "main" names the source file (#67: main.lua for a lua cart).
     carts = _carts_by_title()
     for title, cart in carts.items():
         folder = TITLE_TO_FOLDER[title]
-        main = (SYSTEM_CARTS / (folder + ".moy") / "main.py").read_text(encoding="utf-8")
-        assert cart["src"] == main, "embedded src drifted from " + folder + "/main.py"
+        mainf = _manifest(folder).get("main", "main.py")
+        main = (SYSTEM_CARTS / (folder + ".moy") / mainf).read_text(encoding="utf-8")
+        assert cart["src"] == main, "embedded src drifted from " + folder + "/" + mainf
+        assert cart.get("main", "main.py") == mainf
+        assert cart.get("runtime", "python") == _manifest(folder).get("runtime", "python")
 
 
 def test_embedded_sprites_match_sheet_or_both_absent():

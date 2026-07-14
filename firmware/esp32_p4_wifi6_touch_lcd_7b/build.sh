@@ -111,6 +111,10 @@ rm -rf "${STAGED_NATIVE}"
 mkdir -p "${STAGED_NATIVE}"
 cp -r "${TDECK_DIR}/native/moy_gfx" "${STAGED_NATIVE}/moy_gfx"
 cp -r "${TDECK_DIR}/native/moy_alloc" "${STAGED_NATIVE}/moy_alloc"
+# moy_lua (#67 Phase 1): the Lua cart VM + bridge -- plain C (vendored Lua 5.4
+# + py/ API), compiles unchanged on RISC-V; the PSRAM lua_Alloc uses the same
+# heap_caps the S3 does. The glue rides device_api.py (staged below).
+cp -r "${TDECK_DIR}/native/moy_lua" "${STAGED_NATIVE}/moy_lua"
 
 # 2d) Stage the shared PYTHON modules (#58 console staging).
 #     From runtime/ (canonical, same list the T-Deck build stages) -- the whole

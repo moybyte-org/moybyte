@@ -425,6 +425,16 @@ def run_desktop(fps_cap=60):
     ws = Workstation(comp, game, inp, carts,
                      sys_canvas=sys_canvas, font_scale=FONT_SCALE)
     ws.make_api = make_api
+    # #67 Phase 1: the Lua cart runtime (shared glue in device_api.py) -- wired
+    # only when the moy_lua native module is in this build; without it a
+    # "runtime": "lua" cart opens the Player's runtime-missing panel.
+    try:
+        import moy_lua as _moy_lua_probe  # noqa: F401 -- availability probe
+        from device_api import make_lua_runtime
+        ws.lua_runtime = make_lua_runtime(ws)
+        print("Moybyte P4: lua runtime ON")
+    except ImportError:
+        pass
     ws.carts_store = moy_carts
     ws.carts_root = carts_root
     ws.can_manage = carts_root is not None   # internal VFS: no bus gymnastics,

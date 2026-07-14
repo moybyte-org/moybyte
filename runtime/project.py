@@ -38,9 +38,9 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.audio import AudioBank, AudioEngine
 try:
-    from widgets import Pmem, _SilentAudio, _err_text
+    from widgets import Pmem, _SilentAudio, _err_text, _ticks_ms, _ticks_diff
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import Pmem, _SilentAudio, _err_text
+    from runtime.widgets import Pmem, _SilentAudio, _err_text, _ticks_ms, _ticks_diff
 # The block vocabulary/compiler (#29) -- graduation detection recompiles the cart's
 # frozen blocks.json + normalize-compares (Stage 8). Same bare-or-package fallback
 # console.py/block_editor_ui use: bare `blocks` on the device / once host_app aliased
@@ -97,12 +97,23 @@ class Project:
         on_write = None
         if path and ws.carts_store is not None and ws.can_manage:
             def on_write(values, cart=self.cart):
+                # Runs from Pmem.flush() (#66 deferred persistence) -- cart
+                # exit/crash + the Player's periodic flush -- never per pmem()
+                # call anymore: the per-write version of this save WAS Letter
+                # Blitz's 81-130ms "word-event" logic spike (measured on glass
+                # 2026-07-14 by the PMEM diag line below, which stays to show
+                # the deferred cadence; perf_capture-gated like every diag line).
+                t0 = _ticks_ms()
                 try:
                     ws._with_sd(lambda: ws.carts_store.save_pmem(cart, values))
                 except Exception as exc:  # noqa: BLE001
                     # No serial in the device run loop, but a failed pmem write must
                     # not crash the cart -- the kid just loses that one save.
                     print("Moybyte pmem save failed:", _err_text(exc))
+                    return
+                if ws.perf_capture:
+                    print("PMEM save=%dms cart=%s"
+                          % (_ticks_diff(_ticks_ms(), t0), cart.get("title")))
         return Pmem(cells, on_write)
 
     def _build_tilemap(self, cart=None):
@@ -184,22 +195,25 @@ class Project:
         as still round-tripping, so a transient block problem never graduates a kid."""
         cart = self.cart
         prog = cart.get("blocks") if cart else None
+        # The journal entry names the cart's ACTUAL main file (#67: main.lua for a
+        # lua cart), so an undo restores into the file the runtime loads from.
+        mainf = cart.get("main", "main.py") if cart else "main.py"
         if prog is None:
-            self._journal("main.py", src)                 # code-only: never graduates
+            self._journal(mainf, src)                     # code-only: never graduates
             return
         if bool(cart.get("graduated")):
-            self._journal("main.py", src, grad=1)         # sticky one-way door
+            self._journal(mainf, src, grad=1)             # sticky one-way door
             return
         if _blocks_mod.source_roundtrips(prog, src):
-            self._journal("main.py", src, grad=0)         # still blockifiable
+            self._journal(mainf, src, grad=0)             # still blockifiable
             return
         # DIVERGED -> GRADUATE. Baseline first (restore point), then the diverged src.
         try:
             baseline = _blocks_mod.compile_blocks(prog)
-            self._journal("main.py", baseline, grad=0)    # no-op if already the current state
+            self._journal(mainf, baseline, grad=0)        # no-op if already the current state
         except Exception as exc:  # noqa: BLE001 -- shouldn't raise (it just compiled), be safe
             print("Moybyte graduation baseline failed:", _err_text(exc))
-        self._journal("main.py", src, grad=1)             # flips manifest graduated -> True
+        self._journal(mainf, src, grad=1)                 # flips manifest graduated -> True
         cart["graduated"] = True                          # sync the open workspace in RAM
 
     # -- persistence verbs (moved from Workstation's save_* -- Stage 1b) ------

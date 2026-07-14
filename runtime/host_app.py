@@ -763,6 +763,18 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1, windowed=Fals
     # the same moy_carts wifi.json store the device uses. Injected into a cart's
     # namespace ONLY when its manifest grants "network" (see Workstation._start).
     ws.wifi = make_wifi(moy_carts, carts_dir)
+    # #67 dual-runtime seam: the lupa-backed Lua cart runtime, injected only when
+    # lupa is importable (an optional dev dependency) -- without it a "lua" cart
+    # opens the Player's runtime-missing panel, same as today's device builds.
+    try:
+        import lupa  # noqa: F401 -- availability probe only
+        try:
+            from lua_host import make_lua_runtime
+        except ImportError:  # pragma: no cover - package-relative fallback
+            from runtime.lua_host import make_lua_runtime
+        ws.lua_runtime = make_lua_runtime
+    except ImportError:
+        pass
     ws.can_manage = True
     ws.slim_carts()   # #66 live-set diet: drop heavy payloads now the store can reload them
     # The pointer ranges over the SYSTEM canvas (the panel surface the cursor moves

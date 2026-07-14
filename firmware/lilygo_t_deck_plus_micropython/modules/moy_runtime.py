@@ -367,6 +367,16 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     except Exception:  # noqa: BLE001 -- diagnostic only
         pass
     ws.make_audio = make_audio    # device I2S audio backend (#16, NEEDS HW VERIFICATION)
+    # #67 Phase 1: the Lua cart runtime -- wired only when the moy_lua native
+    # module is in this build; without it a "runtime": "lua" cart opens the
+    # Player's runtime-missing panel (the Phase 2 graceful floor).
+    try:
+        import moy_lua as _moy_lua_probe  # noqa: F401 -- availability probe
+        from device_api import make_lua_runtime
+        ws.lua_runtime = make_lua_runtime(ws)
+        _diag_note("carts", "lua runtime ON")
+    except ImportError:
+        pass
     ws.carts_store = moy_carts    # SD .moy store (scan/load/save/create/dup/delete)
     ws.carts_root = carts_root
     # Writes are enabled on-device via moy_sd: it attaches the SD card to the SPI

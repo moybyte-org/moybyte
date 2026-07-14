@@ -1,0 +1,72 @@
+/* Moybyte #67: the MicroPython esp32 port compiles usermod sources at -Os;
+   the VM's dispatch loops want speed (S3 A/B: sakura _update ~10ms here vs the
+   #6 spike's 2.69ms at -O2 on the same silicon). In-source pragma per the #77
+   lesson: cmake source-file properties never reach the linked objects. */
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC optimize("O2")
+#endif
+
+/*
+** $Id: lctype.c $
+** 'ctype' functions for Lua
+** See Copyright Notice in lua.h
+*/
+
+#define lctype_c
+#define LUA_CORE
+
+#include "lprefix.h"
+
+
+#include "lctype.h"
+
+#if !LUA_USE_CTYPE	/* { */
+
+#include <limits.h>
+
+
+#if defined (LUA_UCID)		/* accept UniCode IDentifiers? */
+/* consider all non-ascii codepoints to be alphabetic */
+#define NONA		0x01
+#else
+#define NONA		0x00	/* default */
+#endif
+
+
+LUAI_DDEF const lu_byte luai_ctype_[UCHAR_MAX + 2] = {
+  0x00,  /* EOZ */
+  0x00,  0x00,  0x00,  0x00,  0x00,  0x00,  0x00,  0x00,	/* 0. */
+  0x00,  0x08,  0x08,  0x08,  0x08,  0x08,  0x00,  0x00,
+  0x00,  0x00,  0x00,  0x00,  0x00,  0x00,  0x00,  0x00,	/* 1. */
+  0x00,  0x00,  0x00,  0x00,  0x00,  0x00,  0x00,  0x00,
+  0x0c,  0x04,  0x04,  0x04,  0x04,  0x04,  0x04,  0x04,	/* 2. */
+  0x04,  0x04,  0x04,  0x04,  0x04,  0x04,  0x04,  0x04,
+  0x16,  0x16,  0x16,  0x16,  0x16,  0x16,  0x16,  0x16,	/* 3. */
+  0x16,  0x16,  0x04,  0x04,  0x04,  0x04,  0x04,  0x04,
+  0x04,  0x15,  0x15,  0x15,  0x15,  0x15,  0x15,  0x05,	/* 4. */
+  0x05,  0x05,  0x05,  0x05,  0x05,  0x05,  0x05,  0x05,
+  0x05,  0x05,  0x05,  0x05,  0x05,  0x05,  0x05,  0x05,	/* 5. */
+  0x05,  0x05,  0x05,  0x04,  0x04,  0x04,  0x04,  0x05,
+  0x04,  0x15,  0x15,  0x15,  0x15,  0x15,  0x15,  0x05,	/* 6. */
+  0x05,  0x05,  0x05,  0x05,  0x05,  0x05,  0x05,  0x05,
+  0x05,  0x05,  0x05,  0x05,  0x05,  0x05,  0x05,  0x05,	/* 7. */
+  0x05,  0x05,  0x05,  0x04,  0x04,  0x04,  0x04,  0x00,
+  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,	/* 8. */
+  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,
+  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,	/* 9. */
+  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,
+  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,	/* a. */
+  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,
+  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,	/* b. */
+  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,
+  0x00,  0x00,  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,	/* c. */
+  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,
+  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,	/* d. */
+  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,
+  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,	/* e. */
+  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,  NONA,
+  NONA,  NONA,  NONA,  NONA,  NONA,  0x00,  0x00,  0x00,	/* f. */
+  0x00,  0x00,  0x00,  0x00,  0x00,  0x00,  0x00,  0x00
+};
+
+#endif			/* } */
