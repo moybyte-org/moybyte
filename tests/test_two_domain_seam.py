@@ -103,12 +103,12 @@ def test_desktop_reflows_on_a_larger_canvas(tmp_path):
     ws = _ws(tmp_path, sys_size=(640, 480))
     assert ws.sys_canvas is not ws.canvas
     assert (ws.sys_canvas.w, ws.sys_canvas.h) == (640, 480)
-    # The Library shelf reflows to the canvas (one tall featured slot + ROWS x
-    # (COLS-1) cartridge cards per page). Columns are RESOLUTION-driven (cards
-    # target ~w/5, the mockup's proportions) -- a bigger canvas buys bigger
-    # cards and crisper 1x text, not magnification.
+    # The Library shelf reflows to the canvas (the one tall featured slot at the
+    # head of a continuously left-right SCROLLING card list). Columns are
+    # RESOLUTION-driven (cards target ~w/5, the mockup's proportions) -- a
+    # bigger canvas buys bigger cards and crisper 1x text, not magnification.
     assert ws.launcher.COLS >= 4 and ws.launcher.ROWS >= 2
-    assert ws.launcher.PAGE == ws.launcher.ROWS * (ws.launcher.COLS - 1) + 1
+    assert ws.layout.grid_content_w(len(ws.launcher.items)) > 0
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)
     buf = drv.rgb888()
@@ -242,10 +242,11 @@ def test_font_scale_is_inert_without_a_system_canvas(tmp_path):
     assert ws.layout.fs == 1                             # layout stays the baseline
     assert ws.layout._base                               # i.e. exactly today's geometry
     assert moy_carts.load_system(carts_dir).get("font_scale") == 3   # persisted
-    # It renders without error and the desktop is still the 320x240 baseline grid.
+    # It renders without error and the desktop is still the 320x240 baseline
+    # shelf (3 columns at the small tier's card proportions).
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)
-    assert ws.launcher.COLS == 4 and ws.launcher.ROWS == 2
+    assert ws.launcher.COLS == 3 and ws.launcher.ROWS == 2
 
 
 def test_composite_safe_when_system_canvas_smaller_than_game(tmp_path):

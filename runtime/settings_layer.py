@@ -105,6 +105,7 @@ class SettingsLayer:
         self.set_msel = 0             # selected row in the Settings screen
         self.set_top = 0              # first visible Settings row (scroll offset, #53)
         self.scroll = None            # lazy ui.ScrollRegion (drag + scrollbar)
+        self._taps = None             # lazy ui.DragTap over it (tap-vs-drag)
         # The WIFI panel (#38, spec §10): a Settings SUB-VIEW over the injected
         # ws.wifi service -- scan list -> pick -> (password) -> connect/forget.
         self.wifi_view = False        # the wifi panel replaces the row list
@@ -478,6 +479,7 @@ class SettingsLayer:
         scrollbar, synced from set_top when a drag is not active."""
         if self.scroll is None:
             self.scroll = _ui.ScrollRegion()
+            self._taps = _ui.DragTap(self.scroll)
         ws = self.ws
         lay = ws.layout
         rows = self._settings_rows()
@@ -487,29 +489,28 @@ class SettingsLayer:
         # Keep the sub-row remainder while a drag is active.  Re-snapping from
         # set_top on every pointer sample discards normal 3-5px finger movement,
         # so a gradual drag can never accumulate enough travel to cross a row.
-        if self.scroll._drag_y is None:
+        if not self.scroll.drag_active:
             self.scroll.offset = self.set_top * lay.set_row_h
         return self.scroll
 
-    def _rows_drag(self, px, py):
-        """Touch drag on the row list scrolls it (rows follow the finger), snapped
-        to whole rows -- set_top stays the state of record. Pure behavior: no
-        pixels change on a tier that doesn't draw the scrollbar."""
+    def _rows_pointer(self, px, py, click):
+        """The row list's pointer machine -- the SAME shared ui.DragTap the
+        Library shelf rides: a held drag scrolls the rows (snapped to whole
+        rows; set_top stays the state of record), and a row activates only on
+        a clean tap RELEASE -- so letting go of a scroll can never 'click' the
+        row under the finger. Returns True when it consumed a tap."""
         ws = self.ws
         sr = self._scroll_region()
-        if not ws.pointer.down:
-            sr.drag_end()
-            return
-        if sr._drag_y is None:
-            if not self._in(px, py, sr.view):
-                return                     # a drag must START on the rows...
-            sr.drag_start(py)
-            return
-        sr.drag_move(py)                   # ...but may continue past the edge
-        rows = len(self._settings_rows())
-        vis = self._settings_visible()
-        top = sr.offset // ws.layout.set_row_h
-        self.set_top = max(0, min(max(0, rows - vis), top))
+        press = self._taps.frame(px, py, click, ws.pointer.down,
+                                 slop=4 * ws.layout.fs + 2)
+        if self._taps.dragging:
+            rows = len(self._settings_rows())
+            vis = self._settings_visible()
+            top = sr.offset // ws.layout.set_row_h
+            self.set_top = max(0, min(max(0, rows - vis), top))
+        if press is not None:
+            return self._row_tap(press[0], press[1])
+        return False
 
     def _settings_visible(self):
         """How many Settings rows fit in the panel at the current font scale (#39)."""
@@ -569,7 +570,10 @@ class SettingsLayer:
     def handle_pointer(self, px, py, click):
         ws = self.ws
         if not self.wifi_view and not ws.show_achievements:
-            self._rows_drag(px, py)       # touch drag scrolls the row list
+            # The rows' shared press/drag/release machine: scrolls on drag,
+            # activates a row only on a clean tap release.
+            if self._rows_pointer(px, py, click):
+                return True
         if not click:
             return True
         # The achievements view is a modal overlay: while it's up, any tap closes it
@@ -605,6 +609,12 @@ class SettingsLayer:
         if slot is not None:
             ws.bar_layer._activate_dock(slot)
             return True
+        return True
+
+    def _row_tap(self, px, py):
+        """Activate the settings row under a clean tap (dispatched from
+        _rows_pointer on the RELEASE, never the press edge)."""
+        ws = self.ws
         edge = 5 * ws.layout.font_w           # the "<"/">" hit zone (40px at fs=1)
         rows = self._settings_rows()
         for i in range(len(rows)):
@@ -631,7 +641,7 @@ class SettingsLayer:
                 elif px <= x + edge:
                     self.settings_adjust(-1)
                 return True
-        return True
+        return False
 
     # -- draw ----------------------------------------------------------------
 

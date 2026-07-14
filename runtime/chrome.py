@@ -269,50 +269,56 @@ class Layout:
         self.icon_box = _ICON_BOX * fs
         self.icon_y0 = self.status_h + 8 * fs
         self.grid_bottom = self.h - 4 * fs           # launcher grid floor (no dock)
-        if self._base:
-            self.cols, self.rows = _ICON_COLS, _ICON_ROWS
-            self.icon_x0 = _ICON_X0
-            self.page = self.cols * self.rows
-        else:
-            # DESKTOP density: the Library SHELF (visual identity v1's library
-            # concept mockup) -- a framed panel (header "LIBRARY" + footer pager)
-            # over the dark construction field, whose grid has ONE tall FEATURED
-            # slot (column 0, spanning both rows: the pinned MAKE/+New card, or a
-            # featured cart on later pages) + rows x (cols-1) cartridge cards with
-            # cover art, a title band, and the selected card's PLAY/CHANGE row.
-            self.icon_x0 = _ICON_X0 * fs                 # legacy attr (unused here)
-            # RESOLUTION-driven, not font-scale-driven (owner call, 2026-07-12:
-            # "everything is 1x; two resolutions"): the shelf's proportions come
-            # from the canvas size -- the mockup's 4 big columns at 1024x600 --
-            # with fs-multiples only as floors so a kid who picks a bigger
-            # Settings font never gets clipped chrome. At 1024x600 the geometry
-            # is near-identical at fs 1 and 2; fs 1 just fits crisper text.
-            mx = max(16 * fs, self.w // 20)
-            pt = self.status_h + max(8 * fs, self.h // 24)
-            pb = max(16 * fs, self.h // 14)
-            self.lib_panel = (mx, pt, self.w - 2 * mx, self.h - pt - pb)
-            self.lib_header_h = max(26 * fs, self.h // 12)
-            self.lib_footer_h = max(20 * fs, self.h // 15)
-            self.lib_gap = max(6 * fs, self.w // 64)
-            # Display-type multiplier: the shelf's headings hold ~32px regardless
-            # of the body font scale (petme128 x4 at fs1, x2 at fs2).
-            self.lib_mult = max(1, 4 // fs)
-            inset = max(10 * fs, self.w // 42)
-            px_, py_, pw_, ph_ = self.lib_panel
-            gx = px_ + inset
-            gy = py_ + self.lib_header_h
-            gw = pw_ - 2 * inset
-            gh = ph_ - self.lib_header_h - self.lib_footer_h - 4 * fs
-            self.cols = max(3, min(6, (gw + self.lib_gap) //
-                                   (self.w // 5 + self.lib_gap)))
-            self.rows = 2
-            self.lib_card_w = (gw - (self.cols - 1) * self.lib_gap) // self.cols
-            self.lib_card_h = (gh - self.lib_gap) // 2
-            # Center the integer-division slack so the grid sits square in the panel.
-            span = self.cols * self.lib_card_w + (self.cols - 1) * self.lib_gap
-            gx += max(0, (gw - span) // 2)
-            self.lib_grid = (gx, gy, gw, gh)
-            self.page = self.rows * (self.cols - 1) + 1   # tall slot + 2x(cols-1)
+        self.icon_x0 = _ICON_X0 if self._base else _ICON_X0 * fs   # legacy attr
+        # The Library SHELF (visual identity v1's library concept mockup) on EVERY
+        # tier -- the T-Deck's 320x240 baseline included (owner call, 2026-07-13:
+        # one launcher look everywhere). A framed panel (header "LIBRARY" + footer
+        # count) whose card grid SCROLLS continuously LEFT-RIGHT (owner call,
+        # 2026-07-13: a shelf slides sideways; no pages): slot 0 is the ONE tall
+        # FEATURED card (the pinned MAKE/+New, column 0 spanning both visible
+        # rows at the head of the list); every other cartridge card stacks the
+        # columns marching right, `rows` per column.
+        # RESOLUTION-driven, not font-scale-driven (owner call, 2026-07-12:
+        # "everything is 1x; two resolutions"): the shelf's proportions come
+        # from the canvas size -- the mockup's 4 big columns at 1024x600 --
+        # with fs-multiples only as floors so a kid who picks a bigger
+        # Settings font never gets clipped chrome. At 1024x600 the geometry
+        # is near-identical at fs 1 and 2; fs 1 just fits crisper text.
+        mx = max(16 * fs, self.w // 20)
+        pt = self.status_h + max(8 * fs, self.h // 24)
+        pb = max(16 * fs, self.h // 14)
+        self.lib_panel = (mx, pt, self.w - 2 * mx, self.h - pt - pb)
+        self.lib_header_h = max(26 * fs, self.h // 12)
+        self.lib_footer_h = max(20 * fs, self.h // 15)
+        self.lib_gap = max(6 * fs, self.w // 64)
+        # Display-type multiplier: the shelf's headings hold ~32px at desktop
+        # widths regardless of the body font scale (petme128 x4 at fs1, x2 at
+        # fs2), and never wider than the tier can hold -- the 320-wide baseline
+        # renders them at body size.
+        self.lib_mult = max(1, min(4 // fs, self.w // 256))
+        inset = max(10 * fs, self.w // 42)
+        px_, py_, pw_, ph_ = self.lib_panel
+        gx = px_ + inset
+        gy = py_ + self.lib_header_h
+        gw = pw_ - 2 * inset
+        gh = ph_ - self.lib_header_h - self.lib_footer_h - 4 * fs
+        self.cols = max(3, min(6, (gw + self.lib_gap) //
+                               (self.w // 5 + self.lib_gap)))
+        self.rows = 2                                # VISIBLE rows (grid look)
+        self.lib_card_w = (gw - (self.cols - 1) * self.lib_gap) // self.cols
+        self.lib_card_h = (gh - self.lib_gap) // 2
+        self.lib_step = self.lib_card_w + self.lib_gap   # one-column scroll step
+        self.lib_grid = (gx, gy, gw, gh)
+        # Whether a card is big enough to carry its own PLAY/CHANGE button row
+        # (visual identity v1 Section 1.2): the row + title band (the exact
+        # heights the card draw uses) must leave the cover art at least half the
+        # card. Small-card tiers (the 320x240 baseline's ~69px-tall cards) keep
+        # the verbs as lent-bar-zone chips instead (Section 7: on the small tier
+        # selected actions use the zoned bar).
+        band_h = max(14 * fs, 20)
+        btn_area = max(13 * fs, 22) + 2 * max(2 * fs, 3)
+        self.lib_card_actions = (
+            self.lib_card_h - band_h - btn_area >= self.lib_card_h // 2)
 
         # -- unified top bar: icon size + clusters (Stage 1) -------------------
         # Every bar control is a 16x16 IconSheet sprite (16px icons, 1px margin in the
@@ -361,19 +367,18 @@ class Layout:
         # right zone's clock text -- the rect BarLayer hands to draw_zone/zone_tap.
         self.zone_left = (edge, _BAR_Y, max(0, self.clock_x - 2 * edge), ic)
 
-        # -- page chevrons ---------------------------------------------------
-        # Base: the frozen mid-band hit rects. Shelf tiers: boxed arrow buttons
-        # in the Library panel footer's corners (the mockup's pager).
-        if self._base:
-            self.page_prev, self.page_next = _PAGE_PREV, _PAGE_NEXT
-        else:
-            px_, py_, pw_, ph_ = self.lib_panel
-            ah = max(16 * fs, self.lib_footer_h * 2 // 3)   # touch-target floor at fs1
-            aw = max(22 * fs, 30)
-            am = max(10 * fs, 20)
-            ay = py_ + ph_ - self.lib_footer_h + (self.lib_footer_h - ah) // 2
-            self.page_prev = (px_ + am, ay, aw, ah)
-            self.page_next = (px_ + pw_ - am - aw, ay, aw, ah)
+        # -- scroll nudge arrows (the pager's successors) ----------------------
+        # Boxed left/right arrow buttons in the Library panel footer's corners:
+        # each tap slides the card grid by one column (drag + scrollbar +
+        # keyboard nav are the primary scroll affordances; these are the big
+        # tap targets).
+        px_, py_, pw_, ph_ = self.lib_panel
+        ah = max(16 * fs, self.lib_footer_h * 2 // 3)   # touch-target floor at fs1
+        aw = max(22 * fs, 30)
+        am = max(10 * fs, 20)
+        ay = py_ + ph_ - self.lib_footer_h + (self.lib_footer_h - ah) // 2
+        self.scroll_lt = (px_ + am, ay, aw, ah)
+        self.scroll_rt = (px_ + pw_ - am - aw, ay, aw, ah)
 
         # -- Settings rows + panel (scale row height with the font) --------------
         self.set_row_h = _SET_ROW_H * fs
@@ -408,27 +413,45 @@ class Layout:
         return (self.set_x, self.set_row_y0 + i * self.set_row_h,
                 self.set_w, self.set_row_h - 2)
 
-    def tile_rect(self, i, page):
-        """Grid-cell rect for cart index `i` on `page`, or None if off that page.
-        On the shelf tiers (non-base) slot 0 of every page is the TALL featured
-        card (column 0, both rows); the rest fill rows x (cols-1) card cells."""
-        start = page * self.page
-        if i < start or i >= start + self.page:
+    def tile_cell(self, i):
+        """(row, col) of grid slot `i` in the shelf packing. Slot 0 is the ONE
+        tall featured card -- column 0 spanning BOTH visible rows (its row
+        reads 0); slots 1.. stack the columns marching right, `rows` cards per
+        column, top to bottom."""
+        if i <= 0:
+            return (0, 0)
+        j = i - 1
+        return (j % self.rows, 1 + j // self.rows)
+
+    def tile_index(self, row, col):
+        """Inverse of tile_cell: the grid slot at (row, col) -- column 0 is
+        the tall slot 0 at any row. No bounds check (callers clamp to n)."""
+        if col <= 0:
+            return 0
+        return 1 + (col - 1) * self.rows + row
+
+    def tile_rect(self, i, scroll=0):
+        """Grid-cell rect for cart index `i` at pixel scroll offset `scroll`, or
+        None when the cell lies fully outside the grid viewport (the card list
+        SCROLLS continuously left-right -- there are no pages). Partially
+        visible cells DO return their rect; the draw clips them."""
+        gx, gy, gw, gh = self.lib_grid
+        cw, ch, gap = self.lib_card_w, self.lib_card_h, self.lib_gap
+        row, col = self.tile_cell(i)
+        hh = 2 * ch + gap if i == 0 else ch
+        x = gx + col * (cw + gap) - scroll
+        if x + cw <= gx or x >= gx + gw:
             return None
-        k = i - start
-        if not self._base:
-            gx, gy, gw, gh = self.lib_grid
-            cw, ch, gap = self.lib_card_w, self.lib_card_h, self.lib_gap
-            if k == 0:
-                return (gx, gy, cw, gh)
-            row = 0 if k <= self.cols - 1 else 1
-            col = k if row == 0 else k - (self.cols - 1)
-            return (gx + col * (cw + gap), gy + row * (ch + gap), cw, ch)
-        col = k % self.cols
-        row = k // self.cols
-        x = self.icon_x0 + col * (self.icon_w + self.icon_gap_x)
-        y = self.icon_y0 + row * (self.icon_h + self.icon_gap_y)
-        return (x, y, self.icon_w, self.icon_h)
+        return (x, gy + row * (ch + gap), cw, hh)
+
+    def grid_content_w(self, n):
+        """Total scrollable content width for n grid items (at least the tall
+        slot 0's own column)."""
+        if n <= 0:
+            return 0
+        cw, gap = self.lib_card_w, self.lib_gap
+        _row, last_col = self.tile_cell(n - 1)
+        return last_col * (cw + gap) + cw
 
     def clock_hit(self):
         # The clock-text region in the top bar's right cluster (Time Traveler egg #21).

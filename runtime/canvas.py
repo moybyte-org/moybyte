@@ -58,6 +58,13 @@ class Canvas:
     # the user's settings-chosen scale; _blit_glyph reads it so icon glyphs follow
     # the text size. Kept on the base so every backend exposes it uniformly.
     font_scale = 1
+    # PARTIAL-repaint capability (the Library shelf's drag fast path): how many
+    # frames back this backend's pixels persist. The host buffer is one
+    # persistent bytearray (every past frame's pixels are still there -> 1);
+    # the device's ping-pong double buffer holds the frame before last (-> 2 on
+    # DeviceCanvas); a RECORDING canvas (web) retains nothing and leaves the
+    # attribute absent, so getattr(..., 0) keeps it on full frames.
+    RETAINED_FRAMES = 1
 
     def __init__(self, width=480, height=270, palette=None):
         self.w = width

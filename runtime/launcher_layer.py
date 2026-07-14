@@ -47,10 +47,11 @@ _in = _ui.rect_in   # one hit-test (ui.rect_in)
 
 # Display-type helpers for the Library shelf (visual identity v1's library-concept
 # mockup): block-scaled petme128 headings that render identically on every canvas.
+# The tick helpers feed the perf_capture-gated home-frame split (see draw below).
 try:
-    from chrome import _print_scaled, _text_w
+    from chrome import _print_scaled, _text_w, _ticks_ms, _ticks_diff
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.chrome import _print_scaled, _text_w
+    from runtime.chrome import _print_scaled, _text_w, _ticks_ms, _ticks_diff
 
 
 def _wrap_words(text, maxc):
@@ -101,16 +102,19 @@ _TYPE_COLOR = {"wallpaper": 12, "game": 8, "app": 11, "tool": 9,
 
 
 class Launcher:
-    """The desktop home (#28): carts laid out as a PAGED GRID of tappable icon
-    tiles over the wallpaper backdrop, instead of a flat vertical strip. Keeps the
-    selection model (items/sel/selected/move) the rest of the console relies on;
-    `page`/PAGE is the grid's scroll unit (one screen of COLS x ROWS icons).
+    """The desktop home (#28): carts laid out as the Library SHELF -- a card grid
+    that SCROLLS continuously LEFT-RIGHT (a shelf slides sideways; no pages)
+    with the ONE tall featured card (the pinned MAKE/+New) at the head of the
+    list. Keeps the selection model (items/sel/selected/move) the rest of the
+    console relies on; `scroll` is the grid's pixel offset, owned here and
+    ridden through a ui.ScrollRegion + ui.DragTap (touch drag + the slim
+    scrollbar + tap-vs-drag disambiguation).
 
     The grid geometry comes from an injected `Layout` (#39) so it reflows with the
-    system canvas size + font scale; COLS/ROWS/PAGE are instance attributes mirrored
-    from the live layout (so callers reading them, and the selection/paging model,
-    track the reflowed grid). A bare Launcher(items) (unit construction) falls back
-    to the 320x240 / scale-1 baseline -- exactly today's 4x2/PAGE=8 grid.
+    system canvas size + font scale; COLS/ROWS are instance attributes mirrored
+    from the live layout (so callers reading them, and the selection model, track
+    the reflowed grid). A bare Launcher(items) (unit construction) falls back to
+    the 320x240 / scale-1 baseline shelf.
 
     `names` (the palette) + `blit_glyph` (the shared glyph blitter) are injected so the
     tile draw stays free of a console back-import."""
@@ -130,7 +134,17 @@ class Launcher:
         # key so the zoned strip re-renders only on a real change.
         self.zone_gen = 0
         self.sel = 0
-        self.page = 0
+        # Continuous scroll state: `_scroll` (raw px, the state of record) is
+        # clamped LAZILY against the live layout (the `scroll` property), so the
+        # windowed tier's per-window layout swaps (wm_windowed set_layout's on
+        # every context switch) can never destroy a position. `_region` is the
+        # touch INTERACTION model (a HORIZONTAL ui.ScrollRegion: drag + the slim
+        # scrollbar), synced from `_scroll` whenever a drag isn't active -- the
+        # Settings-rows pattern (settings_layer._scroll_region); `_taps` is the
+        # shared tap-vs-drag machine over it.
+        self._scroll = 0
+        self._region = _ui.ScrollRegion(horizontal=True)
+        self._taps = _ui.DragTap(self._region)
         self._NAMES = names
         self._blit_glyph = blit_glyph
         self.theme = None             # chrome THEME tokens (ws.set_theme pushes them);
@@ -151,14 +165,15 @@ class Launcher:
         self.set_layout(layout)
 
     def set_layout(self, layout):
-        """Adopt a new grid layout (size/font-scale change) and re-clamp the page so
-        the selection stays on a valid screen. Mirrors COLS/ROWS/PAGE as instance
-        attributes for the callers/tests that read them directly."""
+        """Adopt a new grid layout (size/font-scale change). Mirrors COLS/ROWS as
+        instance attributes for the callers/tests that read them directly. The
+        scroll offset is deliberately NOT re-clamped here (it clamps lazily on
+        read) -- the windowed tier applies every window's layout to BOTH grids on
+        each context switch, and an eager clamp against a small window would lose
+        the desktop grid's position."""
         self.layout = layout
         self.COLS = layout.cols
         self.ROWS = layout.rows
-        self.PAGE = layout.page
-        self._clamp_page()
 
     # -- selection ----------------------------------------------------------
 
@@ -169,7 +184,7 @@ class Launcher:
     @sel.setter
     def sel(self, value):
         # Stage 4 (#46 zoned bar): bump zone_gen on every ACTUAL change, regardless
-        # of call site (nav2d / flip_page / a tap / trackball hover all assign
+        # of call site (nav2d / a tap / trackball hover all assign
         # `.sel` directly) -- this is what lets BarLayer's cache key trust
         # `zone_gen` instead of re-deriving "did the selection move" itself.
         if value != getattr(self, "_sel", None):
@@ -178,78 +193,130 @@ class Launcher:
 
     def set_items(self, items):
         """Replace the cart list (after a create/duplicate/delete) and re-clamp the
-        selection + page so neither dangles past the new end. The public re-sync
-        entry point -- callers must not poke the private page bookkeeping."""
+        selection + scroll so neither dangles past the new end. The public re-sync
+        entry point -- callers must not poke the private scroll bookkeeping."""
         self.items = items
         self.zone_gen += 1          # a rename/new/dup/del can change the title text
                                     # the lent zone shows even when sel is unchanged
         if self.sel >= len(items):
             self.sel = max(0, len(items) - 1)
-        self._page_to_sel()
+        self._scroll_to_sel()
 
     def nav2d(self, dx, dy):
-        """Grid navigation: dx steps a column, dy steps a row. Clamped within the
-        list (no wrap) so arrow nav feels like a real grid. On the shelf tiers
-        (non-base) slot 0 spans both rows (the tall featured card), so horizontal
-        nav walks the linear order and vertical nav hops between the two card
-        rows -- the tall card itself has no vertical neighbor."""
+        """Grid navigation: dx hops a card COLUMN (the shelf's scroll axis --
+        the layout's packing maps columns<->indices; the tall featured slot 0
+        is the whole of column 0), dy steps within the column. Clamped within
+        the list (no wrap) so arrow nav feels like a real grid, and the scroll
+        follows the selection."""
         n = len(self.items)
         if not n:
             return
-        if self.layout._base:
-            step = dx + dy * self.COLS
-            self.sel = max(0, min(n - 1, self.sel + step))
-            self._page_to_sel()
-            return
-        cols = self.COLS
-        base = self.page * self.PAGE
-        k = self.sel - base
+        lay = self.layout
+        row, col = lay.tile_cell(self.sel)
         if dx:
-            self.sel = max(0, min(n - 1, self.sel + dx))
-        elif dy > 0 and 1 <= k <= cols - 1:            # row 0 -> row 1
-            nk = k + (cols - 1)
-            if base + nk < n:
-                self.sel = base + nk
-        elif dy < 0 and k >= cols:                     # row 1 -> row 0
-            self.sel = base + (k - (cols - 1))
-        self._page_to_sel()
+            col += dx
+            if col <= 0:
+                self.sel = 0               # back onto the tall card
+            else:
+                self.sel = max(0, min(n - 1, lay.tile_index(row, col)))
+        elif dy and self.sel > 0:          # the tall card spans both rows
+            row = max(0, min(lay.rows - 1, row + dy))
+            self.sel = max(0, min(n - 1, lay.tile_index(row, col)))
+        self._scroll_to_sel()
 
-    def _page_to_sel(self):
-        self.page = self.sel // self.PAGE
-        self._clamp_page()
+    # -- continuous scroll (no pages) ----------------------------------------
 
-    def max_page(self):
-        n = len(self.items)
-        return max(0, (n - 1) // self.PAGE) if n else 0
+    @property
+    def scroll(self):
+        """The effective pixel scroll offset: the raw position clamped against
+        the LIVE layout (lazy, see set_layout)."""
+        return max(0, min(self._scroll, self.max_scroll()))
 
-    def _clamp_page(self):
-        self.page = max(0, min(self.max_page(), self.page))
+    @scroll.setter
+    def scroll(self, value):
+        self._scroll = max(0, min(int(value), self.max_scroll()))
 
-    def flip_page(self, d):
-        """Page the grid by d screens (chevron tap), moving the selection onto the
-        first tile of the new page so keyboard nav continues from there."""
-        self.page = max(0, min(self.max_page(), self.page + d))
-        first = self.page * self.PAGE
-        if self.items and not (first <= self.sel < first + self.PAGE):
-            self.sel = min(len(self.items) - 1, first)
+    @property
+    def dragging(self):
+        """True while a touch drag (past the slop) is scrolling the grid."""
+        return self._taps.dragging
+
+    def max_scroll(self):
+        lay = self.layout
+        return max(0, lay.grid_content_w(len(self.items)) - lay.lib_grid[2])
+
+    def scroll_cols(self, d):
+        """Nudge the grid by d card columns (the footer arrow buttons)."""
+        self.scroll = self.scroll + d * self.layout.lib_step
+
+    def _scroll_to_sel(self):
+        """Keep the selected card fully inside the grid viewport (keyboard nav)."""
+        lay = self.layout
+        gw = lay.lib_grid[2]
+        _row, col = lay.tile_cell(self.sel)
+        x = col * lay.lib_step                   # content-relative card left
+        cw = lay.lib_card_w
+        s = self.scroll
+        if x < s:
+            s = x
+        elif x + cw > s + gw:
+            s = x + cw - gw
+        self.scroll = s
+
+    def _scroll_region(self):
+        """The grid's ui.ScrollRegion, synced to the live layout + item count.
+        `_scroll` stays the state of record; the region owns the offset only
+        while a touch drag is active (the Settings-rows pattern -- re-snapping
+        every sample would discard sub-slop finger travel)."""
+        lay = self.layout
+        self._region.set(lay.lib_grid, lay.grid_content_w(len(self.items)))
+        if not self._region.drag_active:
+            self._region.offset = self.scroll
+        return self._region
+
+    def pointer_frame(self, px, py, click, down):
+        """One pointer sample over the grid, fed through the shared ui.DragTap
+        machine: returns the tapped tile index on a clean RELEASE (press and
+        release on the same card with no drag travel), else None -- so a
+        scroll gesture can never launch a cart. `click` is the press edge,
+        `down` the held state (ws.pointer.down)."""
+        region = self._scroll_region()
+        press = self._taps.frame(px, py, click, down,
+                                 slop=4 * self.layout.fs + 2)
+        if self._taps.dragging:
+            self._scroll = region.offset       # the grid follows the finger
+        if press is None:
+            return None
+        i = self.tile_at(press[0], press[1])
+        if i is not None and i == self.tile_at(px, py):
+            return i
+        return None
 
     def selected(self):
         return self.items[self.sel] if self.items else None
 
-    def _page_range(self):
-        start = self.page * self.PAGE
-        return range(start, min(len(self.items), start + self.PAGE))
+    def _visible(self):
+        """(index, rect) for every card intersecting the grid viewport at the
+        current scroll (partially clipped cards included -- the draw clips)."""
+        s = self.scroll
+        lay = self.layout
+        for i in range(len(self.items)):
+            r = lay.tile_rect(i, s)
+            if r is not None:
+                yield i, r
 
     def tile_rect(self, i):
-        """The grid-cell rect for cart index i, or None if it's not on the current
-        page. Cells lay out left-to-right, top-to-bottom in the icon area (geometry
-        from the live Layout, so it reflows with the system canvas / font scale)."""
-        return self.layout.tile_rect(i, self.page)
+        """The grid-cell rect for cart index i at the current scroll, or None if
+        it's outside the grid viewport (geometry from the live Layout, so it
+        reflows with the system canvas / font scale)."""
+        return self.layout.tile_rect(i, self.scroll)
 
     def tile_at(self, px, py):
-        for i in self._page_range():
-            r = self.tile_rect(i)
-            if r and _in(px, py, r):
+        gx, gy, gw, _gh = self.layout.lib_grid
+        if not (gx <= px < gx + gw):         # the clipped part of a card is not
+            return None                      # tappable -- viewport-bounded hits
+        for i, r in self._visible():
+            if _in(px, py, r):
                 return i
         return None
 
@@ -257,13 +324,14 @@ class Launcher:
         """The selected card's PLAY / CHANGE button rects as {"play": r, "change": r}
         (visual identity v1 Sections 1.2/6.1: the selected cartridge exposes the two
         verbs; primary activation still always plays). The mockup's in-card row along
-        the card's bottom edge, under the title band. DESKTOP-density tiers only:
-        returns None on the 320x240 baseline (the lent bar zone carries the verbs
-        there -- LauncherHomeLayer.draw_zone), when `actions` is off (the picker),
-        for a pseudo tile (Make has one verb, its tap), or when the selection is off
-        the current page. Draw and hit-test both read this, so they can't desync."""
+        the card's bottom edge, under the title band. Wide-card tiers only: returns
+        None when the cards are too narrow for the row (lay.lib_card_actions -- the
+        lent bar zone carries the verbs there, LauncherHomeLayer.draw_zone), when
+        `actions` is off (the picker), for a pseudo tile (Make has one verb, its
+        tap), or when the selection is scrolled out of the grid viewport. Draw and
+        hit-test both read this, so they can't desync."""
         lay = self.layout
-        if lay._base or not self.actions or not self.items:
+        if not lay.lib_card_actions or not self.actions or not self.items:
             return None
         it = self.items[self.sel]
         if it.get("type") in PSEUDO_TILE_TYPES:
@@ -284,62 +352,40 @@ class Launcher:
                 "change": (x + 2 * pad + pw, by, avail - pw, bh)}
 
     def draw(self, cv, sheet_for=None):
-        # Icon tiles only -- the wallpaper backdrop + status strip + dock are drawn
-        # by the Workstation around this (so the wallpaper shows through). The
-        # 320x240 baseline keeps the frozen tile look; the desktop-density tiers
-        # render the Library SHELF cards (visual identity v1's library mockup).
-        NAMES = self._NAMES
-        lay = self.layout
-        if not lay._base:
-            self._draw_shelf(cv, sheet_for)
-            return
-        box = lay.icon_box
-        fw = lay.font_w                              # on-screen char-cell width (8*fs)
-        spr_scale = max(1, box // 16)                # fit the 16x16 icon sprite in the box
-        # The selection accent follows the panel THEME when one is pushed (Settings
-        # -> THEME); the default is the frozen yellow (byte-identical baseline).
-        acc = (self.theme or {}).get("accent", NAMES["yellow"])
-        for i in self._page_range():
-            x, y, w, h = self.tile_rect(i)
-            it = self.items[i]
-            sel = (i == self.sel)
-            bx = x + (w - box) // 2
-            by = y + 2
-            cv.rect(bx, by, box, box, NAMES["dark_purple"])
-            cv.rectb(bx, by, box, box,
-                     acc if sel else NAMES["dark_grey"])
-            img = sheet_for(it) if sheet_for is not None else None
-            if img is not None:
-                cv.spr(img, bx + (box - 16 * spr_scale) // 2,
-                       by + (box - 16 * spr_scale) // 2, spr_scale)
-            else:
-                self._tile_glyph(cv, it, (bx, by, box, box))
-            # short name (one line, truncated to the tile width: fw-wide cells)
-            name = it["title"]
-            maxc = w // fw
-            if len(name) > maxc:
-                name = name[:maxc]
-            nx = x + (w - len(name) * fw) // 2
-            ny = by + box + 3
-            cv.print(name, nx, ny,
-                     NAMES["white"] if sel else NAMES["light_grey"], 1)
+        # Cards only -- the framed Library panel / tool backdrop + status strip
+        # are drawn by the owning layer around this. One look on EVERY tier now
+        # (the 320x240 baseline included): the Library SHELF cards (visual
+        # identity v1's library mockup).
+        self._draw_shelf(cv, sheet_for)
 
-    # -- the Library shelf cards (visual identity v1, desktop density) ----------
+    # -- the Library shelf cards (visual identity v1) ---------------------------
 
     def _draw_shelf(self, cv, sheet_for):
-        """The mockup's card grid: the tall featured slot (MAKE STUDIO / +New / a
-        featured cart) + cover-art cartridge cards, plus the footer pager arrows.
-        The framed panel around this is the home layer's (the picker draws the same
-        cards over its own tool backdrop)."""
-        for i in self._page_range():
-            rect = self.tile_rect(i)
+        """The mockup's card grid: the tall featured slot (MAKE STUDIO / +New) at
+        the head of the list + cover-art cartridge cards, continuously SCROLLED
+        left-right -- cards clip to the grid viewport (clip is a v0.4 canvas
+        verb: host, device and web all honor it), with the footer scroll arrows
+        + slim scrollbar drawn outside the clip. The framed panel around this is
+        the home layer's (the picker draws the same cards over its own tool
+        backdrop)."""
+        lay = self.layout
+        gx, gy, gw, gh = lay.lib_grid
+        clip = getattr(cv, "clip", None)
+        if clip is not None:
+            # Inflate vertically so the selection focus ring survives above/
+            # below the rows; horizontal stays exact so a scrolled card never
+            # bleeds past the panel's side insets.
+            d = 2 * lay.fs + 2
+            clip(gx, gy - d, gw, gh + 2 * d)
+        for i, rect in self._visible():
             it = self.items[i]
             if it.get("type") in PSEUDO_TILE_TYPES:
                 self._draw_pseudo_card(cv, it, rect, i == self.sel)
             else:
                 self._draw_cart_card(cv, it, rect, i == self.sel, sheet_for)
-        if self.max_page() > 0:
-            self._draw_pager(cv)
+        if clip is not None:
+            clip()
+        self._draw_scroll_ui(cv)
 
     def _draw_cart_card(self, cv, it, rect, selected, sheet_for):
         """One cartridge card: cover art over the dark field, a title band, a thin
@@ -484,12 +530,15 @@ class Launcher:
                 d = fs + 1 + i
                 cv.rectb(x - d, y - d, w + 2 * d, h + 2 * d, color)
 
-    def _draw_pager(self, cv):
-        """The footer pager arrows (boxed, mockup-style), drawn at the layout's
-        page_prev/page_next hit rects -- dimmed at the ends of the page range.
-        The HOME grid (actions on) sits on the light shelf panel, so it uses the
-        surface ink; the picker sits on its dark tool backdrop, so it keeps the
-        light chrome ink."""
+    def _draw_scroll_ui(self, cv):
+        """The footer left/right nudge arrows (boxed, mockup-style; each tap =
+        one card column) + the slim scrollbar along the grid's bottom edge --
+        hidden entirely when every card fits the viewport. The HOME grid
+        (actions on) sits on the light shelf panel, so it uses the surface ink;
+        the picker sits on its dark tool backdrop, so it keeps the light
+        chrome ink."""
+        if self.max_scroll() <= 0:
+            return
         NAMES = self._NAMES
         th = self.theme or {}
         lay = self.layout
@@ -499,26 +548,14 @@ class Launcher:
         else:
             ink = NAMES["white"]
             dim = NAMES["light_grey"]
-        for rect, glyph, on in ((lay.page_prev, "<", self.page > 0),
-                                (lay.page_next, ">", self.page < self.max_page())):
+        s = self.scroll
+        for rect, glyph, on in ((lay.scroll_lt, "<", s > 0),
+                                (lay.scroll_rt, ">", s < self.max_scroll())):
             x, y, w, h = rect
             cv.rectb(x, y, w, h, ink if on else dim)
             cv.print(glyph, x + (w - lay.font_w) // 2,
                      y + (h - 8 * lay.fs) // 2, ink if on else dim, 1)
-
-    def _tile_glyph(self, cv, it, box):
-        # A type-colored art box with a centered type glyph, for carts with no
-        # sprite (320x240 baseline tiles). Uses the injected shared glyph blitter
-        # (host == device). MAKE wears the theme's AUTHORING accent (the frozen
-        # default keeps today's yellow), per visual identity v1 Section 6.2.
-        NAMES = self._NAMES
-        x, y, w, h = box
-        ttype = it["type"]
-        fill = _TYPE_COLOR.get(ttype, NAMES["indigo"])
-        if ttype == MAKE_TILE_TYPE:
-            fill = (self.theme or {}).get("author", _TYPE_COLOR[MAKE_TILE_TYPE])
-        cv.rect(x + 6, y + 6, w - 12, h - 12, fill)
-        self._blit_glyph(cv, _TYPE_GLYPH.get(ttype, "app"), box, NAMES["black"])
+        self._scroll_region().draw_bar(cv, self.theme or {})
 
 
 class LauncherHomeLayer:
@@ -535,6 +572,66 @@ class LauncherHomeLayer:
         self._NAMES = names
         self._in = in_rect
         self._lhover = (-1, -1)       # last cursor pos used for desktop icon hover-highlight
+        # Drag-scroll PARTIAL repaint bookkeeping (#58/#66: a FULL home repaint
+        # measured ~100-140ms on BOTH boards' glass -- backdrop + panel + cards
+        # stack megabytes of writes -- capping a shelf drag at ~7fps). During a
+        # drag only the grid band + bar change, so eligible frames skip the
+        # wallpaper/panel chrome entirely (see _try_drag_partial): the streak
+        # counts consecutive FULL paints with identical statics, so a partial
+        # only runs once every retained framebuffer already holds them.
+        self._full_streak = 0
+        self._statics = None
+
+    def _statics_key(self, cv):
+        """Everything the home frame's STATIC chrome (wallpaper backdrop +
+        Library panel fill/header/footer) is a pure function of. A key change
+        forces full paints until the streak re-arms."""
+        ws = self.ws
+        return (cv.w, cv.h, ws.layout.fs, id(ws.theme_colors),
+                ws.wallpaper_id, len(ws.launcher.items))
+
+    def _try_drag_partial(self, cv, dt):
+        """The shelf drag fast path: while a touch drag scrolls the grid and
+        every retained framebuffer already holds this frame's static chrome
+        (two prior full paints, unchanged statics -- the ping-pong stale-by-2
+        rule), repaint ONLY what moves: the inflated grid band (fill + cards +
+        scroll UI, the exact rect the card clip uses) and the bar strip. The
+        wallpaper backdrop and panel chrome are byte-identical in the target
+        buffer and are simply left alone. Full paints resume on release, so
+        any straggler is erased within a frame."""
+        ws = self.ws
+        if not ws.launcher.dragging:
+            return False
+        if getattr(cv, "RETAINED_FRAMES", 0) < 1 or self._full_streak < 2:
+            return False
+        if self._statics != self._statics_key(cv):
+            return False
+        # Anything animating over the home (toast/confetti/splash/live
+        # wallpaper) moves pixels outside the band -> full frames.
+        if ws._animating(dt):
+            return False
+        top = getattr(ws.wm, "top_kind", None)
+        if top is not None and top() != "launcher":
+            return False
+        lay = ws.layout
+        gx, gy, gw, gh = lay.lib_grid
+        d = 2 * lay.fs + 2
+        p = ws.pointer
+        if p is not None and getattr(p, "visible", False):
+            # The composited cursor must land fully inside the repainted band,
+            # or its previous stamp would ghost on the untouched chrome.
+            if not (gx <= p.x and p.x + 8 <= gx + gw
+                    and gy - d <= p.y and p.y + 13 <= gy + gh + d):
+                return False
+        _t0 = _ticks_ms() if getattr(ws, "perf_capture", False) else None
+        cv.rect(gx, gy - d, gw, gh + 2 * d, ws.theme_colors["surface"])
+        ws.launcher.draw(cv, ws._icon_sheet_for)
+        _t1 = _ticks_ms() if _t0 is not None else None
+        ws.bar_layer._draw_status_strip("home")
+        if _t0 is not None:
+            ws._pf_home = (0, _ticks_diff(_t1, _t0),
+                           _ticks_diff(_ticks_ms(), _t1))
+        return True
 
     def draw(self, dt):
         """The home desktop: wallpaper backdrop -> cart icon grid -> top status
@@ -547,9 +644,10 @@ class LauncherHomeLayer:
         It returns the moment a cart is open (the in-cart top-bar buttons / Settings'
         dock). Settings stays reachable via the gear button in the status strip; the
         cart grid reclaims the freed bottom band (Layout.grid_bottom)."""
-        NAMES = self._NAMES
         ws = self.ws
         cv = ws.sys_canvas
+        if self._try_drag_partial(cv, dt):    # drag-scroll fast path (#58/#66)
+            return
         # #76 sub-surface marks: on a RECORDING canvas, partition the home into
         # wallpaper / grid / bar streams so the web delta can skip the static grid +
         # bar while a live wallpaper animates underneath (they were one "launcher"
@@ -557,36 +655,43 @@ class LauncherHomeLayer:
         # marks are positional slices of the same flat stream: replayed in order the
         # pixels are identical, and on the RAW canvas _surf is None (zero cost).
         _surf = getattr(cv, "begin_surface", None)
+        # perf_capture (#66 instrument-before-cutting): time the home frame's
+        # three sections so a launcher HITCH names its eater (the device diag
+        # appends ws._pf_home to the HITCH line -- wallpaper vs grid vs bar).
+        _t0 = _ticks_ms() if getattr(ws, "perf_capture", False) else None
         ws.wallpaper.draw(dt)
-        lay = ws.layout
+        _t1 = _ticks_ms() if _t0 is not None else None
         if _surf is not None:
             _surf("home-grid", "system")
-        if not lay._base:
-            # The Library shelf panel (visual identity v1's library mockup): the
-            # warm tool surface framed over the construction field, with the
-            # "LIBRARY" header and the footer cartridge count. The grid + pager
-            # arrows draw inside it (Launcher._draw_shelf).
-            self._draw_shelf_panel(cv)
+        # The Library shelf panel (visual identity v1's library mockup) on every
+        # tier: the warm tool surface framed over the construction field, with
+        # the "LIBRARY" header and the footer cartridge count. The scrolling
+        # card grid + its scroll arrows/bar draw inside it (Launcher._draw_shelf).
+        self._draw_shelf_panel(cv)
         ws.launcher.draw(cv, ws._icon_sheet_for)
-        # page chevrons when more than one page of carts (baseline tier; the
-        # shelf tiers draw boxed pager arrows in the panel footer instead)
-        if lay._base and ws.launcher.max_page() > 0:
-            if ws.launcher.page > 0:
-                px, py = lay.page_prev[0], lay.page_prev[1]
-                cv.print("<", px + 3, py + 8, NAMES["white"], 2)
-            if ws.launcher.page < ws.launcher.max_page():
-                px, py = lay.page_next[0], lay.page_next[1]
-                cv.print(">", px + 3, py + 8, NAMES["white"], 2)
+        _t2 = _ticks_ms() if _t0 is not None else None
         if _surf is not None:
             _surf("home-bar", "system")
         ws.bar_layer._draw_status_strip("home")
+        if _t0 is not None:
+            _t3 = _ticks_ms()
+            ws._pf_home = (_ticks_diff(_t1, _t0), _ticks_diff(_t2, _t1),
+                           _ticks_diff(_t3, _t2))
+        # A FULL paint landed in the current framebuffer: advance (or restart)
+        # the partial path's statics streak.
+        key = self._statics_key(cv)
+        if key == self._statics:
+            if self._full_streak < 2:
+                self._full_streak += 1
+        else:
+            self._statics = key
+            self._full_streak = 1
 
     def _draw_shelf_panel(self, cv):
         """The framed Library panel: surface fill + border, the Moy + "LIBRARY"
         header, and the footer's centered cartridge count between thin rules
-        (the pager arrows are drawn by the grid, at the layout's footer rects)."""
+        (the scroll arrows are drawn by the grid, at the layout's footer rects)."""
         ws = self.ws
-        NAMES = self._NAMES
         th = ws.theme_colors
         lay = ws.layout
         fs = lay.fs
@@ -618,8 +723,8 @@ class LauncherHomeLayer:
         tx = x + (w - tw) // 2
         cv.print(label, tx, ty, th["ink_dim"], 1)
         ly = ty + 4 * fs
-        lx0 = lay.page_prev[0] + lay.page_prev[2] + 10 * fs
-        lx1 = lay.page_next[0] - 10 * fs
+        lx0 = lay.scroll_lt[0] + lay.scroll_lt[2] + 10 * fs
+        lx1 = lay.scroll_rt[0] - 10 * fs
         cv.rect(lx0, ly, max(0, tx - 8 * fs - lx0), fs, th["ink_dim"])
         cv.rect(tx + tw + 8 * fs, ly, max(0, lx1 - (tx + tw + 8 * fs)), fs,
                 th["ink_dim"])
@@ -633,7 +738,7 @@ class LauncherHomeLayer:
             if i.pressed(_b):
                 ws.ach_ui._konami_step(_b)
                 break
-        # Grid nav (#28): left/right step a column, up/down a whole row.
+        # Grid nav (#28): left/right slide a card column, up/down step within it.
         if i.pressed("left"):
             ws.launcher.nav2d(-1, 0)
         if i.pressed("right"):
@@ -652,25 +757,28 @@ class LauncherHomeLayer:
         return True
 
     def handle_pointer(self, px, py, click):
-        # Desktop home (#28): a tap on a cart icon opens it; the gear + management
-        # row + page chevrons fire on the press edge. There's no list drag anymore --
-        # the grid pages instead. Trackball hover still previews the icon under it.
-        # The bottom in-cart dock is no longer drawn on the launcher (#46), so it's not
-        # hit-tested here; Settings is reached via the gear in the status strip.
+        # Desktop home (#28): the bar / scroll arrows / the selected card's
+        # PLAY-CHANGE row fire on the press edge; a tap on a CARD selects + runs
+        # on RELEASE (Launcher.pointer_frame), so drag-to-scroll on the grid can
+        # never launch a cart. Trackball hover still previews the icon under it
+        # (pointer-up only -- a touch drag must not re-select under the finger).
+        # The bottom in-cart dock is no longer drawn on the launcher (#46), so it's
+        # not hit-tested here; Settings is reached via the gear in the status strip.
         ws = self.ws
+        down = ws.pointer.down
         if click:
             # The top-bar tap slice (clock egg / ≡ / NEW / DUP / DEL) is owned by the
             # bar surface now (#46 BarLayer); it also runs the clock-run reset for any
-            # non-clock tap, so page/tile taps that fall through stay byte-identical.
+            # non-clock tap, so arrow/tile taps that fall through stay byte-identical.
             if ws.bar_layer.handle_home_tap(px, py):
                 return True
             lay = ws.layout
-            if ws.launcher.max_page() > 0 and self._in(px, py, lay.page_prev):
-                ws.launcher.flip_page(-1); return True
-            if ws.launcher.max_page() > 0 and self._in(px, py, lay.page_next):
-                ws.launcher.flip_page(1); return True
-            # The selected card's PLAY / CHANGE buttons (desktop-density tiers).
-            # Checked before the tile hit so a button tap never falls through to
+            if ws.launcher.max_scroll() > 0 and self._in(px, py, lay.scroll_lt):
+                ws.launcher.scroll_cols(-1); return True
+            if ws.launcher.max_scroll() > 0 and self._in(px, py, lay.scroll_rt):
+                ws.launcher.scroll_cols(1); return True
+            # The selected card's PLAY / CHANGE buttons (wide-card tiers).
+            # Checked before the grid press so a button tap never falls through to
             # the card's primary activation underneath it.
             ar = ws.launcher.action_rects()
             if ar is not None:
@@ -680,16 +788,21 @@ class LauncherHomeLayer:
                 if self._in(px, py, ar["change"]):
                     ws.change_selected()
                     return True
-            i = ws.launcher.tile_at(px, py)
-            if i is not None:
-                ws.launcher.sel = i
-                ws.launch_selected()         # launcher tap = RUN the selected cart
-                return True
-        # Trackball cursor hover (no click): highlight the icon the cursor MOVED
-        # onto. Only when the position actually changed frame-to-frame, so a
-        # parked cursor doesn't fight keyboard nav. _lhover seeds to the live
-        # pointer position on the first frame so the initial centered cursor isn't
-        # treated as a move (which would clobber the first arrow step).
+        # The grid's press/drag/release machine: returns an index only on a clean
+        # tap release -- the launcher tap = RUN the selected cart.
+        i = ws.launcher.pointer_frame(px, py, click, down)
+        if i is not None:
+            ws.launcher.sel = i
+            ws.launch_selected()
+            return True
+        if click or down:
+            self._lhover = (px, py)   # track the finger so the release frame
+            return True               # isn't read as a hover "move" below
+        # Trackball cursor hover (pointer up, no click): highlight the icon the
+        # cursor MOVED onto. Only when the position actually changed frame-to-
+        # frame, so a parked cursor doesn't fight keyboard nav. _lhover seeds to
+        # the live pointer position on the first frame so the initial centered
+        # cursor isn't treated as a move (which would clobber the first arrow step).
         if self._lhover == (-1, -1):
             self._lhover = (px, py)
         elif (px, py) != self._lhover:
@@ -709,15 +822,16 @@ class LauncherHomeLayer:
         return self.ws.launcher.zone_gen
 
     def _zone_action_rects(self, rect):
-        """PLAY / CHANGE chip rects inside the lent bar zone -- the 320x240-baseline
-        home of the selected card's two verbs (visual identity v1 Section 7: on the
-        small tier 'selected actions use the zoned bar'; the desktop-density tiers
-        draw them on the card itself, Launcher.action_rects). None off-baseline,
-        with no real cart selected (the Make tile has one verb, its tap), or when
-        the zone is too narrow to keep any room for the name."""
+        """PLAY / CHANGE chip rects inside the lent bar zone -- the narrow-card
+        tiers' home of the selected card's two verbs (visual identity v1 Section 7:
+        on the small tier 'selected actions use the zoned bar'; the wide-card tiers
+        draw them on the card itself, Launcher.action_rects -- lay.lib_card_actions
+        is the one predicate both read). None on wide-card tiers, with no real cart
+        selected (the Make tile has one verb, its tap), or when the zone is too
+        narrow to keep any room for the name."""
         ws = self.ws
         lay = ws.layout
-        if not lay._base:
+        if lay.lib_card_actions:
             return None
         sel = ws.launcher.selected()
         if sel is None or sel.get("type") in PSEUDO_TILE_TYPES:
@@ -736,14 +850,14 @@ class LauncherHomeLayer:
         there is none) -- cart management (create/copy/delete) moved to the Editor
         picker's zone (docs/shell_ux_v1.md: the launcher is for PLAYING, the picker
         is for MANAGING projects), so NEW/DUP/DEL no longer draw here. On the
-        320x240 baseline the zone also carries the selected card's PLAY / CHANGE
-        chips (visual identity v1 Section 1.2), right-aligned so the name keeps its
-        flush-left spot."""
+        narrow-card tiers (the 320x240 baseline) the zone also carries the selected
+        card's PLAY / CHANGE chips (visual identity v1 Section 1.2), right-aligned
+        so the name keeps its flush-left spot."""
         ws = self.ws
         NAMES = self._NAMES
         lay = ws.layout
-        if not lay._base:
-            # Shelf tiers: the OS wordmark (the mockup's top-left "moybyte") --
+        if lay.lib_card_actions:
+            # Wide-card tiers: the OS wordmark (the mockup's top-left "moybyte") --
             # the selected cart's name reads on the card itself, and the verbs
             # are the card's own PLAY/CHANGE row.
             fs = lay.fs
@@ -842,7 +956,6 @@ class EditorPickerLayer:
             self._confirm_gen += 1
 
     def draw(self, dt):
-        NAMES = self._NAMES
         ws = self.ws
         cv = ws.sys_canvas
         # The picker is a TOOL space (owner call, 2026-07-08): a STATIC backdrop
@@ -861,15 +974,6 @@ class EditorPickerLayer:
             for gx in range(8 * _fs, cv.w, 24 * _fs):
                 cv.pix(gx, gy, th["dim"])
         ws.picker.draw(cv, ws._icon_sheet_for)
-        # Baseline chevrons only -- the shelf tiers draw boxed pager arrows
-        # inside Launcher._draw_shelf.
-        if lay._base and ws.picker.max_page() > 0:
-            if ws.picker.page > 0:
-                px, py = lay.page_prev[0], lay.page_prev[1]
-                cv.print("<", px + 3, py + 8, NAMES["white"], 2)
-            if ws.picker.max_page() > 0 and ws.picker.page < ws.picker.max_page():
-                px, py = lay.page_next[0], lay.page_next[1]
-                cv.print(">", px + 3, py + 8, NAMES["white"], 2)
         ws.bar_layer._draw_status_strip("picker")
 
     def handle_input(self, i):
@@ -892,22 +996,31 @@ class EditorPickerLayer:
 
     def handle_pointer(self, px, py, click):
         ws = self.ws
+        down = ws.pointer.down
         if click:
             if ws.bar_layer.handle_bar_tap("picker", px, py):   # clock/≡/wifi/X + lent zone
                 return True
             lay = ws.layout
-            if ws.picker.max_page() > 0 and self._in(px, py, lay.page_prev):
-                self._disarm_delete(); ws.picker.flip_page(-1); return True
-            if ws.picker.max_page() > 0 and self._in(px, py, lay.page_next):
-                self._disarm_delete(); ws.picker.flip_page(1); return True
-            i = ws.picker.tile_at(px, py)
-            if i is not None:
+            if ws.picker.max_scroll() > 0 and self._in(px, py, lay.scroll_lt):
+                self._disarm_delete(); ws.picker.scroll_cols(-1); return True
+            if ws.picker.max_scroll() > 0 and self._in(px, py, lay.scroll_rt):
+                self._disarm_delete(); ws.picker.scroll_cols(1); return True
+        # The grid's press/drag/release machine (mirrors LauncherHomeLayer): a
+        # clean tap release picks; a drag scrolls and disarms the DEL confirm.
+        i = ws.picker.pointer_frame(px, py, click, down)
+        if i is not None:
+            self._disarm_delete()
+            ws.picker.sel = i
+            ws.pick_selected()
+            return True
+        if click or down:
+            if ws.picker.dragging:
                 self._disarm_delete()
-                ws.picker.sel = i
-                ws.pick_selected()
-                return True
-        # Trackball hover (no click): preview the tile the cursor moved onto (mirrors
-        # LauncherHomeLayer -- seed to the live pos so the first centered frame isn't a move).
+            self._phover = (px, py)   # track the finger so the release frame
+            return True               # isn't read as a hover "move" below
+        # Trackball hover (pointer up, no click): preview the tile the cursor moved
+        # onto (mirrors LauncherHomeLayer -- seed to the live pos so the first
+        # centered frame isn't a move).
         if self._phover == (-1, -1):
             self._phover = (px, py)
         elif (px, py) != self._phover:
