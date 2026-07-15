@@ -102,6 +102,49 @@ jobs:
           key: idf-${{ matrix.board }}-${{ runner.os }}-v1
           restore-keys: idf-${{ matrix.board }}-${{ runner.os }}-
 
+      # pip wheels for `make setup` -- small, safe, keyed on the dependency spec.
+      - name: Cache pip
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            pip-${{ runner.os }}-
+
+      # The BIG win: cache the per-board `.build` UPSTREAM CLONES (esp-idf +
+      # micropython + lvgl_micropython). They are PINNED in build.sh, so an
+      # otherwise-fresh runner re-clones ~1.5 GB of esp-idf on every run -- and for
+      # the T-Deck that late esp-idf fetch is exactly why the build had to run
+      # twice (the #43 patch can't land until esp-idf exists). Keyed on build.sh so
+      # a pin bump busts it; scoped per board so the two matrix legs don't evict
+      # each other. The heavy esp32 port `build-*` object dirs are EXCLUDED (ccache
+      # already covers recompiles) to keep each cache source-sized. A miss == today.
+      #
+      # The key hashes build.sh AND patches/** -- both determine the cached source
+      # (the .patch files are applied into esp-idf under a one-shot MARKER guard, so
+      # a restored tree already carries them and would NOT be re-patched). For the
+      # same reason there is deliberately NO restore-keys here: a partial-key
+      # fallback could restore a stale-patched tree that the marker then skips. Exact
+      # key only -- any build.sh/patch change forces one clean (uncached) rebuild.
+      - name: Cache T-Deck build tree (esp-idf + micropython clones)
+        if: steps.gate.outputs.run == 'true' && matrix.board == 'tdeck'
+        uses: actions/cache@v4
+        with:
+          path: |
+            firmware/lilygo_t_deck_plus_micropython/.build
+            !firmware/lilygo_t_deck_plus_micropython/.build/lvgl_micropython/lib/micropython/ports/esp32/build-*
+          key: build-tdeck-${{ runner.os }}-${{ hashFiles('firmware/lilygo_t_deck_plus_micropython/build.sh', 'firmware/lilygo_t_deck_plus_micropython/patches/**') }}
+
+      - name: Cache ESP32-P4 build tree (esp-idf + micropython clones)
+        if: steps.gate.outputs.run == 'true' && matrix.board == 'p4'
+        uses: actions/cache@v4
+        with:
+          path: |
+            firmware/esp32_p4_wifi6_touch_lcd_7b/.build
+            !firmware/esp32_p4_wifi6_touch_lcd_7b/.build/micropython/ports/esp32/build-*
+          key: build-p4-${{ runner.os }}-${{ hashFiles('firmware/esp32_p4_wifi6_touch_lcd_7b/build.sh', 'firmware/esp32_p4_wifi6_touch_lcd_7b/patches/**') }}
+
       - name: Host venv (make setup)
         if: steps.gate.outputs.run == 'true'
         run: make setup
@@ -110,10 +153,21 @@ jobs:
         if: steps.gate.outputs.run == 'true' && matrix.board == 'tdeck'
         run: |
           # A from-scratch .build fetches esp-idf DURING the first pass, so the
-          # #43 PSRAM-TX-DMA patch only lands on the second run; build twice
+          # #43 PSRAM-TX-DMA patch only lands on the second run -> build twice
           # (ccache makes the second pass fast) so the shipped image is patched.
+          # But when the `.build` cache above restored esp-idf, the patch lands on
+          # the FIRST pass, so the second full build is unnecessary -- skip it.
+          # NB: check esp-idf presence BEFORE the first build (the first build
+          # fetches it, so it always exists afterwards).
+          IDF=firmware/lilygo_t_deck_plus_micropython/.build/lvgl_micropython/lib/esp-idf/export.sh
+          if [ -f "$IDF" ]; then WARM=1; else WARM=0; fi
           make firmware-build-lilygo-micropython
-          make firmware-build-lilygo-micropython
+          if [ "$WARM" = "0" ]; then
+            echo "== cold .build: esp-idf was fetched mid-build, running a second (patched) pass"
+            make firmware-build-lilygo-micropython
+          else
+            echo "== warm .build cache: esp-idf present up front, single pass is patched -- skipping second build"
+          fi
 
       - name: Build ESP32-P4 firmware
         if: steps.gate.outputs.run == 'true' && matrix.board == 'p4'
