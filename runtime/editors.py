@@ -459,6 +459,32 @@ class TileMap:
                 return False
         return True
 
+    def resize(self, new_w, new_h):
+        """Grow/shrink the grid to new_w x new_h in place (#91), preserving the
+        overlapping top-left content (a grow adds empty cells on the right/bottom,
+        a shrink drops the cells past the new edge). Anchored top-left so a running
+        cart's existing tiles keep their coordinates. Clamped to >= 1; bumps
+        dirty/gen so a cart's map cache rebuilds and SAVE persists the new dims via
+        to_hex (the `w h` header already carries them, so from_hex round-trips)."""
+        new_w = max(1, int(new_w))
+        new_h = max(1, int(new_h))
+        if new_w == self.w and new_h == self.h:
+            return
+        old = self.cells
+        ow = self.w
+        cw = ow if ow < new_w else new_w
+        ch = self.h if self.h < new_h else new_h
+        new = bytearray(new_w * new_h)
+        for y in range(ch):
+            src = y * ow
+            dst = y * new_w
+            new[dst:dst + cw] = old[src:src + cw]
+        self.cells = new
+        self.w = new_w
+        self.h = new_h
+        self.dirty = True
+        self.gen += 1
+
     def to_hex(self):
         """Serialize to `w h` + h rows of w*2 hex digits (one byte/cell)."""
         rows = ["%d %d" % (self.w, self.h)]
@@ -580,6 +606,7 @@ class MapEditor:
     big sprite renders identical to the code-drawn one."""
 
     SIZES = (1, 2, 3)     # selectable stamp sizes (side length in tiles)
+    UNDO_MAX = 32         # bounded in-editor undo depth (device RAM is scarce, #91)
 
     def __init__(self, tilemap, sheet):
         self.tilemap = tilemap
@@ -587,7 +614,106 @@ class MapEditor:
         self.n = 0            # current tile id to stamp (a sprite id in the sheet)
         self.size = 1         # stamp side length in tiles (#57; 1 = today's cell)
         self.cam_x = 0        # top-left visible cell (pan offset), in cells
+        # In-editor undo/redo (#91): each COMPLETED edit gesture (a stamp, a rect
+        # fill, a flood) is one step recording ONLY the changed cells -- not a
+        # whole-map snapshot -- as (index, prev_byte, new_byte) triples. `begin_edit`
+        # opens the batch, `place`/`erase`/`fill_rect`/`flood` append to it via
+        # `_set`, `end_edit` commits it (dropping the redo stack). Bounded to
+        # UNDO_MAX steps so a long session can't grow without limit.
         self.cam_y = 0
+        self._rec = None     # open edit batch (list of (idx, prev, new)) or None
+        self._undo = []      # committed edits, oldest first
+        self._redo = []
+
+    # -- in-editor undo/redo (#91) --------------------------------------------
+
+    def begin_edit(self):
+        """Open a new edit batch (a gesture). Any changes made through `_set` until
+        `end_edit` are grouped into one undo step. Flushes a stray open batch first
+        (a release always ends one, so this is only belt-and-braces)."""
+        if self._rec:
+            self.end_edit()
+        self._rec = []
+
+    def end_edit(self):
+        """Commit the open batch as one undo step (no-op if it made no change or was
+        aborted). Committing an edit drops the redo stack -- the classic branch."""
+        rec = self._rec
+        self._rec = None
+        if rec:
+            self._undo.append(rec)
+            if len(self._undo) > self.UNDO_MAX:
+                del self._undo[0]
+            self._redo = []
+
+    def abort_edit(self):
+        """Discard the open batch without committing it (the cells are reverted by
+        the caller). Used when a stamp gesture turns out to be a pan (#37)."""
+        self._rec = None
+
+    def _set(self, x, y, tile):
+        """Write one cell through the TileMap AND, when a batch is open, record the
+        before/after byte so undo/redo can replay it. Behaves exactly like a bare
+        mset when no batch is open (so direct MapEditor use is unchanged)."""
+        tm = self.tilemap
+        x = int(x)
+        y = int(y)
+        if not (0 <= x < tm.w and 0 <= y < tm.h):
+            return
+        idx = y * tm.w + x
+        prev = tm.cells[idx]
+        tm.mset(x, y, tile)
+        new = tm.cells[idx]
+        if self._rec is not None and new != prev:
+            self._rec.append((idx, prev, new))
+
+    def _apply(self, rec, forward):
+        """Replay (forward) or reverse a committed edit onto the live cells, then
+        bump dirty/gen so a running cart's map cache rebuilds."""
+        tm = self.tilemap
+        cells = tm.cells
+        n = len(cells)
+        for idx, prev, new in rec:
+            if 0 <= idx < n:
+                cells[idx] = new if forward else prev
+        tm.dirty = True
+        tm.gen += 1
+
+    def can_undo(self):
+        return bool(self._undo)
+
+    def can_redo(self):
+        return bool(self._redo)
+
+    def undo(self):
+        """Revert the most recent committed edit; returns True iff a step was taken.
+        Closes any open batch first so an in-flight gesture can't be half-undone."""
+        if self._rec:
+            self.end_edit()
+        if not self._undo:
+            return False
+        rec = self._undo.pop()
+        self._apply(rec, False)
+        self._redo.append(rec)
+        return True
+
+    def redo(self):
+        """Re-apply the next undone edit; returns True iff a step was taken."""
+        if self._rec:
+            self.end_edit()
+        if not self._redo:
+            return False
+        rec = self._redo.pop()
+        self._apply(rec, True)
+        self._undo.append(rec)
+        return True
+
+    def clear_history(self):
+        """Drop the undo/redo stacks (a structural change -- a map resize -- makes
+        the recorded cell indices meaningless, so history is reset, #91)."""
+        self._rec = None
+        self._undo = []
+        self._redo = []
 
     def stamp_span(self):
         """The (tw, th) tile block the current brush stamps: `size` clamped
@@ -614,8 +740,8 @@ class MapEditor:
         cols = self.sheet.cols
         for dy in range(th):
             for dx in range(tw):
-                self.tilemap.mset(cell_x + dx, cell_y + dy,
-                                  self.n + dy * cols + dx)
+                self._set(cell_x + dx, cell_y + dy,
+                          self.n + dy * cols + dx)
 
     def erase(self, cell_x, cell_y):
         """Clear the size x size block at map cell (cell_x, cell_y) to empty (no
@@ -623,7 +749,72 @@ class MapEditor:
         ignores the stamp's sheet-edge clamp."""
         for dy in range(self.size):
             for dx in range(self.size):
-                self.tilemap.mset(cell_x + dx, cell_y + dy, self.tilemap.EMPTY)
+                self._set(cell_x + dx, cell_y + dy, self.tilemap.EMPTY)
+
+    def fill_rect(self, x0, y0, x1, y1, erase=False):
+        """Fill the rectangle spanned by corners (x0,y0)..(x1,y1) inclusive with the
+        current single-tile brush (#91): the RECT tool. `erase` (or the EMPTY brush,
+        n<0) fills with EMPTY/sky, so a rect works with the eraser too. The corners
+        are normalized + clamped to the map, so a drag in any direction fills the
+        same region. Records into the open edit batch (one undo step per fill)."""
+        tm = self.tilemap
+        x0 = int(x0)
+        y0 = int(y0)
+        x1 = int(x1)
+        y1 = int(y1)
+        if x1 < x0:
+            x0, x1 = x1, x0
+        if y1 < y0:
+            y0, y1 = y1, y0
+        x0 = 0 if x0 < 0 else x0
+        y0 = 0 if y0 < 0 else y0
+        x1 = (tm.w - 1) if x1 > tm.w - 1 else x1
+        y1 = (tm.h - 1) if y1 > tm.h - 1 else y1
+        tile = tm.EMPTY if (erase or self.n < 0) else self.n
+        for y in range(y0, y1 + 1):
+            for x in range(x0, x1 + 1):
+                self._set(x, y, tile)
+
+    def flood(self, cell_x, cell_y, erase=False):
+        """Flood-fill the contiguous 4-connected region of cells sharing the tile
+        under (cell_x, cell_y), replacing it with the current brush (#91): the FLOOD
+        tool. Iterative (an explicit stack, never recursion -- MicroPython's frame
+        depth is shallow), and bounded by the map: each cell flips at most once, so
+        the whole map is the natural ceiling. A same-tile fill (target == brush) is
+        a no-op. Records into the open edit batch (one undo step)."""
+        tm = self.tilemap
+        cell_x = int(cell_x)
+        cell_y = int(cell_y)
+        w = tm.w
+        h = tm.h
+        if not (0 <= cell_x < w and 0 <= cell_y < h):
+            return
+        cells = tm.cells
+        target = cells[cell_y * w + cell_x]           # the raw byte to replace
+        tile = tm.EMPTY if (erase or self.n < 0) else self.n
+        # The byte the brush lays down (mirror TileMap.mset's id+1 / clamp).
+        if tile < 0:
+            new = 0
+        else:
+            new = (tile if tile <= tm.MAX_ID else tm.MAX_ID) + 1
+        if new == target:
+            return                                     # same-tile fill: nothing to do
+        stack = [cell_y * w + cell_x]
+        while stack:
+            idx = stack.pop()
+            if cells[idx] != target:
+                continue                               # already flipped or a boundary
+            cx = idx % w
+            cy = idx // w
+            self._set(cx, cy, tile)                    # writes `new` + records it
+            if cx > 0:
+                stack.append(idx - 1)
+            if cx < w - 1:
+                stack.append(idx + 1)
+            if cy > 0:
+                stack.append(idx - w)
+            if cy < h - 1:
+                stack.append(idx + w)
 
     def cycle_size(self):
         """Step to the next stamp size (1 -> 2 -> 3 -> 1), PaintEditor-style."""
