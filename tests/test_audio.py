@@ -422,6 +422,234 @@ def test_music_editor_cursor_move_clamps():
     assert me.step == me.step_count() - 1
 
 
+# -- music editor: copy/paste/duplicate/reorder/undo (#92) ------------------
+
+def test_music_editor_copy_paste_step():
+    me, b = _music_editor()
+    me.select_cursor(0)
+    me.set_pitch(60)
+    me.cycle_wave(1)                     # -> triangle
+    me.nudge_vol(-3)
+    src = list(me.cur_step())
+    me.add_step()                        # step 1: add_step COPIES step 0 (existing
+                                          # per-item duplicate); nudge it so it differs
+    me.nudge_vol(1)
+    assert me.cur_step() != src
+    me.copy()                            # clipboard <- the (now different) step 1
+    me.select_cursor(0)
+    before_paste = list(me.cur_step())
+    me.paste()                           # overwrite step 0 with step 1's copied value
+    assert me.cur_step() != before_paste
+    assert me.cur_step() == [src[0], src[1], src[2] + 1]
+    assert me.cur_step() is not me.bank.sfx[me.sfx_idx].steps[1]   # a copy, not aliased
+
+
+def test_music_editor_copy_paste_slot():
+    me, b = _music_editor()
+    me.toggle_view()
+    me.add_slot()                        # >= 2 slots
+    me.select_cursor(0)
+    me.set_slot(0)
+    me.copy()                            # clipboard <- slot 0's SFX id (0)
+    me.select_cursor(1)
+    me.nudge_slot(99)                    # slot 1 now points at the LAST sfx id
+    assert me.cur_slot_value() != 0 or len(b.sfx) == 1
+    me.paste()
+    assert me.cur_slot_value() == 0      # overwritten by the copied id
+
+
+def test_music_editor_paste_ignores_wrong_clipboard_kind():
+    me, b = _music_editor()
+    me.set_pitch(72)
+    me.copy()                            # clipboard now holds a "step"
+    me.toggle_view()
+    before = me.cur_slot_value()
+    me.paste()                           # step clipboard can't paste into a slot
+    assert me.cur_slot_value() == before
+    # and the reverse: a "slot" clipboard can't paste into a step
+    me.copy()                            # now the clipboard holds a "slot"
+    me.toggle_view()
+    before_step = list(me.cur_step())
+    me.paste()
+    assert me.cur_step() == before_step
+
+
+def test_music_editor_paste_without_copy_is_noop():
+    me, b = _music_editor()
+    before = list(me.cur_step())
+    me.paste()                           # nothing was ever copied
+    assert me.cur_step() == before and not me.dirty
+
+
+def test_music_editor_duplicate_sfx_adds_bank_slot_and_selects_copy():
+    me, b = _music_editor()
+    me.select_cursor(0)
+    me.set_pitch(50)
+    me.cycle_wave(2)
+    me.add_step()
+    n = len(b.sfx)
+    orig_idx = me.sfx_idx
+    src = me.cur_sfx()
+    src_steps = [list(s) for s in src.steps]
+    me.duplicate_sfx()
+    assert len(b.sfx) == n + 1                 # a NEW bank slot, nothing removed
+    assert me.sfx_idx == orig_idx + 1           # selection followed the copy
+    assert b.sfx[orig_idx] is src               # the original stayed exactly where it was
+    dup = me.cur_sfx()
+    assert dup is not src
+    assert [list(s) for s in dup.steps] == src_steps
+    assert dup.speed == src.speed and dup.loop == src.loop
+    # mutating the copy must not touch the original (a deep copy, not aliased)
+    me.nudge_pitch(1)
+    assert [list(s) for s in b.sfx[orig_idx].steps] == src_steps
+
+
+def test_music_editor_duplicate_track_adds_bank_slot_and_selects_copy():
+    me, b = _music_editor()
+    me.toggle_view()
+    me.add_slot()
+    n = len(b.music)
+    orig_idx = me.track_idx
+    src = me.cur_track()
+    src_pattern = list(src.pattern)
+    me.duplicate_track()
+    assert len(b.music) == n + 1
+    assert me.track_idx == orig_idx + 1
+    assert b.music[orig_idx] is src
+    dup = me.cur_track()
+    assert dup is not src
+    assert dup.pattern == src_pattern
+    assert dup.speed == src.speed and dup.loop == src.loop
+
+
+def test_music_editor_duplicate_sfx_capped():
+    from runtime import editors
+    me, b = _music_editor()
+    while len(b.sfx) < editors._ME_BANK_MAX:
+        me.duplicate_sfx()
+    n = len(b.sfx)
+    assert n == editors._ME_BANK_MAX
+    me.duplicate_sfx()                          # at the cap -> no-op
+    assert len(b.sfx) == n
+
+
+def test_music_editor_move_step_swaps_and_clamps_at_edges():
+    me, b = _music_editor()
+    me.add_step(); me.add_step(); me.add_step()          # >= 4 steps
+    s = me.cur_sfx()
+    for i, st in enumerate(s.steps):
+        st[0] = i                                          # tag each step by index
+    order = [st[0] for st in s.steps]
+    me.select_cursor(1)
+    me.move_step(1)                                        # swap steps 1 and 2
+    assert me.step == 2
+    order[1], order[2] = order[2], order[1]
+    assert [st[0] for st in s.steps] == order
+    me.move_step(-1)                                        # swap back
+    assert me.step == 1
+    order[1], order[2] = order[2], order[1]
+    assert [st[0] for st in s.steps] == order
+    # boundary: can't move the first step left, or the last step right
+    me.select_cursor(0)
+    me.move_step(-1)
+    assert me.step == 0 and [st[0] for st in s.steps] == order
+    me.select_cursor(len(s.steps) - 1)
+    me.move_step(1)
+    assert me.step == len(s.steps) - 1
+    assert [st[0] for st in s.steps] == order
+
+
+def test_music_editor_move_slot_swaps_and_clamps_at_edges():
+    me, b = _music_editor()
+    me.toggle_view()
+    me.add_slot(); me.add_slot(); me.add_slot()             # 4 slots
+    t = me.cur_track()
+    hi = len(b.sfx) - 1
+    for i in range(len(t.pattern)):
+        t.pattern[i] = min(i, hi)
+    me.select_cursor(0)
+    me.move_slot(1)
+    assert me.slot == 1
+    assert t.pattern[0] == min(1, hi) and t.pattern[1] == 0
+    # boundary: the last slot can't move right
+    me.select_cursor(len(t.pattern) - 1)
+    before = list(t.pattern)
+    me.move_slot(1)
+    assert me.slot == len(t.pattern) - 1 and t.pattern == before
+
+
+def test_music_editor_undo_redo_across_edit_types():
+    me, b = _music_editor()
+    me.select_cursor(0)
+    p_orig = me.cur_step()[0]
+    assert not me.can_undo() and not me.can_redo()   # fresh editor, nothing to walk
+
+    me.set_pitch(50)                     # edit 1: pitch (value edit)
+    assert me.can_undo()
+    w_before = me.cur_step()[1]
+    me.cycle_wave(1)                     # edit 2: wave (value edit)
+    w_after = me.cur_step()[1]
+    assert w_after != w_before
+    n_before_add = me.step_count()
+    me.add_step()                        # edit 3: structural (insert)
+    n_after_add = me.step_count()
+    assert n_after_add == n_before_add + 1
+
+    me.undo()                            # undo the add_step
+    assert me.step_count() == n_before_add
+    me.undo()                            # undo the wave cycle
+    assert me.cur_step()[1] == w_before
+    me.undo()                            # undo the pitch set
+    assert me.cur_step()[0] == p_orig
+    assert not me.can_undo()             # at the floor
+    assert me.can_redo()
+
+    me.redo()                            # redo the pitch set
+    assert me.cur_step()[0] == 50
+    me.redo()                            # redo the wave cycle
+    assert me.cur_step()[1] == w_after
+    me.redo()                            # redo the add_step
+    assert me.step_count() == n_after_add
+    assert not me.can_redo()             # fully replayed
+
+    # a fresh edit after an undo drops the redo tail (Google-Docs rule, like
+    # moy_carts' durable journal)
+    me.undo()                            # undo the add_step again
+    assert me.can_redo()
+    me.nudge_vol(1)
+    assert not me.can_redo()
+
+
+def test_music_editor_undo_redo_survives_object_switch():
+    # An edit's undo entry remembers WHICH object it happened to, so undo still
+    # finds its way back after the cursor moved on to something else.
+    me, b = _music_editor()
+    me.select_cursor(0)
+    p0 = me.cur_step()[0]
+    me.nudge_pitch(5)
+    sfx0 = me.sfx_idx
+    me.select_sfx(1)                     # walk to a different (or fresh) SFX
+    assert me.sfx_idx != sfx0 or len(b.sfx) == 1
+    me.undo()
+    assert me.sfx_idx == sfx0 and me.view == me.SFX_VIEW
+    assert me.cur_step()[0] == p0
+
+
+def test_music_editor_undo_stack_is_bounded():
+    from runtime import editors
+    me, b = _music_editor()
+    me.add_step()
+    me.select_cursor(0)
+    for _ in range(editors._ME_UNDO_MAX + 10):
+        me.nudge_pitch(1)
+    assert len(me._undo) == editors._ME_UNDO_MAX
+    steps_taken = 0
+    while me.can_undo():
+        me.undo()
+        steps_taken += 1
+    assert steps_taken == editors._ME_UNDO_MAX
+
+
 def test_music_editor_edits_roundtrip_through_sounds_json(tmp_path):
     # The editor mutates the bank in place; saving + reloading the cart preserves it.
     from runtime import moy_carts
@@ -525,3 +753,128 @@ def test_music_editor_view_toggle_and_song_path_on_console(tmp_path):
     r = C._mu_pad_rect(1, 0)
     ws.music_ui._music_click(r[0] + 2, r[1] + 2)
     assert me.cur_slot_value() == min(v0 + 1, len(me.bank.sfx) - 1)
+
+
+# -- music editor UI: copy/paste/duplicate/reorder/undo touch surface (#92) -
+
+def test_music_editor_ui_copy_paste_and_move_pad_buttons_sfx_view(tmp_path):
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.launcher.sel = 0
+    ws.open()
+    ws._open_music()
+    me = ws.music_ui.musicedit
+    lay = ws.music_ui.layout
+
+    def tap(col, row):
+        r = lay.pad_rect(col, row)
+        ws.music_ui._music_click(r[0] + 2, r[1] + 2)
+
+    # COPY (row 4 col 0) the current step, edit a second step, then PASTE
+    # (row 4 col 1) the clipboard back over it.
+    me.select_cursor(0)
+    me.set_pitch(66)
+    tap(0, 4)                              # COPY
+    me.add_step()
+    me.nudge_pitch(1)
+    assert me.cur_step()[0] != 66
+    tap(1, 4)                              # PASTE
+    assert me.cur_step()[0] == 66 and me.dirty
+
+    # MOVE- / MOVE+ (row 5) swap the cursor step with its neighbor.
+    s = me.cur_sfx()
+    for i, st in enumerate(s.steps):
+        st[0] = i
+    me.select_cursor(0)
+    tap(1, 5)                              # MOVE+
+    assert me.step == 1 and s.steps[0][0] == 1
+
+    # DUP (row 2 col 1) clones the WHOLE current SFX into a new bank slot.
+    n = len(me.bank.sfx)
+    orig_idx = me.sfx_idx
+    tap(1, 2)                              # DUP
+    assert len(me.bank.sfx) == n + 1 and me.sfx_idx == orig_idx + 1
+
+    # A frame still draws cleanly with the extra pad rows + bottom buttons.
+    ws.frame(1 / 30)
+    assert len(set(ws.canvas.buf)) > 1
+
+
+def test_music_editor_ui_dup_and_move_pad_buttons_song_view(tmp_path):
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.launcher.sel = 0
+    ws.open()
+    ws._open_music()
+    me = ws.music_ui.musicedit
+    lay = ws.music_ui.layout
+    ws.music_ui._music_click(lay.view_btn[0] + 2, lay.view_btn[1] + 2)
+    assert me.view == me.SONG_VIEW
+
+    def tap(col, row):
+        r = lay.pad_rect(col, row)
+        ws.music_ui._music_click(r[0] + 2, r[1] + 2)
+
+    me.add_slot()
+    t = me.cur_track()
+    hi = len(me.bank.sfx) - 1
+    for i in range(len(t.pattern)):
+        t.pattern[i] = min(i, hi)
+    me.select_cursor(0)
+    tap(1, 5)                              # MOVE+ (song view, row 5)
+    assert me.slot == 1 and t.pattern[0] == min(1, hi)
+
+    n = len(me.bank.music)
+    orig_idx = me.track_idx
+    tap(1, 2)                              # DUP (song view, row 2 col 1)
+    assert len(me.bank.music) == n + 1 and me.track_idx == orig_idx + 1
+
+    ws.frame(1 / 30)
+    assert len(set(ws.canvas.buf)) > 1
+
+
+def test_music_editor_ui_undo_redo_bottom_bar_buttons(tmp_path):
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.launcher.sel = 0
+    ws.open()
+    ws._open_music()
+    me = ws.music_ui.musicedit
+    lay = ws.music_ui.layout
+
+    me.select_cursor(0)
+    p0 = me.cur_step()[0]
+    me.set_pitch(80)
+    assert me.can_undo()
+
+    ws.music_ui._music_click(lay.undo_btn[0] + 2, lay.undo_btn[1] + 2)
+    assert me.cur_step()[0] == p0
+
+    ws.music_ui._music_click(lay.redo_btn[0] + 2, lay.redo_btn[1] + 2)
+    assert me.cur_step()[0] == 80
+
+
+def test_music_editor_ui_ctrl_z_y_keyboard_shortcut(tmp_path):
+    # Host-only convenience (#92): the same Ctrl+Z (0x1A) / Ctrl+Y (0x19) control
+    # bytes the code editor's durable undo rides (test_journal_undo.py), wired
+    # here to the bounded in-editor undo/redo stack instead.
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.launcher.sel = 0
+    ws.open()
+    ws._open_music()
+    me = ws.music_ui.musicedit
+    drv = host_app.ConsoleDriver(ws)
+
+    me.select_cursor(0)
+    p0 = me.cur_step()[0]
+    me.set_pitch(33)
+    assert me.can_undo()
+
+    drv.type_char(0x1A)                     # Ctrl+Z
+    drv.frame(1 / 30)
+    assert me.cur_step()[0] == p0
+
+    drv.type_char(0x19)                     # Ctrl+Y
+    drv.frame(1 / 30)
+    assert me.cur_step()[0] == 33
