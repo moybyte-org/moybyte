@@ -56,6 +56,15 @@ fi
 if [ ! -f "${UPSTREAM_DIR}/lib/micropython/ports/esp32/main.c" ]; then
   git -C "${UPSTREAM_DIR}" submodule update --init --depth=1 -- lib/micropython
 fi
+# micropython has its OWN nested submodules; the esp32 port needs berkeley-db
+# (MICROPY_PY_BTREE) and micropython-lib (the frozen manifest). We disable
+# lvgl_micropython's own `make submodules` above (MOYBYTE_SKIP_UPSTREAM_SUBMODULES),
+# which assumes a warm .build, so init them ourselves -- faithful to micropython's
+# `make submodules`, a no-op once present (fixes a from-scratch build: CI / fresh dev).
+if [ ! -e "${UPSTREAM_DIR}/lib/micropython/lib/berkeley-db-1.xx/btree/bt_open.c" ]; then
+  git -C "${UPSTREAM_DIR}/lib/micropython" submodule update --init --depth=1 \
+    lib/berkeley-db-1.xx lib/micropython-lib
+fi
 
 MPY_MAIN_C="${UPSTREAM_DIR}/lib/micropython/ports/esp32/main.c"
 MPY_BOOT_PY="${UPSTREAM_DIR}/lib/micropython/ports/esp32/modules/_boot.py"
