@@ -1084,6 +1084,28 @@ class MapEditor:
         self.cam_y = max(0, min(self.tilemap.h - 1, self.cam_y + dcy))
 
 
+# The block editor's in-session undo/redo depth (#93). Scripts are tiny JSON-ish
+# trees, so a full-script snapshot per mutation is cheap; a bounded stack keeps
+# the RAM footprint fixed on the device. In-session only (it never crosses a
+# save / graduation -- the durable journal is Code's, spec Section 7).
+_BLK_UNDO_MAX = 40
+
+
+def _clone_tree(node):
+    """A deep copy of a block / program tree -- dicts, lists, and json-safe scalars
+    (int / float / str / bool / None). So a pasted/duplicated block or an undo
+    snapshot shares NO mutable state with the original (#93). MicroPython-safe (no
+    `copy`/`json` needed): the schema is exactly these three shapes."""
+    if isinstance(node, dict):
+        out = {}
+        for k in node:
+            out[k] = _clone_tree(node[k])
+        return out
+    if isinstance(node, list):
+        return [_clone_tree(v) for v in node]
+    return node
+
+
 class BlockRow:
     """One visual line of the flattened block-outline (what the cursor moves over).
 
@@ -1124,6 +1146,11 @@ class BlockEditor:
         self.cur = 0              # cursor index into self.rows
         self.rows = []
         self.dirty = False
+        # -- #93 clipboard + cross-parent move + in-session undo/redo -----------
+        self.clipboard = None     # a deep-copied block subtree (copy/paste/duplicate)
+        self._move_src = None     # the block object marked for a cross-parent MOVE
+        self._undo = []           # bounded full-program snapshots (in-session)
+        self._redo = []
         self.reflow()
 
     # -- flattening ----------------------------------------------------------
@@ -1191,6 +1218,56 @@ class BlockEditor:
         r = self.row()
         return r is not None and r.kind == "insert"
 
+    # -- in-session undo/redo (#93) ------------------------------------------
+    # Every mutating edit snapshots the WHOLE program (a tiny tree) onto a bounded
+    # stack BEFORE it changes anything, so undo restores the prior program verbatim.
+    # In-session only: the stack lives on this editor instance and is dropped when a
+    # different cart opens (BlockEditorUI rebuilds the editor). It never crosses a
+    # save or graduation -- those are the durable code journal's job (spec Section 7).
+    def _record(self):
+        """Push a pre-edit snapshot for undo and clear the redo stack. Called at the
+        top of every mutating op (after its guards, so a no-op records nothing)."""
+        self._undo.append(_clone_tree(self.program))
+        if len(self._undo) > _BLK_UNDO_MAX:
+            del self._undo[0]
+        self._redo = []
+
+    def can_undo(self):
+        return bool(self._undo)
+
+    def can_redo(self):
+        return bool(self._redo)
+
+    def undo(self):
+        """Restore the program to the state before the last mutation. Returns True
+        if a step was taken."""
+        if not self._undo:
+            return False
+        self._redo.append(_clone_tree(self.program))
+        if len(self._redo) > _BLK_UNDO_MAX:
+            del self._redo[0]
+        self.program = self._undo.pop()
+        self._after_history()
+        return True
+
+    def redo(self):
+        """Re-apply the mutation the last undo reverted. Returns True if it moved."""
+        if not self._redo:
+            return False
+        self._undo.append(_clone_tree(self.program))
+        if len(self._undo) > _BLK_UNDO_MAX:
+            del self._undo[0]
+        self.program = self._redo.pop()
+        self._after_history()
+        return True
+
+    def _after_history(self):
+        """Shared undo/redo tail: a restored program is a fresh tree, so any marked
+        move source is stale -- drop it -- and the outline must re-flatten."""
+        self._move_src = None
+        self.dirty = True
+        self.reflow()
+
     # -- structural edits ----------------------------------------------------
     def insert_block(self, type_id, params=None, children=None):
         """Insert a freshly-built block (make_block) at the cursor's insert point.
@@ -1201,6 +1278,7 @@ class BlockEditor:
         if r is None or r.kind != "insert":
             return None
         blk = self.blocks.make_block(type_id, params, children)
+        self._record()
         r.parent.insert(r.index, blk)
         self.dirty = True
         self.reflow()
@@ -1219,6 +1297,7 @@ class BlockEditor:
         for c in children:
             if c.get("t") == self.blocks.ELSE_MARKER:
                 return False                      # only one else per if_else
+        self._record()
         children.append(self.blocks.make_block(self.blocks.ELSE_MARKER))
         self.dirty = True
         self.reflow()
@@ -1234,6 +1313,7 @@ class BlockEditor:
         tid = r.block.get("t")
         if self._is_hat(tid):
             return False                          # never delete an event hat
+        self._record()
         del r.parent[r.index]
         self.dirty = True
         self.reflow()
@@ -1258,13 +1338,152 @@ class BlockEditor:
             return False
         if siblings[j].get("t") == self.blocks.ELSE_MARKER:
             # Don't shuffle a statement across the else boundary by a single step --
-            # that silently changes branches. The kid moves it explicitly instead.
+            # that silently changes branches. The kid moves it explicitly instead
+            # (the #93 MOVE flow crosses the divider on purpose).
             return False
+        self._record()
         siblings[i], siblings[j] = siblings[j], siblings[i]
         self.dirty = True
         self.reflow()
         self._select_block(siblings[j])
         return True
+
+    # -- copy / paste / duplicate + cross-parent move (#93) -------------------
+    def copy_block(self):
+        """Deep-copy the selected block (and its whole subtree: if/else arms, loop
+        bodies, nested reporters) into the clipboard. Refuses an event hat (it can't
+        live inside a body) and the synthetic else divider. Returns True on success."""
+        r = self.row()
+        if r is None or r.kind != "block" or r.is_else:
+            return False
+        tid = r.block.get("t")
+        if self._is_hat(tid) or tid == self.blocks.ELSE_MARKER:
+            return False
+        self.clipboard = _clone_tree(r.block)
+        return True
+
+    def has_clipboard(self):
+        return self.clipboard is not None
+
+    def duplicate(self):
+        """Insert a deep copy of the selected block immediately after it (same body).
+        Same guards as copy (no hats, no else divider). The copy shares no mutable
+        state with the original. Returns the new block, or None. Undoable."""
+        r = self.row()
+        if r is None or r.kind != "block" or r.is_else:
+            return None
+        tid = r.block.get("t")
+        if self._is_hat(tid) or tid == self.blocks.ELSE_MARKER:
+            return None
+        clone = _clone_tree(r.block)
+        self._record()
+        r.parent.insert(r.index + 1, clone)
+        self.dirty = True
+        self.reflow()
+        self._select_block(clone)
+        return clone
+
+    def paste(self):
+        """Paste a deep copy of the clipboard at the cursor's insert point. Only at
+        an insert point, only when the clipboard holds a paste-able block (never a
+        hat / else divider -- copy already refuses those). Each paste is an
+        independent deep copy, so repeated pastes never alias. Returns the new block,
+        or None. Undoable."""
+        if self.clipboard is None:
+            return None
+        r = self.row()
+        if r is None or r.kind != "insert":
+            return None
+        tid = self.clipboard.get("t")
+        if self._is_hat(tid) or tid == self.blocks.ELSE_MARKER:
+            return None
+        clone = _clone_tree(self.clipboard)
+        self._record()
+        r.parent.insert(r.index, clone)
+        self.dirty = True
+        self.reflow()
+        self._select_block(clone)
+        return clone
+
+    def start_move(self):
+        """Mark the selected block as the source of a cross-parent MOVE (the
+        destination is then any insert point -- across the if/else divider or into a
+        different body, which the single-step reorder can't reach). Refuses a hat /
+        else divider. Returns True if the block can be moved."""
+        r = self.row()
+        if r is None or r.kind != "block" or r.is_else:
+            return False
+        if self._is_hat(r.block.get("t")):
+            return False
+        self._move_src = r.block
+        return True
+
+    def moving(self):
+        return self._move_src is not None
+
+    def cancel_move(self):
+        self._move_src = None
+
+    def complete_move(self):
+        """Move the marked block to the cursor's insert point (across parents / the
+        if-else divider) -- ONE undoable op that preserves the block's identity (the
+        same object is re-parented, not cloned). Rejects a destination inside the
+        block's own subtree (that would orphan it). Returns True on success."""
+        src = self._move_src
+        if src is None:
+            return False
+        r = self.row()
+        if r is None or r.kind != "insert":
+            return False
+        dest_parent = r.parent
+        dest_index = r.index
+        if self._within(src, dest_parent):
+            return False                          # can't drop a block inside itself
+        loc = self._locate(src)
+        if loc is None:                           # source vanished (e.g. undone away)
+            self._move_src = None
+            return False
+        src_parent, src_index = loc
+        self._record()
+        del src_parent[src_index]
+        # same body, dropping after the removed slot: the destination shifted up one.
+        if dest_parent is src_parent and dest_index > src_index:
+            dest_index -= 1
+        dest_parent.insert(dest_index, src)
+        self._move_src = None
+        self.dirty = True
+        self.reflow()
+        self._select_block(src)
+        return True
+
+    def _locate(self, block):
+        """Find (parent_list, index) of `block` by identity in the statement tree, or
+        None. Walks child bodies only -- a movable block is always a body statement."""
+        return self._locate_in(self.program.get("scripts", []) or [], block)
+
+    def _locate_in(self, lst, block):
+        for i in range(len(lst)):
+            c = lst[i]
+            if c is block:
+                return (lst, i)
+            kids = c.get("c") if isinstance(c, dict) else None
+            if kids:
+                found = self._locate_in(kids, block)
+                if found is not None:
+                    return found
+        return None
+
+    def _within(self, block, target_list):
+        """True if `target_list` is `block`'s own children list or any body nested
+        under it (so a MOVE can't drop a block into itself)."""
+        kids = block.get("c")
+        if kids is target_list:
+            return True
+        if kids:
+            for c in kids:
+                if isinstance(c, dict) and self._within(c, target_list):
+                    return True
+        return False
 
     # -- slot editing --------------------------------------------------------
     def slots(self, block=None):
@@ -1290,6 +1509,7 @@ class BlockEditor:
         b = block if block is not None else self.selected_block()
         if b is None:
             return False
+        self._record()
         p = b.setdefault("p", {})
         p[slot_name] = value
         self.dirty = True
@@ -1313,7 +1533,11 @@ class BlockEditor:
                 except ValueError:
                     i = 0
                 val = opts[(i + d) % len(opts)]
-                self.set_slot(slot_name, val, b)
+                # inline the write (don't call set_slot) so this records ONE undo
+                # snapshot for the whole cycle, not a nested double.
+                self._record()
+                b.setdefault("p", {})[slot_name] = val
+                self.dirty = True
                 return val
         return None
 
@@ -1326,6 +1550,7 @@ class BlockEditor:
         name = self.blocks.sanitize_var_name(name)
         vars_ = self.program.setdefault("vars", [])
         if name and name not in vars_ and name not in self.lists():
+            self._record()
             vars_.append(name)
             self.dirty = True
         return vars_
@@ -1336,6 +1561,7 @@ class BlockEditor:
         share the module-level global namespace). Returns the new variable's name."""
         taken = self.variables() + self.lists()
         name = self.blocks.unique_var_name(taken, base)
+        self._record()
         self.program.setdefault("vars", []).append(name)
         self.dirty = True
         return name
@@ -1351,6 +1577,7 @@ class BlockEditor:
             return None
         if new != old and (new in vars_ or new in self.lists()):
             return None                       # would collide with a var/list
+        self._record()
         vars_[vars_.index(old)] = new
         self._rewrite_name_refs(old, new, self.blocks.SLOT_VARIABLE)
         self.dirty = True
@@ -1391,6 +1618,7 @@ class BlockEditor:
         name = self.blocks.sanitize_var_name(name)
         lists_ = self.program.setdefault("lists", [])
         if name and name not in lists_ and name not in self.variables():
+            self._record()
             lists_.append(name)
             self.dirty = True
         return lists_
@@ -1400,6 +1628,7 @@ class BlockEditor:
         is unique across BOTH lists and variables. Returns the new list's name."""
         taken = self.lists() + self.variables()
         name = self.blocks.unique_var_name(taken, base)
+        self._record()
         self.program.setdefault("lists", []).append(name)
         self.dirty = True
         return name
@@ -1414,6 +1643,7 @@ class BlockEditor:
             return None
         if new != old and (new in lists_ or new in self.variables()):
             return None
+        self._record()
         lists_[lists_.index(old)] = new
         self._rewrite_name_refs(old, new, self.blocks.SLOT_LIST)
         self.dirty = True

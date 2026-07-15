@@ -991,3 +991,326 @@ def test_for_each_block_inserts_and_saves(tmp_path):
     assert "for it in nums:" in reloaded["src"]
     assert reloaded["blocks"]["lists"] == ["nums"]
     _run(reloaded["src"], frames=2)
+
+
+# ----------------------------------------------------------------------------
+# #93: copy / paste / duplicate of blocks + subtrees (BlockEditor core)
+# ----------------------------------------------------------------------------
+
+def _snap(be):
+    """A structural deep copy of the program for equality compares (json round-trip
+    -- the schema is json-serializable by contract)."""
+    return blocks.loads(blocks.dumps(be.program))
+
+
+def _inserts_at(be, depth):
+    return [i for i, r in enumerate(be.rows) if r.kind == "insert" and r.depth == depth]
+
+
+def test_copy_paste_subtree_keeps_structure_and_deep_copies():
+    """Copying a c-block copies its WHOLE subtree (if/else arms + loop bodies), and
+    a paste is an independent deep copy -- mutating one pasted block never touches
+    the clipboard or another paste."""
+    be = _be()
+    _go_to_insert(be, 1)                                  # under on_draw
+    be.insert_block("if_else", {"cond": mk("btnp", {"dir": "a"})})
+    assert be.insert_else() is True
+    ins2 = _inserts_at(be, 2)
+    be.cur = ins2[0]                                      # if-body
+    be.insert_block("cls", {"color": "green"})
+    ins2 = _inserts_at(be, 2)
+    be.cur = ins2[-1]                                     # else-body (after divider)
+    be.insert_block("cls", {"color": "red"})
+    # copy the whole if_else (subtree: both arms + the else divider)
+    assert _select_type(be, "if_else")
+    assert be.copy_block() is True
+    subtree = be.clipboard
+    # the clipboard carries both arms
+    kinds = [c.get("t") for c in subtree.get("c", [])]
+    assert "cls" in kinds and blocks.ELSE_MARKER in kinds
+    # paste it under on_draw (a second, independent copy)
+    be.cur = _inserts_at(be, 1)[-1]
+    pasted = be.paste()
+    assert pasted is not None
+    # deep-copy: distinct objects, distinct nested param/children containers
+    assert pasted is not subtree
+    assert pasted["c"] is not subtree["c"]
+    assert pasted["c"][0] is not subtree["c"][0]
+    # mutating the paste leaves the clipboard untouched
+    pasted["p"]["cond"] = mk("btnp", {"dir": "b"})
+    assert subtree["p"]["cond"]["p"]["dir"] == "a"
+    # and the whole program still compiles + runs
+    _run(blocks.compile_blocks(be.program))
+
+
+def test_copy_and_duplicate_refuse_hats_and_else_divider():
+    be = _be()
+    # a hat can't be copied (it can't live inside a body)
+    assert _select_type(be, "on_start")
+    assert be.copy_block() is False
+    assert be.duplicate() is None
+    assert be.clipboard is None
+    # the else divider is protected too
+    _go_to_insert(be, 1)
+    be.insert_block("if_else", {"cond": mk("btnp", {"dir": "a"})})
+    be.insert_else()
+    else_row = [i for i, r in enumerate(be.rows) if r.is_else][0]
+    be.cur = else_row
+    assert be.copy_block() is False
+    assert be.duplicate() is None
+
+
+def test_duplicate_in_place_inserts_a_sibling_copy():
+    be = _be()
+    _go_to_insert(be, 1)
+    be.insert_block("spr", {"id": 3, "x": 1, "y": 2})
+    assert _select_type(be, "spr")
+    dup = be.duplicate()
+    assert dup is not None
+    body = be.program["scripts"][2]["c"]                 # on_draw
+    assert [c["t"] for c in body] == ["spr", "spr"]
+    # a real deep copy: same values, no shared param dict
+    assert body[0]["p"] == body[1]["p"]
+    assert body[0]["p"] is not body[1]["p"]
+    body[1]["p"]["id"] = 9
+    assert body[0]["p"]["id"] == 3                        # original untouched
+    _run(blocks.compile_blocks(be.program))
+
+
+def test_paste_only_at_insert_point_and_needs_clipboard():
+    be = _be()
+    # nothing copied yet -> paste is a no-op even at an insert point
+    _go_to_insert(be, 1)
+    assert be.paste() is None
+    # copy a block, then try to paste while the cursor is ON A BLOCK (not an insert)
+    be.insert_block("cls", {"color": "black"})
+    assert _select_type(be, "cls")
+    assert be.copy_block() is True
+    assert be.paste() is None                             # cursor is on a block
+    # at an insert it works
+    be.cur = _inserts_at(be, 1)[-1]
+    assert be.paste() is not None
+
+
+def test_compile_after_paste_is_correct():
+    be = _be()
+    be.add_var("x")
+    _go_to_insert(be, 1)                                  # under on_draw
+    be.insert_block("if", {"cond": mk("op_gt", {"a": mk("var", {"var": "x"}), "b": 5})})
+    be.cur = _inserts_at(be, 2)[0]
+    be.insert_block("spr", {"id": 0, "x": 1, "y": 2})
+    assert _select_type(be, "if")
+    assert be.copy_block() is True
+    be.cur = _inserts_at(be, 1)[-1]
+    be.paste()
+    src = blocks.compile_blocks(be.program)
+    assert src.count("if (x > 5):") == 2                 # the whole guarded block, twice
+    assert src.count("spr(0, 1, 2)") == 2
+    _run(src)
+
+
+# ----------------------------------------------------------------------------
+# #93: move a block across the if/else divider or to a different parent
+# ----------------------------------------------------------------------------
+
+def test_move_across_the_if_else_divider():
+    be = _be()
+    _go_to_insert(be, 1)
+    be.insert_block("if_else", {"cond": mk("btnp", {"dir": "a"})})
+    be.insert_else()
+    be.cur = _inserts_at(be, 2)[0]                        # if-body
+    be.insert_block("cls", {"color": "green"})
+    assert _select_type(be, "cls")
+    assert be.start_move() is True and be.moving() is True
+    be.cur = _inserts_at(be, 2)[-1]                       # else-body destination
+    assert be.complete_move() is True
+    assert be.moving() is False
+    src = blocks.compile_blocks(be.program)
+    # cls now lives in the ELSE branch (after `else:`); the if-body is empty (`pass`)
+    assert src.index("cls(col") > src.index("else:")
+    _run(src)
+
+
+def test_move_to_a_different_parent():
+    be = _be()
+    _go_to_insert(be, 1)                                  # under on_draw (last depth-1)
+    be.insert_block("cls", {"color": "black"})
+    assert _select_type(be, "cls")
+    assert be.start_move() is True
+    be.cur = _inserts_at(be, 1)[0]                        # under on_start
+    assert be.complete_move() is True
+    assert be.program["scripts"][0]["c"][0]["t"] == "cls"   # moved into _init
+    assert be.program["scripts"][2].get("c", []) == []      # gone from _draw
+    _run(blocks.compile_blocks(be.program))
+
+
+def test_move_rejects_dropping_a_block_inside_itself():
+    be = _be()
+    _go_to_insert(be, 1)
+    be.insert_block("if", {"cond": mk("btn", {"dir": "left"})})
+    assert _select_type(be, "if")
+    assert be.start_move() is True
+    be.cur = _inserts_at(be, 2)[0]                        # the if's OWN body
+    assert be.complete_move() is False                   # can't orphan itself
+    assert be.moving() is True                            # still armed
+    be.cancel_move()
+    assert be.moving() is False
+
+
+# ----------------------------------------------------------------------------
+# #93: in-session undo / redo over each mutation type
+# ----------------------------------------------------------------------------
+
+def test_undo_redo_over_insert():
+    be = _be()
+    s0 = _snap(be)
+    _go_to_insert(be, 1)
+    be.insert_block("cls", {"color": "red"})
+    assert be.program != s0
+    assert be.undo() is True and be.program == s0
+    assert be.redo() is True and be.program != s0
+
+
+def test_undo_redo_over_delete():
+    be = _be()
+    _go_to_insert(be, 1)
+    be.insert_block("cls", {"color": "red"})
+    s1 = _snap(be)
+    assert _select_type(be, "cls")
+    assert be.delete() is True and be.program != s1
+    assert be.undo() is True and be.program == s1        # the block is back
+    assert _select_type(be, "cls")
+
+
+def test_undo_redo_over_reorder():
+    be = _be()
+    _go_to_insert(be, 1)
+    be.insert_block("cls", {"color": "black"})
+    _go_to_insert(be, 1)
+    be.insert_block("circ", {"x": 1, "y": 2, "r": 3, "color": "red"})
+    s = _snap(be)
+    assert _select_type(be, "circ")
+    assert be.move_block(-1) is True and be.program != s
+    assert be.undo() is True and be.program == s
+
+
+def test_undo_redo_over_slot_edit():
+    be = _be()
+    _go_to_insert(be, 1)
+    be.insert_block("cls", {"color": "black"})
+    assert _select_type(be, "cls")
+    s = _snap(be)
+    be.cycle_dropdown("color", 1)                        # a slot edit
+    assert be.program != s
+    assert be.undo() is True and be.program == s
+    # a set_slot is undoable too
+    be.set_slot("color", "green")
+    assert be.program != s
+    assert be.undo() is True and be.program == s
+
+
+def test_undo_redo_over_paste():
+    be = _be()
+    _go_to_insert(be, 1)
+    be.insert_block("cls", {"color": "black"})
+    assert _select_type(be, "cls")
+    be.copy_block()
+    s = _snap(be)
+    be.cur = _inserts_at(be, 1)[-1]
+    be.paste()
+    assert be.program != s
+    assert be.undo() is True and be.program == s
+    assert be.redo() is True and be.program != s
+
+
+def test_undo_stack_is_bounded():
+    from runtime.editors import _BLK_UNDO_MAX
+    be = _be()
+    be.add_var("x")
+    for _ in range(_BLK_UNDO_MAX + 20):
+        _go_to_insert(be, 1)
+        be.insert_block("change_var", {"var": "x", "value": 1})
+    assert len(be._undo) <= _BLK_UNDO_MAX
+
+
+# ----------------------------------------------------------------------------
+# #93: the UI wiring -- actions menu, move flow, undo/redo buttons + shortcut
+# ----------------------------------------------------------------------------
+
+def test_actions_menu_copy_then_paste_ui(tmp_path):
+    from runtime import block_editor_ui as B
+    ws, _, _ = _ws_with_block_cart(tmp_path)
+    ws._open_blocks()
+    bu = ws.block_ui
+    be = bu.blocks_ed
+    _go_to_insert(be, 1)
+    be.insert_block("cls", {"color": "green"})
+    assert _select_type(be, "cls")
+    bu._blk_open_actions()
+    assert bu.blk_menu is not None and bu.blk_menu["mode"] == "actions"
+    bu.blk_menu["sel"] = bu.blk_menu["items"].index(B._ACT_COPY)
+    bu._blk_menu_select()
+    assert bu.blk_menu is None and be.has_clipboard()
+    # move to an insert point and paste through the menu
+    be.cur = _inserts_at(be, 1)[-1]
+    bu._blk_open_actions()
+    assert B._ACT_PASTE in bu.blk_menu["items"]
+    bu.blk_menu["sel"] = bu.blk_menu["items"].index(B._ACT_PASTE)
+    bu._blk_menu_select()
+    body = [c["t"] for c in be.program["scripts"][2].get("c", [])]
+    assert body.count("cls") == 2
+    ws.frame(1 / 30)                                      # renders without error
+    assert ws.cart_error is None
+
+
+def test_move_flow_via_ui_taps_a_destination(tmp_path):
+    from runtime import block_editor_ui as B
+    ws, _, _ = _ws_with_block_cart(tmp_path)
+    ws._open_blocks()
+    bu = ws.block_ui
+    be = bu.blocks_ed
+    _go_to_insert(be, 1)                                  # under on_draw
+    be.insert_block("cls", {"color": "black"})
+    assert _select_type(be, "cls")
+    bu._blk_open_actions()
+    bu.blk_menu["sel"] = bu.blk_menu["items"].index(B._ACT_MOVE)
+    bu._blk_menu_select()
+    assert be.moving() is True
+    # in move mode, the A action on an insert point completes the move
+    be.cur = _inserts_at(be, 1)[0]                        # under on_start
+    bu._blk_a()
+    assert be.moving() is False
+    assert be.program["scripts"][0]["c"][0]["t"] == "cls"
+    assert bu.blk_status == "MOVED"
+
+
+def test_undo_redo_buttons_ui(tmp_path):
+    ws, _, _ = _ws_with_block_cart(tmp_path)
+    ws._open_blocks()
+    bu = ws.block_ui
+    be = bu.blocks_ed
+    _go_to_insert(be, 1)
+    be.insert_block("cls", {"color": "red"})
+    assert _select_type(be, "cls")
+    bu._blk_undo()
+    assert not _select_type(be, "cls")                   # the insert was reverted
+    bu._blk_redo()
+    assert _select_type(be, "cls")                       # and re-applied
+    ws.frame(1 / 30)
+    assert ws.cart_error is None
+
+
+def test_ctrl_z_keyboard_shortcut_undoes(tmp_path):
+    """Host convenience: Ctrl+Z (0x1A via last_key) undoes in the outline, like the
+    code editor. Driven through the real Workstation input path."""
+    ws, _, _ = _ws_with_block_cart(tmp_path)
+    ws._open_blocks()
+    drv = _driver(ws)
+    be = ws.block_ui.blocks_ed
+    _go_to_insert(be, 1)
+    be.insert_block("cls", {"color": "red"})
+    assert _select_type(be, "cls")
+    drv.type_char(0x1A)                                   # Ctrl+Z
+    drv.frame(1 / 30)
+    assert not _select_type(be, "cls")                   # undone
+    assert ws.menu_view == "blocks"                      # still in the editor
