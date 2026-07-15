@@ -51,14 +51,26 @@ align-items:center;justify-content:center;font:700 26px ui-monospace;color:#fff1
 background:#7e2553;border:2px solid #c2c3c7;margin-left:18px}#bb{background:#29366f}
 #bh{background:#5f574f;width:52px;height:52px;font-size:20px}
 .pr{background:#ffec27;color:#1d2b53}
-@media (hover:hover) and (pointer:fine){#ctl{display:none}}
+/* Soft-keyboard summon (#42 Thread 2): #cvwrap hugs the canvas so #kb (the toggle) pins to
+   its top-right corner without disturbing the flex-centered layout. #kbin is the real input
+   that gets focused -- pinned 1x1px at the viewport origin so it never occludes the canvas or
+   pushes the page around; font-size 16px so iOS doesn't zoom the page in on focus. */
+#cvwrap{position:relative;display:inline-block}
+#kb{position:absolute;top:6px;right:6px;width:30px;height:30px;border-radius:50%;
+display:flex;align-items:center;justify-content:center;font-size:16px;color:#fff1e8;
+background:#29366f;border:2px solid #c2c3c7;touch-action:none;user-select:none}
+#kbin{position:fixed;top:0;left:0;width:1px;height:1px;padding:0;margin:0;border:0;
+opacity:0;font-size:16px;background:transparent;color:transparent;caret-color:transparent}
+@media (hover:hover) and (pointer:fine){#ctl{display:none}#kb{display:none}}
 /* Debug HUD (#41): toggled with the ` key; lightweight live stream stats. */
 #hud{position:fixed;top:6px;left:6px;z-index:9;display:none;padding:6px 8px;border-radius:5px;
 background:rgba(11,15,26,.82);border:1px solid #1d2b53;color:#00e436;font:12px ui-monospace;
 white-space:pre;pointer-events:none}#hud b{color:#ffec27}#hud .w{color:#ff004d}</style></head><body>
 <div id=hud></div>
 <h1>Moybyte &mdash; device <span id=s>connecting...</span> <small style="color:#5f6f9f">(press ` for stats)</small></h1>
-<canvas id=cv width=320 height=240 tabindex=0></canvas>
+<div id=cvwrap><canvas id=cv width=320 height=240 tabindex=0></canvas>
+<span id=kb title="keyboard">&#9000;</span></div>
+<input id=kbin type=text autocapitalize=off autocomplete=off autocorrect=off spellcheck=false>
 <div id=ctl><div id=joy><div id=th></div></div>
 <div><span class=b id=bh>&#9776;</span><span class=b id=bb>B</span><span class=b id=ba>A</span></div></div>
 <script>
@@ -274,6 +286,35 @@ if(s&&!e.repeat)send({type:"press",name:s});var n=nv(e);if(n&&!nH[n]){nH[n]=true
 if(s||n||cd!==null)e.preventDefault();});
 cv.addEventListener("keyup",function(e){if(e.key in PAN){delete pH[e.key];e.preventDefault();return;}
 var n=nv(e);if(n&&nH[n]){delete nH[n];send({type:"hold",name:n,down:false});}});
+// Soft keyboard (#42 Thread 2): #kb focuses the hidden #kbin so a touch device's on-screen
+// keyboard opens; #kbin never appears on desktop (media-query hidden alongside #ctl) and its
+// events are entirely separate from cv's keydown above, so a physical keyboard is never
+// double-counted. Typed characters are read by DIFFING #kbin's value against a single-space
+// SENTINEL kept at all times -- soft keyboards routinely fire keydown with no usable key (IME
+// composition reports keyCode 229/"Unidentified"), so the value delta is the only reliable
+// signal; the sentinel exists so Backspace on an otherwise-empty field still fires an `input`
+// event (deleting the last real character leaves nothing to delete otherwise).
+var kbBtn=document.getElementById("kb"),kbInp=document.getElementById("kbin");
+function kbReset(){kbInp.value=" ";try{kbInp.setSelectionRange(1,1);}catch(e){}}
+kbReset();
+function kbScroll(){cv.scrollIntoView({block:"center",inline:"center"});}
+kbInp.addEventListener("input",function(){var v=kbInp.value;
+  if(v.length<1){send({type:"key",code:8});kbReset();return;}      // sentinel gone -> Backspace
+  var add=v.charAt(0)===" "?v.slice(1):v;                          // typed text lands after the sentinel
+  for(var i=0;i<add.length;i++){var c=add.charCodeAt(i);
+    if(c===10||c===13)send({type:"key",code:13});
+    else if(c>=32&&c<=126)send({type:"key",code:c});}              // letters/digits/punctuation incl. = [ ] { } < > %
+  kbReset();});
+// A single-line <input> never inserts a newline, so Enter needs its own listener (still
+// reliable on soft keyboards -- unlike printable keys, the Enter key name is widely reported).
+kbInp.addEventListener("keydown",function(e){if(e.key==="Enter"){send({type:"key",code:13});e.preventDefault();}});
+kbInp.addEventListener("focus",function(){kbBtn.classList.add("pr");
+  if(window.visualViewport)window.visualViewport.addEventListener("resize",kbScroll);kbScroll();});
+kbInp.addEventListener("blur",function(){kbBtn.classList.remove("pr");
+  if(window.visualViewport)window.visualViewport.removeEventListener("resize",kbScroll);});
+kbBtn.addEventListener("click",function(e){
+  if(document.activeElement===kbInp)kbInp.blur();else{kbReset();kbInp.focus();}
+  e.preventDefault();});
 var ok=false;
 function pv(){return[(pH.ArrowRight?1:0)-(pH.ArrowLeft?1:0),(pH.ArrowDown?1:0)-(pH.ArrowUp?1:0)];}
 // df(): render ONE frame payload. Atlas reset is driven by the device's `gen` (lock-step with
