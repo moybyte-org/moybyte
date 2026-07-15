@@ -1,6 +1,6 @@
 {
   "format": "moybyte-cart-v1",
-  "version": 6,
+  "version": 7,
   "title": "Hop Quest",
   "type": "game",
   "runtime": "python",

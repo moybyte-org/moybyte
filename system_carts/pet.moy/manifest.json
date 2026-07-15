@@ -1,6 +1,6 @@
 {
   "format": "moybyte-cart-v1",
-  "version": 4,
+  "version": 5,
   "title": "Pixel Pet",
   "type": "game",
   "runtime": "python",

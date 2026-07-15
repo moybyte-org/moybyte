@@ -59,8 +59,15 @@ def gen_cover(slug):
         if ws.screen != "desktop" or ws.cart_error:
             print("skip (did not start):", slug, ws.cart_error)
             return False
+        # Console overlays must not bake into the artwork (#86: several shipped
+        # covers carried the host mouse cursor; the fps readout does the same).
+        ws.show_fps = False
+        if ws.pointer is not None:
+            ws.pointer.visible = False
         for _ in range(FRAMES):
             ws.ach.toast = None          # keep system toasts out of the artwork
+            if ws.pointer is not None:
+                ws.pointer.visible = False
             ws.frame(1 / 30)
         ws.ach.toast = None
         ws._dirty = True
