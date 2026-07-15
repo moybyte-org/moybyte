@@ -27,7 +27,16 @@ that poke the music editor's internals directly.
 
 NOTE one asymmetry versus blocks/map, preserved as-is (not a bug to fix here):
 Workstation.go_home() does NOT reset musicedit/music_preview (blocks/map's
-go_home DOES reset their active editor) -- pre-existing behavior."""
+go_home DOES reset their active editor) -- pre-existing behavior.
+
+#92 adds copy/paste/duplicate/reorder/undo/redo, all touch-first: two extra pad
+rows (COPY/PASTE, MOVE-/MOVE+) shared verbatim by both views, a DUP button
+folded into the row 2 slot the song view left blank, and UNDO/REDO tucked into
+the bottom bar's unused width beside PLAY/LOOP -- see MusicEditor's docstring
+(runtime/editors.py) for the underlying model. Ctrl+Z/Ctrl+Y also work
+(_music_input), a host-only convenience mirroring the code editor's durable
+undo (code_layer.py) -- the device has no Ctrl, so the on-screen buttons are
+the device-identical path."""
 
 try:
     from editors import MusicEditor
@@ -70,16 +79,25 @@ _MU_PAD_Y = 34
 _MU_PAD_W = 68                     # one button's width
 _MU_PAD_H = 22
 _MU_PAD_GAP = 4
+_MU_PAD_ROWS = 6                   # 0-3 = #50's edit pad, 4-5 = #92's copy/move
 # Buttons (filled in by _mu_pad_rect via row index):
 #   row 0: NOTE- / NOTE+  (pitch down/up, or SFX-id down/up in song view)
 #   row 1: WAVE  / VOL    (cycle waveform / cycle volume) -- sfx view only
-#   row 2: REST  / SPEED  (toggle rest / bump tempo)
+#   row 2: REST  / DUP    (toggle rest, sfx only / duplicate the WHOLE SFX or
+#                          SONG into a new bank slot -- both views, #92)
 #   row 3: ADD   / DEL    (insert/remove a step or slot)
+#   row 4: COPY  / PASTE  (#92 -- the item under the cursor; both views)
+#   row 5: MOVE- / MOVE+  (#92 -- reorder the cursor item earlier/later)
+# Rows 4-5 fit the leftover vertical band below row 3 and above the bottom bar
+# (34 + 6*(22+4) - 4 == 186, still clear of the y=198 PLAY/LOOP row).
 _MU_SPEED_DN = (206, 19, 16, 14)   # speed - (control row, right of the SPD label)
 _MU_SPEED_UP = (228, 19, 16, 14)   # speed +
-# Bottom action bar: PLAY (preview) + LOOP only (SAVE/CLOSE moved to the unified bar).
+# Bottom action bar: PLAY (preview) + LOOP (SAVE/CLOSE moved to the unified bar),
+# plus UNDO/REDO (#92) tucked into the unused width to their right (216..320).
 _MU_PLAY = (8, 198, 100, 24)
 _MU_LOOP = (116, 198, 100, 24)
+_MU_UNDO = (220, 198, 46, 24)
+_MU_REDO = (268, 198, 46, 24)
 # Note names for rendering a pitch index (semitone 0..95 -> e.g. "C4"). Sharps only,
 # matching audio._NOTE_OFFSETS; kept here so the console renders labels without
 # reaching into audio's private table.
@@ -96,8 +114,9 @@ def _mu_note_name(pitch):
 
 
 def _mu_pad_rect(col, row):
-    """The (x, y, w, h) of edit-pad button at (col 0/1, row 0..3) -- the frozen
-    320x240 baseline (MusicLayout.pad_rect is the responsive equivalent)."""
+    """The (x, y, w, h) of edit-pad button at (col 0/1, row 0..5 -- #92 added rows
+    4-5) -- the frozen 320x240 baseline (MusicLayout.pad_rect is the responsive
+    equivalent)."""
     x = _MU_PAD_X + col * (_MU_PAD_W + _MU_PAD_GAP)
     y = _MU_PAD_Y + row * (_MU_PAD_H + _MU_PAD_GAP)
     return (x, y, _MU_PAD_W, _MU_PAD_H)
@@ -139,6 +158,7 @@ class MusicLayout:
             self.pad_x, self.pad_y = _MU_PAD_X, _MU_PAD_Y
             self.pad_w, self.pad_h, self.pad_gap = _MU_PAD_W, _MU_PAD_H, _MU_PAD_GAP
             self.play_btn, self.loop_btn = _MU_PLAY, _MU_LOOP
+            self.undo_btn, self.redo_btn = _MU_UNDO, _MU_REDO
             return
         # -- responsive: the control row hangs under the bar, the bottom bar anchors
         # to the canvas floor, and the list gains rows to fill the band between ----
@@ -166,9 +186,11 @@ class MusicLayout:
         self.pad_w, self.pad_h, self.pad_gap = 68 * fs, 22 * fs, 4 * fs
         self.play_btn = (8 * fs, bot_y, 100 * fs, 24 * fs)
         self.loop_btn = (116 * fs, bot_y, 100 * fs, 24 * fs)
+        self.undo_btn = (220 * fs, bot_y, 46 * fs, 24 * fs)
+        self.redo_btn = (268 * fs, bot_y, 46 * fs, 24 * fs)
 
     def pad_rect(self, col, row):
-        """The (x, y, w, h) of edit-pad button at (col 0/1, row 0..3)."""
+        """The (x, y, w, h) of edit-pad button at (col 0/1, row 0..5)."""
         x = self.pad_x + col * (self.pad_w + self.pad_gap)
         y = self.pad_y + row * (self.pad_h + self.pad_gap)
         return (x, y, self.pad_w, self.pad_h)
@@ -285,6 +307,16 @@ class MusicEditorUI:
                     self._stop_music_preview()
                 else:
                     self._play_music_preview()
+            # Host-only convenience (#92): Ctrl+Z/Ctrl+Y, same control bytes + same
+            # "typed key, not a game button" wiring as the code editor's durable
+            # undo/redo (code_layer.py) -- device has no Ctrl, so the on-screen
+            # UNDO/REDO buttons (the bottom bar) are the touch-first, device-
+            # identical path; this is purely a host keyboard shortcut on top.
+            k = i.last_key
+            if k == 0x1A:
+                me.undo()
+            elif k == 0x19:
+                me.redo()
         ws._leave_or_home(ws._leave_menu)
         ws._dirty = True
 
@@ -331,6 +363,10 @@ class MusicEditorUI:
             return
         if self._in(px, py, lay.loop_btn):
             me.toggle_loop(); return
+        if self._in(px, py, lay.undo_btn):
+            me.undo(); return
+        if self._in(px, py, lay.redo_btn):
+            me.redo(); return
         # The right-hand edit pad (per-view button grid).
         self._music_pad_click(px, py, song)
 
@@ -338,22 +374,33 @@ class MusicEditorUI:
         me = self.musicedit
         if me is None:
             return
-        # Find which pad button was hit (col 0/1, row 0..3).
-        for row in range(4):
+        # Find which pad button was hit (col 0/1, row 0..5 -- #92 added rows 4-5).
+        for row in range(_MU_PAD_ROWS):
             for col in range(2):
                 if self._in(px, py, self.layout.pad_rect(col, row)):
                     self._music_pad_action(row, col, song)
                     return
 
     def _music_pad_action(self, row, col, song):
-        """Apply the edit-pad button at (row, col) for the active view (#50). The
-        labels are wired in _draw_music_pad; this is their behavior."""
+        """Apply the edit-pad button at (row, col) for the active view (#50/#92). The
+        labels are wired in _draw_music_pad; this is their behavior. Rows 4-5 (copy/
+        paste/reorder) and row 2 col 1 (duplicate) are shared verbatim across both
+        views -- only the target object (step vs. slot, SFX vs. track) differs."""
         me = self.musicedit
         if me is None:
+            return
+        if row == 4:                           # COPY / PASTE (#92, both views)
+            me.copy() if col == 0 else me.paste()
+            return
+        if row == 5:                           # MOVE- / MOVE+ (#92, both views)
+            (me.move_slot if song else me.move_step)(-1 if col == 0 else 1)
             return
         if song:
             if row == 0:                       # SFX- / SFX+
                 me.nudge_slot(-1 if col == 0 else 1)
+            elif row == 2:                     # DUP (col 1) -- col 0 unused
+                if col == 1:
+                    me.duplicate_track()
             elif row == 3:                     # ADD / DEL
                 me.add_slot() if col == 0 else me.del_slot()
             return
@@ -362,9 +409,8 @@ class MusicEditorUI:
             me.nudge_pitch(-1 if col == 0 else 1)
         elif row == 1:                         # WAVE / VOL (both wrap: one tap cycles)
             me.cycle_wave(1) if col == 0 else me.cycle_vol(1)
-        elif row == 2:                         # REST (col 0) -- col 1 unused
-            if col == 0:
-                me.toggle_rest()
+        elif row == 2:                         # REST (col 0) / DUP (col 1, #92)
+            me.toggle_rest() if col == 0 else me.duplicate_sfx()
         elif row == 3:                         # ADD / DEL
             me.add_step() if col == 0 else me.del_step()
 
@@ -427,6 +473,12 @@ class MusicEditorUI:
                   NAMES["red"] if playing else NAMES["green"], cv)
         ws._btn("LOOP" if loop else "1X", lay.loop_btn,
                   NAMES["orange"] if loop else NAMES["dark_grey"], cv)
+        # UNDO/REDO (#92) -- always tappable, same "just don't crash" style as DEL
+        # on a single-step SFX (undo()/redo() are no-ops at either end of the
+        # bounded stack; me.can_undo()/can_redo() are there for callers/tests that
+        # want to know without tapping).
+        ws._btn("UNDO", lay.undo_btn, NAMES["dark_grey"], cv)
+        ws._btn("REDO", lay.redo_btn, NAMES["dark_grey"], cv)
         if ws.save_status:
             cv.print(ws.save_status[:8], lay.status_x, lay.title_y,
                      th["author"] if light else NAMES["yellow"], 1)
@@ -526,21 +578,29 @@ class MusicEditorUI:
                      (th["ink"] if light else NAMES["light_grey"]), 1)
 
     def _draw_music_pad(self, song):
-        # Two columns x four rows of edit buttons; labels differ per view.
+        # Two columns x six rows of edit buttons; labels differ per view. Rows 4-5
+        # (COPY/PASTE, MOVE-/MOVE+) and row 2's DUP are #92 additions, shared
+        # verbatim across both views (only the target object differs).
         NAMES = self._NAMES
         cv = self.ws.sys_canvas
         if song:
-            labels = (("SFX-", "SFX+"), ("", ""), ("", ""), ("ADD", "DEL"))
-            cols = ((NAMES["blue"], NAMES["blue"]), (None, None), (None, None),
-                    (NAMES["dark_green"], NAMES["red"]))
+            labels = (("SFX-", "SFX+"), ("", ""), ("", "DUP"), ("ADD", "DEL"),
+                      ("COPY", "PASTE"), ("MOVE-", "MOVE+"))
+            cols = ((NAMES["blue"], NAMES["blue"]), (None, None),
+                    (None, NAMES["peach"]),
+                    (NAMES["dark_green"], NAMES["red"]),
+                    (NAMES["indigo"], NAMES["indigo"]),
+                    (NAMES["pink"], NAMES["pink"]))
         else:
-            labels = (("NOTE-", "NOTE+"), ("WAVE", "VOL"), ("REST", ""),
-                      ("ADD", "DEL"))
+            labels = (("NOTE-", "NOTE+"), ("WAVE", "VOL"), ("REST", "DUP"),
+                      ("ADD", "DEL"), ("COPY", "PASTE"), ("MOVE-", "MOVE+"))
             cols = ((NAMES["blue"], NAMES["blue"]),
                     (NAMES["dark_purple"], NAMES["orange"]),
-                    (NAMES["brown"], None),
-                    (NAMES["dark_green"], NAMES["red"]))
-        for row in range(4):
+                    (NAMES["brown"], NAMES["peach"]),
+                    (NAMES["dark_green"], NAMES["red"]),
+                    (NAMES["indigo"], NAMES["indigo"]),
+                    (NAMES["pink"], NAMES["pink"]))
+        for row in range(_MU_PAD_ROWS):
             for col in range(2):
                 lbl = labels[row][col]
                 if not lbl:

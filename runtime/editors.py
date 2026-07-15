@@ -1451,6 +1451,8 @@ _ME_SPEED_MIN = 1
 _ME_SPEED_MAX = 30          # steps/slots per second (kid-sane upper bound)
 _ME_STEPS_MAX = 32          # most steps a single SFX may hold
 _ME_PATTERN_MAX = 32        # most slots a music track may hold
+_ME_BANK_MAX = 64           # most SFX/tracks duplicate_sfx/duplicate_track may grow the bank to
+_ME_UNDO_MAX = 30           # bounded in-editor undo/redo depth (#92)
 
 
 def _me_clamp(v, lo, hi):
@@ -1483,7 +1485,35 @@ class MusicEditor:
 
     The bank is guaranteed non-empty on construction (a default SFX + track are
     created if missing) so the grid is never blank. `dirty` tracks unsaved edits so
-    the console can show a `*` and SAVE; the bank's own to_dict drives sounds.json."""
+    the console can show a `*` and SAVE; the bank's own to_dict drives sounds.json.
+
+    #92 adds copy/paste, whole-object duplicate, step/slot reorder, and a bounded
+    in-editor undo/redo, all pure in-RAM state (no OS clipboard, no disk journal --
+    that's moy_carts' separate durable per-project journal for code):
+
+      copy/paste -- `copy()` snapshots the item under the cursor (a step in the sfx
+                    view, a slot's SFX id in the song view) into `self._clip`;
+                    `paste()` writes it back at the (possibly moved) cursor. A
+                    mismatched clipboard kind for the active view is a no-op.
+
+      duplicate  -- `duplicate_sfx`/`duplicate_track` deep-copy the WHOLE active
+                    object into a fresh bank slot right after it and select the
+                    copy (the per-item "duplicate" -- a new step/slot seeded from
+                    the current one -- already exists as add_step/add_slot).
+
+      reorder    -- `move_step`/`move_slot` swap the cursor item with its neighbor
+                    (d = +-1) and move the cursor along with it; a no-op at either
+                    edge (mirrors add/del's "keep at least one" edge behavior).
+
+      undo/redo  -- a bounded stack (depth _ME_UNDO_MAX) of snapshots of just the
+                    ACTIVE object's editable fields (steps/pattern + speed + loop),
+                    pushed before every content-mutating call. Switching which
+                    SFX/track is active, or duplicating one, is navigation, not a
+                    tracked edit -- undo only walks back through what was DONE to
+                    the object currently open, restoring the object + cursor + view
+                    the edit happened in (so an undo after `select_sfx` still finds
+                    its way back). A fresh edit after an undo drops the redo tail,
+                    same rule as moy_carts' durable journal."""
 
     SFX_VIEW = "sfx"
     SONG_VIEW = "song"
@@ -1502,6 +1532,9 @@ class MusicEditor:
         self.track_idx = 0        # which music track is being edited (song view)
         self.slot = 0             # selected slot within that track (song view)
         self.dirty = False
+        self._clip = None         # internal clipboard: ("step", [p, w, v]) | ("slot", id)
+        self._undo = []           # bounded snapshot stacks (#92) -- see class docstring
+        self._redo = []
         self._ensure_nonempty()
 
     # -- bank bootstrapping --------------------------------------------------
@@ -1636,6 +1669,7 @@ class MusicEditor:
         st = self.cur_step()
         if st is None or st[0] < 0:
             return
+        self._push_undo()
         st[0] = _me_clamp(st[0] + d, _ME_PITCH_MIN, _ME_PITCH_MAX)
         self.dirty = True
 
@@ -1644,6 +1678,7 @@ class MusicEditor:
         st = self.cur_step()
         if st is None:
             return
+        self._push_undo()
         st[0] = _ME_REST if pitch < 0 else _me_clamp(int(pitch), _ME_PITCH_MIN, _ME_PITCH_MAX)
         self.dirty = True
 
@@ -1653,6 +1688,7 @@ class MusicEditor:
         st = self.cur_step()
         if st is None:
             return
+        self._push_undo()
         if st[0] < 0:
             st[0] = _me_clamp(int(default_pitch), _ME_PITCH_MIN, _ME_PITCH_MAX)
         else:
@@ -1664,6 +1700,7 @@ class MusicEditor:
         st = self.cur_step()
         if st is None:
             return
+        self._push_undo()
         span = _ME_WAVE_MAX - _ME_WAVE_MIN + 1
         st[1] = _ME_WAVE_MIN + (st[1] - _ME_WAVE_MIN + d) % span
         self.dirty = True
@@ -1673,6 +1710,7 @@ class MusicEditor:
         st = self.cur_step()
         if st is None:
             return
+        self._push_undo()
         st[2] = _me_clamp(st[2] + d, _ME_VOL_MIN, _ME_VOL_MAX)
         self.dirty = True
 
@@ -1682,6 +1720,7 @@ class MusicEditor:
         st = self.cur_step()
         if st is None:
             return
+        self._push_undo()
         span = _ME_VOL_MAX - _ME_VOL_MIN + 1
         st[2] = _ME_VOL_MIN + (st[2] - _ME_VOL_MIN + d) % span
         self.dirty = True
@@ -1692,6 +1731,7 @@ class MusicEditor:
         s = self.cur_sfx()
         if s is None or len(s.steps) >= _ME_STEPS_MAX:
             return
+        self._push_undo()
         src = self.cur_step()
         new = list(src) if src is not None else [_ME_REST, _ME_WAVE_MIN, _ME_VOL_MAX - 1]
         s.steps.insert(self.step + 1, new)
@@ -1703,9 +1743,25 @@ class MusicEditor:
         s = self.cur_sfx()
         if s is None or len(s.steps) <= 1:
             return
+        self._push_undo()
         del s.steps[self.step]
         if self.step >= len(s.steps):
             self.step = len(s.steps) - 1
+        self.dirty = True
+
+    def move_step(self, d):
+        """Reorder (#92): swap the current step with its neighbor d away (+1 right/
+        later, -1 left/earlier) and move the cursor along with it. A no-op past
+        either edge, mirroring add/del's "keep at least one" boundary style."""
+        s = self.cur_sfx()
+        if s is None:
+            return
+        j = self.step + d
+        if not (0 <= j < len(s.steps)):
+            return
+        self._push_undo()
+        s.steps[self.step], s.steps[j] = s.steps[j], s.steps[self.step]
+        self.step = j
         self.dirty = True
 
     # -- tempo / length ------------------------------------------------------
@@ -1715,6 +1771,7 @@ class MusicEditor:
         obj = self.cur_sfx() if self.view == self.SFX_VIEW else self.cur_track()
         if obj is None:
             return
+        self._push_undo()
         obj.speed = _me_clamp(obj.speed + d, _ME_SPEED_MIN, _ME_SPEED_MAX)
         self.dirty = True
 
@@ -1723,6 +1780,7 @@ class MusicEditor:
         obj = self.cur_sfx() if self.view == self.SFX_VIEW else self.cur_track()
         if obj is None:
             return
+        self._push_undo()
         obj.loop = not obj.loop
         self.dirty = True
 
@@ -1740,6 +1798,7 @@ class MusicEditor:
         t = self.cur_track()
         if t is None or not (0 <= self.slot < len(t.pattern)):
             return
+        self._push_undo()
         hi = max(0, len(self.bank.sfx) - 1)
         t.pattern[self.slot] = _me_clamp(t.pattern[self.slot] + d, 0, hi)
         self.dirty = True
@@ -1749,6 +1808,7 @@ class MusicEditor:
         t = self.cur_track()
         if t is None or not (0 <= self.slot < len(t.pattern)):
             return
+        self._push_undo()
         hi = max(0, len(self.bank.sfx) - 1)
         t.pattern[self.slot] = _me_clamp(int(sfx_id), 0, hi)
         self.dirty = True
@@ -1758,6 +1818,7 @@ class MusicEditor:
         t = self.cur_track()
         if t is None or len(t.pattern) >= _ME_PATTERN_MAX:
             return
+        self._push_undo()
         val = t.pattern[self.slot] if 0 <= self.slot < len(t.pattern) else 0
         t.pattern.insert(self.slot + 1, val)
         self.slot += 1
@@ -1768,7 +1829,187 @@ class MusicEditor:
         t = self.cur_track()
         if t is None or len(t.pattern) <= 1:
             return
+        self._push_undo()
         del t.pattern[self.slot]
         if self.slot >= len(t.pattern):
             self.slot = len(t.pattern) - 1
+        self.dirty = True
+
+    def move_slot(self, d):
+        """Reorder (#92): swap the current phrase slot with its neighbor d away
+        (+1 later, -1 earlier), moving the cursor along. Mirrors move_step."""
+        t = self.cur_track()
+        if t is None:
+            return
+        j = self.slot + d
+        if not (0 <= j < len(t.pattern)):
+            return
+        self._push_undo()
+        t.pattern[self.slot], t.pattern[j] = t.pattern[j], t.pattern[self.slot]
+        self.slot = j
+        self.dirty = True
+
+    # -- copy / paste (#92) ---------------------------------------------------
+    def copy(self):
+        """Copy the item under the cursor to the internal clipboard: the current
+        step (a [pitch, wave, vol] list) in the sfx view, the current slot's SFX id
+        in the song view. In-RAM only, device-identical -- no OS clipboard."""
+        if self.view == self.SFX_VIEW:
+            st = self.cur_step()
+            if st is not None:
+                self._clip = ("step", list(st))
+        else:
+            v = self.cur_slot_value()
+            if v is not None:
+                self._clip = ("slot", v)
+
+    def paste(self):
+        """Paste the clipboard over the item under the cursor. A no-op if nothing
+        was copied yet, or the clipboard holds the other view's kind of item
+        (a copied step can't paste into a song slot and vice versa)."""
+        if self._clip is None:
+            return
+        kind, val = self._clip
+        if self.view == self.SFX_VIEW and kind == "step":
+            st = self.cur_step()
+            if st is None:
+                return
+            self._push_undo()
+            st[0], st[1], st[2] = val
+            self.dirty = True
+        elif self.view == self.SONG_VIEW and kind == "slot":
+            t = self.cur_track()
+            if t is None or not (0 <= self.slot < len(t.pattern)):
+                return
+            self._push_undo()
+            hi = max(0, len(self.bank.sfx) - 1)
+            t.pattern[self.slot] = _me_clamp(int(val), 0, hi)
+            self.dirty = True
+
+    # -- whole-object duplicate (#92) ------------------------------------------
+    def duplicate_sfx(self):
+        """Duplicate the WHOLE current SFX (steps/speed/loop) into a fresh bank
+        slot right after it, and select the copy. The per-item duplicate (a new
+        step seeded from the current one) already exists as add_step; this is the
+        bank-level "clone this effect" the kid reaches from either view."""
+        s = self.cur_sfx()
+        if s is None or len(self.bank.sfx) >= _ME_BANK_MAX:
+            return
+        dup = self._new_sfx()
+        if dup is None:
+            return
+        dup.steps = [list(st) for st in s.steps]
+        dup.speed = s.speed
+        dup.loop = s.loop
+        self.bank.sfx.insert(self.sfx_idx + 1, dup)
+        self.sfx_idx += 1
+        self.step = 0
+        self.dirty = True
+        self._clamp()
+
+    def duplicate_track(self):
+        """Duplicate the WHOLE current SONG (track: pattern/speed/loop) into a
+        fresh bank slot right after it, and select the copy. Mirrors
+        duplicate_sfx for the song view."""
+        t = self.cur_track()
+        if t is None or len(self.bank.music) >= _ME_BANK_MAX:
+            return
+        dup = self._new_track()
+        if dup is None:
+            return
+        dup.pattern = list(t.pattern)
+        dup.speed = t.speed
+        dup.loop = t.loop
+        self.bank.music.insert(self.track_idx + 1, dup)
+        self.track_idx += 1
+        self.slot = 0
+        self.dirty = True
+        self._clamp()
+
+    # -- bounded in-editor undo/redo (#92) -------------------------------------
+    # Scoped to the ACTIVE object's own editable fields (steps/pattern + speed +
+    # loop) -- a snapshot per content edit, depth _ME_UNDO_MAX. Navigation (which
+    # SFX/track is selected) and whole-object duplicate are NOT tracked; only what
+    # was actually done to an object is undoable, and undoing restores the view +
+    # object + cursor the edit happened in.
+    def _snapshot(self):
+        """Capture the active object's mutable fields + the cursor pointing at it,
+        or None if there is nothing to snapshot (an empty bank)."""
+        if self.view == self.SFX_VIEW:
+            obj = self.cur_sfx()
+            if obj is None:
+                return None
+            return ("sfx", self.sfx_idx, [list(st) for st in obj.steps],
+                    obj.speed, obj.loop, self.step)
+        obj = self.cur_track()
+        if obj is None:
+            return None
+        return ("song", self.track_idx, list(obj.pattern),
+                obj.speed, obj.loop, self.slot)
+
+    def _restore(self, snap):
+        """Write a _snapshot() tuple back over the bank + re-point the cursor."""
+        kind, idx, data, speed, loop, cursor = snap
+        if kind == "sfx":
+            if not (0 <= idx < len(self.bank.sfx)):
+                return
+            obj = self.bank.sfx[idx]
+            obj.steps = [list(st) for st in data]
+            obj.speed = speed
+            obj.loop = loop
+            self.view = self.SFX_VIEW
+            self.sfx_idx = idx
+            self.step = cursor
+        else:
+            if not (0 <= idx < len(self.bank.music)):
+                return
+            obj = self.bank.music[idx]
+            obj.pattern = list(data)
+            obj.speed = speed
+            obj.loop = loop
+            self.view = self.SONG_VIEW
+            self.track_idx = idx
+            self.slot = cursor
+        self._clamp()
+
+    def _push_undo(self):
+        """Record the active object's pre-edit state. Called by every content-
+        mutating method BEFORE it changes anything. A fresh edit always drops the
+        redo tail (same rule as moy_carts' durable journal)."""
+        snap = self._snapshot()
+        if snap is None:
+            return
+        self._undo.append(snap)
+        if len(self._undo) > _ME_UNDO_MAX:
+            del self._undo[0]
+        self._redo = []
+
+    def can_undo(self):
+        return bool(self._undo)
+
+    def can_redo(self):
+        return bool(self._redo)
+
+    def undo(self):
+        """Step back one content edit (a no-op at the floor)."""
+        if not self._undo:
+            return
+        cur = self._snapshot()
+        snap = self._undo.pop()
+        if cur is not None:
+            self._redo.append(cur)
+            if len(self._redo) > _ME_UNDO_MAX:
+                del self._redo[0]
+        self._restore(snap)
+        self.dirty = True
+
+    def redo(self):
+        """Re-apply the next edit undo() walked back past (a no-op at the top)."""
+        if not self._redo:
+            return
+        cur = self._snapshot()
+        snap = self._redo.pop()
+        if cur is not None:
+            self._undo.append(cur)
+        self._restore(snap)
         self.dirty = True
