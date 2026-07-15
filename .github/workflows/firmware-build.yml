@@ -15,9 +15,16 @@ on:
         type: choice
         default: tdeck
         options: [tdeck, p4, both]
-  # push:
-  #   branches: [master]
-  #   paths: ["firmware/**", "runtime/**", "system_carts/**"]
+  # TEMPORARY: lets this feature branch trigger a validation build (workflow_dispatch
+  # only works once the file is on the default branch). Building tdeck on a push that
+  # touches the workflow file itself. Remove this block after the workflow is proven.
+  push:
+    branches: ["claude/cloud-capabilities-webview-neu3du"]
+    paths: [".github/workflows/firmware-build.yml"]
+  # To archive every master build, use instead:
+  #   push:
+  #     branches: [master]
+  #     paths: ["firmware/**", "runtime/**", "system_carts/**"]
 
 concurrency:
   group: firmware-${{ github.ref }}
@@ -27,7 +34,7 @@ jobs:
   build:
     name: ${{ matrix.board }}
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -59,7 +66,12 @@ jobs:
         uses: jlumbroso/free-disk-space@main
         with:
           tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          docker-images: true
           large-packages: false
+          swap-storage: false
 
       - name: ESP-IDF host prerequisites
         if: steps.gate.outputs.run == 'true'
