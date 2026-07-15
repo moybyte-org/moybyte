@@ -161,6 +161,18 @@ class CodeLayer:
     id = "code"
     domain = "system"
 
+    # The tool palette (#89): a tappable row (opened by the always-visible TLS
+    # toggle) that reaches every range op the T-Deck keyboard has no key/combo for.
+    # 2-3 char labels so ten fit across the 320px baseline. Host keyboard shortcuts
+    # (Ctrl+C/X/V/F, shift+arrow, Tab) are conveniences layered on top -- these
+    # buttons are the touch (mouse-on-web) path that also works on the device.
+    _TOOLS = ("sel", "copy", "cut", "paste", "find",
+              "indent", "outdent", "gutter", "undo", "redo")
+    _TOOL_LABEL = {"sel": "SEL", "copy": "CPY", "cut": "CUT", "paste": "PST",
+                   "find": "FND", "indent": ">>", "outdent": "<<", "gutter": "#",
+                   "undo": "UN", "redo": "RE"}
+    _TLS_COLS = 3                 # cells wide for the always-visible tools toggle
+
     def __init__(self, ws, names, in_rect):
         self.ws = ws
         self._NAMES = names
@@ -169,11 +181,26 @@ class CodeLayer:
         self._drag = None             # last pointer pos during a code-view drag-scroll
         self._hl_cache = {}           # per-line syntax-highlight memo (#24)
         self._t = None                # per-draw tone map (set by _draw_code)
+        # -- #89 additions: selection / tools / find / gutter -----------------
+        self._tools_open = False      # the tool palette row is shown
+        self._select_mode = False     # SELECT mode: a code drag extends the selection
+        self._sel_drag = False        # a selection drag is in progress this gesture
+        self._gutter = False          # optional line-number gutter (off == baseline)
+        self._find_open = False       # the find bar is shown + focused
+        self._find_q = ""             # the find query being typed
+        self._find_ci = True          # case-insensitive find (the default)
+        self._find_anchor = None      # where the incremental search re-runs from
 
     def reset(self):
         """Reset the keyboard edge tracker (called by ws.set_menu_view when the editor
-        is (re)built) so the first key press after opening registers."""
+        is (re)built) so the first key press after opening registers. Also drops the
+        transient #89 modes so a freshly-opened editor is in a clean state."""
         self._ekey_prev = 0
+        self._sel_drag = False
+        self._find_open = False
+        self._select_mode = False
+        if self.ws.editor is not None:
+            self.ws.editor.select_sticky = False
 
     def _is_lua(self):
         """The open project's cart language (#67 Phase 5): drives the symbol
@@ -207,20 +234,41 @@ class CodeLayer:
         # draws in, so the bar tap goes straight through (no _game_xy translation).
         ws = self.ws
         lay = ws.code_layout
+        ed = ws.editor
         # The unified bar's tab ladder + PLAY + SAVE + X claims its slice FIRST (Stage 4
         # rollout), before any code-body tap -- SAVE here dispatches to ws.save_code.
         if click and ws.bar_layer.handle_bar_tap("menu", px, py):
             return True
-        self._code_drag(px, py)        # touch/mouse drag pans the viewport
-        if click:
-            if self._in(px, py, lay.sym_area) and ws.editor is not None:
-                syms = self._symbols()
-                i = (px - lay.sym_area[0]) // lay.sym_cell  # tap a coding symbol
-                if 0 <= i < len(syms):
-                    ws.editor.key(ord(syms[i]))
-            elif ws.editor is not None and self._in(px, py, lay.code_area()):
-                ws.editor.place((px - lay.x0) // lay.cell,
-                                (py - lay.y0) // lay.lh)
+        # #89 chrome, in overlay order: the always-visible tools toggle, then (when
+        # open) the find bar + the tool palette row, all before the code body.
+        if click and self._in(px, py, self._tls_btn(lay)):
+            self._tools_open = not self._tools_open
+            ws.mark_dirty()
+            return True
+        if click and self._find_open and self._find_tap(px, py, lay):
+            return True
+        if click and self._tools_open and self._in(px, py, self._toolbar_rect(lay)):
+            self._tool_tap(px, py, lay, ed)
+            return True
+        if click and self._in(px, py, lay.sym_area) and ed is not None:
+            syms = self._symbols()
+            i = (px - lay.sym_area[0]) // lay.sym_cell   # tap a coding symbol
+            if 0 <= i < len(syms):
+                self._feed_char(ord(syms[i]))            # routes to find field or editor
+            return True
+        if ed is not None and self._in(px, py, lay.code_area()):
+            if self._select_mode:
+                self._select_pointer(px, py, click, lay, ed)   # drag = extend selection
+            else:
+                self._code_drag(px, py)                  # drag pans the viewport
+                if click:
+                    tx0 = self._text_x0(lay, ed)
+                    col = (px - tx0) // lay.cell
+                    if col < 0:
+                        col = 0                           # a tap in the gutter -> column 0
+                    ed.place(col, (py - lay.y0) // lay.lh)
+        else:
+            self._drag = None
         return True
 
     # -- input ---------------------------------------------------------------
@@ -230,26 +278,220 @@ class CodeLayer:
         # keyboard reports the byte for the frame it is down then 0, so acting on
         # the 0->key edge (key != previous) avoids autorepeat.
         ws = self.ws
-        if ws.editor is None:
+        ed = ws.editor
+        if ed is None:
             return
         k = ws.input.last_key
         if k and k != self._ekey_prev:
-            # Durable undo/redo (Stage 7): the code editor's keyboard shortcut for the
-            # journal walk -- Ctrl+Z (0x1A) / Ctrl+Y (0x19). These control bytes are
-            # never inserted as text (editor.key ignores them), so they can't corrupt
-            # the buffer. DESIGN CALL FOR THE OWNER (spec Section 7): the on-DEVICE
-            # affordance -- which T-Deck key combo, or an in-body control -- is
-            # unresolved; this wires the host's Ctrl+Z/Y and ws.undo()/redo() are the
-            # mechanism whatever device affordance the owner picks will drive.
-            if k == 0x1A:
+            # Host keyboard shortcuts (#89) layered over the touch tool palette: the
+            # control bytes below are NEVER inserted as text (editor.key ignores them),
+            # so they can't corrupt the buffer -- and each maps to a tool-palette button
+            # so touch-only devices reach the same feature. Ctrl+Z/Y (0x1A/0x19) are the
+            # Stage-7 journal walk; Ctrl+C/X/V (0x03/0x18/0x16) the clipboard; Ctrl+F
+            # (0x06) the find bar. While the find bar is focused, typing feeds the query.
+            if k == 0x06:                      # Ctrl+F toggles the find bar
+                self._toggle_find()
+            elif self._find_open:
+                self._find_key(k)              # find field owns the keyboard while open
+            elif k == 0x1A:
                 ws.undo()
             elif k == 0x19:
                 ws.redo()
-            elif ws.editor.key(k):     # text changed -> drop the stale error marker
-                ws.code_err = None
-                ws.code_err_row = None
-                ws.crash_line = None
+            elif k == 0x03:
+                ed.copy()
+            elif k == 0x18:
+                if ed.cut():
+                    self._clear_err()
+            elif k == 0x16:
+                if ed.paste():
+                    self._clear_err()
+            elif ed.key(k):                    # text changed -> drop the stale error marker
+                self._clear_err()
         self._ekey_prev = k
+
+    # -- #89 helpers: clipboard/find/tool/select routing ---------------------
+
+    def _clear_err(self):
+        # A text edit invalidates a stale runtime-error marker (same as the old
+        # inline drop in _editor_input; shared now that several ops mutate the text).
+        ws = self.ws
+        ws.code_err = None
+        ws.code_err_row = None
+        ws.crash_line = None
+
+    def _feed_char(self, code):
+        # One typed/tapped character: into the find field while it's focused, else
+        # inserted into the buffer (the symbol-palette path).
+        if self._find_open:
+            self._find_key(code)
+        elif self.ws.editor is not None and self.ws.editor.key(code):
+            self._clear_err()
+
+    def _run_tool(self, name, ed):
+        # Dispatch a tool-palette button (also the keyboard-shortcut targets).
+        ws = self.ws
+        if ed is None:
+            return
+        if name == "sel":
+            self._select_mode = not self._select_mode
+            ed.select_sticky = self._select_mode
+            if self._select_mode:
+                ed.begin_select()              # anchor here so arrows/drag extend
+        elif name == "copy":
+            ed.copy()
+        elif name == "cut":
+            if ed.cut():
+                self._clear_err()
+        elif name == "paste":
+            if ed.paste():
+                self._clear_err()
+        elif name == "find":
+            self._toggle_find()
+        elif name == "indent":
+            ed.indent_selection()
+            self._clear_err()
+        elif name == "outdent":
+            if ed.outdent_selection():
+                self._clear_err()
+        elif name == "gutter":
+            self._gutter = not self._gutter
+        elif name == "undo":
+            ws.undo()
+        elif name == "redo":
+            ws.redo()
+        ws.mark_dirty()
+
+    def _tool_tap(self, px, py, lay, ed):
+        r = self._toolbar_rect(lay)
+        n = len(self._TOOLS)
+        bw = r[2] // n
+        if bw <= 0:
+            return
+        i = (px - r[0]) // bw
+        if 0 <= i < n:
+            self._run_tool(self._TOOLS[i], ed)
+
+    def _select_pointer(self, px, py, click, lay, ed):
+        # SELECT mode: the press edge drops a fresh anchor at the tapped cell, then a
+        # drag extends the selection to the finger (place(select=True) keeps the
+        # anchor). Release ends the gesture. A plain tap (press+release, no move)
+        # just moves the caret -- exactly a non-select tap.
+        ws = self.ws
+        tx0 = self._text_x0(lay, ed)
+        col = (px - tx0) // lay.cell
+        if col < 0:
+            col = 0
+        row = (py - lay.y0) // lay.lh
+        if click:
+            ed.place(col, row)                 # collapse + move the caret here
+            ed.begin_select()
+            self._sel_drag = True
+        elif self._sel_drag and ws.pointer.down:
+            ed.place(col, row, select=True)    # extend to the finger
+        elif not ws.pointer.down:
+            self._sel_drag = False
+        ws.mark_dirty()
+
+    # -- find bar ------------------------------------------------------------
+
+    def _toggle_find(self):
+        self._find_open = not self._find_open
+        ed = self.ws.editor
+        if self._find_open and ed is not None:
+            self._find_anchor = (ed.row, ed.col)   # incremental search re-runs from here
+        self.ws.mark_dirty()
+
+    def _find_run(self, forward, reset=False):
+        ed = self.ws.editor
+        if ed is None or not self._find_q:
+            return
+        if reset and self._find_anchor is not None:
+            # Incremental (query changed): restart from where find opened so the
+            # highlight doesn't march away as you type.
+            ed.row, ed.col = self._find_anchor
+            ed.sel = None
+        ed.find(self._find_q, forward, self._find_ci)
+        self.ws.mark_dirty()
+
+    def _find_key(self, code):
+        # Edit the find query (the find field has the keyboard while it's open).
+        if code in (0x0D, 0x0A):               # enter -> next match
+            self._find_run(True)
+        elif code in (0x08, 0x7F):             # backspace -> trim + re-search
+            self._find_q = self._find_q[:-1]
+            self._find_run(True, reset=True)
+            self.ws.mark_dirty()
+        elif 0x20 <= code <= 0x7E:             # printable -> extend + re-search
+            self._find_q += chr(code)
+            self._find_run(True, reset=True)
+            self.ws.mark_dirty()
+
+    def _find_tap(self, px, py, lay):
+        btns = self._find_btns(lay)
+        if self._in(px, py, btns["prev"]):
+            self._find_run(False)
+        elif self._in(px, py, btns["next"]):
+            self._find_run(True)
+        elif self._in(px, py, btns["case"]):
+            self._find_ci = not self._find_ci
+            self._find_run(True, reset=True)
+        elif self._in(px, py, btns["close"]):
+            self._find_open = False
+            self.ws.mark_dirty()
+        elif not self._in(px, py, self._find_rect(lay)):
+            return False
+        return True                            # a tap anywhere on the bar is consumed
+
+    # -- #89 geometry (derived from CodeLayout; kept off the frozen constants) -
+
+    def _tls_btn(self, lay):
+        # The always-visible tools toggle, top-right of the code body (overlays only
+        # the far-right of line 0, which is usually blank). Off the frozen constants,
+        # so the baseline code_area()/sym_area geometry is untouched.
+        w = self._TLS_COLS * lay.cell
+        return (lay.w - w, lay.y0, w, lay.lh)
+
+    def _toolbar_rect(self, lay):
+        # The tool palette row, just above the status band / symbol palette.
+        h = lay.lh
+        top = lay.status_band[1] if lay.status_band is not None else lay.sym_y
+        return (0, top - h, lay.w, h)
+
+    def _find_rect(self, lay):
+        # The SECOND visible row, so the find bar's right-edge buttons never sit
+        # under the always-visible TLS toggle (which owns the top-right of row 0).
+        return (0, lay.y0 + lay.lh, lay.w, lay.lh)
+
+    def _find_btns(self, lay):
+        # prev / next / case / close, packed against the right edge of the find bar.
+        r = self._find_rect(lay)
+        bw = 2 * lay.cell
+        x = r[0] + r[2]
+        out = {}
+        for name in ("close", "case", "next", "prev"):
+            x -= bw
+            out[name] = (x, r[1], bw, r[3])
+        return out
+
+    def _gutter_cols(self, ed):
+        # Line-number gutter width in cells (0 == off). Narrow: the digits of the
+        # largest line number + one separating cell, so it stays readable at 320x240.
+        if not self._gutter or ed is None:
+            return 0
+        return len(str(len(ed.lines))) + 1
+
+    def _text_x0(self, lay, ed):
+        return lay.x0 + self._gutter_cols(ed) * lay.cell
+
+    def _apply_gutter(self, lay, ed):
+        # Re-flow the editor's visible columns so long lines still fit beside the
+        # gutter. Self-correcting every draw (a resize relayout resets ed.COLS to
+        # lay.cols; this narrows it again while the gutter is on).
+        if ed is None:
+            return
+        target = max(4, lay.cols - self._gutter_cols(ed))
+        if ed.COLS != target:
+            ed.set_view_size(target, lay.rows)
 
     def _code_drag(self, px, py):
         # Touch/mouse drag inside the code area pans the viewport (content follows
@@ -286,20 +528,29 @@ class CodeLayer:
         engages on a LIGHT surface (dark ink token), so the dark themes keep the
         shipped highlight set on their own panel color."""
         NAMES = self._NAMES
+        # sel/find (#89): the selection tint (drawn BEHIND the text) + the find-match
+        # outline + the dim gutter number ink. indigo/orange read on every surface the
+        # editor uses; on a light theme the selection uses the theme hilite token.
         if self.ws.code_layout._base:
             return {"bg": NAMES["black"], "caret": NAMES["yellow"],
                     "sym_bg": NAMES["dark_grey"], "sym_edge": NAMES["indigo"],
-                    "sym_ink": NAMES["white"], "hl": None}
+                    "sym_ink": NAMES["white"], "hl": None,
+                    "sel": NAMES["indigo"], "find": NAMES["orange"],
+                    "gutter": NAMES["dark_grey"]}
         th = self.ws.theme_colors
         if th.get("ink", NAMES["white"]) != 0:      # dark surface -> dark set
             return {"bg": th.get("surface", NAMES["black"]),
                     "caret": NAMES["yellow"],
                     "sym_bg": NAMES["dark_grey"], "sym_edge": NAMES["indigo"],
-                    "sym_ink": NAMES["white"], "hl": None}
+                    "sym_ink": NAMES["white"], "hl": None,
+                    "sel": NAMES["indigo"], "find": NAMES["orange"],
+                    "gutter": NAMES["dark_grey"]}
         return {"bg": th["surface"], "caret": th["ink"],
                 "sym_bg": th.get("surface_alt", NAMES["dark_grey"]),
                 "sym_edge": th["border"], "sym_ink": th["ink"],
-                "hl": self._HL_LIGHT}
+                "hl": self._HL_LIGHT,
+                "sel": th.get("hilite", NAMES["indigo"]), "find": NAMES["orange"],
+                "gutter": th.get("border", NAMES["dark_grey"])}
 
     def _draw_code(self):
         # Responsive (#39 step 2): the code editor draws on the SYSTEM canvas at
@@ -322,34 +573,46 @@ class CodeLayer:
         # y0 == 18 (below the bar), so the body is fullscreen with no chrome of its own.
         # code area (horizontal scroll: columns [left, left+COLS))
         if ed is not None:
+            self._apply_gutter(lay, ed)          # #89: narrow ed.COLS while the gutter is on
+            gc = self._gutter_cols(ed)           # gutter width in cells (0 == off)
+            tx0 = lay.x0 + gc * cell             # text origin (shifted right by the gutter)
             cols = ed.COLS
             vis = ed.visible_lines()
             errrow = ws.code_err_row
             for idx in range(len(vis)):
                 y = lay.y0 + idx * lh
+                absrow = ed.top + idx
                 full = vis[idx]
-                on_err = errrow is not None and ed.top + idx == errrow
-                if on_err:                      # inline error: gutter mark + underline (#24)
+                on_err = errrow is not None and absrow == errrow
+                if gc:                           # #89: line-number gutter (crash mark integrated)
+                    num = str(absrow + 1)
+                    cv.print(num[-gc:], lay.x0, y,
+                             NAMES["red"] if on_err else t["gutter"], 1)
+                elif on_err:                     # no gutter: the original far-left crash tick
                     cv.rect(0, y, 3 * fs, 8 * fs, NAMES["red"])
-                    cv.rect(lay.x0, y + 8 * fs, cols * cell, fs, NAMES["red"])
+                if on_err:                       # inline error underline (#24)
+                    cv.rect(tx0, y + 8 * fs, cols * cell, fs, NAMES["red"])
+                self._draw_selection(ed, absrow, y, tx0, cell, cols, fs, t["sel"])
+                self._draw_find_matches(ed, full, y, tx0, cell, cols, fs, t["find"])
                 seg = full[ed.left:ed.left + cols]
                 segcols = self._hl(full)[ed.left:ed.left + cols]
-                self._draw_code_runs(seg, segcols, y)
+                self._draw_code_runs(seg, segcols, y, tx0)
                 if on_err and ws.code_err:      # short reason after the code, if it fits
                     mcol = len(seg) + 1
                     if mcol < cols - 2:
                         cv.print(ws.code_err[:cols - mcol],
-                                 lay.x0 + mcol * cell, y, NAMES["red"], 1)
-                if ed.top + idx == ed.row:      # caret on the cursor's line
+                                 tx0 + mcol * cell, y, NAMES["red"], 1)
+                if absrow == ed.row:            # caret on the cursor's line
                     vcol = ed.col - ed.left
                     if 0 <= vcol <= cols:
-                        cv.rect(lay.x0 + vcol * cell, y, fs, 8 * fs, t["caret"])
+                        cv.rect(tx0 + vcol * cell, y, fs, 8 * fs, t["caret"])
         # Status band (Phase 3, shelf tiers): the mockup's "Ln 13, Col 1" strip.
         if lay.status_band is not None and ed is not None:
             issues = "1 ISSUE" if ws.code_err else "NO ISSUES"
             _ui.status_row(cv, ws.theme_colors, lay.status_band,
                            ("LN " + str(ed.row + 1) + ", COL " + str(ed.col + 1),
                             str(len(ed.lines)) + " LINES", issues))
+        self._draw_tools(lay, ed, t)             # #89: tools toggle + palette + find bar
         self._draw_symbols()
 
     def _hl(self, line):
@@ -367,12 +630,12 @@ class CodeLayer:
             self._hl_cache[key] = cols
         return cols
 
-    def _draw_code_runs(self, seg, segcols, y):
+    def _draw_code_runs(self, seg, segcols, y, x0):
         """Draw one code line as runs of same-colored text (#24). On the SYSTEM
-        canvas at the layout's char-cell width (8*fs), so it scales with the font."""
+        canvas at the layout's char-cell width (8*fs), so it scales with the font.
+        `x0` is the text origin (shifted right by the #89 line-number gutter)."""
         cv = self.ws.sys_canvas
-        lay = self.ws.code_layout
-        x0, cell = lay.x0, lay.cell
+        cell = self.ws.code_layout.cell
         hl = (self._t or {}).get("hl")
         n = len(seg)
         i = 0
@@ -384,6 +647,110 @@ class CodeLayer:
             cv.print(seg[i:j], x0 + i * cell, y,
                      hl.get(cl, cl) if hl else cl, 1)
             i = j
+
+    def _visible_span(self, ed, s, e, cols):
+        """Clip a column span [s, e) to the horizontally-scrolled visible window,
+        returning the visible (start_col, end_col) or None when it's off-screen."""
+        vs = s if s > ed.left else ed.left
+        we = ed.left + cols
+        ve = e if e < we else we
+        if ve <= vs:
+            return None
+        return vs, ve
+
+    def _draw_selection(self, ed, absrow, y, tx0, cell, cols, fs, color):
+        """Highlight the selected columns on one visible row (#89): a filled tint
+        behind the text (the runs redraw on top). Multi-row selections fill full
+        lines between the endpoints."""
+        b = ed.selection_bounds()
+        if b is None:
+            return
+        r0, c0, r1, c1 = b
+        if absrow < r0 or absrow > r1:
+            return
+        s = c0 if absrow == r0 else 0
+        e = c1 if absrow == r1 else len(ed.lines[absrow])
+        span = self._visible_span(ed, s, e, cols)
+        if span is None:
+            return
+        vs, ve = span
+        cv = self.ws.sys_canvas
+        cv.rect(tx0 + (vs - ed.left) * cell, y, (ve - vs) * cell, 8 * fs, color)
+
+    def _draw_find_matches(self, ed, line, y, tx0, cell, cols, fs, color):
+        """Outline every occurrence of the find query on one visible row (#89): the
+        incremental "all matches" highlight the find bar drives."""
+        q = self._find_q
+        if not (self._find_open and q):
+            return
+        hay = line.lower() if self._find_ci else line
+        qq = q.lower() if self._find_ci else q
+        L = len(qq)
+        cv = self.ws.sys_canvas
+        start = 0
+        while True:
+            i = hay.find(qq, start)
+            if i < 0:
+                break
+            span = self._visible_span(ed, i, i + L, cols)
+            if span is not None:
+                vs, ve = span
+                cv.rectb(tx0 + (vs - ed.left) * cell, y, (ve - vs) * cell, 8 * fs, color)
+            start = i + (L if L > 0 else 1)
+
+    def _panel_btn(self, cv, lay, r, label, t, active=False, ink=None):
+        """One tool/find button: a filled, bordered cell with a centered label. Uses
+        the same sym_bg/sym_edge palette as the symbol strip so it reads as chrome."""
+        fs = lay.fs
+        cv.rect(r[0], r[1], r[2] - 1, r[3] - 1, t["sym_edge"] if active else t["sym_bg"])
+        cv.rectb(r[0], r[1], r[2] - 1, r[3] - 1, t["sym_edge"])
+        if label:
+            gx = r[0] + (r[2] - len(label) * 8 * fs) // 2
+            if gx < r[0] + fs:
+                gx = r[0] + fs
+            gy = r[1] + (r[3] - 8 * fs) // 2
+            cv.print(label, gx, gy, ink if ink is not None else t["sym_ink"], 1)
+
+    def _draw_tools(self, lay, ed, t):
+        """The #89 chrome: the always-visible TLS toggle, the tool palette row (when
+        open) and the find bar (when open). All overlay the code body -- drawn AFTER
+        the text so they sit on top -- and never touch the frozen baseline geometry."""
+        cv = self.ws.sys_canvas
+        self._panel_btn(cv, lay, self._tls_btn(lay), "TLS", t, active=self._tools_open)
+        if self._tools_open:
+            r = self._toolbar_rect(lay)
+            n = len(self._TOOLS)
+            bw = r[2] // n
+            for i in range(n):
+                name = self._TOOLS[i]
+                active = (name == "sel" and self._select_mode) or \
+                         (name == "find" and self._find_open) or \
+                         (name == "gutter" and self._gutter)
+                self._panel_btn(cv, lay, (r[0] + i * bw, r[1], bw, r[3]),
+                                self._TOOL_LABEL[name], t, active=active)
+        if self._find_open:
+            self._draw_find(lay, ed, t)
+
+    def _draw_find(self, lay, ed, t):
+        """The find bar: the typed query on the left + prev/next/case/close buttons
+        packed against the right (#89)."""
+        cv = self.ws.sys_canvas
+        fs = lay.fs
+        r = self._find_rect(lay)
+        btns = self._find_btns(lay)
+        qright = btns["prev"][0]                  # the query field ends where the buttons start
+        cv.rect(r[0], r[1], qright - r[0] - 1, r[3] - 1, t["sym_bg"])
+        cv.rectb(r[0], r[1], qright - r[0] - 1, r[3] - 1, t["sym_edge"])
+        # As much of the tail of the query as fits, then a caret block.
+        avail = max(1, (qright - r[0]) // lay.cell - 2)
+        shown = self._find_q[-avail:] if len(self._find_q) > avail else self._find_q
+        cv.print(("F:" + shown)[-avail - 2:], r[0] + fs, r[1] + fs, t["sym_ink"], 1)
+        cx = r[0] + fs + (len(shown) + 2) * lay.cell
+        cv.rect(cx, r[1] + fs, fs, 8 * fs, t["caret"])
+        self._panel_btn(cv, lay, btns["prev"], "<", t)
+        self._panel_btn(cv, lay, btns["next"], ">", t)
+        self._panel_btn(cv, lay, btns["case"], "Aa", t, active=not self._find_ci)
+        self._panel_btn(cv, lay, btns["close"], "X", t)
 
     def _draw_symbols(self):
         # Tappable coding-symbol palette (supplies what the keyboard can't type). On
