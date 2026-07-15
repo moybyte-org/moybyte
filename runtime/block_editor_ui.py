@@ -81,6 +81,13 @@ _BLK_DEL = (48, 196, 34, 22)
 _BLK_UP = (84, 196, 22, 22)
 _BLK_DN = (108, 196, 22, 22)
 _BLK_CODE = (138, 196, 56, 22)   # graduate to code
+# The #93 edit cluster on the free right end of the action bar: "..." opens the
+# BLOCK ACTIONS menu (copy / duplicate / paste / move to...), UNDO / REDO walk the
+# in-session outline history. Touch-first (a tap fires each); host also binds
+# Ctrl+Z / Ctrl+Y to undo/redo.
+_BLK_ACT = (198, 196, 30, 22)    # "..." -> the block-actions menu
+_BLK_UNDO = (230, 196, 42, 22)
+_BLK_REDO = (274, 196, 40, 22)
 # The insert menu: a modal list overlay (category list, then the block list for the
 # chosen category, then for some slots a small option picker). Drawn over a frozen
 # outline; navigated with up/down + A, B backs out one level.
@@ -134,6 +141,19 @@ _NEW_LIST_LABEL = "+ new list"
 # number keypad instead of dropping a block (#29).
 _NUM_LITERAL_ITEM = "\x00num_lit"
 _NUM_LITERAL_LABEL = "123 type a number"
+
+# The #93 BLOCK ACTIONS menu items (context-sensitive rows, built by
+# _blk_open_actions). Sentinels so they never collide with a real block id.
+_ACT_COPY = "\x00act_copy"
+_ACT_DUP = "\x00act_dup"
+_ACT_PASTE = "\x00act_paste"
+_ACT_MOVE = "\x00act_move"
+_ACT_LABELS = {
+    _ACT_COPY: "Copy",
+    _ACT_DUP: "Duplicate",
+    _ACT_PASTE: "Paste here",
+    _ACT_MOVE: "Move to...",
+}
 
 
 def _blk_plain_label(label):
@@ -198,17 +218,25 @@ class BlockLayout:
             self.add_btn, self.del_btn = _BLK_ADD, _BLK_DEL
             self.up_btn, self.dn_btn = _BLK_UP, _BLK_DN
             self.code_btn = _BLK_CODE
+            # #93 edit cluster (frozen constants at base).
+            self.act_btn = _BLK_ACT
+            self.undo_btn = _BLK_UNDO
+            self.redo_btn = _BLK_REDO
         else:
             self.bar_h = 22 * fs
             self.bar_y = self.h - self.bar_h - 2 * fs
             by, bh = self.bar_y, self.bar_h
-            # left cluster: ADD / DEL / up / dn ; CODE (graduate) after them.
+            # left cluster: ADD / DEL / up / dn ; CODE (graduate) after them; then the
+            # #93 edit cluster ("..." / UNDO / REDO) packed after CODE.
             x = self.x0
             self.add_btn = (x, by, 40 * fs, bh); x += 42 * fs
             self.del_btn = (x, by, 34 * fs, bh); x += 36 * fs
             self.up_btn = (x, by, 22 * fs, bh); x += 24 * fs
             self.dn_btn = (x, by, 22 * fs, bh); x += 24 * fs
-            self.code_btn = (x, by, 56 * fs, bh)
+            self.code_btn = (x, by, 56 * fs, bh); x += 58 * fs
+            self.act_btn = (x, by, 30 * fs, bh); x += 32 * fs
+            self.undo_btn = (x, by, 42 * fs, bh); x += 44 * fs
+            self.redo_btn = (x, by, 40 * fs, bh)
         # -- outline width + visible rows ----------------------------------------
         if self._base:
             self.outline_w = _BLK_W              # 308
@@ -264,6 +292,7 @@ class BlockEditorUI:
         self.blk_protect = False      # block editor opened on a hand-written-code cart
         self.blk_graduated = False    # cart has GRADUATED (Stage 8): blocks read-only
         self.blk_kbd = None           # inline name-entry prompt state dict, or None
+        self._blk_ekey_prev = 0       # #93: last typed byte (Ctrl+Z/Y edge detect)
         self.block_layout = BlockLayout()
 
     def relayout(self, w, h, fs):
@@ -333,6 +362,9 @@ class BlockEditorUI:
         """Called from Workstation._leave_menu() when menu_view == "blocks"."""
         self.blk_menu = None
         self.blk_kbd = None
+        # #93: don't leave a half-started MOVE armed when the kid steps away.
+        if self.blocks_ed is not None:
+            self.blocks_ed.cancel_move()
 
     # -- block editor (#29 Part 2) -------------------------------------------
     #
@@ -366,6 +398,16 @@ class BlockEditorUI:
         be = self.blocks_ed
         if be is None:
             return
+        if be.moving():
+            # MOVE in progress (#93): the next insert point is the destination.
+            if be.at_insert():
+                if be.complete_move():
+                    self.blk_slot = 0
+                    self._blk_reveal()
+                    self.blk_status = "MOVED"
+                else:
+                    self.blk_status = "can't move there"
+            return
         if be.at_insert():
             self._blk_open_categories()
             return
@@ -390,6 +432,80 @@ class BlockEditorUI:
         """Open the modal insert menu at the category level."""
         self.blk_menu = {"mode": "cat", "sel": 0, "top": 0,
                          "items": _blocks_mod.categories()}
+
+    # -- copy / paste / duplicate / move + undo (#93) ------------------------
+    def _blk_open_actions(self):
+        """Open the modal BLOCK ACTIONS menu (copy / duplicate / paste here / move
+        to...). Context-sensitive: a selected block offers Copy/Duplicate/Move; an
+        insert point with a filled clipboard offers Paste here. Reuses the shared
+        modal-menu machinery (up/down + A, B backs out, tap-outside dismisses)."""
+        be = self.blocks_ed
+        if be is None:
+            return
+        items = []
+        if be.selected_block() is not None:
+            items.append(_ACT_COPY)
+            items.append(_ACT_DUP)
+            items.append(_ACT_MOVE)
+        if be.at_insert() and be.has_clipboard():
+            items.append(_ACT_PASTE)
+        if not items:
+            # nothing applies here -- point the kid at what to do rather than open
+            # an empty menu (an insert point with nothing copied, say).
+            self.blk_status = "copy a block first" if be.at_insert() \
+                else "select a block"
+            return
+        self.blk_menu = {"mode": "actions", "sel": 0, "top": 0, "items": items}
+
+    def _blk_do_action(self, item):
+        """Run a chosen BLOCK ACTIONS item and close the menu."""
+        be = self.blocks_ed
+        self.blk_menu = None
+        if be is None:
+            return
+        if item == _ACT_COPY:
+            self.blk_status = "COPIED" if be.copy_block() else "can't copy that"
+        elif item == _ACT_DUP:
+            if be.duplicate() is not None:
+                self.blk_slot = 0
+                self._blk_reveal()
+                self.blk_status = "DUPLICATED"
+        elif item == _ACT_PASTE:
+            if be.paste() is not None:
+                self.blk_slot = 0
+                self._blk_reveal()
+                self.blk_status = "PASTED"
+            else:
+                self.blk_status = "can't paste here"
+        elif item == _ACT_MOVE:
+            if be.start_move():
+                self.blk_status = "tap a + spot"
+
+    def _blk_undo(self):
+        be = self.blocks_ed
+        if be is None:
+            return
+        be.cancel_move()
+        self.blk_menu = None
+        if be.undo():
+            self.blk_slot = 0
+            self._blk_reveal()
+            self.blk_status = "UNDO"
+        else:
+            self.blk_status = "nothing to undo"
+
+    def _blk_redo(self):
+        be = self.blocks_ed
+        if be is None:
+            return
+        be.cancel_move()
+        self.blk_menu = None
+        if be.redo():
+            self.blk_slot = 0
+            self._blk_reveal()
+            self.blk_status = "REDO"
+        else:
+            self.blk_status = "nothing to redo"
 
     def _blk_open_blocks(self, category):
         ids = _blocks_mod.blocks_in_category(category)
@@ -419,6 +535,8 @@ class BlockEditorUI:
             return _NEW_LIST_LABEL
         if item == _NUM_LITERAL_ITEM:
             return _NUM_LITERAL_LABEL
+        if item in _ACT_LABELS:
+            return _ACT_LABELS[item]
         if m["mode"] == "cat":
             return _CAT_LABEL.get(item, item).upper()
         if m["mode"] == "blk":
@@ -461,7 +579,9 @@ class BlockEditorUI:
             self.blk_menu = None
             self._blk_open_number_prompt(blk, name, None)
             return
-        if m["mode"] == "cat":
+        if m["mode"] == "actions":
+            self._blk_do_action(item)
+        elif m["mode"] == "cat":
             self._blk_open_blocks(item)
         elif m["mode"] == "blk":
             self._blk_insert_chosen(item)
@@ -897,6 +1017,31 @@ class BlockEditorUI:
             elif i.pressed("b"):
                 self._blk_menu_back()
             return
+        be = self.blocks_ed
+        if be is not None and be.moving():
+            # MOVE mode (#93) is modal: nav to a destination, A drops it at an insert
+            # point, B cancels. (A/complete + the cancel are the only exits, so
+            # BACKSPACE/B doesn't leave the editor mid-move.)
+            if i.pressed("up"):
+                self._blk_move_cursor(-1)
+            if i.pressed("down"):
+                self._blk_move_cursor(1)
+            if i.pressed("a"):
+                self._blk_a()
+            elif i.pressed("b"):
+                be.cancel_move()
+                self.blk_status = "move off"
+            return
+        # Host convenience (#93): Ctrl+Z / Ctrl+Y walk the in-session outline undo,
+        # mirroring the code editor's shortcut (0x1A / 0x19 arrive via last_key). The
+        # on-screen UNDO/REDO buttons are the touch/device affordance.
+        k = getattr(i, "last_key", 0) or 0
+        if k and k != self._blk_ekey_prev:
+            if k == 0x1A:
+                self._blk_undo()
+            elif k == 0x19:
+                self._blk_redo()
+        self._blk_ekey_prev = k
         if i.pressed("up"):
             self._blk_move_cursor(-1)
         if i.pressed("down"):
@@ -1000,12 +1145,27 @@ class BlockEditorUI:
             be.move_block(1); self._blk_reveal(); return
         if self._in(px, py, lay.code_btn):
             self.graduate_to_code(); return
+        # #93 edit cluster: "..." opens the block-actions menu, UNDO/REDO walk history.
+        if self._in(px, py, lay.act_btn):
+            self._blk_open_actions(); return
+        if self._in(px, py, lay.undo_btn):
+            self._blk_undo(); return
+        if self._in(px, py, lay.redo_btn):
+            self._blk_redo(); return
         # Tap a row in the outline: select it (and on a block, advance the slot
         # highlight / open the insert menu on a `+` row -- a tap == the A action).
         if self._in(px, py, lay.area()):
             ridx = self.blk_top + (py - lay.y0) // lay.row_h
             if 0 <= ridx < len(be.rows):
-                if ridx == be.cur:
+                if be.moving():
+                    # MOVE mode (#93): a single tap on an insert point drops the block
+                    # there; a tap on a block just re-homes the cursor.
+                    be.cur = ridx
+                    self.blk_slot = 0
+                    self._blk_reveal()
+                    if be.rows[ridx].kind == "insert":
+                        self._blk_a()
+                elif ridx == be.cur:
                     self._blk_a()                # a second tap acts (insert / edit)
                 else:
                     be.cur = ridx
@@ -1146,6 +1306,15 @@ class BlockEditorUI:
         ws._btn("^", lay.up_btn, NAMES["indigo"], cv)
         ws._btn("v", lay.dn_btn, NAMES["indigo"], cv)
         ws._icon_btn("code", "CODE", lay.code_btn, NAMES["dark_purple"], cv)
+        # #93 edit cluster: "..." (block-actions menu) + UNDO/REDO. Undo/redo dim to
+        # dark_grey when the stack is empty so their availability reads at a glance;
+        # "..." glows yellow while a MOVE is armed (the "tap a + spot" state).
+        act_col = NAMES["yellow"] if be.moving() else NAMES["blue"]
+        ws._btn("...", lay.act_btn, act_col, cv)
+        ws._btn("UNDO", lay.undo_btn,
+                NAMES["indigo"] if be.can_undo() else NAMES["dark_grey"], cv)
+        ws._btn("REDO", lay.redo_btn,
+                NAMES["indigo"] if be.can_redo() else NAMES["dark_grey"], cv)
         # The unified zoned bar (tab ladder + PLAY + SAVE + X), drawn BEFORE the modal
         # insert menu / entry prompt so those still sit on top (Stage-4 rollout).
         ws.bar_layer._draw_status_strip("menu")
@@ -1406,7 +1575,7 @@ class BlockEditorUI:
         cv.rectb(mx, my, mw, mh, NAMES["yellow"])
         titles = {"cat": "PICK A KIND", "blk": "PICK A BLOCK",
                   "dropdown": "PICK ONE", "variable": "PICK A VARIABLE",
-                  "expr": "PICK A VALUE"}
+                  "expr": "PICK A VALUE", "actions": "BLOCK ACTIONS"}
         cv.print(titles.get(m["mode"], "PICK"), mx + 6 * fs, my + 4 * fs, NAMES["yellow"], 1)
         items = m["items"]
         if not items:
