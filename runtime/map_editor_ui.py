@@ -108,6 +108,25 @@ _PAN_DN = (244, 182, 24, 16)
 _MAP_ERASE = (14, 198, 40, 20)
 _MAP_SAVE = (58, 198, 64, 20)
 _MAP_CLOSE = (126, 198, 76, 20)
+# Editor toolbar (#91): a compact strip in the title band (between the panel top
+# and the map view, y 16..32) on the RIGHT, clear of the "MAP TILE n z1 *" title
+# text on the left. TOOL cycles the paint tool (pen/box/fill), UNDO/REDO walk the
+# in-editor edit journal, DIM opens the map-resize panel. 26px buttons keep the
+# labels two chars so the whole strip fits the 320px baseline.
+_MAP_TOOL = (196, 17, 26, 13)
+_MAP_UNDO = (224, 17, 26, 13)
+_MAP_REDO = (252, 17, 26, 13)
+_MAP_DIM = (280, 17, 26, 13)
+# The paint tools (#91), cycled by the TOOL button: STAMP (today's per-cell / SIZE
+# brush), RECT (drag corner-to-corner, fill the rectangle), FLOOD (contiguous
+# same-tile fill). Two-char labels for the compact toolbar button.
+_MAP_TOOLS = ("stamp", "rect", "flood")
+_MAP_TOOL_LABEL = {"stamp": "PN", "rect": "BX", "flood": "FL"}
+# Map resize (#91): the largest grid the +/- steppers will grow to. 96x96 = 9216
+# cells (~9KB) is a generous kid level and still device-RAM-safe; shrink floors at
+# 1x1 (TileMap.resize clamps too).
+_MAP_MAX_DIM = 96
+_MAP_MIN_DIM = 1
 # Map editor gesture threshold (#37): a pointer drag farther than this many pixels
 # from its press origin pans the visible window (drag = pan); a shorter press +
 # release taps one cell (tap = paint). Touch-drag panning is the primary way to
@@ -159,6 +178,8 @@ class MapLayout:
                 _PAN_UP, _PAN_LF, _PAN_RT, _PAN_DN
             self.erase_btn, self.save_btn, self.close_btn = \
                 _MAP_ERASE, _MAP_SAVE, _MAP_CLOSE
+            self.tool_btn, self.undo_btn, self.redo_btn, self.dim_btn = \
+                _MAP_TOOL, _MAP_UNDO, _MAP_REDO, _MAP_DIM
             self.pan_thresh = _MAP_PAN_THRESH
             return
         # -- responsive: anchor the palette/d-pad column to the panel's right edge,
@@ -206,6 +227,15 @@ class MapLayout:
         self.erase_btn = (px + 6 * fs, row_y, 40 * fs, 20 * fs)
         self.save_btn = (px + 50 * fs, row_y, 64 * fs, 20 * fs)
         self.close_btn = (px + 118 * fs, row_y, 76 * fs, 20 * fs)
+        # Editor toolbar (#91): the TOOL/UNDO/REDO/DIM strip, right-anchored in the
+        # title band, mirrors the baseline geometry scaled to the panel.
+        tb_y = py + 2 * fs
+        tbw, tbh, gap = 26 * fs, 13 * fs, 2 * fs
+        tb_right = p_right - 6 * fs
+        self.dim_btn = (tb_right - tbw, tb_y, tbw, tbh)
+        self.redo_btn = (self.dim_btn[0] - gap - tbw, tb_y, tbw, tbh)
+        self.undo_btn = (self.redo_btn[0] - gap - tbw, tb_y, tbw, tbh)
+        self.tool_btn = (self.undo_btn[0] - gap - tbw, tb_y, tbw, tbh)
         self.pan_thresh = _MAP_PAN_THRESH * fs
 
 
@@ -225,6 +255,10 @@ class MapEditorUI:
         self.map_erase = False         # tap-to-erase instead of stamp
         self.map_page = 0              # first tile id shown in the palette
         self.map_zoom = 0              # zoom level index into layout.zooms (0 = fit)
+        self.map_tool = "stamp"        # active paint tool (#91): stamp/rect/flood
+        self._map_rect = None          # (x0,y0,x1,y1) cell corners while a RECT drags
+        self.dims_open = False         # the map-resize (DIM) panel is showing (#91)
+        self._mkey_prev = 0            # last last_key seen (Ctrl+Z/Y edge, #91)
         self._map_drag = None          # last pointer (px,py) during a map pan drag (#37)
         self._map_press = None         # gesture origin (px,py); set on press, None on release
         self._map_panning = False      # this gesture has crossed the pan threshold (#37)
@@ -268,6 +302,10 @@ class MapEditorUI:
         self._map_panning = False
         self._map_drag = None
         self._map_paint_undo = None
+        self.map_tool = "stamp"        # (#91) back to the plain per-cell brush
+        self._map_rect = None
+        self.dims_open = False
+        self._mkey_prev = 0
 
     # -- input -----------------------------------------------------------------
 
@@ -289,7 +327,40 @@ class MapEditorUI:
                 self._map_pan(1, 0)
             if i.pressed("a"):          # A cycles the zoom level (#37 follow-up)
                 self._map_cycle_zoom()
+            # In-editor undo/redo (#91): the host keyboard shortcut Ctrl+Z (0x1A) /
+            # Ctrl+Y (0x19), edge-triggered (act on the 0->key press, no autorepeat),
+            # mirroring the code editor's journal shortcut. On the device the on-screen
+            # UNDO/REDO buttons are the touch-first affordance (no Ctrl key).
+            k = getattr(i, "last_key", 0)
+            if k and k != self._mkey_prev:
+                if k == 0x1A:
+                    self._map_undo()
+                elif k == 0x19:
+                    self._map_redo()
+            self._mkey_prev = k
         ws._leave_or_home(ws._leave_menu)
+
+    def _map_undo(self):
+        """Step the in-editor edit journal back one gesture (#91), then re-clamp the
+        camera (an undo can't move it, but a resize-undo path might)."""
+        me = self.mapedit
+        if me is not None and me.undo():
+            self._map_clamp_cam()
+
+    def _map_redo(self):
+        me = self.mapedit
+        if me is not None and me.redo():
+            self._map_clamp_cam()
+
+    def _map_cycle_tool(self):
+        """Cycle the paint tool stamp -> rect -> flood -> stamp (#91). Drops any
+        half-built RECT preview so switching mid-drag can't leave a stray outline."""
+        try:
+            idx = _MAP_TOOLS.index(self.map_tool)
+        except ValueError:
+            idx = 0
+        self.map_tool = _MAP_TOOLS[(idx + 1) % len(_MAP_TOOLS)]
+        self._map_rect = None
 
     def _map_palette_ids(self):
         """The tile ids shown on the current palette page (a window into the sheet,
@@ -363,6 +434,105 @@ class MapEditorUI:
         cy = me.cam_y + (py - y0) // cell
         return (cx, cy)
 
+    def _map_cell_at_clamped(self, px, py):
+        """Like _map_cell_at but never None: the pointer is snapped to the nearest
+        visible cell then clamped to the map bounds (#91). Used by the RECT drag so
+        a rubber-band that leaves the view still tracks a valid opposite corner."""
+        me = self.mapedit
+        tm = self.ws.project.tilemap
+        if me is None or tm is None:
+            return None
+        x0, y0, cell, cols, rows = self._mv_metrics()
+        rx = (px - x0) // cell
+        ry = (py - y0) // cell
+        if rx < 0:
+            rx = 0
+        elif rx > cols - 1:
+            rx = cols - 1
+        if ry < 0:
+            ry = 0
+        elif ry > rows - 1:
+            ry = rows - 1
+        cx = me.cam_x + rx
+        cy = me.cam_y + ry
+        if cx > tm.w - 1:
+            cx = tm.w - 1
+        if cy > tm.h - 1:
+            cy = tm.h - 1
+        return (cx, cy)
+
+    # -- map resize panel (#91) ------------------------------------------------
+
+    def _dims_rects(self):
+        """Geometry for the map-resize (DIM) overlay panel: the panel itself plus its
+        W-/W+/H-/H+ steppers and DONE button, centered in the content area and scaled
+        with the font. Computed on demand (drawn/hit-tested only while dims_open) so
+        it needs no permanent MapLayout real estate."""
+        lay = self.layout
+        fs = lay.fs
+        pw = 168 * fs
+        ph = 96 * fs
+        bx, by, bw, bh = lay.body_fill
+        x = bx + (bw - pw) // 2
+        y = by + (bh - ph) // 2
+        b = 22 * fs
+        wy = y + 26 * fs
+        hy = y + 50 * fs
+        margin = 8 * fs
+        return {
+            "panel": (x, y, pw, ph),
+            "w_dn": (x + margin, wy, b, b),
+            "w_up": (x + pw - margin - b, wy, b, b),
+            "h_dn": (x + margin, hy, b, b),
+            "h_up": (x + pw - margin - b, hy, b, b),
+            "done": (x + (pw - 64 * fs) // 2, y + ph - 26 * fs, 64 * fs, 20 * fs),
+            "rows": (wy, hy),
+        }
+
+    def _map_resize(self, dw, dh):
+        """Grow/shrink the map by (dw, dh) cells on the right/bottom edge (#91),
+        clamped to [_MAP_MIN_DIM, _MAP_MAX_DIM]; content is preserved (top-left
+        anchored). A structural change, so it drops the in-editor undo history and
+        re-clamps the camera to the new bounds."""
+        tm = self.ws.project.tilemap
+        me = self.mapedit
+        if tm is None:
+            return
+        new_w = tm.w + dw
+        new_h = tm.h + dh
+        if new_w < _MAP_MIN_DIM:
+            new_w = _MAP_MIN_DIM
+        elif new_w > _MAP_MAX_DIM:
+            new_w = _MAP_MAX_DIM
+        if new_h < _MAP_MIN_DIM:
+            new_h = _MAP_MIN_DIM
+        elif new_h > _MAP_MAX_DIM:
+            new_h = _MAP_MAX_DIM
+        if new_w == tm.w and new_h == tm.h:
+            return
+        tm.resize(new_w, new_h)
+        if me is not None:
+            me.clear_history()
+        self._map_rect = None
+        self._map_clamp_cam()
+
+    def _dims_click(self, px, py):
+        """Route a tap while the resize panel is open (#91): the +/- steppers resize
+        by one row/column, DONE (or a tap outside the panel) closes it. Returns True
+        so the tap never falls through to the map/palette behind the panel."""
+        r = self._dims_rects()
+        if self._in(px, py, r["w_dn"]):
+            self._map_resize(-1, 0)
+        elif self._in(px, py, r["w_up"]):
+            self._map_resize(1, 0)
+        elif self._in(px, py, r["h_dn"]):
+            self._map_resize(0, -1)
+        elif self._in(px, py, r["h_up"]):
+            self._map_resize(0, 1)
+        elif self._in(px, py, r["done"]) or not self._in(px, py, r["panel"]):
+            self.dims_open = False
+        return True
+
     def _map_paint(self, cx, cy):
         """Stamp the brush at map cell (cx, cy): the EMPTY brush (#37) clears the
         cell (paints sky/background), otherwise the brush's tile is placed. The
@@ -407,6 +577,16 @@ class MapEditorUI:
         press = self._map_press
         if press is None:
             return
+        if self.map_tool == "rect":
+            # RECT rubber-band (#91): track the opposite corner; no panning while a
+            # box is being drawn (the d-pad/arrows still pan). Drawn as a preview.
+            cell = self._map_cell_at_clamped(px, py)
+            if cell is not None and self._map_rect is not None:
+                x0, y0, _, _ = self._map_rect
+                self._map_rect = (x0, y0, cell[0], cell[1])
+            return
+        if self.map_tool == "flood":
+            return                             # flood already applied on the press
         if not self._map_panning:
             thresh = self.layout.pan_thresh
             if abs(px - press[0]) < thresh and abs(py - press[1]) < thresh:
@@ -414,6 +594,8 @@ class MapEditorUI:
             self._map_panning = True           # crossed the threshold -> this is a pan
             self._map_drag = press
             self._map_revert_paint()           # undo the press-edge stamp (it was a pan)
+            if self.mapedit is not None:       # discard the open edit batch (#91): the
+                self.mapedit.abort_edit()      # cells are reverted, so it must not commit
         me = self.mapedit
         last = self._map_drag
         if me is None or last is None:
@@ -444,35 +626,81 @@ class MapEditorUI:
         self._map_paint_undo = None
 
     def _map_release(self, px, py):
-        """Pointer up in the map view (#37): the tap-paint already landed on the
-        press edge (and a pan would have reverted it), so release just clears the
-        gesture state."""
+        """Pointer up in the map view: the STAMP tap-paint already landed on the press
+        edge (a pan would have reverted it), so it just closes the edit batch; the
+        RECT tool fills its rubber-banded rectangle here as ONE undo step (#37/#91)."""
+        me = self.mapedit
+        if me is not None:
+            if self.map_tool == "rect" and self._map_press is not None \
+                    and self._map_rect is not None:
+                x0, y0, x1, y1 = self._map_rect
+                me.begin_edit()
+                me.fill_rect(x0, y0, x1, y1, erase=self.map_erase)
+                me.end_edit()
+            else:
+                # STAMP: commit the press-edge stamp's batch (a no-op for flood, whose
+                # batch already ended, or a pan, whose batch was aborted).
+                me.end_edit()
         self._map_press = None
         self._map_panning = False
         self._map_drag = None
         self._map_paint_undo = None
+        self._map_rect = None
 
     def _map_click(self, px, py):
         ws = self.ws
         me = self.mapedit
         if me is None:
             return
+        if self.dims_open:                     # the resize panel eats every tap (#91)
+            self._dims_click(px, py)
+            return
         if self._in(px, py, self._mv_area()):  # a press in the map view: start a
-            self._map_press = (px, py)         # gesture (tap=paint / drag=pan).
+            self._map_press = (px, py)         # gesture; the tool decides what it does.
             self._map_panning = False
             self._map_drag = None
-            # Paint immediately so a tap is responsive; remember the cell + its prior
-            # byte so a drag-that-becomes-a-pan can revert it (no stray stamp) (#37).
-            cell = self._map_cell_at(px, py)
             tm = ws.project.tilemap
-            if cell is not None and tm is not None:
-                cx, cy = cell
-                if 0 <= cx < tm.w and 0 <= cy < tm.h:
-                    self._map_paint_undo = (self._map_stamp_cells(cx, cy),
-                                            tm.dirty, tm.gen)
-                    self._map_paint(cx, cy)
+            if tm is None:
+                return
+            tool = self.map_tool
+            if tool == "rect":
+                # RECT (#91): remember the start corner; the drag rubber-bands the
+                # rectangle, release fills it. No paint yet, no pan (the d-pad pans).
+                cell = self._map_cell_at_clamped(px, py)
+                self._map_rect = (cell[0], cell[1], cell[0], cell[1]) if cell else None
+            elif tool == "flood":
+                # FLOOD (#91): a single tap fills the contiguous region right away --
+                # one committed undo step. No drag/pan follow-up.
+                cell = self._map_cell_at(px, py)
+                if cell is not None and 0 <= cell[0] < tm.w and 0 <= cell[1] < tm.h:
+                    me.begin_edit()
+                    me.flood(cell[0], cell[1], erase=self.map_erase)
+                    me.end_edit()
+            else:
+                # STAMP (#37/#57): paint immediately so a tap is responsive; remember
+                # the block + its prior bytes so a drag-that-becomes-a-pan reverts it.
+                cell = self._map_cell_at(px, py)
+                if cell is not None:
+                    cx, cy = cell
+                    if 0 <= cx < tm.w and 0 <= cy < tm.h:
+                        me.begin_edit()
+                        self._map_paint_undo = (self._map_stamp_cells(cx, cy),
+                                                tm.dirty, tm.gen)
+                        self._map_paint(cx, cy)
             return
         lay = self.layout
+        if self._in(px, py, lay.tool_btn):     # cycle stamp/rect/flood (#91)
+            self._map_cycle_tool()
+            return
+        if self._in(px, py, lay.undo_btn):     # in-editor undo (#91)
+            self._map_undo()
+            return
+        if self._in(px, py, lay.redo_btn):     # in-editor redo (#91)
+            self._map_redo()
+            return
+        if self._in(px, py, lay.dim_btn):      # open the map-resize panel (#91)
+            self.dims_open = True
+            return
         if self._in(px, py, lay.sky_btn):      # the EMPTY/"sky" swatch (#37)
             me.n = ws.project.tilemap.EMPTY if ws.project.tilemap is not None else -1
             return
@@ -576,6 +804,29 @@ class MapEditorUI:
                         if img:
                             cv.spr(img, x + off, y + off, scale)
                 cv.rectb(x, y, cell, cell, NAMES["dark_grey"])
+        # RECT preview (#91): while a box is being dragged, outline the covered cells
+        # (clamped to the visible window) so the fill region is visible before release.
+        if self.map_tool == "rect" and self._map_rect is not None \
+                and self._map_press is not None:
+            rx0, ry0, rx1, ry1 = self._map_rect
+            if rx1 < rx0:
+                rx0, rx1 = rx1, rx0
+            if ry1 < ry0:
+                ry0, ry1 = ry1, ry0
+            ix0 = rx0 if rx0 > me.cam_x else me.cam_x
+            iy0 = ry0 if ry0 > me.cam_y else me.cam_y
+            vx1 = me.cam_x + cols - 1
+            vy1 = me.cam_y + rows - 1
+            ix1 = rx1 if rx1 < vx1 else vx1
+            iy1 = ry1 if ry1 < vy1 else vy1
+            if ix0 <= ix1 and iy0 <= iy1:
+                rpx = x0 + (ix0 - me.cam_x) * cell
+                rpy = y0 + (iy0 - me.cam_y) * cell
+                rpw = (ix1 - ix0 + 1) * cell
+                rph = (iy1 - iy0 + 1) * cell
+                cv.rectb(rpx, rpy, rpw, rph, NAMES["yellow"])
+                if rpw > 2 and rph > 2:
+                    cv.rectb(rpx + 1, rpy + 1, rpw - 2, rph - 2, NAMES["yellow"])
         # Tile palette (right): a page of sheet tiles; the brush tile is boxed white.
         # The tile art stays its native size (a bigger palette shows MORE tiles per
         # page via extra rows, and the fs-scaled cell just gives it more air).
@@ -631,3 +882,40 @@ class MapEditorUI:
         cv.print("SKY", sx + sw - 26 * fs, sy + (sh - 8 * fs) // 2, NAMES["white"], 1)
         cv.rectb(sx, sy, sw, sh,
                  NAMES["white"] if me.n < 0 else NAMES["dark_grey"])
+        # Editor toolbar (#91): TOOL (shows the active tool PN/BX/FL), UNDO / REDO
+        # (dimmed when the in-editor journal is at an end), DIM (open resize panel).
+        ws._btn(_MAP_TOOL_LABEL.get(self.map_tool, "PN"), lay.tool_btn,
+                NAMES["orange"], cv)
+        ws._btn("UN", lay.undo_btn,
+                NAMES["blue"] if me.can_undo() else NAMES["dark_grey"], cv)
+        ws._btn("RE", lay.redo_btn,
+                NAMES["blue"] if me.can_redo() else NAMES["dark_grey"], cv)
+        ws._btn("WH", lay.dim_btn, NAMES["dark_green"], cv)
+        # Map-resize overlay (#91): drawn LAST so it sits over the whole editor.
+        if self.dims_open:
+            self._draw_dims(cv, NAMES)
+
+    def _draw_dims(self, cv, NAMES):
+        """The map-resize (DIM) overlay panel (#91): the current W x H with +/-
+        steppers on the right/bottom edge and a DONE button, centered over the
+        editor. Drawn only while dims_open; geometry from _dims_rects()."""
+        ws = self.ws
+        tm = ws.project.tilemap
+        lay = self.layout
+        fs = lay.fs
+        r = self._dims_rects()
+        px, py, pw, ph = r["panel"]
+        cv.rect(px, py, pw, ph, NAMES["dark_blue"])
+        cv.rectb(px, py, pw, ph, NAMES["white"])
+        cv.print("MAP SIZE", px + 8 * fs, py + 6 * fs, NAMES["white"], 1)
+        wy, hy = r["rows"]
+        w = tm.w if tm is not None else 0
+        h = tm.h if tm is not None else 0
+        ws._btn("-", r["w_dn"], NAMES["red"], cv)
+        ws._btn("+", r["w_up"], NAMES["green"], cv)
+        ws._btn("-", r["h_dn"], NAMES["red"], cv)
+        ws._btn("+", r["h_up"], NAMES["green"], cv)
+        yoff = (22 * fs - 8 * fs) // 2
+        cv.print("W " + str(w), px + pw // 2 - 14 * fs, wy + yoff, NAMES["white"], 1)
+        cv.print("H " + str(h), px + pw // 2 - 14 * fs, hy + yoff, NAMES["white"], 1)
+        ws._btn("DONE", r["done"], NAMES["green"], cv)
