@@ -46,6 +46,17 @@ if [ ! -d "${UPSTREAM_DIR}/.git" ]; then
   git -C "${UPSTREAM_DIR}" checkout "${LVGL_MPY_COMMIT}"
 fi
 
+# lvgl_micropython vendors micropython/lvgl/pycparser as git submodules that its
+# make.py populates on the fly (builder.get_micropython -> `git submodule update
+# --init --depth=1 -- lib/micropython`). But we patch files UNDER lib/micropython
+# (main.c / _boot.py) *before* make.py runs, so on a from-scratch .build (CI, or a
+# fresh dev checkout) that path doesn't exist yet and the patch/cp below fail. Init
+# the micropython submodule now -- faithful to get_micropython, and a no-op once it
+# is present (lvgl/pycparser/esp-idf are still fetched later by make.py).
+if [ ! -f "${UPSTREAM_DIR}/lib/micropython/ports/esp32/main.c" ]; then
+  git -C "${UPSTREAM_DIR}" submodule update --init --depth=1 -- lib/micropython
+fi
+
 MPY_MAIN_C="${UPSTREAM_DIR}/lib/micropython/ports/esp32/main.c"
 MPY_BOOT_PY="${UPSTREAM_DIR}/lib/micropython/ports/esp32/modules/_boot.py"
 MPY_BOOT_ORIG="${BUILD_DIR}/micropython_esp32_boot.py.orig"

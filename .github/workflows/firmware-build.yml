@@ -20,7 +20,9 @@ on:
   # touches the workflow file itself. Remove this block after the workflow is proven.
   push:
     branches: ["claude/cloud-capabilities-webview-neu3du"]
-    paths: [".github/workflows/firmware-build.yml"]
+    paths:
+      - ".github/workflows/firmware-build.yml"
+      - "firmware/lilygo_t_deck_plus_micropython/build.sh"
   # To archive every master build, use instead:
   #   push:
   #     branches: [master]
