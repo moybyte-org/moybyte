@@ -43,7 +43,7 @@ def _run(ws, frames, dt=1 / 30):
 def test_seed_cart_folders_present_and_valid():
     import json
 
-    for folder in ("pet", "tiny_runner", "platformer", "tap_red"):
+    for folder in ("pet", "tiny_runner", "platformer", "tap_red", "bubble_trouble"):
         d = SYSTEM_CARTS / (folder + ".moy")
         assert (d / "manifest.json").is_file(), folder
         assert (d / "main.py").is_file(), folder
@@ -386,3 +386,115 @@ def test_space_pet_picker_selects_a_sprite_tile(tmp_path):
     ws.apply()
     assert ws.cart_error is None
     assert ws.ns["pet"] == 1                             # the running cart uses the picked tile
+
+
+# -- Bubble Trouble (#79 stage 1: single-player seed cart) -------------------
+
+def test_bubble_trouble_opens_and_is_lively(tmp_path):
+    from runtime import host_app
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_cart(ws, "Bubble Trouble")
+    assert ws.screen == "desktop"                        # _start succeeded
+    ws.config["autoplay"] = 1
+    ws.apply()
+    snaps = set()
+    for _ in range(150):
+        ws.input.begin_frame()
+        ws.frame(1 / 30)
+        snaps.add(bytes(ws.canvas.buf[::97]))            # bubbles always move -> lively
+    assert len(snaps) > 3, "Bubble Trouble is static in attract mode"
+
+
+def test_bubble_trouble_harpoon_pops_and_splits(tmp_path):
+    # A harpoon fired under a size-2 bubble pops it (scores) and splits it into
+    # two smaller (size-1) bubbles -- the core Pang mechanic.
+    from runtime import host_app
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_cart(ws, "Bubble Trouble")
+    ns = ws.ns
+    ns["bubbles"][:] = [[160.0, 120.0, 0.0, 0.0, 2]]     # one size-2 bubble, centred
+    ns["px"] = 160.0 - ns["PW"] / 2                      # player directly under it
+    ns["harpoon"] = None
+    ns["score"] = 0
+    ws.input.set_held("a", True)                         # fire
+    ws.input.begin_frame()
+    ws.frame(1 / 30)
+    ws.input.set_held("a", False)
+    for _ in range(60):                                  # let the harpoon rise and hit
+        ws.input.begin_frame()
+        ws.frame(1 / 30)
+        if ns["score"] > 0:
+            break
+    assert ns["score"] > 0, "harpoon never popped the bubble"
+    assert len(ns["bubbles"]) == 2, "a size-2 bubble must split into two"
+    assert all(b[4] == 1 for b in ns["bubbles"]), "children must be one size smaller"
+
+
+def test_bubble_trouble_smallest_bubble_pops_outright(tmp_path):
+    from runtime import host_app
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_cart(ws, "Bubble Trouble")
+    ns = ws.ns
+    ns["bubbles"][:] = [[160.0, 120.0, 0.0, 0.0, 0]]     # a size-0 bubble
+    ns["px"] = 160.0 - ns["PW"] / 2
+    ns["harpoon"] = None
+    for _ in range(4):                                   # fire and let it rise
+        ws.input.set_held("a", True)
+        ws.input.begin_frame()
+        ws.frame(1 / 30)
+        ws.input.set_held("a", False)
+        for _ in range(60):
+            ws.input.begin_frame()
+            ws.frame(1 / 30)
+            if not ns["bubbles"]:
+                break
+        if not ns["bubbles"]:
+            break
+    assert not ns["bubbles"], "the smallest bubble must vanish, not split"
+
+
+def test_bubble_trouble_contact_costs_a_life(tmp_path):
+    from runtime import host_app
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_cart(ws, "Bubble Trouble")
+    ns = ws.ns
+    ns["lives"] = 3
+    ns["invuln"] = 0.0
+    ns["dead_t"] = 0.0
+    ns["over"] = 0.0
+    ns["bubbles"][:] = [[ns["px"] + ns["PW"] / 2, ns["PLAYER_TOP"] + 2, 0.0, 10.0, 1]]
+    ws.input.begin_frame()
+    ws.frame(1 / 30)
+    assert ns["lives"] == 2, "touching a bubble must cost a life"
+
+
+def test_bubble_trouble_high_score_persists(tmp_path):
+    # The best score rides pmem(0), so it survives a restart of the cart.
+    from runtime import host_app
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_cart(ws, "Bubble Trouble")
+    ns = ws.ns
+    ns["bubbles"][:] = [[160.0, 120.0, 0.0, 0.0, 0]]     # pop one -> scores -> new best
+    ns["px"] = 160.0 - ns["PW"] / 2
+    ns["harpoon"] = None
+    ns["score"] = 0
+    for _ in range(4):
+        ws.input.set_held("a", True)
+        ws.input.begin_frame()
+        ws.frame(1 / 30)
+        ws.input.set_held("a", False)
+        for _ in range(60):
+            ws.input.begin_frame()
+            ws.frame(1 / 30)
+            if ns["score"] > 0:
+                break
+        if ns["score"] > 0:
+            break
+    assert ns["score"] > 0
+    assert ns["best"] == ns["score"]
+    assert ns["pmem"](0) == ns["best"], "best score must be written to pmem"

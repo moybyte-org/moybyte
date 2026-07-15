@@ -48,6 +48,7 @@ TITLE_TO_FOLDER = {
     "Hop Quest": "platformer",
     "Sky Run": "scroll_demo",
     "Battle City": "battle_city",
+    "Bubble Trouble": "bubble_trouble",
     "Tap Only Red": "tap_red",
     "Tap Game": "tap_game",
     "Beeper": "beeper",
