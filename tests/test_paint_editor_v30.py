@@ -447,3 +447,151 @@ def test_map_empty_sky_tile_is_selectable_and_clears_a_cell(tmp_path):
     drv.frame(1 / 30)
     assert ws.tilemap.mget(0, 0) == ws.tilemap.EMPTY   # cleared to transparent (-1)
     assert ws.tilemap.cells[0] == 0                # stored as byte 0 == "no tile"
+
+
+# -- #91: undo/redo + rect/flood tools + resize, driven through the shell ------
+
+def _btn_center(rect):
+    x, y, w, h = rect
+    return (x + w // 2, y + h // 2)
+
+
+def _open_map(tmp_path):
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.launcher.sel = 0
+    ws.open()
+    ws._open_map()
+    return ws, host_app.ConsoleDriver(ws)
+
+
+def _tap(drv, x, y):
+    drv.touch(x, y)
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+
+
+def _blank_map(ws):
+    # The seeded cart ships a map with content; start from a clean slate so a
+    # stamp/undo lands on EMPTY (deterministic across whichever cart is sel=0).
+    cells = ws.tilemap.cells
+    for i in range(len(cells)):
+        cells[i] = 0
+
+
+def test_map_undo_redo_buttons_walk_gestures(tmp_path):
+    # #91: two stamp taps are two undo steps; the on-screen UNDO button reverts the
+    # last, REDO re-applies it (touch-first -- no Ctrl key needed on the device).
+    ws, drv = _open_map(tmp_path)
+    _blank_map(ws)
+    me = ws.map_ui.mapedit
+    me.n = 4
+    _tap(drv, *_map_cell_center(ws, 1, 1))         # gesture 1
+    _tap(drv, *_map_cell_center(ws, 2, 1))         # gesture 2
+    c1 = (me.cam_x + 1, me.cam_y + 1)
+    c2 = (me.cam_x + 2, me.cam_y + 1)
+    assert ws.tilemap.mget(*c1) == 4 and ws.tilemap.mget(*c2) == 4
+
+    _tap(drv, *_btn_center(ws.map_ui.layout.undo_btn))
+    assert ws.tilemap.mget(*c2) == ws.tilemap.EMPTY and ws.tilemap.mget(*c1) == 4
+    _tap(drv, *_btn_center(ws.map_ui.layout.redo_btn))
+    assert ws.tilemap.mget(*c2) == 4               # the step came back
+
+
+def test_map_ctrl_z_undoes_a_stamp(tmp_path):
+    # #91: the host keyboard shortcut Ctrl+Z (0x1A) drives the same in-editor undo.
+    ws, drv = _open_map(tmp_path)
+    _blank_map(ws)
+    me = ws.map_ui.mapedit
+    me.n = 6
+    cell = (me.cam_x + 3, me.cam_y + 2)
+    before = ws.tilemap.mget(*cell)
+    _tap(drv, *_map_cell_center(ws, 3, 2))
+    assert ws.tilemap.mget(*cell) == 6
+
+    drv.type_char(0x1A)                            # Ctrl+Z
+    drv.frame(1 / 30)
+    assert ws.tilemap.mget(*cell) == before        # reverted to its prior tile
+
+
+def test_map_rect_tool_fills_dragged_rectangle_as_one_step(tmp_path):
+    # #91: cycle to the RECT tool, drag corner-to-corner, and the whole rectangle
+    # fills on release as a SINGLE undo step (touch-drag = the box, not a pan).
+    ws, drv = _open_map(tmp_path)
+    _blank_map(ws)
+    me = ws.map_ui.mapedit
+    me.n = 5
+    _tap(drv, *_btn_center(ws.map_ui.layout.tool_btn))   # stamp -> rect
+    assert ws.map_ui.map_tool == "rect"
+
+    x0, y0 = _map_cell_center(ws, 1, 1)
+    x1, y1 = _map_cell_center(ws, 3, 3)
+    drv.touch(x0, y0)
+    drv.frame(1 / 30)
+    drv.touch_drag(x1, y1)
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+
+    bx, by = me.cam_x, me.cam_y
+    for dy in range(3):
+        for dx in range(3):
+            assert ws.tilemap.mget(bx + 1 + dx, by + 1 + dy) == 5
+    assert me.can_undo()
+    assert me.undo() is True                        # one step reverts the whole box
+    for dy in range(3):
+        for dx in range(3):
+            assert ws.tilemap.mget(bx + 1 + dx, by + 1 + dy) == ws.tilemap.EMPTY
+
+
+def test_map_flood_tool_taps_one_committed_step(tmp_path):
+    # #91: cycle to FLOOD, tap a cell, and the contiguous region fills as one undo
+    # step. (The exhaustive same-tile/full-map/wall coverage is the unit test.)
+    ws, drv = _open_map(tmp_path)
+    _blank_map(ws)
+    me = ws.map_ui.mapedit
+    me.n = 7
+    _tap(drv, *_btn_center(ws.map_ui.layout.tool_btn))   # stamp -> rect
+    _tap(drv, *_btn_center(ws.map_ui.layout.tool_btn))   # rect  -> flood
+    assert ws.map_ui.map_tool == "flood"
+
+    cell = (me.cam_x + 2, me.cam_y + 2)
+    _tap(drv, *_map_cell_center(ws, 2, 2))
+    assert ws.tilemap.mget(*cell) == 7
+    assert me.can_undo() and me.undo() is True
+
+
+def test_map_resize_panel_grows_and_shrinks(tmp_path):
+    # #91: the DIM button opens the resize panel; the +/- steppers grow/shrink the
+    # map on the right/bottom edge, content preserved, and DONE closes it.
+    ws, drv = _open_map(tmp_path)
+    tm = ws.tilemap
+    tm.mset(0, 0, 3)                               # a top-left marker to preserve
+    w0, h0 = tm.w, tm.h
+
+    _tap(drv, *_btn_center(ws.map_ui.layout.dim_btn))
+    assert ws.map_ui.dims_open
+
+    r = ws.map_ui._dims_rects()
+    _tap(drv, *_btn_center(r["w_up"]))             # +1 column
+    _tap(drv, *_btn_center(r["h_up"]))             # +1 row
+    assert ws.tilemap.w == w0 + 1 and ws.tilemap.h == h0 + 1
+    assert ws.tilemap.mget(0, 0) == 3             # content preserved through resize
+
+    r = ws.map_ui._dims_rects()
+    _tap(drv, *_btn_center(r["w_dn"]))             # -1 column
+    assert ws.tilemap.w == w0
+    assert ws.tilemap.mget(0, 0) == 3
+
+    r = ws.map_ui._dims_rects()
+    _tap(drv, *_btn_center(r["done"]))
+    assert not ws.map_ui.dims_open
+
+    # The resized map serializes at the new dims and round-trips through map.moymap
+    # (SAVE writes exactly this blob), so a cart reloads the grown grid + content.
+    from runtime.editors import TileMap
+    reloaded = TileMap.from_hex(ws.tilemap.to_hex())
+    assert (reloaded.w, reloaded.h) == (ws.tilemap.w, ws.tilemap.h)
+    assert reloaded.mget(0, 0) == 3
+    ws.save_map()                                  # persists without error

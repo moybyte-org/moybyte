@@ -992,6 +992,152 @@ def test_map_size_stamp_renders_identical_to_spr_multitile():
     assert set(pix_a) >= {0, 1, 2, 3, 4}     # all four tiles actually rendered
 
 
+# -- map editor undo/redo + rect/flood tools + resize (#91) -----------------
+
+def test_map_editor_undo_redo_across_gestures():
+    # #91: each COMPLETED gesture (bracketed by begin_edit/end_edit) is ONE undo
+    # step recording only the changed cells; undo/redo walk the stack, redo is
+    # dropped by a fresh edit, and the depth is bounded.
+    from runtime.editors import MapEditor
+    tm = TileMap(8, 8)
+    me = MapEditor(tm, SpriteSheet())
+    me.n = 3
+    me.begin_edit(); me.place(1, 1); me.end_edit()   # gesture 1
+    me.n = 5
+    me.begin_edit(); me.place(2, 2); me.end_edit()   # gesture 2
+    assert tm.mget(1, 1) == 3 and tm.mget(2, 2) == 5
+    assert me.can_undo() and not me.can_redo()
+
+    assert me.undo() is True                          # undo gesture 2
+    assert tm.mget(2, 2) == TileMap.EMPTY and tm.mget(1, 1) == 3
+    assert me.undo() is True                          # undo gesture 1
+    assert tm.mget(1, 1) == TileMap.EMPTY
+    assert me.undo() is False                          # floor: nothing left
+    assert me.can_redo()
+
+    assert me.redo() is True and tm.mget(1, 1) == 3   # redo gesture 1
+    assert me.redo() is True and tm.mget(2, 2) == 5   # redo gesture 2
+    assert me.redo() is False
+
+    # A brand-new edit after an undo drops the redo branch (classic model).
+    me.undo()                                          # back to just gesture 1
+    assert me.can_redo()
+    me.n = 9
+    me.begin_edit(); me.place(4, 4); me.end_edit()
+    assert not me.can_redo() and tm.mget(4, 4) == 9
+
+    # An empty gesture (no cell changed) is not pushed as a step.
+    depth = len(me._undo)
+    me.begin_edit(); me.end_edit()
+    assert len(me._undo) == depth
+
+
+def test_map_editor_undo_depth_is_bounded():
+    # #91: the undo stack never grows past UNDO_MAX (device RAM); the oldest step
+    # is dropped so recent edits stay undoable.
+    from runtime.editors import MapEditor
+    tm = TileMap(64, 4)
+    me = MapEditor(tm, SpriteSheet())
+    me.n = 1
+    for x in range(me.UNDO_MAX + 10):
+        me.begin_edit(); me.place(x, 0); me.end_edit()
+    assert len(me._undo) == me.UNDO_MAX
+
+
+def test_map_editor_rect_fill_bounds_and_erase():
+    # #91: fill_rect fills the inclusive rectangle with the brush, normalizes the
+    # corners (any drag direction), clamps to the map, and honors the eraser.
+    from runtime.editors import MapEditor
+    tm = TileMap(10, 8)
+    me = MapEditor(tm, SpriteSheet())
+    me.n = 4
+    me.begin_edit(); me.fill_rect(4, 3, 2, 1); me.end_edit()   # corners reversed
+    for y in range(1, 4):
+        for x in range(2, 5):
+            assert tm.mget(x, y) == 4
+    assert tm.mget(1, 1) == TileMap.EMPTY                       # just outside
+    assert tm.mget(5, 3) == TileMap.EMPTY
+    changed = sum(1 for c in tm.cells if c)
+    assert changed == 3 * 3                                     # exactly the 3x3 block
+
+    # A rect that runs off the map clamps to the edge (no error, fills what fits).
+    me.n = 6
+    me.begin_edit(); me.fill_rect(8, 6, 99, 99); me.end_edit()
+    assert tm.mget(9, 7) == 6 and tm.mget(8, 6) == 6
+
+    # ERASE (or the EMPTY brush) fills a rectangle with sky.
+    me.begin_edit(); me.fill_rect(0, 0, 9, 7, erase=True); me.end_edit()
+    assert tm.is_blank()
+
+    # The whole fill is ONE undo step.
+    assert me.undo() is True and not tm.is_blank()
+
+
+def test_map_editor_flood_fill_same_tile_noop_and_full_map():
+    # #91: flood fills the contiguous same-tile region iteratively; a same-tile
+    # fill is a no-op, and a blank map floods entirely.
+    from runtime.editors import MapEditor
+    tm = TileMap(6, 5)
+    me = MapEditor(tm, SpriteSheet())
+
+    # Full-map flood on a blank grid: every cell becomes the brush.
+    me.n = 2
+    me.begin_edit(); me.flood(0, 0); me.end_edit()
+    assert all(tm.mget(x, y) == 2 for y in range(5) for x in range(6))
+
+    # Same-tile flood is a no-op (target == brush) -- no undo step recorded.
+    depth = len(me._undo)
+    me.begin_edit(); me.flood(3, 3); me.end_edit()
+    assert len(me._undo) == depth
+
+    # A bounded region: flood only the contiguous same-tile blob, stopping at a
+    # different-tile wall.
+    tm2 = TileMap(5, 1)
+    me2 = MapEditor(tm2, SpriteSheet())
+    tm2.mset(2, 0, 9)                       # a wall splits the row into [0,1] | [3,4]
+    me2.n = 4
+    me2.begin_edit(); me2.flood(0, 0); me2.end_edit()
+    assert tm2.mget(0, 0) == 4 and tm2.mget(1, 0) == 4
+    assert tm2.mget(2, 0) == 9             # the wall is untouched
+    assert tm2.mget(3, 0) == TileMap.EMPTY  # the far side never floods
+    assert me2.undo() is True and tm2.mget(0, 0) == TileMap.EMPTY  # one step
+
+
+def test_tilemap_resize_preserves_content_and_roundtrips():
+    # #91: resize grows/shrinks in place, preserving the overlapping top-left
+    # content; the new dims serialize + round-trip through map.moymap (to_hex has
+    # a `w h` header, so from_hex reconstructs the grown/shrunk grid).
+    tm = TileMap(4, 3)
+    for y in range(3):
+        for x in range(4):
+            tm.mset(x, y, x + y * 4)        # a recognizable pattern
+    gen0 = tm.gen
+
+    tm.resize(6, 5)                          # GROW: content kept, new cells empty
+    assert (tm.w, tm.h) == (6, 5)
+    assert tm.gen > gen0 and tm.dirty
+    for y in range(3):
+        for x in range(4):
+            assert tm.mget(x, y) == x + y * 4
+    assert tm.mget(5, 4) == TileMap.EMPTY    # a fresh cell is empty
+    assert tm.mget(4, 0) == TileMap.EMPTY
+
+    rt = TileMap.from_hex(tm.to_hex())       # serialize round-trip at the new dims
+    assert (rt.w, rt.h) == (6, 5)
+    for y in range(3):
+        for x in range(4):
+            assert rt.mget(x, y) == x + y * 4
+
+    tm.resize(2, 2)                          # SHRINK: the surviving corner is kept
+    assert (tm.w, tm.h) == (2, 2)
+    assert tm.mget(0, 0) == 0 and tm.mget(1, 1) == 1 + 4
+    rt2 = TileMap.from_hex(tm.to_hex())
+    assert (rt2.w, rt2.h) == (2, 2) and rt2.mget(1, 1) == 5
+
+    tm.resize(0, 0)                          # clamps to a minimum 1x1
+    assert (tm.w, tm.h) == (1, 1)
+
+
 def test_host_console_map_size_brush_stamps_block_via_taps(tmp_path):
     # #57 in the shell: the SIZE button cycles the stamp size, one tap with
     # SIZE=2 places the sprite's 4 tiles, and an ERASE tap clears the block.
