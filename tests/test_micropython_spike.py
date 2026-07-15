@@ -3219,3 +3219,40 @@ def test_moy_lua_phase1_wired():
     assert "ws.lua_runtime = make_lua_runtime(ws)" in p4_runtime
     assert "moy_lua" in (p4 / "native" / "micropython.cmake").read_text(encoding="utf-8")
     assert "moy_lua" in (p4 / "build.sh").read_text(encoding="utf-8")
+
+
+def test_moy_lua_hardware_learned_constraints_pinned():
+    """#67 Phase 4: the two S3-measured taxes (both halved the VM when lost) and
+    the safety contracts must survive any re-vendor / refactor of moy_lua.
+    Behavioral protocol parity lives in test_device_canvas_parity._LuaSpr; these
+    greps pin what no host test can execute."""
+    mod = (ROOT / "native" / "moy_lua" / "modmoy_lua.c").read_text(encoding="utf-8")
+    # 1) lua_Alloc is internal-SRAM-first with a headroom floor, PSRAM fallback
+    #    (all-PSRAM measured ~2x slower on the S3's 120MHz-OCT bus).
+    assert "MALLOC_CAP_INTERNAL" in mod
+    assert "48 * 1024" in mod                          # the WiFi/DMA headroom floor
+    assert mod.index("MALLOC_CAP_INTERNAL") < mod.index("MALLOC_CAP_SPIRAM")
+    # 2) every vendored Lua source carries the in-source -O2 pragma (usermods
+    #    compile at -Os, which halved the VM -- the #77 moy_gfx lesson; cmake
+    #    source-file properties never reach the linked objects).
+    lua_dir = ROOT / "native" / "moy_lua" / "lua"
+    missing = [p.name for p in sorted(lua_dir.glob("*.c"))
+               if "#pragma GCC optimize" not in p.read_text(encoding="utf-8")]
+    assert missing == [], "vendored lua sources missing the -O2 pragma: %s" % missing
+    # 3) sandbox: the unsafe base entries are stripped after luaopen_base, and
+    #    only the safe stdlib subset is opened.
+    for fn in ("dofile", "loadfile", "load", "require"):
+        assert '"%s"' % fn in mod
+    for lib in ("luaopen_io", "luaopen_os", "luaopen_package", "luaopen_debug"):
+        assert lib not in mod
+    # 4) MP exceptions never longjmp through Lua frames: the trampoline's Python
+    #    call and l_spr's begin_batch upcall are both nlr-protected.
+    assert mod.count("nlr_push") >= 2
+    # 5) the token init masks to int16-positive so the header compare in l_spr
+    #    can never alias the Python writer (0) or a gate token.
+    assert "0x7FFF" in mod
+    # 6) the shared glue declines the C fast path on the web-view TeeCanvas (its
+    #    __getattr__ would hand the C spr a bypass around the recorder).
+    api_src = (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8")
+    assert 'getattr(canvas, "_r", None)' in api_src
+    assert "0x7A11" in api_src                         # the documented Lua token

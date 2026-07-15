@@ -435,7 +435,10 @@ class LuaCartRun:
                 moy_lua.register("spr", ns["spr"])
             self._install_handles(ns)
             moy_lua.exec(_LUA_PRELUDE, "prelude")
-            moy_lua.exec(src)
+            # "@cart" so error positions render `cart:12:` -- the chunkname
+            # player._lua_cart_line parses for the drop-on-the-bad-line panel
+            # (#24), matching the host runner's loadstring(src, "@cart").
+            moy_lua.exec(src, "@cart")
             self.init = ((lambda: moy_lua.call("_init"))
                          if moy_lua.has("_init") else None)
             self.update = ((lambda dt: moy_lua.call("_update", dt))

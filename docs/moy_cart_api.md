@@ -20,7 +20,9 @@ PC simulator and on the device — same names, same pixels.
 A cart is a single `main.py` inside a `.moy` folder (`manifest.json` + `main.py` +
 `config.json`, optional sprite sheet / tilemap / sounds / paint images). It defines up
 to three lifecycle functions and calls the API by name — **no imports**; every name
-below is pre-injected as a global.
+below is pre-injected as a global. (A cart can also be written in **Lua** —
+`main.lua` + `"runtime": "lua"` in the manifest, same API — see
+[Writing a cart in Lua](#writing-a-cart-in-lua-67).)
 
 ```python
 # a tiny cart: move a ball with the D-pad
@@ -50,6 +52,66 @@ def _draw():                 # every frame; render here
 | `_init()` | once at cart start (and on restart) | optional; reset your state here |
 | `_update(dt)` | once per frame, before draw | optional; `dt` is **seconds** (float). Put game logic here |
 | `_draw()` | once per frame | render the frame; called every frame even if `_update` isn't defined |
+
+## Writing a cart in Lua (#67)
+
+A cart can be **Lua instead of Python**: set `"runtime": "lua"` and
+`"main": "main.lua"` in `manifest.json`. **Every call in this document is valid
+verbatim in both languages** — `spr(1, x, y)`, `btn("left")`, `cfg("speed", 2)`,
+`pmem`, `quit()`, `textmode()` — because the Lua globals *are* the same console
+API (the device bridges them natively; hot sprites append to the same batch the
+Python path uses). Same lifecycle too: define `_init` / `_update(dt)` / `_draw`
+as global functions.
+
+```lua
+-- the same tiny cart, in Lua
+local x, y = 0, 0
+
+function _init()
+  x, y = W // 2, H // 2
+end
+
+function _update(dt)
+  local speed = 120 * dt
+  if btn("left")  then x = x - speed end
+  if btn("right") then x = x + speed end
+  if btn("up")    then y = y - speed end
+  if btn("down")  then y = y + speed end
+end
+
+function _draw()
+  cls(col("dark_blue"))
+  circ(flr(x), flr(y), 6, col("yellow"))
+  print("MOVE ME", 8, 8, col("white"))
+end
+```
+
+**Why pick Lua:** speed. Logic-heavy carts run flat frame times with no
+garbage-collector pauses (the measured verdicts live in issue #67 — e.g. Sakura's
+logic at a flat 3–4ms where the Python twin spikes to 19–24ms).
+`system_carts/sakura_lua.moy` is the living example — a line-by-line twin of
+`sakura.moy`, pixel-identical by test.
+
+The few Lua-specific notes:
+
+- `touch()` returns **multiple values**, not a tuple:
+  `local tx, ty, tapped, held = touch()` (all `nil` when no pointer).
+- `print(...)` is the **draw-text verb** (as in this doc), not Lua's console print.
+- Layer methods are **colon calls**: `lay = make_layer(w, h)`, then `lay:cls(0)`,
+  `lay:map(...)`, `lay:spr(...)`; stamp with `draw_layer(lay, cam_x, cam_y)`.
+- `spr(n, x, y, colorkey, scale, flip)` takes **sheet-tile numbers** (the fast
+  path). Paint images (`image("name")`) are placed via a layer —
+  `lay:spr(image("bg"), x, y)` — not passed to `spr()` directly; multi-tile
+  sprites (`w,h` spans) are drawn as their individual tiles.
+- No imports, same as Python. The **safe Lua stdlib** is available: `math.*`,
+  `string.*`, `table.*` (no `io`/`os`/`load`/`require`).
+- A crash opens the same error panel, and EDIT drops on the offending
+  `main.lua` line. The code editor's tap-palette offers `~` (for `~=`) in a
+  Lua project.
+- The blocks editor stays Python-only for now (compiles to Python by design).
+
+*(Host note: the PC simulator runs Lua carts through `lupa` — an optional dev
+dependency; without it a Lua cart opens the "needs the Lua runtime" panel.)*
 
 ## Frame pacing
 
@@ -240,9 +302,10 @@ earth tones, vivid accents, neutrals, deep shades) — pass those as integers.
 
 The canvas works in **palette indices** and the API is **plain functions over a
 buffer** — no dependency on `framebuf`, LVGL, or even Python in the contract. That's
-deliberate: the same surface maps onto the host window (indices → RGB888) and the
+deliberate: the same surface maps onto the host window (indices → RGB888), the
 device's native `moy_compositor` RGB565 framebuffer (indices → RGB565 via the
-palette), and eventually a Lua VM. **A cart authored once runs on every tier** (Zero /
+palette), and the Lua cart VM (#67) — the "not even Python" clause is now shipping
+code. **A cart authored once runs on every tier** (Zero /
 Player / One) — see `docs/hardware_lineup.md` and issue #59. When you add a drawing
 feature, add it to **both** `runtime/canvas.py` and the device path and keep the name
 identical.

@@ -91,8 +91,17 @@ class LuaCartRun:
         g = self._lua.globals()
         for k, v in ns.items():
             g[k] = v
+        # Captured BEFORE the prelude's sandbox nils `load`: the cart chunk is
+        # loaded as "@cart" so every error position renders `cart:12:` -- the
+        # same chunkname the device passes to moy_lua.exec, which is what
+        # player._lua_cart_line parses for the drop-on-the-bad-line panel (#24).
+        loadstring = self._lua.eval("load")
         self._lua.execute(PRELUDE)
-        self._lua.execute(src)
+        chunk = loadstring(src, "@cart")
+        if isinstance(chunk, tuple):     # (nil, errmsg): a load/syntax error
+            from lupa import LuaError
+            raise LuaError(chunk[1])     # errmsg already carries `cart:N:`
+        chunk()
         # Captured post-exec, like the Python path's ns.get("_update"): a cart
         # may define any subset; missing verbs just don't run.
         self.init = g["_init"]

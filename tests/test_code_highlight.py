@@ -62,6 +62,52 @@ def test_digits_in_identifier_are_not_a_number():
     assert cols[0] == _HL_TEXT and cols[1] == _HL_TEXT   # x1 is one identifier
 
 
+# -- the Lua rules (#67 Phase 5) ----------------------------------------------
+
+def test_lua_comment_is_double_dash():
+    line = "x = 1  -- set x"
+    cols = _highlight(line, lua=True)
+    h = line.index("--")
+    assert all(c == _HL_COMMENT for c in cols[h:])
+    assert cols[0] == _HL_TEXT                   # code before it untouched
+
+
+def test_lua_hash_is_the_length_operator_not_a_comment():
+    line = "n = #petals"
+    cols = _highlight(line, lua=True)
+    assert _HL_COMMENT not in cols               # nothing dimmed
+    # ...while the SAME line in python dims from the hash on (regression pin)
+    py = _highlight(line)
+    assert all(c == _HL_COMMENT for c in py[line.index("#"):])
+
+
+def test_lua_minus_alone_is_not_a_comment():
+    cols = _highlight("a = b - c", lua=True)
+    assert _HL_COMMENT not in cols
+
+
+def test_lua_double_dash_inside_string_is_not_a_comment():
+    line = 's = "a -- b"'
+    cols = _highlight(line, lua=True)
+    assert all(c == _HL_STRING for c in cols[line.index('"'):])
+
+
+def test_lua_keywords_are_colored():
+    line = "local function f() return nil end"
+    cols = _highlight(line, lua=True)
+    for word in ("local", "function", "return", "nil", "end"):
+        i = line.index(word)
+        assert cols[i:i + len(word)] == [_HL_KEYWORD] * len(word), word
+    # ...and python-only keywords are NOT lua keywords
+    cols = _highlight("def f():", lua=True)
+    assert cols[0:3] == [_HL_TEXT] * 3
+
+
+def test_lua_cart_verbs_stay_builtins():
+    cols = _highlight("spr(1, x, y)", lua=True)
+    assert cols[0:3] == [_HL_BUILTIN] * 3        # same api, same color
+
+
 # -- inline syntax-error markers (driven through the console) ----------------
 
 def _make_ws_with_cart(tmp_path, src, title="E"):
@@ -142,3 +188,27 @@ def test_highlight_cache_reuses_result(tmp_path):
     a = ws.code_layer._hl("cls(7)")
     b = ws.code_layer._hl("cls(7)")
     assert a is b                          # same line -> cached object
+
+
+def test_lua_project_switches_palette_and_highlighting(tmp_path):
+    # The symbol palette + highlighter follow the OPEN project's runtime (#67
+    # Phase 5): a lua cart's code tab offers `~` (for ~=) in place of the `;`
+    # Lua never needs, and `--` comments dim. Same string length, so the
+    # responsive layout geometry is untouched.
+    from runtime.code_layer import _CODE_SYMBOLS, _LUA_SYMBOLS
+    assert len(_LUA_SYMBOLS) == len(_CODE_SYMBOLS)
+    assert "~" in _LUA_SYMBOLS and "=" in _LUA_SYMBOLS
+    assert ";" not in _LUA_SYMBOLS
+    ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(5)\n")
+    ws.set_menu_view("code")
+    ws.screen = "menu"
+    assert ws.code_layer._symbols() == _CODE_SYMBOLS
+    line = "n = #petals  -- count"
+    py_cols = ws.code_layer._hl(line)
+    ws.project.cart["runtime"] = "lua"     # what a picker-opened lua cart carries
+    assert ws.code_layer._symbols() == _LUA_SYMBOLS
+    lua_cols = ws.code_layer._hl(line)
+    assert lua_cols != py_cols             # memo keyed by language, not just text
+    assert lua_cols[line.index("--")] == _HL_COMMENT
+    assert lua_cols[line.index("#")] != _HL_COMMENT
+    ws.frame(1 / 30)                       # the palette draw must not raise

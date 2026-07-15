@@ -44,8 +44,12 @@ _CODE_Y0 = 18
 _CODE_LH = 10
 _CODE_AREA = (_CODE_X0, _CODE_Y0, CodeEditor.COLS * 8, CodeEditor.ROWS * _CODE_LH)
 # The T-Deck keyboard has no `=`/`[]`/`{}`/`<>`/`%` keys, so the code editor shows a
-# tappable palette of them along the bottom.
+# tappable palette of them along the bottom. A lua cart (#67 Phase 5) swaps in the
+# Lua set: `~` joins (for `~=`; `..` is two taps of `.`) and the optional `;` --
+# which Lua never needs -- makes room. SAME length, so the layout geometry (and
+# the frozen 320x240 baseline for python carts) is untouched.
 _CODE_SYMBOLS = "=()[]{}<>:;,.\"_%"
+_LUA_SYMBOLS = "=~()[]{}<>:,.\"_%"
 _SYM_Y = 220
 _SYM_H = 20
 _SYM_CELL = 20
@@ -70,6 +74,11 @@ _HL_KEYWORDS = (
     "from", "global", "if", "import", "in", "is", "lambda", "nonlocal", "not",
     "or", "pass", "raise", "return", "try", "while", "with", "yield",
 )
+_HL_LUA_KEYWORDS = (
+    "and", "break", "do", "else", "elseif", "end", "false", "for", "function",
+    "goto", "if", "in", "local", "nil", "not", "or", "repeat", "return",
+    "then", "true", "until", "while",
+)
 # Cart-API verbs + the common builtins a kid actually types. Keep roughly in
 # sync with make_api (host_app / moy_runtime); an extra name here is harmless.
 _HL_BUILTINS = (
@@ -85,15 +94,20 @@ def _is_alpha(ch):
     return ch == "_" or ("a" <= ch <= "z") or ("A" <= ch <= "Z")
 
 
-def _highlight(line):
+def _highlight(line, lua=False):
     """Return a list of palette indices, one per character of `line` (#24).
-    Hand-rolled scanner -- no regex/tokenize, so it runs under MicroPython."""
+    Hand-rolled scanner -- no regex/tokenize, so it runs under MicroPython.
+    `lua` (#67 Phase 5) switches the comment marker (`--`; `#` is Lua's length
+    operator, NOT a comment) and the keyword set; strings/numbers/cart-verb
+    builtins scan identically in both languages."""
     n = len(line)
     out = [_HL_TEXT] * n
     i = 0
+    keywords = _HL_LUA_KEYWORDS if lua else _HL_KEYWORDS
     while i < n:
         ch = line[i]
-        if ch == "#":                          # comment to end of line
+        if (lua and ch == "-" and i + 1 < n and line[i + 1] == "-") or \
+                (not lua and ch == "#"):       # comment to end of line
             while i < n:
                 out[i] = _HL_COMMENT
                 i += 1
@@ -124,7 +138,7 @@ def _highlight(line):
             while j < n and (_is_alpha(line[j]) or "0" <= line[j] <= "9"):
                 j += 1
             word = line[i:j]
-            if word in _HL_KEYWORDS:
+            if word in keywords:
                 cl = _HL_KEYWORD
             elif word in _HL_BUILTINS:
                 cl = _HL_BUILTIN
@@ -161,6 +175,16 @@ class CodeLayer:
         is (re)built) so the first key press after opening registers."""
         self._ekey_prev = 0
 
+    def _is_lua(self):
+        """The open project's cart language (#67 Phase 5): drives the symbol
+        palette + the highlighter's comment/keyword rules."""
+        proj = self.ws.project
+        cart = proj.cart if proj is not None else None
+        return cart is not None and cart.get("runtime") == "lua"
+
+    def _symbols(self):
+        return _LUA_SYMBOLS if self._is_lua() else _CODE_SYMBOLS
+
     # -- Layer facets --------------------------------------------------------
 
     def draw(self, dt):
@@ -190,9 +214,10 @@ class CodeLayer:
         self._code_drag(px, py)        # touch/mouse drag pans the viewport
         if click:
             if self._in(px, py, lay.sym_area) and ws.editor is not None:
+                syms = self._symbols()
                 i = (px - lay.sym_area[0]) // lay.sym_cell  # tap a coding symbol
-                if 0 <= i < len(_CODE_SYMBOLS):
-                    ws.editor.key(ord(_CODE_SYMBOLS[i]))
+                if 0 <= i < len(syms):
+                    ws.editor.key(ord(syms[i]))
             elif ws.editor is not None and self._in(px, py, lay.code_area()):
                 ws.editor.place((px - lay.x0) // lay.cell,
                                 (py - lay.y0) // lay.lh)
@@ -329,13 +354,17 @@ class CodeLayer:
 
     def _hl(self, line):
         """Memoized per-line syntax highlight (#24). Lines recur every frame, so
-        cache by text; bound the cache so a long edit session can't grow it."""
-        cols = self._hl_cache.get(line)
+        cache by text (keyed with the language, so switching a python project for
+        a lua one never replays stale colors); bound the cache so a long edit
+        session can't grow it."""
+        lua = self._is_lua()
+        key = (lua, line)
+        cols = self._hl_cache.get(key)
         if cols is None:
             if len(self._hl_cache) > 400:
                 self._hl_cache.clear()
-            cols = _highlight(line)
-            self._hl_cache[line] = cols
+            cols = _highlight(line, lua)
+            self._hl_cache[key] = cols
         return cols
 
     def _draw_code_runs(self, seg, segcols, y):
@@ -367,8 +396,9 @@ class CodeLayer:
         sy = lay.sym_y
         sh = lay.sym_h
         t = self._t if self._t is not None else self._tones()
-        for i in range(len(_CODE_SYMBOLS)):
+        syms = self._symbols()
+        for i in range(len(syms)):
             x = lay.sym_area[0] + i * sc
             cv.rect(x, sy, sc - 1, sh - 1, t["sym_bg"])
             cv.rectb(x, sy, sc - 1, sh - 1, t["sym_edge"])
-            cv.print(_CODE_SYMBOLS[i], x + 6 * fs, sy + 6 * fs, t["sym_ink"], 1)
+            cv.print(syms[i], x + 6 * fs, sy + 6 * fs, t["sym_ink"], 1)

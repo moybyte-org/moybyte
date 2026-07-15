@@ -184,6 +184,45 @@ def _exc_cart_line(exc, fname="<cart>"):
     return getattr(exc, "lineno", None)            # SyntaxError caught at compile
 
 
+def _lua_err_text(exc):
+    """_err_text minus lupa's appended "stack traceback:" block (#67 Phase 5).
+    The device moy_lua text never has one (lua_pcall runs without a message
+    handler), so trimming keeps the panel the same kid-short one-liner on both
+    backends; the raise position (`cart:N:`) lives in the message head."""
+    t = _err_text(exc)
+    p = t.find("\nstack traceback:")
+    return t if p < 0 else t[:p]
+
+
+def _lua_cart_line(text, chunk="cart"):
+    """Best-effort: the 1-based cart line inside a Lua error text (#67 Phase 5).
+    Both backends load the cart chunk as "@cart" (lua_host loadstring /
+    device_api moy_lua.exec), so a load or raise position renders `cart:12:`;
+    a plain-named chunk renders `[string "cart"]:12:` -- both parsed. The FIRST
+    position in the text is the raise point (any traceback frames come after
+    it), the deepest-frame rule the Python parser applies. No regex: this runs
+    frozen on MicroPython like its Python twin above."""
+    if not text:
+        return None
+    s = str(text)
+    for pat in ('[string "%s"]:' % chunk, chunk + ":"):
+        p = s.find(pat)
+        while p >= 0:
+            prev = s[p - 1] if p > 0 else " "
+            # a real position, not a word ending in the chunk name ("restart:")
+            if not (prev.isalpha() or prev.isdigit() or prev == "_"):
+                num = ""
+                for ch in s[p + len(pat):]:
+                    if "0" <= ch <= "9":
+                        num += ch
+                    else:
+                        break
+                if num:
+                    return int(num)
+            p = s.find(pat, p + 1)
+    return None
+
+
 def _wrap(text, cols):
     """Word-wrap `text` into a list of lines no wider than `cols` chars. A single
     word longer than `cols` is hard-split so it still fits the panel."""
@@ -639,8 +678,10 @@ class Player:
                     lua.close()
                 except Exception:  # noqa: BLE001
                     pass
-            self.cart_error = _err_text(exc)
-            self.crash_line = None
+            self.cart_error = _lua_err_text(exc)
+            # a load/syntax or _init error carries its `cart:N:` position, so
+            # EDIT drops on the line exactly like a Python SyntaxError (#24)
+            self.crash_line = _lua_cart_line(self.cart_error)
             self.ns = ns
             h1 = _heap_stats()
             self._start_diag = (t_reclaim, t_audio, t_api, 0, t_exec, t_init,
@@ -717,9 +758,15 @@ class Player:
                 # device would hang silently). Capture it, stop running the
                 # broken cart, and fall through to paint the error panel; the
                 # desktop buttons stay so the kid can EDIT/CODE the fix.
-                self.cart_error = _err_text(exc)
-                # mark the line on EDIT (#24; mapped back through the nativize insert)
-                self.crash_line = self._map_crash_line(_exc_cart_line(exc))
+                # mark the line on EDIT (#24): a Lua cart's line comes from the
+                # error text's `cart:N:` position (#67 Phase 5); a Python cart's
+                # from the traceback, mapped back through the nativize insert.
+                if self._lua is not None:
+                    self.cart_error = _lua_err_text(exc)
+                    self.crash_line = _lua_cart_line(self.cart_error)
+                else:
+                    self.cart_error = _err_text(exc)
+                    self.crash_line = self._map_crash_line(_exc_cart_line(exc))
                 self._update = None
                 self._draw = None
                 # Print the _err_text-guarded string, never the raw `exc`: a

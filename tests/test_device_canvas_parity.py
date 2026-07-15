@@ -1306,6 +1306,177 @@ def test_auto_batch_actually_coalesces():
 
 
 # --------------------------------------------------------------------------- #
+# moy_lua l_spr (#67 Phase 4): the Lua cart runtime's hot spr is a SECOND C     #
+# writer into the same _batch_arr, speaking the spr_gate protocol with its own  #
+# token (0x7A11). _LuaSpr transcribes it; the tests pin array shape, clamps,    #
+# run breaks, cross-writer interleaving, and the no-fallback error contract.    #
+# --------------------------------------------------------------------------- #
+_LUA_TOKEN = 0x7A11        # device_api._LUA_TOKEN: never 0 (the Python writer),
+                           # outside the spr_gate sequence (1..0x4000)
+
+
+class _LuaSprError(Exception):
+    """Stands in for luaL_error: in the VM this becomes a Lua error -> a cart
+    error panel, never a fallback (the gate's fallback delegation does not
+    exist on the Lua path -- bad args are cart bugs)."""
+
+
+class _LuaSpr:
+    """Faithful Python transcription of moy_lua's l_spr (modmoy_lua.c, #67):
+    the SAME array-header state machine as moy_gfx's spr_gate (_PyGate above)
+    with the Lua writer's deltas: C-side defaults [0,0,0,-1,1,0], NO fallback
+    (luaL_error on bad args), one sheet bound for the whole run (init), and the
+    0x7A11 token (masked & 0x7FFF like moy_lua.init). Keep this line-for-line
+    with the C; that is what makes the parity meaningful."""
+
+    def __init__(self, canvas, sheet, token=_LUA_TOKEN):
+        self._cv = canvas
+        self._sheet = sheet
+        self._q = canvas._batch_arr
+        self._qlen = len(canvas._batch_arr)
+        self._token = token & 0x7FFF
+
+    def __call__(self, *args):
+        n = len(args)
+        if n < 3 or n > 6:
+            raise _LuaSprError("spr(tile, x, y[, colorkey, scale, flip])")
+        v = [0, 0, 0, -1, 1, 0]
+        for i, o in enumerate(args):
+            if isinstance(o, bool) or not isinstance(o, (int, float)):
+                raise _LuaSprError("spr: arg %d must be a number" % (i + 1))
+            v[i] = int(o)      # C: lua_tointeger / (lua_Integer) truncation
+        q = self._q
+        k = q[0]
+        if k < 4:
+            k = 4
+        if (k == 4 or k + 4 > self._qlen
+                or q[3] != self._token or q[1] != v[3] or q[2] != v[4]):
+            # run break (first item / state change / foreign writer / full
+            # queue): the SAME begin_batch upcall the C makes, nlr-protected there.
+            self._cv.begin_batch(self._sheet, v[3], v[4], self._token)
+            k = q[0]
+            if k < 4 or k + 4 > self._qlen:
+                return None    # defensive: queue unusable, drop
+        tid = v[0]
+        if tid < -32768 or tid > 32767:
+            tid = -1           # invalid tile id -> skipped at draw
+        x = min(32767, max(-32768, v[1]))
+        y = min(32767, max(-32768, v[2]))
+        q[k] = tid
+        q[k + 1] = x
+        q[k + 2] = y
+        q[k + 3] = v[5] & 3
+        q[0] = k + 4
+        return None
+
+
+def test_lua_spr_protocol_matches_python_path():
+    # The Lua writer's scene must draw pixel-identically to the plain Python
+    # spr_tile path: contiguous runs, colorkey/scale breaks, float truncation,
+    # int16 clamps, invalid tile ids, and non-spr primitives breaking the run.
+    m, _, _ = _both(True)
+    _, sheet_d = _batch_sheets(m)
+
+    def scene(cv, spr):
+        cv.cls(1)
+        for i in range(12):
+            spr((i % 3) + 1, i * 9, 5, 0)             # one contiguous run
+        for i in range(5):
+            spr(2, i * 9, 30, 3)                      # colorkey change -> break
+        spr(1, 10.6, 44.9, 0)                          # float coords truncate
+        spr(1, -3.7, 20)                               # ...toward zero (-3, not -4)
+        spr(1, 90000, 10, 0)                           # x clamps (off-screen)
+        spr(90000, 20, 10, 0)                          # tile id -> invalid, skipped
+        cv.rect(60, 60, 8, 8, 5)                       # primitive breaks the run
+        spr(3, 70, 60, 0)
+        spr(2, 80, 60, -1, 2)                          # scale change -> break
+        spr(1, 4, 20, -1, 1, 1)                        # flip H
+        cv.flush_batch()
+
+    lua_cv = m.DeviceCanvas(_FakeComp(W, H))
+    py_cv = m.DeviceCanvas(_FakeComp(W, H))
+
+    def py_spr(n, x, y, colorkey=-1, scale=1, flip=0):
+        py_cv.spr_tile(sheet_d, int(n), x, y, colorkey, scale, flip)
+
+    scene(lua_cv, _LuaSpr(lua_cv, sheet_d))
+    scene(py_cv, py_spr)
+    a = _dev_rgb565(lua_cv)
+    b = _dev_rgb565(py_cv)
+    assert a == b, ("lua spr protocol differs from python path in %d px"
+                    % sum(1 for x, y in zip(a, b) if x != y))
+
+
+def test_lua_spr_array_shape_and_clamps():
+    # The exact int16 layout the C kernel will read: header [next, colorkey,
+    # scale, token] stamped by begin_batch, quads (tile, x, y, flip) after it.
+    m, _, _ = _both(True)
+    _, sheet_d = _batch_sheets(m)
+    cv = m.DeviceCanvas(_FakeComp(W, H))
+    spr = _LuaSpr(cv, sheet_d)
+    spr(2, 10, 20)                       # defaults: colorkey -1, scale 1, flip 0
+    spr(1, 33.9, -3.7, -1, 1, 5)         # truncation + flip & 3 masking
+    spr(3, 90000, -90000, -1, 1, -1)     # int16 coord clamps; -1 & 3 == 3
+    spr(70000, 5, 5)                     # out-of-int16 tile id -> -1
+    q = cv._batch_arr
+    assert q[0] == 4 + 4 * 4
+    assert (q[1], q[2], q[3]) == (-1, 1, _LUA_TOKEN)
+    assert list(q[4:8]) == [2, 10, 20, 0]
+    assert list(q[8:12]) == [1, 33, -3, 1]
+    assert list(q[12:16]) == [3, 32767, -32768, 3]
+    assert list(q[16:20]) == [-1, 5, 5, 0]
+    cv.flush_batch()
+    assert q[0] == 4                     # drained back to the empty header
+
+
+def test_lua_spr_run_breaks_and_cross_writer_interleave():
+    # Coalescing counters: one contiguous Lua run is ONE flush; state changes
+    # break; a FULL queue (512 quads) breaks mid-run; and interleaving with the
+    # Python writer (token 0) breaks BOTH ways -- the foreign-token check is
+    # what lets the console chrome and a Lua cart share one array safely.
+    m, _, _ = _both(True)
+    _, sheet_d = _batch_sheets(m)
+    cv = m.DeviceCanvas(_FakeComp(W, H))
+    spr = _LuaSpr(cv, sheet_d)
+    # one run, one flush
+    cv.batch_reset()
+    for i in range(20):
+        spr((i % 3) + 1, i * 3, 5)
+    cv.flush_batch()
+    assert (cv._batch_flushes, cv._batch_sprites, cv._batch_maxrun) == (1, 20, 20)
+    # a 600-sprite frame overflows the 512-quad queue exactly once
+    cv.batch_reset()
+    for i in range(600):
+        spr(1, i % 60, i // 60)
+    cv.flush_batch()
+    assert (cv._batch_flushes, cv._batch_sprites, cv._batch_maxrun) == (2, 600, 512)
+    # Lua -> Python -> Lua: three runs (each writer breaks the other's)
+    cv.batch_reset()
+    spr(1, 0, 0)
+    spr(2, 8, 0)
+    cv.spr_tile(sheet_d, 1, 16, 0)       # the Python writer (token 0)
+    spr(3, 24, 0)
+    cv.flush_batch()
+    assert (cv._batch_flushes, cv._batch_sprites) == (3, 4)
+
+
+def test_lua_spr_bad_args_error_not_fallback():
+    # Unlike the gate (which delegates Images/kwargs to the Python spr), the
+    # Lua writer has NO fallback: wrong arity or a non-number arg is a Lua
+    # error (-> the cart panel), and nothing lands in the queue.
+    import pytest
+    m, _, _ = _both(True)
+    _, sheet_d = _batch_sheets(m)
+    cv = m.DeviceCanvas(_FakeComp(W, H))
+    spr = _LuaSpr(cv, sheet_d)
+    for bad in ((1, 2), (1, 2, 3, 4, 5, 6, 7), ("x", 2, 3), (1, "y", 3),
+                (1, 2, 3, None), (True, 2, 3)):
+        with pytest.raises(_LuaSprError):
+            spr(*bad)
+    assert cv._batch_arr[0] == 4         # queue untouched
+
+
+# --------------------------------------------------------------------------- #
 # map auto-cache (#63 Fold 2): a naive camera()+map() re-uses a hidden cached    #
 # raster on a camera-only change (window/keyed blit) and re-rasters only on a     #
 # (tilemap.gen, sheet.gen, scale) bump. The cache must be BYTE-IDENTICAL to a     #
