@@ -709,10 +709,16 @@ fi
 
 if [ -n "${IDF_PYTHON:-}" ]; then
   ESPTOOL_PY="${IDF_PYTHON}"
-elif [ -x "${HOME}/.espressif/python_env/idf5.5_py3.10_env/bin/python" ]; then
-  ESPTOOL_PY="${HOME}/.espressif/python_env/idf5.5_py3.10_env/bin/python"
 else
-  ESPTOOL_PY="python3"
+  # Find the ESP-IDF python env (it has esptool) regardless of its py-version suffix:
+  # the env is named idf<idf>_py<py>_env, e.g. idf5.5_py3.10_env locally but
+  # idf5.5_py3.11_env on the CI runner -- a hardcoded py3.10 path missed it and fell
+  # through to a bare `python3` that has no esptool, so the final merge failed.
+  ESPTOOL_PY=""
+  for _cand in "${HOME}"/.espressif/python_env/idf*_py*_env/bin/python; do
+    [ -x "${_cand}" ] && ESPTOOL_PY="${_cand}" && break
+  done
+  [ -n "${ESPTOOL_PY}" ] || ESPTOOL_PY="python3"
 fi
 
 # Moybyte OTA (#53): with --ota the bootable app partition is `ota_0`, which no longer
