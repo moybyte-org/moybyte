@@ -515,11 +515,30 @@ class PaintEditor:
 
     SIZES = (1, 2, 3)     # selectable sprite sizes (side length in tiles)
 
+    PEN = "pen"           # brush tool: tap/drag paints single pixels (#30)
+    FILL = "fill"         # bucket tool: a tap flood-fills the contiguous region (#90)
+
+    # In-editor undo depth (#90). An undo step snapshots ONLY the current editable
+    # region (dim*dim palette bytes) -- 64B for an 8x8 sprite, 256B for a 16x16 icon,
+    # up to ~2.3KB for a 3x3 icon block -- so the whole ring stays a few KB on the
+    # device at the usual sizes. See the undo note in __init__.
+    UNDO_DEPTH = 24
+
     def __init__(self, sheet):
         self.sheet = sheet
         self.n = 0            # current sprite id (top-left tile of the sprite)
         self.color = 8        # current paint color (red, a friendly default)
         self.size = 1         # sprite side length in tiles (1=8x8, 2=16x16, ...)
+        self.tool = self.PEN  # active tool (PEN brush / FILL bucket, #90)
+        # In-editor undo/redo (#90): two bounded stacks of region snapshots. Paint
+        # edits are far too frequent to journal to SD per pixel (the durable journal
+        # fires on a SAVE commit, project.py), so an in-RAM stroke-level ring gives
+        # responsive undo; a SAVE still lands a durable step. Each entry is
+        # (n, size, bytes) -- the region's tile origin + size + its flat pixels -- so
+        # a restore targets the right tiles even after the sprite/size was changed.
+        self._undo = []
+        self._redo = []
+        self._stroke_pre = None   # pending pre-stroke snapshot (set on press, #90)
 
     @property
     def dim(self):
@@ -560,6 +579,232 @@ class PaintEditor:
         fit = max_tw if max_tw < max_th else max_th
         if self.size > fit:
             self.size = fit if fit >= 1 else 1
+
+    # -- tool selection (#90) ------------------------------------------------
+
+    def toggle_fill(self):
+        """Flip between the PEN brush and the FILL bucket (one shared button)."""
+        self.tool = self.PEN if self.tool == self.FILL else self.FILL
+
+    # -- region snapshot / restore (undo primitive, #90) ---------------------
+
+    def _capture(self, n=None, size=None):
+        """Snapshot the dim(size) x dim(size) region at tile n as (n, size, bytes).
+        Defaults to the current sprite. Reads pixel-by-pixel (like tile_span_image)
+        so a multi-tile region -- whose tiles aren't contiguous in the flat buffer --
+        captures correctly."""
+        if n is None:
+            n = self.n
+        if size is None:
+            size = self.size
+        dim = size * self.sheet.TILE
+        ox, oy = self.sheet.tile_origin(n)
+        sh = self.sheet
+        buf = bytearray(dim * dim)
+        k = 0
+        for ly in range(dim):
+            for lx in range(dim):
+                buf[k] = sh.pget(ox + lx, oy + ly)
+                k += 1
+        return (n, size, bytes(buf))
+
+    def _restore(self, snap):
+        """Write a snapshot back and re-select its sprite/size so the revert is
+        visible (undo/redo). Goes through pset so `gen`/`dirty` bump exactly like a
+        paint edit (a running cart preview picks it up)."""
+        n, size, buf = snap
+        self.n = n
+        self.size = size
+        self._clamp_size()
+        dim = size * self.sheet.TILE
+        ox, oy = self.sheet.tile_origin(n)
+        sh = self.sheet
+        k = 0
+        for ly in range(dim):
+            for lx in range(dim):
+                sh.pset(ox + lx, oy + ly, buf[k])
+                k += 1
+
+    def _read_region(self):
+        """The current region as a mutable bytearray (for the transforms/fill)."""
+        return bytearray(self._capture()[2])
+
+    def _write_region(self, buf):
+        """Write a dim*dim buffer back into the current region."""
+        dim = self.dim
+        ox, oy = self._origin()
+        sh = self.sheet
+        k = 0
+        for ly in range(dim):
+            for lx in range(dim):
+                sh.pset(ox + lx, oy + ly, buf[k])
+                k += 1
+
+    def _push(self, snap):
+        """Append a pre-edit snapshot to the undo ring (bounded) and drop the redo
+        stack -- a fresh edit forks the history."""
+        self._undo.append(snap)
+        if len(self._undo) > self.UNDO_DEPTH:
+            del self._undo[0]
+        self._redo = []
+
+    def _record(self, op):
+        """Run an atomic edit `op` and journal ONE undo step iff it changed pixels
+        (a no-op fill / a flip that reproduces the region records nothing)."""
+        pre = self._capture()
+        op()
+        if self._capture(pre[0], pre[1])[2] != pre[2]:
+            self._push(pre)
+
+    # -- stroke boundaries (a drag = ONE undo step, #90) ---------------------
+
+    def begin_stroke(self):
+        """Mark the start of a brush stroke: snapshot the region ONCE (a fast drag
+        calls paint() many times, but a whole press-drag-release is one undo step)."""
+        if self._stroke_pre is None:
+            self._stroke_pre = self._capture()
+
+    def end_stroke(self):
+        """Close a brush stroke: commit its pre-snapshot to the undo ring iff the
+        stroke actually changed pixels. Idempotent (safe to call every idle frame)."""
+        if self._stroke_pre is not None:
+            pre = self._stroke_pre
+            self._stroke_pre = None
+            if self._capture(pre[0], pre[1])[2] != pre[2]:
+                self._push(pre)
+
+    # -- undo / redo ---------------------------------------------------------
+
+    def can_undo(self):
+        return bool(self._undo)
+
+    def can_redo(self):
+        return bool(self._redo)
+
+    def undo(self):
+        """Revert the last recorded edit. Captures the current region onto the redo
+        ring first, then restores. Returns True iff a step was taken."""
+        if not self._undo:
+            return False
+        snap = self._undo.pop()
+        self._redo.append(self._capture(snap[0], snap[1]))
+        if len(self._redo) > self.UNDO_DEPTH:
+            del self._redo[0]
+        self._restore(snap)
+        return True
+
+    def redo(self):
+        """Re-apply the last undone edit (the inverse of undo)."""
+        if not self._redo:
+            return False
+        snap = self._redo.pop()
+        self._undo.append(self._capture(snap[0], snap[1]))
+        if len(self._undo) > self.UNDO_DEPTH:
+            del self._undo[0]
+        self._restore(snap)
+        return True
+
+    # -- bucket fill (#90) ---------------------------------------------------
+
+    def fill(self, lx, ly):
+        """Flood-fill the contiguous same-color run touching grid pixel (lx, ly)
+        with the current color, bounded to the editable region. 4-connected and
+        ITERATIVE (an explicit index stack, no recursion -- MicroPython has a small
+        C stack). A fill onto its own color is a no-op (records no undo step)."""
+        if not (0 <= lx < self.dim and 0 <= ly < self.dim):
+            return
+
+        def op():
+            dim = self.dim
+            buf = self._read_region()
+            target = buf[ly * dim + lx]
+            repl = self.color & 15
+            if target == repl:
+                return
+            stack = [ly * dim + lx]
+            while stack:
+                i = stack.pop()
+                if buf[i] != target:
+                    continue
+                buf[i] = repl
+                x = i % dim
+                if x > 0:
+                    stack.append(i - 1)
+                if x < dim - 1:
+                    stack.append(i + 1)
+                if i >= dim:
+                    stack.append(i - dim)
+                if i < dim * (dim - 1):
+                    stack.append(i + dim)
+            self._write_region(buf)
+        self._record(op)
+
+    # -- transforms (respect the multi-tile SIZE selection, #90) -------------
+
+    def _transform(self, fn):
+        """Read the region, build a transformed copy via `fn(src, dst, dim)`, write
+        it back -- all as one undo step. Operates on the size*8 square, so a 2x2/3x3
+        sprite transforms as a whole block."""
+        def op():
+            dim = self.dim
+            src = self._read_region()
+            dst = bytearray(dim * dim)
+            fn(src, dst, dim)
+            self._write_region(dst)
+        self._record(op)
+
+    def flip_h(self):
+        """Mirror the sprite left<->right."""
+        def fn(s, d, n):
+            for y in range(n):
+                b = y * n
+                for x in range(n):
+                    d[b + x] = s[b + (n - 1 - x)]
+        self._transform(fn)
+
+    def flip_v(self):
+        """Mirror the sprite top<->bottom."""
+        def fn(s, d, n):
+            for y in range(n):
+                b = y * n
+                sb = (n - 1 - y) * n
+                for x in range(n):
+                    d[b + x] = s[sb + x]
+        self._transform(fn)
+
+    def rotate(self):
+        """Rotate the sprite 90 degrees clockwise (the square region maps onto
+        itself)."""
+        def fn(s, d, n):
+            for y in range(n):
+                for x in range(n):
+                    d[y * n + x] = s[(n - 1 - x) * n + y]
+        self._transform(fn)
+
+    def shift(self, dx, dy):
+        """Scroll the sprite by (dx, dy) pixels with WRAP (pixels off one edge
+        reappear on the opposite one)."""
+        def fn(s, d, n):
+            dxm = dx % n
+            dym = dy % n
+            for y in range(n):
+                sy = (y - dym) % n
+                sb = sy * n
+                b = y * n
+                for x in range(n):
+                    d[b + x] = s[sb + ((x - dxm) % n)]
+        self._transform(fn)
+
+    def clear(self):
+        """Clear the whole editable region to color 0 (the transparent/erase index)."""
+        def op():
+            dim = self.dim
+            ox, oy = self._origin()
+            sh = self.sheet
+            for ly in range(dim):
+                for lx in range(dim):
+                    sh.pset(ox + lx, oy + ly, 0)
+        self._record(op)
 
 
 class MapEditor:

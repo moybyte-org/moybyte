@@ -68,6 +68,33 @@ _PAINT_PUT = (210, 154, 92, 20)
 _BASE_W = 320
 _BASE_H = 240
 
+# -- tool palette (#90) -------------------------------------------------------
+# A compact row of single-glyph tool buttons drawn just below the pixel grid: the
+# in-editor undo/redo, the bucket-fill toggle, and the whole-sprite transforms
+# (flip / rotate 90 / shift-with-wrap in 4 directions / clear). Single-char labels
+# so they fit the petme128 ASCII font AND the tiny baseline row (no chrome-glyph
+# vocabulary change): Z/Y echo the host Ctrl+Z/Y undo shortcut, < > ^ v are the
+# shift arrows, H/V mirror, R rotates, F is the fill bucket, X clears. Order is the
+# hit-test/draw order.
+_TOOLS = ("undo", "redo", "fill", "fliph", "flipv", "rot",
+          "sleft", "sright", "sup", "sdown", "clear")
+_TOOL_LABEL = {
+    "undo": "Z", "redo": "Y", "fill": "F", "fliph": "H", "flipv": "V",
+    "rot": "R", "sleft": "<", "sright": ">", "sup": "^", "sdown": "v",
+    "clear": "X",
+}
+# Baseline (320x240) tool row: a full-width strip in the gap between the grid
+# bottom (y176) and the SAVE/CLOSE row (y190). 11 buttons of 26px across x14..300.
+_TOOL_X0 = 14
+_TOOL_Y0 = 176
+_TOOL_CW = 26
+_TOOL_H = 13
+
+
+def _tool_row(x0, y0, cw, h, n):
+    """A row of n button rects (x, y, w, h), cw apart with a 1px gutter."""
+    return [(x0 + i * cw, y0, cw - 1, h) for i in range(n)]
+
 
 class PaintLayout:
     """Responsive paint-editor geometry (#39 step 3): the panel, the zoomed pixel
@@ -110,6 +137,9 @@ class PaintLayout:
             self.close_btn = _PAINT_CLOSE
             self.status_xy = (110, 196)
             self.status_maxc = 18
+            # The #90 tool row: undo/redo/fill/transforms, in the grid->SAVE gap.
+            self.tool_btns = _tool_row(_TOOL_X0, _TOOL_Y0, _TOOL_CW, _TOOL_H,
+                                       len(_TOOLS))
             return
         # -- responsive: anchor the panel to the canvas, the swatch/button column to
         # the panel's right edge, and grow the grid to fill what's left ------------
@@ -123,9 +153,13 @@ class PaintLayout:
         self.title_xy = (px + 6 * fs, py + 2 * fs)
         rc_x = p_right - 142 * fs                 # right column origin (base 170)
         row_y = p_bottom - 30 * fs                # SAVE/CLOSE row (base 190)
+        toolh = 13 * fs                           # #90 tool row height
         self.pg_x0 = px + 6 * fs
         self.pg_y0 = py + 16 * fs
-        avail = min(rc_x - self.pg_x0 - 8 * fs, row_y - self.pg_y0 - 4 * fs)
+        # Reserve the tool-row band (its height + gaps) above the SAVE row so the
+        # grid never grows over it -- otherwise the same as the shipped formula.
+        avail = min(rc_x - self.pg_x0 - 8 * fs,
+                    row_y - self.pg_y0 - toolh - 8 * fs)
         self.pg_span = max(48, 48 * (avail // 48))
         self.pg_area = (self.pg_x0, self.pg_y0, self.pg_span, self.pg_span)
         self.sw_x0, self.sw_y0 = rc_x, self.pg_y0
@@ -144,6 +178,13 @@ class PaintLayout:
         self.close_btn = (p_right - 112 * fs, row_y, 102 * fs, 26 * fs)
         self.status_xy = (self.pg_x0 + 96 * fs, row_y + 6 * fs)
         self.status_maxc = max(4, (self.close_btn[0] - self.status_xy[0]) // (8 * fs))
+        # The #90 tool row: a full-width strip just above the SAVE/CLOSE row, growing
+        # its button cells with the panel width. The reserved `avail` band above keeps
+        # the (grown) grid clear of it.
+        tool_y0 = row_y - toolh - 3 * fs
+        tool_span = (p_right - 6 * fs) - self.pg_x0
+        cw = max(10 * fs, tool_span // len(_TOOLS))
+        self.tool_btns = _tool_row(self.pg_x0, tool_y0, cw, toolh, len(_TOOLS))
 
 
 def _line_cells(x0, y0, x1, y1):
@@ -189,6 +230,7 @@ class PaintLayer:
         self._NAMES = names
         self._in = in_rect
         self._paint_drag = None       # last painted grid cell during a drag (#30)
+        self._ekey_prev = 0           # last consumed keyboard byte (undo-shortcut edge, #90)
         sc = ws.sys_canvas
         self.layout = PaintLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
 
@@ -220,7 +262,23 @@ class PaintLayer:
         self.ws.bar_layer._draw_status_strip("menu")
 
     def handle_input(self, i):
-        return True                    # paint is pointer/touch-driven
+        self.handle_key(i)             # host Ctrl+Z / Ctrl+Y undo shortcut (#90)
+        return True                    # otherwise paint is pointer/touch-driven
+
+    def handle_key(self, i):
+        """Host-convenience undo/redo shortcut: Ctrl+Z (0x1A) / Ctrl+Y (0x19). These
+        control bytes never reach the paint logic otherwise (paint is pointer-driven),
+        and on-screen Z/Y buttons give the SAME verbs everywhere touch reaches -- the
+        keyboard path is a convenience only (spec / #90). Edge-tracked so a held key
+        fires once."""
+        pe = self.ws.paint
+        k = getattr(i, "last_key", 0)
+        if pe is not None and k and k != self._ekey_prev:
+            if k == 0x1A:
+                pe.undo()
+            elif k == 0x19:
+                pe.redo()
+        self._ekey_prev = k
 
     def handle_pointer(self, px, py, click):
         ws = self.ws
@@ -243,6 +301,10 @@ class PaintLayer:
         elif ws.pointer.down:
             self._paint_stroke(px, py)
         else:
+            # Pointer released (anywhere): close the brush stroke so the whole
+            # press-drag-release commits ONE undo step (#90). Idempotent when idle.
+            if ws.paint is not None:
+                ws.paint.end_stroke()
             self._paint_drag = None
         return True
 
@@ -275,8 +337,17 @@ class PaintLayer:
         if cell is None:
             self._paint_drag = None        # left the grid -> next entry starts fresh
             return False
+        # Bucket tool (#90): a tap floods the contiguous region ONCE per press (no
+        # drag chaining). `fill` snapshots/records its own undo step, so the brush
+        # stroke machinery below is bypassed.
+        if pe.tool == pe.FILL:
+            if self._paint_drag is None:
+                pe.fill(cell[0], cell[1])
+            self._paint_drag = cell
+            return True
         last = self._paint_drag
         if last is None:
+            pe.begin_stroke()              # snapshot before the first pixel (#90)
             pe.paint(cell[0], cell[1])
         else:
             for cx, cy in _line_cells(last[0], last[1], cell[0], cell[1]):
@@ -292,6 +363,10 @@ class PaintLayer:
         if pe is None:
             return
         if self._paint_stroke(px, py):         # paint a pixel in the zoomed grid
+            return
+        tid = self._tool_at(px, py)            # a #90 tool button (undo/fill/transform)?
+        if tid is not None:
+            self._do_tool(tid)
             return
         if self._in(px, py, lay.sw_area):           # pick a palette color
             idx = ((py - lay.sw_y0) // lay.sw) * lay.sw_cols + ((px - lay.sw_x0) // lay.sw)
@@ -313,6 +388,80 @@ class PaintLayer:
         elif self._in(px, py, lay.close_btn):
             # CLOSE returns to Settings (theme editor) or runs+leaves to the cart (PAINT).
             ws._leave_theme() if ws._editing_icons else ws._leave_menu()
+
+    # -- tool row (#90) ------------------------------------------------------
+
+    def _tool_at(self, px, py):
+        """The tool id under (px, py), or None -- hit-tested over the tool row."""
+        btns = getattr(self.layout, "tool_btns", None)
+        if btns is None:
+            return None
+        for i in range(len(btns)):
+            if self._in(px, py, btns[i]):
+                return _TOOLS[i]
+        return None
+
+    def _do_tool(self, tid):
+        """Dispatch a tool-row tap to the PaintEditor verb (#90). Every action is
+        touch-reachable here; the keyboard shortcut only doubles undo/redo."""
+        pe = self.ws.paint
+        if pe is None:
+            return
+        if tid == "undo":
+            pe.undo()
+        elif tid == "redo":
+            pe.redo()
+        elif tid == "fill":
+            pe.toggle_fill()
+        elif tid == "fliph":
+            pe.flip_h()
+        elif tid == "flipv":
+            pe.flip_v()
+        elif tid == "rot":
+            pe.rotate()
+        elif tid == "sleft":
+            pe.shift(-1, 0)
+        elif tid == "sright":
+            pe.shift(1, 0)
+        elif tid == "sup":
+            pe.shift(0, -1)
+        elif tid == "sdown":
+            pe.shift(0, 1)
+        elif tid == "clear":
+            pe.clear()
+
+    def _draw_tools(self):
+        """Draw the compact tool row: undo/redo, the FILL toggle, and the whole-sprite
+        transforms. Single-char labels centered at the canvas font scale (#39). The
+        active FILL tool is accented; undo/redo dim when their ring is empty. Drawn on
+        the panel surface directly with the indexed primitives (no chrome-glyph
+        vocabulary change), so it renders identically on host and device."""
+        NAMES = self._NAMES
+        ws = self.ws
+        cv = ws.sys_canvas
+        pe = ws.paint
+        btns = getattr(self.layout, "tool_btns", None)
+        if pe is None or btns is None:
+            return
+        fs = getattr(cv, "font_scale", 1)
+        if fs < 1:
+            fs = 1
+        for i in range(len(btns)):
+            tid = _TOOLS[i]
+            x, y, w, h = btns[i]
+            active = tid == "fill" and pe.tool == pe.FILL
+            enabled = True
+            if tid == "undo":
+                enabled = pe.can_undo()
+            elif tid == "redo":
+                enabled = pe.can_redo()
+            fill = NAMES["indigo"] if active else (
+                NAMES["dark_grey"] if enabled else NAMES["black"])
+            ink = NAMES["white"] if enabled else NAMES["dark_grey"]
+            cv.rect(x, y, w, h, fill)
+            cv.rectb(x, y, w, h, NAMES["light_grey"])
+            lbl = _TOOL_LABEL[tid]
+            cv.print(lbl, x + (w - 8 * fs) // 2, y + (h - 8 * fs) // 2, ink, fs)
 
     # -- draw ----------------------------------------------------------------
 
@@ -410,6 +559,7 @@ class PaintLayer:
                      th["author"] if light else NAMES["yellow"], 1)
         ws._btn("SAVE", lay.save_btn, NAMES["green"], cv)
         ws._btn("CLOSE", lay.close_btn, NAMES["red"], cv)
+        self._draw_tools()               # #90: undo/redo/fill/transform row
 
 
 class ThemeLayer:
@@ -443,6 +593,8 @@ class ThemeLayer:
 
     def handle_input(self, i):
         # EDIT ICONS is pointer/touch-driven like PAINT; B closes back to Settings.
+        # Share the paint editor's host Ctrl+Z/Y undo shortcut here too (#90).
+        self._paint.handle_key(i)
         self.ws._leave_or_home(self.leave)
         return True
 
