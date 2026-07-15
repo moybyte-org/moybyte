@@ -893,6 +893,56 @@ def test_browser_page_fills_large_viewports_without_integer_scale_cliff():
     assert "(hover:hover) and (pointer:fine)" in text
 
 
+def test_soft_keyboard_toggle_and_hidden_input_are_served(server):
+    """#42 Thread 2: the page must ship a touch-only ⌨ toggle (#kb) and a hidden real <input>
+    (#kbin) to focus so a phone's on-screen keyboard opens. #kbin must keep autocapitalize/
+    autocorrect/autocomplete OFF (clean code typing) and stay out of the desktop layout (hidden
+    alongside #ctl on a hover-capable/fine-pointer device -- physical keyboard/mouse users never
+    see it)."""
+    _console, host, port = server
+    status, ctype, body = _get(host, port, "/")
+    assert status == 200
+    text = body.decode("utf-8")
+    assert 'id=kb ' in text or "id=kb>" in text
+    assert "id=kbin" in text
+    assert 'autocapitalize=off' in text and 'autocomplete=off' in text
+    assert 'autocorrect=off' in text and 'spellcheck=false' in text
+    assert "#ctl{display:none}#kb{display:none}" in text
+
+
+def test_soft_keyboard_routes_typed_text_through_the_key_protocol():
+    """The hidden input must feed the SAME {"type":"key"} wire the physical keydown handler
+    uses (server-side this already fans out to type_char, incl. symbols like = [ ] { } < > % --
+    any printable ASCII 0x20-0x7e), never a new event shape. Backspace is detected by the
+    sentinel-value going empty, Enter by its own keydown listener (a single-line <input> never
+    inserts a literal newline)."""
+    text = web_view.PAGE_HTML
+    assert "kbInp=document.getElementById(\"kbin\")" in text
+    assert 'send({type:"key",code:8})' in text        # Backspace: sentinel deleted
+    assert 'send({type:"key",code:13})' in text        # Enter (both the input diff and keydown paths)
+    assert "c>=32&&c<=126" in text                     # printable ASCII incl. = [ ] { } < > %
+    assert 'kbInp.addEventListener("keydown"' in text
+    assert 'kbInp.addEventListener("input"' in text
+
+
+def test_soft_keyboard_focus_scrolls_the_canvas_into_view():
+    """Requirement: the canvas viewport stays visible while the on-screen keyboard is up (the
+    keyboard eats the bottom of the viewport on a phone) -- focusing #kbin scrolls #cv into
+    view, re-applied on every visualViewport resize (the keyboard opening/animating)."""
+    text = web_view.PAGE_HTML
+    assert "cv.scrollIntoView(" in text
+    assert "window.visualViewport" in text
+    assert 'kbInp.addEventListener("focus"' in text and "kbScroll" in text
+
+
+def test_soft_keyboard_toggle_blurs_to_hide():
+    """Tapping #kb again (while #kbin is focused) blurs it -- the phone's own teardown for
+    dismissing its on-screen keyboard; no separate hide/show DOM state to manage."""
+    text = web_view.PAGE_HTML
+    assert "kbBtn.addEventListener(\"click\"" in text
+    assert "kbInp.blur()" in text
+
+
 def test_web_console_pan_zero_stops_arrow_velocity(tmp_path):
     """The host driver keeps pan as a held velocity until a neutral pan arrives."""
     console = web_console.WebConsole(str(tmp_path / "carts"), fps=30)
