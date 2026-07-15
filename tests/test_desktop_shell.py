@@ -927,3 +927,29 @@ def test_live_set_diet_slims_rehydrates_and_reslims(tmp_path):
         ws.select_wallpaper(slug, persist=False)
         assert ws.wallpaper._wp_draw is not None, "wallpaper must compile from a slim cart"
         assert wp[0] is ws._fat_cart or wp[0].get("lazy") is True
+
+
+def test_cart_bound_keys_do_not_dirty_the_shell(tmp_path):
+    """#44/#58: a healthy fullscreen cart owns every key, so a key frame must
+    not request a shell repaint -- a BLE keyboard reports last_key as LEVEL
+    state (a held byte each frame), and the old unconditional mark repainted
+    the shell on every held-key frame. On the launcher the same input must
+    still repaint (grid nav)."""
+    ws = _ws(tmp_path)
+    ws.launcher.sel = 0
+    ws.open()
+    assert ws.screen == "desktop"
+    assert ws.wm.keys_to_cart()
+    ws._dirty = False
+    ws.input._pressed = set()
+    ws.input.last_key = ord("q")
+    ws.handle_input()
+    assert not ws._dirty, "cart-bound key dirtied the shell"
+    ws.input.last_key = 0
+    ws._exit_to_caller()
+    assert ws.screen == "launcher"
+    assert not ws.wm.keys_to_cart()
+    ws._dirty = False
+    ws.input._pressed = {"right"}
+    ws.handle_input()
+    assert ws._dirty, "launcher nav key must repaint"

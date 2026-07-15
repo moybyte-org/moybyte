@@ -576,6 +576,23 @@ class WindowedWM(FullscreenStackWM):
         win = self._focus_win()
         return win is not None and win.kind == "desktop"
 
+    def keys_to_cart(self):
+        """Console hook (#44 redraw gate), focus-aware like player_has_pointer:
+        keyboard follows _focus (decoupled from the back-stack), so keys reach
+        the cart only while the PLAYER window holds focus. This is the gate that
+        stops a held/typed key from forcing the FULL desktop repaint every frame
+        -- a BLE keyboard reports last_key as LEVEL state (unlike the T-Deck's
+        press edge), and an unconditional dirty-mark collapsed play to ~10fps on
+        any key (the P4 keyboard slowdown). An editor focused beside a playtest
+        keeps repainting on typing exactly as before."""
+        ws = self.ws
+        if ws.cart_error is not None or (ws._update is None and ws._draw is None):
+            return False
+        if not self._order:                    # launcher root: fullscreen shape
+            return FullscreenStackWM.keys_to_cart(self)
+        win = self._focus_win()
+        return win is not None and win.kind == "desktop"
+
     def keeps_animating(self, dt):
         """Console hook (the #44 redraw gate): keep frames flowing while a RUNNING
         cart's window is open anywhere on the desktop -- not just while it's the

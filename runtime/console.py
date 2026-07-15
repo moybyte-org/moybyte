@@ -2811,8 +2811,16 @@ class Workstation:
         # changes nothing costs nothing. Pointer-driven changes (click/drag/cursor move)
         # are caught separately in frame() via the pointer-state snapshot. Conservative
         # but never stale: a press that's a no-op costs one redraw, not a wrong screen.
+        # EXCEPT when the keys belong to a RUNNING cart (wm.keys_to_cart): the cart's
+        # viewport animates on its own and the chrome around it is unchanged by
+        # cart-bound keys, so the mark would only force the windowed desktop's FULL
+        # 1024x600 repaint instead of the quiet game-window blit. That mattered
+        # because a BLE keyboard reports last_key as LEVEL state (a held byte, not
+        # the T-Deck's one-shot press edge): ANY held/mashed key collapsed P4 play
+        # from ~30fps to ~10 (measured; the "every keypress slows the game" bug).
         if getattr(i, "_pressed", None) or i.last_key:
-            self._dirty = True
+            if not self.wm.keys_to_cart():
+                self._dirty = True
         # Undo journal (Stage 7): any activity in the code editor (re)arms the idle
         # autosave-commit debounce -- frame() fires the durable commit once the kid
         # STOPS typing for _edit_debounce_ms, so the SD write lands in a gap. Marked

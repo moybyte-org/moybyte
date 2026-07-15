@@ -603,6 +603,16 @@ def run_desktop(fps_cap=60):
                 on = not (len(parts) == 2 and parts[1] == "0")
                 ws.set_frameskip(on, persist=False)
                 print("REMOTE skip %s" % ("on" if on else "off"))
+            if parts and parts[0] == "gov":
+                # `gov 0|1`: A/B the frame governor (#63 SNES rule) on glass --
+                # a GAME locks to its manifest fps (default 30) with the freed
+                # headroom absorbing GC/render spikes. frame_cap_fps() re-reads
+                # the module global every loop, so this takes effect immediately;
+                # the shipped default stays OFF (owner measurement mode).
+                on = not (len(parts) == 2 and parts[1] == "0")
+                import console as _console_mod
+                _console_mod.FPS_GOVERNOR = on
+                print("REMOTE gov %s" % ("on" if on else "off"))
             if parts and parts[0] == "union":
                 # `union 0|1`: A/B the dirty-union gesture restore (#58; 1=on,
                 # 0=full-screen restore) -- pairs with `drag [frames]`.

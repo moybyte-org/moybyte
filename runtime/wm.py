@@ -93,6 +93,17 @@ class FullscreenStackWM:
         the bar-visibility rule, the perf sampler, and the FPS overlay gate all key on."""
         return self._stack[-1] == "desktop"
 
+    def keys_to_cart(self):
+        """Console hook (#44 redraw gate): this frame's keys are consumed by a
+        healthy RUNNING cart, not by any system surface -- so a key press/hold
+        must NOT mark the shell dirty (the cart's viewport animates on its own
+        and the chrome around it is unchanged by cart-bound keys). On this
+        fullscreen tier a running cart on top owns ALL input; the crash panel
+        (cart_error) hands keys back to the system chrome."""
+        ws = self.ws
+        return (self._stack[-1] == "desktop" and ws.cart_error is None
+                and (ws._update is not None or ws._draw is not None))
+
     def goto(self, kind):
         """Navigate the back-stack so `kind` is on top -- the mechanism behind the
         `ws.screen = kind` projection setter (and the explicit push/pop verbs).

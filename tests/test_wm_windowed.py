@@ -893,3 +893,56 @@ def test_resize_outline_fallback_without_rect_stamp(tmp_path):
     # ... and the body was NOT drawn at the rubber size (the border at the
     # rubber corner would be _BORDER_TOP under live-body).
     assert buf[(win.y + ch - 1) * W + (win.x + cw - 1)] != _BORDER_TOP
+
+
+# ---------------------------------------------------------------------------
+# Key input vs the redraw gate (#44/#58: the P4 BLE-keyboard slowdown)
+# ---------------------------------------------------------------------------
+
+def _held_key_frame(ws, key=ord("q")):
+    """One router pass with a held/typed key; report whether it dirtied the
+    shell. Mimics a BLE keyboard: last_key is LEVEL state (a held byte every
+    frame), unlike the T-Deck's one-shot press edge."""
+    ws._dirty = False
+    ws.input._pressed = set()
+    ws.input.last_key = key
+    ws.handle_input()
+    ws.input.last_key = 0
+    return ws._dirty
+
+
+def test_held_key_to_focused_playtest_stays_quiet(tmp_path):
+    """A key whose only consumer is the RUNNING cart must not mark the shell
+    dirty: on this tier a dirty frame is the FULL desktop repaint
+    (backdrop+windows+bar) instead of the quiet game-window blit. Measured on
+    the P4: ANY mashed key (even ones the game ignores) collapsed play from
+    ~30fps to ~10 via exactly this mark. Typing into a focused editor beside
+    the playtest must keep repainting as before."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open_picker()
+    ws.pick_selected()
+    drv.frame(1 / 30)
+    ws._leave_menu()                        # PLAY: playtest window, focused
+    drv.frame(1 / 30)
+    assert ws.wm._focus == "desktop"
+    assert ws.wm.keys_to_cart()
+    assert not _held_key_frame(ws), "cart-bound key repainted the desktop"
+    ws.wm._focus = "make"                   # the editor beside it takes keys
+    assert not ws.wm.keys_to_cart()
+    assert _held_key_frame(ws), "editor typing must still repaint"
+
+
+def test_crash_panel_keys_repaint_again(tmp_path):
+    """cart_error hands keys back to the system chrome (EDIT/CODE nav), so the
+    dirty mark must return on the crash panel."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open_picker()
+    ws.pick_selected()
+    drv.frame(1 / 30)
+    ws._leave_menu()
+    drv.frame(1 / 30)
+    ws.cart_error = "boom"
+    assert not ws.wm.keys_to_cart()
+    assert _held_key_frame(ws)
