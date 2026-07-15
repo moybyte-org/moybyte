@@ -46,6 +46,26 @@ if [ ! -d "${UPSTREAM_DIR}/.git" ]; then
   git -C "${UPSTREAM_DIR}" checkout "${LVGL_MPY_COMMIT}"
 fi
 
+# lvgl_micropython vendors micropython/lvgl/pycparser as git submodules that its
+# make.py populates on the fly (builder.get_micropython -> `git submodule update
+# --init --depth=1 -- lib/micropython`). But we patch files UNDER lib/micropython
+# (main.c / _boot.py) *before* make.py runs, so on a from-scratch .build (CI, or a
+# fresh dev checkout) that path doesn't exist yet and the patch/cp below fail. Init
+# the micropython submodule now -- faithful to get_micropython, and a no-op once it
+# is present (lvgl/pycparser/esp-idf are still fetched later by make.py).
+if [ ! -f "${UPSTREAM_DIR}/lib/micropython/ports/esp32/main.c" ]; then
+  git -C "${UPSTREAM_DIR}" submodule update --init --depth=1 -- lib/micropython
+fi
+# micropython has its OWN nested submodules; the esp32 port needs berkeley-db
+# (MICROPY_PY_BTREE) and micropython-lib (the frozen manifest). We disable
+# lvgl_micropython's own `make submodules` above (MOYBYTE_SKIP_UPSTREAM_SUBMODULES),
+# which assumes a warm .build, so init them ourselves -- faithful to micropython's
+# `make submodules`, a no-op once present (fixes a from-scratch build: CI / fresh dev).
+if [ ! -e "${UPSTREAM_DIR}/lib/micropython/lib/berkeley-db-1.xx/btree/bt_open.c" ]; then
+  git -C "${UPSTREAM_DIR}/lib/micropython" submodule update --init --depth=1 \
+    lib/berkeley-db-1.xx lib/micropython-lib
+fi
+
 MPY_MAIN_C="${UPSTREAM_DIR}/lib/micropython/ports/esp32/main.c"
 MPY_BOOT_PY="${UPSTREAM_DIR}/lib/micropython/ports/esp32/modules/_boot.py"
 MPY_BOOT_ORIG="${BUILD_DIR}/micropython_esp32_boot.py.orig"
@@ -689,10 +709,16 @@ fi
 
 if [ -n "${IDF_PYTHON:-}" ]; then
   ESPTOOL_PY="${IDF_PYTHON}"
-elif [ -x "${HOME}/.espressif/python_env/idf5.5_py3.10_env/bin/python" ]; then
-  ESPTOOL_PY="${HOME}/.espressif/python_env/idf5.5_py3.10_env/bin/python"
 else
-  ESPTOOL_PY="python3"
+  # Find the ESP-IDF python env (it has esptool) regardless of its py-version suffix:
+  # the env is named idf<idf>_py<py>_env, e.g. idf5.5_py3.10_env locally but
+  # idf5.5_py3.11_env on the CI runner -- a hardcoded py3.10 path missed it and fell
+  # through to a bare `python3` that has no esptool, so the final merge failed.
+  ESPTOOL_PY=""
+  for _cand in "${HOME}"/.espressif/python_env/idf*_py*_env/bin/python; do
+    [ -x "${_cand}" ] && ESPTOOL_PY="${_cand}" && break
+  done
+  [ -n "${ESPTOOL_PY}" ] || ESPTOOL_PY="python3"
 fi
 
 # Moybyte OTA (#53): with --ota the bootable app partition is `ota_0`, which no longer

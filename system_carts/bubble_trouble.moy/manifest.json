@@ -1,0 +1,93 @@
+{
+  "format": "moybyte-cart-v1",
+  "version": 2,
+  "title": "Bubble Trouble",
+  "type": "game",
+  "runtime": "python",
+  "main": "main.py",
+  "system": true,
+  "canvas": {
+    "width": 320,
+    "height": 240,
+    "palette": "moy64"
+  },
+  "permissions": [
+    "graphics",
+    "input"
+  ],
+  "safe_to_share": true,
+  "config": {
+    "start_bubbles": 2,
+    "bubble_speed": 100,
+    "harpoon_speed": 300,
+    "lives": 3,
+    "autoplay": 0
+  },
+  "edit": [
+    {
+      "key": "start_bubbles",
+      "label": "BUBBLES",
+      "type": "int",
+      "min": 1,
+      "max": 4,
+      "step": 1,
+      "display": "count",
+      "icon": "dot",
+      "card": "START WITH {value} BUBBLES"
+    },
+    {
+      "key": "bubble_speed",
+      "label": "SPEED",
+      "type": "int",
+      "min": 50,
+      "max": 200,
+      "step": 10,
+      "display": "gauge",
+      "gauge": {
+        "low": "turtle",
+        "high": "rabbit"
+      },
+      "card": "BUBBLES DRIFT AT {value}"
+    },
+    {
+      "key": "harpoon_speed",
+      "label": "HARPOON",
+      "type": "int",
+      "min": 150,
+      "max": 500,
+      "step": 25,
+      "display": "gauge",
+      "gauge": {
+        "low": "turtle",
+        "high": "rabbit"
+      },
+      "card": "HARPOON FLIES AT {value}"
+    },
+    {
+      "key": "lives",
+      "label": "LIVES",
+      "type": "int",
+      "min": 1,
+      "max": 5,
+      "step": 1,
+      "display": "count",
+      "icon": "heart",
+      "card": "{value} LIVES"
+    },
+    {
+      "key": "autoplay",
+      "label": "AUTOPLAY",
+      "type": "choice",
+      "choices": [
+        0,
+        1
+      ],
+      "icons": [
+        "close",
+        "run"
+      ],
+      "display": "choice-icons",
+      "card": "AUTOPLAY {value}"
+    }
+  ]
+}

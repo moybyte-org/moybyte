@@ -43,6 +43,7 @@ CART_ORDER = [
     "sakura_lua",
     "bullet_storm",
     "battle_city",
+    "bubble_trouble",
     "tap_red",
     "tap_game",
     "beeper",
