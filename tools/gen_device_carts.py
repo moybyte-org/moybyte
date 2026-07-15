@@ -41,6 +41,7 @@ CART_ORDER = [
     "platformer",
     "scroll_demo",
     "sakura_lua",
+    "bullet_storm",
     "battle_city",
     "tap_red",
     "tap_game",

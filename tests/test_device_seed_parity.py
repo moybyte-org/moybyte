@@ -41,6 +41,7 @@ TITLE_TO_FOLDER = {
     "My Art": "my_art",
     "Sakura": "sakura",
     "Sakura Lua": "sakura_lua",
+    "Bullet Storm": "bullet_storm",
     "Star Catcher": "star_catcher",
     "Pixel Pet": "pet",
     "Tiny Runner": "tiny_runner",
@@ -69,6 +70,19 @@ def _load_moy_runtime():
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         sys.modules[name] = mod
+    # moy_runtime also imports the device-only leaves (authored in modules/,
+    # not staged from runtime/, so conftest's alias finder doesn't cover them).
+    # The full suite happened to inherit them from earlier-collected test files'
+    # loaders; register them here too (same order as test_micropython_spike's
+    # loader -- device_util first, device_wifi imports it) so this file passes
+    # standalone instead of depending on collection order.
+    for name in ("device_util", "device_wifi", "device_input", "device_diag",
+                 "device_webview", "device_audio", "device_canvas", "device_api"):
+        if name not in sys.modules:
+            spec = importlib.util.spec_from_file_location(name, FW / "modules" / (name + ".py"))
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            sys.modules[name] = mod
     # moy_runtime now does `from carts_data import CARTS`; on device that module is
     # build-generated from system_carts/. Register the same generated data here so
     # exec succeeds AND this test exercises the real generator -> moy_runtime path.
