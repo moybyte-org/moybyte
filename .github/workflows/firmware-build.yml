@@ -1,0 +1,122 @@
+name: Firmware build
+
+# Build the ESP32 firmware images on GitHub's runners -- no always-on box needed.
+# The .bin images drop out as downloadable artifacts on each run.
+#
+# Run it: Actions tab -> "Firmware build" -> Run workflow (pick a board), or via
+# the API/gh with a ref. It is manual-only by default so it never burns minutes
+# on ordinary pushes; to also archive every master build, uncomment the `push:`
+# trigger below.
+on:
+  workflow_dispatch:
+    inputs:
+      board:
+        description: "Which board(s) to build"
+        type: choice
+        default: tdeck
+        options: [tdeck, p4, both]
+  # push:
+  #   branches: [master]
+  #   paths: ["firmware/**", "runtime/**", "system_carts/**"]
+
+concurrency:
+  group: firmware-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.board }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        board: [tdeck, p4]
+    # Only run the boards the dispatcher asked for.
+    env:
+      WANT: ${{ github.event.inputs.board || 'tdeck' }}
+      IDF_CCACHE_ENABLE: "1"
+      MOYBYTE_BUILD_JOBS: "4"
+      MOYBYTE_SKIP_VFS_BOOT: "1"
+    steps:
+      - name: Should this board run?
+        id: gate
+        run: |
+          if [ "$WANT" = "both" ] || [ "$WANT" = "${{ matrix.board }}" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "skipping ${{ matrix.board }} (dispatcher chose: $WANT)"
+          fi
+
+      - name: Check out repository
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/checkout@v4
+
+      # ESP-IDF + toolchains + the build tree are large; reclaim ~30 GB first.
+      - name: Free disk space
+        if: steps.gate.outputs.run == 'true'
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          large-packages: false
+
+      - name: ESP-IDF host prerequisites
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            git wget flex bison gperf cmake ninja-build ccache \
+            libffi-dev libssl-dev dfu-util libusb-1.0-0 \
+            python3 python3-venv python3-pip
+
+      - name: Set up Python
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Cache the installed Xtensa/RISC-V toolchains + ccache (the expensive parts);
+      # the .build/ clone itself is too big for the 10 GB cache, so it is fetched fresh.
+      - name: Cache ESP-IDF toolchains + ccache
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.espressif
+            ~/.ccache
+          key: idf-${{ matrix.board }}-${{ runner.os }}-v1
+          restore-keys: idf-${{ matrix.board }}-${{ runner.os }}-
+
+      - name: Host venv (make setup)
+        if: steps.gate.outputs.run == 'true'
+        run: make setup
+
+      - name: Build T-Deck (S3) firmware
+        if: steps.gate.outputs.run == 'true' && matrix.board == 'tdeck'
+        run: |
+          # A from-scratch .build fetches esp-idf DURING the first pass, so the
+          # #43 PSRAM-TX-DMA patch only lands on the second run; build twice
+          # (ccache makes the second pass fast) so the shipped image is patched.
+          make firmware-build-lilygo-micropython
+          make firmware-build-lilygo-micropython
+
+      - name: Build ESP32-P4 firmware
+        if: steps.gate.outputs.run == 'true' && matrix.board == 'p4'
+        run: make firmware-build-p4
+
+      - name: Collect images
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          mkdir -p out
+          find firmware -path '*/dist/*' -name '*.bin' -print -exec cp {} out/ \; || true
+          ls -l out || true
+
+      - name: Upload firmware artifacts
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: moybyte-firmware-${{ matrix.board }}
+          path: out/*.bin
+          if-no-files-found: error
+          retention-days: 14
