@@ -493,7 +493,7 @@ def test_music_editor_duplicate_sfx_adds_bank_slot_and_selects_copy():
     src_steps = [list(s) for s in src.steps]
     me.duplicate_sfx()
     assert len(b.sfx) == n + 1                 # a NEW bank slot, nothing removed
-    assert me.sfx_idx == orig_idx + 1           # selection followed the copy
+    assert me.sfx_idx == n                      # copy APPENDED at the end + selected
     assert b.sfx[orig_idx] is src               # the original stayed exactly where it was
     dup = me.cur_sfx()
     assert dup is not src
@@ -502,6 +502,27 @@ def test_music_editor_duplicate_sfx_adds_bank_slot_and_selects_copy():
     # mutating the copy must not touch the original (a deep copy, not aliased)
     me.nudge_pitch(1)
     assert [list(s) for s in b.sfx[orig_idx].steps] == src_steps
+
+
+def test_music_editor_duplicate_sfx_appends_so_bank_ids_stay_stable():
+    # Bank index is a cross-referenced id (song pattern slots + cart sfx(n) calls
+    # store raw indices): duplicating an EARLY sfx must not shift any later sfx's
+    # index -- the copy is appended, never inserted mid-bank.
+    me, b = _music_editor()                    # default bank: 3 sfx
+    assert len(b.sfx) >= 3
+    ref1, ref2 = b.sfx[1], b.sfx[2]
+    me.toggle_view()
+    t = me.cur_track()
+    t.pattern[:] = [1, 2]                      # a song referencing sfx 1 + 2 by id
+    me.toggle_view()
+    me.select_cursor(0)
+    src = b.sfx[0]
+    me.duplicate_sfx()                         # duplicate sfx 0 (mid-bank source)
+    # every pre-existing id still resolves to the same object
+    assert b.sfx[0] is src
+    assert b.sfx[1] is ref1 and b.sfx[2] is ref2
+    assert t.pattern == [1, 2]                 # untouched, and still the same sounds
+    assert b.sfx[me.sfx_idx] is b.sfx[-1]      # the copy sits at the bank end
 
 
 def test_music_editor_duplicate_track_adds_bank_slot_and_selects_copy():
@@ -514,12 +535,26 @@ def test_music_editor_duplicate_track_adds_bank_slot_and_selects_copy():
     src_pattern = list(src.pattern)
     me.duplicate_track()
     assert len(b.music) == n + 1
-    assert me.track_idx == orig_idx + 1
+    assert me.track_idx == n                    # copy APPENDED at the end + selected
     assert b.music[orig_idx] is src
     dup = me.cur_track()
     assert dup is not src
     assert dup.pattern == src_pattern
     assert dup.speed == src.speed and dup.loop == src.loop
+
+
+def test_music_editor_duplicate_track_appends_so_music_ids_stay_stable():
+    # music(n) calls index the bank the same way sfx(n) does: duplicating track 0
+    # in a 2-track bank must leave track 1 at index 1.
+    me, b = _music_editor()
+    me.toggle_view()
+    me.select_track(1)                          # grow to >= 2 tracks
+    ref1 = b.music[1]
+    me.select_track(-99)                        # back to track 0
+    assert me.track_idx == 0
+    me.duplicate_track()
+    assert b.music[1] is ref1                   # id 1 still the same track
+    assert me.track_idx == len(b.music) - 1
 
 
 def test_music_editor_duplicate_sfx_capped():
@@ -633,6 +668,27 @@ def test_music_editor_undo_redo_survives_object_switch():
     me.undo()
     assert me.sfx_idx == sfx0 and me.view == me.SFX_VIEW
     assert me.cur_step()[0] == p0
+
+
+def test_music_editor_redo_after_object_switch_restores_the_edited_object():
+    # The regression: undo() while a DIFFERENT object was active used to push a
+    # snapshot of that other object onto the redo stack, so redo restored the
+    # unrelated object and the edit was permanently lost. The redo entry must be
+    # the popped entry's object (its kind + bank idx), not whatever is showing.
+    me, b = _music_editor()
+    assert len(b.sfx) >= 2
+    me.select_cursor(0)
+    p0 = me.cur_step()[0]
+    me.set_pitch(77)                     # edit sfx 0
+    sfx1_steps = [list(s) for s in b.sfx[1].steps]
+    me.select_sfx(1)                     # now sfx 1 is active (untracked navigation)
+    assert me.sfx_idx == 1
+    me.undo()                            # reverts sfx 0 (and jumps back to it)
+    assert me.sfx_idx == 0 and me.cur_step()[0] == p0
+    me.redo()                            # must re-apply the sfx-0 edit ...
+    assert me.sfx_idx == 0 and me.cur_step()[0] == 77
+    # ... and sfx 1 was never touched by the walk.
+    assert [list(s) for s in b.sfx[1].steps] == sfx1_steps
 
 
 def test_music_editor_undo_stack_is_bounded():
@@ -789,11 +845,10 @@ def test_music_editor_ui_copy_paste_and_move_pad_buttons_sfx_view(tmp_path):
     tap(1, 5)                              # MOVE+
     assert me.step == 1 and s.steps[0][0] == 1
 
-    # DUP (row 2 col 1) clones the WHOLE current SFX into a new bank slot.
+    # DUP (row 2 col 1) clones the WHOLE current SFX into a new bank-end slot.
     n = len(me.bank.sfx)
-    orig_idx = me.sfx_idx
     tap(1, 2)                              # DUP
-    assert len(me.bank.sfx) == n + 1 and me.sfx_idx == orig_idx + 1
+    assert len(me.bank.sfx) == n + 1 and me.sfx_idx == n
 
     # A frame still draws cleanly with the extra pad rows + bottom buttons.
     ws.frame(1 / 30)
@@ -825,9 +880,8 @@ def test_music_editor_ui_dup_and_move_pad_buttons_song_view(tmp_path):
     assert me.slot == 1 and t.pattern[0] == min(1, hi)
 
     n = len(me.bank.music)
-    orig_idx = me.track_idx
     tap(1, 2)                              # DUP (song view, row 2 col 1)
-    assert len(me.bank.music) == n + 1 and me.track_idx == orig_idx + 1
+    assert len(me.bank.music) == n + 1 and me.track_idx == n
 
     ws.frame(1 / 30)
     assert len(set(ws.canvas.buf)) > 1
@@ -878,3 +932,35 @@ def test_music_editor_ui_ctrl_z_y_keyboard_shortcut(tmp_path):
     drv.type_char(0x19)                     # Ctrl+Y
     drv.frame(1 / 30)
     assert me.cur_step()[0] == 33
+
+
+def test_music_editor_ui_held_ctrl_z_fires_undo_once(tmp_path):
+    # last_key can be LEVEL state on some key sources (a BLE keyboard holds the
+    # byte across frames, unlike the T-Deck's one-shot press edge). The Ctrl+Z
+    # handler must edge-detect against the previous frame's byte -- the code
+    # editor's _ekey_prev pattern -- or a held Ctrl+Z drains the whole undo
+    # stack, one step per frame.
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.launcher.sel = 0
+    ws.open()
+    ws._open_music()
+    me = ws.music_ui.musicedit
+
+    me.select_cursor(0)
+    me.set_pitch(40)
+    me.nudge_pitch(1)                       # two edits -> two undo entries
+    assert len(me._undo) == 2
+
+    ws.input.last_key = 0x1A                # Ctrl+Z held (level, not an edge)
+    for _ in range(5):                      # ... across five frames
+        ws.music_ui._music_input()
+    assert len(me._undo) == 1               # exactly ONE undo fired
+    assert me.cur_step()[0] == 40
+
+    ws.input.last_key = 0                   # release ...
+    ws.music_ui._music_input()
+    ws.input.last_key = 0x1A                # ... and a fresh press is a new edge
+    ws.music_ui._music_input()
+    assert len(me._undo) == 0               # the second undo landed
+    ws.input.last_key = 0
