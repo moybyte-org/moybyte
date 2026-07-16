@@ -58,6 +58,7 @@ TITLE_TO_FOLDER = {
     "Writer": "writer",
     "Calc": "calc",
     "Storybook": "storybook",
+    "Sheets": "sheets",
     "WiFi": "wifi",
 }
 

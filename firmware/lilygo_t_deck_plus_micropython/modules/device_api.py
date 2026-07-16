@@ -20,7 +20,8 @@ from device_canvas import Image, _decode_moyimg, _Layer
 
 
 def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
-             pmem=None, wifi=None, images=None, owner="cart"):
+             pmem=None, wifi=None, images=None, tables=None, texts=None,
+             owner="cart"):
     import random
 
     _img_cache = {}        # name -> decoded paint Image (see image() below), so a
@@ -219,7 +220,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # ~12-14ms) with a flat memory copy (~7ms) -- the lever for ~60fps scrollers.
         lc = canvas.new_layer(w, h, owner=owner)   # #63: lent to this program (leak fix)
         lns = make_api(lc, input, config, sheet, audio, tilemap, pmem, wifi, images,
-                       owner=owner)
+                       tables=tables, texts=texts, owner=owner)
         return _Layer(lc, lns)
 
     def draw_layer(layer, cam_x=0, cam_y=0):
@@ -267,6 +268,20 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
                 _img_cache[a] = im
             return im
         return Image.from_ascii(a, mapping, transparent)
+
+    def table(name):
+        # Desk Lab interop (#78, host==device): a Sheets sheet placed in the cart's
+        # folder (tables/<name>.moysheet) read as ROWS -- a list of lists of computed
+        # values. Missing name -> [] (image()'s degrade-don't-throw contract). The
+        # rows were decoded once at cart-load (moy_carts.decode_table).
+        rows = tables.get(name) if tables else None
+        return rows if rows is not None else []
+
+    def text(name):
+        # Desk Lab interop (#78): a Writer doc in the cart's folder
+        # (docs/<name>.moytext) read as LINES. Missing name -> [].
+        lines = texts.get(name) if texts else None
+        return lines if lines is not None else []
 
     # #63: hand the kid the NATIVE spr fast path when available. The C gate parses
     # (n, x, y[, colorkey[, scale[, flip]]]) and appends to the canvas batch array
@@ -330,6 +345,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         "flr": lambda x: int(x // 1),
         "Image": Image,
         "image": image,
+        "table": table, "text": text,
     }
     # Capability-gated network API (#38): the shared Workstation passes a non-None
     # wifi backend ONLY for a cart with the "network" permission, so a normal kid

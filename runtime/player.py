@@ -514,7 +514,8 @@ class Player:
         wifi = ws.wifi if ws._cart_has_perm("network") else None
         t2 = _ticks_ms()
         ns = ws.make_api(ws.canvas, ws.input, project.config, project.sheet,
-                         ws.audio, project.tilemap, project.pmem, wifi, project.images)
+                         ws.audio, project.tilemap, project.pmem, wifi, project.images,
+                         tables=project.tables, texts=project.texts)
         # Paint is a regular cartridge with one narrow shell capability. Keep it out
         # of the kid API and inject it only into the shipped app identity that asks
         # for the artwork permission; copied/renamed carts do not inherit it.

@@ -197,6 +197,36 @@ re-drawing the background every frame.
 | `make_layer(w, h)` | create an off-screen layer (wider than the screen). Draw into it once with the **same verbs** (`cls`/`map`/`spr`/`rect`/…) via the layer's methods |
 | `draw_layer(layer, cam_x=0, cam_y=0)` | blit the visible `W×H` window of `layer` at the camera offset (clamped to the layer bounds). Draw actors on top afterwards |
 
+## Reading documents (`table` / `text`, `#78`)
+
+A game can read a **Sheets** sheet or a **Writer** doc that lives in its own cart
+folder — the document IS the game data. Make the document in the Sheets/Writer app,
+attach it to your cart (`tables/<name>.moysheet`, `docs/<name>.moytext`), then read
+it back. Both are tiny kid-greppable JSON; a missing name reads as an empty list, so
+these never crash your cart.
+
+| call | does |
+|---|---|
+| `table(name)` | read the sheet `tables/<name>.moysheet` as **rows** — a list of lists of the sheet's computed values (numbers stay numbers, text stays strings, a blank cell is `""`). Missing name → `[]` |
+| `text(name)` | read the Writer doc `docs/<name>.moytext` as **lines** — a list of strings, one per line. Missing name → `[]` |
+
+```python
+# A wave table authored in Sheets drives how many enemies each level spawns:
+WAVES = table("waves")        # e.g. [[3], [5], [8], [12]]
+
+def spawn(level):
+    count = WAVES[level][0] if level < len(WAVES) else 20
+    ...
+
+# Dialog written in Writer, shown a line at a time:
+LINES = text("intro")         # ["You wake in a cave.", "A torch flickers.", ...]
+
+def _draw():
+    cls(col("black"))
+    for i, ln in enumerate(LINES):
+        print(ln, 8, 8 + i * 10, col("white"))
+```
+
 ---
 
 ## Make it fast (five habits)

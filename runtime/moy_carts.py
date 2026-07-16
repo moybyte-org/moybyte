@@ -44,6 +44,19 @@ COVER_IMAGE = "cover"
 NOTES_NAME = "notes.json"
 DECK_NAME = "deck.json"
 
+# Desk Lab interop assets (#78): the tiny cart-folder documents a game reads back
+# through the table(name)/text(name) cart verbs -- the Sheets + Writer analogue of
+# Paint's images/<name>.moyimg. A .moysheet is the moysheet-v1 JSON blob (formula +
+# computed value per cell, from Sheets); a .moytext is the moytext-v1 blob (a
+# Writer doc's body). Kid-greppable, engine-free (the v0.4 portability contract).
+TABLES_DIR = "tables"
+TABLE_EXT = ".moysheet"
+TEXTS_DIR = "docs"
+TEXT_EXT = ".moytext"
+# The Sheets app's own workbook (a list of sheets), beside the carts dir exactly
+# like Writer's notes.json / Paint's artwork.moyimg.
+SHEETS_NAME = "sheets.json"
+
 # A single shared sprite sheet lives alongside the carts dir (one level up, so
 # it sits beside every <name>.moy folder). Tiles painted here are reusable
 # across carts; the import-tile primitive copies tiles between any two sheets.
@@ -407,6 +420,157 @@ def save_notes(text, root=CARTS_DIR):
     _write_atomic(notes_path(root), text)
 
 
+# --- Desk Lab interop (#78): table(name) / text(name) cart-folder documents ---
+#
+# A game reads a Sheets sheet or a Writer doc placed in ITS OWN cart folder, the
+# exact mirror of Paint's image(name) -> images/<name>.moyimg. The decoders turn a
+# tiny JSON blob into the plain-Python shape the cart verb hands the kid (rows of
+# values / lines of text); both are guarded so a missing/bad file degrades to an
+# empty list, never a crash (image()'s degrade-don't-throw contract).
+
+def decode_table(blob):
+    """A moysheet-v1 blob -> rows (a list of lists of computed values). Numbers
+    stay numbers, text stays strings, a blank cell is "". The grid is trimmed to
+    the last populated row/column, so a mostly-empty sheet reads as a tight table.
+    Anything malformed yields []."""
+    try:
+        data = json.loads(blob) if isinstance(blob, str) else blob
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    cells = data.get("cells")
+    if not isinstance(cells, dict) or not cells:
+        return []
+    max_c = -1
+    max_r = -1
+    parsed = {}
+    for key, entry in cells.items():
+        cr = _ref_to_rc(key)
+        if cr is None:
+            continue
+        col, row = cr
+        if isinstance(entry, dict):
+            val = entry.get("v", "")
+        else:
+            val = entry
+        parsed[(row, col)] = val
+        if col > max_c:
+            max_c = col
+        if row > max_r:
+            max_r = row
+    if max_r < 0:
+        return []
+    rows = []
+    for r in range(max_r + 1):
+        row = []
+        for c in range(max_c + 1):
+            v = parsed.get((r, c), "")
+            row.append(v if v is not None else "")
+        rows.append(row)
+    return rows
+
+
+def decode_text(blob):
+    """A moytext-v1 blob -> the doc body split into a list of lines. A blank/absent
+    body is []. Anything malformed yields []."""
+    try:
+        data = json.loads(blob) if isinstance(blob, str) else blob
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    body = data.get("body", "")
+    if not isinstance(body, str) or body == "":
+        return []
+    return body.split("\n")
+
+
+def _ref_to_rc(ref):
+    """"B3" -> (col_index, row_index), both 0-based; None if malformed. A tiny
+    self-contained A1 parser so this module keeps its json+os-only footprint (no
+    formula.py import on the device asset path)."""
+    ref = str(ref).upper()
+    i = 0
+    while i < len(ref) and "A" <= ref[i] <= "Z":
+        i += 1
+    if i == 0 or i >= len(ref):
+        return None
+    col = 0
+    for ch in ref[:i]:
+        col = col * 26 + (ord(ch) - 64)
+    for ch in ref[i:]:
+        if not ("0" <= ch <= "9"):
+            return None
+    row = int(ref[i:])
+    if row < 1:
+        return None
+    return (col - 1, row - 1)
+
+
+def load_tables(path):
+    """A cart's Sheets assets: {name: rows} for every tables/<name>.moysheet blob
+    (name = filename without the extension), decoded to rows. {} when the cart has
+    no tables/ dir. Mirrors load_images' degrade-don't-throw contract."""
+    return _load_docs(path, TABLES_DIR, TABLE_EXT, decode_table)
+
+
+def load_texts(path):
+    """A cart's Writer assets: {name: lines} for every docs/<name>.moytext blob,
+    decoded to lines. {} when the cart has no docs/ dir."""
+    return _load_docs(path, TEXTS_DIR, TEXT_EXT, decode_text)
+
+
+def _load_docs(path, subdir, ext, decode):
+    out = {}
+    d = path + "/" + subdir
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return out                     # no subfolder -> the common case
+    for name in names:
+        if name.endswith(ext):
+            try:
+                out[name[:-len(ext)]] = decode(_read(d + "/" + name))
+            except OSError:
+                pass                   # skip an unreadable entry, keep the rest
+    return out
+
+
+def save_table(cart, name, text):
+    """Attach a sheet to a cart as tables/<name>.moysheet (atomically, like
+    save_image). `text` is the moysheet-v1 JSON blob; the cart then reads it via
+    the table(name) verb."""
+    _mkdir(cart["path"] + "/" + TABLES_DIR)
+    _write_atomic(cart["path"] + "/" + TABLES_DIR + "/" + name + TABLE_EXT, text)
+
+
+def save_text(cart, name, text):
+    """Attach a Writer doc to a cart as docs/<name>.moytext (atomically). `text`
+    is the moytext-v1 JSON blob; the cart reads it via the text(name) verb."""
+    _mkdir(cart["path"] + "/" + TEXTS_DIR)
+    _write_atomic(cart["path"] + "/" + TEXTS_DIR + "/" + name + TEXT_EXT, text)
+
+
+# --- the Sheets app's own workbook (a list of sheets), beside the carts dir ---
+
+def sheets_path(root=CARTS_DIR):
+    parent = root.rsplit("/", 1)[0]
+    return (parent + "/" + SHEETS_NAME) if parent else SHEETS_NAME
+
+
+def load_sheets(root=CARTS_DIR):
+    try:
+        return _read(sheets_path(root))
+    except OSError:
+        return None
+
+
+def save_sheets(text, root=CARTS_DIR):
+    ensure_dirs(root)
+    _write_atomic(sheets_path(root), text)
+
+
 def slug(title):
     out = ""
     for ch in str(title).lower():
@@ -578,6 +742,8 @@ def load(path):
         except (OSError, ValueError):
             blocks = None
         images = load_images(path)                # paint-image assets (#63), {} if none
+        tables = load_tables(path)                # Sheets docs (#78), {name: rows}, {} if none
+        texts = load_texts(path)                  # Writer docs (#78), {name: lines}, {} if none
         return {
             "path": path,
             "title": man.get("title", "cart"),
@@ -615,6 +781,10 @@ def load(path):
             # A cart references one via the api's image(name) accessor and places it
             # with spr(img, x, y) -- a big MOY64 index bitmap (a painted background).
             "images": images,
+            # Desk Lab interop (#78): Sheets sheets ({name: rows}) + Writer docs
+            # ({name: lines}) placed in the cart folder, read via table()/text().
+            "tables": tables,
+            "texts": texts,
         }
     except Exception as exc:  # noqa: BLE001  -- never let one bad cart escape
         print("Moybyte cart unreadable:", path, exc)

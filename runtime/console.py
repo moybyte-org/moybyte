@@ -284,6 +284,11 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.storybook_app import StorybookAppLayer
 
+try:
+    from sheets_app import SheetsAppLayer
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.sheets_app import SheetsAppLayer
+
 # The desktop home / launcher surface (#28, extracted -- see launcher_layer.py): the
 # Launcher grid CLASS (its instance stays ws.launcher, the single source everything
 # reads) + LauncherHomeLayer (the "launcher" content Layer -- home composition + grid
@@ -955,6 +960,9 @@ class Workstation:
         # Storybook (#78): decks of art+words pages that COMPILE to story carts
         # (deck.json + a generated, readable main.py -- the blocks->code model).
         self.storybook_app = StorybookAppLayer(self, NAMES, _in)
+        # Sheets (#78): the kid spreadsheet -- a workbook of grids with a hand-rolled
+        # formula engine (runtime/formula.py); values reach a game via table().
+        self.sheets_app = SheetsAppLayer(self, NAMES, _in)
         # The Python code editor (#24/#39): the full-screen text view. Owns the drawing
         # + code-UI state (keyboard edge / drag / highlight memo); the shared ws.editor
         # handle + save_code/run_code + code-error state + code_layout stay on ws.
@@ -1002,6 +1010,7 @@ class Workstation:
                           min_size=(AppearanceLayout.MIN_W, AppearanceLayout.MIN_H))
         self.register_app(self.writer_app, text_mode=True)
         self.register_app(self.storybook_app)
+        self.register_app(self.sheets_app, text_mode=True)
         self.register_app(CalcAppLayer(self, NAMES, _in))
         # The boot logo is a draw-time takeover of the screen content (input still
         # routes to the underlying screen), so it's not in _content_layers.
@@ -1748,6 +1757,22 @@ class Workstation:
         self.project.images = value
 
     @property
+    def tables(self):
+        return self.project.tables
+
+    @tables.setter
+    def tables(self, value):
+        self.project.tables = value
+
+    @property
+    def texts(self):
+        return self.project.texts
+
+    @texts.setter
+    def texts(self, value):
+        self.project.texts = value
+
+    @property
     def pmem(self):
         return self.project.pmem
 
@@ -2080,6 +2105,8 @@ class Workstation:
         self.sheet = self._build_sheet()
         self.tilemap = self._build_tilemap()
         self.images = self.cart.get("images") or {}   # paint-image assets (#63)
+        self.tables = self.cart.get("tables") or {}    # Sheets docs, table() (#78)
+        self.texts = self.cart.get("texts") or {}      # Writer docs, text() (#78)
         self.pmem = self._build_pmem()
         self._cart_key_prev = 0       # fresh cart: no stale key edge
         self.input.text_mode = False  # a fresh cart starts in game mode (#38/#42);
@@ -2499,6 +2526,8 @@ class Workstation:
         self.sheet = self._build_sheet()
         self.tilemap = self._build_tilemap()
         self.images = fresh.get("images") or {}
+        self.tables = fresh.get("tables") or {}
+        self.texts = fresh.get("texts") or {}
         self.cart_error = None
         self.crash_line = None
         # Drop the editor cores + rebuild the ACTIVE tab's over the fresh data, then
