@@ -607,6 +607,10 @@ class MapEditor:
 
     SIZES = (1, 2, 3)     # selectable stamp sizes (side length in tiles)
     UNDO_MAX = 32         # bounded in-editor undo depth (device RAM is scarce, #91)
+    SNAP_DIV = 8          # a batch touching more than w*h/SNAP_DIV cells compacts
+                          # to a whole-map snapshot step (per-cell tuples cost ~10x
+                          # a raw byte on MicroPython; a full-map flood on a big map
+                          # must not retain hundreds of KB per undo step, #91)
 
     def __init__(self, tilemap, sheet):
         self.tilemap = tilemap
@@ -615,8 +619,12 @@ class MapEditor:
         self.size = 1         # stamp side length in tiles (#57; 1 = today's cell)
         self.cam_x = 0        # top-left visible cell (pan offset), in cells
         # In-editor undo/redo (#91): each COMPLETED edit gesture (a stamp, a rect
-        # fill, a flood) is one step recording ONLY the changed cells -- not a
-        # whole-map snapshot -- as (index, prev_byte, new_byte) triples. `begin_edit`
+        # fill, a flood) is one step. Small steps record ONLY the changed cells as
+        # (index, prev_byte, new_byte) triples (a LIST); a step that touched more
+        # than w*h/SNAP_DIV cells is compacted by end_edit into a whole-map
+        # before/after snapshot -- a ("snap", w, h, before, after) TUPLE of two
+        # bytes() blobs (2 bytes/cell vs ~30+ per boxed tuple on MicroPython), so a
+        # full-map flood/rect step is ~KBs, never hundreds of KB. `begin_edit`
         # opens the batch, `place`/`erase`/`fill_rect`/`flood` append to it via
         # `_set`, `end_edit` commits it (dropping the redo stack). Bounded to
         # UNDO_MAX steps so a long session can't grow without limit.
@@ -637,10 +645,23 @@ class MapEditor:
 
     def end_edit(self):
         """Commit the open batch as one undo step (no-op if it made no change or was
-        aborted). Committing an edit drops the redo stack -- the classic branch."""
+        aborted). A big batch (more than w*h/SNAP_DIV changed cells -- a full-map
+        flood/rect) is compacted to a whole-map before/after snapshot so a step's
+        retained size is bounded by 2*w*h bytes, never a per-cell tuple list (#91).
+        Committing an edit drops the redo stack -- the classic branch."""
         rec = self._rec
         self._rec = None
         if rec:
+            tm = self.tilemap
+            if len(rec) > (tm.w * tm.h) // self.SNAP_DIV:
+                after = bytes(tm.cells)            # the batch just finished: cells
+                before = bytearray(after)          # ARE the post-edit state
+                # Rebuild the pre-edit state by unwinding the recorded prevs newest
+                # -> oldest (correct even if a cell was written twice in-gesture).
+                for k in range(len(rec) - 1, -1, -1):
+                    e = rec[k]
+                    before[e[0]] = e[1]
+                rec = ("snap", tm.w, tm.h, bytes(before), after)
             self._undo.append(rec)
             if len(self._undo) > self.UNDO_MAX:
                 del self._undo[0]
@@ -669,13 +690,31 @@ class MapEditor:
 
     def _apply(self, rec, forward):
         """Replay (forward) or reverse a committed edit onto the live cells, then
-        bump dirty/gen so a running cart's map cache rebuilds."""
+        bump dirty/gen so a running cart's map cache rebuilds. Two step forms (#91):
+        a LIST of (idx, prev, new) cell deltas, or a compacted ("snap", w, h,
+        before, after) whole-map snapshot (undo restores `before`, redo `after`).
+        A snapshot only applies at its recorded dims -- resize clears the history,
+        so a mismatch can't happen; guarded anyway (a wrong-size blob must never
+        be slammed over the live grid)."""
         tm = self.tilemap
         cells = tm.cells
-        n = len(cells)
-        for idx, prev, new in rec:
-            if 0 <= idx < n:
-                cells[idx] = new if forward else prev
+        if type(rec) is tuple:                     # snapshot step
+            _, w, h, before, after = rec
+            if w == tm.w and h == tm.h:
+                cells[:] = after if forward else before
+        else:                                      # per-cell delta step
+            n = len(cells)
+            if forward:
+                for idx, prev, new in rec:
+                    if 0 <= idx < n:
+                        cells[idx] = new
+            else:
+                # Unwind newest -> oldest so a cell written twice in one gesture
+                # lands back on its ORIGINAL byte, not an intermediate one.
+                for k in range(len(rec) - 1, -1, -1):
+                    idx, prev, new = rec[k]
+                    if 0 <= idx < n:
+                        cells[idx] = prev
         tm.dirty = True
         tm.gen += 1
 
