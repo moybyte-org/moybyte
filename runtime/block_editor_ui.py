@@ -34,7 +34,7 @@ except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
 
 
-from editors import BlockEditor
+from editors import BlockEditor, _clone_tree
 # The block vocabulary/compiler (#29). Mirrors console.py's own import (see its
 # comment there): bare `blocks` on the device (frozen top-level) and once
 # host_app has aliased it on the host, or `runtime.blocks` when a test loads
@@ -321,7 +321,11 @@ class BlockEditorUI:
             except Exception as exc:  # noqa: BLE001
                 print("Moybyte load blocks failed:", self._err_text(exc))
         if prog is None:
-            prog = ws.project.cart.get("blocks")
+            # A DEEP COPY, never the cart's own tree (#93): the editor mutates its
+            # program in place and undo/redo rebinds it -- editing an aliased
+            # cart["blocks"] would drift the cart's snapshot away from both the
+            # disk file and the editor (save_blocks re-syncs it with a fresh copy).
+            prog = _clone_tree(ws.project.cart.get("blocks"))
         # DATA-LOSS GUARD (#29): a cart whose main.py is hand-written code (no
         # blocks.json, and main.py wasn't emitted by the block compiler) must
         # NEVER have that code clobbered by saving an empty block program. When
@@ -928,9 +932,13 @@ class BlockEditorUI:
             self.blk_status = "SYNTAX " + msg
             return False
         if not (ws.project.cart.get("path") and ws.can_manage and ws.carts_store):
-            # nothing to persist (embedded / writes deferred): apply in RAM so RUN works
+            # nothing to persist (embedded / writes deferred): apply in RAM so RUN
+            # works. A DEEP COPY, never the live tree (#93) -- the editor keeps
+            # mutating `prog` in place and undo/redo rebinds it, so an aliased
+            # cart["blocks"] would drift from what this save captured (mirrors
+            # moy_carts.save_blocks' own snapshot copy).
             ws.project.cart["src"] = src
-            ws.project.cart["blocks"] = prog
+            ws.project.cart["blocks"] = _clone_tree(prog)
             be.dirty = False
             self.blk_status = "SAVED"
             ws.ach.note("code_save")
