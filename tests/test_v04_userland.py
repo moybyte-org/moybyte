@@ -1103,6 +1103,45 @@ def test_map_editor_flood_fill_same_tile_noop_and_full_map():
     assert me2.undo() is True and tm2.mget(0, 0) == TileMap.EMPTY  # one step
 
 
+def test_map_editor_big_batch_compacts_to_bounded_snapshot():
+    # #91 review fix: a gesture touching a large share of the map (a full-map
+    # FLOOD/RECT -- up to 9216 cells on the 96x96 UI max) must NOT retain one
+    # (idx, prev, new) tuple per cell (~hundreds of KB on MicroPython). end_edit
+    # compacts such a batch to a ("snap", w, h, before, after) whole-map snapshot
+    # -- 2 bytes/cell, bounded -- and undo/redo replay it exactly like a delta.
+    from runtime.editors import MapEditor
+    tm = TileMap(96, 96)
+    me = MapEditor(tm, SpriteSheet())
+    tm.mset(10, 10, 7)                       # pre-existing content to restore
+    me.n = 2
+    me.begin_edit(); me.flood(0, 0); me.end_edit()      # full-map flood
+    assert tm.mget(0, 0) == 2 and tm.mget(95, 95) == 2
+    assert tm.mget(10, 10) == 7             # the walled cell survived the flood
+
+    step = me._undo[-1]
+    assert type(step) is tuple and step[0] == "snap"     # snapshot form, not tuples
+    assert (step[1], step[2]) == (96, 96)
+    assert len(step[3]) == 96 * 96 and len(step[4]) == 96 * 96  # 2 blobs, w*h each
+
+    assert me.undo() is True                 # snapshot undo restores the whole map
+    assert tm.mget(0, 0) == TileMap.EMPTY and tm.mget(95, 95) == TileMap.EMPTY
+    assert tm.mget(10, 10) == 7
+    assert me.redo() is True                 # ...and redo re-applies it
+    assert tm.mget(0, 0) == 2 and tm.mget(95, 95) == 2 and tm.mget(10, 10) == 7
+
+    # A small gesture stays the cheap delta form (no snapshot for a 1-cell stamp).
+    me.n = 4                                 # different tile so the stamp changes it
+    me.begin_edit(); me.place(5, 5); me.end_edit()
+    assert type(me._undo[-1]) is list
+
+    # A big RECT compacts the same way and round-trips.
+    me.n = 9
+    me.begin_edit(); me.fill_rect(0, 0, 95, 95); me.end_edit()
+    assert me._undo[-1][0] == "snap"
+    assert me.undo() is True and tm.mget(0, 0) == 2      # back to the flood state
+    assert me.redo() is True and tm.mget(0, 0) == 9
+
+
 def test_tilemap_resize_preserves_content_and_roundtrips():
     # #91: resize grows/shrinks in place, preserving the overlapping top-left
     # content; the new dims serialize + round-trip through map.moymap (to_hex has
