@@ -230,6 +230,7 @@ class PaintLayer:
         self._NAMES = names
         self._in = in_rect
         self._paint_drag = None       # last painted grid cell during a drag (#30)
+        self._fill_fired = False      # FILL already fired this press (#90; see _paint_stroke)
         self._ekey_prev = 0           # last consumed keyboard byte (undo-shortcut edge, #90)
         sc = ws.sys_canvas
         self.layout = PaintLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
@@ -243,6 +244,7 @@ class PaintLayer:
         """Clear the drag-stroke origin (called by ws lifecycle: open_theme /
         _leave_theme) so a new paint session's first stroke starts fresh."""
         self._paint_drag = None
+        self._fill_fired = False
 
     # -- Layer facets --------------------------------------------------------
 
@@ -303,9 +305,12 @@ class PaintLayer:
         else:
             # Pointer released (anywhere): close the brush stroke so the whole
             # press-drag-release commits ONE undo step (#90). Idempotent when idle.
+            # Also re-arm the once-per-press FILL guard -- release is the ONLY
+            # place it clears (a mid-press grid exit must not re-arm it).
             if ws.paint is not None:
                 ws.paint.end_stroke()
             self._paint_drag = None
+            self._fill_fired = False
         return True
 
     # -- grid + taps ---------------------------------------------------------
@@ -339,9 +344,13 @@ class PaintLayer:
             return False
         # Bucket tool (#90): a tap floods the contiguous region ONCE per press (no
         # drag chaining). `fill` snapshots/records its own undo step, so the brush
-        # stroke machinery below is bypassed.
+        # stroke machinery below is bypassed. The guard is a dedicated per-press
+        # flag -- NOT _paint_drag, which resets whenever the held pointer wobbles
+        # off the grid edge (above) and would re-fire a second flood (+ a surprise
+        # extra undo step) on re-entry; _fill_fired only clears on pointer RELEASE.
         if pe.tool == pe.FILL:
-            if self._paint_drag is None:
+            if not self._fill_fired:
+                self._fill_fired = True
                 pe.fill(cell[0], cell[1])
             self._paint_drag = cell
             return True
