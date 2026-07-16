@@ -213,6 +213,7 @@ class MusicEditorUI:
         # and shows STOP; None when nothing is playing.
         self.musicedit = None         # MusicEditor while menu_view == "music"
         self.music_preview = None     # ("sfx", n) | ("song", track) | None (preview)
+        self._mkey_prev = 0           # last consumed keyboard byte (Ctrl+Z/Y edge detect)
         sc = ws.sys_canvas
         self.layout = MusicLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
 
@@ -312,11 +313,17 @@ class MusicEditorUI:
             # undo/redo (code_layer.py) -- device has no Ctrl, so the on-screen
             # UNDO/REDO buttons (the bottom bar) are the touch-first, device-
             # identical path; this is purely a host keyboard shortcut on top.
+            # Edge-detected against the previous frame's byte (the code editor's
+            # _ekey_prev pattern): a LEVEL key source that holds last_key across
+            # frames (e.g. a BLE keyboard) must fire ONE undo per press, not one
+            # per frame -- a held Ctrl+Z would otherwise drain the whole stack.
             k = i.last_key
-            if k == 0x1A:
-                me.undo()
-            elif k == 0x19:
-                me.redo()
+            if k and k != self._mkey_prev:
+                if k == 0x1A:
+                    me.undo()
+                elif k == 0x19:
+                    me.redo()
+            self._mkey_prev = k
         ws._leave_or_home(ws._leave_menu)
         ws._dirty = True
 

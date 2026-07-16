@@ -2027,9 +2027,12 @@ class MusicEditor:
                     mismatched clipboard kind for the active view is a no-op.
 
       duplicate  -- `duplicate_sfx`/`duplicate_track` deep-copy the WHOLE active
-                    object into a fresh bank slot right after it and select the
-                    copy (the per-item "duplicate" -- a new step/slot seeded from
-                    the current one -- already exists as add_step/add_slot).
+                    object into a fresh bank slot APPENDED at the end and select
+                    the copy -- appended because bank indices are cross-referenced
+                    ids (song slots + cart sfx(n)/music(n) calls), so a mid-bank
+                    insert would retarget every later reference (the per-item
+                    "duplicate" -- a new step/slot seeded from the current one --
+                    already exists as add_step/add_slot).
 
       reorder    -- `move_step`/`move_slot` swap the cursor item with its neighbor
                     (d = +-1) and move the cursor along with it; a no-op at either
@@ -2419,9 +2422,13 @@ class MusicEditor:
     # -- whole-object duplicate (#92) ------------------------------------------
     def duplicate_sfx(self):
         """Duplicate the WHOLE current SFX (steps/speed/loop) into a fresh bank
-        slot right after it, and select the copy. The per-item duplicate (a new
-        step seeded from the current one) already exists as add_step; this is the
-        bank-level "clone this effect" the kid reaches from either view."""
+        slot APPENDED at the end, and select the copy. Appended -- never inserted
+        mid-bank -- because a bank index is a cross-referenced id: song pattern
+        slots store raw SFX indices and cart code calls sfx(n) by the same
+        integer, so an insert would silently retarget every later reference
+        (every other grow path here appends for the same reason). The per-item
+        duplicate (a new step seeded from the current one) already exists as
+        add_step; this is the bank-level "clone this effect"."""
         s = self.cur_sfx()
         if s is None or len(self.bank.sfx) >= _ME_BANK_MAX:
             return
@@ -2431,16 +2438,16 @@ class MusicEditor:
         dup.steps = [list(st) for st in s.steps]
         dup.speed = s.speed
         dup.loop = s.loop
-        self.bank.sfx.insert(self.sfx_idx + 1, dup)
-        self.sfx_idx += 1
+        self.bank.sfx.append(dup)
+        self.sfx_idx = len(self.bank.sfx) - 1
         self.step = 0
         self.dirty = True
         self._clamp()
 
     def duplicate_track(self):
         """Duplicate the WHOLE current SONG (track: pattern/speed/loop) into a
-        fresh bank slot right after it, and select the copy. Mirrors
-        duplicate_sfx for the song view."""
+        fresh bank slot APPENDED at the end, and select the copy. Mirrors
+        duplicate_sfx (same append-only rule: music(n) calls index the bank)."""
         t = self.cur_track()
         if t is None or len(self.bank.music) >= _ME_BANK_MAX:
             return
@@ -2450,8 +2457,8 @@ class MusicEditor:
         dup.pattern = list(t.pattern)
         dup.speed = t.speed
         dup.loop = t.loop
-        self.bank.music.insert(self.track_idx + 1, dup)
-        self.track_idx += 1
+        self.bank.music.append(dup)
+        self.track_idx = len(self.bank.music) - 1
         self.slot = 0
         self.dirty = True
         self._clamp()
@@ -2476,6 +2483,30 @@ class MusicEditor:
             return None
         return ("song", self.track_idx, list(obj.pattern),
                 obj.speed, obj.loop, self.slot)
+
+    def _snapshot_of(self, snap):
+        """Snapshot the CURRENT state of the object a popped undo/redo entry names
+        (its kind + bank idx) -- NOT whatever object the editor happens to be
+        showing. undo/redo push this onto the opposite stack, so the pair is
+        always a true before/after of the SAME object even when the kid walked
+        the selection elsewhere between the edit and the undo. The cursor
+        recorded is the live one when that object is still active, else the
+        popped entry's (best available -- _restore clamps it anyway)."""
+        kind, idx, _data, _speed, _loop, cursor = snap
+        if kind == "sfx":
+            if not (0 <= idx < len(self.bank.sfx)):
+                return None
+            obj = self.bank.sfx[idx]
+            if self.view == self.SFX_VIEW and self.sfx_idx == idx:
+                cursor = self.step
+            return ("sfx", idx, [list(st) for st in obj.steps],
+                    obj.speed, obj.loop, cursor)
+        if not (0 <= idx < len(self.bank.music)):
+            return None
+        obj = self.bank.music[idx]
+        if self.view == self.SONG_VIEW and self.track_idx == idx:
+            cursor = self.slot
+        return ("song", idx, list(obj.pattern), obj.speed, obj.loop, cursor)
 
     def _restore(self, snap):
         """Write a _snapshot() tuple back over the bank + re-point the cursor."""
@@ -2524,8 +2555,8 @@ class MusicEditor:
         """Step back one content edit (a no-op at the floor)."""
         if not self._undo:
             return
-        cur = self._snapshot()
         snap = self._undo.pop()
+        cur = self._snapshot_of(snap)      # the POPPED entry's object, pre-restore
         if cur is not None:
             self._redo.append(cur)
             if len(self._redo) > _ME_UNDO_MAX:
@@ -2537,8 +2568,8 @@ class MusicEditor:
         """Re-apply the next edit undo() walked back past (a no-op at the top)."""
         if not self._redo:
             return
-        cur = self._snapshot()
         snap = self._redo.pop()
+        cur = self._snapshot_of(snap)      # the POPPED entry's object, pre-restore
         if cur is not None:
             self._undo.append(cur)
         self._restore(snap)
