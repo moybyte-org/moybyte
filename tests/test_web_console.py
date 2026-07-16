@@ -954,6 +954,51 @@ def test_web_console_pan_zero_stops_arrow_velocity(tmp_path):
     assert console.driver._pan == (0, 0)
 
 
+def test_web_console_key_batch_delivers_every_char_in_order(tmp_path):
+    """#42 Thread 2 regression: a phone soft keyboard swipe-typing/autocorrect-committing
+    a word lands as ONE WebSocket batch of {"type":"key"} events. ConsoleDriver.type_char
+    used to be last-wins (`self._typed = code`), so 'hello' typed only 'o'. The driver now
+    QUEUES typed chars and frame() feeds ONE per frame into last_key (the console's
+    one-key-per-frame contract), so every char reaches a text consumer, in order."""
+    from runtime import moy_carts
+
+    carts_dir = str(tmp_path / "carts")
+    os.makedirs(carts_dir, exist_ok=True)
+    # A text-mode cart that records every nonzero key() it sees, one frame at a time.
+    moy_carts.create("Typer", carts_dir, type="app", src="""
+typed = ""
+
+def _update(dt):
+    global typed
+    textmode(True)
+    k = key()
+    if k:
+        typed = typed + chr(k)
+
+def _draw():
+    cls(0)
+""")
+    console = web_console.WebConsole(carts_dir, fps=30)
+    ws = console.ws
+    for i, c in enumerate(ws.launcher.items):
+        if c["title"] == "Typer":
+            ws.launcher.sel = i
+            break
+    ws.open()
+    assert ws.screen == "desktop" and ws.cart_error is None
+    console.step_frame()                       # _update ran textmode(True)
+    assert ws.input.text_mode is True
+
+    # One WS batch, five typed chars (incl. a repeat -- 'll' -- so ordering AND
+    # completeness are both pinned; last-wins would leave just 'o').
+    console.apply_events([{"type": "key", "code": ord(ch)} for ch in "hello"])
+    for _ in range(5):
+        console.step_frame()                   # one char drains per frame
+    assert ws.ns["typed"] == "hello"
+    console.step_frame()                       # the queue is spent -- no repeats
+    assert ws.ns["typed"] == "hello"
+
+
 def test_assets_returns_palette_font_and_sheet(server):
     _console, host, port = server
     status, ctype, obj = _get_json(host, port, "/assets")
