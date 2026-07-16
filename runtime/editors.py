@@ -1558,6 +1558,11 @@ class BlockEditor:
         scripts = self.program.get("scripts", []) or []
         for si in range(len(scripts)):
             self._flatten_block(rows, scripts, si, 0)
+        # custom-block definitions (#48) render after the event scripts: each proc's
+        # define-hat + its indented body, using the same flatten machinery as a hat.
+        procs = self.program.get("procs", []) or []
+        for pi in range(len(procs)):
+            self._flatten_block(rows, procs, pi, 0)
         if not rows:                              # an empty program still needs a row
             rows.append(BlockRow("insert", 0, scripts, 0))
         self.rows = rows
@@ -1573,8 +1578,9 @@ class BlockEditor:
             rows.append(BlockRow("block", depth, parent, index, b, is_else=True))
             return
         rows.append(BlockRow("block", depth, parent, index, b))
-        if self.blocks.is_cblock(tid) or self._is_hat(tid):
-            # A block with a body (hat / c-block) shows its children indented, with
+        if self.blocks.is_cblock(tid) or self._is_hat(tid) or self.blocks.is_def(tid):
+            # A block with a body (hat / c-block / proc definition) shows its children
+            # indented, with
             # an insert point before each child and one trailing insert point so the
             # body can always be appended to even when empty. Ensure the body list
             # exists (make_block omits "c" on hats), so inserts have a real target.
@@ -1748,7 +1754,7 @@ class BlockEditor:
         if r is None or r.kind != "block" or r.is_else:
             return False
         tid = r.block.get("t")
-        if self._is_hat(tid) or tid == self.blocks.ELSE_MARKER:
+        if self._is_hat(tid) or self.blocks.is_def(tid) or tid == self.blocks.ELSE_MARKER:
             return False
         self.clipboard = _clone_tree(r.block)
         return True
@@ -1764,7 +1770,7 @@ class BlockEditor:
         if r is None or r.kind != "block" or r.is_else:
             return None
         tid = r.block.get("t")
-        if self._is_hat(tid) or tid == self.blocks.ELSE_MARKER:
+        if self._is_hat(tid) or self.blocks.is_def(tid) or tid == self.blocks.ELSE_MARKER:
             return None
         clone = _clone_tree(r.block)
         self._record()
@@ -1786,7 +1792,7 @@ class BlockEditor:
         if r is None or r.kind != "insert":
             return None
         tid = self.clipboard.get("t")
-        if self._is_hat(tid) or tid == self.blocks.ELSE_MARKER:
+        if self._is_hat(tid) or self.blocks.is_def(tid) or tid == self.blocks.ELSE_MARKER:
             return None
         clone = _clone_tree(self.clipboard)
         self._record()
@@ -1804,7 +1810,7 @@ class BlockEditor:
         r = self.row()
         if r is None or r.kind != "block" or r.is_else:
             return False
-        if self._is_hat(r.block.get("t")):
+        if self._is_hat(r.block.get("t")) or self.blocks.is_def(r.block.get("t")):
             return False
         self._move_src = r.block
         return True
@@ -1849,8 +1855,11 @@ class BlockEditor:
 
     def _locate(self, block):
         """Find (parent_list, index) of `block` by identity in the statement tree, or
-        None. Walks child bodies only -- a movable block is always a body statement."""
-        return self._locate_in(self.program.get("scripts", []) or [], block)
+        None. Walks child bodies only -- a movable block is always a body statement,
+        which may live inside an event script OR a custom-block body (#48)."""
+        roots = (self.program.get("scripts", []) or []) + \
+                (self.program.get("procs", []) or [])
+        return self._locate_in(roots, block)
 
     def _locate_in(self, lst, block):
         for i in range(len(lst)):
@@ -1878,13 +1887,13 @@ class BlockEditor:
 
     # -- slot editing --------------------------------------------------------
     def slots(self, block=None):
-        """The catalog slot descriptors for a block (defaults to the selection).
-        Empty list for an unknown/None block."""
+        """The slot descriptors for a block (defaults to the selection). Program-aware
+        (#48): a `call` yields one expr slot per parameter of the proc it targets, a
+        `proc_def` yields none (edited via the PROC menu). Empty for unknown/None."""
         b = block if block is not None else self.selected_block()
         if b is None:
             return []
-        d = self.blocks.block_def(b.get("t"))
-        return list(d["slots"]) if d else []
+        return self.blocks.block_slots(self.program, b)
 
     def slot_value(self, slot_name, block=None):
         b = block if block is not None else self.selected_block()
@@ -1900,6 +1909,21 @@ class BlockEditor:
         b = block if block is not None else self.selected_block()
         if b is None:
             return False
+        # A call's args (#48) live in a positional list p["args"], not as named slots;
+        # the dynamic slot names are arg0/arg1/... -> write into the list, growing it
+        # (padded with 0) so an arg can be set even before earlier ones were touched.
+        if b.get("t") == self.blocks.CALL and slot_name[:3] == "arg":
+            try:
+                i = int(slot_name[3:])
+            except ValueError:
+                return False
+            self._record()
+            args = b.setdefault("p", {}).setdefault("args", [])
+            while len(args) <= i:
+                args.append(0)
+            args[i] = value
+            self.dirty = True
+            return True
         self._record()
         p = b.setdefault("p", {})
         p[slot_name] = value
@@ -1940,7 +1964,8 @@ class BlockEditor:
         list."""
         name = self.blocks.sanitize_var_name(name)
         vars_ = self.program.setdefault("vars", [])
-        if name and name not in vars_ and name not in self.lists():
+        if name and name not in vars_ and name not in self.lists() \
+                and name not in self.proc_names():
             self._record()
             vars_.append(name)
             self.dirty = True
@@ -1950,7 +1975,7 @@ class BlockEditor:
         """Create a freshly-named variable with a sensible default (var, var2, ...)
         the kid can rename. The name is unique across BOTH variables and lists (they
         share the module-level global namespace). Returns the new variable's name."""
-        taken = self.variables() + self.lists()
+        taken = self._all_names()
         name = self.blocks.unique_var_name(taken, base)
         self._record()
         self.program.setdefault("vars", []).append(name)
@@ -1966,8 +1991,9 @@ class BlockEditor:
         vars_ = self.program.setdefault("vars", [])
         if not new or old not in vars_:
             return None
-        if new != old and (new in vars_ or new in self.lists()):
-            return None                       # would collide with a var/list
+        if new != old and (new in vars_ or new in self.lists()
+                           or new in self.proc_names()):
+            return None                       # would collide with a var/list/proc
         self._record()
         vars_[vars_.index(old)] = new
         self._rewrite_name_refs(old, new, self.blocks.SLOT_VARIABLE)
@@ -1979,6 +2005,10 @@ class BlockEditor:
         to `new` (statements' params, nested expression params, child bodies). Shared by
         the variable and list renamers (#48)."""
         def walk(node):
+            if isinstance(node, list):            # a call's positional args (#48)
+                for it in node:
+                    walk(it)
+                return
             if not isinstance(node, dict):
                 return
             d = self.blocks.block_def(node.get("t"))
@@ -1993,7 +2023,8 @@ class BlockEditor:
             for c in node.get("c", []) or []:
                 walk(c)
 
-        for s in self.program.get("scripts", []) or []:
+        for s in (self.program.get("scripts", []) or []) + \
+                 (self.program.get("procs", []) or []):
             walk(s)
 
     def variables(self):
@@ -2008,7 +2039,8 @@ class BlockEditor:
         duplicates / names already used by a variable are ignored. Returns the list."""
         name = self.blocks.sanitize_var_name(name)
         lists_ = self.program.setdefault("lists", [])
-        if name and name not in lists_ and name not in self.variables():
+        if name and name not in lists_ and name not in self.variables() \
+                and name not in self.proc_names():
             self._record()
             lists_.append(name)
             self.dirty = True
@@ -2017,7 +2049,7 @@ class BlockEditor:
     def new_list(self, base="list"):
         """Create a freshly-named list (list, list2, ...) the kid can rename. The name
         is unique across BOTH lists and variables. Returns the new list's name."""
-        taken = self.lists() + self.variables()
+        taken = self._all_names()
         name = self.blocks.unique_var_name(taken, base)
         self._record()
         self.program.setdefault("lists", []).append(name)
@@ -2032,7 +2064,8 @@ class BlockEditor:
         lists_ = self.program.setdefault("lists", [])
         if not new or old not in lists_:
             return None
-        if new != old and (new in lists_ or new in self.variables()):
+        if new != old and (new in lists_ or new in self.variables()
+                           or new in self.proc_names()):
             return None
         self._record()
         lists_[lists_.index(old)] = new
@@ -2042,6 +2075,146 @@ class BlockEditor:
 
     def lists(self):
         return list(self.program.get("lists", []) or [])
+
+    # -- custom blocks (#48: My Blocks / procedures) -------------------------
+    # Procs mirror vars/lists at the program level: a definition list, created +
+    # named through the same on-screen-keyboard flow, with a name unique across the
+    # whole module-global namespace (vars + lists + procs) and NOT a reserved cart-API
+    # verb. A proc's define-hat + body render in the outline after the event scripts.
+    def procs(self):
+        return list(self.program.get("procs", []) or [])
+
+    def proc_names(self):
+        return [self.blocks.proc_name(pd) for pd in self.procs()]
+
+    def _all_names(self):
+        return self.variables() + self.lists() + self.proc_names()
+
+    def new_proc(self, base="block"):
+        """Create a fresh, empty custom block with a unique default name the kid can
+        rename, and select its define-hat. Returns the new proc_def block."""
+        base = self.blocks.sanitize_var_name(base) or "block"
+        if self.blocks.is_reserved_name(base):
+            base = base + "_"                 # never seed a name that shadows the API
+        name = self.blocks.unique_var_name(self._all_names(), base)
+        self._record()
+        pd = self.blocks.make_block(self.blocks.PROC_DEF, {"name": name, "params": []})
+        self.program.setdefault("procs", []).append(pd)
+        self.dirty = True
+        self.reflow()
+        self._select_block(pd)
+        return pd
+
+    def rename_proc(self, old, new):
+        """Rename a custom block AND rewrite every call targeting it. The new name is
+        sanitized; a blank / reserved / duplicate / clash with a var/list is rejected.
+        Returns the applied name, or None."""
+        new = self.blocks.sanitize_var_name(new)
+        if not new or self.blocks.is_reserved_name(new):
+            return None
+        pd = self.blocks.find_proc(self.program, old)
+        if pd is None:
+            return None
+        if new != old and new in self._all_names():
+            return None
+        self._record()
+        pd.setdefault("p", {})["name"] = new
+        self._rewrite_call_names(old, new)
+        self.dirty = True
+        return new
+
+    def delete_proc(self, proc_def):
+        """Remove a custom block entirely (stray calls to it then compile to `pass`).
+        Returns True if it was removed."""
+        procs = self.program.get("procs", []) or []
+        for i in range(len(procs)):
+            if procs[i] is proc_def:
+                self._record()
+                del procs[i]
+                self.dirty = True
+                self.reflow()
+                self.cur = max(0, min(len(self.rows) - 1, self.cur))
+                return True
+        return False
+
+    def add_param(self, proc_def, name):
+        """Append a parameter to a custom block. The name is sanitized + made unique
+        within the proc (blank/reserved/duplicate rejected). Returns the applied name
+        or None; existing calls keep their args (a new trailing arg defaults to 0)."""
+        if proc_def is None:
+            return None
+        name = self.blocks.sanitize_var_name(name)
+        if not name or self.blocks.is_reserved_name(name):
+            return None
+        params = self.blocks.proc_params(proc_def)
+        if name in params:
+            return None
+        self._record()
+        params.append(name)
+        proc_def.setdefault("p", {})["params"] = params
+        self.dirty = True
+        self.reflow()
+        return name
+
+    def remove_last_param(self, proc_def):
+        """Drop the last parameter of a custom block. Returns True if one was removed."""
+        if proc_def is None:
+            return False
+        params = self.blocks.proc_params(proc_def)
+        if not params:
+            return False
+        self._record()
+        params.pop()
+        proc_def.setdefault("p", {})["params"] = params
+        self.dirty = True
+        self.reflow()
+        return True
+
+    def insert_call(self, name):
+        """Insert a call to proc `name` at the cursor's insert point, pre-filling one
+        default (0) arg per parameter. Returns the new call block, or None."""
+        pd = self.blocks.find_proc(self.program, name)
+        if pd is None:
+            return None
+        n = len(self.blocks.proc_params(pd))
+        return self.insert_block(self.blocks.CALL, {"name": name, "args": [0] * n})
+
+    def _rewrite_call_names(self, old, new):
+        """Rewrite every call targeting `old` to target `new` (after a proc rename)."""
+        def walk(node):
+            if isinstance(node, list):
+                for it in node:
+                    walk(it)
+                return
+            if not isinstance(node, dict):
+                return
+            if node.get("t") == self.blocks.CALL and \
+                    self.blocks.proc_name(node) == old:
+                node.setdefault("p", {})["name"] = new
+            for v in (node.get("p", {}) or {}).values():
+                walk(v)
+            for c in node.get("c", []) or []:
+                walk(c)
+        for s in (self.program.get("scripts", []) or []) + \
+                 (self.program.get("procs", []) or []):
+            walk(s)
+
+    def enclosing_proc(self):
+        """The proc_def whose body contains the cursor row (or None). Lets the editor
+        offer a proc's PARAMETERS as variables while editing inside its body (#48)."""
+        r = self.row()
+        if r is None:
+            return None
+        for pd in self.procs():
+            if self._within(pd, r.parent):
+                return pd
+        return None
+
+    def current_params(self):
+        """The parameter names in scope at the cursor (the enclosing proc's params),
+        or [] outside any custom-block body."""
+        pd = self.enclosing_proc()
+        return self.blocks.proc_params(pd) if pd is not None else []
 
     # -- helpers -------------------------------------------------------------
     def _select_block(self, blk):

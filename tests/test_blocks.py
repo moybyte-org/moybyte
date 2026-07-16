@@ -96,11 +96,19 @@ def test_catalog_is_wellformed():
     # every block has a category in the known set, a known shape, and the right
     # emit/expr key for its shape; every slot has a name + a known type.
     cats = set(blocks.CATEGORY_ORDER)
+    # The custom-block entries (#48) are DYNAMIC: proc_def (SHAPE_DEF) and call carry
+    # no static emit/expr template + no static slots (their label/slots/emit are all
+    # program-aware -- see block_label/block_slots/_emit_call), so they're exempt from
+    # the emit/expr requirement below.
+    dynamic = (blocks.PROC_DEF, blocks.CALL)
     for tid, d in blocks.CATALOG.items():
         assert d["category"] in cats, tid
         assert d["shape"] in (blocks.SHAPE_HAT, blocks.SHAPE_STATEMENT,
-                              blocks.SHAPE_CBLOCK, blocks.SHAPE_EXPR), tid
-        if d["shape"] == blocks.SHAPE_EXPR:
+                              blocks.SHAPE_CBLOCK, blocks.SHAPE_EXPR,
+                              blocks.SHAPE_DEF), tid
+        if tid in dynamic:
+            pass
+        elif d["shape"] == blocks.SHAPE_EXPR:
             assert "expr" in d, tid
         elif d["shape"] in (blocks.SHAPE_STATEMENT, blocks.SHAPE_CBLOCK):
             assert "emit" in d, tid

@@ -130,6 +130,7 @@ _BLK_NUM_X = (244, 168, 40, 26)       # cancel
 _CAT_LABEL = {
     "events": "When...", "control": "Control", "draw": "Draw", "input": "Buttons",
     "variables": "Variables", "lists": "Lists", "operators": "Math", "sound": "Sound",
+    "myblocks": "My Blocks",
 }
 
 # Sentinel menu row: "make a brand-new variable + name it". It heads the Variables
@@ -142,6 +143,25 @@ _NEW_VAR_LABEL = "+ new variable"
 # kid creates + names a list the same way they make a variable.
 _NEW_LIST_ITEM = "\x00new_list"
 _NEW_LIST_LABEL = "+ new list"
+
+# Custom blocks (#48: My Blocks / procedures). "+ new block" heads the My Blocks
+# category (create + name a proc), then one "call NAME" row per defined proc --
+# encoded as the _CALL_PREFIX + the proc name so a menu item stays a plain string.
+_NEW_PROC_ITEM = "\x00new_proc"
+_NEW_PROC_LABEL = "+ new block"
+_CALL_PREFIX = "\x00call:"
+# The PROC ACTIONS menu (opened with A on a define-hat): add/remove an input, rename
+# or delete the whole block. Sentinels so they never collide with a real block id.
+_PROC_ADD = "\x00proc_add"
+_PROC_RENAME = "\x00proc_rename"
+_PROC_DELP = "\x00proc_delp"
+_PROC_DEL = "\x00proc_del"
+_PROC_LABELS = {
+    _PROC_ADD: "Add an input",
+    _PROC_RENAME: "Rename block",
+    _PROC_DELP: "Remove last input",
+    _PROC_DEL: "Delete this block",
+}
 
 # Sentinel menu row in the expr-slot chooser: "type a number" -- the Scratch white
 # editable oval. It heads the reporter list so a typed literal (the common case:
@@ -188,6 +208,8 @@ _BLK_HINTS = {
     "stop": "stop = end this script now (this frame)",
     "break_loop": "break = jump out of the loop around it",
     "for_each": "for each = run the body once per item in the list",
+    "proc_def": "define = your own block; press A to add inputs",
+    "call": "call = run your custom block right here",
 }
 
 
@@ -426,6 +448,11 @@ class BlockEditorUI:
         b = be.selected_block()
         if b is None:
             return
+        if b.get("t") == _blocks_mod.PROC_DEF:
+            # A define-hat (#48): A opens the PROC ACTIONS menu (add/remove input,
+            # rename, delete) instead of a slot editor -- its name/params aren't slots.
+            self._blk_open_proc_menu(b)
+            return
         slots = be.slots(b)
         if slots:
             self._blk_edit_slot(b, slots[self.blk_slot % len(slots)])
@@ -532,6 +559,12 @@ class BlockEditorUI:
         # Lists: the same affordance -- "+ new list" heads the category (#48).
         if category == _blocks_mod.CAT_LISTS:
             ids = [_NEW_LIST_ITEM] + list(ids)
+        # My Blocks (#48): "+ new block" heads the category, then one "call NAME" row
+        # per defined proc (the catalog's own proc_def/call ids never list here).
+        if category == _blocks_mod.CAT_PROCS:
+            be = self.blocks_ed
+            names = be.proc_names() if be is not None else []
+            ids = [_NEW_PROC_ITEM] + [_CALL_PREFIX + n for n in names]
         self.blk_menu = {"mode": "blk", "cat": category, "sel": 0, "top": 0,
                          "items": ids}
 
@@ -547,8 +580,14 @@ class BlockEditorUI:
             return _NEW_LIST_LABEL
         if item == _NUM_LITERAL_ITEM:
             return _NUM_LITERAL_LABEL
+        if item == _NEW_PROC_ITEM:
+            return _NEW_PROC_LABEL
+        if item[:len(_CALL_PREFIX)] == _CALL_PREFIX:      # a "call NAME" palette row
+            return "call " + item[len(_CALL_PREFIX):]
         if item in _ACT_LABELS:
             return _ACT_LABELS[item]
+        if item in _PROC_LABELS:
+            return _PROC_LABELS[item]
         if m["mode"] == "cat":
             return _CAT_LABEL.get(item, item).upper()
         if m["mode"] == "blk":
@@ -584,6 +623,10 @@ class BlockEditorUI:
             # "+ new list": same flow, for lists (#48).
             self._blk_new_list()
             return
+        if item == _NEW_PROC_ITEM:
+            # "+ new block": create a custom block + name it (#48).
+            self._blk_new_proc()
+            return
         if item == _NUM_LITERAL_ITEM:
             # "type a number": close the chooser and open the number keypad on this
             # expr slot (the Scratch white oval -- a literal instead of a block).
@@ -593,10 +636,15 @@ class BlockEditorUI:
             return
         if m["mode"] == "actions":
             self._blk_do_action(item)
+        elif m["mode"] == "proc":
+            self._blk_do_proc_action(item)
         elif m["mode"] == "cat":
             self._blk_open_blocks(item)
         elif m["mode"] == "blk":
-            self._blk_insert_chosen(item)
+            if item[:len(_CALL_PREFIX)] == _CALL_PREFIX:   # "call NAME" (#48)
+                self._blk_insert_call(item[len(_CALL_PREFIX):])
+            else:
+                self._blk_insert_chosen(item)
         elif m["mode"] == "dropdown":
             self.blocks_ed.set_slot(m["slot"], item, m["block"])
             self.blk_menu = None
@@ -623,6 +671,68 @@ class BlockEditorUI:
         self.blk_slot = 0
         self.blk_menu = None
         self._blk_reveal()
+
+    # -- custom blocks (#48: My Blocks / procedures) -------------------------
+    def _blk_insert_call(self, name):
+        """Insert a call to custom block `name` (args pre-filled with 0s) and close."""
+        be = self.blocks_ed
+        if be is not None:
+            be.insert_call(name)
+        self.blk_slot = 0
+        self.blk_menu = None
+        self._blk_reveal()
+
+    def _blk_new_proc(self):
+        """Create a fresh custom block and open the name prompt so the kid names it
+        (mirrors _blk_new_variable). The define-hat + empty body appear in the outline;
+        confirming renames the default. `proc` carries the just-created proc_def."""
+        be = self.blocks_ed
+        if be is None:
+            return
+        pd = be.new_proc("block")
+        self.blk_menu = None
+        self._blk_reveal()
+        self.blk_kbd = {"kind": "proc", "text": "", "var": _blocks_mod.proc_name(pd),
+                        "proc": pd, "slot_target": None, "armed": False}
+        self._blk_arm_prompt()
+
+    def _blk_open_proc_menu(self, pd):
+        """Open the PROC ACTIONS menu on a define-hat: add/remove an input, rename or
+        delete the whole custom block. `proc` is the target proc_def block."""
+        items = [_PROC_ADD, _PROC_RENAME]
+        if _blocks_mod.proc_params(pd):
+            items.append(_PROC_DELP)
+        items.append(_PROC_DEL)
+        self.blk_menu = {"mode": "proc", "sel": 0, "top": 0, "items": items,
+                         "proc": pd}
+
+    def _blk_do_proc_action(self, item):
+        """Run a chosen PROC ACTIONS item. Add/rename open a name prompt; remove-input
+        and delete apply immediately."""
+        be = self.blocks_ed
+        m = self.blk_menu
+        pd = m.get("proc") if m else None
+        self.blk_menu = None
+        if be is None or pd is None:
+            return
+        if item == _PROC_ADD:
+            # name the new input, then add_param on confirm.
+            self.blk_kbd = {"kind": "param", "text": "", "var": "", "proc": pd,
+                            "slot_target": None, "armed": False}
+            self._blk_arm_prompt()
+        elif item == _PROC_RENAME:
+            self.blk_kbd = {"kind": "proc", "text": "",
+                            "var": _blocks_mod.proc_name(pd), "proc": pd,
+                            "slot_target": None, "armed": False}
+            self._blk_arm_prompt()
+        elif item == _PROC_DELP:
+            self.blk_status = "input removed" if be.remove_last_param(pd) \
+                else "no inputs"
+        elif item == _PROC_DEL:
+            if be.delete_proc(pd):
+                self.blk_slot = 0
+                self._blk_reveal()
+                self.blk_status = "block deleted"
 
     # -- slot editors --------------------------------------------------------
     def _blk_edit_slot(self, block, slot):
@@ -730,9 +840,13 @@ class BlockEditorUI:
 
     def _blk_open_variable_picker(self, block, name):
         # The variable-slot picker: "+ new variable" first (so a kid can create +
-        # name one right here and have the slot use it), then every declared variable.
+        # name one right here and have the slot use it), then the enclosing custom
+        # block's PARAMETERS (#48, if the cursor is inside one -- they read like
+        # variables in its body), then every declared variable.
         be = self.blocks_ed
-        items = [_NEW_VAR_ITEM] + be.variables()
+        params = be.current_params()
+        items = [_NEW_VAR_ITEM] + params + [v for v in be.variables()
+                                            if v not in params]
         self.blk_menu = {"mode": "variable", "sel": 0, "top": 0, "items": items,
                          "block": block, "slot": name}
 
@@ -820,6 +934,14 @@ class BlockEditorUI:
             if bt is not None and bt[0] is not None:
                 be.set_slot(bt[1], final, bt[0])
             self.blk_status = "list: " + final[:12]
+        elif kind == "proc":                   # "proc": rename the custom block (#48)
+            old = k["var"]
+            applied = be.rename_proc(old, k["text"])
+            self.blk_status = "block: " + (applied if applied else old)[:12]
+        elif kind == "param":                  # "param": add an input to the block (#48)
+            applied = be.add_param(k.get("proc"), k["text"])
+            self.blk_status = ("input: " + applied[:12]) if applied \
+                else "bad input name"
         else:                                  # "var": rename the freshly-created var
             old = k["var"]
             applied = be.rename_var(old, k["text"])
@@ -1376,9 +1498,11 @@ class BlockEditorUI:
         cv = self.ws.canvas
         x, y, w, h = _BLK_KBD
         _ui.dialog(cv, (x, y, w, h))
-        is_text = self.blk_kbd.get("kind") == "text"
-        cv.print("TYPE SOME TEXT" if is_text else "NAME YOUR VARIABLE",
-                 x + 10, y + 8, NAMES["white"], 1)
+        kind = self.blk_kbd.get("kind")
+        is_text = kind == "text"
+        title = {"text": "TYPE SOME TEXT", "proc": "NAME YOUR BLOCK",
+                 "param": "NAME AN INPUT"}.get(kind, "NAME YOUR VARIABLE")
+        cv.print(title, x + 10, y + 8, NAMES["white"], 1)
         cv.print("type, then OK", x + 10, y + 18, NAMES["light_grey"], 1)
         # the live edit buffer in a field with a blinking-ish caret bar
         fx, fy, fw = x + 10, y + 30, w - 20
@@ -1454,7 +1578,8 @@ class BlockEditorUI:
         border = NAMES["white"] if is_cursor else NAMES["black"]
         cv.rectb(x, y + fs, w - 2 * fs, rh - 2 * fs, border)
         # readable text color over the block fill (light on dark, dark on light)
-        fg = NAMES["white"] if cat in ("draw", "input", "variables", "control") \
+        fg = NAMES["white"] if cat in ("draw", "input", "variables", "control",
+                                       "myblocks") \
             and not row.is_else else NAMES["black"]
         if row.is_else:
             fg = NAMES["black"]
@@ -1496,12 +1621,16 @@ class BlockEditorUI:
         d = _blocks_mod.block_def(b.get("t"))
         if d is None:
             return str(b.get("t"))
+        # Program-aware label + slots (#48): proc_def reads "define NAME p1 p2" and a
+        # call reads "NAME {arg0} {arg1}" (one hole per proc parameter); every other
+        # block is its static catalog label. The rest of the inline fill is unchanged.
+        prog = self.blocks_ed.program if self.blocks_ed is not None else {}
         out = ""
-        tmpl = d["label"]
+        tmpl = _blocks_mod.block_label(prog, b)
         i = 0
         n = len(tmpl)
         slot_by_name = {}
-        for s in d["slots"]:
+        for s in _blocks_mod.block_slots(prog, b):
             slot_by_name[s["name"]] = s
         while i < n:
             ch = tmpl[i]
@@ -1523,11 +1652,12 @@ class BlockEditorUI:
     def _blk_slot_text_col(self, b, si):
         """The character column where slot `si`'s value starts in the rendered row
         label (so the caret underlines the right run). None if it can't be found."""
-        d = _blocks_mod.block_def(b.get("t"))
-        if d is None or si >= len(d["slots"]):
+        prog = self.blocks_ed.program if self.blocks_ed is not None else {}
+        bslots = _blocks_mod.block_slots(prog, b)
+        if si >= len(bslots):
             return None
-        target = d["slots"][si]["name"]
-        tmpl = d["label"]
+        target = bslots[si]["name"]
+        tmpl = _blocks_mod.block_label(prog, b)
         col = 0
         i = 0
         n = len(tmpl)
@@ -1541,7 +1671,7 @@ class BlockEditorUI:
                     continue
                 name = tmpl[i + 1:j]
                 slot = None
-                for s in d["slots"]:
+                for s in bslots:
                     if s["name"] == name:
                         slot = s
                         break
@@ -1597,7 +1727,8 @@ class BlockEditorUI:
         cv.rectb(mx, my, mw, mh, NAMES["yellow"])
         titles = {"cat": "PICK A KIND", "blk": "PICK A BLOCK",
                   "dropdown": "PICK ONE", "variable": "PICK A VARIABLE",
-                  "expr": "PICK A VALUE", "actions": "BLOCK ACTIONS"}
+                  "expr": "PICK A VALUE", "actions": "BLOCK ACTIONS",
+                  "proc": "EDIT THIS BLOCK"}
         cv.print(titles.get(m["mode"], "PICK"), mx + 6 * fs, my + 4 * fs, NAMES["yellow"], 1)
         items = m["items"]
         if not items:
@@ -1629,6 +1760,11 @@ class BlockEditorUI:
         item = m["items"][ridx]
         if item == _NUM_LITERAL_ITEM:
             return NAMES["white"]      # the white editable-oval look (Scratch)
+        # My Blocks rows (#48): "+ new block" and every "call NAME" carry the category
+        # color so the palette reads consistently.
+        if item == _NEW_PROC_ITEM or item[:len(_CALL_PREFIX)] == _CALL_PREFIX:
+            return NAMES[_blocks_mod.CATEGORY_COLOR.get(_blocks_mod.CAT_PROCS,
+                                                        "dark_grey")]
         if m["mode"] == "cat":
             return NAMES[_blocks_mod.CATEGORY_COLOR.get(item, "dark_grey")]
         if m["mode"] in ("blk", "expr"):

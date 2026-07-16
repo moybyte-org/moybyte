@@ -108,10 +108,11 @@ CAT_VARIABLES = "variables"
 CAT_LISTS = "lists"          # #48: the multi-thing data type
 CAT_OPERATORS = "operators"
 CAT_SOUND = "sound"
+CAT_PROCS = "myblocks"       # #48: custom blocks (My Blocks / procedures)
 
 CATEGORY_ORDER = [
     CAT_EVENTS, CAT_CONTROL, CAT_DRAW, CAT_INPUT,
-    CAT_VARIABLES, CAT_LISTS, CAT_OPERATORS, CAT_SOUND,
+    CAT_VARIABLES, CAT_LISTS, CAT_OPERATORS, CAT_SOUND, CAT_PROCS,
 ]
 
 # Color name (MOY64) per category -- the Scratch *look* (Part 2 paints blocks
@@ -125,6 +126,7 @@ CATEGORY_COLOR = {
     CAT_LISTS: "peach",
     CAT_OPERATORS: "green",
     CAT_SOUND: "pink",
+    CAT_PROCS: "dark_purple",   # #48: custom blocks (My Blocks / procedures)
 }
 
 
@@ -136,6 +138,9 @@ SHAPE_HAT = "hat"          # an event hat (top of a script): on_start/update/dra
 SHAPE_STATEMENT = "stmt"   # a plain one-line statement (no body)
 SHAPE_CBLOCK = "c-block"   # wraps a body of child statements ("c")
 SHAPE_EXPR = "expr"        # a reporter/boolean expression (used in expr slots)
+SHAPE_DEF = "def"          # #48: a custom-block DEFINITION hat (define NAME ...), a
+                           # body owner like a hat but DELETABLE (removes the whole
+                           # proc) -- lives in program["procs"], not program["scripts"].
 
 
 def _slot(name, kind, **extra):
@@ -521,7 +526,29 @@ CATALOG = {
         "slots": [_slot("freq", SLOT_NUMBER, default=440)],
         "emit": "beep({freq})",
     },
+
+    # -- my blocks (#48): custom procedures with parameters ------------------
+    # These two are SHAPE-only catalog entries (category + shape); their label and
+    # slots are DYNAMIC and program-aware -- see block_label / block_slots. A
+    # `proc_def` is a definition hat (its name + params live in its own `p` and it
+    # lives in program["procs"]); a `call` invokes a proc by name with 0..N args.
+    "proc_def": {
+        "category": CAT_PROCS, "shape": SHAPE_DEF,
+        "label": "define {name}",           # dynamic; block_label renders name+params
+        "slots": [],                        # edited via the PROC menu, not slot carets
+    },
+    "call": {
+        "category": CAT_PROCS, "shape": SHAPE_STATEMENT,
+        "label": "call {name}",             # dynamic; block_label adds one hole per arg
+        "slots": [],                        # dynamic expr slots, one per proc param
+        # NOTE: no "emit" template -- calls compile through _emit_call (dynamic args +
+        # the recursion guard), never the generic single-line emitter.
+    },
 }
+
+# The custom-block node type ids (#48), named so callers don't string-literal them.
+PROC_DEF = "proc_def"
+CALL = "call"
 
 # A pseudo-block that marks the boundary between the if and else bodies inside an
 # "if_else" c-block's children. It is NOT in CATALOG (it never appears in a menu);
@@ -574,6 +601,80 @@ def is_cblock(type_id):
     return bool(d) and d["shape"] == SHAPE_CBLOCK
 
 
+def is_def(type_id):
+    """True for the custom-block DEFINITION hat (#48). Like a hat it owns a body,
+    but unlike a hat it's deletable (deleting it removes the whole proc)."""
+    return type_id == PROC_DEF
+
+
+# ============================================================================
+# Custom blocks (#48): program-aware label + slots
+# ============================================================================
+#
+# A proc's define-hat carries its name + params in its own `p`:
+#     {"t":"proc_def","p":{"name":"draw_star","params":["px","py"]},"c":[...]}
+# A call carries the target name + positional args (each an expr value):
+#     {"t":"call","p":{"name":"draw_star","args":[3, mk("var",{"var":"n"})]}}
+# Because procs are created at runtime, their labels/slots can't be static CATALOG
+# entries -- these two helpers derive them from the live program instead.
+
+def proc_name(block):
+    """The name a proc_def defines / a call targets (or "" if absent)."""
+    return str((block.get("p", {}) or {}).get("name", "") or "")
+
+
+def proc_params(block):
+    """The parameter-name list of a proc_def (a fresh list; [] if none)."""
+    return list((block.get("p", {}) or {}).get("params", []) or [])
+
+
+def call_args(block):
+    """The positional arg-value list of a call (a fresh list; [] if none)."""
+    return list((block.get("p", {}) or {}).get("args", []) or [])
+
+
+def find_proc(program, name):
+    """The proc_def block declaring `name`, or None."""
+    for pd in program.get("procs", []) or []:
+        if proc_name(pd) == name:
+            return pd
+    return None
+
+
+def block_slots(program, block):
+    """The slot descriptors for a block -- DYNAMIC for a call (one expr slot per
+    parameter of the proc it targets), the static CATALOG slots otherwise. proc_def
+    has no slots (its name/params are edited through the PROC menu, not slot carets)."""
+    tid = block.get("t")
+    if tid == CALL:
+        pd = find_proc(program, proc_name(block))
+        n = len(proc_params(pd)) if pd is not None else len(call_args(block))
+        return [_slot("arg%d" % i, SLOT_EXPR) for i in range(n)]
+    if tid == PROC_DEF:
+        return []
+    d = CATALOG.get(tid)
+    return list(d["slots"]) if d else []
+
+
+def block_label(program, block):
+    """The human label template for a block -- DYNAMIC for proc_def / call, the
+    static CATALOG label otherwise. proc_def reads 'define NAME p1 p2' (brace-free:
+    params are edited via the PROC menu). call reads 'NAME {arg0} {arg1} ...' so the
+    generic inline renderer fills each arg slot's value in place."""
+    tid = block.get("t")
+    if tid == PROC_DEF:
+        nm = proc_name(block) or "block"
+        params = proc_params(block)
+        return "define " + nm + ((" " + " ".join(params)) if params else "")
+    if tid == CALL:
+        nm = proc_name(block) or "?"
+        n = len(block_slots(program, block))
+        holes = " ".join("{arg%d}" % i for i in range(n))
+        return nm + ((" " + holes) if holes else "")
+    d = CATALOG.get(tid)
+    return d["label"] if d else str(tid)
+
+
 # ============================================================================
 # Block construction helpers (Part 2's tree edits build on these)
 # ============================================================================
@@ -581,6 +682,19 @@ def is_cblock(type_id):
 def make_block(type_id, params=None, children=None):
     """Build a block dict. Unfilled slots get their catalog default (or a neutral
     zero/empty), so a freshly-inserted block always compiles."""
+    # Custom blocks (#48) carry non-slot payloads (name / params / args) that the
+    # generic slot-fill path would drop, so build them explicitly.
+    if type_id == PROC_DEF:
+        params = params or {}
+        return {"t": PROC_DEF,
+                "p": {"name": str(params.get("name", "")),
+                      "params": list(params.get("params", []) or [])},
+                "c": list(children) if children is not None else []}
+    if type_id == CALL:
+        params = params or {}
+        return {"t": CALL,
+                "p": {"name": str(params.get("name", "")),
+                      "args": list(params.get("args", []) or [])}}
     d = CATALOG.get(type_id)
     p = {}
     if d is not None:
@@ -700,11 +814,21 @@ class _Ctx:
     block only emits `break` when it really is inside a loop (a stray one becomes a
     safe `pass`, so the generated Python always parses)."""
 
-    def __init__(self, known_vars, known_lists, assigned):
+    def __init__(self, known_vars, known_lists, assigned,
+                 params=None, pinfo=None, current_proc=None):
         self.vars = known_vars
         self.lists = known_lists
         self.assigned = assigned        # name -> True (a function reassigns it -> global)
         self.loop_depth = 0
+        # -- custom blocks (#48) ------------------------------------------------
+        # `params` are the local parameter names of the proc currently compiling
+        # (locals: valid as variable slots INSIDE the body, but never `global`-hoisted).
+        # `pinfo` (a _ProcInfo) carries the known proc names, each proc's param list,
+        # and the call-graph reachability used by the recursion guard. `current_proc`
+        # is the name of the proc being compiled (None for a lifecycle script).
+        self.params = set(params or [])
+        self.pinfo = pinfo
+        self.current_proc = current_proc
 
 
 def _render_value(value, slot, ctx):
@@ -734,7 +858,9 @@ def _render_value(value, slot, ctx):
         return _render_text_literal(value)
     if kind == SLOT_VARIABLE:
         name = str(value)
-        if name not in ctx.vars:
+        # A proc's parameters are valid variable references INSIDE its body (#48) --
+        # they're the function's locals -- so accept them alongside the declared globals.
+        if name not in ctx.vars and name not in ctx.params:
             raise BlockError("unknown variable: " + name)
         return name
     if kind == SLOT_LIST:
@@ -807,6 +933,12 @@ def _emit_statement(block, ctx, indent, lines):
     shape = d["shape"]
     pad = _INDENT * indent
     params = block.get("p", {}) or {}
+
+    # A custom-block CALL (#48) compiles through its own emitter (dynamic positional
+    # args + the recursion guard), never the generic single-line template.
+    if tid == CALL:
+        _emit_call(block, ctx, pad, lines)
+        return
 
     if shape == SHAPE_STATEMENT:
         # reassigning statements: record the target for `global` hoisting.
@@ -929,6 +1061,47 @@ def _emit_cblock(tid, d, block, ctx, indent, lines):
     raise BlockError("unknown c-block emitter: " + str(emit))
 
 
+def _emit_call(block, ctx, pad, lines):
+    """Emit a custom-block CALL (#48): `name(arg0, arg1, ...)`.
+
+    Degrades to `pass` (matching the stray-break philosophy) when the call can't be
+    emitted safely:
+      * the target proc doesn't exist (a call to a deleted definition), or
+      * emitting it would create a call CYCLE -- a direct self-call or mutual
+        recursion. A synchronous frame loop can't recurse unbounded, so the
+        cycle-closing call becomes a no-op instead of a hang (the documented guard).
+    Args render positionally to the proc's CURRENT parameter count: extra stored args
+    are ignored and missing ones default to 0, so a call stays valid even after its
+    proc gains or loses a parameter."""
+    pinfo = ctx.pinfo
+    name = proc_name(block)
+    if pinfo is None or name not in pinfo.names:
+        lines.append(pad + "pass")               # unknown / deleted proc -> no-op
+        return
+    if _call_would_recurse(ctx, name):
+        lines.append(pad + "pass")               # direct or mutual recursion -> no-op
+        return
+    nparams = len(pinfo.params.get(name, []))
+    args = call_args(block)
+    parts = []
+    for i in range(nparams):
+        val = args[i] if i < len(args) else 0
+        parts.append(_render_expr(val, ctx))
+    lines.append(pad + name + "(" + ", ".join(parts) + ")")
+
+
+def _call_would_recurse(ctx, target):
+    """True if a call to `target` from the proc currently compiling would close a
+    call cycle (direct self-call, or mutual recursion where `target` can reach back
+    to the caller). Lifecycle scripts (current_proc is None) never recurse."""
+    cur = ctx.current_proc
+    if cur is None or ctx.pinfo is None:
+        return False
+    if target == cur:
+        return True
+    return cur in ctx.pinfo.reach.get(target, ())
+
+
 # Helper snippets the generated cart needs (emitted once, only when referenced).
 _HELPER_TOUCHED = (
     "def _touched():\n"
@@ -988,12 +1161,17 @@ _HELPER_LETTER = (
 )
 
 
-def _uses(scripts, needle):
-    """True if any block tree in `scripts` contains a block whose type id == needle.
-    Walks both child bodies ("c") and nested expression params ("p")."""
+def _uses(trees, needle):
+    """True if any block tree in `trees` (scripts and/or proc defs) contains a block
+    whose type id == needle. Walks child bodies ("c"), nested expression params ("p"),
+    and list-valued params such as a call's positional args (#48)."""
     found = [False]
 
     def walk(node):
+        if isinstance(node, list):                # e.g. a call's positional args (#48)
+            for it in node:
+                walk(it)
+            return
         if not isinstance(node, dict):
             return
         if node.get("t") == needle:
@@ -1003,7 +1181,7 @@ def _uses(scripts, needle):
         for v in (node.get("p", {}) or {}).values():
             walk(v)
 
-    for s in scripts:
+    for s in trees:
         walk(s)
     return found[0]
 
@@ -1048,6 +1226,140 @@ _KEYWORDS = {
     "if", "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise",
     "return", "try", "while", "with", "yield",
 }
+
+# Names a custom block (#48) may NOT take: a proc compiles to `def <name>(...)`, so
+# a name that collides with a cart-API verb (the make_api namespace), a builtin the
+# generated code calls, a compiler helper, or a lifecycle function would SHADOW it
+# and break the cart. The editor gates proc names through this too, so a BlockError
+# here only ever fires on a hand-corrupted blocks.json.
+_RESERVED_NAMES = {
+    # cart API verbs (host_app.make_api / moy_runtime -- keep in sync if that grows)
+    "W", "H", "cls", "pix", "line", "rect", "rectb", "circ", "circb", "spr",
+    "spr_batch", "background", "make_layer", "draw_layer", "map", "mget", "mset",
+    "print", "touch", "mouse", "clip", "camera", "pal", "palt", "btn", "btnp",
+    "key", "keyp", "time", "pmem", "textmode", "quit", "cfg", "col", "sfx", "beep",
+    "music", "music_stop", "sound_stop", "volume", "rnd", "flr", "Image", "image",
+    "wifi",
+    # builtins the generated code relies on
+    "int", "range", "len", "str", "min", "max", "abs", "round", "bool",
+    # lifecycle functions + the compiler's own helpers (all `_`-prefixed)
+    "_init", "_update", "_draw", "_touched", "_touch_x", "_touch_y", "_wait",
+    "_wait_until", "_lget", "_lremove", "_lset", "_letter",
+}
+
+
+def is_reserved_name(name):
+    """True if `name` is a reserved verb/builtin/helper a custom block can't reuse."""
+    return name in _RESERVED_NAMES
+
+
+class _ProcInfo:
+    """Compiled facts about a program's custom blocks (#48), built once per compile:
+    the set of proc names, each proc's parameter list, and the call-graph
+    reachability the recursion guard consults (reach[a] = every proc transitively
+    callable starting from a)."""
+
+    def __init__(self, names, params, reach):
+        self.names = names          # set of proc names
+        self.params = params        # name -> [param, ...]
+        self.reach = reach          # name -> set of transitively-reachable proc names
+
+
+def collect_procs(program):
+    """The declared custom blocks (#48) as a list of proc_def blocks, validated.
+
+    Each proc becomes a top-level `def name(params):`, so names/params are held to
+    the same identifier + collision discipline as variables/lists (a hand-edited
+    blocks.json can't inject code or shadow the cart API through them):
+      * name is a safe identifier, not a reserved verb/builtin/helper, unique among
+        procs, and doesn't clash with a declared variable or list (all module-level),
+      * each parameter is a safe identifier, unique within that proc, and not reserved.
+    Returns [] for a pre-#48 program with no "procs" key (back-compat)."""
+    var_set = set(collect_vars(program))
+    list_set = set(collect_lists(program))
+    out = []
+    seen = {}
+    for pd in program.get("procs", []) or []:
+        if not isinstance(pd, dict) or pd.get("t") != PROC_DEF:
+            raise BlockError("not a custom-block definition")
+        name = proc_name(pd)
+        if not _is_identifier(name):
+            raise BlockError("bad custom-block name: " + name)
+        if is_reserved_name(name):
+            raise BlockError("custom-block name is reserved: " + name)
+        if name in seen:
+            raise BlockError("duplicate custom-block name: " + name)
+        if name in var_set or name in list_set:
+            raise BlockError("custom-block name clashes with a variable/list: " + name)
+        pseen = {}
+        for raw in proc_params(pd):
+            pn = str(raw)
+            if not _is_identifier(pn):
+                raise BlockError("bad parameter name: " + pn)
+            if is_reserved_name(pn):
+                raise BlockError("parameter name is reserved: " + pn)
+            if pn in pseen:
+                raise BlockError("duplicate parameter name: " + pn)
+            pseen[pn] = True
+        seen[name] = True
+        out.append(pd)
+    return out
+
+
+def _proc_info(procs):
+    """Build the _ProcInfo (names / params / call-graph reachability) for `procs`."""
+    names = set(proc_name(pd) for pd in procs)
+    params = {}
+    edges = {}
+    for pd in procs:
+        nm = proc_name(pd)
+        params[nm] = proc_params(pd)
+        edges[nm] = _calls_in(pd.get("c", []) or [], names)
+    reach = {}
+    for nm in names:
+        reach[nm] = _reachable_from(nm, edges)
+    return _ProcInfo(names, params, reach)
+
+
+def _calls_in(body, names):
+    """The set of proc names this body (a statement/expr tree) directly calls."""
+    out = set()
+
+    def walk(node):
+        if isinstance(node, list):
+            for it in node:
+                walk(it)
+            return
+        if not isinstance(node, dict):
+            return
+        if node.get("t") == CALL:
+            tgt = proc_name(node)
+            if tgt in names:
+                out.add(tgt)
+        for c in node.get("c", []) or []:
+            walk(c)
+        for v in (node.get("p", {}) or {}).values():
+            walk(v)
+
+    for b in body:
+        walk(b)
+    return out
+
+
+def _reachable_from(start, edges):
+    """Every proc name transitively reachable by following call edges from `start`
+    (NOT including `start` unless a cycle leads back to it)."""
+    reach = set()
+    stack = list(edges.get(start, ()))
+    while stack:
+        nm = stack.pop()
+        if nm in reach:
+            continue
+        reach.add(nm)
+        for nxt in edges.get(nm, ()):
+            if nxt not in reach:
+                stack.append(nxt)
+    return reach
 
 
 def _is_identifier(name):
@@ -1165,7 +1477,12 @@ def compile_blocks(program):
         raise BlockError("program is not a dict")
     known_vars = collect_vars(program)
     known_lists = collect_lists(program)
+    procs = collect_procs(program)                 # #48: custom blocks (validated)
+    pinfo = _proc_info(procs)
     scripts = program.get("scripts", []) or []
+    # Helper detection must see proc bodies too (a helper may be used only inside a
+    # custom block), so scan scripts + proc definitions together.
+    use_trees = scripts + procs
 
     out = [BLOCK_MARKER + " Edit in the block editor (or graduate to code)."]
 
@@ -1178,33 +1495,60 @@ def compile_blocks(program):
             out.append(lst + " = []")
 
     # helper functions, emitted only when used (keeps the cart minimal + readable).
-    if _uses(scripts, "touched"):
+    if _uses(use_trees, "touched"):
         out.append("")
         out.append(_HELPER_TOUCHED.rstrip("\n"))
-    if _uses(scripts, "touch_x"):
+    if _uses(use_trees, "touch_x"):
         out.append("")
         out.append(_HELPER_TOUCH_X.rstrip("\n"))
-    if _uses(scripts, "touch_y"):
+    if _uses(use_trees, "touch_y"):
         out.append("")
         out.append(_HELPER_TOUCH_Y.rstrip("\n"))
-    if _uses(scripts, "wait"):
+    if _uses(use_trees, "wait"):
         out.append("")
         out.append(_HELPER_WAIT.rstrip("\n"))
-    if _uses(scripts, "wait_until"):
+    if _uses(use_trees, "wait_until"):
         out.append("")
         out.append(_HELPER_WAIT_UNTIL.rstrip("\n"))
-    if _uses(scripts, "list_get"):
+    if _uses(use_trees, "list_get"):
         out.append("")
         out.append(_HELPER_LGET.rstrip("\n"))
-    if _uses(scripts, "list_remove_at"):
+    if _uses(use_trees, "list_remove_at"):
         out.append("")
         out.append(_HELPER_LREMOVE.rstrip("\n"))
-    if _uses(scripts, "list_set_at"):
+    if _uses(use_trees, "list_set_at"):
         out.append("")
         out.append(_HELPER_LSET.rstrip("\n"))
-    if _uses(scripts, "op_letter"):
+    if _uses(use_trees, "op_letter"):
         out.append("")
         out.append(_HELPER_LETTER.rstrip("\n"))
+
+    # custom-block definitions (#48): one top-level `def name(params):` per proc,
+    # emitted BEFORE the lifecycle functions (Python resolves call names at call time,
+    # so the order is purely cosmetic; procs-first reads cleaner). Each body compiles
+    # with its params as LOCALS -- valid as variable references, never `global`-hoisted
+    # -- while a declared var/list the body REASSIGNS is still hoisted `global`, exactly
+    # like a lifecycle function. Emitting nothing when there are no procs keeps a
+    # procs-less program byte-identical to pre-#48 output.
+    for pd in procs:
+        name = proc_name(pd)
+        params = proc_params(pd)
+        out.append("")
+        out.append("")
+        out.append("def " + name + "(" + ", ".join(params) + "):")
+        body_lines = []
+        ctx = _Ctx(known_vars, known_lists, {}, params=params,
+                   pinfo=pinfo, current_proc=name)
+        _emit_body(pd.get("c", []) or [], ctx, 1, body_lines)
+        pset = set(params)
+        glob = [v for v in known_vars if v in ctx.assigned and v not in pset]
+        glob += [lst for lst in known_lists if lst in ctx.assigned and lst not in pset]
+        if glob:
+            out.append(_INDENT + "global " + ", ".join(glob))
+        if not body_lines:
+            out.append(_INDENT + "pass")
+        else:
+            out.extend(body_lines)
 
     # group scripts by lifecycle function, preserving order (so two on_draw hats
     # concatenate into one _draw body in the order they appear).
@@ -1227,7 +1571,7 @@ def compile_blocks(program):
 
         # emit the body to a scratch list first so we can compute `global` hoisting.
         body_lines = []
-        ctx = _Ctx(known_vars, known_lists, {})
+        ctx = _Ctx(known_vars, known_lists, {}, pinfo=pinfo)
         for hat in hats:
             _emit_body(hat.get("c", []) or [], ctx, 1, body_lines)
 
