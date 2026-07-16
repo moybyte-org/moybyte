@@ -47,6 +47,14 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.audio import MusicTrack, SFX
 
+# The shared pre-literate glyph vocabulary (#92 icon pass): the copy/paste/duplicate/
+# reorder pads lead with a 12x12 chrome glyph; the bar UNDO/REDO draw glyph-only.
+# Imported for the membership check that keeps the word label as a fallback.
+try:
+    from chrome import _GLYPHS
+except ImportError:  # pragma: no cover - direct host import (chrome not yet aliased)
+    from runtime.chrome import _GLYPHS
+
 # Music / sound editor (#50): a tracker-style step editor over the cart's AudioBank.
 # Two views: SFX (a vertical column of [note, wave, vol] steps for one effect) and
 # SONG (a column of SFX-id slots making the looping phrase). The cursor picks a
@@ -104,6 +112,11 @@ _MU_REDO = (268, 198, 46, 24)
 _MU_NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F",
                   "F#", "G", "G#", "A", "A#", "B")
 _MU_WAVE_LABELS = ("SQ", "TRI", "SAW", "NOI")   # WAVE_SQUARE/TRIANGLE/SAW/NOISE
+# The pre-literate glyph for each #92 edit-pad button (icon + word), keyed by label:
+# COPY/PASTE/DUP + the reorder arrows (the step/slot list is vertical, so MOVE-/MOVE+
+# read as up/down). The other pad buttons (NOTE-, WAVE, ADD, ...) stay plain labels.
+_MU_PAD_GLYPH = {"COPY": "copy", "PASTE": "paste", "DUP": "duplicate",
+                 "MOVE-": "arr_u", "MOVE+": "arr_d"}
 
 
 def _mu_note_name(pitch):
@@ -478,12 +491,24 @@ class MusicEditorUI:
         # UNDO/REDO (#92) -- always tappable, same "just don't crash" style as DEL
         # on a single-step SFX (undo()/redo() are no-ops at either end of the
         # bounded stack; me.can_undo()/can_redo() are there for callers/tests that
-        # want to know without tapping).
-        ws._btn("UNDO", lay.undo_btn, NAMES["dark_grey"], cv)
-        ws._btn("REDO", lay.redo_btn, NAMES["dark_grey"], cv)
+        # want to know without tapping). Glyph-only (the bar slots are too narrow for
+        # an icon + word), so the #92 icon pass reaches this pair too.
+        self._gbtn("undo", "UNDO", lay.undo_btn, NAMES["dark_grey"], cv)
+        self._gbtn("redo", "REDO", lay.redo_btn, NAMES["dark_grey"], cv)
         if ws.save_status:
             cv.print(ws.save_status[:8], lay.status_x, lay.title_y,
                      th["author"] if light else NAMES["yellow"], 1)
+
+    def _gbtn(self, kind, label, rect, fill, cv):
+        """A bottom-bar button carrying a centered 12x12 chrome glyph (#92 icon pass):
+        the colored `ws._btn` chip, then the glyph (black, matching the label ink).
+        Falls back to the word `label` when the glyph kind is missing."""
+        ws = self.ws
+        if kind is not None and kind in _GLYPHS:
+            ws._btn("", rect, fill, cv)
+            ws._glyph(kind, rect, self._NAMES["black"], cv)
+        else:
+            ws._btn(label, rect, fill, cv)
 
     def _mu_tick(self, rect, label):
         """A small +/- tick button (smaller text than _btn for the title-strip nudges)."""
@@ -607,4 +632,13 @@ class MusicEditorUI:
                 lbl = labels[row][col]
                 if not lbl:
                     continue
-                self.ws._btn(lbl, self.layout.pad_rect(col, row), cols[row][col], cv)
+                rect = self.layout.pad_rect(col, row)
+                fill = cols[row][col]
+                # The #92 pads (COPY/PASTE/DUP/MOVE) lead with an icon + keep the word
+                # (the pads are wide enough); the rest stay plain labels. A missing
+                # glyph kind falls back to the plain labeled button.
+                kind = _MU_PAD_GLYPH.get(lbl)
+                if kind is not None and kind in _GLYPHS:
+                    self.ws._icon_btn(kind, lbl, rect, fill, cv)
+                else:
+                    self.ws._btn(lbl, rect, fill, cv)

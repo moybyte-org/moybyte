@@ -39,6 +39,14 @@ the font. Hit-testing is in SYSTEM coords (no _game_xy translation).
 """
 from editors import PaintEditor, KeyEdge
 
+# The shared pre-literate glyph vocabulary (#89-#93 icon pass): the tool row draws a
+# 12x12 chrome glyph per button instead of a one-char label. Imported for the
+# membership check that keeps the letter as a fallback if a kind is ever missing.
+try:
+    from chrome import _GLYPHS
+except ImportError:  # pragma: no cover - direct host import (chrome not yet aliased)
+    from runtime.chrome import _GLYPHS
+
 
 # -- paint geometry (single source; console.py imports these back) ------------
 # The frozen 320x240 baseline PaintLayout reproduces VERBATIM (#39 graceful
@@ -82,6 +90,15 @@ _TOOL_LABEL = {
     "undo": "Z", "redo": "Y", "fill": "F", "fliph": "H", "flipv": "V",
     "rot": "R", "sleft": "<", "sright": ">", "sup": "^", "sdown": "v",
     "clear": "X",
+}
+# The pre-literate glyph for each tool (#89-#93 icon pass): a 12x12 chrome glyph
+# (runtime/chrome.py _GLYPHS) drawn centered instead of the single-char label, so
+# the row reads as pictures. _blit_glyph draws NOTHING for an unknown kind, so the
+# _TOOL_LABEL letter above stays the guaranteed fallback (see _draw_tools).
+_TOOL_GLYPH = {
+    "undo": "undo", "redo": "redo", "fill": "fill", "fliph": "flip_h",
+    "flipv": "flip_v", "rot": "rotate", "sleft": "arr_l", "sright": "arr_r",
+    "sup": "arr_u", "sdown": "arr_d", "clear": "clear",
 }
 # Baseline (320x240) tool row: a full-width strip in the gap between the grid
 # bottom (y176) and the SAVE/CLOSE row (y190). 11 buttons of 26px across x14..300.
@@ -439,10 +456,13 @@ class PaintLayer:
 
     def _draw_tools(self):
         """Draw the compact tool row: undo/redo, the FILL toggle, and the whole-sprite
-        transforms. Single-char labels centered at the canvas font scale (#39). The
-        active FILL tool is accented; undo/redo dim when their ring is empty. Drawn on
-        the panel surface directly with the indexed primitives (no chrome-glyph
-        vocabulary change), so it renders identically on host and device."""
+        transforms. Each button carries a centered 12x12 chrome GLYPH (the #89-#93 icon
+        pass -- undo/redo/fill/flip/rotate/shift-arrows/clear) instead of its one-char
+        label, so the row reads as pictures on the pre-literate tiers. The active FILL
+        tool is accented; undo/redo dim when their ring is empty. Drawn on the panel
+        surface directly (indexed primitives + ws._glyph), so host == device; the glyph
+        follows the canvas font scale (#39). If a glyph kind were ever missing, ws._glyph
+        draws nothing and the _TOOL_LABEL letter is the guaranteed fallback."""
         NAMES = self._NAMES
         ws = self.ws
         cv = ws.sys_canvas
@@ -467,8 +487,12 @@ class PaintLayer:
             ink = NAMES["white"] if enabled else NAMES["dark_grey"]
             cv.rect(x, y, w, h, fill)
             cv.rectb(x, y, w, h, NAMES["light_grey"])
-            lbl = _TOOL_LABEL[tid]
-            cv.print(lbl, x + (w - 8 * fs) // 2, y + (h - 8 * fs) // 2, ink, fs)
+            kind = _TOOL_GLYPH.get(tid)
+            if kind is not None and kind in _GLYPHS:
+                ws._glyph(kind, (x, y, w, h), ink, cv)
+            else:                            # missing glyph -> the letter is the fallback
+                cv.print(_TOOL_LABEL[tid],
+                         x + (w - 8 * fs) // 2, y + (h - 8 * fs) // 2, ink, fs)
 
     # -- draw ----------------------------------------------------------------
 

@@ -28,6 +28,14 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editors import MapEditor, KeyEdge
 
+# The shared pre-literate glyph vocabulary (#91 icon pass): the #91 toolbar (TOOL/
+# UNDO/REDO/resize) + the resize panel's -/+ draw a 12x12 chrome glyph instead of a
+# terse label. Imported for the membership check that keeps the label as a fallback.
+try:
+    from chrome import _GLYPHS
+except ImportError:  # pragma: no cover - direct host import (chrome not yet aliased)
+    from runtime.chrome import _GLYPHS
+
 # Map (tilemap) editor (#32): a panned view of the map on the left where each cell
 # is the scaled sprite tile placed there, and a paged tile palette on the right to
 # pick the brush tile. Tap a map cell to stamp the brush (or erase, when the ERASE
@@ -122,6 +130,10 @@ _MAP_DIM = (280, 17, 26, 13)
 # same-tile fill). Two-char labels for the compact toolbar button.
 _MAP_TOOLS = ("stamp", "rect", "flood")
 _MAP_TOOL_LABEL = {"stamp": "PN", "rect": "BX", "flood": "FL"}
+# The pre-literate glyph the TOOL button shows for the ACTIVE tool (#91 icon pass):
+# a pen/brush for STAMP, a hollow box for RECT, a paint bucket for FLOOD. _blit_glyph
+# draws nothing for an unknown kind, so _MAP_TOOL_LABEL stays the fallback.
+_MAP_TOOL_GLYPH = {"stamp": "paint", "rect": "rect_tool", "flood": "fill"}
 # Map resize (#91): the largest grid the +/- steppers will grow to. 96x96 = 9216
 # cells (~9KB) is a generous kid level and still device-RAM-safe; shrink floors at
 # 1x1 (TileMap.resize clamps too).
@@ -733,6 +745,18 @@ class MapEditorUI:
 
     # -- drawing -----------------------------------------------------------------
 
+    def _gbtn(self, kind, label, rect, fill, cv):
+        """A tool button carrying a centered 12x12 chrome glyph (#91 icon pass): the
+        colored `ws._btn` chip, then the glyph (black, matching the button's label
+        ink) over it. Falls back to the terse `label` when the glyph kind is missing
+        (or None), so the row is never blank."""
+        ws = self.ws
+        if kind is not None and kind in _GLYPHS:
+            ws._btn("", rect, fill, cv)
+            ws._glyph(kind, rect, self._NAMES["black"], cv)
+        else:
+            ws._btn(label, rect, fill, cv)
+
     def _draw_map(self):
         # The map (tilemap) editor (#32): a panned view of the map on the left where
         # each cell shows the placed sprite tile, and a paged tile palette on the
@@ -877,15 +901,17 @@ class MapEditorUI:
         cv.print("SKY", sx + sw - 26 * fs, sy + (sh - 8 * fs) // 2, NAMES["white"], 1)
         cv.rectb(sx, sy, sw, sh,
                  NAMES["white"] if me.n < 0 else NAMES["dark_grey"])
-        # Editor toolbar (#91): TOOL (shows the active tool PN/BX/FL), UNDO / REDO
-        # (dimmed when the in-editor journal is at an end), DIM (open resize panel).
-        ws._btn(_MAP_TOOL_LABEL.get(self.map_tool, "PN"), lay.tool_btn,
-                NAMES["orange"], cv)
-        ws._btn("UN", lay.undo_btn,
-                NAMES["blue"] if me.can_undo() else NAMES["dark_grey"], cv)
-        ws._btn("RE", lay.redo_btn,
-                NAMES["blue"] if me.can_redo() else NAMES["dark_grey"], cv)
-        ws._btn("WH", lay.dim_btn, NAMES["dark_green"], cv)
+        # Editor toolbar (#91): TOOL (the active tool's pen/box/bucket glyph), UNDO /
+        # REDO (dimmed when the in-editor journal is at an end), the resize glyph (open
+        # the resize panel). Icons instead of the terse two-char labels (#91 icon pass).
+        self._gbtn(_MAP_TOOL_GLYPH.get(self.map_tool),
+                   _MAP_TOOL_LABEL.get(self.map_tool, "PN"), lay.tool_btn,
+                   NAMES["orange"], cv)
+        self._gbtn("undo", "UN", lay.undo_btn,
+                   NAMES["blue"] if me.can_undo() else NAMES["dark_grey"], cv)
+        self._gbtn("redo", "RE", lay.redo_btn,
+                   NAMES["blue"] if me.can_redo() else NAMES["dark_grey"], cv)
+        self._gbtn("resize", "WH", lay.dim_btn, NAMES["dark_green"], cv)
         # Map-resize overlay (#91): drawn LAST so it sits over the whole editor.
         if self.dims_open:
             self._draw_dims(cv, NAMES)
@@ -906,10 +932,10 @@ class MapEditorUI:
         wy, hy = r["rows"]
         w = tm.w if tm is not None else 0
         h = tm.h if tm is not None else 0
-        ws._btn("-", r["w_dn"], NAMES["red"], cv)
-        ws._btn("+", r["w_up"], NAMES["green"], cv)
-        ws._btn("-", r["h_dn"], NAMES["red"], cv)
-        ws._btn("+", r["h_up"], NAMES["green"], cv)
+        self._gbtn("minus", "-", r["w_dn"], NAMES["red"], cv)
+        self._gbtn("plus", "+", r["w_up"], NAMES["green"], cv)
+        self._gbtn("minus", "-", r["h_dn"], NAMES["red"], cv)
+        self._gbtn("plus", "+", r["h_up"], NAMES["green"], cv)
         yoff = (22 * fs - 8 * fs) // 2
         cv.print("W " + str(w), px + pw // 2 - 14 * fs, wy + yoff, NAMES["white"], 1)
         cv.print("H " + str(h), px + pw // 2 - 14 * fs, hy + yoff, NAMES["white"], 1)
