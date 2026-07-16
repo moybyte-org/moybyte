@@ -305,6 +305,56 @@ def test_fill_tool_button_toggles_and_fills(tmp_path):
                for y in range(8) for x in range(8))
 
 
+def test_fill_fires_once_even_if_press_wobbles_off_the_grid(tmp_path):
+    # Regression (#90 review): the once-per-press FILL guard used _paint_drag, which
+    # _paint_stroke resets whenever the held pointer leaves the grid -- so one press
+    # that wobbled off the grid edge and back in flooded a SECOND region on re-entry
+    # (+ recorded a surprise extra undo step). The guard is a dedicated per-press
+    # flag now, cleared only on pointer release: press in the grid -> drag out ->
+    # drag back in over a DIFFERENT color region, all one press == exactly ONE fill.
+    from runtime import console as C
+    from runtime import host_app
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_paint(ws)
+    drv = host_app.ConsoleDriver(ws)
+    ws.paint.n = 0
+    ws.paint.clear()                   # blank canvas (one undo step of its own)
+    ws.paint.color = 2
+    # Wall down column x==4 splits the tile into two separate flood regions.
+    ws.paint.begin_stroke()
+    for y in range(8):
+        ws.paint.paint(4, y)
+    ws.paint.end_stroke()
+    steps_before = len(ws.paint._undo)
+    ox, oy = ws.sheet.tile_origin(ws.paint.n)
+
+    # FILL tool on, then one press: left region -> off the grid -> right region.
+    ws.paint.tool = ws.paint.FILL
+    ws.paint.color = 11
+    lx, ly = _cell_center(C, 1, 1, ws.paint.dim)
+    drv.touch(lx, ly)                  # press: floods the LEFT region
+    drv.frame(1 / 30)
+    drv.touch_drag(C._PG_X0 - 6, ly)   # wobble off the grid's left edge (held)
+    drv.frame(1 / 30)
+    rx, ry = _cell_center(C, 6, 1, ws.paint.dim)
+    drv.touch_drag(rx, ry)             # back in, over the RIGHT region (still held)
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+
+    assert ws.sheet.pget(ox + 1, oy + 1) == 11        # left region flooded...
+    assert ws.sheet.pget(ox + 6, oy + 1) == 0         # ...right region UNTOUCHED
+    assert len(ws.paint._undo) == steps_before + 1    # exactly one undo step added
+
+    # The release re-armed the guard: a fresh press fills again.
+    drv.touch(rx, ry)
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert ws.sheet.pget(ox + 6, oy + 1) == 11
+
+
 def test_undo_redo_buttons_revert_a_stroke(tmp_path):
     from runtime import console as C
     from runtime import host_app
