@@ -357,6 +357,119 @@ def save_image(cart, name, text):
     imgs[name] = text
 
 
+# Scene assets (#85) live in a per-cart scenes/ subfolder as <name>.moyscene files --
+# the FOURTH asset type (a WYSIWYG-placed table of actors), alongside sprites.moygfx,
+# map.moymap and the images/. A .moyscene is plain compact JSON: an ordered list of
+# actor rows {tag, tile, x, y, flip, flags} (order = spawn order = draw order; no
+# compression -- these tables are small, unlike the bitmaps). The manifest's
+# assets.scenes list is the authoritative ORDERED set (its first entry is the default
+# active scene, the one bare scene() iterates); the folder scan is the safety net. The
+# cart consumes them once in _init via scene()/load_scene() (data-only, #85 Variant A)
+# -- Project builds a widgets.Scenes from the raw blobs. json+os only, like the rest.
+SCENES_DIR = "scenes"
+SCENE_EXT = ".moyscene"
+
+
+def load_scene(path, name):
+    """One scene blob (scenes/<name>.moyscene) for the cart at `path`, or None."""
+    try:
+        return _read(path + "/" + SCENES_DIR + "/" + name + SCENE_EXT)
+    except OSError:
+        return None
+
+
+def load_scenes(path):
+    """A cart's scene assets (#85): {name: text} of every scenes/<name>.moyscene blob
+    (name = filename without the extension), or {} when the cart has no scenes/ dir.
+    Kept as raw JSON text (like the map/image blobs); Project builds the widgets.Scenes
+    the cart reads. Guarded so a missing dir / bad entry just yields fewer scenes, never
+    a crash (mirrors load_images)."""
+    out = {}
+    d = path + "/" + SCENES_DIR
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return out                     # no scenes/ subfolder -> the common case
+    for name in names:
+        if name.endswith(SCENE_EXT):
+            try:
+                out[name[:-len(SCENE_EXT)]] = _read(d + "/" + name)
+            except OSError:
+                pass                   # skip an unreadable entry, keep the rest
+    return out
+
+
+def scene_names(man, blobs):
+    """The ordered scene names for a cart (#85): the manifest's assets.scenes order
+    (filtered to scenes that actually exist on disk), then any on-disk scene the
+    manifest forgot, appended sorted -- so the loader is authoritative but robust to a
+    hand-added file. `man` is the parsed manifest, `blobs` the load_scenes() dict.
+    Element 0 is the default active scene."""
+    order = []
+    seen = {}
+    assets = man.get("assets") if isinstance(man, dict) else None
+    listed = assets.get("scenes") if isinstance(assets, dict) else None
+    if isinstance(listed, list):
+        for n in listed:
+            if n in blobs and n not in seen:
+                order.append(n)
+                seen[n] = True
+    for n in sorted(blobs.keys()):     # any on-disk scene the manifest didn't list
+        if n not in seen:
+            order.append(n)
+            seen[n] = True
+    return order
+
+
+def _manifest_add_scene(cart_dir, name):
+    """Register scene `name` in manifest.json's assets.scenes list (#85), preserving
+    every other manifest field (title/version/edit/permissions/assets.*). Idempotent
+    -- a name already listed writes nothing. Atomic (its rename is the torn-write
+    proofing), like _manifest_set_graduated. Returns the ordered scene-name list after
+    the change (so save_scene can sync cart['scene_names']), or None on a missing/bad
+    manifest."""
+    path = cart_dir + "/manifest.json"
+    try:
+        man = json.loads(_read_recover(path))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(man, dict):
+        return None
+    assets = man.get("assets")
+    if not isinstance(assets, dict):
+        assets = {}
+        man["assets"] = assets
+    scenes = assets.get("scenes")
+    if not isinstance(scenes, list):
+        scenes = []
+        assets["scenes"] = scenes
+    if name not in scenes:
+        scenes.append(name)
+        _write_atomic(path, json.dumps(man))
+    return list(scenes)
+
+
+def save_scene(cart, name, text):
+    """Persist one scene to scenes/<name>.moyscene (#85) -- the mirror of save_map,
+    atomically so an interrupted write can't truncate the real file. Registers the
+    scene in manifest.json's assets.scenes (so load() finds it) and updates the live
+    cart dict (cart['scenes'] + cart['scene_names']). `text` is the compact .moyscene
+    JSON blob (an ordered actor list)."""
+    _mkdir(cart["path"] + "/" + SCENES_DIR)
+    _write_atomic(cart["path"] + "/" + SCENES_DIR + "/" + name + SCENE_EXT, text)
+    scenes = cart.get("scenes")
+    if not isinstance(scenes, dict):
+        scenes = {}
+        cart["scenes"] = scenes
+    scenes[name] = text
+    order = _manifest_add_scene(cart["path"], name)
+    if order is not None:
+        cart["scene_names"] = order
+    elif name not in (cart.get("scene_names") or []):
+        # No/bad manifest to update -- keep the live ordered list consistent anyway.
+        cart["scene_names"] = list(cart.get("scene_names") or []) + [name]
+
+
 def artwork_path(root=CARTS_DIR):
     """The shared Paint document, beside the carts directory."""
     parent = root.rsplit("/", 1)[0]
@@ -504,6 +617,14 @@ def seed_builtins(seed_list, root=CARTS_DIR):
             manifest["canvas"] = cart["canvas"]
         if cart.get("permissions") is not None:
             manifest["permissions"] = cart["permissions"]
+        scenes = cart.get("scenes")               # {name: .moyscene blob}, optional (#85)
+        if scenes:
+            # Register the ordered set in manifest.assets.scenes (element 0 = default
+            # active) BEFORE the manifest is written, so load() finds them. A seed may
+            # pin the order via "scene_order"; else sorted names (bump the built-in's
+            # version, #47, whenever a seed's scenes change -- like any other content).
+            manifest["assets"] = {"scenes": list(cart.get("scene_order")
+                                                 or sorted(scenes.keys()))}
         _write(d + "/manifest.json", json.dumps(manifest))
         _write(d + "/" + cart.get("main", "main.py"), cart["src"])
         _write(d + "/config.json", json.dumps(cart["cfg"]))
@@ -526,6 +647,10 @@ def seed_builtins(seed_list, root=CARTS_DIR):
             # a block-authored seed (tap_game) ships its blocks.json so it opens in
             # the on-device block editor as blocks, not just compiled code.
             _write(d + "/blocks.json", json.dumps(blocks))
+        if scenes:                                # scene assets (#85), written last
+            _mkdir(d + "/" + SCENES_DIR)
+            for sname, sblob in scenes.items():
+                _write(d + "/" + SCENES_DIR + "/" + sname + SCENE_EXT, sblob)
         if preserved:
             # restore the kid's saves + tuning AFTER the seed write, so config.json
             # holds their values (not the freshly-seeded defaults) and pmem survives.
@@ -578,6 +703,7 @@ def load(path):
         except (OSError, ValueError):
             blocks = None
         images = load_images(path)                # paint-image assets (#63), {} if none
+        scenes = load_scenes(path)                # scene assets (#85), {} if none
         return {
             "path": path,
             "title": man.get("title", "cart"),
@@ -615,6 +741,13 @@ def load(path):
             # A cart references one via the api's image(name) accessor and places it
             # with spr(img, x, y) -- a big MOY64 index bitmap (a painted background).
             "images": images,
+            # Scene assets (#85 Variant A): {name: .moyscene text} from scenes/, or {}.
+            # The manifest's assets.scenes is the ordered set (element 0 = default
+            # active); Project builds a widgets.Scenes the cart reads via scene()/
+            # load_scene() in _init. scene_names is that order (files not in the
+            # manifest are appended sorted, so a hand-added scene still loads).
+            "scenes": scenes,
+            "scene_names": scene_names(man, scenes),
         }
     except Exception as exc:  # noqa: BLE001  -- never let one bad cart escape
         print("Moybyte cart unreadable:", path, exc)
@@ -812,7 +945,12 @@ def _journal_ts():
 
 
 def _journal_snap_name(seq, file):
-    return "%04d-%s" % (seq, file)
+    # A subfolder asset (#85: scenes/<name>.moyscene) has a "/" in its `file`; flatten
+    # it in the SNAPSHOT filename so the snapshot lands directly under journal/s/ (a
+    # "/" would open into a non-existent subdir). The entry's `file` field keeps the
+    # real relative path, so undo/redo still restore to cart_dir/scenes/<name>.moyscene.
+    # No-op for the existing top-level files (main.py/sprites.moygfx/... have no "/").
+    return "%04d-%s" % (seq, file.replace("/", "_"))
 
 
 def _journal_load_entries(log_path):
@@ -1484,19 +1622,27 @@ def _unique_dir(root, base):
 
 
 def create(title, root=CARTS_DIR, src=None, cfg=None, edit=None, type="app",
-           runtime="python", main="main.py"):
+           runtime="python", main="main.py", scenes=None, scene_order=None):
     """Create a new .moy folder and return its loaded cart dict. `runtime`/`main`
     default to a python cart; duplicate() passes a source cart's through so a
-    copied "lua" cart (#67) stays a lua cart with its source in main.lua."""
+    copied "lua" cart (#67) stays a lua cart with its source in main.lua. `scenes`
+    ({name: .moyscene text}) + `scene_order` copy a source cart's scene assets (#85),
+    registered in manifest.assets.scenes and written under scenes/."""
     d = _unique_dir(root, slug(title))
     _mkdir(d)
     manifest = {
         "format": CART_FORMAT, "title": title, "type": type,
         "runtime": runtime, "main": main, "edit": edit or [],
     }
+    if scenes:                        # scene assets (#85): register + write (see above)
+        manifest["assets"] = {"scenes": list(scene_order or sorted(scenes.keys()))}
     _write(d + "/manifest.json", json.dumps(manifest))
     _write(d + "/" + main, src if src is not None else NEW_TEMPLATE["src"])
     _write(d + "/config.json", json.dumps(cfg or {}))
+    if scenes:
+        _mkdir(d + "/" + SCENES_DIR)
+        for sname, sblob in scenes.items():
+            _write(d + "/" + SCENES_DIR + "/" + sname + SCENE_EXT, sblob)
     return load(d)
 
 
@@ -1508,7 +1654,9 @@ def new_from_template(root=CARTS_DIR, title="New Cart"):
 def duplicate(cart, root=CARTS_DIR, new_title=None):
     return create(new_title or (cart["title"] + " copy"), root,
                   src=cart["src"], cfg=dict(cart["cfg"]), edit=cart["edit"], type=cart["type"],
-                  runtime=cart.get("runtime", "python"), main=cart.get("main", "main.py"))
+                  runtime=cart.get("runtime", "python"), main=cart.get("main", "main.py"),
+                  scenes=dict(cart.get("scenes") or {}),      # #85: copy scene assets +
+                  scene_order=list(cart.get("scene_names") or []))  # their manifest order
 
 
 def delete(cart):

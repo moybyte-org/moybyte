@@ -8,6 +8,8 @@ that don't belong to any one surface Layer or the router:
                       auto-hides after CURSOR_IDLE_MS idle).
   * `Achievements` -- the milestone tracker (#21): the catalog + award-once + toast.
   * `Pmem`         -- a cart's persistent 256x uint32 memory (TIC-80 pmem()).
+  * `Actor`/`Scenes` -- a cart's placed-actor scenes (#85): read-only data rows +
+                      the scene()/load_scene() accessor over the .moyscene blobs.
   * `_SilentAudio` -- the no-op audio backend (#16) when none was injected.
   * `Popup`        -- the reusable dropdown overlay primitive (#52) the ≡ menu is
                       built on.
@@ -19,6 +21,8 @@ dependency-free leaf. The trivial helpers a couple of them need (`_ticks_ms` /
 achievements_ui.py does) rather than imported back from console -- no circular import.
 console.py imports these classes back so `console.Pointer` / `console.Popup` /
 `console.ACHIEVEMENTS` / ... still resolve for its own use + the tests + host_app.
+(`json` is imported for Scenes, which parses the .moyscene blobs -- available on
+both CPython and MicroPython.)
 
 (Launcher stayed in console.py: its draw() needs the palette NAMES + the shared
 `_blit_glyph` glyph vocabulary + the tile-type constants, and its bare-construction
@@ -26,6 +30,7 @@ default needs Layout -- moving it would inject NAMES/a glyph fn into a class the
 Workstation constructs, or pull the whole glyph vocabulary out here, i.e. the ugly
 cross-import web. It's cohesive with the launcher-home rendering, so it's left put.)
 """
+import json
 import time
 
 
@@ -293,6 +298,108 @@ class Pmem:
         self._dirty = False
         self._on_write(self.cells)
         return True
+
+
+# --- placed-actor scenes (#85) ----------------------------------------------
+#
+# A scene is a saved table of placed actors (a sprite + a world position + a tag),
+# authored WYSIWYG and consumed once at cart start (data-only, #85 Variant A). Each
+# .moyscene file is compact JSON: an ordered list of rows {tag, tile, x, y, flip,
+# flags}; order is the spawn order and the default draw order. The cart reads the
+# table in _init and spawns whatever it wants -- there is NO drawing here, so this
+# lives once in shared code (host == device) and make_api just binds the accessors.
+
+
+class Actor:
+    """One placed actor from a scene (#85): a read-only data ROW the cart branches on.
+
+    Attribute access -- a.tag / a.tile / a.x / a.y / a.flip / a.flags -- like the
+    {tag, tile, x, y, flip, flags} JSON it came from. `tag` is the kind string code/
+    blocks dispatch on; `tile` the sheet index (placement preview + default draw);
+    `x`/`y` world-space ints; `flip` 0/1; `flags` an optional dict of kid-tunable
+    extras. Read-only by convention (writing a scene back at runtime is out of scope --
+    that's pmem's job); MicroPython-safe (plain attributes, no dependencies)."""
+
+    def __init__(self, tag="", tile=0, x=0, y=0, flip=0, flags=None):
+        self.tag = str(tag)
+        self.tile = int(tile)
+        self.x = int(x)
+        self.y = int(y)
+        self.flip = int(flip)
+        self.flags = flags if isinstance(flags, dict) else {}
+
+    def __repr__(self):
+        return "Actor(tag=%r, tile=%d, x=%d, y=%d, flip=%d)" % (
+            self.tag, self.tile, self.x, self.y, self.flip)
+
+
+class Scenes:
+    """A cart's placed-actor scenes (#85), parsed from the scenes/*.moyscene blobs.
+
+    Backend-agnostic + MicroPython-safe (json only). The Workstation builds one per
+    cart from the raw {name: json-text} blobs moy_carts.load returns (+ the manifest's
+    ordered names, element 0 = the default active scene) and injects scene()/
+    load_scene() into make_api, so both the host and the device get the accessors from
+    THIS one implementation. Parsing is lazy + memoised, so scene() is cheap even
+    called every frame. The active scene resets to the default on each run via reset()
+    (Player.start), so a load_scene() switch never leaks across a re-run ("resets on
+    next _init", #85 Section 6). An absent/malformed scene yields an empty list -- a
+    cart with no scenes just spawns nothing, never crashes."""
+
+    def __init__(self, blobs=None, names=None):
+        self._raw = dict(blobs) if blobs else {}
+        if names:
+            order = [n for n in names if n in self._raw]
+        else:
+            order = sorted(self._raw.keys())
+        self.names = order                 # ordered scene names (0 = default active)
+        self._default = order[0] if order else None
+        self.active = self._default
+        self._cache = {}                   # name -> [Actor], parsed once
+
+    def reset(self):
+        """Back to the default active scene -- called at each run's start so a
+        load_scene() switch doesn't persist into the next _init (#85)."""
+        self.active = self._default
+
+    def _parse(self, name):
+        got = self._cache.get(name)
+        if got is not None:
+            return got
+        actors = []
+        blob = self._raw.get(name)
+        if blob is not None:
+            try:
+                rows = json.loads(blob)
+            except (ValueError, TypeError):
+                rows = None
+            if isinstance(rows, list):
+                for r in rows:
+                    if isinstance(r, dict):
+                        actors.append(Actor(
+                            r.get("tag", ""), r.get("tile", 0),
+                            r.get("x", 0), r.get("y", 0),
+                            r.get("flip", 0), r.get("flags")))
+        self._cache[name] = actors
+        return actors
+
+    def scene(self, name=None):
+        """Iterate a scene's actors (read-only rows). scene() -> the ACTIVE scene;
+        scene(name) -> a named scene WITHOUT switching the active one. A missing or
+        malformed scene yields an empty list (never raises). A fresh list copy each
+        call, so a cart mutating it can't corrupt the parse cache."""
+        n = self.active if name is None else name
+        if n is None:
+            return []
+        return list(self._parse(n))
+
+    def load_scene(self, name):
+        """Set the active scene and return its actors. An unknown name leaves the
+        active scene unchanged and returns [] (the graceful missing-scene path)."""
+        if name in self._raw:
+            self.active = name
+            return list(self._parse(name))
+        return []
 
 
 class _SilentAudio:
