@@ -359,8 +359,12 @@ class Scenes:
 
     def reset(self):
         """Back to the default active scene -- called at each run's start so a
-        load_scene() switch doesn't persist into the next _init (#85)."""
+        load_scene() switch doesn't persist into the next _init (#85). Also drops
+        the parse cache: scene() hands out the CACHED Actor objects (fresh list,
+        shared rows), so a cart that mutated its rows in-place would otherwise
+        carry that drift into its next run. Re-parsing once per run is cheap."""
         self.active = self._default
+        self._cache = {}
 
     def _parse(self, name):
         got = self._cache.get(name)

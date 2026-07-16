@@ -77,6 +77,18 @@ def test_scene_returns_fresh_list_each_call():
     assert len(sc.scene()) == 3                 # ...does not corrupt the cache
 
 
+def test_reset_drops_in_place_row_mutations():
+    # scene() shares the cached Actor rows between calls, so a cart that mutates
+    # them in-place (a.x += 1 in _init -- kids do) must get pristine rows on its
+    # NEXT run: reset() re-parses, dropping the drift (#85).
+    from runtime.widgets import Scenes
+    sc = Scenes({"main": MAIN_SCENE}, ["main"])
+    sc.scene()[0].x += 99                       # in-place row drift during a run
+    assert sc.scene()[0].x == 5 + 99            # visible within the same run
+    sc.reset()                                  # the next run's start (Player.start)
+    assert sc.scene()[0].x == 5                 # fresh parse, drift gone
+
+
 # -- moy_carts store: save / load / manifest assets --------------------------
 
 def _cart(tmp_path, **kw):
