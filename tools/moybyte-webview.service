@@ -1,0 +1,18 @@
+[Unit]
+# Moybyte web console (#22): serves the LIVE shared Workstation to a browser over
+# the draw-command / WebSocket transport (tools/web_console.py). Headless -- no
+# display needed (the console draws through web_view.CommandCanvas, not pygame).
+# Installed as a systemd SYSTEM service (port 80 needs a privileged bind). The
+# @PYTHON@ / @PORT@ / @ROOT@ placeholders are filled in at install time.
+Description=Moybyte web console (draw-command streaming)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=@ROOT@
+ExecStart=@PYTHON@ @ROOT@/tools/web_console.py --host 0.0.0.0 --port @PORT@
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
