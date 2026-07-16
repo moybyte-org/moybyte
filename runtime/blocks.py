@@ -1239,7 +1239,7 @@ _RESERVED_NAMES = {
     "print", "touch", "mouse", "clip", "camera", "pal", "palt", "btn", "btnp",
     "key", "keyp", "time", "pmem", "textmode", "quit", "cfg", "col", "sfx", "beep",
     "music", "music_stop", "sound_stop", "volume", "rnd", "flr", "Image", "image",
-    "wifi",
+    "wifi", "scene", "load_scene", "table", "text",   # #85 scenes + #78 Desk Lab interop
     # builtins the generated code relies on
     "int", "range", "len", "str", "min", "max", "abs", "round", "bool",
     # lifecycle functions + the compiler's own helpers (all `_`-prefixed)
