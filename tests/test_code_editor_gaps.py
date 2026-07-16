@@ -228,6 +228,57 @@ def test_find_missing_returns_false():
     assert ed.find("") is False
 
 
+def test_find_include_current_accepts_match_at_caret():
+    # Regression: the incremental path must NOT skip a match starting exactly at
+    # the caret (find() used to always scan from pos+1, so with the caret sitting
+    # on a 'def' the SECOND def highlighted). Explicit next keeps move-past.
+    from runtime import CodeEditor
+    ed = CodeEditor("def one\ndef two")
+    ed.row, ed.col = 0, 0
+    assert ed.find("def", include_current=True)
+    assert (ed.row, ed.col) == (0, 0)             # the match AT the caret
+    assert ed.selected_text() == "def"
+    assert ed.find("def")                         # explicit next moves past it
+    assert (ed.row, ed.col) == (1, 0)
+
+
+def test_find_with_stale_caret_never_crashes():
+    # Regression: the buffer can shrink under a caller holding an old (row, col)
+    # (a cut while the find bar is open); find/_offset must clamp, not IndexError.
+    from runtime import CodeEditor
+    ed = CodeEditor("only\ntwo lines")
+    ed.row, ed.col = 49, 7                        # stale caret from a 50-line buffer
+    assert ed.find("only", include_current=True)  # no crash; wraps to the match
+    assert (ed.row, ed.col) == (0, 0)
+    ed.row, ed.col = 30, 2
+    assert ed.find("zzz") is False                # miss path is clamp-safe too
+
+
+def test_typing_after_bare_anchor_keeps_all_chars():
+    # Regression: begin_select() with no extending move left a zero-width anchor;
+    # insert() advanced the caret past it, so the SECOND keystroke saw a bogus
+    # 1-char "selection" and delete_selection() ate the first char ('ab' -> 'b').
+    from runtime import CodeEditor
+    ed = CodeEditor("")
+    ed.begin_select()                             # SEL tapped, no drag/move yet
+    ed.insert("a")
+    ed.insert("b")
+    assert ed.text() == "ab"
+    # newline + backspace drop a dangling anchor the same way
+    ed = CodeEditor("x")
+    ed.row, ed.col = 0, 1
+    ed.begin_select()
+    ed.newline()
+    ed.insert("y")
+    assert ed.text() == "x\ny"
+    ed = CodeEditor("xy")
+    ed.row, ed.col = 0, 2
+    ed.begin_select()
+    ed.backspace()
+    ed.insert("z")
+    assert ed.text() == "xz"
+
+
 # ---------------------------------------------------------------------------
 # CodeLayer surface: touch affordances driven through the console (#89)
 # ---------------------------------------------------------------------------
@@ -350,6 +401,62 @@ def test_tool_palette_indent_outdent(tmp_path):
     assert ws.editor.lines == ["  one", "  two"]
     _tap_tool(ws, drv, "outdent")
     assert ws.editor.lines == ["one", "two"]
+
+
+def test_sel_mode_then_typing_keeps_first_char(tmp_path):
+    # Regression (layer repro): tap SEL then type 'ab' -- the eager zero-width
+    # anchor must not turn the first char into a "selection" the second one eats.
+    ws = _ws(tmp_path)
+    drv = _enter_code(ws)
+    ws.editor.set_text("")
+    _tap_tool(ws, drv, "sel")
+    for ch in "ab":
+        drv.type_char(ord(ch))
+        drv.frame(DT)
+    assert ws.editor.text() == "ab"
+
+
+def test_find_survives_buffer_shrink_via_cut(tmp_path):
+    # Regression (layer repro, used to IndexError in the frame loop): open find on
+    # a deep caret, CUT a large span behind the still-open find bar (the tool
+    # palette stays tappable -- _find_tap only consumes taps on the bar's rect),
+    # then type another query char. The incremental reset used to restore the
+    # UNCLAMPED anchor row into the shrunken buffer.
+    ws = _ws(tmp_path)
+    drv = _enter_code(ws)
+    ws.editor.set_text("\n".join("line %d" % i for i in range(50)))
+    ws.editor.place(0, 0)
+    ws.editor.row, ws.editor.col = 49, 3          # deep caret: the recorded anchor
+    _tap_tool(ws, drv, "find")                    # opens find, anchor = (49, 3)
+    drv.type_char(ord("l"))
+    drv.frame(DT)
+    # Select nearly everything and CUT it while the find bar stays open.
+    ws.editor.sel = (0, 0)
+    ws.editor.row, ws.editor.col = 48, 0
+    _tap_tool(ws, drv, "cut")
+    assert len(ws.editor.lines) < 49              # the buffer shrank under the anchor
+    drv.type_char(ord("i"))                       # next incremental keystroke
+    drv.frame(DT)                                 # must not raise
+    assert ws.code_layer._find_q == "li"
+    assert ws.editor.row < len(ws.editor.lines)   # caret restored clamped
+
+
+def test_incremental_find_selects_match_at_anchor(tmp_path):
+    # Regression (layer repro): with the caret sitting ON a match, typing the query
+    # incrementally must select THAT occurrence, and enter (next) moves past it.
+    ws = _ws(tmp_path)
+    drv = _enter_code(ws)
+    ws.editor.set_text("def one\ndef two")
+    ws.editor.row, ws.editor.col = 0, 0
+    _tap_tool(ws, drv, "find")
+    for ch in "def":
+        drv.type_char(ord(ch))
+        drv.frame(DT)
+    assert (ws.editor.row, ws.editor.col) == (0, 0)   # the FIRST def, at the caret
+    assert ws.editor.selected_text() == "def"
+    drv.type_char(0x0D)                               # enter = next match
+    drv.frame(DT)
+    assert (ws.editor.row, ws.editor.col) == (1, 0)
 
 
 def test_gutter_renders_without_error(tmp_path):

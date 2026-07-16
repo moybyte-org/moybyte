@@ -407,10 +407,18 @@ class CodeLayer:
             return
         if reset and self._find_anchor is not None:
             # Incremental (query changed): restart from where find opened so the
-            # highlight doesn't march away as you type.
-            ed.row, ed.col = self._find_anchor
+            # highlight doesn't march away as you type, and ACCEPT a match starting
+            # exactly there (include_current -- explicit next keeps move-past). The
+            # buffer may have SHRUNK since the anchor was recorded (the tool
+            # palette's CUT/UNDO stay tappable behind the find bar), so clamp the
+            # restored position or the next search indexes past the buffer.
+            r, c = self._find_anchor
+            if r > len(ed.lines) - 1:
+                r = len(ed.lines) - 1
+            ed.row = r
+            ed.col = min(c, len(ed.lines[r]))
             ed.sel = None
-        ed.find(self._find_q, forward, self._find_ci)
+        ed.find(self._find_q, forward, self._find_ci, include_current=reset)
         self.ws.mark_dirty()
 
     def _find_key(self, code):

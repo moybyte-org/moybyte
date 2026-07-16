@@ -147,6 +147,11 @@ class CodeEditor:
     def insert(self, ch):
         if self.has_selection():             # typing over a selection replaces it (#89)
             self.delete_selection()
+        else:
+            # Drop a zero-width anchor: the caret is about to advance past it, and
+            # a dangling anchor would turn the NEXT edit into a bogus 1-char
+            # "selection" that delete_selection() eats (the SEL-then-type bug).
+            self.sel = None
         ln = self.lines[self.row]
         self.lines[self.row] = ln[:self.col] + ch + ln[self.col:]
         self.col += 1
@@ -156,6 +161,8 @@ class CodeEditor:
     def newline(self):
         if self.has_selection():             # enter over a selection replaces it (#89)
             self.delete_selection()
+        else:
+            self.sel = None                  # drop a zero-width anchor (see insert)
         ln = self.lines[self.row]
         head, tail = ln[:self.col], ln[self.col:]
         indent = ""                          # carry indentation (kid-friendly Python)
@@ -175,6 +182,7 @@ class CodeEditor:
         if self.has_selection():             # backspace over a selection deletes it (#89)
             self.delete_selection()
             return
+        self.sel = None                      # drop a zero-width anchor (see insert)
         if self.col > 0:
             ln = self.lines[self.row]
             self.lines[self.row] = ln[:self.col - 1] + ln[self.col:]
@@ -386,7 +394,15 @@ class CodeEditor:
     # -- find / search (#89) -------------------------------------------------
 
     def _offset(self, row, col):
-        """Absolute character offset of (row, col) in the newline-joined buffer."""
+        """Absolute character offset of (row, col) in the newline-joined buffer.
+        Defensively clamps a stale position (the buffer can shrink under a caller
+        holding an old (row, col) -- e.g. a cut while the find bar is open), so a
+        stale row can never index past the buffer."""
+        if row > len(self.lines) - 1:
+            row = len(self.lines) - 1
+            col = len(self.lines[row])
+        elif col > len(self.lines[row]):
+            col = len(self.lines[row])
         off = 0
         for r in range(row):
             off += len(self.lines[r]) + 1        # +1 for the joining newline
@@ -403,21 +419,27 @@ class CodeEditor:
             off = len(self.lines[r])
         return r, off
 
-    def find(self, query, forward=True, ci=True):
+    def find(self, query, forward=True, ci=True, include_current=False):
         """Search for `query` from the caret, wrapping around the whole buffer. On a
         hit, move the caret to the match START and select the match (so it renders
         highlighted); returns True. An empty query or no match leaves the caret put
-        and returns False. Case-insensitive by default (`ci`). The query never
-        contains a newline (it comes from the one-line find field), so a match
-        always lies within a single line."""
+        and returns False. Case-insensitive by default (`ci`). `include_current`
+        (the incremental-typing path) accepts a match starting AT the caret;
+        explicit next keeps the move-past pos+1 semantics. The query never contains
+        a newline (it comes from the one-line find field), so a match always lies
+        within a single line."""
         if not query:
             return False
+        if self.row > len(self.lines) - 1:       # defensive: a stale caret from a
+            self.row = len(self.lines) - 1       # shrunk buffer must never crash
+        if self.col > len(self.lines[self.row]):
+            self.col = len(self.lines[self.row])
         text = "\n".join(self.lines)
         hay = text.lower() if ci else text
         q = query.lower() if ci else query
         pos = self._offset(self.row, self.col)
         if forward:
-            idx = hay.find(q, pos + 1)
+            idx = hay.find(q, pos if include_current else pos + 1)
             if idx < 0:
                 idx = hay.find(q, 0)             # wrap to the top
         else:
