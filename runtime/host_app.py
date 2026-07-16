@@ -376,7 +376,8 @@ class _Layer:
 
 
 def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
-             pmem=None, wifi=None, images=None, scenes=None, owner="cart"):
+             pmem=None, wifi=None, images=None, scenes=None, tables=None,
+             texts=None, owner="cart"):
     # `owner` tags device-side layer loans for the leak-fix reclaim (#63); the host
     # Canvas allocates layers on the gc heap, so it is accepted and unused here.
     """The cartridge global namespace on the host -- same names/signature as the
@@ -613,6 +614,21 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
             return im
         return Image.from_ascii(a, mapping, transparent)
 
+    def table(name):
+        # Desk Lab interop (#78): a Sheets sheet placed in the cart's folder
+        # (tables/<name>.moysheet) read as ROWS -- a list of lists of computed
+        # values (numbers as numbers, text as strings, blank cells ""). Missing
+        # name -> [] (image()'s degrade-don't-throw contract). The rows were decoded
+        # once at cart-load (moy_carts.decode_table), so this is a plain lookup.
+        rows = tables.get(name) if tables else None
+        return rows if rows is not None else []
+
+    def text(name):
+        # Desk Lab interop (#78): a Writer doc placed in the cart's folder
+        # (docs/<name>.moytext) read as LINES -- a list of strings. Missing name -> [].
+        lines = texts.get(name) if texts else None
+        return lines if lines is not None else []
+
     # Declared background (#63 fast-by-default -- the "software PPU layer 0"): the
     # cart names its backdrop ONCE -- a color, or a painted Image -- and the engine
     # restores it at the START of every frame, so a naive cart never writes a
@@ -666,6 +682,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         "flr": lambda x: int(x // 1),
         "Image": Image,
         "image": image,
+        "table": table, "text": text,
     }
     if wifi is not None:                 # capability-gated network API (#38)
         ns["wifi"] = wifi

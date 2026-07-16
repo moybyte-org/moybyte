@@ -53,6 +53,7 @@ CART_ORDER = [
     "writer",
     "calc",
     "storybook",
+    "sheets",
     "wifi",
 ]
 
