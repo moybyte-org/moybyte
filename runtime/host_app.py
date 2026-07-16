@@ -809,7 +809,7 @@ class ConsoleDriver:
         self.input = ws.input
         self.pointer = ws.pointer
         self._pending = []      # one-frame button presses
-        self._typed = 0
+        self._typed = []        # queued typed chars; frame() feeds ONE per frame
         self._click = False
         self._down = False      # touch/button currently held (for drag-scroll)
         self._tap = False       # click(): auto-release at the end of the frame
@@ -823,7 +823,12 @@ class ConsoleDriver:
         self.input.set_held(name, down)
 
     def type_char(self, code):
-        self._typed = code
+        # QUEUE, not last-wins (#42 Thread 2): the console consumes ONE last_key per
+        # frame, but a browser WS batch can carry many typed chars at once (a phone
+        # soft keyboard swipe-typing/autocorrect-committing a whole word) -- a bare
+        # `self._typed = code` kept only the final char ("hello" typed only "o").
+        # frame() drains one char per frame, preserving order.
+        self._typed.append(code)
 
     def pan(self, dx, dy):
         # Arrow keys = the trackball: a relative, *visible*-cursor nudge each frame.
@@ -882,7 +887,7 @@ class ConsoleDriver:
         for name in self._pending:
             self.input.set_held(name, True)
         self.input.begin_frame()
-        self.input.last_key = self._typed
+        self.input.last_key = self._typed.pop(0) if self._typed else 0
         self.pointer.down = self._down
         self.pointer.click = self._click
         self.ws.handle_input()
@@ -891,7 +896,6 @@ class ConsoleDriver:
         for name in self._pending:
             self.input.set_held(name, False)
         self._pending = []
-        self._typed = 0
         self._click = False
         self.input.last_key = 0
         if self._tap:
