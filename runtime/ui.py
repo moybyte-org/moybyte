@@ -212,12 +212,18 @@ def button(cv, th, rect, label, kind="normal", on=False, icon_img=None,
         cv.print(label, tx + iw, y + (h - 8 * fs) // 2, ink, 1)
 
 
-def chip(cv, th, rect, label, on=False, hot=False, fs=None):
+def chip(cv, th, rect, label, on=False, hot=False, fs=None,
+         glyph=None, glyph_draw=None):
     """The app-toolbar CHIP -- the one implementation of the `_button` the
     Appearance/Writer/Storybook/Artwork apps each used to carry a local copy
     of (pixel-identical to those). A quiet field on the panel color with the
     theme's title ink; `on` swaps to the accent toggle look (edge border);
     `hot` to danger red with light ink (an armed destructive action).
+
+    `glyph` + `glyph_draw` (the game_icon_btn pattern -- the caller passes
+    ws._glyph so this module never imports the vocabulary): draw the icon
+    centered in the chip INSTEAD of the text label. The label still names the
+    chip at the call site (and is the fallback when no glyph is given).
 
     `chip` vs `button`: chip is the PANEL-chrome vocabulary (toolbars inside
     the dark app chrome, theme-quiet); button is the Open Machine STUDIO
@@ -239,6 +245,9 @@ def chip(cv, th, rect, label, on=False, hot=False, fs=None):
         edge = th.get("dim", 1)
     cv.rect(x, y, w, h, bg)
     cv.rectb(x, y, w, h, edge)
+    if glyph is not None and glyph_draw is not None:
+        glyph_draw(glyph, rect, ink, cv)
+        return
     fw = 8 * fs
     label = str(label)
     cv.print(label, x + max(2, (w - len(label) * fw) // 2),

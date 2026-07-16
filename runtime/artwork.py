@@ -356,6 +356,10 @@ class PaintAppLayer:
     TOOLS = ("PENCIL", "BRUSH", "ERASER", "FILL", "PICK",
              "LINE", "BOX", "CIRCLE", "SPRAY", "PAN")
     GLYPHS = ("P", "B", "E", "F", "I", "/", "#", "O", "*", "+")
+    # Icon vocabulary for the tool buttons (chrome._GLYPHS kinds, drawn via
+    # ws._glyph); the single-letter GLYPHS above stay the guaranteed fallback.
+    TOOL_ICONS = ("edit", "paint", "eraser", "fill", "picker",
+                  "line", "rect_tool", "circle", "spray", "move")
 
     def __init__(self, ws, names, in_rect):
         self.ws = ws
@@ -414,9 +418,13 @@ class PaintAppLayer:
         self.mode = "paint"
         self.ws._dirty = True
 
-    def _button(self, cv, label, r, on=False):
+    def _button(self, cv, label, r, on=False, glyph=None):
         # One shared implementation now (ui.chip) -- pixel-identical delegate.
-        _ui.chip(cv, self.ws.theme_colors, r, label, on=on, fs=self.layout.fs)
+        # `glyph` draws a chrome._GLYPHS icon instead of the text (ws._glyph is
+        # the vocabulary bridge -- the game_icon_btn pattern); unknown kinds draw
+        # nothing, so callers only pass kinds this build ships.
+        _ui.chip(cv, self.ws.theme_colors, r, label, on=on, fs=self.layout.fs,
+                 glyph=glyph, glyph_draw=self.ws._glyph)
 
     def _display_spec(self):
         vx, vy, vw, vh = self.layout.view
@@ -705,11 +713,15 @@ class PaintAppLayer:
         cv.rect(0, lay.bar_h, lay.w, lay.top_h, 48)
         action_labels = ("N", "U", "R", "SAVE", "WALL", "GAME", "SHOW",
                          "FIT" if self.view_mode == 0 else str(self.view_mode) + "X")
+        # N/U/R lead as icons (new/undo/redo); the word buttons stay words.
+        action_icons = ("plus", "undo", "redo", None, None, None, None, None)
         for i, r in enumerate(lay.actions):
             self._button(cv, action_labels[i], r,
-                         (i == 0 and self.new_armed) or (i == 7 and self.view_mode == 0))
+                         (i == 0 and self.new_armed) or (i == 7 and self.view_mode == 0),
+                         glyph=action_icons[i])
         for i, r in enumerate(lay.tools):
-            self._button(cv, self.GLYPHS[i], r, i == self.tool)
+            self._button(cv, self.GLYPHS[i], r, i == self.tool,
+                         glyph=self.TOOL_ICONS[i])
 
         cv.rect(lay.view[0], lay.view[1], lay.view[2], lay.view[3], self.names["black"])
         cv.rectb(lay.view[0], lay.view[1], lay.view[2], lay.view[3], th["edge"])
