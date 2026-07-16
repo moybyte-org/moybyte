@@ -44,6 +44,14 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import blocks as _blocks_mod
 
+# The shared pre-literate glyph vocabulary (#93 icon pass): the action bar's UNDO/REDO
+# draw glyph-only ("..." IS its own icon and stays text). Imported for the membership
+# check that keeps the word label as a fallback.
+try:
+    from chrome import _GLYPHS
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.chrome import _GLYPHS
+
 
 # --- Layout geometry (baseline 320x240 constants + BlockLayout) -------------
 #
@@ -1246,6 +1254,17 @@ class BlockEditorUI:
 
     # -- block editor drawing (#29 Part 2) -----------------------------------
 
+    def _gbtn(self, kind, label, rect, fill, cv):
+        """An action-bar button carrying a centered 12x12 chrome glyph (#93 icon pass):
+        the colored `ws._btn` chip, then the glyph (black, matching the label ink).
+        Falls back to the word `label` when the glyph kind is missing."""
+        ws = self.ws
+        if kind is not None and kind in _GLYPHS:
+            ws._btn("", rect, fill, cv)
+            ws._glyph(kind, rect, self._NAMES["black"], cv)
+        else:
+            ws._btn(label, rect, fill, cv)
+
     def _draw_blocks(self):
         """The structured outline: a title bar, a scrolling list of Scratch-style
         colored block rows (the flattened script with the cursor highlighted and the
@@ -1314,10 +1333,10 @@ class BlockEditorUI:
         # "..." glows yellow while a MOVE is armed (the "tap a + spot" state).
         act_col = NAMES["yellow"] if be.moving() else NAMES["blue"]
         ws._btn("...", lay.act_btn, act_col, cv)
-        ws._btn("UNDO", lay.undo_btn,
-                NAMES["indigo"] if be.can_undo() else NAMES["dark_grey"], cv)
-        ws._btn("REDO", lay.redo_btn,
-                NAMES["indigo"] if be.can_redo() else NAMES["dark_grey"], cv)
+        self._gbtn("undo", "UNDO", lay.undo_btn,
+                   NAMES["indigo"] if be.can_undo() else NAMES["dark_grey"], cv)
+        self._gbtn("redo", "REDO", lay.redo_btn,
+                   NAMES["indigo"] if be.can_redo() else NAMES["dark_grey"], cv)
         # The unified zoned bar (tab ladder + PLAY + SAVE + X), drawn BEFORE the modal
         # insert menu / entry prompt so those still sit on top (Stage-4 rollout).
         ws.bar_layer._draw_status_strip("menu")

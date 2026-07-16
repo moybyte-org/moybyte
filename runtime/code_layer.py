@@ -35,6 +35,27 @@ try:
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
 
+# The shared pre-literate glyph vocabulary (#89 icon pass): the TLS toggle + the tool
+# palette row draw a 12x12 chrome glyph per button instead of the terse 2-3 char
+# label. Looked up LAZILY (not a top-level import): chrome.py imports THIS module for
+# its code-layout constants before it defines _GLYPHS, so a module-level
+# `from chrome import _GLYPHS` here would be a circular import. By draw time chrome is
+# fully loaded, so the cached lookup below resolves the dict once.
+_GLYPHS = None
+
+
+def _glyph_known(kind):
+    """True if `kind` is a known chrome glyph (so a button draws the icon; else the
+    text label is the fallback). Caches the _GLYPHS dict on first draw-time call."""
+    global _GLYPHS
+    if _GLYPHS is None:
+        try:
+            from chrome import _GLYPHS as _G
+        except ImportError:  # pragma: no cover - direct host import
+            from runtime.chrome import _GLYPHS as _G
+        _GLYPHS = _G
+    return kind in _GLYPHS
+
 
 # -- code-editor geometry (single source; console.py imports these back) ------
 # The area/line-height feed console's CodeLayout (responsive) + the crash panel; the
@@ -171,6 +192,12 @@ class CodeLayer:
     _TOOL_LABEL = {"sel": "SEL", "copy": "CPY", "cut": "CUT", "paste": "PST",
                    "find": "FND", "indent": ">>", "outdent": "<<", "gutter": "#",
                    "undo": "UN", "redo": "RE"}
+    # The pre-literate glyph per tool (#89 icon pass): drawn centered instead of the
+    # label. _blit_glyph draws nothing for an unknown kind, so _TOOL_LABEL stays the
+    # guaranteed fallback (gutter -> the numbered-lines glyph).
+    _TOOL_GLYPH = {"sel": "select", "copy": "copy", "cut": "cut", "paste": "paste",
+                   "find": "find", "indent": "indent", "outdent": "outdent",
+                   "gutter": "linenums", "undo": "undo", "redo": "redo"}
     _TLS_COLS = 3                 # cells wide for the always-visible tools toggle
 
     def __init__(self, ws, names, in_rect):
@@ -706,25 +733,31 @@ class CodeLayer:
                 cv.rectb(tx0 + (vs - ed.left) * cell, y, (ve - vs) * cell, 8 * fs, color)
             start = i + (L if L > 0 else 1)
 
-    def _panel_btn(self, cv, lay, r, label, t, active=False, ink=None):
-        """One tool/find button: a filled, bordered cell with a centered label. Uses
-        the same sym_bg/sym_edge palette as the symbol strip so it reads as chrome."""
+    def _panel_btn(self, cv, lay, r, label, t, active=False, ink=None, glyph=None):
+        """One tool/find button: a filled, bordered cell with a centered label -- or,
+        when `glyph` names a known chrome glyph (#89 icon pass), a centered 12x12 icon
+        instead of the label. Uses the same sym_bg/sym_edge palette as the symbol strip
+        so it reads as chrome. A missing glyph kind falls through to the `label`."""
         fs = lay.fs
         cv.rect(r[0], r[1], r[2] - 1, r[3] - 1, t["sym_edge"] if active else t["sym_bg"])
         cv.rectb(r[0], r[1], r[2] - 1, r[3] - 1, t["sym_edge"])
-        if label:
+        gink = ink if ink is not None else t["sym_ink"]
+        if glyph is not None and _glyph_known(glyph):
+            self.ws._glyph(glyph, (r[0], r[1], r[2] - 1, r[3] - 1), gink, cv)
+        elif label:
             gx = r[0] + (r[2] - len(label) * 8 * fs) // 2
             if gx < r[0] + fs:
                 gx = r[0] + fs
             gy = r[1] + (r[3] - 8 * fs) // 2
-            cv.print(label, gx, gy, ink if ink is not None else t["sym_ink"], 1)
+            cv.print(label, gx, gy, gink, 1)
 
     def _draw_tools(self, lay, ed, t):
         """The #89 chrome: the always-visible TLS toggle, the tool palette row (when
         open) and the find bar (when open). All overlay the code body -- drawn AFTER
         the text so they sit on top -- and never touch the frozen baseline geometry."""
         cv = self.ws.sys_canvas
-        self._panel_btn(cv, lay, self._tls_btn(lay), "TLS", t, active=self._tools_open)
+        self._panel_btn(cv, lay, self._tls_btn(lay), "TLS", t,
+                        active=self._tools_open, glyph="tools")
         if self._tools_open:
             r = self._toolbar_rect(lay)
             n = len(self._TOOLS)
@@ -735,7 +768,8 @@ class CodeLayer:
                          (name == "find" and self._find_open) or \
                          (name == "gutter" and self._gutter)
                 self._panel_btn(cv, lay, (r[0] + i * bw, r[1], bw, r[3]),
-                                self._TOOL_LABEL[name], t, active=active)
+                                self._TOOL_LABEL[name], t, active=active,
+                                glyph=self._TOOL_GLYPH.get(name))
         if self._find_open:
             self._draw_find(lay, ed, t)
 
