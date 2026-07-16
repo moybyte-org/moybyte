@@ -127,6 +127,10 @@ cliff (e.g. 1.95x used to collapse all the way to 1x on an ultrawide). */
 var hh=document.querySelector("h1"),ct=document.getElementById("ctl");
 var rw=Math.max(64,window.innerWidth-16);
 var rh=Math.max(64,window.innerHeight-((hh?hh.offsetHeight:0)+(ct?ct.offsetHeight:0)+28));
+// While the soft keyboard is up (#42) the viewport HEIGHT collapses (and the
+// gamepad block still counts against it), which used to shrink the canvas to a
+// stamp -- so size by width alone then; a phone is width-limited anyway.
+var ae=document.activeElement;if(ae&&ae.id==="kbin")rh=1e9;
 var s=Math.min(rw/W,rh/H);
 cv.style.width=Math.round(W*s)+"px";cv.style.height=Math.round(H*s)+"px";}
 window.addEventListener("resize",fit);
@@ -308,9 +312,15 @@ kbInp.addEventListener("input",function(){var v=kbInp.value;
 // A single-line <input> never inserts a newline, so Enter needs its own listener (still
 // reliable on soft keyboards -- unlike printable keys, the Enter key name is widely reported).
 kbInp.addEventListener("keydown",function(e){if(e.key==="Enter"){send({type:"key",code:13});e.preventDefault();}});
+// While typing, the virtual gamepad is dead weight that eats the (already
+// keyboard-shrunken) viewport -- hide it so the canvas keeps the room; blur
+// restores it (the CSS media query still owns whether it exists at all).
+var kbCtl=document.getElementById("ctl");
 kbInp.addEventListener("focus",function(){kbBtn.classList.add("pr");
+  if(kbCtl)kbCtl.style.display="none";fit();
   if(window.visualViewport)window.visualViewport.addEventListener("resize",kbScroll);kbScroll();});
 kbInp.addEventListener("blur",function(){kbBtn.classList.remove("pr");
+  if(kbCtl)kbCtl.style.display="";fit();
   if(window.visualViewport)window.visualViewport.removeEventListener("resize",kbScroll);});
 kbBtn.addEventListener("click",function(e){
   if(document.activeElement===kbInp)kbInp.blur();else{kbReset();kbInp.focus();}
