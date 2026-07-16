@@ -20,7 +20,7 @@ from device_canvas import Image, _decode_moyimg, _Layer
 
 
 def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
-             pmem=None, wifi=None, images=None, owner="cart"):
+             pmem=None, wifi=None, images=None, scenes=None, owner="cart"):
     import random
 
     _img_cache = {}        # name -> decoded paint Image (see image() below), so a
@@ -337,6 +337,14 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
     # on the host).
     if wifi is not None:
         ns["wifi"] = wifi
+    # Scene accessors (#85): scene()/scene(name)/load_scene(name) over the cart's
+    # placed-actor scenes. Pure DATA (no drawing) -- the logic lives once in the
+    # shared widgets.Scenes and make_api just binds its methods (host == device). The
+    # Player always passes a Scenes object (empty for a scene-less cart); a
+    # make_layer/probe caller omits it, so a layer's ns simply carries no scene names.
+    if scenes is not None:
+        ns["scene"] = scenes.scene
+        ns["load_scene"] = scenes.load_scene
     return ns
 
 

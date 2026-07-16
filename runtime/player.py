@@ -481,6 +481,14 @@ class Player:
         h0 = _heap_stats()
         ws._dirty = True               # a (re)started cart paints its first frame (#44)
         self._reset_exit_state()       # a fresh run drops any half-done exit gesture
+        # #85: a fresh run resets the active scene to the default, so a load_scene()
+        # switch never leaks across a re-run (the "resets on next _init" semantics).
+        _sc = getattr(project, "scenes", None)
+        if _sc is not None:
+            try:
+                _sc.reset()
+            except Exception:  # noqa: BLE001 -- scene reset must never block a run
+                pass
         self._close_lua()              # a re-run replaces the previous run's Lua state
         self._pmem_last = t0           # periodic pmem flush counts from this run's start
         self._slow_logic_next = 0
@@ -514,7 +522,8 @@ class Player:
         wifi = ws.wifi if ws._cart_has_perm("network") else None
         t2 = _ticks_ms()
         ns = ws.make_api(ws.canvas, ws.input, project.config, project.sheet,
-                         ws.audio, project.tilemap, project.pmem, wifi, project.images)
+                         ws.audio, project.tilemap, project.pmem, wifi, project.images,
+                         project.scenes)   # #85: scene()/load_scene() over the cart's scenes
         # Paint is a regular cartridge with one narrow shell capability. Keep it out
         # of the kid API and inject it only into the shipped app identity that asks
         # for the artwork permission; copied/renamed carts do not inherit it.

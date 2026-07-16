@@ -528,7 +528,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # pays for on every collect (~0.2ms/KB on device -- most of the 93-161ms pauses).
 # slim_carts() strips them after the icons are cached; opening a cart rehydrates
 # from the store, and switching carts re-slims the previous one.
-_HEAVY_CART_KEYS = ("src", "sprites", "sounds", "map", "images", "blocks")
+_HEAVY_CART_KEYS = ("src", "sprites", "sounds", "map", "images", "blocks", "scenes")
 
 # Frame pacing knob (#63): True locks GAME carts to a steady cadence (30 default,
 # manifest "fps": 60 opt-out); False runs everything uncapped at the loop's own
@@ -1755,6 +1755,14 @@ class Workstation:
     def pmem(self, value):
         self.project.pmem = value
 
+    @property
+    def scenes(self):                     # #85: the open cart's placed-actor scenes
+        return self.project.scenes
+
+    @scenes.setter
+    def scenes(self, value):
+        self.project.scenes = value
+
     # -- cart-run forwards (Stage 2, player.py) ------------------------------
     #
     # The Player owns the running cart's live state now; these forwarding properties
@@ -2081,6 +2089,7 @@ class Workstation:
         self.tilemap = self._build_tilemap()
         self.images = self.cart.get("images") or {}   # paint-image assets (#63)
         self.pmem = self._build_pmem()
+        self.scenes = self._build_scenes()             # placed-actor scenes (#85)
         self._cart_key_prev = 0       # fresh cart: no stale key edge
         self.input.text_mode = False  # a fresh cart starts in game mode (#38/#42);
                                       # it opts into text input via textmode(True)
@@ -2268,6 +2277,9 @@ class Workstation:
 
     def _build_tilemap(self, cart=None):
         return self.project._build_tilemap(cart)
+
+    def _build_scenes(self, cart=None):
+        return self.project._build_scenes(cart)
 
     def _build_audio(self):
         return self.project._build_audio()

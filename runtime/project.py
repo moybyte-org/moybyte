@@ -38,9 +38,9 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.audio import AudioBank, AudioEngine
 try:
-    from widgets import Pmem, _SilentAudio, _err_text, _ticks_ms, _ticks_diff
+    from widgets import Pmem, Scenes, _SilentAudio, _err_text, _ticks_ms, _ticks_diff
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import Pmem, _SilentAudio, _err_text, _ticks_ms, _ticks_diff
+    from runtime.widgets import Pmem, Scenes, _SilentAudio, _err_text, _ticks_ms, _ticks_diff
 # The block vocabulary/compiler (#29) -- graduation detection recompiles the cart's
 # frozen blocks.json + normalize-compares (Stage 8). Same bare-or-package fallback
 # console.py/block_editor_ui use: bare `blocks` on the device / once host_app aliased
@@ -65,6 +65,8 @@ class Project:
         self.images = None            # {name: .moyimg text} for the open cart (#63);
                                       # make_api decodes each lazily via image(name)
         self.pmem = None              # Pmem (persistent cart store) for the open cart
+        self.scenes = None            # Scenes (#85): the open cart's placed-actor
+                                      # scenes; make_api binds scene()/load_scene()
 
     # -- builders (moved verbatim from Workstation) --------------------------
 
@@ -129,6 +131,17 @@ class Project:
             except Exception:  # noqa: BLE001
                 pass
         return TileMap()
+
+    def _build_scenes(self, cart=None):
+        """Build `cart`'s Scenes (#85) from its scenes/*.moyscene blobs (default: the
+        open cart), or an empty Scenes when the cart has none -- the mirror of
+        _build_tilemap, so scene()/load_scene() are always callable (an empty scene
+        just yields no actors). Names come from the cart's manifest-ordered
+        scene_names (moy_carts.load), so element 0 is the default active scene."""
+        cart = cart if cart is not None else self.cart
+        blobs = cart.get("scenes") if cart else None
+        names = cart.get("scene_names") if cart else None
+        return Scenes(blobs, names)
 
     def _build_audio(self):
         """Build the per-cart audio backend (#16): an AudioEngine over the cart's
@@ -313,6 +326,27 @@ class Project:
             ws.save_status = "SAVE FAILED"
             ws.cart_error = "Could not save map -- " + txt
             print("Moybyte save map failed:", txt)
+
+    def commit_scene(self, name, text):
+        """Persist one scene to scenes/<name>.moyscene (#85) -- the mirror of commit_map
+        (save_scene -> SD wrapper -> journal). `text` is the compact .moyscene JSON blob
+        (an ordered actor list). Stage 1 has no placement editor yet; this is the
+        persistence verb the editor (Stage 2) calls, and the surface tests drive it
+        directly. The journal `file` is the real relative path (scenes/<name>.moyscene),
+        so undo restores into the file the loader reads from."""
+        ws = self.ws
+        if not (self.cart and self.cart.get("path") and ws.can_manage):
+            return
+        try:
+            ws._with_sd(lambda: ws.carts_store.save_scene(self.cart, name, text))
+            ws.save_status = "SAVED"
+            rel = ws.carts_store.SCENES_DIR + "/" + name + ws.carts_store.SCENE_EXT
+            self._journal(rel, text)              # durable undo (Stage 7)
+        except Exception as exc:  # noqa: BLE001
+            txt = _err_text(exc)
+            ws.save_status = "SAVE FAILED"
+            ws.cart_error = "Could not save scene -- " + txt
+            print("Moybyte save scene failed:", txt)
 
     def commit_sounds(self):
         """Persist the cart's AudioBank to sounds.json (#50) -- the mirror of

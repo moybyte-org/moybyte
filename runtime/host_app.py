@@ -376,7 +376,7 @@ class _Layer:
 
 
 def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
-             pmem=None, wifi=None, images=None, owner="cart"):
+             pmem=None, wifi=None, images=None, scenes=None, owner="cart"):
     # `owner` tags device-side layer loans for the leak-fix reclaim (#63); the host
     # Canvas allocates layers on the gc heap, so it is accepted and unused here.
     """The cartridge global namespace on the host -- same names/signature as the
@@ -669,6 +669,14 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
     }
     if wifi is not None:                 # capability-gated network API (#38)
         ns["wifi"] = wifi
+    # Scene accessors (#85): scene()/scene(name)/load_scene(name) over the cart's
+    # placed-actor scenes. Pure DATA (no drawing), so the logic lives once in the
+    # shared widgets.Scenes -- make_api just binds its methods (same on the device).
+    # The Player always passes a Scenes object (an empty one for a scene-less cart),
+    # so every cart's base key-set carries these; a make_layer/probe caller omits it.
+    if scenes is not None:
+        ns["scene"] = scenes.scene
+        ns["load_scene"] = scenes.load_scene
     return ns
 
 
