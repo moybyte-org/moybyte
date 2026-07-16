@@ -1152,8 +1152,15 @@ def save_blocks(cart, program):
     ok, msg = compile_check(src)        # belt-and-braces: the emitted code must parse
     if not ok:
         return SAVE_BAD_SYNTAX, msg
-    _write_atomic(cart["path"] + "/blocks.json", json.dumps(program))
-    cart["blocks"] = program
+    text = json.dumps(program)
+    _write_atomic(cart["path"] + "/blocks.json", text)
+    # A DEEP COPY, never the live tree (#93): the block editor keeps mutating
+    # `program` in place after this save, and its undo/redo REBINDS its own
+    # program to restored snapshots -- an aliased cart["blocks"] would drift to a
+    # state matching neither the disk file nor the editor (and the graduation
+    # compare reads cart["blocks"]). The json round-trip reuses the text already
+    # serialized for the file, so the snapshot is exactly what was written.
+    cart["blocks"] = json.loads(text)
     _write_atomic(cart["path"] + "/main.py", src)
     cart["src"] = src
     return SAVE_OK, ""

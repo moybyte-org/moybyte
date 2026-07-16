@@ -1314,3 +1314,66 @@ def test_ctrl_z_keyboard_shortcut_undoes(tmp_path):
     drv.frame(1 / 30)
     assert not _select_type(be, "cls")                   # undone
     assert ws.menu_view == "blocks"                      # still in the editor
+
+
+def _snap_of(prog):
+    """A structural deep copy via the schema's own json round-trip contract."""
+    return blocks.loads(blocks.dumps(prog))
+
+
+def _body_types(prog):
+    """Every statement type id across all scripts' bodies (top level only)."""
+    return [c.get("t") for s in prog.get("scripts", []) for c in s.get("c", [])]
+
+
+def test_undo_after_save_does_not_leak_into_cart_blocks(tmp_path):
+    """#93 regression: save_blocks must SNAPSHOT (deep-copy) the program into
+    cart["blocks"], never alias the editor's live tree -- otherwise a post-save
+    in-place edit mutates the cart's copy, and an undo (which rebinds the editor's
+    program to a restored snapshot) leaves cart["blocks"] holding the un-undone
+    state (matching neither disk nor the editor; the graduation compare reads it)."""
+    ws, cart, _ = _ws_with_block_cart(tmp_path)
+    ws._open_blocks()
+    be = ws.block_ui.blocks_ed
+    _go_to_insert(be, 1)
+    be.insert_block("cls", {"color": "black"})
+    assert ws.block_ui.save_blocks() is True
+    saved = _snap_of(ws.project.cart["blocks"])
+    # a post-save in-place edit must NOT reach through into the cart's snapshot...
+    _go_to_insert(be, 1)
+    be.insert_block("spr", {"id": 0, "x": 1, "y": 2})
+    assert ws.project.cart["blocks"] == saved
+    assert "spr" not in _body_types(ws.project.cart["blocks"])
+    # ...and after an undo, cart["blocks"] still can't hold the undone block
+    assert be.undo() is True
+    assert "spr" not in _body_types(ws.project.cart["blocks"])
+    assert ws.project.cart["blocks"] == saved
+
+
+def test_in_ram_save_and_build_fallback_do_not_alias_cart_blocks(tmp_path):
+    """The other two #93 alias windows: the in-RAM save (no path -> apply in RAM)
+    snapshots too, and build()'s fallback (prog from cart["blocks"]) clones the
+    cart's tree before handing it to the editor."""
+    ws, cart, _ = _ws_with_block_cart(tmp_path)
+    ws._open_blocks()
+    be = ws.block_ui.blocks_ed
+    _go_to_insert(be, 1)
+    be.insert_block("cls", {"color": "black"})
+    ws.project.cart["path"] = None                       # force the in-RAM save path
+    assert ws.block_ui.save_blocks() is True
+    saved = _snap_of(ws.project.cart["blocks"])
+    _go_to_insert(be, 1)
+    be.insert_block("spr", {"id": 1, "x": 3, "y": 4})
+    assert ws.project.cart["blocks"] == saved            # no reach-through
+    assert be.undo() is True
+    assert ws.project.cart["blocks"] == saved
+    # a FRESH editor built from cart["blocks"] (the no-store fallback) gets a clone:
+    # its edits never touch the cart's tree until the next save
+    ws.block_ui.reset()
+    ws.block_ui.build()
+    be2 = ws.block_ui.blocks_ed
+    assert be2 is not None and be2.program == saved
+    _go_to_insert(be2, 1)
+    be2.insert_block("beep", {"freq": 220})
+    assert ws.project.cart["blocks"] == saved
+    assert "beep" not in _body_types(ws.project.cart["blocks"])
