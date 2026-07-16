@@ -39,9 +39,9 @@ undo (code_layer.py) -- the device has no Ctrl, so the on-screen buttons are
 the device-identical path."""
 
 try:
-    from editors import MusicEditor
+    from editors import MusicEditor, KeyEdge
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors import MusicEditor
+    from runtime.editors import MusicEditor, KeyEdge
 try:
     from audio import MusicTrack, SFX
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -213,7 +213,7 @@ class MusicEditorUI:
         # and shows STOP; None when nothing is playing.
         self.musicedit = None         # MusicEditor while menu_view == "music"
         self.music_preview = None     # ("sfx", n) | ("song", track) | None (preview)
-        self._mkey_prev = 0           # last consumed keyboard byte (Ctrl+Z/Y edge detect)
+        self._mkey = KeyEdge()        # Ctrl+Z/Y edge tracker (#92)
         sc = ws.sys_canvas
         self.layout = MusicLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
 
@@ -318,12 +318,7 @@ class MusicEditorUI:
             # frames (e.g. a BLE keyboard) must fire ONE undo per press, not one
             # per frame -- a held Ctrl+Z would otherwise drain the whole stack.
             k = i.last_key
-            if k and k != self._mkey_prev:
-                if k == 0x1A:
-                    me.undo()
-                elif k == 0x19:
-                    me.redo()
-            self._mkey_prev = k
+            self._mkey.undo_redo(k, me.undo, me.redo)
         ws._leave_or_home(ws._leave_menu)
         ws._dirty = True
 

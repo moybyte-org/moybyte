@@ -34,7 +34,7 @@ except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
 
 
-from editors import BlockEditor, _clone_tree
+from editors import BlockEditor, KeyEdge, _clone_tree
 # The block vocabulary/compiler (#29). Mirrors console.py's own import (see its
 # comment there): bare `blocks` on the device (frozen top-level) and once
 # host_app has aliased it on the host, or `runtime.blocks` when a test loads
@@ -292,7 +292,7 @@ class BlockEditorUI:
         self.blk_protect = False      # block editor opened on a hand-written-code cart
         self.blk_graduated = False    # cart has GRADUATED (Stage 8): blocks read-only
         self.blk_kbd = None           # inline name-entry prompt state dict, or None
-        self._blk_ekey_prev = 0       # #93: last typed byte (Ctrl+Z/Y edge detect)
+        self._blk_ekey = KeyEdge()    # #93: Ctrl+Z/Y edge tracker
         self.block_layout = BlockLayout()
 
     def relayout(self, w, h, fs):
@@ -1044,12 +1044,7 @@ class BlockEditorUI:
         # mirroring the code editor's shortcut (0x1A / 0x19 arrive via last_key). The
         # on-screen UNDO/REDO buttons are the touch/device affordance.
         k = getattr(i, "last_key", 0) or 0
-        if k and k != self._blk_ekey_prev:
-            if k == 0x1A:
-                self._blk_undo()
-            elif k == 0x19:
-                self._blk_redo()
-        self._blk_ekey_prev = k
+        self._blk_ekey.undo_redo(k, self._blk_undo, self._blk_redo)
         if i.pressed("up"):
             self._blk_move_cursor(-1)
         if i.pressed("down"):

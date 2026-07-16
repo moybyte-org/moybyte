@@ -37,7 +37,7 @@ big panel the zoomed pixel grid GROWS to fill the space (a multiple of 48px so t
 1x1/2x2/3x3 sprite sizes all divide it into whole pixels) and the chrome scales with
 the font. Hit-testing is in SYSTEM coords (no _game_xy translation).
 """
-from editors import PaintEditor
+from editors import PaintEditor, KeyEdge
 
 
 # -- paint geometry (single source; console.py imports these back) ------------
@@ -231,7 +231,7 @@ class PaintLayer:
         self._in = in_rect
         self._paint_drag = None       # last painted grid cell during a drag (#30)
         self._fill_fired = False      # FILL already fired this press (#90; see _paint_stroke)
-        self._ekey_prev = 0           # last consumed keyboard byte (undo-shortcut edge, #90)
+        self._ekey = KeyEdge()        # Ctrl+Z/Y edge tracker (undo-shortcut, #90)
         sc = ws.sys_canvas
         self.layout = PaintLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
 
@@ -275,12 +275,10 @@ class PaintLayer:
         fires once."""
         pe = self.ws.paint
         k = getattr(i, "last_key", 0)
-        if pe is not None and k and k != self._ekey_prev:
-            if k == 0x1A:
-                pe.undo()
-            elif k == 0x19:
-                pe.redo()
-        self._ekey_prev = k
+        if pe is not None:
+            self._ekey.undo_redo(k, pe.undo, pe.redo)
+        else:
+            self._ekey.hit(k)          # keep the edge in sync even with no editor
 
     def handle_pointer(self, px, py, click):
         ws = self.ws

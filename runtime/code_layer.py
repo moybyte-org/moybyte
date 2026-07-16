@@ -21,14 +21,14 @@ ws.save_code / ws.run_code (device/test-pinned, now reached via the bar's SAVE/P
 ws.code_err / code_err_row / crash_line + _set_code_error / _mark_code_error /
 _cart_has_handwritten_code, and ws.code_layout (the CodeLayout). CodeLayer READS
 ws.editor + code_layout + the error state and DISPATCHES to the bar; it owns only the
-code-UI state (the keyboard edge tracker _ekey_prev, the drag-scroll origin _drag, the
+code-UI state (the keyboard edge tracker _ekey, the drag-scroll origin _drag, the
 highlight memo _hl_cache). ws.nav (the trackball-caret handler, called by both the host
 + device input drivers) stays on ws -- it just reads ws.editor. The code-only constants
 + the MicroPython-safe syntax highlighter live here (single source; console.py imports
 the constants back for its CodeLayout + the crash panel + tests). `NAMES` / `_in`
 injected.
 """
-from editors import CodeEditor
+from editors import CodeEditor, KeyEdge
 
 try:
     import ui as _ui
@@ -177,7 +177,7 @@ class CodeLayer:
         self.ws = ws
         self._NAMES = names
         self._in = in_rect
-        self._ekey_prev = 0           # last consumed keyboard byte (editor edge detect)
+        self._ekey = KeyEdge()        # keyboard edge tracker (editor edge detect)
         self._drag = None             # last pointer pos during a code-view drag-scroll
         self._hl_cache = {}           # per-line syntax-highlight memo (#24)
         self._t = None                # per-draw tone map (set by _draw_code)
@@ -195,7 +195,7 @@ class CodeLayer:
         """Reset the keyboard edge tracker (called by ws.set_menu_view when the editor
         is (re)built) so the first key press after opening registers. Also drops the
         transient #89 modes so a freshly-opened editor is in a clean state."""
-        self._ekey_prev = 0
+        self._ekey.reset()
         self._sel_drag = False
         self._find_open = False
         self._select_mode = False
@@ -282,7 +282,7 @@ class CodeLayer:
         if ed is None:
             return
         k = ws.input.last_key
-        if k and k != self._ekey_prev:
+        if self._ekey.hit(k):
             # Host keyboard shortcuts (#89) layered over the touch tool palette: the
             # control bytes below are NEVER inserted as text (editor.key ignores them),
             # so they can't corrupt the buffer -- and each maps to a tool-palette button
@@ -307,7 +307,7 @@ class CodeLayer:
                     self._clear_err()
             elif ed.key(k):                    # text changed -> drop the stale error marker
                 self._clear_err()
-        self._ekey_prev = k
+        # (self._ekey.hit above already recorded k as the new previous byte.)
 
     # -- #89 helpers: clipboard/find/tool/select routing ---------------------
 
