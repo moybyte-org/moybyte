@@ -498,3 +498,54 @@ def test_bubble_trouble_high_score_persists(tmp_path):
     assert ns["score"] > 0
     assert ns["best"] == ns["score"]
     assert ns["pmem"](0) == ns["best"], "best score must be written to pmem"
+
+
+def test_bubble_trouble_runs_long_without_error(tmp_path):
+    # A plain endurance smoke: 300+ frames in attract mode (spawns, splits,
+    # bounces, level clears all fire) with no cart crash.
+    from runtime import host_app
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_cart(ws, "Bubble Trouble")
+    ws.config["autoplay"] = 1
+    ws.apply()
+    for _ in range(360):
+        ws.input.begin_frame()
+        ws.frame(1 / 30)
+    assert ws.cart_error is None, "Bubble Trouble crashed during a long run"
+
+
+def test_bubble_trouble_is_deterministic_from_a_seed(tmp_path):
+    # The #65/#7 lockstep contract this cart exists to prove out: two runs
+    # seeded the same way must reach BIT-IDENTICAL state. The cart's own
+    # randomness is 100% behind rnd(), which the host wires straight to
+    # Python's random module (see host_app.make_api), so seeding that module
+    # before each run pins the whole simulation -- spawn positions, split
+    # directions, bounce timing, everything the attract-mode autopilot then
+    # reacts to deterministically.
+    import random
+
+    from runtime import host_app
+
+    def _play(tag, frames=300):
+        random.seed(12345)
+        ws = host_app.build_workstation(str(tmp_path / ("carts_" + tag)))
+        _open_cart(ws, "Bubble Trouble")
+        ws.config["autoplay"] = 1
+        ws.apply()
+        for _ in range(frames):
+            ws.input.begin_frame()
+            ws.frame(1 / 30)
+        ns = ws.ns
+        bubbles = tuple(
+            tuple(round(v, 9) if isinstance(v, float) else v for v in b)
+            for b in ns["bubbles"]
+        )
+        return (
+            round(ns["px"], 9), ns["score"], ns["level"], ns["lives"],
+            round(ns["invuln"], 9), bubbles,
+        )
+
+    a = _play("a")
+    b = _play("b")
+    assert a == b, "same seed must replay to identical state (the stage-3 lockstep contract)"
