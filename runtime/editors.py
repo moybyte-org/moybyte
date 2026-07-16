@@ -20,6 +20,103 @@ CPython (tests/host) and MicroPython (device).
 """
 
 
+class UndoStack:
+    """The bounded undo/redo stack discipline shared by every in-editor history
+    (Paint #90, Map #91, Music #92, Blocks #93). It owns ONLY the bookkeeping --
+    a bounded undo list + a redo list, the fresh-edit push (append, trim to
+    `depth`, drop the redo branch), the undo/redo exchange, and clear. Each
+    editor keeps its OWN snapshot/capture/restore semantics: it hands in the
+    pushed entries and, on undo/redo, a `reverse(entry)` callable that builds the
+    counterpart to stash on the opposite stack, so the three exchange shapes all
+    fit --
+      * Paint/Blocks push a freshly-captured CURRENT snapshot as the reverse;
+      * Map moves the SAME popped rec across (reverse=None -- deltas replay both
+        ways);
+      * Music pushes _snapshot_of(popped) and skips the push when that is None.
+    Plain Python (no deps) so it freezes onto the device."""
+
+    def __init__(self, depth):
+        self.depth = depth
+        self.undo = []            # committed edits, oldest first
+        self.redo = []
+
+    def can_undo(self):
+        return bool(self.undo)
+
+    def can_redo(self):
+        return bool(self.redo)
+
+    def push(self, entry):
+        """Record a pre-edit entry (a fresh edit): bounded-append it and drop the
+        redo branch -- the classic fork."""
+        self.undo.append(entry)
+        if len(self.undo) > self.depth:
+            del self.undo[0]
+        self.redo = []
+
+    def clear(self):
+        """Drop both stacks (a structural change makes recorded steps meaningless)."""
+        self.undo = []
+        self.redo = []
+
+    def _exchange(self, src, dst, reverse):
+        """Pop the newest entry off `src`, push its counterpart (bounded) onto
+        `dst`, and return the popped entry for the caller to apply. `reverse(entry)`
+        builds what to stash -- None from the callable SKIPS the push (Music's
+        stale object); reverse=None moves the SAME entry across (Map's replayable
+        deltas). Returns None when `src` is empty (real entries are never None)."""
+        if not src:
+            return None
+        entry = src.pop()
+        rev = entry if reverse is None else reverse(entry)
+        if rev is not None:
+            dst.append(rev)
+            if len(dst) > self.depth:
+                del dst[0]
+        return entry
+
+    def take_undo(self, reverse=None):
+        """Pop an undo step (stashing its reverse on redo); None if nothing to do."""
+        return self._exchange(self.undo, self.redo, reverse)
+
+    def take_redo(self, reverse=None):
+        """Pop a redo step (stashing its reverse on undo); None if nothing to do."""
+        return self._exchange(self.redo, self.undo, reverse)
+
+
+class KeyEdge:
+    """Single-fire keystroke edge detector shared by the editor surfaces (#89-#93).
+    The keyboard streams last_key every frame with NO autorepeat, so a shortcut
+    must act only on the 0->key (or key->new-key) EDGE -- a held Ctrl+Z would
+    otherwise drain the whole undo stack, one step per frame. Tracks the previous
+    byte. `undo_redo(k, on_undo, on_redo)` is the common Ctrl+Z/Y (0x1A/0x19) case
+    the one-shot surfaces share; `hit(k)` exposes the raw edge for a richer
+    dispatcher (the code editor folds undo/redo in with copy/cut/paste/find)."""
+
+    def __init__(self):
+        self.prev = 0
+
+    def reset(self):
+        """Forget the last byte (on entering a screen, so a stale key can't fire)."""
+        self.prev = 0
+
+    def hit(self, k):
+        """True iff k is a fresh press (truthy and != the last byte). Records k as
+        the new previous either way, so a caller reads the flag then dispatches."""
+        fresh = bool(k) and k != self.prev
+        self.prev = k
+        return fresh
+
+    def undo_redo(self, k, on_undo, on_redo):
+        """The Ctrl+Z/Y shortcut: on a fresh edge fire on_undo (0x1A) / on_redo
+        (0x19). Records the edge like hit(), so a held key fires once."""
+        if self.hit(k):
+            if k == 0x1A:
+                on_undo()
+            elif k == 0x19:
+                on_redo()
+
+
 class CodeEditor:
     """Editable text buffer for a cart's main.py: a list of lines plus a
     (row, col) cursor. The shell feeds it keyboard ASCII (key) and tap-to-place
@@ -823,9 +920,17 @@ class PaintEditor:
         # responsive undo; a SAVE still lands a durable step. Each entry is
         # (n, size, bytes) -- the region's tile origin + size + its flat pixels -- so
         # a restore targets the right tiles even after the sprite/size was changed.
-        self._undo = []
-        self._redo = []
+        self._hist = UndoStack(self.UNDO_DEPTH)
         self._stroke_pre = None   # pending pre-stroke snapshot (set on press, #90)
+
+    # `_undo`/`_redo` proxy the shared stack's lists (read-only; tests inspect them).
+    @property
+    def _undo(self):
+        return self._hist.undo
+
+    @property
+    def _redo(self):
+        return self._hist.redo
 
     @property
     def dim(self):
@@ -912,10 +1017,6 @@ class PaintEditor:
                 sh.pset(ox + lx, oy + ly, buf[k])
                 k += 1
 
-    def _read_region(self):
-        """The current region as a mutable bytearray (for the transforms/fill)."""
-        return bytearray(self._capture()[2])
-
     def _write_region(self, buf):
         """Write a dim*dim buffer back into the current region."""
         dim = self.dim
@@ -927,21 +1028,20 @@ class PaintEditor:
                 sh.pset(ox + lx, oy + ly, buf[k])
                 k += 1
 
-    def _push(self, snap):
-        """Append a pre-edit snapshot to the undo ring (bounded) and drop the redo
-        stack -- a fresh edit forks the history."""
-        self._undo.append(snap)
-        if len(self._undo) > self.UNDO_DEPTH:
-            del self._undo[0]
-        self._redo = []
-
-    def _record(self, op):
-        """Run an atomic edit `op` and journal ONE undo step iff it changed pixels
-        (a no-op fill / a flip that reproduces the region records nothing)."""
-        pre = self._capture()
-        op()
-        if self._capture(pre[0], pre[1])[2] != pre[2]:
-            self._push(pre)
+    def _record(self, build):
+        """Run an atomic edit as a buffer transform: read the current region ONCE
+        into a mutable pixel copy, hand it to `build(buf, dim)` to mutate in place,
+        then -- ONLY if it actually changed -- write the region back and journal
+        one undo step. A no-op fill / a flip that reproduces the region reads once,
+        writes nothing, records nothing (so `gen`/`dirty` only bump on a real edit,
+        matching the pset-driven paint path)."""
+        pre = self._capture()              # (n, size, bytes) -- the ONE region read
+        prebytes = pre[2]
+        buf = bytearray(prebytes)
+        build(buf, self.dim)
+        if buf != prebytes:                # bytearray == bytes compares by content
+            self._write_region(buf)
+            self._hist.push(pre)
 
     # -- stroke boundaries (a drag = ONE undo step, #90) ---------------------
 
@@ -958,36 +1058,30 @@ class PaintEditor:
             pre = self._stroke_pre
             self._stroke_pre = None
             if self._capture(pre[0], pre[1])[2] != pre[2]:
-                self._push(pre)
+                self._hist.push(pre)
 
-    # -- undo / redo ---------------------------------------------------------
+    # -- undo / redo (over the shared UndoStack) -----------------------------
 
     def can_undo(self):
-        return bool(self._undo)
+        return self._hist.can_undo()
 
     def can_redo(self):
-        return bool(self._redo)
+        return self._hist.can_redo()
 
     def undo(self):
         """Revert the last recorded edit. Captures the current region onto the redo
         ring first, then restores. Returns True iff a step was taken."""
-        if not self._undo:
+        snap = self._hist.take_undo(lambda s: self._capture(s[0], s[1]))
+        if snap is None:
             return False
-        snap = self._undo.pop()
-        self._redo.append(self._capture(snap[0], snap[1]))
-        if len(self._redo) > self.UNDO_DEPTH:
-            del self._redo[0]
         self._restore(snap)
         return True
 
     def redo(self):
         """Re-apply the last undone edit (the inverse of undo)."""
-        if not self._redo:
+        snap = self._hist.take_redo(lambda s: self._capture(s[0], s[1]))
+        if snap is None:
             return False
-        snap = self._redo.pop()
-        self._undo.append(self._capture(snap[0], snap[1]))
-        if len(self._undo) > self.UNDO_DEPTH:
-            del self._undo[0]
         self._restore(snap)
         return True
 
@@ -1001,9 +1095,7 @@ class PaintEditor:
         if not (0 <= lx < self.dim and 0 <= ly < self.dim):
             return
 
-        def op():
-            dim = self.dim
-            buf = self._read_region()
+        def build(buf, dim):
             target = buf[ly * dim + lx]
             repl = self.color & 15
             if target == repl:
@@ -1023,22 +1115,19 @@ class PaintEditor:
                     stack.append(i - dim)
                 if i < dim * (dim - 1):
                     stack.append(i + dim)
-            self._write_region(buf)
-        self._record(op)
+        self._record(build)
 
     # -- transforms (respect the multi-tile SIZE selection, #90) -------------
 
     def _transform(self, fn):
-        """Read the region, build a transformed copy via `fn(src, dst, dim)`, write
-        it back -- all as one undo step. Operates on the size*8 square, so a 2x2/3x3
-        sprite transforms as a whole block."""
-        def op():
-            dim = self.dim
-            src = self._read_region()
-            dst = bytearray(dim * dim)
-            fn(src, dst, dim)
-            self._write_region(dst)
-        self._record(op)
+        """Transform the region in one undo step: `_record` reads it ONCE into
+        `buf`, we snapshot a stable `src` copy, then `fn(src, dst, dim)` writes the
+        transformed pixels back into `buf`. Operates on the size*8 square, so a
+        2x2/3x3 sprite transforms as a whole block."""
+        def build(buf, dim):
+            src = bytes(buf)               # a stable read-only source snapshot
+            fn(src, buf, dim)
+        self._record(build)
 
     def flip_h(self):
         """Mirror the sprite left<->right."""
@@ -1084,14 +1173,10 @@ class PaintEditor:
 
     def clear(self):
         """Clear the whole editable region to color 0 (the transparent/erase index)."""
-        def op():
-            dim = self.dim
-            ox, oy = self._origin()
-            sh = self.sheet
-            for ly in range(dim):
-                for lx in range(dim):
-                    sh.pset(ox + lx, oy + ly, 0)
-        self._record(op)
+        def build(buf, dim):
+            for i in range(len(buf)):
+                buf[i] = 0
+        self._record(build)
 
 
 class MapEditor:
@@ -1136,8 +1221,16 @@ class MapEditor:
         # UNDO_MAX steps so a long session can't grow without limit.
         self.cam_y = 0
         self._rec = None     # open edit batch (list of (idx, prev, new)) or None
-        self._undo = []      # committed edits, oldest first
-        self._redo = []
+        self._hist = UndoStack(self.UNDO_MAX)   # committed edits (shared discipline)
+
+    # `_undo`/`_redo` proxy the shared stack's lists (read-only; tests inspect them).
+    @property
+    def _undo(self):
+        return self._hist.undo
+
+    @property
+    def _redo(self):
+        return self._hist.redo
 
     # -- in-editor undo/redo (#91) --------------------------------------------
 
@@ -1168,10 +1261,7 @@ class MapEditor:
                     e = rec[k]
                     before[e[0]] = e[1]
                 rec = ("snap", tm.w, tm.h, bytes(before), after)
-            self._undo.append(rec)
-            if len(self._undo) > self.UNDO_MAX:
-                del self._undo[0]
-            self._redo = []
+            self._hist.push(rec)
 
     def abort_edit(self):
         """Discard the open batch without committing it (the cells are reverted by
@@ -1225,40 +1315,38 @@ class MapEditor:
         tm.gen += 1
 
     def can_undo(self):
-        return bool(self._undo)
+        return self._hist.can_undo()
 
     def can_redo(self):
-        return bool(self._redo)
+        return self._hist.can_redo()
 
     def undo(self):
         """Revert the most recent committed edit; returns True iff a step was taken.
-        Closes any open batch first so an in-flight gesture can't be half-undone."""
+        Closes any open batch first so an in-flight gesture can't be half-undone. The
+        SAME rec moves to the redo stack -- a delta/snapshot replays either way."""
         if self._rec:
             self.end_edit()
-        if not self._undo:
+        rec = self._hist.take_undo()
+        if rec is None:
             return False
-        rec = self._undo.pop()
         self._apply(rec, False)
-        self._redo.append(rec)
         return True
 
     def redo(self):
         """Re-apply the next undone edit; returns True iff a step was taken."""
         if self._rec:
             self.end_edit()
-        if not self._redo:
+        rec = self._hist.take_redo()
+        if rec is None:
             return False
-        rec = self._redo.pop()
         self._apply(rec, True)
-        self._undo.append(rec)
         return True
 
     def clear_history(self):
         """Drop the undo/redo stacks (a structural change -- a map resize -- makes
         the recorded cell indices meaningless, so history is reset, #91)."""
         self._rec = None
-        self._undo = []
-        self._redo = []
+        self._hist.clear()
 
     def stamp_span(self):
         """The (tw, th) tile block the current brush stamps: `size` clamped
@@ -1449,9 +1537,18 @@ class BlockEditor:
         # -- #93 clipboard + cross-parent move + in-session undo/redo -----------
         self.clipboard = None     # a deep-copied block subtree (copy/paste/duplicate)
         self._move_src = None     # the block object marked for a cross-parent MOVE
-        self._undo = []           # bounded full-program snapshots (in-session)
-        self._redo = []
+        # bounded full-program snapshots (in-session), over the shared discipline
+        self._hist = UndoStack(_BLK_UNDO_MAX)
         self.reflow()
+
+    # `_undo`/`_redo` proxy the shared stack's lists (read-only; tests inspect them).
+    @property
+    def _undo(self):
+        return self._hist.undo
+
+    @property
+    def _redo(self):
+        return self._hist.redo
 
     # -- flattening ----------------------------------------------------------
     def reflow(self):
@@ -1527,37 +1624,31 @@ class BlockEditor:
     def _record(self):
         """Push a pre-edit snapshot for undo and clear the redo stack. Called at the
         top of every mutating op (after its guards, so a no-op records nothing)."""
-        self._undo.append(_clone_tree(self.program))
-        if len(self._undo) > _BLK_UNDO_MAX:
-            del self._undo[0]
-        self._redo = []
+        self._hist.push(_clone_tree(self.program))
 
     def can_undo(self):
-        return bool(self._undo)
+        return self._hist.can_undo()
 
     def can_redo(self):
-        return bool(self._redo)
+        return self._hist.can_redo()
 
     def undo(self):
         """Restore the program to the state before the last mutation. Returns True
-        if a step was taken."""
-        if not self._undo:
+        if a step was taken. The reverse pushed to redo is a fresh clone of the
+        CURRENT program (captured before the restore)."""
+        snap = self._hist.take_undo(lambda _e: _clone_tree(self.program))
+        if snap is None:
             return False
-        self._redo.append(_clone_tree(self.program))
-        if len(self._redo) > _BLK_UNDO_MAX:
-            del self._redo[0]
-        self.program = self._undo.pop()
+        self.program = snap
         self._after_history()
         return True
 
     def redo(self):
         """Re-apply the mutation the last undo reverted. Returns True if it moved."""
-        if not self._redo:
+        snap = self._hist.take_redo(lambda _e: _clone_tree(self.program))
+        if snap is None:
             return False
-        self._undo.append(_clone_tree(self.program))
-        if len(self._undo) > _BLK_UNDO_MAX:
-            del self._undo[0]
-        self.program = self._redo.pop()
+        self.program = snap
         self._after_history()
         return True
 
@@ -2066,9 +2157,18 @@ class MusicEditor:
         self.slot = 0             # selected slot within that track (song view)
         self.dirty = False
         self._clip = None         # internal clipboard: ("step", [p, w, v]) | ("slot", id)
-        self._undo = []           # bounded snapshot stacks (#92) -- see class docstring
-        self._redo = []
+        # bounded snapshot stacks (#92) over the shared discipline -- see docstring
+        self._hist = UndoStack(_ME_UNDO_MAX)
         self._ensure_nonempty()
+
+    # `_undo`/`_redo` proxy the shared stack's lists (read-only; tests inspect them).
+    @property
+    def _undo(self):
+        return self._hist.undo
+
+    @property
+    def _redo(self):
+        return self._hist.redo
 
     # -- bank bootstrapping --------------------------------------------------
     def _new_sfx(self):
@@ -2540,37 +2640,29 @@ class MusicEditor:
         snap = self._snapshot()
         if snap is None:
             return
-        self._undo.append(snap)
-        if len(self._undo) > _ME_UNDO_MAX:
-            del self._undo[0]
-        self._redo = []
+        self._hist.push(snap)
 
     def can_undo(self):
-        return bool(self._undo)
+        return self._hist.can_undo()
 
     def can_redo(self):
-        return bool(self._redo)
+        return self._hist.can_redo()
 
     def undo(self):
-        """Step back one content edit (a no-op at the floor)."""
-        if not self._undo:
+        """Step back one content edit (a no-op at the floor). The reverse pushed to
+        redo is a fresh _snapshot_of the POPPED entry's object (pre-restore) -- so
+        the pair is a true before/after even if the selection walked elsewhere; a
+        stale object (None) simply isn't stashed."""
+        snap = self._hist.take_undo(self._snapshot_of)
+        if snap is None:
             return
-        snap = self._undo.pop()
-        cur = self._snapshot_of(snap)      # the POPPED entry's object, pre-restore
-        if cur is not None:
-            self._redo.append(cur)
-            if len(self._redo) > _ME_UNDO_MAX:
-                del self._redo[0]
         self._restore(snap)
         self.dirty = True
 
     def redo(self):
         """Re-apply the next edit undo() walked back past (a no-op at the top)."""
-        if not self._redo:
+        snap = self._hist.take_redo(self._snapshot_of)
+        if snap is None:
             return
-        snap = self._redo.pop()
-        cur = self._snapshot_of(snap)      # the POPPED entry's object, pre-restore
-        if cur is not None:
-            self._undo.append(cur)
         self._restore(snap)
         self.dirty = True

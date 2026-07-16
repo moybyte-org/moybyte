@@ -24,9 +24,9 @@ internals directly.
 """
 
 try:
-    from editors import MapEditor
+    from editors import MapEditor, KeyEdge
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors import MapEditor
+    from runtime.editors import MapEditor, KeyEdge
 
 # Map (tilemap) editor (#32): a panned view of the map on the left where each cell
 # is the scaled sprite tile placed there, and a paged tile palette on the right to
@@ -258,7 +258,7 @@ class MapEditorUI:
         self.map_tool = "stamp"        # active paint tool (#91): stamp/rect/flood
         self._map_rect = None          # (x0,y0,x1,y1) cell corners while a RECT drags
         self.dims_open = False         # the map-resize (DIM) panel is showing (#91)
-        self._mkey_prev = 0            # last last_key seen (Ctrl+Z/Y edge, #91)
+        self._mkey = KeyEdge()         # Ctrl+Z/Y edge tracker (#91)
         self._map_drag = None          # last pointer (px,py) during a map pan drag (#37)
         self._map_press = None         # gesture origin (px,py); set on press, None on release
         self._map_panning = False      # this gesture has crossed the pan threshold (#37)
@@ -305,7 +305,7 @@ class MapEditorUI:
         self.map_tool = "stamp"        # (#91) back to the plain per-cell brush
         self._map_rect = None
         self.dims_open = False
-        self._mkey_prev = 0
+        self._mkey.reset()
 
     # -- input -----------------------------------------------------------------
 
@@ -332,12 +332,7 @@ class MapEditorUI:
             # mirroring the code editor's journal shortcut. On the device the on-screen
             # UNDO/REDO buttons are the touch-first affordance (no Ctrl key).
             k = getattr(i, "last_key", 0)
-            if k and k != self._mkey_prev:
-                if k == 0x1A:
-                    self._map_undo()
-                elif k == 0x19:
-                    self._map_redo()
-            self._mkey_prev = k
+            self._mkey.undo_redo(k, self._map_undo, self._map_redo)
         ws._leave_or_home(ws._leave_menu)
 
     def _map_undo(self):
