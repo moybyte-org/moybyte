@@ -10,9 +10,10 @@ TS = 16          # tile size in pixels (one map cell, drawn at scale 2 over 8x8 
 GROUND = 2       # sprite-sheet tile id for a solid block (baked into sprites.moygfx)
 # The solid terrain now lives in the cart's TILEMAP (map.moymap), drawn in ONE native
 # map() call instead of ~381 per-frame rect/spr draws (#32) -- and collision reads
-# it back with mget() instead of scanning a string grid. This LEVEL string stays as
-# the readable source for the NON-tile markers: C coin, G goal, S spawn (#/= cells
-# are the ground in the tilemap). EVERY row is exactly 20 cols x 13 rows -> the
+# it back with mget() instead of scanning a string grid. The NON-tile placements --
+# C coin, G goal, S spawn -- now live in the cart's SCENE (scenes/main.moyscene,
+# #85), read via scene() in _init; this LEVEL string is kept as the readable
+# fallback if the scene is missing. EVERY row is exactly 20 cols x 13 rows -> the
 # 320x240 canvas (top HUD aside). The terrain is a solid staircase climbing right
 # from the spawn to a plateau with the goal; a coin sits one tile above each tread.
 LEVEL = [
@@ -84,15 +85,27 @@ def _init():
     global px, py, vx, vy, coins, goal, spawn, won, t, ai_dir, ai_jump
     global got, sparks, flash
     coins = []
-    for ty in range(len(LEVEL)):
-        for tx in range(len(LEVEL[ty])):
-            ch = LEVEL[ty][tx]
-            if ch == "C":
-                coins.append([tx, ty, False])
-            elif ch == "G":
-                goal = (tx, ty)
-            elif ch == "S":
-                spawn = (tx, ty)
+    # The coins/goal/spawn are PLACED ACTORS (#85): scenes/main.moyscene holds one
+    # tagged row per placement (world-space pixels), read once here -- change the
+    # level by moving actors, not by editing code. The LEVEL string below stays as
+    # the readable fallback for a cart copy that lost its scene.
+    for a in scene():
+        if a.tag == "coin":
+            coins.append([a.x // TS, a.y // TS, False])
+        elif a.tag == "goal":
+            goal = (a.x // TS, a.y // TS)
+        elif a.tag == "spawn":
+            spawn = (a.x // TS, a.y // TS)
+    if not coins:
+        for ty in range(len(LEVEL)):
+            for tx in range(len(LEVEL[ty])):
+                ch = LEVEL[ty][tx]
+                if ch == "C":
+                    coins.append([tx, ty, False])
+                elif ch == "G":
+                    goal = (tx, ty)
+                elif ch == "S":
+                    spawn = (tx, ty)
     px = spawn[0] * TS
     py = spawn[1] * TS
     vx = 0.0

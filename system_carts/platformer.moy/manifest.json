@@ -1,6 +1,6 @@
 {
   "format": "moybyte-cart-v1",
-  "version": 7,
+  "version": 8,
   "title": "Hop Quest",
   "type": "game",
   "runtime": "python",
@@ -85,5 +85,10 @@
       "card": "AUTOPLAY {value}"
     }
   ],
-  "fps": 60
+  "fps": 60,
+  "assets": {
+    "scenes": [
+      "main"
+    ]
+  }
 }

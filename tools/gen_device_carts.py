@@ -103,6 +103,20 @@ def build_carts(system_carts_dir):
                     images[iname[:-len(".moyimg")]] = _read(os.path.join(images_dir, iname))
             if images:
                 cart["images"] = images
+        scenes_dir = os.path.join(base, "scenes")          # placed-actor scenes (#85)
+        if os.path.isdir(scenes_dir):
+            scenes = {}
+            for sname in sorted(os.listdir(scenes_dir)):
+                if sname.endswith(".moyscene"):
+                    scenes[sname[:-len(".moyscene")]] = _read(os.path.join(scenes_dir, sname))
+            if scenes:
+                cart["scenes"] = scenes
+                # seed_builtins writes manifest assets.scenes from scene_order
+                # (element 0 = the default active scene); carry the manifest order.
+                order = (man.get("assets") or {}).get("scenes") or []
+                keep = [n for n in order if n in scenes]
+                if keep:
+                    cart["scene_order"] = keep
         blocks = os.path.join(base, "blocks.json")      # block source (#29), optional
         if os.path.exists(blocks):
             # carry the block program so a block-authored seed (tap_game) opens in

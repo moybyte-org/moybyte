@@ -19,17 +19,26 @@ def _touch_y():
     return t[1] if t else -100
 
 
-def _init():
-    global score, tx, ty, timer, over
+def new_game(ticks):
+    global score, timer, over
     score = 0
-    timer = 600
+    timer = ticks
     over = 0
+
+
+def move_coin():
+    global tx, ty
     tx = (int(rnd(270)) + 15)
     ty = (int(rnd(150)) + 56)
 
 
+def _init():
+    new_game(600)
+    move_coin()
+
+
 def _update(dt):
-    global score, tx, ty, timer, over
+    global score, timer, over
     if (over == 0):
         timer = timer + (-1)
         if _touched():
@@ -38,15 +47,13 @@ def _update(dt):
                     if (_touch_y() > ty):
                         if (_touch_y() < (ty + 28)):
                             score = score + (1)
-                            tx = (int(rnd(270)) + 15)
-                            ty = (int(rnd(150)) + 56)
+                            move_coin()
                             beep(880)
         if (timer < 1):
             over = 1
 
 
 def _draw():
-    global score, timer, over
     cls(col("dark_blue"))
     if (over == 0):
         spr(0, tx, ty)
@@ -62,6 +69,4 @@ def _draw():
         print(score, 168, 120, col("yellow"))
         print("TAP TO REPLAY", 104, 140, col("light_grey"))
     if ((over > 0) and _touched()):
-        score = 0
-        timer = 600
-        over = 0
+        new_game(600)
