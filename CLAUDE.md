@@ -183,7 +183,14 @@ to whoever called it.
   RLE decode; regenerable cache, plain writes, readers validate magic+size+stamp)
   and passes the **#67 dual-runtime fields** (`runtime`/`main`) through
   load/save_code/create/duplicate/seed_builtins, so a lua cart's source stays in
-  `main.lua` end-to-end (save_code only Python-syntax-gates python carts).
+  `main.lua` end-to-end (save_code only Python-syntax-gates python carts). Newer
+  asset kinds ride the same load/save/create/duplicate/seed flow: **scenes**
+  (#85 Stage 1: `scenes/*.moyscene` placed-actor tables, manifest
+  `assets.scenes` ordered with element 0 the default; consumed via the
+  `scene()`/`load_scene()` cart verbs over `widgets.Scenes`; the placement
+  editor is Stage 2, still open) and the **Desk Lab interop docs** (#78:
+  `tables/*.moysheet` from the Sheets app + `docs/*.moytext` from Writer, read
+  back via the `table()`/`text()` cart verbs — all in `docs/moy_cart_api.md`).
   (frozen as `moy_carts`)
 - **Dual cart runtimes (#67, on-glass both boards 2026-07-14):** a manifest
   `"runtime": "lua"` (+ `"main": "main.lua"`) routes `Player.start` through the
@@ -212,9 +219,11 @@ to whoever called it.
   lives in #67 (S3: parity with auto-native Python; P4: logic 3–4ms flat vs
   Python's 6–7ms with 19–24ms GC spikes). The web-view TeeCanvas declines the
   C fast path (its `__getattr__` would bypass the recorder — same trap
-  `make_spr_gate` shadows against). Remaining: Phase 4 protocol tests, Phase 5
-  UX tail (Lua crash-line mapping, `=`/`~=` symbol palette, docs), and the
-  `LUA_32BITS` decision (doubles are soft-float on both boards' FPUs).
+  `make_spr_gate` shadows against). The Phase 4 protocol tests + Phase 5 UX tail
+  (crash-line mapping via `player._lua_cart_line`, the per-language symbol
+  palette in `code_layer`, the docs Lua section) shipped 2026-07-15 (`21c1278`);
+  remaining: only the `LUA_32BITS` decision (doubles are soft-float on both
+  boards' FPUs).
 - **pmem persistence is DEFERRED (#66, on-glass 2026-07-14):** `pmem(i, v)` is
   RAM + a dirty mark; `Pmem.flush()` persists at cart exit (`release_world`),
   the crash capture, the workspace swap, and a periodic frame-boundary save

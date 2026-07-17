@@ -42,12 +42,13 @@ code) and **host glue**.
 | `settings_layer.py` | **(shared, staged)** `SettingsLayer` — the Settings aggregator (#28/#39/#53): rows + scroll + draw; owns no config (dispatches every mutation to `ws` setters). Includes the **WIFI panel** (#38, spec §10: scan/pick/password/connect over the injected `ws.wifi` — Settings is an app, so wifi setup coexists with a running cart), the capability-gated P4 **BLUETOOTH KEYBOARD** panel (visual-identity-v1 widgets; enable/scan/pick/forget over `ws.keyboard`), and the **THEME row** (cycles `chrome.THEMES`, persisted) |
 | `code_layer.py` | **(shared, staged)** `CodeLayer` — the full-screen code editor (#24/#39): draw + touch/keyboard editing + the MicroPython-safe syntax highlighter; `ws.editor`/`save_code`/`run_code` stay on `ws` |
 | `wallpaper.py` | **(shared, staged)** `Wallpaper` — the desktop backdrop component (#28) the launcher home + Settings both draw; owns the rendering + compiled-cart cache, `wallpaper_id` + picker API stay on `ws`. On a distinct big system canvas the cart frame COVER-crops full-bleed (and ships as one b64 img on a recording canvas); the solid fallback fills the SYSTEM canvas |
-| `widgets.py` | **(shared, staged)** self-contained support classes: `Pointer` (cursor), `Achievements` (#21 tracker + catalog), `Popup` (dropdown #52), `Pmem` (cart RAM), `_SilentAudio`, `_Blit` |
+| `widgets.py` | **(shared, staged)** self-contained support classes: `Pointer` (cursor), `Achievements` (#21 tracker + catalog), `Popup` (dropdown #52), `Pmem` (cart RAM), `Actor`/`Scenes` (#85 placed-actor scenes — the `scene()`/`load_scene()` data model), `_SilentAudio`, `_Blit` |
 | `perf_hud.py` / `update_ui.py` / `system_menu_ui.py` / `achievements_ui.py` | **(shared, staged)** the FPS/frame-time HUD (#43), the OTA update screen (#53), the ≡ system-menu drawing (#52), the achievement/Easter-egg drawing (#21) |
 | `block_editor_ui.py` / `map_editor_ui.py` / `music_editor_ui.py` | **(shared, staged)** the block editor (#29), tilemap editor (#32), and music/sound editor (#50) UIs |
-| `moy_carts.py` | **(shared, staged to device)** the `.moy` store — scan/load/save_config/save_code/save_sprites/save_sounds/save_map/create/duplicate/delete + the known-WiFi credential store (load_wifi/remember_wifi/forget_wifi → `wifi.json`, #38) (dict carts; `map.moymap` tilemap blob, #32; only `json`+`os`) |
+| `moy_carts.py` | **(shared, staged to device)** the `.moy` store — scan/load/save_config/save_code/save_sprites/save_sounds/save_map/save_scene/create/duplicate/delete + the known-WiFi credential store (load_wifi/remember_wifi/forget_wifi → `wifi.json`, #38) (dict carts; `map.moymap` tilemap blob #32; `scenes/*.moyscene` actor tables #85; `tables/*.moysheet` + `docs/*.moytext` Desk Lab interop #78; only `json`+`os`) |
 | `ui.py` | **(shared, staged)** the immediate-mode widget toolkit + rect algebra + Hits + ScrollRegion + the `is_light` gate (visual identity v1 Phase 3; see `docs/app_api_v1.md`) |
 | `calc_app.py` | **(shared, staged)** Calc -- the reference SYSTEM APP for the app API (`ws.register_app`, docs/app_api_v1.md): identity cart `system_carts/calc.moy`, geometry via the ui rect algebra, taps via ui.Hits |
+| `sheets_app.py` / `formula.py` | **(shared, staged)** Sheets (#78) — the kid spreadsheet app (identity cart `system_carts/sheets.moy`): workbook list + responsive grid + formula-entry row, autosaving `sheets.json`; `formula.py` is its hand-rolled tokenizer/recursive-descent formula engine + `Sheet` model (the #48 block-operator vocabulary + `sum`/`avg`; cycles → `#LOOP`, malformed → `#ERR`, never raises). A sheet attached to a cart (`tables/<name>.moysheet`) is read back via the `table()` cart verb |
 | `host_app.py` | **(host glue)** host `make_api` (incl. audio + the capability-gated `wifi`), `FakeAudio` + `FakeWifi` backends, `build_workstation()` (320×240 Canvas + `moy_carts` + seeded system carts), and `ConsoleDriver` (mouse/keyboard → the shared console) |
 | `input.py` | **(host)** `InputState` — held/pressed/released + `last_key` (same contract as firmware `moybyte`) |
 
@@ -74,8 +75,10 @@ Content + tooling:
   `storybook.moy` (title: Storybook, #78) opens `runtime/storybook_app.py`:
   decks of art+words pages that COMPILE to real story carts (`deck.json` + a
   generated, readable `main.py`; Paint art attaches per page; hand-editing the
-  code past the deck graduates the story to read-only-in-Storybook). Each seed
-  carries its own `config` defaults and edit schema where applicable.
+  code past the deck graduates the story to read-only-in-Storybook).
+  `sheets.moy` (title: Sheets, #78) opens `runtime/sheets_app.py`: the kid
+  spreadsheet (see the file table above); sheets become game data via `table()`.
+  Each seed carries its own `config` defaults and edit schema where applicable.
 - `tools/simulate_desktop.py` — run the workstation (or a single cart) on the host.
 - `tests/test_v04_userland.py` — canvas, cartridge, desktop, launcher, cards tests.
 

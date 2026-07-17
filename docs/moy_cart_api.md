@@ -197,6 +197,35 @@ re-drawing the background every frame.
 | `make_layer(w, h)` | create an off-screen layer (wider than the screen). Draw into it once with the **same verbs** (`cls`/`map`/`spr`/`rect`/…) via the layer's methods |
 | `draw_layer(layer, cam_x=0, cam_y=0)` | blit the visible `W×H` window of `layer` at the camera offset (clamped to the layer bounds). Draw actors on top afterwards |
 
+## Scenes (placed actors, `#85`)
+
+A **scene** is a saved table of placed actors — a sprite + a world position + a tag —
+that your cart reads once in `_init` and spawns however it likes. Scenes live in the
+cart's `scenes/<name>.moyscene` files (tiny JSON, one row per actor, list order =
+spawn order = draw order); the manifest's `assets.scenes` lists them, and the first
+entry is the default active scene. Pure data: `scene()` never draws anything, and a
+cart with no scenes just gets an empty list.
+
+| call | does |
+|---|---|
+| `scene()` | the ACTIVE scene's actors — a list of read-only rows with `.tag` (the kind your code branches on), `.tile` (sheet index), `.x`/`.y` (world-space), `.flip`, `.flags` (a dict of extras). Missing/empty scene → `[]` |
+| `scene(name)` | a named scene's actors, WITHOUT switching the active one |
+| `load_scene(name)` | switch the active scene (e.g. `level2`) and return its actors. Resets to the default on the next run. Unknown name → `[]`, active unchanged |
+
+```python
+def _init():
+    global coins, px, py
+    coins = []
+    for a in scene():                 # spawn whatever was placed
+        if a.tag == "coin":
+            coins.append([a.x, a.y])
+        elif a.tag == "player":
+            px, py = a.x, a.y
+```
+
+Treat the rows as read-only — a game's *changing* state belongs in your own
+variables (and `pmem` for what should survive), not written back into the scene.
+
 ## Reading documents (`table` / `text`, `#78`)
 
 A game can read a **Sheets** sheet or a **Writer** doc that lives in its own cart
