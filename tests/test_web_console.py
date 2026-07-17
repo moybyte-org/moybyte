@@ -1263,3 +1263,34 @@ def test_idle_static_screen_pushes_nothing(tmp_path):
     console.assets()                                    # a page (re)connects
     cmds, _cart, _au = console.step_frame()
     assert cmds                                         # -> one full keyframe again
+
+
+def test_hop_quest_mapped_layer_background_replays_identical(tmp_path):
+    """Hop Quest paints its terrain with lay.map() into the pre-rendered background
+    layer (the #66 "paint the static background once" habit). RecordingLayer.map must
+    ship the cells (per-cell spr expansion) -- the old __getattr__ fallthrough rastered
+    the terrain but shipped a cls-only deflayer, so the browser drew a flat sky with no
+    ground. The running cart must replay pixel-identical, with the layer shipped ONCE."""
+    ws, drv, tee = _build_tee(str(tmp_path / "carts"))
+    for i, c in enumerate(ws.launcher.items):
+        if c["title"] == "Hop Quest":
+            ws.launcher.sel = i
+            ws.open()
+            break
+    layers = {}
+    for f in range(3):
+        ws.input.begin_frame()
+        ws.frame(1.0 / 30)
+        cmds = _served(tee)
+        cv = Canvas(WIDTH, HEIGHT)
+        replay_to_canvas(cmds, cv, layers)
+        assert bytes(cv.buf) == bytes(tee.raster.buf), \
+            "Hop Quest frame %d must replay pixel-identical over the web stream" % f
+        defl = [c for c in cmds if c[0] == "deflayer"]
+        if f == 0:
+            assert len(defl) == 1, "the background layer ships exactly once"
+            assert len(defl[0][4]) > 50, \
+                "the shipped layer must carry the terrain cells, not just the sky cls"
+        else:
+            assert not defl, "later frames blit the shipped layer by reference"
+    assert ws.cart_error is None

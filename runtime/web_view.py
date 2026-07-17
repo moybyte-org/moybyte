@@ -641,9 +641,11 @@ class RecordingLayer:
     every frame ships its deflayer ONCE -- a periodically rebuilt layer (the top bar) re-ships
     only on the rebuild.
 
-    RECORDED VERBS: primitives + print + spr (self-contained). map()/spr_batch() INTO a layer
-    fall through __getattr__ to the real canvas (panel/host stays correct) but are NOT recorded
-    -- no shipped cart draws a tilemap into a layer (Sky Run is primitives only)."""
+    RECORDED VERBS: primitives + print + spr (self-contained) + map (per-cell expansion
+    through the recording spr -- Hop Quest's #66 layer diet paints its terrain with
+    lay.map(), so a mapped layer must ship its cells or the browser shows a flat sky).
+    spr_batch() INTO a layer still falls through __getattr__ unrecorded (a layer is
+    pre-rendered once, so no shipped cart batches into one)."""
 
     _VERBS = ("cls", "pix", "line", "rect", "rectb", "circ", "circb",
               "spr", "print", "camera", "clip", "pal", "palt", "reset_state")
@@ -686,6 +688,40 @@ class RecordingLayer:
         img = sheet.tile_image(int(tile), colorkey)
         if img is not None:
             self.spr(img, x, y, scale, flip)
+
+    def map(self, tilemap, sheet, mx=0, my=0, w=None, h=None,
+            sx=0, sy=0, colorkey=-1, scale=1):
+        # A tilemap INTO a layer (Hop Quest's _build_layer, the #66 "paint the static
+        # background once" habit): mirror Canvas.map's cell walk through the BOUND
+        # recording spr, so both the backing raster AND the layer's shipped stream get
+        # every cell. Runs once per (re)build, only on the web path -- per-cell cost
+        # is fine. Without this the old __getattr__ fallthrough rastered the terrain
+        # but shipped a cls-only deflayer: a flat-sky background in the browser.
+        mx = int(mx)
+        my = int(my)
+        scale = int(scale)
+        if scale < 1:
+            scale = 1
+        if w is None:
+            w = tilemap.w - mx
+        if h is None:
+            h = tilemap.h - my
+        step = sheet.TILE * scale
+        cache = {}
+        for cy in range(int(h)):
+            ty = my + cy
+            py = int(sy) + cy * step
+            for cx in range(int(w)):
+                tid = tilemap.mget(mx + cx, ty)
+                if tid < 0:
+                    continue
+                img = cache.get(tid)
+                if img is None:
+                    img = sheet.tile_image(tid, colorkey)
+                    cache[tid] = img if img is not None else False
+                if not img:
+                    continue
+                self.spr(img, int(sx) + cx * step, py, scale, 0)
 
     def _begin_batch(self):
         if not self._in_batch:
