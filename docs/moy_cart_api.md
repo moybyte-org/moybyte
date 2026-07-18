@@ -109,6 +109,11 @@ The few Lua-specific notes:
   `main.lua` line. The code editor's tap-palette offers `~` (for `~=`) in a
   Lua project.
 - The blocks editor stays Python-only for now (compiles to Python by design).
+- **Numbers on the device are 32-bit** (`LUA_32BITS`, #67): floats carry ~7
+  digits and integers wrap at ±2.1 billion — plenty for scores, timers and
+  positions, and float math runs on the hardware FPU (part of why Lua is the
+  fast tier). The PC simulator uses 64-bit doubles, so a float-heavy cart can
+  drift slightly between sim and device.
 
 *(Host note: the PC simulator runs Lua carts through `lupa` — an optional dev
 dependency; without it a Lua cart opens the "needs the Lua runtime" panel.)*

@@ -3259,3 +3259,9 @@ def test_moy_lua_hardware_learned_constraints_pinned():
     api_src = (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8")
     assert 'getattr(canvas, "_r", None)' in api_src
     assert "0x7A11" in api_src                         # the documented Lua token
+    # 7) LUA_32BITS is ON (#67 owner decision 2026-07-18): both boards' FPUs are
+    #    single-precision, so doubles are soft-float; 32-bit floats/ints use the
+    #    HW FPU and halve TValue. Host lupa stays on doubles -- golden-frame
+    #    parity is host-only for float-heavy carts.
+    conf = (lua_dir / "luaconf.h").read_text(encoding="utf-8")
+    assert "#define LUA_32BITS\t1" in conf
