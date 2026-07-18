@@ -169,7 +169,9 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: |
           mkdir -p out
-          find firmware -path '*/dist/*' -name '*.bin' -print -exec cp {} out/ \; || true
+          # T-Deck images land under firmware/*/dist/; the P4 build writes to
+          # the repo-root dist/p4/ -- scan both (dist/ may not exist).
+          find firmware dist -path '*dist/*' -name '*.bin' -print -exec cp {} out/ \; 2>/dev/null || true
           ls -l out || true
 
       - name: Upload firmware artifacts
