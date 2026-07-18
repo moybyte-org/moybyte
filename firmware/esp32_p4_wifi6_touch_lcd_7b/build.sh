@@ -68,15 +68,19 @@ fi
 echo "== using ESP-IDF at ${IDF_DIR}"
 # The toolchains + IDF python env live in ~/.espressif, OUTSIDE the esp-idf
 # tree: a runner can have the tree (restored .build cache) but not the tools
-# (evicted ~/.espressif cache), and export.sh then refuses with "virtual
-# environment not found". Self-heal with the official installer and re-source.
+# (evicted ~/.espressif cache). export.sh can NOT be trusted to report that --
+# v5.5.1 ends in an unconditional `return 0` (only its inner activate.py
+# fails) -- so probe the real outcome: idf.py on PATH. Self-heal with the
+# official installer and re-source.
 set +u
 # shellcheck disable=SC1091
-if ! source "${IDF_DIR}/export.sh" >/dev/null 2>&1; then
+source "${IDF_DIR}/export.sh" >/dev/null 2>&1 || true
+if ! command -v idf.py >/dev/null 2>&1; then
   echo "== ESP-IDF tools missing (fresh runner / evicted cache): running install.sh esp32p4"
   "${IDF_DIR}/install.sh" esp32p4
   # shellcheck disable=SC1091
   source "${IDF_DIR}/export.sh" >/dev/null
+  command -v idf.py >/dev/null 2>&1 || { echo "!! idf.py still missing after install.sh" >&2; exit 1; }
 fi
 set -u
 
