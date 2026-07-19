@@ -94,10 +94,10 @@ to whoever called it.
   hold-to-exit toast — zero knowledge of who launched it; exit pops to the run
   CALLER (launcher→launcher; Editor-PLAY→the same tab). **`EditorApp`** = ONE
   authoring app opened on a `Project`: the tab ladder Config→Blocks→Code→Sprites→
-  Map→Music (+ PROJECTS/PLAY/SAVE in its lent bar zone), whose tabs ARE the
-  extracted `*_layer.py` surfaces — all six tabs are **system-domain responsive**
-  (#39 step 3: `PaintLayout`/`MapLayout`/`MusicLayout`/`CardsLayout` join
-  `CodeLayout`/`BlockLayout`, each `_base`-verbatim byte-identical at 320×240/1×),
+  Map→Scene→Music (+ PROJECTS/PLAY/SAVE in its lent bar zone), whose tabs ARE the
+  extracted `*_layer.py` surfaces — all seven tabs are **system-domain responsive**
+  (#39 step 3: `PaintLayout`/`MapLayout`/`SceneLayout`/`MusicLayout`/`CardsLayout`
+  join `CodeLayout`/`BlockLayout`, each `_base`-verbatim byte-identical at 320×240/1×),
   so the whole Editor reflows to any panel/window size and only a RUNNING CART still
   draws on the fixed 320×240 game canvas. **`FullscreenStackWM`** = the small-screen
   tier's WM: the process back-stack (`screen` is a read-only projection of its top),
@@ -185,10 +185,12 @@ to whoever called it.
   load/save_code/create/duplicate/seed_builtins, so a lua cart's source stays in
   `main.lua` end-to-end (save_code only Python-syntax-gates python carts). Newer
   asset kinds ride the same load/save/create/duplicate/seed flow: **scenes**
-  (#85 Stage 1: `scenes/*.moyscene` placed-actor tables, manifest
-  `assets.scenes` ordered with element 0 the default; consumed via the
-  `scene()`/`load_scene()` cart verbs over `widgets.Scenes`; the placement
-  editor is Stage 2, still open) and the **Desk Lab interop docs** (#78:
+  (#85: `scenes/*.moyscene` placed-actor tables, manifest `assets.scenes`
+  ordered with element 0 the default; consumed via the `scene()`/`load_scene()`
+  cart verbs over `widgets.Scenes`; authored WYSIWYG in the Editor's **Scene
+  tab** — `scene_editor_ui.py` over the `editors_scene.SceneEditor` core, which
+  live-syncs each gesture into `ws.scenes` so PLAY re-starts on the freshest
+  placement) and the **Desk Lab interop docs** (#78:
   `tables/*.moysheet` from the Sheets app + `docs/*.moytext` from Writer, read
   back via the `table()`/`text()` cart verbs — all in `docs/moy_cart_api.md`).
   (frozen as `moy_carts`)

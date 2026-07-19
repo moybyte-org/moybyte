@@ -4,7 +4,7 @@
 tabs ARE the already-extracted editor layers -- the view ladder ordered gentlest
 -> deepest (spec shell_ux_v1.md Section 6):
 
-    Config -> Blocks -> Code -> Sprites -> Map -> Music        [ PLAY ]
+    Config -> Blocks -> Code -> Sprites -> Map -> Scene -> Music        [ PLAY ]
 
 What EditorApp owns (moved verbatim out of Workstation): the current-tab state
 (`EditorApp.tab`, the new single source of truth for the active view), the lazy
@@ -59,7 +59,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # (_ZONE_SAVE) are ACTIONS, not destinations, so they're never highlighted -- SAVE
 # dispatches to the active tab's persist verb (save_current), the ONE compact save
 # affordance the unified bar carries so every editor BODY stays chrome-free (fits 320px:
-# 9 icons * 18px = 162px inside the ~202px lent zone). This is what makes the bar
+# 10 icons * 18px = 180px inside the ~202px lent zone). This is what makes the bar
 # identical across all six tabs -- code/blocks/music no longer need their own SAVE/RUN/CLOSE.
 _ZONE_SAVE = "\x00save"          # sentinel: the SAVE action icon (never a real tab)
 _ZONE_PROJECTS = "\x00projects"  # sentinel: back to the project-picker (never a real tab)
@@ -70,6 +70,7 @@ _ZONE_TABS = (
     ("code", "code"),
     ("paint", "paint"),
     ("map", "map"),
+    ("scene", "scene"),     # placed-actor placement editor (#85 Stage 2)
     ("music", "music"),
     (None, "run"),          # PLAY
     (_ZONE_SAVE, "save"),   # SAVE -> save_current() (persist the active tab)
@@ -86,6 +87,7 @@ _TAB_CHIPS = (
     ("code", "CODE", "code"),
     ("paint", "SPRITES", "paint"),
     ("map", "MAP", "map"),
+    ("scene", "SCENE", "scene"),
     ("music", "MUSIC", "music"),
 )
 
@@ -184,6 +186,21 @@ class EditorApp:
         # clearing it after would hide the data-loss guard's message.
         ws.set_menu_view("blocks")
 
+    def open_scene(self):
+        """Open the scene placement editor (#85 Stage 2): the WYSIWYG placed-
+        actor view over the cart's default scene. Mirrors open_map -- reset
+        gesture/zoom state, then build via set_menu_view("scene")."""
+        ws = self.ws
+        ws.wm.goto("menu")       # Stage 6e: spawn/return the Editor on the back-stack
+        ws.save_status = None
+        ws.scene_ui.on_open()        # fresh gesture/zoom/props state
+        ws.set_menu_view("scene")
+        # Open with the camera at the world origin so the game viewport's frame
+        # shows immediately (screen-space carts place inside it, no panning).
+        if ws.scene_ui.sceneedit is not None:
+            ws.scene_ui.sceneedit.cam_x = 0
+            ws.scene_ui.sceneedit.cam_y = 0
+
     def open_music(self):
         """Open the music/sound editor (#50): a tracker-style step grid over the
         cart's AudioBank. Mirrors open_map -- reset preview state, then build the
@@ -225,6 +242,11 @@ class EditorApp:
             # + sheet (both always exist after open()). Edits go straight into the
             # live tilemap, so a running cart picks them up via tilemap.gen (#32).
             ws.map_ui.build()
+        elif view == "scene":
+            # Mirror the map branch: build the SceneEditor over the cart's
+            # default scene (#85 Stage 2). Committed gestures sync into the live
+            # widgets.Scenes, so a PLAY runs the freshest placement.
+            ws.scene_ui.build()
         elif view == "blocks":
             # Build the BlockEditor over the cart's block program (#29), lazily --
             # see BlockEditorUI.build's docstring (block_editor_ui.py) for the
@@ -256,6 +278,8 @@ class EditorApp:
         ws._set_text_mode(False)
         if self.tab == "music":
             ws.music_ui._stop_music_preview()   # don't let a preview leak into the cart resume
+        if self.tab == "scene" and ws.scene_ui.tag_edit:
+            ws.scene_ui._tag_commit()   # PLAY mid-typing keeps the typed tag (#85)
         # Returning to the desktop from the code editor must run whatever source is
         # in the editor now (the kid may have fixed a crash and hit SAVE, or just
         # edited and closed). Re-_start() with the editor text so the FIXED cart
@@ -270,6 +294,14 @@ class EditorApp:
             # it so leaving the outline runs the freshest program, just like the code
             # editor does. (Unsaved edits don't touch src, so this re-runs the last
             # saved version -- the kid SAVEs to keep changes, exactly like code.)
+            if ws.cart is not None:
+                ws._start()
+        elif self.tab == "scene":
+            # Scenes are consumed ONCE at _init (#85 Variant A) -- a resumed cart
+            # would never re-read scene(), so PLAY from the scene tab re-starts:
+            # the fresh _init spawns the placement the kid just made (the editor
+            # live-syncs each gesture into ws.scenes; Player.start resets the
+            # parse cache). Mirrors the blocks tab's re-run-on-leave.
             if ws.cart is not None:
                 ws._start()
         elif self.tab == "cards":
@@ -389,6 +421,8 @@ class EditorApp:
             ws._open_paint()
         elif tab == "map":
             ws._open_map()
+        elif tab == "scene":
+            ws._open_scene()
         elif tab == "blocks":
             ws._open_blocks()
         elif tab == "music":
@@ -415,6 +449,8 @@ class EditorApp:
             ws.save_sprites()
         elif tab == "map":
             ws.save_map()
+        elif tab == "scene":
+            ws.save_scene()
         elif tab == "music":
             ws.save_sounds()
         elif tab == "blocks":

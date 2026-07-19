@@ -197,7 +197,7 @@ ladder**, ordered easy → deep, so the leftmost thing a kid sees is always the
 gentlest:
 
 ```
-[ PROJECTS ]  Config → Blocks → Code → Sprites → Map → Music   [ PLAY ] [ SAVE ]
+[ PROJECTS ]  Config → Blocks → Code → Sprites → Map → Scene → Music   [ PLAY ] [ SAVE ]
 ```
 
 - **Config** — the default landing tab (§4) and the intrigue rung: the "Make it mine"
@@ -211,15 +211,18 @@ gentlest:
   device), incremental find, an optional line-number gutter, and block
   indent/outdent — every verb touch-reachable, with host Ctrl+C/X/V/F/Z/Y as
   conveniences on top.
-- **Sprites / Map / Music** — the asset editors, each with an icon-buttoned tool
-  row (#90/#91/#92): the sprite painter has stroke-level undo/redo, a bucket
+- **Sprites / Map / Scene / Music** — the asset editors, each with an icon-buttoned
+  tool row (#90/#91/#92): the sprite painter has stroke-level undo/redo, a bucket
   fill, and whole-sprite transforms (flip/rotate/shift/clear); the map editor has
-  per-gesture undo/redo, rectangle + flood fills, and map resize; the music
-  editor has copy/paste/duplicate, step/slot reorder, and undo/redo. They are
-  tabs of the one Editor rather than global console modes. (In the codebase
-  these are the extracted layer modules — `code_layer` / `paint_layer` /
-  `map_editor_ui` / `music_editor_ui` — owned as tabs by `runtime/editor_app.py`;
-  see §13.) The Blocks tab likewise carries subtree copy/paste/duplicate, an
+  per-gesture undo/redo, rectangle + flood fills, and map resize; the scene
+  placement editor (#85 Stage 2) places tagged actors WYSIWYG on the world (tap =
+  place/select, drag = move or pan, snap toggle, tag/flip props, front/back
+  z-order, per-gesture undo/redo — every committed gesture live-syncs so PLAY
+  runs the freshest placement); the music editor has copy/paste/duplicate,
+  step/slot reorder, and undo/redo. They are tabs of the one Editor rather than
+  global console modes. (In the codebase these are the extracted layer modules —
+  `code_layer` / `paint_layer` / `map_editor_ui` / `scene_editor_ui` /
+  `music_editor_ui` — owned as tabs by `runtime/editor_app.py`; see §13.) The Blocks tab likewise carries subtree copy/paste/duplicate, an
   explicit cross-parent MOVE flow, and outline undo/redo (#93). Tool buttons
   draw from the shared 12×12 glyph vocabulary (`chrome._GLYPHS`), so every tool
   reads pre-literate.

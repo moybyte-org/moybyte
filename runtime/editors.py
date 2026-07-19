@@ -11,6 +11,7 @@ consumer and test keeps `from editors import X` / `editors.X`:
   editors_paint_map -- PaintEditor (#4) + MapEditor (#32)
   editors_block     -- BlockRow / BlockEditor (+ _clone_tree, #29 Part 2)
   editors_music     -- MusicEditor (#50/#92)
+  editors_scene     -- SceneEditor (placed-actor placement, #85 Stage 2)
 
 All of them are pure logic -- no canvas, framebuf, input, or I/O -- so the
 *same* files back both the host reference (`runtime/`) and the MicroPython
@@ -28,6 +29,7 @@ try:
                                _ME_VOL_MAX, _ME_SPEED_MIN, _ME_SPEED_MAX,
                                _ME_STEPS_MAX, _ME_PATTERN_MAX, _ME_BANK_MAX,
                                _ME_UNDO_MAX, _me_clamp, MusicEditor)
+    from editors_scene import SceneEditor
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editors_base import UndoStack, KeyEdge, UndoRedoMixin
     from runtime.editors_code import CodeEditor
@@ -41,3 +43,4 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                        _ME_STEPS_MAX, _ME_PATTERN_MAX,
                                        _ME_BANK_MAX, _ME_UNDO_MAX, _me_clamp,
                                        MusicEditor)
+    from runtime.editors_scene import SceneEditor

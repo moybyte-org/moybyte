@@ -115,6 +115,7 @@ class _LayoutCtx:
         ctx.block_layout = ws.block_ui.block_layout
         ctx.paint_layout = ws.paint_layer.layout
         ctx.map_layout = ws.map_ui.layout
+        ctx.scene_layout = ws.scene_ui.layout
         ctx.music_layout = ws.music_ui.layout
         ctx.cards_layout = ws.cards_layer.layout
         # Registered SYSTEM APPS (docs/app_api_v1.md): capture each app's layout
@@ -138,6 +139,7 @@ class _LayoutCtx:
         ws.block_ui.block_layout = self.block_layout
         ws.paint_layer.layout = self.paint_layout
         ws.map_ui.layout = self.map_layout
+        ws.scene_ui.layout = self.scene_layout
         ws.music_ui.layout = self.music_layout
         ws.cards_layer.layout = self.cards_layout
         for _app, _t in getattr(ws, "_apps", ()):

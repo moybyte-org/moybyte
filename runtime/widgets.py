@@ -405,6 +405,28 @@ class Scenes:
             return list(self._parse(name))
         return []
 
+    def raw(self, name):
+        """The raw .moyscene blob of scene `name` (None when absent) -- the
+        placement editor (#85 Stage 2) parses this into its editable rows."""
+        return self._raw.get(name)
+
+    def put(self, name, text):
+        """Replace scene `name`'s raw blob IN the live object (#85 Stage 2: the
+        placement editor syncs each committed gesture here, so a PLAY without an
+        explicit SAVE runs the freshest placement -- the same live-edit semantics
+        the shared TileMap gives the map editor). A NEW name joins the order (and
+        becomes the default when there was none); the parse cache entry drops so
+        the next scene() re-parses."""
+        known = name in self._raw
+        self._raw[name] = text
+        if not known:
+            self.names.append(name)
+            if self._default is None:
+                self._default = name
+            if self.active is None:
+                self.active = name
+        self._cache.pop(name, None)
+
 
 class _SilentAudio:
     """No-op audio backend (#16): wraps an AudioEngine but never produces sound.

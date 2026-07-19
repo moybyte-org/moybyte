@@ -198,6 +198,46 @@ class _MapLayer(Layer):
         return True
 
 
+class _SceneLayer(Layer):
+    """The scene placement editor (#85 Stage 2), SYSTEM-domain responsive (#39):
+    a full-screen panel on the reflowed system canvas -- the world view + actor
+    palette + props row (scene_editor_ui.SceneEditorUI). Tap = place/select,
+    drag = move an actor or pan the world (the map editor's gesture grammar).
+
+    Stage-4 bar rollout (#46 zoned bar): draw() calls ws.bar_layer.
+    _draw_status_strip("menu") LAST (chrome over content) so the Editor's lent
+    top-bar zone (the tab ladder + PLAY + SAVE) shows on this tab;
+    handle_pointer routes a tap through ws.bar_layer.handle_bar_tap("menu", ...)
+    FIRST, before the placement click/pan -- the exact _MapLayer shape."""
+
+    id = "scene"
+    domain = "system"
+
+    def draw(self, dt):
+        ws = self.ws
+        ws._reset_canvas_state()          # game-canvas hygiene (degradation shares it)
+        ws.scene_ui._draw_scene()
+        ws.bar_layer._draw_status_strip("menu")
+
+    def handle_input(self, i):
+        self.ws.scene_ui._scene_input()
+        return True
+
+    def handle_pointer(self, px, py, click):
+        ws = self.ws
+        # SYSTEM coords (#39): the editor draws on the system canvas at native
+        # size, so it hit-tests the raw pointer -- no _game_xy translation.
+        if click and ws.bar_layer.handle_bar_tap("menu", px, py):
+            return True         # the Editor's lent zone (Stage 4) claimed the tap
+        if click:
+            ws.scene_ui._scene_click(px, py)
+        elif ws.pointer.down:
+            ws.scene_ui._scene_drag(px, py)
+        else:
+            ws.scene_ui._scene_release(px, py)
+        return True
+
+
 class _MusicLayer(Layer):
     """The music/sound editor (#50), SYSTEM-domain responsive (#39 step 3): a
     full-screen tracker on the reflowed system canvas (a bigger panel shows more

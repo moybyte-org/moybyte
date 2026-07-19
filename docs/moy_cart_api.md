@@ -209,7 +209,9 @@ that your cart reads once in `_init` and spawns however it likes. Scenes live in
 cart's `scenes/<name>.moyscene` files (tiny JSON, one row per actor, list order =
 spawn order = draw order); the manifest's `assets.scenes` lists them, and the first
 entry is the default active scene. Pure data: `scene()` never draws anything, and a
-cart with no scenes just gets an empty list.
+cart with no scenes just gets an empty list. Author them WYSIWYG in the Editor's
+**Scene** tab: pick a sprite, tap the world to place an actor, tap one to select it,
+drag to move, and set its tag in the props row — PLAY spawns what you placed.
 
 | call | does |
 |---|---|

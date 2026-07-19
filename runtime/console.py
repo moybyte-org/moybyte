@@ -74,6 +74,13 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
         _MAP_CLOSE, _MAP_PAN_THRESH,
     )
 
+# The scene placement editor's UI layer (#85 Stage 2, its own module from birth
+# -- the map editor's extraction shape): the WYSIWYG placed-actor editor.
+try:
+    from scene_editor_ui import SceneEditorUI
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.scene_editor_ui import SceneEditorUI
+
 # The music/sound editor's UI layer (issue #50, extracted from this file): the
 # tracker-style step editor + preview. Re-exported under its pre-extraction names
 # (_MU_*, _mu_note_name, _mu_pad_rect) for the same `console.X`/`C.X` reasons as
@@ -143,11 +150,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 try:
     from layers import (
         _LegacyLayer, _PlayerLayer, _BlocksLayer, _UpdateLayer, _MapLayer, _MusicLayer,
-        _PerfLayer, _AchOverlayLayer, _SysMenuLayer, _AboutLayer)
+        _SceneLayer, _PerfLayer, _AchOverlayLayer, _SysMenuLayer, _AboutLayer)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layers import (
         _LegacyLayer, _PlayerLayer, _BlocksLayer, _UpdateLayer, _MapLayer, _MusicLayer,
-        _PerfLayer, _AchOverlayLayer, _SysMenuLayer, _AboutLayer)
+        _SceneLayer, _PerfLayer, _AchOverlayLayer, _SysMenuLayer, _AboutLayer)
 
 # The unified top bar + bottom dock surface (#46, extracted from this file -- see
 # bar_layer.py). bar_layer.py is the SINGLE SOURCE of the bar/dock geometry constants
@@ -744,6 +751,10 @@ class Workstation:
         # handle_pointer/frame's menu_view == "map" branches plus set_menu_view/
         # _open_map/open/go_home.
         self.map_ui = MapEditorUI(self, NAMES, _in)
+        # The scene placement editor's UI (#85 Stage 2 -- see scene_editor_ui.py):
+        # one instance, delegated to from the "scene" content layer plus
+        # set_menu_view/_open_scene/open/go_home, the exact map_ui lifecycle.
+        self.scene_ui = SceneEditorUI(self, NAMES, _in)
         # Block editor (#29 Part 2) state now lives on self.block_ui (built above).
         # The music/sound editor's UI (#50, extracted from this class -- see
         # music_editor_ui.py): one instance, delegated to from handle_input/
@@ -1025,6 +1036,7 @@ class Workstation:
             "theme": self.theme_layer,
             "paint": self.paint_layer,
             "map": _MapLayer(self),
+            "scene": _SceneLayer(self),
             "cards": self.cards_layer,
         }
         # -- SYSTEM APPS (docs/app_api_v1.md): a cartridge identity backed by a
@@ -1316,7 +1328,7 @@ class Workstation:
             self.editor.set_view_size(self.code_layout.cols, self.code_layout.rows)
         # The step-3 responsive editors (#39): each converted layer owns its layout;
         # guarded, since _relayout is first called before _build_layers registers them.
-        for _lyr in ("paint_layer", "map_ui", "music_ui", "cards_layer"):
+        for _lyr in ("paint_layer", "map_ui", "scene_ui", "music_ui", "cards_layer"):
             _obj = getattr(self, _lyr, None)
             if _obj is not None:
                 _obj.relayout(w, h, fs)
@@ -2139,6 +2151,7 @@ class Workstation:
         self.editor = None
         self.paint = None
         self.map_ui.reset()
+        self.scene_ui.reset()
         self.music_ui.reset()
         self.block_ui.reset()
         self.cart_error = None
@@ -2407,6 +2420,9 @@ class Workstation:
     def _open_map(self):
         self.editor_app.open_map()
 
+    def _open_scene(self):
+        self.editor_app.open_scene()
+
     def _open_blocks(self):
         self.editor_app.open_blocks()
 
@@ -2573,6 +2589,7 @@ class Workstation:
         self.images = fresh.get("images") or {}
         self.tables = fresh.get("tables") or {}
         self.texts = fresh.get("texts") or {}
+        self.scenes = self._build_scenes()   # a scene undo must reach the live rows (#85)
         self.cart_error = None
         self.crash_line = None
         # Drop the editor cores + rebuild the ACTIVE tab's over the fresh data, then
@@ -2580,10 +2597,12 @@ class Workstation:
         self.editor = None
         self.paint = None
         self.map_ui.reset()
+        self.scene_ui.reset()
         self.music_ui.reset()
         self.block_ui.reset()
         view = self.menu_view
-        if self.wm.top_is("menu") and view in ("code", "paint", "map", "blocks", "music"):
+        if self.wm.top_is("menu") and view in ("code", "paint", "map", "scene",
+                                               "blocks", "music"):
             self.set_menu_view(view)     # rebuild the active editor from fresh data
         self._start()
 
@@ -2629,6 +2648,13 @@ class Workstation:
         # Store-write moved to Project.commit_map (Stage 1b); this stays as the tested
         # ws. entry point MapEditorUI's SAVE dispatches to.
         self.project.commit_map()
+
+    def save_scene(self):
+        # The scene tab's persist verb (#85 Stage 2): the editor serializes its
+        # rows and commits through Project.commit_scene (atomic write + manifest
+        # registration + the durable undo journal). The ws entry point the bar's
+        # SAVE (EditorApp.save_current) dispatches to.
+        self.scene_ui.save()
 
     # -- music / sound editor (#50) ------------------------------------------
 
@@ -2734,6 +2760,7 @@ class Workstation:
         self.paint = None
         self._editing_icons = False    # never carry the theme-editing flag home
         self.map_ui.reset()
+        self.scene_ui.reset()
         self.block_ui.reset()
         self.wm.goto("launcher")       # Stage 6e: pop back to the launcher root
         self.cart = None

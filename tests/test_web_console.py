@@ -278,6 +278,35 @@ def test_crosscheck_named_cart_with_map(tmp_path):
         _assert_frame_identical(ws, drv, tee, label="map#%d" % n)
 
 
+def test_crosscheck_scene_cart_and_placement_editor(tmp_path):
+    """The #85 web-view knock-on, verified: scenes need NO asset threading over
+    the draw-command transport -- scene() is pure data consumed server-side at
+    _init (only its ordinary spr/rect draw verbs reach the wire, unlike map(),
+    whose replay needs the browser's cached tilemap). A seeded scene consumer
+    (Hop Quest) AND the Stage 2 placement editor tab itself both round-trip
+    pixel-identical."""
+    cart_path = os.path.join(host_app.ROOT, "system_carts", "platformer.moy")
+    if not os.path.isdir(os.path.join(cart_path, "scenes")):
+        pytest.skip("platformer.moy scene assets not present")
+    ws, drv, tee = _build_tee(str(tmp_path / "carts"))
+    for i, c in enumerate(ws.launcher.items):
+        if os.path.basename(c.get("path") or "") == "platformer.moy":
+            ws.launcher.sel = i
+            break
+    else:
+        pytest.skip("platformer.moy not in the seeded store")
+    ws.open()
+    assert ws.screen == "desktop"
+    assert len(ws.scenes.scene()) > 0          # the cart really loaded its scene
+    for n in range(6):
+        _assert_frame_identical(ws, drv, tee, label="scenecart#%d" % n)
+    # The placement editor's own surface (world view + palette + props row).
+    ws._open_scene()
+    assert ws.menu_view == "scene"
+    for n in range(3):
+        _assert_frame_identical(ws, drv, tee, label="sceneedit#%d" % n)
+
+
 def test_take_commands_clears_per_frame(tmp_path):
     """take_commands() returns the frame's list AND resets it, so commands never
     accumulate across frames (the wire stays a few calls/frame)."""

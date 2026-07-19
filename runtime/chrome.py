@@ -551,6 +551,9 @@ _GLYPHS = {
     "map":    (0x000, 0x7FE, 0x444, 0x444, 0x444, 0x7FE, 0x444, 0x444, 0x444, 0x7FE, 0x000, 0x000),
     # "blocks": two stacked Scratch-style notched bricks (the #29 block-editor icon).
     "blocks": (0x000, 0x3F8, 0x7FC, 0x7FC, 0x3F8, 0x000, 0x1FC, 0x3FE, 0x3FE, 0x1FC, 0x000, 0x000),
+    # "scene": the placement editor (#85 Stage 2) -- a viewport frame with two
+    # placed actors inside (one low-left, one high-right): things ON a stage.
+    "scene":  (0x000, 0x7FE, 0x402, 0x40E, 0x40E, 0x402, 0x582, 0x582, 0x402, 0x7FE, 0x000, 0x000),
     # Desktop-shell dock icons (#28). "code" = angle brackets </>; "gear" = a
     # settings cog; "note" = a music note (the #16 music slot, greyed until it
     # lands); "app" = a generic window (default cart icon).
@@ -735,6 +738,7 @@ _ICON = {
     "moy": 16,          # the moybyte mascot (boot logo); not a bar control
     "wifi_off": 17,     # wifi-with-a-red-slash: the right-zone status glyph when
                         # there's NO connection (ws._wifi_icon_kind picks it, #Part3)
+    "scene": 18,        # the scene placement editor tab (#85 Stage 2)
 }
 
 # The baked default theme: each icon is 16 row-strings of 16 chars over the 16-color
@@ -847,6 +851,15 @@ _ICON_ART = {
         ".7ccc.....7ccc..", "7cccc....7cccc..", "7cccc....7cccc..", ".7cc......7cc...",
         "................", "................", "................", "................",
     ),
+    # "scene": the placement editor (#85 Stage 2) -- a white viewport frame with
+    # two placed actors inside (a green block low-left, an orange one up-right),
+    # matching the 12px _glyph's "things on a stage" motif.
+    "scene": (
+        "................", ".77777777777777.", ".7............7.", ".7........aa..7.",
+        ".7........aa..7.", ".7............7.", ".7............7.", ".7...bbb......7.",
+        ".7...bbb......7.", ".7...bbb......7.", ".7............7.", ".77777777777777.",
+        "................", "................", "................", "................",
+    ),
     # "Moy", the moybyte mascot: one big pixel (a byte) with a square bite chomped
     # from the top-right corner, two eyes + a smile + stubby feet. "Grape" skin --
     # body = indigo (d/13), shadow = dark-purple (2), sheen = light-grey (6), eyes
@@ -865,8 +878,9 @@ _ICON_ART = {
 # at load (mirrors cart versioning, #47), so an already-themed device/desktop picks up
 # new icons without a manual wipe. A bump discards a user's custom icon edits, exactly
 # like a built-in cart re-seed. (v1 = the first full restyle; v2 = added the "moy"
-# mascot slot for the boot logo; v3 = added the "wifi_off" no-connection status slot.)
-_ICON_VERSION = 3
+# mascot slot for the boot logo; v3 = added the "wifi_off" no-connection status slot;
+# v4 = added the "scene" placement-editor tab slot, #85 Stage 2.)
+_ICON_VERSION = 4
 
 
 # --- Panel THEMES (owner ask, 2026-07-08) -----------------------------------

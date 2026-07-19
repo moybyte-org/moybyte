@@ -2227,7 +2227,8 @@ def _load_moy_runtime():
     # loads under CPython (editors [+ block_editor_ui #29 Part 2 / map_editor_ui #32
     # / music_editor_ui #50 / perf_hud #43/#44] + audio first -- console imports
     # all of them).
-    for name in ("editors", "block_editor_ui", "map_editor_ui", "music_editor_ui",
+    for name in ("editors", "block_editor_ui", "map_editor_ui", "scene_editor_ui",
+                 "music_editor_ui",
                  "perf_hud", "update_ui", "system_menu_ui", "achievements_ui",
                  "layers", "bar_layer", "cards_layer", "paint_layer", "settings_layer", "code_layer", "widgets", "audio", "wallpaper", "launcher_layer", "console"):
         spec = importlib.util.spec_from_file_location(name, Path("runtime") / (name + ".py"))
