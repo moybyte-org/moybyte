@@ -88,7 +88,9 @@ _PAL565_WIRE_BUF = array("H", PAL565_WIRE)
 _RGB_KEY = 0xF81F
 
 # Flip to False to force the slow Python per-pixel drawing path (no native moy_gfx)
-# for an FPS A/B comparison against the native-blit build.
+# for an FPS A/B comparison against the native-blit build. NOT dead config: the
+# host parity suite (tests/test_device_canvas_parity.py) sets this module attribute
+# per-case to prove the Python fallbacks render byte-identical to the native kernel.
 _USE_GFX = True
 
 # GDMA async layer copy (#54 St.2 / #63 / #66): tied to the SRAM-bounce flush.

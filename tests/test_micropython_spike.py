@@ -3048,16 +3048,14 @@ def test_micropython_offline_diag_wiring():
     # No rotation / second file (owner: the file is just the most-recent session).
     assert "diag.prev.log" not in diag
 
-    # Boot dump runs in main() BEFORE init_display() -- the bus-safe pre-display
-    # window where serial is alive and machine.SDCard mounting is safe.
+    # The previous-session dump is a REPL affordance now: its boot hook rode the
+    # #56 pre-display SD prefetch A/B path, which shipped OFF and was removed
+    # (nothing touches SD before the panel is up). The reader keeps the bus-safe
+    # pre-display machine.SDCard path (moybyte_sd.with_sd), NOT the live native
+    # path, so calling it from the REPL before the desktop starts stays safe.
     assert "def dump_previous_to_serial(" in diag
-    assert "_dump_diag()" in shell
-    main_src = shell.split("def main(", 1)[1].split("def ", 1)[0]
-    assert main_src.index("_dump_diag()") < main_src.index("_init_display()")
-    # The boot read uses the pre-display machine.SDCard path (moybyte_sd.with_sd),
-    # NOT the live native path -- documented as the safe pre-display read.
+    assert "_dump_diag" not in shell            # the boot hook is gone with the prefetch
     assert "moybyte_sd.with_sd(" in diag
-    assert "BEFORE init_display" in diag
 
     # Periodic SD flush goes through the live single-bus path (with_sd_live), runs
     # between frames, and overwrites the whole ring (one session per file).

@@ -319,9 +319,12 @@ def dump_previous_to_serial():
     No rotation: the new session's periodic flushes overwrite the same file, so it
     always contains exactly one (the most recent) session.
 
-    Call this from moybyte_shell.main() BEFORE _init_display() -- that's the
-    bus-safe window for the machine.SDCard read path (see
-    _read_prev_log_pre_display). Fully guarded: never crashes the boot."""
+    NOT called automatically anymore: the boot hook rode the #56 pre-display SD
+    prefetch path, which shipped OFF (a pre-display machine.SDCard mount can
+    break display init on a populated card) and has been removed. Call it from
+    the REPL before the desktop starts -- that's the bus-safe window for the
+    machine.SDCard read path (see _read_prev_log_pre_display). Fully guarded:
+    never crashes the caller."""
     if not ENABLED:
         return
     try:

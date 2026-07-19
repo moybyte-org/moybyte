@@ -301,10 +301,10 @@ def run_perf_bench(handler):
 def run_desktop(handler, prefetched=None, fps_cap=60):
     """Boot the workstation on the device: launcher + carts + keyboard.
 
-    `prefetched` is the (carts, carts_root) tuple read from SD BEFORE display
-    init (see moybyte_shell._prefetch_carts). SD shares the panel's SPI bus, so
-    mounting after the panel runs hard-hangs the device -- never call _load_carts
-    here once the display is live."""
+    `prefetched` is an optional pre-read (carts, carts_root) tuple; the shipped
+    boot passes None (#56: nothing touches SD before the panel is up) and carts
+    load below through the bus-safe moy_sd/with_sd_live attach -- machine.SDCard
+    against the live panel bus is what hard-hangs the board, not SD access."""
     if handler is not None:
         try:
             handler.deinit()  # stop the LVGL TaskHandler; the compositor owns the bus
@@ -453,7 +453,8 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     # (The #28 system.json / icon theme / achievements boot loads ran inside
     # wire_workstation_core above -- same store + with_sd_live path.)
     # Offline diagnostics (moybyte_diag): RAM ring now, flushed to SD every ~5s and
-    # on a crash, dumped to serial at next boot. perf_capture makes ws.frame() record
+    # on a crash (read back via moybyte_diag.dump_previous_to_serial from the
+    # REPL, or by pulling the card). perf_capture makes ws.frame() record
     # the flush/draw split each frame WITHOUT drawing the on-screen HUD, so the perf
     # sampler below can read steady numbers. Guarded import: no diag -> plain loop.
     try:

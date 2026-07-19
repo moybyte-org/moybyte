@@ -350,7 +350,7 @@ class WebServer:
     The `provider` is a small object the server queries for live data without holding any
     console references itself:
       provider.assets()    -> the /assets dict
-      provider.frame()     -> (cmds, cart_title) for /frame and the WS push
+      provider.frame()     -> (cmds, cart_title) for the WS push
       provider.apply(events)-> inject browser events
 
     The serve-time defspr/deflayer ship-once bookkeeping lives in the SHARED web_view.ServedState
@@ -672,10 +672,10 @@ class WebServer:
         return iv
 
     def _push_frame(self, ws):
-        """Send the latest committed frame as a WS text message: the SAME frame_payload (run
-        through served_frame for the serve-time defspr prepend + the atlas gen) the HTTP /frame
-        path returned -- only the transport differs. Times the json-encode + the socket send
-        separately (#41 perf log)."""
+        """Send the latest committed frame as a WS text message: frame_payload run
+        through served_frame for the serve-time defspr prepend + the atlas gen (the
+        same shape the retired HTTP poll served). Times the json-encode + the socket
+        send separately (#41 perf log)."""
         cmds, cart = self.provider.frame()
         # #76: when the committed frame carries per-WM-surface slices, serve + DELTA
         # them -- an unchanged surface (static grid/bar/chrome) ships as a ~30-byte
