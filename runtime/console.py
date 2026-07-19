@@ -550,6 +550,21 @@ FPS_GOVERNOR = False
 class Workstation:
     def __init__(self, comp, canvas, input, carts=None, sys_canvas=None,
                  font_scale=1):
+        # Built in five ordered stages (each a method so the constructor reads
+        # as a table of contents). The ORDER is load-bearing: the WM must exist
+        # before anything reads/writes `screen`, Project/Player/EditorApp before
+        # anything sets their forwarded fields, and the layer stack last.
+        self._init_canvases(comp, canvas, sys_canvas, font_scale)
+        self._init_components(input, carts)
+        self._init_state()
+        self._init_perf()
+        self._init_overlays()
+        # The compositor/router layer stack (docs/shell_layers_refactor_v1.md). Built
+        # once here; _visible_stack()/_draw_stack() z-order + gate them per frame.
+        self._build_layers()
+
+    def _init_canvases(self, comp, canvas, sys_canvas, font_scale):
+        """The two-domain canvas seam (#39), the WM, the theme and the responsive layouts."""
         self.comp = comp
         # Two rendering domains (#39). The GAME canvas is the fixed 320x240 indexed
         # surface the cart + cart API draw on -- carts are UNCHANGED. The SYSTEM
@@ -610,6 +625,10 @@ class Workstation:
         self.block_ui = BlockEditorUI(self, NAMES, _in, _err_text, _clamp_scroll)
         self.block_ui.relayout(self.sys_canvas.w, self.sys_canvas.h,
                                self._effective_font_scale())
+
+    def _init_components(self, input, carts):
+        """Injected-service attach points + the shell processes (Project/Player/
+        EditorApp) + the extracted editor/HUD UIs."""
         self.input = input
         self.make_api = None       # injected: make_api(canvas, input, cfg, sheet, audio, tilemap, pmem, wifi)->ns
         self.artwork = ArtworkService(self)  # narrow capability for the shipped Paint app
@@ -739,6 +758,9 @@ class Workstation:
         # this class (device diag contract). Pure read-only consumer of the
         # timing fields.
         self.perf_ui = PerfHud(self, NAMES)
+
+    def _init_state(self):
+        """Store/settings/wallpaper/cache/status fields (the mutable shell state)."""
         self.keyboard = None          # set by run_desktop (for raw/text mode toggle)
         # (The code editor's keyboard-edge tracker (_ekey_prev) + drag-scroll origin
         # (_drag) + highlight memo (_hl_cache) live on self.code_layer now.)
@@ -808,6 +830,9 @@ class Workstation:
         # run_desktop swaps in moybyte_sd.with_sd_live (native moy_sd attach). The
         # default is a host passthrough.
         self._with_sd = lambda fn: fn()
+
+    def _init_perf(self):
+        """The perf/diag/frameskip measurement fields (#43/#44/#66/#68/#77)."""
         self.show_fps = True          # bottom-right FPS readout while a cart runs
         self._fps = 0.0               # smoothed frames/sec (EMA of 1/dt)
         # Frame-time breakdown HUD (#43/#44 perf): off by default; tap the FPS
@@ -877,6 +902,10 @@ class Workstation:
         # until the on-glass feel verdict. _fs_phase is the alternation bit.
         self.frameskip = False
         self._fs_phase = False
+
+    def _init_overlays(self):
+        """Achievements/eggs (#21), the system menu (#52), device hooks, and the
+        #44 redraw gate."""
         # Achievements (#21): a small set of fun milestones + the hidden Easter-egg
         # rewards. Starts empty/volatile; load_achievements() wires the SD store +
         # the unlock beep. The Workstation calls ach.note(event) at the flow points
@@ -929,9 +958,7 @@ class Workstation:
         self._pf_cart = 0
         self._pf_audio = 0
         self._pf_bar = 0
-        # The compositor/router layer stack (docs/shell_layers_refactor_v1.md). Built
-        # once here; _visible_stack()/_draw_stack() z-order + gate them per frame.
-        self._build_layers()
+
 
     # -- the layer stack (compositor / router) -------------------------------
 
@@ -3218,40 +3245,7 @@ class Workstation:
         # calls gated on perf_hud OR perf_capture (device diag sampling), so the
         # render path itself is unchanged.
         if _perf:
-            _upd = self._pf_upd
-            _cart = self._pf_cart
-            _audio = self._pf_audio
-            _bar = self._pf_bar
-            _flush_t0 = _ticks_ms()
-            self.comp.flush()
-            _flush = _ticks_diff(_ticks_ms(), _flush_t0)
-            _total = _ticks_diff(_ticks_ms(), _frame_t0)
-            _draw = _total - _flush
-            if _draw < 0:
-                _draw = 0
-            self._flush_ms = _ema(self._flush_ms, _flush)
-            self._draw_ms = _ema(self._draw_ms, _draw)
-            # DRAWBRK split: cart _update (logic) / cart _draw (render) / audio.tick /
-            # console chrome (remainder = dock + cursor + overlays).
-            _chrome = _draw - _upd - _cart - _audio
-            if _chrome < 0:
-                _chrome = 0
-            # raw per-frame copies for the hitch logger (#66 HITCH v3)
-            self._raw_upd = float(_upd)
-            self._raw_cart = float(_cart)
-            self._raw_audio = float(_audio)
-            self._raw_chrome = float(_chrome)
-            self._raw_flush = float(_flush)
-            self._raw_draw = float(_draw)
-            self._upd_ms = _ema(self._upd_ms, _upd)
-            self._cart_ms = _ema(self._cart_ms, _cart)
-            self._audio_ms = _ema(self._audio_ms, _audio)
-            self._chrome_ms = _ema(self._chrome_ms, _chrome)
-            # CHROMEBRK sub-split (#66 lever 5): bar / composite / cursor EMAs, so
-            # a chrome trim targets the real cost instead of guessing.
-            self._bar_ms = _ema(self._bar_ms, _bar)
-            self._cmp_ms = _ema(self._cmp_ms, _cmp)
-            self._cur_ms = _ema(self._cur_ms, _cur)
+            self._frame_perf_end(_frame_t0, _cmp, _cur)
         else:
             self.comp.flush()
         # We painted this frame: clear the dirty flag and snapshot the pointer state
@@ -3265,6 +3259,49 @@ class Workstation:
             self._dirty = True
         self._last_ptr = self._ptr_state()
         self._frames_drawn += 1
+
+    def _frame_perf_end(self, frame_t0, cmp_ms, cur_ms):
+        """The #43/#44 perf-capture frame tail (extracted from frame() so the hot
+        router stays readable): time the panel DMA flush in isolation, back out
+        the draw span, and EMA the DRAWBRK/CHROMEBRK splits. Only called when
+        perf_hud/perf_capture is on -- the kid-mode path flushes directly, so the
+        render path itself is unchanged. The timing fields stay on the
+        Workstation (the device diag contract -- perf_sample/perf_breakdown/
+        perf_chrome read them)."""
+        _upd = self._pf_upd
+        _cart = self._pf_cart
+        _audio = self._pf_audio
+        _bar = self._pf_bar
+        _flush_t0 = _ticks_ms()
+        self.comp.flush()
+        _flush = _ticks_diff(_ticks_ms(), _flush_t0)
+        _total = _ticks_diff(_ticks_ms(), frame_t0)
+        _draw = _total - _flush
+        if _draw < 0:
+            _draw = 0
+        self._flush_ms = _ema(self._flush_ms, _flush)
+        self._draw_ms = _ema(self._draw_ms, _draw)
+        # DRAWBRK split: cart _update (logic) / cart _draw (render) / audio.tick /
+        # console chrome (remainder = dock + cursor + overlays).
+        _chrome = _draw - _upd - _cart - _audio
+        if _chrome < 0:
+            _chrome = 0
+        # raw per-frame copies for the hitch logger (#66 HITCH v3)
+        self._raw_upd = float(_upd)
+        self._raw_cart = float(_cart)
+        self._raw_audio = float(_audio)
+        self._raw_chrome = float(_chrome)
+        self._raw_flush = float(_flush)
+        self._raw_draw = float(_draw)
+        self._upd_ms = _ema(self._upd_ms, _upd)
+        self._cart_ms = _ema(self._cart_ms, _cart)
+        self._audio_ms = _ema(self._audio_ms, _audio)
+        self._chrome_ms = _ema(self._chrome_ms, _chrome)
+        # CHROMEBRK sub-split (#66 lever 5): bar / composite / cursor EMAs, so
+        # a chrome trim targets the real cost instead of guessing.
+        self._bar_ms = _ema(self._bar_ms, _bar)
+        self._cmp_ms = _ema(self._cmp_ms, cmp_ms)
+        self._cur_ms = _ema(self._cur_ms, cur_ms)
 
     # -- boot logo ------------------------------------------------------------
 
