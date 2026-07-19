@@ -27,9 +27,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editors import CodeEditor, IconSheet
 
 try:
-    from widgets import _Blit
+    from widgets import _Blit, _in
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import _Blit
+    from runtime.widgets import _Blit, _in
 
 # The shared petme128 glyph source (#62) -- the Library shelf's display type
 # (_print_scaled) rasterizes it through plain rect blocks so it renders identically
@@ -680,6 +680,19 @@ def _blit_glyph(cv, kind, rect, c, scale=None):
             cv.rect(ox + (n - run) * fs, yy, run * fs, fs, c)
 
 
+def _gbtn(ws, names, kind, label, rect, fill, cv):
+    """A button carrying a centered 12x12 chrome glyph (the #91/#92/#93 icon
+    passes): the colored `ws._btn` chip, then the glyph (black, matching the
+    button's label ink) over it. Falls back to the word `label` when the glyph
+    kind is missing (or None), so the row is never blank. The ONE body behind
+    the map/music/block editor surfaces' `_gbtn` delegates."""
+    if kind is not None and kind in _GLYPHS:
+        ws._btn("", rect, fill, cv)
+        ws._glyph(kind, rect, names["black"], cv)
+    else:
+        ws._btn(label, rect, fill, cv)
+
+
 def _print_scaled(cv, s, x, y, c, mult=2):
     """System DISPLAY type (visual identity v1): print `s` at `mult` x the canvas's
     system font scale, each glyph pixel a filled block via cv.rect -- so the Library
@@ -1022,9 +1035,8 @@ def _clamp_scroll(top, cur, visible, count):
     return max(0, min(top, max(0, count - visible)))
 
 
-def _in(px, py, rect):
-    x, y, w, h = rect
-    return x <= px < x + w and y <= py < y + h
+# (_in -- the rect hit-test -- lives in widgets.py, the one shared definition;
+# imported above and re-exported so console.py's `from chrome import _in` holds.)
 
 
 # (_line_cells -- the drag-to-draw Bresenham helper -- moved to paint_layer.py with

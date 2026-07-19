@@ -30,11 +30,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 # The shared pre-literate glyph vocabulary (#91 icon pass): the #91 toolbar (TOOL/
 # UNDO/REDO/resize) + the resize panel's -/+ draw a 12x12 chrome glyph instead of a
-# terse label. Imported for the membership check that keeps the label as a fallback.
+# terse label. The shared glyph-button body lives in chrome (one implementation).
 try:
-    from chrome import _GLYPHS
+    from chrome import _gbtn as _chrome_gbtn
 except ImportError:  # pragma: no cover - direct host import (chrome not yet aliased)
-    from runtime.chrome import _GLYPHS
+    from runtime.chrome import _gbtn as _chrome_gbtn
 
 # Map (tilemap) editor (#32): a panned view of the map on the left where each cell
 # is the scaled sprite tile placed there, and a paged tile palette on the right to
@@ -746,16 +746,8 @@ class MapEditorUI:
     # -- drawing -----------------------------------------------------------------
 
     def _gbtn(self, kind, label, rect, fill, cv):
-        """A tool button carrying a centered 12x12 chrome glyph (#91 icon pass): the
-        colored `ws._btn` chip, then the glyph (black, matching the button's label
-        ink) over it. Falls back to the terse `label` when the glyph kind is missing
-        (or None), so the row is never blank."""
-        ws = self.ws
-        if kind is not None and kind in _GLYPHS:
-            ws._btn("", rect, fill, cv)
-            ws._glyph(kind, rect, self._NAMES["black"], cv)
-        else:
-            ws._btn(label, rect, fill, cv)
+        # #91 icon pass -- one shared body, chrome._gbtn.
+        _chrome_gbtn(self.ws, self._NAMES, kind, label, rect, fill, cv)
 
     def _draw_map(self):
         # The map (tilemap) editor (#32): a panned view of the map on the left where

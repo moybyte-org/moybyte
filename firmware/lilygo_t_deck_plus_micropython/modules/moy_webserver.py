@@ -632,16 +632,9 @@ class WebServer:
         return did
 
     def _apply_ws_text(self, payload):
-        """Decode one inbound WS text payload ({"events":[...]}) and feed it through the SAME
-        apply path POST /input used. A bad payload yields no events (never raises)."""
-        try:
-            data = payload.decode("utf-8") if isinstance(payload, (bytes, bytearray)) else payload
-            obj = json.loads(data)
-            events = obj.get("events", []) if isinstance(obj, dict) else obj
-            if isinstance(events, list):
-                self.provider.apply(events)
-        except Exception:  # noqa: BLE001 -- a malformed message just yields no input
-            pass
+        # One shared decode path (web_view.apply_ws_text) so the wire format can't
+        # drift between the device and the host web console.
+        _wv.apply_ws_text(payload, self.provider.apply)
 
     def _perf_snapshot(self):
         """A tiny device-side stats dict for the per-frame payload (#41 perf log): free heap

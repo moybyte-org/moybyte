@@ -483,22 +483,46 @@ def save_scene(cart, name, text):
         cart["scene_names"] = list(cart.get("scene_names") or []) + [name]
 
 
-def artwork_path(root=CARTS_DIR):
-    """The shared Paint document, beside the carts directory."""
+# --- sibling stores ----------------------------------------------------------
+#
+# System-state documents live BESIDE the carts dir (one level up from `root`), so
+# they aren't tied to any single cart: artwork/notes/sheets, the shared sprite
+# sheet, the system icon theme, wifi/system/achievements JSON. The path formula,
+# the read-or-None, and the ensure-dirs + atomic write are each written ONCE here;
+# the per-store `X_path`/`load_X`/`save_X` wrappers keep their public names (and
+# any store-specific parse/sanitize logic).
+
+def _sibling_path(root, name):
     parent = root.rsplit("/", 1)[0]
-    return (parent + "/" + ARTWORK_NAME) if parent else ARTWORK_NAME
+    return (parent + "/" + name) if parent else name
 
 
-def load_artwork(root=CARTS_DIR):
+def _read_sibling(root, name):
+    """The store's raw text, or None if it has never been saved."""
     try:
-        return _read(artwork_path(root))
+        return _read(_sibling_path(root, name))
     except OSError:
         return None
 
 
-def save_artwork(text, root=CARTS_DIR):
+def _write_sibling(root, name, text):
+    """Persist a sibling store atomically (an interrupted write must never
+    truncate system state). Ensures the parent dir exists."""
     ensure_dirs(root)
-    _write_atomic(artwork_path(root), text)
+    _write_atomic(_sibling_path(root, name), text)
+
+
+def artwork_path(root=CARTS_DIR):
+    """The shared Paint document, beside the carts directory."""
+    return _sibling_path(root, ARTWORK_NAME)
+
+
+def load_artwork(root=CARTS_DIR):
+    return _read_sibling(root, ARTWORK_NAME)
+
+
+def save_artwork(text, root=CARTS_DIR):
+    _write_sibling(root, ARTWORK_NAME, text)
 
 
 def load_deck(cart):
@@ -517,20 +541,15 @@ def save_deck(cart, text):
 def notes_path(root=CARTS_DIR):
     """The Writer app's notebook (a `moynotes-v1` JSON blob), beside the carts
     directory like Paint's shared artwork.moyimg."""
-    parent = root.rsplit("/", 1)[0]
-    return (parent + "/" + NOTES_NAME) if parent else NOTES_NAME
+    return _sibling_path(root, NOTES_NAME)
 
 
 def load_notes(root=CARTS_DIR):
-    try:
-        return _read(notes_path(root))
-    except OSError:
-        return None
+    return _read_sibling(root, NOTES_NAME)
 
 
 def save_notes(text, root=CARTS_DIR):
-    ensure_dirs(root)
-    _write_atomic(notes_path(root), text)
+    _write_sibling(root, NOTES_NAME, text)
 
 
 # --- Desk Lab interop (#78): table(name) / text(name) cart-folder documents ---
@@ -668,20 +687,15 @@ def save_text(cart, name, text):
 # --- the Sheets app's own workbook (a list of sheets), beside the carts dir ---
 
 def sheets_path(root=CARTS_DIR):
-    parent = root.rsplit("/", 1)[0]
-    return (parent + "/" + SHEETS_NAME) if parent else SHEETS_NAME
+    return _sibling_path(root, SHEETS_NAME)
 
 
 def load_sheets(root=CARTS_DIR):
-    try:
-        return _read(sheets_path(root))
-    except OSError:
-        return None
+    return _read_sibling(root, SHEETS_NAME)
 
 
 def save_sheets(text, root=CARTS_DIR):
-    ensure_dirs(root)
-    _write_atomic(sheets_path(root), text)
+    _write_sibling(root, SHEETS_NAME, text)
 
 
 def slug(title):
@@ -1512,27 +1526,20 @@ def save_pmem(cart, cells):
 # --- shared sprite sheet (cross-cart sprite reuse, #18) ---------------------
 
 def shared_sheet_path(root=CARTS_DIR):
-    """Well-known path of the shared sprite sheet: a sibling of the carts dir
-    (one level up from `root`), so it isn't tied to any single cart."""
-    parent = root.rsplit("/", 1)[0]
-    return (parent + "/" + SHARED_SHEET_NAME) if parent else SHARED_SHEET_NAME
+    """Well-known path of the shared sprite sheet."""
+    return _sibling_path(root, SHARED_SHEET_NAME)
 
 
 def load_shared_sheet(root=CARTS_DIR):
     """Read the shared sprite sheet's hex (PICO-8 __gfx__-style), or None if it
     has never been saved. Caller turns it into a SpriteSheet via from_hex."""
-    try:
-        return _read(shared_sheet_path(root))
-    except OSError:
-        return None
+    return _read_sibling(root, SHARED_SHEET_NAME)
 
 
 def save_shared_sheet(hex_text, root=CARTS_DIR):
-    """Persist the shared sprite sheet's hex. Ensures the parent dir exists.
-    Written atomically (like the per-cart saves) -- it's the highest-value shared
-    asset, so an interrupted write must never truncate it."""
-    ensure_dirs(root)
-    _write_atomic(shared_sheet_path(root), hex_text)
+    """Persist the shared sprite sheet's hex -- it's the highest-value shared
+    asset, so the atomic sibling write matters most here."""
+    _write_sibling(root, SHARED_SHEET_NAME, hex_text)
 
 
 # --- system icon theme (the unified top bar, Stage 1) -----------------------
@@ -1550,27 +1557,21 @@ SYSTEM_ICONS_VER_NAME = "system_icons.ver"   # the saved theme's icon-set versio
 
 
 def system_icons_path(root=CARTS_DIR):
-    """Well-known path of the system icon theme: a sibling of the carts dir (one
-    level up from `root`), so it isn't tied to any single cart."""
-    parent = root.rsplit("/", 1)[0]
-    return (parent + "/" + SYSTEM_ICONS_NAME) if parent else SYSTEM_ICONS_NAME
+    """Well-known path of the system icon theme."""
+    return _sibling_path(root, SYSTEM_ICONS_NAME)
 
 
 def system_icons_version_path(root=CARTS_DIR):
     """Sidecar holding the icon-set version the saved theme was written at (a sibling
     of system_icons.moygfx). Lets a newer baked icon set re-seed a stale saved theme."""
-    parent = root.rsplit("/", 1)[0]
-    return (parent + "/" + SYSTEM_ICONS_VER_NAME) if parent else SYSTEM_ICONS_VER_NAME
+    return _sibling_path(root, SYSTEM_ICONS_VER_NAME)
 
 
 def load_system_icons(root=CARTS_DIR):
     """Read the system icon theme's hex (PICO-8 __gfx__-style), or None if it has
     never been saved -- in which case the caller uses the baked default IconSheet.
     Caller turns the hex into an IconSheet via IconSheet.from_hex."""
-    try:
-        return _read(system_icons_path(root))
-    except OSError:
-        return None
+    return _read_sibling(root, SYSTEM_ICONS_NAME)
 
 
 def load_system_icons_version(root=CARTS_DIR):
@@ -1606,10 +1607,8 @@ WIFI_STORE_NAME = "wifi.json"
 
 
 def wifi_store_path(root=CARTS_DIR):
-    """Well-known path of the WiFi credential store: a sibling of the carts dir
-    (one level up from `root`), so it isn't tied to any single cart."""
-    parent = root.rsplit("/", 1)[0]
-    return (parent + "/" + WIFI_STORE_NAME) if parent else WIFI_STORE_NAME
+    """Well-known path of the WiFi credential store."""
+    return _sibling_path(root, WIFI_STORE_NAME)
 
 
 def load_wifi(root=CARTS_DIR):
@@ -1673,10 +1672,8 @@ SYSTEM_STORE_NAME = "system.json"
 
 
 def system_store_path(root=CARTS_DIR):
-    """Well-known path of the system settings store: a sibling of the carts dir
-    (one level up from `root`), so it isn't tied to any single cart."""
-    parent = root.rsplit("/", 1)[0]
-    return (parent + "/" + SYSTEM_STORE_NAME) if parent else SYSTEM_STORE_NAME
+    """Well-known path of the system settings store."""
+    return _sibling_path(root, SYSTEM_STORE_NAME)
 
 
 def load_system(root=CARTS_DIR):
@@ -1711,10 +1708,8 @@ ACHIEVEMENTS_STORE_NAME = "achievements.json"
 
 
 def achievements_store_path(root=CARTS_DIR):
-    """Well-known path of the achievements store: a sibling of the carts dir
-    (one level up from `root`), so it isn't tied to any single cart."""
-    parent = root.rsplit("/", 1)[0]
-    return (parent + "/" + ACHIEVEMENTS_STORE_NAME) if parent else ACHIEVEMENTS_STORE_NAME
+    """Well-known path of the achievements store."""
+    return _sibling_path(root, ACHIEVEMENTS_STORE_NAME)
 
 
 def load_achievements(root=CARTS_DIR):

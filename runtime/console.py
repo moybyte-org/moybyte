@@ -535,6 +535,12 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # from the store, and switching carts re-slims the previous one.
 _HEAVY_CART_KEYS = ("src", "sprites", "sounds", "map", "images", "blocks", "scenes")
 
+
+def _ema(cur, sample):
+    """One-pole EMA (alpha 0.15) with a <=0 "unseeded" bootstrap -- the perf
+    readouts' smoothing, written once (frame() applies it to ~10 fields)."""
+    return float(sample) if cur <= 0 else cur + (sample - cur) * 0.15
+
 # Frame pacing knob (#63): True locks GAME carts to a steady cadence (30 default,
 # manifest "fps": 60 opt-out); False runs everything uncapped at the loop's own
 # fps cap -- the measurement mode (owner call 2026-07-08: uncapped for now, we
@@ -3106,9 +3112,8 @@ class Workstation:
 
     def frame(self, dt):
         if dt > 0:
-            inst = 1.0 / dt
             # EMA so the readout reflects sustained rate, not single-frame jitter.
-            self._fps = inst if self._fps <= 0 else self._fps + (inst - self._fps) * 0.15
+            self._fps = _ema(self._fps, 1.0 / dt)
         self._cover_built = False     # reset the per-frame cover-build budget
         self._pf_home = None          # home-frame split (launcher_layer, perf_capture)
         # Undo journal (Stage 7): the idle-typing autosave debounce runs BEFORE the
@@ -3224,10 +3229,8 @@ class Workstation:
             _draw = _total - _flush
             if _draw < 0:
                 _draw = 0
-            self._flush_ms = float(_flush) if self._flush_ms <= 0 \
-                else self._flush_ms + (_flush - self._flush_ms) * 0.15
-            self._draw_ms = float(_draw) if self._draw_ms <= 0 \
-                else self._draw_ms + (_draw - self._draw_ms) * 0.15
+            self._flush_ms = _ema(self._flush_ms, _flush)
+            self._draw_ms = _ema(self._draw_ms, _draw)
             # DRAWBRK split: cart _update (logic) / cart _draw (render) / audio.tick /
             # console chrome (remainder = dock + cursor + overlays).
             _chrome = _draw - _upd - _cart - _audio
@@ -3240,22 +3243,15 @@ class Workstation:
             self._raw_chrome = float(_chrome)
             self._raw_flush = float(_flush)
             self._raw_draw = float(_draw)
-            self._upd_ms = float(_upd) if self._upd_ms <= 0 \
-                else self._upd_ms + (_upd - self._upd_ms) * 0.15
-            self._cart_ms = float(_cart) if self._cart_ms <= 0 \
-                else self._cart_ms + (_cart - self._cart_ms) * 0.15
-            self._audio_ms = float(_audio) if self._audio_ms <= 0 \
-                else self._audio_ms + (_audio - self._audio_ms) * 0.15
-            self._chrome_ms = float(_chrome) if self._chrome_ms <= 0 \
-                else self._chrome_ms + (_chrome - self._chrome_ms) * 0.15
+            self._upd_ms = _ema(self._upd_ms, _upd)
+            self._cart_ms = _ema(self._cart_ms, _cart)
+            self._audio_ms = _ema(self._audio_ms, _audio)
+            self._chrome_ms = _ema(self._chrome_ms, _chrome)
             # CHROMEBRK sub-split (#66 lever 5): bar / composite / cursor EMAs, so
             # a chrome trim targets the real cost instead of guessing.
-            self._bar_ms = float(_bar) if self._bar_ms <= 0 \
-                else self._bar_ms + (_bar - self._bar_ms) * 0.15
-            self._cmp_ms = float(_cmp) if self._cmp_ms <= 0 \
-                else self._cmp_ms + (_cmp - self._cmp_ms) * 0.15
-            self._cur_ms = float(_cur) if self._cur_ms <= 0 \
-                else self._cur_ms + (_cur - self._cur_ms) * 0.15
+            self._bar_ms = _ema(self._bar_ms, _bar)
+            self._cmp_ms = _ema(self._cmp_ms, _cmp)
+            self._cur_ms = _ema(self._cur_ms, _cur)
         else:
             self.comp.flush()
         # We painted this frame: clear the dirty flag and snapshot the pointer state

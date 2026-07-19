@@ -461,16 +461,9 @@ class _Handler(BaseHTTPRequestHandler):
                     pass
 
     def _ws_apply(self, payload):
-        """Decode one inbound WS text payload ({"events":[...]}) and inject it through the SAME
-        apply path the old POST /input used. A malformed message just yields no input."""
-        try:
-            data = payload.decode("utf-8") if isinstance(payload, (bytes, bytearray)) else payload
-            obj = json.loads(data)
-            events = obj.get("events", []) if isinstance(obj, dict) else obj
-            if isinstance(events, list):
-                self.console.apply_events(events)
-        except Exception:  # noqa: BLE001 -- a bad message just yields no input
-            pass
+        # One shared decode path (web_view.apply_ws_text) so the wire format can't
+        # drift between the host web console and the device transport.
+        web_view.apply_ws_text(payload, self.console.apply_events)
 
 
 def make_server(console, host="0.0.0.0", port=DEFAULT_PORT, html=None):

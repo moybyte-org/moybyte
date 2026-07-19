@@ -2711,13 +2711,13 @@ def test_music_editor_wired_into_device_shell():
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
 
     # The editor CORE is a single shared class (not redefined on the device).
-    assert "class MusicEditor:" in editors
+    assert "class MusicEditor(UndoRedoMixin):" in editors
     # moy_runtime + device_api together are the device backend surface the
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
                + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
-    assert "class MusicEditor:" not in runtime, "device redefines MusicEditor"
+    assert "class MusicEditor" not in runtime, "device redefines MusicEditor"
     # editors.py must stay dependency-free (the frozen-module contract): it must NOT
     # import audio just to edit the bank -- SFX/MusicTrack are injected as factories.
     assert "import audio" not in editors
@@ -2975,7 +2975,8 @@ def test_editor_cores_are_shared_single_source():
     # One canonical file (runtime/editors.py); the device imports it and the build
     # stages it into the frozen modules tree -- no duplicated class definitions.
     editors = EDITORS_SRC.read_text(encoding="utf-8")
-    for cls in ("class CodeEditor:", "class SpriteSheet:", "class PaintEditor:"):
+    for cls in ("class CodeEditor:", "class SpriteSheet:",
+                "class PaintEditor(UndoRedoMixin):"):
         assert cls in editors, cls
     # moy_runtime + device_api together are the device backend surface the
     # greps pin: make_api moved to device_api.py (#58, staged to every device
@@ -2984,7 +2985,7 @@ def test_editor_cores_are_shared_single_source():
                + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
     canvas = Path("runtime/canvas.py").read_text(encoding="utf-8")
     # Neither backend redefines the shared cores.
-    for cls in ("class CodeEditor:", "class SpriteSheet:", "class PaintEditor:"):
+    for cls in ("class CodeEditor", "class SpriteSheet", "class PaintEditor"):
         assert cls not in runtime, "device redefines " + cls
     assert "class SpriteSheet:" not in canvas, "host canvas redefines SpriteSheet"
     # build.sh stages the canonical file into modules/ so the device freezes it.

@@ -117,6 +117,62 @@ class KeyEdge:
                 on_redo()
 
 
+class UndoRedoMixin:
+    """The undo/redo METHOD surface shared by the four history-keeping editors
+    (Paint #90, Map #91, Music #92, Blocks #93) over the UndoStack above: the
+    can_undo/can_redo delegates, the read-only `_undo`/`_redo` list proxies
+    tests inspect, and the ONE undo()/redo() exchange skeleton. Each editor
+    keeps its own snapshot semantics via three hooks --
+      * _hist_before()              -- runs first (Map closes an open batch);
+      * _hist_reverse(entry)        -- builds the counterpart stashed on the
+                                       opposite stack; the default returns the
+                                       SAME entry (Map's replayable deltas), a
+                                       None return skips the stash (Music's
+                                       stale object);
+      * _hist_apply(entry, is_redo) -- restores the popped entry.
+    undo()/redo() return True iff a step was taken."""
+
+    @property
+    def _undo(self):
+        return self._hist.undo
+
+    @property
+    def _redo(self):
+        return self._hist.redo
+
+    def can_undo(self):
+        return self._hist.can_undo()
+
+    def can_redo(self):
+        return self._hist.can_redo()
+
+    def _hist_before(self):
+        pass
+
+    def _hist_reverse(self, entry):
+        return entry
+
+    def _hist_apply(self, entry, is_redo):
+        raise NotImplementedError
+
+    def _hist_step(self, is_redo):
+        self._hist_before()
+        take = self._hist.take_redo if is_redo else self._hist.take_undo
+        entry = take(self._hist_reverse)
+        if entry is None:
+            return False
+        self._hist_apply(entry, is_redo)
+        return True
+
+    def undo(self):
+        """Revert the last recorded edit; True iff a step was taken."""
+        return self._hist_step(False)
+
+    def redo(self):
+        """Re-apply the last undone edit; True iff a step was taken."""
+        return self._hist_step(True)
+
+
 class CodeEditor:
     """Editable text buffer for a cart's main.py: a list of lines plus a
     (row, col) cursor. The shell feeds it keyboard ASCII (key) and tap-to-place
@@ -885,7 +941,7 @@ class TileMap:
         return tm
 
 
-class PaintEditor:
+class PaintEditor(UndoRedoMixin):
     """Pixel-paint state over a SpriteSheet tile: current sprite + paint color +
     sprite size. The shell maps taps on the zoomed grid/palette to these calls.
 
@@ -922,15 +978,6 @@ class PaintEditor:
         # a restore targets the right tiles even after the sprite/size was changed.
         self._hist = UndoStack(self.UNDO_DEPTH)
         self._stroke_pre = None   # pending pre-stroke snapshot (set on press, #90)
-
-    # `_undo`/`_redo` proxy the shared stack's lists (read-only; tests inspect them).
-    @property
-    def _undo(self):
-        return self._hist.undo
-
-    @property
-    def _redo(self):
-        return self._hist.redo
 
     @property
     def dim(self):
@@ -1060,30 +1107,15 @@ class PaintEditor:
             if self._capture(pre[0], pre[1])[2] != pre[2]:
                 self._hist.push(pre)
 
-    # -- undo / redo (over the shared UndoStack) -----------------------------
+    # -- undo / redo (UndoRedoMixin over the shared UndoStack) ---------------
 
-    def can_undo(self):
-        return self._hist.can_undo()
+    def _hist_reverse(self, snap):
+        """The reverse of a region snapshot: the CURRENT pixels of that region
+        (captured onto the opposite stack before the restore)."""
+        return self._capture(snap[0], snap[1])
 
-    def can_redo(self):
-        return self._hist.can_redo()
-
-    def undo(self):
-        """Revert the last recorded edit. Captures the current region onto the redo
-        ring first, then restores. Returns True iff a step was taken."""
-        snap = self._hist.take_undo(lambda s: self._capture(s[0], s[1]))
-        if snap is None:
-            return False
+    def _hist_apply(self, snap, is_redo):
         self._restore(snap)
-        return True
-
-    def redo(self):
-        """Re-apply the last undone edit (the inverse of undo)."""
-        snap = self._hist.take_redo(lambda s: self._capture(s[0], s[1]))
-        if snap is None:
-            return False
-        self._restore(snap)
-        return True
 
     # -- bucket fill (#90) ---------------------------------------------------
 
@@ -1179,7 +1211,7 @@ class PaintEditor:
         self._record(build)
 
 
-class MapEditor:
+class MapEditor(UndoRedoMixin):
     """Tile-placement state over a TileMap + its SpriteSheet -- the map analogue
     of PaintEditor (#32). PaintEditor places palette indices onto a sprite tile;
     this places sprite ids onto map cells. Pure logic: the shell maps taps on the
@@ -1222,15 +1254,6 @@ class MapEditor:
         self.cam_y = 0
         self._rec = None     # open edit batch (list of (idx, prev, new)) or None
         self._hist = UndoStack(self.UNDO_MAX)   # committed edits (shared discipline)
-
-    # `_undo`/`_redo` proxy the shared stack's lists (read-only; tests inspect them).
-    @property
-    def _undo(self):
-        return self._hist.undo
-
-    @property
-    def _redo(self):
-        return self._hist.redo
 
     # -- in-editor undo/redo (#91) --------------------------------------------
 
@@ -1314,33 +1337,16 @@ class MapEditor:
         tm.dirty = True
         tm.gen += 1
 
-    def can_undo(self):
-        return self._hist.can_undo()
+    # undo/redo come from UndoRedoMixin. The SAME rec moves across the stacks
+    # (the default _hist_reverse) -- a delta/snapshot replays either way.
 
-    def can_redo(self):
-        return self._hist.can_redo()
-
-    def undo(self):
-        """Revert the most recent committed edit; returns True iff a step was taken.
-        Closes any open batch first so an in-flight gesture can't be half-undone. The
-        SAME rec moves to the redo stack -- a delta/snapshot replays either way."""
+    def _hist_before(self):
+        # Close any open batch first so an in-flight gesture can't be half-undone.
         if self._rec:
             self.end_edit()
-        rec = self._hist.take_undo()
-        if rec is None:
-            return False
-        self._apply(rec, False)
-        return True
 
-    def redo(self):
-        """Re-apply the next undone edit; returns True iff a step was taken."""
-        if self._rec:
-            self.end_edit()
-        rec = self._hist.take_redo()
-        if rec is None:
-            return False
-        self._apply(rec, True)
-        return True
+    def _hist_apply(self, rec, is_redo):
+        self._apply(rec, is_redo)
 
     def clear_history(self):
         """Drop the undo/redo stacks (a structural change -- a map resize -- makes
@@ -1514,7 +1520,7 @@ class BlockRow:
         self.is_else = is_else    # the if_else divider (a non-deletable label row)
 
 
-class BlockEditor:
+class BlockEditor(UndoRedoMixin):
     """The structured-outline block program + a cursor over its flattened script
     (issue #29 Part 2). Pure logic -- no rendering, no I/O -- so it backs both the
     host console and the frozen device console. The `blocks` module (Part 1) is the
@@ -1540,15 +1546,6 @@ class BlockEditor:
         # bounded full-program snapshots (in-session), over the shared discipline
         self._hist = UndoStack(_BLK_UNDO_MAX)
         self.reflow()
-
-    # `_undo`/`_redo` proxy the shared stack's lists (read-only; tests inspect them).
-    @property
-    def _undo(self):
-        return self._hist.undo
-
-    @property
-    def _redo(self):
-        return self._hist.redo
 
     # -- flattening ----------------------------------------------------------
     def reflow(self):
@@ -1632,31 +1629,16 @@ class BlockEditor:
         top of every mutating op (after its guards, so a no-op records nothing)."""
         self._hist.push(_clone_tree(self.program))
 
-    def can_undo(self):
-        return self._hist.can_undo()
+    # undo/redo come from UndoRedoMixin over these hooks.
 
-    def can_redo(self):
-        return self._hist.can_redo()
+    def _hist_reverse(self, entry):
+        """The reverse is a fresh clone of the CURRENT program (captured before
+        the restore)."""
+        return _clone_tree(self.program)
 
-    def undo(self):
-        """Restore the program to the state before the last mutation. Returns True
-        if a step was taken. The reverse pushed to redo is a fresh clone of the
-        CURRENT program (captured before the restore)."""
-        snap = self._hist.take_undo(lambda _e: _clone_tree(self.program))
-        if snap is None:
-            return False
+    def _hist_apply(self, snap, is_redo):
         self.program = snap
         self._after_history()
-        return True
-
-    def redo(self):
-        """Re-apply the mutation the last undo reverted. Returns True if it moved."""
-        snap = self._hist.take_redo(lambda _e: _clone_tree(self.program))
-        if snap is None:
-            return False
-        self.program = snap
-        self._after_history()
-        return True
 
     def _after_history(self):
         """Shared undo/redo tail: a restored program is a fresh tree, so any marked
@@ -2257,7 +2239,7 @@ def _me_clamp(v, lo, hi):
     return v
 
 
-class MusicEditor:
+class MusicEditor(UndoRedoMixin):
     """Tracker/step-editor state over a cart's AudioBank (#50) -- the sound analogue
     of MapEditor/PaintEditor. Pure logic: no canvas, no synth, no I/O, so the *same*
     file backs the host console and the frozen device console. The console wraps it
@@ -2333,15 +2315,6 @@ class MusicEditor:
         # bounded snapshot stacks (#92) over the shared discipline -- see docstring
         self._hist = UndoStack(_ME_UNDO_MAX)
         self._ensure_nonempty()
-
-    # `_undo`/`_redo` proxy the shared stack's lists (read-only; tests inspect them).
-    @property
-    def _undo(self):
-        return self._hist.undo
-
-    @property
-    def _redo(self):
-        return self._hist.redo
 
     # -- bank bootstrapping --------------------------------------------------
     def _new_sfx(self):
@@ -2815,27 +2788,14 @@ class MusicEditor:
             return
         self._hist.push(snap)
 
-    def can_undo(self):
-        return self._hist.can_undo()
+    # undo/redo come from UndoRedoMixin over these hooks.
 
-    def can_redo(self):
-        return self._hist.can_redo()
-
-    def undo(self):
-        """Step back one content edit (a no-op at the floor). The reverse pushed to
-        redo is a fresh _snapshot_of the POPPED entry's object (pre-restore) -- so
-        the pair is a true before/after even if the selection walked elsewhere; a
+    def _hist_reverse(self, entry):
+        """A fresh _snapshot_of the POPPED entry's object (pre-restore) -- the
+        pair is a true before/after even if the selection walked elsewhere; a
         stale object (None) simply isn't stashed."""
-        snap = self._hist.take_undo(self._snapshot_of)
-        if snap is None:
-            return
-        self._restore(snap)
-        self.dirty = True
+        return self._snapshot_of(entry)
 
-    def redo(self):
-        """Re-apply the next edit undo() walked back past (a no-op at the top)."""
-        snap = self._hist.take_redo(self._snapshot_of)
-        if snap is None:
-            return
+    def _hist_apply(self, snap, is_redo):
         self._restore(snap)
         self.dirty = True

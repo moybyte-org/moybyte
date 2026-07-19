@@ -1241,6 +1241,21 @@ def frame_payload(cmds, cart_title, gen=0, perf=None, audio="", surfaces=None):
     return p
 
 
+def apply_ws_text(payload, apply):
+    """Decode one inbound WS text payload ({"events":[...]}) and feed the event list
+    to `apply` -- the ONE input-decode path both transports share (the device's
+    moy_webserver and the host web console), so the wire format can't drift between
+    them. A malformed message just yields no input (never raises)."""
+    try:
+        data = payload.decode("utf-8") if isinstance(payload, (bytes, bytearray)) else payload
+        obj = json.loads(data)
+        events = obj.get("events", []) if isinstance(obj, dict) else obj
+        if isinstance(events, list):
+            apply(events)
+    except Exception:  # noqa: BLE001 -- a bad message just yields no input
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Input event injection: browser events -> the console's InputState + Pointer + hooks. The
 # host ConsoleDriver and the device run_desktop wire the hooks to their own input paths.

@@ -28,7 +28,14 @@ the registered floor.
 MicroPython-safe: tuples/lists/dicts, no f-strings, and no imports from the
 shell/surface graph. Glyph drawing is injected by callers that want it, keeping
 this toolkit a leaf module that chrome and every surface can safely import.
+(The one import below is widgets -- a peer leaf, so no cycle: the rect hit-test
+has exactly one definition, widgets._in, re-exported here as `rect_in`.)
 """
+
+try:
+    from widgets import _in as rect_in
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.widgets import _in as rect_in
 
 _BLACK = 0
 _WHITE = 7          # MOY64 cream
@@ -125,9 +132,7 @@ def vsplit(rect, n, gap=0):
     return rows
 
 
-def rect_in(px, py, rect):
-    x, y, w, h = rect
-    return x <= px < x + w and y <= py < y + h
+# (rect_in is widgets._in, imported at the top -- one hit-test definition.)
 
 
 # --- draw == tap: the Hits registry ------------------------------------------

@@ -57,12 +57,12 @@ try:
     from wm import FullscreenStackWM
     from layers import Layer
     from chrome import NAMES          # not palette: chrome is the device-safe home
-    from widgets import _Blit         # (runtime/palette.py needs colorsys -- host-only)
+    from widgets import _Blit, _in    # (runtime/palette.py needs colorsys -- host-only)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.wm import FullscreenStackWM
     from runtime.layers import Layer
     from runtime.chrome import NAMES
-    from runtime.widgets import _Blit
+    from runtime.widgets import _Blit, _in
 
 
 # Window-chrome colors: the fixed ones live here; everything THEMEABLE (panel /
@@ -1221,7 +1221,7 @@ class WindowedWM(FullscreenStackWM):
         # Taskbar chips live in the OS bar row, above every window.
         if click:
             for key, rect, _label in self._chip_rects():
-                if self._hit(px, py, rect):
+                if _in(px, py, rect):
                     self._chip_tap(key)
                     return True
         key = self._win_at(px, py)
@@ -1243,7 +1243,7 @@ class WindowedWM(FullscreenStackWM):
         focused = (key == self._focus)
         if click:
             for name, rect in self._strip_buttons(win):
-                if self._hit(px, py, rect):
+                if _in(px, py, rect):
                     ws._dirty = True
                     if name == "close":
                         self._close_window(win.kind)
@@ -1254,7 +1254,7 @@ class WindowedWM(FullscreenStackWM):
                         if focused:
                             self._focus = None
                     return True
-            if self._hit(px, py, self._grip_hit_rect(win)):
+            if _in(px, py, self._grip_hit_rect(win)):
                 self._resize = (key, px, py, win.w, win.h, win.w, win.h)
                 self._seed_gesture_hist()   # #58: pre-resize footprint, both buffers
                 return True
@@ -1329,7 +1329,3 @@ class WindowedWM(FullscreenStackWM):
         win.x = max(-win.w + 40 * fs, min(nx, full.w - 40 * fs))
         win.y = max(self._bar_h(), min(ny, full.h - 24 * fs))
         self.ws._dirty = True
-
-    def _hit(self, px, py, rect):
-        x, y, w, h = rect
-        return x <= px < x + w and y <= py < y + h

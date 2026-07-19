@@ -46,11 +46,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 # The shared pre-literate glyph vocabulary (#93 icon pass): the action bar's UNDO/REDO
 # draw glyph-only ("..." IS its own icon and stays text). Imported for the membership
-# check that keeps the word label as a fallback.
+# check that keeps the word label as a fallback (chrome._gbtn owns it now).
 try:
-    from chrome import _GLYPHS
+    from chrome import _gbtn as _chrome_gbtn
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.chrome import _GLYPHS
+    from runtime.chrome import _gbtn as _chrome_gbtn
 
 
 # --- Layout geometry (baseline 320x240 constants + BlockLayout) -------------
@@ -1377,15 +1377,8 @@ class BlockEditorUI:
     # -- block editor drawing (#29 Part 2) -----------------------------------
 
     def _gbtn(self, kind, label, rect, fill, cv):
-        """An action-bar button carrying a centered 12x12 chrome glyph (#93 icon pass):
-        the colored `ws._btn` chip, then the glyph (black, matching the label ink).
-        Falls back to the word `label` when the glyph kind is missing."""
-        ws = self.ws
-        if kind is not None and kind in _GLYPHS:
-            ws._btn("", rect, fill, cv)
-            ws._glyph(kind, rect, self._NAMES["black"], cv)
-        else:
-            ws._btn(label, rect, fill, cv)
+        # #93 icon pass -- one shared body, chrome._gbtn.
+        _chrome_gbtn(self.ws, self._NAMES, kind, label, rect, fill, cv)
 
     def _draw_blocks(self):
         """The structured outline: a title bar, a scrolling list of Scratch-style

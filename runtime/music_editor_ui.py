@@ -49,11 +49,12 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 # The shared pre-literate glyph vocabulary (#92 icon pass): the copy/paste/duplicate/
 # reorder pads lead with a 12x12 chrome glyph; the bar UNDO/REDO draw glyph-only.
-# Imported for the membership check that keeps the word label as a fallback.
+# Imported for the membership check that keeps the word label as a fallback
+# (the pads row still checks it; the glyph-button body itself is chrome._gbtn).
 try:
-    from chrome import _GLYPHS
+    from chrome import _GLYPHS, _gbtn as _chrome_gbtn
 except ImportError:  # pragma: no cover - direct host import (chrome not yet aliased)
-    from runtime.chrome import _GLYPHS
+    from runtime.chrome import _GLYPHS, _gbtn as _chrome_gbtn
 
 # Music / sound editor (#50): a tracker-style step editor over the cart's AudioBank.
 # Two views: SFX (a vertical column of [note, wave, vol] steps for one effect) and
@@ -500,15 +501,8 @@ class MusicEditorUI:
                      th["author"] if light else NAMES["yellow"], 1)
 
     def _gbtn(self, kind, label, rect, fill, cv):
-        """A bottom-bar button carrying a centered 12x12 chrome glyph (#92 icon pass):
-        the colored `ws._btn` chip, then the glyph (black, matching the label ink).
-        Falls back to the word `label` when the glyph kind is missing."""
-        ws = self.ws
-        if kind is not None and kind in _GLYPHS:
-            ws._btn("", rect, fill, cv)
-            ws._glyph(kind, rect, self._NAMES["black"], cv)
-        else:
-            ws._btn(label, rect, fill, cv)
+        # #92 icon pass -- one shared body, chrome._gbtn.
+        _chrome_gbtn(self.ws, self._NAMES, kind, label, rect, fill, cv)
 
     def _mu_tick(self, rect, label):
         """A small +/- tick button (smaller text than _btn for the title-strip nudges)."""
