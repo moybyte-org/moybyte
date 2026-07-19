@@ -31,6 +31,11 @@ try:
 except ImportError:  # pragma: no cover - direct host import
     from runtime.editors import CodeEditor
 
+try:
+    from app_shell import ListShellLayout, ListShellApp
+except ImportError:  # pragma: no cover - direct host import
+    from runtime.app_shell import ListShellLayout, ListShellApp
+
 
 MAX_PAGES = 16
 MAX_TEXT_LINES = 4
@@ -113,13 +118,10 @@ def _fit_art(w, h, idx, max_w=320, max_h=240):
     return nw, nh, bytes(out)
 
 
-class StorybookLayout:
+class StorybookLayout(ListShellLayout):
     def __init__(self, w, h, fs=1, windowed=False):
-        self.w = int(w)
-        self.h = int(h)
-        self.fs = max(1, int(fs))
+        self._init_frame(w, h, fs, windowed)
         fs = self.fs
-        self.bar_h = 0 if windowed else 18 * fs
         self.band_h = 24 * fs
         x = 6 * fs
         y = self.bar_h + 3 * fs
@@ -130,10 +132,8 @@ class StorybookLayout:
         self.btn3 = (x + 118 * fs, y, 72 * fs, bh)           # MY ART
         self.btn4 = (x + 194 * fs, y, 66 * fs, bh)           # NO ART / TEAR OUT
         self.status_x = x
-        # Row lists (shelf + pages), Writer-style.
-        self.row_h = 20 * fs
-        self.list_y = self.bar_h + self.band_h
-        self.list_rows = max(1, (self.h - self.list_y - 2 * fs) // self.row_h)
+        # Row lists (shelf + pages), Writer-style (geometry: ListShellLayout).
+        self._init_list(self.bar_h + self.band_h)
         # Page view: the text box (the kid types the page's words here) above a
         # live-ish preview strip.
         self.cell = 8 * fs
@@ -150,17 +150,16 @@ class StorybookLayout:
                         self.w - 2 * (self.tx - 2 * fs),
                         max(20 * fs, self.h - pv_y - 4 * fs))
 
-    def row_rect(self, i):
-        return (4 * self.fs, self.list_y + i * self.row_h,
-                self.w - 8 * self.fs, self.row_h - 2 * self.fs)
-
-
-class StorybookAppLayer:
+class StorybookAppLayer(ListShellApp):
     """Shelf of story carts -> a story's pages -> one page's words/art/bg."""
 
     id = "storybook"
     domain = "system"
     TITLE = "STORYBOOK"
+    # The shipped identity (ListShellApp.is_app gates on these).
+    APP_TITLE = "Storybook"
+    APP_PERM = "storybook"
+    APP_FOLDER = "storybook.moy"
 
     def __init__(self, ws, names, in_rect):
         self.ws = ws
@@ -182,35 +181,16 @@ class StorybookAppLayer:
         self._ekey_prev = 0
         self._deck_dirty = False      # unsaved deck edits (commit no-ops when clean)
 
-    @staticmethod
-    def is_app(cart):
-        """True only for the shipped Storybook identity, not a copy."""
-        if (not cart or cart.get("title") != "Storybook"
-                or "storybook" not in (cart.get("permissions") or ())):
-            return False
-        path = cart.get("path")
-        if not path:
-            return int(cart.get("version", 0)) >= 1
-        return str(path).replace("\\", "/").rsplit("/", 1)[-1] == "storybook.moy"
-
     # -- store -----------------------------------------------------------------
-
-    def _ready(self):
-        ws = self.ws
-        return bool(ws.carts_store is not None and ws.carts_root is not None
-                    and ws.can_manage)
+    # (is_app / _store_ready / _load_blob: ListShellApp)
 
     def _stories(self):
         return [c for c in self.ws._all_carts
                 if c.get("type") == STORY_TYPE and c.get("path")]
 
     def _load_deck(self, cart):
-        try:
-            blob = self.ws._with_sd(
-                lambda: self.ws.carts_store.load_deck(cart))
-            data = json.loads(blob) if blob else None
-        except Exception:  # noqa: BLE001 -- a bad deck opens as read-only code
-            data = None
+        # a bad deck opens as read-only code (guarded read: ListShellApp)
+        data = self._load_blob(lambda: self.ws.carts_store.load_deck(cart))
         return data if isinstance(data, dict) else None
 
     def _commit_deck(self):
@@ -225,7 +205,7 @@ class StorybookAppLayer:
         self._sync_editor()
         src = deck_to_code(self.deck, self.cart.get("title") or "My Story")
         self.deck["gen"] = _sig(src)
-        if not self._ready():
+        if not self._store_ready():
             self.status = "CAN'T SAVE HERE"
             return
         ws = self.ws
@@ -271,7 +251,7 @@ class StorybookAppLayer:
     # -- story verbs ---------------------------------------------------------------
 
     def _new_story(self):
-        if not self._ready():
+        if not self._store_ready():
             self.status = "CAN'T MAKE STORIES HERE"
             self.ws._dirty = True
             return
@@ -405,7 +385,7 @@ class StorybookAppLayer:
             self.status = "PAINT SOMETHING FIRST"
             self.ws._dirty = True
             return
-        if not self._ready():
+        if not self._store_ready():
             self.status = "CAN'T SAVE HERE"
             self.ws._dirty = True
             return
@@ -456,24 +436,9 @@ class StorybookAppLayer:
         if self.mode == "page":
             self._typed_keys(inp)
             return True
-        count = (len(self._stories()) if self.mode == "shelf"
-                 else len(self._pages())) + 1
-        if inp.pressed("up"):
-            self.sel = (self.sel - 1) % count
-            self._scroll_list()
-        elif inp.pressed("down"):
-            self.sel = (self.sel + 1) % count
-            self._scroll_list()
-        elif inp.pressed("a"):
-            self._tap_row(self.sel)
-        return True
-
-    def _scroll_list(self):
-        rows = self.layout.list_rows
-        if self.sel < self.top:
-            self.top = self.sel
-        elif self.sel >= self.top + rows:
-            self.top = self.sel - rows + 1
+        # shelf rows / page rows + the NEW row (nav + scroll window: ListShellApp)
+        return self._list_nav(inp, (len(self._stories()) if self.mode == "shelf"
+                                    else len(self._pages())) + 1)
 
     def _typed_keys(self, inp):
         ed = self.editor

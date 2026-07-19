@@ -28,6 +28,11 @@ try:
 except ImportError:  # pragma: no cover - direct host import
     from runtime.editors import CodeEditor
 
+try:
+    from app_shell import ListShellLayout, ListShellApp
+except ImportError:  # pragma: no cover - direct host import
+    from runtime.app_shell import ListShellLayout, ListShellApp
+
 
 MAX_NOTES = 12          # a kid notebook, not a filesystem; the list stays tappable
 MAX_CHARS = 8000        # per note -- bounds the SD write + device memory
@@ -44,13 +49,10 @@ def _title_of(body):
     return "EMPTY PAGE"
 
 
-class WriterLayout:
+class WriterLayout(ListShellLayout):
     def __init__(self, w, h, fs=1, windowed=False):
-        self.w = int(w)
-        self.h = int(h)
-        self.fs = max(1, int(fs))
+        self._init_frame(w, h, fs, windowed)
         fs = self.fs
-        self.bar_h = 0 if windowed else 18 * fs
         self.toolbar_h = 24 * fs
         self.cell = 8 * fs
         self.lh = 10 * fs
@@ -70,22 +72,20 @@ class WriterLayout:
                           self.cols * self.cell + 4 * fs,
                           self.rows * self.lh + 4 * fs)
         # The notebook (list view): one row per note below the title band --
-        # a reading list, not an icon grid.
-        self.row_h = 20 * fs
-        self.list_y = self.bar_h + self.toolbar_h
-        self.list_rows = max(1, (self.h - self.list_y - 2 * fs) // self.row_h)
-
-    def row_rect(self, i):
-        return (4 * self.fs, self.list_y + i * self.row_h,
-                self.w - 8 * self.fs, self.row_h - 2 * self.fs)
+        # a reading list, not an icon grid (geometry + row_rect: ListShellLayout).
+        self._init_list(self.bar_h + self.toolbar_h)
 
 
-class WriterAppLayer:
+class WriterAppLayer(ListShellApp):
     """Notebook list + a ruled-paper text page over the shared CodeEditor core."""
 
     id = "writer"
     domain = "system"
     TITLE = "WRITER"
+    # The shipped identity (ListShellApp.is_app gates on these).
+    APP_TITLE = "Writer"
+    APP_PERM = "notebook"
+    APP_FOLDER = "writer.moy"
 
     def __init__(self, ws, names, in_rect):
         self.ws = ws
@@ -107,35 +107,13 @@ class WriterAppLayer:
         self._loaded = False
         self._save_failed = False
 
-    @staticmethod
-    def is_app(cart):
-        """True only for the shipped Writer identity, not a renamed/copied cart."""
-        if (not cart or cart.get("title") != "Writer"
-                or "notebook" not in (cart.get("permissions") or ())):
-            return False
-        path = cart.get("path")
-        if not path:                 # embedded fallback cart (no writable store)
-            return int(cart.get("version", 0)) >= 1
-        return str(path).replace("\\", "/").rsplit("/", 1)[-1] == "writer.moy"
-
     # -- store ---------------------------------------------------------------
-
-    def _store_ready(self):
-        ws = self.ws
-        return bool(ws.carts_store is not None and ws.carts_root is not None
-                    and ws.can_manage)
+    # (is_app / _store_ready / _load_blob / _persist: ListShellApp)
 
     def _load(self):
         self.notes = []
-        if self.ws.carts_store is None or self.ws.carts_root is None:
-            self._loaded = True
-            return
-        try:
-            blob = self.ws._with_sd(
-                lambda: self.ws.carts_store.load_notes(self.ws.carts_root))
-            data = json.loads(blob) if blob else None
-        except Exception:  # noqa: BLE001 -- a bad/missing notebook starts fresh
-            data = None
+        data = self._load_blob(
+            lambda: self.ws.carts_store.load_notes(self.ws.carts_root))
         if isinstance(data, dict):
             for n in (data.get("notes") or [])[:MAX_NOTES]:
                 body = str((n or {}).get("body", ""))[:MAX_CHARS]
@@ -156,21 +134,10 @@ class WriterAppLayer:
         if not (changed or force):
             return True
         self._pending_keys = 0
-        if not self._store_ready():
-            self._save_failed = True
-            self.status = "CAN'T SAVE HERE"
-            return False
         blob = json.dumps({"format": "moynotes-v1",
                            "notes": self.notes})
-        try:
-            self.ws._with_sd(lambda: self.ws.carts_store.save_notes(
-                blob, self.ws.carts_root))
-            self._save_failed = False
-            return True
-        except Exception as exc:  # noqa: BLE001 -- surface, never crash the shell
-            self._save_failed = True
-            self.status = ("SAVE FAILED " + str(exc))[:28]
-            return False
+        return self._persist(lambda: self.ws.carts_store.save_notes(
+            blob, self.ws.carts_root))
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -242,25 +209,10 @@ class WriterAppLayer:
 
     def handle_input(self, inp):
         if self.mode == "list":
-            count = len(self.notes) + 1          # the NEW row + notes
-            if inp.pressed("up"):
-                self.sel = (self.sel - 1) % count
-                self._scroll_list()
-            elif inp.pressed("down"):
-                self.sel = (self.sel + 1) % count
-                self._scroll_list()
-            elif inp.pressed("a"):
-                self._tap_row(self.sel)
-            return True
+            # the NEW row + notes (nav + scroll window: ListShellApp)
+            return self._list_nav(inp, len(self.notes) + 1)
         self._typed_keys(inp)
         return True
-
-    def _scroll_list(self):
-        rows = self.layout.list_rows
-        if self.sel < self.top:
-            self.top = self.sel
-        elif self.sel >= self.top + rows:
-            self.top = self.sel - rows + 1
 
     def _typed_keys(self, inp):
         # One insert per physical press (the code_layer edge idiom): the keyboard
