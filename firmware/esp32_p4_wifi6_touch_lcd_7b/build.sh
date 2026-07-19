@@ -144,7 +144,9 @@ cp -r "${TDECK_DIR}/native/moy_lua" "${STAGED_NATIVE}/moy_lua"
 #     From runtime/ (canonical, same list the T-Deck build stages) -- the whole
 #     shared console -- PLUS wm_windowed.py: the P4 is the windowed presentation
 #     tier (#73), deliberately NOT staged into the S3 build.
-for f in editors.py block_editor_ui.py map_editor_ui.py audio.py \
+for f in editors.py editors_base.py editors_code.py editors_sheet.py \
+         editors_paint_map.py editors_block.py editors_music.py \
+         block_editor_ui.py map_editor_ui.py audio.py \
          music_editor_ui.py perf_hud.py update_ui.py system_menu_ui.py \
          achievements_ui.py layers.py bar_layer.py cards_layer.py \
          paint_layer.py settings_layer.py code_layer.py widgets.py \

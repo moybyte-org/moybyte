@@ -7,6 +7,17 @@ ROOT = Path("firmware/lilygo_t_deck_plus_micropython")
 EDITORS_SRC = Path("runtime") / "editors.py"
 
 
+def _editors_src():
+    """The editor cores' combined source: editors.py is the re-exporting
+    umbrella since the per-editor split (editors_base/_code/_sheet/_paint_map/
+    _block/_music) -- greps that pin class definitions read all of them."""
+    parts = [EDITORS_SRC.read_text(encoding="utf-8")]
+    for name in ("editors_base", "editors_code", "editors_sheet",
+                 "editors_paint_map", "editors_block", "editors_music"):
+        parts.append((Path("runtime") / (name + ".py")).read_text(encoding="utf-8"))
+    return "\n".join(parts)
+
+
 def test_micropython_spike_scaffold_exists():
     assert (ROOT / "README.md").exists()
     assert (ROOT / "build.sh").exists()
@@ -2335,7 +2346,7 @@ def test_unified_top_bar_wired_into_device_shell():
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     chrome = (Path("runtime") / "chrome.py").read_text(encoding="utf-8")
     bar_layer = (Path("runtime") / "bar_layer.py").read_text(encoding="utf-8")
-    editors = EDITORS_SRC.read_text(encoding="utf-8")
+    editors = _editors_src()
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
     # moy_runtime + device_api together are the device backend surface the
     # greps pin: make_api moved to device_api.py (#58, staged to every device
@@ -2703,7 +2714,7 @@ def test_music_editor_wired_into_device_shell():
     # glue (a menu_view, the top-bar switcher, save to sounds.json). It lives in
     # the SAME shared files build.sh freezes onto the device, so source-level
     # greps prove it's on both ends (host == device).
-    editors = EDITORS_SRC.read_text(encoding="utf-8")
+    editors = _editors_src()
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     editor_app = (Path("runtime") / "editor_app.py").read_text(encoding="utf-8")
     layers = (Path("runtime") / "layers.py").read_text(encoding="utf-8")
@@ -2978,7 +2989,7 @@ def test_device_wifi_wired():
 def test_editor_cores_are_shared_single_source():
     # One canonical file (runtime/editors.py); the device imports it and the build
     # stages it into the frozen modules tree -- no duplicated class definitions.
-    editors = EDITORS_SRC.read_text(encoding="utf-8")
+    editors = _editors_src()
     for cls in ("class CodeEditor:", "class SpriteSheet:",
                 "class PaintEditor(UndoRedoMixin):"):
         assert cls in editors, cls
@@ -2992,9 +3003,13 @@ def test_editor_cores_are_shared_single_source():
     for cls in ("class CodeEditor", "class SpriteSheet", "class PaintEditor"):
         assert cls not in runtime, "device redefines " + cls
     assert "class SpriteSheet:" not in canvas, "host canvas redefines SpriteSheet"
-    # build.sh stages the canonical file into modules/ so the device freezes it.
+    # build.sh stages the canonical files into modules/ so the device freezes them.
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
-    assert 'cp "${REPO_ROOT}/runtime/editors.py" "${SCRIPT_DIR}/modules/editors.py"' in build
+    for name in ("editors", "editors_base", "editors_code", "editors_sheet",
+                 "editors_paint_map", "editors_block", "editors_music"):
+        line = ('cp "${REPO_ROOT}/runtime/%s.py" "${SCRIPT_DIR}/modules/%s.py"'
+                % (name, name))
+        assert line in build, name
 
 
 def test_micropython_offline_diag_wiring():

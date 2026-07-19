@@ -224,6 +224,12 @@ fi
 #                    moy_gfx.text kernel (#62), so device text rasterizes from the
 #                    SAME bytes the host does (pixel parity)
 cp "${REPO_ROOT}/runtime/editors.py" "${SCRIPT_DIR}/modules/editors.py"
+cp "${REPO_ROOT}/runtime/editors_base.py" "${SCRIPT_DIR}/modules/editors_base.py"
+cp "${REPO_ROOT}/runtime/editors_code.py" "${SCRIPT_DIR}/modules/editors_code.py"
+cp "${REPO_ROOT}/runtime/editors_sheet.py" "${SCRIPT_DIR}/modules/editors_sheet.py"
+cp "${REPO_ROOT}/runtime/editors_paint_map.py" "${SCRIPT_DIR}/modules/editors_paint_map.py"
+cp "${REPO_ROOT}/runtime/editors_block.py" "${SCRIPT_DIR}/modules/editors_block.py"
+cp "${REPO_ROOT}/runtime/editors_music.py" "${SCRIPT_DIR}/modules/editors_music.py"
 cp "${REPO_ROOT}/runtime/block_editor_ui.py" "${SCRIPT_DIR}/modules/block_editor_ui.py"
 cp "${REPO_ROOT}/runtime/map_editor_ui.py" "${SCRIPT_DIR}/modules/map_editor_ui.py"
 cp "${REPO_ROOT}/runtime/audio.py" "${SCRIPT_DIR}/modules/audio.py"
