@@ -1,0 +1,175 @@
+# The portable moyimg codec + cover-thumb sidecars, extracted from moy_carts.py
+# (which re-exports every name here, so store call sites and tests are unchanged).
+#
+# encode/decode_moyimg: the ``moyimg-v1`` indexed-bitmap blob (Paint's MicroPython-
+# safe RLE codec; legacy zlib assets stay valid -- decoders dispatch on ``codec``).
+# moyimg_runs: the header+runs parse for the time-sliced cover builder.
+# cover_thumb load/save (#66/#86): the decoded-crop sidecar cache the Library shelf
+# reads instead of re-running the 0.5-1.7s RLE decode -- regenerable, plain writes,
+# readers validate magic + size + stamp.
+#
+# MicroPython-safe (json + binascii only; _mkdir from the moy_fs leaf).
+
+import json
+
+try:
+    from moy_fs import _mkdir
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.moy_fs import _mkdir
+
+
+def _b64_encode(data):
+    """MicroPython/CPython-compatible base64 text without a trailing newline."""
+    try:
+        import ubinascii as _binascii
+    except ImportError:  # pragma: no cover - CPython
+        import binascii as _binascii
+    out = _binascii.b2a_base64(data)
+    if not isinstance(out, str):
+        out = out.decode("ascii")
+    return out.strip()
+
+
+def _b64_decode(text):
+    try:
+        import ubinascii as _binascii
+    except ImportError:  # pragma: no cover - CPython
+        import binascii as _binascii
+    return _binascii.a2b_base64(text)
+
+
+def encode_moyimg(width, height, indices):
+    """Encode an indexed bitmap as a portable ``moyimg-v1`` blob.
+
+    Paint uses a tiny RLE codec instead of zlib so saving works in the shared
+    runtime without depending on a board-specific compressor. Existing zlib
+    assets remain valid; decoders dispatch on the optional ``codec`` field.
+    Runs are stored as ``count, palette_index`` byte pairs.
+    """
+    w = int(width)
+    h = int(height)
+    if w <= 0 or h <= 0 or len(indices) != w * h:
+        raise ValueError("bad artwork size")
+    packed = bytearray()
+    pos = 0
+    total = len(indices)
+    while pos < total:
+        value = int(indices[pos]) & 63
+        count = 1
+        while pos + count < total and count < 255 \
+                and (int(indices[pos + count]) & 63) == value:
+            count += 1
+        packed.append(count)
+        packed.append(value)
+        pos += count
+    return json.dumps({
+        "format": "moyimg-v1", "w": w, "h": h,
+        "codec": "rle", "data": _b64_encode(packed),
+    })
+
+
+def moyimg_runs(text):
+    """Parse a ``.moyimg`` into ``(w, h, packed_rle_bytes)`` WITHOUT decoding
+    the pixels -- the JSON header + base64 only. The Library shelf's
+    time-sliced cover builder (console._CoverJob) walks the returned
+    (count, value) run pairs incrementally across frames; ``decode_moyimg``
+    below stays the one-shot decoder. None on any malformed input."""
+    try:
+        meta = json.loads(text)
+        w = int(meta["w"])
+        h = int(meta["h"])
+        if w <= 0 or h <= 0 or meta.get("codec") != "rle":
+            return None
+        packed = _b64_decode(meta["data"])
+        if len(packed) & 1:
+            return None
+        return (w, h, packed)
+    except Exception:  # noqa: BLE001 -- a corrupt drawing is treated as absent
+        return None
+
+
+def decode_moyimg(text):
+    """Decode Paint's RLE ``.moyimg`` form into ``(w, h, bytes)``.
+
+    The host/device drawing backends retain their legacy-zlib fallback. Keeping
+    the shared-store decoder focused on RLE avoids importing compression support
+    merely to load Paint's own persisted artwork.
+    """
+    try:
+        meta = json.loads(text)
+        w = int(meta["w"])
+        h = int(meta["h"])
+        if w <= 0 or h <= 0 or meta.get("codec") != "rle":
+            return None
+        packed = _b64_decode(meta["data"])
+        out = bytearray()
+        if len(packed) & 1:
+            return None
+        for i in range(0, len(packed), 2):
+            count = packed[i]
+            value = packed[i + 1]
+            if count < 1 or value > 63 or len(out) + count > w * h:
+                return None
+            out.extend(bytes((value,)) * count)
+        if len(out) != w * h:
+            return None
+        return (w, h, bytes(out))
+    except Exception:  # noqa: BLE001 -- a corrupt drawing is treated as absent
+        return None
+
+
+# --- cover thumbnails (#66 launcher shelf): decoded-crop sidecars -------------
+#
+# Decoding a 320x240 RLE cover costs 0.5-1.7s interpreted on the T-Deck, so the
+# console (console._cover_for) builds each card-sized crop ONCE and persists it
+# here as raw indexed pixels: <cart>/thumbs/<w>x<h>.mct = b"MCT1" + a 4-byte LE
+# stamp of the cover blob it was built from (cover_sig) + the w*h pix bytes.
+# An edited cover changes the stamp -> the stale thumb is ignored and rebuilt;
+# a deleted cart takes its thumbs with it; a re-seed wipe just regenerates.
+# Regenerable cache, so: plain writes (no atomic dance), best-effort saves, and
+# every reader validates magic + size + stamp before trusting a byte.
+
+THUMBS_DIR = "thumbs"
+
+
+def cover_sig(text):
+    """A cheap content stamp for a cover blob (NOT a hash): its length mixed
+    with head+tail character sums -- a paint edit virtually always moves one of
+    them. A collision only ever means one stale thumbnail, never a crash."""
+    s = 0
+    for ch in text[:64]:
+        s += ord(ch)
+    for ch in text[-64:]:
+        s = (s * 3 + ord(ch)) & 0xFFFFFF
+    return (len(text) * 2654435761 + s) & 0xFFFFFFFF
+
+
+def _thumb_file(path, w, h):
+    return (path + "/" + THUMBS_DIR + "/"
+            + str(int(w)) + "x" + str(int(h)) + ".mct")
+
+
+def load_cover_thumb(path, w, h, sig):
+    """The pre-decoded (w, h) cover crop for the cart at `path` -- the raw
+    indexed pix bytes (len == w*h) -- or None when absent, stale or corrupt."""
+    try:
+        with open(_thumb_file(path, w, h), "rb") as f:
+            data = f.read()
+    except OSError:
+        return None
+    if (len(data) != 8 + int(w) * int(h) or data[:4] != b"MCT1"
+            or int.from_bytes(data[4:8], "little") != (sig & 0xFFFFFFFF)):
+        return None
+    return data[8:]
+
+
+def save_cover_thumb(path, w, h, sig, pix):
+    """Persist a finished cover crop. Best-effort and never raises: a full SD
+    just means that crop decodes again next session."""
+    try:
+        _mkdir(path + "/" + THUMBS_DIR)
+        with open(_thumb_file(path, w, h), "wb") as f:
+            f.write(b"MCT1" + (sig & 0xFFFFFFFF).to_bytes(4, "little"))
+            f.write(pix)
+    except Exception:  # noqa: BLE001 -- regenerable cache
+        pass

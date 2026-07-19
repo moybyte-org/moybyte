@@ -361,19 +361,21 @@ def test_rename_unsupported_keeps_path_if_publish_copy_fails(tmp_path, monkeypat
     monkeypatch.setattr(moy_carts.os, "rename",
                         lambda s, d: (_ for _ in ()).throw(OSError("no rename")))
     # Make the publish copy (tmp -> the real main.py) fail too -- the worst case.
-    real_copy = moy_carts._copy
+    # (_write_atomic's internals live in moy_fs since the split -- patch there.)
+    from runtime import moy_fs
+    real_copy = moy_fs._copy
 
     def boom_copy(src, dst):
         if dst == main_path:              # only the publish copy of main.py blows up
             raise OSError("write failed")
         return real_copy(src, dst)
-    monkeypatch.setattr(moy_carts, "_copy", boom_copy)
+    monkeypatch.setattr(moy_fs, "_copy", boom_copy)
 
     try:
         moy_carts.save_code(c, "def _draw():\n    cls(2)\n")
     except OSError:
         pass
-    monkeypatch.setattr(moy_carts, "_copy", real_copy)
+    monkeypatch.setattr(moy_fs, "_copy", real_copy)
 
     # path was never deleted before publishing -> the original good file is intact.
     assert main.exists() and "KEEPME" in main.read_text()
@@ -392,20 +394,22 @@ def test_orphan_tmp_cleaned_on_failed_write(tmp_path, monkeypatch):
     path = c["path"]
 
     # Force the tmp write to fail (e.g. ENOSPC) AFTER it would have created the file.
-    real_write = moy_carts._write
+    # (_write_atomic's internals live in moy_fs since the split -- patch there.)
+    from runtime import moy_fs
+    real_write = moy_fs._write
 
     def failing_write(p, data):
         if p.endswith(".tmp"):
             real_write(p, data[: len(data) // 2])   # partial bytes land...
             raise OSError("ENOSPC")                  # ...then the write dies
         return real_write(p, data)
-    monkeypatch.setattr(moy_carts, "_write", failing_write)
+    monkeypatch.setattr(moy_fs, "_write", failing_write)
 
     try:
         moy_carts.save_code(c, "def _draw():\n    cls(2)\n")
     except OSError:
         pass
-    monkeypatch.setattr(moy_carts, "_write", real_write)
+    monkeypatch.setattr(moy_fs, "_write", real_write)
 
     assert not (Path(path) / "main.py.tmp").exists()   # orphan cleaned up
     # The original file is untouched (the failure happened before any swap).

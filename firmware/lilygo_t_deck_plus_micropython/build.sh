@@ -210,6 +210,9 @@ fi
 #                    `from chrome import (...)` and re-exports under the old console.X names
 #   console.py    -- launcher + desktop + cards/code/paint UI + Pointer
 #   moy_carts.py  -- the .moy store (scan/load/save/create/duplicate/delete)
+#   moy_fs.py     -- crash-safe file primitives (atomic write / .bak recover)
+#   moy_image.py  -- the moyimg codec + cover-thumb sidecars
+#   moy_journal.py -- the per-project undo/redo journal (#7 Stage 7)
 #   blocks.py     -- block model + blocks->Python compiler (#29; moy_carts imports it)
 #   web_view.py   -- shared web-view core (recorder + payloads + serve + constants);
 #                    moy_webserver imports it as a frozen top-level `web_view` (#41/#22)
@@ -253,6 +256,9 @@ cp "${REPO_ROOT}/runtime/ui.py" "${SCRIPT_DIR}/modules/ui.py"
 cp "${REPO_ROOT}/runtime/calc_app.py" "${SCRIPT_DIR}/modules/calc_app.py"
 cp "${REPO_ROOT}/runtime/console.py" "${SCRIPT_DIR}/modules/console.py"
 cp "${REPO_ROOT}/runtime/moy_carts.py" "${SCRIPT_DIR}/modules/moy_carts.py"
+cp "${REPO_ROOT}/runtime/moy_fs.py" "${SCRIPT_DIR}/modules/moy_fs.py"
+cp "${REPO_ROOT}/runtime/moy_image.py" "${SCRIPT_DIR}/modules/moy_image.py"
+cp "${REPO_ROOT}/runtime/moy_journal.py" "${SCRIPT_DIR}/modules/moy_journal.py"
 cp "${REPO_ROOT}/runtime/blocks.py" "${SCRIPT_DIR}/modules/blocks.py"
 cp "${REPO_ROOT}/runtime/web_view_ws.py" "${SCRIPT_DIR}/modules/web_view_ws.py"
 cp "${REPO_ROOT}/runtime/web_view_page.py" "${SCRIPT_DIR}/modules/web_view_page.py"

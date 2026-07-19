@@ -25,6 +25,14 @@ def _cart(tmp_path):
     return moy_carts, c["path"]
 
 
+def _journal_mod():
+    """The journal implementation module (moy_journal since the moy_carts split):
+    caps + private helpers are patched/inspected THERE; moy_carts re-exports the
+    public verbs so `mc.journal_*` keeps working."""
+    from runtime import moy_journal
+    return moy_journal
+
+
 def _live(path, file="main.py"):
     return (Path(path) / file).read_text()
 
@@ -189,7 +197,7 @@ def test_journal_undo_restores_a_legit_empty_snapshot(tmp_path):
 
 def test_journal_compaction_drops_oldest(tmp_path, monkeypatch):
     mc, path = _cart(tmp_path)
-    monkeypatch.setattr(mc, "JOURNAL_MAX_ENTRIES", 3)   # tiny cap so the test is quick
+    monkeypatch.setattr(_journal_mod(), "JOURNAL_MAX_ENTRIES", 3)   # tiny cap so the test is quick
 
     for i in range(1, 7):                               # 6 commits, cap 3
         mc.journal_append(path, "main.py", "V%d\n" % i)
@@ -215,8 +223,8 @@ def test_journal_compaction_drops_oldest(tmp_path, monkeypatch):
 def test_journal_bytes_cap_triggers_compaction(tmp_path, monkeypatch):
     # The 512KB cap fires independently of the 64-entry cap (whichever first).
     mc, path = _cart(tmp_path)
-    monkeypatch.setattr(mc, "JOURNAL_MAX_ENTRIES", 1000)  # count cap out of the way
-    monkeypatch.setattr(mc, "JOURNAL_MAX_BYTES", 300)     # ~3 x 100-byte snapshots
+    monkeypatch.setattr(_journal_mod(), "JOURNAL_MAX_ENTRIES", 1000)  # count cap out of the way
+    monkeypatch.setattr(_journal_mod(), "JOURNAL_MAX_BYTES", 300)     # ~3 x 100-byte snapshots
 
     for i in range(6):
         mc.journal_append(path, "main.py", ("%03d" % i) * 33 + "\n")   # 100 bytes each
@@ -232,7 +240,7 @@ def test_journal_compact_keeps_current_state(tmp_path, monkeypatch):
     # Even under a brutal cap, compaction never drops the CURRENT state's snapshot --
     # undo/current always resolves.
     mc, path = _cart(tmp_path)
-    monkeypatch.setattr(mc, "JOURNAL_MAX_ENTRIES", 1)
+    monkeypatch.setattr(_journal_mod(), "JOURNAL_MAX_ENTRIES", 1)
     for i in range(4):
         mc.journal_append(path, "main.py", "S%d\n" % i)
         (Path(path) / "main.py").write_text("S%d\n" % i)
@@ -273,14 +281,16 @@ def test_journal_append_is_raw_open_not_write_atomic(tmp_path, monkeypatch):
     _jdir, log_path, _cur, _snap = mc._journal_paths(path)
 
     # (1) _write_atomic is NEVER called with the journal log as its target on the
-    #     per-commit append path (cursor.json IS atomic -- that's allowed).
-    real_atomic = mc._write_atomic
+    #     per-commit append path (cursor.json IS atomic -- that's allowed). The spy
+    #     lands on moy_journal (the implementation module since the split).
+    mj = _journal_mod()
+    real_atomic = mj._write_atomic
     atomic_targets = []
 
     def _spy_atomic(p, data):
         atomic_targets.append(p)
         return real_atomic(p, data)
-    monkeypatch.setattr(mc, "_write_atomic", _spy_atomic)
+    monkeypatch.setattr(mj, "_write_atomic", _spy_atomic)
 
     mc.journal_append(path, "main.py", "a\n")
     mc.journal_append(path, "main.py", "b\n")
