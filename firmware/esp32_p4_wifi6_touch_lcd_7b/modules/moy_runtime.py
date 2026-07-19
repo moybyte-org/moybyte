@@ -30,7 +30,7 @@ the SDIO slot + LDO4 power fix are a follow-up for removable-cart workflows).
 
 import time
 
-from console import Pointer, Workstation
+from console import Pointer, Workstation, wire_workstation_core
 from carts_data import CARTS   # build-time generated from system_carts/
 from device_util import _ticks_ms, _ticks_diff
 from device_api import make_api
@@ -424,34 +424,32 @@ def run_desktop(fps_cap=60):
                               auto_start=False)
     ws = Workstation(comp, game, inp, carts,
                      sys_canvas=sys_canvas, font_scale=FONT_SCALE)
-    ws.make_api = make_api
     # #67 Phase 1: the Lua cart runtime (shared glue in device_api.py) -- wired
     # only when the moy_lua native module is in this build; without it a
     # "runtime": "lua" cart opens the Player's runtime-missing panel.
+    lua_runtime = None
     try:
         import moy_lua as _moy_lua_probe  # noqa: F401 -- availability probe
         from device_api import make_lua_runtime
-        ws.lua_runtime = make_lua_runtime(ws)
+        lua_runtime = make_lua_runtime(ws)
         print("Moybyte P4: lua runtime ON")
     except ImportError:
         pass
-    ws.carts_store = moy_carts
-    ws.carts_root = carts_root
-    ws.can_manage = carts_root is not None   # internal VFS: no bus gymnastics,
-    #                                          _with_sd stays the direct-call default
-    ws.wifi = make_wifi(moy_carts, carts_root)   # C6-hosted WLAN is transparent
-    #                                              to network.WLAN (bring-up-confirmed)
-    ws.keyboard = keyboard
-    ws.slim_carts()
-    ws.pointer = pointer
+    # The shared service wiring (console.wire_workstation_core -- one canonical
+    # order for host + both boards; this used to be a hand-kept "same order as
+    # host build_workstation" copy). P4 notes: can_manage's carts_root default is
+    # the internal VFS -- no bus gymnastics, _with_sd stays the direct-call
+    # default; the C6-hosted WLAN is transparent to network.WLAN
+    # (bring-up-confirmed); no I2S audio backend yet.
+    wire_workstation_core(ws, moy_carts, carts_root, make_api,
+                          make_wifi(moy_carts, carts_root),
+                          lua_runtime=lua_runtime,
+                          pointer=pointer, inp=inp, keyboard=keyboard)
     try:
         import machine
         ws.reboot_hook = machine.reset
     except Exception as exc:  # noqa: BLE001
         print("Moybyte P4: reboot hook unavailable:", exc)
-    ws.load_system()
-    ws.load_icon_sheet()
-    ws.load_achievements()
     # The P4 presentation tier (#73/#58): launcher = desktop, apps = windows.
     # Installed AFTER load_system (same order as host build_workstation) so the
     # persisted font scale is applied before the root layout context is captured.

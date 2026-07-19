@@ -780,41 +780,27 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1, windowed=Fals
     inp = InputState()
     ws = console.Workstation(_NullComp(), canvas, inp, carts,
                              sys_canvas=sys_canvas, font_scale=font_scale)
-    ws.make_api = make_api
-    ws.make_audio = make_audio
-    ws.carts_store = moy_carts
-    ws.carts_root = carts_dir
-    # WiFi (#38): one fake system service shared across carts, persisting through
-    # the same moy_carts wifi.json store the device uses. Injected into a cart's
-    # namespace ONLY when its manifest grants "network" (see Workstation._start).
-    ws.wifi = make_wifi(moy_carts, carts_dir)
     # #67 dual-runtime seam: the lupa-backed Lua cart runtime, injected only when
     # lupa is importable (an optional dev dependency) -- without it a "lua" cart
     # opens the Player's runtime-missing panel, same as today's device builds.
+    lua_runtime = None
     try:
         import lupa  # noqa: F401 -- availability probe only
         try:
             from lua_host import make_lua_runtime
         except ImportError:  # pragma: no cover - package-relative fallback
             from runtime.lua_host import make_lua_runtime
-        ws.lua_runtime = make_lua_runtime
+        lua_runtime = make_lua_runtime
     except ImportError:
         pass
-    ws.can_manage = True
-    ws.slim_carts()   # #66 live-set diet: drop heavy payloads now the store can reload them
-    # The pointer ranges over the SYSTEM canvas (the panel surface the cursor moves
-    # on), so size it to that. The api touch() reads it in system coords.
-    ws.pointer = console.Pointer(ws.sys_canvas.w, ws.sys_canvas.h)
-    inp.pointer = ws.pointer       # touch-driven carts read it via the api touch()
-    # Desktop shell (#28): load the system settings (system.json) and apply the
-    # saved wallpaper so the home screen boots with the chosen backdrop.
-    ws.load_system()
-    # Unified top bar (Stage 1): build the 16x16 IconSheet the bar draws its chrome
-    # icons from -- from system_icons.moygfx if present, else the baked default theme.
-    ws.load_icon_sheet()
-    # Achievements (#21): load the unlocked badges (achievements.json) so earned
-    # milestones persist across reboots and the toast/view reflect them.
-    ws.load_achievements()
+    # The shared service wiring (console.wire_workstation_core -- one canonical
+    # order for host + both boards). WiFi (#38) is the fake host service over the
+    # same moy_carts wifi.json store the device uses; the pointer ranges over the
+    # SYSTEM canvas (the surface the cursor moves on), so it's sized to that.
+    console.wire_workstation_core(
+        ws, moy_carts, carts_dir, make_api, make_wifi(moy_carts, carts_dir),
+        make_audio=make_audio, lua_runtime=lua_runtime, can_manage=True,
+        pointer=console.Pointer(ws.sys_canvas.w, ws.sys_canvas.h), inp=inp)
     # The Picotron-style windowed WM (#73): swap the presentation tier in before
     # the first frame. Only meaningful with a distinct (big) system canvas.
     if windowed and ws._sys_canvas is not None:

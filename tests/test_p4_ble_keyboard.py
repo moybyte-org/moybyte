@@ -480,5 +480,5 @@ def test_p4_board_enables_hosted_ble_and_runtime_polls_before_edge_snapshot():
         assert "CONFIG_ESP_HOSTED_NIMBLE_HCI_VHCI=y" in text
 
     assert "from p4_ble_keyboard import BleHidKeyboard" in runtime
-    assert "ws.keyboard = keyboard" in runtime
+    assert "keyboard=keyboard" in runtime    # via console.wire_workstation_core
     assert runtime.index("keyboard.poll()") < runtime.index("inp.begin_frame()")

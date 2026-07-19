@@ -16,7 +16,7 @@ from array import array
 # shared verbatim with the host (canonical: runtime/editors.py; build.sh stages a
 # copy into modules/ so it freezes here as the top-level module `editors`).
 from editors import CodeEditor, PaintEditor, SpriteSheet
-from console import NAMES, Pointer, Workstation, _cursor_delta
+from console import NAMES, Pointer, Workstation, _cursor_delta, wire_workstation_core
 from carts_data import CARTS  # build-time generated from system_carts/ (tools/gen_device_carts.py)
 # Leaf tick + diag helpers (extracted to device_util.py so every device cluster can
 # import them without a moy_runtime cycle -- see device_util.py's module docstring).
@@ -357,7 +357,6 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
                          else _load_carts(moybyte_sd.with_sd_live))
     import moy_carts
     ws = Workstation(comp, canvas, inp, carts)
-    ws.make_api = make_api        # device cart namespace (DeviceCanvas + Image + color)
     # #67 spike: say ONCE whether the auto-native cart loader engaged (the emitter
     # probe in player.py), so a serial capture can attribute logic-ms deltas.
     try:
@@ -366,25 +365,18 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
                    % ("ON" if _player_mod.NATIVE_CARTS else "OFF"))
     except Exception:  # noqa: BLE001 -- diagnostic only
         pass
-    ws.make_audio = make_audio    # device I2S audio backend (#16, NEEDS HW VERIFICATION)
     # #67 Phase 1: the Lua cart runtime -- wired only when the moy_lua native
     # module is in this build; without it a "runtime": "lua" cart opens the
     # Player's runtime-missing panel (the Phase 2 graceful floor).
+    lua_runtime = None
     try:
         import moy_lua as _moy_lua_probe  # noqa: F401 -- availability probe
         from device_api import make_lua_runtime
-        ws.lua_runtime = make_lua_runtime(ws)
+        lua_runtime = make_lua_runtime(ws)
         _diag_note("carts", "lua runtime ON")
     except ImportError:
         pass
-    ws.carts_store = moy_carts    # SD .moy store (scan/load/save/create/dup/delete)
-    ws.carts_root = carts_root
-    # Writes are enabled on-device via moy_sd: it attaches the SD card to the SPI
-    # host esp_lcd already initialized (instead of machine.SDCard re-initializing
-    # it, which hangs the live bus). with_sd_live mounts the card once and keeps
-    # it resident -- tearing it down per op silent-hangs the next panel flush.
-    # can_manage falls back off if the SD root is unknown (booted on embedded carts).
-    ws.can_manage = carts_root is not None
+
     # SD vs panel-DMA mutual exclusion (#40 double-buffer): SD shares the panel's SPI
     # host, so an SD op can NOT overlap an in-flight panel DMA. Wrap with_sd_live so it
     # drains any pending panel DMA (comp.sync()) BEFORE touching the SD card -- the
@@ -395,29 +387,36 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     def _with_sd_synced(fn):
         comp.sync()
         return moybyte_sd.with_sd_live(fn)
-    ws._with_sd = _with_sd_synced
-    # OTA firmware update (#53): the shared console's Settings -> UPDATE FW row flashes a
-    # new app image from /sd/update into the inactive OTA slot (esp32.Partition) and
-    # reboots. SD shares the panel SPI host, so the updater reads through the SAME
-    # _with_sd_synced wrapper as cart saves (drain panel DMA -> native single-bus mount).
-    # Available only on an --ota build (running slot is ota_0/ota_1); on a legacy single-
-    # factory image available() is False and the row never shows.
-    try:
-        import moy_ota
-        ws.updater = moy_ota.OtaUpdater(_with_sd_synced)
-    except Exception as exc:
-        print("Moybyte: OTA updater unavailable:", exc)
-    # #66 live-set diet: the scanned cart list keeps ~300-500KB of src/sprite
-    # strings permanently live -- most of a GC collect's mark cost. Drop them now
-    # that the store + _with_sd can reload a cart on open (icons bake first).
-    ws.slim_carts()
-    ws.pointer = pointer
-    ws.keyboard = keyboard        # lets the code editor switch to text (ASCII) mode
-    # WiFi (#38): one SYSTEM service (network.WLAN STA) shared across carts, so the
-    # connection persists when the WiFi-manager cart exits and #22/#8 can use it.
-    # Injected into a cart's namespace ONLY when its manifest grants "network".
-    # Autoconnect from the saved creds at boot. NEEDS ON-DEVICE VERIFICATION.
-    ws.wifi = make_wifi(moy_carts, carts_root)
+
+    def _before_slim(ws):
+        # Writes are enabled on-device via moy_sd: it attaches the SD card to the SPI
+        # host esp_lcd already initialized (instead of machine.SDCard re-initializing
+        # it, which hangs the live bus). with_sd_live mounts the card once and keeps
+        # it resident -- tearing it down per op silent-hangs the next panel flush.
+        # Set BEFORE slim_carts so the store can reload what the diet drops.
+        ws._with_sd = _with_sd_synced
+        # OTA firmware update (#53): the shared console's Settings -> UPDATE FW row
+        # flashes a new app image from /sd/update into the inactive OTA slot
+        # (esp32.Partition) and reboots. SD shares the panel SPI host, so the updater
+        # reads through the SAME _with_sd_synced wrapper as cart saves. Available only
+        # on an --ota build; on a legacy single-factory image available() is False.
+        try:
+            import moy_ota
+            ws.updater = moy_ota.OtaUpdater(_with_sd_synced)
+        except Exception as exc:
+            print("Moybyte: OTA updater unavailable:", exc)
+
+    # The shared service wiring (console.wire_workstation_core -- one canonical
+    # order for host + both boards): api/audio/lua + store/root/can_manage + the
+    # WiFi (#38) SYSTEM service (network.WLAN STA, lazy -- injected into a cart's
+    # namespace only when its manifest grants "network"; the WLAN stack
+    # NEEDS ON-DEVICE VERIFICATION) + the #66 slim_carts diet + pointer/keyboard
+    # + the boot loads.
+    wire_workstation_core(ws, moy_carts, carts_root, make_api,
+                          make_wifi(moy_carts, carts_root),
+                          make_audio=make_audio,   # device I2S audio backend (#16)
+                          lua_runtime=lua_runtime, before_slim=_before_slim,
+                          pointer=pointer, inp=inp, keyboard=keyboard)
     # OTA online update (#53, Phase 3): hand the updater the wifi service so Settings ->
     # UPDATE ONLINE can fetch a manifest + stream a new image to SD. go_online reuses the
     # saved-credential autoconnect (autoconnect_wifi) so the kid needn't re-enter wifi to
@@ -451,17 +450,8 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     # 257 / ESP_ERR_NO_MEM) and froze the desktop. DeviceWifi is lazy now -- the radio
     # only spins up when the WiFi-manager cart scans/connects. WiFi<->display coexistence
     # on this RAM budget is an open #38 item. (autoconnect_wifi left defined, not called.)
-    # Desktop shell (#28): load system.json + apply the saved wallpaper. On device
-    # the wallpaper backdrop runs the chosen wallpaper cart's _draw (and _update if
-    # cheap) each home frame; _wp_live can be set False to keep it _draw-only.
-    ws.load_system()
-    # Unified top bar (Stage 1): build the 16x16 IconSheet the bar draws its chrome
-    # icons from -- from system_icons.moygfx on SD if present, else the baked default
-    # theme. Same store + with_sd_live path as system.json.
-    ws.load_icon_sheet()
-    # Achievements (#21): load the unlocked badges (achievements.json) so earned
-    # milestones survive a reboot. Same store + with_sd_live path as system.json.
-    ws.load_achievements()
+    # (The #28 system.json / icon theme / achievements boot loads ran inside
+    # wire_workstation_core above -- same store + with_sd_live path.)
     # Offline diagnostics (moybyte_diag): RAM ring now, flushed to SD every ~5s and
     # on a crash, dumped to serial at next boot. perf_capture makes ws.frame() record
     # the flush/draw split each frame WITHOUT drawing the on-screen HUD, so the perf

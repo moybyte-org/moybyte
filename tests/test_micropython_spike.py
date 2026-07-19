@@ -376,7 +376,9 @@ def test_micropython_native_sd_shares_display_spi_host():
     # native live-mount path.
     assert "ws._with_sd = _with_sd_synced" in runtime
     assert "return moybyte_sd.with_sd_live(fn)" in runtime
-    assert "ws.can_manage = carts_root is not None" in runtime
+    # can_manage defaults to "the store root is known" inside the shared
+    # console.wire_workstation_core (the runtime hands it carts_root).
+    assert "wire_workstation_core(ws, moy_carts, carts_root, make_api" in runtime
     assert "ws.can_manage = False" not in runtime
 
 
@@ -2307,8 +2309,7 @@ def test_code_editor_wired_into_device_shell():
     assert "ws.carts_store.save_code(self.cart, src)" in project
     assert "def save_code(cart, src):" in carts
     # run_desktop injects the device make_api + SD cart store into the shared console.
-    assert "ws.make_api = make_api" in runtime
-    assert "ws.carts_store = moy_carts" in runtime
+    assert "wire_workstation_core(ws, moy_carts, carts_root, make_api" in runtime
 
     # The console flips the keyboard between ASCII (code editor: clean typing) and
     # the raw matrix (running cart: true hold-to-move) on every screen change. It
@@ -2322,7 +2323,7 @@ def test_code_editor_wired_into_device_shell():
     # only entered later, via set_game_mode, once a cart is running).
     init_src = inp.split("def __init__(self, input_state):", 1)[1].split("\n    def ", 1)[0]
     assert "_enable_raw_mode" not in init_src
-    assert "ws.keyboard = keyboard" in runtime
+    assert "keyboard=keyboard" in runtime      # via wire_workstation_core
 
 
 def test_unified_top_bar_wired_into_device_shell():
@@ -2361,8 +2362,11 @@ def test_unified_top_bar_wired_into_device_shell():
     assert "def load_system_icons(" in carts
     assert "def save_system_icons(" in carts
 
-    # The device run loop builds + injects the IconSheet the same way as the host.
-    assert "ws.load_icon_sheet()" in runtime
+    # The device run loop builds + injects the IconSheet the same way as the host
+    # (the boot loads run inside the shared console.wire_workstation_core).
+    assert "wire_workstation_core(ws, moy_carts, carts_root, make_api" in runtime
+    console_src = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    assert "ws.load_icon_sheet()" in console_src
 
 
 def test_icon_theme_editor_wired_into_device_shell():
@@ -2678,7 +2682,7 @@ def test_device_audio_wired():
     assert "class DeviceAudio:" in device_audio
     assert "from machine import I2S, Pin" in device_audio
     assert "mode=I2S.TX" in device_audio
-    assert "ws.make_audio = make_audio" in runtime
+    assert "make_audio=make_audio" in runtime  # via wire_workstation_core
     assert "NEEDS ON-DEVICE VERIFICATION" in runtime
     # The feed must be NON-BLOCKING: irq() flips the I2S port into non-blocking mode
     # and a completion flag gates the next write, so write() can never stall the
@@ -2951,7 +2955,7 @@ def test_device_wifi_wired():
     assert "NEEDS ON-DEVICE VERIFICATION" in device_wifi
     # run_desktop wires the system service but does NOT bring WiFi up at boot (WLAN
     # reserves the internal RAM the LCD DMA needs -- WiFi<->display coexistence is #38).
-    assert "ws.wifi = make_wifi(moy_carts, carts_root)" in runtime
+    assert "make_wifi(moy_carts, carts_root)" in runtime   # via wire_workstation_core
     # autoconnect is NOT called eagerly at boot; it is only reused, deferred, by the OTA
     # online-update path (#53) via the go_online lambda -- never as a bare boot statement.
     assert "go_online=lambda: autoconnect_wifi(ws.wifi)" in runtime
@@ -3216,11 +3220,11 @@ def test_moy_lua_phase1_wired():
     assert "class LuaCartRun" in api_src
     assert "_LUA_TOKEN" in api_src                    # the Lua writer's batch token
     runtime_src = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-    assert "ws.lua_runtime = make_lua_runtime(ws)" in runtime_src
+    assert "lua_runtime = make_lua_runtime(ws)" in runtime_src
     assert "except ImportError" in runtime_src
     p4 = Path("firmware/esp32_p4_wifi6_touch_lcd_7b")
     p4_runtime = (p4 / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-    assert "ws.lua_runtime = make_lua_runtime(ws)" in p4_runtime
+    assert "lua_runtime = make_lua_runtime(ws)" in p4_runtime
     assert "moy_lua" in (p4 / "native" / "micropython.cmake").read_text(encoding="utf-8")
     assert "moy_lua" in (p4 / "build.sh").read_text(encoding="utf-8")
 

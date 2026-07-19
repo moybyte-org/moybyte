@@ -3515,3 +3515,41 @@ class Workstation:
         else:
             self._glyph(kind, (x, y, _BAR_ICON * fs, _BAR_ICON * fs),
                         NAMES["light_grey"], cv)
+
+
+def wire_workstation_core(ws, store, carts_root, make_api, wifi,
+                          make_audio=None, lua_runtime=None, can_manage=None,
+                          before_slim=None, pointer=None, inp=None,
+                          keyboard=None):
+    """The board-agnostic Workstation service wiring, in the ONE canonical order
+    every backend used to hand-copy (host build_workstation + both boards'
+    run_desktop -- the P4 literally carried a "same order as host" comment).
+    The caller builds its board-specific backends (api/audio/wifi/lua/SD/OTA)
+    and hands them in; board glue that must land between the store hookup and
+    the #66 slim_carts diet (the T-Deck's _with_sd + OTA updater) goes through
+    `before_slim(ws)`. can_manage defaults to "the store root is known"; the
+    host passes True. Ends with the three boot loads (system.json settings /
+    icon theme / achievements) -- install a WindowedWM AFTER this returns, so
+    the persisted font scale is applied before the root layout context is
+    captured (#73/#58)."""
+    ws.make_api = make_api
+    if make_audio is not None:
+        ws.make_audio = make_audio
+    if lua_runtime is not None:
+        ws.lua_runtime = lua_runtime
+    ws.carts_store = store
+    ws.carts_root = carts_root
+    ws.can_manage = (carts_root is not None) if can_manage is None else can_manage
+    ws.wifi = wifi
+    if before_slim is not None:
+        before_slim(ws)
+    ws.slim_carts()   # #66 live-set diet: heavy payloads reload from the store
+    if pointer is not None:
+        ws.pointer = pointer
+        if inp is not None:
+            inp.pointer = pointer   # touch-driven carts read it via the api touch()
+    if keyboard is not None:
+        ws.keyboard = keyboard      # lets the code editor switch to text (ASCII) mode
+    ws.load_system()                # #28: system.json + the saved wallpaper
+    ws.load_icon_sheet()            # Stage 1: the 16x16 bar IconSheet (theme or baked)
+    ws.load_achievements()          # #21: unlocked badges survive reboots
