@@ -51,6 +51,7 @@ TITLE_TO_FOLDER = {
     "Bubble Trouble": "bubble_trouble",
     "Tap Only Red": "tap_red",
     "Tap Game": "tap_game",
+    "Coin Quest": "coin_quest",
     "Beeper": "beeper",
     "Letter Blitz": "letter_blitz",
     "Paint": "paint",
