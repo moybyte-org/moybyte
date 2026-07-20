@@ -353,13 +353,18 @@ class WebView:
             self._pan = [0, 0]
         # Browser typed key -> last_key for THIS frame. Applied here (after the loop's
         # keyboard.poll() which would otherwise reset last_key to 0) so a cart in
-        # textmode()/the code editor sees it; consumed so it's one byte for one frame.
+        # textmode()/the code editor sees it. QUEUE, not last-wins (#42 Thread 3, mirrors
+        # the host ConsoleDriver.type_char fix): a browser WS batch can carry many typed
+        # chars at once (a phone soft keyboard swipe-typing/autocorrect-committing a whole
+        # word) -- taking _key_queue[-1] then wiping the queue dropped every char but the
+        # last ("hello" arrived as only "o"). Pop ONE byte per frame instead, preserving
+        # order across frames; the rest stays queued for the next ones. NEEDS AN ON-GLASS
+        # PASS (host-verified only: tests/test_moy_webserver.py drives feed_input directly).
         if self._key_queue:
             try:
-                self._inp.last_key = self._key_queue[-1]
+                self._inp.last_key = self._key_queue.pop(0)
             except Exception:  # noqa: BLE001
                 pass
-            self._key_queue = []
 
     def feed_pointer(self, physical_active):
         """Merge browser pointer intent into the real Pointer. Called in the loop AFTER
@@ -429,10 +434,12 @@ class WebView:
                 dec = _decode_moyimg(raw[name])
                 if dec is not None:
                     decoded[name] = dec
+        # #42 Thread 3: the open cart's manifest input hint (None -> show every control).
+        input_kinds = cart.get("input") if cart else None
         return self._web.assets_payload(self._canvas.w, self._canvas.h, PAL565,
                                         getattr(ws, "sheet", None),
                                         getattr(ws, "tilemap", None), title, rate,
-                                        decoded or None)
+                                        decoded or None, input_kinds)
 
     def frame(self):
         cart = getattr(self._ws, "cart", None)

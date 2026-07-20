@@ -1,6 +1,6 @@
 {
   "format": "moybyte-cart-v1",
-  "version": 12,
+  "version": 13,
   "title": "Letter Blitz",
   "type": "game",
   "runtime": "python",
@@ -15,6 +15,10 @@
     "graphics",
     "input",
     "audio"
+  ],
+  "input": [
+    "keyboard",
+    "touch"
   ],
   "safe_to_share": true,
   "config": {

@@ -80,6 +80,10 @@ var W=320,H=240,PAL=null,FONT=null,ready=false,assCart=undefined,idx=null,img=nu
 // Payload-diet caches (#41): SHEET = the cart sprite sheet; TM = the cart tilemap (kept
 // current by settiles); ATL = the per-session sprite atlas filled by defspr.
 var SHEET=null,TM=null,ATL=[],curGen=-1;
+// #42 Thread 3: the open cart's manifest input hint (null/"buttons"/"touch"/"keyboard" list;
+// null = undeclared -> show every control, today's behaviour). applyInputHint() gates the
+// virtual gamepad (#ctl) on "buttons" and the soft-keyboard summon (#kb) on "keyboard".
+var INPUT=null,padWanted=true,kbWanted=true;
 // #76 per-surface DELTA: the last full command list per WM-surface id. A frame entry
 // {"same":1} replays from here instead of re-shipping the commands; wiped with ATL/LAY
 // on a gen change (the server's SurfaceDelta resets in lock-step on connect/reset).
@@ -138,6 +142,7 @@ function alloc(){cv.width=W;cv.height=H;cx=cv.getContext("2d");cx.imageSmoothing
 idx=new Uint8Array(W*H);img=cx.createImageData(W,H);rgba=img.data;rs();fit();}
 function getA(){assLoading=true;return fetch("/assets").then(function(r){return r.json();}).then(function(a){
 W=a.w;H=a.h;PAL=a.palette;FONT=a.font;assCart=a.cart;SHEET=a.sheet||null;if(a.audio_rate)AUDIO_RATE=a.audio_rate;
+INPUT=a.input||null;applyInputHint();
 TM=a.tilemap?{w:a.tilemap.w,h:a.tilemap.h,cells:a.tilemap.cells.slice()}:null;
 // Decode each paint image's base64 raw indices into a Uint8Array ONCE (#63 Fold 4), so an
 // imgref just blits the cached bytes (index->palette). Keyed by the SAME name image('name') tags.
@@ -316,11 +321,18 @@ kbInp.addEventListener("keydown",function(e){if(e.key==="Enter"){send({type:"key
 // keyboard-shrunken) viewport -- hide it so the canvas keeps the room; blur
 // restores it (the CSS media query still owns whether it exists at all).
 var kbCtl=document.getElementById("ctl");
+// #42 Thread 3: syncCtl() shows the virtual gamepad only when BOTH the cart wants it
+// (padWanted, from the manifest input hint) AND we're not mid-type (kbInp focused);
+// applyInputHint() re-derives padWanted/kbWanted from INPUT (set by getA() on every
+// /assets fetch, i.e. every cart change) and also gates the #kb summon button itself.
+function syncCtl(){if(kbCtl)kbCtl.style.display=(padWanted&&document.activeElement!==kbInp)?"":"none";}
+function applyInputHint(){padWanted=!INPUT||INPUT.indexOf("buttons")>=0;
+  kbWanted=!INPUT||INPUT.indexOf("keyboard")>=0;kbBtn.style.display=kbWanted?"":"none";syncCtl();}
 kbInp.addEventListener("focus",function(){kbBtn.classList.add("pr");
-  if(kbCtl)kbCtl.style.display="none";fit();
+  syncCtl();fit();
   if(window.visualViewport)window.visualViewport.addEventListener("resize",kbScroll);kbScroll();});
 kbInp.addEventListener("blur",function(){kbBtn.classList.remove("pr");
-  if(kbCtl)kbCtl.style.display="";fit();
+  syncCtl();fit();
   if(window.visualViewport)window.visualViewport.removeEventListener("resize",kbScroll);});
 kbBtn.addEventListener("click",function(e){
   if(document.activeElement===kbInp)kbInp.blur();else{kbReset();kbInp.focus();}

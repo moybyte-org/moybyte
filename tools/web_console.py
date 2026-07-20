@@ -98,10 +98,38 @@ DEFAULT_FPS = 30
 # device's single-threaded loop), so a generous budget stalls nobody else.
 WS_SEND_BUDGET = 1.0
 
-# The launcher nav / gameplay buttons a browser key can map to (mirrors the pygame
-# sim's WASD nav + Enter/Z/X/H shortcuts). The browser sends a logical `name`; we
-# only forward names the console actually knows so a stray key can't wedge it.
-BUTTON_NAMES = frozenset(("left", "right", "up", "down", "a", "b", "run", "home"))
+
+class _DriverPointerSink:
+    """Adapts a ConsoleDriver's DEFERRED touch state (self._down / self._click, mixed
+    into ws.pointer only at frame() time) to the Pointer-shaped interface
+    runtime.web_view.apply_events expects (place() + a down/click PROPERTY pair) --
+    the same sink shape the device's device_webview._PointerSink presents (#42
+    Thread 3), so both transports drive the ONE shared event-decode path instead of
+    two hand-rolled ones. place() writes straight through to the real ws.pointer
+    (ConsoleDriver.touch() does too -- only down/click are deferred)."""
+
+    def __init__(self, driver):
+        self._d = driver
+
+    def place(self, x, y):
+        self._d.pointer.place(int(x), int(y))
+
+    @property
+    def down(self):
+        return self._d._down
+
+    @down.setter
+    def down(self, v):
+        self._d._down = bool(v)
+
+    @property
+    def click(self):
+        return self._d._click
+
+    @click.setter
+    def click(self, v):
+        if v:
+            self._d._click = True
 
 
 class WebConsole:
@@ -175,6 +203,7 @@ class WebConsole:
         if cart:
             self._open_named_cart(cart, save_dir)
         self.driver = host_app.ConsoleDriver(self.ws)
+        self._pointer_sink = _DriverPointerSink(self.driver)
         self._lock = threading.Lock()
 
     def _open_named_cart(self, cart_path, carts_dir):
@@ -202,34 +231,19 @@ class WebConsole:
 
     # -- input ---------------------------------------------------------------
     def apply_events(self, events):
-        """Replay a batch of browser events through the host ConsoleDriver, exactly
-        as the pygame sim would -- mouse->touch, keys->keyboard/buttons/trackball."""
+        """Replay a batch of browser events through the host ConsoleDriver.
+
+        Routed through the SHARED runtime.web_view.apply_events -- the same
+        decode path the device's web view runs (#42 Thread 3) -- instead of a
+        second hand-rolled copy, so the button-name allowlist and the key/press
+        rules (e.g. a Backspace also firing HOME outside text mode) can't drift
+        between the host and device transports."""
         d = self.driver
         with self._lock:
-            for ev in events:
-                t = ev.get("type")
-                if t == "down":
-                    d.touch(ev.get("x", 0), ev.get("y", 0))      # tap (press edge)
-                elif t == "move":
-                    d.touch_drag(ev.get("x", 0), ev.get("y", 0))  # drag, button down
-                elif t == "up":
-                    d.touch_up()
-                elif t == "pan":
-                    d.pan(int(ev.get("dx", 0)), int(ev.get("dy", 0)))  # trackball
-                elif t == "press":
-                    name = ev.get("name")
-                    if name in BUTTON_NAMES:
-                        d.press(name)
-                elif t == "hold":
-                    name = ev.get("name")
-                    if name in BUTTON_NAMES:
-                        d.hold(name, bool(ev.get("down")))
-                elif t == "key":
-                    code = ev.get("code")
-                    if isinstance(code, int) and 0 <= code <= 0xFF:
-                        d.type_char(code)
-                elif t == "esc":
-                    d.escape()
+            web_view.apply_events(
+                events, d.input, self._pointer_sink,
+                on_press=d.press, on_pan=d.pan, on_key=d.type_char,
+                on_esc=d.escape, on_hold=d.hold)
 
     # -- output --------------------------------------------------------------
     def step_frame(self):
@@ -297,11 +311,14 @@ class WebConsole:
                     dec = host_app._decode_moyimg(blob)
                     if dec is not None:
                         decoded[name] = dec
+            # #42 Thread 3: the open cart's manifest input hint (None -> show every control).
+            cart_obj = getattr(self.ws, "cart", None)
+            input_kinds = cart_obj.get("input") if cart_obj else None
             # The SHARED assets builder (host passes the MOY64 RGB palette directly; the device
             # passes its RGB565 LUT and the builder decodes -- detected by element type).
             return web_view.assets_payload(
                 self.canvas.w, self.canvas.h, palette.MOY64, sheet, tilemap, cart,
-                _audio.AudioEngine().rate, decoded or None)
+                _audio.AudioEngine().rate, decoded or None, input_kinds)
 
 
 class _Handler(BaseHTTPRequestHandler):

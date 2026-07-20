@@ -1,6 +1,6 @@
 {
   "format": "moybyte-cart-v1",
-  "version": 6,
+  "version": 7,
   "title": "Battle City",
   "type": "game",
   "runtime": "python",
@@ -15,6 +15,9 @@
     "graphics",
     "input",
     "audio"
+  ],
+  "input": [
+    "buttons"
   ],
   "safe_to_share": true,
   "config": {
