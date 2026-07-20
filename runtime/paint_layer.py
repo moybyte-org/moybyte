@@ -66,8 +66,11 @@ _SW_AREA = (_SW_X0, _SW_Y0, _SW_COLS * _SW, (16 // _SW_COLS) * _SW)
 _SPR_PREV = (214, 40, 40, 24)
 _SPR_NEXT = (262, 40, 40, 24)
 _PAINT_SIZE = (214, 68, 88, 20)    # cycle sprite size 1x1 / 2x2 / 3x3 (#30)
-_PAINT_SAVE = (14, 190, 88, 26)
-_PAINT_CLOSE = (200, 190, 102, 26)
+# SAVE/CLOSE dropped below the TWO tool rows (#90 added a second row): a shorter
+# button height buys the extra row on the 320x240 T-Deck without shrinking the
+# pixel grid. Byte-identical-verbatim in PaintLayout._base.
+_PAINT_SAVE = (14, 202, 88, 16)
+_PAINT_CLOSE = (200, 202, 102, 16)
 # Cross-cart sprite reuse (#18): GET imports the current tile FROM the shared sheet,
 # PUT saves it TO the shared sheet. Hidden in the theme (icon) editor.
 _PAINT_GET = (210, 130, 92, 20)
@@ -77,35 +80,51 @@ _BASE_W = 320
 _BASE_H = 240
 
 # -- tool palette (#90) -------------------------------------------------------
-# A compact row of single-glyph tool buttons drawn just below the pixel grid: the
-# in-editor undo/redo, the bucket-fill toggle, and the whole-sprite transforms
-# (flip / rotate 90 / shift-with-wrap in 4 directions / clear). Single-char labels
-# so they fit the petme128 ASCII font AND the tiny baseline row (no chrome-glyph
-# vocabulary change): Z/Y echo the host Ctrl+Z/Y undo shortcut, < > ^ v are the
-# shift arrows, H/V mirror, R rotates, F is the fill bucket, X clears. Order is the
-# hit-test/draw order.
-_TOOLS = ("undo", "redo", "fill", "fliph", "flipv", "rot",
-          "sleft", "sright", "sup", "sdown", "clear")
+# TWO compact rows of single-glyph tool buttons drawn just below the pixel grid.
+# Row 1 = the drawing MODES + history + region clipboard (undo/redo, the pen /
+# bucket / rect / line / oval / select tools). Row 2 = the whole-sprite transforms
+# (flip / rotate 90 / shift-with-wrap x4 / clear) plus the copy/paste/erase actions.
+# The drawing tools are direct mode buttons (touch-first, no chords): a tap selects
+# that tool, and a grid drag then draws it with a live preview. Single-char labels
+# are the fallback if a glyph is ever missing; the glyphs (chrome.py _GLYPHS) are
+# the pre-literate primary cue. Order within each tuple is the hit-test/draw order.
+_TOOL_ROW1 = ("undo", "redo", "pen", "fill", "rect", "line", "oval", "select")
+_TOOL_ROW2 = ("copy", "paste", "erase", "fliph", "flipv", "rot",
+              "sleft", "sright", "sup", "sdown", "clear")
+_TOOLS = _TOOL_ROW1 + _TOOL_ROW2       # flat order; tool_btns follows it (row1, row2)
 _TOOL_LABEL = {
-    "undo": "Z", "redo": "Y", "fill": "F", "fliph": "H", "flipv": "V",
-    "rot": "R", "sleft": "<", "sright": ">", "sup": "^", "sdown": "v",
-    "clear": "X",
+    "undo": "Z", "redo": "Y", "pen": "P", "fill": "F", "rect": "R", "line": "L",
+    "oval": "O", "select": "S", "copy": "C", "paste": "V", "erase": "E",
+    "fliph": "H", "flipv": "M", "rot": "T", "sleft": "<", "sright": ">",
+    "sup": "^", "sdown": "v", "clear": "X",
 }
 # The pre-literate glyph for each tool (#89-#93 icon pass): a 12x12 chrome glyph
 # (runtime/chrome.py _GLYPHS) drawn centered instead of the single-char label, so
 # the row reads as pictures. _blit_glyph draws NOTHING for an unknown kind, so the
 # _TOOL_LABEL letter above stays the guaranteed fallback (see _draw_tools).
 _TOOL_GLYPH = {
-    "undo": "undo", "redo": "redo", "fill": "fill", "fliph": "flip_h",
-    "flipv": "flip_v", "rot": "rotate", "sleft": "arr_l", "sright": "arr_r",
-    "sup": "arr_u", "sdown": "arr_d", "clear": "clear",
+    "undo": "undo", "redo": "redo", "pen": "edit", "fill": "fill",
+    "rect": "rect_tool", "line": "line", "oval": "circle", "select": "select",
+    "copy": "copy", "paste": "paste", "erase": "eraser",
+    "fliph": "flip_h", "flipv": "flip_v", "rot": "rotate",
+    "sleft": "arr_l", "sright": "arr_r", "sup": "arr_u", "sdown": "arr_d",
+    "clear": "clear",
 }
-# Baseline (320x240) tool row: a full-width strip in the gap between the grid
-# bottom (y176) and the SAVE/CLOSE row (y190). 11 buttons of 26px across x14..300.
+# The drawing-mode tools (highlighted when active); the rest are one-shot actions.
+_TOOL_MODE = {
+    "pen": PaintEditor.PEN, "fill": PaintEditor.FILL, "rect": PaintEditor.RECT,
+    "line": PaintEditor.LINE, "oval": PaintEditor.OVAL, "select": PaintEditor.SELECT,
+}
+# Baseline (320x240) tool rows: two full-width strips in the gap between the grid
+# bottom (y176) and the SAVE/CLOSE row (y202). Row 1 = 8 buttons of 35px, row 2 =
+# 11 buttons of 26px, both across x14..300.
 _TOOL_X0 = 14
-_TOOL_Y0 = 176
-_TOOL_CW = 26
-_TOOL_H = 13
+_TOOL_ROW1_Y = 176
+_TOOL_ROW2_Y = 189
+_TOOL_H = 12
+_TOOL_SPAN = 286                       # x14..300 usable width
+_TOOL_CW1 = _TOOL_SPAN // len(_TOOL_ROW1)   # 35
+_TOOL_CW2 = _TOOL_SPAN // len(_TOOL_ROW2)   # 26
 
 
 def _tool_row(x0, y0, cw, h, n):
@@ -152,11 +171,13 @@ class PaintLayout:
             self.put_btn = _PAINT_PUT
             self.save_btn = _PAINT_SAVE
             self.close_btn = _PAINT_CLOSE
-            self.status_xy = (110, 196)
-            self.status_maxc = 18
-            # The #90 tool row: undo/redo/fill/transforms, in the grid->SAVE gap.
-            self.tool_btns = _tool_row(_TOOL_X0, _TOOL_Y0, _TOOL_CW, _TOOL_H,
-                                       len(_TOOLS))
+            self.status_xy = (110, 206)
+            self.status_maxc = 11
+            # The #90 tool rows: row 1 = drawing modes + undo/redo, row 2 =
+            # copy/paste/erase + transforms, in the grid->SAVE gap (verbatim).
+            self.tool_btns = (
+                _tool_row(_TOOL_X0, _TOOL_ROW1_Y, _TOOL_CW1, _TOOL_H, len(_TOOL_ROW1))
+                + _tool_row(_TOOL_X0, _TOOL_ROW2_Y, _TOOL_CW2, _TOOL_H, len(_TOOL_ROW2)))
             return
         # -- responsive: anchor the panel to the canvas, the swatch/button column to
         # the panel's right edge, and grow the grid to fill what's left ------------
@@ -170,13 +191,14 @@ class PaintLayout:
         self.title_xy = (px + 6 * fs, py + 2 * fs)
         rc_x = p_right - 142 * fs                 # right column origin (base 170)
         row_y = p_bottom - 30 * fs                # SAVE/CLOSE row (base 190)
-        toolh = 13 * fs                           # #90 tool row height
+        toolh = 12 * fs                           # #90 tool row height (per row)
+        tools_band = 2 * toolh + 2 * fs           # two rows + a gutter
         self.pg_x0 = px + 6 * fs
         self.pg_y0 = py + 16 * fs
-        # Reserve the tool-row band (its height + gaps) above the SAVE row so the
-        # grid never grows over it -- otherwise the same as the shipped formula.
+        # Reserve BOTH tool rows' band (their height + gaps) above the SAVE row so the
+        # grid never grows over them -- otherwise the same as the shipped formula.
         avail = min(rc_x - self.pg_x0 - 8 * fs,
-                    row_y - self.pg_y0 - toolh - 8 * fs)
+                    row_y - self.pg_y0 - tools_band - 6 * fs)
         self.pg_span = max(48, 48 * (avail // 48))
         self.pg_area = (self.pg_x0, self.pg_y0, self.pg_span, self.pg_span)
         self.sw_x0, self.sw_y0 = rc_x, self.pg_y0
@@ -195,13 +217,18 @@ class PaintLayout:
         self.close_btn = (p_right - 112 * fs, row_y, 102 * fs, 26 * fs)
         self.status_xy = (self.pg_x0 + 96 * fs, row_y + 6 * fs)
         self.status_maxc = max(4, (self.close_btn[0] - self.status_xy[0]) // (8 * fs))
-        # The #90 tool row: a full-width strip just above the SAVE/CLOSE row, growing
-        # its button cells with the panel width. The reserved `avail` band above keeps
-        # the (grown) grid clear of it.
-        tool_y0 = row_y - toolh - 3 * fs
+        # The #90 tool rows: two full-width strips just above the SAVE/CLOSE row,
+        # growing their button cells with the panel width. The reserved `avail` band
+        # above keeps the (grown) grid clear of them. Row 2 sits directly above the
+        # SAVE row; row 1 above it.
+        row2_y = row_y - toolh - 3 * fs
+        row1_y = row2_y - toolh - 1 * fs
         tool_span = (p_right - 6 * fs) - self.pg_x0
-        cw = max(10 * fs, tool_span // len(_TOOLS))
-        self.tool_btns = _tool_row(self.pg_x0, tool_y0, cw, toolh, len(_TOOLS))
+        cw1 = max(10 * fs, tool_span // len(_TOOL_ROW1))
+        cw2 = max(10 * fs, tool_span // len(_TOOL_ROW2))
+        self.tool_btns = (
+            _tool_row(self.pg_x0, row1_y, cw1, toolh, len(_TOOL_ROW1))
+            + _tool_row(self.pg_x0, row2_y, cw2, toolh, len(_TOOL_ROW2)))
 
 
 def _line_cells(x0, y0, x1, y1):
@@ -248,6 +275,8 @@ class PaintLayer:
         self._in = in_rect
         self._paint_drag = None       # last painted grid cell during a drag (#30)
         self._fill_fired = False      # FILL already fired this press (#90; see _paint_stroke)
+        self._shape_start = None      # RECT/LINE/OVAL/SELECT drag origin cell (#90)
+        self._shape_end = None        # ...and its current (clamped) end cell, for preview
         self._ekey = KeyEdge()        # Ctrl+Z/Y edge tracker (undo-shortcut, #90)
         sc = ws.sys_canvas
         self.layout = PaintLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
@@ -262,6 +291,8 @@ class PaintLayer:
         _leave_theme) so a new paint session's first stroke starts fresh."""
         self._paint_drag = None
         self._fill_fired = False
+        self._shape_start = None
+        self._shape_end = None
 
     # -- Layer facets --------------------------------------------------------
 
@@ -309,23 +340,17 @@ class PaintLayer:
         if click and ws.menu_view == "paint" and ws.bar_layer.handle_bar_tap("menu", px, py):
             return True
         # A tap (click) routes through _paint_click (grid OR buttons). A held drag with
-        # no fresh click keeps painting the grid stroke so press-and-move draws a
-        # continuous line -- the same path for a host mouse drag and a device touch drag
-        # (both = pointer.down + moving position). Releasing resets the stroke origin
-        # (#30). The theme editor (EDIT ICONS) reuses this exact path over the icon sheet.
+        # no fresh click keeps drawing on the grid so press-and-move draws a continuous
+        # stroke / grows a shape's preview -- the same path for a host mouse drag and a
+        # device touch drag (both = pointer.down + moving position). Releasing commits
+        # the stroke/shape/selection (#30/#90). The theme editor (EDIT ICONS) reuses
+        # this exact path over the icon sheet.
         if click:
             self._paint_click(px, py)
         elif ws.pointer.down:
-            self._paint_stroke(px, py)
+            self._paint_drag_move(px, py)
         else:
-            # Pointer released (anywhere): close the brush stroke so the whole
-            # press-drag-release commits ONE undo step (#90). Idempotent when idle.
-            # Also re-arm the once-per-press FILL guard -- release is the ONLY
-            # place it clears (a mid-press grid exit must not re-arm it).
-            if ws.paint is not None:
-                ws.paint.end_stroke()
-            self._paint_drag = None
-            self._fill_fired = False
+            self._paint_release()
         return True
 
     # -- grid + taps ---------------------------------------------------------
@@ -346,6 +371,24 @@ class PaintLayer:
         if 0 <= lx < pe.dim and 0 <= ly < pe.dim:
             return (lx, ly)
         return None
+
+    def _grid_cell_clamped(self, px, py):
+        """Grid-local cell under (px, py), CLAMPED into [0, dim) even when the pointer
+        wandered off the grid -- used for the shape/select drag preview so dragging
+        past an edge still tracks to the edge (#90). Returns None only with no editor."""
+        pe = self.ws.paint
+        lay = self.layout
+        if pe is None:
+            return None
+        cell = lay.pg_span // pe.dim
+        if cell < 1:
+            cell = 1
+        d = pe.dim
+        lx = (px - lay.pg_x0) // cell
+        ly = (py - lay.pg_y0) // cell
+        lx = 0 if lx < 0 else (d - 1 if lx > d - 1 else lx)
+        ly = 0 if ly < 0 else (d - 1 if ly > d - 1 else ly)
+        return (lx, ly)
 
     def _paint_stroke(self, px, py):
         """Drag-to-draw (#30): paint the grid cell under (px, py) AND fill the line
@@ -379,16 +422,76 @@ class PaintLayer:
         self._paint_drag = cell
         return True
 
+    def _grid_press(self, px, py):
+        """Handle a press that lands inside the pixel grid. PEN/FILL go through the
+        continuous _paint_stroke path (#30); RECT/LINE/OVAL/SELECT record a drag origin
+        and defer the commit to release (#90). Returns True iff the press was in-grid."""
+        pe = self.ws.paint
+        if pe.tool in (pe.RECT, pe.LINE, pe.OVAL, pe.SELECT):
+            cell = self._paint_grid_cell(px, py)   # a shape/select must START in-grid
+            if cell is None:
+                return False
+            self._shape_start = cell
+            self._shape_end = cell
+            return True
+        return self._paint_stroke(px, py)
+
+    def _paint_drag_move(self, px, py):
+        """A held drag with no fresh click. Grow the pending shape/selection preview
+        (clamped to the grid), else keep painting the continuous pen/fill stroke."""
+        pe = self.ws.paint
+        if pe is None:
+            return
+        if self._shape_start is not None:
+            cell = self._grid_cell_clamped(px, py)
+            if cell is not None:
+                self._shape_end = cell
+            return
+        self._paint_stroke(px, py)
+
+    def _paint_release(self):
+        """Pointer released (anywhere): commit the pending shape/selection, or close a
+        brush stroke, so a whole press-drag-release is ONE undo step (#90). Idempotent
+        when idle. Re-arms the once-per-press FILL guard (release is the ONLY place it
+        clears -- a mid-press grid exit must not re-arm it)."""
+        pe = self.ws.paint
+        if pe is not None:
+            if self._shape_start is not None:
+                self._commit_shape_or_select(pe)
+            else:
+                pe.end_stroke()
+        self._paint_drag = None
+        self._fill_fired = False
+        self._shape_start = None
+        self._shape_end = None
+
+    def _commit_shape_or_select(self, pe):
+        """Turn a finished shape/select drag into an edit. RECT/LINE/OVAL stamp the
+        shape; SELECT sets the selection box on a real drag, and a TAP (no drag) either
+        stamps the clipboard there (move/copy) or clears the selection (#90)."""
+        s = self._shape_start
+        e = self._shape_end if self._shape_end is not None else s
+        if pe.tool == pe.SELECT:
+            if s == e:
+                if pe.has_clip:
+                    pe.paste(s[0], s[1])       # tap-to-stamp: move/copy the clip here
+                else:
+                    pe.clear_selection()       # tap on empty space deselects
+            else:
+                pe.set_selection(s[0], s[1], e[0], e[1])
+        else:
+            pe.stamp_shape(s[0], s[1], e[0], e[1])
+
     def _paint_click(self, px, py):
-        # A tap (press edge). Paint the grid cell, or hit a button/palette swatch.
+        # A tap (press edge). Draw in the grid cell, or hit a button/palette swatch.
         ws = self.ws
         pe = ws.paint
         lay = self.layout
         if pe is None:
             return
-        if self._paint_stroke(px, py):         # paint a pixel in the zoomed grid
+        if self._grid_press(px, py):           # draw/shape/select in the zoomed grid
             return
-        tid = self._tool_at(px, py)            # a #90 tool button (undo/fill/transform)?
+        tid = self._tool_at(px, py)            # a #90 tool button (mode/undo/transform)?
         if tid is not None:
             self._do_tool(tid)
             return
@@ -435,8 +538,14 @@ class PaintLayer:
             pe.undo()
         elif tid == "redo":
             pe.redo()
-        elif tid == "fill":
-            pe.toggle_fill()
+        elif tid in _TOOL_MODE:                # pen/fill/rect/line/oval/select
+            pe.set_tool(_TOOL_MODE[tid])
+        elif tid == "copy":
+            pe.copy_selection()
+        elif tid == "paste":
+            self._paste_default(pe)
+        elif tid == "erase":
+            pe.toggle_erase()
         elif tid == "fliph":
             pe.flip_h()
         elif tid == "flipv":
@@ -453,6 +562,17 @@ class PaintLayer:
             pe.shift(0, 1)
         elif tid == "clear":
             pe.clear()
+
+    def _paste_default(self, pe):
+        """The PASTE button stamps the clipboard at the active selection's top-left (so
+        copy->paste lands in place), or at (0, 0) with no selection. In SELECT mode a
+        tap on the grid pastes at the tapped cell instead (the move/copy gesture)."""
+        if not pe.has_clip:
+            return
+        if pe.sel is not None:
+            pe.paste(pe.sel[0], pe.sel[1])
+        else:
+            pe.paste(0, 0)
 
     def _draw_tools(self):
         """Draw the compact tool row: undo/redo, the FILL toggle, and the whole-sprite
@@ -476,12 +596,17 @@ class PaintLayer:
         for i in range(len(btns)):
             tid = _TOOLS[i]
             x, y, w, h = btns[i]
-            active = tid == "fill" and pe.tool == pe.FILL
+            # The active drawing MODE is accented; so is the erase toggle when armed.
+            active = (tid in _TOOL_MODE and pe.tool == _TOOL_MODE[tid]) or (
+                tid == "erase" and pe.erase)
             enabled = True
             if tid == "undo":
                 enabled = pe.can_undo()
             elif tid == "redo":
                 enabled = pe.can_redo()
+            elif tid in ("copy", "paste"):
+                # copy needs a selection, paste needs a clip -- dim when unusable.
+                enabled = (pe.sel is not None) if tid == "copy" else pe.has_clip
             fill = NAMES["indigo"] if active else (
                 NAMES["dark_grey"] if enabled else NAMES["black"])
             ink = NAMES["white"] if enabled else NAMES["dark_grey"]
@@ -493,6 +618,37 @@ class PaintLayer:
             else:                            # missing glyph -> the letter is the fallback
                 cv.print(_TOOL_LABEL[tid],
                          x + (w - 8 * fs) // 2, y + (h - 8 * fs) // 2, ink, fs)
+
+    def _draw_grid_overlay(self, cv, lay, pe, gx0, gy0, cell):
+        """Overlay the active selection marquee and the live shape/select drag preview
+        on the zoomed grid (#90). The committed selection is a solid white box; a live
+        SELECT drag is a yellow box; a live RECT/LINE/OVAL drag stamps the shape's cells
+        in the current ink with a white outline so it reads even when ink == background.
+        Called after the grid pixels + tile boundaries; a no-selection / no-drag editor
+        draws nothing (baseline parity)."""
+        NAMES = self._NAMES
+
+        def box(x0, y0, x1, y1, c):
+            cv.rectb(gx0 + x0 * cell, gy0 + y0 * cell,
+                     (x1 - x0 + 1) * cell, (y1 - y0 + 1) * cell, c)
+
+        if pe.sel is not None:
+            box(pe.sel[0], pe.sel[1], pe.sel[2], pe.sel[3], NAMES["white"])
+        if self._shape_start is not None and self._shape_end is not None:
+            s, e = self._shape_start, self._shape_end
+            if pe.tool == pe.SELECT:
+                x0 = s[0] if s[0] < e[0] else e[0]
+                x1 = s[0] if s[0] > e[0] else e[0]
+                y0 = s[1] if s[1] < e[1] else e[1]
+                y1 = s[1] if s[1] > e[1] else e[1]
+                box(x0, y0, x1, y1, NAMES["yellow"])
+            else:
+                ink = 0 if pe.erase else pe.color
+                for (x, y) in pe.shape_points(s[0], s[1], e[0], e[1]):
+                    cv.rect(gx0 + x * cell, gy0 + y * cell, cell, cell, ink)
+                    if cell >= 6:
+                        cv.rectb(gx0 + x * cell, gy0 + y * cell, cell, cell,
+                                 NAMES["white"])
 
     # -- draw ----------------------------------------------------------------
 
@@ -558,6 +714,10 @@ class PaintLayer:
                         gx0 + t * tpx, gy0 + span - 1, NAMES["light_grey"])
                 cv.line(gx0, gy0 + t * tpx,
                         gx0 + span - 1, gy0 + t * tpx, NAMES["light_grey"])
+        # The selection marquee + the live shape/select drag preview (#90). Draws
+        # nothing in the default (no-selection, no-drag) state, so the frozen 320x240
+        # baseline stays byte-identical (the #39 parity contract).
+        self._draw_grid_overlay(cv, lay, pe, gx0, gy0, cell)
         # 16-color palette (2x8), the selected swatch outlined white.
         for idx in range(16):
             x = lay.sw_x0 + (idx % lay.sw_cols) * lay.sw

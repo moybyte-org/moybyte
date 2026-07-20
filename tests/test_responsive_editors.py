@@ -318,6 +318,14 @@ def test_paint_layout_baseline_constants(tmp_path):
     assert lay.size_btn == P._PAINT_SIZE
     assert lay.get_btn == P._PAINT_GET and lay.put_btn == P._PAINT_PUT
     assert lay.save_btn == P._PAINT_SAVE and lay.close_btn == P._PAINT_CLOSE
+    # The #90 two tool rows: one flat list (row 1 then row 2), aligned to _TOOLS, all
+    # inside the panel and clear of the pixel grid.
+    assert len(lay.tool_btns) == len(P._TOOLS)
+    assert lay.tool_btns[0][1] == P._TOOL_ROW1_Y          # row 1 first
+    assert lay.tool_btns[len(P._TOOL_ROW1)][1] == P._TOOL_ROW2_Y   # row 2 starts
+    grid_bottom = P._PG_Y0 + P._PG_SPAN
+    for (x, y, w, h) in lay.tool_btns:
+        assert y >= grid_bottom and y + h <= P._PAINT_SAVE[1]
 
 
 def test_paint_editor_grid_grows_on_large_canvas(tmp_path):

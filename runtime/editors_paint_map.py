@@ -8,6 +8,114 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editors_base import UndoStack, UndoRedoMixin
 
 
+# -- shape rasterizers (#90) -------------------------------------------------
+# Integer-only point generators for the RECT / LINE / OVAL tools: a shape is
+# defined by its two drag endpoints and rasterized to a list of (x, y) cells the
+# editor stamps in one undo step (and the layer previews live during the drag).
+# Integer-only (no float / math import) so host CPython and the frozen device
+# MicroPython produce byte-identical pixels; unclamped here (PaintEditor clips to
+# the editable region).
+
+
+def _pe_line(x0, y0, x1, y1):
+    """Bresenham line points from (x0,y0) to (x1,y1) inclusive (mirrors the layer's
+    drag-stroke _line_cells; kept in the core so shapes stay dependency-free)."""
+    pts = []
+    dx = x1 - x0 if x1 >= x0 else x0 - x1
+    dy = y1 - y0 if y1 >= y0 else y0 - y1
+    sx = 1 if x0 < x1 else -1
+    sy = 1 if y0 < y1 else -1
+    err = dx - dy
+    x, y = x0, y0
+    while True:
+        pts.append((x, y))
+        if x == x1 and y == y1:
+            break
+        e2 = err + err
+        if e2 > -dy:
+            err -= dy
+            x += sx
+        if e2 < dx:
+            err += dx
+            y += sy
+    return pts
+
+
+def _pe_rect(x0, y0, x1, y1):
+    """The HOLLOW rectangle outline spanned by corners (x0,y0)..(x1,y1) inclusive
+    (drag in any direction). Kids bucket-fill inside for a solid box -- an outline
+    keeps the tool count down (one RECT mode, no fill variant)."""
+    if x1 < x0:
+        x0, x1 = x1, x0
+    if y1 < y0:
+        y0, y1 = y1, y0
+    pts = []
+    for x in range(x0, x1 + 1):
+        pts.append((x, y0))
+        if y1 != y0:
+            pts.append((x, y1))
+    for y in range(y0 + 1, y1):
+        pts.append((x0, y))
+        if x1 != x0:
+            pts.append((x1, y))
+    return pts
+
+
+def _pe_oval(x0, y0, x1, y1):
+    """The HOLLOW ellipse inscribed in the bounding box (x0,y0)..(x1,y1) -- a circle
+    when the box is square. Integer midpoint-ellipse over an integer centre/radii
+    derived from the box (an even-sized box rounds the radius down by a pixel), so
+    it needs no float. Degenerates to a line for a zero radius."""
+    if x1 < x0:
+        x0, x1 = x1, x0
+    if y1 < y0:
+        y0, y1 = y1, y0
+    rx = (x1 - x0) // 2
+    ry = (y1 - y0) // 2
+    if rx == 0 or ry == 0:
+        return _pe_line(x0, y0, x1, y1)
+    cx = x0 + rx
+    cy = y0 + ry
+    pts = []
+
+    def plot(px, py):
+        pts.append((cx + px, cy + py))
+        pts.append((cx - px, cy + py))
+        pts.append((cx + px, cy - py))
+        pts.append((cx - px, cy - py))
+
+    rx2 = rx * rx
+    ry2 = ry * ry
+    x = 0
+    y = ry
+    px = 0
+    py = 2 * rx2 * y
+    plot(x, y)
+    p = ry2 - rx2 * ry + (rx2 + 2) // 4          # region 1 decision (~0.25*rx2)
+    while px < py:
+        x += 1
+        px += 2 * ry2
+        if p < 0:
+            p += ry2 + px
+        else:
+            y -= 1
+            py -= 2 * rx2
+            p += ry2 + px - py
+        plot(x, y)
+    p = (ry2 * (2 * x + 1) * (2 * x + 1)) // 4 + rx2 * (y - 1) * (y - 1) - rx2 * ry2
+    while y > 0:
+        y -= 1
+        py -= 2 * rx2
+        if p > 0:
+            p += rx2 - py
+        else:
+            x += 1
+            px += 2 * ry2
+            p += rx2 - py + px
+        plot(x, y)
+    return pts
+
+
 class PaintEditor(UndoRedoMixin):
     """Pixel-paint state over a SpriteSheet tile: current sprite + paint color +
     sprite size. The shell maps taps on the zoomed grid/palette to these calls.
@@ -24,6 +132,11 @@ class PaintEditor(UndoRedoMixin):
 
     PEN = "pen"           # brush tool: tap/drag paints single pixels (#30)
     FILL = "fill"         # bucket tool: a tap flood-fills the contiguous region (#90)
+    RECT = "rect"         # shape tool: drag two corners -> hollow rectangle (#90)
+    LINE = "line"         # shape tool: drag endpoints -> straight line (#90)
+    OVAL = "oval"         # shape tool: drag a bbox -> hollow ellipse/circle (#90)
+    SELECT = "select"     # region tool: drag a box -> selection; tap stamps the clip (#90)
+    TOOLS = (PEN, FILL, RECT, LINE, OVAL, SELECT)
 
     # In-editor undo depth (#90). An undo step snapshots ONLY the current editable
     # region (dim*dim palette bytes) -- 64B for an 8x8 sprite, 256B for a 16x16 icon,
@@ -36,7 +149,14 @@ class PaintEditor(UndoRedoMixin):
         self.n = 0            # current sprite id (top-left tile of the sprite)
         self.color = 8        # current paint color (red, a friendly default)
         self.size = 1         # sprite side length in tiles (1=8x8, 2=16x16, ...)
-        self.tool = self.PEN  # active tool (PEN brush / FILL bucket, #90)
+        self.tool = self.PEN  # active tool (PEN / FILL / RECT / LINE / OVAL / SELECT, #90)
+        self.erase = False    # color-erase toggle (#90): paint/fill/shapes write index 0
+        # Region select / copy / paste (#90). `sel` is the active grid-local selection
+        # rectangle (x0,y0,x1,y1 inclusive) or None; `clip` is the copied region as
+        # (w, h, bytes) or None. Both default off so a freshly-opened editor renders
+        # byte-identically to before (the #39 parity contract).
+        self.sel = None
+        self.clip = None
         # In-editor undo/redo (#90): two bounded stacks of region snapshots. Paint
         # edits are far too frequent to journal to SD per pixel (the durable journal
         # fires on a SAVE commit, project.py), so an in-RAM stroke-level ring gives
@@ -54,11 +174,16 @@ class PaintEditor(UndoRedoMixin):
     def _origin(self):
         return self.sheet.tile_origin(self.n)
 
+    def _ink(self):
+        """The palette index the current op writes: the erase toggle forces index 0
+        (the transparent/erase color), else the selected paint color (#90)."""
+        return 0 if self.erase else (self.color & 15)
+
     def paint(self, lx, ly):
         """Paint grid-local pixel (lx, ly) within the size*8 region at tile n."""
         if 0 <= lx < self.dim and 0 <= ly < self.dim:
             ox, oy = self._origin()
-            self.sheet.pset(ox + lx, oy + ly, self.color)
+            self.sheet.pset(ox + lx, oy + ly, self._ink())
 
     def pick(self, lx, ly):
         if 0 <= lx < self.dim and 0 <= ly < self.dim:
@@ -89,8 +214,21 @@ class PaintEditor(UndoRedoMixin):
     # -- tool selection (#90) ------------------------------------------------
 
     def toggle_fill(self):
-        """Flip between the PEN brush and the FILL bucket (one shared button)."""
+        """Flip between the PEN brush and the FILL bucket (legacy one-button toggle;
+        the tool row now selects modes directly via set_tool -- kept for API stability)."""
         self.tool = self.PEN if self.tool == self.FILL else self.FILL
+
+    def set_tool(self, tool):
+        """Select the active drawing tool (PEN / FILL / RECT / LINE / OVAL / SELECT).
+        Direct mode buttons on the tool row call this -- touch-first, no chords (#90)."""
+        if tool in self.TOOLS:
+            self.tool = tool
+
+    def toggle_erase(self):
+        """Flip the color-erase toggle: when on, PEN / FILL / shapes lay index 0 (the
+        transparent color) so a kid can carve holes in a sprite without hunting for the
+        color-0 swatch (#90). A display flag only in spirit -- the pixels really change."""
+        self.erase = not self.erase
 
     # -- region snapshot / restore (undo primitive, #90) ---------------------
 
@@ -196,7 +334,7 @@ class PaintEditor(UndoRedoMixin):
 
         def build(buf, dim):
             target = buf[ly * dim + lx]
-            repl = self.color & 15
+            repl = self._ink()
             if target == repl:
                 return
             stack = [ly * dim + lx]
@@ -276,6 +414,122 @@ class PaintEditor(UndoRedoMixin):
             for i in range(len(buf)):
                 buf[i] = 0
         self._record(build)
+
+    # -- shape tools (RECT / LINE / OVAL, #90) -------------------------------
+
+    def shape_points(self, x0, y0, x1, y1):
+        """The grid-local cells the active shape tool would draw between drag
+        endpoints (x0,y0)..(x1,y1), CLIPPED to the editable region. Returns [] for a
+        non-shape tool. Shared by the live drag preview (paint_layer) and stamp_shape,
+        so the preview matches the committed pixels exactly."""
+        t = self.tool
+        if t == self.LINE:
+            pts = _pe_line(x0, y0, x1, y1)
+        elif t == self.RECT:
+            pts = _pe_rect(x0, y0, x1, y1)
+        elif t == self.OVAL:
+            pts = _pe_oval(x0, y0, x1, y1)
+        else:
+            return []
+        d = self.dim
+        return [(x, y) for (x, y) in pts if 0 <= x < d and 0 <= y < d]
+
+    def stamp_shape(self, x0, y0, x1, y1):
+        """Commit the active shape (RECT / LINE / OVAL) between drag endpoints as ONE
+        undo step, in the current ink (erase toggle honored). A shape wholly off-grid
+        or that changes nothing records nothing (like the pen/fill paths)."""
+        pts = self.shape_points(x0, y0, x1, y1)
+        if not pts:
+            return
+        c = self._ink()
+
+        def build(buf, dim):
+            for (x, y) in pts:
+                buf[y * dim + x] = c
+        self._record(build)
+
+    # -- region select / copy / paste (#90) ----------------------------------
+
+    def set_selection(self, x0, y0, x1, y1):
+        """Set the active selection rectangle (grid-local, inclusive), normalized so a
+        drag in any direction works and clamped inside the editable region."""
+        d = self.dim
+        if x1 < x0:
+            x0, x1 = x1, x0
+        if y1 < y0:
+            y0, y1 = y1, y0
+        x0 = 0 if x0 < 0 else (d - 1 if x0 > d - 1 else x0)
+        y0 = 0 if y0 < 0 else (d - 1 if y0 > d - 1 else y0)
+        x1 = 0 if x1 < 0 else (d - 1 if x1 > d - 1 else x1)
+        y1 = 0 if y1 < 0 else (d - 1 if y1 > d - 1 else y1)
+        self.sel = (x0, y0, x1, y1)
+
+    def clear_selection(self):
+        """Drop the active selection (the copied clip stays available for paste)."""
+        self.sel = None
+
+    @property
+    def has_clip(self):
+        return self.clip is not None
+
+    def copy_selection(self):
+        """Copy the selected region's pixels into the clipboard as (w, h, bytes).
+        No-op (returns False) with no active selection. Read-only -- records no undo
+        step. Survives a sprite/size switch, so a kid can copy from one tile and paste
+        onto another."""
+        if self.sel is None:
+            return False
+        x0, y0, x1, y1 = self.sel
+        w = x1 - x0 + 1
+        h = y1 - y0 + 1
+        ox, oy = self._origin()
+        buf = bytearray(w * h)
+        k = 0
+        for yy in range(y0, y1 + 1):
+            for xx in range(x0, x1 + 1):
+                buf[k] = self.sheet.pget(ox + xx, oy + yy)
+                k += 1
+        self.clip = (w, h, bytes(buf))
+        return True
+
+    def paste(self, lx, ly, transparent=True):
+        """Stamp the clipboard with its top-left at grid cell (lx, ly), clipped to the
+        editable region, as ONE undo step. `transparent` (default) skips index-0 clip
+        pixels so a paste overlays the destination (the sprite-editor idiom where 0 is
+        transparent); pass False for an opaque block copy. Returns False with no clip."""
+        if self.clip is None:
+            return False
+        w, h, buf = self.clip
+
+        def build(bbuf, dim):
+            for yy in range(h):
+                ty = ly + yy
+                if ty < 0 or ty >= dim:
+                    continue
+                for xx in range(w):
+                    tx = lx + xx
+                    if tx < 0 or tx >= dim:
+                        continue
+                    v = buf[yy * w + xx]
+                    if transparent and v == 0:
+                        continue
+                    bbuf[ty * dim + tx] = v
+        self._record(build)
+        return True
+
+    def cut_selection(self):
+        """Copy the selection to the clipboard AND clear it to index 0 in one undo step
+        -- the move primitive (cut here, paste elsewhere). No-op with no selection."""
+        if not self.copy_selection():
+            return False
+        x0, y0, x1, y1 = self.sel
+
+        def build(buf, dim):
+            for yy in range(y0, y1 + 1):
+                for xx in range(x0, x1 + 1):
+                    buf[yy * dim + xx] = 0
+        self._record(build)
+        return True
 
 
 class MapEditor(UndoRedoMixin):

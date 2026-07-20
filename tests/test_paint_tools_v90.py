@@ -259,6 +259,228 @@ def _xy(pe, lx, ly):
     return (ox + lx, oy + ly)
 
 
+# -- shape tools: rectangle / line / oval (#90) ------------------------------
+
+def test_line_tool_rasterizes_bresenham():
+    pe = _pe()
+    pe.set_tool(pe.LINE)
+    pe.color = 6
+    pe.stamp_shape(0, 0, 4, 4)         # a clean diagonal
+    reg = _region(pe)
+    for i in range(5):
+        assert reg[i * 8 + i] == 6
+    assert reg[0 * 8 + 4] == 0         # off-diagonal untouched
+    assert pe.can_undo()
+
+
+def test_line_tool_horizontal_and_undo():
+    pe = _pe()
+    pe.set_tool(pe.LINE)
+    pe.color = 3
+    pe.stamp_shape(1, 2, 6, 2)
+    reg = _region(pe)
+    assert all(reg[2 * 8 + x] == 3 for x in range(1, 7))
+    pe.undo()
+    assert _region(pe) == [0] * 64
+
+
+def test_rect_tool_is_a_hollow_outline():
+    pe = _pe()
+    pe.set_tool(pe.RECT)
+    pe.color = 9
+    pe.stamp_shape(1, 1, 5, 4)         # corners inclusive
+    reg = _region(pe)
+    # top + bottom edges
+    assert all(reg[1 * 8 + x] == 9 for x in range(1, 6))
+    assert all(reg[4 * 8 + x] == 9 for x in range(1, 6))
+    # left + right edges
+    assert all(reg[y * 8 + 1] == 9 for y in range(1, 5))
+    assert all(reg[y * 8 + 5] == 9 for y in range(1, 5))
+    # interior stays empty (hollow)
+    assert reg[2 * 8 + 3] == 0
+
+
+def test_rect_tool_normalizes_reversed_drag():
+    pe = _pe()
+    pe.set_tool(pe.RECT)
+    pe.color = 4
+    pe.stamp_shape(5, 4, 1, 1)         # dragged up-left
+    reg = _region(pe)
+    assert reg[1 * 8 + 1] == 4 and reg[4 * 8 + 5] == 4
+
+
+def test_oval_tool_hits_the_four_extremes_and_stays_in_bbox():
+    pe = _pe()
+    pe.set_tool(pe.OVAL)
+    pe.color = 5
+    pe.stamp_shape(0, 0, 6, 6)         # a circle radius 3, centre (3,3)
+    reg = _region(pe)
+    for (x, y) in ((3, 0), (3, 6), (0, 3), (6, 3)):
+        assert reg[y * 8 + x] == 5     # the 4 cardinal points are on the ellipse
+    assert reg[3 * 8 + 3] == 0         # hollow centre
+    # every painted cell is inside the bounding box
+    for y in range(8):
+        for x in range(8):
+            if reg[y * 8 + x] == 5:
+                assert 0 <= x <= 6 and 0 <= y <= 6
+
+
+def test_shape_respects_erase_toggle():
+    pe = _pe()
+    # seed a filled row, then erase a line through it with the LINE tool + erase.
+    pe.color = 7
+    pe.begin_stroke()
+    for x in range(8):
+        pe.paint(x, 3)
+    pe.end_stroke()
+    pe.set_tool(pe.LINE)
+    pe.erase = True
+    pe.stamp_shape(2, 3, 5, 3)
+    reg = _region(pe)
+    assert reg[3 * 8 + 1] == 7 and reg[3 * 8 + 6] == 7   # ends of the seed row
+    assert all(reg[3 * 8 + x] == 0 for x in range(2, 6))  # carved transparent
+
+
+def test_shape_no_change_records_nothing():
+    # A shape that reproduces the existing pixels (index 0 on a blank tile) reads the
+    # region once and records no undo step -- matching the pen/fill no-op discipline.
+    pe = _pe()
+    pe.set_tool(pe.RECT)
+    pe.color = 0
+    pe.stamp_shape(0, 0, 7, 7)
+    assert not pe.can_undo()
+
+
+def test_shape_points_matches_stamp():
+    # The live preview (shape_points) and the committed pixels are the same cells.
+    pe = _pe()
+    pe.set_tool(pe.OVAL)
+    pts = set(pe.shape_points(1, 1, 6, 5))
+    pe.color = 8
+    pe.stamp_shape(1, 1, 6, 5)
+    reg = _region(pe)
+    drawn = {(i % 8, i // 8) for i in range(64) if reg[i] == 8}
+    assert drawn == pts
+
+
+# -- transparency / color-erase toggle (#90) ---------------------------------
+
+def test_erase_toggle_makes_pen_write_transparent():
+    pe = _pe()
+    pe.color = 5
+    pe.paint(0, 0)
+    assert _region(pe)[0] == 5
+    pe.toggle_erase()
+    assert pe.erase is True
+    pe.paint(0, 0)                     # same cell, now erased
+    assert _region(pe)[0] == 0
+    pe.toggle_erase()
+    assert pe.erase is False
+
+
+def test_erase_toggle_makes_fill_transparent():
+    pe = _pe()
+    pe.color = 6
+    pe.tool = pe.FILL
+    pe.fill(0, 0)                      # flood color 6
+    assert _region(pe) == [6] * 64
+    pe.toggle_erase()
+    pe.fill(0, 0)                      # flood back to 0 (transparent)
+    assert _region(pe) == [0] * 64
+
+
+# -- region select / copy / paste (#90) --------------------------------------
+
+def test_selection_normalizes_and_clamps():
+    pe = _pe()
+    pe.set_selection(6, 5, 2, 1)       # reversed drag
+    assert pe.sel == (2, 1, 6, 5)
+    pe.set_selection(-3, -3, 100, 100)  # out of range
+    assert pe.sel == (0, 0, 7, 7)      # clamped to the 8x8 region
+    pe.clear_selection()
+    assert pe.sel is None
+
+
+def test_copy_paste_round_trip_moves_a_region():
+    pe = _pe()
+    pe.color = 9
+    pe.begin_stroke()
+    pe.paint(1, 1)
+    pe.paint(2, 1)
+    pe.end_stroke()
+    pe.set_selection(1, 1, 2, 1)
+    assert pe.copy_selection() is True
+    assert pe.has_clip
+    # paste the 2x1 clip lower-right
+    assert pe.paste(4, 4) is True
+    reg = _region(pe)
+    assert reg[1 * 8 + 1] == 9 and reg[1 * 8 + 2] == 9   # source intact (copy)
+    assert reg[4 * 8 + 4] == 9 and reg[4 * 8 + 5] == 9   # clip landed at (4,4)
+
+
+def test_paste_is_transparent_by_default():
+    pe = _pe()
+    # clip = a 2x2 with a transparent (0) corner
+    pe.color = 3
+    pe.paint(0, 0)
+    pe.paint(1, 0)
+    pe.paint(0, 1)                      # (1,1) stays 0
+    pe.set_selection(0, 0, 1, 1)
+    pe.copy_selection()
+    # destination has an existing pixel where the clip's 0 would land
+    pe.color = 7
+    pe.paint(6, 6)                     # will be (1,1) of the paste at origin (5,5)
+    pe.paste(5, 5)
+    reg = _region(pe)
+    assert reg[5 * 8 + 5] == 3         # opaque clip pixel written
+    assert reg[6 * 8 + 6] == 7         # under the clip's transparent corner: preserved
+
+
+def test_paste_opaque_overwrites():
+    pe = _pe()
+    pe.color = 3
+    pe.paint(0, 0)
+    pe.set_selection(0, 0, 1, 1)       # a 2x2 clip, only (0,0) set
+    pe.copy_selection()
+    pe.color = 7
+    pe.paint(6, 6)
+    pe.paste(5, 5, transparent=False)  # opaque: the clip's 0s overwrite
+    assert _region(pe)[6 * 8 + 6] == 0
+
+
+def test_paste_clips_to_region_edge():
+    pe = _pe()
+    pe.color = 4
+    pe.paint(0, 0)
+    pe.paint(1, 0)
+    pe.set_selection(0, 0, 1, 0)
+    pe.copy_selection()
+    pe.paste(7, 7)                     # (8,7) is off-grid -> dropped, no crash
+    assert _region(pe)[7 * 8 + 7] == 4
+
+
+def test_cut_selection_moves_pixels():
+    pe = _pe()
+    pe.color = 5
+    pe.paint(2, 2)
+    pe.set_selection(2, 2, 2, 2)
+    assert pe.cut_selection() is True
+    assert _region(pe)[2 * 8 + 2] == 0   # source cleared
+    pe.paste(5, 5)
+    assert _region(pe)[5 * 8 + 5] == 5   # landed at destination
+    # cut = one undo step for the clear + one for the paste
+    pe.undo()                            # undo paste
+    assert _region(pe)[5 * 8 + 5] == 0
+    pe.undo()                            # undo cut's clear
+    assert _region(pe)[2 * 8 + 2] == 5
+
+
+def test_copy_with_no_selection_is_a_noop():
+    pe = _pe()
+    assert pe.copy_selection() is False
+    assert pe.paste(0, 0) is False       # nothing on the clipboard
+
+
 # -- tool-row UI + keyboard shortcut (through the shared console) -------------
 
 def _open_paint(ws):
@@ -413,6 +635,111 @@ def test_ctrl_z_y_keyboard_shortcut(tmp_path):
     drv.type_char(0x19)                # Ctrl+Y
     drv.frame(1 / 30)
     assert ws.sheet.pget(ox + 5, oy + 5) == 10
+
+
+def _tap_tool(drv, ws, tid):
+    tx, ty = _tool_center(ws, tid)
+    drv.touch(tx, ty)
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+
+
+def test_line_tool_button_and_grid_drag(tmp_path):
+    from runtime import console as C
+    from runtime import host_app
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_paint(ws)
+    drv = host_app.ConsoleDriver(ws)
+    ws.paint.clear()
+    ws.paint.color = 12
+
+    _tap_tool(drv, ws, "line")
+    assert ws.paint.tool == ws.paint.LINE
+
+    # Press-drag-release a horizontal line: press at (1,1), drag to (5,1), release.
+    x0, y0 = _cell_center(C, 1, 1, ws.paint.dim)
+    x1, y1 = _cell_center(C, 5, 1, ws.paint.dim)
+    drv.touch(x0, y0)
+    drv.frame(1 / 30)
+    drv.touch_drag(x1, y1)
+    drv.frame(1 / 30)
+    # mid-drag the line is only a PREVIEW -- not yet committed to the sheet.
+    ox, oy = ws.sheet.tile_origin(ws.paint.n)
+    assert ws.sheet.pget(ox + 3, oy + 1) == 0
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert all(ws.sheet.pget(ox + x, oy + 1) == 12 for x in range(1, 6))
+    assert ws.paint.can_undo()
+
+
+def test_erase_toggle_button(tmp_path):
+    from runtime import console as C
+    from runtime import host_app
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_paint(ws)
+    drv = host_app.ConsoleDriver(ws)
+    ws.paint.color = 9
+    ox, oy = ws.sheet.tile_origin(ws.paint.n)
+
+    cx, cy = _cell_center(C, 2, 2, ws.paint.dim)
+    drv.touch(cx, cy)
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert ws.sheet.pget(ox + 2, oy + 2) == 9
+
+    _tap_tool(drv, ws, "erase")
+    assert ws.paint.erase is True
+    drv.touch(cx, cy)                  # paint again -> now erases
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert ws.sheet.pget(ox + 2, oy + 2) == 0
+
+
+def test_select_copy_paste_through_the_ui(tmp_path):
+    from runtime import console as C
+    from runtime import host_app
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_paint(ws)
+    drv = host_app.ConsoleDriver(ws)
+    ws.paint.clear()
+    ws.paint.color = 7
+    ox, oy = ws.sheet.tile_origin(ws.paint.n)
+    # seed a 2x1 mark
+    ws.paint.begin_stroke()
+    ws.paint.paint(1, 1)
+    ws.paint.paint(2, 1)
+    ws.paint.end_stroke()
+
+    # SELECT tool, drag a box over (1,1)-(2,1).
+    _tap_tool(drv, ws, "select")
+    assert ws.paint.tool == ws.paint.SELECT
+    a = _cell_center(C, 1, 1, ws.paint.dim)
+    b = _cell_center(C, 2, 1, ws.paint.dim)
+    drv.touch(*a)
+    drv.frame(1 / 30)
+    drv.touch_drag(*b)
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert ws.paint.sel == (1, 1, 2, 1)
+
+    _tap_tool(drv, ws, "copy")
+    assert ws.paint.has_clip
+
+    # A tap in SELECT mode (no drag) stamps the clip at the tapped cell.
+    dest = _cell_center(C, 4, 4, ws.paint.dim)
+    drv.touch(*dest)
+    drv.frame(1 / 30)
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert ws.sheet.pget(ox + 4, oy + 4) == 7 and ws.sheet.pget(ox + 5, oy + 4) == 7
+    assert ws.sheet.pget(ox + 1, oy + 1) == 7   # source intact (copy, not cut)
 
 
 def _cell_center(C, lx, ly, dim):
