@@ -1,11 +1,13 @@
-"""Sheets app (#78): the kid spreadsheet -- workbook list, grid, formula cells,
-autosave -- plus the table()/text() interop cart verbs it feeds."""
+"""Sheets app (#78/#108): the kid spreadsheet on named files/tables/*.moysheet
+user files -- the shared FileGridView picker, per-sheet autosave, rename, trash,
+the sheets.json -> named-tables migration -- plus the table()/text() interop
+cart verbs it feeds (unchanged moy_carts decoders)."""
 
 import json
 from pathlib import Path
 
 from runtime import host_app, moy_carts, formula
-from runtime.sheets_app import SheetsAppLayer, SheetsLayout, MAX_SHEETS
+from runtime.sheets_app import SheetsAppLayer, SheetsLayout
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -57,10 +59,13 @@ def test_sheets_identity_rejects_copies_and_impostors():
 # -- open + edit + persist -------------------------------------------------------
 
 def test_new_sheet_edit_formula_and_reload(tmp_path):
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
     app = _open_sheets(ws)
-    app._tap_row(0)                          # + NEW SHEET
+    assert app.mode == "list"
+    app._new_sheet()                         # + NEW
     assert app.mode == "grid" and app.sheet is not None
+    name = app.sheet_name
     # A1 = 5, B1 = =A1*2 (Enter steps the selection down, so re-place it).
     app.cur_col, app.cur_row = 0, 0
     _type(app, ws.input, "5\n")
@@ -68,22 +73,38 @@ def test_new_sheet_edit_formula_and_reload(tmp_path):
     _type(app, ws.input, "=A1*2\n")
     assert app.sheet.value_at(0, 0) == 5
     assert app.sheet.value_at(1, 0) == 10
-    ws.frame(1 / 30)                         # a draw pass over live data
     app.flush(force=True)
-    assert moy_carts.load_sheets(str(tmp_path / "carts"))
-    # Re-open the app: the workbook comes back with the formula intact.
+    # It persisted as a named .moysheet user file (moysheet-v1).
+    blob = moy_carts.load_file("tables", name, carts)
+    assert json.loads(blob)["format"] == "moysheet-v1"
+    # Re-open it: the formula comes back intact.
     ws.go_home()
     app2 = _open_sheets(ws)
-    assert len(app2.sheets) == 1
-    app2._open_sheet(0)
+    assert name in app2.grid.names
+    app2._open_file(name)
     assert app2.sheet.value_at(1, 0) == 10
     assert app2.sheet.raw_at(1, 0) == "=A1*2"
+
+
+def test_saved_sheet_reads_back_through_the_table_verb(tmp_path):
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
+    app = _open_sheets(ws)
+    app._new_sheet()
+    app.cur_col, app.cur_row = 0, 0
+    _type(app, ws.input, "1\n")
+    app.cur_col, app.cur_row = 1, 0
+    _type(app, ws.input, "=A1+1\n")
+    app.flush(force=True)
+    # The same blob the table() cart verb consumes (#78 decode_table).
+    blob = moy_carts.load_file("tables", app.sheet_name, carts)
+    assert moy_carts.decode_table(blob) == [[1, 2]]
 
 
 def test_cell_error_values_show_in_the_grid(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     app = _open_sheets(ws)
-    app._tap_row(0)
+    app._new_sheet()
     app.cur_col, app.cur_row = 0, 0
     _type(app, ws.input, "=B1\n")
     app.cur_col, app.cur_row = 1, 0
@@ -96,7 +117,7 @@ def test_cell_error_values_show_in_the_grid(tmp_path):
 def test_backspace_clears_a_cell(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     app = _open_sheets(ws)
-    app._tap_row(0)
+    app._new_sheet()
     app.cur_col, app.cur_row = 0, 0
     _type(app, ws.input, "42\n")
     app.cur_col, app.cur_row = 0, 0
@@ -107,30 +128,86 @@ def test_backspace_clears_a_cell(tmp_path):
     assert app.sheet.value_at(0, 0) == ""
 
 
-def test_delete_sheet_and_workbook_cap(tmp_path):
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
+def test_delete_sheet_moves_to_trash(tmp_path):
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
     app = _open_sheets(ws)
-    app._tap_row(0)
-    app._delete_active()
-    assert app.mode == "list" and len(app.sheets) == 0
-    # Fill the workbook to the cap; the next NEW is refused.
-    app.sheets = [formula.Sheet("S" + str(i)) for i in range(MAX_SHEETS)]
     app._new_sheet()
-    assert len(app.sheets) == MAX_SHEETS
-    assert app.status == "WORKBOOK FULL"
+    name = app.sheet_name
+    assert name in moy_carts.list_files("tables", carts)
+    app._delete_current()
+    assert app.mode == "list"
+    assert name not in moy_carts.list_files("tables", carts)
+    assert ("tables", name) in moy_carts.trash_list(carts)
 
 
-def test_bar_x_exit_saves_the_workbook(tmp_path):
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
+def test_rename_moves_the_file(tmp_path):
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
     app = _open_sheets(ws)
-    app._tap_row(0)
+    app._new_sheet()
+    old = app.sheet_name
+    app._begin_rename()
+    app.rename_text = "budget"
+    app._typed_name(type("K", (), {"last_key": 0x0D})())
+    assert app.sheet_name == "budget"
+    assert "budget" in moy_carts.list_files("tables", carts)
+    assert old not in moy_carts.list_files("tables", carts)
+
+
+def test_bar_x_exit_saves_the_open_sheet(tmp_path):
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
+    app = _open_sheets(ws)
+    app._new_sheet()
+    name = app.sheet_name
     app.cur_col, app.cur_row = 0, 0
     _type(app, ws.input, "99")               # an OPEN, uncommitted edit
     xb = ws.layout.context_x_btn
     app.handle_pointer(xb[0] + 2, xb[1] + 2, True)
     assert ws.wm.top_kind() == "launcher"
-    data = json.loads(moy_carts.load_sheets(str(tmp_path / "carts")))
-    assert data["sheets"][0]["cells"]["A1"]["v"] == 99
+    data = json.loads(moy_carts.load_file("tables", name, carts))
+    assert data["cells"]["A1"]["v"] == 99
+
+
+def test_migration_turns_sheets_json_into_named_tables(tmp_path):
+    carts = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(carts)
+    s1 = formula.Sheet("Alpha", 6, 6)
+    s1.set_cell(0, 0, "7")
+    s2 = formula.Sheet("Beta", 6, 6)
+    s2.set_cell(0, 0, "hi")
+    moy_carts.save_sheets(json.dumps({"format": "moysheets-v1",
+                                      "sheets": [s1.to_dict(), s2.to_dict()]}), carts)
+    ws = host_app.build_workstation(carts)
+    app = _open_sheets(ws)
+    names = moy_carts.list_files("tables", carts)
+    assert len(names) == 2
+    assert set(app.grid.names) == set(names)
+    # Each migrated file is a valid moysheet the table() verb can read.
+    got = {tuple(tuple(r) for r in moy_carts.decode_table(
+        moy_carts.load_file("tables", n, carts))) for n in names}
+    assert ((7,),) in got and (("hi",),) in got
+
+
+def test_files_app_open_routes_a_table_to_sheets(tmp_path):
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
+    s = formula.Sheet("nums", 4, 4)
+    s.set_cell(0, 0, "3")
+    moy_carts.save_file("tables", "nums", json.dumps(s.to_dict()), carts)
+    files = ws.files_app
+    for i, cart in enumerate(ws.launcher.items):
+        if cart.get("title") == "Files":
+            ws.launcher.sel = i
+            break
+    ws.open()
+    ws.frame(1 / 30)
+    files._enter_kind("tables")
+    files._act("OPEN", "nums")
+    assert ws.wm.top_kind() == "sheets"
+    assert ws.sheets_app.sheet_name == "nums"
+    assert ws.sheets_app.sheet.value_at(0, 0) == 3
 
 
 def test_layout_reflows():
@@ -140,7 +217,7 @@ def test_layout_reflows():
     assert SheetsLayout(480, 300, 1, windowed=True).bar_h == 0
 
 
-# -- interop: the decode helpers -------------------------------------------------
+# -- interop: the decode helpers (unchanged moy_carts) ---------------------------
 
 def test_decode_table_trims_to_populated_extent():
     s = formula.Sheet("wave", 8, 8)
@@ -163,8 +240,6 @@ def test_decoders_degrade_on_garbage():
         assert moy_carts.decode_text(bad) == []
 
 
-# -- interop: a headless cart reading table()/text() -----------------------------
-
 def test_cart_reads_table_and_text_at_runtime(tmp_path):
     carts = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts)
@@ -185,7 +260,6 @@ def test_cart_reads_table_and_text_at_runtime(tmp_path):
     moy_carts.save_text(cart, "dialog",
                         json.dumps({"format": "moytext-v1",
                                     "body": "Hello\nAdventurer"}))
-    # Re-scan so load() picks up the freshly attached tables/ + docs/ assets.
     ws._apply_items(ws.carts_store.scan(carts))
     for i, c in enumerate(ws.launcher.items):
         if c.get("title") == "Reader":
@@ -197,12 +271,11 @@ def test_cart_reads_table_and_text_at_runtime(tmp_path):
     assert ws.cart_error is None
     assert ws.ns["ROWS"] == [[1, 2], ["hi", ""]]
     assert ws.ns["LINES"] == ["Hello", "Adventurer"]
-    assert ws.ns["MISS_T"] == []       # missing name -> empty, never a crash
+    assert ws.ns["MISS_T"] == []
     assert ws.ns["MISS_X"] == []
 
 
 def test_cart_folder_loaders_return_empty_without_assets(tmp_path):
-    # A plain cart folder (no tables/ or docs/) loads to {} -- the common case.
     d = tmp_path / "plain.moy"
     d.mkdir()
     (d / "manifest.json").write_text('{"title": "Plain", "main": "main.py"}')

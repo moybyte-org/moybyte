@@ -101,17 +101,20 @@ def test_reuse_actions_are_copies(tmp_path):
     app._enter_kind("drawings")
     app.grid.select("dragon")
 
-    # WALL: copy-on-set -- the wallpaper copy + My Art bg hold the pixels.
+    # WALL: copy-on-set -- the wallpaper copy + My Art bg hold the pixels
+    # (plus a #108 phase-2 provenance stamp, so compare decoded pixels).
     app._act("WALL", "dragon")
     assert ws.wallpaper_id == "my_art"
-    blob = moy_carts.load_file("drawings", "dragon", carts)
-    assert moy_carts.load_artwork(carts) == blob
+    px = moy_carts.decode_moyimg(moy_carts.load_file("drawings", "dragon", carts))
+    assert moy_carts.decode_moyimg(moy_carts.load_artwork(carts)) == px
     wall = next(c for c in moy_carts.scan(carts) if c["title"] == "My Art")
-    assert wall["images"]["bg"] == blob
+    assert moy_carts.decode_moyimg(wall["images"]["bg"]) == px
+    assert moy_carts.read_provenance(moy_carts.load_artwork(carts))[0] == \
+        "drawings/dragon"
 
     # Editing the drawing afterwards changes NOTHING until sent again.
     _seed_drawing(carts, "dragon", color=33)
-    assert moy_carts.load_artwork(carts) == blob
+    assert moy_carts.decode_moyimg(moy_carts.load_artwork(carts)) == px
 
     # GAME: a 320x240 copy lands in the picked project.
     app.grid.select("dragon")
@@ -219,3 +222,80 @@ def test_files_is_app_rejects_lookalikes(tmp_path):
     fake2 = dict(real)
     fake2["permissions"] = ["graphics", "input"]
     assert not ws.files_app.is_app(fake2)
+
+
+# -- provenance: "used in:" + the one-tap UPDATE (#108 phase 2) -------------------
+
+def test_usage_tracks_stale_copies_and_update_clears_them(tmp_path):
+    carts = str(tmp_path / "carts")
+    ws = _ws(tmp_path)
+    _seed_drawing(carts, "dragon", color=20)
+    # Copy it into a project (with a provenance stamp) + set as wallpaper.
+    ti = ws.artwork.targets().index("Star Catcher")
+    assert ws.artwork.attach(ti, "dragon")
+    assert ws.artwork.set_wallpaper("dragon")
+
+    rows = ws.artwork.usage("dragon")
+    labels = {r["label"] for r in rows}
+    assert "Star Catcher" in labels and "WALLPAPER" in labels
+    assert all(not r["stale"] for r in rows)          # fresh copies
+
+    # Edit the source drawing: every copy is now stale (pull-based detection).
+    _seed_drawing(carts, "dragon", color=33)
+    rows = ws.artwork.usage("dragon")
+    assert all(r["stale"] for r in rows)
+
+    # UPDATE (send again) the project copy -> only it clears.
+    game_row = next(r for r in rows if r["label"] == "Star Catcher")
+    assert ws.artwork.resend(game_row, "dragon")
+    rows = {r["label"]: r["stale"] for r in ws.artwork.usage("dragon")}
+    assert rows["Star Catcher"] is False
+    assert rows["WALLPAPER"] is True                   # not re-sent yet
+
+
+def test_files_app_use_action_lists_and_resends(tmp_path):
+    carts = str(tmp_path / "carts")
+    ws = _ws(tmp_path)
+    _seed_drawing(carts, "dragon", color=20)
+    ti = ws.artwork.targets().index("Star Catcher")
+    ws.artwork.attach(ti, "dragon")
+    app = ws.files_app
+    _open_app(ws, "Files")
+    app._enter_kind("drawings")
+    app.grid.select("dragon")
+    app._act("USE", "dragon")
+    assert app.mode == "used"
+    assert any(r["label"] == "Star Catcher" for r in app.used_rows)
+    # Make it stale, then tap the row -> re-sends (UPDATE).
+    _seed_drawing(carts, "dragon", color=33)
+    app._act("USE", "dragon")
+    idx = next(i for i, r in enumerate(app.used_rows)
+               if r["label"] == "Star Catcher")
+    assert app.used_rows[idx]["stale"] is True
+    app._resend(idx)
+    assert app.used_rows[idx]["stale"] is False
+
+
+def test_docs_and_tables_kinds_get_the_open_action(tmp_path):
+    import json
+    carts = str(tmp_path / "carts")
+    ws = _ws(tmp_path)
+    moy_carts.save_file("docs", "note",
+                        json.dumps({"format": "moytext-v1", "body": "hi"}), carts)
+    app = ws.files_app
+    _open_app(ws, "Files")
+    app._enter_kind("docs")
+    assert "OPEN" in app._action_labels()
+
+
+def test_send_sprites_to_files_producer(tmp_path):
+    carts = str(tmp_path / "carts")
+    ws = _ws(tmp_path)
+    # Open a project so ws.project.sheet is a real sprite sheet.
+    cart = ws.carts_store.create("Doodle", carts, type="game")
+    ws._apply_items(ws.carts_store.scan(carts))
+    ws.open_in_editor(next(c for c in ws._all_carts if c.get("title") == "Doodle"))
+    ws.project.sheet.pset(0, 0, 9)
+    name = ws.send_sprites_to_files()
+    assert name in moy_carts.list_files("sprites", carts)
+    assert moy_carts.load_file("sprites", name, carts) == ws.project.sheet.to_hex()

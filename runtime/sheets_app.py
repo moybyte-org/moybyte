@@ -1,6 +1,6 @@
 """Sheets -- the kid spreadsheet system app (#78, the Desk Lab trio's third tile).
 
-Presented like Writer/Storybook/Calc: a `.moy` cartridge identity on the launcher
+Presented like Writer/Paint: a `.moy` cartridge identity on the launcher
 (`sheets.moy`, so it seeds/versions/exports like every cart) backed by a
 responsive SYSTEM process the console spawns instead of the Player -- a grid app
 must reflow to a P4/web window, while Player is the fixed 320x240 contract.
@@ -12,11 +12,13 @@ eval/exec) and reuse the block-operator vocabulary (#48: mod/round/abs/min/max) 
 Sheets and Blocks teach the same words. A reference cycle shows `#LOOP`, a bad
 formula `#ERR` -- never a crash.
 
-The whole workbook persists as ONE crash-safe `sheets.json` beside Writer's
-notes.json (moy_carts owns the path + atomic write), and the app AUTOSAVES on
-every view change and cell commit -- a kid never presses save. A sheet's computed
-values reach a GAME through the `table(name)` cart verb: attach it into a cart
-folder as `tables/<name>.moysheet` and read it back as rows of numbers."""
+Each sheet is a USER FILE (#108): a named `files/tables/*.moysheet` item in the
+store, auto-named (`table_1`, ...), browsed through the SHARED `FileGridView`
+picker (the exact widget Paint's OPEN mode + the Files app use) and AUTOSAVED on
+every cell commit + view change. The legacy single-file `sheets.json` workbook
+is migrated once (`moy_carts.migrate_tables`) into one file per sheet. A sheet's
+`moysheet-v1` blob is exactly what `table(name)` reads (#78), so copying it into
+a cart works unchanged."""
 
 try:
     import ui as _ui
@@ -31,15 +33,20 @@ except ImportError:  # pragma: no cover - direct host import
     from runtime.formula import Sheet, index_to_col, ERR, LOOP
 
 try:
+    from file_widgets import FileGridView
+except ImportError:  # pragma: no cover - direct host import
+    from runtime.file_widgets import FileGridView
+
+try:
     from app_shell import ListShellLayout, ListShellApp
 except ImportError:  # pragma: no cover - direct host import
     from runtime.app_shell import ListShellLayout, ListShellApp
 
 
-MAX_SHEETS = 12          # a kid workbook, not a database; the list stays tappable
 DEFAULT_COLS = 8
 DEFAULT_ROWS = 20
 CELL_MAX = 48            # chars of raw formula/text per cell
+MAX_NAME = 24            # rename entry cap
 _ERRORS = (ERR, LOOP)
 
 
@@ -71,9 +78,14 @@ class SheetsLayout(ListShellLayout):
         x = 6 * fs
         y = self.bar_h + 3 * fs
         bh = self.toolbar_h - 6 * fs
-        self.back_btn = (x, y, 58 * fs, bh)          # SHEETS (list) button
-        self.del_btn = (x + 62 * fs, y, 62 * fs, bh)  # CLEAR cell
-        self.status_x = x + 130 * fs
+        # Grid-view toolbar: SHEETS (back), CLEAR (cell), RENAME, TRASH.
+        self.back_btn = (x, y, 50 * fs, bh)
+        self.clr_btn = (x + 54 * fs, y, 46 * fs, bh)
+        self.name_btn = (x + 104 * fs, y, 52 * fs, bh)
+        self.del_btn = (x + 160 * fs, y, 46 * fs, bh)
+        # List-view: + NEW.
+        self.new_btn = (x, y, 62 * fs, bh)
+        self.status_x = x + 210 * fs
         self.status_y = y + max(0, (bh - 8 * fs) // 2)
         # Formula entry row: the raw text of the selected cell, edited in place.
         self.entry_h = 14 * fs
@@ -89,8 +101,10 @@ class SheetsLayout(ListShellLayout):
         self.cell_h = 12 * fs
         self.vis_cols = max(1, min(self.cols, avail_w // self.cell_w))
         self.vis_rows = max(1, (self.h - self.gy - 2 * fs) // self.cell_h)
-        # The notebook (list view): one row per sheet below the title band
-        # (geometry + row_rect: ListShellLayout).
+        # The picker (list view): the shared thumbnail grid fills the body.
+        gy_body = self.bar_h + self.toolbar_h + 2 * fs
+        self.body = (4 * fs, gy_body, self.w - 8 * fs,
+                     max(40, self.h - gy_body - 4 * fs))
         self._init_list(self.bar_h + self.toolbar_h)
 
     def cell_rect(self, ci, ri, left, top):
@@ -101,7 +115,8 @@ class SheetsLayout(ListShellLayout):
 
 
 class SheetsAppLayer(ListShellApp):
-    """Workbook list -> one sheet's grid, over the formula.Sheet model."""
+    """A sheet picker (shared FileGridView) -> one sheet's grid, over the
+    formula.Sheet model on named files/tables/*.moysheet user files (#108)."""
 
     id = "sheets"
     domain = "system"
@@ -117,12 +132,10 @@ class SheetsAppLayer(ListShellApp):
         self._in = in_rect
         self.layout = SheetsLayout(ws.sys_canvas.w, ws.sys_canvas.h,
                                    ws._effective_font_scale(), ws.windowed_chrome)
-        self.mode = "list"            # list | grid
-        self.sheets = []              # [formula.Sheet, ...]
-        self.active = -1              # index of the open sheet
+        self.mode = "list"            # list | grid | rename
+        self.grid = FileGridView(ws, "tables")
         self.sheet = None             # the open formula.Sheet
-        self.sel = 0                  # list selection (0 = the NEW row)
-        self.top = 0                  # first visible list row
+        self.sheet_name = None        # its files/tables/<name> file name
         self.cur_col = 0              # grid selection
         self.cur_row = 0
         self.left = 0                 # grid scroll origin
@@ -130,36 +143,41 @@ class SheetsAppLayer(ListShellApp):
         self.editing = False          # the formula entry is open for typing
         self.edit_buf = ""            # the raw text being typed
         self.status = "MY SHEETS"
-        self.del_armed = False        # two-tap DELETE (sheet) confirm
         self._ekey_prev = 0
-        self._loaded = False
+        self._unsaved = False         # a change since the last flush
+        self.rename_text = ""
+        self._pending_open = None     # a name to open on the next open() (Files jump)
         self._save_failed = False
 
     # -- store ---------------------------------------------------------------
-    # (is_app / _store_ready / _load_blob / _persist: ListShellApp)
+    # (is_app / _store_ready / _load_blob / _persist / _edge_key: ListShellApp)
 
-    def _load(self):
-        self.sheets = []
-        data = self._load_blob(
-            lambda: self.ws.carts_store.load_sheets(self.ws.carts_root))
-        if isinstance(data, dict):
-            for entry in (data.get("sheets") or [])[:MAX_SHEETS]:
-                if isinstance(entry, dict):
-                    self.sheets.append(Sheet.from_dict(entry))
-        self._loaded = True
+    def open_named(self, name):
+        """Point Sheets at a named sheet to open on its next open() -- the Files
+        app's OPEN verb (tables open in Sheets)."""
+        self._pending_open = name
 
     def flush(self, force=False):
-        """Persist the whole workbook. Cheap to call, and the app calls it on every
-        commit + view change so a kid never loses data (Writer's autosave verb)."""
+        """Persist the open sheet to its files/tables/<name>.moysheet file. The
+        autosave verb: commits any open edit, then writes when something changed
+        (or force). Cheap to call, no-ops on an unchanged sheet."""
         self._commit_edit()
+        if self.sheet is None or self.sheet_name is None:
+            return True
+        if not (self._unsaved or force):
+            return True
         if not self._store_ready():
             self._save_failed = True
             self.status = "CAN'T SAVE HERE"
             return False
-        blob = json.dumps({"format": "moysheets-v1",
-                           "sheets": [s.to_dict() for s in self.sheets]})
-        return self._persist(lambda: self.ws.carts_store.save_sheets(
-            blob, self.ws.carts_root))
+        name = self.sheet_name
+        blob = json.dumps(self.sheet.to_dict())
+        ok = self._persist(lambda: self.ws.carts_store.save_file(
+            "tables", name, blob, self.ws.carts_root))
+        if ok:
+            self._unsaved = False
+            self.grid.invalidate(name)
+        return ok
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -169,27 +187,33 @@ class SheetsAppLayer(ListShellApp):
         self._scroll_grid()
 
     def open(self):
-        self._load()
-        self.mode = "list"
-        self.active = -1
-        self.sheet = None
-        self.sel = 0
-        self.top = 0
+        if self._store_ready():
+            try:
+                self.ws._with_sd(
+                    lambda: self.ws.carts_store.migrate_tables(self.ws.carts_root))
+            except Exception:  # noqa: BLE001 -- migration is best-effort
+                pass
+        self.grid.refresh()
+        pending = self._pending_open
+        self._pending_open = None
+        if pending and pending in self.grid.names:
+            self._open_file(pending)
+        else:
+            self.mode = "list"
+            self.sheet = None
+            self.sheet_name = None
+            self.status = "MY SHEETS"
         self.editing = False
         self.edit_buf = ""
-        self.del_armed = False
         self._ekey_prev = 0
-        self.status = "MY SHEETS"
         self.ws._dirty = True
 
     # -- sheet verbs ---------------------------------------------------------
 
-    def _open_sheet(self, index):
-        if not (0 <= index < len(self.sheets)):
-            return
+    def _enter_grid(self, sheet, name):
         self.flush()
-        self.active = index
-        self.sheet = self.sheets[index]
+        self.sheet = sheet
+        self.sheet_name = name
         self.mode = "grid"
         self.cur_col = 0
         self.cur_row = 0
@@ -197,44 +221,97 @@ class SheetsAppLayer(ListShellApp):
         self.gtop = 0
         self.editing = False
         self.edit_buf = ""
-        self.del_armed = False
         self._ekey_prev = 0
         self.layout = SheetsLayout(self.layout.w, self.layout.h, self.layout.fs,
-                                   self.ws.windowed_chrome, self.sheet.cols)
-        self.status = self.sheet.name
+                                   self.ws.windowed_chrome, sheet.cols)
+        self.status = name.upper()
         self.ws._dirty = True
 
+    def _open_file(self, name):
+        blob = None
+        if self._store_ready():
+            try:
+                blob = self.ws._with_sd(lambda: self.ws.carts_store.load_file(
+                    "tables", name, self.ws.carts_root))
+            except Exception:  # noqa: BLE001
+                blob = None
+        data = None
+        if blob:
+            try:
+                data = json.loads(blob)
+            except (ValueError, TypeError):
+                data = None
+        sheet = Sheet.from_dict(data) if isinstance(data, dict) else Sheet()
+        self._enter_grid(sheet, name)
+
     def _new_sheet(self):
-        if len(self.sheets) >= MAX_SHEETS:
-            self.status = "WORKBOOK FULL"
-            self.ws._dirty = True
-            return
-        self.sheets.append(Sheet("Sheet " + str(len(self.sheets) + 1),
-                                 DEFAULT_ROWS, DEFAULT_COLS))
-        self._open_sheet(len(self.sheets) - 1)
+        self.flush()
+        name = None
+        if self._store_ready():
+            try:
+                name = self.ws._with_sd(lambda: self.ws.carts_store.new_file_name(
+                    "tables", self.ws.carts_root))
+            except Exception:  # noqa: BLE001
+                name = None
+        name = name or "table_1"
+        sheet = Sheet(name, DEFAULT_ROWS, DEFAULT_COLS)
+        self._enter_grid(sheet, name)
+        self._unsaved = True            # a new sheet writes its first file eagerly
+        self.flush()
 
     def _back_to_list(self):
         self.flush(force=True)
-        self.sel = self.active + 1 if self.active >= 0 else 0
+        keep = self.sheet_name
         self.mode = "list"
         self.sheet = None
-        self.active = -1
+        self.sheet_name = None
         self.editing = False
-        self.del_armed = False
+        self.grid.refresh()
+        self.grid.select(keep)
         self.status = "MY SHEETS"
         self.ws._dirty = True
 
-    def _delete_active(self):
-        if not (0 <= self.active < len(self.sheets)):
+    def _delete_current(self):
+        if self.sheet_name is None:
             return
-        del self.sheets[self.active]
+        name = self.sheet_name
+        if self._persist(lambda: self.ws.carts_store.delete_file(
+                "tables", name, self.ws.carts_root)):
+            self.grid.invalidate(name)
+            self.status = "IN TRASH"
         self.sheet = None
-        self.active = -1
+        self.sheet_name = None
+        self._unsaved = False
         self.mode = "list"
-        self.sel = 0
-        self.del_armed = False
-        self.status = "SHEET REMOVED"
-        self.flush(force=True)
+        self.grid.refresh()
+        self.grid.select(None)
+        self.ws._dirty = True
+
+    def _begin_rename(self):
+        if self.sheet_name is None:
+            return
+        self.rename_text = self.sheet_name[:MAX_NAME]
+        self._ekey_prev = 0
+        self.mode = "rename"
+        self.status = "TYPE A NAME"
+        self.ws._dirty = True
+
+    def _rename_commit(self):
+        name = self.sheet_name
+        text = self.rename_text
+        new = [name]
+
+        def _do():
+            new[0] = self.ws.carts_store.rename_file(
+                "tables", name, text, self.ws.carts_root)
+
+        if name and self._persist(_do):
+            self.grid.invalidate(name)
+            self.sheet_name = new[0]
+            if self.sheet is not None:
+                self.sheet.name = new[0]
+            self.status = new[0].upper()
+        self.mode = "grid"
         self.ws._dirty = True
 
     # -- cell editing --------------------------------------------------------
@@ -252,7 +329,10 @@ class SheetsAppLayer(ListShellApp):
     def _commit_edit(self):
         if not self.editing or self.sheet is None:
             return
+        before = self._cur_raw()
         self.sheet.set_cell(self.cur_col, self.cur_row, self.edit_buf)
+        if self.edit_buf != before:
+            self._unsaved = True
         self.editing = False
         self.edit_buf = ""
 
@@ -263,7 +343,6 @@ class SheetsAppLayer(ListShellApp):
             return
         self.cur_col = max(0, min(self.sheet.cols - 1, self.cur_col + dc))
         self.cur_row = max(0, min(self.sheet.rows - 1, self.cur_row + dr))
-        self.del_armed = False
         self._scroll_grid()
         self.status = index_to_col(self.cur_col) + str(self.cur_row + 1)
         self.ws._dirty = True
@@ -284,6 +363,8 @@ class SheetsAppLayer(ListShellApp):
             return
         self.editing = False
         self.edit_buf = ""
+        if self._cur_raw() != "":
+            self._unsaved = True
         self.sheet.set_cell(self.cur_col, self.cur_row, "")
         self.status = index_to_col(self.cur_col) + str(self.cur_row + 1)
         self.ws._dirty = True
@@ -292,8 +373,15 @@ class SheetsAppLayer(ListShellApp):
 
     def handle_input(self, inp):
         if self.mode == "list":
-            # the NEW row + sheets (nav + scroll window: ListShellApp)
-            return self._list_nav(inp, len(self.sheets) + 1)
+            hit = self.grid.nav(inp)
+            if hit and hit[0] == "pick":
+                self._open_file(hit[1])
+            elif hit:
+                self.status = hit[1].upper()
+            return True
+        if self.mode == "rename":
+            self._typed_name(inp)
+            return True
         # -- grid: trackball arrows move the selection, keys type into a cell ----
         if inp.pressed("left"):
             self._move(-1, 0)
@@ -336,6 +424,18 @@ class SheetsAppLayer(ListShellApp):
                     self.edit_buf = chr(k)
         self._ekey_prev = k
 
+    def _typed_name(self, inp):
+        k = self._edge_key(inp)
+        if not k:
+            return
+        if k in (0x0D, 0x0A):
+            self._rename_commit()
+        elif k in (0x08, 0x7F):
+            self.rename_text = self.rename_text[:-1]
+        elif 0x20 <= k < 0x7F and len(self.rename_text) < MAX_NAME:
+            self.rename_text += chr(k)
+        self.ws._dirty = True
+
     def handle_pointer(self, px, py, click):
         ws = self.ws
         lay = self.layout
@@ -345,12 +445,16 @@ class SheetsAppLayer(ListShellApp):
         if self.mode == "list":
             if not click:
                 return True
-            for i in range(self.top, min(self.top + lay.list_rows,
-                                         len(self.sheets) + 1)):
-                if self._in(px, py, lay.row_rect(i - self.top)):
-                    self.sel = i
-                    self._tap_row(i)
-                    return True
+            if self._in(px, py, lay.new_btn):
+                self._new_sheet()
+                return True
+            hit = self.grid.tap(px, py)
+            if hit and hit[0] in ("pick", "sel"):
+                self._open_file(hit[1])
+            return True
+        if self.mode == "rename":
+            if click and self._in(px, py, lay.del_btn):
+                self._rename_commit()
             return True
         # -- grid view -----------------------------------------------------------
         if not click:
@@ -358,8 +462,14 @@ class SheetsAppLayer(ListShellApp):
         if self._in(px, py, lay.back_btn):
             self._back_to_list()
             return True
-        if self._in(px, py, lay.del_btn):
+        if self._in(px, py, lay.clr_btn):
             self._clear_cell()
+            return True
+        if self._in(px, py, lay.name_btn):
+            self._begin_rename()
+            return True
+        if self._in(px, py, lay.del_btn):
+            self._delete_current()
             return True
         # A tap inside the grid selects that cell (and commits any open edit).
         if self.sheet is not None:
@@ -372,17 +482,10 @@ class SheetsAppLayer(ListShellApp):
                             self._commit_edit()
                         self.cur_col = ci
                         self.cur_row = ri
-                        self.del_armed = False
                         self.status = index_to_col(ci) + str(ri + 1)
                         self.ws._dirty = True
                         return True
         return True
-
-    def _tap_row(self, i):
-        if i == 0:
-            self._new_sheet()
-        else:
-            self._open_sheet(i - 1)
 
     # -- draw ----------------------------------------------------------------
 
@@ -397,35 +500,34 @@ class SheetsAppLayer(ListShellApp):
         _ui.toolbar(cv, th, (0, lay.bar_h, lay.w, lay.toolbar_h))
         if self.mode == "grid":
             self._button(cv, "SHEETS", lay.back_btn)
-            self._button(cv, "CLEAR", lay.del_btn)
+            self._button(cv, "CLEAR", lay.clr_btn)
+            self._button(cv, "RENAME", lay.name_btn)
+            self._button(cv, "TRASH", lay.del_btn)
             label = self.status[:max(1, (lay.w - lay.status_x) // (8 * lay.fs) - 1)]
             cv.print(label, lay.status_x, lay.bar_h + 8 * lay.fs, th["title_ink"], 1)
             self._draw_grid(cv)
+        elif self.mode == "rename":
+            self._button(cv, "OK", lay.del_btn, hot=True)
+            self._draw_rename(cv)
         else:
+            self._button(cv, "+ NEW", lay.new_btn)
             cv.print(self.status[:max(1, lay.w // (8 * lay.fs) - 2)],
-                     6 * lay.fs, lay.bar_h + 8 * lay.fs, th["title_ink"], 1)
-            self._draw_list(cv)
+                     lay.new_btn[0] + lay.new_btn[2] + 8 * lay.fs,
+                     lay.bar_h + 8 * lay.fs, th["title_ink"], 1)
+            self.grid.set_rect(lay.body, lay.fs)
+            self.grid.draw(cv, th)
         if not self.ws.windowed_chrome:
             self.ws.bar_layer._draw_status_strip("tool")
 
-    def _draw_list(self, cv):
+    def _draw_rename(self, cv):
         lay = self.layout
         th = self.ws.theme_colors
         fs = lay.fs
-        for i in range(self.top, min(self.top + lay.list_rows,
-                                     len(self.sheets) + 1)):
-            x, y, w, h = lay.row_rect(i - self.top)
-            selected = i == self.sel
-            if i == 0:
-                cv.rect(x, y, w, h, th["accent"] if selected else th["hilite"])
-                cv.print("+ NEW SHEET", x + 6 * fs,
-                         y + (h - 8 * fs) // 2, self.names["black"], 1)
-            else:
-                sheet = self.sheets[i - 1]
-                cv.rect(x, y, w, h, 7)
-                cv.print(sheet.name[:max(1, w // (8 * fs) - 2)],
-                         x + 6 * fs, y + (h - 8 * fs) // 2, 0, 1)
-            cv.rectb(x, y, w, h, th["accent"] if selected else th["dim"])
+        ex, ey, ew, eh = lay.entry
+        cv.rect(ex, ey, ew, eh, self.names["white"])
+        cv.rectb(ex, ey, ew, eh, th.get("accent", 10))
+        cv.print(self.rename_text + "_", ex + 4 * fs, ey + (eh - 8 * fs) // 2,
+                 self.names["black"], 1)
 
     def _draw_grid(self, cv):
         lay = self.layout

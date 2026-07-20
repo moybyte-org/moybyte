@@ -72,6 +72,10 @@ _PAINT_CLOSE = (200, 190, 102, 26)
 # PUT saves it TO the shared sheet. Hidden in the theme (icon) editor.
 _PAINT_GET = (210, 130, 92, 20)
 _PAINT_PUT = (210, 154, 92, 20)
+# "Send to Files" (#108): export the whole sprite sheet to files/sprites/ as a
+# named user file. Tucked into the free strip left of the sprite preview (base
+# layout is packed). Hidden in the theme editor, like GET/PUT.
+_PAINT_FILES = (206, 98, 34, 18)
 
 _BASE_W = 320
 _BASE_H = 240
@@ -150,6 +154,7 @@ class PaintLayout:
             self.prev_box = 32
             self.get_btn = _PAINT_GET
             self.put_btn = _PAINT_PUT
+            self.files_btn = _PAINT_FILES
             self.save_btn = _PAINT_SAVE
             self.close_btn = _PAINT_CLOSE
             self.status_xy = (110, 196)
@@ -191,6 +196,7 @@ class PaintLayout:
         self.prev_box = 32 * fs
         self.get_btn = (rc_x + 40 * fs, self.pg_y0 + 98 * fs, 92 * fs, 20 * fs)
         self.put_btn = (rc_x + 40 * fs, self.pg_y0 + 122 * fs, 92 * fs, 20 * fs)
+        self.files_btn = (rc_x + 40 * fs, self.pg_y0 + 146 * fs, 92 * fs, 20 * fs)
         self.save_btn = (self.pg_x0, row_y, 88 * fs, 26 * fs)
         self.close_btn = (p_right - 112 * fs, row_y, 102 * fs, 26 * fs)
         self.status_xy = (self.pg_x0 + 96 * fs, row_y + 6 * fs)
@@ -406,6 +412,9 @@ class PaintLayer:
             ws.share_tile_get()              # import the tile from the shared sheet
         elif self._in(px, py, lay.put_btn) and not ws._editing_icons:
             ws.share_tile_put()              # save the tile to the shared sheet
+        elif (getattr(lay, "files_btn", None) is not None
+              and self._in(px, py, lay.files_btn) and not ws._editing_icons):
+            ws.send_sprites_to_files()       # export the sheet to files/sprites/ (#108)
         elif self._in(px, py, lay.save_btn):
             # SAVE persists the SYSTEM icon theme (EDIT ICONS) or the cart's sprites.
             ws.save_icons() if ws._editing_icons else ws.save_sprites()
@@ -584,6 +593,9 @@ class PaintLayer:
         if not ws._editing_icons:
             ws._icon_btn("get", "GET", lay.get_btn, NAMES["indigo"], cv)
             ws._icon_btn("put", "PUT", lay.put_btn, NAMES["dark_green"], cv)
+            fbtn = getattr(lay, "files_btn", None)
+            if fbtn is not None:             # export the sheet to files/sprites/ (#108)
+                ws._btn("FILE", fbtn, NAMES["dark_blue"], cv)
         if ws.paint_status:
             cv.print(ws.paint_status[:lay.status_maxc],
                      lay.status_xy[0], lay.status_xy[1],

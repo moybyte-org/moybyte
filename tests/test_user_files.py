@@ -182,3 +182,63 @@ def test_migration_without_legacy_artwork_is_a_noop(tmp_path):
     root = _root(tmp_path)
     assert moy_carts.migrate_user_files(root) is None
     assert moy_carts.list_files("drawings", root) == []
+
+
+# -- provenance stamps (#108 phase 2) --------------------------------------------
+
+def test_provenance_stamp_roundtrips_and_is_ignored_by_decoders():
+    import json
+    blob = moy_carts.encode_moyimg(2, 2, bytes((5, 6, 7, 8)))
+    sig = moy_carts.content_sig(blob)
+    stamped = moy_carts.stamp_provenance(blob, "drawings", "dragon", sig)
+    # The stamp adds src/sig but leaves the pixels intact for the image decoder.
+    assert moy_carts.read_provenance(stamped) == ("drawings/dragon", sig)
+    assert moy_carts.decode_moyimg(stamped) == moy_carts.decode_moyimg(blob)
+    assert json.loads(stamped)["src"] == "drawings/dragon"
+
+
+def test_read_provenance_absent_or_garbage_is_none():
+    plain = moy_carts.encode_moyimg(1, 1, bytes((3,)))
+    assert moy_carts.read_provenance(plain) == (None, None)
+    for bad in ("", "not json", "[]", None):
+        assert moy_carts.read_provenance(bad) == (None, None)
+
+
+def test_content_sig_changes_when_the_blob_changes():
+    a = moy_carts.encode_moyimg(2, 2, bytes((1, 1, 1, 1)))
+    b = moy_carts.encode_moyimg(2, 2, bytes((1, 1, 1, 2)))
+    assert moy_carts.content_sig(a) != moy_carts.content_sig(b)
+    assert moy_carts.content_sig("") == 0
+
+
+# -- migrate docs / tables -------------------------------------------------------
+
+def test_migrate_docs_and_tables_are_one_shot(tmp_path):
+    import json
+    root = _root(tmp_path)
+    moy_carts.ensure_dirs(root)
+    moy_carts.save_notes(json.dumps({"notes": [{"body": "hello"}]}), root)
+    moy_carts.save_sheets(json.dumps(
+        {"sheets": [{"format": "moysheet-v1", "name": "S", "cells": {}}]}), root)
+    assert moy_carts.migrate_docs(root)
+    assert moy_carts.migrate_tables(root)
+    assert len(moy_carts.list_files("docs", root)) == 1
+    assert len(moy_carts.list_files("tables", root)) == 1
+    # Both are gated on their kind dir existing -> never re-run.
+    assert moy_carts.migrate_docs(root) is None
+    assert moy_carts.migrate_tables(root) is None
+
+
+def test_sprite_export_lands_in_files_sprites(tmp_path):
+    from runtime.editors_sheet import SpriteSheet
+    root = _root(tmp_path)
+    sheet = SpriteSheet()
+    sheet.pset(0, 0, 9)
+    hexs = sheet.to_hex()
+    name = moy_carts.save_file("sprites", moy_carts.new_file_name("sprites", root),
+                               hexs, root)
+    assert name in moy_carts.list_files("sprites", root)
+    assert moy_carts.load_file("sprites", name, root) == hexs
+    # A re-hydrated sheet matches the exported one (the reuse contract).
+    assert SpriteSheet.from_hex(
+        moy_carts.load_file("sprites", name, root)).to_hex() == hexs

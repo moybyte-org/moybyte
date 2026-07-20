@@ -2814,6 +2814,32 @@ class Workstation:
         self.paint_status = "PUT SPR " + str(n)
         return True
 
+    def send_sprites_to_files(self):
+        """Export the open cart's sprite sheet to files/sprites/ as a named user
+        file (#108 the "send to Files" producer for the sprites kind). The whole
+        sheet travels as one .moygfx (the same hex the cart stores), auto-named
+        (sheet_1, ...) and browsable in the Files app; from there it re-imports
+        into any project through the file picker (the #18 cross-cart reuse hub).
+        Returns the stored file name, or None. Surfaces a paint status."""
+        sheet = self.project.sheet if self.project is not None else None
+        if sheet is None or not (self.carts_root and self.can_manage):
+            self.paint_status = None       # writes deferred -- nothing to persist
+            return None
+        try:
+            hexs = sheet.to_hex()
+
+            def _write():
+                name = self.carts_store.new_file_name("sprites", self.carts_root)
+                return self.carts_store.save_file("sprites", name, hexs,
+                                                  self.carts_root)
+            name = self._with_sd(_write)
+        except Exception as exc:  # noqa: BLE001 -- surface, never crash the editor
+            self.paint_status = "FILE FAILED"
+            print("Moybyte send sprites to files failed:", exc)
+            return None
+        self.paint_status = "SENT " + str(name).upper()[:8]
+        return name
+
     def apply(self):
         # GO (Config tab): re-run with the new config. Always return to the desktop:
         # on success it runs, on failure frame() paints the error panel there (still

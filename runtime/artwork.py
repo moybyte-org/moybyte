@@ -1092,9 +1092,14 @@ class ArtworkService:
                         if n else None)
                 if not blob:
                     return False
-                store.save_artwork(blob, ws.carts_root)
+                # Provenance (#108 phase 2): the wallpaper copy remembers the
+                # drawing it came from + that drawing's signature now, so a later
+                # edit can offer "your drawing changed -> UPDATE".
+                stamped = store.stamp_provenance(
+                    blob, "drawings", n, store.content_sig(blob))
+                store.save_artwork(stamped, ws.carts_root)
                 if wall is not None and wall.get("path"):
-                    store.save_image(wall, "bg", blob)
+                    store.save_image(wall, "bg", stamped)
                 return True
             if not ws._with_sd(_copy):
                 self.last_error = "SAVE FIRST"
@@ -1212,13 +1217,18 @@ class ArtworkService:
                         if n else None)
                 if not blob:
                     return False
+                # The signature is of the SOURCE file as it stands now (before
+                # any resize), so change-detection re-reads files/drawings/<n>
+                # and compares its content_sig to this stamp (#108 phase 2).
+                sig = store.content_sig(blob)
                 data = store.decode_moyimg(blob)
                 if data is None:
                     return False
                 if data[0] != 320 or data[1] != 240:
                     game = cover_indices(data[2], data[0], data[1], 320, 240)
                     blob = store.encode_moyimg(320, 240, game)
-                store.save_image(target, "bg", blob)
+                store.save_image(target, "bg",
+                                 store.stamp_provenance(blob, "drawings", n, sig))
                 return True
             if not ws._with_sd(_attach):
                 self.last_error = "SAVE FIRST"
@@ -1228,3 +1238,51 @@ class ArtworkService:
         except Exception as exc:  # noqa: BLE001
             self.last_error = str(exc)
             return None
+
+    # -- provenance: where a drawing is used (#108 phase 2) -------------------
+
+    def usage(self, name):
+        """Where drawing `name` is currently used -- the File Manager's "used
+        in:" list (#108 phase 2). Returns rows {"label", "kind", "index",
+        "stale"}: one per consumer holding a copy stamped src=="drawings/<name>"
+        (the wallpaper + any project bg). `stale` is True when the source
+        drawing changed since the copy (its content_sig differs), which powers
+        the one-tap UPDATE re-copy. Pull-based: a renamed/deleted source simply
+        matches nothing, so the affordance just never appears."""
+        if not self._ready() or not name:
+            return []
+        ws = self.ws
+        store = ws.carts_store
+        src_key = "drawings/" + str(name)
+        try:
+            cur = ws._with_sd(lambda: store.content_sig(
+                store.load_file("drawings", name, ws.carts_root) or ""))
+        except Exception:  # noqa: BLE001 -- an unreadable source lists nothing
+            return []
+        rows = []
+        try:
+            wblob = ws._with_sd(lambda: store.load_artwork(ws.carts_root))
+        except Exception:  # noqa: BLE001
+            wblob = None
+        wsrc, wsig = store.read_provenance(wblob) if wblob else (None, None)
+        if wsrc == src_key:
+            rows.append({"label": "WALLPAPER", "kind": "wall", "index": -1,
+                         "stale": wsig != cur})
+        for i, cart in enumerate(self._targets()):
+            blob = (cart.get("images") or {}).get("bg")
+            if not blob:
+                continue
+            psrc, psig = store.read_provenance(blob)
+            if psrc == src_key:
+                rows.append({"label": cart.get("title", "PROJECT"),
+                             "kind": "game", "index": i, "stale": psig != cur})
+        return rows
+
+    def resend(self, row, name):
+        """Re-copy drawing `name` to one usage row -- the "send again" (or the
+        stale row's UPDATE) action. Returns True on success."""
+        if not isinstance(row, dict) or not name:
+            return False
+        if row.get("kind") == "wall":
+            return self.set_wallpaper(name)
+        return self.attach(row.get("index", -1), name) is not None
