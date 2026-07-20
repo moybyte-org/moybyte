@@ -197,7 +197,8 @@ def test_menu_omits_cart_group_when_no_cart(tmp_path):
     labels = _labels(ws)
     assert "CART" not in labels
     assert "RESTART CART" not in labels and "DELETE CART" not in labels
-    assert labels == ["SYSTEM", "SETTINGS", "ABOUT", "REBOOT"]
+    # #105: SEARCH is offered first, launcher-only (over the run-grid it filters).
+    assert labels == ["SYSTEM", "SEARCH", "SETTINGS", "ABOUT", "REBOOT"]
 
 
 # -- dismissal ---------------------------------------------------------------

@@ -60,6 +60,14 @@ class SystemMenuUI:
             rows.append(("item", "DELETE CART", self._menu_delete_cart))
             rows.append(("sep",))
         rows.append(("header", "SYSTEM"))
+        # SEARCH (#105): only meaningful over the run-grid, so it's offered ONLY
+        # from the launcher home -- the label flips to CLEAR SEARCH once a query
+        # is active/typing, so the same row both opens and dismisses it.
+        if self.ws.screen == "launcher":
+            label = ("CLEAR SEARCH"
+                      if (self.ws.search_typing or self.ws.search_query)
+                      else "SEARCH")
+            rows.append(("item", label, self.ws.toggle_search))
         rows.append(("item", "SETTINGS", self.ws.open_settings))
         rows.append(("item", "ABOUT", self._menu_about))
         rows.append(("item", "REBOOT", self._menu_reboot))

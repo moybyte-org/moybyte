@@ -689,6 +689,14 @@ class Workstation:
         # rather than either display grid (the Make/New pseudo tiles never leak out).
         self._all_carts = list(carts) if carts else []
         self._fat_cart = None         # #66 live-set diet: the one rehydrated cart
+        # Launcher search (#105): plain-text substring filter over the run-grid,
+        # entered via the sysmenu SEARCH item (mirrors the wifi-password typing
+        # idiom -- _set_text_mode swaps the keyboard to clean ASCII while typing).
+        # search_query persists once typing stops (so the filtered grid stays up
+        # for d-pad/trackball browsing); search_typing is just the keystroke-
+        # capture sub-state. See _launcher_view_items/open_search/close_search.
+        self.search_query = ""
+        self.search_typing = False
         self.launcher = Launcher(self._launcher_items(self._all_carts),
                                  self.layout, NAMES, _blit_glyph)
         # The HOME grid exposes the selected card's PLAY/CHANGE row on the desktop-
@@ -700,6 +708,9 @@ class Workstation:
         # backdrop doesn't plate the card.
         self.launcher.icon_for = self._icon_image_keyed
         self.launcher.cover_for = self._cover_for
+        # The favorite-star corner badge (#105): only the RUN grid plays, so only
+        # ws.launcher (not the Editor's project-picker) gets the toggle.
+        self.launcher.favorite_for = self.is_favorite
         # Default the highlight to the first RUNNABLE cart (skip the pinned Make tile at
         # slot 0), so a bare RUN/A plays a game rather than opening the picker -- the
         # launcher is RUN-first (spec shell_ux_v1.md); Make is a tap/nav target.
@@ -1422,6 +1433,64 @@ class Workstation:
             self._with_sd(lambda: self.carts_store.save_system(self.system, self.carts_root))
         except Exception as exc:  # noqa: BLE001 -- a failed write just isn't remembered
             print("Moybyte system save failed:", _err_text(exc))
+
+    # -- favorites + recents (#105) -------------------------------------------
+    #
+    # Both ride the SAME system.json persistence Settings already uses for
+    # theme/wallpaper/font/OTA channel (self.system + _persist_system) -- no new
+    # store surface. `favorites` is a plain path list (order = the order a kid
+    # starred them, oldest first); `desk_mru` (issue #105's own naming note) is a
+    # capped most-recently-run path list, newest first. Cart identity is the
+    # store PATH (stable across a rename/rescan, unlike an in-memory dict).
+
+    _MRU_CAP = 8          # how many recents system.json remembers
+
+    def is_favorite(self, cart):
+        path = cart.get("path") if cart else None
+        if not path:
+            return False
+        return path in self.system.get("favorites", [])
+
+    def toggle_favorite(self, cart):
+        """Star/unstar `cart` (the launcher card's corner badge tap) and persist.
+        A no-op for a pseudo tile (no path)."""
+        path = cart.get("path") if cart else None
+        if not path:
+            return
+        favs = list(self.system.get("favorites", []))
+        if path in favs:
+            favs.remove(path)
+        else:
+            favs.append(path)
+        self.system["favorites"] = favs
+        self._dirty = True
+        self._persist_system()
+
+    def _note_recent(self, cart):
+        """Record `cart` as most-recently-run: move its path to the front of
+        system.json's `desk_mru` list (issue #105's naming), capped at
+        _MRU_CAP. Called from every launcher-driven run/open (open/open_app) --
+        a pseudo tile (no path) is never recorded."""
+        path = cart.get("path") if cart else None
+        if not path:
+            return
+        mru = [p for p in self.system.get("desk_mru", []) if p != path]
+        mru.insert(0, path)
+        self.system["desk_mru"] = mru[:self._MRU_CAP]
+        self._persist_system()
+
+    def recent_carts(self):
+        """The desk_mru path list resolved back to live cart dicts (newest first),
+        silently dropping any path that no longer scans (deleted/renamed since).
+        Read-only convenience for a future recents surface; #105 only settled the
+        system.json key, not where it renders."""
+        by_path = {c.get("path"): c for c in self._all_carts if c.get("path")}
+        out = []
+        for path in self.system.get("desk_mru", []):
+            c = by_path.get(path)
+            if c is not None:
+                out.append(c)
+        return out
 
     def _ota_channel(self):
         """The selected OTA update channel ("stable" default / "unstable" beta). Drives
@@ -2261,6 +2330,8 @@ class Workstation:
         # be a dead end on the device). Authoring is a separate app (the Editor), reached
         # via the launcher's Make tile -> project-picker, not a tap-mode on the launcher.
         selected = self.launcher.selected()
+        self._note_recent(selected)    # #105 desk_mru: every launcher-tap run counts
+        self.search_typing = False     # a RUN always ends any in-progress query typing
         # SYSTEM APPS (docs/app_api_v1.md): a cartridge identity backed by a
         # responsive system process. Deliberately NOT the Player: the Player is
         # the fixed 320x240 contract, while an app reflows to a P4/web window.
@@ -2293,6 +2364,7 @@ class Workstation:
                 break
         self.cart = cart
         self.input.text_mode = False
+        self.search_typing = False     # #105: an app jump ends any in-progress search typing
         app.open()
         self.wm.goto(app.id)
         self._set_text_mode(bool(text))
@@ -2341,11 +2413,12 @@ class Workstation:
         world (its bar has no X); the PLAY icon is the way back to the
         fullscreen Library. Fullscreen tiers never call this (no has_desk)."""
         self._dirty = True
+        self.search_typing = False     # #105: leaving the run-grid ends any query typing
         self._set_text_mode(False)
         # Re-derive the shelf under the two-worlds filter (system apps are
         # desk-only here): the first call runs before the WM swap finished
         # populating anything, so the boot-time entry settles the filter.
-        self.launcher.set_items(self._launcher_items(self._all_carts))
+        self.launcher.set_items(self._launcher_view_items())
         self.wm.goto("desk")
 
     def open_library(self):
@@ -2382,6 +2455,7 @@ class Workstation:
         returns HERE). Resets the picker's armed delete-confirm (if any) so a stale
         "DELETE? TAP AGAIN" from a previous visit never carries into a fresh one."""
         self._dirty = True             # screen change repaints (#44)
+        self.search_typing = False     # #105: leaving the run-grid ends any query typing
         self._set_text_mode(False)     # a grid, not the code editor
         self.editor_picker.reset()
         self.wm.goto("picker")
@@ -2940,6 +3014,60 @@ class Workstation:
             out.append(c)
         return out
 
+    def _launcher_view_items(self):
+        """The launcher grid's current contents: `_launcher_items` narrowed by the
+        active search query (#105), if any -- a plain case-insensitive substring
+        match on the title. The pinned Make tile always survives a filter (it's
+        not a cart to search for, it's the way to keep making one). The single
+        place a rescan (_apply_items) and a query edit (set_search_query) both
+        call, so the two can never desync on which list is "current"."""
+        base = self._launcher_items(self._all_carts)
+        q = self.search_query.strip().lower()
+        if not q:
+            return base
+        return [it for it in base
+                if it.get("type") in PSEUDO_TILE_TYPES
+                or q in it.get("title", "").lower()]
+
+    def open_search(self):
+        """Enter the launcher search box (≡ -> SEARCH, #105): capture ASCII
+        keystrokes into search_query, filtering the run-grid live. Mirrors the
+        wifi-password typing idiom (_set_text_mode swaps the keyboard to clean
+        ASCII while a query is being typed -- plain printable range only, so it
+        works on the T-Deck's keyboard with no `=[]{}<>%` keys)."""
+        self.search_typing = True
+        self._set_text_mode(True)
+        self._dirty = True
+
+    def close_search(self, clear=True):
+        """Leave the search box (ENTER/ESC while typing, or the sysmenu CLEAR
+        SEARCH toggle). `clear=True` also drops the query and restores the full
+        grid; `clear=False` (ENTER) just stops capturing keystrokes, leaving the
+        filtered results up for d-pad/trackball browsing."""
+        self.search_typing = False
+        self._set_text_mode(False)
+        if clear:
+            self.search_query = ""
+            self.launcher.set_items(self._launcher_view_items())
+        self._dirty = True
+
+    def toggle_search(self):
+        """The sysmenu SEARCH row's action: open the box if idle, else close (and
+        clear) it -- one control both opens and dismisses search."""
+        if self.search_typing or self.search_query:
+            self.close_search(clear=True)
+        else:
+            self.open_search()
+
+    def set_search_query(self, q):
+        """Replace the search query and re-filter the launcher grid (#105). The
+        idle-frame perf floor stays intact: this only runs on a keystroke, never
+        per-frame, and an unchanged (empty) query is the byte-identical original
+        grid."""
+        self.search_query = q
+        self.launcher.set_items(self._launcher_view_items())
+        self._dirty = True
+
     def _picker_items(self, carts):
         """The Editor PROJECT-PICKER grid entries: the pinned "+ New" tile first (create a
         game + open it), then EVERY editable cart (all types, wallpapers + built-ins
@@ -2956,7 +3084,7 @@ class Workstation:
             self._cover_cache_order = []
             self._cover_cache_pixels = 0
             self._cover_jobs = {}          # in-flight builds may read stale blobs
-            self.launcher.set_items(self._launcher_items(items))
+            self.launcher.set_items(self._launcher_view_items())   # #105: keep an active filter
             self.picker.set_items(self._picker_items(items))
 
     def _real_selected(self, grid):
