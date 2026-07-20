@@ -575,6 +575,16 @@ class MapEditor(UndoRedoMixin):
         self.cam_y = 0
         self._rec = None     # open edit batch (list of (idx, prev, new)) or None
         self._hist = UndoStack(self.UNDO_MAX)   # committed edits (shared discipline)
+        # Region select / copy / paste / move (#91), mirroring PaintEditor's model
+        # (editors_paint_map, #90) so the two editors feel identical. `sel` is the
+        # active selection rectangle in MAP CELLS (x0,y0,x1,y1 inclusive) or None;
+        # `clip` is the copied region as (w, h, bytes) where each byte is the TileMap
+        # STORAGE form (tile_id+1, 0 = EMPTY) so a paste round-trips a cell exactly.
+        # Both default off so a freshly built editor behaves byte-identically to
+        # before (the #39 parity contract -- the SELECT overlay only draws when the
+        # select tool is active, never at open).
+        self.sel = None
+        self.clip = None
 
     # -- in-editor undo/redo (#91) --------------------------------------------
 
@@ -671,9 +681,12 @@ class MapEditor(UndoRedoMixin):
 
     def clear_history(self):
         """Drop the undo/redo stacks (a structural change -- a map resize -- makes
-        the recorded cell indices meaningless, so history is reset, #91)."""
+        the recorded cell indices meaningless, so history is reset, #91). The active
+        selection rectangle is dropped too (its cell coords are stale on a resized
+        grid); the coordinate-free clip survives so a copy can outlive a resize."""
         self._rec = None
         self._hist.clear()
+        self.sel = None
 
     def stamp_span(self):
         """The (tw, th) tile block the current brush stamps: `size` clamped
@@ -797,6 +810,111 @@ class MapEditor(UndoRedoMixin):
         always stays inside the map (never scroll the whole map off the window)."""
         self.cam_x = max(0, min(self.tilemap.w - 1, self.cam_x + dcx))
         self.cam_y = max(0, min(self.tilemap.h - 1, self.cam_y + dcy))
+
+    # -- region select / copy / paste / move (#91) ----------------------------
+    # The map analogue of PaintEditor's #90 clipboard: PaintEditor copies palette
+    # indices out of a sprite tile; this copies TileMap cell bytes out of the grid.
+    # Same verbs, same shapes (sel / clip / copy_selection / paste / cut_selection),
+    # so the two editors read identically -- the clip byte is the storage form
+    # (tile_id+1, 0 = EMPTY), converted back to a tile id on paste so it round-trips.
+
+    def set_selection(self, x0, y0, x1, y1):
+        """Set the active selection rectangle (map cells, inclusive), normalized so a
+        drag in any direction works and clamped inside the map bounds. Mirrors
+        PaintEditor.set_selection."""
+        tm = self.tilemap
+        x0 = int(x0)
+        y0 = int(y0)
+        x1 = int(x1)
+        y1 = int(y1)
+        if x1 < x0:
+            x0, x1 = x1, x0
+        if y1 < y0:
+            y0, y1 = y1, y0
+        mw = tm.w - 1
+        mh = tm.h - 1
+        x0 = 0 if x0 < 0 else (mw if x0 > mw else x0)
+        y0 = 0 if y0 < 0 else (mh if y0 > mh else y0)
+        x1 = 0 if x1 < 0 else (mw if x1 > mw else x1)
+        y1 = 0 if y1 < 0 else (mh if y1 > mh else y1)
+        self.sel = (x0, y0, x1, y1)
+
+    def clear_selection(self):
+        """Drop the active selection (the copied clip stays available for paste)."""
+        self.sel = None
+
+    @property
+    def has_clip(self):
+        return self.clip is not None
+
+    def copy_selection(self):
+        """Copy the selected region's RAW cell bytes into the clipboard as
+        (w, h, bytes) (each byte tile_id+1, 0 = EMPTY -- the TileMap storage form, so a
+        paste round-trips exactly). No-op (returns False) with no active selection;
+        read-only, records no undo step. Survives a brush/size switch and a resize, so
+        a kid can copy one area and paste it elsewhere."""
+        if self.sel is None:
+            return False
+        x0, y0, x1, y1 = self.sel
+        tm = self.tilemap
+        w = x1 - x0 + 1
+        h = y1 - y0 + 1
+        cells = tm.cells
+        buf = bytearray(w * h)
+        k = 0
+        for yy in range(y0, y1 + 1):
+            base = yy * tm.w
+            for xx in range(x0, x1 + 1):
+                buf[k] = cells[base + xx]
+                k += 1
+        self.clip = (w, h, bytes(buf))
+        return True
+
+    def paste(self, cell_x, cell_y, transparent=True):
+        """Stamp the clipboard with its top-left at map cell (cell_x, cell_y), clipped
+        to the map, as ONE undo step. `transparent` (default) skips EMPTY (byte 0) clip
+        cells so the paste overlays the destination (an empty clip cell doesn't punch a
+        hole); pass False to lay the clip opaquely (its empties then erase). Returns
+        False with no clip. Self-contained: opens/commits its own edit batch so it's a
+        single undo step regardless of caller (begin_edit flushes any stray batch)."""
+        if self.clip is None:
+            return False
+        w, h, buf = self.clip
+        tm = self.tilemap
+        cell_x = int(cell_x)
+        cell_y = int(cell_y)
+        self.begin_edit()
+        for yy in range(h):
+            ty = cell_y + yy
+            if ty < 0 or ty >= tm.h:
+                continue
+            row = yy * w
+            for xx in range(w):
+                tx = cell_x + xx
+                if tx < 0 or tx >= tm.w:
+                    continue
+                v = buf[row + xx]
+                if transparent and v == 0:
+                    continue
+                self._set(tx, ty, v - 1)       # storage byte -> tile id (0 -> EMPTY)
+        self.end_edit()
+        return True
+
+    def cut_selection(self):
+        """Copy the selection to the clipboard AND clear it to EMPTY in one undo step
+        -- the move primitive (cut here, paste elsewhere). No-op (False) with no
+        selection. The copy is read-only; only the clear journals, so a single undo
+        restores the cut region (mirrors PaintEditor.cut_selection)."""
+        if not self.copy_selection():
+            return False
+        x0, y0, x1, y1 = self.sel
+        tm = self.tilemap
+        self.begin_edit()
+        for yy in range(y0, y1 + 1):
+            for xx in range(x0, x1 + 1):
+                self._set(xx, yy, tm.EMPTY)
+        self.end_edit()
+        return True
 
 
 # The block editor's in-session undo/redo depth (#93). Scripts are tiny JSON-ish
