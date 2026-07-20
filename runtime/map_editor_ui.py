@@ -127,13 +127,26 @@ _MAP_REDO = (252, 17, 26, 13)
 _MAP_DIM = (280, 17, 26, 13)
 # The paint tools (#91), cycled by the TOOL button: STAMP (today's per-cell / SIZE
 # brush), RECT (drag corner-to-corner, fill the rectangle), FLOOD (contiguous
-# same-tile fill). Two-char labels for the compact toolbar button.
-_MAP_TOOLS = ("stamp", "rect", "flood")
-_MAP_TOOL_LABEL = {"stamp": "PN", "rect": "BX", "flood": "FL"}
+# same-tile fill), SELECT (drag a marquee -> COPY/CUT the region -> tap-to-stamp
+# PASTE, the paint editor's #90 region model applied to map cells). Two-char labels
+# for the compact toolbar button.
+_MAP_TOOLS = ("stamp", "rect", "flood", "select")
+_MAP_TOOL_LABEL = {"stamp": "PN", "rect": "BX", "flood": "FL", "select": "SE"}
 # The pre-literate glyph the TOOL button shows for the ACTIVE tool (#91 icon pass):
-# a pen/brush for STAMP, a hollow box for RECT, a paint bucket for FLOOD. _blit_glyph
-# draws nothing for an unknown kind, so _MAP_TOOL_LABEL stays the fallback.
-_MAP_TOOL_GLYPH = {"stamp": "paint", "rect": "rect_tool", "flood": "fill"}
+# a pen/brush for STAMP, a hollow box for RECT, a paint bucket for FLOOD, a dashed
+# marquee for SELECT. _blit_glyph draws nothing for an unknown kind, so
+# _MAP_TOOL_LABEL stays the fallback.
+_MAP_TOOL_GLYPH = {"stamp": "paint", "rect": "rect_tool", "flood": "fill",
+                   "select": "select"}
+# SELECT-mode region actions (#91), mirroring the paint editor's copy/paste/cut. The
+# tile palette is idle while selecting (region ops don't use the brush), so when the
+# SELECT tool is active a COPY/CUT/PASTE strip is drawn OVER the palette column and
+# hit-tested there instead of the palette. Geometry is computed on demand from the
+# palette rect (like the resize panel's _dims_rects), so MapLayout gains no permanent
+# field and the 320x240 idle-parity baseline is untouched.
+_MAP_SEL_ACTIONS = ("copy", "cut", "paste")
+_MAP_SEL_GLYPH = {"copy": "copy", "cut": "cut", "paste": "paste"}
+_MAP_SEL_LABEL = {"copy": "CP", "cut": "CT", "paste": "PS"}
 # Map resize (#91): the largest grid the +/- steppers will grow to. 96x96 = 9216
 # cells (~9KB) is a generous kid level and still device-RAM-safe; shrink floors at
 # 1x1 (TileMap.resize clamps too).
@@ -267,8 +280,9 @@ class MapEditorUI:
         self.map_erase = False         # tap-to-erase instead of stamp
         self.map_page = 0              # first tile id shown in the palette
         self.map_zoom = 0              # zoom level index into layout.zooms (0 = fit)
-        self.map_tool = "stamp"        # active paint tool (#91): stamp/rect/flood
+        self.map_tool = "stamp"        # active paint tool (#91): stamp/rect/flood/select
         self._map_rect = None          # (x0,y0,x1,y1) cell corners while a RECT drags
+        self._map_sel = None           # (x0,y0,x1,y1) live SELECT marquee drag box (#91)
         self.dims_open = False         # the map-resize (DIM) panel is showing (#91)
         self._mkey = KeyEdge()         # Ctrl+Z/Y edge tracker (#91)
         self._map_drag = None          # last pointer (px,py) during a map pan drag (#37)
@@ -316,6 +330,7 @@ class MapEditorUI:
         self._map_paint_undo = None
         self.map_tool = "stamp"        # (#91) back to the plain per-cell brush
         self._map_rect = None
+        self._map_sel = None
         self.dims_open = False
         self._mkey.reset()
 
@@ -360,14 +375,16 @@ class MapEditorUI:
             self._map_clamp_cam()
 
     def _map_cycle_tool(self):
-        """Cycle the paint tool stamp -> rect -> flood -> stamp (#91). Drops any
-        half-built RECT preview so switching mid-drag can't leave a stray outline."""
+        """Cycle the paint tool stamp -> rect -> flood -> select -> stamp (#91). Drops
+        any half-built RECT/SELECT drag preview so switching mid-drag can't leave a
+        stray outline."""
         try:
             idx = _MAP_TOOLS.index(self.map_tool)
         except ValueError:
             idx = 0
         self.map_tool = _MAP_TOOLS[(idx + 1) % len(_MAP_TOOLS)]
         self._map_rect = None
+        self._map_sel = None
 
     def _map_palette_ids(self):
         """The tile ids shown on the current palette page (a window into the sheet,
@@ -540,6 +557,56 @@ class MapEditorUI:
             self.dims_open = False
         return True
 
+    # -- SELECT-mode region actions (#91) --------------------------------------
+
+    def _sel_actions_rects(self):
+        """Geometry for the SELECT-mode COPY/CUT/PASTE strip, computed on demand (drawn
+        + hit-tested only while the select tool is active) so it needs no permanent
+        MapLayout field and the 320x240 baseline stays byte-identical. Three buttons
+        stacked vertically over the (idle) tile-palette column, scaled with the font."""
+        lay = self.layout
+        fs = lay.fs
+        ax, ay, aw, ah = lay.tp_area
+        bh = 20 * fs
+        gap = 4 * fs
+        r = {"panel": lay.tp_area}
+        for i in range(len(_MAP_SEL_ACTIONS)):
+            r[_MAP_SEL_ACTIONS[i]] = (ax, ay + i * (bh + gap), aw, bh)
+        return r
+
+    def _sel_actions_click(self, px, py):
+        """Route a tap on the SELECT-mode action strip (over the palette). COPY needs a
+        selection, CUT needs a selection, PASTE needs a clip -- an unusable button is a
+        no-op (it's drawn dimmed). Returns True iff the tap hit the strip's column, so a
+        tap there never falls through to the brush-pick behind it."""
+        me = self.mapedit
+        if me is None:
+            return False
+        r = self._sel_actions_rects()
+        if self._in(px, py, r["copy"]):
+            me.copy_selection()
+            return True
+        if self._in(px, py, r["cut"]):
+            me.cut_selection()
+            return True
+        if self._in(px, py, r["paste"]):
+            self._sel_paste_default(me)
+            return True
+        # A tap anywhere else in the palette column while selecting is swallowed (the
+        # strip owns the column in this mode) so it can't accidentally re-pick a brush.
+        return self._in(px, py, r["panel"])
+
+    def _sel_paste_default(self, me):
+        """The PASTE button stamps the clip at the active selection's top-left (so
+        copy->paste lands in place), or at the top-left visible cell with no selection.
+        In SELECT mode a tap on the map pastes at the tapped cell instead (#91)."""
+        if not me.has_clip:
+            return
+        if me.sel is not None:
+            me.paste(me.sel[0], me.sel[1])
+        else:
+            me.paste(me.cam_x, me.cam_y)
+
     def _map_paint(self, cx, cy):
         """Stamp the brush at map cell (cx, cy): the EMPTY brush (#37) clears the
         cell (paints sky/background), otherwise the brush's tile is placed. The
@@ -592,6 +659,14 @@ class MapEditorUI:
                 x0, y0, _, _ = self._map_rect
                 self._map_rect = (x0, y0, cell[0], cell[1])
             return
+        if self.map_tool == "select":
+            # SELECT marquee (#91): rubber-band the selection box like RECT; no pan
+            # while dragging (the d-pad still pans). Committed on release.
+            cell = self._map_cell_at_clamped(px, py)
+            if cell is not None and self._map_sel is not None:
+                x0, y0, _, _ = self._map_sel
+                self._map_sel = (x0, y0, cell[0], cell[1])
+            return
         if self.map_tool == "flood":
             return                             # flood already applied on the press
         if not self._map_panning:
@@ -635,7 +710,9 @@ class MapEditorUI:
     def _map_release(self, px, py):
         """Pointer up in the map view: the STAMP tap-paint already landed on the press
         edge (a pan would have reverted it), so it just closes the edit batch; the
-        RECT tool fills its rubber-banded rectangle here as ONE undo step (#37/#91)."""
+        RECT tool fills its rubber-banded rectangle here as ONE undo step (#37/#91);
+        the SELECT tool commits its marquee (a drag sets the selection, a tap either
+        pastes the clip there or clears the selection -- mirroring the paint editor)."""
         me = self.mapedit
         if me is not None:
             if self.map_tool == "rect" and self._map_press is not None \
@@ -644,6 +721,16 @@ class MapEditorUI:
                 me.begin_edit()
                 me.fill_rect(x0, y0, x1, y1, erase=self.map_erase)
                 me.end_edit()
+            elif self.map_tool == "select" and self._map_press is not None \
+                    and self._map_sel is not None:
+                x0, y0, x1, y1 = self._map_sel
+                if x0 == x1 and y0 == y1:      # a tap (no marquee) -> paste or deselect
+                    if me.has_clip:
+                        me.paste(x0, y0)       # tap-to-stamp: drop the clip here (#91)
+                    else:
+                        me.clear_selection()   # tap on empty space clears the selection
+                else:
+                    me.set_selection(x0, y0, x1, y1)
             else:
                 # STAMP: commit the press-edge stamp's batch (a no-op for flood, whose
                 # batch already ended, or a pan, whose batch was aborted).
@@ -653,6 +740,7 @@ class MapEditorUI:
         self._map_drag = None
         self._map_paint_undo = None
         self._map_rect = None
+        self._map_sel = None
 
     def _map_click(self, px, py):
         ws = self.ws
@@ -683,6 +771,12 @@ class MapEditorUI:
                     me.begin_edit()
                     me.flood(cell[0], cell[1], erase=self.map_erase)
                     me.end_edit()
+            elif tool == "select":
+                # SELECT (#91): remember the marquee start corner; the drag rubber-bands
+                # the box, release commits it (a drag sets the selection, a tap pastes
+                # the clip / clears). No paint, no pan (the d-pad still pans).
+                cell = self._map_cell_at_clamped(px, py)
+                self._map_sel = (cell[0], cell[1], cell[0], cell[1]) if cell else None
             else:
                 # STAMP (#37/#57): paint immediately so a tap is responsive; remember
                 # the block + its prior bytes so a drag-that-becomes-a-pan reverts it.
@@ -696,6 +790,10 @@ class MapEditorUI:
                         self._map_paint(cx, cy)
             return
         lay = self.layout
+        # SELECT mode (#91): the COPY/CUT/PASTE strip is drawn OVER the palette column,
+        # so it eats taps there before the brush-pick / palette-page logic below.
+        if self.map_tool == "select" and self._sel_actions_click(px, py):
+            return
         if self._in(px, py, lay.tool_btn):     # cycle stamp/rect/flood (#91)
             self._map_cycle_tool()
             return
@@ -838,6 +936,19 @@ class MapEditorUI:
                 cv.rectb(rpx, rpy, rpw, rph, NAMES["yellow"])
                 if rpw > 2 and rph > 2:
                     cv.rectb(rpx + 1, rpy + 1, rpw - 2, rph - 2, NAMES["yellow"])
+        # SELECT overlay (#91): the committed selection is a solid white box, a live
+        # marquee drag a yellow box (like the RECT preview). Both clamp to the visible
+        # window. Drawn only in select mode, so the frozen baseline is untouched.
+        if self.map_tool == "select":
+            if me.sel is not None:
+                self._draw_map_box(cv, x0, y0, cell, cols, rows, me.cam_x, me.cam_y,
+                                   me.sel[0], me.sel[1], me.sel[2], me.sel[3],
+                                   NAMES["white"], False)
+            if self._map_sel is not None and self._map_press is not None:
+                self._draw_map_box(cv, x0, y0, cell, cols, rows, me.cam_x, me.cam_y,
+                                   self._map_sel[0], self._map_sel[1],
+                                   self._map_sel[2], self._map_sel[3],
+                                   NAMES["yellow"], True)
         # Tile palette (right): a page of sheet tiles; the brush tile is boxed white.
         # The tile art stays its native size (a bigger palette shows MORE tiles per
         # page via extra rows, and the fs-scaled cell just gives it more air).
@@ -866,6 +977,10 @@ class MapEditorUI:
                      (NAMES["light_grey"] if tid in block else NAMES["dark_grey"]))
         ws._btn("<", lay.tp_prev, NAMES["blue"], cv)
         ws._btn(">", lay.tp_next, NAMES["blue"], cv)
+        # SELECT-mode region actions (#91): the COPY/CUT/PASTE strip is drawn OVER the
+        # palette column (idle while selecting), so it sits after the palette tiles.
+        if self.map_tool == "select":
+            self._draw_sel_actions(cv, NAMES)
         # SIZE brush (#57): cycles the stamp size (top-left d-pad corner slot);
         # labeled like the zoom button ("S2" ~ "Z2").
         ws._btn("S" + str(me.size), lay.size_btn, NAMES["dark_purple"], cv)
@@ -907,6 +1022,51 @@ class MapEditorUI:
         # Map-resize overlay (#91): drawn LAST so it sits over the whole editor.
         if self.dims_open:
             self._draw_dims(cv, NAMES)
+
+    def _draw_map_box(self, cv, x0, y0, cell, cols, rows, cam_x, cam_y,
+                      bx0, by0, bx1, by1, color, double):
+        """Outline the map-cell rectangle (bx0,by0)..(bx1,by1) (any orientation),
+        clamped to the visible window, in `color` (#91 SELECT overlay). `double` draws
+        an inner outline too (the thick live-drag box); a box fully off-window draws
+        nothing. Mirrors the RECT-preview clamp so the two tools read alike."""
+        if bx1 < bx0:
+            bx0, bx1 = bx1, bx0
+        if by1 < by0:
+            by0, by1 = by1, by0
+        ix0 = bx0 if bx0 > cam_x else cam_x
+        iy0 = by0 if by0 > cam_y else cam_y
+        vx1 = cam_x + cols - 1
+        vy1 = cam_y + rows - 1
+        ix1 = bx1 if bx1 < vx1 else vx1
+        iy1 = by1 if by1 < vy1 else vy1
+        if ix0 > ix1 or iy0 > iy1:
+            return
+        rpx = x0 + (ix0 - cam_x) * cell
+        rpy = y0 + (iy0 - cam_y) * cell
+        rpw = (ix1 - ix0 + 1) * cell
+        rph = (iy1 - iy0 + 1) * cell
+        cv.rectb(rpx, rpy, rpw, rph, color)
+        if double and rpw > 2 and rph > 2:
+            cv.rectb(rpx + 1, rpy + 1, rpw - 2, rph - 2, color)
+
+    def _draw_sel_actions(self, cv, NAMES):
+        """The SELECT-mode COPY/CUT/PASTE strip over the palette column (#91). COPY/CUT
+        need a selection, PASTE a clip -- an unusable action is dimmed (mirrors the
+        paint tool row). Geometry from _sel_actions_rects(); drawn only in select mode
+        so the baseline is untouched."""
+        me = self.mapedit
+        if me is None:
+            return
+        r = self._sel_actions_rects()
+        # Back the whole column so the palette tiles underneath don't bleed through.
+        cv.rect(*(r["panel"] + (NAMES["black"],)))
+        enabled = {"copy": me.sel is not None,
+                   "cut": me.sel is not None,
+                   "paste": me.has_clip}
+        for act in _MAP_SEL_ACTIONS:
+            on = enabled[act]
+            self._gbtn(_MAP_SEL_GLYPH.get(act), _MAP_SEL_LABEL.get(act, "?"),
+                       r[act], NAMES["indigo"] if on else NAMES["dark_grey"], cv)
 
     def _draw_dims(self, cv, NAMES):
         """The map-resize (DIM) overlay panel (#91): the current W x H with +/-
