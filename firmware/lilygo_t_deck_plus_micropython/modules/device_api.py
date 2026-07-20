@@ -21,7 +21,7 @@ from device_canvas import Image, _decode_moyimg, _Layer
 
 def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
              pmem=None, wifi=None, images=None, scenes=None, tables=None,
-             texts=None, owner="cart"):
+             texts=None, net=None, owner="cart"):
     import random
 
     _img_cache = {}        # name -> decoded paint Image (see image() below), so a
@@ -323,6 +323,29 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
             else:
                 draw_layer(b[1], 0, 0)
 
+    # Multiplayer input (#65, host == device): btn/btnp take an optional player
+    # slot. Player 0 is the local console -- it calls input.held/pressed DIRECTLY,
+    # byte-for-byte as before, so every existing single-player cart is unchanged.
+    # Higher slots read the PlayerRouter attached to the InputState (in
+    # console.wire_workstation_core); with no extra controller registered they are
+    # always "not held" and players() is 1. `input` may be a bare stub with no
+    # router (probes / tests) -- fall back to the local path.
+    _prouter = getattr(input, "players", None)
+
+    def btn(name, player=0):
+        if player:
+            return _prouter.held(name, player) if _prouter is not None else False
+        return input.held(name)
+
+    def btnp(name, player=0):
+        if player:
+            return _prouter.pressed(name, player) if _prouter is not None else False
+        return input.pressed(name)
+
+    def players():
+        # The connected player count (>=1) so a cart can offer a 2P/co-op mode.
+        return _prouter.count() if _prouter is not None else 1
+
     ns = {
         "W": canvas.w, "H": canvas.h,
         "cls": canvas.cls, "pix": canvas.pix,
@@ -335,7 +358,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         "print": canvas.print, "touch": touch, "mouse": mouse,
         "clip": canvas.clip, "camera": canvas.camera,
         "pal": canvas.pal, "palt": canvas.palt,
-        "btn": input.held, "btnp": input.pressed,
+        "btn": btn, "btnp": btnp, "players": players,
         "key": key, "keyp": keyp, "time": time, "pmem": pmem_fn,
         "textmode": textmode, "quit": _quit,
         "cfg": cfg, "col": color,
@@ -353,6 +376,19 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
     # on the host).
     if wifi is not None:
         ns["wifi"] = wifi
+    # Capability-gated multiplayer message API (#65, host == device): net.send(data)
+    # / on_net(fn), injected ONLY for a cart whose manifest permissions include
+    # "multiplayer" (the Player passes a non-None backend then, like the wifi gate).
+    # on_net registers the handler the Player pumps each frame -- the old radio
+    # contract. A normal kid cart's namespace never carries `net`/`on_net`.
+    if net is not None:
+        ns["net"] = net
+
+        def on_net(fn):
+            net.on_message(fn)
+            return fn
+
+        ns["on_net"] = on_net
     # Scene accessors (#85): scene()/scene(name)/load_scene(name) over the cart's
     # placed-actor scenes. Pure DATA (no drawing) -- the logic lives once in the
     # shared widgets.Scenes and make_api just binds its methods (host == device). The

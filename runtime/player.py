@@ -307,6 +307,9 @@ class Player:
         self._lua = None              # #67: the running "lua" cart's runtime state (a
                                       # ws.lua_runtime handle; _close_lua() on exit so a
                                       # cart's whole Lua heap dies with its run)
+        self._net = None              # #65: the running cart's net.* service, when it
+                                      # has the "multiplayer" permission (else None); tick()
+                                      # pumps inbound messages to its on_net handler
         self._pmem_last = 0           # #66 deferred pmem: last periodic flush (_ticks_ms)
         self._native_ins = None       # #67 spike: nativize's inserted-line map (crash-line fix)
         # Diagnostics for repeat-run regressions (#66 follow-up): one line on cart
@@ -384,6 +387,14 @@ class Player:
         self._update = None
         self._draw = None
         self._restore_bg = None
+        # #65: drop the net handler/inbox with the dead run so a stale on_net
+        # callback (closing over the cleared ns) can't fire into the next run.
+        if self._net is not None:
+            try:
+                self._net.reset()
+            except Exception:  # noqa: BLE001 -- reset must never block an exit
+                pass
+        self._net = None
         self._close_lua()          # #67: the dead run's Lua heap goes with its world
         ws = self.ws
         rl = getattr(ws.canvas, "reclaim_layers", None)
@@ -520,11 +531,20 @@ class Player:
         # gets NO `wifi` name (sandbox preserved). make_api injects `wifi` into the
         # cart namespace iff the backend it receives is non-None.
         wifi = ws.wifi if ws._cart_has_perm("network") else None
+        # Multiplayer message service (#65): gate net.* by the "multiplayer"
+        # manifest permission exactly like wifi's "network" gate. reset() drops any
+        # handler/inbox from a previous run so a fresh run starts clean; make_api
+        # injects `net`/`on_net` into the namespace iff the backend is non-None.
+        net = ws.net if ws._cart_has_perm("multiplayer") else None
+        if net is not None:
+            net.reset()
+        self._net = net
         t2 = _ticks_ms()
         ns = ws.make_api(ws.canvas, ws.input, project.config, project.sheet,
                          ws.audio, project.tilemap, project.pmem, wifi, project.images,
                          project.scenes,    # #85: scene()/load_scene() over the cart's scenes
-                         tables=project.tables, texts=project.texts)  # #78 interop
+                         tables=project.tables, texts=project.texts,  # #78 interop
+                         net=net)           # #65: capability-gated net.* backend
         # Paint is a regular cartridge with one narrow shell capability. Keep it out
         # of the kid API and inject it only into the shipped app identity that asks
         # for the artwork permission; copied/renamed carts do not inherit it.
@@ -746,6 +766,12 @@ class Player:
                 rb = self._restore_bg
                 if render and rb is not None:
                     rb()
+                # Multiplayer (#65): deliver any inbound net.* messages to the cart's
+                # on_net handler BEFORE its _update runs (incoming shared state applied
+                # first -- the lockstep-friendly order). Every logic tick, incl. a
+                # frameskip logic-only frame. No-op when the cart has no net permission.
+                if self._net is not None:
+                    self._net.pump()
                 _ts = _ticks_ms() if _perf else 0
                 if self._update:
                     self._update(dt)

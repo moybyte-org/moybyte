@@ -496,6 +496,16 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.wm import FullscreenStackWM
 
+# The unified multiplayer input router (#65): PlayerRouter maps input SOURCES to
+# player SLOTS behind btn(name, player)/players(). Slot 0 is the local console
+# (untouched); extra slots stay empty until a transport (USB pad / phone / ESP-NOW
+# peer) registers one. Attached to the InputState in wire_workstation_core so host +
+# both boards share it. Same bare-or-package fallback as the extracted modules above.
+try:
+    from players import PlayerRouter
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.players import PlayerRouter
+
 # The block vocabulary/compiler (#29). Imported under whichever name it's known by:
 # bare `blocks` on the device (frozen top-level) and on the host once host_app has
 # aliased it, or `runtime.blocks` when a test loads console/moy_runtime directly
@@ -648,6 +658,11 @@ class Workstation:
         # the backend here; it's exposed to a cart's namespace ONLY when the cart's
         # manifest permissions include "network" (capability-gated -- see _start).
         self.wifi = None            # injected wifi backend (host FakeWifi / device WLAN)
+        # Multiplayer message service (#65): the transport-neutral net.* seam (a
+        # players.LoopbackNet in the host sim, None on the device until the ESP-NOW
+        # radio lands). A SYSTEM service like wifi -- exposed to a cart's namespace
+        # ONLY when its manifest permissions include "multiplayer" (see player.start).
+        self.net = None
         self.carts_store = None     # injected: cart store module (moy_carts API)
         # #67 dual-runtime seam: factory(ns, src) -> a running Lua cart handle
         # (.init/.update/.draw callables + .close()). build_workstation injects
@@ -3030,6 +3045,13 @@ class Workstation:
         # this frame's keys before they can leak to the screen underneath; the active
         # content layer is at the bottom and always consumes.
         i = self.input
+        # Multiplayer (#65): advance every extra player slot's press-edge for this
+        # frame, aligned with the local InputState.begin_frame() the driver already
+        # ran. A no-op (empty loop) with no extra controllers registered, so the
+        # single-player path costs one attribute read.
+        _pr = getattr(i, "players", None)
+        if _pr is not None:
+            _pr.begin_frame()
         # Redraw-on-change (#44): a button PRESS edge or a typed key this frame may
         # change visible state (nav, select, screen/menu switch, an edit), so request a
         # repaint. Only the press edge (not release, not a steady hold) is marked: every
@@ -3738,6 +3760,12 @@ def wire_workstation_core(ws, store, carts_root, make_api, wifi,
         ws.pointer = pointer
         if inp is not None:
             inp.pointer = pointer   # touch-driven carts read it via the api touch()
+    # Multiplayer (#65): attach the PlayerRouter to the InputState so btn(name,
+    # player)/players() resolve extra controller slots. Slot 0 stays the console's
+    # own InputState (zero regression); extra slots stay empty until a transport
+    # registers one. Idempotent -- never re-wrap on a re-wire.
+    if inp is not None and getattr(inp, "players", None) is None:
+        inp.players = PlayerRouter(inp)
     if keyboard is not None:
         ws.keyboard = keyboard      # lets the code editor switch to text (ASCII) mode
     ws.load_system()                # #28: system.json + the saved wallpaper

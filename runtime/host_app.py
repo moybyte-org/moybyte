@@ -72,6 +72,8 @@ sys.modules.setdefault("project", _project)   # console.py does `from project im
 sys.modules.setdefault("player", _player)     # console.py does `from player import Player`
 sys.modules.setdefault("editor_app", _editor_app)  # console.py does `from editor_app import EditorApp`
 sys.modules.setdefault("wm", _wm)             # console.py does `from wm import FullscreenStackWM`
+from . import players as _players             # #65 multiplayer: PlayerRouter + net seam
+sys.modules.setdefault("players", _players)   # console.py does `from players import PlayerRouter`
 
 from . import console  # noqa: E402  (after the editors/audio aliases above)
 from . import moy_carts  # noqa: E402  (shared .moy store; host-clean)
@@ -377,7 +379,7 @@ class _Layer:
 
 def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
              pmem=None, wifi=None, images=None, scenes=None, tables=None,
-             texts=None, owner="cart"):
+             texts=None, net=None, owner="cart"):
     # `owner` tags device-side layer loans for the leak-fix reclaim (#63); the host
     # Canvas allocates layers on the gc heap, so it is accepted and unused here.
     """The cartridge global namespace on the host -- same names/signature as the
@@ -660,6 +662,29 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
             else:
                 draw_layer(b[1], 0, 0)
 
+    # Multiplayer input (#65): btn/btnp take an optional player slot. Player 0 is
+    # the local console -- it calls input.held/pressed DIRECTLY, byte-for-byte as
+    # before, so every existing single-player cart is unchanged. Higher slots read
+    # the PlayerRouter attached to the InputState (console.wire_workstation_core);
+    # with no extra controller registered they are always "not held" and players()
+    # is 1. `input` may be a bare stub (make_api probes / unit tests) with no
+    # router, so fall back to the local path. Host == device.
+    _prouter = getattr(input, "players", None)
+
+    def btn(name, player=0):
+        if player:
+            return _prouter.held(name, player) if _prouter is not None else False
+        return input.held(name)
+
+    def btnp(name, player=0):
+        if player:
+            return _prouter.pressed(name, player) if _prouter is not None else False
+        return input.pressed(name)
+
+    def players():
+        # The connected player count (>=1) so a cart can offer a 2P/co-op mode.
+        return _prouter.count() if _prouter is not None else 1
+
     ns = {
         "W": canvas.w, "H": canvas.h,
         "cls": canvas.cls, "pix": canvas.pix,
@@ -672,7 +697,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         "print": canvas.print, "touch": touch, "mouse": mouse,
         "clip": canvas.clip, "camera": canvas.camera,
         "pal": canvas.pal, "palt": canvas.palt,
-        "btn": input.held, "btnp": input.pressed,
+        "btn": btn, "btnp": btnp, "players": players,
         "key": key, "keyp": keyp, "time": time, "pmem": pmem_fn,
         "textmode": textmode, "quit": _quit,
         "cfg": cfg, "col": palette.color,
@@ -686,6 +711,20 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
     }
     if wifi is not None:                 # capability-gated network API (#38)
         ns["wifi"] = wifi
+    # Capability-gated multiplayer message API (#65): net.send(data)/on_net(fn),
+    # injected ONLY for a cart whose manifest permissions include "multiplayer"
+    # (the Player passes a non-None backend then, mirroring the wifi gate). A normal
+    # kid cart's namespace never carries `net`/`on_net`. on_net registers the handler
+    # the Player pumps each frame (net.on_message), so it mirrors the old radio
+    # contract. Host == device.
+    if net is not None:
+        ns["net"] = net
+
+        def on_net(fn):
+            net.on_message(fn)
+            return fn
+
+        ns["on_net"] = on_net
     # Scene accessors (#85): scene()/scene(name)/load_scene(name) over the cart's
     # placed-actor scenes. Pure DATA (no drawing), so the logic lives once in the
     # shared widgets.Scenes -- make_api just binds its methods (same on the device).
@@ -817,6 +856,11 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1, windowed=Fals
         ws, moy_carts, carts_dir, make_api, make_wifi(moy_carts, carts_dir),
         make_audio=make_audio, lua_runtime=lua_runtime, can_manage=True,
         pointer=console.Pointer(ws.sys_canvas.w, ws.sys_canvas.h), inp=inp)
+    # Multiplayer (#65): a host-side fake net transport (the sim's fake radio, for
+    # net.*), so a "multiplayer"-permission cart runs in the sim. Unlinked here (a
+    # solo desktop has no second console) -> send() drops; a test link()s two. The
+    # PlayerRouter (extra controller slots) is attached to inp by wire_workstation_core.
+    ws.net = _players.LoopbackNet()
     # The Picotron-style windowed WM (#73): swap the presentation tier in before
     # the first frame. Only meaningful with a distinct (big) system canvas.
     if windowed and ws._sys_canvas is not None:
