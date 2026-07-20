@@ -316,6 +316,46 @@ def journal_undo(cart_dir):
     return file
 
 
+def journal_can_undo(cart_dir):
+    """Read-only companion to journal_undo (#88): True iff a walk would actually
+    restore something (an earlier snapshot of the cursor's file exists), WITHOUT
+    touching any live file or snapshot -- just entries + the cursor, so the bar can
+    dim the UNDO icon cheaply. Mirrors journal_undo's own floor logic exactly (kept
+    in lock-step deliberately) so the button's enabled state never lies about what a
+    tap would do."""
+    jdir, log_path, cur_path, snap_dir = _journal_paths(cart_dir)
+    entries = _journal_load_entries(log_path)
+    if not entries:
+        return False
+    cursor = _journal_cursor(cur_path, entries)
+    idx = None
+    for k in range(len(entries)):
+        if entries[k]["seq"] == cursor:
+            idx = k
+            break
+    if idx is None:
+        return False                       # cursor at 0 (or not found) -> nothing to undo
+    file = entries[idx]["file"]
+    for k in range(idx - 1, -1, -1):       # nearest earlier snapshot of the SAME file
+        if entries[k]["file"] == file:
+            return True
+    return False                           # first snapshot of this file -> the floor
+
+
+def journal_can_redo(cart_dir):
+    """Read-only companion to journal_redo (#88): True iff there is a next commit to
+    re-apply. Mirrors journal_redo's own ceiling logic."""
+    jdir, log_path, cur_path, snap_dir = _journal_paths(cart_dir)
+    entries = _journal_load_entries(log_path)
+    if not entries:
+        return False
+    cursor = _journal_cursor(cur_path, entries)
+    for e in entries:                      # ascending -> the smallest seq > cursor
+        if e["seq"] > cursor:
+            return True
+    return False
+
+
 def journal_redo(cart_dir):
     """Re-apply the next commit's snapshot over the live file and step the cursor
     forward. Returns the restored file name, or None at the top (nothing to redo)."""

@@ -2611,12 +2611,12 @@ class Workstation:
 
     # -- durable undo/redo (Stage 7 of docs/shell_ux_technical_plan_v1.md) ------
     #
-    # The kid-facing verbs over the moy_carts journal walk. UI TRIGGER (a design call
-    # for the owner, spec Section 7): the left bar zone is full (8 icons), so undo/redo
-    # ride a KEYBOARD SHORTCUT in the code editor -- Ctrl+Z / Ctrl+Y (code_layer.py),
-    # which draws NO pixels (golden-safe) and is host-testable. The ON-DEVICE binding
-    # (which T-Deck key combo, or an in-body control) is UNRESOLVED and left to the
-    # owner; ws.undo()/ws.redo() are the mechanism either affordance drives.
+    # The kid-facing verbs over the moy_carts journal walk. UI TRIGGER: resolved by
+    # owner decision (#88, 2026-07-18) -- shared UNDO/REDO icons in the Editor's lent
+    # top-bar zone (EditorApp.draw_zone/_ZONE_TABS), reachable from every tab
+    # (Code/Blocks/Sprites/Map/Scene/Music), on top of the code editor's existing
+    # Ctrl+Z / Ctrl+Y host shortcut (code_layer.py) -- both drive the SAME
+    # ws.undo()/ws.redo() mechanism, so neither affordance can drift from the other.
 
     def undo(self):
         """Undo the last durable commit: restore the previous snapshot over the live
@@ -2629,6 +2629,32 @@ class Workstation:
         """Re-apply the next durable commit (the inverse of undo). Returns True iff a
         step was taken (False at the top)."""
         return self._journal_walk(True)
+
+    def can_undo(self):
+        """Read-only: True iff undo() would actually restore something (#88, the bar
+        icon's dimmed state). Cheap -- a journal.jsonl parse, no live-file write --
+        but still an SD read, so callers should only ask when they're about to
+        REPAINT (the zoned-bar cache key), never on a per-frame hot path."""
+        return self._journal_check(False)
+
+    def can_redo(self):
+        """Read-only counterpart to can_undo() for redo()."""
+        return self._journal_check(True)
+
+    def _journal_check(self, redo):
+        store = self.carts_store
+        if store is None or not self.cart:
+            return False
+        path = self.cart.get("path")
+        name = "journal_can_redo" if redo else "journal_can_undo"
+        if not (path and self.can_manage and hasattr(store, name)):
+            return False
+        fn = getattr(store, name)
+        try:
+            return bool(self._with_sd(lambda: fn(path)))
+        except Exception as exc:  # noqa: BLE001 -- a check failure must never crash the shell
+            print("Moybyte journal check failed:", _err_text(exc))
+            return False
 
     def _journal_walk(self, redo):
         store = self.carts_store
@@ -2647,6 +2673,11 @@ class Workstation:
             return False           # at a floor/ceiling -- nothing to restore
         self._reload_after_walk(changed)
         self._dirty = True
+        # The walk just moved the journal cursor, flipping can_undo()/can_redo() --
+        # invalidate so the bar's UNDO/REDO icons re-check + repaint their dimmed
+        # state on the NEXT frame (#88) instead of showing a stale enabled/disabled
+        # look until some unrelated zone_gen bump happens to force a re-render.
+        self.bar_layer.invalidate()
         return True
 
     def _reload_after_walk(self, file):

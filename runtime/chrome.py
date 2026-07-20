@@ -739,6 +739,7 @@ _ICON = {
     "wifi_off": 17,     # wifi-with-a-red-slash: the right-zone status glyph when
                         # there's NO connection (ws._wifi_icon_kind picks it, #Part3)
     "scene": 18,        # the scene placement editor tab (#85 Stage 2)
+    "undo": 19, "redo": 20,   # the shared Editor bar's undo/redo icons (#88)
 }
 
 # The baked default theme: each icon is 16 row-strings of 16 chars over the 16-color
@@ -860,6 +861,22 @@ _ICON_ART = {
         ".7...bbb......7.", ".7...bbb......7.", ".7............7.", ".77777777777777.",
         "................", "................", "................", "................",
     ),
+    # "undo"/"redo" (#88): the SAME curl the 12x12 _GLYPHS vocabulary already draws
+    # (undo left, redo its horizontal mirror -- kept pixel-consistent with the
+    # code editor's existing tool-palette icon so the two affordances read as one
+    # visual language), just re-authored at 16x16 for the themeable IconSheet.
+    "undo": (
+        "................", "................", "................", "................",
+        ".....7..........", "....77..........", "...77777........", "..777777........",
+        "...77777..7.....", "....77...77.....", "........777.....", "......7777......",
+        "................", "................", "................", "................",
+    ),
+    "redo": (
+        "................", "................", "................", "................",
+        "..........7.....", "..........77....", "........77777...", "........777777..",
+        ".....7..77777...", ".....77...77....", ".....777........", "......7777......",
+        "................", "................", "................", "................",
+    ),
     # "Moy", the moybyte mascot: one big pixel (a byte) with a square bite chomped
     # from the top-right corner, two eyes + a smile + stubby feet. "Grape" skin --
     # body = indigo (d/13), shadow = dark-purple (2), sheen = light-grey (6), eyes
@@ -879,8 +896,9 @@ _ICON_ART = {
 # new icons without a manual wipe. A bump discards a user's custom icon edits, exactly
 # like a built-in cart re-seed. (v1 = the first full restyle; v2 = added the "moy"
 # mascot slot for the boot logo; v3 = added the "wifi_off" no-connection status slot;
-# v4 = added the "scene" placement-editor tab slot, #85 Stage 2.)
-_ICON_VERSION = 4
+# v4 = added the "scene" placement-editor tab slot, #85 Stage 2; v5 = added the
+# "undo"/"redo" bar-icon slots, #88.)
+_ICON_VERSION = 5
 
 
 # --- Panel THEMES (owner ask, 2026-07-08) -----------------------------------

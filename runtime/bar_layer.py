@@ -440,10 +440,13 @@ class BarLayer:
         return s
 
     def _draw_dock(self, where):
-        """The persistent bottom dock: home / code / draw / map / run / settings.
-        The active slot (home on the desktop, settings in Settings) is highlighted;
-        tool slots that need an open cart read dimmed on the home desktop. Suppressed entirely in
-        the windowed WM (#73): the dock is desktop-level chrome, not something a
+        """The persistent bottom dock: a fixed five-tool subset (home / code / draw /
+        map / run / settings, predating the blocks/scene/music editors -- see
+        _DOCK_SLOTS) -- NOT the full editor roster; blocks/scene/music are reached
+        via the Editor's zoned bar (EditorApp draw_zone), not this dock. The active
+        slot (home on the desktop, settings in Settings) is highlighted; tool slots
+        that need an open cart read dimmed on the home desktop. Suppressed entirely
+        in the windowed WM (#73): the dock is desktop-level chrome, not something a
         Settings WINDOW should carry a copy of."""
         if getattr(self.ws, "windowed_chrome", False):
             return

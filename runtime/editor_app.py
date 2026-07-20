@@ -44,25 +44,35 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editors import CodeEditor, PaintEditor
 
 try:
-    from bar_layer import _BAR_ICON, _BAR_GAP, _ZONE_LEFT_GAME
+    from bar_layer import _BAR_ICON, _ZONE_LEFT_GAME
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.bar_layer import _BAR_ICON, _BAR_GAP, _ZONE_LEFT_GAME
+    from runtime.bar_layer import _BAR_ICON, _ZONE_LEFT_GAME
 
 
 # The Editor's lent left zone (Stage 4 of docs/shell_ux_technical_plan_v1.md, #46
-# zoned bar): PROJECTS (back to the picker) + the tab ladder + PLAY + SAVE, in the
-# spec Section 6 order (Projects -> Config -> Blocks -> Code -> Sprites -> Map -> Music
-# -> PLAY -> SAVE), rendered as icons inside the rect the bar lends it. Each entry is
-# (tab_name_or_None_or_ACTION, icon_kind); `tab_name` is what EditorApp.tab equals when
-# that icon's destination is showing (so draw_zone can highlight it). PROJECTS
-# (_ZONE_PROJECTS -> open_picker, edit another project), PLAY (None) and SAVE
-# (_ZONE_SAVE) are ACTIONS, not destinations, so they're never highlighted -- SAVE
-# dispatches to the active tab's persist verb (save_current), the ONE compact save
-# affordance the unified bar carries so every editor BODY stays chrome-free (fits 320px:
-# 10 icons * 18px = 180px inside the ~202px lent zone). This is what makes the bar
-# identical across all six tabs -- code/blocks/music no longer need their own SAVE/RUN/CLOSE.
+# zoned bar): PROJECTS (back to the picker) + the tab ladder + UNDO/REDO + PLAY +
+# SAVE, in the spec Section 6 order (Projects -> Config -> Blocks -> Code -> Sprites
+# -> Map -> Music -> UNDO -> REDO -> PLAY -> SAVE), rendered as icons inside the rect
+# the bar lends it. Each entry is (tab_name_or_None_or_ACTION, icon_kind);
+# `tab_name` is what EditorApp.tab equals when that icon's destination is showing
+# (so draw_zone can highlight it). PROJECTS (_ZONE_PROJECTS -> open_picker, edit
+# another project), UNDO/REDO (_ZONE_UNDO/_ZONE_REDO -> ws.undo()/ws.redo(), #88),
+# PLAY (None) and SAVE (_ZONE_SAVE) are ACTIONS, not destinations, so they're never
+# highlighted -- SAVE dispatches to the active tab's persist verb (save_current),
+# the ONE compact save affordance the unified bar carries so every editor BODY stays
+# chrome-free. This is what makes the bar identical across all six tabs -- code/
+# blocks/music no longer need their own SAVE/RUN/CLOSE, and now none of them need
+# their own undo/redo either (#88: UNDO/REDO used to be a Code-only Ctrl+Z/Y).
+#
+# Fits 320px: 12 icons * 16px = 192px inside the ~202px lent zone -- UNDO/REDO (#88)
+# pushed the ladder from 10 icons to 12, which no longer fits at the original
+# _BAR_GAP-per-icon (2px) stride (12*18 = 216px, 14px over budget); _ZONE_STRIDE
+# drops the inter-icon gap to 0 (icons flush) to claw that back rather than reach
+# for the owner's fallback (a menu/overflow) -- see #88's design-call comment.
 _ZONE_SAVE = "\x00save"          # sentinel: the SAVE action icon (never a real tab)
 _ZONE_PROJECTS = "\x00projects"  # sentinel: back to the project-picker (never a real tab)
+_ZONE_UNDO = "\x00undo"          # sentinel: UNDO action icon -> ws.undo() (#88)
+_ZONE_REDO = "\x00redo"          # sentinel: REDO action icon -> ws.redo() (#88)
 _ZONE_TABS = (
     (_ZONE_PROJECTS, "projects"),  # <- back to the PROJECT-PICKER (edit another project)
     ("cards", "edit"),
@@ -72,10 +82,12 @@ _ZONE_TABS = (
     ("map", "map"),
     ("scene", "scene"),     # placed-actor placement editor (#85 Stage 2)
     ("music", "music"),
+    (_ZONE_UNDO, "undo"),   # UNDO -> ws.undo() (#88), dimmed when there's nothing to undo
+    (_ZONE_REDO, "redo"),   # REDO -> ws.redo() (#88), dimmed when there's nothing to redo
     (None, "run"),          # PLAY
     (_ZONE_SAVE, "save"),   # SAVE -> save_current() (persist the active tab)
 )
-_ZONE_STRIDE = _BAR_ICON + _BAR_GAP
+_ZONE_STRIDE = _BAR_ICON        # 0-gap ladder (#88) -- see the block comment above
 
 # The SHELF-density zone (visual identity v1 Phase 3, the Studio mockup): the six
 # tabs as LABELED chips (icon + name) via ui.tab_row, PROJECTS as an icon chip on
@@ -324,15 +336,17 @@ class EditorApp:
     # chrome was dissolved into it (SAVE routes through save_current above).
 
     def draw_zone(self, cv, rect):
-        """Draw the tab ladder + PLAY + SAVE inside the rect the bar lent us,
-        highlighting the active tab. `cv` may be the bar's offscreen cache strip
-        (#43) -- this draws the SAME pixels either way, which is what makes the
-        cached strip pixel-identical to a direct render.
+        """Draw the tab ladder + UNDO/REDO + PLAY + SAVE inside the rect the bar
+        lent us, highlighting the active tab. `cv` may be the bar's offscreen cache
+        strip (#43) -- this draws the SAME pixels either way, which is what makes
+        the cached strip pixel-identical to a direct render.
 
         The icon side + stride derive from the lent rect's HEIGHT (16*fs -- the
         bar hands over an icon-high rect), so the ladder scales with the system
-        font (#39): at fs=1 this is byte-identical to the frozen 16px/18px
-        constants, at fs=2+ the icons no longer overlap."""
+        font (#39): at fs=1 this is byte-identical to the frozen 16px/0-gap
+        constants, at fs=2+ the icons no longer overlap. UNDO/REDO (#88) each
+        query ws.can_undo()/ws.can_redo() -- an SD-backed journal read, but one
+        that only runs HERE, inside a cache-miss re-render (never per-frame)."""
         ws = self.ws
         NAMES = self._NAMES
         if not ws.layout._base:
@@ -352,14 +366,32 @@ class EditorApp:
             return
         x0, y0, w, h = rect
         ic = h if h > 0 else _BAR_ICON      # icon side (16*fs)
-        stride = ic + (ic // 8)             # _BAR_GAP (2) scaled: 2*fs == ic//8
+        stride = ic                         # 0-gap ladder (#88) -- see _ZONE_STRIDE
         for i, (tab, glyph) in enumerate(_ZONE_TABS):
             x = x0 + i * stride
             if x + ic > x0 + w:
                 break                       # ran out of lent width -- draw what fits
             if tab is not None and tab == self.tab:
                 cv.rect(x, y0, ic, ic, NAMES["indigo"])
-            ws._icon(glyph, x, y0, cv)
+            if tab == _ZONE_UNDO:
+                self._draw_history_icon(cv, glyph, x, y0, ic, ws.can_undo())
+            elif tab == _ZONE_REDO:
+                self._draw_history_icon(cv, glyph, x, y0, ic, ws.can_redo())
+            else:
+                ws._icon(glyph, x, y0, cv)
+
+    def _draw_history_icon(self, cv, glyph, x, y, ic, enabled):
+        """Draw the UNDO/REDO bar icon (#88), dimmed when the journal has nothing to
+        walk. `enabled` reads the themeable 16x16 IconSheet sprite like any other bar
+        icon; disabled falls back to the plain _glyph bitmap tinted dim (the SAME
+        disabled affordance the bottom dock uses, bar_layer._draw_dock) -- there's no
+        separate 'dimmed' sprite variant, so the fallback vocabulary carries the
+        color instead."""
+        ws = self.ws
+        if enabled:
+            ws._icon(glyph, x, y, cv)
+        else:
+            ws._glyph(glyph, (x, y, ic, ic), self._NAMES["dark_blue"], cv)
 
     def _zone_parts(self, rect):
         """PURE shelf-zone geometry (shared by draw_zone and zone_tap so a strip-
@@ -400,7 +432,7 @@ class EditorApp:
             return False
         x0, y0, w, h = rect if rect is not None else _ZONE_LEFT_GAME
         ic = h if h > 0 else _BAR_ICON
-        stride = ic + (ic // 8)
+        stride = ic                         # 0-gap ladder (#88) -- matches draw_zone
         for i, (tab, _glyph) in enumerate(_ZONE_TABS):
             x = x0 + i * stride
             if x + ic > x0 + w:
@@ -427,6 +459,10 @@ class EditorApp:
             ws._open_blocks()
         elif tab == "music":
             ws._open_music()
+        elif tab == _ZONE_UNDO:   # UNDO (#88): the shared journal walk, any tab
+            ws.undo()
+        elif tab == _ZONE_REDO:   # REDO (#88)
+            ws.redo()
         elif tab == _ZONE_SAVE:   # SAVE: persist the active tab (bar's one save affordance)
             self.save_current()
         else:                     # PLAY (tab is None)
