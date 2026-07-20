@@ -101,8 +101,8 @@ def test_settings_screen_opens_and_renders(tmp_path):
 
 def test_status_strip_menu_opens_settings_from_home(tmp_path):
     """The launcher has no bottom dock (#46) and no gear (#52 -- Settings moved into the
-    ≡ system menu, OS-style). Tapping ≡ opens the menu; its first item SETTINGS opens
-    Settings."""
+    ≡ system menu, OS-style). Tapping ≡ opens the menu; SETTINGS (#105: now the second
+    selectable row, after the launcher-only SEARCH row) opens Settings."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
@@ -110,7 +110,8 @@ def test_status_strip_menu_opens_settings_from_home(tmp_path):
     drv.click(x + w // 2, y + h // 2)
     drv.frame(1 / 30)
     assert ws.sysmenu.open
-    drv.press("a"); drv.frame(1 / 30); drv.frame(1 / 30)   # activate SETTINGS (first item)
+    drv.press("down"); drv.frame(1 / 30)                    # SEARCH -> SETTINGS
+    drv.press("a"); drv.frame(1 / 30); drv.frame(1 / 30)    # activate SETTINGS
     assert ws.screen == "settings"
 
 

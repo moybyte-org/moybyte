@@ -221,14 +221,16 @@ def test_cart_bar_blocks_icon_opens_blocks(tmp_path):
 
 def test_launcher_bar_menu_opens_settings(tmp_path):
     """Settings moved off the bar into the ≡ system menu (#52). Tapping ≡ on the home
-    bar opens the dropdown; its first item (SETTINGS) opens Settings."""
+    bar opens the dropdown; SETTINGS (#105: the second selectable row now, after the
+    launcher-only SEARCH row) opens Settings."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     drv.click(*_center(ws.layout.sysmenu_btn))
     drv.frame(1 / 30)
     assert ws.sysmenu.open
-    drv.press("a"); drv.frame(1 / 30); drv.frame(1 / 30)   # activate SETTINGS (first item)
+    drv.press("down"); drv.frame(1 / 30)                    # SEARCH -> SETTINGS
+    drv.press("a"); drv.frame(1 / 30); drv.frame(1 / 30)    # activate SETTINGS
     assert ws.screen == "settings"
 
 

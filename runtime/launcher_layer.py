@@ -154,6 +154,9 @@ class Launcher:
                                       # draw the real themeable pencil/plus icon big
         self.cover_for = None         # optional (cart, w, h) -> full-bleed cover
                                       # blittable (visual identity v1 Section 11.4)
+        self.favorite_for = None      # optional cart -> bool (console wires ws.is_favorite,
+                                      # #105): when set, the SELECTED card's corner star
+                                      # badge draws + is tappable (favorite_rect below)
         if layout is None:
             # Defensive default for a bare Launcher(items) (no caller does this); lazy so
             # there's no launcher_layer<->console module-load cycle.
@@ -351,6 +354,35 @@ class Launcher:
         return {"play": (x + pad, by, pw, bh),
                 "change": (x + 2 * pad + pw, by, avail - pw, bh)}
 
+    def _favorite_badge_geom(self, rect):
+        """The corner badge square for card rect `rect` -- one formula shared by
+        the draw path (_draw_cart_card) and favorite_rect (hit-test), so they can
+        never desync."""
+        x, y, w, _h = rect
+        fs = self.layout.fs
+        sz = max(9 * fs, 12)
+        pad = max(fs, 2)
+        return (x + w - sz - pad, y + pad, sz, sz)
+
+    def favorite_rect(self, i):
+        """The SELECTED real card's corner favorite-star badge rect (#105: mirrors
+        the pseudo card's corner pushpin -- a small always-present corner control,
+        not a new chrome idiom), or None for a pseudo tile, an out-of-range index,
+        a scrolled-out-of-view card, or when no favorite_for predicate is wired.
+        Draw and hit-test both call this, so they can't desync (the action_rects
+        pattern)."""
+        if self.favorite_for is None or not self.items or i is None:
+            return None
+        if not (0 <= i < len(self.items)):
+            return None
+        it = self.items[i]
+        if it.get("type") in PSEUDO_TILE_TYPES or not it.get("path"):
+            return None
+        r = self.tile_rect(i)
+        if r is None:
+            return None
+        return self._favorite_badge_geom(r)
+
     def draw(self, cv, sheet_for=None):
         # Cards only -- the framed Library panel / tool backdrop + status strip
         # are drawn by the owning layer around this. One look on EVERY tier now
@@ -455,6 +487,17 @@ class Launcher:
                 label = label[:maxc]
             cv.print(label, bx + max(fs, (bw - len(label) * fw) // 2),
                      by + (bh - 8 * fs) // 2, NAMES["black"], 1)
+        # Favorite star (#105): a corner badge on the SELECTED card only, mirroring
+        # the pseudo card's corner-pushpin idiom rather than inventing new chrome
+        # (LauncherHomeLayer.handle_pointer hit-tests the identical geometry via
+        # favorite_rect, so draw and tap can't desync).
+        if selected and self.favorite_for is not None:
+            fx, fy, fw2, fh2 = self._favorite_badge_geom(rect)
+            fav = bool(self.favorite_for(it))
+            cv.rect(fx, fy, fw2, fh2, NAMES["black"])
+            cv.rectb(fx, fy, fw2, fh2, NAMES["yellow"] if fav else NAMES["light_grey"])
+            self._blit_glyph(cv, "star", (fx, fy, fw2, fh2),
+                              NAMES["yellow"] if fav else NAMES["light_grey"])
         self._card_frame(cv, rect, selected)
 
     def _draw_pseudo_card(self, cv, it, rect, selected):
@@ -581,6 +624,7 @@ class LauncherHomeLayer:
         # only runs once every retained framebuffer already holds them.
         self._full_streak = 0
         self._statics = None
+        self._search_kprev = 0        # keyboard edge detect while typing a search query
 
     def _statics_key(self, cv):
         """Everything the home frame's STATIC chrome (wallpaper backdrop +
@@ -588,7 +632,8 @@ class LauncherHomeLayer:
         forces full paints until the streak re-arms."""
         ws = self.ws
         return (cv.w, cv.h, ws.layout.fs, id(ws.theme_colors),
-                ws.wallpaper_id, len(ws.launcher.items))
+                ws.wallpaper_id, len(ws.launcher.items),
+                getattr(ws, "search_query", ""), getattr(ws, "search_typing", False))
 
     def _try_drag_partial(self, cv, dt):
         """The shelf drag fast path: while a touch drag scrolls the grid and
@@ -709,8 +754,23 @@ class LauncherHomeLayer:
             cv.spr(moy, hx, y + (lay.lib_header_h - 16 * isc) // 2, isc)
         else:
             ws._icon("moy", hx, y + (lay.lib_header_h - 16 * fs) // 2, cv)
-        _print_scaled(cv, "LIBRARY", hx + 16 * isc + 6 * fs,
-                      y + (lay.lib_header_h - 8 * fs * mult) // 2, th["ink"], mult)
+        # Search (#105): while a query is being typed/held, the header swaps to
+        # "SEARCH: <query>" (plain 1x text, since a typed string can run longer
+        # than the display-type "LIBRARY" heading ever needs to fit) -- the ONE
+        # visual change search makes to an otherwise-untouched idle frame, so a
+        # quiet (no search) launcher repaints byte-identical to before.
+        query = getattr(ws, "search_query", "")
+        typing = getattr(ws, "search_typing", False)
+        if query or typing:
+            label = "SEARCH: " + query + ("_" if typing else "")
+            tx0 = hx + 16 * isc + 6 * fs
+            maxc = max(6, (x + w - tx0) // lay.font_w)
+            if len(label) > maxc:
+                label = label[:maxc]
+            cv.print(label, tx0, y + (lay.lib_header_h - 8 * fs) // 2, th["ink"], 1)
+        else:
+            _print_scaled(cv, "LIBRARY", hx + 16 * isc + 6 * fs,
+                          y + (lay.lib_header_h - 8 * fs * mult) // 2, th["ink"], mult)
         # Footer: "N CARTRIDGES" centered between thin rules.
         n = 0
         for it in ws.launcher.items:
@@ -729,8 +789,33 @@ class LauncherHomeLayer:
         cv.rect(tx + tw + 8 * fs, ly, max(0, lx1 - (tx + tw + 8 * fs)), fs,
                 th["ink_dim"])
 
+    def _handle_search_typing(self, i):
+        """Keyboard while a search query is being TYPED (ws.search_typing, entered
+        via the sysmenu SEARCH item) -- mirrors settings_layer._wifi_input's
+        password-typing branch: typed ASCII bytes edit the query live (plain
+        printable range only -- no `=[]{}<>%` needed, so it works on the T-Deck's
+        keyboard), BACKSPACE deletes, ENTER leaves typing (keeping the filtered
+        results up for d-pad/trackball browsing), ESC leaves AND clears back to
+        the full grid. Grid nav is intentionally NOT handled here (mirrors the
+        wifi panel: while typing, the d-pad doesn't drive anything else)."""
+        ws = self.ws
+        k = ws.input.last_key
+        if k and k != self._search_kprev:
+            if k in (10, 13):                       # ENTER -> stop typing, keep results
+                ws.close_search(clear=False)
+            elif k == 27:                           # ESC -> cancel back to the full grid
+                ws.close_search(clear=True)
+            elif k == 8:                            # BACKSPACE -> delete
+                ws.set_search_query(ws.search_query[:-1])
+            elif 32 <= k <= 126 and len(ws.search_query) < 24:
+                ws.set_search_query(ws.search_query + chr(k))
+        self._search_kprev = k
+        return True
+
     def handle_input(self, i):
         ws = self.ws
+        if getattr(ws, "search_typing", False):
+            return self._handle_search_typing(i)
         # Konami Easter egg (#21): watch every button press on the home desktop
         # for the secret sequence (the nav below still runs normally -- the egg
         # is a passive observer, so it never blocks the launcher).
@@ -777,6 +862,13 @@ class LauncherHomeLayer:
                 ws.launcher.scroll_cols(-1); return True
             if ws.launcher.max_scroll() > 0 and self._in(px, py, lay.scroll_rt):
                 ws.launcher.scroll_cols(1); return True
+            # The selected card's favorite star badge (#105) -- checked before the
+            # PLAY/CHANGE row and the grid press, same reason: a button tap must
+            # never fall through to the card's primary activation underneath it.
+            frect = ws.launcher.favorite_rect(ws.launcher.sel)
+            if frect is not None and self._in(px, py, frect):
+                ws.toggle_favorite(ws.launcher.selected())
+                return True
             # The selected card's PLAY / CHANGE buttons (wide-card tiers).
             # Checked before the grid press so a button tap never falls through to
             # the card's primary activation underneath it.
