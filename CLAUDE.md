@@ -16,7 +16,7 @@ Moybyte is a PC-first SDK + simulator for a future ESP32 kids' coding console, p
 2. **The `.moy` console (newer, active direction).** A TIC-80-style "fantasy workstation" where *everything is a cartridge* — now running the shipped **v0.5 shell** (everything-is-a-process: launcher / Player / Editor apps over a fullscreen-stack WM; spec `docs/shell_ux_v1.md`). This is where current feature work happens.
    - `runtime/` — the **host reference** of the console (launcher → Player → tabbed Editor). Pure host, fast dev loop. See `runtime/README.md` for the per-file map; don't duplicate it.
    - `firmware/lilygo_t_deck_plus_micropython/` — the **device port** of that same console (MicroPython).
-   - `firmware/esp32_p4_wifi6_touch_lcd_7b/` — the **second device target** (#58): the 7″ 1024×600 MIPI-DSI "desktop workstation" board. Panel/touch/SD/WiFi hardware-confirmed; the **console runs on glass** (launcher under `WindowedWM`, carts on internal flash) — colors/flicker/touch/popup/wallpaper all fixed on-glass, the game composite runs on the hardware **PPA** (`moy_ppa`) with an **async-overlap** frame path (most carts ~60fps now, Battle City 35→56), app-window drags ~15fps (retained backdrop cache; the full-screen restore is PSRAM-bandwidth-bound, not PPA-helpable).
+   - `firmware/esp32_p4_wifi6_touch_lcd_7b/` — the **second device target** (#58): the 7″ 1024×600 MIPI-DSI "desktop workstation" board. Panel/touch/SD/WiFi hardware-confirmed; the **console runs on glass** (the two-worlds desktop under `WindowedWM` — boots to the desk, #105; carts on internal flash; on-glass verify of the two-worlds split pending next flash) — colors/flicker/touch/popup/wallpaper all fixed on-glass, the game composite runs on the hardware **PPA** (`moy_ppa`) with an **async-overlap** frame path (most carts ~60fps now, Battle City 35→56), app-window drags ~15fps (retained backdrop cache; the full-screen restore is PSRAM-bandwidth-bound, not PPA-helpable).
    - `system_carts/*.moy` — seed cartridges (folder = `manifest.json` + `main.py` + `config.json`).
 
 The two systems share a design intent but **not code**. `.moyproj` is the old format; `.moy` is the v0.4 format.
@@ -104,11 +104,23 @@ to whoever called it.
   the **memoized** visible/draw stack (zero per-frame list churn, #66), and the
   game↔system viewport composite. **`runtime/wm_windowed.py`** (`WindowedWM` —
   host/P4 only, deliberately NOT staged to the S3 build) is the second presentation
-  tier (#73/#58 "Desktop look"): the Picotron-style windowed desktop — launcher =
-  the desktop root, every pushed process a window with a WM title strip
-  (minimize/maximize/close), draggable by the strip and resizable by the
-  bottom-right grip (apply-on-release rubber band); open windows appear as
-  **taskbar chips** in the desktop's OS bar. The **picker + Editor share ONE
+  tier (#73/#58 "Desktop look"): the Picotron-style windowed desktop, now split
+  into **TWO WORLDS (#105, 2026-07-20)** — boot lands on the **DESK** (stack kind
+  `"desk"`, the make world's floor: wallpaper + a system-app icon column
+  (PLAY/PROJECTS/Files/Paint/Writer/Sheets/Storybook/Calc, tile-0 cart art) +
+  the one OS bar with taskbar chips and NO context-X), where every process above
+  the desk is a window with a WM title strip (minimize/maximize/close),
+  draggable by the strip and resizable by the bottom-right grip
+  (apply-on-release rubber band). The **PLAY icon drops to the fullscreen
+  Library** (the play world): system-app carts leave the shelf on this tier
+  ("apps are windows, games are fullscreen"), a tap runs the game FULLSCREEN
+  exactly like the small tiers (windows only exist above `"desk"`, so every
+  `not _order` deferral presents fullscreen; `composite_game` routes the play
+  world through the polymorphic `_blit_game` — native P4 blit / web b64-spr),
+  and the Make tile / a card's CHANGE drop back to the desk (CHANGE with that
+  project's Editor open). `ws.windowed_chrome` is a world-aware PROPERTY
+  (`wm.desk_open()`), and a world flip triggers a relayout so app-layout chrome
+  never leaks across worlds. The **picker + Editor share ONE
   "Make" window** (`_GROUP`): picking a project swaps its content to the Editor,
   PROJECTS/its X swap back (the back-stack keeps both kinds — presentation-only
   merge). **Input focus is decoupled from the back-stack**: clicking a window or
@@ -117,9 +129,9 @@ to whoever called it.
   feed click-stripped so the background cart never eats editor taps; only an
   explicit exit ends a run (strip X / hold-BACKSPACE while focused / app verb).
   True multi-cart (N games ticking) stays out of scope per #73.
-  `ws.windowed_chrome` makes the zoned bar suppress its OS right zone + the dock
+  In the desk world the zoned bar suppresses its OS right zone + the dock
   inside windows, so a window's bar row is purely the app's toolbar — the desktop
-  bar is the ONE taskbar. A running cart composites integer-scaled + centered in
+  bar is the ONE taskbar. A running desk-world cart composites integer-scaled + centered in
   its window (no minimize — hiding a game would silently pause it); per-window
   **layout contexts** re-run the #39 responsive layouts at each window's size,
   and `Wallpaper.draw` composites/fills the SYSTEM canvas (cover-crop backdrop)
@@ -193,7 +205,16 @@ to whoever called it.
   placement) and the **Desk Lab interop docs** (#78:
   `tables/*.moysheet` from the Sheets app + `docs/*.moytext` from Writer, read
   back via the `table()`/`text()` cart verbs — all in `docs/moy_cart_api.md`).
-  (frozen as `moy_carts`)
+  Also owns the **#108 user-files layer**: `files/<kind>/` BESIDE the carts dir
+  (drawings/docs/tables/sprites/music + folder-valued recordings — the
+  `FILE_KINDS` registry), with list/load/save/rename/duplicate verbs, a
+  restorable `files/trash/` (count-pruned, no confirm dialogs), auto-naming
+  (`new_file_name`), and the one-shot `artwork.moyimg → files/drawings/`
+  migration. Browsed by the **Files system app** (`files_app.py` over the
+  shared `file_widgets.FileGridView` thumbnail grid — the same widget Paint's
+  OPEN mode embeds); Paint autosaves NAMED drawings on an idle debounce and
+  WALL/GAME/wallpaper are **copy-on-use** (the design discussion + decisions
+  live in #108's comments). (frozen as `moy_carts`)
 - **Dual cart runtimes (#67, on-glass both boards 2026-07-14):** a manifest
   `"runtime": "lua"` (+ `"main": "main.lua"`) routes `Player.start` through the
   injected `ws.lua_runtime` factory instead of the Python compile/exec path — a

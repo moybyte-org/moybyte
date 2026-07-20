@@ -93,6 +93,16 @@ class FullscreenStackWM:
         the bar-visibility rule, the perf sampler, and the FPS overlay gate all key on."""
         return self._stack[-1] == "desktop"
 
+    # -- the two worlds (#105): play (fullscreen) vs make (the windowed desk) --
+
+    has_desk = False                   # capability probe: only WindowedWM has a desk
+
+    def desk_open(self):
+        """True while the MAKE world (the windowed tier's desk) is open --
+        `ws.windowed_chrome` projects this. Always False on this fullscreen
+        tier: there is one world here and it is the fullscreen stack."""
+        return False
+
     def keys_to_cart(self):
         """Console hook (#44 redraw gate): this frame's keys are consumed by a
         healthy RUNNING cart, not by any system surface -- so a key press/hold

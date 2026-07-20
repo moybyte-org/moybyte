@@ -215,21 +215,19 @@ class WriterAppLayer(ListShellApp):
         return True
 
     def _typed_keys(self, inp):
-        # One insert per physical press (the code_layer edge idiom): the keyboard
-        # reports the byte for the frame it is down then 0.
         ed = self.editor
         if ed is None:
             return
-        k = inp.last_key
-        if k and k != self._ekey_prev:
-            if len(ed.text()) >= MAX_CHARS and k not in (0x08, 0x7F):
-                self.status = "PAGE FULL"
-            elif ed.key(k):
-                self._pending_keys += 1
-                self.status = _title_of(ed.text())
-                if self._pending_keys >= AUTOSAVE_KEYS:
-                    self.flush()
-        self._ekey_prev = k
+        k = self._edge_key(inp)
+        if not k:
+            return
+        if len(ed.text()) >= MAX_CHARS and k not in (0x08, 0x7F):
+            self.status = "PAGE FULL"
+        elif ed.key(k):
+            self._pending_keys += 1
+            self.status = _title_of(ed.text())
+            if self._pending_keys >= AUTOSAVE_KEYS:
+                self.flush()
 
     def handle_pointer(self, px, py, click):
         ws = self.ws

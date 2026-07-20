@@ -54,6 +54,7 @@ CART_ORDER = [
     "calc",
     "storybook",
     "sheets",
+    "files",
     "wifi",
 ]
 

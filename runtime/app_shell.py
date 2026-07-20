@@ -96,6 +96,19 @@ class ListShellApp:
             self.status = ("SAVE FAILED " + str(exc))[:28]
             return False
 
+    # -- typed keys ------------------------------------------------------------
+
+    def _edge_key(self, inp):
+        """The typed-key edge (one key per physical press -- the code_layer
+        idiom): the keyboard reports the byte for the frame it is down then 0.
+        Returns the fresh byte or 0. Hosts keep `self._ekey_prev = 0` in
+        __init__/mode resets. (Writer/Files use this; the sheets/storybook
+        inline copies predate it and can migrate.)"""
+        k = inp.last_key
+        fresh = k if (k and k != self._ekey_prev) else 0
+        self._ekey_prev = k
+        return fresh
+
     # -- the list view's scroll window + nav -------------------------------------
 
     def _scroll_list(self):

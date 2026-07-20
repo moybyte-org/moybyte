@@ -806,6 +806,7 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1, windowed=Fals
     if windowed and ws._sys_canvas is not None:
         from runtime.wm_windowed import WindowedWM
         ws.wm = WindowedWM(ws)
+        ws.open_desk()                 # two worlds (#105): boot onto the DESK
     return ws
 
 

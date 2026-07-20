@@ -1271,3 +1271,283 @@ def _rmtree(path):
         os.rmdir(path)
     except OSError:
         pass
+
+
+# --- user files (#108): the kid's creations as real files -------------------
+#
+# Creations that outlive any one app or cart (a Paint drawing, a Writer doc, a
+# recorded voice set) live under ONE visible root BESIDE the carts dir --
+# files/<kind>/<name><ext> -- real folders with real names on the card, so the
+# same stuff a File Manager shows is what a PC sees on the mounted SD. Kinds
+# are flat (no nesting in v1) and kind-homed like every desktop OS's known
+# folders. Carts never reference these: reuse is copy-on-use through the
+# existing attach verbs (the one exception, recordings, is used-by-name and
+# never copied INTO a cart -- #70's privacy rule). Delete moves to
+# files/trash/<kind>/ (restorable; pruned by count), never destroys directly.
+
+FILES_DIR = "files"
+TRASH_DIR = "trash"
+TRASH_KEEP = 50          # prune the trash's oldest entries beyond this many
+
+# kind -> (extension, folder_valued, auto-name base). A folder-valued kind
+# (#70 recordings) holds one DIRECTORY per item (the macOS-bundle model); file
+# kinds hold one flat file per item. Every store verb below validates against
+# this registry, so an unknown kind is a loud ValueError, not a stray dir.
+FILE_KINDS = {
+    "drawings":   (IMAGE_EXT, False, "drawing"),
+    "docs":       (TEXT_EXT, False, "doc"),
+    "tables":     (TABLE_EXT, False, "table"),
+    "sprites":    (".moygfx", False, "sheet"),
+    "music":      (".moysong", False, "song"),
+    "recordings": ("", True, "recording"),
+}
+
+
+def _kind_spec(kind):
+    try:
+        return FILE_KINDS[kind]
+    except KeyError:
+        raise ValueError("unknown file kind: " + str(kind))
+
+
+def files_root(root=CARTS_DIR):
+    """The user-files root, beside the carts directory (like shared.moygfx)."""
+    return _sibling_path(root, FILES_DIR)
+
+
+def file_kind_dir(kind, root=CARTS_DIR):
+    _kind_spec(kind)
+    return files_root(root) + "/" + kind
+
+
+def file_path(kind, name, root=CARTS_DIR):
+    ext = _kind_spec(kind)[0]
+    return file_kind_dir(kind, root) + "/" + name + ext
+
+
+def _ensure_kind_dir(kind, root):
+    ensure_dirs(root)
+    _mkdir(files_root(root))
+    d = file_kind_dir(kind, root)
+    _mkdir(d)
+    return d
+
+
+def _mtime(path):
+    try:
+        return os.stat(path)[8]
+    except OSError:
+        return 0
+
+
+def _kind_entries(d, ext, folder_valued):
+    """[(name, mtime)] of the kind's items in `d`, newest first (mtime is
+    best-effort -- 0 on filesystems without one, leaving alphabetical order).
+    Skips the atomic-write machinery's .tmp/.bak orphans by construction: a
+    file item must end with the kind's extension exactly."""
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return []
+    out = []
+    for n in names:
+        p = d + "/" + n
+        if folder_valued:
+            if _is_dir(p):
+                out.append((n, _mtime(p)))
+        elif n.endswith(ext) and len(n) > len(ext) and not _is_dir(p):
+            out.append((n[:-len(ext)] if ext else n, _mtime(p)))
+    out.sort(key=lambda e: (-e[1], e[0]))
+    return out
+
+
+def list_files(kind, root=CARTS_DIR):
+    """The kind's item names, newest first."""
+    ext, folder_valued, _base = _kind_spec(kind)
+    entries = _kind_entries(file_kind_dir(kind, root), ext, folder_valued)
+    return [n for n, _m in entries]
+
+
+def count_files(kind, root=CARTS_DIR):
+    """How many items the kind holds -- a bare listdir filter, so the Files
+    kinds screen never pays list_files' per-item stat+sort just for a badge."""
+    ext, folder_valued, _base = _kind_spec(kind)
+    d = file_kind_dir(kind, root)
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return 0
+    if folder_valued:
+        return sum(1 for n in names if _is_dir(d + "/" + n))
+    return sum(1 for n in names if n.endswith(ext) and len(n) > len(ext))
+
+
+def load_file(kind, name, root=CARTS_DIR):
+    """A file item's text, or None if missing/unreadable (degrade-don't-throw,
+    like every asset loader). Folder-valued kinds have no single blob."""
+    if _kind_spec(kind)[1]:
+        return None
+    try:
+        return _read(file_path(kind, name, root))
+    except OSError:
+        return None
+
+
+def _unique_name(kind, name, root, path=None):
+    """`name` if free under `path` (default: the kind's live dir), else name_2,
+    name_3, ... -- the ONE collision probe every rename/duplicate/trash move
+    rides on (`path` swaps in _trash_path for the trash side)."""
+    path = path or file_path
+    if not _exists(path(kind, name, root)):
+        return name
+    i = 2
+    while _exists(path(kind, name + "_" + str(i), root)):
+        i += 1
+    return name + "_" + str(i)
+
+
+def new_file_name(kind, root=CARTS_DIR, base=None):
+    """The next free auto-name for the kind (drawing_1, drawing_2, ...) --
+    creations are auto-named so naming is never a gate; rename is optional."""
+    _ext, _fv, kind_base = _kind_spec(kind)
+    base = slug(base) if base else kind_base
+    i = 1
+    while _exists(file_path(kind, base + "_" + str(i), root)):
+        i += 1
+    return base + "_" + str(i)
+
+
+def save_file(kind, name, text, root=CARTS_DIR):
+    """Persist one file item atomically (folder-valued kinds are written by
+    their own tools, never through this). Returns the (slugged) stored name."""
+    if _kind_spec(kind)[1]:
+        raise ValueError(kind + " items are folders; write them in place")
+    name = slug(name)
+    _ensure_kind_dir(kind, root)
+    _write_atomic(file_path(kind, name, root), text)
+    return name
+
+
+def rename_file(kind, name, new_title, root=CARTS_DIR):
+    """Rename an item to (the slug of) `new_title`, unique-ified against the
+    kind's dir. Returns the final name (a contentless or unchanged title is a
+    no-op -- slug()'s "cart" fallback must never fire from a rename)."""
+    for ch in str(new_title):
+        if ch.isalpha() or ch.isdigit():
+            break
+    else:
+        return name
+    new = slug(new_title)
+    if new == name:
+        return name
+    new = _unique_name(kind, new, root)
+    os.rename(file_path(kind, name, root), file_path(kind, new, root))
+    return new
+
+
+def _copytree(src, dst):
+    _mkdir(dst)
+    for n in os.listdir(src):
+        s = src + "/" + n
+        d = dst + "/" + n
+        if _is_dir(s):
+            _copytree(s, d)
+        else:
+            _copy(s, d)
+
+
+def duplicate_file(kind, name, root=CARTS_DIR):
+    """Copy an item to the next free name_2/name_3 slot; returns the new name."""
+    folder_valued = _kind_spec(kind)[1]
+    new = _unique_name(kind, name, root)   # the source exists, so this yields name_2, name_3, ...
+    src = file_path(kind, name, root)
+    if folder_valued:
+        _copytree(src, file_path(kind, new, root))
+    else:
+        _write_atomic(file_path(kind, new, root), _read(src))
+    return new
+
+
+def _trash_dir(kind, root):
+    return files_root(root) + "/" + TRASH_DIR + "/" + kind
+
+
+def _trash_path(kind, name, root):
+    return _trash_dir(kind, root) + "/" + name + _kind_spec(kind)[0]
+
+
+def delete_file(kind, name, root=CARTS_DIR):
+    """Move an item to files/trash/<kind>/ (never destroy -- trash trains
+    recovery, confirms train click-through), then prune the trash's oldest
+    entries beyond TRASH_KEEP. Returns the name it holds in the trash."""
+    _kind_spec(kind)
+    _mkdir(files_root(root))
+    _mkdir(files_root(root) + "/" + TRASH_DIR)
+    _mkdir(_trash_dir(kind, root))
+    new = _unique_name(kind, name, root, _trash_path)
+    os.rename(file_path(kind, name, root), _trash_path(kind, new, root))
+    prune_trash(root)
+    return new
+
+
+def trash_list(root=CARTS_DIR):
+    """Every trashed item as (kind, name), newest first across kinds."""
+    out = []
+    for kind in FILE_KINDS:
+        ext, folder_valued, _base = FILE_KINDS[kind]
+        for n, m in _kind_entries(_trash_dir(kind, root), ext, folder_valued):
+            out.append((kind, n, m))
+    out.sort(key=lambda e: (-e[2], e[0], e[1]))
+    return [(k, n) for k, n, _m in out]
+
+
+def restore_file(kind, name, root=CARTS_DIR):
+    """Move a trashed item back into its kind dir (unique-ified against what
+    was made since). Returns the restored name."""
+    _ensure_kind_dir(kind, root)
+    new = _unique_name(kind, name, root)
+    os.rename(_trash_path(kind, name, root), file_path(kind, new, root))
+    return new
+
+
+def _remove_trash_entry(kind, name, root):
+    p = _trash_path(kind, name, root)
+    if _is_dir(p):
+        _rmtree(p)
+    else:
+        _remove(p)
+
+
+def prune_trash(root=CARTS_DIR, keep=TRASH_KEEP):
+    """Drop the trash's oldest entries beyond `keep` (mtime best-effort -- the
+    quota-pressure half of the trash story; there is no wall-clock retention
+    because the device RTC may never be set). A cheap listdir count gates the
+    stat+sort pass, so the every-delete call usually costs six listdirs."""
+    total = 0
+    for kind in FILE_KINDS:
+        try:
+            total += len(os.listdir(_trash_dir(kind, root)))
+        except OSError:
+            pass
+    if total <= keep:
+        return
+    for kind, name in trash_list(root)[keep:]:
+        _remove_trash_entry(kind, name, root)
+
+
+def empty_trash(root=CARTS_DIR):
+    prune_trash(root, keep=0)
+
+
+def migrate_user_files(root=CARTS_DIR):
+    """One-shot #108 migration: the legacy single-slot artwork.moyimg becomes
+    files/drawings/my_art.moyimg. Runs only while files/drawings/ does not
+    exist yet (its existence is the migrated marker), so a kid who later
+    empties the kind never sees the legacy drawing resurrected. The legacy
+    file is left in place -- older builds keep booting against it."""
+    if _exists(file_kind_dir("drawings", root)):
+        return None
+    blob = load_artwork(root)
+    if not blob:
+        return None
+    return save_file("drawings", "my_art", blob, root)

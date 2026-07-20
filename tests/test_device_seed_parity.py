@@ -59,6 +59,7 @@ TITLE_TO_FOLDER = {
     "Calc": "calc",
     "Storybook": "storybook",
     "Sheets": "sheets",
+    "Files": "files",
     "WiFi": "wifi",
 }
 

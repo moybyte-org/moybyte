@@ -14,6 +14,14 @@ def _open_paint(ws):
         if cart.get("title") == "Paint":
             ws.launcher.sel = i
             break
+    else:
+        # Windowed tier (#105): system apps are desk-only, not on the shelf.
+        assert ws.open_app(ws.artwork_app)
+        ws.input.begin_frame()
+        ws.frame(1 / 30)
+        assert ws.cart_error is None
+        assert ws.wm.top_kind() == "artwork"
+        return ws.artwork_app
     ws.open()
     ws.input.begin_frame()
     ws.frame(1 / 30)
@@ -74,10 +82,18 @@ def test_touch_stroke_undo_redo_and_shared_save(tmp_path):
     assert bytes(app.doc.pix) == changed
 
     assert app._save() is True
-    blob = moy_carts.load_artwork(carts)
+    # #108: the drawing persists as a NAMED user file, auto-named on first
+    # save; saving alone never touches the wallpaper copy (copy-on-set).
+    name = ws.artwork.doc_name()
+    assert name
+    blob = moy_carts.load_file("drawings", name, carts)
     assert moy_carts.decode_moyimg(blob) == (app.doc.W, app.doc.H, changed)
     wall = next(c for c in moy_carts.scan(carts) if c["title"] == "My Art")
+    assert "bg" not in wall["images"]
+    assert ws.artwork.set_wallpaper()
+    wall = next(c for c in moy_carts.scan(carts) if c["title"] == "My Art")
     assert wall["images"]["bg"] == blob
+    assert moy_carts.load_artwork(carts) == blob   # the wallpaper-copy store
 
 
 def test_publish_wallpaper_and_attach_as_game_bg(tmp_path):

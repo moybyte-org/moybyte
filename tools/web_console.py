@@ -171,6 +171,7 @@ class WebConsole:
         if windowed and self.ws._sys_canvas is not None:
             from runtime.wm_windowed import WindowedWM
             self.ws.wm = WindowedWM(self.ws)
+            self.ws.open_desk()        # two worlds (#105): boot onto the DESK
         if cart:
             self._open_named_cart(cart, save_dir)
         self.driver = host_app.ConsoleDriver(self.ws)

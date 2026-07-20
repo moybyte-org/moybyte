@@ -67,11 +67,16 @@ def test_windowed_ignored_at_320x240(tmp_path):
 
 
 def test_root_only_defers_to_fullscreen_shape(tmp_path):
-    """With just the launcher on the stack there are no windows: the visible
-    stack is [launcher] + overlays, exactly the fullscreen tier's shape."""
+    """The PLAY world (#105): with no desk on the stack there are no windows --
+    the visible stack is [launcher] + overlays, exactly the fullscreen tier's
+    shape. Boot lands on the DESK, so drop to the Library first."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     drv.frame(1 / 30)
+    assert ws.wm._stack == ["launcher", "desk"]      # boot = the desk
+    ws.open_library()
+    drv.frame(1 / 30)
+    assert ws.wm._stack == ["launcher"]
     assert ws.wm._order == []
     assert ws.wm.visible_stack()[0] is ws.launcher_layer
 
@@ -110,7 +115,7 @@ def test_picker_and_editor_share_one_make_window(tmp_path):
     assert ws.wm._order == ["make"]              # STILL one window
     assert ws.wm._wins["make"] is win            # the same record
     assert win.kind == "menu"                    # showing the Editor now
-    assert ws.wm._stack == ["launcher", "picker", "menu"]   # stack unchanged
+    assert ws.wm._stack == ["launcher", "desk", "picker", "menu"]   # stack unchanged
     assert win.buf is not None and win.ctx is not None
     # The window's layout context is sized to the window, not the desktop.
     assert win.ctx.layout.w == win.buf.w and win.ctx.layout.w < 1024
@@ -476,6 +481,7 @@ def test_title_strip_buttons_min_max_close(tmp_path):
     names = [n for n, _r in ws.wm._strip_buttons(ws.wm._wins["settings"])]
     assert names == ["close", "max", "min"]
     ws.go_home()
+    ws.open_desk()                              # a player WINDOW needs the desk (#105)
     ws.open()                                   # run a cart
     drv.frame(1 / 30)
     names = [n for n, _r in ws.wm._strip_buttons(ws.wm._wins["desktop"])]
@@ -626,7 +632,7 @@ def test_game_keeps_running_under_settings_window(tmp_path):
     drv.frame(1 / 30)
     ws.open_settings()
     drv.frame(1 / 30)
-    assert ws.wm._stack == ["launcher", "desktop", "settings"]
+    assert ws.wm._stack == ["launcher", "desk", "desktop", "settings"]
     assert ws.wm.keeps_animating(1 / 30)       # the redraw gate stays live
     ticks = [0]
     real_tick = ws.player.tick
@@ -664,7 +670,7 @@ def test_settings_wifi_panel_connects_while_game_runs(tmp_path):
     assert "Home WiFi" in sl.wifi_known        # credentials remembered
     # The game never left the cart slot.
     assert ws.cart.get("title") == cart_title
-    assert ws.wm._stack[1] == "desktop"
+    assert ws.wm._stack[2] == "desktop"   # above the desk (#105)
 
 
 def test_bar_wifi_icon_deep_links_to_settings_wifi(tmp_path):
@@ -695,7 +701,7 @@ def test_closing_make_never_takes_settings_with_it(tmp_path):
     ws.pick_selected()
     ws.open_settings()                          # Settings ABOVE the Make flow
     drv.frame(1 / 30)
-    assert ws.wm._stack == ["launcher", "picker", "menu", "settings"]
+    assert ws.wm._stack == ["launcher", "desk", "picker", "menu", "settings"]
     make = ws.wm._wins["make"]
     xr = dict(ws.wm._strip_buttons(make))["close"]
     drv.touch(xr[0] + 2, xr[1] + 2)             # X on the Make window (the EDITOR)
@@ -704,7 +710,7 @@ def test_closing_make_never_takes_settings_with_it(tmp_path):
     drv.frame(1 / 30)
     assert "settings" in ws.wm._order           # Settings SURVIVED
     assert ws.wm._wins["make"].kind == "picker"  # make popped one level only
-    assert ws.wm._stack == ["launcher", "picker", "settings"]
+    assert ws.wm._stack == ["launcher", "desk", "picker", "settings"]
 
 
 def test_closing_playtest_keeps_settings_and_refocuses_editor(tmp_path):
@@ -719,10 +725,10 @@ def test_closing_playtest_keeps_settings_and_refocuses_editor(tmp_path):
     ws._leave_menu()                            # PLAY (caller = the Editor)
     ws.open_settings()                          # Settings over the running game
     drv.frame(1 / 30)
-    assert ws.wm._stack == ["launcher", "picker", "menu", "desktop", "settings"]
+    assert ws.wm._stack == ["launcher", "desk", "picker", "menu", "desktop", "settings"]
     ws._exit_to_caller()                        # the hold-BACKSPACE exit path
     drv.frame(1 / 30)
-    assert ws.wm._stack == ["launcher", "picker", "menu", "settings"]
+    assert ws.wm._stack == ["launcher", "desk", "picker", "menu", "settings"]
     assert "settings" in ws.wm._order           # Settings SURVIVED
     assert ws.wm._focus == "make"               # back to the Editor's window
 
@@ -737,7 +743,7 @@ def test_settings_keyboard_close_is_surgical_too(tmp_path):
     drv.frame(1 / 30)
     ws._exit_settings()
     drv.frame(1 / 30)
-    assert ws.wm._stack == ["launcher", "desktop"]
+    assert ws.wm._stack == ["launcher", "desk", "desktop"]
     assert "desktop" in ws.wm._order            # the game window survived
 
 

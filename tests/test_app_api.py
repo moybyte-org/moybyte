@@ -29,7 +29,7 @@ def test_builtin_apps_are_registered(tmp_path):
     ws = _ws(tmp_path)
     kinds = [app.id for app, _t in ws._apps]
     assert kinds == ["artwork", "appearance", "writer", "storybook", "sheets",
-                     "calc"]
+                     "files", "calc"]
     for kind in kinds:
         assert ws._content_layers[kind] is not None       # router wired
     assert ws.app_min_size("artwork") == (310, 230)       # registered minimum

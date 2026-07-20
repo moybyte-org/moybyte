@@ -111,6 +111,20 @@ and only an explicit exit ends a run); and closes are surgical (closing one
 window never closes another). One cart still runs at a time (#73's multi-cart
 boundary). The P4 device port of this tier rides #58.)*
 
+*(Status 2026-07-20 — TWO WORLDS, #105: the windowed tier now splits play from
+make. It BOOTS onto the **desktop** — wallpaper + a static icon column (PLAY,
+PROJECTS, and the system apps) + the one OS bar with taskbar chips — which is
+the make world's floor: everything opened there is a window, and the desk bar
+draws no X (nothing is beneath it). The **PLAY icon** drops to the fullscreen
+**Library**, purely the game launcher: system-app carts leave its shelf on
+this tier (they are desk icons instead — "apps are windows, games are
+fullscreen"), a tap runs the game FULLSCREEN exactly like the small tiers
+(hold-BACKSPACE exits back to the Library), and the Make tile / a card's
+CHANGE drop back to the desk (CHANGE with that project's Editor open).
+Leaving the desk closes its windows — autosave (§7) makes that free. The
+fullscreen tiers are untouched: per #59 the Player product only ever gets the
+launcher; its desktop story is the web view.)*
+
 ---
 
 ## 4. Two personas — making is an app, a tap always plays
@@ -302,6 +316,7 @@ fullscreen game → hold-BACKSPACE exits.**
 | App | Presentation | Exit affordance | BACKSPACE is… |
 |---|---|---|---|
 | Launcher (back-stack root) | taskbar | **no X** — it's home; nothing beneath it | a plain key |
+| Desk (windowed tier's make-world floor, #105) | taskbar + windows | **no X** — the PLAY icon drops to the Library | a plain key |
 | Editor | taskbar | X → pop back (picker → launcher) | a plain key |
 | Settings (incl. wifi setup) | taskbar | X → back | a plain key — **delete in the password field just works** |
 | Running game | fullscreen | **hold**-BACKSPACE (~700ms) → return to caller (§2) | a game key on a quick tap |

@@ -296,6 +296,11 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.sheets_app import SheetsAppLayer
 
+try:
+    from files_app import FilesAppLayer
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.files_app import FilesAppLayer
+
 # The desktop home / launcher surface (#28, extracted -- see launcher_layer.py): the
 # Launcher grid CLASS (its instance stays ws.launcher, the single source everything
 # reads) + LauncherHomeLayer (the "launcher" content Layer -- home composition + grid
@@ -603,12 +608,9 @@ class Workstation:
         # the memoized layer stack. Built here (before anything reads/writes screen or
         # composites) with a `ws` back-ref to the console's canvases + layer instances.
         self.wm = FullscreenStackWM(self)
-        # Windowed-desktop chrome mode (#73, wm_windowed.py): True when the windowed
-        # WM is installed. The bar + dock consult it to keep OS chrome (the right-zone
-        # status cluster, the dock) OFF app windows -- the desktop's own full-width
-        # bar is the one OS bar and each window's WM title strip carries min/max/X.
-        # Always False on the fullscreen-stack tiers.
-        self.windowed_chrome = False
+        # windowed_chrome is a PROPERTY (world-aware, two-worlds #105): it is
+        # True only while the windowed WM's DESK (the make world) is open --
+        # see the property below the screen projection.
         # Panel THEME (Settings -> THEME): the chrome token set the panels/window
         # chrome/selection accents read each draw. Default = the moybyte "night"
         # colorway (today's exact colors); load_system applies the persisted pick.
@@ -1007,6 +1009,10 @@ class Workstation:
         # Sheets (#78): the kid spreadsheet -- a workbook of grids with a hand-rolled
         # formula engine (runtime/formula.py); values reach a game via table().
         self.sheets_app = SheetsAppLayer(self, NAMES, _in)
+        # Files (#108): the user-files gallery/manager over files/<kind>/ --
+        # browse, rename, duplicate, trash/restore, and the copy-on-use reuse
+        # verbs (wallpaper / game bg) on the kid's drawings.
+        self.files_app = FilesAppLayer(self, NAMES, _in)
         # The Python code editor (#24/#39): the full-screen text view. Owns the drawing
         # + code-UI state (keyboard edge / drag / highlight memo); the shared ws.editor
         # handle + save_code/run_code + code-error state + code_layout stay on ws.
@@ -1056,6 +1062,7 @@ class Workstation:
         self.register_app(self.writer_app, text_mode=True)
         self.register_app(self.storybook_app)
         self.register_app(self.sheets_app, text_mode=True)
+        self.register_app(self.files_app, text_mode=True)   # rename typing
         self.register_app(CalcAppLayer(self, NAMES, _in))
         # The boot logo is a draw-time takeover of the screen content (input still
         # routes to the underlying screen), so it's not in _content_layers.
@@ -1088,6 +1095,17 @@ class Workstation:
     def _active_content(self):
         """The active content Layer (spec alias for _content_layer())."""
         return self._content_layer()
+
+    @property
+    def windowed_chrome(self):
+        """True while the MAKE world (the windowed WM's desk, #105 two-worlds)
+        is open: in-window app bars suppress OS chrome, the dock is off, and
+        the bar's wifi icon deep-links to the Settings window. Always False in
+        the PLAY world (fullscreen Library/games -- even on the windowed tier)
+        and on the fullscreen-stack tiers, where the fullscreen chrome rules
+        apply verbatim."""
+        wm = getattr(self, "wm", None)
+        return wm is not None and wm.desk_open()
 
     # The overlay/visible/draw stacks are now built + MEMOIZED by the WM (Stage 6c,
     # wm.py) -- rebuilt only on a back-stack push/pop, a menu_view tab switch, or an
@@ -1671,9 +1689,10 @@ class Workstation:
 
     def _exit_settings(self):
         # Windowed WM (#73): close JUST the Settings window -- whatever else is
-        # open (a running game, the Make window) stays. No hook on the fullscreen WM.
+        # open (a running game, the Make window) stays. Desk world only (#105):
+        # play-world Settings is fullscreen and takes the resume-or-home rules.
         _ck = getattr(self.wm, "close_window_kind", None)
-        if _ck is not None:
+        if _ck is not None and self.wm.desk_open():
             self._dirty = True
             _ck("settings")
             return
@@ -1953,9 +1972,11 @@ class Workstation:
         self.player.release_world()
         # Windowed WM (#73): closing the playtest must never truncate unrelated
         # windows stacked above it (e.g. Settings) -- the WM removes ONLY the
-        # player and refocuses the caller's window. No hook on the fullscreen WM.
+        # player and refocuses the caller's window. Desk world only (#105): a
+        # play-world game (launched from the fullscreen Library) pops by the
+        # fullscreen rules below, landing back in the Library via go_home.
         _cp = getattr(self.wm, "close_player", None)
-        if _cp is not None:
+        if _cp is not None and self.wm.desk_open():
             self._dirty = True
             _cp()
             return
@@ -2228,40 +2249,102 @@ class Workstation:
         # SYSTEM APPS (docs/app_api_v1.md): a cartridge identity backed by a
         # responsive system process. Deliberately NOT the Player: the Player is
         # the fixed 320x240 contract, while an app reflows to a P4/web window.
-        # A TYPING app (register_app text_mode=True, the Writer precedent) gets
-        # the clean ASCII keyboard after it opens; the rest stay in button mode.
         for _app, _text in self._apps:
             if _app.is_app(selected):
-                self.cart = selected
-                self.input.text_mode = False
-                _app.open()
-                self.wm.goto(_app.id)
-                if _text:
-                    self._set_text_mode(True)
-                self.ach.note("open", selected.get("path") or selected.get("title"))
+                self.open_app(_app, selected)
                 return
         self._open_workspace()
         self.run(self.project, self.launcher_layer)   # activate desktop, record caller
+
+    def open_app(self, app, cart=None):
+        """Spawn a registered system app on `cart` (default: the cart its
+        is_app claims) -- the ONE app-launch dispatch, used by the launcher
+        tap above and by app-to-app jumps (e.g. Files' OPEN -> Paint). A
+        TYPING app (register_app text_mode=True, the Writer precedent) gets
+        the clean ASCII keyboard after it opens; the rest are set to button
+        mode BOTH ways, so a jump out of a typing app restores the raw
+        keyboard. Returns False when no cart carries the app's identity."""
+        if cart is None:
+            for c in self._all_carts:
+                if app.is_app(c):
+                    cart = c
+                    break
+            if cart is None:
+                return False
+        text = False
+        for _app, _text in self._apps:
+            if _app is app:
+                text = _text
+                break
+        self.cart = cart
+        self.input.text_mode = False
+        app.open()
+        self.wm.goto(app.id)
+        self._set_text_mode(bool(text))
+        self.ach.note("open", cart.get("path") or cart.get("title"))
+        return True
+
+    def is_system_app(self, cart):
+        """True when a registered system app's identity claims `cart` -- the
+        registry-side predicate (services use it to keep app carts out of
+        project lists)."""
+        for app, _text in self._apps:
+            if app.is_app(cart):
+                return True
+        return False
 
     def open_in_editor(self, cart=None):
         # Open `cart` (default: the launcher selection) in the Editor, landing on Config
         # (spec Section 6). The cart is started (ready for PLAY) but not shown; the Editor
         # owns the screen until PLAY runs it. Reached from the Editor's PROJECT-PICKER, which
         # passes the PICKED cart -- never a launcher tap (a launcher tap always RUNS).
+        self._ensure_desk()            # make verbs live in the make world (#105)
         self._open_workspace(cart)
         self.editor_app.open(self.project)
 
     def launch_selected(self):
         """A launcher TAP RUNS the selected cart (spec shell_ux_v1.md, the locked model:
         launcher tap = RUN, always, for every cart type). The one exception is the pinned
-        "Make" pseudo tile (slot 0), which opens the Editor's PROJECT-PICKER rather than
-        running -- authoring is a launchable Editor app, not a mode a tap flips into. Both
-        Play and Edit stay reachable -- Play here, Edit through the Make tile."""
+        "Make" pseudo tile (slot 0): authoring lives in the MAKE world -- on the windowed
+        tier that is the DESK (two-worlds #105), on the fullscreen tiers the Editor's
+        PROJECT-PICKER. Both Play and Edit stay reachable -- Play here, Edit through
+        the Make tile."""
         sel = self.launcher.selected()
         if sel is not None and sel.get("type") == MAKE_TILE_TYPE:
-            self.open_picker()
+            if getattr(self.wm, "has_desk", False):
+                self.open_desk()
+            else:
+                self.open_picker()
             return
         self.open()
+
+    # -- the desk (two-worlds #105: the windowed tier's MAKE world) ----------
+
+    def open_desk(self):
+        """Enter the DESK -- the windowed tier's make world: wallpaper + system
+        icons + taskbar, every app a window. The desk is the FLOOR of that
+        world (its bar has no X); the PLAY icon is the way back to the
+        fullscreen Library. Fullscreen tiers never call this (no has_desk)."""
+        self._dirty = True
+        self._set_text_mode(False)
+        # Re-derive the shelf under the two-worlds filter (system apps are
+        # desk-only here): the first call runs before the WM swap finished
+        # populating anything, so the boot-time entry settles the filter.
+        self.launcher.set_items(self._launcher_items(self._all_carts))
+        self.wm.goto("desk")
+
+    def open_library(self):
+        """The desk's PLAY icon: drop to the fullscreen Library (the play
+        world). Leaving the desk closes its windows (v1 -- autosave means
+        nothing is lost); go_home also runs the leave-make-world cleanup
+        (flushes Writer/Storybook, releases the world, re-slims the cart)."""
+        self.go_home()
+
+    def _ensure_desk(self):
+        """Route a make verb (CHANGE / pick) through the desk on the windowed
+        tier; a no-op when the desk is already open or on fullscreen tiers."""
+        if getattr(self.wm, "has_desk", False) and not self.wm.desk_open():
+            self.wm.goto("desk")
 
     def change_selected(self):
         """CHANGE (visual identity v1 Sections 1.2-1.3): open the launcher's selected
@@ -2794,10 +2877,22 @@ class Workstation:
 
     def _launcher_items(self, carts):
         """The LAUNCHER run-grid entries: the pinned "Make" tile first (spec shell_ux_v1.md
-        -- tap it to open the Editor project-picker), then the runnable carts. WALLPAPERS
+        -- tap it to enter the MAKE world), then the runnable carts. WALLPAPERS
         are excluded -- they're a backdrop category chosen in Settings -> wallpaper, not
-        run-grid apps (they stay in the Editor picker + the Settings wallpaper picker)."""
-        return [make_tile()] + [c for c in carts if c.get("type") != "wallpaper"]
+        run-grid apps (they stay in the Editor picker + the Settings wallpaper picker).
+        On the windowed tier (#105 two worlds) SYSTEM-APP carts are excluded too: the
+        Library is the game launcher; the tools live as desk icons/windows -- one rule
+        a kid can hold ("apps are windows, games are fullscreen"). Kid-made "app"-type
+        carts are NOT system apps and stay on the shelf (they run under the Player)."""
+        out = [make_tile()]
+        desk = getattr(self.wm, "has_desk", False)
+        for c in carts:
+            if c.get("type") == "wallpaper":
+                continue
+            if desk and self.is_system_app(c):
+                continue
+            out.append(c)
+        return out
 
     def _picker_items(self, carts):
         """The Editor PROJECT-PICKER grid entries: the pinned "+ New" tile first (create a
@@ -3074,8 +3169,8 @@ class Workstation:
         if kind == "menu" and self.menu_view == "music" \
                 and self.music_ui.music_preview is not None:
             return True
-        # A live wallpaper animates the home/settings backdrop.
-        if kind in ("launcher", "settings") and self.wallpaper.is_animating(dt):
+        # A live wallpaper animates the home/settings/desk backdrop.
+        if kind in ("launcher", "settings", "desk") and self.wallpaper.is_animating(dt):
             return True
         # The P4 Bluetooth keyboard picker advances through scan/pair/discovery
         # asynchronously. A static wallpaper would otherwise close the redraw

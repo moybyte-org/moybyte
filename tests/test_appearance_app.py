@@ -14,6 +14,13 @@ def _open_appearance(ws):
         if cart.get("title") == "Appearance":
             ws.launcher.sel = i
             break
+    else:
+        # Windowed tier (#105): system apps are desk-only, not on the shelf.
+        assert ws.open_app(ws.appearance_app)
+        ws.input.begin_frame()
+        ws.frame(1 / 30)
+        assert ws.wm.top_kind() == "appearance"
+        return ws.appearance_app
     ws.open()
     ws.input.begin_frame()
     ws.frame(1 / 30)

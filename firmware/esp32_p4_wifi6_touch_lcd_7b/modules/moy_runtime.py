@@ -450,10 +450,12 @@ def run_desktop(fps_cap=60):
         ws.reboot_hook = machine.reset
     except Exception as exc:  # noqa: BLE001
         print("Moybyte P4: reboot hook unavailable:", exc)
-    # The P4 presentation tier (#73/#58): launcher = desktop, apps = windows.
+    # The P4 presentation tier (#73/#58, two worlds #105): the DESK is home
+    # (make world, windows); the PLAY icon drops to the fullscreen Library.
     # Installed AFTER load_system (same order as host build_workstation) so the
     # persisted font scale is applied before the root layout context is captured.
     ws.wm = WindowedWM(ws)
+    ws.open_desk()
     keyboard.start()               # failure is touch-only, never a boot failure
 
     # Remote input over serial (#58 dev affordance): the CH343 REPL stays alive

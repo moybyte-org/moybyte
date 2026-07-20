@@ -237,7 +237,7 @@ class BarLayer:
         WM's title strip carries min/max/close instead. Always False on the
         fullscreen-stack tiers (ws.windowed_chrome stays False there)."""
         return getattr(self.ws, "windowed_chrome", False) and where not in (
-            "home", "desktop", "tool")
+            "home", "desk", "desktop", "tool")
 
     # -- draw + cache (the #43 strip, generalized to every `where`) -----------
 
@@ -401,7 +401,9 @@ class BarLayer:
         back-stack root, so it draws NO X (spec Section 9) -- only where != "home"."""
         NAMES = self._NAMES
         ws = self.ws
-        show_x = where != "home"          # the launcher root never exits -> no X
+        # The launcher root never exits -> no X; neither does the DESK (#105:
+        # it is the make world's FLOOR -- the PLAY icon is the way out).
+        show_x = where not in ("home", "desk")
         if self._zone_is_game(where):
             cv.print(self._clock_text(), _ZONE_CLOCK[0], 3, NAMES["light_grey"], 1)
             ws._icon(ws._wifi_icon_kind(), _ZONE_WIFI[0], _ZONE_WIFI[1], cv)
@@ -560,7 +562,7 @@ class BarLayer:
         # caller (spec Section 6's test-play round trip -- go_home for a launcher-launched
         # tool, but the Editor tab if a tool is ever PLAYed from the editor); every other
         # taskbar app (Editor/Settings) uses the screen-string exit.
-        if where != "home" and self._in(px, py, x_hit):
+        if where not in ("home", "desk") and self._in(px, py, x_hit):
             if where == "tool":
                 ws._exit_to_caller()
             else:

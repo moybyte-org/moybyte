@@ -54,15 +54,17 @@ nothing -- a rubber-band outline previews the new size).
 """
 
 try:
-    from wm import FullscreenStackWM
+    from wm import FullscreenStackWM, _VIEWPORT_BEZEL
     from layers import Layer
     from chrome import NAMES          # not palette: chrome is the device-safe home
     from widgets import _Blit, _in    # (runtime/palette.py needs colorsys -- host-only)
+    import ui as _ui                  # desk icon label pills (ui.chip)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.wm import FullscreenStackWM
+    from runtime.wm import FullscreenStackWM, _VIEWPORT_BEZEL
     from runtime.layers import Layer
     from runtime.chrome import NAMES
     from runtime.widgets import _Blit, _in
+    from runtime import ui as _ui
 
 
 # Window-chrome colors: the fixed ones live here; everything THEMEABLE (panel /
@@ -274,30 +276,127 @@ class _BackdropLayer(Layer):
 
     def _draw_desktop(self, dt):
         self.ws.wallpaper.draw(dt)
-        self.ws.bar_layer._draw_status_strip("home")
+        self._draw_desk_icons()
+        self.ws.bar_layer._draw_status_strip("desk")
+
+    # -- desk icons (#105: the make world's launch surface) --------------------
+    #
+    # A static v1 column: PLAY (drop to the fullscreen Library), PROJECTS (the
+    # picker), then every desktop-only system app. Geometry is deterministic
+    # (the _chip_rects pattern -- computed per call, no stored state), so draw
+    # and hit-test can never disagree, and the icons render before the drag
+    # backdrop capture, so the drag cache carries them for free.
+
+    ICON_GLYPHS = {"play": "run", "projects": "edit"}
+    HIDDEN_APPS = ("appearance",)     # reachable via Settings, not a desk tool
+
+    def _icon_catalog(self):
+        ws = self.ws
+        out = [("play", "PLAY", None), ("projects", "PROJECTS", None)]
+        for app, _text in getattr(ws, "_apps", ()):
+            if app.id in self.HIDDEN_APPS:
+                continue
+            cart = None
+            for c in ws._all_carts:
+                if app.is_app(c):
+                    cart = c
+                    break
+            title = ws.app_title(app.id) or app.id.upper()
+            out.append((app.id, str(title).upper(), cart))
+        return out
+
+    def _icon_rects(self):
+        """[(key, box_rect, label_rect, label, cart), ...] -- a left-edge column
+        wrapping into further columns; recomputed per call from live geometry."""
+        ws = self.ws
+        fs = ws._effective_font_scale()
+        bar_h = self.wm._bar_h()
+        box = 40 * fs
+        cell_w = 66 * fs
+        cell_h = 62 * fs
+        x = 14 * fs
+        y0 = bar_h + 12 * fs
+        y = y0
+        out = []
+        for key, label, cart in self._icon_catalog():
+            if y + cell_h > ws.sys_canvas.h - 6 * fs:
+                y = y0
+                x += cell_w
+            bx = x + (cell_w - 10 * fs - box) // 2
+            out.append((key,
+                        (bx, y, box, box),
+                        (x, y + box + 3 * fs, cell_w - 10 * fs, 13 * fs),
+                        label, cart))
+            y += cell_h
+        return out
+
+    def _draw_desk_icons(self):
+        ws = self.ws
+        cv = ws.sys_canvas
+        th = ws.theme_colors
+        fs = ws._effective_font_scale()
+        for key, box, pill, label, cart in self._icon_rects():
+            cv.rect(box[0], box[1], box[2], box[3], th.get("panel", 60))
+            cv.rectb(box[0], box[1], box[2], box[3], th.get("edge", 13))
+            img = ws._icon_sheet_for(cart) if cart is not None else None
+            if img is not None:
+                sc = max(1, (box[2] - 8 * fs) // 16)
+                cv.spr(img, box[0] + (box[2] - 16 * sc) // 2,
+                       box[1] + (box[3] - 16 * sc) // 2, sc)
+            else:
+                glyph = self.ICON_GLYPHS.get(key, "app")
+                ink = th.get("accent", 10) if key == "play" else th.get("title_ink", 0)
+                ws._glyph(glyph, (box[0] + 6 * fs, box[1] + 6 * fs,
+                                  box[2] - 12 * fs, box[3] - 12 * fs), ink, cv)
+            _ui.chip(cv, th, pill, label, on=key == "play", fs=fs)
+
+    def _open_icon(self, key):
+        ws = self.ws
+        if key == "play":
+            ws.open_library()
+        elif key == "projects":
+            ws.open_picker()
+        else:
+            app = ws._apps_by_id.get(key)
+            if app is not None:
+                ws.open_app(app)
 
     def handle_input(self, i):
         return True
 
     def handle_pointer(self, px, py, click):
         if click:
-            self.ws.bar_layer.handle_home_tap(px, py)
+            if py < self.wm._bar_h():
+                self.ws.bar_layer.handle_bar_tap("desk", px, py)
+                return True
+            for key, box, pill, _label, _cart in self._icon_rects():
+                if _in(px, py, box) or _in(px, py, pill):
+                    self._open_icon(key)
+                    return True
         return True
 
 
 class WindowedWM(FullscreenStackWM):
-    """The windowed presentation of the back-stack (spec shell_ux_v1.md §3):
-    Library = the launch surface; every pushed process = a floating window over
-    the wallpaper desktop, focus = top of stack. Install with
+    """The TWO-WORLDS presentation of the back-stack (#105, spec shell_ux_v1.md
+    §3): the DESK (stack kind "desk") is the make world's floor -- wallpaper +
+    system icons + taskbar, every process above it a floating window; without
+    the desk on the stack this tier presents FULLSCREEN exactly like the small
+    tiers (the Library and launcher-launched games own the whole screen -- the
+    play world). Boot lands on the desk; the PLAY icon drops to the Library;
+    the Library's Make tile / CHANGE come back to the desk. Install with
     `ws.wm = WindowedWM(ws)` right after construction
     (host_app.build_workstation(windowed=True)); requires a DISTINCT system
     canvas bigger than the 320x240 game canvas."""
+
+    has_desk = True
 
     def __init__(self, ws):
         FullscreenStackWM.__init__(self, ws)
         if ws._sys_canvas is None:
             raise ValueError("WindowedWM needs a distinct (big) system canvas")
-        ws.windowed_chrome = True     # bar/dock: suppress OS chrome inside windows
+        # (ws.windowed_chrome is a world-aware PROPERTY now -- it follows
+        # desk_open(); nothing to set here.)
+        self._desk_was = False        # world-flip edge detector (_on_nav)
         self._root_canvas = ws._sys_canvas
         self._root_ctx = _LayoutCtx.capture(ws)
         self._win_layer = _WindowStackLayer(self)
@@ -404,13 +503,36 @@ class WindowedWM(FullscreenStackWM):
         row is OS-owned, chips included)."""
         return self._root_ctx.layout.status_h
 
+    def desk_open(self):
+        return "desk" in self._stack
+
+    def _on_nav(self):
+        FullscreenStackWM._on_nav(self)
+        desk = "desk" in self._stack
+        if desk != self._desk_was:
+            # WORLD FLIP (#105): windowed_chrome just changed, and every app
+            # layout bakes it into its bar_h at construction. Rebuild all
+            # layouts + recapture the root ctx NOW, so the visible world is
+            # never presented through the other world's chrome (repro without
+            # this: a font-scale change inside the desk would strip the play
+            # world's fullscreen app bars).
+            self._desk_was = desk
+            self.ws._relayout()
+
     def _slots(self):
-        """Collapse the back-stack (above the root) into window SLOTS: consecutive
+        """Collapse the back-stack ABOVE THE DESK into window SLOTS: consecutive
         kinds in the same _GROUP share one slot, and the slot's content is the
         TOPMOST of its kinds (picker+menu -> one "make" window showing whichever
-        is up). Returns [[slot_key, kind], ...] bottom -> top."""
+        is up). Returns [[slot_key, kind], ...] bottom -> top. In the play world
+        (no desk on the stack) there are NO windows, ever -- every `not
+        self._order` deferral then presents fullscreen (#105 two worlds)."""
+        st = self._stack
+        try:
+            base = st.index("desk") + 1
+        except ValueError:
+            return []
         slots = []
-        for k in self._stack[1:]:
+        for k in st[base:]:
             g = _GROUP.get(k, k)
             if slots and slots[-1][0] == g:
                 slots[-1][1] = k        # the higher kind takes the window over
@@ -616,8 +738,10 @@ class WindowedWM(FullscreenStackWM):
     # -- the memoized stacks (parent memo, windowed shape) ---------------------
 
     def _rebuild(self, content, sig):
-        if len(self._stack) == 1:
-            # Just the launcher root: byte-identical to the fullscreen tier.
+        if "desk" not in self._stack:
+            # The PLAY world (#105): no desk -> byte-identical to the
+            # fullscreen tier, for the whole stack (Library, fullscreen games,
+            # play-world Settings/tools) -- not just the launcher root.
             if self._wins:
                 self._wins.clear()
                 self._order = []
@@ -821,11 +945,27 @@ class WindowedWM(FullscreenStackWM):
         return self._player_view(win)
 
     def composite_game(self):
-        # The frame router's game->system boundary composite: a no-op here -- the
-        # window layer blits the game canvas into the player WINDOW itself, and
-        # stamping it full-viewport would paint over the desktop.
-        if not self._order:
-            FullscreenStackWM.composite_game(self)
+        # Desk world: a no-op -- the window layer blits the game canvas into
+        # the player WINDOW itself, and stamping it full-viewport would paint
+        # over the desktop. PLAY world (#105): the fullscreen composite, routed
+        # through the polymorphic _blit_game so the P4's native RGB565 path and
+        # the web's b64-spr path both work (the parent's index loops need an
+        # indexed system buffer this tier's canvases may not have).
+        if self._order:
+            return
+        ws = self.ws
+        gc = ws.canvas
+        sc = ws.sys_canvas
+        if gc is not self._fb_for:     # the parent's cached flush_batch probe
+            self._fb_for = gc
+            self._fb_fn = getattr(gc, "flush_batch", None)
+        if self._fb_fn is not None:
+            self._fb_fn()
+        if sc is gc:
+            return
+        ox, oy, scale = FullscreenStackWM.viewport(self)
+        sc.cls(_VIEWPORT_BEZEL)        # letterbox fill
+        self._blit_game(sc, gc, ox, oy, scale)
 
     # -- drawing ---------------------------------------------------------------
 
