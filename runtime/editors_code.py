@@ -2,6 +2,32 @@
 Split out of editors.py (which re-exports it); pure logic, dependency-free."""
 
 
+def _is_word_char(ch):
+    """A character that can appear inside an identifier (letters/digits/underscore).
+    Hand-rolled ranges -- no str.isalnum dependency -- so it runs under MicroPython
+    identically to the highlighter's _is_alpha (#89 completion/navigation)."""
+    return (ch == "_" or ("a" <= ch <= "z") or ("A" <= ch <= "Z")
+            or ("0" <= ch <= "9"))
+
+
+def _def_kw_name(line):
+    """The symbol a `def`/`class` (or Lua `function`/`local function`) line defines,
+    or None. Used by def_symbols() for jump-to-symbol (#89). Dotted names
+    (`obj.method`, Lua) are kept whole; the parse stops at the first char that can't
+    be part of a name (`(`, `:`, whitespace)."""
+    s = line.lstrip()
+    for kw in ("def ", "class ", "local function ", "function "):
+        if s[:len(kw)] == kw:
+            rest = s[len(kw):].lstrip()
+            j = 0
+            n = len(rest)
+            while j < n and (_is_word_char(rest[j]) or rest[j] == "."):
+                j += 1
+            name = rest[:j]
+            return name if name else None
+    return None
+
+
 class CodeEditor:
     """Editable text buffer for a cart's main.py: a list of lines plus a
     (row, col) cursor. The shell feeds it keyboard ASCII (key) and tap-to-place
@@ -435,3 +461,103 @@ class CodeEditor:
         self.sel = (r, c + len(query))           # select the match (anchor past its end)
         self._scroll()
         return True
+
+    # -- autocomplete + jump-to-symbol (#89) ---------------------------------
+    # Pure buffer logic; the CodeLayer surface drives the popups. Autocomplete
+    # completes the identifier left of the caret from a supplied name pool (the
+    # cart-API verbs + language keywords) plus the words already in the buffer.
+    # Jump-to-symbol lists the `def`/`class` (Lua `function`) lines.
+
+    def word_prefix(self):
+        """The identifier immediately left of the caret ('' when there is none, e.g.
+        the caret sits after a space/operator, or the run starts with a digit -- a
+        number, not a name). This is the text autocomplete replaces."""
+        ln = self.lines[self.row]
+        i = self.col
+        while i > 0 and _is_word_char(ln[i - 1]):
+            i -= 1
+        pre = ln[i:self.col]
+        if pre and ("0" <= pre[0] <= "9"):       # a number, not an identifier prefix
+            return ""
+        return pre
+
+    def buffer_words(self, prefix):
+        """Distinct identifier-shaped words in the whole buffer that start with
+        `prefix` (case-sensitive), in first-appearance order, with an exact-match of
+        `prefix` itself excluded. `prefix` == '' returns every identifier word."""
+        out = []
+        seen = {}
+        for ln in self.lines:
+            i = 0
+            n = len(ln)
+            while i < n:
+                ch = ln[i]
+                if ch == "_" or ("a" <= ch <= "z") or ("A" <= ch <= "Z"):
+                    j = i + 1
+                    while j < n and _is_word_char(ln[j]):
+                        j += 1
+                    w = ln[i:j]
+                    if w not in seen:
+                        seen[w] = True
+                        out.append(w)
+                    i = j
+                else:
+                    i += 1
+        if prefix:
+            return [w for w in out if w != prefix and w[:len(prefix)] == prefix]
+        return out
+
+    def completions(self, names, limit=12):
+        """Autocomplete candidates for the word left of the caret: first the supplied
+        `names` (cart-API verbs + language keywords) that start with the prefix, then
+        the buffer's own identifiers that start with it -- de-duplicated, the prefix
+        itself excluded, capped at `limit`. An empty prefix yields no candidates
+        (autocomplete only fires mid-word)."""
+        p = self.word_prefix()
+        if not p:
+            return []
+        out = []
+        seen = {}
+        lp = len(p)
+        for nm in names:
+            if nm != p and nm[:lp] == p and nm not in seen:
+                seen[nm] = True
+                out.append(nm)
+        for w in self.buffer_words(p):
+            if w not in seen:
+                seen[w] = True
+                out.append(w)
+        if limit and len(out) > limit:
+            out = out[:limit]
+        return out
+
+    def complete(self, word):
+        """Accept an autocomplete candidate: replace the identifier prefix left of the
+        caret with `word`, leaving the caret at its end. Returns True."""
+        p = self.word_prefix()
+        ln = self.lines[self.row]
+        start = self.col - len(p)
+        self.lines[self.row] = ln[:start] + word + ln[self.col:]
+        self.col = start + len(word)
+        self.sel = None
+        self.dirty = True
+        self._scroll()
+        return True
+
+    def def_symbols(self):
+        """(name, row) for every `def`/`class` (or Lua `function`/`local function`)
+        line, in file order -- the jump-to-symbol source (#89)."""
+        out = []
+        for r in range(len(self.lines)):
+            name = _def_kw_name(self.lines[r])
+            if name:
+                out.append((name, r))
+        return out
+
+    def goto_row(self, row, col=0):
+        """Move the caret to an absolute (row, col), clamped, and scroll it into view
+        (jump-to-symbol lands here). Collapses any selection."""
+        self.row = max(0, min(len(self.lines) - 1, int(row)))
+        self.col = max(0, min(len(self.lines[self.row]), int(col)))
+        self.sel = None
+        self._scroll()
