@@ -694,6 +694,22 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
     if scenes is not None:
         ns["scene"] = scenes.scene
         ns["load_scene"] = scenes.load_scene
+        # Actor-aware helpers (#109 / #85 Section 8): the live mutable actor world +
+        # its verbs, the cart-API mirror of the actor blocks. Same object/logic on the
+        # device (widgets.SceneWorld); only draw_scene lives per-backend because it
+        # draws (spr). The world resets per run via scenes.reset() (Player.start).
+        _world = scenes.world()
+        ns["actors"] = _world.actors
+        ns["touching"] = _world.touching
+        ns["move_actor"] = _world.move
+        ns["move_actor_to"] = _world.move_to
+        ns["remove_actor"] = _world.remove
+
+        def draw_scene():
+            for _a in _world.actors():
+                spr(_a.tile, _a.x, _a.y, -1, 1, _a.flip)
+
+        ns["draw_scene"] = draw_scene
     return ns
 
 

@@ -39,6 +39,7 @@ CART_ORDER = [
     "pet",
     "tiny_runner",
     "platformer",
+    "coin_quest",
     "scroll_demo",
     "sakura_lua",
     "bullet_storm",
