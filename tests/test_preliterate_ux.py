@@ -302,6 +302,79 @@ def test_draw_cards_is_wrapped_against_a_thrown_card():
     assert "boom" in ws.cart_error
 
 
+# -- #94: inline validation feedback for a bad `edit` field def -------------
+#
+# Before #94 a malformed field def only surfaced through draw()'s belt-and-
+# braces try/except (test_draw_cards_is_wrapped_against_a_thrown_card, above):
+# ONE bad card took the whole Config tab down to the error panel, and a
+# left/right press on the bad card (outside draw()'s guard entirely) could
+# raise straight out of the input router. These tests pin the friendlier
+# behavior: a bad field renders as a small inline "!" card -- everything else
+# on the panel still works -- and stepping it is just a no-op, never a crash.
+
+def test_bad_edit_field_renders_inline_error_others_still_work():
+    edit = [
+        {"key": "ok", "type": "int", "min": 0, "max": 9, "card": "OK {value}"},
+        {"key": "bad", "type": "int", "min": 9, "max": 0, "card": "BAD"},  # min > max
+    ]
+    ws = _ws_with_cart(edit, {"ok": 3, "bad": 5})
+    _draw_once(ws)                                    # must not raise / no error panel
+    assert ws.cart_error is None
+    rows = ws.cards_layer._card_layout()
+    assert [r["error"] for r in rows] == [None, "min > max"]
+    assert rows[1]["display"] is None                  # never reaches the real renderer
+    assert len(set(ws.canvas.buf)) > 1                  # something drew (the good card + "!")
+
+
+def test_validate_field_catches_the_known_bad_shapes():
+    v = _ws_with_cart([], {}).cards_layer._validate_field
+    assert v({"key": "k", "type": "int", "min": 0, "max": 9}) is None       # fine
+    assert v({"key": "k", "type": "choice", "choices": [1, 2]}) is None    # fine
+    assert v("not a dict") is not None
+    assert v({}) is not None                                                # no key
+    assert v({"key": "k"}) is not None                                      # no/bad type
+    assert v({"key": "k", "type": "int", "min": 5, "max": 1}) is not None   # min > max
+    assert v({"key": "k", "type": "int", "step": 0}) is not None            # step 0
+    assert v({"key": "k", "type": "choice", "choices": []}) is not None     # empty choices
+    assert v({"key": "k", "type": "choice"}) is not None                    # missing choices
+    assert v({"key": "k", "type": "int", "display": "choice-icons"}) is not None  # display/type mismatch
+    assert v({"key": "k", "type": "int", "display": "nope"}) is not None    # unknown display
+
+
+def test_adjust_on_malformed_card_is_a_safe_noop():
+    edit = [{"key": "bad", "type": "int", "min": 9, "max": 0, "card": "BAD"}]
+    ws = _ws_with_cart(edit, {"bad": 5})
+    ws.cards_layer.msel = 0
+    ws.adjust(1)                                       # must not raise
+    ws.adjust(-1)
+    assert ws.config["bad"] == 5                        # untouched -- no-op stepping
+
+
+def test_card_tap_on_malformed_card_is_a_safe_noop():
+    edit = [{"key": "bad", "type": "choice", "choices": []}]  # empty choices -> invalid
+    ws = _ws_with_cart(edit, {"bad": 1})
+    row = ws.cards_layer._card_layout()[0]
+    assert row["error"] == "no choices"
+    ws.cards_layer._card_tap(row["x"] + 2, row["y"] + 2, 0)   # must not raise
+    assert ws.config["bad"] == 1
+
+
+def test_left_right_input_on_malformed_card_does_not_crash():
+    # The real regression this closes: a d-pad left/right routes straight to
+    # ws.adjust() through handle_input(), OUTSIDE draw()'s try/except -- before
+    # #94 a bad field def here raised out of the frame loop entirely.
+    edit = [{"key": "bad", "type": "int", "min": 9, "max": 0, "card": "BAD"}]
+    ws = _ws_with_cart(edit, {"bad": 5})
+    drv = host_app.ConsoleDriver(ws)
+    ws.cards_layer.msel = 0
+    drv.press("left")
+    drv.frame(1 / 30)                                   # must not raise
+    drv.press("right")
+    drv.frame(1 / 30)
+    assert ws.cart_error is None
+    assert ws.config["bad"] == 5
+
+
 # -- cards-menu scrolling (#3) ----------------------------------------------
 
 def _many_tile_cards(n):
