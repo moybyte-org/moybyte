@@ -127,6 +127,8 @@ def build_carts(system_carts_dir):
             cart["canvas"] = man["canvas"]
         if "permissions" in man:
             cart["permissions"] = man["permissions"]
+        if "input" in man:                # #42 Thread 3 input-kind hint, optional
+            cart["input"] = man["input"]
         cart["cfg"] = man.get("config", {})
         cart["edit"] = man.get("edit", [])
         carts.append(cart)

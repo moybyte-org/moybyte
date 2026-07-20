@@ -1197,7 +1197,8 @@ def images_payload(images):
     return out
 
 
-def assets_payload(w, h, palette, sheet, tilemap, cart_title, audio_rate=8000, images=None):
+def assets_payload(w, h, palette, sheet, tilemap, cart_title, audio_rate=8000, images=None,
+                   input_kinds=None):
     """The static render assets the browser needs (re-fetched on a cart change): palette +
     petme128 font + the open cart's sheet/tilemap + cart title + PCM rate.
 
@@ -1207,7 +1208,12 @@ def assets_payload(w, h, palette, sheet, tilemap, cart_title, audio_rate=8000, i
 
     `images` (#63 Fold 4) is the open cart's DECODED paint images ({name: (w, h, index_bytes)},
     one per images/*.moyimg); it ships as {name: {"w","h","b64"}} so a ["imgref", ...] draw
-    command references a browser-cached image by name instead of carrying its pixels."""
+    command references a browser-cached image by name instead of carrying its pixels.
+
+    `input_kinds` (#42 Thread 3) is the open cart's manifest input hint -- a tuple/list of
+    "buttons"/"touch"/"keyboard" (moy_carts._normalize_input_kinds), or None when undeclared
+    or no cart is open. Shipped as a plain list (or null) so the page's virtual controls gate
+    on it: None -> show every control (today's behaviour, zero regression)."""
     if palette and isinstance(palette[0], int):
         pal = palette_rgb(palette)                 # RGB565 ints (device)
     else:
@@ -1221,6 +1227,7 @@ def assets_payload(w, h, palette, sheet, tilemap, cart_title, audio_rate=8000, i
         "images": images_payload(images),
         "cart": cart_title,
         "audio_rate": audio_rate,
+        "input": list(input_kinds) if input_kinds else None,
     }
 
 

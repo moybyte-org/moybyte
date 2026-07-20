@@ -320,6 +320,15 @@ Buttons are named. The canonical set is `left, right, up, down, a, b, run, home`
 | `mouse()` | TIC-80 7-tuple `(x, y, left, middle, right, scrollx, scrolly)`; a tap = left. middle/right/scroll are always 0 on hardware |
 | `textmode(on=True)` | opt a running cart into clean text-keyboard input (for typing a name/password) so `key()/keyp()` return typeable ASCII; `textmode(False)` restores game mode (held WASD/arrows drive `btn()`). Auto-resets to game mode on exit |
 
+**Declaring which input you use (`#42`):** `manifest.json` may carry an optional
+`"input"` list naming the input groups a cart actually reads — any of `"buttons"`
+(`btn`/`btnp`), `"touch"` (`touch()`), `"keyboard"` (`key`/`keyp`/`textmode`), e.g.
+`"input": ["touch"]` for a touch-only game. It's purely a hint for surfaces that draw
+optional controls (today: the web view's virtual gamepad + soft-keyboard summon —
+`"buttons"` shows the d-pad, `"keyboard"` shows the ⌨ toggle); it changes nothing about
+which calls actually work. **Omit it and every control shows** (today's behavior,
+zero regression) — only declare it once a cart's input is settled.
+
 ## Audio
 
 | call | does |

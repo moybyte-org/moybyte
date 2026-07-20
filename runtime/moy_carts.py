@@ -26,6 +26,24 @@ except ImportError:  # pragma: no cover
 CARTS_DIR = "/sd/moybyte/carts"
 CART_FORMAT = "moybyte-cart-v1"
 
+# Input-kind hint (#42 Thread 3): a manifest MAY declare which of the three cart-API
+# input groups it actually reads -- "buttons" (btn/btnp), "touch" (touch()), "keyboard"
+# (key/keyp/textmode) -- so a surface (today: the web view) can show only the controls
+# a cart needs (e.g. skip the virtual d-pad for a touch()-only game). OPTIONAL and
+# purely advisory: absent/invalid -> None, and every consumer treats None as "show
+# everything" (today's behaviour), so an undeclared cart is a zero-regression no-op.
+INPUT_KINDS = ("buttons", "touch", "keyboard")
+
+
+def _normalize_input_kinds(value):
+    """A manifest "input" value -> a tuple of known kinds, or None when absent/not a
+    list/empty after filtering -- never raises on a malformed manifest."""
+    if not isinstance(value, list):
+        return None
+    kinds = tuple(k for k in value if k in INPUT_KINDS)
+    return kinds or None
+
+
 # Paint-image assets (#63 Fold 3) live in a per-cart images/ subfolder as
 # <name>.moyimg files -- the THIRD asset type (a 64-colour MOY64 index bitmap from
 # the paint app), alongside sprites.moygfx and map.moymap. A .moyimg is a small JSON
@@ -551,6 +569,8 @@ def seed_builtins(seed_list, root=CARTS_DIR):
             manifest["canvas"] = cart["canvas"]
         if cart.get("permissions") is not None:
             manifest["permissions"] = cart["permissions"]
+        if cart.get("input") is not None:               # #42 Thread 3 input-kind hint
+            manifest["input"] = list(cart["input"])
         scenes = cart.get("scenes")               # {name: .moyscene blob}, optional (#85)
         if scenes:
             # Register the ordered set in manifest.assets.scenes (element 0 = default
@@ -666,6 +686,10 @@ def load(path):
             # normal kid cart has just ["graphics","input"] (or none) and stays
             # network-less -- the sandbox is preserved.
             "permissions": man.get("permissions", []),
+            # Input-kind hint (#42 Thread 3): which cart-API input groups this cart
+            # actually reads, or None when undeclared (show every control -- see
+            # _normalize_input_kinds above).
+            "input": _normalize_input_kinds(man.get("input")),
             "sprites": sprites,
             "sounds": sounds,
             "map": tilemap,
