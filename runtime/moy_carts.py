@@ -837,14 +837,17 @@ try:
     from moy_journal import (JOURNAL_DIR, JOURNAL_LOG, JOURNAL_CURSOR,
                              JOURNAL_SNAP_DIR, JOURNAL_MAX_ENTRIES,
                              JOURNAL_MAX_BYTES, journal_append, journal_undo,
-                             journal_redo, journal_compact, _journal_paths,
+                             journal_redo, journal_can_undo, journal_can_redo,
+                             journal_compact, _journal_paths,
                              _journal_load_entries, _journal_cursor,
                              _journal_current_snap, _journal_total_bytes)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_journal import (JOURNAL_DIR, JOURNAL_LOG, JOURNAL_CURSOR,
                                      JOURNAL_SNAP_DIR, JOURNAL_MAX_ENTRIES,
                                      JOURNAL_MAX_BYTES, journal_append,
-                                     journal_undo, journal_redo, journal_compact,
+                                     journal_undo, journal_redo,
+                                     journal_can_undo, journal_can_redo,
+                                     journal_compact,
                                      _journal_paths, _journal_load_entries,
                                      _journal_cursor, _journal_current_snap,
                                      _journal_total_bytes)

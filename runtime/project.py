@@ -183,9 +183,16 @@ class Project:
         if not path or not ws.can_manage or not hasattr(store, "journal_append"):
             return
         try:
-            ws._with_sd(lambda: store.journal_append(path, file, new_bytes, grad=grad))
+            seq = ws._with_sd(lambda: store.journal_append(path, file, new_bytes, grad=grad))
         except Exception as exc:  # noqa: BLE001 -- journaling can't be allowed to fail a save
             print("Moybyte journal append failed:", _err_text(exc))
+            return
+        if seq is not None:
+            # A real (non-dedup) commit just made an UNDO step available -- invalidate
+            # the bar so its UNDO/REDO icons re-check can_undo()/can_redo() and repaint
+            # their enabled state on the next frame (#88), even when the active tab
+            # hasn't changed (zone_gen wouldn't otherwise bump for a plain autosave).
+            ws.bar_layer.invalidate()
 
     def _journal_code(self, src):
         """Journal a main.py code commit, DETECTING GRADUATION for a block-authored
