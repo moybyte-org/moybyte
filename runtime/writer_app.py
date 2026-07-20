@@ -1,19 +1,21 @@
 """Writer -- the kid notebook system app (notes, stories, project docs).
 
-Presented exactly like Paint/Appearance: a `.moy` cartridge identity on the
-launcher (`writer.moy`, so it seeds/versions/exports like every cart) backed by
-a responsive SYSTEM process the console spawns instead of the Player -- a text
-app must reflow to a P4/web window, while Player is the fixed 320x240 contract.
+Presented exactly like Paint: a `.moy` cartridge identity on the launcher
+(`writer.moy`, so it seeds/versions/exports like every cart) backed by a
+responsive SYSTEM process the console spawns instead of the Player -- a text app
+must reflow to a P4/web window, while Player is the fixed 320x240 contract.
 
-Notes are plain text. The buffer/caret core is the shared `CodeEditor` (the
-same editing behavior a kid already knows from the Code tab), drawn here as a
-ruled paper page instead of a dark code screen. The whole notebook persists as
-ONE crash-safe `notes.json` beside Paint's `artwork.moyimg` (moy_carts owns the
-path + atomic write), and the app AUTOSAVES -- on every view change, on the
-exit tap, and every few dozen keystrokes -- because a kid never presses save.
+Docs are USER FILES (#108): named ``files/docs/*.moytext`` items in the store,
+auto-named (`doc_1`, ...), browsed through the SHARED ``FileGridView`` picker
+(the exact widget Paint's OPEN mode + the Files app use) and AUTOSAVED on an
+idle debounce -- a kid never presses save. The legacy single-file `notes.json`
+notebook is migrated once (`moy_carts.migrate_docs`) into one doc file per note.
 
-A note's title is its first non-empty line (real-notebook rule): renaming is
-just editing the first line, so there is no rename UI to learn."""
+The buffer/caret core is the shared `CodeEditor` (the same editing behavior a
+kid already knows from the Code tab), drawn as a ruled paper page. A doc's body
+persists as a tiny `moytext-v1` blob, so copying it into a cart reads back
+unchanged through the `text(name)` cart verb (#78). Titling is optional
+(RENAME); the auto-name is always visible under the thumbnail."""
 
 try:
     import ui as _ui
@@ -29,24 +31,37 @@ except ImportError:  # pragma: no cover - direct host import
     from runtime.editors import CodeEditor
 
 try:
+    from file_widgets import FileGridView
+except ImportError:  # pragma: no cover - direct host import
+    from runtime.file_widgets import FileGridView
+
+try:
     from app_shell import ListShellLayout, ListShellApp
 except ImportError:  # pragma: no cover - direct host import
     from runtime.app_shell import ListShellLayout, ListShellApp
 
 
-MAX_NOTES = 12          # a kid notebook, not a filesystem; the list stays tappable
-MAX_CHARS = 8000        # per note -- bounds the SD write + device memory
-AUTOSAVE_KEYS = 24      # flush after this many buffered keystrokes
+MAX_CHARS = 8000        # per doc -- bounds the SD write + device memory
+MAX_NAME = 24           # rename entry cap -- a label, not a paragraph
 PAPER = 7               # white -- same paper index Paint uses
 INK = 0                 # black
 
 
-def _title_of(body):
-    for ln in str(body).split("\n"):
-        ln = ln.strip()
-        if ln:
-            return ln[:40]
-    return "EMPTY PAGE"
+def _body_of(blob):
+    """The body string of a moytext-v1 blob (empty on anything malformed)."""
+    try:
+        data = json.loads(blob)
+    except (ValueError, TypeError):
+        return ""
+    if isinstance(data, dict):
+        b = data.get("body", "")
+        if isinstance(b, str):
+            return b
+    return ""
+
+
+def _encode(body):
+    return json.dumps({"format": "moytext-v1", "body": body})
 
 
 class WriterLayout(ListShellLayout):
@@ -59,9 +74,13 @@ class WriterLayout(ListShellLayout):
         x = 6 * fs
         y = self.bar_h + 3 * fs
         bh = self.toolbar_h - 6 * fs
-        self.back_btn = (x, y, 58 * fs, bh)
-        self.del_btn = (x + 62 * fs, y, 66 * fs, bh)
-        self.status_x = x + 134 * fs
+        # Edit-view toolbar buttons: DOCS (back to the picker), RENAME, TRASH.
+        self.back_btn = (x, y, 52 * fs, bh)
+        self.name_btn = (x + 56 * fs, y, 58 * fs, bh)
+        self.del_btn = (x + 118 * fs, y, 46 * fs, bh)
+        # List-view: a single + NEW button (same x as back).
+        self.new_btn = (x, y, 62 * fs, bh)
+        self.status_x = x + 170 * fs
         self.status_y = y + max(0, (bh - 8 * fs) // 2)
         # The page (edit view): a text grid sized to the window, like CodeLayout.
         self.tx = 8 * fs
@@ -71,13 +90,19 @@ class WriterLayout(ListShellLayout):
         self.text_area = (self.tx - 2 * fs, self.ty - 2 * fs,
                           self.cols * self.cell + 4 * fs,
                           self.rows * self.lh + 4 * fs)
-        # The notebook (list view): one row per note below the title band --
-        # a reading list, not an icon grid (geometry + row_rect: ListShellLayout).
+        # The picker (list view): the shared thumbnail grid fills the body.
+        gy = self.bar_h + self.toolbar_h + 2 * fs
+        self.body = (4 * fs, gy, self.w - 8 * fs, max(40, self.h - gy - 4 * fs))
+        # Rename entry field (below the toolbar).
+        self.entry = (x - 2 * fs, self.bar_h + self.toolbar_h + 2 * fs,
+                      self.w - 2 * (x - 2 * fs), 16 * fs)
+        # Kept so ListShell helpers that read list geometry stay valid.
         self._init_list(self.bar_h + self.toolbar_h)
 
 
 class WriterAppLayer(ListShellApp):
-    """Notebook list + a ruled-paper text page over the shared CodeEditor core."""
+    """A doc picker (shared FileGridView) + a ruled-paper text page over the
+    shared CodeEditor core, on named files/docs/*.moytext user files (#108)."""
 
     id = "writer"
     domain = "system"
@@ -86,6 +111,7 @@ class WriterAppLayer(ListShellApp):
     APP_TITLE = "Writer"
     APP_PERM = "notebook"
     APP_FOLDER = "writer.moy"
+    AUTOSAVE_S = 2.5
 
     def __init__(self, ws, names, in_rect):
         self.ws = ws
@@ -93,51 +119,46 @@ class WriterAppLayer(ListShellApp):
         self._in = in_rect
         self.layout = WriterLayout(ws.sys_canvas.w, ws.sys_canvas.h,
                                    ws._effective_font_scale(), ws.windowed_chrome)
-        self.mode = "list"            # list | edit
-        self.notes = []               # [{"title": str, "body": str}, ...]
-        self.active = -1              # index of the note open in the editor
-        self.sel = 0                  # list selection (0 = the NEW row)
-        self.top = 0                  # first visible list row
+        self.mode = "list"            # list | edit | rename
+        self.grid = FileGridView(ws, "docs")
+        self.doc_name = None          # the open doc's file name (None = none open)
         self.editor = None            # CodeEditor while mode == "edit"
-        self.status = "MY NOTEBOOK"
-        self.del_armed = False        # two-tap DELETE confirm
+        self.status = "MY DOCS"
         self._ekey_prev = 0           # typed-key edge tracker (code_layer idiom)
         self._drag = None             # page drag-scroll anchor
-        self._pending_keys = 0        # keystrokes since the last flush (autosave)
-        self._loaded = False
+        self._unsaved = False         # dirty since the last flush (idle autosave)
+        self._idle = 0.0
+        self.rename_text = ""
+        self._pending_open = None     # a name to open on the next open() (Files jump)
         self._save_failed = False
 
     # -- store ---------------------------------------------------------------
-    # (is_app / _store_ready / _load_blob / _persist: ListShellApp)
+    # (is_app / _store_ready / _load_blob / _persist / _edge_key: ListShellApp)
 
-    def _load(self):
-        self.notes = []
-        data = self._load_blob(
-            lambda: self.ws.carts_store.load_notes(self.ws.carts_root))
-        if isinstance(data, dict):
-            for n in (data.get("notes") or [])[:MAX_NOTES]:
-                body = str((n or {}).get("body", ""))[:MAX_CHARS]
-                self.notes.append({"title": _title_of(body), "body": body})
-        self._loaded = True
+    def open_named(self, name):
+        """Point Writer at a named doc to open on its next open() -- the Files
+        app's OPEN verb (docs open in Writer)."""
+        self._pending_open = name
 
     def flush(self, force=False):
-        """Sync the open editor into its note and persist the whole notebook.
-        The autosave verb: cheap to call, no-ops when nothing changed."""
-        changed = False
+        """Persist the open doc to its files/docs/<name>.moytext file. The
+        autosave verb: cheap to call, no-ops when nothing changed."""
         ed = self.editor
-        if ed is not None and 0 <= self.active < len(self.notes):
-            body = ed.text()[:MAX_CHARS]
-            if ed.dirty or body != self.notes[self.active]["body"]:
-                self.notes[self.active] = {"title": _title_of(body), "body": body}
-                ed.dirty = False
-                changed = True
-        if not (changed or force):
+        if ed is None or self.doc_name is None:
             return True
-        self._pending_keys = 0
-        blob = json.dumps({"format": "moynotes-v1",
-                           "notes": self.notes})
-        return self._persist(lambda: self.ws.carts_store.save_notes(
-            blob, self.ws.carts_root))
+        if not (ed.dirty or self._unsaved or force):
+            return True
+        body = ed.text()[:MAX_CHARS]
+        store = self.ws.carts_store
+        name = self.doc_name
+        ok = self._persist(lambda: store.save_file(
+            "docs", name, _encode(body), self.ws.carts_root))
+        if ok:
+            ed.dirty = False
+            self._unsaved = False
+            self._idle = 0.0
+            self.grid.invalidate(name)
+        return ok
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -147,70 +168,128 @@ class WriterAppLayer(ListShellApp):
             self.editor.set_view_size(self.layout.cols, self.layout.rows)
 
     def open(self):
-        self._load()
-        self.mode = "list"
-        self.editor = None
-        self.active = -1
-        self.sel = 0
-        self.top = 0
-        self.del_armed = False
-        self._ekey_prev = 0
-        self._pending_keys = 0
-        self.status = "MY NOTEBOOK"
+        if self._store_ready():
+            try:
+                self.ws._with_sd(
+                    lambda: self.ws.carts_store.migrate_docs(self.ws.carts_root))
+            except Exception:  # noqa: BLE001 -- migration is best-effort
+                pass
+        self.grid.refresh()
+        pending = self._pending_open
+        self._pending_open = None
+        if pending and pending in self.grid.names:
+            self._open_doc(pending)
+        else:
+            self.mode = "list"
+            self.editor = None
+            self.doc_name = None
+            self.status = "MY DOCS"
         self.ws._dirty = True
 
-    # -- note verbs ------------------------------------------------------------
+    # -- doc verbs -----------------------------------------------------------
 
-    def _open_note(self, index):
-        if not (0 <= index < len(self.notes)):
-            return
+    def _open_doc(self, name):
         self.flush()
-        self.active = index
+        blob = None
+        if self._store_ready():
+            try:
+                blob = self.ws._with_sd(lambda: self.ws.carts_store.load_file(
+                    "docs", name, self.ws.carts_root))
+            except Exception:  # noqa: BLE001
+                blob = None
         lay = self.layout
-        self.editor = CodeEditor(self.notes[index]["body"], lay.cols, lay.rows)
+        self.editor = CodeEditor(_body_of(blob) if blob else "", lay.cols, lay.rows)
+        self.doc_name = name
         self.mode = "edit"
-        self.del_armed = False
+        self._unsaved = False
+        self._idle = 0.0
         self._ekey_prev = 0
-        self.status = self.notes[index]["title"]
+        self.status = name.upper()
         self.ws._dirty = True
 
-    def _new_note(self):
-        if len(self.notes) >= MAX_NOTES:
-            self.status = "NOTEBOOK FULL"
-            self.ws._dirty = True
-            return
-        self.notes.append({"title": "EMPTY PAGE", "body": ""})
-        self._open_note(len(self.notes) - 1)
+    def _new_doc(self):
+        self.flush()
+        name = None
+        if self._store_ready():
+            try:
+                name = self.ws._with_sd(lambda: self.ws.carts_store.new_file_name(
+                    "docs", self.ws.carts_root))
+            except Exception:  # noqa: BLE001
+                name = None
+        lay = self.layout
+        self.editor = CodeEditor("", lay.cols, lay.rows)
+        self.doc_name = name or "doc_1"
+        self.mode = "edit"
+        self._unsaved = False           # written on first change (no empty litter)
+        self._idle = 0.0
+        self._ekey_prev = 0
+        self.status = "NEW DOC"
+        self.ws._dirty = True
 
     def _back_to_list(self):
-        self.flush(force=True)
-        self.sel = self.active + 1 if self.active >= 0 else 0
+        self.flush()                    # change-gated: an untouched doc never litters
+        keep = self.doc_name
         self.mode = "list"
         self.editor = None
-        self.active = -1
-        self.del_armed = False
-        self.status = "MY NOTEBOOK"
+        self.doc_name = None
+        self.grid.refresh()
+        self.grid.select(keep)
+        self.status = "MY DOCS"
         self.ws._dirty = True
 
-    def _delete_active(self):
-        if not (0 <= self.active < len(self.notes)):
+    def _delete_doc(self):
+        if self.doc_name is None:
             return
-        del self.notes[self.active]
+        name = self.doc_name
+        if self._persist(lambda: self.ws.carts_store.delete_file(
+                "docs", name, self.ws.carts_root)):
+            self.grid.invalidate(name)
+            self.status = "IN TRASH"
         self.editor = None
-        self.active = -1
+        self.doc_name = None
         self.mode = "list"
-        self.sel = 0
-        self.del_armed = False
-        self.status = "PAGE TORN OUT"
-        self.flush(force=True)
+        self.grid.refresh()
+        self.grid.select(None)
+        self.ws._dirty = True
+
+    def _begin_rename(self):
+        if self.doc_name is None:
+            return
+        self.rename_text = self.doc_name[:MAX_NAME]
+        self._ekey_prev = 0
+        self.mode = "rename"
+        self.status = "TYPE A NAME"
+        self.ws._dirty = True
+
+    def _rename_commit(self):
+        name = self.doc_name
+        text = self.rename_text
+        new = [name]
+
+        def _do():
+            new[0] = self.ws.carts_store.rename_file(
+                "docs", name, text, self.ws.carts_root)
+
+        if name and self._persist(_do):
+            self.grid.invalidate(name)
+            self.doc_name = new[0]
+            self.status = new[0].upper()
+        self.mode = "edit"
         self.ws._dirty = True
 
     # -- input -----------------------------------------------------------------
 
     def handle_input(self, inp):
         if self.mode == "list":
-            # the NEW row + notes (nav + scroll window: ListShellApp)
-            return self._list_nav(inp, len(self.notes) + 1)
+            hit = self.grid.nav(inp)
+            if hit and hit[0] == "pick":
+                self._open_doc(hit[1])
+            elif hit:
+                self.status = hit[1].upper()
+            return True
+        if self.mode == "rename":
+            self._typed_name(inp)
+            return True
         self._typed_keys(inp)
         return True
 
@@ -224,27 +303,43 @@ class WriterAppLayer(ListShellApp):
         if len(ed.text()) >= MAX_CHARS and k not in (0x08, 0x7F):
             self.status = "PAGE FULL"
         elif ed.key(k):
-            self._pending_keys += 1
-            self.status = _title_of(ed.text())
-            if self._pending_keys >= AUTOSAVE_KEYS:
-                self.flush()
+            self._unsaved = True
+            self._idle = 0.0
+            self.status = self.doc_name.upper() if self.doc_name else "DOC"
+
+    def _typed_name(self, inp):
+        k = self._edge_key(inp)
+        if not k:
+            return
+        if k in (0x0D, 0x0A):
+            self._rename_commit()
+        elif k in (0x08, 0x7F):
+            self.rename_text = self.rename_text[:-1]
+        elif 0x20 <= k < 0x7F and len(self.rename_text) < MAX_NAME:
+            self.rename_text += chr(k)
+        self.ws._dirty = True
 
     def handle_pointer(self, px, py, click):
         ws = self.ws
         lay = self.layout
         if click and not ws.windowed_chrome and py < lay.bar_h:
-            # The OS bar (context-X exits): flush FIRST so an exit never loses text.
-            self.flush(force=True)
+            # The OS bar (context-X exits): flush FIRST so an exit never loses text
+            # (change-gated -- an untouched blank doc is not written just to exit).
+            self.flush()
             return bool(ws.bar_layer.handle_bar_tap("tool", px, py))
         if self.mode == "list":
             if not click:
                 return True
-            for i in range(self.top, min(self.top + lay.list_rows,
-                                         len(self.notes) + 1)):
-                if self._in(px, py, lay.row_rect(i - self.top)):
-                    self.sel = i
-                    self._tap_row(i)
-                    return True
+            if self._in(px, py, lay.new_btn):
+                self._new_doc()
+                return True
+            hit = self.grid.tap(px, py)
+            if hit and hit[0] in ("pick", "sel"):
+                self._open_doc(hit[1])       # the picker opens on one tap
+            return True
+        if self.mode == "rename":
+            if click and self._in(px, py, lay.del_btn):
+                self._rename_commit()
             return True
         # -- edit view ---------------------------------------------------------
         self._page_drag(px, py)
@@ -253,25 +348,16 @@ class WriterAppLayer(ListShellApp):
         if self._in(px, py, lay.back_btn):
             self._back_to_list()
             return True
-        if self._in(px, py, lay.del_btn):
-            if self.del_armed:
-                self._delete_active()
-            else:
-                self.del_armed = True
-                self.status = "TAP AGAIN TO TEAR OUT"
-                self.ws._dirty = True
+        if self._in(px, py, lay.name_btn):
+            self._begin_rename()
             return True
-        self.del_armed = False
+        if self._in(px, py, lay.del_btn):
+            self._delete_doc()
+            return True
         if self.editor is not None and self._in(px, py, lay.text_area):
             self.editor.place((px - lay.tx) // lay.cell, (py - lay.ty) // lay.lh)
             self.ws._dirty = True
         return True
-
-    def _tap_row(self, i):
-        if i == 0:
-            self._new_note()
-        else:
-            self._open_note(i - 1)
 
     def _page_drag(self, px, py):
         # Touch drag inside the page pans the text (content follows the finger).
@@ -294,47 +380,49 @@ class WriterAppLayer(ListShellApp):
     # -- draw --------------------------------------------------------------------
 
     def _button(self, cv, label, r, hot=False):
-        # One shared implementation now (ui.chip) -- pixel-identical delegate.
         _ui.chip(cv, self.ws.theme_colors, r, label, hot=hot, fs=self.layout.fs)
 
     def draw(self, dt):
         cv = self.ws.sys_canvas
         lay = self.layout
         th = self.ws.theme_colors
+        # The #108 autosave debounce (Paint's idle-flush model).
+        if self.mode == "edit" and self._unsaved:
+            self._idle += dt
+            if self._idle >= self.AUTOSAVE_S:
+                self.flush()
         cv.cls(th["panel"])
         _ui.toolbar(cv, th, (0, lay.bar_h, lay.w, lay.toolbar_h))
-        if self.mode == "edit":
-            self._button(cv, "NOTES", lay.back_btn)
-            self._button(cv, "TEAR OUT", lay.del_btn, hot=self.del_armed)
+        if self.mode == "list":
+            self._button(cv, "+ NEW", lay.new_btn)
+        elif self.mode == "rename":
+            self._button(cv, "OK", lay.del_btn, hot=True)
+        else:
+            self._button(cv, "DOCS", lay.back_btn)
+            self._button(cv, "RENAME", lay.name_btn)
+            self._button(cv, "TRASH", lay.del_btn)
         label = self.status[:max(1, (lay.w - lay.status_x) // (8 * lay.fs) - 1)]
-        sx = lay.status_x if self.mode == "edit" else 6 * lay.fs
+        sx = lay.status_x if self.mode != "list" else lay.new_btn[0] + lay.new_btn[2] + 8 * lay.fs
         cv.print(label, sx, lay.bar_h + 8 * lay.fs, th["title_ink"], 1)
         if self.mode == "list":
-            self._draw_list(cv)
+            self.grid.set_rect(lay.body, lay.fs)
+            self.grid.draw(cv, th)
+        elif self.mode == "rename":
+            self._draw_rename(cv)
         else:
             self._draw_page(cv)
         if not self.ws.windowed_chrome:
             self.ws.bar_layer._draw_status_strip("tool")
 
-    def _draw_list(self, cv):
+    def _draw_rename(self, cv):
         lay = self.layout
         th = self.ws.theme_colors
         fs = lay.fs
-        for i in range(self.top, min(self.top + lay.list_rows,
-                                     len(self.notes) + 1)):
-            x, y, w, h = lay.row_rect(i - self.top)
-            selected = i == self.sel
-            if i == 0:
-                cv.rect(x, y, w, h, th["accent"] if selected else th["hilite"])
-                cv.print("+ NEW PAGE", x + 6 * fs,
-                         y + (h - 8 * fs) // 2, self.names["black"], 1)
-            else:
-                note = self.notes[i - 1]
-                cv.rect(x, y, w, h, PAPER)
-                cv.rect(x, y + h - fs, w, fs, self.names["light_grey"])
-                cv.print(note["title"][:max(1, w // (8 * fs) - 2)],
-                         x + 6 * fs, y + (h - 8 * fs) // 2, INK, 1)
-            cv.rectb(x, y, w, h, th["accent"] if selected else th["dim"])
+        r = lay.entry
+        cv.rect(r[0], r[1], r[2], r[3], self.names["white"])
+        cv.rectb(r[0], r[1], r[2], r[3], th.get("accent", 10))
+        cv.print(self.rename_text + "_", r[0] + 4 * fs, r[1] + 4 * fs,
+                 self.names["black"], 1)
 
     def _draw_page(self, cv):
         lay = self.layout

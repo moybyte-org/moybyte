@@ -1631,3 +1631,121 @@ def migrate_user_files(root=CARTS_DIR):
     if not blob:
         return None
     return save_file("drawings", "my_art", blob, root)
+
+
+def migrate_docs(root=CARTS_DIR):
+    """One-shot #108 migration: the legacy single-file Writer notebook
+    (notes.json, a list of {title, body}) becomes one files/docs/<name>.moytext
+    per note. Gated on files/docs/ not existing yet (its own marker, like
+    drawings/), so an emptied Docs kind is never resurrected. The legacy
+    notes.json is left in place (older builds keep reading it). No-op when there
+    is nothing to migrate; returns the list of made names, or None."""
+    if _exists(file_kind_dir("docs", root)):
+        return None
+    blob = load_notes(root)
+    if not blob:
+        return None
+    try:
+        data = json.loads(blob)
+    except (ValueError, TypeError):
+        return None
+    notes = data.get("notes") if isinstance(data, dict) else None
+    if not isinstance(notes, list) or not notes:
+        return None
+    made = []
+    for n in notes:
+        if not isinstance(n, dict):
+            continue
+        body = str(n.get("body", ""))
+        if not body.strip():
+            continue
+        title = ""
+        for ln in body.split("\n"):
+            if ln.strip():
+                title = ln.strip()
+                break
+        name = new_file_name("docs", root, base=title or None)
+        text = json.dumps({"format": "moytext-v1", "body": body})
+        made.append(save_file("docs", name, text, root))
+    return made or None
+
+
+def migrate_tables(root=CARTS_DIR):
+    """One-shot #108 migration: the legacy single-file Sheets workbook
+    (sheets.json, a list of moysheet-v1 dicts) becomes one
+    files/tables/<name>.moysheet per sheet. Gated on files/tables/ not existing
+    yet. Each entry is already a moysheet-v1 blob, so it is written verbatim (it
+    stays readable by table() unchanged). No-op when there is nothing to
+    migrate; returns the list of made names, or None."""
+    if _exists(file_kind_dir("tables", root)):
+        return None
+    blob = load_sheets(root)
+    if not blob:
+        return None
+    try:
+        data = json.loads(blob)
+    except (ValueError, TypeError):
+        return None
+    sheets = data.get("sheets") if isinstance(data, dict) else None
+    if not isinstance(sheets, list) or not sheets:
+        return None
+    made = []
+    for entry in sheets:
+        if not isinstance(entry, dict):
+            continue
+        base = entry.get("name") if isinstance(entry.get("name"), str) else None
+        name = new_file_name("tables", root, base=base)
+        made.append(save_file("tables", name, json.dumps(entry), root))
+    return made or None
+
+
+# --- provenance stamps (#108 phase 2): a copy remembers its source ----------
+#
+# When a user file is COPIED into a consuming cart (a drawing -> a project's
+# images/bg, or the wallpaper copy), the copied JSON blob gains two optional
+# keys: `src` ("<kind>/<name>", the origin file) and `sig` (a content signature
+# of the source blob at copy time -- the cover_sig stamp pattern from #86).
+# PURE METADATA: never resolved at runtime, ignored by every decoder (they read
+# only format/w/h/data/cells/body). It powers two PULL-BASED affordances --
+# "your drawing changed -> UPDATE" (re-read the source; a differing sig offers a
+# one-tap re-copy; a missing/renamed source simply never matches, so the
+# affordance vanishes) and the File Manager's "used in:" list (scan the
+# consumers for a matching src). No reverse index is kept, so a stale/deleted
+# source can never break anything.
+
+def content_sig(text):
+    """A cheap content stamp for a user-file blob (reuses the #86 cover_sig)."""
+    return cover_sig(text) if text else 0
+
+
+def stamp_provenance(blob, kind, name, sig):
+    """Return `blob` (a JSON object string) with src/sig provenance keys added.
+    A non-object / unparseable blob passes through unchanged (never a crash)."""
+    try:
+        data = json.loads(blob)
+    except (ValueError, TypeError):
+        return blob
+    if not isinstance(data, dict):
+        return blob
+    data["src"] = str(kind) + "/" + str(name)
+    data["sig"] = int(sig) & 0xFFFFFFFF
+    return json.dumps(data)
+
+
+def read_provenance(blob):
+    """(src, sig) from a stamped blob -- ("<kind>/<name>", int) -- or
+    (None, None) when there is no stamp / the blob is unreadable."""
+    try:
+        data = json.loads(blob)
+    except (ValueError, TypeError):
+        return (None, None)
+    if not isinstance(data, dict):
+        return (None, None)
+    src = data.get("src")
+    if not isinstance(src, str) or "/" not in src:
+        return (None, None)
+    try:
+        sig = int(data.get("sig", 0))
+    except (TypeError, ValueError):
+        sig = 0
+    return (src, sig)

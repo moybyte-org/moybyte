@@ -93,7 +93,8 @@ class FilesAppLayer(ListShellApp):
     APP_PERM = "files"
     APP_FOLDER = "files.moy"
 
-    GRID_ACTIONS = ("OPEN", "NAME", "COPY", "WALL", "GAME", "DEL")
+    GRID_ACTIONS = ("OPEN", "NAME", "COPY", "WALL", "GAME", "USE", "DEL")
+    DOC_ACTIONS = ("OPEN", "NAME", "COPY", "DEL")   # docs/tables open in their app
     PLAIN_ACTIONS = ("NAME", "COPY", "DEL")     # kinds with no opener/reuse yet
 
     def __init__(self, ws, names, in_rect):
@@ -115,6 +116,8 @@ class FilesAppLayer(ListShellApp):
         self.rename_text = ""
         self._ekey_prev = 0
         self.project_names = ()
+        self.used_rows = ()           # provenance "used in:" rows (#108 phase 2)
+        self.used_name = None
 
     def relayout(self, w, h, fs):
         self.layout = FilesLayout(w, h, fs, self.ws.windowed_chrome)
@@ -168,21 +171,42 @@ class FilesAppLayer(ListShellApp):
         if mode == "trash":
             self._rows = tuple(n + "  (" + k + ")" for k, n in self.trash)
             self._rows_empty = "TRASH IS EMPTY"
+        elif mode == "used":
+            # A drawing's consumers (#108 phase 2): a "*" marks a stale copy
+            # (the drawing changed since) -- tapping it re-sends (UPDATE).
+            self._rows = tuple(
+                (r["label"] + (" *" if r.get("stale") else "")) for r in self.used_rows)
+            self._rows_empty = "NOT USED YET"
         else:
             self._rows = tuple(self.project_names)
             self._rows_empty = "NO PROJECTS"
         self.ws._dirty = True
 
     def _action_labels(self):
-        return (self.GRID_ACTIONS if self.grid.kind == "drawings"
-                else self.PLAIN_ACTIONS)
+        kind = self.grid.kind
+        if kind == "drawings":
+            return self.GRID_ACTIONS
+        if kind in ("docs", "tables"):
+            return self.DOC_ACTIONS
+        return self.PLAIN_ACTIONS
 
     def _pick(self, name):
-        """The grid's open gesture (second tap / A on the selection)."""
-        if self.grid.kind == "drawings":
+        """The grid's open gesture (second tap / A on the selection): open the
+        file in its owning app -- drawings in Paint, docs in Writer, tables in
+        Sheets (#108: 'tap = open in owning app')."""
+        kind = self.grid.kind
+        if kind == "drawings":
             self.ws.artwork.open_named(name)
             if not self.ws.open_app(self.ws.artwork_app):
                 self.status = "NO PAINT APP"
+        elif kind == "docs":
+            self.ws.writer_app.open_named(name)
+            if not self.ws.open_app(self.ws.writer_app):
+                self.status = "NO WRITER APP"
+        elif kind == "tables":
+            self.ws.sheets_app.open_named(name)
+            if not self.ws.open_app(self.ws.sheets_app):
+                self.status = "NO SHEETS APP"
 
     def _act(self, verb, name):
         ws = self.ws
@@ -210,6 +234,14 @@ class FilesAppLayer(ListShellApp):
             self.project_names = ws.artwork.targets()
             self._enter_rows("game")
             self.status = "PICK A PROJECT"
+        elif verb == "USE":
+            # Provenance "used in:" list (#108 phase 2): the wallpaper + every
+            # project bg copied from this drawing, stale copies flagged.
+            self.used_name = name
+            self.used_rows = tuple(ws.artwork.usage(name))
+            self._enter_rows("used")
+            self.status = ("USED IN " + str(len(self.used_rows))) \
+                if self.used_rows else "NOT USED YET"
         elif verb == "DEL":
             if self._persist(lambda: store.delete_file(
                     self.grid.kind, name, ws.carts_root)):
@@ -257,6 +289,22 @@ class FilesAppLayer(ListShellApp):
             self._restore(i)
         elif self.mode == "game":
             self._game_pick(i)
+        elif self.mode == "used":
+            self._resend(i)
+
+    def _resend(self, i):
+        """Re-copy the drawing to one usage row -- the one-tap UPDATE / send-
+        again (#108 phase 2). Stays in the list, re-scanned so the '*' clears."""
+        ws = self.ws
+        if 0 <= i < len(self.used_rows) and self.used_name:
+            row = self.used_rows[i]
+            if ws.artwork.resend(row, self.used_name):
+                self.status = "SENT TO " + row["label"].upper()[:14]
+            else:
+                self.status = ws.artwork.last_error or "CAN'T SEND"
+            self.used_rows = tuple(ws.artwork.usage(self.used_name))
+            self._enter_rows("used")
+        self.ws._dirty = True
 
     def _game_pick(self, i):
         ws = self.ws
@@ -274,7 +322,7 @@ class FilesAppLayer(ListShellApp):
         if self.mode == "rename":
             self._typed_keys(inp)
             return True
-        if self.mode in ("trash", "game"):
+        if self.mode in ("trash", "game", "used"):
             if self._rows:
                 return self._list_nav(inp, len(self._rows))
             return True
@@ -306,7 +354,7 @@ class FilesAppLayer(ListShellApp):
     def _back(self):
         if self.mode == "kinds":
             return
-        if self.mode in ("rename", "game"):
+        if self.mode in ("rename", "game", "used"):
             self.mode = "grid"
         elif self.mode == "grid" and self.grid.sel_name():
             self.grid.select(None)
@@ -337,7 +385,7 @@ class FilesAppLayer(ListShellApp):
                     self._enter_rows("trash")
             else:
                 self._rows_tap(px, py)
-        elif self.mode == "game":
+        elif self.mode in ("game", "used"):
             self._rows_tap(px, py)
         elif self.mode == "rename":
             if self._in(px, py, lay.head2):
@@ -401,8 +449,10 @@ class FilesAppLayer(ListShellApp):
         cv.cls(th["panel"])
         _ui.toolbar(cv, th, (0, lay.bar_h, lay.w, lay.top_h))
         crumb = "FILES"
-        if self.mode in ("grid", "rename", "game"):
+        if self.mode in ("grid", "rename", "game", "used"):
             crumb = "FILES > " + self.grid.kind.upper()
+            if self.mode == "used":
+                crumb = "FILES > USED IN"
         elif self.mode == "trash":
             crumb = "FILES > TRASH"
         self._chip(cv, "<" if self.mode != "kinds" else "FILES", lay.head,

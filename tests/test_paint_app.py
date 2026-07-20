@@ -92,8 +92,14 @@ def test_touch_stroke_undo_redo_and_shared_save(tmp_path):
     assert "bg" not in wall["images"]
     assert ws.artwork.set_wallpaper()
     wall = next(c for c in moy_carts.scan(carts) if c["title"] == "My Art")
-    assert wall["images"]["bg"] == blob
-    assert moy_carts.load_artwork(carts) == blob   # the wallpaper-copy store
+    # The wallpaper copy carries the SAME pixels (copy-on-set) plus a #108
+    # phase-2 provenance stamp (src/sig) so a later edit can offer UPDATE.
+    assert moy_carts.decode_moyimg(wall["images"]["bg"]) == \
+        moy_carts.decode_moyimg(blob)
+    assert moy_carts.decode_moyimg(moy_carts.load_artwork(carts)) == \
+        moy_carts.decode_moyimg(blob)
+    assert moy_carts.read_provenance(moy_carts.load_artwork(carts))[0] == \
+        "drawings/" + name
 
 
 def test_publish_wallpaper_and_attach_as_game_bg(tmp_path):
