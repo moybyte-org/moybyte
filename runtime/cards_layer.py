@@ -52,6 +52,10 @@ _CARD_H = 20
 _CARD_VIEW_BOTTOM = 232
 _CARD_SCROLL_UP = (300, 44, 16, 14)     # tap to scroll cards up (toward the top)
 _CARD_SCROLL_DN = (300, 214, 16, 14)    # tap to scroll cards down
+# The header "INFO" button (#94): opens the CART INFO modal (title/author manifest
+# editing -- the tracker's gap 2). Sits in the header row (y=21..35), clear of both
+# the "MAKE IT MINE" label (ends ~x234 at scale 2) and the scroll chevrons (y>=44).
+_CARD_INFO_BTN = (278, 21, 36, 14)
 
 _BASE_W = 320
 _BASE_H = 240
@@ -82,6 +86,7 @@ class CardsLayout:
             self.card_y0, self.card_h = _CARD_Y0, _CARD_H
             self.view_bottom = _CARD_VIEW_BOTTOM
             self.scroll_up, self.scroll_dn = _CARD_SCROLL_UP, _CARD_SCROLL_DN
+            self.info_btn = _CARD_INFO_BTN
             self.gap = 2
             self.h_cells, self.h_icons, self.h_meter = 44, 36, 32
             return
@@ -97,6 +102,7 @@ class CardsLayout:
         self.scroll_up = (self.w - 20 * fs, self.card_y0, 16 * fs, 14 * fs)
         self.scroll_dn = (self.w - 20 * fs, self.view_bottom - 18 * fs,
                           16 * fs, 14 * fs)
+        self.info_btn = (self.w - 44 * fs, bar_h + 3 * fs, 40 * fs, 14 * fs)
         self.gap = 2 * fs
         # Per-display card heights (#15): sprite/bg picker cells, icon choices,
         # gauge/count meters -- all scale with the font so the pictures stay tappable.
@@ -129,6 +135,10 @@ class CardsLayer:
         self.mtop = 0                 # first card scrolled into view (#3)
         self._t = None                # per-draw tone map (set by _draw_cards)
         self._dragv = None            # drag-to-scroll anchor (held vertical drag)
+        # The CART INFO modal (#94): None when closed, else {"title", "author",
+        # "field" (0=title/1=author), "msg", "armed"} -- the title/author edit
+        # buffer + which field has focus + an inline status line. See _open_meta.
+        self.meta = None
         sc = ws.sys_canvas
         self.layout = CardsLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
 
@@ -141,6 +151,9 @@ class CardsLayer:
         """Reset the scroll/selection state (called by ws.open on a fresh cart)."""
         self.msel = 0
         self.mtop = 0
+        if self.meta is not None:     # never leak an open modal across a cart switch
+            self.meta = None
+            self.ws._set_text_mode(False)
 
     # -- Layer facets --------------------------------------------------------
 
@@ -162,9 +175,15 @@ class CardsLayer:
         # PLAY, replacing the old pause-only tool switcher for this tab. Drawn LAST
         # (chrome over content), byte-identical cost to the #43 strip cache.
         ws.bar_layer._draw_status_strip("menu")
+        # The CART INFO modal (#94), if open, draws OVER the bar too -- same order
+        # as the block editor's blk_kbd prompt (chrome, then any modal on top).
+        if self.meta is not None:
+            self._draw_meta_modal()
 
     def handle_input(self, i):
         ws = self.ws
+        if self.meta is not None:
+            return self._meta_input(i)
         ed = ws.project.cart.get("edit")
         if not ed:
             return True
@@ -226,10 +245,15 @@ class CardsLayer:
 
     def handle_pointer(self, px, py, click):
         ws = self.ws
+        if self.meta is not None:
+            return self._meta_pointer(px, py, click)
         # SYSTEM coords (#39 step 3): hit-test the raw pointer, no _game_xy.
         self._cards_drag(px, py)           # held drag scrolls the card column
         if click and ws.bar_layer.handle_bar_tap("menu", px, py):
             return True         # the Editor's lent zone (Stage 4) claimed the tap
+        if click and self._in(px, py, self.layout.info_btn):
+            self._open_meta()
+            return True
         ci = self._card_at(px, py)
         if ci is not None:
             self.msel = ci                 # hover highlights
@@ -285,10 +309,61 @@ class CardsLayer:
                 out.append(0)
         return out
 
+    # -- edit-field validation (#94) -----------------------------------------
+
+    def _validate_field(self, f):
+        """Sanity-check ONE `edit` field definition: returns a short human
+        reason it can't be drawn/stepped, or None when it's fine. Checked once
+        per row (in _card_height/_card_layout, so every call site that touches
+        `f` before this line goes through it first) and again by ws.adjust
+        before it mutates config, so a bad hand-edited manifest.json/config.json
+        degrades to one inline "!" card + a no-op stepper instead of taking the
+        whole Config tab down -- draw()'s try/except stays as the belt-and-
+        braces net for a genuinely UNFORESEEN crash; this catches the KNOWN-bad
+        shapes (missing key/type, min>max, a zero step, empty/missing choices,
+        an unknown or type-mismatched `display`) with a message a kid's parent
+        (or the kid, tapping past it) can actually read."""
+        if not isinstance(f, dict):
+            return "not a card"
+        key = f.get("key")
+        if not key or not isinstance(key, str):
+            return "missing key"
+        t = f.get("type")
+        if t not in ("int", "choice"):
+            return "bad type %r" % (t,)
+        if t == "int":
+            lo, hi = f.get("min"), f.get("max")
+            if lo is not None and hi is not None:
+                try:
+                    if float(lo) > float(hi):
+                        return "min > max"
+                except (TypeError, ValueError):
+                    return "bad min/max"
+            step = f.get("step", 1)
+            try:
+                if float(step) == 0:
+                    return "step is 0"
+            except (TypeError, ValueError):
+                return "bad step"
+        else:                                             # "choice"
+            ch = f.get("choices")
+            if not isinstance(ch, list) or not ch:
+                return "no choices"
+        disp = f.get("display")
+        if disp is not None and disp not in self._DISPLAYS:
+            return "bad display %r" % (disp,)
+        if disp in ("gauge", "count") and t != "int":
+            return "display needs type int"
+        if disp in self._CELL_DISPLAYS and t != "choice":
+            return "display needs type choice"
+        return None
+
     # -- geometry / scroll ---------------------------------------------------
 
     def _card_height(self, f):
         lay = self.layout
+        if self._validate_field(f):        # a malformed field never reaches
+            return lay.card_h              # _card_display -- see _draw_bad_card
         d = self._card_display(f)
         if d in ("sprite-tiles", "bg-thumbs"):
             return lay.h_cells
@@ -302,7 +377,10 @@ class CardsLayer:
         """Pure (no-draw) per-card geometry for the VISIBLE cards so draw and
         hit-test agree (#3). Cards lay out top-down from layout.card_y0 starting at
         the scrolled-in index self.mtop; a row is included only while its bottom
-        stays within layout.view_bottom. Returns dicts: {i, f, display, x, y, w, h}."""
+        stays within layout.view_bottom. Returns dicts: {i, f, display, x, y, w, h,
+        error} -- `error` (#94) is None for a well-formed field, else the short
+        reason _validate_field gave; `display` is forced None on an errored row
+        (_draw_card/_card_tap branch off `error` before ever reading `display`)."""
         ws = self.ws
         lay = self.layout
         rows = []
@@ -310,11 +388,14 @@ class CardsLayer:
         top = self._clamp_mtop()
         for i in range(top, len(ws.project.cart["edit"])):
             f = ws.project.cart["edit"][i]
+            err = self._validate_field(f)
             h = self._card_height(f)
             if i > top and y + h > lay.view_bottom:
                 break                       # next row would spill past the buttons
-            rows.append({"i": i, "f": f, "display": self._card_display(f),
-                         "x": lay.card_x, "y": y, "w": lay.card_w, "h": h})
+            rows.append({"i": i, "f": f,
+                         "display": None if err else self._card_display(f),
+                         "x": lay.card_x, "y": y, "w": lay.card_w, "h": h,
+                         "error": err})
             y += h + lay.gap
         return rows
 
@@ -413,6 +494,8 @@ class CardsLayer:
         for row in self._card_layout():
             if row["i"] != ci:
                 continue
+            if row.get("error"):
+                return                 # a malformed card def can't be stepped (#94)
             if row["display"] in self._CELL_DISPLAYS:
                 for k, cell in self._choice_cells(row):
                     if self._in(px, py, cell):
@@ -456,6 +539,7 @@ class CardsLayer:
         cv.rectb(*(lay.body + (t["edge"],)))
         ws._glyph("edit", lay.head_glyph, t["accent"], cv)  # pencil = "make it yours"
         cv.print("MAKE IT MINE", lay.head_xy[0], lay.head_xy[1], t["head"], 2)
+        _ui.mini_btn(cv, lay.info_btn, "INFO", t["accent"])   # #94: CART INFO modal
         for row in self._card_layout():
             self._draw_card(row)
         if self._cards_scrollable():           # up/down chevrons when cards overflow
@@ -465,6 +549,9 @@ class CardsLayer:
                 self.mtop > 0, self.mtop < self._max_mtop(), t["accent"], 2)
 
     def _draw_card(self, row):
+        if row.get("error"):
+            self._draw_bad_card(row)
+            return
         ws = self.ws
         cv = ws.sys_canvas
         fs = self.layout.fs
@@ -491,6 +578,27 @@ class CardsLayer:
             self._draw_bg_thumbs(row)
         elif disp in ("choice-icons", "sprite-tiles"):
             self._draw_choice_icons(row)
+
+    def _draw_bad_card(self, row):
+        """A card whose `edit` field definition failed _validate_field (#94):
+        a short inline "!" warning instead of crashing the whole Config tab.
+        draw()'s try/except stays the net for a genuinely unforeseen exception;
+        this covers the KNOWN-bad shapes (bad type/min-max/step, missing/empty
+        choices, a display that doesn't match its type) so a kid's hand-edited
+        manifest degrades to one dead card, not a dead tab."""
+        NAMES = self._NAMES
+        ws = self.ws
+        cv = ws.sys_canvas
+        fs = self.layout.fs
+        x, y, w, h = row["x"], row["y"], row["w"], row["h"]
+        f = row["f"]
+        key = f.get("key") if isinstance(f, dict) else None
+        label = str(key) if key else ("card %d" % row["i"])
+        cv.rect(x, y, w, h, NAMES["dark_grey"])
+        cv.rectb(x, y, w, h, NAMES["red"])
+        cv.print("!", x + 4 * fs, y + max(0, (h - 8 * fs) // 2), NAMES["red"], 2)
+        msg = ("%s: %s" % (label, row["error"]))[:32]
+        cv.print(msg, x + 20 * fs, y + max(0, (h - 8) // 2), NAMES["light_grey"], 1)
 
     def _draw_gauge(self, row):
         # A slow->fast slider: a turtle at the low end, a rabbit at the high end,
@@ -616,3 +724,161 @@ class CardsLayer:
                                 (cx + 1 * fs, cy + 1 * fs, cw - 2 * fs, ch - 2 * fs))
             cv.rectb(cx, cy, cw, ch,
                      NAMES["yellow"] if k == sel_k else self._t["cell_edge"])
+
+    # -- CART INFO: manifest title/author editing (#94) ----------------------
+    #
+    # The tracker's gap 1 ("Cart manifest / metadata editing -- title, author,
+    # permissions not editable here"): a small modal opened from the header INFO
+    # button, editing title/author through Project.commit_manifest (which writes
+    # manifest.json via moy_carts.save_manifest_meta). `permissions` stays
+    # read-only by design -- see the comment over save_manifest_meta.
+    #
+    # Typing idiom: exactly the wifi-password field's shape (settings_layer.py
+    # _wifi_input) -- while self.meta is open, input is driven PURELY off
+    # `i.last_key` (never i.pressed("a")/("b")/nav), because _set_text_mode(True)
+    # does not stop the T-Deck's ASCII-mode keyboard from ALSO firing a typed
+    # key's game-button alias (w/a/s/d/z/x -> up/left/down/right/a/b) -- typing a
+    # letter that collided with a checked button would spuriously fire it. Field
+    # switch is Tab (ASCII 9) or a tap, never up/down, for the same reason. The
+    # one-frame "armed" guard mirrors block_editor_ui._blk_arm_prompt: the tap/
+    # key that OPENED the modal can still be latched on its first input pass, so
+    # that pass only arms it -- never types/commits/cancels.
+
+    def _open_meta(self):
+        ws = self.ws
+        cart = ws.project.cart
+        if not cart:
+            return
+        self.meta = {"title": str(cart.get("title") or "")[:24],
+                     "author": str(cart.get("author") or "")[:24],
+                     "field": 0, "msg": None, "armed": False}
+        ws._set_text_mode(True)             # clean ASCII typing (device keyboard)
+        ws.input.release_all()
+        try:
+            ws.input._pressed = set()
+            ws.input._released = set()
+            ws.input._last = set()          # device InputState edge snapshot
+            ws.input._prev = set()          # host InputState edge snapshot
+        except AttributeError:
+            pass
+        ws._ekey_prev = getattr(ws.input, "last_key", 0) or 0
+        if ws.pointer is not None:
+            ws.pointer.click = False        # the tap that opened this != a field tap
+        ws._dirty = True
+
+    def _close_meta(self):
+        self.meta = None
+        self.ws._set_text_mode(False)
+
+    def _commit_meta(self):
+        ws = self.ws
+        m = self.meta
+        if m is None:
+            return
+        title = m["title"].strip()
+        author = m["author"].strip()
+        if not title:
+            m["msg"] = "TITLE CAN'T BE BLANK"
+            ws._dirty = True
+            return                          # stay open -- never persist a blank title
+        if not ws.project.commit_manifest(title=title, author=author):
+            m["msg"] = "COULD NOT SAVE"
+            ws._dirty = True
+            return
+        self._close_meta()
+        ws._dirty = True
+
+    def _meta_key(self, ch):
+        m = self.meta
+        if m is None:
+            return
+        field = "title" if m["field"] == 0 else "author"
+        if ch in (8, 127):                  # backspace / delete
+            m[field] = m[field][:-1]
+            m["msg"] = None
+            return
+        if ch in (13, 10):                  # Enter -> confirm
+            self._commit_meta()
+            return
+        if ch == 27:                        # Esc -> cancel
+            self._close_meta()
+            return
+        if ch == 9:                         # Tab -> switch field
+            m["field"] = 1 - m["field"]
+            return
+        if not (32 <= ch < 127):
+            return
+        if len(m[field]) >= 24:             # matches the launcher/toast title cap
+            return
+        m[field] += chr(ch)
+        m["msg"] = None
+
+    def _meta_input(self, i):
+        """Input while the CART INFO modal is open: last_key ONLY (see the note
+        above the section) -- no i.pressed(...) branch, ever."""
+        ws = self.ws
+        m = self.meta
+        if not m.get("armed"):
+            m["armed"] = True
+            ws._ekey_prev = i.last_key      # don't read the trigger byte as a keystroke
+            return True
+        k = i.last_key
+        if k and k != ws._ekey_prev:
+            self._meta_key(k)
+        ws._ekey_prev = k
+        return True
+
+    def _meta_rects(self):
+        """Modal geometry: a centered dialog with a TITLE field, an AUTHOR
+        field, a status line and OK/CANCEL, scaled by the system font like
+        every other responsive Cards element."""
+        lay = self.layout
+        fs = lay.fs
+        w, h = 240 * fs, 108 * fs
+        x = (lay.w - w) // 2
+        y = (lay.h - h) // 2
+        title_r = (x + 12 * fs, y + 26 * fs, w - 24 * fs, 14 * fs)
+        author_r = (x + 12 * fs, y + 54 * fs, w - 24 * fs, 14 * fs)
+        ok_r = (x + w - 96 * fs, y + h - 22 * fs, 40 * fs, 16 * fs)
+        cancel_r = (x + w - 50 * fs, y + h - 22 * fs, 40 * fs, 16 * fs)
+        return (x, y, w, h), title_r, author_r, ok_r, cancel_r
+
+    def _meta_pointer(self, px, py, click):
+        if not click:
+            return True
+        _, title_r, author_r, ok_r, cancel_r = self._meta_rects()
+        if self._in(px, py, title_r):
+            self.meta["field"] = 0
+        elif self._in(px, py, author_r):
+            self.meta["field"] = 1
+        elif self._in(px, py, ok_r):
+            self._commit_meta()
+        elif self._in(px, py, cancel_r):
+            self._close_meta()
+        self.ws._dirty = True
+        return True
+
+    def _draw_meta_modal(self):
+        NAMES = self._NAMES
+        ws = self.ws
+        cv = ws.sys_canvas
+        fs = self.layout.fs
+        m = self.meta
+        (x, y, w, h), title_r, author_r, ok_r, cancel_r = self._meta_rects()
+        _ui.dialog(cv, (x, y, w, h), ring=NAMES["yellow"])
+        cv.print("CART INFO", x + 10 * fs, y + 8 * fs, NAMES["white"], 1)
+        foc_title = m["field"] == 0
+        cv.print("TITLE", x + 12 * fs, title_r[1] - 9 * fs, NAMES["light_grey"], 1)
+        _ui.text_field(cv, title_r, m["title"], "")
+        if foc_title:
+            cv.rectb(title_r[0], title_r[1], title_r[2], title_r[3], NAMES["yellow"])
+        cv.print("AUTHOR", x + 12 * fs, author_r[1] - 9 * fs, NAMES["light_grey"], 1)
+        _ui.text_field(cv, author_r, m["author"], "(optional)")
+        if not foc_title:
+            cv.rectb(author_r[0], author_r[1], author_r[2], author_r[3], NAMES["yellow"])
+        if m.get("msg"):
+            bad = ("BLANK" in m["msg"] or "FAILED" in m["msg"] or "SAVE" in m["msg"])
+            cv.print(m["msg"][:34], x + 12 * fs, y + h - 38 * fs,
+                     NAMES["red"] if bad else NAMES["green"], 1)
+        _ui.game_btn(cv, ok_r, "OK", NAMES["green"])
+        _ui.game_btn(cv, cancel_r, "X", NAMES["dark_grey"])

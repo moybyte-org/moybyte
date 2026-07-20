@@ -643,6 +643,11 @@ def load(path):
         return {
             "path": path,
             "title": man.get("title", "cart"),
+            # Manifest metadata (#94 -- the Config-tab "CART INFO" editor):
+            # optional, kid-editable. Absent on every seed cart + every
+            # pre-#94 hand-authored one, so this defaults to "" (a blank author
+            # reads as "not set", never crashes a display that prints it).
+            "author": man.get("author", ""),
             "type": man.get("type", "app"),
             # The #67 dual-runtime seam: which VM runs this cart ("python" today,
             # "lua" via the injected runtime), and which file `src` came from --
@@ -762,6 +767,48 @@ def set_graduated(cart_or_path, value=True):
     if isinstance(cart_or_path, dict):
         cart_or_path["graduated"] = bool(value)
     return changed
+
+
+# --- manifest metadata (title/author) editing (#94) --------------------------
+#
+# The Config tab's "CART INFO" mini-editor (cards_layer.py): a kid-editable
+# title + author, the tracker's gap 2 ("Cart manifest / metadata editing --
+# title, author, permissions not editable here"). `permissions` stays
+# READ-ONLY for now -- it gates privileged system-app identity + the network
+# capability (app_shell.py/artwork.py/appearance_app.py/calc_app.py check it,
+# wifi.moy is the one network cart), so turning it into a free-form kid toggle
+# is a separate, security-sensitive design question the tracker doesn't settle;
+# title/author are the unambiguous, low-risk half of the gap.
+#
+# save_manifest_meta is the low-level read-modify-write, same shape as
+# _manifest_set_graduated: preserves every other manifest field (version/edit/
+# permissions/runtime/main/graduated/assets/...) and writes atomically. `title`/
+# `author` are each optional (None = leave alone); an empty/whitespace title is
+# the CALLER's job to reject (Project.commit_manifest does, before this ever
+# runs) so an on-disk manifest can never lose its title.
+
+def save_manifest_meta(cart_dir, title=None, author=None):
+    """Update manifest.json's `title`/`author` fields, preserving every other
+    field. Returns True iff the manifest was rewritten (changed), False on a
+    no-op (both None / already match) or an unreadable/bad manifest."""
+    path = cart_dir + "/manifest.json"
+    try:
+        man = json.loads(_read_recover(path))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(man, dict):
+        return False
+    changed = False
+    if title is not None and man.get("title") != title:
+        man["title"] = title
+        changed = True
+    if author is not None and man.get("author", "") != author:
+        man["author"] = author
+        changed = True
+    if not changed:
+        return False
+    _write_atomic(path, json.dumps(man))
+    return True
 
 
 # save_code() outcomes -- the caller (Workstation) surfaces these to the kid:
@@ -1215,18 +1262,23 @@ def _unique_dir(root, base):
 
 
 def create(title, root=CARTS_DIR, src=None, cfg=None, edit=None, type="app",
-           runtime="python", main="main.py", scenes=None, scene_order=None):
+           runtime="python", main="main.py", scenes=None, scene_order=None,
+           author=None):
     """Create a new .moy folder and return its loaded cart dict. `runtime`/`main`
     default to a python cart; duplicate() passes a source cart's through so a
     copied "lua" cart (#67) stays a lua cart with its source in main.lua. `scenes`
     ({name: .moyscene text}) + `scene_order` copy a source cart's scene assets (#85),
-    registered in manifest.assets.scenes and written under scenes/."""
+    registered in manifest.assets.scenes and written under scenes/. `author` (#94)
+    is optional -- omitted entirely when blank, so a fresh/duplicated cart's
+    manifest stays as clean as before this field existed."""
     d = _unique_dir(root, slug(title))
     _mkdir(d)
     manifest = {
         "format": CART_FORMAT, "title": title, "type": type,
         "runtime": runtime, "main": main, "edit": edit or [],
     }
+    if author:
+        manifest["author"] = author
     if scenes:                        # scene assets (#85): register + write (see above)
         manifest["assets"] = {"scenes": list(scene_order or sorted(scenes.keys()))}
     _write(d + "/manifest.json", json.dumps(manifest))
@@ -1249,7 +1301,8 @@ def duplicate(cart, root=CARTS_DIR, new_title=None):
                   src=cart["src"], cfg=dict(cart["cfg"]), edit=cart["edit"], type=cart["type"],
                   runtime=cart.get("runtime", "python"), main=cart.get("main", "main.py"),
                   scenes=dict(cart.get("scenes") or {}),      # #85: copy scene assets +
-                  scene_order=list(cart.get("scene_names") or []))  # their manifest order
+                  scene_order=list(cart.get("scene_names") or []),  # their manifest order
+                  author=cart.get("author") or None)          # #94: carry the author over
 
 
 def delete(cart):

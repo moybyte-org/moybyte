@@ -260,6 +260,43 @@ class Project:
                 return
             self._journal("config.json", json.dumps(self.cart["cfg"]))
 
+    def commit_manifest(self, title=None, author=None):
+        """Persist edited manifest metadata (title/author, #94's "CART INFO"
+        editor) through the store. Mirrors commit_config's shape (sync the
+        in-RAM cart dict always, defer the write when the device can't manage
+        SD) but skips the undo journal: title/author are a small immediate-
+        commit modal (explicit OK), not typing-idle-debounced asset content, and
+        manifest.json already carries the graduation flag's own one-way-door
+        journal riders (moy_carts._journal_code) -- folding plain metadata edits
+        into that general file journal would blur the two. A blank/whitespace-
+        only title is rejected here (never reaches the store), so a cart can
+        never lose its name; author has no such requirement (blank = unset).
+        Returns True on success (incl. a deferred-on-device no-write), False
+        only on an actual store-write failure."""
+        ws = self.ws
+        cart = self.cart
+        if not (cart and cart.get("path")):
+            return False
+        t = title.strip() if isinstance(title, str) else None
+        if t == "":
+            t = None                      # reject a blank title, keep the old one
+        a = author.strip() if isinstance(author, str) else None
+        if t is None and a is None:
+            return False
+        if t is not None:
+            cart["title"] = t             # in-RAM sync (always)
+        if a is not None:
+            cart["author"] = a
+        if not ws.can_manage:
+            return True                   # write deferred on device (cfg pattern)
+        try:
+            ws._with_sd(lambda: ws.carts_store.save_manifest_meta(
+                cart["path"], title=t, author=a))
+        except Exception as exc:  # noqa: BLE001
+            print("Moybyte save manifest failed:", _err_text(exc))
+            return False
+        return True
+
     def commit_code(self, src, quiet=False):
         """Persist validated source through the store -- the store-write half of the
         old Workstation.save_code. The compile-check + code-UI half stays on the code

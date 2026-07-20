@@ -3140,19 +3140,32 @@ class Workstation:
         # Config mutation stays on Workstation (ws.config is the single source of cart
         # state); the CARD selection lives on cards_layer, so read msel from there.
         f = self.cart["edit"][self.cards_layer.msel]
+        # #94: a malformed field definition (bad type, min>max, missing/empty
+        # choices, ...) must not crash left/right stepping -- this is the ONE
+        # call site draw()'s try/except doesn't cover (a d-pad press routes
+        # here directly, not through _draw_cards). _validate_field is the same
+        # check cards_layer uses to swap the card for an inline "!" message; a
+        # kid who navigated onto that card with up/down just can't step it.
+        if self.cards_layer._validate_field(f):
+            return
         key = f["key"]
         cur = self.config.get(key, f.get("default"))
-        if f["type"] == "int":
-            v = int(cur) + d * f.get("step", 1)
-            if "min" in f:
-                v = max(f["min"], v)
-            if "max" in f:
-                v = min(f["max"], v)
-            self.config[key] = v
-        elif f["type"] == "choice":
-            ch = f["choices"]
-            idx = ch.index(cur) if cur in ch else 0
-            self.config[key] = ch[(idx + d) % len(ch)]
+        try:
+            if f["type"] == "int":
+                v = int(cur) + d * f.get("step", 1)
+                if "min" in f:
+                    v = max(f["min"], v)
+                if "max" in f:
+                    v = min(f["max"], v)
+                self.config[key] = v
+            elif f["type"] == "choice":
+                ch = f["choices"]
+                idx = ch.index(cur) if cur in ch else 0
+                self.config[key] = ch[(idx + d) % len(ch)]
+        except (TypeError, ValueError, KeyError):  # noqa: BLE001 -- a bad current
+            # value (e.g. a non-numeric default some other bug left behind) must
+            # not crash the frame loop either; the -/+ just becomes a no-op.
+            pass
 
     def _leave_or_home(self, leave):
         """The B-leaves-the-sub-view / HOME-goes-all-the-way-home shape shared by
