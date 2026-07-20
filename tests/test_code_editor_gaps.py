@@ -473,3 +473,181 @@ def test_gutter_renders_without_error(tmp_path):
     buf = ws.sys_canvas.to_rgb888()
     assert len(buf) == 960 * 600 * 3
     assert len(set(buf)) > 4                        # drew content, not a flat fill
+
+
+# ---------------------------------------------------------------------------
+# CodeEditor core: autocomplete completion source (#89)
+# ---------------------------------------------------------------------------
+
+def test_word_prefix():
+    from runtime import CodeEditor
+    ed = CodeEditor("draw cir")
+    ed.row, ed.col = 0, 8                          # caret after "cir"
+    assert ed.word_prefix() == "cir"
+    ed.col = 5                                     # caret just after the space -> none
+    assert ed.word_prefix() == ""
+    ed.col = 2                                     # caret mid-word "dr|aw"
+    assert ed.word_prefix() == "dr"
+    ed.set_text("x2y")                             # digits are word chars mid-run
+    ed.row, ed.col = 0, 3
+    assert ed.word_prefix() == "x2y"
+    ed.set_text("123")                             # a number is not an identifier prefix
+    ed.row, ed.col = 0, 3
+    assert ed.word_prefix() == ""
+
+
+def test_buffer_words_prefix_and_dedup():
+    from runtime import CodeEditor
+    ed = CodeEditor("score = score + player\nplayer_x = 3")
+    words = ed.buffer_words("")
+    # first-appearance order, de-duplicated ("score" once), numbers excluded
+    assert words == ["score", "player", "player_x"]
+    assert ed.buffer_words("pl") == ["player", "player_x"]
+    assert ed.buffer_words("player") == ["player_x"]   # exact prefix itself excluded
+
+
+def test_completions_api_then_buffer():
+    from runtime import CodeEditor
+    names = ("circ", "circb", "cls", "def", "class")
+    ed = CodeEditor("circular = 1\ncir")
+    ed.row, ed.col = 1, 3                          # prefix "cir"
+    out = ed.completions(names)
+    # API/keyword matches first (in the pool's order), then the buffer word
+    assert out == ["circ", "circb", "circular"]
+    # no prefix -> no completions (autocomplete only fires mid-word)
+    ed.col = 0
+    assert ed.completions(names) == []
+    # limit caps the list
+    ed.set_text("aa\nab\nac\nad\na")
+    ed.row, ed.col = 4, 1
+    assert len(ed.completions((), limit=2)) == 2
+
+
+def test_complete_replaces_prefix():
+    from runtime import CodeEditor
+    ed = CodeEditor("x = cir")
+    ed.row, ed.col = 0, 7
+    assert ed.complete("circ")
+    assert ed.lines == ["x = circ"]
+    assert ed.col == 8
+    # completing mid-line keeps the tail after the caret
+    ed.set_text("cir()")
+    ed.row, ed.col = 0, 3
+    ed.complete("circb")
+    assert ed.lines == ["circb()"]
+    assert ed.col == 5
+
+
+# ---------------------------------------------------------------------------
+# CodeEditor core: jump-to-symbol (#89)
+# ---------------------------------------------------------------------------
+
+def test_def_symbols_python():
+    from runtime import CodeEditor
+    src = "import x\n\ndef update():\n    pass\n\nclass Ball(Sprite):\n    def draw(self):\n        pass"
+    ed = CodeEditor(src)
+    syms = ed.def_symbols()
+    assert syms == [("update", 2), ("Ball", 5), ("draw", 6)]
+
+
+def test_def_symbols_lua_function():
+    from runtime import CodeEditor
+    src = "function TIC()\nend\nlocal function helper()\nend\nfunction obj.method()\nend"
+    ed = CodeEditor(src)
+    syms = ed.def_symbols()
+    assert syms == [("TIC", 0), ("helper", 2), ("obj.method", 4)]
+
+
+def test_goto_row_moves_and_clamps():
+    from runtime import CodeEditor
+    ed = CodeEditor("a\nbb\nccc")
+    ed.goto_row(2, 1)
+    assert (ed.row, ed.col) == (2, 1)
+    ed.goto_row(99, 99)                            # clamped to the buffer
+    assert (ed.row, ed.col) == (2, 3)
+    ed.sel = (0, 0)
+    ed.goto_row(0)                                 # jump collapses any selection
+    assert ed.sel is None
+
+
+# ---------------------------------------------------------------------------
+# CodeLayer surface: autocomplete + jump popups through the console (#89)
+# ---------------------------------------------------------------------------
+
+def test_autocomplete_popup_pick(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _enter_code(ws)
+    ws.editor.set_text("cir")
+    ws.editor.row, ws.editor.col = 0, 3
+    cl = ws.code_layer
+    _tap_tool(ws, drv, "auto")                     # open the completion popup
+    assert cl._cmp_open and cl._cmp_items[0] == "circ"
+    lay = ws.code_layout
+    _panel, rects = cl._cmp_geom(lay, ws.editor)
+    r = rects[0]
+    _tap(drv, r[0] + r[2] // 2, r[1] + r[3] // 2)  # tap the first candidate
+    assert not cl._cmp_open
+    assert ws.editor.lines == ["circ"]
+
+
+def test_autocomplete_empty_prefix_no_popup(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _enter_code(ws)
+    ws.editor.set_text("x = ")
+    ws.editor.row, ws.editor.col = 0, 4            # caret after a space -> no prefix
+    _tap_tool(ws, drv, "auto")
+    assert not ws.code_layer._cmp_open             # nothing to offer, stays closed
+
+
+def test_autocomplete_dismissed_by_typing(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _enter_code(ws)
+    ws.editor.set_text("cir")
+    ws.editor.row, ws.editor.col = 0, 3
+    cl = ws.code_layer
+    _tap_tool(ws, drv, "auto")
+    assert cl._cmp_open
+    drv.type_char(ord("c"))                        # any key dismisses + edits normally
+    drv.frame(DT)
+    assert not cl._cmp_open
+    assert ws.editor.text() == "circ"              # the 'c' was inserted, not swallowed
+
+
+def test_jump_to_symbol_pick(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _enter_code(ws)
+    ws.editor.set_text("def a():\n    pass\ndef b():\n    pass\ndef c():\n    pass")
+    ws.editor.row, ws.editor.col = 0, 0
+    cl = ws.code_layer
+    _tap_tool(ws, drv, "goto")
+    assert cl._jump_open
+    assert [n for n, _ in cl._jump_items] == ["a", "b", "c"]
+    lay = ws.code_layout
+    _panel, rects = cl._jump_geom(lay)
+    r = rects[2]                                   # tap "c" (row 4)
+    _tap(drv, r[0] + r[2] // 2, r[1] + r[3] // 2)
+    assert not cl._jump_open
+    assert ws.editor.row == 4
+
+
+def test_jump_tap_outside_dismisses(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _enter_code(ws)
+    ws.editor.set_text("def a():\n    pass")
+    cl = ws.code_layer
+    _tap_tool(ws, drv, "goto")
+    assert cl._jump_open
+    _tap(drv, 1, 1)                                # a tap off the popup closes it
+    assert not cl._jump_open
+
+
+def test_completion_popup_renders_without_error(tmp_path):
+    """The popups draw over the code body without touching the frozen baseline."""
+    ws = _ws(tmp_path)
+    drv = _enter_code(ws)
+    ws.editor.set_text("cir")
+    ws.editor.row, ws.editor.col = 0, 3
+    ws.code_layer._open_completion(ws.editor)
+    drv.frame(DT)
+    buf = ws.sys_canvas.to_rgb888()
+    assert len(set(buf)) > 4

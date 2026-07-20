@@ -188,17 +188,19 @@ class CodeLayer:
     # (Ctrl+C/X/V/F, shift+arrow, Tab) are conveniences layered on top -- these
     # buttons are the touch (mouse-on-web) path that also works on the device.
     _TOOLS = ("sel", "copy", "cut", "paste", "find",
-              "indent", "outdent", "gutter", "undo", "redo")
+              "indent", "outdent", "gutter", "auto", "goto", "undo", "redo")
     _TOOL_LABEL = {"sel": "SEL", "copy": "CPY", "cut": "CUT", "paste": "PST",
                    "find": "FND", "indent": ">>", "outdent": "<<", "gutter": "#",
-                   "undo": "UN", "redo": "RE"}
+                   "auto": "AC", "goto": "DEF", "undo": "UN", "redo": "RE"}
     # The pre-literate glyph per tool (#89 icon pass): drawn centered instead of the
     # label. _blit_glyph draws nothing for an unknown kind, so _TOOL_LABEL stays the
-    # guaranteed fallback (gutter -> the numbered-lines glyph).
+    # guaranteed fallback (gutter -> the numbered-lines glyph; auto/goto have no glyph
+    # yet -> the AC/DEF labels).
     _TOOL_GLYPH = {"sel": "select", "copy": "copy", "cut": "cut", "paste": "paste",
                    "find": "find", "indent": "indent", "outdent": "outdent",
                    "gutter": "linenums", "undo": "undo", "redo": "redo"}
     _TLS_COLS = 3                 # cells wide for the always-visible tools toggle
+    _POPUP_MAX = 8               # visible rows in the autocomplete / jump popups
 
     def __init__(self, ws, names, in_rect):
         self.ws = ws
@@ -217,6 +219,13 @@ class CodeLayer:
         self._find_q = ""             # the find query being typed
         self._find_ci = True          # case-insensitive find (the default)
         self._find_anchor = None      # where the incremental search re-runs from
+        # -- #89 autocomplete + jump-to-symbol popups -------------------------
+        self._cmp_open = False        # the autocomplete popup is shown
+        self._cmp_items = []          # the candidate words (API/keyword + buffer)
+        self._cmp_sel = 0             # the highlighted candidate row
+        self._jump_open = False       # the jump-to-symbol popup is shown
+        self._jump_items = []         # (name, row) for every def/class line
+        self._jump_sel = 0            # the highlighted symbol row
 
     def reset(self):
         """Reset the keyboard edge tracker (called by ws.set_menu_view when the editor
@@ -226,6 +235,8 @@ class CodeLayer:
         self._sel_drag = False
         self._find_open = False
         self._select_mode = False
+        self._cmp_open = False
+        self._jump_open = False
         if self.ws.editor is not None:
             self.ws.editor.select_sticky = False
 
@@ -272,6 +283,11 @@ class CodeLayer:
             self._tools_open = not self._tools_open
             ws.mark_dirty()
             return True
+        # An open autocomplete / jump popup is modal over the code body: a tap picks a
+        # row, a tap anywhere else dismisses it (the small-screen "escape").
+        if click and (self._cmp_open or self._jump_open) and \
+                self._popup_tap(px, py, lay, ed):
+            return True
         if click and self._find_open and self._find_tap(px, py, lay):
             return True
         if click and self._tools_open and self._in(px, py, self._toolbar_rect(lay)):
@@ -310,13 +326,27 @@ class CodeLayer:
             return
         k = ws.input.last_key
         if self._ekey.hit(k):
+            # An open popup (autocomplete / jump-to-symbol) owns the keyboard: Enter
+            # accepts the highlighted row; any other key dismisses it and then edits
+            # normally (the small-screen "escape" -- the T-Deck has no Esc key).
+            if self._cmp_open or self._jump_open:
+                if k in (0x0D, 0x0A):
+                    self._popup_accept()
+                    return
+                self._cmp_open = False
+                self._jump_open = False
             # Host keyboard shortcuts (#89) layered over the touch tool palette: the
             # control bytes below are NEVER inserted as text (editor.key ignores them),
             # so they can't corrupt the buffer -- and each maps to a tool-palette button
             # so touch-only devices reach the same feature. Ctrl+Z/Y (0x1A/0x19) are the
             # Stage-7 journal walk; Ctrl+C/X/V (0x03/0x18/0x16) the clipboard; Ctrl+F
-            # (0x06) the find bar. While the find bar is focused, typing feeds the query.
-            if k == 0x06:                      # Ctrl+F toggles the find bar
+            # (0x06) the find bar; Ctrl+E (0x05) autocomplete, Ctrl+G (0x07) jump-to-
+            # symbol. While the find bar is focused, typing feeds the query.
+            if k == 0x05:                      # Ctrl+E opens autocomplete
+                self._open_completion(ed)
+            elif k == 0x07:                    # Ctrl+G opens jump-to-symbol
+                self._open_jump(ed)
+            elif k == 0x06:                    # Ctrl+F toggles the find bar
                 self._toggle_find()
             elif self._find_open:
                 self._find_key(k)              # find field owns the keyboard while open
@@ -382,6 +412,10 @@ class CodeLayer:
                 self._clear_err()
         elif name == "gutter":
             self._gutter = not self._gutter
+        elif name == "auto":
+            self._open_completion(ed)
+        elif name == "goto":
+            self._open_jump(ed)
         elif name == "undo":
             ws.undo()
         elif name == "redo":
@@ -476,6 +510,134 @@ class CodeLayer:
         elif not self._in(px, py, self._find_rect(lay)):
             return False
         return True                            # a tap anywhere on the bar is consumed
+
+    # -- autocomplete + jump-to-symbol popups (#89) --------------------------
+    # Both are small overlay lists the CodeEditor core populates: autocomplete
+    # completes the identifier left of the caret from the cart-API verbs + language
+    # keywords + the words already in the buffer; jump lists the def/class lines and
+    # moves the caret to the picked one. Pointer-pick is the universal path (touch on
+    # the device, mouse on the web); Ctrl+E/Ctrl+G + Enter layer on for the host.
+
+    def _api_names(self):
+        """The completion name pool for the open project's language (#67): the cart-
+        API verbs (shared) + the language keywords. Tuples concatenate fine."""
+        if self._is_lua():
+            return _HL_LUA_KEYWORDS + _HL_BUILTINS
+        return _HL_KEYWORDS + _HL_BUILTINS
+
+    def _open_completion(self, ed):
+        if ed is None:
+            return
+        self._jump_open = False
+        self._cmp_items = ed.completions(self._api_names())
+        self._cmp_sel = 0
+        self._cmp_open = bool(self._cmp_items)     # nothing to offer -> stay closed
+        self.ws.mark_dirty()
+
+    def _open_jump(self, ed):
+        if ed is None:
+            return
+        self._cmp_open = False
+        self._jump_items = ed.def_symbols()
+        self._jump_sel = 0
+        self._jump_open = bool(self._jump_items)
+        self.ws.mark_dirty()
+
+    def _popup_accept(self):
+        """Accept the highlighted row of whichever popup is open (Enter / the pointer
+        pick both land here)."""
+        ed = self.ws.editor
+        if self._cmp_open:
+            if ed is not None and self._cmp_items:
+                ed.complete(self._cmp_items[self._cmp_sel])
+                self._clear_err()
+            self._cmp_open = False
+        elif self._jump_open:
+            if ed is not None and self._jump_items:
+                _name, row = self._jump_items[self._jump_sel]
+                ed.goto_row(row, self._leading_spaces(ed.lines[row]))
+            self._jump_open = False
+        self.ws.mark_dirty()
+
+    def _leading_spaces(self, line):
+        n = 0
+        while n < len(line) and line[n] == " ":
+            n += 1
+        return n
+
+    def _popup_tap(self, px, py, lay, ed):
+        """A tap while a popup is open: pick the tapped row, else dismiss. Always
+        consumes the tap (the popup is modal over the code body)."""
+        if self._cmp_open:
+            _panel, rects = self._cmp_geom(lay, ed)
+            for i in range(len(rects)):
+                if self._in(px, py, rects[i]):
+                    self._cmp_sel = i
+                    self._popup_accept()
+                    return True
+            self._cmp_open = False
+        elif self._jump_open:
+            _panel, rects = self._jump_geom(lay)
+            for i in range(len(rects)):
+                if self._in(px, py, rects[i]):
+                    self._jump_sel = i
+                    self._popup_accept()
+                    return True
+            self._jump_open = False
+        self.ws.mark_dirty()
+        return True
+
+    def _cmp_geom(self, lay, ed):
+        """(panel_rect, [row_rects]) for the autocomplete popup, anchored at the word
+        start just below the caret line and clamped inside the canvas. Flips above the
+        caret when it would cover the symbol palette."""
+        items = self._cmp_items
+        n = min(len(items), self._POPUP_MAX)
+        lh = lay.lh
+        cell = lay.cell
+        w = 1
+        for i in range(n):
+            if len(items[i]) > w:
+                w = len(items[i])
+        pw = (w + 1) * cell
+        plen = len(ed.word_prefix()) if ed is not None else 0
+        x = self._text_x0(lay, ed) + (ed.col - ed.left - plen) * cell
+        if x + pw > lay.w:
+            x = lay.w - pw
+        if x < 0:
+            x = 0
+        ph = n * lh
+        y = lay.y0 + (ed.row - ed.top + 1) * lh
+        if y + ph > lay.sym_y:                     # would cover the palette -> flip up
+            y = lay.y0 + (ed.row - ed.top) * lh - ph
+            if y < lay.y0:
+                y = lay.y0
+        panel = (x, y, pw, ph)
+        rects = [(x, y + i * lh, pw, lh) for i in range(n)]
+        return panel, rects
+
+    def _jump_geom(self, lay):
+        """(panel_rect, [row_rects]) for the jump-to-symbol popup: a centered list
+        with a one-row header. (More than _POPUP_MAX symbols show the first page --
+        kid carts rarely have that many defs.)"""
+        items = self._jump_items
+        n = min(len(items), self._POPUP_MAX)
+        lh = lay.lh
+        cell = lay.cell
+        w = 4
+        for i in range(n):
+            L = len(items[i][0]) + 5               # room for the " 12" line-number tail
+            if L > w:
+                w = L
+        pw = (w + 1) * cell
+        if pw > lay.w:
+            pw = lay.w
+        ph = (n + 1) * lh                          # +1 header row
+        x = (lay.w - pw) // 2
+        y = lay.y0 + lh
+        panel = (x, y, pw, ph)
+        rects = [(x, y + (i + 1) * lh, pw, lh) for i in range(n)]
+        return panel, rects
 
     # -- #89 geometry (derived from CodeLayout; kept off the frozen constants) -
 
@@ -772,6 +934,39 @@ class CodeLayer:
                                 glyph=self._TOOL_GLYPH.get(name))
         if self._find_open:
             self._draw_find(lay, ed, t)
+        if self._cmp_open:
+            self._draw_completion(lay, ed, t)
+        if self._jump_open:
+            self._draw_jump(lay, t)
+
+    def _draw_listbox(self, cv, lay, t, panel, rects, labels, sel, title):
+        """A bordered overlay list (the autocomplete + jump popups): the sym_bg/edge
+        chrome palette, an optional accent title row, and the selected row tinted with
+        the selection color. Labels are pre-clipped by the caller's width."""
+        fs = lay.fs
+        cv.rect(panel[0], panel[1], panel[2] - 1, panel[3] - 1, t["sym_bg"])
+        cv.rectb(panel[0], panel[1], panel[2] - 1, panel[3] - 1, t["sym_edge"])
+        if title is not None:
+            cv.print(title, panel[0] + fs, panel[1] + fs, t["find"], 1)
+        maxch = max(1, (panel[2] - 2 * fs) // lay.cell)
+        for i in range(len(rects)):
+            r = rects[i]
+            if i == sel:
+                cv.rect(r[0], r[1], r[2] - 1, r[3] - 1, t["sel"])
+            cv.print(labels[i][:maxch], r[0] + fs, r[1] + fs, t["sym_ink"], 1)
+
+    def _draw_completion(self, lay, ed, t):
+        cv = self.ws.sys_canvas
+        panel, rects = self._cmp_geom(lay, ed)
+        self._draw_listbox(cv, lay, t, panel, rects,
+                           self._cmp_items[:len(rects)], self._cmp_sel, None)
+
+    def _draw_jump(self, lay, t):
+        cv = self.ws.sys_canvas
+        panel, rects = self._jump_geom(lay)
+        labels = [self._jump_items[i][0] + " " + str(self._jump_items[i][1] + 1)
+                  for i in range(len(rects))]
+        self._draw_listbox(cv, lay, t, panel, rects, labels, self._jump_sel, "DEFS")
 
     def _draw_find(self, lay, ed, t):
         """The find bar: the typed query on the left + prev/next/case/close buttons
