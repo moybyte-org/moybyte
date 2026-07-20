@@ -1,5 +1,15 @@
 name: CI
 
+# The pure-software slice of #34 (automated development pipeline): host tests +
+# the portable-subset gate on every push to master and every PR, plus the
+# issue's software-vs-hardware classification (firmware/ or native/ changed ->
+# flag "needs on-device verification"). This intentionally stops at the
+# decision-free infra -- it does NOT implement #34's Claude-issue-trigger or a
+# self-hosted ESP-IDF runner, both of which are still open design questions on
+# the issue (trigger mechanism, where Claude runs, build-artifact handoff,
+# human-in-the-loop gates). See the classify-hardware-impact job below for the
+# hand-off this workflow leaves for a human (or a future automated step).
+
 on:
   push:
     branches: ["master", "main"]
@@ -14,6 +24,16 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.10", "3.11"]
+    env:
+      # Nothing in the suite needs a real display: pygame is imported lazily
+      # everywhere (moybyte_sim/pygame_backend.PygameBackend.__init__,
+      # runtime/host_app.py's PygameAudio) and every call site falls back to
+      # headless/silent if init fails, and `.[dev]` doesn't even install
+      # pygame (that's the `sim` extra). Pin the dummy SDL drivers anyway as
+      # cheap insurance in case a future test path pulls pygame in for real --
+      # a headless runner should never hang waiting on a display/audio device.
+      SDL_VIDEODRIVER: dummy
+      SDL_AUDIODRIVER: dummy
 
     steps:
       - name: Check out repository
@@ -23,12 +43,28 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
       - name: Install package
         run: make setup
 
-      - name: Run tests
-        run: make test
+      # tests/test_redraw_on_change.py asserts exact/zero redraw counts against
+      # real wall-clock deadlines (Workstation._frames_drawn), but the top bar
+      # clock legitimately repaints on a real minute rollover -- so when this
+      # file's tests land inside a long multi-file pytest run there's a small
+      # chance the run straddles :00 and trips an "exactly one redraw" assert.
+      # It has never been observed to fail standalone (a whole-file run is
+      # under 2s, so the rollover window is tiny) -- only inside a full-suite
+      # run that takes long enough in wall-clock time to cross a boundary.
+      # Isolating it removes the shared-run timing risk instead of chasing a
+      # rerun-on-failure workaround. See the repo's redraw-test-wallclock-flake
+      # note for the observed history.
+      - name: Run test suite (excluding the wall-clock-flaky redraw tests)
+        run: .venv/bin/python -m pytest --ignore=tests/test_redraw_on_change.py
+
+      - name: Run redraw-on-change tests in isolation
+        run: .venv/bin/python -m pytest tests/test_redraw_on_change.py
 
       - name: Check portable examples
         run: make check-portable
@@ -53,3 +89,121 @@ jobs:
 
       - name: Export LilyGO bundle
         run: make export-lilygo-example
+
+  classify-hardware-impact:
+    name: Classify software vs. hardware impact
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine changed paths
+        id: diff
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+            HEAD="${{ github.event.pull_request.head.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+            HEAD="${{ github.event.after }}"
+          fi
+          # A brand-new branch/tag push reports an all-zero BASE; diff against
+          # git's empty tree instead so the classifier has something to diff.
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            BASE="$(git hash-object -t tree /dev/null)"
+          fi
+          git diff --name-only "$BASE" "$HEAD" > changed_files.txt
+          echo "-- changed files --"
+          cat changed_files.txt
+
+      # #34's heuristic: a change touching firmware/ or native/ needs
+      # on-device verification (native/ already lives under each board's
+      # firmware/<board>/native/, so the firmware/ prefix alone would cover
+      # it -- matched separately anyway to say what the issue says).
+      - name: Classify (touches firmware/ or native/ -> hardware path)
+        id: classify
+        run: |
+          if grep -Eq '^(firmware/|native/)' changed_files.txt; then
+            echo "hardware=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "hardware=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Write job summary
+        run: |
+          if [ "${{ steps.classify.outputs.hardware }}" = "true" ]; then
+            {
+              echo "### Hardware path -- needs on-device verification"
+              echo
+              echo "This change touches \`firmware/\` or \`native/\`. Per #34's"
+              echo "software-vs-hardware heuristic, host CI (this workflow) can't"
+              echo "prove it: the T-Deck/P4 can't be exercised on a GitHub-hosted"
+              echo "runner (native-takeover loop starves USB, SD/display share"
+              echo "one SPI bus). Build the image and test on real hardware:"
+              echo
+              echo '```'
+              echo "make firmware-build-lilygo-micropython"
+              echo "make firmware-flash-lilygo-micropython PORT=/dev/ttyACM0"
+              echo "make firmware-monitor-lilygo-micropython PORT=/dev/ttyACM0"
+              echo '```'
+              echo
+              echo "(or run the \"Firmware build\" workflow from the Actions tab for a downloadable \`.bin\` without a local ESP-IDF toolchain.)"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Pure software -- host tests + \`make check-portable\` are the full gate here, no device step needed." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # Comment (not just summary) so the flag is visible on the PR itself.
+      # Skipped for forked-repo PRs: GITHUB_TOKEN is read-only there regardless
+      # of the permissions block above, and continue-on-error keeps that a
+      # soft failure -- the job summary above still carries the flag.
+      - name: Comment on PR when hardware-affecting
+        if: >-
+          github.event_name == 'pull_request' &&
+          steps.classify.outputs.hardware == 'true' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = "<!-- moybyte-hardware-path-flag (#34) -->";
+            const body = [
+              marker,
+              "**Hardware path -- needs on-device verification** (#34)",
+              "",
+              "This PR touches `firmware/` or `native/`. Host CI can't exercise the T-Deck/P4, so this needs a build + a flash/test pass on real hardware before merge:",
+              "",
+              "```",
+              "make firmware-build-lilygo-micropython",
+              "make firmware-flash-lilygo-micropython PORT=/dev/ttyACM0",
+              "make firmware-monitor-lilygo-micropython PORT=/dev/ttyACM0",
+              "```",
+              "",
+              '(or run the "Firmware build" workflow from the Actions tab for a downloadable `.bin` without a local ESP-IDF toolchain.)',
+            ].join("\n");
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
