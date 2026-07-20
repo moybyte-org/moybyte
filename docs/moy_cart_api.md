@@ -312,13 +312,63 @@ Buttons are named. The canonical set is `left, right, up, down, a, b, run, home`
 
 | call | returns |
 |---|---|
-| `btn(name)` | `True` while the button is **held** |
-| `btnp(name)` | `True` on the frame it was **pressed** (the released→held edge) |
+| `btn(name, player=0)` | `True` while the button is **held**. `player=0` is this console's own controls (the default — every existing cart is unchanged). `player=1, 2, …` read **extra controllers** (see Multiplayer below) |
+| `btnp(name, player=0)` | `True` on the frame it was **pressed** (the released→held edge). Takes the same optional `player` |
+| `players()` | how many players are connected right now (**1** = just this console). Offer a 2-player mode when it's `>= 2` |
 | `key(code=None)` | with a code (`key(ord("a"))`): is that ASCII key down this frame. No arg: the last key code (`0` if none). *One key at a time* (T-Deck reports 1 byte/frame) |
 | `keyp(code=None)` | same, but only the press edge this frame |
 | `touch()` | `(x, y, tapped, held)` in canvas space, or `None` if no pointer. `tapped` = press edge (one hit per tap); `held` = the finger/button is still down this frame, position following the drag (drawing, sliders) |
 | `mouse()` | TIC-80 7-tuple `(x, y, left, middle, right, scrollx, scrolly)`; a tap = left. middle/right/scroll are always 0 on hardware |
 | `textmode(on=True)` | opt a running cart into clean text-keyboard input (for typing a name/password) so `key()/keyp()` return typeable ASCII; `textmode(False)` restores game mode (held WASD/arrows drive `btn()`). Auto-resets to game mode on exit |
+
+## Multiplayer (`#65`)
+
+> **Needs a second controller or console.** With only this console's own controls,
+> `players()` is `1` and `btn(name, p)` for `p > 0` is always `False`, so a cart that
+> reads `player=0` is a normal single-player cart — nothing changes.
+
+There is **one** multiplayer API and the way the extra players arrive (a second USB
+gamepad, a phone over the web view, another Moybyte over the radio) is just a backend —
+your cart never knows the difference.
+
+**Shared screen (many controllers).** Read each player with the `player` argument.
+Player 0 is always this console:
+
+```python
+def _update(dt):
+    # player 0 (this console) moves the blue paddle, player 1 the red one
+    if btn("up", 0):   blue.y -= 2
+    if btn("down", 0): blue.y += 2
+    if players() >= 2:
+        if btn("up", 1):   red.y -= 2
+        if btn("down", 1): red.y += 2
+```
+
+**Two consoles (shared game state).** A cart that declares the `"multiplayer"`
+permission in its manifest also gets a tiny message API — send a bit of data to the
+other console, and handle what arrives:
+
+| call | does |
+|---|---|
+| `net.send(data)` | send `data` (a small value — a number, a short list/dict) to the other console |
+| `on_net(fn)` | register `fn(msg)` — it's called once for **each** message that arrives, right before your `_update` runs |
+
+```python
+# manifest.json: "permissions": ["multiplayer"]
+def _catch(msg):
+    other.x, other.y = msg          # the friend's position arrived
+on_net(_catch)
+
+def _update(dt):
+    net.send((me.x, me.y))          # tell the friend where I am
+```
+
+Both `net` and `on_net` are **only present** when the manifest grants
+`"multiplayer"` — a normal cart has no `net` name at all (just like `wifi`).
+
+> **Keeping two consoles in step:** if both sides run the same game logic, seed your
+> randomness the same way on both (share a start seed and use it for `rnd()`), and keep
+> game logic off the wall clock — otherwise the two screens drift apart.
 
 ## Audio
 
@@ -344,6 +394,7 @@ Buttons are named. The canonical set is `left, right, up, down, a, b, run, home`
 | `flr(x)` | floor to int |
 | `W`, `H` | canvas size (320, 240) |
 | `wifi` | **only present** if the cart's manifest permissions include `"network"` (capability-gated, `#38`). A normal cart has no `wifi` name at all |
+| `net` / `on_net` | **only present** if the cart's manifest permissions include `"multiplayer"` (capability-gated, `#65`). See **Multiplayer** above |
 
 ---
 
