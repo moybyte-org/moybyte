@@ -8,12 +8,18 @@ the Editor's Code tab on it. Page art comes from Paint: USE MY PAINTING copies
 the shared drawing into the story cart as `images/pgN.moyimg`, drawn by the
 generated code through the existing `image()` verb (the My Art mechanism).
 
-Graduation (the MakeCode rule, v1 form): the deck remembers a signature of the
-code it last generated (`deck.json` "gen"). If the cart's `main.py` no longer
-matches -- the kid hand-edited their story past the deck's vocabulary --
-Storybook opens it READ-ONLY with a "leveled up to code" notice instead of
-ever clobbering hand-written code. Full `graduated`-manifest integration with
-the blocks machinery is follow-up (#78).
+Graduation (the MakeCode rule, full #78 form): a story is a deck-authored
+"origin" exactly like a block program is -- when the kid hand-edits `main.py`
+past the deck's page/art/bg vocabulary (in the Editor's Code tab), the SAME
+manifest `graduated` flag + undo-journal `grad` rider the block editor uses
+(runtime/project.py's `_journal_code`/`_journal_code_toward`) flips true, and
+undoing past that commit un-graduates it, exactly like a block cart. Storybook
+itself just READS that persisted flag (`cart["graduated"]`) to decide
+read-only, and -- as a bootstrap/fallback for a divergence that reached disk
+some other way (a direct write, or a cart authored before this integration
+existed) -- opportunistically detects + GRADUATES it into the real mechanism
+right here on open (`_graduate_hand_edit`), so "leveled up to code" is never a
+transient, un-persisted, un-undoable guess again.
 
 Same app pattern as Paint/Appearance/Writer: a `.moy` cartridge identity
 (`storybook.moy`) backed by this responsive system process."""
@@ -42,14 +48,6 @@ MAX_TEXT_LINES = 4
 MAX_LINE = 34
 BGS = ("dark_blue", "indigo", "dark_purple", "black", "dark_green", "blue")
 STORY_TYPE = "story"
-
-
-def _sig(src):
-    """A tiny stable signature of generated code -- a guard, not security."""
-    total = 0
-    for b in src.encode("utf-8"):
-        total = (total + b) % 1000003
-    return str(len(src)) + ":" + str(total)
 
 
 def deck_to_code(deck, title="My Story"):
@@ -204,7 +202,6 @@ class StorybookAppLayer(ListShellApp):
         self._deck_dirty = False
         self._sync_editor()
         src = deck_to_code(self.deck, self.cart.get("title") or "My Story")
-        self.deck["gen"] = _sig(src)
         if not self._store_ready():
             self.status = "CAN'T SAVE HERE"
             return
@@ -261,7 +258,6 @@ class StorybookAppLayer(ListShellApp):
                 "pages": [{"bg": BGS[0], "art": None,
                            "text": ["Once upon a time..."]}]}
         src = deck_to_code(deck, title)
-        deck["gen"] = _sig(src)
         try:
             def _make():
                 cart = ws.carts_store.create(title, ws.carts_root, src=src,
@@ -287,13 +283,25 @@ class StorybookAppLayer(ListShellApp):
         self.read_only = False
         if self.deck is None:
             # No deck (hand-made "story" cart) -- treat as graduated code.
-            self.deck = {"format": "moydeck-v1", "pages": [], "gen": ""}
+            self.deck = {"format": "moydeck-v1", "pages": []}
             self.read_only = True
         else:
             self.ws._rehydrate_cart(cart)
-            src = cart.get("src") or ""
-            if _sig(src) != self.deck.get("gen"):
-                self.read_only = True     # hand-edited past the deck: never clobber
+            if bool(cart.get("graduated")):
+                self.read_only = True     # persisted (#78): already graduated
+            else:
+                src = cart.get("src") or ""
+                title = cart.get("title") or "My Story"
+                expected = deck_to_code(self.deck, title)
+                if src != expected:
+                    # Hand-edited past the deck's vocabulary. The Editor's Code
+                    # tab is the normal trigger (runtime/project.py's
+                    # _journal_code graduates it there, durably); this is the
+                    # bootstrap path for a divergence that reached disk some
+                    # other way -- fold it into the real mechanism NOW rather
+                    # than just refusing locally.
+                    self._graduate_hand_edit(cart, expected, src)
+                self.read_only = bool(cart.get("graduated"))
         self.mode = "pages"
         self.sel = 0
         self.top = 0
@@ -302,6 +310,32 @@ class StorybookAppLayer(ListShellApp):
         self.status = ("LEVELED UP TO CODE - EDIT IN MAKE" if self.read_only
                        else (cart.get("title") or "STORY"))
         self.ws._dirty = True
+
+    def _graduate_hand_edit(self, cart, baseline_src, diverged_src):
+        """GRADUATE a story cart whose main.py diverged from what its deck would
+        generate (#78 full graduated-manifest integration): journal the deck's
+        own regenerated source as a grad=0 BASELINE (an undo restore point) then
+        the diverged source as grad=1 -- the exact blocks-machinery shape
+        (runtime/project.py's _journal_code_toward), so the SAME manifest flag +
+        journal rider + undo/redo un-graduate mechanism covers a deck-authored
+        story too (journal_append never touches the live main.py -- it only
+        records history + flips the manifest, so this never clobbers the
+        diverged code already on disk). Best-effort: a store/journal hiccup
+        still marks the RAM copy graduated (never re-offers a clobbering SAVE
+        this session), it just won't persist until the next successful write."""
+        ws = self.ws
+        store = ws.carts_store
+        path = cart.get("path")
+        if store is not None and path and ws.can_manage and hasattr(store, "journal_append"):
+            mainf = cart.get("main", "main.py")
+            try:
+                def _write():
+                    store.journal_append(path, mainf, baseline_src, grad=0)
+                    store.journal_append(path, mainf, diverged_src, grad=1)
+                ws._with_sd(_write)
+            except Exception as exc:  # noqa: BLE001 -- never crash the shell over this
+                print("Moybyte story graduation failed:", exc)
+        cart["graduated"] = True
 
     def _play_story(self):
         if self.cart is None:

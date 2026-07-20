@@ -335,3 +335,96 @@ def test_non_graduated_block_cart_stays_editable(tmp_path):
     assert ws.block_ui.blk_graduated is False
     assert ws.block_ui.blk_protect is False
     assert ws.block_ui.save_blocks() is True
+
+
+# ----------------------------------------------------------------------------
+# Layer 3b (#78): a DECK-authored story cart (Storybook) graduates through the
+# EXACT SAME manifest-flag + journal-rider + undo mechanism as a block cart --
+# the "full graduated-manifest integration" #78 asked for, replacing the old
+# v1 hash-compare-only read-only refusal. runtime/project.py's _journal_code
+# now recognizes a story cart's deck.json as an origin (mirroring blocks.json)
+# via _deck_for_graduation/_journal_code_toward.
+# ----------------------------------------------------------------------------
+
+def _story_cart(tmp_path, title="Story Cart"):
+    """A workstation open on a genuine deck-authored story cart: deck.json + its
+    own regenerated main.py both on disk -- built directly through the store
+    (the mirror of _block_cart's real block-authored setup, and of Storybook's
+    own _new_story), then reopened so ws.cart carries no blocks.json (the deck
+    branch is only reached when `prog` is None)."""
+    from runtime import host_app
+    from runtime.storybook_app import deck_to_code
+    root = str(tmp_path / "carts")
+    ws = host_app.build_workstation(root)
+    deck = {"format": "moydeck-v1",
+            "pages": [{"bg": "black", "art": None,
+                       "text": ["Once upon a time..."]}]}
+    src = deck_to_code(deck, title)
+    cart = moy_carts.create(title, root, src=src, type="story")
+    moy_carts.save_deck(cart, json.dumps(deck))
+    ws.launcher.items = moy_carts.scan(root)
+    _select(ws, title)
+    ws.open()
+    assert ws.cart["blocks"] is None
+    assert ws.cart["type"] == "story"
+    return ws, root
+
+
+def test_story_template_does_not_graduate(tmp_path):
+    """A story cart whose main.py is the deck's own untouched generated source
+    stays deck-editable (Storybook) -- committing it does NOT graduate."""
+    ws, _ = _story_cart(tmp_path)
+    gen = ws.cart["src"]
+    assert _commit_code(ws, gen) is True
+    assert not ws.cart.get("graduated")
+    assert moy_carts.load(ws.cart["path"])["graduated"] is False
+
+
+def test_story_hand_edit_past_deck_graduates(tmp_path):
+    """A story's main.py hand-edited past the deck's page/art/bg vocabulary (in
+    the Editor's Code tab) GRADUATES it -- persisted, RAM-synced, deck.json left
+    frozen as the read-only render source (not deleted)."""
+    ws, _ = _story_cart(tmp_path)
+    diverged = ws.cart["src"] + "\nSPEED = 99\n"
+    assert _commit_code(ws, diverged) is True
+    assert ws.cart["graduated"] is True                      # RAM synced immediately
+    assert moy_carts.load(ws.cart["path"])["graduated"] is True   # persisted
+    assert moy_carts.load_deck(ws.cart) is not None
+
+
+def test_story_undo_past_graduation_restores_source_and_flag(tmp_path):
+    """Undo past a story's graduating commit -> source AND graduated:false BOTH
+    restored; redo re-graduates -- the same one honest back-door blocks get,
+    riding the Stage-7 journal generically (no deck-specific undo code needed)."""
+    ws, _ = _story_cart(tmp_path)
+    path = ws.cart["path"]
+    diverged = ws.cart["src"] + "\nSPEED = 99\n"
+    assert _commit_code(ws, diverged) is True
+    assert ws.cart["graduated"] is True
+    assert "SPEED = 99" in (Path(path) / "main.py").read_text()
+
+    assert ws.undo() is True
+    restored = (Path(path) / "main.py").read_text()
+    assert "SPEED = 99" not in restored
+    assert ws.cart["graduated"] is False
+    assert moy_carts.load(path)["graduated"] is False
+
+    assert ws.redo() is True
+    assert "SPEED = 99" in (Path(path) / "main.py").read_text()
+    assert ws.cart["graduated"] is True
+    assert moy_carts.load(path)["graduated"] is True
+
+
+def test_story_already_graduated_stays_sticky(tmp_path):
+    """§8's one-way door applies to decks too: once graduated, a FURTHER code
+    commit stays graduated even if it happens to match the deck's regenerated
+    source again (sticky, not re-derived every commit)."""
+    ws, _ = _story_cart(tmp_path)
+    gen = ws.cart["src"]
+    diverged = gen + "\nSPEED = 99\n"
+    assert _commit_code(ws, diverged) is True
+    assert ws.cart["graduated"] is True
+    # Hand-revert to byte-identical generated source: STILL graduated (sticky).
+    assert _commit_code(ws, gen) is True
+    assert ws.cart["graduated"] is True
+    assert moy_carts.load(ws.cart["path"])["graduated"] is True
