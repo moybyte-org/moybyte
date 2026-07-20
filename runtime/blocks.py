@@ -106,13 +106,14 @@ CAT_DRAW = "draw"
 CAT_INPUT = "input"
 CAT_VARIABLES = "variables"
 CAT_LISTS = "lists"          # #48: the multi-thing data type
+CAT_ACTORS = "actors"        # #109: placed-actor scenes (for-each/touching/move/remove)
 CAT_OPERATORS = "operators"
 CAT_SOUND = "sound"
 CAT_PROCS = "myblocks"       # #48: custom blocks (My Blocks / procedures)
 
 CATEGORY_ORDER = [
     CAT_EVENTS, CAT_CONTROL, CAT_DRAW, CAT_INPUT,
-    CAT_VARIABLES, CAT_LISTS, CAT_OPERATORS, CAT_SOUND, CAT_PROCS,
+    CAT_VARIABLES, CAT_LISTS, CAT_ACTORS, CAT_OPERATORS, CAT_SOUND, CAT_PROCS,
 ]
 
 # Color name (MOY64) per category -- the Scratch *look* (Part 2 paints blocks
@@ -124,6 +125,7 @@ CATEGORY_COLOR = {
     CAT_INPUT: "indigo",
     CAT_VARIABLES: "red",
     CAT_LISTS: "peach",
+    CAT_ACTORS: "yellow",       # #109: placed-actor scene blocks
     CAT_OPERATORS: "green",
     CAT_SOUND: "pink",
     CAT_PROCS: "dark_purple",   # #48: custom blocks (My Blocks / procedures)
@@ -513,6 +515,52 @@ CATALOG = {
         "emit": "for_each",
     },
 
+    # -- actors (#109): placed-actor scenes, the declarative game-object rung ------
+    # These operate on the LIVE actor world make_api builds from the active scene
+    # (widgets.SceneWorld): for_each_actor iterates the placed actors of a tag and
+    # binds an implicit "current actor"; touching?/move/remove act on THAT current
+    # actor (the innermost for-each's loop var, threaded through the compile ctx). A
+    # move/remove/touching block outside any for-each-actor compiles against `None`,
+    # which every verb treats as a safe no-op (the same "a stray block never breaks
+    # the cart" discipline as break_loop). draw_scene draws every remaining actor.
+    "for_each_actor": {
+        "category": CAT_ACTORS, "shape": SHAPE_CBLOCK,
+        "label": "for each {tag} actor",
+        "slots": [_slot("tag", SLOT_TEXT, default="")],
+        "emit": "for_each_actor",
+    },
+    "actor_touching": {
+        "category": CAT_ACTORS, "shape": SHAPE_EXPR,
+        "label": "actor touching {tag}?",
+        # the current actor overlaps ANY live actor of tag {tag} (AABB, 8px boxes).
+        "slots": [_slot("tag", SLOT_TEXT, default="")],
+        "expr": "touching({__actor__}, {tag})",
+    },
+    "move_actor_by": {
+        "category": CAT_ACTORS, "shape": SHAPE_STATEMENT,
+        "label": "move actor by {dx} {dy}",
+        "slots": [_slot("dx", SLOT_EXPR, default=0), _slot("dy", SLOT_EXPR, default=0)],
+        "emit": "move_actor({__actor__}, {dx}, {dy})",
+    },
+    "move_actor_to": {
+        "category": CAT_ACTORS, "shape": SHAPE_STATEMENT,
+        "label": "move actor to {x} {y}",
+        "slots": [_slot("x", SLOT_EXPR, default=0), _slot("y", SLOT_EXPR, default=0)],
+        "emit": "move_actor_to({__actor__}, {x}, {y})",
+    },
+    "remove_actor": {
+        "category": CAT_ACTORS, "shape": SHAPE_STATEMENT,
+        "label": "remove actor",
+        "slots": [],
+        "emit": "remove_actor({__actor__})",
+    },
+    "draw_scene": {
+        "category": CAT_ACTORS, "shape": SHAPE_STATEMENT,
+        "label": "draw scene",
+        "slots": [],
+        "emit": "draw_scene()",
+    },
+
     # -- sound ---------------------------------------------------------------
     "sfx": {
         "category": CAT_SOUND, "shape": SHAPE_STATEMENT,
@@ -820,6 +868,10 @@ class _Ctx:
         self.lists = known_lists
         self.assigned = assigned        # name -> True (a function reassigns it -> global)
         self.loop_depth = 0
+        # #109: the "current actor" a for_each_actor block binds -- the code name of
+        # the innermost actor-loop var (e.g. "_actor2"), or None outside any such loop.
+        # touching?/move/remove render against it; None compiles to a safe no-op verb.
+        self.actor_var = None
         # -- custom blocks (#48) ------------------------------------------------
         # `params` are the local parameter names of the proc currently compiling
         # (locals: valid as variable slots INSIDE the body, but never `global`-hoisted).
@@ -898,6 +950,9 @@ def _render_expr(value, ctx):
         name = slot["name"]
         filled[name] = _render_value(params.get(name, _default_for(slot)),
                                      slot, ctx)
+    # #109: an actor reporter (actor_touching) references the current for_each_actor
+    # loop var via {__actor__}; None (outside a for-each) makes touching() return False.
+    filled["__actor__"] = ctx.actor_var if ctx.actor_var else "None"
     return _fill(template, filled)
 
 
@@ -956,6 +1011,9 @@ def _emit_statement(block, ctx, indent, lines):
             name = slot["name"]
             filled[name] = _render_value(params.get(name, _default_for(slot)),
                                          slot, ctx)
+        # #109: actor statements (move/remove) reference the current for_each_actor
+        # loop var via {__actor__}; None (outside a for-each) is a safe no-op verb arg.
+        filled["__actor__"] = ctx.actor_var if ctx.actor_var else "None"
         lines.append(pad + _fill(d["emit"], filled))
         return
 
@@ -1056,6 +1114,24 @@ def _emit_cblock(tid, d, block, ctx, indent, lines):
         ctx.assigned[vname] = True
         lines.append(pad + "for " + vname + " in " + lname + ":")
         _emit_loop_body(children, ctx, indent + 1, lines)
+        return
+
+    if emit == "for_each_actor":
+        # #109: iterate the placed actors of a tag over the live scene world. The loop
+        # var is the "current actor" its body's touching?/move/remove act on -- threaded
+        # through ctx.actor_var (restored on the way out so sibling/outer scopes are
+        # unaffected). actors(tag) hands back a SNAPSHOT, so a body that remove_actor()s
+        # the current item never skips the next (the remove-while-iterating trap is the
+        # verb's problem, never the kid's). The var is namespaced by indent so nested
+        # actor loops don't collide and can't clash with a kid's variable.
+        tag = _render_value(params.get("tag", ""),
+                            {"name": "tag", "type": SLOT_TEXT}, ctx)
+        avar = "_actor%d" % indent
+        lines.append(pad + "for " + avar + " in actors(" + tag + "):")
+        prev = ctx.actor_var
+        ctx.actor_var = avar
+        _emit_loop_body(children, ctx, indent + 1, lines)
+        ctx.actor_var = prev
         return
 
     raise BlockError("unknown c-block emitter: " + str(emit))
@@ -1240,6 +1316,8 @@ _RESERVED_NAMES = {
     "key", "keyp", "time", "pmem", "textmode", "quit", "cfg", "col", "sfx", "beep",
     "music", "music_stop", "sound_stop", "volume", "rnd", "flr", "Image", "image",
     "wifi", "scene", "load_scene", "table", "text",   # #85 scenes + #78 Desk Lab interop
+    "actors", "touching", "move_actor", "move_actor_to",  # #109 actor-aware verbs
+    "remove_actor", "draw_scene",
     # builtins the generated code relies on
     "int", "range", "len", "str", "min", "max", "abs", "round", "bool",
     # lifecycle functions + the compiler's own helpers (all `_`-prefixed)

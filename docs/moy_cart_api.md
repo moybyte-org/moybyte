@@ -233,6 +233,54 @@ def _init():
 Treat the rows as read-only — a game's *changing* state belongs in your own
 variables (and `pmem` for what should survive), not written back into the scene.
 
+### The actor world (`#109`)
+
+`scene()` is the placement you authored (read-only, never changes). Its **live,
+playable projection** is the *actor world* — the same actors, but you can move and
+remove them and the changes stick from frame to frame. It's built for you from the
+active scene the first time you touch it, and starts fresh from the scene on every
+run. These are the cart-API mirrors of the **Actors** blocks (a coin collector is
+~8 blocks) — a kid who graduates to code calls exactly what they used to click.
+
+| call | does |
+|---|---|
+| `actors()` | a snapshot list of every live actor (mutable `.tag`/`.tile`/`.x`/`.y`/`.flip`) |
+| `actors(tag)` | just the live actors whose `.tag == tag`. It's a **snapshot**, so you can `remove_actor` while looping over it without skipping anyone |
+| `touching(a, b)` | `True` if actor `a` overlaps `b` (an 8×8-box AABB). `b` is another actor OR a tag string — a tag tests `a` against any *other* live actor of that tag |
+| `move_actor(a, dx, dy)` | nudge actor `a` by `(dx, dy)` world pixels |
+| `move_actor_to(a, x, y)` | place actor `a` at world `(x, y)` |
+| `remove_actor(a)` | take actor `a` out of the world (a collected coin, a dead enemy) |
+| `draw_scene()` | draw every remaining actor at its position with `spr` (list order = z-order, `.flip` respected) |
+
+A full coin collector, in code (the **Actors** blocks compile to exactly this):
+
+```python
+score = 0
+
+def _update(dt):
+    global score
+    for player in actors("player"):
+        if btn("left"):  move_actor(player, -2, 0)
+        if btn("right"): move_actor(player, 2, 0)
+        if btn("up"):    move_actor(player, 0, -2)
+        if btn("down"):  move_actor(player, 0, 2)
+    for coin in actors("coin"):
+        if touching(coin, "player"):
+            remove_actor(coin)
+            score = score + 1
+
+def _draw():
+    cls(col("dark_blue"))
+    draw_scene()
+    print("SCORE " + str(score), 4, 4, col("white"))
+```
+
+The **Actors** block category gives you the no-loop version of the same thing:
+*for each `player` actor → move actor with the buttons*, *for each `coin` actor → if
+actor touching `player`? → remove actor, change score by 1*, then *clear*, *draw
+scene*, *write score*. Inside a *for each … actor* block, "actor" always means the
+one it's currently looping over. (`system_carts/coin_quest.moy` is the built-in demo.)
+
 ## Reading documents (`table` / `text`, `#78`)
 
 A game can read a **Sheets** sheet or a **Writer** doc that lives in its own cart

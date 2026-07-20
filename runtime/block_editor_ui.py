@@ -129,8 +129,8 @@ _BLK_NUM_X = (244, 168, 40, 26)       # cancel
 # Kid-facing category names for the insert menu (the catalog ids are terse keys).
 _CAT_LABEL = {
     "events": "When...", "control": "Control", "draw": "Draw", "input": "Buttons",
-    "variables": "Variables", "lists": "Lists", "operators": "Math", "sound": "Sound",
-    "myblocks": "My Blocks",
+    "variables": "Variables", "lists": "Lists", "actors": "Actors",
+    "operators": "Math", "sound": "Sound", "myblocks": "My Blocks",
 }
 
 # Sentinel menu row: "make a brand-new variable + name it". It heads the Variables

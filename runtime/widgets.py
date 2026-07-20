@@ -356,15 +356,28 @@ class Scenes:
         self._default = order[0] if order else None
         self.active = self._default
         self._cache = {}                   # name -> [Actor], parsed once
+        self._world = None                 # #109: the live mutable actor world (lazy)
 
     def reset(self):
         """Back to the default active scene -- called at each run's start so a
         load_scene() switch doesn't persist into the next _init (#85). Also drops
         the parse cache: scene() hands out the CACHED Actor objects (fresh list,
         shared rows), so a cart that mutated its rows in-place would otherwise
-        carry that drift into its next run. Re-parsing once per run is cheap."""
+        carry that drift into its next run. Re-parsing once per run is cheap. The
+        live actor world (#109) is dropped too, so each run starts from the scene."""
         self.active = self._default
         self._cache = {}
+        self._world = None
+
+    def world(self):
+        """The live mutable actor world (#109) for the actor-aware blocks + the
+        touching()/move_actor()/remove_actor() cart-API verbs. One per run: it's
+        created lazily here and dropped by reset() at each run's start, so a fresh
+        run always projects from the scene again. make_api calls this once and binds
+        the world's methods (host == device -- pure data, no drawing)."""
+        if self._world is None:
+            self._world = SceneWorld(self)
+        return self._world
 
     def _parse(self, name):
         got = self._cache.get(name)
@@ -426,6 +439,99 @@ class Scenes:
             if self.active is None:
                 self.active = name
         self._cache.pop(name, None)
+
+
+class SceneWorld:
+    """The live, mutable actor world for the actor-aware blocks (#109, #85 Section 8).
+
+    `scene()` is READ-ONLY authored data (the placement, unchanged across runs); the
+    world is the PLAYABLE projection the game acts on -- it MOVES and REMOVES actors
+    and those changes persist across frames within a run. It is built LAZILY from the
+    active scene's rows on first access (fresh, independent Actor copies, so touching
+    the world never drifts the scene's parse cache), and dropped by Scenes.reset() at
+    each run's start, so a fresh run always projects from the scene again.
+
+    The declarative floor of #85 Section 8 lives HERE, not in a C engine: the actor
+    blocks compile to plain calls on these verbs -- `actors(tag)` (a SNAPSHOT list, so
+    a for-each can safely remove during iteration), `touching(a, b)` (AABB over the
+    8px tile boxes; `b` an Actor or a tag string), `move_actor`/`move_actor_to`,
+    `remove_actor` -- and the SAME verbs ship in make_api, so a kid who graduates to
+    code calls exactly what they used to click. Backend-agnostic + MicroPython-safe
+    (pure data, no drawing -- draw_scene lives in make_api, which owns the canvas)."""
+
+    def __init__(self, scenes):
+        self._scenes = scenes
+        self._actors = None                # lazy: [Actor], built on first access
+
+    def _ensure(self):
+        if self._actors is None:
+            live = []
+            src = []
+            if self._scenes is not None:
+                try:
+                    src = self._scenes.scene()
+                except Exception:  # noqa: BLE001 -- a bad scene just spawns nothing
+                    src = []
+            for a in src:
+                live.append(Actor(a.tag, a.tile, a.x, a.y, a.flip,
+                                  dict(a.flags) if a.flags else None))
+            self._actors = live
+        return self._actors
+
+    def actors(self, tag=None):
+        """A SNAPSHOT list of the live actors (all of them, or only those of `tag`).
+        A fresh list each call, so a `for each` loop over it can remove_actor() an
+        item mid-iteration without skipping the next -- the remove-while-iterating
+        trap is handled here, never by the kid (#85 Section 8)."""
+        live = self._ensure()
+        if tag is None:
+            return list(live)
+        return [a for a in live if a.tag == tag]
+
+    def remove(self, actor):
+        """Remove `actor` from the live world (by identity). A no-op for an actor
+        already gone or for None (a `remove actor` block outside a for-each), so a
+        misplaced block never crashes the cart."""
+        if actor is None:
+            return
+        live = self._ensure()
+        for i in range(len(live)):
+            if live[i] is actor:
+                del live[i]
+                return
+
+    def move(self, actor, dx, dy):
+        """Nudge `actor` by (dx, dy) world pixels. None -> no-op (a `move actor`
+        block outside a for-each)."""
+        if actor is not None:
+            actor.x = int(actor.x + dx)
+            actor.y = int(actor.y + dy)
+
+    def move_to(self, actor, x, y):
+        """Place `actor` at world (x, y). None -> no-op."""
+        if actor is not None:
+            actor.x = int(x)
+            actor.y = int(y)
+
+    def touching(self, a, b):
+        """AABB overlap over the 8px tile boxes (#85 Section 8). `a` is an actor; `b`
+        is an Actor OR a tag string. A tag tests `a` against ANY OTHER live actor of
+        that tag (a==b identity is skipped, so an actor never 'touches' itself).
+        Returns False for a None `a` (a `touching?` reporter outside a for-each)."""
+        if a is None:
+            return False
+        if isinstance(b, Actor):
+            return self._overlap(a, b)
+        for other in self._ensure():
+            if other is a:
+                continue
+            if other.tag == b and self._overlap(a, other):
+                return True
+        return False
+
+    def _overlap(self, a, b):
+        return (a.x < b.x + 8 and b.x < a.x + 8 and
+                a.y < b.y + 8 and b.y < a.y + 8)
 
 
 class _SilentAudio:
