@@ -78,10 +78,20 @@ Content + tooling:
   one crash-safe `notes.json` beside `artwork.moyimg`.
   `storybook.moy` (title: Storybook, #78) opens `runtime/storybook_app.py`:
   decks of art+words pages that COMPILE to real story carts (`deck.json` + a
-  generated, readable `main.py`; Paint art attaches per page; hand-editing the
-  code past the deck graduates the story to read-only-in-Storybook).
+  generated, readable `main.py`; Paint art attaches per page). Hand-editing the
+  code past the deck's vocabulary GRADUATES the story through the exact same
+  manifest `graduated` flag + undo-journal `grad` rider the block editor uses
+  (`project.py`'s `_journal_code`/`_journal_code_toward` treat a deck.json as
+  an origin just like blocks.json) -- not a local hash-compare guess: it
+  persists, survives a reload, and undoing past the graduating commit
+  un-graduates it, same as a block cart.
   `sheets.moy` (title: Sheets, #78) opens `runtime/sheets_app.py`: the kid
   spreadsheet (see the file table above); sheets become game data via `table()`.
+  An open sheet's ATTACH button opens a third mode listing every GAME/story
+  cart (the same row-list widget the workbook list itself uses) and writes the
+  sheet's current cells into the picked cart's folder as
+  `tables/<name>.moysheet` (`moy_carts.save_table`), so its next open reads it
+  back via `table(name)`.
   Each seed carries its own `config` defaults and edit schema where applicable.
 - `tools/simulate_desktop.py` — run the workstation (or a single cart) on the host.
 - `tests/test_v04_userland.py` — canvas, cartridge, desktop, launcher, cards tests.

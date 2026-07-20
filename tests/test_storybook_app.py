@@ -3,9 +3,9 @@
 import json
 from pathlib import Path
 
-from runtime import host_app
+from runtime import host_app, moy_carts
 from runtime.storybook_app import (StorybookAppLayer, StorybookLayout,
-                                   deck_to_code, _fit_art, _sig, MAX_PAGES)
+                                   deck_to_code, _fit_art, MAX_PAGES)
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -112,6 +112,10 @@ def test_hand_edited_code_graduates_the_story_to_read_only(tmp_path):
     app._open_story(cart)
     assert app.read_only
     assert "LEVELED UP" in app.status
+    # #78 full integration: the divergence GRADUATED the real manifest fact,
+    # not just a local in-app refusal -- it round-trips through a fresh load.
+    assert cart["graduated"] is True
+    assert moy_carts.load(cart["path"])["graduated"] is True
     # A commit must NEVER clobber the hand-written code.
     app._deck_dirty = True
     app._commit_deck()
@@ -173,7 +177,11 @@ def test_bar_x_exit_commits_the_open_story(tmp_path):
     assert "Saved by the X." in " ".join(deck["pages"][0]["text"])
     src = (Path(app.cart["path"]) / "main.py").read_text()
     assert "Saved by the X." in src
-    assert _sig(src) == deck["gen"]            # the graduation guard stays in sync
+    # A plain deck-driven save must never graduate the story on its own -- only
+    # a hand-edit past the deck's vocabulary does (#78, see the graduation
+    # tests below).
+    assert not app.cart.get("graduated")
+    assert moy_carts.load(app.cart["path"])["graduated"] is False
 
 
 def test_layout_reflows():

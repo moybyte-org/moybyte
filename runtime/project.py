@@ -49,6 +49,16 @@ try:
     import blocks as _blocks_mod
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import blocks as _blocks_mod
+# The Storybook deck compiler (#78) -- graduation detection for a DECK-authored
+# story cart recompiles what the deck would generate and compares it to the
+# committed source, the deck-cart mirror of the blocks check just above (same
+# bare-or-package import fallback storybook_app/console use). No cycle: neither
+# storybook_app nor its own imports (ui/editors/app_shell) touch project.py.
+try:
+    from storybook_app import deck_to_code as _deck_to_code, STORY_TYPE as _STORY_TYPE
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.storybook_app import (deck_to_code as _deck_to_code,
+                                       STORY_TYPE as _STORY_TYPE)
 
 
 class Project:
@@ -195,48 +205,97 @@ class Project:
             ws.bar_layer.invalidate()
 
     def _journal_code(self, src):
-        """Journal a main.py code commit, DETECTING GRADUATION for a block-authored
-        cart (spec Section 8, the MakeCode model). Bound to the code-commit path (so
-        it rides Stage 7's idle-debounce, never a keystroke), it is the ONE place a
-        block cart can graduate:
+        """Journal a main.py code commit, DETECTING GRADUATION for a block- OR
+        deck-authored cart (spec Section 8, the MakeCode model -- #78 folds
+        Storybook's decks into the SAME mechanism as the block editor). Bound to
+        the code-commit path (so it rides Stage 7's idle-debounce, never a
+        keystroke), it is the ONE place either origin can graduate:
 
-          * code-only cart (no blocks.json) -> a plain journal; it has no block
-            program, so it never 'graduates'.
-          * already-graduated block cart -> sticky: journal with grad=1 (a one-way
-            door; every later code commit stays graduated).
-          * block cart that still round-trips (source_roundtrips) -> journal grad=0;
-            stays blockifiable.
-          * block cart whose commit DIVERGED past the vocabulary -> GRADUATE: journal
-            a grad=0 BASELINE (the frozen block program's own regenerated source, the
-            pre-graduation round-tripping state) so an undo restores it, THEN the
-            diverged src as grad=1 (which flips the manifest flag on the same durable
-            step). Undoing past the graduating commit lands on the grad=0 baseline ->
-            source AND graduated:false both restored (the §8 back-door).
+          * code-only cart (no blocks.json, no deck.json) -> a plain journal; it
+            has no generating program, so it never 'graduates'.
+          * a block-authored cart -> _journal_code_toward (below) decides
+            sticky/round-trips/GRADUATE against the frozen blocks.json's own
+            regenerated source (source_roundtrips/compile_blocks).
+          * a deck-authored story cart (#78) -> the same decision against the
+            deck's own regenerated source (deck_to_code) -- a kid hand-editing a
+            story's main.py past Storybook's page/art/bg vocabulary graduates it
+            exactly like outgrowing blocks.
 
-        Conservative by construction: source_roundtrips treats an un-recompilable tree
-        as still round-tripping, so a transient block problem never graduates a kid."""
+        `prog` (blocks.json) wins when both somehow exist -- a cart is one origin
+        or the other in practice (Storybook never writes blocks.json)."""
         cart = self.cart
         prog = cart.get("blocks") if cart else None
         # The journal entry names the cart's ACTUAL main file (#67: main.lua for a
         # lua cart), so an undo restores into the file the runtime loads from.
         mainf = cart.get("main", "main.py") if cart else "main.py"
-        if prog is None:
-            self._journal(mainf, src)                     # code-only: never graduates
+        if prog is not None:
+            self._journal_code_toward(
+                mainf, src, cart,
+                lambda: _blocks_mod.source_roundtrips(prog, src),
+                lambda: _blocks_mod.compile_blocks(prog))
             return
+        deck = self._deck_for_graduation(cart)
+        if deck is not None:
+            expected = _deck_to_code(deck, cart.get("title") or "My Story")
+            self._journal_code_toward(
+                mainf, src, cart,
+                lambda: src == expected,
+                lambda: expected)
+            return
+        self._journal(mainf, src)                         # code-only: never graduates
+
+    def _journal_code_toward(self, mainf, src, cart, roundtrips, baseline_fn):
+        """Shared graduation body for BOTH origins (blocks/deck -- #78):
+
+          * already-graduated cart -> sticky: journal with grad=1 (a one-way
+            door; every later code commit stays graduated).
+          * still round-trips (`roundtrips()` True) -> journal grad=0; stays
+            editable from its origin (the Blocks tab / Storybook).
+          * DIVERGED past the origin's vocabulary -> GRADUATE: journal a grad=0
+            BASELINE (`baseline_fn()`'s regenerated source, the pre-graduation
+            round-tripping state) so an undo restores it, THEN the diverged src
+            as grad=1 (which flips the manifest flag on the same durable step).
+            Undoing past the graduating commit lands on the grad=0 baseline ->
+            source AND graduated:false both restored (the §8 back-door).
+
+        Conservative by construction: a `roundtrips` that treats an unreadable
+        origin as still round-tripping (as blocks.source_roundtrips does for a
+        corrupt tree) never graduates a kid over a transient hiccup."""
         if bool(cart.get("graduated")):
             self._journal(mainf, src, grad=1)             # sticky one-way door
             return
-        if _blocks_mod.source_roundtrips(prog, src):
-            self._journal(mainf, src, grad=0)             # still blockifiable
+        if roundtrips():
+            self._journal(mainf, src, grad=0)             # still origin-regenerable
             return
         # DIVERGED -> GRADUATE. Baseline first (restore point), then the diverged src.
         try:
-            baseline = _blocks_mod.compile_blocks(prog)
+            baseline = baseline_fn()
             self._journal(mainf, baseline, grad=0)        # no-op if already the current state
         except Exception as exc:  # noqa: BLE001 -- shouldn't raise (it just compiled), be safe
             print("Moybyte graduation baseline failed:", _err_text(exc))
         self._journal(mainf, src, grad=1)                 # flips manifest graduated -> True
         cart["graduated"] = True                          # sync the open workspace in RAM
+
+    def _deck_for_graduation(self, cart):
+        """The parsed deck.json for a Storybook-authored cart (#78 graduation), or
+        None for anything that isn't a deck-backed story right now (not a story
+        cart, no deck.json yet, or a store/SD hiccup) -- the deck-cart mirror of
+        `cart['blocks']` feeding the block graduation check above."""
+        ws = self.ws
+        if (cart is None or cart.get("type") != _STORY_TYPE
+                or ws.carts_store is None or not cart.get("path")):
+            return None
+        try:
+            blob = ws._with_sd(lambda: ws.carts_store.load_deck(cart))
+        except Exception:  # noqa: BLE001 -- a bad/missing deck: not deck-graduating
+            return None
+        if not blob:
+            return None
+        try:
+            data = json.loads(blob)
+        except ValueError:
+            return None
+        return data if isinstance(data, dict) else None
 
     # -- persistence verbs (moved from Workstation's save_* -- Stage 1b) ------
     #

@@ -140,6 +140,73 @@ def test_layout_reflows():
     assert SheetsLayout(480, 300, 1, windowed=True).bar_h == 0
 
 
+# -- attach a sheet to a game (#78: the Sheets-to-game UI) -----------------------
+
+def test_attach_lists_only_game_and_story_carts(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_sheets(ws)
+    app._tap_row(0)                          # + NEW SHEET
+    kinds = {c.get("type") for c in app._attach_targets()}
+    assert kinds <= {"game", "story"}
+    # Sheets/Writer/Storybook/... (type "app") never show up as attach targets.
+    assert "Sheets" not in [c.get("title") for c in app._attach_targets()]
+
+
+def test_attach_sheet_lands_the_table_in_the_target_cart(tmp_path):
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
+    game_src = (
+        "ROWS = table('wave')\n"
+        "def _update(dt):\n    pass\n"
+        "def _draw():\n    cls(0)\n"
+    )
+    game = ws.carts_store.create("Coin Quest 2", carts, src=game_src, type="game")
+    ws._apply_items(ws.carts_store.scan(carts))
+    app = _open_sheets(ws)
+    app._tap_row(0)                          # + NEW SHEET
+    app.sheet.name = "wave"
+    app.cur_col, app.cur_row = 0, 0
+    _type(app, ws.input, "1\n")
+    app.cur_col, app.cur_row = 1, 0
+    _type(app, ws.input, "=A1+1\n")
+    app._open_attach()
+    assert app.mode == "attach"
+    targets = app._attach_targets()
+    titles = [c.get("title") for c in targets]
+    assert "Coin Quest 2" in titles
+    app._tap_row(titles.index("Coin Quest 2"))
+    assert app.mode == "grid"
+    assert "ATTACHED" in app.status
+    table_path = Path(game["path"]) / "tables" / "wave.moysheet"
+    assert table_path.exists()
+    rows = moy_carts.decode_table(table_path.read_text(encoding="utf-8"))
+    assert rows == [[1, 2]]
+    # The sheet stays open + editable in Sheets after attaching (not consumed).
+    assert app.sheet is not None and app.sheet.name == "wave"
+    # And the game reads it back at runtime through table() (#78's cart verb --
+    # already shipped; this proves the attach UI feeds it end to end).
+    ws._apply_items(ws.carts_store.scan(carts))
+    for i, c in enumerate(ws.launcher.items):
+        if c.get("title") == "Coin Quest 2":
+            ws.launcher.sel = i
+            break
+    ws.open()
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)
+    assert ws.cart_error is None
+    assert ws.ns["ROWS"] == [[1, 2]]
+
+
+def test_attach_back_button_returns_to_the_grid_without_writing(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_sheets(ws)
+    app._tap_row(0)
+    app._open_attach()
+    assert app.mode == "attach"
+    app._close_attach()
+    assert app.mode == "grid" and app.sheet is not None
+
+
 # -- interop: the decode helpers -------------------------------------------------
 
 def test_decode_table_trims_to_populated_extent():

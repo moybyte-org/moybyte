@@ -16,7 +16,15 @@ The whole workbook persists as ONE crash-safe `sheets.json` beside Writer's
 notes.json (moy_carts owns the path + atomic write), and the app AUTOSAVES on
 every view change and cell commit -- a kid never presses save. A sheet's computed
 values reach a GAME through the `table(name)` cart verb: attach it into a cart
-folder as `tables/<name>.moysheet` and read it back as rows of numbers."""
+folder as `tables/<name>.moysheet` and read it back as rows of numbers.
+
+The ATTACH flow (#78's remaining UI piece -- the write side, moy_carts.save_table,
+already existed for a hand-placed file): from an open sheet's grid, ATTACH opens a
+third mode listing every GAME/story cart on the store (the SAME row-list widget
+(ListShellLayout/ListShellApp) Sheets already uses for its own workbook list --
+no new chrome), and picking one writes the sheet's CURRENT computed cells as
+tables/<slugified sheet name>.moysheet into that cart's folder, so its next open
+picks it up via table(name)."""
 
 try:
     import ui as _ui
@@ -73,7 +81,8 @@ class SheetsLayout(ListShellLayout):
         bh = self.toolbar_h - 6 * fs
         self.back_btn = (x, y, 58 * fs, bh)          # SHEETS (list) button
         self.del_btn = (x + 62 * fs, y, 62 * fs, bh)  # CLEAR cell
-        self.status_x = x + 130 * fs
+        self.attach_btn = (x + 128 * fs, y, 60 * fs, bh)  # ATTACH to a game (#78)
+        self.status_x = x + 194 * fs
         self.status_y = y + max(0, (bh - 8 * fs) // 2)
         # Formula entry row: the raw text of the selected cell, edited in place.
         self.entry_h = 14 * fs
@@ -237,6 +246,62 @@ class SheetsAppLayer(ListShellApp):
         self.flush(force=True)
         self.ws._dirty = True
 
+    # -- attach to a game (#78: the Sheets-to-game UI, table() feeds it) ------
+    #
+    # `moy_carts.save_table` (the write) already existed for a hand-placed file;
+    # this is the missing picker flow. Reuses the SAME row-list widget the
+    # workbook list draws with (ListShellLayout/ListShellApp -- no new chrome),
+    # over the eligible GAME/story carts instead of the open workbook's sheets.
+
+    def _attach_targets(self):
+        """Every cart a sheet can be attached to: GAME/story carts with a store
+        path -- table() is game data (inventories/waves/scores), so system apps
+        (Sheets/Writer/Storybook/... are type 'app') and wallpapers are excluded."""
+        return [c for c in self.ws._all_carts
+                if c.get("path") and c.get("type") in ("game", "story")]
+
+    def _open_attach(self):
+        if self.sheet is None:
+            return
+        if not self._store_ready():
+            self.status = "CAN'T ATTACH HERE"
+            self.ws._dirty = True
+            return
+        self._commit_edit()
+        self.mode = "attach"
+        self.sel = 0
+        self.top = 0
+        self.del_armed = False
+        self.status = "ATTACH TO WHICH GAME?"
+        self.ws._dirty = True
+
+    def _close_attach(self):
+        self.mode = "grid"
+        self.status = self.sheet.name if self.sheet is not None else "SHEETS"
+        self.ws._dirty = True
+
+    def _attach_to(self, cart):
+        """Write the open sheet's CURRENT computed cells into `cart`'s folder as
+        tables/<slug>.moysheet (moy_carts.save_table -- the same moysheet-v1 blob
+        Sheet.to_dict() already produces, decoded by table() at cart load)."""
+        if self.sheet is None or not self._store_ready():
+            self.status = "CAN'T SAVE HERE"
+            self.ws._dirty = True
+            return
+        store = self.ws.carts_store
+        name = store.slug(self.sheet.name)
+        blob = json.dumps(self.sheet.to_dict())
+        ws = self.ws
+        try:
+            ws._with_sd(lambda: store.save_table(cart, name, blob))
+        except Exception as exc:  # noqa: BLE001 -- surface, never crash the shell
+            self.status = ("ATTACH FAILED " + str(exc))[:28]
+            self.ws._dirty = True
+            return
+        self.status = ("ATTACHED TO " + (cart.get("title") or "GAME"))[:28]
+        self.mode = "grid"
+        self.ws._dirty = True
+
     # -- cell editing --------------------------------------------------------
 
     def _cur_raw(self):
@@ -294,6 +359,9 @@ class SheetsAppLayer(ListShellApp):
         if self.mode == "list":
             # the NEW row + sheets (nav + scroll window: ListShellApp)
             return self._list_nav(inp, len(self.sheets) + 1)
+        if self.mode == "attach":
+            # the ATTACH target rows -- same nav idiom (nav + scroll: ListShellApp)
+            return self._list_nav(inp, len(self._attach_targets()))
         # -- grid: trackball arrows move the selection, keys type into a cell ----
         if inp.pressed("left"):
             self._move(-1, 0)
@@ -352,6 +420,19 @@ class SheetsAppLayer(ListShellApp):
                     self._tap_row(i)
                     return True
             return True
+        if self.mode == "attach":
+            if not click:
+                return True
+            if self._in(px, py, lay.back_btn):
+                self._close_attach()
+                return True
+            targets = self._attach_targets()
+            for i in range(self.top, min(self.top + lay.list_rows, len(targets))):
+                if self._in(px, py, lay.row_rect(i - self.top)):
+                    self.sel = i
+                    self._tap_row(i)
+                    return True
+            return True
         # -- grid view -----------------------------------------------------------
         if not click:
             return True
@@ -360,6 +441,9 @@ class SheetsAppLayer(ListShellApp):
             return True
         if self._in(px, py, lay.del_btn):
             self._clear_cell()
+            return True
+        if self._in(px, py, lay.attach_btn):
+            self._open_attach()
             return True
         # A tap inside the grid selects that cell (and commits any open edit).
         if self.sheet is not None:
@@ -379,6 +463,11 @@ class SheetsAppLayer(ListShellApp):
         return True
 
     def _tap_row(self, i):
+        if self.mode == "attach":
+            targets = self._attach_targets()
+            if 0 <= i < len(targets):
+                self._attach_to(targets[i])
+            return
         if i == 0:
             self._new_sheet()
         else:
@@ -398,9 +487,16 @@ class SheetsAppLayer(ListShellApp):
         if self.mode == "grid":
             self._button(cv, "SHEETS", lay.back_btn)
             self._button(cv, "CLEAR", lay.del_btn)
+            self._button(cv, "ATTACH", lay.attach_btn)
             label = self.status[:max(1, (lay.w - lay.status_x) // (8 * lay.fs) - 1)]
             cv.print(label, lay.status_x, lay.bar_h + 8 * lay.fs, th["title_ink"], 1)
             self._draw_grid(cv)
+        elif self.mode == "attach":
+            self._button(cv, "BACK", lay.back_btn)
+            sx = lay.back_btn[0] + lay.back_btn[2] + 6 * lay.fs
+            cv.print(self.status[:max(1, (lay.w - sx) // (8 * lay.fs) - 1)],
+                     sx, lay.bar_h + 8 * lay.fs, th["title_ink"], 1)
+            self._draw_attach(cv)
         else:
             cv.print(self.status[:max(1, lay.w // (8 * lay.fs) - 2)],
                      6 * lay.fs, lay.bar_h + 8 * lay.fs, th["title_ink"], 1)
@@ -425,6 +521,23 @@ class SheetsAppLayer(ListShellApp):
                 cv.rect(x, y, w, h, 7)
                 cv.print(sheet.name[:max(1, w // (8 * fs) - 2)],
                          x + 6 * fs, y + (h - 8 * fs) // 2, 0, 1)
+            cv.rectb(x, y, w, h, th["accent"] if selected else th["dim"])
+
+    def _draw_attach(self, cv):
+        lay = self.layout
+        th = self.ws.theme_colors
+        fs = lay.fs
+        targets = self._attach_targets()
+        if not targets:
+            cv.print("NO GAMES YET", 6 * fs, lay.list_y + 4 * fs, th["dim"], 1)
+            return
+        for i in range(self.top, min(self.top + lay.list_rows, len(targets))):
+            x, y, w, h = lay.row_rect(i - self.top)
+            selected = i == self.sel
+            cv.rect(x, y, w, h, 7)
+            title = targets[i].get("title") or "GAME"
+            cv.print(title[:max(1, w // (8 * fs) - 2)],
+                     x + 6 * fs, y + (h - 8 * fs) // 2, 0, 1)
             cv.rectb(x, y, w, h, th["accent"] if selected else th["dim"])
 
     def _draw_grid(self, cv):
