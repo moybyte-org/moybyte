@@ -207,7 +207,7 @@ class Project:
             # hasn't changed (zone_gen wouldn't otherwise bump for a plain autosave).
             ws.bar_layer.invalidate()
 
-    def _journal_code(self, src):
+    def _journal_code(self, src, ops=None):
         """Journal a main.py code commit, DETECTING GRADUATION for a block- OR
         deck-authored cart (spec Section 8, the MakeCode model -- #78 folds
         Storybook's decks into the SAME mechanism as the block editor). Bound to
@@ -235,7 +235,7 @@ class Project:
             self._journal_code_toward(
                 mainf, src, cart,
                 lambda: _blocks_mod.source_roundtrips(prog, src),
-                lambda: _blocks_mod.compile_blocks(prog))
+                lambda: _blocks_mod.compile_blocks(prog), ops=ops)
             return
         deck = self._deck_for_graduation(cart)
         if deck is not None:
@@ -243,11 +243,11 @@ class Project:
             self._journal_code_toward(
                 mainf, src, cart,
                 lambda: src == expected,
-                lambda: expected)
+                lambda: expected, ops=ops)
             return
-        self._journal(mainf, src)                         # code-only: never graduates
+        self._journal(mainf, src, ops=ops)                # code-only: never graduates
 
-    def _journal_code_toward(self, mainf, src, cart, roundtrips, baseline_fn):
+    def _journal_code_toward(self, mainf, src, cart, roundtrips, baseline_fn, ops=None):
         """Shared graduation body for BOTH origins (blocks/deck -- #78):
 
           * already-graduated cart -> sticky: journal with grad=1 (a one-way
@@ -264,11 +264,14 @@ class Project:
         Conservative by construction: a `roundtrips` that treats an unreadable
         origin as still round-tripping (as blocks.source_roundtrips does for a
         corrupt tree) never graduates a kid over a transient hiccup."""
+        # The fine-grained op batch (#111 phase 4) always rides the commit that
+        # represents the NEW state (the current/diverged src), never the baseline
+        # restore-point -- so undoing INTO this commit walks the same net text edit.
         if bool(cart.get("graduated")):
-            self._journal(mainf, src, grad=1)             # sticky one-way door
+            self._journal(mainf, src, grad=1, ops=ops)    # sticky one-way door
             return
         if roundtrips():
-            self._journal(mainf, src, grad=0)             # still origin-regenerable
+            self._journal(mainf, src, grad=0, ops=ops)    # still origin-regenerable
             return
         # DIVERGED -> GRADUATE. Baseline first (restore point), then the diverged src.
         try:
@@ -276,7 +279,7 @@ class Project:
             self._journal(mainf, baseline, grad=0)        # no-op if already the current state
         except Exception as exc:  # noqa: BLE001 -- shouldn't raise (it just compiled), be safe
             print("Moybyte graduation baseline failed:", _err_text(exc))
-        self._journal(mainf, src, grad=1)                 # flips manifest graduated -> True
+        self._journal(mainf, src, grad=1, ops=ops)        # flips manifest graduated -> True
         cart["graduated"] = True                          # sync the open workspace in RAM
 
     def _deck_for_graduation(self, cart):
@@ -379,7 +382,19 @@ class Project:
                 return False
             ws.editor.dirty = False
             ws.save_status = "SAVED"
-            self._journal_code(src)           # durable undo (Stage 7) + graduation (Stage 8)
+            # #111 phase 4: close any live typing burst, drain the code History's op
+            # batch into this commit's journal line (mirrors commit_sprites/map), then
+            # re-baseline (clear) -- the CLEAN boundary: in-RAM undo covers edits SINCE
+            # this commit, the journal covers commit-to-commit. Snapshots stay the
+            # source of truth for graduation, so the additive ops never disturb it (the
+            # journal WALK reloads snapshots + a fresh empty History; the ops ride along
+            # for parity/future replay). flush() only after the store write succeeded.
+            ws._close_code_burst()
+            hist = ws._code_op_history()
+            ops = hist.flush() if hist is not None else None
+            self._journal_code(src, ops=ops)  # durable undo (Stage 7) + graduation (Stage 8)
+            if hist is not None:
+                hist.clear()                  # re-baseline (subsumes mark_keyframe)
             if not quiet:
                 ws.ach.note("code_save")      # "Code Wizard": manual SAVE/PLAY only (#21)
             # A successful save means the source now compiles and persisted: clear
@@ -412,6 +427,51 @@ class Project:
         if me is not None and getattr(me, "tilemap", None) is self.tilemap:
             return getattr(me, "_hist", None)
         return None
+
+    def _code_history(self):
+        """The op-history of the OPEN code editor (#111 phase 4), or None -- created
+        lazily on the Workstation over the live CodeEditor and rebound when a fresh
+        editor is built (ws._code_op_history). The code burst + this History live on
+        ws where the keyboard input is handled; Project just references it (and
+        commit_code drains it, mirroring commit_sprites/commit_map)."""
+        return self.ws._code_op_history()
+
+    def _blocks_history(self):
+        """The op-history of the OPEN BlockEditor (#111 phase 4), or None. A
+        GRADUATED cart's Blocks tab is a FROZEN, read-only render (spec Section 8),
+        so its History is deliberately ABSENT there -- the bar UNDO then falls
+        straight to the durable journal walk, which un-graduates when it crosses the
+        graduating commit (moy_carts). In-session only: blocks saves don't journal
+        ops, so unlike paint/map this History never flushes into a commit."""
+        ui = getattr(self.ws, "block_ui", None)
+        if ui is None or getattr(ui, "blk_graduated", False):
+            return None
+        be = getattr(ui, "blocks_ed", None)
+        return getattr(be, "_hist", None) if be is not None else None
+
+    # #111 phase 4: the per-tab op-history REGISTRY -- the active Editor tab's
+    # menu_view maps to the Project method returning that tab's live History (or
+    # None for a tab with no in-RAM op stack). One entry per surface, ADDITIVE:
+    # paint/map (#111 phase 2) + code/blocks (phase 4) here; scene/music/config
+    # wire theirs in the same shape. Console._active_history reads it -- keeping
+    # this a data table (not a switch ladder in console) is why new tabs merge
+    # cleanly (one line each) instead of colliding in one growing if/elif.
+    _HISTORY_TABS = {
+        "paint": "_paint_history",
+        "map": "_map_history",
+        "code": "_code_history",
+        "blocks": "_blocks_history",
+    }
+
+    def history_for(self, view):
+        """The live op-history for Editor tab `view` (a menu_view key), or None for
+        a tab with no in-RAM op stack. Keyed via _HISTORY_TABS so a stale editor
+        from another tab is never consulted -- the caller (the bar UNDO/REDO icons,
+        only reachable inside the Editor) guarantees the Editor is focused."""
+        name = self._HISTORY_TABS.get(view)
+        if name is None:
+            return None
+        return getattr(self, name)()
 
     def commit_sprites(self):
         ws = self.ws

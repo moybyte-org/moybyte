@@ -360,13 +360,25 @@ class CodeLayer:
             elif k == 0x03:
                 ed.copy()
             elif k == 0x18:
+                ws._code_burst_open()          # #111: a cut joins the live typing burst
                 if ed.cut():
                     self._clear_err()
             elif k == 0x16:
+                ws._code_burst_open()          # #111: a paste joins the live typing burst
                 if ed.paste():
                     self._clear_err()
-            elif ed.key(k):                    # text changed -> drop the stale error marker
-                self._clear_err()
+            else:
+                # A text-editing key (printable / backspace / tab / enter). Open the
+                # typing burst BEFORE the edit lands (#111 phase 4), then close it on
+                # Enter -- the burst edge the spec names, alongside the autosave
+                # debounce + an undo press (both handled on the Workstation). ed.key
+                # ignores control bytes it doesn't know, so a no-op key just leaves the
+                # burst open with an unchanged pre-image (a harmless later net no-op).
+                ws._code_burst_open()
+                if ed.key(k):                  # text changed -> drop the stale error marker
+                    self._clear_err()
+                if k in (0x0D, 0x0A):
+                    ws._close_code_burst()
         # (self._ekey.hit above already recorded k as the new previous byte.)
 
     # -- #89 helpers: clipboard/find/tool/select routing ---------------------
@@ -384,8 +396,10 @@ class CodeLayer:
         # inserted into the buffer (the symbol-palette path).
         if self._find_open:
             self._find_key(code)
-        elif self.ws.editor is not None and self.ws.editor.key(code):
-            self._clear_err()
+        elif self.ws.editor is not None:
+            self.ws._code_burst_open()         # #111: a palette/tapped char joins the burst
+            if self.ws.editor.key(code):
+                self._clear_err()
 
     def _run_tool(self, name, ed):
         # Dispatch a tool-palette button (also the keyboard-shortcut targets).
@@ -400,17 +414,21 @@ class CodeLayer:
         elif name == "copy":
             ed.copy()
         elif name == "cut":
+            ws._code_burst_open()              # #111: tool-row edits join the typing burst
             if ed.cut():
                 self._clear_err()
         elif name == "paste":
+            ws._code_burst_open()
             if ed.paste():
                 self._clear_err()
         elif name == "find":
             self._toggle_find()
         elif name == "indent":
+            ws._code_burst_open()
             ed.indent_selection()
             self._clear_err()
         elif name == "outdent":
+            ws._code_burst_open()
             if ed.outdent_selection():
                 self._clear_err()
         elif name == "gutter":

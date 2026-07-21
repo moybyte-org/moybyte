@@ -41,9 +41,9 @@ except ImportError:  # pragma: no cover - direct host import
     from runtime.app_shell import ListShellLayout, ListShellApp
 
 try:
-    from op_history import History, OpCodec
+    from op_history import History, TextEditCodec, text_diff_op
 except ImportError:  # pragma: no cover - direct host import
-    from runtime.op_history import History, OpCodec
+    from runtime.op_history import History, TextEditCodec, text_diff_op
 
 
 MAX_CHARS = 8000        # per doc -- bounds the SD write + device memory
@@ -58,66 +58,9 @@ INK = 0                 # black
 # get an undo step", no second timer needed).
 _BURST_BREAK = ".,!?;:"
 
-
-def _diff_op(before, after):
-    """The smallest (pos, deleted, inserted) edit turning `before` into `after`
-    -- a common-prefix/suffix diff over the two burst-edge text snapshots, so
-    one op carries a whole typing/delete burst's net change. `pos` + the two
-    strings make _WriterOpCodec.invert a trivial swap (ints/strings only, #111
-    MicroPython-safe). Returns None for a no-op pair (callers already guard
-    before == after -- this is just belt-and-braces)."""
-    n = min(len(before), len(after))
-    i = 0
-    while i < n and before[i] == after[i]:
-        i += 1
-    max_suffix = n - i
-    j = 0
-    while j < max_suffix and before[len(before) - 1 - j] == after[len(after) - 1 - j]:
-        j += 1
-    deleted = before[i:len(before) - j]
-    inserted = after[i:len(after) - j]
-    if not deleted and not inserted:
-        return None
-    return ("edit", i, deleted, inserted)
-
-
-def _place_offset(ed, off):
-    """Land the CodeEditor caret at an absolute flat-text offset -- used after
-    apply()/invert() rewrite the buffer via set_text() (which always resets
-    row/col to the top). Newline counting + the editor's own public goto_row(),
-    no reach into its private row/col-offset helpers."""
-    text = ed.text()
-    off = max(0, min(len(text), off))
-    row = text.count("\n", 0, off)
-    col = off - (text.rfind("\n", 0, off) + 1)
-    ed.goto_row(row, col)
-
-
-class _WriterOpCodec(OpCodec):
-    """#111 phase 3: one op is a whole typing/delete BURST's net effect --
-    ("edit", pos, deleted, inserted) as flat character offsets into the doc's
-    joined text. apply() and invert() are the SAME shape with deleted/inserted
-    swapped, so invert never needs a base snapshot -- op_history.History picks
-    the (preferred) invert path automatically. `doc` is the live CodeEditor;
-    apply/invert only ever go through its public set_text()/goto_row()."""
-
-    def apply(self, doc, op):
-        _, pos, deleted, inserted = op
-        text = doc.text()
-        doc.set_text(text[:pos] + inserted + text[pos + len(deleted):])
-        _place_offset(doc, pos + len(inserted))
-
-    def invert(self, doc, op):
-        _, pos, deleted, inserted = op
-        text = doc.text()
-        doc.set_text(text[:pos] + deleted + text[pos + len(inserted):])
-        _place_offset(doc, pos + len(deleted))
-
-    def snapshot(self, doc):
-        # Only for History.keyframe() -- the sidecar's full-text keyframe blob
-        # when needs_keyframe() trips (#111's segment cap). Undo itself never
-        # calls this (invert() is the preferred path checked above).
-        return doc.text()
+# #111 phase 3 -> phase 4: the typing-burst diff + codec are SHARED with the
+# Code editor tab (both edit the same CodeEditor buffer), so they live in
+# op_history now (text_diff_op / TextEditCodec) instead of a private copy here.
 
 
 def _body_of(blob):
@@ -289,7 +232,7 @@ class WriterAppLayer(ListShellApp):
         after = ed.text()
         if before == after:
             return
-        op = _diff_op(before, after)
+        op = text_diff_op(before, after)
         if op is not None:
             hist.record(op)
 
@@ -401,7 +344,7 @@ class WriterAppLayer(ListShellApp):
         self._idle = 0.0
         self._ekey_prev = 0
         self.status = name.upper()
-        self.history = History(self.editor, _WriterOpCodec())
+        self.history = History(self.editor, TextEditCodec())
         self._burst_before = None
         self._seed_history(name)          # #111: undo reaches past this open
         self.ws._dirty = True
@@ -423,7 +366,7 @@ class WriterAppLayer(ListShellApp):
         self._idle = 0.0
         self._ekey_prev = 0
         self.status = "NEW DOC"
-        self.history = History(self.editor, _WriterOpCodec())   # fresh doc -> no sidecar to seed
+        self.history = History(self.editor, TextEditCodec())   # fresh doc -> no sidecar to seed
         self._burst_before = None
         self.ws._dirty = True
 

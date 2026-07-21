@@ -65,6 +65,72 @@ def _has(codec, name):
     return callable(fn)
 
 
+# -- shared text-burst codec (Code editor tab + Writer app, #111) -------------
+# Both surfaces edit the SAME CodeEditor buffer core and want the SAME undo grain
+# (one op per typing/delete BURST). The diff + codec live here so neither owns a
+# private copy -- op_history is already the one shared module (the alternative is
+# a grab-bag helper file the spec warns against).
+
+def text_diff_op(before, after):
+    """The smallest ("edit", pos, deleted, inserted) turning `before` into
+    `after` -- a common-prefix/suffix diff over two text snapshots, so one op
+    carries a whole typing/delete burst's net change. `pos` + the two strings
+    make TextEditCodec.invert a trivial swap (ints/strings only -- MicroPython-
+    safe, frozen on device). Returns None for a no-op pair."""
+    n = min(len(before), len(after))
+    i = 0
+    while i < n and before[i] == after[i]:
+        i += 1
+    max_suffix = n - i
+    j = 0
+    while j < max_suffix and before[len(before) - 1 - j] == after[len(after) - 1 - j]:
+        j += 1
+    deleted = before[i:len(before) - j]
+    inserted = after[i:len(after) - j]
+    if not deleted and not inserted:
+        return None
+    return ("edit", i, deleted, inserted)
+
+
+def _place_text_offset(doc, off):
+    """Land a text-buffer doc's caret at an absolute flat-text offset -- used
+    after apply()/invert() rewrite the buffer via set_text() (which resets
+    row/col to the top). Newline counting + the doc's own public goto_row(), no
+    reach into private row/col-offset helpers."""
+    text = doc.text()
+    off = max(0, min(len(text), off))
+    row = text.count("\n", 0, off)
+    col = off - (text.rfind("\n", 0, off) + 1)
+    doc.goto_row(row, col)
+
+
+class TextEditCodec(OpCodec):
+    """OpCodec over any text-buffer doc exposing text()/set_text()/goto_row()
+    (the shared CodeEditor) -- one op is a whole typing/delete BURST's net effect
+    ("edit", pos, deleted, inserted) as flat character offsets into the doc's
+    joined text. apply() and invert() are the SAME shape with deleted/inserted
+    swapped, so invert never needs a base snapshot -- History picks the (preferred)
+    invert path automatically. snapshot() backs History.keyframe() only (the
+    sidecar's full-text keyframe blob when the segment cap trips); undo itself
+    never calls it. Used by the Code editor tab (#111 phase 4) and the Writer app
+    (phase 3)."""
+
+    def apply(self, doc, op):
+        _, pos, deleted, inserted = op
+        text = doc.text()
+        doc.set_text(text[:pos] + inserted + text[pos + len(deleted):])
+        _place_text_offset(doc, pos + len(inserted))
+
+    def invert(self, doc, op):
+        _, pos, deleted, inserted = op
+        text = doc.text()
+        doc.set_text(text[:pos] + deleted + text[pos + len(inserted):])
+        _place_text_offset(doc, pos + len(deleted))
+
+    def snapshot(self, doc):
+        return doc.text()
+
+
 class History(object):
     """One per open document. In-RAM undo/redo over the ops a surface records,
     plus the pending batch a persistence adapter drains at commit time.
