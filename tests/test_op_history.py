@@ -212,6 +212,43 @@ def test_clear_rebaselines_the_history():
     assert doc == [5, 0]                   # back to the post-clear baseline, not [0,0]
 
 
+# -- seed(): rebuilding undo depth from persisted ops (#111 phase 3) ------------
+
+def test_seed_rebuilds_undo_depth_without_touching_pending_or_redo():
+    # The doc is already loaded at the state these ops produced (a reopened
+    # document's normal load path) -- seed() only makes undo() able to walk
+    # back through them, it never re-applies anything.
+    doc = [5, 7, 0]
+    h = History(doc, InvertCodec())
+    a = ("set", 0, 0, 5)
+    b = ("set", 1, 0, 7)
+    h.seed([a, b])
+    assert h.can_undo() is True
+    assert h.can_redo() is False
+    assert h.peek() == []                  # seeded ops are NOT pending (already on disk)
+    assert h.flush() == []
+    assert h.undo() == b
+    assert doc == [5, 0, 0]
+    assert h.undo() == a
+    assert doc == [0, 0, 0]
+    assert h.undo() is None                # floor
+
+
+def test_seed_sets_the_keyframe_cap_counter():
+    h = History([0, 0, 0, 0], InvertCodec(), max_ops=2)
+    h.seed([("set", 0, 0, 1), ("set", 1, 0, 2)])
+    assert h.needs_keyframe() is True       # 2 >= max_ops=2
+    h.mark_keyframe()
+    assert h.needs_keyframe() is False
+
+
+def test_seed_of_empty_or_none_is_a_no_op():
+    h = History([0], InvertCodec())
+    h.seed([])
+    h.seed(None)
+    assert not h.can_undo()
+
+
 # -- journal adapter: the additive `ops` field (#111) ---------------------------
 
 def _cart(tmp_path):
