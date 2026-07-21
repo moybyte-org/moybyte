@@ -33,6 +33,15 @@ def _type(app, inp, text):
         app._typed_keys(inp)
 
 
+def _press(app, inp, key):
+    # One control-key press/release cycle (Ctrl+Z=0x1A, Ctrl+Y=0x19) -- same
+    # press-then-release edge contract as _type.
+    inp.last_key = key
+    app._typed_keys(inp)
+    inp.last_key = 0
+    app._typed_keys(inp)
+
+
 def test_writer_cart_is_versioned_system_app():
     folder = ROOT / "system_carts" / "writer.moy"
     man = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
@@ -222,3 +231,114 @@ def test_layout_reflows_and_windowed_drops_the_bar():
     assert win.bar_h == 0
     assert _body_of('{"format": "moytext-v1", "body": "hi"}') == "hi"
     assert _body_of("garbage") == ""
+
+
+# -- #111 phase 3: op-history undo/redo --------------------------------------
+
+
+def test_typing_a_burst_then_undo_removes_it_and_redo_restores_it(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_writer(ws)
+    app._new_doc()
+    assert app.can_undo() is False and app.can_redo() is False
+    _type(app, ws.input, "hello")         # one burst -- no pause, no punctuation
+    assert app.editor.text() == "hello"
+    assert app.can_undo() is True
+    _press(app, ws.input, 0x1A)           # Ctrl+Z
+    assert app.editor.text() == ""
+    assert app.can_undo() is False and app.can_redo() is True
+    _press(app, ws.input, 0x19)           # Ctrl+Y
+    assert app.editor.text() == "hello"
+    assert app.can_redo() is False
+
+
+def test_punctuation_closes_a_burst_so_undo_walks_word_by_word(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_writer(ws)
+    app._new_doc()
+    _type(app, ws.input, "Hi. Bye.")      # two bursts: "Hi." then " Bye."
+    assert app.editor.text() == "Hi. Bye."
+    _press(app, ws.input, 0x1A)
+    assert app.editor.text() == "Hi."
+    _press(app, ws.input, 0x1A)
+    assert app.editor.text() == ""
+    assert app.can_undo() is False
+
+
+def test_undo_reaches_across_the_autosave_flush(tmp_path):
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
+    app = _open_writer(ws)
+    app._new_doc()
+    _type(app, ws.input, "first")
+    app.draw(app.AUTOSAVE_S + 0.1)        # the debounce flushes + commits the burst
+    assert app._unsaved is False
+    _type(app, ws.input, " second")       # a fresh burst after the flush boundary
+    assert app.editor.text() == "first second"
+    _press(app, ws.input, 0x1A)           # undo the still-open post-flush burst
+    assert app.editor.text() == "first"
+    _press(app, ws.input, 0x1A)           # undo reaches the ALREADY-FLUSHED burst too
+    assert app.editor.text() == ""
+    assert app.can_undo() is False
+
+
+def test_history_commit_writes_a_sidecar_segment(tmp_path):
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
+    app = _open_writer(ws)
+    app._new_doc()
+    name = app.doc_name
+    _type(app, ws.input, "note.")
+    app.flush(force=True)
+    recs = moy_carts.load_history("docs", name, carts)
+    segs = [r for r in recs if r["t"] == "seg"]
+    assert segs and segs[0]["ops"]
+    op = segs[0]["ops"][0]
+    assert op[0] == "edit" and op[2] == "" and op[3] == "note."
+
+
+def test_reopened_doc_keeps_undo_depth(tmp_path):
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
+    app = _open_writer(ws)
+    app._new_doc()
+    name = app.doc_name
+    _type(app, ws.input, "keep me")
+    app.flush(force=True)                 # sidecar segment lands
+    app._back_to_list()
+    # A fresh workstation re-opening the same doc rebuilds undo depth from the
+    # #111 sidecar, not just the saved text.
+    ws2 = host_app.build_workstation(carts)
+    app2 = _open_writer(ws2)
+    app2._open_doc(name)
+    assert app2.editor.text() == "keep me"
+    assert app2.can_undo() is True
+    assert app2.can_redo() is False
+    _press(app2, ws2.input, 0x1A)
+    assert app2.editor.text() == ""
+
+
+def test_undo_redo_dim_with_can_undo_can_redo(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_writer(ws)
+    app._new_doc()
+    assert app.can_undo() is False and app.can_redo() is False
+    app.draw(0)                           # exercise the dimmed toolbar paint path
+    _type(app, ws.input, "x")
+    assert app.can_undo() is True and app.can_redo() is False
+    app.draw(0)                           # exercise the enabled toolbar paint path
+    _press(app, ws.input, 0x1A)
+    assert app.can_undo() is False and app.can_redo() is True
+
+
+def test_undo_redo_toolbar_taps(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_writer(ws)
+    app._new_doc()
+    _type(app, ws.input, "tap me")
+    ub = app.layout.undo_btn
+    assert app.handle_pointer(ub[0] + 2, ub[1] + 2, True) is True
+    assert app.editor.text() == ""
+    rb = app.layout.redo_btn
+    assert app.handle_pointer(rb[0] + 2, rb[1] + 2, True) is True
+    assert app.editor.text() == "tap me"

@@ -217,3 +217,19 @@ class History(object):
         self._since_keyframe = 0
         if not self._invert:
             self._base = self.codec.snapshot(self.doc)
+
+    def seed(self, ops):
+        """Rebuild undo DEPTH from ops the persistence layer already has on disk
+        (a reopened document's flattened sidecar/journal segments, oldest ..
+        newest) -- NOT fresh edits: appends straight onto the undo stack and the
+        keyframe-since counter, but never touches `_pending`/`_redo` (these ops
+        are already committed; re-flushing them would double-write the sidecar,
+        and there is nothing to redo into a session that just started). The doc
+        itself is assumed already loaded at the state these ops produce (the
+        adapter's normal load path), so seed() never calls apply() -- it only
+        makes undo() able to walk back through them. Call once, right after
+        construction, before any record(). A no-op for an empty/None list."""
+        if not ops:
+            return
+        self._undo.extend(ops)
+        self._since_keyframe += len(ops)
