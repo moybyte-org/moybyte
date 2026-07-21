@@ -837,14 +837,16 @@ try:
     from moy_journal import (JOURNAL_DIR, JOURNAL_LOG, JOURNAL_CURSOR,
                              JOURNAL_SNAP_DIR, JOURNAL_MAX_ENTRIES,
                              JOURNAL_MAX_BYTES, journal_append, journal_undo,
-                             journal_redo, journal_compact, _journal_paths,
-                             _journal_load_entries, _journal_cursor,
-                             _journal_current_snap, _journal_total_bytes)
+                             journal_redo, journal_compact, journal_entry_ops,
+                             _journal_paths, _journal_load_entries,
+                             _journal_cursor, _journal_current_snap,
+                             _journal_total_bytes)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_journal import (JOURNAL_DIR, JOURNAL_LOG, JOURNAL_CURSOR,
                                      JOURNAL_SNAP_DIR, JOURNAL_MAX_ENTRIES,
                                      JOURNAL_MAX_BYTES, journal_append,
                                      journal_undo, journal_redo, journal_compact,
+                                     journal_entry_ops,
                                      _journal_paths, _journal_load_entries,
                                      _journal_cursor, _journal_current_snap,
                                      _journal_total_bytes)
@@ -1428,10 +1430,192 @@ def save_file(kind, name, text, root=CARTS_DIR):
     return name
 
 
+# --- op-history sidecars (#111): keyframe + op segments per user file --------
+#
+# The #111 keyframe+ops undo model for Desk Lab apps (Paint/Writer/Sheets). A
+# per-file history lives in a HIDDEN sibling of the kind dirs --
+# files/.history/<kind>/<name>.jsonl -- one append-only JSONL of records:
+#
+#   {"t":"kf","doc": <snapshot blob>}   a full keyframe (the replay base). Comes
+#                                       from an op_history.History.keyframe().
+#   {"t":"seg","ops": [ ... ]}          a batch of fine-grained ops (History.flush())
+#                                       that transforms the previous keyframe forward.
+#
+# CADENCE mirrors the journal (#7): a raw open(path,"a") per record -- O(1), never
+# _write_atomic -- flushed on the SAME #108 autosave debounce as the file itself,
+# so nothing writes per-stroke (the pmem SD lesson, #66). A torn last line fails
+# json.loads and is dropped at load, exactly like journal.jsonl. Pruned to the
+# newest keyframe + the last HISTORY_KEEP segments (History forces a fresh keyframe
+# every <=256 ops, so segments never grow unbounded). The .history dir is a SIBLING
+# of the kind dirs, NOT a kind -- list_files/trash_list/FileGridView are all
+# registry-driven (they scan files/<kind>, never files/), so it is invisible by
+# construction, and _kind_spec(".history") is a loud ValueError.
+
+HISTORY_DIR = ".history"
+HISTORY_EXT = ".jsonl"
+HISTORY_KEEP = 32          # keep the newest keyframe + this many trailing op-segments
+
+
+def _history_dir(kind, root):
+    _kind_spec(kind)                          # validate -- ".history" is never a kind
+    return files_root(root) + "/" + HISTORY_DIR + "/" + kind
+
+
+def _history_path(kind, name, root):
+    return _history_dir(kind, root) + "/" + name + HISTORY_EXT
+
+
+def _history_trash_dir(kind, root):
+    _kind_spec(kind)
+    return files_root(root) + "/" + TRASH_DIR + "/" + HISTORY_DIR + "/" + kind
+
+
+def _history_trash_path(kind, name, root):
+    return _history_trash_dir(kind, root) + "/" + name + HISTORY_EXT
+
+
+def _ensure_history_dir(kind, root):
+    ensure_dirs(root)
+    _mkdir(files_root(root))
+    _mkdir(files_root(root) + "/" + HISTORY_DIR)
+    d = _history_dir(kind, root)
+    _mkdir(d)
+    return d
+
+
+def _ensure_history_trash_dir(kind, root):
+    _mkdir(files_root(root))
+    _mkdir(files_root(root) + "/" + TRASH_DIR)
+    _mkdir(files_root(root) + "/" + TRASH_DIR + "/" + HISTORY_DIR)
+    d = _history_trash_dir(kind, root)
+    _mkdir(d)
+    return d
+
+
+def _sidecar_move(src, dst):
+    """Move a history sidecar to follow its file (rename/trash/restore). A
+    best-effort no-op when the file was never edited under op-history (no
+    sidecar). The dst's dir must already exist (callers ensure it)."""
+    if not _exists(src):
+        return
+    try:
+        os.rename(src, dst)
+    except OSError:
+        _copy(src, dst)
+        _remove(src)
+
+
+def _sidecar_copy(src, dst):
+    """Copy a history sidecar alongside a duplicated file (best-effort)."""
+    if not _exists(src):
+        return
+    _copy(src, dst)
+
+
+def history_path(kind, name, root=CARTS_DIR):
+    """The op-history sidecar path for a user file (phase 2/3 read this)."""
+    return _history_path(kind, name, root)
+
+
+def load_history(kind, name, root=CARTS_DIR):
+    """Parse a file's history sidecar into a list of records (keyframes +
+    segments) in file order. A torn/corrupt line is DROPPED (append-only's only
+    failure mode), every good record before it survives; a missing sidecar -> []."""
+    _kind_spec(kind)
+    out = []
+    try:
+        raw = _read(_history_path(kind, name, root))
+    except OSError:
+        return out
+    for line in raw.split("\n"):
+        if not line.strip():
+            continue
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue                          # torn / corrupt line -> drop, keep the rest
+        if isinstance(rec, dict) and rec.get("t") in ("kf", "seg"):
+            out.append(rec)
+    return out
+
+
+def history_write_keyframe(kind, name, doc_blob, root=CARTS_DIR):
+    """Append a full keyframe record (the replay base) and prune. `doc_blob` is
+    a JSON-able snapshot (an op_history.History.keyframe())."""
+    _ensure_history_dir(kind, root)
+    with open(_history_path(kind, name, root), "a") as f:   # RAW append -- O(1)
+        f.write(json.dumps({"t": "kf", "doc": doc_blob}) + "\n")
+    prune_history(kind, name, root)
+
+
+def history_append_segment(kind, name, ops, root=CARTS_DIR):
+    """Append one op-segment record (a History.flush() batch) and prune. An empty
+    batch writes nothing (a debounce that fires with no ops must not touch SD)."""
+    if not ops:
+        return
+    _ensure_history_dir(kind, root)
+    with open(_history_path(kind, name, root), "a") as f:   # RAW append -- O(1)
+        f.write(json.dumps({"t": "seg", "ops": list(ops)}) + "\n")
+    prune_history(kind, name, root)
+
+
+def history_commit(kind, name, ops, keyframe=None, root=CARTS_DIR):
+    """The one-call adapter for op_history: at the #108 autosave debounce a Desk
+    Lab app passes History.flush() as `ops` and, when History.needs_keyframe(),
+    History.keyframe() as `keyframe`. Writes the keyframe first (so it precedes
+    the segment it bases), then the segment, then prunes once. A pure no-op
+    (no keyframe, empty ops) never touches SD."""
+    if keyframe is None and not ops:
+        return
+    _ensure_history_dir(kind, root)
+    path = _history_path(kind, name, root)
+    with open(path, "a") as f:
+        if keyframe is not None:
+            f.write(json.dumps({"t": "kf", "doc": keyframe}) + "\n")
+        if ops:
+            f.write(json.dumps({"t": "seg", "ops": list(ops)}) + "\n")
+    prune_history(kind, name, root)
+
+
+def prune_history(kind, name, root=CARTS_DIR, keep=HISTORY_KEEP):
+    """Keep the newest keyframe and the last `keep` op-segments after it; drop
+    everything older (the keyframe supersedes the records before it). A full
+    rewrite, so it rides _write_atomic -- but it is O(records) and rare (only
+    when a sidecar exceeds keep+1), NOT on the per-record append path (like
+    journal_compact). No-op when nothing needs dropping."""
+    recs = load_history(kind, name, root)
+    if not recs:
+        return 0
+    last_kf = -1
+    for i in range(len(recs)):
+        if recs[i].get("t") == "kf":
+            last_kf = i
+    if last_kf >= 0:
+        head = [recs[last_kf]]
+        segs = [r for r in recs[last_kf + 1:] if r.get("t") == "seg"]
+    else:
+        head = []                             # no keyframe yet -> just cap the segments
+        segs = [r for r in recs if r.get("t") == "seg"]
+    kept = head + (segs[-keep:] if keep and len(segs) > keep else segs)
+    if len(kept) == len(recs):
+        return 0                              # nothing to drop
+    _write_atomic(_history_path(kind, name, root),
+                  "".join(json.dumps(r) + "\n" for r in kept))
+    return len(recs) - len(kept)
+
+
+def clear_history(kind, name, root=CARTS_DIR):
+    """Drop a file's history sidecar entirely (a hard reset / the file is gone
+    forever). Best-effort; a missing sidecar is a no-op."""
+    _kind_spec(kind)
+    _remove(_history_path(kind, name, root))
+
+
 def rename_file(kind, name, new_title, root=CARTS_DIR):
     """Rename an item to (the slug of) `new_title`, unique-ified against the
     kind's dir. Returns the final name (a contentless or unchanged title is a
-    no-op -- slug()'s "cart" fallback must never fire from a rename)."""
+    no-op -- slug()'s "cart" fallback must never fire from a rename). The op-
+    history sidecar (#111) moves with the file."""
     for ch in str(new_title):
         if ch.isalpha() or ch.isdigit():
             break
@@ -1442,6 +1626,8 @@ def rename_file(kind, name, new_title, root=CARTS_DIR):
         return name
     new = _unique_name(kind, new, root)
     os.rename(file_path(kind, name, root), file_path(kind, new, root))
+    _ensure_history_dir(kind, root)
+    _sidecar_move(_history_path(kind, name, root), _history_path(kind, new, root))
     return new
 
 
@@ -1457,7 +1643,9 @@ def _copytree(src, dst):
 
 
 def duplicate_file(kind, name, root=CARTS_DIR):
-    """Copy an item to the next free name_2/name_3 slot; returns the new name."""
+    """Copy an item to the next free name_2/name_3 slot; returns the new name.
+    The op-history sidecar (#111) is copied alongside it, so a duplicate opens
+    with its source's undo history intact."""
     folder_valued = _kind_spec(kind)[1]
     new = _unique_name(kind, name, root)   # the source exists, so this yields name_2, name_3, ...
     src = file_path(kind, name, root)
@@ -1465,6 +1653,8 @@ def duplicate_file(kind, name, root=CARTS_DIR):
         _copytree(src, file_path(kind, new, root))
     else:
         _write_atomic(file_path(kind, new, root), _read(src))
+    _ensure_history_dir(kind, root)
+    _sidecar_copy(_history_path(kind, name, root), _history_path(kind, new, root))
     return new
 
 
@@ -1486,6 +1676,10 @@ def delete_file(kind, name, root=CARTS_DIR):
     _mkdir(_trash_dir(kind, root))
     new = _unique_name(kind, name, root, _trash_path)
     os.rename(file_path(kind, name, root), _trash_path(kind, new, root))
+    # The op-history sidecar (#111) follows the file into the trash under the
+    # SAME trashed name, so a restore brings the undo history back with it.
+    _ensure_history_trash_dir(kind, root)
+    _sidecar_move(_history_path(kind, name, root), _history_trash_path(kind, new, root))
     prune_trash(root)
     return new
 
@@ -1507,6 +1701,9 @@ def restore_file(kind, name, root=CARTS_DIR):
     _ensure_kind_dir(kind, root)
     new = _unique_name(kind, name, root)
     os.rename(_trash_path(kind, name, root), file_path(kind, new, root))
+    # Bring the op-history sidecar (#111) back out of the trash with the file.
+    _ensure_history_dir(kind, root)
+    _sidecar_move(_history_trash_path(kind, name, root), _history_path(kind, new, root))
     return new
 
 
@@ -1516,6 +1713,7 @@ def _remove_trash_entry(kind, name, root):
         _rmtree(p)
     else:
         _remove(p)
+    _remove(_history_trash_path(kind, name, root))   # drop the sidecar too (#111)
 
 
 def prune_trash(root=CARTS_DIR, keep=TRASH_KEEP):

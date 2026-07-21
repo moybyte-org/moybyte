@@ -182,3 +182,111 @@ def test_migration_without_legacy_artwork_is_a_noop(tmp_path):
     root = _root(tmp_path)
     assert moy_carts.migrate_user_files(root) is None
     assert moy_carts.list_files("drawings", root) == []
+
+
+# -- op-history sidecars (#111): files/.history/<kind>/<name>.jsonl ---------------
+
+def test_history_sidecar_create_append_and_load(tmp_path):
+    root = _root(tmp_path)
+    moy_carts.save_file("drawings", "castle", "PIXELS", root)
+    assert moy_carts.load_history("drawings", "castle", root) == []   # none yet
+    moy_carts.history_write_keyframe("drawings", "castle", {"w": 2}, root)
+    moy_carts.history_append_segment("drawings", "castle", [["s", 0, 0, 5]], root)
+    moy_carts.history_append_segment("drawings", "castle", [], root)   # empty -> no-op
+    recs = moy_carts.load_history("drawings", "castle", root)
+    assert [r["t"] for r in recs] == ["kf", "seg"]
+    assert recs[0]["doc"] == {"w": 2}
+    assert recs[1]["ops"] == [["s", 0, 0, 5]]
+    # The sidecar lives at files/.history/drawings/castle.jsonl.
+    assert moy_carts.history_path("drawings", "castle", root) == str(
+        tmp_path / "files" / ".history" / "drawings" / "castle.jsonl")
+
+
+def test_history_commit_writes_keyframe_then_segment(tmp_path):
+    root = _root(tmp_path)
+    moy_carts.save_file("docs", "story", "TEXT", root)
+    moy_carts.history_commit("docs", "story", [["ins", 0, "hi"]],
+                             keyframe={"body": ""}, root=root)
+    recs = moy_carts.load_history("docs", "story", root)
+    assert [r["t"] for r in recs] == ["kf", "seg"]
+    # A pure no-op commit never touches the sidecar.
+    moy_carts.history_commit("docs", "story", [], keyframe=None, root=root)
+    assert len(moy_carts.load_history("docs", "story", root)) == 2
+
+
+def test_history_prune_keeps_last_keyframe_plus_n_segments(tmp_path):
+    root = _root(tmp_path)
+    moy_carts.save_file("drawings", "art", "X", root)
+    moy_carts.history_write_keyframe("drawings", "art", {"v": 1}, root)
+    for i in range(5):
+        moy_carts.history_append_segment("drawings", "art", [["s", i]], root)
+    dropped = moy_carts.prune_history("drawings", "art", root, keep=2)
+    assert dropped == 3                              # 1 kf + 5 seg -> 1 kf + 2 seg
+    recs = moy_carts.load_history("drawings", "art", root)
+    assert [r["t"] for r in recs] == ["kf", "seg", "seg"]
+    assert [r["ops"] for r in recs[1:]] == [[["s", 3]], [["s", 4]]]  # the newest two
+
+
+def test_history_load_drops_a_torn_last_line(tmp_path):
+    root = _root(tmp_path)
+    moy_carts.save_file("drawings", "art", "X", root)
+    moy_carts.history_write_keyframe("drawings", "art", {"v": 1}, root)
+    with open(moy_carts.history_path("drawings", "art", root), "a") as f:
+        f.write('{"t":"seg","ops":[[1,2  ')            # a torn append (power loss)
+    recs = moy_carts.load_history("drawings", "art", root)
+    assert [r["t"] for r in recs] == ["kf"]           # good record survives, torn dropped
+
+
+def test_history_sidecar_follows_rename(tmp_path):
+    root = _root(tmp_path)
+    moy_carts.save_file("drawings", "drawing_1", "a", root)
+    moy_carts.history_append_segment("drawings", "drawing_1", [["s", 1]], root)
+    assert moy_carts.rename_file("drawings", "drawing_1", "Castle", root) == "castle"
+    assert moy_carts.load_history("drawings", "drawing_1", root) == []      # moved away
+    assert moy_carts.load_history("drawings", "castle", root)[0]["ops"] == [["s", 1]]
+
+
+def test_history_sidecar_copies_on_duplicate(tmp_path):
+    root = _root(tmp_path)
+    moy_carts.save_file("drawings", "cat", "MEOW", root)
+    moy_carts.history_append_segment("drawings", "cat", [["s", 7]], root)
+    assert moy_carts.duplicate_file("drawings", "cat", root) == "cat_2"
+    # Both the source and the copy carry the history (a copy is a real copy).
+    assert moy_carts.load_history("drawings", "cat", root)[0]["ops"] == [["s", 7]]
+    assert moy_carts.load_history("drawings", "cat_2", root)[0]["ops"] == [["s", 7]]
+
+
+def test_history_sidecar_rides_trash_and_restore(tmp_path):
+    root = _root(tmp_path)
+    moy_carts.save_file("drawings", "cat", "MEOW", root)
+    moy_carts.history_append_segment("drawings", "cat", [["s", 3]], root)
+    moy_carts.delete_file("drawings", "cat", root)
+    assert moy_carts.load_history("drawings", "cat", root) == []            # gone from live
+    moy_carts.restore_file("drawings", "cat", root)
+    assert moy_carts.load_history("drawings", "cat", root)[0]["ops"] == [["s", 3]]
+
+
+def test_history_sidecar_dropped_when_trash_is_emptied(tmp_path):
+    root = _root(tmp_path)
+    moy_carts.save_file("drawings", "cat", "MEOW", root)
+    moy_carts.history_append_segment("drawings", "cat", [["s", 3]], root)
+    moy_carts.delete_file("drawings", "cat", root)
+    moy_carts.empty_trash(root)
+    # The trashed sidecar is gone with the trashed file.
+    assert not os.path.exists(
+        moy_carts._history_trash_path("drawings", "cat", root))
+
+
+def test_history_dir_is_hidden_from_listing_and_is_not_a_kind(tmp_path):
+    import pytest
+    root = _root(tmp_path)
+    moy_carts.save_file("drawings", "art", "X", root)
+    moy_carts.history_append_segment("drawings", "art", [["s", 1]], root)
+    # The .history sibling never appears as a kind item or in the trash listing,
+    # and is not itself a valid kind (list/save against it are loud errors).
+    assert moy_carts.list_files("drawings", root) == ["art"]
+    assert (".history", "art") not in moy_carts.trash_list(root)
+    for k, _n in moy_carts.trash_list(root):
+        assert k in moy_carts.FILE_KINDS
+    with pytest.raises(ValueError):
+        moy_carts.list_files(".history", root)
