@@ -3,9 +3,11 @@
 **Status:** SHIPPED (v0.5) / CURRENT UX REFERENCE — the shell described here is
 implemented (branch `refactor/shell-ux`), and this doc has been corrected where the
 build deliberately diverged from the original lock: §4 (the maker/player tap-mode was
-RETIRED in favour of the Editor-as-an-app model), §7 (the bar keeps one compact SAVE),
-and §9 (tools/apps run with a minimal bar; text-mode games exit via the new `quit()`
-cart verb). It remains the "what the user experiences"; the "how" docs beneath it are
+RETIRED in favour of the Editor-as-an-app model), §7 (the bar's compact SAVE icon was
+ITSELF retired, #111 -- autosave is the only model now, so there is no persist-now
+affordance left to keep), and §9 (tools/apps run with a minimal bar; text-mode games
+exit via the new `quit()` cart verb). It remains the "what the user experiences"; the
+"how" docs beneath it are
 implemented and archived under `docs/history/` (`shell_ux_technical_plan_v1.md`,
 `shell_layers_refactor_v1.md`, `shell_os_architecture_v1.md`), while
 `docs/shell_architecture_v1.md` stays the standing direction doc. The shipped module
@@ -185,7 +187,7 @@ bar, re-framed: it stops being a hardcoded strip of mode buttons and becomes an 
 shell with an app-populated region.
 
 - **LEFT zone = the active app's toolbar.** The OS *lends* the app this region. The
-  Editor loads PROJECTS + its tab ladder + PLAY + SAVE here (§6); the launcher shows
+  Editor loads PROJECTS + its tab ladder + PLAY here (§6, no SAVE -- #111); the launcher shows
   the selected cart's name (its management verbs live in the picker, §4); Settings
   fills it with its sections. The app owns the pixels and the taps inside the zone;
   the OS owns the zone's existence and bounds.
@@ -211,7 +213,7 @@ ladder**, ordered easy → deep, so the leftmost thing a kid sees is always the
 gentlest:
 
 ```
-[ PROJECTS ]  Config → Blocks → Code → Sprites → Map → Scene → Music   [ PLAY ] [ SAVE ]
+[ PROJECTS ]  Config → Blocks → Code → Sprites → Map → Scene → Music   [ PLAY ]
 ```
 
 - **Config** — the default landing tab (§4) and the intrigue rung: the "Make it mine"
@@ -244,9 +246,12 @@ gentlest:
   returns to the Editor **on the tab you were on**. Test-play is a round trip, not a
   context switch.
 - **PROJECTS** — back to the project-picker (§4): switch projects without going home.
-- **SAVE** — the one compact persist-now affordance the bar carries (it dispatches to
-  the active tab's commit verb), so every editor body stays chrome-free; edits also
-  autosave on the §7 idle debounce, so forgetting it costs nothing.
+
+There is no SAVE (#111): the bar used to carry one compact persist-now icon, but
+autosave (§7) is the only model now, so it was removed along with the concept it
+stood for. Every tab-leaving event (switching tabs, PLAY, PROJECTS, a window/context-X
+close, a workspace swap, going home) hard-commits whichever tab was showing, on top of
+the idle-typing debounce -- exactly what SAVE used to do, just automatic.
 
 The ladder is the icons → blocks → code progression (#29) made spatial: growth is
 "one tab to the right," and every rung is visible from every other rung.
@@ -257,12 +262,13 @@ The ladder is the icons → blocks → code progression (#29) made spatial: grow
 
 Two guarantees, stated as UX law:
 
-- **Save is never required.** No "unsaved changes" state, no save prompt on exit —
-  edits persist continuously: a typing-idle autosave debounce plus hard commits on
-  tab-leave and PLAY. A kid can pull the battery mid-edit and lose (at most) the last
-  idle-debounce window. (`commit` in the §10 contract is the app telling the OS
-  "persist this"; the bar's compact SAVE icon (§6) is an optional "persist now" —
-  forgetting it costs nothing.)
+- **Save is never required — there is no SAVE.** No "unsaved changes" state, no save
+  prompt on exit, no SAVE button anywhere (#111): edits persist continuously — a
+  typing-idle autosave debounce plus hard commits on every tab-leaving event (a tab
+  switch, PLAY, PROJECTS, a window/context-X close, a workspace swap, going home). A
+  kid can pull the battery mid-edit and lose (at most) the last idle-debounce window.
+  (`commit` in the §10 contract is the app telling the OS "persist this" — the exit
+  paths above are simply every place that telling now happens automatically.)
 - **Undo is real, step-by-step, and survives reboots.** Every project carries an
   undo/redo journal persisted on SD **per project**: step-by-step undo AND redo, so a
   kid walks back a mistake one change at a time — including after power-off, including

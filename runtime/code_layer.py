@@ -8,16 +8,18 @@ the touch/keyboard editing.
 
 Stage-4 bar rollout (docs/shell_ux_technical_plan_v1.md): the code editor's OWN top
 band -- the cart title + the RUN/SAVE/CLOSE icons -- is GONE. draw() now paints the
-unified zoned bar (the tab ladder + PLAY + SAVE + X) over the top 18px like every other
-editor tab, so the body below it is fullscreen text + the symbol palette with no chrome
-of its own. PLAY runs (EditorApp.leave), SAVE persists (EditorApp.save_current ->
-ws.save_code), X exits -- all in the bar. The text area already began at y0 == 18 (below
-the bar), so nothing shifted.
+unified zoned bar (the tab ladder + PLAY + X, no SAVE -- #111) over the top 18px like
+every other editor tab, so the body below it is fullscreen text + the symbol palette
+with no chrome of its own. PLAY runs (EditorApp.leave, itself now a hard-commit
+trigger) and persists (EditorApp.save_current -> ws.save_code, #111: a tab switch
+and every other exit path commit too, not just PLAY), X exits -- all in the bar. The
+text area already began at y0 == 18 (below the bar), so nothing shifted.
 
 Boundary (the anti-spaghetti line, per the doc): the shared CodeEditor handle stays on
 Workstation -- `ws.editor` (device/test-pinned, ~38 refs, exactly like ws.paint), built
 by ws.set_menu_view. The SAVE/RUN API + the code-error state stay on ws too:
-ws.save_code / ws.run_code (device/test-pinned, now reached via the bar's SAVE/PLAY),
+ws.save_code / ws.run_code (device/test-pinned, save_code now reached via every exit
+path rather than a bar tap, #111; run_code stays PLAY's own explicit-run entry point),
 ws.code_err / code_err_row / crash_line + _set_code_error / _mark_code_error /
 _cart_has_handwritten_code, and ws.code_layout (the CodeLayout). CodeLayer READS
 ws.editor + code_layout + the error state and DISPATCHES to the bar; it owns only the
@@ -254,11 +256,11 @@ class CodeLayer:
 
     def draw(self, dt):
         self._draw_code()
-        # The unified zoned bar (Stage 4 rollout): the tab ladder + PLAY + SAVE + X,
-        # drawn LAST (chrome over the full-screen text) so the code editor shows the
-        # SAME bar every other tab does. System canvas + responsive layout, like the
+        # The unified zoned bar (Stage 4 rollout): the tab ladder + PLAY + X (no SAVE,
+        # #111), drawn LAST (chrome over the full-screen text) so the code editor shows
+        # the SAME bar every other tab does. System canvas + responsive layout, like the
         # launcher/Settings bar. This replaces the code editor's old title + RUN/SAVE/
-        # CLOSE band: PLAY/SAVE/X all live in the bar now.
+        # CLOSE band: PLAY/X live in the bar now, SAVE is an automatic exit-path commit.
         self.ws.bar_layer._draw_status_strip("menu")
 
     def handle_input(self, i):
@@ -273,8 +275,9 @@ class CodeLayer:
         ws = self.ws
         lay = ws.code_layout
         ed = ws.editor
-        # The unified bar's tab ladder + PLAY + SAVE + X claims its slice FIRST (Stage 4
-        # rollout), before any code-body tap -- SAVE here dispatches to ws.save_code.
+        # The unified bar's tab ladder + PLAY + X claims its slice FIRST (Stage 4
+        # rollout), before any code-body tap -- there's no SAVE tap to dispatch (#111);
+        # ws.save_code fires automatically from set_tab/leave instead.
         if click and ws.bar_layer.handle_bar_tap("menu", px, py):
             return True
         # #89 chrome, in overlay order: the always-visible tools toggle, then (when
@@ -765,9 +768,10 @@ class CodeLayer:
         t = self._t = self._tones()
         cv.cls(t["bg"])                         # full-screen editor
         # The old title + RUN/SAVE/CLOSE top band is gone (Stage 4 rollout): the unified
-        # bar (drawn after this in draw()) owns the top 18px -- PLAY runs, SAVE persists,
-        # X exits, and the tab ladder switches views. The text area already starts at
-        # y0 == 18 (below the bar), so the body is fullscreen with no chrome of its own.
+        # bar (drawn after this in draw()) owns the top 18px -- PLAY runs (and persists,
+        # #111), X exits, and the tab ladder switches views (persisting the outgoing tab
+        # too). The text area already starts at y0 == 18 (below the bar), so the body is
+        # fullscreen with no chrome of its own.
         # code area (horizontal scroll: columns [left, left+COLS))
         if ed is not None:
             self._apply_gutter(lay, ed)          # #89: narrow ed.COLS while the gutter is on

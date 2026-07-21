@@ -234,7 +234,7 @@ def test_window_local_tap_hits_the_apps_bar(tmp_path):
     from runtime import ui as _ui
     from runtime import editor_app as _ea
     zone = win.ctx.layout.zone_left
-    _proj, tabs_area, _save, _play = ws.editor_app._zone_parts(zone)
+    _proj, tabs_area, _play = ws.editor_app._zone_parts(zone)
     slim = [(tid, label) for tid, label, _ic in _ea._TAB_CHIPS]
     rects = dict((tid, r) for tid, r, _l in
                  _ui.tab_row_rects(tabs_area, slim, max(1, zone[3] // 16)))

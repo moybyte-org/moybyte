@@ -1274,7 +1274,9 @@ def test_host_console_map_save_roundtrips(tmp_path):
     drv.click(C._MAP_BTN[0] + 2, C._MAP_BTN[1] + 2); drv.frame(1 / 30)
     ws.map_ui.mapedit.n = 6
     drv.click(C._MV_X0 + 2, C._MV_Y0 + 2); drv.frame(1 / 30)   # stamp tile 6 at (0,0)
-    drv.click(C._MAP_SAVE[0] + 2, C._MAP_SAVE[1] + 2); drv.frame(1 / 30)    # SAVE
+    # No SAVE button (#111) -- ws.save_map is the hard-commit verb every exit path
+    # (tab switch/PLAY/CLOSE/...) now dispatches automatically.
+    ws.save_map()
     assert ws.save_status == "SAVED"
     reloaded = moy_carts.load(cart_path)                  # map.moymap persisted on disk
     assert reloaded["map"] is not None
