@@ -2724,12 +2724,13 @@ class Workstation:
     # ws.undo()/ws.redo() mechanism, so neither affordance can drift from the other.
 
     def _active_history(self):
-        """The FINE-GRAINED op-history (#111) of the active Editor tab -- paint or
-        map, the two surfaces with an in-RAM op stack -- or None for a commit-level
-        tab (code/blocks/config/scene/music). Keyed on the active `menu_view` so a
-        stale ws.paint/mapedit from an earlier tab is ignored; the caller (the bar
-        UNDO/REDO icons, only reachable inside the Editor) guarantees the Editor is
-        the focused surface, so no back-stack check is needed."""
+        """The FINE-GRAINED op-history (#111) of the active Editor tab -- paint,
+        map, scene, music and config all keep an in-RAM op stack (#111 phase 4)
+        -- or None for a commit-level tab (code/blocks). Keyed on the active
+        `menu_view` so a stale ws.paint/mapedit/etc from an earlier tab is
+        ignored; the caller (the bar UNDO/REDO icons, only reachable inside the
+        Editor) guarantees the Editor is the focused surface, so no back-stack
+        check is needed."""
         view = self.menu_view
         if view == "paint":
             pe = self.paint
@@ -2737,24 +2738,41 @@ class Workstation:
         if view == "map":
             me = self.map_ui.mapedit
             return getattr(me, "_hist", None) if me is not None else None
+        if view == "scene":
+            se = self.scene_ui.sceneedit
+            return getattr(se, "_hist", None) if se is not None else None
+        if view == "music":
+            me = self.music_ui.musicedit
+            return getattr(me, "_hist", None) if me is not None else None
+        if view == "cards":
+            return self.project.config_hist
         return None
 
     def _after_local_history(self):
-        """After a fine-grained (paint/map) undo/redo: the editor mutated the LIVE
-        sheet/tilemap in place (gen bumped, a running preview picks it up), so there's
-        no cart reload -- just repaint and re-check the bar's dimmed state (#111)."""
+        """After a fine-grained (paint/map/scene/music/config) undo/redo: the
+        editor mutated its LIVE data in place (gen bumped for paint/map, the
+        SAME bank object for music, the SAME config dict for config -- a
+        running preview picks it up with no extra step), so there's no cart
+        reload -- just repaint and re-check the bar's dimmed state (#111). The
+        one exception is SCENE: its rows are a separate in-editor list that
+        only reaches the running cart's `scene()` via an explicit sync (the
+        same one every committed gesture calls, scene_editor_ui._sync_live),
+        so a bar-driven undo/redo must call it too."""
         self._dirty = True
         self.bar_layer.invalidate()
+        if self.menu_view == "scene":
+            self.scene_ui._sync_live()
 
     def undo(self):
-        """Undo one step for the active Editor tab (#111). A paint/map tab UNWINDS its
-        in-RAM op-history FIRST (one stroke/gesture), and only once that's exhausted
-        falls through to the durable journal walk (one whole commit) -- so the SAME
-        bar icon crosses the stroke->commit boundary. A commit-level tab (code/blocks/
-        config/scene/music) goes straight to the journal. Returns True iff a step was
-        taken. NOTE the boundary is CLEAN: falling into the journal reloads the editor
-        with a fresh (empty) History, so continued presses walk whole commits until
-        new fine-grained edits are made (the seed-from-journal option was deferred)."""
+        """Undo one step for the active Editor tab (#111). A paint/map/scene/music/
+        config tab UNWINDS its in-RAM op-history FIRST (one stroke/gesture/field
+        tweak), and only once that's exhausted falls through to the durable journal
+        walk (one whole commit) -- so the SAME bar icon crosses the stroke->commit
+        boundary. A commit-level tab (code/blocks) goes straight to the journal.
+        Returns True iff a step was taken. NOTE the boundary is CLEAN: falling into
+        the journal reloads the editor with a fresh (empty) History, so continued
+        presses walk whole commits until new fine-grained edits are made (the
+        seed-from-journal option was deferred)."""
         hist = self._active_history()
         if hist is not None and hist.can_undo() and hist.undo() is not None:
             self._after_local_history()
@@ -2844,6 +2862,7 @@ class Workstation:
             return
         self.cart = fresh
         self.config = dict(fresh.get("cfg", {}))
+        self.project.reset_config_history()  # #111 phase 4: fresh baseline post-walk
         self.sheet = self._build_sheet()
         self.tilemap = self._build_tilemap()
         self.images = fresh.get("images") or {}
@@ -3259,10 +3278,13 @@ class Workstation:
                 if "max" in f:
                     v = min(f["max"], v)
                 self.config[key] = v
+                self.project.record_config(key, cur, v)   # #111 phase 4
             elif f["type"] == "choice":
                 ch = f["choices"]
                 idx = ch.index(cur) if cur in ch else 0
-                self.config[key] = ch[(idx + d) % len(ch)]
+                v = ch[(idx + d) % len(ch)]
+                self.config[key] = v
+                self.project.record_config(key, cur, v)   # #111 phase 4
         except (TypeError, ValueError, KeyError):  # noqa: BLE001 -- a bad current
             # value (e.g. a non-numeric default some other bug left behind) must
             # not crash the frame loop either; the -/+ just becomes a no-op.

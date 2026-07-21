@@ -2727,7 +2727,9 @@ def test_music_editor_wired_into_device_shell():
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
 
     # The editor CORE is a single shared class (not redefined on the device).
-    assert "class MusicEditor(UndoRedoMixin):" in editors
+    # #111 phase 4: MusicEditor moved off UndoRedoMixin onto the shared
+    # op-history core (History/_MusicOps) -- see test_op_history_wiring.py.
+    assert "class MusicEditor:" in editors
     # moy_runtime + device_api together are the device backend surface the
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
