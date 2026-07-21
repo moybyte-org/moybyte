@@ -206,7 +206,7 @@ class _SceneLayer(Layer):
 
     Stage-4 bar rollout (#46 zoned bar): draw() calls ws.bar_layer.
     _draw_status_strip("menu") LAST (chrome over content) so the Editor's lent
-    top-bar zone (the tab ladder + PLAY + SAVE) shows on this tab;
+    top-bar zone (the tab ladder + PLAY, no SAVE -- #111) shows on this tab;
     handle_pointer routes a tap through ws.bar_layer.handle_bar_tap("menu", ...)
     FIRST, before the placement click/pan -- the exact _MapLayer shape."""
 
@@ -246,7 +246,7 @@ class _MusicLayer(Layer):
 
     Stage-4 bar rollout (#46 zoned bar): draw() calls ws.bar_layer._draw_status_strip
     ("menu") LAST (chrome over the tracker) so the Editor's lent top-bar zone (the tab
-    ladder + PLAY + SAVE + X) shows on this tab; handle_pointer routes a tap through
+    ladder + PLAY + X, no SAVE -- #111) shows on this tab; handle_pointer routes a tap through
     ws.bar_layer.handle_bar_tap("menu", ...) FIRST, before the tracker click."""
 
     id = "music"

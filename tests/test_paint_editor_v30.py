@@ -252,26 +252,21 @@ def test_size_button_cycles_through_the_ui(tmp_path):
 
 
 def test_save_persists_a_2x2_sprite(tmp_path):
-    # Paint a 2x2 sprite, SAVE, reload from disk: all four constituent tiles survive.
-    from runtime import console as C
+    # Paint a 2x2 sprite, commit, reload from disk: all four constituent tiles
+    # survive. There's no SAVE button (#111) -- ws.save_sprites is the hard-commit
+    # verb every exit path (tab switch/PLAY/CLOSE/...) now dispatches automatically.
     from runtime import host_app, moy_carts
     from runtime.editors import SpriteSheet
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_paint(ws)
-    drv = host_app.ConsoleDriver(ws)
     cols = ws.sheet.cols
     ws.paint.n = 0
     ws.paint.cycle_size()                          # 2x2
     ws.paint.color = 14
     for q in ((1, 1), (9, 1), (1, 9), (9, 9)):     # one pixel per quadrant tile
         ws.paint.paint(*q)
-    # SAVE through the UI button.
-    bx, by, bw, bh = C._PAINT_SAVE
-    drv.touch(bx + bw // 2, by + bh // 2)
-    drv.frame(1 / 30)
-    drv.touch_up()
-    drv.frame(1 / 30)
+    ws.save_sprites()
 
     reloaded = SpriteSheet.from_hex(moy_carts.load(ws.cart["path"])["sprites"],
                                     cols=cols, rows=ws.sheet.rows)

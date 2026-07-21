@@ -50,26 +50,25 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 
 # The Editor's lent left zone (Stage 4 of docs/shell_ux_technical_plan_v1.md, #46
-# zoned bar): PROJECTS (back to the picker) + the tab ladder + UNDO/REDO + PLAY +
-# SAVE, in the spec Section 6 order (Projects -> Config -> Blocks -> Code -> Sprites
-# -> Map -> Music -> UNDO -> REDO -> PLAY -> SAVE), rendered as icons inside the rect
-# the bar lends it. Each entry is (tab_name_or_None_or_ACTION, icon_kind);
-# `tab_name` is what EditorApp.tab equals when that icon's destination is showing
-# (so draw_zone can highlight it). PROJECTS (_ZONE_PROJECTS -> open_picker, edit
-# another project), UNDO/REDO (_ZONE_UNDO/_ZONE_REDO -> ws.undo()/ws.redo(), #88),
-# PLAY (None) and SAVE (_ZONE_SAVE) are ACTIONS, not destinations, so they're never
-# highlighted -- SAVE dispatches to the active tab's persist verb (save_current),
-# the ONE compact save affordance the unified bar carries so every editor BODY stays
-# chrome-free. This is what makes the bar identical across all six tabs -- code/
-# blocks/music no longer need their own SAVE/RUN/CLOSE, and now none of them need
-# their own undo/redo either (#88: UNDO/REDO used to be a Code-only Ctrl+Z/Y).
+# zoned bar): PROJECTS (back to the picker) + the tab ladder + UNDO/REDO + PLAY, in
+# the spec Section 6 order (Projects -> Config -> Blocks -> Code -> Sprites -> Map
+# -> Music -> UNDO -> REDO -> PLAY), rendered as icons inside the rect the bar lends
+# it. Each entry is (tab_name_or_None_or_ACTION, icon_kind); `tab_name` is what
+# EditorApp.tab equals when that icon's destination is showing (so draw_zone can
+# highlight it). PROJECTS (_ZONE_PROJECTS -> open_picker, edit another project) and
+# UNDO/REDO (_ZONE_UNDO/_ZONE_REDO -> ws.undo()/ws.redo(), #88) are ACTIONS, not
+# destinations, so they're never highlighted; so is PLAY (None).
 #
-# Fits 320px: 12 icons * 16px = 192px inside the ~202px lent zone -- UNDO/REDO (#88)
-# pushed the ladder from 10 icons to 12, which no longer fits at the original
-# _BAR_GAP-per-icon (2px) stride (12*18 = 216px, 14px over budget); _ZONE_STRIDE
-# drops the inter-icon gap to 0 (icons flush) to claw that back rather than reach
-# for the owner's fallback (a menu/overflow) -- see #88's design-call comment.
-_ZONE_SAVE = "\x00save"          # sentinel: the SAVE action icon (never a real tab)
+# SAVE is GONE (#111, owner decision 2026-07-21): autosave is the only model now --
+# an idle-typing debounce commits mid-edit, and every tab-leaving event (a tab
+# switch, PLAY, PROJECTS, a window/context-X, a workspace swap, going home) hard-
+# commits whichever tab was showing via save_current() -- the exact verb the SAVE
+# icon used to dispatch, now called automatically instead of from a tap. See
+# set_tab/leave below and the exit-path call sites in console.py/wm_windowed.py.
+#
+# Fits 320px: 11 icons * 16px = 176px inside the ~202px lent zone -- UNDO/REDO (#88)
+# pushed the ladder to 11, well inside budget; _ZONE_STRIDE keeps the 0-gap stride
+# (icons flush) that #88 settled on for the (then 12-icon) ladder.
 _ZONE_PROJECTS = "\x00projects"  # sentinel: back to the project-picker (never a real tab)
 _ZONE_UNDO = "\x00undo"          # sentinel: UNDO action icon -> ws.undo() (#88)
 _ZONE_REDO = "\x00redo"          # sentinel: REDO action icon -> ws.redo() (#88)
@@ -85,14 +84,13 @@ _ZONE_TABS = (
     (_ZONE_UNDO, "undo"),   # UNDO -> ws.undo() (#88), dimmed when there's nothing to undo
     (_ZONE_REDO, "redo"),   # REDO -> ws.redo() (#88), dimmed when there's nothing to redo
     (None, "run"),          # PLAY
-    (_ZONE_SAVE, "save"),   # SAVE -> save_current() (persist the active tab)
 )
 _ZONE_STRIDE = _BAR_ICON        # 0-gap ladder (#88) -- see the block comment above
 
 # The SHELF-density zone (visual identity v1 Phase 3, the Studio mockup): the six
 # tabs as LABELED chips (icon + name) via ui.tab_row, PROJECTS as an icon chip on
-# the left, PLAY/SAVE as labeled buttons on the right. The 320x240 baseline keeps
-# the frozen 9-icon ladder above, byte-identical.
+# the left, PLAY a labeled button on the right (SAVE dropped, #111). The 320x240
+# baseline keeps the frozen 9-icon ladder above, byte-identical.
 _TAB_CHIPS = (
     ("cards", "CONFIG", "edit"),
     ("blocks", "BLOCKS", "blocks"),
@@ -231,6 +229,21 @@ class EditorApp:
         source of truth; ws.menu_view projects onto it."""
         ws = self.ws
         ws._dirty = True             # sub-view change always repaints (#44)
+        if view != self.tab and self.project is ws.project:
+            # (#111) autosave-only: a tab switch is an exit path for the OUTGOING
+            # tab -- hard-commit whatever it holds (the exact verb the removed SAVE
+            # icon used to dispatch) before the ladder moves on. Reads self.tab
+            # BEFORE it's reassigned below, so save_current() persists the right
+            # target. A same-tab call (view == self.tab, e.g. open()'s landing
+            # set_menu_view) is a no-op here -- nothing changed to commit. The
+            # `self.project is ws.project` guard skips a stale/never-opened editor
+            # (self.tab defaults to "cards" from __init__, meaningless if EditorApp.
+            # open() was never actually called for the CURRENT project -- e.g. a
+            # bare ws.set_menu_view("code") on a workspace opened via the RUN path,
+            # never the Editor) -- without it a plain RUN followed by a direct
+            # set_menu_view call would spuriously commit_config() a "cards" tab
+            # that was never really open (confirmed by test_journal_wiring.py).
+            self.save_current()
         self.tab = view              # the `tab` setter bumps zone_gen on a real change
                                      # (Stage 4, #46: the lent zone's highlight moved)
         if view == "code":
@@ -268,7 +281,7 @@ class EditorApp:
             # Build the MusicEditor over the open cart's live AudioBank (#50): the
             # SAME bank the running cart plays through, so an edit is heard immediately
             # by the preview AND by the cart on resume. Edits go straight into that
-            # bank; SAVE persists it to sounds.json.
+            # bank; a tab-leave/PLAY hard-commit persists it to sounds.json (#111).
             ws.music_ui.build()
         ws._set_text_mode(view == "code")
         # Achievements (#21): visiting each editor (code/paint/map) earns "Toolbox
@@ -292,9 +305,16 @@ class EditorApp:
             ws.music_ui._stop_music_preview()   # don't let a preview leak into the cart resume
         if self.tab == "scene" and ws.scene_ui.tag_edit:
             ws.scene_ui._tag_commit()   # PLAY mid-typing keeps the typed tag (#85)
+        # (#111) PLAY is a hard-commit trigger too -- autosave is the only model now
+        # (no SAVE tap exists to rely on), so persist whatever the active tab holds
+        # BEFORE running. Config is the one exception: it keeps its OWN commit below,
+        # gated on a CLEAN _start() (a crash must not overwrite good config with a
+        # half-applied edit) -- every other tab commits unconditionally, here.
+        if self.tab != "cards":
+            self.save_current()
         # Returning to the desktop from the code editor must run whatever source is
-        # in the editor now (the kid may have fixed a crash and hit SAVE, or just
-        # edited and closed). Re-_start() with the editor text so the FIXED cart
+        # in the editor now (the kid may have fixed a crash and kept typing, or just
+        # edited and left). Re-_start() with the editor text so the FIXED cart
         # actually runs -- otherwise a previously-set cart_error would re-paint the
         # stale "crashed" panel and _update/_draw would stay None forever.
         if self.tab == "code" and ws.editor is not None and ws.cart is not None:
@@ -302,10 +322,10 @@ class EditorApp:
             ws._start()
         elif self.tab == "blocks":
             ws.block_ui.on_leave()
-            # A saved block edit already recompiled cart["src"] (save_blocks); re-run
-            # it so leaving the outline runs the freshest program, just like the code
-            # editor does. (Unsaved edits don't touch src, so this re-runs the last
-            # saved version -- the kid SAVEs to keep changes, exactly like code.)
+            # save_current() above just recompiled + committed cart["src"] (save_blocks);
+            # re-run it so leaving the outline runs the freshest program, just like the
+            # code editor does. (A refused save -- protected/graduated -- leaves src at
+            # its last good state, so this re-runs THAT.)
             if ws.cart is not None:
                 ws._start()
         elif self.tab == "scene":
@@ -328,18 +348,20 @@ class EditorApp:
 
     # -- the lent left zone (Stage 4, #46 zoned bar) --------------------------
     #
-    # The Editor's tab ladder + PLAY + SAVE, shown on EVERY tab now (Stage-4 rollout):
-    # cards_layer.py, paint_layer.py, layers.py's _MapLayer/_MusicLayer, code_layer.py
-    # and block_editor_ui.py each call ws.bar_layer._draw_status_strip("menu") from
-    # their draw() (+ ws.bar_layer.handle_bar_tap("menu", ...) from handle_pointer), so
-    # the bar is identical across all six Editor tabs and each tab's own RUN/CLOSE
-    # chrome was dissolved into it (SAVE routes through save_current above).
+    # The Editor's tab ladder + UNDO/REDO + PLAY, shown on EVERY tab now (Stage-4
+    # rollout): cards_layer.py, paint_layer.py, layers.py's _MapLayer/_MusicLayer,
+    # code_layer.py and block_editor_ui.py each call ws.bar_layer._draw_status_strip
+    # ("menu") from their draw() (+ ws.bar_layer.handle_bar_tap("menu", ...) from
+    # handle_pointer), so the bar is identical across all six Editor tabs and each
+    # tab's own RUN/SAVE/CLOSE chrome was dissolved into it -- SAVE itself is GONE
+    # now (#111): every tab-leaving event calls save_current() automatically (see
+    # set_tab/leave above), so there is no tap-driven affordance left to draw here.
 
     def draw_zone(self, cv, rect):
-        """Draw the tab ladder + UNDO/REDO + PLAY + SAVE inside the rect the bar
-        lent us, highlighting the active tab. `cv` may be the bar's offscreen cache
-        strip (#43) -- this draws the SAME pixels either way, which is what makes
-        the cached strip pixel-identical to a direct render.
+        """Draw the tab ladder + UNDO/REDO + PLAY inside the rect the bar lent us,
+        highlighting the active tab. `cv` may be the bar's offscreen cache strip
+        (#43) -- this draws the SAME pixels either way, which is what makes the
+        cached strip pixel-identical to a direct render.
 
         The icon side + stride derive from the lent rect's HEIGHT (16*fs -- the
         bar hands over an icon-high rect), so the ladder scales with the system
@@ -350,17 +372,17 @@ class EditorApp:
         ws = self.ws
         NAMES = self._NAMES
         if not ws.layout._base:
-            # SHELF density (visual identity v1 Phase 3): labeled tabs + labeled
-            # PLAY/SAVE buttons -- the Studio mockup's tab row, on the zoned bar.
+            # SHELF density (visual identity v1 Phase 3): labeled tabs + a labeled
+            # PLAY button -- the Studio mockup's tab row, on the zoned bar (SAVE
+            # dropped, #111).
             th = ws.theme_colors
-            proj, tabs_area, save_r, play_r = self._zone_parts(rect)
+            proj, tabs_area, play_r = self._zone_parts(rect)
             band_ink = th["ink"] if ws.bar_layer.zone_band_light("menu") else None
             _ui.button(cv, th, proj, "", glyph="projects", kind="normal",
                        glyph_draw=ws._glyph)
             _ui.tab_row(cv, th, tabs_area, _TAB_CHIPS, self.tab,
                         icon_for=getattr(ws, "_icon_image_keyed", None),
                         ink=band_ink)
-            _ui.button(cv, th, save_r, "SAVE", kind="normal")
             _ui.button(cv, th, play_r, "PLAY", kind="play", glyph="run",
                        glyph_draw=ws._glyph)
             return
@@ -396,20 +418,18 @@ class EditorApp:
     def _zone_parts(self, rect):
         """PURE shelf-zone geometry (shared by draw_zone and zone_tap so a strip-
         cached draw and a later tap can't desync): PROJECTS chip | labeled tab row
-        | SAVE | PLAY, the buttons right-aligned. Scales off the lent rect's
-        height (16*fs, like the frozen ladder)."""
+        | PLAY, the button right-aligned (SAVE dropped, #111). Scales off the
+        lent rect's height (16*fs, like the frozen ladder)."""
         fs = max(1, rect[3] // 16)
         gap = 4 * fs
         proj, rest = _ui.cut_left(rect, 22 * fs)
         play_r, rest = _ui.cut_right(rest, 54 * fs)
         _pad, rest = _ui.cut_right(rest, gap)
-        save_r, rest = _ui.cut_right(rest, 46 * fs)
-        _pad, rest = _ui.cut_right(rest, gap)
         tabs_area = (rest[0] + gap, rest[1], max(0, rest[2] - 2 * gap), rest[3])
-        return proj, tabs_area, save_r, play_r
+        return proj, tabs_area, play_r
 
     def zone_tap(self, px, py, rect=None):
-        """Hit-test the tab ladder + PLAY + SAVE and dispatch. `rect` is the lent
+        """Hit-test the tab ladder + PLAY and dispatch. `rect` is the lent
         left-zone rect BarLayer drew into -- the fixed game-canvas _ZONE_LEFT_GAME
         for a game-canvas tab, or the responsive layout.zone_left for the
         system-canvas tabs (both hit-test in the same coord space the bar drew
@@ -417,13 +437,11 @@ class EditorApp:
         side + stride derive from the rect height, matching draw_zone; the shelf
         tiers resolve against the SAME _zone_parts geometry the draw used."""
         if rect is not None and not self.ws.layout._base:
-            proj, tabs_area, save_r, play_r = self._zone_parts(rect)
+            proj, tabs_area, play_r = self._zone_parts(rect)
             if self._in(px, py, proj):
                 return self._activate_zone_tab(_ZONE_PROJECTS)
             if self._in(px, py, play_r):
                 return self._activate_zone_tab(None)
-            if self._in(px, py, save_r):
-                return self._activate_zone_tab(_ZONE_SAVE)
             fs = max(1, rect[3] // 16)
             slim = [(tid, label) for tid, label, _ic in _TAB_CHIPS]
             for tid, r, _labels_on in _ui.tab_row_rects(tabs_area, slim, fs):
@@ -463,20 +481,21 @@ class EditorApp:
             ws.undo()
         elif tab == _ZONE_REDO:   # REDO (#88)
             ws.redo()
-        elif tab == _ZONE_SAVE:   # SAVE: persist the active tab (bar's one save affordance)
-            self.save_current()
         else:                     # PLAY (tab is None)
             ws._leave_menu()
         return True
 
     def save_current(self):
-        """Persist the ACTIVE tab -- the SAVE bar icon's dispatch (spec Section 7's
-        commit; auto-save is a later stage). Each tab keeps its own persist verb; the
-        bar just routes to whichever tab is up, so every editor BODY drops its SAVE
-        button. Config persists via commit_config (no re-run -- PLAY runs). The theme
-        (EDIT ICONS) tab has no bar, so it's never routed here; paint/map keep their
-        own body SAVE too (the theme reuse pins paint's), so a bar SAVE on those tabs
-        is a harmless second route to the same verb."""
+        """Hard-commit the ACTIVE tab (#111: the autosave-only model's persist verb --
+        SAVE was a tap dispatching here; now every exit path calls this directly: a
+        tab switch (set_tab), PLAY (leave), a workspace swap (console.py's
+        _open_workspace, reached from PROJECTS -> pick a project) and going home
+        (console.py's go_home), and a window/context-X close (wm_windowed.py's
+        close_window_kind)). Each tab keeps its own persist verb; this just routes
+        to whichever tab is up. Config persists via commit_config (no re-run -- PLAY
+        runs, handled separately in leave() so a crash can't overwrite good config).
+        The theme (EDIT ICONS) tab has no bar zone, so it's never routed here -- its
+        own CLOSE/leave hard-commits via ws.save_icons() (paint_layer.ThemeLayer.leave)."""
         ws = self.ws
         tab = self.tab
         if tab == "code":

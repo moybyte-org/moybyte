@@ -40,7 +40,7 @@ except ImportError:  # pragma: no cover - direct host import (chrome not yet ali
 # is the scaled sprite tile placed there, and a paged tile palette on the right to
 # pick the brush tile. Tap a map cell to stamp the brush (or erase, when the ERASE
 # toggle is on); tap a palette cell to select that tile id. Mirrors the paint
-# editor's structure (grid + picker + save/close), with pan controls for maps
+# editor's structure (grid + picker + close), with pan controls for maps
 # larger than the on-screen window.
 _MV_X0 = 14            # map view top-left (cells drawn scaled here)
 _MV_Y0 = 32
@@ -112,9 +112,9 @@ _PAN_UP = (244, 146, 24, 16)
 _PAN_LF = (218, 164, 24, 16)
 _PAN_RT = (270, 164, 24, 16)
 _PAN_DN = (244, 182, 24, 16)
-# ERASE toggle + SAVE + CLOSE along the bottom-left (clear of the d-pad column).
+# ERASE toggle + CLOSE along the bottom-left (clear of the d-pad column). (SAVE
+# lived at x58 here; #111 removed it -- the freed strip stays empty.)
 _MAP_ERASE = (14, 198, 40, 20)
-_MAP_SAVE = (58, 198, 64, 20)
 _MAP_CLOSE = (126, 198, 76, 20)
 # Editor toolbar (#91): a compact strip in the title band (between the panel top
 # and the map view, y 16..32) on the RIGHT, clear of the "MAP TILE n z1 *" title
@@ -164,7 +164,7 @@ _BASE_H = 240
 
 class MapLayout:
     """Responsive map-editor geometry (#39 step 3): the panel, the panned map view,
-    the paged tile palette + pan d-pad + zoom column, and the ERASE/SAVE/CLOSE/SKY
+    the paged tile palette + pan d-pad + zoom column, and the ERASE/CLOSE/SKY
     bottom row, derived from the SYSTEM canvas size (w, h) + font scale.
 
     The single hard contract (mirrors Layout/CodeLayout/PaintLayout): at (w, h, fs)
@@ -201,8 +201,7 @@ class MapLayout:
             self.size_btn = _MAP_SIZE
             self.pan_up, self.pan_lf, self.pan_rt, self.pan_dn = \
                 _PAN_UP, _PAN_LF, _PAN_RT, _PAN_DN
-            self.erase_btn, self.save_btn, self.close_btn = \
-                _MAP_ERASE, _MAP_SAVE, _MAP_CLOSE
+            self.erase_btn, self.close_btn = _MAP_ERASE, _MAP_CLOSE
             self.tool_btn, self.undo_btn, self.redo_btn, self.dim_btn = \
                 _MAP_TOOL, _MAP_UNDO, _MAP_REDO, _MAP_DIM
             self.pan_thresh = _MAP_PAN_THRESH
@@ -250,7 +249,6 @@ class MapLayout:
         self.tp_next = (self.tp_x0 + 46 * fs, tp_by, 42 * fs, 18 * fs)
         self.sky_btn = (rc_x, row_y, 100 * fs, 20 * fs)
         self.erase_btn = (px + 6 * fs, row_y, 40 * fs, 20 * fs)
-        self.save_btn = (px + 50 * fs, row_y, 64 * fs, 20 * fs)
         self.close_btn = (px + 118 * fs, row_y, 76 * fs, 20 * fs)
         # Editor toolbar (#91): the TOOL/UNDO/REDO/DIM strip, right-anchored in the
         # title band, mirrors the baseline geometry scaled to the panel.
@@ -836,9 +834,9 @@ class MapEditorUI:
             self._map_pan(1, 0)
         elif self._in(px, py, lay.erase_btn):  # toggle stamp <-> erase
             self.map_erase = not self.map_erase
-        elif self._in(px, py, lay.save_btn):
-            ws.save_map()
         elif self._in(px, py, lay.close_btn):
+            # CLOSE runs+leaves to the cart (ws._leave_menu is EditorApp.leave --
+            # PLAY, itself a hard-commit trigger now, #111: no SAVE tap exists).
             ws._leave_menu()
 
     # -- drawing -----------------------------------------------------------------
@@ -851,7 +849,7 @@ class MapEditorUI:
         # The map (tilemap) editor (#32): a panned view of the map on the left where
         # each cell shows the placed sprite tile, and a paged tile palette on the
         # right to pick the brush. Mirrors _draw_paint's structure (grid + picker +
-        # save/close), drawn with the indexed API only so host == device. SYSTEM
+        # close), drawn with the indexed API only so host == device. SYSTEM
         # canvas + MapLayout geometry (#39 step 3): a bigger panel shows more map.
         ws = self.ws
         NAMES = self._NAMES
@@ -992,9 +990,8 @@ class MapEditorUI:
         ws._btn("v", lay.pan_dn, NAMES["indigo"], cv)
         ws._btn("<", lay.pan_lf, NAMES["indigo"], cv)
         ws._btn(">", lay.pan_rt, NAMES["indigo"], cv)
-        # ERASE toggle (highlighted when active) + SAVE + CLOSE.
+        # ERASE toggle (highlighted when active) + CLOSE.
         ws._btn("ER", lay.erase_btn, NAMES["red"] if self.map_erase else NAMES["dark_grey"], cv)
-        ws._btn("SAVE", lay.save_btn, NAMES["green"], cv)
         ws._btn("CLOSE", lay.close_btn, NAMES["red"], cv)
         # EMPTY/"sky" swatch (#37): a selectable brush that paints "nothing". Drawn
         # as a checkerboard (the universal transparent cue) + "SKY" label, boxed

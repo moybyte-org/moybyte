@@ -308,16 +308,18 @@ def test_paint_editor_320x240_is_byte_identical(tmp_path):
 
 
 def test_paint_layout_baseline_constants(tmp_path):
-    """PaintLayout at (320, 240, 1) reproduces the frozen module constants."""
+    """PaintLayout at (320, 240, 1) reproduces the frozen module constants. No
+    save_btn (#111 -- the SAVE button was removed, not just relocated)."""
     from runtime import paint_layer as P
     lay = P.PaintLayout(320, 240, 1)
     assert lay._base
+    assert not hasattr(lay, "save_btn")
     assert lay.pg_area == P._PG_AREA and lay.pg_span == P._PG_SPAN
     assert lay.sw_area == P._SW_AREA
     assert lay.spr_prev == P._SPR_PREV and lay.spr_next == P._SPR_NEXT
     assert lay.size_btn == P._PAINT_SIZE
     assert lay.get_btn == P._PAINT_GET and lay.put_btn == P._PAINT_PUT
-    assert lay.save_btn == P._PAINT_SAVE and lay.close_btn == P._PAINT_CLOSE
+    assert lay.close_btn == P._PAINT_CLOSE
     # The #90 two tool rows: one flat list (row 1 then row 2), aligned to _TOOLS, all
     # inside the panel and clear of the pixel grid.
     assert len(lay.tool_btns) == len(P._TOOLS)
@@ -325,7 +327,22 @@ def test_paint_layout_baseline_constants(tmp_path):
     assert lay.tool_btns[len(P._TOOL_ROW1)][1] == P._TOOL_ROW2_Y   # row 2 starts
     grid_bottom = P._PG_Y0 + P._PG_SPAN
     for (x, y, w, h) in lay.tool_btns:
-        assert y >= grid_bottom and y + h <= P._PAINT_SAVE[1]
+        assert y >= grid_bottom and y + h <= P._PAINT_CLOSE[1]
+
+
+def test_paint_files_button_clears_the_sprite_preview(tmp_path):
+    """#111 layout nit: the FILE button (#108, send-to-Files) used to sit flush
+    against the sprite preview thumbnail at 320x240 -- a snug fit that read as an
+    overlap. It must now clear the preview box with no overlap."""
+    from runtime import paint_layer as P
+    lay = P.PaintLayout(320, 240, 1)
+    fx, fy, fw, fh = lay.files_btn
+    px, py = lay.prev_xy
+    pw = ph = lay.prev_box
+    # Standard axis-aligned rect overlap test: NOT overlapping iff separated on
+    # some axis.
+    overlaps = not (fx + fw <= px or px + pw <= fx or fy + fh <= py or py + ph <= fy)
+    assert not overlaps, "FILE button must not overlap the sprite preview"
 
 
 def test_paint_editor_grid_grows_on_large_canvas(tmp_path):
@@ -383,10 +400,12 @@ def test_map_editor_320x240_is_byte_identical(tmp_path):
 
 
 def test_map_layout_baseline_constants(tmp_path):
-    """MapLayout at (320, 240, 1) reproduces the frozen module constants."""
+    """MapLayout at (320, 240, 1) reproduces the frozen module constants. No
+    save_btn (#111 -- the SAVE button was removed, not just relocated)."""
     from runtime import map_editor_ui as M
     lay = M.MapLayout(320, 240, 1)
     assert lay._base
+    assert not hasattr(lay, "save_btn")
     assert (lay.mv_x0, lay.mv_y0) == (M._MV_X0, M._MV_Y0)
     assert (lay.mv_avail_w, lay.mv_avail_h) == (M._MV_AVAIL_W, M._MV_AVAIL_H)
     assert lay.zooms == tuple(M._MV_ZOOMS)
@@ -396,8 +415,7 @@ def test_map_layout_baseline_constants(tmp_path):
     assert lay.size_btn == M._MAP_SIZE
     assert (lay.pan_up, lay.pan_lf, lay.pan_rt, lay.pan_dn) == \
         (M._PAN_UP, M._PAN_LF, M._PAN_RT, M._PAN_DN)
-    assert (lay.erase_btn, lay.save_btn, lay.close_btn) == \
-        (M._MAP_ERASE, M._MAP_SAVE, M._MAP_CLOSE)
+    assert (lay.erase_btn, lay.close_btn) == (M._MAP_ERASE, M._MAP_CLOSE)
 
 
 def test_map_editor_shows_more_cells_on_large_canvas(tmp_path):

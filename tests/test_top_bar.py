@@ -623,7 +623,7 @@ def test_zoned_bar_editor_zone_switches_tabs_and_plays(tmp_path):
     drv.click(x, y)
     drv.frame(1 / 30)
     assert ws.screen == "menu" and ws.menu_view == "paint"
-    play_i = [t for t, _g in EA._ZONE_TABS].index(None)   # PLAY (SAVE now follows it)
+    play_i = [t for t, _g in EA._ZONE_TABS].index(None)   # PLAY (the ladder's last icon)
     x = BL._ZONE_LEFT_GAME[0] + play_i * EA._ZONE_STRIDE + BL._BAR_ICON // 2
     drv.click(x, y)
     drv.frame(1 / 30)
@@ -631,13 +631,14 @@ def test_zoned_bar_editor_zone_switches_tabs_and_plays(tmp_path):
 
 
 # -- the unified bar on the CODE/BLOCKS/MUSIC editors (Stage-4 rollout): the tab
-# ladder + PLAY + SAVE + X shows on these tabs too, so navigation is IDENTICAL to
-# the cards/paint/map tabs. code/blocks are SYSTEM-canvas (responsive layout.zone_left),
-# so the tab-ladder icons hit-test in system coords (no _game_xy translation).
+# ladder + PLAY + X shows on these tabs too (no SAVE, #111), so navigation is
+# IDENTICAL to the cards/paint/map tabs. code/blocks are SYSTEM-canvas (responsive
+# layout.zone_left), so the tab-ladder icons hit-test in system coords (no
+# _game_xy translation).
 
 def _sys_zone_center(ws, target):
-    """Center of the tab-ladder / PLAY / SAVE icon `target` on the SYSTEM-canvas bar
-    (the code + blocks tabs). `target` is a tab name, None (PLAY) or EA._ZONE_SAVE."""
+    """Center of the tab-ladder / PLAY icon `target` on the SYSTEM-canvas bar
+    (the code + blocks tabs). `target` is a tab name or None (PLAY)."""
     from runtime import editor_app as EA, bar_layer as BL
     i = [t for t, _g in EA._ZONE_TABS].index(target)
     zx, zy, _zw, _zh = ws.layout.zone_left
@@ -686,9 +687,10 @@ def test_code_tab_context_x_exits_to_home(tmp_path):
     assert ws.screen == "launcher"
 
 
-def test_bar_save_icon_persists_the_active_tab(tmp_path):
-    """The bar's SAVE icon dispatches to the ACTIVE tab's persist verb (the ONE save
-    affordance the unified bar carries). On the code tab it must reach ws.save_code."""
+def test_play_hard_commits_the_active_tab(tmp_path):
+    """#111: there is no SAVE icon anymore -- PLAY is a hard-commit trigger itself,
+    dispatching to the ACTIVE tab's persist verb (EditorApp.leave calls
+    save_current() before running). On the code tab that must reach ws.save_code."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
@@ -700,10 +702,29 @@ def test_bar_save_icon_persists_the_active_tab(tmp_path):
     calls = []
     orig = ws.save_code
     ws.save_code = lambda: (calls.append(1), orig())[-1]
-    from runtime import editor_app as EA
-    drv.click(*_sys_zone_center(ws, EA._ZONE_SAVE))       # the bar's SAVE icon
+    drv.click(*_sys_zone_center(ws, None))                # PLAY
     drv.frame(1 / 30)
-    assert calls == [1], "the bar SAVE must dispatch to the code tab's save_code"
+    assert calls == [1], "PLAY must hard-commit the code tab via save_code"
+
+
+def test_tab_switch_hard_commits_the_outgoing_tab(tmp_path):
+    """#111: a tab switch is an exit path too -- EditorApp.set_tab commits the
+    OUTGOING tab (via save_current) before the ladder moves on, so navigating
+    away from CODE persists it exactly like the removed SAVE icon used to."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    drv = host_app.ConsoleDriver(ws)
+    ws.launcher.sel = 0
+    ws.open_in_editor()
+    ws.set_menu_view("code")
+    drv.frame(1 / 30)
+    ws.editor.set_text("def _draw():\n    cls(5)\n")
+    calls = []
+    orig = ws.save_code
+    ws.save_code = lambda: (calls.append(1), orig())[-1]
+    drv.click(*_sys_zone_center(ws, "paint"))             # switch away from CODE
+    drv.frame(1 / 30)
+    assert calls == [1], "leaving the code tab must hard-commit it via save_code"
 
 
 def test_bar_undo_redo_icons_dispatch_the_journal_walk(tmp_path):
@@ -787,7 +808,9 @@ def test_blocks_tab_shows_unified_bar_ladder_play_and_x(tmp_path):
     assert ws.screen == "desktop"
 
 
-def test_blocks_tab_bar_save_dispatches_to_save_blocks(tmp_path):
+def test_blocks_tab_play_hard_commits_via_save_blocks(tmp_path):
+    """#111: PLAY on the blocks tab hard-commits it (save_current -> save_blocks)
+    before running -- no SAVE icon exists to do it explicitly anymore."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
@@ -798,15 +821,14 @@ def test_blocks_tab_bar_save_dispatches_to_save_blocks(tmp_path):
     calls = []
     orig = ws.block_ui.save_blocks
     ws.block_ui.save_blocks = lambda: (calls.append(1), orig())[-1]
-    from runtime import editor_app as EA
-    drv.click(*_sys_zone_center(ws, EA._ZONE_SAVE))
+    drv.click(*_sys_zone_center(ws, None))       # PLAY
     drv.frame(1 / 30)
-    assert calls == [1], "the bar SAVE on the blocks tab must reach save_blocks"
+    assert calls == [1], "PLAY on the blocks tab must reach save_blocks"
 
 
 def _game_zone_center(target):
-    """Center of the ladder/PLAY/SAVE icon `target` on the GAME-canvas bar
-    (cards/paint/map/music). `target` is a tab name, None (PLAY) or EA._ZONE_SAVE."""
+    """Center of the ladder/PLAY icon `target` on the GAME-canvas bar
+    (cards/paint/map/music). `target` is a tab name or None (PLAY)."""
     from runtime import editor_app as EA, bar_layer as BL
     i = [t for t, _g in EA._ZONE_TABS].index(target)
     return (BL._ZONE_LEFT_GAME[0] + i * EA._ZONE_STRIDE + BL._BAR_ICON // 2,
@@ -834,7 +856,9 @@ def test_music_tab_shows_unified_bar_ladder_play_and_x(tmp_path):
     assert ws.screen == "desktop"
 
 
-def test_music_tab_bar_save_dispatches_to_save_sounds(tmp_path):
+def test_music_tab_play_hard_commits_via_save_sounds(tmp_path):
+    """#111: PLAY on the music tab hard-commits it (save_current -> save_sounds)
+    before running -- no SAVE icon exists to do it explicitly anymore."""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
@@ -845,10 +869,9 @@ def test_music_tab_bar_save_dispatches_to_save_sounds(tmp_path):
     calls = []
     orig = ws.save_sounds
     ws.save_sounds = lambda: (calls.append(1), orig())[-1]
-    from runtime import editor_app as EA
-    drv.click(*_game_zone_center(EA._ZONE_SAVE))
+    drv.click(*_game_zone_center(None))          # PLAY
     drv.frame(1 / 30)
-    assert calls == [1], "the bar SAVE on the music tab must reach save_sounds"
+    assert calls == [1], "PLAY on the music tab must reach save_sounds"
 
 
 def test_music_tab_context_x_exits_to_home(tmp_path):

@@ -235,10 +235,13 @@ def test_drag_on_empty_world_pans_and_never_places(tmp_path):
     assert not se.can_undo()
 
 
-def test_committed_gestures_reach_the_next_play_without_save(tmp_path):
+def test_committed_gestures_reach_the_next_play_and_persist(tmp_path):
     # The live-sync contract: place an actor in the editor, hit PLAY -- the
-    # cart's _init counts it via scene() with NO explicit SAVE (the map tab's
-    # live-TileMap semantics).
+    # cart's _init counts it via scene() immediately (the map tab's live-TileMap
+    # semantics), with NO explicit SAVE tap (#111: there is no SAVE button
+    # anymore). PLAY is ALSO a hard-commit trigger now (EditorApp.leave calls
+    # save_current() before running), so the placement lands on disk too --
+    # unlike the old explicit-SAVE model, a kid never has to remember to persist.
     ws = _open_ws(tmp_path, scenes={"main": MAIN_SCENE}, src=(
         "def _init():\n"
         "    global n\n"
@@ -248,11 +251,11 @@ def test_committed_gestures_reach_the_next_play_without_save(tmp_path):
     ws._open_scene()
     x0, y0, scale, vw, vh = ws.scene_ui._sv_metrics()
     _tap(ws, x0 + 120, y0 + 40)                       # place actor #3
-    ws._leave_menu()                                  # PLAY re-runs _init
+    ws._leave_menu()                                  # PLAY re-runs _init AND commits
     assert ws.ns["n"] == 3
-    # Nothing persisted yet: the store file still holds the two seeded rows.
+    # The placement is durably persisted too -- PLAY hard-commits (#111).
     live = Path(ws.cart["path"]) / "scenes" / "main.moyscene"
-    assert len(json.loads(live.read_text())) == 2
+    assert len(json.loads(live.read_text())) == 3
 
 
 def test_save_persists_and_journal_undo_reaches_live_workspace(tmp_path):

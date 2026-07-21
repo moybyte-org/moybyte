@@ -1450,13 +1450,33 @@ class WindowedWM(FullscreenStackWM):
         """Close one window by its process kind -- the console's windowed exit
         hook (_exit_to_caller / _exit_settings route here) and the title-strip
         X's dispatch. Closing the Make window's EDITOR pops one level (the same
-        window flips back to the picker); everything else just closes."""
+        window flips back to the picker); everything else just closes.
+
+        (#111) autosave-only: the strip X is an exit path like any other, so
+        every persistent surface hard-commits here BEFORE its window/level pops
+        -- otherwise a kid mid-idle-debounce who drags-closes the window (rather
+        than using the app's own CLOSE/context-X) would silently lose the last
+        edit. `kind` is the window's RESOLVED top (e.g. "menu" for the make
+        window showing the Editor, never the "make" group key), so this keys on
+        the same real kinds close_window_kind always has."""
         ws = self.ws
         ws._dirty = True
         if kind == "writer":
             ws.writer_app.flush(force=True)   # the strip X must never lose typed notes
         if kind == "storybook":
             ws.storybook_app._commit_deck()   # same rule for an open story
+        if kind == "sheets":
+            ws.sheets_app.flush(force=True)   # same rule for an open sheet
+        if kind == "artwork":
+            ws.artwork_app._save()            # same rule for the open drawing
+        if kind == "menu":
+            # The "menu" WM kind is shared by the Editor AND the icon-theme editor
+            # (Settings -> EDIT ICONS, paint_layer.ThemeLayer -- it spawns on the
+            # same back-stack slot); each has its own commit verb.
+            if ws._editing_icons:
+                ws.save_icons()
+            else:
+                ws.editor_app.save_current()      # the Editor's active tab
         if kind == "desktop":
             self.close_player()
         else:

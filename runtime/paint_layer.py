@@ -5,17 +5,23 @@ ONE renderer/input serves BOTH sheets (so the theme chunk reuses it, no duplicat
   * menu_view == "paint"  -> edits the cart's SpriteSheet   (ws.project.sheet)
   * menu_view == "theme"  -> edits the system IconSheet     (ws.icon_sheet, EDIT ICONS)
 The active editor is `ws.paint` (a PaintEditor over whichever sheet); `ws._editing_icons`
-selects the mode (which sheet, where SAVE persists, where CLOSE returns, GET/PUT hidden).
+selects the mode (which sheet, where CLOSE returns/commits, GET/PUT hidden). SAVE is GONE
+(#111, owner decision 2026-07-21): there is no SAVE button anywhere in the editor -- CLOSE
+hard-commits the open sheet on its way out (paint's cart-sprite CLOSE runs ws._leave_menu,
+which is EditorApp.leave -- PLAY, a hard-commit trigger now; the theme's CLOSE is
+ThemeLayer.leave, which commits directly since it has no PLAY of its own), and the idle-
+typing autosave-commit + every other tab-leaving exit path (a tab switch, PROJECTS, a
+window/context-X, a workspace swap, going home) commit it too.
 
 Boundary (the anti-spaghetti line, per the doc): the SHEETS + the current-editor handle
-+ the SAVE persistence stay on Workstation -- `ws.project.sheet` / `ws.icon_sheet` (single
++ the persistence verbs stay on Workstation -- `ws.project.sheet` / `ws.icon_sheet` (single
 source of the pixels), `ws.paint` (the PaintEditor handle, device/test-pinned like
 ws.editor), `ws._editing_icons` / `ws.paint_status` (lifecycle mode/status), and
 `ws.save_sprites` / `ws.save_icons` / `ws.share_tile_get` / `ws.share_tile_put` (cart/
 system state the device + tests pin). PaintLayer READS those and DISPATCHES to them; it
 owns only the paint-UI: the DRAW, the grid/palette/button hit-testing, and the drag-
 stroke continuity state (_paint_drag). The paint-only constants live here (single source;
-console.py imports them back so tests + tools resolve console._PG_X0 / _PAINT_SAVE / ...).
+console.py imports them back so tests + tools resolve console._PG_X0 / _PAINT_CLOSE / ...).
 `NAMES` (palette) and `_in` (rect hit-test) are injected (the circular-import dodge);
 the shared draw toolkit (ws._btn/_icon_btn) stays on Workstation.
 
@@ -66,19 +72,23 @@ _SW_AREA = (_SW_X0, _SW_Y0, _SW_COLS * _SW, (16 // _SW_COLS) * _SW)
 _SPR_PREV = (214, 40, 40, 24)
 _SPR_NEXT = (262, 40, 40, 24)
 _PAINT_SIZE = (214, 68, 88, 20)    # cycle sprite size 1x1 / 2x2 / 3x3 (#30)
-# SAVE/CLOSE dropped below the TWO tool rows (#90 added a second row): a shorter
-# button height buys the extra row on the 320x240 T-Deck without shrinking the
-# pixel grid. Byte-identical-verbatim in PaintLayout._base.
-_PAINT_SAVE = (14, 202, 88, 16)
+# CLOSE dropped below the TWO tool rows (#90 added a second row): a shorter button
+# height buys the extra row on the 320x240 T-Deck without shrinking the pixel grid.
+# Byte-identical-verbatim in PaintLayout._base. (SAVE lived at x14 here; #111 removed
+# it -- the freed strip stays empty rather than widening CLOSE, so the status text at
+# status_xy doesn't need to move too.)
 _PAINT_CLOSE = (200, 202, 102, 16)
 # Cross-cart sprite reuse (#18): GET imports the current tile FROM the shared sheet,
 # PUT saves it TO the shared sheet. Hidden in the theme (icon) editor.
 _PAINT_GET = (210, 130, 92, 20)
 _PAINT_PUT = (210, 154, 92, 20)
 # "Send to Files" (#108): export the whole sprite sheet to files/sprites/ as a
-# named user file. Tucked into the free strip left of the sprite preview (base
-# layout is packed). Hidden in the theme editor, like GET/PUT.
-_PAINT_FILES = (206, 98, 34, 18)
+# named user file. Stacked below GET/PUT in the right column (#111: moved off
+# y98 -- that slot sat flush against the sprite preview thumbnail at (240,92)-
+# (272,124), a snug fit that read as an overlap; y178 clears it with room to
+# spare, matching the responsive branch's already-correct sequencing below).
+# Hidden in the theme editor, like GET/PUT.
+_PAINT_FILES = (210, 178, 92, 20)
 
 _BASE_W = 320
 _BASE_H = 240
@@ -174,12 +184,11 @@ class PaintLayout:
             self.get_btn = _PAINT_GET
             self.put_btn = _PAINT_PUT
             self.files_btn = _PAINT_FILES
-            self.save_btn = _PAINT_SAVE
             self.close_btn = _PAINT_CLOSE
             self.status_xy = (110, 206)
             self.status_maxc = 11
             # The #90 tool rows: row 1 = drawing modes + undo/redo, row 2 =
-            # copy/paste/erase + transforms, in the grid->SAVE gap (verbatim).
+            # copy/paste/erase + transforms, in the grid->CLOSE gap (verbatim).
             self.tool_btns = (
                 _tool_row(_TOOL_X0, _TOOL_ROW1_Y, _TOOL_CW1, _TOOL_H, len(_TOOL_ROW1))
                 + _tool_row(_TOOL_X0, _TOOL_ROW2_Y, _TOOL_CW2, _TOOL_H, len(_TOOL_ROW2)))
@@ -195,12 +204,12 @@ class PaintLayout:
         p_bottom = py + ph
         self.title_xy = (px + 6 * fs, py + 2 * fs)
         rc_x = p_right - 142 * fs                 # right column origin (base 170)
-        row_y = p_bottom - 30 * fs                # SAVE/CLOSE row (base 190)
+        row_y = p_bottom - 30 * fs                # CLOSE row (base 190; SAVE lived here too)
         toolh = 12 * fs                           # #90 tool row height (per row)
         tools_band = 2 * toolh + 2 * fs           # two rows + a gutter
         self.pg_x0 = px + 6 * fs
         self.pg_y0 = py + 16 * fs
-        # Reserve BOTH tool rows' band (their height + gaps) above the SAVE row so the
+        # Reserve BOTH tool rows' band (their height + gaps) above the CLOSE row so the
         # grid never grows over them -- otherwise the same as the shipped formula.
         avail = min(rc_x - self.pg_x0 - 8 * fs,
                     row_y - self.pg_y0 - tools_band - 6 * fs)
@@ -219,14 +228,13 @@ class PaintLayout:
         self.get_btn = (rc_x + 40 * fs, self.pg_y0 + 98 * fs, 92 * fs, 20 * fs)
         self.put_btn = (rc_x + 40 * fs, self.pg_y0 + 122 * fs, 92 * fs, 20 * fs)
         self.files_btn = (rc_x + 40 * fs, self.pg_y0 + 146 * fs, 92 * fs, 20 * fs)
-        self.save_btn = (self.pg_x0, row_y, 88 * fs, 26 * fs)
         self.close_btn = (p_right - 112 * fs, row_y, 102 * fs, 26 * fs)
         self.status_xy = (self.pg_x0 + 96 * fs, row_y + 6 * fs)
         self.status_maxc = max(4, (self.close_btn[0] - self.status_xy[0]) // (8 * fs))
-        # The #90 tool rows: two full-width strips just above the SAVE/CLOSE row,
+        # The #90 tool rows: two full-width strips just above the CLOSE row,
         # growing their button cells with the panel width. The reserved `avail` band
         # above keeps the (grown) grid clear of them. Row 2 sits directly above the
-        # SAVE row; row 1 above it.
+        # CLOSE row; row 1 above it.
         row2_y = row_y - toolh - 3 * fs
         row1_y = row2_y - toolh - 1 * fs
         tool_span = (p_right - 6 * fs) - self.pg_x0
@@ -518,11 +526,11 @@ class PaintLayer:
         elif (getattr(lay, "files_btn", None) is not None
               and self._in(px, py, lay.files_btn) and not ws._editing_icons):
             ws.send_sprites_to_files()       # export the sheet to files/sprites/ (#108)
-        elif self._in(px, py, lay.save_btn):
-            # SAVE persists the SYSTEM icon theme (EDIT ICONS) or the cart's sprites.
-            ws.save_icons() if ws._editing_icons else ws.save_sprites()
         elif self._in(px, py, lay.close_btn):
-            # CLOSE returns to Settings (theme editor) or runs+leaves to the cart (PAINT).
+            # CLOSE returns to Settings (theme editor, hard-committing on the way --
+            # ThemeLayer.leave -- since it has no PLAY of its own) or runs+leaves to
+            # the cart (PAINT: ws._leave_menu is EditorApp.leave, PLAY, itself now a
+            # hard-commit trigger, #111 -- no SAVE tap exists anymore either way).
             ws._leave_theme() if ws._editing_icons else ws._leave_menu()
 
     # -- tool row (#90) ------------------------------------------------------
@@ -760,7 +768,6 @@ class PaintLayer:
             cv.print(ws.paint_status[:lay.status_maxc],
                      lay.status_xy[0], lay.status_xy[1],
                      th["author"] if light else NAMES["yellow"], 1)
-        ws._btn("SAVE", lay.save_btn, NAMES["green"], cv)
         ws._btn("CLOSE", lay.close_btn, NAMES["red"], cv)
         self._draw_tools()               # #90: undo/redo/fill/transform row
 
@@ -807,9 +814,10 @@ class ThemeLayer:
     def open(self):
         """Open the PAINT editor on the SYSTEM icon sheet (Settings -> EDIT ICONS,
         Stage 2 / #52). The same renderer/input as the cart PAINT flow, but pointed
-        at ws.icon_sheet: SAVE persists system_icons.moygfx (not a cart) and CLOSE
-        returns to Settings. Starts from the current theme (the baked default if no
-        system_icons.moygfx exists yet); the first SAVE creates the file."""
+        at ws.icon_sheet: CLOSE persists system_icons.moygfx (not a cart, #111: no
+        SAVE tap -- leave() hard-commits) and returns to Settings. Starts from the
+        current theme (the baked default if no system_icons.moygfx exists yet); the
+        first commit creates the file."""
         ws = self.ws
         ws._dirty = True                 # screen change repaints (#44)
         ws._editing_icons = True
@@ -827,11 +835,15 @@ class ThemeLayer:
         ws.ach.note("editor", "paint")   # repainting the chrome counts toward Toolbox
 
     def leave(self):
-        """CLOSE/back from the theme editor: return to Settings (not a cart/desktop --
-        the theme editor was opened from there). Drops the editor + clears the
-        editing-icons flag so the cart PAINT flow is untouched next time."""
+        """CLOSE/back from the theme editor: hard-commit the icon sheet (#111 --
+        there's no SAVE tap, and the theme editor has no PLAY of its own to double
+        as one either, unlike the cart-sprite paint tab), then return to Settings
+        (not a cart/desktop -- the theme editor was opened from there). Drops the
+        editor + clears the editing-icons flag so the cart PAINT flow is untouched
+        next time."""
         ws = self.ws
         ws._dirty = True                 # screen change repaints (#44)
+        ws.save_icons()                  # hard-commit BEFORE the editor drops (#111)
         ws._editing_icons = False
         ws.paint = None
         self._paint.reset_drag()

@@ -52,16 +52,17 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 # The map (tilemap) editor's UI layer (issue #32, extracted from this file): the
 # panned view + tile palette + pan/zoom + gesture handling. Re-exported under
-# their pre-extraction names (_MV_*, _TP_*, _MAP_ZOOM/_MAP_ERASE/_MAP_SAVE/
+# their pre-extraction names (_MV_*, _TP_*, _MAP_ZOOM/_MAP_ERASE/
 # _MAP_CLOSE/_MAP_PAN_THRESH, _PAN_*) for the same `console.X`/`C.X` reasons as
-# the block editor above, with the same bare-or-package fallback.
+# the block editor above, with the same bare-or-package fallback. (_MAP_SAVE was
+# removed with the SAVE button, #111.)
 try:
     from map_editor_ui import (
         MapEditorUI,
         _MV_X0, _MV_Y0, _MV_AVAIL_W, _MV_AVAIL_H, _MV_FIT_COLS, _MV_FIT_ROWS,
         _mv_default_cell, _MV_ZOOMS, _MAP_ZOOM, _MAP_SIZE, _TP_X0, _TP_Y0,
         _TP_CELL, _TP_COLS, _TP_ROWS, _TP_PAGE, _TP_AREA, _TP_PREV, _TP_NEXT,
-        _TP_SKY, _PAN_UP, _PAN_LF, _PAN_RT, _PAN_DN, _MAP_ERASE, _MAP_SAVE,
+        _TP_SKY, _PAN_UP, _PAN_LF, _PAN_RT, _PAN_DN, _MAP_ERASE,
         _MAP_CLOSE, _MAP_PAN_THRESH,
     )
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -70,7 +71,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
         _MV_X0, _MV_Y0, _MV_AVAIL_W, _MV_AVAIL_H, _MV_FIT_COLS, _MV_FIT_ROWS,
         _mv_default_cell, _MV_ZOOMS, _MAP_ZOOM, _MAP_SIZE, _TP_X0, _TP_Y0,
         _TP_CELL, _TP_COLS, _TP_ROWS, _TP_PAGE, _TP_AREA, _TP_PREV, _TP_NEXT,
-        _TP_SKY, _PAN_UP, _PAN_LF, _PAN_RT, _PAN_DN, _MAP_ERASE, _MAP_SAVE,
+        _TP_SKY, _PAN_UP, _PAN_LF, _PAN_RT, _PAN_DN, _MAP_ERASE,
         _MAP_CLOSE, _MAP_PAN_THRESH,
     )
 
@@ -194,16 +195,17 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # sheet (menu_view=="theme", EDIT ICONS), keyed on ws._editing_icons. paint_layer.py is
 # the single source of the paint geometry constants (_PG_*/_SW*/_SPR_*/_PAINT_*),
 # imported back here for tests + tools. The SHEETS + ws.paint handle + save persistence
-# stay on Workstation; PaintLayer reads them + dispatches SAVE/GET/PUT/CLOSE to ws.
+# stay on Workstation; PaintLayer reads them + dispatches GET/PUT/CLOSE to ws (SAVE
+# removed with the button, #111 -- CLOSE + every other exit path hard-commit instead).
 try:
     from paint_layer import (
         PaintLayer, ThemeLayer, _PG_X0, _PG_Y0, _PG_CELL, _PG_SPAN, _PG_AREA, _SW_X0,
-        _SW_Y0, _SW, _SW_COLS, _SW_AREA, _SPR_PREV, _SPR_NEXT, _PAINT_SIZE, _PAINT_SAVE,
+        _SW_Y0, _SW, _SW_COLS, _SW_AREA, _SPR_PREV, _SPR_NEXT, _PAINT_SIZE,
         _PAINT_CLOSE, _PAINT_GET, _PAINT_PUT)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.paint_layer import (
         PaintLayer, ThemeLayer, _PG_X0, _PG_Y0, _PG_CELL, _PG_SPAN, _PG_AREA, _SW_X0,
-        _SW_Y0, _SW, _SW_COLS, _SW_AREA, _SPR_PREV, _SPR_NEXT, _PAINT_SIZE, _PAINT_SAVE,
+        _SW_Y0, _SW, _SW_COLS, _SW_AREA, _SPR_PREV, _SPR_NEXT, _PAINT_SIZE,
         _PAINT_CLOSE, _PAINT_GET, _PAINT_PUT)
 
 # The Settings app surface (#28/#39/#53, extracted -- see settings_layer.py). The
@@ -2236,6 +2238,20 @@ class Workstation:
                 _old.pmem.flush()
             except Exception:  # noqa: BLE001
                 pass
+        # (#111) autosave-only: a workspace swap is an exit path too -- hard-commit
+        # the OUTGOING project's active Editor tab (code/sprites/map/scene/sounds/
+        # config) before it's replaced below, exactly like the removed SAVE icon
+        # used to on a tap. Only meaningful when the Editor was actually open on
+        # `_old` (editor_app.project is the SAME object -- a plain RUN from the
+        # launcher never opened the Editor, so this is a no-op there). Reset
+        # editor_app.tab to a sentinel afterward so the NEW project's landing tab
+        # switch (EditorApp.open -> set_tab, below/in open_in_editor) doesn't see a
+        # stale tab name and re-commit the fresh (already-current) workspace it
+        # just built -- save_current() no-ops on an unrecognized tab.
+        _editor_app = getattr(self, "editor_app", None)
+        if _editor_app is not None and _old is not None and _editor_app.project is _old:
+            _editor_app.save_current()
+            _editor_app.tab = None
         self.project = Project(self)   # a fresh workspace for the cart being opened
         if cart is None:
             cart = self.launcher.selected()
@@ -2985,6 +3001,24 @@ class Workstation:
         _story = getattr(self, "storybook_app", None)
         if _story is not None:
             _story._commit_deck()      # same rule for an open story (clean = no-op)
+        # (#111) autosave-only: going home is an exit path for every persistent
+        # system app + the Editor, not just Writer/Storybook above -- hard-commit
+        # each BEFORE the state below is torn down (self.editor/self.project etc.),
+        # so a HOME-key tap (which reaches here directly, bypassing any per-app
+        # CLOSE affordance) never drops an edit still sitting in its idle-debounce
+        # window. Guarded so a plain RUN (the Editor/apps never opened this
+        # session) costs nothing.
+        _sheets = getattr(self, "sheets_app", None)
+        if _sheets is not None:
+            _sheets.flush()
+        _art = getattr(self, "artwork_app", None)
+        if _art is not None:
+            _art._save()
+        _editor_app = getattr(self, "editor_app", None)
+        if _editor_app is not None and _editor_app.project is self.project:
+            _editor_app.save_current()
+        if self._editing_icons:
+            self.save_icons()          # the theme editor has no bar of its own
         self.editor = None
         self.paint = None
         self._editing_icons = False    # never carry the theme-editing flag home

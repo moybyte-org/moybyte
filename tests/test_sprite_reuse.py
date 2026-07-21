@@ -199,8 +199,10 @@ def test_put_then_get_moves_a_tile_between_carts_via_ui(tmp_path):
     assert [ws.sheet.tget(src_tile, lx, ly)
             for ly in range(ws.sheet.TILE) for lx in range(ws.sheet.TILE)] == painted
 
-    # And saving cart B persists it (the round-trip survives a reload from disk).
-    _tap(ws, console._PAINT_SAVE)
+    # And committing cart B persists it (the round-trip survives a reload from disk).
+    # There's no SAVE button (#111) -- ws.save_sprites is the hard-commit verb every
+    # exit path (tab switch/PLAY/CLOSE/...) now dispatches automatically.
+    ws.save_sprites()
     reloaded = SpriteSheet.from_hex(moy_carts.load(ws.cart["path"])["sprites"])
     assert _tile_pixels(reloaded, src_tile) == painted
 
