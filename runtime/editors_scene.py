@@ -2,23 +2,29 @@
 row table, the scene analogue of MapEditor. MapEditor places tile ids onto map
 CELLS; this places tagged ACTORS at world-space pixel positions. Pure logic:
 the shell (scene_editor_ui.py) maps taps on the world view / tile palette to
-these calls and renders the result; history rides the shared editors_base
-discipline.
+these calls and renders the result; undo/redo rides the shared #111
+op-history core (runtime/op_history.py).
 
 The rows are plain dicts in the .moyscene shape ({tag, tile, x, y, flip,
 flags}) so serialize() round-trips the exact on-disk format; list order IS the
 spawn order and the default draw order (#85 Section 2), which is why z-order
-editing is just moving a row within the list. Undo snapshots the WHOLE row
-list per gesture -- a scene is tens of tiny rows (the biggest shipped one is
-11), so a full deep-copy per step costs bytes, not the per-cell delta
-machinery the map needs."""
+editing is just moving a row within the list.
+
+Undo/redo (#111 phase 4): each GESTURE (a placement, a finished drag, a
+delete, a z-order move, a tag/flip commit) records ONE typed op carrying its
+own pre-image -- a place/remove op carries the row + its list index, a move op
+its before/after (x, y), a tag/flip op its before/after value, a z-order op
+its before/after index -- so invert() is O(1) per op, replacing the earlier
+full-row-list-snapshot UndoStack (a scene is tens of tiny rows, so either
+approach is cheap; typed ops match the paint/map/sheets codec model and let a
+project commit drain the SAME batch into its journal line, #111)."""
 
 import json
 
 try:
-    from editors_base import UndoStack, UndoRedoMixin
+    from op_history import History, OpCodec
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_base import UndoStack, UndoRedoMixin
+    from runtime.op_history import History, OpCodec
 
 
 # A fresh actor's tag: a real word (not "") so the props row never shows an
@@ -60,19 +66,85 @@ def _norm_row(r):
     return row
 
 
-def _copy_rows(rows):
-    """Deep-enough copy for snapshots: each row dict copied, flags dict copied
-    (flag VALUES are kid-tunable scalars, shared by reference is fine)."""
-    out = []
-    for r in rows:
-        c = dict(r)
-        if "flags" in c:
-            c["flags"] = dict(c["flags"])
-        out.append(c)
-    return out
+class _SceneOps(OpCodec):
+    """OpCodec for SceneEditor (#111 phase 4): one JSON-able op per GESTURE
+    TYPE, each carrying its own pre-image so invert() is O(1) -- no whole-
+    row-list snapshot needed. `t` selects the shape:
+
+      place  {"t":"place","i":idx,"row":dict}                   -- appended
+      remove {"t":"remove","i":idx,"row":dict}                  -- deleted
+      move   {"t":"move","i":idx,"ox":x,"oy":y,"nx":x,"ny":y}   -- dragged/nudged
+      tag    {"t":"tag","i":idx,"o":old,"n":new}                -- TAG committed
+      flip   {"t":"flip","i":idx,"o":0/1,"n":0/1}               -- FLIP toggled
+      z      {"t":"z","i":from,"j":to}                          -- front/back_sel
+
+    Every op names a row by its LIST INDEX at record time. Ops are only ever
+    undone/redone in strict stack order (a fresh edit truncates the redo
+    tail), so an index recorded here is still valid whenever apply()/invert()
+    replays it -- no other structural edit can have landed in between. Plain
+    dicts of ints/strings (MicroPython-safe, JSON-able as-is)."""
+
+    def apply(self, doc, op):          # redo -> forward
+        self._replay(doc, op, True)
+
+    def invert(self, doc, op):         # undo -> reverse
+        self._replay(doc, op, False)
+
+    def _replay(self, doc, op, forward):
+        t = op["t"]
+        rows = doc.rows
+        i = op["i"]
+        if t == "place":
+            if forward:
+                rows.insert(i, dict(op["row"]))
+                doc.sel = i
+            else:
+                if 0 <= i < len(rows):
+                    rows.pop(i)
+                doc.sel = None
+        elif t == "remove":
+            if forward:
+                if 0 <= i < len(rows):
+                    rows.pop(i)
+                doc.sel = None
+            else:
+                rows.insert(i, dict(op["row"]))
+                doc.sel = i
+        elif t == "move":
+            if 0 <= i < len(rows):
+                if forward:
+                    rows[i]["x"], rows[i]["y"] = op["nx"], op["ny"]
+                else:
+                    rows[i]["x"], rows[i]["y"] = op["ox"], op["oy"]
+                doc.sel = i
+        elif t == "tag":
+            if 0 <= i < len(rows):
+                rows[i]["tag"] = op["n"] if forward else op["o"]
+                doc.sel = i
+        elif t == "flip":
+            if 0 <= i < len(rows):
+                v = op["n"] if forward else op["o"]
+                if v:
+                    rows[i]["flip"] = 1
+                elif "flip" in rows[i]:
+                    del rows[i]["flip"]
+                doc.sel = i
+        elif t == "z":
+            j = op["j"]
+            if forward:
+                if 0 <= i < len(rows):
+                    row = rows.pop(i)
+                    rows.insert(j, row)
+                    doc.sel = j
+            else:
+                if 0 <= j < len(rows):
+                    row = rows.pop(j)
+                    rows.insert(i, row)
+                    doc.sel = i
+        doc.dirty = True
 
 
-class SceneEditor(UndoRedoMixin):
+class SceneEditor:
     """Placement state over one scene's actor rows (#85 Stage 2).
 
     `n` is the brush -- the sheet tile a placed actor gets; `sel` the selected
@@ -82,7 +154,7 @@ class SceneEditor(UndoRedoMixin):
     Every completed gesture (a placement, a finished drag, a delete, a z-order
     move, a tag/flip commit) is one undo step."""
 
-    UNDO_MAX = 32     # bounded like MapEditor (#91); a step is a tiny row list
+    UNDO_MAX = 32     # bounded like MapEditor (#91); a step is one tiny typed op
     GRID = 8          # the snap grid: the sheet's tile size
     TAG_MAX = 16      # tag length ceiling (fits the props field at 320px)
 
@@ -94,8 +166,8 @@ class SceneEditor(UndoRedoMixin):
         self.cam_x = 0        # view top-left, world px
         self.cam_y = 0
         self.dirty = False    # unsaved edits (the title's "*", cleared on SAVE)
-        self._hist = UndoStack(self.UNDO_MAX)
-        self._pre = None      # pre-gesture snapshot ((rows, sel)) while one is open
+        self._hist = History(self, _SceneOps(), max_undo=self.UNDO_MAX)
+        self._pre = None      # pre-gesture (i, ox, oy) for an open MOVE drag, or None
 
     # -- serialization -------------------------------------------------------
 
@@ -104,54 +176,78 @@ class SceneEditor(UndoRedoMixin):
         format widgets.Scenes parses and moy_carts.save_scene persists."""
         return json.dumps(self.rows)
 
-    # -- gesture batching (a drag = ONE undo step) ---------------------------
+    # -- gesture batching (a drag = ONE undo step, #111) ----------------------
+    #
+    # begin_edit/end_edit/abort_edit now bracket ONLY the MOVE gesture (a drag
+    # of the selected actor): a place/remove/tag/flip/z-order edit is a single
+    # atomic call, so it records its typed op directly (below) without needing
+    # a pre-snapshot at all.
 
     def begin_edit(self):
-        """Open an edit gesture: snapshot the rows once. Idempotent while open."""
+        """Open a MOVE gesture: remember the selected actor's pre-drag (index,
+        x, y). Idempotent while open; a no-op with nothing selected."""
         if self._pre is None:
-            self._pre = (_copy_rows(self.rows), self.sel)
+            r = self.selected()
+            if r is not None:
+                self._pre = (self.sel, r["x"], r["y"])
 
     def end_edit(self):
-        """Close the gesture: commit its pre-snapshot iff the rows actually
-        changed (a select-only tap or a zero-move drag records nothing).
-        Returns True when an undo step was recorded."""
+        """Close the gesture: record a "move" op iff the actor actually ended
+        up somewhere else (a select-only tap or a zero-move drag records
+        nothing). Returns True when an undo step was recorded."""
         pre = self._pre
         self._pre = None
-        if pre is not None and pre[0] != self.rows:
-            self._hist.push(pre)
-            self.dirty = True
-            return True
-        return False
+        if pre is None:
+            return False
+        i, ox, oy = pre
+        if not (0 <= i < len(self.rows)):
+            return False
+        r = self.rows[i]
+        nx, ny = r["x"], r["y"]
+        if (nx, ny) == (ox, oy):
+            return False
+        self.dirty = True
+        self._hist.record({"t": "move", "i": i, "ox": ox, "oy": oy,
+                           "nx": nx, "ny": ny})
+        return True
 
     def abort_edit(self):
-        """Discard the open gesture AND restore the pre-snapshot (a drag that
-        turned out to be a pan must leave the rows untouched)."""
+        """Discard the open gesture AND restore the actor's pre-drag position
+        (a drag that turned out to be a pan must leave the rows untouched).
+        Records nothing."""
         pre = self._pre
         self._pre = None
         if pre is not None:
-            self.rows = pre[0]
-            self.sel = pre[1]
+            i, ox, oy = pre
+            if 0 <= i < len(self.rows):
+                self.rows[i]["x"], self.rows[i]["y"] = ox, oy
 
-    def _commit(self, mutate):
-        """Run `mutate()` as one self-contained undo step."""
-        self.begin_edit()
-        mutate()
-        return self.end_edit()
+    # -- undo / redo (over the shared #111 op-history) ------------------------
 
-    # -- undo/redo (UndoRedoMixin over full-list snapshots) ------------------
+    @property
+    def _undo(self):
+        return self._hist._undo          # the op undo stack (tests inspect it)
 
-    def _hist_before(self):
+    @property
+    def _redo(self):
+        return self._hist._redo
+
+    def can_undo(self):
+        return self._hist.can_undo()
+
+    def can_redo(self):
+        return self._hist.can_redo()
+
+    def undo(self):
+        """Revert the last recorded gesture; True iff a step was taken. Closes
+        any open drag first (an in-flight gesture can't be half-undone)."""
         if self._pre is not None:
             self.end_edit()
+        return self._hist.undo() is not None
 
-    def _hist_reverse(self, entry):
-        return (_copy_rows(self.rows), self.sel)
-
-    def _hist_apply(self, entry, is_redo):
-        self.rows, self.sel = entry
-        if self.sel is not None and not (0 <= self.sel < len(self.rows)):
-            self.sel = None
-        self.dirty = True
+    def redo(self):
+        """Re-apply the last undone gesture; True iff a step was taken."""
+        return self._hist.redo() is not None
 
     # -- placement / selection ----------------------------------------------
 
@@ -166,12 +262,12 @@ class SceneEditor(UndoRedoMixin):
         """Append (spawn) a new actor at world (x, y) -- snapped when snap is on
         -- with the brush tile, and select it. One undo step."""
         x, y = self.snap_xy(x, y)
-
-        def mutate():
-            self.rows.append({"tag": str(tag)[:self.TAG_MAX], "tile": self.n,
-                              "x": x, "y": y})
-            self.sel = len(self.rows) - 1
-        self._commit(mutate)
+        row = {"tag": str(tag)[:self.TAG_MAX], "tile": self.n, "x": x, "y": y}
+        i = len(self.rows)
+        self.rows.append(row)
+        self.sel = i
+        self.dirty = True
+        self._hist.record({"t": "place", "i": i, "row": dict(row)})
         return self.sel
 
     def actor_at(self, x, y):
@@ -211,21 +307,31 @@ class SceneEditor(UndoRedoMixin):
         if r is None:
             return False
         step = self.GRID if self.snap else 1
-
-        def mutate():
-            r["x"] = r["x"] + dx * step
-            r["y"] = r["y"] + dy * step
-        return self._commit(mutate)
+        i = self.sel
+        ox, oy = r["x"], r["y"]
+        nx, ny = ox + dx * step, oy + dy * step
+        if (nx, ny) == (ox, oy):
+            return False
+        r["x"], r["y"] = nx, ny
+        self.dirty = True
+        self._hist.record({"t": "move", "i": i, "ox": ox, "oy": oy,
+                           "nx": nx, "ny": ny})
+        return True
 
     def delete_sel(self):
         """Remove the selected actor. One undo step."""
-        if self.selected() is None:
+        r = self.selected()
+        if r is None:
             return False
-
-        def mutate():
-            self.rows.pop(self.sel)
-            self.sel = None
-        return self._commit(mutate)
+        i = self.sel
+        row = dict(r)
+        if "flags" in row:
+            row["flags"] = dict(row["flags"])
+        self.rows.pop(i)
+        self.sel = None
+        self.dirty = True
+        self._hist.record({"t": "remove", "i": i, "row": row})
+        return True
 
     # -- z-order (list order IS draw order, #85 Section 2) -------------------
 
@@ -235,12 +341,14 @@ class SceneEditor(UndoRedoMixin):
         r = self.selected()
         if r is None or self.sel == len(self.rows) - 1:
             return False
-
-        def mutate():
-            row = self.rows.pop(self.sel)
-            self.rows.append(row)
-            self.sel = len(self.rows) - 1
-        return self._commit(mutate)
+        i = self.sel
+        j = len(self.rows) - 1
+        row = self.rows.pop(i)
+        self.rows.append(row)
+        self.sel = j
+        self.dirty = True
+        self._hist.record({"t": "z", "i": i, "j": j})
+        return True
 
     def back_sel(self):
         """Send the selected actor to the BACK (start of the list -- drawn
@@ -248,12 +356,14 @@ class SceneEditor(UndoRedoMixin):
         r = self.selected()
         if r is None or self.sel == 0:
             return False
-
-        def mutate():
-            row = self.rows.pop(self.sel)
-            self.rows.insert(0, row)
-            self.sel = 0
-        return self._commit(mutate)
+        i = self.sel
+        j = 0
+        row = self.rows.pop(i)
+        self.rows.insert(j, row)
+        self.sel = j
+        self.dirty = True
+        self._hist.record({"t": "z", "i": i, "j": j})
+        return True
 
     # -- props (the inline tag/flip row, #85 Section 4) ----------------------
 
@@ -263,20 +373,31 @@ class SceneEditor(UndoRedoMixin):
         r = self.selected()
         if r is None:
             return False
-        return self._commit(lambda: r.__setitem__("tag", str(tag)[:self.TAG_MAX]))
+        i = self.sel
+        old = r.get("tag", "")
+        new = str(tag)[:self.TAG_MAX]
+        if new == old:
+            return False
+        r["tag"] = new
+        self.dirty = True
+        self._hist.record({"t": "tag", "i": i, "o": old, "n": new})
+        return True
 
     def toggle_flip(self):
         """Flip the selected actor horizontally (0 <-> 1). One undo step."""
         r = self.selected()
         if r is None:
             return False
-
-        def mutate():
-            if r.get("flip"):
-                del r["flip"]
-            else:
-                r["flip"] = 1
-        return self._commit(mutate)
+        i = self.sel
+        old = 1 if r.get("flip") else 0
+        new = 0 if old else 1
+        if new:
+            r["flip"] = 1
+        elif "flip" in r:
+            del r["flip"]
+        self.dirty = True
+        self._hist.record({"t": "flip", "i": i, "o": old, "n": new})
+        return True
 
     # -- world extents (the pan clamp reads these) ---------------------------
 

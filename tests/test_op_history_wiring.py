@@ -204,12 +204,10 @@ def test_map_commit_embeds_ops_in_journal(tmp_path):
     assert len(op[-1]) == 3              # a (idx, prev, new) triple
 
 
-# ===========================================================================
-# #111 phase 4: the CODE tab (a typing-burst codec) + the BLOCKS tab (structured
+# ====================================================================# #111 phase 4: the CODE tab (a typing-burst codec) + the BLOCKS tab (structured
 # whole-program ops) join the same unified bar undo -- local in-RAM steps first,
 # then the durable journal, crossing the boundary transparently.
-# ===========================================================================
-
+# ====================================================================
 def _open_code(ws):
     ws.set_menu_view("code")
     assert ws.menu_view == "code"
@@ -367,6 +365,95 @@ def test_blocks_dimmed_state_is_truthful(tmp_path):
 
     _go_to_insert(be, 1)
     be.insert_block("cls", {"color": "red"})   # an un-sealed edit still dims-in undo
+# -- scene: a placement is one undo step; undo re-syncs ws.scenes (#111 phase 4) --
+
+def _open_scene(ws):
+    ws._open_scene()
+    assert ws.menu_view == "scene"
+    return ws.scene_ui.sceneedit
+
+
+def test_scene_place_bar_undo_removes_it_and_syncs_live(tmp_path):
+    ws = _make_ws_with_cart(tmp_path)
+    se = _open_scene(ws)
+    name = ws.scene_ui.scene_name
+    se.place(40, 40)
+    ws.scene_ui._sync_live()             # the same call every committed gesture makes
+    assert len(se.rows) == 1
+    assert len(ws.scenes.scene(name)) == 1
+
+    assert ws.undo() is True             # the bar UNDO reverts the placement...
+    assert len(se.rows) == 0
+    assert len(ws.scenes.scene(name)) == 0     # ...and the LIVE scene() sees it too
+    # (undo() drives console._after_local_history -> scene_ui._sync_live(), the
+    # scene-specific tail every other tab's generic "mutated in place" path doesn't need)
+
+    assert ws.redo() is True
+    assert len(se.rows) == 1
+    assert len(ws.scenes.scene(name)) == 1
+
+
+def test_scene_dimmed_state_is_truthful(tmp_path):
+    ws = _make_ws_with_cart(tmp_path)
+    se = _open_scene(ws)
+    assert ws.can_undo() is False and ws.can_redo() is False
+
+    se.place(8, 8)
+    assert ws.can_undo() is True and ws.can_redo() is False
+
+    assert ws.undo() is True
+    assert ws.can_undo() is False and ws.can_redo() is True
+
+
+def test_scene_commit_embeds_ops_in_journal(tmp_path):
+    from runtime import moy_journal
+    ws = _make_ws_with_cart(tmp_path)
+    path = ws.cart["path"]
+    se = _open_scene(ws)
+    se.place(16, 16)
+    se.place(32, 32)
+
+    ws.save_scene()
+
+    ents = _entries(path, "scenes/main.moyscene")
+    assert ents, "a scene commit must journal"
+    ops = moy_journal.journal_entry_ops(ents[-1])
+    assert ops, "the scene commit line must carry the op batch"
+    for op in ops:
+        assert op["t"] == "place"
+    assert se._hist.peek() == []         # the batch drained
+
+
+# -- music: a step edit is one undo step; ops land in the journal (#111 phase 4) --
+
+def _open_music(ws):
+    ws._open_music()
+    assert ws.menu_view == "music"
+    return ws.music_ui.musicedit
+
+
+def test_music_step_bar_undo_reverts_pitch(tmp_path):
+    ws = _make_ws_with_cart(tmp_path)
+    me = _open_music(ws)
+    me.select_cursor(0)
+    p0 = me.cur_step()[0]
+
+    me.set_pitch(50)
+    assert me.cur_step()[0] == 50
+
+    assert ws.undo() is True             # the bar UNDO reverts the pitch edit
+    assert me.cur_step()[0] == p0
+
+    assert ws.redo() is True
+    assert me.cur_step()[0] == 50
+
+
+def test_music_dimmed_state_is_truthful(tmp_path):
+    ws = _make_ws_with_cart(tmp_path)
+    me = _open_music(ws)
+    assert ws.can_undo() is False and ws.can_redo() is False
+
+    me.nudge_vol(1)
     assert ws.can_undo() is True and ws.can_redo() is False
 
     assert ws.undo() is True
@@ -391,3 +478,95 @@ def test_graduated_blocks_tab_has_no_history(tmp_path):
 def blocks_snapshot(be):
     from runtime.editors import _clone_tree
     return _clone_tree(be.program)
+def test_music_commit_embeds_ops_in_journal(tmp_path):
+    from runtime import moy_journal
+    ws = _make_ws_with_cart(tmp_path)
+    path = ws.cart["path"]
+    me = _open_music(ws)
+    me.select_cursor(0)
+    me.set_pitch(60)
+    me.cycle_wave(1)
+
+    ws.save_sounds()
+
+    ents = _entries(path, "sounds.json")
+    assert ents, "a sounds commit must journal"
+    ops = moy_journal.journal_entry_ops(ents[-1])
+    assert ops, "the sounds commit line must carry the op batch"
+    # Each op is the JSON-able [old_snap, new_snap] pair (_MusicOps).
+    for op in ops:
+        assert isinstance(op, list) and len(op) == 2
+    assert me._hist.peek() == []         # the batch drained
+
+
+# -- config: a field adjust is one undo step; ops land in the journal (#111 phase 4)
+#
+# NOTE: the CART INFO modal's title/author edits (#94, Project.commit_manifest)
+# deliberately stay OUT of this history -- they're manifest metadata (a small
+# immediate-commit modal), not config.json content, and manifest.json already
+# carries its own one-way-door graduation journal riders; folding plain
+# metadata edits into the config op-history would blur the two (see
+# commit_manifest's docstring in project.py).
+
+def _make_ws_with_config_cart(tmp_path, title="Cfg"):
+    from runtime import host_app
+    carts_dir = str(tmp_path / "carts")
+    host_app.moy_carts.ensure_dirs(carts_dir)
+    host_app.moy_carts.create(
+        title, carts_dir, src="def _draw():\n    cls(1)\n", type="game",
+        edit=[{"key": "spd", "type": "int", "min": 0, "max": 10, "default": 3,
+              "card": "SPD {value}"}])
+    ws = host_app.build_workstation(carts_dir)
+    for i, c in enumerate(ws.launcher.items):
+        if c["title"] == title:
+            ws.launcher.sel = i
+            break
+    ws.open_in_editor()
+    assert ws.menu_view == "cards"
+    return ws
+
+
+def test_config_adjust_bar_undo_reverts_field(tmp_path):
+    ws = _make_ws_with_config_cart(tmp_path)
+    ws.cards_layer.msel = 0
+    assert ws.config.get("spd", 3) == 3
+
+    ws.adjust(1)
+    assert ws.config["spd"] == 4
+
+    assert ws.undo() is True             # the bar UNDO reverts the field
+    assert ws.config["spd"] == 3
+
+    assert ws.redo() is True
+    assert ws.config["spd"] == 4
+
+
+def test_config_dimmed_state_is_truthful(tmp_path):
+    ws = _make_ws_with_config_cart(tmp_path)
+    assert ws.can_undo() is False and ws.can_redo() is False
+
+    ws.cards_layer.msel = 0
+    ws.adjust(1)
+    assert ws.can_undo() is True and ws.can_redo() is False
+
+    assert ws.undo() is True
+    assert ws.can_undo() is False and ws.can_redo() is True
+
+
+def test_config_commit_embeds_ops_in_journal(tmp_path):
+    from runtime import moy_journal
+    ws = _make_ws_with_config_cart(tmp_path)
+    path = ws.cart["path"]
+    ws.cards_layer.msel = 0
+    ws.adjust(1)
+    ws.adjust(1)
+
+    ws._save_config()
+
+    ents = _entries(path, "config.json")
+    assert ents, "a config commit must journal"
+    ops = moy_journal.journal_entry_ops(ents[-1])
+    assert ops, "the config commit line must carry the op batch"
+    for op in ops:
+        assert op["k"] == "spd"
+    assert ws.project.config_hist.peek() == []   # the batch drained

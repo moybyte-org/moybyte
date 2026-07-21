@@ -41,6 +41,13 @@ try:
     from widgets import Pmem, Scenes, _SilentAudio, _err_text, _ticks_ms, _ticks_diff
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import Pmem, Scenes, _SilentAudio, _err_text, _ticks_ms, _ticks_diff
+# The #111 op-history core: CONFIG's fine-grained undo lives directly on Project
+# (there is no separate ConfigEditor class the way paint/map/scene/music have one --
+# see _ConfigOps below).
+try:
+    from op_history import History, OpCodec
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.op_history import History, OpCodec
 # The block vocabulary/compiler (#29) -- graduation detection recompiles the cart's
 # frozen blocks.json + normalize-compares (Stage 8). Same bare-or-package fallback
 # console.py/block_editor_ui use: bare `blocks` on the device / once host_app aliased
@@ -61,6 +68,22 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                        STORY_TYPE as _STORY_TYPE)
 
 
+class _ConfigOps(OpCodec):
+    """OpCodec for the CONFIG tab (#111 phase 4): an op is `{"k":key,"o":old,
+    "n":new}` -- one field's old/new value, the exact Sheets cell-codec shape
+    (invert is O(1): write `o`/`n` straight back). The doc is the Project
+    itself (config lives directly in `doc.config`, a plain dict -- there is no
+    separate ConfigEditor instance the way paint/map/scene/music each have
+    one, so no editor-identity guard is needed; `Project.reset_config_history`
+    re-baselines whenever the live dict is replaced wholesale)."""
+
+    def apply(self, doc, op):
+        doc.config[op["k"]] = op["n"]
+
+    def invert(self, doc, op):
+        doc.config[op["k"]] = op["o"]
+
+
 class Project:
     """The open cart's live data + its persistence verbs (Stage 1). The six data
     fields (cart/config/sheet/tilemap/images/pmem) are exposed back on Workstation
@@ -79,6 +102,7 @@ class Project:
         self.pmem = None              # Pmem (persistent cart store) for the open cart
         self.scenes = None            # Scenes (#85): the open cart's placed-actor
                                       # scenes; make_api binds scene()/load_scene()
+        self.config_hist = History(self, _ConfigOps())  # #111: CONFIG tab op-history
 
     # -- builders (moved verbatim from Workstation) --------------------------
 
@@ -311,6 +335,26 @@ class Project:
     # save-status UI fields (ws.save_status/ws.cart_error) + achievements (ws.ach)
     # they touch stay on Workstation, reached via the ws back-reference.
 
+    # -- CONFIG tab op-history (#111 phase 4) ---------------------------------
+
+    def reset_config_history(self):
+        """Fresh #111 op-history for `config`: called whenever the live dict is
+        replaced WHOLESALE (Project.__init__ via a fresh workspace open, and a
+        journal walk's console._reload_after_walk) so a stale field op from a
+        superseded config can never be replayed against the new one -- the same
+        "clean boundary" reset paint/map/scene/music get from dropping their
+        whole editor instance on a reload."""
+        self.config_hist = History(self, _ConfigOps())
+
+    def record_config(self, key, old, new):
+        """Record one field's old/new value (#111): called by every config
+        mutation point (Workstation.adjust's left/right stepper, the CardsLayer
+        choice-cell tap) AFTER the field is already written, mirroring the
+        paint/map/scene/sheets record() contract. A same-value set records
+        nothing."""
+        if old != new:
+            self.config_hist.record({"k": key, "o": old, "n": new})
+
     def commit_config(self):
         # Persist edits to the SD cartridge (embedded fallback carts have no path).
         ws = self.ws
@@ -323,7 +367,14 @@ class Project:
             except Exception as exc:  # noqa: BLE001
                 print("Moybyte save failed:", exc)
                 return
-            self._journal("config.json", json.dumps(self.cart["cfg"]))
+            # #111: drain the CONFIG History's op batch into the journal line
+            # (fine-grained cross-boundary undo), then re-baseline (clear) -- the
+            # same clean-boundary contract commit_sprites documents (in-RAM undo
+            # covers edits SINCE the last commit, the journal covers commit-to-
+            # commit, so the two never double-count a field tweak).
+            ops = self.config_hist.flush()
+            self._journal("config.json", json.dumps(self.cart["cfg"]), ops=ops)
+            self.config_hist.clear()
 
     def commit_manifest(self, title=None, author=None):
         """Persist edited manifest metadata (title/author, #94's "CART INFO"
@@ -461,6 +512,9 @@ class Project:
         "map": "_map_history",
         "code": "_code_history",
         "blocks": "_blocks_history",
+        "scene": "_scene_history",
+        "music": "_music_history",
+        "cards": "_config_history",
     }
 
     def history_for(self, view):
@@ -472,6 +526,32 @@ class Project:
         if name is None:
             return None
         return getattr(self, name)()
+
+    def _config_history(self):
+        """The op-history of this project's config cards (#111 phase 4) -- lives
+        directly on the Project (there is no separate ConfigEditor instance);
+        reset_config_history() re-baselines it whenever self.config is replaced
+        wholesale (fresh open, journal-walk reload)."""
+        return getattr(self, "config_hist", None)
+
+    def _scene_history(self):
+        """The op-history of the OPEN SceneEditor (#111 phase 4), or None. Unlike
+        paint/map there is only ever one live SceneEditor per open project (no
+        theme-editor-style alias rides the same class on different data), so no
+        identity guard beyond "an editor is actually open" is needed."""
+        se = getattr(self.ws.scene_ui, "sceneedit", None)
+        return getattr(se, "_hist", None) if se is not None else None
+
+    def _music_history(self):
+        """The op-history of the OPEN MusicEditor (#111 phase 4), or None --
+        guarded on the live AudioBank identity like _paint_history (the bank a
+        MusicEditor edits is `ws.audio.engine.bank`; commit_sounds only wants
+        the ops for THIS project's bank)."""
+        me = getattr(self.ws.music_ui, "musicedit", None)
+        au = getattr(self.ws, "audio", None)
+        if me is not None and au is not None and getattr(me, "bank", None) is au.engine.bank:
+            return getattr(me, "_hist", None)
+        return None
 
     def commit_sprites(self):
         ws = self.ws
@@ -543,7 +623,13 @@ class Project:
             ws._with_sd(lambda: ws.carts_store.save_scene(self.cart, name, text))
             ws.save_status = "SAVED"
             rel = ws.carts_store.SCENES_DIR + "/" + name + ws.carts_store.SCENE_EXT
-            self._journal(rel, text)              # durable undo (Stage 7)
+            # #111 phase 4: drain the SceneEditor's op batch into the journal line
+            # (see commit_sprites for the clean-boundary contract).
+            hist = self._scene_history()
+            ops = hist.flush() if hist is not None else None
+            self._journal(rel, text, ops=ops)     # durable undo (Stage 7/#111)
+            if hist is not None:
+                hist.clear()                      # re-baseline
         except Exception as exc:  # noqa: BLE001
             txt = _err_text(exc)
             ws.save_status = "SAVE FAILED"
@@ -563,7 +649,13 @@ class Project:
             ws._with_sd(lambda: ws.carts_store.save_sounds(self.cart, bank_dict))
             me.dirty = False
             ws.save_status = "SAVED"
-            self._journal("sounds.json", json.dumps(bank_dict))   # durable undo (Stage 7)
+            # #111 phase 4: drain the MusicEditor's op batch into the journal line
+            # (see commit_sprites for the clean-boundary contract).
+            hist = self._music_history()
+            ops = hist.flush() if hist is not None else None
+            self._journal("sounds.json", json.dumps(bank_dict), ops=ops)  # (Stage 7/#111)
+            if hist is not None:
+                hist.clear()                      # re-baseline
             ws.ach.note("sound_save")          # "Sound Designer": a bank saved (#21)
         except Exception as exc:  # noqa: BLE001
             txt = _err_text(exc)

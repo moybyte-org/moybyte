@@ -2735,8 +2735,8 @@ class Workstation:
 
     def _active_history(self):
         """The FINE-GRAINED op-history (#111) of the active Editor tab -- paint/map
-        (phase 2) + code/blocks (phase 4), the surfaces with an in-RAM op stack -- or
-        None for a commit-level tab (config/scene/music). Resolved through the
+        (phase 2) + code/blocks/scene/music/config (phase 4): every tab keeps an
+        in-RAM op stack now, or None with no live editor. Resolved through the
         project's per-tab registry keyed on `menu_view` (Project.history_for), so a
         stale editor from an earlier tab is never consulted; the caller (the bar
         UNDO/REDO icons, only reachable inside the Editor) guarantees the Editor is
@@ -2827,19 +2827,25 @@ class Workstation:
         its LIVE doc in place (sheet/tilemap gen bumped for a running preview; the code
         buffer rewritten), so there's no cart reload -- just repaint and re-check the
         bar's dimmed state (#111). The code buffer's set_text() cleared its dirty flag,
-        so re-arm it: the reverted text must persist at the next commit (autosave/exit)."""
+        so re-arm it: the reverted text must persist at the next commit (autosave/exit).
+        The one other exception is SCENE: its rows are a separate in-editor list that
+        only reaches the running cart's `scene()` via an explicit sync (the same one
+        every committed gesture calls, scene_editor_ui._sync_live), so a bar-driven
+        undo/redo must call it too."""
         self._dirty = True
         self.bar_layer.invalidate()
         if self.menu_view == "code" and self.editor is not None:
             self.editor.dirty = True
+        elif self.menu_view == "scene":
+            self.scene_ui._sync_live()
 
     def undo(self):
         """Undo one step for the active Editor tab (#111). A tab with an in-RAM
         op-history (paint/map strokes, code typing bursts, block edits) UNWINDS it
-        FIRST (one stroke/gesture/burst/edit), and only once that's exhausted falls
-        through to the durable journal walk (one whole commit) -- so the SAME bar icon
-        crosses the local->commit boundary. A commit-level tab (config/scene/music)
-        goes straight to the journal. Returns True iff a step was taken. NOTE the
+        FIRST (one stroke/gesture/burst/edit/field tweak), and only once that's
+        exhausted falls through to the durable journal walk (one whole commit) -- so
+        the SAME bar icon crosses the local->commit boundary; every Editor tab keeps
+        an in-RAM op stack now (#111 phase 4). Returns True iff a step was taken. NOTE the
         boundary is CLEAN: falling into the journal reloads the editor with a fresh
         (empty) History, so continued presses walk whole commits until new
         fine-grained edits are made (the seed-from-journal option was deferred)."""
@@ -2935,6 +2941,7 @@ class Workstation:
             return
         self.cart = fresh
         self.config = dict(fresh.get("cfg", {}))
+        self.project.reset_config_history()  # #111 phase 4: fresh baseline post-walk
         self.sheet = self._build_sheet()
         self.tilemap = self._build_tilemap()
         self.images = fresh.get("images") or {}
@@ -3350,10 +3357,13 @@ class Workstation:
                 if "max" in f:
                     v = min(f["max"], v)
                 self.config[key] = v
+                self.project.record_config(key, cur, v)   # #111 phase 4
             elif f["type"] == "choice":
                 ch = f["choices"]
                 idx = ch.index(cur) if cur in ch else 0
-                self.config[key] = ch[(idx + d) % len(ch)]
+                v = ch[(idx + d) % len(ch)]
+                self.config[key] = v
+                self.project.record_config(key, cur, v)   # #111 phase 4
         except (TypeError, ValueError, KeyError):  # noqa: BLE001 -- a bad current
             # value (e.g. a non-numeric default some other bug left behind) must
             # not crash the frame loop either; the -/+ just becomes a no-op.

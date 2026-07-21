@@ -499,7 +499,11 @@ class CardsLayer:
             if row["display"] in self._CELL_DISPLAYS:
                 for k, cell in self._choice_cells(row):
                     if self._in(px, py, cell):
-                        ws.project.config[row["f"]["key"]] = row["f"]["choices"][k]
+                        f = row["f"]
+                        old = ws.project.config.get(f["key"], f.get("default"))
+                        new = f["choices"][k]
+                        ws.project.config[f["key"]] = new
+                        ws.project.record_config(f["key"], old, new)  # #111 phase 4
                         return
             ws.adjust(-1 if px < self.layout.card_x + self.layout.card_w // 2 else 1)
             return

@@ -1,11 +1,11 @@
 """MusicEditor (#50/#92) -- the tracker-style step editor over a cart's
-AudioBank. Split out of editors.py (which re-exports it); history via the
-shared editors_base discipline."""
+AudioBank. Split out of editors.py (which re-exports it); undo/redo rides the
+shared #111 op-history core (runtime/op_history.py)."""
 
 try:
-    from editors_base import UndoStack, UndoRedoMixin
+    from op_history import History, OpCodec
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_base import UndoStack, UndoRedoMixin
+    from runtime.op_history import History, OpCodec
 
 
 _ME_REST = -1
@@ -31,7 +31,27 @@ def _me_clamp(v, lo, hi):
     return v
 
 
-class MusicEditor(UndoRedoMixin):
+class _MusicOps(OpCodec):
+    """OpCodec for MusicEditor (#111 phase 4): each op is `[old_snap, new_snap]`
+    -- a full before/after pair of the ACTIVE object's editable fields, exactly
+    the tuple MusicEditor._snapshot() already produces (kind, bank idx, steps/
+    pattern, speed, loop, cursor). A mutation touches at most one bank object,
+    so a whole-object snapshot pair stays small (a handful of ints + one short
+    list) and is trivially invertible: apply() replays doc._restore(new),
+    invert() replays doc._restore(old). Both halves are captured AT RECORD
+    TIME (right after the edit, in MusicEditor._commit_op), so undo/redo are
+    correct even when the cursor has since wandered to a different SFX/track
+    (the #92 object-switch case) -- no lazy re-snapshot needed, unlike the
+    older UndoRedoMixin hooks this replaces."""
+
+    def apply(self, doc, op):          # redo -> the recorded NEW state
+        doc._restore(op[1])
+
+    def invert(self, doc, op):         # undo -> the recorded OLD state
+        doc._restore(op[0])
+
+
+class MusicEditor:
     """Tracker/step-editor state over a cart's AudioBank (#50) -- the sound analogue
     of MapEditor/PaintEditor. Pure logic: no canvas, no synth, no I/O, so the *same*
     file backs the host console and the frozen device console. The console wraps it
@@ -76,15 +96,20 @@ class MusicEditor(UndoRedoMixin):
                     (d = +-1) and move the cursor along with it; a no-op at either
                     edge (mirrors add/del's "keep at least one" edge behavior).
 
-      undo/redo  -- a bounded stack (depth _ME_UNDO_MAX) of snapshots of just the
-                    ACTIVE object's editable fields (steps/pattern + speed + loop),
-                    pushed before every content-mutating call. Switching which
-                    SFX/track is active, or duplicating one, is navigation, not a
-                    tracked edit -- undo only walks back through what was DONE to
-                    the object currently open, restoring the object + cursor + view
-                    the edit happened in (so an undo after `select_sfx` still finds
-                    its way back). A fresh edit after an undo drops the redo tail,
-                    same rule as moy_carts' durable journal."""
+      undo/redo  -- a bounded op-history (depth _ME_UNDO_MAX, #111) of before/after
+                    snapshot PAIRS of just the ACTIVE object's editable fields
+                    (steps/pattern + speed + loop): `_push_undo()` stashes the
+                    pre-edit snapshot, the content-mutating call runs, then
+                    `_commit_op()` diffs against the post-edit state and records
+                    one op if it actually changed. Switching which SFX/track is
+                    active, or duplicating one, is navigation, not a tracked edit
+                    -- undo only walks back through what was DONE to the object
+                    currently open, restoring the object + cursor + view the edit
+                    happened in (so an undo after `select_sfx` still finds its way
+                    back, and a subsequent redo can't land on the wrong object --
+                    both halves are baked into the op at record time). A fresh
+                    edit after an undo drops the redo tail, same rule as
+                    moy_carts' durable journal."""
 
     SFX_VIEW = "sfx"
     SONG_VIEW = "song"
@@ -104,8 +129,9 @@ class MusicEditor(UndoRedoMixin):
         self.slot = 0             # selected slot within that track (song view)
         self.dirty = False
         self._clip = None         # internal clipboard: ("step", [p, w, v]) | ("slot", id)
-        # bounded snapshot stacks (#92) over the shared discipline -- see docstring
-        self._hist = UndoStack(_ME_UNDO_MAX)
+        # bounded op-history (#111) over the shared core -- see docstring
+        self._hist = History(self, _MusicOps(), max_undo=_ME_UNDO_MAX)
+        self._pre_op = None       # pending pre-edit snapshot from _push_undo(), #111
         self._ensure_nonempty()
 
     # -- bank bootstrapping --------------------------------------------------
@@ -242,7 +268,7 @@ class MusicEditor(UndoRedoMixin):
             return
         self._push_undo()
         st[0] = _me_clamp(st[0] + d, _ME_PITCH_MIN, _ME_PITCH_MAX)
-        self.dirty = True
+        self._commit_op()
 
     def set_pitch(self, pitch):
         """Set the current step to an explicit pitch (a semitone index, or <0 rest)."""
@@ -251,7 +277,7 @@ class MusicEditor(UndoRedoMixin):
             return
         self._push_undo()
         st[0] = _ME_REST if pitch < 0 else _me_clamp(int(pitch), _ME_PITCH_MIN, _ME_PITCH_MAX)
-        self.dirty = True
+        self._commit_op()
 
     def toggle_rest(self, default_pitch=57):
         """Toggle the current step between a rest and a real note. Leaving a rest
@@ -264,7 +290,7 @@ class MusicEditor(UndoRedoMixin):
             st[0] = _me_clamp(int(default_pitch), _ME_PITCH_MIN, _ME_PITCH_MAX)
         else:
             st[0] = _ME_REST
-        self.dirty = True
+        self._commit_op()
 
     def cycle_wave(self, d=1):
         """Step the current step's waveform (square/triangle/saw/noise), wrapping."""
@@ -274,7 +300,7 @@ class MusicEditor(UndoRedoMixin):
         self._push_undo()
         span = _ME_WAVE_MAX - _ME_WAVE_MIN + 1
         st[1] = _ME_WAVE_MIN + (st[1] - _ME_WAVE_MIN + d) % span
-        self.dirty = True
+        self._commit_op()
 
     def nudge_vol(self, d):
         """Raise/lower the current step's volume (0=silent .. 7=loud), clamped."""
@@ -283,7 +309,7 @@ class MusicEditor(UndoRedoMixin):
             return
         self._push_undo()
         st[2] = _me_clamp(st[2] + d, _ME_VOL_MIN, _ME_VOL_MAX)
-        self.dirty = True
+        self._commit_op()
 
     def cycle_vol(self, d=1):
         """Step the current step's volume with wraparound (7 -> 0), so a single
@@ -294,7 +320,7 @@ class MusicEditor(UndoRedoMixin):
         self._push_undo()
         span = _ME_VOL_MAX - _ME_VOL_MIN + 1
         st[2] = _ME_VOL_MIN + (st[2] - _ME_VOL_MIN + d) % span
-        self.dirty = True
+        self._commit_op()
 
     def add_step(self):
         """Append a step (a copy of the current one, or a default) to the current SFX
@@ -307,7 +333,7 @@ class MusicEditor(UndoRedoMixin):
         new = list(src) if src is not None else [_ME_REST, _ME_WAVE_MIN, _ME_VOL_MAX - 1]
         s.steps.insert(self.step + 1, new)
         self.step += 1
-        self.dirty = True
+        self._commit_op()
 
     def del_step(self):
         """Remove the current step (keeps at least one step so the grid never empties)."""
@@ -318,7 +344,7 @@ class MusicEditor(UndoRedoMixin):
         del s.steps[self.step]
         if self.step >= len(s.steps):
             self.step = len(s.steps) - 1
-        self.dirty = True
+        self._commit_op()
 
     def move_step(self, d):
         """Reorder (#92): swap the current step with its neighbor d away (+1 right/
@@ -333,7 +359,7 @@ class MusicEditor(UndoRedoMixin):
         self._push_undo()
         s.steps[self.step], s.steps[j] = s.steps[j], s.steps[self.step]
         self.step = j
-        self.dirty = True
+        self._commit_op()
 
     # -- tempo / length ------------------------------------------------------
     def nudge_speed(self, d):
@@ -344,7 +370,7 @@ class MusicEditor(UndoRedoMixin):
             return
         self._push_undo()
         obj.speed = _me_clamp(obj.speed + d, _ME_SPEED_MIN, _ME_SPEED_MAX)
-        self.dirty = True
+        self._commit_op()
 
     def toggle_loop(self):
         """Flip the loop flag of the active object (SFX in sfx view, track in song)."""
@@ -353,7 +379,7 @@ class MusicEditor(UndoRedoMixin):
             return
         self._push_undo()
         obj.loop = not obj.loop
-        self.dirty = True
+        self._commit_op()
 
     # -- song (phrase) edits -------------------------------------------------
     def cur_slot_value(self):
@@ -372,7 +398,7 @@ class MusicEditor(UndoRedoMixin):
         self._push_undo()
         hi = max(0, len(self.bank.sfx) - 1)
         t.pattern[self.slot] = _me_clamp(t.pattern[self.slot] + d, 0, hi)
-        self.dirty = True
+        self._commit_op()
 
     def set_slot(self, sfx_id):
         """Set the current phrase slot to a specific SFX id (clamped to the bank)."""
@@ -382,7 +408,7 @@ class MusicEditor(UndoRedoMixin):
         self._push_undo()
         hi = max(0, len(self.bank.sfx) - 1)
         t.pattern[self.slot] = _me_clamp(int(sfx_id), 0, hi)
-        self.dirty = True
+        self._commit_op()
 
     def add_slot(self):
         """Append a phrase slot (copying the current slot's SFX id) and move to it."""
@@ -393,7 +419,7 @@ class MusicEditor(UndoRedoMixin):
         val = t.pattern[self.slot] if 0 <= self.slot < len(t.pattern) else 0
         t.pattern.insert(self.slot + 1, val)
         self.slot += 1
-        self.dirty = True
+        self._commit_op()
 
     def del_slot(self):
         """Remove the current phrase slot (keeps at least one so a track always plays)."""
@@ -404,7 +430,7 @@ class MusicEditor(UndoRedoMixin):
         del t.pattern[self.slot]
         if self.slot >= len(t.pattern):
             self.slot = len(t.pattern) - 1
-        self.dirty = True
+        self._commit_op()
 
     def move_slot(self, d):
         """Reorder (#92): swap the current phrase slot with its neighbor d away
@@ -418,7 +444,7 @@ class MusicEditor(UndoRedoMixin):
         self._push_undo()
         t.pattern[self.slot], t.pattern[j] = t.pattern[j], t.pattern[self.slot]
         self.slot = j
-        self.dirty = True
+        self._commit_op()
 
     # -- copy / paste (#92) ---------------------------------------------------
     def copy(self):
@@ -447,7 +473,7 @@ class MusicEditor(UndoRedoMixin):
                 return
             self._push_undo()
             st[0], st[1], st[2] = val
-            self.dirty = True
+            self._commit_op()
         elif self.view == self.SONG_VIEW and kind == "slot":
             t = self.cur_track()
             if t is None or not (0 <= self.slot < len(t.pattern)):
@@ -455,7 +481,7 @@ class MusicEditor(UndoRedoMixin):
             self._push_undo()
             hi = max(0, len(self.bank.sfx) - 1)
             t.pattern[self.slot] = _me_clamp(int(val), 0, hi)
-            self.dirty = True
+            self._commit_op()
 
     # -- whole-object duplicate (#92) ------------------------------------------
     def duplicate_sfx(self):
@@ -501,12 +527,12 @@ class MusicEditor(UndoRedoMixin):
         self.dirty = True
         self._clamp()
 
-    # -- bounded in-editor undo/redo (#92) -------------------------------------
+    # -- bounded in-editor undo/redo (#92, on the #111 op-history core) --------
     # Scoped to the ACTIVE object's own editable fields (steps/pattern + speed +
-    # loop) -- a snapshot per content edit, depth _ME_UNDO_MAX. Navigation (which
-    # SFX/track is selected) and whole-object duplicate are NOT tracked; only what
-    # was actually done to an object is undoable, and undoing restores the view +
-    # object + cursor the edit happened in.
+    # loop) -- a snapshot pair per content edit, depth _ME_UNDO_MAX. Navigation
+    # (which SFX/track is selected) and whole-object duplicate are NOT tracked;
+    # only what was actually done to an object is undoable, and undoing restores
+    # the view + object + cursor the edit happened in.
     def _snapshot(self):
         """Capture the active object's mutable fields + the cursor pointing at it,
         or None if there is nothing to snapshot (an empty bank)."""
@@ -572,22 +598,48 @@ class MusicEditor(UndoRedoMixin):
         self._clamp()
 
     def _push_undo(self):
-        """Record the active object's pre-edit state. Called by every content-
-        mutating method BEFORE it changes anything. A fresh edit always drops the
-        redo tail (same rule as moy_carts' durable journal)."""
-        snap = self._snapshot()
-        if snap is None:
-            return
-        self._hist.push(snap)
+        """Stash the active object's pre-edit snapshot (#111). Called by every
+        content-mutating method BEFORE it changes anything; `_commit_op()`
+        (called AFTER the mutation) closes the pair out into one History op."""
+        self._pre_op = self._snapshot()
 
-    # undo/redo come from UndoRedoMixin over these hooks.
-
-    def _hist_reverse(self, entry):
-        """A fresh _snapshot_of the POPPED entry's object (pre-restore) -- the
-        pair is a true before/after even if the selection walked elsewhere; a
-        stale object (None) simply isn't stashed."""
-        return self._snapshot_of(entry)
-
-    def _hist_apply(self, snap, is_redo):
-        self._restore(snap)
+    def _commit_op(self):
+        """Close out a _push_undo()-opened edit: diff the active object's
+        CURRENT state against the stashed pre-edit snapshot (via _snapshot_of,
+        which re-derives the live cursor for that SAME object -- the pair is a
+        true before/after even though nothing walked away in between) and
+        record one #111 op iff it actually changed. Called at the end of every
+        content-mutating method in place of a bare `self.dirty = True`; always
+        marks dirty regardless (mirrors the old unconditional set)."""
+        pre = self._pre_op
+        self._pre_op = None
         self.dirty = True
+        if pre is None:
+            return
+        post = self._snapshot_of(pre)
+        if post is not None and post != pre:
+            self._hist.record([pre, post])
+
+    # -- undo / redo (over the shared #111 op-history) -------------------------
+
+    @property
+    def _undo(self):
+        return self._hist._undo          # the op undo stack (tests inspect it)
+
+    @property
+    def _redo(self):
+        return self._hist._redo
+
+    def can_undo(self):
+        return self._hist.can_undo()
+
+    def can_redo(self):
+        return self._hist.can_redo()
+
+    def undo(self):
+        """Revert the last recorded edit; True iff a step was taken."""
+        return self._hist.undo() is not None
+
+    def redo(self):
+        """Re-apply the last undone edit; True iff a step was taken."""
+        return self._hist.redo() is not None
