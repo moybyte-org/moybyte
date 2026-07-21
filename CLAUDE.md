@@ -94,7 +94,8 @@ to whoever called it.
   hold-to-exit toast — zero knowledge of who launched it; exit pops to the run
   CALLER (launcher→launcher; Editor-PLAY→the same tab). **`EditorApp`** = ONE
   authoring app opened on a `Project`: the tab ladder Config→Blocks→Code→Sprites→
-  Map→Scene→Music (+ PROJECTS/PLAY/SAVE in its lent bar zone), whose tabs ARE the
+  Map→Scene→Music (+ PROJECTS/UNDO/REDO/PLAY in its lent bar zone — there is NO
+  SAVE, see #111 below), whose tabs ARE the
   extracted `*_layer.py` surfaces — all seven tabs are **system-domain responsive**
   (#39 step 3: `PaintLayout`/`MapLayout`/`SceneLayout`/`MusicLayout`/`CardsLayout`
   join `CodeLayout`/`BlockLayout`, each `_base`-verbatim byte-identical at 320×240/1×),
@@ -164,7 +165,7 @@ to whoever called it.
   zone = OS status (clock/wifi/batt/≡ + a **context-X** that exits the active app;
   the launcher root draws no X). LEFT zone = LENT to the active app (`draw_zone`):
   the launcher shows the selected cart's name, the Editor its PROJECTS/tab-ladder/
-  PLAY/SAVE icons. Icons stay 16×16 sprites from the editable `IconSheet`
+  UNDO/REDO/PLAY icons. Icons stay 16×16 sprites from the editable `IconSheet`
   (Settings → EDIT ICONS). **The bar hides entirely while a GAME plays** (the cart
   owns all 320×240); tools/apps run WITH a minimal bar (title + status + X) so
   they're always exitable.
@@ -183,9 +184,15 @@ to whoever called it.
 - `runtime/moy_carts.py` — the `.moy` store (scan/load/save_*/create/duplicate/delete;
   versioned `seed_builtins` re-seed; `system_icons.moygfx` bar theme; only `json`+`os`)
   plus the **per-project undo/redo journal** (`journal.jsonl` append-only + full-file
-  snapshots + an atomic cursor, torn-snapshot-safe; commits fire on a typing-idle
-  autosave debounce + hard commits on tab-leave/PLAY; Ctrl+Z/Y walks it in the code
-  editor) and **blocks↔code graduation** (MakeCode model: a diverging code commit —
+  snapshots + an atomic **per-file cursor map** (#111: tolerant migration from the old
+  single seq), torn-snapshot-safe; commits fire on a typing-idle autosave debounce +
+  hard commits on EVERY exit path — tab-leave/PLAY/workspace-swap/HOME/window-X; there
+  is NO SAVE button or concept, and no dirty-star UI. **Undo is unified (#111,
+  `runtime/op_history.py`)**: every Editor tab + Writer/Sheets keep fine-grained in-RAM
+  ops (`History`/`OpCodec`, keyframe+ops; commits embed the op batch in their journal
+  line, Desk-Lab apps persist theirs in `files/.history/` sidecars), and the ONE bar
+  UNDO/REDO pair walks local ops first, then whole commits **scoped to the active
+  tab's file(s)** — never another tab's) and **blocks↔code graduation** (MakeCode model: a diverging code commit —
   conservative recompile-and-normalize compare — stores `"graduated": true` in the
   manifest with a journal rider; the Blocks tab goes read-only + celebrates; undoing
   past the graduating commit un-graduates). Also owns **cover thumb sidecars**
