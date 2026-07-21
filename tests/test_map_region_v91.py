@@ -122,9 +122,9 @@ def test_map_paste_is_a_single_undo_step():
     _put(me, 1, 1, 4)                    # a 2x2 block, all 4 cells set
     me.set_selection(0, 0, 1, 1)
     me.copy_selection()
-    steps_before = len(me._hist.undo)
+    steps_before = len(me._undo)         # #111: the op-history undo stack
     assert me.paste(5, 5) is True
-    assert len(me._hist.undo) == steps_before + 1     # 4 cells, ONE undo step
+    assert len(me._undo) == steps_before + 1          # 4 cells, ONE undo step
     me.undo()                            # one undo reverts the whole paste
     assert me.tilemap.mget(5, 5) == -1
     assert me.tilemap.mget(6, 6) == -1

@@ -1,11 +1,34 @@
 """PaintEditor (#4) + MapEditor (#32) -- pixel-paint state over a sheet tile
 and tile-placement state over a TileMap. Split out of editors.py (which
-re-exports them); history via the shared editors_base discipline."""
+re-exports them).
+
+Undo/redo runs on the shared #111 op-history core (runtime/op_history.py): each
+editor keeps ONE `History` per open sheet/map over a small OpCodec, replacing the
+per-editor UndoStack rings. The codecs record JSON-able ops (flat ints + hex
+blobs -- MicroPython-safe, frozen on device) that INVERT in place carrying their
+own pre-image, so the SAME batch a stroke records in RAM is the batch a project
+commit embeds in its journal line (`History.flush()`), and the #88 bar UNDO/REDO
+icons walk it before falling back to the coarse whole-commit journal (#111)."""
 
 try:
-    from editors_base import UndoStack, UndoRedoMixin
+    from op_history import History
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_base import UndoStack, UndoRedoMixin
+    from runtime.op_history import History
+
+try:                                              # binascii = MicroPython + CPython
+    import ubinascii as _binascii
+except ImportError:  # pragma: no cover
+    import binascii as _binascii
+
+
+def _b2hex(blob):
+    """Bytes -> lowercase hex string (JSON-able map snapshot blob, #111)."""
+    return _binascii.hexlify(bytes(blob)).decode()
+
+
+def _hex2b(text):
+    """Hex string -> bytes (the inverse of _b2hex, for a snapshot restore)."""
+    return _binascii.unhexlify(text)
 
 
 # -- shape rasterizers (#90) -------------------------------------------------
@@ -116,7 +139,39 @@ def _pe_oval(x0, y0, x1, y1):
     return pts
 
 
-class PaintEditor(UndoRedoMixin):
+class _PaintOps:
+    """OpCodec for PaintEditor (#111): each op is a SPARSE pre/post pixel diff of
+    one edited region, `["p", n, size, spans]` where `spans` is a flat int list
+    `[idx, pre, post, idx, pre, post, ...]` (region-local pixel index + its old and
+    new palette values). JSON-able by construction, so the same op undoes in RAM
+    and replays out of a journal line unchanged. INVERT-only (undo writes `pre`,
+    redo writes `post`); the doc is the PaintEditor -- the codec re-selects the
+    op's sprite/size (so the revert is visible) and psets through the sheet exactly
+    like a paint edit, bumping gen/dirty for a running cart preview."""
+
+    def apply(self, doc, op):          # redo -> lay the POST pixels
+        self._write(doc, op, 2)
+
+    def invert(self, doc, op):         # undo -> lay the PRE pixels
+        self._write(doc, op, 1)
+
+    def _write(self, doc, op, which):
+        n, size, spans = int(op[1]), int(op[2]), op[3]
+        doc.n = n
+        doc.size = size
+        doc._clamp_size()
+        sh = doc.sheet
+        dim = size * sh.TILE            # the STORED size (the region fit when recorded)
+        ox, oy = sh.tile_origin(n)
+        i = 0
+        L = len(spans)
+        while i < L:
+            idx = spans[i]
+            sh.pset(ox + (idx % dim), oy + (idx // dim), spans[i + which])
+            i += 3
+
+
+class PaintEditor:
     """Pixel-paint state over a SpriteSheet tile: current sprite + paint color +
     sprite size. The shell maps taps on the zoomed grid/palette to these calls.
 
@@ -157,13 +212,14 @@ class PaintEditor(UndoRedoMixin):
         # byte-identically to before (the #39 parity contract).
         self.sel = None
         self.clip = None
-        # In-editor undo/redo (#90): two bounded stacks of region snapshots. Paint
-        # edits are far too frequent to journal to SD per pixel (the durable journal
-        # fires on a SAVE commit, project.py), so an in-RAM stroke-level ring gives
-        # responsive undo; a SAVE still lands a durable step. Each entry is
-        # (n, size, bytes) -- the region's tile origin + size + its flat pixels -- so
-        # a restore targets the right tiles even after the sprite/size was changed.
-        self._hist = UndoStack(self.UNDO_DEPTH)
+        # In-editor undo/redo (#90/#111): ONE op-history over the paint OpCodec,
+        # bounded to UNDO_DEPTH RAM steps (paint edits are far too frequent to
+        # journal to SD per pixel -- the durable journal fires on a commit,
+        # project.py, which also drains this History's op batch into its line). Each
+        # op is a sparse (n, size, changed-pixel) diff, so undo/redo target the
+        # right tiles even after the sprite/size was changed, and the batch survives
+        # the JSON round-trip through the journal unchanged.
+        self._hist = History(self, _PaintOps(), max_undo=self.UNDO_DEPTH)
         self._stroke_pre = None   # pending pre-stroke snapshot (set on press, #90)
 
     @property
@@ -252,22 +308,24 @@ class PaintEditor(UndoRedoMixin):
                 k += 1
         return (n, size, bytes(buf))
 
-    def _restore(self, snap):
-        """Write a snapshot back and re-select its sprite/size so the revert is
-        visible (undo/redo). Goes through pset so `gen`/`dirty` bump exactly like a
-        paint edit (a running cart preview picks it up)."""
-        n, size, buf = snap
-        self.n = n
-        self.size = size
-        self._clamp_size()
-        dim = size * self.sheet.TILE
-        ox, oy = self.sheet.tile_origin(n)
-        sh = self.sheet
-        k = 0
-        for ly in range(dim):
-            for lx in range(dim):
-                sh.pset(ox + lx, oy + ly, buf[k])
-                k += 1
+    def _push_diff(self, n, size, prebytes, postbytes):
+        """Record ONE undo op = the sparse pre/post pixel diff of the (n, size)
+        region (#111). `spans` is a flat int list [idx, pre, post, ...] over just
+        the pixels that changed, so a small stroke is a small op and the batch
+        JSON-round-trips through the journal unchanged. A no-diff (nothing changed)
+        records nothing -- the callers already gate on `buf != prebytes`, this is
+        belt-and-braces so gen/dirty and the undo ring stay in lock-step."""
+        spans = []
+        ap = spans.append
+        for idx in range(len(prebytes)):
+            p = prebytes[idx]
+            q = postbytes[idx]
+            if p != q:
+                ap(idx)
+                ap(p)
+                ap(q)
+        if spans:
+            self._hist.record(["p", n, size, spans])
 
     def _write_region(self, buf):
         """Write a dim*dim buffer back into the current region."""
@@ -293,7 +351,7 @@ class PaintEditor(UndoRedoMixin):
         build(buf, self.dim)
         if buf != prebytes:                # bytearray == bytes compares by content
             self._write_region(buf)
-            self._hist.push(pre)
+            self._push_diff(pre[0], pre[1], prebytes, buf)
 
     # -- stroke boundaries (a drag = ONE undo step, #90) ---------------------
 
@@ -304,23 +362,38 @@ class PaintEditor(UndoRedoMixin):
             self._stroke_pre = self._capture()
 
     def end_stroke(self):
-        """Close a brush stroke: commit its pre-snapshot to the undo ring iff the
+        """Close a brush stroke: record its pre/post diff as ONE undo op iff the
         stroke actually changed pixels. Idempotent (safe to call every idle frame)."""
         if self._stroke_pre is not None:
             pre = self._stroke_pre
             self._stroke_pre = None
-            if self._capture(pre[0], pre[1])[2] != pre[2]:
-                self._hist.push(pre)
+            post = self._capture(pre[0], pre[1])[2]
+            if post != pre[2]:
+                self._push_diff(pre[0], pre[1], pre[2], post)
 
-    # -- undo / redo (UndoRedoMixin over the shared UndoStack) ---------------
+    # -- undo / redo (over the shared #111 op-history) -----------------------
 
-    def _hist_reverse(self, snap):
-        """The reverse of a region snapshot: the CURRENT pixels of that region
-        (captured onto the opposite stack before the restore)."""
-        return self._capture(snap[0], snap[1])
+    @property
+    def _undo(self):
+        return self._hist._undo          # the op undo stack (tests inspect its depth)
 
-    def _hist_apply(self, snap, is_redo):
-        self._restore(snap)
+    @property
+    def _redo(self):
+        return self._hist._redo
+
+    def can_undo(self):
+        return self._hist.can_undo()
+
+    def can_redo(self):
+        return self._hist.can_redo()
+
+    def undo(self):
+        """Revert the last recorded edit; True iff a step was taken."""
+        return self._hist.undo() is not None
+
+    def redo(self):
+        """Re-apply the last undone edit; True iff a step was taken."""
+        return self._hist.redo() is not None
 
     # -- bucket fill (#90) ---------------------------------------------------
 
@@ -532,7 +605,57 @@ class PaintEditor(UndoRedoMixin):
         return True
 
 
-class MapEditor(UndoRedoMixin):
+class _MapOps:
+    """OpCodec for MapEditor (#111): two JSON-able op forms, both replayed against
+    the live TileMap cells (mirrors the old MapEditor._apply exactly, just over
+    device-safe payloads).
+
+      * DELTA: `[(idx, prev, new), ...]` -- a list of per-cell (index, old, new)
+        triples, the cheap form for a small gesture. Serializes to a list-of-lists
+        and reads back the same; the codec indexes by position, so tuple/list both
+        work.
+      * SNAPSHOT: `("snap", w, h, before_hex, after_hex)` -- a whole-map before/after
+        pair (hex strings) for a gesture that touched a large share of the map (a
+        full-map flood/rect), so a step's retained size stays bounded by the map,
+        not one boxed tuple per cell.
+
+    INVERT-only: undo reverses the deltas / restores `before`; redo re-applies /
+    restores `after`. The doc is the MapEditor; `tm.dirty`/`gen` bump so a running
+    cart's map cache rebuilds."""
+
+    def apply(self, doc, op):          # redo -> forward
+        self._replay(doc, op, True)
+
+    def invert(self, doc, op):         # undo -> reverse
+        self._replay(doc, op, False)
+
+    def _replay(self, doc, op, forward):
+        tm = doc.tilemap
+        cells = tm.cells
+        if op and op[0] == "snap":                 # whole-map snapshot step
+            w, h = op[1], op[2]
+            if w == tm.w and h == tm.h:            # a resize clears history -> guarded
+                cells[:] = _hex2b(op[4] if forward else op[3])
+        else:                                      # per-cell delta step
+            n = len(cells)
+            if forward:
+                for e in op:
+                    idx = e[0]
+                    if 0 <= idx < n:
+                        cells[idx] = e[2]
+            else:
+                # Unwind newest -> oldest so a cell written twice in one gesture
+                # lands back on its ORIGINAL byte, not an intermediate one.
+                for k in range(len(op) - 1, -1, -1):
+                    e = op[k]
+                    idx = e[0]
+                    if 0 <= idx < n:
+                        cells[idx] = e[1]
+        tm.dirty = True
+        tm.gen += 1
+
+
+class MapEditor:
     """Tile-placement state over a TileMap + its SpriteSheet -- the map analogue
     of PaintEditor (#32). PaintEditor places palette indices onto a sprite tile;
     this places sprite ids onto map cells. Pure logic: the shell maps taps on the
@@ -566,15 +689,15 @@ class MapEditor(UndoRedoMixin):
         # fill, a flood) is one step. Small steps record ONLY the changed cells as
         # (index, prev_byte, new_byte) triples (a LIST); a step that touched more
         # than w*h/SNAP_DIV cells is compacted by end_edit into a whole-map
-        # before/after snapshot -- a ("snap", w, h, before, after) TUPLE of two
-        # bytes() blobs (2 bytes/cell vs ~30+ per boxed tuple on MicroPython), so a
-        # full-map flood/rect step is ~KBs, never hundreds of KB. `begin_edit`
-        # opens the batch, `place`/`erase`/`fill_rect`/`flood` append to it via
-        # `_set`, `end_edit` commits it (dropping the redo stack). Bounded to
-        # UNDO_MAX steps so a long session can't grow without limit.
+        # before/after snapshot -- a ("snap", w, h, before_hex, after_hex) tuple of
+        # two hex blobs (2 bytes/cell), so a full-map flood/rect step is ~KBs, never
+        # hundreds of KB. `begin_edit` opens the batch, `place`/`erase`/`fill_rect`/
+        # `flood` append to it via `_set`, `end_edit` records it as one op into the
+        # shared #111 op-history (dropping the redo stack). Bounded to UNDO_MAX RAM
+        # steps; a project commit drains the batch into its journal line.
         self.cam_y = 0
         self._rec = None     # open edit batch (list of (idx, prev, new)) or None
-        self._hist = UndoStack(self.UNDO_MAX)   # committed edits (shared discipline)
+        self._hist = History(self, _MapOps(), max_undo=self.UNDO_MAX)
         # Region select / copy / paste / move (#91), mirroring PaintEditor's model
         # (editors_paint_map, #90) so the two editors feel identical. `sel` is the
         # active selection rectangle in MAP CELLS (x0,y0,x1,y1 inclusive) or None;
@@ -599,9 +722,10 @@ class MapEditor(UndoRedoMixin):
     def end_edit(self):
         """Commit the open batch as one undo step (no-op if it made no change or was
         aborted). A big batch (more than w*h/SNAP_DIV changed cells -- a full-map
-        flood/rect) is compacted to a whole-map before/after snapshot so a step's
-        retained size is bounded by 2*w*h bytes, never a per-cell tuple list (#91).
-        Committing an edit drops the redo stack -- the classic branch."""
+        flood/rect) is compacted to a whole-map before/after HEX snapshot so a
+        step's retained size is bounded by ~2*w*h bytes, never a per-cell tuple list
+        (#91). The cells are already edited (via _set), so `record` just logs the op
+        -- which also drops the redo stack, the classic branch (#111)."""
         rec = self._rec
         self._rec = None
         if rec:
@@ -614,8 +738,8 @@ class MapEditor(UndoRedoMixin):
                 for k in range(len(rec) - 1, -1, -1):
                     e = rec[k]
                     before[e[0]] = e[1]
-                rec = ("snap", tm.w, tm.h, bytes(before), after)
-            self._hist.push(rec)
+                rec = ("snap", tm.w, tm.h, _b2hex(before), _b2hex(after))
+            self._hist.record(rec)
 
     def abort_edit(self):
         """Discard the open batch without committing it (the cells are reverted by
@@ -638,46 +762,36 @@ class MapEditor(UndoRedoMixin):
         if self._rec is not None and new != prev:
             self._rec.append((idx, prev, new))
 
-    def _apply(self, rec, forward):
-        """Replay (forward) or reverse a committed edit onto the live cells, then
-        bump dirty/gen so a running cart's map cache rebuilds. Two step forms (#91):
-        a LIST of (idx, prev, new) cell deltas, or a compacted ("snap", w, h,
-        before, after) whole-map snapshot (undo restores `before`, redo `after`).
-        A snapshot only applies at its recorded dims -- resize clears the history,
-        so a mismatch can't happen; guarded anyway (a wrong-size blob must never
-        be slammed over the live grid)."""
-        tm = self.tilemap
-        cells = tm.cells
-        if type(rec) is tuple:                     # snapshot step
-            _, w, h, before, after = rec
-            if w == tm.w and h == tm.h:
-                cells[:] = after if forward else before
-        else:                                      # per-cell delta step
-            n = len(cells)
-            if forward:
-                for idx, prev, new in rec:
-                    if 0 <= idx < n:
-                        cells[idx] = new
-            else:
-                # Unwind newest -> oldest so a cell written twice in one gesture
-                # lands back on its ORIGINAL byte, not an intermediate one.
-                for k in range(len(rec) - 1, -1, -1):
-                    idx, prev, new = rec[k]
-                    if 0 <= idx < n:
-                        cells[idx] = prev
-        tm.dirty = True
-        tm.gen += 1
+    # -- undo / redo (over the shared #111 op-history) -----------------------
+    # The _MapOps codec (module top) replays a delta/snapshot either way; undo/redo
+    # here just close any open batch first (an in-flight gesture can't be
+    # half-undone) and drive the History.
 
-    # undo/redo come from UndoRedoMixin. The SAME rec moves across the stacks
-    # (the default _hist_reverse) -- a delta/snapshot replays either way.
+    @property
+    def _undo(self):
+        return self._hist._undo          # the op undo stack (tests inspect it)
 
-    def _hist_before(self):
-        # Close any open batch first so an in-flight gesture can't be half-undone.
+    @property
+    def _redo(self):
+        return self._hist._redo
+
+    def can_undo(self):
+        return self._hist.can_undo()
+
+    def can_redo(self):
+        return self._hist.can_redo()
+
+    def undo(self):
+        """Revert the last recorded gesture; True iff a step was taken."""
         if self._rec:
             self.end_edit()
+        return self._hist.undo() is not None
 
-    def _hist_apply(self, rec, is_redo):
-        self._apply(rec, is_redo)
+    def redo(self):
+        """Re-apply the last undone gesture; True iff a step was taken."""
+        if self._rec:
+            self.end_edit()
+        return self._hist.redo() is not None
 
     def clear_history(self):
         """Drop the undo/redo stacks (a structural change -- a map resize -- makes

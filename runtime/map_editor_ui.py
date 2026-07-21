@@ -118,12 +118,10 @@ _MAP_ERASE = (14, 198, 40, 20)
 _MAP_CLOSE = (126, 198, 76, 20)
 # Editor toolbar (#91): a compact strip in the title band (between the panel top
 # and the map view, y 16..32) on the RIGHT, clear of the "MAP TILE n z1 *" title
-# text on the left. TOOL cycles the paint tool (pen/box/fill), UNDO/REDO walk the
-# in-editor edit journal, DIM opens the map-resize panel. 26px buttons keep the
-# labels two chars so the whole strip fits the 320px baseline.
+# text on the left. TOOL cycles the paint tool (pen/box/fill), DIM opens the
+# map-resize panel. UNDO/REDO left the strip in #111 (the ONE bar pair is THE undo).
+# 26px buttons keep the labels two chars so the whole strip fits the 320px baseline.
 _MAP_TOOL = (196, 17, 26, 13)
-_MAP_UNDO = (224, 17, 26, 13)
-_MAP_REDO = (252, 17, 26, 13)
 _MAP_DIM = (280, 17, 26, 13)
 # The paint tools (#91), cycled by the TOOL button: STAMP (today's per-cell / SIZE
 # brush), RECT (drag corner-to-corner, fill the rectangle), FLOOD (contiguous
@@ -202,8 +200,10 @@ class MapLayout:
             self.pan_up, self.pan_lf, self.pan_rt, self.pan_dn = \
                 _PAN_UP, _PAN_LF, _PAN_RT, _PAN_DN
             self.erase_btn, self.close_btn = _MAP_ERASE, _MAP_CLOSE
-            self.tool_btn, self.undo_btn, self.redo_btn, self.dim_btn = \
-                _MAP_TOOL, _MAP_UNDO, _MAP_REDO, _MAP_DIM
+            # UNDO/REDO left the strip in #111 (the ONE bar pair is now THE undo,
+            # routed to this editor's op-history) -- TOOL + DIM keep their slots,
+            # the freed middle is spacing.
+            self.tool_btn, self.dim_btn = _MAP_TOOL, _MAP_DIM
             self.pan_thresh = _MAP_PAN_THRESH
             return
         # -- responsive: anchor the palette/d-pad column to the panel's right edge,
@@ -250,15 +250,14 @@ class MapLayout:
         self.sky_btn = (rc_x, row_y, 100 * fs, 20 * fs)
         self.erase_btn = (px + 6 * fs, row_y, 40 * fs, 20 * fs)
         self.close_btn = (px + 118 * fs, row_y, 76 * fs, 20 * fs)
-        # Editor toolbar (#91): the TOOL/UNDO/REDO/DIM strip, right-anchored in the
-        # title band, mirrors the baseline geometry scaled to the panel.
+        # Editor toolbar (#91/#111): the TOOL/DIM strip, right-anchored in the title
+        # band, mirrors the baseline geometry scaled to the panel (UNDO/REDO moved to
+        # the ONE bar pair, so TOOL now abuts DIM).
         tb_y = py + 2 * fs
         tbw, tbh, gap = 26 * fs, 13 * fs, 2 * fs
         tb_right = p_right - 6 * fs
         self.dim_btn = (tb_right - tbw, tb_y, tbw, tbh)
-        self.redo_btn = (self.dim_btn[0] - gap - tbw, tb_y, tbw, tbh)
-        self.undo_btn = (self.redo_btn[0] - gap - tbw, tb_y, tbw, tbh)
-        self.tool_btn = (self.undo_btn[0] - gap - tbw, tb_y, tbw, tbh)
+        self.tool_btn = (self.dim_btn[0] - gap - tbw, tb_y, tbw, tbh)
         self.pan_thresh = _MAP_PAN_THRESH * fs
 
 
@@ -795,12 +794,6 @@ class MapEditorUI:
         if self._in(px, py, lay.tool_btn):     # cycle stamp/rect/flood (#91)
             self._map_cycle_tool()
             return
-        if self._in(px, py, lay.undo_btn):     # in-editor undo (#91)
-            self._map_undo()
-            return
-        if self._in(px, py, lay.redo_btn):     # in-editor redo (#91)
-            self._map_redo()
-            return
         if self._in(px, py, lay.dim_btn):      # open the map-resize panel (#91)
             self.dims_open = True
             return
@@ -1005,16 +998,12 @@ class MapEditorUI:
         cv.print("SKY", sx + sw - 26 * fs, sy + (sh - 8 * fs) // 2, NAMES["white"], 1)
         cv.rectb(sx, sy, sw, sh,
                  NAMES["white"] if me.n < 0 else NAMES["dark_grey"])
-        # Editor toolbar (#91): TOOL (the active tool's pen/box/bucket glyph), UNDO /
-        # REDO (dimmed when the in-editor journal is at an end), the resize glyph (open
-        # the resize panel). Icons instead of the terse two-char labels (#91 icon pass).
+        # Editor toolbar (#91/#111): TOOL (the active tool's pen/box/bucket glyph) +
+        # the resize glyph (open the resize panel). UNDO/REDO moved to the ONE bar
+        # pair. Icons instead of the terse two-char labels (#91 icon pass).
         self._gbtn(_MAP_TOOL_GLYPH.get(self.map_tool),
                    _MAP_TOOL_LABEL.get(self.map_tool, "PN"), lay.tool_btn,
                    NAMES["orange"], cv)
-        self._gbtn("undo", "UN", lay.undo_btn,
-                   NAMES["blue"] if me.can_undo() else NAMES["dark_grey"], cv)
-        self._gbtn("redo", "RE", lay.redo_btn,
-                   NAMES["blue"] if me.can_redo() else NAMES["dark_grey"], cv)
         self._gbtn("resize", "WH", lay.dim_btn, NAMES["dark_green"], cv)
         # Map-resize overlay (#91): drawn LAST so it sits over the whole editor.
         if self.dims_open:

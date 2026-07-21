@@ -74,10 +74,18 @@ class History(object):
     previous keyframe + replay its segment), exactly as the journal already
     documents ("finer, in-session undo stays in the editor's RAM")."""
 
-    def __init__(self, doc, codec, max_ops=MAX_OPS_PER_SEGMENT):
+    def __init__(self, doc, codec, max_ops=MAX_OPS_PER_SEGMENT, max_undo=None):
         self.doc = doc
         self.codec = codec
         self.max_ops = int(max_ops) if max_ops else MAX_OPS_PER_SEGMENT
+        # An OPTIONAL hard bound on the in-RAM undo stack DEPTH (device RAM is
+        # scarce -- the paint/map editors keep a bounded ring, #90/#91): once more
+        # than max_undo ops sit on the undo stack the OLDEST is dropped, so recent
+        # edits stay undoable while older ones fall back to the persistence layer's
+        # snapshots. Sound only with an INVERT codec (a replay codec re-applies
+        # from the session base, so it must keep EVERY op); None (the default) =
+        # unbounded -- the segment cap alone governs (keyframes bound what persists).
+        self.max_undo = int(max_undo) if max_undo else None
         self._undo = []                 # applied ops, oldest .. newest (the undo stack)
         self._redo = []                 # undone ops (newest first pop) -> redo
         self._pending = []              # ops recorded since the last flush()
@@ -101,11 +109,20 @@ class History(object):
         undo stack, clear the redo stack (a new action forks the timeline --
         the Google-Docs rule), and queue it for the next flush(). No I/O."""
         self._undo.append(op)
+        self._cap_undo()
         if self._redo:
             self._redo = []
         self._pending.append(op)
         self._since_keyframe += 1
         return op
+
+    def _cap_undo(self):
+        """Enforce the optional max_undo depth bound: drop the OLDEST undo op(s)
+        once the stack grows past it (the paint/map RAM ring, #90/#91). A no-op
+        when max_undo is None -- the default unbounded History."""
+        if self.max_undo:
+            while len(self._undo) > self.max_undo:
+                del self._undo[0]
 
     # -- undo / redo -----------------------------------------------------------
 
@@ -148,6 +165,7 @@ class History(object):
         op = self._redo.pop()
         self.codec.apply(self.doc, op)
         self._undo.append(op)
+        self._cap_undo()
         self._pending.append(op)
         self._since_keyframe += 1
         return op
