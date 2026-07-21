@@ -208,7 +208,18 @@ def _journal_apply_grad(cart_dir, entry):
         print("Moybyte graduation flag walk failed:", exc)
 
 
-def journal_append(cart_dir, file, new_bytes, grad=None):
+def journal_entry_ops(entry):
+    """The fine-grained op batch (#111) an entry carries between its snapshot and
+    the previous one, or [] for a pre-#111 entry (the field is additive, so old
+    journals -- and every non-ops commit -- simply have no `ops` key). Guarded so
+    a hand-mangled value never crashes a walk: anything but a list reads as []."""
+    if not isinstance(entry, dict):
+        return []
+    ops = entry.get("ops")
+    return ops if isinstance(ops, list) else []
+
+
+def journal_append(cart_dir, file, new_bytes, grad=None, ops=None):
     """Record a durable commit event for `file`: snapshot `new_bytes` under journal/s/
     and RAW-append one line to journal.jsonl (O(1)). Returns the new seq, or None when
     nothing was written (a no-op: the content already matches the current state).
@@ -217,6 +228,13 @@ def journal_append(cart_dir, file, new_bytes, grad=None):
     crash never leaves a log line pointing at a torn snapshot (the orphan snapshot is
     simply unreferenced). A commit made while the cursor is rewound truncates the redo
     tail first (Google-Docs rule). Rotation runs at the end when over cap.
+
+    `ops` (#111): an OPTIONAL list of fine-grained, JSON-able ops (from an editor's
+    op_history.History.flush()) that transform the PREVIOUS keyframe into this one --
+    embedded additively in the commit line so an undo can cross the stroke->commit
+    boundary without a coarse snapshot jump. Snapshots stay the source of truth; a
+    reader that doesn't know about ops ignores the key, and an empty/None batch writes
+    no key at all (old journals + non-ops commits are byte-for-byte as before).
 
     `grad` (Stage 8, spec Section 8): an optional 0/1 GRADUATION rider that rides a
     main.py commit -- the graduated state of the cart AT this commit. When an entry is
@@ -263,6 +281,8 @@ def journal_append(cart_dir, file, new_bytes, grad=None):
     entry = {"seq": seq, "ts": _journal_ts(), "file": file, "snap": snap, "len": len(new_bytes)}
     if grad is not None:
         entry["grad"] = int(grad)                     # Stage 8 graduation rider
+    if ops:
+        entry["ops"] = list(ops)                      # #111 fine-grained op batch (additive)
     with open(log_path, "a") as f:                    # RAW append -- O(1), NOT _write_atomic
         f.write(json.dumps(entry) + "\n")
     total += len(new_bytes)
