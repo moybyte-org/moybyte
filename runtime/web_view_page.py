@@ -387,6 +387,11 @@ if(p.js>PERF.mj)PERF.mj=p.js;if(p.tx>PERF.mt)PERF.mt=p.tx;
 if(p.dr>PERF.md)PERF.md=p.dr;if(p.gap>PERF.mg)PERF.mg=p.gap;if(p.thr)PERF.thr++;}
 if(f.gen!==curGen){curGen=f.gen;ATL=[];LAY={};SURF={};HUD.unknown=0;}
 if(f.cart!==assCart){assCart=f.cart;getA().catch(function(){});}
+// #42 Thread 3: the EFFECTIVE input hint rides every frame (the cart's manifest hint
+// while it owns the keyboard, null on any system surface) -- so the ⌨ summon comes
+// back the moment PLAY exits to the Editor, without waiting for an /assets refetch.
+var fi=f.input||null;
+if(JSON.stringify(fi)!==JSON.stringify(INPUT)){INPUT=fi;applyInputHint();}
 // Stage 9: the browser as a SECOND window manager -- when the frame carries per-WM-surface
 // streams (f.surfaces: bar / app-content / player-viewport, each id-tagged), COMPOSITE them
 // in order (bottom->top) reusing the same rep() interpreter + global ATL/LAY caches; the

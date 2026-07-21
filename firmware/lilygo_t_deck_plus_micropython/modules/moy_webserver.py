@@ -350,7 +350,9 @@ class WebServer:
     The `provider` is a small object the server queries for live data without holding any
     console references itself:
       provider.assets()    -> the /assets dict
-      provider.frame()     -> (cmds, cart_title) for the WS push
+      provider.frame()     -> (cmds, cart_title, input_kinds) for the WS push
+                              (input_kinds = the EFFECTIVE #42 hint, see
+                              web_view.effective_input_kinds)
       provider.apply(events)-> inject browser events
 
     The serve-time defspr/deflayer ship-once bookkeeping lives in the SHARED web_view.ServedState
@@ -676,7 +678,7 @@ class WebServer:
         through served_frame for the serve-time defspr prepend + the atlas gen (the
         same shape the retired HTTP poll served). Times the json-encode + the socket
         send separately (#41 perf log)."""
-        cmds, cart = self.provider.frame()
+        cmds, cart, input_kinds = self.provider.frame()
         # #76: when the committed frame carries per-WM-surface slices, serve + DELTA
         # them -- an unchanged surface (static grid/bar/chrome) ships as a ~30-byte
         # {"same":1} stub instead of its whole command list. served_surfaces runs the
@@ -698,9 +700,10 @@ class WebServer:
             # surfaces mode: the page composites f.surfaces and ignores f.cmds -> send
             # an empty flat list rather than double-shipping the same commands.
             payload = json.dumps(frame_payload([], cart, self.recorder.atlas_gen, perf,
-                                               surfaces=wire))
+                                               surfaces=wire, input_kinds=input_kinds))
         else:
-            payload = json.dumps(frame_payload(cmds, cart, self.recorder.atlas_gen, perf))
+            payload = json.dumps(frame_payload(cmds, cart, self.recorder.atlas_gen, perf,
+                                               input_kinds=input_kinds))
         t1 = ticks_ms()
         ws.send(payload)
         t2 = ticks_ms()

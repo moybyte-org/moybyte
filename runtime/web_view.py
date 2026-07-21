@@ -1231,7 +1231,25 @@ def assets_payload(w, h, palette, sheet, tilemap, cart_title, audio_rate=8000, i
     }
 
 
-def frame_payload(cmds, cart_title, gen=0, perf=None, audio="", surfaces=None):
+def effective_input_kinds(ws):
+    """The manifest input hint (#42 Thread 3), but only while the RUNNING cart
+    actually owns the keyboard (wm.keys_to_cart: fullscreen play / the focused
+    game window). Any system surface -- Editor, launcher, Settings -- needs
+    the FULL control set: the Code tab is exactly where the phone's soft-
+    keyboard summon matters, and gating it by the open cart's hint hid the
+    ⌨ button the moment a buttons-only game was opened for CHANGE. Shared by
+    both web transports so host and device can't drift."""
+    try:
+        if ws is not None and ws.wm.keys_to_cart():
+            cart = getattr(ws, "cart", None)
+            return cart.get("input") if cart else None
+    except Exception:  # noqa: BLE001 -- a hint failure just shows every control
+        pass
+    return None
+
+
+def frame_payload(cmds, cart_title, gen=0, perf=None, audio="", surfaces=None,
+                  input_kinds=None):
     """The per-frame payload: the recorded draw-command list + the cart title (so the client
     refetches /assets on a cart change) + the atlas generation `gen` (the browser resets its
     ATL/LAY caches ONLY when gen changes, lock-step with the served reset). `perf` (device) is
@@ -1241,8 +1259,13 @@ def frame_payload(cmds, cart_title, gen=0, perf=None, audio="", surfaces=None):
     `surfaces` (Stage 9): when present it's the per-WM-surface streams
     ([{"id","domain","cmds"}, ...]) the browser composites IN ORDER (bottom->top) instead of
     the flat `cmds` -- the browser as a second window manager. None keeps the flat-frame shape
-    unchanged (the device + web-view-off path), so every existing consumer is untouched."""
-    p = {"cmds": cmds, "cart": cart_title, "gen": gen, "audio": audio, "perf": perf}
+    unchanged (the device + web-view-off path), so every existing consumer is untouched.
+
+    `input_kinds` is the EFFECTIVE input hint for this frame (effective_input_kinds:
+    the cart's manifest hint while it owns the keyboard, else None) -- per-frame so
+    the page's virtual controls follow PLAY/editor transitions live."""
+    p = {"cmds": cmds, "cart": cart_title, "gen": gen, "audio": audio, "perf": perf,
+         "input": list(input_kinds) if input_kinds else None}
     if surfaces is not None:
         p["surfaces"] = surfaces
     return p

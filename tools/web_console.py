@@ -311,9 +311,9 @@ class WebConsole:
                     dec = host_app._decode_moyimg(blob)
                     if dec is not None:
                         decoded[name] = dec
-            # #42 Thread 3: the open cart's manifest input hint (None -> show every control).
-            cart_obj = getattr(self.ws, "cart", None)
-            input_kinds = cart_obj.get("input") if cart_obj else None
+            # #42 Thread 3: the EFFECTIVE input hint -- the cart's manifest hint only
+            # while it owns the keyboard (playing), never in the Editor (typing!).
+            input_kinds = web_view.effective_input_kinds(self.ws)
             # The SHARED assets builder (host passes the MOY64 RGB palette directly; the device
             # passes its RGB565 LUT and the builder decodes -- detected by element type).
             return web_view.assets_payload(
@@ -457,12 +457,14 @@ class _Handler(BaseHTTPRequestHandler):
             # #76: delta-encode them per connection -- unchanged surfaces ship as stubs; the
             # flat cmds are dropped in surfaces mode (the page ignores them) to halve the wire.
             surfaces = self.console._last_surfaces
+            kinds = web_view.effective_input_kinds(self.console.ws)
             if surfaces is not None:
                 payload = json.dumps(web_view.frame_payload(
-                    [], cart, gen, audio=audio, surfaces=delta.encode(surfaces, gen=gen)))
+                    [], cart, gen, audio=audio, surfaces=delta.encode(surfaces, gen=gen),
+                    input_kinds=kinds))
             else:
                 payload = json.dumps(web_view.frame_payload(
-                    cmds, cart, gen, audio=audio))
+                    cmds, cart, gen, audio=audio, input_kinds=kinds))
             try:
                 # Send under WS_SEND_BUDGET, not the 20ms read-pacing timeout. A
                 # sendall that times out has already written PART of the frame (the

@@ -177,11 +177,17 @@ def test_web_console_assets_carries_the_open_carts_input_hint(tmp_path):
 
 def test_device_webview_assets_passes_the_input_hint_source_wired():
     """Device-side wiring is source-grepped (device_webview.py imports device-only
-    modules): assets() must read the open cart's "input" and forward it as
-    assets_payload's input_kinds= kwarg -- the SAME shared builder the host uses."""
+    modules): assets() AND the per-frame push must forward the EFFECTIVE hint
+    (web_view.effective_input_kinds -- the manifest hint only while the cart owns
+    the keyboard, so the Editor keeps the phone's soft-keyboard summon) through
+    the SAME shared builders the host uses."""
     text = open(os.path.join(FW_MODULES, "device_webview.py"), encoding="utf-8").read()
-    assert 'input_kinds = cart.get("input") if cart else None' in text
+    assert "input_kinds = self._web.effective_input_kinds(ws)" in text
     assert "decoded or None, input_kinds)" in text
+    assert "self._web.effective_input_kinds(self._ws))" in text   # frame() triple
+    server = open(os.path.join(FW_MODULES, "moy_webserver.py"), encoding="utf-8").read()
+    assert "cmds, cart, input_kinds = self.provider.frame()" in server
+    assert server.count("input_kinds=input_kinds") == 2           # both push shapes
 
 
 # ---------------------------------------------------------------------------

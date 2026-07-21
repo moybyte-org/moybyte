@@ -1345,3 +1345,27 @@ def test_hop_quest_mapped_layer_background_replays_identical(tmp_path):
         else:
             assert not defl, "later frames blit the shipped layer by reference"
     assert ws.cart_error is None
+
+
+def test_effective_input_hint_never_hides_the_keyboard_in_the_editor(tmp_path):
+    """#42 Thread 3 regression: a buttons-only cart's manifest hint must apply
+    only while the cart OWNS the keyboard (playing). Opening the same cart for
+    CHANGE (the Editor -- typing!) must report None so the phone page keeps its
+    soft-keyboard summon; PLAY from the editor re-applies the hint, and exiting
+    back drops it again."""
+    from runtime import host_app, web_view
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    for i, c in enumerate(ws.picker.items):
+        if c.get("title") == "Battle City":
+            ws.picker.sel = i
+            break
+    ws.open_picker()
+    ws.pick_selected()
+    assert ws.screen == "menu"
+    assert tuple(ws.cart.get("input")) == ("buttons",)      # the manifest hint
+    assert web_view.effective_input_kinds(ws) is None       # ...but the EDITOR types
+    ws.run(ws.project, ws.editor_app)                       # PLAY
+    assert ws.screen == "desktop"
+    assert tuple(web_view.effective_input_kinds(ws)) == ("buttons",)
+    ws._exit_to_caller()
+    assert web_view.effective_input_kinds(ws) is None       # back in the editor

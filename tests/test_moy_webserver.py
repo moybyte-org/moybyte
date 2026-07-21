@@ -1563,7 +1563,7 @@ class _FakeProvider:
         return web.assets_payload(WIDTH, HEIGHT, PAL565, None, None, "Demo", 8000)
 
     def frame(self):
-        return (self._cmds, "Demo")
+        return (self._cmds, "Demo", None)
 
     def apply(self, events):
         self.applied.extend(events)

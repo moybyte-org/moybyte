@@ -434,8 +434,9 @@ class WebView:
                 dec = _decode_moyimg(raw[name])
                 if dec is not None:
                     decoded[name] = dec
-        # #42 Thread 3: the open cart's manifest input hint (None -> show every control).
-        input_kinds = cart.get("input") if cart else None
+        # #42 Thread 3: the EFFECTIVE input hint -- the cart's manifest hint only
+        # while it owns the keyboard (playing), never in the Editor (typing!).
+        input_kinds = self._web.effective_input_kinds(ws)
         return self._web.assets_payload(self._canvas.w, self._canvas.h, PAL565,
                                         getattr(ws, "sheet", None),
                                         getattr(ws, "tilemap", None), title, rate,
@@ -445,7 +446,9 @@ class WebView:
         cart = getattr(self._ws, "cart", None)
         title = cart.get("title") if cart else None
         cmds = self._rec.frame() if self._rec is not None else []
-        return (cmds, title)
+        # The per-frame EFFECTIVE hint (see assets above) so the page's controls
+        # follow PLAY/editor transitions live -- same triple the host serves.
+        return (cmds, title, self._web.effective_input_kinds(self._ws))
 
     def apply(self, events):
         # Route pointer events through a sink (captured into browser-pointer state and
