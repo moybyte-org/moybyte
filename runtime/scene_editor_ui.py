@@ -584,8 +584,6 @@ class SceneEditorUI:
         if self.scene_name:
             title += " " + str(self.scene_name)[:8].upper()
         title += "  TILE " + str(se.n if se else 0) + "  z" + str(self.scene_zoom + 1)
-        if se is not None and se.dirty:
-            title += " *"
         cv.print(title, lay.title_xy[0], lay.title_xy[1],
                  th["ink"] if light else NAMES["green"], 1)
         if se is None or sheet is None:

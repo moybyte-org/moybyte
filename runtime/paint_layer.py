@@ -689,9 +689,10 @@ class PaintLayer:
         # baseline needs the black plate.
         cv.rect(*(lay.panel + ((th["surface"] if light else NAMES["black"]),)))
         cv.rectb(*(lay.panel + ((th["author"] if light else NAMES["orange"]),)))
+        # No dirty star: SAVE (the button and the concept) is gone (#111) -- autosave
+        # commits pending edits within seconds, so "unsaved" is not a state a kid can
+        # act on; write FAILURES surface loudly via ws.save_status instead.
         title = ("ICONS  TILE " if ws._editing_icons else "PAINT  SPR ") + str(pe.n if pe else 0)
-        if sheet is not None and sheet.dirty:
-            title = title + " *"
         cv.print(title, lay.title_xy[0], lay.title_xy[1],
                  th["ink"] if light else NAMES["orange"], 1)
         if pe is None or sheet is None:

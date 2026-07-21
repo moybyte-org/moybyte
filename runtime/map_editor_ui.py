@@ -871,8 +871,6 @@ class MapEditorUI:
         else:
             title = "MAP  TILE " + str(me.n if me else 0)
         title = title + "  z" + str(self.map_zoom + 1)
-        if ws.project.tilemap is not None and ws.project.tilemap.dirty:
-            title = title + " *"
         cv.print(title, lay.title_xy[0], lay.title_xy[1],
                  th["ink"] if light else NAMES["green"], 1)
         if me is None or sheet is None or ws.project.tilemap is None:

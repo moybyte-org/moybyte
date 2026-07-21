@@ -466,8 +466,6 @@ class MusicEditorUI:
             title = "SFX " + str(me.sfx_idx)
         speed = obj.speed if obj is not None else 0
         loop = bool(obj.loop) if obj is not None else False
-        if me.dirty:
-            title = title + " *"
         # View toggle (far left) | < obj > + title | SPD + tempo +/- | save status.
         ws._btn("SONG" if not song else "SFX", lay.view_btn, NAMES["dark_purple"], cv)
         ws._btn("<", lay.obj_prev, NAMES["indigo"], cv)
