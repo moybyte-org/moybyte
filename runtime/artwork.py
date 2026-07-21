@@ -1171,6 +1171,13 @@ class ArtworkService:
                    (ch - sh * scale) // 2, scale)
         return True
 
+    def wall_size(self):
+        """The wallpaper copy's (w, h) in pixels, or None -- the Appearance
+        preview uses it to aspect-FIT the full image (thumbnail cover-crops
+        at the image's own aspect = no crop)."""
+        data = self._wall_data()
+        return (data[0], data[1]) if data else None
+
     def thumbnail(self, width, height):
         """A current My Art cover thumbnail for the visual Appearance picker."""
         data = self._wall_data()

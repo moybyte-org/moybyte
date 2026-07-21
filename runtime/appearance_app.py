@@ -1,4 +1,14 @@
-"""Responsive visual wallpaper + theme picker system app."""
+"""Responsive visual wallpaper + theme picker system app.
+
+A nod to the classic Display Properties dialog, simplified to the moybyte
+vocabulary and arranged side-by-side (the owner's space verdict): the
+selectable catalog is a LEFT column, and the RIGHT pane previews the choice --
+the IMAGES/CARTS tabs draw a little MONITOR whose screen shows the wallpaper
+IN FULL (the ONLY place it renders; the app sits on a flat panel, never the
+live backdrop), and the THEMES tab draws how moybyte windows will LOOK (an
+inactive strip behind an active window, real WM token roles). One layout,
+every tier -- the monitor scales from the 320x240 shelf to the desktop.
+"""
 
 try:
     from chrome import THEMES
@@ -24,10 +34,15 @@ class AppearanceLayout:
         fs = self.fs
         self.bar_h = 0 if windowed else 18 * fs
         self.tabs_h = 30 * fs
-        self.catalog_h = min(self.h // 2, 142 * fs)
-        self.preview = (0, self.bar_h + self.tabs_h, self.w,
-                        max(1, self.h - self.bar_h - self.tabs_h - self.catalog_h))
-        self.catalog = (0, self.h - self.catalog_h, self.w, self.catalog_h)
+        # Side-by-side: the catalog COLUMN on the left, the preview pane on the
+        # right. `wide` only picks the chunkier paddings/bezels of big surfaces.
+        self.wide = self.w >= 420 * fs and self.h >= 240 * fs
+        band_y = self.bar_h + self.tabs_h
+        band_h = max(1, self.h - band_y)
+        self.catalog_w = max(150 * fs, self.w * 2 // 5)
+        self.catalog = (0, band_y, self.catalog_w, band_h)
+        self.preview = (self.catalog_w, band_y,
+                        max(1, self.w - self.catalog_w), band_h)
         labels = ("IMAGES", "CARTS", "THEMES")
         widths = (70, 62, 70)
         self.tabs = []
@@ -36,6 +51,34 @@ class AppearanceLayout:
             bw = widths[i] * fs
             self.tabs.append((x, self.bar_h + 3 * fs, bw, self.tabs_h - 6 * fs))
             x += bw + 4 * fs
+        # Preview-pane geometry. `field` = the inset desk area the THEMES mock
+        # windows draw over; `screen`/`bezel`/`stand_h` = the monitor. The
+        # screen SNAPS to clean half-frame multiples (160x120 * k) when it can,
+        # else to the exact 4:3 fit -- either way a cart frame fills it edge to
+        # edge (the fit blit resamples below native size).
+        cap = 18 * fs                       # the status caption strip at pane bottom
+        px_, py_, pw_, ph_ = self.preview
+        pad = 8 * fs if self.wide else 4 * fs
+        self.field = (px_ + pad, py_ + pad // 2,
+                      pw_ - pad * 2, max(1, ph_ - cap - pad))
+        self.bezel = 6 * fs if self.wide else 4 * fs
+        self.stand_h = 10 * fs if self.wide else 8 * fs
+        avail_h = ph_ - cap - self.stand_h - 2 * pad - 2 * self.bezel
+        avail_w = pw_ - 2 * pad - 2 * self.bezel
+        if avail_h >= 24 * fs and avail_w >= 32 * fs:
+            k = min(avail_w // 160, avail_h // 120)
+            if k >= 1:
+                sw, sh = 160 * k, 120 * k      # clean half-frame multiple
+            else:
+                sh = max(24, min(avail_h, avail_w * 3 // 4))
+                sh -= sh % 3                   # exact 4:3 (the game canvas aspect)
+                sw = sh * 4 // 3
+            block_h = sh + 2 * self.bezel + self.stand_h
+            sx = px_ + (pw_ - sw) // 2
+            sy = py_ + max(0, (ph_ - cap - block_h) // 2) + self.bezel
+            self.screen = (sx, sy, sw, sh)
+        else:
+            self.screen = None              # no room for a monitor: caption only
 
     def cards(self, count):
         fs = self.fs
@@ -57,7 +100,8 @@ class AppearanceLayout:
 
 
 class AppearanceAppLayer:
-    """Large live preview with visual Images/Carts/Themes catalogs."""
+    """Display-Properties-style picker: monitor/window-mock preview on top,
+    visual Images/Carts/Themes catalogs below."""
 
     id = "appearance"
     domain = "system"
@@ -88,17 +132,25 @@ class AppearanceAppLayer:
         self.layout = AppearanceLayout(w, h, fs, self.ws.windowed_chrome)
 
     def open(self):
-        # Land on the current wallpaper's source category.
-        cart = self.ws._wp_cart_by_id(self.ws.wallpaper_id)
-        self.mode = "images" if cart is not None and cart.get("title") == "My Art" else "carts"
+        # Land on the current wallpaper's source category. Solid fills live on
+        # the IMAGES tab beside My Art.
+        wp = self.ws.wallpaper_id
+        cart = self.ws._wp_cart_by_id(wp)
+        my_art = cart is not None and cart.get("title") == "My Art"
+        fill = isinstance(wp, str) and wp.startswith("fill:")
+        self.mode = "images" if (my_art or fill) else "carts"
         self.sel = self._selected_index()
         self.status = self.mode.upper()
         self.ws._dirty = True
 
     def _image_items(self):
+        # My Art (the paint document) + the built-in solid fills ("fill:<color>"
+        # id strings) -- everything that isn't a live wallpaper CART.
         wall = next((c for c in self.ws.wallpaper_carts()
                      if c.get("title") == "My Art"), None)
-        return [wall] if wall is not None else []
+        items = [wall] if wall is not None else []
+        items.extend(self.ws._FILL_WALLPAPERS)
+        return items
 
     def _cart_items(self):
         return [c for c in self.ws.wallpaper_carts() if c.get("title") != "My Art"]
@@ -110,6 +162,10 @@ class AppearanceAppLayer:
             return self._cart_items()
         return list(THEMES)
 
+    def _wall_id(self, item):
+        """The selectable wallpaper id: a fill item IS its id string."""
+        return item if isinstance(item, str) else self.ws._wp_id_for(item)
+
     def _selected_index(self):
         items = self._items()
         if self.mode == "themes":
@@ -117,8 +173,8 @@ class AppearanceAppLayer:
                 if item[0] == self.ws.theme_name:
                     return i
             return 0
-        for i, cart in enumerate(items):
-            if self.ws._wp_id_for(cart) == self.ws.wallpaper_id:
+        for i, item in enumerate(items):
+            if self._wall_id(item) == self.ws.wallpaper_id:
                 return i
         return 0
 
@@ -138,19 +194,28 @@ class AppearanceAppLayer:
             self.ws.set_theme(item[0], persist=True)
             self.status = item[0].upper() + " THEME"
         else:
-            self.ws.select_wallpaper(self.ws._wp_id_for(item), persist=True)
-            self.status = item.get("title", "WALLPAPER").upper()
+            self.ws.select_wallpaper(self._wall_id(item), persist=True)
+            self.status = self._wall_title(item).upper()
         self.ws._dirty = True
 
+    @staticmethod
+    def _wall_title(item):
+        if isinstance(item, str):              # "fill:dark_blue" -> "Dark Blue"
+            return " ".join(p[:1].upper() + p[1:]
+                            for p in item[5:].split("_") if p)
+        return item.get("title", "WALLPAPER")
+
     def handle_input(self, inp):
+        # The catalog is a vertical column now: up/down walks (and applies) the
+        # list, left/right steps the horizontal tab row.
         items = self._items()
-        if inp.pressed("left") and items:
+        if inp.pressed("up") and items:
             self._apply((self.sel - 1) % len(items))
-        elif inp.pressed("right") and items:
+        elif inp.pressed("down") and items:
             self._apply((self.sel + 1) % len(items))
-        elif inp.pressed("up"):
+        elif inp.pressed("left"):
             self._set_mode(self.MODES[(self.MODES.index(self.mode) - 1) % 3])
-        elif inp.pressed("down"):
+        elif inp.pressed("right"):
             self._set_mode(self.MODES[(self.MODES.index(self.mode) + 1) % 3])
         return True
 
@@ -174,28 +239,35 @@ class AppearanceAppLayer:
         # One shared implementation now (ui.chip) -- pixel-identical delegate.
         _ui.chip(cv, self.ws.theme_colors, r, label, on=on, fs=self.layout.fs)
 
+    # -- drawing --------------------------------------------------------------
+
     def draw(self, dt):
         cv = self.ws.sys_canvas
-        # The preview is the actual wallpaper renderer. Live cart wallpapers animate;
-        # Paint images take the direct resolution-aware system path.
-        self.ws.wallpaper.draw(dt)
         lay = self.layout
         th = self.ws.theme_colors
+        # A flat panel field -- the wallpaper renders ONLY inside the monitor's
+        # screen (owner call: never doubled as a full-bleed backdrop here).
+        cv.rect(0, lay.bar_h, lay.w, lay.h - lay.bar_h, th["panel"])
         cv.rect(0, lay.bar_h, lay.w, lay.tabs_h, 48)
         for i, r in enumerate(lay.tabs):
             self._button(cv, ("IMAGES", "CARTS", "THEMES")[i], r,
                          self.mode == self.MODES[i])
 
-        # A quiet preview caption, not a floating card.
+        if self.mode == "themes":
+            self._draw_theme_preview(cv, lay.field)
+        elif lay.screen is not None:
+            self._draw_monitor(cv, dt)
+
+        # A quiet preview caption along the pane's bottom.
         px, py, pw, ph = lay.preview
-        label = self.status[:max(1, pw // (8 * lay.fs) - 4)]
+        label = self.status[:max(1, pw // (8 * lay.fs) - 2)]
         cv.rect(px, py + ph - 18 * lay.fs, pw, 18 * lay.fs, self.names["black"])
         cv.print(label, px + 8 * lay.fs, py + ph - 13 * lay.fs,
                  self.names["white"], 1)
 
         cx, cy, cw, ch = lay.catalog
         cv.rect(cx, cy, cw, ch, th["panel"])
-        cv.rect(cx, cy, cw, 2 * lay.fs, th["edge"])
+        cv.rect(cx + cw - 2 * lay.fs, cy, 2 * lay.fs, ch, th["edge"])
         items = self._items()
         cards = lay.cards(len(items))
         for i, r in enumerate(cards):
@@ -207,13 +279,96 @@ class AppearanceAppLayer:
         if not self.ws.windowed_chrome:
             self.ws.bar_layer._draw_status_strip("tool")
 
+    def _draw_monitor(self, cv, dt):
+        """The Background-tab nod: a little monitor whose 4:3 screen shows the
+        FULL wallpaper -- a cart frame fills it edge to edge, My Art letterboxes
+        to its own aspect, a fill floods it."""
+        lay = self.layout
+        n = self.names
+        fs = lay.fs
+        sx, sy, sw, sh = lay.screen
+        bz = lay.bezel
+        mx, my = sx - bz, sy - bz
+        mw, mh = sw + 2 * bz, sh + 2 * bz
+        cv.rect(mx, my, mw, mh, n["light_grey"])              # the case
+        cv.rectb(mx, my, mw, mh, n["dark_grey"])
+        cv.rectb(sx - 1, sy - 1, sw + 2, sh + 2, n["dark_grey"])  # screen inset
+        self.ws.wallpaper.draw_preview(cv, lay.screen, dt)
+        # power LED on the bezel's bottom-right
+        cv.rect(mx + mw - 5 * fs, my + mh - bz + bz // 2 - fs, 2 * fs, 2 * fs,
+                n["green"])
+        # stand: neck + base
+        neck_w = max(4 * fs, mw // 6)
+        base_w = max(neck_w, mw // 2)
+        neck_h = lay.stand_h // 2
+        cv.rect(mx + (mw - neck_w) // 2, my + mh, neck_w, neck_h, n["light_grey"])
+        cv.rect(mx + (mw - base_w) // 2, my + mh + neck_h, base_w,
+                lay.stand_h - neck_h, n["light_grey"])
+        cv.rect(mx + (mw - base_w) // 2, my + mh + lay.stand_h - fs, base_w, fs,
+                n["dark_grey"])
+
+    def _draw_theme_preview(self, cv, field):
+        """The Appearance-tab nod: how moybyte windows will look in the chosen
+        theme -- an inactive window behind, the active one in front, over the
+        theme's desk field. Token roles mirror the windowed WM's strip drawing
+        (focused = title/title_ink, unfocused = panel + light-grey ink)."""
+        th = self.ws.theme_colors
+        n = self.names
+        fs = self.layout.fs
+        x, y, w, h = field
+        # The desk field behind the mock windows: the theme's desktop token, but
+        # when that resolves to the window panel tone (most themes alias it),
+        # drop to "dim" so the windows actually stand out against the desk.
+        bg = th.get("desktop", th["panel"])
+        if bg == th["panel"]:
+            bg = th["dim"]
+        cv.rect(x, y, w, h, bg)
+        cv.rectb(x, y, w, h, th["edge"])
+        strip = 10 * fs
+        gap_x, gap_y = w // 12, h // 10
+        ww = w - w // 3
+        wh = h - h // 3
+        # inactive window (back, up-left)
+        ix, iy = x + gap_x, y + gap_y
+        cv.rect(ix, iy, ww, wh, th["panel"])
+        cv.rectb(ix, iy, ww, wh, th["dim"])
+        cv.rect(ix + 1, iy + 1, ww - 2, strip, th["panel"])
+        cv.rect(ix + 1, iy + strip, ww - 2, 1, th["dim"])
+        if ww >= 70 * fs:
+            cv.print("WINDOW", ix + 3 * fs, iy + 2 * fs, n["light_grey"], 1)
+        # active window (front, down-right)
+        ax, ay = x + w - gap_x - ww, y + h - gap_y - wh
+        cv.rect(ax, ay, ww, wh, th["panel"])
+        cv.rectb(ax, ay, ww, wh, th["edge"])
+        cv.rect(ax + 1, ay + 1, ww - 2, strip, th["title"])
+        if ww >= 70 * fs:
+            cv.print("MOYBYTE", ax + 3 * fs, ay + 2 * fs, th["title_ink"], 1)
+        self.ws._glyph("close", (ax + ww - strip, ay + 1, strip - 1, strip - 1),
+                       th["title_ink"], cv)
+        # body: a text line, a selected row, an accent button
+        body_y = ay + strip + 2 * fs
+        body_h = wh - strip - 3 * fs
+        if body_h >= 22 * fs:
+            cv.print("AA", ax + 4 * fs, body_y + fs, n["white"], 1)
+            cv.rect(ax + 3 * fs, body_y + 10 * fs, ww - 6 * fs, 9 * fs,
+                    th["hilite"])
+            cv.print("PICK", ax + 5 * fs, body_y + 11 * fs, n["white"], 1)
+        bw_, bh_ = 26 * fs, 11 * fs
+        if body_h >= 36 * fs:
+            cv.rect(ax + ww - bw_ - 4 * fs, ay + wh - bh_ - 3 * fs, bw_, bh_,
+                    th["accent"])
+            cv.print("OK", ax + ww - bw_ + 1 * fs, ay + wh - bh_ - 1 * fs,
+                     n["black"], 1)
+
     def _draw_wall_card(self, cv, r, cart, selected, image_kind):
         x, y, w, h = r
         th = self.ws.theme_colors
         pad = 3 * self.layout.fs
         ix, iy, iw, ih = x + pad, y + pad, w - pad * 2, max(12, h - 20 * self.layout.fs)
-        title = cart.get("title", "WALLPAPER")
-        if image_kind:
+        title = self._wall_title(cart)
+        if isinstance(cart, str):              # solid fill: the color itself
+            cv.rect(ix, iy, iw, ih, self.names.get(cart[5:], 0))
+        elif image_kind:
             preview = self.ws.artwork.thumbnail(iw, ih)
             if preview is not None:
                 cv.spr(preview, ix, iy)

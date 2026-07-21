@@ -1190,8 +1190,9 @@ class Workstation:
     def wallpaper_carts(self):
         """The wallpaper-type carts available as backdrops (discovery by type, Moybyte's
         equivalent of Picotron's wallpapers folder). Reads the FULL scanned list, not the
-        launcher grid -- wallpapers are a backdrop category chosen in Settings, so they
-        leave the launcher RUN-grid (spec shell_ux_v1.md) but stay discoverable here."""
+        launcher grid -- wallpapers are a backdrop category chosen in the Appearance app,
+        so they leave the launcher RUN-grid (spec shell_ux_v1.md) but stay discoverable
+        here."""
         return [c for c in self._all_carts if c.get("type") == "wallpaper"]
 
     def wallpaper_options(self):
@@ -1342,7 +1343,7 @@ class Workstation:
         self.set_font_scale(nxt, persist=True)
 
     def set_theme(self, name, persist=True):
-        """Pick the panel THEME (Settings -> THEME): swap the chrome token set
+        """Pick the panel THEME (Appearance app -> THEMES): swap the chrome token set
         (chrome.THEMES) the panels/window chrome/selection accents read each draw,
         and persist the choice. An unknown name falls back to the default."""
         if not any(n == name for n, _t in THEMES):
@@ -1364,7 +1365,8 @@ class Workstation:
             self._persist_system()
 
     def cycle_theme(self, d):
-        """Step Settings -> THEME through chrome.THEMES (applies + persists)."""
+        """Step the panel theme through chrome.THEMES (programmatic verb; the UI
+        pick is the Appearance app). Applies + persists."""
         names = [n for n, _t in THEMES]
         cur = self.theme_name if self.theme_name in names else names[0]
         self.set_theme(names[(names.index(cur) + d) % len(names)], persist=True)
@@ -1584,6 +1586,9 @@ class Workstation:
                     self._reslim_cart(cart)
         if persist:
             self._persist_wallpaper()
+            # "Home Decorator": any persisted pick counts -- the Appearance app,
+            # Paint's WALL, the cycle verb. Boot restore (persist=False) doesn't.
+            self.ach.note("wallpaper_change")   # (#21)
 
     def _persist_wallpaper(self):
         self.system["wallpaper"] = self.wallpaper_id
@@ -1596,15 +1601,14 @@ class Workstation:
             print("Moybyte system save failed:", _err_text(exc))
 
     def cycle_wallpaper(self, d):
-        """Step the wallpaper choice by d (Settings < / > stepper); applies +
-        persists immediately so the desktop updates live."""
+        """Step the wallpaper choice by d (programmatic verb; the UI pick is the
+        Appearance app); applies + persists immediately."""
         opts = self.wallpaper_options()
         if not opts:
             return
         cur = self.wallpaper_id if self.wallpaper_id in opts else opts[0]
         nxt = opts[(opts.index(cur) + d) % len(opts)]
         self.select_wallpaper(nxt, persist=True)
-        self.ach.note("wallpaper_change")       # "Home Decorator": changed the backdrop (#21)
 
     # (The wallpaper RENDERING -- _draw_wallpaper + _compile_wallpaper + the compiled-cart
     # cache -- moved to the Wallpaper component (wallpaper.py); self.wallpaper.draw(dt) is

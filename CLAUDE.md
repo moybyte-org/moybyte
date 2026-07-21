@@ -137,7 +137,7 @@ to whoever called it.
   **layout contexts** re-run the #39 responsive layouts at each window's size,
   and `Wallpaper.draw` composites/fills the SYSTEM canvas (cover-crop backdrop)
   so the big desktop backdrop is real. **Panel THEMES** (`chrome.THEMES`,
-  Settings → THEME, persisted): named token sets (`panel`/`edge`/`title`/
+  picked in the Appearance app, persisted): named token sets (`panel`/`edge`/`title`/
   `title_ink`/`accent`/`hilite`/`dim`) that every panel surface reads per draw —
   Settings panel, picker backdrop, window strips/chips, launcher selection
   accents; the default "night" is the moybyte site colorway and keeps the frozen
@@ -159,7 +159,9 @@ to whoever called it.
   tile** opens the Editor **project-picker** (the same grid over every editable cart
   + a ＋New tile), which owns project management (＋New / Copy / Delete — delete is
   a two-tap confirm); the launcher home has no new/dup/del. **Wallpapers are
-  backdrop-only**: excluded from the run-grid, chosen in Settings → WALLPAPER,
+  backdrop-only**: excluded from the run-grid, chosen in the **Appearance app**
+  (wallpaper + panel theme — the ONE appearance surface; Settings' APPEARANCE
+  action row deep-links to it, the old WALLPAPER/THEME stepper rows are gone),
   still editable via the picker.
 - **The zoned top bar (#46, macOS-menu-bar model):** one OS-owned 18px bar. RIGHT
   zone = OS status (clock/wifi/batt/≡ + a **context-X** that exits the active app;

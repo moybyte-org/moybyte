@@ -57,6 +57,16 @@ class Wallpaper:
         self._wp_draw = None
         self._wp_cart = None
         self._wp_live = True
+        # The Appearance monitor's PREVIEW runner: the same cart compiled a
+        # second time over an OFFSCREEN host canvas, so the little screen can
+        # show the full frame without touching the game canvas (and without a
+        # readable framebuffer -- the web tier records the blit as one spr).
+        self._pv_canvas = None
+        self._pv_ns = None
+        self._pv_update = None
+        self._pv_draw = None
+        self._pv_restore = None
+        self._pv_for = None
 
     def clear(self):
         """Drop the compiled wallpaper (back to a solid fill). Called by
@@ -64,6 +74,9 @@ class Wallpaper:
         self._wp_ns = self._wp_update = self._wp_draw = None
         self._wp_cart = None
         self._wp_restore_bg = None
+        self._pv_ns = self._pv_update = self._pv_draw = None
+        self._pv_restore = None
+        self._pv_for = None
         # #63 leak fix: return the dead wallpaper's pooled layer buffers for reuse.
         rl = getattr(self.ws.canvas, "reclaim_layers", None)
         if rl is not None:
@@ -175,6 +188,184 @@ class Wallpaper:
         wp = ws.wallpaper_id or "fill:dark_blue"
         name = wp[5:] if isinstance(wp, str) and wp.startswith("fill:") else "dark_blue"
         ws.sys_canvas.cls(NAMES.get(name, NAMES["dark_blue"]))
+
+    def draw_preview(self, cv, rect, dt):
+        """The Appearance monitor's screen: render the chosen wallpaper FIT
+        inside `rect` -- the FULL frame, vs draw()'s full-bleed cover-crop.
+        Same guarded degradation ladder as draw(): My Art direct -> cart
+        frame -> solid fill.
+
+        A cart wallpaper renders through the PREVIEW runner: the cart compiled
+        a second time over an offscreen host canvas (never the game canvas --
+        it may belong to a running game, or BE the visible 320x240 screen),
+        then blitted here. The blit lands via draw verbs on a recording canvas
+        (the web tiers) or raw rows on a buffer canvas; a build without the
+        host Canvas (device) shows a dark screen -- native preview is a
+        follow-up."""
+        NAMES = self._NAMES
+        ws = self.ws
+        x, y, w, h = rect
+        wp = ws.wallpaper_id or ""
+        if isinstance(wp, str) and wp.startswith("fill:"):
+            cv.rect(x, y, w, h, NAMES.get(wp[5:], NAMES["dark_blue"]))
+            return
+        art = getattr(ws, "artwork", None)
+        if art is not None and art.owns_wallpaper(wp):
+            try:
+                size = art.wall_size()
+                if size:
+                    aw, ah = size
+                    if aw * h >= ah * w:            # aspect-fit inside rect
+                        fw, fh = w, max(1, ah * w // aw)
+                    else:
+                        fw, fh = max(1, aw * h // ah), h
+                    img = art.thumbnail(fw, fh)
+                    if img is not None:
+                        cv.rect(x, y, w, h, NAMES["black"])
+                        cv.spr(img, x + (w - fw) // 2, y + (h - fh) // 2)
+                        return
+            except Exception as exc:  # noqa: BLE001 -- fall through to the cart/fill
+                print("Moybyte artwork preview error:", _err_text(exc))
+        cv.rect(x, y, w, h, NAMES["black"])
+        if self._ensure_preview():
+            try:
+                if self._pv_restore is not None:
+                    self._pv_restore()          # #63 declared background
+                if self._wp_live and self._pv_update is not None and dt > 0:
+                    self._pv_update(dt)
+                self._pv_draw()
+                rs = getattr(self._pv_canvas, "reset_state", None)
+                if rs is not None:
+                    rs()
+                self._fit_blit(cv, self._pv_canvas, rect)
+            except Exception as exc:  # noqa: BLE001 -- drop the broken preview, keep black
+                print("Moybyte wallpaper preview error:", _err_text(exc))
+                self._pv_ns = self._pv_update = self._pv_draw = None
+                self._pv_for = None
+
+    def _ensure_preview(self):
+        """Compile the current wallpaper cart into the preview runner (once per
+        selection; clear() invalidates). False when there's no cart, no host
+        Canvas (device build), or the compile fails."""
+        cart = self._wp_cart
+        if cart is None:
+            return False
+        if self._pv_draw is not None and self._pv_for is cart:
+            return True
+        try:
+            from canvas import Canvas
+        except ImportError:
+            try:
+                from runtime.canvas import Canvas
+            except ImportError:
+                return False            # no host canvas on this build
+        ws = self.ws
+        try:
+            pv = self._pv_canvas
+            if pv is None:
+                pv = Canvas(ws.canvas.w, ws.canvas.h)
+                self._pv_canvas = pv
+            else:
+                rl = getattr(pv, "reclaim_layers", None)
+                if rl is not None:      # #63: return the last preview's layer loans
+                    rl("wallpaper_pv")
+            # #66 live-set diet: the slimmed cart rehydrates for this compile
+            # (src/sheet bake into the preview ns), then re-slims -- the same
+            # dance select_wallpaper does for the backdrop compile.
+            ws._rehydrate_cart(cart)
+            try:
+                sheet = ws._build_sheet(cart)
+                tilemap = ws._build_tilemap(cart)
+                ns = ws.make_api(pv, ws.input, dict(cart.get("cfg", {})),
+                                 sheet, _SilentAudio(AudioEngine(AudioBank.default())),
+                                 tilemap, Pmem(), None, cart.get("images") or {},
+                                 owner="wallpaper_pv")
+                exec(compile(cart["src"], "<wallpaper-preview>", "exec"), ns)
+            finally:
+                if cart is not getattr(ws, "_fat_cart", None):
+                    ws._reslim_cart(cart)
+            if ns.get("_init"):
+                ns["_init"]()
+            self._pv_ns = ns
+            self._pv_update = ns.get("_update")
+            self._pv_draw = ns.get("_draw")
+            self._pv_restore = ns.get("_moy_restore_bg")
+            self._pv_for = cart
+            return self._pv_draw is not None
+        except Exception as exc:  # noqa: BLE001 -- a broken cart keeps a dark screen
+            print("Moybyte wallpaper preview error:", _err_text(exc))
+            self._pv_ns = self._pv_update = self._pv_draw = None
+            self._pv_for = None
+            return False
+
+    @staticmethod
+    def _sample(pix, gw, gh, vw, vh):
+        """Nearest-neighbor resample of gw x gh indices to exactly vw x vh."""
+        xm = [dx * gw // vw for dx in range(vw)]
+        out = bytearray(vw * vh)
+        o = 0
+        for dy in range(vh):
+            base = (dy * gh // vh) * gw
+            for i in range(vw):
+                out[o + i] = pix[base + xm[i]]
+            o += vw
+        return out
+
+    def _fit_blit(self, sc, gc, rect):
+        """Blit the whole frame on `gc` into `rect`, aspect-fit and centered.
+        At or above native size the target snaps to a CLEAN half-frame
+        multiple (uniform pixels: full- or half-res source, integer expand);
+        below native it resamples to the exact fit, so the monitor screen
+        fills edge to edge. Dest paths: raw rows on a buffer canvas, one
+        self-contained spr on a recording canvas (the web wire mechanism)."""
+        fb = getattr(gc, "flush_batch", None)
+        if fb is not None:
+            fb()
+        gbuf = getattr(gc, "buf", None)
+        if gbuf is None:
+            return
+        x, y, w, h = rect
+        gw, gh = gc.w, gc.h
+        if gw * h >= gh * w:                    # aspect-fit target inside rect
+            vw, vh = w, max(1, gh * w // gw)
+        else:
+            vw, vh = max(1, gw * h // gh), h
+        hw, hh = max(1, gw // 2), max(1, gh // 2)
+        if vw >= gw:
+            k = min(vw // hw, vh // hh)         # clean half-frame multiples
+            vw, vh = hw * k, hh * k
+        if vw % gw == 0 and vh % gh == 0:       # full-res source, integer expand
+            src, dw, dh, s = gbuf, gw, gh, vw // gw
+        elif vw % hw == 0 and vh % hh == 0 and vw // hw == vh // hh:
+            rows = bytearray()                  # half-res source (2x decimation)
+            for gy in range(0, gh, 2):
+                rows.extend(gbuf[gy * gw:(gy + 1) * gw:2])
+            src, dw, dh, s = rows, hw, hh, vw // hw
+        else:                                   # sub-native: exact-fit resample
+            src, dw, dh, s = self._sample(gbuf, gw, gh, vw, vh), vw, vh, 1
+        ox = x + (w - vw) // 2
+        oy = y + (h - vh) // 2
+        sbuf = getattr(sc, "buf", None)
+        if sbuf is None:
+            img = _Blit(dw, dh, bytes(src), -1)
+            img._paint = True                   # compact b64 wire form
+            sc.spr(img, ox, oy, s)
+            return
+        sw = sc.w
+        for ry in range(dh):
+            row = src[ry * dw:(ry + 1) * dw]
+            if s > 1:
+                er = bytearray(dw * s)
+                out = 0
+                for px in row:
+                    er[out:out + s] = bytes((px,)) * s
+                    out += s
+            else:
+                er = row
+            base0 = (oy + ry * s) * sw + ox
+            for r in range(s):
+                base = base0 + r * sw
+                sbuf[base:base + vw] = er
 
     def _backdrop_blit(self, sc, gc):
         """Composite the 320x240 wallpaper frame into the big system canvas as the

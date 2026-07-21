@@ -39,7 +39,7 @@ code) and **host glue**.
 | `launcher_layer.py` | **(shared, staged)** the `Launcher` grid class (two instances: `ws.launcher`, the home RUN-grid with the pinned Make tile and no wallpapers, and `ws.picker`) + `LauncherHomeLayer` — the home desktop composition (wallpaper → grid → bar; a tap always RUNS) + `EditorPickerLayer` — the Editor's project-picker (every editable cart + ＋New; owns New/Copy/two-tap-Delete) (#28) |
 | `cards_layer.py` | **(shared, staged)** `CardsLayer` — the "Make it mine" config-card editor (#3/#15): card draw + layout + scroll (msel/mtop) + taps; cart `config`/`apply`/`adjust` stay on `ws`. A malformed `edit` field def (#94) degrades to one inline "!" card via `_validate_field` instead of taking the whole tab down. The header **INFO button** opens a **CART INFO modal** (#94) that edits the manifest's title/author through `ws.project.commit_manifest` (`moy_carts.save_manifest_meta`); `permissions` stays read-only |
 | `paint_layer.py` | **(shared, staged)** `PaintLayer` (the sprite/icon paint editor #4/#30) + `ThemeLayer` (EDIT ICONS over the system icon sheet) — one renderer keyed on `ws._editing_icons` |
-| `settings_layer.py` | **(shared, staged)** `SettingsLayer` — the Settings aggregator (#28/#39/#53): rows + scroll + draw; owns no config (dispatches every mutation to `ws` setters). Includes the **WIFI panel** (#38, spec §10: scan/pick/password/connect over the injected `ws.wifi` — Settings is an app, so wifi setup coexists with a running cart), the capability-gated P4 **BLUETOOTH KEYBOARD** panel (visual-identity-v1 widgets; enable/scan/pick/forget over `ws.keyboard`), and the **THEME row** (cycles `chrome.THEMES`, persisted) |
+| `settings_layer.py` | **(shared, staged)** `SettingsLayer` — the Settings aggregator (#28/#39/#53): rows + scroll + draw; owns no config (dispatches every mutation to `ws` setters). Includes the **WIFI panel** (#38, spec §10: scan/pick/password/connect over the injected `ws.wifi` — Settings is an app, so wifi setup coexists with a running cart), the capability-gated P4 **BLUETOOTH KEYBOARD** panel (visual-identity-v1 widgets; enable/scan/pick/forget over `ws.keyboard`), and the **APPEARANCE action row** — wallpaper + panel-theme picking consolidated into the Appearance app (`appearance_app.py`), this row deep-links to it |
 | `code_layer.py` | **(shared, staged)** `CodeLayer` — the full-screen code editor (#24/#39): draw + touch/keyboard editing + the MicroPython-safe syntax highlighter; `ws.editor`/`save_code`/`run_code` stay on `ws` |
 | `wallpaper.py` | **(shared, staged)** `Wallpaper` — the desktop backdrop component (#28) the launcher home + Settings both draw; owns the rendering + compiled-cart cache, `wallpaper_id` + picker API stay on `ws`. On a distinct big system canvas the cart frame COVER-crops full-bleed (and ships as one b64 img on a recording canvas); the solid fallback fills the SYSTEM canvas |
 | `widgets.py` | **(shared, staged)** self-contained support classes: `Pointer` (cursor), `Achievements` (#21 tracker + catalog), `Popup` (dropdown #52), `Pmem` (cart RAM), `Actor`/`Scenes` (#85 placed-actor scenes — the `scene()`/`load_scene()` data model), `_SilentAudio`, `_Blit` |
@@ -73,8 +73,12 @@ Content + tooling:
   publishes it through the `my_art.moy` wallpaper, and can attach it to a game as
   `images/bg.moyimg`). Paint's high-level store actions live behind the narrow
   shell-owned `ArtworkService`; they are not part of the kid cart API.
-  `theme_picker.moy` (title: Appearance) opens the responsive visual picker for image wallpapers,
-  live wallpaper carts, and panel themes.
+  `theme_picker.moy` (title: Appearance) opens the ONE appearance surface (`runtime/appearance_app.py`,
+  deep-linked from Settings' APPEARANCE row): a Display-Properties-style side-by-side picker —
+  catalog column left, preview right. IMAGES/CARTS preview in a little MONITOR whose screen
+  shows the FULL wallpaper (a second compile of the cart on an offscreen canvas, blitted as one
+  spr so the web tiers render it; fills/My Art draw direct); THEMES previews mock WM windows in
+  the selected token set.
   `writer.moy` (title: Writer) opens the kid notebook (`runtime/writer_app.py`):
   a notes list + ruled text page over the shared `CodeEditor` core, autosaving
   one crash-safe `notes.json` beside `artwork.moyimg`.

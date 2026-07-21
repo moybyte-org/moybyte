@@ -115,16 +115,23 @@ def test_status_strip_menu_opens_settings_from_home(tmp_path):
     assert ws.screen == "settings"
 
 
-def test_settings_wallpaper_stepper_applies_and_persists(tmp_path):
+def test_settings_appearance_row_opens_the_one_picker(tmp_path):
+    """Wallpaper + theme picking is consolidated into the Appearance app; the
+    Settings APPEARANCE action row deep-links there (the Files -> Paint open_app
+    precedent), and a pick made in the app applies + persists."""
     from runtime import host_app, moy_carts
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)
     drv = host_app.ConsoleDriver(ws)
     ws.open_settings()
-    ws.settings_layer.set_msel = [r[0] for r in
-                                  ws.settings_layer._SETTINGS_ROWS].index("wallpaper")
+    rows = [r[0] for r in ws.settings_layer._SETTINGS_ROWS]
+    assert "wallpaper" not in rows and "theme" not in rows   # the old steppers are gone
+    ws.settings_layer.set_msel = rows.index("appearance")
+    drv.press("right")                                    # any step activates an action row
+    drv.frame(1 / 30)
+    assert ws.wm.top_kind() == "appearance"
     before = ws.wallpaper_id
-    drv.press("right")                                    # step the stepper
+    drv.press("down")          # the catalog column: down applies the next item
     drv.frame(1 / 30)
     assert ws.wallpaper_id != before
     assert moy_carts.load_system(carts_dir).get("wallpaper") == ws.wallpaper_id

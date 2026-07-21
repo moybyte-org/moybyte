@@ -168,8 +168,9 @@ door — no setting, no mode:
   Delete (a two-tap confirm) live in the picker — cart management moved OFF the
   launcher home, which no longer has new/dup/del.
 - **Wallpapers are backdrop-only:** they are not run-grid tiles at all. The backdrop
-  is chosen in Settings → wallpaper; wallpaper carts stay editable through the
-  picker.
+  (and the panel theme) is chosen in the **Appearance app** — the ONE appearance
+  surface, reachable from Settings' APPEARANCE row; wallpaper carts stay editable
+  through the picker.
 - **The picker sits on a static black backdrop** (2026-07-08): the launcher home is
   the kid's decorated desk (live wallpaper), the Make space is the workbench —
   "it's software". Side effect: with no animated backdrop forcing repaints, an idle

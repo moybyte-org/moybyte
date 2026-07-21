@@ -1,7 +1,7 @@
 """The Settings app (#28/#39/#53), extracted from Workstation (runtime/console.py) as
 its own Layer -- docs/shell_layers_refactor_v1.md Phase 2.
 
-Settings is the console's AGGREGATOR: a scrolling list of rows (wallpaper / font size /
+Settings is the console's AGGREGATOR: a scrolling list of rows (APPEARANCE / font size /
 volume / brightness / name / EDIT ICONS / PERF DIAG, plus the injected OTA + web-view
 rows) drawn over the live wallpaper backdrop. SettingsLayer owns the SCREEN: the row
 list + drawing + scroll window (set_msel/set_top) + the row hit-testing, and the
@@ -9,11 +9,11 @@ settings-only constants (_SET_*).
 
 Boundary (the anti-spaghetti line, per the doc): SettingsLayer owns NO config. Every
 value it steps or shows is CART/SYSTEM state on Workstation -- ws.system (the
-system.json dict), ws.wallpaper_id, ws.font_scale, ws.diag_live, ws.web_hook, the
-updater queries -- and every mutation goes through the ws setters (cycle_wallpaper /
+system.json dict), ws.font_scale, ws.diag_live, ws.web_hook, the
+updater queries -- and every mutation goes through the ws setters (
 cycle_font_scale / set_diag_live / _cycle_channel / _toggle_web_view / _persist_system).
-The WALLPAPER cluster is SHARED (the launcher draws the same backdrop), so it stays
-single-sourced on ws -- SettingsLayer just calls ws.wallpaper.draw + the picker verbs.
+Wallpaper + panel-theme picking is NOT here: the Appearance app is the ONE
+appearance surface, and Settings just deep-links to it (the APPEARANCE action row).
 The actions Settings hosts delegate OUT to other layers (ws.open_theme / ws.update_ui.
 open_update / ws.show_achievements). ws.open_settings / _exit_settings (the lifecycle,
 tested) stay on ws. `NAMES` / `_in` / `_clamp_scroll` are injected to keep the
@@ -40,7 +40,7 @@ _SET_ACH = (262, 18, 22, 14)        # open the achievements view (trophy), title
 _SET_TITLE_HIT = (30, 18, 130, 16)  # the "SETTINGS" panel title (secret door, #21)
 
 # (The panel colors moved to the selectable THEME tokens -- chrome.THEMES,
-# Settings -> THEME; the "night" default is the moybyte site colorway.)
+# picked in the Appearance app; the "night" default is the moybyte site colorway.)
 
 
 class SettingsLayer:
@@ -64,10 +64,9 @@ class SettingsLayer:
         # over the injected ws.wifi service. Settings is a system APP (not a
         # cart), so this works while a game keeps running in the one cart slot.
         ("wifi", "WIFI", "wifi-net"),
-        ("wallpaper", "WALLPAPER", "wallpaper"),
-        # Panel THEME (owner ask 2026-07-08): cycles chrome.THEMES -- the token
-        # set the panels / window chrome / selection accents read. Persisted.
-        ("theme", "THEME", "theme"),
+        # APPEARANCE: wallpaper + panel theme moved into the visual Appearance
+        # app (the ONE appearance surface); this action row deep-links to it.
+        ("appearance", "APPEARANCE", "action"),
         ("font_scale", "FONT SIZE", "font"),
         ("volume", "VOLUME", "mock-gauge"),
         ("brightness", "BRIGHTNESS", "mock-gauge"),
@@ -625,10 +624,13 @@ class SettingsLayer:
         return rows
 
     def _activate_settings_action(self, key):
-        """Fire an "action" Settings row by key: EDIT ICONS opens the theme editor,
-        UPDATE FW installs a local SD image, UPDATE ONLINE checks WiFi for one (#53)."""
+        """Fire an "action" Settings row by key: APPEARANCE opens the Appearance app
+        (wallpaper + theme), EDIT ICONS opens the theme editor, UPDATE FW installs a
+        local SD image, UPDATE ONLINE checks WiFi for one (#53)."""
         ws = self.ws
-        if key == "update":
+        if key == "appearance":
+            ws.open_app(ws.appearance_app)   # the one appearance surface
+        elif key == "update":
             ws.update_ui.open_update()
         elif key == "update_online":
             ws.update_ui.open_update_online()
@@ -648,9 +650,10 @@ class SettingsLayer:
             ws.set_diag_live(not ws.diag_live)
 
     def settings_adjust(self, d):
-        """Step the selected Settings row by d. Wallpaper/font apply + persist; the
+        """Step the selected Settings row by d. Font applies + persists; the
         mock rows just move a cosmetic value held in ws.system (not acted on); an
-        "action" row (EDIT ICONS) fires its action regardless of direction."""
+        "action" row (APPEARANCE / EDIT ICONS) fires its action regardless of
+        direction."""
         ws = self.ws
         key, _label, kind = self._settings_rows()[self.set_msel]
         if kind == "wifi-net":                  # WIFI: any step/tap opens the panel (#38)
@@ -671,12 +674,6 @@ class SettingsLayer:
         if key == "ota_channel":                # OTA update channel STABLE <-> BETA
             ws._cycle_channel(d)
             return
-        if key == "wallpaper":
-            ws.cycle_wallpaper(d)
-            return
-        if key == "theme":                      # panel THEME: cycle chrome.THEMES
-            ws.cycle_theme(d)
-            return
         if key == "font_scale":                 # system-UI font size (#39): live + persisted
             ws.cycle_font_scale(d)
             return
@@ -687,18 +684,6 @@ class SettingsLayer:
         else:  # mock-gauge (volume / brightness): a 0..5 placeholder
             v = int(ws.system.get(key, 3)) + d
             ws.system[key] = max(0, min(5, v))
-
-    def _settings_wallpaper_label(self):
-        """A friendly label for the current wallpaper: the cart's TITLE for a
-        wallpaper cart, or the color name for a built-in solid fill."""
-        ws = self.ws
-        wp = ws.wallpaper_id or ""
-        if isinstance(wp, str) and wp.startswith("fill:"):
-            return wp[5:].replace("_", " ").upper()
-        cart = ws._wp_cart_by_id(wp)
-        if cart is not None:
-            return cart["title"].upper()
-        return str(wp).replace("_", " ").upper()
 
     # -- scroll window -------------------------------------------------------
 
@@ -989,11 +974,13 @@ class SettingsLayer:
             cv.print("OPEN", x + w - 38 * lay.fs, y + 5, NAMES["blue"], 1)
             return
         if kind == "action":
-            # An action row (EDIT ICONS / UPDATE FW / UPDATE ONLINE): no value/stepper --
-            # just an OPEN affordance at the right so a tap (or A) is the obvious activate.
-            # The glyph cues what it does (paint = repaint chrome; run = install; wifi =
-            # online update).
-            if key == "update":
+            # An action row (APPEARANCE / EDIT ICONS / UPDATE FW / UPDATE ONLINE): no
+            # value/stepper -- just an OPEN affordance at the right so a tap (or A) is
+            # the obvious activate. The glyph cues what it does (star = wallpaper+theme;
+            # paint = repaint chrome; run = install; wifi = online update).
+            if key == "appearance":
+                g, c = "star", NAMES["pink"]
+            elif key == "update":
                 g, c = "run", NAMES["yellow"]
             elif key == "update_online":
                 g, c = "wifi", NAMES["yellow"]
@@ -1005,12 +992,7 @@ class SettingsLayer:
         cv.print("<", x + w - 11 * fw - 2, y + 5, NAMES["yellow"], 2)
         cv.print(">", x + w - 2 * fw + 2, y + 5, NAMES["yellow"], 2)
         vx = x + w - 78 * lay.fs           # value column (baseline x+w-78)
-        if kind == "theme":                # panel THEME: the current name, tinted
-            cv.print(str(ws.theme_name)[:9].upper(), vx, y + 5,
-                     ws.theme_colors["edge"], 1)
-        elif kind == "wallpaper":
-            cv.print(self._settings_wallpaper_label()[:9], vx, y + 5, NAMES["green"], 1)
-        elif kind == "font":               # system-UI font size (#39): 1x / 2x / 3x
+        if kind == "font":                 # system-UI font size (#39): 1x / 2x / 3x
             cv.print("%dx" % ws.font_scale, vx, y + 5, NAMES["green"], 1)
         elif kind == "mock-gauge":
             lvl = int(ws.system.get(key, 3))
@@ -1041,8 +1023,8 @@ class SettingsLayer:
             on = bool(getattr(ws, key, False))
             cv.print("ON" if on else "OFF", vx, y + 5,
                      NAMES["orange"] if on else NAMES["dark_grey"], 1)
-        # Mark not-yet-functional rows clearly (wifi + wallpaper + font + channel +
+        # Mark not-yet-functional rows clearly (wifi + font + channel +
         # web + diag + actions work).
-        if kind not in ("wifi-net", "bluetooth", "wallpaper", "font", "action", "channel",
-                        "web", "diag", "theme"):
+        if kind not in ("wifi-net", "bluetooth", "font", "action", "channel",
+                        "web", "diag"):
             cv.print("soon", x + 4, y + 6 + fw, NAMES["dark_grey"], 1)

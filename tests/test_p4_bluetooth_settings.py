@@ -77,7 +77,7 @@ def test_bluetooth_row_is_capability_gated(tmp_path):
     ws = _ws(tmp_path)
     rows = ws.settings_layer._settings_rows()
     keys = [row[0] for row in rows]
-    assert keys[:3] == ["wifi", "bluetooth", "wallpaper"]
+    assert keys[:3] == ["wifi", "bluetooth", "appearance"]
     assert rows[1][1:] == ("BLUETOOTH KEYBOARD", "bluetooth")
 
 
