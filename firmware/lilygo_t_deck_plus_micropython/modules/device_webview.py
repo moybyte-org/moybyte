@@ -65,6 +65,7 @@ class WebView:
         self._pulsed = []
         self._pan = [0, 0]
         self._key_queue = []
+        self._key_prev = 0      # last frame's fed byte (repeats need a 0 gap)
         self._held = set()         # browser-held buttons (joystick/WASD), re-asserted each
         self._held_last = set()    # frame in feed_input AFTER keyboard.poll clears them
         # Browser pointer intent, applied AFTER the physical touch read each frame so
@@ -360,11 +361,26 @@ class WebView:
         # last ("hello" arrived as only "o"). Pop ONE byte per frame instead, preserving
         # order across frames; the rest stays queued for the next ones. NEEDS AN ON-GLASS
         # PASS (host-verified only: tests/test_moy_webserver.py drives feed_input directly).
+        # ...and in TEXT MODE, never the same byte in two ADJACENT frames: the
+        # editors' KeyEdge dedups identical consecutive bytes (it models the
+        # physical keyboard's discrete press edges + the P4 BLE keyboard's held
+        # level state), so a queued repeat (backspace-backspace, "ll") must
+        # leave a 0-gap frame (keyboard.poll already reset last_key) or every
+        # second keystroke is silently dropped. GAME mode keeps the raw
+        # contiguous stream (a repeated byte IS the held-key latch the
+        # key()/keyp() cart API reads) -- mirrors the host ConsoleDriver.
         if self._key_queue:
             try:
-                self._inp.last_key = self._key_queue.pop(0)
+                if (self._key_queue[0] != self._key_prev
+                        or not getattr(self._inp, "text_mode", False)):
+                    self._inp.last_key = self._key_queue.pop(0)
+                    self._key_prev = self._inp.last_key
+                else:
+                    self._key_prev = 0          # gap frame; the repeat pops next
             except Exception:  # noqa: BLE001
                 pass
+        else:
+            self._key_prev = 0
 
     def feed_pointer(self, physical_active):
         """Merge browser pointer intent into the real Pointer. Called in the loop AFTER

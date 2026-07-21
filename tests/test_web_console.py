@@ -1041,10 +1041,12 @@ def _draw():
     assert ws.input.text_mode is True
 
     # One WS batch, five typed chars (incl. a repeat -- 'll' -- so ordering AND
-    # completeness are both pinned; last-wins would leave just 'o').
+    # completeness are both pinned; last-wins would leave just 'o'). In text
+    # mode the repeated 'l' ships with a 0-GAP frame between (the KeyEdge
+    # discrete-press contract), so five chars drain in six frames.
     console.apply_events([{"type": "key", "code": ord(ch)} for ch in "hello"])
-    for _ in range(5):
-        console.step_frame()                   # one char drains per frame
+    for _ in range(6):
+        console.step_frame()                   # one char per frame + the ll gap
     assert ws.ns["typed"] == "hello"
     console.step_frame()                       # the queue is spent -- no repeats
     assert ws.ns["typed"] == "hello"
@@ -1369,3 +1371,34 @@ def test_effective_input_hint_never_hides_the_keyboard_in_the_editor(tmp_path):
     assert tuple(web_view.effective_input_kinds(ws)) == ("buttons",)
     ws._exit_to_caller()
     assert web_view.effective_input_kinds(ws) is None       # back in the editor
+
+
+def test_repeated_keys_survive_the_typed_queue(tmp_path):
+    """The editors' KeyEdge dedups identical consecutive last_key bytes (it
+    models the T-Deck's byte-then-0 stream and the P4 BLE keyboard's held level
+    state) -- so the driver's typed-char queue must ship a 0-GAP frame between
+    two equal bytes. Without it, "aa" typed one 'a' and a double Backspace
+    deleted one character (the phone's code-editor Backspace bug)."""
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    drv = host_app.ConsoleDriver(ws)
+    for i, c in enumerate(ws.picker.items):
+        if c.get("title") == "Battle City":
+            ws.picker.sel = i
+            break
+    ws.open_picker()
+    ws.pick_selected()
+    ws.editor_app.set_tab("code")
+    drv.frame(1 / 30)
+    ed = ws.editor
+    before = ed.lines[ed.row]
+    drv.type_char(ord("a"))                      # the WS-batch shape: both queued
+    drv.type_char(ord("a"))
+    for _ in range(4):
+        drv.frame(1 / 30)
+    assert ed.lines[ed.row] == "aa" + before     # BOTH repeats landed
+    drv.type_char(8)
+    drv.type_char(8)
+    for _ in range(4):
+        drv.frame(1 / 30)
+    assert ed.lines[ed.row] == before            # BOTH backspaces landed

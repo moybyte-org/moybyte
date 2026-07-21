@@ -882,6 +882,7 @@ class ConsoleDriver:
         self.pointer = ws.pointer
         self._pending = []      # one-frame button presses
         self._typed = []        # queued typed chars; frame() feeds ONE per frame
+        self._key_prev = 0      # last frame's fed byte (repeats need a 0 gap)
         self._click = False
         self._down = False      # touch/button currently held (for drag-scroll)
         self._tap = False       # click(): auto-release at the end of the frame
@@ -959,7 +960,22 @@ class ConsoleDriver:
         for name in self._pending:
             self.input.set_held(name, True)
         self.input.begin_frame()
-        self.input.last_key = self._typed.pop(0) if self._typed else 0
+        # One queued byte per frame -- and in TEXT MODE, never the same byte in
+        # two ADJACENT frames: the editors' KeyEdge dedups identical consecutive
+        # bytes (it models the T-Deck's discrete press edges + the P4 BLE
+        # keyboard's held level state), so a queued repeat ("ll" in "hello",
+        # backspace-backspace, a soft keyboard's delete autorepeat) must ship a
+        # 0 GAP frame between the two -- or every second keystroke is silently
+        # dropped (found via the phone's Backspace in the code editor). GAME
+        # mode keeps the raw contiguous stream: there a repeated byte IS the
+        # held-key latch the key()/keyp() cart API reads (v0.4 semantics).
+        nxt = 0
+        if self._typed:
+            if (self._typed[0] != self._key_prev
+                    or not getattr(self.input, "text_mode", False)):
+                nxt = self._typed.pop(0)
+        self.input.last_key = nxt
+        self._key_prev = nxt
         self.pointer.down = self._down
         self.pointer.click = self._click
         self.ws.handle_input()

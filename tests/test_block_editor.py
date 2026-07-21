@@ -649,9 +649,16 @@ def test_new_variable_prompt_survives_the_opening_keypress(tmp_path):
     drv.type_char(0x0D)
     drv.frame(1 / 30)                                    # this frame opens the prompt
     assert ws.block_ui.blk_kbd is not None, "prompt should open"
-    # A + the Enter byte STILL held the very next frame: the prompt must NOT commit.
-    drv.type_char(0x0D)
-    drv.frame(1 / 30)
+    # A + the Enter byte STILL held the very next frame: the prompt must NOT
+    # commit. The held byte is the DEVICE keyboard's latch (the same byte
+    # repeating across adjacent frames), injected directly -- the driver's
+    # typed queue is device-faithful now and ships a 0 gap between two queued
+    # discrete repeats, so it can no longer express a latched hold.
+    ws.input.begin_frame()
+    ws.input.last_key = 0x0D
+    ws.handle_input()
+    ws.frame(1 / 30)
+    ws.input.last_key = 0
     assert ws.block_ui.blk_kbd is not None, "opening keypress must not auto-commit the prompt"
     assert not be.variables() or be.variables() == [ws.block_ui.blk_kbd["var"]]
     drv.hold("a", False)
