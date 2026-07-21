@@ -78,10 +78,11 @@ Content + tooling:
   catalog column left, preview right. IMAGES/CARTS preview in a little MONITOR whose screen
   shows the FULL wallpaper (a second compile of the cart on an offscreen canvas, blitted as one
   spr so the web tiers render it; fills/My Art draw direct); THEMES previews mock WM windows in
-  the selected token set. A build without the host Canvas (device) falls back to the cart's
-  cover art through the #66/#86 cached-thumb pipeline — the shipped wallpaper covers ARE their
-  rendered frames, baked by `tools/gen_wallpaper_covers.py` (re-run it after editing a
-  wallpaper cart; it bumps manifest versions per #47 so seeded devices re-seed).
+  the selected token set. On device (`wallpaper.PREVIEW_LIVE = False` — per-frame interpreted
+  rendering is unaffordable there) the preview COMPUTES ONCE per cart source in a general way:
+  one render on the staged pure-Python `canvas.py`, persisted as a `thumbs/wp<w>x<h>.mct`
+  sidecar stamped with `cover_sig(src)` (the thumbnail model — an edit recomputes, a re-seed
+  regenerates; no prebaked assets).
   `writer.moy` (title: Writer) opens the kid notebook (`runtime/writer_app.py`):
   a notes list + ruled text page over the shared `CodeEditor` core, autosaving
   one crash-safe `notes.json` beside `artwork.moyimg`.

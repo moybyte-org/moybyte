@@ -270,6 +270,11 @@ cp "${REPO_ROOT}/runtime/console.py" "${SCRIPT_DIR}/modules/console.py"
 cp "${REPO_ROOT}/runtime/moy_carts.py" "${SCRIPT_DIR}/modules/moy_carts.py"
 cp "${REPO_ROOT}/runtime/moy_fs.py" "${SCRIPT_DIR}/modules/moy_fs.py"
 cp "${REPO_ROOT}/runtime/moy_image.py" "${SCRIPT_DIR}/modules/moy_image.py"
+# The pure-Python indexed Canvas + palette: the Wallpaper preview runner needs
+# them on-device to COMPUTE the Appearance monitor's frame (once per cart
+# source, cached as a thumbs/wp*.mct sidecar -- the thumbnail model).
+cp "${REPO_ROOT}/runtime/canvas.py" "${SCRIPT_DIR}/modules/canvas.py"
+cp "${REPO_ROOT}/runtime/palette.py" "${SCRIPT_DIR}/modules/palette.py"
 cp "${REPO_ROOT}/runtime/moy_journal.py" "${SCRIPT_DIR}/modules/moy_journal.py"
 cp "${REPO_ROOT}/runtime/op_history.py" "${SCRIPT_DIR}/modules/op_history.py"
 cp "${REPO_ROOT}/runtime/blocks.py" "${SCRIPT_DIR}/modules/blocks.py"

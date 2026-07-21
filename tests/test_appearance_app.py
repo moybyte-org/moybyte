@@ -243,33 +243,55 @@ def test_preview_runner_leaves_the_game_canvas_alone(tmp_path):
     assert bytes(ws.canvas.buf) == before
 
 
-def test_wallpaper_carts_ship_rendered_covers():
-    """Every wallpaper system cart (except My Art, which previews through the
-    artwork path) bakes its rendered frame as images/cover.moyimg
-    (tools/gen_wallpaper_covers.py) -- the device monitor's static fallback
-    and the project-picker card art."""
-    for folder in (ROOT / "system_carts").glob("*.moy"):
-        man = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
-        if man.get("type") != "wallpaper" or man.get("title") == "My Art":
-            continue
-        assert (folder / "images" / "cover.moyimg").exists(), folder.name
-
-
-def test_device_fallback_draws_cached_cover_thumb(tmp_path, monkeypatch):
-    """Without the live preview runner (a device build has no host Canvas) the
-    monitor screen falls back to the cover through the #66/#86 cached-thumb
-    pipeline -- a still of the same frame, not a dark screen."""
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
+def test_static_preview_computes_once_and_caches_like_thumbnails(tmp_path):
+    """The device tier (PREVIEW_LIVE off): the monitor's frame is COMPUTED in a
+    general way -- rendered once through the preview runner, persisted as a
+    thumbs/wp<w>x<h>.mct sidecar stamped with cover_sig(src), and a later
+    session draws from the sidecar WITHOUT the runner."""
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
+    ws.wallpaper.PREVIEW_LIVE = False
     ws.select_wallpaper("moy_night", persist=False)
-    monkeypatch.setattr(ws.wallpaper, "_ensure_preview", lambda: False)
     rect = (10, 10, 152, 114)
     buf, w = ws.sys_canvas.buf, ws.sys_canvas.w
-    for _ in range(400):                       # the decode is time-sliced
-        ws._cover_built = False               # each frame grants one slice
-        ws.wallpaper.draw_preview(ws.sys_canvas, rect, 0)
-        if buf[67 * w + 86] != 0:
-            break
-    assert buf[67 * w + 86] != 0               # the cover landed on the screen
+    ws.wallpaper.draw_preview(ws.sys_canvas, rect, 1 / 30)
+    assert buf[67 * w + 86] != 0               # the rendered still landed
+    side = Path(carts) / "moy_night.moy" / "thumbs" / "wp152x114.mct"
+    assert side.exists()                       # ...and persisted as a sidecar
+
+    # A fresh session with NO runner (the pre-staging device floor) still
+    # shows the frame -- straight from the sidecar.
+    ws2 = host_app.build_workstation(carts)
+    ws2.wallpaper.PREVIEW_LIVE = False
+    ws2.wallpaper._ensure_preview = lambda: False
+    ws2.select_wallpaper("moy_night", persist=False)
+    ws2.sys_canvas.cls(0)
+    ws2.wallpaper.draw_preview(ws2.sys_canvas, rect, 1 / 30)
+    assert ws2.sys_canvas.buf[67 * ws2.sys_canvas.w + 86] != 0
+
+
+def test_static_preview_recomputes_when_the_source_changes(tmp_path):
+    """The sidecar is stamped against the cart SOURCE: an edit invalidates it
+    (with no runner available, a stale sidecar draws nothing rather than the
+    old frame)."""
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
+    ws.wallpaper.PREVIEW_LIVE = False
+    ws.select_wallpaper("moy_night", persist=False)
+    rect = (10, 10, 152, 114)
+    ws.wallpaper.draw_preview(ws.sys_canvas, rect, 1 / 30)
+    main = Path(carts) / "moy_night.moy" / "main.py"
+    main.write_text(main.read_text(encoding="utf-8") + "\n# edited\n",
+                    encoding="utf-8")
+    ws2 = host_app.build_workstation(carts)
+    ws2.wallpaper.PREVIEW_LIVE = False
+    ws2.wallpaper._ensure_preview = lambda: False   # no runner: stale = nothing
+    ws2.select_wallpaper("moy_night", persist=False)
+    ws2.sys_canvas.cls(0)
+    ws2.wallpaper.draw_preview(ws2.sys_canvas, rect, 1 / 30)
+    scr = ws2.sys_canvas
+    assert all(scr.buf[yy * scr.w + xx] == 0
+               for yy in range(12, 122, 13) for xx in range(12, 160, 17))
 
 
 def test_small_theme_grid_stays_inside_catalog(tmp_path):

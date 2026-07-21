@@ -15,9 +15,16 @@ transparency. These four are kept byte-identical on the device backend
 (`DeviceCanvas`) so a `.moy` draws the same pixels everywhere.
 """
 
-from . import font as _font
-from . import palette as _pal
-from .editors import SpriteSheet  # noqa: F401  (canonical home; re-exported here)
+try:
+    from . import font as _font
+    from . import palette as _pal
+    from .editors import SpriteSheet  # noqa: F401  (canonical home; re-exported here)
+except ImportError:  # pragma: no cover - the staged device tree: bare names, no
+    # package, and font.py stages as moy_font (the Wallpaper preview runner
+    # imports this Canvas on-device to render the Appearance monitor's frame).
+    import moy_font as _font
+    import palette as _pal
+    from editors import SpriteSheet  # noqa: F401
 
 # #75: immutable templates the per-frame reset_state restores the pal tables from
 # IN PLACE (no per-frame bytearray allocation; identity map / all-opaque).

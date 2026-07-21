@@ -26,6 +26,11 @@ try:
     from widgets import Pmem, _SilentAudio, _Blit
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import Pmem, _SilentAudio, _Blit
+try:
+    from moy_image import cover_sig, load_wallpaper_preview, save_wallpaper_preview
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.moy_image import (cover_sig, load_wallpaper_preview,
+                                   save_wallpaper_preview)
 
 
 def _err_text(exc):
@@ -45,6 +50,14 @@ def _err_text(exc):
 class Wallpaper:
     """The wallpaper backdrop component (#28). Owns the RENDERING (draw) + the compiled
     wallpaper-cart cache; ws.wallpaper_id + the picker API stay on Workstation."""
+
+    # Appearance-monitor policy: True renders the preview LIVE every frame
+    # (host/web -- the runner is cheap there). The device backend sets the
+    # instance False: interpreted per-frame rendering is unaffordable, so the
+    # preview COMPUTES ONCE per cart source (the thumbnail model -- one
+    # offscreen render, persisted as a thumbs/wp<w>x<h>.mct sidecar stamped
+    # with cover_sig(src), reused until the kid edits the cart).
+    PREVIEW_LIVE = True
 
     def __init__(self, ws, names):
         self.ws = ws
@@ -67,6 +80,10 @@ class Wallpaper:
         self._pv_draw = None
         self._pv_restore = None
         self._pv_for = None
+        # Static (compute-once) previews: {(path, vw, vh): (src_sig, _Blit)}.
+        # Keyed by source stamp, so it survives selection changes and drops
+        # stale entries on its own; bounded below.
+        self._static_cache = {}
 
     def clear(self):
         """Drop the compiled wallpaper (back to a solid fill). Called by
@@ -227,7 +244,7 @@ class Wallpaper:
             except Exception as exc:  # noqa: BLE001 -- fall through to the cart/fill
                 print("Moybyte artwork preview error:", _err_text(exc))
         cv.rect(x, y, w, h, NAMES["black"])
-        if self._ensure_preview():
+        if self.PREVIEW_LIVE and self._ensure_preview():
             try:
                 if self._pv_restore is not None:
                     self._pv_restore()          # #63 declared background
@@ -243,23 +260,15 @@ class Wallpaper:
                 print("Moybyte wallpaper preview error:", _err_text(exc))
                 self._pv_ns = self._pv_update = self._pv_draw = None
                 self._pv_for = None
-        # No live runner (a device build without the host Canvas, or a broken
-        # compile): the STATIC cached preview -- the cart's cover art through
-        # the #66/#86 cover-thumb pipeline (time-sliced decode, RAM LRU,
-        # persistent .mct sidecar), sized exactly to the screen. The shipped
-        # wallpaper covers ARE their rendered 320x240 frames
-        # (tools/gen_wallpaper_covers.py), so this is the same picture, still.
-        # None while the decode is in flight -- the cover machinery re-arms the
-        # redraw gate, so the screen pops in a few frames later.
-        cart = self._wp_cart
-        cover_for = getattr(ws, "_cover_for", None)
-        if cart is not None and cover_for is not None:
-            try:
-                img = cover_for(cart, w, h)
-                if img is not None:
-                    cv.spr(img, x, y)
-            except Exception as exc:  # noqa: BLE001 -- a bad cover keeps black
-                print("Moybyte wallpaper preview error:", _err_text(exc))
+        # Static tier (PREVIEW_LIVE off -- the device -- or a broken live
+        # runner): the COMPUTED preview, general on every board -- rendered
+        # once through the same runner, cached like a thumbnail. A stable
+        # _Blit identity per cart+size lets a device canvas keep its sprite
+        # cache warm across frames.
+        img = self._static_preview(w, h)
+        if img is not None:
+            s = max(1, min(w // img.w, h // img.h))
+            cv.spr(img, x + (w - img.w * s) // 2, y + (h - img.h * s) // 2, s)
 
     def _ensure_preview(self):
         """Compile the current wallpaper cart into the preview runner (once per
@@ -315,6 +324,99 @@ class Wallpaper:
             self._pv_ns = self._pv_update = self._pv_draw = None
             self._pv_for = None
             return False
+
+    def _src_sig(self, cart):
+        """cover_sig of the cart's SOURCE -- the staleness stamp for computed
+        previews. Rehydrates a slimmed cart (#66) just long enough to read it."""
+        src = cart.get("src")
+        if src is None:
+            ws = self.ws
+            try:
+                ws._rehydrate_cart(cart)
+                src = cart.get("src")
+            finally:
+                if cart is not getattr(ws, "_fat_cart", None):
+                    ws._reslim_cart(cart)
+        return cover_sig(src) if src else None
+
+    def _static_preview(self, w, h):
+        """The COMPUTED (thumbnail-model) preview of the current wallpaper
+        cart, sized to fit (w, h): RAM memo -> wp sidecar -> one offscreen
+        render (persisted). Returns a _Blit or None. General on every device:
+        the render needs only the staged pure-Python Canvas, and the result is
+        stamped against the cart's source so an edit recomputes it."""
+        cart = self._wp_cart
+        if cart is None:
+            return None
+        gw, gh = self.ws.canvas.w, self.ws.canvas.h
+        if gw * h >= gh * w:                    # aspect-fit target, capped at
+            vw, vh = w, max(1, gh * w // gw)    # native (draw upscales cleanly)
+        else:
+            vw, vh = max(1, gw * h // gh), h
+        if vw >= gw:
+            vw, vh = gw, gh
+        path = cart.get("path")
+        key = (path, vw, vh)
+        try:
+            sig = self._src_sig(cart)
+        except Exception:  # noqa: BLE001 -- an unreadable cart has no preview
+            return None
+        ent = self._static_cache.get(key)
+        if ent is not None and ent[0] == sig:
+            return ent[1]
+        pix = None
+        if path and sig is not None:
+            try:
+                pix = load_wallpaper_preview(path, vw, vh, sig)
+            except Exception:  # noqa: BLE001 -- a bad sidecar just recomputes
+                pix = None
+        if pix is None:
+            pix = self._render_static(vw, vh)
+            if (pix is not None and path and sig is not None
+                    and getattr(self.ws, "can_manage", False)):
+                try:
+                    self.ws._with_sd(lambda: save_wallpaper_preview(
+                        path, vw, vh, sig, pix))
+                except Exception:  # noqa: BLE001 -- regenerable cache
+                    pass
+        if pix is None:
+            return None
+        img = _Blit(vw, vh, bytes(pix), -1)
+        img._paint = True                       # compact b64 wire form on the web
+        while len(self._static_cache) > 8:      # bound the memo
+            self._static_cache.pop(next(iter(self._static_cache)))
+        self._static_cache[key] = (sig, img)
+        return img
+
+    def _render_static(self, vw, vh):
+        """Render ONE representative frame of the current wallpaper cart on
+        the offscreen runner canvas (live scenes warmed a few seconds so the
+        still looks alive) and resample it to (vw, vh). The one-time cost the
+        sidecar amortizes away; None when the runner is unavailable."""
+        if not self._ensure_preview():
+            return None
+        try:
+            if self._pv_restore is not None:
+                self._pv_restore()
+            if self._pv_update is not None:
+                for _ in range(120):            # ~4s at 30Hz
+                    self._pv_update(1 / 30)
+            self._pv_draw()
+            pv = self._pv_canvas
+            rs = getattr(pv, "reset_state", None)
+            if rs is not None:
+                rs()
+            fb = getattr(pv, "flush_batch", None)
+            if fb is not None:
+                fb()
+            if (vw, vh) == (pv.w, pv.h):
+                return bytes(pv.buf)
+            return self._sample(pv.buf, pv.w, pv.h, vw, vh)
+        except Exception as exc:  # noqa: BLE001 -- a broken cart has no preview
+            print("Moybyte wallpaper preview error:", _err_text(exc))
+            self._pv_ns = self._pv_update = self._pv_draw = None
+            self._pv_for = None
+            return None
 
     @staticmethod
     def _sample(pix, gw, gh, vw, vh):

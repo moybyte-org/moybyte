@@ -144,16 +144,14 @@ def cover_sig(text):
     return (len(text) * 2654435761 + s) & 0xFFFFFFFF
 
 
-def _thumb_file(path, w, h):
-    return (path + "/" + THUMBS_DIR + "/"
+def _thumb_file(path, w, h, prefix=""):
+    return (path + "/" + THUMBS_DIR + "/" + prefix
             + str(int(w)) + "x" + str(int(h)) + ".mct")
 
 
-def load_cover_thumb(path, w, h, sig):
-    """The pre-decoded (w, h) cover crop for the cart at `path` -- the raw
-    indexed pix bytes (len == w*h) -- or None when absent, stale or corrupt."""
+def _load_thumb(path, w, h, sig, prefix=""):
     try:
-        with open(_thumb_file(path, w, h), "rb") as f:
+        with open(_thumb_file(path, w, h, prefix), "rb") as f:
             data = f.read()
     except OSError:
         return None
@@ -163,13 +161,36 @@ def load_cover_thumb(path, w, h, sig):
     return data[8:]
 
 
-def save_cover_thumb(path, w, h, sig, pix):
-    """Persist a finished cover crop. Best-effort and never raises: a full SD
-    just means that crop decodes again next session."""
+def _save_thumb(path, w, h, sig, pix, prefix=""):
     try:
         _mkdir(path + "/" + THUMBS_DIR)
-        with open(_thumb_file(path, w, h), "wb") as f:
+        with open(_thumb_file(path, w, h, prefix), "wb") as f:
             f.write(b"MCT1" + (sig & 0xFFFFFFFF).to_bytes(4, "little"))
             f.write(pix)
     except Exception:  # noqa: BLE001 -- regenerable cache
         pass
+
+
+def load_cover_thumb(path, w, h, sig):
+    """The pre-decoded (w, h) cover crop for the cart at `path` -- the raw
+    indexed pix bytes (len == w*h) -- or None when absent, stale or corrupt."""
+    return _load_thumb(path, w, h, sig)
+
+
+def save_cover_thumb(path, w, h, sig, pix):
+    """Persist a finished cover crop. Best-effort and never raises: a full SD
+    just means that crop decodes again next session."""
+    _save_thumb(path, w, h, sig, pix)
+
+
+def load_wallpaper_preview(path, w, h, sig):
+    """The Appearance monitor's COMPUTED preview frame for the wallpaper cart
+    at `path` (thumbs/wp<w>x<h>.mct) -- raw indexed pix, or None when absent,
+    stale (the stamp is cover_sig of the cart's SOURCE, so an edit rebuilds)
+    or corrupt. Same regenerable-sidecar contract as the cover thumbs."""
+    return _load_thumb(path, w, h, sig, "wp")
+
+
+def save_wallpaper_preview(path, w, h, sig, pix):
+    """Persist a rendered wallpaper preview frame. Best-effort, never raises."""
+    _save_thumb(path, w, h, sig, pix, "wp")

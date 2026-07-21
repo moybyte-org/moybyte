@@ -154,6 +154,7 @@ for f in editors.py editors_base.py editors_code.py editors_sheet.py \
          wallpaper.py artwork.py appearance_app.py app_shell.py file_widgets.py files_app.py writer_app.py storybook_app.py sheets_app.py formula.py launcher_layer.py project.py player.py editor_app.py \
          wm.py wm_windowed.py players.py chrome.py ui.py calc_app.py console.py moy_carts.py \
          moy_fs.py moy_image.py moy_journal.py op_history.py blocks.py \
+         canvas.py palette.py \
          web_view_ws.py web_view_page.py web_view.py; do
   cp "${REPO_ROOT}/runtime/${f}" "${MODULES_DIR}/${f}"
 done
