@@ -289,6 +289,216 @@ def test_attach_back_button_returns_to_the_grid_without_writing(tmp_path):
     assert app.mode == "grid" and app.sheet is not None
 
 
+# -- op-history undo/redo (#111 phase 3): the merged op_history.History core ----
+
+
+def _key(app, inp, code):
+    inp.last_key = code
+    app._typed_keys(inp)
+    inp.last_key = 0
+    app._typed_keys(inp)
+
+
+def test_undo_redo_dimmed_at_a_fresh_sheet(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_sheets(ws)
+    app._new_sheet()
+    assert app.history is not None
+    assert not app.history.can_undo()
+    assert not app.history.can_redo()
+
+
+def test_cell_edit_undo_restores_old_value_and_recomputes(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_sheets(ws)
+    app._new_sheet()
+    app.cur_col, app.cur_row = 0, 0
+    _type(app, ws.input, "5\n")
+    app.cur_col, app.cur_row = 1, 0
+    _type(app, ws.input, "=A1*2\n")
+    assert app.sheet.value_at(1, 0) == 10
+    app.cur_col, app.cur_row = 0, 0
+    _type(app, ws.input, "9\n")
+    assert app.sheet.value_at(0, 0) == 9
+    assert app.sheet.value_at(1, 0) == 18       # formula recomputed off the edit
+    assert app.history.can_undo()
+    app._undo()
+    assert app.sheet.value_at(0, 0) == 5        # A1 restored
+    assert app.sheet.value_at(1, 0) == 10       # B1 recomputes off the restored A1
+    assert app.cur_col == 0 and app.cur_row == 0   # undo jumps the selection to the cell
+
+
+def test_clear_is_now_undoable(tmp_path):
+    # The #111 marquee win: CLEAR (previously a silent, unrecoverable wipe of
+    # the current cell) is just a cell-edit-to-"" under the shared codec.
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_sheets(ws)
+    app._new_sheet()
+    app.cur_col, app.cur_row = 0, 0
+    _type(app, ws.input, "42\n")
+    app.cur_col, app.cur_row = 0, 0
+    app.handle_pointer(app.layout.clr_btn[0] + 1, app.layout.clr_btn[1] + 1, True)
+    assert app.sheet.value_at(0, 0) == ""
+    assert app.history.can_undo()
+    app._undo()
+    assert app.sheet.raw_at(0, 0) == "42"
+    assert app.sheet.value_at(0, 0) == 42
+
+
+def test_clear_on_an_already_empty_cell_records_no_op(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_sheets(ws)
+    app._new_sheet()
+    app._clear_cell()
+    assert not app.history.can_undo()
+
+
+def test_redo_replays_the_undone_edit(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_sheets(ws)
+    app._new_sheet()
+    app.cur_col, app.cur_row = 0, 0
+    _type(app, ws.input, "7\n")
+    assert not app.history.can_redo()
+    app._undo()
+    assert app.sheet.value_at(0, 0) == ""
+    assert app.history.can_redo()
+    app._redo()
+    assert app.sheet.value_at(0, 0) == 7
+    assert not app.history.can_redo()
+
+
+def test_undo_redo_toolbar_taps(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_sheets(ws)
+    app._new_sheet()
+    app.cur_col, app.cur_row = 0, 0
+    _type(app, ws.input, "4\n")
+    assert app.history.can_undo() and not app.history.can_redo()
+    ub = app.layout.undo_btn
+    app.handle_pointer(ub[0] + 1, ub[1] + 1, True)
+    assert app.sheet.value_at(0, 0) == ""
+    assert app.history.can_redo()
+    rb = app.layout.redo_btn
+    app.handle_pointer(rb[0] + 1, rb[1] + 1, True)
+    assert app.sheet.value_at(0, 0) == 4
+
+
+def test_ctrl_z_ctrl_y_undo_redo(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_sheets(ws)
+    app._new_sheet()
+    app.cur_col, app.cur_row = 0, 0
+    _type(app, ws.input, "6\n")
+    _key(app, ws.input, 0x1A)                    # Ctrl+Z
+    assert app.sheet.value_at(0, 0) == ""
+    _key(app, ws.input, 0x19)                    # Ctrl+Y
+    assert app.sheet.value_at(0, 0) == 6
+
+
+def test_undo_still_works_across_an_autosave_flush(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_sheets(ws)
+    app._new_sheet()
+    app.cur_col, app.cur_row = 0, 0
+    _type(app, ws.input, "3\n")
+    app.flush(force=True)                        # the autosave point
+    assert app.sheet.value_at(0, 0) == 3
+    assert app.history.can_undo()
+    app._undo()
+    assert app.sheet.value_at(0, 0) == ""
+
+
+def test_history_sidecar_segments_land_on_flush(tmp_path):
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
+    app = _open_sheets(ws)
+    app._new_sheet()
+    name = app.sheet_name
+    app.cur_col, app.cur_row = 0, 0
+    _type(app, ws.input, "1\n")
+    app.cur_col, app.cur_row = 1, 0
+    _type(app, ws.input, "2\n")
+    app.flush(force=True)
+    recs = moy_carts.load_history("tables", name, carts)
+    segs = [r for r in recs if r["t"] == "seg"]
+    assert segs
+    assert sum(len(s["ops"]) for s in segs) == 2
+
+
+def test_undo_available_after_reopening_a_sheet(tmp_path):
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
+    app = _open_sheets(ws)
+    app._new_sheet()
+    name = app.sheet_name
+    app.cur_col, app.cur_row = 0, 0
+    _type(app, ws.input, "11\n")
+    app.flush(force=True)
+    app._back_to_list()
+    assert app.history is None
+    app._open_file(name)
+    assert app.history is not None
+    assert app.history.can_undo()
+    app._undo()
+    assert app.sheet.value_at(0, 0) == ""
+
+
+def test_undo_available_after_go_home_and_reopen(tmp_path):
+    # go_home() is the hard-commit exit path (#111 addendum) -- a HOME tap must
+    # flush the sidecar exactly like the explicit back-to-list path above.
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
+    app = _open_sheets(ws)
+    app._new_sheet()
+    name = app.sheet_name
+    app.cur_col, app.cur_row = 0, 0
+    _type(app, ws.input, "8\n")
+    ws.go_home()
+    app2 = _open_sheets(ws)
+    app2._open_file(name)
+    assert app2.history.can_undo()
+    app2._undo()
+    assert app2.sheet.value_at(0, 0) == ""
+
+
+def test_attach_unaffected_by_op_history(tmp_path):
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
+    game_src = (
+        "ROWS = table('wave')\n"
+        "def _update(dt):\n    pass\n"
+        "def _draw():\n    cls(0)\n"
+    )
+    game = ws.carts_store.create("Coin Quest 3", carts, src=game_src, type="game")
+    ws._apply_items(ws.carts_store.scan(carts))
+    app = _open_sheets(ws)
+    app._new_sheet()
+    app._begin_rename()
+    app.rename_text = "wave2"
+    app._typed_name(type("K", (), {"last_key": 0x0D})())
+    assert app.sheet_name == "wave2"
+    app.cur_col, app.cur_row = 0, 0
+    _type(app, ws.input, "1\n")
+    app.cur_col, app.cur_row = 1, 0
+    _type(app, ws.input, "=A1+1\n")
+    app._undo()                                   # undo B1's formula, redo it back
+    assert app.sheet.value_at(1, 0) == ""
+    app._redo()
+    assert app.sheet.value_at(1, 0) == 2
+    app._open_attach()
+    assert app.mode == "attach"
+    targets = app._attach_targets()
+    titles = [c.get("title") for c in targets]
+    app._tap_row(titles.index("Coin Quest 3"))
+    assert app.mode == "grid"
+    assert "ATTACHED" in app.status
+    table_path = Path(game["path"]) / "tables" / "wave2.moysheet"
+    assert table_path.exists()
+    rows = moy_carts.decode_table(table_path.read_text(encoding="utf-8"))
+    assert rows == [[1, 2]]
+
+
 # -- interop: the decode helpers (unchanged moy_carts) ---------------------------
 
 def test_decode_table_trims_to_populated_extent():
