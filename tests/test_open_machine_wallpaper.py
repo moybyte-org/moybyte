@@ -32,6 +32,6 @@ def test_open_machine_wallpaper_is_in_device_seed_order():
     carts = build_carts(str(ROOT / "system_carts"))
     cart = next(c for c in carts if c["title"] == "Open Machine")
     assert cart["type"] == "wallpaper"
-    assert cart["version"] == 1
+    assert cart["version"] >= 1                # bumped per #47 on content changes
     assert cart["cfg"]["field"] == "black"
     assert "def _update" not in cart["src"]

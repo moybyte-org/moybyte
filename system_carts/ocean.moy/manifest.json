@@ -1,1 +1,55 @@
-{"format": "moybyte-cart-v1", "version": 3, "title": "Ocean Desktop", "type": "wallpaper", "runtime": "python", "main": "main.py", "system": true, "canvas": {"width": 320, "height": 240, "palette": "moy64"}, "permissions": ["graphics", "input"], "safe_to_share": true, "config": {"bubble_count": 60, "rise_speed": 25, "water": "blue"}, "edit": [{"key": "bubble_count", "label": "BUBBLES", "type": "int", "min": 10, "max": 200, "step": 10, "card": "ADD {value} BUBBLES"}, {"key": "rise_speed", "label": "RISE", "type": "int", "min": 5, "max": 80, "step": 5, "card": "BUBBLES RISE AT {value}"}, {"key": "water", "label": "WATER", "type": "choice", "choices": ["blue", "indigo", "dark_blue"], "card": "WATER IS {value}"}]}
+{
+  "format": "moybyte-cart-v1",
+  "version": 4,
+  "title": "Ocean Desktop",
+  "type": "wallpaper",
+  "runtime": "python",
+  "main": "main.py",
+  "system": true,
+  "canvas": {
+    "width": 320,
+    "height": 240,
+    "palette": "moy64"
+  },
+  "permissions": [
+    "graphics",
+    "input"
+  ],
+  "safe_to_share": true,
+  "config": {
+    "bubble_count": 60,
+    "rise_speed": 25,
+    "water": "blue"
+  },
+  "edit": [
+    {
+      "key": "bubble_count",
+      "label": "BUBBLES",
+      "type": "int",
+      "min": 10,
+      "max": 200,
+      "step": 10,
+      "card": "ADD {value} BUBBLES"
+    },
+    {
+      "key": "rise_speed",
+      "label": "RISE",
+      "type": "int",
+      "min": 5,
+      "max": 80,
+      "step": 5,
+      "card": "BUBBLES RISE AT {value}"
+    },
+    {
+      "key": "water",
+      "label": "WATER",
+      "type": "choice",
+      "choices": [
+        "blue",
+        "indigo",
+        "dark_blue"
+      ],
+      "card": "WATER IS {value}"
+    }
+  ]
+}

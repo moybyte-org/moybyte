@@ -238,10 +238,28 @@ class Wallpaper:
                 if rs is not None:
                     rs()
                 self._fit_blit(cv, self._pv_canvas, rect)
-            except Exception as exc:  # noqa: BLE001 -- drop the broken preview, keep black
+                return
+            except Exception as exc:  # noqa: BLE001 -- drop the broken preview
                 print("Moybyte wallpaper preview error:", _err_text(exc))
                 self._pv_ns = self._pv_update = self._pv_draw = None
                 self._pv_for = None
+        # No live runner (a device build without the host Canvas, or a broken
+        # compile): the STATIC cached preview -- the cart's cover art through
+        # the #66/#86 cover-thumb pipeline (time-sliced decode, RAM LRU,
+        # persistent .mct sidecar), sized exactly to the screen. The shipped
+        # wallpaper covers ARE their rendered 320x240 frames
+        # (tools/gen_wallpaper_covers.py), so this is the same picture, still.
+        # None while the decode is in flight -- the cover machinery re-arms the
+        # redraw gate, so the screen pops in a few frames later.
+        cart = self._wp_cart
+        cover_for = getattr(ws, "_cover_for", None)
+        if cart is not None and cover_for is not None:
+            try:
+                img = cover_for(cart, w, h)
+                if img is not None:
+                    cv.spr(img, x, y)
+            except Exception as exc:  # noqa: BLE001 -- a bad cover keeps black
+                print("Moybyte wallpaper preview error:", _err_text(exc))
 
     def _ensure_preview(self):
         """Compile the current wallpaper cart into the preview runner (once per
