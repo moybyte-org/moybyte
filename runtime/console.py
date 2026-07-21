@@ -3630,8 +3630,9 @@ class Workstation:
         # gate after its first frame and hide newly-found devices/status changes.
         if kind == "settings" and self.settings_layer.bluetooth_animating():
             return True
-        if kind == "appearance" and self.wallpaper.is_animating(dt):
-            return True
+        # (The Appearance app's monitor shows a COMPUTED still on every tier,
+        # so it needs no live-wallpaper redraw exception -- the gate closes
+        # like any static UI and the web view idles at ~0 KB/s there.)
         # A firmware install (#53) advances a chunk per frame; "done" runs a short
         # reboot countdown; "checking"/"downloading" (Phase 3) step the online flow.
         # All must keep redrawing so progress animates and the work proceeds without input.

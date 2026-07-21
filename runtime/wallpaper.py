@@ -51,14 +51,6 @@ class Wallpaper:
     """The wallpaper backdrop component (#28). Owns the RENDERING (draw) + the compiled
     wallpaper-cart cache; ws.wallpaper_id + the picker API stay on Workstation."""
 
-    # Appearance-monitor policy: True renders the preview LIVE every frame
-    # (host/web -- the runner is cheap there). The device backend sets the
-    # instance False: interpreted per-frame rendering is unaffordable, so the
-    # preview COMPUTES ONCE per cart source (the thumbnail model -- one
-    # offscreen render, persisted as a thumbs/wp<w>x<h>.mct sidecar stamped
-    # with cover_sig(src), reused until the kid edits the cart).
-    PREVIEW_LIVE = True
-
     def __init__(self, ws, names):
         self.ws = ws
         self._NAMES = names
@@ -207,18 +199,18 @@ class Wallpaper:
         ws.sys_canvas.cls(NAMES.get(name, NAMES["dark_blue"]))
 
     def draw_preview(self, cv, rect, dt):
-        """The Appearance monitor's screen: render the chosen wallpaper FIT
-        inside `rect` -- the FULL frame, vs draw()'s full-bleed cover-crop.
-        Same guarded degradation ladder as draw(): My Art direct -> cart
-        frame -> solid fill.
+        """The Appearance monitor's screen: the chosen wallpaper FIT inside
+        `rect` -- the FULL frame, vs draw()'s full-bleed cover-crop. Same
+        guarded degradation ladder as draw(): My Art direct -> cart frame ->
+        solid fill.
 
-        A cart wallpaper renders through the PREVIEW runner: the cart compiled
-        a second time over an offscreen host canvas (never the game canvas --
-        it may belong to a running game, or BE the visible 320x240 screen),
-        then blitted here. The blit lands via draw verbs on a recording canvas
-        (the web tiers) or raw rows on a buffer canvas; a build without the
-        host Canvas (device) shows a dark screen -- native preview is a
-        follow-up."""
+        A cart wallpaper shows its COMPUTED preview -- one identical behavior
+        on every tier (host, web, both boards; no live/static policy fork):
+        rendered once per cart source through the preview runner (the cart
+        compiled a second time over an offscreen pure-Python Canvas -- never
+        the game canvas) and cached like a thumbnail (RAM memo + the
+        thumbs/wp*.mct sidecar). A STILL, so the appearance screen closes the
+        redraw gate like any static UI."""
         NAMES = self._NAMES
         ws = self.ws
         x, y, w, h = rect
@@ -244,27 +236,8 @@ class Wallpaper:
             except Exception as exc:  # noqa: BLE001 -- fall through to the cart/fill
                 print("Moybyte artwork preview error:", _err_text(exc))
         cv.rect(x, y, w, h, NAMES["black"])
-        if self.PREVIEW_LIVE and self._ensure_preview():
-            try:
-                if self._pv_restore is not None:
-                    self._pv_restore()          # #63 declared background
-                if self._wp_live and self._pv_update is not None and dt > 0:
-                    self._pv_update(dt)
-                self._pv_draw()
-                rs = getattr(self._pv_canvas, "reset_state", None)
-                if rs is not None:
-                    rs()
-                self._fit_blit(cv, self._pv_canvas, rect)
-                return
-            except Exception as exc:  # noqa: BLE001 -- drop the broken preview
-                print("Moybyte wallpaper preview error:", _err_text(exc))
-                self._pv_ns = self._pv_update = self._pv_draw = None
-                self._pv_for = None
-        # Static tier (PREVIEW_LIVE off -- the device -- or a broken live
-        # runner): the COMPUTED preview, general on every board -- rendered
-        # once through the same runner, cached like a thumbnail. A stable
-        # _Blit identity per cart+size lets a device canvas keep its sprite
-        # cache warm across frames.
+        # A stable _Blit identity per cart+size lets a device canvas keep its
+        # sprite cache warm across frames.
         img = self._static_preview(w, h)
         if img is not None:
             s = max(1, min(w // img.w, h // img.h))
@@ -430,62 +403,6 @@ class Wallpaper:
                 out[o + i] = pix[base + xm[i]]
             o += vw
         return out
-
-    def _fit_blit(self, sc, gc, rect):
-        """Blit the whole frame on `gc` into `rect`, aspect-fit and centered.
-        At or above native size the target snaps to a CLEAN half-frame
-        multiple (uniform pixels: full- or half-res source, integer expand);
-        below native it resamples to the exact fit, so the monitor screen
-        fills edge to edge. Dest paths: raw rows on a buffer canvas, one
-        self-contained spr on a recording canvas (the web wire mechanism)."""
-        fb = getattr(gc, "flush_batch", None)
-        if fb is not None:
-            fb()
-        gbuf = getattr(gc, "buf", None)
-        if gbuf is None:
-            return
-        x, y, w, h = rect
-        gw, gh = gc.w, gc.h
-        if gw * h >= gh * w:                    # aspect-fit target inside rect
-            vw, vh = w, max(1, gh * w // gw)
-        else:
-            vw, vh = max(1, gw * h // gh), h
-        hw, hh = max(1, gw // 2), max(1, gh // 2)
-        if vw >= gw:
-            k = min(vw // hw, vh // hh)         # clean half-frame multiples
-            vw, vh = hw * k, hh * k
-        if vw % gw == 0 and vh % gh == 0:       # full-res source, integer expand
-            src, dw, dh, s = gbuf, gw, gh, vw // gw
-        elif vw % hw == 0 and vh % hh == 0 and vw // hw == vh // hh:
-            rows = bytearray()                  # half-res source (2x decimation)
-            for gy in range(0, gh, 2):
-                rows.extend(gbuf[gy * gw:(gy + 1) * gw:2])
-            src, dw, dh, s = rows, hw, hh, vw // hw
-        else:                                   # sub-native: exact-fit resample
-            src, dw, dh, s = self._sample(gbuf, gw, gh, vw, vh), vw, vh, 1
-        ox = x + (w - vw) // 2
-        oy = y + (h - vh) // 2
-        sbuf = getattr(sc, "buf", None)
-        if sbuf is None:
-            img = _Blit(dw, dh, bytes(src), -1)
-            img._paint = True                   # compact b64 wire form
-            sc.spr(img, ox, oy, s)
-            return
-        sw = sc.w
-        for ry in range(dh):
-            row = src[ry * dw:(ry + 1) * dw]
-            if s > 1:
-                er = bytearray(dw * s)
-                out = 0
-                for px in row:
-                    er[out:out + s] = bytes((px,)) * s
-                    out += s
-            else:
-                er = row
-            base0 = (oy + ry * s) * sw + ox
-            for r in range(s):
-                base = base0 + r * sw
-                sbuf[base:base + vw] = er
 
     def _backdrop_blit(self, sc, gc):
         """Composite the 320x240 wallpaper frame into the big system canvas as the

@@ -78,7 +78,12 @@ def test_wallpaper_and_theme_choices_apply_and_persist(tmp_path):
     app._apply(ocean_i)
     assert ws.wallpaper_id == "ocean"
     assert moy_carts.load_system(carts)["wallpaper"] == "ocean"
-    assert ws._animating(1 / 30) is True  # actual live cart preview keeps moving
+    # The monitor shows a COMPUTED still on every tier (no live/static drift),
+    # so the appearance screen closes the redraw gate even for a live cart
+    # (once the "Home Decorator" unlock toast this pick raised has cleared).
+    ws.ach.toast = None
+    ws.ach.toast_until = 0
+    assert ws._animating(1 / 30) is False
 
     app._set_mode("themes")
     berry_i = [item[0] for item in app._items()].index("berry")
@@ -138,10 +143,9 @@ def test_wide_monitor_shows_full_wallpaper_letterboxed(tmp_path):
     app._set_mode("carts")
     ws.wallpaper.draw_preview(ws.sys_canvas, (10, 20, 500, 380), 1 / 30)
     buf, w = ws.sys_canvas.buf, ws.sys_canvas.w
-    # 320x240 fits 500x380 best at 3/2 -> 480x360 centered: 10px bars all around.
+    # The computed 320x240 still centers in 500x380: bars around, frame inside.
     assert buf[22 * w + 12] == 0 and buf[200 * w + 12] == 0        # left/top bars
-    assert buf[30 * w + 20] == ws.canvas.buf[0]                    # frame TL mapped
-    assert any(buf[200 * w + xx] != 0 for xx in range(30, 480))    # frame content
+    assert any(buf[200 * w + xx] != 0 for xx in range(110, 420))   # frame content
 
 
 def test_fill_and_image_previews_fill_or_fit_the_screen(tmp_path):
@@ -244,13 +248,12 @@ def test_preview_runner_leaves_the_game_canvas_alone(tmp_path):
 
 
 def test_static_preview_computes_once_and_caches_like_thumbnails(tmp_path):
-    """The device tier (PREVIEW_LIVE off): the monitor's frame is COMPUTED in a
-    general way -- rendered once through the preview runner, persisted as a
+    """The ONE preview behavior, every tier: the monitor's frame is COMPUTED --
+    rendered once through the preview runner, persisted as a
     thumbs/wp<w>x<h>.mct sidecar stamped with cover_sig(src), and a later
     session draws from the sidecar WITHOUT the runner."""
     carts = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts)
-    ws.wallpaper.PREVIEW_LIVE = False
     ws.select_wallpaper("moy_night", persist=False)
     rect = (10, 10, 152, 114)
     buf, w = ws.sys_canvas.buf, ws.sys_canvas.w
@@ -259,10 +262,9 @@ def test_static_preview_computes_once_and_caches_like_thumbnails(tmp_path):
     side = Path(carts) / "moy_night.moy" / "thumbs" / "wp152x114.mct"
     assert side.exists()                       # ...and persisted as a sidecar
 
-    # A fresh session with NO runner (the pre-staging device floor) still
-    # shows the frame -- straight from the sidecar.
+    # A fresh session with NO runner (an old device build without the staged
+    # Canvas) still shows the frame -- straight from the sidecar.
     ws2 = host_app.build_workstation(carts)
-    ws2.wallpaper.PREVIEW_LIVE = False
     ws2.wallpaper._ensure_preview = lambda: False
     ws2.select_wallpaper("moy_night", persist=False)
     ws2.sys_canvas.cls(0)
@@ -276,7 +278,6 @@ def test_static_preview_recomputes_when_the_source_changes(tmp_path):
     old frame)."""
     carts = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts)
-    ws.wallpaper.PREVIEW_LIVE = False
     ws.select_wallpaper("moy_night", persist=False)
     rect = (10, 10, 152, 114)
     ws.wallpaper.draw_preview(ws.sys_canvas, rect, 1 / 30)
@@ -284,7 +285,6 @@ def test_static_preview_recomputes_when_the_source_changes(tmp_path):
     main.write_text(main.read_text(encoding="utf-8") + "\n# edited\n",
                     encoding="utf-8")
     ws2 = host_app.build_workstation(carts)
-    ws2.wallpaper.PREVIEW_LIVE = False
     ws2.wallpaper._ensure_preview = lambda: False   # no runner: stale = nothing
     ws2.select_wallpaper("moy_night", persist=False)
     ws2.sys_canvas.cls(0)

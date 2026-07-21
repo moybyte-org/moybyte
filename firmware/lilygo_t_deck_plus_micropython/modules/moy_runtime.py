@@ -357,11 +357,6 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
                          else _load_carts(moybyte_sd.with_sd_live))
     import moy_carts
     ws = Workstation(comp, canvas, inp, carts)
-    # Appearance monitor: interpreted per-frame rendering is unaffordable on
-    # device, so the preview COMPUTES ONCE per cart source on the staged
-    # pure-Python Canvas and caches as a thumbs/wp*.mct sidecar (the
-    # thumbnail model; wallpaper.PREVIEW_LIVE docstring has the contract).
-    ws.wallpaper.PREVIEW_LIVE = False
     # #67 spike: say ONCE whether the auto-native cart loader engaged (the emitter
     # probe in player.py), so a serial capture can attribute logic-ms deltas.
     try:

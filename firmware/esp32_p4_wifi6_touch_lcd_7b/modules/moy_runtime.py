@@ -424,11 +424,6 @@ def run_desktop(fps_cap=60):
                               auto_start=False)
     ws = Workstation(comp, game, inp, carts,
                      sys_canvas=sys_canvas, font_scale=FONT_SCALE)
-    # Appearance monitor: interpreted per-frame rendering is unaffordable on
-    # device, so the preview COMPUTES ONCE per cart source on the staged
-    # pure-Python Canvas and caches as a thumbs/wp*.mct sidecar (the
-    # thumbnail model; wallpaper.PREVIEW_LIVE docstring has the contract).
-    ws.wallpaper.PREVIEW_LIVE = False
     # #67 Phase 1: the Lua cart runtime (shared glue in device_api.py) -- wired
     # only when the moy_lua native module is in this build; without it a
     # "runtime": "lua" cart opens the Player's runtime-missing panel.
