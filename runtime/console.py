@@ -2898,6 +2898,43 @@ class Workstation:
             return True
         return self._journal_check(True)
 
+    def _active_tab_files(self):
+        """The journal file set the bar UNDO/REDO should walk for the ACTIVE Editor tab
+        (#111 owner decision): the fallback journal walk is scoped to the tab's own
+        file(s), so an undo on one tab never reverts another's newest commit and REDO
+        only lights on the tab that has something ahead. A tuple of journal file names,
+        or None (the legacy whole-project walk) for a tab with no defined set / outside
+        the Editor. `main` is the cart's actual main file (#67: main.lua for a lua cart),
+        matching how commits name it (_journal_code)."""
+        v = self.menu_view
+        cart = self.cart or {}
+        mainf = cart.get("main", "main.py")
+        if v == "code":
+            return (mainf,)
+        if v == "blocks":
+            # blocks.json is not itself journaled today (block saves write it straight to
+            # disk); main.py IS -- so the pair is walked together and can't desync, and a
+            # GRADUATED cart's read-only Blocks tab reaches the main.py graduating commit
+            # (its grad rider un-graduates on the same press).
+            return ("blocks.json", mainf)
+        if v == "cards":
+            return ("config.json",)
+        if v == "paint":
+            return ("sprites.moygfx",)
+        if v == "map":
+            return ("map.moymap",)
+        if v == "music":
+            return ("sounds.json",)
+        if v == "scene":
+            name = getattr(self.scene_ui, "scene_name", None)
+            store = self.carts_store
+            if name and store is not None:
+                sd = getattr(store, "SCENES_DIR", "scenes")
+                ext = getattr(store, "SCENE_EXT", ".moyscene")
+                return (sd + "/" + name + ext,)
+            return None
+        return None
+
     def _journal_check(self, redo):
         store = self.carts_store
         if store is None or not self.cart:
@@ -2907,8 +2944,9 @@ class Workstation:
         if not (path and self.can_manage and hasattr(store, name)):
             return False
         fn = getattr(store, name)
+        files = self._active_tab_files()
         try:
-            return bool(self._with_sd(lambda: fn(path)))
+            return bool(self._with_sd(lambda: fn(path, files)))
         except Exception as exc:  # noqa: BLE001 -- a check failure must never crash the shell
             print("Moybyte journal check failed:", _err_text(exc))
             return False
@@ -2921,8 +2959,9 @@ class Workstation:
         if not (path and self.can_manage and hasattr(store, "journal_undo")):
             return False
         fn = store.journal_redo if redo else store.journal_undo
+        files = self._active_tab_files()
         try:
-            changed = self._with_sd(lambda: fn(path))
+            changed = self._with_sd(lambda: fn(path, files))
         except Exception as exc:  # noqa: BLE001 -- a walk failure must never crash the shell
             print("Moybyte journal walk failed:", _err_text(exc))
             return False

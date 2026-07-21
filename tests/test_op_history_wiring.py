@@ -599,3 +599,98 @@ def test_bar_undo_bits_are_ram_only_off_editor(tmp_path):
     ws = _make_ws_with_cart(tmp_path)
     ws.go_home()
     assert ws._bar_undo_bits() == (False, False)
+
+
+# ==================================================================#
+# #111 owner decision: the journal fallback walk is scoped to the ACTIVE TAB's
+# file(s), so a bar undo on one tab never reverts another tab's newest commit and
+# REDO only lights on the tab that actually has something ahead.
+# ==================================================================#
+
+def _cell_painted(ws):
+    ox, oy = ws.sheet.tile_origin(0)
+    return ws.sheet.pget(ox, oy)
+
+
+def test_active_tab_files_maps_each_tab(tmp_path):
+    # The tab -> journal-file-set table the scoped walk routes through.
+    ws = _make_ws_with_cart(tmp_path)
+    ws.set_menu_view("code")
+    assert ws._active_tab_files() == ("main.py",)
+    ws.set_menu_view("paint");  assert ws._active_tab_files() == ("sprites.moygfx",)
+    ws.set_menu_view("map");    assert ws._active_tab_files() == ("map.moymap",)
+    ws.set_menu_view("music");  assert ws._active_tab_files() == ("sounds.json",)
+    ws.set_menu_view("blocks"); assert ws._active_tab_files() == ("blocks.json", "main.py")
+    ws._open_scene()
+    assert ws._active_tab_files() == ("scenes/main.moyscene",)
+    # off the Editor (launcher) there is no scoped set -> whole-project (None)
+    ws.go_home()
+    assert ws._active_tab_files() is None
+
+
+def test_bar_undo_on_code_tab_never_reverts_the_map_commit(tmp_path):
+    # The reported symptom, end to end: commit code TWICE and the map ONCE, then a bar
+    # UNDO on the CODE tab must revert the code (never the map, though the map committed
+    # with the higher seq), and the map tab's REDO must stay DIMMED.
+    ws = _make_ws_with_cart(tmp_path)
+    ed = _open_code(ws)
+    _type(ws, "# c1\n"); ws.save_code()          # main.py commit 1
+    _type(ws, "# c2\n"); ws.save_code()          # main.py commit 2
+
+    me = _open_map(ws)                           # (tab switch hard-commits code -- deduped)
+    tm = ws.tilemap
+    me.n = 5
+    me.begin_edit(); me.place(6, 6); me.end_edit()
+    ws.save_map()                                # map.moymap commit (the NEWEST commit)
+    assert tm.mget(6, 6) == 5
+
+    # Back on the code tab: the bar UNDO walks main.py (its own timeline), not the map.
+    ws.set_menu_view("code")
+    assert ws.undo() is True
+    assert "# c2" not in ws.editor.text()        # code stepped c2 -> c1
+    assert "# c1" in ws.editor.text()
+    assert ws.tilemap.mget(6, 6) == 5            # the MAP is untouched
+
+    # Redo dim is per-tab: the code tab can redo (it was just rewound); after switching
+    # to the map tab, REDO is dimmed (the map has nothing ahead).
+    assert ws.can_redo() is True                 # (still on code)
+    ws.set_menu_view("map")
+    assert ws.can_redo() is False                # the map tab's REDO stays dark
+
+
+def test_graduated_blocks_tab_undo_ungraduates_under_scoped_walk(tmp_path):
+    # Blocks pair walks in step: blocks.json is not itself journaled (block saves write
+    # it straight to disk), so the blocks filter ("blocks.json","main.py") reaches the
+    # main.py graduating commit -- a single bar UNDO on the FROZEN Blocks tab restores
+    # the block-generated baseline AND un-graduates, in one press.
+    from runtime import host_app, moy_carts, blocks
+    root = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(root)
+    ws = host_app.build_workstation(root)
+    cart = moy_carts.create("Grad", root, type="game")
+    prog = {"vars": ["score"], "scripts": [
+        blocks.make_block("on_draw", children=[
+            blocks.make_block("cls", {"color": "black"}),
+            blocks.make_block("set_var", {"var": "score", "value": 7})])]}
+    assert moy_carts.save_blocks(cart, prog)[0] == moy_carts.SAVE_OK
+    ws.launcher.items = moy_carts.scan(root)
+    for i, c in enumerate(ws.launcher.items):
+        if c["title"] == "Grad":
+            ws.launcher.sel = i
+    ws.open()
+    path = ws.cart["path"]
+
+    # Graduate via a diverging CODE commit.
+    ws.set_menu_view("code"); ws.screen = "menu"
+    ws.editor.set_text(ws.cart["src"].replace("score = 7", "score = 999"))
+    assert ws.save_code() is True
+    assert ws.cart["graduated"] is True
+
+    # Open the (now frozen, History-less) Blocks tab and press the bar UNDO ONCE.
+    ws._open_blocks()
+    assert ws.menu_view == "blocks"
+    assert ws.project.history_for("blocks") is None       # no in-RAM history: journal walk
+    assert ws.undo() is True
+    assert "score = 999" not in (Path(path) / "main.py").read_text()
+    assert ws.cart["graduated"] is False                  # un-graduated in ONE press
+    assert moy_carts.load(path)["graduated"] is False
