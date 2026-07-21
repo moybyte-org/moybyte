@@ -570,3 +570,32 @@ def test_config_commit_embeds_ops_in_journal(tmp_path):
     for op in ops:
         assert op["k"] == "spd"
     assert ws.project.config_hist.peek() == []   # the batch drained
+
+
+# -- the bar's cached strip must un-dim UNDO on the very next frame ----------
+
+def test_bar_cache_key_tracks_local_history(tmp_path):
+    # The user-visible bug this pins: paint a stroke -> the dirty star appears but
+    # the bar's UNDO icon stayed dimmed, because the cached strip's key had no
+    # undo-state component (it only rebuilt on a clock tick / zone change). The
+    # key must now change as soon as the local History gains a step -- and again
+    # when undo empties it.
+    ws = _make_ws_with_cart(tmp_path)
+    ws._open_paint()
+    pe = ws.paint
+    pe.n = 0
+    before = ws.bar_layer._cart_bar_key()
+    _stroke(pe, 3, 3, 6)
+    after = ws.bar_layer._cart_bar_key()
+    assert before != after                      # stroke -> key changes -> strip re-renders
+    assert ws.can_undo() is True
+    ws.undo()
+    assert ws.bar_layer._cart_bar_key() != after   # redo now possible -> changes again
+
+
+def test_bar_undo_bits_are_ram_only_off_editor(tmp_path):
+    # On the launcher (no active editor tab) the bits are constant False/False --
+    # and crucially computing them never touches the SD-backed journal check.
+    ws = _make_ws_with_cart(tmp_path)
+    ws.go_home()
+    assert ws._bar_undo_bits() == (False, False)

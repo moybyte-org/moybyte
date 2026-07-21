@@ -2822,6 +2822,20 @@ class Workstation:
             return be is not None and be._pending_changed()
         return False
 
+    def _bar_undo_bits(self):
+        """RAM-only dim-state bits for the bar cache key: the active tab's local
+        op-history depth + its live-burst/edit flag, so a stroke/typing burst
+        un-dims the bar UNDO icon on the very next frame (a stroke records into a
+        History without any journal commit, and the strip cache otherwise only
+        rebuilds on a clock tick or zone change). Deliberately EXCLUDES the
+        SD-backed journal check (_journal_check reads the journal log -- keying
+        the per-frame cache on it would cost a disk read per frame); journal-level
+        dim flips already invalidate the bar explicitly (Project._journal,
+        _journal_walk)."""
+        hist = self._active_history()
+        local_undo = (hist is not None and hist.can_undo()) or self._active_local_pending()
+        return (local_undo, hist is not None and hist.can_redo())
+
     def _after_local_history(self):
         """After a fine-grained (paint/map/code/blocks) undo/redo: the editor mutated
         its LIVE doc in place (sheet/tilemap gen bumped for a running preview; the code

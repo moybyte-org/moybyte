@@ -315,6 +315,8 @@ class BarLayer:
                 owner.zone_gen if owner is not None else 0,
                 ws._wifi_icon_kind(),      # Part 3: wifi status glyph (connect/disconnect repaints)
                 (ws.cart.get("title") if ws.cart else None),   # Part 4: the tool bar's left-zone title
+                ws._bar_undo_bits(),       # #111: local op-history dim state (RAM-only;
+                                           # journal flips invalidate explicitly)
                 self._bar_cache_gen)
 
     def _render_cart_bar(self, cv, key):
