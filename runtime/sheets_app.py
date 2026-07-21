@@ -50,12 +50,54 @@ try:
 except ImportError:  # pragma: no cover - direct host import
     from runtime.app_shell import ListShellLayout, ListShellApp
 
+try:
+    from op_history import History, OpCodec
+except ImportError:  # pragma: no cover - direct host import
+    from runtime.op_history import History, OpCodec
+
 
 DEFAULT_COLS = 8
 DEFAULT_ROWS = 20
 CELL_MAX = 48            # chars of raw formula/text per cell
 MAX_NAME = 24            # rename entry cap
 _ERRORS = (ERR, LOOP)
+
+
+class _SheetCellCodec(OpCodec):
+    """The #111 op codec for a formula.Sheet: an op is `{"c": col, "r": row,
+    "o": old_raw, "n": new_raw}` -- a plain dict of ints/strings (MicroPython-
+    safe, JSON-able as-is). invert() is O(1): write the OLD raw text back and
+    let Sheet.set_cell's own recalc() recompute every dependent formula, so
+    undo/redo never needs to touch `values` by hand. snapshot() backs
+    History.keyframe() (the sidecar's periodic full-state checkpoint); undo/
+    redo always go through invert()/apply(), so restore() is never needed."""
+
+    def apply(self, doc, op):
+        doc.set_cell(op["c"], op["r"], op["n"])
+
+    def invert(self, doc, op):
+        doc.set_cell(op["c"], op["r"], op["o"])
+
+    def snapshot(self, doc):
+        return doc.to_dict()
+
+
+def _ops_since_keyframe(recs):
+    """Flatten every op-segment recorded AFTER the last keyframe in `recs` (a
+    moy_carts.load_history() list) into one ordered list of ops -- the same
+    "keyframe + trailing segments" window moy_carts.prune_history keeps on
+    disk. The doc these ops apply to is loaded from the sheet's OWN
+    files/tables/<name>.moysheet file (the source of truth), not replayed from
+    here -- this only rebuilds History's in-RAM undo STACK on a reopen."""
+    last_kf = -1
+    for i, rec in enumerate(recs):
+        if rec.get("t") == "kf":
+            last_kf = i
+    ops = []
+    for rec in recs[last_kf + 1:]:
+        if rec.get("t") == "seg":
+            ops.extend(rec.get("ops") or [])
+    return ops
 
 
 def _fmt(v, width):
@@ -98,8 +140,22 @@ class SheetsLayout(ListShellLayout):
         self.status_y = y + max(0, (bh - 8 * fs) // 2)
         # Formula entry row: the raw text of the selected cell, edited in place.
         self.entry_h = 14 * fs
-        self.entry = (x - 2 * fs, self.bar_h + self.toolbar_h,
-                      self.w - 2 * (x - 2 * fs), self.entry_h)
+        ex = x - 2 * fs
+        ey = self.bar_h + self.toolbar_h
+        ew_full = self.w - 2 * (x - 2 * fs)
+        # Compact icon-only undo/redo pair (#111 phase 3): the toolbar row above
+        # is already full at the 320px tier (five chips fill it edge to edge, and
+        # the status label there is already squeezed to a handful of chars), but
+        # the formula-entry row is nearly EMPTY -- it just shows a short
+        # "A1: text" ref+value. Anchoring undo/redo to its right end costs that
+        # row only ~30px of a ~300px budget instead of starving the toolbar's
+        # status text further, so this is the least-cramped single-row option
+        # (no second row, no shrinking the toolbar chips).
+        ubtn = self.entry_h
+        ugap = 1 * fs
+        self.redo_btn = (ex + ew_full - ubtn, ey, ubtn, self.entry_h)
+        self.undo_btn = (self.redo_btn[0] - ubtn - ugap, ey, ubtn, self.entry_h)
+        self.entry = (ex, ey, self.undo_btn[0] - ex - 2 * fs, self.entry_h)
         # The grid.
         self.rowhdr_w = 20 * fs
         self.colhdr_h = 10 * fs
@@ -147,6 +203,7 @@ class SheetsAppLayer(ListShellApp):
         self.grid = FileGridView(ws, "tables")
         self.sheet = None             # the open formula.Sheet
         self.sheet_name = None        # its files/tables/<name> file name
+        self.history = None           # op_history.History over the open sheet (#111)
         self.cur_col = 0              # grid selection
         self.cur_row = 0
         self.left = 0                 # grid scroll origin
@@ -190,7 +247,30 @@ class SheetsAppLayer(ListShellApp):
         if ok:
             self._unsaved = False
             self.grid.invalidate(name)
+            self._flush_history(name)
         return ok
+
+    def _flush_history(self, name):
+        """The #111 op-history sidecar write, at the SAME autosave point as the
+        sheet file itself (just above): drain History's pending ops (+ a fresh
+        keyframe once History.needs_keyframe() trips) into
+        files/.history/tables/<name>.jsonl via moy_carts.history_commit. Best-
+        effort and silent -- the .moysheet file above is already the durable
+        save, so a sidecar write failure only costs undo depth, never data."""
+        hist = self.history
+        if hist is None:
+            return
+        kf = hist.keyframe() if hist.needs_keyframe() else None
+        ops = hist.flush()
+        if kf is None and not ops:
+            return
+        try:
+            self.ws._with_sd(lambda: self.ws.carts_store.history_commit(
+                "tables", name, ops, keyframe=kf, root=self.ws.carts_root))
+        except Exception:  # noqa: BLE001 -- best-effort sidecar, never crash the shell
+            return
+        if kf is not None:
+            hist.mark_keyframe()
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -215,6 +295,7 @@ class SheetsAppLayer(ListShellApp):
             self.mode = "list"
             self.sheet = None
             self.sheet_name = None
+            self.history = None
             self.status = "MY SHEETS"
         self.editing = False
         self.edit_buf = ""
@@ -238,7 +319,29 @@ class SheetsAppLayer(ListShellApp):
         self.layout = SheetsLayout(self.layout.w, self.layout.h, self.layout.fs,
                                    self.ws.windowed_chrome, sheet.cols)
         self.status = name.upper()
+        self.history = self._build_history(sheet, name)
         self.ws._dirty = True
+
+    def _build_history(self, sheet, name):
+        """A fresh op_history.History over `sheet`, its undo stack rebuilt from
+        the #111 sidecar so a REOPENED sheet keeps undo depth across sessions
+        (not just within the one that made the edits). This is NOT a doc replay
+        -- `sheet` was just loaded from its own .moysheet FILE (the source of
+        truth), so it is already at the state the sidecar's ops produced;
+        History.seed() only primes the in-RAM undo STACK with the ops recorded
+        since the last on-disk keyframe. A brand-new sheet (no sidecar yet)
+        seeds an empty stack -- load_history() degrades to [] on a missing
+        file, same as everywhere else in moy_carts."""
+        hist = History(sheet, _SheetCellCodec())
+        if self._store_ready():
+            try:
+                recs = self.ws._with_sd(lambda: self.ws.carts_store.load_history(
+                    "tables", name, self.ws.carts_root))
+            except Exception:  # noqa: BLE001 -- a bad/missing sidecar just starts empty
+                recs = None
+            if recs:
+                hist.seed(_ops_since_keyframe(recs))
+        return hist
 
     def _open_file(self, name):
         blob = None
@@ -278,6 +381,7 @@ class SheetsAppLayer(ListShellApp):
         self.mode = "list"
         self.sheet = None
         self.sheet_name = None
+        self.history = None
         self.editing = False
         self.grid.refresh()
         self.grid.select(keep)
@@ -294,6 +398,7 @@ class SheetsAppLayer(ListShellApp):
             self.status = "IN TRASH"
         self.sheet = None
         self.sheet_name = None
+        self.history = None
         self._unsaved = False
         self.mode = "list"
         self.grid.refresh()
@@ -407,11 +512,20 @@ class SheetsAppLayer(ListShellApp):
         if not self.editing or self.sheet is None:
             return
         before = self._cur_raw()
-        self.sheet.set_cell(self.cur_col, self.cur_row, self.edit_buf)
-        if self.edit_buf != before:
+        after = self.edit_buf
+        self.sheet.set_cell(self.cur_col, self.cur_row, after)
+        if after != before:
             self._unsaved = True
+            self._record_cell_op(self.cur_col, self.cur_row, before, after)
         self.editing = False
         self.edit_buf = ""
+
+    def _record_cell_op(self, col, row, before, after):
+        """The #111 op-history record point: the surface has ALREADY applied
+        the change to `self.sheet` (History.record()'s contract) -- one op per
+        cell commit, carrying its own pre/post text so undo/redo is O(1)."""
+        if self.history is not None:
+            self.history.record({"c": col, "r": row, "o": before, "n": after})
 
     def _move(self, dc, dr):
         if self.editing:
@@ -436,14 +550,54 @@ class SheetsAppLayer(ListShellApp):
             self.gtop = self.cur_row - lay.vis_rows + 1
 
     def _clear_cell(self):
+        # CLEAR (#111 phase 3 marquee win): this is a cell edit to "" like any
+        # other, so the SAME cell OpCodec makes it undoable -- no separate
+        # "clear" op type needed.
         if self.sheet is None:
             return
         self.editing = False
         self.edit_buf = ""
-        if self._cur_raw() != "":
-            self._unsaved = True
+        before = self._cur_raw()
         self.sheet.set_cell(self.cur_col, self.cur_row, "")
+        if before != "":
+            self._unsaved = True
+            self._record_cell_op(self.cur_col, self.cur_row, before, "")
         self.status = index_to_col(self.cur_col) + str(self.cur_row + 1)
+        self.ws._dirty = True
+
+    # -- undo / redo (#111): one History per open sheet ------------------------
+
+    def _cancel_edit(self):
+        """Drop an in-progress, uncommitted edit WITHOUT recording it -- undo/
+        redo only walk COMMITTED ops, so a stray open edit must not become one
+        via _commit_edit()'s normal path."""
+        self.editing = False
+        self.edit_buf = ""
+
+    def _undo(self):
+        if self.sheet is None or self.history is None or not self.history.can_undo():
+            return
+        if self.editing:
+            self._cancel_edit()
+        op = self.history.undo()
+        if op is not None:
+            self._unsaved = True
+            self.cur_col, self.cur_row = op["c"], op["r"]
+            self._scroll_grid()
+            self.status = "UNDO " + index_to_col(op["c"]) + str(op["r"] + 1)
+        self.ws._dirty = True
+
+    def _redo(self):
+        if self.sheet is None or self.history is None or not self.history.can_redo():
+            return
+        if self.editing:
+            self._cancel_edit()
+        op = self.history.redo()
+        if op is not None:
+            self._unsaved = True
+            self.cur_col, self.cur_row = op["c"], op["r"]
+            self._scroll_grid()
+            self.status = "REDO " + index_to_col(op["c"]) + str(op["r"] + 1)
         self.ws._dirty = True
 
     # -- input ---------------------------------------------------------------
@@ -484,7 +638,11 @@ class SheetsAppLayer(ListShellApp):
             return
         k = inp.last_key
         if k and k != self._ekey_prev:
-            if self.editing:
+            if k == 0x1A:                        # Ctrl+Z: undo (#111, code_layer parity)
+                self._undo()
+            elif k == 0x19:                      # Ctrl+Y: redo
+                self._redo()
+            elif self.editing:
                 if k in (0x0D, 0x0A):            # Enter: commit + step down
                     self._commit_edit()
                     self._move(0, 1)
@@ -566,6 +724,12 @@ class SheetsAppLayer(ListShellApp):
             return True
         if self._in(px, py, lay.attach_btn):
             self._open_attach()
+            return True
+        if self._in(px, py, lay.undo_btn):
+            self._undo()
+            return True
+        if self._in(px, py, lay.redo_btn):
+            self._redo()
             return True
         # A tap inside the grid selects that cell (and commits any open edit).
         if self.sheet is not None:
@@ -649,6 +813,23 @@ class SheetsAppLayer(ListShellApp):
                      x + 6 * fs, y + (h - 8 * fs) // 2, 0, 1)
             cv.rectb(x, y, w, h, th["accent"] if selected else th["dim"])
 
+    def _draw_undo_redo(self, cv):
+        """The #111 op-history undo/redo pair: compact icon-only buttons (the
+        chrome #88 undo/redo glyphs) at the right end of the formula-entry row.
+        Dimmed via History.can_undo()/can_redo() -- exactly the shared contract
+        the Editor bar icons will read too."""
+        lay = self.layout
+        hist = self.history
+        self._icon_btn(cv, "undo", lay.undo_btn, bool(hist and hist.can_undo()))
+        self._icon_btn(cv, "redo", lay.redo_btn, bool(hist and hist.can_redo()))
+
+    def _icon_btn(self, cv, kind, r, enabled):
+        th = self.ws.theme_colors
+        x, y, w, h = r
+        cv.rect(x, y, w, h, th["panel"])
+        cv.rectb(x, y, w, h, th["accent"] if enabled else th["dim"])
+        self.ws._glyph(kind, r, th["title_ink"] if enabled else th["dim"], cv)
+
     def _draw_grid(self, cv):
         lay = self.layout
         th = self.ws.theme_colors
@@ -665,6 +846,7 @@ class SheetsAppLayer(ListShellApp):
         cv.print((ref + ": " + shown)[:max(1, ew // (8 * fs) - 1)],
                  ex + 3 * fs, ey + (eh - 8 * fs) // 2,
                  self.names["green"] if self.editing else self.names["white"], 1)
+        self._draw_undo_redo(cv)
         # Column headers (A B C ...).
         colw = max(1, lay.cell_w // (8 * fs))
         for ci in range(self.left, min(self.left + lay.vis_cols, sheet.cols)):
