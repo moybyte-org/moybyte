@@ -42,25 +42,45 @@ def _set_graduated_flag(cart_dir, value):
 #                  the entry points at a FULL-FILE snapshot under journal/s/. Full
 #                  snapshots, not diffs: MicroPython-safe (no difflib), and one bad
 #                  snapshot loses one step, never the whole history.
-#   cursor.json    {"seq": N, "bytes": B} -- the undo position (N) + the running
-#                  total snapshot bytes (B, the rotation gate). Written via
-#                  _write_atomic: a tiny fixed-size file whose atomic rename is what
-#                  makes the cursor torn-write-proof.
+#   cursor.json    {"cursors": {file: seq, ...}, "seq": N, "bytes": B} -- a PER-FILE
+#                  undo position map (#111: one cursor per journaled file, so an undo
+#                  on one file/tab never walks another file's timeline, and redo only
+#                  lights up on the tab that actually has something ahead). Plus a
+#                  legacy scalar `seq` (= the max applied seq across files, kept purely
+#                  for old readers/tools + the reboot-cursor test) and the running total
+#                  snapshot bytes (B, the rotation gate). Written via _write_atomic: a
+#                  tiny fixed-size file whose atomic rename is what makes the cursor
+#                  torn-write-proof. TOLERANT MIGRATION: an OLD single-`seq` cursor
+#                  (pre-#111, no "cursors" key) loads as "each file's cursor = its
+#                  newest entry seq <= the old seq"; a missing/torn cursor defaults
+#                  every file to its newest entry (the safe 'everything applied' state).
 #   s/000N-<file>  the per-commit full-file snapshots.
 #
 # CADENCE (v1.1 pinned): the line APPEND is a raw open(path, "a") -- O(1), one line
 # appended per commit -- and NEVER _write_atomic (which rewrites the whole file, so
 # every commit would be O(n) in the journal's length). The only non-append rewrites
-# are the RARE redo-tail truncation (a commit after an undo) and journal_compact
-# (rotation) -- both between-frames like every SD op. Torn-write recovery: a torn
-# last jsonl line fails json.loads and is dropped at load; the cursor is atomic.
+# are the RARE per-file redo-tail truncation (a commit of file F after an undo of F)
+# and journal_compact (rotation) -- both between-frames like every SD op.
 #
-# WALK: cursor N = "live files reflect commit seq N applied" (0 = pre-journal).
-#   undo  = restore the same file's PREVIOUS snapshot over the live file, step the
-#           cursor back one entry (floor = a file's first journaled snapshot; finer,
-#           in-session undo stays in the editor's RAM).
-#   redo  = re-apply the next commit's snapshot, step the cursor forward.
-#   a NEW commit while the cursor is rewound TRUNCATES the redo tail (Google-Docs rule).
+# TORN-WRITE ORDERING GUARANTEE (must survive any edit to journal_append): a commit
+# writes the SNAPSHOT first, THEN raw-appends the log line, THEN atomically rewrites the
+# cursor. So a power loss can only ever leave (a) an UNREFERENCED orphan snapshot or
+# (b) a torn last log line -- both dropped at load (json.loads-guarded), never a cursor
+# pointing at a half-written entry. Moving to a per-file cursor MAP does not change this:
+# the map is still written LAST, via _write_atomic, so it is only ever advanced to seqs
+# whose snapshot + log line are already durable.
+#
+# WALK (#111 PER-FILE): each file F carries its own cursor C[F] = the seq of F's applied
+#   (live) snapshot. A walk takes an OPTIONAL `files` filter (a tuple of journal file
+#   names; None = the legacy whole-project walk over every file):
+#   undo  = among the filtered files that CAN step back (C[F] is not F's first snapshot),
+#           restore the NEWEST one's (max C[F]) PREVIOUS snapshot over the live file and
+#           step ONLY that file's cursor back one F-entry (floor = a file's first
+#           journaled snapshot; finer, in-session undo stays in the editor's RAM).
+#   redo  = among the filtered files, re-apply the chronologically-nearest next commit
+#           (the smallest F-entry seq > C[F]) and step that file's cursor forward.
+#   a NEW commit of file F while F is rewound TRUNCATES only F's redo tail (Google-Docs
+#   rule, PER-FILE -- other files' redo tails survive).
 #
 # ROTATION: a per-project cap of 64 entries OR 512KB of snapshots (whichever first);
 # journal_compact drops the OLDEST entries + their snapshots (a full journal.jsonl
@@ -121,15 +141,75 @@ def _journal_load_entries(log_path):
     return entries
 
 
-def _journal_cursor(cur_path, entries):
-    """The undo position (a seq value; 0 = pre-journal). A missing/torn cursor.json
-    defaults to the TOP (the latest entry's seq, i.e. everything applied) -- the safe
-    'live files reflect the last commit' state."""
+def _journal_newest_by_file(entries):
+    """{file: seq} of each file's NEWEST entry (its latest seq). The safe
+    'everything applied' default for the per-file cursor map, and the base the
+    migration + validation fill from."""
+    newest = {}
+    for e in entries:                      # ascending -> the last seq per file wins
+        newest[e["file"]] = e["seq"]
+    return newest
+
+
+def _journal_cursors(cur_path, entries):
+    """The PER-FILE undo position map {file: seq} (#111). Every journaled file has an
+    entry; a file's cursor is the seq of its applied (live) snapshot. Resolution order:
+
+      * a NEW-format cursor.json ({"cursors": {...}}) -> use it, validated to ints and
+        BACKFILLED so any file present in the journal but missing from the map defaults
+        to its newest entry (never leaves a file cursor-less);
+      * an OLD single-`seq` cursor (pre-#111) -> TOLERANT MIGRATION: each file's cursor
+        = its newest entry seq <= the old seq (a file with no entry <= old seq falls to
+        the safe default: its newest entry, 'everything applied');
+      * a missing/torn cursor -> every file defaults to its newest entry (safe state).
+    """
+    default = _journal_newest_by_file(entries)
     try:
         data = json.loads(_read(cur_path))
-        return int(data["seq"])
-    except (OSError, ValueError, TypeError, KeyError):
-        return entries[-1]["seq"] if entries else 0
+    except (OSError, ValueError, TypeError):
+        return default
+    if not isinstance(data, dict):
+        return default
+    raw = data.get("cursors")
+    if isinstance(raw, dict):
+        out = dict(default)                # backfill: unknown/new files -> newest
+        for f, s in raw.items():
+            try:
+                if f in default:           # ignore stale files no longer in the journal
+                    out[f] = int(s)
+            except (TypeError, ValueError):
+                pass
+        return out
+    # -- old single-seq cursor: migrate to newest-entry-<=-old per file --------
+    try:
+        old = int(data["seq"])
+    except (KeyError, TypeError, ValueError):
+        return default
+    out = dict(default)                    # files with no entry <= old stay at newest
+    migrated = {}
+    for e in entries:                      # ascending -> newest <= old per file wins
+        if e["seq"] <= old:
+            migrated[e["file"]] = e["seq"]
+    for f, s in migrated.items():
+        out[f] = s
+    return out
+
+
+def _journal_max_applied(cursors):
+    """The legacy scalar cursor seq = the max applied seq across files (0 for an empty
+    map). Kept in cursor.json's `seq` field for old readers/tools + the reboot test."""
+    best = 0
+    for s in cursors.values():
+        if s and s > best:
+            best = s
+    return best
+
+
+def _journal_cursor(cur_path, entries):
+    """BACK-COMPAT scalar cursor (= max applied seq across files; 0 = pre-journal).
+    The per-file map (_journal_cursors) is the source of truth now; this stays for any
+    old reader/tool that still asks for the single position."""
+    return _journal_max_applied(_journal_cursors(cur_path, entries))
 
 
 def _journal_bytes(cur_path):
@@ -142,10 +222,29 @@ def _journal_bytes(cur_path):
         return 0
 
 
-def _journal_write_cursor(cur_path, seq, total_bytes):
+def _journal_prune_cursors(cursors, entries):
+    """Drop cursor entries for files that no longer have any journal entry (after a
+    truncation/compaction removed them), so the map never carries dead files."""
+    live = {}
+    for e in entries:
+        live[e["file"]] = True
+    out = {}
+    for f, s in cursors.items():
+        if f in live:
+            out[f] = s
+    return out
+
+
+def _journal_write_cursors(cur_path, cursors, total_bytes):
     # cursor.json is tiny + fixed-shape -> _write_atomic (its atomic rename is the
-    # torn-write proofing the append deliberately skips).
-    _write_atomic(cur_path, json.dumps({"seq": int(seq), "bytes": int(total_bytes)}))
+    # torn-write proofing the append deliberately skips). Writes the per-file map plus a
+    # legacy scalar `seq` (max applied) for old readers. This is the LAST write of a
+    # commit (see the TORN-WRITE ORDERING GUARANTEE at the top).
+    cmap = {}
+    for f, s in cursors.items():
+        cmap[f] = int(s)
+    _write_atomic(cur_path, json.dumps(
+        {"cursors": cmap, "seq": _journal_max_applied(cmap), "bytes": int(total_bytes)}))
 
 
 def _journal_rewrite(log_path, entries):
@@ -246,12 +345,13 @@ def journal_append(cart_dir, file, new_bytes, grad=None, ops=None):
         return None
     jdir, log_path, cur_path, snap_dir = _journal_paths(cart_dir)
     entries = _journal_load_entries(log_path)   # empty when there's no journal/ yet
-    cursor = _journal_cursor(cur_path, entries)
+    cursors = _journal_cursors(cur_path, entries)   # #111: per-file cursor map
     total = _journal_bytes(cur_path)
-    # -- ceiling / no-op dedup: identical to the current state -> write NOTHING (a
-    #    debounce that fires with nothing changed must not touch the card). Checked
+    # -- ceiling / no-op dedup: identical to THIS FILE's current state -> write NOTHING
+    #    (a debounce that fires with nothing changed must not touch the card). Checked
     #    BEFORE any _mkdir so a no-op append leaves no empty journal/ folder behind.
-    cur_snap = _journal_current_snap(entries, cursor, file)
+    cf = cursors.get(file)
+    cur_snap = _journal_current_snap(entries, cf, file) if cf is not None else None
     if cur_snap is not None:
         try:
             if _read(jdir + "/" + cur_snap) == new_bytes:
@@ -261,16 +361,21 @@ def journal_append(cart_dir, file, new_bytes, grad=None, ops=None):
     # We are committing to a WRITE now -> create the journal dirs lazily.
     _mkdir(jdir)
     _mkdir(snap_dir)
-    # -- Google-Docs rule: a commit while rewound truncates the redo tail. This is the
-    #    ONE non-append rewrite on the commit path (rare -- only right after an undo).
-    tail = [e for e in entries if e["seq"] > cursor]
+    # -- Google-Docs rule, PER-FILE: a commit of `file` while `file` is rewound truncates
+    #    only THIS FILE's redo tail (other files' redo tails survive). The ONE non-append
+    #    rewrite on the commit path (rare -- only right after an undo of this file).
+    tail = [e for e in entries if e["file"] == file and (cf is None or e["seq"] > cf)]
     if tail:
+        cut = {}
         for e in tail:
+            cut[e["seq"]] = True
             _remove(jdir + "/" + e["snap"])
-        entries = [e for e in entries if e["seq"] <= cursor]
+        entries = [e for e in entries if e["seq"] not in cut]
         _journal_rewrite(log_path, entries)
         total = _journal_total_bytes(jdir, entries)   # recompute exactly after the cut
-    # -- assign the next seq, write the full-file snapshot, then RAW-append one line.
+        cursors = _journal_prune_cursors(cursors, entries)  # drop any now-empty file
+    # -- assign the next seq (global-monotonic: max remaining + 1, so surviving other-file
+    #    entries above the cut keep unique seqs), write the snapshot, then RAW-append.
     seq = (entries[-1]["seq"] + 1) if entries else 1
     snap = JOURNAL_SNAP_DIR + "/" + _journal_snap_name(seq, file)
     _write(jdir + "/" + snap, new_bytes)              # snapshot BEFORE the log line
@@ -286,7 +391,8 @@ def journal_append(cart_dir, file, new_bytes, grad=None, ops=None):
     with open(log_path, "a") as f:                    # RAW append -- O(1), NOT _write_atomic
         f.write(json.dumps(entry) + "\n")
     total += len(new_bytes)
-    _journal_write_cursor(cur_path, seq, total)       # cursor advances (atomic)
+    cursors[file] = seq                               # this file now applied at the new commit
+    _journal_write_cursors(cur_path, cursors, total)  # cursor map advances (atomic, LAST)
     # -- graduation flip rides this exact durable step (Stage 8): the manifest's
     #    `graduated` follows the appended entry's grad. Guarded -- a manifest hiccup
     #    must not undo the append that just succeeded (the entry is already durable).
@@ -301,103 +407,147 @@ def journal_append(cart_dir, file, new_bytes, grad=None, ops=None):
     return seq
 
 
-def journal_undo(cart_dir):
-    """Restore `file`'s PREVIOUS snapshot over the live file and step the cursor back
-    one entry. Returns the restored file name, or None at a floor (cursor 0, or the
-    file has no earlier snapshot). The live write goes through _write_atomic exactly
-    like a normal save."""
+def _journal_file_groups(entries, files):
+    """{file: [entries ascending]} for the files in scope. `files` is a filter iterable
+    of file names, or None = every file present. The one place the scoped walk narrows
+    to the active tab's file set (#111)."""
+    fset = None if files is None else set(files)
+    groups = {}
+    for e in entries:
+        f = e["file"]
+        if fset is not None and f not in fset:
+            continue
+        groups.setdefault(f, []).append(e)   # entries are already seq-ascending
+    return groups
+
+
+def _journal_undo_target(entries, cursors, files):
+    """Pick the file whose undo the bar UNDO should take (#111 scoped walk): among the
+    filtered files that CAN step back (their cursor is not their first snapshot),
+    the one with the NEWEST applied entry (max cursor seq). Returns (file, target_entry,
+    new_cursor_seq) -- target_entry is the earlier snapshot to restore -- or None."""
+    best_file = None
+    best_target = None
+    best_new = None
+    best_seq = -1
+    for f, elist in _journal_file_groups(entries, files).items():
+        cf = cursors.get(f)
+        if cf is None:
+            continue
+        idx = None
+        for k in range(len(elist)):
+            if elist[k]["seq"] == cf:
+                idx = k
+                break
+        if idx is None or idx == 0:
+            continue                       # cursor below/at this file's first snapshot -> floor
+        if cf > best_seq:                  # newest applied among the scoped files
+            best_seq = cf
+            best_file = f
+            best_target = elist[idx - 1]   # the previous snapshot of THIS file
+            best_new = elist[idx - 1]["seq"]
+    if best_file is None:
+        return None
+    return best_file, best_target, best_new
+
+
+def _journal_redo_target(entries, cursors, files):
+    """Pick the file whose redo the bar REDO should take (#111 scoped walk): among the
+    filtered files, the chronologically-nearest next commit (smallest F-entry seq >
+    that file's cursor). Returns (file, next_entry) or None."""
+    best_file = None
+    best_next = None
+    best_seq = None
+    for f, elist in _journal_file_groups(entries, files).items():
+        cf = cursors.get(f)
+        nxt = None
+        for e in elist:
+            if cf is None or e["seq"] > cf:
+                nxt = e
+                break
+        if nxt is None:
+            continue
+        if best_seq is None or nxt["seq"] < best_seq:
+            best_seq = nxt["seq"]
+            best_file = f
+            best_next = nxt
+    if best_file is None:
+        return None
+    return best_file, best_next
+
+
+def journal_undo(cart_dir, files=None):
+    """Restore the PREVIOUS snapshot of the newest applied file (among `files`) over the
+    live file and step ONLY that file's cursor back one entry (#111). `files` is an
+    optional tuple of journal file names scoping the walk to the active tab's file(s);
+    None = the legacy whole-project walk. Returns the restored file name, or None at a
+    floor. The live write goes through _write_atomic exactly like a normal save."""
     jdir, log_path, cur_path, snap_dir = _journal_paths(cart_dir)
     entries = _journal_load_entries(log_path)
     if not entries:
         return None
-    cursor = _journal_cursor(cur_path, entries)
-    idx = None
-    for k in range(len(entries)):
-        if entries[k]["seq"] == cursor:
-            idx = k
-            break
-    if idx is None:
-        return None                        # cursor at 0 (or not found) -> nothing to undo
-    file = entries[idx]["file"]
-    target = None
-    for k in range(idx - 1, -1, -1):       # nearest earlier snapshot of the SAME file
-        if entries[k]["file"] == file:
-            target = entries[k]
-            break
-    if target is None:
-        return None                        # first snapshot of this file -> the floor
+    cursors = _journal_cursors(cur_path, entries)
+    picked = _journal_undo_target(entries, cursors, files)
+    if picked is None:
+        return None                        # nothing to undo in scope -> floor
+    file, target, new_cursor = picked
     data = _journal_read_snap(jdir, target)
     if data is None:
         return None                        # snapshot missing/torn -> REFUSE, live file intact
     _write_atomic(cart_dir + "/" + file, data)
-    new_cursor = entries[idx - 1]["seq"] if idx > 0 else 0
-    _journal_write_cursor(cur_path, new_cursor, _journal_bytes(cur_path))
+    cursors[file] = new_cursor             # step ONLY this file's cursor back
+    _journal_write_cursors(cur_path, cursors, _journal_bytes(cur_path))
     _journal_apply_grad(cart_dir, target)  # Stage 8: un-graduate past a graduating commit
     return file
 
 
-def journal_can_undo(cart_dir):
-    """Read-only companion to journal_undo (#88): True iff a walk would actually
-    restore something (an earlier snapshot of the cursor's file exists), WITHOUT
-    touching any live file or snapshot -- just entries + the cursor, so the bar can
-    dim the UNDO icon cheaply. Mirrors journal_undo's own floor logic exactly (kept
-    in lock-step deliberately) so the button's enabled state never lies about what a
-    tap would do."""
+def journal_can_undo(cart_dir, files=None):
+    """Read-only companion to journal_undo (#88/#111): True iff a scoped walk would
+    restore something, WITHOUT touching any live file or snapshot -- just entries + the
+    cursor map, so the bar can dim the UNDO icon cheaply. Mirrors journal_undo's own
+    scoped floor logic exactly (via the shared _journal_undo_target) so the button's
+    enabled state never lies about what a tap would do."""
     jdir, log_path, cur_path, snap_dir = _journal_paths(cart_dir)
     entries = _journal_load_entries(log_path)
     if not entries:
         return False
-    cursor = _journal_cursor(cur_path, entries)
-    idx = None
-    for k in range(len(entries)):
-        if entries[k]["seq"] == cursor:
-            idx = k
-            break
-    if idx is None:
-        return False                       # cursor at 0 (or not found) -> nothing to undo
-    file = entries[idx]["file"]
-    for k in range(idx - 1, -1, -1):       # nearest earlier snapshot of the SAME file
-        if entries[k]["file"] == file:
-            return True
-    return False                           # first snapshot of this file -> the floor
+    cursors = _journal_cursors(cur_path, entries)
+    return _journal_undo_target(entries, cursors, files) is not None
 
 
-def journal_can_redo(cart_dir):
-    """Read-only companion to journal_redo (#88): True iff there is a next commit to
-    re-apply. Mirrors journal_redo's own ceiling logic."""
+def journal_can_redo(cart_dir, files=None):
+    """Read-only companion to journal_redo (#88/#111): True iff there is a next commit
+    to re-apply WITHIN the scoped files. Mirrors journal_redo's own ceiling logic (the
+    shared _journal_redo_target), so REDO lights up only on the tab that has one."""
     jdir, log_path, cur_path, snap_dir = _journal_paths(cart_dir)
     entries = _journal_load_entries(log_path)
     if not entries:
         return False
-    cursor = _journal_cursor(cur_path, entries)
-    for e in entries:                      # ascending -> the smallest seq > cursor
-        if e["seq"] > cursor:
-            return True
-    return False
+    cursors = _journal_cursors(cur_path, entries)
+    return _journal_redo_target(entries, cursors, files) is not None
 
 
-def journal_redo(cart_dir):
-    """Re-apply the next commit's snapshot over the live file and step the cursor
-    forward. Returns the restored file name, or None at the top (nothing to redo)."""
+def journal_redo(cart_dir, files=None):
+    """Re-apply the next commit's snapshot over the live file and step ONLY that file's
+    cursor forward (#111 scoped). `files` scopes the walk to the active tab's file(s);
+    None = whole-project. Returns the restored file name, or None at the top."""
     jdir, log_path, cur_path, snap_dir = _journal_paths(cart_dir)
     entries = _journal_load_entries(log_path)
     if not entries:
         return None
-    cursor = _journal_cursor(cur_path, entries)
-    nxt = None
-    for e in entries:                      # ascending -> the smallest seq > cursor
-        if e["seq"] > cursor:
-            nxt = e
-            break
-    if nxt is None:
-        return None                        # at the top -> nothing to redo
+    cursors = _journal_cursors(cur_path, entries)
+    picked = _journal_redo_target(entries, cursors, files)
+    if picked is None:
+        return None                        # nothing ahead in scope -> at the top
+    file, nxt = picked
     data = _journal_read_snap(jdir, nxt)
     if data is None:
         return None                        # snapshot missing/torn -> REFUSE, live file intact
-    _write_atomic(cart_dir + "/" + nxt["file"], data)
-    _journal_write_cursor(cur_path, nxt["seq"], _journal_bytes(cur_path))
+    _write_atomic(cart_dir + "/" + file, data)
+    cursors[file] = nxt["seq"]             # step ONLY this file's cursor forward
+    _journal_write_cursors(cur_path, cursors, _journal_bytes(cur_path))
     _journal_apply_grad(cart_dir, nxt)     # Stage 8: re-graduate on redo past the commit
-    return nxt["file"]
+    return file
 
 
 def journal_compact(cart_dir):
@@ -405,22 +555,19 @@ def journal_compact(cart_dir):
     (JOURNAL_MAX_ENTRIES entries AND JOURNAL_MAX_BYTES of snapshots). A full
     journal.jsonl rewrite + snapshot deletes -- the one non-append-only path, run
     between frames like every SD op. NEVER drops any file's current-state snapshot
-    (latest seq <= cursor) or the redo tail (seq > cursor), so the current + every
-    reachable redo survive. Returns the number of entries dropped."""
+    (the entry AT its cursor) or its redo tail (seq > its cursor), so the current +
+    every reachable redo survive; only the deep undo history BELOW each file's cursor
+    is droppable. Returns the number of entries dropped."""
     jdir, log_path, cur_path, snap_dir = _journal_paths(cart_dir)
     entries = _journal_load_entries(log_path)
     if not entries:
         return 0
-    cursor = _journal_cursor(cur_path, entries)
+    cursors = _journal_cursors(cur_path, entries)   # #111: per-file cursor map
     keep = {}
-    current = {}
     for e in entries:
-        if e["seq"] > cursor:
-            keep[e["seq"]] = True          # redo tail: never drop
-        else:
-            current[e["file"]] = e["seq"]  # ascending -> latest <= cursor per file
-    for s in current.values():
-        keep[s] = True                     # each file's current-state snapshot: never drop
+        cf = cursors.get(e["file"])
+        if cf is None or e["seq"] >= cf:   # this file's cursor entry + its redo tail
+            keep[e["seq"]] = True          # (droppable = only entries strictly below a cursor)
     droppable = [e for e in entries if e["seq"] not in keep]
     droppable.sort(key=lambda e: e["seq"])  # oldest first
     remaining = list(entries)
@@ -442,5 +589,6 @@ def journal_compact(cart_dir):
     for e in dropped:
         _remove(jdir + "/" + e["snap"])
     _journal_rewrite(log_path, remaining)
-    _journal_write_cursor(cur_path, cursor, _journal_total_bytes(jdir, remaining))
+    cursors = _journal_prune_cursors(cursors, remaining)
+    _journal_write_cursors(cur_path, cursors, _journal_total_bytes(jdir, remaining))
     return len(dropped)

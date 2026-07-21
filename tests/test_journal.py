@@ -326,3 +326,102 @@ def test_noop_append_does_not_mkdir(tmp_path, monkeypatch):
     monkeypatch.setattr(mc, "_mkdir", lambda p: (calls.append(p), real_mkdir(p))[1])
     assert mc.journal_append(path, "main.py", "same\n") is None   # no-op (deduped)
     assert calls == []                              # no mkdir on a no-op append
+
+
+# -- (f) #111 PER-FILE cursors: a scoped undo/redo walks only the tab's file(s) --------
+
+def _two_file_cart(tmp_path):
+    """A cart with TWO journaled files, each committed twice (main.py: A,B; the map:
+    M1,M2), the common shape behind the per-tab scoping tests below."""
+    mc, path = _cart(tmp_path)
+    mc.journal_append(path, "main.py", "A\n"); (Path(path) / "main.py").write_text("A\n")
+    mc.journal_append(path, "main.py", "B\n"); (Path(path) / "main.py").write_text("B\n")
+    mc.journal_append(path, "map.moymap", "M1\n"); (Path(path) / "map.moymap").write_text("M1\n")
+    mc.journal_append(path, "map.moymap", "M2\n"); (Path(path) / "map.moymap").write_text("M2\n")
+    return mc, path
+
+
+def test_scoped_undo_on_one_file_never_touches_the_other(tmp_path):
+    # The core #111 fix: an undo scoped to main.py reverts ONLY main.py, leaving the
+    # map's newest commit intact -- even though the map committed LAST (higher seq).
+    mc, path = _two_file_cart(tmp_path)
+    assert mc.journal_undo(path, ("main.py",)) == "main.py"
+    assert _live(path, "main.py") == "A\n"           # code stepped back B -> A
+    assert _live(path, "map.moymap") == "M2\n"       # the map is UNTOUCHED
+
+    # A second scoped undo hits main.py's floor (its first snapshot) -> None, and the
+    # map is STILL untouched (a floor on one file never spills onto another).
+    assert mc.journal_undo(path, ("main.py",)) is None
+    assert _live(path, "map.moymap") == "M2\n"
+
+
+def test_scoped_redo_dim_is_per_file(tmp_path):
+    # The exact reported symptom, at the storage layer: undo on one file lights ITS redo
+    # while the OTHER file's redo stays dim (nothing was undone there).
+    mc, path = _two_file_cart(tmp_path)
+    assert mc.journal_can_redo(path, ("main.py",)) is False    # nothing undone yet
+    assert mc.journal_can_redo(path, ("map.moymap",)) is False
+
+    mc.journal_undo(path, ("main.py",))              # rewind ONLY main.py
+    assert mc.journal_can_redo(path, ("main.py",)) is True      # its redo armed
+    assert mc.journal_can_redo(path, ("map.moymap",)) is False  # the map stays DIM
+    # ...and the whole-project (files=None) view sees the redo (compat).
+    assert mc.journal_can_redo(path) is True
+
+
+def test_per_file_truncation_preserves_the_other_files_redo_tail(tmp_path):
+    # A commit of file F drops only F's redo tail; another file rewound in the same
+    # session keeps its redo tail (they don't share one global cursor anymore).
+    mc, path = _two_file_cart(tmp_path)
+    mc.journal_undo(path, ("map.moymap",))           # map: M2 -> M1 (map redo = M2 armed)
+    mc.journal_undo(path, ("main.py",))              # main: B -> A (main redo = B armed)
+
+    # A NEW main.py commit truncates main's redo tail (B) -- but NOT the map's (M2).
+    mc.journal_append(path, "main.py", "C\n"); (Path(path) / "main.py").write_text("C\n")
+    assert mc.journal_can_redo(path, ("main.py",)) is False     # main's B was truncated
+    assert mc.journal_can_redo(path, ("map.moymap",)) is True   # the map's M2 survived
+    assert mc.journal_redo(path, ("map.moymap",)) == "map.moymap"
+    assert _live(path, "map.moymap") == "M2\n"
+
+
+def test_old_single_seq_cursor_migrates_per_file(tmp_path):
+    # TOLERANT MIGRATION: a pre-#111 cursor.json ({"seq": N}) loads as "each file's
+    # cursor = its newest entry seq <= N". Interleaved commits main(1),map(2),main(3),
+    # map(4) with an old seq=2 -> main's cursor = 1 (seq3 is redo tail), map's = 2 (seq4
+    # is redo tail): each file rewound to its own newest-applied-<=-2.
+    mc, path = _cart(tmp_path)
+    mc.journal_append(path, "main.py", "A\n")            # seq 1
+    mc.journal_append(path, "map.moymap", "M1\n")        # seq 2
+    mc.journal_append(path, "main.py", "B\n")            # seq 3
+    mc.journal_append(path, "map.moymap", "M2\n")        # seq 4
+    _jdir, _log, cur, _snap = mc._journal_paths(path)
+    Path(cur).write_text(json.dumps({"seq": 2, "bytes": 999}))   # legacy single-seq shape
+
+    mj = _journal_mod()
+    entries = mj._journal_load_entries(_log)
+    cursors = mj._journal_cursors(cur, entries)
+    assert cursors == {"main.py": 1, "map.moymap": 2}    # each file's newest seq <= 2
+
+    # And the walk honors it: both files have a commit AHEAD of their migrated cursor.
+    assert mc.journal_can_redo(path, ("main.py",)) is True       # seq3 (B) ahead
+    assert mc.journal_can_redo(path, ("map.moymap",)) is True    # seq4 (M2) ahead
+    assert mc.journal_can_undo(path, ("main.py",)) is False      # main is at its floor (seq1)
+    assert mc.journal_redo(path, ("main.py",)) == "main.py"      # steps main 1 -> 3
+
+    # A migrating write persists the NEW cursor-map format (no more bare `seq` walk).
+    saved = json.loads(Path(cur).read_text())
+    assert "cursors" in saved and saved["cursors"]["main.py"] == 3
+
+
+def test_missing_and_torn_cursor_default_to_newest(tmp_path):
+    # A missing/torn cursor.json defaults every file to its newest entry (the safe
+    # 'everything applied' state) -- so undo works and redo is dim.
+    mc, path = _two_file_cart(tmp_path)
+    _jdir, _log, cur, _snap = mc._journal_paths(path)
+    Path(cur).write_text("{ this is torn json")       # unparseable cursor
+
+    mj = _journal_mod()
+    entries = mj._journal_load_entries(_log)
+    assert mj._journal_cursors(cur, entries) == {"main.py": 2, "map.moymap": 4}
+    assert mc.journal_can_redo(path, ("main.py",)) is False   # already at the top
+    assert mc.journal_can_undo(path, ("main.py",)) is True
