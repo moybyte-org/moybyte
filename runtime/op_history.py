@@ -190,22 +190,6 @@ class History(object):
 
     # -- reopen seam (rebuild undo depth from a persisted sidecar/journal) -----
 
-    def seed(self, ops):
-        """Rebuild the in-RAM undo stack from ops a persistence adapter already
-        wrote (a REOPEN): `ops` is the flat, ordered list of ops recorded since
-        the last on-disk keyframe (the adapter reads its sidecar/journal and
-        flattens the trailing segments -- op_history.py has no persistence of
-        its own). The doc passed to `__init__` is ALREADY at the state those ops
-        produced (the caller loaded it from the source-of-truth file/snapshot,
-        not by replaying `ops` here), so seed() only primes the undo STACK --
-        it never calls apply()/invert(). Ops seeded this way are NOT re-queued
-        for the next flush() (they are already persisted); this only resets
-        the redo stack and the keyframe-cap counter to match. An empty/None
-        `ops` just clears the stack (a reopen with no prior history)."""
-        self._undo = list(ops) if ops else []
-        self._redo = []
-        self._since_keyframe = len(self._undo)
-
     # -- lifecycle -------------------------------------------------------------
 
     def clear(self):
