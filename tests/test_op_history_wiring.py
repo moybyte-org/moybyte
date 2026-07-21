@@ -202,3 +202,192 @@ def test_map_commit_embeds_ops_in_journal(tmp_path):
     op = ops[-1]
     assert isinstance(op, list) and op[0] != "snap"
     assert len(op[-1]) == 3              # a (idx, prev, new) triple
+
+
+# ===========================================================================
+# #111 phase 4: the CODE tab (a typing-burst codec) + the BLOCKS tab (structured
+# whole-program ops) join the same unified bar undo -- local in-RAM steps first,
+# then the durable journal, crossing the boundary transparently.
+# ===========================================================================
+
+def _open_code(ws):
+    ws.set_menu_view("code")
+    assert ws.menu_view == "code"
+    return ws.editor
+
+
+def _type(ws, s, at_top=True):
+    """Simulate a code typing BURST: open the burst, then insert text (left OPEN,
+    exactly like mid-typing -- a bar UNDO closes it first). Inserts at the top by
+    default so the buffer stays compilable (# comment lines)."""
+    ed = ws.editor
+    if at_top:
+        ed.goto_row(0, 0)
+    ws._code_burst_open()
+    ed.insert_text(s)
+
+
+# -- code: a typing burst is ONE bar-undo step ------------------------------
+
+def test_code_burst_bar_undo_reverts_one_burst(tmp_path):
+    ws = _make_ws_with_cart(tmp_path)
+    ed = _open_code(ws)
+    base = ed.text()
+
+    _type(ws, "# hello\n")                # one live burst
+    assert "# hello" in ed.text()
+
+    assert ws.undo() is True             # the bar UNDO closes + reverts the whole burst
+    assert ed.text() == base
+    assert "# hello" not in ed.text()
+
+    assert ws.redo() is True             # ...and REDO re-lays it
+    assert "# hello" in ed.text()
+
+
+def test_code_dimmed_state_is_truthful(tmp_path):
+    ws = _make_ws_with_cart(tmp_path)
+    ed = _open_code(ws)
+    assert ws.can_undo() is False and ws.can_redo() is False
+
+    _type(ws, "# x\n")                    # a LIVE (unrecorded) burst still dims-in undo
+    assert ws.can_undo() is True and ws.can_redo() is False
+
+    assert ws.undo() is True
+    # Only one burst existed and this cart has no earlier code commit, so undo is a
+    # floor now; redo is armed.
+    assert ws.can_undo() is False and ws.can_redo() is True
+
+
+def test_code_commit_embeds_ops_in_journal(tmp_path):
+    from runtime import moy_journal
+    ws = _make_ws_with_cart(tmp_path)
+    path = ws.cart["path"]
+    ed = _open_code(ws)
+
+    _type(ws, "# note\n")
+    ws.save_code()                       # commit -> closes burst, drains the op batch
+
+    ents = _entries(path, "main.py")
+    assert ents, "a code commit must journal"
+    ops = moy_journal.journal_entry_ops(ents[-1])
+    assert ops, "the code commit line must carry the fine-grained op batch"
+    op = ops[-1]
+    assert op[0] == "edit"               # ("edit", pos, deleted, inserted)
+    assert isinstance(op[1], int)
+    assert "# note" in op[3]             # the inserted text rode the journal line
+    # And the batch drained + re-baselined: the in-RAM stack is clear after commit.
+    assert ws._code_op_history().peek() == []
+    assert ws._code_op_history().can_undo() is False   # in-RAM stack re-baselined
+
+
+def test_code_undo_walks_into_previous_commit(tmp_path):
+    ws = _make_ws_with_cart(tmp_path)
+    ed = _open_code(ws)
+
+    _type(ws, "# one\n")
+    ws.save_code()                       # commit V1 (re-baselines the History)
+    _type(ws, "# two\n")
+    ws.save_code()                       # commit V2
+    _type(ws, "# three\n")               # a live, uncommitted burst
+
+    assert ws.undo() is True             # local: revert the live burst
+    assert "# three" not in ws.editor.text()
+    assert "# two" in ws.editor.text()
+
+    assert ws.undo() is True             # boundary crossed -> journal walks V2 -> V1
+    # The reload rebuilt the editor over the restored (V1) source.
+    assert "# two" not in ws.editor.text()
+    assert "# one" in ws.editor.text()
+
+
+def test_code_ops_do_not_disturb_graduation(tmp_path):
+    # A code commit that carries an op batch must journal graduation exactly as
+    # before: a plain code-only cart never graduates, and its manifest stays put.
+    ws = _make_ws_with_cart(tmp_path)
+    ed = _open_code(ws)
+    _type(ws, "# free edit\n")
+    ws.save_code()
+    assert bool(ws.cart.get("graduated")) is False
+
+
+# -- blocks: structured whole-program ops on the same bar undo ---------------
+
+def _open_blocks(ws):
+    ws.set_menu_view("blocks")
+    assert ws.menu_view == "blocks"
+    return ws.block_ui.blocks_ed
+
+
+def _go_to_insert(be, depth=1, which=-1):
+    found = [i for i, r in enumerate(be.rows) if r.kind == "insert" and r.depth == depth]
+    assert found, "no insert row at depth %d" % depth
+    be.cur = found[which]
+
+
+def _select_type(be, tid):
+    for i, r in enumerate(be.rows):
+        if (r.block or {}).get("t") == tid:
+            be.cur = i
+            return True
+    return False
+
+
+def test_blocks_add_delete_param_bar_undo(tmp_path):
+    from runtime import blocks
+    ws = _make_ws_with_cart(tmp_path)
+    be = _open_blocks(ws)
+
+    # ADD a block -> bar UNDO removes it.
+    s0 = blocks_snapshot(be)
+    _go_to_insert(be, 1)
+    be.insert_block("cls", {"color": "red"})
+    assert be.program != s0
+    assert ws.undo() is True and be.program == s0
+    assert ws.redo() is True and be.program != s0
+
+    # PARAM edit -> bar UNDO reverts the slot.
+    assert _select_type(be, "cls")
+    s1 = blocks_snapshot(be)
+    be.set_slot("color", "green")
+    assert be.program != s1
+    assert ws.undo() is True and be.program == s1
+
+    # DELETE -> bar UNDO brings the block back.
+    assert _select_type(be, "cls")
+    s2 = blocks_snapshot(be)
+    assert be.delete() is True and be.program != s2
+    assert ws.undo() is True and be.program == s2
+
+
+def test_blocks_dimmed_state_is_truthful(tmp_path):
+    ws = _make_ws_with_cart(tmp_path)
+    be = _open_blocks(ws)
+    assert ws.can_undo() is False and ws.can_redo() is False
+
+    _go_to_insert(be, 1)
+    be.insert_block("cls", {"color": "red"})   # an un-sealed edit still dims-in undo
+    assert ws.can_undo() is True and ws.can_redo() is False
+
+    assert ws.undo() is True
+    assert ws.can_undo() is False and ws.can_redo() is True
+
+
+def test_graduated_blocks_tab_has_no_history(tmp_path):
+    ws = _make_ws_with_cart(tmp_path)
+    be = _open_blocks(ws)
+    _go_to_insert(be, 1)
+    be.insert_block("cls", {"color": "red"})   # an edit that WOULD be undoable
+
+    # Graduated: the Blocks tab is a frozen read-only render, so its History is
+    # ABSENT -- the registry returns None and the bar never routes into it.
+    ws.block_ui.blk_graduated = True
+    assert ws.project.history_for("blocks") is None
+    assert ws._active_history() is None
+    # can_undo now consults only the journal (no in-RAM block history to report).
+    assert ws.can_undo() is False
+
+
+def blocks_snapshot(be):
+    from runtime.editors import _clone_tree
+    return _clone_tree(be.program)

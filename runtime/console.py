@@ -13,6 +13,10 @@ import time
 
 from editors import (CodeEditor, IconSheet,
                      SpriteSheet, _SheetSprite)
+try:
+    from op_history import History, TextEditCodec, text_diff_op   # #111 phase 4: code-tab undo
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.op_history import History, TextEditCodec, text_diff_op
 # The block editor's UI layer (issue #29 Part 2, extracted from this file): the
 # structured-outline screen + BlockLayout (its responsive geometry, #39 step 2) +
 # the module constants/sentinels its rows/menu render. Re-exported under their
@@ -771,6 +775,12 @@ class Workstation:
         # "theme" -- lives on self.editor_app.tab now (Stage 3); ws.menu_view is a
         # forwarding projection of it, so every reader/writer is unchanged.)
         self.editor = None            # CodeEditor while menu_view == "code"
+        # #111 phase 4: the code editor's in-RAM op-history (a typing-burst codec
+        # over the live CodeEditor) + the open burst's pre-image text. Created/
+        # rebound lazily by _code_op_history() over whatever editor is live, so a
+        # rebuilt editor (fresh cart / reopen) starts a fresh, empty History.
+        self._code_hist = None
+        self._code_burst_before = None
         # (cart/config/sheet/tilemap/images/pmem live on self.project now -- Stage 1;
         # ns/_update/_draw/cart_error/crash_line/_cart_start_ms/_cart_key_prev live on
         # self.player now -- Stage 2; both exposed as forwarding properties, so
@@ -2724,37 +2734,116 @@ class Workstation:
     # ws.undo()/ws.redo() mechanism, so neither affordance can drift from the other.
 
     def _active_history(self):
-        """The FINE-GRAINED op-history (#111) of the active Editor tab -- paint or
-        map, the two surfaces with an in-RAM op stack -- or None for a commit-level
-        tab (code/blocks/config/scene/music). Keyed on the active `menu_view` so a
-        stale ws.paint/mapedit from an earlier tab is ignored; the caller (the bar
+        """The FINE-GRAINED op-history (#111) of the active Editor tab -- paint/map
+        (phase 2) + code/blocks (phase 4), the surfaces with an in-RAM op stack -- or
+        None for a commit-level tab (config/scene/music). Resolved through the
+        project's per-tab registry keyed on `menu_view` (Project.history_for), so a
+        stale editor from an earlier tab is never consulted; the caller (the bar
         UNDO/REDO icons, only reachable inside the Editor) guarantees the Editor is
         the focused surface, so no back-stack check is needed."""
-        view = self.menu_view
-        if view == "paint":
-            pe = self.paint
-            return getattr(pe, "_hist", None) if pe is not None else None
-        if view == "map":
-            me = self.map_ui.mapedit
-            return getattr(me, "_hist", None) if me is not None else None
-        return None
+        return self.project.history_for(self.menu_view)
+
+    # -- code editor op-history + typing burst (#111 phase 4) -------------------
+    # The code tab's History + its open typing burst live HERE (where the keyboard
+    # input is handled), not on the pure CodeEditor core. A burst opens on the
+    # first edit and CLOSES (records one net-diff op) on the autosave debounce, an
+    # Enter, and an undo press -- the three edges the spec names.
+
+    def _code_op_history(self):
+        """The code editor's History, created lazily over the live CodeEditor and
+        rebound when a fresh editor is built (a new cart / reopen). None with no
+        editor open. Rebinding resets the open burst so a stale pre-image can't
+        leak across editors."""
+        ed = self.editor
+        if ed is None:
+            return None
+        h = self._code_hist
+        if h is None or h.doc is not ed:
+            self._code_hist = History(ed, TextEditCodec())
+            self._code_burst_before = None
+        return self._code_hist
+
+    def _code_burst_open(self):
+        """Mark a code typing/delete burst's start: snapshot the buffer text ONCE
+        (idempotent while a burst is open), so the net change since it began becomes
+        one undo op when it closes. No-op with no code editor."""
+        if self.editor is None:
+            return
+        self._code_op_history()               # ensure the History is bound to this editor
+        if self._code_burst_before is None:
+            self._code_burst_before = self.editor.text()
+
+    def _close_code_burst(self):
+        """Close the live code burst into ONE op = the net text diff since it began.
+        A no-op when nothing is pending or the burst net-cancelled back to its start
+        (typed then fully backspaced). Called on the burst edges: the autosave
+        debounce (commit_code), an Enter (code_layer), and an undo press (below)."""
+        before = self._code_burst_before
+        self._code_burst_before = None
+        hist = self._code_op_history()
+        ed = self.editor
+        if before is None or hist is None or ed is None:
+            return
+        after = ed.text()
+        if before == after:
+            return
+        op = text_diff_op(before, after)
+        if op is not None:
+            hist.record(op)
+
+    def _code_burst_pending(self):
+        """True iff a live code burst holds an un-recorded net change -- so can_undo()
+        reports it WITHOUT the side effect of closing the burst (the dim-state read)."""
+        return (self._code_burst_before is not None and self.editor is not None
+                and self.editor.text() != self._code_burst_before)
+
+    def _seal_active_local(self):
+        """Close any in-progress edit on the active tab BEFORE an undo/redo, so a
+        just-made, not-yet-recorded edit is undo's first target: a live code typing
+        burst, an un-sealed block edit. A no-op for tabs without one (paint/map seal
+        their own stroke/batch on release)."""
+        v = self.menu_view
+        if v == "code":
+            self._close_code_burst()
+        elif v == "blocks":
+            be = getattr(self.block_ui, "blocks_ed", None)
+            if be is not None:
+                be._seal_pending()
+
+    def _active_local_pending(self):
+        """True iff the active tab has an in-progress edit not yet on its History (a
+        live code burst / an un-sealed block edit), so can_undo() dims correctly
+        without sealing it."""
+        v = self.menu_view
+        if v == "code":
+            return self._code_burst_pending()
+        if v == "blocks":
+            be = getattr(self.block_ui, "blocks_ed", None)
+            return be is not None and be._pending_changed()
+        return False
 
     def _after_local_history(self):
-        """After a fine-grained (paint/map) undo/redo: the editor mutated the LIVE
-        sheet/tilemap in place (gen bumped, a running preview picks it up), so there's
-        no cart reload -- just repaint and re-check the bar's dimmed state (#111)."""
+        """After a fine-grained (paint/map/code/blocks) undo/redo: the editor mutated
+        its LIVE doc in place (sheet/tilemap gen bumped for a running preview; the code
+        buffer rewritten), so there's no cart reload -- just repaint and re-check the
+        bar's dimmed state (#111). The code buffer's set_text() cleared its dirty flag,
+        so re-arm it: the reverted text must persist at the next commit (autosave/exit)."""
         self._dirty = True
         self.bar_layer.invalidate()
+        if self.menu_view == "code" and self.editor is not None:
+            self.editor.dirty = True
 
     def undo(self):
-        """Undo one step for the active Editor tab (#111). A paint/map tab UNWINDS its
-        in-RAM op-history FIRST (one stroke/gesture), and only once that's exhausted
-        falls through to the durable journal walk (one whole commit) -- so the SAME
-        bar icon crosses the stroke->commit boundary. A commit-level tab (code/blocks/
-        config/scene/music) goes straight to the journal. Returns True iff a step was
-        taken. NOTE the boundary is CLEAN: falling into the journal reloads the editor
-        with a fresh (empty) History, so continued presses walk whole commits until
-        new fine-grained edits are made (the seed-from-journal option was deferred)."""
+        """Undo one step for the active Editor tab (#111). A tab with an in-RAM
+        op-history (paint/map strokes, code typing bursts, block edits) UNWINDS it
+        FIRST (one stroke/gesture/burst/edit), and only once that's exhausted falls
+        through to the durable journal walk (one whole commit) -- so the SAME bar icon
+        crosses the local->commit boundary. A commit-level tab (config/scene/music)
+        goes straight to the journal. Returns True iff a step was taken. NOTE the
+        boundary is CLEAN: falling into the journal reloads the editor with a fresh
+        (empty) History, so continued presses walk whole commits until new
+        fine-grained edits are made (the seed-from-journal option was deferred)."""
+        self._seal_active_local()             # a live burst/edit is undo's first target
         hist = self._active_history()
         if hist is not None and hist.can_undo() and hist.undo() is not None:
             self._after_local_history()
@@ -2764,6 +2853,7 @@ class Workstation:
     def redo(self):
         """Re-apply one step (the inverse of undo): local op-history redo first, then
         the durable journal redo. Returns True iff a step was taken."""
+        self._seal_active_local()             # close a stray open edit before walking redo
         hist = self._active_history()
         if hist is not None and hist.can_redo() and hist.redo() is not None:
             self._after_local_history()
@@ -2773,10 +2863,11 @@ class Workstation:
     def can_undo(self):
         """Read-only: True iff undo() would restore something (#88/#111, the bar icon's
         dimmed state). Consults the active tab's op-history FIRST (a cheap in-RAM
-        check, no I/O), then the journal (a journal.jsonl parse -- an SD read, so only
-        ask when about to REPAINT, never on a per-frame hot path)."""
+        check, no I/O) -- including a live-but-unrecorded code burst / block edit --
+        then the journal (a journal.jsonl parse -- an SD read, so only ask when about
+        to REPAINT, never on a per-frame hot path)."""
         hist = self._active_history()
-        if hist is not None and hist.can_undo():
+        if hist is not None and (hist.can_undo() or self._active_local_pending()):
             return True
         return self._journal_check(False)
 

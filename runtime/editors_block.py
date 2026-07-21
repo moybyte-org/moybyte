@@ -3,9 +3,9 @@
 history via the shared editors_base discipline."""
 
 try:
-    from editors_base import UndoStack, UndoRedoMixin
+    from op_history import History
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_base import UndoStack, UndoRedoMixin
+    from runtime.op_history import History
 
 
 _BLK_UNDO_MAX = 40
@@ -24,6 +24,27 @@ def _clone_tree(node):
     if isinstance(node, list):
         return [_clone_tree(v) for v in node]
     return node
+
+
+class _BlockOps:
+    """OpCodec for BlockEditor (#111 phase 4): one op is the whole-program
+    before/after pair ["blk", before, after] -- both JSON-able clones of the
+    (tiny) block tree, so an op carries enough pre-state to invert (undo restores
+    `before`, redo restores `after`) and round-trips through a persistence layer
+    unchanged. A full-tree op (not a per-mutation delta) is deliberate: the tree
+    is small, and inverting ~18 heterogeneous structural edits op-by-op
+    (cross-parent move, rename-with-ref-rewrite, param add/remove) would be far
+    more error-prone than swapping a clone. The doc is the BlockEditor; apply/
+    invert rebind `program` to a FRESH clone (never the stored op's tree, which
+    later edits would corrupt) and re-flatten via the editor's own tail."""
+
+    def apply(self, doc, op):          # redo -> the AFTER program
+        doc.program = _clone_tree(op[2])
+        doc._after_history()
+
+    def invert(self, doc, op):         # undo -> the BEFORE program
+        doc.program = _clone_tree(op[1])
+        doc._after_history()
 
 
 class BlockRow:
@@ -46,7 +67,7 @@ class BlockRow:
         self.is_else = is_else    # the if_else divider (a non-deletable label row)
 
 
-class BlockEditor(UndoRedoMixin):
+class BlockEditor(object):
     """The structured-outline block program + a cursor over its flattened script
     (issue #29 Part 2). Pure logic -- no rendering, no I/O -- so it backs both the
     host console and the frozen device console. The `blocks` module (Part 1) is the
@@ -69,8 +90,20 @@ class BlockEditor(UndoRedoMixin):
         # -- #93 clipboard + cross-parent move + in-session undo/redo -----------
         self.clipboard = None     # a deep-copied block subtree (copy/paste/duplicate)
         self._move_src = None     # the block object marked for a cross-parent MOVE
-        # bounded full-program snapshots (in-session), over the shared discipline
-        self._hist = UndoStack(_BLK_UNDO_MAX)
+        # #111 phase 4: the outline's in-session undo/redo runs on the SHARED
+        # op-history core (op_history.History) over the whole-program before/after
+        # codec, so the #88 bar UNDO/REDO icons (ws.undo()/redo(), routed by
+        # Project's per-tab history registry) drive the SAME stack as the host
+        # Ctrl+Z. Bounded to _BLK_UNDO_MAX RAM steps (an INVERT codec, so the
+        # depth ring is sound). In-session only -- blocks saves don't journal
+        # ops, so this History never flushes into a commit (unlike paint/map);
+        # it's dropped when a different cart rebuilds the editor.
+        self._hist = History(self, _BlockOps(), max_undo=_BLK_UNDO_MAX)
+        # A mutating edit snapshots the program PRE-state here (at _record, before
+        # it changes anything); the matching POST-state is captured lazily when the
+        # NEXT edit opens or an undo/redo/flush seals it -- a "burst" close exactly
+        # like Writer's typing burst and Map's open batch. So an edit is one op.
+        self._pending_pre = None
         self.reflow()
 
     # -- flattening ----------------------------------------------------------
@@ -151,20 +184,60 @@ class BlockEditor(UndoRedoMixin):
     # different cart opens (BlockEditorUI rebuilds the editor). It never crosses a
     # save or graduation -- those are the durable code journal's job (spec Section 7).
     def _record(self):
-        """Push a pre-edit snapshot for undo and clear the redo stack. Called at the
-        top of every mutating op (after its guards, so a no-op records nothing)."""
-        self._hist.push(_clone_tree(self.program))
+        """Open a new undo op: seal the previous pending op (its after-state is the
+        current program -- that mutation has completed) and snapshot the fresh
+        pre-state. Called at the top of every mutating op, after its guards, so a
+        guarded no-op records nothing (#111 phase 4)."""
+        self._seal_pending()
+        self._pending_pre = _clone_tree(self.program)
 
-    # undo/redo come from UndoRedoMixin over these hooks.
+    def _seal_pending(self):
+        """Close the open pending op into ONE History op = the net before/after
+        program pair. A no-op when nothing is pending, or when the edit ended up
+        not changing the program. Also the seam the undo/redo verbs (and the bar's
+        ws._seal_active_local) call FIRST, so a just-made, not-yet-sealed edit is
+        undo's first target -- mirrors Writer's burst close + Map's end_edit."""
+        before = self._pending_pre
+        self._pending_pre = None
+        if before is None:
+            return
+        after = _clone_tree(self.program)
+        if before != after:
+            self._hist.record(["blk", before, after])
 
-    def _hist_reverse(self, entry):
-        """The reverse is a fresh clone of the CURRENT program (captured before
-        the restore)."""
-        return _clone_tree(self.program)
+    def _pending_changed(self):
+        """True iff an un-sealed edit actually changed the program -- so can_undo()
+        reports it WITHOUT the side effect of sealing (the dim-state read path)."""
+        return (self._pending_pre is not None
+                and self._pending_pre != self.program)
 
-    def _hist_apply(self, snap, is_redo):
-        self.program = snap
-        self._after_history()
+    # -- undo / redo (over the shared #111 op-history) -----------------------
+    # The #88 bar (ws.undo/redo) and the host Ctrl+Z (block_editor_ui) both drive
+    # these; each seals any open edit first so a just-made edit is undo's target.
+
+    @property
+    def _undo(self):
+        return self._hist._undo          # the op undo stack (tests inspect its depth)
+
+    @property
+    def _redo(self):
+        return self._hist._redo
+
+    def can_undo(self):
+        return self._hist.can_undo() or self._pending_changed()
+
+    def can_redo(self):
+        return self._hist.can_redo()
+
+    def undo(self):
+        """Revert the last edit; True iff a step was taken."""
+        self._seal_pending()
+        return self._hist.undo() is not None
+
+    def redo(self):
+        """Re-apply the last undone edit; True iff a step was taken."""
+        self._seal_pending()
+        return self._hist.redo() is not None
 
     def _after_history(self):
         """Shared undo/redo tail: a restored program is a fresh tree, so any marked
