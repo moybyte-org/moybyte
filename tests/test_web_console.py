@@ -924,10 +924,12 @@ def test_browser_page_fills_large_viewports_without_integer_scale_cliff():
 
 def test_soft_keyboard_toggle_and_hidden_input_are_served(server):
     """#42 Thread 2: the page must ship a touch-only ⌨ toggle (#kb) and a hidden real <input>
-    (#kbin) to focus so a phone's on-screen keyboard opens. #kbin must keep autocapitalize/
-    autocorrect/autocomplete OFF (clean code typing) and stay out of the desktop layout (hidden
-    alongside #ctl on a hover-capable/fine-pointer device -- physical keyboard/mouse users never
-    see it)."""
+    (#kbin) to focus so a phone's on-screen keyboard opens. #kb lives in the bottom control
+    bar's middle cluster (#mid, beside the burger) -- NEVER floating over the canvas, where it
+    used to sit exactly on the console's OS status zone / context-X and eat its taps. #kbin
+    must keep autocapitalize/autocorrect/autocomplete OFF (clean code typing); the whole bar
+    (incl. #kb) hides on a hover-capable/fine-pointer device -- physical keyboard/mouse users
+    never see it."""
     _console, host, port = server
     status, ctype, body = _get(host, port, "/")
     assert status == 200
@@ -936,7 +938,27 @@ def test_soft_keyboard_toggle_and_hidden_input_are_served(server):
     assert "id=kbin" in text
     assert 'autocapitalize=off' in text and 'autocomplete=off' in text
     assert 'autocorrect=off' in text and 'spellcheck=false' in text
-    assert "#ctl{display:none}#kb{display:none}" in text
+    assert "#ctl{display:none}" in text
+    # The toggle sits INSIDE the control bar's middle cluster, not pinned over the canvas.
+    assert "<div id=mid><span class=b id=kb" in text
+    assert "cvwrap" not in text and "position:absolute;top:6px" not in text
+
+
+def test_touch_long_press_never_starts_text_selection():
+    """Holding a control (hold-to-exit burger, d-pad, A/B) must never start the OS
+    text-selection: iOS needs -webkit-user-select + -webkit-touch-callout (plain user-select
+    isn't honored there) on the whole page for holds that drift off a button, and Android
+    fires contextmenu on long-press even with pointerdown preventDefault'd. Touch-scoped:
+    desktop text selection and right-click stay normal, and #kbin stays selectable (its
+    caret is driven programmatically)."""
+    text = web_view.PAGE_HTML
+    assert "-webkit-user-select:none" in text and "-webkit-touch-callout:none" in text
+    before_guard = text[:text.index("-webkit-user-select:none")]
+    assert "(pointer:coarse)" in before_guard.rsplit("@media", 1)[1], \
+        "the selection guard must be scoped to touch devices"
+    assert "#kbin{-webkit-user-select:text;user-select:text}" in text
+    assert 'document.addEventListener("contextmenu"' in text
+    assert 't.closest("#ctl")' in text
 
 
 def test_soft_keyboard_routes_typed_text_through_the_key_protocol():

@@ -34,45 +34,75 @@ PAGE_HTML = """<!doctype html><html><head><meta charset=utf-8>
 html,body{margin:0;height:100%;background:#0b0f1a;color:#c2c3c7;
 font:14px ui-monospace,Menlo,Consolas,monospace;display:flex;flex-direction:column;
 align-items:center}
-h1{font-size:14px;color:#fff1e8;margin:8px}#s{color:#ffec27}
+h1{font-size:14px;color:#fff1e8;margin:8px;max-width:96vw;white-space:nowrap;
+overflow:hidden;text-overflow:ellipsis}#s{color:#ffec27}
+/* Small phones (e.g. iPhone 13 mini): the full title used to wrap to two rows and
+   steal canvas height -- drop the "device" suffix + the backtick hint (meaningless
+   without a physical keyboard) on coarse pointers; nowrap+ellipsis backstops the rest. */
+@media (pointer:coarse){h1 .dv,h1 small{display:none}}
+/* Long-press guard: HOLDING a control (the hold-to-exit burger, a d-pad direction, A/B)
+   used to start the OS text-selection -- iOS magnifier/blue highlight, Android context
+   menu -- because plain user-select isn't enough there: iOS wants the -webkit- prefix +
+   -webkit-touch-callout, and the page text (title/status) had no guard at all for a hold
+   that drifts off a button. Touch devices only; desktop keeps normal text selection.
+   #kbin stays selectable -- its caret/selection is driven programmatically (setSelectionRange)
+   and must not inherit the guard. */
+@media (pointer:coarse){body{-webkit-user-select:none;user-select:none;
+-webkit-touch-callout:none}
+#kbin{-webkit-user-select:text;user-select:text}}
 /* Presentation scale: the OS renders at its DESIGN resolution (320x240 /
    1024x600); fit() uses the whole available viewport while the browser keeps
    nearest-neighbour sampling. Desktop users have real keyboard/pointer input,
    so the touch controls do not consume a permanent 120px-tall band there. */
 canvas{image-rendering:pixelated;background:#000;border:1px solid #1d2b53;border-radius:6px;
 width:min(96vw,112vh);height:auto;max-width:100%;touch-action:none;cursor:crosshair}
-#ctl{display:flex;justify-content:space-between;gap:24px;width:min(96vw,112vh);
-max-width:100%;padding:12px 8px;box-sizing:border-box;touch-action:none;user-select:none}
-#joy{position:relative;width:120px;height:120px;border-radius:50%;background:#1d2b53;
-border:2px solid #29366f}#th{position:absolute;top:50%;left:50%;width:52px;height:52px;
-margin:-26px 0 0 -26px;border-radius:50%;background:#5f6f9f;border:2px solid #c2c3c7;
-pointer-events:none}.b{width:72px;height:72px;border-radius:50%;display:flex;
-align-items:center;justify-content:center;font:700 26px ui-monospace;color:#fff1e8;
-background:#7e2553;border:2px solid #c2c3c7;margin-left:18px}#bb{background:#29366f}
-#bh{background:#5f574f;width:52px;height:52px;font-size:20px}
+/* Control sizes scale with the viewport (min(px, vw)): full desktop-tablet size when the
+   width allows, proportionally smaller on narrow phones -- adding the ⌨ button made the
+   fixed-px row overflow a 375px iPhone 13 mini, and flex "resolved" it by squashing the
+   joystick half off-screen and overlapping the circles. flex-shrink is 0 everywhere so the
+   row can never squash; the sizes are tuned to fit ~360px at their vw floors. */
+#ctl{display:flex;justify-content:space-between;align-items:center;gap:min(8px,1vw);
+width:min(96vw,112vh);
+max-width:100%;padding:12px 4px;box-sizing:border-box;touch-action:none;user-select:none;
+--bb:min(72px,15vw);--sb:min(40px,9vw);--joy:min(120px,26vw)}
+#joy{flex:0 0 auto;position:relative;width:var(--joy);height:var(--joy);border-radius:50%;
+background:#1d2b53;
+border:2px solid #29366f}#th{position:absolute;top:50%;left:50%;
+width:calc(var(--joy)*0.43);height:calc(var(--joy)*0.43);
+margin:calc(var(--joy)*-0.215) 0 0 calc(var(--joy)*-0.215);
+border-radius:50%;background:#5f6f9f;border:2px solid #c2c3c7;
+pointer-events:none}.b{flex:0 0 auto;width:var(--bb);height:var(--bb);border-radius:50%;
+display:flex;
+align-items:center;justify-content:center;font:700 min(26px,5.5vw) ui-monospace;
+color:#fff1e8;
+background:#7e2553;border:2px solid #c2c3c7;margin-left:min(18px,2vw)}#bb{background:#29366f}
+#bh,#kb{background:#5f574f;width:var(--sb);height:var(--sb);font-size:min(16px,4vw)}
 .pr{background:#ffec27;color:#1d2b53}
-/* Soft-keyboard summon (#42 Thread 2): #cvwrap hugs the canvas so #kb (the toggle) pins to
-   its top-right corner without disturbing the flex-centered layout. #kbin is the real input
-   that gets focused -- pinned 1x1px at the viewport origin so it never occludes the canvas or
-   pushes the page around; font-size 16px so iOS doesn't zoom the page in on focus. */
-#cvwrap{position:relative;display:inline-block}
-#kb{position:absolute;top:6px;right:6px;width:30px;height:30px;border-radius:50%;
-display:flex;align-items:center;justify-content:center;font-size:16px;color:#fff1e8;
-background:#29366f;border:2px solid #c2c3c7;touch-action:none;user-select:none}
+/* The middle cluster (#42 Thread 2 rework): the soft-keyboard summon lives in the bottom
+   control bar next to the burger, NEVER floating over the canvas -- the old pinned corner
+   toggle sat exactly on the console's OS status zone / context-X and ate its taps. #mid is
+   always shown on touch (even for touch-only carts, so HOME/exit stays reachable); only the
+   joystick + A/B gate on the cart's input hint, and only they hide while typing. */
+#mid{flex:1 1 0;min-width:0;display:flex;justify-content:center;align-items:center}
+#mid .b{margin:0 min(9px,1.5vw)}
+#ab{flex:0 0 auto;display:flex;align-items:center}
+/* #kbin is the real input that gets focused -- pinned 1x1px at the viewport origin so it
+   never occludes the canvas or pushes the page around; font-size 16px so iOS doesn't zoom
+   the page in on focus. */
 #kbin{position:fixed;top:0;left:0;width:1px;height:1px;padding:0;margin:0;border:0;
 opacity:0;font-size:16px;background:transparent;color:transparent;caret-color:transparent}
-@media (hover:hover) and (pointer:fine){#ctl{display:none}#kb{display:none}}
+@media (hover:hover) and (pointer:fine){#ctl{display:none}}
 /* Debug HUD (#41): toggled with the ` key; lightweight live stream stats. */
 #hud{position:fixed;top:6px;left:6px;z-index:9;display:none;padding:6px 8px;border-radius:5px;
 background:rgba(11,15,26,.82);border:1px solid #1d2b53;color:#00e436;font:12px ui-monospace;
 white-space:pre;pointer-events:none}#hud b{color:#ffec27}#hud .w{color:#ff004d}</style></head><body>
 <div id=hud></div>
-<h1>Moybyte &mdash; device <span id=s>connecting...</span> <small style="color:#5f6f9f">(press ` for stats)</small></h1>
-<div id=cvwrap><canvas id=cv width=320 height=240 tabindex=0></canvas>
-<span id=kb title="keyboard">&#9000;</span></div>
+<h1>Moybyte<span class=dv> &mdash; device</span> <span id=s>connecting...</span> <small style="color:#5f6f9f">(press ` for stats)</small></h1>
+<canvas id=cv width=320 height=240 tabindex=0></canvas>
 <input id=kbin type=text autocapitalize=off autocomplete=off autocorrect=off spellcheck=false>
 <div id=ctl><div id=joy><div id=th></div></div>
-<div><span class=b id=bh>&#9776;</span><span class=b id=bb>B</span><span class=b id=ba>A</span></div></div>
+<div id=mid><span class=b id=kb title="keyboard">&#9000;</span><span class=b id=bh>&#9776;</span></div>
+<div id=ab><span class=b id=bb>B</span><span class=b id=ba>A</span></div></div>
 <script>
 var FPS=30,cv=document.getElementById("cv"),cx=cv.getContext("2d"),sEl=document.getElementById("s");
 cx.imageSmoothingEnabled=false;
@@ -276,6 +306,10 @@ function rl(e){if(!dn)return;dn=false;el.classList.remove("pr");send({type:"hold
 el.addEventListener("pointerdown",function(e){el.setPointerCapture(e.pointerId);pr(e);});
 el.addEventListener("pointerup",rl);el.addEventListener("pointercancel",rl);el.addEventListener("pointerleave",rl);}
 wb("ba","a");wb("bb","b");wb("bh","home");  // &#9776; = HOME (Stage 5 EXIT key): a HELD wb button streams "home" down, so holding it ~700ms is the hold-to-exit gesture (server-side synthesized hold)
+// Android long-press fires contextmenu even with pointerdown preventDefault'd -- swallow it
+// on the play surfaces (canvas + control bar) only, so desktop right-click elsewhere is normal.
+document.addEventListener("contextmenu",function(e){var t=e.target;
+if(t===cv||(t.closest&&t.closest("#ctl")))e.preventDefault();});
 var PAN={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]},
 NAV={a:"left",d:"right",w:"up",s:"down"},SC={Enter:"run",z:"a",x:"b"},pH={},nH={};
 // No letter->HOME shortcut: page buttons BYPASS the device's text-mode alias
@@ -295,10 +329,10 @@ if(s&&!e.repeat)send({type:"press",name:s});var n=nv(e);if(n&&!nH[n]){nH[n]=true
 if(s||n||cd!==null)e.preventDefault();});
 cv.addEventListener("keyup",function(e){if(e.key in PAN){delete pH[e.key];e.preventDefault();return;}
 var n=nv(e);if(n&&nH[n]){delete nH[n];send({type:"hold",name:n,down:false});}});
-// Soft keyboard (#42 Thread 2): #kb focuses the hidden #kbin so a touch device's on-screen
-// keyboard opens; #kbin never appears on desktop (media-query hidden alongside #ctl) and its
-// events are entirely separate from cv's keydown above, so a physical keyboard is never
-// double-counted. Typed characters are read by DIFFING #kbin's value against a single-space
+// Soft keyboard (#42 Thread 2): #kb (in the bottom bar's middle cluster, beside the burger)
+// focuses the hidden #kbin so a touch device's on-screen keyboard opens; it never appears on
+// desktop (#ctl is media-query hidden there) and #kbin's events are entirely separate from
+// cv's keydown above, so a physical keyboard is never double-counted. Typed characters are read by DIFFING #kbin's value against a single-space
 // SENTINEL kept at all times -- soft keyboards routinely fire keydown with no usable key (IME
 // composition reports keyCode 229/"Unidentified"), so the value delta is the only reliable
 // signal; the sentinel exists so Backspace on an otherwise-empty field still fires an `input`
@@ -317,17 +351,21 @@ kbInp.addEventListener("input",function(){var v=kbInp.value;
 // A single-line <input> never inserts a newline, so Enter needs its own listener (still
 // reliable on soft keyboards -- unlike printable keys, the Enter key name is widely reported).
 kbInp.addEventListener("keydown",function(e){if(e.key==="Enter"){send({type:"key",code:13});e.preventDefault();}});
-// While typing, the virtual gamepad is dead weight that eats the (already
-// keyboard-shrunken) viewport -- hide it so the canvas keeps the room; blur
-// restores it (the CSS media query still owns whether it exists at all).
-var kbCtl=document.getElementById("ctl");
-// #42 Thread 3: syncCtl() shows the virtual gamepad only when BOTH the cart wants it
+// While typing, the joystick + A/B are dead weight that eat the (already
+// keyboard-shrunken) viewport -- hide them so the canvas keeps the room; blur
+// restores them. The middle cluster (#kb + burger) STAYS so the toggle and
+// HOME/exit remain reachable mid-type.
+var abEl=document.getElementById("ab");
+// #42 Thread 3: syncCtl() shows the joystick/A-B only when BOTH the cart wants buttons
 // (padWanted, from the manifest input hint) AND we're not mid-type (kbInp focused);
 // applyInputHint() re-derives padWanted/kbWanted from INPUT (set by getA() on every
-// /assets fetch, i.e. every cart change) and also gates the #kb summon button itself.
-function syncCtl(){if(kbCtl)kbCtl.style.display=(padWanted&&document.activeElement!==kbInp)?"":"none";}
+// /assets fetch, i.e. every cart change). #kb gates on kbWanted; the burger never hides
+// (a touch-only cart still needs an exit affordance -- the bar itself is only ever
+// hidden by the desktop media query).
+function syncCtl(){var pad=(padWanted&&document.activeElement!==kbInp)?"":"none";
+  jE.style.display=pad;abEl.style.display=pad;kbBtn.style.display=kbWanted?"":"none";}
 function applyInputHint(){padWanted=!INPUT||INPUT.indexOf("buttons")>=0;
-  kbWanted=!INPUT||INPUT.indexOf("keyboard")>=0;kbBtn.style.display=kbWanted?"":"none";syncCtl();}
+  kbWanted=!INPUT||INPUT.indexOf("keyboard")>=0;syncCtl();}
 kbInp.addEventListener("focus",function(){kbBtn.classList.add("pr");
   syncCtl();fit();
   if(window.visualViewport)window.visualViewport.addEventListener("resize",kbScroll);kbScroll();});

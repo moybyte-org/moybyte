@@ -374,7 +374,8 @@ Buttons are named. The canonical set is `left, right, up, down, a, b, run, home`
 (`btn`/`btnp`), `"touch"` (`touch()`), `"keyboard"` (`key`/`keyp`/`textmode`), e.g.
 `"input": ["touch"]` for a touch-only game. It's purely a hint for surfaces that draw
 optional controls (today: the web view's virtual gamepad + soft-keyboard summon —
-`"buttons"` shows the d-pad, `"keyboard"` shows the ⌨ toggle); it changes nothing about
+`"buttons"` shows the d-pad + A/B, `"keyboard"` shows the ⌨ toggle; the HOME/exit
+button always shows, so even a `["touch"]` cart stays exitable); it changes nothing about
 which calls actually work. **Omit it and every control shows** (today's behavior,
 zero regression) — only declare it once a cart's input is settled.
 
