@@ -179,12 +179,14 @@ class Project:
     # it the (file, bytes) each commit produced, in the SAME between-frames SD-session
     # discipline (ws._with_sd) as the save it shadows.
 
-    def _journal(self, file, new_bytes, grad=None):
+    def _journal(self, file, new_bytes, grad=None, ops=None):
         """Append a durable undo-journal entry for `file`. Best-effort: a journal
         failure must NEVER break the save it shadows -- the edit is already on disk,
         the kid just loses one undo step. The store's dedup drops a no-op commit, so
         journaling an unchanged file costs nothing. `grad` (Stage 8) is the optional
-        0/1 graduation rider on a main.py commit (see _journal_code)."""
+        0/1 graduation rider on a main.py commit (see _journal_code); `ops` (#111) is
+        the optional fine-grained op batch (from a paint/map History.flush()) embedded
+        additively so the bar UNDO can cross the stroke->commit boundary."""
         ws = self.ws
         store = ws.carts_store
         if store is None or not self.cart or new_bytes is None:
@@ -193,7 +195,8 @@ class Project:
         if not path or not ws.can_manage or not hasattr(store, "journal_append"):
             return
         try:
-            seq = ws._with_sd(lambda: store.journal_append(path, file, new_bytes, grad=grad))
+            seq = ws._with_sd(lambda: store.journal_append(
+                path, file, new_bytes, grad=grad, ops=ops))
         except Exception as exc:  # noqa: BLE001 -- journaling can't be allowed to fail a save
             print("Moybyte journal append failed:", _err_text(exc))
             return
@@ -392,6 +395,24 @@ class Project:
             print("Moybyte save code failed:", txt)
             return False
 
+    def _paint_history(self):
+        """The op-history of the OPEN cart-sprite PaintEditor (#111), or None. Guarded
+        so the theme/icon editor (whose PaintEditor rides a DIFFERENT sheet) can never
+        have its ops folded into a cart's journal -- only the editor bound to THIS
+        project's live sheet counts."""
+        pe = getattr(self.ws, "paint", None)
+        if pe is not None and getattr(pe, "sheet", None) is self.sheet:
+            return getattr(pe, "_hist", None)
+        return None
+
+    def _map_history(self):
+        """The op-history of the OPEN MapEditor (#111), or None -- guarded on the live
+        tilemap identity like _paint_history."""
+        me = getattr(self.ws.map_ui, "mapedit", None)
+        if me is not None and getattr(me, "tilemap", None) is self.tilemap:
+            return getattr(me, "_hist", None)
+        return None
+
     def commit_sprites(self):
         ws = self.ws
         if not (self.sheet and self.cart and self.cart.get("path") and ws.can_manage):
@@ -401,7 +422,19 @@ class Project:
             ws._with_sd(lambda: ws.carts_store.save_sprites(self.cart, hexs))
             self.sheet.dirty = False
             ws.save_status = "SAVED"
-            self._journal("sprites.moygfx", hexs)   # durable undo (Stage 7)
+            # #111: this snapshot IS a keyframe, so drain the paint History's op batch
+            # into the journal line (fine-grained cross-boundary undo). Then re-baseline
+            # the History (clear): a commit is the CLEAN boundary -- in-RAM undo covers
+            # edits SINCE the last commit, the journal covers commit-to-commit, so the
+            # two never double-count the same stroke. flush() runs only after the store
+            # write succeeded, so a failed save doesn't silently swallow the batch.
+            # (Paint commits only on tab-leave/exit, never mid-session, so clearing
+            # here never costs a kid an in-progress stroke's undo.)
+            hist = self._paint_history()
+            ops = hist.flush() if hist is not None else None
+            self._journal("sprites.moygfx", hexs, ops=ops)   # durable undo (Stage 7/#111)
+            if hist is not None:
+                hist.clear()                  # re-baseline (subsumes mark_keyframe)
             ws.ach.note("paint_save")         # "Little Artist": a sprite saved (#21)
         except Exception as exc:  # noqa: BLE001
             # Mirror the save_code contract: a failed sprite save must be VISIBLE on
@@ -424,7 +457,11 @@ class Project:
             ws._with_sd(lambda: ws.carts_store.save_map(self.cart, hexs))
             self.tilemap.dirty = False
             ws.save_status = "SAVED"
-            self._journal("map.moymap", hexs)       # durable undo (Stage 7)
+            hist = self._map_history()        # #111: drain the map op batch (see commit_sprites)
+            ops = hist.flush() if hist is not None else None
+            self._journal("map.moymap", hexs, ops=ops)   # durable undo (Stage 7/#111)
+            if hist is not None:
+                hist.clear()                  # re-baseline the clean boundary (see commit_sprites)
             ws.ach.note("map_save")           # "Map Maker": a map saved (#21)
         except Exception as exc:  # noqa: BLE001
             txt = _err_text(exc)

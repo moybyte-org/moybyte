@@ -577,7 +577,9 @@ def test_fill_fires_once_even_if_press_wobbles_off_the_grid(tmp_path):
     assert ws.sheet.pget(ox + 6, oy + 1) == 11
 
 
-def test_undo_redo_buttons_revert_a_stroke(tmp_path):
+def test_undo_redo_reverts_a_stroke(tmp_path):
+    # #111: the paint toolbar's local UNDO/REDO buttons were removed -- the ONE bar
+    # pair (ws.undo()/ws.redo(), routed to this editor's op-history) is now the undo.
     from runtime import console as C
     from runtime import host_app
 
@@ -595,18 +597,9 @@ def test_undo_redo_buttons_revert_a_stroke(tmp_path):
     drv.frame(1 / 30)
     assert ws.sheet.pget(ox + 2, oy + 2) == 13
 
-    ux, uy = _tool_center(ws, "undo")
-    drv.touch(ux, uy)
-    drv.frame(1 / 30)
-    drv.touch_up()
-    drv.frame(1 / 30)
+    assert ws.undo() is True           # the bar UNDO reverts the whole stroke
     assert ws.sheet.pget(ox + 2, oy + 2) == before
-
-    rx, ry = _tool_center(ws, "redo")
-    drv.touch(rx, ry)
-    drv.frame(1 / 30)
-    drv.touch_up()
-    drv.frame(1 / 30)
+    assert ws.redo() is True           # ...and the bar REDO re-lays it
     assert ws.sheet.pget(ox + 2, oy + 2) == 13
 
 

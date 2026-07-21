@@ -2723,27 +2723,68 @@ class Workstation:
     # Ctrl+Z / Ctrl+Y host shortcut (code_layer.py) -- both drive the SAME
     # ws.undo()/ws.redo() mechanism, so neither affordance can drift from the other.
 
+    def _active_history(self):
+        """The FINE-GRAINED op-history (#111) of the active Editor tab -- paint or
+        map, the two surfaces with an in-RAM op stack -- or None for a commit-level
+        tab (code/blocks/config/scene/music). Keyed on the active `menu_view` so a
+        stale ws.paint/mapedit from an earlier tab is ignored; the caller (the bar
+        UNDO/REDO icons, only reachable inside the Editor) guarantees the Editor is
+        the focused surface, so no back-stack check is needed."""
+        view = self.menu_view
+        if view == "paint":
+            pe = self.paint
+            return getattr(pe, "_hist", None) if pe is not None else None
+        if view == "map":
+            me = self.map_ui.mapedit
+            return getattr(me, "_hist", None) if me is not None else None
+        return None
+
+    def _after_local_history(self):
+        """After a fine-grained (paint/map) undo/redo: the editor mutated the LIVE
+        sheet/tilemap in place (gen bumped, a running preview picks it up), so there's
+        no cart reload -- just repaint and re-check the bar's dimmed state (#111)."""
+        self._dirty = True
+        self.bar_layer.invalidate()
+
     def undo(self):
-        """Undo the last durable commit: restore the previous snapshot over the live
-        file, then rebuild the affected editor so the revert is visible. Returns True
-        iff a step was taken (False at the floor -- finer, in-session undo is the
-        editor's RAM). A DURABLE step = one commit, not one keystroke (spec Section 7)."""
+        """Undo one step for the active Editor tab (#111). A paint/map tab UNWINDS its
+        in-RAM op-history FIRST (one stroke/gesture), and only once that's exhausted
+        falls through to the durable journal walk (one whole commit) -- so the SAME
+        bar icon crosses the stroke->commit boundary. A commit-level tab (code/blocks/
+        config/scene/music) goes straight to the journal. Returns True iff a step was
+        taken. NOTE the boundary is CLEAN: falling into the journal reloads the editor
+        with a fresh (empty) History, so continued presses walk whole commits until
+        new fine-grained edits are made (the seed-from-journal option was deferred)."""
+        hist = self._active_history()
+        if hist is not None and hist.can_undo() and hist.undo() is not None:
+            self._after_local_history()
+            return True
         return self._journal_walk(False)
 
     def redo(self):
-        """Re-apply the next durable commit (the inverse of undo). Returns True iff a
-        step was taken (False at the top)."""
+        """Re-apply one step (the inverse of undo): local op-history redo first, then
+        the durable journal redo. Returns True iff a step was taken."""
+        hist = self._active_history()
+        if hist is not None and hist.can_redo() and hist.redo() is not None:
+            self._after_local_history()
+            return True
         return self._journal_walk(True)
 
     def can_undo(self):
-        """Read-only: True iff undo() would actually restore something (#88, the bar
-        icon's dimmed state). Cheap -- a journal.jsonl parse, no live-file write --
-        but still an SD read, so callers should only ask when they're about to
-        REPAINT (the zoned-bar cache key), never on a per-frame hot path."""
+        """Read-only: True iff undo() would restore something (#88/#111, the bar icon's
+        dimmed state). Consults the active tab's op-history FIRST (a cheap in-RAM
+        check, no I/O), then the journal (a journal.jsonl parse -- an SD read, so only
+        ask when about to REPAINT, never on a per-frame hot path)."""
+        hist = self._active_history()
+        if hist is not None and hist.can_undo():
+            return True
         return self._journal_check(False)
 
     def can_redo(self):
         """Read-only counterpart to can_undo() for redo()."""
+        hist = self._active_history()
+        if hist is not None and hist.can_redo():
+            return True
         return self._journal_check(True)
 
     def _journal_check(self, redo):

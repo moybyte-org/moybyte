@@ -1119,9 +1119,10 @@ def test_map_editor_big_batch_compacts_to_bounded_snapshot():
     assert tm.mget(10, 10) == 7             # the walled cell survived the flood
 
     step = me._undo[-1]
-    assert type(step) is tuple and step[0] == "snap"     # snapshot form, not tuples
+    assert step[0] == "snap"                             # #111: snapshot op form
     assert (step[1], step[2]) == (96, 96)
-    assert len(step[3]) == 96 * 96 and len(step[4]) == 96 * 96  # 2 blobs, w*h each
+    # 2 HEX blobs, 2 chars/cell (#111: JSON-able payloads, not raw bytes())
+    assert len(step[3]) == 96 * 96 * 2 and len(step[4]) == 96 * 96 * 2
 
     assert me.undo() is True                 # snapshot undo restores the whole map
     assert tm.mget(0, 0) == TileMap.EMPTY and tm.mget(95, 95) == TileMap.EMPTY

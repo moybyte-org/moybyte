@@ -475,9 +475,11 @@ def _blank_map(ws):
         cells[i] = 0
 
 
-def test_map_undo_redo_buttons_walk_gestures(tmp_path):
-    # #91: two stamp taps are two undo steps; the on-screen UNDO button reverts the
-    # last, REDO re-applies it (touch-first -- no Ctrl key needed on the device).
+def test_map_undo_redo_walk_gestures(tmp_path):
+    # #91/#111: two stamp taps are two undo steps; the shared bar UNDO reverts the
+    # last, REDO re-applies it. The map's local toolbar UNDO/REDO buttons were
+    # removed in #111 -- ws.undo()/ws.redo() (the ONE bar pair, routed to this
+    # editor's op-history) is now the walk.
     ws, drv = _open_map(tmp_path)
     _blank_map(ws)
     me = ws.map_ui.mapedit
@@ -488,9 +490,9 @@ def test_map_undo_redo_buttons_walk_gestures(tmp_path):
     c2 = (me.cam_x + 2, me.cam_y + 1)
     assert ws.tilemap.mget(*c1) == 4 and ws.tilemap.mget(*c2) == 4
 
-    _tap(drv, *_btn_center(ws.map_ui.layout.undo_btn))
+    assert ws.undo() is True
     assert ws.tilemap.mget(*c2) == ws.tilemap.EMPTY and ws.tilemap.mget(*c1) == 4
-    _tap(drv, *_btn_center(ws.map_ui.layout.redo_btn))
+    assert ws.redo() is True
     assert ws.tilemap.mget(*c2) == 4               # the step came back
 
 

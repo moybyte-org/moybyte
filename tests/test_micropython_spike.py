@@ -2992,7 +2992,7 @@ def test_editor_cores_are_shared_single_source():
     # stages it into the frozen modules tree -- no duplicated class definitions.
     editors = _editors_src()
     for cls in ("class CodeEditor:", "class SpriteSheet:",
-                "class PaintEditor(UndoRedoMixin):"):
+                "class PaintEditor:"):     # #111: undo now on the op-history core
         assert cls in editors, cls
     # moy_runtime + device_api together are the device backend surface the
     # greps pin: make_api moved to device_api.py (#58, staged to every device
