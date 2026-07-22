@@ -151,6 +151,13 @@ door — no setting, no mode:
   scrollbar along the grid's bottom edge, and keyboard nav pulling the view along.
   The SAME shelf renders on every tier, the 320×240 T-Deck included (its frozen
   icon-tile grid is retired).
+- **Scrolling is KINETIC** (#113, 2026-07-22): a fast release FLINGS the shelf,
+  which coasts with friction and hard-stops at the ends; a slow or held release
+  is a plain stop, and a touch mid-coast CATCHES it (that catching tap never
+  activates a card). The physics lives in the shared `ui.ScrollRegion`, so the
+  Editor project-picker grid flings identically; scroll/fling frames repaint via
+  the scroll-as-blit band path (shift the retained pixels, redraw only the
+  exposed strip), which is what makes a 60Hz coast affordable on every backend.
 - **The selected card also exposes the two verbs PLAY / CHANGE** (visual identity
   v1 §1.2, the Library contract): PLAY runs it (same as the tap), CHANGE opens the
   SAME project in the Editor landing on Config — the bridge from playing to making,
