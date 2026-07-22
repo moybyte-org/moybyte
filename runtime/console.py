@@ -832,6 +832,13 @@ class Workstation:
         self._cover_cache = {}        # (path, w, h) -> shelf-card cover blittable (or None)
         self._cover_cache_order = []  # LRU keys (oldest first); bounds resize variants
         self._cover_cache_pixels = 0  # indexed pixels; device RGB bakes add 2B each
+        self._cover_gen = 0           # bumped on any cover-cache change (#113: the
+                                      # shelf blit path pins it so a cover landing
+                                      # mid-drag forces a full band repaint)
+        self._cover_serial = 0        # names each cover blittable ("cover:N") so the
+                                      # web recorder ships it ONCE via /assets imgref
+                                      # instead of ~40KB of inline b64 per redraw
+                                      # (#113: the measured shelf-drag payload eater)
         self._cover_jobs = {}         # (path, w, h) -> in-flight _CoverJob (time-sliced)
         self._cover_built = False     # per-frame cover-build budget (one; see _cover_for)
         self._covers_deferred = False # a build was pushed past the budget -> stay dirty
@@ -1002,6 +1009,11 @@ class Workstation:
         self._dirty = True
         self._last_ptr = None         # (x, y, visible, down, click) last drawn, or None
         self._frames_drawn = 0        # frames that actually drew+flushed (test witness)
+        self._frame_dt_ms = 33.0      # last loop tick in ms (kinetic velocity, #113)
+        self._frame_requested = False # a draw asked for another frame (request_frame:
+                                      # a coasting fling re-arms the gate the
+                                      # _covers_deferred way -- set DURING a draw,
+                                      # consumed after the gate cleared _dirty)
         # Per-frame perf scratch (#43/#66): the running-cart content Layer fills these
         # during its draw so the router's frame-end DRAWBRK/CHROMEBRK accounting can read
         # the split without threading it back through the loop. Zeroed each frame().
@@ -1736,6 +1748,14 @@ class Workstation:
         cache[key] = img
         order = self._cover_cache_order
         order.append(key)
+        self._cover_gen += 1
+        if img is not None:
+            # A serial name (never reused) routes the web recorder onto the
+            # ship-once ["imgref", ...] wire (#63 Fold 4): the pixels ride
+            # /assets once (cover_assets below), and an edited cover's REBUILD
+            # gets a fresh name, so a browser can never show a stale cache hit.
+            img._name = "cover:%d" % self._cover_serial
+            self._cover_serial += 1
         if img is not None:
             self._cover_cache_pixels += len(img.pix)
         while (len(order) > _COVER_CACHE_MAX_ENTRIES
@@ -1745,6 +1765,26 @@ class Workstation:
             if old_img is not None:
                 self._cover_cache_pixels -= len(old_img.pix)
         return img
+
+    def cover_assets(self):
+        """{name: (w, h, index_bytes)} for every LIVE shelf-cover blittable --
+        merged into both web transports' /assets images (#113): a cover then
+        ships to the browser ONCE and every card redraw references it by name
+        (["imgref", ...]) instead of carrying ~40KB of inline b64 (the measured
+        payload eater of shelf drag/fling frames). A cover built after the
+        page's last /assets fetch simply misses client-side, which latches the
+        page's imgWant refetch -- the same self-healing loop paint images use."""
+        out = {}
+        for img in self._cover_cache.values():
+            if img is not None:
+                out[img._name] = (img.w, img.h, bytes(img.pix))
+        # The wallpaper backdrop composite rides the same lane (#113: a static
+        # wallpaper's frame is stable, so it ships once and every desk/drag
+        # frame references it instead of inlining ~100KB of b64).
+        wa = getattr(self.wallpaper, "wire_assets", None)
+        if wa is not None:
+            out.update(wa())
+        return out
 
     # -- Settings screen (#28) -----------------------------------------------
     #
@@ -3339,6 +3379,7 @@ class Workstation:
             self._cover_cache = {}         # a re-scan may carry new/changed cover art
             self._cover_cache_order = []
             self._cover_cache_pixels = 0
+            self._cover_gen += 1
             self._cover_jobs = {}          # in-flight builds may read stale blobs
             self.launcher.set_items(self._launcher_view_items())   # #105: keep an active filter
             self.picker.set_items(self._picker_items(items))
@@ -3575,6 +3616,13 @@ class Workstation:
 
     # -- redraw-on-change (#44 step 1) ---------------------------------------
 
+    def request_frame(self):
+        """Ask for one more frame from WITHIN a draw (#113: a coasting fling).
+        mark_dirty() would be lost here -- the gate clears _dirty right after
+        the draw -- so this sets a flag consumed AFTER that clear (the
+        _covers_deferred pattern)."""
+        self._frame_requested = True
+
     def mark_dirty(self):
         """Request a redraw on the next frame(). Called whenever a visible change
         could have happened (input that mutates state, scrolls, edits, screen/menu
@@ -3717,6 +3765,10 @@ class Workstation:
         if dt > 0:
             # EMA so the readout reflects sustained rate, not single-frame jitter.
             self._fps = _ema(self._fps, 1.0 / dt)
+            # The loop tick in ms for the input phase (which runs BEFORE frame()
+            # and has no dt of its own): feeds the kinetic scroll velocity
+            # (#113). Clamped so a hitch can't spike the physics.
+            self._frame_dt_ms = min(dt * 1000.0, 100.0)
         self._cover_built = False     # reset the per-frame cover-build budget
         self._pf_home = None          # home-frame split (launcher_layer, perf_capture)
         # Undo journal (Stage 7): the idle-typing autosave debounce runs BEFORE the
@@ -3832,6 +3884,11 @@ class Workstation:
             # dirty so the remaining covers land on the following frames (the
             # flag is set during the draw, AFTER the gate consumed _dirty).
             self._covers_deferred = False
+            self._dirty = True
+        if self._frame_requested:
+            # A draw asked for a follow-up frame (a coasting kinetic fling,
+            # #113) -- same pattern as the covers re-arm above.
+            self._frame_requested = False
             self._dirty = True
         self._last_ptr = self._ptr_state()
         self._frames_drawn += 1

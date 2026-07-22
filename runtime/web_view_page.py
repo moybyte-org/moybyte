@@ -205,22 +205,32 @@ p=px[bs+rx];if(p===t||p<0||pt[p&63])continue;if(sc<=1)put(x+xx,y+yy,p);else fr(x
 function sp(ix,x,y,sc,fl){var a=ATL[ix];if(!a){HUD.unknown++;return;}blt(a.px,a.w,a.h,a.t,x,y,sc,fl);}
 // img (#63 Fold 3): a paint image (a big MOY64 index bitmap) as base64 of its RAW indices --
 // the INLINE FALLBACK for a nameless paint image. atob -> write indices OPAQUE (index>=64
-// skipped) into the CURRENT target (idx/W/H) clamped, the browser twin of blit_indices.
-function im(x,y,w,h,b64,sc){var s=atob(b64);x|=0;y|=0;w|=0;h|=0;sc=(sc|0)||1;
-if(sc==1){for(var yy=0;yy<h;yy++){var ty=y+yy;if(ty<0||ty>=H)continue;var sr=yy*w,dr=ty*W;
-for(var xx=0;xx<w;xx++){var tx=x+xx;if(tx<0||tx>=W)continue;var p=s.charCodeAt(sr+xx);if(p<64)idx[dr+tx]=p;}}return;}
+// skipped) into the CURRENT target (idx/W/H), the browser twin of blit_indices. Honors
+// CAMERA + CLIP like every other draw op (the raster Canvas.spr clips a paint image the
+// same way -- an unclipped im was how shelf edge-card covers bled outside the Library
+// panel on the web while the host/device clipped them; clip bounds are always inside the
+// canvas, so they subsume the old raw bounds checks).
+function im(x,y,w,h,b64,sc){var s=atob(b64);x=(x|0)-caX;y=(y|0)-caY;w|=0;h|=0;sc=(sc|0)||1;
+if(sc==1){for(var yy=0;yy<h;yy++){var ty=y+yy;if(ty<cm0||ty>=cm1)continue;var sr=yy*w,dr=ty*W;
+for(var xx=0;xx<w;xx++){var tx=x+xx;if(tx<cl0||tx>=cl1)continue;var p=s.charCodeAt(sr+xx);if(p<64)idx[dr+tx]=p;}}return;}
 // scaled (the full-frame game/wallpaper composite, ["img",...,b64,scale]): each source
-// pixel paints an sc x sc block, clamped -- the browser twin of the scaled spr blit.
-for(var yy=0;yy<h;yy++){var sr=yy*w;for(var r=0;r<sc;r++){var ty=y+yy*sc+r;if(ty<0||ty>=H)continue;var dr=ty*W;
+// pixel paints an sc x sc block, clipped -- the browser twin of the scaled spr blit.
+for(var yy=0;yy<h;yy++){var sr=yy*w;for(var r=0;r<sc;r++){var ty=y+yy*sc+r;if(ty<cm0||ty>=cm1)continue;var dr=ty*W;
 for(var xx=0;xx<w;xx++){var p=s.charCodeAt(sr+xx);if(p>=64)continue;var t0=x+xx*sc;
-for(var q=0;q<sc;q++){var tx=t0+q;if(tx>=0&&tx<W)idx[dr+tx]=p;}}}}}
+for(var q=0;q<sc;q++){var tx=t0+q;if(tx>=cl0&&tx<cl1)idx[dr+tx]=p;}}}}}
 // imgref (#63 Fold 4): a paint image by NAME, blitted from the /assets IMG cache -- the normal
-// path (pixels shipped once, not per-frame). Same opaque index->target blit as im, but reading
-// the pre-decoded Uint8Array. A cache MISS latches imgWant so df() re-fetches /assets (the layer
-// deflayer re-ships once assets arrive) -- a ship-once layer can otherwise strand its background.
-function imr(x,y,nm){var G=IMG[nm];if(!G){imgWant=true;return;}var s=G.px,w=G.w,h=G.h;x|=0;y|=0;
-for(var yy=0;yy<h;yy++){var ty=y+yy;if(ty<0||ty>=H)continue;var sr=yy*w,dr=ty*W;
-for(var xx=0;xx<w;xx++){var tx=x+xx;if(tx<0||tx>=W)continue;var p=s[sr+xx];if(p<64)idx[dr+tx]=p;}}}
+// path (pixels shipped once, not per-frame). Same opaque index->target blit as im (camera +
+// clip honored), but reading the pre-decoded Uint8Array. A cache MISS latches imgWant so df()
+// re-fetches /assets (the layer deflayer re-ships once assets arrive) -- a ship-once layer can
+// otherwise strand its background.
+function imr(x,y,nm,sc){var G=IMG[nm];if(!G){imgWant=true;return;}var s=G.px,w=G.w,h=G.h;
+x=(x|0)-caX;y=(y|0)-caY;sc=(sc|0)||1;
+if(sc==1){for(var yy=0;yy<h;yy++){var ty=y+yy;if(ty<cm0||ty>=cm1)continue;var sr=yy*w,dr=ty*W;
+for(var xx=0;xx<w;xx++){var tx=x+xx;if(tx<cl0||tx>=cl1)continue;var p=s[sr+xx];if(p<64)idx[dr+tx]=p;}}return;}
+// scaled imgref (#113: the ship-once wallpaper backdrop composite) -- sc x sc blocks, clipped.
+for(var yy=0;yy<h;yy++){var sr=yy*w;for(var r=0;r<sc;r++){var ty=y+yy*sc+r;if(ty<cm0||ty>=cm1)continue;var dr=ty*W;
+for(var xx=0;xx<w;xx++){var p=s[sr+xx];if(p>=64)continue;var t0=x+xx*sc;
+for(var q=0;q<sc;q++){var tx=t0+q;if(tx>=cl0&&tx<cl1)idx[dr+tx]=p;}}}}}
 // map(): walk the cached tilemap region over the cached sheet (step=tile*scale, colorkey
 // transparent), mirroring the device map() cell layout.
 function mp(mx,my,w,h,sx,sy,sc,ck){if(!SHEET||!TM)return;sc=sc<1?1:sc;
@@ -232,6 +242,16 @@ for(var ly=0;ly<tile;ly++){var srow=(oy+ly)*sw+ox;for(var lx=0;lx<tile;lx++){var
 if(p===ck||p<0||pt[p&63])continue;if(sc<=1)put(dx+lx,dy+ly,p);else fr(dx+lx*sc,dy+ly*sc,sc,sc,p);}}}}}
 // settiles: overwrite the cached tilemap (a cart mutated it via mset).
 function st(w,h,cells){TM={w:w,h:h,cells:cells};}
+// scr (#113 scroll-as-blit): shift the pixels inside rect (rx,ry,rw,rh) of the RETAINED
+// index buffer by (dx,dy) in place -- the browser twin of Canvas.scroll_rect (exposed
+// strips keep stale content; the stream's band repaint covers them). copyWithin is
+// memmove-semantics (horizontal overlap safe); vertical order follows dy.
+function scr(rx,ry,rw,rh,dx,dy){dx|=0;dy|=0;if(!dx&&!dy)return;
+var x0=Math.max(0,rx|0),y0=Math.max(0,ry|0),x1=Math.min(W,(rx|0)+(rw|0)),y1=Math.min(H,(ry|0)+(rh|0));
+var tx0=x0+(dx>0?dx:0),tx1=x1+(dx<0?dx:0),ty0=y0+(dy>0?dy:0),ty1=y1+(dy<0?dy:0);
+if(tx0>=tx1||ty0>=ty1)return;var cw=tx1-tx0;
+if(dy>0){for(var ty=ty1-1;ty>=ty0;ty--){var s0=(ty-dy)*W+(tx0-dx);idx.copyWithin(ty*W+tx0,s0,s0+cw);}}
+else{for(var ty2=ty0;ty2<ty1;ty2++){var s1=(ty2-dy)*W+(tx0-dx);idx.copyWithin(ty2*W+tx0,s1,s1+cw);}}}
 // OFF-SCREEN LAYERS (#54 scroll + #43 cached top bar): deflayer (re)builds an off-screen
 // index buffer by REPLAYING the layer's recorded stream (reusing rep()); blit_layer copies a
 // window (draw_layer) or the full layer (blit_strip) into idx. LAY keeps each built buffer.
@@ -265,8 +285,9 @@ else if(o=="defspr")ATL[c[1]]={w:c[2],h:c[3],t:c[4],px:c[5]};
 // spr has TWO shapes: atlas ["spr",idx,x,y,sc,fl] (<=6 fields) and self-contained
 // ["spr",x,y,sc,w,h,t,pix,fl] (a pix array at c[7]). Branch on the pix array.
 else if(o=="spr"){if(c.length>7&&c[7]&&c[7].length!==undefined)blt(c[7],c[4],c[5],c[6],c[1],c[2],c[3],c[8]||0);else sp(c[1],c[2],c[3],c[4],c[5]||0);}
-else if(o=="img")im(c[1],c[2],c[3],c[4],c[5],c[6]);else if(o=="imgref")imr(c[1],c[2],c[3]);
+else if(o=="img")im(c[1],c[2],c[3],c[4],c[5],c[6]);else if(o=="imgref")imr(c[1],c[2],c[3],c[4]);
 else if(o=="deflayer")dfl(c[1],c[2],c[3],c[4]);else if(o=="blit_layer")bl(c);
+else if(o=="scr")scr(c[1],c[2],c[3],c[4],c[5],c[6]);
 else if(o=="settiles")st(c[1],c[2],c[3]);else if(o=="map")mp(c[1],c[2],c[3],c[4],c[5],c[6],c[7],c[8]);
 else if(o=="print")tx(c[1],c[2],c[3],c[4],c[5]);else if(o=="reset_state")rs();
 else if(o=="camera"){caX=c[1]|0;caY=c[2]|0;}

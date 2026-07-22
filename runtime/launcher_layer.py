@@ -177,6 +177,7 @@ class Launcher:
         self.layout = layout
         self.COLS = layout.cols
         self.ROWS = layout.rows
+        self._region.invalidate()   # #113: new geometry -- recorded paints are void
 
     # -- selection ----------------------------------------------------------
 
@@ -201,6 +202,8 @@ class Launcher:
         self.items = items
         self.zone_gen += 1          # a rename/new/dup/del can change the title text
                                     # the lent zone shows even when sel is unchanged
+        self._region.invalidate()   # #113: the shelf pixels no longer match any
+                                    # recorded paint -- full paints until re-armed
         if self.sel >= len(items):
             self.sel = max(0, len(items) - 1)
         self._scroll_to_sel()
@@ -238,11 +241,30 @@ class Launcher:
     @scroll.setter
     def scroll(self, value):
         self._scroll = max(0, min(int(value), self.max_scroll()))
+        if self._region.animating:
+            self._region.stop()     # a programmatic scroll cancels a fling
 
     @property
     def dragging(self):
         """True while a touch drag (past the slop) is scrolling the grid."""
         return self._taps.dragging
+
+    @property
+    def flinging(self):
+        """True while a released kinetic fling is coasting the grid (#113)."""
+        return self._region.animating
+
+    def anim_frame(self, dt):
+        """Advance a live fling one frame (dt in SECONDS, the loop's tick) --
+        the owning layer calls this at the top of draw, BEFORE painting, so
+        the painted offset is this frame's. Returns True when the view moved."""
+        if not self._region.animating:
+            return False
+        region = self._scroll_region()     # live geometry; sync skips a fling
+        if region.tick(dt * 1000.0):
+            self._scroll = region.offset   # direct: the setter would stop us
+            return True
+        return False
 
     def max_scroll(self):
         lay = self.layout
@@ -273,19 +295,85 @@ class Launcher:
         every sample would discard sub-slop finger travel)."""
         lay = self.layout
         self._region.set(lay.lib_grid, lay.grid_content_w(len(self.items)))
-        if not self._region.drag_active:
+        if not (self._region.drag_active or self._region.animating):
             self._region.offset = self.scroll
         return self._region
 
-    def pointer_frame(self, px, py, click, down):
+    def band_rect(self):
+        """The shelf band: the grid viewport inflated vertically by the focus-ring
+        margin -- the EXACT rect the card clip uses (_draw_shelf), the drag-partial
+        path fills, and the #113 blit path shifts. One formula so they can't drift."""
+        lay = self.layout
+        gx, gy, gw, gh = lay.lib_grid
+        d = 2 * lay.fs + 2
+        return (gx, gy - d, gw, gh + 2 * d)
+
+    def draw_shift(self, cv, sheet_for, delta, damage, fill):
+        """The #113 scroll-as-blit band draw: shift the shelf band's pixels by
+        `-delta` (the cards move opposite the offset) and repaint ONLY the exposed
+        strip plus the caller's `damage` rects (the stale cursor stamp), pixel-
+        identical to a full _draw_shelf of the same state. The caller has proven
+        eligibility via ScrollRegion.blit_shift (same items/sel/statics, pixels of
+        a known offset in the target buffer); `fill(cv, rect)` paints the owning
+        layer's band backdrop inside a rect (surface fill on the home shelf, the
+        dotted panel on the picker)."""
+        bx, by, bw, bh = self.band_rect()
+        if delta:
+            cv.scroll_rect(bx, by, bw, bh, -delta, 0)
+            if delta > 0:
+                damage = damage + [(bx + bw - delta, by, delta, bh)]
+            else:
+                damage = damage + [(bx, by, -delta, bh)]
+        # Clamp damage to the band -- pixels outside it were never shifted.
+        rects = []
+        for r in damage:
+            x0 = max(r[0], bx)
+            y0 = max(r[1], by)
+            x1 = min(r[0] + r[2], bx + bw)
+            y1 = min(r[1] + r[3], by + bh)
+            if x0 < x1 and y0 < y1:
+                rects.append((x0, y0, x1 - x0, y1 - y0))
+        for r in rects:
+            fill(cv, r)
+        lay = self.layout
+        d = 2 * lay.fs + 2
+        clip = getattr(cv, "clip", None)
+        if clip is not None:
+            clip(bx, by, bw, bh)
+        for i, rect in self._visible():
+            # Inflate by the focus-ring margin so a card whose ring sliver was
+            # damaged redraws whole (a full card redraw over shifted pixels is
+            # byte-identical -- only the damaged sliver actually changes).
+            rx0 = rect[0] - d
+            ry0 = rect[1] - d
+            rx1 = rect[0] + rect[2] + d
+            ry1 = rect[1] + rect[3] + d
+            for r in rects:
+                if rx0 < r[0] + r[2] and r[0] < rx1 \
+                        and ry0 < r[1] + r[3] and r[1] < ry1:
+                    break
+            else:
+                continue
+            it = self.items[i]
+            if it.get("type") in PSEUDO_TILE_TYPES:
+                self._draw_pseudo_card(cv, it, rect, i == self.sel)
+            else:
+                self._draw_cart_card(cv, it, rect, i == self.sel, sheet_for)
+        if clip is not None:
+            clip()
+        self._draw_scroll_ui(cv)   # arrows redraw (dim state); draw_bar refills
+                                   # its whole track, healing the shifted thumb
+
+    def pointer_frame(self, px, py, click, down, dt_ms=None):
         """One pointer sample over the grid, fed through the shared ui.DragTap
         machine: returns the tapped tile index on a clean RELEASE (press and
         release on the same card with no drag travel), else None -- so a
         scroll gesture can never launch a cart. `click` is the press edge,
-        `down` the held state (ws.pointer.down)."""
+        `down` the held state (ws.pointer.down); `dt_ms` the loop's tick
+        (feeds the kinetic release velocity, #113)."""
         region = self._scroll_region()
         press = self._taps.frame(px, py, click, down,
-                                 slop=4 * self.layout.fs + 2)
+                                 slop=4 * self.layout.fs + 2, dt_ms=dt_ms)
         if self._taps.dragging:
             self._scroll = region.offset       # the grid follows the finger
         if press is None:
@@ -601,6 +689,18 @@ class Launcher:
         self._scroll_region().draw_bar(cv, self.theme or {})
 
 
+def _cursor_stamp(ws):
+    """The cursor sprite's footprint on the system canvas this frame, or None
+    when it isn't drawn -- recorded with each shelf paint (#113) so a blitted
+    frame can repaint the stale stamp the shift dragged along (CURSOR is 8x13
+    at the system font scale, hotspot top-left)."""
+    p = ws.pointer
+    if p is None or not getattr(p, "visible", False):
+        return None
+    fs = ws.font_scale
+    return (p.x, p.y, 8 * fs, 13 * fs)
+
+
 class LauncherHomeLayer:
     """The "launcher" content Layer (system domain): the home desktop. draw composes
     the wallpaper backdrop -> the cart icon grid (ws.launcher) -> the top bar; input is
@@ -645,7 +745,7 @@ class LauncherHomeLayer:
         buffer and are simply left alone. Full paints resume on release, so
         any straggler is erased within a frame."""
         ws = self.ws
-        if not ws.launcher.dragging:
+        if not (ws.launcher.dragging or ws.launcher.flinging):
             return False
         if getattr(cv, "RETAINED_FRAMES", 0) < 1 or self._full_streak < 2:
             return False
@@ -669,8 +769,36 @@ class LauncherHomeLayer:
                     and gy - d <= p.y and p.y + 13 <= gy + gh + d):
                 return False
         _t0 = _ticks_ms() if getattr(ws, "perf_capture", False) else None
-        cv.rect(gx, gy - d, gw, gh + 2 * d, ws.theme_colors["surface"])
-        ws.launcher.draw(cv, ws._icon_sheet_for)
+        # #113 scroll-as-blit: when the target framebuffer holds this shelf's
+        # pixels at a known offset (same sel/statics/covers, consecutive
+        # paints), shift them and repaint only the exposed strip + the stale
+        # cursor stamp -- a handful of draw calls instead of every visible
+        # card. Any ineligibility falls back to the full band repaint below.
+        region = ws.launcher._scroll_region()
+        key = (ws.launcher.sel, self._statics, ws._cover_gen)
+        shift = region.blit_shift(cv, ws._frames_drawn, key)
+        if shift is not None:
+            delta, old_stamp = shift
+            damage = []
+            if old_stamp is not None:
+                damage.append(old_stamp)           # where the shift left it...
+                if delta:                          # ...and where it came from
+                    damage.append((old_stamp[0] - delta, old_stamp[1],
+                                   old_stamp[2], old_stamp[3]))
+            surface = ws.theme_colors["surface"]
+
+            def _fill(c, r):
+                c.rect(r[0], r[1], r[2], r[3], surface)
+
+            ws.launcher.draw_shift(cv, ws._icon_sheet_for, delta, damage, _fill)
+        else:
+            cv.rect(gx, gy - d, gw, gh + 2 * d, ws.theme_colors["surface"])
+            ws.launcher.draw(cv, ws._icon_sheet_for)
+        # Re-pin the cover gen POST-draw: a cover landing during the card draw
+        # is in these pixels, so the recorded key must carry the new gen.
+        region.note_painted(ws._frames_drawn,
+                            (ws.launcher.sel, self._statics, ws._cover_gen),
+                            _cursor_stamp(ws))
         _t1 = _ticks_ms() if _t0 is not None else None
         ws.bar_layer._draw_status_strip("home")
         if _t0 is not None:
@@ -691,6 +819,12 @@ class LauncherHomeLayer:
         cart grid reclaims the freed bottom band (Layout.grid_bottom)."""
         ws = self.ws
         cv = ws.sys_canvas
+        # Kinetic fling (#113): advance a coasting shelf BEFORE painting, and
+        # keep the redraw gate open until it rests. Fling frames ride the same
+        # partial/blit path as finger drags (its gate includes flinging).
+        ws.launcher.anim_frame(dt)
+        if ws.launcher.flinging:
+            ws.request_frame()
         if self._try_drag_partial(cv, dt):    # drag-scroll fast path (#58/#66)
             return
         # #76 sub-surface marks: on a RECORDING canvas, partition the home into
@@ -714,6 +848,13 @@ class LauncherHomeLayer:
         # card grid + its scroll arrows/bar draw inside it (Launcher._draw_shelf).
         self._draw_shelf_panel(cv)
         ws.launcher.draw(cv, ws._icon_sheet_for)
+        # #113: record this full paint in the shelf's blit ring (offset + the
+        # state the pixels depend on + the cursor stamp about to land on top),
+        # so an eligible drag frame can shift instead of repainting every card.
+        ws.launcher._scroll_region().note_painted(
+            ws._frames_drawn,
+            (ws.launcher.sel, self._statics_key(cv), ws._cover_gen),
+            _cursor_stamp(ws))
         _t2 = _ticks_ms() if _t0 is not None else None
         if _surf is not None:
             _surf("home-bar", "system")
@@ -882,7 +1023,8 @@ class LauncherHomeLayer:
                     return True
         # The grid's press/drag/release machine: returns an index only on a clean
         # tap release -- the launcher tap = RUN the selected cart.
-        i = ws.launcher.pointer_frame(px, py, click, down)
+        i = ws.launcher.pointer_frame(px, py, click, down,
+                                      dt_ms=ws._frame_dt_ms)
         if i is not None:
             ws.launcher.sel = i
             ws.launch_selected()
@@ -1031,6 +1173,11 @@ class EditorPickerLayer:
         self._phover = (-1, -1)       # trackball hover pos (like LauncherHomeLayer._lhover)
         self._del_armed = False       # DEL confirm-guard: first tap arms, second confirms
         self._confirm_gen = 0         # bumped on arm/disarm so zone_gen reflects it too
+        # Drag-scroll partial repaint (#113): the picker grid rides the same
+        # streak/statics machinery as the home shelf (LauncherHomeLayer), so a
+        # drag frame can blit the band instead of repainting every card.
+        self._full_streak = 0
+        self._statics = None
 
     def reset(self):
         """Clear any armed delete-confirm state -- called by ws.open_picker() so a
@@ -1047,9 +1194,101 @@ class EditorPickerLayer:
             self._del_armed = False
             self._confirm_gen += 1
 
+    def _statics_key(self, cv):
+        """Everything the picker's STATIC backdrop (panel fill + dot grid) and
+        band chrome are a pure function of -- the home shelf's streak idiom."""
+        ws = self.ws
+        return (cv.w, cv.h, ws.layout.fs, id(ws.theme_colors),
+                len(ws.picker.items))
+
+    def _dots(self, cv, r, xoff):
+        """Dot-grid pixels inside rect `r`, x-lattice shifted by `xoff`. The
+        #113 band contract requires everything inside a scrolled band to be a
+        pure function of the offset, so the dots INSIDE the shelf band ride
+        the scroll (xoff = -(scroll % step); at rest they sit on the static
+        lattice) while the rest of the screen keeps the fixed lattice."""
+        th = self.ws.theme_colors
+        fs = self.ws.layout.fs
+        step = 24 * fs
+        base = 8 * fs
+        if r[2] <= 0 or r[3] <= 0:
+            return
+        x0 = r[0] + ((base + xoff - r[0]) % step)   # first lattice x >= r.x
+        y0 = r[1] + ((base - r[1]) % step)
+        for gy in range(y0, r[1] + r[3], step):
+            for gx in range(x0, r[0] + r[2], step):
+                cv.pix(gx, gy, th["dim"])
+
+    def _dot_xoff(self):
+        """The in-band dot lattice's scroll offset."""
+        lay = self.ws.layout
+        return -(self.ws.picker.scroll % (24 * lay.fs))
+
+    def _backdrop_fill(self, cv, r):
+        """The picker's band backdrop restricted to rect `r`: the theme panel
+        fill plus the scroll-riding dot grid -- byte-identical to the band
+        slice the full draw() paints at the same offset."""
+        th = self.ws.theme_colors
+        cv.rect(r[0], r[1], r[2], r[3], th["panel"])
+        self._dots(cv, r, self._dot_xoff())
+
+    def _try_drag_partial(self, cv, dt):
+        """The picker grid's drag fast path (#113) -- the home shelf's gates,
+        minus the wallpaper concerns (the backdrop is static): while a touch
+        drag scrolls the grid and every retained framebuffer holds the statics
+        (two prior full paints, unchanged statics), repaint only the band --
+        blit-shifted when the ring proves the target buffer's pixels, else the
+        full band repaint."""
+        ws = self.ws
+        if not (ws.picker.dragging or ws.picker.flinging):
+            return False
+        if getattr(cv, "RETAINED_FRAMES", 0) < 1 or self._full_streak < 2:
+            return False
+        if self._statics != self._statics_key(cv):
+            return False
+        if ws._animating(dt):
+            return False
+        top = getattr(ws.wm, "top_kind", None)
+        if top is not None and top() != "picker":
+            return False
+        bx, by, bw, bh = ws.picker.band_rect()
+        fs = ws.font_scale
+        p = ws.pointer
+        if p is not None and getattr(p, "visible", False):
+            if not (bx <= p.x and p.x + 8 * fs <= bx + bw
+                    and by <= p.y and p.y + 13 * fs <= by + bh):
+                return False
+        region = ws.picker._scroll_region()
+        key = (ws.picker.sel, self._statics, ws._cover_gen)
+        shift = region.blit_shift(cv, ws._frames_drawn, key)
+        if shift is not None:
+            delta, old_stamp = shift
+            damage = []
+            if old_stamp is not None:
+                damage.append(old_stamp)
+                if delta:
+                    damage.append((old_stamp[0] - delta, old_stamp[1],
+                                   old_stamp[2], old_stamp[3]))
+            ws.picker.draw_shift(cv, ws._icon_sheet_for, delta, damage,
+                                 self._backdrop_fill)
+        else:
+            self._backdrop_fill(cv, (bx, by, bw, bh))
+            ws.picker.draw(cv, ws._icon_sheet_for)
+        region.note_painted(ws._frames_drawn,
+                            (ws.picker.sel, self._statics, ws._cover_gen),
+                            _cursor_stamp(ws))
+        ws.bar_layer._draw_status_strip("picker")
+        return True
+
     def draw(self, dt):
         ws = self.ws
         cv = ws.sys_canvas
+        # Kinetic fling (#113): tick before painting; keep frames coming.
+        ws.picker.anim_frame(dt)
+        if ws.picker.flinging:
+            ws.request_frame()
+        if self._try_drag_partial(cv, dt):    # drag-scroll fast path (#113)
+            return
         # The picker is a TOOL space (owner call, 2026-07-08): a STATIC backdrop
         # instead of the animated wallpaper -- "it's software". Besides the look,
         # this makes the screen FREE under the redraw gate (#44): nothing here
@@ -1060,12 +1299,30 @@ class EditorPickerLayer:
         # pix -- static, so effectively free).
         th = ws.theme_colors
         cv.cls(th["panel"])
-        lay = ws.layout
-        _fs = lay.fs
-        for gy in range(8 * _fs, cv.h, 24 * _fs):
-            for gx in range(8 * _fs, cv.w, 24 * _fs):
-                cv.pix(gx, gy, th["dim"])
+        # Dot grid: fixed lattice outside the shelf band, scroll-riding inside
+        # it (#113: the band must be a pure function of the offset so a drag
+        # frame can blit-shift it; at scroll 0 both lattices coincide, so the
+        # rest-state picker is byte-identical to the pre-#113 look).
+        bx, by, bw, bh = ws.picker.band_rect()
+        W, H = cv.w, cv.h
+        self._dots(cv, (0, 0, W, by), 0)
+        self._dots(cv, (0, by + bh, W, H - (by + bh)), 0)
+        self._dots(cv, (0, by, bx, bh), 0)
+        self._dots(cv, (bx + bw, by, W - (bx + bw), bh), 0)
+        self._dots(cv, (bx, by, bw, bh), self._dot_xoff())
         ws.picker.draw(cv, ws._icon_sheet_for)
+        # #113: record this full paint in the blit ring + advance the streak.
+        ws.picker._scroll_region().note_painted(
+            ws._frames_drawn,
+            (ws.picker.sel, self._statics_key(cv), ws._cover_gen),
+            _cursor_stamp(ws))
+        key = self._statics_key(cv)
+        if key == self._statics:
+            if self._full_streak < 2:
+                self._full_streak += 1
+        else:
+            self._statics = key
+            self._full_streak = 1
         ws.bar_layer._draw_status_strip("picker")
 
     def handle_input(self, i):
@@ -1099,7 +1356,8 @@ class EditorPickerLayer:
                 self._disarm_delete(); ws.picker.scroll_cols(1); return True
         # The grid's press/drag/release machine (mirrors LauncherHomeLayer): a
         # clean tap release picks; a drag scrolls and disarms the DEL confirm.
-        i = ws.picker.pointer_frame(px, py, click, down)
+        i = ws.picker.pointer_frame(px, py, click, down,
+                                    dt_ms=ws._frame_dt_ms)
         if i is not None:
             self._disarm_delete()
             ws.picker.sel = i

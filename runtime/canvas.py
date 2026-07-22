@@ -787,6 +787,44 @@ class Canvas:
             d0 = ty * dw + (dst_x + sx0)
             dst[d0:d0 + (sx1 - sx0)] = src[s0 + sx0:s0 + sx1]
 
+    def scroll_rect(self, rx, ry, rw, rh, dx, dy):
+        """Shift the pixels inside rect (rx, ry, rw, rh) by (dx, dy) IN PLACE --
+        the #113 scroll-as-blit primitive: a scrolled view keeps its already-
+        correct pixels and the caller repaints only the exposed band. Pixels
+        that would leave the rect are dropped; the strip shifted in from
+        outside the rect keeps its stale content (the caller's band repaint
+        covers it). Ignores camera/clip/pal (a system verb over a finished
+        frame, like blit_strip). Row copies are overlap-safe: the vertical
+        iteration order follows dy, and a bytearray slice read makes a copy,
+        so horizontal overlap within a row can't smear. Backends without this
+        verb simply never take the blit path (callers probe, the
+        blit_strip_rect pattern)."""
+        self.flush_batch()             # #63: emit queued sprites into buf first
+        dx = int(dx)
+        dy = int(dy)
+        if dx == 0 and dy == 0:
+            return
+        # Clamp the rect to the canvas.
+        x0 = max(0, int(rx))
+        y0 = max(0, int(ry))
+        x1 = min(self.w, int(rx) + int(rw))
+        y1 = min(self.h, int(ry) + int(rh))
+        # Destination span: the part of the rect whose source is also inside it.
+        tx0 = x0 + max(0, dx)
+        tx1 = x1 + min(0, dx)
+        ty0 = y0 + max(0, dy)
+        ty1 = y1 + min(0, dy)
+        if tx0 >= tx1 or ty0 >= ty1:
+            return
+        buf = self.buf
+        w = self.w
+        cw = tx1 - tx0
+        rows = range(ty1 - 1, ty0 - 1, -1) if dy > 0 else range(ty0, ty1)
+        for ty in rows:
+            s0 = (ty - dy) * w + (tx0 - dx)
+            d0 = ty * w + tx0
+            buf[d0:d0 + cw] = buf[s0:s0 + cw]
+
     # -- output --------------------------------------------------------------
 
     def to_rgb888(self):

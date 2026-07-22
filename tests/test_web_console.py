@@ -202,7 +202,10 @@ def _assert_frame_identical(ws, drv, tee, dt=1.0 / 30, label=""):
     if layers is None:
         layers = {}
         tee._replay_layers = layers
-    replay_to_canvas(_served(tee), cv, layers)
+    # Covers ship ONCE via /assets imgref (#113), so the replay -- like the
+    # browser -- needs the live cover images to resolve those references.
+    assets = {"images": web_view.images_payload(ws.cover_assets())}
+    replay_to_canvas(_served(tee), cv, layers, assets=assets)
     replayed = bytes(cv.buf)
     assert len(raster) == len(replayed) == WIDTH * HEIGHT
     if raster != replayed:

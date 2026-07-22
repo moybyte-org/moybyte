@@ -472,6 +472,13 @@ class ScrollRegion:
     horizontally)."""
 
     BAR_W = 4           # scaled by fs at draw
+    # Kinetic scrolling (#113 Phase 4). Velocities are px/ms so the tuning is
+    # frame-rate independent; every dt is INJECTED (the loop's tick), never
+    # read from a clock, so the physics is deterministic under test.
+    FRICTION = 0.995    # per-ms decay: a fling coasts ~1s (0.995^1000 ~ 0.007)
+    MIN_FLING = 0.15    # px/ms (150 px/s): a release slower than this is a stop
+    STOP_VEL = 0.02     # px/ms: coasting below this comes to rest
+    VEL_EMA = 0.5       # release velocity reflects the last few pointer samples
 
     def __init__(self, horizontal=False):
         self.horizontal = bool(horizontal)
@@ -479,6 +486,16 @@ class ScrollRegion:
         self.content = 0            # content extent along the scroll axis
         self.offset = 0
         self._drag = None           # last drag sample's axis coordinate
+        self._vel = 0.0             # kinetic: EMA finger velocity, px/ms
+        self._fling = False         # a released fling is coasting
+        self._foff = 0.0            # float offset shadow while coasting
+        # Scroll-as-blit paint ring (#113): the most recent painted frames'
+        # (frame_no, offset, key, stamp), newest first. blit_shift compares the
+        # current offset against the paint whose pixels sit in the target
+        # framebuffer (RETAINED_FRAMES back -- 1 on the host's persistent
+        # buffer, 2 on the device ping-pong), so a scrolled view can shift its
+        # already-correct pixels and repaint only the exposed band.
+        self._painted = []
 
     def set(self, view_rect, content):
         self.view = view_rect
@@ -502,6 +519,50 @@ class ScrollRegion:
         self.offset += int(d)
         self._clamp()
 
+    # -- scroll-as-blit (#113) ----------------------------------------------
+    # The band contract: an eligible frame shifts the view's pixels by the
+    # offset delta (Canvas.scroll_rect) and repaints ONLY the exposed band --
+    # pixel-identical to a full repaint, at a fraction of the draw calls. The
+    # ring pins everything that must match for the shift to be sound: the
+    # paints must be the immediately preceding console frames (a gap means
+    # another surface may have painted these framebuffers), and the target
+    # buffer's paint must share the caller's `key` (selection/statics -- any
+    # difference means the retained pixels aren't a pure translation of the
+    # current state).
+
+    def invalidate(self):
+        """Content changed under the pixels (items/layout/theme): force full
+        paints until the ring re-arms."""
+        self._painted = []
+
+    def note_painted(self, frame_no, key=None, stamp=None):
+        """Record a paint of this view at the current offset. `key` pins the
+        non-scroll state the pixels depend on; `stamp` is an opaque damage rect
+        (the cursor sprite baked into this paint) returned by a later
+        blit_shift so the caller can repaint it."""
+        self._painted.insert(0, (frame_no, self.offset, key, stamp))
+        del self._painted[2:]          # RETAINED_FRAMES is at most 2 anywhere
+
+    def blit_shift(self, cv, frame_no, key=None):
+        """(delta, stamp) when the canvas's target framebuffer holds this
+        view's pixels at a known offset, else None (caller paints full). delta
+        is current offset minus the offset baked in the target buffer; stamp
+        is that paint's recorded damage rect (or None)."""
+        k = getattr(cv, "RETAINED_FRAMES", 0)
+        if (k < 1 or getattr(cv, "scroll_rect", None) is None
+                or len(self._painted) < k):
+            return None
+        for i in range(k):
+            if self._painted[i][0] != frame_no - 1 - i:
+                return None            # not consecutive paints of THIS view
+        _fno, off, pkey, stamp = self._painted[k - 1]
+        if pkey != key:
+            return None
+        delta = self.offset - off
+        if abs(delta) >= self._extent():
+            return None                # nothing survives the shift
+        return (delta, stamp)
+
     def scroll_to_show(self, p, size):
         """Nudge the offset so the content span [p, p+size) is inside the view."""
         vis = self._extent()
@@ -517,16 +578,58 @@ class ScrollRegion:
 
     def drag_start(self, p):
         self._drag = p
+        self.stop()                 # a new touch CATCHES a live fling
 
-    def drag_move(self, p):
+    def drag_move(self, p, dt_ms=None):
         if self._drag is None:
             return False
-        self.scroll_by(self._drag - p)
+        d = self._drag - p
+        self.scroll_by(d)
         self._drag = p
+        # Release-velocity EMA, fed the loop's dt by the caller. The pointer
+        # routes every frame (the redraw gate only skips DRAWS), so a held-
+        # still finger decays the velocity to ~0 -- hold-then-release is a
+        # stop, not a fling. No dt (a legacy caller): velocity stays 0.
+        if dt_ms:
+            self._vel += (d / dt_ms - self._vel) * self.VEL_EMA
         return True
 
     def drag_end(self):
         self._drag = None
+        if abs(self._vel) >= self.MIN_FLING and self._max_offset() > 0:
+            self._fling = True
+            self._foff = float(self.offset)
+
+    def stop(self):
+        """Kill any kinetic motion (a catching touch / a programmatic scroll)."""
+        self._fling = False
+        self._vel = 0.0
+
+    @property
+    def animating(self):
+        """True while a released fling is coasting -- the owner ticks it each
+        frame and keeps the redraw gate open until it rests."""
+        return self._fling
+
+    def tick(self, dt_ms):
+        """Advance a coasting fling by one frame (dt_ms injected): integrate
+        the offset, decay the velocity, hard-stop at the clamp edges (#113
+        v1: no overshoot). Returns True when this frame moved the view."""
+        if not self._fling or dt_ms <= 0:
+            return False
+        self._foff += self._vel * dt_ms
+        self._vel *= self.FRICTION ** dt_ms
+        m = self._max_offset()
+        if self._foff <= 0:
+            self._foff = 0.0
+            self.stop()
+        elif self._foff >= m:
+            self._foff = float(m)
+            self.stop()
+        elif abs(self._vel) < self.STOP_VEL:
+            self.stop()
+        self.offset = int(self._foff + 0.5)
+        return True
 
     @property
     def drag_active(self):
@@ -576,22 +679,26 @@ class DragTap:
         self.region = region
         self._press = None          # (x, y) at the press edge, while pending
         self._dragging = False
+        self._caught = False        # this press stopped a live fling (#113):
+                                    # its release is a CATCH, never a tap
 
     @property
     def dragging(self):
         return self._dragging
 
-    def frame(self, px, py, click, down, slop=6):
+    def frame(self, px, py, click, down, slop=6, dt_ms=None):
         """One pointer sample: `click` is the press edge, `down` the held
-        state. Returns the press-edge (x, y) on a clean tap release, else
-        None. While a drag is live the region's offset follows the finger --
-        the caller syncs its scroll state from region.offset."""
+        state, `dt_ms` the loop's tick (feeds the kinetic release velocity).
+        Returns the press-edge (x, y) on a clean tap release, else None.
+        While a drag is live the region's offset follows the finger -- the
+        caller syncs its scroll state from region.offset."""
         region = self.region
         axis = px if region.horizontal else py
         if click:
             if rect_in(px, py, region.view):
                 self._press = (px, py)
                 self._dragging = False
+                self._caught = region.animating   # read BEFORE drag_start stops it
                 region.drag_start(axis)
             return None
         if down:
@@ -600,11 +707,12 @@ class DragTap:
                 if abs(px - sx) > slop or abs(py - sy) > slop:
                     self._dragging = True
             if self._dragging:
-                region.drag_move(axis)     # the region owns the offset mid-drag
+                region.drag_move(axis, dt_ms)  # the region owns the offset mid-drag
             return None
         region.drag_end()
         press, self._press = self._press, None
         was_drag, self._dragging = self._dragging, False
-        if press is None or was_drag:
+        caught, self._caught = self._caught, False
+        if press is None or was_drag or caught:
             return None
         return press

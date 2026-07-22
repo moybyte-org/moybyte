@@ -340,7 +340,10 @@ def test_cover_cache_is_bounded_across_resize_variants(tmp_path):
     rec = web_view.DrawRecorder(1024, 600)
     rec.self_contained = True
     rec.spr(first, 0, 0)
-    assert rec._cmds[0][0] == "img"        # not the generic JSON pixel-list spr
+    # The paint fast wire, not the generic JSON pixel-list spr: covers are
+    # serial-NAMED now (#113), so they ride the ship-once imgref lane (the
+    # nameless inline "img" form remains the fallback for unnamed paint images).
+    assert rec._cmds[0][0] == "imgref"
 
     for i in range(80):
         _cover_sync(ws, covered, 120 + i, 90 + i)

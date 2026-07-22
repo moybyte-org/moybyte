@@ -311,6 +311,10 @@ class WebConsole:
                     dec = host_app._decode_moyimg(blob)
                     if dec is not None:
                         decoded[name] = dec
+            # Shelf covers (#113): ship every live cover ONCE -- the card
+            # draws then reference them by name instead of inlining ~40KB
+            # of b64 per redraw (the measured shelf-drag payload eater).
+            decoded.update(self.ws.cover_assets())
             # #42 Thread 3: the EFFECTIVE input hint -- the cart's manifest hint only
             # while it owns the keyboard (playing), never in the Editor (typing!).
             input_kinds = web_view.effective_input_kinds(self.ws)

@@ -76,6 +76,18 @@ class Wallpaper:
         # Keyed by source stamp, so it survives selection changes and drops
         # stale entries on its own; bounded below.
         self._static_cache = {}
+        # #113 web wire diet: the backdrop composite's ship-once identity. A
+        # STATIC wallpaper repeats the same 320x240 frame every draw, so once
+        # two consecutive frames match it gets a serial name ("wall:N") and
+        # rides /assets ONCE (wire_assets below) -- every later draw is a tiny
+        # ["imgref", ...] instead of ~100KB of inline b64 (the measured
+        # window-drag payload eater). A LIVE wallpaper's frame changes every
+        # draw, so it keeps the inline form (status quo) and never churns the
+        # client's asset cache.
+        self._wire_pix = None          # last composite frame's raw indices
+        self._wire_wh = (0, 0)
+        self._wire_name = None         # set only while the frame is stable
+        self._wire_serial = 0
 
     def clear(self):
         """Drop the compiled wallpaper (back to a solid fill). Called by
@@ -197,6 +209,15 @@ class Wallpaper:
         wp = ws.wallpaper_id or "fill:dark_blue"
         name = wp[5:] if isinstance(wp, str) and wp.startswith("fill:") else "dark_blue"
         ws.sys_canvas.cls(NAMES.get(name, NAMES["dark_blue"]))
+
+    def wire_assets(self):
+        """{name: (w, h, index_bytes)} for the backdrop composite's ship-once
+        wire image, or {} while the frame is churning / never composited --
+        merged into /assets beside the shelf covers (Workstation.cover_assets)."""
+        if self._wire_name is None or self._wire_pix is None:
+            return {}
+        w, h = self._wire_wh
+        return {self._wire_name: (w, h, self._wire_pix)}
 
     def draw_preview(self, cv, rect, dt):
         """The Appearance monitor's screen: the chosen wallpaper FIT inside
@@ -433,8 +454,25 @@ class Wallpaper:
         ox = (sw - gw * scale) // 2                                # <= 0 (crop)
         oy = (sh - gh * scale) // 2
         if sbuf is None:
-            img = _Blit(gw, gh, bytes(gbuf), -1)
+            pix = bytes(gbuf)
+            if pix == self._wire_pix:
+                # Stable frame (a static wallpaper): mint/keep the serial name
+                # so the pixels ride /assets once (wire_assets) and this draw
+                # records as one small imgref (#113).
+                if self._wire_name is None:
+                    self._wire_serial += 1
+                    self._wire_name = "wall:%d" % self._wire_serial
+                    self._wire_wh = (gw, gh)
+            else:
+                # Changed frame (first draw / a live wallpaper): inline it and
+                # remember the pixels -- naming a churning frame would refetch
+                # the whole asset set every frame.
+                self._wire_pix = pix
+                self._wire_name = None
+            img = _Blit(gw, gh, pix, -1)
             img._paint = True              # -> the compact b64 wire form (~2.4x lighter)
+            if self._wire_name is not None:
+                img._name = self._wire_name
             sc.spr(img, ox, oy, scale)
             return
         # Raster: expand each source row ONCE, then slice the visible crop into every

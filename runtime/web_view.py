@@ -112,8 +112,15 @@ def _paint_cmd(img, x, y, scale=1):
     _LayerRecorder.spr so the wire forms can't drift."""
     scale = int(scale)
     name = getattr(img, "_name", None)
-    if name is not None and scale == 1:
-        return ["imgref", int(x), int(y), name]
+    if name is not None:
+        # Named: pixels ride /assets once. scale > 1 appends a 5th element
+        # (["imgref", x, y, name, scale] -- the wallpaper backdrop composite,
+        # #113); the bare 4-element form stays byte-identical for the 1:1
+        # placements (covers, paint images).
+        cmd = ["imgref", int(x), int(y), name]
+        if scale != 1:
+            cmd.append(scale)
+        return cmd
     cmd = ["img", int(x), int(y), int(img.w), int(img.h), _b64_indices(img.pix)]
     if scale != 1:
         cmd.append(scale)
@@ -411,6 +418,15 @@ class DrawRecorder:
 
     def circb(self, cx, cy, r, c):
         self._cmds.append(["circb", int(cx), int(cy), int(r), c & 63])
+
+    def scroll_rect(self, rx, ry, rw, rh, dx, dy):
+        # #113 scroll-as-blit: the browser shifts its retained index buffer in
+        # place (the page's scr op -- copyWithin rows, the Canvas.scroll_rect
+        # twin). NOTE a stream carrying this op is NOT idempotent -- replaying
+        # it shifts again -- so SurfaceDelta never collapses such a stream to
+        # {"same":1}.
+        self._cmds.append(["scr", int(rx), int(ry), int(rw), int(rh),
+                           int(dx), int(dy)])
 
     def spr(self, img, x, y, scale=1, flip=0):
         # img is an Image / _SheetSprite (.w/.h/.pix/.transparent); ids are already resolved
@@ -758,6 +774,15 @@ class TeeCanvas:
     RecordingLayer; blit_window_from/blit_strip record a tiny ["blit_layer", ...] reference
     (the layer's stream ships ONCE as a deflayer at serve time)."""
 
+    # #113: the blit-scroll partial path stays OFF while the device web view's
+    # Tee is bound. Forwarding the real canvas's RETAINED_FRAMES (2, the panel
+    # ping-pong) would be WRONG for the browser's retained buffer (which holds
+    # the LAST shipped frame, not two back), and in stream mode the panel isn't
+    # painted at all -- there is no single retention answer for both consumers,
+    # so the gate reads 0 here and drag frames keep the full band repaint.
+    # (Class attr: __getattr__ only fires for MISSING names, so this pins it.)
+    RETAINED_FRAMES = 0
+
     def __init__(self, canvas, recorder):
         self._c = canvas
         self._r = recorder
@@ -767,6 +792,18 @@ class TeeCanvas:
     def __getattr__(self, name):
         # Only reached for attrs not set on the Tee (e.g. buf, _comp, sync_back).
         return getattr(self._c, name)
+
+    def scroll_rect(self, rx, ry, rw, rh, dx, dy):
+        # #113: record + forward explicitly. Without this, __getattr__ would
+        # forward to DeviceCanvas.scroll_rect UNRECORDED -- the browser would
+        # miss the shift and render torn scroll frames. (RETAINED_FRAMES = 0
+        # above keeps the console's blit gate off while the Tee is bound, so
+        # this is defensive completeness for any direct caller.)
+        if self._r.enabled:
+            self._r.scroll_rect(rx, ry, rw, rh, dx, dy)
+            if self._r.record_only:
+                return
+        self._c.scroll_rect(rx, ry, rw, rh, dx, dy)
 
     def make_spr_gate(self, sheet, fallback):
         # #63 spr_gate: explicitly DECLINE the native fast path. Without this,
@@ -962,6 +999,14 @@ class CommandCanvas:
     and clears it. `_rec` is the shared DrawRecorder (self_contained) the host web console hands
     to a ServedState for the serve-time deflayer prepend + gen bookkeeping."""
 
+    # #113 scroll-as-blit: the browser's retained index buffer IS this canvas's
+    # framebuffer (frames replay onto it, quiet frames ship nothing), so the
+    # last shipped frame's pixels persist exactly like the host Canvas's one
+    # persistent bytearray -> 1. With scroll_rect below, the shelf/picker
+    # drag+fling partial path engages over the web transport: a blit frame
+    # ships one tiny ["scr", ...] + the exposed band instead of every card.
+    RETAINED_FRAMES = 1
+
     def __init__(self, width=320, height=240, palette=None, font_scale=1):
         self.w = width
         self.h = height
@@ -1052,6 +1097,9 @@ class CommandCanvas:
 
     def circb(self, cx, cy, r, c):
         self._rec.circb(cx, cy, r, c)
+
+    def scroll_rect(self, rx, ry, rw, rh, dx, dy):
+        self._rec.scroll_rect(rx, ry, rw, rh, dx, dy)
 
     def spr(self, img, x, y, scale=1, flip=0):
         self._rec.spr(img, x, y, scale, flip)     # self_contained -> pixels inline
@@ -1502,7 +1550,14 @@ class SurfaceDelta:
                 out.append(s)              # ship-once defs: always fresh, never cached
                 continue
             cmds = s["cmds"]
-            if last.get(sid) == cmds:
+            # #113: a stream carrying a scroll shift is NOT idempotent (the
+            # browser REPLAYS a {"same":1} surface from its cache, and re-
+            # applying "scr" shifts the pixels again), so it always ships in
+            # full. It still updates the cache below -- the server's cache must
+            # mirror the client's SURF exactly or a later same:1 would replay
+            # the wrong stream. The scan only runs on an exact repeat (rare).
+            if last.get(sid) == cmds and not any(c and c[0] == "scr"
+                                                 for c in cmds):
                 out.append({"id": sid, "domain": s["domain"], "same": 1})
             else:
                 last[sid] = cmds
@@ -1575,6 +1630,9 @@ def replay_to_canvas(commands, canvas, layers=None, assets=None, atlas=None):
             canvas.circ(cmd[1], cmd[2], cmd[3], cmd[4])
         elif op == "circb":
             canvas.circb(cmd[1], cmd[2], cmd[3], cmd[4])
+        elif op == "scr":
+            # #113 scroll-as-blit: the raster twin is Canvas.scroll_rect itself.
+            canvas.scroll_rect(cmd[1], cmd[2], cmd[3], cmd[4], cmd[5], cmd[6])
         elif op == "defspr":
             idx, w, h, t, pix = cmd[1:6]
             atlas[idx] = Image(w, h, list(pix), transparent=t)
@@ -1592,27 +1650,28 @@ def replay_to_canvas(commands, canvas, layers=None, assets=None, atlas=None):
                 if im is not None:
                     canvas.spr(im, x, y, scale, flip)
         elif op == "img":
-            # PAINT-IMAGE inline fallback (#63 Fold 3): decode the base64 raw MOY64 indices and
-            # blit them (opaque, clamped) via the same blit_indices the device bakes with -- into
-            # the CURRENT canvas (the layer buffer when replayed inside a deflayer). A scaled
-            # form (cmd[6] > 1: the full-frame game/wallpaper composites) draws via spr with no
-            # transparent index -- the same opaque result, integer-upscaled.
+            # PAINT-IMAGE inline fallback (#63 Fold 3): decode the base64 raw MOY64 indices
+            # and draw via spr (opaque: transparent=-1, the _CoverImage/raster contract) --
+            # into the CURRENT canvas (the layer buffer when replayed inside a deflayer).
+            # spr, NOT blit_indices: the raster truth clips a paint image through the live
+            # camera/clip state (the shelf's edge-card covers), and blit_indices is only
+            # canvas-clamped -- replaying through it bled covers outside the Library panel.
             x, y, w, h = cmd[1:5]
             sc = int(cmd[6]) if len(cmd) > 6 else 1
-            if sc == 1:
-                canvas.blit_indices(_unb64_indices(cmd[5]), int(w), int(h), int(x), int(y))
-            else:
-                pix = list(_unb64_indices(cmd[5]))
-                canvas.spr(Image(int(w), int(h), pix, transparent=None), int(x), int(y), sc)
+            pix = list(_unb64_indices(cmd[5]))
+            canvas.spr(Image(int(w), int(h), pix, transparent=-1), int(x), int(y), sc)
         elif op == "imgref":
             # PAINT-IMAGE by NAME (#63 Fold 4): resolve the cart image from the /assets `images`
-            # dict (shipped once, browser-cached) and blit its raw indices -- the imgref twin of
-            # img. A missing name (assets not seeded) no-ops, like the browser's IMG cache miss.
+            # dict (shipped once, browser-cached) and draw it -- the imgref twin of img (same
+            # spr-for-clip reasoning). A missing name (assets not seeded) no-ops, like the
+            # browser's IMG cache miss.
             x, y, name = cmd[1], cmd[2], cmd[3]
+            sc = int(cmd[4]) if len(cmd) > 4 else 1
             im = imgs.get(name) if imgs else None
             if im is not None:
-                canvas.blit_indices(_unb64_indices(im["b64"]),
-                                    int(im["w"]), int(im["h"]), int(x), int(y))
+                canvas.spr(Image(int(im["w"]), int(im["h"]),
+                                 list(_unb64_indices(im["b64"])), transparent=-1),
+                           int(x), int(y), sc)
         elif op == "deflayer":
             lid, lw, lh, lcmds = cmd[1:5]
             layer = Canvas(int(lw), int(lh), canvas.palette)
