@@ -450,6 +450,13 @@ class WebView:
                 dec = _decode_moyimg(raw[name])
                 if dec is not None:
                     decoded[name] = dec
+        # Shelf covers (#113): ship every live cover ONCE via /assets so card
+        # draws reference them by name (["imgref", ...]) instead of inlining
+        # b64 per redraw -- the host web console's measured payload eater;
+        # same lane here so the device page keeps rendering covers.
+        ca = getattr(ws, "cover_assets", None)
+        if ca is not None:
+            decoded.update(ca())
         # #42 Thread 3: the EFFECTIVE input hint -- the cart's manifest hint only
         # while it owns the keyboard (playing), never in the Editor (typing!).
         input_kinds = self._web.effective_input_kinds(ws)

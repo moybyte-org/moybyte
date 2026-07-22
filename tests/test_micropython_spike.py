@@ -1831,6 +1831,25 @@ def test_device_canvas_uses_native_moy_gfx():
     assert "def gfx(self):" in comp
 
 
+def test_scroll_rect_wired_for_ui_blit_scroll():
+    # #113 scroll-as-blit: the device system canvas carries the scroll_rect
+    # system verb (native moy_gfx row-memmove kernel + a bytearray-slice
+    # fallback), so shelf/picker drag+fling frames shift pixels instead of
+    # repainting every card. Grep the frozen sources + the C module like the
+    # other firmware tests; the on-glass behavior still NEEDS HARDWARE
+    # VERIFICATION (#113 Phase 7 -- built on CI, never on the dev box).
+    c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
+    assert "moy_gfx_scroll_rect" in c
+    assert "MP_QSTR_scroll_rect" in c
+    assert "def scroll_rect(self, rx, ry, rw, rh, dx, dy):" in device_canvas
+    assert "self._gfx.scroll_rect(self._buf" in device_canvas
+    # A layer (win.buf on the windowed tier) is ONE persistent buffer: it must
+    # override the root canvas's ping-pong RETAINED_FRAMES = 2 or blit_shift
+    # would measure deltas against the wrong paint.
+    assert "lay.RETAINED_FRAMES = 1" in device_canvas
+
+
 def test_native_blit_map_wired_for_tilemaps():
     # The tilemap blit (#32) is a native moy_gfx op (one C call per map() region) and
     # DeviceCanvas.map drives it from a baked RGB565 tile atlas, with a Python

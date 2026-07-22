@@ -807,6 +807,54 @@ static mp_obj_t moy_gfx_blit_window(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit_window_obj, 7, 7, moy_gfx_blit_window);
 
+// scroll_rect(buf, stride_px, rx, ry, rw, rh, dx, dy) -- shift the pixels inside
+// rect (rx, ry, rw, rh) of an RGB565 buffer by (dx, dy) IN PLACE: the #113
+// scroll-as-blit primitive (a scrolled UI view keeps its already-correct pixels;
+// the caller repaints only the exposed band). Pixels that would leave the rect
+// are dropped; the strip shifted in from outside keeps its stale content. Rect
+// clamped to the buffer. Per-row memmove (horizontal overlap safe); the vertical
+// iteration order follows dy so rows are read before they are overwritten.
+static mp_obj_t moy_gfx_scroll_rect(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap;
+    uint16_t *px = moy_gfx_buf_w(a[0], &cap);
+    mp_int_t stride = mp_obj_get_int(a[1]);
+    mp_int_t rx = mp_obj_get_int(a[2]);
+    mp_int_t ry = mp_obj_get_int(a[3]);
+    mp_int_t rw = mp_obj_get_int(a[4]);
+    mp_int_t rh = mp_obj_get_int(a[5]);
+    mp_int_t dx = mp_obj_get_int(a[6]);
+    mp_int_t dy = mp_obj_get_int(a[7]);
+    if (stride <= 0 || (dx == 0 && dy == 0)) return mp_const_none;
+    mp_int_t rows = (mp_int_t)(cap / (size_t)stride);
+    mp_int_t x0 = rx < 0 ? 0 : rx;
+    mp_int_t y0 = ry < 0 ? 0 : ry;
+    mp_int_t x1 = rx + rw; if (x1 > stride) x1 = stride;
+    mp_int_t y1 = ry + rh; if (y1 > rows) y1 = rows;
+    // Destination span: the part of the rect whose source is also inside it.
+    mp_int_t tx0 = x0 + (dx > 0 ? dx : 0);
+    mp_int_t tx1 = x1 + (dx < 0 ? dx : 0);
+    mp_int_t ty0 = y0 + (dy > 0 ? dy : 0);
+    mp_int_t ty1 = y1 + (dy < 0 ? dy : 0);
+    if (tx0 >= tx1 || ty0 >= ty1) return mp_const_none;
+    size_t cw = (size_t)(tx1 - tx0) * 2u;
+    if (dy > 0) {
+        for (mp_int_t ty = ty1 - 1; ty >= ty0; ty--) {
+            memmove(px + (size_t)ty * (size_t)stride + (size_t)tx0,
+                    px + (size_t)(ty - dy) * (size_t)stride + (size_t)(tx0 - dx),
+                    cw);
+        }
+    } else {
+        for (mp_int_t ty = ty0; ty < ty1; ty++) {
+            memmove(px + (size_t)ty * (size_t)stride + (size_t)tx0,
+                    px + (size_t)(ty - dy) * (size_t)stride + (size_t)(tx0 - dx),
+                    cw);
+        }
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_scroll_rect_obj, 8, 8, moy_gfx_scroll_rect);
+
 // blit_indices(dst, dw, dh, dx, dy, indices, iw, ih, pal565) -- place an iw x ih palette-
 // INDEX bitmap (1 byte/pixel, like blit_map's cells) at (dx, dy) into the RGB565 `dst` (dw
 // px/row), converting each index through `pal565` (an index->RGB565 table, 1 uint16/entry).
@@ -992,6 +1040,7 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_circb),      MP_ROM_PTR(&moy_gfx_circb_obj) },
     { MP_ROM_QSTR(MP_QSTR_line),       MP_ROM_PTR(&moy_gfx_line_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_window), MP_ROM_PTR(&moy_gfx_blit_window_obj) },
+    { MP_ROM_QSTR(MP_QSTR_scroll_rect), MP_ROM_PTR(&moy_gfx_scroll_rect_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_indices), MP_ROM_PTR(&moy_gfx_blit_indices_obj) },
     { MP_ROM_QSTR(MP_QSTR_text),       MP_ROM_PTR(&moy_gfx_text_obj) },
     { MP_ROM_QSTR(MP_QSTR_pack_strip), MP_ROM_PTR(&moy_gfx_pack_strip_obj) },

@@ -1260,6 +1260,10 @@ class DeviceCanvas:
             pass
         lay = DeviceCanvas(_LayerComp(int(w), int(h), self._gfx))
         lay._nocache = True            # #63: a layer's own map() rasters directly (no nesting)
+        lay.RETAINED_FRAMES = 1        # #113: a layer is ONE persistent buffer (the class
+                                       # default 2 describes the ROOT ping-pong only) -- a
+                                       # windowed surface blit-scrolling its win.buf must
+                                       # measure against the LAST paint, not two back
         # Layer lending (#63 leak fix): a pooled (moy_alloc-backed) buffer created for a
         # program (`owner`: "cart" via make_api, "wallpaper" via the wallpaper runner,
         # "_mapcache" for Fold 2's hidden cache) is recorded so reclaim_layers(owner)
@@ -1480,6 +1484,40 @@ class DeviceCanvas:
             s0 = row * sw
             d0 = ty * dw + (dst_x + sx0)
             d[d0:d0 + (sx1 - sx0)] = s[s0 + sx0:s0 + sx1]
+
+    def scroll_rect(self, rx, ry, rw, rh, dx, dy):
+        # Shift the pixels inside rect (rx, ry, rw, rh) by (dx, dy) IN PLACE --
+        # the #113 scroll-as-blit primitive (host twin: runtime/canvas.py
+        # Canvas.scroll_rect, same semantics: exposed strips keep stale content,
+        # the caller repaints the band; ignores camera/clip/pal). Native via the
+        # moy_gfx.scroll_rect row-memmove kernel; else a bytearray row loop
+        # (slice reads copy, so overlap is safe -- vertical order follows dy).
+        self.flush_batch()             # #63: emit queued sprites into the buffer first
+        dx = int(dx)
+        dy = int(dy)
+        if dx == 0 and dy == 0:
+            return
+        if self._gfx is not None:
+            self._gfx.scroll_rect(self._buf, self.w, rx, ry, rw, rh, dx, dy)
+            return
+        buf = self._buf
+        w = self.w
+        x0 = max(0, int(rx))
+        y0 = max(0, int(ry))
+        x1 = min(w, int(rx) + int(rw))
+        y1 = min(self.h, int(ry) + int(rh))
+        tx0 = x0 + max(0, dx)
+        tx1 = x1 + min(0, dx)
+        ty0 = y0 + max(0, dy)
+        ty1 = y1 + min(0, dy)
+        if tx0 >= tx1 or ty0 >= ty1:
+            return
+        cw = (tx1 - tx0) * 2
+        rows = range(ty1 - 1, ty0 - 1, -1) if dy > 0 else range(ty0, ty1)
+        for ty in rows:
+            s0 = ((ty - dy) * w + (tx0 - dx)) * 2
+            d0 = (ty * w + tx0) * 2
+            buf[d0:d0 + cw] = buf[s0:s0 + cw]
 
 
 class _LayerComp:
