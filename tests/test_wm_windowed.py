@@ -952,3 +952,46 @@ def test_crash_panel_keys_repaint_again(tmp_path):
     ws.cart_error = "boom"
     assert not ws.wm.keys_to_cart()
     assert _held_key_frame(ws)
+
+
+def test_group_window_drag_freezes_its_content(tmp_path):
+    """#113: gesture tuples carry the window REGISTRY key ("make" for the
+    shared picker/Editor group window) while win.kind is the CONTENT kind
+    ("picker") -- the old `key == win.kind` freeze test never matched the
+    group, so a make-window drag re-rendered the picker/Editor content every
+    frame (pure waste on the P4; on the web transport it also re-shipped the
+    window's whole recorded stream per frame -- the payload autopsy that
+    found this). The freeze must resolve gestures through _wins identity."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    drv.frame(1 / 30)
+    _quiesce(ws)
+    ws.open_picker()
+    for _ in range(4):
+        drv.frame(1 / 30)
+    win = ws.wm._wins["make"]
+    assert win.kind == "picker"            # the content kind, NOT the key
+    calls = [0]
+    orig = ws.editor_picker.draw
+
+    def spy(dt):
+        calls[0] += 1
+        return orig(dt)
+
+    ws.editor_picker.draw = spy
+    sx, sy = win.x + win.w // 2, win.y + win.title_h // 2
+    drv.touch(sx, sy)
+    drv.frame(1 / 30)
+    x = sx
+    for _ in range(4):                     # arm the strip drag, then move
+        x += 8
+        drv.touch_drag(x, sy)
+        drv.frame(1 / 30)
+    assert ws.wm._drag is not None and ws.wm._drag[0] == "make"
+    calls[0] = 0
+    drv.touch_drag(x + 8, sy)
+    drv.frame(1 / 30)
+    assert calls[0] == 0                   # frozen: no content render mid-drag
+    drv.touch_up()
+    drv.frame(1 / 30)
+    assert calls[0] > 0                    # release: live rendering resumes

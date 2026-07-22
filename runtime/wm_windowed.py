@@ -258,7 +258,8 @@ class _BackdropLayer(Layer):
 
     def draw(self, dt):
         wm = self.wm
-        if (wm._drag is None and wm._resize is None) or wm._backdrop_disabled:
+        if ((wm._drag is None and wm._resize is None)
+                or wm._backdrop_disabled or wm._backdrop_unsupported):
             wm._backdrop_valid = False        # live: no drag, always re-render
             if wm._gesture_hist:
                 wm._gesture_hist = []         # gesture over: drop the damage trail
@@ -435,6 +436,10 @@ class WindowedWM(FullscreenStackWM):
         self._backdrop = None
         self._backdrop_valid = False
         self._backdrop_disabled = False   # A/B measurement knob (P4 remote `cache`)
+        self._backdrop_unsupported = False  # the root canvas can't snapshot pixels
+                                            # (the web CommandCanvas, #113): stop
+                                            # re-trying the capture every drag frame
+                                            # (each retry minted+leaked a layer)
         # Dirty-union gesture restore (#58 "smooth like a real OS"): during a
         # drag/resize only the moving window's recent footprint needs the backdrop
         # re-stamped -- a full-screen 1.2MB restore per frame is the drag path's
@@ -834,9 +839,13 @@ class WindowedWM(FullscreenStackWM):
             cache = self._ensure_backdrop()
             cache.blit_strip(self._root_canvas, 0, 0)
             self._backdrop_valid = True
-        except Exception:  # noqa: BLE001 -- a failed capture (OOM) forfeits the
-            self._backdrop_valid = False   # cache; the drag just re-renders live
-            self._backdrop = None
+        except Exception:  # noqa: BLE001 -- a failed capture (OOM, or a
+            self._backdrop_valid = False   # recording root with no pixels to
+            self._backdrop = None          # snapshot) forfeits the cache; the
+            # drag re-renders live. Mark the mechanism unsupported so the next
+            # frames don't retry (#113: each retry allocated a fresh layer --
+            # on the web root that leaked one RecordingLayer per drag frame).
+            self._backdrop_unsupported = True
 
     def _gesture_extent(self):
         """The moving window's CURRENT damage bbox (x, y, w, h) -- everything the
@@ -851,7 +860,13 @@ class WindowedWM(FullscreenStackWM):
         if win is None:
             return None
         w, h = win.w, win.h
-        if self._resize is not None and self._resize[0] == win.kind:
+        # NOTE gesture tuples carry the window REGISTRY key (g[0], e.g. "make"
+        # for the shared picker/Editor group), which is NOT win.kind (the
+        # CONTENT kind, e.g. "picker") -- comparing g[0] == win.kind silently
+        # never matched for the make group, so its drag content-freeze and
+        # stamp-defer never engaged (found via the web payload autopsy, #113).
+        # Every gesture-vs-window test below resolves through _wins identity.
+        if g is self._resize:
             w = max(w, self._resize[5])
             h = max(h, self._resize[6])
         return (win.x - 2, win.y - 2, w + 7, h + 7)
@@ -906,7 +921,7 @@ class WindowedWM(FullscreenStackWM):
         bx0 = by0 = bx1 = by1 = 0
         if win is not None:
             bw, bh = win.w, win.h
-            if self._resize is not None and self._resize[0] == win.kind \
+            if g is self._resize \
                     and self._live_resize_ok() and win.kind != "desktop":
                 bw, bh = self._resize[5], self._resize[6]
             bx0 = max(x0, win.x)
@@ -1111,14 +1126,22 @@ class WindowedWM(FullscreenStackWM):
         # the editor-tab layout every drag frame is pure waste -- blit the retained
         # buffer at the new position instead. A drag of ANOTHER window still lets
         # this one render live (it's not the one moving).
-        if self._resize is not None and self._resize[0] == win.kind \
+        # Gesture keys are the window REGISTRY key (e.g. "make"), not win.kind
+        # (the CONTENT kind, e.g. "picker") -- resolve through _wins identity
+        # (see _gesture_extent's note; the == win.kind form never matched the
+        # shared make group, so its drag froze nothing and re-rendered the
+        # picker/Editor content every frame).
+        if self._resize is not None \
+                and self._wins.get(self._resize[0]) is win \
                 and self._live_resize_ok():
             # Live-body resize: the frame follows the grip, content crops.
             self._draw_resizing_window(win, focused,
                                        self._resize[5], self._resize[6])
             return
-        moving = ((self._drag is not None and self._drag[0] == win.kind)
-                  or (self._resize is not None and self._resize[0] == win.kind))
+        moving = ((self._drag is not None
+                   and self._wins.get(self._drag[0]) is win)
+                  or (self._resize is not None
+                      and self._wins.get(self._resize[0]) is win))
         if focused and not moving:
             # Live: render the focused app into its buffer at the window's layout.
             self._install(win.ctx)
@@ -1136,8 +1159,8 @@ class WindowedWM(FullscreenStackWM):
         # DRAG (a resize redraws live-body above; the grip drawn under the stamp
         # simply hides while dragging, which is fine). Host/web canvases lack
         # the hook, so their path is byte-identical.
-        if (self._drag is not None and self._drag[0] == win.kind
-                and self._order and self._order[-1] == win.kind):
+        if (self._drag is not None and self._wins.get(self._drag[0]) is win
+                and self._order and self._wins.get(self._order[-1]) is win):
             asb = getattr(self._root_canvas, "blit_strip_async", None)
             if asb is not None:
                 self._win_chrome(win, focused)
