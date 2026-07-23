@@ -104,3 +104,16 @@ run()
 ```
 
 The child-facing API and generated project code are kept portable so they can later be reimplemented on a MicroPython/ESP32 runtime. PC-only libraries belong in the simulator, CLI, compiler, and tests.
+
+## License
+
+Everything you'd do as a person is free: run the simulator, flash the firmware
+on your own board, modify it, teach with it, make and sell your own carts.
+Selling hardware (or a commercial product) built on the console requires a
+commercial license, and that restriction expires per release two years after
+publication. Details and the exact split: [`LICENSE.md`](LICENSE.md) — SDK and
+examples are [MIT](LICENSES/MIT.md); the console and firmware are
+[FSL-1.1-MIT](LICENSES/FSL-1.1-MIT.md) (source-available, becomes MIT after
+2 years). The `.moy` cart format and API are an open specification; carts you
+author are yours. The rationale lives in
+[`docs/pricing_release_model_v1.md`](docs/pricing_release_model_v1.md).
