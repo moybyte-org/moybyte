@@ -155,10 +155,10 @@ class SystemMenuUI:
         firmware version, dismissed by any tap / ESC / B. Drawn on top of everything."""
         NAMES = self._NAMES
         cv = self.ws.sys_canvas
-        lines = ("MOYBYTE CONSOLE", "v0.4", "", "TAP TO CLOSE")
+        lines = ("moybyte", "v0.4", "", "TAP TO CLOSE")
         ver = self._firmware_version_text()
         if ver:
-            lines = ("MOYBYTE CONSOLE", ver, "", "TAP TO CLOSE")
+            lines = ("moybyte", ver, "", "TAP TO CLOSE")
         fs = getattr(cv, "font_scale", 1)   # scaled text -> scaled panel (#39/#58)
         fw = 8 * fs
         w = 0

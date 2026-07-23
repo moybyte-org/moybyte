@@ -366,7 +366,7 @@ def test_save_sprites_failure_surfaces_error(tmp_path, monkeypatch):
         raise OSError("disk full")
     monkeypatch.setattr(ws.carts_store, "save_sprites", _boom)
     ws.save_sprites()
-    assert ws.save_status == "SAVE FAILED"
+    assert ws.save_status == "CAN'T SAVE"
     assert ws.cart_error is not None and "sprites" in ws.cart_error.lower()
     assert ws.sheet.dirty is True         # not marked clean on failure
 

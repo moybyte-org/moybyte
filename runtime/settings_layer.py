@@ -320,10 +320,13 @@ class SettingsLayer:
         try:
             ok = bool(ws.wifi.connect(ssid, pw)) if ws.wifi is not None else False
         except Exception as exc:  # noqa: BLE001
-            self.wifi_msg = ("CONNECT FAILED: " + str(exc))[:34]
+            self.wifi_msg = ("CAN'T CONNECT: " + str(exc))[:34]
         else:
+            # Voice (docs/os_voice_v1.md): say the fix, not the fault -- a typed
+            # password gets the password message; an open/saved net stays generic.
             self.wifi_msg = ("CONNECTED TO " + str(ssid))[:34] if ok \
-                else "COULD NOT CONNECT"
+                else ("That password didn't work." if pw
+                      else "Couldn't connect.")
         self.wifi_pick = None
         ws._set_text_mode(False)
         if ws.wifi is not None:

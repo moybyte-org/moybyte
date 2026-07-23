@@ -212,7 +212,7 @@ class StorybookAppLayer(ListShellApp):
                 return ws.carts_store.save_code(self.cart, src)
             ws._with_sd(_write)
         except Exception as exc:  # noqa: BLE001 -- surface, never crash the shell
-            self.status = ("SAVE FAILED " + str(exc))[:28]
+            self.status = ("CAN'T SAVE " + str(exc))[:28]
 
     def _sync_editor(self):
         ed = self.editor

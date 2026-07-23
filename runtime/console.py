@@ -3189,7 +3189,7 @@ class Workstation:
             # Mirror save_sprites: a failed save must be VISIBLE on device (no serial in
             # the run loop), not silent. _err_text-guarded so a weird __str__ can't escape.
             txt = _err_text(exc)
-            self.save_status = "SAVE FAILED"
+            self.save_status = "CAN'T SAVE"
             self.cart_error = "Could not save icons -- " + txt
             print("Moybyte save icons failed:", txt)
 
@@ -3253,7 +3253,7 @@ class Workstation:
             return False
         n = self.paint.n
         if self.sheet.copy_tile(shared, n, dst_n=n) is None:
-            self.paint_status = "GET FAILED"
+            self.paint_status = "CAN'T GET"
             return False
         self.paint_status = "GOT SPR " + str(n)
         return True
@@ -3269,17 +3269,17 @@ class Workstation:
             return False
         shared = self._load_shared_sheet()
         if shared is None:
-            self.paint_status = "PUT FAILED"
+            self.paint_status = "CAN'T PUT"
             return False
         n = self.paint.n
         if shared.copy_tile(self.sheet, n, dst_n=n) is None:
-            self.paint_status = "PUT FAILED"
+            self.paint_status = "CAN'T PUT"
             return False
         try:
             hexs = shared.to_hex()
             self._with_sd(lambda: self.carts_store.save_shared_sheet(hexs, self.carts_root))
         except Exception as exc:  # noqa: BLE001
-            self.paint_status = "PUT FAILED"
+            self.paint_status = "CAN'T PUT"
             print("Moybyte save shared sheet failed:", exc)
             return False
         self.paint_status = "PUT SPR " + str(n)
@@ -3305,7 +3305,7 @@ class Workstation:
                                                   self.carts_root)
             name = self._with_sd(_write)
         except Exception as exc:  # noqa: BLE001 -- surface, never crash the editor
-            self.paint_status = "FILE FAILED"
+            self.paint_status = "CAN'T SEND"
             print("Moybyte send sprites to files failed:", exc)
             return None
         self.paint_status = "SENT " + str(name).upper()[:8]

@@ -974,13 +974,13 @@ class Player:
         cv.rect(x, y, w, h, NAMES["dark_purple"])
         cv.rectb(x, y, w, h, NAMES["red"])
         cv.rect(x, y, w, 14, NAMES["red"])
-        cv.print("OOPS! THIS CART CRASHED", x + 6, y + 4, NAMES["white"], 1)
+        cv.print("Your game stopped.", x + 6, y + 4, NAMES["white"], 1)
         cols = (w - 16) // 8                       # 8px monospace cells
         lines = _wrap(self.cart_error or "Unknown error", cols)
         max_rows = (h - 30) // _CODE_LH
         for i in range(min(len(lines), max_rows)):
             cv.print(lines[i], x + 8, y + 20 + i * _CODE_LH, NAMES["peach"], 1)
-        cv.print("TAP CODE TO FIX IT", x + 8, y + h - 12, NAMES["yellow"], 1)
+        cv.print("TAP CODE TO SEE WHY", x + 8, y + h - 12, NAMES["yellow"], 1)
 
     def _draw_hold_progress(self):
         """The TRANSIENT hold-to-exit affordance (Stage 5, spec Section 12): a small

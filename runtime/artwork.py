@@ -483,7 +483,7 @@ class PaintAppLayer:
             self._unsaved = False
             self._idle = 0.0
             return True
-        self.status = self.ws.artwork.last_error or "SAVE FAILED"
+        self.status = self.ws.artwork.last_error or "CAN'T SAVE"
         self._idle = self.AUTOSAVE_S - self.RETRY_S
         return False
 

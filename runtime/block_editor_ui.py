@@ -378,7 +378,7 @@ class BlockEditorUI:
         if self.blk_graduated:
             self.blk_status = None            # the celebration banner carries the message
         elif self.blk_protect:
-            self.blk_status = "CODE LOCKED -- can't blockify"
+            self.blk_status = "CODE LOCKED"
         else:
             self.blk_status = None
 
@@ -440,7 +440,7 @@ class BlockEditorUI:
                     self._blk_reveal()
                     self.blk_status = "MOVED"
                 else:
-                    self.blk_status = "can't move there"
+                    self.blk_status = "CAN'T MOVE THERE"
             return
         if be.at_insert():
             self._blk_open_categories()
@@ -491,8 +491,8 @@ class BlockEditorUI:
         if not items:
             # nothing applies here -- point the kid at what to do rather than open
             # an empty menu (an insert point with nothing copied, say).
-            self.blk_status = "copy a block first" if be.at_insert() \
-                else "select a block"
+            self.blk_status = "COPY A BLOCK FIRST" if be.at_insert() \
+                else "SELECT A BLOCK"
             return
         self.blk_menu = {"mode": "actions", "sel": 0, "top": 0, "items": items}
 
@@ -503,7 +503,7 @@ class BlockEditorUI:
         if be is None:
             return
         if item == _ACT_COPY:
-            self.blk_status = "COPIED" if be.copy_block() else "can't copy that"
+            self.blk_status = "COPIED" if be.copy_block() else "CAN'T COPY THAT"
         elif item == _ACT_DUP:
             if be.duplicate() is not None:
                 self.blk_slot = 0
@@ -515,10 +515,10 @@ class BlockEditorUI:
                 self._blk_reveal()
                 self.blk_status = "PASTED"
             else:
-                self.blk_status = "can't paste here"
+                self.blk_status = "CAN'T PASTE HERE"
         elif item == _ACT_MOVE:
             if be.start_move():
-                self.blk_status = "tap a + spot"
+                self.blk_status = "TAP A + SPOT"
 
     def _blk_undo(self):
         be = self.blocks_ed
@@ -531,7 +531,7 @@ class BlockEditorUI:
             self._blk_reveal()
             self.blk_status = "UNDO"
         else:
-            self.blk_status = "nothing to undo"
+            self.blk_status = "NOTHING TO UNDO"
 
     def _blk_redo(self):
         be = self.blocks_ed
@@ -544,7 +544,7 @@ class BlockEditorUI:
             self._blk_reveal()
             self.blk_status = "REDO"
         else:
-            self.blk_status = "nothing to redo"
+            self.blk_status = "NOTHING TO REDO"
 
     def _blk_open_blocks(self, category):
         ids = _blocks_mod.blocks_in_category(category)
@@ -726,13 +726,13 @@ class BlockEditorUI:
                             "slot_target": None, "armed": False}
             self._blk_arm_prompt()
         elif item == _PROC_DELP:
-            self.blk_status = "input removed" if be.remove_last_param(pd) \
-                else "no inputs"
+            self.blk_status = "INPUT REMOVED" if be.remove_last_param(pd) \
+                else "NO INPUTS"
         elif item == _PROC_DEL:
             if be.delete_proc(pd):
                 self.blk_slot = 0
                 self._blk_reveal()
-                self.blk_status = "block deleted"
+                self.blk_status = "BLOCK DELETED"
 
     # -- slot editors --------------------------------------------------------
     def _blk_edit_slot(self, block, slot):
@@ -925,7 +925,7 @@ class BlockEditorUI:
             self.blk_status = "= " + str(val)
         elif kind == "text":
             be.set_slot(k["slot"], k["text"], k["block"])
-            self.blk_status = "text set"
+            self.blk_status = "TEXT SET"
         elif kind == "list":                   # "list": rename the freshly-created list
             old = k["var"]
             applied = be.rename_list(old, k["text"])
@@ -933,11 +933,11 @@ class BlockEditorUI:
             bt = k.get("slot_target")
             if bt is not None and bt[0] is not None:
                 be.set_slot(bt[1], final, bt[0])
-            self.blk_status = "list: " + final[:12]
+            self.blk_status = "LIST: " + final[:12]
         elif kind == "proc":                   # "proc": rename the custom block (#48)
             old = k["var"]
             applied = be.rename_proc(old, k["text"])
-            self.blk_status = "block: " + (applied if applied else old)[:12]
+            self.blk_status = "BLOCK: " + (applied if applied else old)[:12]
         elif kind == "param":                  # "param": add an input to the block (#48)
             applied = be.add_param(k.get("proc"), k["text"])
             self.blk_status = ("input: " + applied[:12]) if applied \
@@ -949,7 +949,7 @@ class BlockEditorUI:
             bt = k.get("slot_target")
             if bt is not None and bt[0] is not None:
                 be.set_slot(bt[1], final, bt[0])
-            self.blk_status = "var: " + final[:12]
+            self.blk_status = "VAR: " + final[:12]
         self.blk_kbd = None
         self.ws._set_text_mode(False)
 
@@ -1048,7 +1048,7 @@ class BlockEditorUI:
         if self.blk_protect:
             # DATA-LOSS GUARD (#29): this cart's main.py is hand-written code that a
             # block save would replace. Refuse and tell the kid -- their code stays.
-            self.blk_status = "CART HAS CODE -- not saved"
+            self.blk_status = "CART HAS CODE -- NOT SAVED"
             return False
         prog = be.program
         # Always compile-check first so the kid sees a problem before it persists.
@@ -1077,7 +1077,7 @@ class BlockEditorUI:
             status, smsg = ws._with_sd(
                 lambda: ws.carts_store.save_blocks(ws.project.cart, prog))
             if status != ws.carts_store.SAVE_OK:
-                self.blk_status = "SAVE BAD " + str(smsg)
+                self.blk_status = "CAN'T SAVE " + str(smsg)
                 return False
             be.dirty = False
             self.blk_status = "SAVED"
@@ -1085,7 +1085,7 @@ class BlockEditorUI:
             ws.cart_error = None
             return True
         except Exception as exc:  # noqa: BLE001
-            self.blk_status = "SAVE FAILED"
+            self.blk_status = "CAN'T SAVE"
             print("Moybyte save blocks failed:", self._err_text(exc))
             return False
 
@@ -1168,7 +1168,7 @@ class BlockEditorUI:
                 self._blk_a()
             elif i.pressed("b"):
                 be.cancel_move()
-                self.blk_status = "move off"
+                self.blk_status = "MOVE OFF"
             return
         # Host convenience (#93): Ctrl+Z / Ctrl+Y walk the in-session outline undo,
         # mirroring the code editor's shortcut (0x1A / 0x19 arrive via last_key). The
@@ -1445,7 +1445,7 @@ class BlockEditorUI:
         ws._icon_btn("code", "CODE", lay.code_btn, NAMES["dark_purple"], cv)
         # #93 edit cluster: "..." (block-actions menu) + UNDO/REDO. Undo/redo dim to
         # dark_grey when the stack is empty so their availability reads at a glance;
-        # "..." glows yellow while a MOVE is armed (the "tap a + spot" state).
+        # "..." glows yellow while a MOVE is armed (the "TAP A + SPOT" state).
         act_col = NAMES["yellow"] if be.moving() else NAMES["blue"]
         ws._btn("...", lay.act_btn, act_col, cv)
         self._gbtn("undo", "UNDO", lay.undo_btn,
@@ -1725,8 +1725,8 @@ class BlockEditorUI:
         cv.print(titles.get(m["mode"], "PICK"), mx + 6 * fs, my + 4 * fs, NAMES["yellow"], 1)
         items = m["items"]
         if not items:
-            cv.print("(nothing here)", mx + 8 * fs, my + 22 * fs, NAMES["light_grey"], 1)
-            cv.print("B = back", mx + 8 * fs, my + mh - 12 * fs, NAMES["light_grey"], 1)
+            cv.print("NOTHING HERE YET", mx + 8 * fs, my + 22 * fs, NAMES["light_grey"], 1)
+            cv.print("B = BACK", mx + 8 * fs, my + mh - 12 * fs, NAMES["light_grey"], 1)
             return
         for vi in range(lay.menu_rows):
             ridx = m["top"] + vi
@@ -1743,7 +1743,7 @@ class BlockEditorUI:
             label = self._blk_menu_label(ridx)
             cv.print(label[:(mw - 24 * fs) // cell], mx + 16 * fs, y + 3 * fs,
                      NAMES["white"] if sel else NAMES["light_grey"], 1)
-        cv.print("B = back", mx + 6 * fs, my + mh - 12 * fs, NAMES["light_grey"], 1)
+        cv.print("B = BACK", mx + 6 * fs, my + mh - 12 * fs, NAMES["light_grey"], 1)
 
     def _blk_menu_chip(self, ridx):
         """The category-color chip for menu row `ridx` (categories + block lists);

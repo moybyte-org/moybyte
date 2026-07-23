@@ -289,7 +289,7 @@ class CodeLayer:
                 break
             lines.append(raw)
         lines = lines[:4]
-        title = "OOPS! IT CRASHED"
+        title = "Stopped on this line."
         foot = "TAP TO CLOSE"
         w = (max([len(title), len(foot)] + [len(l) for l in lines]) + 2) * fw \
             + 8 * fs

@@ -10,7 +10,7 @@
 #                      (is_app over APP_TITLE/APP_PERM/APP_FOLDER), the store
 #                      readiness probe, the list scroll-window + up/down/A
 #                      nav, the guarded blob load, and the persist tail with
-#                      its CAN'T SAVE HERE / SAVE FAILED status contract.
+#                      its CAN'T SAVE HERE / CAN'T SAVE status contract.
 #
 # MicroPython-safe (json only); staged to both boards like every runtime/
 # module. The apps keep their own views, draw code and store verbs.
@@ -81,7 +81,7 @@ class ListShellApp:
 
     def _persist(self, save_call):
         """Run a store write through _with_sd with the shared status contract:
-        no store -> CAN'T SAVE HERE; an exception -> SAVE FAILED <why>; sets
+        no store -> CAN'T SAVE HERE; an exception -> CAN'T SAVE <why>; sets
         _save_failed both ways and returns True on success."""
         if not self._store_ready():
             self._save_failed = True
@@ -93,7 +93,7 @@ class ListShellApp:
             return True
         except Exception as exc:  # noqa: BLE001 -- surface, never crash the shell
             self._save_failed = True
-            self.status = ("SAVE FAILED " + str(exc))[:28]
+            self.status = ("CAN'T SAVE " + str(exc))[:28]
             return False
 
     # -- typed keys ------------------------------------------------------------

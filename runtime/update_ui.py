@@ -367,8 +367,12 @@ class UpdateUI:
             y += 20 * fs
             cv.print("rebooting...", x, y, th["ink"], 1)
         else:  # error
-            cv.print("UPDATE FAILED", x, y, th["danger"], 1)
-            y += 14 * fs
+            # Voice: the rollback design means a failed update truly leaves the
+            # running firmware untouched -- "Nothing changed." states that trust.
+            cv.print("Update didn't finish.", x, y, th["danger"], 1)
+            y += 12 * fs
+            cv.print("Nothing changed.", x, y, th["ink"], 1)
+            y += 12 * fs
             cv.print((self._upd_msg or "?")[:26], x, y, th["ink_dim"], 1)
             y += 18 * fs
             cv.print("B = BACK", x, y, th["accent"], 1)

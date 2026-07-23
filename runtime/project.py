@@ -428,7 +428,7 @@ class Project:
             # moy_carts.save_code always returns a (status, message) 2-tuple.
             status, smsg = ws._with_sd(lambda: ws.carts_store.save_code(self.cart, src))
             if status != ws.carts_store.SAVE_OK:
-                ws.save_status = "SAVE FAILED " + str(smsg)
+                ws.save_status = "CAN'T SAVE " + str(smsg)
                 ws.cart_error = "Could not save -- " + str(smsg)
                 return False
             ws.editor.dirty = False
@@ -456,7 +456,7 @@ class Project:
             return True
         except Exception as exc:  # noqa: BLE001
             txt = _err_text(exc)
-            ws.save_status = "SAVE FAILED"
+            ws.save_status = "CAN'T SAVE"
             ws.cart_error = "Could not save -- " + txt
             print("Moybyte save code failed:", txt)
             return False
@@ -581,7 +581,7 @@ class Project:
             # device (no serial in the run loop), not silent. _err_text-guarded so a
             # weird exception's __str__ can't itself escape this handler.
             txt = _err_text(exc)
-            ws.save_status = "SAVE FAILED"
+            ws.save_status = "CAN'T SAVE"
             ws.cart_error = "Could not save sprites -- " + txt
             print("Moybyte save sprites failed:", txt)
 
@@ -605,7 +605,7 @@ class Project:
             ws.ach.note("map_save")           # "Map Maker": a map saved (#21)
         except Exception as exc:  # noqa: BLE001
             txt = _err_text(exc)
-            ws.save_status = "SAVE FAILED"
+            ws.save_status = "CAN'T SAVE"
             ws.cart_error = "Could not save map -- " + txt
             print("Moybyte save map failed:", txt)
 
@@ -632,7 +632,7 @@ class Project:
                 hist.clear()                      # re-baseline
         except Exception as exc:  # noqa: BLE001
             txt = _err_text(exc)
-            ws.save_status = "SAVE FAILED"
+            ws.save_status = "CAN'T SAVE"
             ws.cart_error = "Could not save scene -- " + txt
             print("Moybyte save scene failed:", txt)
 
@@ -659,6 +659,6 @@ class Project:
             ws.ach.note("sound_save")          # "Sound Designer": a bank saved (#21)
         except Exception as exc:  # noqa: BLE001
             txt = _err_text(exc)
-            ws.save_status = "SAVE FAILED"
+            ws.save_status = "CAN'T SAVE"
             ws.cart_error = "Could not save sounds -- " + txt
             print("Moybyte save sounds failed:", txt)
