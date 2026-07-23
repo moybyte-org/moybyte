@@ -148,6 +148,13 @@ MATURITY = {
 }
 MATURITY_UNKNOWN = (0, "·", "unclassified")
 
+# The build-requirement axis: what a machine needs to advance the work.
+BUILD = {
+    "host":         ("🟢", "host — buildable + testable here, no device"),
+    "host-partial": ("🟡", "host-partial — host leg workable, device leg blocked"),
+    "device":       ("🔴", "device — needs firmware / native C / on-glass / radio"),
+}
+
 AREA_ORDER = [
     "launcher", "editor", "wm", "player", "blocks", "carts", "apps",
     "audio", "input", "multiplayer", "webview", "ota", "perf",
@@ -155,9 +162,9 @@ AREA_ORDER = [
 ]
 
 
-def _split_labels(issue: dict) -> tuple[list[str], str | None, list[str], bool]:
-    """Return (areas, maturity_key, statuses, is_tracker) from an issue's labels."""
-    areas, statuses, maturity, tracker = [], [], None, False
+def _split_labels(issue: dict) -> tuple[list[str], str | None, list[str], bool, str | None]:
+    """Return (areas, maturity_key, statuses, is_tracker, build_key) from labels."""
+    areas, statuses, maturity, tracker, build = [], [], None, False, None
     for lbl in issue.get("labels", []):
         name = lbl["name"]
         if name.startswith("area:"):
@@ -166,9 +173,11 @@ def _split_labels(issue: dict) -> tuple[list[str], str | None, list[str], bool]:
             maturity = name[len("maturity:"):]
         elif name.startswith("status:"):
             statuses.append(name[len("status:"):])
+        elif name.startswith("build:"):
+            build = name[len("build:"):]
         elif name == "tracker":
             tracker = True
-    return areas, maturity, statuses, tracker
+    return areas, maturity, statuses, tracker, build
 
 
 def _mat(maturity: str | None) -> tuple[int, str, str]:
@@ -176,9 +185,11 @@ def _mat(maturity: str | None) -> tuple[int, str, str]:
 
 
 def _issue_cell(issue: dict, maturity: str | None, statuses: list[str],
-                tracker: bool) -> str:
+                tracker: bool, build: str | None = None) -> str:
     order, sym, _ = _mat(maturity)
     flags = ""
+    if build in BUILD:
+        flags += " " + BUILD[build][0]
     if tracker:
         flags += " ⏳"
     for s in statuses:
@@ -196,8 +207,9 @@ def write_status(out: Path, slug: str, issues: list[dict]) -> None:
     unclassified: list[dict] = []
     trackers: list[dict] = []
     for i in open_issues:
-        areas, maturity, statuses, tracker = _split_labels(i)
+        areas, maturity, statuses, tracker, build = _split_labels(i)
         i["_maturity"], i["_statuses"], i["_tracker"] = maturity, statuses, tracker
+        i["_build"] = build
         if tracker:
             trackers.append(i)
         if not areas:
@@ -224,6 +236,13 @@ def write_status(out: Path, slug: str, issues: list[dict]) -> None:
         body.append(f"- {sym} **{key}** — {desc.split('—',1)[1].strip()}")
     body += [
         "",
+        "**Build requirement** (the `build:*` axis — what it takes to advance the work):",
+        "",
+    ]
+    for key, (mark, desc) in BUILD.items():
+        body.append(f"- {mark} **{key}** — {desc.split('—',1)[1].strip()}")
+    body += [
+        "",
         "⏳ = living **tracker** issue (continuously updated, not a one-shot task). "
         "Status flags: `blocked`, `pending-decision`, `pending-testing`.",
         "",
@@ -242,14 +261,16 @@ def write_status(out: Path, slug: str, issues: list[dict]) -> None:
         body += [f"### area:{area} ({len(items)})", "",
                  "| Maturity | Issue | What |", "|---|---|---|"]
         for i in items:
-            body.append(_issue_cell(i, i["_maturity"], i["_statuses"], i["_tracker"]))
+            body.append(_issue_cell(i, i["_maturity"], i["_statuses"],
+                                    i["_tracker"], i["_build"]))
         body.append("")
 
     if unclassified:
         body += ["### unclassified ({})".format(len(unclassified)), "",
                  "| Maturity | Issue | What |", "|---|---|---|"]
         for i in unclassified:
-            body.append(_issue_cell(i, i["_maturity"], i["_statuses"], i["_tracker"]))
+            body.append(_issue_cell(i, i["_maturity"], i["_statuses"],
+                                    i["_tracker"], i["_build"]))
         body.append("")
 
     # "Ready to work" — actionable = not blocked, not awaiting a decision.
@@ -264,7 +285,24 @@ def write_status(out: Path, slug: str, issues: list[dict]) -> None:
              "at the top)._", "",
              "| Maturity | Issue | What |", "|---|---|---|"]
     for i in ready:
-        body.append(_issue_cell(i, i["_maturity"], i["_statuses"], i["_tracker"]))
+        body.append(_issue_cell(i, i["_maturity"], i["_statuses"],
+                                i["_tracker"], i["_build"]))
+    body.append("")
+
+    # "Buildable on host" — pick-up-today on a host-only box (no device/firmware).
+    buildable = [i for i in open_issues
+                 if not i["_tracker"] and i["_build"] in ("host", "host-partial")]
+    buildable.sort(key=lambda i: (0 if i["_build"] == "host" else 1,
+                                  -_mat(i["_maturity"])[0], i["number"]))
+    body += ["---", "", f"## Buildable on host ({len(buildable)})", "",
+             "_Open, non-tracker issues tagged `build:host` (🟢) or "
+             "`build:host-partial` (🟡) — workable on a host-only dev box with no "
+             "firmware build, C toolchain, or device to flash. Sorted host-first, "
+             "then most-mature._", "",
+             "| Maturity | Issue | What |", "|---|---|---|"]
+    for i in buildable:
+        body.append(_issue_cell(i, i["_maturity"], i["_statuses"],
+                                i["_tracker"], i["_build"]))
     body.append("")
 
     # Living trackers roll-up.
@@ -273,7 +311,7 @@ def write_status(out: Path, slug: str, issues: list[dict]) -> None:
              "_Persistent, continuously-updated issues — read these for current "
              "state rather than treating them as tasks to close._", ""]
     for i in trackers:
-        areas, _, _, _ = _split_labels(i)
+        areas, _, _, _, _ = _split_labels(i)
         atags = " ".join(f"`{a}`" for a in areas)
         body.append(f"- ⏳ [#{i['number']} {i['title']}]({i.get('url','')}) — {atags}")
     body.append("")

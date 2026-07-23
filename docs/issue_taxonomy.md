@@ -6,7 +6,7 @@ glance what can be worked on**: every open issue carries one or more **area** la
 GitHub's label filters are the source of truth; `make sync-issues` renders a convenience
 dashboard at `docs/issues/STATUS.md` (gitignored, generated — never hand-edit it).
 
-Labels are applied on three orthogonal axes plus a `tracker` marker.
+Labels are applied on four orthogonal axes plus a `tracker` marker.
 
 ## 1. `area:*` — what part of the system (one or more)
 
@@ -65,7 +65,28 @@ issues sort to the top of each area and of the "Ready to work" list, i.e. closes
 The dashboard's **"Ready to work"** list excludes `blocked` and `pending-decision`
 issues, so it shows only what's actually actionable.
 
-## 4. `tracker` — living issues (marker)
+## 4. `build:*` — what it takes to build (exactly one, actionable issues only)
+
+Answers a different question from `maturity:*`: not *how far along* the work is, but
+*what a machine needs in order to advance it*. This is the "can I pick this up on a
+host-only dev box (no firmware build, no C toolchain, no device to flash)?" filter.
+
+| Label | Meaning |
+|---|---|
+| `build:host` | Buildable + testable entirely on the host (Python/tests/docs) — no device |
+| `build:host-partial` | Host reference workable now; a device/radio/audio leg remains blocked (build the host leg, hand off the rest) |
+| `build:device` | Requires firmware build, native C, on-glass verification, or radio/audio hardware |
+
+Applied to **actionable** issues only — `tracker`/meta/`pending-decision` issues carry
+their own markers and aren't build tasks, so they stay unlabelled on this axis.
+`build:host` vs `maturity:host` are independent: `maturity` says the host
+implementation *exists and runs*; `build:host` says it *can be built here* (a
+`maturity:idea` feature can still be `build:host` if the reference lives in `runtime/`).
+Filter what you can pick up today with `gh issue list --label build:host`. Colors:
+`build:host` `0e8a16` (green), `build:host-partial` `dbab09` (amber), `build:device`
+`b60205` (red).
+
+## 5. `tracker` — living issues (marker)
 
 Some issues are **persistent, continuously-updated ledgers**, not one-shot tasks to
 close: the performance ledger (#66), the P4 port status (#58), the native-gap lever
@@ -99,9 +120,12 @@ related issues under it as sub-issues.
 
 `tools/sync_issues.py` (run via `make sync-issues`, needs the `gh` CLI, authed) mirrors
 every issue into `docs/issues/` and derives `STATUS.md` purely from these labels —
-grouped by area, sorted by maturity, with a "Ready to work" and "Living trackers"
-roll-up. Because it's generated from GitHub, it can't drift. **Re-run `make sync-issues`
-after any label change** (the mirror is gitignored, so a fresh checkout rebuilds it).
+grouped by area, sorted by maturity, with "Ready to work", **"Buildable on host"**, and
+"Living trackers" roll-ups. Every row carries an inline `build:*` marker (🟢/🟡/🔴), and
+the "Buildable on host" section lists just the 🟢/🟡 issues (host-first) — the
+pick-up-today view for a host-only box. Because it's generated from GitHub, it can't
+drift. **Re-run `make sync-issues` after any label change** (the mirror is gitignored, so
+a fresh checkout rebuilds it).
 
 ## Housekeeping
 
