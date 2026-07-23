@@ -1179,10 +1179,20 @@ def test_page_alloc_resets_clip_on_resize():
     be unit-tested directly, so guard the served source: alloc() must call rs()."""
     page = web_view.PAGE_HTML
     start = page.index("function alloc()")
-    body = page[start:start + 400]
+    body = page[start:start + 700]
     assert "rs()" in body, (
         "web_view.PAGE_HTML alloc() must call rs() to reset the clip on canvas "
         "resize; without it a >320x240 system canvas clips drawing to the top-left"
+    )
+    # ... but ONLY inside the size-changed branch: an unconditional realloc
+    # blanked the retained buffer on every /assets refetch -- once per built
+    # shelf cover, the launcher's black-flash-per-thumbnail bug (2026-07-23).
+    assert "var fresh=cv.width!==W||cv.height!==H||!idx" in body, (
+        "alloc() must keep the retained index buffer on a same-size /assets "
+        "refetch (cover cache-miss) -- blanking it flashes the screen black. "
+        "The !idx term is load-bearing: on the 320x240 tier the canvas HTML "
+        "default already equals the assets size, so without it the buffer is "
+        "NEVER allocated (the all-black first paint, 2026-07-23)"
     )
 
 
@@ -1319,6 +1329,69 @@ def test_idle_static_screen_pushes_nothing(tmp_path):
     console.assets()                                    # a page (re)connects
     cmds, _cart, _au = console.step_frame()
     assert cmds                                         # -> one full keyframe again
+
+
+def test_assets_prebuilds_the_whole_shelf_no_refetch_loop(tmp_path):
+    """/assets builds EVERY shelf cover to completion first (owner 2026-07-23
+    "ship them all once"): the payload carries the whole shelf, and the frames
+    that follow reference ONLY shipped covers -- so the browser never hits the
+    per-thumbnail cache-miss -> /assets refetch loop (each refetch used to
+    flash the launcher black before the alloc() fix; now it wouldn't even
+    happen)."""
+    console = web_console.WebConsole(str(tmp_path / "carts"), fps=30)
+    console.ws.pointer.visible = False
+    a = console.assets()
+    shipped = set((a.get("images") or {}).keys())
+    covers = {n for n in shipped if n.startswith("cover:")}
+    assert covers                                   # seed carts ship cover art
+    referenced = set()
+    for _ in range(10):
+        cmds, _cart, _au = console.step_frame()
+        for c in (cmds or []):
+            if c and c[0] == "imgref" and isinstance(c[3], str) \
+                    and c[3].startswith("cover:"):
+                referenced.add(c[3])
+    assert referenced                               # the shelf draws covers
+    assert referenced <= covers                     # ...all already shipped
+
+
+def test_ws_client_latch_survives_a_consumed_dirty_kick(tmp_path):
+    """The host loop's shared per-connection state (web_view.WsClientState):
+    even when the /assets dirty-kick is consumed by ANOTHER connection's step
+    (the page-reload socket overlap -- the black-until-tap bug), a fresh
+    connection's latch keeps re-arming the redraw gate until IT is served a
+    full keyframe, then goes quiet so idle stays free."""
+    from runtime import web_view
+    console = web_console.WebConsole(str(tmp_path / "carts"), fps=30)
+    ws = console.ws
+    ws.pointer.visible = False
+    ws.bar_layer._clock_text = lambda: "12:00"   # a minute rollover mid-test
+    ws.select_wallpaper("fill:black", persist=False)  # would re-dirty the idle
+    for _ in range(200):                                # settle to a static idle
+        if console.step_frame()[0] is None:
+            break
+    console.assets()                                    # the NEW page's kick...
+    assert console.step_frame()[0]                      # ...eaten by the OLD conn
+    for _ in range(30):                                 # cover-gen bumps may repaint
+        if console.step_frame()[0] is None:             # a frame or two -- settle
+            break
+    assert console.step_frame()[0] is None              # idle again: new page = black
+
+    def _mark():
+        with console._lock:
+            ws._dirty = True
+
+    client = web_view.WsClientState()                   # the fresh conn's state
+    client.arm_keyframe(_mark)
+    cmds, _cart, _au = console.step_frame()
+    assert cmds                                         # the latch won a keyframe
+    client.note_frame(cmds is not None)
+    assert client.served_full
+    client.arm_keyframe(_mark)                          # latched -> no-op
+    for _ in range(30):
+        if console.step_frame()[0] is None:
+            break
+    assert console.step_frame()[0] is None              # idle stays free
 
 
 def test_hop_quest_mapped_layer_background_replays_identical(tmp_path):

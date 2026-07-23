@@ -262,6 +262,51 @@ class CodeLayer:
         # launcher/Settings bar. This replaces the code editor's old title + RUN/SAVE/
         # CLOSE band: PLAY/X live in the bar now, SAVE is an automatic exit-path commit.
         self.ws.bar_layer._draw_status_strip("menu")
+        if self.ws.crash_popup:
+            self._draw_crash_popup()   # crash-to-code (owner 2026-07-23): the
+                                       # dismissible error popup over the marked line
+
+    def _draw_crash_popup(self):
+        """The crash-to-code popup: the full error text in a danger-framed panel
+        over the code body (the caret already sits on the crashing line). A tap
+        anywhere -- or the first edit -- dismisses it (handle_pointer /
+        _clear_err). Theme-aware: reads the surface/ink tokens, so it works on
+        every theme and both variants."""
+        ws = self.ws
+        cv = ws.sys_canvas
+        th = ws.theme_colors
+        fs = getattr(cv, "font_scale", 1)
+        fw = 8 * fs
+        maxc = max(12, min(34, (cv.w - 32 * fs) // fw - 2))
+        text = str(ws.crash_popup)
+        lines = []
+        for raw in text.split("\n"):
+            raw = raw.rstrip()
+            while len(raw) > maxc and len(lines) < 4:
+                lines.append(raw[:maxc])
+                raw = raw[maxc:]
+            if len(lines) >= 4:
+                break
+            lines.append(raw)
+        lines = lines[:4]
+        title = "OOPS! IT CRASHED"
+        foot = "TAP TO CLOSE"
+        w = (max([len(title), len(foot)] + [len(l) for l in lines]) + 2) * fw \
+            + 8 * fs
+        w = min(w, cv.w - 8 * fs)
+        strip = 12 * fs
+        h = strip + (len(lines) + 1) * 10 * fs + 14 * fs
+        x = (cv.w - w) // 2
+        y = max(20 * fs, (cv.h - h) // 3)
+        cv.rect(x, y, w, h, th["surface"])
+        cv.rectb(x, y, w, h, th["danger"])
+        cv.rect(x + 1, y + 1, w - 2, strip, th["danger"])
+        cv.print(title, x + 4 * fs, y + 2 * fs, 7, 1)
+        ty = y + strip + 4 * fs
+        for l in lines:
+            cv.print(l, x + 4 * fs, ty, th["ink"], 1)
+            ty += 10 * fs
+        cv.print(foot, x + 4 * fs, y + h - 11 * fs, th["ink_dim"], 1)
 
     def handle_input(self, i):
         self._editor_input()           # keyboard is in text mode here
@@ -278,6 +323,13 @@ class CodeLayer:
         # The unified bar's tab ladder + PLAY + X claims its slice FIRST (Stage 4
         # rollout), before any code-body tap -- there's no SAVE tap to dispatch (#111);
         # ws.save_code fires automatically from set_tab/leave instead.
+        # The crash-to-code popup is dismissed by a tap ANYWHERE (consumed --
+        # the tap under it must not edit/re-place the caret), before any other
+        # claim, the bar included.
+        if click and ws.crash_popup is not None:
+            ws.crash_popup = None
+            ws.mark_dirty()
+            return True
         if click and ws.bar_layer.handle_bar_tap("menu", px, py):
             return True
         # #89 chrome, in overlay order: the always-visible tools toggle, then (when
@@ -362,11 +414,11 @@ class CodeLayer:
             elif k == 0x18:
                 ws._code_burst_open()          # #111: a cut joins the live typing burst
                 if ed.cut():
-                    self._clear_err()
+                    self._recheck_err()
             elif k == 0x16:
                 ws._code_burst_open()          # #111: a paste joins the live typing burst
                 if ed.paste():
-                    self._clear_err()
+                    self._recheck_err()
             else:
                 # A text-editing key (printable / backspace / tab / enter). Open the
                 # typing burst BEFORE the edit lands (#111 phase 4), then close it on
@@ -375,8 +427,8 @@ class CodeLayer:
                 # ignores control bytes it doesn't know, so a no-op key just leaves the
                 # burst open with an unchanged pre-image (a harmless later net no-op).
                 ws._code_burst_open()
-                if ed.key(k):                  # text changed -> drop the stale error marker
-                    self._clear_err()
+                if ed.key(k):                  # text changed -> re-check the marker
+                    self._recheck_err()
                 if k in (0x0D, 0x0A):
                     ws._close_code_burst()
         # (self._ekey.hit above already recorded k as the new previous byte.)
@@ -384,12 +436,40 @@ class CodeLayer:
     # -- #89 helpers: clipboard/find/tool/select routing ---------------------
 
     def _clear_err(self):
-        # A text edit invalidates a stale runtime-error marker (same as the old
-        # inline drop in _editor_input; shared now that several ops mutate the text).
+        # Hard-clear the error marker (the save-OK path; _recheck_err below is
+        # what text edits call).
         ws = self.ws
         ws.code_err = None
         ws.code_err_row = None
         ws.crash_line = None
+        ws.crash_popup = None
+
+    def _recheck_err(self):
+        """A text change RE-VALIDATES the marked error instead of blindly
+        clearing it (owner 2026-07-23): the red underline retires only when the
+        source actually parses again; while it still doesn't, the marker
+        FOLLOWS the live syntax error (without moving the caret). A runtime
+        crash marker can't be re-proven without a run, so a parsing source
+        retires it too -- the closest static answer. The crash popup is
+        transient either way: the first edit/undo dismisses it. Lua carts have
+        no host-side parser -> the old clear-on-edit rule. No marker up ->
+        free (typing never pays a compile)."""
+        ws = self.ws
+        ws.crash_popup = None          # typing starts the fix -- the popup is done
+        if ws.code_err is None and ws.code_err_row is None:
+            return
+        ed = ws.editor
+        check = getattr(ws.carts_store, "compile_check", None) \
+            if ws.carts_store is not None else None
+        if ed is None or check is None or self._is_lua():
+            self._clear_err()
+            return
+        ok, msg = check(ed.text())
+        if ok:
+            self._clear_err()
+        else:
+            ws.crash_line = None       # superseded by the live syntax position
+            ws._set_code_error(msg, move=False)
 
     def _feed_char(self, code):
         # One typed/tapped character: into the find field while it's focused, else
@@ -399,7 +479,7 @@ class CodeLayer:
         elif self.ws.editor is not None:
             self.ws._code_burst_open()         # #111: a palette/tapped char joins the burst
             if self.ws.editor.key(code):
-                self._clear_err()
+                self._recheck_err()
 
     def _run_tool(self, name, ed):
         # Dispatch a tool-palette button (also the keyboard-shortcut targets).
@@ -749,7 +829,11 @@ class CodeLayer:
         # sel/find (#89): the selection tint (drawn BEHIND the text) + the find-match
         # outline + the dim gutter number ink. indigo/orange read on every surface the
         # editor uses; on a light theme the selection uses the theme hilite token.
-        if self.ws.code_layout._base:
+        # The frozen 320x240 literals hold only in DARK chrome; a light theme
+        # variant themes the base tier too (owner ask 2026-07-23) -- the light
+        # branch below carries the _HL_LIGHT syntax set, so code is exactly
+        # "light and dark" on the small tier.
+        if self.ws.code_layout._base and not self.ws.light_chrome():
             return {"bg": NAMES["black"], "caret": NAMES["yellow"],
                     "sym_bg": NAMES["dark_grey"], "sym_edge": NAMES["indigo"],
                     "sym_ink": NAMES["white"], "hl": None,
@@ -758,10 +842,12 @@ class CodeLayer:
         th = self.ws.theme_colors
         if th.get("ink", NAMES["white"]) != 0:      # dark surface -> dark set
             return {"bg": th.get("surface", NAMES["black"]),
-                    "caret": NAMES["yellow"],
-                    "sym_bg": NAMES["dark_grey"], "sym_edge": NAMES["indigo"],
+                    "caret": th.get("accent", NAMES["yellow"]),
+                    "sym_bg": NAMES["dark_grey"],
+                    "sym_edge": th.get("hilite", NAMES["indigo"]),
                     "sym_ink": NAMES["white"], "hl": None,
-                    "sel": NAMES["indigo"], "find": NAMES["orange"],
+                    "sel": th.get("hilite", NAMES["indigo"]),
+                    "find": NAMES["orange"],
                     "gutter": NAMES["dark_grey"]}
         return {"bg": th["surface"], "caret": th["ink"],
                 "sym_bg": th.get("surface_alt", NAMES["dark_grey"]),

@@ -507,6 +507,34 @@ class Launcher:
             clip()
         self._draw_scroll_ui(cv)
 
+    def cover_specs(self):
+        """Every (cart, w, h) cover this grid's NEXT full draw would request
+        (#113 follow-up, owner ask 2026-07-23 "ship them all once": the web
+        /assets prebuild builds these to completion so the whole shelf ships in
+        ONE payload, retiring the per-thumbnail refetch loop) -- the unselected
+        cover size for every cart card, plus the selected card's (its PLAY/
+        CHANGE row shrinks the crop). Mirrors _draw_cart_card's geometry."""
+        lay = self.layout
+        fs = lay.fs
+        band_h = max(14 * fs, 20)
+        # Every CART card shares the uniform grid cell (only the pseudo MAKE
+        # tile takes the tall slot) -- so the sizes never need per-index rects
+        # (tile_rect is None for scrolled-out cards, which a prebuild must
+        # still cover).
+        cw, ch = lay.lib_card_w, lay.lib_card_h
+        btn = 0
+        if self.action_rects() is not None:
+            btn = max(13 * fs, 22) + 2 * max(2 * fs, 3)
+        out = []
+        for i in range(len(self.items)):
+            it = self.items[i]
+            if it.get("type") in PSEUDO_TILE_TYPES or not it.get("path"):
+                continue
+            hh = ch - band_h - (btn if i == self.sel else 0)
+            if cw > 0 and hh > 0:
+                out.append((it, cw, hh))
+        return out
+
     def _draw_cart_card(self, cv, it, rect, selected, sheet_for):
         """One cartridge card: cover art over the dark field, a title band, a thin
         border -- and, when selected, the focus ring plus the PLAY / CHANGE button
@@ -1095,9 +1123,12 @@ class LauncherHomeLayer:
             # the selected cart's name reads on the card itself, and the verbs
             # are the card's own PLAY/CHANGE row.
             fs = lay.fs
+            th = ws.theme_colors
+            ink = th["ink"] if ws.bar_layer.zone_band_light("home") \
+                else th["chrome_ink"]
             ws._icon("moy", rect[0] + 2, rect[1], cv)
             cv.print("moybyte", rect[0] + 2 + 20 * fs,
-                     rect[1] + (16 * fs - 8 * fs) // 2, NAMES["white"], 1)
+                     rect[1] + (16 * fs - 8 * fs) // 2, ink, 1)
             return
         sel = ws.launcher.selected()
         if sel is None:
@@ -1110,7 +1141,10 @@ class LauncherHomeLayer:
         maxc = max(4, limit // lay.font_w)
         if len(name) > maxc:
             name = name[:maxc]
-        cv.print(name, rect[0] + 2, 3, NAMES["white"], 1)
+        th_ = ws.theme_colors
+        cv.print(name, rect[0] + 2, 3,
+                 th_["ink"] if ws.bar_layer.zone_band_light("home")
+                 else th_["chrome_ink"], 1)
         if chips is not None:
             th = ws.theme_colors
             for verb, label, bg in (("play", "PLAY", th["play"]),

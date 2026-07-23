@@ -1397,7 +1397,7 @@ class BlockEditorUI:
         # shelf tiers; the frozen dark-blue body at 320x240, byte-identical. The
         # block PIECES keep their own colorful language (self-backed rows).
         th = ws.theme_colors
-        light = (not lay._base) and ws.light_chrome()
+        light = (not lay._base) or ws.light_chrome()  # tokens on every responsive tier; _base stays frozen only in DARK chrome
         cv.cls(th["surface"] if light else NAMES["dark_blue"])
         # The old "BLOCKS <title>" row was dissolved into the unified bar (Stage-4
         # rollout). Just below the bar sits a thin hint/status strip: the kid-facing

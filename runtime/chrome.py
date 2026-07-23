@@ -961,6 +961,50 @@ THEMES = (
 )
 DEFAULT_THEME = "night"
 
+# --- Light variants (owner ask, 2026-07-23) ---------------------------------
+# Every theme family now ships a DARK and a LIGHT presentation of the same hue
+# identity (visual identity v1 Section 4.3's `surface_light` class, generalized
+# from the one "machine" theme to the whole catalog). THEMES above stays the
+# DARK set -- byte-identical, it is what every existing caller/golden pins.
+# The light sets below are FULL token dicts (base + semantic roles): light
+# papers/pastels for fields, dark ink, the family's tint kept for titles/
+# selection so switching variant never changes a theme's identity. Palette
+# jobs (Section 4.2 discipline): 48 cool paper / 52 warm paper / 7 cream for
+# surfaces, 49/6 for quiet texture, 53 dim warm ink, pastels 19/22/24/25 for
+# the per-family selection wash; signal verbs stay yellow/green/orange/red.
+THEME_VARIANTS = ("dark", "light")
+DEFAULT_VARIANT = "dark"
+_LIGHT_COMMON = {"surface": 7, "surface_alt": 52, "ink": 0, "ink_dim": 53,
+                 "chrome_ink": 0, "chrome_ink_dim": 53, "selection_ink": 0,
+                 "focus": 10, "play": 11, "author": 9, "danger": 8,
+                 "surface_light": True, "bar_light": True}
+THEME_LIGHT = {
+    "night":  {"panel": 48, "edge": 60, "title": 13, "title_ink": 0,
+               "accent": 10, "hilite": 22, "dim": 49,
+               "desktop": 22, "desktop_pattern": 48, "border": 60},
+    "indigo": {"panel": 48, "edge": 61, "title": 13, "title_ink": 0,
+               "accent": 10, "hilite": 24, "dim": 49,
+               "desktop": 24, "desktop_pattern": 48, "border": 61},
+    "berry":  {"panel": 7, "edge": 62, "title": 14, "title_ink": 0,
+               "accent": 10, "hilite": 25, "dim": 6,
+               "desktop": 25, "desktop_pattern": 7, "border": 62},
+    "forest": {"panel": 52, "edge": 58, "title": 11, "title_ink": 0,
+               "accent": 10, "hilite": 19, "dim": 6,
+               "desktop": 19, "desktop_pattern": 52, "border": 58,
+               "surface": 52, "surface_alt": 31},
+    "slate":  {"panel": 6, "edge": 54, "title": 50, "title_ink": 7,
+               "accent": 9, "hilite": 48, "dim": 49,
+               "desktop": 49, "desktop_pattern": 6, "border": 54,
+               "surface": 6, "surface_alt": 48},
+    # Open Machine by day: the construction field itself turns to cool paper
+    # with a quiet grey dot grid; tool surfaces stay cream, grape stays the
+    # selection identity (Section 4.2's jobs, light-inverted).
+    "machine": {"panel": 48, "edge": 60, "title": 48, "title_ink": 0,
+                "accent": 10, "hilite": 22, "dim": 49,
+                "desktop": 48, "desktop_pattern": 49, "border": 1,
+                "selection": 13},
+}
+
 # Semantic-role fallbacks (visual identity v1 Section 4.3). Aliases resolve a missing
 # role from the theme's own base tokens; statics are the frozen literals the surfaces
 # hardcode today, so a legacy theme keeps its exact pixels when a surface switches
@@ -968,42 +1012,69 @@ DEFAULT_THEME = "night"
 _SEMANTIC_ALIAS = (("desktop", "panel"), ("desktop_pattern", "dim"),
                    ("surface", "panel"), ("surface_alt", "panel"),
                    ("border", "edge"), ("selection", "hilite"),
-                   ("focus", "accent"))
+                   ("focus", "accent"),
+                   # Section 4.3's window-strip roles: default to the base
+                   # title/panel tokens the WM reads today.
+                   ("title_active", "title"), ("title_inactive", "panel"))
 _SEMANTIC_STATIC = (("ink", 7), ("ink_dim", 6),      # white / light-grey text
+                    # Ink on the OS chrome itself (bar/taskbar/window strips/
+                    # focused ring) as opposed to `ink` on tool SURFACES -- the
+                    # two diverge in "machine" (dark chrome, light surfaces).
+                    ("chrome_ink", 7), ("chrome_ink_dim", 6),
+                    # Ink on a selection/hilite fill (every dark theme's hilite
+                    # is a dark tint -- white ink; light pastel fills flip it).
+                    ("selection_ink", 7),
+                    # The OS bar/dock band: frozen black + dark-grey shelf edge
+                    # on every dark theme.
+                    ("bar", 0), ("bar_edge", 5),
                     ("play", 11),                    # signal green: PLAY/healthy
                     ("author", 10),                  # today's Make-tile yellow
                     ("danger", 8))                   # red: errors/destructive only
-_SEMANTIC_FLAGS = (("surface_light", False),)
+_SEMANTIC_FLAGS = (("surface_light", False), ("bar_light", False))
 _THEME_CACHE = {}
 
 
-def theme_colors(name):
-    """The full token dict for theme `name` (base tokens + every semantic role,
-    missing roles resolved per _SEMANTIC_ALIAS/_SEMANTIC_STATIC), falling back to
-    the default theme. Returns a shared cached dict (treat as read-only)."""
+def theme_colors(name, variant=DEFAULT_VARIANT):
+    """The full token dict for theme `name` in `variant` ("dark"/"light"): base
+    tokens + every semantic role, missing roles resolved per _SEMANTIC_ALIAS/
+    _SEMANTIC_STATIC, falling back to the default theme (and to the dark set
+    when a theme has no light tokens). Returns a shared cached dict (treat as
+    read-only). The one-arg call keeps its exact pre-variant behavior."""
     resolved = DEFAULT_THEME
     for n, _tokens in THEMES:
         if n == name:
             resolved = name
             break
-    cached = _THEME_CACHE.get(resolved)
+    if variant not in THEME_VARIANTS:
+        variant = DEFAULT_VARIANT
+    if variant == "light" and resolved not in THEME_LIGHT:
+        variant = "dark"
+    key = (resolved, variant)
+    cached = _THEME_CACHE.get(key)
     if cached is None:
         tokens = None
         for n, t in THEMES:
             if n == resolved:
                 tokens = t
                 break
+        if variant == "light":
+            tokens = dict(_LIGHT_COMMON)
+            tokens.update(THEME_LIGHT[resolved])
+            # The OS bar/dock band follows the light panel tone unless a theme
+            # says otherwise (dark themes keep the frozen black band, below).
+            tokens.setdefault("bar", tokens["panel"])
+            tokens.setdefault("bar_edge", tokens["dim"])
         cached = dict(tokens)
         for role, base in _SEMANTIC_ALIAS:
             if role not in cached:
-                cached[role] = tokens[base]
+                cached[role] = cached[base]
         for role, idx in _SEMANTIC_STATIC:
             if role not in cached:
                 cached[role] = idx
         for role, value in _SEMANTIC_FLAGS:
             if role not in cached:
                 cached[role] = value
-        _THEME_CACHE[resolved] = cached
+        _THEME_CACHE[key] = cached
     return cached
 
 

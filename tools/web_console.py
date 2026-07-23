@@ -314,6 +314,12 @@ class WebConsole:
             # Shelf covers (#113): ship every live cover ONCE -- the card
             # draws then reference them by name instead of inlining ~40KB
             # of b64 per redraw (the measured shelf-drag payload eater).
+            # Prebuild the WHOLE shelf first (owner 2026-07-23): every cover
+            # the next draw needs finishes NOW, so this one payload is
+            # complete and no per-thumbnail cache-miss refetch loop runs.
+            pb = getattr(self.ws, "prebuild_covers", None)
+            if pb is not None:
+                pb()
             decoded.update(self.ws.cover_assets())
             # #42 Thread 3: the EFFECTIVE input hint -- the cart's manifest hint only
             # while it owns the keyboard (playing), never in the Editor (typing!).
@@ -399,10 +405,20 @@ class _Handler(BaseHTTPRequestHandler):
             pass
         next_push = time.monotonic()
         last_sent = 0.0                     # last actual push (for the idle keepalive)
-        # Per-surface DELTA (#76): one SurfaceDelta per WS connection -- it mirrors
-        # THIS browser's SURF cache, so a fresh connection starts full and unchanged
-        # surfaces ship as {"same":1} stubs afterwards (same wire the device speaks).
-        delta = web_view.SurfaceDelta()
+        # Per-connection serve state (the SHARED policy object, web_view.
+        # WsClientState -- the same one the device's moy_webserver uses): the
+        # #76 SurfaceDelta mirroring THIS browser's SURF cache, plus the
+        # first-frame KEYFRAME LATCH -- the /assets dirty-kick can be consumed
+        # by a still-live OLD connection's loop (a page reload overlaps
+        # sockets), leaving the new page black until an input dirties the
+        # console again (owner report 2026-07-23), so the loop re-arms the
+        # dirty gate every push tick until IT has served a full frame.
+        client = web_view.WsClientState()
+        delta = client.delta
+
+        def _mark_dirty():
+            with self.console._lock:
+                self.console.ws._dirty = True
         while True:
             # 1. Inbound: drain queued input frames (input UP the socket).
             try:
@@ -442,10 +458,12 @@ class _Handler(BaseHTTPRequestHandler):
             if now < next_push:
                 continue
             next_push = now + interval
+            client.arm_keyframe(_mark_dirty)
             try:
                 cmds, cart, audio = self.console.step_frame()   # lock-guarded inside
             except Exception:  # noqa: BLE001 -- a frame error must not kill the socket loop
                 continue
+            client.note_frame(cmds is not None)
             gen = self.console.canvas._rec.atlas_gen            # host recorder gen (self-contained)
             if cmds is None:
                 # The console skipped the redraw (a static screen): push NOTHING --

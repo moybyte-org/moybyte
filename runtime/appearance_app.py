@@ -11,9 +11,9 @@ every tier -- the monitor scales from the 320x240 shelf to the desktop.
 """
 
 try:
-    from chrome import THEMES
+    from chrome import THEMES, THEME_VARIANTS, theme_colors
 except ImportError:  # pragma: no cover - direct host import
-    from runtime.chrome import THEMES
+    from runtime.chrome import THEMES, THEME_VARIANTS, theme_colors
 
 try:
     import ui as _ui
@@ -192,7 +192,7 @@ class AppearanceAppLayer:
         item = items[self.sel]
         if self.mode == "themes":
             self.ws.set_theme(item[0], persist=True)
-            self.status = item[0].upper() + " THEME"
+            self.status = (item[0] + " " + self.ws.theme_variant).upper()
         else:
             self.ws.select_wallpaper(self._wall_id(item), persist=True)
             self.status = self._wall_title(item).upper()
@@ -219,6 +219,24 @@ class AppearanceAppLayer:
             self._set_mode(self.MODES[(self.MODES.index(self.mode) + 1) % 3])
         return True
 
+    def _variant_chip_rects(self):
+        """The THEMES tab's DARK/LIGHT toggle chips, along the top of the
+        preview field (same rects for draw and hit-test)."""
+        fs = self.layout.fs
+        x, y, w, _h = self.layout.field
+        cw, ch = 42 * fs, 13 * fs
+        out = []
+        cx = x + w - (cw + 3 * fs) * len(THEME_VARIANTS)
+        for v in THEME_VARIANTS:
+            out.append((v, (cx, y + 2 * fs, cw, ch)))
+            cx += cw + 3 * fs
+        return out
+
+    def _set_variant(self, variant):
+        self.ws.set_theme_variant(variant, persist=True)
+        self.status = (self.ws.theme_name + " " + variant).upper()
+        self.ws._dirty = True
+
     def handle_pointer(self, px, py, click):
         lay = self.layout
         if click and not self.ws.windowed_chrome and py < lay.bar_h:
@@ -229,6 +247,11 @@ class AppearanceAppLayer:
             if self._in(px, py, r):
                 self._set_mode(self.MODES[i])
                 return True
+        if self.mode == "themes":
+            for v, r in self._variant_chip_rects():
+                if self._in(px, py, r):
+                    self._set_variant(v)
+                    return True
         for i, r in enumerate(lay.cards(len(self._items()))):
             if self._in(px, py, r):
                 self._apply(i)
@@ -254,7 +277,12 @@ class AppearanceAppLayer:
                          self.mode == self.MODES[i])
 
         if self.mode == "themes":
-            self._draw_theme_preview(cv, lay.field)
+            fs = lay.fs
+            fx, fy, fw, fh = lay.field
+            band = 17 * fs
+            for v, r in self._variant_chip_rects():
+                self._button(cv, v.upper(), r, self.ws.theme_variant == v)
+            self._draw_theme_preview(cv, (fx, fy + band, fw, max(1, fh - band)))
         elif lay.screen is not None:
             self._draw_monitor(cv, dt)
 
@@ -335,7 +363,7 @@ class AppearanceAppLayer:
         cv.rect(ix + 1, iy + 1, ww - 2, strip, th["panel"])
         cv.rect(ix + 1, iy + strip, ww - 2, 1, th["dim"])
         if ww >= 70 * fs:
-            cv.print("WINDOW", ix + 3 * fs, iy + 2 * fs, n["light_grey"], 1)
+            cv.print("WINDOW", ix + 3 * fs, iy + 2 * fs, th["ink_dim"], 1)
         # active window (front, down-right)
         ax, ay = x + w - gap_x - ww, y + h - gap_y - wh
         cv.rect(ax, ay, ww, wh, th["panel"])
@@ -349,10 +377,10 @@ class AppearanceAppLayer:
         body_y = ay + strip + 2 * fs
         body_h = wh - strip - 3 * fs
         if body_h >= 22 * fs:
-            cv.print("AA", ax + 4 * fs, body_y + fs, n["white"], 1)
+            cv.print("AA", ax + 4 * fs, body_y + fs, th["ink"], 1)
             cv.rect(ax + 3 * fs, body_y + 10 * fs, ww - 6 * fs, 9 * fs,
                     th["hilite"])
-            cv.print("PICK", ax + 5 * fs, body_y + 11 * fs, n["white"], 1)
+            cv.print("PICK", ax + 5 * fs, body_y + 11 * fs, th["ink"], 1)
         bw_, bh_ = 26 * fs, 11 * fs
         if body_h >= 36 * fs:
             cv.rect(ax + ww - bw_ - 4 * fs, ay + wh - bh_ - 3 * fs, bw_, bh_,
@@ -428,7 +456,10 @@ class AppearanceAppLayer:
             cv.circ(x + w * 3 // 4, y + h // 3, max(2, h // 8), self.names["yellow"])
 
     def _draw_theme_card(self, cv, r, item, selected):
-        name, tok = item
+        # Cards preview the theme in the ACTIVE variant, so flipping DARK/LIGHT
+        # repaints the whole catalog in that presentation.
+        name = item[0]
+        tok = theme_colors(name, self.ws.theme_variant)
         x, y, w, h = r
         fs = self.layout.fs
         cv.rect(x, y, w, h, tok["panel"])
@@ -441,5 +472,5 @@ class AppearanceAppLayer:
         else:
             cv.rect(x + 8 * fs, y + 25 * fs, w * 3 // 5, 12 * fs, tok["hilite"])
             cv.rect(x + w - 25 * fs, y + 25 * fs, 17 * fs, 12 * fs, tok["accent"])
-        cv.print(name.upper(), x + 6 * fs, y + h - 14 * fs, tok["title_ink"], 1)
+        cv.print(name.upper(), x + 6 * fs, y + h - 14 * fs, tok["ink"], 1)
         cv.rectb(x, y, w, h, tok["accent"] if selected else tok["dim"])

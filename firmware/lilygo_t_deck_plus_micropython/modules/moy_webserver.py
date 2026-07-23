@@ -82,6 +82,7 @@ RecordingLayer = _wv.RecordingLayer
 TeeCanvas = _wv.TeeCanvas
 ServedState = _wv.ServedState
 SurfaceDelta = _wv.SurfaceDelta
+WsClientState = _wv.WsClientState
 palette_rgb = _wv.palette_rgb
 sheet_payload = _wv.sheet_payload
 tilemap_payload = _wv.tilemap_payload
@@ -394,7 +395,8 @@ class WebServer:
         self._served_state = ServedState(recorder)
         # Per-surface DELTA (#76): mirrors what the ONE live WS client's page holds
         # (its SURF cache); reset with the served state (fresh client / /assets).
-        self._surf_delta = SurfaceDelta()
+        self._client = WsClientState()     # per-WS-connection serve state (shared
+                                           # policy object -- delta + keyframe latch)
 
     def start(self, ip=None):
         """Open the non-blocking listening socket. `ip` is the device's STA IP (for the printed
@@ -465,7 +467,7 @@ class WebServer:
         sprite bitmap AND layer stream it references. Called when /assets is (re)served.
         The surface delta resets in lock-step (#76): a fresh page has an empty SURF cache."""
         self._served_state.reset()
-        self._surf_delta.reset()
+        self._client.delta.reset()
 
     def begin_frame(self):
         """Set the recorder's gate for THIS frame + start a fresh command list when a browser is
@@ -587,7 +589,11 @@ class WebServer:
         self._drop_ws()                            # latest-wins: one client at a time
         self._ws = _WSConn(conn)
         # A fresh client starts with an empty atlas + no assets -> re-ship every defspr it
-        # references, exactly as /assets did for the poll transport.
+        # references, exactly as /assets did for the poll transport. The fresh
+        # WsClientState re-arms the KEYFRAME LATCH too: the latest-wins replacement
+        # above produces NO recording-wanted edge (the device_webview connect kick
+        # never fires on a reload), which was this tier's black-until-tap hole.
+        self._client = WsClientState()
         self.reset_served()
         self._last_push_ms = 0                     # push the first frame promptly
         self.requests += 1
@@ -616,6 +622,12 @@ class WebServer:
         if ticks_diff(ticks_ms(), ws.last_recv) >= RECORD_IDLE_MS:
             self._drop_ws()
             return did
+        # Keyframe latch (shared policy, web_view.WsClientState): keep the console's
+        # redraw gate open until THIS connection has been served one full frame, so
+        # a fresh/reloaded page can never sit black on an idle screen.
+        hook = getattr(self.provider, "mark_dirty", None)
+        if hook is not None:
+            self._client.arm_keyframe(hook)
         # 2. Outbound: push the latest committed frame, capped. The interval is the fps cap,
         # RAISED for a heavy frame so WiFi never saturates (#41).
         now = ticks_ms()
@@ -684,10 +696,11 @@ class WebServer:
         # {"same":1} stub instead of its whole command list. served_surfaces runs the
         # same ship-once defspr/deflayer bookkeeping served_frame would, exactly once.
         surfaces = self.recorder.frame_surfaces()
+        self._client.note_frame(bool(cmds) or bool(surfaces))   # latch on a real frame
         wire = None
         if surfaces is not None:
             _flat, dicts = self._served_state.served_surfaces(cmds, surfaces)
-            wire = self._surf_delta.encode(dicts, gen=self.recorder.atlas_gen)
+            wire = self._client.delta.encode(dicts, gen=self.recorder.atlas_gen)
         else:
             cmds = self.served_frame(cmds)
         self._frames_pushed += 1

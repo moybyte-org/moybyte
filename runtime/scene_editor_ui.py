@@ -575,7 +575,7 @@ class SceneEditorUI:
         se = self.sceneedit
         sheet = ws.project.sheet
         th = ws.theme_colors
-        light = (not lay._base) and ws.light_chrome()
+        light = (not lay._base) or ws.light_chrome()  # tokens on every responsive tier; _base stays frozen only in DARK chrome
         cv.rect(*(lay.body_fill + ((th["surface"] if light else NAMES["black"]),)))
         cv.rect(*(lay.panel + ((th["surface"] if light else NAMES["black"]),)))
         cv.rectb(*(lay.panel + (NAMES["green"],)))

@@ -465,6 +465,16 @@ class WebView:
                                         getattr(ws, "tilemap", None), title, rate,
                                         decoded or None, input_kinds)
 
+    def mark_dirty(self):
+        """The keyframe latch's dirty hook (web_view.WsClientState via
+        moy_webserver): force the console to record a full frame for a freshly
+        connected browser even on an idle screen (#44's gate records nothing
+        otherwise). Same verb the connect-edge kick above uses."""
+        try:
+            self._ws.mark_dirty()
+        except Exception:  # noqa: BLE001 -- a hook hiccup must never kill the serve loop
+            pass
+
     def frame(self):
         cart = getattr(self._ws, "cart", None)
         title = cart.get("title") if cart else None
@@ -527,6 +537,9 @@ class _WebProvider:
 
     def frame(self):
         return self._v.frame()
+
+    def mark_dirty(self):
+        self._v.mark_dirty()
 
     def apply(self, events):
         self._v.apply(events)

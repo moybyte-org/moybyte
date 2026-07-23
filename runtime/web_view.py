@@ -1501,6 +1501,52 @@ class ServedState:
         self._served_gen = self.recorder.atlas_gen
 
 
+class WsClientState:
+    """Per-WS-connection serve state, shared by BOTH web servers (the host
+    tools/web_console.py per-connection thread loop and the device
+    moy_webserver.py single-client poll loop) so the connection-lifecycle
+    POLICY has one home instead of three hand-rolled copies:
+
+      * `delta`  -- the #76 per-surface SurfaceDelta (mirrors THIS browser's
+        SURF cache; a fresh connection starts full).
+      * the FIRST-FRAME KEYFRAME LATCH -- a fresh connection must be served
+        one full recorded frame before the stream may idle. The console's
+        redraw-on-change gate (#44) records NOTHING on a static screen, and
+        every one-shot kick (the /assets dirty arm, the device's
+        recording-wanted edge) has a hole: on a page reload the OLD
+        connection can consume the kick (host, overlapping sockets) or
+        latest-wins replacement produces no edge at all (device) -- the
+        black-screen-until-tap bug (owner report 2026-07-23). The latch
+        closes it structurally: the serving loop calls arm_keyframe(mark_dirty)
+        every push tick until note_frame() has seen a real frame go down THIS
+        connection, so no race can starve a fresh page.
+
+    MicroPython-safe (plain attributes, no imports); constructed per accepted
+    WS connection on both tiers."""
+
+    def __init__(self):
+        self.delta = SurfaceDelta()
+        self.served_full = False
+
+    def arm_keyframe(self, mark_dirty):
+        """Keep the console's redraw gate open until this connection has been
+        served one full frame. Call once per push tick BEFORE stepping/
+        recording; `mark_dirty` is the backend's dirty hook (guarded -- a
+        hook hiccup must never kill a serve loop)."""
+        if self.served_full:
+            return
+        try:
+            mark_dirty()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def note_frame(self, served):
+        """Record a push: `served` truthy = a real recorded frame (not an idle
+        keepalive) went down this connection -- the latch closes."""
+        if served:
+            self.served_full = True
+
+
 class SurfaceDelta:
     """Per-client surface DELTA (#76): only re-send a WM surface whose command stream
     actually changed since the last push to THIS client. The browser keeps a per-id

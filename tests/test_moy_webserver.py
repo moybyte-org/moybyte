@@ -59,6 +59,69 @@ WIDTH, HEIGHT = 320, 240
 replay_diet = web_view.replay_to_canvas
 
 
+def test_device_reload_keyframe_latch_without_recording_edge():
+    """A page RELOAD replaces the live WS conn latest-wins, so the recording-
+    wanted edge (device_webview's connect kick) never fires -- the shared
+    web_view.WsClientState latch must still force a keyframe: _service_ws
+    re-arms the provider's dirty hook every poll until a REAL frame goes down
+    the fresh connection, then stops (the idle stream stays ~free)."""
+
+    class _Rec:
+        atlas_gen = 0
+
+        def frame_surfaces(self):
+            return None
+
+    class _Prov:
+        def __init__(self):
+            self.dirty = 0
+            self.cmds = []
+
+        def frame(self):
+            return (list(self.cmds), None, None)
+
+        def apply(self, events):
+            pass
+
+        def mark_dirty(self):
+            self.dirty += 1
+
+    class _Conn:
+        def __init__(self):
+            self.alive = True
+            self.last_recv = web.ticks_ms()
+            self.sent = []
+
+        def drain_input(self):
+            return []
+
+        def send(self, payload, opcode=None):
+            self.sent.append(payload)
+
+        def close(self):
+            self.alive = False
+
+    prov = _Prov()
+    srv = web.WebServer(_Rec(), prov, port=0)
+    srv._ws = _Conn()
+    srv._client = web.WsClientState()      # what _upgrade_ws installs per conn
+    # Idle console (empty committed frames): the latch re-arms every poll.
+    for want in (1, 2):
+        srv._last_push_ms = 0
+        srv._service_ws()
+        assert prov.dirty == want
+        assert not srv._client.served_full
+    # The console repainted -> a real frame goes down -> the latch closes...
+    prov.cmds = [["cls", 0]]
+    srv._last_push_ms = 0
+    srv._service_ws()
+    assert srv._client.served_full
+    settled = prov.dirty
+    srv._last_push_ms = 0
+    srv._service_ws()
+    assert prov.dirty == settled           # ...and the arming stops
+
+
 def test_moved_code_is_re_exported_from_the_shared_module():
     """The recorder / Tee / payload builders / serve logic / page / constants moved into the
     SHARED web_view module; the DEVICE moy_webserver is a thin transport that IMPORTS + re-exports

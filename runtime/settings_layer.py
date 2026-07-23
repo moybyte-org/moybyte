@@ -453,18 +453,19 @@ class SettingsLayer:
                 connected, ssid, ip = ws.wifi.status()
             except Exception:  # noqa: BLE001
                 pass
+        th = ws.theme_colors
         ws._icon("wifi" if connected else "wifi_off", x, y, cv)
         if connected:
-            cv.print(("ON  " + str(ssid))[:22], x + 20 * fs, y + 5, NAMES["green"], 1)
+            cv.print(("ON  " + str(ssid))[:22], x + 20 * fs, y + 5, th["play"], 1)
             if ip:
                 cv.print(str(ip)[:15], x + w - 15 * fw, y + 5, NAMES["blue"], 1)
         else:
-            cv.print("NOT CONNECTED", x + 20 * fs, y + 5, NAMES["light_grey"], 1)
+            cv.print("NOT CONNECTED", x + 20 * fs, y + 5, th["ink_dim"], 1)
         if self.wifi_pick is not None:
             # Password prompt: the picked ssid + the typed password + a caret.
             x, y, w, h = self._wifi_row_rect(0)
             cv.print(("PASSWORD FOR " + str(self.wifi_pick))[:30], x + 4, y + 5,
-                     NAMES["white"], 1)
+                     th["ink"], 1)
             bx, by, bw2, bh2 = self._wifi_row_rect(1)
             cv.rect(bx, by, bw2, bh2 - 2, NAMES["black"])
             cv.rectb(bx, by, bw2, bh2 - 2, ws.theme_colors["edge"])
@@ -473,7 +474,7 @@ class SettingsLayer:
             cv.rect(bx + 4 + len(shown) * fw, by + 3, fs, bh2 - 8, NAMES["yellow"])
             x, y, w, h = self._wifi_row_rect(2)
             cv.print("ENTER = CONNECT   ESC = BACK", x + 4, y + 5,
-                     NAMES["dark_grey"], 1)
+                     th["ink_dim"], 1)
         else:
             # The network list.
             for k in range(len(self.wifi_nets)):
@@ -483,12 +484,12 @@ class SettingsLayer:
                     break                          # keep clear of the button row
                 sel = (k == self.wifi_sel)
                 if sel:
-                    cv.rect(x, y, w, h, ws.theme_colors["hilite"])
-                fg = NAMES["white"] if sel else NAMES["light_grey"]
+                    cv.rect(x, y, w, h, th["hilite"])
+                fg = th["selection_ink"] if sel else th["ink_dim"]
                 cv.print(str(ssid_k)[:16], x + 4, y + 5, fg, 1)
                 bars = max(0, min(4, int(sig) // 25 + 1))
                 for s in range(4):
-                    c = NAMES["green"] if s < bars else NAMES["dark_grey"]
+                    c = th["play"] if s < bars else th["ink_dim"]
                     cv.rect(x + w - 46 * fs + s * 8 * fs, y + h - 6 * fs - 2 * fs * s,
                             5 * fs, (2 + 2 * s) * fs, c)
                 if locked:
@@ -498,10 +499,10 @@ class SettingsLayer:
                     cv.print("SAVED", x + w - 110 * fs, y + 5, NAMES["blue"], 1)
         if self.wifi_msg:
             mx, my = px + 10 * fs, py + ph - 30 * fs - 10 * fs
-            cv.print(self.wifi_msg[:36], mx, my, NAMES["yellow"], 1)
+            cv.print(self.wifi_msg[:36], mx, my, th["accent"], 1)
         for name, rect in self._wifi_btns():
             label = name.upper()
-            color = {"connect": NAMES["green"], "forget": NAMES["red"],
+            color = {"connect": th["play"], "forget": th["danger"],
                      "rescan": NAMES["blue"], "back": NAMES["dark_grey"]}[name]
             ws._btn(label, rect, color, cv)
 
@@ -886,10 +887,11 @@ class SettingsLayer:
         # Inside a WM window (#73) the title strip already says SETTINGS and carries
         # the closing X, so the panel's own header + X are suppressed (no doubled
         # chrome); the trophy (the achievements door, #21) stays either way.
+        p_ink = th["ink"] if th.get("bar_light", False) else th["chrome_ink"]
         if not getattr(ws, "windowed_chrome", False):
-            ws._glyph("gear", (px + 6, py + 2, 14 * fs, 14 * fs), NAMES["yellow"], cv)
-            cv.print("SETTINGS", px + 24, py + 4, NAMES["white"], 2)
-            ws._mini_btn("X", lay.set_back, NAMES["red"], cv)
+            ws._glyph("gear", (px + 6, py + 2, 14 * fs, 14 * fs), th["accent"], cv)
+            cv.print("SETTINGS", px + 24, py + 4, p_ink, 2)
+            ws._mini_btn("X", lay.set_back, th["danger"], cv)
         if self.wifi_view:
             # The WIFI panel (#38) replaces the row list (its BACK returns here).
             self._draw_wifi()
@@ -903,9 +905,10 @@ class SettingsLayer:
             return
         # Achievements view button (#21): a trophy badge with the unlocked count.
         sa = lay.set_ach
-        cv.rect(sa[0], sa[1], sa[2], sa[3], ws.theme_colors["hilite"])
-        ws._glyph("trophy", (sa[0] - 2, sa[1], 14 * fs, 14 * fs), NAMES["yellow"], cv)
-        cv.print(str(ws.ach.count()), sa[0] + 13 * fs, sa[1] + 4, NAMES["white"], 1)
+        cv.rect(sa[0], sa[1], sa[2], sa[3], th["hilite"])
+        ws._glyph("trophy", (sa[0] - 2, sa[1], 14 * fs, 14 * fs), th["accent"], cv)
+        cv.print(str(ws.ach.count()), sa[0] + 13 * fs, sa[1] + 4,
+                 th["selection_ink"], 1)
         rows = self._settings_rows()
         for i in range(len(rows)):
             if self._settings_row_visible(i):
@@ -924,9 +927,11 @@ class SettingsLayer:
         px, py, pw, ph = lay.settings_panel
         xr = px + pw - 9 * lay.fs
         vis = self._settings_visible()
+        th_ = ws.theme_colors
         _ui.scroll_cues(
             cv, (xr, lay.set_row_y0), (xr, py + ph - 9 * lay.fs),
-            self.set_top > 0, self.set_top + vis < len(rows), NAMES["white"])
+            self.set_top > 0, self.set_top + vis < len(rows),
+            th_["ink"] if th_.get("bar_light", False) else th_["chrome_ink"])
         if not lay._base:
             # Shelf tiers: the toolkit scrollbar alongside (base keeps the frozen
             # chevron-only pixels).
@@ -938,12 +943,13 @@ class SettingsLayer:
         cv = ws.sys_canvas
         lay = ws.layout
         fw = lay.font_w
+        th = ws.theme_colors
         key, label, kind = self._settings_rows()[i]
         x, y, w, h = self._settings_row_rect(i)
         sel = (i == self.set_msel)
         if sel:
-            cv.rect(x, y, w, h, ws.theme_colors["hilite"])
-        fg = NAMES["white"] if sel else NAMES["light_grey"]
+            cv.rect(x, y, w, h, th["hilite"])
+        fg = th["selection_ink"] if sel else th["chrome_ink_dim"]
         cv.print(label, x + 4, y + 5, fg, 1)
         if kind == "wifi-net":
             # WIFI (#38): the connected SSID (or OFF) + the status icon as the OPEN
@@ -989,15 +995,15 @@ class SettingsLayer:
             ws._glyph(g, (x + w - 18 * lay.fs, y + 2, 14 * lay.fs, 14 * lay.fs), c, cv)
             return
         # < value > stepper at the right (the chevrons print at double size = 2*fw).
-        cv.print("<", x + w - 11 * fw - 2, y + 5, NAMES["yellow"], 2)
-        cv.print(">", x + w - 2 * fw + 2, y + 5, NAMES["yellow"], 2)
+        cv.print("<", x + w - 11 * fw - 2, y + 5, th["author"], 2)
+        cv.print(">", x + w - 2 * fw + 2, y + 5, th["author"], 2)
         vx = x + w - 78 * lay.fs           # value column (baseline x+w-78)
         if kind == "font":                 # system-UI font size (#39): 1x / 2x / 3x
-            cv.print("%dx" % ws.font_scale, vx, y + 5, NAMES["green"], 1)
+            cv.print("%dx" % ws.font_scale, vx, y + 5, th["play"], 1)
         elif kind == "mock-gauge":
             lvl = int(ws.system.get(key, 3))
             for s in range(5):
-                c = NAMES["green"] if s < lvl else NAMES["dark_grey"]
+                c = th["play"] if s < lvl else NAMES["dark_grey"]
                 cv.rect(vx + s * 8 * lay.fs, y + 6, 6 * lay.fs, 8 * lay.fs, c)
         elif kind == "mock-name":
             cv.print(str(ws.system.get("name", self._MOCK_NAMES[0]))[:8], vx, y + 5,

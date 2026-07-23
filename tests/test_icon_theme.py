@@ -124,7 +124,7 @@ def test_save_invalidates_bar_cache_and_bar_still_draws(tmp_path):
     drv.frame(1 / 30)
     # Warm the bar image cache (the running-cart bar draws icons via _bar_image).
     ws._bar_image("home")
-    assert "home" in ws._bar_img_cache
+    assert ("home", False) in ws._bar_img_cache   # (kind, light-chrome) key
     ws.paint.color = 11
     drv.click(C._PG_X0 + 1, C._PG_Y0 + 1)
     drv.frame(1 / 30)

@@ -541,7 +541,7 @@ try:
         _BASE_W, _BASE_H, _FONT_W, Layout, CodeLayout, _GLYPH_SIZE, _GLYPHS,
         _blit_glyph, _ICON, _ICON_ART, _ICON_VERSION, _nibble, _default_icon_sheet,
         _cursor_delta, _clamp_scroll, _in, _SPLASH_MS,
-        THEMES, DEFAULT_THEME, theme_colors,
+        THEMES, DEFAULT_THEME, theme_colors, THEME_VARIANTS, DEFAULT_VARIANT,
     )
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import (
@@ -552,7 +552,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
         _BASE_W, _BASE_H, _FONT_W, Layout, CodeLayout, _GLYPH_SIZE, _GLYPHS,
         _blit_glyph, _ICON, _ICON_ART, _ICON_VERSION, _nibble, _default_icon_sheet,
         _cursor_delta, _clamp_scroll, _in, _SPLASH_MS,
-        THEMES, DEFAULT_THEME, theme_colors,
+        THEMES, DEFAULT_THEME, theme_colors, THEME_VARIANTS, DEFAULT_VARIANT,
     )
 
 
@@ -631,6 +631,7 @@ class Workstation:
         # chrome/selection accents read each draw. Default = the moybyte "night"
         # colorway (today's exact colors); load_system applies the persisted pick.
         self.theme_name = DEFAULT_THEME
+        self.theme_variant = DEFAULT_VARIANT
         self.theme_colors = theme_colors(DEFAULT_THEME)
         self.layout = Layout(self.sys_canvas.w, self.sys_canvas.h,
                              self._effective_font_scale())
@@ -871,6 +872,10 @@ class Workstation:
         self.save_status = None       # last save_code result text (e.g. a syntax error)
         self.code_err = None          # short inline syntax-error message (#24)
         self.code_err_row = None      # 0-based row the syntax error is on (#24)
+        self.crash_popup = None       # full error text of the popup the code
+                                      # editor shows after a crash-to-code throw
+                                      # (owner ask 2026-07-23); dismissed by a
+                                      # tap or the first edit
         # Undo-journal idle-typing debounce (Stage 7 of docs/shell_ux_technical_plan_v1.md):
         # _edit_ms is the ticks of the last keystroke in the code editor (None = no
         # pending edit); frame() fires a durable, INVISIBLE autosave-commit once
@@ -1253,7 +1258,8 @@ class Workstation:
         # My Art's bg asset before compiling a persisted My Art wallpaper.
         self.artwork.sync_wallpaper()
         self.select_wallpaper(self.system.get("wallpaper"), persist=False)
-        self.set_theme(self.system.get("theme", self.theme_name), persist=False)
+        self.set_theme(self.system.get("theme", self.theme_name), persist=False,
+                       variant=self.system.get("theme_variant", self.theme_variant))
         # #68: apply the persisted diagnostics gate (kid-mode default OFF).
         self.set_diag_live(self.system.get("diag_live", False), persist=False)
         self.set_diag_sd(self.system.get("diag_sd", False), persist=False)
@@ -1354,14 +1360,19 @@ class Workstation:
         nxt = scales[(scales.index(cur) + d) % len(scales)]
         self.set_font_scale(nxt, persist=True)
 
-    def set_theme(self, name, persist=True):
+    def set_theme(self, name, persist=True, variant=None):
         """Pick the panel THEME (Appearance app -> THEMES): swap the chrome token set
         (chrome.THEMES) the panels/window chrome/selection accents read each draw,
-        and persist the choice. An unknown name falls back to the default."""
+        and persist the choice. An unknown name falls back to the default.
+        `variant` picks the theme's dark/light presentation (None keeps the
+        current variant, so existing name-only callers are untouched)."""
         if not any(n == name for n, _t in THEMES):
             name = DEFAULT_THEME
+        if variant is not None:
+            self.theme_variant = variant if variant in THEME_VARIANTS \
+                else DEFAULT_VARIANT
         self.theme_name = name
-        self.theme_colors = theme_colors(name)
+        self.theme_colors = theme_colors(name, self.theme_variant)
         # The launcher grids read the accent for their selection ring/pill.
         self.launcher.theme = self.theme_colors
         if getattr(self, "picker", None) is not None:
@@ -1374,7 +1385,13 @@ class Workstation:
         self._dirty = True
         if persist:
             self.system["theme"] = self.theme_name
+            self.system["theme_variant"] = self.theme_variant
             self._persist_system()
+
+    def set_theme_variant(self, variant, persist=True):
+        """Flip the current theme between its dark and light presentation
+        (Appearance app -> THEMES -> DARK/LIGHT)."""
+        self.set_theme(self.theme_name, persist=persist, variant=variant)
 
     def cycle_theme(self, d):
         """Step the panel theme through chrome.THEMES (programmatic verb; the UI
@@ -1766,6 +1783,31 @@ class Workstation:
                 self._cover_cache_pixels -= len(old_img.pix)
         return img
 
+    def prebuild_covers(self):
+        """Build EVERY cover the shelf's next draw needs to COMPLETION, now --
+        bypassing the per-frame _COVER_SLICE_MS budget by re-arming it per step
+        (owner ask 2026-07-23 "ship them all once"). Wired into the HOST web
+        /assets handler (tools/web_console.assets), so cover_assets() below
+        returns the WHOLE shelf in one payload and the browser never hits the
+        per-thumbnail cache-miss -> /assets refetch loop. Cheap after the first
+        session (the #86 thumb sidecars make each build one small read); the
+        DEVICE deliberately keeps the budgeted pop-in + self-healing refetch
+        instead -- a first-boot prebuild without sidecars would stall its
+        single-threaded loop for seconds per shelf."""
+        specs = getattr(self.launcher, "cover_specs", None)
+        if specs is None:
+            return
+        for cart, w, h in specs():
+            path = cart.get("path")
+            if path is None:
+                continue
+            key = (path, w, h)
+            guard = 400                    # hard ceiling: ~400 x 8ms slices
+            while key not in self._cover_cache and guard:
+                guard -= 1
+                self._cover_built = False  # re-arm the one-slice-per-frame gate
+                self._cover_for(cart, w, h)
+
     def cover_assets(self):
         """{name: (w, h, index_bytes)} for every LIVE shelf-cover blittable --
         merged into both web transports' /assets images (#113): a cover then
@@ -2095,6 +2137,10 @@ class Workstation:
         run() makes the desktop layer active + records the caller. The launcher home root
         is one caller (pop == go_home); the Editor is the second (Stage 3), so PLAY
         returns to the same tab -- proving the Player is caller-agnostic."""
+        if self.cart_error is not None and self._crash_to_code():
+            return                     # the start already failed (syntax/init error):
+                                       # no parked OOPS screen -- straight to the line
+        self.crash_popup = None        # a clean launch retires any stale popup
         self._run_caller = caller
         self.wm.goto("desktop")        # Stage 6e: push the Player process onto the back-stack
 
@@ -2131,6 +2177,38 @@ class Workstation:
             self._set_text_mode(getattr(self.editor_app, "tab", None) == "code")
         else:
             self.go_home()
+
+    def _crash_to_code(self):
+        """A crashed cart run throws the kid STRAIGHT into the code editor on
+        the crashing line, with a dismissible error popup (owner ask
+        2026-07-23) -- replacing the parked OOPS panel + its manual TAP-CODE
+        step at both crash sites (a failed start via run(), a mid-frame crash
+        via Player._frame_running). Returns True when it navigated; False
+        (no open project/cart -- nothing to edit) keeps the caller on the old
+        panel fallback. The dead run's world is released exactly like a
+        normal exit; cart_error/crash_line survive it (the editor's inline
+        marker + the popup read them)."""
+        if self.project is None or self.cart is None:
+            return False
+        err = self.cart_error or "crashed"
+        line = self.crash_line
+        self.player.release_world()
+        # Windowed desk world (#73/#105): the crashed playtest window closes
+        # like a normal exit (never truncating windows stacked above it);
+        # the fullscreen tiers just re-route the back-stack below.
+        _cp = getattr(self.wm, "close_player", None)
+        if _cp is not None and self.wm.desk_open():
+            _cp()
+        self.editor_app.open(self.project)
+        self.set_menu_view("code")
+        if line is not None:
+            # Land the caret on the line that raised (set_menu_view only marks
+            # it when it BUILDS the editor -- an editor kept open across the
+            # PLAY needs the explicit jump).
+            self._mark_code_error(line - 1, err[:32])
+        self.crash_popup = err
+        self._dirty = True
+        return True
 
     def exit(self):
         """Exit the active TASKBAR app back toward the launcher root (spec Section 9's
@@ -2724,11 +2802,12 @@ class Workstation:
         # check + code-UI half above stays here (the code surface).
         return self.project.commit_code(src)
 
-    def _set_code_error(self, msg):
+    def _set_code_error(self, msg, move=True):
         """Record a syntax error so the code view can mark the offending line
         inline (#24). compile_check formats messages as "line N: <reason>"; pull
         N out for the marker, keep the short reason for the inline note, and move
-        the caret onto that line so the fix is one tap away."""
+        the caret onto that line so the fix is one tap away (`move=False` for
+        the live typing re-check, which must never yank the caret)."""
         row = None
         short = msg
         if msg.startswith("line "):
@@ -2737,14 +2816,16 @@ class Workstation:
             if p > 0 and rest[:p].strip().isdigit():
                 row = int(rest[:p].strip()) - 1
                 short = rest[p + 1:].strip()
-        self._mark_code_error(row, short)
+        self._mark_code_error(row, short, move=move)
 
-    def _mark_code_error(self, row, short):
+    def _mark_code_error(self, row, short, move=True):
         """Record an inline error marker (#24) and, if the editor is open, move
-        the caret onto `row` (0-based) so the fix is one tap away."""
+        the caret onto `row` (0-based) so the fix is one tap away. `move=False`
+        (the live re-check while the kid types) updates the marker WITHOUT
+        yanking the caret."""
         self.code_err = short
         self.code_err_row = row
-        if row is not None and self.editor is not None:
+        if move and row is not None and self.editor is not None:
             ed = self.editor
             ed.row = max(0, min(len(ed.lines) - 1, row))
             ed._clamp_col()
@@ -2894,6 +2975,10 @@ class Workstation:
         self.bar_layer.invalidate()
         if self.menu_view == "code" and self.editor is not None:
             self.editor.dirty = True
+            # An undo/redo rewrote the buffer: RE-CHECK the marked error (owner
+            # 2026-07-23) -- it retires only if the restored code actually
+            # parses again; a still-broken restore keeps a live marker.
+            self.code_layer._recheck_err()
         elif self.menu_view == "scene":
             self.scene_ui._sync_live()
 
@@ -3047,6 +3132,14 @@ class Workstation:
         self.scenes = self._build_scenes()   # a scene undo must reach the live rows (#85)
         self.cart_error = None
         self.crash_line = None
+        self.crash_popup = None        # the popup is transient -- any walk ends it
+        # Keep the kid's place in the code: the rebuild below resets the fresh
+        # CodeEditor's caret to the top, which read as "undo threw me to the
+        # start of the file" (owner report 2026-07-23). goto_row clamps, so a
+        # shrunken restore lands on the nearest surviving line.
+        caret = None
+        if self.menu_view == "code" and self.editor is not None:
+            caret = (self.editor.row, self.editor.col)
         # Drop the editor cores + rebuild the ACTIVE tab's over the fresh data, then
         # re-run so a running cart / a subsequent PLAY uses the restored source/art.
         self.editor = None
@@ -3059,6 +3152,12 @@ class Workstation:
         if self.wm.top_is("menu") and view in ("code", "paint", "map", "scene",
                                                "blocks", "music"):
             self.set_menu_view(view)     # rebuild the active editor from fresh data
+            if caret is not None and self.editor is not None:
+                self.editor.goto_row(caret[0], caret[1])
+            if view == "code":
+                # Re-check the restored text (owner 2026-07-23): a marker only
+                # retires when the code actually parses again.
+                self.code_layer._recheck_err()
         self._start()
 
     def save_sprites(self):
@@ -4141,17 +4240,49 @@ class Workstation:
 
     def _bar_image(self, kind):
         """The cached 16x16 _SheetSprite for top-bar icon `kind`, or None when the
-        icon sheet/slot is missing. Memoised per kind so the SAME image object is
-        blitted every frame -- the device caches its RGB565 copy on the image, so the
-        bar costs one cached blit per icon (Stage 1's perf goal)."""
-        if kind in self._bar_img_cache:
-            return self._bar_img_cache[kind]
+        icon sheet/slot is missing. Memoised per (kind, light) so the SAME image
+        object is blitted every frame -- the device caches its RGB565 copy on the
+        image, so the bar costs one cached blit per icon (Stage 1's perf goal).
+
+        LIGHT chrome (a light theme variant, `bar_light`): the sheet's untouched
+        0 pixels -- invisible on the frozen black bar -- would read as a black
+        PLATE on a light band, and white strokes would vanish on cream. So the
+        light variant of every icon is derived at build time: the plate is
+        remapped to a sentinel index (63 -- outside the 0-15 range icon art is
+        authored in) and keyed transparent, white (7) strokes flip to ink-black
+        and light-grey (6) detail to dim warm ink. The key CANNOT be 0 itself:
+        strokes remapped to black would then erase themselves (the invisible-
+        wifi bug, owner report 2026-07-23). The mascot ("moy") keeps its
+        authored colors -- only its plate is keyed (via transparent=0, since
+        its own outline must stay black and drawn)."""
+        light = bool(self.theme_colors.get("bar_light", False))
+        key = (kind, light)
+        if key in self._bar_img_cache:
+            return self._bar_img_cache[key]
         img = None
         if self.icon_sheet is not None:
             slot = _ICON.get(kind)
             if slot is not None:
-                img = self.icon_sheet.tile_image(slot)   # transparent -1 (icons keyed)
-        self._bar_img_cache[kind] = img
+                if not light:
+                    img = self.icon_sheet.tile_image(slot)   # transparent -1
+                else:
+                    base = self.icon_sheet.tile_image(slot, transparent=0)
+                    if base is not None:
+                        if kind == "moy":
+                            img = _SheetSprite(base.w, base.h, base.pix, 0)
+                        else:
+                            pix = []
+                            for p in base.pix:
+                                if p == 0:
+                                    pix.append(63)   # plate -> keyed sentinel
+                                elif p == 7:
+                                    pix.append(0)    # white strokes -> ink
+                                elif p == 6:
+                                    pix.append(53)   # grey detail -> dim ink
+                                else:
+                                    pix.append(p)
+                            img = _SheetSprite(base.w, base.h, pix, 63)
+        self._bar_img_cache[key] = img
         return img
 
     def _icon_image_keyed(self, kind):
@@ -4184,7 +4315,7 @@ class Workstation:
             cv.spr(img, x, y, fs)                        # 16px art upscaled by font scale
         else:
             self._glyph(kind, (x, y, _BAR_ICON * fs, _BAR_ICON * fs),
-                        NAMES["light_grey"], cv)
+                        self.theme_colors.get("chrome_ink_dim", 6), cv)
 
 
 def wire_workstation_core(ws, store, carts_root, make_api, wifi,

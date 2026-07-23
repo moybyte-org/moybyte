@@ -225,9 +225,12 @@ class BarLayer:
         return self.ws.layout.zone_left
 
     def zone_band_light(self, where):
-        """True when `where`'s bar band is the LIGHT in-window band (windowed
-        chrome + a theme marked surface_light) -- zone owners pick their band
+        """True when `where`'s bar band is LIGHT -- an in-window band under a
+        light-surface theme, or ANY band when the theme's OS bar itself is
+        light (`bar_light`, the light variants) -- zone owners pick their band
         ink with this so lent-zone text stays readable on either band."""
+        if self.ws.theme_colors.get("bar_light", False):
+            return True
         return self._in_window(where) and self.ws.light_chrome()
 
     def _in_window(self, where):
@@ -336,14 +339,15 @@ class BarLayer:
             # "zone" (no draw_zone call below this branch's `return`, which is exactly
             # what keeps the zoned-bar dispatch off the play frame -- see the Stage-4
             # guardrail test, now driven through the crash state).
-            cv.rect(0, 0, cv.w, _STATUS_H, NAMES["black"])
-            cv.rect(0, _STATUS_H - 1, cv.w, 1, NAMES["dark_grey"])   # shelf edge line
+            th = ws.theme_colors
+            cv.rect(0, 0, cv.w, _STATUS_H, th["bar"])
+            cv.rect(0, _STATUS_H - 1, cv.w, 1, th["bar_edge"])       # shelf edge line
             # Left cluster: the TIC-80 one-tap tool switcher. Carts with a Make-it-mine
             # schema open the cards menu (pencil = EDIT); the rest jump straight to code
             # (the < > glyph = CODE). cart may be None defensively (error panel, no cart).
             # ≡ system-menu toggle (#52), leftmost. A _glyph bitmap (not a themeable
             # IconSheet slot) so it never goes blank on a device with an older saved theme.
-            ws._glyph("menu", _SYSMENU_BTN, NAMES["white"], cv)
+            ws._glyph("menu", _SYSMENU_BTN, th["chrome_ink"], cv)
             ws._icon("home", _HOME_BTN[0], _HOME_BTN[1], cv)
             ws._icon("edit" if has_edit else "code", _MENU_BTN[0], _MENU_BTN[1], cv)
             ws._icon("paint", _PAINT_BTN[0], _PAINT_BTN[1], cv)
@@ -351,7 +355,7 @@ class BarLayer:
             ws._icon("blocks", _BLOCKS_BTN[0], _BLOCKS_BTN[1], cv)
             ws._icon("music", _MUSIC_BTN[0], _MUSIC_BTN[1], cv)
             # Right cluster: clock + wifi/batt (Settings now lives in the ≡ menu, not a gear).
-            cv.print(self._clock_text(), _BAR_CLOCK[0], 3, NAMES["light_grey"], 1)
+            cv.print(self._clock_text(), _BAR_CLOCK[0], 3, th["chrome_ink_dim"], 1)
             ws._icon(ws._wifi_icon_kind(), _BAR_WIFI[0], _BAR_WIFI[1], cv)
             ws._icon("batt", _BAR_BATT[0], _BAR_BATT[1], cv)
             return
@@ -362,13 +366,14 @@ class BarLayer:
             # X exits the tool -- handle_bar_tap("tool") routes it); LEFT zone = the tool's
             # TITLE only, NO tab ladder (a tool isn't an editor with tabs). No owner.draw_zone
             # call here, so the play-frame guardrail (draw_zone never during a Player) holds.
-            cv.rect(0, 0, cv.w, _STATUS_H, NAMES["black"])
-            cv.rect(0, _STATUS_H - 1, cv.w, 1, NAMES["dark_grey"])   # shelf edge line
+            th = ws.theme_colors
+            cv.rect(0, 0, cv.w, _STATUS_H, th["bar"])
+            cv.rect(0, _STATUS_H - 1, cv.w, 1, th["bar_edge"])       # shelf edge line
             self._render_right_zone(cv, where)                       # clock/wifi/batt/≡ + X
             title = (ws.cart.get("title") if ws.cart else "") or ""
             maxc = _ZONE_LEFT_GAME[2] // 8                           # 8px cells in the lent rect
             if maxc > 0:
-                cv.print(title[:maxc], _ZONE_LEFT_GAME[0], 3, NAMES["light_grey"], 1)
+                cv.print(title[:maxc], _ZONE_LEFT_GAME[0], 3, th["chrome_ink_dim"], 1)
             return
         # -- the zoned bar (Stage 4): a black backing band (with a thin shelf edge
         # line below), the OS-owned RIGHT zone, then the active app's LENT left zone.
@@ -385,8 +390,9 @@ class BarLayer:
             cv.rect(0, 0, cv.w, bar_h, th["surface"])
             cv.rect(0, bar_h - 1, cv.w, 1, th["border"])
         else:
-            cv.rect(0, 0, cv.w, bar_h, NAMES["black"])
-            cv.rect(0, bar_h - 1, cv.w, 1, NAMES["dark_grey"])       # shelf edge line
+            th = ws.theme_colors
+            cv.rect(0, 0, cv.w, bar_h, th["bar"])
+            cv.rect(0, bar_h - 1, cv.w, 1, th["bar_edge"])           # shelf edge line
         if not self._in_window(where):
             self._render_right_zone(cv, where)
         owner = self._zone_owner(where)
@@ -406,19 +412,20 @@ class BarLayer:
         # The launcher root never exits -> no X; neither does the DESK (#105:
         # it is the make world's FLOOR -- the PLAY icon is the way out).
         show_x = where not in ("home", "desk")
+        th = ws.theme_colors
         if self._zone_is_game(where):
-            cv.print(self._clock_text(), _ZONE_CLOCK[0], 3, NAMES["light_grey"], 1)
+            cv.print(self._clock_text(), _ZONE_CLOCK[0], 3, th["chrome_ink_dim"], 1)
             ws._icon(ws._wifi_icon_kind(), _ZONE_WIFI[0], _ZONE_WIFI[1], cv)
             ws._icon("batt", _ZONE_BATT[0], _ZONE_BATT[1], cv)
-            ws._glyph("menu", _ZONE_GEAR, NAMES["white"], cv)
+            ws._glyph("menu", _ZONE_GEAR, th["chrome_ink"], cv)
             if show_x:                    # context X (Stage 5): tap to exit the app
                 ws._icon("close", _ZONE_CONTEXT_X[0], _ZONE_CONTEXT_X[1], cv)
         else:
             lay = ws.layout
-            cv.print(self._clock_text(), lay.clock_x, 3, NAMES["light_grey"], 1)
+            cv.print(self._clock_text(), lay.clock_x, 3, th["chrome_ink_dim"], 1)
             ws._icon(ws._wifi_icon_kind(), lay.wifi_btn[0], lay.wifi_btn[1], cv)
             ws._icon("batt", lay.batt_btn[0], lay.batt_btn[1], cv)
-            ws._glyph("menu", lay.sysmenu_btn, NAMES["white"], cv)
+            ws._glyph("menu", lay.sysmenu_btn, th["chrome_ink"], cv)
             if show_x:                    # context X (Stage 5): tap to exit the app
                 ws._icon("close", lay.context_x_btn[0], lay.context_x_btn[1], cv)
 
@@ -458,8 +465,9 @@ class BarLayer:
         lay = ws.layout
         fw = lay.font_w                              # on-screen char-cell width (8*fs)
         gh = lay.status_gh                           # glyph box (12*fs)
-        cv.rect(0, lay.dock_y, cv.w, cv.h - lay.dock_y, NAMES["dark_grey"])
-        cv.rect(0, lay.dock_y, cv.w, 1, NAMES["black"])
+        th = ws.theme_colors
+        cv.rect(0, lay.dock_y, cv.w, cv.h - lay.dock_y, th["bar_edge"])
+        cv.rect(0, lay.dock_y, cv.w, 1, th["bar"])
         for k in range(len(_DOCK_SLOTS)):
             slot = _DOCK_SLOTS[k]
             x, y, w, h = self._dock_slot_rect(k)
@@ -468,8 +476,9 @@ class BarLayer:
             # On the home desktop the editor tools have no cart -> dim them.
             enabled = slot in ("home", "settings", "run") or ws.cart is not None
             if is_active:
-                cv.rect(x, y, w, h, NAMES["indigo"])
-            gc = NAMES["white"] if enabled else NAMES["dark_blue"]
+                cv.rect(x, y, w, h, th["hilite"])
+            gc = th["chrome_ink"] if enabled else (
+                th["chrome_ink_dim"] if th.get("bar_light") else NAMES["dark_blue"])
             ws._glyph(_DOCK_GLYPH[slot], (x, y, w, gh), gc, cv)
             label = _DOCK_LABEL[slot]
             cv.print(label, x + (w - len(label) * fw) // 2, y + gh, gc, 1)

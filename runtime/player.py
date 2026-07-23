@@ -818,6 +818,13 @@ class Player:
                         pm.flush()
                     except Exception:  # noqa: BLE001
                         pass
+                # Owner ask 2026-07-23: no parked OOPS screen -- throw the kid
+                # straight into the code editor on the crashing line (popup +
+                # inline marker). The panel below survives only as the
+                # fallback when there is nothing to edit.
+                ws._reset_canvas_state()
+                if ws._crash_to_code():
+                    return
         # Deferred pmem periodic flush (#66, the Letter Blitz attribution): a
         # dirty pmem persists at most once per PMEM_FLUSH_MS while the cart
         # plays -- the guaranteed saves are exit (release_world) and the crash

@@ -79,6 +79,16 @@ never special-cases "was I launched from the editor?", the Editor never special-
 "how do I get back after a test run?", and adding a new caller (a debugger, a
 slideshow, the web view) costs nothing.
 
+*(2026-07-23: a CRASH is an exit too — the **crash-to-code throw**. A cart that
+fails to start or raises mid-frame no longer parks on an OOPS panel waiting for
+a manual TAP-CODE: the run exits straight into the Editor's Code tab with the
+caret on the crashing line, the inline marker set, and a tap/type-dismissible
+error popup over it (`ws._crash_to_code`). The marker then RE-CHECKS on every
+edit/undo — it retires only when the source actually parses again, and follows
+the live syntax error while it doesn't. The old panel survives only as the
+no-open-cart fallback. This is still the caller model: the crash path is just
+one more pop, into the one place the fix can happen.)*
+
 ---
 
 ## 3. The kernel, and the window manager as the only tier-specific layer
@@ -386,7 +396,16 @@ surface / ink / focus / play / author / danger etc., resolved for every theme
 with the frozen literals as fallbacks — and an opt-in **"machine"** theme ships
 the Open Machine colorway: dark-blue construction field, navy dot grid/chrome,
 grape identity, green PLAY / orange authoring / yellow focus. "night" stays the
-byte-identical default.)*
+byte-identical default. 2026-07-23: every theme family ships a **dark AND a
+light variant** (Appearance → THEMES → DARK/LIGHT chips, persisted
+`theme_variant`), and the tokens now reach the whole system: the OS bar + dock,
+Settings rows + WiFi panel, the ≡ menu/About, achievements, the OTA screens,
+the windowed-WM strips/chips, and the editor tabs on every responsive tier —
+the frozen 320×240 `_base` branches keep their literals only in DARK chrome, so
+a light variant themes the small tier too. Bar icons derive plate-free
+light-mode sprites at draw time (`Workstation._bar_image`), so wifi/battery
+read on a light band. See docs/visual_identity_v1.md §4.3 for the role
+contract.)*
 
 Two owner-facing diagnostics rows live here too (#68, both persisted, both default
 OFF — together they are "kid mode"): **PERF DIAG** turns on the measurement

@@ -83,9 +83,7 @@ def _wt():
 
 
 _SHADOW = NAMES["black"]
-_BORDER_TOP = NAMES["white"]          # focused window border (cream ring, all themes)
 _BTN_X_FG = NAMES["red"]
-_CHIP_FG = NAMES["white"]
 _DRAG_MIN = 4                         # px of travel before a press becomes a drag
 
 # Shell-process title strips (registered apps contribute TITLE through the app
@@ -1028,15 +1026,15 @@ class WindowedWM(FullscreenStackWM):
         sc.rect(win.x + sh, win.y + win.h, win.w, sh, _SHADOW)     # bottom shadow
         sc.rect(win.x + win.w, win.y + sh, sh, win.h, _SHADOW)     # right shadow
         sc.rectb(win.x, win.y, win.w, win.h,
-                 _BORDER_TOP if focused else th["dim"])
+                 th["chrome_ink"] if focused else th["dim"])
         # Title strip: label left, [minimize][maximize][close] right. Focused =
-        # the theme's title tint with its ink (the active-title cue, Picotron-
-        # style); unfocused = the theme's panel field with dim ink.
-        strip_bg = th["title"] if focused else th["panel"]
-        strip_fg = th["title_ink"] if focused else NAMES["light_grey"]
+        # the theme's active-title tint with its ink (the active-title cue,
+        # Picotron-style); unfocused = the inactive strip role with dim ink.
+        strip_bg = th["title_active"] if focused else th["title_inactive"]
+        strip_fg = th["title_ink"] if focused else th["chrome_ink_dim"]
         sc.rect(win.x + 1, win.y + 1, win.w - 2, win.title_h, strip_bg)
         sc.rect(win.x + 1, win.y + win.title_h, win.w - 2, 1,
-                _BORDER_TOP if focused else th["dim"])
+                th["chrome_ink"] if focused else th["dim"])
         title = self._win_title(win)
         btns = self._strip_buttons(win)
         first_btn_x = btns[-1][1][0] if btns else win.x + win.w
@@ -1051,7 +1049,7 @@ class WindowedWM(FullscreenStackWM):
             gx, gy, gw, gh = self._grip_rect(win)
             for i in range(3):
                 d = (i + 1) * (gw // 4)
-                sc.rect(gx + gw - d, gy + gh - 2 * fs, d, fs, _BORDER_TOP)
+                sc.rect(gx + gw - d, gy + gh - 2 * fs, d, fs, th["chrome_ink"])
 
     def _win_title(self, win):
         ws = self.ws
@@ -1281,9 +1279,9 @@ class WindowedWM(FullscreenStackWM):
             if focused:
                 fg = NAMES["black"]                # ink on the accent CTA chip
             else:
-                fg = th["edge"] if win.minimized else _CHIP_FG
+                fg = th["edge"] if win.minimized else th["chrome_ink"]
             sc.rect(x, y, w, h, bg)
-            sc.rectb(x, y, w, h, th["dim"] if win.minimized else _BORDER_TOP)
+            sc.rectb(x, y, w, h, th["dim"] if win.minimized else th["chrome_ink"])
             sc.print(label, x + 4 * fs, y + (h - 8 * fs) // 2, fg, 1)
 
     def _chip_tap(self, key):

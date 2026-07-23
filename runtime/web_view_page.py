@@ -157,10 +157,15 @@ for(var i=0;i<n;i++){var v=bin.charCodeAt(i*2)|(bin.charCodeAt(i*2+1)<<8);if(v>=
 var src=actx.createBufferSource();src.buffer=buf;src.connect(actx.destination);
 var t=Math.max(actx.currentTime+0.02,audioNext);src.start(t);audioNext=t+buf.duration;}
 function fit(){/* Fill the available viewport without the old integer-scale
-cliff (e.g. 1.95x used to collapse all the way to 1x on an ultrawide). */
+cliff (e.g. 1.95x used to collapse all the way to 1x on an ultrawide). Sized off
+the VISUAL viewport when the browser has one: iOS collapses it for the soft
+keyboard WITHOUT firing window.resize on close, which is how the canvas used to
+stick tiny after typing + PLAY (owner report 2026-07-23). */
 var hh=document.querySelector("h1"),ct=document.getElementById("ctl");
-var rw=Math.max(64,window.innerWidth-16);
-var rh=Math.max(64,window.innerHeight-((hh?hh.offsetHeight:0)+(ct?ct.offsetHeight:0)+28));
+var vv=window.visualViewport;
+var iw=vv?vv.width:window.innerWidth,ih=vv?vv.height:window.innerHeight;
+var rw=Math.max(64,iw-16);
+var rh=Math.max(64,ih-((hh?hh.offsetHeight:0)+(ct?ct.offsetHeight:0)+28));
 // While the soft keyboard is up (#42) the viewport HEIGHT collapses (and the
 // gamepad block still counts against it), which used to shrink the canvas to a
 // stamp -- so size by width alone then; a phone is width-limited anyway.
@@ -168,8 +173,16 @@ var ae=document.activeElement;if(ae&&ae.id==="kbin")rh=1e9;
 var s=Math.min(rw/W,rh/H);
 cv.style.width=Math.round(W*s)+"px";cv.style.height=Math.round(H*s)+"px";}
 window.addEventListener("resize",fit);
-function alloc(){cv.width=W;cv.height=H;cx=cv.getContext("2d");cx.imageSmoothingEnabled=false;
-idx=new Uint8Array(W*H);img=cx.createImageData(W,H);rgba=img.data;rs();fit();}
+// The visual viewport is what actually changes when the soft keyboard opens/
+// closes -- listen permanently (kbScroll's focus-scoped listener is separate).
+if(window.visualViewport)window.visualViewport.addEventListener("resize",fit);
+function alloc(){/* Blank the retained buffer ONLY on a real size change: getA()
+re-runs per cover cache-miss (one per built shelf thumbnail), and zeroing idx
+each time blacked the screen until the next push (owner 2026-07-23). */
+var fresh=cv.width!==W||cv.height!==H||!idx;
+if(fresh){cv.width=W;cv.height=H;cx=cv.getContext("2d");cx.imageSmoothingEnabled=false;
+idx=new Uint8Array(W*H);img=cx.createImageData(W,H);rgba=img.data;rs();}
+fit();}
 function getA(){assLoading=true;return fetch("/assets").then(function(r){return r.json();}).then(function(a){
 W=a.w;H=a.h;PAL=a.palette;FONT=a.font;assCart=a.cart;SHEET=a.sheet||null;if(a.audio_rate)AUDIO_RATE=a.audio_rate;
 INPUT=a.input||null;applyInputHint();
@@ -392,6 +405,9 @@ kbInp.addEventListener("focus",function(){kbBtn.classList.add("pr");
   if(window.visualViewport)window.visualViewport.addEventListener("resize",kbScroll);kbScroll();});
 kbInp.addEventListener("blur",function(){kbBtn.classList.remove("pr");
   syncCtl();fit();
+  // The keyboard-close animation outlives the blur: re-fit after it settles,
+  // even on browsers that fire no resize event at all for it.
+  setTimeout(fit,300);setTimeout(fit,700);
   if(window.visualViewport)window.visualViewport.removeEventListener("resize",kbScroll);});
 kbBtn.addEventListener("click",function(e){
   if(document.activeElement===kbInp)kbInp.blur();else{kbReset();kbInp.focus();}

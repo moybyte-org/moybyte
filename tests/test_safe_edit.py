@@ -150,10 +150,14 @@ def test_cart_that_raises_in_update_shows_error_panel(tmp_path):
 
 def test_cart_with_syntax_error_at_start_shows_panel_not_silence(tmp_path):
     # A cart whose source won't even exec (e.g. saved-around our guard, or shipped
-    # broken) must land on the desktop with an error panel, not a dead launcher.
+    # broken) must never die silently: the crash-to-code throw (owner 2026-07-23)
+    # lands the kid in the CODE editor on the offending line with the error popup
+    # armed -- no parked OOPS screen, no manual TAP-CODE step.
     ws = _make_ws_with_cart(tmp_path, "def _draw(:\n    cls(1)\n")
-    assert ws.screen == "desktop"          # not stuck silently on the launcher
+    assert ws.screen == "menu" and ws.menu_view == "code"
     assert ws.cart_error is not None
+    assert ws.crash_popup is not None          # the dismissible popup is up
+    assert ws.code_err_row == 0                # caret marked line 1
     for _ in range(3):
         ws.frame(1 / 30)                  # must not raise
     assert ws.cart_error is not None
@@ -222,12 +226,102 @@ def test_evil_str_cart_does_not_escape_frame(tmp_path):
 
 def test_evil_str_cart_at_start_does_not_escape(tmp_path):
     # The same hostile exception, but raised in _init during _start(): open() must
-    # land on the desktop with a panel, never propagate out of _start's print.
+    # throw to the code editor with the error captured, never propagate out of
+    # _start's print (crash-to-code, owner 2026-07-23).
     ws = _make_ws_with_cart(tmp_path, _EVIL_AT_START_SRC)   # open() runs _start()
-    assert ws.screen == "desktop"
+    assert ws.screen == "menu" and ws.menu_view == "code"
     assert ws.cart_error is not None and "Evil" in ws.cart_error
+    assert ws.crash_popup is not None
     for _ in range(3):
         ws.frame(1 / 30)                  # must not raise
+
+
+def test_runtime_crash_throws_to_code_line_with_popup(tmp_path):
+    """A mid-frame crash = the same throw: straight to the code editor, caret on
+    the raising line, popup up; a tap anywhere dismisses it (and is consumed),
+    typing a fix dismisses it too (crash-to-code, owner 2026-07-23)."""
+    ws = _make_ws_with_cart(tmp_path,
+                            "def _draw():\n    raise ValueError('boom')\n")
+    assert ws.screen == "desktop"              # started clean
+    ws.frame(1 / 30)                           # first frame raises
+    assert ws.screen == "menu" and ws.menu_view == "code"
+    assert "boom" in (ws.crash_popup or "")
+    assert ws.code_err_row == 1                # the raise is on line 2
+    assert ws.editor is not None and ws.editor.row == 1
+    ws.frame(1 / 30)                           # popup draws without error
+    ws.code_layer.handle_pointer(50, 100, True)
+    assert ws.crash_popup is None              # tap anywhere closes it
+    # A fresh crash re-arms it; the first EDIT dismisses it with the marker.
+    ws.cart["src"] = "def _draw():\n    raise ValueError('again')\n"
+    ws._start()
+    ws.run(ws.project, ws.editor_app)
+    assert ws.screen == "desktop"
+    ws.frame(1 / 30)
+    assert ws.screen == "menu" and "again" in (ws.crash_popup or "")
+    # A FIXING edit retires the marker via the re-check (the popup goes with
+    # the first edit either way).
+    ws.editor.set_text("def _draw():\n    cls(7)\n")
+    ws.code_layer._recheck_err()
+    assert ws.crash_popup is None and ws.code_err_row is None
+
+
+def test_marker_follows_until_the_error_is_actually_fixed(tmp_path):
+    """The re-check rule (owner 2026-07-23): an edit that does NOT fix the
+    error keeps the red underline (it follows the live syntax error, without
+    yanking the caret); only code that parses again retires it."""
+    ws = _make_ws_with_cart(tmp_path, "def _draw(:\n    cls(1)\n")
+    assert ws.screen == "menu" and ws.code_err_row == 0     # crash-to-code
+    ed = ws.editor
+    # An unrelated edit leaves it broken: the marker STAYS on the bad line
+    # and the caret is not yanked back to it.
+    ed.goto_row(1, 4)
+    ed.key(ord("#"))
+    ws.code_layer._recheck_err()
+    assert ws.code_err_row == 0 and ws.code_err
+    assert ws.editor.row == 1                               # caret left alone
+    # The actual fix retires it.
+    ed.set_text("def _draw():\n    cls(1)\n")
+    ws.code_layer._recheck_err()
+    assert ws.code_err_row is None and ws.code_err is None
+
+
+def test_undo_of_breaking_change_clears_marker_and_keeps_place(tmp_path):
+    """Undoing the breaking change re-checks the marker: it retires because
+    the restored code PARSES again (a still-broken restore would keep it) --
+    and an undo must not throw the caret to the top of the file (owner report
+    2026-07-23). Covers BOTH walk tiers: the in-RAM burst undo and the
+    journal-commit fallback."""
+    ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(1)\n",
+                            title="Undoable")
+    ws.set_menu_view("code")
+    ws.screen = "menu"
+    ed = ws.editor
+    # -- local tier: a typing burst breaks line 2, PLAY crashes, undo fixes.
+    ws._code_burst_open()
+    ed.set_text("def _draw():\n    boom_undefined()\n")
+    ws.cart["src"] = ed.text()
+    ws._start()
+    ws.run(ws.project, ws.editor_app)
+    ws.frame(1 / 30)                            # crash -> thrown back to code
+    assert ws.screen == "menu" and ws.code_err_row == 1
+    assert ws.crash_popup is not None
+    assert ws.undo() is True                    # unwinds the burst
+    assert "boom_undefined" not in ws.editor.text()
+    assert ws.code_err_row is None and ws.code_err is None
+    assert ws.crash_popup is None               # popup retired with the marker
+    # -- journal tier: two commits, caret parked low, undo reloads the file.
+    ed = ws.editor
+    ed.set_text("def _draw():\n    cls(2)\n    cls(3)\n    cls(4)\n")
+    assert ws.save_code() is True               # commit 1
+    ed.set_text("def _draw():\n    cls(5)\n    cls(6)\n    cls(7)\n")
+    assert ws.save_code() is True               # commit 2
+    ed.goto_row(2, 4)
+    ws.code_err = "stale"                       # a stale marker must not survive
+    ws.code_err_row = 1
+    assert ws.undo() is True                    # no local ops -> journal walk
+    assert "cls(2)" in ws.editor.text()         # commit 2 reverted
+    assert ws.code_err is None and ws.code_err_row is None
+    assert (ws.editor.row, ws.editor.col) == (2, 4)   # place kept, not (0, 0)
 
 
 # -- (f) [MAJOR] fixing a crashed cart + SAVE clears the stale panel --------

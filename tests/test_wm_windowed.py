@@ -860,8 +860,8 @@ def test_live_resize_body_follows_grip(tmp_path):
     """During a grip resize the window BODY tracks the rubber size (the 'real OS'
     feel, #58): the focused border lands at the rubber corner, grown area shows
     the panel field, the real relayout still only happens on release."""
-    from runtime.wm_windowed import _BORDER_TOP
     ws = _ws(tmp_path)
+    _BORDER_TOP = ws.theme_colors["chrome_ink"]   # focused border role
     drv = _drv(ws)
     win, cw, ch = _engage_resize(ws, drv)
     ow, oh = win.w, win.h
@@ -887,8 +887,8 @@ def test_live_resize_body_follows_grip(tmp_path):
 def test_resize_outline_fallback_without_rect_stamp(tmp_path):
     """A canvas without blit_strip_rect (the web RecordingLayer) keeps the old
     rubber-band OUTLINE preview and the full-screen backdrop restore."""
-    from runtime.wm_windowed import _BORDER_TOP
     ws = _ws(tmp_path)
+    _BORDER_TOP = ws.theme_colors["chrome_ink"]   # focused border role
     drv = _drv(ws)
     ws.sys_canvas.blit_strip_rect = None     # instance attr shadows the method
     win, cw, ch = _engage_resize(ws, drv)

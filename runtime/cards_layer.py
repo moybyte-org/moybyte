@@ -516,7 +516,9 @@ class CardsLayer:
         Phase 3 warm tool surface (visual identity v1 Section 10): cream body,
         dark ink, the orange authoring accent on the value controls."""
         NAMES = self._NAMES
-        if self.layout._base:
+        # The frozen 320x240 literals hold only in DARK chrome; a light theme
+        # variant themes the base tier too (owner ask 2026-07-23).
+        if self.layout._base and not self.ws.light_chrome():
             return {"body": NAMES["dark_purple"], "edge": NAMES["pink"],
                     "head": NAMES["white"], "text": NAMES["light_grey"],
                     "sel_text": NAMES["white"], "row": NAMES["indigo"],
@@ -526,7 +528,7 @@ class CardsLayer:
         th = self.ws.theme_colors
         return {"body": th["surface"], "edge": th["border"],
                 "head": th["ink"], "text": th["ink"],
-                "sel_text": NAMES["white"], "row": th["hilite"],
+                "sel_text": th["selection_ink"], "row": th["hilite"],
                 "accent": th["author"], "track": th["ink_dim"],
                 "knob": th["ink"], "cell": th["dim"],
                 "cell_edge": th["ink_dim"]}

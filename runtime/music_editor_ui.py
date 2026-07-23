@@ -445,7 +445,10 @@ class MusicEditorUI:
         # Phase 3 (visual identity v1): the warm tool surface + dark ink on the
         # shelf tiers; the frozen dark-blue body at 320x240, byte-identical.
         th = ws.theme_colors
-        light = (not lay._base) and ws.light_chrome()
+        # Themed on EVERY responsive tier (owner ask 2026-07-23 -- the tokens
+        # resolve per theme/variant); only the frozen 320x240 _base branch keeps
+        # its byte-identical literals.
+        light = (not lay._base) or ws.light_chrome()
         self._light = light
         ink = th["ink"] if light else NAMES["white"]
         ink_dim = th["ink_dim"] if light else NAMES["light_grey"]
@@ -550,12 +553,15 @@ class MusicEditorUI:
             # the surface ink (dark on the warm surface at shelf density).
             base_ink = self.ws.theme_colors["ink"] if light else NAMES["light_grey"]
             base_dim = self.ws.theme_colors["ink_dim"] if light else NAMES["dark_grey"]
-            tc = NAMES["white"] if cur else base_ink
+            sel_ink = self.ws.theme_colors["selection_ink"] if light \
+                else NAMES["white"]
+            tc = sel_ink if cur else base_ink
             cv.print("%02d" % idx, x + 2 * fs, y + 4 * fs, base_dim
-                     if not cur else NAMES["light_grey"], 1)
+                     if not cur else (sel_ink if light
+                                      else NAMES["light_grey"]), 1)
             note = _mu_note_name(pitch)
-            note_c = NAMES["peach"] if cur else (
-                NAMES["brown"] if light else NAMES["peach"])
+            note_c = (sel_ink if light else NAMES["peach"]) if cur else (
+                NAMES["brown"] if self.ws.light_chrome() else NAMES["peach"])
             cv.print(note, x + 24 * fs, y + 4 * fs, note_c if pitch >= 0 else
                      base_dim, 1)
             cv.print(_MU_WAVE_LABELS[wave & 3], x + 64 * fs, y + 4 * fs, tc, 1)
@@ -589,11 +595,13 @@ class MusicEditorUI:
                 cv.rect(x, y, lay.list_w, lay.row_h - 1,
                         th["hilite"] if light else NAMES["indigo"])
             sid = t.pattern[idx]
+            sel_ink = th["selection_ink"] if light else NAMES["white"]
             cv.print("%02d" % idx, x + 2 * fs, y + 4 * fs,
                      (th["ink_dim"] if light else NAMES["dark_grey"])
-                     if not cur else NAMES["light_grey"], 1)
+                     if not cur else (sel_ink if light
+                                      else NAMES["light_grey"]), 1)
             cv.print("SFX " + str(sid), x + 30 * fs, y + 4 * fs,
-                     NAMES["white"] if cur else
+                     sel_ink if cur else
                      (th["ink"] if light else NAMES["light_grey"]), 1)
 
     def _draw_music_pad(self, song):

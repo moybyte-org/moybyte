@@ -869,7 +869,7 @@ class SheetsAppLayer(ListShellApp):
                     fg = self.names["white"]
                 else:
                     cv.rect(x, y, w, h, 7 if not selected else th["hilite"])
-                    fg = 0
+                    fg = 0 if not selected else th["selection_ink"]
                 cv.rectb(x, y, w, h, th["accent"] if selected else th["dim"])
                 if val != "":
                     cv.print(_fmt(val, max(1, w // (8 * fs) - 1)),

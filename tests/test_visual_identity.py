@@ -81,6 +81,109 @@ def test_unknown_theme_falls_back_to_default():
     assert theme_colors("no-such-theme") == theme_colors("night")
 
 
+# -- Light/dark variants (owner ask 2026-07-23) -------------------------------
+
+def test_every_theme_has_a_light_variant_resolving_every_role():
+    """Each theme family ships DARK + LIGHT presentations of the same identity:
+    the light set resolves every semantic role, is marked surface_light, and
+    flips the chrome ink dark (light fields need dark text)."""
+    from runtime.chrome import THEMES, THEME_LIGHT, theme_colors
+    roles = ("panel", "edge", "title", "title_ink", "accent", "hilite", "dim",
+             "desktop", "desktop_pattern", "surface", "surface_alt", "border",
+             "ink", "ink_dim", "chrome_ink", "chrome_ink_dim", "selection",
+             "focus", "play", "author", "danger",
+             "title_active", "title_inactive")
+    for name, _tokens in THEMES:
+        assert name in THEME_LIGHT, name
+        th = theme_colors(name, "light")
+        for role in roles:
+            assert role in th, (name, role)
+            assert 0 <= th[role] <= 63
+        assert th["surface_light"] is True
+        assert th["ink"] == 0 and th["chrome_ink"] == 0
+        # The signal verbs keep their Section 4.2 jobs in both variants.
+        assert th["play"] == 11 and th["danger"] == 8 and th["focus"] == 10
+
+
+def test_dark_variant_is_the_legacy_token_set():
+    """theme_colors(name) == theme_colors(name, "dark") -- the one-arg call
+    (every existing caller) keeps its exact pre-variant pixels, including the
+    chrome ink statics (white / light-grey)."""
+    from runtime.chrome import THEMES, theme_colors
+    for name, _tokens in THEMES:
+        th = theme_colors(name)
+        assert th is theme_colors(name, "dark")
+        if name != "machine":
+            assert th["ink"] == 7 and th["ink_dim"] == 6
+        assert th["chrome_ink"] == 7 and th["chrome_ink_dim"] == 6
+
+
+def test_theme_variant_applies_and_persists(tmp_path):
+    from runtime import moy_carts
+    ws = _ws(tmp_path)
+    assert ws.theme_variant == "dark"
+    ws.set_theme_variant("light")
+    assert ws.theme_variant == "light"
+    assert ws.theme_colors["surface_light"] is True
+    assert ws.launcher.theme is ws.theme_colors
+    assert ws.system.get("theme_variant") == "light"
+    carts = ws.carts_root
+    assert moy_carts.load_system(carts).get("theme_variant") == "light"
+    # A theme pick keeps the variant; an unknown variant falls back to dark.
+    ws.set_theme("berry")
+    assert ws.theme_variant == "light" and ws.theme_colors["panel"] == 7
+    ws.set_theme_variant("nonsense")
+    assert ws.theme_variant == "dark"
+
+
+def test_variant_survives_reboot(tmp_path):
+    ws = _ws(tmp_path)
+    ws.set_theme("forest")
+    ws.set_theme_variant("light")
+    ws2 = _ws(tmp_path)
+    assert ws2.theme_name == "forest" and ws2.theme_variant == "light"
+    assert ws2.theme_colors["surface_light"] is True
+
+
+def test_base_tier_editors_follow_light_chrome(tmp_path):
+    """The 320x240 _base editor branches keep their frozen literals ONLY in dark
+    chrome; a light variant themes the base tier too (owner ask 2026-07-23 --
+    'editors follow the styles')."""
+    from runtime.chrome import NAMES
+    ws = _ws(tmp_path)                      # 320x240 base tier
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                           if it.get("path") and it.get("edit"))
+    ws.change_selected()
+    t = ws.cards_layer._tones()
+    assert t["body"] == NAMES["dark_purple"]        # frozen dark baseline
+    ws.set_theme_variant("light")
+    t = ws.cards_layer._tones()
+    assert t["body"] == ws.theme_colors["surface"]  # themed on light
+    assert t["head"] == ws.theme_colors["ink"] == 0
+    # The code editor gets exactly a light-and-dark pair on the base tier.
+    tc = ws.code_layer._tones()
+    assert tc["bg"] == ws.theme_colors["surface"]
+    assert tc["hl"] is not None                     # the light syntax set
+
+
+def test_bar_icons_get_plateless_light_variants(tmp_path):
+    """LIGHT chrome derives per-icon light sprites: the sheet's 0 plate is keyed
+    transparent and white strokes flip to ink-black, so wifi/batt never draw a
+    black plate on the light bar (owner report 2026-07-23)."""
+    ws = _ws(tmp_path)
+    dark = ws._bar_image("wifi")
+    assert dark.transparent == -1                   # dark bar: opaque tile
+    ws.set_theme_variant("light")
+    light = ws._bar_image("wifi")
+    assert light is not dark
+    assert light.transparent == 63                  # the plate is keyed out...
+    assert 0 in light.pix and 7 not in light.pix    # ...and strokes DRAW as ink
+    # (the key must never be 0: black strokes would erase themselves)
+    moy = ws._bar_image("moy")
+    if moy is not None:                             # mascot keeps its cream pixels
+        assert moy.transparent == 0 and 7 in moy.pix
+
+
 # -- Sections 1.2/6.1: the Library card's PLAY / CHANGE verbs ----------------
 
 def _select_real_cart(ws):

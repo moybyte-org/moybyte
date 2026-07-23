@@ -267,15 +267,16 @@ class UpdateUI:
         SYSTEM canvas, same panel chrome as Settings (host == device)."""
         NAMES = self._NAMES
         cv = self.ws.sys_canvas
+        th = self.ws.theme_colors
         lay = self.ws.layout
         fs = lay.fs
-        cv.rect(0, 0, lay.w, lay.h, NAMES["black"])
+        cv.rect(0, 0, lay.w, lay.h, th["bar"])
         px, py, pw, ph = lay.settings_panel
-        cv.rect(px, py, pw, ph, NAMES["dark_purple"])
-        cv.rectb(px, py, pw, ph, NAMES["pink"])
-        self.ws._glyph("gear", (px + 6, py + 2, 14 * fs, 14 * fs), NAMES["yellow"], cv)
-        cv.print("UPDATE", px + 24, py + 4, NAMES["white"], 2)
-        self.ws._mini_btn("X", lay.set_back, NAMES["red"], cv)
+        cv.rect(px, py, pw, ph, th["surface"])
+        cv.rectb(px, py, pw, ph, th["edge"])
+        self.ws._glyph("gear", (px + 6, py + 2, 14 * fs, 14 * fs), th["accent"], cv)
+        cv.print("UPDATE", px + 24, py + 4, th["ink"], 2)
+        self.ws._mini_btn("X", lay.set_back, th["danger"], cv)
         u = self.ws.updater
         slot = u.slot() if u is not None else "?"
         ver = u.version() if u is not None else 0
@@ -284,19 +285,19 @@ class UpdateUI:
         y = py + 28 * fs
         phase = self._upd_phase
         if phase == "checking":
-            cv.print("CHECKING ONLINE...", x, y, NAMES["yellow"], 1)
+            cv.print("CHECKING ONLINE...", x, y, th["accent"], 1)
             y += 16 * fs
             beta = self.ws._ota_channel() == "unstable"
             cv.print("channel: %s" % ("BETA" if beta else "STABLE"), x, y,
-                     NAMES["orange"] if beta else NAMES["green"], 1)
+                     NAMES["orange"] if beta else th["play"], 1)
             y += 14 * fs
-            cv.print("running: %s %s" % (slot, vlabel), x, y, NAMES["light_grey"], 1)
+            cv.print("running: %s %s" % (slot, vlabel), x, y, th["ink_dim"], 1)
         elif phase == "uptodate":
-            cv.print("UP TO DATE", x, y, NAMES["green"], 1)
+            cv.print("UP TO DATE", x, y, th["play"], 1)
             y += 14 * fs
-            cv.print("firmware %s" % vlabel, x, y, NAMES["white"], 1)
+            cv.print("firmware %s" % vlabel, x, y, th["ink"], 1)
             y += 18 * fs
-            cv.print("B = BACK", x, y, NAMES["yellow"], 1)
+            cv.print("B = BACK", x, y, th["accent"], 1)
         elif phase == "confirm_online" and self._online_manifest:
             m = self._online_manifest
             newv = int(m.get("version", 0) or 0)
@@ -307,79 +308,79 @@ class UpdateUI:
             switch = tgt_ch != run_ch
             tgt_name = "BETA" if tgt_ch == "unstable" else "STABLE"
             cv.print("SWITCH TO %s" % tgt_name if switch else "UPDATE AVAILABLE",
-                     x, y, NAMES["light_grey"], 1)
+                     x, y, th["ink_dim"], 1)
             y += 12 * fs
             if switch:
                 cv.print(label[:22], x, y, NAMES["orange"], 1)
             else:
-                cv.print("%s -> %s" % (vlabel, label[:13]), x, y, NAMES["green"], 1)
+                cv.print("%s -> %s" % (vlabel, label[:13]), x, y, th["play"], 1)
             y += 14 * fs
             if kb:
-                cv.print("%d KB download" % kb, x, y, NAMES["white"], 1)
+                cv.print("%d KB download" % kb, x, y, th["ink"], 1)
                 y += 14 * fs
             else:
                 y += 2 * fs
-            cv.print("A = DOWNLOAD", x, y, NAMES["yellow"], 1)
+            cv.print("A = DOWNLOAD", x, y, th["accent"], 1)
             y += 12 * fs
-            cv.print("B = CANCEL", x, y, NAMES["light_grey"], 1)
+            cv.print("B = CANCEL", x, y, th["ink_dim"], 1)
         elif phase == "downloading":
             done = u.dl_done if u is not None else 0
             total = u.dl_total if (u is not None and u.dl_total) else 0
-            cv.print("DOWNLOADING...", x, y, NAMES["yellow"], 1)
+            cv.print("DOWNLOADING...", x, y, th["accent"], 1)
             y += 16 * fs
             frac = (done / total) if total else 0.0
             self._draw_progress_bar(px + 12 * fs, y, pw - 24 * fs, 10 * fs, frac)
             y += 16 * fs
             if total:
-                cv.print("%d / %d KB" % (done // 1024, total // 1024), x, y, NAMES["white"], 1)
+                cv.print("%d / %d KB" % (done // 1024, total // 1024), x, y, th["ink"], 1)
             else:
-                cv.print("%d KB" % (done // 1024), x, y, NAMES["white"], 1)
+                cv.print("%d KB" % (done // 1024), x, y, th["ink"], 1)
             y += 16 * fs
-            cv.print("B = CANCEL", x, y, NAMES["light_grey"], 1)
+            cv.print("B = CANCEL", x, y, th["ink_dim"], 1)
         elif phase == "confirm" and self._upd_bin:
             path, size = self._upd_bin
             name = path.rsplit("/", 1)[-1]
-            cv.print("FOUND ON SD:", x, y, NAMES["light_grey"], 1)
+            cv.print("FOUND ON SD:", x, y, th["ink_dim"], 1)
             y += 12 * fs
-            cv.print(name[:24], x, y, NAMES["green"], 1)
+            cv.print(name[:24], x, y, th["play"], 1)
             y += 12 * fs
-            cv.print("%d KB" % (size // 1024), x, y, NAMES["white"], 1)
+            cv.print("%d KB" % (size // 1024), x, y, th["ink"], 1)
             y += 14 * fs
-            cv.print("running: %s" % slot, x, y, NAMES["light_grey"], 1)
+            cv.print("running: %s" % slot, x, y, th["ink_dim"], 1)
             y += 18 * fs
-            cv.print("A = INSTALL", x, y, NAMES["yellow"], 1)
+            cv.print("A = INSTALL", x, y, th["accent"], 1)
             y += 12 * fs
-            cv.print("B = CANCEL", x, y, NAMES["light_grey"], 1)
+            cv.print("B = CANCEL", x, y, th["ink_dim"], 1)
         elif phase == "install":
             done = u.done if u is not None else 0
             total = u.total if (u is not None and u.total) else 1
-            cv.print("FLASHING...", x, y, NAMES["yellow"], 1)
+            cv.print("FLASHING...", x, y, th["accent"], 1)
             y += 16 * fs
             self._draw_progress_bar(px + 12 * fs, y, pw - 24 * fs, 10 * fs, done / total)
             y += 16 * fs
             cv.print("%d / %d KB" % (done // 1024, (u.total // 1024) if u else 0),
-                     x, y, NAMES["white"], 1)
+                     x, y, th["ink"], 1)
             y += 16 * fs
-            cv.print("DO NOT POWER OFF", x, y, NAMES["red"], 1)
+            cv.print("DO NOT POWER OFF", x, y, th["danger"], 1)
         elif phase == "done":
-            cv.print("UPDATED!", x, y, NAMES["green"], 2)
+            cv.print("UPDATED!", x, y, th["play"], 2)
             y += 20 * fs
-            cv.print("rebooting...", x, y, NAMES["white"], 1)
+            cv.print("rebooting...", x, y, th["ink"], 1)
         else:  # error
-            cv.print("UPDATE FAILED", x, y, NAMES["red"], 1)
+            cv.print("UPDATE FAILED", x, y, th["danger"], 1)
             y += 14 * fs
-            cv.print((self._upd_msg or "?")[:26], x, y, NAMES["light_grey"], 1)
+            cv.print((self._upd_msg or "?")[:26], x, y, th["ink_dim"], 1)
             y += 18 * fs
-            cv.print("B = BACK", x, y, NAMES["yellow"], 1)
+            cv.print("B = BACK", x, y, th["accent"], 1)
 
     def _draw_progress_bar(self, x, y, w, h, frac):
-        NAMES = self._NAMES
+        th = self.ws.theme_colors
         cv = self.ws.sys_canvas
         if frac < 0:
             frac = 0.0
         elif frac > 1:
             frac = 1.0
-        cv.rectb(x, y, w, h, NAMES["light_grey"])
+        cv.rectb(x, y, w, h, th["ink_dim"])
         fill = int((w - 2) * frac)
         if fill > 0:
-            cv.rect(x + 1, y + 1, fill, h - 2, NAMES["green"])
+            cv.rect(x + 1, y + 1, fill, h - 2, th["play"])

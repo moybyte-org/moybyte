@@ -394,7 +394,11 @@ class EditorApp:
             if x + ic > x0 + w:
                 break                       # ran out of lent width -- draw what fits
             if tab is not None and tab == self.tab:
-                cv.rect(x, y0, ic, ic, NAMES["indigo"])
+                # Frozen indigo on the dark bar; the theme hilite on a light band
+                # (the base ladder under a light variant, owner 2026-07-23).
+                cv.rect(x, y0, ic, ic,
+                        ws.theme_colors["hilite"]
+                        if ws.theme_colors.get("bar_light") else NAMES["indigo"])
             if tab == _ZONE_UNDO:
                 self._draw_history_icon(cv, glyph, x, y0, ic, ws.can_undo())
             elif tab == _ZONE_REDO:
@@ -413,7 +417,10 @@ class EditorApp:
         if enabled:
             ws._icon(glyph, x, y, cv)
         else:
-            ws._glyph(glyph, (x, y, ic, ic), self._NAMES["dark_blue"], cv)
+            th = ws.theme_colors
+            ws._glyph(glyph, (x, y, ic, ic),
+                      th["chrome_ink_dim"] if th.get("bar_light")
+                      else self._NAMES["dark_blue"], cv)
 
     def _zone_parts(self, rect):
         """PURE shelf-zone geometry (shared by draw_zone and zone_tap so a strip-

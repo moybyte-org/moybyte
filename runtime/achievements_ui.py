@@ -152,12 +152,16 @@ class AchievementsUI:
         NAMES = self._NAMES
         ACHIEVEMENTS = self._ACHDEFS
         cv = self.ws.sys_canvas
-        cv.rect(6, 14, 308, 212, NAMES["dark_blue"])
-        cv.rectb(6, 14, 308, 212, NAMES["yellow"])
-        self.ws._glyph("trophy", (12, 16, 14, 14), NAMES["yellow"], cv)
-        cv.print("ACHIEVEMENTS", 30, 18, NAMES["white"], 2)
+        th = self.ws.theme_colors
+        light = th.get("bar_light", False)
+        ink = th["ink"] if light else th["chrome_ink"]
+        dim = th["chrome_ink_dim"]
+        cv.rect(6, 14, 308, 212, th["panel"])
+        cv.rectb(6, 14, 308, 212, th["accent"])
+        self.ws._glyph("trophy", (12, 16, 14, 14), th["accent"], cv)
+        cv.print("ACHIEVEMENTS", 30, 18, ink, 2)
         cv.print("%d / %d" % (self.ws.ach.count(), len(ACHIEVEMENTS)), 240, 20,
-                 NAMES["yellow"], 1)
+                 th["accent"], 1)
         col_w = 150
         row_h = 18
         x0 = 12
@@ -171,12 +175,13 @@ class AchievementsUI:
             y = y0 + row * row_h
             got = self.ws.ach.has(ach_id)
             if got:
-                self.ws._glyph(glyph, (x, y, 14, 14), NAMES["yellow"], cv)
-                cv.print(title[:16], x + 16, y + 3, NAMES["white"], 1)
+                self.ws._glyph(glyph, (x, y, 14, 14), th["accent"], cv)
+                cv.print(title[:16], x + 16, y + 3, ink, 1)
             else:
-                self.ws._glyph("lock", (x, y, 14, 14), NAMES["dark_grey"], cv)
+                self.ws._glyph("lock", (x, y, 14, 14),
+                               th["ink_dim"] if light else NAMES["dark_grey"], cv)
                 # A hidden (Easter-egg) achievement stays "???"; a normal locked one
                 # shows its name greyed so a kid knows what's there to earn.
                 label = "???" if hidden else title[:16]
-                cv.print(label, x + 16, y + 3, NAMES["light_grey"], 1)
-        cv.print("TAP TO CLOSE", 110, 210, NAMES["light_grey"], 1)
+                cv.print(label, x + 16, y + 3, dim, 1)
+        cv.print("TAP TO CLOSE", 110, 210, dim, 1)

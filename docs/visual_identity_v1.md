@@ -309,6 +309,37 @@ The shipped `night` theme must remain byte-identical until golden/parity tests a
 deliberately migrated. Open Machine should begin as an additional theme or an opt-in
 prototype, not an in-place mutation of the default.
 
+*Status (2026-07-23): SHIPPED, extended.* Every theme family now carries a **dark
+and a light variant** (`chrome.THEME_VARIANTS`, picked in Appearance → THEMES →
+DARK/LIGHT, persisted as `system.theme_variant`); the dark sets are the frozen
+legacy tokens, the light sets are full token dicts (papers/pastels + dark ink, the
+family tint kept for titles/selection). Section 4.3 grew four resolved roles beyond
+the list above, all defaulting to today's frozen literals so dark themes stay
+pixel-stable:
+
+```text
+chrome_ink / chrome_ink_dim  (ink on the OS chrome itself -- bar, strips, panels;
+                              distinct from surface ink, which diverges in machine)
+selection_ink                (ink on a hilite/selection fill)
+bar / bar_edge / bar_light   (the OS bar band -- frozen black band on dark themes,
+                              the panel tone + a boolean flip on light variants)
+title_active / title_inactive (the WM strip pair, aliased to title/panel)
+```
+
+The Phase 5 system-app pass landed with it: the zoned bar + dock, Settings (rows +
+Wi-Fi panel), the ≡ system menu, About, achievements, the OTA update screens, and
+the editor tab surfaces (block/map/paint/scene/music/code/cards) read tokens on
+every responsive tier — the token gate is no longer machine-only. Each surface's
+frozen 320×240 `_base` branch keeps its literal indices **only in dark chrome**
+(the device parity contract holds at the default theme): under a light variant
+the base tier takes the token path too, so the small tier gets exactly a dark and
+a light presentation of every editor (code included — its `_HL_LIGHT` syntax set
+is the light half of the pair). Bar **icons get derived light variants** at draw
+time (`Workstation._bar_image`): the IconSheet's untouched index-0 plate — invisible
+on the frozen black bar — is keyed transparent and white strokes remap to ink-black
+on a `bar_light` theme, so wifi/battery/close never draw a black plate on a light
+band (the mascot keeps its authored colors).
+
 ### 4.4 Website color
 
 The website may use a deeper CSS surround such as its existing `#0B1024`, because it
