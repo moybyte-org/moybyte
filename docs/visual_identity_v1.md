@@ -514,6 +514,11 @@ cadence. A child's game owns its own audio while running.
 
 ## 9. Voice and naming
 
+> The working contract that grows this section — the full rule set, the before/after
+> rewrite table, and the shipped-string audit — lives in
+> [`docs/os_voice_v1.md`](os_voice_v1.md) (#147). This section is the seed; that doc
+> governs new text.
+
 Voice is direct, warm, and concrete. It assumes the child is capable.
 
 Prefer:
