@@ -87,6 +87,12 @@ class BlockEditor(object):
         self.cur = 0              # cursor index into self.rows
         self.rows = []
         self.dirty = False
+        # #85/#93 per-object scripts: which script set the outline is editing --
+        # None = the global "Stage" (program["scripts"] + procs), or a scene object's
+        # tag string (program["objects"] entry). set_target() flips it; reflow()
+        # flattens whichever is active. Stays None for a cart with no scene objects,
+        # so a Stage-only program behaves exactly as before.
+        self.target = None
         # -- #93 clipboard + cross-parent move + in-session undo/redo -----------
         self.clipboard = None     # a deep-copied block subtree (copy/paste/duplicate)
         self._move_src = None     # the block object marked for a cross-parent MOVE
@@ -111,14 +117,16 @@ class BlockEditor(object):
         """Rebuild the flat row list from the tree, then clamp the cursor. Called
         after every structural edit so rows/cursor stay in sync with the program."""
         rows = []
-        scripts = self.program.get("scripts", []) or []
+        scripts = self.active_scripts()           # Stage or the target object's scripts
         for si in range(len(scripts)):
             self._flatten_block(rows, scripts, si, 0)
         # custom-block definitions (#48) render after the event scripts: each proc's
         # define-hat + its indented body, using the same flatten machinery as a hat.
-        procs = self.program.get("procs", []) or []
-        for pi in range(len(procs)):
-            self._flatten_block(rows, procs, pi, 0)
+        # Procs are GLOBAL, so they only show on the Stage -- not inside an object.
+        if self.target is None:
+            procs = self.program.get("procs", []) or []
+            for pi in range(len(procs)):
+                self._flatten_block(rows, procs, pi, 0)
         if not rows:                              # an empty program still needs a row
             rows.append(BlockRow("insert", 0, scripts, 0))
         self.rows = rows
@@ -126,6 +134,78 @@ class BlockEditor(object):
             self.cur = len(rows) - 1
         if self.cur < 0:
             self.cur = 0
+
+    # -- per-object scripts (#85/#93) ----------------------------------------
+    #
+    # The outline edits ONE script set at a time: the global Stage (target None) or a
+    # scene object's scripts (target = its tag). Every structural edit (insert/delete/
+    # move/slot) works through the BlockRow's `parent` list, so it operates on whatever
+    # `active_scripts()` reflow flattened -- no per-edit changes needed. Objects live in
+    # program["objects"] = [{"tag": str, "scripts": [on_start/on_update/on_draw hats]}],
+    # the OPTIONAL key the compiler reads via `.get(...) or []` (empty => byte-identical).
+
+    def objects(self):
+        return list(self.program.get("objects", []) or [])
+
+    # A sprite's standard event hats (Scratch's per-sprite events): green-flag start,
+    # per-frame update + draw, and "when I'm tapped" (on_tap). A sprite authored before
+    # on_tap existed gains it on next open (never losing existing scripts).
+    _OBJECT_HATS = ("on_start", "on_update", "on_draw", "on_tap")
+
+    def _ensure_object_hats(self, o):
+        """Ensure `o` carries the standard sprite hats, appending any missing one in
+        canonical order (e.g. on_tap for an older sprite). Never removes/reorders a
+        kid's existing scripts. Idempotent."""
+        scripts = o.setdefault("scripts", [])
+        have = set(h.get("t") for h in scripts)
+        for t in self._OBJECT_HATS:
+            if t not in have:
+                scripts.append(self.blocks.make_block(t))
+        return o
+
+    def object_entry(self, tag, create=False):
+        """The program["objects"] entry for `tag`, or None. A found entry is normalized
+        to the standard sprite hats (so "when I'm tapped" appears on older sprites too);
+        with create=True a missing entry is materialized with those hats, so a
+        just-selected sprite opens on a familiar, editable outline. Empty entries are
+        pruned at save (blocks.prune_empty_objects)."""
+        for o in (self.program.get("objects", []) or []):
+            if o.get("tag") == tag:
+                return self._ensure_object_hats(o)
+        if not create:
+            return None
+        o = self._ensure_object_hats({"tag": tag, "scripts": []})
+        self.program.setdefault("objects", []).append(o)
+        return o
+
+    def active_scripts(self):
+        """The script list the outline is currently editing: program["scripts"] on the
+        Stage, else the target object's scripts (materialized on demand)."""
+        if self.target is None:
+            return self.program.setdefault("scripts", [])
+        return self.object_entry(self.target, create=True)["scripts"]
+
+    def set_target(self, tag):
+        """Switch the outline to a scene object's scripts (`tag`) or the global Stage
+        (`tag` is None), then reflow. Idempotent -- a no-op when already on `tag`."""
+        if tag == self.target:
+            return
+        if tag is not None:
+            self.object_entry(tag, create=True)
+        self.target = tag
+        self.cur = 0
+        self.reflow()
+
+    def _all_roots(self):
+        """Every top-level script root -- global scripts + procs + EVERY object's hats.
+        Used by the tree-wide walks (locate-for-move, variable rename, proc rename) so
+        a global rename rewrites references inside per-object scripts too, and a MOVE
+        can find its block whichever script set is active."""
+        roots = list(self.program.get("scripts", []) or [])
+        roots += list(self.program.get("procs", []) or [])
+        for o in (self.program.get("objects", []) or []):
+            roots += list(o.get("scripts", []) or [])
+        return roots
 
     def _flatten_block(self, rows, parent, index, depth):
         b = parent[index]
@@ -438,9 +518,7 @@ class BlockEditor(object):
         """Find (parent_list, index) of `block` by identity in the statement tree, or
         None. Walks child bodies only -- a movable block is always a body statement,
         which may live inside an event script OR a custom-block body (#48)."""
-        roots = (self.program.get("scripts", []) or []) + \
-                (self.program.get("procs", []) or [])
-        return self._locate_in(roots, block)
+        return self._locate_in(self._all_roots(), block)
 
     def _locate_in(self, lst, block):
         for i in range(len(lst)):
@@ -604,8 +682,7 @@ class BlockEditor(object):
             for c in node.get("c", []) or []:
                 walk(c)
 
-        for s in (self.program.get("scripts", []) or []) + \
-                 (self.program.get("procs", []) or []):
+        for s in self._all_roots():               # #85/#93: rename inside objects too
             walk(s)
 
     def variables(self):
@@ -776,8 +853,7 @@ class BlockEditor(object):
                 walk(v)
             for c in node.get("c", []) or []:
                 walk(c)
-        for s in (self.program.get("scripts", []) or []) + \
-                 (self.program.get("procs", []) or []):
+        for s in self._all_roots():               # #85/#93: rename inside objects too
             walk(s)
 
     def enclosing_proc(self):

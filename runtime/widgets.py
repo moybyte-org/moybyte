@@ -76,6 +76,37 @@ class _Blit:
         self.transparent = transparent
 
 
+def rotate_indices(pix, w, h, deg, transparent):
+    """Rotate an indexed sprite (`pix` = w*h palette indices) by `deg` degrees, nearest-
+    neighbour, expanding the canvas so no corner is clipped. Pixels that fall outside the
+    source become -1 (Canvas.spr always skips index < 0), so the rotated sprite has clean
+    transparent corners; the source's own `transparent` index is carried through. Pure
+    integer/float pixel math -> host and device rotate identically (#85/#93 all-around
+    rotation). Returns (out_pix, out_w, out_h)."""
+    import math
+    a = math.radians(deg)
+    ca = math.cos(a)
+    sa = math.sin(a)
+    ow = int(abs(w * ca) + abs(h * sa) + 0.5) or 1
+    oh = int(abs(w * sa) + abs(h * ca) + 0.5) or 1
+    out = [-1] * (ow * oh)
+    ocx = (ow - 1) * 0.5
+    ocy = (oh - 1) * 0.5
+    icx = (w - 1) * 0.5
+    icy = (h - 1) * 0.5
+    for oy in range(oh):
+        ry = oy - ocy
+        for ox in range(ow):
+            rx = ox - ocx
+            sx = ca * rx + sa * ry + icx     # inverse-rotate into the source
+            sy = -sa * rx + ca * ry + icy
+            ix = int(sx + 0.5)
+            iy = int(sy + 0.5)
+            if 0 <= ix < w and 0 <= iy < h:
+                out[oy * ow + ox] = pix[iy * w + ix]
+    return out, ow, oh
+
+
 CURSOR_IDLE_MS = 2000  # hide the trackball cursor after this long with no movement
 
 

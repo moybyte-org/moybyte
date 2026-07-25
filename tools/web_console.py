@@ -462,6 +462,11 @@ class _Handler(BaseHTTPRequestHandler):
             try:
                 cmds, cart, audio = self.console.step_frame()   # lock-guarded inside
             except Exception:  # noqa: BLE001 -- a frame error must not kill the socket loop
+                # Log it (once-ish) so a draw regression is VISIBLE in journalctl instead
+                # of silently freezing the browser at its last frame.
+                import traceback
+                sys.stderr.write("[web] step_frame error:\n" + traceback.format_exc())
+                sys.stderr.flush()
                 continue
             client.note_frame(cmds is not None)
             gen = self.console.canvas._rec.atlas_gen            # host recorder gen (self-contained)
@@ -504,8 +509,14 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _ws_apply(self, payload):
         # One shared decode path (web_view.apply_ws_text) so the wire format can't
-        # drift between the host web console and the device transport.
-        web_view.apply_ws_text(payload, self.console.apply_events)
+        # drift between the host web console and the device transport. Guard it: a bad
+        # input event must never crash the WS thread (silent freeze) -- log + swallow.
+        try:
+            web_view.apply_ws_text(payload, self.console.apply_events)
+        except Exception:  # noqa: BLE001
+            import traceback
+            sys.stderr.write("[web] input apply error:\n" + traceback.format_exc())
+            sys.stderr.flush()
 
 
 def make_server(console, host="0.0.0.0", port=DEFAULT_PORT, html=None):

@@ -55,6 +55,30 @@ def test_place_snaps_to_grid_and_selects():
     assert (se.rows[-1]["x"], se.rows[-1]["y"]) == (43, 61)   # free-pixel
 
 
+def test_stamp_tag_follows_the_sprite_you_place():
+    # "The sprite is the object type" (#85/#93): placing more of a sprite keeps its
+    # tag instead of resetting to the generic default every time.
+    se = SceneEditor(json.dumps([
+        {"tag": "player", "tile": 1, "x": 10, "y": 10},
+        {"tag": "coin", "tile": 2, "x": 40, "y": 40}]))
+    # pick the coin sprite from the palette -> new placements are coins
+    se.set_brush(2)
+    assert se.stamp_tag == "coin"
+    se.place(80, 80)
+    assert se.rows[-1]["tag"] == "coin" and se.rows[-1]["tile"] == 2
+    # a brand-new sprite starts generic, but naming it once is remembered
+    se.set_brush(7)
+    assert se.stamp_tag == "actor"
+    se.place(100, 100)
+    se.set_tag("enemy")
+    assert se.stamp_tag == "enemy"
+    se.place(120, 120)
+    assert se.rows[-1]["tag"] == "enemy"          # remembered for the next stamp
+    # selecting an actor loads it as the stamp (sprite + tag)
+    se.select_at(10, 10)
+    assert se.n == 1 and se.stamp_tag == "player"
+
+
 def test_select_at_picks_topmost_and_move_snaps():
     se = SceneEditor(json.dumps([
         {"tag": "a", "tile": 0, "x": 40, "y": 40},

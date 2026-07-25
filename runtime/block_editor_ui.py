@@ -66,6 +66,20 @@ _BASE_W = 320
 _BASE_H = 240
 _FONT_W = 8                 # petme128 cell width at scale 1 (one char advance)
 
+# Blocks + Scene side-by-side workspace (#93 blocks / #85 scene): on a wide enough
+# canvas the Blocks tab grows an INTERACTIVE scene pane on the right -- Scratch-
+# style, "objects on the right, their programming on the left". Below these
+# thresholds (notably the 320x240 T-Deck) the tab renders exactly as before
+# (blocks-only): the split can't fit a small screen, and the T-Deck stays a player
+# that keeps its existing single-tab editors. Big-screen (P4 7"/console/host) only.
+_WORKSPACE_MIN_W = 640      # min system-canvas width to show the scene pane
+_WORKSPACE_MIN_H = 360      # min height (a full scene panel + block outline)
+_WORKSPACE_SCENE_PCT = 58   # the scene (stage) pane gets the larger share of the width
+_WORKSPACE_MIN_BLOCK_W = 320  # ...but the block pane never shrinks below this (its
+                              # action bar -- ADD/DEL/^/v/CODE/.../UNDO/REDO -- needs
+                              # ~306px; the scene takes whatever's left over)
+_ADD_SPRITE = "\x00add_sprite"  # the sprite-list "+" chip sentinel (never a real tag)
+
 # Block editor (#29 Part 2): the structured outline. A vertical scrolling list of
 # Scratch-style colored block rows (the flattened script) under the unified zoned bar
 # (Stage-4 rollout: the old title bar was dissolved into it) and over a bottom action
@@ -129,7 +143,7 @@ _BLK_NUM_X = (244, 168, 40, 26)       # cancel
 # Kid-facing category names for the insert menu (the catalog ids are terse keys).
 _CAT_LABEL = {
     "events": "When...", "control": "Control", "draw": "Draw", "input": "Buttons",
-    "variables": "Variables", "lists": "Lists", "actors": "Actors",
+    "variables": "Variables", "lists": "Lists", "actors": "Sprite", "looks": "Looks",
     "operators": "Math", "sound": "Sound", "myblocks": "My Blocks",
 }
 
@@ -224,13 +238,19 @@ class BlockLayout:
     `_BLK_*` constant verbatim (the `_base` branch), so the degradation path is
     pixel-identical to today."""
 
-    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1):
+    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1, bounds=None):
         self.w = int(w)
         self.h = int(h)
         self.fs = max(1, int(font_scale))
         fs = self.fs
         self.cell = _FONT_W * fs
-        self._base = (self.w == _BASE_W and self.h == _BASE_H and fs == 1)
+        # `bounds` (bx, by, bw, bh) confines the OUTLINE + action bar to a sub-rect
+        # -- the left pane of the combined Blocks+Scene workspace (blocks-left /
+        # objects-right). The modal overlays (insert menu / prompts) stay centered
+        # on the full canvas. A bounded layout never takes the frozen 320x240 branch
+        # (big-screen feature), so `_base` excludes it and the T-Deck is unchanged.
+        self._base = (self.w == _BASE_W and self.h == _BASE_H and fs == 1
+                      and bounds is None)
         # The hint + SAVE-status strip sits just below the 18px unified bar (the old
         # title row was dissolved into the bar, Stage-4 rollout).
         self.hint_y = _BLK_HINT_Y * fs
@@ -287,6 +307,38 @@ class BlockLayout:
             my = 24 * fs
             self.menu = (mx, my, mw, mh)
             self.menu_rows = max(3, (mh - 16 * fs) // self.menu_row_h)
+        # Confine the outline + action bar to the workspace's left pane (the modals
+        # above keep full-canvas centering, so they float over both panes).
+        if bounds is not None and not self._base:
+            self._apply_bounds(bounds)
+
+    def _apply_bounds(self, bounds):
+        """Relocate the outline + action bar into `bounds` (bx, by, bw, bh) -- the
+        left pane of the combined Blocks+Scene workspace. Overrides the fields the
+        draw/hit-test read (x0/y0/hint_y/status_x/bar/outline_w/rows); the modal
+        insert-menu/prompt geometry stays centered on the full canvas."""
+        bx, by, bw, bh = bounds
+        fs = self.fs
+        pad = _BLK_X0 * fs
+        self.hint_y = by + 2 * fs
+        self.status_x = bx + bw - 56 * fs      # SAVE-status/dirty-* on the pane's right
+        self.x0 = bx + pad
+        self.y0 = by + 12 * fs                  # below the hint/status line
+        self.bar_h = 22 * fs
+        self.bar_y = by + bh - self.bar_h - 2 * fs
+        by2, bhh = self.bar_y, self.bar_h
+        x = self.x0
+        self.add_btn = (x, by2, 40 * fs, bhh); x += 42 * fs
+        self.del_btn = (x, by2, 34 * fs, bhh); x += 36 * fs
+        self.up_btn = (x, by2, 22 * fs, bhh); x += 24 * fs
+        self.dn_btn = (x, by2, 22 * fs, bhh); x += 24 * fs
+        self.code_btn = (x, by2, 56 * fs, bhh); x += 58 * fs
+        self.act_btn = (x, by2, 30 * fs, bhh); x += 32 * fs
+        self.undo_btn = (x, by2, 42 * fs, bhh); x += 44 * fs
+        self.redo_btn = (x, by2, 40 * fs, bhh)
+        self.outline_w = bw - 2 * pad
+        avail_h = self.bar_y - self.y0
+        self.rows = max(3, avail_h // self.row_h)
 
     def area(self):
         return (self.x0, self.y0, self.outline_w, self.rows * self.row_h)
@@ -324,6 +376,15 @@ class BlockEditorUI:
         self.blk_kbd = None           # inline name-entry prompt state dict, or None
         self._blk_ekey = KeyEdge()    # #93: Ctrl+Z/Y edge tracker
         self.block_layout = BlockLayout()
+        # Blocks+Scene workspace: which pane owns the keyboard ("blocks"|"scene"),
+        # and whether a pointer gesture in flight belongs to the scene pane (so a
+        # drag that started there keeps routing to it until release).
+        self._ws_focus = "blocks"
+        self._ws_scene_drag = False
+        # Per-object scripts (#85/#93): the SPRITE LIST -- [(rect, tag_or_None), ...]
+        # for STAGE + every sprite chip drawn atop the block pane in the workspace
+        # (rebuilt each draw, hit-tested in _blocks_pointer). Scratch's sprite pane.
+        self._blk_roster_btns = []
 
     def relayout(self, w, h, fs):
         """Rebuild the responsive layout from the live system-canvas size + the
@@ -332,6 +393,206 @@ class BlockEditorUI:
         self.block_layout = BlockLayout(w, h, fs)
         if self.blocks_ed is not None:
             self._blk_reveal()
+
+    # -- Blocks + Scene side-by-side workspace (#93/#85) ----------------------
+
+    def _workspace_active(self):
+        """True when the canvas is big enough (and the cart has a sheet + scenes)
+        to show the interactive scene pane beside the blocks. Big-screen only --
+        the 320x240 T-Deck and any narrow window fall through to blocks-only."""
+        ws = self.ws
+        sc = ws.sys_canvas
+        proj = ws.project
+        if sc is None or proj is None or getattr(proj, "cart", None) is None:
+            return False
+        if getattr(proj, "sheet", None) is None or getattr(proj, "scenes", None) is None:
+            return False
+        return sc.w >= _WORKSPACE_MIN_W and sc.h >= _WORKSPACE_MIN_H
+
+    def _workspace_panes(self):
+        """The (left, right) pane rects: blocks-left / scene-right, both below the
+        18px OS bar. The scene (stage) takes the larger share (~_WORKSPACE_SCENE_PCT
+        of the width), but the block pane is floored at _WORKSPACE_MIN_BLOCK_W so its
+        action bar always fits -- the scene gets whatever's left over."""
+        sc = self.ws.sys_canvas
+        fs = max(1, getattr(sc, "font_scale", 1))
+        top = 18 * fs
+        body_h = sc.h - top
+        gap = 3 * fs
+        scene_w = (sc.w * _WORKSPACE_SCENE_PCT) // 100
+        scene_w = min(scene_w, sc.w - _WORKSPACE_MIN_BLOCK_W * fs - gap)
+        scene_w = max(scene_w, 1)
+        left_w = sc.w - scene_w - gap
+        left = (0, top, left_w, body_h)
+        right = (left_w + gap, top, scene_w, body_h)
+        return left, right
+
+    def _layout_workspace(self):
+        """If the workspace is active, split the canvas and BOUND both editors'
+        layouts to their panes; return (left, right) or None. Called at the top of
+        draw AND pointer/input so the geometry is consistent within a frame (input
+        runs before draw) and re-derives on a window resize."""
+        if not self._workspace_active():
+            return None
+        left, right = self._workspace_panes()
+        sc = self.ws.sys_canvas
+        fs = max(1, getattr(sc, "font_scale", 1))
+        self.block_layout = BlockLayout(sc.w, sc.h, fs, bounds=left)
+        if self.blocks_ed is not None:
+            self._blk_reveal()               # re-clamp scroll to the pane's row count
+        # Lazily build the scene editor the first time the workspace opens, then
+        # bound it to the right pane (mirrors EditorApp.set_tab's "scene" arm).
+        su = self.ws.scene_ui
+        if su.sceneedit is None:
+            su.build()
+            su.on_open()
+        su.relayout_bounded(right)
+        return left, right
+
+    def _scene_pane_pointer(self, px, py, click):
+        """Route a pointer event into the scene pane, mirroring _SceneLayer.
+        handle_pointer (tap = place/select, drag = move/pan, else release). After the
+        gesture, point the block outline at the selected object's scripts (Scratch:
+        pick a sprite -> see its code)."""
+        ws = self.ws
+        self._ws_focus = "scene"
+        if click:
+            ws.scene_ui._scene_click(px, py)
+        elif ws.pointer.down:
+            ws.scene_ui._scene_drag(px, py)
+        else:
+            ws.scene_ui._scene_release(px, py)
+        # Sync after EVERY gesture edge: selecting an existing actor lands on press,
+        # but PLACING a new one completes on release -- both must focus its scripts.
+        self._sync_target_from_scene()
+
+    def _selected_scene_tag(self):
+        """The tag of the currently-selected scene actor, or None (Stage)."""
+        se = self.ws.scene_ui.sceneedit
+        if se is not None:
+            sel = getattr(se, "sel", None)
+            if sel is not None and 0 <= sel < len(se.rows):
+                tag = se.rows[sel].get("tag")
+                if tag:
+                    return str(tag)
+        return None
+
+    def _sync_target_from_scene(self):
+        """Point the block outline at the selected object's scripts. Selecting/placing
+        an object focuses its scripts; a tag change is followed too. No selection keeps
+        whatever target is active (so a stray tap doesn't yank the kid back to Stage)."""
+        be = self.blocks_ed
+        if be is None:
+            return
+        tag = self._selected_scene_tag()
+        if tag is not None:
+            be.set_target(tag)
+
+    def _draw_scene_pane(self, right):
+        """Draw the interactive scene into the right pane: a thin divider, then the
+        SceneEditorUI panel (it clears only its own body_fill = the pane)."""
+        ws = self.ws
+        cv = ws.sys_canvas
+        fs = self.block_layout.fs
+        th = ws.theme_colors
+        cv.rect(right[0] - 2 * fs, right[1], fs, right[3],
+                th.get("edge", self._NAMES["dark_grey"]))
+        ws.scene_ui._draw_scene()
+
+    def _roster_tags(self):
+        """The ordered, distinct list of sprite tags -- every object placed in the
+        scene PLUS any object that has scripts (so a sprite shows in the list whether
+        or not it's on the stage yet). Scene-placement order first."""
+        tags = []
+        seen = {}
+        se = self.ws.scene_ui.sceneedit
+        if se is not None:
+            for r in se.rows:
+                t = r.get("tag")
+                if t and t not in seen:
+                    seen[t] = True
+                    tags.append(t)
+        be = self.blocks_ed
+        if be is not None:
+            for o in (be.program.get("objects", []) or []):
+                t = o.get("tag")
+                if t and t not in seen:
+                    seen[t] = True
+                    tags.append(t)
+        return tags
+
+    def _draw_sprite_list(self, lay):
+        """The SPRITE LIST atop the block pane (#85/#93) -- Scratch's sprite pane: a
+        STAGE chip (the global program) then one chip per sprite in the game. Tapping a
+        chip edits that sprite's scripts; the active target is highlighted. Chips that
+        run past the pane width are dropped (the list clips, like the tab ladder)."""
+        ws = self.ws
+        cv = ws.sys_canvas
+        NAMES = self._NAMES
+        fs = lay.fs
+        be = self.blocks_ed
+        tgt = be.target if be is not None else None
+        y = lay.hint_y - 2 * fs
+        h = 11 * fs
+        gap = 3 * fs
+        right = lay.x0 + lay.outline_w
+        self._blk_roster_btns = []
+        x = [lay.x0]
+
+        def chip(label, active, tag, base_col):
+            w = (len(label) + 1) * lay.cell + 4 * fs
+            if x[0] + w > right:
+                return False
+            cv.rect(x[0], y, w, h, NAMES["yellow"] if active else base_col)
+            cv.print(label, x[0] + 3 * fs, lay.hint_y,
+                     NAMES["black"] if active else NAMES["white"], 1)
+            self._blk_roster_btns.append(((x[0], y, w, h), tag))
+            x[0] += w + gap
+            return True
+
+        chip("STAGE", tgt is None, None, NAMES["indigo"])
+        for t in self._roster_tags():
+            if not chip(t[:10], tgt == t, t, NAMES["green"]):
+                break
+        chip("+", False, _ADD_SPRITE, NAMES["dark_grey"])   # add a new sprite
+
+    def _new_sprite_tag(self):
+        """A fresh, unique sprite tag ('sprite1', 'sprite2', ...) for + Add sprite."""
+        existing = set(self._roster_tags())
+        i = 1
+        while ("sprite" + str(i)) in existing:
+            i += 1
+        return "sprite" + str(i)
+
+    def _add_sprite(self):
+        """+ Add sprite (Scratch's sprite-pane +): drop a new sprite (fresh tag, the
+        current brush costume) near the middle of the stage, select it, and open its
+        scripts. The kid names/repositions/re-costumes it from there."""
+        se = self.ws.scene_ui.sceneedit
+        if se is None:
+            return
+        se.stamp_tag = self._new_sprite_tag()
+        se.place(152, 112)               # ~centre of the 320x240 stage, grid-snapped
+        self.ws.scene_ui._sync_live()
+        self._sync_target_from_scene()   # the placed actor is selected -> target its blocks
+
+    def _select_sprite(self, tag):
+        """Edit a sprite's scripts (tag) or the global Stage (tag None), and mirror the
+        pick onto the stage -- selecting the first actor of that tag, like Scratch
+        highlighting the chosen sprite. The two-way twin of _sync_target_from_scene."""
+        be = self.blocks_ed
+        if be is None:
+            return
+        be.set_target(tag)
+        self._ws_focus = "blocks"
+        se = self.ws.scene_ui.sceneedit
+        if tag is not None and se is not None:
+            for i, r in enumerate(se.rows):
+                if r.get("tag") == tag:
+                    se.sel = i
+                    se.n = r.get("tile", se.n)
+                    se.stamp_tag = tag
+                    break
 
     def build(self):
         """Build the BlockEditor over the cart's block program (#29), lazily --
@@ -391,14 +652,29 @@ class BlockEditorUI:
         self.blk_kbd = None
         self.blk_protect = False
         self.blk_graduated = False
+        self._ws_focus = "blocks"
+        self._ws_scene_drag = False
 
     def on_leave(self):
         """Called from Workstation._leave_menu() when menu_view == "blocks"."""
         self.blk_menu = None
         self.blk_kbd = None
+        self._ws_focus = "blocks"
+        self._ws_scene_drag = False
         # #93: don't leave a half-started MOVE armed when the kid steps away.
         if self.blocks_ed is not None:
             self.blocks_ed.cancel_move()
+
+    def commit_workspace_scene(self):
+        """Persist the scene pane if it was edited in the combined workspace
+        (#93/#85). Called from EditorApp.save_current when leaving the Blocks tab --
+        the scene has its OWN commit path (save_scene -> Project.commit_scene),
+        separate from save_blocks. No-op unless a scene editor is built AND dirty,
+        so a blocks-only cart / an untouched scene never writes."""
+        su = self.ws.scene_ui
+        se = getattr(su, "sceneedit", None)
+        if se is not None and getattr(se, "dirty", False):
+            self.ws.save_scene()
 
     # -- block editor (#29 Part 2) -------------------------------------------
     #
@@ -1050,7 +1326,11 @@ class BlockEditorUI:
             # block save would replace. Refuse and tell the kid -- their code stays.
             self.blk_status = "CART HAS CODE -- NOT SAVED"
             return False
-        prog = be.program
+        # Drop scene objects the kid selected but never gave a block (#85/#93), so
+        # blocks.json stays clean and an empty object never forces a draw_scene(). The
+        # live editor keeps its entries (prune returns a copy), so the outline is
+        # unchanged; a program with no objects is returned as-is (byte-identical).
+        prog = _blocks_mod.prune_empty_objects(be.program)
         # Always compile-check first so the kid sees a problem before it persists.
         try:
             src = _blocks_mod.compile_blocks(prog)
@@ -1124,6 +1404,14 @@ class BlockEditorUI:
         editors' edge-driven nav. The menu, when open, captures nav + A/B."""
         ws = self.ws
         i = ws.input
+        # Blocks+Scene workspace (#93/#85): route the keyboard to the focused pane. A
+        # block modal (name/number entry, insert menu) always keeps it on blocks;
+        # otherwise the scene owns it while focused (e.g. typing an actor's TAG).
+        if (self.blk_kbd is None and self.blk_menu is None
+                and (self._ws_focus == "scene" or ws.scene_ui.tag_edit)
+                and self._workspace_active()):
+            ws.scene_ui._scene_input()
+            return
         if self.blk_kbd is not None:
             # The variable name-entry prompt owns input: type the name (one insert per
             # physical press, edge-detected like the code editor), Enter/A confirm, B
@@ -1248,14 +1536,28 @@ class BlockEditorUI:
 
     def _blocks_pointer(self, px, py, click):
         # SYSTEM coords + the responsive BlockLayout (#39 step 2).
-        self._outline_drag(px, py)         # held drag scrolls the outline
-        if not click:
-            return
-        if self.blk_kbd is not None:
+        panes = self._layout_workspace()   # None unless the wide workspace is active
+        # Modal overlays (full-canvas insert menu / entry prompt) own a click first.
+        if click and self.blk_kbd is not None:
             self._blk_kbd_click(px, py)
             return
-        if self.blk_menu is not None:
+        if click and self.blk_menu is not None:
             self._blk_menu_click(px, py)
+            return
+        # Scene pane (#93/#85): a gesture that STARTS in the right pane routes into
+        # the scene and keeps routing until release (a drag/pan can leave the pane).
+        # Runs BEFORE the outline drag so a scene pan/move isn't also read as an
+        # outline scroll. Suppressed while a block modal is open.
+        if panes is not None and self.blk_kbd is None and self.blk_menu is None:
+            if click:
+                self._ws_scene_drag = self._in(px, py, panes[1])
+            if self._ws_scene_drag:
+                self._scene_pane_pointer(px, py, click)
+                if not click and not self.ws.pointer.down:
+                    self._ws_scene_drag = False
+                return
+        self._outline_drag(px, py)         # held drag scrolls the outline
+        if not click:
             return
         # No modal up: the unified bar (tab ladder + PLAY + SAVE + X) claims its slice
         # FIRST (Stage-4 rollout), before any outline/action-bar tap -- SAVE here
@@ -1263,6 +1565,17 @@ class BlockEditorUI:
         # system-canvas tab), same space the bar drew in.
         if self.ws.bar_layer.handle_bar_tap("menu", px, py):
             return
+        if panes is not None:
+            self._ws_focus = "blocks"      # a tap that reached the outline focuses blocks
+            # Sprite list (#85/#93): tapping a chip edits that sprite's scripts (STAGE =
+            # the global program); the "+" chip adds a new sprite. Scratch's sprite pane.
+            for rect, tag in self._blk_roster_btns:
+                if self._in(px, py, rect):
+                    if tag == _ADD_SPRITE:
+                        self._add_sprite()
+                    else:
+                        self._select_sprite(tag)
+                    return
         be = self.blocks_ed
         if be is None:
             return
@@ -1299,10 +1612,27 @@ class BlockEditorUI:
                     if be.rows[ridx].kind == "insert":
                         self._blk_a()
                 elif ridx == be.cur:
+                    # Second tap: edit the tapped slot directly (tap the 2nd arg to
+                    # edit the 2nd arg), Scratch-style -- fall back to the highlighted
+                    # slot when the tap missed a value (e.g. on the block's name).
+                    row = be.rows[ridx]
+                    if row.kind == "block" and not row.is_else:
+                        row_x = lay.x0 + row.depth * lay.indent
+                        si = self._blk_slot_at_x(row.block, row_x, px)
+                        if si is not None:
+                            self.blk_slot = si
                     self._blk_a()                # a second tap acts (insert / edit)
                 else:
+                    # First tap: select the block AND highlight whichever slot was
+                    # tapped, so the very next tap edits that argument.
                     be.cur = ridx
                     self.blk_slot = 0
+                    row = be.rows[ridx]
+                    if row.kind == "block" and not row.is_else:
+                        row_x = lay.x0 + row.depth * lay.indent
+                        si = self._blk_slot_at_x(row.block, row_x, px)
+                        if si is not None:
+                            self.blk_slot = si
                     self._blk_reveal()
 
     def _blk_menu_click(self, px, py):
@@ -1380,16 +1710,21 @@ class BlockEditorUI:
         # #93 icon pass -- one shared body, chrome._gbtn.
         _chrome_gbtn(self.ws, self._NAMES, kind, label, rect, fill, cv)
 
-    def _draw_blocks(self):
+    def _draw_blocks(self, dt=0):
         """The structured outline: a title bar, a scrolling list of Scratch-style
         colored block rows (the flattened script with the cursor highlighted and the
         insert points shown as `+`), and a bottom action bar. Drawn with the indexed
         API + petme128 font only, so host == device. Responsive (#39 step 2): on the
         SYSTEM canvas at native size, geometry from BlockLayout (verbatim at 320x240/
-        1x) -- a bigger panel shows MORE rows + WIDER blocks, a bigger font scales it."""
+        1x) -- a bigger panel shows MORE rows + WIDER blocks, a bigger font scales it.
+
+        On a wide canvas (#93/#85) the outline is BOUND to the left pane and an
+        interactive scene pane is drawn on the right (Scratch-style objects-right);
+        below the gate it's blocks-only, byte-identical to before (T-Deck path)."""
         ws = self.ws
         NAMES = self._NAMES
         cv = ws.sys_canvas
+        panes = self._layout_workspace()     # split + bound both layouts, or None
         lay = self.block_layout
         fs = lay.fs
         be = self.blocks_ed
@@ -1418,12 +1753,19 @@ class BlockEditorUI:
             return
         # A kid-facing hint for the surprising blocks (forever-is-bounded / wait).
         # Suppressed on a graduated cart -- the banner owns that row.
-        hint = None if self.blk_graduated else self._blk_hint()
-        if hint:
-            # truncate to leave the right end for the status slot
-            hmax = max(8, (lay.status_x - lay.x0) // lay.cell - 1)
-            cv.print(hint[:hmax], lay.x0, lay.hint_y,
-                     th["ink_dim"] if light else NAMES["light_grey"], 1)
+        # In the workspace the hint row becomes the SPRITE LIST (#85/#93) -- which
+        # sprite you're editing matters more there than a block hint. Below the gate
+        # (blocks-only) the kid hint shows as before.
+        if panes is not None and not self.blk_graduated:
+            self._draw_sprite_list(lay)
+        else:
+            self._blk_roster_btns = []
+            hint = None if self.blk_graduated else self._blk_hint()
+            if hint:
+                # truncate to leave the right end for the status slot
+                hmax = max(8, (lay.status_x - lay.x0) // lay.cell - 1)
+                cv.print(hint[:hmax], lay.x0, lay.hint_y,
+                         th["ink_dim"] if light else NAMES["light_grey"], 1)
         rows = be.rows
         for vi in range(lay.rows):
             ridx = self.blk_top + vi
@@ -1452,6 +1794,11 @@ class BlockEditorUI:
                    NAMES["indigo"] if be.can_undo() else NAMES["dark_grey"], cv)
         self._gbtn("redo", "REDO", lay.redo_btn,
                    NAMES["indigo"] if be.can_redo() else NAMES["dark_grey"], cv)
+        # The interactive SCENE pane (#93/#85): objects on the right, their
+        # programming on the left. Only on a wide canvas -- below the gate the tab
+        # is blocks-only (unchanged, T-Deck included).
+        if panes is not None:
+            self._draw_scene_pane(panes[1])
         # The unified zoned bar (tab ladder + PLAY + SAVE + X), drawn BEFORE the modal
         # insert menu / entry prompt so those still sit on top (Stage-4 rollout).
         ws.bar_layer._draw_status_strip("menu")
@@ -1488,7 +1835,12 @@ class BlockEditorUI:
             self._draw_blk_num()
             return
         NAMES = self._NAMES
-        cv = self.ws.canvas
+        # The prompt is part of the EDITOR, so it draws on the SYSTEM canvas -- NOT
+        # ws.canvas (the 320x240 game canvas). They're the same object at 320x240 (so
+        # the device/small tier was fine), but on a bigger canvas (the Blocks+Scene
+        # workspace, P4, windowed web) the game canvas is a hidden 320x240 buffer, so
+        # drawing here left the modal INVISIBLE -- the editor looked frozen (#85/#93).
+        cv = self.ws.sys_canvas
         x, y, w, h = _BLK_KBD
         _ui.dialog(cv, (x, y, w, h))
         kind = self.blk_kbd.get("kind")
@@ -1503,15 +1855,16 @@ class BlockEditorUI:
         # empty buffer: the default name shows as a dim placeholder (OK keeps it)
         ph = "" if is_text else str(self.blk_kbd.get("var", ""))[:24]
         _ui.text_field(cv, (fx, fy, fw, 14), txt, ph)
-        self.ws._btn("DEL", _BLK_KBD_DEL, NAMES["red"])
-        self.ws._btn("OK", _BLK_KBD_OK, NAMES["green"])
-        self.ws._btn("X", _BLK_KBD_X, NAMES["dark_grey"])
+        self.ws._btn("DEL", _BLK_KBD_DEL, NAMES["red"], cv)
+        self.ws._btn("OK", _BLK_KBD_OK, NAMES["green"], cv)
+        self.ws._btn("X", _BLK_KBD_X, NAMES["dark_grey"], cv)
 
     def _draw_blk_num(self):
         """The number-entry pad: a live value field + an on-screen digit grid (tap a
         number in, or type it) + DEL/OK/X and a BLOCK swap for expr slots (#29)."""
         NAMES = self._NAMES
-        cv = self.ws.canvas
+        cv = self.ws.sys_canvas    # the EDITOR's canvas, not the 320x240 game canvas
+                                   # (see _draw_blk_kbd -- same invisible-modal bug, #85/#93)
         k = self.blk_kbd
         x, y, w, h = _BLK_NUM
         _ui.dialog(cv, (x, y, w, h))
@@ -1529,12 +1882,12 @@ class BlockEditorUI:
             rx = _BLK_NUM_GX + c * _BLK_NUM_BW
             ry = _BLK_NUM_GY + r * _BLK_NUM_BH
             self.ws._btn(_BLK_NUM_KEYS[idx],
-                      (rx, ry, _BLK_NUM_BW - 3, _BLK_NUM_BH - 3), NAMES["indigo"])
-        self.ws._btn("DEL", _BLK_NUM_DEL, NAMES["red"])
+                      (rx, ry, _BLK_NUM_BW - 3, _BLK_NUM_BH - 3), NAMES["indigo"], cv)
+        self.ws._btn("DEL", _BLK_NUM_DEL, NAMES["red"], cv)
         if k.get("allow_block"):
-            self.ws._btn("BLOCK", _BLK_NUM_BLOCK, NAMES["green"])
-        self.ws._btn("OK", _BLK_NUM_OK, NAMES["green"])
-        self.ws._btn("X", _BLK_NUM_X, NAMES["dark_grey"])
+            self.ws._btn("BLOCK", _BLK_NUM_BLOCK, NAMES["green"], cv)
+        self.ws._btn("OK", _BLK_NUM_OK, NAMES["green"], cv)
+        self.ws._btn("X", _BLK_NUM_X, NAMES["dark_grey"], cv)
 
     def _blk_hint(self):
         be = self.blocks_ed
@@ -1542,6 +1895,33 @@ class BlockEditorUI:
         if b is not None:
             return _BLK_HINTS.get(b.get("t"))
         return None
+
+    def _blk_ink(self, fill_idx):
+        """Black or white text, whichever reads on the fill colour (luminance)."""
+        try:
+            r, g, b = self.ws.sys_canvas.palette[fill_idx]
+        except Exception:  # noqa: BLE001 - a non-RGB palette entry
+            return self._NAMES["white"]
+        return self._NAMES["black"] if (r * 30 + g * 59 + b * 11) > 13000 \
+            else self._NAMES["white"]
+
+    def _is_hat_block(self, b):
+        d = _blocks_mod.block_def(b.get("t"))
+        return bool(d) and d.get("shape") == _blocks_mod.SHAPE_HAT
+
+    def _is_body_block(self, b):
+        """A block that WRAPS children (hat / c-block / proc def) -- gets a Scratch mouth."""
+        tid = b.get("t")
+        return (_blocks_mod.is_cblock(tid) or _blocks_mod.is_def(tid)
+                or self._is_hat_block(b))
+
+    def _blk_body_span(self, ridx, depth):
+        """How many rows after `ridx` belong to its body (depth deeper than `depth`)."""
+        rows = self.blocks_ed.rows
+        j = ridx + 1
+        while j < len(rows) and rows[j].depth > depth:
+            j += 1
+        return j - ridx - 1
 
     def _draw_blk_row(self, row, vi, is_cursor):
         NAMES = self._NAMES
@@ -1551,33 +1931,54 @@ class BlockEditorUI:
         cell = lay.cell
         rh = lay.row_h
         be = self.blocks_ed
+        th = self.ws.theme_colors
+        light = (not lay._base) or self.ws.light_chrome()
+        bg = th["surface"] if light else NAMES["dark_blue"]
         y = lay.y0 + vi * rh
         x = lay.x0 + row.depth * lay.indent
         w = lay.outline_w - row.depth * lay.indent
         if row.kind == "insert":
-            # an empty insert point: a slim dashed-looking `+` slot
+            # a slim Scratch-style drop slot (a notch between stacked blocks).
             c = NAMES["yellow"] if is_cursor else NAMES["dark_grey"]
-            cv.rectb(x, y + 2 * fs, w - 2 * fs, rh - 4 * fs, c)
-            cv.print("+", x + 4 * fs, y + 4 * fs, c, 1)
+            cv.rect(x + 2 * fs, y + rh // 2 - fs, 12 * fs, 2 * fs, c)
             if is_cursor:
-                cv.print("add a block", x + 16 * fs, y + 4 * fs, NAMES["light_grey"], 1)
+                cv.print("+ add a block", x + 16 * fs, y + 3 * fs, NAMES["light_grey"], 1)
+            else:
+                cv.print("+", x + 4 * fs, y + 3 * fs, c, 1)
             return
         b = row.block
         cat = self._blk_block_cat(b)
         fill = NAMES[_blocks_mod.CATEGORY_COLOR.get(cat, "dark_grey")]
         if row.is_else:
             fill = NAMES["orange"]
-        cv.rect(x, y + fs, w - 2 * fs, rh - 2 * fs, fill)
-        border = NAMES["white"] if is_cursor else NAMES["black"]
-        cv.rectb(x, y + fs, w - 2 * fs, rh - 2 * fs, border)
-        # readable text color over the block fill (light on dark, dark on light)
-        fg = NAMES["white"] if cat in ("draw", "input", "variables", "control",
-                                       "myblocks") \
-            and not row.is_else else NAMES["black"]
-        if row.is_else:
-            fg = NAMES["black"]
         label = self._blk_row_text(b, row.is_else)
-        cv.print(label[:(w - 8 * fs) // cell], x + 4 * fs, y + 4 * fs, fg, 1)
+        is_body = (not row.is_else) and self._is_body_block(b)
+        # tile width: fit the content (a discrete Scratch block, not a full-width bar).
+        tw = min(w - 2 * fs, (len(label) + 2) * cell + 2 * fs)
+        ty, tht = y + fs, rh - 2 * fs
+        # C-block/hat MOUTH: a coloured spine down the visible body + a bottom lip,
+        # so the nested blocks read as sitting INSIDE the wrapper (Scratch's C-shape).
+        if is_body:
+            span = self._blk_body_span(self.blk_top + vi, row.depth)
+            vis = min(span, lay.rows - vi - 1)
+            if vis > 0:
+                sy = y + rh
+                sh = vis * rh
+                cv.rect(x, sy, 3 * fs, sh, fill)                        # left spine
+                cv.rect(x, sy + sh - fs, min(w - 2 * fs, 14 * fs), fs, fill)  # bottom lip
+        # the block tile + a 1px bevel (white top highlight / black bottom shadow).
+        cv.rect(x, ty, tw, tht, fill)
+        cv.rect(x, ty, tw, fs, NAMES["white"] if not is_cursor else NAMES["yellow"])
+        cv.rect(x, ty + tht - fs, tw, fs, NAMES["black"])
+        cv.print(label[:(tw - 4 * fs) // cell], x + 3 * fs, y + 4 * fs,
+                 self._blk_ink(fill), 1)
+        # rounded corners: knock the 4 corner pixels back to the background.
+        for cx, cy in ((x, ty), (x + tw - fs, ty),
+                       (x, ty + tht - fs), (x + tw - fs, ty + tht - fs)):
+            cv.rect(cx, cy, fs, fs, bg)
+        # a cursor ring around the whole tile.
+        if is_cursor:
+            cv.rectb(x, ty, tw, tht, NAMES["yellow"])
         # highlight the selected block's active slot with a small caret under it
         if is_cursor and not row.is_else:
             self._draw_blk_slot_caret(b, x, y)
@@ -1676,6 +2077,30 @@ class BlockEditorUI:
             else:
                 col += 1
                 i += 1
+        return None
+
+    def _blk_slot_at_x(self, b, row_x, px):
+        """Which slot of block `b` the tap `px` falls on (its value's character run in
+        the rendered row), or None if the tap missed every slot. Lets a kid tap the
+        SECOND argument (or any) directly, Scratch-style, instead of stepping with the
+        right-arrow. `row_x` is the row's left edge; the label prints at row_x + 3*fs."""
+        lay = self.block_layout
+        be = self.blocks_ed
+        if be is None:
+            return None
+        slots = be.slots(b)
+        if not slots:
+            return None
+        col = (px - (row_x + 3 * lay.fs)) // lay.cell
+        if col < 0:
+            return None
+        for si in range(len(slots)):
+            c0 = self._blk_slot_text_col(b, si)
+            if c0 is None:
+                continue
+            disp = self._blk_slot_display(b, slots[si])
+            if c0 <= col < c0 + max(1, len(disp)):
+                return si
         return None
 
     def _blk_slot_display(self, b, slot):

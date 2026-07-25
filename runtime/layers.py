@@ -129,7 +129,7 @@ class _BlocksLayer(Layer):
     domain = "system"
 
     def draw(self, dt):
-        self.ws.block_ui._draw_blocks()
+        self.ws.block_ui._draw_blocks(dt)
 
     def handle_input(self, i):
         self.ws.block_ui._blocks_input()   # cursor nav + insert menu (#29)

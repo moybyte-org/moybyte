@@ -95,12 +95,18 @@ class SceneLayout:
     star of the reflow -- a big panel shows the whole 320x240 viewport (and
     beyond) with no panning."""
 
-    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1):
+    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1, bounds=None):
         self.w = int(w)
         self.h = int(h)
         self.fs = max(1, int(font_scale))
         fs = self.fs
-        self._base = (self.w == _BASE_W and self.h == _BASE_H and fs == 1)
+        # `bounds` (bx, by, bw, bh) confines the whole editor to a SUB-RECT of the
+        # system canvas -- the right pane of the combined Blocks+Scene workspace
+        # (blocks-left / objects-right, Scratch-style). A bounded layout never takes
+        # the frozen 320x240 branch (it's a big-screen feature), so `_base` excludes
+        # it and the T-Deck's scene tab is byte-identical.
+        self._base = (self.w == _BASE_W and self.h == _BASE_H and fs == 1
+                      and bounds is None)
         self.zooms = _SV_ZOOMS
         if self._base:
             self.body_fill = (0, 18, _BASE_W, _BASE_H - 18)
@@ -125,9 +131,19 @@ class SceneLayout:
         # -- responsive: the MapLayout formulas (right column anchored to the
         # panel's right edge, button row to its bottom, view fills the rest) ----
         bar_h = 18 * fs
-        px, py = 8 * fs, bar_h - 2 * fs
-        pw, ph = self.w - 16 * fs, self.h - (bar_h - 2 * fs) - 20 * fs
-        self.body_fill = (0, bar_h, self.w, self.h - bar_h)
+        if bounds is not None:
+            # Confined to the workspace's right pane: the panel fills the pane
+            # (minus a hair of inset), and every rect below derives from px/py/
+            # pw/ph exactly as the full-canvas path -- so the whole scene editor
+            # relocates with no other change.
+            bx, by, bw, bh = bounds
+            px, py = bx + 2 * fs, by + 2 * fs
+            pw, ph = bw - 4 * fs, bh - 4 * fs
+            self.body_fill = (bx, by, bw, bh)
+        else:
+            px, py = 8 * fs, bar_h - 2 * fs
+            pw, ph = self.w - 16 * fs, self.h - (bar_h - 2 * fs) - 20 * fs
+            self.body_fill = (0, bar_h, self.w, self.h - bar_h)
         self.panel = (px, py, pw, ph)
         p_right = px + pw
         p_bottom = py + ph
@@ -203,6 +219,17 @@ class SceneEditorUI:
     def relayout(self, w, h, fs):
         """Rebuild the responsive geometry (#39) -- ws._relayout fan-out."""
         self.layout = SceneLayout(w, h, fs)
+        if self.scene_zoom >= len(self.layout.zooms):
+            self.scene_zoom = 0
+        self._clamp_cam()
+
+    def relayout_bounded(self, bounds):
+        """Rebuild the scene geometry CONFINED to `bounds` (bx, by, bw, bh) -- the
+        right pane of the combined Blocks+Scene workspace. Mirrors relayout() but
+        into a sub-rect; called each frame the workspace is active by the Blocks
+        tab, so a window resize (new sys_canvas size) re-derives the pane."""
+        sc = self.ws.sys_canvas
+        self.layout = SceneLayout(sc.w, sc.h, getattr(sc, "font_scale", 1), bounds)
         if self.scene_zoom >= len(self.layout.zooms):
             self.scene_zoom = 0
         self._clamp_cam()
@@ -487,7 +514,7 @@ class SceneEditorUI:
                 k = row * lay.tp_cols + col
                 ids = self._palette_ids()
                 if 0 <= k < len(ids):
-                    se.n = ids[k]
+                    se.set_brush(ids[k])     # pick sprite + adopt its object type (#85/#93)
         elif self._in(px, py, lay.tp_prev):
             self.scene_page = max(0, self.scene_page - lay.tp_page)
         elif self._in(px, py, lay.tp_next):

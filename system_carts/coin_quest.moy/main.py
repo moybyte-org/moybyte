@@ -10,18 +10,18 @@ def _init():
 
 def _update(dt):
     global score
-    for _actor1 in actors("player"):
+    for _self in actors("player"):
         if btn("left"):
-            move_actor(_actor1, -2, 0)
+            move_actor(_self, -2, 0)
         if btn("right"):
-            move_actor(_actor1, 2, 0)
+            move_actor(_self, 2, 0)
         if btn("up"):
-            move_actor(_actor1, 0, -2)
+            move_actor(_self, 0, -2)
         if btn("down"):
-            move_actor(_actor1, 0, 2)
-    for _actor1 in actors("coin"):
-        if touching(_actor1, "player"):
-            remove_actor(_actor1)
+            move_actor(_self, 0, 2)
+    for _self in actors("coin"):
+        if touching(_self, "player"):
+            remove_actor(_self)
             score = score + (1)
             sfx(0)
 

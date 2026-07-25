@@ -161,6 +161,11 @@ class SceneEditor:
     def __init__(self, text=""):
         self.rows = parse_rows(text)
         self.n = 0            # brush tile id (the sprite a new actor shows)
+        # #85/#93: the tag a NEW placement gets. In a per-object world "the sprite is
+        # the object type", so this follows what you're stamping -- picking a sprite or
+        # selecting an actor adopts that sprite's tag, so placing more coins stays
+        # "coin" instead of resetting to the generic default every time.
+        self.stamp_tag = DEFAULT_TAG
         self.sel = None       # selected row index, or None
         self.snap = True      # grid placement on by default (kid-friendly)
         self.cam_x = 0        # view top-left, world px
@@ -258,9 +263,29 @@ class SceneEditor:
             return (int(x) // g * g, int(y) // g * g)
         return (int(x), int(y))
 
-    def place(self, x, y, tag=DEFAULT_TAG):
+    def tag_for_tile(self, tile):
+        """The tag of the most-recently-placed actor that uses `tile`, or None -- so a
+        sprite already in the scene keeps its object type when you stamp more of it."""
+        tile = int(tile)
+        for r in reversed(self.rows):
+            if r.get("tile") == tile:
+                return r.get("tag")
+        return None
+
+    def set_brush(self, tile):
+        """Pick the stamp sprite AND adopt its object type: if any actor already uses
+        `tile`, new placements reuse that tag; a brand-new sprite falls back to the
+        default tag (named once, then remembered). This is how the tile palette doubles
+        as an object palette."""
+        self.n = int(tile)
+        self.stamp_tag = self.tag_for_tile(self.n) or DEFAULT_TAG
+
+    def place(self, x, y, tag=None):
         """Append (spawn) a new actor at world (x, y) -- snapped when snap is on
-        -- with the brush tile, and select it. One undo step."""
+        -- with the brush tile + the current stamp tag, and select it. One undo step.
+        An explicit `tag` overrides the stamp tag (used by tests / programmatic placement)."""
+        if tag is None:
+            tag = self.stamp_tag
         x, y = self.snap_xy(x, y)
         row = {"tag": str(tag)[:self.TAG_MAX], "tile": self.n, "x": x, "y": y}
         i = len(self.rows)
@@ -283,8 +308,14 @@ class SceneEditor:
 
     def select_at(self, x, y):
         """Select the actor under world (x, y); returns the index or None
-        (selection itself is not an edit -- no undo step)."""
+        (selection itself is not an edit -- no undo step). Selecting an actor also
+        loads it as the stamp (its sprite + tag), so "place another like this one"
+        is just select-then-tap -- the new actors share its object type (#85/#93)."""
         self.sel = self.actor_at(x, y)
+        if self.sel is not None:
+            r = self.rows[self.sel]
+            self.n = r.get("tile", self.n)
+            self.stamp_tag = r.get("tag", self.stamp_tag)
         return self.sel
 
     def selected(self):
@@ -379,6 +410,9 @@ class SceneEditor:
         if new == old:
             return False
         r["tag"] = new
+        # Naming an object updates the stamp tag too, so the NEXT placement of this
+        # sprite is already the right type (#85/#93 -- name a coin once, place many).
+        self.stamp_tag = new
         self.dirty = True
         self._hist.record({"t": "tag", "i": i, "o": old, "n": new})
         return True

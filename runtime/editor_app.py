@@ -517,5 +517,6 @@ class EditorApp:
             ws.save_sounds()
         elif tab == "blocks":
             ws.block_ui.save_blocks()
+            ws.block_ui.commit_workspace_scene()   # persist the side-by-side scene pane (#93/#85)
         elif tab == "cards":
             ws._save_config()

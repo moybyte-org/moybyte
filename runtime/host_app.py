@@ -744,9 +744,66 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         ns["move_actor_to"] = _world.move_to
         ns["remove_actor"] = _world.remove
 
+        _rot_cache = {}
+
+        def _rot_sprite(_tile, _deg):
+            # A cached rotated copy of a sheet sprite (1-degree buckets, #85/#93 all-
+            # around rotation). rotate_indices fills the exposed corners with -1, which
+            # Canvas.spr always skips, so the rotation keeps clean transparent edges.
+            if sheet is None:
+                return None
+            _key = (_tile, int(_deg) % 360)
+            _im = _rot_cache.get(_key)
+            if _im is None:
+                _base = sheet.tile_image(_tile, -1)
+                if _base is None:
+                    return None
+                _rp, _rw, _rh = _widgets.rotate_indices(
+                    _base.pix, _base.w, _base.h, _deg, _base.transparent)
+                _t = _base.transparent if _base.transparent is not None else -1
+                _im = Image(_rw, _rh, _rp, _t)
+                _rot_cache[_key] = _im
+            return _im
+
         def draw_scene():
+            # #85/#93 Looks + rotation: honour each actor's per-sprite appearance -- hide,
+            # size, direction (Scratch rotation styles: all-around=rotate / left-right=
+            # flip / none), and a `say` bubble. An actor with no `dir` draws as placed
+            # (the common case, unchanged), so non-directional carts are byte-identical.
             for _a in _world.actors():
-                spr(_a.tile, _a.x, _a.y, -1, 1, _a.flip)
+                _f = _a.flags
+                if _f.get("hidden"):
+                    continue
+                _sc = _f.get("size", 100) // 100
+                if _sc < 1:
+                    _sc = 1
+                _dir = _f.get("dir")
+                if _dir is None:
+                    spr(_a.tile, _a.x, _a.y, -1, _sc, _a.flip)
+                else:
+                    _style = _f.get("rot", "all")
+                    if _style == "none":
+                        spr(_a.tile, _a.x, _a.y, -1, _sc, _a.flip)
+                    elif _style == "leftright":
+                        spr(_a.tile, _a.x, _a.y, -1, _sc,
+                            1 if (_dir % 360) > 180 else 0)
+                    else:                             # "all" around: rotate to the heading
+                        _im = _rot_sprite(_a.tile, _dir - 90)
+                        if _im is None:
+                            spr(_a.tile, _a.x, _a.y, -1, _sc, _a.flip)
+                        else:
+                            _cx = _a.x + 4 * _sc      # centre the (larger) rotated sprite
+                            _cy = _a.y + 4 * _sc      # on the 8x8 actor's centre
+                            canvas.spr(_im, _cx - (_im.w * _sc) // 2,
+                                       _cy - (_im.h * _sc) // 2, _sc)
+                _sy = _f.get("say")
+                if _sy:
+                    _t = str(_sy)[:10]
+                    _bw = len(_t) * 8 + 4
+                    _by = _a.y - 11 if _a.y >= 11 else _a.y + 9
+                    canvas.rect(_a.x, _by, _bw, 10, 7)      # white bubble
+                    canvas.rectb(_a.x, _by, _bw, 10, 0)     # black outline
+                    canvas.print(_t, _a.x + 2, _by + 1, 0)  # black text
 
         ns["draw_scene"] = draw_scene
     return ns

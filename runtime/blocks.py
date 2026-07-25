@@ -106,29 +106,34 @@ CAT_DRAW = "draw"
 CAT_INPUT = "input"
 CAT_VARIABLES = "variables"
 CAT_LISTS = "lists"          # #48: the multi-thing data type
-CAT_ACTORS = "actors"        # #109: placed-actor scenes (for-each/touching/move/remove)
+CAT_ACTORS = "actors"        # #109: the SPRITE category (motion/sensing on self)
+CAT_LOOKS = "looks"          # #85/#93: sprite appearance (show/hide/size/costume/say)
 CAT_OPERATORS = "operators"
 CAT_SOUND = "sound"
 CAT_PROCS = "myblocks"       # #48: custom blocks (My Blocks / procedures)
 
 CATEGORY_ORDER = [
-    CAT_EVENTS, CAT_CONTROL, CAT_DRAW, CAT_INPUT,
-    CAT_VARIABLES, CAT_LISTS, CAT_ACTORS, CAT_OPERATORS, CAT_SOUND, CAT_PROCS,
+    CAT_EVENTS, CAT_CONTROL, CAT_ACTORS, CAT_LOOKS, CAT_DRAW, CAT_INPUT,
+    CAT_VARIABLES, CAT_LISTS, CAT_OPERATORS, CAT_SOUND, CAT_PROCS,
 ]
 
 # Color name (MOY64) per category -- the Scratch *look* (Part 2 paints blocks
 # with these; here so host and device agree on the palette).
+# Scratch-aligned category colours (#85/#93 restyle): Motion=blue, Events=yellow,
+# Control=orange, Looks/Draw=purple, Sensing/Input=indigo, Operators=green,
+# Sound=pink, Data=red/peach. Mapped onto the MOY64 (PICO-8 base) named colours.
 CATEGORY_COLOR = {
-    CAT_EVENTS: "brown",
-    CAT_CONTROL: "orange",
-    CAT_DRAW: "blue",
-    CAT_INPUT: "indigo",
-    CAT_VARIABLES: "red",
+    CAT_EVENTS: "yellow",       # Scratch events = gold/yellow
+    CAT_CONTROL: "orange",      # Scratch control = orange
+    CAT_ACTORS: "blue",         # the SPRITE category = Scratch Motion (blue)
+    CAT_LOOKS: "dark_purple",   # Scratch Looks (purple)
+    CAT_DRAW: "dark_green",     # drawing primitives ~ Scratch Pen
+    CAT_INPUT: "indigo",        # ~ Scratch Sensing
+    CAT_VARIABLES: "red",       # Scratch data/variables
     CAT_LISTS: "peach",
-    CAT_ACTORS: "yellow",       # #109: placed-actor scene blocks
-    CAT_OPERATORS: "green",
-    CAT_SOUND: "pink",
-    CAT_PROCS: "dark_purple",   # #48: custom blocks (My Blocks / procedures)
+    CAT_OPERATORS: "green",     # Scratch operators = green
+    CAT_SOUND: "pink",          # Scratch sound = pink/magenta
+    CAT_PROCS: "brown",         # My Blocks (kept distinct from Looks-purple)
 }
 
 
@@ -189,6 +194,37 @@ CATALOG = {
         "category": CAT_EVENTS, "shape": SHAPE_HAT,
         "label": "every frame (draw)",
         "slots": [], "lifecycle": "_draw",
+    },
+    # #85/#93: a per-sprite tap event (Scratch's "when this sprite clicked"). Its body
+    # runs in _update guarded by a hit-test on the current actor -- see _HAT_GUARD. On
+    # the Stage (no `self`) it's a safe no-op.
+    "on_tap": {
+        "category": CAT_EVENTS, "shape": SHAPE_HAT,
+        "label": "when I'm tapped",
+        "slots": [], "lifecycle": "_update",
+    },
+    # "when {button} pressed" -- body runs on the frame that button is first pressed
+    # (btnp edge). Slot resolved into the guard (see _hat_guard_expr).
+    "on_key": {
+        "category": CAT_EVENTS, "shape": SHAPE_HAT,
+        "label": "when {key} pressed",
+        "slots": [_slot("key", SLOT_DROPDOWN, options="BUTTONS", default="a")],
+        "lifecycle": "_update",
+    },
+    # broadcast / receive (Scratch's messages). broadcast is a plain statement; the
+    # message is delivered to every "when I hear" hat on the NEXT frame (a deterministic
+    # 1-frame, order-independent double-buffer -- see _pump_msgs).
+    "broadcast": {
+        "category": CAT_EVENTS, "shape": SHAPE_STATEMENT,
+        "label": "broadcast {msg}",
+        "slots": [_slot("msg", SLOT_TEXT, default="go")],
+        "emit": "broadcast({msg})",
+    },
+    "on_receive": {
+        "category": CAT_EVENTS, "shape": SHAPE_HAT,
+        "label": "when I hear {msg}",
+        "slots": [_slot("msg", SLOT_TEXT, default="go")],
+        "lifecycle": "_update",
     },
 
     # -- control -------------------------------------------------------------
@@ -531,26 +567,100 @@ CATALOG = {
     },
     "actor_touching": {
         "category": CAT_ACTORS, "shape": SHAPE_EXPR,
-        "label": "actor touching {tag}?",
+        "label": "touching {tag}?",
         # the current actor overlaps ANY live actor of tag {tag} (AABB, 8px boxes).
         "slots": [_slot("tag", SLOT_TEXT, default="")],
         "expr": "touching({__actor__}, {tag})",
     },
+    "touching_edge": {
+        "category": CAT_ACTORS, "shape": SHAPE_EXPR,
+        "label": "touching edge?",
+        "slots": [],
+        "expr": "_atedge({__actor__})",
+    },
+    # -- self motion (#85/#93, Scratch's Motion category): read/set MY position -----
+    "my_x": {
+        "category": CAT_ACTORS, "shape": SHAPE_EXPR,
+        "label": "my x", "slots": [], "expr": "_ax({__actor__})",
+    },
+    "my_y": {
+        "category": CAT_ACTORS, "shape": SHAPE_EXPR,
+        "label": "my y", "slots": [], "expr": "_ay({__actor__})",
+    },
+    "set_my_x": {
+        "category": CAT_ACTORS, "shape": SHAPE_STATEMENT,
+        "label": "set my x to {x}",
+        "slots": [_slot("x", SLOT_EXPR, default=0)],
+        "emit": "_setax({__actor__}, {x})",
+    },
+    "set_my_y": {
+        "category": CAT_ACTORS, "shape": SHAPE_STATEMENT,
+        "label": "set my y to {y}",
+        "slots": [_slot("y", SLOT_EXPR, default=0)],
+        "emit": "_setay({__actor__}, {y})",
+    },
+    "change_my_x": {
+        "category": CAT_ACTORS, "shape": SHAPE_STATEMENT,
+        "label": "change my x by {dx}",
+        "slots": [_slot("dx", SLOT_EXPR, default=0)],
+        "emit": "_chax({__actor__}, {dx})",
+    },
+    "change_my_y": {
+        "category": CAT_ACTORS, "shape": SHAPE_STATEMENT,
+        "label": "change my y by {dy}",
+        "slots": [_slot("dy", SLOT_EXPR, default=0)],
+        "emit": "_chay({__actor__}, {dy})",
+    },
+    # -- direction / steps (Scratch's default motion) --------------------------
+    "point_dir": {
+        "category": CAT_ACTORS, "shape": SHAPE_STATEMENT,
+        "label": "point in direction {d}",
+        "slots": [_slot("d", SLOT_NUMBER, default=90)],
+        "emit": "_setdir({__actor__}, {d})",
+    },
+    "turn_deg": {
+        "category": CAT_ACTORS, "shape": SHAPE_STATEMENT,
+        "label": "turn {d} degrees",
+        "slots": [_slot("d", SLOT_NUMBER, default=15)],
+        "emit": "_turn({__actor__}, {d})",
+    },
+    "move_steps": {
+        "category": CAT_ACTORS, "shape": SHAPE_STATEMENT,
+        "label": "move {n} steps",
+        "slots": [_slot("n", SLOT_EXPR, default=10)],
+        "emit": "_movesteps({__actor__}, {n})",
+    },
+    "my_dir": {
+        "category": CAT_ACTORS, "shape": SHAPE_EXPR,
+        "label": "my direction", "slots": [], "expr": "_getdir({__actor__})",
+    },
+    "bounce_edge": {
+        "category": CAT_ACTORS, "shape": SHAPE_STATEMENT,
+        "label": "if on edge, bounce",
+        "slots": [], "emit": "_bounce({__actor__})",
+    },
+    "set_rot_style": {
+        "category": CAT_ACTORS, "shape": SHAPE_STATEMENT,
+        "label": "set rotation style {style}",
+        "slots": [_slot("style", SLOT_DROPDOWN, options="ROTSTYLES",
+                        default="all around")],
+        "emit": "_setrot({__actor__}, {style})",
+    },
     "move_actor_by": {
         "category": CAT_ACTORS, "shape": SHAPE_STATEMENT,
-        "label": "move actor by {dx} {dy}",
+        "label": "move by {dx} {dy}",
         "slots": [_slot("dx", SLOT_EXPR, default=0), _slot("dy", SLOT_EXPR, default=0)],
         "emit": "move_actor({__actor__}, {dx}, {dy})",
     },
     "move_actor_to": {
         "category": CAT_ACTORS, "shape": SHAPE_STATEMENT,
-        "label": "move actor to {x} {y}",
+        "label": "go to x {x} y {y}",
         "slots": [_slot("x", SLOT_EXPR, default=0), _slot("y", SLOT_EXPR, default=0)],
         "emit": "move_actor_to({__actor__}, {x}, {y})",
     },
     "remove_actor": {
         "category": CAT_ACTORS, "shape": SHAPE_STATEMENT,
-        "label": "remove actor",
+        "label": "remove me",
         "slots": [],
         "emit": "remove_actor({__actor__})",
     },
@@ -559,6 +669,52 @@ CATALOG = {
         "label": "draw scene",
         "slots": [],
         "emit": "draw_scene()",
+    },
+
+    # -- looks (#85/#93, Scratch's Looks): the current sprite's appearance -----
+    "show": {
+        "category": CAT_LOOKS, "shape": SHAPE_STATEMENT,
+        "label": "show", "slots": [], "emit": "_show({__actor__}, True)",
+    },
+    "hide": {
+        "category": CAT_LOOKS, "shape": SHAPE_STATEMENT,
+        "label": "hide", "slots": [], "emit": "_show({__actor__}, False)",
+    },
+    "set_size": {
+        "category": CAT_LOOKS, "shape": SHAPE_STATEMENT,
+        "label": "set size to {n} %",
+        "slots": [_slot("n", SLOT_NUMBER, default=100)],
+        "emit": "_setsize({__actor__}, {n})",
+    },
+    "change_size": {
+        "category": CAT_LOOKS, "shape": SHAPE_STATEMENT,
+        "label": "change size by {n}",
+        "slots": [_slot("n", SLOT_NUMBER, default=10)],
+        "emit": "_chsize({__actor__}, {n})",
+    },
+    "switch_costume": {
+        "category": CAT_LOOKS, "shape": SHAPE_STATEMENT,
+        "label": "switch costume to {n}",
+        "slots": [_slot("n", SLOT_NUMBER, default=0)],
+        "emit": "_setcostume({__actor__}, {n})",
+    },
+    "next_costume": {
+        "category": CAT_LOOKS, "shape": SHAPE_STATEMENT,
+        "label": "next costume", "slots": [], "emit": "_nextcostume({__actor__})",
+    },
+    "say": {
+        "category": CAT_LOOKS, "shape": SHAPE_STATEMENT,
+        "label": "say {text}",
+        "slots": [_slot("text", SLOT_TEXT, default="Hi!")],
+        "emit": "_say({__actor__}, {text})",
+    },
+    "my_size": {
+        "category": CAT_LOOKS, "shape": SHAPE_EXPR,
+        "label": "my size", "slots": [], "expr": "_getsize({__actor__})",
+    },
+    "my_costume": {
+        "category": CAT_LOOKS, "shape": SHAPE_EXPR,
+        "label": "costume #", "slots": [], "expr": "_getcostume({__actor__})",
     },
 
     # -- sound ---------------------------------------------------------------
@@ -608,7 +764,8 @@ COLORS = ["black", "dark_blue", "dark_purple", "dark_green", "brown", "dark_grey
           "light_grey", "white", "red", "orange", "yellow", "green", "blue",
           "indigo", "pink", "peach"]
 BUTTONS = ["left", "right", "up", "down", "a", "b"]
-OPTION_SETS = {"COLORS": COLORS, "BUTTONS": BUTTONS}
+ROTSTYLES = ["all around", "left-right", "don't rotate"]   # #85/#93 Scratch rotation styles
+OPTION_SETS = {"COLORS": COLORS, "BUTTONS": BUTTONS, "ROTSTYLES": ROTSTYLES}
 
 
 # ============================================================================
@@ -1235,6 +1392,162 @@ _HELPER_LETTER = (
     "        return _s[_n]\n"
     "    return \"\"\n"
 )
+# Sprite self-motion (#85/#93, Scratch's Motion category): read/set the CURRENT actor's
+# position. All None-safe -- a stray "my x" outside any sprite reads 0 and a stray set
+# no-ops, keeping the "a loose block never breaks the cart" discipline (like the actor
+# verbs). `a` is the for_each / per-object loop's current actor (`_self`).
+_HELPER_AX = (
+    "def _ax(a):\n"
+    "    return a.x if a else 0\n"
+)
+_HELPER_AY = (
+    "def _ay(a):\n"
+    "    return a.y if a else 0\n"
+)
+_HELPER_SETAX = (
+    "def _setax(a, v):\n"
+    "    if a is not None:\n"
+    "        a.x = v\n"
+)
+_HELPER_SETAY = (
+    "def _setay(a, v):\n"
+    "    if a is not None:\n"
+    "        a.y = v\n"
+)
+_HELPER_CHAX = (
+    "def _chax(a, v):\n"
+    "    if a is not None:\n"
+    "        a.x = a.x + v\n"
+)
+_HELPER_CHAY = (
+    "def _chay(a, v):\n"
+    "    if a is not None:\n"
+    "        a.y = a.y + v\n"
+)
+# Rotation style (Scratch): map the kid-facing dropdown to the flag draw_scene reads.
+_HELPER_SETROT = (
+    "def _setrot(a, s):\n"
+    "    if a is not None:\n"
+    "        a.flags['rot'] = ('leftright' if s == 'left-right'\n"
+    "                          else 'none' if s == \"don't rotate\" else 'all')\n"
+)
+# "touching edge?" -- the current actor's 8px box past any screen edge (Scratch sensing).
+_HELPER_ATEDGE = (
+    "def _atedge(a):\n"
+    "    if not a:\n"
+    "        return False\n"
+    "    return a.x < 0 or a.x > 312 or a.y < 0 or a.y > 232\n"
+)
+# "when I'm tapped" (on_tap): true on the frame the pointer taps INSIDE the actor's box.
+_HELPER_TAPHIT = (
+    "def _taphit(a):\n"
+    "    t = touch()\n"
+    "    if not a or not t or not t[2]:\n"
+    "        return False\n"
+    "    return a.x <= t[0] < a.x + 8 and a.y <= t[1] < a.y + 8\n"
+)
+
+# Direction / steps (Scratch's default motion). Direction lives in the per-actor
+# `flags` dict (Scratch convention: 90 = right, 0 = up). None-safe. _movesteps uses
+# `math`, imported into the header when the move-steps block is used.
+_HELPER_MOTION = (
+    "def _getdir(a):\n"
+    "    return a.flags.get('dir', 90) if a else 90\n"
+    "def _setdir(a, d):\n"
+    "    if a is not None:\n"
+    "        a.flags['dir'] = d % 360\n"
+    "def _turn(a, d):\n"
+    "    if a is not None:\n"
+    "        a.flags['dir'] = (a.flags.get('dir', 90) + d) % 360\n"
+    "def _movesteps(a, n):\n"
+    "    if a is not None:\n"
+    "        _r = math.radians(a.flags.get('dir', 90))\n"
+    "        a.x = a.x + int(round(n * math.sin(_r)))\n"
+    "        a.y = a.y - int(round(n * math.cos(_r)))\n"
+    "def _bounce(a):\n"
+    "    if a is None:\n"
+    "        return\n"
+    "    _d = a.flags.get('dir', 90)\n"
+    "    if a.x <= 0 or a.x >= 312:\n"
+    "        _d = (360 - _d) % 360\n"
+    "        a.x = 1 if a.x <= 0 else 311\n"
+    "    if a.y <= 0 or a.y >= 232:\n"
+    "        _d = (180 - _d) % 360\n"
+    "        a.y = 1 if a.y <= 0 else 231\n"
+    "    a.flags['dir'] = _d\n"
+)
+# Looks (show/hide/size/costume/say): sprite appearance in the per-actor flags; the
+# enhanced draw_scene (make_api) honours hidden / size / say when it paints the actors.
+_HELPER_SHOW = (
+    "def _show(a, v):\n"
+    "    if a is not None:\n"
+    "        a.flags['hidden'] = not v\n"
+)
+_HELPER_SIZE = (
+    "def _setsize(a, n):\n"
+    "    if a is not None:\n"
+    "        a.flags['size'] = n\n"
+    "def _chsize(a, n):\n"
+    "    if a is not None:\n"
+    "        a.flags['size'] = a.flags.get('size', 100) + n\n"
+    "def _getsize(a):\n"
+    "    return a.flags.get('size', 100) if a else 100\n"
+)
+_HELPER_COSTUME = (
+    "def _setcostume(a, n):\n"
+    "    if a is not None:\n"
+    "        a.tile = int(n)\n"
+    "def _nextcostume(a):\n"
+    "    if a is not None:\n"
+    "        a.tile = a.tile + 1\n"
+    "def _getcostume(a):\n"
+    "    return a.tile if a else 0\n"
+)
+_HELPER_SAY = (
+    "def _say(a, s):\n"
+    "    if a is not None:\n"
+    "        a.flags['say'] = str(s)\n"
+)
+# Broadcast / receive (Scratch messages). A double-buffered mailbox: broadcast() drops
+# into the NEXT set, _pump_msgs() (top of _update) swaps it into the LIVE set, and
+# _received() reads the live set -- so delivery is a deterministic, order-independent
+# 1-frame hop that every "when I hear" hat sees.
+_HELPER_MSGS = (
+    "_msg_now = set()\n"
+    "_msg_next = set()\n"
+    "def broadcast(m):\n"
+    "    _msg_next.add(m)\n"
+    "def _received(m):\n"
+    "    return m in _msg_now\n"
+    "def _pump_msgs():\n"
+    "    global _msg_now, _msg_next\n"
+    "    _msg_now = _msg_next\n"
+    "    _msg_next = set()\n"
+)
+
+
+def _hat_guard_expr(hat, actor_var):
+    """The `if <guard>:` expression for a CONDITIONAL event hat (Scratch's non-
+    lifecycle events), or None for a plain lifecycle hat. {__actor__} resolves to the
+    current sprite (or `None` on the Stage, where every guard is a safe no-op)."""
+    t = hat.get("t")
+    av = actor_var if actor_var else "None"
+    if t == "on_tap":
+        return "_taphit(" + av + ")"
+    if t == "on_key":
+        key = (hat.get("p", {}) or {}).get("key", "a")
+        return "btnp(" + _render_text_literal(key) + ")"
+    if t == "on_receive":
+        msg = (hat.get("p", {}) or {}).get("msg", "")
+        return "_received(" + _render_text_literal(msg) + ")"
+    return None
+
+
+def _uses_any(trees, needles):
+    for n in needles:
+        if _uses(trees, n):
+            return True
+    return False
 
 
 def _uses(trees, needle):
@@ -1317,12 +1630,17 @@ _RESERVED_NAMES = {
     "music", "music_stop", "sound_stop", "volume", "rnd", "flr", "Image", "image",
     "wifi", "scene", "load_scene", "table", "text",   # #85 scenes + #78 Desk Lab interop
     "actors", "touching", "move_actor", "move_actor_to",  # #109 actor-aware verbs
-    "remove_actor", "draw_scene",
+    "remove_actor", "draw_scene", "broadcast",            # #85/#93 messages
     # builtins the generated code relies on
     "int", "range", "len", "str", "min", "max", "abs", "round", "bool",
     # lifecycle functions + the compiler's own helpers (all `_`-prefixed)
     "_init", "_update", "_draw", "_touched", "_touch_x", "_touch_y", "_wait",
     "_wait_until", "_lget", "_lremove", "_lset", "_letter",
+    "_ax", "_ay", "_setax", "_setay", "_chax", "_chay", "_atedge", "_taphit",
+    "_getdir", "_setdir", "_turn", "_movesteps", "_bounce", "_setrot",
+    "_show", "_setsize", "_chsize", "_getsize",
+    "_setcostume", "_nextcostume", "_getcostume", "_say",
+    "_msg_now", "_msg_next", "_received", "_pump_msgs",
 }
 
 
@@ -1397,6 +1715,62 @@ def _proc_info(procs):
     for nm in names:
         reach[nm] = _reachable_from(nm, edges)
     return _ProcInfo(names, params, reach)
+
+
+# -- per-object scripts (#85/#93): a SCENE object's own scripts, run per live actor --
+# Mirrors the #48 procs pattern: an OPTIONAL program["objects"] list, read via
+# `.get(...) or []` so a pre-per-object program has no key -> [] -> the compiler emits
+# nothing extra -> byte-identical output (and existing carts never spuriously graduate).
+# Each entry is {"tag": <scene tag str>, "scripts": [on_start/on_update/on_draw hats]};
+# compile_blocks wraps each non-empty hat body in `for _self in actors("<tag>"):`.
+
+def collect_objects(program):
+    """The validated per-object script list from program["objects"] (#85/#93). Each
+    entry is {"tag": str, "scripts": [hat,...]}. Skips entries with a blank tag or no
+    scripts and de-dups tags (first wins), so a tag compiles to exactly one actor
+    loop per lifecycle. Never raises -- a malformed entry is dropped (the runtime-
+    facing "a stray block never breaks the cart" discipline)."""
+    raw = program.get("objects", []) or []
+    out = []
+    seen = {}
+    for o in raw:
+        if not isinstance(o, dict):
+            continue
+        tag = str(o.get("tag", "")).strip()
+        if not tag or tag in seen:
+            continue
+        scripts = o.get("scripts", []) or []
+        if not isinstance(scripts, list):
+            continue
+        seen[tag] = True
+        out.append({"tag": tag, "scripts": scripts})
+    return out
+
+
+def object_has_content(obj):
+    """True iff an object entry carries at least one non-empty hat body -- the test
+    used to prune 'selected but never programmed' objects before save/compile."""
+    for h in (obj.get("scripts", []) or []):
+        if h.get("c"):
+            return True
+    return False
+
+
+def prune_empty_objects(program):
+    """Return a shallow copy of `program` with all-empty object entries dropped (a
+    scene object the kid selected but never gave a block). Keeps blocks.json clean and
+    stops an empty entry from forcing a draw_scene() into the output. Leaves the input
+    untouched (the live editor keeps the entry so the kid can still add to it)."""
+    objs = program.get("objects")
+    if not objs:
+        return program
+    kept = [o for o in objs if object_has_content(o)]
+    out = dict(program)
+    if kept:
+        out["objects"] = kept
+    else:
+        out.pop("objects", None)
+    return out
 
 
 def _calls_in(body, names):
@@ -1557,12 +1931,23 @@ def compile_blocks(program):
     known_lists = collect_lists(program)
     procs = collect_procs(program)                 # #48: custom blocks (validated)
     pinfo = _proc_info(procs)
+    objects = collect_objects(program)             # #85/#93: per-object scripts (validated)
     scripts = program.get("scripts", []) or []
-    # Helper detection must see proc bodies too (a helper may be used only inside a
-    # custom block), so scan scripts + proc definitions together.
-    use_trees = scripts + procs
+    # #85/#93: an object's scripts are hats too -- flatten them so helper detection
+    # + `global` hoisting see blocks used only inside a per-object script.
+    object_hats = []
+    for _o in objects:
+        object_hats.extend(_o["scripts"])
+    # Helper detection must see proc + object bodies too (a helper may be used only
+    # inside a custom block or a per-object script), so scan them all together.
+    use_trees = scripts + procs + object_hats
 
     out = [BLOCK_MARKER + " Edit in the block editor (or graduate to code)."]
+
+    # `move N steps` needs trig; import it once at the top (portable-subset allowed).
+    if _uses(use_trees, "move_steps"):
+        out.append("")
+        out.append("import math")
 
     # module-level declarations: variables start at 0, lists start empty.
     if known_vars or known_lists:
@@ -1600,6 +1985,53 @@ def compile_blocks(program):
     if _uses(use_trees, "op_letter"):
         out.append("")
         out.append(_HELPER_LETTER.rstrip("\n"))
+    # sprite self-motion / sensing helpers (#85/#93), each only when its block is used.
+    if _uses(use_trees, "my_x"):
+        out.append("")
+        out.append(_HELPER_AX.rstrip("\n"))
+    if _uses(use_trees, "my_y"):
+        out.append("")
+        out.append(_HELPER_AY.rstrip("\n"))
+    if _uses(use_trees, "set_my_x"):
+        out.append("")
+        out.append(_HELPER_SETAX.rstrip("\n"))
+    if _uses(use_trees, "set_my_y"):
+        out.append("")
+        out.append(_HELPER_SETAY.rstrip("\n"))
+    if _uses(use_trees, "change_my_x"):
+        out.append("")
+        out.append(_HELPER_CHAX.rstrip("\n"))
+    if _uses(use_trees, "change_my_y"):
+        out.append("")
+        out.append(_HELPER_CHAY.rstrip("\n"))
+    if _uses(use_trees, "touching_edge"):
+        out.append("")
+        out.append(_HELPER_ATEDGE.rstrip("\n"))
+    if _uses(use_trees, "on_tap"):
+        out.append("")
+        out.append(_HELPER_TAPHIT.rstrip("\n"))
+    if _uses_any(use_trees, ("point_dir", "turn_deg", "move_steps",
+                             "my_dir", "bounce_edge")):
+        out.append("")
+        out.append(_HELPER_MOTION.rstrip("\n"))
+    if _uses(use_trees, "set_rot_style"):
+        out.append("")
+        out.append(_HELPER_SETROT.rstrip("\n"))
+    if _uses_any(use_trees, ("show", "hide")):
+        out.append("")
+        out.append(_HELPER_SHOW.rstrip("\n"))
+    if _uses_any(use_trees, ("set_size", "change_size", "my_size")):
+        out.append("")
+        out.append(_HELPER_SIZE.rstrip("\n"))
+    if _uses_any(use_trees, ("switch_costume", "next_costume", "my_costume")):
+        out.append("")
+        out.append(_HELPER_COSTUME.rstrip("\n"))
+    if _uses(use_trees, "say"):
+        out.append("")
+        out.append(_HELPER_SAY.rstrip("\n"))
+    if _uses_any(use_trees, ("broadcast", "on_receive")):
+        out.append("")
+        out.append(_HELPER_MSGS.rstrip("\n"))
 
     # custom-block definitions (#48): one top-level `def name(params):` per proc,
     # emitted BEFORE the lifecycle functions (Python resolves call names at call time,
@@ -1638,9 +2070,29 @@ def compile_blocks(program):
             raise BlockError("top-level script is not an event: " + str(s.get("t")))
         bodies[d["lifecycle"]].append(s)
 
+    # #85/#93: per-object script loops for this lifecycle -- one
+    # `for _self in actors("<tag>"): <body>` per object that has a non-empty hat of
+    # this kind. Precompute per fn so we know whether a function must be emitted even
+    # when there are no GLOBAL hats (an object-only _update still needs a _update).
+    obj_loops = {"_init": [], "_update": [], "_draw": []}
+    for _o in objects:
+        for _h in _o["scripts"]:
+            _d = CATALOG.get(_h.get("t"))
+            if (_d is not None and _d["shape"] == SHAPE_HAT
+                    and (_h.get("c") or [])):        # skip empty hats -> no loop
+                obj_loops[_d["lifecycle"]].append((_o["tag"], _h))
+    # Actors are NOT auto-drawn (draw_scene paints them); when the program has any
+    # per-object script, auto-emit a draw_scene() in _draw so the objects show up --
+    # unless the kid already placed a `draw scene` block (never double-draw). Gated on
+    # object loops existing, so an objects-less program's _draw is byte-identical.
+    any_obj = any(obj_loops[fn] for fn in order)
+    auto_draw_scene = any_obj and not _uses(use_trees, "draw_scene")
+
     for fn in order:
         hats = bodies[fn]
-        if not hats:
+        oloops = obj_loops[fn]
+        want_draw = (fn == "_draw" and auto_draw_scene)
+        if not hats and not oloops and not want_draw:
             continue
         out.append("")
         out.append("")
@@ -1650,8 +2102,46 @@ def compile_blocks(program):
         # emit the body to a scratch list first so we can compute `global` hoisting.
         body_lines = []
         ctx = _Ctx(known_vars, known_lists, {}, pinfo=pinfo)
+        # Message delivery (broadcast/receive): swap the mailbox ONCE per frame, before
+        # any hat runs, so every "when I hear" hat this frame sees the same delivery.
+        if fn == "_update" and _uses_any(use_trees, ("broadcast", "on_receive")):
+            body_lines.append(_INDENT + "_pump_msgs()")
         for hat in hats:
-            _emit_body(hat.get("c", []) or [], ctx, 1, body_lines)
+            # Skip an EMPTY global hat: _emit_body would pad it with a `pass` that,
+            # once object loops / draw_scene follow, becomes dead code. A program with
+            # exactly one (possibly empty) hat per kind -- i.e. every existing cart --
+            # is byte-identical either way (an all-empty function still gets its single
+            # `pass` from the trailing guard below).
+            kids = hat.get("c") or []
+            if not kids:
+                continue
+            g = _hat_guard_expr(hat, ctx.actor_var)  # conditional event -> wrap it
+            if g:
+                body_lines.append(_INDENT + "if " + g + ":")
+                _emit_body(kids, ctx, 2, body_lines)
+            else:
+                _emit_body(kids, ctx, 1, body_lines)
+        # draw the placed actors (after the global _draw body, so it paints over the
+        # background; under any per-object _draw extras below).
+        if want_draw:
+            body_lines.append(_INDENT + "draw_scene()")
+        # per-object scripts: `for _self in actors("<tag>"): <body>` with `self` bound
+        # as the current actor (reuses the #109 actor verbs -- move/touching/remove
+        # act on `self`). Vars the body reassigns land in this fn's `global` (shared
+        # ctx); `_self` is synthetic (like `_actorN`), never hoisted.
+        for tag, hat in oloops:
+            body_lines.append(_INDENT + "for _self in actors("
+                              + _render_text_literal(tag) + "):")
+            prev = ctx.actor_var
+            ctx.actor_var = "_self"
+            kids = hat.get("c", []) or []
+            g = _hat_guard_expr(hat, ctx.actor_var)  # ctx.actor_var == "_self" here
+            if g:
+                body_lines.append(_INDENT * 2 + "if " + g + ":")
+                _emit_loop_body(kids, ctx, 3, body_lines)
+            else:
+                _emit_loop_body(kids, ctx, 2, body_lines)
+            ctx.actor_var = prev
 
         # hoist globals: any declared var/list this function REASSIGNS must be `global`
         # (set/change a variable, clear a list, bind a for-each loop var). In-place list

@@ -17,6 +17,7 @@ moyimg/_Layer, and console's color -- no moy_runtime cycle. Device-only module
 from console import color
 from device_util import _ticks_ms, _ticks_diff
 from device_canvas import Image, _decode_moyimg, _Layer
+from widgets import rotate_indices          # #85/#93 all-around sprite rotation
 
 
 def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
@@ -409,9 +410,59 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         ns["move_actor_to"] = _world.move_to
         ns["remove_actor"] = _world.remove
 
+        _rot_cache = {}
+
+        def _rot_sprite(_tile, _deg):
+            if sheet is None:
+                return None
+            _key = (_tile, int(_deg) % 360)
+            _im = _rot_cache.get(_key)
+            if _im is None:
+                _base = sheet.tile_image(_tile, -1)
+                if _base is None:
+                    return None
+                _rp, _rw, _rh = rotate_indices(
+                    _base.pix, _base.w, _base.h, _deg, _base.transparent)
+                _t = _base.transparent if _base.transparent is not None else -1
+                _im = Image(_rw, _rh, _rp, _t)
+                _rot_cache[_key] = _im
+            return _im
+
         def draw_scene():
+            # #85/#93 Looks + rotation (Scratch rotation styles): hide / size / direction
+            # (all-around=rotate, left-right=flip, none) / say. No `dir` -> draw as placed.
             for _a in _world.actors():
-                _spr_entry(_a.tile, _a.x, _a.y, -1, 1, _a.flip)
+                _f = _a.flags
+                if _f.get("hidden"):
+                    continue
+                _sc = _f.get("size", 100) // 100
+                if _sc < 1:
+                    _sc = 1
+                _dir = _f.get("dir")
+                if _dir is None:
+                    _spr_entry(_a.tile, _a.x, _a.y, -1, _sc, _a.flip)
+                else:
+                    _style = _f.get("rot", "all")
+                    if _style == "none":
+                        _spr_entry(_a.tile, _a.x, _a.y, -1, _sc, _a.flip)
+                    elif _style == "leftright":
+                        _spr_entry(_a.tile, _a.x, _a.y, -1, _sc,
+                                   1 if (_dir % 360) > 180 else 0)
+                    else:
+                        _im = _rot_sprite(_a.tile, _dir - 90)
+                        if _im is None:
+                            _spr_entry(_a.tile, _a.x, _a.y, -1, _sc, _a.flip)
+                        else:
+                            canvas.spr(_im, _a.x + 4 * _sc - (_im.w * _sc) // 2,
+                                       _a.y + 4 * _sc - (_im.h * _sc) // 2, _sc)
+                _sy = _f.get("say")
+                if _sy:
+                    _t = str(_sy)[:10]
+                    _bw = len(_t) * 8 + 4
+                    _by = _a.y - 11 if _a.y >= 11 else _a.y + 9
+                    canvas.rect(_a.x, _by, _bw, 10, 7)
+                    canvas.rectb(_a.x, _by, _bw, 10, 0)
+                    canvas.print(_t, _a.x + 2, _by + 1, 0)
 
         ns["draw_scene"] = draw_scene
     return ns
