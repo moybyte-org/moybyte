@@ -125,6 +125,50 @@ def test_window_buffers_are_single_retained_surfaces(board):
     assert all(v == 1 for v in ret.values()), ret
 
 
+def test_draw_gates_are_installed(board):
+    """(#155) rect/rectb/print/pix must be the NATIVE moy_gfx callables on the
+    root system canvas AND on every window content buffer. Measured on glass
+    2026-07-26: the Python wrapper cost 50.2us against 5.2us for the fill_rect
+    kernel it ends in, so an un-gated canvas silently pays ~10x per chrome
+    call."""
+    assert board.pyval("str(type(ws.sys_canvas.rect))") == "<class 'draw_gate'>"
+    assert board.pyval("ws.sys_canvas._gate_ctx is not None") is True
+    ungated = board.pyval(
+        "[k for k, w in ws.wm._wins.items() if w.buf._gate_ctx is None]")
+    assert ungated == [], ungated
+
+
+def test_draw_gates_take_the_traffic(board):
+    """The gates must actually be drawing -- a fallback that quietly swallowed
+    every call would look installed and measure fast."""
+    board.pyexec("ws.sys_canvas.gate_counts_reset()\nws.mark_dirty()")
+    board.drain(1.5)
+    fills, texts, _fu, _tu = board.pyval("ws.sys_canvas.gate_counts()")
+    assert fills > 0 and texts > 0, (fills, texts)
+
+
+def test_window_chrome_freezes_during_a_content_scroll(board):
+    """(#155) A window's title strip is disjoint from its content stamp, so a
+    quiet frame must leave it alone once both ping-pong buffers hold it -- 8.2ms
+    of a 70ms picker-scroll frame before the freeze. Probed MID-gesture: the
+    freeze only engages while the desk serves its cache.
+
+    tools/p4_chrome_freeze.py is the deeper version (it byte-compares the strip
+    out of both ping-pong buffers); this pins that the freeze engages at all."""
+    board.open("settings")
+    board.drain(1.0)
+    w = board.state()["wins"]["settings"]
+    cx = w[0] + 1 + w[2] // 2
+    ctop = w[1] + 1 + w[4]
+    board.swipe_async(cx, ctop + (w[3] - w[4]) - 40, cx, ctop + 40, frames=200)
+    board.drain(1.5)                     # let the streak reach both buffers
+    quiet = board.pyval("ws.wm._chrome_quiet")
+    streak = board.pyval("ws.wm._wins['settings']._chrome_streak")
+    board.wait_line("swipe done", 30)
+    assert quiet is True, "the scroll frame never went quiet"
+    assert (streak or 0) >= 2, "chrome never froze (streak=%s)" % (streak,)
+
+
 def test_perf_lines_flow(board):
     n0 = len(board.lines)
     board.drain(4.0)

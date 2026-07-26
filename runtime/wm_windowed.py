@@ -485,6 +485,13 @@ class WindowedWM(FullscreenStackWM):
                                           # _lowest_dirty_window)
         self._win_sig = None              # window-shape signature; a change voids
                                           # every retained window stamp
+        self._sig_stable = False          # ...was it unchanged THIS frame?
+        # Chrome freeze (#155): a window strip/border and the taskbar chips are
+        # disjoint from every content stamp, so a quiet frame can leave them
+        # alone once both ping-pong buffers hold them.
+        self._chrome_quiet = False
+        self._chip_sig = None
+        self._chip_streak = 0
         # Dirty-union gesture restore (#58 "smooth like a real OS"): during a
         # drag/resize only the moving window's recent footprint needs the backdrop
         # re-stamped -- a full-screen 1.2MB restore per frame is the drag path's
@@ -1062,13 +1069,11 @@ class WindowedWM(FullscreenStackWM):
             self._win_sig = sig
             for k in self._order:
                 self._wins[k]._stamp_streak = 0
+            self._sig_stable = False
             return 0
-        if (self._desk_painted or self._drag is not None
-                or self._resize is not None or self.ws._animating(dt)):
+        self._sig_stable = True
+        if not self._frame_is_quiet(dt):
             return 0                      # something under/over everything moved
-        p = self.ws.pointer
-        if p is not None and getattr(p, "visible", False):
-            return 0                      # the cursor's old stamp needs erasing
         for i in range(n):
             win = self._wins[self._order[i]]
             if win.minimized:
@@ -1078,10 +1083,30 @@ class WindowedWM(FullscreenStackWM):
                 return i
         return n                          # every window is settled: draw none
 
+    def _frame_is_quiet(self, dt):
+        """True when nothing GLOBAL invalidated the retained ping-pong pixels
+        this frame: the desk backdrop did not repaint under the windows, no
+        window is being dragged or resized, nothing is animating, and no cursor
+        stamp needs erasing. Shared by the window-skip and the chrome freeze."""
+        if (self._desk_painted or self._drag is not None
+                or self._resize is not None or self.ws._animating(dt)):
+            return False
+        p = self.ws.pointer
+        if p is not None and getattr(p, "visible", False):
+            return False
+        return True
+
     def _draw_windows(self, dt):
         self._sync_windows()
         n = len(self._order)
         first = self._lowest_dirty_window(dt)
+        # Chrome freeze (#155): a window's strip/border/shadow is DISJOINT from
+        # its content stamp, so on a quiet frame -- a content scroll, a fling,
+        # typing -- those pixels are already correct in this ping-pong buffer and
+        # redrawing them is pure waste. Measured on P4 glass during a picker
+        # scroll: 8.2ms of a 70ms frame, every frame, for an unchanged title bar.
+        # _lowest_dirty_window sets _sig_stable (window shape/order/focus).
+        self._chrome_quiet = self._sig_stable and self._frame_is_quiet(dt)
         for i in range(n):
             key = self._order[i]
             win = self._wins[key]
@@ -1101,7 +1126,7 @@ class WindowedWM(FullscreenStackWM):
                 self._draw_player_window(win, True, focused, dt)
             else:
                 self._draw_app_window(win, focused, dt)
-        self._draw_taskbar_chips()
+        self._draw_taskbar_chips(quiet=self._chrome_quiet)
         if self._resize is not None:               # rubber-band resize preview
             kind, _ox, _oy, _ow, _oh, cw, chh = self._resize
             win = self._wins.get(kind)
@@ -1115,9 +1140,41 @@ class WindowedWM(FullscreenStackWM):
                 self._root_canvas.rectb(win.x, win.y, cw, chh,
                                         self.ws.theme_colors["accent"])
 
-    def _win_chrome(self, win, focused):
+    def _win_grip(self, win, focused):
+        """The resize grip: three diagonal steps in the bottom-right corner.
+        Drawn SEPARATELY from the rest of the chrome because it sits INSIDE the
+        content rect -- the window's content stamp overwrites it every frame, so
+        it is the one piece the chrome freeze can never skip."""
+        if not focused:
+            return
+        sc = self._root_canvas
+        ink = self.ws.theme_colors["chrome_ink"]
+        fs = self._fs()
+        gx, gy, gw, gh = self._grip_rect(win)
+        for i in range(3):
+            d = (i + 1) * (gw // 4)
+            sc.rect(gx + gw - d, gy + gh - 2 * fs, d, fs, ink)
+
+    def _win_chrome(self, win, focused, quiet=False):
         """Title strip (title + min/max/X) + border + drop shadow + resize grip.
-        The highlight follows INPUT FOCUS (which moves on click), not the stack."""
+        The highlight follows INPUT FOCUS (which moves on click), not the stack.
+
+        `quiet` (see _draw_windows) allows the FREEZE: once this exact chrome has
+        been painted into both ping-pong buffers, a quiet frame skips it and
+        redraws only the grip. The streak counts CONSECUTIVE quiet paints, so any
+        disturbance -- desk repaint, drag, cursor, animation, a changed title or
+        theme -- restarts it and both buffers are refreshed before skipping
+        resumes."""
+        sig = (win.x, win.y, win.w, win.h, win.title_h, focused,
+               self._win_title(win), self.ws.theme_name, self.ws.theme_variant,
+               self._fs())
+        if not quiet or sig != getattr(win, "_chrome_sig", None):
+            win._chrome_sig = sig
+            win._chrome_streak = 0
+        elif win._chrome_streak >= 2:
+            self._win_grip(win, focused)
+            return
+        win._chrome_streak += 1
         sc = self._root_canvas
         ws = self.ws
         th = ws.theme_colors
@@ -1144,12 +1201,7 @@ class WindowedWM(FullscreenStackWM):
         for name, rect in btns:
             glyph = {"close": "close", "max": "app", "min": "minus"}[name]
             ws._glyph(glyph, rect, _BTN_X_FG if name == "close" else strip_fg, sc)
-        # Resize grip (focused window only): three diagonal steps in the corner.
-        if focused:
-            gx, gy, gw, gh = self._grip_rect(win)
-            for i in range(3):
-                d = (i + 1) * (gw // 4)
-                sc.rect(gx + gw - d, gy + gh - 2 * fs, d, fs, th["chrome_ink"])
+        self._win_grip(win, focused)
 
     def _win_title(self, win):
         ws = self.ws
@@ -1272,7 +1324,7 @@ class WindowedWM(FullscreenStackWM):
         self._root_canvas.blit_strip(win.buf, win.x + 1, win.y + 1 + win.title_h)
         if _perf:
             self.ws._pf_wm_stamp = _wt() - _t0
-        self._win_chrome(win, focused)
+        self._win_chrome(win, focused, quiet=self._chrome_quiet)
 
     def _draw_player_window(self, win, running, focused, dt, full=True):
         ws = self.ws
@@ -1368,10 +1420,23 @@ class WindowedWM(FullscreenStackWM):
             x += widths[i] + 2 * fs
         return out
 
-    def _draw_taskbar_chips(self):
+    def _draw_taskbar_chips(self, quiet=False):
+        # Frozen on quiet frames like the window chrome (#155): the chips live on
+        # the OS bar, which no window ever overlaps, so once painted into both
+        # ping-pong buffers they stay correct until something changes them. Any
+        # disturbance (desk repaint, drag, cursor, animation) makes `quiet` False
+        # and restarts the streak, so both buffers refresh before skipping again.
         sc = self._root_canvas
         fs = self._fs()
         th = self.ws.theme_colors
+        sig = tuple((k, r, lb, k == self._focus, self._wins[k].minimized)
+                    for k, r, lb in self._chip_rects())
+        if not quiet or sig != self._chip_sig:
+            self._chip_sig = sig
+            self._chip_streak = 0
+        elif self._chip_streak >= 2:
+            return
+        self._chip_streak += 1
         for key, (x, y, w, h), label in self._chip_rects():
             win = self._wins[key]
             focused = (key == self._focus and not win.minimized)

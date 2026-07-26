@@ -1097,3 +1097,122 @@ def test_moving_a_window_voids_the_skip(tmp_path):
     ws.wm._move_window(win, win.x + 11, win.y + 7)
     assert ws.wm._lowest_dirty_window(1 / 30) == 0, \
         "a moved window must void every retained stamp"
+
+
+# -- the chrome freeze (#155) ------------------------------------------------
+
+def test_window_chrome_freezes_on_quiet_frames(tmp_path):
+    """A window's title strip / border / shadow is disjoint from its content
+    stamp, so on a quiet frame those pixels are already correct in this
+    ping-pong buffer. Measured on P4 glass: redrawing them cost 8.2ms of a 70ms
+    picker-scroll frame, every frame, for a bar that never changed."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _quiesce(ws)
+    _open_two_windows(ws, drv)
+    _settle_gesture(ws, drv, frames=10)
+    win = ws.wm._wins[ws.wm._order[-1]]
+    assert ws.wm._chrome_quiet, "the frame never went quiet"
+    assert win._chrome_streak >= 2, \
+        "chrome never reached both ping-pong buffers (streak=%s)" % (
+            getattr(win, "_chrome_streak", None),)
+
+
+def test_chrome_freeze_survives_only_two_paints_then_skips(tmp_path):
+    """The streak counts CONSECUTIVE quiet paints: a disturbance restarts it, so
+    both ping-pong buffers are refreshed before skipping resumes."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _quiesce(ws)
+    _open_two_windows(ws, drv)
+    _settle_gesture(ws, drv, frames=10)
+    win = ws.wm._wins[ws.wm._order[-1]]
+    assert win._chrome_streak >= 2
+
+    # A desk repaint wipes the buffer under the chrome -> restart.
+    ws.wm._desk_painted = True
+    ws.wm._draw_windows(1 / 30)
+    assert win._chrome_streak == 1, \
+        "a desk repaint must restart the chrome streak"
+
+
+def test_chrome_freeze_refreshes_when_the_title_changes(tmp_path):
+    """The freeze keys on what the chrome DRAWS (geometry, focus, title, theme,
+    font scale) -- change any of it and both buffers must be repainted."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _quiesce(ws)
+    _open_two_windows(ws, drv)
+    _settle_gesture(ws, drv, frames=10)
+    win = ws.wm._wins[ws.wm._order[-1]]
+    assert win._chrome_streak >= 2
+    before = win._chrome_sig
+
+    ws.wm._win_chrome(win, True, quiet=True)      # unchanged -> still frozen
+    assert win._chrome_streak >= 2
+
+    ws.set_theme("berry" if ws.theme_name != "berry" else "forest",
+                 persist=False)
+    ws.wm._win_chrome(win, True, quiet=True)
+    assert win._chrome_sig != before
+    assert win._chrome_streak == 1, "a theme change must repaint the chrome"
+
+
+def test_chrome_freeze_still_draws_the_resize_grip(tmp_path):
+    """The grip sits INSIDE the content rect, so the window's content stamp
+    overwrites it every frame -- it is the one piece the freeze can never
+    skip."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _quiesce(ws)
+    _open_two_windows(ws, drv)
+    _settle_gesture(ws, drv, frames=10)
+    win = ws.wm._wins[ws.wm._order[-1]]
+    assert win._chrome_streak >= 2            # frozen
+
+    grips = []
+    real = ws.wm._win_grip
+    ws.wm._win_grip = lambda w, f: (grips.append(w.kind), real(w, f))[1]
+    try:
+        ws.wm._win_chrome(win, True, quiet=True)
+    finally:
+        ws.wm._win_grip = real
+    assert grips == [win.kind], "a frozen chrome must still redraw the grip"
+
+
+def test_chrome_freeze_is_pixel_identical(tmp_path):
+    """The frozen frame's screen must equal a frame that repainted all chrome --
+    the correctness contract behind the freeze."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _quiesce(ws)
+    _open_two_windows(ws, drv)
+    _settle_gesture(ws, drv, frames=10)
+
+    def full():
+        for w in ws.wm._wins.values():
+            w._chrome_sig = None          # void the freeze
+        ws.wm._chip_sig = None
+        ws.mark_dirty()
+        drv.frame(1 / 30)
+
+    full(); full()
+    reference = bytes(ws.sys_canvas.buf)
+    ws.mark_dirty()
+    drv.frame(1 / 30)                     # a frame free to freeze the chrome
+    assert bytes(ws.sys_canvas.buf) == reference
+
+
+def test_taskbar_chips_freeze_and_refresh_on_focus_change(tmp_path):
+    """The chips live on the OS bar, which no window overlaps -- same freeze,
+    same restart rule (here: the focused chip is a different colour)."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _quiesce(ws)
+    order = _open_two_windows(ws, drv)
+    _settle_gesture(ws, drv, frames=10)
+    assert ws.wm._chip_streak >= 2, "the chips never froze"
+
+    ws.wm._focus = order[0]               # focus moves -> a chip changes colour
+    ws.wm._draw_taskbar_chips(quiet=True)
+    assert ws.wm._chip_streak == 1, "a focus change must repaint the chips"
