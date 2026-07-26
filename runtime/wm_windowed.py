@@ -1269,6 +1269,40 @@ class WindowedWM(FullscreenStackWM):
         finally:
             win.w, win.h = ow, oh
 
+    def _direct_render(self, win, dt):
+        """Draw the window's content into the framebuffer IN PLACE, through a
+        viewport at its content rect (#155). Returns False if this backend or
+        this window can't take the path, and the caller falls back to the
+        render-into-buffer-then-stamp route.
+
+        The layout context still comes from the window (every responsive surface
+        must keep deriving its geometry from the WINDOW size); only the canvas is
+        swapped for the root, masked to the window's rect. That is why the
+        viewport has to match win.buf exactly -- the layouts were built for that
+        size, and a mismatch would lay the content out for the wrong surface."""
+        root = self._root_canvas
+        sv = getattr(root, "set_viewport", None)
+        if sv is None:
+            return False                      # web RecordingLayer: keep the stamp
+        cx, cy, cw, ch = win.content_rect()
+        if cw <= 0 or ch <= 0 or cw != win.buf.w or ch != win.buf.h:
+            return False
+        # A window may hang off the screen edge; a clamped viewport would then be
+        # a different surface from the one its layouts were built for. Stamp
+        # instead (the buffer path crops for free).
+        if cx < 0 or cy < 0 or cx + cw > root.w or cy + ch > root.h:
+            return False
+        ws = self.ws
+        self._install(win.ctx)
+        ws._sys_canvas = root                 # ...but paint on the framebuffer
+        sv(cx, cy, cw, ch)
+        try:
+            self._content_for(win.kind).draw(dt)
+        finally:
+            root.clear_viewport()
+            self._install(self._root_ctx)
+        return True
+
     def _draw_app_window(self, win, focused, dt):
         # Freeze the content render while THIS window is being dragged/resized
         # (#58 drag perf): its buffer can't change under a drag (no input reaches
@@ -1293,6 +1327,23 @@ class WindowedWM(FullscreenStackWM):
                   or (self._resize is not None
                       and self._wins.get(self._resize[0]) is win))
         if focused and not moving:
+            # DIRECT RENDER (#155): while this window's content is being scrolled
+            # or flung, draw it STRAIGHT into the framebuffer through a viewport
+            # and skip the 1:1 stamp entirely -- that copy is ~900KB of bus
+            # traffic per frame on the P4, against a measured 91MB/s ceiling.
+            #
+            # Gated to the gesture on purpose. Outside one, the render still goes
+            # into win.buf, because other paths stamp FROM that buffer without
+            # re-rendering (the drag freeze, a settled background window). Only
+            # during a gesture is nobody reading it -- the window repaints every
+            # frame anyway -- so letting it go stale for the duration is free,
+            # and the first ordinary frame after the release refills it.
+            if (self._chrome_quiet
+                    and (self._content_gesture or self._content_flinging())
+                    and self._order and self._wins.get(self._order[-1]) is win
+                    and self._direct_render(win, dt)):
+                self._win_chrome(win, focused, quiet=self._chrome_quiet)
+                return
             # Live: render the focused app into its buffer at the window's layout.
             self._install(win.ctx)
             try:

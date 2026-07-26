@@ -142,10 +142,18 @@ class Canvas:
         of bus traffic per frame on the P4, where a full-screen copy costs 27ms
         against a 91MB/s ceiling. Through a viewport the same draw calls write
         the framebuffer once, in place."""
-        self._ox = int(x)
-        self._oy = int(y)
-        self.w = int(w)
-        self.h = int(h)
+        # CLAMP to the buffer. A window may hang off the screen edge, so the
+        # requested rect is not always fully on it -- and an unclamped row write
+        # runs past the end, where a bytearray slice-assign silently GROWS the
+        # buffer instead of failing (caught by the direct-render equivalence
+        # test, which saw a 1024x600 canvas become 1024x603).
+        rows = len(self.buf) // self._stride if self._stride else 0
+        ox = max(0, int(x))
+        oy = max(0, int(y))
+        self._ox = ox
+        self._oy = oy
+        self.w = max(0, min(int(w), self._stride - ox))
+        self.h = max(0, min(int(h), rows - oy))
         self.reset_state()
 
     def clear_viewport(self):

@@ -591,10 +591,14 @@ class DeviceCanvas:
         Host twin: runtime/canvas.py Canvas.set_viewport -- see it for why. On
         this backend it also re-seeds the native draw gates, whose state array
         carries the stride and the buffer-space clip."""
-        self._ox = int(x)
-        self._oy = int(y)
-        self.w = int(w)
-        self.h = int(h)
+        # Clamped to the buffer -- see the host twin for why (a window can hang
+        # off the screen edge, and an unclamped write runs past the end).
+        ox = max(0, int(x))
+        oy = max(0, int(y))
+        self._ox = ox
+        self._oy = oy
+        self.w = max(0, min(int(w), self._stride - ox))
+        self.h = max(0, min(int(h), self._bh - oy))
         st = self._gate_state
         if st is not None:
             st[_ST_W] = self._stride

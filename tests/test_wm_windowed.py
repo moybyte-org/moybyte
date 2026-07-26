@@ -1309,3 +1309,80 @@ def test_new_window_buffers_adopt_the_changed_font_scale(tmp_path):
         drv.frame(1 / 30)
     for key, win in ws.wm._wins.items():
         assert getattr(win.buf, "font_scale", 1) == 1, key
+
+
+# -- direct render: no window buffer, no stamp (#155) ------------------------
+
+def _scroll_frames(ws, drv, frames=8):
+    """Hold a content drag inside the top window and paint `frames` frames."""
+    win = ws.wm._wins[ws.wm._order[-1]]
+    cx = win.x + 1 + win.w // 2
+    cy = win.y + 1 + win.title_h + (win.h - win.title_h) // 2
+    drv.touch(cx, cy)
+    drv.frame(1 / 30)
+    for i in range(frames):
+        drv.touch_drag(cx - 4 * i, cy)
+        ws.mark_dirty()
+        drv.frame(1 / 30)
+
+
+def test_direct_render_is_taken_during_a_content_scroll(tmp_path):
+    """The whole point: while a window's content is being scrolled it must draw
+    straight into the framebuffer instead of into a private buffer that is then
+    copied. On the P4 that copy is ~900KB of bus traffic a frame."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _quiesce(ws)
+    _open_two_windows(ws, drv)
+
+    hits = []
+    real = ws.wm._direct_render
+    ws.wm._direct_render = lambda win, dt: (hits.append(win.kind),
+                                            real(win, dt))[1]
+    _scroll_frames(ws, drv)
+    assert hits, "the direct path never ran during a content scroll"
+
+
+def test_direct_render_matches_the_stamp_path_pixel_for_pixel(tmp_path):
+    """Equivalence on a REAL frame, not just the canvas unit test: the same
+    gesture with the direct path forced off must produce the same screen."""
+    def run(direct, sub):
+        # A DISTINCT save dir per run: two workstations sharing one would have
+        # the second start from state the first persisted (selection, system.json),
+        # which shows up as a pixel diff that has nothing to do with the path.
+        ws = _ws(tmp_path / sub)
+        drv = _drv(ws)
+        _quiesce(ws)
+        _open_two_windows(ws, drv)
+        _pin_clock(ws)
+        if not direct:
+            ws.wm._direct_render = lambda win, dt: False   # force the stamp
+        _scroll_frames(ws, drv)
+        return bytes(ws.sys_canvas.buf)
+
+    assert run(True, "a") == run(False, "b")
+
+
+def test_direct_render_declines_when_the_window_was_resized(tmp_path):
+    """The window's layouts were built for win.buf's size, so a viewport that
+    doesn't match it would lay the content out for the wrong surface. Decline
+    rather than draw something subtly wrong."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _quiesce(ws)
+    _open_two_windows(ws, drv)
+    win = ws.wm._wins[ws.wm._order[-1]]
+    win.w += 40                       # geometry moved, buffer did not
+    assert ws.wm._direct_render(win, 1 / 30) is False
+
+
+def test_direct_render_leaves_no_viewport_installed(tmp_path):
+    """A leaked viewport would silently mask every later draw on the frame."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _quiesce(ws)
+    _open_two_windows(ws, drv)
+    _scroll_frames(ws, drv)
+    root = ws.wm._root_canvas
+    assert (root._ox, root._oy) == (0, 0)
+    assert (root.w, root.h) == (root._stride, len(root.buf) // root._stride)
