@@ -311,7 +311,19 @@ class SettingsLayer:
             self.wifi_msg = "TYPE THE PASSWORD"
             ws._set_text_mode(True)      # clean ASCII typing (device keyboard)
         else:
-            self._wifi_connect(ssid, "")
+            # A saved/open network reconnects with "" -- the SERVICE resolves
+            # the stored password (FakeWifi/DeviceWifi.connect). If a LOCKED
+            # known net still fails (stale/wrong saved password), reopen the
+            # password prompt so the kid can just retype it -- without this a
+            # bad saved password stranded the network forever (on-glass P4,
+            # 2026-07-25).
+            ok = self._wifi_connect(ssid, "")
+            if not ok and locked:
+                self.wifi_pick = ssid
+                self.wifi_pw = ""
+                self._wifi_kprev = 0
+                self.wifi_msg = "TYPE THE PASSWORD"
+                ws._set_text_mode(True)
         ws._dirty = True
 
     def _wifi_connect(self, ssid, pw):
@@ -726,6 +738,14 @@ class SettingsLayer:
             vis = self._settings_visible()
             top = sr.offset // ws.layout.set_row_h
             self.set_top = max(0, min(max(0, rows - vis), top))
+            # Drag the SELECTION along with the view: the highlighted row must
+            # stay on screen, or the next d-pad press (which nudges the view
+            # back to the selection) would yank the list to wherever the
+            # selection was left behind.
+            if self.set_msel < self.set_top:
+                self.set_msel = self.set_top
+            elif self.set_msel >= self.set_top + vis:
+                self.set_msel = self.set_top + vis - 1
         if press is not None:
             return self._row_tap(press[0], press[1])
         return False
@@ -762,11 +782,23 @@ class SettingsLayer:
         if self.bt_view:
             return self._bt_input(i)
         rows = self._settings_rows()
+        # The keep-selection-visible clamp (#53) fires ONLY when the keyboard
+        # moves the selection -- NOT every frame. The per-frame form fought the
+        # touch drag: every drag frame's set_top got yanked back to keep the
+        # (never-moved) selected row in view, so the rows never visibly
+        # scrolled and the release re-snap threw the list back to the top
+        # (the on-glass P4 report, 2026-07-25).
         if i.pressed("up"):
             self.set_msel = (self.set_msel - 1) % len(rows)
+            self._settings_scroll()
         if i.pressed("down"):
             self.set_msel = (self.set_msel + 1) % len(rows)
-        self._settings_scroll()        # keep the selection in view (#53)
+            self._settings_scroll()
+        # Range-only safety clamp (what the per-frame _settings_scroll used to
+        # provide): a shrinking row set / a font-scale change must not strand
+        # set_top past the end. No selection nudge -- that is the drag's fight.
+        self.set_top = max(0, min(self.set_top,
+                                  max(0, len(rows) - self._settings_visible())))
         if i.pressed("left"):
             self.settings_adjust(-1)
         if i.pressed("right"):

@@ -126,7 +126,14 @@ class AppearanceAppLayer:
         path = cart.get("path")
         if not path:
             return int(cart.get("version", 0)) >= 1
-        return str(path).replace("\\", "/").rsplit("/", 1)[-1] == "theme_picker.moy"
+        # Two folder names claim the app: the host store copies the SOURCE
+        # folder (theme_picker.moy), but the device's seed_builtins names the
+        # seeded folder from the TITLE slug (appearance.moy) -- the mismatch
+        # left every device's Appearance cart unclaimed, so Settings ->
+        # APPEARANCE silently did nothing (on-glass P4, 2026-07-25). Pinned by
+        # tests/test_device_seed_parity.py's app-identity parity test.
+        base = str(path).replace("\\", "/").rsplit("/", 1)[-1]
+        return base in ("theme_picker.moy", "appearance.moy")
 
     def relayout(self, w, h, fs):
         self.layout = AppearanceLayout(w, h, fs, self.ws.windowed_chrome)

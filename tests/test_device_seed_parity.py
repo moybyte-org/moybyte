@@ -434,3 +434,27 @@ def test_every_system_cart_is_versioned():
     # (and the generator propagates it into the embedded seed).
     for cart in _carts_by_title().values():
         assert cart.get("version", 0) >= 1, cart["title"] + " missing manifest version"
+
+
+def test_every_system_app_claims_its_device_seeded_folder(tmp_path):
+    """host == device for APP IDENTITY: the host store copies each cart's SOURCE
+    folder name (theme_picker.moy), but the device's seed_builtins names the
+    seeded folder from the TITLE slug (appearance.moy). An is_app that only
+    knows the source name silently fails to claim its cart on device, and the
+    app becomes unopenable -- Settings -> APPEARANCE did nothing on the P4
+    (on-glass, 2026-07-25). Every registered system app must accept BOTH."""
+    from runtime import host_app, moy_carts
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    assert ws._apps, "no system apps registered"
+    for app, _text in ws._apps:
+        claimed = [c for c in ws._all_carts if app.is_app(c)]
+        assert len(claimed) == 1, \
+            "%s claims %d carts on the host store" % (app.id, len(claimed))
+        cart = dict(claimed[0])
+        root, _, _base = cart["path"].replace("\\", "/").rpartition("/")
+        # Re-path it exactly the way the device's seed_builtins would name it.
+        cart["path"] = root + "/" + moy_carts.slug(cart["title"]) + ".moy"
+        assert app.is_app(cart), \
+            "%s does not claim its DEVICE-seeded folder %s" % (app.id,
+                                                               cart["path"])

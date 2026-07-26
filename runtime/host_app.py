@@ -245,11 +245,19 @@ class FakeWifi:
     def connect(self, ssid, password=""):
         """'Associate' with `ssid` (fake: always succeeds), remember the creds, and
         report connected. Returns True. The connection persists across carts (it's
-        system state) and the creds persist to disk for autoconnect."""
+        system state) and the creds persist to disk for autoconnect. An EMPTY
+        password resolves to the stored one first (the DeviceWifi contract): the
+        panel's known-network reconnect passes "", and remembering that "" used
+        to overwrite the saved password in wifi.json."""
         self._connected = True
         self._ssid = str(ssid)
         if self._store is not None and self._root is not None:
             try:
+                if not password:
+                    for n in self._store.load_wifi(self._root):
+                        if n["ssid"] == self._ssid:
+                            password = n.get("password", "") or ""
+                            break
                 self._store.remember_wifi(ssid, password, self._root)
             except Exception as exc:  # noqa: BLE001 -- a save failure must not crash the cart
                 print("Moybyte wifi remember failed:", exc)

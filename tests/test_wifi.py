@@ -273,3 +273,88 @@ def test_wifi_manager_cart_password_entry_for_locked_net(tmp_path):
     assert connected and got_ssid == ssid
     nets_saved = {n["ssid"]: n["password"] for n in moy_carts.load_wifi(carts_dir)}
     assert nets_saved.get(ssid) == "wonderland"
+
+
+# -- reconnect to a SAVED network (the on-glass P4 bug, 2026-07-25) -----------
+#
+# The Settings wifi panel has no credential access: tapping an already-known
+# network calls connect(ssid, "") and lets the SERVICE resolve the stored
+# password. The old backends took the "" literally -- they associated with an
+# empty password (which fails on a locked net) AND remembered the "", wiping
+# the saved password so the network could never be rejoined without retyping.
+
+def _device_wifi_class():
+    """The device DeviceWifi loaded under CPython (like the make_api test)."""
+    import importlib.util
+    fw = (ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules"
+          / "device_wifi.py")
+    for name in ("device_util",):
+        if name not in sys.modules:
+            s = importlib.util.spec_from_file_location(
+                name, fw.parent / (name + ".py"))
+            m = importlib.util.module_from_spec(s)
+            s.loader.exec_module(m)
+            sys.modules[name] = m
+    spec = importlib.util.spec_from_file_location("device_wifi", fw)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.DeviceWifi
+
+
+def test_empty_password_reconnect_keeps_the_saved_one(tmp_path):
+    """host == device: connect(ssid, "") on a KNOWN network must resolve the
+    stored password, not overwrite it with ""."""
+    from runtime import host_app, moy_carts
+
+    carts = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(carts)
+
+    w = host_app.FakeWifi(moy_carts, carts)
+    w.connect("Home WiFi", "secretpw")
+    w.disconnect()
+    w.connect("Home WiFi", "")               # the panel's known-network reconnect
+    saved = {n["ssid"]: n["password"] for n in moy_carts.load_wifi(carts)}
+    assert saved["Home WiFi"] == "secretpw"
+
+    # ... and the device backend resolves the stored password the same way
+    # (no radio here: the store lookup is what this pins).
+    dev = _device_wifi_class()(moy_carts, carts)
+    seen = []
+    dev._ensure_wlan = lambda: None          # no network module under CPython
+    dev.connect("Home WiFi", "")
+    saved = {n["ssid"]: n["password"] for n in moy_carts.load_wifi(carts)}
+    assert saved["Home WiFi"] == "secretpw", seen
+
+
+def test_device_status_survives_an_unreadable_detail(tmp_path):
+    """A port where ifconfig()/essid raises must still report the link UP --
+    the old status() swallowed the whole thing and said NOT CONNECTED."""
+    from runtime import moy_carts
+
+    carts = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(carts)
+    dev = _device_wifi_class()(moy_carts, carts)
+
+    class _Wlan:
+        def isconnected(self):
+            return True
+
+        def ifconfig(self):
+            raise OSError("no ip yet")
+
+        def config(self, _k):
+            raise OSError("essid unavailable")
+
+    dev.wlan = _Wlan()
+    dev._ssid = "Home WiFi"
+    connected, ssid, ip = dev.status()
+    assert connected is True
+    assert ssid == "Home WiFi"       # falls back to the ssid we associated with
+    assert ip is None
+
+    class _Down(_Wlan):
+        def isconnected(self):
+            return False
+
+    dev.wlan = _Down()
+    assert dev.status() == (False, None, None)

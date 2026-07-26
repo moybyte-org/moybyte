@@ -73,6 +73,110 @@ def test_offscreen_rows_are_not_tappable(tmp_path):
     assert not ws.settings_layer._settings_row_visible(0)
 
 
+def _feed(ws, drv, x, y, *, press=False, down=True):
+    """One pointer sample through the REAL console path (the device loop's
+    handle_pointer + frame), so these exercise the same routing the glass does."""
+    if press:
+        drv.touch(x, y)
+    elif down:
+        drv.touch_drag(x, y)
+    else:
+        ws.pointer.place(int(x), int(y))
+        drv.touch_up()
+    drv.frame(1 / 30)
+
+
+def _drag_rows(ws, drv, x, y0, dy, steps=12):
+    """Press at (x, y0), drag by dy over `steps` samples, release at the end."""
+    _feed(ws, drv, x, y0, press=True)
+    for i in range(1, steps + 1):
+        _feed(ws, drv, x, y0 + dy * i // steps)
+    _feed(ws, drv, x, y0 + dy, down=False)
+
+
+def test_touch_drag_scrolls_the_rows(tmp_path):
+    """A finger drag up scrolls the list (the on-glass P4 report: the rows
+    would not move at all). The per-frame keep-selection-visible clamp used to
+    yank set_top back to the selected row on EVERY frame, so a drag could never
+    accumulate: set_top went 0 -> (drag) -> 0."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    _force_ota_rows(ws)
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)
+    lay = ws.layout
+    row_h = lay.set_row_h
+    x = lay.set_x + lay.set_w // 2
+    _drag_rows(ws, drv, x, lay.set_row_y0 + 4 * row_h, -3 * row_h)
+    assert ws.settings_layer.set_top > 0
+
+
+def test_scroll_position_survives_the_release(tmp_path):
+    """Letting go must leave the list where the finger put it -- the second
+    half of the on-glass report ('when i drag and let go i get thrown at the
+    start')."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    _force_ota_rows(ws)
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)
+    lay = ws.layout
+    row_h = lay.set_row_h
+    x = lay.set_x + lay.set_w // 2
+    _drag_rows(ws, drv, x, lay.set_row_y0 + 4 * row_h, -3 * row_h)
+    top = ws.settings_layer.set_top
+    assert top > 0
+    for _ in range(20):                     # idle frames: nothing may re-snap it
+        drv.frame(1 / 30)
+    assert ws.settings_layer.set_top == top
+
+
+def test_drag_carries_the_selection_into_view(tmp_path):
+    """The highlighted row follows the scrolled view, so the next d-pad press
+    doesn't yank the list back to where the selection was left behind."""
+    from runtime import host_app
+    ws = _ws(tmp_path)
+    _force_ota_rows(ws)
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)
+    lay = ws.layout
+    row_h = lay.set_row_h
+    x = lay.set_x + lay.set_w // 2
+    _drag_rows(ws, drv, x, lay.set_row_y0 + 4 * row_h, -3 * row_h)
+    sl = ws.settings_layer
+    assert sl._settings_row_visible(sl.set_msel)
+    top = sl.set_top
+    drv.press("down")                       # a d-pad step must not jump the view
+    drv.frame(1 / 30)
+    assert abs(sl.set_top - top) <= 1
+
+
+def test_windowed_settings_rows_scroll(tmp_path):
+    """The same drag inside the P4/desktop tier's Settings WINDOW (window-local
+    coords under the window's own layout context) -- the tier the bug was
+    reported on."""
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"),
+                                    sys_size=(1024, 600), font_scale=2,
+                                    windowed=True)
+    drv = host_app.ConsoleDriver(ws)
+    ws.open_settings()
+    drv.frame(1 / 30)
+    _force_ota_rows(ws)
+    win = ws.wm._wins["settings"]
+    lay = win.ctx.layout                    # window-local geometry
+    row_h = lay.set_row_h
+    ox, oy = win.x + 1, win.y + 1 + win.title_h
+    x = ox + lay.set_x + lay.set_w // 2
+    y0 = oy + lay.set_row_y0 + 4 * row_h
+    _drag_rows(ws, drv, x, y0, -3 * row_h)
+    top = ws.settings_layer.set_top
+    assert top > 0
+    for _ in range(20):
+        drv.frame(1 / 30)
+    assert ws.settings_layer.set_top == top
+
+
 def test_update_online_reachable_by_keyboard(tmp_path):
     """Walking the d-pad down reaches the formerly-off-screen UPDATE ONLINE row."""
     from runtime import host_app

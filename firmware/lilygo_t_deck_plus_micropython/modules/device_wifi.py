@@ -31,6 +31,7 @@ class DeviceWifi:
     def __init__(self, store=None, root=None):
         self._store = store
         self._root = root
+        self._ssid = None        # last ssid we associated with (status fallback)
         # LAZY: bringing the WiFi stack up reserves a large chunk of INTERNAL RAM that
         # the LCD DMA flush (lcd_panel_io_tx_color) also needs. Doing it at boot starved
         # the panel flush -> OSError 257 (ESP_ERR_NO_MEM) and froze the desktop. So spin
@@ -74,9 +75,21 @@ class DeviceWifi:
 
     def connect(self, ssid, password=""):
         """Associate with `ssid`, remember the creds, and report whether the link
-        came up. NEEDS ON-DEVICE VERIFICATION (the connect()/isconnected() poll
+        came up. An EMPTY password resolves to the stored one first -- the panel's
+        known-network reconnect passes "" (it has no credential access), and the
+        old behavior associated with "" AND remembered it, destroying the saved
+        password (the on-glass P4 "says not connected after i exit", 2026-07-25).
+        NEEDS ON-DEVICE VERIFICATION (the connect()/isconnected() poll
         timing below is a sketch -- a real impl waits on a status callback/timeout)."""
         ssid = str(ssid)
+        if not password and self._store is not None and self._root is not None:
+            try:
+                for n in self._store.load_wifi(self._root):
+                    if n["ssid"] == ssid:
+                        password = n.get("password", "") or ""
+                        break
+            except Exception:  # noqa: BLE001 -- a store hiccup falls back to ""
+                pass
         ok = False
         if self._ensure_wlan() is not None:
             try:
@@ -92,6 +105,8 @@ class DeviceWifi:
             except Exception as exc:  # noqa: BLE001
                 print("Moybyte wifi connect failed:", exc)
                 ok = False
+        if ok:
+            self._ssid = ssid
         if self._store is not None and self._root is not None:
             try:
                 self._store.remember_wifi(ssid, password, self._root)
@@ -107,21 +122,34 @@ class DeviceWifi:
                 pass
 
     def status(self):
-        """(connected, ssid, ip): the live link state #22/#8 read to use the net."""
+        """(connected, ssid, ip): the live link state #22/#8 read to use the net.
+
+        The LINK question (isconnected) is answered independently of the
+        DETAIL reads (ifconfig / essid): a port where either detail raises --
+        the P4's C6-over-SDIO is a candidate -- used to report the whole link
+        DOWN, so every status surface (the WIFI row, the panel line, the bar
+        icon) said NOT CONNECTED over a working connection. A detail that
+        can't be read now degrades to the remembered ssid / a null ip."""
         if self.wlan is None:
             return (False, None, None)
         try:
-            if self.wlan.isconnected():
-                ip = self.wlan.ifconfig()[0]
-                ssid = None
-                try:
-                    ssid = self.wlan.config("essid") or None
-                except Exception:  # noqa: BLE001 -- essid not always queryable
-                    ssid = None
-                return (True, ssid, ip)
+            live = bool(self.wlan.isconnected())
         except Exception as exc:  # noqa: BLE001
             print("Moybyte wifi status failed:", exc)
-        return (False, None, None)
+            return (False, None, None)
+        if not live:
+            return (False, None, None)
+        ip = None
+        try:
+            ip = self.wlan.ifconfig()[0]
+        except Exception as exc:  # noqa: BLE001 -- link is up; the detail isn't
+            print("Moybyte wifi ifconfig failed:", exc)
+        ssid = None
+        try:
+            ssid = self.wlan.config("essid") or None
+        except Exception:  # noqa: BLE001 -- essid not always queryable
+            ssid = None
+        return (True, ssid or self._ssid, ip)
 
     def forget(self, ssid):
         ssid = str(ssid)
