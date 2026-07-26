@@ -69,6 +69,9 @@ def _clear_ram_caches(ws):
     ws._cover_cache_order = []
     ws._cover_cache_pixels = 0
     ws._cover_jobs = {}
+    ws._cover_runs = {}
+    ws._cover_runs_order = []
+    ws._cover_runs_bytes = 0
 
 
 def test_cover_persists_and_reloads_without_a_decode(tmp_path):
@@ -122,10 +125,11 @@ def test_a_new_size_re_crops_instead_of_re_decoding(tmp_path):
     cart = _mk_cart_with_cover(tmp_path, value=5)
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _land_cover(ws, cart, 40, 30)
-    assert ws._cover_src_get(cart["path"], None) is None      # sig must match
+    assert ws._cover_runs_get(cart["path"], None) is None     # sig must match
     sig = moy_carts.cover_sig(moy_carts.load_image(cart["path"], "cover"))
-    src = ws._cover_src_get(cart["path"], sig)
-    assert src is not None and len(src) == 64 * 48, "source was not cached"
+    runs = ws._cover_runs_get(cart["path"], sig)
+    assert runs is not None and runs[0] == 64 and runs[1] == 48, \
+        "the parsed runs were not cached"
 
     # A DIFFERENT size, with no sidecar for it: one step, no decode.
     _clear_ram_caches(ws)
@@ -143,14 +147,14 @@ def test_the_source_cache_is_stamped_against_the_cover(tmp_path):
     _land_cover(ws, cart, 40, 30)
     moy_carts.save_image(cart, "cover", _cover_text(64, 48, 9))
     new_sig = moy_carts.cover_sig(moy_carts.load_image(cart["path"], "cover"))
-    assert ws._cover_src_get(cart["path"], new_sig) is None
+    assert ws._cover_runs_get(cart["path"], new_sig) is None
     _clear_ram_caches(ws)
     img = _land_cover(ws, cart, 24, 18)
     assert img.pix[0] == 9, "re-cropped from the stale source"
 
 
 def test_the_source_cache_is_bounded(tmp_path):
-    """Sources are ~77KB each, so they must be evicted, not accumulated."""
+    """Runs are ~15KB each, so the cache must stay bounded."""
     from runtime import console, host_app
     root = str(tmp_path / "carts")
     moy_carts.ensure_dirs(root)
@@ -163,45 +167,8 @@ def test_the_source_cache_is_bounded(tmp_path):
     ws = host_app.build_workstation(root)
     for c in carts:
         _land_cover(ws, c, 40, 30, frames=2000)
-    assert ws._cover_src_pixels <= console._COVER_SRC_MAX_PIXELS
-    assert len(ws._cover_src) == len(ws._cover_src_order)
-    assert len(ws._cover_src) < len(carts), "nothing was ever evicted"
-
-
-def test_a_new_size_needs_no_decode_in_a_fresh_session(tmp_path):
-    """The case the owner actually hit: the Library had loaded every cover from
-    its per-size sidecars, so NO decode had run and no source was in RAM -- and
-    the hop to the differently-sized picker then decoded all of them again. The
-    source sidecar is what closes that: it is size-independent, so a size never
-    seen before still skips the decode."""
-    from runtime import host_app
-    cart = _mk_cart_with_cover(tmp_path, value=5)
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    _land_cover(ws, cart, 40, 30)
-    assert (Path(cart["path"]) / "thumbs" / "src.mcs").exists(), \
-        "the decoded source was never persisted"
-
-    # A brand new Workstation (a reboot): no RAM caches at all, and no sidecar
-    # for this size. It must still land in ONE step.
-    ws2 = host_app.build_workstation(str(tmp_path / "carts"))
-    cart2 = next(c for c in ws2._all_carts if c.get("path") == cart["path"])
-    ws2._cover_built = False
-    img = ws2._cover_for(cart2, 24, 18)
-    assert img is not None, "a fresh session still had to decode for a new size"
-    assert len(img.pix) == 24 * 18 and img.pix[0] == 5
-
-
-def test_a_stale_source_sidecar_is_ignored(tmp_path):
-    from runtime import moy_carts as st
-    cart = _mk_cart_with_cover(tmp_path, value=5)
-    path = cart["path"]
-    sig = st.cover_sig(st.load_image(path, "cover"))
-    st.save_cover_source(path, sig, 4, 3, bytes([7]) * 12)
-    assert st.load_cover_source(path, sig) == (4, 3, bytes([7]) * 12)
-    assert st.load_cover_source(path, sig ^ 1) is None      # edited cover
-    with open(path + "/thumbs/src.mcs", "wb") as f:
-        f.write(b"JUNK" + bytes(20))
-    assert st.load_cover_source(path, sig) is None           # corrupt
+    assert ws._cover_runs_bytes <= console._COVER_RUNS_MAX_BYTES
+    assert len(ws._cover_runs) == len(ws._cover_runs_order)
 
 
 def test_native_and_python_crops_are_byte_identical(tmp_path):

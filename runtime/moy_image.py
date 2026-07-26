@@ -183,51 +183,6 @@ def save_cover_thumb(path, w, h, sig, pix):
     _save_thumb(path, w, h, sig, pix)
 
 
-SOURCE_FILE = "src.mcs"
-
-
-def load_cover_source(path, sig):
-    """The DECODED cover source for the cart at `path` as (w, h, pix), or None
-    when absent, stale or corrupt.
-
-    Size-INDEPENDENT, which is the point (#155). The per-size crop sidecars make
-    a known size free, but any NEW size -- a window resize, or the hop between
-    the fullscreen Library and the windowed picker -- missed on all of them and
-    re-ran the 0.5-1.7s RLE decode per cover (owner-reported: "covers are remade
-    every time you resize the launcher"). The decode does not depend on the size;
-    only the crop after it does. So the source is persisted once and any size
-    re-crops from it."""
-    try:
-        with open(path + "/" + THUMBS_DIR + "/" + SOURCE_FILE, "rb") as f:
-            data = f.read()
-    except OSError:
-        return None
-    if (len(data) < 12 or data[:4] != b"MCS1"
-            or int.from_bytes(data[4:8], "little") != (sig & 0xFFFFFFFF)):
-        return None
-    w = int.from_bytes(data[8:10], "little")
-    h = int.from_bytes(data[10:12], "little")
-    if w <= 0 or h <= 0 or len(data) != 12 + w * h:
-        return None
-    return (w, h, data[12:])
-
-
-def save_cover_source(path, sig, w, h, pix):
-    """Persist a decoded cover source. Best-effort and never raises -- like the
-    crop sidecars this is a regenerable cache."""
-    if w <= 0 or h <= 0 or len(pix) != int(w) * int(h):
-        return
-    try:
-        _mkdir(path + "/" + THUMBS_DIR)
-        with open(path + "/" + THUMBS_DIR + "/" + SOURCE_FILE, "wb") as f:
-            f.write(b"MCS1" + (sig & 0xFFFFFFFF).to_bytes(4, "little"))
-            f.write(int(w).to_bytes(2, "little"))
-            f.write(int(h).to_bytes(2, "little"))
-            f.write(pix)
-    except Exception:  # noqa: BLE001 -- regenerable cache
-        pass
-
-
 def load_wallpaper_preview(path, w, h, sig):
     """The Appearance monitor's COMPUTED preview frame for the wallpaper cart
     at `path` (thumbs/wp<w>x<h>.mct) -- raw indexed pix, or None when absent,

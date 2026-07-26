@@ -333,10 +333,14 @@ _ui_is_light = _uimod.is_light
 # the Make window, and selected/unselected card heights at the same time.
 _COVER_CACHE_MAX_ENTRIES = 64
 _COVER_CACHE_MAX_PIXELS = 768 * 1024
-# Decoded cover SOURCES, kept so a relayout re-crops instead of re-decoding.
-# Sources are big (a 320x240 cover is 76.8KB), so this is capped well below the
-# crop cache and evicted LRU; the point is to hold the VISIBLE set (~7 cards).
-_COVER_SRC_MAX_PIXELS = 640 * 1024
+# Parsed cover RUNS, kept so a relayout neither re-reads nor re-parses.
+# Measured per cover on P4 glass: read the blob 46.9ms + parse it 17.1ms, against
+# a native decode 0.89ms + crop 0.76ms. So the expensive half is the I/O and the
+# interpreted base64/RLE parse, and THAT is what must be cached -- not the
+# decoded bitmap (a first attempt cached that instead: 77KB per cover, which at
+# this board's ~470KB/s flash cost 164ms to reload and made things worse).
+# Runs are ~15KB, so this holds far more covers in less RAM.
+_COVER_RUNS_MAX_BYTES = 512 * 1024
 
 
 class _CoverImage:
@@ -368,8 +372,10 @@ _COVER_RUNS = None
 try:
     import moy_gfx as _moy_gfx
     _CROP_INDEX = getattr(_moy_gfx, "crop_index", None)
+    _DECODE_RUNS = getattr(_moy_gfx, "decode_runs", None)
 except ImportError:
     _CROP_INDEX = None
+    _DECODE_RUNS = None
 
 
 class _CoverJob:
@@ -390,14 +396,11 @@ class _CoverJob:
         self.w = int(w)
         self.h = int(h)
         self.sw, self.sh, self.packed = runs
-        # `src` is an ALREADY-DECODED source bitmap for this cover (see
-        # Workstation._cover_src): the RLE decode is the whole 0.5-1.7s, and it
-        # is size-INDEPENDENT, while the crop that follows is cheap. Adopting a
-        # cached source is what makes a relayout free -- both the cover cache and
-        # its thumb sidecar are keyed by (path, w, h), so before this every
-        # window resize, and every hop between the fullscreen Library and the
-        # windowed picker, re-decoded EVERY cover from scratch (owner-reported:
-        # "covers are remade every time you resize the launcher").
+        # `src` is an already-decoded source bitmap, letting a caller skip
+        # straight to the crop. Unused by the console now that the decode itself
+        # is native (~0.9ms) and the expensive part turned out to be reading and
+        # PARSING the blob -- which Workstation caches as runs instead -- but
+        # kept because it is the natural seam and the crop tests drive it.
         if src is not None and len(src) == self.sw * self.sh:
             self.pix = src
             self.pos = self.sw * self.sh        # decode phase already complete
@@ -426,6 +429,18 @@ class _CoverJob:
         n = len(packed)
         pix = self.pix
         total = self.sw * self.sh
+        # NATIVE decode (#155): the entire RLE stream in ONE C call. This is what
+        # the whole time-slicing machinery was for -- interpreted, a 320x240 cover
+        # cost 0.5-1.7s. The slow Python walk below stays as the host path and the
+        # fallback, and produces identical bytes.
+        if self.i < n and _DECODE_RUNS is not None:
+            got = _DECODE_RUNS(pix, total, packed)
+            if got != total:
+                self.img = None
+                self.done = True
+                return
+            self.i = n
+            self.pos = total
         while self.i < n:
             i = self.i
             pos = self.pos
@@ -883,10 +898,11 @@ class Workstation:
                                       # instead of ~40KB of inline b64 per redraw
                                       # (#113: the measured shelf-drag payload eater)
         self._cover_jobs = {}         # (path, w, h) -> in-flight _CoverJob (time-sliced)
-        self._cover_built = False     # per-frame cover-build budget (one; see _cover_for)
-        self._cover_src = {}          # path -> (sig, sw, sh, pix) decoded sources
-        self._cover_src_order = []    # LRU keys (oldest first)
-        self._cover_src_pixels = 0
+        self._cover_built = False     # per-frame cover-build budget (see _cover_for)
+        self._cover_ms = 0            # ms of it spent this frame
+        self._cover_runs = {}         # path -> (sig, runs) parsed RLE, LRU-bounded
+        self._cover_runs_order = []   # LRU keys (oldest first)
+        self._cover_runs_bytes = 0
         self._covers_deferred = False # a build was pushed past the budget -> stay dirty
         # Unified top bar (Stage 1): the editable 16x16 IconSheet the bar draws its
         # chrome icons from. Injected by build_workstation / run_desktop (loaded from
@@ -1756,7 +1772,14 @@ class Workstation:
                 pass
             order.append(key)
             return cache[key]
-        if self._cover_built:              # this frame's slice is already spent
+        # Per-frame build budget. This used to be ONE build per frame, because a
+        # build was a 0.5-1.7s interpreted decode and even one had to be sliced.
+        # With the decode and crop both native, a build off cached runs is ~2ms,
+        # so a count of one just spread N cheap covers over N frames -- which is
+        # exactly the stutter after a resize the owner reported. Spend a TIME
+        # slice instead: cheap builds all land on the same frame, an expensive
+        # one still yields.
+        if self._cover_built and self._cover_ms >= _COVER_SLICE_MS:
             self._covers_deferred = True
             return None
         self._cover_built = True
@@ -1766,41 +1789,44 @@ class Workstation:
         if job is None:
             loader = getattr(self.carts_store, "load_image", None)
             cover_name = getattr(self.carts_store, "COVER_IMAGE", "cover")
-            blob = loader(path, cover_name) if loader is not None else None
+            sig_fn = getattr(self.carts_store, "cover_sig", None)
+            # Parsed runs still in RAM? Then this size costs a native decode +
+            # crop (~1.7ms) and touches no storage at all (#155). That is what
+            # makes a relayout cheap: reading the blob is 46.9ms and parsing it
+            # 17.1ms on P4 glass, against 0.89 + 0.76ms for the two native steps.
             runs = None
-            if blob:
-                parse = getattr(self.carts_store, "moyimg_runs", None)
-                runs = parse(blob) if parse is not None else None
-            if runs is None:                # no cover / not RLE -> cache the miss
-                return self._cover_finish(key, None)
+            sig = cart.get("_cover_sig")
+            if sig is not None:
+                runs = self._cover_runs_get(path, sig)
+            if runs is None:
+                blob = loader(path, cover_name) if loader is not None else None
+                if blob:
+                    parse = getattr(self.carts_store, "moyimg_runs", None)
+                    runs = parse(blob) if parse is not None else None
+                    sig = sig_fn(blob) if sig_fn is not None else None
+                else:
+                    sig = None
+                if runs is None:            # no cover / not RLE -> cache the miss
+                    self._cover_spend(t0)
+                    return self._cover_finish(key, None)
+                if sig is not None:
+                    cart["_cover_sig"] = sig     # skip the re-read next size
+                    self._cover_runs_put(path, sig, runs)
             # Persistent thumb sidecar (#66 "decode covers ONCE"): a crop this
             # size finished in ANY earlier session loads in one small read here
             # instead of re-running the 0.5-1.7s time-sliced decode -- so a
             # boot / re-scan / LRU-evicted shelf refills in a frame per card,
             # not seconds. Stamped against the blob, so an edited cover
             # rebuilds; store fns are optional so a bare store still works.
-            sig_fn = getattr(self.carts_store, "cover_sig", None)
-            sig = sig_fn(blob) if sig_fn is not None else None
             if sig is not None:
                 load_thumb = getattr(self.carts_store, "load_cover_thumb", None)
                 pix = (load_thumb(path, w, h, sig)
                        if load_thumb is not None else None)
                 if pix is not None:
+                    self._cover_spend(t0)
                     return self._cover_finish(key, _CoverImage(w, h, pix))
-            # A decoded source for this cover version -- from RAM, or failing
-            # that from the size-INDEPENDENT sidecar (#155). Either way the job
-            # skips the decode and only crops, so a new size costs one step
-            # instead of hundreds of sliced frames.
-            src = self._cover_src_get(path, sig)
-            if src is None and sig is not None:
-                load_src = getattr(self.carts_store, "load_cover_source", None)
-                got = load_src(path, sig) if load_src is not None else None
-                if got is not None and got[0] == runs[0] and got[1] == runs[1]:
-                    src = bytearray(got[2])
-                    self._cover_src_put(path, sig, got[0], got[1], src)
-            job = _CoverJob(runs, w, h, src=src)
+            job = _CoverJob(runs, w, h)
             job.sig = sig                   # stamps the sidecar when it lands
-            job.src_known = src is not None
             jobs[key] = job
             # Bound the half-built set: a card scrolled out of view stops
             # being stepped -- drop some OTHER job (it just rebuilds if it
@@ -1814,25 +1840,11 @@ class Workstation:
                     break
         if not job.done:
             job.step(t0)
+        self._cover_spend(t0)
         if not job.done:
             self._covers_deferred = True    # keep frames coming until it lands
             return None
         jobs.pop(key, None)
-        # Remember the DECODED SOURCE (not just the crop): the next size asked
-        # for -- a resize, or the hop between the Library and the picker -- then
-        # skips the decode entirely and only re-crops.
-        if job.img is not None and getattr(job, "sig", None) is not None:
-            self._cover_src_put(path, job.sig, job.sw, job.sh, job.pix)
-            # ...and persist it once, so the NEXT size (or the next session)
-            # never decodes either. Only when we actually decoded it.
-            if not getattr(job, "src_known", False) and self.can_manage:
-                save_src = getattr(self.carts_store, "save_cover_source", None)
-                if save_src is not None:
-                    try:
-                        self._with_sd(lambda: save_src(path, job.sig, job.sw,
-                                                       job.sh, job.pix))
-                    except Exception:  # noqa: BLE001 -- regenerable cache
-                        pass
         # Persist the finished crop (#66): the decode this size never runs
         # again for this cover version -- next session's shelf reads the
         # sidecar. Best-effort (save_cover_thumb never raises); _with_sd so
@@ -1848,41 +1860,45 @@ class Workstation:
                     pass
         return self._cover_finish(key, job.img)
 
-    def _cover_src_get(self, path, sig):
-        """The decoded source bitmap for this cover version, or None."""
-        e = self._cover_src.get(path)
+    def _cover_runs_get(self, path, sig):
+        """The parsed (sw, sh, packed) runs for this cover version, or None."""
+        e = self._cover_runs.get(path)
         if e is None or sig is None or e[0] != sig:
             return None
-        order = self._cover_src_order
+        order = self._cover_runs_order
         try:
             order.remove(path)
         except ValueError:
             pass
         order.append(path)
-        return e[3]
+        return e[1]
 
-    def _cover_src_put(self, path, sig, sw, sh, pix):
-        """Cache a decoded source, LRU-bounded by total pixels."""
-        src = self._cover_src
-        order = self._cover_src_order
-        old = src.get(path)
+    def _cover_runs_put(self, path, sig, runs):
+        """Cache parsed runs, LRU-bounded by packed bytes."""
+        cache = self._cover_runs
+        order = self._cover_runs_order
+        old = cache.get(path)
         if old is not None:
-            self._cover_src_pixels -= len(old[3])
+            self._cover_runs_bytes -= len(old[1][2])
             try:
                 order.remove(path)
             except ValueError:
                 pass
-        src[path] = (sig, sw, sh, pix)
+        cache[path] = (sig, runs)
         order.append(path)
-        self._cover_src_pixels += len(pix)
-        while order and self._cover_src_pixels > _COVER_SRC_MAX_PIXELS:
+        self._cover_runs_bytes += len(runs[2])
+        while order and self._cover_runs_bytes > _COVER_RUNS_MAX_BYTES:
             drop = order.pop(0)
             if drop == path:              # never evict the one just stored
                 order.insert(0, drop)
                 break
-            gone = src.pop(drop, None)
+            gone = cache.pop(drop, None)
             if gone is not None:
-                self._cover_src_pixels -= len(gone[3])
+                self._cover_runs_bytes -= len(gone[1][2])
+
+    def _cover_spend(self, t0):
+        """Charge this frame's cover budget (see _cover_for)."""
+        self._cover_ms += _ticks_diff(_ticks_ms(), t0)
 
     def _cover_finish(self, key, img):
         """Insert a finished cover (or a definitive miss) into the bounded
@@ -3607,9 +3623,9 @@ class Workstation:
             # Sources too: they are stamped against the blob, so an edited cover
             # would be caught anyway -- but a rescan is also when a cart goes
             # away, and holding its 77KB source would be a leak.
-            self._cover_src = {}
-            self._cover_src_order = []
-            self._cover_src_pixels = 0
+            self._cover_runs = {}
+            self._cover_runs_order = []
+            self._cover_runs_bytes = 0
             self._cover_gen += 1
             self._cover_jobs = {}          # in-flight builds may read stale blobs
             self.launcher.set_items(self._launcher_view_items())   # #105: keep an active filter
@@ -4001,6 +4017,7 @@ class Workstation:
             # (#113). Clamped so a hitch can't spike the physics.
             self._frame_dt_ms = min(dt * 1000.0, 100.0)
         self._cover_built = False     # reset the per-frame cover-build budget
+        self._cover_ms = 0            # ...which is a TIME slice, not a count
         self._pf_home = None          # home-frame split (launcher_layer, perf_capture)
         # Undo journal (Stage 7): the idle-typing autosave debounce runs BEFORE the
         # redraw gate below, so it fires even on a static (redraw-skipped) editor frame.

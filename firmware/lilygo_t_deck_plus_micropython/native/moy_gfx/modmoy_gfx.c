@@ -1296,6 +1296,43 @@ static mp_obj_t moy_gfx_make_draw_gate(mp_obj_t ctx_in, mp_obj_t kind_in,
 static MP_DEFINE_CONST_FUN_OBJ_3(moy_gfx_make_draw_gate_obj,
                                  moy_gfx_make_draw_gate);
 
+// decode_runs(dst, npix, packed) -> pixels written, or -1 on a corrupt stream.
+// Expands a MOY64 run-length stream -- byte pairs (count, value), count >= 1,
+// value <= 63 -- into an indexed bitmap. The cover-art decode (#155).
+//
+// This is the operation the whole time-sliced _CoverJob machinery existed for:
+// interpreted, one 320x240 cover cost 0.5-1.7s, so it had to be spread over
+// frames and cached to a sidecar. In C it is a memset loop. That also undoes the
+// sidecar trade: the raw source is 77KB and this board reads its internal flash
+// at ~470KB/s (measured: 164ms per source read), while the RLE blob it came from
+// is a fraction of the size -- so reading the small blob and decoding natively
+// beats reading a big pre-decoded one.
+static mp_obj_t moy_gfx_decode_runs(mp_obj_t dst_obj, mp_obj_t npix_obj,
+                                    mp_obj_t packed_obj) {
+    mp_buffer_info_t dbi, pbi;
+    mp_get_buffer_raise(dst_obj, &dbi, MP_BUFFER_WRITE);
+    mp_get_buffer_raise(packed_obj, &pbi, MP_BUFFER_READ);
+    mp_int_t total = mp_obj_get_int(npix_obj);
+    if (total < 0 || (size_t)total > dbi.len) {
+        return MP_OBJ_NEW_SMALL_INT(-1);
+    }
+    uint8_t *dst = (uint8_t *)dbi.buf;
+    const uint8_t *p = (const uint8_t *)pbi.buf;
+    size_t n = pbi.len & ~(size_t)1;          // whole (count, value) pairs only
+    mp_int_t pos = 0;
+    for (size_t i = 0; i < n; i += 2) {
+        mp_int_t count = p[i];
+        uint8_t value = p[i + 1];
+        if (count < 1 || value > 63 || pos + count > total) {
+            return MP_OBJ_NEW_SMALL_INT(-1);
+        }
+        memset(dst + pos, value, (size_t)count);
+        pos += count;
+    }
+    return MP_OBJ_NEW_SMALL_INT(pos);
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(moy_gfx_decode_runs_obj, moy_gfx_decode_runs);
+
 // crop_index(dst, dw, dh, src, sw, sh, ox, oy, cw, ch) -- nearest-sample the
 // (ox, oy, cw, ch) window of an INDEXED source (1 byte/pixel) into a dw x dh
 // indexed destination. The cover-art crop (#155).
@@ -1415,6 +1452,7 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_scroll_rect), MP_ROM_PTR(&moy_gfx_scroll_rect_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_indices), MP_ROM_PTR(&moy_gfx_blit_indices_obj) },
     { MP_ROM_QSTR(MP_QSTR_text),       MP_ROM_PTR(&moy_gfx_text_obj) },
+    { MP_ROM_QSTR(MP_QSTR_decode_runs), MP_ROM_PTR(&moy_gfx_decode_runs_obj) },
     { MP_ROM_QSTR(MP_QSTR_crop_index), MP_ROM_PTR(&moy_gfx_crop_index_obj) },
     { MP_ROM_QSTR(MP_QSTR_pack_strip), MP_ROM_PTR(&moy_gfx_pack_strip_obj) },
 };

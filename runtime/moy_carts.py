@@ -88,15 +88,13 @@ SHARED_SHEET_NAME = "shared.moygfx"
 try:
     from moy_image import (THUMBS_DIR, _b64_encode, _b64_decode, encode_moyimg,
                            moyimg_runs, decode_moyimg, cover_sig, _thumb_file,
-                           load_cover_thumb, save_cover_thumb,
-                           load_cover_source, save_cover_source)
+                           load_cover_thumb, save_cover_thumb)
     from moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
                         _write_atomic, _read_recover)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_image import (THUMBS_DIR, _b64_encode, _b64_decode,
                                    encode_moyimg, moyimg_runs, decode_moyimg,
                                    cover_sig, _thumb_file, load_cover_thumb,
-                                   load_cover_source, save_cover_source,
                                    save_cover_thumb)
     from runtime.moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
                                 _write_atomic, _read_recover)
