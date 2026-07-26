@@ -207,12 +207,16 @@ to whoever called it.
   tab's file(s)** — never another tab's) and **blocks↔code graduation** (MakeCode model: a diverging code commit —
   conservative recompile-and-normalize compare — stores `"graduated": true` in the
   manifest with a journal rider; the Blocks tab goes read-only + celebrates; undoing
-  past the graduating commit un-graduates). Also owns **cover thumb sidecars**
-  (#66/#86: a finished shelf-card cover crop persists as
-  `<cart>/thumbs/<w>x<h>.mct`, stamped against the cover blob via `cover_sig` —
-  boots/re-scans/LRU refills read a few KB instead of re-running the 0.5–1.7s
-  RLE decode; regenerable cache, plain writes, readers validate magic+size+stamp)
-  and passes the **#67 dual-runtime fields** (`runtime`/`main`) through
+  past the graduating commit un-graduates). Also owns the **wallpaper-preview sidecars**
+  (`<cart>/thumbs/wp<w>x<h>.mct`, stamped via `cover_sig`; a regenerable cache
+  whose readers validate magic+size+stamp — a computed preview FRAME is far
+  dearer to rebuild than to read). Cover thumbs used the same machinery (#66/#86)
+  and were **removed** in #155: with `moy_gfx.decode_runs` + `crop_index` the
+  RLE decode fell from 0.5–1.7s to ~1.7ms, so reading a per-size crop sidecar
+  (~66ms on the P4's ~470KB/s flash) cost the same as rebuilding from the blob
+  while charging a ~30ms write per cover per size. Covers now cache their PARSED
+  RUNS in RAM instead (`Workstation._cover_runs`, ~15KB each), which is what
+  makes a window resize cheap. Also passes the **#67 dual-runtime fields** (`runtime`/`main`) through
   load/save_code/create/duplicate/seed_builtins, so a lua cart's source stays in
   `main.lua` end-to-end (save_code only Python-syntax-gates python carts). Newer
   asset kinds ride the same load/save/create/duplicate/seed flow: **scenes**

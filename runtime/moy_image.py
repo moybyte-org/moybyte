@@ -4,7 +4,7 @@
 # encode/decode_moyimg: the ``moyimg-v1`` indexed-bitmap blob (Paint's MicroPython-
 # safe RLE codec; legacy zlib assets stay valid -- decoders dispatch on ``codec``).
 # moyimg_runs: the header+runs parse for the time-sliced cover builder.
-# cover_thumb load/save (#66/#86): the decoded-crop sidecar cache the Library shelf
+# The wallpaper-preview sidecar cache (the Appearance monitor's computed frame)
 # reads instead of re-running the 0.5-1.7s RLE decode -- regenerable, plain writes,
 # readers validate magic + size + stamp.
 #
@@ -122,7 +122,7 @@ def decode_moyimg(text):
 #
 # Decoding a 320x240 RLE cover costs 0.5-1.7s interpreted on the T-Deck, so the
 # console (console._cover_for) builds each card-sized crop ONCE and persists it
-# here as raw indexed pixels: <cart>/thumbs/<w>x<h>.mct = b"MCT1" + a 4-byte LE
+# Sidecars hold raw indexed pixels: <cart>/thumbs/<prefix><w>x<h>.mct = b"MCT1" + a 4-byte LE
 # stamp of the cover blob it was built from (cover_sig) + the w*h pix bytes.
 # An edited cover changes the stamp -> the stale thumb is ignored and rebuilt;
 # a deleted cart takes its thumbs with it; a re-seed wipe just regenerates.
@@ -169,18 +169,6 @@ def _save_thumb(path, w, h, sig, pix, prefix=""):
             f.write(pix)
     except Exception:  # noqa: BLE001 -- regenerable cache
         pass
-
-
-def load_cover_thumb(path, w, h, sig):
-    """The pre-decoded (w, h) cover crop for the cart at `path` -- the raw
-    indexed pix bytes (len == w*h) -- or None when absent, stale or corrupt."""
-    return _load_thumb(path, w, h, sig)
-
-
-def save_cover_thumb(path, w, h, sig, pix):
-    """Persist a finished cover crop. Best-effort and never raises: a full SD
-    just means that crop decodes again next session."""
-    _save_thumb(path, w, h, sig, pix)
 
 
 def load_wallpaper_preview(path, w, h, sig):

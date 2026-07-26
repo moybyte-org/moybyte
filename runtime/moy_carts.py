@@ -87,15 +87,13 @@ SHARED_SHEET_NAME = "shared.moygfx"
 # unchanged. Same bare-or-package fallback as every shared module.
 try:
     from moy_image import (THUMBS_DIR, _b64_encode, _b64_decode, encode_moyimg,
-                           moyimg_runs, decode_moyimg, cover_sig, _thumb_file,
-                           load_cover_thumb, save_cover_thumb)
+                           moyimg_runs, decode_moyimg, cover_sig, _thumb_file)
     from moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
                         _write_atomic, _read_recover)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_image import (THUMBS_DIR, _b64_encode, _b64_decode,
                                    encode_moyimg, moyimg_runs, decode_moyimg,
-                                   cover_sig, _thumb_file, load_cover_thumb,
-                                   save_cover_thumb)
+                                   cover_sig, _thumb_file)
     from runtime.moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
                                 _write_atomic, _read_recover)
 

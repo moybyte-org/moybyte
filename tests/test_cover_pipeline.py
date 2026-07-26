@@ -1,8 +1,15 @@
-"""Persistent cover thumbnails (#66 "decode covers once"): a finished shelf-card
-crop is saved as a sidecar (<cart>/thumbs/<w>x<h>.mct) and every later session
-(or re-scan / LRU refill) loads it in one small read instead of re-running the
-0.5-1.7s time-sliced RLE decode. Stale (edited-cover) and corrupt sidecars are
-ignored and rebuilt."""
+"""The cover-art pipeline (#155): read the RLE blob, decode it, crop it to the
+card, cache what is expensive.
+
+What is expensive was measured on P4 glass: reading the blob 46.9ms and PARSING
+it (base64 + RLE) 17.1ms, against a native decode 0.89ms and a native crop
+0.76ms. So the parsed RUNS are what get cached in RAM; the decode and crop are
+cheap enough to redo per size, which is what makes a window resize cheap.
+
+Two caches were tried and removed, both because a sidecar read cost more than
+the work it saved on a board whose flash reads at ~470KB/s: a 77KB decoded
+SOURCE (164ms per read), and #86's per-size crop sidecars (~66ms to read, the
+same as rebuilding from the blob, plus a ~30ms write per cover per size)."""
 
 import sys
 from pathlib import Path
@@ -27,23 +34,6 @@ def _mk_cart_with_cover(tmp_path, value=5):
 
 # -- store level ----------------------------------------------------------------
 
-def test_thumb_roundtrip_and_validation(tmp_path):
-    cart = _mk_cart_with_cover(tmp_path)
-    path = cart["path"]
-    pix = bytes(range(40)) * 30          # 40x30 crop payload
-    sig = moy_carts.cover_sig("some cover blob")
-    moy_carts.save_cover_thumb(path, 40, 30, sig, pix)
-    assert moy_carts.load_cover_thumb(path, 40, 30, sig) == pix
-    # wrong stamp (edited cover) / wrong size / absent -> None, never garbage
-    assert moy_carts.load_cover_thumb(path, 40, 30, sig ^ 1) is None
-    assert moy_carts.load_cover_thumb(path, 30, 40, sig) is None
-    assert moy_carts.load_cover_thumb(path, 41, 30, sig) is None
-    # corrupt file -> None
-    with open(path + "/thumbs/40x30.mct", "wb") as f:
-        f.write(b"JUNKJUNK" + pix)
-    assert moy_carts.load_cover_thumb(path, 40, 30, sig) is None
-
-
 def test_cover_sig_moves_with_content():
     a = _cover_text(64, 48, 5)
     b = _cover_text(64, 48, 9)
@@ -64,7 +54,7 @@ def _land_cover(ws, cart, w, h, frames=300):
 
 
 def _clear_ram_caches(ws):
-    # mirror the store re-scan clear: RAM caches gone, sidecars remain
+    # mirror the store re-scan clear
     ws._cover_cache = {}
     ws._cover_cache_order = []
     ws._cover_cache_pixels = 0
@@ -72,23 +62,6 @@ def _clear_ram_caches(ws):
     ws._cover_runs = {}
     ws._cover_runs_order = []
     ws._cover_runs_bytes = 0
-
-
-def test_cover_persists_and_reloads_without_a_decode(tmp_path):
-    from runtime import host_app
-    cart = _mk_cart_with_cover(tmp_path, value=5)
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    img = _land_cover(ws, cart, 40, 30)
-    assert len(img.pix) == 40 * 30 and img.pix[0] == 5
-    assert (Path(cart["path"]) / "thumbs" / "40x30.mct").exists()
-
-    # "next session": RAM caches cleared -> ONE call returns the image from the
-    # sidecar, with no decode job ever created.
-    _clear_ram_caches(ws)
-    ws._cover_built = False
-    img2 = ws._cover_for(cart, 40, 30)
-    assert img2 is not None and img2.pix == img.pix
-    assert ws._cover_jobs == {}
 
 
 def test_edited_cover_invalidates_the_thumb(tmp_path):
@@ -125,9 +98,7 @@ def test_a_new_size_re_crops_instead_of_re_decoding(tmp_path):
     cart = _mk_cart_with_cover(tmp_path, value=5)
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _land_cover(ws, cart, 40, 30)
-    assert ws._cover_runs_get(cart["path"], None) is None     # sig must match
-    sig = moy_carts.cover_sig(moy_carts.load_image(cart["path"], "cover"))
-    runs = ws._cover_runs_get(cart["path"], sig)
+    runs = ws._cover_runs_get(cart["path"])
     assert runs is not None and runs[0] == 64 and runs[1] == 48, \
         "the parsed runs were not cached"
 
@@ -139,21 +110,23 @@ def test_a_new_size_re_crops_instead_of_re_decoding(tmp_path):
     assert len(img.pix) == 24 * 18 and img.pix[0] == 5
 
 
-def test_the_source_cache_is_stamped_against_the_cover(tmp_path):
-    """An edited cover must not be re-cropped from the old source."""
+def test_an_edited_cover_is_picked_up_after_a_rescan(tmp_path):
+    """The runs cache is keyed by path and trusted for the session -- computing a
+    content stamp would mean reading the blob, which is the cost it exists to
+    avoid. A re-scan is what drops it, and that is the path a cover edit takes."""
     from runtime import host_app
     cart = _mk_cart_with_cover(tmp_path, value=5)
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    _land_cover(ws, cart, 40, 30)
+    img = _land_cover(ws, cart, 40, 30)
+    assert img.pix[0] == 5
     moy_carts.save_image(cart, "cover", _cover_text(64, 48, 9))
-    new_sig = moy_carts.cover_sig(moy_carts.load_image(cart["path"], "cover"))
-    assert ws._cover_runs_get(cart["path"], new_sig) is None
-    _clear_ram_caches(ws)
+    ws._apply_items(moy_carts.scan(str(tmp_path / "carts")))
+    cart = next(c for c in ws._all_carts if c.get("path") == cart["path"])
     img = _land_cover(ws, cart, 24, 18)
-    assert img.pix[0] == 9, "re-cropped from the stale source"
+    assert img.pix[0] == 9, "a re-scan did not drop the cached runs"
 
 
-def test_the_source_cache_is_bounded(tmp_path):
+def test_the_runs_cache_is_bounded(tmp_path):
     """Runs are ~15KB each, so the cache must stay bounded."""
     from runtime import console, host_app
     root = str(tmp_path / "carts")

@@ -389,7 +389,7 @@ class _CoverJob:
     following frames until `done`. Any malformed input just finishes with
     img=None -- a corrupt cover means no cover, never a crash."""
 
-    def __init__(self, runs, w, h, src=None):
+    def __init__(self, runs, w, h, src=None, buf=None):
         global _COVER_RUNS
         self.done = False
         self.img = None
@@ -401,12 +401,22 @@ class _CoverJob:
         # is native (~0.9ms) and the expensive part turned out to be reading and
         # PARSING the blob -- which Workstation caches as runs instead -- but
         # kept because it is the natural seam and the crop tests drive it.
-        if src is not None and len(src) == self.sw * self.sh:
+        total = self.sw * self.sh
+        if src is not None and len(src) == total:
             self.pix = src
-            self.pos = self.sw * self.sh        # decode phase already complete
+            self.pos = total                    # decode phase already complete
             self.i = len(self.packed)
         else:
-            self.pix = bytearray(self.sw * self.sh)
+            # `buf` is a REUSED scratch buffer. A source bitmap is ~77KB, and
+            # allocating one per build cost 116ms on P4 glass -- a big
+            # MicroPython allocation whose gc collect dwarfed the 0.9ms decode it
+            # was for. Only safe with the native decode, which finishes in a
+            # single step: the interpreted fallback keeps partial state in `pix`
+            # across frames, so it must own its buffer.
+            if buf is not None and len(buf) >= total:
+                self.pix = buf
+            else:
+                self.pix = bytearray(total)
             self.pos = 0              # decode write cursor (pixels)
             self.i = 0                # decode read cursor (packed bytes)
         self.out = None               # crop dest (created when decode ends)
@@ -484,7 +494,7 @@ class _CoverJob:
             # now cached, the crop is what a relayout pays -- ~20k nearest
             # samples per card, which is 20-40ms of interpreted loop but well
             # under a millisecond in C. Byte-identical by construction (same
-            # integer floors, same source window); pinned by test_cover_thumbs.
+            # integer floors, same source window); pinned by test_cover_pipeline.
             if _CROP_INDEX is not None:
                 try:
                     if _CROP_INDEX(self.out, w, h, pix, sw, sh,
@@ -900,6 +910,8 @@ class Workstation:
         self._cover_jobs = {}         # (path, w, h) -> in-flight _CoverJob (time-sliced)
         self._cover_built = False     # per-frame cover-build budget (see _cover_for)
         self._cover_ms = 0            # ms of it spent this frame
+        self._cover_none = {}         # paths known to carry no cover art
+        self._cover_buf = None        # reused decode scratch (see _CoverJob)
         self._cover_runs = {}         # path -> (sig, runs) parsed RLE, LRU-bounded
         self._cover_runs_order = []   # LRU keys (oldest first)
         self._cover_runs_bytes = 0
@@ -1762,6 +1774,8 @@ class Workstation:
         path = cart.get("path")
         if path is None or self.carts_store is None or w <= 0 or h <= 0:
             return None
+        if path in self._cover_none:       # known cover-less: never re-probe
+            return None
         key = (path, w, h)
         cache = self._cover_cache
         if key in cache:
@@ -1794,38 +1808,43 @@ class Workstation:
             # crop (~1.7ms) and touches no storage at all (#155). That is what
             # makes a relayout cheap: reading the blob is 46.9ms and parsing it
             # 17.1ms on P4 glass, against 0.89 + 0.76ms for the two native steps.
-            runs = None
-            sig = cart.get("_cover_sig")
-            if sig is not None:
-                runs = self._cover_runs_get(path, sig)
+            # Keyed by PATH alone, deliberately. Validating against the cover's
+            # content stamp would mean READING the blob to compute it, which is
+            # the 46.9ms this cache exists to avoid -- so it uses the same trust
+            # model as the crop cache beside it: good for the session, dropped
+            # wholesale on a store re-scan (which is what a create/edit/delete
+            # goes through). Keying it on a stamp stashed on the cart dict was
+            # measured to never hit at all: the picker's dicts do not survive a
+            # relayout, so every build re-read and re-parsed the blob (53ms) and
+            # the cache was dead code.
+            runs = self._cover_runs_get(path)
+            sig = None
             if runs is None:
                 blob = loader(path, cover_name) if loader is not None else None
                 if blob:
                     parse = getattr(self.carts_store, "moyimg_runs", None)
                     runs = parse(blob) if parse is not None else None
                     sig = sig_fn(blob) if sig_fn is not None else None
-                else:
-                    sig = None
-                if runs is None:            # no cover / not RLE -> cache the miss
+                if runs is None:
+                    # No cover art. Remember it per PATH, not just per (path, w,
+                    # h): probing for a file that is not there costs 20-28ms on
+                    # this board's flash, and most carts have no cover, so a
+                    # relayout was re-probing all of them.
+                    self._cover_none[path] = True
                     self._cover_spend(t0)
                     return self._cover_finish(key, None)
-                if sig is not None:
-                    cart["_cover_sig"] = sig     # skip the re-read next size
-                    self._cover_runs_put(path, sig, runs)
-            # Persistent thumb sidecar (#66 "decode covers ONCE"): a crop this
-            # size finished in ANY earlier session loads in one small read here
-            # instead of re-running the 0.5-1.7s time-sliced decode -- so a
-            # boot / re-scan / LRU-evicted shelf refills in a frame per card,
-            # not seconds. Stamped against the blob, so an edited cover
-            # rebuilds; store fns are optional so a bare store still works.
-            if sig is not None:
-                load_thumb = getattr(self.carts_store, "load_cover_thumb", None)
-                pix = (load_thumb(path, w, h, sig)
-                       if load_thumb is not None else None)
-                if pix is not None:
-                    self._cover_spend(t0)
-                    return self._cover_finish(key, _CoverImage(w, h, pix))
-            job = _CoverJob(runs, w, h)
+                self._cover_runs_put(path, sig, runs)
+            need = runs[0] * runs[1]
+            # The shared scratch is only safe when the build cannot span frames,
+            # i.e. BOTH steps are native. With a Python crop the job keeps
+            # partial state in pix across frames and another cart's decode would
+            # overwrite it.
+            if _DECODE_RUNS is not None and _CROP_INDEX is not None:
+                if self._cover_buf is None or len(self._cover_buf) < need:
+                    self._cover_buf = bytearray(need)
+                job = _CoverJob(runs, w, h, buf=self._cover_buf)
+            else:
+                job = _CoverJob(runs, w, h)
             job.sig = sig                   # stamps the sidecar when it lands
             jobs[key] = job
             # Bound the half-built set: a card scrolled out of view stops
@@ -1845,25 +1864,12 @@ class Workstation:
             self._covers_deferred = True    # keep frames coming until it lands
             return None
         jobs.pop(key, None)
-        # Persist the finished crop (#66): the decode this size never runs
-        # again for this cover version -- next session's shelf reads the
-        # sidecar. Best-effort (save_cover_thumb never raises); _with_sd so
-        # the device write rides the resident SD session like every store write.
-        if (job.img is not None and getattr(job, "sig", None) is not None
-                and self.can_manage):
-            save_thumb = getattr(self.carts_store, "save_cover_thumb", None)
-            if save_thumb is not None:
-                try:
-                    self._with_sd(lambda: save_thumb(path, w, h,
-                                                     job.sig, job.img.pix))
-                except Exception:  # noqa: BLE001 -- regenerable cache
-                    pass
         return self._cover_finish(key, job.img)
 
-    def _cover_runs_get(self, path, sig):
-        """The parsed (sw, sh, packed) runs for this cover version, or None."""
+    def _cover_runs_get(self, path):
+        """The parsed (sw, sh, packed) runs for this cart's cover, or None."""
         e = self._cover_runs.get(path)
-        if e is None or sig is None or e[0] != sig:
+        if e is None:
             return None
         order = self._cover_runs_order
         try:
@@ -3626,6 +3632,7 @@ class Workstation:
             self._cover_runs = {}
             self._cover_runs_order = []
             self._cover_runs_bytes = 0
+            self._cover_none = {}
             self._cover_gen += 1
             self._cover_jobs = {}          # in-flight builds may read stale blobs
             self.launcher.set_items(self._launcher_view_items())   # #105: keep an active filter
