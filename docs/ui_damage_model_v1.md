@@ -83,6 +83,66 @@ That is the next thing to build. It is a kernel, not an architecture, and it is
 testable the same way everything else here was: `p4_surface_sweep --only map`
 before and after.
 
+### 0.06 The rest of the attribution: paint and blocks (2026-07-27)
+
+Paint and blocks were then attributed the same way, with **real content** —
+Coin Quest (16 block rows, 23 scene actors) and Battle City (a full 15×15
+tilemap) rather than the first cart on the shelf, whose outline and map are
+empty. That is not a detail: the map tab costs **74.4ms on a populated map vs
+65.0ms on an empty one**, because the 960 grid fills are a floor that the
+per-tile `spr` calls are then added to. Every number below is per painted frame
+during a drag, from `tools/p4_attrib.py`.
+
+| phase | wall | native fills | in kernel | dispatch |
+|---|---|---|---|---|
+| `map._draw_map` (Battle City) | 74.4 | 960 | 31.7 (43%) | 42.4 (57%) |
+| `map._draw_map` (empty map) | 65.0 | 960 | 32.4 (50%) | 32.2 (50%) |
+| `block_ui._draw_blocks` | 86.9 | 409 | 20.7 (24%) | 65.2 (**75%**) |
+| `paint_layer.draw` | 51.8 | 543 | 24.1 (46%) | 27.4 (53%) |
+
+Three things fell out that the §1 table could not have shown:
+
+- **The blocks tab is not a blocks tab.** Its dominant phase is
+  `scene_ui._draw_scene` at 47.9ms — the interactive scene pane it hosts on a
+  wide canvas (#93/#85). The outline itself is 13.3ms over 16 rows and the tab's
+  own chrome 10.6ms. So "blocks is slow" is really "the scene renderer is slow,
+  and two tabs pay for it".
+- **Two of the biggest phases belonged to neither surface.** `chrome._blit_glyph`
+  cost 48µs a call — ~35µs of Python walking a 12×12 mask bit by bit behind
+  ~1.5µs of pixels — and Paint draws 19 glyphs a frame: 13.1ms of a 51.8ms tab.
+  `block_ui._layout_workspace` ran **4.3 times per painted frame** (the draw plus
+  every pointer event in the gesture), rebuilding both pane layouts each time:
+  5.5ms. Both are now memoised (`c422a12`), which is what took sprites 64→52ms
+  and blocks/map 80→76ms whole-frame. Neither needed damage tracking, a new
+  primitive, or C.
+- **The dispatch share is the whole story, and it rises as the fills shrink.**
+  Blocks issues 409 native fills to map's 960 yet spends *more* absolute time in
+  Python (65ms vs 42ms), because `spr` is not gate-counted and the per-call
+  overhead does not care how few pixels a call moves. Across all three surfaces
+  the kernel never exceeds half the wall.
+
+That last point generalises §0.05's conclusion beyond the map tab: **every
+measured editor surface is dispatch-bound, not fill-bound.** A damage model
+removes *regions*; these surfaces need to remove *calls*. The two levers that
+follow from the numbers, in order:
+
+1. A **native span-batch verb** (`fill_rects` over a packed array), which is the
+   generalisation of the map grid kernel — it also serves the glyph spans, the
+   Paint palette/tool row and the scene tile palette.
+2. The **scene renderer**, which is now the single most expensive phase on the
+   device and is paid twice (Scene tab and Blocks tab).
+
+### 0.07 Method note: measure content, not the first cart on the shelf
+
+Three separate runs in this campaign measured an empty screen and drew a
+conclusion from it — the Writer/Sheets file-grid rows in `p4_surface_sweep`, the
+blocks outline, and the Paint tab's sprite 0 (blank on most carts; Coin Quest's
+art starts at index 1). `p4_attrib` now prints what is actually on the surface
+(block rows / scene actors / map dims / lit pixels in the open sprite) above
+every table, and picks a non-blank sprite, because a number whose content is not
+stated is not reproducible. An empty editor is not a cheap editor — it is a
+different screen.
+
 ### 0.1 Corrections to specific claims below
 
 Left in place so the errors are visible rather than quietly deleted:
@@ -187,9 +247,9 @@ Every interactive surface, measured with real content seeded on the device
 
 | surface | content | median | p90 | worst |
 |---|---|---|---|---|
-| editor:map | ~960 fills/frame | **80** (was 92) | 84 | 139 |
-| editor:blocks | via the scene pane | **80** (was 88) | 92 | 158 |
-| editor:paint | — | **64** (was 76) | 64 | 125 |
+| editor:map | ~960 fills/frame | **76** (was 92) | 80 | 138 |
+| editor:blocks | via the scene pane | **76** (was 88) | 76 | 151 |
+| editor:paint | 19 glyphs/frame | **52** (was 76) | 56 | 116 |
 | writer | 200-line doc | 52 | 52 | 128 |
 | editor:code | 302-line cart | 52 | 60 | 130 |
 | sheets | 360-cell table | 48 | 52 | 99 |
@@ -199,16 +259,26 @@ Every interactive surface, measured with real content seeded on the device
 Only Settings is close to budget, and only because it received this session's
 fixes (its worst frame was 117ms before them).
 
-### 1.1 The finding that motivates this doc
+### 1.1 The finding that motivated this doc — and what it turned out to be
 
-**The Editor tabs' cost is chrome, not content.** map 92 / blocks 88 / paint 76
-came out *identical* on a freshly created cart with no map, no sprites and no
-blocks, and on the richest cart on the device. Code is only weakly
-content-sensitive (48ms on a system-app cart, 52ms on a 302-line one).
+> **Superseded by §0.05–§0.06.** Kept because the reasoning below is what the
+> whole proposal was built on, and it was wrong in an instructive way.
 
-So the slowest surfaces on the device spend ~90ms per frame redrawing a palette,
-a toolbar and a grid **that did not change**. That is, by definition, what
-invalidation removes.
+The original claim: *the Editor tabs' cost is chrome, not content* — map 92 /
+blocks 88 / paint 76 came out identical on a freshly created cart and on the
+richest cart on the device, so the slowest surfaces spend ~90ms redrawing a
+palette, a toolbar and a grid **that did not change**, which is by definition
+what invalidation removes.
+
+Two things are wrong with that. The experiment had **no power**: these draw loops
+iterate the *viewport*, not the content, so an empty map still issues its 960 cell
+fills and the comparison could not have come out any other way. And the
+invariance is not even exact — a populated map costs 74.4ms against an empty
+map's 65.0ms (§0.06), because the tiles are drawn *on top of* the grid.
+
+What replaced it, from direct attribution rather than an A/B: the cost is
+**per-call dispatch**, 50–75% of the wall on every editor surface. Unchanged
+regions are not the dominant waste; the number of MicroPython→C calls is.
 
 It is also why the T-Deck feels fine on the same code: at 320×240 a full redraw
 moves 25× fewer pixels. The console inherited immediate-mode rendering from the

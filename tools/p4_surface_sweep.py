@@ -17,13 +17,14 @@ gesture. That is still the number that matters for feel, but it is not the same
 mechanism as a scrolled list.
 
 MEASURED 2026-07-26 on glass, P4 @ 1024x600, WITH REAL CONTENT SEEDED (60fps =
-16.7ms). Painted-frame distribution over three drag gestures:
+16.7ms); the three editor rows re-measured 2026-07-27 after the glyph/layout
+memos (c422a12). Painted-frame distribution over three drag gestures:
 
   | surface       | content seeded        | median | p90 | worst | gc |
   |---------------|-----------------------|--------|-----|-------|----|
-  | editor:map    | (content-independent) |   92   |  96 |  220  |  0 |
-  | editor:blocks | (content-independent) |   88   |  92 |  167  |  1 |
-  | editor:paint  | (content-independent) |   76   |  76 |  138  |  0 |
+  | editor:map    | empty map, 960 fills  |   76   |  80 |  138  |  0 |
+  | editor:blocks | empty outline + scene |   76   |  76 |  151  |  0 |
+  | editor:paint  | 19 chrome glyphs      |   52   |  56 |  116  |  0 |
   | writer        | 200-line doc          |   52   |  52 |  128  |  0 |
   | editor:code   | 302-line cart         |   52   |  60 |  130  |  2 |
   | sheets        | 360-cell table        |   48   |  52 |   99  |  1 |
@@ -42,18 +43,25 @@ different screen.
 
 What the seeding then established, and it is the useful part:
 
-  * The EDITOR TABS are the slow family and their cost is CHROME, NOT CONTENT.
-    map 92 / blocks 88 / paint 76 came out identical on a freshly created cart with
-    no map, no sprites and no blocks AND on the richest cart on the device. Whatever
-    they spend 90ms on, it is the grid/palette/toolbar they draw around the content,
-    not the content. That makes them the most promising target on the device: the
-    cost does not depend on what the kid made.
+  * The EDITOR TABS are the slow family. (An earlier version of this header added
+    "and their cost is CHROME, NOT CONTENT", because map/blocks/paint measured the
+    same on an empty cart and on the richest one. That inference is WITHDRAWN:
+    these draw loops iterate the VIEWPORT, so an empty map still issues its 960
+    cell fills and the comparison had no power. Attributed directly with
+    tools/p4_attrib.py, a populated map costs 74.4ms against an empty map's 65.0
+    -- and the real finding is that 50-75% of every editor frame is per-call
+    DISPATCH, not pixels. See docs/ui_damage_model_v1.md Section 0.06.)
   * CODE is only weakly content-sensitive (48ms on a system-app cart, 52ms on a
-    302-line one), so the code editor is also drawing chrome, not text.
+    302-line one).
   * SETTINGS at 24ms is the only surface close to budget, and it is the one that
     got this session's fixes.
   * Every surface still shows a 99-220ms WORST frame -- the open/first-paint
     transition. That class was removed from Settings (worst 42ms) and nowhere else.
+
+  This sweep opens the FIRST cart on the shelf, whose block outline and map are
+  empty. That is fine for tracking a surface against itself over time -- every row
+  here was measured that way -- but it is not the cost a kid with a real project
+  sees. Use tools/p4_attrib.py --cart for that.
 
 SEEDING RECIPE (the formats are not guessable -- three wrong guesses cost a run
 each):
