@@ -331,9 +331,12 @@ class BarLayer:
             # to drawing straight onto cv. Reuse the buffer across re-renders when the size
             # is unchanged; allocate a fresh layer on first build / a resize / a canvas swap.
             if size_changed or canvas_changed:
+                # The expensive one: new_layer pre-collects on the device.
+                self.ws.note_cost("bar.strip.alloc")
                 strip = cv.new_layer(cv.w, bar_h)
                 slot[0] = strip
                 slot[2] = cv
+            self.ws.note_cost("bar.strip.render")
             self._render_cart_bar(strip, key)
             slot[1] = key
         cv.blit_strip(strip, 0, 0)

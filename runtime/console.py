@@ -907,6 +907,8 @@ class Workstation:
                                       # web recorder ships it ONCE via /assets imgref
                                       # instead of ~40KB of inline b64 per redraw
                                       # (#113: the measured shelf-drag payload eater)
+        # Expensive-event counters (2026-07-26). See note_cost.
+        self.costs = {}
         self._cover_jobs = {}         # (path, w, h) -> in-flight _CoverJob (time-sliced)
         self._cover_built = False     # per-frame cover-build budget (see _cover_for)
         self._cover_ms = 0            # ms of it spent this frame
@@ -1841,6 +1843,7 @@ class Workstation:
                 job = _CoverJob(runs, w, h, buf=self._cover_buf)
             else:
                 job = _CoverJob(runs, w, h)
+            self.note_cost("cover.build")   # decode + crop for one (path, w, h)
             job.sig = sig                   # stamps the sidecar when it lands
             jobs[key] = job
             # Bound the half-built set: a card scrolled out of view stops
@@ -1862,6 +1865,33 @@ class Workstation:
         jobs.pop(key, None)
         return self._cover_finish(key, job.img)
 
+    def note_cost(self, what):
+        """Count one EXPENSIVE event: a cache build, or a call into storage.
+
+        Every performance bug found in the 2026-07-26 session was a violated
+        assumption that produced NO SIGNAL -- a cache silently missing 100% of the
+        time (the bar strip keyed on canvas identity while the WM alternated
+        destinations: 72ms of an 86ms frame, twice per gesture), an accessor
+        silently rebuilding per row, storage reads silently landing on drag
+        frames. None of them broke anything; they just made two frames in
+        thirty-one five times slower, which only shows up if you happen to measure
+        the exact frame. Each took hours to find, and three wrong models died on
+        the way.
+
+        So the expensive paths say so. Deliberately counted on the BUILD side
+        only, never on the hit side: a cache hit is the hot path and stays
+        untouched, while a build already costs 15-100ms, so one dict increment
+        there is free. Hit RATE is not the interesting number anyway -- "rebuilt
+        44 times in 44 frames" is the thing that screams, and a bare build count
+        says it.
+
+        Read it two ways: the P4's `state` serial command reports it, so a glass
+        session sees a thrashing cache immediately; and tests assert BUDGETS over a
+        run of frames (tests/test_top_bar.py, tests/test_cover_pipeline.py), which
+        turns this whole bug class from a perf mystery into a test failure."""
+        d = self.costs
+        d[what] = d.get(what, 0) + 1
+
     def _cover_runs_load(self, path):
         """Read + parse this cart's cover blob into the runs cache; returns
         (runs, sig), or (None, None) for a cart with no cover art.
@@ -1880,6 +1910,7 @@ class Workstation:
         loader = getattr(store, "load_image", None)
         cover_name = getattr(store, "COVER_IMAGE", "cover")
         sig_fn = getattr(store, "cover_sig", None)
+        self.note_cost("cover.blob.read")      # 58ms hit / 22ms miss on P4 flash
         blob = loader(path, cover_name) if loader is not None else None
         runs = None
         sig = None

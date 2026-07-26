@@ -917,6 +917,7 @@ class WindowedWM(FullscreenStackWM):
         host index slice otherwise -- the same kernel both directions)."""
         try:
             cache = self._ensure_backdrop()
+            self.ws.note_cost("desk.backdrop")
             cache.blit_strip(self._root_canvas, 0, 0)
             self._backdrop_valid = True
         except Exception:  # noqa: BLE001 -- a failed capture (OOM, or a

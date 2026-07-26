@@ -173,3 +173,46 @@ def test_perf_lines_flow(board):
     n0 = len(board.lines)
     board.drain(4.0)
     assert board.perf_lines(n0), "no PERF lines while idle"
+
+
+def test_a_drag_touches_no_storage_and_rebuilds_no_cache(board):
+    """The two invariants this board's UI perf now rests on, asserted on the real
+    console via ws.note_cost (reported in `state` as "costs").
+
+    Both were bugs found the slow way on 2026-07-26, each costing a day because
+    neither produced any signal -- they just made two frames per gesture 5x
+    slower:
+
+      * cover blob reads (58ms each on this flash, 22ms even when the file is
+        absent) landed on DRAG frames, because a cover was only loaded when its
+        card first scrolled into view. Now prefetched on idle frames, so a drag
+        must read nothing at all.
+      * the bar's strip cache rebuilt on every switch between the WM's two draw
+        destinations (root canvas via viewport / window buffer) -- 72ms of an 86ms
+        frame. Now cached per destination, so a long drag must build ~once, not
+        once per frame.
+
+    Counted on the build/read side only, so this net costs nothing when healthy."""
+    board.open("picker")
+    board.drain(16.0)                    # let the idle prefetch finish the store
+    g = board.pyval("ws.wm._wins['make'].ctx.layout.lib_grid")
+    assert g is not None, "picker did not open as a window"
+    w = board.state()["wins"]["make"]
+    ox, oy = w[0] + 1, w[1] + 1 + w[4]
+    gx, gy, gw, gh = g
+    cy = oy + gy + gh // 2
+    board.pyexec("ws.costs.clear()")
+    f0 = board.state()["frames"]
+    for _ in range(3):
+        board.swipe(ox + gx + gw - 40, cy, ox + gx + 60, cy, 30)
+    st = board.state()
+    costs = st.get("costs") or {}
+    painted = st["frames"] - f0
+    assert painted > 60, "the drags painted only %d frames" % painted
+    assert costs.get("cover.blob.read", 0) == 0, (
+        "a drag read %d cover blobs from flash -- the idle prefetch is not "
+        "covering the store (costs=%r)" % (costs.get("cover.blob.read"), costs))
+    # A handful over ~135 frames is the healthy shape; one per frame is the bug.
+    assert costs.get("bar.strip.render", 0) <= 4, (
+        "the bar strip rebuilt %d times across %d frames (costs=%r)"
+        % (costs.get("bar.strip.render"), painted, costs))

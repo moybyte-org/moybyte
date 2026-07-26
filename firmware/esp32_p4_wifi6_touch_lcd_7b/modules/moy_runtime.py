@@ -436,6 +436,11 @@ def _remote_state(ws):
     try:
         st["screen"] = ws.screen
         st["frames"] = getattr(ws, "_frames_drawn", None)
+        # Expensive-event counters (ws.note_cost): cache builds + storage reads.
+        # A cache that is silently missing shows up here as a count that tracks the
+        # frame count -- which is how the 2026-07-26 bar-strip thrash would have
+        # announced itself instead of taking a day to corner.
+        st["costs"] = dict(getattr(ws, "costs", {}) or {})
         wm = ws.wm
         desk = getattr(wm, "desk_open", None)
         st["desk"] = bool(desk()) if desk is not None else None

@@ -1106,3 +1106,34 @@ def test_bar_strip_slots_stay_bounded(tmp_path):
         ws.bar_layer._draw_status_strip("settings")
     slots = ws.bar_layer._bar_strips["settings"]
     assert len(slots) <= _bl._BAR_STRIP_SLOTS
+
+
+def test_bar_strip_rebuild_budget(tmp_path):
+    """The REGRESSION NET for the 2026-07-26 bar-strip bug, expressed as a budget.
+
+    That bug was invisible: the cache silently missed 100% of the time and the only
+    symptom was two frames per gesture costing 86ms instead of 12. Nothing broke, so
+    nothing failed -- it took a day of on-glass profiling to corner. A build budget
+    is what makes it fail here instead: alternating destinations must cost a
+    BOUNDED number of strip builds, not one per switch.
+
+    Asserts on ws.costs (ws.note_cost), which is counted on the BUILD path only, so
+    the net costs nothing in the healthy case."""
+    ws = _ws(tmp_path)
+    ws.open_settings()
+    root = ws.sys_canvas
+    other = root.new_layer(root.w, root.h)
+    ws.costs.clear()
+    for i in range(24):                        # 24 frames alternating like the WM
+        ws._sys_canvas = other if i % 4 == 0 else root
+        ws.bar_layer._draw_status_strip("settings")
+    allocs = ws.costs.get("bar.strip.alloc", 0)
+    renders = ws.costs.get("bar.strip.render", 0)
+    # Lower bound FIRST: without it this test passes when the counters are gone,
+    # which is how a regression net quietly stops being one (caught while
+    # verifying it -- stashing the fix removed the note_cost calls too, and the
+    # assertion below read 0 and sailed through).
+    assert renders >= 1, "no strip build counted -- is ws.note_cost still wired?"
+    # One per distinct destination is right; one per SWITCH is the bug (would be 12).
+    assert allocs <= 2, "strip layer reallocated %d times in 24 frames" % allocs
+    assert renders <= 2, "strip re-rendered %d times in 24 frames" % renders

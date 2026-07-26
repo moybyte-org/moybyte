@@ -264,3 +264,27 @@ def test_prefetch_stops_once_every_cart_is_known(tmp_path):
     for _ in range(200):
         ws._cover_prefetch_tick()
     assert ws._cover_seen is False
+
+
+def test_cover_blob_read_budget(tmp_path):
+    """Each cart's cover blob must be read from storage AT MOST ONCE per session.
+
+    A read is 58ms on P4 flash (22ms even when the file is absent), so a repeat
+    read is a stall the owner feels. Two separate bugs here re-read blobs -- a
+    cache keyed on a stamp stashed on a cart dict that did not survive a relayout,
+    and per-size keying that missed on every resize -- and neither announced
+    itself. This is the budget that would have."""
+    from runtime import host_app
+    root, carts = _mk_carts_with_covers(tmp_path, 4, with_cover=4)
+    ws = host_app.build_workstation(root)
+    mine = [c for c in ws._all_carts
+            if c.get("path") in [x["path"] for x in carts]]
+    ws.costs.clear()
+    for size in ((40, 30), (24, 18), (40, 30)):      # includes a RELAYOUT
+        for c in mine:
+            _land_cover(ws, c, *size)
+    reads = ws.costs.get("cover.blob.read", 0)
+    assert reads >= 1, "no blob read counted -- is ws.note_cost still wired?"
+    assert reads <= len(mine), (
+        "read %d blobs for %d carts across three layouts -- the runs cache is not "
+        "holding" % (reads, len(mine)))
