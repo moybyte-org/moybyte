@@ -13,6 +13,7 @@
 #include <math.h>
 #include "py/obj.h"
 #include "py/runtime.h"
+#include "py/mphal.h"        // mp_hal_ticks_us -- the draw gates' DRAW2 timers
 
 // #77: build the pixel kernel at -O3 (the ports default to -O2). In-source
 // pragma, NOT cmake: source-file properties are directory-scoped and the linked
@@ -898,49 +899,23 @@ static mp_obj_t moy_gfx_blit_indices(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit_indices_obj, 9, 9, moy_gfx_blit_indices);
 
-// text(dst, dw, dh, s, x, y, color, font, first, scale, cam_x, cam_y,
-//      cx0, cy0, cx1, cy1) -- render a whole string in ONE C call (issue #62): the
-// text analogue of blit_batch. `font` is a petme128-layout glyph blob (8 bytes per
-// glyph, column-major, LSB = top row -- exactly runtime/font.py's _FONT, the SAME
-// bytes the host rasterizes), `first` its first codepoint. Each set glyph pixel
-// becomes a `scale` x `scale` block of the pre-resolved RGB565 `color`; camera
-// offset and the screen-space clip rect [cx0,cy0)..[cx1,cy1) are honoured per
-// pixel like the other vector ops (framebuf.text could do neither). Glyph advance
-// is 8*scale. The string is walked as BYTES (like framebuf.text); an out-of-range
-// byte renders the font's first glyph (space), matching runtime/font.py glyph().
-static mp_obj_t moy_gfx_text(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
-    size_t dcap;
-    uint16_t *dst = moy_gfx_buf_w(a[0], &dcap);
-    mp_int_t dw = mp_obj_get_int(a[1]);
-    mp_int_t dh = mp_obj_get_int(a[2]);
-    mp_buffer_info_t sbi;
-    mp_get_buffer_raise(a[3], &sbi, MP_BUFFER_READ);
-    const uint8_t *s = (const uint8_t *)sbi.buf;
-    size_t slen = sbi.len;
-    mp_int_t x = mp_obj_get_int(a[4]);
-    mp_int_t y = mp_obj_get_int(a[5]);
-    uint16_t col = (uint16_t)(mp_obj_get_int(a[6]) & 0xFFFF);
-    mp_buffer_info_t fbi;
-    mp_get_buffer_raise(a[7], &fbi, MP_BUFFER_READ);
-    const uint8_t *font = (const uint8_t *)fbi.buf;
-    mp_int_t nglyphs = (mp_int_t)(fbi.len / 8u);
-    mp_int_t first = mp_obj_get_int(a[8]);
-    mp_int_t scale = mp_obj_get_int(a[9]);
-    mp_int_t cam_x = mp_obj_get_int(a[10]);
-    mp_int_t cam_y = mp_obj_get_int(a[11]);
-    mp_int_t cx0 = mp_obj_get_int(a[12]);
-    mp_int_t cy0 = mp_obj_get_int(a[13]);
-    mp_int_t cx1 = mp_obj_get_int(a[14]);
-    mp_int_t cy1 = mp_obj_get_int(a[15]);
-    (void)dh;
-    if (dw <= 0 || nglyphs <= 0) return mp_const_none;
+// The petme128 rasterizer, shared by the `text` op and the print draw gate. The
+// clip rect is intersected with the buffer here, so every caller is bounds-safe.
+static void moy_gfx_text_raw(uint16_t *dst, size_t dcap, mp_int_t dw,
+                             const uint8_t *s, size_t slen,
+                             mp_int_t x, mp_int_t y, uint16_t col,
+                             const uint8_t *font, mp_int_t nglyphs,
+                             mp_int_t first, mp_int_t scale,
+                             mp_int_t cam_x, mp_int_t cam_y,
+                             mp_int_t cx0, mp_int_t cy0,
+                             mp_int_t cx1, mp_int_t cy1) {
+    if (dw <= 0 || nglyphs <= 0) return;
     if (scale < 1) scale = 1;
     moy_gfx_clip(dw, dcap, &cx0, &cy0, &cx1, &cy1);
     x -= cam_x;
     y -= cam_y;
     mp_int_t adv = 8 * scale;                    // cell advance per character
-    if (y >= cy1 || y + adv <= cy0) return mp_const_none;   // whole line off-clip
+    if (y >= cy1 || y + adv <= cy0) return;      // whole line off-clip
     for (size_t i = 0; i < slen; i++, x += adv) {
         if (x >= cx1) break;                     // rest of the string is right of clip
         if (x + adv <= cx0) continue;            // this glyph entirely left of clip
@@ -968,9 +943,329 @@ static mp_obj_t moy_gfx_text(size_t n_args, const mp_obj_t *a) {
             }
         }
     }
+}
+
+// text(dst, dw, dh, s, x, y, color, font, first, scale, cam_x, cam_y,
+//      cx0, cy0, cx1, cy1) -- render a whole string in ONE C call (issue #62): the
+// text analogue of blit_batch. `font` is a petme128-layout glyph blob (8 bytes per
+// glyph, column-major, LSB = top row -- exactly runtime/font.py's _FONT, the SAME
+// bytes the host rasterizes), `first` its first codepoint. Each set glyph pixel
+// becomes a `scale` x `scale` block of the pre-resolved RGB565 `color`; camera
+// offset and the screen-space clip rect [cx0,cy0)..[cx1,cy1) are honoured per
+// pixel like the other vector ops (framebuf.text could do neither). Glyph advance
+// is 8*scale. The string is walked as BYTES (like framebuf.text); an out-of-range
+// byte renders the font's first glyph (space), matching runtime/font.py glyph().
+static mp_obj_t moy_gfx_text(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t dcap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &dcap);
+    mp_int_t dw = mp_obj_get_int(a[1]);
+    mp_buffer_info_t sbi;
+    mp_get_buffer_raise(a[3], &sbi, MP_BUFFER_READ);
+    mp_buffer_info_t fbi;
+    mp_get_buffer_raise(a[7], &fbi, MP_BUFFER_READ);
+    moy_gfx_text_raw(dst, dcap, dw,
+                     (const uint8_t *)sbi.buf, sbi.len,
+                     mp_obj_get_int(a[4]), mp_obj_get_int(a[5]),
+                     (uint16_t)(mp_obj_get_int(a[6]) & 0xFFFF),
+                     (const uint8_t *)fbi.buf, (mp_int_t)(fbi.len / 8u),
+                     mp_obj_get_int(a[8]), mp_obj_get_int(a[9]),
+                     mp_obj_get_int(a[10]), mp_obj_get_int(a[11]),
+                     mp_obj_get_int(a[12]), mp_obj_get_int(a[13]),
+                     mp_obj_get_int(a[14]), mp_obj_get_int(a[15]));
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_text_obj, 16, 16, moy_gfx_text);
+
+// --- draw gates: the console CHROME's native fast path (#155) ----------------
+//
+// WHY (measured on P4 glass 2026-07-26, warm heap):
+//     cv.rect(x, y, w, h, c)      50.2 us
+//     moy_gfx.fill_rect(...)       5.2 us   <- the same pixels
+//     an EMPTY 5-arg Python method 5.5 us   <- the dispatch floor
+//     cv.print("Hello", ...)      71.1 us
+//     moy_gfx.text(...)           31.9 us
+// So ~90% of a chrome rect and ~55% of a chrome print is MicroPython wrapper --
+// two Python frames (rect -> _fill), four int() calls, a palette double-index --
+// around a kernel that is already fast. A windowed Settings scroll issues ~94
+// rects + ~29 prints per frame, so that overhead alone is ~6ms of a ~70ms frame,
+// and it scales with every new panel and every glyph a smaller font fits.
+//
+// NOT A DEFERRED QUEUE. The spr_gate (#63) batches because ITS win is amortising
+// the MP->C boundary over a run of sprites. Here the boundary is only 5.2us while
+// the Python frame is 45us, so a queue would buy ~0.3ms/frame more than drawing
+// immediately -- and would cost a draw-ORDER contract across every other verb
+// (cls/pix/line/circ/spr/map/blit_*/scroll_rect all read or write the same
+// buffer). These gates therefore draw IMMEDIATELY: same pixels, same order, same
+// frame, just without the Python frame. Nothing else in the canvas changes.
+//
+// A gate reads live canvas state through a shared `DrawCtx`: an array('i') the
+// Python side updates whenever camera/clip/font-scale change (rare) and a 64-entry
+// uint16 palette already resolved through pal() -- so the hot path is pure C. The
+// destination buffer is pushed in by sync_back (the DPI ping-pong swaps it every
+// frame). Anything unusual -- kwargs, a wrong arg count, a non-numeric coord, a
+// non-string print -- delegates verbatim to `fallback`, the original bound Python
+// method, so semantics are IDENTICAL and this is purely a fast lane.
+
+enum {
+    ST_CAM_X = 0, ST_CAM_Y,
+    ST_CX0, ST_CY0, ST_CX1, ST_CY1,
+    ST_W, ST_H,
+    ST_FONT_SCALE,
+    ST_PROF,                 // 1 = accumulate the DRAW2 timers below
+    ST_N_FILL, ST_N_TEXT,    // call counts (always) -- proof the gate is live
+    ST_T_FILL, ST_T_TEXT,    // microseconds (only while ST_PROF)
+    ST_LEN
+};
+
+enum { GATE_RECT = 0, GATE_RECTB, GATE_PRINT, GATE_PIX };
+
+typedef struct _moy_gfx_draw_ctx_obj_t {
+    mp_obj_base_t base;
+    mp_obj_t canvas;         // for the rare flush_batch upcall
+    mp_obj_t buf_obj;        // held so gc keeps the destination alive
+    mp_obj_t state_obj;      // held: array('i')
+    mp_obj_t pal_obj;        // held: array('H')
+    mp_obj_t batch_obj;      // held: the sprite queue array('h'), or None
+    mp_obj_t font_obj;       // held: the petme128 blob
+    uint16_t *px;            // destination (gc never moves objects)
+    size_t cap;              // destination capacity in pixels
+    int32_t *st;
+    uint16_t *pal;
+    size_t npal;
+    int16_t *batch;          // sprite queue, or NULL
+    const uint8_t *font;
+    mp_int_t nglyphs;
+    mp_int_t first;
+} moy_gfx_draw_ctx_obj_t;
+
+// set_buf(buf): re-point at the compositor's current back buffer. Called once
+// per frame from DeviceCanvas.sync_back -- the DPI double buffer ping-pongs, so
+// a cached pointer would otherwise draw into the buffer being scanned out.
+static mp_obj_t moy_gfx_draw_ctx_set_buf(mp_obj_t self_in, mp_obj_t buf_obj) {
+    moy_gfx_draw_ctx_obj_t *c = MP_OBJ_TO_PTR(self_in);
+    size_t cap;
+    c->px = moy_gfx_buf_w(buf_obj, &cap);
+    c->cap = cap;
+    c->buf_obj = buf_obj;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(moy_gfx_draw_ctx_set_buf_obj,
+                                 moy_gfx_draw_ctx_set_buf);
+
+static const mp_rom_map_elem_t moy_gfx_draw_ctx_locals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_set_buf), MP_ROM_PTR(&moy_gfx_draw_ctx_set_buf_obj) },
+};
+static MP_DEFINE_CONST_DICT(moy_gfx_draw_ctx_locals,
+                            moy_gfx_draw_ctx_locals_table);
+
+static MP_DEFINE_CONST_OBJ_TYPE(
+    moy_gfx_draw_ctx_type,
+    MP_QSTR_DrawCtx,
+    MP_TYPE_FLAG_NONE,
+    locals_dict, &moy_gfx_draw_ctx_locals
+);
+
+typedef struct _moy_gfx_draw_gate_obj_t {
+    mp_obj_base_t base;
+    moy_gfx_draw_ctx_obj_t *ctx;
+    mp_obj_t fallback;
+    uint8_t kind;
+} moy_gfx_draw_gate_obj_t;
+
+// A coordinate/colour arg: int or float (kid + layout code both produce floats).
+static inline bool gate_num(mp_obj_t o, mp_int_t *out) {
+    if (mp_obj_is_small_int(o)) {
+        *out = MP_OBJ_SMALL_INT_VALUE(o);
+        return true;
+    }
+    if (mp_obj_is_float(o)) {
+        *out = (mp_int_t)mp_obj_get_float(o);
+        return true;
+    }
+    return false;
+}
+
+// The _fill body: camera-offset, intersect with the clip rect, fill. Mirrors
+// DeviceCanvas._fill exactly (same clamp order, same empty-rect early out) so
+// gated and ungated pixels are identical.
+static inline void gate_fill(moy_gfx_draw_ctx_obj_t *c, mp_int_t x, mp_int_t y,
+                             mp_int_t w, mp_int_t h, uint16_t col) {
+    const int32_t *st = c->st;
+    mp_int_t stride = st[ST_W];
+    if (stride <= 0) return;
+    x -= st[ST_CAM_X];
+    y -= st[ST_CAM_Y];
+    mp_int_t x0 = st[ST_CX0], y0 = st[ST_CY0];
+    if (x > x0) x0 = x;
+    if (y > y0) y0 = y;
+    mp_int_t x1 = x + w, y1 = y + h;
+    if (x1 > st[ST_CX1]) x1 = st[ST_CX1];
+    if (y1 > st[ST_CY1]) y1 = st[ST_CY1];
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > stride) x1 = stride;
+    mp_int_t rows = (mp_int_t)(c->cap / (size_t)stride);
+    if (y1 > rows) y1 = rows;
+    if (x1 <= x0 || y1 <= y0) return;
+    for (mp_int_t row = y0; row < y1; row++) {
+        uint16_t *line = c->px + (size_t)row * (size_t)stride;
+        for (mp_int_t cx = x0; cx < x1; cx++) line[cx] = col;
+    }
+}
+
+static mp_obj_t draw_gate_call(mp_obj_t self_in, size_t n_args, size_t n_kw,
+                               const mp_obj_t *args) {
+    moy_gfx_draw_gate_obj_t *g = MP_OBJ_TO_PTR(self_in);
+    moy_gfx_draw_ctx_obj_t *c = g->ctx;
+    uint8_t kind = g->kind;
+    if (n_kw != 0 || c->px == NULL) {
+        return mp_call_function_n_kw(g->fallback, n_args, n_kw, args);
+    }
+    // A pending sprite run must land before any other primitive (#63 order).
+    if (c->batch != NULL && c->batch[0] > 4) {
+        mp_obj_t dest[2];
+        mp_load_method(c->canvas, MP_QSTR_flush_batch, dest);
+        mp_call_method_n_kw(0, 0, dest);
+    }
+    int32_t *st = c->st;
+    uint32_t t0 = st[ST_PROF] ? (uint32_t)mp_hal_ticks_us() : 0;
+
+    if (kind == GATE_PRINT) {
+        // print(s, x, y, c[, scale]) -- the legacy per-call `scale` is IGNORED
+        // (system-UI scaling is the #39 font_scale path), exactly like the
+        // Python DeviceCanvas.print / P4SystemCanvas.print it replaces.
+        if (n_args < 4 || n_args > 5 || !mp_obj_is_str(args[0])) {
+            return mp_call_function_n_kw(g->fallback, n_args, n_kw, args);
+        }
+        mp_int_t x, y, ci;
+        if (!gate_num(args[1], &x) || !gate_num(args[2], &y)
+            || !gate_num(args[3], &ci)) {
+            return mp_call_function_n_kw(g->fallback, n_args, n_kw, args);
+        }
+        size_t slen;
+        const char *s = mp_obj_str_get_data(args[0], &slen);
+        moy_gfx_text_raw(c->px, c->cap, st[ST_W], (const uint8_t *)s, slen,
+                         x, y, c->pal[(size_t)(ci & 63) % c->npal],
+                         c->font, c->nglyphs, c->first, st[ST_FONT_SCALE],
+                         st[ST_CAM_X], st[ST_CAM_Y],
+                         st[ST_CX0], st[ST_CY0], st[ST_CX1], st[ST_CY1]);
+        st[ST_N_TEXT]++;
+        if (st[ST_PROF]) st[ST_T_TEXT] += (int32_t)(mp_hal_ticks_us() - t0);
+        return mp_const_none;
+    }
+
+    if (kind == GATE_PIX) {
+        // pix(x, y, c) writes; the 2-arg READ form returns a value -> Python.
+        mp_int_t x, y, ci;
+        if (n_args != 3 || !gate_num(args[0], &x) || !gate_num(args[1], &y)
+            || !gate_num(args[2], &ci)) {
+            return mp_call_function_n_kw(g->fallback, n_args, n_kw, args);
+        }
+        gate_fill(c, x, y, 1, 1, c->pal[(size_t)(ci & 63) % c->npal]);
+        st[ST_N_FILL]++;
+        if (st[ST_PROF]) st[ST_T_FILL] += (int32_t)(mp_hal_ticks_us() - t0);
+        return mp_const_none;
+    }
+
+    // rect / rectb (x, y, w, h, c)
+    mp_int_t v[5];
+    if (n_args != 5) {
+        return mp_call_function_n_kw(g->fallback, n_args, n_kw, args);
+    }
+    for (size_t i = 0; i < 5; i++) {
+        if (!gate_num(args[i], &v[i])) {
+            return mp_call_function_n_kw(g->fallback, n_args, n_kw, args);
+        }
+    }
+    uint16_t col = c->pal[(size_t)(v[4] & 63) % c->npal];
+    if (kind == GATE_RECT) {
+        gate_fill(c, v[0], v[1], v[2], v[3], col);
+    } else {
+        // rectb = outline: the same four clipped fills the Python path issues.
+        gate_fill(c, v[0], v[1], v[2], 1, col);
+        gate_fill(c, v[0], v[1] + v[3] - 1, v[2], 1, col);
+        gate_fill(c, v[0], v[1], 1, v[3], col);
+        gate_fill(c, v[0] + v[2] - 1, v[1], 1, v[3], col);
+    }
+    st[ST_N_FILL]++;
+    if (st[ST_PROF]) st[ST_T_FILL] += (int32_t)(mp_hal_ticks_us() - t0);
+    return mp_const_none;
+}
+
+static MP_DEFINE_CONST_OBJ_TYPE(
+    moy_gfx_draw_gate_type,
+    MP_QSTR_draw_gate,
+    MP_TYPE_FLAG_NONE,
+    call, draw_gate_call
+);
+
+// make_draw_ctx(canvas, state, pal, batch, font, first) -> DrawCtx.
+//   state -- array('i') of ST_LEN entries (see the enum above)
+//   pal   -- array('H'), index -> RGB565 with the pal() remap already applied
+//   batch -- the canvas's sprite queue array('h'), or None
+//   font  -- the petme128 glyph blob; first -- its first codepoint
+// The destination buffer arrives separately via set_buf (it ping-pongs).
+static mp_obj_t moy_gfx_make_draw_ctx(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    mp_buffer_info_t sbi, pbi, fbi;
+    mp_get_buffer_raise(a[1], &sbi, MP_BUFFER_RW);
+    if (sbi.len < ST_LEN * (int)sizeof(int32_t)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("state array too small"));
+    }
+    mp_get_buffer_raise(a[2], &pbi, MP_BUFFER_READ);
+    if (pbi.len < 2) {
+        mp_raise_ValueError(MP_ERROR_TEXT("palette too small"));
+    }
+    mp_get_buffer_raise(a[4], &fbi, MP_BUFFER_READ);
+    moy_gfx_draw_ctx_obj_t *c = mp_obj_malloc(moy_gfx_draw_ctx_obj_t,
+                                              &moy_gfx_draw_ctx_type);
+    c->canvas = a[0];
+    c->buf_obj = mp_const_none;
+    c->state_obj = a[1];
+    c->pal_obj = a[2];
+    c->batch_obj = a[3];
+    c->font_obj = a[4];
+    c->px = NULL;
+    c->cap = 0;
+    c->st = (int32_t *)sbi.buf;
+    c->pal = (uint16_t *)pbi.buf;
+    c->npal = pbi.len / 2u;
+    c->batch = NULL;
+    if (a[3] != mp_const_none) {
+        mp_buffer_info_t bbi;
+        if (mp_get_buffer(a[3], &bbi, MP_BUFFER_RW) && bbi.len >= 2 * 4) {
+            c->batch = (int16_t *)bbi.buf;
+        }
+    }
+    c->font = (const uint8_t *)fbi.buf;
+    c->nglyphs = (mp_int_t)(fbi.len / 8u);
+    c->first = mp_obj_get_int(a[5]);
+    return MP_OBJ_FROM_PTR(c);
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_make_draw_ctx_obj, 6, 6,
+                                           moy_gfx_make_draw_ctx);
+
+// make_draw_gate(ctx, kind, fallback) -> a callable replacing one canvas verb.
+// kind: 0 rect, 1 rectb, 2 print, 3 pix.
+static mp_obj_t moy_gfx_make_draw_gate(mp_obj_t ctx_in, mp_obj_t kind_in,
+                                       mp_obj_t fallback) {
+    if (!mp_obj_is_type(ctx_in, &moy_gfx_draw_ctx_type)) {
+        mp_raise_TypeError(MP_ERROR_TEXT("need a DrawCtx"));
+    }
+    mp_int_t kind = mp_obj_get_int(kind_in);
+    if (kind < 0 || kind > GATE_PIX) {
+        mp_raise_ValueError(MP_ERROR_TEXT("bad gate kind"));
+    }
+    moy_gfx_draw_gate_obj_t *g = mp_obj_malloc(moy_gfx_draw_gate_obj_t,
+                                               &moy_gfx_draw_gate_type);
+    g->ctx = MP_OBJ_TO_PTR(ctx_in);
+    g->fallback = fallback;
+    g->kind = (uint8_t)kind;
+    return MP_OBJ_FROM_PTR(g);
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(moy_gfx_make_draw_gate_obj,
+                                 moy_gfx_make_draw_gate);
 
 // pack_strip(fb, fb_w, x, y, w, rows, dst) -- copy a (w x rows) window of the
 // framebuffer into dst contiguously (row-major). Full-width is one memcpy;
@@ -1031,6 +1326,8 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_blit_map),   MP_ROM_PTR(&moy_gfx_blit_map_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_batch), MP_ROM_PTR(&moy_gfx_blit_batch_obj) },
     { MP_ROM_QSTR(MP_QSTR_make_spr_gate), MP_ROM_PTR(&moy_gfx_make_spr_gate_obj) },
+    { MP_ROM_QSTR(MP_QSTR_make_draw_ctx), MP_ROM_PTR(&moy_gfx_make_draw_ctx_obj) },
+    { MP_ROM_QSTR(MP_QSTR_make_draw_gate), MP_ROM_PTR(&moy_gfx_make_draw_gate_obj) },
     #ifdef MOY_GFX_HAS_ASYNC_COPY
     { MP_ROM_QSTR(MP_QSTR_copy_async), MP_ROM_PTR(&moy_gfx_copy_async_obj) },
     { MP_ROM_QSTR(MP_QSTR_copy_wait), MP_ROM_PTR(&moy_gfx_copy_wait_obj) },

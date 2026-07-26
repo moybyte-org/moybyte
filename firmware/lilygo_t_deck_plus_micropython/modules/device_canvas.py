@@ -112,6 +112,19 @@ LAYER_COPY_ASYNC = _SRAM_BOUNCE_FLUSH
 _PAL_IDENTITY = bytes(range(64))
 _PALT_OPAQUE = bytes(64)
 
+# Native draw gates (#155). The state-array indices and the gate kinds MUST match
+# the enums in native/moy_gfx/modmoy_gfx.c -- they are one binary layout shared
+# between this module and the C kernel.
+_ST_CAM_X, _ST_CAM_Y = 0, 1
+_ST_CX0, _ST_CY0, _ST_CX1, _ST_CY1 = 2, 3, 4, 5
+_ST_W, _ST_H = 6, 7
+_ST_FONT_SCALE = 8
+_ST_PROF = 9
+_ST_N_FILL, _ST_N_TEXT = 10, 11
+_ST_T_FILL, _ST_T_TEXT = 12, 13
+_ST_LEN = 14
+_GATE_RECT, _GATE_RECTB, _GATE_PRINT, _GATE_PIX = 0, 1, 2, 3
+
 # Layer-buffer pool (#63 GC-wall follow-up): moy_alloc has NO free(), so a layer
 # buffer handed back by a dead cart is returned HERE (keyed by byte size) and the
 # next new_layer of the same dims reuses it -- without this, every cart re-run
@@ -326,7 +339,13 @@ class DeviceCanvas:
         # frame loop turns this on with batch_reset() under perf capture and off
         # otherwise (console.py), so a shipping frame pays nothing.
         self._prof = False
+        # Native draw gates (#155): None until _install_draw_gates succeeds. Set
+        # BEFORE reset_state, whose _sync_gate_* calls read them.
+        self._gate_ctx = None
+        self._gate_state = None
+        self._gate_pal = None
         self.reset_state()
+        self._install_draw_gates()
 
     def sync_back(self):
         """Re-point the draw target at the compositor's current BACK buffer (#40
@@ -349,6 +368,12 @@ class DeviceCanvas:
                 fb = framebuf.FrameBuffer(buf, self.w, self.h, framebuf.RGB565)
                 self._fb_by_buf[id(buf)] = fb
             self._fb = fb
+            if self._gate_ctx is not None:
+                self._gate_ctx.set_buf(buf)   # #155: gates draw into the NEW back
+        if self._gate_state is not None:
+            # DRAW2 timing gate, synced once per frame (console.py flips _prof by
+            # direct attribute store, so there is no setter to hook).
+            self._gate_state[_ST_PROF] = 1 if self._prof else 0
         if self._lcopy is not None:
             self._drain_lcopy()           # last frame's copy never consumed: drain
         pred = self._lcopy_pred
@@ -411,12 +436,15 @@ class DeviceCanvas:
             self._palt_delta = 0
             self._pal_single = -1
             self._palt_single = -1
+            self._sync_gate_pal()
+        self._sync_gate_state()
 
     def camera(self, x=0, y=0):
         self.flush_batch()             # queued sprites belong to the OLD camera (#63)
         prev = (self._cam_x, self._cam_y)
         self._cam_x = int(x)
         self._cam_y = int(y)
+        self._sync_gate_state()
         return prev
 
     def clip(self, x=None, y=None, w=None, h=None):
@@ -426,12 +454,14 @@ class DeviceCanvas:
             self._clip_y0 = 0
             self._clip_x1 = self.w
             self._clip_y1 = self.h
+            self._sync_gate_state()
             return
         x = int(x); y = int(y); w = int(w); h = int(h)
         self._clip_x0 = max(0, x)
         self._clip_y0 = max(0, y)
         self._clip_x1 = min(self.w, x + w)
         self._clip_y1 = min(self.h, y + h)
+        self._sync_gate_state()
 
     def _pal_state_id(self):
         # The stable id of the CURRENT (pal map, palt) content: identity is 0, any
@@ -496,6 +526,7 @@ class DeviceCanvas:
                 # delta/single unchanged, the id below keys on the new value.
         self._palgen = self._pal_state_id()   # content id: re-seen tints reuse bakes
         self._pal_dirty = True              # #75: the next reset_state must restore
+        self._sync_gate_pal()
 
     def palt(self, c=None, on=None):
         self.flush_batch()             # queued sprites belong to the OLD palt (#63)
@@ -518,6 +549,99 @@ class DeviceCanvas:
                     self._palt_single = -2 if self._palt_delta else -1
         self._palgen = self._pal_state_id()   # content id: re-seen tints reuse bakes
         self._pal_dirty = True              # #75: the next reset_state must restore
+
+    # -- native draw gates (#155) -------------------------------------------
+    #
+    # rect/rectb/print/pix become NATIVE callables that draw immediately, with
+    # camera+clip+pal applied in C. Measured on P4 glass 2026-07-26: cv.rect was
+    # 50.2us against 5.2us for the moy_gfx.fill_rect it ends in, and an EMPTY
+    # 5-arg Python method costs 5.5us -- so ~90% of a chrome rect was two Python
+    # frames (rect -> _fill) around an already-fast kernel. A windowed Settings
+    # scroll issues ~94 rects + ~29 prints a frame.
+    #
+    # The gates read live state through a shared moy_gfx DrawCtx: an array('i')
+    # this class keeps in step (camera/clip/reset_state/pal/set_font_scale, all
+    # cold paths that already call flush_batch) plus a 64-entry pal-resolved
+    # RGB565 table. The Python methods stay as the gates' `fallback` for anything
+    # unusual (kwargs, odd arity, a non-numeric coord, a non-string print), so
+    # semantics are unchanged -- this is purely a fast lane.
+
+    def _install_draw_gates(self):
+        """Swap in the native rect/rectb/print/pix. Returns True if gated."""
+        gfx = self._gfx
+        if gfx is None or _FONT8 is None:
+            return False
+        make_ctx = getattr(gfx, "make_draw_ctx", None)
+        if make_ctx is None:
+            return False               # older firmware: keep the Python verbs
+        if self._pump is not None:
+            # T-Deck ROOT canvas only: _fill pokes the SRAM-bounce flush pump
+            # between native ops (#66), and a C gate has no cheap way back into
+            # Python to do that. Layers on both boards and the P4 root have no
+            # pump, so everything that matters here still gates.
+            return False
+        st = array("i", bytearray(4 * _ST_LEN))
+        pal = array("H", bytearray(2 * 64))
+        try:
+            ctx = make_ctx(self, st, pal, self._batch_arr, _FONT8, _FONT8_FIRST)
+        except Exception:  # noqa: BLE001 -- never let a probe break a canvas
+            return False
+        # Grab the bound Python methods BEFORE shadowing them: they become the
+        # gates' fallbacks (and on P4SystemCanvas that correctly picks up the
+        # font_scale-aware print override).
+        fb_rect, fb_rectb = self.rect, self.rectb
+        fb_print, fb_pix = self.print, self.pix
+        self._gate_state = st
+        self._gate_pal = pal
+        self._gate_ctx = ctx
+        st[_ST_W] = self.w
+        st[_ST_H] = self.h
+        st[_ST_FONT_SCALE] = max(1, int(getattr(self, "font_scale", 1)))
+        self._sync_gate_state()
+        self._sync_gate_pal()
+        ctx.set_buf(self._buf)
+        mk = gfx.make_draw_gate
+        self.rect = mk(ctx, _GATE_RECT, fb_rect)
+        self.rectb = mk(ctx, _GATE_RECTB, fb_rectb)
+        self.print = mk(ctx, _GATE_PRINT, fb_print)
+        self.pix = mk(ctx, _GATE_PIX, fb_pix)
+        return True
+
+    def _sync_gate_state(self):
+        st = self._gate_state
+        if st is not None:
+            st[_ST_CAM_X] = self._cam_x
+            st[_ST_CAM_Y] = self._cam_y
+            st[_ST_CX0] = self._clip_x0
+            st[_ST_CY0] = self._clip_y0
+            st[_ST_CX1] = self._clip_x1
+            st[_ST_CY1] = self._clip_y1
+
+    def _sync_gate_pal(self):
+        pal = self._gate_pal
+        if pal is None:
+            return
+        pm = self._pal_map
+        if pm is None:
+            return
+        for i in range(64):
+            pal[i] = PAL565_WIRE[pm[i]]
+
+    def gate_counts(self):
+        """(fills, texts, fill_us, text_us) drawn through the native gates since
+        the last gate_counts_reset -- the on-glass proof the fast lane is live."""
+        st = self._gate_state
+        if st is None:
+            return (0, 0, 0, 0)
+        return (st[_ST_N_FILL], st[_ST_N_TEXT], st[_ST_T_FILL], st[_ST_T_TEXT])
+
+    def gate_counts_reset(self):
+        st = self._gate_state
+        if st is not None:
+            st[_ST_N_FILL] = 0
+            st[_ST_N_TEXT] = 0
+            st[_ST_T_FILL] = 0
+            st[_ST_T_TEXT] = 0
 
     def _col(self, c):
         # Resolve a draw index to RGB565 through the pal remap, so cls/pix/line/rect/

@@ -34,7 +34,8 @@ from console import Pointer, Workstation, wire_workstation_core
 from carts_data import CARTS   # build-time generated from system_carts/
 from device_util import _ticks_ms, _ticks_diff
 from device_api import make_api
-from device_canvas import DeviceCanvas, _LayerComp, _FONT8, _FONT8_FIRST
+from device_canvas import (DeviceCanvas, _LayerComp, _FONT8, _FONT8_FIRST,
+                           _ST_FONT_SCALE)
 from device_wifi import make_wifi
 
 GAME_W, GAME_H = 320, 240
@@ -74,11 +75,18 @@ class P4SystemCanvas(DeviceCanvas):
         return False
 
     def __init__(self, comp, font_scale=1):
-        DeviceCanvas.__init__(self, comp)
+        # BEFORE the base __init__: its _install_draw_gates (#155) seeds the C
+        # gate's state array from font_scale, and the native print gate renders
+        # at that scale. Setting it afterwards would gate every system surface
+        # at 1x until the next set_font_scale.
         self.font_scale = max(1, int(font_scale))
+        DeviceCanvas.__init__(self, comp)
 
     def set_font_scale(self, scale):
         self.font_scale = max(1, int(scale))
+        st = self._gate_state
+        if st is not None:
+            st[_ST_FONT_SCALE] = self.font_scale
 
     def print(self, s, x, y, c, scale=1):
         # SystemCanvas.print (#39): petme128 at font_scale via the native text
