@@ -32,22 +32,40 @@ fixes (60fps = 16.7ms):
   | sheets    |   16   |  16 |   64  |  0 |
   | files     |   16   |  20 |   65  |  0 |
 
-The ranking inverts the intuition, and it is the useful part:
+!! THE TABLE ABOVE IS NOT A FAIR COMPARISON -- the bottom four rows measured
+EMPTY surfaces. Owner caught this immediately; verified on glass afterwards:
 
-  * The DESK LAB apps (sheets / files / writer / storybook) are the FASTEST --
-    16-20ms, i.e. at or near 60fps -- despite sharing none of the #113 scroll
-    machinery. They are sparse text and list surfaces; there is simply little to
-    draw.
-  * The EDITOR TABS are the SLOWEST (map 92, blocks 88, sprites 76, code 48),
-    and they are where a kid spends the most time. None of them uses ScrollRegion
-    either; they redraw their whole content per frame.
-  * So the #113 scroll-as-blit work does not correlate with which surfaces are
-    slow. Content volume does. The two surfaces that DID get the blit path
-    (launcher shelf, picker) are mid-table, and at this screen size the blit only
-    buys them ~4.5ms anyway (see launcher_layer.draw_shift).
-  * Every surface still shows a ~64-166ms WORST frame, mostly the open/first-paint
-    transition -- the same "first frame after quiet does everything" shape that the
-    bar-strip fix removed from Settings.
+  * writer had doc_name=None and 0 docs on disk, sheets had sheet=None and 0
+    tables. With no file open BOTH apps show a file GRID, not a text area, so
+    those rows are "an empty file picker", not "text scrolling". Opening a text
+    area in Writer moved it 20ms -> 40ms immediately.
+  * files and storybook are open to the same doubt and were not re-checked.
+  * the EDITOR TAB rows ran on whichever cart the picker selected first (the
+    "Appearance" system app). Their cost scales with what the cart CONTAINS --
+    lines of code, sprite count, map size -- so a single cart is one sample, not
+    a surface characterisation.
+
+So the conclusion this tool was written to support -- "the Desk Lab apps are
+already at 60fps, the Editor tabs are the slow family" -- is WITHDRAWN pending
+content fixtures. A sweep that opens each surface but not its CONTENT measures
+how fast the console draws nothing.
+
+What survives, because it does not depend on content volume:
+
+  * every surface shows a 64-166ms WORST frame, mostly the open/first-paint
+    transition -- the same "first frame after quiet does everything" shape the
+    bar-strip fix removed from Settings, so that class is gone from Settings only.
+  * the Editor tabs and the Desk Lab apps use NO shared scroll machinery: not
+    ScrollRegion, not the #113 blit path. Only the launcher shelf, the picker and
+    (partly) Settings do. That is a structural fact about the code, not a timing.
+
+TO FINISH THIS PROPERLY the sweep needs per-surface content fixtures. The store
+APIs for that are NOT what a first guess suggests -- a doc written with
+save_file('docs', ...) did not load back as 120 lines (writer's _open_doc runs the
+blob through _body_of, which expects a header), a hand-rolled
+{"rows","cols","cells"} table left sheets_app.sheet None, and load_code(path)
+returned 0 lines for every cart. Read formula.Sheet.to_dict, _body_of and the
+store's load_code signature before trying again.
 """
 
 from __future__ import annotations
