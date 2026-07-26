@@ -124,6 +124,15 @@ class SettingsLayer:
         self.bt_msg = ""
         self._bt_state = None
         self._bt_hits = _ui.Hits()    # visual-identity v1: draw pass == tap map
+        # Memo for _settings_rows (see there): the built tuple plus the four
+        # capability flags it was built from, held as separate attributes so the
+        # comparison allocates NOTHING (a signature tuple would itself cost ~40B
+        # per call, and this is called ~15x per frame).
+        self._rows_cache = None
+        self._rows_bt = False
+        self._rows_web = False
+        self._rows_upd = False
+        self._rows_onl = False
 
     def reset(self):
         """Reset the selection + scroll window (called by ws.open_settings each visit)."""
@@ -622,21 +631,46 @@ class SettingsLayer:
         """The Settings rows for this session: the static set, plus "UPDATE FW" (install
         from SD) and "UPDATE ONLINE" (WiFi download, #53 Phase 3) action rows when the
         injected updater supports them. Built on demand so the rows appear/disappear with
-        the updater without re-statting per draw."""
+        the updater without re-statting per draw.
+
+        MEMOIZED on the four capability flags, because "on demand" turned out to mean
+        ~15 times per FRAME -- the draw loop asks once per ROW, and the pointer/scroll
+        paths ask again -- and each call rebuilt the tuple through up to four
+        concatenations. On P4 glass that was ~2.3KB of the ~4.5KB a Settings frame
+        allocated, and since ~70KB of churn buys one 55ms mark-sweep there, it was the
+        largest single contributor to the scroll hitches (measured with
+        tools/p4_alloc.py, 2026-07-26). Each flag is a cached bool / getattr, so
+        re-checking them per call stays free; only the rebuild is skipped. The flags
+        are compared as separate attributes rather than a signature tuple, because
+        building a tuple to test the cache would reintroduce ~40B of the churn the
+        cache exists to remove."""
         ws = self.ws
+        bt = self._bt_service() is not None
+        web = ws.web_hook is not None
+        upd = ws._update_available()
+        onl = ws._online_update_available()
+        if (self._rows_cache is not None and bt == self._rows_bt
+                and web == self._rows_web and upd == self._rows_upd
+                and onl == self._rows_onl):
+            return self._rows_cache
         rows = self._SETTINGS_ROWS
-        if self._bt_service() is not None:
+        if bt:
             # Keep network/input together. Dynamic capability gating preserves
             # the non-P4 Settings row indices and frozen 320x240 pixels.
             rows = rows[:1] + (("bluetooth", "BLUETOOTH KEYBOARD", "bluetooth"),) \
                 + rows[1:]
-        if ws.web_hook is not None:           # device web view (#41): a WiFi browser feed
+        if web:                               # device web view (#41): a WiFi browser feed
             rows = rows + (("web", "WEB VIEW", "web"),)
-        if ws._update_available():
+        if upd:
             rows = rows + (("update", "UPDATE FW", "action"),)
-        if ws._online_update_available():
+        if onl:
             rows = rows + (("ota_channel", "CHANNEL", "channel"),)
             rows = rows + (("update_online", "UPDATE ONLINE", "action"),)
+        self._rows_bt = bt
+        self._rows_web = web
+        self._rows_upd = upd
+        self._rows_onl = onl
+        self._rows_cache = rows
         return rows
 
     def _activate_settings_action(self, key):

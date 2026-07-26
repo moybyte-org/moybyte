@@ -192,3 +192,35 @@ def test_update_online_reachable_by_keyboard(tmp_path):
         drv.frame(1 / 30)
     assert ws.settings_layer.set_msel == last
     assert ws.settings_layer._settings_row_visible(last)               # scrolled into view, reachable
+
+
+# -- the row set is memoized (P4 allocation, 2026-07-26) ------------------------
+
+def test_settings_rows_are_memoized(tmp_path):
+    """_settings_rows must return the SAME tuple until a capability flips.
+
+    It reads as a cheap accessor, so callers treat it as one: the draw loop asks
+    once per ROW and the pointer/scroll paths ask again, ~15 times per frame, and
+    each call used to rebuild the tuple through up to four concatenations. On P4
+    glass that was ~2.3KB of the ~4.5KB a Settings frame allocated (measured with
+    tools/p4_alloc.py). Identity is the assertion because it is what proves no
+    rebuild happened -- equality would pass on a fresh copy."""
+    ws = _ws(tmp_path)
+    lay = ws.settings_layer
+    first = lay._settings_rows()
+    assert lay._settings_rows() is first
+    assert lay._settings_rows() is first
+
+
+def test_a_capability_appearing_rebuilds_the_rows(tmp_path):
+    """...and the memo must not outlive the flags it was built from: an updater
+    that becomes available mid-session has to show up."""
+    ws = _ws(tmp_path)
+    lay = ws.settings_layer
+    before = lay._settings_rows()
+    assert "UPDATE FW" not in [r[1] for r in before]
+    _force_ota_rows(ws)
+    after = lay._settings_rows()
+    assert after is not before
+    assert "UPDATE FW" in [r[1] for r in after]
+    assert lay._settings_rows() is after          # ...and the new set caches too

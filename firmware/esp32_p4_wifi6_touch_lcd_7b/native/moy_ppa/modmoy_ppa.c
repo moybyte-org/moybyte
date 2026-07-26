@@ -220,6 +220,19 @@ static mp_obj_t moy_ppa_fill(size_t n_args, const mp_obj_t *args) {
         || x < 0 || y < 0 || x + w > dw || y + h > dh) {
         return mp_const_false;
     }
+    // The IDF's fill validator requires the out-picture buffer's ADDRESS *and*
+    // SIZE to be cache-line aligned, and rejects the op otherwise. Surfaces that
+    // fail it (a window buffer / layer whose bytearray landed wherever the heap
+    // had room) were reaching this and logging
+    //   E ppa_fill: out.buffer addr or out.buffer_size not aligned
+    // several times per gesture on glass (2026-07-26) -- the fill fell back to the
+    // CPU correctly, but only after a pointless full-buffer writeback and a driver
+    // error line. Decline here instead: the caller's CPU path is the same either
+    // way, minus the noise. 64 is the P4's PSRAM cache line (internal SRAM's 32
+    // divides it, so this is the conservative test for both).
+    if (((uintptr_t)dst.buf & 63u) != 0 || (dst.len & 63u) != 0) {
+        return mp_const_false;
+    }
     // The PPA fill colour is ARGB8888; expand the RGB565 the console works in.
     uint32_t r = (c565 >> 11) & 0x1F, g = (c565 >> 5) & 0x3F, bch = c565 & 0x1F;
     color_pixel_argb8888_data_t argb = {
