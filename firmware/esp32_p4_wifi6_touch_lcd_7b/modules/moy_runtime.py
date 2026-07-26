@@ -35,7 +35,7 @@ from carts_data import CARTS   # build-time generated from system_carts/
 from device_util import _ticks_ms, _ticks_diff
 from device_api import make_api
 from device_canvas import (DeviceCanvas, _LayerComp, _FONT8, _FONT8_FIRST,
-                           _ST_FONT_SCALE)
+                           _ST_FONT_SCALE, _COMPACT_MIN_PX)
 from device_wifi import make_wifi
 
 GAME_W, GAME_H = 320, 240
@@ -135,12 +135,17 @@ class P4SystemCanvas(DeviceCanvas):
         # Font-scale-carrying layers (mirrors host SystemCanvas.new_layer): the
         # windowed WM's window buffers and the bar cache print through these, so
         # they must scale like the surface they composite onto. Same body as
-        # DeviceCanvas.new_layer with the subclass constructed instead.
-        try:
-            import gc
-            gc.collect()
-        except Exception:  # noqa: BLE001
-            pass
+        # DeviceCanvas.new_layer with the subclass constructed instead -- including
+        # its size gate on the COMPACT FIRST pre-collect, which matters MORE here:
+        # a collect on the P4 desk is ~55ms (mark scales with the live set), and
+        # this override is the one the bar's 1024x18 strip cache reaches, twice per
+        # gesture. See DeviceCanvas.new_layer for the full note.
+        if int(w) * int(h) >= _COMPACT_MIN_PX:
+            try:
+                import gc
+                gc.collect()
+            except Exception:  # noqa: BLE001
+                pass
         lay = P4SystemCanvas(_LayerComp(int(w), int(h), self._gfx),
                              font_scale=self.font_scale)
         lay._nocache = True

@@ -87,6 +87,12 @@ _PAL565_WIRE_BUF = array("H", PAL565_WIRE)
 # built (see DeviceCanvas._cache_rgb), so it can never read as transparent.
 _RGB_KEY = 0xF81F
 
+# new_layer pre-collects (defragment PSRAM) only for a layer at least this many
+# pixels -- a cart's scrolling world (~192K px), not a UI cache like the bar's
+# 1024x18 strip (~18K px), whose rebuild was paying a full mark-sweep. See
+# new_layer's COMPACT FIRST note.
+_COMPACT_MIN_PX = 64 * 1024
+
 # Flip to False to force the slow Python per-pixel drawing path (no native moy_gfx)
 # for an FPS A/B comparison against the native-blit build. NOT dead config: the
 # host parity suite (tests/test_device_canvas_parity.py) sets this module attribute
@@ -1492,13 +1498,20 @@ class DeviceCanvas:
         # layer registry was reset) but not yet collected; under the web view's per-frame
         # JSON/command churn the PSRAM gc heap fragments and a fresh contiguous 384KB
         # eventually fails (MemoryError). Collecting right before the alloc reclaims the dead
-        # layer + transient strings so the region is contiguous again. Cart-start only (a
-        # layer is built once per run, not per frame), so the ~10ms collect is invisible.
-        try:
-            import gc
-            gc.collect()
-        except Exception:  # noqa: BLE001 -- gc is always present; never block a layer alloc
-            pass
+        # layer + transient strings so the region is contiguous again.
+        #
+        # BIG layers only. "Cart-start only, so the ~10ms collect is invisible" was
+        # wrong on two counts: the bar's strip cache also builds layers (1024x18) and
+        # rebuilds them on a canvas switch, i.e. twice per gesture, and on the P4 the
+        # collect is ~55ms, not 10 -- 72ms of an 86ms Settings frame at the press and
+        # release edges (measured 2026-07-26). Defragmenting PSRAM only earns its
+        # keep ahead of a cart-world-sized contiguous request, so small layers skip it.
+        if int(w) * int(h) >= _COMPACT_MIN_PX:
+            try:
+                import gc
+                gc.collect()
+            except Exception:  # noqa: BLE001 -- gc is always present; never block a layer alloc
+                pass
         lay = DeviceCanvas(_LayerComp(int(w), int(h), self._gfx))
         lay._nocache = True            # #63: a layer's own map() rasters directly (no nesting)
         lay.RETAINED_FRAMES = 1        # #113: a layer is ONE persistent buffer (the class

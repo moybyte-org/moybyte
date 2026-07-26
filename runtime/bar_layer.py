@@ -28,6 +28,11 @@ _BAR_ICON = 16              # icon sprite side (16x16, from the IconSheet)
 _BAR_GAP = 2               # px between adjacent bar icons
 _BAR_STRIDE = _BAR_ICON + _BAR_GAP        # 18: left-edge step between icons
 _BAR_Y = 1                 # icons sit 1px down in the 18px bar (1px top/bottom margin)
+# Cached bar strips kept per `where`, one per destination canvas. 2 covers the
+# windowed WM's root-canvas / window-buffer alternation; each costs cv.w * bar_h * 2
+# bytes (~36KB at 1024 wide), so this is a small, bounded PSRAM trade for not
+# rebuilding the strip on every switch.
+_BAR_STRIP_SLOTS = 2
 _SYSMENU_BTN = (2, _BAR_Y, _BAR_ICON, _BAR_ICON)                 # ≡ dropdown toggle (slot 0)
 _HOME_BTN = (2 + _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)      # back to launcher
 _MENU_BTN = (2 + 2 * _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)  # Make-it-mine / code
@@ -148,7 +153,8 @@ class BarLayer:
         # Cached top bar (#43, generalized in Stage 4 to every `where`): rendered
         # ONCE into an offscreen strip and blitted each frame (one flat copy)
         # instead of re-rendering ~9 sprites + glyph + text every frame.
-        # `_bar_strips` maps `where` -> [strip, key, canvas]: the offscreen layer,
+        # `_bar_strips` maps `where` -> a small MRU list of [strip, key, canvas]:
+        # the offscreen layer,
         # the state key it holds (None = stale) and the canvas it was built on (a
         # web-view swap, OR switching between the game canvas and the system canvas,
         # forces a rebuild); `_bar_cache_gen` is bumped by the explicit invalidators
@@ -158,6 +164,11 @@ class BarLayer:
         # window's own -- and a shared slot would rebuild both every frame. On the
         # fullscreen-stack tiers only one `where` is ever active, so the dict holds
         # one live entry, exactly as cheap as the old single slot.
+        #
+        # Each `where` keeps up to _BAR_STRIP_SLOTS of them, one per destination
+        # canvas (see _draw_top_bar_cart). Two is the measured alternation -- root
+        # canvas vs window buffer; a third destination would simply thrash as
+        # before, which is a perf floor, not a correctness problem.
         self._bar_strips = {}
         self._bar_cache_gen = 0
         # Clock-text cache (#66 CHROMEBRK): (second, string) -- see _clock_text.
@@ -266,10 +277,41 @@ class BarLayer:
             # dozen icon/text commands are far lighter than an inlined pixel strip.
             self._render_cart_bar(cv, key)
             return
-        slot = self._bar_strips.get(where)
+        # One slot PER CANVAS, most-recently-used first. The windowed WM draws the
+        # same `where` into DIFFERENT canvases from frame to frame -- straight into
+        # the root canvas through a viewport on a quiet frame (wm_windowed
+        # _direct_render), into the window's own buffer otherwise -- so a slot that
+        # remembers only one canvas reads every switch as a canvas swap and rebuilds.
+        # That cost 72ms of an 86ms Settings frame on P4 glass, twice per gesture
+        # (press edge + release edge), because the rebuild calls new_layer and the
+        # P4's new_layer pre-collects. Same failure the per-`where` keying above
+        # already fixed once, one axis over.
+        slots = self._bar_strips.get(where)
+        if slots is None:
+            slots = []
+            self._bar_strips[where] = slots
+        slot = None
+        for s in slots:
+            if s[2] is cv:
+                slot = s
+                break
         if slot is None:
-            slot = [None, None, None]              # [strip, key, canvas]
-            self._bar_strips[where] = slot
+            if len(slots) >= _BAR_STRIP_SLOTS:
+                slot = slots.pop()                 # evict the least-recently-used
+                slot[0] = None                     # ...its layer belongs to a
+                slot[1] = None                     # canvas we are no longer drawing
+                slot[2] = None                     # into, so it is rebuilt below
+            else:
+                slot = [None, None, None]          # [strip, key, canvas]
+            slots.insert(0, slot)
+        else:
+            # Move to front. By IDENTITY, not list.remove(), whose == would happily
+            # match a different all-None slot.
+            for i in range(len(slots)):
+                if slots[i] is slot:
+                    if i:
+                        slots.insert(0, slots.pop(i))
+                    break
         strip = slot[0]
         # The active canvas can SWAP at runtime (the device web view binds a recording
         # TeeCanvas in place of the raw DeviceCanvas, #41) OR change identity/height as

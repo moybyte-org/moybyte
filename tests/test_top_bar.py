@@ -1052,3 +1052,57 @@ def test_draw_zone_never_invoked_while_player_is_top_of_stack(tmp_path):
     assert calls == [], (
         "the zoned bar's draw_zone must never fire while a Player is top-of-stack "
         "(playing or crashed) -- got calls from: %r" % calls)
+
+
+# -- the strip cache survives an alternating destination canvas (P4, 2026-07-26) --
+
+def test_bar_strip_cache_survives_alternating_canvases(tmp_path):
+    """The windowed WM draws the SAME `where` into different canvases on
+    successive frames -- straight into the root canvas through a viewport on a
+    quiet frame (wm_windowed._direct_render), into the window's own buffer
+    otherwise. The strip cache used to remember exactly one canvas, so every
+    switch read as a canvas swap and rebuilt the strip via new_layer.
+
+    On P4 glass that was 72ms of an 86ms Settings frame, twice per gesture (press
+    edge and release edge), because the P4's new_layer pre-collects. Counting
+    new_layer is the assertion because it is the expensive part; a rebuild that
+    reused the buffer would be cheap and would not have shown up on glass."""
+    ws = _ws(tmp_path)
+    ws.open_settings()
+    root = ws.sys_canvas
+    other = root.new_layer(root.w, root.h)      # stand-in for a window buffer
+    builds = []
+    for cv in (root, other):
+        orig = cv.new_layer
+
+        def spy(w, h, *a, _orig=orig, _cv=cv, **k):
+            builds.append(_cv)          # host Canvas.new_layer has no `owner`
+            return _orig(w, h, *a, **k)
+        cv.new_layer = spy
+
+    # Alternate destinations the way a gesture does: buffer, root, root, ..., buffer.
+    order = [other] + [root] * 6 + [other]
+    for cv in order:
+        ws._sys_canvas = cv
+        ws.bar_layer._draw_status_strip("settings")
+
+    # One build per DISTINCT canvas, not one per switch.
+    assert len(builds) == 2, (
+        "expected one strip build per canvas; got %d builds across %d draws"
+        % (len(builds), len(order)))
+    assert builds.count(root) == 1 and builds.count(other) == 1
+
+
+def test_bar_strip_slots_stay_bounded(tmp_path):
+    """...and the per-canvas cache must not grow without limit: each strip pins a
+    layer (~36KB at 1024 wide) AND the canvas it was built for, so an unbounded
+    dict keyed by canvas would retain dead window buffers."""
+    from runtime import bar_layer as _bl
+    ws = _ws(tmp_path)
+    ws.open_settings()
+    root = ws.sys_canvas
+    for _ in range(6):                          # six distinct destinations
+        ws._sys_canvas = root.new_layer(root.w, root.h)
+        ws.bar_layer._draw_status_strip("settings")
+    slots = ws.bar_layer._bar_strips["settings"]
+    assert len(slots) <= _bl._BAR_STRIP_SLOTS
