@@ -16,56 +16,67 @@ vertical drag PAINTS rather than scrolls, so those rows measure the drawing
 gesture. That is still the number that matters for feel, but it is not the same
 mechanism as a scrolled list.
 
-Measured 2026-07-26, P4 @ 1024x600, after the session's bar-strip / cover-prefetch
-fixes (60fps = 16.7ms):
+MEASURED 2026-07-26 on glass, P4 @ 1024x600, WITH REAL CONTENT SEEDED (60fps =
+16.7ms). Painted-frame distribution over three drag gestures:
 
-  | surface   | median | p90 | worst | gc |
-  |-----------|--------|-----|-------|----|
-  | map       |   92   |  96 |  152  |  0 |
-  | blocks    |   88   |  96 |  166  |  2 |
-  | sprites   |   76   |  76 |  139  |  0 |
-  | picker    |   68   |  72 |  117  |  0 |
-  | code      |   48   |  56 |  130  |  1 |
-  | settings  |   24   |  28 |   72  |  0 |
-  | writer    |   20   |  20 |   98  |  0 |
-  | storybook |   20   |  20 |   98  |  0 |
-  | sheets    |   16   |  16 |   64  |  0 |
-  | files     |   16   |  20 |   65  |  0 |
+  | surface       | content seeded        | median | p90 | worst | gc |
+  |---------------|-----------------------|--------|-----|-------|----|
+  | editor:map    | (content-independent) |   92   |  96 |  220  |  0 |
+  | editor:blocks | (content-independent) |   88   |  92 |  167  |  1 |
+  | editor:paint  | (content-independent) |   76   |  76 |  138  |  0 |
+  | writer        | 200-line doc          |   52   |  52 |  128  |  0 |
+  | editor:code   | 302-line cart         |   52   |  60 |  130  |  2 |
+  | sheets        | 360-cell table        |   48   |  52 |   99  |  1 |
+  | picker        | 29 carts, covers warm |   48   |  60 |   89  |  0 |
+  | settings      | full row set          |   24   |  28 |   42  |  0 |
 
-!! THE TABLE ABOVE IS NOT A FAIR COMPARISON -- the bottom four rows measured
-EMPTY surfaces. Owner caught this immediately; verified on glass afterwards:
+The first version of this table measured EMPTY surfaces and drew a conclusion that
+had to be withdrawn. The deltas are why seeding is not optional:
 
-  * writer had doc_name=None and 0 docs on disk, sheets had sheet=None and 0
-    tables. With no file open BOTH apps show a file GRID, not a text area, so
-    those rows are "an empty file picker", not "text scrolling". Opening a text
-    area in Writer moved it 20ms -> 40ms immediately.
-  * files and storybook are open to the same doubt and were not re-checked.
-  * the EDITOR TAB rows ran on whichever cart the picker selected first (the
-    "Appearance" system app). Their cost scales with what the cart CONTAINS --
-    lines of code, sprite count, map size -- so a single cart is one sample, not
-    a surface characterisation.
+  * writer   20ms (empty file GRID) -> 40 (empty text area) -> 52 (200 lines)
+  * sheets   16ms (empty file GRID) -> 48 (360 cells)
 
-So the conclusion this tool was written to support -- "the Desk Lab apps are
-already at 60fps, the Editor tabs are the slow family" -- is WITHDRAWN pending
-content fixtures. A sweep that opens each surface but not its CONTENT measures
-how fast the console draws nothing.
+With no file open, Writer and Sheets show a file grid rather than a text surface,
+so an unseeded measurement is not a slow version of the real thing -- it is a
+different screen.
 
-What survives, because it does not depend on content volume:
+What the seeding then established, and it is the useful part:
 
-  * every surface shows a 64-166ms WORST frame, mostly the open/first-paint
-    transition -- the same "first frame after quiet does everything" shape the
-    bar-strip fix removed from Settings, so that class is gone from Settings only.
-  * the Editor tabs and the Desk Lab apps use NO shared scroll machinery: not
-    ScrollRegion, not the #113 blit path. Only the launcher shelf, the picker and
-    (partly) Settings do. That is a structural fact about the code, not a timing.
+  * The EDITOR TABS are the slow family and their cost is CHROME, NOT CONTENT.
+    map 92 / blocks 88 / paint 76 came out identical on a freshly created cart with
+    no map, no sprites and no blocks AND on the richest cart on the device. Whatever
+    they spend 90ms on, it is the grid/palette/toolbar they draw around the content,
+    not the content. That makes them the most promising target on the device: the
+    cost does not depend on what the kid made.
+  * CODE is only weakly content-sensitive (48ms on a system-app cart, 52ms on a
+    302-line one), so the code editor is also drawing chrome, not text.
+  * SETTINGS at 24ms is the only surface close to budget, and it is the one that
+    got this session's fixes.
+  * Every surface still shows a 99-220ms WORST frame -- the open/first-paint
+    transition. That class was removed from Settings (worst 42ms) and nowhere else.
 
-TO FINISH THIS PROPERLY the sweep needs per-surface content fixtures. The store
-APIs for that are NOT what a first guess suggests -- a doc written with
-save_file('docs', ...) did not load back as 120 lines (writer's _open_doc runs the
-blob through _body_of, which expects a header), a hand-rolled
-{"rows","cols","cells"} table left sheets_app.sheet None, and load_code(path)
-returned 0 lines for every cart. Read formula.Sheet.to_dict, _body_of and the
-store's load_code signature before trying again.
+SEEDING RECIPE (the formats are not guessable -- three wrong guesses cost a run
+each):
+
+  * doc:   save_file('docs', name, json.dumps({"format": "moytext-v1",
+           "body": "<text>"})) -- writer's _open_doc runs the blob through
+           _body_of, which reads ONLY the "body" key.
+  * table: build a real formula.Sheet (set_cell(col, row, raw), keys are "A1"
+           refs via make_ref) and save json.dumps(sheet.to_dict()). A hand-rolled
+           {"rows","cols","cells"} dict leaves sheets_app.sheet None.
+  * ORDER MATTERS for Sheets: open_named(name) only sets _pending_open, which is
+           consumed by the app's open(). Call it BEFORE open_app(), not after.
+  * cart:  carts_store.create(title, root, src=...) then
+           ws._apply_items(store.scan(root)).
+  * There is no load_code(path); reading a cart's source goes through load(path).
+
+READ THE ROWS AS "cost of a drag frame", not "scroll". On Sprites and Map a
+vertical drag PAINTS rather than scrolls, so those measure the drawing gesture.
+
+STRUCTURAL NOTE (content-independent): the Editor tabs and the Desk Lab apps share
+NO scroll machinery -- not ui.ScrollRegion, not the #113 blit path. Only the
+launcher shelf, the picker and (partly) Settings do. So #113 does not correlate
+with which surfaces are slow.
 """
 
 from __future__ import annotations
