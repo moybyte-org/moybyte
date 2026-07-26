@@ -429,6 +429,33 @@ class BarLayer:
             if show_x:                    # context X (Stage 5): tap to exit the app
                 ws._icon("close", lay.context_x_btn[0], lay.context_x_btn[1], cv)
 
+    def redraw_clock(self, where):
+        """Repaint JUST the clock cell of an already-drawn bar (#155).
+
+        Lets the desk backdrop cache survive a clock tick. The desk render is
+        wallpaper cover-crop + icon column + this bar, ~77ms on the P4, and the
+        clock is the only part of it that changes while nothing else does -- so
+        without this, ticking the minute invalidated the whole cached desk once a
+        second. The clock cell is right of the taskbar chips (they stop at
+        lay.clock_x - 4*cs), so repainting it cannot erase them."""
+        ws = self.ws
+        cv = self._bar_canvas(where)
+        if cv is None:
+            return
+        lay = ws.layout
+        th = ws.theme_colors
+        x, y, w, h = lay.clock_hit()
+        # Same background the strip itself uses (the light-theme in-window band
+        # is a different token), minus the bottom edge line so the repaint can
+        # never eat it.
+        if self.zone_band_light(where):
+            bg = th["surface"]
+        else:
+            bg = th["bar"]
+        bar_h = self._bar_h(where)
+        cv.rect(x, y, w, min(h, max(0, bar_h - 1)), bg)
+        cv.print(self._clock_text(), lay.clock_x, 3, th["chrome_ink_dim"], 1)
+
     def _clock_text(self):
         """A wall-clock HH:MM from time.localtime when available, else a mm:ss
         uptime so the strip always shows a live clock (host == device). Cached

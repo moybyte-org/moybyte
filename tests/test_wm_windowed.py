@@ -305,11 +305,19 @@ def test_drag_backdrop_cache_engages(tmp_path):
         drv.touch_drag(hx, hy)
         drv.frame(0.0)
     assert calls[0] == 0
-    # Release: the next frame renders the desktop live again (cache invalidated).
+    # Release: the desk itself did not CHANGE, so the cache keeps serving and
+    # the desktop is NOT re-rendered. It used to re-render on every non-gesture
+    # frame, which put a 120ms frame on every release (#155, measured on glass:
+    # layer:launcher=77ms of which wallpaper=37ms, for a STATIC wallpaper).
     drv.touch_up()
     ws._dirty = True
     drv.frame(0.0)
-    assert not ws.wm._backdrop_valid
+    assert ws.wm._backdrop_valid
+    assert calls[0] == 0
+    # ...and it does re-render as soon as the desk really changes.
+    ws.set_theme("berry" if ws.theme_name != "berry" else "forest", persist=False)
+    ws._dirty = True
+    drv.frame(0.0)
     assert calls[0] == 1
     backdrop._draw_desktop = real_draw
 
@@ -1386,3 +1394,65 @@ def test_direct_render_leaves_no_viewport_installed(tmp_path):
     root = ws.wm._root_canvas
     assert (root._ox, root._oy) == (0, 0)
     assert (root.w, root.h) == (root._stride, len(root.buf) // root._stride)
+
+
+# -- the desk cache is keyed on the desk, not on gesturing (#155) -------------
+
+def test_a_clock_tick_does_not_re_render_the_desk(tmp_path):
+    """The desk render is wallpaper cover-crop + icon column + bar, ~77ms on P4
+    glass. The clock is the only part of it that changes while nothing else
+    does, so it is repainted over the cached blit rather than being allowed to
+    invalidate the cache -- otherwise the desk re-rendered once a second."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _quiesce(ws)
+    _open_two_windows(ws, drv)
+    _settle_gesture(ws, drv, frames=6)
+    assert ws.wm._backdrop_valid
+
+    renders = [0]
+    backdrop = ws.wm._backdrop_layer
+    real = backdrop._draw_desktop
+    backdrop._draw_desktop = lambda dt: (renders.__setitem__(0, renders[0] + 1),
+                                         real(dt))[1]
+    clocks = [0]
+    real_clock = ws.bar_layer.redraw_clock
+    ws.bar_layer.redraw_clock = lambda where: (
+        clocks.__setitem__(0, clocks[0] + 1), real_clock(where))[1]
+    try:
+        # Force the clock string to change, as a minute boundary would.
+        ws.bar_layer._clock_at = -1
+        ws.bar_layer._clock_cache = "00:00"
+        for _ in range(4):
+            ws.mark_dirty()
+            drv.frame(1 / 30)
+    finally:
+        backdrop._draw_desktop = real
+        ws.bar_layer.redraw_clock = real_clock
+    assert renders[0] == 0, "a clock tick re-rendered the whole desk"
+    assert clocks[0] > 0, "the clock was never repainted over the cache"
+
+
+def test_the_desk_sig_excludes_the_cover_generation(tmp_path):
+    """Covers landing in the picker must not invalidate the desk: those are
+    exactly the frames a scroll is trying to keep cheap."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _quiesce(ws)
+    _open_two_windows(ws, drv)
+    before = ws.wm._desk_sig_value() if hasattr(ws.wm, "_desk_sig_value") \
+        else ws.wm._backdrop_layer._desk_sig()
+    ws._cover_gen += 5
+    after = ws.wm._backdrop_layer._desk_sig()
+    assert before == after
+
+
+def test_the_desk_sig_moves_with_the_theme_and_size(tmp_path):
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _quiesce(ws)
+    _open_two_windows(ws, drv)
+    layer = ws.wm._backdrop_layer
+    a = layer._desk_sig()
+    ws.set_theme("berry" if ws.theme_name != "berry" else "forest", persist=False)
+    assert layer._desk_sig() != a

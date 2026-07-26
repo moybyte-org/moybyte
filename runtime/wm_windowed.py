@@ -269,14 +269,25 @@ class _BackdropLayer(Layer):
         content_anim = wm._content_gesture or wm._content_flinging()
         gesture = (wm._drag is not None or wm._resize is not None
                    or content_anim)
-        if (not gesture or wm._backdrop_disabled or wm._backdrop_unsupported
+        # The cache is gated on the desk being UNCHANGED, not on being in a
+        # gesture (#155). Gating it on the gesture meant every non-gesture
+        # painted frame re-rendered the whole desk -- wallpaper cover-crop + icon
+        # column + bar -- which on P4 glass is a 120ms frame, and one landed on
+        # every gesture RELEASE. The desk's own content is a pure function of the
+        # signature below; the clock is the one live part and it is repainted
+        # over the cached blit instead of invalidating it.
+        sig = self._desk_sig()
+        stale = sig != wm._desk_sig
+        if (stale or wm._backdrop_disabled or wm._backdrop_unsupported
                 or self.ws._animating(dt)):   # a toast/confetti moves desk pixels
-            wm._backdrop_valid = False        # live: no gesture, always re-render
+            wm._desk_sig = sig
+            wm._backdrop_valid = False        # live: re-render, then re-snapshot
             wm._desk_streak = 0
             wm._desk_painted = True           # wiped the buffer -> windows repaint
-            if wm._gesture_hist:
+            if wm._gesture_hist and not gesture:
                 wm._gesture_hist = []         # gesture over: drop the damage trail
             self._draw_desktop(dt)
+            wm._capture_backdrop()
             return
         if wm._backdrop_valid:
             # CONTENT gesture: the window is STATIONARY, so the desk outside it
@@ -291,6 +302,7 @@ class _BackdropLayer(Layer):
             if wm._drag is None and wm._resize is None:
                 if wm._desk_streak >= 2:
                     wm._desk_painted = False   # untouched: windows may skip too
+                    self.ws.bar_layer.redraw_clock("desk")
                     return
                 wm._desk_streak += 1
             wm._desk_painted = True
@@ -299,11 +311,26 @@ class _BackdropLayer(Layer):
             wm._blit_backdrop_cache()
             if _perf:
                 self.ws._pf_wm_restore = _wt() - _t0
+            self.ws.bar_layer.redraw_clock("desk")
             return
         wm._desk_streak = 0
         wm._desk_painted = True
-        self._draw_desktop(dt)                # first drag frame: render + snapshot
+        self._draw_desktop(dt)                # cache lost: render + re-snapshot
         wm._capture_backdrop()
+
+    def _desk_sig(self):
+        """Everything the desk's wallpaper + icon column depends on.
+
+        Deliberately NOT the clock (repainted over the cache instead) and NOT
+        ws._cover_gen: a cover landing in the picker would otherwise invalidate
+        the desk on the very frames a scroll is trying to stay cheap. Cheap to
+        compute -- no per-frame scan of the cart list."""
+        ws = self.ws
+        cv = ws.sys_canvas
+        return (cv.w, cv.h, ws.theme_name, ws.theme_variant,
+                ws._effective_font_scale(), id(ws.icon_sheet),
+                getattr(ws, "wallpaper_id", None),
+                len(getattr(ws, "_apps", ())), len(ws._all_carts))
 
     def _draw_desktop(self, dt):
         self.ws.wallpaper.draw(dt)
@@ -475,6 +502,7 @@ class WindowedWM(FullscreenStackWM):
                                           # itself). The desk can't change under it,
                                           # so _BackdropLayer serves the cache --
                                           # see its draw() note.
+        self._desk_sig = None             # #155: the desk cache is keyed on this
         self._desk_streak = 0             # consecutive content-gesture frames that
                                           # stamped the cached desk; at 2 BOTH
                                           # ping-pong buffers hold it and the
