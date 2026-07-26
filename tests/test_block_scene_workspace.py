@@ -337,3 +337,44 @@ def test_base_layouts_ignore_bounds_and_stay_frozen():
     assert (a.x0, a.y0, a.outline_w, a.rows) == (b.x0, b.y0, b.outline_w, b.rows)
     sa = SU.SceneLayout(320, 240, 1)
     assert sa._base
+
+
+# -- the split is memoised (perf, #58) ----------------------------------------
+#
+# _layout_workspace runs on every pointer event AND the draw -- 4.2 times per
+# painted frame during a drag on glass, 5.5ms of the tab's 87. Both layouts are
+# pure functions of (canvas size, font scale, pane rect), so a repeat call must
+# reuse them; anything that CHANGES the geometry -- or replaces a layout from
+# outside -- must still re-derive.
+
+def test_repeat_layout_reuses_both_layout_objects(tmp_path):
+    ws = _open_blocks_ws(tmp_path, WIDE)
+    bl, sl = ws.block_ui.block_layout, ws.scene_ui.layout
+    for _ in range(4):
+        assert ws.block_ui._layout_workspace() is not None
+    assert ws.block_ui.block_layout is bl
+    assert ws.scene_ui.layout is sl
+
+
+def test_resize_re_derives_the_split(tmp_path):
+    ws = _open_blocks_ws(tmp_path, WIDE)
+    bl = ws.block_ui.block_layout
+    left0, right0 = ws.block_ui._layout_workspace()
+    ws.sys_canvas.w = WIDE[0] - 200            # a narrower window
+    left1, right1 = ws.block_ui._layout_workspace()
+    assert ws.block_ui.block_layout is not bl
+    assert right1 != right0
+    assert left1[2] < left0[2] or right1[2] < right0[2]
+
+
+def test_external_relayout_is_not_masked_by_the_memo(tmp_path):
+    # ws._relayout fans out to BlockEditorUI.relayout(), which installs an
+    # UNBOUNDED layout at the SAME canvas size. The memo must notice (identity),
+    # or the tab would draw full-width blocks under the scene pane.
+    ws = _open_blocks_ws(tmp_path, WIDE)
+    left, _right = ws.block_ui._layout_workspace()
+    ws.block_ui.relayout(ws.sys_canvas.w, ws.sys_canvas.h, 1)
+    assert ws.block_ui.block_layout.x0 + ws.block_ui.block_layout.outline_w > left[2]
+    ws.block_ui._layout_workspace()
+    assert (ws.block_ui.block_layout.x0 + ws.block_ui.block_layout.outline_w
+            <= left[0] + left[2])

@@ -385,6 +385,9 @@ class BlockEditorUI:
         # for STAGE + every sprite chip drawn atop the block pane in the workspace
         # (rebuilt each draw, hit-tested in _blocks_pointer). Scratch's sprite pane.
         self._blk_roster_btns = []
+        # (geometry key, block_layout, scene layout) of the last workspace split --
+        # see _layout_workspace.
+        self._ws_memo = None
 
     def relayout(self, w, h, fs):
         """Rebuild the responsive layout from the live system-canvas size + the
@@ -431,22 +434,48 @@ class BlockEditorUI:
         """If the workspace is active, split the canvas and BOUND both editors'
         layouts to their panes; return (left, right) or None. Called at the top of
         draw AND pointer/input so the geometry is consistent within a frame (input
-        runs before draw) and re-derives on a window resize."""
+        runs before draw) and re-derives on a window resize.
+
+        Both layouts are pure functions of (canvas size, font scale, pane rect), so
+        a repeat call REINSTALLS the cached pair instead of rebuilding it: on glass
+        this ran 4.2 times per PAINTED frame -- the draw plus every pointer event
+        in the gesture -- for 5.5ms of the tab's 87 (p4_attrib, #58).
+
+        Re-assigning rather than checking identity is the point. wm_windowed's
+        _LayoutCtx.install restores the layouts it CAPTURED around every dispatch,
+        so the objects built here never survive to the next call and an
+        identity-guarded memo misses 100% of the time (measured -- the first cut
+        of this cache bought exactly nothing). Keying on geometry alone is also
+        what makes the memo correct rather than merely fast: whatever stale layout
+        a context (or ws._relayout) put back, a hit overwrites it with the one
+        this pane's geometry implies. The scroll/camera clamps still run every
+        call -- they depend on the cursor and cam, not the geometry."""
         if not self._workspace_active():
+            self._ws_memo = None
             return None
         left, right = self._workspace_panes()
         sc = self.ws.sys_canvas
         fs = max(1, getattr(sc, "font_scale", 1))
+        su = self.ws.scene_ui
+        memo = self._ws_memo
+        if (memo is not None and su.sceneedit is not None
+                and memo[0] == (sc.w, sc.h, fs, left, right)):
+            self.block_layout = memo[1]
+            su.layout = memo[2]
+            if self.blocks_ed is not None:
+                self._blk_reveal()
+            su._clamp_cam()
+            return left, right
         self.block_layout = BlockLayout(sc.w, sc.h, fs, bounds=left)
         if self.blocks_ed is not None:
             self._blk_reveal()               # re-clamp scroll to the pane's row count
         # Lazily build the scene editor the first time the workspace opens, then
         # bound it to the right pane (mirrors EditorApp.set_tab's "scene" arm).
-        su = self.ws.scene_ui
         if su.sceneedit is None:
             su.build()
             su.on_open()
         su.relayout_bounded(right)
+        self._ws_memo = ((sc.w, sc.h, fs, left, right), self.block_layout, su.layout)
         return left, right
 
     def _scene_pane_pointer(self, px, py, click):
@@ -654,6 +683,7 @@ class BlockEditorUI:
         self.blk_graduated = False
         self._ws_focus = "blocks"
         self._ws_scene_drag = False
+        self._ws_memo = None       # the next cart re-splits from scratch
 
     def on_leave(self):
         """Called from Workstation._leave_menu() when menu_view == "blocks"."""

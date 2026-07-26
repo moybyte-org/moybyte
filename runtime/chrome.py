@@ -641,6 +641,54 @@ _GLYPHS = {
 }
 
 
+_GLYPH_RUNS = {}
+
+
+def _glyph_runs(kind, fs):
+    """The flat (dx, dy, width) span list for glyph `kind` at pixel scale `fs`,
+    memoised per (kind, fs).
+
+    The mask walk itself was the cost, not the drawing: on glass (p4_attrib, #58)
+    a _blit_glyph call ran 48us and issued ~14 native rects whose kernel time was
+    0.4ms/267 calls -- i.e. ~1.5us of pixels behind ~35us of Python bit-testing
+    144 cells. The Sprites tab draws 19 glyphs a frame, so that walk alone was
+    13ms of an 52ms tab. _GLYPHS is a module constant (never themed -- the
+    themeable 16x16 bar icons are the separate IconSheet), so the spans can be
+    computed once per scale and kept for the life of the process; ~30 kinds x a
+    handful of scales x ~30 spans is a few KB frozen into firmware-sized terms.
+
+    Flat rather than a list of tuples: MicroPython pays per object, and the draw
+    loop reads three ints by index instead of unpacking a tuple per span."""
+    key = (kind, fs)
+    runs = _GLYPH_RUNS.get(key)
+    if runs is not None:
+        return runs
+    bits = _GLYPHS.get(kind)
+    n = _GLYPH_SIZE
+    runs = []
+    if bits is not None:
+        for r in range(n):
+            row = bits[r]
+            if not row:
+                continue
+            yy = r * fs
+            run = 0                                 # length of the current on-run
+            for col in range(n):                    # walk L->R, coalescing runs
+                if row & (1 << (n - 1 - col)):
+                    run += 1
+                elif run:
+                    runs.append((col - run) * fs)
+                    runs.append(yy)
+                    runs.append(run * fs)
+                    run = 0
+            if run:
+                runs.append((n - run) * fs)
+                runs.append(yy)
+                runs.append(run * fs)
+    _GLYPH_RUNS[key] = runs
+    return runs
+
+
 def _blit_glyph(cv, kind, rect, c, scale=None):
     """Draw an icon glyph (no background) centered in `rect`, in color `c`, onto
     canvas `cv`. The shared pre-literate icon vocabulary -- a 12x12 1-bit pixel
@@ -653,9 +701,6 @@ def _blit_glyph(cv, kind, rect, c, scale=None):
     `scale` (visual identity v1): an explicit pixel scale overriding the canvas
     font scale -- the Library's cover-art-sized type glyphs. Default None keeps
     every existing call byte-identical."""
-    bits = _GLYPHS.get(kind)
-    if bits is None:                                # unknown -> nothing (fallback contract)
-        return
     x, y, w, h = rect
     n = _GLYPH_SIZE
     # Scale the icon mask with the canvas's system font scale (#39) so glyphs grow
@@ -664,23 +709,16 @@ def _blit_glyph(cv, kind, rect, c, scale=None):
     fs = int(scale) if scale else getattr(cv, "font_scale", 1)
     if fs < 1:
         fs = 1
+    runs = _glyph_runs(kind, fs)
+    if not runs:                                    # unknown -> nothing (fallback contract)
+        return
     span = n * fs
     ox = x + (w - span) // 2                          # center the (scaled) mask in the rect
     oy = y + (h - span) // 2
-    for r in range(n):
-        row = bits[r]
-        if not row:
-            continue
-        yy = oy + r * fs
-        run = 0                                     # length of the current on-run
-        for col in range(n):                        # walk L->R, coalescing runs
-            if row & (1 << (n - 1 - col)):
-                run += 1
-            elif run:
-                cv.rect(ox + (col - run) * fs, yy, run * fs, fs, c)
-                run = 0
-        if run:
-            cv.rect(ox + (n - run) * fs, yy, run * fs, fs, c)
+    i = 0
+    while i < len(runs):
+        cv.rect(ox + runs[i], oy + runs[i + 1], runs[i + 2], fs, c)
+        i += 3
 
 
 def _gbtn(ws, names, kind, label, rect, fill, cv):
