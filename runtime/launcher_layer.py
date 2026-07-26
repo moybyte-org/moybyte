@@ -328,7 +328,21 @@ class Launcher:
         eligibility via ScrollRegion.blit_shift (same items/sel/statics, pixels of
         a known offset in the target buffer); `fill(cv, rect)` paints the owning
         layer's band backdrop inside a rect (surface fill on the home shelf, the
-        dotted panel on the picker)."""
+        dotted panel on the picker).
+
+        SIZE MATTERS, and on the desktop tier this barely pays. Measured on P4
+        glass 2026-07-26, picker drag at 1024x600: this path 26.8ms per frame
+        against 31.3ms for the plain full draw -- a 4.5ms saving, not the order of
+        magnitude it buys on the T-Deck. 15.2ms of it is the one scroll_rect,
+        moving an 874x429 band (750KB, ~148MB/s of cache traffic counting the
+        write-allocate read) which is about what this PSRAM can do; the rest is
+        the exposed strip plus the two or three cards it uncovers, all of it real
+        work. The premise of #113 -- that shifting pixels beats redrawing them --
+        holds at 320x240, where the band is 25x smaller than the cards it carries
+        are here. It does NOT generalise to a desktop-sized band, and the cards
+        cover 420 of the band's 429 rows, so there is no empty backdrop to stop
+        shifting either. Making this materially faster means moving fewer bytes or
+        overlapping the move with the repaint (async DMA), not tuning the loop."""
         bx, by, bw, bh = self.band_rect()
         if delta:
             cv.scroll_rect(bx, by, bw, bh, -delta, 0)
