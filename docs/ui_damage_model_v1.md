@@ -1,8 +1,141 @@
 # UI damage model v1 — one invalidation mechanism instead of six
 
-**Status:** proposal / direction doc. Nothing here is built.
-**Date:** 2026-07-26. All numbers measured on P4 glass (1024×600) unless stated.
+**Status: REVIEWED AND DOWNGRADED. Do not build §5 phases 1-3.**
+**Date:** 2026-07-26, revised the same day after an adversarial architecture + perf
+review. Numbers measured on P4 glass (1024×600) unless stated.
 **Tracks:** #58 (P4 port), #66 (performance ledger), #113 (kinetic scroll), #73 (windowed WM).
+
+---
+
+## 0. Review outcome — read this before anything else
+
+The review killed the performance case and left the maintainability case standing.
+Both halves matter, so both are recorded.
+
+**The perf claim is NOT established.** §1.1 argued the Editor tabs' 76-92ms is
+"chrome that did not change", from the observation that the cost is identical on an
+empty cart and on the richest cart on the device. That experiment had **no power**:
+
+- Every one of those draw loops iterates over the **viewport, not the content**.
+  `map_editor_ui.py:886-904` issues `rect` + `rectb` for every visible cell whether
+  occupied or not (only the `spr` at :903 is content-gated); the tile palette draws
+  from `sheet.count`, and a blank `SpriteSheet` still reports 256 tiles;
+  `code_layer.py:887` draws `len(visible_lines())` rows regardless of file length.
+  So identical numbers were **structurally guaranteed** either way.
+- The two maps on the device are 20×13 and 15×15 against a 26×15 viewport, so
+  `map_editor_ui.py:427-428` pins the camera at (0,0) and a pan is a **no-op**. The
+  "richest cart" had 620 bytes of assets. Both samples were effectively empty.
+- And content-independence says nothing about whether the pixels *changed* — which
+  is the question invalidation answers and the one never asked.
+
+**A cheaper lever with better evidence was found in the same code.** `map` and
+`paint` (and the scene pane, which is why `blocks` is 88ms) fill `lay.body_fill`
+and then immediately fill `lay.panel` **in the same colour**:
+
+    cv.rect(*(lay.body_fill + (th["surface"] if light else NAMES["black"],)))
+    cv.rect(*(lay.panel     + (th["surface"] if light else NAMES["black"],)))
+
+`map_editor_ui.py:861,864` and `paint_layer.py:686,690`. `panel` covers `body_fill`
+except two 8px columns and a bottom strip, so **~94% of ~450K px is written twice**
+— ~848KB of redundant writes per frame, and `moy_gfx_fill_run` is a cached store
+loop, so on PSRAM write-allocate genuinely doubles a fill's traffic.
+
+This exact bug was already fixed in **Settings** during this session, and its own
+comment says so (`settings_layer.py:966-968`: *"re-filling the panel rect would
+paint 272k of the same pixels a second time, ~9ms of pure duplicate fill"*). So
+Settings' 24ms — cited in §1 as proof the fixes worked — was bought by **deleting
+an overdrawn fill**, i.e. by the cheap lever this doc proposed to replace with an
+architecture. `docs/perf_native_gap_v1.md:49-54` had already named overdraw as the
+structural cost. This doc failed to cite it.
+
+**Prior art this doc should have cited and did not:** the same bet — infer what is
+static, retain it, repaint the rest — was already tried and **reverted** in this
+codebase as the *Fold-2 auto map cache* (`perf_native_gap_v1.md:176`), because
+inferring "static" under a free-form drawing API cost more than it saved. That is
+the most likely failure mode of §5 and it has precedent here.
+
+**What survives:** §2.1's argument. Six hand-rolled partial re-derivations of
+invalidation, two of which produced the same silent-key bug, is a real
+maintainability defect independent of any millisecond. Consolidation is defensible
+on bug-class grounds alone — which §6 already concedes promises no speed-up.
+
+### 0.1 Corrections to specific claims below
+
+Left in place so the errors are visible rather than quietly deleted:
+
+| claim | correction |
+|---|---|
+| "25× fewer pixels at 320×240" | **8.0×** (614,400 / 76,800). Against the actual editor window, 6.1×. |
+| picker band "874×429, 750KB" | that is the **fullscreen Library**, not the windowed picker (764×372, 555KB). Different surface, different `RETAINED_FRAMES`. |
+| `scroll_rect` "~148MB/s counting write-allocate" | the drag shifts ~26px, so src and dst share cache lines — there is no separate write-allocate read. ~99MB/s, matching `p4_scroll_ab.py:13`. The PSRAM ceiling was never measured. |
+| "scroll-as-blit buys only 4.5ms" | confounded: the A/B's full-redraw arm set `RETAINED_FRAMES = 0`, which trips `_try_drag_partial`'s first gate, so it varied shift-vs-repaint **and** band-vs-whole-surface. The controlled third arm (band repaint, no shift) was never run. |
+| the sweep's picker row | the grid is `ScrollRegion(horizontal=True)` (`launcher_layer.py:146`) and the sweep swipes **vertically**, so that row measured no scroll at all; its 6s drain also leaves covers cold where sibling tools use 14s. |
+| Settings 24ms as proof of the fixes | confounded by window area: Settings is 407×341 vs the Editor's 894×521, a 3.36× ratio against a measured 76/24 = 3.17. Consistent with "cost ∝ filled pixels" with no chrome story needed. |
+| §9 Q3 (is the PPA useful at small damage?) | already measured: a 1:1 16×16 PPA blit is **8× slower** than CPU and never crosses over (`perf_native_gap_v1.md:67-68`). Small damage makes the PPA *worse*. |
+
+### 0.2 Architecture blockers — prerequisites, not details
+
+§5.1 claimed the plumbing is "half-built". It is not:
+
+1. **`clip()` has no stack and no intersect.** `clip()` with no args resets to the
+   **full surface** (`canvas.py:223-242`, device twin `device_canvas.py:479-494`),
+   and existing surfaces already call it that way mid-draw
+   (`launcher_layer.py:519-533`, `artwork.py:806-808`). A compositor-installed
+   damage clip is silently destroyed by the first Layer that clips. Fixing it means
+   intersect-or-stack semantics in three implementations plus the native `DrawCtx`
+   state array and the web-view wire op.
+2. **`cls` ignores clip by design** ("a full-SURFACE reset", both backends) and
+   *every* migrated surface opens with one. So do `blit_strip`, `scroll_rect`,
+   `blit_window_from` and `blit_indices` — which are exactly the verbs the
+   compositor's own restore path uses.
+3. **The viewport is not half a damage clip.** `set_viewport` redefines `cv.w/cv.h`
+   (`canvas.py:135-157`) and every responsive layout is built from `(cv.w, cv.h,
+   fs)`, so a viewport set to a damage rect would relayout the surface for that
+   rect. It also resets the clip on install.
+4. **Damage must be a union over the last `RETAINED_FRAMES` painted frames.** The
+   P4 is a 2-deep DPI ping-pong; every existing partial mechanism encodes the
+   `>= 2` streak rule for exactly this reason. A list cleared after one paint is
+   correct on the host (`RETAINED_FRAMES = 1`) and **stale on the P4** — and the
+   320×240 `_base` goldens structurally cannot catch it, because that is the tier
+   that keeps full repaint.
+5. **On device, layer buffers cannot be freed.** `moy_alloc` has no `free()`; a
+   layer returns to the pool only if minted with an `owner`, and console chrome
+   passes `owner=None`. So §5.2's "it owns the buffer, the key, eviction" would
+   **leak PSRAM** on every eviction (today's MRU-2 strip eviction already does).
+6. **§5.2's stated rationale is already satisfied.** `ws.note_cost` is already
+   wired to all three caches with budget tests. Unification would not have
+   prevented the §2.1 bug — that key was wrong about the destination canvas, and a
+   unified primitive still needs a per-destination key. What caught it was the
+   counter plus the test, both per-cache.
+7. **No damage *producer* story.** There are ~179 `_dirty = True` sites across 22
+   files, some firing from input handlers that run outside `frame()`. §5.1 specifies
+   only the consumer, so a surface is migrated only once *every* path that can
+   dirty it produces a rect.
+8. **Two damage lists, not one.** Render damage (re-run the content draw into
+   `win.buf`) and composite damage (re-stamp `win.buf` into the root) are different
+   questions, and every measured win of this session lives in that distinction.
+
+### 0.3 The sequence the review argues for instead
+
+Cheapest first, each independently valuable, none requiring an architecture:
+
+1. **Delete the duplicate fills** on map / paint / scene and re-run the sweep.
+   Two-line change per surface; the identical fix on Settings measured ~9ms.
+2. **Fix the sweep** — axis-aware swipes and a 14s warm-up — and re-derive the
+   table. The picker row is currently measuring the wrong gesture.
+3. **Point an attribution instrument at map/paint/blocks for the first time.**
+   Every existing tool hardcodes settings/picker/library. `gate_counts()` bracketing
+   the cell loop vs the palette/toolbar tail would settle where the 90ms goes; the
+   code suggests ~1000 cells × 2 verbs = ~2000 gated calls, i.e. mostly **grid**,
+   not "chrome around the content".
+4. **Run the picker A/B's missing third arm** (band repaint without the shift) to
+   learn whether scroll-as-blit should be generalised or **deleted** above a band-size
+   threshold.
+
+Only then decide whether what remains justifies a damage model — and if it does,
+specify it per §0.2, with a non-vacuous phase-1 gate (phase 1 as written exercises
+only the no-op path) and a `damage 0|1` A/B switch, which every comparable lever in
+this codebase shipped with.
 
 ---
 
