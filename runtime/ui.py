@@ -460,6 +460,47 @@ def focus_ring(cv, th, rect, fs=None):
         cv.rectb(x - d, y - d, w + 2 * d, h + 2 * d, color)
 
 
+def fill_uncovered(cv, inner, outer, col):
+    """Fill only the parts of `inner` that `outer` does not already cover.
+
+    For the "clear the body, then clear the panel on top of it" idiom, where both
+    fills use the SAME colour and the panel sits almost entirely inside the body.
+    On the P4's 1024x600 editor those two rects are ~450K and ~426K pixels, so the
+    second fill was rewriting ~94% of the first in the same colour -- ~848KB of
+    redundant writes per frame, and `moy_gfx_fill_run` is a cached store loop, so
+    PSRAM's write-allocate doubles a fill's traffic. Settings hit the identical bug
+    and deleting its duplicate fill was worth ~9ms (see settings_layer.draw).
+
+    The panel is NOT contained in the body -- its top edge sits `2 * fs` px above
+    (`panel = (8fs, bar_h - 2fs, ...)` vs `body_fill = (0, bar_h, ...)`) -- so the
+    fill cannot simply be dropped; that would leave a stale strip under the bar.
+    This paints the overhang and nothing else, which is pixel-identical to the two
+    full fills whenever the colours match. Emits nothing at all when `inner` is
+    fully covered (the Scene pane's layout), and degrades to one full fill when the
+    two rects do not overlap, so it is safe on every tier.
+    """
+    ix, iy, iw, ih = int(inner[0]), int(inner[1]), int(inner[2]), int(inner[3])
+    ox, oy, ow, oh = int(outer[0]), int(outer[1]), int(outer[2]), int(outer[3])
+    if iw <= 0 or ih <= 0:
+        return
+    ix1, iy1 = ix + iw, iy + ih
+    ox1, oy1 = ox + ow, oy + oh
+    if ox >= ix1 or ox1 <= ix or oy >= iy1 or oy1 <= iy:
+        cv.rect(ix, iy, iw, ih, col)          # no overlap: all of it is uncovered
+        return
+    if iy < oy:                                # strip above
+        cv.rect(ix, iy, iw, oy - iy, col)
+    if iy1 > oy1:                              # strip below
+        cv.rect(ix, oy1, iw, iy1 - oy1, col)
+    my0 = iy if iy > oy else oy                # the vertically-overlapping band
+    my1 = iy1 if iy1 < oy1 else oy1
+    if my1 > my0:
+        if ix < ox:                            # strip left
+            cv.rect(ix, my0, ox - ix, my1 - my0, col)
+        if ix1 > ox1:                          # strip right
+            cv.rect(ox1, my0, ix1 - ox1, my1 - my0, col)
+
+
 # --- scrolling ------------------------------------------------------------------
 
 class ScrollRegion:

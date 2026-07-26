@@ -24,6 +24,11 @@ internals directly.
 """
 
 try:
+    import ui as _ui              # frozen on device
+except ImportError:  # pragma: no cover - host fallback
+    from runtime import ui as _ui
+
+try:
     from editors import MapEditor, KeyEdge
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editors import MapEditor, KeyEdge
@@ -861,7 +866,11 @@ class MapEditorUI:
         cv.rect(*(lay.body_fill + ((th["surface"] if light else NAMES["black"]),)))
         # Map cells + the tile-palette strip back themselves (dark map field),
         # so the panel joins the surface on the light tiers too.
-        cv.rect(*(lay.panel + ((th["surface"] if light else NAMES["black"]),)))
+        # Only the sliver of `panel` that `body_fill` did not already cover in
+        # this exact colour -- the full re-fill rewrote ~94% of ~450K px for
+        # nothing (see ui.fill_uncovered).
+        _ui.fill_uncovered(cv, lay.panel, lay.body_fill,
+                           th["surface"] if light else NAMES["black"])
         cv.rectb(*(lay.panel + (NAMES["green"],)))
         # Live zoom metrics (#37 follow-up): one cell size drives the grid, the tile
         # upscale and the title's "z<level>" badge.

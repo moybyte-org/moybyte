@@ -30,6 +30,11 @@ write + the durable undo journal, Stage 1). The editor manages the cart's
 DEFAULT scene (multi-scene UX is a deferred follow-up, #85 decision log 4)."""
 
 try:
+    import ui as _ui              # frozen on device
+except ImportError:  # pragma: no cover - host fallback
+    from runtime import ui as _ui
+
+try:
     from editors import SceneEditor, KeyEdge
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editors import SceneEditor, KeyEdge
@@ -604,7 +609,11 @@ class SceneEditorUI:
         th = ws.theme_colors
         light = (not lay._base) or ws.light_chrome()  # tokens on every responsive tier; _base stays frozen only in DARK chrome
         cv.rect(*(lay.body_fill + ((th["surface"] if light else NAMES["black"]),)))
-        cv.rect(*(lay.panel + ((th["surface"] if light else NAMES["black"]),)))
+        # Only the sliver of `panel` that `body_fill` did not already cover in
+        # this exact colour -- the full re-fill rewrote ~94% of ~450K px for
+        # nothing (see ui.fill_uncovered).
+        _ui.fill_uncovered(cv, lay.panel, lay.body_fill,
+                           th["surface"] if light else NAMES["black"])
         cv.rectb(*(lay.panel + (NAMES["green"],)))
         x0, y0, scale, vw, vh = self._sv_metrics()
         title = "SCENE"

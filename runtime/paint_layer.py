@@ -43,6 +43,11 @@ big panel the zoomed pixel grid GROWS to fill the space (a multiple of 48px so t
 1x1/2x2/3x3 sprite sizes all divide it into whole pixels) and the chrome scales with
 the font. Hit-testing is in SYSTEM coords (no _game_xy translation).
 """
+
+try:
+    import ui as _ui              # frozen on device
+except ImportError:  # pragma: no cover - host fallback
+    from runtime import ui as _ui
 from editors import PaintEditor, KeyEdge
 
 # The shared pre-literate glyph vocabulary (#89-#93 icon pass): the tool row draws a
@@ -687,7 +692,11 @@ class PaintLayer:
         # The panel joins the surface on the light tiers -- the pixel grid and
         # swatch/preview cells all back themselves, so only the frozen dark
         # baseline needs the black plate.
-        cv.rect(*(lay.panel + ((th["surface"] if light else NAMES["black"]),)))
+        # Only the sliver of `panel` that `body_fill` did not already cover in
+        # this exact colour -- the full re-fill rewrote ~94% of ~450K px for
+        # nothing (see ui.fill_uncovered).
+        _ui.fill_uncovered(cv, lay.panel, lay.body_fill,
+                           th["surface"] if light else NAMES["black"])
         cv.rectb(*(lay.panel + ((th["author"] if light else NAMES["orange"]),)))
         # No dirty star: SAVE (the button and the concept) is gone (#111) -- autosave
         # commits pending edits within seconds, so "unsaved" is not a state a kid can
