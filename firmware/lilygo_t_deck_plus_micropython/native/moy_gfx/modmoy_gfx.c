@@ -1296,6 +1296,52 @@ static mp_obj_t moy_gfx_make_draw_gate(mp_obj_t ctx_in, mp_obj_t kind_in,
 static MP_DEFINE_CONST_FUN_OBJ_3(moy_gfx_make_draw_gate_obj,
                                  moy_gfx_make_draw_gate);
 
+// crop_index(dst, dw, dh, src, sw, sh, ox, oy, cw, ch) -- nearest-sample the
+// (ox, oy, cw, ch) window of an INDEXED source (1 byte/pixel) into a dw x dh
+// indexed destination. The cover-art crop (#155).
+//
+// Covers are MOY64 indices, not RGB565, so this stays in the index domain: the
+// shared console caches one indexed blittable that the host draws per-pixel and
+// the device bakes to RGB565 once. Routing it through the PPA instead would mean
+// converting to 565 first and handing back a device-only representation, to save
+// a fraction of a millisecond -- the crop is only ~20k pixels. The DECODE was
+// the expensive half (0.5-1.7s) and that is now cached; this is what is left.
+//
+// Reproduces runtime/console.py _CoverJob's crop EXACTLY (same integer floors,
+// same column map), so a native and a Python crop are byte-identical.
+static mp_obj_t moy_gfx_crop_index(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    mp_buffer_info_t dbi, sbi;
+    mp_get_buffer_raise(a[0], &dbi, MP_BUFFER_WRITE);
+    mp_int_t dw = mp_obj_get_int(a[1]);
+    mp_int_t dh = mp_obj_get_int(a[2]);
+    mp_get_buffer_raise(a[3], &sbi, MP_BUFFER_READ);
+    mp_int_t sw = mp_obj_get_int(a[4]);
+    mp_int_t sh = mp_obj_get_int(a[5]);
+    mp_int_t ox = mp_obj_get_int(a[6]);
+    mp_int_t oy = mp_obj_get_int(a[7]);
+    mp_int_t cw = mp_obj_get_int(a[8]);
+    mp_int_t ch = mp_obj_get_int(a[9]);
+    if (dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0 || cw <= 0 || ch <= 0
+        || ox < 0 || oy < 0 || ox + cw > sw || oy + ch > sh
+        || (size_t)(sw * sh) > sbi.len
+        || (size_t)(dw * dh) > dbi.len) {
+        return mp_const_false;
+    }
+    uint8_t *dst = (uint8_t *)dbi.buf;
+    const uint8_t *src = (const uint8_t *)sbi.buf;
+    for (mp_int_t dy = 0; dy < dh; dy++) {
+        const uint8_t *srow = src + (size_t)(oy + dy * ch / dh) * (size_t)sw;
+        uint8_t *drow = dst + (size_t)dy * (size_t)dw;
+        for (mp_int_t dx = 0; dx < dw; dx++) {
+            drow[dx] = srow[ox + dx * cw / dw];
+        }
+    }
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_crop_index_obj, 10, 10,
+                                           moy_gfx_crop_index);
+
 // pack_strip(fb, fb_w, x, y, w, rows, dst) -- copy a (w x rows) window of the
 // framebuffer into dst contiguously (row-major). Full-width is one memcpy;
 // cropped rects are packed row-by-row in C (the slow Stage 2 Python path).
@@ -1369,6 +1415,7 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_scroll_rect), MP_ROM_PTR(&moy_gfx_scroll_rect_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_indices), MP_ROM_PTR(&moy_gfx_blit_indices_obj) },
     { MP_ROM_QSTR(MP_QSTR_text),       MP_ROM_PTR(&moy_gfx_text_obj) },
+    { MP_ROM_QSTR(MP_QSTR_crop_index), MP_ROM_PTR(&moy_gfx_crop_index_obj) },
     { MP_ROM_QSTR(MP_QSTR_pack_strip), MP_ROM_PTR(&moy_gfx_pack_strip_obj) },
 };
 static MP_DEFINE_CONST_DICT(moy_gfx_globals, moy_gfx_globals_table);
