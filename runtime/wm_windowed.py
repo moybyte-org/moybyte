@@ -1299,21 +1299,34 @@ class WindowedWM(FullscreenStackWM):
                 self._content_for(win.kind).draw(dt)
             finally:
                 self._install(self._root_ctx)
-        # Drag stamp-defer (#58): while THIS window drags on a device with an
-        # async 1:1 blitter (P4SystemCanvas.blit_strip_async -> PPA DMA), draw
-        # the chrome FIRST -- strip/borders/shadow/title are all DISJOINT from
-        # the content rect -- and kick the content stamp as the frame's LAST
-        # framebuffer write; the deferred present (present_pending) then overlaps
-        # the ~24ms DMA with the next loop's input poll, the same machinery as
-        # the quiet-game-frame composite. Only the TOP-drawn window during a
-        # DRAG (a resize redraws live-body above; the grip drawn under the stamp
-        # simply hides while dragging, which is fine). Host/web canvases lack
-        # the hook, so their path is byte-identical.
-        if (self._drag is not None and self._wins.get(self._drag[0]) is win
+        # Stamp-defer (#58 drag; extended to CONTENT gestures 2026-07-26): on a
+        # device with an async 1:1 blitter (P4SystemCanvas.blit_strip_async ->
+        # PPA DMA) draw the chrome FIRST -- strip/borders/shadow/title are all
+        # DISJOINT from the content rect -- and register the content stamp so the
+        # compositor kicks it as the frame's LAST framebuffer write. The deferred
+        # present then overlaps the ~25ms DMA with the next loop's input poll,
+        # the same machinery as the quiet-game-frame composite.
+        #
+        # Why content scrolls qualify now: the stamp is a 1:1 copy, so it is a
+        # wall-time WASH against the CPU (PSRAM-bound both ways, measured 91MB/s
+        # either engine) -- ALL of its value is the overlap, and the overlap is
+        # only sound when nothing draws over the region afterwards. The #155
+        # chrome freeze made that true on a quiet gesture frame: the strip,
+        # border and taskbar chips no longer repaint at all, so the deferred DMA
+        # really is the last write. Same accepted trade as the drag path -- the
+        # resize grip sits inside the content rect and hides for the duration.
+        #
+        # Host/web canvases have no hook, so their path is byte-identical.
+        moving_this = (self._drag is not None
+                       and self._wins.get(self._drag[0]) is win)
+        scrolling_this = (focused and self._chrome_quiet
+                          and (self._content_gesture
+                               or self._content_flinging()))
+        if ((moving_this or scrolling_this)
                 and self._order and self._wins.get(self._order[-1]) is win):
             asb = getattr(self._root_canvas, "blit_strip_async", None)
             if asb is not None:
-                self._win_chrome(win, focused)
+                self._win_chrome(win, focused, quiet=self._chrome_quiet)
                 if asb(win.buf, win.x + 1, win.y + 1 + win.title_h):
                     return
                 # non-fit / refusal: fall through to the sync stamp (the chrome

@@ -1249,11 +1249,21 @@ def test_font_scale_change_from_a_window_reaches_the_root_canvas(tmp_path):
         "the scale landed on a throwaway window buffer, not the root canvas"
 
 
+def _pin_clock(ws):
+    """Freeze the OS bar's clock for a whole-frame pixel comparison.
+
+    The bar prints HH:MM, so a minute boundary falling between the reference
+    render and the compared one makes two otherwise-identical frames differ --
+    a real once-in-a-while flake, seen once in a full-suite run before this."""
+    ws.bar_layer._clock_text = lambda: "10:30"
+
+
 def test_font_scale_change_matches_booting_at_that_scale(tmp_path):
     """The pixel contract: switching at runtime must render EXACTLY what booting
     at that scale renders -- the mismatch is what read as 'bunched up'."""
     ws_boot = _ws(tmp_path, font_scale=1)
     drv_boot = _drv(ws_boot)
+    _pin_clock(ws_boot)
     ws_boot.open_settings()
     for _ in range(30):
         ws_boot.mark_dirty()
@@ -1262,6 +1272,7 @@ def test_font_scale_change_matches_booting_at_that_scale(tmp_path):
 
     ws = _ws(tmp_path, font_scale=2)
     drv = _drv(ws)
+    _pin_clock(ws)
     ws.open_settings()
     for _ in range(30):
         ws.mark_dirty()
