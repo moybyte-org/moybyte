@@ -120,8 +120,18 @@ def main():
     args = ap.parse_args()
     b = P4Board(args.port)
     try:
-        b.reset()
-        b.pyexec(PROBE)
+        def fresh():
+            """Boot into the DESK world with the probe loaded.
+
+            Deliberately a RESET between surfaces, not ws.go_home(): go_home lands
+            in the fullscreen Library (the play world), where the picker is not a
+            window at all -- so ws.wm._wins has no 'make' and the measurement died
+            with a KeyError. A reset also keeps the two surfaces from contaminating
+            each other's caches."""
+            b.reset()
+            b.pyexec(PROBE)
+
+        fresh()
 
         def gesture(x0, y0, x1, y1, n=30):
             b.ser.write(("swipe %d %d %d %d %d\n" % (x0, y0, x1, y1, n)).encode())
@@ -144,12 +154,14 @@ def main():
             gesture(cx, lo, cx, hi)
         report(b, "settings scroll")
 
-        b.pyexec("ws.go_home()")
-        b.drain(1.0)
+        fresh()
         b.open("picker")
         b.drain(14.0)
         b.pyexec(HOOK)
         g = b.pyval("ws.wm._wins['make'].ctx.layout.lib_grid")
+        if g is None or "make" not in b.state()["wins"]:
+            print("\n  picker did not open as a window -- skipped")
+            return 0
         w = b.state()["wins"]["make"]
         ox, oy = w[0] + 1, w[1] + 1 + w[4]
         gx, gy, gw, gh = g

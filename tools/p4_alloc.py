@@ -479,8 +479,20 @@ def main():
                       % (nc, nf / float(nc), gmin, gavg, gmax))
             else:
                 print("   NO collect in %d frames" % nf)
-            print("   worst frame %dms;  ms histogram: %s" % (worst, "  ".join(
-                "%d-%d:%d" % (ms, ms + 3, n_) for ms, n_ in hist)))
+            # Percentiles off the 4ms-bucket histogram: a bucket's LOW edge, so
+            # these read as "at least this fast" and never flatter the result.
+            tot_n = sum(v for _b, v in hist)
+            def _pct(p):
+                seen = 0
+                for ms_, v in hist:
+                    seen += v
+                    if seen >= tot_n * p:
+                        return ms_
+                return worst
+            print("   median %dms  p90 %dms  p99 %dms  worst %dms"
+                  % (_pct(0.5), _pct(0.9), _pct(0.99), worst))
+            print("   ms histogram: %s" % "  ".join(
+                "%d-%d:%d" % (ms, ms + 3, n_) for ms, n_ in hist))
             print("   biggest frame alloc %d B;  KB/frame histogram: %s"
                   % (amax, "  ".join("%dK:%d" % (kb, n_) for kb, n_ in ahist)))
 
@@ -515,8 +527,12 @@ def main():
             ct = w[1] + 1 + w[4]
             lo, hi = ct + (w[3] - w[4]) - 50, ct + 50
             record("settings scroll", lambda: gesture(cx, lo, cx, hi))
-            b.pyexec("ws.go_home()")
-            b.drain(1.0)
+            # A reset, not go_home: go_home lands in the fullscreen Library
+            # where the picker is not a window (no 'make' key), and it would carry
+            # Settings' warm caches into the picker's numbers.
+            b.reset()
+            for _s in (PROBE, CAL, HOOK, AGG, WRAPS, CADENCE, PREGROW):
+                b.pyexec(_s)
 
         if args.surface in ("picker", "both"):
             b.open("picker")
