@@ -132,6 +132,71 @@ follow from the numbers, in order:
 2. The **scene renderer**, which is now the single most expensive phase on the
    device and is paid twice (Scene tab and Blocks tab).
 
+### 0.065 "Move the GUI to C?" — no, and here is the measurement
+
+The obvious reading of §0.06 is "50–75% is Python, so put the GUI in C". Measured
+on glass 2026-07-27, that is wrong on both halves.
+
+**The MP→C transition is not the cost.** A gated `cv.rect` call with constant
+arguments costs **1.2µs** (empty MicroPython loop iteration: 1.27µs; the loop plus
+the call: 2.5µs). Computing the arguments adds ~0.9µs, reading them off a layout
+object ~0.8µs, an unhoisted `cv.rect` attribute lookup ~0.6µs. Nothing here is a
+40µs call.
+
+**The kernel time is memory, not code.** 960 map-cell fills (28×17 = 476px, 914KB
+in total) at 1024x600:
+
+| how the same 914KB is written | cost |
+|---|---|
+| one 896×510 fill | 13.4ms (= 68MB/s, the PSRAM write ceiling) |
+| 510 full-width rows (896×1) | 14.3ms |
+| 960 grid cells, row-major | 22.4ms |
+| 960 cells scattered | 23.0ms |
+| 960 cells all at the same spot (cache-hot) | 4.6ms |
+
+So the map grid's ~22ms is **13.4ms of irreducible bytes** plus ~8ms of penalty
+for writing 28px-wide strips across a 2048-byte stride, plus ~1ms of call
+overhead. C cannot remove the floor; a *row-contiguous* kernel could recover most
+of the 8ms. And if every microsecond of Python vanished from the map tab it would
+go 70.7 → ~32ms — still 2× over budget, because the bytes remain.
+
+**A caveat on §0.06's "dispatch" column:** it is wall minus *gated* kernel time,
+and only `rect`/`rectb`/`print`/`pix` are gated. `spr`/`line`/`circ` are native
+work booked as dispatch. It is therefore "everything that is not a counted fill",
+not "Python".
+
+**Tried and reverted: a lookup-free `spr` preamble.** A microbenchmark put
+`cv.spr` for a cached 8×8 tile at 92µs against a 19µs C blit, apparently 73µs of
+preamble (five `getattr(img, name, default)` guards ≈ 24µs, an empty
+`flush_batch()` call ≈ 11µs, plus `int()`s and nine attribute reads). Replacing
+the guards with direct attribute reads behind `try/except AttributeError` (plus
+class-level defaults on `Image`) made the map tab **10ms SLOWER** on glass — 70.7
+→ 81.4ms, repeatable to ±1ms. The editors blit image objects that are not all
+`Image` instances, so the AttributeError *fires*, and a raised exception in
+MicroPython costs far more than the five getattrs it replaced. Reverted.
+
+Two lessons, both cheap to re-learn expensively: `try/except` is a fast-path guard
+only when the exception never fires; and **the microbenchmark was not
+reproducible** — a second run reported 43µs for the same unchanged `flush_batch`
+that first measured 11.5µs, while the 62-frame `p4_attrib` numbers repeat to
+±1ms. Act on in-situ frame measurements, not on a REPL loop.
+
+**What this leaves as the levers**, in order:
+
+1. **Fewer, wider spans** — the native grid kernel, for the contiguity as much as
+   the call count (est. 22 → 14ms on the map grid).
+2. **Retained widget surfaces** — Paint's tool row, the palette, the bar strip are
+   static across frames; caching *pixels* removes the dispatch and the bytes. The
+   bar strip cache already proves the mechanism.
+3. Not redrawing at all: the redraw gate exists, the editors just don't use it at
+   tab granularity.
+
+The pattern this codebase has actually won with five times (`spr_batch` #43,
+`spr_gate` #63, `blit_map`, `decode_runs`, `blit565`) is not "move code to C" — it
+is **raise the verb's level so one call does what N did**, keeping the Python
+description portable. Rewriting layers in C would fork `runtime/`, and host ==
+device is the invariant the whole console rests on.
+
 ### 0.07 Method note: measure content, not the first cart on the shelf
 
 Three separate runs in this campaign measured an empty screen and drew a
