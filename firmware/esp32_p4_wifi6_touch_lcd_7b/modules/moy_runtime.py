@@ -104,6 +104,33 @@ class P4SystemCanvas(DeviceCanvas):
                        self._clip_x0, self._clip_y0,
                        self._clip_x1, self._clip_y1)
 
+    # Below this many pixels a CPU fill wins outright: the rect is cache-resident
+    # and the PPA's ~60us submit cost dominates. Measured on glass 2026-07-26 --
+    # 128x64 CPU 0.07ms vs PPA 0.15ms; 200x100 CPU 0.72ms vs PPA 0.19ms.
+    PPA_FILL_MIN_PX = 16384
+
+    def ppa_fill(self, x, y, w, h, col):
+        """Clear a block on the PPA DMA engine. True if it took it (#155).
+
+        Worth having even though a 1:1 PPA COPY measured a wash against the CPU:
+        a copy moves the same bytes either way, but a CPU fill pays an extra
+        cache-line READ per line (write-allocate on PSRAM) that the DMA does not.
+        So a fill is the one op where DMA does strictly LESS memory traffic --
+        measured 18.0ms -> 3.6ms for the full screen."""
+        ppa = self._ppa
+        if ppa is None or w <= 0 or h <= 0 or w * h < self.PPA_FILL_MIN_PX:
+            return False
+        fill = getattr(ppa, "fill", None)
+        if fill is None:
+            return False              # older firmware: CPU path
+        try:
+            return bool(fill(self._buf, self._stride, self._bh,
+                             x, y, w, h, col))
+        except Exception as exc:  # noqa: BLE001 -- a real error demotes for good
+            print("Moybyte P4 PPA fill failed -> CPU:", exc)
+            P4SystemCanvas._ppa = None
+            return False
+
     def new_layer(self, w, h, owner=None):
         # Font-scale-carrying layers (mirrors host SystemCanvas.new_layer): the
         # windowed WM's window buffers and the bar cache print through these, so

@@ -356,6 +356,11 @@ class DeviceCanvas:
         self._oy = 0
         self._user_cam_x = 0
         self._user_cam_y = 0
+        # DMA fill hook (#155), resolved once: the P4 backend can clear a block
+        # on the PPA, which writes PSRAM WITHOUT the CPU cache's write-allocate
+        # read -- 4-5x a CPU fill above the crossover. None on backends without
+        # one, so those keep the moy_gfx path untouched.
+        self._ppa_fill = getattr(self, "ppa_fill", None)
         self.reset_state()
         self._install_draw_gates()
 
@@ -767,6 +772,11 @@ class DeviceCanvas:
             self._drain_lcopy()        # flight for a frame that ISN'T drawing the
                                        # layer (screen switch) -- drain, don't race
         col = self._col(c)
+        # A whole-surface clear is the biggest single fill the console issues, so
+        # it is the first thing to hand to the DMA engine (#155).
+        pf = self._ppa_fill
+        if pf is not None and pf(self._ox, self._oy, self.w, self.h, col):
+            return
         if self._gfx is not None:
             _t0 = _ticks_us()          # #66 DRAW2: fill bucket (cls is its big half)
             if self._ox == 0 and self._oy == 0 and self.w == self._stride:
