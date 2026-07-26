@@ -916,6 +916,10 @@ class Workstation:
         self._cover_runs_order = []   # LRU keys (oldest first)
         self._cover_runs_bytes = 0
         self._covers_deferred = False # a build was pushed past the budget -> stay dirty
+        self._cover_seen = False      # a surface asked for a cover -> idle prefetch is
+                                      # worth running (see _cover_prefetch_tick)
+        self._cover_pf_i = 0          # round-robin cursor over _all_carts
+        self._quiet_frames = 0        # consecutive frames the redraw gate skipped
         # Unified top bar (Stage 1): the editable 16x16 IconSheet the bar draws its
         # chrome icons from. Injected by build_workstation / run_desktop (loaded from
         # system_icons.moygfx, else the baked default theme); None falls back to _glyph.
@@ -1774,6 +1778,8 @@ class Workstation:
         path = cart.get("path")
         if path is None or self.carts_store is None or w <= 0 or h <= 0:
             return None
+        self._cover_seen = True            # a surface is showing covers: prefetching
+                                           # the rest on idle frames is worth doing
         if path in self._cover_none:       # known cover-less: never re-probe
             return None
         key = (path, w, h)
@@ -1820,20 +1826,10 @@ class Workstation:
             runs = self._cover_runs_get(path)
             sig = None
             if runs is None:
-                blob = loader(path, cover_name) if loader is not None else None
-                if blob:
-                    parse = getattr(self.carts_store, "moyimg_runs", None)
-                    runs = parse(blob) if parse is not None else None
-                    sig = sig_fn(blob) if sig_fn is not None else None
+                runs, sig = self._cover_runs_load(path)
                 if runs is None:
-                    # No cover art. Remember it per PATH, not just per (path, w,
-                    # h): probing for a file that is not there costs 20-28ms on
-                    # this board's flash, and most carts have no cover, so a
-                    # relayout was re-probing all of them.
-                    self._cover_none[path] = True
                     self._cover_spend(t0)
                     return self._cover_finish(key, None)
-                self._cover_runs_put(path, sig, runs)
             need = runs[0] * runs[1]
             # The shared scratch is only safe when the build cannot span frames,
             # i.e. BOTH steps are native. With a Python crop the job keeps
@@ -1865,6 +1861,73 @@ class Workstation:
             return None
         jobs.pop(key, None)
         return self._cover_finish(key, job.img)
+
+    def _cover_runs_load(self, path):
+        """Read + parse this cart's cover blob into the runs cache; returns
+        (runs, sig), or (None, None) for a cart with no cover art.
+
+        This is the SIZE-INDEPENDENT half of a cover build, and the expensive one:
+        58ms to read the blob and 50ms to parse it on P4 glass, against ~2ms for
+        the decode+crop that turns runs into a card of a given size. Split out so
+        the idle prefetch can pay it while nothing is happening (see
+        _cover_prefetch_tick) instead of mid-drag, when a card scrolls into view.
+
+        A cover-less cart is remembered per PATH: probing for a file that is not
+        there costs 22ms on this board's flash (a listdir of images/ measured the
+        same 23.5ms, so there is no cheaper existence test), and 17 of 29 carts had
+        no cover -- 380ms of pure waste per session before this was cached."""
+        store = self.carts_store
+        loader = getattr(store, "load_image", None)
+        cover_name = getattr(store, "COVER_IMAGE", "cover")
+        sig_fn = getattr(store, "cover_sig", None)
+        blob = loader(path, cover_name) if loader is not None else None
+        runs = None
+        sig = None
+        if blob:
+            parse = getattr(store, "moyimg_runs", None)
+            runs = parse(blob) if parse is not None else None
+            sig = sig_fn(blob) if sig_fn is not None else None
+        if runs is None:
+            self._cover_none[path] = True
+            return None, None
+        self._cover_runs_put(path, sig, runs)
+        return runs, sig
+
+    def _cover_prefetch_tick(self):
+        """Warm ONE not-yet-known cart's cover runs. Called only from the idle
+        branch of frame(), i.e. on a frame that would otherwise do nothing.
+
+        A cover's blob read + parse is ~108ms and is charged to whichever frame
+        first needs the card. On a shelf that scrolls, that is a DRAG frame: the
+        picker measured a 577ms worst frame and a 48ms median against a 31ms
+        warm one, which is the "it takes a while for all the covers to load and
+        for it to stop stuttering" the owner reported. The work cannot be made
+        much cheaper (it is flash-bound), so it moves instead -- same reasoning as
+        the bar strip: spend it where nobody is waiting.
+
+        Only runs while a surface is actually showing covers (_cover_seen, set by
+        _cover_for), so a device sitting in an editor never warms a cache nobody
+        wants, and only after a couple of quiet frames so a gap between two
+        gestures is not spent on flash."""
+        carts = self._all_carts
+        if not self._cover_seen or self.carts_store is None or not carts:
+            return
+        n = len(carts)
+        i = self._cover_pf_i
+        for _ in range(n):
+            cart = carts[i % n]
+            i += 1
+            path = cart.get("path")
+            if (not path or path in self._cover_none
+                    or self._cover_runs_get(path) is not None):
+                continue
+            self._cover_pf_i = i
+            self._cover_runs_load(path)
+            return
+        # Every cart is known: stop until something asks for covers again (a
+        # re-scan clears the caches and _cover_for re-arms the flag).
+        self._cover_pf_i = i
+        self._cover_seen = False
 
     def _cover_runs_get(self, path):
         """The parsed (sw, sh, packed) runs for this cart's cover, or None."""
@@ -4061,7 +4124,16 @@ class Workstation:
         # device saves the SPI flush + power. A running cart / live wallpaper / active
         # overlay always reports animating, so it redraws every frame as before.
         if not self._needs_redraw(dt):
+            # Nothing to paint. Spend the frame warming the next cover instead
+            # (#155) -- after two quiet frames, so the gap between two gestures
+            # is not spent on a 108ms flash read. This is the ONLY work the idle
+            # branch does, and it never dirties anything: the visible cards are
+            # built by the draw path, the prefetch is for the ones off-screen.
+            self._quiet_frames += 1
+            if self._quiet_frames > 2:
+                self._cover_prefetch_tick()
             return
+        self._quiet_frames = 0
         # Perf HUD (#43/#44): mark the start of this frame's draw work. Cheap (one
         # ticks call); only meaningful for a frame we actually paint, so it's after
         # the redraw gate. _flush_ms is filled around comp.flush() below; _draw_ms

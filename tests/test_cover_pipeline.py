@@ -182,3 +182,85 @@ def test_native_and_python_crops_are_byte_identical(tmp_path):
             job.step(_ticks_ms())
         assert job.done and job.img is not None, (w, h)
         assert job.img.pix == python_crop(pix, sw, sh, w, h), (w, h)
+
+
+# -- idle prefetch (#155, P4 glass 2026-07-26) ----------------------------------
+
+def _mk_carts_with_covers(tmp_path, n, with_cover=3):
+    root = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(root)
+    out = []
+    for i in range(n):
+        c = moy_carts.create("C%d" % i, root, src="def _draw():\n    pass\n")
+        if i < with_cover:
+            moy_carts.save_image(c, "cover", _cover_text(32, 24, i + 1))
+        out.append(c)
+    return root, out
+
+
+def test_idle_frames_prefetch_cover_runs(tmp_path):
+    """A cover's blob read + parse is ~108ms on P4 flash and is SIZE-INDEPENDENT.
+    Charged lazily, it lands on the frame that first needs the card -- during a
+    shelf drag, that is a drag frame, which is why the picker measured a 577ms
+    worst frame. Idle frames do nothing, so they pay it instead.
+
+    The assertion is that runs for a cart NOT on screen become cached while the
+    console is idle -- that is what makes the later drag free."""
+    from runtime import host_app
+    root, carts = _mk_carts_with_covers(tmp_path, 4, with_cover=3)
+    ws = host_app.build_workstation(root)
+    covered = [c for c in ws._all_carts if c.get("path") in
+               [x["path"] for x in carts[:3]]]
+    assert covered, "fixture carts missing from the store"
+
+    # Nothing has asked for a cover yet -> the prefetch must stay asleep, so a
+    # device sitting in an editor never warms a cache nobody wants.
+    for _ in range(50):
+        ws._cover_prefetch_tick()
+    assert all(ws._cover_runs_get(c["path"]) is None for c in covered)
+
+    # A surface draws a card -> prefetch is armed and warms the REST on idle.
+    _land_cover(ws, covered[0], 20, 15)
+    assert ws._cover_seen
+    for _ in range(200):
+        ws._cover_prefetch_tick()
+    for c in covered:
+        assert ws._cover_runs_get(c["path"]) is not None, c["path"]
+
+
+def test_prefetch_makes_a_later_build_touch_no_storage(tmp_path):
+    """The point of warming runs: the build that follows must not read flash."""
+    from runtime import host_app
+    root, carts = _mk_carts_with_covers(tmp_path, 3, with_cover=3)
+    ws = host_app.build_workstation(root)
+    # By PATH: _all_carts also holds the seeded built-ins, most of which have no
+    # cover at all, so an index into it is not necessarily a fixture cart.
+    want = carts[-1]["path"]
+    target = next(c for c in ws._all_carts if c.get("path") == want)
+    first = next(c for c in ws._all_carts if c.get("path") == carts[0]["path"])
+    _land_cover(ws, first, 20, 15)                 # arm
+    for _ in range(200):
+        ws._cover_prefetch_tick()
+
+    reads = []
+    orig = ws.carts_store.load_image
+
+    def spy(path, name, _orig=orig):
+        reads.append(path)
+        return _orig(path, name)
+    ws.carts_store.load_image = spy
+    img = _land_cover(ws, target, 20, 15)
+    assert img is not None
+    assert reads == [], "the build re-read the blob the prefetch already parsed"
+
+
+def test_prefetch_stops_once_every_cart_is_known(tmp_path):
+    """It must not spin: once every cart is either warmed or known cover-less it
+    disarms, so an idle console is not walking the cart list forever."""
+    from runtime import host_app
+    root, _carts = _mk_carts_with_covers(tmp_path, 3, with_cover=1)
+    ws = host_app.build_workstation(root)
+    _land_cover(ws, ws._all_carts[0], 20, 15)
+    for _ in range(200):
+        ws._cover_prefetch_tick()
+    assert ws._cover_seen is False
