@@ -2054,7 +2054,9 @@ def test_native_spr_gate_wired():
     assert "def make_spr_gate(self, sheet, fallback):" in device_canvas
     assert '"spr": _spr_entry,' in runtime
     # flush_batch draws the run via ONE array-mode native call.
-    assert "self._gfx.blit_batch(self._buf, self.w, self.h, a," in device_canvas
+    # Buffer geometry, not the logical surface: since the #155 viewport a canvas's
+    # w/h can be a sub-rect of its buffer, so kernels take _stride/_bh.
+    assert "self._gfx.blit_batch(self._buf, self._stride, self._bh, a," in device_canvas
 
 
 def test_perf_bench_mode_is_stamped_not_committed():

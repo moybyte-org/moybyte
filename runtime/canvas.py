@@ -78,6 +78,23 @@ class Canvas:
         self.h = height
         self.palette = palette or _pal.MOY64
         self.buf = bytearray(width * height)
+        # VIEWPORT (#155): w/h are the LOGICAL surface a caller draws on (0,0
+        # based); _stride/_ox/_oy say where that surface lives inside `buf`. They
+        # are equal to the full buffer here, so a plain Canvas is unchanged --
+        # set_viewport() is what makes a canvas a window onto a bigger one, which
+        # is how a window's content draws straight into the framebuffer instead
+        # of into a private buffer that then has to be copied.
+        #
+        # The translation rides the EXISTING camera: _cam_x is kept as the
+        # EFFECTIVE offset (user camera minus the origin), so every verb's
+        # `x -= self._cam_x` already lands in buffer space and the hot paths cost
+        # exactly what they did before. camera() remembers the user's own value
+        # separately so it can still report and restore it.
+        self._stride = width
+        self._ox = 0
+        self._oy = 0
+        self._user_cam_x = 0
+        self._user_cam_y = 0
         # Pending sprite batch (Fold 1, #63): spr_tile() queues 1x1 sheet-tile blits
         # here instead of drawing them immediately, and flush_batch() emits the whole
         # run in one go (spr_batch -> one native blit_batch on device). Initialised
@@ -115,6 +132,30 @@ class Canvas:
 
     # -- draw state (camera / clip / pal / palt, #11) ------------------------
 
+    def set_viewport(self, x, y, w, h):
+        """Point this canvas at the (x, y, w, h) sub-rect of its own buffer:
+        callers keep drawing 0,0-based in a w x h surface, the pixels land at the
+        offset, and everything clips to the rect (#155).
+
+        The point is to delete a copy. A window's content used to render into a
+        private buffer that was then blitted 1:1 onto the framebuffer -- ~900KB
+        of bus traffic per frame on the P4, where a full-screen copy costs 27ms
+        against a 91MB/s ceiling. Through a viewport the same draw calls write
+        the framebuffer once, in place."""
+        self._ox = int(x)
+        self._oy = int(y)
+        self.w = int(w)
+        self.h = int(h)
+        self.reset_state()
+
+    def clear_viewport(self):
+        """Back to owning the whole buffer."""
+        self._ox = 0
+        self._oy = 0
+        self.w = self._stride
+        self.h = len(self.buf) // self._stride if self._stride else 0
+        self.reset_state()
+
     def reset_state(self):
         """Restore camera (0,0), clip (full screen), pal (identity), palt (all
         opaque). The console calls this before each cart frame so draw state never
@@ -122,12 +163,17 @@ class Canvas:
         # Draw any queued sprites FIRST: they were spr_tile()'d under the current
         # camera/clip/pal/palt, so they must be emitted before that state is wiped.
         self.flush_batch()
-        self._cam_x = 0
-        self._cam_y = 0
-        self._clip_x0 = 0
-        self._clip_y0 = 0
-        self._clip_x1 = self.w
-        self._clip_y1 = self.h
+        # _cam_* is the EFFECTIVE offset (user camera - viewport origin), and the
+        # clip rect lives in BUFFER coordinates; both are identities on a
+        # full-surface canvas.
+        self._user_cam_x = 0
+        self._user_cam_y = 0
+        self._cam_x = -self._ox
+        self._cam_y = -self._oy
+        self._clip_x0 = self._ox
+        self._clip_y0 = self._oy
+        self._clip_x1 = self._ox + self.w
+        self._clip_y1 = self._oy + self.h
         # pal remap: index i draws as _pal_map[i]. Identity by default. palt: per-index
         # sprite transparency. TIC-80 defaults index 0 transparent, but v0.4's spr()
         # has always used an explicit colorkey (default -1 = none), so to keep existing
@@ -159,9 +205,11 @@ class Canvas:
         world-space cart scrolls. camera() with no args resets to (0, 0). Returns the
         previous offset (TIC-80 returns the prior camera)."""
         self.flush_batch()             # queued sprites belong to the OLD camera (#63)
-        prev = (self._cam_x, self._cam_y)
-        self._cam_x = int(x)
-        self._cam_y = int(y)
+        prev = (self._user_cam_x, self._user_cam_y)
+        self._user_cam_x = int(x)
+        self._user_cam_y = int(y)
+        self._cam_x = self._user_cam_x - self._ox
+        self._cam_y = self._user_cam_y - self._oy
         return prev
 
     def clip(self, x=None, y=None, w=None, h=None):
@@ -170,19 +218,20 @@ class Canvas:
         full screen. The rect is clamped to the canvas."""
         self.flush_batch()             # queued sprites belong to the OLD clip (#63)
         if x is None:
-            self._clip_x0 = 0
-            self._clip_y0 = 0
-            self._clip_x1 = self.w
-            self._clip_y1 = self.h
+            self._clip_x0 = self._ox
+            self._clip_y0 = self._oy
+            self._clip_x1 = self._ox + self.w
+            self._clip_y1 = self._oy + self.h
             return
         x = int(x)
         y = int(y)
         w = int(w)
         h = int(h)
-        self._clip_x0 = max(0, x)
-        self._clip_y0 = max(0, y)
-        self._clip_x1 = min(self.w, x + w)
-        self._clip_y1 = min(self.h, y + h)
+        # The caller's rect is surface-local; the stored clip is buffer-space.
+        self._clip_x0 = self._ox + max(0, x)
+        self._clip_y0 = self._oy + max(0, y)
+        self._clip_x1 = self._ox + min(self.w, x + w)
+        self._clip_y1 = self._oy + min(self.h, y + h)
 
     def _pal_state_id(self):
         # The stable id of the CURRENT (pal map, palt) content (mirrors
@@ -273,10 +322,21 @@ class Canvas:
     # -- primitives ----------------------------------------------------------
 
     def cls(self, c=0):
-        # cls ignores camera/clip (it's a full-surface reset, like TIC-80) but DOES
+        # cls ignores camera/clip (it's a full-SURFACE reset, like TIC-80) but DOES
         # honour the pal remap so a recoloured palette clears consistently.
+        # #155: "surface" means the VIEWPORT, not the whole buffer -- a windowed
+        # layer that clears itself must not wipe the desktop it is drawing on.
         self.flush_batch()             # #63: a non-spr primitive breaks the batch
-        self.buf[:] = bytes((self._pal_map[c & 63],)) * (self.w * self.h)
+        ci = self._pal_map[c & 63]
+        if self._ox == 0 and self._oy == 0 and self.w == self._stride:
+            self.buf[:] = bytes((ci,)) * (self.w * self.h)
+            return
+        row = bytes((ci,)) * self.w
+        buf = self.buf
+        stride = self._stride
+        for yy in range(self._oy, self._oy + self.h):
+            base = yy * stride + self._ox
+            buf[base:base + self.w] = row
 
     def _put(self, x, y, ci):
         # Single clipped, camera-offset, pal-remapped pixel write. `ci` is a raw
@@ -286,7 +346,7 @@ class Canvas:
         y = y - self._cam_y
         if not (self._clip_x0 <= x < self._clip_x1 and self._clip_y0 <= y < self._clip_y1):
             return
-        self.buf[y * self.w + x] = self._pal_map[ci & 63]
+        self.buf[y * self._stride + x] = self._pal_map[ci & 63]
 
     def pix(self, x, y, c=None):
         # TIC-80 pix: read the index at (x, y) with two args, set it with three
@@ -296,13 +356,14 @@ class Canvas:
         self.flush_batch()
         x = int(x) - self._cam_x
         y = int(y) - self._cam_y
-        if not (0 <= x < self.w and 0 <= y < self.h):
+        stride = self._stride
+        if not (0 <= x < stride and 0 <= y * stride < len(self.buf)):
             return 0
         if c is None:
-            return self.buf[y * self.w + x]
+            return self.buf[y * stride + x]
         if not (self._clip_x0 <= x < self._clip_x1 and self._clip_y0 <= y < self._clip_y1):
             return
-        self.buf[y * self.w + x] = self._pal_map[c & 63]
+        self.buf[y * stride + x] = self._pal_map[c & 63]
 
     def line(self, x0, y0, x1, y1, c):
         self.flush_batch()             # #63: a non-spr primitive breaks the batch
@@ -343,7 +404,7 @@ class Canvas:
         ci = self._pal_map[c & 63]
         row = bytes((ci,)) * (x1 - x0)
         buf = self.buf
-        width = self.w
+        width = self._stride
         for yy in range(y0, y1):
             base = yy * width + x0
             buf[base:base + (x1 - x0)] = row
@@ -628,7 +689,14 @@ class Canvas:
         the host parity of the device moy_gfx.blit_window (which copies RGB565). Clamped
         to the source bounds exactly like the C kernel; draw_layer keeps cam in range so
         the full window always lands. Overwrites (no transparency): it's the background,
-        drawn first each frame, and it erases last frame's sprites for free."""
+        drawn first each frame, and it erases last frame's sprites for free.
+
+        NOT viewport-aware (#155), deliberately: when the window is clamped to a
+        narrower source this writes rows packed at the CLAMPED width, matching
+        moy_gfx.blit_window -- the destination is a contiguous dw-wide buffer,
+        not a sub-rect of a wider one. It is a CART verb (draw_layer) and only
+        ever runs on a full-surface canvas; a viewport canvas must not call
+        it."""
         # #63: flush BOTH sides -- this canvas's queued sprites (drawn, then overwritten
         # by the opaque copy, exactly as immediate mode would) and the source layer's,
         # so its pixels are complete before we read them.
@@ -720,6 +788,7 @@ class Canvas:
         src = layer.buf
         dw = self.w
         dh = self.h
+        ox, oy, stride = self._ox, self._oy, self._stride   # #155 viewport
         sw = layer.w
         if sw <= 0 or dw <= 0 or dh <= 0:
             return
@@ -741,7 +810,7 @@ class Canvas:
                 cw = dw - tx0
             if cw <= 0:
                 continue
-            d0 = ty * dw + tx0
+            d0 = (oy + ty) * stride + ox + tx0
             dst[d0:d0 + cw] = src[s0 + sx0:s0 + sx0 + cw]
 
     def blit_strip_rect(self, layer, dst_x, dst_y, rx, ry, rw, rh):
@@ -763,6 +832,7 @@ class Canvas:
         src = layer.buf
         dw = self.w
         dh = self.h
+        ox, oy, stride = self._ox, self._oy, self._stride   # #155 viewport
         sw = layer.w
         if sw <= 0 or dw <= 0 or dh <= 0 or rw <= 0 or rh <= 0:
             return
@@ -784,7 +854,7 @@ class Canvas:
             if sx0 >= sx1:
                 continue
             s0 = row * sw
-            d0 = ty * dw + (dst_x + sx0)
+            d0 = (oy + ty) * stride + ox + (dst_x + sx0)
             dst[d0:d0 + (sx1 - sx0)] = src[s0 + sx0:s0 + sx1]
 
     def scroll_rect(self, rx, ry, rw, rh, dx, dy):
@@ -817,12 +887,12 @@ class Canvas:
         if tx0 >= tx1 or ty0 >= ty1:
             return
         buf = self.buf
-        w = self.w
+        ox, oy, stride = self._ox, self._oy, self._stride   # #155 viewport
         cw = tx1 - tx0
         rows = range(ty1 - 1, ty0 - 1, -1) if dy > 0 else range(ty0, ty1)
         for ty in rows:
-            s0 = (ty - dy) * w + (tx0 - dx)
-            d0 = ty * w + tx0
+            s0 = (oy + ty - dy) * stride + ox + (tx0 - dx)
+            d0 = (oy + ty) * stride + ox + tx0
             buf[d0:d0 + cw] = buf[s0:s0 + cw]
 
     # -- output --------------------------------------------------------------

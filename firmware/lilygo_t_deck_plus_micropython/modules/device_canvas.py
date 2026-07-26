@@ -344,6 +344,18 @@ class DeviceCanvas:
         self._gate_ctx = None
         self._gate_state = None
         self._gate_pal = None
+        # VIEWPORT (#155) -- host twin: runtime/canvas.py Canvas.set_viewport.
+        # w/h are the LOGICAL surface a caller draws on (0,0 based); _stride/_bh
+        # are the real buffer, _ox/_oy where the surface sits inside it. Equal on
+        # a full-surface canvas, so nothing here changes until set_viewport runs.
+        # The translation rides the EXISTING camera (_cam_* is the EFFECTIVE
+        # offset = user camera - origin), so every hot path costs what it did.
+        self._stride = self.w
+        self._bh = self.h
+        self._ox = 0
+        self._oy = 0
+        self._user_cam_x = 0
+        self._user_cam_y = 0
         self.reset_state()
         self._install_draw_gates()
 
@@ -365,7 +377,8 @@ class DeviceCanvas:
             fb = self._fb_by_buf.get(id(buf))
             if fb is None:
                 import framebuf
-                fb = framebuf.FrameBuffer(buf, self.w, self.h, framebuf.RGB565)
+                fb = framebuf.FrameBuffer(buf, self._stride, self._bh,
+                                          framebuf.RGB565)
                 self._fb_by_buf[id(buf)] = fb
             self._fb = fb
             if self._gate_ctx is not None:
@@ -411,12 +424,15 @@ class DeviceCanvas:
         # Draw any queued sprites FIRST: they were spr_tile()'d under the current
         # camera/clip/pal/palt, so they must be emitted before that state is wiped (#63).
         self.flush_batch()
-        self._cam_x = 0
-        self._cam_y = 0
-        self._clip_x0 = 0
-        self._clip_y0 = 0
-        self._clip_x1 = self.w
-        self._clip_y1 = self.h
+        # #155: effective offset + BUFFER-space clip (identities without a viewport).
+        self._user_cam_x = 0
+        self._user_cam_y = 0
+        self._cam_x = -self._ox
+        self._cam_y = -self._oy
+        self._clip_x0 = self._ox
+        self._clip_y0 = self._oy
+        self._clip_x1 = self._ox + self.w
+        self._clip_y1 = self._oy + self.h
         # #75: this runs EVERY cart frame (ws._reset_canvas_state), and rebuilding the
         # two 64-byte tables was two heap allocations per frame. The tables are created
         # once (first call: the attributes don't exist yet) and afterwards restored
@@ -441,26 +457,29 @@ class DeviceCanvas:
 
     def camera(self, x=0, y=0):
         self.flush_batch()             # queued sprites belong to the OLD camera (#63)
-        prev = (self._cam_x, self._cam_y)
-        self._cam_x = int(x)
-        self._cam_y = int(y)
+        prev = (self._user_cam_x, self._user_cam_y)
+        self._user_cam_x = int(x)
+        self._user_cam_y = int(y)
+        self._cam_x = self._user_cam_x - self._ox
+        self._cam_y = self._user_cam_y - self._oy
         self._sync_gate_state()
         return prev
 
     def clip(self, x=None, y=None, w=None, h=None):
         self.flush_batch()             # queued sprites belong to the OLD clip (#63)
         if x is None:
-            self._clip_x0 = 0
-            self._clip_y0 = 0
-            self._clip_x1 = self.w
-            self._clip_y1 = self.h
+            self._clip_x0 = self._ox
+            self._clip_y0 = self._oy
+            self._clip_x1 = self._ox + self.w
+            self._clip_y1 = self._oy + self.h
             self._sync_gate_state()
             return
         x = int(x); y = int(y); w = int(w); h = int(h)
-        self._clip_x0 = max(0, x)
-        self._clip_y0 = max(0, y)
-        self._clip_x1 = min(self.w, x + w)
-        self._clip_y1 = min(self.h, y + h)
+        # Caller's rect is surface-local; the stored clip is buffer-space (#155).
+        self._clip_x0 = self._ox + max(0, x)
+        self._clip_y0 = self._oy + max(0, y)
+        self._clip_x1 = self._ox + min(self.w, x + w)
+        self._clip_y1 = self._oy + min(self.h, y + h)
         self._sync_gate_state()
 
     def _pal_state_id(self):
@@ -566,6 +585,39 @@ class DeviceCanvas:
     # unusual (kwargs, odd arity, a non-numeric coord, a non-string print), so
     # semantics are unchanged -- this is purely a fast lane.
 
+    def set_viewport(self, x, y, w, h):
+        """Point this canvas at the (x, y, w, h) sub-rect of its own buffer (#155).
+
+        Host twin: runtime/canvas.py Canvas.set_viewport -- see it for why. On
+        this backend it also re-seeds the native draw gates, whose state array
+        carries the stride and the buffer-space clip."""
+        self._ox = int(x)
+        self._oy = int(y)
+        self.w = int(w)
+        self.h = int(h)
+        st = self._gate_state
+        if st is not None:
+            st[_ST_W] = self._stride
+            st[_ST_H] = self._bh
+        self.reset_state()
+
+    def clear_viewport(self):
+        """Back to owning the whole buffer."""
+        self._ox = 0
+        self._oy = 0
+        self.w = self._stride
+        self.h = self._bh
+        self.reset_state()
+
+    def retarget(self, buf):
+        """Re-point at another RGB565 buffer of the SAME stride -- the DPI
+        ping-pong swaps the framebuffer every frame, so a viewport canvas onto it
+        must follow (the root canvas does this in sync_back)."""
+        self._buf = buf
+        self._fb = self._fb_by_buf.get(id(buf)) or self._fb
+        if self._gate_ctx is not None:
+            self._gate_ctx.set_buf(buf)
+
     def _install_draw_gates(self):
         """Swap in the native rect/rectb/print/pix. Returns True if gated."""
         gfx = self._gfx
@@ -594,8 +646,8 @@ class DeviceCanvas:
         self._gate_state = st
         self._gate_pal = pal
         self._gate_ctx = ctx
-        st[_ST_W] = self.w
-        st[_ST_H] = self.h
+        st[_ST_W] = self._stride
+        st[_ST_H] = self._bh
         st[_ST_FONT_SCALE] = max(1, int(getattr(self, "font_scale", 1)))
         self._sync_gate_state()
         self._sync_gate_pal()
@@ -687,10 +739,10 @@ class DeviceCanvas:
         if gfx is not None:
             if self._prof:
                 _t0 = _ticks_us()      # #66 DRAW2: fill bucket (rect/rectb/circ spans)
-                gfx.fill_rect(self._buf, self.w, x0, y0, x1 - x0, y1 - y0, col)
+                gfx.fill_rect(self._buf, self._stride, x0, y0, x1 - x0, y1 - y0, col)
                 self._t_fill_us += _ticks_diff(_ticks_us(), _t0)
             else:
-                gfx.fill_rect(self._buf, self.w, x0, y0, x1 - x0, y1 - y0, col)
+                gfx.fill_rect(self._buf, self._stride, x0, y0, x1 - x0, y1 - y0, col)
             if self._pump is not None:
                 self._pump()           # #66: feed the bounce flush between native ops
         else:
@@ -713,7 +765,13 @@ class DeviceCanvas:
         col = self._col(c)
         if self._gfx is not None:
             _t0 = _ticks_us()          # #66 DRAW2: fill bucket (cls is its big half)
-            self._gfx.fill(self._buf, self.w * self.h, col)
+            if self._ox == 0 and self._oy == 0 and self.w == self._stride:
+                self._gfx.fill(self._buf, self.w * self.h, col)
+            else:
+                # #155: "full-surface" means the VIEWPORT -- a windowed layer
+                # clearing itself must not wipe the desktop it draws on.
+                self._gfx.fill_rect(self._buf, self._stride,
+                                    self._ox, self._oy, self.w, self.h, col)
             self._t_fill_us += _ticks_diff(_ticks_us(), _t0)
             if self._pump is not None:
                 self._pump()           # #66: feed the bounce flush between native ops
@@ -740,7 +798,7 @@ class DeviceCanvas:
         x0 = int(x1); y0 = int(y1); xe = int(x2); ye = int(y2)
         col = self._col(c)
         if self._gfx is not None:
-            self._gfx.line(self._buf, self.w, self.h, x0, y0, xe, ye, col,
+            self._gfx.line(self._buf, self._stride, self._bh, x0, y0, xe, ye, col,
                            self._cam_x, self._cam_y,
                            self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
             return
@@ -785,7 +843,7 @@ class DeviceCanvas:
         cx = int(cx); cy = int(cy); r = int(r)
         col = self._col(c)
         if self._gfx is not None:
-            self._gfx.circ(self._buf, self.w, self.h, cx, cy, r, col,
+            self._gfx.circ(self._buf, self._stride, self._bh, cx, cy, r, col,
                            self._cam_x, self._cam_y,
                            self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
             return
@@ -800,7 +858,7 @@ class DeviceCanvas:
         cx = int(cx); cy = int(cy); r = int(r)
         col = self._col(c)
         if self._gfx is not None:
-            self._gfx.circb(self._buf, self.w, self.h, cx, cy, r, col,
+            self._gfx.circb(self._buf, self._stride, self._bh, cx, cy, r, col,
                             self._cam_x, self._cam_y,
                             self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
             return
@@ -843,7 +901,7 @@ class DeviceCanvas:
                 and self._palgen == 0):
             if getattr(img, "_rgb_i", None) is None:
                 self._bake_indices(img)
-            self._gfx.blit565(self._buf, self.w, self.h, x, y,
+            self._gfx.blit565(self._buf, self._stride, self._bh, x, y,
                               img._rgb_i, img.w, img.h, -1,
                               self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
             return
@@ -861,7 +919,7 @@ class DeviceCanvas:
                 or getattr(img, "_rgb_palgen", -1) != self._palgen):
             if not self._rgb_variant(img, scale, flip):
                 self._cache_rgb(img, scale, flip)
-        self._gfx.blit565(self._buf, self.w, self.h, x, y,
+        self._gfx.blit565(self._buf, self._stride, self._bh, x, y,
                           img._rgb, img._rgb_w, img._rgb_h, _RGB_KEY,
                           self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
 
@@ -1019,7 +1077,7 @@ class DeviceCanvas:
         _t0 = _ticks_us()              # #66 DRAW2: the whole map path (raster or composite)
         if (self._nocache or self._palgen != 0     # layer / active palette / revert knob
                 or not MAP_AUTO_CACHE):            # -> direct raster
-            self._blit_map_into(self._buf, self.w, self.h, dsx, dsy,
+            self._blit_map_into(self._buf, self._stride, self._bh, dsx, dsy,
                                 tilemap, sheet, mx, my, w, h, colorkey, tile, scale,
                                 self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
             self._t_map_us += _ticks_diff(_ticks_us(), _t0)
@@ -1073,7 +1131,7 @@ class DeviceCanvas:
         # ones. Overdrawing the region each frame still erases last frame's actors for
         # free, exactly like a direct map().
         layer = mc[1]
-        self._gfx.blit565(self._buf, self.w, self.h, dsx, dsy,
+        self._gfx.blit565(self._buf, self._stride, self._bh, dsx, dsy,
                           layer._buf, lw, lh, mc[4],
                           self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
         self._t_map_us += _ticks_diff(_ticks_us(), _t0)
@@ -1276,7 +1334,7 @@ class DeviceCanvas:
         atlas, ntiles = self._sheet_atlas(sheet, colorkey)
         a[0] = k                       # array mode: C reads the count from a[0]
         _t0 = _ticks_us()              # #63 DRAW2: time the native sprite batch
-        self._gfx.blit_batch(self._buf, self.w, self.h, a,
+        self._gfx.blit_batch(self._buf, self._stride, self._bh, a,
                              atlas, ntiles, sheet.TILE, scale, _RGB_KEY,
                              self._cam_x, self._cam_y,
                              self._clip_x0, self._clip_y0,
@@ -1330,7 +1388,7 @@ class DeviceCanvas:
             return
         atlas, ntiles = self._sheet_atlas(sheet, colorkey)
         _t0 = _ticks_us()                           # #63 DRAW2: time the native sprite batch
-        self._gfx.blit_batch(self._buf, self.w, self.h, items,
+        self._gfx.blit_batch(self._buf, self._stride, self._bh, items,
                              atlas, ntiles, tile, scale, _RGB_KEY,
                              self._cam_x, self._cam_y,
                              self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
@@ -1350,7 +1408,7 @@ class DeviceCanvas:
             # is gated here like _fill's (see its note).
             _prof = self._prof
             _t0 = _ticks_us() if _prof else 0
-            self._gfx_text(self._buf, self.w, self.h, str(s), int(x), int(y),
+            self._gfx_text(self._buf, self._stride, self._bh, str(s), int(x), int(y),
                            PAL565_WIRE[self._pal_map[c & 63]],
                            _FONT8, _FONT8_FIRST, 1,
                            self._cam_x, self._cam_y,
@@ -1377,7 +1435,7 @@ class DeviceCanvas:
         if iw <= 0 or ih <= 0:
             return
         if self._gfx is not None:
-            self._gfx.blit_indices(self._buf, self.w, self.h, x, y,
+            self._gfx.blit_indices(self._buf, self._stride, self._bh, x, y,
                                    indices, iw, ih, _PAL565_WIRE_BUF)
             return
         d = memoryview(self._buf).cast("H")
@@ -1581,8 +1639,11 @@ class DeviceCanvas:
         sw = layer.w
         sh = layer.h
         if self._gfx is not None:
-            self._gfx.blit565(self._buf, self.w, self.h, dst_x, dst_y,
-                              layer._buf, sw, sh, -1)
+            self._gfx.blit565(self._buf, self._stride, self._bh,
+                              dst_x + self._ox, dst_y + self._oy,
+                              layer._buf, sw, sh, -1,
+                              self._ox, self._oy,
+                              self._ox + self.w, self._oy + self.h)
             return
         d = memoryview(self._buf).cast("H")
         s = memoryview(layer._buf).cast("H")
@@ -1629,8 +1690,21 @@ class DeviceCanvas:
         sw = layer.w
         sh = layer.h
         if self._gfx is not None:
-            self._gfx.blit565(self._buf, self.w, self.h, dst_x, dst_y,
-                              layer._buf, sw, sh, -1, rx, ry, rx + rw, ry + rh)
+            cx0 = self._ox + rx
+            cy0 = self._oy + ry
+            if cx0 < self._ox:
+                cx0 = self._ox
+            if cy0 < self._oy:
+                cy0 = self._oy
+            cx1 = self._ox + rx + rw
+            cy1 = self._oy + ry + rh
+            if cx1 > self._ox + self.w:
+                cx1 = self._ox + self.w
+            if cy1 > self._oy + self.h:
+                cy1 = self._oy + self.h
+            self._gfx.blit565(self._buf, self._stride, self._bh,
+                              dst_x + self._ox, dst_y + self._oy,
+                              layer._buf, sw, sh, -1, cx0, cy0, cx1, cy1)
             return
         d = memoryview(self._buf).cast("H")
         s = memoryview(layer._buf).cast("H")
@@ -1667,7 +1741,8 @@ class DeviceCanvas:
         if dx == 0 and dy == 0:
             return
         if self._gfx is not None:
-            self._gfx.scroll_rect(self._buf, self.w, rx, ry, rw, rh, dx, dy)
+            self._gfx.scroll_rect(self._buf, self._stride,
+                                  rx + self._ox, ry + self._oy, rw, rh, dx, dy)
             return
         buf = self._buf
         w = self.w
