@@ -53,6 +53,35 @@ static inline const uint16_t *moy_gfx_buf_r(mp_obj_t obj, size_t *npix) {
     return (const uint16_t *)bi.buf;
 }
 
+// A run of `n` RGB565 pixels set to `c`, written 32 bits at a time.
+//
+// WHY (measured on P4 glass 2026-07-26): a full-screen 1.2MB fill through the
+// naive uint16 loop took 18.8ms -- while memcpy moved TWICE the bytes (a 1.2MB
+// read plus a 1.2MB write) in 26.9ms, i.e. ~40% less time per byte. A copy
+// cannot beat a fill on a memory-bound path, so the loop was the bottleneck,
+// not the bus: one 16-bit store per pixel leaves half of every 32-bit bus beat
+// unused and pays full loop overhead per pixel. Pairing the pixels into 32-bit
+// stores and unrolling by four fixes both. (RV32 has no wider scalar store, so
+// 32 bits is the ceiling here.)
+static inline void moy_gfx_fill_run(uint16_t *px, size_t n, uint16_t c) {
+    if (n == 0) return;
+    // Align to a 4-byte boundary so the 32-bit stores never straddle one.
+    if (((uintptr_t)px & 2u) != 0) {
+        *px++ = c;
+        n--;
+    }
+    uint32_t c2 = ((uint32_t)c << 16) | c;
+    uint32_t *w = (uint32_t *)px;
+    size_t pairs = n >> 1;
+    while (pairs >= 4) {
+        w[0] = c2; w[1] = c2; w[2] = c2; w[3] = c2;
+        w += 4;
+        pairs -= 4;
+    }
+    while (pairs--) *w++ = c2;
+    if (n & 1) *((uint16_t *)w) = c;
+}
+
 // fill(buf, npix, color) -- set the first `npix` pixels (clamped to capacity).
 static mp_obj_t moy_gfx_fill(mp_obj_t buf_obj, mp_obj_t npix_obj, mp_obj_t color_obj) {
     size_t cap;
@@ -61,7 +90,7 @@ static mp_obj_t moy_gfx_fill(mp_obj_t buf_obj, mp_obj_t npix_obj, mp_obj_t color
     uint16_t c = (uint16_t)(mp_obj_get_int(color_obj) & 0xFFFF);
     if (n < 0) n = 0;
     if ((size_t)n > cap) n = (mp_int_t)cap;
-    for (mp_int_t i = 0; i < n; i++) px[i] = c;
+    moy_gfx_fill_run(px, (size_t)n, c);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(moy_gfx_fill_obj, moy_gfx_fill);
@@ -87,8 +116,8 @@ static mp_obj_t moy_gfx_fill_rect(size_t n_args, const mp_obj_t *a) {
     if (y >= max_rows) return mp_const_none;
     if (y + h > max_rows) h = max_rows - y;
     for (mp_int_t row = 0; row < h; row++) {
-        uint16_t *line = px + (size_t)(y + row) * (size_t)stride + (size_t)x;
-        for (mp_int_t col = 0; col < w; col++) line[col] = c;
+        moy_gfx_fill_run(px + (size_t)(y + row) * (size_t)stride + (size_t)x,
+                         (size_t)w, c);
     }
     return mp_const_none;
 }
@@ -686,8 +715,8 @@ static mp_obj_t moy_gfx_circ(size_t n_args, const mp_obj_t *a) {
         if (x0 < cx0) x0 = cx0;
         if (x1 > cx1) x1 = cx1;
         if (x1 <= x0) continue;
-        uint16_t *line = dst + (size_t)y * (size_t)dw;
-        for (mp_int_t x = x0; x < x1; x++) line[x] = col;
+        moy_gfx_fill_run(dst + (size_t)y * (size_t)dw + (size_t)x0,
+                         (size_t)(x1 - x0), col);
     }
     return mp_const_none;
 }
@@ -1109,8 +1138,8 @@ static inline void gate_fill(moy_gfx_draw_ctx_obj_t *c, mp_int_t x, mp_int_t y,
     if (y1 > rows) y1 = rows;
     if (x1 <= x0 || y1 <= y0) return;
     for (mp_int_t row = y0; row < y1; row++) {
-        uint16_t *line = c->px + (size_t)row * (size_t)stride;
-        for (mp_int_t cx = x0; cx < x1; cx++) line[cx] = col;
+        moy_gfx_fill_run(c->px + (size_t)row * (size_t)stride + (size_t)x0,
+                         (size_t)(x1 - x0), col);
     }
 }
 
