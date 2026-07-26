@@ -125,9 +125,73 @@ class P4Board:
             raise RuntimeError("swipe never finished")
         self.drain(0.3)
 
+    def swipe_async(self, x0, y0, x1, y1, frames=200):
+        """Start a swipe and return immediately, so the caller can probe the
+        console MID-gesture (the only way to observe gesture-only state such as
+        the desk-cache serve or the chrome freeze). Spread the travel over many
+        frames to keep it moving while you sample; finish with
+        wait_line("swipe done"). NB a ZERO-motion hold does not count as a
+        content gesture -- the scroll region reports one only once the finger
+        travels -- so pass a real distance."""
+        self.ser.write(("swipe %d %d %d %d %d\n"
+                        % (x0, y0, x1, y1, frames)).encode())
+        self.ser.flush()
+
     def open(self, what, timeout=8.0):
         """`open settings|picker|appearance|wifi`; returns the echo line."""
         return self.cmd("open %s" % what, timeout=timeout)
+
+    # -- the `py` probe hook ----------------------------------------------
+
+    # The device reads dev commands with one sys.stdin.readline() per frame, so
+    # a command must fit the USB-CDC RX ring: a ~1KB one-liner arrives TRUNCATED
+    # and execs as a SyntaxError (measured 2026-07-26 -- a 988-char snippet).
+    # Multi-line snippets therefore upload in chunks and exec once.
+    CHUNK = 120
+
+    def pyval(self, expr, timeout=30.0):
+        """Evaluate a short expression on the device; returns the repr'd value
+        (parsed back with eval) or None if the device raised."""
+        line = self.cmd("py " + expr, wait_for="PY", timeout=timeout) or ""
+        if "PY ERR" in line:
+            self.log("device: " + line.strip())
+            return None
+        try:
+            return eval(line.split("PY ", 1)[1])   # noqa: S307 (our own repr)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def pyexec(self, code, timeout=30.0):
+        """Run a multi-line snippet on the device (`ws`/`wm`/`pointer` in scope),
+        uploaded in RX-safe chunks. Returns True if it ran clean.
+
+        Snippets share ONE persistent namespace (`ws._g`), so a later upload can
+        use names an earlier one defined. The device's `py` handler builds a
+        FRESH env per command, which silently broke composed probes: a helper
+        defined by upload A referencing a module imported by upload B raised
+        NameError once per frame (measured 2026-07-26 -- an empty profile)."""
+        code = code.strip("\n")
+        if len(code) <= self.CHUNK and "\n" not in code:
+            line = self.cmd("py " + code, wait_for="PY", timeout=timeout) or ""
+            return "PY ERR" not in line
+        self.cmd("py setattr(ws, '_up', '') or 1", wait_for="PY")
+        # NB: plain getattr-or, not ws.__dict__.setdefault -- a MicroPython
+        # instance __dict__ is not a full dict (no setdefault; raises TypeError).
+        self.cmd("py ws._g = getattr(ws, '_g', None) or {'ws': ws, 'wm': ws.wm}",
+                 wait_for="PY")
+        for i in range(0, len(code), self.CHUNK):
+            part = code[i:i + self.CHUNK]
+            line = self.cmd("py ws._up += %r" % part, wait_for="PY",
+                            timeout=timeout) or ""
+            if "PY ERR" in line:
+                self.log("upload failed: " + line.strip())
+                return False
+        line = self.cmd("py exec(ws._up, ws._g)", wait_for="PY",
+                        timeout=timeout) or ""
+        if "PY ERR" in line:
+            self.log("device: " + line.strip())
+            return False
+        return True
 
     def perf_lines(self, since=0):
         return [ln for ln in self.lines[since:] if ln.startswith("PERF ")]
