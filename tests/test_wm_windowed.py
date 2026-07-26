@@ -1216,3 +1216,85 @@ def test_taskbar_chips_freeze_and_refresh_on_focus_change(tmp_path):
     ws.wm._focus = order[0]               # focus moves -> a chip changes colour
     ws.wm._draw_taskbar_chips(quiet=True)
     assert ws.wm._chip_streak == 1, "a focus change must repaint the chips"
+
+
+# -- changing the font scale from inside a window (#155) ---------------------
+
+def test_font_scale_change_from_a_window_reaches_the_root_canvas(tmp_path):
+    """Changing FONT SIZE in Settings must resize the console for real.
+
+    On this tier ws._sys_canvas is whatever WINDOW BUFFER is installed while a
+    window's content draws or handles input -- and the Settings row that changes
+    the font is exactly that. Pushing the new scale into the ambient canvas set
+    it on a buffer on_relayout then discarded, so the layout reflowed to the new
+    scale while the root canvas (and every window buffer, which clones its
+    font_scale from the root) kept rendering text at the old one. Owner, on
+    glass 2026-07-26: "changing it while running messes it up, if I change and
+    reboot it looks great"."""
+    ws = _ws(tmp_path, font_scale=2)
+    drv = _drv(ws)
+    ws.open_settings()
+    drv.frame(1 / 30)
+    win = ws.wm._wins["settings"]
+
+    ws.wm._install(win.ctx)               # what input dispatch does
+    try:
+        ws.set_font_scale(1, persist=False)
+    finally:
+        ws.wm._install(ws.wm._root_ctx)
+
+    assert ws.font_scale == 1
+    assert ws.layout.fs == 1
+    assert ws.wm._root_canvas.font_scale == 1, \
+        "the scale landed on a throwaway window buffer, not the root canvas"
+
+
+def test_font_scale_change_matches_booting_at_that_scale(tmp_path):
+    """The pixel contract: switching at runtime must render EXACTLY what booting
+    at that scale renders -- the mismatch is what read as 'bunched up'."""
+    ws_boot = _ws(tmp_path, font_scale=1)
+    drv_boot = _drv(ws_boot)
+    ws_boot.open_settings()
+    for _ in range(30):
+        ws_boot.mark_dirty()
+        drv_boot.frame(1 / 30)
+    reference = bytes(ws_boot.sys_canvas.buf)
+
+    ws = _ws(tmp_path, font_scale=2)
+    drv = _drv(ws)
+    ws.open_settings()
+    for _ in range(30):
+        ws.mark_dirty()
+        drv.frame(1 / 30)
+    win = ws.wm._wins["settings"]
+    ws.wm._install(win.ctx)
+    try:
+        ws.set_font_scale(1, persist=False)
+    finally:
+        ws.wm._install(ws.wm._root_ctx)
+    for _ in range(30):
+        ws.mark_dirty()
+        drv.frame(1 / 30)
+
+    assert bytes(ws.sys_canvas.buf) == reference
+
+
+def test_new_window_buffers_adopt_the_changed_font_scale(tmp_path):
+    """A window opened AFTER the change must render at the new scale too --
+    new_layer clones font_scale from the root, so this is the same bug seen from
+    the other end."""
+    ws = _ws(tmp_path, font_scale=2)
+    drv = _drv(ws)
+    ws.open_settings()
+    drv.frame(1 / 30)
+    ws.wm._install(ws.wm._wins["settings"].ctx)
+    try:
+        ws.set_font_scale(1, persist=False)
+    finally:
+        ws.wm._install(ws.wm._root_ctx)
+    ws.open_picker()
+    for _ in range(20):
+        ws.mark_dirty()
+        drv.frame(1 / 30)
+    for key, win in ws.wm._wins.items():
+        assert getattr(win.buf, "font_scale", 1) == 1, key

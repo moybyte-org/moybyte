@@ -1346,11 +1346,29 @@ class Workstation:
         if scale not in self.FONT_SCALES:
             scale = self.FONT_SCALES[0]
         self.font_scale = scale
-        if self._sys_canvas is not None:
-            self._sys_canvas.set_font_scale(self._effective_font_scale())
+        target = self._font_scale_canvas()
+        if target is not None:
+            target.set_font_scale(self._effective_font_scale())
         self._relayout()
         if persist:
             self._persist_font_scale()
+
+    def _font_scale_canvas(self):
+        """The system canvas that OWNS the shell's font scale.
+
+        NOT simply `self._sys_canvas`: on the windowed tier that attribute is
+        whatever WINDOW BUFFER is installed while a window's content draws or
+        handles input -- and changing the font size from Settings is exactly
+        that. The new scale then landed on a buffer that on_relayout immediately
+        throws away, leaving the REAL canvas (and every future window buffer,
+        which clones its font_scale from the root in new_layer) at the OLD size:
+        layout reflowed to 1x with text still rendering at 2x, which is the
+        owner's "changing it while running messes it up, if I change and reboot
+        it looks great" (2026-07-26). The fullscreen tier has no _root_canvas and
+        falls through to the ambient canvas, which IS the root there."""
+        wm = getattr(self, "wm", None)
+        root = getattr(wm, "_root_canvas", None) if wm is not None else None
+        return root if root is not None else self._sys_canvas
 
     def cycle_font_scale(self, d):
         """Step the font scale by d through FONT_SCALES (Settings < / > stepper);
