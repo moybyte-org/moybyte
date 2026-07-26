@@ -21,6 +21,7 @@
 #include "esp_cache.h"
 
 static ppa_client_handle_t s_srm = NULL;
+static ppa_client_handle_t s_fill = NULL;
 
 // Async fence (the composite-overlap lever): every submitted transaction bumps
 // s_submitted; the PPA's done ISR bumps s_done. sync() spins until they meet.
@@ -57,6 +58,20 @@ static mp_obj_t moy_ppa_init(void) {
     }
     ppa_event_callbacks_t cbs = { .on_trans_done = ppa_trans_done_cb };
     ppa_client_register_event_callbacks(s_srm, &cbs);
+    // A separate FILL client (#155). Why a DMA fill is worth having when a DMA
+    // 1:1 COPY measured a wash against the CPU: a CPU write to PSRAM goes
+    // through the cache with WRITE-ALLOCATE, so the line is READ IN before it
+    // is written and a "pure write" actually moves twice its bytes. The PPA
+    // writes PSRAM directly, without the allocate read -- so unlike a copy,
+    // where both engines move the same bytes, a fill should cost the DMA half
+    // what it costs the CPU.
+    ppa_client_config_t fcfg = {
+        .oper_type = PPA_OPERATION_FILL,
+        .max_pending_trans_num = 1,
+    };
+    if (ppa_register_client(&fcfg, &s_fill) != ESP_OK) {
+        s_fill = NULL;            // fill unavailable; the CPU path still works
+    }
     s_submitted = 0;
     s_done = 0;
     return mp_const_true;
@@ -67,6 +82,10 @@ static mp_obj_t moy_ppa_deinit(void) {
     if (s_srm != NULL) {
         ppa_unregister_client(s_srm);
         s_srm = NULL;
+    }
+    if (s_fill != NULL) {
+        ppa_unregister_client(s_fill);
+        s_fill = NULL;
     }
     return mp_const_none;
 }
@@ -178,11 +197,71 @@ static mp_obj_t moy_ppa_blit_async(size_t n_args, const mp_obj_t *args) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_blit_async_obj, 9, 9,
                                            moy_ppa_blit_async);
 
+
+// fill(dst, dw, dh, x, y, w, h, rgb565) -> True when the PPA took it.
+// Fills the (x, y, w, h) block of an RGB565 picture on the DMA engine, skipping
+// the CPU cache's write-allocate read (see init). Blocking: the caller wants the
+// pixels before it draws over them.
+static mp_obj_t moy_ppa_fill(size_t n_args, const mp_obj_t *args) {
+    (void)n_args;
+    if (s_fill == NULL) {
+        return mp_const_false;
+    }
+    mp_buffer_info_t dst;
+    mp_get_buffer_raise(args[0], &dst, MP_BUFFER_WRITE);
+    mp_int_t dw = mp_obj_get_int(args[1]);
+    mp_int_t dh = mp_obj_get_int(args[2]);
+    mp_int_t x = mp_obj_get_int(args[3]);
+    mp_int_t y = mp_obj_get_int(args[4]);
+    mp_int_t w = mp_obj_get_int(args[5]);
+    mp_int_t h = mp_obj_get_int(args[6]);
+    uint32_t c565 = (uint32_t)(mp_obj_get_int(args[7]) & 0xFFFF);
+    if (dw <= 0 || dh <= 0 || w <= 0 || h <= 0
+        || x < 0 || y < 0 || x + w > dw || y + h > dh) {
+        return mp_const_false;
+    }
+    // The PPA fill colour is ARGB8888; expand the RGB565 the console works in.
+    uint32_t r = (c565 >> 11) & 0x1F, g = (c565 >> 5) & 0x3F, bch = c565 & 0x1F;
+    color_pixel_argb8888_data_t argb = {
+        .r = (uint8_t)((r << 3) | (r >> 2)),
+        .g = (uint8_t)((g << 2) | (g >> 4)),
+        .b = (uint8_t)((bch << 3) | (bch >> 2)),
+        .a = 0xFF,
+    };
+    ppa_fill_oper_config_t op = {
+        .out = {
+            .buffer = dst.buf,
+            .buffer_size = (uint32_t)dst.len,
+            .pic_w = (uint32_t)dw,
+            .pic_h = (uint32_t)dh,
+            .block_offset_x = (uint32_t)x,
+            .block_offset_y = (uint32_t)y,
+            .fill_cm = PPA_FILL_COLOR_MODE_RGB565,
+        },
+        .fill_block_w = (uint32_t)w,
+        .fill_block_h = (uint32_t)h,
+        .fill_argb_color = argb,
+        .mode = PPA_TRANS_MODE_BLOCKING,
+    };
+    // Same cache contract as the SRM path: the IDF driver INVALIDATES the whole
+    // out-picture buffer at submit, so every dirty CPU line in it must be
+    // written back first or this frame's CPU drawing is silently discarded. The
+    // whole buffer, not just the block -- the invalidate is not block-scoped.
+    esp_cache_msync(dst.buf, dst.len,
+                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    if (ppa_do_fill(s_fill, &op) != ESP_OK) {
+        return mp_const_false;
+    }
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_fill_obj, 8, 8, moy_ppa_fill);
+
 static const mp_rom_map_elem_t moy_ppa_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_ppa) },
     { MP_ROM_QSTR(MP_QSTR_init), MP_ROM_PTR(&moy_ppa_init_obj) },
     { MP_ROM_QSTR(MP_QSTR_deinit), MP_ROM_PTR(&moy_ppa_deinit_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_scale), MP_ROM_PTR(&moy_ppa_blit_scale_obj) },
+    { MP_ROM_QSTR(MP_QSTR_fill), MP_ROM_PTR(&moy_ppa_fill_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_async), MP_ROM_PTR(&moy_ppa_blit_async_obj) },
     { MP_ROM_QSTR(MP_QSTR_sync), MP_ROM_PTR(&moy_ppa_sync_obj) },
 };
