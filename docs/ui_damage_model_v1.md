@@ -59,6 +59,30 @@ invalidation, two of which produced the same silent-key bug, is a real
 maintainability defect independent of any millisecond. Consolidation is defensible
 on bug-class grounds alone — which §6 already concedes promises no speed-up.
 
+### 0.05 Where the attribution left it — the lever is a native grid kernel, not damage
+
+Step 3 above measured the worst surface for the first time, and it redirects the
+plan a second time. The map tab's 80ms is **~960 native fills and ~50% Python
+dispatch**, i.e. the CELL GRID itself, not chrome drawn around content. Two
+consequences:
+
+- **Invalidation is the wrong tool here.** It pays only when the region is
+  unchanged, and on a map larger than the viewport a pan changes every cell. On the
+  maps currently on the device the camera is pinned (§0), so a damage experiment
+  would have looked like a large win for a reason that reverses on real content —
+  exactly what the review predicted of §6's phase-2 gate.
+- **The right lever has precedent in this codebase.** ~1000 MicroPython→C calls per
+  frame is the same shape as the sprite problem, solved twice already: `spr_batch`
+  (#43) and the native `spr_gate` (#63) collapsed N per-item calls into one. A
+  **native grid kernel** — one C call that fills the cell grid straight from the
+  tilemap, as `blit_map` already does for cart maps — attacks both halves at once:
+  it removes the dispatch (53%) and lets the kernel fill spans instead of 960
+  separate rects.
+
+That is the next thing to build. It is a kernel, not an architecture, and it is
+testable the same way everything else here was: `p4_surface_sweep --only map`
+before and after.
+
 ### 0.1 Corrections to specific claims below
 
 Left in place so the errors are visible rather than quietly deleted:
@@ -117,17 +141,34 @@ Left in place so the errors are visible rather than quietly deleted:
 
 ### 0.3 The sequence the review argues for instead
 
-Cheapest first, each independently valuable, none requiring an architecture:
+Cheapest first, each independently valuable, none requiring an architecture.
+**Steps 1 and 3 are DONE; their results are below and they change the conclusion
+again.**
 
-1. **Delete the duplicate fills** on map / paint / scene and re-run the sweep.
-   Two-line change per surface; the identical fix on Settings measured ~9ms.
+1. ~~**Delete the duplicate fills** on map / paint / scene~~ — **DONE** (`5dd6357`).
+   `ui.fill_uncovered` paints only the part of `panel` that `body_fill` did not
+   already cover in the same colour (it cannot simply be dropped: the panel
+   overhangs the body by `2 * fs` at the top). On glass: **map 92 → 80ms, sprites
+   76 → 64ms, blocks 88 → 80ms**, with `code` (48) and `settings` (24) unchanged as
+   controls — they are exactly the two surfaces without a duplicate fill.
 2. **Fix the sweep** — axis-aware swipes and a 14s warm-up — and re-derive the
    table. The picker row is currently measuring the wrong gesture.
-3. **Point an attribution instrument at map/paint/blocks for the first time.**
-   Every existing tool hardcodes settings/picker/library. `gate_counts()` bracketing
-   the cell loop vs the palette/toolbar tail would settle where the 90ms goes; the
-   code suggests ~1000 cells × 2 verbs = ~2000 gated calls, i.e. mostly **grid**,
-   not "chrome around the content".
+3. ~~**Point an attribution instrument at map/paint/blocks**~~ — **DONE for map**,
+   and it settles the question. Bracketing `_draw_map` with `gate_counts()`, per
+   frame over 31 frames:
+
+       wall              64.6 ms
+       native fills         960 calls
+       in fill kernel      30.3 ms   (47%, 31.6 us/fill)
+       native texts          14 calls, 0.3 ms
+       => dispatch/py      34.0 ms   (53%)
+
+   So the map tab issues **~960 native fills per frame** — the 26×15 cell grid,
+   `map_editor_ui.py:895-904`, a `rect` (+`rectb`) per visible cell whether occupied
+   or not — and splits **almost exactly 50/50 between kernel time and Python
+   dispatch**. (Perf capture adds ~6us/op, so kernel time is if anything
+   overstated and dispatch's share larger.) Paint and blocks are still
+   unattributed: the probe used the wrong object for the Paint tab's UI.
 4. **Run the picker A/B's missing third arm** (band repaint without the shift) to
    learn whether scroll-as-blit should be generalised or **deleted** above a band-size
    threshold.
@@ -146,9 +187,9 @@ Every interactive surface, measured with real content seeded on the device
 
 | surface | content | median | p90 | worst |
 |---|---|---|---|---|
-| editor:map | *content-independent* | **92** | 96 | 220 |
-| editor:blocks | *content-independent* | **88** | 92 | 167 |
-| editor:paint | *content-independent* | 76 | 76 | 138 |
+| editor:map | ~960 fills/frame | **80** (was 92) | 84 | 139 |
+| editor:blocks | via the scene pane | **80** (was 88) | 92 | 158 |
+| editor:paint | — | **64** (was 76) | 64 | 125 |
 | writer | 200-line doc | 52 | 52 | 128 |
 | editor:code | 302-line cart | 52 | 60 | 130 |
 | sheets | 360-cell table | 48 | 52 | 99 |
