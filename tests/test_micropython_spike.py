@@ -3305,3 +3305,26 @@ def test_moy_lua_hardware_learned_constraints_pinned():
     #    parity is host-only for float-heavy carts.
     conf = (lua_dir / "luaconf.h").read_text(encoding="utf-8")
     assert "#define LUA_32BITS\t1" in conf
+
+
+def test_every_new_layer_pins_retained_frames_to_one():
+    """(#113) A layer/window buffer is ONE persistent surface, so a blit-
+    scrolling caller must measure against the LAST paint -- RETAINED_FRAMES = 1.
+    The class default is 2 because it describes the ROOT ping-pong (the P4's DPI
+    double buffer), so EVERY new_layer factory has to override it.
+
+    P4SystemCanvas.new_layer copies DeviceCanvas.new_layer's body, and the
+    override was lost in that copy: once the paint ring actually armed on the
+    desktop tier, a picker drag shifted by ~twice the real delta and ghosted a
+    duplicate of every card (owner-reported on glass, 2026-07-25). This grep
+    pins the override at every factory so the divergence can't come back."""
+    from pathlib import Path
+
+    for mod in (Path("firmware/lilygo_t_deck_plus_micropython/modules/device_canvas.py"),
+                Path("firmware/esp32_p4_wifi6_touch_lcd_7b/modules/moy_runtime.py")):
+        src = mod.read_text(encoding="utf-8")
+        i = src.find("def new_layer(")
+        assert i > 0, "no new_layer factory in " + mod.name
+        body = src[i:i + 2400]
+        assert "RETAINED_FRAMES = 1" in body, \
+            mod.name + ": new_layer must pin RETAINED_FRAMES = 1 (#113)"

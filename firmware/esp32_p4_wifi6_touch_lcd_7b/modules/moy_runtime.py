@@ -109,6 +109,13 @@ class P4SystemCanvas(DeviceCanvas):
         lay = P4SystemCanvas(_LayerComp(int(w), int(h), self._gfx),
                              font_scale=self.font_scale)
         lay._nocache = True
+        # #113: ONE persistent buffer, so a blit-scrolling surface must measure
+        # against the LAST paint. The class default 2 describes the ROOT DPI
+        # ping-pong only. This line exists in DeviceCanvas.new_layer and was
+        # LOST when this subclass copied its body -- with the ring armed, a
+        # picker drag then shifted by ~twice the real delta and ghosted a second
+        # copy of every card (owner-reported on glass 2026-07-25).
+        lay.RETAINED_FRAMES = 1
         comp = lay._comp
         if owner is not None and comp.pooled:
             lent = self._lent_layers
@@ -381,6 +388,90 @@ def run_ppa_smoke(scale=2, iters=60):
     print("PPA SMOKE done -> REPL")
 
 
+def _remote_state(ws):
+    """One-line JSON snapshot for the serial `state` command -- the on-glass
+    test harness's introspection half (tools/p4_autotest.py parses it). Every
+    field is best-effort: a broken subsystem reads as null, never a crash."""
+    st = {}
+    try:
+        st["screen"] = ws.screen
+        st["frames"] = getattr(ws, "_frames_drawn", None)
+        wm = ws.wm
+        desk = getattr(wm, "desk_open", None)
+        st["desk"] = bool(desk()) if desk is not None else None
+        st["order"] = list(getattr(wm, "_order", ()) or ())
+        st["focus"] = getattr(wm, "_focus", None)
+        wins = {}
+        for k in st["order"]:
+            win = wm._wins.get(k)
+            if win is not None:
+                wins[k] = [win.x, win.y, win.w, win.h, win.title_h,
+                           win.kind, bool(win.minimized)]
+        st["wins"] = wins
+        # #113: a window buffer is ONE retained surface -- 2 here means a
+        # blit-scroll would measure against the wrong paint and ghost.
+        st["win_retained"] = dict(
+            (k, getattr(wm._wins[k].buf, "RETAINED_FRAMES", None))
+            for k in st["order"]
+            if wm._wins.get(k) is not None and wm._wins[k].buf is not None)
+    except Exception as exc:  # noqa: BLE001
+        st["wm_err"] = str(exc)
+    try:
+        sl = ws.settings_layer
+        sr = sl.scroll
+        st["settings"] = {
+            "set_top": sl.set_top, "sel": sl.set_msel,
+            "rows": len(sl._settings_rows()),
+            "offset": None if sr is None else sr.offset,
+            "view": None if sr is None else list(sr.view),
+            "content": None if sr is None else sr.content,
+            "wifi_view": bool(sl.wifi_view), "bt_view": bool(sl.bt_view),
+        }
+        win = ws.wm._wins.get("settings") if hasattr(ws.wm, "_wins") else None
+        if win is not None and win.ctx is not None:
+            lay = win.ctx.layout
+            st["settings"]["lay"] = [lay.set_x, lay.set_row_y0,
+                                     lay.set_w, lay.set_row_h]
+    except Exception as exc:  # noqa: BLE001
+        st["settings_err"] = str(exc)
+    try:
+        if ws.wifi is not None:
+            st["wifi"] = list(ws.wifi.status())
+        else:
+            st["wifi"] = None
+    except Exception as exc:  # noqa: BLE001
+        st["wifi_err"] = str(exc)
+    try:
+        # Look the app cart up by TITLE, never by folder name: the device seeds
+        # from the title slug (appearance.moy) while the host store copies the
+        # source folder (theme_picker.moy) -- assuming either name is what broke
+        # is_app in the first place (on-glass 2026-07-25).
+        app = getattr(ws, "appearance_app", None)
+        cart = None
+        for c in ws._all_carts:
+            if c.get("title") == "Appearance":
+                cart = c
+                break
+        if cart is None:
+            st["appearance_cart"] = None
+        else:
+            st["appearance_cart"] = {
+                "title": cart.get("title"), "version": cart.get("version"),
+                "path": cart.get("path"),
+                "perms": list(cart.get("permissions") or ()),
+                "is_app": bool(app.is_app(cart)) if app is not None else None,
+            }
+        # Every registered system app's claim, so a harness run catches the
+        # whole class rather than just Appearance.
+        claims = {}
+        for _app, _text in getattr(ws, "_apps", ()):
+            claims[_app.id] = sum(1 for c in ws._all_carts if _app.is_app(c))
+        st["app_claims"] = claims
+    except Exception as exc:  # noqa: BLE001
+        st["appearance_err"] = str(exc)
+    return st
+
+
 def run_desktop(fps_cap=60):
     """Boot the shared console on the P4: launcher-as-desktop under WindowedWM,
     GT911 touch as the pointer, a BLE HID keyboard over the companion C6, and
@@ -482,6 +573,7 @@ def run_desktop(fps_cap=60):
     last = _ticks_ms()
     _backlight_on = False          # dark until the first composed frame (#45)
     _drag_script = None            # remote `drag` playback state (see below)
+    _swipe_script = None           # remote `swipe` playback state (see below)
     # Perf sampler (#58 fps-ledger groundwork): serial is free on this board, so
     # print a PERF line every ~2s -- drawn-fps, average busy loop ms, and the
     # console's own draw/flush/logic/render/chrome EMAs (filled because
@@ -627,14 +719,68 @@ def run_desktop(fps_cap=60):
             if parts and parts[0] == "open":
                 # `open settings|picker`: pop an app window deterministically (no
                 # tile-hunting) so a drag can be measured against a known window.
-                fn = {"settings": getattr(ws, "open_settings", None),
-                      "picker": getattr(ws, "open_picker", None)}.get(
-                          parts[1] if len(parts) > 1 else "")
-                if fn is not None:
-                    fn()
-                    print("REMOTE open %s" % parts[1])
+                # `open appearance` reports open_app's claim result (a False is
+                # the silent no-op the on-glass harness needs to SEE); `open
+                # wifi` deep-links Settings -> the wifi panel.
+                what = parts[1] if len(parts) > 1 else ""
+                if what == "appearance":
+                    ok = ws.open_app(ws.appearance_app)
+                    print("REMOTE open appearance -> %s" % ok)
+                elif what == "wifi":
+                    ws.open_settings()
+                    ws.settings_layer.open_wifi()
+                    print("REMOTE open wifi")
                 else:
-                    print("REMOTE open ? %s" % line)
+                    fn = {"settings": getattr(ws, "open_settings", None),
+                          "picker": getattr(ws, "open_picker", None)}.get(what)
+                    if fn is not None:
+                        fn()
+                        print("REMOTE open %s" % what)
+                    else:
+                        print("REMOTE open ? %s" % line)
+            if parts and parts[0] == "py" and len(parts) > 1:
+                # `py <code>`: eval/exec one line against the LIVE console (ws /
+                # wm / pointer in scope) between frames -- the harness's probe
+                # hook (attach counters, read gesture state, monkeypatch a
+                # surface under test). Dev-board serial only, like every
+                # command here.
+                _code = line.split(None, 1)[1]
+                _env = {"ws": ws, "wm": ws.wm, "pointer": pointer,
+                        "comp": comp, "game": game}
+                try:
+                    try:
+                        print("PY %r" % (eval(_code, _env),))
+                    except SyntaxError:
+                        exec(_code, _env)
+                        print("PY ok")
+                except Exception as exc:  # noqa: BLE001
+                    print("PY ERR %s: %s" % (type(exc).__name__, exc))
+            if parts and parts[0] == "state":
+                # `state`: one-line JSON snapshot (world/windows/settings scroll/
+                # wifi/cart claims) -- the harness's assertion source.
+                try:
+                    import json as _json
+                    print("STATE %s" % _json.dumps(_remote_state(ws)))
+                except Exception as exc:  # noqa: BLE001
+                    print("STATE {\"err\": \"%s\"}" % exc)
+            if parts and parts[0] == "swipe" and len(parts) >= 5:
+                # `swipe x0 y0 x1 y1 [frames]`: a synthetic touch gesture fed
+                # through the SAME pointer path as the glass (press edge at the
+                # start point, interpolated held move, release at the end), so
+                # the harness can exercise scroll/drag/fling on any surface.
+                try:
+                    _swipe_script = {"i": 0,
+                                     "x0": int(parts[1]), "y0": int(parts[2]),
+                                     "x1": int(parts[3]), "y1": int(parts[4]),
+                                     "n": max(2, int(parts[5]))
+                                     if len(parts) > 5 else 20}
+                    print("REMOTE swipe %d,%d -> %d,%d frames=%d"
+                          % (_swipe_script["x0"], _swipe_script["y0"],
+                             _swipe_script["x1"], _swipe_script["y1"],
+                             _swipe_script["n"]))
+                except ValueError:
+                    _swipe_script = None
+                    print("REMOTE swipe ? %s" % line)
             if parts and parts[0] == "drag":
                 # `drag [frames]`: grab the TOP window's title strip and oscillate
                 # it for `frames` frames (default 120), so the PERF sampler reports
@@ -679,6 +825,24 @@ def run_desktop(fps_cap=60):
                 pointer.place(s["cx"] + off, s["cy"])
                 pointer.down = True
                 click = (i == 0)                        # frame 0 arms the drag
+                s["i"] = i + 1
+        if _swipe_script is not None:
+            s = _swipe_script
+            i = s["i"]
+            n = s["n"]
+            if i > n:
+                _swipe_script = None
+                print("REMOTE swipe done")
+            else:
+                # i==0 press edge at the start, i in 1..n-1 held interpolation,
+                # i==n the release sample at the end point (down=False so the
+                # gesture machines see a real release, fling velocity intact).
+                f = min(i, n - 1) / (n - 1)
+                x = s["x0"] + int((s["x1"] - s["x0"]) * f)
+                y = s["y0"] + int((s["y1"] - s["y0"]) * f)
+                pointer.place(x, y)
+                pointer.down = i < n
+                click = (i == 0)
                 s["i"] = i + 1
         pointer.click = click
         pointer.tick(now)
