@@ -1821,7 +1821,12 @@ def test_device_canvas_uses_native_moy_gfx():
     # so complex carts stay fast.
     assert "self._gfx = compositor.gfx()" in device_canvas
     assert "self._gfx.fill(self._buf" in device_canvas          # cls
-    assert "self._gfx.fill_rect(self._buf" in device_canvas     # rect / circ
+    # rect / circ. Matches both `self._gfx.fill_rect(` and the hoisted
+    # `gfx.fill_rect(` _fill uses -- that wrapper caches self._gfx in a local
+    # because it is the console chrome's hot verb and every interpreter dict
+    # lookup in it is measurable (see _fill's note in device_canvas.py). The
+    # pin is "the native kernel writes the shared framebuffer", not a spelling.
+    assert "gfx.fill_rect(self._buf" in device_canvas
     assert "self._gfx.blit565(self._buf" in device_canvas       # spr
     # Sprites are cached as a pre-scaled RGB565 blit; sheet tiles reuse one Image
     # across frames so the cache is built once, not rebuilt every frame.

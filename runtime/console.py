@@ -3919,6 +3919,13 @@ class Workstation:
             _bc = getattr(self.canvas, "batch_reset", None)
             if _bc is not None:
                 _bc()                  # #63: zero this frame's auto-batch profiling counters
+        elif getattr(self.canvas, "_prof", False):
+            # Perf capture just went off: clear the device canvas's DRAW2 timing
+            # gate so its hot verbs stop paying the per-op ticks_us pair (~6us a
+            # fill, and chrome issues them by the hundred -- see _fill's note in
+            # device_canvas.py). One attribute read per frame here; the host
+            # canvas has no _prof, so getattr returns False and this never fires.
+            self.canvas._prof = False
             # Per-frame perf scratch (the running-cart content Layer fills self._pf_*).
             # #75: zeroed ONLY under _perf -- the writers (Player.tick / the bar draws)
             # only fill them under _perf too, and the reads below are _perf-gated, so a

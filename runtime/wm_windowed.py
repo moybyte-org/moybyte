@@ -256,20 +256,52 @@ class _BackdropLayer(Layer):
 
     def draw(self, dt):
         wm = self.wm
-        if ((wm._drag is None and wm._resize is None)
-                or wm._backdrop_disabled or wm._backdrop_unsupported):
-            wm._backdrop_valid = False        # live: no drag, always re-render
+        # A CONTENT gesture (a finger scrolling inside a window) counts as a
+        # gesture for cache purposes, exactly like a window drag/resize (#155,
+        # owner "the project picker is choppy, the play launcher is smooth").
+        # The desk cannot change while a window's content is being dragged, but
+        # this layer used to re-render the whole desktop -- wallpaper cover-crop
+        # + icon column + bar -- on EVERY such frame. Measured on glass during a
+        # picker scroll: 107ms of a 181ms frame (~5fps) against the fullscreen
+        # Library's 36ms, which pays no desk at all. The cached blit is ~26ms.
+        # Same staleness trade the window-drag path already accepts: a clock tick
+        # mid-gesture waits for the release, which re-renders live.
+        content_anim = wm._content_gesture or wm._content_flinging()
+        gesture = (wm._drag is not None or wm._resize is not None
+                   or content_anim)
+        if (not gesture or wm._backdrop_disabled or wm._backdrop_unsupported
+                or self.ws._animating(dt)):   # a toast/confetti moves desk pixels
+            wm._backdrop_valid = False        # live: no gesture, always re-render
+            wm._desk_streak = 0
+            wm._desk_painted = True           # wiped the buffer -> windows repaint
             if wm._gesture_hist:
                 wm._gesture_hist = []         # gesture over: drop the damage trail
             self._draw_desktop(dt)
             return
         if wm._backdrop_valid:
+            # CONTENT gesture: the window is STATIONARY, so the desk outside it
+            # never changes and the desk under it is fully covered by the
+            # window's own stamp. Once the cache has been laid into BOTH
+            # ping-pong buffers (two consecutive gesture frames), every later
+            # frame's target already holds the right pixels -- skip the restore
+            # entirely. That is the last ~28ms between a windowed content scroll
+            # and the fullscreen Library's (owner: "choppy vs smooth"). A window
+            # DRAG still restores every frame: there the window moves, so the
+            # backdrop it uncovers is genuinely damaged.
+            if wm._drag is None and wm._resize is None:
+                if wm._desk_streak >= 2:
+                    wm._desk_painted = False   # untouched: windows may skip too
+                    return
+                wm._desk_streak += 1
+            wm._desk_painted = True
             _perf = getattr(self.ws, "perf_capture", False)
             _t0 = _wt() if _perf else 0
             wm._blit_backdrop_cache()
             if _perf:
                 self.ws._pf_wm_restore = _wt() - _t0
             return
+        wm._desk_streak = 0
+        wm._desk_painted = True
         self._draw_desktop(dt)                # first drag frame: render + snapshot
         wm._capture_backdrop()
 
@@ -438,6 +470,21 @@ class WindowedWM(FullscreenStackWM):
                                             # (the web CommandCanvas, #113): stop
                                             # re-trying the capture every drag frame
                                             # (each retry minted+leaked a layer)
+        self._content_gesture = False     # a finger is dragging inside a window's
+                                          # CONTENT (a list scroll, not the window
+                                          # itself). The desk can't change under it,
+                                          # so _BackdropLayer serves the cache --
+                                          # see its draw() note.
+        self._desk_streak = 0             # consecutive content-gesture frames that
+                                          # stamped the cached desk; at 2 BOTH
+                                          # ping-pong buffers hold it and the
+                                          # restore can be skipped outright.
+        self._desk_painted = True         # did the backdrop paint THIS frame? (it
+                                          # wipes the buffer, so every window above
+                                          # must then repaint -- see
+                                          # _lowest_dirty_window)
+        self._win_sig = None              # window-shape signature; a change voids
+                                          # every retained window stamp
         # Dirty-union gesture restore (#58 "smooth like a real OS"): during a
         # drag/resize only the moving window's recent footprint needs the backdrop
         # re-stamped -- a full-screen 1.2MB restore per frame is the drag path's
@@ -982,15 +1029,68 @@ class WindowedWM(FullscreenStackWM):
 
     # -- drawing ---------------------------------------------------------------
 
+    def _lowest_dirty_window(self, dt):
+        """Index of the LOWEST window that must repaint this frame; everything
+        below it is already correct in the target framebuffer and is skipped.
+
+        Why (measured on glass 2026-07-26): every open window was re-stamped and
+        re-chromed EVERY frame even when nothing about it changed -- an unfocused
+        window isn't even re-rendered, just copied. Each extra open window cost
+        ~44ms a frame (1 window 56ms, 2 windows 99ms, 3 windows 144ms), which is
+        what made a desktop with a few things open feel far worse than the
+        fullscreen Library.
+
+        The z-order rule that makes skipping SOUND: windows are painted bottom to
+        top, so a repainting window overwrites the overlap of everything below
+        it. Skipping is therefore only safe for a CONTIGUOUS run at the BOTTOM --
+        find the lowest window that must paint and draw from there up.
+
+        A window may be skipped only once its pixels sit in BOTH ping-pong
+        buffers (`_stamp_streak >= 2`, the same rule _BackdropLayer uses), it is
+        not the focused window (whose content re-renders live), and nothing
+        global invalidated the frame -- the desk backdrop repainting under it, a
+        live animation, or a visible cursor whose old stamp would ghost."""
+        n = len(self._order)
+        # Any change to the window SHAPE of the frame (which windows, their
+        # z-order, geometry, minimised state, or which one has focus) voids every
+        # retained stamp. One signature comparison beats hunting each mutation
+        # site (open/close/move/resize/maximise/focus) and can't miss one.
+        sig = (tuple(self._order), self._focus,
+               tuple((w.x, w.y, w.w, w.h, w.minimized, w.kind)
+                     for w in (self._wins[k] for k in self._order)))
+        if sig != self._win_sig:
+            self._win_sig = sig
+            for k in self._order:
+                self._wins[k]._stamp_streak = 0
+            return 0
+        if (self._desk_painted or self._drag is not None
+                or self._resize is not None or self.ws._animating(dt)):
+            return 0                      # something under/over everything moved
+        p = self.ws.pointer
+        if p is not None and getattr(p, "visible", False):
+            return 0                      # the cursor's old stamp needs erasing
+        for i in range(n):
+            win = self._wins[self._order[i]]
+            if win.minimized:
+                continue                  # nothing painted -> nothing to skip past
+            if (self._order[i] == self._focus or win.kind == "desktop"
+                    or getattr(win, "_stamp_streak", 0) < 2):
+                return i
+        return n                          # every window is settled: draw none
+
     def _draw_windows(self, dt):
         self._sync_windows()
         n = len(self._order)
+        first = self._lowest_dirty_window(dt)
         for i in range(n):
             key = self._order[i]
             win = self._wins[key]
             focused = (key == self._focus)
             if win.minimized:
                 continue
+            if i < first:
+                continue                  # settled + nothing below it repainted
+            win._stamp_streak = getattr(win, "_stamp_streak", 0) + 1
             if win.kind == "desktop":
                 # The Player TICKS whenever its window is open, independent of
                 # input focus AND of what sits above it on the back-stack -- a
@@ -1336,10 +1436,24 @@ class WindowedWM(FullscreenStackWM):
                 return k
         return None
 
+    def _content_flinging(self):
+        """True while a window's CONTENT is coasting on a kinetic fling (#113) --
+        the finger is up but the view is still moving, so the desk is as static
+        as it is mid-drag. Without this the release dropped straight back onto
+        the live desk render and the fling frames measured ~180ms against the
+        drag's ~100ms (on glass, 2026-07-26)."""
+        ws = self.ws
+        for grid in (getattr(ws, "picker", None), getattr(ws, "launcher", None)):
+            if grid is not None and getattr(grid, "flinging", False):
+                return True
+        return False
+
     def _route_pointer(self, px, py, click):
         ws = self.ws
         self._sync_windows()
         p = ws.pointer
+        if p is None or not p.down:
+            self._content_gesture = False   # finger up: the desk renders live again
         # An in-flight RESIZE follows the pointer; released -> apply the new size.
         if self._resize is not None:
             kind, ox, oy, ow, oh, _cw, _ch = self._resize
@@ -1436,6 +1550,9 @@ class WindowedWM(FullscreenStackWM):
         content = self._content_for(win.kind)
         if content is None:
             return True
+        if p.down:
+            self._content_gesture = True    # scrolling INSIDE a window: the desk
+                                            # is static -> _BackdropLayer caches
         self._install(win.ctx)
         try:
             content.handle_pointer(lx, ly, click)

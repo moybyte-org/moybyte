@@ -911,13 +911,28 @@ class SettingsLayer:
         reflow with the layout/font scale (#39)."""
         NAMES = self._NAMES
         ws = self.ws
-        ws.wallpaper.draw(dt)
         cv = ws.sys_canvas
         lay = ws.layout
         fs = lay.fs
         px, py, pw, ph = lay.settings_panel
         th = ws.theme_colors
-        cv.rect(px, py, pw, ph, th["panel"])
+        # Backdrop. FULLSCREEN tiers keep the live wallpaper behind the panel (the
+        # honest preview this app is partly about). Inside a WM WINDOW that is pure
+        # waste: the window already sits ON the desktop wallpaper, and rendering the
+        # whole cover-crop composite AGAIN into the window buffer measured **70ms of
+        # a 98ms** Settings frame on the P4 -- the single worst UI cost found in the
+        # 2026-07-26 panel sweep (settings scroll drag p90 174ms vs the fullscreen
+        # Library's 40ms). The panel does not cover the window (646x422 inside
+        # 678x510), so the margin still needs filling -- one flat fill does it.
+        _windowed = getattr(ws, "windowed_chrome", False)
+        if _windowed:
+            cv.cls(th["panel"])
+        else:
+            ws.wallpaper.draw(dt)
+            # (windowed: cls above already laid this exact colour over the whole
+            # buffer -- re-filling the panel rect would paint 272k of the same
+            # pixels a second time, ~9ms of pure duplicate fill.)
+            cv.rect(px, py, pw, ph, th["panel"])
         cv.rectb(px, py, pw, ph, th["edge"])
         # Inside a WM window (#73) the title strip already says SETTINGS and carries
         # the closing X, so the panel's own header + X are suppressed (no doubled

@@ -449,3 +449,78 @@ def test_paint_image_replay_honors_the_clip():
     replayed = Canvas(40, 30)
     web_view.replay_to_canvas(cmds, replayed)
     assert bytes(replayed.buf) == bytes(truth.buf)
+
+
+# -- the WINDOWED tier: the ring must survive per-frame layout swaps ---------
+
+def test_picker_blit_arms_in_a_window(tmp_path):
+    """The desktop tier's picker drag must actually SHIFT, not repaint every
+    card (on-glass P4 regression, 2026-07-25).
+
+    `WindowedWM._install` swaps a window's layout context in to draw its
+    content and swaps the ROOT context back afterwards -- for BOTH grids, so
+    `Launcher.set_layout` runs several times per frame (measured: 1040 calls in
+    4 idle seconds). It used to `invalidate()` the paint ring on every call, so
+    the ring was ALWAYS empty here, blit_shift never returned a shift, and each
+    drag frame fell back to repainting the whole band: ~73ms a frame on glass
+    versus ~28ms once the shift arms. The ring's KEY (which carries the surface
+    geometry) is what guards a layout change now, not an eager invalidate."""
+    from runtime import host_app
+
+    ws = _ws_with_carts(tmp_path, 14)
+    del ws                                   # rebuild windowed, same cart dir
+    ws = host_app.build_workstation(str(tmp_path / "carts"),
+                                    sys_size=(1024, 600), font_scale=2,
+                                    windowed=True)
+    drv = host_app.ConsoleDriver(ws)
+    ws.open_picker()
+    for _ in range(80):                      # settle covers; arm streak + ring
+        drv.frame(1 / 30)
+    win = ws.wm._wins["make"]
+    assert win.kind == "picker"
+
+    # The ring must be non-empty AFTER a frame -- the bug left it wiped.
+    assert ws.picker._region._painted, "the paint ring never survives a frame"
+
+    shifts = [0]
+    region = ws.picker._region
+    orig = region.blit_shift
+
+    def spy(cv, frame_no, key=None):
+        r = orig(cv, frame_no, key)
+        if r is not None:
+            shifts[0] += 1
+        return r
+
+    region.blit_shift = spy
+
+    lay = win.ctx.layout                     # window-local grid geometry
+    gx, gy, gw, gh = lay.lib_grid
+    ox, oy = win.x + 1, win.y + 1 + win.title_h
+    cx, cy = ox + gx + gw - 12, oy + gy + gh // 2
+    _drag_frames(drv, cx, cy, 10)
+    assert ws.picker.dragging
+    assert shifts[0] > 0, "no drag frame used the scroll-as-blit path"
+    drv.touch_up()
+    drv.frame(1 / 30)
+
+
+def test_set_layout_keeps_the_paint_ring(tmp_path):
+    """Re-applying a layout must not wipe the ring (that is the whole bug);
+    a paint recorded under DIFFERENT geometry must still be unmatchable via
+    the key."""
+    from runtime import host_app
+
+    ws = _ws_with_carts(tmp_path, 14)
+    drv = host_app.ConsoleDriver(ws)
+    ws.open_picker()
+    for _ in range(60):
+        drv.frame(1 / 30)
+    region = ws.picker._region
+    assert region._painted
+    before = list(region._painted)
+    ws.picker.set_layout(ws.picker.layout)   # the per-frame context swap
+    assert region._painted == before, "set_layout wiped the ring"
+    # ... but the geometry IS pinned: the statics key carries the grid rect.
+    key = ws.editor_picker._statics_key(ws.sys_canvas)
+    assert ws.picker.layout.lib_grid in key

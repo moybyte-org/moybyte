@@ -156,3 +156,93 @@ def test_windowed_artwork_window_close_commits_the_drawing(tmp_path):
     assert app._unsaved is True
     ws.wm.close_window_kind("artwork")
     assert app._unsaved is False, "closing the Paint window must flush the open drawing"
+
+
+# -- the clean-tab guard (P4 tab-switch cost, on-glass 2026-07-25) -----------
+#
+# save_current() skips a tab that provably has nothing to persist. On the P4 a
+# commit is ~800ms of flash write + ~175ms of journal, so an unguarded commit
+# made merely WALKING the tab ladder cost 0.5-1.4s per switch. These pin both
+# halves: an untouched tab writes nothing, a real edit still commits on exit.
+
+def _writes_during(ws, fn):
+    """Count store writes fn() performs (the verbs every commit_* routes to)."""
+    store = ws.carts_store
+    names = ("save_code", "save_sprites", "save_map", "save_config",
+             "save_sounds", "save_scene")
+    hits = []
+    orig = {}
+    for n in names:
+        f = getattr(store, n, None)
+        if f is None:
+            continue
+        orig[n] = f
+
+        def mk(n=n, f=f):
+            def w(*a, **k):
+                hits.append(n)
+                return f(*a, **k)
+            return w
+        setattr(store, n, mk())
+    try:
+        fn()
+    finally:
+        for n, f in orig.items():
+            setattr(store, n, f)
+    return hits
+
+
+def test_untouched_tab_switch_writes_nothing(tmp_path):
+    """Walking the tab ladder without editing must not touch the store."""
+    ws = _ws(tmp_path)
+    _open_in_editor_by_title(ws, ws.launcher.items[1]["title"]
+                             if ws.launcher.items[1].get("path")
+                             else ws.launcher.items[2]["title"])
+    ws.editor_app.set_tab("code")
+    hits = _writes_during(ws, lambda: [ws.editor_app.set_tab(t)
+                                       for t in ("paint", "map", "cards", "code")])
+    assert hits == [], "an untouched tab ladder walk still wrote: %s" % hits
+
+
+def test_a_real_edit_still_commits_on_tab_switch(tmp_path):
+    """The guard must never swallow an actual edit -- each tab's own mutation
+    verb (not the set_text loader) marks it dirty, and the switch persists it."""
+    from runtime import moy_carts
+    ws = _ws(tmp_path)
+    title = next(c["title"] for c in ws.launcher.items if c.get("path"))
+    path = _cart_path_by_title(ws, title)
+    _open_in_editor_by_title(ws, title)
+
+    # code: type a character through the real edit verb
+    ws.editor_app.set_tab("code")
+    ws.editor.goto_row(0, 0)
+    ws.editor.insert("#")
+    hits = _writes_during(ws, lambda: ws.editor_app.set_tab("paint"))
+    assert "save_code" in hits, hits
+    assert moy_carts.load(path)["src"].startswith("#")
+
+    # paint: one pset
+    ws.sheet.pset(0, 0, 7)
+    hits = _writes_during(ws, lambda: ws.editor_app.set_tab("map"))
+    assert "save_sprites" in hits, hits
+
+    # map: one tile
+    ws.tilemap.mset(0, 0, 1)
+    hits = _writes_during(ws, lambda: ws.editor_app.set_tab("code"))
+    assert "save_map" in hits, hits
+
+
+def test_code_undo_is_not_mistaken_for_clean(tmp_path):
+    """CodeEditor.set_text (the LOADER, which clears dirty) is what op_history
+    replays undo/redo through -- so a `dirty`-based guard would drop an undone
+    edit. The code tab compares content instead."""
+    ws = _ws(tmp_path)
+    title = next(c["title"] for c in ws.launcher.items if c.get("path"))
+    _open_in_editor_by_title(ws, title)
+    ws.editor_app.set_tab("code")
+    ws.editor.set_text("# undone-into-place\n")     # loader: leaves dirty False
+    assert ws.editor.dirty is False
+    assert not ws.editor_app._tab_is_clean("code"), \
+        "content differs from the persisted source -- must NOT read as clean"
+    hits = _writes_during(ws, lambda: ws.editor_app.set_tab("cards"))
+    assert "save_code" in hits, hits

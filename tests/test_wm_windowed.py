@@ -995,3 +995,105 @@ def test_group_window_drag_freezes_its_content(tmp_path):
     drv.touch_up()
     drv.frame(1 / 30)
     assert calls[0] > 0                    # release: live rendering resumes
+
+
+# -- settled windows are not re-stamped every frame (#155) -------------------
+
+def _open_two_windows(ws, drv):
+    ws.open_settings()
+    drv.frame(1 / 30)
+    ws.open_picker()
+    for _ in range(40):            # settle covers + the stamp streaks
+        drv.frame(1 / 30)
+    assert len(ws.wm._order) >= 2
+    return ws.wm._order
+
+
+def _settle_gesture(ws, drv, frames=6):
+    """Put the WM in the state where retained stamps are legal: a CONTENT
+    gesture (a finger scrolling inside a window). Only then does the desk
+    backdrop serve its cache instead of re-rendering -- and a live desk render
+    wipes the buffer, so windows can never skip while it runs. (That coupling
+    is why a non-gesture frame still repaints everything; see the desk-cache
+    note in _BackdropLayer.draw.)"""
+    win = ws.wm._wins[ws.wm._order[-1]]
+    cx = win.x + 1 + win.w // 2
+    cy = win.y + 1 + win.title_h + (win.h - win.title_h) // 2
+    drv.touch(cx, cy)                     # press inside the top window's CONTENT
+    drv.frame(1 / 30)
+    for _ in range(frames):
+        drv.touch_drag(cx, cy)            # held (the flag is per-frame, set by
+        ws.mark_dirty()                   # _route_pointer's content dispatch)
+        drv.frame(1 / 30)
+    assert ws.wm._content_gesture, "the content gesture never registered"
+
+
+def test_settled_lower_windows_are_skipped(tmp_path):
+    """A window whose shape and content haven't changed must not be re-stamped
+    and re-chromed every frame.
+
+    Measured on glass 2026-07-26: every open window was repainted every frame
+    even when only the top one was being used, so each extra window cost ~44ms
+    a frame (1 window 56ms, 2 windows 99ms, 3 windows 144ms). Skipping is sound
+    only for a contiguous run at the BOTTOM of the z-order (a repainting window
+    overwrites the overlap of everything below it), which is what
+    _lowest_dirty_window returns."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _quiesce(ws)
+    _open_two_windows(ws, drv)
+    _settle_gesture(ws, drv)
+
+    drawn = []
+    wm = ws.wm
+    real = wm._draw_app_window
+
+    def spy(win, focused, dt, **kw):
+        drawn.append(win.kind)
+        return real(win, focused, dt, **kw)
+
+    wm._draw_app_window = spy
+    ws.mark_dirty()
+    drv.frame(1 / 30)
+    assert drawn, "no window drew at all"
+    assert len(drawn) < len(wm._order) or len(wm._order) == 1, \
+        "every window still repainted: %s of %s" % (drawn, wm._order)
+
+
+def test_skipping_is_pixel_identical_to_a_full_repaint(tmp_path):
+    """The skipped frame's screen must equal a frame that repainted every
+    window -- the correctness contract behind the skip (verified on glass with
+    a same-buffer byte compare; this is its host pin)."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _quiesce(ws)
+    _open_two_windows(ws, drv)
+    _settle_gesture(ws, drv)
+
+    def full():
+        ws.wm._win_sig = None            # void every retained stamp
+        ws.wm._desk_painted = True
+        ws.mark_dirty()
+        drv.frame(1 / 30)
+
+    full(); full()
+    reference = bytes(ws.sys_canvas.buf)
+    ws.mark_dirty()
+    drv.frame(1 / 30)                    # a frame free to skip settled windows
+    assert bytes(ws.sys_canvas.buf) == reference
+
+
+def test_moving_a_window_voids_the_skip(tmp_path):
+    """Any change to the window SHAPE of the frame (geometry, z-order, focus,
+    minimise) must force a full window repaint -- the signature guard."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _quiesce(ws)
+    _open_two_windows(ws, drv)
+    _settle_gesture(ws, drv)
+    assert ws.wm._lowest_dirty_window(1 / 30) > 0     # settled: something skips
+
+    win = ws.wm._wins[ws.wm._order[-1]]
+    ws.wm._move_window(win, win.x + 11, win.y + 7)
+    assert ws.wm._lowest_dirty_window(1 / 30) == 0, \
+        "a moved window must void every retained stamp"

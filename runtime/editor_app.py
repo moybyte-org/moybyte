@@ -492,6 +492,70 @@ class EditorApp:
             ws._leave_menu()
         return True
 
+    def _tab_is_clean(self, tab):
+        """True when `tab` PROVABLY has nothing to persist, so save_current can
+        skip the whole commit.
+
+        Why this exists (on-glass P4, 2026-07-25): every exit path hard-commits
+        the outgoing tab, and a commit is expensive -- serialize the asset
+        (`to_hex`, ~220ms), write it to flash (~800ms: _write_atomic costs five
+        littlefs metadata ops), then append a full-file snapshot to the undo
+        journal (~175ms). With no guard that ran even when the kid had merely
+        LOOKED at a tab, so walking the tab ladder cost 0.5-1.4s PER SWITCH
+        ("slow switching between project tabs"). Measured on glass: map 1356ms,
+        paint 1145ms, music 919ms, code 579ms, cards 534ms -- against a
+        32-247ms redraw.
+
+        Conservative by construction: it returns True only for tabs whose
+        cleanliness is provable, AND whose #111 op-history has no pending batch.
+        Anything else -- an unknown tab, a missing editor, scene/music (no dirty
+        flag) -- falls through to the commit exactly as before, so this can only
+        skip writes that would have been byte-identical no-ops.
+
+        Per-tab signal, and why they differ: paint/map/blocks carry a `dirty`
+        flag their editor cores set at the single mutation chokepoint AND that
+        their undo codecs re-set on replay (_PaintOps psets through the sheet,
+        _MapOps sets tm.dirty, BlockEditor._after_history sets dirty), so the
+        flag is trustworthy there. The CODE tab's is NOT: CodeEditor.set_text is
+        the LOADER (it clears dirty) and op_history.TextEditCodec rewrites the
+        buffer through it, so an undo/redo leaves a changed document flagged
+        clean. Code therefore compares content against the last persisted source
+        (moy_carts.save_code keeps cart["src"] in step) -- an O(n) compare of a
+        few KB, nothing next to the ~800ms flash write it guards."""
+        ws = self.ws
+
+        def _quiet(hist):
+            return hist is None or not hist.peek()
+
+        proj = self.project
+        if tab == "code":
+            ed = ws.editor
+            cart = ws.cart
+            if ed is None or not cart:
+                return False
+            return (ed.text() == cart.get("src")
+                    and _quiet(proj._code_history() if proj is not None else None))
+        if tab == "paint":
+            sh = ws.sheet
+            return (sh is not None and not getattr(sh, "dirty", True)
+                    and _quiet(proj._paint_history() if proj is not None else None))
+        if tab == "map":
+            tm = getattr(ws, "tilemap", None)
+            return (tm is not None and not getattr(tm, "dirty", True)
+                    and _quiet(proj._map_history() if proj is not None else None))
+        if tab == "blocks":
+            blk = getattr(getattr(ws, "block_ui", None), "editor", None)
+            return blk is not None and not getattr(blk, "dirty", True)
+        if tab == "cards":
+            # No editor core: the config IS the document. It's clean when the
+            # live values already match what the cart dict carries (what a
+            # commit would write) and no field tweak is pending in the history.
+            if proj is None or not proj.cart:
+                return False
+            return (dict(proj.config) == dict(proj.cart.get("cfg") or {})
+                    and _quiet(proj.config_hist))
+        return False                 # scene / music / unknown: commit as before
+
     def save_current(self):
         """Hard-commit the ACTIVE tab (#111: the autosave-only model's persist verb --
         SAVE was a tap dispatching here; now every exit path calls this directly: a
@@ -505,6 +569,8 @@ class EditorApp:
         own CLOSE/leave hard-commits via ws.save_icons() (paint_layer.ThemeLayer.leave)."""
         ws = self.ws
         tab = self.tab
+        if self._tab_is_clean(tab):
+            return                   # nothing changed -> nothing to persist
         if tab == "code":
             ws.save_code()
         elif tab == "paint":

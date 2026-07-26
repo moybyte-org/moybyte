@@ -177,7 +177,19 @@ class Launcher:
         self.layout = layout
         self.COLS = layout.cols
         self.ROWS = layout.rows
-        self._region.invalidate()   # #113: new geometry -- recorded paints are void
+        # (#113) NO eager ring invalidate here. This is called MANY times per
+        # frame on the windowed tier -- _install swaps in a window's layout
+        # context to draw its content and swaps the ROOT context back after, for
+        # BOTH grids, so the picker's layout legitimately alternates
+        # window<->root ~4x a frame (measured on glass 2026-07-25: 1040 calls in
+        # 4 idle seconds). Invalidating here wiped the paint ring every time, so
+        # blit_shift's ring was ALWAYS empty and the scroll-as-blit path could
+        # never arm on the desktop tier -- every drag frame repainted every
+        # visible card. The ring's own key is the real guard: it carries the
+        # surface geometry (canvas w/h, font scale, grid rect) plus the theme
+        # and item count, so a paint recorded under a different layout can never
+        # be mistaken for a match. set_items still invalidates -- an item LIST
+        # change alters pixels the key's length alone can't distinguish.
 
     # -- selection ----------------------------------------------------------
 
@@ -757,9 +769,11 @@ class LauncherHomeLayer:
     def _statics_key(self, cv):
         """Everything the home frame's STATIC chrome (wallpaper backdrop +
         Library panel fill/header/footer) is a pure function of. A key change
-        forces full paints until the streak re-arms."""
+        forces full paints until the streak re-arms. Carries the GRID RECT
+        (#113) for the same reason the picker's does -- see that docstring."""
         ws = self.ws
         return (cv.w, cv.h, ws.layout.fs, id(ws.theme_colors),
+                ws.launcher.layout.lib_grid,
                 ws.wallpaper_id, len(ws.launcher.items),
                 getattr(ws, "search_query", ""), getattr(ws, "search_typing", False))
 
@@ -1230,10 +1244,14 @@ class EditorPickerLayer:
 
     def _statics_key(self, cv):
         """Everything the picker's STATIC backdrop (panel fill + dot grid) and
-        band chrome are a pure function of -- the home shelf's streak idiom."""
+        band chrome are a pure function of -- the home shelf's streak idiom.
+        Carries the GRID RECT too (#113): set_layout no longer invalidates the
+        ring eagerly (the windowed tier re-applies layouts several times per
+        frame), so this key is what makes a paint recorded under a different
+        layout unmatchable."""
         ws = self.ws
         return (cv.w, cv.h, ws.layout.fs, id(ws.theme_colors),
-                len(ws.picker.items))
+                ws.picker.layout.lib_grid, len(ws.picker.items))
 
     def _dots(self, cv, r, xoff):
         """Dot-grid pixels inside rect `r`, x-lattice shifted by `xoff`. The

@@ -320,6 +320,12 @@ class DeviceCanvas:
         self._t_map_us = 0
         self._t_text_us = 0
         self._t_fill_us = 0
+        # DRAW2 timing gate. The per-op ticks_us pair costs ~6us -- meaningless
+        # against a cart's big native verbs (which is why it shipped ungated), but
+        # ~6% of a CHROME fill, of which a single picker draw issues ~155. The
+        # frame loop turns this on with batch_reset() under perf capture and off
+        # otherwise (console.py), so a shipping frame pays nothing.
+        self._prof = False
         self.reset_state()
 
     def sync_back(self):
@@ -522,18 +528,45 @@ class DeviceCanvas:
         # Filled rect of a pre-resolved RGB565 colour, camera-offset and intersected
         # with the clip rect; native (clamped in C) when moy_gfx is present, else
         # framebuf. Shared by rect()/circ()/rectb().
-        x -= self._cam_x
+        #
+        # HOT PATH -- this is the console CHROME's dominant verb (a picker grid draw
+        # issues ~155 of them). On-glass P4 2026-07-25: the native fill_rect kernel
+        # costs 6us, but this wrapper made the whole call ~96us, and pixels are
+        # nearly free (a 1x1 fill and a 181x121 fill differ by 0.11ms/21901px =
+        # 5ns/px). So the ENTIRE desktop-UI draw budget was wrapper overhead, and
+        # every microsecond removed here shows up across every surface. Hence:
+        # attributes hoisted into locals (each self.X is an interpreter dict
+        # lookup), min/max builtin calls replaced with comparisons, and the DRAW2
+        # timing gated behind _prof -- the ticks_us pair alone measured 6us/call and
+        # it used to run on EVERY fill in a shipping build, not just under perf
+        # capture. Keep it lookup-free.
+        cx = self._cam_x
+        x -= cx
         y -= self._cam_y
-        x0 = max(self._clip_x0, x)
-        y0 = max(self._clip_y0, y)
-        x1 = min(self._clip_x1, x + w)
-        y1 = min(self._clip_y1, y + h)
+        x0 = self._clip_x0
+        y0 = self._clip_y0
+        if x > x0:
+            x0 = x
+        if y > y0:
+            y0 = y
+        x1 = x + w
+        y1 = y + h
+        cx1 = self._clip_x1
+        cy1 = self._clip_y1
+        if x1 > cx1:
+            x1 = cx1
+        if y1 > cy1:
+            y1 = cy1
         if x1 <= x0 or y1 <= y0:
             return
-        if self._gfx is not None:
-            _t0 = _ticks_us()          # #66 DRAW2: fill bucket (rect/rectb/circ spans)
-            self._gfx.fill_rect(self._buf, self.w, x0, y0, x1 - x0, y1 - y0, col)
-            self._t_fill_us += _ticks_diff(_ticks_us(), _t0)
+        gfx = self._gfx
+        if gfx is not None:
+            if self._prof:
+                _t0 = _ticks_us()      # #66 DRAW2: fill bucket (rect/rectb/circ spans)
+                gfx.fill_rect(self._buf, self.w, x0, y0, x1 - x0, y1 - y0, col)
+                self._t_fill_us += _ticks_diff(_ticks_us(), _t0)
+            else:
+                gfx.fill_rect(self._buf, self.w, x0, y0, x1 - x0, y1 - y0, col)
             if self._pump is not None:
                 self._pump()           # #66: feed the bounce flush between native ops
         else:
@@ -602,15 +635,20 @@ class DeviceCanvas:
                 err += dx; y0 += sy
 
     def rect(self, x, y, w, h, c):
-        # TIC-80 rect = FILLED rectangle.
-        self.flush_batch()             # #63: a non-spr primitive breaks the batch
-        self._fill(int(x), int(y), int(w), int(h), self._col(c))
+        # TIC-80 rect = FILLED rectangle. HOT PATH (see _fill): the batch break is
+        # inlined to the array-header test so an already-empty batch costs a load
+        # instead of a method call, and _col is inlined for the same reason.
+        if self._batch_arr[0] > 4:
+            self.flush_batch()         # #63: a non-spr primitive breaks the batch
+        self._fill(int(x), int(y), int(w), int(h),
+                   PAL565_WIRE[self._pal_map[c & 63]])
 
     def rectb(self, x, y, w, h, c):
         # TIC-80 rectb = rectangle outline (4 clipped fills, like the host).
-        self.flush_batch()             # #63: a non-spr primitive breaks the batch
+        if self._batch_arr[0] > 4:
+            self.flush_batch()         # #63: a non-spr primitive breaks the batch
         x = int(x); y = int(y); w = int(w); h = int(h)
-        col = self._col(c)
+        col = PAL565_WIRE[self._pal_map[c & 63]]
         self._fill(x, y, w, 1, col)
         self._fill(x, y + h - 1, w, 1, col)
         self._fill(x, y, 1, h, col)
@@ -1135,6 +1173,7 @@ class DeviceCanvas:
         self._t_map_us = 0          # #66: the render-bound carts' remaining verbs
         self._t_text_us = 0
         self._t_fill_us = 0
+        self._prof = True           # perf capture is on this frame -- time the ops
 
     def spr_batch(self, sheet, items, colorkey=-1, scale=1):
         # Draw N sheet tiles in ONE native moy_gfx.blit_batch call (#43) -- the sprite
@@ -1180,15 +1219,21 @@ class DeviceCanvas:
         # `scale` arg stays IGNORED, exactly like the host Canvas.print (system-UI
         # scaling is the #39 font_scale path, not this arg). framebuf.text (same
         # glyphs, screen-bounds clip only) remains the no-gfx / old-build fallback.
-        self.flush_batch()             # #63: print() is a non-spr primitive -> break batch
+        if self._batch_arr[0] > 4:
+            self.flush_batch()         # #63: print() is a non-spr primitive -> break batch
         if self._gfx_text is not None:
-            _t0 = _ticks_us()          # #66 DRAW2: time the native text blit
+            # Chrome draws text by the dozen per frame, so the DRAW2 ticks pair
+            # is gated here like _fill's (see its note).
+            _prof = self._prof
+            _t0 = _ticks_us() if _prof else 0
             self._gfx_text(self._buf, self.w, self.h, str(s), int(x), int(y),
-                           self._col(c), _FONT8, _FONT8_FIRST, 1,
+                           PAL565_WIRE[self._pal_map[c & 63]],
+                           _FONT8, _FONT8_FIRST, 1,
                            self._cam_x, self._cam_y,
                            self._clip_x0, self._clip_y0,
                            self._clip_x1, self._clip_y1)
-            self._t_text_us += _ticks_diff(_ticks_us(), _t0)
+            if _prof:
+                self._t_text_us += _ticks_diff(_ticks_us(), _t0)
             if self._pump is not None:
                 self._pump()           # #66: feed the bounce flush between native ops
             return
