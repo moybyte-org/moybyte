@@ -119,12 +119,30 @@ static mp_obj_t lua_to_mp(lua_State *L, int i) {
             return lua_toboolean(L, i) ? mp_const_true : mp_const_false;
         case LUA_TNUMBER:
             if (lua_isinteger(L, i)) {
-                return mp_obj_new_int_from_ll(lua_tointeger(L, i));
+                // #107: mp_obj_new_int_from_ll unconditionally heap-allocates
+                // an mpz (~64B with its digit storage) -- paid for EVERY
+                // integer arg of EVERY upcall. Celeste's ~17 draw upcalls x
+                // ~5 floored coords each = ~11KB/frame of pure marshalling
+                // garbage, i.e. a 160-200ms auto-collect every ~6s of play.
+                // Small-int the common case; >31-bit values (never a p8
+                // coordinate) keep the mpz path.
+                lua_Integer v = lua_tointeger(L, i);
+                if ((lua_Integer)(mp_int_t)v == v) {
+                    return mp_obj_new_int((mp_int_t)v);
+                }
+                return mp_obj_new_int_from_ll(v);
             }
             return mp_obj_new_float((mp_float_t)lua_tonumber(L, i));
         case LUA_TSTRING: {
             size_t len;
             const char *s = lua_tolstring(L, i, &len);
+            // Same #107 diet for strings: btn("left")/key("a") arrive as
+            // already-interned names -- hand back the qstr, allocate only for
+            // genuinely new text.
+            qstr q = qstr_find_strn(s, len);
+            if (q != MP_QSTRnull) {
+                return MP_OBJ_NEW_QSTR(q);
+            }
             return mp_obj_new_str(s, len);
         }
         default:

@@ -88,6 +88,24 @@ One trap worth keeping in mind when extending this: `run_desktop` calls
 that resets its accumulator at frame entry silently discards everything the input
 path allocates -- which is where a press/release edge does its work. The reset
 below happens at frame END for that reason.
+
+THREE MORE (2026-07-27, the #107 celeste hunt -- each cost a probe cycle):
+
+  * Do NOT drill a Lua cart by `moy_lua.register`-ing wrapped verbs. The extra
+    per-upcall garbage tips the split heap into releasing+re-adding SEGMENTS
+    mid-frame (the forced collect at frame start frees them), and `mem_alloc`
+    then jumps by segment-sized phantoms booked to whatever wrapped call is
+    open -- a NO-OP verb read as 430KB/call. Mute at the LUA level instead
+    (`moy_lua.exec("map = function() end")`) and diff the frame total.
+  * A one-line `py` command runs in a FRESH env (see pyexec's docstring), so
+    `py import moy_lua` + a later one-liner using it dies on a silent
+    NameError -- and P4Board's default log swallows the PY ERR line. A whole
+    bisect round returned baseline noise this way. Always send Lua execs
+    through multi-line pyexec (the ws._g path), check its return value, and
+    verify the mute took (a canary global + moy_lua.has()).
+  * A sample window longer than ~2s must PUMP serial (drain, not sleep): the
+    board's PERF prints fill the host-side buffer and the loop stalls on the
+    blocking write, which reads as a fake 3fps slowdown.
 """
 
 from __future__ import annotations

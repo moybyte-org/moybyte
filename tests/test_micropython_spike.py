@@ -3312,6 +3312,17 @@ def test_moy_lua_hardware_learned_constraints_pinned():
     #    parity is host-only for float-heavy carts.
     conf = (lua_dir / "luaconf.h").read_text(encoding="utf-8")
     assert "#define LUA_32BITS\t1" in conf
+    # 8) the upcall marshalling diet (#107): lua_to_mp small-ints integer args
+    #    and hands interned names back as qstrs. mp_obj_new_int_from_ll
+    #    unconditionally heap-allocates an mpz, and paying it per coordinate
+    #    was 11KB/frame of garbage in celeste -- a 160-200ms auto-collect
+    #    every ~6s of play (the #107 stutter metronome, P4 on glass
+    #    2026-07-27). from_ll survives only as the >31-bit fallback.
+    tramp = mod[mod.index("static mp_obj_t lua_to_mp"):]
+    tramp = tramp[:tramp.index("static bool push_scalar")]
+    assert "mp_obj_new_int((mp_int_t)v)" in tramp
+    assert "qstr_find_strn" in tramp
+    assert "(lua_Integer)(mp_int_t)v == v" in tramp    # the fits-check guard
 
 
 def test_every_new_layer_pins_retained_frames_to_one():
