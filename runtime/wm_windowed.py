@@ -1121,8 +1121,20 @@ class WindowedWM(FullscreenStackWM):
         if sc is gc:
             return
         ox, oy, scale = FullscreenStackWM.viewport(self)
-        sc.cls(_VIEWPORT_BEZEL)        # letterbox fill
-        self._blit_game(sc, gc, ox, oy, scale, src=self._view_src())
+        src = self._view_src()
+        # The letterbox bezel is STATIC: fill it only until every framebuffer
+        # holds it (the stale-by-N rule), re-armed when the composite geometry
+        # changes. It was a full-screen fill EVERY play frame -- chrome=8ms of
+        # a 15ms fullscreen celeste frame at 4x (the game rect covers less of
+        # the screen the bigger the letterbox, so the waste grew with `view`).
+        bkey = (ox, oy, scale, sc.w, sc.h, src)
+        if bkey != getattr(self, "_bezel_key", None):
+            self._bezel_key = bkey
+            self._bezel_paints = 0
+        if self._bezel_paints < self._retained_n():
+            self._bezel_paints += 1
+            sc.cls(_VIEWPORT_BEZEL)    # letterbox fill
+        self._blit_game(sc, gc, ox, oy, scale, src=src)
 
     # -- drawing ---------------------------------------------------------------
 
