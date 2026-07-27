@@ -1456,3 +1456,53 @@ def test_the_desk_sig_moves_with_the_theme_and_size(tmp_path):
     a = layer._desk_sig()
     ws.set_theme("berry" if ws.theme_name != "berry" else "forest", persist=False)
     assert layer._desk_sig() != a
+
+
+# ---------------------------------------------------------------------------
+# Fat-finger strip buttons (owner report 2026-07-27): at font scale 1 the
+# 16px buttons at 18px pitch were finger-unhittable on the 7" glass -- a
+# near-miss tap armed a window DRAG instead of closing ("exit a window and it
+# stays on the desktop"). A tap anywhere in the button block resolves to the
+# nearest button center; taps left of the block still arm the drag.
+# ---------------------------------------------------------------------------
+
+def test_near_miss_tap_on_the_x_still_closes(tmp_path):
+    ws = _ws(tmp_path, font_scale=1)
+    drv = _drv(ws)
+    ws.open_settings()
+    drv.frame(1 / 30)
+    win = ws.wm._wins["settings"]
+    xr = dict(ws.wm._strip_buttons(win))["close"]
+    # 5px below the visual rect, in the border gap -- the old exact-rect test
+    # missed here and the window drag-armed instead.
+    drv.touch(xr[0] + xr[2] // 2, xr[1] + xr[3] + 5)
+    drv.frame(1 / 30)
+    assert "settings" not in ws.wm._order
+    assert ws.wm._drag_armed is None
+
+
+def test_between_buttons_resolves_to_the_nearest(tmp_path):
+    ws = _ws(tmp_path, font_scale=1)
+    drv = _drv(ws)
+    ws.open_settings()
+    drv.frame(1 / 30)
+    win = ws.wm._wins["settings"]
+    mr = dict(ws.wm._strip_buttons(win))["min"]
+    # 2px left of the min button: nearest center is min -> minimized, not drag.
+    drv.touch(mr[0] - 2, mr[1] + mr[3] // 2)
+    drv.frame(1 / 30)
+    assert ws.wm._wins["settings"].minimized
+
+
+def test_left_of_the_button_block_still_arms_the_drag(tmp_path):
+    ws = _ws(tmp_path, font_scale=1)
+    drv = _drv(ws)
+    ws.open_settings()
+    drv.frame(1 / 30)
+    win = ws.wm._wins["settings"]
+    mr = dict(ws.wm._strip_buttons(win))["min"]
+    assert ws.wm._strip_button_hit(win, mr[0] - 40, mr[1] + 2) is None
+    drv.touch(mr[0] - 40, mr[1] + 2)      # strip, well left of the block
+    drv.frame(1 / 30)
+    assert ws.wm._drag_armed is not None
+    assert "settings" in ws.wm._order

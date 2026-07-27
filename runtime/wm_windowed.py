@@ -1285,6 +1285,37 @@ class WindowedWM(FullscreenStackWM):
             out.append(("min", (x, y, ic, ic)))
         return out
 
+    def _strip_button_hit(self, win, px, py):
+        """Fat-finger resolution for the strip buttons (owner report 2026-07-27:
+        'when I exit a window it stays on the desktop'). At font scale 1 the
+        visual buttons are 16px (~1.7mm on the 7\" glass) at 18px pitch, so a
+        finger tap missed the exact rect and fell through to the drag-arm --
+        the window moved a little and never closed. A tap anywhere in the
+        button BLOCK (the buttons' span plus the border to the window's right
+        edge, plus a small overhang below the strip) now resolves to the
+        NEAREST button center. Per-button padding can't work at this pitch;
+        same fix class as _grip_hit_rect (2026-07-10)."""
+        btns = self._strip_buttons(win)
+        if not btns:
+            return None
+        fs = self._fs()
+        pad = 6 * fs
+        left = min(r[0] for _, r in btns) - pad
+        right = win.x + win.w               # past X is the dead border strip
+        top = win.y
+        bottom = win.y + 1 + win.title_h + pad
+        if not (left <= px < right and top <= py < bottom):
+            return None
+        best = None
+        bd = None
+        for name, (bx, by, bw, bh) in btns:
+            cx = bx + bw // 2
+            cy = by + bh // 2
+            d = (px - cx) * (px - cx) + (py - cy) * (py - cy)
+            if bd is None or d < bd:
+                best, bd = name, d
+        return best
+
     def _grip_rect(self, win):
         fs = self._fs()
         g = 12 * fs
@@ -1769,18 +1800,18 @@ class WindowedWM(FullscreenStackWM):
             ws._dirty = True
         focused = (key == self._focus)
         if click:
-            for name, rect in self._strip_buttons(win):
-                if _in(px, py, rect):
-                    ws._dirty = True
-                    if name == "close":
-                        self._close_window(win.kind)
-                    elif name == "max":
-                        self._toggle_max(win)
-                    elif name == "min" and win.kind != "desktop":
-                        win.minimized = True
-                        if focused:
-                            self._focus = None
-                    return True
+            name = self._strip_button_hit(win, px, py)
+            if name is not None:
+                ws._dirty = True
+                if name == "close":
+                    self._close_window(win.kind)
+                elif name == "max":
+                    self._toggle_max(win)
+                elif name == "min" and win.kind != "desktop":
+                    win.minimized = True
+                    if focused:
+                        self._focus = None
+                return True
             if _in(px, py, self._grip_hit_rect(win)):
                 self._resize = (key, px, py, win.w, win.h, win.w, win.h)
                 self._seed_gesture_hist()   # #58: pre-resize footprint, both buffers
