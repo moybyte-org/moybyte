@@ -200,6 +200,7 @@ if [ -f "${GEN_SDKCONFIG}" ]; then
   if ! grep -q '^CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-p4.csv"$' "${GEN_SDKCONFIG}" || \
      ! grep -q '^CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=64$' "${GEN_SDKCONFIG}" || \
      ! grep -q '^CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=12288$' "${GEN_SDKCONFIG}" || \
+     ! grep -q '^CONFIG_CACHE_L2_CACHE_256KB=y$' "${GEN_SDKCONFIG}" || \
      ! grep -q '^CONFIG_LCD_DSI_ISR_IRAM_SAFE=y$' "${GEN_SDKCONFIG}"; then
     echo "== sdkconfig lacks a required P4 board override -- forcing regeneration"
     rm -f "${GEN_SDKCONFIG}"

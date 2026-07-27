@@ -255,8 +255,11 @@ to whoever called it.
   wrapper), and layers/images kept Python-side behind int-handle glue
   (`device_api.LuaCartRun`, shared by both boards' `moy_runtime.run_desktop`
   wiring). Two S3-learned constraints live in the module: the vendored lua
-  sources carry **in-source `-O2` pragmas** (usermods compile at `-Os`, which
-  halved the VM — the #77 moy_gfx lesson again) and the `lua_Alloc` is
+  sources carry **in-source `-O2` pragmas** (historically a guard against `-Os`
+  halving the VM; today's builds resolve usermods to `-O2` globally, so the
+  pragmas PIN that — and `-O3` on the VM hot files is a measured ~2–5%
+  REGRESSION on the P4, #159, so O2 is the affirmed setting, not a leftover)
+  and the `lua_Alloc` is
   **internal-SRAM-first with a 48KB headroom floor + PSRAM fallback** (the
   all-PSRAM version measured ~2× slower on the S3's 120MHz-OCT bus).
   `system_carts/sakura_lua.moy` is the A/B twin of sakura (line-faithful,
