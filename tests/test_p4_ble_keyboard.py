@@ -466,7 +466,7 @@ def test_p4_board_enables_hosted_ble_and_runtime_polls_before_edge_snapshot():
     assert ".intr_priority = 3" in underrun_patch
     assert "ETS_DSI_BRIDGE_INTR_SOURCE" in underrun_patch
     assert "CONFIG_LCD_DSI_ISR_IRAM_SAFE=y" in board_sdkconfig
-    assert "dpi_cfg.num_fbs = 2" in dsi_native
+    assert "dpi_cfg.num_fbs = 3" in dsi_native   # triple-buffer (#58, 6b045e3)
     assert "dsi_underruns=" in runtime
     # BLE IRQs execute on NimBLE's core-0 task. Serial output must be deferred
     # to poll() on the main task; print() here caused hardware stack panics.
