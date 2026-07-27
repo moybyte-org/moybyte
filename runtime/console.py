@@ -1821,9 +1821,6 @@ class Workstation:
         jobs = self._cover_jobs
         job = jobs.get(key)
         if job is None:
-            loader = getattr(self.carts_store, "load_image", None)
-            cover_name = getattr(self.carts_store, "COVER_IMAGE", "cover")
-            sig_fn = getattr(self.carts_store, "cover_sig", None)
             # Parsed runs still in RAM? Then this size costs a native decode +
             # crop (~1.7ms) and touches no storage at all (#155). That is what
             # makes a relayout cheap: reading the blob is 46.9ms and parsing it
