@@ -104,7 +104,7 @@ def test_paint_and_save_persists_and_round_trips(tmp_path):
     drv.frame(1 / 30)
     assert ws.icon_sheet.pget(0, 0) == 9 and before != 9      # painted in-RAM
     ws.save_icons()
-    assert ws.save_status == "SAVED"
+    assert ws.save_status is None      # invisible save: no failure, no "SAVED"
     # Persisted: the file now exists, loads non-None, and the edit round-trips.
     hexs = moy_carts.load_system_icons(carts_dir)
     assert hexs is not None

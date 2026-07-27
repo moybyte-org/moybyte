@@ -3422,7 +3422,7 @@ class Workstation:
         try:
             self._with_sd(lambda: self.carts_store.save_system_icons(hexs, self.carts_root, _ICON_VERSION))
             self.icon_sheet.dirty = False
-            self.save_status = "SAVED"
+            self.save_status = None           # clear stale failure text (see commit_code)
             # Re-adopt the (same) sheet so the bar's per-kind image cache is dropped and
             # the next _draw_status_strip rebuilds its sprites from the freshest pixels.
             self.set_icon_sheet(self.icon_sheet)
@@ -4086,11 +4086,12 @@ class Workstation:
         ok, _msg = self.carts_store.compile_check(src)
         if not ok:
             return                        # don't autosave/journal un-parseable source
-        prev_status = self.save_status
+        # quiet=True keeps the autosave invisible (spec Section 7): it suppresses
+        # the "Code Wizard" achievement toast, and commit_* no longer writes a
+        # "SAVED" status at all (save_status carries FAILURES only) -- so the old
+        # save/restore dance around this call is gone. A failed store write still
+        # surfaces via save_status/cart_error, as it must.
         self.project.commit_code(src, quiet=True)   # persists + journals; clears ed.dirty
-        self.save_status = prev_status    # keep the autosave invisible (spec Section 7):
-                                          # save_status restored + quiet=True suppresses the
-                                          # "Code Wizard" achievement toast (Stage 7 F2)
 
     def _journal_idle_tick(self):
         """Fire the idle-typing autosave-commit once the code editor has sat quiet for

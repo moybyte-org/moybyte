@@ -295,8 +295,7 @@ class SceneEditorUI:
         if se is None or self.scene_name is None:
             return
         self._sync_live()                       # the store text == the live text
-        ws.project.commit_scene(self.scene_name, se.serialize())
-        if ws.save_status == "SAVED":
+        if ws.project.commit_scene(self.scene_name, se.serialize()):
             se.dirty = False
 
     # -- view metrics ---------------------------------------------------------

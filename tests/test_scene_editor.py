@@ -288,7 +288,7 @@ def test_save_persists_and_journal_undo_reaches_live_workspace(tmp_path):
     se = ws.scene_ui.sceneedit
     se.place(80, 80)
     ws.save_scene()
-    assert ws.save_status == "SAVED" and not se.dirty
+    assert ws.save_status is None and not se.dirty   # invisible save: no failure text
     live = Path(ws.cart["path"]) / "scenes" / "main.moyscene"
     assert len(json.loads(live.read_text())) == 3
     ws.scene_ui.sceneedit.place(120, 80)

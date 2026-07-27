@@ -779,7 +779,7 @@ def test_music_editor_opens_edits_previews_and_saves_on_console(tmp_path):
     # SAVE persists to sounds.json; reload proves it stuck. SAVE moved to the unified
     # bar (Stage-4 rollout): the music tab's bar SAVE dispatches through save_current.
     ws.editor_app.save_current()
-    assert ws.save_status == "SAVED" and not me.dirty
+    assert ws.save_status is None and not me.dirty   # invisible save: no failure text
     from runtime import moy_carts
     reloaded = moy_carts.load(ws.cart["path"])
     assert reloaded["sounds"] is not None

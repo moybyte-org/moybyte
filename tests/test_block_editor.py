@@ -311,7 +311,7 @@ def test_save_persists_blocks_and_main_and_reloads(tmp_path):
     be.add_var("score")
     _go_to_insert(be, 1)                                # under on_start
     be.insert_block("set_var", {"var": "score", "value": 0})
-    assert ws.block_ui.save_blocks() is True and ws.block_ui.blk_status == "SAVED"
+    assert ws.block_ui.save_blocks() is True and ws.block_ui.blk_status is None
     # both files landed; reload restores the program AND a runnable main.py
     reloaded = moy_carts.load(cart["path"])
     assert reloaded["blocks"] == be.program

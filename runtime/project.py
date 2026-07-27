@@ -432,7 +432,11 @@ class Project:
                 ws.cart_error = "Could not save -- " + str(smsg)
                 return False
             ws.editor.dirty = False
-            ws.save_status = "SAVED"
+            # Save is invisible (spec Section 7 / #111): no "SAVED" happy path --
+            # save_status carries FAILURES only, so a successful commit just
+            # CLEARS any stale failure text (the old "SAVED" write also did the
+            # clearing, by overwrite; same across every commit_* verb).
+            ws.save_status = None
             # #111 phase 4: close any live typing burst, drain the code History's op
             # batch into this commit's journal line (mirrors commit_sprites/map), then
             # re-baseline (clear) -- the CLEAN boundary: in-RAM undo covers edits SINCE
@@ -561,7 +565,7 @@ class Project:
         try:
             ws._with_sd(lambda: ws.carts_store.save_sprites(self.cart, hexs))
             self.sheet.dirty = False
-            ws.save_status = "SAVED"
+            ws.save_status = None             # clear stale failure text (see commit_code)
             # #111: this snapshot IS a keyframe, so drain the paint History's op batch
             # into the journal line (fine-grained cross-boundary undo). Then re-baseline
             # the History (clear): a commit is the CLEAN boundary -- in-RAM undo covers
@@ -596,7 +600,7 @@ class Project:
         try:
             ws._with_sd(lambda: ws.carts_store.save_map(self.cart, hexs))
             self.tilemap.dirty = False
-            ws.save_status = "SAVED"
+            ws.save_status = None             # clear stale failure text (see commit_code)
             hist = self._map_history()        # #111: drain the map op batch (see commit_sprites)
             ops = hist.flush() if hist is not None else None
             self._journal("map.moymap", hexs, ops=ops)   # durable undo (Stage 7/#111)
@@ -615,13 +619,15 @@ class Project:
         (an ordered actor list). Stage 1 has no placement editor yet; this is the
         persistence verb the editor (Stage 2) calls, and the surface tests drive it
         directly. The journal `file` is the real relative path (scenes/<name>.moyscene),
-        so undo restores into the file the loader reads from."""
+        so undo restores into the file the loader reads from. Returns True on a
+        persisted commit (the caller's success signal -- this used to ride the
+        save_status "SAVED" happy path, removed with the rest of it)."""
         ws = self.ws
         if not (self.cart and self.cart.get("path") and ws.can_manage):
-            return
+            return False
         try:
             ws._with_sd(lambda: ws.carts_store.save_scene(self.cart, name, text))
-            ws.save_status = "SAVED"
+            ws.save_status = None             # clear stale failure text (see commit_code)
             rel = ws.carts_store.SCENES_DIR + "/" + name + ws.carts_store.SCENE_EXT
             # #111 phase 4: drain the SceneEditor's op batch into the journal line
             # (see commit_sprites for the clean-boundary contract).
@@ -630,11 +636,13 @@ class Project:
             self._journal(rel, text, ops=ops)     # durable undo (Stage 7/#111)
             if hist is not None:
                 hist.clear()                      # re-baseline
+            return True
         except Exception as exc:  # noqa: BLE001
             txt = _err_text(exc)
             ws.save_status = "CAN'T SAVE"
             ws.cart_error = "Could not save scene -- " + txt
             print("Moybyte save scene failed:", txt)
+            return False
 
     def commit_sounds(self):
         """Persist the cart's AudioBank to sounds.json (#50) -- the mirror of
@@ -648,7 +656,7 @@ class Project:
         try:
             ws._with_sd(lambda: ws.carts_store.save_sounds(self.cart, bank_dict))
             me.dirty = False
-            ws.save_status = "SAVED"
+            ws.save_status = None             # clear stale failure text (see commit_code)
             # #111 phase 4: drain the MusicEditor's op batch into the journal line
             # (see commit_sprites for the clean-boundary contract).
             hist = self._music_history()

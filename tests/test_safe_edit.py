@@ -341,7 +341,7 @@ def test_fix_and_save_clears_stale_crash_panel_and_reruns(tmp_path):
     ws.editor.set_text("def _draw():\n    cls(7)\n")
     assert ws.save_code() is True
     assert ws.cart_error is None          # SAVE_OK cleared the stale crash text
-    assert ws.save_status == "SAVED"
+    assert ws.save_status is None         # ...and the stale SYNTAX text (invisible save)
     assert "cls(7)" in moy_carts.load(path)["src"]
 
     # Closing the editor (the X button) returns to the desktop and the FIXED cart

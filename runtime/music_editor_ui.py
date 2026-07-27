@@ -498,6 +498,9 @@ class MusicEditorUI:
         self._gbtn("undo", "UNDO", lay.undo_btn, NAMES["dark_grey"], cv)
         self._gbtn("redo", "REDO", lay.redo_btn, NAMES["dark_grey"], cv)
         if ws.save_status:
+            # Failure surface only: commit_* writes save_status on ERRORS
+            # ("CAN'T SAVE...", "SYNTAX...") -- the "SAVED" happy path was
+            # removed (save is invisible, #111).
             cv.print(ws.save_status[:8], lay.status_x, lay.title_y,
                      th["author"] if light else NAMES["yellow"], 1)
 

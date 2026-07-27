@@ -1278,7 +1278,7 @@ def test_host_console_map_save_roundtrips(tmp_path):
     # No SAVE button (#111) -- ws.save_map is the hard-commit verb every exit path
     # (tab switch/PLAY/CLOSE/...) now dispatches automatically.
     ws.save_map()
-    assert ws.save_status == "SAVED"
+    assert ws.save_status is None      # invisible save: no failure, no "SAVED"
     reloaded = moy_carts.load(cart_path)                  # map.moymap persisted on disk
     assert reloaded["map"] is not None
     assert TileMap.from_hex(reloaded["map"]).mget(0, 0) == 6

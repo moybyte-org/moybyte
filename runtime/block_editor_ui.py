@@ -1380,7 +1380,7 @@ class BlockEditorUI:
             ws.project.cart["src"] = src
             ws.project.cart["blocks"] = _clone_tree(prog)
             be.dirty = False
-            self.blk_status = "SAVED"
+            self.blk_status = None        # save is invisible (#111): no "SAVED"
             ws.ach.note("code_save")
             return True
         try:
@@ -1390,7 +1390,7 @@ class BlockEditorUI:
                 self.blk_status = "CAN'T SAVE " + str(smsg)
                 return False
             be.dirty = False
-            self.blk_status = "SAVED"
+            self.blk_status = None        # save is invisible (#111): no "SAVED"
             ws.ach.note("code_save")          # "Code Wizard": a program saved (#21)
             ws.cart_error = None
             return True
