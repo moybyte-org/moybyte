@@ -223,21 +223,38 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
   LAST framebuffer write (the WM registers the drag stamp; `P4Compositor.flush`
   kicks it after the bar/chips/cursor have drawn).
 
-## Power / battery (board schematic + vendor datasheets)
+## Power / battery (measured draw + board schematic + vendor datasheets)
 
 Derived from the [board schematic](https://files.waveshare.com/wiki/ESP32-P4-WIFI6-Touch-LCD-7B/ESP32-P4-WIFI6-Touch-LCD-7B.pdf),
 the [ETA6098](https://www.eta-semi.com/wp-content/uploads/2022/03/ETA6098_V1.1.pdf)
 and ESP32-P4 datasheets, and TRM ch.14 — the wiki's spec page omits every number
 below, so re-check against those, not against it.
 
-- **Measured draw: ~2W (~400mA @5V), full brightness, game running** (2026-07-26,
-  USB power bank). Datasheet Table 5-7 puts the SoC at 150mA @3.3V typ (400MHz,
-  dual-core 32-bit data access, all peripheral clocks enabled) ≈ 110-150mA @5V
-  through the buck — so **the SoC is ~⅓ of the budget and panel+backlight ~⅔**.
-  Frequency scaling is therefore a weak lever (400→200MHz saves ~9% at the battery
-  and costs fps on a dispatch-bound workload); **backlight PWM is the strong one**.
-  Light-sleep is 0.8mA, deep-sleep 12µA (Table 5-8), so idle-blank + sleep buys more
-  calendar life than any extra cell.
+- **Measured draw: 2.85W (0.58A @ 4.91V), full brightness** (2026-07-27, KEWEISI
+  inline USB meter on a power bank). Note the 4.91V — you do not get a clean 5.00V
+  at the port, and the board sees less again after cable drop. **Trust only the
+  meter's live V/A: its mAh and elapsed-time counters accumulate across sessions
+  until RESET**, so any average or efficiency derived from them is garbage unless
+  you zeroed it first (an earlier read of this section did exactly that and had to
+  be retracted).
+- **Desk idle draws the SAME 2.85W as a running game** — hardware-measured, and the
+  single most important power fact about this port. The frame loop runs flat out
+  regardless: the redraw gate skips *drawing*, not the loop, and DPI mode scans
+  PSRAM continuously whether or not a pixel changed. **There is no idle power state
+  at all**, so battery life is a constant, with no mixed-use discount to bank on.
+  Datasheet light-sleep is 0.8mA and deep-sleep 12µA (Table 5-8), so the headroom
+  is enormous and entirely unclaimed.
+- **The SoC-vs-backlight split is UNMEASURED — do not quote one.** Datasheet
+  Table 5-7 puts the SoC at 150mA @3.3V typ (400MHz, dual-core 32-bit data access,
+  all peripheral clocks enabled) ≈ 110-150mA @5V through the buck, i.e. ~0.55-0.75W
+  of the 2.85W, but that is inference and the idle==game result neither confirms
+  nor refutes it. **One reading with the backlight blanked settles it** (`BL_CTRL`
+  = GPIO32, active-low, so drive it high): a drop to ~0.8W means the panel is ~70%
+  of the budget and dimming plus idle-blank are the whole game, with the CPU-side
+  levers (DCDC, frequency scaling) rounding errors; a drop to only ~2W means the
+  SoC is far above its datasheet figure, which would point straight at the DCDC
+  below never being switched on. Those outcomes lead to opposite work — measure
+  before building either.
 - **Charger: ETA6098** (U20), a *switching* buck charger + L10 2.2µH/3A. Charge
   current is set by R89 at ISET: **82K → 2A** (what's fitted), 150K → 1.2A, 2.5A
   part max; 4.2V EOC, 130mA termination, 200mA pre-charge. **No NTC/thermistor
@@ -248,15 +265,19 @@ below, so re-check against those, not against it.
   J4 (solder leads / JST-PH / XT30) or swap R89 to 150K for 1.2A. Meter the polarity
   before first connection: the wiki says "forward polarity" and many pigtails ship
   reversed.
-- **Runtime rule of thumb: ~1.6h per 1000mAh** of 1S pack at the measured 2W
-  (~550mA drawn from the cell). 3× 18650 ≈ 19h, charging in ~6h at 2A (0.19C).
+- **Runtime rule of thumb: ~1.2h per 1000mAh** of 1S pack at the measured 2.85W
+  (~856mA drawn from the cell after board regulation) — and since idle costs the
+  same as play, that is a flat figure, not a best case. 3× 18650 ≈ 12h, charging in
+  ~6h at 2A (0.19C); 2× ≈ 8h. Claiming an idle state would move this more than
+  another cell would.
 - **The external DCDC is populated but its use is UNVERIFIED.** U5 `MP1605GTF-Z` +
   L2 1µH/4.2A produce `ESP_VDD_HP` 1.2V, with the chip's `EN_DCDC`/`FB_DCDC` wired
   to its EN/FB. TRM §14.4.1.1: the chip powers up on the *linear* HP system
   regulator and "it is recommended to switch to the DCDC power supply for better
   efficiency and load capacity". Nothing in this port touches it (we only acquire
-  LDO chan 3 for the DSI PHY and poke LDO4 for SD, both above). Worth ~8% of the 2W
-  if the switch is not already happening in IDF startup — measure before/after
+  LDO chan 3 for the DSI PHY and poke LDO4 for SD, both above). Worth ~0.2W of the
+  2.85W if the switch is not already happening in IDF startup, and potentially far
+  more if the backlight-blank reading above comes in high — measure before/after
   rather than assuming either way.
 - **Backlight driver: AP3032KTR-G1** (U12) boost, LED+/LED−, EN = `BL_CTRL` =
   **GPIO32 active-low** (same pin as the board map below) — PWM-dimmable, and per
