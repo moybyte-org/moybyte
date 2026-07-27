@@ -283,6 +283,25 @@ class _BackdropLayer(Layer):
         # over the cached blit instead of invalidating it.
         sig = self._desk_sig()
         stale = sig != wm._desk_sig
+        # A change to the window SHAPE (open/close/minimize/move/resize) uncovers
+        # desk the departed window was covering -- pixels the skip's own
+        # justification ("fully covered by the window's stamp") no longer holds
+        # for. The desk STATICS are unchanged then (the cache stays valid); only
+        # the restore must actually run again, so reset the skip streak. Same
+        # one-signature-beats-hunting-mutation-sites rule as the stamp voider.
+        # (Owner report 2026-07-27: "close it and it remains as an artifact on
+        # the desktop" -- the close frame skipped the restore outright.)
+        wsig = wm._shape_sig()
+        if wsig != wm._desk_win_sig:
+            wm._desk_win_sig = wsig
+            wm._desk_streak = 0
+            # Invalidate the CACHE too, not just the skip streak: a restore
+            # from the cache trusts a capture whose validity flag cannot see
+            # content rot (on the P4 the boot capture was found holding the
+            # SPLASH, never re-checked -- see the capture-poisoning issue), and
+            # a live render erases the departed window's pixels regardless.
+            # One full desk render per shape change is a discrete-event cost.
+            wm._backdrop_valid = False
         if (stale or wm._backdrop_disabled or wm._backdrop_unsupported
                 or self.ws._animating(dt)):   # a toast/confetti moves desk pixels
             wm._desk_sig = sig
@@ -516,6 +535,9 @@ class WindowedWM(FullscreenStackWM):
                                           # wipes the buffer, so every window above
                                           # must then repaint -- see
                                           # _lowest_dirty_window)
+        self._desk_win_sig = None         # shape sig as the DESK pass last saw it
+                                          # (its own holder: it advances a pass
+                                          # earlier in the frame than _win_sig)
         self._win_sig = None              # window-shape signature; a change voids
                                           # every retained window stamp
         self._sig_stable = False          # ...was it unchanged THIS frame?
@@ -1116,9 +1138,7 @@ class WindowedWM(FullscreenStackWM):
         # z-order, geometry, minimised state, or which one has focus) voids every
         # retained stamp. One signature comparison beats hunting each mutation
         # site (open/close/move/resize/maximise/focus) and can't miss one.
-        sig = (tuple(self._order), self._focus,
-               tuple((w.x, w.y, w.w, w.h, w.minimized, w.kind)
-                     for w in (self._wins[k] for k in self._order)))
+        sig = self._shape_sig()
         if sig != self._win_sig:
             self._win_sig = sig
             for k in self._order:
@@ -1705,6 +1725,15 @@ class WindowedWM(FullscreenStackWM):
             finally:
                 self._install(self._root_ctx)
         return bool(content.handle_input(i))
+
+    def _shape_sig(self):
+        """The frame's window SHAPE: which windows exist, z-order, geometry,
+        minimised state, focus. The ONE signature both retained-pixel voiders
+        key on (window stamps AND the desk-restore streak) -- a change means
+        pixels somewhere stopped being covered by what covered them last frame."""
+        return (tuple(self._order), self._focus,
+                tuple((w.x, w.y, w.w, w.h, w.minimized, w.kind)
+                      for w in (self._wins[k] for k in self._order)))
 
     def _win_at(self, px, py):
         """The slot key of the topmost VISIBLE window under the pointer (incl.

@@ -1506,3 +1506,39 @@ def test_left_of_the_button_block_still_arms_the_drag(tmp_path):
     drv.frame(1 / 30)
     assert ws.wm._drag_armed is not None
     assert "settings" in ws.wm._order
+
+
+def test_closed_window_leaves_no_artifact_on_the_desk(tmp_path):
+    """Owner report 2026-07-27: 'if I open and close it, it is closed but
+    remains as an artefact on the desktop.' The desk-restore skip keyed only on
+    desk STATICS, so the close frame skipped the restore and the dead window's
+    pixels stayed. The shape signature now resets the skip streak. Fails on the
+    old code."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    lay = ws.layout
+    # Settle the desk past the skip streak, then baseline the pixels below the bar.
+    for _ in range(6):
+        ws._dirty = True
+        drv.frame(1 / 30)
+    base = bytes(ws.sys_canvas.buf)
+    ws.open_settings()
+    for _ in range(4):
+        drv.frame(1 / 30)
+    win = ws.wm._wins["settings"]
+    region = (win.x, win.y, win.w, win.h)
+    ws.wm._close_window("settings")
+    for _ in range(4):
+        drv.frame(1 / 30)
+    after = bytes(ws.sys_canvas.buf)
+    x, y, w, h = region
+    stride = ws.sys_canvas.w
+    bar = lay.status_h + 2
+    diff = 0
+    for yy in range(max(y, bar), y + h):
+        a = base[yy * stride + x:yy * stride + x + w]
+        c = after[yy * stride + x:yy * stride + x + w]
+        if a != c:
+            diff += sum(1 for p, q in zip(a, c) if p != q)
+    assert "settings" not in ws.wm._order
+    assert diff == 0, "%d stale pixels where the window was" % diff
