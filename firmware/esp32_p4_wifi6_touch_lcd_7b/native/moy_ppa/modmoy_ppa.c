@@ -180,6 +180,15 @@ static mp_obj_t moy_ppa_sync(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_sync_obj, moy_ppa_sync);
 
+// done() -> bool: True when every submitted transaction has completed -- the
+// NON-BLOCKING probe of sync()'s fence (the triple-framebuffer present checks
+// this per loop and shows the pending frame only once its DMA landed, instead
+// of spinning; a caller that must wait still uses sync()).
+static mp_obj_t moy_ppa_done(void) {
+    return mp_obj_new_bool(s_done == s_submitted);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_done_obj, moy_ppa_done);
+
 // blit_scale(...): blocking -- returns after the DMA + cache sync completes.
 static mp_obj_t moy_ppa_blit_scale(size_t n_args, const mp_obj_t *args) {
     return srm_blit(args, PPA_TRANS_MODE_BLOCKING);
@@ -277,6 +286,7 @@ static const mp_rom_map_elem_t moy_ppa_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_fill), MP_ROM_PTR(&moy_ppa_fill_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_async), MP_ROM_PTR(&moy_ppa_blit_async_obj) },
     { MP_ROM_QSTR(MP_QSTR_sync), MP_ROM_PTR(&moy_ppa_sync_obj) },
+    { MP_ROM_QSTR(MP_QSTR_done), MP_ROM_PTR(&moy_ppa_done_obj) },
 };
 static MP_DEFINE_CONST_DICT(moy_ppa_module_globals, moy_ppa_module_globals_table);
 

@@ -6,17 +6,21 @@ T-Deck's ~28ms tx_color ceiling is structurally gone). `P4Compositor` adapts
 that to the compositor interface DeviceCanvas + the shared Workstation expect
 (size/framebuffer/back_buffer/gfx/flush/sync).
 
-DOUBLE-BUFFERED (glass-learned 2026-07-08): drawing straight into the scanned
-framebuffer made every repaint visibly flash -- the scan-out raced the painter,
-so each tap's full redraw (wallpaper -> windows -> bar) showed its intermediate
-states ("everything refreshes on each tap"). The panel now owns TWO
-framebuffers: draws land in the BACK one, flush() msyncs it and switches the
-scan-out to it zero-copy (moy_dsi.show -- the DPI driver recognizes its own fb
-pointer, no pixel copy), then the buffers swap roles. DeviceCanvas.sync_back()
-re-points the draw target each frame (the #40 machinery). This requires every
-DRAWN frame to fully repaint -- which the console's draw stack does (the
-wallpaper/backdrop covers the canvas first). Degrades to the single-buffer
-msync path if the build's moy_dsi predates show()/nfbs().
+MULTI-BUFFERED (double 2026-07-08, TRIPLE 2026-07-27 -- the #58 render
+overlap): drawing straight into the scanned framebuffer made every repaint
+visibly flash (the scan-out raced the painter), so draws land in a BACK
+buffer and flush() switches scan-out to it zero-copy (moy_dsi.show -- the DPI
+driver recognizes its own fb pointer, no pixel copy). With THREE buffers a
+deferred async PPA op (the drag stamp / game composite) never blocks the next
+paint: one buffer scans, one holds the in-flight DMA, one takes the paint --
+the ~15ms moy_ppa.sync fence leaves the per-frame path for "stamp" pendings
+(a "game" pending still fences before the cart tick: the composite reads the
+game canvas the tick would overwrite). DeviceCanvas.sync_back() re-points the
+draw target each frame (the #40 machinery). This requires every DRAWN frame
+to fully repaint -- which the console's draw stack does; the stale-by-N
+partial machinery (wm_windowed/launcher_layer/_retained_n, RETAINED_FRAMES=3
+on the root) carries the horizon. Degrades to the 2-buffer then
+single-buffer paths on older moy_dsi builds.
 """
 
 BACKLIGHT_GPIO = 32     # active-LOW (board fact, hardware-confirmed)
@@ -71,6 +75,17 @@ class P4Compositor:
         # blit_game for the current frame.
         self._pending = None
         self._composite_pending = False
+        # Triple-buffer rotation (#58 render overlap, n >= 3): deferred frames
+        # queue here as (fb_index, kind) -- kind "stamp" (the drag content
+        # stamp; its SOURCE win.buf is frozen for the gesture, so the show can
+        # wait non-blocking on moy_ppa.done()) or "game" (the composite READS
+        # the game canvas, which the cart's NEXT _draw overwrites -- the fence
+        # must stay blocking until the double game canvas retires it).
+        # _busy3 tracks fb indices with in-flight DMA separately: a full
+        # opaque paint OBSOLETES a queued show (never flash an older frame
+        # after a newer one), but its buffer stays unpaintable until a fence.
+        self._pend3 = []
+        self._busy3 = []
         # Deferred drag stamp (#58 stamp-defer): the WM registers the dragged
         # window's content stamp here (P4SystemCanvas.blit_strip_async) instead
         # of drawing it mid-stack; flush() kicks it on the PPA as the frame's
@@ -92,6 +107,7 @@ class P4Compositor:
         return self._gfx
 
     def flush(self):
+        stamp_kicked = False
         if self._stamp_pending is not None:
             # Kick the registered drag stamp NOW -- every layer (incl. cursor)
             # has drawn, so the DMA can't race any CPU write. Falls back to the
@@ -103,6 +119,7 @@ class P4Compositor:
                 moy_ppa.blit_async(args[0], args[1], args[2], args[3], args[4],
                                    args[5], args[6], args[7], 1)
                 self._composite_pending = True
+                stamp_kicked = True
             except Exception as exc:  # noqa: BLE001 -- refusal -> draw it sync
                 print("Moybyte P4 stamp kick failed -> CPU:", exc)
                 try:
@@ -113,6 +130,34 @@ class P4Compositor:
                     pass
         if len(self._fbs) <= 1:
             self._dsi.flush()            # single-buffer: CPU-cache msync only
+            return
+        n = len(self._fbs)
+        if n >= 3:
+            # Triple-buffer rotation (#58 render overlap): the back buffer
+            # ALWAYS advances at flush, because the next paint target is
+            # neither the scanned buffer nor the DMA-pending one -- the paint
+            # never waits on the fence. Deferred frames queue; present_pending
+            # shows them when their DMA lands.
+            if self._composite_pending:
+                self._pend3.append((self._back,
+                                    "stamp" if stamp_kicked else "game"))
+                self._busy3.append(self._back)
+                self._composite_pending = False
+            else:
+                if self._pend3:
+                    # This full opaque frame REPLACES the queued deferred
+                    # ones: drop their shows (an older frame must never flash
+                    # after a newer). Their DMA may still fly -- _busy3 keeps
+                    # the reuse fence armed.
+                    self._pend3 = []
+                self._dsi.show(self._back)   # msync + zero-copy switch
+            self._back = (self._back + 1) % n
+            # The next paint target still has DMA in flight (two deferred
+            # frames without a present between them, or a dropped obsolete
+            # op): one blocking fence before handing the buffer out. Rare --
+            # a present runs every loop.
+            if self._back in self._busy3:
+                self._drain_pending()
             return
         if self._composite_pending:
             # A quiet game frame kicked the composite async: hold the show for the
@@ -125,11 +170,36 @@ class P4Compositor:
         self._dsi.show(self._back)       # msync + zero-copy scan-out switch
         self._back ^= 1                  # next frame draws the other buffer
 
+    def _drain_pending(self):
+        """Fence every in-flight PPA op, then show the queued frames in order
+        (the last show wins the next VSYNC; earlier ones were sequential)."""
+        import moy_ppa
+        moy_ppa.sync()
+        self._busy3 = []
+        while self._pend3:
+            self._dsi.show(self._pend3.pop(0)[0])
+
     def present_pending(self):
-        """Show a deferred (async-composited) frame: wait for its PPA DMA, then
-        switch scan-out to it and free the other buffer for the next frame. Called
-        by the desktop loop AFTER the input poll, so the poll overlapped the DMA.
-        No-op when nothing was deferred (non-game frames present in flush())."""
+        """Show a deferred (async-composited) frame. n >= 3: non-blocking for a
+        "stamp" pending (its source is frozen; if the DMA is still flying the
+        show just waits for the next loop -- painting continues into a third
+        buffer meanwhile), blocking for a "game" pending (the cart's next _draw
+        overwrites the composite's SOURCE canvas, so the fence must land before
+        the tick -- the double game canvas will retire this). n == 2: wait for
+        the PPA DMA, then switch scan-out and free the other buffer -- called
+        by the desktop loop AFTER the input poll, so the poll overlapped the
+        DMA. No-op when nothing was deferred."""
+        if len(self._fbs) >= 3:
+            if not self._pend3:
+                return
+            import moy_ppa
+            if self._pend3[0][1] == "game":
+                self._drain_pending()
+                return
+            done = getattr(moy_ppa, "done", None)
+            if done is None or done():
+                self._drain_pending()    # sync is ~free once done() is True
+            return
         if self._pending is None:
             return
         import moy_ppa

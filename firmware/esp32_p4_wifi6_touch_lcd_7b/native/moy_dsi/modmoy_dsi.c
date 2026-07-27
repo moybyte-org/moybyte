@@ -29,7 +29,9 @@ static esp_lcd_dsi_bus_handle_t s_bus;
 static esp_lcd_panel_io_handle_t s_io;
 static esp_lcd_panel_handle_t s_panel;
 static void *s_fb;          // fb 0 (kept for the single-buffer flush() compat path)
-static void *s_fbs[2];      // DOUBLE-BUFFER (#58): the DPI panel owns 2 framebuffers;
+static void *s_fbs[3];      // TRIPLE-BUFFER (#58 render overlap): the DPI panel owns
+                            // 3 framebuffers -- scan / DMA-pending / paint -- so a
+                            // deferred async composite never blocks the next paint;
 static int s_nfbs;          // show(n) switches scan-out zero-copy (draw_bitmap with an
                             // internal fb pointer), so a full redraw never races the
                             // scan (the "everything visibly refreshes" tearing).
@@ -67,7 +69,8 @@ static mp_obj_t moy_dsi_init(void) {
     moy_dsi_check(esp_lcd_new_panel_io_dbi(s_bus, &dbi_cfg, &s_io), "dbi io");
 
     esp_lcd_dpi_panel_config_t dpi_cfg = EK79007_1024_600_PANEL_60HZ_CONFIG(LCD_COLOR_PIXEL_FORMAT_RGB565);
-    dpi_cfg.num_fbs = 2;    // double-buffer: 2x 1.2MB PSRAM (the board has 32MB)
+    dpi_cfg.num_fbs = 3;    // triple-buffer: 3x 1.2MB PSRAM (the board has 32MB) --
+                            // scan + DMA-pending + paint (#58 render overlap)
     ek79007_vendor_config_t vendor_cfg = {
         .mipi_config = {
             .dsi_bus = s_bus,
@@ -84,8 +87,8 @@ static mp_obj_t moy_dsi_init(void) {
     moy_dsi_check(esp_lcd_new_panel_ek79007(s_io, &panel_cfg, &s_panel), "panel new");
     moy_dsi_check(esp_lcd_panel_reset(s_panel), "panel reset");
     moy_dsi_check(esp_lcd_panel_init(s_panel), "panel init");
-    moy_dsi_check(esp_lcd_dpi_panel_get_frame_buffer(s_panel, 2, &s_fbs[0], &s_fbs[1]), "get fbs");
-    s_nfbs = 2;
+    moy_dsi_check(esp_lcd_dpi_panel_get_frame_buffer(s_panel, 3, &s_fbs[0], &s_fbs[1], &s_fbs[2]), "get fbs");
+    s_nfbs = 3;
     s_fb = s_fbs[0];
     return mp_const_none;
 }
@@ -96,7 +99,7 @@ static mp_obj_t moy_dsi_deinit(void) {
         esp_lcd_panel_del(s_panel);
         s_panel = NULL;
         s_fb = NULL;
-        s_fbs[0] = s_fbs[1] = NULL;
+        s_fbs[0] = s_fbs[1] = s_fbs[2] = NULL;
         s_nfbs = 0;
     }
     if (s_io) {

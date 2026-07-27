@@ -81,6 +81,13 @@ class P4SystemCanvas(DeviceCanvas):
         # at 1x until the next set_font_scale.
         self.font_scale = max(1, int(font_scale))
         DeviceCanvas.__init__(self, comp)
+        # The root's staleness horizon = the panel's ACTUAL buffer rotation
+        # (3 with the #58 render-overlap triple buffer, 2 on an older moy_dsi
+        # build, 1 in the single-buffer degrade). Every partial-paint streak
+        # (_retained_n in wm_windowed/launcher_layer) reads this.
+        n = len(getattr(comp, "_fbs", ()) or ())
+        if n:
+            self.RETAINED_FRAMES = n
 
     def set_font_scale(self, scale):
         self.font_scale = max(1, int(scale))
