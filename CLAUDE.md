@@ -254,14 +254,18 @@ to whoever called it.
   closures (tuple returns fan out to Lua multivalues, so `touch()` needs no
   wrapper), and layers/images kept Python-side behind int-handle glue
   (`device_api.LuaCartRun`, shared by both boards' `moy_runtime.run_desktop`
-  wiring). Two S3-learned constraints live in the module: the vendored lua
-  sources carry **in-source `-O2` pragmas** (historically a guard against `-Os`
-  halving the VM; today's builds resolve usermods to `-O2` globally, so the
-  pragmas PIN that — and `-O3` on the VM hot files is a measured ~2–5%
-  REGRESSION on the P4, #159, so O2 is the affirmed setting, not a leftover)
-  and the `lua_Alloc` is
+  wiring). Three hardware-learned constraints live in the module: the vendored
+  lua sources carry **in-source `-O2` pragmas** (historically a guard against
+  `-Os` halving the VM; today's builds resolve usermods to `-O2` globally, so
+  the pragmas PIN that — and `-O3` on the VM hot files is a measured ~2–5%
+  REGRESSION on the P4, #159, so O2 is the affirmed setting, not a leftover),
+  the `lua_Alloc` is
   **internal-SRAM-first with a 48KB headroom floor + PSRAM fallback** (the
-  all-PSRAM version measured ~2× slower on the S3's 120MHz-OCT bus).
+  all-PSRAM version measured ~2× slower on the S3's 120MHz-OCT bus), and
+  `lua_to_mp` **small-ints integer args + returns interned names as qstrs**
+  (#107: `mp_obj_new_int_from_ll` per coordinate was ~64B × every upcall arg —
+  celeste's 11KB/frame of marshalling garbage, i.e. a 160–200ms auto-collect
+  every ~6s of play; from_ll survives only as the >31-bit fallback).
   `system_carts/sakura_lua.moy` is the A/B twin of sakura (line-faithful,
   bit-identical over 600 host frames — `tests/test_lua_sakura_parity.py` +
   `experiments/lua_bridge/host_parity.py`); the measured cross-board verdict
