@@ -202,6 +202,17 @@ class P4SystemCanvas(DeviceCanvas):
                 and ox + gc.w * scale <= self.w and oy + gc.h * scale <= self.h:
             try:
                 if defer:
+                    # NOTE the DOUBLE GAME CANVAS (copy-on-swap so this pending
+                    # could go fence-free) was built and REVERTED 2026-07-28
+                    # with a measured verdict: windowed Battle City 56 -> 41fps.
+                    # The blocking "game" fence this defer pays at
+                    # present_pending measured ~FREE at this composite size
+                    # (the DMA finishes within the input poll), while the
+                    # swap's ~150KB retention memcpy cost 4-5ms EVERY quiet
+                    # frame and the fence-free show backlogged into
+                    # _drain_pending collisions. See #58 for the numbers; the
+                    # design is in git history if a bigger composite ever
+                    # changes the arithmetic.
                     ppa.blit_async(self._buf, self.w, self.h, ox, oy,
                                    gc._buf, gc.w, gc.h, scale)
                     self._comp._composite_pending = True   # flush() will defer
