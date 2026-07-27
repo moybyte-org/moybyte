@@ -359,10 +359,17 @@ class _CoverImage:
         self._paint = True
 
 
-# How long one _CoverJob.step may run inside a frame. Small enough to hide in
-# any frame budget; big enough that a 320x240 cover lands in a couple dozen
-# frames (~a second of pop-in at UI rates).
-_COVER_SLICE_MS = 8
+# How long one _CoverJob.step may run inside a frame, and the per-frame budget
+# for cover BUILDS (_cover_for). Sized for the warm case (2026-07-27): with the
+# runs prefetched a native build is ~2ms, and a transition frame arrives with
+# the whole visible set pending -- at 8ms the picker's ~9 covers spread over 2-3
+# painted frames (each a full ~190ms repaint via the _covers_deferred re-arm),
+# at 20ms they land on the FIRST frame (p4_clicks: open_picker 376 -> ~190ms).
+# The cold path is unshaped by this constant: the first build of a frame always
+# proceeds (one ~50ms blob load), and the budget only gates the SECOND onward,
+# which a 20ms ceiling still refuses after any load. Python-fallback jobs (host
+# without moy_gfx) just step in chunkier slices -- the host is fast.
+_COVER_SLICE_MS = 20
 # Per-palette-index run templates for the RLE fill (built lazily, 64 x 255B):
 # a run decodes as ONE C-level slice copy instead of a per-pixel loop.
 _COVER_RUNS = None
@@ -918,8 +925,12 @@ class Workstation:
         self._cover_runs_order = []   # LRU keys (oldest first)
         self._cover_runs_bytes = 0
         self._covers_deferred = False # a build was pushed past the budget -> stay dirty
-        self._cover_seen = False      # a surface asked for a cover -> idle prefetch is
-                                      # worth running (see _cover_prefetch_tick)
+        self._cover_seen = True       # idle prefetch armed (see _cover_prefetch_tick);
+                                      # True from BOOT: covers must be warm BEFORE the
+                                      # first cover surface opens, not after (p4_clicks
+                                      # measured the cold pipeline as two ~1s clicks).
+                                      # Latched False once every cart is known; re-armed
+                                      # by a store re-scan (_apply_items).
         self._cover_pf_i = 0          # round-robin cursor over _all_carts
         self._quiet_frames = 0        # consecutive frames the redraw gate skipped
         # Unified top bar (Stage 1): the editable 16x16 IconSheet the bar draws its
@@ -1780,8 +1791,9 @@ class Workstation:
         path = cart.get("path")
         if path is None or self.carts_store is None or w <= 0 or h <= 0:
             return None
-        self._cover_seen = True            # a surface is showing covers: prefetching
-                                           # the rest on idle frames is worth doing
+        self._cover_seen = True            # re-arm the idle prefetch (it latches off
+                                           # once every cart is known; a surface asking
+                                           # again is the cheap signal to re-check)
         if path in self._cover_none:       # known cover-less: never re-probe
             return None
         key = (path, w, h)
@@ -1936,10 +1948,20 @@ class Workstation:
         much cheaper (it is flash-bound), so it moves instead -- same reasoning as
         the bar strip: spend it where nobody is waiting.
 
-        Only runs while a surface is actually showing covers (_cover_seen, set by
-        _cover_for), so a device sitting in an editor never warms a cache nobody
-        wants, and only after a couple of quiet frames so a gap between two
-        gestures is not spent on flash."""
+        ARMED FROM BOOT (2026-07-27), not from the first cover draw. The old
+        gate ("only while a surface is showing covers") kept the cache cold at
+        exactly the moment it was needed: tools/p4_clicks.py measured
+        back_to_desk at 1108ms and open_picker at 824ms, both of which were the
+        cover pipeline paying its ~49ms-per-cart loads ON the transition's
+        painted frames because nothing had armed the prefetch from the desk or
+        Settings. Warming from boot moves all of it into the first few idle
+        seconds of the session. The trade, accepted: an idle EDITOR now warms
+        the cache too, so the first input after a >2-quiet-frame pause can land
+        behind one in-flight flash read (~50-108ms extra latency, at most once
+        per cart per session, then never again -- the exhaustion latch below).
+        A RUNNING game is never affected: it animates, so the idle branch that
+        calls this never executes. Runs only after a couple of quiet frames so
+        the gap between two gestures is not spent on flash."""
         carts = self._all_carts
         if not self._cover_seen or self.carts_store is None or not carts:
             return
@@ -3729,6 +3751,8 @@ class Workstation:
             self._cover_none = {}
             self._cover_gen += 1
             self._cover_jobs = {}          # in-flight builds may read stale blobs
+            self._cover_seen = True        # re-arm the idle prefetch: new/changed
+                                           # carts should warm before their surface opens
             self.launcher.set_items(self._launcher_view_items())   # #105: keep an active filter
             self.picker.set_items(self._picker_items(items))
 

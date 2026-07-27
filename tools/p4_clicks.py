@@ -22,21 +22,23 @@ its `worst` is lower -- `sum` is the honest latency number.
 Each scenario resets the board so it cannot inherit another's warm caches, then
 runs its `pre` verbs, arms the recorder, and runs the `click` verb.
 
-MEASURED 2026-07-27, P4 on glass @ 1024x600 (60fps = 16.7ms):
+MEASURED 2026-07-27, P4 on glass @ 1024x600 (60fps = 16.7ms). Sum ms across
+three states: the cold pipeline, after arming the prefetch from boot, and
+after also raising _COVER_SLICE_MS 8 -> 20 ("-" = not re-run):
 
-  | click         | frames | worst | total |
-  |---------------|--------|-------|-------|
-  | back_to_desk  |   6    |  253  | 1108  |
-  | open_picker   |   5    |  238  |  824  |
-  | tab_blocks    |   1    |  268  |  252  |
-  | tab_map       |   1    |  224  |  224  |
-  | open_project  |   1    |  182  |  180  |
-  | tab_sprites   |   1    |  121  |  120  |
-  | tab_code      |   1    |   99  |   96  |
-  | open_settings |   1    |   72  |   72  |
+  | click         | cold  | boot prefetch | +20ms slice |
+  |---------------|-------|---------------|-------------|
+  | back_to_desk  | 1108  |  536          |  408 (2 fr) |
+  | open_picker   |  824  |  376          |  312 (2 fr) |
+  | tab_blocks    |  252  |  252          |    -        |
+  | tab_map       |  224  |  220          |  220        |
+  | open_project  |  180  |  180          |    -        |
+  | tab_sprites   |  120  |  120          |    -        |
+  | tab_code      |   96  |   96          |    -        |
+  | open_settings |   72  |   72          |   72        |
 
-TWO CLICKS COST ABOUT A SECOND, and both are the COVER PIPELINE, not the surface
-they open. Attributed with tools/p4_attrib.py's wrap hook over the same driver:
+THE TWO ~1s CLICKS WERE THE COVER PIPELINE, not the surface they open.
+Attributed with tools/p4_attrib.py's wrap hook over the same driver (cold):
 
   back_to_desk, 6 painted frames      open_picker, 5 painted frames
     cover_load      32 x  1572ms        cover_load      32 x  1561ms
@@ -44,18 +46,25 @@ they open. Attributed with tools/p4_attrib.py's wrap hook over the same driver:
     wallpaper.draw   6 x   222          ws._relayout     1 x    25
     cover_prefetch 200 x  1338 incl     cover_prefetch 195 x  1334 incl
 
-A cover's blob read + parse is ~49ms and there are ~29 carts. _cover_for builds
-at most one per PAINTED frame (the _COVER_SLICE_MS budget), and each pop-in
-re-arms the redraw gate -- so the desk repaints SIX times (~104ms each: launcher
-67 + wallpaper 37) to fold in six covers, while the idle prefetch grinds through
-the remaining ~1.3s. The transition itself is cheap; the covers are the click.
+A cover's blob read + parse is ~49ms and there are ~29 carts; each pop-in
+re-armed the redraw gate, so the desk repainted SIX times (~104ms each) with
+the loads landing on painted frames. THE FIX (2026-07-27, two halves):
+  1. The idle prefetch is ARMED FROM BOOT (console._cover_seen starts True,
+     re-armed on a store re-scan). The old arming -- only after a surface drew
+     a cover -- kept the cache cold at exactly the moment of the click: neither
+     Settings nor the desk icon column (tile-0 art) ever armed it.
+  2. _COVER_SLICE_MS 8 -> 20: with runs warm a native build is ~2ms, so a
+     transition's visible set lands on the first painted frame or two instead
+     of spreading over 2-3 full ~190ms repaints. The cold path is unshaped by
+     this: the first build of a frame always proceeded regardless of budget,
+     and after any ~50ms load the 20ms ceiling still refuses a second.
+The remaining ~200ms/frame IS the desk/picker repaint itself (launcher 67 +
+wallpaper 37 + windows/chrome) -- ui_damage_model territory, not covers.
 
-TRIED AND REVERTED: giving _cover_prefetch_tick a 150ms time budget on idle
-frames instead of one cart per frame. Measured ZERO change (1108 -> 1132, noise),
-because the prefetch never runs in either path -- `_cover_seen` is set only by
-_cover_for, and neither the Settings window nor the desk's icon column (tile-0
-sprite art, not covers) sets it. So the covers are always cold at the moment of
-the click. Fix the arming before touching the budget.
+TRIED AND REVERTED (pre-fix): giving _cover_prefetch_tick a 150ms time budget
+on idle frames. Measured ZERO change (1108 -> 1132, noise), because with the
+old arming the prefetch never ran at all -- the budget of a thing that never
+runs is irrelevant. Fix the arming before touching budgets.
 """
 
 from __future__ import annotations

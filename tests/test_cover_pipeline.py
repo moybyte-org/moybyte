@@ -204,8 +204,12 @@ def test_idle_frames_prefetch_cover_runs(tmp_path):
     shelf drag, that is a drag frame, which is why the picker measured a 577ms
     worst frame. Idle frames do nothing, so they pay it instead.
 
-    The assertion is that runs for a cart NOT on screen become cached while the
-    console is idle -- that is what makes the later drag free."""
+    The assertion is that runs become cached while the console is idle WITHOUT
+    any surface having drawn a cover first -- armed from boot (2026-07-27).
+    The old first-draw arming kept the cache cold at exactly the moment it was
+    needed: p4_clicks measured back_to_desk at 1108ms / open_picker at 824ms,
+    both the cover pipeline paying its per-cart loads on the transition's
+    painted frames because nothing on the desk or in Settings had armed it."""
     from runtime import host_app
     root, carts = _mk_carts_with_covers(tmp_path, 4, with_cover=3)
     ws = host_app.build_workstation(root)
@@ -213,19 +217,32 @@ def test_idle_frames_prefetch_cover_runs(tmp_path):
                [x["path"] for x in carts[:3]]]
     assert covered, "fixture carts missing from the store"
 
-    # Nothing has asked for a cover yet -> the prefetch must stay asleep, so a
-    # device sitting in an editor never warms a cache nobody wants.
-    for _ in range(50):
-        ws._cover_prefetch_tick()
-    assert all(ws._cover_runs_get(c["path"]) is None for c in covered)
-
-    # A surface draws a card -> prefetch is armed and warms the REST on idle.
-    _land_cover(ws, covered[0], 20, 15)
+    # Armed from boot: idle ticks warm every cart with NO cover draw first.
     assert ws._cover_seen
     for _ in range(200):
         ws._cover_prefetch_tick()
     for c in covered:
         assert ws._cover_runs_get(c["path"]) is not None, c["path"]
+
+
+def test_rescan_rearms_the_prefetch(tmp_path):
+    """A store re-scan clears the cover caches (new/changed art), so it must
+    also re-arm the idle prefetch -- otherwise every cover goes cold again
+    until a surface happens to draw one (the exact failure the boot arming
+    exists to prevent)."""
+    from runtime import host_app
+    root, carts = _mk_carts_with_covers(tmp_path, 3, with_cover=2)
+    ws = host_app.build_workstation(root)
+    for _ in range(200):
+        ws._cover_prefetch_tick()
+    assert ws._cover_seen is False          # exhausted: every cart known
+    ws._apply_items(list(ws._all_carts))    # the re-scan path (create/dup/delete)
+    assert ws._cover_seen                   # re-armed...
+    want = carts[0]["path"]
+    assert ws._cover_runs_get(want) is None  # ...and the cache really was cleared
+    for _ in range(200):
+        ws._cover_prefetch_tick()
+    assert ws._cover_runs_get(want) is not None   # idle re-warms with no draw
 
 
 def test_prefetch_makes_a_later_build_touch_no_storage(tmp_path):
