@@ -743,6 +743,17 @@ class Launcher:
         self._scroll_region().draw_bar(cv, self.theme or {})
 
 
+def _retained_n(cv):
+    """The canvas's physical-buffer rotation -- the staleness horizon the
+    drag-partial streaks must respect (a back buffer on an N-buffer root is N
+    frames stale). Parameterized for the P4 triple-framebuffer render overlap
+    (#58); FLOORED at 2 so the host's single persistent buffer keeps today's
+    conservative gates (behavior-identical at N<=2). Mirrors
+    WindowedWM._retained_n."""
+    n = getattr(cv, "RETAINED_FRAMES", 1)
+    return n if n > 2 else 2
+
+
 def _cursor_stamp(ws):
     """The cursor sprite's footprint on the system canvas this frame, or None
     when it isn't drawn -- recorded with each shelf paint (#113) so a blitted
@@ -938,7 +949,8 @@ class LauncherHomeLayer:
         ws = self.ws
         if not (ws.launcher.dragging or ws.launcher.flinging):
             return False
-        if getattr(cv, "RETAINED_FRAMES", 0) < 1 or self._full_streak < 2:
+        if (getattr(cv, "RETAINED_FRAMES", 0) < 1
+                or self._full_streak < _retained_n(cv)):
             return False
         if self._statics != self._statics_key(cv):
             return False
@@ -1030,7 +1042,7 @@ class LauncherHomeLayer:
                 _cursor_stamp(ws))
             key = self._statics_key(cv)
             if key == self._statics:
-                if self._full_streak < 2:
+                if self._full_streak < _retained_n(cv):
                     self._full_streak += 1
             else:
                 self._statics = key
@@ -1076,7 +1088,7 @@ class LauncherHomeLayer:
         # the partial path's statics streak.
         key = self._statics_key(cv)
         if key == self._statics:
-            if self._full_streak < 2:
+            if self._full_streak < _retained_n(cv):
                 self._full_streak += 1
         else:
             self._statics = key
@@ -1465,7 +1477,8 @@ class EditorPickerLayer:
         ws = self.ws
         if not (ws.picker.dragging or ws.picker.flinging):
             return False
-        if getattr(cv, "RETAINED_FRAMES", 0) < 1 or self._full_streak < 2:
+        if (getattr(cv, "RETAINED_FRAMES", 0) < 1
+                or self._full_streak < _retained_n(cv)):
             return False
         if self._statics != self._statics_key(cv):
             return False
@@ -1547,7 +1560,7 @@ class EditorPickerLayer:
             _cursor_stamp(ws))
         key = self._statics_key(cv)
         if key == self._statics:
-            if self._full_streak < 2:
+            if self._full_streak < _retained_n(cv):
                 self._full_streak += 1
         else:
             self._statics = key

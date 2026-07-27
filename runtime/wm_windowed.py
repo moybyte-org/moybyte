@@ -305,7 +305,7 @@ class _BackdropLayer(Layer):
             # DRAG still restores every frame: there the window moves, so the
             # backdrop it uncovers is genuinely damaged.
             if wm._drag is None and wm._resize is None:
-                if wm._desk_streak >= 2:
+                if wm._desk_streak >= wm._retained_n():
                     wm._desk_painted = False   # untouched: windows may skip too
                     self.ws.bar_layer.redraw_clock("desk")
                     return
@@ -529,10 +529,11 @@ class WindowedWM(FullscreenStackWM):
         # drag/resize only the moving window's recent footprint needs the backdrop
         # re-stamped -- a full-screen 1.2MB restore per frame is the drag path's
         # dominant cost on the P4 (PSRAM-bandwidth-bound, no accelerator helps a
-        # 1:1 copy). _gesture_hist holds the last TWO frames' damage extents (two:
-        # a ping-pong back buffer is two frames stale; a single-buffer host needs
-        # one -- the superset covers both). Seeded with the window's extent at
-        # gesture START (both physical buffers hold its pre-gesture stamp).
+        # 1:1 copy). _gesture_hist holds the last _retained_n() frames' damage
+        # extents (a back buffer on an N-buffer root is N frames stale; a
+        # single-buffer host needs one -- the floored N covers all). Seeded
+        # with the window's extent at gesture START (every physical buffer
+        # holds its pre-gesture stamp).
         self._gesture_hist = []
         self._union_disabled = False      # A/B measurement knob (P4 remote `union`)
 
@@ -874,6 +875,18 @@ class WindowedWM(FullscreenStackWM):
 
     # -- the quiet-frame draw stack (#58 P4 perf) -------------------------------
 
+    def _retained_n(self):
+        """How many physical buffers the root canvas rotates through -- the
+        staleness horizon every partial-paint mechanism must respect: retained
+        pixels may be trusted only after N consecutive identical paints, a
+        change must be painted into all N buffers before partials resume
+        (debt = N-1), and a gesture's damage trail must union the last N
+        frames' extents. Parameterized for the P4 triple-framebuffer render
+        overlap (#58); FLOORED at 2 so the host's single persistent buffer
+        keeps today's conservative gates (behavior-identical at N<=2)."""
+        n = getattr(self._root_canvas, "RETAINED_FRAMES", 1)
+        return n if n > 2 else 2
+
     def draw_stack(self):
         """The frame router's draw list. QUIET frames -- a running game window is
         the only animation: no dirty flag, no pointer change, no cursor, no
@@ -899,9 +912,11 @@ class WindowedWM(FullscreenStackWM):
         if quiet and self._full_debt <= 0:
             return self._quiet_stack_fps if (self._cache_sig & 2) else self._quiet_stack
         if quiet:
-            self._full_debt -= 1      # paying the second-buffer debt: full paint
+            self._full_debt -= 1      # paying the other-buffer debt: full paint
         else:
-            self._full_debt = 1       # a change painted: the OTHER buffer owes one
+            # A change painted: every OTHER physical buffer owes a full paint
+            # before partial frames may resume (N-1 debts on an N-buffer root).
+            self._full_debt = self._retained_n() - 1
         return self._cache_draw
 
     # -- the drag backdrop cache (#58 drag perf) -------------------------------
@@ -960,10 +975,11 @@ class WindowedWM(FullscreenStackWM):
         return (win.x - 2, win.y - 2, w + 7, h + 7)
 
     def _seed_gesture_hist(self):
-        """Prime the damage history at gesture START: both physical buffers hold
-        the window's pre-gesture stamp, so the first two restores must cover it."""
+        """Prime the damage history at gesture START: every physical buffer
+        holds the window's pre-gesture stamp, so the first N restores must
+        cover it."""
         ext = self._gesture_extent()
-        self._gesture_hist = [ext, ext] if ext is not None else []
+        self._gesture_hist = [ext] * self._retained_n() if ext is not None else []
 
     def _blit_backdrop_cache(self):
         """Stamp the cached backdrop into the current (ping-pong) back buffer --
@@ -981,12 +997,13 @@ class WindowedWM(FullscreenStackWM):
         rc = self._root_canvas
         stamp = getattr(rc, "blit_strip_rect", None)
         ext = self._gesture_extent()
+        n = self._retained_n()
         if (stamp is None or self._union_disabled or ext is None
                 or not self._gesture_hist):
             rc.blit_strip(self._backdrop, 0, 0)
             if ext is not None:
-                self._gesture_hist = [self._gesture_hist[-1], ext] \
-                    if self._gesture_hist else [ext, ext]
+                self._gesture_hist = (self._gesture_hist + [ext])[-n:] \
+                    if self._gesture_hist else [ext] * n
             return
         rects = self._gesture_hist + [ext]
         x0 = min(r[0] for r in rects)
@@ -1027,7 +1044,7 @@ class WindowedWM(FullscreenStackWM):
                 stamp(self._backdrop, 0, 0, x0, by0, bx0 - x0, by1 - by0)
             if bx1 < x1:                                       # right strip
                 stamp(self._backdrop, 0, 0, bx1, by0, x1 - bx1, by1 - by0)
-        self._gesture_hist = [self._gesture_hist[-1], ext]
+        self._gesture_hist = (self._gesture_hist + [ext])[-n:]
 
     # -- game viewport == the player window (#39 mapping) ----------------------
 
@@ -1089,7 +1106,8 @@ class WindowedWM(FullscreenStackWM):
         find the lowest window that must paint and draw from there up.
 
         A window may be skipped only once its pixels sit in BOTH ping-pong
-        buffers (`_stamp_streak >= 2`, the same rule _BackdropLayer uses), it is
+        buffers (`_stamp_streak >= _retained_n()`, the same rule _BackdropLayer
+        uses), it is
         not the focused window (whose content re-renders live), and nothing
         global invalidated the frame -- the desk backdrop repainting under it, a
         live animation, or a visible cursor whose old stamp would ghost."""
@@ -1110,12 +1128,13 @@ class WindowedWM(FullscreenStackWM):
         self._sig_stable = True
         if not self._frame_is_quiet(dt):
             return 0                      # something under/over everything moved
+        horizon = self._retained_n()
         for i in range(n):
             win = self._wins[self._order[i]]
             if win.minimized:
                 continue                  # nothing painted -> nothing to skip past
             if (self._order[i] == self._focus or win.kind == "desktop"
-                    or getattr(win, "_stamp_streak", 0) < 2):
+                    or getattr(win, "_stamp_streak", 0) < horizon):
                 return i
         return n                          # every window is settled: draw none
 
@@ -1196,10 +1215,10 @@ class WindowedWM(FullscreenStackWM):
         The highlight follows INPUT FOCUS (which moves on click), not the stack.
 
         `quiet` (see _draw_windows) allows the FREEZE: once this exact chrome has
-        been painted into both ping-pong buffers, a quiet frame skips it and
+        been painted into every physical buffer, a quiet frame skips it and
         redraws only the grip. The streak counts CONSECUTIVE quiet paints, so any
         disturbance -- desk repaint, drag, cursor, animation, a changed title or
-        theme -- restarts it and both buffers are refreshed before skipping
+        theme -- restarts it and all buffers are refreshed before skipping
         resumes."""
         sig = (win.x, win.y, win.w, win.h, win.title_h, focused,
                self._win_title(win), self.ws.theme_name, self.ws.theme_variant,
@@ -1207,7 +1226,7 @@ class WindowedWM(FullscreenStackWM):
         if not quiet or sig != getattr(win, "_chrome_sig", None):
             win._chrome_sig = sig
             win._chrome_streak = 0
-        elif win._chrome_streak >= 2:
+        elif win._chrome_streak >= self._retained_n():
             self._win_grip(win, focused)
             return
         win._chrome_streak += 1
@@ -1600,7 +1619,7 @@ class WindowedWM(FullscreenStackWM):
         if not quiet or sig != self._chip_sig:
             self._chip_sig = sig
             self._chip_streak = 0
-        elif self._chip_streak >= 2:
+        elif self._chip_streak >= self._retained_n():
             return
         self._chip_streak += 1
         for key, (x, y, w, h), label in self._chip_rects():
