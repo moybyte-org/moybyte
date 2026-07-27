@@ -487,6 +487,13 @@ _LUA_TOKEN = 0x7A11   # the Lua writer's batch token: never 0 (the Python
 
 _LUA_PRELUDE = """
 do
+  -- #164: `table` stays the Lua LIBRARY (celeste's p8 shim needs
+  -- table.remove); the #78 cart verb rides it as a metatable __call.
+  if moy_table_verb ~= nil then
+    local tv = moy_table_verb
+    setmetatable(table, { __call = function(_, name) return tv(name) end })
+    moy_table_verb = nil
+  end
   local layer_new, layer_spr_img = __layer_new, __layer_spr_img
   local layer_spr, layer_cls = __layer_spr, __layer_cls
   local draw_layer_h, image_h = __draw_layer, __image_handle
@@ -555,6 +562,13 @@ class LuaCartRun:
         try:
             for name in ns:
                 v = ns[name]
+                if name == "table":
+                    # Never clobber Lua's `table` LIBRARY (#164): the prelude
+                    # grafts the #78 verb onto it as a metatable __call, so
+                    # table.insert/remove (celeste's p8 shim) AND
+                    # table("scores") both work. Host twin: lua_host.py.
+                    moy_lua.register("moy_table_verb", v)
+                    continue
                 if name != "spr" and name != "Image" and callable(v):
                     moy_lua.register(name, v)
             moy_lua.exec("W=%d H=%d"

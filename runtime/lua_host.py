@@ -60,6 +60,17 @@ do
     py_draw_layer(l, cx or 0, cy or 0)
   end
 
+  -- The #78 `table()` cart verb collides with Lua's `table` LIBRARY (the one
+  -- stdlib name the kid API shares; found via celeste's p8 shim calling
+  -- table.remove on the injected Python closure, #164). The library stays the
+  -- global -- portable lua (table.insert/remove/...) keeps working -- and a
+  -- metatable __call makes it double as the verb: table("scores") -> rows.
+  if moy_table_verb ~= nil then
+    local tv = moy_table_verb
+    setmetatable(table, { __call = function(_, name) return tv(name) end })
+    moy_table_verb = nil
+  end
+
   -- Sandbox: the device plan's "safe stdlib only" (base/math/string/table),
   -- mirrored on the host so a cart that runs here runs there. `python` is
   -- lupa's Python bridge -- the one escape hatch a kid cart must not have.
@@ -90,6 +101,11 @@ class LuaCartRun:
                                         register_builtins=False)
         g = self._lua.globals()
         for k, v in ns.items():
+            if k == "table":
+                # Never clobber Lua's `table` library (#164): the prelude
+                # grafts the #78 verb onto it as a metatable __call instead.
+                g["moy_table_verb"] = v
+                continue
             g[k] = v
         # Captured BEFORE the prelude's sandbox nils `load`: the cart chunk is
         # loaded as "@cart" so every error position renders `cart:12:` -- the

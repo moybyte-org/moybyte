@@ -165,3 +165,30 @@ end
         'camera(-1.5, 0.5) camera()')
     ws.frame(1 / 60)
     assert ws.player.cart_error is None
+
+
+def test_table_is_both_the_lua_library_and_the_cart_verb(tmp_path):
+    """#164: the #78 `table()` cart verb used to CLOBBER Lua's `table` library
+    (g[k]=v over the whole api ns), so celeste's p8 shim crashed in `del` with
+    \"'function' object has no attribute 'remove'\". The library must survive
+    (table.insert/remove) while table(\"name\") still reaches the verb."""
+    pytest.importorskip("lupa")
+    from runtime.lua_host import LuaCartRun
+
+    calls = []
+    ns = {"table": lambda name: calls.append(name) or [[1, 2]],
+          "touch": lambda: None,
+          "make_layer": lambda w, h: None,
+          "draw_layer": lambda l, x, y: None}
+    run = LuaCartRun(ns, """
+      t = {}
+      table.insert(t, "a")
+      table.insert(t, "b")
+      table.remove(t, 1)
+      rows = table("scores")
+      function _update(dt) end
+    """)
+    g = run._lua.globals()
+    assert g.t[1] == "b" and g.t[2] is None      # the LIBRARY worked
+    assert calls == ["scores"]                    # the VERB worked
+    assert g.moy_table_verb is None               # no leaked global
