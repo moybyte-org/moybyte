@@ -368,6 +368,7 @@ Buttons are named. The canonical set is `left, right, up, down, a, b, run, home`
 | `touch()` | `(x, y, tapped, held)` in canvas space, or `None` if no pointer. `tapped` = press edge (one hit per tap); `held` = the finger/button is still down this frame, position following the drag (drawing, sliders) |
 | `mouse()` | TIC-80 7-tuple `(x, y, left, middle, right, scrollx, scrolly)`; a tap = left. middle/right/scroll are always 0 on hardware |
 | `textmode(on=True)` | opt a running cart into clean text-keyboard input (for typing a name/password) so `key()/keyp()` return typeable ASCII; `textmode(False)` restores game mode (held WASD/arrows drive `btn()`). Auto-resets to game mode on exit |
+| `view(w, h)` | declare the cart's LOGICAL viewport: the console composites the centered `w`x`h` region of the 320x240 canvas at the biggest integer scale that fits the screen (a 128x128 PICO-8 port fills the P4 glass at 4x instead of the full canvas's 2x); touch coords stay in full canvas space. `view()` restores the full canvas; auto-resets each run |
 
 **Declaring which input you use (`#42`):** `manifest.json` may carry an optional
 `"input"` list naming the input groups a cart actually reads — any of `"buttons"`

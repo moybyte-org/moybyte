@@ -4026,6 +4026,26 @@ class Workstation:
     def _viewport(self):
         return self.wm.viewport()
 
+    @property
+    def game_view(self):
+        """The running cart's declared logical viewport (the additive
+        `view(w, h)` cart verb): a centered (sx, sy, w, h) source rect of the
+        320x240 game canvas, or None for the full canvas. The fullscreen
+        composite scales the VIEW to the surface instead of the container --
+        celeste's 128x128 p8 screen fills the P4 glass at 4x instead of riding
+        the 320x240 canvas's 2x -- and game_xy maps taps back through it.
+        Lives on the shared InputState (the cart_quit pattern) so the verb
+        needs no console handle; Player.start clears it per run."""
+        v = getattr(self.input, "game_view", None)
+        if not v:
+            return None
+        gc = self.canvas
+        w = min(int(v[0]), gc.w)
+        h = min(int(v[1]), gc.h)
+        if w <= 0 or h <= 0 or (w == gc.w and h == gc.h):
+            return None
+        return ((gc.w - w) // 2, (gc.h - h) // 2, w, h)
+
     def _game_xy(self, px, py):
         return self.wm.game_xy(px, py)
 

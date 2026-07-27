@@ -377,6 +377,9 @@ class Player:
                 pm.flush()
             except Exception:  # noqa: BLE001
                 pass
+        # The dead run's `view(w, h)` must not outlive it: every fullscreen
+        # surface shares viewport(), and a lingering view would crop chrome.
+        self.ws.input.game_view = None
         ns = self.ns
         if ns:
             try:
@@ -492,6 +495,8 @@ class Player:
         h0 = _heap_stats()
         ws._dirty = True               # a (re)started cart paints its first frame (#44)
         self._reset_exit_state()       # a fresh run drops any half-done exit gesture
+        ws.input.game_view = None      # the `view(w, h)` verb is per-run (cart_quit
+                                       # pattern): a cart re-declares it each start
         # #85: a fresh run resets the active scene to the default, so a load_scene()
         # switch never leaks across a re-run (the "resets on next _init" semantics).
         _sc = getattr(project, "scenes", None)

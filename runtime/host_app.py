@@ -562,6 +562,17 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # namespace, resolving to this closure.
         input.cart_quit = True
 
+    def view(w=0, h=0):
+        # view(w, h) -> declare the cart's LOGICAL viewport: the console
+        # composites this centered w x h region of the 320x240 canvas to the
+        # screen instead of the whole canvas, at the biggest integer scale that
+        # fits -- celeste's 128x128 p8 screen fills the P4 glass at 4x instead
+        # of riding the container's 2x. view() / view(0, 0) restores the full
+        # canvas. ADDITIVE like textmode/quit; rides InputState (cart_quit
+        # pattern), cleared by Player.start each run. Same name + behavior on
+        # the device (device_api).
+        input.game_view = (int(w), int(h)) if w and h else None
+
     def pmem_fn(index, value=None):
         # TIC-80 pmem(i[, v]): read pmem(i) -> int, write pmem(i, v) -> persists.
         if pmem is None:
@@ -707,7 +718,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         "pal": canvas.pal, "palt": canvas.palt,
         "btn": btn, "btnp": btnp, "players": players,
         "key": key, "keyp": keyp, "time": time, "pmem": pmem_fn,
-        "textmode": textmode, "quit": _quit,
+        "textmode": textmode, "quit": _quit, "view": view,
         "cfg": cfg, "col": palette.color,
         "sfx": _sfx, "beep": _beep, "music": _music,
         "music_stop": _music_stop, "sound_stop": _sound_stop, "volume": _volume,

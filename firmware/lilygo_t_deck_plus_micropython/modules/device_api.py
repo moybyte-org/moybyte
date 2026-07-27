@@ -193,6 +193,15 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # no-op flip but key()/keyp() still work via the hold-latch path.)
         input.text_mode = bool(on)
 
+    def view(w=0, h=0):
+        # view(w, h) -> declare the cart's LOGICAL viewport: the composite
+        # scales this centered w x h region of the 320x240 canvas to the glass
+        # at the biggest integer scale that fits (celeste's 128x128 -> 4x on
+        # the P4). view() / view(0, 0) restores the full canvas. ADDITIVE like
+        # textmode/quit; rides InputState, cleared by Player.start. Host twin:
+        # host_app.view.
+        input.game_view = (int(w), int(h)) if w and h else None
+
     def _quit():
         # quit() -> END this cart and return to whoever launched it (the launcher, or
         # the Editor). A cart calls it from a key or an on-screen affordance it draws.
@@ -361,7 +370,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         "pal": canvas.pal, "palt": canvas.palt,
         "btn": btn, "btnp": btnp, "players": players,
         "key": key, "keyp": keyp, "time": time, "pmem": pmem_fn,
-        "textmode": textmode, "quit": _quit,
+        "textmode": textmode, "quit": _quit, "view": view,
         "cfg": cfg, "col": color,
         "sfx": _sfx, "beep": _beep, "music": _music,
         "music_stop": _music_stop, "sound_stop": _sound_stop, "volume": _volume,

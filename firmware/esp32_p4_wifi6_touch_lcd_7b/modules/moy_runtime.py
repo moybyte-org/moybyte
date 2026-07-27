@@ -173,7 +173,26 @@ class P4SystemCanvas(DeviceCanvas):
 
     # -- the native composite hooks (probed via getattr by the shared code) ----
 
-    def blit_game(self, gc, ox, oy, scale, defer=False):
+    def blit_game(self, gc, ox, oy, scale, defer=False, src=None):
+        # A cart-declared VIEW (`view(w, h)`, e.g. celeste's 128x128 p8 screen):
+        # crop the source rect into a scratch layer via one dest-clipped blit565
+        # with a NEGATIVE dest offset (no crop kernel needed), then scale the
+        # scratch through the normal path below -- the PPA's scaled-fit check
+        # passes and the composite reads a SMALLER source than the full canvas.
+        if src is not None and self._gfx is not None:
+            fb0 = getattr(gc, "flush_batch", None)
+            if fb0 is not None:
+                fb0()
+            sx, sy, vw, vh = src
+            scr = getattr(self, "_view_scratch", None)
+            if scr is None or scr.w != vw or scr.h != vh:
+                scr = self._view_scratch = self.new_layer(vw, vh)
+            self._gfx.blit565(scr._buf, vw, vh, -sx, -sy,
+                              gc._buf, gc.w, gc.h, -1)
+            gc = scr
+        return self._blit_game_full(gc, ox, oy, scale, defer)
+
+    def _blit_game_full(self, gc, ox, oy, scale, defer=False):
         """wm_windowed._blit_game's device path (#58/#73): integer-scale the
         320x240 game canvas into this surface at (ox, oy). Hardware PPA (DMA,
         ~2.6x faster than the CPU blit -- measured) when available, else the

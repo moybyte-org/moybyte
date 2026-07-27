@@ -1082,12 +1082,16 @@ class WindowedWM(FullscreenStackWM):
 
     def _player_view(self, win):
         """(ox, oy, scale) of the game canvas centered in the player window's
-        content rect -- the windowed viewport."""
+        content rect -- the windowed viewport. A cart-declared view (`view(w,
+        h)`) scales ITS region here exactly like the fullscreen composite, so
+        celeste's 128x128 fills the window at 4x instead of the container's 2x."""
         gc = self.ws.canvas
+        view = self._view_src()
+        gw, gh = (view[2], view[3]) if view else (gc.w, gc.h)
         cx, cy, cw, ch = win.content_rect()
-        scale = max(1, min(cw // gc.w, ch // gc.h))
-        ox = cx + (cw - gc.w * scale) // 2
-        oy = cy + (ch - gc.h * scale) // 2
+        scale = max(1, min(cw // gw, ch // gh))
+        ox = cx + (cw - gw * scale) // 2
+        oy = cy + (ch - gh * scale) // 2
         return (ox, oy, scale)
 
     def viewport(self):
@@ -1095,6 +1099,7 @@ class WindowedWM(FullscreenStackWM):
         if win is None:
             return FullscreenStackWM.viewport(self)
         return self._player_view(win)
+
 
     def composite_game(self):
         # Desk world: a no-op -- the window layer blits the game canvas into
@@ -1117,7 +1122,7 @@ class WindowedWM(FullscreenStackWM):
             return
         ox, oy, scale = FullscreenStackWM.viewport(self)
         sc.cls(_VIEWPORT_BEZEL)        # letterbox fill
-        self._blit_game(sc, gc, ox, oy, scale)
+        self._blit_game(sc, gc, ox, oy, scale, src=self._view_src())
 
     # -- drawing ---------------------------------------------------------------
 
@@ -1590,11 +1595,12 @@ class WindowedWM(FullscreenStackWM):
         # framebuffer write, so a device backend may run it async and defer the
         # present (the #58 composite-overlap budget lever). A full paint draws
         # chrome AFTER it, so it must stay synchronous -- defer=not full.
-        self._blit_game(self._root_canvas, gc, ox, oy, scale, defer=not full)
+        self._blit_game(self._root_canvas, gc, ox, oy, scale, defer=not full,
+                        src=self._view_src())
         if full:
             self._win_chrome(win, focused)
 
-    def _blit_game(self, sc, gc, ox, oy, scale, defer=False):
+    def _blit_game(self, sc, gc, ox, oy, scale, defer=False, src=None):
         """Integer-scale the 320x240 game canvas into the desktop at (ox, oy) --
         the windowed sibling of the parent's centered composite_game. A device
         system canvas (the P4, #58) exposes a native blit_game (RGB565 scaled
@@ -1605,21 +1611,30 @@ class WindowedWM(FullscreenStackWM):
         FullscreenStackWM._composite_via_spr)."""
         bg = getattr(sc, "blit_game", None)
         if bg is not None:
-            bg(gc, ox, oy, scale, defer)
+            bg(gc, ox, oy, scale, defer, src)
             return
         gbuf = getattr(gc, "buf", None)
         sbuf = getattr(sc, "buf", None)
         if gbuf is None:
             return
         if sbuf is None:
-            img = _Blit(gc.w, gc.h, bytes(gbuf), -1)
+            if src is not None:            # ship only the declared view region
+                sx, sy, vw, vh = src
+                rows = bytearray(vw * vh)
+                for gy in range(vh):
+                    b = (sy + gy) * gc.w + sx
+                    rows[gy * vw:(gy + 1) * vw] = gbuf[b:b + vw]
+                img = _Blit(vw, vh, bytes(rows), -1)
+            else:
+                img = _Blit(gc.w, gc.h, bytes(gbuf), -1)
             img._paint = True              # -> the compact b64 wire form (~2.4x lighter)
             sc.spr(img, ox, oy, scale)
             return
-        gw, gh = gc.w, gc.h
+        stride = gc.w
+        sx, sy, gw, gh = src if src is not None else (0, 0, gc.w, gc.h)
         sw, sh = sc.w, sc.h
         for gy in range(gh):
-            grow = gy * gw
+            grow = (sy + gy) * stride + sx
             for s in range(scale):
                 dy = oy + gy * scale + s
                 if dy < 0 or dy >= sh:

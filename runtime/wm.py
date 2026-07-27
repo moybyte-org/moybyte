@@ -280,19 +280,31 @@ class FullscreenStackWM:
         sc = self.ws.sys_canvas
         if sc is gc:
             return (0, 0, 1)
-        scale = min(sc.w // gc.w, sc.h // gc.h)
+        view = self._view_src()
+        gw, gh = (view[2], view[3]) if view else (gc.w, gc.h)
+        scale = min(sc.w // gw, sc.h // gh)
         if scale < 1:
             scale = 1
-        ox = (sc.w - gc.w * scale) // 2
-        oy = (sc.h - gc.h * scale) // 2
+        ox = (sc.w - gw * scale) // 2
+        oy = (sc.h - gh * scale) // 2
         return (ox, oy, scale)
 
     def game_xy(self, px, py):
         """Map a SYSTEM-canvas point (where the pointer lives) into GAME-canvas
         coords, so a running cart / the editors (drawn in the 320x240 viewport) hit-
-        test correctly. Identity in the degradation case."""
+        test correctly. Identity in the degradation case. A cart-declared VIEW
+        (`view(w, h)`) shifts the mapping by its source origin, so touch coords
+        stay in full game-canvas space -- the cart's own frame of reference."""
         ox, oy, scale = self.viewport()
-        return ((px - ox) // scale, (py - oy) // scale)
+        view = self._view_src()
+        sx, sy = (view[0], view[1]) if view else (0, 0)
+        return (sx + (px - ox) // scale, sy + (py - oy) // scale)
+
+    def _view_src(self):
+        """The cart view rect the COMPOSITE honors, or None. One source of
+        truth for every viewport/blit/tap-mapping site on both tiers (the
+        windowed player window scales the view exactly like fullscreen)."""
+        return getattr(self.ws, "game_view", None)
 
     def composite_game(self):
         """Blit the fixed 320x240 GAME canvas into the SYSTEM canvas as a
@@ -328,27 +340,31 @@ class FullscreenStackWM:
         gw = gc.w
         sw = sc.w
         sh = sc.h
-        vw = gw * scale
+        # A cart-declared view (`view(w, h)`) composites only its source rect --
+        # the stride stays the full canvas width, the row slices start at sx.
+        view = getattr(self.ws, "game_view", None)
+        sx, sy, srw, srh = view if view is not None else (0, 0, gw, gc.h)
+        vw = srw * scale
         # The viewport always fits a system canvas >= the game (the supported case),
         # so take the fast row-replication path. A degenerate smaller-than-game system
         # canvas (negative offset / overflow) falls to a clipped per-pixel path that
         # can never resize the bytearray.
-        fits = ox >= 0 and oy >= 0 and ox + vw <= sw and oy + gc.h * scale <= sh
+        fits = ox >= 0 and oy >= 0 and ox + vw <= sw and oy + srh * scale <= sh
         if fits:
-            for gy in range(gc.h):
-                grow = gy * gw
+            for gy in range(srh):
+                grow = (sy + gy) * gw + sx
                 for s in range(scale):
                     base = (oy + gy * scale + s) * sw + ox
                     if scale == 1:
-                        sbuf[base:base + gw] = gbuf[grow:grow + gw]
+                        sbuf[base:base + srw] = gbuf[grow:grow + srw]
                     else:
                         out = base
-                        for gx in range(gw):
+                        for gx in range(srw):
                             sbuf[out:out + scale] = bytes((gbuf[grow + gx],)) * scale
                             out += scale
             return
-        for gy in range(gc.h):                      # clipped fallback (defensive)
-            grow = gy * gw
+        for gy in range(srh):                       # clipped fallback (defensive)
+            grow = (sy + gy) * gw + sx
             for s in range(scale):
                 dy = oy + gy * scale + s
                 if dy < 0 or dy >= sh:
@@ -369,6 +385,18 @@ class FullscreenStackWM:
         scale], ~2.4x lighter than a JSON int-list spr -- the webview's heaviest op)."""
         if gbuf is None:
             return
-        img = _Blit(gc.w, gc.h, bytes(gbuf), -1)    # opaque (no transparent index)
+        view = getattr(self.ws, "game_view", None)
+        if view is not None:
+            # A cart-declared view ships only its region (smaller payload, and
+            # the browser scales the VIEW like the framebuffer tiers do).
+            sx, sy, vw, vh = view
+            stride = gc.w
+            rows = bytearray(vw * vh)
+            for gy in range(vh):
+                b = (sy + gy) * stride + sx
+                rows[gy * vw:(gy + 1) * vw] = gbuf[b:b + vw]
+            img = _Blit(vw, vh, bytes(rows), -1)
+        else:
+            img = _Blit(gc.w, gc.h, bytes(gbuf), -1)  # opaque (no transparency)
         img._paint = True                           # -> the compact b64 wire form
         sc.spr(img, ox, oy, scale)

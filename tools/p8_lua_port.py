@@ -287,6 +287,11 @@ SHIM = r'''-- ============================================================
 -- ============================================================
 local P8_OX, P8_OY = 96, 56        -- center the 128x128 p8 screen in 320x240
 local P8_DT = 1 / 30               -- PICO-8 _update runs at a fixed 30fps
+-- Declare the 128x128 LOGICAL viewport (the additive `view` verb): the console
+-- composites just the p8 screen at the biggest integer scale that fits the
+-- glass (4x = 512x512 on the P4) instead of the 320x240 container's 2x.
+-- Guarded so the port keeps running on builds that predate the verb.
+if view ~= nil then view(128, 128) end
 do
   local m_spr, m_btn, m_btnp = spr, btn, btnp
   local m_camera = camera

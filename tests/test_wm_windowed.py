@@ -1542,3 +1542,57 @@ def test_closed_window_leaves_no_artifact_on_the_desk(tmp_path):
             diff += sum(1 for p, q in zip(a, c) if p != q)
     assert "settings" not in ws.wm._order
     assert diff == 0, "%d stale pixels where the window was" % diff
+
+
+# ---------------------------------------------------------------------------
+# The `view(w, h)` cart verb: a declared logical viewport composites at the
+# biggest integer scale that FITS THE VIEW (celeste's 128x128 -> 4x on a
+# 1024x600 surface instead of the 320x240 container's 2x), and tap mapping
+# shifts back into full canvas coords. Windowed player WINDOWS keep the full
+# canvas (v1), so their mapping must not shift.
+# ---------------------------------------------------------------------------
+
+def test_view_verb_scales_the_fullscreen_composite(tmp_path):
+    ws = _ws(tmp_path)
+    _drv(ws)
+    ws.input.game_view = (128, 128)
+    assert ws.game_view == (96, 56, 128, 128)      # centered source rect
+    assert ws.wm._wins.get("desktop") is None      # fullscreen (no player window)
+    ox, oy, scale = ws.wm.viewport()
+    assert scale == 4                              # 600 // 128, not 600 // 240
+    assert (ox, oy) == ((1024 - 512) // 2, (600 - 512) // 2)
+    # Tap mapping: the composite's top-left is the view's source origin.
+    assert ws.wm.game_xy(ox, oy) == (96, 56)
+    assert ws.wm.game_xy(ox + 511, oy + 511) == (96 + 127, 56 + 127)
+    ws.input.game_view = None
+    assert ws.game_view is None
+    assert ws.wm.viewport()[2] == 2                # back to the container scale
+
+
+def test_view_full_canvas_and_zero_are_identity(tmp_path):
+    ws = _ws(tmp_path)
+    _drv(ws)
+    for v in (None, (0, 0), (320, 240)):
+        ws.input.game_view = v
+        assert ws.game_view is None
+
+
+def test_view_scales_the_windowed_player_too(tmp_path):
+    # The desk-world game WINDOW honors the view like the fullscreen composite:
+    # one _view_src drives viewport, blit and tap mapping on both paths.
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open_picker()
+    ws.pick_selected()
+    drv.frame(1 / 30)
+    ws._leave_menu()
+    drv.frame(1 / 30)
+    win = ws.wm._wins.get("desktop")
+    if win is None:
+        return                                     # tier launched fullscreen
+    ws.input.game_view = (128, 128)
+    cx, cy, cw, ch = win.content_rect()
+    ox, oy, scale = ws.wm.viewport()
+    assert scale == max(1, min(cw // 128, ch // 128))
+    assert scale > max(1, min(cw // 320, ch // 240))   # bigger than full-canvas
+    assert ws.wm.game_xy(ox, oy) == (96, 56)
