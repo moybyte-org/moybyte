@@ -516,6 +516,82 @@ pixels at 320×240.
 
 ## 5. Proposal
 
+> **Superseded by §5.0.** The three primitives below were specified before the
+> attribution and before §0.2's blocker list; §5.0 is what the numbers and the
+> blockers together actually argue for, and it is roughly a tenth of the work.
+
+### 5.0 What to build instead: surface-granularity damage (2026-07-27)
+
+**The mechanism already exists — it is just not reached for the focused window.**
+`wm_windowed.py:1352` reads `if focused and not moving:` and only then re-runs the
+content draw. A background window, or one being dragged, is already stamped from
+its retained `win.buf` without re-rendering. So the console already has retained
+per-window surfaces, a compositor that stamps them, and a two-frame streak rule
+for the ping-pong. What it does not have is a reason to skip the FOCUSED window's
+content draw when that content did not change — and that is the 70.7ms.
+
+**The arithmetic that makes it worth doing** (correcting §0.065, which compared a
+retained blit against the byte floor rather than against the real cost):
+
+| the focused editor window, per painted frame | cost |
+|---|---|
+| re-running the content draw (map tab) | **70.7ms** |
+| stamping the retained `win.buf` 1:1 | **13.7ms** |
+| stamping nothing, because nothing moved | ~0 |
+
+So the win is up to ~57ms on any painted frame whose content is unchanged — and
+those are common: the clock ticking, the cursor moving, another window dirtying,
+an FPS chip updating. Today every one of them re-renders the focused surface in
+full.
+
+**Why this shape and not §5.1's damage clip.** It sidesteps four of §0.2's eight
+blockers outright, because there is no damage *rect* pushed into drawing code:
+
+- **#1 (`clip()` has no stack), #2 (`cls` ignores clip), #3 (the viewport is not a
+  damage clip)** — all moot. Nothing installs a damage clip. A layer draws its
+  whole surface into its own buffer exactly as it does today, `cls` and all.
+- **#7 (no damage producer; ~179 `_dirty` sites)** — the producer already exists.
+  At surface granularity the question is only "did this content change", which is
+  precisely what `_dirty` already answers. No rects to derive, no sites to audit.
+- **#8 (two damage lists, not one)** — this IS that split, and it names them:
+  RENDER damage is a per-surface boolean; COMPOSITE damage is the WM's existing
+  rect union and streak machinery. They stay separate.
+
+Still live and must be designed for:
+
+- **#4 (union over `RETAINED_FRAMES`)** — the composite half still needs the `>= 2`
+  streak; the WM already implements it (`_stamp_streak`, `_full_debt`).
+- **#5 (`moy_alloc` has no `free()`)** — retained buffers must be minted with an
+  `owner` and reused per window, never evicted-and-reallocated.
+
+**And the one real risk, which decides the gate:** a surface that animates without
+setting `_dirty` would freeze. Candidates to check before switching anything on —
+the code editor's caret blink, the music playhead, a running cart window (already
+special-cased via `_PlayerWindowLayer`), and any status text on a timer. The
+conservative first gate is therefore NOT "content not dirty" but "the frame is
+being painted for a reason that provably is not this window" — cursor movement,
+clock tick, another window's dirty flag — which is a strictly smaller set than
+`not ws._dirty` and cannot freeze a self-animating surface that also dirties.
+
+**First slice, with a measurement gate:** skip the focused window's content draw
+when the painted frame was triggered by the cursor or the clock alone; stamp from
+`win.buf`. Verify with `tools/p4_clicks.py` (the transitions must not regress) and
+`tools/p4_surface_sweep.py` (the drag medians), and check the caret still blinks in
+the Code tab on glass. If that holds, widen the trigger set one source at a time.
+
+**On maintainability**, since that is the other reason to do it: this direction is
+neutral-to-positive for Layer code and positive for the shell. Layers keep drawing
+imperatively — they are not asked to declare rects, which is the version that
+would have made them harder. The shell's ad-hoc mechanisms that this can absorb
+are the chrome freeze and the drag content-freeze (both special cases of "this
+surface did not change"); the bar strip cache, the cover caches and scroll-as-blit
+are different problems and stay. So "six mechanisms become one" (§2.1) is an
+overclaim — call it two of six, plus a general rule where there were special cases.
+
+---
+
+**The original §5, for the record:**
+
 **Not a widget toolkit.** A widget tree would mean rewriting every Layer's draw and
 would fight the indexed-canvas cart API. Three primitives instead, and Layers keep
 drawing imperatively:
