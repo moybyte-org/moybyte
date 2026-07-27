@@ -291,17 +291,27 @@ class _BackdropLayer(Layer):
         # one-signature-beats-hunting-mutation-sites rule as the stamp voider.
         # (Owner report 2026-07-27: "close it and it remains as an artifact on
         # the desktop" -- the close frame skipped the restore outright.)
-        wsig = wm._shape_sig()
+        # A DISCRETE shape change (open/close/minimize/maximize, or a gesture
+        # settling on release) uncovers desk the departed footprint was
+        # covering: invalidate the cache so that frame renders the desk LIVE
+        # (erasing the ghost regardless of cache content -- on the P4 the boot
+        # capture was found holding the SPLASH, #165) and re-captures fresh.
+        # NEVER for gesture-driven changes: geometry is in the sig, so
+        # invalidating during a drag/resize would re-render + re-capture the
+        # whole desk EVERY frame (owner: "drags are slow, settings flickers" --
+        # the first cut did exactly that), and doing it on RELEASE would
+        # re-add the 120ms release frame #155 killed (the trail machinery
+        # already restores a gesture's footprint). So the holder TRACKS the
+        # sig silently while a gesture is live -- release finds it equal --
+        # and only a discrete change (open/close/min/max) invalidates. Focus
+        # is deliberately NOT in this sig: focus moves no desk pixels.
+        s = wm._shape_sig()
+        wsig = (s[0], s[2])               # order + geometry, no focus
         if wsig != wm._desk_win_sig:
             wm._desk_win_sig = wsig
-            wm._desk_streak = 0
-            # Invalidate the CACHE too, not just the skip streak: a restore
-            # from the cache trusts a capture whose validity flag cannot see
-            # content rot (on the P4 the boot capture was found holding the
-            # SPLASH, never re-checked -- see the capture-poisoning issue), and
-            # a live render erases the departed window's pixels regardless.
-            # One full desk render per shape change is a discrete-event cost.
-            wm._backdrop_valid = False
+            if wm._drag is None and wm._resize is None:
+                wm._desk_streak = 0
+                wm._backdrop_valid = False
         if (stale or wm._backdrop_disabled or wm._backdrop_unsupported
                 or self.ws._animating(dt)):   # a toast/confetti moves desk pixels
             wm._desk_sig = sig
