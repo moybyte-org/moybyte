@@ -23,19 +23,23 @@ Each scenario resets the board so it cannot inherit another's warm caches, then
 runs its `pre` verbs, arms the recorder, and runs the `click` verb.
 
 MEASURED 2026-07-27, P4 on glass @ 1024x600 (60fps = 16.7ms). Sum ms across
-three states: the cold pipeline, after arming the prefetch from boot, and
-after also raising _COVER_SLICE_MS 8 -> 20 ("-" = not re-run):
+four states: the cold pipeline, after arming the prefetch from boot, after
+raising _COVER_SLICE_MS 8 -> 20, and after the image PREBUILD (phase 2 --
+idle frames also build the first screenful of cover images per grid):
 
-  | click         | cold  | boot prefetch | +20ms slice |
-  |---------------|-------|---------------|-------------|
-  | back_to_desk  | 1108  |  536          |  408 (2 fr) |
-  | open_picker   |  824  |  376          |  312 (2 fr) |
-  | tab_blocks    |  252  |  252          |    -        |
-  | tab_map       |  224  |  220          |  220        |
-  | open_project  |  180  |  180          |    -        |
-  | tab_sprites   |  120  |  120          |    -        |
-  | tab_code      |   96  |   96          |    -        |
-  | open_settings |   72  |   72          |   72        |
+  | click         | cold  | prefetch | +20ms slice | +prebuild    |
+  |---------------|-------|----------|-------------|--------------|
+  | back_to_desk  | 1108  |  536     |  408 (2 fr) |  180 (1 fr)  |
+  | open_picker   |  824  |  376     |  312 (2 fr) |  144 (1 fr)  |
+  | tab_blocks    |  252  |  252     |    -        |  252         |
+  | tab_map       |  224  |  220     |  220        |  236         |
+  | open_project  |  180  |  180     |    -        |  212         |
+  | tab_sprites   |  120  |  120     |    -        |  128         |
+  | tab_code      |   96  |   96     |    -        |   96         |
+  | open_settings |   72  |   72     |   72        |   80         |
+
+  (controls wander +-15ms run to run; the editor-tab clicks are their own
+  content builds, untouched by the cover work.)
 
 THE TWO ~1s CLICKS WERE THE COVER PIPELINE, not the surface they open.
 Attributed with tools/p4_attrib.py's wrap hook over the same driver (cold):
@@ -58,8 +62,16 @@ the loads landing on painted frames. THE FIX (2026-07-27, two halves):
      of spreading over 2-3 full ~190ms repaints. The cold path is unshaped by
      this: the first build of a frame always proceeded regardless of budget,
      and after any ~50ms load the 20ms ceiling still refuses a second.
-The remaining ~200ms/frame IS the desk/picker repaint itself (launcher 67 +
-wallpaper 37 + windows/chrome) -- ui_damage_model territory, not covers.
+  3. Image PREBUILD (phase 2, console._cover_prebuild_tick): the wrap-hook
+     attribution of the remaining 2x~200ms found ~10ms PER CARD still paid on
+     the transition -- the first build at each grid's card size (native
+     decode+crop at ~150x150) plus the device spr's first-blit RGB bake. Idle
+     frames now also build the first screenful of cover images per grid
+     (cover_specs, the same geometry the draw and the web /assets prebuild
+     use; capped per grid so the LRU pixel cap can't evict the head cards).
+The remaining ~150-180ms single frame IS the Library/picker repaint itself
+(shelf panel ~27 + wallpaper stamp ~38 + pseudo card ~23 + bar ~10 + cards)
+-- ui_damage_model territory, not covers.
 
 TRIED AND REVERTED (pre-fix): giving _cover_prefetch_tick a 150ms time budget
 on idle frames. Measured ZERO change (1108 -> 1132, noise), because with the

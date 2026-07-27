@@ -245,6 +245,27 @@ def test_rescan_rearms_the_prefetch(tmp_path):
     assert ws._cover_runs_get(want) is not None   # idle re-warms with no draw
 
 
+def test_prefetch_prebuilds_visible_cover_images(tmp_path):
+    """Phase 2 (2026-07-27): once every cart's runs are warm, idle ticks also
+    BUILD the cover images the shelf/picker grids' next full draw requests
+    (cover_specs' first screenful) -- on glass the first draw at a new card
+    size cost ~10ms per card, charged to the transition's painted frames. The
+    idle builds must not leak a dirty re-arm (_covers_deferred)."""
+    from runtime import host_app
+    root, carts = _mk_carts_with_covers(tmp_path, 4, with_cover=3)
+    ws = host_app.build_workstation(root)
+    for _ in range(400):
+        ws._cover_prefetch_tick()
+    assert ws._cover_seen is False          # runs AND prebuild fully exhausted
+    assert ws._covers_deferred is False     # no repaint re-arm from idle work
+    specs = ws.launcher.cover_specs()[:ws._COVER_PREBUILD_PER_GRID]
+    want = [(c.get("path"), w, h) for c, w, h in specs
+            if c.get("path") not in ws._cover_none]
+    assert want, "no cover-bearing specs in the fixture"
+    for key in want:
+        assert key in ws._cover_cache, key
+
+
 def test_prefetch_makes_a_later_build_touch_no_storage(tmp_path):
     """The point of warming runs: the build that follows must not read flash."""
     from runtime import host_app

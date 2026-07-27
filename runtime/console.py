@@ -1977,10 +1977,59 @@ class Workstation:
             self._cover_pf_i = i
             self._cover_runs_load(path)
             return
-        # Every cart is known: stop until something asks for covers again (a
-        # re-scan clears the caches and _cover_for re-arms the flag).
         self._cover_pf_i = i
+        # Every cart's RUNS are known. Phase 2 (2026-07-27): pre-BUILD the cover
+        # IMAGES the shelf/picker grids' next full draw will request, so the
+        # first click pays a cache hit instead of a build. Attributed on glass:
+        # with runs warm, the first draw at a new card size still cost ~10ms
+        # per card (native decode+crop at card size) x 12 cards = ~120ms of the
+        # remaining 2x~200ms transition -- charged to the exact frames a kid is
+        # watching. Same doctrine as phase 1: pay it where nobody waits.
+        if self._cover_prebuild_tick():
+            return
+        # Nothing left to warm: stop until something asks for covers again (a
+        # re-scan clears the caches and _cover_for re-arms the flag).
         self._cover_seen = False
+
+    # The prebuild covers the first screenful per grid -- what a fresh session's
+    # click reveals. Scroll-ins beyond it build lazily as before (~10ms once per
+    # card, amortized over drag frames). Deliberately NOT every item: the cover
+    # cache is pixel-capped (_COVER_CACHE_MAX_PIXELS) and LRU -- prebuilding two
+    # full 29-cart grids would evict the head cards (the ones the click shows)
+    # to make room for the tail.
+    _COVER_PREBUILD_PER_GRID = 12
+
+    def _cover_prebuild_tick(self):
+        """Build ONE pending cover image from the grids' cover_specs (the exact
+        (cart, w, h) set their next full draw requests -- the same geometry
+        helper the web /assets prebuild uses). Returns True while there is (or
+        may be) work left, False when the visible set is fully built.
+
+        Runs on idle frames only (the caller), so it must not re-arm the paint
+        machinery: _cover_for sets _covers_deferred when a build defers, which
+        would turn the NEXT painted frame into two -- save/restore it."""
+        grids = (self.launcher, self.picker)
+        cap = self._COVER_PREBUILD_PER_GRID
+        for grid in grids:
+            specs = getattr(grid, "cover_specs", None)
+            if specs is None:
+                continue
+            n = 0
+            for cart, w, h in specs():
+                if n >= cap:
+                    break
+                n += 1
+                path = cart.get("path")
+                if (not path or path in self._cover_none
+                        or (path, w, h) in self._cover_cache):
+                    continue
+                deferred = self._covers_deferred
+                try:
+                    self._cover_for(cart, w, h)
+                finally:
+                    self._covers_deferred = deferred
+                return True
+        return False
 
     def _cover_runs_get(self, path):
         """The parsed (sw, sh, packed) runs for this cart's cover, or None."""
