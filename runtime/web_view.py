@@ -410,6 +410,16 @@ class DrawRecorder:
     def rect(self, x, y, w, h, c):
         self._cmds.append(["rect", int(x), int(y), int(w), int(h), c & 63])
 
+    def fill_rects(self, arr, n=-1, ox=0, oy=0, c=-1):
+        # #163: the span-batch verb DECLINES the fast path on recording
+        # surfaces -- each quad records as a plain rect op (same shadow rule
+        # as spr_gate: a __getattr__ forward would bypass the recorder).
+        if n is None or n < 0:
+            n = len(arr) // 5
+        for i in range(0, n * 5, 5):
+            self.rect(arr[i] + ox, arr[i + 1] + oy, arr[i + 2], arr[i + 3],
+                      c if c >= 0 else arr[i + 4])
+
     def rectb(self, x, y, w, h, c):
         self._cmds.append(["rectb", int(x), int(y), int(w), int(h), c & 63])
 
@@ -604,6 +614,16 @@ class _LayerRecorder:
     def rect(self, x, y, w, h, c):
         self._cmds.append(["rect", int(x), int(y), int(w), int(h), c & 63])
 
+    def fill_rects(self, arr, n=-1, ox=0, oy=0, c=-1):
+        # #163: the span-batch verb DECLINES the fast path on recording
+        # surfaces -- each quad records as a plain rect op (same shadow rule
+        # as spr_gate: a __getattr__ forward would bypass the recorder).
+        if n is None or n < 0:
+            n = len(arr) // 5
+        for i in range(0, n * 5, 5):
+            self.rect(arr[i] + ox, arr[i + 1] + oy, arr[i + 2], arr[i + 3],
+                      c if c >= 0 else arr[i + 4])
+
     def rectb(self, x, y, w, h, c):
         self._cmds.append(["rectb", int(x), int(y), int(w), int(h), c & 63])
 
@@ -664,7 +684,9 @@ class RecordingLayer:
     pre-rendered once, so no shipped cart batches into one)."""
 
     _VERBS = ("cls", "pix", "line", "rect", "rectb", "circ", "circb",
-              "spr", "print", "camera", "clip", "pal", "palt", "reset_state")
+              "spr", "print", "camera", "clip", "pal", "palt", "reset_state",
+              "fill_rects")   # #163: must record, or __getattr__ silently
+                              # forwards it to the raster side only
 
     def __init__(self, canvas, recorder):
         self._c = canvas               # the real backing canvas (DeviceCanvas or host Canvas)
@@ -905,6 +927,15 @@ class TeeCanvas:
         if self._r.enabled:
             self._r.rect(x, y, w, h, c)
 
+    def fill_rects(self, arr, n=-1, ox=0, oy=0, c=-1):
+        # #163: explicit shadow -- __getattr__ would forward straight to the
+        # real canvas's native lane and the recorder would never see the quads.
+        if n is None or n < 0:
+            n = len(arr) // 5
+        for i in range(0, n * 5, 5):
+            self.rect(arr[i] + ox, arr[i + 1] + oy, arr[i + 2], arr[i + 3],
+                      c if c >= 0 else arr[i + 4])
+
     def rectb(self, x, y, w, h, c):
         if not self._r.record_only:
             self._c.rectb(x, y, w, h, c)
@@ -1088,6 +1119,14 @@ class CommandCanvas:
 
     def rect(self, x, y, w, h, c):
         self._rec.rect(x, y, w, h, c)
+
+    def fill_rects(self, arr, n=-1, ox=0, oy=0, c=-1):
+        # #163: record each quad as a plain rect op (see TeeCanvas note).
+        if n is None or n < 0:
+            n = len(arr) // 5
+        for i in range(0, n * 5, 5):
+            self.rect(arr[i] + ox, arr[i + 1] + oy, arr[i + 2], arr[i + 3],
+                      c if c >= 0 else arr[i + 4])
 
     def rectb(self, x, y, w, h, c):
         self._rec.rectb(x, y, w, h, c)

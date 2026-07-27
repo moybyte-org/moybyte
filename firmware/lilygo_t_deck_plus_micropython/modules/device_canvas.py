@@ -856,6 +856,23 @@ class DeviceCanvas:
         self._fill(x, y, 1, h, col)
         self._fill(x + w - 1, y, 1, h, col)
 
+    def fill_rects(self, arr, n=-1, ox=0, oy=0, c=-1):
+        # #163 span-batch: n packed int16 quads (x, y, w, h, ci) in ONE call.
+        # Native lane: the shared DrawCtx loops gate_fill in C (camera/clip/pal
+        # identical to the rect gate, sprite-batch flushed once at entry).
+        # Fallback mirrors the host loop through self.rect. Host twin:
+        # runtime/canvas.py Canvas.fill_rects.
+        ctx = self._gate_ctx
+        if ctx is not None:
+            ctx.fill_rects(arr, -1 if n is None else n, ox, oy, c)
+            return
+        if n < 0 or n is None:
+            n = len(arr) // 5
+        rect = self.rect
+        for i in range(0, n * 5, 5):
+            rect(arr[i] + ox, arr[i + 1] + oy, arr[i + 2], arr[i + 3],
+                 c if c >= 0 else arr[i + 4])
+
     def circ(self, cx, cy, r, c):
         # TIC-80 circ = FILLED circle. Native (#43): one moy_gfx.circ call rasterizes
         # the scanline spans in C (was 2r+1 MP->C _fill calls); else the Python path.

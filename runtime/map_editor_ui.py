@@ -23,6 +23,8 @@ instead of `self.X`), and so did the tests that poke the map editor's
 internals directly.
 """
 
+from array import array
+
 try:
     import ui as _ui              # frozen on device
 except ImportError:  # pragma: no cover - host fallback
@@ -892,25 +894,71 @@ class MapEditorUI:
         cache = {}
         scale = max(1, cell // sheet.TILE)
         off = (cell - sheet.TILE * scale) // 2
-        for ry in range(rows):
+        # #163 span-batch: the per-cell rect+rectb pair (2 gated calls x every
+        # visible cell, the tab's dominant dispatch cost) becomes THREE merged
+        # quad groups in two fill_rects calls, pixel-identical by construction:
+        #   1. backgrounds -- cells are disjoint, so the in-bounds block is ONE
+        #      dark_blue quad and the out-of-bounds remainder two black strips;
+        #   2. (sprites, unchanged -- they ride the existing spr batch);
+        #   3. the grid lattice -- each cell's rectb edges merged into full-length
+        #      1px lines (interior edges stay DOUBLED at k*cell and k*cell-1,
+        #      exactly the pixels the per-cell outlines painted; overlaps at
+        #      corners are same-color idempotent).
+        # Lattice draws after sprites, like the per-cell order did.
+        nx = min(cols, tm.w - me.cam_x)
+        ny = min(rows, tm.h - me.cam_y)
+        if nx < 0:
+            nx = 0
+        if ny < 0:
+            ny = 0
+        # The packed geometry is a pure function of this key, so it is memoised:
+        # a paint gesture re-hits it every frame (camera fixed), a pan/zoom/
+        # relayout re-keys and rebuilds (~4k int stores, ≈ the old per-cell
+        # dispatch it replaces). The LATTICE array is ordered band-by-band (per
+        # cell-row: 2 wide lines + the 2·cols short verticals of that band) --
+        # full-height vertical lines drawn last measured +16ms on glass: 1px
+        # column-major writes fetch one cache line per row, ~3.4MB of traffic,
+        # where a band's writes stay inside an L2-resident ~122KB window.
+        memo = getattr(self, "_grid_memo", None)
+        key = (x0, y0, cols, rows, cell, nx, ny)
+        if memo is None or memo[0] != key:
+            blue = NAMES["dark_blue"]
+            black = NAMES["black"]
+            grey = NAMES["dark_grey"]
+            bg = []
+            if nx and ny:
+                bg += [x0, y0, nx * cell, ny * cell, blue]
+            if nx < cols:
+                bg += [x0 + nx * cell, y0,
+                       (cols - nx) * cell, rows * cell, black]
+            if ny < rows and nx:
+                bg += [x0, y0 + ny * cell,
+                       nx * cell, (rows - ny) * cell, black]
+            lat = []
+            gw = cols * cell
+            for k in range(rows):
+                yb = y0 + k * cell
+                lat += [x0, yb, gw, 1, grey]
+                lat += [x0, yb + cell - 1, gw, 1, grey]
+                for j in range(cols):
+                    lat += [x0 + j * cell, yb, 1, cell, grey]
+                    lat += [x0 + (j + 1) * cell - 1, yb, 1, cell, grey]
+            memo = (key, array("h", bg), array("h", lat))
+            self._grid_memo = memo
+        cv.fill_rects(memo[1])
+        for ry in range(ny):
             cy = me.cam_y + ry
-            for rx in range(cols):
-                cx = me.cam_x + rx
-                x = x0 + rx * cell
-                y = y0 + ry * cell
-                inb = (cx < tm.w and cy < tm.h)
-                cv.rect(x, y, cell, cell,
-                        NAMES["dark_blue"] if inb else NAMES["black"])
-                if inb:
-                    tid = tm.mget(cx, cy)
-                    if tid >= 0:
-                        img = cache.get(tid)
-                        if img is None:
-                            img = sheet.tile_image(tid, -1)
-                            cache[tid] = img if img is not None else False
-                        if img:
-                            cv.spr(img, x + off, y + off, scale)
-                cv.rectb(x, y, cell, cell, NAMES["dark_grey"])
+            y = y0 + ry * cell
+            for rx in range(nx):
+                tid = tm.mget(me.cam_x + rx, cy)
+                if tid >= 0:
+                    img = cache.get(tid)
+                    if img is None:
+                        img = sheet.tile_image(tid, -1)
+                        cache[tid] = img if img is not None else False
+                    if img:
+                        cv.spr(img, x0 + rx * cell + off, y + off, scale)
+        cv.fill_rects(memo[2])
         # RECT preview (#91): while a box is being dragged, outline the covered cells
         # (clamped to the visible window) so the fill region is visible before release.
         if self.map_tool == "rect" and self._map_rect is not None \

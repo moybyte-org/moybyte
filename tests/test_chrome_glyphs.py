@@ -21,7 +21,9 @@ from runtime import chrome                        # noqa: E402
 
 
 class RecCanvas:
-    """Records rect() calls; font_scale drives the glyph scale."""
+    """Records rect() calls; font_scale drives the glyph scale. Implements
+    fill_rects (#163) by expanding quads to rect tuples, so the oracle compares
+    the packed-quad path _blit_glyph now takes against the bit walk."""
 
     def __init__(self, font_scale=1):
         self.font_scale = font_scale
@@ -29,6 +31,13 @@ class RecCanvas:
 
     def rect(self, x, y, w, h, c):
         self.rects.append((x, y, w, h, c))
+
+    def fill_rects(self, arr, n=-1, ox=0, oy=0, c=-1):
+        if n is None or n < 0:
+            n = len(arr) // 5
+        for i in range(0, n * 5, 5):
+            self.rect(arr[i] + ox, arr[i + 1] + oy, arr[i + 2], arr[i + 3],
+                      c if c >= 0 else arr[i + 4])
 
 
 def _reference(cv, kind, rect, c, scale=None):

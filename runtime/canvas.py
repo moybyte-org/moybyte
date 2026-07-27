@@ -417,6 +417,19 @@ class Canvas:
             base = yy * width + x0
             buf[base:base + (x1 - x0)] = row
 
+    def fill_rects(self, arr, n=-1, ox=0, oy=0, c=-1):
+        # #163 span-batch: draw n packed quads (x, y, w, h, ci -- int16, 5 slots
+        # each) in one call. ox/oy shift every quad (relative span lists, e.g.
+        # chrome glyph runs); c >= 0 overrides every quad's ci. The device twin
+        # runs this loop in C (moy_gfx DrawCtx.fill_rects); routing through
+        # self.rect keeps camera/clip/pal semantics identical on both.
+        if n < 0:
+            n = len(arr) // 5
+        rect = self.rect
+        for i in range(0, n * 5, 5):
+            rect(arr[i] + ox, arr[i + 1] + oy, arr[i + 2], arr[i + 3],
+                 c if c >= 0 else arr[i + 4])
+
     def rectb(self, x, y, w, h, c):
         # TIC-80 rectb = rectangle border/outline (the old rect).
         self.flush_batch()             # #63: a non-spr primitive breaks the batch

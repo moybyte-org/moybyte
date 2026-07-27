@@ -20,6 +20,7 @@ bare-or-package fallback as those modules.
 """
 
 import time
+from array import array
 
 try:
     from editors import CodeEditor, IconSheet
@@ -689,6 +690,30 @@ def _glyph_runs(kind, fs):
     return runs
 
 
+_GLYPH_PACKS = {}
+
+
+def _glyph_pack(kind, fs):
+    """The (kind, fs) span list as a packed int16 quad array for `fill_rects`
+    (#163): (dx, dy, w, fs, 0) per run, drawn in ONE native call with the color
+    passed as the call-level override -- so one pack serves every theme ink.
+    Cached forever like _GLYPH_RUNS (a few KB across all kinds x scales)."""
+    key = (kind, fs)
+    pack = _GLYPH_PACKS.get(key)
+    if pack is None:
+        runs = _glyph_runs(kind, fs)
+        lst = []
+        for i in range(0, len(runs), 3):
+            lst.append(runs[i])
+            lst.append(runs[i + 1])
+            lst.append(runs[i + 2])
+            lst.append(fs)
+            lst.append(0)
+        pack = array("h", lst)
+        _GLYPH_PACKS[key] = pack
+    return pack
+
+
 def _blit_glyph(cv, kind, rect, c, scale=None):
     """Draw an icon glyph (no background) centered in `rect`, in color `c`, onto
     canvas `cv`. The shared pre-literate icon vocabulary -- a 12x12 1-bit pixel
@@ -715,6 +740,10 @@ def _blit_glyph(cv, kind, rect, c, scale=None):
     span = n * fs
     ox = x + (w - span) // 2                          # center the (scaled) mask in the rect
     oy = y + (h - span) // 2
+    fr = getattr(cv, "fill_rects", None)              # probe: minimal canvases
+    if fr is not None:                                # (#163) one native call
+        fr(_glyph_pack(kind, fs), -1, ox, oy, c)
+        return
     i = 0
     while i < len(runs):
         cv.rect(ox + runs[i], oy + runs[i + 1], runs[i + 2], fs, c)

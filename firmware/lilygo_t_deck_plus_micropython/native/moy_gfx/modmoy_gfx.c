@@ -1082,8 +1082,64 @@ static mp_obj_t moy_gfx_draw_ctx_set_buf(mp_obj_t self_in, mp_obj_t buf_obj) {
 static MP_DEFINE_CONST_FUN_OBJ_2(moy_gfx_draw_ctx_set_buf_obj,
                                  moy_gfx_draw_ctx_set_buf);
 
+static inline void gate_fill(moy_gfx_draw_ctx_obj_t *c, mp_int_t x, mp_int_t y,
+                             mp_int_t w, mp_int_t h, uint16_t col);
+
+// fill_rects(arr, n, ox, oy, c): the #163 span-batch verb -- draw n packed
+// quads (x, y, w, h, ci as int16, 5 slots each) through the same gate_fill the
+// rect gate uses (camera/clip/pal identical), in ONE MP->C call. ox/oy shift
+// every quad (relative span lists -- chrome glyphs); c >= 0 overrides every
+// quad's ci (one-color packs cached across theme changes). n < 0 means "the
+// whole array". Counted as n fills in ST_N_FILL so DRAW2 gate liveness and the
+// per-frame fill attribution stay honest.
+static mp_obj_t moy_gfx_draw_ctx_fill_rects(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_gfx_draw_ctx_obj_t *c = MP_OBJ_TO_PTR(a[0]);
+    if (c->px == NULL) {
+        mp_raise_msg(&mp_type_RuntimeError,
+                     MP_ERROR_TEXT("fill_rects: no destination buffer"));
+    }
+    mp_buffer_info_t bi;
+    mp_get_buffer_raise(a[1], &bi, MP_BUFFER_READ);
+    const int16_t *q = (const int16_t *)bi.buf;
+    mp_int_t nmax = (mp_int_t)(bi.len / (2 * 5));
+    mp_int_t n = mp_obj_get_int(a[2]);
+    if (n < 0 || n > nmax) n = nmax;
+    mp_int_t ox = mp_obj_get_int(a[3]);
+    mp_int_t oy = mp_obj_get_int(a[4]);
+    mp_int_t cov = mp_obj_get_int(a[5]);
+    // #63 order rule: a pending sprite run must land before any other primitive.
+    if (c->batch != NULL && c->batch[0] > 4) {
+        mp_obj_t dest[2];
+        mp_load_method(c->canvas, MP_QSTR_flush_batch, dest);
+        mp_call_method_n_kw(0, 0, dest);
+    }
+    int32_t *st = c->st;
+    uint32_t t0 = st[ST_PROF] ? (uint32_t)mp_hal_ticks_us() : 0;
+    uint16_t col = 0;
+    bool have_col = false;
+    if (cov >= 0) {
+        col = c->pal[(size_t)(cov & 63) % c->npal];
+        have_col = true;
+    }
+    for (mp_int_t i = 0; i < n; i++) {
+        const int16_t *p = q + i * 5;
+        uint16_t cc = have_col
+            ? col : c->pal[(size_t)(p[4] & 63) % c->npal];
+        gate_fill(c, (mp_int_t)p[0] + ox, (mp_int_t)p[1] + oy,
+                  (mp_int_t)p[2], (mp_int_t)p[3], cc);
+    }
+    st[ST_N_FILL] += n;
+    if (st[ST_PROF]) st[ST_T_FILL] += (int32_t)(mp_hal_ticks_us() - t0);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_draw_ctx_fill_rects_obj,
+                                           6, 6, moy_gfx_draw_ctx_fill_rects);
+
 static const mp_rom_map_elem_t moy_gfx_draw_ctx_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_set_buf), MP_ROM_PTR(&moy_gfx_draw_ctx_set_buf_obj) },
+    { MP_ROM_QSTR(MP_QSTR_fill_rects),
+      MP_ROM_PTR(&moy_gfx_draw_ctx_fill_rects_obj) },
 };
 static MP_DEFINE_CONST_DICT(moy_gfx_draw_ctx_locals,
                             moy_gfx_draw_ctx_locals_table);
