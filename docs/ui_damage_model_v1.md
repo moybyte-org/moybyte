@@ -181,10 +181,47 @@ reproducible** — a second run reported 43µs for the same unchanged `flush_bat
 that first measured 11.5µs, while the 62-frame `p4_attrib` numbers repeat to
 ±1ms. Act on in-situ frame measurements, not on a REPL loop.
 
+**Correction (2026-07-27, same day): lever 1 below was tried on the map grid and
+is WRONG.** Three arrangements of the same pixels, measured on glass:
+
+| map grid arrangement | wall | kernel | native fills |
+|---|---|---|---|
+| per-cell `rect` + `spr` + `rectb` (shipping) | **70.7ms** | 31.7 | 960 |
+| 2 field fills + tiles + per-cell `rectb` | 81.3ms | 48.1 | 572 |
+| 2 field fills + tiles + full-length rules | 96.4ms | 65.6 | 264 |
+
+Restructuring cut the call count by 73% and the dispatch by 8ms, and made the tab
+**26ms slower**, because the kernel time DOUBLED. Two memory effects the fill
+benchmark above did not model:
+
+- **Temporal reuse.** In the per-cell loop a cell's `rectb` writes lines its own
+  `rect` wrote microseconds earlier — warm. Fill the whole field first and the
+  border pass re-touches every line cold. That alone is +16ms.
+- **Vertical rules are pathological.** A 1px × full-height rule is ~500
+  consecutive partial-cache-line read-modify-writes at a 2048-byte stride. Two
+  per column is worse than the same pixels drawn cell-locally.
+
+So the "22.4ms of strips vs 14.3ms of rows" table measures a *single pass in
+isolation*; it does not license reordering passes. **The map grid is already in
+the best shape this memory system will give**, and the byte floor is not the only
+memory effect — locality between a write and its reuse is another. Reverted.
+
+Verification note, since it cost more than the change: the pixel-equivalence
+harness must run the oracle **inside the frame**, right after the real renderer,
+and assert it changes zero bytes of the canvas. Two earlier versions drew the
+oracle onto a twin canvas (or onto the real one after the frame) and compared
+regions — both failed against the UNMODIFIED renderer, because the viewport
+origin/clip/pal the renderer runs under do not survive the frame. A harness that
+fails on known-good code cannot certify anything; check that first, always.
+
 **What this leaves as the levers**, in order:
 
-1. **Fewer, wider spans** — the native grid kernel, for the contiguity as much as
-   the call count (est. 22 → 14ms on the map grid).
+1. ~~**Fewer, wider spans** — the native grid kernel, for the contiguity as much
+   as the call count (est. 22 → 14ms on the map grid).~~ **Disproved above.** A
+   native kernel could still win by writing row-contiguously *without* losing the
+   reuse (compose each output row once, cells and lattice together), but that is
+   a much narrower claim than "fewer, wider spans", and the measured baseline it
+   has to beat is 70.7ms, not 96.
 2. **Retained widget surfaces** — Paint's tool row, the palette, the bar strip are
    static across frames; caching *pixels* removes the dispatch and the bytes. The
    bar strip cache already proves the mechanism.
