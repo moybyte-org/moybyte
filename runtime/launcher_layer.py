@@ -779,6 +779,27 @@ class LauncherHomeLayer:
         self._full_streak = 0
         self._statics = None
         self._search_kprev = 0        # keyboard edge detect while typing a search query
+        # Retained WHOLE-frame cache (2026-07-27, the damage-model doctrine at
+        # shelf granularity): the last full home frame, captured at the END of
+        # a live paint (right after our own last pixel -- overlays/cursor draw
+        # AFTER this layer, so the copy is exactly our output) and stamped back
+        # on re-entry when NOTHING the frame reads has changed (_retained_key)
+        # -- a repeat home visit becomes one full-screen blit instead of the
+        # ~150ms wallpaper + panel + cards + bar rebuild. NOT captured on idle
+        # frames, though that would be free: the P4 root ping-pongs (DPI
+        # num_fbs=2), so after present the canvas's CURRENT buffer holds the
+        # frame BEFORE last -- an idle capture can cache the previous screen's
+        # pixels under this frame's key.
+        self._lib_cache = None        # cv.new_layer sized to the canvas
+        self._lib_key = None          # _retained_key at capture
+        self._lib_unsupported = False # web RecordingLayer: no pixels to copy
+        # Paint-continuity guard for the ping-pong trust (#113's stale-by-2
+        # rule): if OTHER surfaces painted since our last draw, the retained
+        # buffers hold foreign pixels and the partial/streak machinery must
+        # re-arm from zero. Without this, a re-entry inherited streak=2 from
+        # the previous visit and the first drag partially repainted over the
+        # PREVIOUS screen's chrome in the second buffer.
+        self._last_pf = None
 
     def _statics_key(self, cv):
         """Everything the home frame's STATIC chrome (wallpaper backdrop +
@@ -790,6 +811,120 @@ class LauncherHomeLayer:
                 ws.launcher.layout.lib_grid,
                 ws.wallpaper_id, len(ws.launcher.items),
                 getattr(ws, "search_query", ""), getattr(ws, "search_typing", False))
+
+    def _retained_key(self, cv):
+        """Everything the WHOLE home frame's pixels are a pure function of: the
+        chrome statics plus the grid's dynamics (selection, scroll offset, the
+        cover-cache generation, trackball hover, per-item titles, favorites)
+        and the bar's own pixel key (_cart_bar_key -- clock minute, wifi state,
+        icon theme; reusing it means the bar's cache discipline IS this cache's
+        discipline). Anything that draws a pixel of the home frame and is NOT
+        derivable from this tuple is a staleness bug -- the silent-cache family
+        ui_damage_model §2.1 documents -- so additions to the home draw must
+        extend this key."""
+        ws = self.ws
+        return (self._statics_key(cv), ws.launcher.sel, ws.launcher.scroll,
+                ws._cover_gen, self._lhover,
+                tuple(it.get("title") for it in ws.launcher.items),
+                tuple(ws.system.get("favorites", ())),
+                ws.bar_layer._cart_bar_key("home"))
+
+    def _try_stamp_retained(self, cv, dt):
+        """Present the retained home frame when nothing it depends on changed:
+        one full-screen blit (~26ms on P4 glass) instead of the full rebuild.
+        Only for settled frames -- a drag/fling wants the partial path, and an
+        animating overlay/wallpaper means the pixels are NOT a pure function
+        of the key. Returns True when the frame was presented."""
+        ws = self.ws
+        cache = self._lib_cache
+        if (cache is None or self._lib_unsupported
+                or ws.launcher.dragging or ws.launcher.flinging
+                or ws._animating(dt)):
+            return False
+        # A RECORDING canvas (web console root / the device web-view tee, which
+        # can swap in at runtime) can't replay a framebuffer capture -- its
+        # stream would blit a layer no command ever defined. Two probes: the
+        # recording marker (begin_surface, same probe frame() uses) and the
+        # retention contract (web_view.TeeCanvas declares RETAINED_FRAMES = 0
+        # for exactly this reason; a canvas that retains nothing can't be
+        # captured from either).
+        if (getattr(cv, "begin_surface", None) is not None
+                or getattr(cv, "RETAINED_FRAMES", 0) < 1):
+            return False
+        if cache.w != cv.w or cache.h != cv.h:
+            return False
+        if self._retained_key(cv) != self._lib_key:
+            return False
+        cv.blit_strip(cache, 0, 0)
+        return True
+
+    def prealloc_retained(self):
+        """Mint the retained-frame layer on an IDLE frame (called from frame()'s
+        idle branch): the device new_layer pre-collects, which measured as a
+        371ms first home visit when the allocation rode the capture's paint
+        frame (~150ms collect + ~35ms copy on top of the ~180ms live paint).
+        Allocation reads no pixels, so the ping-pong trap in __init__'s note
+        does not apply -- only the CAPTURE must stay on the paint path."""
+        ws = self.ws
+        if self._lib_unsupported:
+            return
+        cv = ws.sys_canvas
+        if (getattr(cv, "begin_surface", None) is not None
+                or getattr(cv, "RETAINED_FRAMES", 0) < 1):
+            return
+        cache = self._lib_cache
+        if cache is not None and cache.w == cv.w and cache.h == cv.h:
+            return
+        try:
+            self._lib_cache = cv.new_layer(cv.w, cv.h)
+            self._lib_key = None          # freshly minted: no captured pixels
+        except Exception:  # noqa: BLE001
+            self._lib_cache = None
+            self._lib_unsupported = True
+
+    def _capture_retained(self, cv, dt):
+        """Capture the frame just painted into the retained cache -- called at
+        the END of a live draw, while cv is still the back buffer being painted
+        (pre-present, so it is provably THIS frame; see __init__'s ping-pong
+        note for why an idle capture cannot be trusted). Overlays and the
+        cursor draw after this layer, so the copy is exactly our output. Costs
+        one full-screen copy (~26ms on P4) charged only when the key CHANGED --
+        once per settled state, not per frame. Skipped mid-drag/fling (the key
+        carries the scroll offset, so every frame would re-capture) and while
+        anything animates (those pixels are not a pure function of the key)."""
+        ws = self.ws
+        if (self._lib_unsupported or ws.launcher.dragging
+                or ws.launcher.flinging or ws._animating(dt)):
+            return
+        if (getattr(cv, "begin_surface", None) is not None
+                or getattr(cv, "RETAINED_FRAMES", 0) < 1):
+            return              # recording/non-retaining canvas: a framebuffer
+                                # copy is not a recordable op (see
+                                # _try_stamp_retained); the raster side would
+                                # diverge from the recorded stream
+        key = self._retained_key(cv)
+        if key == self._lib_key:
+            return
+        try:
+            cache = self._lib_cache
+            if cache is None or cache.w != cv.w or cache.h != cv.h:
+                cache = self._lib_cache = cv.new_layer(cv.w, cv.h)
+            ws.note_cost("home.frame.capture")
+            cache.blit_strip(cv, 0, 0)
+            self._lib_key = key
+        except Exception:  # noqa: BLE001 -- a recording root has no pixels to
+            self._lib_cache = None     # copy; forfeit the mechanism for the
+            self._lib_key = None       # session rather than retry every paint
+            self._lib_unsupported = True
+
+    def _paint_continuity(self):
+        """Re-arm the streak from zero when other surfaces painted since our
+        last draw (see __init__'s note -- the retained ping-pong buffers hold
+        foreign pixels after a visit elsewhere)."""
+        nf = self.ws._frames_drawn
+        if self._last_pf is not None and nf != self._last_pf + 1:
+            self._full_streak = 0
+        self._last_pf = nf
 
     def _try_drag_partial(self, cv, dt):
         """The shelf drag fast path: while a touch drag scrolls the grid and
@@ -875,6 +1010,7 @@ class LauncherHomeLayer:
         cart grid reclaims the freed bottom band (Layout.grid_bottom)."""
         ws = self.ws
         cv = ws.sys_canvas
+        self._paint_continuity()              # foreign paints void the buffers
         # Kinetic fling (#113): advance a coasting shelf BEFORE painting, and
         # keep the redraw gate open until it rests. Fling frames ride the same
         # partial/blit path as finger drags (its gate includes flinging).
@@ -882,6 +1018,23 @@ class LauncherHomeLayer:
         if ws.launcher.flinging:
             ws.request_frame()
         if self._try_drag_partial(cv, dt):    # drag-scroll fast path (#58/#66)
+            return
+        # Retained-frame stamp (2026-07-27): a re-entry whose pixels are provably
+        # identical to the captured frame presents it in one blit. Bookkeeping
+        # matches a full paint exactly -- pixel-wise it IS one -- so the scroll
+        # ring and the drag partial's streak stay honest.
+        if self._try_stamp_retained(cv, dt):
+            ws.launcher._scroll_region().note_painted(
+                ws._frames_drawn,
+                (ws.launcher.sel, self._statics_key(cv), ws._cover_gen),
+                _cursor_stamp(ws))
+            key = self._statics_key(cv)
+            if key == self._statics:
+                if self._full_streak < 2:
+                    self._full_streak += 1
+            else:
+                self._statics = key
+                self._full_streak = 1
             return
         # #76 sub-surface marks: on a RECORDING canvas, partition the home into
         # wallpaper / grid / bar streams so the web delta can skip the static grid +
@@ -928,6 +1081,7 @@ class LauncherHomeLayer:
         else:
             self._statics = key
             self._full_streak = 1
+        self._capture_retained(cv, dt)   # retain this frame for re-entry stamps
 
     def _draw_shelf_panel(self, cv):
         """The framed Library panel: surface fill + border, the Moy + "LIBRARY"
@@ -1240,6 +1394,9 @@ class EditorPickerLayer:
         # drag frame can blit the band instead of repainting every card.
         self._full_streak = 0
         self._statics = None
+        self._last_pf = None          # paint-continuity guard (see the home
+                                      # layer's __init__: foreign paints void
+                                      # the retained ping-pong buffers)
 
     def reset(self):
         """Clear any armed delete-confirm state -- called by ws.open_picker() so a
@@ -1349,6 +1506,12 @@ class EditorPickerLayer:
     def draw(self, dt):
         ws = self.ws
         cv = ws.sys_canvas
+        # Paint-continuity (see LauncherHomeLayer._paint_continuity): foreign
+        # paints since our last draw void the retained ping-pong buffers.
+        nf = ws._frames_drawn
+        if self._last_pf is not None and nf != self._last_pf + 1:
+            self._full_streak = 0
+        self._last_pf = nf
         # Kinetic fling (#113): tick before painting; keep frames coming.
         ws.picker.anim_frame(dt)
         if ws.picker.flinging:

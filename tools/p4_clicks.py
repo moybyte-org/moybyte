@@ -70,8 +70,18 @@ the loads landing on painted frames. THE FIX (2026-07-27, two halves):
      (cover_specs, the same geometry the draw and the web /assets prebuild
      use; capped per grid so the LRU pixel cap can't evict the head cards).
 The remaining ~150-180ms single frame IS the Library/picker repaint itself
-(shelf panel ~27 + wallpaper stamp ~38 + pseudo card ~23 + bar ~10 + cards)
--- ui_damage_model territory, not covers.
+(shelf panel ~27 + wallpaper stamp ~38 + pseudo card ~23 + bar ~10 + cards).
+THE RETAINED HOME FRAME (2026-07-27, launcher_layer) attacks exactly that for
+REVISITS: the last full home paint is captured at the end of the live draw
+(+~29ms once per settled state -- back_to_desk's first visit reads 208ms) and
+a re-entry whose _retained_key is unchanged presents it as ONE stamp:
+
+  | home_revisit  |  52ms, 1 frame  |   (was the full ~180ms live paint)
+
+The capture layer is minted on an IDLE frame (prealloc_retained -- the device
+new_layer pre-collects, which measured as a 371ms first visit when the
+allocation rode the capture's paint frame). First visits and every key change
+(sel/scroll/titles/covers/bar state) still paint live.
 
 TRIED AND REVERTED (pre-fix): giving _cover_prefetch_tick a 150ms time budget
 on idle frames. Measured ZERO change (1108 -> 1132, noise), because with the
@@ -138,6 +148,12 @@ SCENARIOS = {
                        "ws.pick_selected()", "ws.editor_app.set_tab('map')"],
                       "ws.editor_app.set_tab('code')"),
     "back_to_desk":  (["ws.open_settings()"], "ws.go_home()"),
+    # The SECOND home visit (2026-07-27): the first visit paints live and the
+    # retained-frame cache captures it (launcher_layer._capture_retained); the
+    # revisit must present as ONE stamp. This is the common kid loop (play ->
+    # home -> pick next), which the reset-per-scenario harness otherwise
+    # never measures.
+    "home_revisit":  (["ws.go_home()", "ws.open_settings()"], "ws.go_home()"),
 }
 
 rows = []

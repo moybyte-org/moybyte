@@ -4234,6 +4234,10 @@ class Workstation:
             self._quiet_frames += 1
             if self._quiet_frames > 2:
                 self._cover_prefetch_tick()
+                # Mint the home retained-frame buffer off the paint path too
+                # (idempotent after the first call; the device new_layer
+                # pre-collects, ~150ms nobody should wait for).
+                self.launcher_layer.prealloc_retained()
             return
         self._quiet_frames = 0
         # Perf HUD (#43/#44): mark the start of this frame's draw work. Cheap (one
