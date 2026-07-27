@@ -588,6 +588,41 @@ surface did not change"); the bar strip cache, the cover caches and scroll-as-bl
 are different problems and stay. So "six mechanisms become one" (§2.1) is an
 overclaim — call it two of six, plus a general rule where there were special cases.
 
+**First slice SHIPPED (2026-07-27): `wm_windowed._content_static`.** The gate that
+proved implementable is equivalent to the "provably not this window" trigger set,
+decomposed into checkable facts: `not ws._dirty` (readable during the draw —
+`frame()` clears it after) **and** no pointer DOWN or CLICK this frame or last
+**and** the content is not a self-animating window surface (music preview,
+bluetooth panel, update screen — excluded by name) **and** `win.buf` is not stale
+(a fresh build or a gesture's `_direct_render` bypass forces one live refill).
+The down/click guard exists because the audit found the real invariant: the
+drag-driven handlers (paint strokes, map pans, `ScrollRegion`) mutate content
+WITHOUT marking dirty — they predate the #44 gate and rely on pointer-state
+arming — so any button activity must render live; a position/visibility-only
+pointer change is inert (no content surface draws hover feedback, and anything
+that appears without input must already be an `_animating` source or it could
+never paint under the redraw gate). The feared caret blink does not exist:
+both carets (code editor, Writer) are deliberately solid, for exactly this
+reason. Pinned by `tests/test_wm_content_freeze.py` (7 tests incl. a
+frozen-vs-live pixel-equality check; both gate mutations verified caught).
+
+**The measured on-glass verdict is humbler than the table above.** The
+frame-by-frame classes the 57ms row promised are mostly already covered on the
+P4: a game beside a focused editor goes through `draw_stack`'s quiet partial
+stack, which bypasses ALL window draws (A/B measured 32.2 vs 32.4ms/frame — no
+change, correctly), and an open EDITOR freezes a live wallpaper anyway
+(`wm.top_kind()` is `"menu"`, not in `_animating`'s wallpaper list). Where
+animation-armed full paints DO occur — Settings over a live-wallpaper desk —
+the freeze measured **123.1 → 109.2ms/frame** (the settings content draw
+replaced by its stamp; the rest is the wallpaper's own desk repaint).
+`tools/p4_clicks.py` transitions: unchanged within noise (all dirty-armed, as
+designed). The 70ms-class win applies to tap-settle frames on the P4 and to
+every cursor-move frame on the HOST and WEB tiers (visible cursor defeats both
+quiet paths there; on the web a skipped render also means the window's
+`RecordingLayer` re-ships nothing — it blits by reference). Next widening, per
+the plan: waive the down-guard when a WM drag/resize of a DIFFERENT window has
+captured the pointer.
+
 ---
 
 **The original §5, for the record:**

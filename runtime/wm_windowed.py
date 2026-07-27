@@ -169,6 +169,11 @@ class _Win:
         self.ctx = ctx                # _LayoutCtx (apps) | None (player)
         self.minimized = False        # hidden; lives on as a taskbar chip
         self.saved = None             # pre-maximize rect (x, y, w, h) | None
+        self._buf_stale = True        # buf is behind the content's truth (fresh
+                                      # buffer, or a gesture's _direct_render
+                                      # painted past it) -> the next paint must
+                                      # render live before the content freeze
+                                      # (_content_static) may reuse it
 
     def content_rect(self):
         """The inner rect the content occupies (below the WM title strip)."""
@@ -701,6 +706,7 @@ class WindowedWM(FullscreenStackWM):
         self._install(win.ctx)
         try:
             content.draw(0)
+            win._buf_stale = False
         except Exception:  # noqa: BLE001
             pass
         finally:
@@ -729,6 +735,7 @@ class WindowedWM(FullscreenStackWM):
         ch = max(40, win.h - 2 - win.title_h)
         win.buf = full.new_layer(cw, ch)
         win.ctx = self._make_ctx(win.buf)
+        win._buf_stale = True         # blank until a live render/_prewarm fills it
 
     def _resize_window(self, win, w, h):
         """Apply a new OUTER size (resize grip release / maximize): clamp to a
@@ -1330,6 +1337,64 @@ class WindowedWM(FullscreenStackWM):
         finally:
             root.clear_viewport()
             self._install(self._root_ctx)
+        win._buf_stale = True                 # buf skipped: it now lags the truth
+        return True
+
+    def _content_static(self, win):
+        """True when this PAINTED frame provably did not change WIN's content,
+        so the focused window's draw may be skipped and the stamp reuse the
+        retained win.buf (the surface-granularity damage model,
+        docs/ui_damage_model_v1.md §5.0 -- this is its first slice).
+
+        "Provably" is three facts together:
+
+        - Nothing marked the UI dirty. ws._dirty is still readable during the
+          draw -- frame() clears it AFTER -- so a False here means no input or
+          state handler reported a visible change this frame.
+        - No pointer DOWN or CLICK was live this frame or last. The drag-driven
+          handlers (paint strokes, map pans, block drags, kinetic scrolls)
+          mutate content WITHOUT marking dirty -- they predate the #44 gate and
+          rely on the pointer-state change arming the repaint -- so any button
+          activity forces a live render. The click check reads BOTH frames'
+          states because handlers consume p.click in place (a tap that opened a
+          prompt zeroes it before the draw sees it); the previous frame's edge
+          is still visible in ws._last_ptr. A position/visibility-only change
+          -- the moving cursor, its auto-hide -- is inert: no content surface
+          draws hover feedback (audited 2026-07-27; the cursor is an overlay,
+          and anything that appears without input must already be an
+          _animating source or it could never paint under the redraw gate).
+        - The content is not one of the self-animating window surfaces: the
+          _animating sources that draw INSIDE an app window (the music
+          preview's playhead + PLAY/STOP, the bluetooth panel's async
+          scan/pair states, the update screen's progress) repaint on
+          animation-armed frames precisely because nothing marks dirty, so
+          they are excluded by name. Sources OUTSIDE app windows (running
+          cart, live wallpaper, splash, confetti/toast/egg overlays) draw on
+          other layers and need no exclusion.
+
+        win._buf_stale guards the buffer itself: a fresh/rebuilt buffer or a
+        gesture's _direct_render (which paints past the buffer straight into
+        the framebuffer) leaves buf behind the truth, so the next paint
+        renders live to refill it before the freeze may resume."""
+        ws = self.ws
+        if ws._dirty or win.buf is None or win._buf_stale:
+            return False
+        cur = ws._ptr_state()
+        last = ws._last_ptr
+        if cur is not None and (cur[3] or cur[4]):
+            return False
+        if last is not None and (last[3] or last[4]):
+            return False
+        if (cur is None) != (last is None):
+            return False                  # pointer appeared/vanished: be safe
+        k = win.kind
+        if k == "update":
+            return False
+        if k == "settings" and ws.settings_layer.bluetooth_animating():
+            return False
+        if k == "menu" and ws.menu_view == "music" \
+                and ws.music_ui.music_preview is not None:
+            return False
         return True
 
     def _draw_app_window(self, win, focused, dt):
@@ -1373,12 +1438,20 @@ class WindowedWM(FullscreenStackWM):
                     and self._direct_render(win, dt)):
                 self._win_chrome(win, focused, quiet=self._chrome_quiet)
                 return
-            # Live: render the focused app into its buffer at the window's layout.
-            self._install(win.ctx)
-            try:
-                self._content_for(win.kind).draw(dt)
-            finally:
-                self._install(self._root_ctx)
+            # CONTENT FREEZE (docs/ui_damage_model_v1.md §5.0 first slice): on a
+            # painted frame that provably did not change this window's content
+            # (see _content_static), skip the re-render and let the retained-
+            # buffer stamp below present it -- the map tab's draw is ~70ms on P4
+            # glass, the stamp ~14ms, and the stamp runs either way.
+            if not self._content_static(win):
+                # Live: render the focused app into its buffer at the window's
+                # layout.
+                self._install(win.ctx)
+                try:
+                    self._content_for(win.kind).draw(dt)
+                finally:
+                    self._install(self._root_ctx)
+                win._buf_stale = False
         # Stamp-defer (#58 drag; extended to CONTENT gestures 2026-07-26): on a
         # device with an async 1:1 blitter (P4SystemCanvas.blit_strip_async ->
         # PPA DMA) draw the chrome FIRST -- strip/borders/shadow/title are all
