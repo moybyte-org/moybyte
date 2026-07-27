@@ -3,6 +3,9 @@
 **Status: REVIEWED AND DOWNGRADED. Do not build §5 phases 1-3.**
 **Date:** 2026-07-26, revised the same day after an adversarial architecture + perf
 review. Numbers measured on P4 glass (1024×600) unless stated.
+**⚠ 2026-07-27:** every ms figure below predates the #159 L2-cache 128→256KB flag
+(surface medians dropped 4–20ms; the post-flag re-sweep is in #58). The *structural*
+findings (dispatch-bound tabs, the span-batch ranking → #163) are unchanged.
 **Tracks:** #58 (P4 port), #66 (performance ledger), #113 (kinetic scroll), #73 (windowed WM).
 
 ---
