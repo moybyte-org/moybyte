@@ -215,6 +215,53 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
   LAST framebuffer write (the WM registers the drag stamp; `P4Compositor.flush`
   kicks it after the bar/chips/cursor have drawn).
 
+## Power / battery (board schematic + vendor datasheets)
+
+Derived from the [board schematic](https://files.waveshare.com/wiki/ESP32-P4-WIFI6-Touch-LCD-7B/ESP32-P4-WIFI6-Touch-LCD-7B.pdf),
+the [ETA6098](https://www.eta-semi.com/wp-content/uploads/2022/03/ETA6098_V1.1.pdf)
+and ESP32-P4 datasheets, and TRM ch.14 — the wiki's spec page omits every number
+below, so re-check against those, not against it.
+
+- **Measured draw: ~2W (~400mA @5V), full brightness, game running** (2026-07-26,
+  USB power bank). Datasheet Table 5-7 puts the SoC at 150mA @3.3V typ (400MHz,
+  dual-core 32-bit data access, all peripheral clocks enabled) ≈ 110-150mA @5V
+  through the buck — so **the SoC is ~⅓ of the budget and panel+backlight ~⅔**.
+  Frequency scaling is therefore a weak lever (400→200MHz saves ~9% at the battery
+  and costs fps on a dispatch-bound workload); **backlight PWM is the strong one**.
+  Light-sleep is 0.8mA, deep-sleep 12µA (Table 5-8), so idle-blank + sleep buys more
+  calendar life than any extra cell.
+- **Charger: ETA6098** (U20), a *switching* buck charger + L10 2.2µH/3A. Charge
+  current is set by R89 at ISET: **82K → 2A** (what's fitted), 150K → 1.2A, 2.5A
+  part max; 4.2V EOC, 130mA termination, 200mA pre-charge. **No NTC/thermistor
+  pin** — there is no battery temperature sensing anywhere in this circuit, so any
+  pack must bring its own protection board with thermal cutoff.
+- **Battery connector J4 is 2-pin (GND/BAT)**; the wiki calls it MX1.25, rated
+  ~1A per contact — **a mismatch with the fitted 2A charge setting**. Either bypass
+  J4 (solder leads / JST-PH / XT30) or swap R89 to 150K for 1.2A. Meter the polarity
+  before first connection: the wiki says "forward polarity" and many pigtails ship
+  reversed.
+- **Runtime rule of thumb: ~1.6h per 1000mAh** of 1S pack at the measured 2W
+  (~550mA drawn from the cell). 3× 18650 ≈ 19h, charging in ~6h at 2A (0.19C).
+- **The external DCDC is populated but its use is UNVERIFIED.** U5 `MP1605GTF-Z` +
+  L2 1µH/4.2A produce `ESP_VDD_HP` 1.2V, with the chip's `EN_DCDC`/`FB_DCDC` wired
+  to its EN/FB. TRM §14.4.1.1: the chip powers up on the *linear* HP system
+  regulator and "it is recommended to switch to the DCDC power supply for better
+  efficiency and load capacity". Nothing in this port touches it (we only acquire
+  LDO chan 3 for the DSI PHY and poke LDO4 for SD, both above). Worth ~8% of the 2W
+  if the switch is not already happening in IDF startup — measure before/after
+  rather than assuming either way.
+- **Backlight driver: AP3032KTR-G1** (U12) boost, LED+/LED−, EN = `BL_CTRL` =
+  **GPIO32 active-low** (same pin as the board map below) — PWM-dimmable, and per
+  the split above it is the single biggest power lever on the board.
+- **VDD_BAT is the RTC backup domain, NOT a system battery input** (TRM §14.4.1.4:
+  it powers the LP regulators and LP clocks only when VDD_ANA is off). It goes to
+  the **CR1220 holder** (BAT1) — fit a *rechargeable* LIR1220 or leave it empty, as
+  the board charges that cell.
+- **VDDO_FLASH / VDDO_PSRAM / VDDO_3 / VDDO_4 are each rated 50mA max**
+  (datasheet Table 2-12). The SD slot runs off LDO4 → VDDO_4, and SD write bursts
+  routinely exceed 50mA — worth remembering before chasing SD write flakiness in
+  software.
+
 ## Board map (from the factory xiaozhi boot log + Waveshare/xiaozhi sources)
 
 - Panel: **EK79007**, 2-lane MIPI-DSI @ 900Mbps, 1024×600 RGB565, DPI clock
