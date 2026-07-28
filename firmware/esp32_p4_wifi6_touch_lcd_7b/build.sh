@@ -163,7 +163,7 @@ cp "${REPO_ROOT}/runtime/font.py" "${MODULES_DIR}/moy_font.py"
 #     units): the drawing backend + the cart namespace + wifi + the leaf utils +
 #     the moybyte input package (InputState). These are board-agnostic by
 #     construction (their lvgl/S3-only imports are guarded).
-for f in device_util.py device_canvas.py device_api.py device_wifi.py; do
+for f in device_util.py device_canvas.py device_api.py moy_lua_glue.py device_wifi.py; do
   cp "${TDECK_DIR}/modules/${f}" "${MODULES_DIR}/${f}"
 done
 rm -rf "${MODULES_DIR}/moybyte"
