@@ -38,17 +38,96 @@ _S = {}          # the runner singletons: ws / canvas / driver / served / sink
 _AUDIO_RATE = [0]
 
 
+# The page keeps ~this many seconds of PCM scheduled ahead of the audio clock.
+# Deep enough to ride out a late frame (wasm GC pause, phone jank -- the 20ms
+# scheduling margin alone was the owner-reported crackle), shallow enough that
+# a game sfx mixed into the stream isn't noticeably late.
+_AUDIO_TARGET = 0.12
+_AUDIO_MAX_STEP = 0.20      # bound one frame's top-up render (seconds)
+
+
 class _RunnerAudio(host_api.FakeAudio):
-    """FakeAudio with the calls list capped: it grows per sfx for host test
-    assertions, which a long browser session doesn't want. The per-frame PCM
-    render is inherited -- step_frame_json drains take_pcm() into the frame
-    payload and the page's playPCM plays the FINISHED samples (no JS synth),
-    the same seam the host web console streams."""
+    """FakeAudio with the calls list capped, plus two web-runner twists
+    (#170 round 3 -- the owner's "crackle and slowdown" report):
+
+    * TOP-UP rendering (the crackle fix): the page reports how many seconds
+      of PCM it still has scheduled (step_frame_json's audio_ahead); tick()
+      renders whatever refills that to _AUDIO_TARGET instead of exactly
+      rate*dt. One late frame now eats cushion, not the stream -- the browser
+      twin of the device feed's ring top-up (device_audio.py). Without the
+      report (ahead < 0: a transport that never sends it) the per-dt render
+      stays, unchanged.
+    * The NATIVE moy_audio kernel does the per-sample mix when the wasm was
+      built with the usermod (the slowdown fix: the Python sample loop costs
+      whole milliseconds per frame under wasm). Same voice_set / render /
+      voice_read per-block pattern as the device's legacy feed -- Python keeps
+      the model, the scheduler and all triggering; C only mixes the block, so
+      host == device == browser stays one audible behaviour.
+
+    step_frame_json drains take_pcm() into the frame payload and the page's
+    playPCM plays the FINISHED samples (no JS synth), as before."""
+
+    def __init__(self, engine):
+        host_api.FakeAudio.__init__(self, engine)
+        self.ahead = -1.0           # page-reported queue depth; <0 = no report
+        try:
+            import moy_audio
+            self._ka = moy_audio
+        except ImportError:
+            self._ka = None
+        self._buf = bytearray(int(engine.rate * _AUDIO_MAX_STEP) * 2 + 64)
 
     def tick(self, dt):
         if len(self.calls) > 64:
             del self.calls[:]
-        host_api.FakeAudio.tick(self, dt)
+        eng = self.engine
+        if self.ahead >= 0.0:
+            want = _AUDIO_TARGET - self.ahead
+            if want > _AUDIO_MAX_STEP:
+                want = _AUDIO_MAX_STEP
+            n = int(eng.rate * want) if want > 0 else 0
+        else:
+            n = int(eng.rate * dt) if dt > 0 else 0
+        cap = len(self._buf) // 2
+        if n > cap:
+            n = cap
+        if n <= 0 or not eng.is_active():
+            return
+        if self._ka is not None:
+            self.last_pcm = self._render_native(n)
+        else:
+            self.last_pcm = eng.render(n)
+        self.rendered += n
+
+    def _render_native(self, n):
+        """device_audio._render_native's pattern: music scheduler in Python,
+        the per-sample mix in C, advanced voice state read back so the Python
+        engine stays the single source of truth."""
+        eng = self.engine
+        ka = self._ka
+        eng._advance_music(n / float(eng.rate))
+        voices = eng.voices
+        for c in range(len(voices)):
+            v = voices[c]
+            ka.voice_set(c, v.active, v.steps, v.step_dur, v.loop,
+                         v.idx, v.t, v.phase, v.noise,
+                         v.phase2, v.prev_pitch, v.prev_vol, v.loop_start)
+        buf = memoryview(self._buf)[:n * 2]
+        ka.render(buf, n, eng.rate, eng.volume)
+        for c in range(len(voices)):
+            st = ka.voice_read(c)
+            if st is not None:
+                v = voices[c]
+                v.active = st[0]
+                v.idx = st[1]
+                v.t = st[2]
+                v.phase = st[3]
+                v.noise = st[4]
+                if len(st) > 7:
+                    v.phase2 = st[5]
+                    v.prev_pitch = st[6]
+                    v.prev_vol = st[7]
+        return bytes(buf)
 
 
 def _make_audio(engine):
@@ -235,12 +314,17 @@ def assets_json():
         _cart_title(), _audio_rate(), decoded or None, kinds))
 
 
-def step_frame_json(dt):
+def step_frame_json(dt, audio_ahead=-1.0):
     """Advance the console one frame; return the frame_payload JSON, or ""
     when the console skipped the redraw (#44 dirty gate: static screen) -- the
-    page then just retains its last frame."""
+    page then just retains its last frame. `audio_ahead` is the page's
+    scheduled-ahead audio depth in seconds (-1 = not reported): _RunnerAudio
+    tops the cushion back up to target each frame (the crackle fix, #170)."""
     canvas = _S["canvas"]
     canvas.take_commands()               # drop anything stale (defensive)
+    au = getattr(_S["ws"], "audio", None)
+    if au is not None and hasattr(au, "ahead"):
+        au.ahead = float(audio_ahead)
     _S["driver"].frame(dt)
     flat = canvas.take_commands()
     cart = _cart_title()

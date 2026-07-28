@@ -117,6 +117,13 @@ PYEOF
         "${USERMODS_DIR}/moy_lua"
   cp "${SCRIPT_DIR}/moy_lua_micropython.mk" "${USERMODS_DIR}/moy_lua/micropython.mk"
 
+  # moy_audio usermod (#170): the native mixer kernel (no-IDF half only) so
+  # the runner's per-sample synth runs in C -- the Python loop was the
+  # audible "slowdown" under wasm. Same source of truth as the T-Deck.
+  cp -r "${REPO_ROOT}/firmware/lilygo_t_deck_plus_micropython/native/moy_audio" \
+        "${USERMODS_DIR}/moy_audio"
+  cp "${SCRIPT_DIR}/moy_audio_micropython.mk" "${USERMODS_DIR}/moy_audio/micropython.mk"
+
 fi
 
 # ---------------------------------------------------------------------------
