@@ -48,7 +48,18 @@ PY="${REPO_ROOT}/.venv/bin/python"
 [ -x "${PY}" ] || PY=python3
 
 STAGE_ONLY=0
-[ "${1:-}" = "--stage-only" ] && STAGE_ONLY=1
+SPEC=0
+SPEC_CART=""
+case "${1:-}" in
+  --stage-only) STAGE_ONLY=1 ;;
+  # --spec [cart-dir]: the moy-spec CART EXPORT (the PICO-8 web-export shape):
+  # a NEUTRAL page (no Moybyte branding), exactly ONE cart packed (the given
+  # .moy folder; any path works), auto-booted by the loader -- a self-contained
+  # static bundle in dist-spec/ an embedder can host anywhere.
+  --spec) SPEC=1; SPEC_CART="${2:-${REPO_ROOT}/system_carts/ray_lua.moy}" ;;
+esac
+[ "${SPEC}" = "1" ] && DIST_DIR="${SCRIPT_DIR}/dist-spec"
+export MOY_SPEC="${SPEC}"   # read by the page-gen heredoc (branding swap)
 
 # ---------------------------------------------------------------------------
 # 1. Toolchain (skipped with --stage-only): emsdk + micropython clone + patches.
@@ -170,27 +181,36 @@ PYEOF
 #    binary cache) is skipped. Lua twins stay out until the wasm Lua VM lands.
 # ---------------------------------------------------------------------------
 echo "== packing carts"
-ROSTER="${MOYBYTE_WEB_CARTS:-star_catcher.moy sakura.moy tap_red.moy bubble_trouble.moy coin_quest.moy platformer.moy tiny_runner.moy battle_city.moy letter_blitz.moy scroll_demo.moy sakura_lua.moy ray_lua.moy moy_night.moy}"
+if [ "${SPEC}" = "1" ]; then
+  ROSTER="${SPEC_CART}"
+else
+  ROSTER="${MOYBYTE_WEB_CARTS:-star_catcher.moy sakura.moy tap_red.moy bubble_trouble.moy coin_quest.moy platformer.moy tiny_runner.moy battle_city.moy letter_blitz.moy scroll_demo.moy sakura_lua.moy ray_lua.moy moy_night.moy}"
+fi
 "${PY}" - "${REPO_ROOT}/system_carts" "${STAGE_DIR}/carts.json" ${ROSTER} <<'PYEOF'
 import json, os, sys
 root, out = sys.argv[1], sys.argv[2]
 bundle = {}
+n = 0
 for cart in sys.argv[3:]:
-    src = os.path.join(root, cart)
+    # A bare name resolves under system_carts/; anything with a separator is a
+    # path (the --spec export packs an arbitrary .moy folder).
+    src = cart if os.sep in cart else os.path.join(root, cart)
+    name = os.path.basename(src.rstrip("/"))
     if not os.path.isdir(src):
         print("  !! missing cart:", cart)
         continue
+    n += 1
     for dirpath, dirnames, filenames in os.walk(src):
         dirnames[:] = [d for d in dirnames if d not in ("thumbs", "__pycache__")]
         for fn in sorted(filenames):
             p = os.path.join(dirpath, fn)
-            rel = cart + "/" + os.path.relpath(p, src).replace(os.sep, "/")
+            rel = name + "/" + os.path.relpath(p, src).replace(os.sep, "/")
             try:
                 bundle[rel] = open(p, encoding="utf-8").read()
             except UnicodeDecodeError:
                 print("  !! skipping binary file:", rel)
 json.dump(bundle, open(out, "w"))
-print("  %d files, %d carts" % (len(bundle), len(sys.argv) - 3))
+print("  %d files, %d carts" % (len(bundle), n))
 PYEOF
 
 # modules.json: one fetch for the whole staged module tree (bring-up loads the
@@ -213,9 +233,17 @@ REPO_ROOT="${REPO_ROOT}" "${PY}" - "${SCRIPT_DIR}/page_tail.js" "${STAGE_DIR}/in
 import os, sys
 sys.path.insert(0, os.environ["REPO_ROOT"])
 from runtime.web_view_page import PAGE_CORE
+core = PAGE_CORE
+if os.environ.get("MOY_SPEC") == "1":
+    # The spec export is brand-neutral: the page presents as the moy console
+    # (the spec's name), not Moybyte's.
+    core = core.replace("<title>Moybyte device</title>",
+                        "<title>moy cart runner</title>")
+    core = core.replace("Moybyte<span class=dv> &mdash; device</span>", "moy")
+    core = core.replace('"[moybyte] "', '"[moy] "')   # the perf console.log prefix
 tail = open(sys.argv[1], encoding="utf-8").read()
 open(sys.argv[2], "w", encoding="utf-8").write(
-    PAGE_CORE + tail + "\n</script></body></html>")
+    core + tail + "\n</script></body></html>")
 PYEOF
 
 # ---------------------------------------------------------------------------

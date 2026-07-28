@@ -68,3 +68,4 @@ ports/celeste.moy/
 # The web runner (#151) static bundle output (build.sh assembles it; .build is
 # covered by the build-trees rule above).
 firmware/web_runner/dist/
+firmware/web_runner/dist-spec/

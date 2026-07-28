@@ -1,5 +1,5 @@
 
-// ---- Moybyte WEB RUNNER transport tail (#151) --------------------------------
+// ---- web runner transport tail (#151) ----------------------------------------
 // Replaces PAGE_LIVE_TAIL's HTTP+WebSocket with DIRECT calls into the
 // MicroPython-WASM console (window.MOY, installed by the loader module below).
 // Frames come from MOY.step(dt) as a JSON string ("" = redraw skipped, retain);
@@ -61,7 +61,11 @@ try {
     mp.FS.writeFile(full, carts[rel]);
   }
   sEl2.textContent = "booting console...";
-  const cart = new URLSearchParams(location.search).get("cart");
+  let cart = new URLSearchParams(location.search).get("cart");
+  // Single-cart bundle (the --spec export): boot straight into the game, no
+  // shelf stop -- the PICO-8-web-export behaviour.
+  const names = [...new Set(Object.keys(carts).map((k)=>k.split("/")[0]))];
+  if (!cart && names.length === 1) cart = names[0];
   mp.runPython(boot + "import web_boot\n"
     + "web_boot.boot('/moy/carts'" + (cart ? ", cart=" + JSON.stringify(cart) : "") + ")\n"
     + "from web_boot import assets_json, step_frame_json, apply_events_json");

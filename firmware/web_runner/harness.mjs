@@ -6,12 +6,12 @@
 //   node harness.mjs             # full sweep
 //   node harness.mjs star_catcher.moy   # one cart
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { dirname, join, resolve } from "node:path";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const DIST = join(HERE, "dist");
-const { loadMicroPython } = await import(join(DIST, "micropython.mjs"));
+const DIST = resolve(process.env.MOY_DIST || join(HERE, "dist"));  // dist-spec via MOY_DIST
+const { loadMicroPython } = await import(pathToFileURL(join(DIST, "micropython.mjs")).href);
 
 const mp = await loadMicroPython({ heapsize: 16 * 1024 * 1024,
     stdout: (l) => console.log("  [moy]", l) });

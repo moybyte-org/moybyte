@@ -5,14 +5,15 @@ Plain `python -m http.server` minus two gotchas: .mjs must ship as
 text/javascript (older CPython mimetypes map it to text/plain, which browsers
 refuse for ES modules) and .wasm as application/wasm (streaming compile).
 
-    python serve.py [port]      # default 8321
+    python serve.py [port] [dir]    # defaults: 8321, dist/ (dir e.g. dist-spec)
 """
 
 import http.server
 import os
 import sys
 
-os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), "dist"))
+_here = os.path.dirname(os.path.abspath(__file__))
+os.chdir(os.path.join(_here, sys.argv[2] if len(sys.argv) > 2 else "dist"))
 port = int(sys.argv[1]) if len(sys.argv) > 1 else 8321
 
 handler = http.server.SimpleHTTPRequestHandler
