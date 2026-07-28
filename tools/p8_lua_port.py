@@ -36,6 +36,7 @@ system_carts/ and ship an attribution note next to the cart.
 """
 
 import json
+import re
 import os
 import sys
 
@@ -223,11 +224,22 @@ def _rename_lifecycle(code):
     return code
 
 
+_EMPTY_MUSIC_STUB = re.compile(r"^\s*function\s+music\s*\([^)]*\)\s*end\s*$")
+
+
 def p8_lua_to_lua54(lines):
     out = []
     for line in lines:
         line = line.replace("\t", "  ").rstrip()
         code, comment = _split_comment(line)
+        if _EMPTY_MUSIC_STUB.match(code):
+            # The cart silenced ITSELF with an empty music() override (the
+            # celeste-maker mirror ships one). The port imports __music__ as
+            # real tracks, so drop the stub and let the shim's music() play
+            # them. A NON-empty override is real cart behaviour and is kept.
+            out.append("-- [port] dropped the cart's empty music() stub "
+                       "(imported __music__ plays instead)")
+            continue
         i = _find_outside_strings(code, "!=")
         while i >= 0:
             code = code[:i] + "~=" + code[i + 2:]
