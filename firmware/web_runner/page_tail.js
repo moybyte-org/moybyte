@@ -25,12 +25,11 @@ if(nextT&&ts<nextT-1)return;
 nextT=nextT?Math.max(nextT+1000/60,ts-30):ts+1000/60;
 var dt=lastTs?(ts-lastTs)/1000:1/60;if(dt>0.1)dt=0.1;lastTs=ts;
 pump();
-// Report the scheduled-ahead audio depth so the console tops the cushion back
-// up to target each frame (the crackle fix, #170) instead of rendering blind
-// rate*dt. -1 = context not running yet -> the legacy per-dt render.
-var ah=-1;
-if(typeof actx!=="undefined"&&actx&&actx.state==="running")
-ah=Math.max(0,audioNext-actx.currentTime);
+// Report the queued audio depth (worklet ring or legacy schedule -- PAGE_CORE's
+// audioQueuedSecs abstracts both) so the console tops the cushion back up to
+// target each frame (the crackle fix, #170) instead of rendering blind rate*dt.
+// -1 = context not running yet -> the legacy per-dt render.
+var ah=(typeof audioQueuedSecs==="function")?audioQueuedSecs():-1;
 var f="";
 try{f=MOY.step(dt,ah);}catch(e){sEl.textContent="console crash (see devtools)";sEl.style.color="#ff004d";throw e;}
 if(f){PERF.f++;PERF.b+=f.length;if(f.length>PERF.pk)PERF.pk=f.length;HUD.kb=f.length/1024;
