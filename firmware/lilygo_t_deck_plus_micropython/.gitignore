@@ -1,0 +1,70 @@
+# Build output. build.sh `cp`s these in from runtime/ on every build (they are
+# re-staged after each re-clone), so they are generated, not source -- edit
+# runtime/ instead. Without this they sit in `git status` forever and a
+# `git add -A` commits them.
+#
+# Authored device-only modules (device_canvas.py, device_api.py, moy_runtime.py,
+# moybyte_shell.py, ...) have no runtime/ twin and stay tracked.
+
+modules/_ota_build.py
+modules/achievements_ui.py
+modules/app_shell.py
+modules/appearance_app.py
+modules/artwork.py
+modules/audio.py
+modules/bar_layer.py
+modules/block_editor_ui.py
+modules/blocks.py
+modules/calc_app.py
+modules/canvas.py
+modules/cards_layer.py
+modules/carts_data.py
+modules/chrome.py
+modules/code_layer.py
+modules/console.py
+modules/editor_app.py
+modules/editors.py
+modules/editors_base.py
+modules/editors_block.py
+modules/editors_code.py
+modules/editors_music.py
+modules/editors_paint_map.py
+modules/editors_scene.py
+modules/editors_sheet.py
+modules/file_widgets.py
+modules/files_app.py
+modules/formula.py
+modules/launcher_layer.py
+modules/layers.py
+modules/map_editor_ui.py
+modules/moy_carts.py
+modules/moy_font.py
+modules/moy_fs.py
+modules/moy_image.py
+modules/moy_journal.py
+modules/music_editor_ui.py
+modules/op_history.py
+modules/paint_layer.py
+modules/palette.py
+modules/perf_hud.py
+modules/player.py
+modules/players.py
+modules/project.py
+modules/scene_editor_ui.py
+modules/settings_layer.py
+modules/sheets_app.py
+modules/storybook_app.py
+modules/system_menu_ui.py
+modules/ui.py
+modules/update_ui.py
+modules/wallpaper.py
+modules/web_view.py
+modules/web_view_page.py
+modules/web_view_ws.py
+modules/widgets.py
+modules/wm.py
+modules/writer_app.py
+
+# Toolchain + build tree (contains nested git repos).
+.build/
+dist/

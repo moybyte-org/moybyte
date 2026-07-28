@@ -1,0 +1,2 @@
+# emsdk + micropython checkouts and build output (nested git repos).
+.build/
