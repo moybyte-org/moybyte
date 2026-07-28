@@ -249,20 +249,47 @@ def _music_line_to_pattern_entry(line):
     form or a fully-packed 10-hex line by stripping internal whitespace. We
     FLATTEN 4 channels to 1 by taking the first channel that is enabled and points
     at a real SFX."""
+    ids = _music_line_channels(line)
+    return ids[0] if ids else None
+
+
+def _music_line_channels(line):
+    """All ENABLED channel SFX ids of one __music__ line (in channel order)."""
     s = "".join(line.strip().lower().split())   # drop the inter-group space(s)
     if len(s) < 10:
-        return None
+        return []
     chans = s[2:10]                              # the 4 channel bytes after flags
+    out = []
     for ci in range(4):
         b = _hx(chans, ci * 2, ci * 2 + 2)
         if b & 0x40:                     # channel disabled in this pattern
             continue
-        sfx_id = b & 0x3F
-        return sfx_id
-    return None
+        out.append(b & 0x3F)
+    return out
 
 
-def _music_tracks(music_lines):
+def _melody_channel(ids, sfx):
+    """Pick the channel to KEEP in the 4->1 flatten: the enabled sfx with the
+    highest mean pitch over its sounding steps -- the top line is usually the
+    melody, and keeping the bass instead is what made ported tunes
+    unrecognizable. Falls back to the first channel without bank data."""
+    best, best_pitch = None, -1.0
+    for sid in ids:
+        if sfx is None or sid >= len(sfx):
+            continue
+        steps = sfx[sid].get("steps") or []
+        pitches = [st[0] for st in steps if st and st[2] > 0]
+        if not pitches:
+            continue
+        p = sum(pitches) / len(pitches)
+        if p > best_pitch:
+            best, best_pitch = sid, p
+    if best is None:
+        return ids[0] if ids else None
+    return best
+
+
+def _music_tracks(music_lines, sfx=None):
     """PICO-8 __music__ -> Moybyte tracks + the pattern-start map.
 
     A p8 SONG is a run of patterns: `music(n)` starts at pattern n and plays
@@ -275,7 +302,8 @@ def _music_tracks(music_lines):
     for line in music_lines:
         s = "".join(line.strip().lower().split())
         flags = _hx(s, 0, 2) if len(s) >= 10 else 0
-        rows.append((flags, _music_line_to_pattern_entry(line)))
+        ids = _music_line_channels(line)
+        rows.append((flags, _melody_channel(ids, sfx) if ids else None))
     tracks = []
     starts = {}
     i = 0
@@ -296,7 +324,13 @@ def _music_tracks(music_lines):
                 loop = False
                 break
         starts[start] = len(tracks)
-        tracks.append({"speed": 4, "loop": loop, "pattern": pattern})
+        # A row lasts its WHOLE 32-note SFX: speed (slots/sec) = sfx steps/sec
+        # divided by 32. The old hard-coded 4 advanced rows every 250ms while
+        # each row's notes were still playing -- a garbled medley of row-heads.
+        spd = 4.0
+        if sfx and pattern and pattern[0] < len(sfx):
+            spd = (sfx[pattern[0]].get("speed") or 8) / 32.0
+        tracks.append({"speed": spd, "loop": loop, "pattern": pattern})
     return tracks, starts
 
 
@@ -328,7 +362,7 @@ def sfx_music_to_sounds(sfx_lines, music_lines, max_sfx=64):
     while sfx and not sfx[-1]["steps"]:
         sfx.pop()
 
-    music, _starts = _music_tracks(music_lines)
+    music, _starts = _music_tracks(music_lines, sfx)
 
     if not sfx and not music:
         return None, 0, 0
@@ -670,3 +704,154 @@ def main(argv):
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv))
+
+
+# --------------------------------------------------------------------------
+# .p8.png -> sections   (the BBS cart format: one ROM byte per pixel, hidden in
+# the 2 low bits of each A,R,G,B channel; 160x205 = 0x8000 ROM + trailer)
+# --------------------------------------------------------------------------
+# Everything below is stdlib-only: hand-rolled PNG chunk walk + unfilter (RGBA8
+# non-interlaced -- every BBS cart is), then the fixed ROM layout re-emitted as
+# the TEXT .p8 section lines the existing converters already consume:
+#   0x0000 gfx (2px/byte, low nibble = left)   0x2000 map rows 0-31
+#   0x3000 gff        0x3100 music (4B/pattern, flag bits ride bit7 of ch0-2)
+#   0x3200 sfx (64x68B: 32 2-byte notes + editor/speed/loop)   0x4300 code
+# Code is raw ASCII or the OLD ":c:" compression (pre-0.2.0 carts -- the BBS
+# classics); the newer "\x00pxa" scheme is detected and reported, not decoded.
+
+_OLD_LOOKUP = b"#\n 0123456789abcdefghijklmnopqrstuvwxyz!#%(){}[]<>+=/*:;.,~_"
+
+
+def _png_scanlines(data):
+    import struct
+    import zlib
+    assert data[:8] == b"\x89PNG\r\n\x1a\n", "not a PNG"
+    pos = 8
+    w = h = None
+    idat = b""
+    while pos < len(data):
+        ln, typ = struct.unpack(">I4s", data[pos:pos + 8])
+        chunk = data[pos + 8:pos + 8 + ln]
+        pos += 12 + ln
+        if typ == b"IHDR":
+            w, h, depth, ctype, _, _, interlace = struct.unpack(">IIBBBBB", chunk)
+            assert depth == 8 and ctype == 6 and interlace == 0, \
+                "expected 8-bit RGBA non-interlaced (all BBS carts are)"
+        elif typ == b"IDAT":
+            idat += chunk
+        elif typ == b"IEND":
+            break
+    raw = zlib.decompress(idat)
+    stride = w * 4
+    out = bytearray()
+    prev = bytearray(stride)
+    p = 0
+    for _y in range(h):
+        f = raw[p]
+        line = bytearray(raw[p + 1:p + 1 + stride])
+        p += 1 + stride
+        if f == 1:                                   # Sub
+            for i in range(4, stride):
+                line[i] = (line[i] + line[i - 4]) & 0xFF
+        elif f == 2:                                 # Up
+            for i in range(stride):
+                line[i] = (line[i] + prev[i]) & 0xFF
+        elif f == 3:                                 # Average
+            for i in range(stride):
+                a = line[i - 4] if i >= 4 else 0
+                line[i] = (line[i] + ((a + prev[i]) >> 1)) & 0xFF
+        elif f == 4:                                 # Paeth
+            for i in range(stride):
+                a = line[i - 4] if i >= 4 else 0
+                b = prev[i]
+                c = prev[i - 4] if i >= 4 else 0
+                pa, pb, pc = abs(b - c), abs(a - c), abs(a + b - 2 * c)
+                pr = a if (pa <= pb and pa <= pc) else (b if pb <= pc else c)
+                line[i] = (line[i] + pr) & 0xFF
+        out += line
+        prev = line
+    return w, h, bytes(out)
+
+
+def _p8png_rom(data):
+    w, h, px = _png_scanlines(data)
+    rom = bytearray(w * h)
+    for i in range(w * h):
+        r, g, b, a = px[i * 4:i * 4 + 4]
+        rom[i] = ((a & 3) << 6) | ((r & 3) << 4) | ((g & 3) << 2) | (b & 3)
+    return bytes(rom)
+
+
+def _old_decompress(rom, start):
+    ln = (rom[start + 4] << 8) | rom[start + 5]
+    out = bytearray()
+    i = start + 8
+    while len(out) < ln and i < len(rom):
+        b = rom[i]
+        i += 1
+        if b == 0x00:
+            out.append(rom[i])
+            i += 1
+        elif b <= 0x3B:
+            out.append(_OLD_LOOKUP[b])
+        else:
+            second = rom[i]
+            i += 1
+            off = (b - 0x3C) * 16 + (second & 0xF)
+            cnt = (second >> 4) + 2
+            for _ in range(cnt):
+                out.append(out[-off])
+    return out.decode("ascii", "replace")
+
+
+def _p8png_sections(rom):
+    sections = {}
+    sections["gfx"] = ["".join("%x%x" % (rom[y * 64 + xb] & 0xF, rom[y * 64 + xb] >> 4)
+                               for xb in range(64)) for y in range(128)]
+    sections["map"] = ["".join("%02x" % rom[0x2000 + y * 128 + x] for x in range(128))
+                       for y in range(32)]
+    sections["gff"] = ["".join("%02x" % rom[0x3000 + y * 128 + x] for x in range(128))
+                       for y in range(2)]
+    mus = []
+    for p in range(64):
+        ch = rom[0x3100 + p * 4:0x3100 + p * 4 + 4]
+        flags = (ch[0] >> 7) | ((ch[1] >> 7) << 1) | ((ch[2] >> 7) << 2)
+        mus.append("%02x %02x%02x%02x%02x"
+                   % (flags, ch[0] & 0x7F, ch[1] & 0x7F, ch[2] & 0x7F, ch[3] & 0x7F))
+    sections["music"] = mus
+    sfx = []
+    for s in range(64):
+        base = 0x3200 + s * 68
+        head = rom[base + 64:base + 68]           # editor, speed, loop start/end
+        line = "%02x%02x%02x%02x" % (head[0], head[1], head[2], head[3])
+        for n in range(32):
+            v = rom[base + n * 2] | (rom[base + n * 2 + 1] << 8)
+            pitch = v & 0x3F
+            wave = (v >> 6) & 0x7
+            vol = (v >> 9) & 0x7
+            eff = (v >> 12) & 0x7
+            custom = (v >> 15) & 1
+            line += "%02x%x%x%x" % (pitch, wave | (custom << 3), vol, eff)
+        sfx.append(line)
+    sections["sfx"] = sfx
+    code = rom[0x4300:]
+    if code[:4] == b"\x00pxa":
+        raise SystemExit("this cart uses the newer pxa code compression "
+                         "(PICO-8 >= 0.2.0) -- save it as text .p8 first")
+    if code[:4] == b":c:\x00":
+        lua = _old_decompress(rom, 0x4300)
+    else:
+        end = code.find(b"\x00")
+        lua = code[:end if end >= 0 else len(code)].decode("ascii", "replace")
+    sections["lua"] = lua.split("\n")
+    return sections
+
+
+def read_p8(path):
+    """Parse a cart from either the text .p8 or the BBS .p8.png form into the
+    same sections dict parse_p8 yields."""
+    with open(path, "rb") as f:
+        blob = f.read()
+    if blob[:8] == b"\x89PNG\r\n\x1a\n":
+        return _p8png_sections(_p8png_rom(blob))
+    return parse_p8(blob.decode("utf-8", "replace"))

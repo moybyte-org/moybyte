@@ -117,7 +117,9 @@ class MusicTrack:
 
     def __init__(self, pattern=None, speed=4, loop=True):
         self.pattern = [int(n) for n in (pattern or [])]
-        self.speed = max(1, int(speed))
+        # fractional speeds are legal (#151: a ported PICO-8 row lasts its
+        # whole 32-note SFX -- e.g. 0.117 slots/sec); int carts unchanged.
+        self.speed = max(0.01, float(speed))
         self.loop = bool(loop)
 
     def to_dict(self):

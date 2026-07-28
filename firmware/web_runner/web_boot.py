@@ -126,6 +126,12 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240):
     ws.ach.note = lambda *a, **k: None
     ws.ach.toast = None
     ws._achievement_unlocked = lambda *a, **k: None
+    # The Pointer boots visible (a device shows the trackball cursor until its
+    # idle timeout) -- in the browser that composited an arrow over the first
+    # game frames (owner report: "a cursor flashes at open"). Start hidden; a
+    # real trackball-style pan on a system surface re-shows it, a mouse/touch
+    # place() keeps it hidden as always.
+    ws.pointer.visible = False
     driver = host_api.ConsoleDriver(ws)
     _S["ws"] = ws
     _S["canvas"] = canvas
