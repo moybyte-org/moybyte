@@ -25,10 +25,18 @@ function mkdirs(p) {
     }
 }
 
-const mods = JSON.parse(readFileSync(join(DIST, "modules.json"), "utf-8"));
+// Frozen-first, like the page: a ship dist has no modules.json (console baked
+// into the wasm); a --stage-only dev dist adds one, loaded into /modules which
+// shadows the frozen copies.
+let mods = null;
+try { mods = JSON.parse(readFileSync(join(DIST, "modules.json"), "utf-8")); } catch (e) { }
 const carts = JSON.parse(readFileSync(join(DIST, "carts.json"), "utf-8"));
-mkdirs("/modules");
-for (const n in mods) mp.FS.writeFile("/modules/" + n, mods[n]);
+let boot = "";
+if (mods) {
+    mkdirs("/modules");
+    for (const n in mods) mp.FS.writeFile("/modules/" + n, mods[n]);
+    boot = "import sys\nsys.path.insert(0, '/modules')\n";
+}
 mkdirs("/moy/carts");
 for (const rel in carts) {
     const full = "/moy/carts/" + rel;
@@ -37,9 +45,10 @@ for (const rel in carts) {
 }
 
 const t0 = performance.now();
-mp.runPython("import sys\nsys.path.insert(0, '/modules')\nimport web_boot\n"
+mp.runPython(boot + "import web_boot\n"
     + "web_boot.boot('/moy/carts')\n"
     + "from web_boot import assets_json, step_frame_json, apply_events_json, open_cart");
+console.log("mode:", mods ? "dev (VFS modules)" : "frozen");
 console.log("boot: console up in", (performance.now() - t0).toFixed(0), "ms");
 
 const assets = mp.globals.get("assets_json");

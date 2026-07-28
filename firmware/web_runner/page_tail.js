@@ -41,11 +41,19 @@ try {
   const mp = await loadMicroPython({heapsize: 16*1024*1024,
     stdout: (l)=>console.log("[moy]", l)});
   sEl2.textContent = "loading console...";
+  // FROZEN-first: the ship build bakes the console into the wasm and ships no
+  // modules.json. A --stage-only dev dist adds one; loading it into /modules
+  // (first on sys.path) SHADOWS the frozen copies, so runtime/ edits run
+  // without a wasm rebuild.
   const [mods, carts] = await Promise.all([
-    fetch("modules.json").then(r=>r.json()),
+    fetch("modules.json").then((r)=>r.ok?r.json():null).catch(()=>null),
     fetch("carts.json").then(r=>r.json())]);
-  mkdirs(mp, "/modules");
-  for (const n in mods) mp.FS.writeFile("/modules/"+n, mods[n]);
+  let boot = "";
+  if (mods) {
+    mkdirs(mp, "/modules");
+    for (const n in mods) mp.FS.writeFile("/modules/"+n, mods[n]);
+    boot = "import sys\nsys.path.insert(0, '/modules')\n";
+  }
   mkdirs(mp, "/moy/carts");
   for (const rel in carts) {
     const full = "/moy/carts/"+rel;
@@ -54,7 +62,7 @@ try {
   }
   sEl2.textContent = "booting console...";
   const cart = new URLSearchParams(location.search).get("cart");
-  mp.runPython("import sys\nsys.path.insert(0, '/modules')\nimport web_boot\n"
+  mp.runPython(boot + "import web_boot\n"
     + "web_boot.boot('/moy/carts'" + (cart ? ", cart=" + JSON.stringify(cart) : "") + ")\n"
     + "from web_boot import assets_json, step_frame_json, apply_events_json");
   window.MOY = {
