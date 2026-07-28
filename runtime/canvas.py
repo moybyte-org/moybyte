@@ -15,6 +15,8 @@ transparency. These four are kept byte-identical on the device backend
 (`DeviceCanvas`) so a `.moy` draws the same pixels everywhere.
 """
 
+from array import array
+
 try:
     from . import font as _font
     from . import palette as _pal
@@ -30,6 +32,53 @@ except ImportError:  # pragma: no cover - the staged device tree: bare names, no
 # IN PLACE (no per-frame bytearray allocation; identity map / all-opaque).
 _PAL_IDENTITY = bytes(range(64))
 _PALT_OPAQUE = bytes(64)
+
+
+def tri_spans(x1, y1, x2, y2, x3, y3):
+    """The horizontal spans covering a filled triangle, packed flat as
+    (x, y, w, 1, 0) quints for fill_rects (#167). Pure integer scanline walk --
+    sort the vertices by y, then for each row take the long edge a->c against
+    whichever short edge (a->b above the middle vertex, b->c below) is active.
+
+    Shared shape with the device twin (device_canvas.tri_spans); the colour slot
+    is left 0 because tri() passes the colour as fill_rects' `c` override."""
+    x1 = int(x1); y1 = int(y1)
+    x2 = int(x2); y2 = int(y2)
+    x3 = int(x3); y3 = int(y3)
+    if y1 > y2:
+        x1, y1, x2, y2 = x2, y2, x1, y1
+    if y1 > y3:
+        x1, y1, x3, y3 = x3, y3, x1, y1
+    if y2 > y3:
+        x2, y2, x3, y3 = x3, y3, x2, y2
+    if y3 == y1:                       # flat: one span through all three x
+        lo = x1 if x1 < x2 else x2
+        if x3 < lo:
+            lo = x3
+        hi = x1 if x1 > x2 else x2
+        if x3 > hi:
+            hi = x3
+        return [lo, y1, hi - lo + 1, 1, 0]
+    out = []
+    dy_long = y3 - y1
+    dy_top = y2 - y1
+    dy_bot = y3 - y2
+    for y in range(y1, y3 + 1):
+        xa = x1 + (x3 - x1) * (y - y1) // dy_long
+        if y < y2:                     # dy_top > 0 whenever this branch is taken
+            xb = x1 + (x2 - x1) * (y - y1) // dy_top
+        elif dy_bot:
+            xb = x2 + (x3 - x2) * (y - y2) // dy_bot
+        else:
+            xb = x3
+        if xa > xb:
+            xa, xb = xb, xa
+        out.append(xa)
+        out.append(y)
+        out.append(xb - xa + 1)
+        out.append(1)
+        out.append(0)
+    return out
 
 
 class Image:
@@ -472,6 +521,61 @@ class Canvas:
             else:
                 x -= 1
                 err -= 2 * x + 1
+
+    def tri(self, x1, y1, x2, y2, x3, y3, c):
+        # TIC-80 tri = FILLED triangle (#167). Rasterized to horizontal spans and
+        # emitted as ONE fill_rects (#163) instead of a rect() per scanline -- on
+        # device that is a single MP->C crossing per triangle, which is what makes
+        # software 3D affordable. camera/clip/pal apply through fill_rects -> rect.
+        self.flush_batch()             # #63: a non-spr primitive breaks the batch
+        spans = tri_spans(x1, y1, x2, y2, x3, y3)
+        if spans:
+            self.fill_rects(array("h", spans), len(spans) // 5, 0, 0, int(c) & 63)
+
+    def trib(self, x1, y1, x2, y2, x3, y3, c):
+        # TIC-80 trib = triangle outline (three lines, like rectb's four fills).
+        self.flush_batch()             # #63: a non-spr primitive breaks the batch
+        self.line(x1, y1, x2, y2, c)
+        self.line(x2, y2, x3, y3, c)
+        self.line(x3, y3, x1, y1, c)
+
+    def sspr(self, sheet, sx, sy, sw, sh, dx, dy, dw=None, dh=None,
+             colorkey=-1, flip=0):
+        # Stretch a sw x sh PIXEL region of the sheet (top-left sx, sy) into a
+        # dw x dh destination rect at dx, dy -- ARBITRARY scale, unlike spr()'s
+        # integer `scale` (#167). Nearest-neighbour. This is the textured
+        # wall-slice verb for software 3D, and plain non-integer sprite scaling.
+        # Per-destination-pixel by nature (every pixel is a different texel), so
+        # this Python path is the host lane + the no-moy_gfx fallback; the device
+        # wants a native kernel before a cart leans on it in a frame loop.
+        self.flush_batch()             # #63: a non-spr primitive breaks the batch
+        sx = int(sx); sy = int(sy); sw = int(sw); sh = int(sh)
+        dx = int(dx); dy = int(dy)
+        dw = sw if dw is None else int(dw)
+        dh = sh if dh is None else int(dh)
+        if sw <= 0 or sh <= 0 or dw <= 0 or dh <= 0:
+            return
+        flip = int(flip)
+        fx = flip & 1
+        fy = (flip >> 1) & 1
+        ck = int(colorkey)
+        palt = self._palt
+        pget = sheet.pget
+        put = self._put
+        for j in range(dh):
+            v = (j * sh) // dh
+            if fy:
+                v = sh - 1 - v
+            row_y = sy + v
+            ty = dy + j
+            for i in range(dw):
+                u = (i * sw) // dw
+                if fx:
+                    u = sw - 1 - u
+                p = pget(sx + u, row_y)
+                if p == ck or palt[p & 63]:
+                    continue
+                put(dx + i, ty, p)
 
     def spr(self, img, x, y, scale=1, flip=0):
         # TIC-80 flip: 0=none, 1=horizontal, 2=vertical, 3=both. The source pixel

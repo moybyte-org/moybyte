@@ -51,7 +51,9 @@ def test_micropython_spike_build_uses_lvgl_micropython_and_frozen_modules():
     assert "FROZEN_MANIFEST" in build
     assert "export IDF_PATH" in build
     assert "export.sh" in build
-    assert "--partition-size=4194304" in build
+    # #168: raised 4MB -> 4.5MB when the app image crossed 0x400000 and the IDF
+    # size check began hard-failing the build.
+    assert "--partition-size=4718592" in build
     # OTA (#53): the build asks the lvgl_micropython builder for a dual-app partition
     # table (otadata + ota_0 + ota_1), and merges the full image at the derived ota_0
     # offset rather than the legacy hardcoded 0x10000.
@@ -479,7 +481,9 @@ def test_micropython_cart_quit_verb_pops_to_the_caller():
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
                + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
-    host = (Path("runtime") / "host_app.py").read_text(encoding="utf-8")
+    # The host make_api moved to host_api.py (the host_app -> host_api extraction
+    # mirroring the device's moy_runtime -> device_api split; #151 web runner).
+    host = (Path("runtime") / "host_api.py").read_text(encoding="utf-8")
     player = (Path("runtime") / "player.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
 
@@ -3256,11 +3260,14 @@ def test_moy_lua_phase1_wired():
     assert (lua_dir / "lvm.c").exists() and not (lua_dir / "lua.c").exists()
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
     assert "moy_lua/micropython.cmake" in build       # staged into ext_mod
-    # the glue is SHARED (device_api.py stages to the P4 tree); each board's
-    # moy_runtime only wires it, guarded so no-moy_lua builds still boot
+    # the glue is SHARED: moy_lua_glue.py (extracted from device_api.py for the
+    # #151 web runner -- the third moy_lua target), staged to the P4 tree and
+    # re-exported by device_api so each board's moy_runtime wiring is unchanged
+    glue_src = (ROOT / "modules" / "moy_lua_glue.py").read_text(encoding="utf-8")
+    assert "class LuaCartRun" in glue_src
+    assert "_LUA_TOKEN" in glue_src                   # the Lua writer's batch token
     api_src = (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8")
-    assert "class LuaCartRun" in api_src
-    assert "_LUA_TOKEN" in api_src                    # the Lua writer's batch token
+    assert "from moy_lua_glue import" in api_src      # the boards' re-export seam
     runtime_src = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     assert "lua_runtime = make_lua_runtime(ws)" in runtime_src
     assert "except ImportError" in runtime_src
@@ -3269,6 +3276,7 @@ def test_moy_lua_phase1_wired():
     assert "lua_runtime = make_lua_runtime(ws)" in p4_runtime
     assert "moy_lua" in (p4 / "native" / "micropython.cmake").read_text(encoding="utf-8")
     assert "moy_lua" in (p4 / "build.sh").read_text(encoding="utf-8")
+    assert "moy_lua_glue.py" in (p4 / "build.sh").read_text(encoding="utf-8")
 
 
 def test_moy_lua_hardware_learned_constraints_pinned():
@@ -3301,11 +3309,13 @@ def test_moy_lua_hardware_learned_constraints_pinned():
     # 5) the token init masks to int16-positive so the header compare in l_spr
     #    can never alias the Python writer (0) or a gate token.
     assert "0x7FFF" in mod
-    # 6) the shared glue declines the C fast path on the web-view TeeCanvas (its
-    #    __getattr__ would hand the C spr a bypass around the recorder).
-    api_src = (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8")
-    assert 'getattr(canvas, "_r", None)' in api_src
-    assert "0x7A11" in api_src                         # the documented Lua token
+    # 6) the shared glue declines the C fast path on any recording canvas (the
+    #    TeeCanvas's __getattr__ would hand the C spr a bypass around the
+    #    recorder; the #151 web runner's CommandCanvas simply has no batch
+    #    array). Lives in moy_lua_glue.py since the web-runner extraction.
+    glue_src = (ROOT / "modules" / "moy_lua_glue.py").read_text(encoding="utf-8")
+    assert 'getattr(canvas, "_r", None)' in glue_src
+    assert "0x7A11" in glue_src                        # the documented Lua token
     # 7) LUA_32BITS is ON (#67 owner decision 2026-07-18): both boards' FPUs are
     #    single-precision, so doubles are soft-float; 32-bit floats/ints use the
     #    HW FPU and halve TValue. Host lupa stays on doubles -- golden-frame
@@ -3353,7 +3363,7 @@ def test_lua_table_verb_never_clobbers_the_table_library():
     metatable __call, never replace it -- celeste's p8 shim needs table.remove.
     Pins both halves on the device glue (host twin: tests/test_p8_lua_port.py's
     dual-role test over runtime/lua_host.py)."""
-    api = (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8")
+    api = (ROOT / "modules" / "moy_lua_glue.py").read_text(encoding="utf-8")
     assert 'moy_lua.register("moy_table_verb", v)' in api
     assert "setmetatable(table, { __call" in api
     host = (ROOT.parent.parent / "runtime" / "lua_host.py").read_text(

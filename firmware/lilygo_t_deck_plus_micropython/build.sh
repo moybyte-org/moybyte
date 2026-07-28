@@ -610,7 +610,8 @@ case "${BOARD_CONFIG}" in
     # partition table (nvs + otadata + phy_init + ota_0 + ota_1 + vfs) instead of a
     # single `factory` app. That is what lets the device flash a new image to the
     # INACTIVE slot from SD and ping-pong between ota_0/ota_1 (esp_ota / esp32.Partition).
-    # --partition-size pins BOTH slots at 4MB (the app is ~3.3MB and growing); vfs takes
+    # --partition-size pins BOTH slots at 4.5MB (raised from 4MB on 2026-07-27: the app
+    # crossed 4MB -- 0x4148a0 -- and the size check hard-fails the build); vfs takes
     # the ~8MB that remains on the 16MB part (carts live on SD, so a smaller internal vfs
     # is fine). Rollback is already on (sdkconfig.base CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE
     # =y): a freshly-flashed app that never calls
@@ -626,7 +627,7 @@ case "${BOARD_CONFIG}" in
       DISPLAY=st7789
       FROZEN_MANIFEST="${MANIFEST}"
       --flash-size=16
-      --partition-size=4194304
+      --partition-size=4718592
       --ota
       "${REPL_ARGS[@]}"
       --task-stack-size=16384

@@ -118,6 +118,54 @@ LAYER_COPY_ASYNC = _SRAM_BOUNCE_FLUSH
 _PAL_IDENTITY = bytes(range(64))
 _PALT_OPAQUE = bytes(64)
 
+
+def tri_spans(x1, y1, x2, y2, x3, y3):
+    """The horizontal spans covering a filled triangle, packed flat as
+    (x, y, w, 1, 0) quints for fill_rects (#167). Pure integer scanline walk --
+    sort the vertices by y, then for each row take the long edge a->c against
+    whichever short edge (a->b above the middle vertex, b->c below) is active.
+
+    Byte-for-byte the host twin (runtime/canvas.py tri_spans); the colour slot is
+    left 0 because tri() passes the colour as fill_rects' `c` override."""
+    x1 = int(x1); y1 = int(y1)
+    x2 = int(x2); y2 = int(y2)
+    x3 = int(x3); y3 = int(y3)
+    if y1 > y2:
+        x1, y1, x2, y2 = x2, y2, x1, y1
+    if y1 > y3:
+        x1, y1, x3, y3 = x3, y3, x1, y1
+    if y2 > y3:
+        x2, y2, x3, y3 = x3, y3, x2, y2
+    if y3 == y1:                       # flat: one span through all three x
+        lo = x1 if x1 < x2 else x2
+        if x3 < lo:
+            lo = x3
+        hi = x1 if x1 > x2 else x2
+        if x3 > hi:
+            hi = x3
+        return [lo, y1, hi - lo + 1, 1, 0]
+    out = []
+    dy_long = y3 - y1
+    dy_top = y2 - y1
+    dy_bot = y3 - y2
+    for y in range(y1, y3 + 1):
+        xa = x1 + (x3 - x1) * (y - y1) // dy_long
+        if y < y2:                     # dy_top > 0 whenever this branch is taken
+            xb = x1 + (x2 - x1) * (y - y1) // dy_top
+        elif dy_bot:
+            xb = x2 + (x3 - x2) * (y - y2) // dy_bot
+        else:
+            xb = x3
+        if xa > xb:
+            xa, xb = xb, xa
+        out.append(xa)
+        out.append(y)
+        out.append(xb - xa + 1)
+        out.append(1)
+        out.append(0)
+    return out
+
+
 # Native draw gates (#155). The state-array indices and the gate kinds MUST match
 # the enums in native/moy_gfx/modmoy_gfx.c -- they are one binary layout shared
 # between this module and the C kernel.
@@ -348,6 +396,8 @@ class DeviceCanvas:
         # Native draw gates (#155): None until _install_draw_gates succeeds. Set
         # BEFORE reset_state, whose _sync_gate_* calls read them.
         self._gate_ctx = None
+        self._wire_pal_arr = None      # #167 fill_spans palette cache (see _wire_pal)
+        self._wire_pal_gen = -1
         self._gate_state = None
         self._gate_pal = None
         # VIEWPORT (#155) -- host twin: runtime/canvas.py Canvas.set_viewport.
@@ -866,12 +916,46 @@ class DeviceCanvas:
         if ctx is not None:
             ctx.fill_rects(arr, -1 if n is None else n, ox, oy, c)
             return
+        # #167: the T-Deck ROOT canvas never installs the gates (its _fill pokes
+        # the SRAM-bounce pump, see _install_draw_gates), so without this lane the
+        # "batch" below is one INTERPRETER rect() per span -- the exact dispatch
+        # cost #163 exists to delete, silently absent on that board. fill_spans
+        # takes buffer/camera/clip as plain args like circ/line, so it works on
+        # every canvas whether or not the gate is there.
+        gfx = self._gfx
+        fs = None if gfx is None else getattr(gfx, "fill_spans", None)
+        if fs is not None:
+            self.flush_batch()         # #63: a non-spr primitive breaks the batch
+            col = -1 if c < 0 else PAL565_WIRE[self._pal_map[c & 63]]
+            fs(self._buf, self._stride, self._bh, arr,
+               -1 if n is None else n, ox, oy, col,
+               None if col >= 0 else self._wire_pal(),
+               self._cam_x, self._cam_y,
+               self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+            if self._pump is not None:
+                self._pump()           # #66: feed the bounce flush between native ops
+            return
         if n < 0 or n is None:
             n = len(arr) // 5
         rect = self.rect
         for i in range(0, n * 5, 5):
             rect(arr[i] + ox, arr[i + 1] + oy, arr[i + 2], arr[i + 3],
                  c if c >= 0 else arr[i + 4])
+
+    def _wire_pal(self):
+        """A 64-entry RGB565 table for fill_spans' per-quad colour lookup, rebuilt
+        only when the pal state changes (`_palgen` is the same content id the
+        sprite bakes key on)."""
+        if self._wire_pal_gen != self._palgen or self._wire_pal_arr is None:
+            wp = self._wire_pal_arr
+            if wp is None:
+                wp = array("H", bytearray(2 * 64))
+                self._wire_pal_arr = wp
+            pm = self._pal_map
+            for i in range(64):
+                wp[i] = PAL565_WIRE[pm[i]]
+            self._wire_pal_gen = self._palgen
+        return self._wire_pal_arr
 
     def circ(self, cx, cy, r, c):
         # TIC-80 circ = FILLED circle. Native (#43): one moy_gfx.circ call rasterizes
@@ -909,6 +993,63 @@ class DeviceCanvas:
             else:
                 x -= 1
                 err -= 2 * x + 1
+
+    def tri(self, x1, y1, x2, y2, x3, y3, c):
+        # TIC-80 tri = FILLED triangle (#167). Scanline spans packed once, then ONE
+        # fill_rects -- which on this backend is one MP->C crossing for the whole
+        # triangle (the #163 native lane), not one per row. That ratio is what makes
+        # software 3D affordable here. Host twin: runtime/canvas.py Canvas.tri.
+        self.flush_batch()             # #63: a non-spr primitive breaks the batch
+        spans = tri_spans(x1, y1, x2, y2, x3, y3)
+        if spans:
+            self.fill_rects(array("h", spans), len(spans) // 5, 0, 0, int(c) & 63)
+
+    def trib(self, x1, y1, x2, y2, x3, y3, c):
+        # TIC-80 trib = triangle outline (three lines, like rectb's four fills).
+        self.flush_batch()             # #63: a non-spr primitive breaks the batch
+        self.line(x1, y1, x2, y2, c)
+        self.line(x2, y2, x3, y3, c)
+        self.line(x3, y3, x1, y1, c)
+
+    def sspr(self, sheet, sx, sy, sw, sh, dx, dy, dw=None, dh=None,
+             colorkey=-1, flip=0):
+        # Stretch a sw x sh PIXEL sheet region into a dw x dh destination rect --
+        # arbitrary scale, unlike spr()'s integer one (#167). Nearest-neighbour, and
+        # per-destination-pixel by nature (every pixel is a different texel), so this
+        # is the correctness lane: a cart leaning on it in a frame loop wants the
+        # native kernel first. Host twin: runtime/canvas.py Canvas.sspr.
+        self.flush_batch()             # #63: a non-spr primitive breaks the batch
+        sx = int(sx); sy = int(sy); sw = int(sw); sh = int(sh)
+        dx = int(dx); dy = int(dy)
+        dw = sw if dw is None else int(dw)
+        dh = sh if dh is None else int(dh)
+        if sw <= 0 or sh <= 0 or dw <= 0 or dh <= 0:
+            return
+        flip = int(flip)
+        fx = flip & 1
+        fy = (flip >> 1) & 1
+        ck = int(colorkey)
+        pt = self._palt
+        pget = sheet.pget
+        put = self._put
+        pal = self._pal_map
+        for j in range(dh):
+            v = (j * sh) // dh
+            if fy:
+                v = sh - 1 - v
+            row_y = sy + v
+            ty = dy + j
+            for i in range(dw):
+                u = (i * sw) // dw
+                if fx:
+                    u = sw - 1 - u
+                p = pget(sx + u, row_y)
+                if p == ck:
+                    continue
+                p &= 63
+                if pt is not None and pt[p]:
+                    continue
+                put(dx + i, ty, PAL565_WIRE[pal[p]])
 
     def spr(self, img, x, y, scale=1, flip=0):
         # TIC-80 flip: 0=none, 1=h, 2=v, 3=both (#11). Camera offsets the dst; the
@@ -1880,6 +2021,8 @@ class _Layer:
     OWN canvas, plus W/H. Built by the api's make_layer(w, h)."""
 
     _VERBS = ("cls", "pix", "line", "rect", "rectb", "circ", "circb",
+              
+              "tri", "trib", "rect_batch", "sspr",
               "spr", "spr_batch", "map", "mget", "mset", "print",
               "camera", "clip", "pal", "palt")
 

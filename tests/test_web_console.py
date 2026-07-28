@@ -97,6 +97,24 @@ class TeeCanvas:
     def circb(self, cx, cy, r, c):
         self.raster.circb(cx, cy, r, c); self.rec.circb(cx, cy, r, c)
 
+    def tri(self, x1, y1, x2, y2, x3, y3, c):
+        self.raster.tri(x1, y1, x2, y2, x3, y3, c)
+        self.rec.tri(x1, y1, x2, y2, x3, y3, c)
+
+    def trib(self, x1, y1, x2, y2, x3, y3, c):
+        self.raster.trib(x1, y1, x2, y2, x3, y3, c)
+        self.rec.trib(x1, y1, x2, y2, x3, y3, c)
+
+    def fill_rects(self, arr, n=-1, ox=0, oy=0, c=-1):
+        self.raster.fill_rects(arr, n, ox, oy, c)
+        self.rec.fill_rects(arr, n, ox, oy, c)
+
+
+    def sspr(self, sheet, sx, sy, sw, sh, dx, dy, dw=None, dh=None,
+             colorkey=-1, flip=0):
+        self.raster.sspr(sheet, sx, sy, sw, sh, dx, dy, dw, dh, colorkey, flip)
+        self.rec.sspr(sheet, sx, sy, sw, sh, dx, dy, dw, dh, colorkey, flip)
+
     def spr(self, img, x, y, scale=1, flip=0):
         self.raster.spr(img, x, y, scale, flip); self.rec.spr(img, x, y, scale, flip)
 

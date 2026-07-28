@@ -1,0 +1,62 @@
+{
+  "format": "moybyte-cart-v1",
+  "version": 7,
+  "title": "Ray Test",
+  "type": "game",
+  "runtime": "python",
+  "main": "main.py",
+  "system": true,
+  "canvas": {
+    "width": 320,
+    "height": 240,
+    "palette": "moy64"
+  },
+  "permissions": [
+    "graphics",
+    "input"
+  ],
+  "input": [
+    "buttons"
+  ],
+  "safe_to_share": true,
+  "config": {
+    "ray_step": 2,
+    "low_res": 0,
+    "bench": 0
+  },
+  "edit": [
+    {
+      "key": "bench",
+      "label": "BENCH",
+      "type": "int",
+      "min": 0,
+      "max": 3,
+      "step": 1,
+      "card": "BENCH {value}: 0 PLAY 1 RAYS 2 FILL 3 CLS"
+    },
+    {
+      "key": "low_res",
+      "label": "LOW RES",
+      "type": "choice",
+      "choices": [
+        0,
+        1
+      ],
+      "card": "HALF-SIZE VIEW {value}"
+    },
+    {
+      "key": "ray_step",
+      "label": "RAYS",
+      "type": "int",
+      "min": 1,
+      "max": 8,
+      "step": 1,
+      "display": "gauge",
+      "gauge": {
+        "low": "rabbit",
+        "high": "turtle"
+      },
+      "card": "ONE RAY EVERY {value} PIXELS"
+    }
+  ]
+}

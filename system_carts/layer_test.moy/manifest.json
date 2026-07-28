@@ -1,0 +1,24 @@
+{
+  "format": "moybyte-cart-v1",
+  "version": 1,
+  "title": "Layer Test",
+  "type": "game",
+  "runtime": "python",
+  "main": "main.py",
+  "system": true,
+  "canvas": {
+    "width": 320,
+    "height": 240,
+    "palette": "moy64"
+  },
+  "permissions": [
+    "graphics",
+    "input"
+  ],
+  "input": [
+    "buttons"
+  ],
+  "safe_to_share": true,
+  "config": {},
+  "edit": []
+}

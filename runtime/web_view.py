@@ -429,6 +429,59 @@ class DrawRecorder:
     def circb(self, cx, cy, r, c):
         self._cmds.append(["circb", int(cx), int(cy), int(r), c & 63])
 
+    def tri(self, x1, y1, x2, y2, x3, y3, c):
+        # #167: like fill_rects, the triangle DECLINES the batched path on a
+        # recording surface -- it records as its own scanline rects, so the
+        # browser needs no new wire op to draw software 3D.
+        from runtime.canvas import tri_spans      # host-only lazy import
+        s = tri_spans(x1, y1, x2, y2, x3, y3)
+        for i in range(0, len(s), 5):
+            self.rect(s[i], s[i + 1], s[i + 2], s[i + 3], c)
+
+    def trib(self, x1, y1, x2, y2, x3, y3, c):
+        self.line(x1, y1, x2, y2, c)
+        self.line(x2, y2, x3, y3, c)
+        self.line(x3, y3, x1, y1, c)
+
+    def sspr(self, sheet, sx, sy, sw, sh, dx, dy, dw=None, dh=None,
+             colorkey=-1, flip=0):
+        # #167: records as per-destination-row colour RUNS (rect ops) rather than
+        # a pixel each -- correct without a new wire op, and a stretched sheet
+        # strip is only a handful of runs per row.
+        sx = int(sx); sy = int(sy); sw = int(sw); sh = int(sh)
+        dx = int(dx); dy = int(dy)
+        dw = sw if dw is None else int(dw)
+        dh = sh if dh is None else int(dh)
+        if sw <= 0 or sh <= 0 or dw <= 0 or dh <= 0:
+            return
+        flip = int(flip)
+        fx = flip & 1
+        fy = (flip >> 1) & 1
+        ck = int(colorkey)
+        pget = sheet.pget
+        for j in range(dh):
+            v = (j * sh) // dh
+            if fy:
+                v = sh - 1 - v
+            row = sy + v
+            run_c = -1
+            run_x = 0
+            for i in range(dw + 1):
+                if i < dw:
+                    u = (i * sw) // dw
+                    if fx:
+                        u = sw - 1 - u
+                    p = pget(sx + u, row)
+                    if p == ck:
+                        p = -1
+                else:
+                    p = -2                  # sentinel: always closes the last run
+                if p != run_c:
+                    if run_c >= 0:
+                        self.rect(dx + run_x, dy + j, i - run_x, 1, run_c)
+                    run_c = p
+                    run_x = i
+
     def scroll_rect(self, rx, ry, rw, rh, dx, dy):
         # #113 scroll-as-blit: the browser shifts its retained index buffer in
         # place (the page's scr op -- copyWithin rows, the Canvas.scroll_rect
@@ -632,6 +685,59 @@ class _LayerRecorder:
 
     def circb(self, cx, cy, r, c):
         self._cmds.append(["circb", int(cx), int(cy), int(r), c & 63])
+
+    def tri(self, x1, y1, x2, y2, x3, y3, c):
+        # #167: like fill_rects, the triangle DECLINES the batched path on a
+        # recording surface -- it records as its own scanline rects, so the
+        # browser needs no new wire op to draw software 3D.
+        from runtime.canvas import tri_spans      # host-only lazy import
+        s = tri_spans(x1, y1, x2, y2, x3, y3)
+        for i in range(0, len(s), 5):
+            self.rect(s[i], s[i + 1], s[i + 2], s[i + 3], c)
+
+    def trib(self, x1, y1, x2, y2, x3, y3, c):
+        self.line(x1, y1, x2, y2, c)
+        self.line(x2, y2, x3, y3, c)
+        self.line(x3, y3, x1, y1, c)
+
+    def sspr(self, sheet, sx, sy, sw, sh, dx, dy, dw=None, dh=None,
+             colorkey=-1, flip=0):
+        # #167: records as per-destination-row colour RUNS (rect ops) rather than
+        # a pixel each -- correct without a new wire op, and a stretched sheet
+        # strip is only a handful of runs per row.
+        sx = int(sx); sy = int(sy); sw = int(sw); sh = int(sh)
+        dx = int(dx); dy = int(dy)
+        dw = sw if dw is None else int(dw)
+        dh = sh if dh is None else int(dh)
+        if sw <= 0 or sh <= 0 or dw <= 0 or dh <= 0:
+            return
+        flip = int(flip)
+        fx = flip & 1
+        fy = (flip >> 1) & 1
+        ck = int(colorkey)
+        pget = sheet.pget
+        for j in range(dh):
+            v = (j * sh) // dh
+            if fy:
+                v = sh - 1 - v
+            row = sy + v
+            run_c = -1
+            run_x = 0
+            for i in range(dw + 1):
+                if i < dw:
+                    u = (i * sw) // dw
+                    if fx:
+                        u = sw - 1 - u
+                    p = pget(sx + u, row)
+                    if p == ck:
+                        p = -1
+                else:
+                    p = -2                  # sentinel: always closes the last run
+                if p != run_c:
+                    if run_c >= 0:
+                        self.rect(dx + run_x, dy + j, i - run_x, 1, run_c)
+                    run_c = p
+                    run_x = i
 
     def print(self, s, x, y, c, scale=2):
         # `scale` (the legacy per-call arg) is accepted but IGNORED (the browser renders
@@ -954,6 +1060,25 @@ class TeeCanvas:
         if self._r.enabled:
             self._r.circb(cx, cy, r, c)
 
+    def tri(self, x1, y1, x2, y2, x3, y3, c):
+        if not self._r.record_only:
+            self._c.tri(x1, y1, x2, y2, x3, y3, c)
+        if self._r.enabled:
+            self._r.tri(x1, y1, x2, y2, x3, y3, c)
+
+    def trib(self, x1, y1, x2, y2, x3, y3, c):
+        if not self._r.record_only:
+            self._c.trib(x1, y1, x2, y2, x3, y3, c)
+        if self._r.enabled:
+            self._r.trib(x1, y1, x2, y2, x3, y3, c)
+
+    def sspr(self, sheet, sx, sy, sw, sh, dx, dy, dw=None, dh=None,
+             colorkey=-1, flip=0):
+        if not self._r.record_only:
+            self._c.sspr(sheet, sx, sy, sw, sh, dx, dy, dw, dh, colorkey, flip)
+        if self._r.enabled:
+            self._r.sspr(sheet, sx, sy, sw, sh, dx, dy, dw, dh, colorkey, flip)
+
     def spr(self, img, x, y, scale=1, flip=0):
         if not self._r.record_only:
             self._c.spr(img, x, y, scale, flip)
@@ -1042,7 +1167,13 @@ class CommandCanvas:
         self.w = width
         self.h = height
         if palette is None:
-            from runtime import palette as _pal   # host-only lazy import
+            # Lazy bare-or-package import: the host resolves runtime.palette; a
+            # staged/frozen target (#151 web runner) resolves its generated
+            # top-level palette module. Callers may also just pass the table.
+            try:
+                import palette as _pal
+            except ImportError:
+                from runtime import palette as _pal
             palette = _pal.MOY64
         self.palette = palette
         # System-UI font scale (#39): when this recorder stands in for the SYSTEM canvas the
@@ -1137,6 +1268,16 @@ class CommandCanvas:
     def circb(self, cx, cy, r, c):
         self._rec.circb(cx, cy, r, c)
 
+    def tri(self, x1, y1, x2, y2, x3, y3, c):
+        self._rec.tri(x1, y1, x2, y2, x3, y3, c)
+
+    def trib(self, x1, y1, x2, y2, x3, y3, c):
+        self._rec.trib(x1, y1, x2, y2, x3, y3, c)
+
+    def sspr(self, sheet, sx, sy, sw, sh, dx, dy, dw=None, dh=None,
+             colorkey=-1, flip=0):
+        self._rec.sspr(sheet, sx, sy, sw, sh, dx, dy, dw, dh, colorkey, flip)
+
     def scroll_rect(self, rx, ry, rw, rh, dx, dy):
         self._rec.scroll_rect(rx, ry, rw, rh, dx, dy)
 
@@ -1211,7 +1352,10 @@ class CommandCanvas:
         # strip / a windowed-WM window buffer rasterizes AND records scaled text
         # (the _LayerRecorder picks the scale up from the backing canvas). At
         # font_scale 1 SystemCanvas is byte-identical to Canvas.
-        from runtime.canvas import SystemCanvas    # host-only lazy import
+        try:                                       # lazy bare-or-package import
+            from canvas import SystemCanvas        # staged/frozen target (#151)
+        except ImportError:
+            from runtime.canvas import SystemCanvas
         real = SystemCanvas(int(w), int(h), self.palette, font_scale=self.font_scale)
         return RecordingLayer(real, self._rec)
 
@@ -1435,6 +1579,22 @@ def apply_events(events, input, pointer, on_press=None, on_pan=None,
                     if (code == 0x08 and on_press is not None
                             and not getattr(input, "text_mode", False)):
                         on_press("home")
+            elif t == "bshold":
+                # Desktop-keyboard hold-to-exit: a physically HELD Backspace
+                # streams the same sustained "home" the touch burger button
+                # provides, so the console's ~700ms hold-to-exit gesture works
+                # from a desktop browser (it previously had NO game-exit path
+                # -- the burger row is media-query hidden there). Gated on
+                # text_mode SERVER-side: a text cart's delete autorepeat must
+                # never arm the exit; the release always passes so leaving
+                # text mode can't strand a held home.
+                down = bool(ev.get("down"))
+                if down and getattr(input, "text_mode", False):
+                    pass
+                elif on_hold is not None:
+                    on_hold("home", down)
+                else:
+                    input.set_button("home", down)
             elif t == "esc":
                 if on_esc is not None:
                     on_esc()

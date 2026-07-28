@@ -685,6 +685,75 @@ static inline void moy_gfx_put(uint16_t *dst, mp_int_t dw, mp_int_t x, mp_int_t 
     dst[(size_t)y * (size_t)dw + (size_t)x] = col;
 }
 
+// fill_spans(dst, dw, dh, arr, n, ox, oy, col, pal, cam_x, cam_y, cx0, cy0, cx1, cy1)
+// -- the #163 span batch WITHOUT a DrawCtx (#167).
+//
+// Why this exists next to DrawCtx.fill_rects: the T-Deck ROOT canvas never
+// installs the draw gates (its _fill has to poke the SRAM-bounce flush pump
+// between native ops, #66, and a C gate has no cheap way back into Python), so
+// on that board DrawCtx.fill_rects is unreachable and DeviceCanvas.fill_rects
+// falls back to ONE INTERPRETER rect() PER SPAN -- precisely the dispatch cost
+// the batch exists to delete. Measured on glass: a 160-span software-3D frame
+// cost ~10ms of Python there while the gated P4 ran the same batch in ~1ms.
+//
+// So this takes the buffer, camera and clip as plain arguments exactly like
+// circ/line above, which makes it work on EVERY canvas, gated or not.
+// `col` >= 0 is an already-resolved RGB565 override for every quad; otherwise
+// quad slot 4 is a palette index into `pal` (a 64-entry RGB565 table).
+static mp_obj_t moy_gfx_fill_spans(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &cap);
+    mp_int_t dw = mp_obj_get_int(a[1]);
+    mp_int_t dh = mp_obj_get_int(a[2]);
+    mp_buffer_info_t bi;
+    mp_get_buffer_raise(a[3], &bi, MP_BUFFER_READ);
+    const int16_t *q = (const int16_t *)bi.buf;
+    mp_int_t nmax = (mp_int_t)(bi.len / (2 * 5));
+    mp_int_t n = mp_obj_get_int(a[4]);
+    if (n < 0 || n > nmax) n = nmax;
+    mp_int_t ox = mp_obj_get_int(a[5]);
+    mp_int_t oy = mp_obj_get_int(a[6]);
+    mp_int_t cov = mp_obj_get_int(a[7]);
+    const uint16_t *pal = NULL;
+    if (a[8] != mp_const_none) {
+        mp_buffer_info_t pb;
+        mp_get_buffer_raise(a[8], &pb, MP_BUFFER_READ);
+        pal = (const uint16_t *)pb.buf;
+    }
+    mp_int_t cam_x = mp_obj_get_int(a[9]);
+    mp_int_t cam_y = mp_obj_get_int(a[10]);
+    mp_int_t cx0 = mp_obj_get_int(a[11]);
+    mp_int_t cy0 = mp_obj_get_int(a[12]);
+    mp_int_t cx1 = mp_obj_get_int(a[13]);
+    mp_int_t cy1 = mp_obj_get_int(a[14]);
+    (void)dh;
+    if (dw <= 0 || (cov < 0 && pal == NULL)) return mp_const_none;
+    moy_gfx_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
+    for (mp_int_t i = 0; i < n; i++) {
+        const int16_t *p = q + i * 5;
+        uint16_t col = (cov >= 0) ? (uint16_t)cov : pal[p[4] & 63];
+        mp_int_t x0 = (mp_int_t)p[0] + ox - cam_x;
+        mp_int_t y0 = (mp_int_t)p[1] + oy - cam_y;
+        mp_int_t x1 = x0 + (mp_int_t)p[2];
+        mp_int_t y1 = y0 + (mp_int_t)p[3];
+        if (x0 < cx0) x0 = cx0;
+        if (y0 < cy0) y0 = cy0;
+        if (x1 > cx1) x1 = cx1;
+        if (y1 > cy1) y1 = cy1;
+        if (x1 <= x0 || y1 <= y0) continue;
+        size_t run = (size_t)(x1 - x0);
+        uint16_t *row = dst + (size_t)y0 * (size_t)dw + (size_t)x0;
+        for (mp_int_t y = y0; y < y1; y++) {
+            moy_gfx_fill_run(row, run, col);
+            row += (size_t)dw;
+        }
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_fill_spans_obj, 15, 15,
+                                           moy_gfx_fill_spans);
+
 // circ(dst, dw, dh, cx, cy, r, color, cam_x, cam_y, cx0, cy0, cx1, cy1) -- FILLED
 // circle: each scanline a clipped, camera-offset span (matches host canvas circ()).
 static mp_obj_t moy_gfx_circ(size_t n_args, const mp_obj_t *a) {
@@ -1501,6 +1570,7 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_copy_wait), MP_ROM_PTR(&moy_gfx_copy_wait_obj) },
     #endif
     { MP_ROM_QSTR(MP_QSTR_copy),       MP_ROM_PTR(&moy_gfx_copy_obj) },
+    { MP_ROM_QSTR(MP_QSTR_fill_spans), MP_ROM_PTR(&moy_gfx_fill_spans_obj) },
     { MP_ROM_QSTR(MP_QSTR_circ),       MP_ROM_PTR(&moy_gfx_circ_obj) },
     { MP_ROM_QSTR(MP_QSTR_circb),      MP_ROM_PTR(&moy_gfx_circb_obj) },
     { MP_ROM_QSTR(MP_QSTR_line),       MP_ROM_PTR(&moy_gfx_line_obj) },
