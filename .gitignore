@@ -64,3 +64,7 @@ firmware/lilygo_t_deck_plus/include/moybyte_project_bundle.h
 # BBS cart (see ports/README.md) -- the tool + README stay tracked, the
 # license-encumbered cart content does not.
 ports/celeste.moy/
+
+# The web runner (#151) static bundle output (build.sh assembles it; .build is
+# covered by the build-trees rule above).
+firmware/web_runner/dist/

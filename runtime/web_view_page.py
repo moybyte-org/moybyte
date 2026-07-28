@@ -28,7 +28,14 @@ device freezes it as top-level web_view_page.
 # the server re-ship the deflayer) until the image is cached -- so a ship-once layer converges.
 # ---------------------------------------------------------------------------
 
-PAGE_HTML = """<!doctype html><html><head><meta charset=utf-8>
+# The page is built from TWO pieces so a third transport can reuse the replayer
+# (#151 web runner): PAGE_CORE = everything transport-agnostic (markup, replay,
+# input capture, HUD, audio unlock) with ONE seam -- getA() sources its assets
+# from a `fetchAssets()` the transport tail defines; PAGE_LIVE_TAIL = the
+# HTTP + WebSocket live transport + the boot call. PAGE_HTML (both live
+# transports) = PAGE_CORE + PAGE_LIVE_TAIL, unchanged for every consumer. The
+# wasm runner builds PAGE_CORE + its own direct-call tail instead.
+PAGE_CORE = """<!doctype html><html><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
 <title>Moybyte device</title><style>
 html,body{margin:0;height:100%;background:#0b0f1a;color:#c2c3c7;
@@ -183,7 +190,7 @@ var fresh=cv.width!==W||cv.height!==H||!idx;
 if(fresh){cv.width=W;cv.height=H;cx=cv.getContext("2d");cx.imageSmoothingEnabled=false;
 idx=new Uint8Array(W*H);img=cx.createImageData(W,H);rgba=img.data;rs();}
 fit();}
-function getA(){assLoading=true;return fetch("/assets").then(function(r){return r.json();}).then(function(a){
+function getA(){assLoading=true;return fetchAssets().then(function(a){
 W=a.w;H=a.h;PAL=a.palette;FONT=a.font;assCart=a.cart;SHEET=a.sheet||null;if(a.audio_rate)AUDIO_RATE=a.audio_rate;
 INPUT=a.input||null;applyInputHint();
 TM=a.tilemap?{w:a.tilemap.w,h:a.tilemap.h,cells:a.tilemap.cells.slice()}:null;
@@ -357,11 +364,17 @@ NAV={a:"left",d:"right",w:"up",s:"down"},SC={Enter:"run",z:"a",x:"b"},pH={},nH={
 function nv(e){var k=e.key.length==1?e.key.toLowerCase():e.key;return NAV[k];}
 cv.addEventListener("keydown",function(e){if(e.key in PAN){pH[e.key]=true;e.preventDefault();return;}
 if(e.key=="Escape"){send({type:"esc"});e.preventDefault();return;}var cd=null;
-if(e.key=="Enter")cd=13;else if(e.key=="Backspace")cd=8;else if(e.key.length==1&&e.key.charCodeAt(0)>=32&&e.key.charCodeAt(0)<=126)cd=e.key.charCodeAt(0);
+if(e.key=="Enter")cd=13;
+// A physically HELD Backspace also streams a sustained "home" (bshold down/up on the
+// press/release edges) -- the desktop-keyboard twin of the burger button's hold, so
+// hold-Backspace-to-exit works from a desktop browser. Text-mode gating is server-side.
+else if(e.key=="Backspace"){cd=8;if(!e.repeat)send({type:"bshold",down:true});}
+else if(e.key.length==1&&e.key.charCodeAt(0)>=32&&e.key.charCodeAt(0)<=126)cd=e.key.charCodeAt(0);
 if(cd!==null)send({type:"key",code:cd});var s=SC[e.key.length==1?e.key.toLowerCase():e.key];
 if(s&&!e.repeat)send({type:"press",name:s});var n=nv(e);if(n&&!nH[n]){nH[n]=true;send({type:"hold",name:n,down:true});}
 if(s||n||cd!==null)e.preventDefault();});
 cv.addEventListener("keyup",function(e){if(e.key in PAN){delete pH[e.key];e.preventDefault();return;}
+if(e.key=="Backspace")send({type:"bshold",down:false});
 var n=nv(e);if(n&&nH[n]){delete nH[n];send({type:"hold",name:n,down:false});}});
 // Soft keyboard (#42 Thread 2): #kb (in the bottom bar's middle cluster, beside the burger)
 // focuses the hidden #kbin so a touch device's on-screen keyboard opens; it never appears on
@@ -447,6 +460,20 @@ if(f.audio)playPCM(f.audio);
 var t=(window.performance&&performance.now)?performance.now():Date.now();if(HUD.last){var inst=1000/Math.max(1,t-HUD.last);
 HUD.fps=HUD.fps?HUD.fps+(inst-HUD.fps)*0.2:inst;}HUD.last=t;if(HUD.on)drawHud();
 if(!ok){ok=true;sEl.textContent="live";sEl.style.color="#00e436";}}
+function drawHud(){var n=0;for(var i=0;i<ATL.length;i++)if(ATL[i])n++;
+var u=HUD.unknown?'<span class=w>'+HUD.unknown+'</span>':'0';
+HUD.el.innerHTML="fps <b>"+HUD.fps.toFixed(1)+"</b>   "+HUD.kb.toFixed(2)+" KB/f<br>atlas <b>"+n+"</b>   unknown "+u;}
+window.addEventListener("keydown",function(e){if(e.key==="`"||e.key==="~"){HUD.on=!HUD.on;
+HUD.el.style.display=HUD.on?"block":"none";if(HUD.on)drawHud();e.preventDefault();}});
+document.addEventListener("pointerdown",ensureAudio);
+document.addEventListener("touchend",ensureAudio);  // legacy iOS only unlocks here
+document.addEventListener("keydown",ensureAudio);
+"""
+
+# The LIVE transport tail (host http.server + device raw-socket -- both speak this):
+# fetchAssets over HTTP, frames over a persistent WebSocket, boot at the end.
+PAGE_LIVE_TAIL = """
+function fetchAssets(){return fetch("/assets").then(function(r){return r.json();});}
 // THE LIVE CHANNEL (#41): a persistent WebSocket, the ONLY transport now. Frames PUSH down
 // (ws.onmessage -> df), input pushes up (pump() sends queued events per tick). BOTH the device
 // and the host speak WS, so a closed/failed socket just reconnects with a small backoff -- no
@@ -467,16 +494,11 @@ ws.onerror=function(){try{ws.close();}catch(e){}};}
 // Reconnect with a small fixed backoff (the socket dropped / the server restarted).
 function retry(){wsOpen=false;sEl.textContent="reconnecting...";sEl.style.color="#ff004d";
 if(reconn)return;reconn=setTimeout(function(){reconn=null;connect();},800);}
-function drawHud(){var n=0;for(var i=0;i<ATL.length;i++)if(ATL[i])n++;
-var u=HUD.unknown?'<span class=w>'+HUD.unknown+'</span>':'0';
-HUD.el.innerHTML="fps <b>"+HUD.fps.toFixed(1)+"</b>   "+HUD.kb.toFixed(2)+" KB/f<br>atlas <b>"+n+"</b>   unknown "+u;}
-window.addEventListener("keydown",function(e){if(e.key==="`"||e.key==="~"){HUD.on=!HUD.on;
-HUD.el.style.display=HUD.on?"block":"none";if(HUD.on)drawHud();e.preventDefault();}});
-document.addEventListener("pointerdown",ensureAudio);
-document.addEventListener("touchend",ensureAudio);  // legacy iOS only unlocks here
-document.addEventListener("keydown",ensureAudio);
 // Fetch /assets once over HTTP, then open the WebSocket live channel; pump queued input up on
 // a timer.
 getA().then(function(){connect();setInterval(pump,Math.round(1000/FPS));setInterval(plog,PERF_MS);}).catch(function(){
 sEl.textContent="no assets";sEl.style.color="#ff004d";});cv.focus();
 </script></body></html>"""
+
+# ONE page for both live transports, exactly as before the PAGE_CORE split.
+PAGE_HTML = PAGE_CORE + PAGE_LIVE_TAIL
