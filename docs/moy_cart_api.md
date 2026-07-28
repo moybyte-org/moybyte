@@ -454,6 +454,10 @@ Since #170 the model is PICO-8-parity:
   (one per channel, `-1` = silent), so a track can play real multi-part music.
   Music claims voices from the top (a 1-channel track uses only channel 3);
   `sfx()` round-robins whatever channels music leaves free.
+- A looping SFX may set `loop_start` (play everything once, then repeat from
+  there — p8's loop range), and a track may carry `row_secs`, per-row
+  durations in seconds (`0` = hold the row forever) — how a p8 song's
+  changing pattern lengths survive the import.
 
 Imported PICO-8 carts (`tools/import_p8.py` / `moy port`) carry all of this
 over verbatim — waves, effects and all four music channels.

@@ -212,12 +212,20 @@ def _hx(s, lo, hi):
 
 
 def _sfx_line_to_dict(line):
-    """One PICO-8 __sfx__ hex line -> a Moybyte SFX dict (or None if all-rest)."""
+    """One PICO-8 __sfx__ hex line -> a Moybyte SFX dict (or None if all-rest).
+
+    The header's LOOP RANGE (bytes 4..8: loop start / loop end) carries over
+    (#170 round 2 -- ignoring it was the "half the music" bug: p8 songs pair a
+    long melody with short accompaniment riffs that loop until the row ends;
+    played once they die mid-row). A loop range keeps its exact step count --
+    the silent steps inside it are part of the riff's rhythm, so no rest-trim."""
     s = line.strip().lower()
     if len(s) < 8:
         return None
     duration = _hx(s, 2, 4)              # ticks-per-row
     speed = max(1, round(120.0 / duration)) if duration else 1
+    loop_s = _hx(s, 4, 6)
+    loop_e = _hx(s, 6, 8)
     notes = s[8:]                        # 32 notes x 5 nibbles
     steps = []
     for i in range(32):
@@ -236,6 +244,18 @@ def _sfx_line_to_dict(line):
             steps.append([PICO8_PITCH_C0 + pitch, wave, vol, eff])
         else:
             steps.append([PICO8_PITCH_C0 + pitch, wave, vol])
+    if 0 < loop_e <= len(steps) and loop_s < loop_e:
+        # p8 loop range: play 0..loop_e once, then repeat loop_s..loop_e
+        steps = steps[:loop_e]
+        if not any(st[0] != REST for st in steps):
+            return None
+        d = {"speed": int(speed), "loop": True, "steps": steps}
+        if loop_s:
+            d["loop_start"] = int(loop_s)
+        return d
+    if loop_e == 0 and 0 < loop_s < len(steps):
+        # p8's length trick: loop start with end 0 = "play this many notes"
+        steps = steps[:loop_s]
     # trim trailing rests so a near-empty SFX doesn't carry 32 silent steps
     while steps and steps[-1][0] == REST:
         steps.pop()
@@ -289,7 +309,7 @@ def _music_line_row(line):
     return row
 
 
-def _music_tracks(music_lines, sfx=None):
+def _music_tracks(music_lines, sfx=None, sfx_lines=None):
     """PICO-8 __music__ -> Moybyte tracks + the pattern-start map.
 
     A p8 SONG is a run of patterns: `music(n)` starts at pattern n and plays
@@ -301,6 +321,7 @@ def _music_tracks(music_lines, sfx=None):
 
     Since #170 each pattern row imports as a MULTI-CHANNEL row (all four p8
     channels, fixed positions) -- the old 4->1 melody-pick flatten is gone."""
+    metas = [_sfx_meta(l) for l in sfx_lines] if sfx_lines else None
     rows = []
     for line in music_lines:
         s = "".join(line.strip().lower().split())
@@ -326,18 +347,50 @@ def _music_tracks(music_lines, sfx=None):
                 loop = False
                 break
         starts[start] = len(tracks)
-        # A row lasts its WHOLE 32-note SFX: speed (slots/sec) = sfx steps/sec
-        # divided by 32. The old hard-coded 4 advanced rows every 250ms while
-        # each row's notes were still playing -- a garbled medley of row-heads.
-        # Take the tempo from the first row's first ENABLED channel.
-        spd = 4.0
-        first = pattern[0] if pattern else None
-        if isinstance(first, list):
-            first = next((sid for sid in first if sid >= 0), None)
-        if sfx and first is not None and 0 <= first < len(sfx):
-            spd = (sfx[first].get("speed") or 8) / 32.0
-        tracks.append({"speed": spd, "loop": loop, "pattern": pattern})
+        # PER-ROW durations, by p8's actual rule (#170 round 2, see _row_secs
+        # -- following channel 0 blindly cut melodies 4x early when ch0 was a
+        # fast looping arp). row_secs carries this per row; `speed` stays the
+        # first finite row's tempo for display/back-compat.
+        rsecs = [_row_secs(row, metas) for row in pattern]
+        finite = [v for v in rsecs if v > 0]
+        spd = (1.0 / finite[0]) if finite else 4.0
+        track = {"speed": spd, "loop": loop, "pattern": pattern}
+        if any(v != rsecs[0] for v in rsecs) or not finite:
+            track["row_secs"] = rsecs
+        tracks.append(track)
     return tracks, starts
+
+
+def _sfx_meta(line):
+    """(duration_ticks, loop_start, loop_end) straight off a raw __sfx__ line
+    -- the duration math needs the EXACT tick value (32*dur/120 s), not the
+    rounded steps/sec the converted SFX carries."""
+    s = line.strip().lower()
+    if len(s) < 8:
+        return (1, 0, 0)
+    return (_hx(s, 2, 4) or 1, _hx(s, 4, 6), _hx(s, 6, 8))
+
+
+def _row_secs(row, metas):
+    """One pattern row's duration in seconds, by p8's REAL rule (verified
+    against zepto8's implementation -- the wiki's "all-looping loops forever"
+    is wrong, celeste's title would stall on row 0):
+      * the FIRST enabled non-looping channel's note count (32, or loop_start
+        when the loop-end-0 length trick is in play) at its own tick rate;
+      * if EVERY channel loops: the SLOWEST looping channel's 32 notes;
+      * 0 (hold forever) only when no channel resolves at all."""
+    ids = row if isinstance(row, list) else [row]
+    longest_loop = 0.0
+    for sid in ids:
+        if sid is None or sid < 0 or not metas or sid >= len(metas):
+            continue
+        dur, ls, le = metas[sid]
+        if le > 0 and le > ls:
+            longest_loop = max(longest_loop, 32.0 * dur / 120.0)
+        else:
+            notes = min(32, ls) if (le == 0 and ls > 0) else 32
+            return notes * dur / 120.0
+    return longest_loop
 
 
 def music_start_map(music_lines):
@@ -368,7 +421,7 @@ def sfx_music_to_sounds(sfx_lines, music_lines, max_sfx=64):
     while sfx and not sfx[-1]["steps"]:
         sfx.pop()
 
-    music, _starts = _music_tracks(music_lines, sfx)
+    music, _starts = _music_tracks(music_lines, sfx, sfx_lines)
 
     if not sfx and not music:
         return None, 0, 0

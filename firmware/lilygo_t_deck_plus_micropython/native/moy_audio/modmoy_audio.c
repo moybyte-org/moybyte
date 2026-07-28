@@ -126,6 +126,7 @@ typedef struct _moy_voice_t {
     int16_t  steps[MOY_MAX_STEPS][4];   // [pitch, wave, vol, eff] per step
     double   step_dur;         // seconds per step
     int      loop;             // bool: wrap idx at the end vs. deactivate
+    int      loop_start;       // where a looping voice wraps back to (#170)
     int      idx;              // current step index
     double   t;                // seconds into the current step
     double   phase;            // oscillator phase 0..1
@@ -234,7 +235,7 @@ static inline void moy_advance_step(moy_voice_t *v) {
     v->t = 0.0;
     if (v->idx >= v->nsteps) {
         if (v->loop) {
-            v->idx = 0;
+            v->idx = (v->loop_start < v->nsteps) ? v->loop_start : 0;
         } else {
             v->active = 0;
         }
@@ -343,7 +344,7 @@ static void moy_mix_block(moy_voice_t *voices, uint8_t *out, int nframes,
 // --- Python-facing API ----------------------------------------------------
 
 // voice_set(chan, active, steps, step_dur, loop, idx, t, phase, noise
-//           [, phase2, prev_pitch, prev_vol]) -- push the
+//           [, phase2, prev_pitch, prev_vol, loop_start]) -- push the
 // EXACT state of a Python _Voice into the C mirror. Unlike a "play" trigger this
 // sets every field verbatim (no idx/t/phase reset), so C is a pure function of the
 // pushed state and reproduces render_into bit-for-bit. `steps` is any iterable of
@@ -395,6 +396,7 @@ static mp_obj_t moy_audio_voice_set(size_t n_args, const mp_obj_t *a) {
     v->phase2     = (n_args > 9)  ? mp_obj_get_float(a[9])     : 0.0;
     v->prev_pitch = (n_args > 10) ? (int)mp_obj_get_int(a[10]) : -1;
     v->prev_vol   = (n_args > 11) ? (int)mp_obj_get_int(a[11]) : 0;
+    v->loop_start = (n_args > 12) ? (int)mp_obj_get_int(a[12]) : 0;
     if (v->idx < 0) {
         v->idx = 0;
     }
@@ -403,7 +405,7 @@ static mp_obj_t moy_audio_voice_set(size_t n_args, const mp_obj_t *a) {
     v->seq += 1;
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_audio_voice_set_obj, 9, 12, moy_audio_voice_set);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_audio_voice_set_obj, 9, 13, moy_audio_voice_set);
 
 // voice_read(chan) -> (active, idx, t, phase, noise, phase2, prev_pitch,
 // prev_vol). After a render block C owns

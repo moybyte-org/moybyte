@@ -447,6 +447,9 @@ class MusicEditor:
         if isinstance(val, list):
             val = list(val)              # never alias a multi-channel row
         t.pattern.insert(self.slot + 1, val)
+        rs = getattr(t, "row_secs", None)
+        if rs and self.slot < len(rs):   # keep per-row durations aligned (#170)
+            rs.insert(self.slot + 1, rs[self.slot])
         self.slot += 1
         self._commit_op()
 
@@ -457,6 +460,9 @@ class MusicEditor:
             return
         self._push_undo()
         del t.pattern[self.slot]
+        rs = getattr(t, "row_secs", None)
+        if rs and self.slot < len(rs):   # keep per-row durations aligned (#170)
+            del rs[self.slot]
         if self.slot >= len(t.pattern):
             self.slot = len(t.pattern) - 1
         self._commit_op()
@@ -472,6 +478,9 @@ class MusicEditor:
             return
         self._push_undo()
         t.pattern[self.slot], t.pattern[j] = t.pattern[j], t.pattern[self.slot]
+        rs = getattr(t, "row_secs", None)
+        if rs and self.slot < len(rs) and j < len(rs):
+            rs[self.slot], rs[j] = rs[j], rs[self.slot]   # stay aligned (#170)
         self.slot = j
         self._commit_op()
 
@@ -531,6 +540,7 @@ class MusicEditor:
         dup.steps = [list(st) for st in s.steps]
         dup.speed = s.speed
         dup.loop = s.loop
+        dup.loop_start = getattr(s, "loop_start", 0)
         self.bank.sfx.append(dup)
         self.sfx_idx = len(self.bank.sfx) - 1
         self.step = 0
@@ -550,6 +560,8 @@ class MusicEditor:
         dup.pattern = _me_copy_pattern(t.pattern)
         dup.speed = t.speed
         dup.loop = t.loop
+        rs = getattr(t, "row_secs", None)
+        dup.row_secs = list(rs) if rs else None
         self.bank.music.append(dup)
         self.track_idx = len(self.bank.music) - 1
         self.slot = 0
@@ -574,8 +586,9 @@ class MusicEditor:
         obj = self.cur_track()
         if obj is None:
             return None
+        rs = getattr(obj, "row_secs", None)
         return ("song", self.track_idx, _me_copy_pattern(obj.pattern),
-                obj.speed, obj.loop, self.slot)
+                obj.speed, obj.loop, self.slot, list(rs) if rs else None)
 
     def _snapshot_of(self, snap):
         """Snapshot the CURRENT state of the object a popped undo/redo entry names
@@ -585,7 +598,7 @@ class MusicEditor:
         the selection elsewhere between the edit and the undo. The cursor
         recorded is the live one when that object is still active, else the
         popped entry's (best available -- _restore clamps it anyway)."""
-        kind, idx, _data, _speed, _loop, cursor = snap
+        kind, idx, _data, _speed, _loop, cursor = snap[:6]
         if kind == "sfx":
             if not (0 <= idx < len(self.bank.sfx)):
                 return None
@@ -599,11 +612,15 @@ class MusicEditor:
         obj = self.bank.music[idx]
         if self.view == self.SONG_VIEW and self.track_idx == idx:
             cursor = self.slot
-        return ("song", idx, _me_copy_pattern(obj.pattern), obj.speed, obj.loop, cursor)
+        rs = getattr(obj, "row_secs", None)
+        return ("song", idx, _me_copy_pattern(obj.pattern), obj.speed,
+                obj.loop, cursor, list(rs) if rs else None)
 
     def _restore(self, snap):
-        """Write a _snapshot() tuple back over the bank + re-point the cursor."""
-        kind, idx, data, speed, loop, cursor = snap
+        """Write a _snapshot() tuple back over the bank + re-point the cursor.
+        Tolerates the pre-#170 6-field song tuple (no row_secs tail) so old
+        journal-embedded ops stay replayable."""
+        kind, idx, data, speed, loop, cursor = snap[:6]
         if kind == "sfx":
             if not (0 <= idx < len(self.bank.sfx)):
                 return
@@ -621,6 +638,8 @@ class MusicEditor:
             obj.pattern = _me_copy_pattern(data)
             obj.speed = speed
             obj.loop = loop
+            if len(snap) > 6:
+                obj.row_secs = list(snap[6]) if snap[6] else None
             self.view = self.SONG_VIEW
             self.track_idx = idx
             self.slot = cursor

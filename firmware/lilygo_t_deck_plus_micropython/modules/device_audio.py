@@ -393,7 +393,8 @@ class DeviceAudio:
                     v = voices[c]
                     ka.voice_set(c, v.active, v.steps, v.step_dur, v.loop,
                                  v.idx, v.t, v.phase, v.noise,
-                                 v.phase2, v.prev_pitch, v.prev_vol)
+                                 v.phase2, v.prev_pitch, v.prev_vol,
+                                 v.loop_start)
             finally:
                 ka.voice_unlock()
             for c in dirty:
@@ -529,7 +530,7 @@ class DeviceAudio:
             v = voices[c]
             ka.voice_set(c, v.active, v.steps, v.step_dur, v.loop,
                          v.idx, v.t, v.phase, v.noise,
-                         v.phase2, v.prev_pitch, v.prev_vol)
+                         v.phase2, v.prev_pitch, v.prev_vol, v.loop_start)
         # 3. the heavy mix, in C.
         ka.render(buf, n, eng.rate, eng.volume)
         # 4. read the advanced state back into the Python voices.

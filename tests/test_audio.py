@@ -1100,3 +1100,76 @@ def test_music_editor_slot_verbs_edit_channel_zero_of_list_rows():
     me.add_slot()
     b.music[0].pattern[1][0] = 3
     assert b.music[0].pattern[0] == [2, 1, 2]
+
+
+# -- p8-parity round 2 (#170): loop ranges + per-row durations ---------------
+
+def test_sfx_loop_start_roundtrips_and_voice_wraps_there():
+    s = audio.SFX([[60, 0, 6], [62, 0, 6], [64, 0, 6]], speed=10,
+                  loop=True, loop_start=1)
+    d = s.to_dict()
+    assert d["loop_start"] == 1
+    assert audio.SFX.from_dict(d).to_dict() == d
+    # a plain sfx serializes WITHOUT the key (pre-#170 banks byte-stable)
+    assert "loop_start" not in audio.SFX([[60, 0, 6]]).to_dict()
+    eng = audio.AudioEngine(audio.AudioBank([s], []), rate=8000)
+    eng.play_sfx(0, chan=0)
+    eng.render(8000)          # 10 steps/s -> several wraps in 1 s
+    v = eng.voices[0]
+    assert v.active
+    assert 1 <= v.idx <= 2    # wrapped to loop_start, never back to step 0
+
+
+def test_music_row_secs_schedule_and_roundtrip():
+    sfx = [audio.SFX([[40 + i, 0, 6]] * 4, speed=8) for i in range(3)]
+    t = audio.MusicTrack([[0], [1], [2]], speed=4,
+                         row_secs=[0.25, 1.0, 0.75])
+    d = t.to_dict()
+    assert d["row_secs"] == [0.25, 1.0, 0.75]
+    assert audio.MusicTrack.from_dict(d).to_dict() == d
+    eng = audio.AudioEngine(audio.AudioBank(sfx, [t]), rate=8000)
+    eng.play_music(0)
+    assert eng._music_slot == 0
+    eng.render(4000)                       # 0.5 s -> row 0 (0.25s) done
+    assert eng._music_slot == 1
+    eng.render(4000)                       # 1.0 s total: row 1 lasts 1.0s
+    assert eng._music_slot == 1            # still inside the long row
+    eng.render(4000)
+    assert eng._music_slot == 2
+
+
+def test_music_hold_forever_row_never_advances():
+    riff = audio.SFX([[50, 0, 6], [-1, 0, 0]], speed=8, loop=True)
+    t = audio.MusicTrack([[0], [0]], speed=4, row_secs=[0, 0.25])
+    eng = audio.AudioEngine(audio.AudioBank([riff], [t]), rate=8000)
+    eng.play_music(0)
+    for _ in range(5):
+        eng.render(8000)                   # 5 s on a 0-duration row
+    assert eng._music_slot == 0            # held
+    assert eng.is_active()
+    eng.stop_music()                       # still stoppable
+    assert not eng.is_active()
+
+
+def test_music_editor_structural_ops_keep_row_secs_aligned():
+    b = audio.AudioBank(
+        [audio.SFX([[60, 0, 6]]) for _ in range(3)],
+        [audio.MusicTrack([[0, 1], 2, [1, -1]], speed=4,
+                          row_secs=[1.0, 2.0, 3.0])])
+    me, _ = _music_editor(b)
+    me.toggle_view()
+    t = b.music[0]
+    me.select_cursor(0)
+    me.add_slot()                          # insert a copy of row 0 after it
+    assert len(t.pattern) == 4 and t.row_secs == [1.0, 1.0, 2.0, 3.0]
+    me.move_slot(1)                        # swap slots 1 and 2
+    assert t.row_secs == [1.0, 2.0, 1.0, 3.0]
+    me.del_slot()                          # delete the moved slot (cursor at 2)
+    assert len(t.pattern) == 3 and t.row_secs == [1.0, 2.0, 3.0]
+    me.undo()                              # snapshots carry row_secs
+    assert len(t.pattern) == 4 and t.row_secs == [1.0, 2.0, 1.0, 3.0]
+    n = len(b.music)
+    me.duplicate_track()
+    assert len(b.music) == n + 1
+    assert b.music[-1].row_secs == t.row_secs
+    assert b.music[-1].row_secs is not t.row_secs

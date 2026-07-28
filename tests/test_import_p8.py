@@ -355,3 +355,56 @@ def test_multichannel_music_track_plays_on_the_engine(tmp_path):
     eng.play_music(0)
     assert eng.voices[3].active and eng.voices[2].active
     assert any(b != 0 for b in eng.render(400))
+
+
+# -- p8 loop ranges + pattern-length rule (#170 round 2) ---------------------
+
+def test_sfx_loop_range_imports_as_looping_with_start():
+    # header: dur=0x10, loop=[2,4) -> 4 steps kept (NO rest-trim inside the
+    # range), loop=True, loop_start=2
+    line = ("00" + "10" + "02" + "04"
+            + "1e060" + "20060" + "22060" + "00000" + "00000" * 28)
+    d = import_p8._sfx_line_to_dict(line)
+    assert d["loop"] is True and d["loop_start"] == 2
+    assert len(d["steps"]) == 4                      # incl. the rest at idx 3
+    assert d["steps"][3][0] == import_p8.REST
+
+
+def test_sfx_length_trick_loop_start_with_end_zero():
+    # loop start 2, end 0 = "play 2 notes" (p8's short-sfx length trick)
+    line = ("00" + "10" + "02" + "00"
+            + "1e060" + "20060" + "22060" + "24060" + "00000" * 28)
+    d = import_p8._sfx_line_to_dict(line)
+    assert d["loop"] is False and "loop_start" not in d
+    assert len(d["steps"]) == 2
+
+
+def test_row_secs_follow_first_non_looping_channel():
+    # ch0 loops (dur 8), ch1 does not (dur 32): the row lasts ch1's 32 notes
+    # = 32*32/120 s -- zepto8's rule, NOT ch0's tempo.
+    looper = "00" + "08" + "00" + "20" + "1e060" * 32
+    lead = "00" + "20" + "00" + "00" + "24060" * 32
+    metas = [import_p8._sfx_meta(looper), import_p8._sfx_meta(lead)]
+    assert abs(import_p8._row_secs([0, 1], metas) - 32 * 32 / 120.0) < 1e-9
+    # all channels looping -> the SLOWEST looping channel's 32 notes
+    slow_looper = "00" + "18" + "00" + "20" + "1e060" * 32
+    metas2 = [import_p8._sfx_meta(looper), import_p8._sfx_meta(slow_looper)]
+    assert abs(import_p8._row_secs([0, 1], metas2) - 32 * 0x18 / 120.0) < 1e-9
+    # length-trick reference channel: loop_start notes, not 32
+    short = "00" + "20" + "05" + "00" + "24060" * 32
+    metas3 = [import_p8._sfx_meta(short)]
+    assert abs(import_p8._row_secs([0], metas3) - 5 * 32 / 120.0) < 1e-9
+
+
+def test_multichannel_track_emits_row_secs_when_rows_differ(tmp_path):
+    looper = "00" + "08" + "00" + "20" + "1e060" * 32
+    lead = "00" + "20" + "00" + "00" + "24060" * 32
+    fast_lead = "00" + "10" + "00" + "00" + "26060" * 32
+    sounds, _n, _m = import_p8.sfx_music_to_sounds(
+        [looper, lead, fast_lead],
+        ["01 " + "00" + "01" + "42" + "43",     # row 0: looper + lead
+         "02 " + "00" + "02" + "42" + "43"])    # row 1: looper + fast lead
+    trk = sounds["music"][0]
+    assert "row_secs" in trk
+    assert abs(trk["row_secs"][0] - 32 * 32 / 120.0) < 1e-9
+    assert abs(trk["row_secs"][1] - 32 * 16 / 120.0) < 1e-9

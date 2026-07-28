@@ -112,11 +112,15 @@ class SFX:
     (#170, PICO-8 numbering, FX_*); a step without one serializes 3-element so
     pre-#170 banks stay byte-identical on disk."""
 
-    def __init__(self, steps=None, speed=8, loop=False):
+    def __init__(self, steps=None, speed=8, loop=False, loop_start=0):
         # normalize each step to a [pitch, wave, vol(, eff)] list of ints
         self.steps = [self._norm(s) for s in (steps or [])]
         self.speed = max(1, int(speed))
         self.loop = bool(loop)
+        # Where a looping SFX jumps BACK to (#170: the p8 loop range -- play
+        # 0..end once, then repeat loop_start..end). 0 = loop the whole list,
+        # which is the pre-#170 behaviour, so old banks are untouched.
+        self.loop_start = max(0, int(loop_start))
 
     @staticmethod
     def _norm(s):
@@ -130,12 +134,17 @@ class SFX:
         return step
 
     def to_dict(self):
-        return {"speed": self.speed, "loop": self.loop, "steps": [list(s) for s in self.steps]}
+        d = {"speed": self.speed, "loop": self.loop,
+             "steps": [list(s) for s in self.steps]}
+        if self.loop_start:
+            d["loop_start"] = self.loop_start
+        return d
 
     @classmethod
     def from_dict(cls, d):
         d = d or {}
-        return cls(d.get("steps"), d.get("speed", 8), d.get("loop", False))
+        return cls(d.get("steps"), d.get("speed", 8), d.get("loop", False),
+                   d.get("loop_start", 0))
 
 
 class MusicTrack:
@@ -143,14 +152,23 @@ class MusicTrack:
     slots/second. A row is one SFX id (the original 1-channel form) OR a list
     of up to CHANNELS ids by channel position (#170 -- multi-channel music, the
     p8-parity form); -1 in a list means that channel is silent this row. Ints
-    stay ints through to_dict so pre-#170 banks serialize unchanged."""
+    stay ints through to_dict so pre-#170 banks serialize unchanged.
 
-    def __init__(self, pattern=None, speed=4, loop=True):
+    `row_secs` (optional, #170) is a parallel list of PER-ROW durations in
+    seconds, overriding the uniform speed clock -- what a p8 song needs, since
+    its pattern length follows the first NON-LOOPING channel and that channel's
+    tempo differs row to row. An entry of 0 means "hold this row forever"
+    (every channel loops -- p8's infinite pattern); music_stop()/music(n) still
+    end it. Absent (the kid-authored case) the speed clock rules alone."""
+
+    def __init__(self, pattern=None, speed=4, loop=True, row_secs=None):
         self.pattern = [self._norm_row(r) for r in (pattern or [])]
         # fractional speeds are legal (#151: a ported PICO-8 row lasts its
         # whole 32-note SFX -- e.g. 0.117 slots/sec); int carts unchanged.
         self.speed = max(0.01, float(speed))
         self.loop = bool(loop)
+        self.row_secs = ([max(0.0, float(v)) for v in row_secs]
+                         if row_secs else None)
 
     @staticmethod
     def _norm_row(r):
@@ -159,15 +177,26 @@ class MusicTrack:
             return row if row else -1
         return int(r)
 
+    def row_dur(self, i):
+        """Row i's duration in seconds (None = hold forever)."""
+        if self.row_secs and 0 <= i < len(self.row_secs):
+            v = self.row_secs[i]
+            return None if v <= 0 else v
+        return 1.0 / self.speed
+
     def to_dict(self):
-        return {"speed": self.speed, "loop": self.loop,
-                "pattern": [list(r) if isinstance(r, list) else r
-                            for r in self.pattern]}
+        d = {"speed": self.speed, "loop": self.loop,
+             "pattern": [list(r) if isinstance(r, list) else r
+                         for r in self.pattern]}
+        if self.row_secs:
+            d["row_secs"] = list(self.row_secs)
+        return d
 
     @classmethod
     def from_dict(cls, d):
         d = d or {}
-        return cls(d.get("pattern"), d.get("speed", 4), d.get("loop", True))
+        return cls(d.get("pattern"), d.get("speed", 4), d.get("loop", True),
+                   d.get("row_secs"))
 
 
 class AudioBank:
@@ -265,9 +294,10 @@ class _Voice:
 
     def __init__(self):
         self.active = False
-        self.steps = []         # list of [pitch, wave, vol]
+        self.steps = []         # list of [pitch, wave, vol(, eff)]
         self.step_dur = 0.0     # seconds per step
         self.loop = False
+        self.loop_start = 0     # where a looping voice wraps back to (#170)
         self.idx = 0            # current step index
         self.t = 0.0            # seconds into the current step
         self.phase = 0.0        # oscillator phase 0..1
@@ -287,11 +317,12 @@ class _Voice:
         # "unchanged" and silently never reaches the mixer -- the Battle City bug).
         self.gen = 0
 
-    def play(self, steps, step_dur, loop):
+    def play(self, steps, step_dur, loop, loop_start=0):
         self.active = bool(steps)
         self.steps = steps
         self.step_dur = step_dur
         self.loop = loop
+        self.loop_start = loop_start if loop_start < len(steps) else 0
         self.idx = 0
         self.t = 0.0
         self.phase = 0.0
@@ -316,7 +347,7 @@ class _Voice:
         self.t = 0.0
         if self.idx >= len(self.steps):
             if self.loop:
-                self.idx = 0
+                self.idx = self.loop_start   # p8 loop range: wrap to loop_start
             else:
                 self.active = False
 
@@ -377,7 +408,8 @@ class AudioEngine:
         if chan is None:
             chan = self._free_sfx_channel()
         chan = _clampi(int(chan), 0, CHANNELS - 1)
-        self.voices[chan].play([list(s) for s in sfx.steps], 1.0 / sfx.speed, sfx.loop)
+        self.voices[chan].play([list(s) for s in sfx.steps], 1.0 / sfx.speed,
+                               sfx.loop, sfx.loop_start)
 
     def play_beep(self, freq, dur=0.15, wave=WAVE_SQUARE, vol=6):
         """One-shot raw tone -- the zero-data escape hatch. Built as a single-step
@@ -429,7 +461,7 @@ class AudioEngine:
         self._music = m
         self._music_nch = self._track_channels(m)
         self._music_loop = loop if loop is not None else m.loop
-        self._music_slot_dur = 1.0 / m.speed
+        self._music_slot_dur = m.row_dur(0)   # None = hold this row forever
         self._music_slot = 0
         self._music_t = 0.0
         # trigger the first phrase slot immediately
@@ -466,8 +498,8 @@ class AudioEngine:
 
     def _advance_music(self, dt):
         m = self._music
-        if m is None:
-            return
+        if m is None or self._music_slot_dur is None:
+            return                       # hold-forever row (every channel loops)
         self._music_t += dt
         while self._music_t >= self._music_slot_dur:
             self._music_t -= self._music_slot_dur
@@ -478,7 +510,10 @@ class AudioEngine:
                 else:
                     self.stop_music()
                     return
+            self._music_slot_dur = m.row_dur(self._music_slot)
             self._trigger_music_row(m.pattern[self._music_slot])
+            if self._music_slot_dur is None:
+                return                   # entered a hold-forever row
 
     # -- rendering -------------------------------------------------------
 
