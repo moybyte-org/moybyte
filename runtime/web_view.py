@@ -433,7 +433,10 @@ class DrawRecorder:
         # #167: like fill_rects, the triangle DECLINES the batched path on a
         # recording surface -- it records as its own scanline rects, so the
         # browser needs no new wire op to draw software 3D.
-        from runtime.canvas import tri_spans      # host-only lazy import
+        try:                                      # lazy bare-or-package import
+            from canvas import tri_spans          # staged/frozen target (#151)
+        except ImportError:
+            from runtime.canvas import tri_spans
         s = tri_spans(x1, y1, x2, y2, x3, y3)
         for i in range(0, len(s), 5):
             self.rect(s[i], s[i + 1], s[i + 2], s[i + 3], c)
@@ -690,7 +693,10 @@ class _LayerRecorder:
         # #167: like fill_rects, the triangle DECLINES the batched path on a
         # recording surface -- it records as its own scanline rects, so the
         # browser needs no new wire op to draw software 3D.
-        from runtime.canvas import tri_spans      # host-only lazy import
+        try:                                      # lazy bare-or-package import
+            from canvas import tri_spans          # staged/frozen target (#151)
+        except ImportError:
+            from runtime.canvas import tri_spans
         s = tri_spans(x1, y1, x2, y2, x3, y3)
         for i in range(0, len(s), 5):
             self.rect(s[i], s[i + 1], s[i + 2], s[i + 3], c)
