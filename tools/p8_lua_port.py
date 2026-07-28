@@ -420,7 +420,19 @@ do
   function mid(a, b, c) return max(min(a, b), min(max(a, b), c)) end
   function rnd(n) return math.random() * (n or 1) end
 
-  -- map + flags (the __gff__/__map__ tables are appended below the shim)
+  -- map + flags: the map DATA now ships as map.moymap (the console's own
+  -- format -- editable, native-map()-able); build the fast Lua-side lookup
+  -- from it ONCE at start via the console mget (captured before the p8 mget
+  -- shadows it). __gff__ stays baked below the shim (flags have no moy home).
+  local m_mget = mget
+  __p8_map = {}
+  for y = 0, 63 do
+    local base = y * 128
+    for x = 0, 127 do
+      local v = m_mget(x, y)
+      __p8_map[base + x + 1] = (v and v >= 0) and v or 0
+    end
+  end
   function mget(x, y)
     x = math.floor(x or 0)
     y = math.floor(y or 0)
@@ -507,29 +519,15 @@ def music_map_lua(sections):
 
 
 def data_tables_lua(sections):
-    rows = full_map_rows(sections)
     lines = [music_map_lua(sections),
-             "-- __gff__ + full __map__ (incl. the gfx-shared rows 32-63)",
+             "-- __gff__ (the map itself ships as map.moymap)",
              "__p8_gff = {}",
-             "__p8_map = {}",
              "do",
              '  local gff = "' + gff_hex(sections) + '"',
              "  for i = 0, 255 do",
              "    __p8_gff[i] = tonumber(string.sub(gff, i * 2 + 1, i * 2 + 2), 16)",
              "  end",
-             "  local rows = {"]
-    for row in rows:
-        lines.append('    "' + row + '",')
-    lines += ["  }",
-              "  for y = 0, 63 do",
-              "    local row = rows[y + 1]",
-              "    local base = y * 128",
-              "    for x = 0, 127 do",
-              "      __p8_map[base + x + 1] = "
-              "tonumber(string.sub(row, x * 2 + 1, x * 2 + 2), 16)",
-              "    end",
-              "  end",
-              "end",
+             "end",
               ""]
     return "\n".join(lines)
 
@@ -566,6 +564,23 @@ def port(p8_path, out_dir, title=None):
     main_lua = header + SHIM + "\n" + data_tables_lua(sections) + "\n" + body
     with open(os.path.join(out_dir, "main.lua"), "w", encoding="utf-8") as f:
         f.write(main_lua)
+
+    # map.moymap -- the console's own tilemap format (cells store tile+1,
+    # 0 = empty), so the map is REAL data other tools/editors/native map()
+    # consume; the shim rebuilds its fast Lua table from it at start. The p8
+    # convention maps exactly: cell 0 ("sprite 0", empty by convention) -> 0,
+    # id N -> N+1. Id 255 can't be stored (+1 overflows the byte) -> empty.
+    rows = full_map_rows(sections)
+    if any(c != "0" for r in rows for c in r):
+        out_rows = []
+        for r in rows:
+            cells = []
+            for i in range(0, len(r), 2):
+                v = int(r[i:i + 2], 16)
+                cells.append("%02x" % (0 if v == 255 else (v + 1) & 0xFF if v else 0))
+            out_rows.append("".join(cells))
+        with open(os.path.join(out_dir, "map.moymap"), "w", encoding="utf-8") as f:
+            f.write("128 64\n" + "\n".join(out_rows) + "\n")
 
     kgfx = gfx_to_kgfx(sections.get("gfx", []))
     if kgfx:

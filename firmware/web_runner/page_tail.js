@@ -16,9 +16,13 @@ function pump(){var v=pv();if(v[0]||v[1]){panWas=true;send({type:"pan",dx:v[0],d
 else if(panWas){panWas=false;send({type:"pan",dx:0,dy:0});}
 if(!q.length)return;var b=q;q=[];
 try{MOY.events(JSON.stringify({events:b}));}catch(e){console.error("input error",e);}}
-var lastTs=0;
+var lastTs=0,nextT=0;
 function tick(ts){requestAnimationFrame(tick);
-if(lastTs&&ts-lastTs<15.5)return;   // cap ~60fps (rAF runs at display refresh -- 144Hz+ monitors)
+// 60fps DEADLINE accumulator: a plain "skip if <16ms since last" gate quantizes
+// to refresh/N on high-Hz displays (144Hz -> every 3rd frame = 48fps). Admit a
+// frame when its deadline arrives, then schedule the next; catch up if behind.
+if(nextT&&ts<nextT-1)return;
+nextT=nextT?Math.max(nextT+1000/60,ts-30):ts+1000/60;
 var dt=lastTs?(ts-lastTs)/1000:1/60;if(dt>0.1)dt=0.1;lastTs=ts;
 pump();
 var f="";

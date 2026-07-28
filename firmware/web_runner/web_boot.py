@@ -119,7 +119,12 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240):
     ws.launcher.items = ws._launcher_items(ws._all_carts)
     # The Moybyte shell's achievements are gamification for the kid console,
     # not part of a cart player (and doubly not of the brand-neutral spec
-    # bundle) -- kill the unlock hook so no toast ever fires.
+    # bundle). The REAL trigger is the Achievements core's note() (e.g.
+    # ach.note("open", ...) -> toast "First Steps" -- console.py's own
+    # _draw_toast renders it, so stubbing achievements_ui alone was not
+    # enough, as the first owner session proved). Kill the core's verbs.
+    ws.ach.note = lambda *a, **k: None
+    ws.ach.toast = None
     ws._achievement_unlocked = lambda *a, **k: None
     driver = host_api.ConsoleDriver(ws)
     _S["ws"] = ws
