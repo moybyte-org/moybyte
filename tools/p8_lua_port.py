@@ -522,6 +522,7 @@ def build_manifest(title):
         "fps": 30,
         "canvas": {"width": 320, "height": 240, "palette": "moy64"},
         "permissions": ["graphics", "input", "audio"],
+        "input": ["buttons"],
         "config": {},
         "edit": [],
         "ported_from": "pico-8",

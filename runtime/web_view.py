@@ -1530,7 +1530,7 @@ def apply_ws_text(payload, apply):
 
 
 def apply_events(events, input, pointer, on_press=None, on_pan=None,
-                 on_key=None, on_esc=None, on_hold=None):
+                 on_key=None, on_esc=None, on_hold=None, on_key_hold=None):
     """Inject a batch of browser events into an InputState + Pointer. Each event is fully
     guarded (a malformed one is skipped, never raised) so a buggy client can't crash the loop.
 
@@ -1585,6 +1585,18 @@ def apply_events(events, input, pointer, on_press=None, on_pan=None,
                     if (code == 0x08 and on_press is not None
                             and not getattr(input, "text_mode", False)):
                         on_press("home")
+            elif t == "khold":
+                # A physically HELD printable key (browser keydown/keyup edges):
+                # outside text mode the driver latches it so key() streams every
+                # frame, matching the device raw matrix -- browser autorepeat is
+                # ~30Hz and made key() flap code/0/code at 60fps. Text mode
+                # ignores the down (typing is the queued-byte path) but always
+                # takes the release, so leaving text mode can't strand a latch.
+                down = bool(ev.get("down"))
+                if down and getattr(input, "text_mode", False):
+                    pass
+                elif on_key_hold is not None:
+                    on_key_hold(ev.get("code"), down)
             elif t == "bshold":
                 # Desktop-keyboard hold-to-exit: a physically HELD Backspace
                 # streams the same sustained "home" the touch burger button

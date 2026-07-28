@@ -769,6 +769,9 @@ class ConsoleDriver:
                                 # HOME presses that used to clobber bshold's sustained
                                 # hold, resetting the hold-to-exit toast every repeat)
         self._typed = []        # queued typed chars; frame() feeds ONE per frame
+        self._key_held = 0      # physically held printable key (khold latch): in
+                                # game mode it streams as last_key every frame,
+                                # the web twin of the device raw-matrix hold
         self._key_prev = 0      # last frame's fed byte (repeats need a 0 gap)
         self._click = False
         self._down = False      # touch/button currently held (for drag-scroll)
@@ -793,6 +796,16 @@ class ConsoleDriver:
         # `self._typed = code` kept only the final char ("hello" typed only "o").
         # frame() drains one char per frame, preserving order.
         self._typed.append(code)
+
+    def key_hold(self, code, down):
+        # The khold latch (web_view.apply_events routes {type:"khold"} here).
+        # Release matches case-insensitively: shift down/up mid-hold changes
+        # the browser's e.key case between the edges.
+        c = int(code)
+        if down:
+            self._key_held = c
+        elif self._key_held and (self._key_held == c or abs(self._key_held - c) == 32):
+            self._key_held = 0
 
     def pan(self, dx, dy):
         # Arrow keys = the trackball: a relative, *visible*-cursor nudge each frame.
@@ -865,6 +878,9 @@ class ConsoleDriver:
             if (self._typed[0] != self._key_prev
                     or not getattr(self.input, "text_mode", False)):
                 nxt = self._typed.pop(0)
+        if (nxt == 0 and self._key_held
+                and not getattr(self.input, "text_mode", False)):
+            nxt = self._key_held     # game mode: a held key streams every frame
         self.input.last_key = nxt
         self._key_prev = nxt
         self.pointer.down = self._down

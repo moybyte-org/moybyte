@@ -257,10 +257,19 @@ def step_frame_json(dt):
 
 def _apply(events):
     d = _S["driver"]
+    rest = []
+    for e in events:
+        if e.get("type") == "reset":
+            # Esc during play: restart the cart (kiosk wraps the exit into a
+            # relaunch; the multi-cart runner pops to the shelf).
+            if getattr(_S["ws"], "cart", None) is not None:
+                _S["ws"]._exit_to_caller()
+        else:
+            rest.append(e)
     web_view.apply_events(
-        events, d.input, _S["sink"],
+        rest, d.input, _S["sink"],
         on_press=d.press, on_pan=d.pan, on_key=d.type_char,
-        on_esc=d.escape, on_hold=d.hold)
+        on_esc=d.escape, on_hold=d.hold, on_key_hold=d.key_hold)
 
 
 def apply_events_json(text):

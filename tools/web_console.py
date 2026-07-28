@@ -243,7 +243,7 @@ class WebConsole:
             web_view.apply_events(
                 events, d.input, self._pointer_sink,
                 on_press=d.press, on_pan=d.pan, on_key=d.type_char,
-                on_esc=d.escape, on_hold=d.hold)
+                on_esc=d.escape, on_hold=d.hold, on_key_hold=d.key_hold)
 
     # -- output --------------------------------------------------------------
     def step_frame(self):

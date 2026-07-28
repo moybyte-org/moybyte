@@ -81,7 +81,25 @@ try {
     step: mp.globals.get("step_frame_json"),
     events: mp.globals.get("apply_events_json"),
   };
-  window.__moyStart();
+  // ---- play-button splash ----------------------------------------------------
+  // The p8-web-player pattern: the game starts on a CLICK. The click is also the
+  // user gesture that unlocks WebAudio, so sound just works from frame one.
+  // ?dev=1 (the CLI hot-reload loop) skips it -- devs restart constantly.
+  if (new URLSearchParams(location.search).get("dev")) {
+    window.__moyStart();
+  } else {
+    const ov = document.createElement("div");
+    ov.style.cssText = "position:fixed;inset:0;display:flex;align-items:center;" +
+      "justify-content:center;background:rgba(11,15,26,.88);cursor:pointer;z-index:20";
+    ov.innerHTML = "<div style='width:110px;height:110px;border-radius:50%;" +
+      "background:#7e2553;border:4px solid #fff1e8;display:flex;align-items:center;" +
+      "justify-content:center'><div style='width:0;height:0;margin-left:10px;" +
+      "border-top:26px solid transparent;border-bottom:26px solid transparent;" +
+      "border-left:42px solid #fff1e8'></div></div>";
+    ov.addEventListener("click", () => { ov.remove(); window.__moyStart(); },
+      { once: true });
+    document.body.appendChild(ov);
+  }
   // ---- dev hot-reload (?dev=1, the moy CLI's watch loop) ---------------------
   // Poll the CLI server's /stamp (latest cart-file mtime); on change, refetch
   // the live-packed carts.json, rewrite the files in the VFS, restart the cart

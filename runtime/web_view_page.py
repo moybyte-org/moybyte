@@ -372,20 +372,36 @@ cv.addEventListener("keydown",function(e){if(e.key in PAN){
 if(INPUT){var an=AN[e.key];if(!nH[an]){nH[an]=true;send({type:"hold",name:an,down:true});}}
 else pH[e.key]=true;
 e.preventDefault();return;}
-if(e.key=="Escape"){send({type:"esc"});e.preventDefault();return;}var cd=null;
+if(e.key=="Escape"){
+// In play (INPUT set), Esc is RESET -- the p8-web-player expectation (their pause
+// menu's reset). Transports without a reset handler ignore the event safely.
+send(INPUT?{type:"reset"}:{type:"esc"});e.preventDefault();return;}var cd=null;
 if(e.key=="Enter")cd=13;
 // A physically HELD Backspace also streams a sustained "home" (bshold down/up on the
 // press/release edges) -- the desktop-keyboard twin of the burger button's hold, so
 // hold-Backspace-to-exit works from a desktop browser. Text-mode gating is server-side.
 else if(e.key=="Backspace"){cd=8;if(!e.repeat)send({type:"bshold",down:true});}
 else if(e.key.length==1&&e.key.charCodeAt(0)>=32&&e.key.charCodeAt(0)<=126)cd=e.key.charCodeAt(0);
-if(cd!==null)send({type:"key",code:cd});var s=SC[e.key.length==1?e.key.toLowerCase():e.key];
-if(s&&!e.repeat)send({type:"press",name:s});var n=nv(e);if(n&&!nH[n]){nH[n]=true;send({type:"hold",name:n,down:true});}
+if(cd!==null)send({type:"key",code:cd});
+// A held printable key must STREAM in game mode (the device's raw matrix
+// reports a held key every frame; browser autorepeat is ~30Hz and gappy --
+// key() read per frame flapped code/0/code). khold latches the physical hold;
+// the server feeds it every frame outside text mode.
+if(cd!==null&&cd>=32&&!e.repeat)send({type:"khold",code:cd,down:true});
+// Enter/Z/X are BUTTONS (run/a/b): hold semantics, not one-frame press edges --
+// a p8 cart holding jump reads btn() the whole hold; btnp() is the edge anyway.
+var s=SC[e.key.length==1?e.key.toLowerCase():e.key];
+if(s&&!nH[s]){nH[s]=true;send({type:"hold",name:s,down:true});}
+var n=nv(e);if(n&&!nH[n]){nH[n]=true;send({type:"hold",name:n,down:true});}
 if(s||n||cd!==null)e.preventDefault();});
 cv.addEventListener("keyup",function(e){if(e.key in PAN){delete pH[e.key];
 var an=AN[e.key];if(nH[an]){delete nH[an];send({type:"hold",name:an,down:false});}
 e.preventDefault();return;}
 if(e.key=="Backspace")send({type:"bshold",down:false});
+if(e.key.length==1&&e.key.charCodeAt(0)>=32&&e.key.charCodeAt(0)<=126)
+send({type:"khold",code:e.key.charCodeAt(0),down:false});
+var s=SC[e.key.length==1?e.key.toLowerCase():e.key];
+if(s&&nH[s]){delete nH[s];send({type:"hold",name:s,down:false});}
 var n=nv(e);if(n&&nH[n]){delete nH[n];send({type:"hold",name:n,down:false});}});
 // Soft keyboard (#42 Thread 2): #kb (in the bottom bar's middle cluster, beside the burger)
 // focuses the hidden #kbin so a touch device's on-screen keyboard opens; it never appears on
