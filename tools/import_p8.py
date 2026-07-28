@@ -262,6 +262,50 @@ def _music_line_to_pattern_entry(line):
     return None
 
 
+def _music_tracks(music_lines):
+    """PICO-8 __music__ -> Moybyte tracks + the pattern-start map.
+
+    A p8 SONG is a run of patterns: `music(n)` starts at pattern n and plays
+    until a stop flag (0x4) or a loop-end (0x2, which loops the run). The old
+    importer flattened EVERYTHING into one track, so a cart's music(40) pointed
+    at nothing. Split on the flag bits instead: one Moybyte track per run, and
+    return {p8_pattern_start: track_index} so the Lua shim can remap music(n)
+    (nearest-lower fallback for a mid-song start index)."""
+    rows = []
+    for line in music_lines:
+        s = "".join(line.strip().lower().split())
+        flags = _hx(s, 0, 2) if len(s) >= 10 else 0
+        rows.append((flags, _music_line_to_pattern_entry(line)))
+    tracks = []
+    starts = {}
+    i = 0
+    while i < len(rows):
+        if rows[i][1] is None:
+            i += 1
+            continue
+        start = i
+        pattern = []
+        loop = True
+        while i < len(rows) and rows[i][1] is not None:
+            flags, entry = rows[i]
+            pattern.append(entry)
+            i += 1
+            if flags & 0x2:            # loop-end: the run loops from its start
+                break
+            if flags & 0x4:            # stop: the song ends here, no loop
+                loop = False
+                break
+        starts[start] = len(tracks)
+        tracks.append({"speed": 4, "loop": loop, "pattern": pattern})
+    return tracks, starts
+
+
+def music_start_map(music_lines):
+    """Just the {p8_pattern_start: moy_track_index} map (the porter bakes it
+    into the compat shim's music() wrapper)."""
+    return _music_tracks(music_lines)[1]
+
+
 def sfx_music_to_sounds(sfx_lines, music_lines, max_sfx=64):
     """Build the AudioBank-shaped sounds dict (lossy) from __sfx__/__music__.
 
@@ -284,20 +328,7 @@ def sfx_music_to_sounds(sfx_lines, music_lines, max_sfx=64):
     while sfx and not sfx[-1]["steps"]:
         sfx.pop()
 
-    # __music__: group consecutive lines into one looping track. PICO-8 patterns
-    # carry begin/end-loop flag bits; we keep it simple and emit ONE track that is
-    # the whole flattened phrase (looping). Empty rows end the phrase.
-    pattern = []
-    for line in music_lines:
-        entry = _music_line_to_pattern_entry(line)
-        if entry is None:
-            if pattern:
-                break          # blank row terminates the (single) phrase
-            continue
-        pattern.append(entry)
-    music = []
-    if pattern:
-        music.append({"speed": 4, "loop": True, "pattern": pattern})
+    music, _starts = _music_tracks(music_lines)
 
     if not sfx and not music:
         return None, 0, 0

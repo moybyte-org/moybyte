@@ -46,7 +46,7 @@ for p in (_THIS_DIR, _REPO_ROOT):
         sys.path.insert(0, p)
 
 from import_p8 import (  # noqa: E402  -- the #36 importer's converters, reused
-    parse_p8, _title_from, gfx_to_kgfx, sfx_music_to_sounds)
+    parse_p8, _title_from, gfx_to_kgfx, sfx_music_to_sounds, music_start_map)
 
 
 # --------------------------------------------------------------------------
@@ -379,7 +379,20 @@ do
   end
 
   function sfx(n) if n and n >= 0 then m_sfx(fl(n)) end end
-  function music(n) if n == -1 then m_music_stop() elseif n then m_music(n) end end
+  function music(n)
+    -- p8 music(n) takes a PATTERN index; __music_map (baked per cart) maps the
+    -- song starts to Moybyte track ids, nearest-lower for a mid-song index.
+    if n == -1 then m_music_stop()
+    elseif n then
+      local t = __music_map and __music_map[n]
+      if t == nil and __music_map then
+        for k = n, 0, -1 do
+          if __music_map[k] ~= nil then t = __music_map[k] break end
+        end
+      end
+      m_music(t or 0)
+    end
+  end
   function menuitem() end                      -- p8 pause menu: nothing to add to
 
   -- p8 table verbs. all() tolerates deleting the CURRENT item mid-loop
@@ -484,9 +497,19 @@ end
 '''
 
 
+def music_map_lua(sections):
+    """The baked {p8_pattern_start: moy_track} table the shim's music() reads."""
+    starts = music_start_map(sections.get("music", []))
+    if not starts:
+        return "__music_map = nil"
+    pairs = ", ".join("[%d]=%d" % (k, v) for k, v in sorted(starts.items()))
+    return "__music_map = {%s}" % pairs
+
+
 def data_tables_lua(sections):
     rows = full_map_rows(sections)
-    lines = ["-- __gff__ + full __map__ (incl. the gfx-shared rows 32-63)",
+    lines = [music_map_lua(sections),
+             "-- __gff__ + full __map__ (incl. the gfx-shared rows 32-63)",
              "__p8_gff = {}",
              "__p8_map = {}",
              "do",
