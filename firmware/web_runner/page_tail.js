@@ -18,6 +18,7 @@ if(!q.length)return;var b=q;q=[];
 try{MOY.events(JSON.stringify({events:b}));}catch(e){console.error("input error",e);}}
 var lastTs=0;
 function tick(ts){requestAnimationFrame(tick);
+if(lastTs&&ts-lastTs<15.5)return;   // cap ~60fps (rAF runs at display refresh -- 144Hz+ monitors)
 var dt=lastTs?(ts-lastTs)/1000:1/60;if(dt>0.1)dt=0.1;lastTs=ts;
 pump();
 var f="";
@@ -71,6 +72,9 @@ try {
   if (!cart && names.length === 1) cart = names[0];
   mp.runPython(boot + "import web_boot\n"
     + "web_boot.boot('/moy/carts'" + (cart ? ", cart=" + JSON.stringify(cart) : "") + ")\n"
+    // Single-cart bundle: kiosk mode -- the exit gesture restarts the game
+    // instead of dropping into the console shell (the game IS the page).
+    + (names.length === 1 && cart ? "web_boot.kiosk(" + JSON.stringify(cart) + ")\n" : "")
     + "from web_boot import assets_json, step_frame_json, apply_events_json");
   window.MOY = {
     assets: mp.globals.get("assets_json"),

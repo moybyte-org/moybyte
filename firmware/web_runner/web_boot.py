@@ -113,6 +113,14 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240):
         host_api.make_wifi(moy_carts, carts_root),
         make_audio=_make_audio, lua_runtime=lua_runtime, can_manage=False,
         pointer=console.Pointer(canvas.w, canvas.h), inp=inp)
+    # can_manage was wired False AFTER the launcher was built, so rebuild the
+    # shelf without the Make tile (the Editor entry point is out of the
+    # runner's scope -- #151).
+    ws.launcher.items = ws._launcher_items(ws._all_carts)
+    # The Moybyte shell's achievements are gamification for the kid console,
+    # not part of a cart player (and doubly not of the brand-neutral spec
+    # bundle) -- kill the unlock hook so no toast ever fires.
+    ws._achievement_unlocked = lambda *a, **k: None
     driver = host_api.ConsoleDriver(ws)
     _S["ws"] = ws
     _S["canvas"] = canvas
@@ -120,9 +128,23 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240):
     _S["served"] = web_view.ServedState(canvas._rec)
     _S["sink"] = _PointerSink(driver)
     _S["root"] = carts_root
+    _S["exit"] = ws._exit_to_caller     # the real exit (reload_cart uses it)
     if cart:
         open_cart(cart)
     return True
+
+
+def kiosk(name):
+    """Single-cart bundle mode (the spec export): the game IS the page. The
+    exit gesture RESTARTS the cart instead of dropping into the console shell
+    -- a PICO-8 web export has no shell, and neither should this."""
+    ws = _S["ws"]
+    real_exit = _S["exit"]
+
+    def _restart():
+        real_exit()
+        open_cart(name)
+    ws._exit_to_caller = _restart
 
 
 def reload_cart(name=None):
@@ -135,7 +157,7 @@ def reload_cart(name=None):
     if name is None and cart is not None:
         name = (cart.get("path") or "").rsplit("/", 1)[-1]
     if cart is not None:
-        ws._exit_to_caller()
+        _S["exit"]()          # the REAL exit (kiosk wraps ws._exit_to_caller)
     ws._all_carts = moy_carts.scan(_S["root"])
     ws.launcher.items = ws._launcher_items(ws._all_carts)
     ws.slim_carts()

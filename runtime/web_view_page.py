@@ -362,7 +362,16 @@ NAV={a:"left",d:"right",w:"up",s:"down"},SC={Enter:"run",z:"a",x:"b"},pH={},nH={
 // mirroring the physical key). In text mode Backspace stays a typed 0x08 (DELETE
 // for a tool -- never an exit).
 function nv(e){var k=e.key.length==1?e.key.toLowerCase():e.key;return NAV[k];}
-cv.addEventListener("keydown",function(e){if(e.key in PAN){pH[e.key]=true;e.preventDefault();return;}
+var AN={ArrowLeft:"left",ArrowRight:"right",ArrowUp:"up",ArrowDown:"down"};
+cv.addEventListener("keydown",function(e){if(e.key in PAN){
+// Arrows are CONTEXTUAL: while a cart owns the keyboard (INPUT = the effective
+// input hint, non-null only during play) they are the D-PAD (PICO-8 muscle
+// memory: arrows + Z/X); on system surfaces they stay the trackball-cursor pan
+// (the code editor's caret, the shelf). The old always-pan mapping painted
+// cursor trails over a playing game's letterbox.
+if(INPUT){var an=AN[e.key];if(!nH[an]){nH[an]=true;send({type:"hold",name:an,down:true});}}
+else pH[e.key]=true;
+e.preventDefault();return;}
 if(e.key=="Escape"){send({type:"esc"});e.preventDefault();return;}var cd=null;
 if(e.key=="Enter")cd=13;
 // A physically HELD Backspace also streams a sustained "home" (bshold down/up on the
@@ -373,7 +382,9 @@ else if(e.key.length==1&&e.key.charCodeAt(0)>=32&&e.key.charCodeAt(0)<=126)cd=e.
 if(cd!==null)send({type:"key",code:cd});var s=SC[e.key.length==1?e.key.toLowerCase():e.key];
 if(s&&!e.repeat)send({type:"press",name:s});var n=nv(e);if(n&&!nH[n]){nH[n]=true;send({type:"hold",name:n,down:true});}
 if(s||n||cd!==null)e.preventDefault();});
-cv.addEventListener("keyup",function(e){if(e.key in PAN){delete pH[e.key];e.preventDefault();return;}
+cv.addEventListener("keyup",function(e){if(e.key in PAN){delete pH[e.key];
+var an=AN[e.key];if(nH[an]){delete nH[an];send({type:"hold",name:an,down:false});}
+e.preventDefault();return;}
 if(e.key=="Backspace")send({type:"bshold",down:false});
 var n=nv(e);if(n&&nH[n]){delete nH[n];send({type:"hold",name:n,down:false});}});
 // Soft keyboard (#42 Thread 2): #kb (in the bottom bar's middle cluster, beside the burger)

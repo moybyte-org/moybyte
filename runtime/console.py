@@ -3709,7 +3709,12 @@ class Workstation:
         Library is the game launcher; the tools live as desk icons/windows -- one rule
         a kid can hold ("apps are windows, games are fullscreen"). Kid-made "app"-type
         carts are NOT system apps and stay on the shelf (they run under the Player)."""
-        out = [make_tile()]
+        # No Make tile on a read-only store (#151: the web runner/spec player
+        # runs can_manage=False -- project management, and with it the whole
+        # Editor entry point, is out of scope there). can_manage is wired
+        # after construction, so runner boots rebuild launcher.items once
+        # wiring is done (web_boot does).
+        out = [make_tile()] if getattr(self, "can_manage", True) else []
         desk = getattr(self.wm, "has_desk", False)
         for c in carts:
             if c.get("type") == "wallpaper":
