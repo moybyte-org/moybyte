@@ -29,6 +29,9 @@ window.__moyStart=function(){
 getA().then(function(){sEl.textContent="live";sEl.style.color="#00e436";
 requestAnimationFrame(tick);setInterval(plog,PERF_MS);cv.focus();})
 .catch(function(e){console.error(e);sEl.textContent="no assets";sEl.style.color="#ff004d";});};
+// The dev hot-reload (moy CLI) refetches assets after a cart restart -- the cart
+// TITLE is unchanged so df()'s change detection never would (stale sheet/images).
+window.__moyRefetchAssets=function(){getA().catch(function(){});};
 </script>
 <script type=module>
 // ---- loader: boot MicroPython-WASM, mount the console + carts, wire MOY ------
@@ -75,6 +78,31 @@ try {
     events: mp.globals.get("apply_events_json"),
   };
   window.__moyStart();
+  // ---- dev hot-reload (?dev=1, the moy CLI's watch loop) ---------------------
+  // Poll the CLI server's /stamp (latest cart-file mtime); on change, refetch
+  // the live-packed carts.json, rewrite the files in the VFS, restart the cart
+  // (web_boot.reload_cart) and refetch assets. Static production hosting never
+  // has ?dev=1, so this costs nothing there.
+  if (new URLSearchParams(location.search).get("dev")) {
+    let stamp = null;
+    setInterval(async () => {
+      try {
+        const s = await (await fetch("stamp")).text();
+        if (stamp === null) { stamp = s; return; }
+        if (s === stamp) return;
+        stamp = s;
+        const fresh = await (await fetch("carts.json")).json();
+        for (const rel in fresh) {
+          const full = "/moy/carts/" + rel;
+          mkdirs(mp, full.slice(0, full.lastIndexOf("/")));
+          mp.FS.writeFile(full, fresh[rel]);
+        }
+        mp.runPython("import web_boot as _wb; _wb.reload_cart()");
+        window.__moyRefetchAssets();
+        console.log("[moy] cart reloaded");
+      } catch (e) { console.error("[moy] reload failed", e); }
+    }, 400);
+  }
 } catch (e) {
   console.error(e);
   sEl2.textContent = "boot failed (see devtools)";

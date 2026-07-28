@@ -119,9 +119,28 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240):
     _S["driver"] = driver
     _S["served"] = web_view.ServedState(canvas._rec)
     _S["sink"] = _PointerSink(driver)
+    _S["root"] = carts_root
     if cart:
         open_cart(cart)
     return True
+
+
+def reload_cart(name=None):
+    """Dev hot-reload (the moy CLI's watch loop): the page rewrote changed cart
+    files in the VFS; pop any running cart (flushes pmem via release_world),
+    re-scan the store, and restart `name` (default: the cart that was running).
+    Returns True when a cart restarted."""
+    ws = _S["ws"]
+    cart = getattr(ws, "cart", None)
+    if name is None and cart is not None:
+        name = (cart.get("path") or "").rsplit("/", 1)[-1]
+    if cart is not None:
+        ws._exit_to_caller()
+    ws._all_carts = moy_carts.scan(_S["root"])
+    ws.launcher.items = ws._launcher_items(ws._all_carts)
+    ws.slim_carts()
+    ws._dirty = True
+    return open_cart(name) if name else True
 
 
 def open_cart(name):
