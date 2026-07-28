@@ -44,7 +44,9 @@
 //
 // SCOPE (deliberately small -- NOT TulipCC/AMY)
 // The Moybyte sound model is tiny: 4 voices, each a short list of [pitch, wave,
-// vol] steps stepped at a fixed rate, 4 waveforms (square/tri/saw/noise), a
+// vol(, eff)] steps stepped at a fixed rate, 8 waveforms (square/tri/saw/noise
+// + the #170 p8-parity pulse/organ/tilted-saw/phaser), the optional per-note
+// effect column (slide/vibrato/drop/fades/arpeggio -- p8 numbering), a
 // per-voice noise LCG, a master volume and a fixed /CHANNELS mixdown. That whole
 // per-sample model lives here in C and is a byte-for-byte port of
 // AudioEngine.render_into, so the SAME .moy sounds identical on host and device.
@@ -87,6 +89,19 @@
 #define MOY_WAVE_TRIANGLE 1
 #define MOY_WAVE_SAW      2
 #define MOY_WAVE_NOISE    3
+#define MOY_WAVE_PULSE    4   // #170 p8-parity additions -- match audio.py
+#define MOY_WAVE_ORGAN    5
+#define MOY_WAVE_TILTED   6
+#define MOY_WAVE_PHASER   7
+
+// per-note effects (the optional 4th step field; p8 numbering, #170)
+#define MOY_FX_SLIDE      1
+#define MOY_FX_VIBRATO    2
+#define MOY_FX_DROP       3
+#define MOY_FX_FADE_IN    4
+#define MOY_FX_FADE_OUT   5
+#define MOY_FX_ARP_FAST   6
+#define MOY_FX_ARP_SLOW   7
 
 // --- core-1 task tuning ---------------------------------------------------
 // Mix/write block: small enough that the task tops the DMA up continuously, large
@@ -107,14 +122,21 @@
 // live here (the bank/data model stays in Python).
 typedef struct _moy_voice_t {
     int      active;            // bool: producing sound
-    int      nsteps;            // number of valid triples in `steps`
-    int16_t  steps[MOY_MAX_STEPS][3];   // [pitch, wave, vol] per step
+    int      nsteps;            // number of valid entries in `steps`
+    int16_t  steps[MOY_MAX_STEPS][4];   // [pitch, wave, vol, eff] per step
     double   step_dur;         // seconds per step
     int      loop;             // bool: wrap idx at the end vs. deactivate
     int      idx;              // current step index
     double   t;                // seconds into the current step
     double   phase;            // oscillator phase 0..1
+    double   phase2;           // detuned secondary phase (MOY_WAVE_PHASER)
     uint32_t noise;            // per-voice noise LCG state
+    // The channel's previous sounding note -- what MOY_FX_SLIDE glides from
+    // (-1 = none; a slide then degenerates to the note itself). Mirror of
+    // _Voice.prev_pitch/prev_vol; advanced here, committed/read via voice_set/
+    // voice_read's optional trailing fields.
+    int      prev_pitch;
+    int      prev_vol;
     // Commit sequence: bumped by every voice_set (under the mutex in core-1 mode).
     // The core-1 task snapshots it with the rest of the voice and folds its advanced
     // cursor back ONLY while seq is unchanged -- an exact "did core 0 re-commit this
@@ -148,18 +170,21 @@ static volatile double   s_master = 1.0;       // master volume 0..1 (live, core
 static volatile uint32_t s_active_mask = 0;
 #endif
 
-// note_to_freq: equal-temperament Hz for a semitone index (A4=440). Negative
-// pitch (REST) -> 0. Identical to audio.note_to_freq.
-static inline double moy_note_to_freq(int pitch) {
-    if (pitch < 0) {
+// note_to_freq: equal-temperament Hz for a (possibly fractional -- effects
+// bend it) semitone index (A4=440). Negative pitch (REST) -> 0. Identical to
+// audio.note_to_freq.
+static inline double moy_note_to_freq(double pitch) {
+    if (pitch < 0.0) {
         return 0.0;
     }
-    return MOY_A4_FREQ * pow(2.0, (pitch - MOY_A4_PITCH) / 12.0);
+    return MOY_A4_FREQ * pow(2.0, (pitch - (double)MOY_A4_PITCH) / 12.0);
 }
 
 // One waveform sample in [-1, 1] at `phase` in [0, 1). Advances *noise for the
-// noise voice. Byte-for-byte the same arithmetic as audio._sample_wave.
-static inline double moy_sample_wave(int wave, double phase, uint32_t *noise) {
+// noise voice; `phase2` is the detuned secondary phase only the phaser reads.
+// Byte-for-byte the same arithmetic as audio._sample_wave.
+static inline double moy_sample_wave(int wave, double phase, uint32_t *noise,
+                                     double phase2) {
     if (wave == MOY_WAVE_SQUARE) {
         return (phase < 0.5) ? 1.0 : -1.0;
     }
@@ -169,14 +194,42 @@ static inline double moy_sample_wave(int wave, double phase, uint32_t *noise) {
     if (wave == MOY_WAVE_SAW) {
         return 2.0 * phase - 1.0;
     }
+    if (wave == MOY_WAVE_PULSE) {
+        return (phase < (1.0 / 3.0)) ? 1.0 : -1.0;
+    }
+    if (wave == MOY_WAVE_ORGAN) {
+        double p2 = fmod(phase * 2.0, 1.0);
+        double s = (4.0 * fabs(phase - 0.5) - 1.0)
+                 + 0.5 * (4.0 * fabs(p2 - 0.5) - 1.0);
+        return s / 1.5;
+    }
+    if (wave == MOY_WAVE_TILTED) {
+        if (phase < 0.875) {
+            return 2.0 * phase / 0.875 - 1.0;
+        }
+        return 2.0 * (1.0 - phase) / 0.125 - 1.0;
+    }
+    if (wave == MOY_WAVE_PHASER) {
+        double s = (4.0 * fabs(phase - 0.5) - 1.0)
+                 + (4.0 * fabs(phase2 - 0.5) - 1.0);
+        return s * 0.5;
+    }
     // noise: tiny LCG (matches the Python `& 0x7FFFFFFF` masked LCG)
     *noise = (*noise * 1103515245u + 12345u) & 0x7FFFFFFFu;
     return ((double)(*noise) / (double)0x3FFFFFFF) - 1.0;
 }
 
 // advance_step: move a voice to its next step; deactivate (or loop) at the end.
-// Mirror of audio._Voice.advance_step.
+// Records the finished step as the channel's previous sounding note (the
+// MOY_FX_SLIDE source). Mirror of audio._Voice.advance_step.
 static inline void moy_advance_step(moy_voice_t *v) {
+    if (v->idx < v->nsteps) {
+        int16_t *st = v->steps[v->idx];
+        if (st[0] >= 0 && st[2] > 0) {
+            v->prev_pitch = st[0];
+            v->prev_vol = st[2];
+        }
+    }
     v->idx += 1;
     v->t = 0.0;
     if (v->idx >= v->nsteps) {
@@ -213,17 +266,59 @@ static void moy_mix_block(moy_voice_t *voices, uint8_t *out, int nframes,
                 continue;
             }
             int16_t *step = v->steps[v->idx];
-            int pitch = step[0];
             int wave  = step[1];
             int vol   = step[2];
-            if (pitch >= 0 && vol > 0) {
+            int eff   = step[3];
+            if (step[0] >= 0 && vol > 0) {
+                // Per-note effects (#170): EXACTLY the arithmetic of
+                // AudioEngine.render_into's eff block -- keep them in lockstep.
+                double pitch = (double)step[0];
+                double volf  = (double)vol;
+                if (eff) {
+                    double frac = (v->step_dur > 0.0)
+                                ? (v->t / v->step_dur) : 0.0;
+                    if (eff == MOY_FX_SLIDE) {
+                        double pp = (v->prev_pitch >= 0)
+                                  ? (double)v->prev_pitch : pitch;
+                        double pv = (v->prev_pitch >= 0)
+                                  ? (double)v->prev_vol : (double)vol;
+                        pitch = pp + (pitch - pp) * frac;
+                        volf  = pv + ((double)vol - pv) * frac;
+                    } else if (eff == MOY_FX_VIBRATO) {
+                        double ph = fmod(v->t * 7.5, 1.0);
+                        pitch = pitch + (4.0 * fabs(ph - 0.5) - 1.0) * 0.25;
+                    } else if (eff == MOY_FX_FADE_IN) {
+                        volf = (double)vol * frac;
+                    } else if (eff == MOY_FX_FADE_OUT) {
+                        volf = (double)vol * (1.0 - frac);
+                    } else if (eff >= MOY_FX_ARP_FAST) {
+                        double arp = (eff == MOY_FX_ARP_FAST) ? 30.0 : 15.0;
+                        int k = (v->idx / 4) * 4 + ((int)(v->t * arp)) % 4;
+                        if (k < v->nsteps) {
+                            pitch = (double)v->steps[k][0];
+                        }
+                    }
+                }
                 double freq = moy_note_to_freq(pitch);
-                double s = moy_sample_wave(wave, v->phase, &v->noise);
-                acc += s * ((double)vol / 7.0);
-                v->phase += freq * inv_rate;
-                if (v->phase >= 1.0) {
-                    // Python: v.phase -= int(v.phase)  (drop the integer part)
-                    v->phase -= (double)((int)v->phase);
+                if (eff == MOY_FX_DROP) {
+                    freq *= 1.0 - ((v->step_dur > 0.0)
+                                   ? (v->t / v->step_dur) : 0.0);
+                }
+                if (pitch >= 0.0) {
+                    double s = moy_sample_wave(wave, v->phase, &v->noise,
+                                               v->phase2);
+                    acc += s * (volf / 7.0);
+                    v->phase += freq * inv_rate;
+                    if (v->phase >= 1.0) {
+                        // Python: v.phase -= int(v.phase) (drop the int part)
+                        v->phase -= (double)((int)v->phase);
+                    }
+                    if (wave == MOY_WAVE_PHASER) {
+                        v->phase2 += freq * (127.0 / 128.0) * inv_rate;
+                        if (v->phase2 >= 1.0) {
+                            v->phase2 -= (double)((int)v->phase2);
+                        }
+                    }
                 }
             }
             // advance time within the step
@@ -247,18 +342,20 @@ static void moy_mix_block(moy_voice_t *voices, uint8_t *out, int nframes,
 
 // --- Python-facing API ----------------------------------------------------
 
-// voice_set(chan, active, steps, step_dur, loop, idx, t, phase, noise) -- push the
+// voice_set(chan, active, steps, step_dur, loop, idx, t, phase, noise
+//           [, phase2, prev_pitch, prev_vol]) -- push the
 // EXACT state of a Python _Voice into the C mirror. Unlike a "play" trigger this
 // sets every field verbatim (no idx/t/phase reset), so C is a pure function of the
 // pushed state and reproduces render_into bit-for-bit. `steps` is any iterable of
-// 3-element [pitch, wave, vol] sequences (>MOY_MAX_STEPS dropped).
+// [pitch, wave, vol(, eff)] sequences (>MOY_MAX_STEPS dropped). The three
+// trailing args are the #170 effect-state fields; omitted (a pre-#170 caller)
+// they default to a fresh voice's values.
 //
 // THREADING: in legacy per-block mode (core 0 only) this is the lone writer. In
 // core-1 mode DeviceAudio calls voice_set for all voices BETWEEN voice_lock() and
 // voice_unlock(), so the whole commit is atomic versus the task's snapshot -- a
 // half-written moy_voices[] is never visible to core 1.
 static mp_obj_t moy_audio_voice_set(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
     mp_int_t c = mp_obj_get_int(a[0]);
     if (c < 0 || c >= MOY_CHANNELS) {
         return mp_const_none;
@@ -281,9 +378,11 @@ static mp_obj_t moy_audio_voice_set(size_t n_args, const mp_obj_t *a) {
         int pitch = (nfields > 0) ? (int)mp_obj_get_int(fields[0]) : -1;
         int wave  = (nfields > 1) ? (int)mp_obj_get_int(fields[1]) : MOY_WAVE_SQUARE;
         int vol   = (nfields > 2) ? (int)mp_obj_get_int(fields[2]) : 6;
+        int eff   = (nfields > 3) ? (int)mp_obj_get_int(fields[3]) : 0;
         v->steps[nsteps][0] = (int16_t)pitch;
         v->steps[nsteps][1] = (int16_t)wave;
         v->steps[nsteps][2] = (int16_t)vol;
+        v->steps[nsteps][3] = (int16_t)eff;
         nsteps++;
     }
     v->nsteps   = (int)nsteps;
@@ -293,6 +392,9 @@ static mp_obj_t moy_audio_voice_set(size_t n_args, const mp_obj_t *a) {
     v->t        = mp_obj_get_float(a[6]);
     v->phase    = mp_obj_get_float(a[7]);
     v->noise    = (uint32_t)mp_obj_get_int_truncated(a[8]);
+    v->phase2     = (n_args > 9)  ? mp_obj_get_float(a[9])     : 0.0;
+    v->prev_pitch = (n_args > 10) ? (int)mp_obj_get_int(a[10]) : -1;
+    v->prev_vol   = (n_args > 11) ? (int)mp_obj_get_int(a[11]) : 0;
     if (v->idx < 0) {
         v->idx = 0;
     }
@@ -301,9 +403,10 @@ static mp_obj_t moy_audio_voice_set(size_t n_args, const mp_obj_t *a) {
     v->seq += 1;
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_audio_voice_set_obj, 9, 9, moy_audio_voice_set);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_audio_voice_set_obj, 9, 12, moy_audio_voice_set);
 
-// voice_read(chan) -> (active, idx, t, phase, noise). After a render block C owns
+// voice_read(chan) -> (active, idx, t, phase, noise, phase2, prev_pitch,
+// prev_vol). After a render block C owns
 // the advanced render state; the Python AudioEngine reads it back into its _Voice
 // so it stays the single source of truth for the NEXT block's triggering decisions
 // (is_active, the music scheduler's free-channel pick). Returns None for a bad chan.
@@ -315,14 +418,17 @@ static mp_obj_t moy_audio_voice_read(mp_obj_t chan_obj) {
         return mp_const_none;
     }
     moy_voice_t *v = &moy_voices[c];
-    mp_obj_t tup[5] = {
+    mp_obj_t tup[8] = {
         mp_obj_new_bool(v->active),
         MP_OBJ_NEW_SMALL_INT(v->idx),
         mp_obj_new_float(v->t),
         mp_obj_new_float(v->phase),
         mp_obj_new_int_from_uint(v->noise),
+        mp_obj_new_float(v->phase2),
+        MP_OBJ_NEW_SMALL_INT(v->prev_pitch),
+        MP_OBJ_NEW_SMALL_INT(v->prev_vol),
     };
-    return mp_obj_new_tuple(5, tup);
+    return mp_obj_new_tuple(8, tup);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(moy_audio_voice_read_obj, moy_audio_voice_read);
 
@@ -409,7 +515,10 @@ static void moy_audio_task(void *arg) {
                 shared->idx    = s->idx;
                 shared->t      = s->t;
                 shared->phase  = s->phase;
+                shared->phase2 = s->phase2;
                 shared->noise  = s->noise;
+                shared->prev_pitch = s->prev_pitch;
+                shared->prev_vol   = s->prev_vol;
             }
             if (moy_voices[c].active && moy_voices[c].nsteps > 0) {
                 mask |= (1u << c);

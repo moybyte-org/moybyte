@@ -12,7 +12,7 @@ _ME_REST = -1
 _ME_PITCH_MIN = 0
 _ME_PITCH_MAX = 95
 _ME_WAVE_MIN = 0
-_ME_WAVE_MAX = 3
+_ME_WAVE_MAX = 7            # 8 waveforms since #170 (audio.WAVE_*)
 _ME_VOL_MIN = 0
 _ME_VOL_MAX = 7
 _ME_SPEED_MIN = 1
@@ -29,6 +29,22 @@ def _me_clamp(v, lo, hi):
     if v > hi:
         return hi
     return v
+
+
+def _me_copy_pattern(pattern):
+    """Copy a track pattern. Rows may be multi-channel LISTS since #170 (a p8
+    import); a shallow list() would alias them, so undo snapshots / duplicates
+    would mutate together."""
+    return [list(r) if isinstance(r, list) else r for r in pattern]
+
+
+def _me_row_id(row):
+    """A pattern row's channel-0 SFX id -- what the (single-channel) editor
+    surface shows and edits. Multi-channel rows (#170) keep their other
+    channels untouched; -1 (silent) reads as -1."""
+    if isinstance(row, list):
+        return row[0] if row else _ME_REST
+    return row
 
 
 class _MusicOps(OpCodec):
@@ -383,11 +399,21 @@ class MusicEditor:
 
     # -- song (phrase) edits -------------------------------------------------
     def cur_slot_value(self):
-        """The SFX id at the cursor slot in the song view, or None."""
+        """The channel-0 SFX id at the cursor slot in the song view, or None.
+        (Multi-channel rows show/edit channel 0 here; #170.)"""
         t = self.cur_track()
         if t is not None and 0 <= self.slot < len(t.pattern):
-            return t.pattern[self.slot]
+            return _me_row_id(t.pattern[self.slot])
         return None
+
+    def _write_slot(self, t, i, val):
+        """Write a slot's channel-0 SFX id, preserving a multi-channel row's
+        other channels."""
+        row = t.pattern[i]
+        if isinstance(row, list) and row:
+            row[0] = val
+        else:
+            t.pattern[i] = val
 
     def nudge_slot(self, d):
         """Point the current phrase slot at the next/previous SFX id, clamped to the
@@ -397,7 +423,8 @@ class MusicEditor:
             return
         self._push_undo()
         hi = max(0, len(self.bank.sfx) - 1)
-        t.pattern[self.slot] = _me_clamp(t.pattern[self.slot] + d, 0, hi)
+        cur = _me_row_id(t.pattern[self.slot])
+        self._write_slot(t, self.slot, _me_clamp(cur + d, 0, hi))
         self._commit_op()
 
     def set_slot(self, sfx_id):
@@ -407,16 +434,18 @@ class MusicEditor:
             return
         self._push_undo()
         hi = max(0, len(self.bank.sfx) - 1)
-        t.pattern[self.slot] = _me_clamp(int(sfx_id), 0, hi)
+        self._write_slot(t, self.slot, _me_clamp(int(sfx_id), 0, hi))
         self._commit_op()
 
     def add_slot(self):
-        """Append a phrase slot (copying the current slot's SFX id) and move to it."""
+        """Append a phrase slot (copying the current slot's row) and move to it."""
         t = self.cur_track()
         if t is None or len(t.pattern) >= _ME_PATTERN_MAX:
             return
         self._push_undo()
         val = t.pattern[self.slot] if 0 <= self.slot < len(t.pattern) else 0
+        if isinstance(val, list):
+            val = list(val)              # never alias a multi-channel row
         t.pattern.insert(self.slot + 1, val)
         self.slot += 1
         self._commit_op()
@@ -518,7 +547,7 @@ class MusicEditor:
         dup = self._new_track()
         if dup is None:
             return
-        dup.pattern = list(t.pattern)
+        dup.pattern = _me_copy_pattern(t.pattern)
         dup.speed = t.speed
         dup.loop = t.loop
         self.bank.music.append(dup)
@@ -545,7 +574,7 @@ class MusicEditor:
         obj = self.cur_track()
         if obj is None:
             return None
-        return ("song", self.track_idx, list(obj.pattern),
+        return ("song", self.track_idx, _me_copy_pattern(obj.pattern),
                 obj.speed, obj.loop, self.slot)
 
     def _snapshot_of(self, snap):
@@ -570,7 +599,7 @@ class MusicEditor:
         obj = self.bank.music[idx]
         if self.view == self.SONG_VIEW and self.track_idx == idx:
             cursor = self.slot
-        return ("song", idx, list(obj.pattern), obj.speed, obj.loop, cursor)
+        return ("song", idx, _me_copy_pattern(obj.pattern), obj.speed, obj.loop, cursor)
 
     def _restore(self, snap):
         """Write a _snapshot() tuple back over the bank + re-point the cursor."""
@@ -589,7 +618,7 @@ class MusicEditor:
             if not (0 <= idx < len(self.bank.music)):
                 return
             obj = self.bank.music[idx]
-            obj.pattern = list(data)
+            obj.pattern = _me_copy_pattern(data)
             obj.speed = speed
             obj.loop = loop
             self.view = self.SONG_VIEW

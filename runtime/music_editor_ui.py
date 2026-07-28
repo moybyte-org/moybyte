@@ -112,7 +112,8 @@ _MU_REDO = (268, 198, 46, 24)
 # reaching into audio's private table.
 _MU_NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F",
                   "F#", "G", "G#", "A", "A#", "B")
-_MU_WAVE_LABELS = ("SQ", "TRI", "SAW", "NOI")   # WAVE_SQUARE/TRIANGLE/SAW/NOISE
+# WAVE_SQUARE/TRIANGLE/SAW/NOISE + the #170 PULSE/ORGAN/TILTED/PHASER
+_MU_WAVE_LABELS = ("SQ", "TRI", "SAW", "NOI", "PLS", "ORG", "TLT", "PHA")
 # The pre-literate glyph for each #92 edit-pad button (icon + word), keyed by label:
 # COPY/PASTE/DUP + the reorder arrows (the step/slot list is vertical, so MOVE-/MOVE+
 # read as up/down). The other pad buttons (NOTE-, WAVE, ADD, ...) stay plain labels.
@@ -567,7 +568,7 @@ class MusicEditorUI:
                 NAMES["brown"] if self.ws.light_chrome() else NAMES["peach"])
             cv.print(note, x + 24 * fs, y + 4 * fs, note_c if pitch >= 0 else
                      base_dim, 1)
-            cv.print(_MU_WAVE_LABELS[wave & 3], x + 64 * fs, y + 4 * fs, tc, 1)
+            cv.print(_MU_WAVE_LABELS[wave & 7], x + 64 * fs, y + 4 * fs, tc, 1)
             # a little volume bar (0..7) -> up to 7 ticks
             bx = x + 96 * fs
             for v in range(7):
@@ -597,13 +598,21 @@ class MusicEditorUI:
             if cur:
                 cv.rect(x, y, lay.list_w, lay.row_h - 1,
                         th["hilite"] if light else NAMES["indigo"])
-            sid = t.pattern[idx]
+            row = t.pattern[idx]
+            # A multi-channel row (#170) reads "SFX 3+2ch": channel 0's id plus
+            # how many more channels sound this row; the editor edits channel 0.
+            if isinstance(row, list):
+                extra = sum(1 for s in row[1:] if s >= 0)
+                sid = row[0] if row else -1
+                label = "SFX %s+%dch" % (sid, extra) if extra else "SFX " + str(sid)
+            else:
+                label = "SFX " + str(row)
             sel_ink = th["selection_ink"] if light else NAMES["white"]
             cv.print("%02d" % idx, x + 2 * fs, y + 4 * fs,
                      (th["ink_dim"] if light else NAMES["dark_grey"])
                      if not cur else (sel_ink if light
                                       else NAMES["light_grey"]), 1)
-            cv.print("SFX " + str(sid), x + 30 * fs, y + 4 * fs,
+            cv.print(label, x + 30 * fs, y + 4 * fs,
                      sel_ink if cur else
                      (th["ink"] if light else NAMES["light_grey"]), 1)
 

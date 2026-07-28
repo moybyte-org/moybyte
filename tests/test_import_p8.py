@@ -311,3 +311,47 @@ def test_cheatsheet_doc_exists():
     assert "circb" in text
     assert 'btn("left")' in text
     assert "peek" in text and "poke" in text
+
+
+# -- full-fidelity audio import (#170): effects, 8 waves, 4-channel rows -----
+
+def test_sfx_effect_nibble_and_new_waves_import_verbatim():
+    # instrument 1 (tilted saw) -> wave 6, 4 (pulse) -> 4, 5 (organ) -> 5,
+    # 7 (phaser) -> 7; the effect nibble rides along in p8 numbering.
+    line = ("00" + "10" + "00" + "00"
+            + "1e" + "1" + "6" + "1"      # tilted saw, slide
+            + "21" + "4" + "5" + "2"      # pulse, vibrato
+            + "18" + "5" + "7" + "0"      # organ, no effect -> 3-element step
+            + "30" + "7" + "6" + "7"      # phaser, arp slow
+            + "00000" * 28)
+    d = import_p8._sfx_line_to_dict(line)
+    assert d["steps"][0] == [0x1E, 6, 6, 1]
+    assert d["steps"][1] == [0x21, 4, 5, 2]
+    assert d["steps"][2] == [0x18, 5, 7]
+    assert d["steps"][3] == [0x30, 7, 6, 7]
+
+
+def test_music_rows_import_all_channels_with_fixed_positions():
+    # ch0=sfx0, ch1 off, ch2=sfx2, ch3 off -> [0, -1, 2] (trailing off trimmed,
+    # positions kept so the engine holds each channel on the same voice).
+    assert import_p8._music_line_row("00 " + "00" + "41" + "02" + "43") == [0, -1, 2]
+    # only ch0 -> collapses to the 1-channel int form
+    assert import_p8._music_line_row("00 " + "05" + "41" + "42" + "43") == 5
+    # all off -> None (a pattern-run break)
+    assert import_p8._music_line_row("00 " + "41" + "42" + "43" + "44") is None
+
+
+def test_multichannel_music_track_plays_on_the_engine(tmp_path):
+    # End to end: a 2-channel __music__ row -> sounds.json -> AudioBank ->
+    # the engine claims two voices for it.
+    from runtime import audio as A
+    sfx2 = "00" + "10" + "00" + "00" + "24" + "0" + "6" + "0" + "00000" * 31
+    sounds, n_sfx, n_music = import_p8.sfx_music_to_sounds(
+        [SFX_LINE, sfx2], ["01 " + "00" + "01" + "42" + "43"])
+    assert n_music == 1
+    bank = AudioBank.from_dict(sounds)
+    assert bank.music[0].pattern == [[0, 1]]
+    eng = A.AudioEngine(bank, rate=8000)
+    eng.play_music(0)
+    assert eng.voices[3].active and eng.voices[2].active
+    assert any(b != 0 for b in eng.render(400))

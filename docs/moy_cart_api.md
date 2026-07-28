@@ -440,6 +440,24 @@ Both `net` and `on_net` are **only present** when the manifest grants
 | `sound_stop(chan=None)` | stop a channel (or all) |
 | `volume(level)` | set output volume |
 
+The sound bank lives in the cart's `sounds.json` (authored in the Music tab).
+Since #170 the model is PICO-8-parity:
+
+- A note is `[pitch, wave, vol]` or `[pitch, wave, vol, effect]`. `pitch` is a
+  semitone index 0–95 (57 = A4 = 440 Hz, −1 = rest), `vol` 0–7.
+- **8 waveforms**: `0` square, `1` triangle, `2` saw, `3` noise, `4` pulse,
+  `5` organ, `6` tilted saw, `7` phaser.
+- **Effects** (optional 4th field, PICO-8 numbering): `1` slide (glide from the
+  channel's previous note), `2` vibrato, `3` drop, `4` fade in, `5` fade out,
+  `6`/`7` arpeggio fast/slow over the note's group of four.
+- A music track's pattern **row** is one SFX id — or a **list of up to 4 ids**
+  (one per channel, `-1` = silent), so a track can play real multi-part music.
+  Music claims voices from the top (a 1-channel track uses only channel 3);
+  `sfx()` round-robins whatever channels music leaves free.
+
+Imported PICO-8 carts (`tools/import_p8.py` / `moy port`) carry all of this
+over verbatim — waves, effects and all four music channels.
+
 ## State & utility
 
 | call | does |

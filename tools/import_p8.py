@@ -17,16 +17,14 @@ This tool parses the *text* `.p8` and writes a `.moy` FOLDER:
                               matches, so the only work is padding/cropping to the
                               16x16 (128x128px) SpriteSheet grid. Round-trips
                               stably through SpriteSheet.from_hex/to_hex.
-  __sfx__   -> sounds.json    BEST-EFFORT, LOSSY. PICO-8 SFX = 32 notes x
+  __sfx__   -> sounds.json    FULL-FIDELITY since #170. PICO-8 SFX = 32 notes x
    __music__                  [pitch, instrument(0-7 builtin + custom), volume,
                               effect] over 8 instruments + 4 channels + an effect
-                              column. Moybyte SFX = [pitch, wave(0-3), vol(0-7)]
-                              steps at one `speed`, 1-channel music. We map the 8
-                              PICO-8 instruments down to the 4 Moybyte waveforms,
-                              DROP the effect column entirely, and FLATTEN the
-                              4-channel music pattern to Moybyte's 1-channel
-                              `pattern` (taking the first non-empty channel per
-                              row). See _IMPORT_INSTRUMENT_TO_WAVE below.
+                              column; Moybyte now models all of it: 8 waveforms
+                              (renumbered, see _IMPORT_INSTRUMENT_TO_WAVE), the
+                              effect nibble verbatim (p8 numbering), and
+                              4-channel music rows (fixed channel positions).
+                              Only the 8 CUSTOM instruments stay unmodelled.
   __lua__   -> main.py        NOT transpiled / NOT executed. The Lua is imported as
                               a commented-out reference block, with a tiny working
                               v0.4 Python stub on top. Running real PICO-8 code is
@@ -158,7 +156,7 @@ def gfx_to_kgfx(gfx_lines):
 
 
 # --------------------------------------------------------------------------
-# __sfx__ / __music__  ->  sounds.json   (best-effort, LOSSY)
+# __sfx__ / __music__  ->  sounds.json
 # --------------------------------------------------------------------------
 # PICO-8 __sfx__: one line per SFX (up to 64). Each line is hex:
 #     [editor mode:2][note duration:2][loop start:2][loop end:2] then 32 notes.
@@ -166,37 +164,42 @@ def gfx_to_kgfx(gfx_lines):
 #     pitch    = first 2 nibbles, 0..63 (C0..D#5; PICO-8 pitch 0 == note C0)
 #     waveform = next 1 nibble, 0..15 (0..7 builtin instruments, 8..F custom)
 #     volume   = next 1 nibble, 0..7
-#     effect   = last 1 nibble, 0..7  (we DROP this -- Moybyte has no effects)
+#     effect   = last 1 nibble, 0..7
 #
-# Moybyte SFX (runtime/audio.py): steps of [pitch, wave, vol] at one `speed`
-# (steps/sec), where pitch is a semitone index 0..95 (A4=57), wave is 0..3
-# (square/triangle/saw/noise), vol 0..7. Mapping decisions, all lossy:
+# Moybyte SFX (runtime/audio.py): steps of [pitch, wave, vol(, eff)] at one
+# `speed` (steps/sec), where pitch is a semitone index 0..95 (A4=57), wave is
+# 0..7, vol 0..7, eff 0..7. Since #170 the model covers PICO-8's 1:1:
 #   * PITCH: PICO-8 pitch 0 == C0. Moybyte pitch is a raw semitone index where
 #     C0 == 0 too (name_to_pitch('C0') -> 0), so PICO-8 pitch maps 1:1 as a
 #     semitone index. A volume-0 note becomes a REST (-1), like PICO-8.
-#   * WAVE: 8 PICO-8 instruments -> 4 Moybyte waveforms (table below). The 8
-#     CUSTOM instruments (waveform 8..15, defined in __sfx__ slots 0..7) are not
-#     modelled; we fold them onto the builtin in the low 3 bits (w & 7).
+#   * WAVE: all 8 builtin instruments map 1:1 (table below -- the two consoles
+#     number them differently). The 8 CUSTOM instruments (waveform 8..15,
+#     defined in __sfx__ slots 0..7) are still not modelled; we fold them onto
+#     the builtin in the low 3 bits (w & 7).
 #   * SPEED: PICO-8 "note duration" D is ticks-per-row at 120 ticks/sec, so the
 #     row rate is 120/D rows/sec. Moybyte `speed` is steps/sec, so speed = round(
 #     120/D), clamped to >=1. D==0 is treated as 1.
-#   * EFFECTS (slide/vibrato/drop/arp/fades): DROPPED entirely.
+#   * EFFECTS: the nibble carries over VERBATIM -- Moybyte uses PICO-8's
+#     numbering (1 slide, 2 vibrato, 3 drop, 4/5 fades, 6/7 arpeggio).
 #   * Trailing all-rest notes are trimmed so a mostly-empty SFX stays short.
 
 PICO8_PITCH_C0 = 0  # PICO-8 pitch index 0 is the note C0
 REST = -1
 
-# 8 PICO-8 builtin instruments -> Moybyte waveform (0 square,1 tri,2 saw,3 noise)
-#   0 triangle, 1 tilted saw, 2 saw, 3 square, 4 pulse, 5 organ, 6 noise, 7 phaser
+# 8 PICO-8 builtin instruments -> the same 8 Moybyte waveforms, renumbered.
+# p8: 0 triangle, 1 tilted saw, 2 saw, 3 square, 4 pulse, 5 organ, 6 noise,
+#     7 phaser
+# moy: 0 square, 1 triangle, 2 saw, 3 noise, 4 pulse, 5 organ, 6 tilted saw,
+#      7 phaser (audio.WAVE_*)
 _IMPORT_INSTRUMENT_TO_WAVE = {
-    0: 1,  # triangle  -> triangle
-    1: 2,  # tilted saw -> saw
-    2: 2,  # saw       -> saw
-    3: 0,  # square    -> square
-    4: 0,  # pulse     -> square (closest of the 4)
-    5: 1,  # organ     -> triangle (mellow)
-    6: 3,  # noise     -> noise
-    7: 2,  # phaser    -> saw (buzzy)
+    0: 1,  # triangle   -> WAVE_TRIANGLE
+    1: 6,  # tilted saw -> WAVE_TILTED
+    2: 2,  # saw        -> WAVE_SAW
+    3: 0,  # square     -> WAVE_SQUARE
+    4: 4,  # pulse      -> WAVE_PULSE
+    5: 5,  # organ      -> WAVE_ORGAN
+    6: 3,  # noise      -> WAVE_NOISE
+    7: 7,  # phaser     -> WAVE_PHASER
 }
 
 
@@ -224,10 +227,13 @@ def _sfx_line_to_dict(line):
         pitch = _hx(chunk, 0, 2)
         instrument = int(chunk[2], 16) if chunk[2] in "0123456789abcdef" else 0
         vol = int(chunk[3], 16) if chunk[3] in "01234567" else 0
-        # effect = chunk[4]  -- intentionally dropped
+        eff = int(chunk[4], 16) if chunk[4] in "01234567" else 0
         wave = _IMPORT_INSTRUMENT_TO_WAVE.get(instrument & 7, 0)
         if vol <= 0:
             steps.append([REST, wave, 0])
+        elif eff:
+            # the effect nibble carries over verbatim (#170, p8 numbering)
+            steps.append([PICO8_PITCH_C0 + pitch, wave, vol, eff])
         else:
             steps.append([PICO8_PITCH_C0 + pitch, wave, vol])
     # trim trailing rests so a near-empty SFX doesn't carry 32 silent steps
@@ -238,23 +244,14 @@ def _sfx_line_to_dict(line):
     return {"speed": int(speed), "loop": False, "steps": steps}
 
 
-def _music_line_to_pattern_entry(line):
-    """One PICO-8 __music__ line -> a single SFX id for Moybyte's 1-channel
-    pattern, or None if the row is empty.
+def _music_line_channels(line):
+    """All ENABLED channel SFX ids of one __music__ line (in channel order).
 
     PICO-8 music line on disk is `<flags:2> <space> <ch0:2><ch1:2><ch2:2><ch3:2>`
     -- a flag byte, a single space, then the four channel bytes packed together.
     Each channel byte is an SFX id 0..63; bit 6 (0x40) set means the channel is
     OFF for this pattern (so 0x40+ == silent). We tolerate either the real spaced
-    form or a fully-packed 10-hex line by stripping internal whitespace. We
-    FLATTEN 4 channels to 1 by taking the first channel that is enabled and points
-    at a real SFX."""
-    ids = _music_line_channels(line)
-    return ids[0] if ids else None
-
-
-def _music_line_channels(line):
-    """All ENABLED channel SFX ids of one __music__ line (in channel order)."""
+    form or a fully-packed 10-hex line by stripping internal whitespace."""
     s = "".join(line.strip().lower().split())   # drop the inter-group space(s)
     if len(s) < 10:
         return []
@@ -268,25 +265,28 @@ def _music_line_channels(line):
     return out
 
 
-def _melody_channel(ids, sfx):
-    """Pick the channel to KEEP in the 4->1 flatten: the enabled sfx with the
-    highest mean pitch over its sounding steps -- the top line is usually the
-    melody, and keeping the bass instead is what made ported tunes
-    unrecognizable. Falls back to the first channel without bank data."""
-    best, best_pitch = None, -1.0
-    for sid in ids:
-        if sfx is None or sid >= len(sfx):
-            continue
-        steps = sfx[sid].get("steps") or []
-        pitches = [st[0] for st in steps if st and st[2] > 0]
-        if not pitches:
-            continue
-        p = sum(pitches) / len(pitches)
-        if p > best_pitch:
-            best, best_pitch = sid, p
-    if best is None:
-        return ids[0] if ids else None
-    return best
+def _music_line_row(line):
+    """One PICO-8 __music__ line -> a Moybyte multi-channel pattern row (#170):
+    a fixed-POSITION list [ch0, ch1, ch2, ch3] with -1 for a disabled channel
+    (positions matter -- the engine keeps channel j on the same voice across
+    rows, which is what lets slides carry over), trailing -1s trimmed. A row
+    with only channel 0 collapses to a plain int (the 1-channel form); a fully
+    silent row is None."""
+    s = "".join(line.strip().lower().split())
+    if len(s) < 10:
+        return None
+    chans = s[2:10]
+    row = []
+    for ci in range(4):
+        b = _hx(chans, ci * 2, ci * 2 + 2)
+        row.append(-1 if (b & 0x40) else (b & 0x3F))
+    while row and row[-1] < 0:
+        row.pop()
+    if not row:
+        return None
+    if len(row) == 1:
+        return row[0]
+    return row
 
 
 def _music_tracks(music_lines, sfx=None):
@@ -297,13 +297,15 @@ def _music_tracks(music_lines, sfx=None):
     importer flattened EVERYTHING into one track, so a cart's music(40) pointed
     at nothing. Split on the flag bits instead: one Moybyte track per run, and
     return {p8_pattern_start: track_index} so the Lua shim can remap music(n)
-    (nearest-lower fallback for a mid-song start index)."""
+    (nearest-lower fallback for a mid-song start index).
+
+    Since #170 each pattern row imports as a MULTI-CHANNEL row (all four p8
+    channels, fixed positions) -- the old 4->1 melody-pick flatten is gone."""
     rows = []
     for line in music_lines:
         s = "".join(line.strip().lower().split())
         flags = _hx(s, 0, 2) if len(s) >= 10 else 0
-        ids = _music_line_channels(line)
-        rows.append((flags, _melody_channel(ids, sfx) if ids else None))
+        rows.append((flags, _music_line_row(line)))
     tracks = []
     starts = {}
     i = 0
@@ -327,9 +329,13 @@ def _music_tracks(music_lines, sfx=None):
         # A row lasts its WHOLE 32-note SFX: speed (slots/sec) = sfx steps/sec
         # divided by 32. The old hard-coded 4 advanced rows every 250ms while
         # each row's notes were still playing -- a garbled medley of row-heads.
+        # Take the tempo from the first row's first ENABLED channel.
         spd = 4.0
-        if sfx and pattern and pattern[0] < len(sfx):
-            spd = (sfx[pattern[0]].get("speed") or 8) / 32.0
+        first = pattern[0] if pattern else None
+        if isinstance(first, list):
+            first = next((sid for sid in first if sid >= 0), None)
+        if sfx and first is not None and 0 <= first < len(sfx):
+            spd = (sfx[first].get("speed") or 8) / 32.0
         tracks.append({"speed": spd, "loop": loop, "pattern": pattern})
     return tracks, starts
 
@@ -341,7 +347,7 @@ def music_start_map(music_lines):
 
 
 def sfx_music_to_sounds(sfx_lines, music_lines, max_sfx=64):
-    """Build the AudioBank-shaped sounds dict (lossy) from __sfx__/__music__.
+    """Build the AudioBank-shaped sounds dict from __sfx__/__music__.
 
     Returns (sounds_dict_or_None, n_sfx, n_music). The SFX list keeps positional
     ids (empty/all-rest SFX become an empty placeholder so music ids still line
@@ -534,8 +540,8 @@ def lua_to_main_py(lua_lines, title):
     head = (
         '# Imported from a PICO-8 .p8 by tools/import_p8.py.\n'
         '#\n'
-        '# Only the ASSETS were imported (sprites.moygfx, and sounds.json if present;\n'
-        '# audio is a lossy fold and __map__/.p8.png are not imported yet).\n'
+        '# Only the ASSETS were imported (sprites.moygfx, and sounds.json if\n'
+        '# present -- full-fidelity since #170: 8 waves, effects, 4-channel music).\n'
         '# Moybyte is PYTHON, not Lua -- so a PICO-8 cart does not "just run": you\n'
         '# PORT it, and that is the fun part. The original PICO-8 Lua is kept below\n'
         '# as a REFERENCE COMMENT (NOT executed -- running Lua is gated on #6).\n'
@@ -660,16 +666,16 @@ def import_p8(p8_path, out_dir):
     else:
         summary["empty"].append("sprites.moygfx (no __gfx__ pixels)")
 
-    # sounds.json (lossy from __sfx__/__music__)
+    # sounds.json (from __sfx__/__music__; full-fidelity since #170)
     sounds, n_sfx, n_music = sfx_music_to_sounds(
         sections.get("sfx", []), sections.get("music", []))
     if sounds is not None:
         with open(os.path.join(out_dir, "sounds.json"), "w", encoding="utf-8") as f:
             json.dump(sounds, f, indent=2)
-        summary["lossy"].append(
+        summary["imported"].append(
             "sounds.json (from __sfx__/__music__: %d sfx, %d music; "
-            "instruments folded to 4 waves, effects dropped, "
-            "music flattened to 1 channel)" % (n_sfx, n_music))
+            "8 waves 1:1, effects verbatim, 4-channel rows; only custom "
+            "instruments unmodelled)" % (n_sfx, n_music))
     else:
         summary["empty"].append("sounds.json (no __sfx__/__music__)")
 

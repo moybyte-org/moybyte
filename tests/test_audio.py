@@ -42,10 +42,23 @@ def test_freq_to_pitch_roundtrips_through_note_to_freq():
 
 def test_sfx_normalizes_and_roundtrips():
     s = audio.SFX([[60, 0, 6], [62], [-1, 9, 99]], speed=12, loop=True)
-    # short steps fill defaults; wave/vol clamp into range; rest stays -1
+    # short steps fill defaults; wave/vol clamp into range (8 waves since #170);
+    # rest stays -1
     assert s.steps[1] == [62, audio.WAVE_SQUARE, 6]
-    assert s.steps[2] == [audio.REST, 3, 7]
+    assert s.steps[2] == [audio.REST, 7, 7]
     assert s.speed == 12 and s.loop is True
+    s2 = audio.SFX.from_dict(s.to_dict())
+    assert s2.to_dict() == s.to_dict()
+
+
+def test_sfx_effect_column_optional_and_stable():
+    # #170: a step MAY carry a 4th field (the per-note effect, p8 numbering).
+    # A 3-element step must serialize 3-element (pre-#170 banks byte-stable on
+    # disk); a step with an effect keeps it through the round-trip; eff clamps.
+    s = audio.SFX([[60, 0, 6], [62, 1, 6, audio.FX_SLIDE], [64, 2, 6, 99]])
+    assert s.steps[0] == [60, 0, 6]                      # no eff -> 3-element
+    assert s.steps[1] == [62, 1, 6, audio.FX_SLIDE]
+    assert s.steps[2] == [64, 2, 6, 7]                   # clamped
     s2 = audio.SFX.from_dict(s.to_dict())
     assert s2.to_dict() == s.to_dict()
 
@@ -325,14 +338,13 @@ def test_music_editor_sfx_step_edits_and_clamps():
     me.set_pitch(1)
     me.nudge_pitch(-5)
     assert me.cur_step()[0] == 0
-    # wave cycles square->triangle->saw->noise->square (0..3 wrap)
+    # wave cycles through all EIGHT waveforms with wrap (0..7, #170)
     me.set_pitch(57)
     waves = []
-    for _ in range(5):
+    for _ in range(9):
         waves.append(me.cur_step()[1])
         me.cycle_wave(1)
-    assert waves == [waves[0], (waves[0] + 1) % 4, (waves[0] + 2) % 4,
-                     (waves[0] + 3) % 4, waves[0]]
+    assert waves == [(waves[0] + i) % 8 for i in range(8)] + [waves[0]]
     # volume cycles with wrap (7 -> 0); nudge clamps at the ends
     me.cur_step()[2] = 7
     me.cycle_vol(1)
@@ -964,3 +976,127 @@ def test_music_editor_ui_held_ctrl_z_fires_undo_once(tmp_path):
     ws.music_ui._music_input()
     assert len(me._undo) == 0               # the second undo landed
     ws.input.last_key = 0
+
+
+# -- p8-parity synth: 8 waves, effects, multi-channel music (#170) -----------
+
+def test_all_eight_waves_make_sound():
+    for w in range(8):
+        b = audio.AudioBank([audio.SFX([[57, w, 6]] * 4, speed=8)], [])
+        eng = audio.AudioEngine(b, rate=8000)
+        eng.play_sfx(0)
+        assert any(x != 0 for x in eng.render(800)), "wave %d is silent" % w
+
+
+def test_each_effect_changes_the_output():
+    def render(fx):
+        steps = [[57, 0, 6], [69, 0, 6, fx] if fx else [69, 0, 6]]
+        eng = audio.AudioEngine(
+            audio.AudioBank([audio.SFX(steps, speed=4)], []), rate=8000)
+        eng.play_sfx(0)
+        return eng.render(4000)
+    plain = render(0)
+    for fx in range(1, 8):
+        assert render(fx) != plain, "effect %d had no audible effect" % fx
+
+
+def test_fade_out_ends_silent_fade_in_starts_silent():
+    def one_note(fx):
+        eng = audio.AudioEngine(
+            audio.AudioBank([audio.SFX([[57, 0, 7, fx]], speed=1)], []),
+            rate=8000)
+        eng.play_sfx(0)
+        return eng.render(8000)          # the whole 1-second step
+    import struct
+
+    def rms(pcm, lo, hi):
+        vals = struct.unpack("<%dh" % ((hi - lo) // 2), pcm[lo:hi])
+        return (sum(v * v for v in vals) / len(vals)) ** 0.5
+    out = one_note(audio.FX_FADE_OUT)
+    assert rms(out, 0, 2000) > 4 * rms(out, 14000, 16000)
+    inn = one_note(audio.FX_FADE_IN)
+    assert rms(inn, 14000, 16000) > 4 * rms(inn, 0, 2000)
+
+
+def test_slide_records_previous_note_and_survives_retrigger():
+    # advance_step records the finished sounding note; play() must NOT clear it
+    # (a slide on the next music row glides from the previous row's note).
+    eng = audio.AudioEngine(
+        audio.AudioBank([audio.SFX([[30, 0, 6], [90, 0, 6, audio.FX_SLIDE]],
+                                   speed=2)], []), rate=8000)
+    eng.play_sfx(0, chan=0)
+    eng.render(6000)                     # into the slide step
+    v = eng.voices[0]
+    assert v.prev_pitch == 30 and v.prev_vol == 6
+    v.play([[50, 0, 6]], 0.05, False)
+    assert v.prev_pitch == 30            # retrigger keeps the channel memory
+
+
+def test_multichannel_music_claims_voices_from_the_top():
+    sfx = [audio.SFX([[40 + i, 0, 6]] * 8, speed=8) for i in range(4)]
+    b = audio.AudioBank(sfx, [audio.MusicTrack([[0, 1, 2]], speed=1)])
+    eng = audio.AudioEngine(b, rate=8000)
+    eng.play_music(0)
+    # row channel j -> voice MUSIC_CHANNEL - j; voice 0 stays free for sfx
+    assert eng._music_nch == 3
+    assert all(eng.voices[c].active for c in (3, 2, 1))
+    assert not eng.voices[0].active
+    eng.play_sfx(3)                      # a game sfx avoids the claimed voices
+    assert eng.voices[0].active
+    eng.stop_music()                     # releases every claimed voice ...
+    assert not any(eng.voices[c].active for c in (1, 2, 3))
+    assert eng.voices[0].active          # ... but never the live game sfx
+    assert eng._music_nch == 1
+
+
+def test_multichannel_row_minus_one_silences_that_voice():
+    sfx = [audio.SFX([[40 + i, 0, 6]] * 8, speed=8) for i in range(4)]
+    b = audio.AudioBank(sfx, [audio.MusicTrack([[0, 1], [0, -1]], speed=10)])
+    eng = audio.AudioEngine(b, rate=8000)
+    eng.play_music(0)
+    assert eng.voices[2].active
+    eng.render(1200)                     # 0.15 s -> exactly one slot advance
+    assert not eng.voices[2].active and eng.voices[3].active
+
+
+def test_music_track_rows_serialize_stably():
+    # ints stay ints (pre-#170 banks byte-stable); list rows round-trip.
+    t = audio.MusicTrack([0, [1, 2], [3, -1, 4], 2], speed=4)
+    d = t.to_dict()
+    assert d["pattern"] == [0, [1, 2], [3, -1, 4], 2]
+    assert audio.MusicTrack.from_dict(d).to_dict() == d
+
+
+def test_legacy_single_channel_music_behavior_unchanged():
+    eng = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
+    eng.play_music(0)
+    assert eng._music_nch == 1
+    assert eng.voices[audio.MUSIC_CHANNEL].active
+    assert not any(v.active for v in eng.voices[:audio.MUSIC_CHANNEL])
+    # sfx still round-robin 0..2 and never steal the music voice
+    for _ in range(6):
+        eng.play_sfx(0)
+    assert eng.voices[audio.MUSIC_CHANNEL].active
+
+
+def test_music_editor_slot_verbs_edit_channel_zero_of_list_rows():
+    # The (single-channel) editor surface over an imported multi-channel track:
+    # slot verbs read/write channel 0 and preserve the other channels; the
+    # undo snapshot must deep-copy rows (no aliasing).
+    b = audio.AudioBank(
+        [audio.SFX([[60, 0, 6]]) for _ in range(4)],
+        [audio.MusicTrack([[0, 1, 2], [3, -1]], speed=4)])
+    me, _ = _music_editor(b)
+    me.toggle_view()
+    me.select_cursor(0)
+    assert me.cur_slot_value() == 0
+    me.nudge_slot(2)
+    assert b.music[0].pattern[0] == [2, 1, 2]     # ch0 edited, ch1/2 kept
+    me.undo()
+    assert b.music[0].pattern[0] == [0, 1, 2]     # undo restored, not aliased
+    me.redo()
+    assert b.music[0].pattern[0] == [2, 1, 2]
+    # add_slot copies the row by value
+    me.add_slot()
+    b.music[0].pattern[1][0] = 3
+    assert b.music[0].pattern[0] == [2, 1, 2]
