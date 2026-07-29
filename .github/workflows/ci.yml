@@ -112,9 +112,15 @@ jobs:
             BASE="${{ github.event.before }}"
             HEAD="${{ github.event.after }}"
           fi
-          # A brand-new branch/tag push reports an all-zero BASE; diff against
-          # git's empty tree instead so the classifier has something to diff.
-          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+          # A brand-new branch/tag push reports an all-zero BASE. A FORCE-PUSH
+          # reports a real-looking BASE that no longer exists, because the
+          # rewrite orphaned it -- `git diff` then dies with "bad object" and
+          # takes the job with it. Both cases mean "no usable predecessor", so
+          # fall back to git's empty tree and classify against everything.
+          if [ -z "$BASE" ] \
+             || [ "$BASE" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            echo "no reachable base commit ($BASE) -- diffing against the empty tree"
             BASE="$(git hash-object -t tree /dev/null)"
           fi
           git diff --name-only "$BASE" "$HEAD" > changed_files.txt
