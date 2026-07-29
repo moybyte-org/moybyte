@@ -14,6 +14,7 @@ art tools already work; this CLI supplies the loop around them.
                                  files that boot straight into the game --
                                  host anywhere (itch.io HTML5 uploads work)
     moy.py port <cart.p8|url>    convert a PICO-8 cart: assets via p8_import,
+                 [--zoom [T,B]]  --zoom trims edge rows so the port draws 2x
                                  code mechanically ported to Lua 5.4 under the
                                  p8 compat shim (p8_lua_port)
     moy.py demo                  fetch Celeste Classic (PICO-8), port it, run
@@ -237,8 +238,13 @@ CELESTE_NOTE = """\
 
 
 def cmd_port(args):
+    import p8_lua_port
+    crop = p8_lua_port.parse_zoom(args)
+    args = [a for a in args if not a.startswith("--")]
+    if crop != (0, 0):        # drop the "T,B" that followed --zoom
+        args = [a for a in args if not ("," in a and a.replace(",", "").isdigit())]
     if not args:
-        die("usage: moy.py port <cart.p8 | url> [out.moy]")
+        die("usage: moy.py port <cart.p8 | url> [out.moy] [--zoom [T,B]]")
     src = args[0]
     if src.startswith(("http://", "https://")):
         import urllib.request
@@ -253,8 +259,7 @@ def cmd_port(args):
         die("no such .p8: " + src)
     out = cart_dir(args[1] if len(args) > 1
                    else os.path.splitext(os.path.basename(src))[0])
-    import p8_lua_port
-    p8_lua_port.port(src, out)
+    p8_lua_port.port(src, out, crop=crop)
     print("ported -> %s" % out)
     print("  PICO-8 carts carry their own licenses (BBS default CC BY-NC-SA")
     print("  4.0) -- ported carts are dev/personal material unless stated.")
@@ -265,11 +270,21 @@ def cmd_demo(args):
     """Fetch + port + run Celeste Classic -- the one-command demo."""
     print(CELESTE_NOTE)
     out = cart_dir("celeste")
-    if not os.path.isdir(out):
-        cmd_port([CELESTE_URL, "celeste"])
+    # --zoom belongs to the PORT, not the run, so split it out -- and re-port
+    # when it is asked for, or the flag would silently do nothing on the second
+    # `demo` (the cart is already on disk, ported at the other scale).
+    zoom = []
+    if "--zoom" in args:
+        i = args.index("--zoom")
+        zoom = [args[i]]
+        if i + 1 < len(args) and "," in args[i + 1]:
+            zoom.append(args[i + 1])
+    rest = [a for a in args if a not in zoom]
+    if zoom or not os.path.isdir(out):
+        cmd_port([CELESTE_URL, "celeste"] + zoom)
     else:
         print("using existing %s" % out)
-    cmd_run(["celeste.moy"] + list(args))
+    cmd_run(["celeste.moy"] + rest)
 
 
 def main():

@@ -27,6 +27,14 @@ shim over the ordinary cart verbs, so the port exercises the whole Lua bridge.
 
 Usage:
     .venv/bin/python tools/p8_lua_port.py cart.p8 out_dir [--title "Name"]
+                                         [--zoom [T,B]]
+
+--zoom trades edge rows for size. A 128x128 p8 screen cannot fill 320x240 at an
+integer scale (2x is 256x256, 16px too tall), so a port runs 1:1 in a letterbox
+by default. Cropping 8 rows leaves a 128x120 viewport, which fits at 2x =
+256x240 and fills the height. Bare --zoom crops 4 off each end; T,B places the
+cut deliberately, because a p8 game's HUD lives at one edge or the other
+(celeste draws its summit timer at y=4, so it survives 4 off the top, not 8).
 
 The emitted cart is only as faithful as doubles-instead-of-16.16-fixed-point
 allows (fine for most carts; Celeste Classic community ports do the same).
@@ -298,13 +306,30 @@ SHIM = r'''-- ============================================================
 -- The p8 API written over the moy cart API; the ported cart below
 -- calls PICO-8 verbs and never knows it moved.
 -- ============================================================
-local P8_OX, P8_OY = 96, 56        -- center the 128x128 p8 screen in 320x240
+-- ZOOM (--zoom T,B): p8 rows are CROPPED off the top and bottom, shrinking the
+-- logical viewport so a BIGGER integer scale fits. 128x128 cannot fill 320x240
+-- at an integer scale (2x is 256x256, 16px too tall), so an uncropped port runs
+-- 1:1 in a letterbox; drop 8 rows and 2x = 256x240 fills the height exactly.
+-- Cropping is LOSSY and per-cart -- a p8 game drawing HUD at the very top or
+-- bottom loses it -- so it is opt-in, and 0,0 (no crop) by default.
+local P8_CROP_T, P8_CROP_B = __P8_CROP_T__, __P8_CROP_B__
+local P8_VH = 128 - P8_CROP_T - P8_CROP_B
+-- The scale is applied BY THIS CART, in the draw verbs below -- not asked of the
+-- host. A cart that draws 2x is just a cart: it looks the same on the web
+-- runner, an S3 and a P4, with no extension and no hardware scaler (the S3 has
+-- no PPA). Asking the host to composite instead made the zoom appear only on
+-- the one tier that implements `view`, which is how it shipped looking cropped
+-- but not zoomed. The cost is fill rate -- 4x the pixels -- and that is the
+-- accepted trade.
+local P8_S = __P8_SCALE__
+local P8_W, P8_H = 128 * P8_S, P8_VH * P8_S   -- the drawn size, in canvas pixels
+local P8_OX, P8_OY = (320 - P8_W) // 2, (240 - P8_H) // 2
+local P8_DY = P8_OY - P8_CROP_T * P8_S        -- where p8 row 0 lands (may be off-screen)
 local P8_DT = 1 / 30               -- PICO-8 _update runs at a fixed 30fps
--- Declare the 128x128 LOGICAL viewport (the additive `view` verb): the console
--- composites just the p8 screen at the biggest integer scale that fits the
--- glass (4x = 512x512 on the P4) instead of the 320x240 container's 2x.
--- Guarded so the port keeps running on builds that predate the verb.
-if view ~= nil then view(128, 128) end
+-- `view` is now only a LETTERBOX hint: the pixels are already the right size, so
+-- a host that implements it just drops the side bars. Guarded, and nothing about
+-- the cart's appearance depends on it any more.
+if view ~= nil then view(P8_W, P8_H) end
 do
   local m_spr, m_btn, m_btnp = spr, btn, btnp
   local m_camera = camera
@@ -329,7 +354,10 @@ do
   local mfloor = math.floor
   local function fl(v) return mfloor(v or 0) end
 
-  function camera(cx, cy) m_camera(fl(cx) - P8_OX, fl(cy) - P8_OY) end
+  local S = P8_S
+  local function sc(v) return fl(v) * S end   -- p8 floors at the API edge,
+                                              -- THEN each p8 pixel becomes SxS
+  function camera(cx, cy) m_camera(sc(cx) - P8_OX, sc(cy) - P8_DY) end
   -- p8 math over the sandboxed Lua math lib (the moy api only registers
   -- rnd/flr; a python cart gets abs/min/max from python builtins, a lua cart
   -- gets them here). p8 angles are TURNS (0..1) and sin is flipped (+y down).
@@ -350,13 +378,13 @@ do
     w = w or 1
     h = h or 1
     if w == 1 and h == 1 then
-      m_spr(n, x, y, 0, 1, flip)               -- p8 color 0 is transparent
+      m_spr(n, x * S, y * S, 0, S, flip)       -- p8 color 0 is transparent
     else
       for ty = 0, h - 1 do
         for tx = 0, w - 1 do
           local cx = fx and (w - 1 - tx) or tx
           local cy = fy and (h - 1 - ty) or ty
-          m_spr(n + cx + cy * 16, x + tx * 8, y + ty * 8, 0, 1, flip)
+          m_spr(n + cx + cy * 16, (x + tx * 8) * S, (y + ty * 8) * S, 0, S, flip)
         end
       end
     end
@@ -367,28 +395,34 @@ do
     x0 = fl(x0) y0 = fl(y0) x1 = fl(x1) y1 = fl(y1)
     if x1 < x0 then x0, x1 = x1, x0 end
     if y1 < y0 then y0, y1 = y1, y0 end
-    m_rect(x0, y0, x1 - x0 + 1, y1 - y0 + 1, fl(c))
+    m_rect(x0 * S, y0 * S, (x1 - x0 + 1) * S, (y1 - y0 + 1) * S, fl(c))
   end
   function rect(x0, y0, x1, y1, c)
     x0 = fl(x0) y0 = fl(y0) x1 = fl(x1) y1 = fl(y1)
     if x1 < x0 then x0, x1 = x1, x0 end
     if y1 < y0 then y0, y1 = y1, y0 end
-    m_rectb(x0, y0, x1 - x0 + 1, y1 - y0 + 1, fl(c))
+    m_rectb(x0 * S, y0 * S, (x1 - x0 + 1) * S, (y1 - y0 + 1) * S, fl(c))
   end
-  function circfill(x, y, r, c) m_circ(fl(x), fl(y), fl(r), fl(c)) end
-  function circ(x, y, r, c) m_circb(fl(x), fl(y), fl(r), fl(c)) end
-  function print(s, x, y, c) m_print(s, fl(x), fl(y), c == nil and 7 or fl(c)) end
+  function circfill(x, y, r, c) m_circ(sc(x), sc(y), sc(r), fl(c)) end
+  function circ(x, y, r, c) m_circb(sc(x), sc(y), sc(r), fl(c)) end
+  -- SPEC.md 6: `print` has no scale, text is ALWAYS 8px. So a zoomed port
+  -- positions its text at scale but draws the glyphs at 1x -- the one thing
+  -- a 2x port cannot double.
+  function print(s, x, y, c) m_print(s, sc(x), sc(y), c == nil and 7 or fl(c)) end
 
   local m_pal = pal
   function pal(a, b)
     if a == nil then m_pal() else m_pal(fl(a), fl(b)) end
   end
   local m_pix = pix
-  function pset(x, y, c) m_pix(fl(x), fl(y), fl(c)) end
-  function pget(x, y) return m_pix(fl(x), fl(y)) end
+  function pset(x, y, c)                       -- one p8 pixel = an SxS block
+    if S == 1 then m_pix(fl(x), fl(y), fl(c))
+    else m_rect(sc(x), sc(y), S, S, fl(c)) end
+  end
+  function pget(x, y) return m_pix(sc(x), sc(y)) end
   local m_line = line
   function line(x0, y0, x1, y1, c)
-    m_line(fl(x0), fl(y0), fl(x1), fl(y1), fl(c))
+    m_line(sc(x0), sc(y0), sc(x1), sc(y1), fl(c))   -- 1px thick at any scale
   end
 
   function sfx(n) if n and n >= 0 then m_sfx(fl(n)) end end
@@ -468,7 +502,7 @@ do
         local tile = __p8_map[rowb + celx + cx + 1] or 0
         if tile > 0 and (mask == nil or mask == 0
                          or ((__p8_gff[tile] or 0) & mask) ~= 0) then
-          m_spr(tile, sx + cx * 8, sy + cy * 8, 0, 1, 0)
+          m_spr(tile, (sx + cx * 8) * S, (sy + cy * 8) * S, 0, S, 0)
         end
       end
     end
@@ -512,7 +546,7 @@ do
       -- the console resets camera/clip/pal after every cart frame (so its own
       -- overlays are never offset) -- re-park the 128x128 window each draw
       camera()
-      m_clip(P8_OX, P8_OY, 128, 128)
+      m_clip(P8_OX, P8_OY, P8_W, P8_H)
       p8_draw()
       ticked = false
     end
@@ -570,7 +604,7 @@ def build_manifest(title, icon=None):
     return man
 
 
-def port(p8_path, out_dir, title=None):
+def port(p8_path, out_dir, title=None, crop=(0, 0)):
     sections = read_p8(p8_path)      # text .p8 OR the BBS .p8.png
     title = title or _title_from(sections, p8_path)
     os.makedirs(out_dir, exist_ok=True)
@@ -580,7 +614,12 @@ def port(p8_path, out_dir, title=None):
               "-- The shim + data tables are generated; the game code below them\n"
               "-- is the original cart's Lua, mechanically converted to Lua 5.4.\n"
               % title)
-    main_lua = header + SHIM + "\n" + data_tables_lua(sections) + "\n" + body
+    vh = 128 - int(crop[0]) - int(crop[1])
+    scale = max(1, min(320 // 128, 240 // vh)) if vh > 0 else 1
+    shim = (SHIM.replace("__P8_CROP_T__", str(int(crop[0])))
+                .replace("__P8_CROP_B__", str(int(crop[1])))
+                .replace("__P8_SCALE__", str(scale)))
+    main_lua = header + shim + "\n" + data_tables_lua(sections) + "\n" + body
     with open(os.path.join(out_dir, "main.lua"), "w", encoding="utf-8") as f:
         f.write(main_lua)
 
@@ -618,17 +657,43 @@ def port(p8_path, out_dir, title=None):
     return out_dir
 
 
+def parse_zoom(argv):
+    """--zoom [T,B] -> (top, bottom) p8 rows to crop, or (0, 0) when absent.
+
+    Bare --zoom means 4,4: the symmetric crop that leaves a 128x120 viewport,
+    the largest that still fits 320x240 at 2x (256x240, filling the height).
+    An explicit T,B lets a cart protect the edge its HUD lives on -- celeste
+    draws its summit timer at y=4, so it survives 4 off the top but not 8."""
+    if "--zoom" not in argv:
+        return (0, 0)
+    i = argv.index("--zoom")
+    spec = argv[i + 1] if i + 1 < len(argv) and not argv[i + 1].startswith("--") else ""
+    if "," not in spec:
+        return (4, 4)
+    t, b = spec.split(",", 1)
+    return (max(0, int(t)), max(0, int(b)))
+
+
 def main(argv):
     args = [a for a in argv if not a.startswith("--")]
     title = None
     if "--title" in argv:
         title = argv[argv.index("--title") + 1]
         args = [a for a in args if a != title]
+    crop = parse_zoom(argv)
+    if crop != (0, 0):
+        args = [a for a in args if "," not in a or not a.replace(",", "").isdigit()]
     if len(args) != 2:
-        print("usage: p8_lua_port.py cart.p8 out_dir [--title NAME]")
+        print("usage: p8_lua_port.py cart.p8 out_dir [--title NAME] [--zoom [T,B]]")
         return 2
-    out = port(args[0], args[1], title)
+    out = port(args[0], args[1], title, crop)
+    vh = 128 - crop[0] - crop[1]
     print("ported ->", out)
+    if crop != (0, 0):
+        scale = max(1, min(320 // 128, 240 // vh)) if vh else 1
+        print("  zoom: cropped %d/%d rows -> the cart DRAWS at %dx = %dx%d "
+              "(text stays 8px -- SPEC.md 6)"
+              % (crop[0], crop[1], scale, 128 * scale, vh * scale))
     return 0
 
 
