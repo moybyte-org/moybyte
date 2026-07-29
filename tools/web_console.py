@@ -324,10 +324,14 @@ class WebConsole:
             # #42 Thread 3: the EFFECTIVE input hint -- the cart's manifest hint only
             # while it owns the keyboard (playing), never in the Editor (typing!).
             input_kinds = web_view.effective_input_kinds(self.ws)
-            # The SHARED assets builder (host passes the MOY64 RGB palette directly; the device
+            # The SHARED assets builder (host passes the RGB palette directly; the device
             # passes its RGB565 LUT and the builder decodes -- detected by element type).
+            # Read the LIVE canvas table, not the MOY64 constant: a cart-supplied
+            # palette (spec 2.2) swapped in by Player.start must reach the page.
             return web_view.assets_payload(
-                self.canvas.w, self.canvas.h, palette.MOY64, sheet, tilemap, cart,
+                self.canvas.w, self.canvas.h,
+                getattr(self.canvas, "palette", None) or palette.MOY64,
+                sheet, tilemap, cart,
                 _audio.AudioEngine().rate, decoded or None, input_kinds)
 
 

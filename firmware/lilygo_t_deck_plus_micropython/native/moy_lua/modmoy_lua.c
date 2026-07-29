@@ -375,7 +375,10 @@ static mp_obj_t moy_lua_init(size_t n_args, const mp_obj_t *a) {
     lua_pop(L, 1);
     luaL_requiref(L, LUA_TABLIBNAME, luaopen_table, 1);
     lua_pop(L, 1);
-    static const char *const strip[] = {"dofile", "loadfile", "load", "require"};
+    // the moy spec's 4.1 ceiling: base minus the code loaders AND collectgarbage
+    // (a cart must not steer the host's GC; the host lupa prelude nils it too)
+    static const char *const strip[] = {"dofile", "loadfile", "load", "require",
+                                        "collectgarbage"};
     for (size_t i = 0; i < sizeof(strip) / sizeof(strip[0]); i++) {
         lua_pushnil(L);
         lua_setglobal(L, strip[i]);

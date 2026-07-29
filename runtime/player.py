@@ -95,6 +95,11 @@ def _nativize(src):
 # hitch cadence -- keep it a minute, not seconds.
 PMEM_FLUSH_MS = 60000
 
+# The optional features this build implements (moy SPEC.md 10). A cart whose
+# manifest "extensions" lists anything else is REFUSED at start -- the clean
+# §10 decline, never a mid-frame crash on a missing verb.
+SUPPORTED_EXTENSIONS = ("layers", "viewport")
+
 
 def _ticks_ms():
     try:
@@ -292,6 +297,8 @@ class Player:
         self.crash_line = None        # 1-based cart line of the last runtime crash (#24)
         self._cart_start_ms = 0       # _ticks_ms when the running cart last start()ed
         self._cart_key_prev = 0       # last frame's keyboard byte (key()/keyp() edge)
+        self._cart_palette = None     # default table saved while a cart's own
+                                      # manifest palette (spec 2.2) is applied
         # Stage 5 exit-gesture state (spec Section 9). Reset per run in start() so a
         # fresh cart never inherits a stale half-gesture.
         self._home_held_since = 0     # _ticks_ms when "home" (BACKSPACE) began being held
@@ -343,6 +350,17 @@ class Player:
         self._home_held_since = 0
         self._home_holding = False
 
+    def _restore_palette(self):
+        """Put back the default palette table a cart-supplied one (spec 2.2)
+        displaced. Idempotent; called from every exit path AND at start (so a
+        re-run never saves a cart table as 'the default')."""
+        if self._cart_palette is not None:
+            try:
+                self.ws.canvas.palette = self._cart_palette
+            except Exception:  # noqa: BLE001 -- restore must never block an exit
+                pass
+            self._cart_palette = None
+
     def _close_lua(self):
         """Tear down the previous run's Lua state (#67), if any. Idempotent and
         exception-proof: a close() failure must never block the next start or
@@ -380,6 +398,9 @@ class Player:
         # The dead run's `view(w, h)` must not outlive it: every fullscreen
         # surface shares viewport(), and a lingering view would crop chrome.
         self.ws.input.game_view = None
+        # A cart-supplied palette (spec 2.2) dies with its run -- the system
+        # surfaces underneath get the default table back.
+        self._restore_palette()
         ns = self.ns
         if ns:
             try:
@@ -512,6 +533,15 @@ class Player:
         cart = project.cart
         self._is_tool = (cart is not None
                          and cart.get("type") in ("tool", "app"))
+        # Required-extension gate (moy SPEC.md 10): a cart listing an extension
+        # this build doesn't implement is refused cleanly -- the normal error
+        # panel -- instead of crashing partway into a frame on a missing verb.
+        missing = [e for e in ((cart.get("extensions") or ()) if cart else ())
+                   if e not in SUPPORTED_EXTENSIONS]
+        if missing:
+            self.cart_error = "needs extension: " + ", ".join(missing)
+            self.crash_line = None
+            return False
         # #63 leak fix: the PREVIOUS cart is dead -- return its pooled layer buffers
         # (make_layer worlds, the Fold-2 map cache) for reuse before the new run
         # allocates. Probe: the host Canvas has no pool (gc reclaims its layers).
@@ -527,6 +557,25 @@ class Player:
         rs = getattr(ws.canvas, "reset_state", None)
         if rs is not None:
             rs()
+        # Cart-supplied palette (moy SPEC.md 2.2): 64 "RRGGBB" strings in the
+        # manifest replace the default table for this run; layers made during
+        # the run inherit it (make_layer shares canvas.palette), and every exit
+        # path restores it (release_world). Indexed backends without a live
+        # .palette (the device compositor's baked RGB565 LUT) skip it -- a
+        # recorded conformance gap there, never a crash.
+        self._restore_palette()        # a re-run must never stack two swaps
+        pal = cart.get("palette") if cart else None
+        if pal and len(pal) == 64 and getattr(ws.canvas, "palette", None):
+            try:
+                table = []
+                for s in pal:
+                    v = int(s.lstrip("#"), 16)
+                    table.append(((v >> 16) & 255, (v >> 8) & 255, v & 255))
+            except (ValueError, AttributeError, TypeError):
+                table = None               # malformed -> keep the default table
+            if table is not None:
+                self._cart_palette = ws.canvas.palette
+                ws.canvas.palette = table
         # Stamp the cart-start clock so the cart's time() reads ms since this run
         # began (re-run on apply/run_code/edit-close resets it, like TIC-80).
         self._cart_start_ms = _ticks_ms()

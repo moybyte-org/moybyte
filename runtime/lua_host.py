@@ -83,6 +83,11 @@ do
   load = nil
   debug = nil
   python = nil
+  -- lupa opens these two; the device VM never does (moy_lua opens only
+  -- base/math/string/table and strips collectgarbage). Nil them so a cart
+  -- that runs on the host runs on glass -- the moy spec's 4.1 ceiling.
+  coroutine = nil
+  collectgarbage = nil
 end
 """
 

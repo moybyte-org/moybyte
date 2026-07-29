@@ -628,8 +628,14 @@ def load(path):
         if not isinstance(man, dict):
             print("Moybyte cart manifest not an object:", path)
             return None
+        # A moy-spec cart (SPEC.md 3.1, "format": "moy-1") is Lua-by-definition
+        # with spec defaults: main.lua, 30fps, a game. Its manifest never carries
+        # the moybyte fields, so the defaults below flip on this flag -- moybyte's
+        # own carts ("moybyte-cart-v1", or no format at all) keep theirs.
+        spec = man.get("format") == "moy-1"
         try:
-            src = _read_recover(path + "/" + man.get("main", "main.py"))
+            src = _read_recover(path + "/" +
+                                man.get("main", "main.lua" if spec else "main.py"))
         except OSError as exc:
             print("Moybyte cart main missing:", path, exc)
             return None
@@ -666,12 +672,12 @@ def load(path):
             # pre-#94 hand-authored one, so this defaults to "" (a blank author
             # reads as "not set", never crashes a display that prints it).
             "author": man.get("author", ""),
-            "type": man.get("type", "app"),
+            "type": man.get("type", "game" if spec else "app"),
             # The #67 dual-runtime seam: which VM runs this cart ("python" today,
             # "lua" via the injected runtime), and which file `src` came from --
             # save_code/duplicate/seed must write THAT file back, never main.py.
-            "runtime": man.get("runtime", "python"),
-            "main": man.get("main", "main.py"),
+            "runtime": man.get("runtime", "lua" if spec else "python"),
+            "main": man.get("main", "main.lua" if spec else "main.py"),
             "version": int(man.get("version", 0)),   # 0 = pre-versioning (re-seedable)
             # Graduation (#29 / spec Section 8): a STORED, one-way project fact. Set
             # when a block-authored cart's code commit diverges past the block
@@ -681,7 +687,14 @@ def load(path):
             "src": src,
             # Frame pacing (#63): a GAME cart locks to 30fps unless its manifest
             # says "fps": 60 (only carts that SUSTAIN 60 should -- frame_cap_fps).
-            "fps": man.get("fps", 0),
+            # Spec carts default to the spec's guaranteed tick (SPEC.md 5): 30.
+            "fps": man.get("fps", 30 if spec else 0),
+            # Cart-supplied palette (SPEC.md 2.2): 64 "RRGGBB" strings replacing
+            # the default table for this cart's run, or None. Player applies it.
+            "palette": man.get("palette"),
+            # Required optional features (SPEC.md 10): Player refuses the cart
+            # cleanly when one isn't implemented, instead of crashing mid-frame.
+            "extensions": man.get("extensions", []),
             "cfg": cfg,
             "edit": man.get("edit", []),
             # Manifest capability permissions (#38): a cart only gets a gated API
@@ -1286,7 +1299,7 @@ def _unique_dir(root, base):
 
 def create(title, root=CARTS_DIR, src=None, cfg=None, edit=None, type="app",
            runtime="python", main="main.py", scenes=None, scene_order=None,
-           author=None):
+           author=None, palette=None, extensions=None):
     """Create a new .moy folder and return its loaded cart dict. `runtime`/`main`
     default to a python cart; duplicate() passes a source cart's through so a
     copied "lua" cart (#67) stays a lua cart with its source in main.lua. `scenes`
@@ -1302,6 +1315,10 @@ def create(title, root=CARTS_DIR, src=None, cfg=None, edit=None, type="app",
     }
     if author:
         manifest["author"] = author
+    if palette:                       # cart-supplied palette (SPEC.md 2.2) survives a copy
+        manifest["palette"] = list(palette)
+    if extensions:                    # required extensions (SPEC.md 10) survive a copy
+        manifest["extensions"] = list(extensions)
     if scenes:                        # scene assets (#85): register + write (see above)
         manifest["assets"] = {"scenes": list(scene_order or sorted(scenes.keys()))}
     _write(d + "/manifest.json", json.dumps(manifest))
@@ -1325,7 +1342,9 @@ def duplicate(cart, root=CARTS_DIR, new_title=None):
                   runtime=cart.get("runtime", "python"), main=cart.get("main", "main.py"),
                   scenes=dict(cart.get("scenes") or {}),      # #85: copy scene assets +
                   scene_order=list(cart.get("scene_names") or []),  # their manifest order
-                  author=cart.get("author") or None)          # #94: carry the author over
+                  author=cart.get("author") or None,          # #94: carry the author over
+                  palette=cart.get("palette"),                # spec 2.2 palette +
+                  extensions=cart.get("extensions"))          # spec 10 extensions carry over
 
 
 def delete(cart):

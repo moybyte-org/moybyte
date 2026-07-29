@@ -310,7 +310,10 @@ def assets_json():
     decoded.update(ws.cover_assets())
     kinds = web_view.effective_input_kinds(ws)
     return json.dumps(web_view.assets_payload(
-        _S["canvas"].w, _S["canvas"].h, palette.MOY64, sheet, tilemap,
+        _S["canvas"].w, _S["canvas"].h,
+        # the LIVE table, not the constant: a cart-supplied palette (spec 2.2)
+        # swapped in by Player.start must reach the page's index->RGB blit
+        getattr(_S["canvas"], "palette", None) or palette.MOY64, sheet, tilemap,
         _cart_title(), _audio_rate(), decoded or None, kinds))
 
 

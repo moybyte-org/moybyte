@@ -111,12 +111,17 @@ class Project:
         # there's no/bad art. The wallpaper runner passes a cart explicitly.
         cart = cart if cart is not None else self.cart
         hexs = cart.get("sprites") if cart else None
+        # A cart sheet is 512 tiles -- 16 cols x 32 rows, 128x256 px (moy
+        # SPEC.md 3.2). Existing 128-line sheets (every pre-512 cart, every
+        # PICO-8 import) parse into the TOP HALF with tile ids unchanged;
+        # from_hex leaves the missing rows blank. The map's placeable ceiling
+        # stays 254 (one byte per cell); spr() reaches all 512.
         if hexs:
             try:
-                return SpriteSheet.from_hex(hexs)
+                return SpriteSheet.from_hex(hexs, cols=16, rows=32)
             except Exception:  # noqa: BLE001
                 pass
-        return SpriteSheet()
+        return SpriteSheet(16, 32)
 
     def _build_pmem(self):
         """Load the open cart's persistent memory (pmem.json) into a Pmem, wiring
