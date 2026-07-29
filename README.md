@@ -17,12 +17,12 @@ This repo is the **reference implementation of [moy core 0.1](https://github.com
 the public spec for that cart format and its verb table.
 
 <p align="center">
-  <img src="docs/media/paint.gif" width="640"
-       alt="Drawing a smile on the pet character in the paint editor; it appears in the running game">
-  <br><em>Paint a smile on the sprite — it's wearing it back in the game. All on the device.</em>
+  <img src="docs/media/desktop/paint.gif"
+       alt="On the windowed desktop: drawing a smile on the pet sprite in the editor, and the running game window beside it wearing the change">
+  <br><em>Paint a smile on the sprite — the game window beside it is already wearing it.</em>
 </p>
 
-| ![The code editor, on the console itself](docs/media/code.gif) | ![Adding a block in the block editor](docs/media/blocks.gif) |
+| ![The code editor as a window on the desktop](docs/media/desktop/code.gif) | ![Building a block program next to the scene it drives](docs/media/desktop/blocks.gif) |
 |:--:|:--:|
 | The code editor is a tab in the same console | Blocks compile to the same Python, and *graduate* to it |
 
@@ -38,6 +38,18 @@ the public spec for that cart format and its verb table.
 Host and device are **one codebase**, not a port. `runtime/` is canonical; each
 firmware build stages copies of those modules and freezes them. A pixel that
 moves in the simulator moves on glass.
+
+The GIFs above are the desktop tier at 1024×600. Here is the *same console, same
+code*, on the handheld tier at its native 320×240 — the layouts reflow, the
+pixels don't change:
+
+| ![The paint editor at native 320x240](docs/media/paint.gif) | ![The code editor at native 320x240](docs/media/code.gif) |
+|:--:|:--:|
+| The same paint session, fullscreen at 320×240 | …and the same code editor |
+
+Only a *running cart* is fixed at 320×240. Every editor surface is
+system-domain responsive, so the console reflows to a phone-sized panel, a
+handheld, or a 7″ desktop from one implementation.
 
 ## Try it in 60 seconds
 

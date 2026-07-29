@@ -41,11 +41,24 @@ from runtime import host_app            # noqa: E402
 from runtime import bar_layer as BAR    # noqa: E402  (the bar's lent-zone rect)
 from runtime import editor_app as EDA   # noqa: E402  (the Editor's tab ladder)
 from runtime import palette             # noqa: E402  (MOY64 -> the exact GIF palette)
+from runtime import ui as UI            # noqa: E402  (labeled tab-row geometry)
 from runtime import widgets as WID      # noqa: E402  (the achievement catalog)
 
 SYSTEM_CARTS = os.path.join(ROOT, "system_carts")
 OUT_DIR = os.path.join(ROOT, "docs", "media")
 BACKSPACE = 0x08
+
+# The WINDOWED desktop tier (--windowed): where the Editor window is parked so the
+# desk's icon column, the wallpaper and the taskbar all stay in frame -- the whole
+# point of recording this tier is the desktop AROUND the app, so the default
+# near-fullscreen "Make" window is nudged in. And where the playtest window lands
+# on PLAY, so the Editor stays readable beside it (spec Section 3's canonical
+# picture) instead of the cascade burying it.
+# The size is chosen, not arbitrary: below ~660px of window width the Editor's
+# labeled tab row (CONFIG / BLOCKS / CODE / SPRITES / ...) collapses to the
+# frozen icon ladder, which is exactly the thing this tier does better.
+_EDITOR_WIN = (76, 44, 760, 400)        # x, y, w, h on a 1024x600 desk
+_PLAYER_WIN = (348, 96)                 # x, y -- size stays the WM's integer scale
 
 
 def _c(rect):
@@ -56,10 +69,16 @@ def _c(rect):
 class Recorder:
     """Boots the console and records frames while a scripted cursor taps real UI."""
 
-    def __init__(self, fps, carts_dir):
+    def __init__(self, fps, carts_dir, sys_size=None, font_scale=1, windowed=False):
         self.dt = 1.0 / fps
-        self.ws = host_app.build_workstation(carts_dir)
+        self.ws = host_app.build_workstation(carts_dir, sys_size=sys_size,
+                                             font_scale=font_scale,
+                                             windowed=windowed)
         self.carts_dir = carts_dir
+        # The WINDOWED desktop tier (wm_windowed.WindowedWM): every geometry
+        # helper below then resolves inside the active window's layout context
+        # and translates to desktop coordinates -- see `local()`.
+        self.windowed = windowed and hasattr(self.ws.wm, "desk_open")
         # Pre-unlock every achievement. The celebration banner is real UI, but a
         # fresh store unlocks "First Steps" on the very first open and the toast
         # would then sit across the top of every recording's opening seconds.
@@ -71,7 +90,8 @@ class Recorder:
         self.drv = host_app.ConsoleDriver(self.ws)
         self.frames = []
         self.cursor = True
-        self.cx, self.cy = 160, 120
+        cv = self.ws.sys_canvas
+        self.cx, self.cy = cv.w // 2, cv.h // 2
 
     # -- frame primitives ---------------------------------------------------
     def _tick(self, click=False, down=False):
@@ -91,6 +111,13 @@ class Recorder:
     def settle(self, n):
         for _ in range(n):
             self._tick()
+
+    def desk(self, n):
+        """An establishing beat on the bare DESK before any window opens -- the
+        windowed tier's own opening shot (wallpaper + system-app icon column +
+        the one OS bar). A no-op on the fullscreen tier, which has no desk."""
+        if self.windowed:
+            self.settle(n)
 
     def play(self, n):
         """Watch the running cart with the cursor parked: the payoff shot should be
@@ -160,73 +187,189 @@ class Recorder:
 
     def open_editor(self, cart):
         """The Make tile -> project-picker -> pick destination, without the two
-        grid screens: land the Editor on the cart's Config tab (spec Section 6)."""
+        grid screens: land the Editor on the cart's Config tab (spec Section 6).
+        On the windowed tier this also parks the "Make" window off the desk's
+        icon column so the desktop stays in frame."""
         self.ws.open_in_editor(cart)
+        if not self.windowed:
+            return
+        wm = self.ws.wm
+        wm._sync_windows()
+        win = wm._wins["make"]
+        x, y, w, h = _EDITOR_WIN
+        win.x, win.y = x, y
+        wm._resize_window(win, w, h)     # rebuilds the buffer + layout context
+        wm._prewarm(win)
 
     # -- live control geometry ----------------------------------------------
-    def zone_rect(self, tab):
-        """The rect of one icon in the Editor's lent top-bar zone (the tab ladder:
-        PROJECTS / Config / Blocks / Code / Sprites / Map / Scene / Music / UNDO /
-        REDO / PLAY). `tab` is the ladder's tab name, or None for PLAY."""
-        lay = getattr(self.ws.layout, "zone_left", None) or BAR._ZONE_LEFT_GAME
-        x0, y0, _w, h = lay
-        ic = h if h > 0 else BAR._BAR_ICON
-        for i, (name, _glyph) in enumerate(EDA._ZONE_TABS):
-            if name == tab:
-                return (x0 + i * ic, y0, ic, ic)
+    #
+    # Every rect below is read from a LIVE layout object. On the fullscreen tier
+    # those layouts are the console's own; on the windowed tier each window has
+    # its own `_LayoutCtx` (the app reflows to the window's size), so the helper
+    # installs that context to read the geometry and then translates the result
+    # out of window-local space into desktop coordinates. `local()` is the one
+    # place that seam lives -- every helper goes through it, so the scenes below
+    # are written once and run on both tiers.
+
+    def local(self, fn, key="make"):
+        """Resolve `fn()` -> (x, y) (or a rect) in the active window's layout
+        context and translate it to desktop coordinates. A pass-through on the
+        fullscreen tier."""
+        if not self.windowed:
+            return fn()
+        wm = self.ws.wm
+        wm._sync_windows()
+        win = wm._wins[key]
+        wm._install(win.ctx)
+        try:
+            out = fn()
+        finally:
+            wm._install(wm._root_ctx)
+        ox, oy = win.x + 1, win.y + 1 + win.title_h
+        if len(out) == 4:
+            return (out[0] + ox, out[1] + oy, out[2], out[3])
+        return (out[0] + ox, out[1] + oy)
+
+    def _zone_rect_local(self, tab):
+        """The Editor's lent top-bar zone resolves two ways: the frozen 320x240
+        icon LADDER (PROJECTS / the seven tabs / UNDO / REDO / PLAY), or -- on any
+        roomier surface, which is every window on the desktop tier -- the labeled
+        CHIP row (`ui.tab_row`). Ask the same geometry the tap dispatch uses."""
+        ws = self.ws
+        rect = ws.bar_layer._zone_rect("menu")
+        if getattr(ws.layout, "_base", True):
+            x0, y0, _w, h = rect
+            ic = h if h > 0 else BAR._BAR_ICON
+            for i, (name, _glyph) in enumerate(EDA._ZONE_TABS):
+                if name == tab:
+                    return (x0 + i * ic, y0, ic, ic)
+            raise KeyError(tab)
+        proj, tabs_area, play_r = ws.editor_app._zone_parts(rect)
+        if tab is None:
+            return play_r
+        if tab == EDA._ZONE_PROJECTS:
+            return proj
+        fs = max(1, rect[3] // 16)
+        slim = [(tid, label) for tid, label, _ic in EDA._TAB_CHIPS]
+        for tid, r, _labels_on in UI.tab_row_rects(tabs_area, slim, fs):
+            if tid == tab:
+                return r
         raise KeyError(tab)
 
+    def zone_rect(self, tab):
+        return self.local(lambda: self._zone_rect_local(tab))
+
     def tab(self, name, **kw):
-        """Tap a tab-ladder icon (PLAY is `name=None`)."""
+        """Tap a tab-ladder icon / labeled chip (PLAY is `name=None`)."""
         self.click(*_c(self.zone_rect(name)), **kw)
 
     def swatch(self, idx):
         """Center of palette swatch `idx` in the paint editor's color column."""
-        lay = self.ws.paint_layer.layout
-        return (lay.sw_x0 + (idx % lay.sw_cols) * lay.sw + lay.sw / 2.0,
-                lay.sw_y0 + (idx // lay.sw_cols) * lay.sw + lay.sw / 2.0)
+        def _r():
+            lay = self.ws.paint_layer.layout
+            return (lay.sw_x0 + (idx % lay.sw_cols) * lay.sw + lay.sw / 2.0,
+                    lay.sw_y0 + (idx // lay.sw_cols) * lay.sw + lay.sw / 2.0)
+        return self.local(_r)
 
     def cell(self, gx, gy):
         """Center of pixel (gx, gy) in the paint editor's zoomed sprite grid."""
-        lay = self.ws.paint_layer.layout
-        size = lay.pg_span // self.ws.paint.dim
-        return (lay.pg_x0 + (gx + 0.5) * size, lay.pg_y0 + (gy + 0.5) * size)
+        def _r():
+            lay = self.ws.paint_layer.layout
+            size = lay.pg_span // self.ws.paint.dim
+            return (lay.pg_x0 + (gx + 0.5) * size, lay.pg_y0 + (gy + 0.5) * size)
+        return self.local(_r)
+
+    def _block_layout(self):
+        """The block editor's LIVE layout. On a roomy surface the Blocks tab splits
+        into the Blocks+Scene workspace (#93/#85) and re-bounds its layout to the
+        left pane -- `_layout_workspace()` is what both the draw and the tap path run
+        first, so anything reading geometry must run it too or it hit-tests against
+        the unsplit rects (silently landing taps in the scene pane)."""
+        bu = self.ws.block_ui
+        bu._layout_workspace()
+        return bu.block_layout
+
+    def last_insert_of_first_script(self):
+        """The "+" slot at the END of the outline's FIRST script (its `on_start`):
+        the row index just before the second top-level hat. Derived, not hardcoded,
+        so the scene reads the same on any block cart."""
+        rows = self.ws.block_ui.blocks_ed.rows
+        nxt = next((i for i in range(1, len(rows))
+                    if rows[i].kind == "block" and rows[i].depth == 0), len(rows))
+        return nxt - 1
+
+    def block_btn(self, name):
+        """A button rect in the block editor's action bar (ADD / DEL / << CODE)."""
+        return self.local(lambda: getattr(self._block_layout(), name))
 
     def block_row(self, idx):
         """Center-left point of outline row `idx` in the block editor."""
-        bu = self.ws.block_ui
-        lay = bu.block_layout
-        area = lay.area()
-        return (area[0] + area[2] / 2.0,
-                lay.y0 + (idx - bu.blk_top + 0.5) * lay.row_h)
+        def _r():
+            bu = self.ws.block_ui
+            lay = self._block_layout()
+            area = lay.area()
+            return (area[0] + area[2] / 2.0,
+                    lay.y0 + (idx - bu.blk_top + 0.5) * lay.row_h)
+        return self.local(_r)
 
     def pick_menu(self, item, **kw):
         """Tap `item` in the block editor's open modal menu (a category name or a
         block id), scrolling it into view first."""
-        bu = self.ws.block_ui
-        menu = bu.blk_menu
-        lay = bu.block_layout
-        mx, my, mw, _mh = lay.menu
-        idx = menu["items"].index(item)
-        if idx >= menu["top"] + lay.menu_rows:
-            menu["top"] = idx - lay.menu_rows + 1
-        elif idx < menu["top"]:
-            menu["top"] = idx
-        y = my + 16 * lay.fs + (idx - menu["top"] + 0.5) * lay.menu_row_h
-        self.click(mx + mw / 2.0, y, **kw)
+        def _r():
+            bu = self.ws.block_ui
+            menu = bu.blk_menu
+            lay = self._block_layout()
+            mx, my, mw, _mh = lay.menu
+            idx = menu["items"].index(item)
+            if idx >= menu["top"] + lay.menu_rows:
+                menu["top"] = idx - lay.menu_rows + 1
+            elif idx < menu["top"]:
+                menu["top"] = idx
+            return (mx + mw / 2.0,
+                    my + 16 * lay.fs + (idx - menu["top"] + 0.5) * lay.menu_row_h)
+        self.click(*self.local(_r), **kw)
 
     def caret_xy(self, row, col, above=5):
         """Screen center of character (row, col) in the code editor, scrolling the
         view so the line sits `above` rows down from the top first."""
-        ws = self.ws
-        ed = ws.editor
-        lay = ws.code_layout
-        ed.top = max(0, min(row - above, len(ed.lines) - lay.rows))
-        ed.left = 0
-        ws.mark_dirty()
-        x0 = ws.code_layer._text_x0(lay, ed)
-        return (x0 + (col + 0.5) * lay.cell,
-                lay.y0 + (row - ed.top + 0.5) * lay.lh)
+        def _r():
+            ws = self.ws
+            ed = ws.editor
+            lay = ws.code_layout
+            ed.top = max(0, min(row - above, len(ed.lines) - lay.rows))
+            ed.left = 0
+            ws.mark_dirty()
+            x0 = ws.code_layer._text_x0(lay, ed)
+            return (x0 + (col + 0.5) * lay.cell,
+                    lay.y0 + (row - ed.top + 0.5) * lay.lh)
+        return self.local(_r)
+
+    def code_rows(self):
+        """How many code lines the editor shows (differs per tier/window size)."""
+        return self.local(lambda: (self.ws.code_layout.rows, 0))[0] \
+            if not self.windowed else self._win_code_rows()
+
+    def _win_code_rows(self):
+        wm = self.ws.wm
+        wm._install(wm._wins["make"].ctx)
+        try:
+            return self.ws.code_layout.rows
+        finally:
+            wm._install(wm._root_ctx)
+
+    # -- PLAY (windowed): park the playtest window beside the Editor ----------
+    def park_player(self):
+        """On the desktop tier a PLAY spawns a player WINDOW on the cascade, which
+        lands centered on top of the Editor. Move it so the Editor's tab row and
+        its work stay visible next to the running cart -- the tier's whole point."""
+        if not self.windowed:
+            return
+        wm = self.ws.wm
+        wm._sync_windows()
+        win = wm._wins.get("desktop")
+        if win is not None:
+            win.x, win.y = _PLAYER_WIN
+        self.ws.mark_dirty()
 
 
 # --- scenes -----------------------------------------------------------------
@@ -238,6 +381,7 @@ def scene_paint(r):
     4x, so PLAY shows it immediately.
     """
     cart = r.reset_cart("pet.moy", cfg={"autoplay": 1})
+    r.desk(16)                               # (windowed tier only) the desktop
     r.open_editor(cart)                      # lands on Config ("Make it mine")
     r.settle(14)
     r.tab("paint", after=12)                 # -> SPRITES
@@ -245,7 +389,8 @@ def scene_paint(r):
     r.stroke([r.cell(*p) for p in
               ((1, 4), (2, 5), (3, 5), (4, 5), (5, 5), (6, 4))])
     r.settle(20)                             # the tile preview updates too
-    r.tab(None, after=4)                     # PLAY
+    r.tab(None, after=2)                     # PLAY
+    r.park_player()
     r.play(46)                               # ...the pet is wearing it
     return r.frames
 
@@ -253,6 +398,7 @@ def scene_paint(r):
 def scene_code(r):
     """The code editor is a tab in the same console: retype a constant, PLAY."""
     cart = r.reset_cart("star_catcher.moy", cfg={"autoplay": 1})
+    r.desk(16)
     r.open_editor(cart)
     r.settle(12)
     r.tab("code", after=14)
@@ -262,7 +408,8 @@ def scene_code(r):
     r.click(*r.caret_xy(row, col, above=3), steps=16, after=8)
     r.type_keys([BACKSPACE, ord("8")], per=5)
     r.settle(16)
-    r.tab(None, after=4)                      # PLAY -> a much bigger catcher
+    r.tab(None, after=2)                      # PLAY -> a much bigger catcher
+    r.park_player()
     r.play(50)
     return r.frames
 
@@ -270,20 +417,24 @@ def scene_code(r):
 def scene_blocks(r):
     """Blocks compile to the same Python: snap a block in, then open the CODE tab
     on the very line it generated."""
-    cart = r.reset_cart("tap_game.moy")
+    # WHICH block cart: on a roomy surface the Blocks tab opens the Blocks+Scene
+    # WORKSPACE (#93/#85) -- scripts left, the placed-actor stage right. Tap Game
+    # is a touch-only cart with no scene, so on the desktop tier that half of the
+    # window would sit empty; Coin Quest is the same kind of block program WITH a
+    # stage (a player + coins), which is what that view was built to show.
+    cart = r.reset_cart("coin_quest.moy" if r.windowed else "tap_game.moy")
+    r.desk(16)
     r.open_editor(cart)
-    r.ws.editor_app.open_blocks()             # open ON the Blocks tab (Tap Game is
-    r.settle(12)                              # a block cart -- that IS its source)
-    bu = r.ws.block_ui
-    lay = bu.block_layout
-    r.click(*r.block_row(5), steps=11, after=8)   # the "+" slot after "move coin"
-    r.click(*_c(lay.add_btn), steps=11, after=10)  # ADD -> "PICK A KIND"
+    r.ws.editor_app.open_blocks()             # open ON the Blocks tab (a block cart
+    r.settle(12)                              # -- the outline IS its source)
+    r.click(*r.block_row(r.last_insert_of_first_script()), steps=11, after=8)
+    r.click(*_c(r.block_btn("add_btn")), steps=11, after=10)  # ADD -> "PICK A KIND"
     r.pick_menu("sound", steps=11, dwell=9, after=10)  # ...a category...
     r.pick_menu("beep", steps=11, dwell=9, after=6)    # ...and the block itself
     r.settle(14)                              # the new block, snapped in
     # "<< CODE" is the block editor's own graduate rung: compile the outline and
     # open the generated main.py in the code tab.
-    r.click(*_c(lay.code_btn), steps=12, after=10)
+    r.click(*_c(r.block_btn("code_btn")), steps=12, after=10)
     ed = r.ws.editor
     row = next((i for i, line in enumerate(ed.lines) if "beep(440)" in line), 0)
     r.click(*r.caret_xy(row, len(ed.lines[row])), steps=14, after=8)
@@ -294,19 +445,22 @@ def scene_blocks(r):
 def scene_tap(r):
     """The "Make it mine" cards: pick another pet on the Config tab, then PLAY."""
     cart = r.reset_cart("pet.moy", cfg={"autoplay": 1})
+    r.desk(16)
     r.open_editor(cart)
     r.settle(20)
-    rows = r.ws.cards_layer._card_layout()
-    row = next(x for x in rows if x["f"]["key"] == "pet")
-    cur = r.ws.config.get("pet", 0)
-    target = None
-    for k, box in r.ws.cards_layer._choice_cells(row):
-        if row["f"]["choices"][k] != cur:
-            target = _c(box)
-            break
-    if target:
-        r.click(*target, steps=12, after=14)
-    r.tab(None, after=4)                      # PLAY
+
+    def _other_pet():
+        cards = r.ws.cards_layer
+        row = next(x for x in cards._card_layout() if x["f"]["key"] == "pet")
+        cur = r.ws.config.get("pet", 0)
+        for k, box in cards._choice_cells(row):
+            if row["f"]["choices"][k] != cur:
+                return box
+        return (0, 0, 0, 0)
+
+    r.click(*_c(r.local(_other_pet)), steps=12, after=14)
+    r.tab(None, after=2)                      # PLAY
+    r.park_player()
     r.play(44)
     return r.frames
 
@@ -354,15 +508,32 @@ def main():
     ap.add_argument("--out", default=OUT_DIR)
     ap.add_argument("--scale", type=int, default=2)
     ap.add_argument("--fps", type=int, default=20)
+    ap.add_argument("--windowed", action="store_true",
+                    help="record the WINDOWED DESKTOP tier (wm_windowed.WindowedWM) "
+                         "instead of the fixed 320x240 one; implies --size 1024x600 "
+                         "and --scale 1")
+    ap.add_argument("--size", default=None, metavar="WxH",
+                    help="system canvas size (default 320x240; 1024x600 windowed)")
+    ap.add_argument("--font-scale", type=int, default=1, dest="font_scale")
     args = ap.parse_args()
+    size = None
+    if args.size:
+        w, _, h = args.size.lower().partition("x")
+        size = (int(w), int(h))
+    elif args.windowed:
+        size = (1024, 600)
+    # The desktop tier is already 3.2x the area, so it records at 1:1 -- doubling
+    # it would be a 2048x1200 GIF nobody wants to clone.
+    scale = 1 if (args.windowed and args.scale == 2) else args.scale
     os.makedirs(args.out, exist_ok=True)
     names = list(SCENES) if args.scene == "all" else [args.scene]
     for name in names:
         carts = tempfile.mkdtemp(prefix="moybyte-gif-")
         try:
-            rec = Recorder(args.fps, carts)
+            rec = Recorder(args.fps, carts, sys_size=size,
+                           font_scale=args.font_scale, windowed=args.windowed)
             save_gif(SCENES[name](rec),
-                     os.path.join(args.out, "%s.gif" % name), args.scale, args.fps)
+                     os.path.join(args.out, "%s.gif" % name), scale, args.fps)
         finally:
             shutil.rmtree(carts, ignore_errors=True)
 
