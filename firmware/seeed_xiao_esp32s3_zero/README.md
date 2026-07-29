@@ -1,6 +1,6 @@
 # MoyByte Zero — Seeed XIAO ESP32-S3 port
 
-The **Zero** tier (see issue #59): a headless ESP32-S3 with no
+The **Zero** tier: a headless ESP32-S3 with no
 screen/keyboard/SD. Its entire UI is **streamed to a browser** over WiFi — the device
 runs cart *logic* and ships draw-commands; the browser rasterizes ("the browser is the
 GPU", #41/#22). Because it never rasterizes, the Zero needs **none** of the T-Deck's

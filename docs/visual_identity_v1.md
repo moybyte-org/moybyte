@@ -61,20 +61,20 @@ image invents a control, process, color, or interaction.
 
 ### Open Machine identity direction
 
-> **Concept render — not in this repo.** `open_machine_direction.png` lives in the private
-> brand repo (`moybyte-org/biz`, under `brand/`). The renders were moved out
-> before this repo went public; the direction they encode is described in the
-> text below, which is what the code actually implements.
+> **Concept render — not in this repo.** `open_machine_direction.png` is not in this
+> repo. The concept renders were moved out before this repo went public; the
+> direction they encode is described in the text below, which is what the code
+> actually implements.
 
 Use this board for the overall relationship: dark construction field, warm-light tool
 surfaces, grape Moy, thin geometry, visible layers, and restrained functional accents.
 
 ### Library concept
 
-> **Concept render — not in this repo.** `library_concept.png` lives in the private
-> brand repo (`moybyte-org/biz`, under `brand/`). The renders were moved out
-> before this repo went public; the direction they encode is described in the
-> text below, which is what the code actually implements.
+> **Concept render — not in this repo.** `library_concept.png` is not in this
+> repo. The concept renders were moved out before this repo went public; the
+> direction they encode is described in the text below, which is what the code
+> actually implements.
 
 Use this image for scale, hierarchy, large cartridge art, the pinned MAKE entry, and
 the shared Open Machine chrome. It predates several decisions in this document:
@@ -88,10 +88,10 @@ the shared Open Machine chrome. It predates several decisions in this document:
 
 ### Studio concept
 
-> **Concept render — not in this repo.** `studio_concept.png` lives in the private
-> brand repo (`moybyte-org/biz`, under `brand/`). The renders were moved out
-> before this repo went public; the direction they encode is described in the
-> text below, which is what the code actually implements.
+> **Concept render — not in this repo.** `studio_concept.png` is not in this
+> repo. The concept renders were moved out before this repo went public; the
+> direction they encode is described in the text below, which is what the code
+> actually implements.
 
 Use this image for the precision-pixel desktop, warm-light authoring surfaces, dark
 taskbar, compact tabs, and side-by-side editing/playtesting. It is not a process-model

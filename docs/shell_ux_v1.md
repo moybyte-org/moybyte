@@ -134,7 +134,7 @@ fullscreen"), a tap runs the game FULLSCREEN exactly like the small tiers
 (hold-BACKSPACE exits back to the Library), and the Make tile / a card's
 CHANGE drop back to the desk (CHANGE with that project's Editor open).
 Leaving the desk closes its windows — autosave (§7) makes that free. The
-fullscreen tiers are untouched: per #59 the Player product only ever gets the
+fullscreen tiers are untouched: the Player tier only ever gets the
 launcher; its desktop story is the web view.)*
 
 ---

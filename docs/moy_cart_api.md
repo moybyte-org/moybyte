@@ -504,7 +504,7 @@ deliberate: the same surface maps onto the host window (indices → RGB888), the
 device's native `moy_compositor` RGB565 framebuffer (indices → RGB565 via the
 palette), and the Lua cart VM (#67) — the "not even Python" clause is now shipping
 code. **A cart authored once runs on every tier** (Zero /
-Player / One) — see issue #59. When you add a drawing
+Player / One). When you add a drawing
 feature, add it to **both** `runtime/canvas.py` and the device path and keep the name
 identical.
 

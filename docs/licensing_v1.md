@@ -16,6 +16,7 @@ This is the answer to "why isn't this MIT?".
    **selling hardware or a competing product built on it requires a commercial
    license from us**. Each release automatically becomes plain **MIT two years
    after publication**.
+
 The licence exists to protect the **Moybyte** name and the hardware that carries
 it, and nothing else.
 

@@ -5,7 +5,7 @@ This is the third console backend, and the thinnest one: the system canvas IS a
 `web_view.CommandCanvas` (the recording canvas the host web console swaps in),
 so the console never rasterizes a pixel -- each frame's draw-command list is
 handed straight to the page's JS replayer by a local call (no WebSocket, no
-72KB/s ceiling; the #59 "Zero / browser is the GPU" thesis realized as a WASM
+72KB/s ceiling; the "Zero / browser is the GPU" thesis realized as a WASM
 target). The cart API is the shared pure-Python `host_api.make_api` -- the same
 backend the PC sim runs -- and input replays through the shared
 `web_view.apply_events` decode, so host == device == browser stays one code
