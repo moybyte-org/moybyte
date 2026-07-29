@@ -397,10 +397,23 @@ fi
 # External MSPI speed (#66, T-Deck S3): run octal flash + octal PSRAM at 120MHz.
 # PSRAM 120 selects a 240MHz MSPI timing tuple; leaving flash at 80MHz hit an
 # unsupported ESP-IDF 240/80 timing-table path, so the tested build moves both
-# memories together. Keep the temperature retune OFF: on the T-Deck sample it
-# aborts at secondary init because IDF only allows that hook for verified flash
-# vendor IDs. MOYBYTE_EXTMEM_SPEED=stock restores the upstream 80/80 defaults for
-# board-stability bisects.
+# memories together.
+#
+# #169: 120MHz octal is an EXPERIMENTAL IDF feature whose documented failure mode is
+# random PSRAM/flash faults once the die drifts ~20C from its boot temperature -- an
+# ordinary day for a handheld (indoors -> outdoors, pocket, a long self-heating play
+# session), presenting as unexplained instability with no reproducer. The mitigation
+# is IDF's temperature retune (a task re-picks the PSRAM timing point from the on-chip
+# sensor), which the FIRST attempt could not use: IDF only starts it for verified flash
+# vendor IDs (0xC8/0x20) and returns ESP_ERR_NOT_SUPPORTED otherwise -- from a SECONDARY
+# ESP_SYSTEM_INIT_FN, i.e. it aborts the boot. patches/esp_psram_temp_retune_any_vendor.patch
+# relaxes that gate (warn + run) and turns the task's other brick path -- an abort() when
+# the scanned points share no temperature range -- into "stop adjusting", which degrades
+# to exactly the un-mitigated build. So `fast` now ships the retune ON.
+#   MOYBYTE_EXTMEM_SPEED=fast_notemp  120MHz with the retune OFF (the pre-#169 build --
+#                                     the A/B if the retune is ever suspected)
+#   MOYBYTE_EXTMEM_SPEED=stock        upstream 80/80, no experimental features (the
+#                                     board-stability bisect / #169's fallback option 2)
 EXTMEM_SPEED="${MOYBYTE_EXTMEM_SPEED:-fast}"
 SDKCONFIG_SPIRAM_OCT="${UPSTREAM_DIR}/lib/micropython/ports/esp32/boards/sdkconfig.spiram_oct"
 sed -i \
@@ -410,24 +423,33 @@ sed -i \
   -e '/^CONFIG_SPIRAM_SPEED_80M=$/d' \
   -e '/^CONFIG_SPIRAM_SPEED_120M=y$/d' \
   -e '/^CONFIG_SPIRAM_TIMING_TUNING_POINT_VIA_TEMPERATURE_SENSOR=$/d' \
+  -e '/^CONFIG_SPIRAM_TIMING_TUNING_POINT_VIA_TEMPERATURE_SENSOR=y$/d' \
   -e '/^CONFIG_SPIRAM_TIMING_MEASURE_TEMPERATURE_INTERVAL_SECOND=/d' \
   "${SDKCONFIG_SPIRAM_OCT}"
 case "${EXTMEM_SPEED}" in
-  fast)
+  fast|fast_notemp)
+    if [ "${EXTMEM_SPEED}" = "fast" ]; then
+      TEMP_RETUNE_OPTS=(
+        'CONFIG_SPIRAM_TIMING_TUNING_POINT_VIA_TEMPERATURE_SENSOR=y'
+        'CONFIG_SPIRAM_TIMING_MEASURE_TEMPERATURE_INTERVAL_SECOND=5'
+      )
+    else
+      TEMP_RETUNE_OPTS=('CONFIG_SPIRAM_TIMING_TUNING_POINT_VIA_TEMPERATURE_SENSOR=')
+    fi
     for opt in \
       'CONFIG_IDF_EXPERIMENTAL_FEATURES=y' \
       'CONFIG_ESPTOOLPY_FLASHFREQ_80M=' \
       'CONFIG_ESPTOOLPY_FLASHFREQ_120M=y' \
       'CONFIG_SPIRAM_SPEED_80M=' \
       'CONFIG_SPIRAM_SPEED_120M=y' \
-      'CONFIG_SPIRAM_TIMING_TUNING_POINT_VIA_TEMPERATURE_SENSOR='; do
+      "${TEMP_RETUNE_OPTS[@]}"; do
       printf '%s\n' "${opt}" >> "${SDKCONFIG_SPIRAM_OCT}"
     done
     ;;
   stock)
     ;;
   *)
-    echo "Unknown MOYBYTE_EXTMEM_SPEED=${EXTMEM_SPEED}; expected fast or stock" >&2
+    echo "Unknown MOYBYTE_EXTMEM_SPEED=${EXTMEM_SPEED}; expected fast, fast_notemp or stock" >&2
     exit 1
     ;;
 esac
@@ -490,6 +512,18 @@ ESP_LCD_SPI_C="${UPSTREAM_DIR}/lib/esp-idf/components/esp_lcd/spi/esp_lcd_panel_
 if [ -f "${ESP_LCD_SPI_C}" ] && ! grep -q "Moybyte #66" "${ESP_LCD_SPI_C}"; then
   echo "Moybyte: applying esp_lcd tx_color no-acquire patch (#66)"
   patch -d "${UPSTREAM_DIR}/lib/esp-idf" -p1 < "${PATCH_DIR}/esp_lcd_tx_color_noacquire.patch"
+fi
+
+# Moybyte #169: let the PSRAM temperature retune run on this board. Upstream gates the
+# retune task on a verified flash vendor id and FAILS a SECONDARY system-init when it
+# doesn't match (= no boot), and abort()s inside the task when the scanned timing points
+# share no temperature range. Both become non-fatal here; see the MOYBYTE_EXTMEM_SPEED
+# block below for why running 120MHz octal without the retune is the worse risk. Same
+# marker-guard pattern as the #43/#66 patches above.
+MSPI_TIMING_C="${UPSTREAM_DIR}/lib/esp-idf/components/esp_hw_support/mspi_timing_tuning/port/esp32s3/mspi_timing_by_mspi_delay.c"
+if [ -f "${MSPI_TIMING_C}" ] && ! grep -q "Moybyte #169" "${MSPI_TIMING_C}"; then
+  echo "Moybyte: applying PSRAM temperature-retune vendor-gate patch (#169)"
+  patch -d "${UPSTREAM_DIR}/lib/esp-idf" -p1 < "${PATCH_DIR}/esp_psram_temp_retune_any_vendor.patch"
 fi
 
 # Moybyte #66: REPR_C object representation -- floats live UNBOXED in the object
@@ -610,10 +644,14 @@ case "${BOARD_CONFIG}" in
     # partition table (nvs + otadata + phy_init + ota_0 + ota_1 + vfs) instead of a
     # single `factory` app. That is what lets the device flash a new image to the
     # INACTIVE slot from SD and ping-pong between ota_0/ota_1 (esp_ota / esp32.Partition).
-    # --partition-size pins BOTH slots at 4.5MB (raised from 4MB on 2026-07-27: the app
-    # crossed 4MB -- 0x4148a0 -- and the size check hard-fails the build); vfs takes
-    # the ~8MB that remains on the 16MB part (carts live on SD, so a smaller internal vfs
-    # is fine). Rollback is already on (sdkconfig.base CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE
+    # --partition-size pins BOTH slots at 5MB (#168: 4MB -> 4.5MB on 2026-07-27 when the
+    # app crossed 4MB -- 0x4148a0 -- and the size check hard-failed the build; -> 5MB on
+    # 2026-07-29 so the next growth spurt doesn't cost another table change, since every
+    # table change costs deployed devices a full-erase USB flash). Layout on the 16MB
+    # part: ota_0 @0x20000 + ota_1 @0x520000, both 5MB, vfs takes the ~6MB tail (carts
+    # live on SD, so a smaller internal vfs is free). The build prints the remaining slot
+    # headroom at the end -- watch it, per #168 this must never again be discovered as a
+    # hard build failure. Rollback is already on (sdkconfig.base CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE
     # =y): a freshly-flashed app that never calls
     # esp32.Partition.mark_app_valid_cancel_rollback() is auto-reverted by the bootloader
     # on the next boot. The device-side updater is modules/moy_ota.py; see the README OTA
@@ -627,7 +665,7 @@ case "${BOARD_CONFIG}" in
       DISPLAY=st7789
       FROZEN_MANIFEST="${MANIFEST}"
       --flash-size=16
-      --partition-size=4718592
+      --partition-size=5242880
       --ota
       "${REPL_ARGS[@]}"
       --task-stack-size=16384
@@ -694,6 +732,12 @@ fi
 if [ "${EXTMEM_SPEED}" = "fast" ]; then
   WANT_EXTMEM='CONFIG_ESPTOOLPY_FLASHFREQ_120M=y
 CONFIG_SPIRAM_SPEED_120M=y
+CONFIG_SPIRAM_TIMING_TUNING_POINT_VIA_TEMPERATURE_SENSOR=y
+CONFIG_SPIRAM_SPEED=120
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y'
+elif [ "${EXTMEM_SPEED}" = "fast_notemp" ]; then
+  WANT_EXTMEM='CONFIG_ESPTOOLPY_FLASHFREQ_120M=y
+CONFIG_SPIRAM_SPEED_120M=y
 # CONFIG_SPIRAM_TIMING_TUNING_POINT_VIA_TEMPERATURE_SENSOR is not set
 CONFIG_SPIRAM_SPEED=120
 CONFIG_IDF_EXPERIMENTAL_FEATURES=y'
@@ -726,6 +770,23 @@ cp "${MPY_BUILD_DIR}/micropython.bin" "${APP_BIN}"
 echo "Wrote SD launcher app image: ${APP_BIN}"
 cp "${APP_BIN}" "${CURRENT_APP_BIN}"
 echo "Updated current app alias: ${CURRENT_APP_BIN}"
+
+# #168 size guard: the app crossing the OTA slot is a HARD build failure two steps
+# later (esptool's size check), and the last time it happened ~73KB of the overflow
+# had accumulated unnoticed over two weeks. Print image size + remaining headroom on
+# every build, and warn loudly under the threshold -- growing the slot again costs
+# every deployed device a full-erase USB flash, so the number has to be seen early.
+APP_SLOT_BYTES="${MOYBYTE_APP_SLOT_BYTES:-5242880}"
+APP_HEADROOM_WARN_BYTES="${MOYBYTE_APP_HEADROOM_WARN_BYTES:-204800}"   # 200KB
+APP_SIZE_BYTES="$(wc -c < "${APP_BIN}" | tr -d '[:space:]')"
+APP_HEADROOM_BYTES=$(( APP_SLOT_BYTES - APP_SIZE_BYTES ))
+printf 'App image: %s bytes of a %s-byte slot -- %s bytes headroom (%s KB)\n' \
+  "${APP_SIZE_BYTES}" "${APP_SLOT_BYTES}" "${APP_HEADROOM_BYTES}" "$(( APP_HEADROOM_BYTES / 1024 ))"
+if [ "${APP_HEADROOM_BYTES}" -lt 0 ]; then
+  echo "Moybyte WARNING (#168): the app image does NOT fit the ${APP_SLOT_BYTES}-byte OTA slot" >&2
+elif [ "${APP_HEADROOM_BYTES}" -lt "${APP_HEADROOM_WARN_BYTES}" ]; then
+  echo "Moybyte WARNING (#168): under $(( APP_HEADROOM_WARN_BYTES / 1024 ))KB of OTA-slot headroom left -- trim the image or plan the next table change" >&2
+fi
 
 BOOTLOADER_BIN="${MPY_BUILD_DIR}/bootloader/bootloader.bin"
 PARTITION_BIN="${MPY_BUILD_DIR}/partition_table/partition-table.bin"

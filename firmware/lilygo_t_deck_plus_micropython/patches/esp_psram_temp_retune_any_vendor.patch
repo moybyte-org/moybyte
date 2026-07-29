@@ -1,0 +1,42 @@
+--- a/components/esp_hw_support/mspi_timing_tuning/port/esp32s3/mspi_timing_by_mspi_delay.c
++++ b/components/esp_hw_support/mspi_timing_tuning/port/esp32s3/mspi_timing_by_mspi_delay.c
+@@ -799,8 +799,13 @@
+         if (valid_point[point] && valid_point[point + 1]) {
+             // check temperature intersection
+             if (s_point_temp_range_max[point] <= s_point_temp_range_min[point + 1]) {
+-                ESP_EARLY_LOGE(TAG, "no temperature intersection of neighboring phase points");
+-                abort();
++                //Moybyte #169: upstream abort()s here, which turns "this chip's scanned
++                //timing points don't overlap in temperature" into a dead board at boot.
++                //Stop adjusting instead: the boot-tuned timing point stays in force,
++                //which is exactly the (un-mitigated) behaviour of a build without this
++                //option -- degraded, never bricked.
++                ESP_EARLY_LOGE(TAG, "no temperature intersection of neighboring phase points -- PSRAM temperature retuning disabled");
++                vTaskDelete(NULL);
+             }
+         }
+     }
+@@ -869,12 +874,18 @@
+ {
+     esp_rom_spiflash_chip_t *chip = &rom_spiflash_legacy_data->chip;
+     uint8_t vender_id = (chip->device_id >> 16) & 0xff;
+-    if (vender_id == 0xC8 || vender_id == 0x20) {
+-        xTaskCreatePinnedToCore(adjust_psram_timing_point_task, "adjust_psram_timing_point_task", 1024 * 5, NULL, configMAX_PRIORITIES - 2, NULL, 0);
+-    } else {
+-        ESP_EARLY_LOGE(TAG, "The flash model has not been verified support this feature, please contact espressif business support");
+-        return ESP_ERR_NOT_SUPPORTED;
++    if (vender_id != 0xC8 && vender_id != 0x20) {
++        //Moybyte #169: upstream returns ESP_ERR_NOT_SUPPORTED here, and because this
++        //runs as a SECONDARY ESP_SYSTEM_INIT_FN that FAILS the boot (the symptom the
++        //first attempt at this option hit on the T-Deck). The gate is Espressif's
++        //"verified flash vendor" support gate, not a known incompatibility, and the
++        //adjustment it guards only re-tunes PSRAM timing points from the on-chip
++        //temperature sensor. Without it, 120MHz octal PSRAM runs with NO drift
++        //mitigation at all -- random PSRAM/flash faults ~20C either side of the boot
++        //temperature, which is an ordinary day for a handheld. Warn and run it.
++        ESP_EARLY_LOGW(TAG, "flash vendor 0x%02x is not on Espressif's verified list for PSRAM temperature retuning -- enabling anyway (Moybyte #169)", vender_id);
+     }
++    xTaskCreatePinnedToCore(adjust_psram_timing_point_task, "adjust_psram_timing_point_task", 1024 * 5, NULL, configMAX_PRIORITIES - 2, NULL, 0);
+     return ESP_OK;
+ }
+ 
