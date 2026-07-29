@@ -207,7 +207,7 @@ Details and the exact split: [`LICENSE.md`](LICENSE.md) — the SDK and examples
 [MIT](LICENSES/MIT.md); the console and firmware are
 [FSL-1.1-MIT](LICENSES/FSL-1.1-MIT.md) (source-available, becomes MIT after two
 years). The `.moy` cart format and API are an open specification, and carts you
-author are yours. The rationale is in
+author are yours. What each licence lets you do, in a table:
 [`docs/pricing_release_model_v1.md`](docs/pricing_release_model_v1.md).
 
 ---
