@@ -19,6 +19,8 @@ restriction above is temporary by design.
 | Repo default — the console, firmware, tools, seed carts (everything not listed below) | [FSL-1.1-MIT](LICENSES/FSL-1.1-MIT.md) (source-available; MIT after 2 years) |
 | `moybyte/`, `moybyte_cli/`, `moybyte_sim/`, `moybyte_blocks/`, `examples/` — the SDK and examples | [MIT](LICENSES/MIT.md) |
 
+Some files here come from other projects and keep their own licenses — see [THIRD_PARTY.md](THIRD_PARTY.md).
+
 The `.moy` cart format and cart API are an **open specification**: anyone may
 implement a compatible runtime or tools for them, without restriction. Carts
 you author are **yours** — this repository's licenses claim nothing over them.

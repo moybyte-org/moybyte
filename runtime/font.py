@@ -5,6 +5,16 @@ draws via `framebuf.text`), extracted byte-for-byte so the host `Canvas.print`
 produces pixel-identical text. 8x8 glyphs for ASCII 0x20..0x7f; each glyph is 8
 bytes = 8 columns, one byte per column with the LSB at the top row (exactly how
 framebuf scans it). Both backends advance 8px per character.
+
+THIRD-PARTY NOTICE -- the glyph data below is not Moybyte's work:
+
+    MicroPython (extmod/font_petme128_8x8.h) -- The MIT License (MIT)
+    Copyright (c) 2013, 2014 Damien P. George
+    https://github.com/micropython/micropython
+
+The full permission notice is reproduced in THIRD_PARTY.md at the repository
+root; it travels with these bytes wherever they go (the frozen device font
+blob, the generated site webfont, any copy of this file).
 """
 
 FIRST = 0x20
