@@ -1246,7 +1246,7 @@ class LauncherHomeLayer:
         # The grid's press/drag/release machine: returns an index only on a clean
         # tap release -- the launcher tap = RUN the selected cart.
         i = ws.launcher.pointer_frame(px, py, click, down,
-                                      dt_ms=ws._frame_dt_ms)
+                                      dt_ms=ws._pointer_dt_ms)
         if i is not None:
             ws.launcher.sel = i
             ws.launch_selected()
@@ -1599,7 +1599,7 @@ class EditorPickerLayer:
         # The grid's press/drag/release machine (mirrors LauncherHomeLayer): a
         # clean tap release picks; a drag scrolls and disarms the DEL confirm.
         i = ws.picker.pointer_frame(px, py, click, down,
-                                    dt_ms=ws._frame_dt_ms)
+                                    dt_ms=ws._pointer_dt_ms)
         if i is not None:
             self._disarm_delete()
             ws.picker.sel = i

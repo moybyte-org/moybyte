@@ -34,8 +34,8 @@ from device_input import TrackBall, Touch
 # the loop's hitch threshold + one-shot calib flag (mutated in place).
 from device_diag import (
     _diag_flush, _diag_perf_sample, _diag_hitch, _diag_drawbrk, _diag_draw2,
-    _diag_chromebrk, _diag_homebrk, _diag_pump, _diag_i2cstat, _diag_calib,
-    _diag_gc, HITCH_MS, _CALIB_DONE,
+    _diag_draw3, _diag_loop, _diag_chromebrk, _diag_homebrk, _diag_pump,
+    _diag_i2cstat, _diag_calib, _diag_gc, HITCH_MS, _CALIB_DONE,
 )
 # The device WEB VIEW controller (#41/#22, extracted to device_webview.py).
 # run_desktop constructs WebView(...) and services it between frames.
@@ -503,6 +503,11 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     _diag_perf_at = _ticks_ms() + 3000
     _diag_prev_cart_err = None    # last ws.cart_error we logged, so we log each crash once
     _diag_cart_prev = False       # #68: cart-running edge -> flush the ring on cart EXIT
+    # LOOP-line accumulator: [n, frame, kbd, inp, sb, ws, web, diag, sd, sleep] ms
+    # summed per frame, averaged + zeroed every diag tick (_diag_loop). HITCH only
+    # fires on SPIKES, so a steady per-frame cost that never crosses HITCH_MS was
+    # invisible until this line existed (2026-07-29 fps hunt).
+    _loop_acc = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     ws.arm_splash()               # boot logo: show the moybyte mascot before the launcher
     while True:
         now = _ticks_ms()
@@ -547,6 +552,12 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
                 pointer.move(dx, dy)            # elsewhere it moves the cursor
         tp = touch.poll()                       # touch -> absolute position + tap
         pointer.down = tp is not None           # held finger drives drag-scroll
+        # Touch.poll holds a held finger's last point across the frames the GT911
+        # has no fresh sample for (#74's 20-45ms finger-down stalls), so `down`
+        # above is a real LEVEL and a drag survives them; `fresh` marks the
+        # repeats so kinetic scrolling (#113) doesn't measure finger speed
+        # against a sample the hardware never took.
+        pointer.fresh = getattr(touch, "fresh", True)
         if tp is not None:
             pointer.place(tp[0], tp[1])
             if tp[2]:                           # press edge = tap = click
@@ -567,9 +578,18 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         canvas.sync_back()                      # buffer repoint + GDMA layer kick
         _t_sb = _ticks_diff(_ticks_ms(), _t0)   # (was an unmeasured stage; HITCH v3)
         _t0 = _ticks_ms()
+        _t_hi = 0                               # (defined before the try: a crash
+        _t_hp = 0                               #  mid-frame still logs a LOOP line)
         try:
+            # Split so the LOOP line can tell ROUTING from DRAWING (2026-07-29):
+            # _t_ws lumped all three, and the fps hunt found ~4.8ms/frame inside
+            # it that DRAWBRK + flush don't account for -- identical on two very
+            # different carts, which is the shape of a fixed per-frame routing
+            # cost, not cart draw work.
             ws.handle_input()                   # keyboard W/A/S/D etc.
+            _t_hi = _ticks_diff(_ticks_ms(), _t0)
             ws.handle_pointer()                 # cursor hover + click
+            _t_hp = _ticks_diff(_ticks_ms(), _t0) - _t_hi
             ws.frame(dt)                        # draw + composite + flush
         except Exception as exc:                # never let one bad frame brick the device:
             # Capture the crash in diag AND print it live: a crash we can't see live
@@ -644,6 +664,11 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             _diag_perf_sample(diag, ws)
             _diag_drawbrk(diag, ws)
             _diag_draw2(diag, ws)       # #63: split render into layer-copy vs sprite-batch us
+            _diag_draw3(diag, ws)       # the REST of render (spr/circ/line) + the
+                                        # measured dispatch residual
+            _diag_loop(diag, ws, _loop_acc)     # the average frame by loop stage --
+            for _i in range(12):                # the steady-state HITCH never sees
+                _loop_acc[_i] = 0
             _diag_chromebrk(diag, ws)   # #66 lever 5: bar/composite/cursor chrome sub-split
             _diag_homebrk(diag, ws)     # launcher wallpaper/grid/bar split (cart-gated
                                         # DRAWBRK never fires on the home screen)
@@ -718,8 +743,24 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             _fms = frame_ms
         if _fms < frame_ms:
             _fms = frame_ms                     # never pace FASTER than the loop cap
-        if elapsed < _fms:
-            time.sleep_ms(_fms - elapsed)
+        _t_sleep = _fms - elapsed if elapsed < _fms else 0
+        # LOOP accumulation (see _loop_acc): plain int adds, one per stage per
+        # frame. Done BEFORE the sleep so `frame` is work, and `sleep` is carried
+        # separately -- a paced loop must not read as a slow one.
+        _loop_acc[0] += 1
+        _loop_acc[1] += elapsed
+        _loop_acc[2] += _t_kbd
+        _loop_acc[3] += _t_inp
+        _loop_acc[4] += _t_sb
+        _loop_acc[5] += _t_ws
+        _loop_acc[6] += _t_web
+        _loop_acc[7] += _t_diag
+        _loop_acc[8] += _t_sd
+        _loop_acc[9] += _t_sleep
+        _loop_acc[10] += _t_hi       # ws.handle_input   (routing, not drawing)
+        _loop_acc[11] += _t_hp       # ws.handle_pointer (routing, not drawing)
+        if _t_sleep:
+            time.sleep_ms(_t_sleep)
 
 
 def run_touch_calibrate(handler):

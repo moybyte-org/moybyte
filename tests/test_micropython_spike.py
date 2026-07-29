@@ -51,9 +51,13 @@ def test_micropython_spike_build_uses_lvgl_micropython_and_frozen_modules():
     assert "FROZEN_MANIFEST" in build
     assert "export IDF_PATH" in build
     assert "export.sh" in build
-    # #168: raised 4MB -> 4.5MB when the app image crossed 0x400000 and the IDF
-    # size check began hard-failing the build.
-    assert "--partition-size=4718592" in build
+    # #168: 4MB -> 4.5MB when the app image crossed 0x400000 and the IDF size check
+    # began hard-failing the build; -> 5MB so the next growth spurt doesn't cost
+    # another partition-table change (each one costs deployed devices a full erase).
+    assert "--partition-size=5242880" in build
+    # ...and the build reports its own headroom, so the next overflow is seen coming.
+    assert "MOYBYTE_APP_SLOT_BYTES" in build
+    assert "headroom" in build
     # OTA (#53): the build asks the lvgl_micropython builder for a dual-app partition
     # table (otadata + ota_0 + ota_1), and merges the full image at the derived ota_0
     # offset rather than the legacy hardcoded 0x10000.
@@ -1859,6 +1863,24 @@ def test_scroll_rect_wired_for_ui_blit_scroll():
     assert "lay.RETAINED_FRAMES = 1" in device_canvas
 
 
+def test_touch_holds_a_held_finger_between_gt911_samples():
+    # #113/#74: the GT911 clock-stretches 20-45ms on 75-90% of the reads it makes
+    # while a finger is DOWN, so at 30-60fps most frames carry no fresh sample --
+    # but the finger is still on the glass. poll() must report the held point (the
+    # P4's p4_input does the same); reporting None makes run_desktop's
+    # `pointer.down = tp is not None` a phantom RELEASE, which ends the drag
+    # mid-swipe and can fire a kinetic fling. The repeats are marked stale so the
+    # console doesn't charge them a finger delta the hardware never measured.
+    inp = (ROOT / "modules" / "device_input.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    assert "HOLD_SAMPLE_MS" in inp
+    assert "if self._down and self._held is not None:" in inp
+    assert "self.fresh = False" in inp
+    # A missed finger-up must never wedge the pointer down forever.
+    assert "self._down = False   # missed release" in inp
+    assert "pointer.fresh = getattr(touch, \"fresh\", True)" in runtime
+
+
 def test_native_blit_map_wired_for_tilemaps():
     # The tilemap blit (#32) is a native moy_gfx op (one C call per map() region) and
     # DeviceCanvas.map drives it from a baked RGB565 tile atlas, with a Python
@@ -2270,8 +2292,12 @@ def _load_moy_runtime():
     # import ...` -- device-only modules authored directly in modules/ (NOT staged
     # from runtime/). Register them from modules/ so the device module execs under
     # CPython (device_util first: device_wifi imports it).
+    # (moy_lua_glue is device-only too and device_api imports it -- since the #67
+    # glue moved out of device_api into its own module it must be registered
+    # BEFORE it, or every test through this loader dies on the import.)
     for dname in ("device_util", "device_wifi", "device_input", "device_diag",
-                  "device_webview", "device_audio", "device_canvas", "device_api"):
+                  "device_webview", "device_audio", "device_canvas",
+                  "moy_lua_glue", "device_api"):
         ds = importlib.util.spec_from_file_location(
             dname, ROOT / "modules" / (dname + ".py"))
         dmod = importlib.util.module_from_spec(ds)

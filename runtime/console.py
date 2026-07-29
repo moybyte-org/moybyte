@@ -1105,6 +1105,8 @@ class Workstation:
         self._last_ptr = None         # (x, y, visible, down, click) last drawn, or None
         self._frames_drawn = 0        # frames that actually drew+flushed (test witness)
         self._frame_dt_ms = 33.0      # last loop tick in ms (kinetic velocity, #113)
+        self._pointer_dt_ms = 33.0    # ...as charged to the pointer SAMPLE (see
+        self._stale_ptr_ms = 0.0      # _tick_pointer_dt), None while it's a repeat
         self._frame_requested = False # a draw asked for another frame (request_frame:
                                       # a coasting fling re-arms the gate the
                                       # _covers_deferred way -- set DURING a draw,
@@ -3966,6 +3968,7 @@ class Workstation:
         p = self.pointer
         if p is None:
             return
+        self._tick_pointer_dt(p)
         px, py, click = p.x, p.y, p.click
         gx, gy = self._game_xy(px, py)
         # Windowed WM (#73): while a window OTHER than the playtest holds input
@@ -3979,6 +3982,33 @@ class Workstation:
         for layer in self.wm.visible_stack_rev():
             if layer.handle_pointer(px, py, click):
                 return
+
+    def _tick_pointer_dt(self, p):
+        """Charge this frame's loop tick to the pointer SAMPLE, for kinetic
+        scrolling (#113).
+
+        A backend whose touch controller can't produce a sample every frame
+        marks the repeat frames `pointer.fresh = False` (the T-Deck's GT911
+        stalls 20-45ms on most finger-down reads, #74, so a drag yields ~20-30
+        samples/s against a 30-60fps loop). Two rules follow:
+
+        * a stale frame gets `None`, which tells ScrollRegion.drag_move to leave
+          the release velocity alone -- the finger did not stand still, we
+          simply learned nothing about it, and averaging in a zero would decay
+          a real fling toward a stop;
+        * its time is BANKED and handed to the next real sample, so a finger
+          delta spanning three frames is divided by three frames of time. Charge
+          one frame's dt to it instead and the velocity reads ~3x too fast.
+
+        On a backend that samples every frame (mouse, and the P4's touch) every
+        frame is fresh, so this is exactly `self._frame_dt_ms`."""
+        dt = self._frame_dt_ms
+        if getattr(p, "fresh", True):
+            self._pointer_dt_ms = min(dt + self._stale_ptr_ms, 100.0)
+            self._stale_ptr_ms = 0.0
+        else:
+            self._pointer_dt_ms = None
+            self._stale_ptr_ms = min(self._stale_ptr_ms + dt, 100.0)
 
     # (The desktop/running-cart pointer handler -- the pause QUIT/CONTINUE + FPS-chip
     # tap + top-bar tool-switcher routing -- moved to Player.handle_pointer (Stage 2,

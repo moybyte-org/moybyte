@@ -122,6 +122,15 @@ class Pointer:
         self.y = h // 2
         self.click = False
         self.down = False         # touch/button currently held (for drag gestures)
+        # Did THIS frame's sample come from the input hardware, or is it a repeat
+        # of the last one? A mouse always reports a level, so the host never sets
+        # this False; the T-Deck's GT911 hands over ~20-30 samples/s while a
+        # finger drags (it clock-stretches 20-45ms on most finger-down reads,
+        # #74), which is well under the frame rate -- so its backend holds the
+        # last point and marks the repeats stale. Kinetic scrolling (#113) reads
+        # it: a repeat carries NO new information about finger speed, so charging
+        # it a zero delta would decay the fling velocity toward nothing.
+        self.fresh = True
         self.visible = True
         self.idle_ms = idle_ms
         self._last_move = _ticks_ms()
