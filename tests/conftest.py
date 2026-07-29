@@ -28,6 +28,7 @@ device itself is untouched by definition (conftest never ships).
 """
 
 import importlib
+import importlib.util
 import importlib.abc
 import importlib.machinery
 import os
@@ -65,4 +66,41 @@ class _SharedRuntimeAliasFinder(importlib.abc.MetaPathFinder):
         return importlib.machinery.ModuleSpec(fullname, _AliasLoader(module))
 
 
+# Device-only modules: authored in the T-Deck modules/ tree with no runtime/
+# counterpart, so the finder above deliberately ignores them. They import each
+# other by bare name the way the frozen device build does (device_api does
+# `from moy_lua_glue import ...`), which on the host resolves only if something
+# already put that name in sys.modules.
+#
+# Test files used to do that by hand, listing the modules they expected to
+# need. A list like that is wrong the moment a device module gains an import:
+# test_device_seed_parity.py's omitted moy_lua_glue, so it passed in a full run
+# -- where an earlier-collected file happened to have registered it -- and
+# failed with 11 errors when run alone. That is the worst failure shape there
+# is: it punishes exactly the person running the one file they just touched.
+#
+# Resolving them from the tree instead means the next device module needs no
+# test change. Runtime modules still win: _SHARED is subtracted, so a staged
+# copy can never shadow the source of truth.
+_DEVICE_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "firmware", "lilygo_t_deck_plus_micropython", "modules")
+_DEVICE_ONLY = {
+    f[:-3] for f in os.listdir(_DEVICE_DIR)
+    if f.endswith(".py") and f != "__init__.py"
+} - _SHARED - set(_RENAMED)
+
+
+class _DeviceModuleFinder(importlib.abc.MetaPathFinder):
+    """Resolve a bare device-only import from the authored modules/ tree."""
+
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname not in _DEVICE_ONLY:
+            return None
+        return importlib.util.spec_from_file_location(
+            fullname, os.path.join(_DEVICE_DIR, fullname + ".py"))
+
+
+# Runtime aliasing first: a device module must never shadow a shared one.
+sys.meta_path.insert(0, _DeviceModuleFinder())
 sys.meta_path.insert(0, _SharedRuntimeAliasFinder())

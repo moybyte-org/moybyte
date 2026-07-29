@@ -30,11 +30,24 @@ def _open_first_cart(ws):
 
 def _quiesce(ws):
     """Hide the cursor + clear the achievement toast so a rendered frame is the pure
-    editor (the same quiescing test_two_domain_seam.py does)."""
+    editor (the same quiescing test_two_domain_seam.py does), and PIN THE CLOCK.
+
+    The OS bar prints a live HH:MM. Each byte-identical test below builds two whole
+    workstations -- seeding ~30 carts each -- and compares their rendered frames, so
+    a minute boundary falling between the two renders changed 21 bytes of clock text
+    and failed the assertion. That is a real flake, not a real difference: it took
+    down CI on Python 3.11 while 3.10 passed the same commit (2026-07-29).
+
+    Pinning the per-second cache does NOT work -- bar_layer hits it with
+    `now_s == self._clock_at`, so a sentinel that never equals the current second
+    forces a recompute every frame, which is the opposite of what you want. Bind
+    the accessor instead. No production code needs a test hook for this.
+    """
     if ws.pointer is not None:
         ws.pointer.visible = False
     ws.ach.toast = None
     ws.ach.toast_until = 0
+    ws.bar_layer._clock_text = lambda: "00:00"
 
 
 def _ws_shared(tmp_path):

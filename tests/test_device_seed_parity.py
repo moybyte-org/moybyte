@@ -77,19 +77,11 @@ def _load_moy_runtime():
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         sys.modules[name] = mod
-    # moy_runtime also imports the device-only leaves (authored in modules/,
-    # not staged from runtime/, so conftest's alias finder doesn't cover them).
-    # The full suite happened to inherit them from earlier-collected test files'
-    # loaders; register them here too (same order as test_micropython_spike's
-    # loader -- device_util first, device_wifi imports it) so this file passes
-    # standalone instead of depending on collection order.
-    for name in ("device_util", "device_wifi", "device_input", "device_diag",
-                 "device_webview", "device_audio", "device_canvas", "device_api"):
-        if name not in sys.modules:
-            spec = importlib.util.spec_from_file_location(name, FW / "modules" / (name + ".py"))
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            sys.modules[name] = mod
+    # moy_runtime also imports the device-only leaves (device_api, device_canvas,
+    # moy_lua_glue, ...). conftest's _DeviceModuleFinder resolves those from the
+    # authored modules/ tree on demand, so there is deliberately no list here --
+    # the one that used to live here omitted moy_lua_glue and made this file fail
+    # standalone while passing in a full run.
     # moy_runtime now does `from carts_data import CARTS`; on device that module is
     # build-generated from system_carts/. Register the same generated data here so
     # exec succeeds AND this test exercises the real generator -> moy_runtime path.
