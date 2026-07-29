@@ -387,6 +387,20 @@ class DeviceCanvas:
         self._t_map_us = 0
         self._t_text_us = 0
         self._t_fill_us = 0
+        # DRAW3 (2026-07-29 regression hunt): DRAW2's five buckets left
+        # (DRAWBRK render - them) as "Python dispatch + circ/line/pix" -- a
+        # guess, and on Sky Run a 3.6ms one. These time the rest, so the
+        # leftover is a MEASURED dispatch number: spr = the per-sprite blit565
+        # path (the spr calls that did NOT coalesce into blit_batch -- DRAW2
+        # batch=0.00 means every sprite went this way), shape = circ/line,
+        # img = the paint-image blit_indices. Counts ride along because a
+        # bucket grows either by cost-per-call or by call COUNT, and only the
+        # count distinguishes "the op got slower" from "something calls it more".
+        self._t_spr_us = 0
+        self._t_shape_us = 0
+        self._t_img_us = 0
+        self._n_spr = 0
+        self._n_shape = 0
         # DRAW2 timing gate. The per-op ticks_us pair costs ~6us -- meaningless
         # against a cart's big native verbs (which is why it shipped ungated), but
         # ~6% of a CHROME fill, of which a single picker draw issues ~155. The
@@ -868,9 +882,19 @@ class DeviceCanvas:
         x0 = int(x1); y0 = int(y1); xe = int(x2); ye = int(y2)
         col = self._col(c)
         if self._gfx is not None:
-            self._gfx.line(self._buf, self._stride, self._bh, x0, y0, xe, ye, col,
-                           self._cam_x, self._cam_y,
-                           self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+            if self._prof:
+                _t0 = _ticks_us()      # DRAW3: shape bucket (line)
+                self._gfx.line(self._buf, self._stride, self._bh, x0, y0, xe, ye,
+                               col, self._cam_x, self._cam_y,
+                               self._clip_x0, self._clip_y0,
+                               self._clip_x1, self._clip_y1)
+                self._t_shape_us += _ticks_diff(_ticks_us(), _t0)
+                self._n_shape += 1
+            else:
+                self._gfx.line(self._buf, self._stride, self._bh, x0, y0, xe, ye,
+                               col, self._cam_x, self._cam_y,
+                               self._clip_x0, self._clip_y0,
+                               self._clip_x1, self._clip_y1)
             return
         dx = abs(xe - x0); dy = -abs(ye - y0)
         sx = 1 if x0 < xe else -1
@@ -964,9 +988,19 @@ class DeviceCanvas:
         cx = int(cx); cy = int(cy); r = int(r)
         col = self._col(c)
         if self._gfx is not None:
-            self._gfx.circ(self._buf, self._stride, self._bh, cx, cy, r, col,
-                           self._cam_x, self._cam_y,
-                           self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+            if self._prof:
+                _t0 = _ticks_us()      # DRAW3: shape bucket (circ)
+                self._gfx.circ(self._buf, self._stride, self._bh, cx, cy, r, col,
+                               self._cam_x, self._cam_y,
+                               self._clip_x0, self._clip_y0,
+                               self._clip_x1, self._clip_y1)
+                self._t_shape_us += _ticks_diff(_ticks_us(), _t0)
+                self._n_shape += 1
+            else:
+                self._gfx.circ(self._buf, self._stride, self._bh, cx, cy, r, col,
+                               self._cam_x, self._cam_y,
+                               self._clip_x0, self._clip_y0,
+                               self._clip_x1, self._clip_y1)
             return
         for dy in range(-r, r + 1):
             span = int((r * r - dy * dy) ** 0.5)
@@ -1079,9 +1113,19 @@ class DeviceCanvas:
                 and self._palgen == 0):
             if getattr(img, "_rgb_i", None) is None:
                 self._bake_indices(img)
-            self._gfx.blit565(self._buf, self._stride, self._bh, x, y,
-                              img._rgb_i, img.w, img.h, -1,
-                              self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+            if self._prof:
+                _t0 = _ticks_us()      # DRAW3: spr bucket (paint-image fast path)
+                self._gfx.blit565(self._buf, self._stride, self._bh, x, y,
+                                  img._rgb_i, img.w, img.h, -1,
+                                  self._clip_x0, self._clip_y0,
+                                  self._clip_x1, self._clip_y1)
+                self._t_spr_us += _ticks_diff(_ticks_us(), _t0)
+                self._n_spr += 1
+            else:
+                self._gfx.blit565(self._buf, self._stride, self._bh, x, y,
+                                  img._rgb_i, img.w, img.h, -1,
+                                  self._clip_x0, self._clip_y0,
+                                  self._clip_x1, self._clip_y1)
             return
         # Blit a cached, pre-scaled+flipped+pal-applied RGB565 copy in one C call. The
         # cache lives on the Image (sheet tiles are reused across frames via the
@@ -1097,9 +1141,19 @@ class DeviceCanvas:
                 or getattr(img, "_rgb_palgen", -1) != self._palgen):
             if not self._rgb_variant(img, scale, flip):
                 self._cache_rgb(img, scale, flip)
-        self._gfx.blit565(self._buf, self._stride, self._bh, x, y,
-                          img._rgb, img._rgb_w, img._rgb_h, _RGB_KEY,
-                          self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+        if self._prof:
+            _t0 = _ticks_us()          # DRAW3: spr bucket (cached-bake blit)
+            self._gfx.blit565(self._buf, self._stride, self._bh, x, y,
+                              img._rgb, img._rgb_w, img._rgb_h, _RGB_KEY,
+                              self._clip_x0, self._clip_y0,
+                              self._clip_x1, self._clip_y1)
+            self._t_spr_us += _ticks_diff(_ticks_us(), _t0)
+            self._n_spr += 1
+        else:
+            self._gfx.blit565(self._buf, self._stride, self._bh, x, y,
+                              img._rgb, img._rgb_w, img._rgb_h, _RGB_KEY,
+                              self._clip_x0, self._clip_y0,
+                              self._clip_x1, self._clip_y1)
 
     def _rgb_variant(self, img, scale, flip):
         # Promote a previously-baked (scale, flip, pal-state) variant into the hot
@@ -1533,6 +1587,11 @@ class DeviceCanvas:
         self._t_map_us = 0          # #66: the render-bound carts' remaining verbs
         self._t_text_us = 0
         self._t_fill_us = 0
+        self._t_spr_us = 0          # DRAW3: the rest of the render ms (see __init__)
+        self._t_shape_us = 0
+        self._t_img_us = 0
+        self._n_spr = 0
+        self._n_shape = 0
         self._prof = True           # perf capture is on this frame -- time the ops
 
     def spr_batch(self, sheet, items, colorkey=-1, scale=1):
@@ -1613,8 +1672,16 @@ class DeviceCanvas:
         if iw <= 0 or ih <= 0:
             return
         if self._gfx is not None:
-            self._gfx.blit_indices(self._buf, self._stride, self._bh, x, y,
-                                   indices, iw, ih, _PAL565_WIRE_BUF)
+            if self._prof:
+                _t0 = _ticks_us()      # DRAW3: img bucket. Documented as a LOAD-time
+                                       # op -- if this is nonzero during play, some
+                                       # cart is blitting a paint image every frame.
+                self._gfx.blit_indices(self._buf, self._stride, self._bh, x, y,
+                                       indices, iw, ih, _PAL565_WIRE_BUF)
+                self._t_img_us += _ticks_diff(_ticks_us(), _t0)
+            else:
+                self._gfx.blit_indices(self._buf, self._stride, self._bh, x, y,
+                                       indices, iw, ih, _PAL565_WIRE_BUF)
             return
         d = memoryview(self._buf).cast("H")
         w = self.w

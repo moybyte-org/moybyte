@@ -142,6 +142,45 @@ def _diag_draw2(diag, ws):
         pass
 
 
+def _diag_draw3(diag, ws):
+    """Log a DRAW3 line: the REST of the render ms, and what's left after it.
+
+    DRAW2's five buckets never covered the whole render slice -- its own comment
+    called the leftover "Python dispatch + circ/line/pix", which is a guess, and
+    on the 2026-07-29 fps regression hunt that guess was 3.6ms of a 9.2ms Sky Run
+    render. So: spr = the per-sprite blit565 path (every spr that did NOT coalesce
+    into blit_batch -- DRAW2 batch=0.00 with sprites on screen means ALL of them),
+    shape = circ/line, img = paint-image blits, n= their call counts. resid is
+    render minus every named bucket: what's genuinely interpreter dispatch.
+
+    Read it as: a big `spr` says the pixel work moved, a big `resid` with flat
+    counts says dispatch got dearer, and a jump in `n` says something started
+    calling more often. Guarded; only meaningful while a cart runs."""
+    if diag is None:
+        return
+    try:
+        cv = getattr(ws, "canvas", None)
+        if cv is None or ws.perf_sample() is None:
+            return
+        named = (getattr(cv, "_t_layer_us", 0) + getattr(cv, "_t_batch_us", 0)
+                 + getattr(cv, "_t_map_us", 0) + getattr(cv, "_t_text_us", 0)
+                 + getattr(cv, "_t_fill_us", 0) + getattr(cv, "_t_spr_us", 0)
+                 + getattr(cv, "_t_shape_us", 0) + getattr(cv, "_t_img_us", 0))
+        # render is the DRAWBRK EMA and the buckets are last-frame, so resid is
+        # approximate frame to frame -- it's the TREND that answers the question.
+        render_ms = ws.perf_breakdown()[1]
+        diag.log("DRAW3",
+                 "spr=%.2fms shape=%.2fms img=%.2fms nspr=%d nshape=%d "
+                 "named=%.2fms resid=%.2fms"
+                 % (getattr(cv, "_t_spr_us", 0) / 1000.0,
+                    getattr(cv, "_t_shape_us", 0) / 1000.0,
+                    getattr(cv, "_t_img_us", 0) / 1000.0,
+                    getattr(cv, "_n_spr", 0), getattr(cv, "_n_shape", 0),
+                    named / 1000.0, render_ms - named / 1000.0))
+    except Exception:
+        pass
+
+
 def _diag_chromebrk(diag, ws):
     """Log a CHROMEBRK line (#66 lever 5, instrument-before-cutting): the sub-split
     of DRAWBRK's chrome remainder -- bar (_draw_status_strip), cmp (the game->system
@@ -176,6 +215,36 @@ def _diag_homebrk(diag, ws):
         home = getattr(ws, "_pf_home", None)
         if home:
             diag.log("HOMEBRK", "wp=%d grid=%d bar=%d" % home)
+    except Exception:
+        pass
+
+
+def _diag_loop(diag, ws, acc):
+    """Log a LOOP line: the AVERAGE frame, split by loop stage, over the diag window.
+
+    HITCH already names these stages -- but only for frames past HITCH_MS, so a
+    steady-state cost that never spikes is invisible to it. The 2026-07-29 fps hunt
+    needed exactly that: Sky Run's DRAWBRK summed to 12ms and flush to 3ms, yet the
+    frame was 19.6ms (51fps), so ~4.6ms per frame was going somewhere no counter
+    watched. `other` is that number -- frame minus every measured stage. `sleep` is
+    the frame-pacing wait, which is deliberate idle, not lost time (if sleep is
+    large the loop is capped, not slow).
+
+    `acc` is the loop's accumulator list (see moy_runtime.run_desktop):
+    [n, frame, kbd, inp, sb, ws, web, diag, sd, sleep] in ms; reset by the caller."""
+    if diag is None or not acc or acc[0] <= 0:
+        return
+    try:
+        n = acc[0]
+        stages = acc[2] + acc[3] + acc[4] + acc[5] + acc[6] + acc[7] + acc[8] + acc[9]
+        diag.log("LOOP",
+                 "n=%d frame=%.1f kbd=%.1f inp=%.1f sb=%.1f ws=%.1f "
+                 "(hi=%.1f hp=%.1f frm=%.1f) web=%.1f diag=%.1f sd=%.1f "
+                 "sleep=%.1f other=%.1f"
+                 % (n, acc[1] / n, acc[2] / n, acc[3] / n, acc[4] / n, acc[5] / n,
+                    acc[10] / n, acc[11] / n, (acc[5] - acc[10] - acc[11]) / n,
+                    acc[6] / n, acc[7] / n, acc[8] / n, acc[9] / n,
+                    (acc[1] - stages) / n))
     except Exception:
         pass
 
