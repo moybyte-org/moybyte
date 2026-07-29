@@ -1,6 +1,6 @@
 # Issue taxonomy — labels & the readiness ladder
 
-This is the label scheme for `nikola-j/moybyte` issues. The goal is to tell **at a
+This is the label scheme for `moybyte-org/moybyte` issues. The goal is to tell **at a
 glance what can be worked on**: every open issue carries one or more **area** labels
 (what part of the system it touches) and one **maturity** label (how far along it is).
 GitHub's label filters are the source of truth; `make sync-issues` renders a convenience

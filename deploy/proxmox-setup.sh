@@ -28,7 +28,7 @@
 #   WEB_PORT=8080
 #
 #   # Web console (optional -- the repo is PRIVATE, so give a read-only token):
-#   REPO_URL=https://github.com/nikola-j/moybyte.git
+#   REPO_URL=https://github.com/moybyte-org/moybyte.git
 #   BRANCH=master
 #   GIT_TOKEN=github_pat_...   fine-grained, read-only (Contents). Omit to skip the
 #                              web console and only install Claude Code + deps.

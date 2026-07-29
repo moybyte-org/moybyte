@@ -1,6 +1,6 @@
 # moybyte
 
-[![CI](https://github.com/nikola-j/moybyte/actions/workflows/ci.yml/badge.svg)](https://github.com/nikola-j/moybyte/actions/workflows/ci.yml)
+[![CI](https://github.com/moybyte-org/moybyte/actions/workflows/ci.yml/badge.svg)](https://github.com/moybyte-org/moybyte/actions/workflows/ci.yml)
 
 **A fantasy workstation where everything is a cartridge — the games, the paint
 app, the wallpaper, the spreadsheet. Open any of them, change it, run it. The
@@ -135,8 +135,8 @@ keyboard handheld; the P4 board is a 7″ desktop. What's honest about the state
   the whole editor suite usable on the device itself.
 - **Performance is tracked in the open, not claimed.** Per-cart fps, the frame
   budget model, and every lever *including the ones that were built, measured
-  and reverted* live in [issue #66](https://github.com/nikola-j/moybyte/issues/66)
-  (T-Deck) and [#58](https://github.com/nikola-j/moybyte/issues/58) (P4);
+  and reverted* live in [issue #66](https://github.com/moybyte-org/moybyte/issues/66)
+  (T-Deck) and [#58](https://github.com/moybyte-org/moybyte/issues/58) (P4);
   [`docs/perf_native_gap_v1.md`](docs/perf_native_gap_v1.md) is the strategic
   analysis of why we trail native emulators and what's left.
 - **Open holes are filed, not hidden** — USB-HID keyboard and audio on the P4,

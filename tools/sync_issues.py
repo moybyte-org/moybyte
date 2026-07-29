@@ -45,7 +45,7 @@ def repo_slug(explicit: str | None) -> str:
     if explicit:
         return explicit
     out = gh(["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"]).strip()
-    return out or "nikola-j/moybyte"
+    return out or "moybyte-org/moybyte"
 
 
 def slugify(title: str, limit: int = 50) -> str:

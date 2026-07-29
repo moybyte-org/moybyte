@@ -20,7 +20,7 @@ Ubuntu 22.04/24.04. Sizing (measured: the suite peaks ~116 MB, a render ~200 MB)
 **Setup — paste `setup-web-console.sh` into the Lightsail "Launch script" (or EC2 user-data), or run it by hand.** Edit the two lines at the top first:
 
 - `REPO_URL` — the repo is **private**, so use a fine-grained read-only PAT:
-  `https://<TOKEN>@github.com/nikola-j/moybyte.git` (or add a deploy key to the box first).
+  `https://<TOKEN>@github.com/moybyte-org/moybyte.git` (or add a deploy key to the box first).
 - `BRANCH` — `master` for stable, or a branch to preview WIP.
 
 It installs deps, builds the venv, and runs the console as a `systemd` service

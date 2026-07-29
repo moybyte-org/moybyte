@@ -14,9 +14,9 @@
 # ---------------------------------------------------------------------------
 #   REPO_URL: this repo is PRIVATE, so plain https will 401. Use ONE of:
 #     * a fine-grained PAT (read-only, Contents):
-#         https://<TOKEN>@github.com/nikola-j/moybyte.git
+#         https://<TOKEN>@github.com/moybyte-org/moybyte.git
 #     * or leave the https URL and add a deploy key to the box yourself first.
-REPO_URL="${REPO_URL:-https://github.com/nikola-j/moybyte.git}"
+REPO_URL="${REPO_URL:-https://github.com/moybyte-org/moybyte.git}"
 BRANCH="${BRANCH:-master}"          # master = stable; use a branch to preview WIP
 # ---------------------------------------------------------------------------
 PORT="${PORT:-8080}"
