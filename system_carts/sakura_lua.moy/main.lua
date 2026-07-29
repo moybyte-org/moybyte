@@ -1,8 +1,18 @@
 -- Sakura Lua -- the #67 A/B twin of sakura.moy, a SEPARATE cart so both sit on
--- the shelf and the same scene can be measured under either runtime. The port
--- is line-faithful by design: same globals, same helper split, same arithmetic
--- in the same order, so the two runtimes produce bit-identical petal state and
--- draw streams (verified per frame by experiments/lua_bridge/host_parity.py).
+-- the shelf and the same scene can be measured under either runtime.
+--
+-- The backdrop (images/bg.moyimg, byte-identical to sakura.moy's) is an image
+-- supplied by the project owner (AI-generated; provenance and rights are
+-- recorded in THIRD_PARTY.md section 5), converted to the 320x240 MOY64 bitmap
+-- by tools/import_sakura_bg.py. That same script generates the EMIT table
+-- below, whose shedding points have to sit on THIS image's canopy; re-importing
+-- regenerates both carts' tables together, and they must stay identical or the
+-- parity test fails.
+--
+-- The port is line-faithful by design: same globals, same helper split, same
+-- arithmetic in the same order, so the two runtimes produce bit-identical petal
+-- state and draw streams (verified per frame by
+-- experiments/lua_bridge/host_parity.py).
 -- Kept in lockstep with sakura.moy/main.py: edit BOTH or the parity test fails.
 -- Launches through the manifest "runtime": "lua" seam (Phase 2): the host runs
 -- it via runtime/lua_host.py (lupa); the device shows the runtime-missing panel
@@ -17,28 +27,23 @@
 --   * Python's int() is truncation toward zero: use trunc() below, NOT
 --     math.floor (they differ on the negative x a wrapped petal can have)
 
-EMIT = { {20, 44}, {21, 76}, {21, 114}, {24, 133}, {28, 61}, {28, 152}, {30,
-95}, {36, 114}, {36, 133}, {36, 152}, {38, 76}, {40, 95}, {44, 19}, {46, 57},
-{53, 55}, {54, 76}, {54, 95}, {54, 114}, {54, 133}, {54, 152}, {59, 57}, {65,
-38}, {67, 7}, {70, 19}, {72, 7}, {72, 57}, {72, 76}, {72, 95}, {72, 114}, {73,
-133}, {73, 152}, {75, 38}, {77, 19}, {89, 38}, {89, 76}, {89, 95}, {89, 114},
-{89, 133}, {90, 57}, {91, 19}, {100, 152}, {101, 13}, {107, 19}, {108, 38},
-{108, 57}, {108, 95}, {110, 76}, {112, 133}, {113, 12}, {117, 114}, {119,
-153}, {125, 38}, {125, 57}, {125, 95}, {125, 114}, {126, 135}, {127, 76},
-{134, 152}, {135, 19}, {139, 14}, {143, 19}, {143, 38}, {143, 57}, {143, 76},
-{143, 95}, {143, 114}, {143, 133}, {149, 152}, {156, 8}, {160, 19}, {160, 38},
-{160, 57}, {160, 95}, {161, 76}, {161, 114}, {161, 133}, {170, 6}, {173, 152},
-{178, 19}, {178, 57}, {178, 76}, {178, 95}, {178, 152}, {179, 114}, {180, 38},
-{180, 133}, {184, 6}, {196, 6}, {196, 38}, {196, 76}, {196, 114}, {196, 133},
-{197, 57}, {197, 95}, {197, 152}, {198, 19}, {214, 38}, {214, 57}, {214, 76},
-{214, 95}, {214, 114}, {214, 133}, {218, 19}, {218, 152}, {229, 10}, {232,
-19}, {232, 38}, {232, 57}, {232, 95}, {232, 133}, {233, 114}, {235, 17}, {238,
-76}, {241, 152}, {249, 38}, {249, 57}, {249, 76}, {249, 95}, {249, 114}, {249,
-133}, {249, 152}, {260, 19}, {266, 18}, {267, 57}, {267, 76}, {267, 95}, {267,
-114}, {267, 158}, {269, 39}, {282, 17}, {283, 20}, {283, 135}, {285, 57},
-{285, 76}, {285, 95}, {285, 114}, {288, 20}, {290, 141}, {291, 7}, {293, 44},
-{298, 154}, {303, 49}, {303, 76}, {303, 95}, {303, 114}, {303, 154}, {304, 62}
-}
+EMIT = { {2, 143}, {6, 113}, {16, 102}, {24, 97}, {25, 80}, {26, 73}, {26, 106}, {40,
+80}, {42, 107}, {44, 100}, {49, 54}, {49, 64}, {53, 98}, {57, 53}, {57, 110}, {59,
+74}, {62, 44}, {66, 80}, {74, 40}, {75, 72}, {75, 105}, {79, 45}, {79, 77}, {80, 103},
+{84, 27}, {86, 101}, {87, 29}, {96, 70}, {99, 40}, {99, 52}, {99, 84}, {99, 110},
+{104, 71}, {105, 111}, {107, 57}, {113, 86}, {116, 93}, {117, 28}, {118, 40}, {119,
+28}, {121, 59}, {121, 76}, {122, 33}, {122, 90}, {126, 71}, {128, 105}, {138, 69},
+{139, 49}, {139, 102}, {145, 29}, {149, 77}, {152, 42}, {157, 13}, {158, 40}, {159,
+68}, {164, 22}, {164, 59}, {167, 121}, {168, 77}, {169, 94}, {169, 105}, {171, 23},
+{171, 122}, {174, 14}, {174, 68}, {174, 90}, {176, 109}, {177, 36}, {177, 86}, {182,
+59}, {188, 19}, {189, 13}, {189, 57}, {192, 90}, {197, 67}, {198, 81}, {199, 106},
+{201, 134}, {202, 38}, {202, 138}, {204, 110}, {207, 25}, {207, 41}, {207, 134}, {215,
+55}, {217, 100}, {218, 60}, {218, 89}, {220, 140}, {222, 119}, {224, 126}, {228, 42},
+{229, 65}, {231, 96}, {231, 150}, {234, 85}, {236, 55}, {236, 144}, {240, 46}, {240,
+114}, {241, 131}, {245, 91}, {248, 39}, {248, 72}, {249, 151}, {250, 147}, {253, 80},
+{259, 85}, {259, 153}, {260, 104}, {262, 48}, {262, 126}, {262, 139}, {264, 74}, {265,
+113}, {274, 118}, {279, 83}, {281, 71}, {282, 136}, {285, 90}, {285, 123}, {290, 118},
+{290, 128}, {292, 96}, {296, 88}, {306, 92} }
 
 SIN = {}            -- sine LUT (built once); the hot loop indexes it, never calls math.sin
 lay = nil           -- the static scene, inflated + painted once, copied per frame (#54)

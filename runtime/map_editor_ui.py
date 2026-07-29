@@ -63,10 +63,10 @@ _MV_AVAIL_H = 164      # usable map-view height (32 .. 196)
 # from the default (bigger cells -> fewer cells -> more detail), so a tile is only
 # ever UPscaled (no sub-8px downscaling). The DEFAULT (index 0, most zoomed-OUT) is
 # computed -- not hardcoded -- as the largest cell that still shows the whole map of
-# both shipped games with NO panning: battle_city is 15x15 and platformer is 20x13,
+# both shipped games with NO panning: brick_siege is 15x15 and platformer is 20x13,
 # so the default must fit >= 20 columns AND >= 15 rows in the available rectangle.
 _MV_FIT_COLS = 20      # widest shipped map (platformer)
-_MV_FIT_ROWS = 15      # tallest shipped map (battle_city)
+_MV_FIT_ROWS = 15      # tallest shipped map (brick_siege)
 
 
 def _mv_default_cell(avail_w=_MV_AVAIL_W, avail_h=_MV_AVAIL_H):

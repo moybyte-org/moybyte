@@ -1304,7 +1304,7 @@ def test_seed_carts_model_the_fast_draw_habits():
     # the fast idioms the docs teach -- a DECLARED background (#63 habit 1: Battle
     # City names its backdrop once; the engine restores it every frame) and
     # static-scenery-in-a-layer (Hop Quest, like Sky Run).
-    battle = (Path("system_carts") / "battle_city.moy" / "main.py").read_text(encoding="utf-8")
+    battle = (Path("system_carts") / "brick_siege.moy" / "main.py").read_text(encoding="utf-8")
     assert 'background(col("dark_blue"))' in battle     # the backdrop is DECLARED
     assert 'cls(' not in battle.split("def _draw()")[1].split("def ")[0], (
         "the play frame must not clear -- the engine restores the declared backdrop")
@@ -1995,8 +1995,8 @@ def test_native_blit_indices_wired_for_paint_images():
     assert "self._gfx.blit_indices(self._buf" in device_canvas  # native one-call bake
     # The batch reuses the map() atlas (one bake, keyed on sheet.gen), not per-sprite.
     assert "atlas, ntiles = self._sheet_atlas(sheet, colorkey)" in device_canvas
-    # Battle City adopts it: the moving sprites go out in one batch (#43).
-    battle = (Path("system_carts") / "battle_city.moy"
+    # Brick Siege adopts it: the moving sprites go out in one batch (#43).
+    battle = (Path("system_carts") / "brick_siege.moy"
               / "main.py").read_text(encoding="utf-8")
     assert "spr_batch(" in battle
 
@@ -2937,7 +2937,7 @@ def test_native_moy_audio_core1_task_wired():
     assert "ka.voice_unlock()" in device_audio
     assert "ka.active_mask()" in device_audio
     assert "ka.voice_set(c, v.active, v.steps, v.step_dur, v.loop," in device_audio
-    # BATTLE CITY FIX (#41): commit is keyed off the monotonic _Voice.gen counter, NOT
+    # BRICK SIEGE FIX (#41): commit is keyed off the monotonic _Voice.gen counter, NOT
     # (id(steps), active). id(steps) aliases on a GC list-address reuse, so a rapid
     # same-SFX retrigger read as "unchanged" and was never committed (silent). gen
     # bumps on every play()/stop(), so every rapid/overlapping sfx commits.
@@ -2961,7 +2961,7 @@ def test_native_moy_audio_core1_task_wired():
     assert "want = AUDIO_IBUF_FRAMES - self._buffered" in device_audio
     assert "self._buffered += n" in device_audio             # account for what we wrote
     # AUDIO DIAGNOSTICS: each sfx/music trigger logs an event line; core-1 logs a
-    # rate-limited active=/committed= sample so Battle City's audio is debuggable blind.
+    # rate-limited active=/committed= sample so Brick Siege's audio is debuggable blind.
     assert "AUDIO_DIAG = True" in device_audio
     assert "def _diag_trigger(self, kind, n, chan):" in device_audio
     assert "def _diag_core1_sample(self, mask):" in device_audio
@@ -2978,7 +2978,7 @@ def test_core1_writeback_cannot_clobber_a_fresh_trigger():
     # on the reused channel" folded back active=0 over the fresh trigger: sound 2
     # never played, and DeviceAudio._await_active waited forever for a confirmation
     # that never came (channel leaked as busy). The fix is the C-side twin of the
-    # Battle City gen fix: an exact per-voice commit counter.
+    # Brick Siege gen fix: an exact per-voice commit counter.
     c = (ROOT / "native" / "moy_audio" / "modmoy_audio.c").read_text(encoding="utf-8")
 
     # The shared voice carries a commit sequence number...

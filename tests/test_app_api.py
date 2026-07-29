@@ -47,7 +47,7 @@ def test_register_app_dispatches_a_custom_app(tmp_path):
         opened = 0
 
         def is_app(self, cart):
-            return bool(cart) and cart.get("title") == "Battle City"
+            return bool(cart) and cart.get("title") == "Brick Siege"
 
         def open(self):
             self.opened += 1
@@ -66,7 +66,7 @@ def test_register_app_dispatches_a_custom_app(tmp_path):
     assert ws._content_layers["demo"] is demo
     assert ws.app_min_size("demo") == (200, 100)
     assert ws.app_title("demo") == "BATTLE DEMO"
-    _select(ws, "Battle City")
+    _select(ws, "Brick Siege")
     ws.launch_selected()
     assert demo.opened == 1
     assert ws.screen == "demo"                            # back-stack kind

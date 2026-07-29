@@ -201,7 +201,7 @@ _LAYER_POOL = {}
 
 # Fold 2 (#63) knob: the map() auto-cache trades the per-cell blit_map walk for a
 # blit565 composite of a cached raster. HARDWARE VERDICT (T-Deck, 2026-07-07 owner
-# flash): the composite LOSES -- Battle City map 4.3-5.7ms direct -> 13.4ms cached
+# flash): the composite LOSES -- Brick Siege map 4.3-5.7ms direct -> 13.4ms cached
 # steady state (the keyed blit reads every pixel of the 240x240 region; blit_map
 # skips empty cells and PSRAM magnifies that), 32-55ms on brick-destruction
 # re-rasters, fps 29-33 -> 24-25. Even the opaque row-memcpy lane only breaks even
@@ -391,7 +391,7 @@ class DeviceCanvas:
         self._t_batch_us = 0
         # #66: the render-bound carts' remaining verbs, so DRAW2 attributes the WHOLE
         # render ms -- map (blit_map), text (moy_gfx.text), fill (cls + rect/circ spans).
-        # Battle City's ~26ms render is cls + a 240px backdrop rect + a full map() +
+        # Brick Siege's ~26ms render is cls + a 240px backdrop rect + a full map() +
         # one spr_batch + 11 prints; these say which C op actually eats it.
         self._t_map_us = 0
         self._t_text_us = 0

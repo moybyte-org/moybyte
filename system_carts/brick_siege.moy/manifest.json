@@ -1,7 +1,7 @@
 {
   "format": "moy-1",
-  "version": 8,
-  "title": "Battle City",
+  "version": 9,
+  "title": "Brick Siege",
   "type": "game",
   "runtime": "python",
   "main": "main.py",

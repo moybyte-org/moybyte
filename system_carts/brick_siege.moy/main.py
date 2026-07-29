@@ -1,7 +1,7 @@
-# Battle City -- a top-down tank battle (a simplified NES "Battle City" clone, #35).
+# Brick Siege -- a top-down tank battle over a destructible brick field (#35).
 # Drive your green tank with the arrows (or WASD on the device): you both MOVE and
-# FACE that way. Press A to FIRE -- one bullet on screen at a time, just like the
-# original. Blast the grey enemy tanks before they wreck your EAGLE BASE (bottom
+# FACE that way. Press A to FIRE -- one bullet on screen at a time, so every shot
+# counts. Blast the grey enemy tanks before they wreck your EAGLE BASE (bottom
 # center) or before they get you. Brick walls (#) crumble cell-by-cell to bullets;
 # steel walls (S) stop bullets cold. Clear every enemy in the wave to WIN; lose all
 # your lives -- or let the base fall -- and it's GAME OVER (it restarts after a beat).

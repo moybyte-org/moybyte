@@ -18,6 +18,21 @@ def _ws(tmp_path):
     return host_app.build_workstation(str(tmp_path / "carts"))
 
 
+def _open_game(ws):
+    """Select a seeded GAME cart and run it.
+
+    A game is fullscreen and exits on hold-BACKSPACE; an app runs WITH the bar and
+    exits via its X. So a test about the game exit contract has to say "a game" --
+    `sel = 0` resolves to whichever cart sorts FIRST, which is alphabetical and
+    changes whenever a cart is added or renamed."""
+    for i, it in enumerate(ws.launcher.items):
+        if it.get("path") and it.get("type") == "game":
+            ws.launcher.sel = i
+            ws.open()
+            return it
+    raise AssertionError("no game cart seeded")
+
+
 # -- the desktop renders without error -------------------------------------
 
 def test_desktop_home_renders(tmp_path):
@@ -429,8 +444,7 @@ def test_hold_backspace_exits_to_caller(tmp_path, monkeypatch):
     from runtime import player as P
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
-    ws.launcher.sel = 0
-    ws.open()
+    _open_game(ws)                     # the exit gesture under test is the GAME one
     assert ws.screen == "desktop"
     clock = [10_000]
     monkeypatch.setattr(P, "_ticks_ms", lambda: clock[0])   # deterministic hold timer
@@ -481,8 +495,7 @@ def test_hold_progress_toast_is_transient(tmp_path, monkeypatch):
     from runtime import player as P
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
-    ws.launcher.sel = 0
-    ws.open()
+    _open_game(ws)                     # the hold toast is the GAME exit affordance
     assert ws.screen == "desktop"
     calls = [0]
     orig = ws.player._draw_hold_progress
@@ -665,8 +678,7 @@ def test_play_from_editor_returns_to_the_editor_tab_on_exit(tmp_path, monkeypatc
     from runtime import player as P
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
-    ws.launcher.sel = 0
-    ws.open()                          # launcher launch: caller = the home root
+    _open_game(ws)                     # launcher launch: caller = the home root
     assert ws.screen == "desktop"
     ws._open_menu()                    # tap EDIT -> into the Editor (Config/code)
     assert ws.screen == "menu"

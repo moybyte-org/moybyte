@@ -190,7 +190,7 @@ def test_recent_carts_ordering_after_runs(tmp_path):
     from runtime import host_app
     ws = _ws(tmp_path)
     star = _find(ws, "Star Catcher")
-    battle = _find(ws, "Battle City")
+    battle = _find(ws, "Brick Siege")
 
     ws.launcher.sel = ws.launcher.items.index(star)
     ws.launch_selected()
@@ -203,13 +203,13 @@ def test_recent_carts_ordering_after_runs(tmp_path):
     ws.go_home()
 
     recent = ws.recent_carts()
-    assert [c["title"] for c in recent] == ["Battle City", "Star Catcher"]
+    assert [c["title"] for c in recent] == ["Brick Siege", "Star Catcher"]
 
 
 def test_rerunning_a_cart_moves_it_to_the_front_without_duplicating(tmp_path):
     ws = _ws(tmp_path)
     star = _find(ws, "Star Catcher")
-    battle = _find(ws, "Battle City")
+    battle = _find(ws, "Brick Siege")
 
     for cart in (star, battle, star):
         ws.launcher.sel = ws.launcher.items.index(cart)

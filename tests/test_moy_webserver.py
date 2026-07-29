@@ -478,7 +478,7 @@ def test_tee_map_settiles_only_when_tilemap_changes():
     rec.commit()
     assert [c[0] for c in rec.frame()] == ["map"], "unchanged tilemap must not re-ship"
     # Frame 3: cart mutates the map (mset) -> settiles re-emitted before the map.
-    tm.mset(0, 0, 1)                        # destroy/place a tile, like Battle City
+    tm.mset(0, 0, 1)                        # destroy/place a tile, like Brick Siege
     rec.begin()
     tee.map(tm, sheet, 0, 0, 2, 1, 0, 0, -1, 1)
     rec.commit()
@@ -853,7 +853,7 @@ def test_map_replays_pixel_identical_to_panel_via_cached_assets():
 def test_map_settiles_mutation_replays_pixel_identical():
     """When a cart mutates the map mid-session (mset), the recorder ships a settiles and
     the browser's replay -- now driven by the UPDATED cells -- still matches the panel
-    pixel-for-pixel (the Battle City destroyed-brick path)."""
+    pixel-for-pixel (the Brick Siege destroyed-brick path)."""
     from runtime.editors import TileMap
     sheet = SpriteSheet(2, 1)
     for yy in range(8):
@@ -863,7 +863,7 @@ def test_map_settiles_mutation_replays_pixel_identical():
     tm.mset(0, 0, 1)
     tm.mset(3, 1, 1)
     # The browser's starting cache is the ORIGINAL /assets tilemap.
-    assets = web.assets_payload(WIDTH, HEIGHT, PAL565, sheet, tm, "BC")
+    assets = web.assets_payload(WIDTH, HEIGHT, PAL565, sheet, tm, "Brick Siege")
     # Now the cart destroys a tile and adds another, THEN draws the map.
     tm.mset(0, 0, -1)                       # clear
     tm.mset(2, 0, 1)                        # place

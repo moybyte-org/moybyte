@@ -105,7 +105,7 @@ AUDIO_MAX_FRAME = AUDIO_IBUF_FRAMES
 
 # Audio diagnostics (moybyte_diag): log each sfx/music trigger and, in core-1 mode,
 # a periodic "active=N committed=M" sample, so the owner can read on serial/SD
-# exactly what reached the mixer (the Battle City rapid-sfx case). Gated so it can
+# exactly what reached the mixer (the Brick Siege rapid-sfx case). Gated so it can
 # NEVER flood the diag ring: triggers log on the event (each sfx/music call), and
 # the core-1 active sample logs at most once every AUDIO_DIAG_SAMPLE_MS.
 AUDIO_DIAG = True
@@ -149,11 +149,11 @@ class DeviceAudio:
         # Core-1 commit tracking: the C task owns per-sample advancement (idx/t/phase)
         # once a voice is committed, so we must NOT re-commit a voice's (now stale)
         # Python cursor every frame -- that would reset it to step 0 and stutter. We
-        # only commit a voice the frame it is (re)triggered or stopped. THE BATTLE CITY
+        # only commit a voice the frame it is (re)triggered or stopped. THE BRICK SIEGE
         # FIX (#41): detect that by the voice's monotonic _Voice.gen counter (bumped on
         # EVERY play()/stop()), NOT by (id(steps), active). id(steps) is unreliable --
         # MicroPython's GC can hand a freshly allocated steps list the SAME address as
-        # the just-freed previous one, so a rapid retrigger of the same SFX (Battle City
+        # the just-freed previous one, so a rapid retrigger of the same SFX (Brick Siege
         # fires many sfx/s) read as "unchanged" and was silently never committed -> the
         # note never reached the mixer. gen changes on every trigger, so every sfx --
         # rapid, overlapping, channel-reused -- now reliably commits.
@@ -166,7 +166,7 @@ class DeviceAudio:
         self._await_active = [False] * len(engine.voices)
         # Diag: a periodic core-1 "active=N committed=M" sample (rate-limited) + a
         # running count of triggers committed since the last sample, so the owner can
-        # read whether Battle City's rapid sfx reach the task. _diag_t0 is the last
+        # read whether Brick Siege's rapid sfx reach the task. _diag_t0 is the last
         # sample's ticks_ms; _diag_committed accumulates triggers between samples.
         self._diag_t0 = 0
         self._diag_committed = 0
@@ -347,7 +347,7 @@ class DeviceAudio:
         every frame would reset the C voice to step 0 and stutter. A voice only needs a
         fresh commit when Python (re)triggers or stops it, which we detect by a change
         in _Voice.gen (bumped on every play()/stop()). gen -- not (id(steps), active) --
-        is what fixes the Battle City regression: id(steps) aliases on GC reuse, so a
+        is what fixes the Brick Siege regression: id(steps) aliases on GC reuse, so a
         rapid same-SFX retrigger read as unchanged and was never committed (#41)."""
         eng = self.engine
         ka = self._moy_audio
@@ -411,7 +411,7 @@ class DeviceAudio:
     def _diag_core1_sample(self, mask):
         """Rate-limited core-1 health sample: at most once per AUDIO_DIAG_SAMPLE_MS log
         the active-voice count (from the task's published mask) + how many triggers we
-        committed since the last sample. Lets the owner confirm Battle City's rapid sfx
+        committed since the last sample. Lets the owner confirm Brick Siege's rapid sfx
         are actually reaching the task (committed climbs, active>0). Fully guarded so it
         can never crash the loop, and gated so it can never flood the diag ring."""
         try:

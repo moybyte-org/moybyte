@@ -236,8 +236,8 @@ FB_INTERNAL_RESERVE = 120 * 1024   # WiFi (#38) + slack must survive the grab
 # A THIRD slot queues ~9.2ms at the kick, absorbing that latency outright.
 #
 # HARDWARE VERDICT (2026-07-08 A/B, third flash): 3 slots DID close the gap
-# (Sky Run idle=0.00 gaps=0 everywhere, BC 0-2.4ms vs 3-6; feed 16-19 -> 7.6-10)
-# and fps DID NOT MOVE (BC 25-33, Sky 46-49, Hop 53 -- all in their 2-slot
+# (Sky Run idle=0.00 gaps=0 everywhere, Brick Siege 0-2.4ms vs 3-6; feed 16-19 -> 7.6-10)
+# and fps DID NOT MOVE (Brick Siege 25-33, Sky 46-49, Hop 53 -- all in their 2-slot
 # bands): the idle overlapped VM work, so it was never on the critical path.
 # Worse, the extra in-flight band intermittently hits a full SPI transaction
 # queue and blocks INSIDE the VM thread (pump=14-25ms / setup=10-25ms spikes,

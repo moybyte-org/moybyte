@@ -43,7 +43,7 @@ def _run(ws, frames, dt=1 / 30):
 def test_seed_cart_folders_present_and_valid():
     import json
 
-    for folder in ("pet", "tiny_runner", "platformer", "tap_red", "bubble_trouble"):
+    for folder in ("pet", "tiny_runner", "platformer", "tap_red", "harpoon_pop"):
         d = SYSTEM_CARTS / (folder + ".moy")
         assert (d / "manifest.json").is_file(), folder
         assert (d / "main.py").is_file(), folder
@@ -388,13 +388,13 @@ def test_space_pet_picker_selects_a_sprite_tile(tmp_path):
     assert ws.ns["pet"] == 1                             # the running cart uses the picked tile
 
 
-# -- Bubble Trouble (#79 stage 1: single-player seed cart) -------------------
+# -- Harpoon Pop (#79 stage 1: single-player seed cart) -------------------
 
-def test_bubble_trouble_opens_and_is_lively(tmp_path):
+def test_harpoon_pop_opens_and_is_lively(tmp_path):
     from runtime import host_app
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    _open_cart(ws, "Bubble Trouble")
+    _open_cart(ws, "Harpoon Pop")
     assert ws.screen == "desktop"                        # _start succeeded
     ws.config["autoplay"] = 1
     ws.apply()
@@ -403,16 +403,16 @@ def test_bubble_trouble_opens_and_is_lively(tmp_path):
         ws.input.begin_frame()
         ws.frame(1 / 30)
         snaps.add(bytes(ws.canvas.buf[::97]))            # bubbles always move -> lively
-    assert len(snaps) > 3, "Bubble Trouble is static in attract mode"
+    assert len(snaps) > 3, "Harpoon Pop is static in attract mode"
 
 
-def test_bubble_trouble_harpoon_pops_and_splits(tmp_path):
+def test_harpoon_pop_harpoon_pops_and_splits(tmp_path):
     # A harpoon fired under a size-2 bubble pops it (scores) and splits it into
-    # two smaller (size-1) bubbles -- the core Pang mechanic.
+    # two smaller (size-1) bubbles -- the core split mechanic.
     from runtime import host_app
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    _open_cart(ws, "Bubble Trouble")
+    _open_cart(ws, "Harpoon Pop")
     ns = ws.ns
     ns["bubbles"][:] = [[160.0, 120.0, 0.0, 0.0, 2]]     # one size-2 bubble, centred
     ns["px"] = 160.0 - ns["PW"] / 2                      # player directly under it
@@ -432,11 +432,11 @@ def test_bubble_trouble_harpoon_pops_and_splits(tmp_path):
     assert all(b[4] == 1 for b in ns["bubbles"]), "children must be one size smaller"
 
 
-def test_bubble_trouble_smallest_bubble_pops_outright(tmp_path):
+def test_harpoon_pop_smallest_bubble_pops_outright(tmp_path):
     from runtime import host_app
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    _open_cart(ws, "Bubble Trouble")
+    _open_cart(ws, "Harpoon Pop")
     ns = ws.ns
     ns["bubbles"][:] = [[160.0, 120.0, 0.0, 0.0, 0]]     # a size-0 bubble
     ns["px"] = 160.0 - ns["PW"] / 2
@@ -456,11 +456,11 @@ def test_bubble_trouble_smallest_bubble_pops_outright(tmp_path):
     assert not ns["bubbles"], "the smallest bubble must vanish, not split"
 
 
-def test_bubble_trouble_contact_costs_a_life(tmp_path):
+def test_harpoon_pop_contact_costs_a_life(tmp_path):
     from runtime import host_app
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    _open_cart(ws, "Bubble Trouble")
+    _open_cart(ws, "Harpoon Pop")
     ns = ws.ns
     ns["lives"] = 3
     ns["invuln"] = 0.0
@@ -472,12 +472,12 @@ def test_bubble_trouble_contact_costs_a_life(tmp_path):
     assert ns["lives"] == 2, "touching a bubble must cost a life"
 
 
-def test_bubble_trouble_high_score_persists(tmp_path):
+def test_harpoon_pop_high_score_persists(tmp_path):
     # The best score rides pmem(0), so it survives a restart of the cart.
     from runtime import host_app
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    _open_cart(ws, "Bubble Trouble")
+    _open_cart(ws, "Harpoon Pop")
     ns = ws.ns
     ns["bubbles"][:] = [[160.0, 120.0, 0.0, 0.0, 0]]     # pop one -> scores -> new best
     ns["px"] = 160.0 - ns["PW"] / 2
@@ -500,22 +500,22 @@ def test_bubble_trouble_high_score_persists(tmp_path):
     assert ns["pmem"](0) == ns["best"], "best score must be written to pmem"
 
 
-def test_bubble_trouble_runs_long_without_error(tmp_path):
+def test_harpoon_pop_runs_long_without_error(tmp_path):
     # A plain endurance smoke: 300+ frames in attract mode (spawns, splits,
     # bounces, level clears all fire) with no cart crash.
     from runtime import host_app
 
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    _open_cart(ws, "Bubble Trouble")
+    _open_cart(ws, "Harpoon Pop")
     ws.config["autoplay"] = 1
     ws.apply()
     for _ in range(360):
         ws.input.begin_frame()
         ws.frame(1 / 30)
-    assert ws.cart_error is None, "Bubble Trouble crashed during a long run"
+    assert ws.cart_error is None, "Harpoon Pop crashed during a long run"
 
 
-def test_bubble_trouble_is_deterministic_from_a_seed(tmp_path):
+def test_harpoon_pop_is_deterministic_from_a_seed(tmp_path):
     # The #65/#7 lockstep contract this cart exists to prove out: two runs
     # seeded the same way must reach BIT-IDENTICAL state. The cart's own
     # randomness is 100% behind rnd(), which the host wires straight to
@@ -530,7 +530,7 @@ def test_bubble_trouble_is_deterministic_from_a_seed(tmp_path):
     def _play(tag, frames=300):
         random.seed(12345)
         ws = host_app.build_workstation(str(tmp_path / ("carts_" + tag)))
-        _open_cart(ws, "Bubble Trouble")
+        _open_cart(ws, "Harpoon Pop")
         ws.config["autoplay"] = 1
         ws.apply()
         for _ in range(frames):

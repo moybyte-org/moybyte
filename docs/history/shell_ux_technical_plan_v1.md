@@ -165,7 +165,7 @@ open (see §6).
 ### Stage 0 — baseline (no code)
 
 Record the #66 ledger numbers on hardware at the branch tip (Sakura / Hop Quest /
-Sky Run / Battle City, PERF DIAG ON), re-capture the golden set, confirm 777 green.
+Sky Run / Brick Siege, PERF DIAG ON), re-capture the golden set, confirm 777 green.
 These are the regression bars for Stages 2, 5, and 9. Update #66's body if the
 snapshot moved, then `make sync-issues`.
 

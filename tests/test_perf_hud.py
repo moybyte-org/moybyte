@@ -21,12 +21,16 @@ DT = 1.0 / 30
 
 
 def _running_cart(tmp_path):
-    """Open the first seeded cart so a cart is running on the desktop (it animates
-    every frame -- the perf HUD lives on this running-cart screen)."""
+    """Open a seeded GAME so a cart is running on the desktop (it animates every
+    frame -- the perf HUD lives on this running-cart screen).
+
+    Pick the game by TYPE, not by position: a game runs fullscreen while an app
+    runs with the bar, and which cart sorts first is alphabetical."""
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
     assert ws.launcher.items, "system carts should be seeded"
-    ws.launcher.sel = 0
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                           if it.get("path") and it.get("type") == "game")
     ws.open()
     assert ws.screen == "desktop"
     assert ws._update is not None or ws._draw is not None

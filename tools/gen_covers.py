@@ -7,7 +7,7 @@ without a cover keep the deterministic sprite/glyph fallback.
 Run from the repo root:
 
     .venv/bin/python tools/gen_covers.py                # all seed games
-    .venv/bin/python tools/gen_covers.py battle_city    # just one
+    .venv/bin/python tools/gen_covers.py brick_siege    # just one
 
 Covers are committed artifacts (authored once, replaceable by hand or by Paint
 art); re-running the tool refreshes them. Bump each cart's manifest "version"

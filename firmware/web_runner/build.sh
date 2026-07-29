@@ -289,7 +289,7 @@ echo "== packing carts"
 if [ "${SPEC}" = "1" ]; then
   ROSTER="${SPEC_CART}"
 else
-  ROSTER="${MOYBYTE_WEB_CARTS:-star_catcher.moy sakura.moy tap_red.moy bubble_trouble.moy coin_quest.moy platformer.moy tiny_runner.moy battle_city.moy letter_blitz.moy scroll_demo.moy sakura_lua.moy ray_lua.moy moy_night.moy}"
+  ROSTER="${MOYBYTE_WEB_CARTS:-star_catcher.moy sakura.moy tap_red.moy harpoon_pop.moy coin_quest.moy platformer.moy tiny_runner.moy brick_siege.moy letter_blitz.moy scroll_demo.moy sakura_lua.moy ray_lua.moy moy_night.moy}"
 fi
 "${PY}" - "${REPO_ROOT}/system_carts" "${STAGE_DIR}/carts.json" ${ROSTER} <<'PYEOF'
 import json, os, sys

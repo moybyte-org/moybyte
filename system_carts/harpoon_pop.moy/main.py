@@ -1,4 +1,4 @@
-# Bubble Trouble -- a Pang-style arcade cart (#79, stage 1: single-player seed).
+# Harpoon Pop -- a bubble-popping arcade cart (#79, stage 1: single-player seed).
 #
 # Big bubbles bounce around the arena in fixed parabolic arcs. Walk LEFT/RIGHT and
 # fire a vertical HARPOON straight up (A / UP / RUN, or TAP the screen). A hit
@@ -38,7 +38,7 @@ INVULN = 1.3              # seconds of blinking safety after a hit
 
 # -- state (module globals ARE the cart namespace, so tests can poke them) ---
 bubbles = []               # each: [x, y, vx, vy, size]
-harpoon = None             # None, or [x, tip_y] (one on screen, classic Pang)
+harpoon = None             # None, or [x, tip_y] (one on screen at a time)
 px = 0.0                   # player left edge
 score = 0
 best = 0

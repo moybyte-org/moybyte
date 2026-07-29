@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 3,
+  "version": 5,
   "title": "Sakura Lua",
   "type": "game",
   "runtime": "lua",

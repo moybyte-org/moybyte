@@ -106,7 +106,7 @@ are estimates; anything not "shipped/reverted" needs on-glass measurement.
 ### Measured NULL on the P4 (2026-07-09 A/B — don't re-explore)
 
 Both "cheap hardware-side" levers were built, flashed, and A/B'd on glass —
-**individually and combined** — against a 4-cart baseline (Battle City / Letter
+**individually and combined** — against a 4-cart baseline (Brick Siege / Letter
 Blitz / Hop Quest / Sky Run, 5×2s PERF samples each, fresh boot per run):
 
 | lever | render slice | fps | verdict |
@@ -138,10 +138,10 @@ on the P4 with hardware levers. Consequences:
 
 The P4 elimination does NOT transfer wholesale to the T-Deck. **Confirmed by
 the 2026-07-10 two-flash A/B** (same session, identical build minus the
-pragma): Battle City **without** `-O3` = 33–36fps / render 10.7–15.3ms (the
+pragma): Brick Siege **without** `-O3` = 33–36fps / render 10.7–15.3ms (the
 old ledger band — master drift ≈ 0); **with** it = 51–54fps / render
 6.6–7.4ms. One pragma line = −40% render / +50% fps, chrome (also moy_gfx
-blits) halved too. BC's render is pure `moy_gfx` C (fill+map per DRAW2), so
+blits) halved too. Brick Siege's render is pure `moy_gfx` C (fill+map per DRAW2), so
 **the S3 render slice is compute-bound where the P4's is dispatch-bound**
 (slower PSRAM wait-states inside per-pixel loops + Xtensa vs RISC-V codegen).
 `-O3` ships in the kernel (in-source pragma; harmless-null on P4). The
@@ -154,7 +154,7 @@ ping-pong buffers + WiFi reserve); the guard + boot line stay self-documenting.
 
 Settings → FRAMESKIP (default OFF, persisted; P4 serial `skip 0|1`): a GAME's
 `_update`+input+audio tick every loop frame, `_draw`+composite+flush every
-SECOND. On-glass: P4 BC logic 55→60Hz / render locked 30 / busy 17.6→9.0ms;
+SECOND. On-glass: P4 Brick Siege logic 55→60Hz / render locked 30 / busy 17.6→9.0ms;
 Letter Blitz logic 49→60Hz. Trade: 30Hz motion + doubled logic rate ⇒ ~2×
 alloc churn ⇒ GC collects ~2× as often. Default ON/OFF is an open product
 call — on the fast S3 build most carts sit near 60 skip-OFF.

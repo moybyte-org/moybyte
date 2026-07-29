@@ -117,7 +117,7 @@ pushed `.py` is the fast dev loop.
 
 - **M0 (done):** MicroPython flashed; PSRAM + 6 MB VFS confirmed.
 - **M1 (done, hardware-verified):** headless console streams to a browser — launcher, editors,
-  and carts (Sky Run / Battle City ~30 fps steady). Confirmed on a phone.
+  and carts (Sky Run / Brick Siege ~30 fps steady). Confirmed on a phone.
 - **WiFi provisioning (done, hardware-verified):** AP-by-default → WiFi cart saves a network →
   STA on reboot; STA eliminates the AP-mode disconnects.
 - **M2 (next):** on-flash cart CRUD (`can_manage`), browser button/key input polish, an optional

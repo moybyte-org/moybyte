@@ -314,7 +314,7 @@ class _Voice:
         # this to decide which voices to commit to the C task each frame -- it MUST
         # NOT rely on id(steps), which the GC can reuse for a freshly allocated list
         # at the same address (a rapid retrigger of the same SFX then reads as
-        # "unchanged" and silently never reaches the mixer -- the Battle City bug).
+        # "unchanged" and silently never reaches the mixer -- the Brick Siege bug).
         self.gen = 0
 
     def play(self, steps, step_dur, loop, loop_start=0):

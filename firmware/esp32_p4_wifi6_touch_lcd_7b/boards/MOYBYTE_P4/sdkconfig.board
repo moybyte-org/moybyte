@@ -13,7 +13,7 @@ CONFIG_IDF_EXPERIMENTAL_FEATURES=y
 CONFIG_LCD_DSI_ISR_IRAM_SAFE=y
 
 # L2 cache 128KB (IDF default) -> 256KB (#159, A/B'd on glass 2026-07-27): the
-# desktop working set thrashes a 128KB L2 -- Battle City busy 15.5 -> 8.0ms,
+# desktop working set thrashes a 128KB L2 -- Brick Siege busy 15.5 -> 8.0ms,
 # window drags -5ms/frame, Lua table bench -13%. Costs exactly 128KB of
 # internal heap. 512KB does NOT boot: the carve starves MicroPython's
 # internal/DMA pool reservation (main_task error 0x101 abort loop), so 256KB

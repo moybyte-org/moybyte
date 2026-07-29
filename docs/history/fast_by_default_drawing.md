@@ -3,7 +3,7 @@
 **Status: ARCHIVED (2026-07-08) — every fold now has a verdict; this doc is
 design history.** Fold 1 (auto-batch `spr()`) SHIPPED as the native `spr_gate`
 (#63). Fold 2 (auto map cache) was built, A/B'd on hardware, and **REVERTED**
-(Battle City map 4.3–5.7 → 13.4ms: the keyed full-region composite reads every
+(Brick Siege map 4.3–5.7 → 13.4ms: the keyed full-region composite reads every
 pixel where the direct raster skips transparent tiles; machinery stays behind
 `MAP_AUTO_CACHE=False`). Fold 3 landed as the **`background()`** declared-backdrop
 verb (docs/moy_cart_api.md). Fold 4's spirit landed as pal-state-id variant

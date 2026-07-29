@@ -108,7 +108,7 @@ def test_gen_device_carts_carries_the_input_hint_from_manifest():
     import gen_device_carts
     carts = {c["title"]: c for c in gen_device_carts.build_carts(SYSTEM_CARTS)}
     assert carts["Tap Only Red"]["input"] == ["touch"]
-    assert carts["Battle City"]["input"] == ["buttons"]
+    assert carts["Brick Siege"]["input"] == ["buttons"]
     assert carts["Letter Blitz"]["input"] == ["keyboard", "touch"]
     # A cart that never declares the hint carries no "input" key at all (matches
     # the "permissions" precedent: absent, not an empty list).
@@ -121,7 +121,7 @@ def test_seed_system_carts_have_a_bumped_version_and_declared_kinds_match_their_
     bumped (#47) so an already-seeded device/host picks up the new hint."""
     for folder, title, kinds, min_version in (
         ("tap_red", "Tap Only Red", ["touch"], 5),
-        ("battle_city", "Battle City", ["buttons"], 7),
+        ("brick_siege", "Brick Siege", ["buttons"], 7),
         ("letter_blitz", "Letter Blitz", ["keyboard", "touch"], 13),
     ):
         man = json.loads(open(os.path.join(SYSTEM_CARTS, folder + ".moy", "manifest.json"),
@@ -167,7 +167,7 @@ def test_web_console_assets_carries_the_open_carts_input_hint(tmp_path):
     assert touch_console.assets()["input"] == ["touch"]
 
     buttons_console = web_console.WebConsole(str(tmp_path / "carts_buttons"), fps=30)
-    _open_by_title(buttons_console, "Battle City")
+    _open_by_title(buttons_console, "Brick Siege")
     assert buttons_console.assets()["input"] == ["buttons"]
 
     keyboard_console = web_console.WebConsole(str(tmp_path / "carts_keyboard"), fps=30)

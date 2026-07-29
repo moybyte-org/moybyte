@@ -562,7 +562,7 @@ def _move_tanks(dt):
         t[6] -= dt
         if blocked or t[6] <= 0.0:
             if blocked and t[10] < 1.2:
-                _tank_fire(t)             # Battle City: blast the wall in the way
+                _tank_fire(t)             # Brick Siege: blast the wall in the way
                 t[10] = 1.2 + rnd(1.2)
             _retarget(t)
         t[10] -= dt

@@ -499,15 +499,15 @@ def test_hop_quest_uses_tilemap_and_still_plays(tmp_path):
     assert len(set(ws.canvas.buf)) > 1      # the map() blit drew the ground
 
 
-def test_battle_city_runs_with_tilemap_and_autoplay_progresses(tmp_path):
-    # Battle City (#35): a top-down tank battle drawn over the cart's brick/steel
+def test_brick_siege_runs_with_tilemap_and_autoplay_progresses(tmp_path):
+    # Brick Siege (#35): a top-down tank battle drawn over the cart's brick/steel
     # tilemap (map.moymap) with map()/mget()/mset(). Verify it loads its tilemap and
     # spawns a wave, then that the attract auto-pilot runs many frames without error
     # and actually PROGRESSES -- destroys enemies (score climbs) and the round ends
     # (a wave is cleared or the base/lives are lost, then it resets).
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    _open_cart(ws, "Battle City")
+    _open_cart(ws, "Brick Siege")
     assert ws.cart["type"] == "game"
     assert ws.cart_error is None
     assert ws.cart.get("map") and not ws.tilemap.is_blank()     # the field is a tilemap
@@ -530,13 +530,13 @@ def test_battle_city_runs_with_tilemap_and_autoplay_progresses(tmp_path):
     assert len(set(ws.canvas.buf)) > 3      # the map()/sprites drew the battlefield
 
 
-def test_battle_city_brick_crumbles_steel_stops(tmp_path):
+def test_brick_siege_brick_crumbles_steel_stops(tmp_path):
     # Bullet vs walls: a player bullet into a BRICK cell clears it (mset -> empty),
     # while a STEEL cell is never destroyed. Drive a couple of shots straight into
     # each wall kind and check the tilemap before/after.
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    _open_cart(ws, "Battle City")
+    _open_cart(ws, "Brick Siege")
     ns = ws.ns
     TS = ns["TS"]
     # find a brick and a steel cell in the loaded field
@@ -1329,10 +1329,10 @@ def _open_cart_map(tmp_path, cart_name):
 
 def test_map_default_zoom_fits_whole_shipped_maps(tmp_path):
     # The DEFAULT (most zoomed-OUT) zoom MUST show the ENTIRE map of both shipped
-    # games with the camera at (0,0) and zero panning: battle_city is 15x15 and
+    # games with the camera at (0,0) and zero panning: brick_siege is 15x15 and
     # platformer is 20x13. So the default view must hold >= the map's cols AND rows.
     from runtime import console as C
-    for name, w, h in (("battle_city", 15, 15), ("platformer", 20, 13)):
+    for name, w, h in (("brick_siege", 15, 15), ("platformer", 20, 13)):
         _C, ws, _drv = _open_cart_map(tmp_path / name, name)
         assert (ws.tilemap.w, ws.tilemap.h) == (w, h)
         assert ws.map_ui.map_zoom == 0                          # opens at the fit-both default
@@ -1354,7 +1354,7 @@ def test_map_cycle_zoom_increases_cell_and_shrinks_view(tmp_path):
     # Cycling the zoom steps IN: the cell size strictly grows and the visible cell
     # count strictly shrinks, level by level, until it wraps back to the default.
     from runtime import console as C
-    _C, ws, drv = _open_cart_map(tmp_path, "battle_city")
+    _C, ws, drv = _open_cart_map(tmp_path, "brick_siege")
     seen = []
     for _ in range(len(C._MV_ZOOMS)):
         x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
@@ -1373,7 +1373,7 @@ def test_map_tap_and_sky_hit_right_cell_after_zoom(tmp_path):
     # After a zoom change tap-paint and the SKY (empty) brush still land on the cell
     # under the pointer -- hit-testing follows the live cell size.
     from runtime import console as C
-    _C, ws, drv = _open_cart_map(tmp_path, "battle_city")
+    _C, ws, drv = _open_cart_map(tmp_path, "brick_siege")
     ws.map_ui.map_zoom = 2                                       # a zoomed-IN level
     ws.map_ui.mapedit.cam_x = ws.map_ui.mapedit.cam_y = 0
     x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
@@ -1394,7 +1394,7 @@ def test_map_pan_works_zoomed_in_and_clamps(tmp_path):
     # Zoomed IN (map bigger than the view), the d-pad pans the camera; panning is
     # clamped so the camera never scrolls the map off the window.
     from runtime import console as C
-    _C, ws, drv = _open_cart_map(tmp_path, "battle_city")
+    _C, ws, drv = _open_cart_map(tmp_path, "brick_siege")
     ws.map_ui.map_zoom = len(C._MV_ZOOMS) - 1                   # most zoomed-in
     x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
     assert ws.tilemap.w > cols and ws.tilemap.h > rows   # room to pan
@@ -1596,8 +1596,10 @@ def test_player_restores_declared_background_each_frame(tmp_path):
     # background() and NO cls still gets a clean backdrop every frame.
     from runtime import host_app, palette
     ws = host_app.build_workstation(str(tmp_path / "carts"))
+    # A GAME: it owns all 320x240, so pixel (0, 0) is the cart's. An app runs with
+    # the bar over that row. Which cart sorts first is alphabetical, so say "game".
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
-                           if it.get("path"))
+                           if it.get("path") and it.get("type") == "game")
     ws.open()
     ws.project.cart["src"] = (
         "def _init():\n"

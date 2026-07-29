@@ -223,7 +223,7 @@ class P4SystemCanvas(DeviceCanvas):
                 if defer:
                     # NOTE the DOUBLE GAME CANVAS (copy-on-swap so this pending
                     # could go fence-free) was built and REVERTED 2026-07-28
-                    # with a measured verdict: windowed Battle City 56 -> 41fps.
+                    # with a measured verdict: windowed Brick Siege 56 -> 41fps.
                     # The blocking "game" fence this defer pays at
                     # present_pending measured ~FREE at this composite size
                     # (the DMA finishes within the input poll), while the

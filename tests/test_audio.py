@@ -171,7 +171,7 @@ def test_stop_all_silences_everything():
 
 def test_voice_gen_bumps_on_every_trigger_and_stop():
     # The device core-1 feed (#41) commits a voice to the C mixer only when its
-    # _Voice.gen counter changes -- this is the Battle City fix. The old detector
+    # _Voice.gen counter changes -- this is the Brick Siege fix. The old detector
     # used (id(steps), active), but the GC can reuse a freed list's address, so a
     # rapid retrigger of the SAME sfx on the SAME channel read as "unchanged" and was
     # never committed (silent). gen must increment on EVERY play()/stop(), so every
@@ -183,7 +183,7 @@ def test_voice_gen_bumps_on_every_trigger_and_stop():
     seen = [v.gen]
     for _ in range(10):
         eng.play_sfx(0, chan=0)
-        assert v.gen > seen[-1], "play() must bump gen every time (Battle City fix)"
+        assert v.gen > seen[-1], "play() must bump gen every time (Brick Siege fix)"
         seen.append(v.gen)
     # A stop is also a committable state change.
     g = v.gen

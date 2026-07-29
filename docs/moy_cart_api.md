@@ -327,7 +327,7 @@ it's painting **more pixels than the frame needs**. Five habits keep any cart sm
 2. **Your background IS the clear color.** `cls(col("dark_blue"))` already paints
    every pixel — don't follow it with a full-screen backdrop `rect()`. That paints
    the whole screen twice and costs ~7ms of the device's ~30ms frame budget for
-   nothing. (Battle City does it right: one `cls` in the field color, then only the
+   nothing. (Brick Siege does it right: one `cls` in the field color, then only the
    HUD strip repaints its own black.)
 3. **Static scenery goes in a layer, once.** If your level or backdrop doesn't change
    every frame, draw it ONCE into `lay = make_layer(W, H)` — a layer speaks the whole

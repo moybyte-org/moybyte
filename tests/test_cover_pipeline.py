@@ -296,9 +296,13 @@ def test_prefetch_stops_once_every_cart_is_known(tmp_path):
     """It must not spin: once every cart is either warmed or known cover-less it
     disarms, so an idle console is not walking the cart list forever."""
     from runtime import host_app
-    root, _carts = _mk_carts_with_covers(tmp_path, 3, with_cover=1)
+    root, carts = _mk_carts_with_covers(tmp_path, 3, with_cover=1)
     ws = host_app.build_workstation(root)
-    _land_cover(ws, ws._all_carts[0], 20, 15)
+    # Land the one fixture cart that HAS a cover, looked up by path -- _all_carts[0]
+    # is whichever seeded system cart sorts first, which is not a fixture cart and
+    # need not have cover art at all.
+    covered = next(c for c in ws._all_carts if c.get("path") == carts[0]["path"])
+    _land_cover(ws, covered, 20, 15)
     for _ in range(200):
         ws._cover_prefetch_tick()
     assert ws._cover_seen is False

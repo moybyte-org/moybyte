@@ -12,7 +12,7 @@ flicker (DPI `num_fbs=2` ping-pong scan-out), touch (180° panel mount →
 `p4_input.FLIP_X/Y`), popup/wallpaper geometry all fixed on-glass. Play perf
 comes from three levers: the quiet-frame partial repaint
 (`WindowedWM.draw_stack`), the hardware-PPA game composite, and the
-async-composite overlap. Battle City 35→51→56; most carts ~60fps. The
+async-composite overlap. Brick Siege 35→51→56; most carts ~60fps. The
 `_BackdropLayer` retained backdrop cache gives ~15fps app-window drags. See #58
 for the living status.
 
@@ -58,7 +58,7 @@ record:
 
 `moy_runtime.run_ppa_smoke()` A/Bs the composite on glass. Perf follow-ups: the
 RENDER overlap (double game canvas + triple framebuffer) to lock 60 on the
-heaviest carts (Battle City 56, Letter Blitz 53); a PPA cover-crop for drags.
+heaviest carts (Brick Siege 56, Letter Blitz 53); a PPA cover-crop for drags.
 Also open: wired USB-HID keyboard/mouse/gamepad, audio (ES8311), OTA/web-view
 wiring.
 
@@ -164,7 +164,7 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
   ("can't fetch data from external memory fast enough").
 - **L2 cache must be 256KB — and can't be more** (`CONFIG_CACHE_L2_CACHE_256KB`,
   set in `sdkconfig.board`, #159). The IDF-default 128KB thrashes under the
-  desktop working set (Battle City busy 15.5→8.0ms on the flip alone); 512KB
+  desktop working set (Brick Siege busy 15.5→8.0ms on the flip alone); 512KB
   force-carves so much internal SRAM that MicroPython's internal/DMA pool
   reservation fails at boot (`main_task: Could not reserve internal/DMA pool
   (error 0x101)` → abort → reboot loop). NB `build.sh`'s stale-sdkconfig guard

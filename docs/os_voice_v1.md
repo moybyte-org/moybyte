@@ -166,7 +166,7 @@ tap, not by pleading); "sorry" is reserved — see §5.
 
 ### 3.3 Named — titles of things
 
-Title Case for every named thing: cartridges (`Battle City`), achievements
+Title Case for every named thing: cartridges (`Brick Siege`), achievements
 (`Lift Off!`, `Secret Coder`), files, themes. The achievement names are already
 the best copy in the OS — whimsical, concrete, two words. That is the model for
 all naming: **whimsy goes in names, not in system prose.** (Exception: the

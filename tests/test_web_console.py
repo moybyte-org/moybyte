@@ -281,18 +281,18 @@ def test_crosscheck_running_cart_is_pixel_identical(tmp_path):
 
 
 def test_crosscheck_named_cart_with_map(tmp_path):
-    """A cart that uses map()/spr (battle_city has a tilemap) round-trips identically
+    """A cart that uses map()/spr (brick_siege has a tilemap) round-trips identically
     -- proves map() expansion to per-cell spr commands replays pixel-perfect."""
-    cart_path = os.path.join(host_app.ROOT, "system_carts", "battle_city.moy")
+    cart_path = os.path.join(host_app.ROOT, "system_carts", "brick_siege.moy")
     if not os.path.isdir(cart_path):
-        pytest.skip("battle_city.moy not present")
+        pytest.skip("brick_siege.moy not present")
     ws, drv, tee = _build_tee(str(tmp_path / "carts"))
     for i, c in enumerate(ws.launcher.items):
-        if os.path.basename(c.get("path") or "") == "battle_city.moy":
+        if os.path.basename(c.get("path") or "") == "brick_siege.moy":
             ws.launcher.sel = i
             break
     else:
-        pytest.skip("battle_city.moy not in the seeded store")
+        pytest.skip("brick_siege.moy not in the seeded store")
     ws.open()
     assert ws.screen == "desktop"
     for n in range(10):
@@ -1452,7 +1452,7 @@ def test_effective_input_hint_never_hides_the_keyboard_in_the_editor(tmp_path):
     from runtime import host_app, web_view
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     for i, c in enumerate(ws.picker.items):
-        if c.get("title") == "Battle City":
+        if c.get("title") == "Brick Siege":
             ws.picker.sel = i
             break
     ws.open_picker()
@@ -1477,7 +1477,7 @@ def test_repeated_keys_survive_the_typed_queue(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
     for i, c in enumerate(ws.picker.items):
-        if c.get("title") == "Battle City":
+        if c.get("title") == "Brick Siege":
             ws.picker.sel = i
             break
     ws.open_picker()

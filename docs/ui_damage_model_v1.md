@@ -89,7 +89,7 @@ before and after.
 ### 0.06 The rest of the attribution: paint and blocks (2026-07-27)
 
 Paint and blocks were then attributed the same way, with **real content** —
-Coin Quest (16 block rows, 23 scene actors) and Battle City (a full 15×15
+Coin Quest (16 block rows, 23 scene actors) and Brick Siege (a full 15×15
 tilemap) rather than the first cart on the shelf, whose outline and map are
 empty. That is not a detail: the map tab costs **74.4ms on a populated map vs
 65.0ms on an empty one**, because the 960 grid fills are a floor that the
@@ -98,7 +98,7 @@ during a drag, from `tools/p4_attrib.py`.
 
 | phase | wall | native fills | in kernel | dispatch |
 |---|---|---|---|---|
-| `map._draw_map` (Battle City) | 74.4 | 960 | 31.7 (43%) | 42.4 (57%) |
+| `map._draw_map` (Brick Siege) | 74.4 | 960 | 31.7 (43%) | 42.4 (57%) |
 | `map._draw_map` (empty map) | 65.0 | 960 | 32.4 (50%) | 32.2 (50%) |
 | `block_ui._draw_blocks` | 86.9 | 409 | 20.7 (24%) | 65.2 (**75%**) |
 | `paint_layer.draw` | 51.8 | 543 | 24.1 (46%) | 27.4 (53%) |
