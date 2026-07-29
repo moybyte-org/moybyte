@@ -61,14 +61,20 @@ image invents a control, process, color, or interaction.
 
 ### Open Machine identity direction
 
-![Open Machine identity direction](visual_identity_v1/open_machine_direction.png)
+> **Concept render — not in this repo.** `open_machine_direction.png` lives in the private
+> brand repo (`moybyte-org/biz`, under `brand/`). The renders were moved out
+> before this repo went public; the direction they encode is described in the
+> text below, which is what the code actually implements.
 
 Use this board for the overall relationship: dark construction field, warm-light tool
 surfaces, grape Moy, thin geometry, visible layers, and restrained functional accents.
 
 ### Library concept
 
-![Moybyte Library concept](visual_identity_v1/library_concept.png)
+> **Concept render — not in this repo.** `library_concept.png` lives in the private
+> brand repo (`moybyte-org/biz`, under `brand/`). The renders were moved out
+> before this repo went public; the direction they encode is described in the
+> text below, which is what the code actually implements.
 
 Use this image for scale, hierarchy, large cartridge art, the pinned MAKE entry, and
 the shared Open Machine chrome. It predates several decisions in this document:
@@ -82,7 +88,10 @@ the shared Open Machine chrome. It predates several decisions in this document:
 
 ### Studio concept
 
-![Moybyte Studio concept](visual_identity_v1/studio_concept.png)
+> **Concept render — not in this repo.** `studio_concept.png` lives in the private
+> brand repo (`moybyte-org/biz`, under `brand/`). The renders were moved out
+> before this repo went public; the direction they encode is described in the
+> text below, which is what the code actually implements.
 
 Use this image for the precision-pixel desktop, warm-light authoring surfaces, dark
 taskbar, compact tabs, and side-by-side editing/playtesting. It is not a process-model
@@ -563,8 +572,8 @@ Do not restyle every system app at once. Build one vertical slice:
 ### Phase 2 — behavior slice
 
 ```text
-Library -> PLAY Battle City -> Player -> exit -> Library
-Library -> CHANGE Battle City -> Studio/Config
+Library -> PLAY Brick Siege -> Player -> exit -> Library
+Library -> CHANGE Brick Siege -> Studio/Config
 Library -> MAKE -> Studio/project picker
 Studio -> PLAY -> playtest -> exit -> same Studio tab
 ```
@@ -668,7 +677,7 @@ should not require two unrelated shell codebases.
 Test behavior, not aesthetic preference, with a small mixed-confidence group around
 ages 8-12. Give concrete tasks:
 
-1. Play Battle City.
+1. Play Brick Siege.
 2. Change the tank.
 3. Start something new.
 4. Return to the Library.
