@@ -6,7 +6,7 @@ FSL-1.1-MIT
 
 ## Notice
 
-Copyright 2026 The Moybyte Authors
+Copyright 2026 Nikola Jovicic
 
 ## Terms and Conditions
 

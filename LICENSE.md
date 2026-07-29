@@ -34,4 +34,4 @@ release ships.
 "Moybyte" and the Moybyte logo are trademarks and are **not** licensed by the
 above; see the Trademarks clause in the FSL text.
 
-Copyright © 2026 The Moybyte Authors
+Copyright © 2026 Nikola Jovicic
