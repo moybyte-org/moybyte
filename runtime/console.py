@@ -1754,9 +1754,15 @@ class Workstation:
     # called by the launcher home + Settings, and select_wallpaper drives it.)
 
     def _icon_sheet_for(self, cart):
-        """A cached sprite Image for a cart's desktop icon (its sheet tile 0), or
-        None when the cart has no art (then the type glyph is drawn). Cached per
-        cart path so the grid doesn't rebuild a sheet every frame."""
+        """A cached sprite Image for a cart's desktop icon, or None when the cart
+        has no art (then the type glyph is drawn). Cached per cart path so the
+        grid doesn't rebuild a sheet every frame.
+
+        The tiles come from the manifest's "icon" (SPEC.md 3.4) -- [tile, w, h],
+        or a bare tile id for 1x1 -- falling back to tile 0. The field has to be
+        explicit rather than a plain tile-0 rule because tile 0 is BLANK by
+        convention across the whole PICO-8 catalogue (it is why map cell 00 means
+        empty), so tile 0 alone draws nothing for every converted cart."""
         if cart.get("path") is None:                # a pinned pseudo tile (Make/New):
             return None                             # no cart art -> draw its type glyph
         key = cart.get("path") or cart.get("title")
@@ -1764,7 +1770,13 @@ class Workstation:
         if key in cache:
             return cache[key]
         sheet = self._build_sheet(cart)             # shared sprite-load + fallback
-        img = sheet.tile_image(0, -1) if not sheet.is_blank() else None
+        img = None
+        if not sheet.is_blank():
+            n, tw, th = cart.get("icon") or (0, 1, 1)
+            img = (sheet.tile_image(n, -1) if tw == 1 and th == 1
+                   else sheet.tile_span_image(n, tw, th, -1))
+            if img is None:            # icon names tiles past this cart's sheet:
+                img = sheet.tile_image(0, -1)   # ignore it, host's choice (SPEC 3.4)
         cache[key] = img
         return img
 

@@ -24,6 +24,16 @@ except ImportError:                    # host / package import
 
 PAN_SPEED = 6            # px/frame the arrow-keys-as-trackball nudge the cursor
 
+# The logical buttons a CART may read (moy SPEC.md 7.3): four directions, a/b,
+# and the optional `run`. The InputState button sets are deliberately wider --
+# the host carries "home" and the device adds x/y/select/start/save/... -- but
+# those belong to the console, not to carts. "home" especially: §7.3 gives exit
+# to the HOST ("no cart is required to provide one... the cart never sees it"),
+# so a cart that polled btn("home") could watch the player reaching for the exit.
+# Anything outside this set reads as not-pressed on every tier, which is also
+# what a conforming console with different hardware would report.
+CART_BUTTONS = ("left", "right", "up", "down", "a", "b", "run")
+
 _console = None
 
 
@@ -607,11 +617,15 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
     _prouter = getattr(input, "players", None)
 
     def btn(name, player=0):
+        if name not in CART_BUTTONS:
+            return False
         if player:
             return _prouter.held(name, player) if _prouter is not None else False
         return input.held(name)
 
     def btnp(name, player=0):
+        if name not in CART_BUTTONS:
+            return False
         if player:
             return _prouter.pressed(name, player) if _prouter is not None else False
         return input.pressed(name)

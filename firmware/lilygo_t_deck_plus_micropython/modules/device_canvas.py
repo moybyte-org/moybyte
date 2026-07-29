@@ -81,6 +81,15 @@ except ImportError:
 # indexes in Python, so it serves both. (The tuple stays for the other PAL565_WIRE uses.)
 _PAL565_WIRE_BUF = array("H", PAL565_WIRE)
 
+# Reverse of PAL565_WIRE, for pix()'s READ form: the framebuffer holds RGB565 but
+# the cart API speaks palette indices on both tiers (SPEC.md 1: "the canvas itself
+# is always indices"). Built once at import; the first index wins where two entries
+# share a word, so the read is stable rather than order-dependent.
+_PAL565_INDEX = {}
+for _i in range(len(PAL565_WIRE) - 1, -1, -1):
+    _PAL565_INDEX[PAL565_WIRE[_i]] = _i
+del _i
+
 # RGB565 colour-key for native sprite blits: transparent sprite pixels are baked
 # to this value so moy_gfx.blit565 skips them. Magenta is absent from MOY64; a
 # visible pixel that happens to equal it is nudged by one LSB when the cache is
@@ -864,14 +873,21 @@ class DeviceCanvas:
 
     def pix(self, x, y, c=None):
         # TIC-80 pix: read the index with two args, set it with three. Reads are
-        # camera-relative; the buffer holds RGB565 so a read returns that, not an index.
-        # Flush the pending sprite batch first so a WRITE keeps draw order and a READ
-        # never samples a stale pixel under a queued-but-unblitted sprite (#63).
+        # camera-relative. Flush the pending sprite batch first so a WRITE keeps
+        # draw order and a READ never samples a stale pixel under a
+        # queued-but-unblitted sprite (#63).
         self.flush_batch()
         x = int(x) - self._cam_x
         y = int(y) - self._cam_y
         if c is None:
-            return self._fb.pixel(x, y)
+            # A read returns a palette INDEX, like the host canvas -- this buffer
+            # holds RGB565, so map back through the wire LUT. Host==device is the
+            # whole point of the indexed canvas: returning the raw word here made
+            # `pix(x, y)` mean two different things on the two tiers, and a cart
+            # that branched on it could never be pixel-conformant (SPEC.md 11).
+            # Unknown words (a native blit's own colour) read as 0, matching the
+            # host's out-of-bounds answer.
+            return _PAL565_INDEX.get(self._fb.pixel(x, y), 0)
         if self._clip_x0 <= x < self._clip_x1 and self._clip_y0 <= y < self._clip_y1:
             self._fb.pixel(x, y, self._col(c))
 

@@ -48,7 +48,7 @@ def test_seed_cart_folders_present_and_valid():
         assert (d / "manifest.json").is_file(), folder
         assert (d / "main.py").is_file(), folder
         man = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
-        assert man["format"] == "moybyte-cart-v1"
+        assert man["format"] == "moy-1"          # SPEC.md 3.1
         assert man["type"] == "game"
         assert man["main"] == "main.py"
         assert man["edit"], folder + " has no Make-it-mine cards"

@@ -35,6 +35,46 @@ CART_FORMAT = "moybyte-cart-v1"
 INPUT_KINDS = ("buttons", "touch", "keyboard")
 
 
+def _int_or(value, default):
+    """`value` as an int, or `default` when it is absent or malformed. Manifest
+    fields are hand-editable, so a bad one must DEGRADE -- an exception here
+    escapes to load()'s blanket handler and drops the whole cart out of the
+    gallery, which is a far worse failure than losing one field."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+# SPEC.md 3.4: an icon is at most 4x4 tiles (32x32px). The bound is what makes the
+# field safe to honour -- a launcher decodes MANY icons at once, and an unbounded
+# block would let one cart name the whole 512-tile sheet.
+ICON_MAX_TILES = 4
+
+
+def _normalize_icon(value):
+    """A manifest "icon" (SPEC.md 3.4) -> (tile, w, h), or None when absent, malformed
+    or out of range. Accepts a bare tile id (1x1) or [tile, w, h]. Never raises and
+    never refuses: an icon is COSMETIC, so a bad one costs the cart its picture (the
+    host picks instead), not its place in the gallery -- unlike `extensions`/`runtime`,
+    where running the cart at all would be wrong."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return (value, 1, 1) if value >= 0 else None
+    if not isinstance(value, (list, tuple)) or not 1 <= len(value) <= 3:
+        return None
+    try:
+        n = int(value[0])
+        w = int(value[1]) if len(value) > 1 else 1
+        h = int(value[2]) if len(value) > 2 else 1
+    except (TypeError, ValueError):
+        return None
+    if n < 0 or not 1 <= w <= ICON_MAX_TILES or not 1 <= h <= ICON_MAX_TILES:
+        return None
+    return (n, w, h)
+
+
 def _normalize_input_kinds(value):
     """A manifest "input" value -> a tuple of known kinds, or None when absent/not a
     list/empty after filtering -- never raises on a malformed manifest."""
@@ -553,9 +593,15 @@ def seed_builtins(seed_list, root=CARTS_DIR):
             _rmtree(d)            # newer built-in: replace code+art wholesale
         _mkdir(d)
         manifest = {
-            "format": CART_FORMAT, "title": cart["title"], "type": cart["type"],
+            # This manifest is REGENERATED, not copied, so every field a built-in
+            # declares has to be passed through explicitly or the seeded copy
+            # loses it. `format` especially: the device seeds from the baked blob
+            # while the host copies the source folder, so hardcoding CART_FORMAT
+            # here restamped a "moy-1" built-in on device and nowhere else.
+            "format": cart.get("format", CART_FORMAT),
+            "title": cart["title"], "type": cart["type"],
             # #67 dual-runtime passthrough: a baked "lua" built-in seeds with its
-            # runtime + main.lua intact (this manifest is REGENERATED, not copied).
+            # runtime + main.lua intact.
             "runtime": cart.get("runtime", "python"),
             "main": cart.get("main", "main.py"),
             "edit": cart.get("edit", []),
@@ -563,6 +609,8 @@ def seed_builtins(seed_list, root=CARTS_DIR):
         }
         if cart.get("fps"):               # frame pacing (#63): "fps": 60 opt-out
             manifest["fps"] = cart["fps"]
+        if cart.get("icon"):              # launcher icon tiles (SPEC.md 3.4)
+            manifest["icon"] = list(cart["icon"])
         if cart.get("canvas") is not None:
             manifest["canvas"] = cart["canvas"]
         if cart.get("permissions") is not None:
@@ -678,7 +726,15 @@ def load(path):
             # save_code/duplicate/seed must write THAT file back, never main.py.
             "runtime": man.get("runtime", "lua" if spec else "python"),
             "main": man.get("main", "main.lua" if spec else "main.py"),
-            "version": int(man.get("version", 0)),   # 0 = pre-versioning (re-seedable)
+            # 0 = pre-versioning (re-seedable). SPEC.md 3.1 leaves `version` to
+            # the author, so a hand-typed "1.2" must read as unversioned rather
+            # than take the cart down with it.
+            "version": _int_or(man.get("version"), 0),
+            # The manifest's declared format, carried so a rewrite puts back what
+            # it found: a moy-spec cart duplicated here must stay a "moy-1" cart.
+            # Restamping it "moybyte-cart-v1" would make it unrecognisable to
+            # every other conforming host -- and silently reset its fps default.
+            "format": man.get("format", CART_FORMAT),
             # Graduation (#29 / spec Section 8): a STORED, one-way project fact. Set
             # when a block-authored cart's code commit diverges past the block
             # vocabulary; makes the block editor read-only. Default False (absent =
@@ -695,6 +751,10 @@ def load(path):
             # Required optional features (SPEC.md 10): Player refuses the cart
             # cleanly when one isn't implemented, instead of crashing mid-frame.
             "extensions": man.get("extensions", []),
+            # The sheet tiles a launcher shows this cart by (SPEC.md 3.4):
+            # (tile, w, h) or None to let the host choose. A POINTER into art the
+            # cart already has -- no image, no codec, no reserved tiles.
+            "icon": _normalize_icon(man.get("icon")),
             "cfg": cfg,
             "edit": man.get("edit", []),
             # Manifest capability permissions (#38): a cart only gets a gated API
@@ -737,14 +797,21 @@ def load(path):
 def scan(root=CARTS_DIR):
     """All carts found under root, sorted by folder name. Corrupt carts are
     skipped (load() returns None), and any per-entry surprise is swallowed so a
-    single bad folder can't break the launcher."""
+    single bad folder can't break the launcher.
+
+    A cart is a FOLDER. A `.moy` FILE beside them is an archive -- how a cart
+    travels, not how it is stored -- and is skipped silently: unpacking belongs
+    to whatever brought it here, because a cart in an archive can't be edited,
+    can't take an autosave commit, and can't hold its own undo journal or saves.
+    (Before this, a `.moy` file was handed to load(), which opened it as a
+    directory, failed, and reported it as a CORRUPT CART.)"""
     carts = []
     try:
         names = sorted(os.listdir(root))
     except OSError:
         return carts
     for name in names:
-        if name.endswith(".moy"):
+        if name.endswith(".moy") and _is_dir(root + "/" + name):
             try:
                 c = load(root + "/" + name)
             except Exception as exc:  # noqa: BLE001  -- belt-and-braces over load()
@@ -1001,7 +1068,7 @@ def save_blocks(cart, program):
 
 # --- persistent cart memory (pmem, TIC-80-style) ----------------------------
 #
-# A cart's pmem is 256 x 32-bit unsigned ints stored as a JSON list in pmem.json
+# A cart's pmem is 256 x SIGNED 32-bit ints stored as a JSON list in pmem.json
 # beside main.py. TIC-80 gives carts pmem(i)/pmem(i,v) for high scores / save
 # state; this is the per-cart backing store. Reads default to all-zero; saves
 # are atomic (same crash-safe path as sprites/config) so an interrupted write
@@ -1009,6 +1076,7 @@ def save_blocks(cart, program):
 
 PMEM_CELLS = 256
 PMEM_MASK = 0xFFFFFFFF
+PMEM_SIGN = 0x80000000       # slots are SIGNED 32-bit (SPEC.md 9, matching 4.2)
 
 
 def load_pmem(path):
@@ -1022,9 +1090,13 @@ def load_pmem(path):
     if isinstance(data, list):
         for i in range(min(PMEM_CELLS, len(data))):
             try:
-                cells[i] = int(data[i]) & PMEM_MASK
+                v = int(data[i]) & PMEM_MASK
             except (TypeError, ValueError):
-                cells[i] = 0
+                v = 0
+            # Slots are signed 32-bit. Reinterpreting is also the migration for
+            # saves written before that was pinned down: a negative a cart wrote
+            # back then landed as a huge unsigned value, and this restores it.
+            cells[i] = v - (PMEM_MASK + 1) if v >= PMEM_SIGN else v
     return cells
 
 
@@ -1299,26 +1371,33 @@ def _unique_dir(root, base):
 
 def create(title, root=CARTS_DIR, src=None, cfg=None, edit=None, type="app",
            runtime="python", main="main.py", scenes=None, scene_order=None,
-           author=None, palette=None, extensions=None):
+           author=None, palette=None, extensions=None, format=None, fps=None,
+           icon=None):
     """Create a new .moy folder and return its loaded cart dict. `runtime`/`main`
     default to a python cart; duplicate() passes a source cart's through so a
     copied "lua" cart (#67) stays a lua cart with its source in main.lua. `scenes`
     ({name: .moyscene text}) + `scene_order` copy a source cart's scene assets (#85),
     registered in manifest.assets.scenes and written under scenes/. `author` (#94)
     is optional -- omitted entirely when blank, so a fresh/duplicated cart's
-    manifest stays as clean as before this field existed."""
+    manifest stays as clean as before this field existed. `format`/`fps` are
+    duplicate()'s passthrough (SPEC.md 3.1): copying a spec cart must yield
+    another "moy-1" cart at its declared tick, not a restamped moybyte one."""
     d = _unique_dir(root, slug(title))
     _mkdir(d)
     manifest = {
-        "format": CART_FORMAT, "title": title, "type": type,
+        "format": format or CART_FORMAT, "title": title, "type": type,
         "runtime": runtime, "main": main, "edit": edit or [],
     }
+    if fps:                # 0 is moybyte's "unset" app default -- never written
+        manifest["fps"] = fps
     if author:
         manifest["author"] = author
     if palette:                       # cart-supplied palette (SPEC.md 2.2) survives a copy
         manifest["palette"] = list(palette)
     if extensions:                    # required extensions (SPEC.md 10) survive a copy
         manifest["extensions"] = list(extensions)
+    if icon:                          # launcher icon tiles (SPEC.md 3.4) survive a copy
+        manifest["icon"] = list(icon)
     if scenes:                        # scene assets (#85): register + write (see above)
         manifest["assets"] = {"scenes": list(scene_order or sorted(scenes.keys()))}
     _write(d + "/manifest.json", json.dumps(manifest))
@@ -1336,15 +1415,74 @@ def new_from_template(root=CARTS_DIR, title="New Cart"):
                   edit=NEW_TEMPLATE["edit"], type=NEW_TEMPLATE["type"])
 
 
+# Files create() has already written for the copy, or that must NOT follow one.
+# Everything else in a cart folder is project content and gets copied verbatim.
+#   manifest/config/main -- create() wrote the COPY's own (new title, version, format)
+#   journal*             -- the ORIGINAL's undo history; inheriting it would let a
+#                           copy "undo" into the source project's edits
+#   pmem.json            -- the original's save state, not the new project's
+#   thumbs/              -- a regenerable preview cache, stamped against the source
+def _dup_skip(name, main):
+    return (name in ("manifest.json", "manifest.json.bak", "config.json",
+                     "pmem.json", main, THUMBS_DIR, JOURNAL_DIR, JOURNAL_LOG,
+                     JOURNAL_CURSOR, JOURNAL_SNAP_DIR)
+            or name.startswith("journal"))
+
+
+def _copy_cart_files(src, dst, main):
+    """Copy a cart folder's asset files (one level of subfolders -- images/,
+    scenes/, tables/, docs/) into a fresh copy. Degrade-don't-throw like load():
+    an unreadable entry is skipped, never fatal, so a copy can lose one asset but
+    never fail outright."""
+    try:
+        names = os.listdir(src)
+    except OSError:
+        return
+    for name in names:
+        if _dup_skip(name, main):
+            continue
+        s, d = src + "/" + name, dst + "/" + name
+        try:
+            kids = os.listdir(s)         # a subfolder (images/, scenes/, ...)
+        except OSError:
+            try:
+                _write(d, _read(s))      # a plain file
+            except (OSError, ValueError, UnicodeError):
+                pass
+            continue
+        _mkdir(d)
+        for kid in kids:
+            try:
+                _write(d + "/" + kid, _read(s + "/" + kid))
+            except (OSError, ValueError, UnicodeError):
+                pass
+
+
 def duplicate(cart, root=CARTS_DIR, new_title=None):
-    return create(new_title or (cart["title"] + " copy"), root,
-                  src=cart["src"], cfg=dict(cart["cfg"]), edit=cart["edit"], type=cart["type"],
-                  runtime=cart.get("runtime", "python"), main=cart.get("main", "main.py"),
-                  scenes=dict(cart.get("scenes") or {}),      # #85: copy scene assets +
-                  scene_order=list(cart.get("scene_names") or []),  # their manifest order
-                  author=cart.get("author") or None,          # #94: carry the author over
-                  palette=cart.get("palette"),                # spec 2.2 palette +
-                  extensions=cart.get("extensions"))          # spec 10 extensions carry over
+    dup = create(new_title or (cart["title"] + " copy"), root,
+                 src=cart["src"], cfg=dict(cart["cfg"]), edit=cart["edit"], type=cart["type"],
+                 runtime=cart.get("runtime", "python"), main=cart.get("main", "main.py"),
+                 scenes=dict(cart.get("scenes") or {}),      # #85: copy scene assets +
+                 scene_order=list(cart.get("scene_names") or []),  # their manifest order
+                 author=cart.get("author") or None,          # #94: carry the author over
+                 palette=cart.get("palette"),                # spec 2.2 palette +
+                 extensions=cart.get("extensions"),          # spec 10 extensions carry over
+                 format=cart.get("format"),                  # spec 3.1: a moy-1 copy
+                 fps=cart.get("fps"),                        # stays moy-1 at its tick
+                 icon=cart.get("icon"))                      # spec 3.4 launcher art
+    # create() writes the CODE side of a project (manifest/main/config/scenes).
+    # Everything else a cart owns -- sprites.moygfx, map.moymap, sounds.json,
+    # blocks.json, images/, tables/, docs/ -- lived only in the source FOLDER, so
+    # a copy used to arrive with just its code: the picker's COPY silently threw
+    # away the sprite sheet, tilemap, sounds and cover art of every project it
+    # duplicated. Copying the files (rather than re-serialising the loaded dict)
+    # also keeps assets this module doesn't model, which is the only lossless
+    # answer for a cart authored by a newer build.
+    src_path = cart.get("path")
+    if src_path and dup is not None:
+        _copy_cart_files(src_path, dup["path"], dup["main"])
+        return load(dup["path"])
+    return dup
 
 
 def delete(cart):

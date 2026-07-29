@@ -848,9 +848,12 @@ def test_frame_cap_locks_games_to_a_steady_30(tmp_path, monkeypatch):
     # pins BOTH: the default-off behaviour and the ON policy.
     from runtime import host_app, console as console_mod
     ws = host_app.build_workstation(str(tmp_path / "carts"))
+    # "a plain game" = anything that doesn't declare the 60 opt-in. Since the
+    # carts became "moy-1" this is fps 30 (SPEC.md 5's default) rather than the
+    # old unset 0, and frame_cap_fps treats the two the same.
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("path") and it.get("type") == "game"
-                           and not it.get("fps"))
+                           and it.get("fps") != 60)
     ws.open()
     assert ws.screen == "desktop" and ws.cart_error is None
     assert console_mod.FPS_GOVERNOR is False

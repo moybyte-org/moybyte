@@ -83,11 +83,14 @@ do
   load = nil
   debug = nil
   python = nil
-  -- lupa opens these two; the device VM never does (moy_lua opens only
-  -- base/math/string/table and strips collectgarbage). Nil them so a cart
-  -- that runs on the host runs on glass -- the moy spec's 4.1 ceiling.
+  -- lupa's luaL_openlibs opens these three; the device VM never does (moy_lua
+  -- opens only base/math/string/table, strips collectgarbage, and its build
+  -- drops lcorolib.c/lutf8lib.c from the sources outright). Nil them so a cart
+  -- that runs here runs on glass -- SPEC.md 4.1's stdlib list is a MAXIMUM, and
+  -- utf8 is the one lupa leaks that the device physically cannot provide.
   coroutine = nil
   collectgarbage = nil
+  utf8 = nil
 end
 """
 

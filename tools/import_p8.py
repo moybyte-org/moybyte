@@ -118,6 +118,28 @@ def _title_from(sections, p8_path):
 
 GFX_W = 128
 GFX_H = 128
+GFX_TILES = (GFX_W // 8) * (GFX_H // 8)   # 256, a p8 sheet's tile count
+
+
+def icon_tile(kgfx_text):
+    """The first sheet tile carrying any art -- the cart's icon (SPEC.md 3.4), or
+    None for a blank sheet.
+
+    PICO-8 has no icon field, so this is a heuristic, but a well-founded one: the
+    p8 convention leaves sprite 0 EMPTY (it is why an empty map cell reads 0), and
+    authors fill the sheet from the top, so the first non-blank tile is the game's
+    own first piece of art -- a player, a ship, a logo. Picking a 1x1 tile rather
+    than guessing a 2x2 block is deliberate: p8 sprites are 8x8, so a wider span
+    would drag in whatever unrelated sprite happens to sit beside it."""
+    if not kgfx_text:
+        return None
+    rows = kgfx_text.split("\n")
+    for n in range(GFX_TILES):
+        ox, oy = (n % 16) * 8, (n // 16) * 8
+        for y in range(oy, min(oy + 8, len(rows))):
+            if any(c != "0" for c in rows[y][ox:ox + 8]):
+                return n
+    return None
 
 
 def gfx_to_kgfx(gfx_lines):

@@ -107,3 +107,341 @@ def test_cart_palette_applied_then_restored(tmp_path):
     assert tuple(ws.canvas.palette[8]) == (255, 0, 0)   # cart table live
     ws.player.release_world()
     assert tuple(ws.canvas.palette[8]) == tuple(default_red)  # restored
+
+
+# -- SPEC.md 3.1: a manifest survives a rewrite, and a bad field degrades ------
+
+def test_duplicate_keeps_moy1_format_and_fps(tmp_path):
+    """Copying a spec cart must yield another SPEC cart. Restamping it
+    "moybyte-cart-v1" would make it unrecognisable to every other host -- and
+    silently reset its declared tick to moybyte's app default."""
+    from runtime import moy_carts
+    path = _write_moy1(tmp_path, "spec", {
+        "format": "moy-1", "title": "Spec", "fps": 60})
+    cart = moy_carts.load(path)
+    assert cart["format"] == "moy-1" and cart["fps"] == 60
+    dup = moy_carts.duplicate(cart, str(tmp_path))
+    assert dup["format"] == "moy-1"
+    assert dup["fps"] == 60
+    assert dup["runtime"] == "lua" and dup["main"] == "main.lua"
+
+
+def test_moybyte_cart_duplicate_unchanged(tmp_path):
+    """The passthrough must not restamp moybyte's own carts either way."""
+    from runtime import moy_carts
+    root = str(tmp_path / "c")
+    Path(root).mkdir(parents=True)
+    cart = moy_carts.create("Mine", root, src="def _draw():\n    pass\n")
+    assert cart["format"] == moy_carts.CART_FORMAT
+    assert moy_carts.duplicate(cart, root)["format"] == moy_carts.CART_FORMAT
+
+
+def test_malformed_version_degrades_not_deletes(tmp_path):
+    """A hand-typed "1.2" must read as unversioned, not drop the whole cart out
+    of the gallery -- SPEC.md 3.1 leaves `version` to the author."""
+    from runtime import moy_carts
+    path = _write_moy1(tmp_path, "spec", {
+        "format": "moy-1", "title": "Spec", "version": "1.2"})
+    cart = moy_carts.load(path)
+    assert cart is not None
+    assert cart["version"] == 0
+    assert cart["title"] == "Spec"
+
+
+# -- SPEC.md 10: vendor extensions are namespaced, and moybyte knows its own ---
+
+def test_vendor_namespaced_extension_is_accepted(tmp_path):
+    """moybyte implements scenes, so a cart HONESTLY declaring the namespaced
+    name must run -- before this the gate refused every vendor name, i.e. the
+    one console that implements the feature rejected carts that declared it."""
+    from runtime import moy_carts
+    root = str(tmp_path / "carts")
+    Path(root).mkdir(parents=True)
+    moy_carts.create("Placed", root, src="def _draw():\n    pass\n",
+                     type="game", extensions=["moybyte.scenes"])
+    ws = _ws(tmp_path)
+    _open(ws, "Placed")
+    assert not ws.cart_error
+
+
+def test_unknown_vendor_extension_still_refused(tmp_path):
+    from runtime import moy_carts
+    root = str(tmp_path / "carts")
+    Path(root).mkdir(parents=True)
+    moy_carts.create("Warp2", root, src="def _draw():\n    pass\n",
+                     type="game", extensions=["moybyte.warpdrive"])
+    ws = _ws(tmp_path)
+    _open(ws, "Warp2")
+    assert ws.cart_error and "moybyte.warpdrive" in ws.cart_error
+
+
+# -- SPEC.md 7.3: the host owns exit, so a cart never sees it ------------------
+
+def test_cart_cannot_read_the_hosts_exit_button(tmp_path):
+    from runtime import host_app
+    from runtime.canvas import Canvas
+    from runtime.input import InputState
+    inp = InputState()
+    api = host_app.make_api(Canvas(320, 240), inp, {})
+    for name in ("left", "right", "up", "down", "a", "b", "run"):
+        assert api["btn"](name) is False        # present, just not held
+    inp.set_held("home", True)
+    inp.begin_frame()
+    assert inp.held("home")                     # the console still sees it
+    assert api["btn"]("home") is False          # the cart never does
+    assert api["btnp"]("home") is False
+    inp.set_held("a", True)
+    inp.begin_frame()
+    assert api["btn"]("a") is True              # a real cart button is unaffected
+
+
+def test_device_cart_buttons_match_host():
+    """host_api and device_api must agree on the cart-visible button set."""
+    import re
+    from runtime import host_api
+    src = (ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules"
+           / "device_api.py").read_text()
+    m = re.search(r"^CART_BUTTONS = \(([^)]*)\)", src, re.M)
+    assert m, "device_api lost its CART_BUTTONS"
+    dev = tuple(re.findall(r'"([a-z]+)"', m.group(1)))
+    assert dev == host_api.CART_BUTTONS
+
+
+# -- SPEC.md 4.1: the host sandbox is a MAXIMUM, matched to what glass can give -
+
+def test_host_lua_sandbox_matches_the_device_ceiling(tmp_path):
+    """utf8 is the one library lupa's openlibs leaks that the device build drops
+    from its sources outright -- a cart using it would run here and die on glass."""
+    from runtime import moy_carts
+    root = str(tmp_path / "carts")
+    Path(root).mkdir(parents=True)
+    probe = "\n".join(
+        'if %s ~= nil then error("%s reachable") end' % (n, n)
+        for n in ("io", "os", "debug", "package", "coroutine",
+                  "utf8", "require", "load", "dofile", "collectgarbage"))
+    moy_carts.create("Sandbox", root, src="function _draw()\n" + probe + "\nend\n",
+                     type="game", runtime="lua", main="main.lua")
+    from runtime import host_app
+    ws = host_app.build_workstation(root)
+    if getattr(ws, "lua_runtime", None) is None:
+        import pytest
+        pytest.skip("lupa not installed")
+    _open(ws, "Sandbox")
+    assert not ws.cart_error
+    ws.frame(1 / 30.0)
+    assert not ws.cart_error, ws.cart_error
+
+
+# -- SPEC.md 3.1/15: an unimplemented `runtime` is REFUSED, never ignored ------
+
+def test_unknown_runtime_is_refused_cleanly(tmp_path):
+    """Ignoring the field is the one reading that fails badly: the host would
+    hand a script in another language to its Lua VM and blame the author's code.
+    A clean refusal names the real problem instead."""
+    from runtime import moy_carts
+    root = str(tmp_path / "carts")
+    Path(root).mkdir(parents=True)
+    moy_carts.create("Wasm", root, src="(module)\n", type="game",
+                     runtime="wasm", main="main.wasm")
+    ws = _ws(tmp_path)
+    _open(ws, "Wasm")
+    assert ws.cart_error and "wasm" in ws.cart_error
+    # and the refusal must not have left a half-started world behind
+    assert ws.player._lua is None
+
+
+def test_lua_runtime_still_runs(tmp_path):
+    """The refusal must key on the binding being unimplemented, not on the field
+    merely being present -- "lua" is core's binding and always runs."""
+    from runtime import moy_carts
+    root = str(tmp_path / "carts")
+    Path(root).mkdir(parents=True)
+    moy_carts.create("Luacart", root, type="game", runtime="lua", main="main.lua",
+                     src="function _draw()\n  cls(3)\nend\n")
+    from runtime import host_app
+    ws = host_app.build_workstation(root)
+    if getattr(ws, "lua_runtime", None) is None:
+        import pytest
+        pytest.skip("lupa not installed")
+    _open(ws, "Luacart")
+    assert not ws.cart_error
+    ws.frame(1 / 30.0)
+    assert not ws.cart_error
+
+
+# -- a copy is the whole project, not just its code ----------------------------
+
+def test_duplicate_carries_every_asset(tmp_path):
+    """The picker's COPY used to arrive with only manifest/main/config: create()
+    writes the code side, and every other asset lived solely in the source
+    FOLDER -- so duplicating a game silently discarded its sprite sheet,
+    tilemap, sounds, blocks and cover art."""
+    from runtime import moy_carts
+    root = str(tmp_path / "carts")
+    Path(root).mkdir(parents=True)
+    cart = moy_carts.create("Full", root, src="def _draw():\n    pass\n", type="game")
+    p = Path(cart["path"])
+    (p / "sprites.moygfx").write_text("0" * 128 + "\n")
+    (p / "map.moymap").write_text("2 1\n0102\n")
+    (p / "sounds.json").write_text(json.dumps({"sfx": [], "music": []}))
+    (p / "blocks.json").write_text(json.dumps({"blocks": []}))
+    for sub, fn, blob in (
+            ("images", "cover.moyimg",
+             json.dumps({"format": "moyimg-v1", "w": 1, "h": 1,
+                         "codec": "rle", "data": "AA"})),
+            ("tables", "scores.moysheet",
+             json.dumps({"format": "moysheet-v1", "cells": {}})),
+            ("docs", "notes.moytext",
+             json.dumps({"format": "moytext-v1", "body": "hi"}))):
+        (p / sub).mkdir()
+        (p / sub / fn).write_text(blob)
+
+    src = moy_carts.load(str(p))
+    dup = moy_carts.duplicate(src, root)
+    assert dup["sprites"] == src["sprites"]
+    assert dup["map"] == src["map"]
+    assert dup["sounds"] == src["sounds"]
+    assert dup["blocks"] == src["blocks"]
+    assert set(dup["images"]) == {"cover"}
+    assert set(dup["tables"]) == {"scores"}
+    assert set(dup["texts"]) == {"notes"}
+
+
+def test_duplicate_leaves_behind_saves_and_undo_history(tmp_path):
+    """A copy is a NEW project: inheriting the original's journal would let it
+    'undo' into another project's edits, and its pmem is that cart's save."""
+    from runtime import moy_carts
+    root = str(tmp_path / "carts")
+    Path(root).mkdir(parents=True)
+    cart = moy_carts.create("Saved", root, src="def _draw():\n    pass\n", type="game")
+    p = Path(cart["path"])
+    (p / "pmem.json").write_text(json.dumps([7] * 8))
+    (p / "journal.jsonl").write_text('{"seq": 1}\n')
+    dup = moy_carts.duplicate(moy_carts.load(str(p)), root)
+    names = set(x.name for x in Path(dup["path"]).iterdir())
+    assert "pmem.json" not in names
+    assert not any(n.startswith("journal") for n in names)
+
+
+def test_duplicate_of_a_pathless_cart_still_works(tmp_path):
+    """The device's embedded fallback carts are dicts with no folder -- the file
+    copy must be skipped, not crash."""
+    from runtime import moy_carts
+    root = str(tmp_path / "carts")
+    Path(root).mkdir(parents=True)
+    cart = moy_carts.create("Embedded", root, src="def _draw():\n    pass\n", type="game")
+    pathless = dict(moy_carts.load(cart["path"]))
+    pathless["path"] = None
+    dup = moy_carts.duplicate(pathless, root)
+    assert dup is not None and dup["src"] == cart["src"]
+
+
+# -- SPEC.md 3.4: the launcher icon is a POINTER into the sheet ----------------
+
+def test_icon_normalizes_both_manifest_shapes(tmp_path):
+    from runtime import moy_carts
+    for value, want in (
+            (4, (4, 1, 1)),                  # bare tile id == 1x1
+            ([4], (4, 1, 1)),
+            ([4, 2, 2], (4, 2, 2)),
+            (None, None),
+            ("4", None),                     # malformed shapes cost the picture,
+            ([], None),                      # never the cart
+            ([-1, 1, 1], None),
+            ([4, 0, 1], None),
+            ([4, 4, 4], (4, 4, 4)),          # the SPEC.md 3.4 ceiling
+            ([4, 5, 1], None),               # past it: ignored, not refused
+            ([4, 1, 9], None),
+            (True, None),
+            ([4, "x", 2], None)):
+        path = _write_moy1(tmp_path, "i%s" % abs(hash(repr(value))), {
+            "format": "moy-1", "title": "Icon", "icon": value}
+            if value is not None else {"format": "moy-1", "title": "Icon"})
+        cart = moy_carts.load(path)
+        assert cart is not None, value       # a bad icon never drops the cart
+        assert cart["icon"] == want, (value, cart["icon"])
+
+
+def test_icon_survives_duplicate(tmp_path):
+    from runtime import moy_carts
+    path = _write_moy1(tmp_path, "spec", {
+        "format": "moy-1", "title": "Spec", "icon": [4, 2, 2]})
+    dup = moy_carts.duplicate(moy_carts.load(path), str(tmp_path))
+    assert dup["icon"] == (4, 2, 2)
+
+
+def test_launcher_draws_the_declared_icon_tiles(tmp_path):
+    """A 2x2 icon must resolve to a 16x16 blittable, and an absent one to tile 0
+    -- the host's free choice when the cart declines to name tiles."""
+    from runtime import moy_carts, host_app
+    root = str(tmp_path / "carts")
+    Path(root).mkdir(parents=True)
+    # tile 0 blank, tiles 16..17/32..33 (a 2x2 block at tile 16) painted
+    rows = ["0" * 128] * 16 + ["0" * 16 + "8" * 16 + "0" * 96] * 16
+    for name, icon in (("Big", [16, 2, 2]), ("Plain", None)):
+        c = moy_carts.create(name, root, src="def _draw():\n    pass\n",
+                             type="game", icon=icon)
+        Path(c["path"], "sprites.moygfx").write_text("\n".join(rows))
+    ws = host_app.build_workstation(root)
+    by_title = {c["title"]: c for c in ws.launcher.items if c.get("path")}
+    big = ws._icon_sheet_for(by_title["Big"])
+    assert big is not None and (big.w, big.h) == (16, 16)
+    plain = ws._icon_sheet_for(by_title["Plain"])
+    assert plain is not None and (plain.w, plain.h) == (8, 8)
+
+
+def test_icon_past_the_sheet_falls_back(tmp_path):
+    """SPEC.md 3.4: an icon naming tiles this cart doesn't have is IGNORED --
+    the host picks instead. A cosmetic field must never blank the tile."""
+    from runtime import moy_carts, host_app
+    root = str(tmp_path / "carts")
+    Path(root).mkdir(parents=True)
+    c = moy_carts.create("Missing", root, src="def _draw():\n    pass\n",
+                         type="game", icon=[500, 1, 1])
+    Path(c["path"], "sprites.moygfx").write_text("\n".join(["8" * 128] * 8))
+    ws = host_app.build_workstation(root)
+    cart = next(x for x in ws.launcher.items if x["title"] == "Missing")
+    assert cart["icon"] == (500, 1, 1)          # carried verbatim...
+    assert ws._icon_sheet_for(cart) is not None  # ...but never a blank tile
+
+
+# -- pmem slots are signed 32-bit (SPEC.md 9, matching 4.2) --------------------
+
+def test_pmem_round_trips_negative_values():
+    """Slots held UNSIGNED 32-bit, so pmem(i, -1) read back 4294967295 -- wrong
+    for a python cart, and not even representable in a LUA_32BITS integer, so a
+    lua cart could not store a negative number at all."""
+    from runtime.widgets import Pmem
+    p = Pmem()
+    for v in (-1, -42, 0, 7, 2147483647, -2147483648):
+        p.cell(0, v)
+        assert p.cell(0) == v, v
+    p.cell(0, 2147483648)               # past the top: wraps like the VM
+    assert p.cell(0) == -2147483648
+
+
+def test_pmem_load_reinterprets_legacy_unsigned_saves(tmp_path):
+    """Saves written before the width was pinned stored a negative as a huge
+    unsigned value; reading them back signed is the migration."""
+    from runtime import moy_carts
+    d = Path(tmp_path) / "c.moy"
+    d.mkdir()
+    (d / "pmem.json").write_text(json.dumps([4294967295, 7, 2147483648]))
+    cells = moy_carts.load_pmem(str(d))
+    assert cells[0] == -1
+    assert cells[1] == 7
+    assert cells[2] == -2147483648
+
+
+# -- a cart is a FOLDER; a .moy archive is transport, not storage --------------
+
+def test_scan_ignores_a_moy_archive_file(tmp_path):
+    """A .moy FILE is how a cart travels; unpacking belongs to whatever brought
+    it here. It must be skipped silently, not reported as a corrupt cart."""
+    from runtime import moy_carts
+    root = str(tmp_path / "carts")
+    Path(root).mkdir(parents=True)
+    moy_carts.create("Real", root, src="def _draw():\n    pass\n", type="game")
+    (Path(root) / "downloaded.moy").write_bytes(b"PK\x03\x04not-a-folder")
+    found = moy_carts.scan(root)
+    assert [c["title"] for c in found] == ["Real"]

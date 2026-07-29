@@ -1731,3 +1731,35 @@ def test_layer_pool_reclaims_cart_buffers_across_runs(monkeypatch):
     assert cv._mapcache is not None
     cv.reclaim_layers("cart")
     assert cv._mapcache is None, "reclaim must drop the map cache (its layer is pooled)"
+
+
+# --------------------------------------------------------------------------- #
+# pix() as a READ returns a palette INDEX on both tiers (moy SPEC.md 1/6).    #
+# The device buffer holds RGB565, so it maps back through the wire LUT; before #
+# that, `pix(x, y)` meant an index on the host and a raw RGB565 word on glass, #
+# and a cart branching on it could never be pixel-conformant.                  #
+# --------------------------------------------------------------------------- #
+def test_pix_read_returns_index_on_both():
+    for gfx in (True, False):
+        m, host, dev = _both(gfx)
+        host.cls(1)
+        dev.cls(1)
+        for idx in (0, 1, 8, 12, 63):
+            host.pix(10, 10, idx)
+            dev.pix(10, 10, idx)
+            assert host.pix(10, 10) == idx, ("host gfx=%s" % gfx, idx)
+            assert dev.pix(10, 10) == idx, ("device gfx=%s" % gfx, idx)
+            assert dev.pix(10, 10) == host.pix(10, 10)
+
+
+def test_pix_read_is_camera_relative_on_both():
+    m, host, dev = _both(True)
+    host.cls(0)
+    dev.cls(0)
+    host.pix(20, 12, 9)
+    dev.pix(20, 12, 9)
+    host.camera(4, 2)
+    dev.camera(4, 2)
+    # same world pixel, now addressed through the camera offset
+    assert host.pix(24, 14) == 9
+    assert dev.pix(24, 14) == 9

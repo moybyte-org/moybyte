@@ -104,16 +104,7 @@ function trib(x1, y1, x2, y2, x3, y3, c) end
 ---@param c? integer colour override for every rect (-1 = per-rect)
 function rect_batch(items, n, ox, oy, c) end
 
----rect_batch told as COLUMNS: same pixels, the console walks memory
----column-wise -- use for tall thin spans (raycaster walls). DRAFT 6.1.
----@param items number[]|userdata
----@param n? integer
----@param ox? integer
----@param oy? integer
----@param c? integer
-function col_batch(items, n, ox, oy, c) end
-
----A reusable int16 buffer for rect_batch/col_batch: n*5 slots (x,y,w,h,c per
+---A reusable int16 buffer for rect_batch: n*5 slots (x,y,w,h,c per
 ---span). Allocate ONCE in _init, refill by index each frame. DRAFT 6.1.
 ---@param n integer span capacity
 ---@return userdata
@@ -131,6 +122,8 @@ function spans(n) end
 function spr(n, x, y, colorkey, scale, flip) end
 
 ---Draw MANY sheet tiles in one call: items = {{tile,x,y}, {tile,x,y,flip}, ...}.
+---DRAFT 6.1. You almost certainly want a plain `for` loop of spr() instead --
+---the console already batches those natively, so the loop costs the same.
 ---@param items table
 ---@param colorkey? integer
 ---@param scale? integer

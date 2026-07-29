@@ -1,6 +1,6 @@
 {
-  "format": "moybyte-cart-v1",
-  "version": 1,
+  "format": "moy-1",
+  "version": 2,
   "title": "Layer Test",
   "type": "game",
   "runtime": "python",

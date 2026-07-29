@@ -1,6 +1,6 @@
 {
-  "format": "moybyte-cart-v1",
-  "version": 2,
+  "format": "moy-1",
+  "version": 3,
   "title": "Ray Lua",
   "type": "game",
   "runtime": "lua",

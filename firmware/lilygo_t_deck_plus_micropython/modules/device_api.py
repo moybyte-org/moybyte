@@ -19,6 +19,12 @@ from device_util import _ticks_ms, _ticks_diff
 from device_canvas import Image, _decode_moyimg, _Layer
 from widgets import rotate_indices          # #85/#93 all-around sprite rotation
 
+# The logical buttons a CART may read (moy SPEC.md 7.3) -- host twin:
+# runtime/host_api.py. This board's InputState carries x/y/select/start/save/
+# share/stop/home besides; those are the console's, not a cart's. "home" most
+# of all: §7.3 gives exit to the HOST, so the cart never sees it.
+CART_BUTTONS = ("left", "right", "up", "down", "a", "b", "run")
+
 
 def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
              pmem=None, wifi=None, images=None, scenes=None, tables=None,
@@ -373,11 +379,15 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
     _prouter = getattr(input, "players", None)
 
     def btn(name, player=0):
+        if name not in CART_BUTTONS:
+            return False
         if player:
             return _prouter.held(name, player) if _prouter is not None else False
         return input.held(name)
 
     def btnp(name, player=0):
+        if name not in CART_BUTTONS:
+            return False
         if player:
             return _prouter.pressed(name, player) if _prouter is not None else False
         return input.pressed(name)

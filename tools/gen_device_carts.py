@@ -25,6 +25,11 @@ import json
 import os
 import sys
 
+# moy_carts.CART_FORMAT, inlined because this script is deliberately stdlib-only
+# (it runs under whatever Python the build has, with no repo on sys.path). Only a
+# manifest declaring something ELSE needs baking -- see build_carts.
+DEFAULT_FORMAT = "moybyte-cart-v1"
+
 # Launcher order on the device. Adding a system cart means adding it here (this
 # tiny ordered list is the only thing still maintained by hand -- vs. the ~1800
 # lines of duplicated cart bodies it replaces).
@@ -84,6 +89,11 @@ def build_carts(system_carts_dir):
             "version": int(man.get("version", 0)),
             "src": _read(os.path.join(base, man.get("main", "main.py"))),
         }
+        if man.get("format") and man["format"] != DEFAULT_FORMAT:
+            # The device REGENERATES each seeded manifest from this blob (the host
+            # copies the folder instead), so a non-default format has to ride along
+            # or the two tiers disagree about what the cart is.
+            cart["format"] = man["format"]
         if man.get("runtime", "python") != "python":
             # #67 dual-runtime seam: a lua built-in seeds/loads with its runtime +
             # main filename intact (defaults stay implicit to keep the blob lean).
@@ -91,6 +101,8 @@ def build_carts(system_carts_dir):
             cart["main"] = man.get("main", "main.py")
         if man.get("fps"):                 # frame pacing (#63): "fps": 60 opt-out
             cart["fps"] = int(man["fps"])
+        if man.get("icon"):                # launcher icon tiles (SPEC.md 3.4)
+            cart["icon"] = man["icon"]
         sheet = os.path.join(base, "sprites.moygfx")
         if os.path.exists(sheet):
             cart["sprites"] = _read(sheet)

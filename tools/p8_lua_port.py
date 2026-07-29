@@ -47,7 +47,8 @@ for p in (_THIS_DIR, _REPO_ROOT):
         sys.path.insert(0, p)
 
 from import_p8 import (  # noqa: E402  -- the #36 importer's converters, reused
-    read_p8, _title_from, gfx_to_kgfx, sfx_music_to_sounds, music_start_map)
+    read_p8, _title_from, gfx_to_kgfx, icon_tile, sfx_music_to_sounds,
+    music_start_map)
 
 
 # --------------------------------------------------------------------------
@@ -544,9 +545,9 @@ def data_tables_lua(sections):
     return "\n".join(lines)
 
 
-def build_manifest(title):
-    return {
-        "format": "moybyte-cart-v1",
+def build_manifest(title, icon=None):
+    man = {
+        "format": "moy-1",
         "version": 1,
         "title": title,
         "type": "game",
@@ -560,6 +561,13 @@ def build_manifest(title):
         "edit": [],
         "ported_from": "pico-8",
     }
+    if icon is not None:
+        # SPEC.md 3.4: the tiles a launcher shows the cart by. p8 has no icon
+        # field, so this is the sheet's first non-blank tile (see icon_tile) --
+        # without it a ported cart falls back to tile 0, which the p8 convention
+        # leaves EMPTY, i.e. every ported cart would show a blank square.
+        man["icon"] = [icon, 1, 1]
+    return man
 
 
 def port(p8_path, out_dir, title=None):
@@ -605,7 +613,7 @@ def port(p8_path, out_dir, title=None):
             json.dump(sounds, f)
 
     with open(os.path.join(out_dir, "manifest.json"), "w", encoding="utf-8") as f:
-        json.dump(build_manifest(title), f, indent=2)
+        json.dump(build_manifest(title, icon_tile(kgfx)), f, indent=2)
         f.write("\n")
     return out_dir
 

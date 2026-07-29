@@ -292,7 +292,7 @@ class Achievements:
 
 
 class Pmem:
-    """A cart's persistent memory: 256 x 32-bit unsigned ints, TIC-80 pmem().
+    """A cart's persistent memory: 256 x SIGNED 32-bit ints, TIC-80 pmem().
 
     Backend-agnostic (host + device share this). The Workstation builds one per
     cart from moy_carts.load_pmem and injects its `cell` accessor into make_api as
@@ -305,7 +305,13 @@ class Pmem:
     pmem(i, v) with the same value every frame stays clean."""
 
     CELLS = 256
+    # A slot holds a SIGNED 32-bit integer -- exactly what SPEC.md 4.2 makes a Lua
+    # integer, which is where every value comes from and goes back to. Storing
+    # unsigned (as this did) meant pmem(i, -1) read back 4294967295: wrong for a
+    # python cart, and not even representable in a LUA_32BITS int, so a lua cart
+    # could not round-trip a negative score at all.
     MASK = 0xFFFFFFFF
+    SIGN = 0x80000000
 
     def __init__(self, cells=None, on_write=None):
         # `cells` is the loaded list (already 256 long from moy_carts.load_pmem);
@@ -323,6 +329,8 @@ class Pmem:
         if value is None:
             return self.cells[i]
         v = int(value) & self.MASK
+        if v >= self.SIGN:              # wrap into the signed range, like the VM
+            v -= self.MASK + 1
         if self.cells[i] != v:
             self.cells[i] = v
             self._dirty = True

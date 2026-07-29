@@ -49,7 +49,7 @@ def test_letter_blitz_folder_present_and_valid():
     assert (d / "manifest.json").is_file()
     assert (d / "main.py").is_file()
     man = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
-    assert man["format"] == "moybyte-cart-v1"
+    assert man["format"] == "moy-1"          # SPEC.md 3.1
     assert man["type"] == "game"
     assert man["main"] == "main.py"
     assert man["edit"], "no Make-it-mine cards"

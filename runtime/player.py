@@ -98,7 +98,22 @@ PMEM_FLUSH_MS = 60000
 # The optional features this build implements (moy SPEC.md 10). A cart whose
 # manifest "extensions" lists anything else is REFUSED at start -- the clean
 # §10 decline, never a mid-frame crash on a missing verb.
-SUPPORTED_EXTENSIONS = ("layers", "viewport")
+#
+# The first two are the spec's STANDARD extensions. The rest are moybyte's own,
+# namespaced `vendor.feature` exactly as §10 requires so they can never collide
+# with a future standard name -- a cart declaring one is non-portable by
+# construction, which is the honest trade its author is making. Before this
+# list existed the gate refused every namespaced name, so a cart that truthfully
+# declared what it used was rejected by the one console that implements it.
+SUPPORTED_EXTENSIONS = (
+    "layers",             # §10 standard: make_layer / draw_layer / background
+    "viewport",           # §10 standard: view(w, h)
+    "moybyte.scenes",     # #85/#109: scene/load_scene + the actor world
+    "moybyte.docs",       # #78 Desk Lab interop: table(name) / text(name)
+    "moybyte.images",     # #63: image(name) / Image paint-image assets
+    "moybyte.net",        # #65: net.send / on_net (also permission-gated)
+    "moybyte.wifi",       # #38: the injected wifi service (permission-gated)
+)
 
 
 def _ticks_ms():
