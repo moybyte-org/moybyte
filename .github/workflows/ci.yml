@@ -28,10 +28,10 @@ jobs:
       # Nothing in the suite needs a real display: pygame is imported lazily
       # everywhere (moybyte_sim/pygame_backend.PygameBackend.__init__,
       # runtime/host_app.py's PygameAudio) and every call site falls back to
-      # headless/silent if init fails, and `.[dev]` doesn't even install
-      # pygame (that's the `sim` extra). Pin the dummy SDL drivers anyway as
-      # cheap insurance in case a future test path pulls pygame in for real --
-      # a headless runner should never hang waiting on a display/audio device.
+      # headless/silent if init fails. `make setup` DOES install pygame now
+      # (the sim extra, so a fresh clone can run the simulator), so pin the
+      # dummy SDL drivers: a headless runner should never hang waiting on a
+      # display/audio device if a test path pulls pygame in for real.
       SDL_VIDEODRIVER: dummy
       SDL_AUDIODRIVER: dummy
 

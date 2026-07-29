@@ -58,6 +58,21 @@ DEMO_SCRIPT = (
 )
 
 
+def _require(module, package, what, extra, hint=""):
+    """Import a lazily-needed third-party module, or exit with a readable hint.
+
+    These deps are optional on purpose (the headless/scripted paths need neither),
+    so a missing one used to surface as a bare ModuleNotFoundError traceback on the
+    very first command a new developer runs. Say what to install instead.
+    """
+    try:
+        return __import__(module)
+    except ImportError:
+        sys.exit("error: %s needs %s, which is not installed.\n"
+                 "  install it:  %s -m pip install -e '.[%s]'   (or: make setup)%s"
+                 % (what, package, sys.executable, extra, hint))
+
+
 def _coerce(value):
     for cast in (int, float):
         try:
@@ -100,6 +115,7 @@ def run_script(driver, actions, dt):
 
 
 def save_gif(images, path, scale):
+    _require("PIL", "pillow", "--gif", "dev")
     from PIL import Image
 
     frames = []
@@ -128,7 +144,9 @@ def _open_named_cart(ws, cart_path, carts_dir):
 
 
 def run_live(driver, dt, scale):
-    import pygame
+    pygame = _require("pygame", "pygame", "the live simulator window", "sim",
+                      "\n  or run it headless:  %s %s --demo"
+                      % (os.path.basename(sys.executable), sys.argv[0]))
 
     cv = driver.current_canvas()
     w, h = cv.w, cv.h

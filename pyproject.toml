@@ -11,11 +11,21 @@ requires-python = ">=3.10"
 dependencies = []
 
 [project.optional-dependencies]
+# `make setup` installs dev + sim: the test suite and the simulator window are
+# what a fresh clone is expected to be able to run.
 dev = [
   "pytest",
+  "pillow",       # GIF export: tools/make_site_gifs.py + simulate_desktop.py --gif
 ]
 sim = [
-  "pygame>=2.5",
+  "pygame>=2.5",  # the live simulator window (tools/simulate_desktop.py, moybyte run)
+]
+# Flashing/monitoring a real board. NOT installed by `make setup` -- it needs
+# hardware, and the T-Deck targets use the ESP-IDF toolchain's python instead.
+device = [
+  "esptool>=4.7,<5",   # tools/esptool_no_modem.py patches esptool 4.x internals
+  "pyserial>=3.5",     # serial monitor + tools/p4_autotest.py (on-glass tests)
+  "mpremote",          # firmware/seeed_xiao_esp32s3_zero/stage.sh
 ]
 
 [project.scripts]

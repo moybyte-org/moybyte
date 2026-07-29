@@ -28,11 +28,42 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: setup test run-example run-headless compile-blocks site-gifs doctor check-portable pack-example export-lilygo-example device-doctor device-port firmware-bundle-lilygo firmware-build-lilygo firmware-build-lilygo-micropython firmware-sim-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-build-p4 firmware-flash-p4 firmware-monitor-p4 firmware-stage-xiao-zero firmware-upload-lilygo firmware-monitor-lilygo firmware-smoke-check-lilygo firmware-smoke-lilygo ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install sync-issues
+.PHONY: setup test run-example run-headless compile-blocks site-gifs doctor check-portable pack-example export-lilygo-example device-doctor device-port firmware-build-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-build-p4 firmware-flash-p4 firmware-monitor-p4 firmware-stage-xiao-zero ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install sync-issues check-venv
 
+# A PLAIN venv on purpose. Two flags used to live here and both hid bugs on every
+# machine but the maintainer's:
+#   --system-site-packages   leaked the host's pygame/wheel in, so missing deps only
+#                            showed up on a clean machine.
+#   --no-build-isolation     forbade pip from fetching a build backend, so the stock
+#                            venv setuptools (59.6 on 3.10, absent on 3.12+) failed
+#                            with "invalid command 'bdist_wheel'".
+# `sim` is installed too: tools/simulate_desktop.py (the first thing a new dev runs)
+# needs pygame.
 setup:
-	$(SYSTEM_PYTHON) -m venv --system-site-packages $(VENV)
-	$(PYTHON) -m pip install --no-build-isolation -e '.[dev]'
+	$(SYSTEM_PYTHON) -m venv $(VENV)
+	$(PYTHON) -m pip install -e '.[dev,sim]'
+
+# Without this, every venv-backed target below dies with a bare
+# "/bin/sh: .venv/bin/python: No such file or directory".
+check-venv:
+	@test -x $(PYTHON) || { echo "no venv at $(VENV)/ -- run: make setup"; exit 1; }
+
+VENV_TARGETS := test doctor device-doctor device-port run-example run-headless \
+                compile-blocks site-gifs check-portable sync-issues pack-example \
+                export-lilygo-example ota-manifest ota-serve ota-publish-unstable \
+                ota-publish-stable ota-host ota-serve-install firmware-flash-p4 \
+                firmware-monitor-p4
+$(VENV_TARGETS): check-venv
+
+# Flashing/monitoring needs a board on a serial port, and the T-Deck images need the
+# ESP-IDF 5.5 toolchain. Both are legitimately environment-dependent -- say which
+# piece is missing instead of failing with a bare `test` or "No such file".
+REQUIRE_PORT = @test -n "$(PORT)" || { echo "PORT is not set -- e.g. make $@ PORT=/dev/ttyACM0 (try: make device-port)"; exit 1; }
+REQUIRE_IDF = @test -x $(IDF_PYTHON) || { echo "no ESP-IDF python at $(IDF_PYTHON) -- install the ESP-IDF 5.5 toolchain (see $(MPY_FW_DIR)/README.md) or pass IDF_PYTHON=..."; exit 1; }
+# esptool/pyserial are the `device` extra: `make setup` does not install them
+# because flashing needs hardware. The P4 targets run them from the project venv.
+REQUIRE_ESPTOOL = @$(PYTHON) -c "import esptool" >/dev/null 2>&1 || { echo "esptool is not installed -- run: $(PYTHON) -m pip install -e '.[device]'"; exit 1; }
+REQUIRE_PYSERIAL = @$(PYTHON) -c "import serial" >/dev/null 2>&1 || { echo "pyserial is not installed -- run: $(PYTHON) -m pip install -e '.[device]'"; exit 1; }
 
 test:
 	$(PYTHON) -m pytest
@@ -69,6 +100,13 @@ sync-issues:
 
 pack-example:
 	$(MOYBYTE) pack examples/tiny_runner.moyproj --out /tmp/tiny_runner.kc8
+
+# CI's "Export LilyGO bundle" step calls this. The recipe was dropped with the
+# Arduino firmware (93ea075) but the name stayed in .PHONY, so make answered
+# "Nothing to be done" and the step silently passed for free. The CLI verb it
+# exercises (`moybyte export-device`) is still here, so the target is too.
+export-lilygo-example:
+	$(MOYBYTE) export-device examples/tiny_runner.moyproj --board lilygo_t_deck_plus --out /tmp/moybyte_lilygo_t_deck_plus
 
 firmware-build-lilygo-micropython:
 	bash firmware/lilygo_t_deck_plus_micropython/build.sh
@@ -118,28 +156,34 @@ ota-serve-install:
 	@echo "OTA host: serving $(OTA_ROOT) on :$(OTA_PORT) (systemd --user moybyte-ota)"
 
 firmware-flash-lilygo-micropython:
-	test -n "$(PORT)"
+	$(REQUIRE_PORT)
+	$(REQUIRE_IDF)
 	@[ -z "$(MPY_OTADATA_OFFSET)" ] || $(IDF_PYTHON) tools/esptool_no_modem.py --chip esp32s3 -p $(PORT) -b 460800 --before default_reset --after no_reset erase_region $(MPY_OTADATA_OFFSET) $(MPY_OTADATA_SIZE)
 	$(IDF_PYTHON) tools/esptool_no_modem.py --chip esp32s3 -p $(PORT) -b 460800 --before default_reset --after hard_reset write_flash --flash_mode dio --flash_size 16MB --flash_freq 80m 0x0 $(MPY_BUILD_DIR)/bootloader/bootloader.bin 0x8000 $(MPY_BUILD_DIR)/partition_table/partition-table.bin $(MPY_APP_OFFSET) $(MPY_APP_BIN)
 
 firmware-flash-lilygo-micropython-no-reset:
-	test -n "$(PORT)"
+	$(REQUIRE_PORT)
+	$(REQUIRE_IDF)
 	$(IDF_PYTHON) tools/esptool_no_modem.py --chip esp32s3 -p $(PORT) -b 460800 --before no_reset --after no_reset write_flash --flash_mode dio --flash_size 16MB --flash_freq 80m 0x0 $(MPY_BUILD_DIR)/bootloader/bootloader.bin 0x8000 $(MPY_BUILD_DIR)/partition_table/partition-table.bin $(MPY_APP_OFFSET) $(MPY_APP_BIN)
 
 firmware-flash-lilygo-micropython-full:
-	test -n "$(PORT)"
+	$(REQUIRE_PORT)
+	$(REQUIRE_IDF)
 	$(IDF_PYTHON) tools/esptool_no_modem.py --chip esp32s3 -p $(PORT) -b 460800 --before default_reset --after hard_reset write_flash 0x0 $(MPY_FULL_BIN)
 
 firmware-flash-lilygo-micropython-full-erase:
-	test -n "$(PORT)"
+	$(REQUIRE_PORT)
+	$(REQUIRE_IDF)
 	$(IDF_PYTHON) tools/esptool_no_modem.py --chip esp32s3 -p $(PORT) -b 460800 --before no_reset --after hard_reset write_flash --flash_mode $(MPY_FLASH_MODE) --flash_size 16MB --flash_freq 80m --erase-all 0x0 $(MPY_FULL_BIN)
 
 firmware-run-lilygo-micropython:
-	test -n "$(PORT)"
+	$(REQUIRE_PORT)
+	$(REQUIRE_IDF)
 	$(IDF_PYTHON) tools/esptool_no_modem.py --chip esp32s3 -p $(PORT) --before no_reset --after hard_reset --no-stub run
 
 firmware-monitor-lilygo-micropython:
-	test -n "$(PORT)"
+	$(REQUIRE_PORT)
+	$(REQUIRE_IDF)
 	$(IDF_PYTHON) -m serial.tools.miniterm $(PORT) 115200
 
 # ESP32-P4 (Waveshare 7B, #58): mainline-MicroPython build via the board dir's
@@ -152,11 +196,13 @@ firmware-build-p4:
 	firmware/esp32_p4_wifi6_touch_lcd_7b/build.sh
 
 firmware-flash-p4:
-	test -n "$(PORT)"
+	$(REQUIRE_PORT)
+	$(REQUIRE_ESPTOOL)
 	$(PYTHON) -m esptool --chip esp32p4 --port $(PORT) --baud 921600 write_flash 0x2000 $(P4_BIN)
 
 firmware-monitor-p4:
-	test -n "$(PORT)"
+	$(REQUIRE_PORT)
+	$(REQUIRE_PYSERIAL)
 	$(PYTHON) -m serial.tools.miniterm $(PORT) 115200
 
 # MoyByte Zero (Seeed XIAO ESP32-S3): pure-Python, no native build. One-time flash of stock

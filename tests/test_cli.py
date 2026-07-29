@@ -5,8 +5,17 @@ def test_cli_doctor(capsys):
     result = main(["doctor"])
     captured = capsys.readouterr()
 
-    assert result == 0
     assert "Moybyte doctor" in captured.out
+    assert "python: " in captured.out
+    # Doctor reports on THIS environment, so its exit code depends on it: 0 when
+    # everything `make setup` installs is importable, 1 with a remedy line when
+    # something the docs promise is missing (asserting a hard 0 would make the
+    # suite pass only on a fully-provisioned machine).
+    if "MISSING" in captured.out:
+        assert result == 1
+        assert "make setup" in captured.out
+    else:
+        assert result == 0
 
 
 def test_cli_validate(capsys):

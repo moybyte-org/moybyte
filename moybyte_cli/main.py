@@ -27,16 +27,72 @@ def _display_path(path):
     return rel
 
 
+# (module, label, what it is for). REQUIRED = installed by `make setup` (the
+# dev + sim extras); OPTIONAL = extras you only need for a specific job.
+_REQUIRED_MODULES = [
+    ("pytest", "pytest", "make test"),
+    ("pygame", "pygame", "the simulator window (`.[sim]`)"),
+    ("PIL", "pillow", "GIF export: --gif / make site-gifs"),
+]
+_OPTIONAL_MODULES = [
+    ("lupa", "lupa", "host-side Lua carts; tests/test_lua_*.py skip without it"),
+    ("esptool", "esptool", "flashing a board (`.[device]`)"),
+    ("serial", "pyserial", "serial monitor / on-glass tests (`.[device]`)"),
+]
+
+
+def _probe_module(name):
+    """Import a module quietly; return (version, file) or None."""
+    os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
+    try:
+        module = __import__(name)
+    except Exception:
+        return None
+    return (str(getattr(module, "__version__", "?")), getattr(module, "__file__", "") or "")
+
+
 def _cmd_doctor(_args):
     print("Moybyte doctor")
-    print("Python: " + sys.version.split()[0])
-    try:
-        os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
-        import pygame  # noqa: F401
+    print("python: " + sys.version.split()[0] + " (" + sys.executable + ")")
 
-        print("pygame: available")
-    except Exception:
-        print("pygame: not installed (headless simulator is available)")
+    # The venv itself is a check: `--system-site-packages` lets a dependency that
+    # only exists on THIS machine look installed, which is how the simulator
+    # shipped for a long time without pygame ever being installed by `make setup`.
+    in_venv = sys.prefix != getattr(sys, "base_prefix", sys.prefix)
+    leaky = False
+    if in_venv:
+        try:
+            with open(os.path.join(sys.prefix, "pyvenv.cfg")) as handle:
+                leaky = "include-system-site-packages = true" in handle.read()
+        except OSError:
+            pass
+        print("venv: " + sys.prefix + (" [inherits system site-packages]" if leaky else ""))
+        if leaky:
+            print("  warning: packages from outside this venv are visible here, so a")
+            print("  dependency can look installed when a clean machine would not have")
+            print("  it. `make setup` builds a plain venv -- consider re-running it.")
+    else:
+        print("venv: none (system python) -- the docs assume ./.venv, see `make setup`")
+
+    missing = []
+    for name, label, why in _REQUIRED_MODULES:
+        found = _probe_module(name)
+        if found is None:
+            missing.append(label)
+            print(label + ": MISSING -- needed for " + why)
+        else:
+            version, path = found
+            outside = in_venv and path and not path.startswith(sys.prefix + os.sep)
+            print(label + ": " + version + (" [outside the venv: " + path + "]" if outside else ""))
+    for name, label, why in _OPTIONAL_MODULES:
+        found = _probe_module(name)
+        print(label + ": " + (found[0] if found else "not installed") + " (optional -- " + why + ")")
+
+    if missing:
+        print("")
+        print("missing: " + ", ".join(missing))
+        print("  fix: " + sys.executable + " -m pip install -e '.[dev,sim]'   (or: make setup)")
+        return 1
     return 0
 
 
@@ -158,14 +214,18 @@ def _cmd_run(args):
     if args.scale is not None and args.scale <= 0:
         print("--scale must be greater than zero", file=sys.stderr)
         return 2
-    context = run_project(
-        args.project,
-        headless=args.headless,
-        frames=args.frames,
-        entry=args.entry,
-        fps=args.fps,
-        scale=args.scale,
-    )
+    try:
+        context = run_project(
+            args.project,
+            headless=args.headless,
+            frames=args.frames,
+            entry=args.entry,
+            fps=args.fps,
+            scale=args.scale,
+        )
+    except RuntimeError as exc:   # no simulator window available -- say so, don't traceback
+        print("error: " + str(exc), file=sys.stderr)
+        return 3
     print("ran: " + context.manifest.id + " frames=" + str(context.frame))
     if context.audio.calls:
         print("audio calls:")

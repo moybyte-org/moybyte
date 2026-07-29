@@ -37,11 +37,21 @@ commercial licensing. PRs without sign-off can't be merged.
 
 ## Development
 
+Python 3.10+ is all you need for the host side — no toolchain, no device.
+
 ```bash
-make setup          # venv + editable install
+make setup          # .venv + editable install (the dev + sim extras)
 make test           # pytest — must pass
 make check-portable # if you touched examples/ or the .moyproj SDK
+
+.venv/bin/python tools/simulate_desktop.py   # the console itself, on your PC
+make doctor         # environment sanity check, if something looks off
 ```
+
+`make setup` installs everything the tests and the simulator need. Flashing a
+board needs more: `.venv/bin/python -m pip install -e '.[device]'` (esptool,
+pyserial, mpremote) and, for the T-Deck/P4 images, the ESP-IDF 5.5 toolchain —
+see the per-board READMEs under `firmware/`.
 
 - Working orientation for the codebase lives in `CLAUDE.md` (humans: it's the
   best map of the repo, not just for AI tools).
