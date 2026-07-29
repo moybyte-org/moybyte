@@ -5,9 +5,18 @@
 -- and typo squiggles on every console verb. The behavioural contract is the
 -- moy spec (SPEC.md); one line here per verb, the spec is the truth.
 --
+-- Every verb below is CORE (runs on any conforming console) unless marked:
+--   EXTENSION: <name> -- standard extension (SPEC.md 10); declare it in your
+--                        manifest's "extensions" or hosts may lack it
+--   DRAFT 6.1         -- provisional (SPEC.md 6.1): exists in the reference
+--                        player, names/signatures still moving, NOT core 0.1
+--   VENDOR            -- reference-console feature, no spec; a cart using it
+--                        is non-portable by construction
+--
 -- Screen: 320x240, palette-indexed (64 colours, indices 0-63; 0-15 are the
--- classic base 16). Origin top-left, +x right, +y down. A cart defines up to
--- three globals the console calls: _init(), _update(dt), _draw().
+-- classic base 16). Sheet: 512 8x8 tiles (16 per row). Origin top-left,
+-- +x right, +y down. A cart defines up to three globals the console calls:
+-- _init(), _update(dt), _draw().
 
 ---Screen width in pixels (320).
 W = 320
@@ -66,7 +75,7 @@ function circ(cx, cy, r, c) end
 ---@param c integer
 function circb(cx, cy, r, c) end
 
----Filled triangle.
+---Filled triangle. DRAFT 6.1.
 ---@param x1 integer
 ---@param y1 integer
 ---@param x2 integer
@@ -76,7 +85,7 @@ function circb(cx, cy, r, c) end
 ---@param c integer
 function tri(x1, y1, x2, y2, x3, y3, c) end
 
----Triangle outline.
+---Triangle outline. DRAFT 6.1.
 ---@param x1 integer
 ---@param y1 integer
 ---@param x2 integer
@@ -87,7 +96,7 @@ function tri(x1, y1, x2, y2, x3, y3, c) end
 function trib(x1, y1, x2, y2, x3, y3, c) end
 
 ---Draw MANY filled rects in one call (the fast lane for software 3D /
----particle fields). `items` is FLAT: x, y, w, h, c repeated.
+---particle fields). `items` is FLAT: x, y, w, h, c repeated. DRAFT 6.1.
 ---@param items number[]|userdata flat quints, or a spans() buffer
 ---@param n? integer how many quints to read (-1 = all)
 ---@param ox? integer x offset applied to every rect
@@ -96,7 +105,7 @@ function trib(x1, y1, x2, y2, x3, y3, c) end
 function rect_batch(items, n, ox, oy, c) end
 
 ---rect_batch told as COLUMNS: same pixels, the console walks memory
----column-wise -- use for tall thin spans (raycaster walls).
+---column-wise -- use for tall thin spans (raycaster walls). DRAFT 6.1.
 ---@param items number[]|userdata
 ---@param n? integer
 ---@param ox? integer
@@ -105,7 +114,7 @@ function rect_batch(items, n, ox, oy, c) end
 function col_batch(items, n, ox, oy, c) end
 
 ---A reusable int16 buffer for rect_batch/col_batch: n*5 slots (x,y,w,h,c per
----span). Allocate ONCE in _init, refill by index each frame.
+---span). Allocate ONCE in _init, refill by index each frame. DRAFT 6.1.
 ---@param n integer span capacity
 ---@return userdata
 function spans(n) end
@@ -128,7 +137,7 @@ function spr(n, x, y, colorkey, scale, flip) end
 function spr_batch(items, colorkey, scale) end
 
 ---Stretch-blit a sheet PIXEL region (sx,sy,sw,sh) to a dw x dh screen rect --
----arbitrary (non-integer) scaling; the textured-slice verb.
+---arbitrary (non-integer) scaling; the textured-slice verb. DRAFT 6.1.
 ---@param sx integer sheet pixel x
 ---@param sy integer sheet pixel y
 ---@param sw integer
@@ -197,14 +206,16 @@ function pal(c0, c1) end
 function palt(c, on) end
 
 ---Resolve a colour name ("red", "sky", ...) or index to a palette index.
+---VENDOR: names describe the DEFAULT table only (a cart-supplied palette
+---renames every slot), so this stays out of the spec -- use plain indices.
 ---@param name_or_index string|integer
 ---@return integer
 function col(name_or_index) end
 
 -- --- input ------------------------------------------------------------------
 
----Is a button held this frame? Names: "left" "right" "up" "down" "a" "b"
----"run" "home".
+---Is a button held this frame? Names: "left" "right" "up" "down" "a" "b",
+---plus "run" on hosts that have it (SPEC.md 7.3).
 ---@param name string
 ---@param player? integer extra controller slot (default 0 = the console)
 ---@return boolean
@@ -225,6 +236,7 @@ function players() end
 function touch() end
 
 ---Mouse state, TIC-80-shaped: x, y, left, middle, right, scrollx, scrolly.
+---VENDOR: use touch() for portable pointer input.
 ---@return integer x, integer y, boolean left, boolean middle, boolean right, integer sx, integer sy
 function mouse() end
 
@@ -280,6 +292,7 @@ function quit() end
 
 ---Declare a logical viewport: the console scales the centered w x h region of
 ---the canvas to the screen (a 128x128 game fills the display). view() resets.
+---EXTENSION: viewport.
 ---@param w? integer
 ---@param h? integer
 function view(w, h) end
@@ -331,23 +344,29 @@ function MoyLayer:cls(c) end
 
 ---An off-screen canvas (w x h, may be wider than the screen): pre-render a
 ---level ONCE, then window-copy per frame with draw_layer -- the 60fps
----scroller pattern.
+---scroller pattern. EXTENSION: layers.
 ---@param w integer
 ---@param h integer
 ---@return MoyLayer
 function make_layer(w, h) end
 
 ---Blit the visible window of `layer` at camera offset (cam_x, cam_y).
+---EXTENSION: layers.
 ---@param layer MoyLayer
 ---@param cam_x? integer
 ---@param cam_y? integer
 function draw_layer(layer, cam_x, cam_y) end
 
+---Declare a backdrop the console repaints automatically each frame -- a
+---colour index, or a layer to pin behind everything. EXTENSION: layers.
+---@param x integer|MoyLayer
+function background(x) end
+
 ---@class MoyImage
 local MoyImage = {}
 
 ---The cart's painted image asset images/<name>.moyimg as a drawable handle
----(place with a layer's l:spr(img, x, y)), or nil if absent.
+---(place with a layer's l:spr(img, x, y)), or nil if absent. VENDOR.
 ---@param name string
 ---@return MoyImage?
 function image(name) end
@@ -356,12 +375,12 @@ function image(name) end
 
 ---Rows of the cart's tables/<name>.moysheet (numbers as numbers, text as
 ---strings, blank cells ""). Missing -> {}. NB: `table` stays Lua's table
----library; this verb rides it as a call: table("scores").
+---library; this verb rides it as a call: table("scores"). VENDOR.
 ---@param name string
 ---@return table
 ---@overload fun(name: string): table
 
----Lines of the cart's docs/<name>.moytext. Missing -> {}.
+---Lines of the cart's docs/<name>.moytext. Missing -> {}. VENDOR.
 ---@param name string
 ---@return string[]
 function text(name) end
