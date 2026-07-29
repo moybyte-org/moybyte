@@ -26,6 +26,8 @@ whatever is in the developer's own ~/.moybyte store.
     python tools/make_site_gifs.py                 # all -> docs/media/*.gif
     python tools/make_site_gifs.py --scene code    # just one
     python tools/make_site_gifs.py --scale 3 --fps 20
+    python tools/make_site_gifs.py --windowed --out docs/media/desktop \
+        --wallpaper open_machine --scene paint     # the desktop tier's set
 """
 
 import argparse
@@ -69,12 +71,23 @@ def _c(rect):
 class Recorder:
     """Boots the console and records frames while a scripted cursor taps real UI."""
 
-    def __init__(self, fps, carts_dir, sys_size=None, font_scale=1, windowed=False):
+    def __init__(self, fps, carts_dir, sys_size=None, font_scale=1, windowed=False,
+                 wallpaper=None):
         self.dt = 1.0 / fps
         self.ws = host_app.build_workstation(carts_dir, sys_size=sys_size,
                                              font_scale=font_scale,
                                              windowed=windowed)
         self.carts_dir = carts_dir
+        # The desktop BACKDROP is a wallpaper-type cart chosen by slug (#28) -- the
+        # same id the Appearance app persists, so `--wallpaper open_machine` records
+        # exactly what a kid who picked it would see. None keeps the boot default
+        # (the first wallpaper cart in the store). persist=False: a recording must
+        # not depend on -- or leave -- a system.json, and the store is a temp dir.
+        if wallpaper:
+            self.ws.select_wallpaper(wallpaper, persist=False)
+            if self.ws.wallpaper_id != wallpaper:
+                raise SystemExit("no such wallpaper: %s (have: %s)"
+                                 % (wallpaper, ", ".join(self.ws.wallpaper_options())))
         # The WINDOWED desktop tier (wm_windowed.WindowedWM): every geometry
         # helper below then resolves inside the active window's layout context
         # and translates to desktop coordinates -- see `local()`.
@@ -515,6 +528,10 @@ def main():
     ap.add_argument("--size", default=None, metavar="WxH",
                     help="system canvas size (default 320x240; 1024x600 windowed)")
     ap.add_argument("--font-scale", type=int, default=1, dest="font_scale")
+    ap.add_argument("--wallpaper", default=None, metavar="SLUG",
+                    help="desktop backdrop: a wallpaper cart's slug (its folder name "
+                         "without .moy, e.g. open_machine / moy_night) or a "
+                         "\"fill:<color>\" built-in; default = the store's first")
     args = ap.parse_args()
     size = None
     if args.size:
@@ -531,7 +548,8 @@ def main():
         carts = tempfile.mkdtemp(prefix="moybyte-gif-")
         try:
             rec = Recorder(args.fps, carts, sys_size=size,
-                           font_scale=args.font_scale, windowed=args.windowed)
+                           font_scale=args.font_scale, windowed=args.windowed,
+                           wallpaper=args.wallpaper)
             save_gif(SCENES[name](rec),
                      os.path.join(args.out, "%s.gif" % name), scale, args.fps)
         finally:
