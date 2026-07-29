@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 6,
+  "version": 7,
   "title": "Pixel Pet",
   "type": "game",
   "runtime": "python",
