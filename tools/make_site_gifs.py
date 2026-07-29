@@ -1,41 +1,51 @@
 #!/usr/bin/env python3
-"""Generate the teaser-site demo GIFs from the REAL shared console (headless).
+"""Generate the README's demo GIFs from the REAL shared console (headless).
 
-Drives `runtime/host_app` (the same Workstation the T-Deck runs) with a scripted,
-*visible* cursor that taps real controls, and records short animated GIFs telling
-the "three ages of making" story, plus a paint gag:
+Drives `runtime/host_app` (the same `Workstation` the T-Deck runs) with a scripted,
+*visible* cursor that taps real controls, and records short animated GIFs of the
+v0.5 shell:
 
-  tap    (age ~5)  open a game -> EDIT -> tap the CATCHER property -> GO ->
-                    the character changes.
-  blocks (age ~7)  open the block editor -> tap ADD -> snap a new block in.
-  code   (age ~12) EDIT -> tap CODE -> change SPR_SCALE 4 -> 16 -> RUN ->
-                    the character grows.
-  paint            open the paint editor -> draw on the sprite -> back to the
-                    game, the character wears it.
+  paint   open the Editor on Pixel Pet -> SPRITES tab -> paint a smile on the
+          pet's tile -> PLAY -> the pet is wearing it in the running game.
+  code    open the Editor on Star Catcher -> CODE tab -> retype a constant ->
+          PLAY -> the change is on screen.
+  blocks  open the Editor on Tap Game -> BLOCKS tab -> snap a new block into the
+          program -> CODE tab -> the same block, compiled to Python.
+  tap     (not in the README) the Config "Make it mine" cards: pick another pet,
+          PLAY, the game runs the new one.
 
-Re-runnable any time the console changes so the site footage tracks the latest
-look (`make site-gifs`). Interactions use REAL clicks through handle_pointer;
-control rects are read from the console module / live layout objects, so they
-stay correct across versions (only a few fixed coords remain, noted inline).
+Re-runnable any time the console changes so the README footage tracks the latest
+look (`make site-gifs`). Interactions are REAL taps through handle_pointer and
+real typed keys through the driver; every control rect is read from the live
+layout objects (the Editor's lent bar zone, PaintLayout, CodeLayout, BlockLayout),
+so they stay correct across versions.
 
-    python tools/make_site_gifs.py                 # all -> site/media/*.gif
+The recording runs in a throwaway carts dir, so it never shows -- or disturbs --
+whatever is in the developer's own ~/.moybyte store.
+
+    python tools/make_site_gifs.py                 # all -> docs/media/*.gif
     python tools/make_site_gifs.py --scene code    # just one
-    python tools/make_site_gifs.py --scale 2 --fps 20
+    python tools/make_site_gifs.py --scale 3 --fps 20
 """
 
 import argparse
+import json
 import os
 import shutil
 import sys
+import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-from runtime import host_app          # noqa: E402
-from runtime import console as C      # noqa: E402  (control-rect constants live here)
+from runtime import host_app            # noqa: E402
+from runtime import bar_layer as BAR    # noqa: E402  (the bar's lent-zone rect)
+from runtime import editor_app as EDA   # noqa: E402  (the Editor's tab ladder)
+from runtime import palette             # noqa: E402  (MOY64 -> the exact GIF palette)
+from runtime import widgets as WID      # noqa: E402  (the achievement catalog)
 
 SYSTEM_CARTS = os.path.join(ROOT, "system_carts")
-OUT_DIR = os.path.join(ROOT, "site", "media")
-SAVE_DIR = os.path.expanduser("~/.moybyte/projects")
+OUT_DIR = os.path.join(ROOT, "docs", "media")
+BACKSPACE = 0x08
 
 
 def _c(rect):
@@ -46,33 +56,50 @@ def _c(rect):
 class Recorder:
     """Boots the console and records frames while a scripted cursor taps real UI."""
 
-    def __init__(self, fps):
+    def __init__(self, fps, carts_dir):
         self.dt = 1.0 / fps
-        self.ws = host_app.build_workstation(SAVE_DIR)
+        self.ws = host_app.build_workstation(carts_dir)
+        self.carts_dir = carts_dir
+        # Pre-unlock every achievement. The celebration banner is real UI, but a
+        # fresh store unlocks "First Steps" on the very first open and the toast
+        # would then sit across the top of every recording's opening seconds.
+        for entry in WID.ACHIEVEMENTS:
+            self.ws.ach.unlocked[entry[0]] = True
         self.ws.pointer.idle_ms = 10 ** 9        # never auto-hide the cursor
         self.ws.pointer.visible = True
+        self.ws.show_fps = False                 # no dev chip over the payoff shot
         self.drv = host_app.ConsoleDriver(self.ws)
         self.frames = []
+        self.cursor = True
         self.cx, self.cy = 160, 120
 
     # -- frame primitives ---------------------------------------------------
-    def _tick(self, click=False, down=False, press=None):
+    def _tick(self, click=False, down=False):
         p = self.ws.pointer
-        p.x, p.y, p.visible = int(round(self.cx)), int(round(self.cy)), True
+        p.x, p.y = int(round(self.cx)), int(round(self.cy))
+        p.visible = self.cursor
         self.ws.mark_dirty()
-        if press:
-            self.drv.press(press)
         self.drv._click = click
         self.drv._down = down
         self.drv.frame(self.dt)
         cv = self.drv.current_canvas()
-        self.frames.append((cv.w, cv.h, self.drv.rgb888()))
+        cv.flush_batch()
+        # Record INDICES, not RGB: the console is an indexed surface, so the GIF
+        # can carry the MOY64 palette verbatim and skip quantization entirely.
+        self.frames.append((cv.w, cv.h, bytes(cv.buf)))
 
     def settle(self, n):
         for _ in range(n):
             self._tick()
 
-    def move_to(self, x, y, steps=18, down=False):
+    def play(self, n):
+        """Watch the running cart with the cursor parked: the payoff shot should be
+        the game, not a stray arrow sitting on the button that started it."""
+        self.cursor = False
+        self.settle(n)
+        self.cursor = True
+
+    def move_to(self, x, y, steps=14, down=False):
         x0, y0 = self.cx, self.cy
         for i in range(1, steps + 1):
             t = i / steps
@@ -81,7 +108,7 @@ class Recorder:
             self.cy = y0 + (y - y0) * t
             self._tick(down=down)
 
-    def click(self, x, y, steps=18, dwell=6, after=10):
+    def click(self, x, y, steps=14, dwell=7, after=8):
         """Glide to (x, y), pause so the target is legible, then a real tap."""
         self.move_to(x, y, steps)
         self.settle(dwell)                       # let the viewer see WHERE
@@ -89,176 +116,235 @@ class Recorder:
         self._tick(down=False)                   # release
         self.settle(after)                       # let the UI react
 
-    def stroke(self, pts):
+    def stroke(self, pts, steps=5, dwell=3):
         """A visible drag that actually paints in the paint editor."""
-        self.cx, self.cy = pts[0]
-        self.settle(3)
+        self.move_to(pts[0][0], pts[0][1])
+        self.settle(dwell)
         self._tick(click=True, down=True)
         for (x, y) in pts[1:]:
-            self.move_to(x, y, steps=7, down=True)
+            self.move_to(x, y, steps=steps, down=True)
         self._tick(down=False)
 
-    def type_keys(self, codes, per=2):
+    def type_keys(self, codes, per=3):
+        """Type through the REAL driver (queued bytes -> the console's key edge),
+        with `per` idle frames between so each keystroke reads as one press."""
         for code in codes:
-            if self.ws.editor is not None:
-                self.ws.editor.key(code)
-            self.ws.mark_dirty()
+            self.drv.type_char(code)
+            self._tick()                         # the frame that consumes it
             self.settle(per)
 
-    # -- cart -------------------------------------------------------------
-    def open_cart(self, name, autoplay=True):
-        # Always reset to the pristine system cart so scenes are deterministic
-        # (GO/edits otherwise persist config into ~/.moybyte and leak between runs).
+    # -- carts + navigation --------------------------------------------------
+    def reset_cart(self, name, cfg=None):
+        """Copy a pristine system cart into the store (so a re-run is deterministic),
+        optionally overriding its config.json, then rescan and return its entry."""
         dst = os.path.join(self.ws.carts_root, name)
         if os.path.exists(dst):
             shutil.rmtree(dst)
         shutil.copytree(os.path.join(SYSTEM_CARTS, name), dst)
-        self.ws.launcher.items = host_app.moy_carts.scan(self.ws.carts_root)
-        for i, c in enumerate(self.ws.launcher.items):
-            if os.path.basename(c["path"]) == name:
+        if cfg:
+            base = {}
+            with open(os.path.join(dst, "manifest.json"), encoding="utf-8") as f:
+                base.update(json.load(f).get("config") or {})
+            base.update(cfg)
+            with open(os.path.join(dst, "config.json"), "w", encoding="utf-8") as f:
+                json.dump(base, f)
+        items = host_app.moy_carts.scan(self.ws.carts_root)
+        self.ws._apply_items(items)
+        cart = next(c for c in self.ws._all_carts
+                    if os.path.basename(c["path"]) == name)
+        for i, it in enumerate(self.ws.launcher.items):
+            if it.get("path") == cart.get("path"):
                 self.ws.launcher.sel = i
                 break
-        orig = self.ws.open
-        def _open():
-            orig()
-            if autoplay and self.ws.cart and isinstance(self.ws.config, dict) \
-                    and "autoplay" in self.ws.config:
-                self.ws.config["autoplay"] = 1
-                self.ws._start()
-        self.ws.open = _open
-        self.ws.open()
+        return cart
+
+    def open_editor(self, cart):
+        """The Make tile -> project-picker -> pick destination, without the two
+        grid screens: land the Editor on the cart's Config tab (spec Section 6)."""
+        self.ws.open_in_editor(cart)
+
+    # -- live control geometry ----------------------------------------------
+    def zone_rect(self, tab):
+        """The rect of one icon in the Editor's lent top-bar zone (the tab ladder:
+        PROJECTS / Config / Blocks / Code / Sprites / Map / Scene / Music / UNDO /
+        REDO / PLAY). `tab` is the ladder's tab name, or None for PLAY."""
+        lay = getattr(self.ws.layout, "zone_left", None) or BAR._ZONE_LEFT_GAME
+        x0, y0, _w, h = lay
+        ic = h if h > 0 else BAR._BAR_ICON
+        for i, (name, _glyph) in enumerate(EDA._ZONE_TABS):
+            if name == tab:
+                return (x0 + i * ic, y0, ic, ic)
+        raise KeyError(tab)
+
+    def tab(self, name, **kw):
+        """Tap a tab-ladder icon (PLAY is `name=None`)."""
+        self.click(*_c(self.zone_rect(name)), **kw)
+
+    def swatch(self, idx):
+        """Center of palette swatch `idx` in the paint editor's color column."""
+        lay = self.ws.paint_layer.layout
+        return (lay.sw_x0 + (idx % lay.sw_cols) * lay.sw + lay.sw / 2.0,
+                lay.sw_y0 + (idx // lay.sw_cols) * lay.sw + lay.sw / 2.0)
+
+    def cell(self, gx, gy):
+        """Center of pixel (gx, gy) in the paint editor's zoomed sprite grid."""
+        lay = self.ws.paint_layer.layout
+        size = lay.pg_span // self.ws.paint.dim
+        return (lay.pg_x0 + (gx + 0.5) * size, lay.pg_y0 + (gy + 0.5) * size)
+
+    def block_row(self, idx):
+        """Center-left point of outline row `idx` in the block editor."""
+        bu = self.ws.block_ui
+        lay = bu.block_layout
+        area = lay.area()
+        return (area[0] + area[2] / 2.0,
+                lay.y0 + (idx - bu.blk_top + 0.5) * lay.row_h)
+
+    def pick_menu(self, item, **kw):
+        """Tap `item` in the block editor's open modal menu (a category name or a
+        block id), scrolling it into view first."""
+        bu = self.ws.block_ui
+        menu = bu.blk_menu
+        lay = bu.block_layout
+        mx, my, mw, _mh = lay.menu
+        idx = menu["items"].index(item)
+        if idx >= menu["top"] + lay.menu_rows:
+            menu["top"] = idx - lay.menu_rows + 1
+        elif idx < menu["top"]:
+            menu["top"] = idx
+        y = my + 16 * lay.fs + (idx - menu["top"] + 0.5) * lay.menu_row_h
+        self.click(mx + mw / 2.0, y, **kw)
+
+    def caret_xy(self, row, col, above=5):
+        """Screen center of character (row, col) in the code editor, scrolling the
+        view so the line sits `above` rows down from the top first."""
+        ws = self.ws
+        ed = ws.editor
+        lay = ws.code_layout
+        ed.top = max(0, min(row - above, len(ed.lines) - lay.rows))
+        ed.left = 0
+        ws.mark_dirty()
+        x0 = ws.code_layer._text_x0(lay, ed)
+        return (x0 + (col + 0.5) * lay.cell,
+                lay.y0 + (row - ed.top + 0.5) * lay.lh)
 
 
 # --- scenes -----------------------------------------------------------------
-def scene_tap(fps):
-    """Age ~5: tap a property, press GO, the character changes."""
-    r = Recorder(fps)
-    r.open_cart("star_catcher.moy")
-    r.settle(28)
-    r.click(*_c(C._MENU_BTN))                     # EDIT (Make it mine)
-    r.settle(18)
-    # tap the OTHER catcher tile on the CATCHER card (real hit-test)
-    row = next(x for x in r.ws._card_layout() if x["f"]["key"] == "basket")
-    cur = r.ws.config.get("basket", 0)
-    target = None
-    for k, cell in r.ws._choice_cells(row):
-        if row["f"]["choices"][k] != cur:
-            target = _c(cell); break
-    if target:
-        r.click(*target, steps=14)
+def scene_paint(r):
+    """The hero: paint a smile onto the pet's sprite, PLAY, it's wearing it.
+
+    Pixel Pet's tile 0 is a frog with a flat red mouth bar; dragging the two
+    corners up turns it into a smile, and the pet is drawn from that same tile at
+    4x, so PLAY shows it immediately.
+    """
+    cart = r.reset_cart("pet.moy", cfg={"autoplay": 1})
+    r.open_editor(cart)                      # lands on Config ("Make it mine")
     r.settle(14)
-    r.click(*_c(C._RUN_BTN))                      # GO -> apply + play
-    r.settle(46)
+    r.tab("paint", after=12)                 # -> SPRITES
+    r.click(*r.swatch(8), steps=12, after=6)  # red
+    r.stroke([r.cell(*p) for p in
+              ((1, 4), (2, 5), (3, 5), (4, 5), (5, 5), (6, 4))])
+    r.settle(20)                             # the tile preview updates too
+    r.tab(None, after=4)                     # PLAY
+    r.play(46)                               # ...the pet is wearing it
     return r.frames
 
 
-def scene_blocks(fps):
-    """Age ~7: tap a `+` slot, pick a category, snap a block into the program."""
-    r = Recorder(fps)
-    r.open_cart("star_catcher.moy")
-    r.settle(20)
-    r.click(*_c(C._BLOCKS_BTN))                   # BLOCKS
-    r.settle(18)
-    be = r.ws.block_ui.blocks_ed
-    lay = r.ws.block_ui.block_layout
-    # select a real `+` insert slot in the outline
-    inserts = [i for i, row in enumerate(be.rows) if row.kind == "insert"]
-    be.cur = inserts[1] if len(inserts) > 1 else inserts[0]
-    r.ws.block_ui.blk_slot = 0
-    r.ws.block_ui._blk_reveal()
-    r.ws.mark_dirty(); r.settle(8)
-    # tap that `+` row (cursor is already the selected row -> opens the insert menu)
-    ry = lay.y0 + (be.cur - r.ws.block_ui.blk_top) * lay.row_h + lay.row_h / 2
-    ax = lay.area()[0] + lay.area()[2] / 2
-    r.click(ax, ry)                              # -> "PICK A KIND"
-    r.settle(16)
-    # pick the DRAW category, then its first block (cursor hovers the menu for show)
-    mx, my, mw, mh = lay.menu
-    if r.ws.block_ui.blk_menu is not None:
-        cats = r.ws.block_ui.blk_menu["items"]
-        di = cats.index("draw") if "draw" in cats else 0
-        r.move_to(mx + mw / 2, my + 16 * lay.fs + (di + 0.5) * lay.menu_row_h)
-        r.settle(6)
-        r.ws.block_ui.blk_menu["sel"] = di
-        r.ws.block_ui._blk_menu_select(); r.ws.mark_dirty(); r.settle(14)
-    if r.ws.block_ui.blk_menu is not None:               # now the blocks in that category
-        r.move_to(mx + mw / 2, my + 16 * lay.fs + 0.5 * lay.menu_row_h)
-        r.settle(6)
-        r.ws.block_ui.blk_menu["sel"] = 0
-        r.ws.block_ui._blk_menu_select(); r.ws.mark_dirty(); r.settle(6)
-    r.ws.block_ui._blk_reveal(); r.ws.mark_dirty()
-    r.settle(34)                                # show the new block snapped in
-    return r.frames
-
-
-def scene_code(fps):
-    """Age ~12: EDIT -> CODE -> change SPR_SCALE 4->16 -> RUN, character grows."""
-    r = Recorder(fps)
-    r.open_cart("star_catcher.moy")
-    r.settle(22)
-    r.click(*_c(C._MENU_BTN))                     # EDIT
-    r.settle(16)
-    r.click(*_c(C._CODE_BTN))                     # CODE tab (the click we missed)
-    r.settle(16)
-    ed = r.ws.editor
-    # find the SPR_SCALE line and put the caret just after its value
-    for i, line in enumerate(ed.lines):
-        if line.startswith("SPR_SCALE"):
-            ed.row = i
-            ed.col = line.index("=") + 2 + len(line.split("=")[1].split()[0])
-            ed.top = max(0, i - 4)
-            break
-    r.ws.mark_dirty(); r.settle(10)
-    r.type_keys([0x08, ord("1"), ord("6")], per=3)   # backspace '4' -> type '16'
+def scene_code(r):
+    """The code editor is a tab in the same console: retype a constant, PLAY."""
+    cart = r.reset_cart("star_catcher.moy", cfg={"autoplay": 1})
+    r.open_editor(cart)
     r.settle(12)
-    r.click(*_c(r.ws.code_layout.run_btn))       # RUN
-    r.settle(48)
-    return r.frames
-
-
-def scene_paint(fps):
-    """Draw two happy dots on the character, then back to the game wearing them."""
-    r = Recorder(fps)
-    r.open_cart("pet.moy")
-    r.settle(18)
-    r.click(*_c(C._PAINT_BTN))                    # DRAW
+    r.tab("code", after=14)
+    ed = r.ws.editor
+    row = next(i for i, line in enumerate(ed.lines) if line.startswith("SPR_SCALE"))
+    col = ed.lines[row].index("=") + 3        # just past the value
+    r.click(*r.caret_xy(row, col, above=3), steps=16, after=8)
+    r.type_keys([BACKSPACE, ord("8")], per=5)
     r.settle(16)
-    pe = r.ws.paint
-    pe.color = 8                                  # red
-    cell = C._PG_SPAN // pe.dim
-
-    def cellxy(gx, gy):
-        return (C._PG_X0 + (gx + 0.5) * cell, C._PG_Y0 + (gy + 0.5) * cell)
-
-    # continue the existing red mouth (row 5, cols 2-5) into a curved smile
-    smile = [(1, 5), (2, 6), (3, 6), (4, 6), (5, 6), (6, 5)]
-    r.stroke([cellxy(gx, gy) for gx, gy in smile])
-    r.settle(18)
-    r.click(*_c(C._CLOSE_BTN))                    # back to the game
-    r.settle(30)
+    r.tab(None, after=4)                      # PLAY -> a much bigger catcher
+    r.play(50)
     return r.frames
 
 
-SCENES = {"tap": scene_tap, "blocks": scene_blocks,
-          "code": scene_code, "paint": scene_paint}
+def scene_blocks(r):
+    """Blocks compile to the same Python: snap a block in, then open the CODE tab
+    on the very line it generated."""
+    cart = r.reset_cart("tap_game.moy")
+    r.open_editor(cart)
+    r.ws.editor_app.open_blocks()             # open ON the Blocks tab (Tap Game is
+    r.settle(12)                              # a block cart -- that IS its source)
+    bu = r.ws.block_ui
+    lay = bu.block_layout
+    r.click(*r.block_row(5), steps=11, after=8)   # the "+" slot after "move coin"
+    r.click(*_c(lay.add_btn), steps=11, after=10)  # ADD -> "PICK A KIND"
+    r.pick_menu("sound", steps=11, dwell=9, after=10)  # ...a category...
+    r.pick_menu("beep", steps=11, dwell=9, after=6)    # ...and the block itself
+    r.settle(14)                              # the new block, snapped in
+    # "<< CODE" is the block editor's own graduate rung: compile the outline and
+    # open the generated main.py in the code tab.
+    r.click(*_c(lay.code_btn), steps=12, after=10)
+    ed = r.ws.editor
+    row = next((i for i, line in enumerate(ed.lines) if "beep(440)" in line), 0)
+    r.click(*r.caret_xy(row, len(ed.lines[row])), steps=14, after=8)
+    r.settle(22)
+    return r.frames
 
 
-def save_gif(frames, path, scale, fps, hold_last=14):
+def scene_tap(r):
+    """The "Make it mine" cards: pick another pet on the Config tab, then PLAY."""
+    cart = r.reset_cart("pet.moy", cfg={"autoplay": 1})
+    r.open_editor(cart)
+    r.settle(20)
+    rows = r.ws.cards_layer._card_layout()
+    row = next(x for x in rows if x["f"]["key"] == "pet")
+    cur = r.ws.config.get("pet", 0)
+    target = None
+    for k, box in r.ws.cards_layer._choice_cells(row):
+        if row["f"]["choices"][k] != cur:
+            target = _c(box)
+            break
+    if target:
+        r.click(*target, steps=12, after=14)
+    r.tab(None, after=4)                      # PLAY
+    r.play(44)
+    return r.frames
+
+
+SCENES = {"paint": scene_paint, "code": scene_code,
+          "blocks": scene_blocks, "tap": scene_tap}
+
+
+def save_gif(frames, path, scale, fps, hold_last=18):
+    """Write the recorded index frames as one GIF.
+
+    Two things keep these small enough to live in a repo everyone clones:
+    the palette is MOY64 *verbatim* (the console is an indexed surface, so there
+    is no quantization step and no color drift), and frames are written with
+    `disposal=1`, which lets Pillow ship each frame as only the rectangle that
+    actually changed -- a still editor screen costs a few bytes, and an identical
+    frame costs nothing at all (its duration is folded into the one before it).
+    """
     from PIL import Image
+    flat = []
+    for rgb in palette.MOY64:
+        flat.extend(rgb)
+    flat.extend([0] * (768 - len(flat)))
     imgs = []
     for (w, h, buf) in frames:
-        im = Image.frombytes("RGB", (w, h), buf)
+        im = Image.frombytes("P", (w, h), buf)
+        im.putpalette(flat)
         if scale != 1:
             im = im.resize((w * scale, h * scale), Image.NEAREST)
         imgs.append(im)
     imgs += [imgs[-1]] * hold_last
-    pal = imgs[0].quantize(colors=64, method=Image.MEDIANCUT)
-    q = [im.quantize(palette=pal, dither=Image.NONE) for im in imgs]
-    q[0].save(path, save_all=True, append_images=q[1:], duration=int(1000 / fps),
-              loop=0, optimize=True, disposal=2)
+    imgs[0].save(path, save_all=True, append_images=imgs[1:],
+                 duration=int(round(1000.0 / fps)), loop=0, optimize=True,
+                 disposal=1)
     kb = os.path.getsize(path) // 1024
     print("wrote %s  (%d frames, %dx%d, %dKB)"
-          % (os.path.relpath(path, ROOT), len(q), imgs[0].width, imgs[0].height, kb))
+          % (os.path.relpath(path, ROOT), len(imgs), imgs[0].width,
+             imgs[0].height, kb))
 
 
 def main():
@@ -266,14 +352,19 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--scene", choices=list(SCENES) + ["all"], default="all")
     ap.add_argument("--out", default=OUT_DIR)
-    ap.add_argument("--scale", type=int, default=3)
+    ap.add_argument("--scale", type=int, default=2)
     ap.add_argument("--fps", type=int, default=20)
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     names = list(SCENES) if args.scene == "all" else [args.scene]
     for name in names:
-        save_gif(SCENES[name](args.fps),
-                 os.path.join(args.out, "%s.gif" % name), args.scale, args.fps)
+        carts = tempfile.mkdtemp(prefix="moybyte-gif-")
+        try:
+            rec = Recorder(args.fps, carts)
+            save_gif(SCENES[name](rec),
+                     os.path.join(args.out, "%s.gif" % name), args.scale, args.fps)
+        finally:
+            shutil.rmtree(carts, ignore_errors=True)
 
 
 if __name__ == "__main__":
