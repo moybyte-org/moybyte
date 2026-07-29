@@ -2,6 +2,14 @@
 
 **Issue:** #16 (Audio: sound effects + music, plus an on-device music editor)
 **Status:** host vertical slice landed; device I2S path implemented (non-blocking feed, NEEDS ON-DEVICE VERIFICATION)
+
+> **#170 (2026-07-29) — the model grew to PICO-8 parity** and this doc now
+> describes only the original core: today there are **8 waveforms**, an
+> optional per-note **effect column** (p8 numbering), **multi-channel music
+> rows**, SFX **loop ranges** (`loop_start`) and per-row pattern lengths
+> (`row_secs`). The current model is documented in `docs/moy_cart_api.md`
+> (Audio) and the moy-spec §8; the C mixer (`native/moy_audio`) is a
+> byte-identical twin compiled into the T-Deck **and** the web runner's wasm.
 **Scope of this doc:** the cart-facing audio API, the shared sound data model, the
 host backend, the device (T-Deck Plus I2S) backend, on-cart storage, and where the
 on-device music/SFX editor fits the existing console UI.

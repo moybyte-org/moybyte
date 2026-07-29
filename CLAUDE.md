@@ -68,6 +68,36 @@ make firmware-monitor-lilygo-micropython PORT=/dev/ttyACM0         # miniterm @1
 
 - `firmware/esp32_p4_wifi6_touch_lcd_7b/` — the desktop-tier board (7″ 1024×600 MIPI-DSI, GT911 touch, C6 WiFi over SDIO, 32MB PSRAM/flash). **NOT lvgl_micropython** (no P4/DSI support there): mainline MicroPython v1.28 with an out-of-tree board def (`boards/MOYBYTE_P4`) + `native/moy_dsi` (vendored EK79007 driver; DPI mode — the DSI peripheral scans a PSRAM framebuffer continuously, so there is **no per-frame flush** and the T-Deck's tx_color ceiling doesn't exist). Build/flash/monitor via `make firmware-build-p4` / `make firmware-flash-p4 PORT=/dev/ttyACM0` / `make firmware-monitor-p4 PORT=...` (→ `dist/p4/moybyte_p4.bin`, flashed at offset **0x2000**); serial = CH343 on `/dev/ttyACM0`, REPL stays alive (no native-takeover USB starvation). **Read that dir's README before touching the P4** — it records the hardware-learned constraints (SD power comes from the P4's internal LDO4 which stock MicroPython never enables; SDMMC slot 1 belongs to the C6 and claiming it panics the board; PSRAM must run at 200MHz or the DSI scan-out underruns; WiFi needs no C6 flash; a root-level VFS dir named like a frozen module SHADOWS it — hence the store root is `/moy/carts`, never `/moybyte/...`). The **console is staged** (2026-07-08): `build.sh` freezes the shared `runtime/` console **plus `wm_windowed.py`** (P4-only tier) and stages `device_canvas`/`device_api`/`device_wifi`/`moybyte.input` from the T-Deck modules tree; `moy_gfx`+`moy_alloc`+`moy_lua` (#67) ride `USER_C_MODULES` via `native/.staged/` (moy_gfx grew `blit565_scale`, the windowed composite kernel); the partition table is OTA-shaped 2×4MB + auto-vfs tail. The launcher boots under `WindowedWM` with carts on the internal-flash VFS. On-glass (2026-07-09): colors (canonical vs T-Deck byte-swapped RGB565 → `PAL565_WIRE`), flicker (DPI `num_fbs=2` ping-pong), touch (180° mount → `p4_input.FLIP_X/Y`) all fixed. Play perf comes from three levers: the quiet-frame partial repaint (`WindowedWM.draw_stack`), the hardware **PPA** game composite, and the **async-composite overlap** — a quiet game frame runs the composite via `moy_ppa.blit_async` and DEFERS the scan-out switch to the next loop's `P4Compositor.present_pending()` (fenced by `moy_ppa.sync`, a done-ISR counter), so the PPA DMA overlaps the loop tail + input poll (`blit_game(defer=not full)`; full paints stay blocking so chrome never races the DMA). Battle City 35→51 (PPA)→56 (overlap); most carts ~60. App-window **drags/resizes use the dirty-union restore** (2026-07-10, "smooth like a real OS"): the `_BackdropLayer` retained cache is re-stamped only over the moving window's recent footprint (`blit_strip_rect`, dest-clipped `blit565` — the full-screen 1.2MB restore was the drag path's dominant cost and no accelerator helps a 1:1 copy), and **resize is live-body** (frame+title+grip track the grip, retained content crops/reveals, real reflow on release; grip TOUCH target 2× the visual; the game window keeps the outline preview; web RecordingLayer falls back to full restore + outline — probe on `blit_strip_rect`). On-glass, owner-verified: drags 14→**30fps locked** (union alone bought ~nothing — default windows are ~60% of the desktop, so the wins were **body-subtract** restore-only-the-trail + the **stamp-defer**: the ~24ms content stamp runs async-PPA, registered by the WM and kicked by `P4Compositor.flush` AFTER bar/chips/cursor — an async PPA op must be the frame's LAST write, and `moy_ppa` must C2M-writeback dst before submit because **the IDF PPA driver invalidates the whole out buffer at submit**, discarding unflushed CPU writes — see the P4 README constraints). The render-overlap lever is RESOLVED: the **triple framebuffer** shipped (drags 30→42.8fps, `6b045e3`) but its second half — the double game canvas — was built, measured and **REVERTED** (`4b35801`: the game fence was already ~free; the retention memcpy + drain stalls cost more than they saved), and then **#159's L2 cache 128→256KB** closed the game chapter outright (BC busy 15.5→8.0ms, the whole roster at the 60 cap; 512KB does not boot — internal/DMA pool 0x101). **The PPA only helps UPSCALE composites** — the game→window scale is 2.6× (tiny source read, hardware scale), but a full-screen 1:1 copy (the backdrop restore) is ~identical CPU vs PPA (~26ms, PSRAM-bandwidth-bound vs the DSI scan-out), and **sprite BATCHING is a dead end** (64× 16×16 queued = 4.57ms vs 0.70ms CPU, ~10× vs `spr_batch` — per-op submit dwarfs a tiny blit), so both stay on the CPU. `run_desktop` has serial dev commands (REPL-alive board): `run <name>`/`open settings|picker`/`drag [frames]`/`cache 0|1`/`diag 0|1`/`skip 0|1`; `moy_runtime.run_ppa_smoke()` A/Bs the composite. #58 is the living port status; open perf follow-ups: the **editor-tab/transition draw cost** (dispatch-bound — the native span-batch verb #163 is the ranked lever, the scene renderer second) and the #113 Phase 5 Settings partial repaint. Also open: USB-HID keyboard, audio (ES8311), OTA/web-view wiring.
 
+### Third target: the web runner + the moy-spec repo (#151/#170)
+
+- `firmware/web_runner/` — the **MicroPython-WASM** build of the same console
+  ("browser-as-GPU": the system canvas IS `web_view.CommandCanvas`, so the wasm
+  never rasterizes a pixel — the page's JS replayer draws). `build.sh` clones +
+  patches the webassembly port (custom `moybyte` variant: GC_SPLIT_HEAP_AUTO,
+  no asyncify), freezes the shared `runtime/` console, and compiles the SAME
+  `moy_lua` **and** `moy_audio` native modules in as usermods (Makefile-fragment
+  twins of the boards' cmake), so Lua carts and the C mixer run in the browser
+  too. Dev loop: `moy.py run` (sub-second hot reload via `?dev=1` + `/stamp`);
+  `node harness.mjs` / the scratchpad probes drive it headless. **`--spec`**
+  builds the de-branded SLIM player (24 shell modules AST-stubbed to absorbing
+  `_Stub`s) that is **vendored into the public spec repo**
+  (`~/Documents/Work/moy-spec`, github.com/moybyte-org/moy-spec, MIT): SPEC.md
+  ("moy core 0.1") + runner + the `moy` CLI (new/run/export/port/demo) + the
+  vendored p8 converters (re-vendor `p8_import.py` whenever `tools/import_p8.py`
+  changes — a mechanical stdlib-only transform, see the session scripts in git
+  history). AUDIO on the web (#170): the console ships per-frame FINISHED PCM
+  (base64) and the page plays it through ONE AudioWorklet ring (continuous
+  resample, seam-free; starvation decays instead of hard-cutting); the runner
+  tops a ~120ms cushion via the page-reported queue depth
+  (`step_frame_json(dt, audio_ahead)`) — the browser twin of the device ring
+  top-up. p8 IMPORTS are full-fidelity since #170: 8 waves 1:1, effect column
+  verbatim, 4-channel music rows, SFX loop ranges, per-row pattern lengths
+  (`row_secs`) by the **zepto8-verified** length rule (first non-looping
+  channel; all-looping → slowest channel — the p8 wiki's "all-looping loops
+  forever" is WRONG, trust zepto8 for p8 semantics). `ports/celeste.moy` is
+  gitignored on BOTH repos (CC BY-NC-SA — never commit or ship it); regenerate
+  with `tools/p8_lua_port.py <cart.p8.png> ports/celeste.moy --title "Celeste Classic"`.
+
 ### Host == device: the shared console (important)
 
 The console UI is **one codebase** that both the host simulator and the

@@ -54,8 +54,10 @@
 // VM-NEUTRAL HOT PATH: the mix kernel touches no Python objects per sample, the
 // same discipline as native/moy_gfx; the core-1 task is doubly so (no MP at all).
 //
-// NEEDS ON-DEVICE VERIFICATION: built + unit-checked against the Python mixer, but
-// the audible result on the MAX98357 amp is unproven in this environment.
+// HARDWARE-CONFIRMED (owner, 2026-07-29): the #170 p8-parity mixer (8 waves,
+// effect column, loop ranges, multi-channel music) plays correctly on the
+// S3's MAX98357 amp. The math half is additionally pinned byte-for-byte
+// against the Python engine by the parity harness (see #170).
 
 #include <math.h>
 #include <string.h>

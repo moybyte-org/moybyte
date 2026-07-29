@@ -114,8 +114,8 @@ blue, indigo, pink, peach` (indices 0–15).
 
 | PICO-8 | Moybyte | Notes |
 |---|---|---|
-| `sfx(n)` | `sfx(n)` | the importer brought sounds across (lossy: 8 PICO-8 instruments folded to 4 waves, effects dropped) |
-| `music(n)` | `music(n)` | the importer flattens PICO-8's 4 music channels to 1 |
+| `sfx(n)` | `sfx(n)` | full fidelity since #170: all 8 instruments map 1:1, the effect column (slide/vibrato/drop/fades/arpeggio) carries over verbatim, loop ranges included |
+| `music(n)` | `music(n)` | all 4 channels import verbatim (multi-channel rows), with true per-row pattern lengths (first-non-looping-channel rule) |
 
 ### The cart loop
 
