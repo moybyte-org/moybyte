@@ -8,10 +8,12 @@ This is the answer to "why isn't this MIT?".
 
 ## 1. The decision (two lines)
 
-1. **Carts and the cart format are unencumbered.** Projects you write, the carts
-   you make, and community tools around them carry no obligation to this
-   repository, and the cart format/API is an open specification anyone may
-   implement. (The `.moyproj` SDK packages that used to carry an explicit MIT
+1. **Carts, the cart format, and the spec's player are unencumbered.** Projects
+   you write, the carts you make, and community tools around them carry no
+   obligation to this repository; the cart format/API is an open specification
+   anyone may implement; and the compiled **web player** the spec repo ships
+   (`build.sh --spec`) is granted under MIT so a `.moy` player can be embedded
+   anywhere. (The `.moyproj` SDK packages that used to carry an explicit MIT
    licence were removed from the tree in 2026-07; they remain MIT in history.)
 2. **The console and firmware are FSL-1.1-MIT** (Functional Source License):
    free for everyone to read, modify, and flash on their own hardware — but
@@ -34,7 +36,7 @@ community, and the community is the point.
 | Flash the firmware on your own board | Free, forever |
 | Modify the console, share your fork | Free (keep the license notice) |
 | Use it in a classroom / library | Free |
-| Write, share, or **sell** carts you made | Free — carts are yours (SDK is MIT) |
+| Write, share, or **sell** carts you made | Free — carts are yours; this repo claims nothing over them |
 | Implement your own runtime for `.moy` carts | Free — the cart format/API is an open spec |
 | **Sell hardware preloaded with the console** | Commercial license required |
 | Ship a competing commercial console product from this code | Commercial license required |
