@@ -1,0 +1,87 @@
+# The project site (GitHub Pages): the README's claims, plus the console itself
+# running in the page.
+#
+# The centrepiece is a REAL build, not a recording -- site/build.py embeds
+# firmware/web_runner/dist, so this workflow has to compile MicroPython to
+# WebAssembly before assembling the page. That is the slow part: build.sh clones
+# and installs emsdk (~1.7 GB) the first time. It is cached, keyed on build.sh,
+# so only a change to the build itself pays for it again.
+#
+# Deploys on a push to master that touches the site, the console, the web runner
+# or the README -- and on demand. If the wasm build ever fails, the page still
+# assembles (build.py says so in place of the player) rather than publishing
+# nothing.
+name: Pages
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "site/**"
+      - "runtime/**"
+      - "system_carts/**"
+      - "firmware/web_runner/**"
+      - "README.md"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time, and never cancel one midway: a half-published site is
+# worse than a slightly stale one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # emsdk + the micropython clone, keyed on the build script that pins them.
+      # ~1.8 GB, comfortably inside the 10 GB repo cache (unlike the board
+      # builds, which need the whole ESP-IDF and cache only their toolchains).
+      - name: Cache the wasm toolchain
+        uses: actions/cache@v4
+        with:
+          path: firmware/web_runner/.build
+          key: web-runner-${{ runner.os }}-${{ hashFiles('firmware/web_runner/build.sh') }}
+          restore-keys: web-runner-${{ runner.os }}-
+
+      - name: Build the browser console
+        id: player
+        continue-on-error: true
+        run: firmware/web_runner/build.sh
+
+      - name: Assemble the site
+        run: python3 site/build.py --out _site
+
+      - name: Note a missing player
+        if: steps.player.outcome == 'failure'
+        run: echo "::warning::the wasm build failed -- the site publishes without the live player"
+
+      - name: Upload the artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
