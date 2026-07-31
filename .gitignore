@@ -69,3 +69,10 @@ ports/celeste.moy/
 # covered by the build-trees rule above).
 firmware/web_runner/dist/
 firmware/web_runner/dist-spec/
+
+# Generated website (site/build.py assembles it from the canonical sources)
+_site/
+
+# Screenshot harness output (pageshot.mjs / browsershot.mjs)
+firmware/web_runner/shots/
+firmware/web_runner/shots-browser/

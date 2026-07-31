@@ -130,11 +130,14 @@ fi
 # 2. Stage the shared console modules (canonical sources: runtime/), the same
 #    copy-don't-import pattern both boards use. Denylist = host-only files and
 #    the CPython-only palette.py (a literal twin is GENERATED below).
+#    wm_windowed.py IS staged, unlike on the S3: its only import is `time` (the
+#    P4 freezes it too), so the browser can present BOTH tiers -- the handheld
+#    320x240 and the windowed desktop (#73/#105).
 # ---------------------------------------------------------------------------
 echo "== staging runtime/ modules"
 rm -rf "${STAGE_DIR}"
 mkdir -p "${STAGE_DIR}/modules"
-DENY="host_app.py wm_windowed.py lua_host.py palette.py font.py __init__.py"
+DENY="host_app.py lua_host.py palette.py font.py __init__.py"
 for f in "${REPO_ROOT}/runtime/"*.py; do
   base="$(basename "${f}")"
   skip=0
@@ -289,7 +292,11 @@ echo "== packing carts"
 if [ "${SPEC}" = "1" ]; then
   ROSTER="${SPEC_CART}"
 else
-  ROSTER="${MOYBYTE_WEB_CARTS:-star_catcher.moy sakura.moy tap_red.moy harpoon_pop.moy coin_quest.moy platformer.moy tiny_runner.moy brick_siege.moy letter_blitz.moy scroll_demo.moy sakura_lua.moy ray_lua.moy moy_night.moy}"
+  # The WALLPAPER carts (moy_night + ocean/open_machine/wallpaper_space) ride
+  # along even though they never appear on the run-grid: they are the Appearance
+  # app's CARTS catalog, and shipping only moy_night left that tab with one
+  # choice (owner report 2026-07-31).
+  ROSTER="${MOYBYTE_WEB_CARTS:-star_catcher.moy sakura.moy tap_red.moy harpoon_pop.moy coin_quest.moy platformer.moy tiny_runner.moy brick_siege.moy brick_siege_lua.moy letter_blitz.moy scroll_demo.moy sakura_lua.moy ray_lua.moy moy_night.moy ocean.moy open_machine.moy wallpaper_space.moy paint.moy files.moy writer.moy sheets.moy storybook.moy calc.moy theme_picker.moy}"
 fi
 "${PY}" - "${REPO_ROOT}/system_carts" "${STAGE_DIR}/carts.json" ${ROSTER} <<'PYEOF'
 import json, os, sys
@@ -376,6 +383,9 @@ fi
 # ---------------------------------------------------------------------------
 mkdir -p "${DIST_DIR}"
 cp "${STAGE_DIR}/carts.json" "${STAGE_DIR}/index.html" "${DIST_DIR}/"
+# worker.js is a SEPARATE file, not inlined: a module Worker needs its own URL.
+# It owns the VM + the frame loop; the page only replays (#176 smoothness).
+cp "${SCRIPT_DIR}/worker.js" "${DIST_DIR}/"
 if [ "${STAGE_ONLY}" = "1" ]; then
   cp "${STAGE_DIR}/modules.json" "${DIST_DIR}/"
 else

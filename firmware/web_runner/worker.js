@@ -1,0 +1,269 @@
+// The console, off the main thread (#176 smoothness).
+//
+// WHY: the browser's main thread must only REPLAY and BLIT. When the wasm console
+// stepped inside the rAF callback, a frame cost ~7ms of console work + ~2ms of blit
+// on a 16.7ms budget, so any worst-case frame (a full repaint, a GC sweep) missed
+// vsync and dropped -- visible judder, even though total frame cost was LOWER than
+// the host web console's. That transport looks smoother precisely because its
+// console runs in another process and the page only replays. This worker gives the
+// wasm the same division of labour, minus the network.
+//
+// The worker owns the VM and self-drives the frame loop, POSTING frames as they are
+// ready (the push model the WebSocket transport uses). The page keeps only the most
+// recent frame, so a slow main thread drops stale frames instead of queueing them.
+//
+// Protocol -- main -> worker:
+//   {t:"init", search}   boot the console; `search` is location.search (tier + cart)
+//   {t:"input", json}    an {"events":[...]} batch, applied before the next step
+//   {t:"ahead", v}       the page's scheduled-ahead audio depth, seconds (-1 = none)
+//   {t:"run"}            start stepping (the page's play-button gesture)
+//   {t:"reload"}         dev hot-reload: re-read carts.json and restart the cart
+// worker -> main:
+//   {t:"status", s}      boot progress text
+//   {t:"assets", json}   the /assets payload (also re-sent after a reload)
+//   {t:"frame", s}       one frame_payload JSON string
+//   {t:"error", s}       fatal: the page shows it and stops
+import { loadMicroPython } from "./micropython.mjs";
+
+let mp = null, step = null, applyEvents = null, assets = null, reload = null;
+let wantAssets = false;   // an assets request that arrived before the VM was up
+let idleCollect = null;
+let reseed = null;        // web_boot.request_keyframe -- the dropped-frame recovery
+let running = false, ahead = -1, inbox = [];
+const FRAME_MS = 1000 / 60;
+// GC scheduling (the surface-model gate-0 finding): web_boot raises the GC
+// trigger from the port's 16KB (which made EVERY painted frame pay a full
+// ~67ms collect at this boundary) to megabytes, so the WORKER now owns WHEN
+// collects land: on the 3rd consecutive quiet frame (idle -- the hitch is
+// invisible), or after COLLECT_MAX_FRAMES of sustained activity (a game that
+// never idles must still collect eventually; one bounded hitch beats heap
+// growth -- SPLIT_HEAP_AUTO grows the heap rather than collecting).
+const IDLE_QUIET_FRAMES = 3, COLLECT_MAX_FRAMES = 600;
+let quietStreak = 0, framesSinceCollect = 0, idleCollected = false;
+// Worker-side perf accounting, reported every WP_MS and printed by the page's
+// plog line: step mean/max, painted frames, >20ms stalls, and the cost of the
+// out-of-band calls (assets/collect/input) that block this same loop.
+const WP_MS = 2000;
+let WP = { n: 0, sum: 0, max: 0, maxB: 0, painted: 0, bytes: 0, slow: 0,
+           assets: 0, assetsN: 0, gc: 0, gcN: 0, inp: 0, inpN: 0, t: 0 };
+function wpFlush() {
+    const now = performance.now();
+    if (!WP.t) { WP.t = now; return; }
+    const dt = (now - WP.t) / 1000;
+    if (dt <= 0) return;
+    self.postMessage({ t: "wperf", s:
+        "step " + (WP.n ? WP.sum / WP.n : 0).toFixed(2) + "/" + WP.max.toFixed(1) +
+        " ms mean/max (worst frame " + (WP.maxB / 1024).toFixed(1) + "KB)" +
+        " | steps " + (WP.n / dt).toFixed(1) + "/s painted " + (WP.painted / dt).toFixed(1) +
+        "/s | >20ms " + WP.slow +
+        " | assets " + WP.assetsN + "x" + (WP.assetsN ? WP.assets / WP.assetsN : 0).toFixed(0) +
+        "ms gc " + WP.gcN + "x" + (WP.gcN ? WP.gc / WP.gcN : 0).toFixed(0) +
+        "ms input " + WP.inpN + "x" + (WP.inpN ? WP.inp / WP.inpN : 0).toFixed(1) + "ms" });
+    WP = { n: 0, sum: 0, max: 0, maxB: 0, painted: 0, bytes: 0, slow: 0,
+           assets: 0, assetsN: 0, gc: 0, gcN: 0, inp: 0, inpN: 0, t: now };
+}
+setInterval(wpFlush, WP_MS);
+
+function say(s) { self.postMessage({ t: "status", s: s }); }
+
+function mkdirs(p) {
+    let cur = "";
+    for (const part of p.split("/")) {
+        if (!part) continue;
+        cur += "/" + part;
+        try { mp.FS.mkdir(cur); } catch (e) { /* exists */ }
+    }
+}
+
+function writeCarts(carts) {
+    mkdirs("/moy/carts");
+    for (const rel in carts) {
+        const full = "/moy/carts/" + rel;
+        mkdirs(full.slice(0, full.lastIndexOf("/")));
+        mp.FS.writeFile(full, carts[rel]);
+    }
+}
+
+async function init(search) {
+    say("loading vm...");
+    // 16MB: the per-frame GC sweep scales with heap SIZE under this build's
+    // GC_SPLIT_HEAP_AUTO (~0.13ms/MB/frame, #176), so a generous heap is a
+    // permanent frame tax, not headroom.
+    mp = await loadMicroPython({ heapsize: 16 * 1024 * 1024,
+        stdout: (l) => console.log("[moy]", l) });
+    say("loading console...");
+    // FROZEN-first, like the page was: a ship build bakes the console into the wasm
+    // and has no modules.json; a --stage-only dev dist adds one, and loading it into
+    // /modules (first on sys.path) shadows the frozen copies.
+    const [mods, carts] = await Promise.all([
+        fetch("modules.json").then((r) => r.ok ? r.json() : null).catch(() => null),
+        fetch("carts.json").then((r) => r.json())]);
+    let boot = "";
+    if (mods) {
+        mkdirs("/modules");
+        for (const n in mods) mp.FS.writeFile("/modules/" + n, mods[n]);
+        boot = "import sys\nsys.path.insert(0, '/modules')\n";
+    }
+    writeCarts(carts);
+    say("booting console...");
+
+    const qs = new URLSearchParams(search || "");
+    let cart = qs.get("cart");
+    const names = [...new Set(Object.keys(carts).map((k) => k.split("/")[0]))];
+    if (!cart && names.length === 1) cart = names[0];
+    // TIER SELECT (#73/#175): default is the handheld 320x240 console; ?desktop=1
+    // boots the windowed desktop, ?size=WxH overrides its panel size.
+    const desktop = qs.get("desktop");
+    let dw = 1024, dh = 600;
+    const szm = /^(\d+)x(\d+)$/.exec(qs.get("size") || "");
+    if (szm) { dw = +szm[1]; dh = +szm[2]; }
+    const bootArgs = desktop
+        ? ", None, " + dw + ", " + dh + ", True"
+        : (cart ? ", cart=" + JSON.stringify(cart) : "");
+    mp.runPython(boot + "import web_boot\n"
+        + "web_boot.boot('/moy/carts'" + bootArgs + ")\n"
+        + (desktop && cart ? "web_boot.open_cart(" + JSON.stringify(cart) + ")\n" : "")
+        // Single-cart bundle: kiosk mode -- the exit gesture restarts the game
+        // instead of dropping into the shell (the game IS the page).
+        + (!desktop && names.length === 1 && cart
+            ? "web_boot.kiosk(" + JSON.stringify(cart) + ")\n" : "")
+        + "from web_boot import assets_json, step_frame_json, apply_events_json, "
+        + "reload_cart, idle_collect, request_keyframe");
+    step = mp.globals.get("step_frame_json");
+    applyEvents = mp.globals.get("apply_events_json");
+    assets = mp.globals.get("assets_json");
+    reload = mp.globals.get("reload_cart");
+    idleCollect = mp.globals.get("idle_collect");
+    reseed = mp.globals.get("request_keyframe");
+    self.postMessage({ t: "assets", json: assets() });
+    wantAssets = false;      // the boot payload answers any pre-boot request
+    say("live");
+}
+
+// Self-driven frame loop. setTimeout (not rAF -- workers have none) against a
+// deadline, so a slow frame catches up instead of quantizing to a slower rate.
+let nextAt = 0, lastStep = 0, simTime = 0, wallFrom = 0;
+function loop() {
+    if (!running) return;
+    const now = performance.now();
+    if (nextAt && now < nextAt - 1) {
+        setTimeout(loop, Math.max(0, nextAt - now));
+        return;
+    }
+    // dt is REAL elapsed time since the previous step -- never derived from the
+    // deadline. Deadlines advance by exactly FRAME_MS, but `now` is always late by
+    // however long the last step took, so measuring deadline->now overstated dt by
+    // that lateness EVERY frame and the game ran fast (~1.5x with an 8ms step).
+    // Real elapsed is correct by construction: simulated time tracks the clock.
+    const dt = lastStep ? Math.min(0.1, (now - lastStep) / 1000) : 1 / 60;
+    lastStep = now;
+    simTime += dt;
+    if (!wallFrom) wallFrom = now;
+    nextAt = nextAt ? Math.max(nextAt + FRAME_MS, now - 30) : now + FRAME_MS;
+    try {
+        if (inbox.length) {
+            // ONE JS->Python crossing per frame, however fast the mouse fires:
+            // merge every queued {"events":[...]} batch into a single batch.
+            // A long drag on a high-poll mouse posts hundreds of move events a
+            // second; crossing per batch multiplied the boundary overhead and
+            // could land a pending GC collect mid-gesture on whichever crossing
+            // came first. Event ORDER is preserved (paint strokes keep their
+            // intermediate points).
+            const batch = inbox;
+            inbox = [];
+            const _i0 = performance.now();
+            if (batch.length === 1) {
+                applyEvents(batch[0]);
+            } else {
+                const all = [];
+                for (const j of batch) {
+                    try { all.push(...JSON.parse(j).events); } catch (e) { }
+                }
+                applyEvents(JSON.stringify({ events: all }));
+            }
+            WP.inp += performance.now() - _i0; WP.inpN++;
+        }
+        const _t0 = performance.now();
+        const s = step(dt, ahead);
+        const _d = performance.now() - _t0;
+        // WORKER-SIDE PERF: the page's `recv` fps says the worker is behind but
+        // not WHY. Track step cost + the worst offender's payload so the HUD
+        // line names it (headless probes have repeatedly failed to reproduce
+        // what the browser does -- measure where it actually runs).
+        WP.n++; WP.sum += _d; if (_d > WP.max) { WP.max = _d; WP.maxB = s ? s.length : 0; }
+        if (_d > 20) WP.slow++;
+        if (s) { WP.painted++; WP.bytes += s.length; }
+        if (s) self.postMessage({ t: "frame", s: s });
+        // GC scheduling (see the constants above). A painted frame re-arms the
+        // idle collect; the periodic guard fires regardless of quiet.
+        framesSinceCollect++;
+        if (s) { quietStreak = 0; idleCollected = false; } else { quietStreak++; }
+        if (idleCollect && ((quietStreak >= IDLE_QUIET_FRAMES && !idleCollected)
+            || framesSinceCollect >= COLLECT_MAX_FRAMES)) {
+            const _g0 = performance.now();
+            idleCollect();               // the collect lands as this call returns
+            WP.gc += performance.now() - _g0; WP.gcN++;
+            idleCollected = true;
+            framesSinceCollect = 0;
+        }
+    } catch (e) {
+        self.postMessage({ t: "error", s: String((e && e.message) || e) });
+        running = false;
+        return;
+    }
+    setTimeout(loop, Math.max(0, nextAt - performance.now()));
+}
+
+self.onmessage = async (ev) => {
+    const m = ev.data;
+    try {
+        if (m.t === "init") {
+            await init(m.search);
+        } else if (m.t === "input") {
+            inbox.push(m.json);
+        } else if (m.t === "ahead") {
+            ahead = m.v;
+        } else if (m.t === "run") {
+            // lastStep too: a (re)start must begin with a clean 1/60 dt, not a
+            // clamped jump measured from whenever the loop last ran.
+            if (!running) { running = true; nextAt = 0; lastStep = 0; loop(); }
+        } else if (m.t === "assets") {
+            // BEFORE BOOT this is a no-op, not a crash. onmessage is async, so a
+            // request arriving while init() is still awaiting does NOT queue
+            // behind it -- it ran against a null `assets` and threw
+            // "assets is not a function", which the page reports as a console
+            // crash (owner, 2026-07-31). The page asks as soon as it wants an
+            // image it lacks, which can easily precede a slow VM boot (and does
+            // reliably if dist/ is rewritten by a rebuild mid-load). Remember
+            // the ask; init() answers it the moment it is ready.
+            if (!assets) { wantAssets = true; return; }
+            const _a0 = performance.now();
+            // Assets ON DEMAND. Covers/paint images are created LAZILY, so the
+            // payload built at boot does not have them yet; the page's imgWant
+            // latch re-requests when a draw references an image it lacks. Serving
+            // that from a cached copy (which the first worker cut did) meant cover
+            // thumbnails could never arrive.
+            self.postMessage({ t: "assets", json: assets() });
+            WP.assets += performance.now() - _a0; WP.assetsN++;
+        } else if (m.t === "clock") {
+            // Simulated vs wall time since the first step. Their ratio must be ~1:
+            // anything else is a pacing bug, and it is invisible from frame counts
+            // alone (a wrong dt changes game SPEED, not frame rate).
+            self.postMessage({ t: "clock", sim: simTime,
+                wall: wallFrom ? (performance.now() - wallFrom) / 1000 : 0 });
+        } else if (m.t === "resync") {
+            // The page dropped a frame (see page_tail's rAF loop). The #76 delta
+            // assumes lossless in-order delivery -- a lost frame strands every
+            // surface it carried, since later frames just say {"same":1}. Re-seed
+            // the client: one full frame, then delta-encoding resumes.
+            if (reseed) reseed();
+        } else if (m.t === "reload") {
+            const carts = await fetch("carts.json").then((r) => r.json());
+            writeCarts(carts);
+            reload();
+            self.postMessage({ t: "assets", json: assets() });
+        }
+    } catch (e) {
+        self.postMessage({ t: "error", s: String((e && e.stack) || e) });
+    }
+};

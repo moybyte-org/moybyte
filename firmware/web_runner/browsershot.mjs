@@ -1,0 +1,192 @@
+// Moybyte web runner BROWSER harness: the page in a REAL browser, driven over
+// the Chrome DevTools Protocol (no puppeteer -- node 22 has a WebSocket client).
+//
+// pageshot.mjs runs the console + the page replayer in node, which covers the
+// wasm side and the drawing side but NOT the browser plumbing: the worker
+// postMessage pump, the async /assets fetch, rAF, canvas sizing. Owner-visible
+// bugs have hidden in exactly that gap ("it doesn't appear until I drag"), so
+// this drives the shipped page itself and screenshots the canvas.
+//
+//   node browsershot.mjs scenario.json [outdir]
+//
+// Same scenario vocabulary as pageshot.mjs where it makes sense --
+//   {"wait":ms} {"shot":"name"} {"click":[x,y]} {"move":[x,y]}
+//   {"drag":[x0,y0,x1,y1,steps]} {"key":"a"} {"js":"..."} {"note":"..."}
+// -- with coordinates in CANVAS pixels (the page's own 1024x600-style space);
+// they are mapped through the canvas's on-screen rect for you.
+//
+// It serves dist/ itself and launches headless Chrome, so it is one command.
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { dirname, join, resolve } from "node:path";
+import { createServer } from "node:http";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const DIST = resolve(process.env.MOY_DIST || join(HERE, "dist"));
+const CHROME = process.env.MOY_CHROME || "google-chrome";
+
+// -- static server (mjs/wasm mime types, like serve.py) ----------------------
+const MIME = { ".html": "text/html", ".mjs": "text/javascript", ".js": "text/javascript",
+               ".wasm": "application/wasm", ".json": "application/json" };
+const server = createServer((req, res) => {
+    let p = decodeURIComponent(req.url.split("?")[0]);
+    if (p === "/") p = "/index.html";
+    try {
+        const body = readFileSync(join(DIST, p));
+        const ext = p.slice(p.lastIndexOf("."));
+        res.writeHead(200, { "content-type": MIME[ext] || "application/octet-stream",
+                             "cross-origin-opener-policy": "same-origin",
+                             "cross-origin-embedder-policy": "require-corp" });
+        res.end(body);
+    } catch (e) { res.writeHead(404); res.end("nope"); }
+});
+await new Promise((ok) => server.listen(0, "127.0.0.1", ok));
+const PORT = server.address().port;
+
+// -- headless chrome + CDP ---------------------------------------------------
+const profile = join(process.env.TMPDIR || "/tmp", "moy-browsershot-" + PORT);
+const chrome = spawn(CHROME, [
+    "--headless=new", "--remote-debugging-port=0", "--user-data-dir=" + profile,
+    "--no-first-run", "--no-default-browser-check", "--disable-gpu",
+    "--window-size=1280,800", "--hide-scrollbars", "about:blank",
+], { stdio: ["ignore", "ignore", "pipe"] });
+
+const wsUrl = await new Promise((ok, err) => {
+    let buf = "";
+    const t = setTimeout(() => err(new Error("chrome did not report a debug port")), 20000);
+    chrome.stderr.on("data", (d) => {
+        buf += d;
+        const m = buf.match(/ws:\/\/[^\s]+/);
+        if (m) { clearTimeout(t); ok(m[0]); }
+    });
+});
+
+let msgId = 0;
+const pending = new Map();
+const ws = new WebSocket(wsUrl);
+await new Promise((ok) => ws.addEventListener("open", ok));
+ws.addEventListener("message", (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); }
+});
+function send(method, params = {}, sessionId = undefined) {
+    const id = ++msgId;
+    return new Promise((ok, err) => {
+        pending.set(id, (m) => m.error ? err(new Error(method + ": " + JSON.stringify(m.error))) : ok(m.result));
+        ws.send(JSON.stringify({ id, method, params, sessionId }));
+    });
+}
+
+const { targetId } = await send("Target.createTarget", { url: "about:blank" });
+const { sessionId } = await send("Target.attachToTarget", { targetId, flatten: true });
+const cdp = (method, params) => send(method, params, sessionId);
+await cdp("Page.enable");
+await cdp("Runtime.enable");
+const logs = [];
+ws.addEventListener("message", (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.method === "Runtime.consoleAPICalled")
+        logs.push(m.params.args.map((a) => a.value ?? a.description ?? "").join(" "));
+    if (m.method === "Runtime.exceptionThrown")
+        logs.push("EXCEPTION " + (m.params.exceptionDetails?.exception?.description
+            || m.params.exceptionDetails?.text));
+});
+
+const argv = process.argv.slice(2);
+const scenario = JSON.parse(readFileSync(argv[0], "utf-8"));
+const outdir = resolve(argv[1] || join(HERE, "shots-browser"));
+mkdirSync(outdir, { recursive: true });
+
+const evaluate = async (expr) => {
+    const r = await cdp("Runtime.evaluate", { expression: expr, returnByValue: true, awaitPromise: true });
+    if (r.exceptionDetails) throw new Error(r.exceptionDetails.text + " " + (r.exceptionDetails.exception?.description || ""));
+    return r.result.value;
+};
+const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+
+// PHONE/TABLET shape: {"device":{"width":390,"height":844,"dpr":3,"mobile":true}}.
+// The small tiers are where the on-screen controls live, and their layout (plus
+// the browser's own dynamic toolbar) is load-bearing -- a desktop-sized window
+// never exercises it.
+if (scenario.device) {
+    const d = scenario.device;
+    await cdp("Emulation.setDeviceMetricsOverride", {
+        width: d.width, height: d.height, deviceScaleFactor: d.dpr || 2,
+        mobile: d.mobile !== false,
+    });
+    await cdp("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+    await cdp("Emulation.setEmitTouchEventsForMouse", { enabled: true, configuration: "mobile" });
+}
+await cdp("Page.navigate", { url: `http://127.0.0.1:${PORT}/${scenario.query || ""}` });
+await sleep(scenario.boot_ms || 6000);
+
+// Canvas rect, so scenario coordinates are CANVAS pixels like every other probe.
+async function canvasRect() {
+    return await evaluate(`(function(){var c=document.getElementById("cv");if(!c)return null;
+        var r=c.getBoundingClientRect();return {x:r.left,y:r.top,w:r.width,h:r.height,cw:c.width,ch:c.height};})()`);
+}
+async function toPage(x, y) {
+    const r = await canvasRect();
+    if (!r) throw new Error("no canvas element");
+    return { x: r.x + (x / r.cw) * r.w, y: r.y + (y / r.ch) * r.h };
+}
+async function mouse(type, x, y, button = "left", clickCount = 1) {
+    const p = await toPage(x, y);
+    await cdp("Input.dispatchMouseEvent", { type, x: p.x, y: p.y, button, clickCount, buttons: type === "mouseMoved" ? 0 : 1 });
+}
+async function shot(name) {
+    // The CANVAS pixels, not the page: element.toDataURL is exactly what the
+    // console painted, with no browser chrome or CSS scaling in the way.
+    const url = await evaluate(`document.getElementById("cv").toDataURL("image/png")`);
+    const b64 = url.split(",")[1];
+    const path = join(outdir, name + ".png");
+    writeFileSync(path, Buffer.from(b64, "base64"));
+    const st = await evaluate(`JSON.stringify({fps:(typeof HUD!=="undefined"&&HUD.fps)||0,
+        unknown:(typeof HUD!=="undefined"&&HUD.unknown)||0,
+        surf:(typeof SURF!=="undefined")?Object.keys(SURF).length:-1,
+        w:document.getElementById("cv").width,h:document.getElementById("cv").height})`);
+    console.log(`shot ${name}: -> ${path}  ${st}`);
+}
+
+let failed = 0;
+for (const step of scenario.steps || []) {
+    try {
+        if (step.note != null) console.log("--", step.note);
+        if (step.wait != null) await sleep(step.wait);
+        if (step.move) { await mouse("mouseMoved", step.move[0], step.move[1]); await sleep(60); }
+        if (step.click) {
+            await mouse("mousePressed", step.click[0], step.click[1]);
+            await sleep(80);
+            await mouse("mouseReleased", step.click[0], step.click[1]);
+            await sleep(step.settle ?? 400);
+        }
+        if (step.drag) {
+            const [x0, y0, x1, y1, n = 8] = step.drag;
+            await mouse("mousePressed", x0, y0);
+            for (let i = 1; i <= n; i++) {
+                await cdp("Input.dispatchMouseEvent", {
+                    type: "mouseMoved", buttons: 1,
+                    ...(await toPage(Math.round(x0 + (x1 - x0) * i / n), Math.round(y0 + (y1 - y0) * i / n))),
+                });
+                await sleep(30);
+            }
+            await mouse("mouseReleased", x1, y1);
+            await sleep(step.settle ?? 300);
+        }
+        if (step.key != null) {
+            await cdp("Input.dispatchKeyEvent", { type: "keyDown", text: String(step.key), key: String(step.key) });
+            await cdp("Input.dispatchKeyEvent", { type: "keyUp", key: String(step.key) });
+            await sleep(150);
+        }
+        if (step.js) console.log("   js ->", JSON.stringify(await evaluate(step.js)));
+        if (step.shot) await shot(step.shot);
+    } catch (e) {
+        failed++;
+        console.log("STEP FAILED", JSON.stringify(step), "\n  ", e && e.message ? e.message : e);
+    }
+}
+if (logs.length) { console.log("-- page console --"); for (const l of logs.slice(-25)) console.log("  " + l); }
+chrome.kill();
+server.close();
+process.exit(failed ? 1 : 0);
