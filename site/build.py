@@ -128,6 +128,41 @@ ROUGH = [
 ]
 
 
+def moy_mark(pal, scale=3):
+    """The Moy mascot as a PNG data URI, rendered from the console's OWN icon art
+    (runtime/chrome.py's _ICON_ART["moy"], 16x16, hex chars = MOY64 indices).
+    Read out of the source text rather than imported: chrome.py pulls in the whole
+    surface stack, and this script must stay importable with nothing installed."""
+    import re, struct, zlib
+    src = open(os.path.join(ROOT, "runtime", "chrome.py"), encoding="utf-8").read()
+    m = re.search(r'"moy":\s*\((.*?)\)\s*,', src, re.S)
+    if not m:
+        return ""
+    rows = re.findall(r'"([.0-9a-f]{16})"', m.group(1))
+    if len(rows) != 16:
+        return ""
+    w = h = 16 * scale
+    px = bytearray()
+    for y in range(h):
+        px.append(0)                                   # PNG filter: none
+        for x in range(w):
+            ch = rows[y // scale][x // scale]
+            if ch == ".":
+                px += b"\x00\x00\x00\x00"
+                continue
+            r, g, b = [int(pal[int(ch, 16)][i:i + 2], 16) for i in (1, 3, 5)]
+            px += bytes((r, g, b, 255))
+    def chunk(tag, data):
+        c = struct.pack(">I", len(data)) + tag + data
+        return c + struct.pack(">I", zlib.crc32(tag + data) & 0xffffffff)
+    png = (b"\x89PNG\r\n\x1a\n"
+           + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
+           + chunk(b"IDAT", zlib.compress(bytes(px), 9))
+           + chunk(b"IEND", b""))
+    import base64
+    return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+
+
 def font_face():
     """The console's own font as the display face. site/petme128.woff2 is the
     petme128 8x8 glyph set (MicroPython, MIT -- THIRD_PARTY.md) rendered as a
@@ -141,6 +176,12 @@ def font_face():
             "src:url(data:font/woff2;base64,%s) format('woff2')}" % b64)
 
 
+TICKER = [
+    "MicroPython + native C", "Python and Lua", "64 indexed colours",
+    "Cartridges are folders", "Editors on the device", "OTA with rollback",
+    "No build step", "One codebase, four backends",
+]
+
 # The at-a-glance status row: the honest state of the machine, as data. Dots are
 # role colours (ok / wip / warn), so "what works" is readable before any prose.
 STATUS = [
@@ -150,19 +191,6 @@ STATUS = [
     ("wip", "System apps", "not editable yet"),
     ("warn", "T-Deck WiFi", "broken right now"),
 ]
-
-# The spec-card facts. Left label, right value -- the machine in one table.
-FACTS = [
-    ("Screen", "<b>320 &times; 240</b> for a cart, palette-indexed; the shell reflows to the display"),
-    ("Palette", "<b>64 colours</b>, indexed end to end &mdash; host, device and browser"),
-    ("Languages", "<b>Python and Lua</b>, one verb table, valid verbatim in both"),
-    ("Cartridge", "a <b>folder</b>: manifest, script, sprite sheet, tilemap, sounds"),
-    ("Editors", "config, blocks, code, sprites, map, scene, music &mdash; on the board"),
-    ("Storage", "<b>SD or internal flash</b>; carts re-seed by version, saves kept"),
-    ("Wireless", "<b>WiFi + OTA</b> into an inactive slot, with bootloader rollback"),
-    ("Firmware", "<b>MicroPython</b> + native C kernels, Lua 5.4 VM outside the GC"),
-]
-
 
 def page(pal, has_player):
     p = lambda i: pal[i]  # noqa: E731
@@ -178,14 +206,13 @@ def page(pal, has_player):
     status = "\n".join(
         '      <li><i class="%s"></i><b>%s</b> %s</li>' % (k, name, note)
         for k, name, note in STATUS)
-    facts = "\n".join(
-        '        <tr><th>%s</th><td>%s</td></tr>' % (k, v) for k, v in FACTS)
     features = "\n".join(
         "      <li><h3>%s</h3><p>%s</p></li>" % (t, b) for t, b in FEATURES)
     targets = "\n".join(
         '      <li><h3>%s</h3><p class="chip">%s</p><p>%s</p></li>' % (t, chip, b)
         for t, chip, b in TARGETS)
     rough = "\n".join("      <li>%s</li>" % r for r in ROUGH)
+    ticker = "".join("<span><b>&#9670;</b> %s</span>" % t for t in TICKER)
     return """<!doctype html>
 <html lang="en">
 <head>
@@ -245,18 +272,26 @@ h1 em{font-style:normal;color:var(--accent)}
 .btn:hover{border-color:var(--accent);color:var(--accent)}
 .btn.pri{background:var(--accent);border-color:var(--accent);color:var(--pri-ink);font-weight:600}
 .btn.pri:hover{filter:brightness(1.08);color:var(--pri-ink)}
-/* --- the facts card -------------------------------------------------------- */
-.card{background:var(--surface);border:1px solid var(--line)}
-.facts{padding:6px 18px 12px}
-.facts caption{caption-side:top;text-align:left;font:12px/1 var(--mono);
-  letter-spacing:.16em;text-transform:uppercase;color:var(--muted);padding:14px 0 10px}
-table{width:100%%;border-collapse:collapse;font-size:14px}
-.facts th{text-align:left;vertical-align:top;font:12px/1.5 var(--mono);
-  letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
-  font-weight:400;padding:9px 14px 9px 0;white-space:nowrap}
-.facts td{padding:9px 0;border-bottom:1px solid var(--line);color:var(--body)}
-.facts tr:last-child td{border-bottom:0}
-.facts b{color:var(--ink)}
+/* --- the machine, shown rather than tabulated ------------------------------ */
+.screen{margin:0}
+.bezel{background:var(--surface);border:1px solid var(--line);padding:10px 10px 26px;
+  position:relative}
+.bezel:after{content:"";position:absolute;left:50%%;bottom:9px;transform:translateX(-50%%);
+  width:34px;height:4px;background:var(--line)}
+.bezel img{display:block;width:100%%;image-rendering:pixelated;border:1px solid var(--line)}
+.screen figcaption{margin:10px 2px 0;color:var(--muted);font-size:13px}
+/* --- the mascot ------------------------------------------------------------ */
+.moy{image-rendering:pixelated;vertical-align:-4px}
+nav .moy{width:22px;height:22px;margin-right:9px}
+/* --- ticker: the machine's vocabulary, moving ------------------------------ */
+.tick{border-top:1px solid var(--line);border-bottom:1px solid var(--line);
+  background:var(--surface);overflow:hidden;margin:44px 0 0}
+.tick div{display:flex;gap:26px;white-space:nowrap;padding:9px 0;width:max-content;
+  font:12px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;
+  color:var(--muted);animation:slide 38s linear infinite}
+.tick b{color:var(--accent);font-weight:400}
+@keyframes slide{from{transform:translateX(0)}to{transform:translateX(-50%%)}}
+@media (prefers-reduced-motion: reduce){.tick div{animation:none}}
 /* --- status chips ---------------------------------------------------------- */
 .status{display:flex;flex-wrap:wrap;gap:8px;list-style:none;padding:0;margin:26px 0 0}
 .status li{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);
@@ -305,7 +340,7 @@ footer a{margin-right:4px}
 </head>
 <body>
 <nav><div class="wrap">
-  <a class="brand px" href="#top">moy<em>byte</em></a>
+  <a class="brand px" href="#top"><img class="moy" src="%(mark)s" alt="">moy<em>byte</em></a>
   <span class="sp"></span>
   <a class="l" href="#try">Try it</a>
   <a class="l" href="#in">What's in it</a>
@@ -337,14 +372,15 @@ footer a{margin-right:4px}
 %(status)s
       </ul>
     </div>
-    <div class="card">
-      <table class="facts">
-        <caption>The machine</caption>
-%(facts)s
-      </table>
-    </div>
+    <figure class="screen">
+      <div class="bezel"><img src="media/desktop.gif" alt="The windowed desktop: a smile drawn on the pet sprite in the editor, and the running game window beside it already wearing the change" loading="lazy"></div>
+      <figcaption>Paint a smile on the sprite &mdash; the game window beside it is
+        already wearing it. Recorded from the real console.</figcaption>
+    </figure>
   </div>
 </div>
+
+<div class="tick"><div>%(ticker)s%(ticker)s</div></div>
 
 <section id="try"><div class="wrap">
   <h2>Try it, right here</h2>
@@ -434,8 +470,8 @@ show(tabs[0]);
 </html>
 """ % {
         "tokens": tokens, "font": font_face(), "tabs": tabs, "missing": missing,
-        "status": status, "facts": facts, "features": features,
-        "targets": targets, "rough": rough,
+        "status": status, "features": features, "mark": moy_mark(pal),
+        "targets": targets, "rough": rough, "ticker": ticker,
     }
 
 
@@ -459,6 +495,17 @@ def main():
             has_player = True
         else:
             print("!! no player bundle at %s -- build it first" % PLAYER_SRC)
+
+    # The hero's screen: a real recording of the console. site/hero.gif is
+    # docs/media/desktop/paint.gif with the boot wipe trimmed off -- the page's
+    # first paint IS frame 0, and that frame was an empty desk. Pre-trimmed and
+    # committed because this script must run with nothing installed.
+    gif = os.path.join(HERE, "hero.gif")
+    if not os.path.exists(gif):
+        gif = os.path.join(ROOT, "docs", "media", "desktop", "paint.gif")
+    if os.path.exists(gif):
+        os.makedirs(os.path.join(out, "media"), exist_ok=True)
+        shutil.copyfile(gif, os.path.join(out, "media", "desktop.gif"))
 
     with open(os.path.join(out, "index.html"), "w", encoding="utf-8") as f:
         f.write(page(palette(), has_player))
