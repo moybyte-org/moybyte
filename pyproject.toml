@@ -1,11 +1,11 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "moybyte"
 version = "0.1.0"
-description = "PC-first SDK and simulator for Moybyte projects."
+description = "Moybyte: an operating system for ESP32 boards, plus its host simulator."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []
@@ -28,11 +28,8 @@ device = [
   "mpremote",          # firmware/seeed_xiao_esp32s3_zero/stage.sh
 ]
 
-[project.scripts]
-moybyte = "moybyte_cli.main:main"
-
 [tool.setuptools.packages.find]
-include = ["moybyte*", "moybyte_sim*", "moybyte_blocks*", "moybyte_cli*"]
+include = ["runtime*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

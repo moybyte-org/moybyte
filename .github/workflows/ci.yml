@@ -66,29 +66,10 @@ jobs:
       - name: Run redraw-on-change tests in isolation
         run: .venv/bin/python -m pytest tests/test_redraw_on_change.py
 
-      - name: Check portable examples
-        run: make check-portable
-
-      - name: Run tiny runner headless
-        run: make run-headless
-
-      - name: Compile blocks demo
-        run: make compile-blocks
-
-      - name: Run generated blocks demo
-        run: .venv/bin/moybyte run examples/blocks_demo.moyproj --entry generated/main.generated.py --headless --frames 60
-
-      - name: Run music player stub
-        run: .venv/bin/moybyte run examples/music_player_stub.moyproj --headless --frames 30
-
-      - name: Run radio pong stub
-        run: .venv/bin/moybyte run examples/radio_pong_stub.moyproj --headless --frames 30
-
-      - name: Pack tiny runner
-        run: make pack-example
-
-      - name: Export LilyGO bundle
-        run: make export-lilygo-example
+      # The console itself, headless: boot the launcher, run a cart, exit. This
+      # is what the .moyproj SDK's example steps used to stand in for.
+      - name: Boot the console headless
+        run: .venv/bin/python tools/simulate_desktop.py --demo --gif /tmp/demo.gif
 
   classify-hardware-impact:
     name: Classify software vs. hardware impact

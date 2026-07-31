@@ -8,9 +8,11 @@ This is the answer to "why isn't this MIT?".
 
 ## 1. The decision (two lines)
 
-1. **The `.moyproj` SDK packages and examples are MIT.** Kid projects, carts, and
-   community tools are unencumbered, and the cart format/API is an open
-   specification anyone may implement.
+1. **Carts and the cart format are unencumbered.** Projects you write, the carts
+   you make, and community tools around them carry no obligation to this
+   repository, and the cart format/API is an open specification anyone may
+   implement. (The `.moyproj` SDK packages that used to carry an explicit MIT
+   licence were removed from the tree in 2026-07; they remain MIT in history.)
 2. **The console and firmware are FSL-1.1-MIT** (Functional Source License):
    free for everyone to read, modify, and flash on their own hardware — but
    **selling hardware or a competing product built on it requires a commercial

@@ -17,7 +17,13 @@ restriction above is temporary by design.
 | Part | License |
 |---|---|
 | Repo default — the console, firmware, tools, seed carts (everything not listed below) | [FSL-1.1-MIT](LICENSES/FSL-1.1-MIT.md) (source-available; MIT after 2 years) |
-| `moybyte/`, `moybyte_cli/`, `moybyte_sim/`, `moybyte_blocks/`, `examples/` — the SDK and examples | [MIT](LICENSES/MIT.md) |
+| *(none today)* | [MIT](LICENSES/MIT.md) |
+
+The MIT row is empty because the `.moyproj` SDK and its examples — the only MIT
+parts — were **removed from the tree in 2026-07**. They stay MIT wherever they
+already exist (this repository's history, and any copy you already have); nothing
+about that licence is withdrawn. The row is kept so the distinction is still
+visible if MIT-licensed parts return.
 
 Some files here come from other projects and keep their own licenses — see [THIRD_PARTY.md](THIRD_PARTY.md).
 

@@ -1,7 +1,6 @@
 VENV ?= .venv
 SYSTEM_PYTHON ?= python3
 PYTHON ?= $(VENV)/bin/python
-MOYBYTE ?= $(VENV)/bin/moybyte
 MONITOR_SECONDS ?= 12
 LOG ?= /tmp/moybyte_lilygo_serial.log
 IDF_PYTHON ?= $(HOME)/.espressif/python_env/idf5.5_py3.10_env/bin/python
@@ -28,7 +27,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: setup test run-example run-headless compile-blocks site-gifs doctor check-portable pack-example export-lilygo-example device-doctor device-port firmware-build-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-build-p4 firmware-flash-p4 firmware-monitor-p4 firmware-stage-xiao-zero ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install sync-issues check-venv
+.PHONY: setup test site-gifs firmware-build-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-build-p4 firmware-flash-p4 firmware-monitor-p4 firmware-stage-xiao-zero ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install sync-issues check-venv
 
 # A PLAIN venv on purpose. Two flags used to live here and both hid bugs on every
 # machine but the maintainer's:
@@ -41,6 +40,10 @@ OTA_ROOT ?= $(HOME)/.moybyte-ota
 # needs pygame.
 setup:
 	$(SYSTEM_PYTHON) -m venv $(VENV)
+# A venv seeded by an older distro python can carry setuptools < 64, which has
+# no PEP 660 editable hook -- and there is no setup.py to fall back to since the
+# .moyproj SDK went. Upgrade first, then install.
+	$(PYTHON) -m pip install -q --upgrade pip setuptools
 	$(PYTHON) -m pip install -e '.[dev,sim]'
 
 # Without this, every venv-backed target below dies with a bare
@@ -48,9 +51,9 @@ setup:
 check-venv:
 	@test -x $(PYTHON) || { echo "no venv at $(VENV)/ -- run: make setup"; exit 1; }
 
-VENV_TARGETS := test doctor device-doctor device-port run-example run-headless \
-                compile-blocks site-gifs check-portable sync-issues pack-example \
-                export-lilygo-example ota-manifest ota-serve ota-publish-unstable \
+VENV_TARGETS := test \
+                site-gifs sync-issues \
+                ota-manifest ota-serve ota-publish-unstable \
                 ota-publish-stable ota-host ota-serve-install firmware-flash-p4 \
                 firmware-monitor-p4
 $(VENV_TARGETS): check-venv
@@ -68,45 +71,14 @@ REQUIRE_PYSERIAL = @$(PYTHON) -c "import serial" >/dev/null 2>&1 || { echo "pyse
 test:
 	$(PYTHON) -m pytest
 
-doctor:
-	$(MOYBYTE) doctor
-
-device-doctor:
-	$(MOYBYTE) device-doctor --board lilygo_t_deck_plus
-
-device-port:
-	$(MOYBYTE) device-port
-
-run-example:
-	$(MOYBYTE) run examples/tiny_runner.moyproj
-
-run-headless:
-	$(MOYBYTE) run examples/tiny_runner.moyproj --headless --frames 60
-
-compile-blocks:
-	$(MOYBYTE) compile examples/blocks_demo.moyproj
-
 # Regenerate the teaser-site demo GIFs from the real console (headless).
 site-gifs:
 	$(PYTHON) tools/make_site_gifs.py
-
-check-portable:
-	$(MOYBYTE) check-portable examples/tiny_runner.moyproj examples/blocks_demo.moyproj examples/music_player_stub.moyproj examples/radio_pong_stub.moyproj
 
 # Mirror GitHub issues into docs/issues/ (open/ + closed/ + INDEX.md) so issue
 # numbers referenced in commits/docs/chat resolve locally. Needs the `gh` CLI, authed.
 sync-issues:
 	$(PYTHON) tools/sync_issues.py
-
-pack-example:
-	$(MOYBYTE) pack examples/tiny_runner.moyproj --out /tmp/tiny_runner.kc8
-
-# CI's "Export LilyGO bundle" step calls this. The recipe was dropped with the
-# Arduino firmware (93ea075) but the name stayed in .PHONY, so make answered
-# "Nothing to be done" and the step silently passed for free. The CLI verb it
-# exercises (`moybyte export-device`) is still here, so the target is too.
-export-lilygo-example:
-	$(MOYBYTE) export-device examples/tiny_runner.moyproj --board lilygo_t_deck_plus --out /tmp/moybyte_lilygo_t_deck_plus
 
 firmware-build-lilygo-micropython:
 	bash firmware/lilygo_t_deck_plus_micropython/build.sh

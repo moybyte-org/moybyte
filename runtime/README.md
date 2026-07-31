@@ -60,7 +60,7 @@ code) and **host glue**.
 
 The pre-unification host UI (`shell.py`, `workstation.py`, `engine.py`, `api.py`,
 `cartridge.py`) was **removed** once the shared console replaced it (issue #17); the
-older `.moyproj` SDK lives separately under `moybyte/` / `moybyte_cli/`.
+older `.moyproj` SDK was removed in 2026-07 (git history has it).
 
 Content + tooling:
 - `system_carts/` — `moy_night.moy` (the default: a STATIC brand-colorway night

@@ -4,22 +4,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-Moybyte is a PC-first SDK + simulator for a future ESP32 kids' coding console, plus the firmware that runs it on real hardware (LilyGO T-Deck Plus). There are **two parallel project systems** living side by side — knowing which one you're touching is the single most important orientation fact:
+Moybyte is an operating system for ESP32 boards: a console where the software is
+cartridges, running as firmware on two boards plus a host simulator and a browser build.
+Everything is ONE system now — the `.moyproj` SDK that used to live beside it
+(`moybyte/`, `moybyte_cli/`, `moybyte_sim/`, `moybyte_blocks/`, `examples/`, the
+portable-subset gate) was **deleted 2026-07-31**; nothing depended on it but its own
+tests, and the console's block compiler (`runtime/blocks.py`, #29) was always separate.
+Git history has it if you need it. `.moy` is the only cart format.
 
-1. **The `.moyproj` SDK (original, mature).** A kid writes a project; it runs on a PC sim and exports to firmware.
-   - `moybyte/` — the runtime/API a project calls (`api`, `screen`, `sprites`, `input`, `audio`, `radio`, `manifest`, `permissions`).
-   - `moybyte_cli/` — the `moybyte` console command (`run`, `new`, `pack`, `check-portable`, `export-device`, firmware header gen, board defs).
-   - `moybyte_sim/` — sim backends (`pygame_backend`, `headless_backend`, fake audio/radio).
-   - `moybyte_blocks/` — block-language → Python compiler.
-   - Projects (`examples/*.moyproj`) must stay inside a **portable subset** enforced by `moybyte_cli/portable.py`: only `moybyte`/`math`/`random` imports, and no `eval`/`exec`/`open`/`getattr`/etc. `make check-portable` is the gate.
+- `runtime/` — the **host reference** of the console (launcher → Player → tabbed Editor). Pure host, fast dev loop. See `runtime/README.md` for the per-file map; don't duplicate it.
+- `firmware/lilygo_t_deck_plus_micropython/` — the **device port** of that same console (MicroPython).
+- `firmware/esp32_p4_wifi6_touch_lcd_7b/` — the **second device target** (#58): the 7″ 1024×600 MIPI-DSI "desktop workstation" board. Panel/touch/SD/WiFi hardware-confirmed; the **console runs on glass** (the two-worlds desktop under `WindowedWM` — boots to the desk, #105; carts on internal flash; on-glass verify of the two-worlds split pending next flash) — colors/flicker/touch/popup/wallpaper all fixed on-glass, the game composite runs on the hardware **PPA** (`moy_ppa`) with an **async-overlap** frame path — post-#159 (L2 cache 256KB) the **whole cart roster sits at the 60 cap** with headroom; app-window drags ~43fps (triple framebuffer + retained backdrop cache).
+- `system_carts/*.moy` — seed cartridges (folder = `manifest.json` + `main.py` + `config.json`).
 
-2. **The `.moy` console (newer, active direction).** A TIC-80-style "fantasy workstation" where *everything is a cartridge* — now running the shipped **v0.5 shell** (everything-is-a-process: launcher / Player / Editor apps over a fullscreen-stack WM; spec `docs/shell_ux_v1.md`). This is where current feature work happens.
-   - `runtime/` — the **host reference** of the console (launcher → Player → tabbed Editor). Pure host, fast dev loop. See `runtime/README.md` for the per-file map; don't duplicate it.
-   - `firmware/lilygo_t_deck_plus_micropython/` — the **device port** of that same console (MicroPython).
-   - `firmware/esp32_p4_wifi6_touch_lcd_7b/` — the **second device target** (#58): the 7″ 1024×600 MIPI-DSI "desktop workstation" board. Panel/touch/SD/WiFi hardware-confirmed; the **console runs on glass** (the two-worlds desktop under `WindowedWM` — boots to the desk, #105; carts on internal flash; on-glass verify of the two-worlds split pending next flash) — colors/flicker/touch/popup/wallpaper all fixed on-glass, the game composite runs on the hardware **PPA** (`moy_ppa`) with an **async-overlap** frame path — post-#159 (L2 cache 256KB) the **whole cart roster sits at the 60 cap** with headroom; app-window drags ~43fps (triple framebuffer + retained backdrop cache).
-   - `system_carts/*.moy` — seed cartridges (folder = `manifest.json` + `main.py` + `config.json`).
-
-The two systems share a design intent but **not code**. `.moyproj` is the old format; `.moy` is the v0.4 format.
+The shipped shell is **v0.5** (everything-is-a-process: launcher / Player / Editor apps
+over a fullscreen-stack WM; spec `docs/shell_ux_v1.md`).
 
 ### The v0.4 portability contract (why the canvas is "indexed")
 
@@ -30,18 +29,10 @@ The v0.4 canvas works in **palette indices** (the `MOY64` palette) with a plain-
 ```bash
 make setup          # python -m venv + pip install -e '.[dev,sim]' (hermetic: NOT --system-site-packages)
 make test           # pytest (all). The venv python is .venv/bin/python
-make doctor         # environment sanity check via the moybyte CLI
 
 # run a single test
 .venv/bin/python -m pytest tests/test_v04_userland.py -k cards
 .venv/bin/python -m pytest tests/test_micropython_spike.py::test_name
-```
-
-`.moyproj` SDK loop:
-```bash
-.venv/bin/moybyte run examples/tiny_runner.moyproj --headless --frames 60
-.venv/bin/moybyte run examples/tiny_runner.moyproj --fps 30 --scale 4   # pygame window
-make check-portable                                                     # portable-subset gate
 ```
 
 `.moy` console (host):

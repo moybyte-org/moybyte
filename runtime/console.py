@@ -2791,7 +2791,7 @@ class Workstation:
         if hook is not None:
             hook(app)
         # The picker HIDES carts an app claims (_picker_items, temporary until
-        # #55), but apps register AFTER the store scan builds the grid -- so
+        # #181), but apps register AFTER the store scan builds the grid -- so
         # re-derive it here or the first-built grid keeps the app carts it was
         # built without knowing about. Cheap: a handful of app registrations at
         # boot, each a list rebuild over the already-scanned carts.
@@ -3814,7 +3814,7 @@ class Workstation:
         and the `.moy` only carries identity, icon art and a few-line fallback
         body for an older shell. Listing them offered a project whose "code" was
         that stub -- editing it changes nothing the kid can see. Hiding them is
-        a placeholder for the real fix: #55 / docs/shell_architecture_v1.md
+        a placeholder for the real fix: #181 / docs/shell_architecture_v1.md
         "privileged system carts", where each app becomes a genuine cart running
         under make_system_api and this filter comes back out.
 
@@ -3822,7 +3822,7 @@ class Workstation:
         (the same is_app() check the desk icons and launcher dispatch use), so a
         kid-made cart of type "app" -- which no shell app claims -- still shows.
         Note this departs from shell_ux_v1's "everything is editable"; the spec
-        line is right again once #55 lands."""
+        line is right again once #181 lands."""
         apps = getattr(self, "_apps", ())
         if apps:
             keep = []

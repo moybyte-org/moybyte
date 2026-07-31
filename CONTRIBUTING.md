@@ -42,7 +42,6 @@ Python 3.10+ is all you need for the host side — no toolchain, no device.
 ```bash
 make setup          # .venv + editable install (the dev + sim extras)
 make test           # pytest — must pass
-make check-portable # if you touched examples/ or the .moyproj SDK
 
 .venv/bin/python tools/simulate_desktop.py   # the console itself, on your PC
 make doctor         # environment sanity check, if something looks off

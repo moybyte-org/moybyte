@@ -2,16 +2,29 @@
 
 [![CI](https://github.com/moybyte-org/moybyte/actions/workflows/ci.yml/badge.svg)](https://github.com/moybyte-org/moybyte/actions/workflows/ci.yml)
 
-**A fantasy workstation where everything is a cartridge — the games, the paint
-app, the wallpaper, the spreadsheet. Open any of them, change it, run it. The
-same console runs as a PC simulator, on two real ESP32 boards, and in a browser
-tab, drawing the same 320×240 indexed pixels on all four.**
+**An operating system that turns an ESP32 board into a small general-purpose
+computer — one you can also write software on, on the board itself. The software
+is cartridges: games, wallpapers, tools, whatever you make. Open any of them,
+change it, run it, with no host computer in the loop. It boots on two
+off-the-shelf boards today; the same source tree is also a PC simulator and a
+browser build.**
 
-Think TIC-80, but the console is the *operating system*: a launcher, a windowing
-shell, and an editor (code / sprites / tilemap / scene / music / blocks) that are
-themselves ordinary processes over one small cart API. A cart is a folder — a
-manifest, a Python or Lua script, an indexed sprite sheet, a tilemap, a sound
-bank. No build step, no per-device binary.
+Its closest relatives are TIC-80 and Picotron: a fantasy console whose editors
+are part of the machine. The difference is that here the console *is* the
+system — the launcher, the window manager and the editor (config / blocks / code
+/ sprites / tilemap / scene / music) are processes on the same window manager
+that runs your cart, not a separate mode you leave the machine to enter. A cart
+is a folder: a manifest, a Python or Lua script, an indexed sprite sheet, a
+tilemap, a sound bank. No build step, no per-device binary, no host toolchain.
+
+It is approachable enough for a ten-year-old (that is what the block editor and
+the seed carts are for) without being *only* that: underneath is a MicroPython
+firmware with native C kernels, a Lua VM, OTA updates and a windowing shell, and
+you are meant to be able to read and change all of it.
+
+Carts draw in 64 indexed colours on a 320×240 surface, the same on every target.
+The shell around them is not fixed — it reflows from that handheld screen to a 7″
+1024×600 desktop, from one implementation.
 
 This repo is the **reference implementation of [moy core 0.1](https://github.com/moybyte-org/moy-spec)**,
 the public spec for that cart format and its verb table.
@@ -36,20 +49,88 @@ the public spec for that cart format and its verb table.
 | **Browser** | MicroPython compiled to WebAssembly (`firmware/web_runner/`) — the console *is* the page, no server. |
 
 Host and device are **one codebase**, not a port. `runtime/` is canonical; each
-firmware build stages copies of those modules and freezes them. A pixel that
-moves in the simulator moves on glass.
+firmware build stages copies of those modules and freezes them, so the simulator
+is not a second implementation that can drift from the firmware.
 
-The GIFs above are the desktop tier at 1024×600. Here is the *same console, same
-code*, on the handheld tier at its native 320×240 — the layouts reflow, the
-pixels don't change:
+The GIFs above are the desktop tier at 1024×600. Below is the same console, from
+the same modules, on the handheld tier at its native 320×240 — the layout
+reflows to the smaller screen:
 
 | ![The paint editor at native 320x240](docs/media/paint.gif) | ![The code editor at native 320x240](docs/media/code.gif) |
 |:--:|:--:|
 | The same paint session, fullscreen at 320×240 | …and the same code editor |
 
-Only a *running cart* is fixed at 320×240. Every editor surface is
-system-domain responsive, so the console reflows to a phone-sized panel, a
-handheld, or a 7″ desktop from one implementation.
+## What's in it
+
+Everything below exists and runs today. Where something is unverified or rough,
+it says so.
+
+**The shell** — a launcher, a Player (`run(cart)` plays until exit and returns to
+whoever called it), and an Editor: all ordinary processes over a window manager.
+Two presentation tiers from one implementation — a fullscreen back-stack on the
+handheld, and a windowed desktop on the 7″ board with draggable, resizable
+windows and a taskbar, where a playtest keeps running beside the editor you are
+typing in. Panel themes in dark and light, live or static wallpapers, and a
+per-window responsive layout: every surface reflows from a phone panel to a 7″
+desk, and only a *running cart* is fixed at 320×240.
+
+**The editors, on the device itself** — seven tabs over one project: Config,
+Blocks, Code, Sprites, Map, Scene, Music. Blocks compile to the same Python and
+*graduate* to it when you edit the code directly. There is no save button and no
+dirty star: commits ride a typing-idle autosave and every exit path, backed by a
+per-project journal, so undo/redo walks fine-grained edits and then whole
+commits, scoped to the tab you are in. A crash drops you into the code on the
+offending line.
+
+**Apps** — Paint, Files, Writer, Sheets, Storybook, Calc, Settings, Appearance,
+WiFi setup. Drawings, documents and tables live in a shared file layer that carts
+can read back. They sit on the launcher as carts and behave like the rest of the
+system; their code still lives in the shell rather than in an editable cart,
+which is what [#181](https://github.com/moybyte-org/moybyte/issues/181) is for.
+
+**Two cart languages** — Python and Lua, one verb table, valid verbatim in both.
+On device, Lua carts run on a vendored Lua 5.4 VM whose heap lives *outside*
+MicroPython's GC and is freed wholesale at exit. Drawing, input, sprites,
+tilemaps, layers, audio, scenes, spreadsheets and documents, persistent memory —
+[the full table](docs/moy_cart_api.md) is about 55 verbs and no imports.
+
+**Graphics** — an indexed 64-colour palette end to end, every draw verb landing
+in a native C kernel on device (`moy_gfx`). The 7″ board composites the game
+through the SoC's hardware PPA, with the DMA overlapping the next frame's input
+poll; scrolling shifts retained pixels instead of repainting them; sprite
+batching collapses N calls into one. An optional frameskip runs logic at the full
+rate and motion at 30 Hz.
+
+**Sound** — a C mixer (`moy_audio`) on both boards and in the browser, fed by a
+tracker-style sound bank. PICO-8 imports carry eight waveforms, the effect
+column, four-channel patterns and SFX loop ranges.
+
+**Cartridges are folders** — a manifest, a script, an indexed sheet, a tilemap, a
+sound bank. No build step and no per-device binary: copy a folder onto the SD
+card and it is on the launcher. Built-in carts re-seed by version and keep the
+your saves and tuning across an update.
+
+**Wireless** — WiFi setup lives in Settings, so it works while a game runs.
+Firmware updates go over the air on two channels, stable and beta, into an
+inactive OTA slot with bootloader rollback; that whole path was confirmed on a
+T-Deck — download, install, boot the new slot, roll back. The device can also
+serve the running console to a browser on the same network as draw commands
+rather than pixels, which also ran on that board. **Both are stale rather than
+proven right now:** neither has been exercised in a while, and WiFi on the T-Deck
+is currently broken
+([#182](https://github.com/moybyte-org/moybyte/issues/182)), so treat them as
+"worked when last tested" until that is fixed.
+
+**Four rendering backends, one contract** — host, two boards, and a browser page
+that draws the console's commands itself. That contract is written down
+([`docs/surface_model_v1.md`](docs/surface_model_v1.md)), including its graveyard
+of approaches that were built, measured and reverted.
+
+**Tests** — ~1900, all headless. Golden-frame tests pin the host renderer and a
+canvas-parity suite holds the device backend to it; the firmware tests read the
+frozen module tree rather than executing it. The P4 is driven over its live serial
+console by a pytest suite that taps and swipes the real UI, and the browser build
+has a screenshot harness that replays real frames through the real page code.
 
 ## Try it in 60 seconds
 
@@ -183,21 +264,6 @@ cost a debugging session.
 Design doc: [`moybyte_Console_Plan_v0_5.md`](moybyte_Console_Plan_v0_5.md).
 Shell reference: [`docs/shell_ux_v1.md`](docs/shell_ux_v1.md).
 
-## The `.moyproj` SDK (the original system)
-
-Before the `.moy` console there was a PC-first SDK with its own project format
-and its own API — `moybyte/`, `moybyte_cli/`, `moybyte_sim/`, `moybyte_blocks/`,
-`examples/`. It is **not** where feature work happens, and its API is *not* the
-cart API above. It stays because it seeds the icons → blocks → code ladder and
-its portable-subset checker still guards `examples/`.
-
-```bash
-.venv/bin/moybyte run examples/tiny_runner.moyproj --headless --frames 60
-make check-portable
-```
-
-If you are here for the console, you want `.moy`, not `.moyproj`.
-
 ## Contributing
 
 Read [`CONTRIBUTING.md`](CONTRIBUTING.md) — features want an issue first, and
@@ -214,9 +280,8 @@ your own board, modify it, teach with it, make and sell your own carts. Selling
 hardware (or a commercial product) built on the console requires a commercial
 license, and that restriction expires per release two years after publication.
 
-Details and the exact split: [`LICENSE.md`](LICENSE.md) — the SDK and examples
-(`moybyte/`, `moybyte_cli/`, `moybyte_sim/`, `moybyte_blocks/`, `examples/`) are
-[MIT](LICENSES/MIT.md); the console and firmware are
+Details and the exact split: [`LICENSE.md`](LICENSE.md) — the console and
+firmware are
 [FSL-1.1-MIT](LICENSES/FSL-1.1-MIT.md) (source-available, becomes MIT after two
 years). The `.moy` cart format and API are an open specification, and carts you
 author are yours. What each licence lets you do, in a table:

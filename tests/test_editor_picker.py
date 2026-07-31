@@ -49,7 +49,7 @@ def test_picker_lists_the_new_tile_then_every_editable_cart(tmp_path):
     # Those are not really projects: the app is a frozen shell module and the
     # cart holds only identity + icon + a few-line fallback body, so offering it
     # as a project meant editing code the kid can never see run. TEMPORARY --
-    # #55 (privileged system carts) makes them real and this exclusion goes
+    # #181 (editable system apps) makes them real and this exclusion goes
     # away; shell_ux_v1's "everything is editable" line is right again then.
     claimed = [c for c in ws._all_carts
                if any(app.is_app(c) for app, _t in getattr(ws, "_apps", ()))]

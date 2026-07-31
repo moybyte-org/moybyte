@@ -304,7 +304,7 @@ def test_p4_build_stages_the_leaf():
 
 # ---------------------------------------------------------------------------
 # System-app carts are hidden from the Editor picker (TEMPORARY -- see
-# _picker_items; #55 privileged system carts removes this).
+# _picker_items; #181 editable system apps removes this).
 # ---------------------------------------------------------------------------
 
 def test_picker_hides_claimed_system_apps(tmp_path):
