@@ -6,7 +6,7 @@ Moybyte uses a split license. The short version:
 firmware on your own board, modify it, share your fork, teach a class with it,
 make and even sell your own carts. No license key, no registration, no fee.
 
-**Selling hardware or a commercial product built on the console requires a
+**Selling hardware or a commercial product built on Moybyte requires a
 commercial license from us.** Contact the maintainers.
 
 **Every release becomes plain MIT two years after its publication** — the
@@ -16,7 +16,7 @@ restriction above is temporary by design.
 
 | Part | License |
 |---|---|
-| Repo default — the console, firmware, tools, seed carts (everything not listed below) | [FSL-1.1-MIT](LICENSES/FSL-1.1-MIT.md) (source-available; MIT after 2 years) |
+| Repo default — the system, firmware, tools, seed carts (everything not listed below) | [FSL-1.1-MIT](LICENSES/FSL-1.1-MIT.md) (source-available; MIT after 2 years) |
 | The **web player artifacts** built by `firmware/web_runner/build.sh --spec` (`index.html`, `micropython.mjs`, `micropython.wasm`) | [MIT](LICENSES/MIT.md) — see below |
 
 **The spec player is MIT on purpose.** The de-branded player built by
@@ -39,7 +39,7 @@ you author are **yours** — this repository's licenses claim nothing over them.
 The Functional Source License is *source-available*, not OSI-certified open
 source, and we don't claim otherwise. Its practical effect: you can do anything
 except commercially compete with us (e.g. sell hardware preloaded with this
-console) — and even that becomes permitted, per release, two years after that
+system) — and even that becomes permitted, per release, two years after that
 release ships.
 
 "Moybyte" and the Moybyte logo are trademarks and are **not** licensed by the

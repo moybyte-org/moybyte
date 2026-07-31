@@ -5,7 +5,7 @@ Mirrors the moy-spec site generator's rule: the CANONICAL things live where they
 live, and this only assembles. The playable player is the real web runner build
 (firmware/web_runner/dist), copied in under player/ -- so what a visitor plays is
 the same bundle the repo ships, at the commit they are reading. The page's colours
-come from runtime/palette.py's MOY64, so the site cannot drift from the console's
+come from runtime/palette.py's MOY64, so the site cannot drift from the system's
 own palette.
 
     python3 site/build.py                  # -> _site/
@@ -32,7 +32,7 @@ sys.path.insert(0, ROOT)
 
 
 def palette():
-    """The console's own 64 colours, as #rrggbb -- the site's palette IS MOY64."""
+    """Moybyte's own 64 colours, as #rrggbb -- the site's palette IS MOY64."""
     from runtime.palette import MOY64
     return ["#%02x%02x%02x" % tuple(c) for c in MOY64]
 
@@ -91,7 +91,7 @@ FEATURES = [
      "bootloader rollback if the new image does not come up &mdash; confirmed on "
      "hardware end to end, though it has not been exercised lately."),
     ("Streams itself to a browser",
-     "The device can serve the running console over WiFi as draw commands rather "
+     "The device can serve the running system over WiFi as draw commands rather "
      "than pixels &mdash; the same protocol this page&rsquo;s player speaks. It "
      "ran on a T-Deck; on that board it is broken right now, and the cause is a "
      "missing re-export rather than the radio."),
@@ -104,10 +104,10 @@ TARGETS = [
      "over-the-air updates."),
     ("Waveshare ESP32-P4 7B", "ESP32-P4",
      "1024&times;600 over MIPI-DSI, mainline MicroPython with a vendored panel "
-     "driver. The same console as a windowed desktop, with the game composite on "
+     "driver. The same system as a windowed desktop, with the game composite on "
      "the hardware PPA."),
     ("This browser tab", "WebAssembly",
-     "The console compiled to wasm. The page is the display &mdash; the console "
+     "The system compiled to wasm. The page is the display &mdash; the OS "
      "ships draw commands and never rasterizes a pixel itself."),
     ("PC simulator", "pure Python",
      "The host reference and the fast dev loop. A pixel that moves here moves on "
@@ -128,7 +128,7 @@ ROUGH = [
 
 
 def moy_mark(pal, scale=3):
-    """The Moy mascot as a PNG data URI, rendered from the console's OWN icon art
+    """The Moy mascot as a PNG data URI, rendered from the system's OWN icon art
     (runtime/chrome.py's _ICON_ART["moy"], 16x16, hex chars = MOY64 indices).
     Read out of the source text rather than imported: chrome.py pulls in the whole
     surface stack, and this script must stay importable with nothing installed."""
@@ -163,7 +163,7 @@ def moy_mark(pal, scale=3):
 
 
 def font_face():
-    """The console's own font as the display face. site/petme128.woff2 is the
+    """The system's own font as the display face. site/petme128.woff2 is the
     petme128 8x8 glyph set (MicroPython, MIT -- THIRD_PARTY.md) rendered as a
     webfont; inlined so the page stays one self-contained file."""
     import base64
@@ -178,7 +178,7 @@ def font_face():
 # The at-a-glance status list: the honest state of the machine, as data. Dots are
 # role colours (ok / wip / warn), so "what works" is readable before any prose.
 STATUS = [
-    ("ok", "Console", "on two ESP32 boards"),
+    ("ok", "The system", "boots on two ESP32 boards"),
     ("ok", "Editors", "on the device itself"),
     ("ok", "OTA updates", "hardware-confirmed"),
     ("wip", "System apps", "not editable yet"),
@@ -213,7 +213,7 @@ def page(pal, has_player):
 <meta name="description" content="An operating system that turns an ESP32 board into a small general-purpose computer. The software is cartridges -- open any of them, change it, run it, on the board itself. Try it here, no install.">
 <style>
 /* Every colour below is MOY64, generated from runtime/palette.py -- the site
-   cannot drift from the console's own palette. Roles are named so the light
+   cannot drift from the system's own palette. Roles are named so the light
    scheme differs only in the block that follows. */
 :root{%(tokens)s
   --bg:#05070d; --surface:#090d19; --raised:#0d1325; --line:#141e3a;
@@ -237,7 +237,7 @@ body{margin:0;background:var(--bg);color:var(--body);font:16px/1.62 var(--sans)}
 .wrap{width:100%%;max-width:var(--w);margin:0 auto;padding:0 24px}
 a{color:var(--link);text-decoration-thickness:1px;text-underline-offset:2px}
 h1,h2,h3{color:var(--ink);line-height:1.25}
-/* --- pixel-native display type: the console's own font ---------------------- */
+/* --- pixel-native display type: the system's own font ---------------------- */
 .px{font-family:'Petme128',var(--mono);letter-spacing:.02em}
 /* --- top bar --------------------------------------------------------------- */
 nav{position:sticky;top:0;z-index:9;background:var(--bg);border-bottom:1px solid var(--line)}
@@ -382,7 +382,7 @@ footer a{margin-right:4px}
 
 <section id="try"><div class="wrap">
   <h2>Try it, right here</h2>
-  <p class="slead">The real console compiled to WebAssembly &mdash; the same code the
+  <p class="slead">The real system compiled to WebAssembly &mdash; the same code the
     firmware freezes, served from this page and nowhere else. Not a mock-up, not a
     video.</p>
   <div class="tabs" id="tabs">
@@ -422,7 +422,7 @@ footer a{margin-right:4px}
 
 <section id="build"><div class="wrap">
   <h2>Build it</h2>
-  <pre><span class="c"># the console on your PC</span>
+  <pre><span class="c"># the system on your PC</span>
 make setup &amp;&amp; make test
 .venv/bin/python tools/simulate_desktop.py
 
@@ -439,7 +439,7 @@ firmware/web_runner/build.sh &amp;&amp; make site</pre>
     <a href="https://github.com/moybyte-org/moybyte/issues">Issues</a>
     <br><br>
     Source-available (FSL-1.1-MIT): free to run, modify, teach with, and to author
-    and sell carts; selling hardware built on the console needs a commercial licence
+    and sell carts; selling hardware built on Moybyte needs a commercial licence
     until each release turns MIT two years after publication. The player bundle on
     this page is MIT. The kid- and parent-facing site is
     <a href="https://moybyte.com">moybyte.com</a>.
@@ -448,7 +448,7 @@ firmware/web_runner/build.sh &amp;&amp; make site</pre>
 <script>
 // Tabs own ONE iframe and swap its src, so only one wasm VM is ever live (two
 // would mean two heaps and two frame loops competing for the main thread). The
-// first tab loads immediately; switching reboots the console for that tier.
+// first tab loads immediately; switching reboots the system for that tier.
 var stage = document.getElementById("stage");
 var tabs = [].slice.call(document.querySelectorAll(".tab"));
 function show(tab) {
@@ -456,7 +456,7 @@ function show(tab) {
   stage.style.aspectRatio = tab.dataset.ar;
   stage.innerHTML = "";
   var f = document.createElement("iframe");
-  f.setAttribute("title", tab.querySelector("b").textContent + " console");
+  f.setAttribute("title", tab.querySelector("b").textContent + " tier");
   f.setAttribute("allow", "autoplay");
   f.src = "player/index.html" + tab.dataset.q;
   stage.appendChild(f);
@@ -494,7 +494,7 @@ def main():
         else:
             print("!! no player bundle at %s -- build it first" % PLAYER_SRC)
 
-    # The hero's screen: a real recording of the console, committed because this
+    # The hero's screen: a real recording of the system, committed because this
     # script must run with nothing installed (the Pages job has no Pillow, no
     # venv). Regenerate it with `make site-hero`, which is
     #   tools/make_site_gifs.py --windowed --scene code --wallpaper moy_night

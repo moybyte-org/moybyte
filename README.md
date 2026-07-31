@@ -10,10 +10,10 @@ off-the-shelf boards today; the same source tree is also a PC simulator and a
 browser build.**
 
 Its closest relatives are TIC-80 and Picotron: a fantasy console whose editors
-are part of the machine. The difference is that here the console *is* the
-system — the launcher, the window manager and the editor (config / blocks / code
-/ sprites / tilemap / scene / music) are processes on the same window manager
-that runs your cart, not a separate mode you leave the machine to enter. A cart
+are part of the machine. The difference is that here it goes all the way down to
+an operating system — the launcher, the editor (config / blocks / code / sprites
+/ tilemap / scene / music) and your running cart are all processes on one window
+manager, not a separate mode you leave the machine to enter. A cart
 is a folder: a manifest, a Python or Lua script, an indexed sprite sheet, a
 tilemap, a sound bank. No build step, no per-device binary, no host toolchain.
 
@@ -24,7 +24,7 @@ you are meant to be able to read and change all of it.
 
 Carts draw in 64 indexed colours on a 320×240 surface, the same on every target.
 The shell around them is not fixed — it reflows from that handheld screen to a 7″
-1024×600 desktop, from one implementation.
+1024×600 desktop, all from one implementation.
 
 This repo is the **reference implementation of [moy core 0.1](https://github.com/moybyte-org/moy-spec)**,
 the public spec for that cart format and its verb table.
@@ -37,7 +37,7 @@ the public spec for that cart format and its verb table.
 
 | ![The code editor as a window on the desktop](docs/media/desktop/code.gif) | ![Building a block program next to the scene it drives](docs/media/desktop/blocks.gif) |
 |:--:|:--:|
-| The code editor is a tab in the same console | Blocks compile to the same Python, and *graduate* to it |
+| The code editor is a tab in the same system | Blocks compile to the same Python, and *graduate* to it |
 
 ## What it runs on
 
@@ -45,14 +45,14 @@ the public spec for that cart format and its verb table.
 |---|---|
 | **PC simulator** | `runtime/` — pure Python, no device. The host reference and the fast dev loop. |
 | **LilyGO T-Deck Plus** (ESP32-S3) | MicroPython firmware, native 320×240, keyboard + trackball + touch, carts on SD, OTA updates. |
-| **Waveshare ESP32-P4 7B** | 1024×600 MIPI-DSI. Same console, second presentation tier: a windowed desktop with draggable app windows. |
-| **Browser** | MicroPython compiled to WebAssembly (`firmware/web_runner/`) — the console *is* the page, no server. |
+| **Waveshare ESP32-P4 7B** | 1024×600 MIPI-DSI. Same system, second presentation tier: a windowed desktop with draggable app windows. |
+| **Browser** | MicroPython compiled to WebAssembly (`firmware/web_runner/`) — the OS *is* the page, no server. |
 
 Host and device are **one codebase**, not a port. `runtime/` is canonical; each
 firmware build stages copies of those modules and freezes them, so the simulator
 is not a second implementation that can drift from the firmware.
 
-The GIFs above are the desktop tier at 1024×600. Below is the same console, from
+The GIFs above are the desktop tier at 1024×600. Below is the same system, from
 the same modules, on the handheld tier at its native 320×240 — the layout
 reflows to the smaller screen:
 
@@ -115,7 +115,7 @@ Firmware updates go over the air on two channels, stable and beta, into an
 inactive OTA slot with bootloader rollback; that whole path was confirmed on a
 T-Deck — download, install, boot the new slot, roll back. It has not been
 exercised in a while, so treat it as "worked when last tested". The device can
-also serve the running console to a browser on the same network as draw commands
+also serve the running system to a browser on the same network as draw commands
 rather than pixels, which ran on that board too — but **that transport is broken
 on the T-Deck right now**
 ([#182](https://github.com/moybyte-org/moybyte/issues/182)). The radio is fine:
@@ -123,7 +123,7 @@ it associates, takes a DHCP lease and serves the page; a missing re-export makes
 the asset request fail, and the page never opens its live channel.
 
 **Four rendering backends, one contract** — host, two boards, and a browser page
-that draws the console's commands itself. That contract is written down
+that draws the system's draw commands itself. That contract is written down
 ([`docs/surface_model_v1.md`](docs/surface_model_v1.md)), including its graveyard
 of approaches that were built, measured and reverted.
 
@@ -152,7 +152,7 @@ you just played.
 # skip the launcher, run one cart
 .venv/bin/python tools/simulate_desktop.py --cart system_carts/star_catcher.moy
 
-# the whole console streamed to a browser as draw commands (no wasm build)
+# the whole system streamed to a browser as draw commands (no wasm build)
 .venv/bin/python tools/web_console.py --size 1024x600 --windowed
 
 # headless tour -> animated GIF (this is how the GIFs above are made)
@@ -160,12 +160,12 @@ you just played.
 ```
 
 No display? Every test runs headless, and `--gif`/`--script` drive the real
-console without one.
+system without one.
 
 **In the browser, for real.** `firmware/web_runner/build.sh` compiles the same
-console to WebAssembly (it fetches emsdk itself; first build is slow) and emits a
+system to WebAssembly (it fetches emsdk itself; first build is slow) and emits a
 static `dist/` — serve it with `firmware/web_runner/serve.py` and the whole
-console, cart roster included, runs in a tab with no server behind it. That build
+system, cart roster included, runs in a tab with no server behind it. That build
 is also what the spec repo vendors as its player, so **you can try a cart without
 cloning anything**: `moy.py run` over there is one command and no dependencies.
 
@@ -210,18 +210,20 @@ twin of `system_carts/sakura.moy`, pinned by a test.
 ## The spec
 
 The cart format and verb table are a **public spec** so carts aren't hostage to
-this console: [**moybyte-org/moy-spec**](https://github.com/moybyte-org/moy-spec)
+this one implementation: [**moybyte-org/moy-spec**](https://github.com/moybyte-org/moy-spec)
 (MIT). It ships `SPEC.md`, a browser player built from this repo's web runner,
 a `moy` CLI (`new` / `run` / `export` / `port`), and a PICO-8 converter — a p8
 cart converts art, map, sound and code under a compat shim.
 
-The spec is deliberately narrow: it describes what a *game* touches. Everything
-else in this repo — the shell, the editors, the window manager, the app API — is
-above core, and consoles are expected to differ there.
+The spec is deliberately narrow: it describes what a *game* touches. That layer
+is where the word *console* belongs — moy core specifies a virtual console, and
+Moybyte is a system that contains one. Everything else in this repo — the shell,
+the editors, the window manager, the app API — is above core, and consoles are
+expected to differ there.
 
 ## The hardware, honestly
 
-Both boards are real and both boot to the console — but both are off-the-shelf
+Both boards are real and both boot to Moybyte — but both are off-the-shelf
 dev boards; bespoke hardware is roadmap, not shipped. The T-Deck Plus is a
 keyboard handheld; the P4 board is a 7″ desktop. What's honest about the state:
 
@@ -253,7 +255,7 @@ cost a debugging session.
 
 | path | |
 |---|---|
-| `runtime/` | the console: kernel, WMs, player, editor app, every surface. **[Its README](runtime/README.md) is a per-file map.** |
+| `runtime/` | the system: kernel, WMs, player, editor app, every surface. **[Its README](runtime/README.md) is a per-file map.** |
 | `system_carts/` | the seed cartridges — games, wallpapers, and the system apps (Paint, Files, Sheets, Writer, Storybook, Calc) |
 | `firmware/lilygo_t_deck_plus_micropython/` | the ESP32-S3 port + the native C modules (`moy_gfx`, `moy_lua`, `moy_audio`, `moy_sd`) |
 | `firmware/esp32_p4_wifi6_touch_lcd_7b/` | the ESP32-P4 port (mainline MicroPython + a vendored DSI driver) |
@@ -278,10 +280,10 @@ an identical API, or the "one cart, every tier" contract breaks.
 
 Everything you'd do as a person is free: run the simulator, flash the firmware on
 your own board, modify it, teach with it, make and sell your own carts. Selling
-hardware (or a commercial product) built on the console requires a commercial
+hardware (or a commercial product) built on Moybyte requires a commercial
 license, and that restriction expires per release two years after publication.
 
-Details and the exact split: [`LICENSE.md`](LICENSE.md) — the console and
+Details and the exact split: [`LICENSE.md`](LICENSE.md) — the system and
 firmware are
 [FSL-1.1-MIT](LICENSES/FSL-1.1-MIT.md) (source-available, becomes MIT after two
 years). The `.moy` cart format and API are an open specification, and carts you
