@@ -8,7 +8,15 @@ This script is the conversion that produced it -- run it again with the same
 source image to reproduce the shipped bytes exactly.
 
 The source is an AI-generated cherry-tree scene supplied by the project owner
--- the project's own image, with no outside rights holder. Pass its path:
+-- the project's own image, with no outside rights holder.
+
+THE HIGH-RESOLUTION ORIGINAL IS LOST (it was handed to a session and never
+committed). What is committed is `assets/sakura_bg.png`, the shipped bitmap
+rendered back out at 320x240 -- and because the crop is already 4:3, the
+downscale is then identity and the quantise is idempotent, re-importing it
+reproduces `bg.moyimg` BYTE-FOR-BYTE. So the pipeline is reproducible from a
+clean clone; what is gone is the ability to re-derive at a different size or
+crop. Run with no arguments to use it:
 
     .venv/bin/python tools/import_sakura_bg.py ~/sakura_source.jpeg
     .venv/bin/python tools/import_sakura_bg.py SRC --png /tmp/sakura.png
@@ -211,7 +219,8 @@ def encode_bg(buf):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("source", help="the owner's source image")
+    ap.add_argument("source", nargs="?", default=os.path.join(ROOT, "assets", "sakura_bg.png"),
+                    help="source image (default: the committed assets/sakura_bg.png)")
     ap.add_argument("--left", type=int, default=14,
                     help="left edge of the 4:3 crop (default 14: centred)")
     ap.add_argument("--dither", type=float, default=0.0,
