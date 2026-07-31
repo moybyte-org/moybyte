@@ -30,11 +30,6 @@ grant. (Third-party components inside the build — MicroPython, Lua, the
 petme128 font, emscripten runtime — keep their own licences; see
 [THIRD_PARTY.md](THIRD_PARTY.md).)
 
-The `.moyproj` SDK and its examples, previously the other MIT part of this tree,
-were **removed in 2026-07**. They stay MIT wherever they already exist (this
-repository's history, and any copy you hold); nothing about that licence is
-withdrawn.
-
 Some files here come from other projects and keep their own licenses — see [THIRD_PARTY.md](THIRD_PARTY.md).
 
 The `.moy` cart format and cart API are an **open specification**: anyone may

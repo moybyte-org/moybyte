@@ -13,8 +13,7 @@ This is the answer to "why isn't this MIT?".
    obligation to this repository; the cart format/API is an open specification
    anyone may implement; and the compiled **web player** the spec repo ships
    (`build.sh --spec`) is granted under MIT so a `.moy` player can be embedded
-   anywhere. (The `.moyproj` SDK packages that used to carry an explicit MIT
-   licence were removed from the tree in 2026-07; they remain MIT in history.)
+   anywhere.
 2. **The console and firmware are FSL-1.1-MIT** (Functional Source License):
    free for everyone to read, modify, and flash on their own hardware — but
    **selling hardware or a competing product built on it requires a commercial
