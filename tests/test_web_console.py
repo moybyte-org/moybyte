@@ -1299,6 +1299,46 @@ def test_windowed_playtest_streams_the_game_as_one_b64_img(tmp_path):
     assert len(set(screen.buf[mid:mid + 320 * scale])) > 1
 
 
+def test_fps_chip_draws_inside_the_playtest_window(tmp_path):
+    """The perf HUD is GAME domain: it draws on the 320x240 canvas, so on a
+    recording tier it only reaches the screen inside the window's `view` bracket
+    (#175). Drawn outside it, its game coordinates were taken as DESKTOP ones and
+    the chip floated over the editor window (owner report 2026-07-31).
+
+    Pinned without naming a colour or a coordinate: toggling the chip may change
+    pixels ONLY inside the playtest window."""
+    console = web_console.WebConsole(str(tmp_path / "carts"), fps=30,
+                                     sys_size=(1024, 600), font_scale=2,
+                                     windowed=True)
+    ws = console.ws
+    ws.pointer.visible = False
+    screen = Canvas(1024, 600)
+    layers, atlas = {}, {}
+    assets = console.assets()
+    ws.open_picker()
+    ws.pick_selected()
+    _replay_frames(console, screen, layers, atlas, assets, frames=4)
+    ws._leave_menu()                     # PLAY from the Editor: a dev-sized window
+    ws.show_fps = True
+    _replay_frames(console, screen, layers, atlas, assets, frames=4)
+    win = ws.wm._wins["desktop"]
+    with_chip = bytes(screen.buf)
+
+    ws.show_fps = False
+    ws.mark_dirty()
+    _replay_frames(console, screen, layers, atlas, assets, frames=3)
+    without = bytes(screen.buf)
+    assert with_chip != without           # the chip was actually being drawn
+
+    cx, cy, cw, ch = win.content_rect()
+    for i in range(len(with_chip)):
+        if with_chip[i] != without[i]:
+            x, y = i % 1024, i // 1024
+            assert cx <= x < cx + cw and cy <= y < cy + ch, (
+                "FPS chip pixel at (%d,%d) outside the playtest window %r"
+                % (x, y, (cx, cy, cw, ch)))
+
+
 def test_scaled_img_replays_pixel_identical_to_raster_blit():
     """The ["img", ..., b64, scale] op (the b64 full-frame composite) replays
     pixel-identically to the raster scaled blit it replaces."""

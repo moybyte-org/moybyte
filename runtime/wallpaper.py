@@ -61,6 +61,7 @@ class Wallpaper:
         self._wp_update = None
         self._wp_draw = None
         self._wp_cart = None
+        self._wp_images = {}   # captured at compile (the cart re-slims after)
         self._wp_live = True
         # The Appearance monitor's PREVIEW runner: the same cart compiled a
         # second time over an OFFSCREEN host canvas, so the little screen can
@@ -94,6 +95,7 @@ class Wallpaper:
         ws.select_wallpaper before it (re)compiles the new choice."""
         self._wp_ns = self._wp_update = self._wp_draw = None
         self._wp_cart = None
+        self._wp_images = {}
         self._wp_restore_bg = None
         self._pv_ns = self._pv_update = self._pv_draw = None
         self._pv_restore = None
@@ -120,6 +122,13 @@ class Wallpaper:
                 ns["_init"]()
             self._wp_ns = ns
             self._wp_cart = cart
+            # Hold the images HERE, not via _wp_cart later: the #66 live-set diet
+            # re-slims a wallpaper cart after this compile, so cart["images"] is
+            # gone by the time a transport asks (sakura's backdrop shipped as an
+            # imgref for a picture /assets never carried -- owner, 2026-07-31).
+            # The namespace already references the same blobs, so this adds a
+            # dict of references, not a copy of the pixels.
+            self._wp_images = dict(cart.get("images") or {})
             self._wp_update = ns.get("_update")
             self._wp_draw = ns.get("_draw")
             self._wp_restore_bg = ns.get("_moy_restore_bg")   # #63 declared background
@@ -183,7 +192,22 @@ class Wallpaper:
                     # the strip); clip keeps the art inside the safe rows.
                     ws.canvas.camera(0, -safe)
                     ws.canvas.clip(0, safe, ws.canvas.w, ws.canvas.h - safe)
-                self._wp_draw()
+                # COMMAND-ONLY GAME CANVAS (#175, web/wasm): there are no pixels to
+                # composite afterwards -- _backdrop_blit needs gc.buf and returns
+                # early -- so the cart's commands ARE the backdrop and must be
+                # PLACED here, cover-style, exactly as _backdrop_blit would have
+                # scaled its framebuffer. Without this the wallpaper cart drew
+                # unbracketed at the origin and the desktop showed it in the
+                # top-left 320x240 (owner report 2026-07-31).
+                _wv = self._view_bracket(ws)
+                _gp = self._enter_pointer(ws, _wv)
+                try:
+                    self._wp_draw()
+                finally:
+                    if _gp is not False:
+                        ws.input.game_pointer = _gp
+                if _wv:
+                    ws.sys_canvas.view()
                 # Clear any camera/clip/pal/palt (#11) the wallpaper cart set (and the
                 # safe-area camera/clip above), so the home/settings foreground (icons,
                 # status strip) draws clean at full extent.
@@ -209,6 +233,48 @@ class Wallpaper:
         wp = ws.wallpaper_id or "fill:dark_blue"
         name = wp[5:] if isinstance(wp, str) and wp.startswith("fill:") else "dark_blue"
         ws.sys_canvas.cls(NAMES.get(name, NAMES["dark_blue"]))
+
+    def _enter_pointer(self, ws, bracketed):
+        """Re-map the pointer into the WALLPAPER's own space for the duration of
+        its draw, returning the value to restore (or False when untouched).
+
+        `input.game_pointer` is built for the GAME viewport (on the windowed
+        tier, the player WINDOW's rect), but the wallpaper is placed by the
+        cover-crop instead -- so an interactive backdrop like sakura's
+        run-from-the-cursor petals read the wrong coordinates: only the middle
+        320x240 of the desktop reacted, and it reacted as if it were the whole
+        screen (owner, 2026-07-31). Invert the SAME transform _view_bracket
+        applies: cart = (screen - origin) / scale."""
+        if not bracketed:
+            return False
+        gp = getattr(ws.input, "game_pointer", None)
+        p = getattr(ws, "pointer", None)
+        if p is None:
+            return False
+        sc, gc = ws.sys_canvas, ws.canvas
+        gw, gh = gc.w, gc.h
+        scale = max(1, (sc.w + gw - 1) // gw, (sc.h + gh - 1) // gh)
+        ox = (sc.w - gw * scale) // 2
+        oy = (sc.h - gh * scale) // 2
+        gx = (int(getattr(p, "x", 0)) - ox) // scale
+        gy = (int(getattr(p, "y", 0)) - oy) // scale
+        # Out-of-frame reads as "no pointer" rather than a clamped edge value,
+        # so petals never stampede toward a corner the cursor is not in.
+        if not (0 <= gx < gw and 0 <= gy < gh):
+            ws.input.game_pointer = None
+            return gp
+        ws.input.game_pointer = (gx, gy, False, bool(getattr(p, "down", False)))
+        return gp
+
+    def cart_images(self):
+        """The WALLPAPER cart's own raw images ({name: blob}) -- what its
+        `image("bg")` draws reference. The transports merge these into /assets
+        beside the open cart's `ws.images`, which they are NOT part of: the
+        wallpaper runs in its own namespace, so a recording tier that ships the
+        wallpaper's DRAW COMMANDS (rather than a composited framebuffer) would
+        otherwise emit an imgref for a picture the page never received --
+        sakura's backdrop went missing exactly that way (owner, 2026-07-31)."""
+        return dict(getattr(self, "_wp_images", None) or {})
 
     def wire_assets(self):
         """{name: (w, h, index_bytes)} for the backdrop composite's ship-once
@@ -424,6 +490,30 @@ class Wallpaper:
                 out[o + i] = pix[base + xm[i]]
             o += vw
         return out
+
+    def _view_bracket(self, ws):
+        """Open a WM view bracket for a wallpaper cart drawing on a COMMAND-ONLY
+        game canvas (#175): the cart's draw span is placed cover-style on the
+        system canvas -- the smallest integer upscale that covers the desktop,
+        centered (so the crop is symmetric), which is the SAME geometry
+        _backdrop_blit computes for a real framebuffer. Returns True when a
+        bracket was opened (the caller must close it).
+
+        No-op on every other tier: a raster game canvas has `buf` and keeps the
+        composite path, and the 320x240 tiers share one canvas object."""
+        sc = ws.sys_canvas
+        gc = ws.canvas
+        if sc is gc or getattr(gc, "buf", None) is not None:
+            return False
+        view = getattr(sc, "view", None)
+        if view is None:
+            return False
+        gw, gh = gc.w, gc.h
+        if gw <= 0 or gh <= 0:
+            return False
+        scale = max(1, (sc.w + gw - 1) // gw, (sc.h + gh - 1) // gh)
+        view((sc.w - gw * scale) // 2, (sc.h - gh * scale) // 2, scale, gw, gh)
+        return True
 
     def _backdrop_blit(self, sc, gc):
         """Composite the 320x240 wallpaper frame into the big system canvas as the

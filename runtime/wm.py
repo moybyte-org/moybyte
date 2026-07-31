@@ -306,6 +306,21 @@ class FullscreenStackWM:
         windowed player window scales the view exactly like fullscreen)."""
         return getattr(self.ws, "game_view", None)
 
+    def game_is_fullscreen(self):
+        """True when the game viewport IS the screen -- i.e. composite_game
+        letterboxes it over the whole system canvas. Always so on this WM; the
+        windowed tier overrides (its desk world puts the game in a WINDOW).
+
+        Read by the router when the game canvas is COMMAND-ONLY (#175): there
+        the letterbox + placement must be emitted BEFORE the cart draws, and
+        only the fullscreen presentation wants them."""
+        return True
+
+    def set_play_intent(self, intent):
+        """No-op here (#178): a cart owns the whole screen on this tier, so
+        there is no window whose default size could vary with WHY it started.
+        The windowed WM overrides -- see its _win_size."""
+
     def composite_game(self):
         """Blit the fixed 320x240 GAME canvas into the SYSTEM canvas as a
         fixed-aspect, integer-scaled, centered viewport, filling the letterbox with

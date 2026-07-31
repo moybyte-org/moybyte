@@ -305,7 +305,15 @@ class WebConsole:
             # bytes) so /assets ships them ONCE (browser-cached) and the per-frame stream
             # references each by name via ["imgref", ...] -- threaded through like the sheet.
             decoded = {}
-            raw = getattr(self.ws, "images", None)
+            raw = dict(getattr(self.ws, "images", None) or {})
+            # ...plus the WALLPAPER cart's own images: it runs in its own
+            # namespace, so its `image("bg")` names are absent from ws.images
+            # and a windowed/recording tier that ships wallpaper DRAW COMMANDS
+            # would reference pictures the page never got (sakura's backdrop).
+            _wc = getattr(self.ws.wallpaper, "cart_images", None)
+            if _wc is not None:
+                for _n, _b in (_wc() or {}).items():
+                    raw.setdefault(_n, _b)
             if raw:
                 for name, blob in raw.items():
                     dec = host_app._decode_moyimg(blob)
@@ -490,8 +498,28 @@ class _Handler(BaseHTTPRequestHandler):
             surfaces = self.console._last_surfaces
             kinds = web_view.effective_input_kinds(self.console.ws)
             if surfaces is not None:
+                enc = delta.encode(surfaces, gen=gen)
+                if delta.need_keyframe:
+                    # A §4 skip stub had nothing cached for THIS client (fresh
+                    # connection / atlas wipe): force a full-draw keyframe next
+                    # push so its retained streams reseed.
+                    delta.need_keyframe = False
+                    _mark_dirty()
+                    _akf = getattr(self.console.ws.wm, "arm_surface_keyframe",
+                                   None)
+                    if _akf is not None:
+                        _akf()
+                ss = getattr(self.console.ws.wm, "surfaces", None)
+                if ss is not None:
+                    # §6 protocol v2: placement + gens per entry (additive).
+                    for e in enc:
+                        s = ss.surfaces.get(e.get("id"))
+                        if s is not None:
+                            e["place"] = s.place()
+                            e["gen"] = ss.content_gen(s.sid)
+                            e["pgen"] = s.place_gen
                 payload = json.dumps(web_view.frame_payload(
-                    [], cart, gen, audio=audio, surfaces=delta.encode(surfaces, gen=gen),
+                    [], cart, gen, audio=audio, surfaces=enc,
                     input_kinds=kinds))
             else:
                 payload = json.dumps(web_view.frame_payload(

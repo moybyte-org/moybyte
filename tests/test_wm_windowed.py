@@ -177,6 +177,56 @@ def test_play_opens_playtest_window_and_exit_returns(tmp_path):
     assert ws.menu_view == "code"   # back on the tab PLAY left
 
 
+def test_editor_playtest_opens_smaller_than_a_desk_run(tmp_path):
+    """#178: one run() verb, two jobs. A PLAY from the Editor is a dev action --
+    the playtest window opens small so the code beside it stays workable -- while
+    running a cart from the desk opens it as big as the desktop fits. The entry
+    point carries that meaning (run()'s caller), so nobody picks a scale."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open()                       # desk run: play-sized
+    drv.frame(1 / 30)
+    play = ws.wm._wins["desktop"]
+    play_scale = ws.wm._player_view(play)[2]
+    ws._exit_to_caller()
+    drv.frame(1 / 30)
+
+    ws.open_picker()                # Editor PLAY: dev-sized
+    ws.pick_selected()
+    drv.frame(1 / 30)
+    ws._leave_menu()
+    drv.frame(1 / 30)
+    dev = ws.wm._wins["desktop"]
+    assert dev.w < play.w and dev.h < play.h
+    assert ws.wm._player_view(dev)[2] == 1        # native cart pixels
+    assert play_scale > 1                         # ... vs as-big-as-fits
+    # Small enough to leave the editor beneath it usable: under half the desktop,
+    # and parked in the corner rather than centered on the code column.
+    assert dev.w * 2 < ws.sys_canvas.w
+    assert dev.x + dev.w <= ws.sys_canvas.w and dev.x > play.x
+    assert dev.y + dev.h <= ws.sys_canvas.h and dev.y > play.y
+    # A window the kid has since resized is never re-sized under them: the
+    # intent is read ONCE, when the window is created.
+    ws.wm._resize_window(dev, play.w, play.h)
+    drv.frame(1 / 30)
+    assert ws.wm._wins["desktop"].w == play.w
+
+
+def test_dev_playtest_is_native_size_on_every_desktop(tmp_path):
+    """The dev playtest is ONE size everywhere: native cart pixels, not a
+    fraction of the screen. A play run still grows with the desktop."""
+    sizes = []
+    for i, sys_size in enumerate(((640, 480), (1024, 600), (1440, 900))):
+        ws = _ws(tmp_path / str(i), sys_size=sys_size, font_scale=1)
+        full = ws.wm._root_canvas
+        ws.wm.set_play_intent("dev")
+        sizes.append(ws.wm._win_size("desktop", full, 1))
+        ws.wm.set_play_intent("play")
+        play_w = ws.wm._win_size("desktop", full, 1)[0]
+        assert play_w >= sizes[-1][0]
+    assert sizes[0] == sizes[1] == sizes[2] == (ws.canvas.w + 2, ws.canvas.h + 2 + 18)
+
+
 def test_game_viewport_is_the_player_window(tmp_path):
     """ws._game_xy maps a system point at the playtest window's viewport origin
     into 320x240 game coords (the cart's touch() contract)."""
@@ -1580,12 +1630,13 @@ def test_view_full_canvas_and_zero_are_identity(tmp_path):
 def test_view_scales_the_windowed_player_too(tmp_path):
     # The desk-world game WINDOW honors the view like the fullscreen composite:
     # one _view_src drives viewport, blit and tap mapping on both paths.
+    # Launched from the desk (a PLAY-sized window, #178): a dev playtest opens at
+    # 1x of the full canvas deliberately, which leaves a 128x128 view no room to
+    # upscale -- that is the small window doing its job, not the view being
+    # ignored (the mapping assertions below hold identically there).
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.open_picker()
-    ws.pick_selected()
-    drv.frame(1 / 30)
-    ws._leave_menu()
+    ws.open()
     drv.frame(1 / 30)
     win = ws.wm._wins.get("desktop")
     if win is None:

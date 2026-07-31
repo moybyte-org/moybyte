@@ -870,6 +870,25 @@ class ConsoleDriver:
     # -- per-frame tick ------------------------------------------------------
     def frame(self, dt):
         dx, dy = self._pan
+        # ARROWS ON A MOUSE TIER (owner call 2026-07-31): the browser/sim page no
+        # longer steers a virtual cursor with the arrow keys -- the MOUSE is the
+        # cursor there -- so arrows arrive as held left/right/up/down (the same
+        # buttons w/a/s/d send) and drive menu navigation. The one surface that
+        # still wants them as a DIRECTION is the code editor's caret, which used
+        # to ride the pan path: translate the held nav buttons back into a nav
+        # step here, and swallow them so the shell does not ALSO act on them.
+        # (`_pan` stays wired for real trackball backends; the T-Deck's own
+        # driver is untouched by this file.)
+        if not (dx or dy) and self._held_ext and self.in_code_editor():
+            ndx = (1 if "right" in self._held_ext else 0) \
+                - (1 if "left" in self._held_ext else 0)
+            ndy = (1 if "down" in self._held_ext else 0) \
+                - (1 if "up" in self._held_ext else 0)
+            if ndx or ndy:
+                self.ws.nav(ndx, ndy)
+                for _n in ("left", "right", "up", "down"):
+                    self._held_ext.discard(_n)
+                    self.input.set_held(_n, False)
         if dx or dy:
             if self.in_code_editor():
                 self.ws.nav(dx, dy)          # arrows move the caret in the editor

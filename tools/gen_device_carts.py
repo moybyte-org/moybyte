@@ -52,6 +52,7 @@ CART_ORDER = [
     "layer_test",
     "bullet_storm",
     "brick_siege",
+    "brick_siege_lua",
     "harpoon_pop",
     "tap_red",
     "tap_game",

@@ -1,0 +1,55 @@
+{
+  "format": "moy-1",
+  "version": 1,
+  "title": "Brick Siege Lua",
+  "type": "game",
+  "runtime": "lua",
+  "main": "main.lua",
+  "system": true,
+  "canvas": {
+    "width": 320,
+    "height": 240,
+    "palette": "moy64"
+  },
+  "permissions": [
+    "graphics",
+    "input",
+    "audio"
+  ],
+  "input": [
+    "buttons"
+  ],
+  "safe_to_share": true,
+  "config": {
+    "enemies": 6,
+    "autoplay": 0
+  },
+  "edit": [
+    {
+      "key": "enemies",
+      "label": "ENEMIES",
+      "type": "int",
+      "min": 1,
+      "max": 16,
+      "step": 1,
+      "display": "count",
+      "icon": "dot",
+      "card": "FIGHT {value} TANKS"
+    },
+    {
+      "key": "autoplay",
+      "label": "AUTOPLAY",
+      "type": "choice",
+      "choices": [
+        0,
+        1
+      ],
+      "icons": [
+        "close",
+        "run"
+      ],
+      "display": "choice-icons",
+      "card": "AUTOPLAY {value}"
+    }
+  ]
+}

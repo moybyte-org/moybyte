@@ -137,15 +137,23 @@ var HUD={on:false,fps:0,kb:0,unknown:0,el:document.getElementById("hud"),last:0}
 // fold the device's per-frame instants (gap/draw/js/tx) into a window MAX + count throttled
 // frames: mg=worst inter-frame gap ms (THE stutter number), md=worst device draw+commit ms,
 // mj/mt=worst json-encode/socket-send ms, thr=# of bandwidth-throttled pushes this window.
-var PERF_MS=2000,PERF={f:0,b:0,pk:0,t:0,dh:0,pf:0,lpf:0,js:0,tx:0,mg:0,md:0,mj:0,mt:0,thr:0};
+var PERF_MS=2000,PERF={f:0,b:0,pk:0,t:0,dh:0,pf:0,lpf:0,js:0,tx:0,mg:0,md:0,mj:0,mt:0,thr:0,
+// page-side halves (surface model Phase B): m* = worst, s*/sn = mean.
+// mr/sr replay, mb/sb index->RGBA, mu/su putImageData upload.
+mr:0,sr:0,mb:0,sb:0,mu:0,su:0,sn:0};
+function PT(){return (window.performance&&performance.now)?performance.now():Date.now();}
 function plog(){var now=(window.performance&&performance.now)?performance.now():Date.now();
 if(!PERF.t){PERF.t=now;PERF.lpf=PERF.pf;return;}var dt=(now-PERF.t)/1000;if(dt<=0)return;
 console.log("[moybyte] "+(assCart||"?")+" | recv "+(PERF.f/dt).toFixed(1)+" render "+HUD.fps.toFixed(1)
 +" dev "+((PERF.pf-PERF.lpf)/dt).toFixed(1)+" fps | worst gap "+PERF.mg+" draw "+PERF.md+" js "+PERF.mj
-+" tx "+PERF.mt+" ms | thr "+PERF.thr+" | bw "+(PERF.b/dt/1024).toFixed(1)+" KB/s avg "
++" tx "+PERF.mt+" ms | PAGE replay "+(PERF.sn?PERF.sr/PERF.sn:0).toFixed(2)+"/"+PERF.mr.toFixed(1)
++" rgba "+(PERF.sn?PERF.sb/PERF.sn:0).toFixed(2)+"/"+PERF.mb.toFixed(1)
++" upload "+(PERF.sn?PERF.su/PERF.sn:0).toFixed(2)+"/"+PERF.mu.toFixed(1)+" ms mean/worst"
++" | thr "+PERF.thr+" | bw "+(PERF.b/dt/1024).toFixed(1)+" KB/s avg "
 +(PERF.f?(PERF.b/PERF.f/1024):0).toFixed(2)+" peak "+(PERF.pk/1024).toFixed(2)
 +" KB | heap "+PERF.dh+" KB | unknown "+HUD.unknown);
-PERF.f=0;PERF.b=0;PERF.pk=0;PERF.t=now;PERF.lpf=PERF.pf;PERF.mg=0;PERF.md=0;PERF.mj=0;PERF.mt=0;PERF.thr=0;}
+PERF.f=0;PERF.b=0;PERF.pk=0;PERF.t=now;PERF.lpf=PERF.pf;PERF.mg=0;PERF.md=0;PERF.mj=0;PERF.mt=0;PERF.thr=0;
+PERF.mr=0;PERF.sr=0;PERF.mb=0;PERF.sb=0;PERF.mu=0;PERF.su=0;PERF.sn=0;}
 // Audio (host web console + wasm runner): play the server's FINISHED PCM (no
 // JS synth). The device streams no audio (f.audio ""), so this is a no-op there.
 // Playback is ONE AudioWorklet pulling from a sample ring with CONTINUOUS
@@ -239,17 +247,47 @@ INPUT=a.input||null;applyInputHint();
 TM=a.tilemap?{w:a.tilemap.w,h:a.tilemap.h,cells:a.tilemap.cells.slice()}:null;
 // Decode each paint image's base64 raw indices into a Uint8Array ONCE (#63 Fold 4), so an
 // imgref just blits the cached bytes (index->palette). Keyed by the SAME name image('name') tags.
-IMG={};if(a.images){for(var nm in a.images){var gi=a.images[nm],bs=atob(gi.b64),bn=bs.length,bp=new Uint8Array(bn);
+// INCREMENTAL (a.partial): the serialiser may ship ONLY images this client lacks --
+// re-serialising the whole set cost 360-560ms per request in the wasm worker (json.dumps
+// over ~644KB), which starved the frame loop to 1-7fps whenever a lazily-built cover kept
+// imgWant latched. A partial payload MERGES; a full one replaces (cart change / reload).
+if(!a.partial)IMG={};
+if(a.images){for(var nm in a.images){var gi=a.images[nm],bs=atob(gi.b64),bn=bs.length,bp=new Uint8Array(bn);
 for(var bk=0;bk<bn;bk++)bp[bk]=bs.charCodeAt(bk);IMG[nm]={w:gi.w,h:gi.h,px:bp};}}
 assLoading=false;alloc();ready=true;}).catch(function(e){assLoading=false;throw e;});}
 // NB: do NOT clear ATL here -- it resets on `gen` change (see df). imgWant is cleared by df's retry.
 var caX=0,caY=0,cl0=0,cm0=0,cl1=W,cm1=H,pm=null,pt=null;
-function rs(){caX=0;caY=0;cl0=0;cm0=0;cl1=W;cm1=H;pm=new Uint8Array(64);pt=new Uint8Array(64);
-for(var i=0;i<64;i++)pm[i]=i;}rs();
-function put(x,y,c){x=(x-caX)|0;y=(y-caY)|0;if(x<cl0||x>=cl1||y<cm0||y>=cm1)return;idx[y*W+x]=pm[c&63];}
-function fr(x,y,w,h,c){x=(x|0)-caX;y=(y|0)-caY;w|=0;h|=0;var a=Math.max(cl0,x),b=Math.max(cm0,y),
+// WM-OWNED VIEW (#175). A ["view",ox,oy,scale,w,h] bracket places a cart's whole
+// draw span inside a window rect, so the cart's COMMANDS ship (~16.7 KB/f) instead
+// of a rasterized full-frame image (~102 KB/f, and ~85 ms/f of pure-Python pixel
+// work in the wasm). It is deliberately OUTSIDE cart draw state: the cart's own
+// camera/clip compose INSIDE it and reset_state cannot clear it -- which is why
+// this is a separate op rather than the WM borrowing `camera`/`clip` (a cart that
+// called either would otherwise clobber its own placement and bleed onto the desk).
+// vBX/vBY are the camera BASE the view installs; vL/vT/vR/vB its clip bounds;
+// vCW/vCH the cart's logical surface (what cls() covers). scale>1 is NOT applied
+// yet -- see the "view" op in rep().
+// vOX/vOY = target origin, vS = integer scale, vCW/vCH = the cart's logical surface
+// (what cls() covers). A cart coord maps to target ((c - cam) * vS + vO).
+var vOX=0,vOY=0,vS=1,vCW=W,vCH=H,vOn=false;
+// With NO view, the bounds are the CURRENT canvas -- never W/H captured at script
+// load. W/H change after load (getA() sets them from assets, dfl() per layer), and
+// caching identity bounds pinned every draw into the top-left 320x240 of a 1024x600
+// desktop. Derive them live instead.
+function vclip(){if(vOn){cl0=Math.max(0,vOX);cm0=Math.max(0,vOY);
+cl1=Math.min(W,vOX+vCW*vS);cm1=Math.min(H,vOY+vCH*vS);}else{cl0=0;cm0=0;cl1=W;cm1=H;}}
+// Raw TARGET-space filled rect (already transformed + scaled): the one place that
+// clips and writes. put/fr both funnel here so scale costs nothing when vS is 1.
+function fr0(x,y,w,h,c){var a=Math.max(cl0,x),b=Math.max(cm0,y),
 e=Math.min(cl1,x+w),f=Math.min(cm1,y+h);if(e<=a||f<=b)return;var ci=pm[c&63];
 for(var yy=b;yy<f;yy++){var bs=yy*W;for(var xx=a;xx<e;xx++)idx[bs+xx]=ci;}}
+function rs(){caX=0;caY=0;vclip();pm=new Uint8Array(64);pt=new Uint8Array(64);
+for(var i=0;i<64;i++)pm[i]=i;}rs();
+function put(x,y,c){var X=(((x|0)-caX)*vS+vOX)|0,Y=(((y|0)-caY)*vS+vOY)|0;
+if(vS>1){fr0(X,Y,vS,vS,c);return;}                 // a cart pixel is an SxS block
+if(X<cl0||X>=cl1||Y<cm0||Y>=cm1)return;idx[Y*W+X]=pm[c&63];}
+function fr(x,y,w,h,c){fr0((((x|0)-caX)*vS+vOX)|0,(((y|0)-caY)*vS+vOY)|0,
+(w|0)*vS,(h|0)*vS,c);}
 function rb(x,y,w,h,c){fr(x,y,w,1,c);fr(x,y+h-1,w,1,c);fr(x,y,1,h,c);fr(x+w-1,y,1,h,c);}
 function ln(x0,y0,x1,y1,c){x0|=0;y0|=0;x1|=0;y1|=0;var dx=Math.abs(x1-x0),dy=-Math.abs(y1-y0),
 sx=x0<x1?1:-1,sy=y0<y1?1:-1,er=dx+dy,e2;while(true){put(x0,y0,c);if(x0==x1&&y0==y1)break;
@@ -273,7 +311,8 @@ function sp(ix,x,y,sc,fl){var a=ATL[ix];if(!a){HUD.unknown++;return;}blt(a.px,a.
 // same way -- an unclipped im was how shelf edge-card covers bled outside the Library
 // panel on the web while the host/device clipped them; clip bounds are always inside the
 // canvas, so they subsume the old raw bounds checks).
-function im(x,y,w,h,b64,sc){var s=atob(b64);x=(x|0)-caX;y=(y|0)-caY;w|=0;h|=0;sc=(sc|0)||1;
+function im(x,y,w,h,b64,sc){var s=atob(b64);sc=((sc|0)||1)*vS;
+x=(((x|0)-caX)*vS+vOX)|0;y=(((y|0)-caY)*vS+vOY)|0;w|=0;h|=0;
 if(sc==1){for(var yy=0;yy<h;yy++){var ty=y+yy;if(ty<cm0||ty>=cm1)continue;var sr=yy*w,dr=ty*W;
 for(var xx=0;xx<w;xx++){var tx=x+xx;if(tx<cl0||tx>=cl1)continue;var p=s.charCodeAt(sr+xx);if(p<64)idx[dr+tx]=p;}}return;}
 // scaled (the full-frame game/wallpaper composite, ["img",...,b64,scale]): each source
@@ -287,7 +326,7 @@ for(var q=0;q<sc;q++){var tx=t0+q;if(tx>=cl0&&tx<cl1)idx[dr+tx]=p;}}}}}
 // re-fetches /assets (the layer deflayer re-ships once assets arrive) -- a ship-once layer can
 // otherwise strand its background.
 function imr(x,y,nm,sc){var G=IMG[nm];if(!G){imgWant=true;return;}var s=G.px,w=G.w,h=G.h;
-x=(x|0)-caX;y=(y|0)-caY;sc=(sc|0)||1;
+sc=((sc|0)||1)*vS;x=(((x|0)-caX)*vS+vOX)|0;y=(((y|0)-caY)*vS+vOY)|0;
 if(sc==1){for(var yy=0;yy<h;yy++){var ty=y+yy;if(ty<cm0||ty>=cm1)continue;var sr=yy*w,dr=ty*W;
 for(var xx=0;xx<w;xx++){var tx=x+xx;if(tx<cl0||tx>=cl1)continue;var p=s[sr+xx];if(p<64)idx[dr+tx]=p;}}return;}
 // scaled imgref (#113: the ship-once wallpaper backdrop composite) -- sc x sc blocks, clipped.
@@ -320,16 +359,47 @@ else{for(var ty2=ty0;ty2<ty1;ty2++){var s1=(ty2-dy)*W+(tx0-dx);idx.copyWithin(ty
 // window (draw_layer) or the full layer (blit_strip) into idx. LAY keeps each built buffer.
 var LAY={};
 function dfl(id,lw,lh,cmds){var sI=idx,sW=W,sH=H,sX=caX,sY=caY,s0=cl0,s1=cm0,s2=cl1,s3=cm1,sm=pm,spt=pt;
+// A layer renders in its OWN space, so the WM view must not leak into it (and must
+// survive it) -- saved/restored alongside camera+clip, identity while inside.
+var q0=vOX,q1=vOY,q2=vS,q3=vCW,q4=vCH,q5=vOn;
+vOX=0;vOY=0;vS=1;vCW=lw;vCH=lh;vOn=false;
 var buf=new Uint8Array(lw*lh);idx=buf;W=lw;H=lh;rs();rep(cmds);
+vOX=q0;vOY=q1;vS=q2;vCW=q3;vCH=q4;vOn=q5;
 idx=sI;W=sW;H=sH;caX=sX;caY=sY;cl0=s0;cm0=s1;cl1=s2;cm1=s3;pm=sm;pt=spt;LAY[id]={w:lw,h:lh,buf:buf};}
-function blw(L,cx,cy){cx=cx<0?0:cx|0;cy=cy<0?0:cy|0;var dw=W,dh=H,sw=L.w,src=L.buf;
+// LAYER BLITS MUST HONOR THE WM VIEW (#175). These copy already-palette-mapped
+// layer pixels, so they never re-apply pm -- but they DO have to place, scale and
+// clip like every other primitive. They did not: both wrote straight into idx
+// against the full canvas W/H, so a windowed cart's draw_layer painted its layer
+// across the WHOLE desktop at 1:1 (owner screenshot 2026-07-31: sakura / Sky Run /
+// Hop Quest / Letter Blitz smeared over the desk -- precisely the carts that use
+// make_layer; cls-only carts were unaffected).
+// Raw (already-mapped) block fill, target space -- the scaled counterpart of fr0.
+function fr0r(x,y,w,h,ci){var a=Math.max(cl0,x),b=Math.max(cm0,y),
+e=Math.min(cl1,x+w),f=Math.min(cm1,y+h);if(e<=a||f<=b)return;
+for(var yy=b;yy<f;yy++){var bs=yy*W;for(var xx=a;xx<e;xx++)idx[bs+xx]=ci;}}
+// Copy a w x h rect of `src` (row stride sw, origin sx,sy) to CART coords (cxo,cyo).
+function blsrc(src,sw,sx,sy,cxo,cyo,w,h){
+if(!vOn&&vS===1){                       // identity: the original tight loops
+for(var r=0;r<h;r++){var ty=cyo+r;if(ty<cm0||ty>=cm1)continue;var d0=ty*W,o0=(sy+r)*sw+sx;
+for(var x=0;x<w;x++){var tx=cxo+x;if(tx<cl0||tx>=cl1)continue;idx[d0+tx]=src[o0+x];}}return;}
+for(var r=0;r<h;r++){var Y=((cyo+r)*vS+vOY)|0,o0=(sy+r)*sw+sx;
+for(var x=0;x<w;x++){var X=((cxo+x)*vS+vOX)|0,p=src[o0+x];
+if(vS>1){fr0r(X,Y,vS,vS,p);continue;}
+if(X<cl0||X>=cl1||Y<cm0||Y>=cm1)continue;idx[Y*W+X]=p;}}}
+// draw_layer's window copy: a viewport-sized window of the layer at the CART origin.
+// The viewport is the cart's logical surface under a view (vCW/vCH), the canvas otherwise.
+function blw(L,cx,cy){cx=cx<0?0:cx|0;cy=cy<0?0:cy|0;var sw=L.w,src=L.buf;
+var dw=vOn?vCW:W,dh=vOn?vCH:H;
 if(sw<=0||dw<=0||dh<=0)return;if(cx+dw>sw)dw=sw-cx;if(dw<=0)return;var sr=(src.length/sw)|0;
-if(cy+dh>sr)dh=sr-cy;if(dh<=0)return;for(var r=0;r<dh;r++){var d0=r*W,o0=(cy+r)*sw+cx;
-for(var x=0;x<dw;x++)idx[d0+x]=src[o0+x];}}
-function blf(L,dx,dy){dx|=0;dy|=0;var dw=W,dh=H,sw=L.w,sh=L.h,src=L.buf;if(sw<=0||dw<=0||dh<=0)return;
-for(var r=0;r<sh;r++){var ty=dy+r;if(ty<0||ty>=dh)continue;var cw=sw,x0=0,t0=dx,o0=r*sw;
-if(t0<0){x0=-t0;cw+=t0;t0=0;}if(t0+cw>dw)cw=dw-t0;if(cw<=0)continue;var d0=ty*W+t0;
-for(var x=0;x<cw;x++)idx[d0+x]=src[o0+x0+x];}}
+if(cy+dh>sr)dh=sr-cy;if(dh<=0)return;blsrc(src,sw,cx,cy,0,0,dw,dh);}
+// blit_strip: the WHOLE layer at cart position (dx,dy). Source-side clipping keeps
+// the copy inside the cart surface; blsrc clips the rest in target space.
+function blf(L,dx,dy){dx|=0;dy|=0;var sw=L.w,sh=L.h,src=L.buf;
+var vw=vOn?vCW:W,vh=vOn?vCH:H;if(sw<=0||vw<=0||vh<=0)return;
+var sx=0,sy=0,w=sw,h=sh;
+if(dx<0){sx=-dx;w+=dx;dx=0;}if(dy<0){sy=-dy;h+=dy;dy=0;}
+if(dx+w>vw)w=vw-dx;if(dy+h>vh)h=vh-dy;if(w<=0||h<=0)return;
+blsrc(src,sw,sx,sy,dx,dy,w,h);}
 function bl(c){var L=LAY[c[1]];if(!L)return;if(c.length>4&&c[4]==="full")blf(L,c[2],c[3]);else blw(L,c[2],c[3]);}
 function tx(s,x,y,c,sc){if(!FONT)return;var X=x|0;y|=0;sc=(sc|0)||1;
 var fi=FONT.first,gw=FONT.w,g=FONT.glyphs,n=g.length;
@@ -340,7 +410,7 @@ for(var j=0;j<gw;j++){var bt=co[j],py=y;while(bt){if(bt&1)put(X+j,py,c);bt>>=1;p
 for(var k=0;k<s.length;k++){var gi=s.charCodeAt(k)-fi,co=(gi>=0&&gi<n)?g[gi]:g[0];
 for(var j=0;j<gw;j++){var bt=co[j],row=0;while(bt){if(bt&1)fr(X+j*sc,y+row*sc,sc,sc,c);bt>>=1;row++;}}X+=gw*sc;}}
 function rep(cs){for(var i=0;i<cs.length;i++){var c=cs[i],o=c[0];
-if(o=="cls")idx.fill(pm[c[1]&63]);else if(o=="pix")put(c[1],c[2],c[3]);
+if(o=="cls"){if(vOn)fr(0,0,vCW,vCH,c[1]);else idx.fill(pm[c[1]&63]);}else if(o=="pix")put(c[1],c[2],c[3]);
 else if(o=="line")ln(c[1],c[2],c[3],c[4],c[5]);else if(o=="rect")fr(c[1],c[2],c[3],c[4],c[5]);
 else if(o=="rectb")rb(c[1],c[2],c[3],c[4],c[5]);else if(o=="circ")ci(c[1],c[2],c[3],c[4]);
 else if(o=="circb")cb(c[1],c[2],c[3],c[4]);
@@ -354,19 +424,48 @@ else if(o=="scr")scr(c[1],c[2],c[3],c[4],c[5],c[6]);
 else if(o=="settiles")st(c[1],c[2],c[3]);else if(o=="map")mp(c[1],c[2],c[3],c[4],c[5],c[6],c[7],c[8]);
 else if(o=="print")tx(c[1],c[2],c[3],c[4],c[5]);else if(o=="reset_state")rs();
 else if(o=="camera"){caX=c[1]|0;caY=c[2]|0;}
-else if(o=="clip"){if(c.length>1){var a=c[1]|0,b=c[2]|0,w=c[3]|0,h=c[4]|0;cl0=Math.max(0,a);cm0=Math.max(0,b);
-cl1=Math.min(W,a+w);cm1=Math.min(H,b+h);}else{cl0=0;cm0=0;cl1=W;cm1=H;}}
+// A cart clip is in cart SCREEN space (canvas.py applies camera, then clips): scale
+// and offset it into the target, then INTERSECT the view rect so a clipping cart
+// still cannot draw outside its window.
+else if(o=="clip"){if(c.length>1){var a=((c[1]|0)*vS+vOX)|0,b=((c[2]|0)*vS+vOY)|0,
+w=(c[3]|0)*vS,h=(c[4]|0)*vS;
+var qL=vOn?Math.max(0,vOX):0,qT=vOn?Math.max(0,vOY):0,
+qR=vOn?Math.min(W,vOX+vCW*vS):W,qB=vOn?Math.min(H,vOY+vCH*vS):H;
+cl0=Math.max(qL,a);cm0=Math.max(qT,b);cl1=Math.min(qR,a+w);cm1=Math.min(qB,b+h);}else vclip();}
+// The WM view bracket: place the enclosed cart draw span at (ox, oy), integer-scaled
+// by c[3], clipped to its w x h surface. ["view"] with no args restores identity.
+else if(o=="view"){if(c.length>1){vOX=c[1]|0;vOY=c[2]|0;vS=(c[3]|0)||1;
+vCW=c[4]|0;vCH=c[5]|0;vOn=true;}
+else{vOX=0;vOY=0;vS=1;vCW=W;vCH=H;vOn=false;}
+caX=0;caY=0;vclip();}
 else if(o=="pal"){if(c.length>1)pm[c[1]&63]=c[2]&63;else for(var q=0;q<64;q++)pm[q]=q;}
 else if(o=="palt"){if(c.length>1)pt[c[1]&63]=c[2]?1:0;else pt.fill(0);}}}
-function blit(){var n=W*H,j=0;for(var i=0;i<n;i++){var p=PAL[idx[i]];rgba[j++]=p[0];rgba[j++]=p[1];
-rgba[j++]=p[2];rgba[j++]=255;}cx.putImageData(img,0,0);}
+// PAGE-SIDE PERF (surface model Phase B): the index->RGBA conversion and the
+// putImageData upload are timed SEPARATELY. In node both look cheap; in a real
+// browser the upload of a 1024x600 ImageData (2.4MB) is a CPU->GPU texture
+// write every frame, which no headless probe models -- so the page must report
+// its own numbers or the desktop tier gets optimized blind.
+function blit(){var t0=PT();var n=W*H,j=0;for(var i=0;i<n;i++){var p=PAL[idx[i]];rgba[j++]=p[0];rgba[j++]=p[1];
+rgba[j++]=p[2];rgba[j++]=255;}var t1=PT();cx.putImageData(img,0,0);var t2=PT();
+if(t1-t0>PERF.mb)PERF.mb=t1-t0;if(t2-t1>PERF.mu)PERF.mu=t2-t1;
+PERF.sb+=t1-t0;PERF.su+=t2-t1;PERF.sn++;}
 var q=[];function send(e){q.push(e);}
 function xy(cX,cY){var r=cv.getBoundingClientRect();var x=Math.floor((cX-r.left)/r.width*W),
 y=Math.floor((cY-r.top)/r.height*H);return{x:Math.max(0,Math.min(W-1,x)),y:Math.max(0,Math.min(H-1,y))};}
 var drag=false;
 cv.addEventListener("pointerdown",function(e){cv.focus();cv.setPointerCapture(e.pointerId);drag=true;
 var p=xy(e.clientX,e.clientY);send({type:"down",x:p.x,y:p.y});e.preventDefault();});
-cv.addEventListener("pointermove",function(e){if(!drag)return;var p=xy(e.clientX,e.clientY);
+cv.addEventListener("pointermove",function(e){var p=xy(e.clientX,e.clientY);
+if(!drag){
+// HOVER (2026-07-31): report the idle pointer too, or the shell's hover
+// feedback (desk icons, cards) never sees the mouse -- it looked dead on the
+// web while working in the pygame sim, which polls the mouse every frame.
+// COALESCED: a mouse fires far more moves than frames, so replace the queued
+// hover instead of appending -- only the newest position matters, and the
+// queue drains once per frame anyway.
+if(q.length&&q[q.length-1].type==="hover")q[q.length-1]={type:"hover",x:p.x,y:p.y};
+else send({type:"hover",x:p.x,y:p.y});
+return;}
 send({type:"move",x:p.x,y:p.y});e.preventDefault();});
 function up(e){if(!drag)return;drag=false;send({type:"up"});if(e)e.preventDefault();}
 cv.addEventListener("pointerup",up);cv.addEventListener("pointercancel",up);
@@ -409,11 +508,14 @@ var AN={ArrowLeft:"left",ArrowRight:"right",ArrowUp:"up",ArrowDown:"down"};
 cv.addEventListener("keydown",function(e){if(e.key in PAN){
 // Arrows are CONTEXTUAL: while a cart owns the keyboard (INPUT = the effective
 // input hint, non-null only during play) they are the D-PAD (PICO-8 muscle
-// memory: arrows + Z/X); on system surfaces they stay the trackball-cursor pan
-// (the code editor's caret, the shelf). The old always-pan mapping painted
-// cursor trails over a playing game's letterbox.
-if(INPUT){var an=AN[e.key];if(!nH[an]){nH[an]=true;send({type:"hold",name:an,down:true});}}
-else pH[e.key]=true;
+// memory: arrows + Z/X). On SYSTEM surfaces they NAVIGATE -- the same
+// left/right/up/down buttons w/a/s/d send -- because in a browser the MOUSE is
+// the cursor (owner call 2026-07-31): steering a virtual cursor with the arrow
+// keys made the desktop feel like neither a console nor a PC, and it painted
+// cursor trails. The trackball-pan mapping stays alive in the code (pv/pump)
+// for backends that really have a trackball; nothing on this transport arms it.
+var an=AN[e.key];
+if(!nH[an]){nH[an]=true;send({type:"hold",name:an,down:true});}
 e.preventDefault();return;}
 if(e.key=="Escape"){
 // In play (INPUT set), Esc is RESET -- the p8-web-player expectation (their pause
@@ -519,9 +621,11 @@ if(JSON.stringify(fi)!==JSON.stringify(INPUT)){INPUT=fi;applyInputHint();}
 // + web-view-off path) has no f.surfaces and replays f.cmds unchanged.
 // #76 delta: a {"same":1} surface replays its cached commands; a full one updates the
 // cache ("_defs" is ship-once-incremental, never cached) then replays.
+var _rt0=PT();
 if(f.surfaces){for(var si=0;si<f.surfaces.length;si++){var s=f.surfaces[si];
 if(s.same){rep(SURF[s.id]||[]);}else{if(s.id!=="_defs")SURF[s.id]=s.cmds||[];rep(s.cmds||[]);}}}
 else{rep(f.cmds||[]);}
+var _rt=PT()-_rt0;if(_rt>PERF.mr)PERF.mr=_rt;PERF.sr+=_rt;
 blit();
 // A deflayer's imgref cache-MISS (racing the async /assets fetch) latched imgWant: re-fetch
 // /assets (the server re-ships the deflayer on reset) until the paint image is cached (#63 F4).

@@ -59,12 +59,14 @@ try:
     from chrome import NAMES          # not palette: chrome is the device-safe home
     from widgets import _Blit, _in    # (runtime/palette.py needs colorsys -- host-only)
     import ui as _ui                  # desk icon label pills (ui.chip)
+    from surface import SurfaceSet    # surface model v1 (docs/surface_model_v1.md)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.wm import FullscreenStackWM, _VIEWPORT_BEZEL
     from runtime.layers import Layer
     from runtime.chrome import NAMES
     from runtime.widgets import _Blit, _in
     from runtime import ui as _ui
+    from runtime.surface import SurfaceSet
 
 
 # Window-chrome colors: the fixed ones live here; everything THEMEABLE (panel /
@@ -494,6 +496,19 @@ class WindowedWM(FullscreenStackWM):
         self._win_layer = _WindowStackLayer(self)
         self._wins = {}               # slot key -> _Win
         self._order = []              # window slots, bottom -> top (stack-shaped)
+        # Surface model v1 (docs/surface_model_v1.md): the registry + the one
+        # monotonic gen mint. Window records mirror _wins ("win:<slot key>" --
+        # REGISTRY keys, never content kinds, §2); _surface_signals bumps the
+        # epoch / attributes gestures; skip-draw (§4) consults the gens on the
+        # RECORDING tier only -- the P4/host raster paths see zero new
+        # per-frame work (_recording False -> signals early-return, and their
+        # canvases have no skip_surface so the console probe stays None).
+        self.surfaces = SurfaceSet()
+        self._recording = hasattr(self._root_canvas, "begin_surface")
+        self._drawn_gens = {}         # sid -> content gen last actually DRAWN
+        self.surface_keyframe = False  # armed by the serve loop (§5.4)
+        self._kf_active = False        # this frame's latched keyframe state
+        self._clock_min = -1           # bar HH:MM minute, for the clock touch
         # INPUT FOCUS -- decoupled from the back-stack (the owner call that fixed
         # "clicking anything else kills my playtest"): the stack still owns what's
         # OPEN and who TICKS (the Player ticks while it's the stack top), but the
@@ -502,6 +517,14 @@ class WindowedWM(FullscreenStackWM):
         # beside it is being typed in; only its X / hold-BACKSPACE (when focused)
         # / an exit verb ends it. None = the desktop root has focus.
         self._focus = None
+        # PLAY INTENT (#178): the same run() verb serves two jobs on a desktop --
+        # playing a game (open it as big as fits) and PLAYTESTING the cart you are
+        # editing (open it small, so the editor beside it stays readable). The
+        # entry point already carries that meaning, so the caller stamps it here
+        # rather than the kid choosing a scale: Editor PLAY -> "dev", everything
+        # else -> "play". Read ONCE, when the player window is created; a window
+        # the kid has since resized is never re-sized under them.
+        self._play_intent = "play"
         self._drag = None             # (kind, grab_dx, grab_dy) while dragging
         self._drag_armed = None       # (kind, ox, oy, wx, wy) press-in-strip origin
         self._resize = None           # (kind, ox, oy, ow, oh, cur_w, cur_h) in-flight
@@ -516,7 +539,6 @@ class WindowedWM(FullscreenStackWM):
         # full stack's [.., perf, windows] order.
         _pw = _PlayerWindowLayer(self)
         self._quiet_stack = [_pw]
-        self._quiet_stack_fps = [ws._perf_layer, _pw]
         self._full_debt = 0
         # Retained desktop-backdrop cache (#58 drag perf): during a DRAG/RESIZE the
         # wallpaper + OS bar are invariant, so the first such frame captures
@@ -684,13 +706,29 @@ class WindowedWM(FullscreenStackWM):
             self._focus = keys[-1] if keys else None
         for g, k in slots:              # content follows the group's top kind
             self._wins[g].kind = k
+        # Surface model: window records mirror the slot set. A dropped slot's
+        # surface goes with it; a re-opened one is REBORN with fresh gens from
+        # the monotonic mint, so no client cache can alias it (§2).
+        self.surfaces.sync(set("win:" + g for g in self._order))
+
+    def set_play_intent(self, intent):
+        """Record WHY the next cart run is starting -- "dev" (a playtest launched
+        from the Editor) or "play" (the desk/Library). Only the player window's
+        DEFAULT size reads it; see _win_size."""
+        self._play_intent = intent if intent == "dev" else "play"
 
     def _win_size(self, key, full, fs):
         """Default window OUTER size per window slot."""
         th = 18 * fs
         if key == "desktop":
-            s = max(1, min((full.w - 24) // self.ws.canvas.w,
-                           (full.h - 24 - th - self._bar_h()) // self.ws.canvas.h))
+            # A dev playtest (#178) is ONE size on every desktop: native cart
+            # pixels. Deliberately not derived from the screen -- "PLAY from the
+            # editor gives me a small window in the corner" is a rule you learn
+            # once, where a screen-relative size would be a different window on
+            # every machine for no benefit the grip doesn't already give.
+            s = (1 if self._play_intent == "dev" else
+                 max(1, min((full.w - 24) // self.ws.canvas.w,
+                            (full.h - 24 - th - self._bar_h()) // self.ws.canvas.h)))
             return (self.ws.canvas.w * s + 2, self.ws.canvas.h * s + 2 + th)
         if key in ("make", "menu", "picker"):
             return (full.w - full.w // 8, full.h - full.h // 10)
@@ -713,12 +751,19 @@ class WindowedWM(FullscreenStackWM):
         # below the OS bar.
         w = min(w, full.w - 4 * fs)
         h = min(h, full.h - bar_h - 8 * fs)
-        # Cascade: centered, each deeper window stepping down-right, clamped so
-        # the title strip always stays reachable below the OS bar.
-        x = (full.w - w) // 2 + depth * 12 * fs
-        y = bar_h + (full.h - bar_h - h) * 2 // 5 + depth * 10 * fs
-        x = max(0, min(x, full.w - w // 2))
-        y = max(bar_h, min(y, full.h - 24 * fs))
+        if key == "desktop" and self._play_intent == "dev":
+            # A dev playtest is small so the editor stays workable (#178) -- so put
+            # it where the editor needs least: the bottom-right corner. Centered,
+            # it would land squarely on the code column it is meant to sit beside.
+            x = max(0, full.w - w - 8 * fs)
+            y = max(bar_h, full.h - h - 8 * fs)
+        else:
+            # Cascade: centered, each deeper window stepping down-right, clamped so
+            # the title strip always stays reachable below the OS bar.
+            x = (full.w - w) // 2 + depth * 12 * fs
+            y = bar_h + (full.h - bar_h - h) * 2 // 5 + depth * 10 * fs
+            x = max(0, min(x, full.w - w // 2))
+            y = max(bar_h, min(y, full.h - 24 * fs))
         win = _Win(kind, x, y, w, h, title_h)
         self._build_content(win)
         # Prewarm: render the content ONCE into the fresh buffer, so a window
@@ -846,8 +891,28 @@ class WindowedWM(FullscreenStackWM):
         """Console hook (the #44 redraw gate): keep frames flowing while a RUNNING
         cart's window is open anywhere on the desktop -- not just while it's the
         stack top -- so a game visibly keeps playing under Settings / beside a
-        focused editor. Mirrors _animating's own desktop branch conditions."""
+        focused editor. Mirrors _animating's own desktop branch conditions.
+
+        Deliberately NO gesture leg here: a WM gesture's repaint is guaranteed
+        by the POINTER leg (window movement implies pointer movement; a
+        held-still pointer moves nothing, so skipping is correct), and
+        _animating feeds the backdrop cache's "desk pixels are moving" test --
+        a gesture leg would force a live desk re-render every drag frame,
+        which is the exact #155 regression the cache exists to prevent.
+
+        A LIVE WALLPAPER does belong here (owner report 2026-07-31: "they only
+        move when I move a window... but it doesn't happen while Settings is on
+        top"). _animating's own wallpaper leg keys on the TOP process kind --
+        `kind in ("launcher", "settings", "desk")` -- a list written before apps
+        were windows, so Settings kept the desk alive and Appearance (or Files,
+        Paint, Writer...) silently froze it. On THIS tier the desk backdrop is
+        visible behind every window, so its liveness cannot depend on who is on
+        top. Unlike the gesture leg, re-rendering here is CORRECT: a live
+        wallpaper's desk pixels really do change every frame, which is exactly
+        the case the backdrop cache is not for."""
         ws = self.ws
+        if self.desk_open() and ws.wallpaper.is_animating(dt):
+            return True
         return ("desktop" in self._stack and ws.cart_error is None
                 and (ws._update is not None or ws._draw is not None))
 
@@ -875,11 +940,18 @@ class WindowedWM(FullscreenStackWM):
         self._sync_windows()
         ws = self.ws
         overlays = []
-        # Game-domain overlays (the perf HUD) draw on the 320x240 game canvas and
-        # must land BEFORE the window blit composites it into the player window.
+        # The GAME-domain perf HUD is deliberately NOT in this stack. It draws on
+        # the 320x240 game canvas, and on this tier that canvas reaches the screen
+        # two different ways: a raster backend composites its pixels, but a
+        # RECORDING one (the web console) has no pixels -- the cart's commands are
+        # placed by the window's `view` bracket (#175). Anything game-domain drawn
+        # outside that bracket lands unplaced at the DESKTOP origin, which is
+        # exactly where the FPS chip appeared: floating over the editor window at
+        # its game-canvas coordinates (owner report 2026-07-31). So the chip is
+        # drawn inside _draw_player_window, between the cart's draw and the
+        # composite -- same pixels on a raster tier, correctly placed on a
+        # recording one.
         pre = []
-        if sig & 2:
-            pre.append(ws._perf_layer)
         if sig & 4:
             overlays.append(ws._confetti_layer)
         if sig & 8:
@@ -929,6 +1001,11 @@ class WindowedWM(FullscreenStackWM):
         frames resume."""
         ws = self.ws
         self._ensure_stack()
+        # Surface-model signals run BEFORE any layer draws or skip-decides
+        # (recording tier only; a raster tier returns immediately). The dt is
+        # nominal -- the one dt-sensitive predicate (wallpaper.is_animating)
+        # only tests dt > 0.
+        self._surface_signals(1 / 60)
         # NOTE deliberately NO pointer-state condition: a finger playing a touch
         # cart moves the (hidden) pointer every frame, and the desktop shows no
         # hover feedback while the cursor is hidden -- real UI reactions all set
@@ -942,7 +1019,7 @@ class WindowedWM(FullscreenStackWM):
                  and self._resize is None
                  and not getattr(ws.pointer, "visible", False))
         if quiet and self._full_debt <= 0:
-            return self._quiet_stack_fps if (self._cache_sig & 2) else self._quiet_stack
+            return self._quiet_stack        # the FPS chip rides the player window
         if quiet:
             self._full_debt -= 1      # paying the other-buffer debt: full paint
         else:
@@ -969,6 +1046,19 @@ class WindowedWM(FullscreenStackWM):
         one opaque full-frame copy via the cache canvas's own blit_strip reading
         the root canvas AS a source layer (native moy_gfx.blit565 on the device,
         host index slice otherwise -- the same kernel both directions)."""
+        # UNSUPPORTED IS A HARD STOP, CHECKED HERE (2026-07-31). The callers gate
+        # on _backdrop_unsupported only to choose the LIVE render path -- they
+        # still called this afterwards, and _ensure_backdrop mints a fresh
+        # full-screen layer BEFORE the blit_strip fails again. On a recording
+        # root (web/wasm) that leaked one 1024x600 RecordingLayer per painted
+        # desk frame: the recorder's _layers list is append-only (dense deflayer
+        # ids, dropped only on a cart change), so the console's own dropped
+        # reference frees nothing. Measured: ~614KB retained per leak, and since
+        # every GC collect then scans a bigger heap, collect cost climbed
+        # 13ms -> 380ms over one browsing session -- the owner's "the more the
+        # kinetic scroll activates the slower it gets".
+        if self._backdrop_unsupported or self._backdrop_disabled:
+            return
         try:
             cache = self._ensure_backdrop()
             self.ws.note_cost("desk.backdrop")
@@ -1094,6 +1184,15 @@ class WindowedWM(FullscreenStackWM):
         oy = cy + (ch - gh * scale) // 2
         return (ox, oy, scale)
 
+    def game_is_fullscreen(self):
+        """Only in the PLAY world (#105). In the desk world the game lives in a
+        WINDOW -- _draw_player_window emits its own placement bracket around the
+        cart's draw -- so the router must NOT also letterbox the whole desktop.
+        It briefly did, and because the FPS overlay ("perf") is a GAME-domain
+        layer, a windowed playtest blacked out the desk and re-placed the game:
+        the owner saw "the project launcher games also go fullscreen"."""
+        return not self._order
+
     def viewport(self):
         win = self._wins.get("desktop")
         if win is None:
@@ -1119,6 +1218,14 @@ class WindowedWM(FullscreenStackWM):
         if self._fb_fn is not None:
             self._fb_fn()
         if sc is gc:
+            return
+        if getattr(gc, "buf", None) is None:
+            # Command-only game canvas (#175): the cart's frame is ALREADY in the
+            # stream, recorded during its draw. There is nothing to composite --
+            # and the letterbox cls() below runs AFTER that draw, so painting it
+            # would wipe the frame. Bail before it. (The play world does not yet
+            # emit a view bracket, so a fullscreen cart lands 1:1 at the origin
+            # rather than centered -- tracked with the scale work in #175.)
             return
         ox, oy, scale = FullscreenStackWM.viewport(self)
         src = self._view_src()
@@ -1198,8 +1305,141 @@ class WindowedWM(FullscreenStackWM):
             return False
         return True
 
+    def _surface_signals(self, dt):
+        """Per-frame surface-model signal bookkeeping (§3). Runs at the TOP of
+        draw_stack -- BEFORE any layer's skip decision -- or a dirty frame's
+        epoch would land after the desk already declared itself clean.
+
+        Signals: a ws._dirty write (Class A un-attributed) or a transient
+        overlay bumps the set EPOCH -- everything reads changed, today's
+        full-repaint behavior expressed as gens. A WM GESTURE in flight is the
+        first AUDITED flow (§3 Class C -> A): the change is the moving window
+        (+ the chips outline on a resize), so only those sids are touched --
+        which is exactly what lets the desk/bar/other windows SKIP during a
+        drag. Pointer activity outside a WM gesture stays the conservative
+        epoch (content handlers mutate without marking dirty -- the pre-#44
+        debt). Class B declarations follow _animating's by-name list
+        (pure-read predicates, verified before mirroring)."""
+        if not self._recording:
+            return                    # raster tiers: zero new per-frame work
+        ws = self.ws
+        ss = self.surfaces
+        self._kf_active = self.surface_keyframe
+        self.surface_keyframe = False
+        cur = ws._ptr_state()
+        last = ws._last_ptr
+        ptr = ((cur is not None and (cur[3] or cur[4]))
+               or (last is not None and (last[3] or last[4])))
+        overlay = (ws._splash_until is not None
+                   or (ws.ach_ui._confetti_until
+                       and ws.ach_ui._confetti_until is not None)
+                   or ws.ach_ui._egg_active() or ws.ach.toast_active())
+        gesture = self._drag if self._drag is not None else self._resize
+        if ws._dirty or overlay:
+            ss.epoch()
+        elif gesture is not None:
+            key = gesture[0]
+            if self._wins.get(key) is not None:
+                ss.touch("win:" + key)   # pre-L4 streams carry the position
+                if gesture is self._resize:
+                    ss.touch("chips")    # the rubber-band outline rides there
+        elif ptr and self._content_gesture and self._focus is not None:
+            # A CONTENT gesture (a finger scrolling/selecting INSIDE the
+            # focused window): the desk cannot change under it (the backdrop
+            # cache's own invariant), so attribute the change to that window
+            # alone. Without this the pointer leg epoch'd everything and the
+            # desk -- whose pixel cache the web root cannot use -- re-rendered
+            # LIVE at ~627KB of garbage per frame (measured, the code-editor
+            # drag), which is what marched the GC into mid-gesture collects.
+            ss.touch("win:" + self._focus)
+        elif ptr or cur != last:
+            # `cur != last` is a POSITION-only change: a hovering mouse. The
+            # shell's hover feedback (desk icon highlight, cards msel) is drawn
+            # by surfaces that do not all mark dirty for it, so a gen-clean
+            # skip would swallow exactly the repaint hover needs. Epoch is the
+            # honest cost of hover -- it lasts only while the mouse MOVES (a
+            # still pointer is inert again, and the idle desktop stays free).
+            ss.epoch()
+        # The desk clock (bar HH:MM renders inside the "launcher" backdrop
+        # surface): a minute flip is a content change nobody marks -- attribute
+        # it here so a skipped desk can never show a stale clock.
+        try:
+            mm = _time.localtime()[4]
+        except Exception:  # noqa: BLE001 -- no RTC: the bar shows mm:ss uptime
+            mm = None
+        if mm != self._clock_min:
+            self._clock_min = mm
+            ss.touch("launcher")
+        # Class B for the non-window surfaces: the desk under a live wallpaper,
+        # the visible cursor (its stream follows the pointer position) -- and
+        # the PLAY-world Library while its grid coasts on a kinetic fling.
+        # Fling frames paint via request_frame() (no dirty, no pointer), so
+        # without this declaration every gen read clean and skip-draw FROZE the
+        # coasting grid until the next real signal -- the owner's "fast drags
+        # lag" (a fast drag flings; a slow one doesn't). In the desk world the
+        # Library grid isn't visible, so launcher.flinging is False there and
+        # the desk backdrop keeps skipping.
+        ss.get("launcher").animating = (
+            ws.wallpaper.is_animating(dt)
+            or bool(getattr(ws.launcher, "flinging", False)))
+        ss.get("cursor").animating = bool(getattr(ws.pointer, "visible", False))
+
+    def _surface_windows(self):
+        """Window-record bookkeeping, AFTER _sync_windows (live slot set):
+        placement mirrored by compare (the WM owns x/y/w/h -- diffing its own
+        writes covers every write site from one place: drag, maximize, resize
+        apply, relayout clamp) and the §3 Class B declarations (the
+        _content_static by-name list, becoming its registration seed)."""
+        if not self._recording:
+            return
+        ws = self.ws
+        ss = self.surfaces
+        for z, key in enumerate(self._order):
+            win = self._wins[key]
+            s = ss.get("win:" + key)
+            if (s.x != win.x or s.y != win.y or s.w != win.w or s.h != win.h
+                    or s.z != z):
+                s.x, s.y, s.w, s.h, s.z = win.x, win.y, win.w, win.h, z
+                s.place_gen = ss.mint()
+            s.animating = (win.kind in ("desktop", "update")
+                           or (win.kind == "settings"
+                               and ws.settings_layer.bluetooth_animating())
+                           or (win.kind == "menu" and ws.menu_view == "music"
+                               and ws.music_ui.music_preview is not None))
+
+    def surface_skip(self, layer_id):
+        """The console draw-stack probe (§4 skip-draw): True = do not draw this
+        layer this frame; the recorder keeps its z-slot and the wire ships a
+        {"same":1} stub. Recording tier only; only the desk backdrop is layer-
+        eligible for now (windows skip individually inside _draw_windows --
+        their layer carries the sync/bookkeeping and must always run)."""
+        if not self._recording or self._kf_active or layer_id != "launcher":
+            return False
+        ss = self.surfaces
+        if ss.is_animating(layer_id):
+            return False
+        gen = ss.content_gen(layer_id)
+        if gen == self._drawn_gens.get(layer_id):
+            self.ws.note_cost("surface.skip")
+            return True
+        self._drawn_gens[layer_id] = gen      # it WILL draw this frame
+        return False
+
+    def arm_surface_keyframe(self):
+        """Force the next painted frame to draw EVERY surface in full (§5.4:
+        fresh client, delta cache wipe, detected drop -- the keyframe verb)."""
+        self.surface_keyframe = True
+
     def _draw_windows(self, dt):
         self._sync_windows()
+        self._surface_windows()
+        # Per-window surface marks (§2: this is the Stage 9 re-partition -- the
+        # one "windows" span becomes one span per window + a "chips" residual).
+        # Probed like console.draw_stack's _surf: None on a raw canvas -> no
+        # call, no allocation, pixels byte-identical.
+        _surf = getattr(self._root_canvas, "begin_surface", None)
+        _skip = getattr(self._root_canvas, "skip_surface", None)
+        ss = self.surfaces
         n = len(self._order)
         first = self._lowest_dirty_window(dt)
         # Chrome freeze (#155): a window's strip/border/shadow is DISJOINT from
@@ -1213,10 +1453,31 @@ class WindowedWM(FullscreenStackWM):
             key = self._order[i]
             win = self._wins[key]
             focused = (key == self._focus)
+            sid = "win:" + key
             if win.minimized:
-                continue
+                continue                  # hidden: no z-slot, not replayed
             if i < first:
-                continue                  # settled + nothing below it repainted
+                # The raster partial path settled this window. On the recording
+                # tier its z-slot must still reach the wire (the page replays
+                # surfaces in listed order -- an omitted window would vanish
+                # under the desk's cls), so keep it as a skip stub.
+                if _skip is not None:
+                    _skip(sid, "system")
+                continue
+            if _skip is not None and not self._kf_active:
+                # §4 skip-draw: gen-clean + non-animating -> don't draw at all;
+                # the client replays its retained stream. The gesture target
+                # can never match (its touch in _surface_signals moved the gen)
+                # and a reborn window's fresh mint always differs (§2).
+                gen = ss.content_gen(sid)
+                if (gen == self._drawn_gens.get(sid)
+                        and not ss.is_animating(sid)):
+                    _skip(sid, "system")
+                    self.ws.note_cost("surface.skip")
+                    continue
+                self._drawn_gens[sid] = gen
+            if _surf is not None:
+                _surf(sid, "system")
             win._stamp_streak = getattr(win, "_stamp_streak", 0) + 1
             if win.kind == "desktop":
                 # The Player TICKS whenever its window is open, independent of
@@ -1228,6 +1489,20 @@ class WindowedWM(FullscreenStackWM):
                 self._draw_player_window(win, True, focused, dt)
             else:
                 self._draw_app_window(win, focused, dt)
+        if _skip is not None and not self._kf_active:
+            # The chips residual skips like a window: its content moves on
+            # focus/order/minimize (dirty -> epoch) and on a resize outline
+            # (attributed in _surface_signals).
+            gen = ss.content_gen("chips")
+            if gen == self._drawn_gens.get("chips"):
+                _skip("chips", "system")
+                return
+            self._drawn_gens["chips"] = gen
+        if _surf is not None:
+            # The residual span: chips + the resize outline. Its OWN sid --
+            # SurfaceDelta's cache is sid-keyed, so a second "windows" span in
+            # one frame would corrupt the {"same":1} replay.
+            _surf("chips", "system")
         self._draw_taskbar_chips(quiet=self._chrome_quiet)
         if self._resize is not None:               # rubber-band resize preview
             kind, _ox, _oy, _ow, _oh, cw, chh = self._resize
@@ -1589,20 +1864,52 @@ class WindowedWM(FullscreenStackWM):
             self.ws._pf_wm_stamp = _wt() - _t0
         self._win_chrome(win, focused, quiet=self._chrome_quiet)
 
+    def _fps_chip_on(self):
+        """The parent's overlay-sig bit 2, re-read where the chip is now drawn:
+        show_fps AND the player is the process on top (a game under Settings
+        keeps its chip hidden, as before)."""
+        return (self.ws.show_fps and bool(self._stack)
+                and self._stack[-1] == "desktop")
+
     def _draw_player_window(self, win, running, focused, dt, full=True):
         ws = self.ws
+        gc = ws.canvas
+        # Geometry FIRST (it does not depend on the cart's draw): on a recording
+        # target with a command-only game canvas we place the cart's draw span with
+        # a WM view bracket (#175) instead of compositing its pixels afterwards --
+        # so the bezel and the bracket must both precede the draw, or the bezel
+        # would wipe the frame the cart just recorded.
+        cx, cy, cw, ch = win.content_rect()
+        ox, oy, scale = self._player_view(win)
+        _view = getattr(self._root_canvas, "view", None)
+        # A command-only game canvas (no `buf`) has NO pixels to composite, so the
+        # bracket is not optional -- without it the cart's commands would land
+        # unplaced at the desktop origin, unclipped. (That is exactly the bug the
+        # first cut of this shipped.) `scale` is the same integer magnification the
+        # pixel path would have used, so the game FILLS its window.
+        use_view = _view is not None and getattr(gc, "buf", None) is None
+        if full:
+            self._root_canvas.rect(cx, cy, cw, ch, _SHADOW)   # letterbox bezel
         if running:
             # The Player ticks while it's the STACK top (the running process),
             # focused or not -- editing beside a live playtest keeps it alive.
+            if use_view:
+                # (ox, oy, scale) is the centered game rect the pixel composite
+                # used; vCW/vCH bound cls() and every draw to the cart surface, so
+                # a cart cannot paint over the desk around it.
+                _view(ox, oy, scale, gc.w, gc.h)
             self._content_for("desktop").draw(dt)  # Player.tick -> the game canvas
-        gc = ws.canvas
+            if self._fps_chip_on():
+                ws._perf_layer.draw(dt)   # game domain: inside the bracket (above)
+            if use_view:
+                _view()
         fb = getattr(gc, "flush_batch", None)
         if fb is not None:
             fb()
-        cx, cy, cw, ch = win.content_rect()
-        if full:
-            self._root_canvas.rect(cx, cy, cw, ch, _SHADOW)   # letterbox bezel
-        ox, oy, scale = self._player_view(win)
+        if use_view:
+            if full:
+                self._win_chrome(win, focused)
+            return
         # On a quiet game frame (full=False) the composite is this frame's LAST
         # framebuffer write, so a device backend may run it async and defer the
         # present (the #58 composite-overlap budget lever). A full paint draws
@@ -1812,7 +2119,8 @@ class WindowedWM(FullscreenStackWM):
                 nw = max(160 * fs, ow + (px - ox))
                 nh = max(90 * fs + win.title_h, oh + (py - oy))
                 self._resize = (kind, ox, oy, ow, oh, nw, nh)
-                ws._dirty = True
+                # Attributed like _move_window (§3): keeps_animating's gesture
+                # leg owns the repaint; _surface_signals touches the sids.
                 return True
             else:
                 self._resize = None
@@ -1971,8 +2279,12 @@ class WindowedWM(FullscreenStackWM):
         self.close_window_kind(kind)
 
     def _move_window(self, win, nx, ny):
+        # An ATTRIBUTED placement write (surface model §3): no un-attributed
+        # ws._dirty here -- the repaint is guaranteed by keeps_animating's
+        # gesture leg + the pointer leg, and _surface_signals attributes the
+        # gesture to the moving window's sid. This is what lets the desk/bar/
+        # other windows SKIP during a drag (the 70ms->3ms wasm frame class).
         full = self._root_canvas
         fs = self._fs()
         win.x = max(-win.w + 40 * fs, min(nx, full.w - 40 * fs))
         win.y = max(self._bar_h(), min(ny, full.h - 24 * fs))
-        self.ws._dirty = True

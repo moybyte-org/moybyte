@@ -14,6 +14,16 @@ t = 0.0
 # The pet faces live in the cart's sprite sheet (sprites.moygfx): frog=0, robot=1.
 # Pick one in "Make it mine" and edit it in the paint editor.
 
+# DESKTOP SAFE BAND. A wallpaper is 320x240, but a desktop backdrop is COVER-
+# cropped: the smallest INTEGER upscale that covers the screen, centred. At
+# 1024x600 that is 4x -> 1280x960 -> ~45 rows off the top AND bottom and ~32
+# columns off each side, in cart pixels. The pet, the ground line and the
+# caption live inside this band; the sky and stars still bleed to the real
+# edges, so the handheld's full 320x240 view stays a complete picture.
+SAFE_Y = 45
+SAFE_X = 32
+GROUND = H - SAFE_Y - 5          # the ground's top edge, just inside the band
+
 
 def _init():
     global stars, pet, pet_x
@@ -39,7 +49,7 @@ def _update(dt):
             s[1] = 0
             s[0] = rnd(W)
     pet_x += pet_dir * 40 * dt
-    if pet_x > W - 40 or pet_x < 4:
+    if pet_x > W - SAFE_X - 36 or pet_x < SAFE_X + 4:
         pet_dir = -pet_dir
 
 
@@ -60,7 +70,7 @@ def _draw():
     _paint_bg(cfg("bg", "dark_blue"))
     for s in stars:
         pix(s[0], s[1], 7 if s[2] > 25 else 6)
-    rect(0, H - 24, W, 24, col("dark_green"))   # ground
+    rect(0, GROUND, W, H - GROUND, col("dark_green"))   # ground
     bob = 2 if (int(t * 4) % 2 == 0) else 0
-    spr(pet, int(pet_x), H - 24 - 28 - bob, 0, 4)  # 4x-scaled pet tile (frog/robot)
-    print("MY SPACE COMPUTER", 10, 10, col("white"), 3)
+    spr(pet, int(pet_x), GROUND - 32 - bob, 0, 4)  # 4x-scaled pet tile (frog/robot)
+    print("MY SPACE COMPUTER", SAFE_X + 8, SAFE_Y + 10, col("white"), 3)

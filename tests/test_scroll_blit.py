@@ -408,8 +408,23 @@ def test_web_stream_blit_frames_replay_to_the_raster_truth(tmp_path):
         step_web()
     assert ws.launcher.dragging and wc.ws.launcher.dragging
     assert ws.launcher.scroll == wc.ws.launcher.scroll   # same physics
+    # scroll-as-blit is OFF over the web transports (CommandCanvas.RETAINED_FRAMES
+    # = 0), so a drag ships FULL bands and never a ["scr", ...] shift.
+    #
+    # This is a MITIGATION, not a root-cause fix, and the distinction matters: the
+    # owner sees scrolling go black on BOTH web transports (the wasm runner and
+    # tools/web_console.py). This test passed throughout, because it replays the
+    # FLAT stream with every frame delivered in order -- which is exactly the
+    # configuration the bug does NOT appear in. Neither the #76 per-surface delta
+    # nor the #44 dirty gate's skipped frames are exercised here, and the shift's
+    # correctness depends on what the browser actually retained.
+    #
+    # So the mechanism is proven sound in isolation and broken in the field, and
+    # until that gap is explained the safe contract is self-contained frames. The
+    # assertion is inverted rather than deleted so re-enabling the optimisation has
+    # to come back through here deliberately.
     saw_scr = sum(1 for cmds in frames for c in cmds if c and c[0] == "scr")
-    assert saw_scr > 0                                   # blit shipped as scr
+    assert saw_scr == 0, "web frames must be self-contained (no scroll shift)"
     # Covers ship ONCE via /assets imgref (#113) -- so a real client fetches
     # assets and replays the frames against them. All covers are live by now,
     # and their serial names are stable, so the final assets serve every frame.

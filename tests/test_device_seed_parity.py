@@ -51,6 +51,7 @@ TITLE_TO_FOLDER = {
     "Hop Quest": "platformer",
     "Sky Run": "scroll_demo",
     "Brick Siege": "brick_siege",
+    "Brick Siege Lua": "brick_siege_lua",
     "Harpoon Pop": "harpoon_pop",
     "Tap Only Red": "tap_red",
     "Tap Game": "tap_game",

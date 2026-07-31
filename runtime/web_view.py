@@ -218,14 +218,26 @@ BUTTON_NAMES = ("left", "right", "up", "down", "a", "b", "run", "home")
 # ---------------------------------------------------------------------------
 
 
+# The page protocol version (surface model §6). 2 = surface entries may carry
+# "place"/"gen"/"pgen" metadata and {"same":1} stubs may be gen-derived (§4
+# skip-draw) rather than byte-compared. Additive over v1 -- a v1 page ignores
+# the new fields and still composites correctly because streams remain
+# root-space; the HARD break (local-space streams + per-surface canvases)
+# bumps this again and the page must then match.
+PROTOCOL_V = 2
+
+
 def _slice_surfaces(cmds, marks):
     """Cut a flat frame `cmds` into per-surface streams at the recorded start offsets.
 
-    `marks` is [(start_index_into_cmds, sid, domain), ...] in draw order. Returns
-    [[sid, domain, sub_cmds], ...] whose sub_cmds CONCATENATE back to exactly `cmds`
-    (so the surfaces composite to the same pixels as the flat frame). Any commands drawn
-    BEFORE the first surface was begun ride a leading "_pre" surface so nothing is dropped;
-    a frame with no surface marks at all becomes one implicit "_all" surface."""
+    `marks` is [(start_index_into_cmds, sid, domain), ...] in draw order -- a
+    4th element True marks a SKIPPED surface (§4 skip-draw: zero-width, entry
+    cmds=None, the client replays its retained stream). Returns
+    [[sid, domain, sub_cmds], ...] whose non-None sub_cmds CONCATENATE back to
+    exactly `cmds` (so the surfaces composite to the same pixels as the flat
+    frame). Any commands drawn BEFORE the first surface was begun ride a
+    leading "_pre" surface so nothing is dropped; a frame with no surface marks
+    at all becomes one implicit "_all" surface."""
     if not marks:
         return [["_all", "system", cmds]] if cmds else []
     out = []
@@ -234,8 +246,16 @@ def _slice_surfaces(cmds, marks):
         out.append(["_pre", "system", cmds[:first]])
     n = len(marks)
     for i in range(n):
-        start, sid, domain = marks[i]
-        end = marks[i + 1][0] if i + 1 < n else len(cmds)
+        mark = marks[i]
+        start, sid, domain = mark[0], mark[1], mark[2]
+        if len(mark) > 3 and mark[3]:
+            out.append([sid, domain, None])       # skipped: retained on the client
+            continue
+        end = len(cmds)
+        for j in range(i + 1, n):                 # next NON-SKIP mark bounds the span
+            if not (len(marks[j]) > 3 and marks[j][3]):
+                end = marks[j][0]
+                break
         out.append([sid, domain, cmds[start:end]])
     return out
 
@@ -326,6 +346,16 @@ class DrawRecorder:
         if self.surfaces_on:
             self._surf_marks.append((len(self._cmds), str(sid), str(domain)))
 
+    def skip_surface(self, sid, domain="system"):
+        """Surface model §4 skip-draw: the WM chose NOT to draw this gen-clean
+        surface, but its z-slot must survive to the wire -- the client replays
+        its retained stream ({"same":1}) in order. Records a zero-width mark
+        whose slice entry carries cmds=None (the delta turns that into a stub
+        WITHOUT a byte-compare -- there are no bytes; the gens are the truth)."""
+        if self.surfaces_on:
+            self._surf_marks.append((len(self._cmds), str(sid), str(domain),
+                                     True))
+
     def commit(self):
         """Finish the frame: the accumulated commands become the served frame. While
         surfaces_on, ALSO slice the flat stream into per-surface streams at the marked offsets
@@ -384,6 +414,26 @@ class DrawRecorder:
             self._cmds.append(["clip"])
         else:
             self._cmds.append(["clip", int(x), int(y), int(w), int(h)])
+
+    def view(self, ox=None, oy=0, scale=1, w=0, h=0):
+        """The WM-OWNED placement bracket (#175). Everything recorded until the
+        matching reset is one cart's draw span, placed at (ox, oy) in a w x h
+        window and clipped to it -- so a windowed game ships its COMMANDS
+        (~16.7 KB/f) instead of a rasterized full-frame image (~102 KB/f, plus
+        ~85 ms/f of pure-Python pixel work in the wasm).
+
+        Deliberately NOT `camera`/`clip`: both are cart-facing spec verbs
+        (SPEC.md's verb table), so a cart calling either would clobber its own
+        placement and bleed onto the desktop. view() with no args = identity.
+
+        `scale` is an INTEGER magnification the replayer applies to the whole
+        span (put/fr/im/imr map cart -> target as (c - cam) * scale + origin), so
+        a windowed game fills its window instead of sitting 1:1 in a corner."""
+        if ox is None:
+            self._cmds.append(["view"])
+            return
+        scale = max(1, int(scale))
+        self._cmds.append(["view", int(ox), int(oy), scale, int(w), int(h)])
 
     def pal(self, c0=None, c1=None):
         if c0 is None:
@@ -576,9 +626,21 @@ class DrawRecorder:
 
     # -- off-screen layers (#54 scroll + #43 cached top bar) -----------------
     def register_layer(self, layer):
-        """Assign a RecordingLayer the next dense layer id and remember it. Returns the id."""
+        """Assign a RecordingLayer the next dense layer id and remember it. Returns the id.
+
+        The registry is append-only by design (ids are dense and the browser
+        caches by id; it clears on reset_atlas). That makes it a RETENTION
+        BOMB for any caller that mints layers in a loop -- a dropped console
+        reference frees nothing while this list holds one. That happened for
+        real (the desk backdrop re-minting a full-screen layer per painted
+        frame on a recording root, ~614KB each), so warn loudly in the one
+        place that can see it: a healthy console mints a handful of layers per
+        screen, never hundreds."""
         lid = len(self._layers)
         self._layers.append(layer)
+        if lid and lid % 256 == 0:
+            print("[web_view] WARNING: %d recorder layers registered -- a mint "
+                  "loop leaks ~w*h bytes each (see register_layer)" % lid)
         return lid
 
     def _ensure_registered(self, layer):
@@ -776,6 +838,34 @@ class _LayerRecorder:
                            int(img.w), int(img.h), int(t), list(img.pix), int(flip)])
 
 
+class ViewCanvas:
+    """The GAME canvas on a RECORDING desktop tier: a w x h logical surface whose
+    draws go STRAIGHT into the parent CommandCanvas's recorder, so the wasm never
+    rasterizes a pixel (#175). It carries no pixels -- placement is the WM-owned
+    ["view", ...] bracket the window path emits around the cart's draw span.
+
+    Two properties are load-bearing:
+      * it is a DISTINCT object from the system canvas -- Workstation only installs
+        the two-domain (game + system) setup when `sys_canvas is not canvas`;
+      * it has NO `buf` -- which is exactly how the compositor detects that the
+        game frame is already in the command stream, so _blit_game no-ops instead
+        of copying 76,800 index bytes out as one base64 image.
+    """
+
+    def __init__(self, parent, width=320, height=240):
+        self._p = parent
+        self.w = width
+        self.h = height
+        self.font_scale = 1        # a cart surface always draws 8px text
+
+    def __getattr__(self, name):
+        # `_p` guards __init__-time recursion; `buf` must RAISE (see the docstring)
+        # even though the parent may grow one later.
+        if name in ("_p", "buf"):
+            raise AttributeError(name)
+        return getattr(self._p, name)
+
+
 class RecordingLayer:
     """An off-screen layer that is BOTH a real rasterizing canvas (so the DEVICE panel / the
     HOST cross-check render the scroll/bar exactly) AND a recorder of its own indexed
@@ -794,6 +884,17 @@ class RecordingLayer:
     lay.map(), so a mapped layer must ship its cells or the browser shows a flat sky).
     spr_batch() INTO a layer still falls through __getattr__ unrecorded (a layer is
     pre-rendered once, so no shipped cart batches into one)."""
+
+    # Scroll-as-blit must be OFF inside a layer too, for the same reason it is off
+    # on CommandCanvas (see there). Without this the gate LEAKS: new_layer() backs a
+    # RecordingLayer with a real SystemCanvas, and __getattr__ forwards the missing
+    # name to it -- so a layer reported the host Canvas's 1 and kept emitting `scr`
+    # shifts even after CommandCanvas said 0. On the windowed tier every window's
+    # content is a layer, which is exactly where the owner sees scrolling go black.
+    # A shift inside a layer is worse than on the root: the layer's stream is CACHED
+    # by the browser (deflayer) and replayed, so the shift re-applies.
+    # (Class attr: __getattr__ only fires for MISSING names, so this pins it.)
+    RETAINED_FRAMES = 0
 
     _VERBS = ("cls", "pix", "line", "rect", "rectb", "circ", "circb",
               "spr", "print", "camera", "clip", "pal", "palt", "reset_state",
@@ -814,15 +915,36 @@ class RecordingLayer:
         for name in RecordingLayer._VERBS:
             self._bind(name)
 
+    # RECORD-ONLY (opt-in): skip the raster half of the tee entirely.
+    #
+    # The tee exists because on a DEVICE the raster half IS the panel output. A
+    # pure-web target has no panel: the browser rasterizes from the commands, so
+    # every pixel painted into the backing canvas is thrown away. Measured on the
+    # windowed picker (whose window content is a layer), a drag frame cost 246.7ms
+    # as a tee and 25.8ms record-only -- ~90% of the frame was rasterizing for
+    # nobody. It is the same finding as #175's game canvas, in the other half of
+    # the draw path: that one is fast now precisely because it stopped rasterizing.
+    #
+    # OPT-IN, not the default: only a consumer that never reads a layer's PIXELS
+    # may set it. The web recording path qualifies -- blit_window_from/blit_strip
+    # record a layer REFERENCE (blit_layer_*) rather than copying -- but the device
+    # web view's Tee wraps a real DeviceCanvas whose panel still needs the pixels.
+    RECORD_ONLY = False
+
     def _bind(self, name):
         real = getattr(self._c, name)
         rec = getattr(self._lr, name)
 
-        def fn(*args):
-            self._begin_batch()
-            r = real(*args)
-            rec(*args)
-            return r
+        if RecordingLayer.RECORD_ONLY:
+            def fn(*args):
+                self._begin_batch()
+                return rec(*args)
+        else:
+            def fn(*args):
+                self._begin_batch()
+                r = real(*args)
+                rec(*args)
+                return r
 
         setattr(self, name, fn)
 
@@ -1161,13 +1283,23 @@ class CommandCanvas:
     and clears it. `_rec` is the shared DrawRecorder (self_contained) the host web console hands
     to a ServedState for the serve-time deflayer prepend + gen bookkeeping."""
 
-    # #113 scroll-as-blit: the browser's retained index buffer IS this canvas's
-    # framebuffer (frames replay onto it, quiet frames ship nothing), so the
-    # last shipped frame's pixels persist exactly like the host Canvas's one
-    # persistent bytearray -> 1. With scroll_rect below, the shelf/picker
-    # drag+fling partial path engages over the web transport: a blit frame
-    # ships one tiny ["scr", ...] + the exposed band instead of every card.
-    RETAINED_FRAMES = 1
+    # #113 scroll-as-blit is OFF over the web transports (was 1).
+    #
+    # The premise -- "the browser's retained buffer is this canvas's framebuffer,
+    # one frame back" -- does not hold. blit_shift() requires the last k paints to
+    # be CONSECUTIVE frames actually present in the target buffer, but what the
+    # browser holds is the last frame that was SHIPPED, and the #44 dirty gate ships
+    # nothing on a quiet frame while the console's frame counter keeps advancing. So
+    # a shift can be emitted against a buffer that never received the paint it is
+    # relative to, and the view marches off into black. Owner-visible on BOTH web
+    # transports (the wasm runner AND tools/web_console.py), which is what rules out
+    # any single transport's frame handling as the cause.
+    #
+    # 0 makes every frame SELF-CONTAINED: scrolling repaints the full band instead
+    # of shipping a ["scr", ...] shift. That costs bytes on a drag, which the #76
+    # per-surface delta already absorbs, and it is the same trade -- for the same
+    # reason -- that the device web view's Tee makes above.
+    RETAINED_FRAMES = 0
 
     def __init__(self, width=320, height=240, palette=None, font_scale=1):
         self.w = width
@@ -1198,6 +1330,12 @@ class CommandCanvas:
         sliced per surface (the browser composites them). A no-op unless the recorder's
         surfaces_on is set (web_console turns it on). See DrawRecorder.begin_surface."""
         self._rec.begin_surface(sid, domain)
+
+    def skip_surface(self, sid, domain="system"):
+        """§4 skip-draw (surface model): keep a gen-clean surface's z-slot as a
+        zero-width mark; the wire ships {"same":1}, the client replays its
+        retained stream. The WM only calls this when this canvas records."""
+        self._rec.skip_surface(sid, domain)
 
     # -- frame handoff -------------------------------------------------------
     def take_commands(self):
@@ -1233,6 +1371,9 @@ class CommandCanvas:
 
     def clip(self, x=None, y=None, w=None, h=None):
         self._rec.clip(x, y, w, h)
+
+    def view(self, ox=None, oy=0, scale=1, w=0, h=0):
+        self._rec.view(ox, oy, scale, w, h)
 
     def pal(self, c0=None, c1=None):
         self._rec.pal(c0, c1)
@@ -1456,6 +1597,7 @@ def assets_payload(w, h, palette, sheet, tilemap, cart_title, audio_rate=8000, i
     else:
         pal = [list(rgb) for rgb in palette]       # already RGB triples (host)
     return {
+        "v": PROTOCOL_V,
         "w": w, "h": h,
         "palette": pal,
         "font": {"first": FONT_FIRST, "w": FONT_W, "h": FONT_H, "glyphs": _font_glyphs()},
@@ -1553,6 +1695,16 @@ def apply_events(events, input, pointer, on_press=None, on_pan=None,
             elif t == "move":
                 pointer.place(int(ev.get("x", 0)), int(ev.get("y", 0)))
                 pointer.down = True
+            elif t == "hover":
+                # POINTER POSITION WITHOUT A BUTTON (2026-07-31). The shell has
+                # real hover feedback -- the desk icon highlight (_lhover), the
+                # cards grid's msel -- and it works in the pygame sim because
+                # that loop reads the mouse every frame. The browser only ever
+                # reported the pointer while a button was down, so on the web
+                # the whole shell looked dead under the cursor. Deliberately NOT
+                # "move": that one asserts `down`, which would fake a drag out
+                # of an idle mouse (drag-scrolling grids, moving windows).
+                pointer.place(int(ev.get("x", 0)), int(ev.get("y", 0)))
             elif t == "up":
                 pointer.down = False
             elif t == "pan":
@@ -1785,12 +1937,17 @@ class SurfaceDelta:
     def __init__(self):
         self._last = {}
         self._gen = None
+        self.need_keyframe = False   # a skip stub had no client-side stream to
+                                     # replay (§4): the serve loop must arm a
+                                     # full-draw keyframe (consumed by caller)
 
     def reset(self):
         """A fresh client (or a serve-state reset): forget everything -- the next
         encode() ships every surface in full."""
         self._last = {}
         self._gen = None
+        self.need_keyframe = True    # nothing cached: the next frame must be
+                                     # drawn in full (no skips) to seed it
 
     def encode(self, surface_dicts, gen=None):
         """The wire form of `surface_dicts` ([{"id","domain","cmds"}, ...], the
@@ -1805,6 +1962,9 @@ class SurfaceDelta:
         if gen is not None and gen != self._gen:
             self._gen = gen
             self._last = {}
+            self.need_keyframe = True  # the page wiped SURF with the atlas: every
+                                       # retained stream is gone -- no skips until
+                                       # a full frame reseeds both sides
         out = []
         last = self._last
         for s in surface_dicts:
@@ -1813,6 +1973,17 @@ class SurfaceDelta:
                 out.append(s)              # ship-once defs: always fresh, never cached
                 continue
             cmds = s["cmds"]
+            if cmds is None:
+                # §4 skip-draw: the WM recorded nothing for this gen-clean
+                # surface. No bytes to compare -- the gens are the truth. The
+                # client MUST already hold the stream; if this cache has never
+                # shipped it to THIS client, the skip was premature (a fresh
+                # connection, a dropped frame): flag for a keyframe re-arm and
+                # stub anyway (one imperfect frame, healed next tick).
+                if sid not in last:
+                    self.need_keyframe = True
+                out.append({"id": sid, "domain": s["domain"], "same": 1})
+                continue
             # #113: a stream carrying a scroll shift is NOT idempotent (the
             # browser REPLAYS a {"same":1} surface from its cache, and re-
             # applying "scr" shifts the pixels again), so it always ships in

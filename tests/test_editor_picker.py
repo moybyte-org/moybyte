@@ -42,11 +42,22 @@ def test_picker_lists_the_new_tile_then_every_editable_cart(tmp_path):
     items = ws.picker.items
     assert items[0]["type"] == NEW_TILE_TYPE   # "+ New" pinned first
     real = [c for c in items if c.get("path")]
-    # EVERY editable cart is listed -- games, tools, apps, AND wallpapers (all editable).
+    # Every editable cart is listed -- games, tools AND wallpapers.
     types = {c.get("type") for c in real}
-    assert {"game", "tool", "app", "wallpaper"} <= types
-    # The picker mirrors the FULL scanned store (built-ins included), not the run-grid.
-    assert len(real) == len(ws._all_carts)
+    assert {"game", "tool", "wallpaper"} <= types
+    # ...MINUS the carts a shell APP claims as its identity (Files/Paint/...).
+    # Those are not really projects: the app is a frozen shell module and the
+    # cart holds only identity + icon + a few-line fallback body, so offering it
+    # as a project meant editing code the kid can never see run. TEMPORARY --
+    # #55 (privileged system carts) makes them real and this exclusion goes
+    # away; shell_ux_v1's "everything is editable" line is right again then.
+    claimed = [c for c in ws._all_carts
+               if any(app.is_app(c) for app, _t in getattr(ws, "_apps", ()))]
+    assert claimed, "fixture has no app carts -- the exclusion is untested"
+    listed = {id(c) for c in real}
+    for cart in claimed:
+        assert id(cart) not in listed, cart.get("title")
+    assert len(real) == len(ws._all_carts) - len(claimed)
 
 
 def test_wallpaper_is_present_in_the_picker(tmp_path):

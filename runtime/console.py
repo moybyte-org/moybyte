@@ -2466,6 +2466,11 @@ class Workstation:
                                        # no parked OOPS screen -- straight to the line
         self.crash_popup = None        # a clean launch retires any stale popup
         self._run_caller = caller
+        # #178: the caller already says WHY this run is starting, so the windowed
+        # tier can size the playtest window for the job -- an Editor PLAY is a dev
+        # action (small, beside the code), a desk/Library run is play (as big as
+        # fits). Stamped BEFORE the push that creates the window.
+        self.wm.set_play_intent("dev" if caller is self.editor_app else "play")
         self.wm.goto("desktop")        # Stage 6e: push the Player process onto the back-stack
 
     def _exit_to_caller(self):
@@ -2785,6 +2790,13 @@ class Workstation:
         hook = getattr(self.wm, "on_app_registered", None)
         if hook is not None:
             hook(app)
+        # The picker HIDES carts an app claims (_picker_items, temporary until
+        # #55), but apps register AFTER the store scan builds the grid -- so
+        # re-derive it here or the first-built grid keeps the app carts it was
+        # built without knowing about. Cheap: a handful of app registrations at
+        # boot, each a list rebuild over the already-scanned carts.
+        if getattr(self, "_all_carts", None) and getattr(self, "picker", None):
+            self.picker.set_items(self._picker_items(self._all_carts))
 
     def app_min_size(self, kind):
         """The registered windowed resize minimum for app `kind`, or None."""
@@ -3794,8 +3806,38 @@ class Workstation:
 
     def _picker_items(self, carts):
         """The Editor PROJECT-PICKER grid entries: the pinned "+ New" tile first (create a
-        game + open it), then EVERY editable cart (all types, wallpapers + built-ins
-        included -- everything is editable)."""
+        game + open it), then every editable cart (wallpapers + built-ins included).
+
+        SYSTEM-APP carts are the one exclusion, and it is TEMPORARY (owner call
+        2026-07-31). Files/Paint/Writer/Sheets/Calc/Appearance are not really
+        carts: the app is a shell MODULE (runtime/*_app.py, frozen on device),
+        and the `.moy` only carries identity, icon art and a few-line fallback
+        body for an older shell. Listing them offered a project whose "code" was
+        that stub -- editing it changes nothing the kid can see. Hiding them is
+        a placeholder for the real fix: #55 / docs/shell_architecture_v1.md
+        "privileged system carts", where each app becomes a genuine cart running
+        under make_system_api and this filter comes back out.
+
+        Deliberately narrow: only carts an app CLAIMS as its identity are hidden
+        (the same is_app() check the desk icons and launcher dispatch use), so a
+        kid-made cart of type "app" -- which no shell app claims -- still shows.
+        Note this departs from shell_ux_v1's "everything is editable"; the spec
+        line is right again once #55 lands."""
+        apps = getattr(self, "_apps", ())
+        if apps:
+            keep = []
+            for c in carts:
+                claimed = False
+                for _app, _t in apps:
+                    try:
+                        if _app.is_app(c):
+                            claimed = True
+                            break
+                    except Exception:  # noqa: BLE001 -- a bad claim never hides a cart
+                        pass
+                if not claimed:
+                    keep.append(c)
+            carts = keep
         return [new_tile()] + list(carts)
 
     def _apply_items(self, items):
@@ -4351,14 +4393,65 @@ class Workstation:
         # the recording canvas, so on the RAW canvas (the default) `_surf` is None: no call, no
         # allocation, byte-identical pixels -- the golden set can't move. Probed ONCE per frame.
         _surf = getattr(self.sys_canvas, "begin_surface", None)
+        # Surface model §4 skip-draw (docs/surface_model_v1.md): a WM that
+        # tracks surface gens may decline a gen-clean layer's draw entirely --
+        # the recorder keeps its z-slot as a zero-width skip mark and the wire
+        # ships a {"same":1} stub. Same probe shape as _surf: on the S3 the WM
+        # has no surface_skip and the canvas no skip_surface -> two Nones, no
+        # per-layer cost, byte-identical (the L6 no-op pattern).
+        _lskip = getattr(self.wm, "surface_skip", None) if _surf is not None \
+            else None
+        _sksurf = getattr(self.sys_canvas, "skip_surface", None)
+        # FULLSCREEN GAME-DOMAIN PLACEMENT on a COMMAND-ONLY game canvas (#175).
+        # There the cart's frame has no pixels for _composite_game to scale up,
+        # so its draw span must be BRACKETED instead -- otherwise every
+        # fullscreen cart (and the play-world Library, which is game-domain
+        # content) lands 1:1 at the desktop origin: the owner's "play menu loads
+        # all games in the upper left corner". The bracket uses the WM's own
+        # viewport geometry, i.e. exactly what the pixel composite would have
+        # applied. Two getattr probes on a raw canvas -> None (the S3/device path
+        # is byte-identical, and a raster game canvas keeps the composite).
+        _view = None
+        if (self._sys_canvas is not None
+                and getattr(self.canvas, "buf", None) is None):
+            _view = getattr(self.sys_canvas, "view", None)
+        # ...and only where the WM presents the game FULLSCREEN. In the windowed
+        # desk world the player WINDOW brackets its own content, so letterboxing
+        # here would black out the desktop -- and it would fire on the FPS
+        # overlay too, which is a game-domain layer.
+        _vp = None
+        if _view is not None:
+            _fs_game = getattr(self.wm, "game_is_fullscreen", None)
+            if _fs_game is None or _fs_game():
+                _vp = getattr(self.wm, "viewport", None)
+        _game_open = False
         for layer in self.wm.draw_stack():          # memoized (Stage 6c) -- no per-frame alloc
             if _prev_domain == "game" and layer.domain == "system":
+                if _game_open:                      # close the placement span
+                    _view()
+                    _game_open = False
                 _tc = _ticks_ms() if _perf else 0
                 self._composite_game()
                 if _perf:
                     _cmp = _ticks_diff(_ticks_ms(), _tc)   # CHROMEBRK: viewport composite
+            if (_lskip is not None and _sksurf is not None
+                    and layer.domain == "system" and _lskip(layer.id)):
+                _sksurf(layer.id, layer.domain)     # z-slot survives, draw doesn't
+                _prev_domain = layer.domain
+                continue
             if _surf is not None:
                 _surf(layer.id, layer.domain)       # start this surface's command stream
+            if _vp is not None and layer.domain == "game" and not _game_open:
+                _ox, _oy, _sc = _vp()
+                # LETTERBOX FIRST. The pixel composite fills the bezel AFTER the
+                # cart draws (it owns the framebuffer); a command-only canvas
+                # cannot -- that fill would wipe the frame already recorded, so
+                # composite_game bails and the play world showed the LIBRARY
+                # behind the game (owner, 2026-07-31). Painting it here, before
+                # the bracket opens, is the same pixels in the right order.
+                self.sys_canvas.cls(0)      # _VIEWPORT_BEZEL: black
+                _view(_ox, _oy, _sc, self.canvas.w, self.canvas.h)
+                _game_open = True
             if layer.id == "cursor":
                 _tk = _ticks_ms() if _perf else 0
                 layer.draw(dt)
@@ -4367,6 +4460,8 @@ class Workstation:
             else:
                 layer.draw(dt)
             _prev_domain = layer.domain
+        if _game_open:                              # game was the TOP layer
+            _view()
         # #63: nothing should be left in an auto-batch by the time we present. The cart
         # sprites were flushed at _reset_canvas_state; the console's own chrome draws
         # Images immediately (never queued). This final flush is the last-line guard so

@@ -80,6 +80,18 @@ class AppearanceLayout:
         else:
             self.screen = None              # no room for a monitor: caption only
 
+    # A card is a 4:3 preview (the game-canvas aspect every wallpaper draws at)
+    # plus the 17px label strip _draw_wall_card paints along its bottom.
+    LABEL_H = 17
+    CARD_PAD = 3
+
+    def card_ideal_h(self, card_w):
+        """The height that shows a card's preview at its native 4:3 without
+        letterboxing: the image box is (card_w - 2*pad) wide."""
+        fs = self.fs
+        img_w = max(1, card_w - 2 * self.CARD_PAD * fs)
+        return img_w * 3 // 4 + (self.LABEL_H + self.CARD_PAD) * fs
+
     def cards(self, count):
         fs = self.fs
         x, y, w, h = self.catalog
@@ -91,6 +103,17 @@ class AppearanceLayout:
         # Divide the available band exactly. On the 320x240 tier five themes use
         # three compact rows; a fixed minimum would push the last row off-screen.
         card_h = max(1, (h - gap * (rows + 1)) // rows)
+        # ...but NEVER stretch a card past its 4:3 preview (owner screenshot
+        # 2026-07-31: at 1024x600 / font 1 the band split into two rows of
+        # 276px-tall cells holding 4:3 art -- tall, empty, and the previews
+        # overflowed their boxes). Dividing the band exactly is only right when
+        # the rows would otherwise OVERFLOW it; when there is spare room the
+        # cards keep their natural proportion and the column simply ends early.
+        # The cap only ever SHRINKS a card, so a band too small for `rows` still
+        # divides exactly (the 320x240 tier's three compact rows are unchanged);
+        # spare height just leaves the column ending early, which is what the
+        # host tier already looked like.
+        card_h = min(card_h, self.card_ideal_h(card_w))
         out = []
         for i in range(count):
             out.append((x + gap + (i % cols) * (card_w + gap),
