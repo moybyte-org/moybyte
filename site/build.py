@@ -89,13 +89,12 @@ FEATURES = [
      "WiFi setup lives in Settings, so it works while a game runs. Firmware "
      "updates over the air on two channels into an inactive OTA slot, with "
      "bootloader rollback if the new image does not come up &mdash; confirmed on "
-     "hardware end to end, but stale rather than proven right now: WiFi on the "
-     "T-Deck is currently broken."),
+     "hardware end to end, though it has not been exercised lately."),
     ("Streams itself to a browser",
      "The device can serve the running console over WiFi as draw commands rather "
-     "than pixels &mdash; the same protocol this page&rsquo;s player speaks. Same "
-     "caveat as the OTA path: it ran on a T-Deck, it has not been exercised "
-     "lately."),
+     "than pixels &mdash; the same protocol this page&rsquo;s player speaks. It "
+     "ran on a T-Deck; on that board it is broken right now, and the cause is a "
+     "missing re-export rather than the radio."),
 ]
 
 TARGETS = [
@@ -122,9 +121,9 @@ ROUGH = [
     "Per-cart frame rates, the frame-budget model and every lever &mdash; including "
     "the ones built, measured and reverted &mdash; are tracked in public issues, "
     "not claimed here.",
-    "Open holes are filed rather than hidden: WiFi on the T-Deck is broken right "
-    "now, the system apps are not editable yet, and USB-HID keyboard and audio on "
-    "the P4 are unbuilt.",
+    "Open holes are filed rather than hidden: the device web view is broken on the "
+    "T-Deck right now, the system apps are not editable yet, and USB-HID keyboard "
+    "and audio on the P4 are unbuilt.",
 ]
 
 
@@ -183,7 +182,7 @@ STATUS = [
     ("ok", "Editors", "on the device itself"),
     ("ok", "OTA updates", "hardware-confirmed"),
     ("wip", "System apps", "not editable yet"),
-    ("warn", "T-Deck WiFi", "broken right now"),
+    ("warn", "Device web view", "broken on the T-Deck"),
 ]
 
 def page(pal, has_player):

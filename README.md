@@ -113,13 +113,14 @@ your saves and tuning across an update.
 **Wireless** — WiFi setup lives in Settings, so it works while a game runs.
 Firmware updates go over the air on two channels, stable and beta, into an
 inactive OTA slot with bootloader rollback; that whole path was confirmed on a
-T-Deck — download, install, boot the new slot, roll back. The device can also
-serve the running console to a browser on the same network as draw commands
-rather than pixels, which also ran on that board. **Both are stale rather than
-proven right now:** neither has been exercised in a while, and WiFi on the T-Deck
-is currently broken
-([#182](https://github.com/moybyte-org/moybyte/issues/182)), so treat them as
-"worked when last tested" until that is fixed.
+T-Deck — download, install, boot the new slot, roll back. It has not been
+exercised in a while, so treat it as "worked when last tested". The device can
+also serve the running console to a browser on the same network as draw commands
+rather than pixels, which ran on that board too — but **that transport is broken
+on the T-Deck right now**
+([#182](https://github.com/moybyte-org/moybyte/issues/182)). The radio is fine:
+it associates, takes a DHCP lease and serves the page; a missing re-export makes
+the asset request fail, and the page never opens its live channel.
 
 **Four rendering backends, one contract** — host, two boards, and a browser page
 that draws the console's commands itself. That contract is written down
