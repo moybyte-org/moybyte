@@ -37,11 +37,6 @@ def palette():
     return ["#%02x%02x%02x" % tuple(c) for c in MOY64]
 
 
-# MOY64 indices used for the page's design tokens (the "night" colorway the
-# console itself ships): 0 black, 1 dark blue, 2 dark purple, 6 light grey,
-# 7 white, 8 red, 10 yellow, 11 green, 12 blue, 14 pink.
-INK, PANEL, EDGE, DIM, ACCENT, HILITE = 7, 1, 2, 6, 10, 12
-
 TIERS = [
     # id, label, sub-label, query string, aspect ratio
     ("desktop", "Desktop", "1024 &times; 600 &mdash; windowed, with the editors",
@@ -133,24 +128,64 @@ ROUGH = [
 ]
 
 
+def font_face():
+    """The console's own font as the display face. site/petme128.woff2 is the
+    petme128 8x8 glyph set (MicroPython, MIT -- THIRD_PARTY.md) rendered as a
+    webfont; inlined so the page stays one self-contained file."""
+    import base64
+    blob = os.path.join(HERE, "petme128.woff2")
+    if not os.path.exists(blob):
+        return ""
+    b64 = base64.b64encode(open(blob, "rb").read()).decode("ascii")
+    return ("@font-face{font-family:'Petme128';font-display:swap;"
+            "src:url(data:font/woff2;base64,%s) format('woff2')}" % b64)
+
+
+# The at-a-glance status row: the honest state of the machine, as data. Dots are
+# role colours (ok / wip / warn), so "what works" is readable before any prose.
+STATUS = [
+    ("ok", "Console", "on two ESP32 boards"),
+    ("ok", "Editors", "on the device itself"),
+    ("ok", "OTA updates", "hardware-confirmed"),
+    ("wip", "System apps", "not editable yet"),
+    ("warn", "T-Deck WiFi", "broken right now"),
+]
+
+# The spec-card facts. Left label, right value -- the machine in one table.
+FACTS = [
+    ("Screen", "<b>320 &times; 240</b> for a cart, palette-indexed; the shell reflows to the display"),
+    ("Palette", "<b>64 colours</b>, indexed end to end &mdash; host, device and browser"),
+    ("Languages", "<b>Python and Lua</b>, one verb table, valid verbatim in both"),
+    ("Cartridge", "a <b>folder</b>: manifest, script, sprite sheet, tilemap, sounds"),
+    ("Editors", "config, blocks, code, sprites, map, scene, music &mdash; on the board"),
+    ("Storage", "<b>SD or internal flash</b>; carts re-seed by version, saves kept"),
+    ("Wireless", "<b>WiFi + OTA</b> into an inactive slot, with bootloader rollback"),
+    ("Firmware", "<b>MicroPython</b> + native C kernels, Lua 5.4 VM outside the GC"),
+]
+
+
 def page(pal, has_player):
     p = lambda i: pal[i]  # noqa: E731
-    bg = "#0b0f1a"        # the player page's own backdrop, so the embed is seamless
+    tokens = "".join("--p%d:%s;" % (i, c) for i, c in enumerate(pal))
     tabs = "\n".join(
-        '      <button class="tab%s" data-tier="%s" data-q="%s" data-ar="%s">'
+        '        <button class="tab%s" data-tier="%s" data-q="%s" data-ar="%s">'
         '<b>%s</b><span>%s</span></button>'
         % (" on" if i == 0 else "", tid, q, ar, label, sub)
         for i, (tid, label, sub, q, ar) in enumerate(TIERS))
     missing = "" if has_player else (
-        '  <p class="warn">The player bundle is not built yet. Run '
-        '<code>firmware/web_runner/build.sh</code> (or <code>--stage-only</code>) '
-        'and re-run <code>site/build.py</code>.</p>\n')
+        '    <p class="warnbox">The player bundle is not built yet &mdash; run '
+        '<code>firmware/web_runner/build.sh</code>, then <code>make site</code>.</p>\n')
+    status = "\n".join(
+        '      <li><i class="%s"></i><b>%s</b> %s</li>' % (k, name, note)
+        for k, name, note in STATUS)
+    facts = "\n".join(
+        '        <tr><th>%s</th><td>%s</td></tr>' % (k, v) for k, v in FACTS)
     features = "\n".join(
-        "    <li><h3>%s</h3><p>%s</p></li>" % (t, b) for t, b in FEATURES)
+        "      <li><h3>%s</h3><p>%s</p></li>" % (t, b) for t, b in FEATURES)
     targets = "\n".join(
-        '    <li><h3>%s</h3><p class="chip">%s</p><p>%s</p></li>' % (t, chip, b)
+        '      <li><h3>%s</h3><p class="chip">%s</p><p>%s</p></li>' % (t, chip, b)
         for t, chip, b in TARGETS)
-    rough = "\n".join("    <li>%s</li>" % r for r in ROUGH)
+    rough = "\n".join("      <li>%s</li>" % r for r in ROUGH)
     return """<!doctype html>
 <html lang="en">
 <head>
@@ -159,108 +194,199 @@ def page(pal, has_player):
 <title>moybyte &mdash; an operating system for ESP32 boards</title>
 <meta name="description" content="An operating system that turns an ESP32 board into a small general-purpose computer. The software is cartridges -- open any of them, change it, run it, on the board itself. Try it here, no install.">
 <style>
-:root{
-  --bg:%(bg)s; --panel:%(panel)s; --edge:%(edge)s; --ink:%(ink)s;
-  --dim:%(dim)s; --accent:%(accent)s; --hilite:%(hilite)s;
-  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+/* Every colour below is MOY64, generated from runtime/palette.py -- the site
+   cannot drift from the console's own palette. Roles are named so the light
+   scheme differs only in the block that follows. */
+:root{%(tokens)s
+  --bg:#05070d; --surface:#090d19; --raised:#0d1325; --line:#141e3a;
+  --ink:var(--p7); --body:var(--p6); --muted:#828899; --link:var(--p12);
+  --accent:var(--p10); --ok:var(--p11); --wip:var(--p9); --warn:var(--p8);
+  --pri-ink:var(--p1);
+  --w:70rem;
+  --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
 }
+@media (prefers-color-scheme: light){
+  :root{--bg:#fff9f5; --surface:#fff4ec; --raised:#fffcfa; --line:#b3a9a1;
+        --ink:var(--p1); --body:#2f323a; --muted:#4d525e; --link:#175f8c;
+        --accent:#74224c; --ok:#007446; --wip:#a86c00; --warn:#c2003b;
+        --pri-ink:#fff9f5;}
+}
+%(font)s
 *{box-sizing:border-box}
-html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 var(--mono)}
-body{display:flex;flex-direction:column;min-height:100vh}
-a{color:var(--hilite)}
-a:hover{color:var(--accent)}
-.wrap{width:100%%;max-width:1120px;margin:0 auto;padding:0 20px}
-header{padding:36px 0 22px}
-.logo{font-size:34px;font-weight:700;letter-spacing:-.02em;color:var(--ink);margin:0}
-.logo em{font-style:normal;color:var(--accent)}
-.pitch{margin:12px 0 0;max-width:70ch;color:var(--ink)}
-.pitch b{color:var(--accent);font-weight:700}
-.meta{margin:14px 0 0;max-width:70ch;color:var(--dim);font-size:14px}
-/* --- tier tabs ------------------------------------------------------------ */
-.tabs{display:flex;gap:10px;flex-wrap:wrap;margin:26px 0 0}
-.tab{appearance:none;cursor:pointer;text-align:left;font:inherit;
-  background:var(--panel);color:var(--dim);border:1px solid var(--edge);
-  border-radius:8px;padding:10px 16px;transition:.12s}
-.tab b{display:block;font-size:15px;color:var(--ink)}
-.tab span{display:block;font-size:12px;color:var(--dim)}
-.tab:hover{border-color:var(--hilite)}
-.tab.on{border-color:var(--accent);background:#12203a}
+html{-webkit-text-size-adjust:100%%;scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--body);font:16px/1.62 var(--sans)}
+.wrap{width:100%%;max-width:var(--w);margin:0 auto;padding:0 24px}
+a{color:var(--link);text-decoration-thickness:1px;text-underline-offset:2px}
+h1,h2,h3{color:var(--ink);line-height:1.25}
+/* --- pixel-native display type: the console's own font ---------------------- */
+.px{font-family:'Petme128',var(--mono);letter-spacing:.02em}
+/* --- top bar --------------------------------------------------------------- */
+nav{position:sticky;top:0;z-index:9;background:var(--bg);border-bottom:1px solid var(--line)}
+nav .wrap{display:flex;align-items:center;gap:18px;height:52px}
+nav .brand{font-size:19px;color:var(--ink);text-decoration:none}
+nav .brand em{font-style:normal;color:var(--accent)}
+nav .sp{flex:1}
+nav a.l{color:var(--body);text-decoration:none;font-size:14px}
+nav a.l:hover{color:var(--accent)}
+/* --- hero ------------------------------------------------------------------ */
+.hero{display:grid;grid-template-columns:1.15fr .85fr;gap:40px;
+  align-items:start;padding:52px 0 8px}
+@media (max-width:900px){.hero{grid-template-columns:1fr;gap:28px;padding-top:34px}}
+.eyebrow{font:12px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;
+  color:var(--muted);margin:0 0 14px}
+h1{margin:0;font-size:clamp(24px,3.2vw,36px);line-height:1.35}
+h1 em{font-style:normal;color:var(--accent)}
+.lead{font-size:19px;color:var(--ink);margin:18px 0 0;max-width:36em}
+.sub{margin:14px 0 0;max-width:38em}
+.btns{display:flex;flex-wrap:wrap;gap:10px;margin:22px 0 0}
+.btn{display:inline-block;padding:9px 16px;border:1px solid var(--line);
+  background:var(--surface);color:var(--ink);text-decoration:none;font-size:15px}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:var(--pri-ink);font-weight:600}
+.btn.pri:hover{filter:brightness(1.08);color:var(--pri-ink)}
+/* --- the facts card -------------------------------------------------------- */
+.card{background:var(--surface);border:1px solid var(--line)}
+.facts{padding:6px 18px 12px}
+.facts caption{caption-side:top;text-align:left;font:12px/1 var(--mono);
+  letter-spacing:.16em;text-transform:uppercase;color:var(--muted);padding:14px 0 10px}
+table{width:100%%;border-collapse:collapse;font-size:14px}
+.facts th{text-align:left;vertical-align:top;font:12px/1.5 var(--mono);
+  letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
+  font-weight:400;padding:9px 14px 9px 0;white-space:nowrap}
+.facts td{padding:9px 0;border-bottom:1px solid var(--line);color:var(--body)}
+.facts tr:last-child td{border-bottom:0}
+.facts b{color:var(--ink)}
+/* --- status chips ---------------------------------------------------------- */
+.status{display:flex;flex-wrap:wrap;gap:8px;list-style:none;padding:0;margin:26px 0 0}
+.status li{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);
+  background:var(--surface);border:1px solid var(--line);padding:5px 11px}
+.status b{color:var(--ink);font-weight:600}
+.status i{flex:0 0 7px;width:7px;height:7px;display:inline-block}
+.status .ok{background:var(--ok)} .status .wip{background:var(--wip)}
+.status .warn{background:var(--warn)}
+/* --- sections -------------------------------------------------------------- */
+section{padding:52px 0 0}
+section > .wrap > h2{margin:0;font-size:clamp(22px,3vw,30px)}
+.slead{margin:10px 0 0;max-width:60ch;color:var(--muted)}
+/* --- the player ------------------------------------------------------------ */
+.tabs{display:flex;gap:10px;flex-wrap:wrap;margin:20px 0 0}
+.tab{appearance:none;cursor:pointer;text-align:left;font:inherit;padding:9px 15px;
+  background:var(--surface);color:var(--muted);border:1px solid var(--line)}
+.tab b{display:block;font-size:14px;color:var(--ink)}
+.tab span{display:block;font:12px/1.5 var(--mono);color:var(--muted)}
+.tab:hover{border-color:var(--link)}
+.tab.on{border-color:var(--accent)}
 .tab.on b{color:var(--accent)}
-/* --- the stage ------------------------------------------------------------ */
-.stage{margin:14px 0 0;background:#000;border:1px solid var(--edge);
-  border-radius:10px;overflow:hidden;position:relative}
+.stage{margin:12px 0 0;background:#000;border:1px solid var(--line);overflow:hidden}
 .stage iframe{display:block;width:100%%;height:100%%;border:0}
-.frame{width:100%%}
-.hint{display:flex;gap:14px;flex-wrap:wrap;justify-content:space-between;
-  color:var(--dim);font-size:13px;margin:10px 0 0}
-.warn{color:%(warn)s;border:1px solid %(warn)s;border-radius:8px;padding:10px 14px}
-code{background:var(--panel);border:1px solid var(--edge);border-radius:4px;
-  padding:1px 5px;font-size:.9em}
-pre{background:var(--panel);border:1px solid var(--edge);border-radius:8px;
-  padding:14px 16px;overflow-x:auto;font-size:13px;color:var(--ink)}
-pre .c{color:var(--dim)}
-/* --- lists ---------------------------------------------------------------- */
-.cards{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
-  margin:16px 0 0;padding:0;list-style:none}
-.cards li{background:var(--panel);border:1px solid var(--edge);border-radius:8px;
-  padding:14px 16px}
-.cards h3{margin:0 0 6px;font-size:14px;color:var(--accent)}
-.cards p{margin:0;font-size:13px;color:var(--dim)}
-.cards .chip{display:inline-block;margin:0 0 6px;padding:1px 7px;font-size:11px;
-  color:var(--ink);background:%(bg)s;border:1px solid var(--edge);border-radius:99px}
-.plain{margin:16px 0 0;padding-left:20px;color:var(--dim);font-size:14px}
-.plain li{margin:0 0 8px}
-footer{margin-top:auto;padding:30px 0 40px;color:var(--dim);font-size:13px}
-footer a{margin-right:6px}
-h2{font-size:15px;color:var(--accent);margin:40px 0 0;text-transform:uppercase;
-  letter-spacing:.08em}
-h2+p{margin:8px 0 0;max-width:74ch;color:var(--dim);font-size:14px}
+.hint{display:flex;gap:16px;flex-wrap:wrap;justify-content:space-between;
+  color:var(--muted);font-size:13px;margin:10px 0 0}
+.warnbox{color:var(--warn);border:1px solid var(--warn);padding:10px 14px;margin:12px 0 0}
+/* --- card grids ------------------------------------------------------------ */
+.cards{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
+  margin:24px 0 0;padding:0;list-style:none}
+.cards li{background:var(--surface);border:1px solid var(--line);padding:16px 18px}
+.cards h3{margin:0 0 7px;font-size:15px;color:var(--accent)}
+.cards p{margin:0;font-size:14px;color:var(--body)}
+.cards .chip{display:inline-block;margin:0 0 7px;padding:2px 8px;font:11px/1.5 var(--mono);
+  letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
+  background:var(--bg);border:1px solid var(--line)}
+.rough{margin:20px 0 0;padding-left:20px;color:var(--body);font-size:15px}
+.rough li{margin:0 0 9px}
+pre{background:var(--surface);border:1px solid var(--line);padding:16px 18px;
+  overflow-x:auto;font:13px/1.7 var(--mono);color:var(--ink);margin:20px 0 0}
+pre .c{color:var(--muted)}
+code{font:.92em var(--mono);background:var(--surface);border:1px solid var(--line);padding:1px 5px}
+footer{margin:64px 0 0;border-top:1px solid var(--line);padding:24px 0 44px;
+  color:var(--muted);font-size:13px}
+footer a{margin-right:4px}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <h1 class="logo">moy<em>byte</em></h1>
-    <p class="pitch"><b>An operating system that turns an ESP32 board into a small
-      general-purpose computer</b> &mdash; one you can also write software on, on the
-      board itself. The software is cartridges: games, wallpapers, tools, whatever
-      you make. Open any of them, change it, run it, with no host computer in the
-      loop.</p>
-    <p class="meta">It boots on two off-the-shelf boards today, and the same source
-      tree is a PC simulator and the browser build running below &mdash; that is the
-      real console compiled to WebAssembly, not a mock-up and not a video. It is
-      approachable enough for a ten-year-old (that is what the block editor is for)
-      without being only that: underneath is a MicroPython firmware with native C
-      kernels, a Lua VM, OTA updates and a windowing shell.</p>
-  </header>
+<nav><div class="wrap">
+  <a class="brand px" href="#top">moy<em>byte</em></a>
+  <span class="sp"></span>
+  <a class="l" href="#try">Try it</a>
+  <a class="l" href="#in">What's in it</a>
+  <a class="l" href="#runs">Runs on</a>
+  <a class="l" href="#build">Build</a>
+  <a class="l" href="https://github.com/moybyte-org/moybyte">GitHub &#8599;</a>
+</div></nav>
 
-  <h2>Try it</h2>
+<div class="wrap" id="top">
+  <div class="hero">
+    <div>
+      <p class="eyebrow">Source-available firmware &middot; FSL-1.1-MIT</p>
+      <h1 class="px">An <em>operating system</em> for ESP32 boards.</h1>
+      <p class="lead">It turns the board into a small computer you can write software
+        on. The software is cartridges &mdash; games, wallpapers, tools, whatever you
+        make &mdash; and you open, change and run any of them on the board itself,
+        with no host computer in the loop.</p>
+      <p class="sub">It boots on two off-the-shelf boards today, and the same source
+        tree is a PC simulator and the browser build below. Approachable enough for a
+        ten-year-old (that is what the block editor is for) without being only that:
+        underneath is a MicroPython firmware with native C kernels, a Lua VM, OTA
+        updates and a windowing shell.</p>
+      <div class="btns">
+        <a class="btn pri" href="#try">Try it in the browser &#9656;</a>
+        <a class="btn" href="https://github.com/moybyte-org/moybyte">Source</a>
+        <a class="btn" href="https://github.com/moybyte-org/moy-spec">The cart spec</a>
+      </div>
+      <ul class="status">
+%(status)s
+      </ul>
+    </div>
+    <div class="card">
+      <table class="facts">
+        <caption>The machine</caption>
+%(facts)s
+      </table>
+    </div>
+  </div>
+</div>
+
+<section id="try"><div class="wrap">
+  <h2>Try it, right here</h2>
+  <p class="slead">The real console compiled to WebAssembly &mdash; the same code the
+    firmware freezes, served from this page and nowhere else. Not a mock-up, not a
+    video.</p>
   <div class="tabs" id="tabs">
 %(tabs)s
   </div>
-  <div class="stage frame" id="stage"></div>
+  <div class="stage" id="stage"></div>
   <div class="hint">
-    <span>Click the screen, then use the arrow keys and Z / X. Pick <b>Make</b> to open the editors.</span>
+    <span>Click the screen, then arrow keys and Z / X. Pick <b>Make</b> for the editors.</span>
     <span><b>Nothing is saved.</b> Reloading resets the machine.</span>
   </div>
-%(missing)s
+%(missing)s</div></section>
+
+<section id="in"><div class="wrap">
   <h2>What's in it</h2>
-  <p>Everything here exists and runs today. Where something is unverified or
-     rough, it says so.</p>
+  <p class="slead">Everything here exists and runs today. Where something is
+    unverified or rough, it says so.</p>
   <ul class="cards">
 %(features)s
   </ul>
+</div></section>
 
+<section id="runs"><div class="wrap">
   <h2>What it runs on</h2>
+  <p class="slead">Host and device are one codebase, not a port: each firmware build
+    stages copies of the same modules and freezes them.</p>
   <ul class="cards">
 %(targets)s
   </ul>
+</div></section>
 
+<section id="rough"><div class="wrap">
   <h2>Where it's rough</h2>
-  <ul class="plain">
+  <ul class="rough">
 %(rough)s
   </ul>
+</div></section>
 
+<section id="build"><div class="wrap">
   <h2>Build it</h2>
   <pre><span class="c"># the console on your PC</span>
 make setup &amp;&amp; make test
@@ -271,25 +397,24 @@ make firmware-build-lilygo-micropython
 make firmware-flash-lilygo-micropython PORT=/dev/ttyACM0
 
 <span class="c"># this page's player, from source</span>
-firmware/web_runner/build.sh</pre>
-
+firmware/web_runner/build.sh &amp;&amp; make site</pre>
   <footer>
     <a href="https://github.com/moybyte-org/moybyte">Source</a> &middot;
     <a href="https://github.com/moybyte-org/moy-spec">The cartridge spec (moy core 0.1)</a> &middot;
     <a href="https://github.com/moybyte-org/moybyte/blob/master/docs/moy_cart_api.md">Cart API</a> &middot;
     <a href="https://github.com/moybyte-org/moybyte/issues">Issues</a>
     <br><br>
-    Source-available: free to run, modify, teach with, and to author and sell carts;
-    selling hardware built on the console needs a commercial licence until each
-    release turns MIT two years after publication.
-    The kid- and parent-facing site is <a href="https://moybyte.com">moybyte.com</a>.
+    Source-available (FSL-1.1-MIT): free to run, modify, teach with, and to author
+    and sell carts; selling hardware built on the console needs a commercial licence
+    until each release turns MIT two years after publication. The player bundle on
+    this page is MIT. The kid- and parent-facing site is
+    <a href="https://moybyte.com">moybyte.com</a>.
   </footer>
-</div>
+</div></section>
 <script>
 // Tabs own ONE iframe and swap its src, so only one wasm VM is ever live (two
-// would mean two 16 MB heaps and two frame loops competing for the main thread).
-// The first tab loads immediately; switching reboots the console for that tier,
-// which is ~200ms on the frozen build.
+// would mean two heaps and two frame loops competing for the main thread). The
+// first tab loads immediately; switching reboots the console for that tier.
 var stage = document.getElementById("stage");
 var tabs = [].slice.call(document.querySelectorAll(".tab"));
 function show(tab) {
@@ -302,18 +427,15 @@ function show(tab) {
   f.src = "player/index.html" + tab.dataset.q;
   stage.appendChild(f);
 }
-tabs.forEach(function (t) {
-  t.addEventListener("click", function () { show(t); });
-});
+tabs.forEach(function (t) { t.addEventListener("click", function () { show(t); }); });
 show(tabs[0]);
 </script>
 </body>
 </html>
 """ % {
-        "bg": bg, "panel": p(PANEL), "edge": p(EDGE), "ink": p(INK),
-        "dim": p(DIM), "accent": p(ACCENT), "hilite": p(HILITE),
-        "warn": p(8), "tabs": tabs, "missing": missing,
-        "features": features, "targets": targets, "rough": rough,
+        "tokens": tokens, "font": font_face(), "tabs": tabs, "missing": missing,
+        "status": status, "facts": facts, "features": features,
+        "targets": targets, "rough": rough,
     }
 
 

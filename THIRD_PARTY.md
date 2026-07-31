@@ -28,7 +28,7 @@ separate question from what is committed.
 | Lua 5.4.7 (device VM) | `firmware/lilygo_t_deck_plus_micropython/native/moy_lua/lua/` | [lua.org](https://www.lua.org/) | MIT | **Yes** — documented |
 | Lua 5.4.7 (measurement spike) | `experiments/lua_bridge/components/lua/` | [lua.org](https://www.lua.org/) | MIT | No |
 | `esp_lcd_ek79007` panel driver | `firmware/esp32_p4_wifi6_touch_lcd_7b/native/moy_dsi/vendor/` | [espressif/esp-iot-solution](https://github.com/espressif/esp-iot-solution) | Apache-2.0 | No |
-| `font_petme128_8x8` glyph data | `runtime/font.py`; derived webfont in the site repo | [MicroPython](https://github.com/micropython/micropython) | MIT | No (re-encoded) |
+| `font_petme128_8x8` glyph data | `runtime/font.py`; derived webfont `site/petme128.woff2` | [MicroPython](https://github.com/micropython/micropython) | MIT | No (re-encoded) |
 | PICO-8 base palette + colour names | `runtime/palette.py` (`_BASE16`, `NAMES`) | [PICO-8 / Lexaloffle](https://www.lexaloffle.com/pico-8.php) | CC-0 | No |
 | Pixelarticons icon shapes | `runtime/chrome.py` (`_GLYPHS` and siblings) | [halfmage/pixelarticons](https://github.com/halfmage/pixelarticons) | MIT | **Yes** — retraced |
 | T-Deck pin assignments | `docs/boards/lilygo_t_deck_plus.md` | [Xinyuan-LilyGO/T-Deck](https://github.com/Xinyuan-LilyGO/T-Deck) | facts; source cited | Transcribed |
@@ -122,7 +122,9 @@ inlined by the marketing site, which now lives in its own repository.
 - **Modified: no.** The bytes are identical to upstream; only the container
   changed (a C array became a Python `bytes` literal). The generated webfont is
   a *derivative*: same glyph shapes, with proportional advances and a redrawn
-  `'`/`"` (see `tools/make_petme_webfont.py`).
+  `'`/`"`. `site/petme128.woff2` is that webfont, inlined into the project site
+  so the page's display type is the console's own font; the MIT notice above
+  covers it.
 
 The MIT permission notice, reproduced in full so it travels with the data:
 
