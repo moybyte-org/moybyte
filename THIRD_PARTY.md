@@ -1,7 +1,7 @@
 # Third-party components
 
 Moybyte is licensed as described in [LICENSE.md](LICENSE.md) — FSL-1.1-MIT for
-the console and firmware, MIT for the SDK directories. Some files in this
+the console and firmware, MIT for the spec player's compiled artifacts. Some files in this
 repository did **not** originate here, and some of what the build produces
 bundles code from elsewhere. Everything in that category is listed below, with
 its upstream, its licence, and whether we changed it.
@@ -16,7 +16,7 @@ being recorded here.
 (`.build/`, `dist/`, `native/.staged/`) and the two vendor reference trees
 (`firmware/reference_tulipcc/`, `firmware/lilygo_t_deck_plus_reference/`) are
 untracked and are not published from this repository; they are working material
-only. Section 6 covers what the *distributed build outputs* bundle, which is a
+only. Section 5 covers what the *distributed build outputs* bundle, which is a
 separate question from what is committed.
 
 ---
@@ -31,11 +31,10 @@ separate question from what is committed.
 | `font_petme128_8x8` glyph data | `runtime/font.py`; derived webfont in the site repo | [MicroPython](https://github.com/micropython/micropython) | MIT | No (re-encoded) |
 | PICO-8 base palette + colour names | `runtime/palette.py` (`_BASE16`, `NAMES`) | [PICO-8 / Lexaloffle](https://www.lexaloffle.com/pico-8.php) | CC-0 | No |
 | Pixelarticons icon shapes | `runtime/chrome.py` (`_GLYPHS` and siblings) | [halfmage/pixelarticons](https://github.com/halfmage/pixelarticons) | MIT | **Yes** — retraced |
-| Sakura backdrop image | `system_carts/sakura*.moy/images/` | Owner-supplied, AI-generated (ChatGPT) | n/a — not third-party; see §5 | **Yes** — cropped, scaled, quantised |
-| T-Deck pin assignments | `moybyte_cli/boards.py`, `docs/boards/lilygo_t_deck_plus.md` | [Xinyuan-LilyGO/T-Deck](https://github.com/Xinyuan-LilyGO/T-Deck) | facts; source cited | Transcribed |
+| T-Deck pin assignments | `docs/boards/lilygo_t_deck_plus.md` | [Xinyuan-LilyGO/T-Deck](https://github.com/Xinyuan-LilyGO/T-Deck) | facts; source cited | Transcribed |
 
-Build-time upstreams that end up inside shipped binaries are in §6.
-Development and optional dependencies that are *not* redistributed are in §7.
+Build-time upstreams that end up inside shipped binaries are in §5.
+Development and optional dependencies that are *not* redistributed are in §6.
 
 ---
 
@@ -256,60 +255,7 @@ published format, protocol or behaviour; none contains third-party code.
 
 ---
 
-## 5. The Sakura backdrop — owner-supplied, AI-generated
-
-`system_carts/sakura.moy/images/bg.moyimg`,
-`system_carts/sakura_lua.moy/images/bg.moyimg` (byte-identical),
-`system_carts/sakura_lua.moy/images/cover.moyimg` (a capture of the same
-scene in play).
-
-The backdrop is **an image the project owner generated with ChatGPT** and
-supplied for this purpose. `tools/import_sakura_bg.py` converts it to the
-cart's 320×240 MOY64 index bitmap — a 4:3 crop, a LANCZOS downscale and a
-nearest-colour quantise — and derives the two carts' `EMIT` petal-shedding
-tables from the result, so those stay tied to the canopy actually on screen.
-The source image itself is not committed here; pass its path to the script to
-reproduce the shipped bytes.
-
-- **No outside rights holder is involved.** Nothing here was taken from another
-  artist, site or cart, which is precisely what disqualified the backdrop this
-  one replaced.
-- **It is AI-generated.** Purely AI-generated material may not attract
-  copyright protection in some jurisdictions — US Copyright Office guidance
-  treats output without sufficient human authorship as uncopyrightable — so the
-  project does not claim exclusive rights in the image itself. This is a
-  factual note about what the image is, not a restriction on using it: it is
-  free of third-party claims, which is all this repository needs.
-- **Modified: yes** — cropped, downscaled and requantised to MOY64 by the
-  script above.
-
-Earlier revisions of this repository shipped a different backdrop here, of
-**third-party origin and unconfirmed licence** — a pixel-art cherry tree
-credited in `sakura.moy/main.py` to *GenossinChloe*, described there as
-originally a Picotron wallpaper, requantised to MOY64. No permission, grant or
-upstream URL was ever recorded, and work posted to the Lexaloffle BBS defaults
-to **CC BY-NC-SA 4.0** — non-commercial and share-alike, which does not sit
-beside this repository's terms. That art has been **removed**: both carts'
-`bg.moyimg` and the Lua cart's `cover.moyimg` were rebuilt from the owner's
-image, and the attribution comment in `sakura.moy/main.py` was replaced with a
-pointer to the importer. The bytes survive only in this repository's git
-history, in commits predating the replacement.
-
-`tools/make_sakura_bg.py` is a *different* thing and should not be confused for
-the source of the shipped art: it is a fixed-seed procedural drawing program
-that produced a candidate backdrop which was not adopted. Its docstring says so.
-
-Both Sakura carts are in `CART_ORDER` (`tools/gen_device_carts.py`), so this
-art is baked into firmware images and included in the web runner's cart roster
-— which is exactly why its provenance had to be settled. Firmware images built
-before the replacement still contain the old third-party backdrop; rebuild
-rather than redistribute them. The carts' manifest `"version"` was bumped on
-both sides, so an already-seeded device re-seeds the new scene on next boot
-(#47).
-
----
-
-## 6. What the build pulls in — bundled into distributed binaries
+## 5. What the build pulls in — bundled into distributed binaries
 
 None of the following is committed to this repository: the build scripts clone
 each one on demand into gitignored working directories. They are listed because
@@ -317,7 +263,7 @@ the **binaries the build produces** — the firmware `.bin` images and the
 WebAssembly web runner — contain compiled code from them, and those artifacts
 carry the upstreams' obligations wherever they are published.
 
-### 6.1 LilyGO T-Deck Plus, ESP32-S3 (`firmware/lilygo_t_deck_plus_micropython/build.sh`)
+### 5.1 LilyGO T-Deck Plus, ESP32-S3 (`firmware/lilygo_t_deck_plus_micropython/build.sh`)
 
 | Project | Upstream | Licence |
 |---|---|---|
@@ -329,14 +275,14 @@ carry the upstreams' obligations wherever they are published.
 | Berkeley DB 1.85 | <https://github.com/micropython/berkeley-db-1.xx> (MicroPython's `btree`) | BSD-style (4.4BSD, Regents of the University of California) |
 | ESP-IDF | <https://github.com/espressif/esp-idf> | Apache-2.0 |
 
-### 6.2 Waveshare ESP32-P4 7B (`firmware/esp32_p4_wifi6_touch_lcd_7b/build.sh`)
+### 5.2 Waveshare ESP32-P4 7B (`firmware/esp32_p4_wifi6_touch_lcd_7b/build.sh`)
 
 | Project | Upstream | Licence |
 |---|---|---|
 | MicroPython v1.28.0 | <https://github.com/micropython/micropython> | MIT |
 | ESP-IDF v5.5.1 | <https://github.com/espressif/esp-idf> | Apache-2.0 |
 
-### 6.3 Web runner, MicroPython-WASM (`firmware/web_runner/build.sh`)
+### 5.3 Web runner, MicroPython-WASM (`firmware/web_runner/build.sh`)
 
 | Project | Upstream | Licence |
 |---|---|---|
@@ -371,7 +317,7 @@ rather than stored as `.patch` files.
 
 ---
 
-## 7. Development and optional dependencies
+## 6. Development and optional dependencies
 
 Installed from PyPI; never vendored, never redistributed by this repository.
 
@@ -394,7 +340,7 @@ Moybyte binary.
 
 ---
 
-## 8. Ported carts
+## 7. Ported carts
 
 `tools/p8_lua_port.py` and `firmware/web_runner/moy.py demo` can convert a
 PICO-8 cart into a `.moy` cartridge. **A ported cart is a derivative work of
@@ -412,7 +358,7 @@ Cartridges *you* author are yours; see LICENSE.md.
 
 ---
 
-## 9. Seed cart names
+## 8. Seed cart names
 
 Every cartridge in `system_carts/` is Moybyte's own code and art. A seed cart
 may sit squarely in a genre an older commercial game defined — that is the

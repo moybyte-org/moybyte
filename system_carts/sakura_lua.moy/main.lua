@@ -2,8 +2,8 @@
 -- the shelf and the same scene can be measured under either runtime.
 --
 -- The backdrop (images/bg.moyimg, byte-identical to sakura.moy's) is an image
--- supplied by the project owner (AI-generated; provenance and rights are
--- recorded in THIRD_PARTY.md section 5), converted to the 320x240 MOY64 bitmap
+-- supplied by the project owner (AI-generated; the project's own, no outside
+-- rights holder), converted to the 320x240 MOY64 bitmap
 -- by tools/import_sakura_bg.py. That same script generates the EMIT table
 -- below, whose shedding points have to sit on THIS image's canopy; re-importing
 -- regenerates both carts' tables together, and they must stay identical or the

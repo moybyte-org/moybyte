@@ -8,8 +8,7 @@ This script is the conversion that produced it -- run it again with the same
 source image to reproduce the shipped bytes exactly.
 
 The source is an AI-generated cherry-tree scene supplied by the project owner
-(see THIRD_PARTY.md section 5 for provenance); it is NOT committed here, so
-pass its path:
+-- the project's own image, with no outside rights holder. Pass its path:
 
     .venv/bin/python tools/import_sakura_bg.py ~/sakura_source.jpeg
     .venv/bin/python tools/import_sakura_bg.py SRC --png /tmp/sakura.png
