@@ -176,13 +176,7 @@ def font_face():
             "src:url(data:font/woff2;base64,%s) format('woff2')}" % b64)
 
 
-TICKER = [
-    "MicroPython + native C", "Python and Lua", "64 indexed colours",
-    "Cartridges are folders", "Editors on the device", "OTA with rollback",
-    "No build step", "One codebase, four backends",
-]
-
-# The at-a-glance status row: the honest state of the machine, as data. Dots are
+# The at-a-glance status list: the honest state of the machine, as data. Dots are
 # role colours (ok / wip / warn), so "what works" is readable before any prose.
 STATUS = [
     ("ok", "Console", "on two ESP32 boards"),
@@ -193,7 +187,6 @@ STATUS = [
 ]
 
 def page(pal, has_player):
-    p = lambda i: pal[i]  # noqa: E731
     tokens = "".join("--p%d:%s;" % (i, c) for i, c in enumerate(pal))
     tabs = "\n".join(
         '        <button class="tab%s" data-tier="%s" data-q="%s" data-ar="%s">'
@@ -212,7 +205,6 @@ def page(pal, has_player):
         '      <li><h3>%s</h3><p class="chip">%s</p><p>%s</p></li>' % (t, chip, b)
         for t, chip, b in TARGETS)
     rough = "\n".join("      <li>%s</li>" % r for r in ROUGH)
-    ticker = "".join("<span><b>&#9670;</b> %s</span>" % t for t in TICKER)
     return """<!doctype html>
 <html lang="en">
 <head>
@@ -256,8 +248,11 @@ nav .brand em{font-style:normal;color:var(--accent)}
 nav .sp{flex:1}
 nav a.l{color:var(--body);text-decoration:none;font-size:14px}
 nav a.l:hover{color:var(--accent)}
+/* Narrow: the section anchors are one scroll away anyway, and keeping them
+   pushed the GitHub link off the edge. */
+@media (max-width:640px){nav a.l:not(:last-of-type){display:none}}
 /* --- hero ------------------------------------------------------------------ */
-.hero{display:grid;grid-template-columns:1.15fr .85fr;gap:40px;
+.hero{display:grid;grid-template-columns:1.3fr .7fr;gap:44px;
   align-items:start;padding:52px 0 8px}
 @media (max-width:900px){.hero{grid-template-columns:1fr;gap:28px;padding-top:34px}}
 .eyebrow{font:12px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;
@@ -273,29 +268,30 @@ h1 em{font-style:normal;color:var(--accent)}
 .btn.pri{background:var(--accent);border-color:var(--accent);color:var(--pri-ink);font-weight:600}
 .btn.pri:hover{filter:brightness(1.08);color:var(--pri-ink)}
 /* --- the machine, shown rather than tabulated ------------------------------ */
-.screen{margin:0}
+/* The recording is 1024 wide and it is PIXEL ART: shrink it and the 8px glyphs
+   turn to mush, so the shot gets its own full-width band and is capped at
+   exactly its native size (1024 + the bezel's 2x10 padding + borders). Below
+   that width it has to scale, and a non-integer downscale looks better smoothed
+   than snapped -- hence the image-rendering flip. */
+.shot{margin:40px auto 0}
+.screen{margin:0 auto;max-width:1046px}
 .bezel{background:var(--surface);border:1px solid var(--line);padding:10px 10px 26px;
   position:relative}
 .bezel:after{content:"";position:absolute;left:50%%;bottom:9px;transform:translateX(-50%%);
   width:34px;height:4px;background:var(--line)}
 .bezel img{display:block;width:100%%;image-rendering:pixelated;border:1px solid var(--line)}
-.screen figcaption{margin:10px 2px 0;color:var(--muted);font-size:13px}
+@media (max-width:1100px){.bezel img{image-rendering:auto}}
+.screen figcaption{margin:11px 2px 0;color:var(--muted);font-size:13px;max-width:74ch}
 /* --- the mascot ------------------------------------------------------------ */
 .moy{image-rendering:pixelated;vertical-align:-4px}
 nav .moy{width:22px;height:22px;margin-right:9px}
-/* --- ticker: the machine's vocabulary, moving ------------------------------ */
-.tick{border-top:1px solid var(--line);border-bottom:1px solid var(--line);
-  background:var(--surface);overflow:hidden;margin:44px 0 0}
-.tick div{display:flex;gap:26px;white-space:nowrap;padding:9px 0;width:max-content;
-  font:12px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;
-  color:var(--muted);animation:slide 38s linear infinite}
-.tick b{color:var(--accent);font-weight:400}
-@keyframes slide{from{transform:translateX(0)}to{transform:translateX(-50%%)}}
-@media (prefers-reduced-motion: reduce){.tick div{animation:none}}
-/* --- status chips ---------------------------------------------------------- */
-.status{display:flex;flex-wrap:wrap;gap:8px;list-style:none;padding:0;margin:26px 0 0}
+/* --- status: a column beside the hero copy --------------------------------- */
+.k{font:12px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;
+  color:var(--muted);margin:0 0 12px}
+.status{display:flex;flex-direction:column;gap:8px;list-style:none;padding:0;margin:0}
+@media (max-width:900px){.status{flex-direction:row;flex-wrap:wrap}}
 .status li{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);
-  background:var(--surface);border:1px solid var(--line);padding:5px 11px}
+  background:var(--surface);border:1px solid var(--line);padding:6px 11px}
 .status b{color:var(--ink);font-weight:600}
 .status i{flex:0 0 7px;width:7px;height:7px;display:inline-block}
 .status .ok{background:var(--ok)} .status .wip{background:var(--wip)}
@@ -368,19 +364,22 @@ footer a{margin-right:4px}
         <a class="btn" href="https://github.com/moybyte-org/moybyte">Source</a>
         <a class="btn" href="https://github.com/moybyte-org/moy-spec">The cart spec</a>
       </div>
+    </div>
+    <aside>
+      <p class="k">Where it stands</p>
       <ul class="status">
 %(status)s
       </ul>
-    </div>
-    <figure class="screen">
-      <div class="bezel"><img src="media/desktop.gif" alt="The windowed desktop: a smile drawn on the pet sprite in the editor, and the running game window beside it already wearing the change" loading="lazy"></div>
-      <figcaption>Paint a smile on the sprite &mdash; the game window beside it is
-        already wearing it. Recorded from the real console.</figcaption>
-    </figure>
+    </aside>
   </div>
-</div>
 
-<div class="tick"><div>%(ticker)s%(ticker)s</div></div>
+  <figure class="screen shot">
+    <div class="bezel"><img src="media/desktop.gif" alt="The windowed desktop at night: the code editor open on Star Catcher, the same cart running in a window beside it, and the sprite scale being changed from 4 to 8 in the source" loading="lazy"></div>
+    <figcaption>The desktop tier, unedited: change <code>SPR_SCALE</code> in the
+      code tab and the cart running in the window next to it comes back twice the
+      size. The wallpaper is a cartridge too &mdash; that is Moy, asleep.</figcaption>
+  </figure>
+</div>
 
 <section id="try"><div class="wrap">
   <h2>Try it, right here</h2>
@@ -471,7 +470,7 @@ show(tabs[0]);
 """ % {
         "tokens": tokens, "font": font_face(), "tabs": tabs, "missing": missing,
         "status": status, "features": features, "mark": moy_mark(pal),
-        "targets": targets, "rough": rough, "ticker": ticker,
+        "targets": targets, "rough": rough,
     }
 
 
@@ -496,13 +495,17 @@ def main():
         else:
             print("!! no player bundle at %s -- build it first" % PLAYER_SRC)
 
-    # The hero's screen: a real recording of the console. site/hero.gif is
-    # docs/media/desktop/paint.gif with the boot wipe trimmed off -- the page's
-    # first paint IS frame 0, and that frame was an empty desk. Pre-trimmed and
-    # committed because this script must run with nothing installed.
+    # The hero's screen: a real recording of the console, committed because this
+    # script must run with nothing installed (the Pages job has no Pillow, no
+    # venv). Regenerate it with `make site-hero`, which is
+    #   tools/make_site_gifs.py --windowed --scene code --wallpaper moy_night
+    # -- the moy_night backdrop is the point: it is the brand colorway, so the
+    # shot's own pixels are the same navy/yellow/cream the page is built from.
+    # Frame 0 matters more than it looks: it IS the page's first paint, so the
+    # recording has to open on a composed desk, not a boot wipe.
     gif = os.path.join(HERE, "hero.gif")
     if not os.path.exists(gif):
-        gif = os.path.join(ROOT, "docs", "media", "desktop", "paint.gif")
+        gif = os.path.join(ROOT, "docs", "media", "desktop", "code.gif")
     if os.path.exists(gif):
         os.makedirs(os.path.join(out, "media"), exist_ok=True)
         shutil.copyfile(gif, os.path.join(out, "media", "desktop.gif"))

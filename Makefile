@@ -27,7 +27,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: setup test site site-gifs firmware-build-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-build-p4 firmware-flash-p4 firmware-monitor-p4 firmware-stage-xiao-zero ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install sync-issues check-venv
+.PHONY: setup test site site-gifs site-hero firmware-build-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-build-p4 firmware-flash-p4 firmware-monitor-p4 firmware-stage-xiao-zero ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install sync-issues check-venv
 
 # A PLAIN venv on purpose. Two flags used to live here and both hid bugs on every
 # machine but the maintainer's:
@@ -52,7 +52,7 @@ check-venv:
 	@test -x $(PYTHON) || { echo "no venv at $(VENV)/ -- run: make setup"; exit 1; }
 
 VENV_TARGETS := test \
-                site-gifs sync-issues \
+                site-gifs site-hero sync-issues \
                 ota-manifest ota-serve ota-publish-unstable \
                 ota-publish-stable ota-host ota-serve-install firmware-flash-p4 \
                 firmware-monitor-p4
@@ -80,6 +80,13 @@ site:
 # Regenerate the teaser-site demo GIFs from the real console (headless).
 site-gifs:
 	$(PYTHON) tools/make_site_gifs.py
+
+# Re-record the site's hero shot (site/hero.gif, committed -- the Pages job has
+# no Pillow). moy_night is deliberate: the site's colours ARE that wallpaper's.
+site-hero:
+	$(PYTHON) tools/make_site_gifs.py --windowed --scene code \
+		--wallpaper moy_night --out $(CURDIR)/site
+	mv $(CURDIR)/site/code.gif $(CURDIR)/site/hero.gif
 
 # Mirror GitHub issues into docs/issues/ (open/ + closed/ + INDEX.md) so issue
 # numbers referenced in commits/docs/chat resolve locally. Needs the `gh` CLI, authed.
