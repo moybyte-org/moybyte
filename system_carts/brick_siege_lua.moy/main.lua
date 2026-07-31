@@ -715,8 +715,8 @@ function _draw()
     -- -- HUD (right strip) --
     local hx = FIELD + 4
     rect(FIELD, 0, W - FIELD, H, 0)
-    print("BATTLE", hx, 6, 10)
-    print("CITY", hx, 16, 10)
+    print("BRICK", hx, 6, 10)
+    print("SIEGE", hx, 16, 10)
     print("SCORE", hx, 36, 6)
     print(tostring(score), hx, 46, 7)
     print("LEFT", hx, 64, 6)

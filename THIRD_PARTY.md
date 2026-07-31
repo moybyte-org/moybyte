@@ -357,27 +357,3 @@ image, a seed set, or anything commercial.
 Cartridges *you* author are yours; see LICENSE.md.
 
 ---
-
-## 8. Seed cart names
-
-Every cartridge in `system_carts/` is Moybyte's own code and art. A seed cart
-may sit squarely in a genre an older commercial game defined — that is the
-point of a seed cart, and a genre is not owned — but **no seed cart carries
-another game's title.**
-
-Two of them used to. Both were renamed on 2026-07-29, before this repository
-went public; only the names changed, and their code, art, tilemaps and sounds
-were original throughout:
-
-| Was | Now | Note |
-|---|---|---|
-| `battle_city.moy`, "Battle City" | `brick_siege.moy`, **Brick Siege** | *Battle City* is Namco's title. The cart is an original top-down tank battle over a destructible brick field. |
-| `bubble_trouble.moy`, "Bubble Trouble" | `harpoon_pop.moy`, **Harpoon Pop** | *Bubble Trouble* is a released game in the *Pang* lineage. The cart is an original bubble-popping arcade game. |
-
-Both manifests' `version` fields were bumped with the rename, so an
-already-seeded device re-seeds under the new name (`seed_builtins`, #47). A
-device seeded before the rename keeps the old folder alongside the new one
-until its cart store is cleared; nothing on it is published.
-
-Neither cart's source comment names a commercial game any more: a header may
-describe the *genre* it belongs to, never a title it clones.

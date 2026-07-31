@@ -549,8 +549,8 @@ def _draw():
     # -- HUD (right strip) --
     hx = FIELD + 4
     rect(FIELD, 0, W - FIELD, H, col("black"))
-    print("BATTLE", hx, 6, col("yellow"), 1)
-    print("CITY", hx, 16, col("yellow"), 1)
+    print("BRICK", hx, 6, col("yellow"), 1)
+    print("SIEGE", hx, 16, col("yellow"), 1)
     print("SCORE", hx, 36, col("light_grey"), 1)
     print(str(score), hx, 46, col("white"), 1)
     print("LEFT", hx, 64, col("light_grey"), 1)
