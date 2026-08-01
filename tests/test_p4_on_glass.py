@@ -216,3 +216,35 @@ def test_a_drag_touches_no_storage_and_rebuilds_no_cache(board):
     assert costs.get("bar.strip.render", 0) <= 4, (
         "the bar strip rebuilt %d times across %d frames (costs=%r)"
         % (costs.get("bar.strip.render"), painted, costs))
+
+
+def test_idle_screen_blank_and_wake(board):
+    """The #58 power save: the panel blanks after an idle timeout and any input
+    wakes it, while the loop, the cart and this very serial channel stay live.
+
+    Retuned to a few seconds for the test, then restored -- the shipped default
+    is 5 minutes. Silence is the actual stimulus here: the assertion is that
+    NOT talking to the board blanks it, so the wait must send nothing.
+    """
+    board.cmd("power 3", wait_for="REMOTE power")
+    board.drain(0.3)
+    board.drain(6.0)                       # say nothing; let the timer expire
+    assert board.state()["psave"][0] is True, "the panel never blanked"
+    # ...and that state query was serial traffic, which counts as activity, so
+    # the panel is already awake again by the following frame.
+    board.drain(0.5)
+    assert board.state()["psave"][0] is False, "input did not wake the panel"
+
+    # `power off` blanks immediately. It arrives ON the serial channel, which is
+    # itself activity -- the explicit blank has to outrank that or it wakes in
+    # the same iteration (it did, before _ps_force).
+    board.cmd("power off", wait_for="REMOTE power")
+    board.drain(1.0)
+    assert board.state()["psave"][0] is True, "`power off` did not blank"
+
+    # 0 disables it outright: no blank, however long the silence.
+    board.cmd("power 0", wait_for="REMOTE power")
+    board.drain(6.0)
+    line = board.cmd("power", wait_for="REMOTE power")
+    assert "asleep=False" in line, "a disabled timer still blanked: %r" % line
+    board.cmd("power 300", wait_for="REMOTE power")     # restore the default

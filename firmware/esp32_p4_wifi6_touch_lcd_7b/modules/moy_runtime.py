@@ -473,6 +473,10 @@ def _remote_state(ws):
     try:
         st["screen"] = ws.screen
         st["frames"] = getattr(ws, "_frames_drawn", None)
+        # Idle screen blank (#58): the harness has to be able to tell a blanked
+        # panel from a hung one -- they look identical from the host end.
+        st["psave"] = [bool(getattr(ws, "_psave_asleep", False)),
+                       getattr(ws, "_psave_ms", POWER_SAVE_MS) // 1000]
         # Expensive-event counters (ws.note_cost): cache builds + storage reads.
         # A cache that is silently missing shows up here as a count that tracks the
         # frame count -- which is how the 2026-07-26 bar-strip thrash would have
@@ -552,6 +556,20 @@ def _remote_state(ws):
     except Exception as exc:  # noqa: BLE001
         st["appearance_err"] = str(exc)
     return st
+
+
+# Idle screen blank (#58): milliseconds of NO INPUT before the panel goes dark,
+# so the board can sit plugged in for days without a lit screen. 0 disables it.
+# Overridable before boot (`import moy_runtime; moy_runtime.POWER_SAVE_MS = ...`)
+# and at runtime over the serial `power` command.
+#
+# This is a DARK SCREEN, not a suspend, and deliberately so: the loop keeps
+# running, a cart mid-run keeps ticking, and the serial dev channel stays live,
+# because the on-glass harness (#156) has to reach a board that has been idle
+# for hours. The backlight is also the one power lever the board README calls
+# out as unmeasured -- its 2.85W draw has never been split between the SoC and
+# the panel, and "one reading with the backlight blanked settles it".
+POWER_SAVE_MS = 300000          # 5 minutes
 
 
 def run_desktop(fps_cap=60):
@@ -654,6 +672,10 @@ def run_desktop(fps_cap=60):
     frame_ms = 1000 // fps_cap
     last = _ticks_ms()
     _backlight_on = False          # dark until the first composed frame (#45)
+    _ps_ms = POWER_SAVE_MS         # idle blank timeout (serial `power` retunes)
+    _asleep = False                # panel blanked by the idle timer
+    _ps_force = False              # serial `power off`: blank on the next frame
+    _idle_at = _ticks_ms()         # last frame that saw real input
     _drag_script = None            # remote `drag` playback state (see below)
     _swipe_script = None           # remote `swipe` playback state (see below)
     # Perf sampler (#58 fps-ledger groundwork): serial is free on this board, so
@@ -680,6 +702,7 @@ def run_desktop(fps_cap=60):
             print("Moybyte P4 BLE keyboard poll failed:", exc)
         inp.begin_frame()
         click = False
+        _serial_cmd = False        # a dev command counts as activity (wakes it)
         tp = touch.poll()
         pointer.down = tp is not None
         if tp is not None:
@@ -693,6 +716,7 @@ def run_desktop(fps_cap=60):
             except Exception:  # noqa: BLE001
                 pass
             parts = line.split() if line else []
+            _serial_cmd = bool(parts)
             if parts and parts[0] == "quit":
                 print("REMOTE quit -> REPL")
                 return
@@ -798,6 +822,34 @@ def run_desktop(fps_cap=60):
                 on = not (len(parts) == 2 and parts[1] == "0")
                 ws.wm._backdrop_disabled = not on
                 print("REMOTE cache %s" % ("on" if on else "off"))
+            if parts and parts[0] == "power":
+                # `power`            -- report
+                # `power <seconds>`  -- retune the idle blank (0 disables)
+                # `power off`        -- blank NOW, without waiting out the timer
+                #                      (the board README wants exactly this
+                #                      reading to split SoC vs backlight draw)
+                # `power on`         -- wake now
+                _arg = parts[1] if len(parts) > 1 else ""
+                if _arg == "off":
+                    _ps_force = True
+                elif _arg == "on":
+                    _idle_at = now
+                    if _asleep:
+                        _asleep = False
+                        set_backlight(True)
+                        _backlight_on = True
+                        ws._psave_asleep = False
+                        ws._dirty = True
+                elif _arg:
+                    try:
+                        _ps_ms = max(0, int(_arg)) * 1000
+                        ws._psave_ms = _ps_ms
+                        _idle_at = now
+                    except ValueError:
+                        print("REMOTE power ? %s" % line)
+                print("REMOTE power timeout=%ds asleep=%s idle=%ds"
+                      % (_ps_ms // 1000, _asleep,
+                         _ticks_diff(now, _idle_at) // 1000))
             if parts and parts[0] == "open":
                 # `open settings|picker`: pop an app window deterministically (no
                 # tile-hunting) so a drag can be measured against a known window.
@@ -926,6 +978,43 @@ def run_desktop(fps_cap=60):
                 pointer.down = i < n
                 click = (i == 0)
                 s["i"] = i + 1
+        # -- idle screen blank (#58) -------------------------------------------
+        # Placed after EVERY input source has been read (touch, BLE keys, the
+        # serial dev channel) and before the pointer is handed to the console,
+        # which is what lets the waking touch be swallowed below.
+        _active = (tp is not None or bool(inp._held) or inp.last_key
+                   or _serial_cmd)
+        if _ps_force:
+            # `power off` arrives ON the serial channel, which is itself
+            # activity -- so an explicit blank has to outrank _active or it
+            # would wake again in the very same iteration.
+            _ps_force = False
+            _asleep = True
+            _idle_at = now
+            set_backlight(False)
+            _backlight_on = False
+            ws._psave_asleep = True
+        elif _active:
+            _idle_at = now
+            if _asleep:
+                _asleep = False
+                set_backlight(True)
+                _backlight_on = True
+                ws._psave_asleep = False
+                # The panel may hold a frame from before the blank, and the
+                # partial-paint machinery would happily leave it there.
+                ws._dirty = True
+                # The touch that WAKES the screen must not also press whatever
+                # it landed on -- otherwise a wake tap launches a cart.
+                pointer.down = False
+                click = False
+        elif (_ps_ms and not _asleep
+                and _ticks_diff(now, _idle_at) >= _ps_ms):
+            _asleep = True
+            set_backlight(False)
+            _backlight_on = False
+            ws._psave_asleep = True
+            print("Moybyte P4 power save: screen off (idle %ds)" % (_ps_ms // 1000))
         pointer.click = click
         pointer.tick(now)
         # Present the PREVIOUS quiet game frame now (its async composite has been
@@ -945,7 +1034,12 @@ def run_desktop(fps_cap=60):
         except Exception as exc:   # noqa: BLE001 -- one bad frame must not brick the boot
             print("Moybyte P4 frame error:", exc)
             gc.collect()
-        if not _backlight_on and getattr(ws, "_frames_drawn", 0) > 0:
+        # First composed frame lights the panel (#45). `not _asleep` is load
+        # bearing: without it this fires the frame after the idle blank -- the
+        # blank clears _backlight_on and frames keep being drawn -- and the
+        # screen comes straight back on.
+        if not _backlight_on and not _asleep \
+                and getattr(ws, "_frames_drawn", 0) > 0:
             set_backlight(True)
             _backlight_on = True
         elapsed = _ticks_diff(_ticks_ms(), now)
