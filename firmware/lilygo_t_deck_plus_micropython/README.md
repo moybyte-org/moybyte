@@ -179,6 +179,22 @@ but leaves the right side black because only 240 native columns are addressed.
 
 ## USB flashing
 
+### Getting the board into the ROM loader
+
+**There is no BOOT button on this board — the trackball click is GPIO0.** Hold
+the trackball in while you power the board on (cable in, or the power switch),
+then let go: it comes up in the ROM download loader instead of the console.
+
+**And when the write finishes, press RST.** The board stays in the loader until
+you do — the new firmware is on flash but nothing is running it.
+
+Both ends are manual for the same reason: the USB port is the ESP32-S3's own,
+and nothing can drive this board's reset line over it. That is why
+`tools/esptool_no_modem.py` exists (see below — the combined RTS/DTR ioctl fails
+on this CDC node) and why the website's flasher connects with `no_reset` and
+does not attempt a reset afterwards. On the P4, by contrast, the CH343 bridge
+resets into the loader and back out again on its own, and none of this applies.
+
 USB full flashing is valid on this board, but use it deliberately because it
 replaces launcher. The stable app-development loop is still: build the
 launcher-friendly `.bin`, copy it to SD, and launch it from the restored

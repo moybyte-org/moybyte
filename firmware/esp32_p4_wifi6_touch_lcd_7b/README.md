@@ -302,5 +302,18 @@ below, so re-check against those, not against it.
 - Audio: ES8311 codec (0x18) + ES7210 quad-mic (0x40) on the same I2C bus;
   I2S MCLK13/WS10/BCLK12/DIN11/DOUT9; PA enable GPIO53.
 - Boot button GPIO35. No camera fitted (empty MIPI-CSI socket).
+- **Web Serial (the website's flasher) fails with "The device has been lost"
+  after any pyserial tool has touched the port.** Not a hardware fault and not a
+  disconnect — the port stays enumerated, and udev reports no remove event.
+  pyserial sets `VMIN=0, VTIME=0` on the tty, that survives the process that set
+  it, and Chrome maps the zero-byte read it then gets to a disconnect. So
+  `esptool`, `miniterm`, `mpremote` or `tools/p4_autotest.py` leaves the port
+  unusable to the browser until it is replugged. Confirmed by opening an idle
+  port from Chrome with no data flowing: `min = 0` errors instantly at 0 bytes,
+  `min = 1` holds the port open. Fix either way:
+
+  ```bash
+  stty -F /dev/ttyACM0 min 1 time 0     # or just unplug and replug the board
+  ```
 - Factory firmware (xiaozhi AI assistant) backup: `dist/p4/factory_full_32MB_backup.bin`
   (local only, gitignored) — restore with `write_flash 0 <file>`.
