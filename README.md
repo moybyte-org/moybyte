@@ -245,6 +245,14 @@ make firmware-flash-lilygo-micropython PORT=/dev/ttyACM0
 make firmware-build-p4 && make firmware-flash-p4 PORT=/dev/ttyACM0
 ```
 
+Without the toolchain: every firmware build publishes to the rolling
+[`firmware-latest`](https://github.com/moybyte-org/moybyte/releases/tag/firmware-latest)
+release, and the project site flashes either board straight from the browser
+over Web Serial (Chrome or Edge) — the same image at the same offset as the
+commands above. The site serves its own copy of each image because that is the
+only origin a browser may fetch firmware from; `tools/fetch_ci_firmware.py` is
+how they get there.
+
 Each firmware directory has its own README recording the hardware-learned
 constraints (shared SPI bus rules, DSI/PSRAM timing, the keyboard's two modes) —
 **read them before touching that board.** They exist because each line in them

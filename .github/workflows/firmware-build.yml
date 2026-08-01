@@ -174,6 +174,10 @@ jobs:
           find firmware dist -path '*dist/*' -name '*.bin' -print -exec cp {} out/ \; 2>/dev/null || true
           ls -l out || true
 
+      # 90 days rather than the old 14. Artifacts are no longer where the
+      # website gets its images (that is the release below, which never
+      # expires), but they are still the fallback and the by-hand download, and
+      # this workflow is dispatched rarely enough that a fortnight is nothing.
       - name: Upload firmware artifacts
         if: steps.gate.outputs.run == 'true'
         uses: actions/upload-artifact@v4
@@ -181,4 +185,41 @@ jobs:
           name: moybyte-firmware-${{ matrix.board }}
           path: out/*.bin
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 90
+
+  # Publish this run's images to the rolling `firmware-latest` release: the
+  # durable store the website's flasher reads. A release costs a clone nothing,
+  # unlike committing 7.4 MB of .bin per build into a 6 MB repository.
+  #
+  # Per board and additive: only the boards THIS run built are replaced, so a
+  # single-board dispatch leaves the other board's published image alone. The
+  # Pages workflow watches this workflow and republishes the site afterwards.
+  publish:
+    name: publish to firmware-latest
+    needs: build
+    # always(): one board failing must not withhold the other's image. With
+    # nothing built at all, the publish step finds no artifacts and no-ops.
+    if: always() && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Download this run's images
+        uses: actions/download-artifact@v4
+        continue-on-error: true          # nothing built -> nothing to publish
+        with:
+          path: artifacts
+          pattern: moybyte-firmware-*
+
+      - name: Publish to the rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/publish_firmware_release.py --artifacts artifacts

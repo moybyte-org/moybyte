@@ -27,7 +27,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: setup test site site-gifs site-hero firmware-build-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-build-p4 firmware-flash-p4 firmware-monitor-p4 firmware-stage-xiao-zero ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install sync-issues check-venv
+.PHONY: setup test site site-firmware site-gifs site-hero firmware-build-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-build-p4 firmware-flash-p4 firmware-monitor-p4 firmware-stage-xiao-zero ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install sync-issues check-venv
 
 # A PLAIN venv on purpose. Two flags used to live here and both hid bugs on every
 # machine but the maintainer's:
@@ -74,8 +74,16 @@ test:
 # Build the project site into _site/ (the GitHub Pages source). Embeds the web
 # runner's dist/ as the playable player, so build that first for a live page:
 #   firmware/web_runner/build.sh && make site
+# It also embeds whatever `make site-firmware` last pulled down, which is what
+# the page's board flasher writes; without it the flash section says so.
 site:
 	$(PYTHON) site/build.py
+
+# Pull both boards' current firmware into dist/ci-firmware for the site's
+# flasher: the rolling `firmware-latest` release, falling back per board to a
+# live run artifact. Needs the `gh` CLI, authenticated.
+site-firmware:
+	$(SYSTEM_PYTHON) tools/fetch_ci_firmware.py
 
 # Regenerate the teaser-site demo GIFs from the real console (headless).
 site-gifs:

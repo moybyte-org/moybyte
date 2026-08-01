@@ -17,10 +17,20 @@ Build the player first, or there is nothing to embed:
     firmware/web_runner/build.sh           # production (frozen, no modules.json)
     firmware/web_runner/build.sh --stage-only   # dev (fast, ships modules.json)
 
+The page also FLASHES a board over USB (site/flash.js, esptool-js over Web
+Serial). The images it writes are CI builds pulled down beforehand:
+
+    python3 tools/fetch_ci_firmware.py     # -> dist/ci-firmware/{tdeck,p4}/
+
+with no images present, the flash section simply says there is no current build.
+
 Everything under _site/ is generated. Edit this file, not the output.
 """
 
 import argparse
+import datetime
+import hashlib
+import json
 import os
 import shutil
 import sys
@@ -28,6 +38,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 PLAYER_SRC = os.path.join(ROOT, "firmware", "web_runner", "dist")
+VENDOR_SRC = os.path.join(HERE, "vendor")
+FIRMWARE_SRC = os.path.join(ROOT, "dist", "ci-firmware")
 sys.path.insert(0, ROOT)
 
 
@@ -43,6 +55,77 @@ TIERS = [
      "?desktop=1", "1024 / 600"),
     ("handheld", "Handheld", "320 &times; 240 &mdash; the T-Deck tier",
      "", "4 / 3"),
+]
+
+
+# The flashable boards. This table is the ONE place the page's flasher and the
+# Makefile's cable flash have to agree, so each field is the browser's copy of a
+# `make firmware-flash-*` argument -- change one, change the other:
+#
+#   tdeck  esptool --chip esp32s3 write_flash 0x0 <full-dio image>
+#   p4     esptool --chip esp32p4 write_flash 0x2000 moybyte_p4.bin
+#
+# Both write a MERGED image (bootloader + partition table + app) whose header
+# already carries the flash mode/size/frequency the build baked in, which is why
+# the flasher passes "keep" for all three rather than re-deriving them here. The
+# partition tail (the VFS, and on the T-Deck otadata) is not part of the image,
+# so an ordinary flash leaves the board's own storage alone.
+#
+# `images` is a preference list: the first name present in the board's artifact
+# folder is the one published. `reset` is how esptool-js is asked to enter the
+# ROM loader, and it is a hardware fact per board, not a preference (see the
+# T-Deck note in CLAUDE.md: its native-USB auto-reset never syncs).
+BOARDS = [
+    {
+        "id": "tdeck",
+        "label": "LilyGO T-Deck Plus",
+        "chip": "ESP32-S3",                 # what esptool-js must report
+        "images": ("moybyte-current-full-dio-0x0.bin",),
+        "offset": 0x0,
+        "baud": 460800,
+        "reset": "no_reset",                # the trackball hold below did it
+        "manual": None,                     # ... so there is no reset to skip
+        "usb_otg": True,                    # native USB, for esptool-js's sake
+        # Nothing can drive this board's reset line over its own USB port --
+        # neither in nor out of the loader -- so the human does both ends.
+        "after": None,                      # ... which is why we do not try
+        "done": "Written. Press <b>RST</b> on the board to start it.",
+        "prep": "Its USB port is the ESP32-S3&rsquo;s own and auto-reset does not "
+                "sync on it, so you move the board in and out of the loader by "
+                "hand. There is no BOOT button &mdash; <b>the trackball click is "
+                "GPIO0</b>: hold the trackball in while you power the board on, "
+                "then let go, and it comes up in the ROM loader instead of the "
+                "console. Flash, pick its port in the dialog, and when the write "
+                "finishes <b>press RST</b> &mdash; it stays in the loader until "
+                "you do.",
+        "erase": "Erase the whole chip first. Only needed once, when moving a "
+                 "board onto the OTA layout &mdash; carts live on the SD card, so "
+                 "they survive either way.",
+        "cli": "make firmware-flash-lilygo-micropython-full PORT=/dev/ttyACM0",
+    },
+    {
+        "id": "p4",
+        "label": "Waveshare ESP32-P4 7B",
+        "chip": "ESP32-P4",
+        "images": ("moybyte_p4.bin",),
+        "offset": 0x2000,
+        "baud": 921600,
+        "reset": "default_reset",           # CH343 bridge: DTR/RTS reset works
+        "usb_otg": False,
+        "after": "hard_reset",              # ... at both ends, unlike the T-Deck
+        "done": "Done &mdash; the board is rebooting into this build.",
+        "prep": "Plug into the board&rsquo;s USB-C debug port &mdash; the CH343 "
+                "bridge resets it into the loader and back out again on its own, "
+                "so there is nothing to hold or press.",
+        "erase": "Erase the whole chip first. This board keeps its cartridges on "
+                 "internal flash, so that deletes them along with their saves.",
+        # The escape hatch for a reset that will not take: hold BOOT (GPIO35 on
+        # this board), tap RESET, and the browser skips its own reset entirely.
+        "manual": "Skip the reset &mdash; I have put the board in download mode "
+                  "myself (hold <b>BOOT</b>, tap <b>RESET</b>, release BOOT). Try "
+                  "this if connecting fails.",
+        "cli": "make firmware-flash-p4 PORT=/dev/ttyACM0",
+    },
 ]
 
 
@@ -162,6 +245,77 @@ def moy_mark(pal, scale=3):
     return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
 
 
+def firmware(src, out):
+    """Publish one flashable image per board, and describe what was published.
+
+    `src` is tools/fetch_ci_firmware.py's output: a folder per board holding
+    that board's CI artifact plus the source.json saying which run it came from.
+    A board with nothing there is not an error -- the firmware workflow is
+    manual, artifacts expire, and the page renders the gap honestly.
+
+    Returns the BOARDS table with each entry's "fw" set to the published image's
+    manifest record (or None). That record is what site/flash.js reads.
+    """
+    cards = []
+    for board in BOARDS:
+        card = dict(board, fw=None)
+        cards.append(card)
+        folder = os.path.join(src, board["id"])
+        name = next((n for n in board["images"]
+                     if os.path.exists(os.path.join(folder, n))), None)
+        if not name:
+            continue
+
+        blob = open(os.path.join(folder, name), "rb").read()
+        dest = os.path.join(out, "firmware", board["id"])
+        os.makedirs(dest, exist_ok=True)
+        with open(os.path.join(dest, name), "wb") as f:
+            f.write(blob)
+
+        source = {}
+        meta = os.path.join(folder, "source.json")
+        if os.path.exists(meta):
+            try:
+                source = json.load(open(meta, encoding="utf-8"))
+            except ValueError:
+                source = {}                  # a corrupt sidecar is not fatal
+        card["fw"] = {
+            "id": board["id"],
+            "label": board["label"],
+            "chip": board["chip"],
+            "file": name,
+            "url": "firmware/%s/%s" % (board["id"], name),
+            "size": len(blob),
+            "sha256": hashlib.sha256(blob).hexdigest(),
+            "offset": board["offset"],
+            "baud": board["baud"],
+            "reset": board["reset"],
+            "usb_otg": board["usb_otg"],
+            "after": board["after"],
+            "done": board["done"],
+            # Provenance: the page states which build it is about to write, so
+            # "the latest build" is checkable rather than a claim.
+            "commit": source.get("commit", ""),
+            "run_url": source.get("run_url", ""),
+            "run_number": source.get("run_number"),
+            "built": source.get("built", ""),
+        }
+    return cards
+
+
+def when(stamp):
+    """2026-07-29T19:39:21Z -> 29 Jul 2026 (and anything odd -> as given)."""
+    try:
+        d = datetime.datetime.strptime(stamp[:10], "%Y-%m-%d")
+    except (TypeError, ValueError):
+        return stamp or "an unrecorded date"
+    return "%d %s %d" % (d.day, d.strftime("%b"), d.year)
+
+
+def size_mb(n):
+    return "%.1f MB" % (n / 1048576.0)
+
+
 def font_face():
     """The system's own font as the display face. site/petme128.woff2 is the
     petme128 8x8 glyph set (MicroPython, MIT -- THIRD_PARTY.md) rendered as a
@@ -185,7 +339,51 @@ STATUS = [
     ("ok", "Streams to a browser", "verified on the T-Deck"),
 ]
 
-def page(pal, has_player):
+REPO = "https://github.com/moybyte-org/moybyte"
+
+
+def flash_cards(cards):
+    """The board cards for the flash section -- one per BOARDS entry."""
+    out = []
+    for c in cards:
+        fw = c["fw"]
+        li = ['<li class="board" data-board="%s"><h3>%s</h3><p class="chip">%s</p>'
+              % (c["id"], c["label"], c["chip"])]
+        if not fw:
+            li.append('<p class="fwmeta">no published build</p>'
+                      '<p>CI has not left a live image for this board &mdash; the '
+                      'firmware workflow is dispatched by hand and its artifacts '
+                      'expire. Build and flash it from a checkout:</p>'
+                      '<pre>%s</pre>' % c["cli"])
+            out.append("\n".join(li) + "</li>")
+            continue
+        bits = ["Built " + when(fw["built"])]
+        if fw["run_url"]:
+            bits.append('<a href="%s">run%s</a>'
+                        % (fw["run_url"],
+                           " #%s" % fw["run_number"] if fw["run_number"] else ""))
+        if fw["commit"]:
+            bits.append('<a href="%s/commit/%s">%s</a>'
+                        % (REPO, fw["commit"], fw["commit"][:7]))
+        bits.append("%s &rarr; 0x%x" % (size_mb(fw["size"]), fw["offset"]))
+        li.append('<p class="fwmeta">%s</p>' % " &middot; ".join(bits))
+        li.append("<p>%s</p>" % c["prep"])
+        li.append('<p class="act">'
+                  '<button class="btn pri go" type="button">Flash this board</button>'
+                  '<a class="btn" href="%s" download>Download the .bin</a></p>'
+                  % fw["url"])
+        li.append('<label class="erase"><input type="checkbox">'
+                  '<span>%s</span></label>' % c["erase"])
+        if c["manual"]:
+            li.append('<label class="erase manual"><input type="checkbox">'
+                      '<span>%s</span></label>' % c["manual"])
+        li.append('<p class="state"></p><div class="prog" hidden><i></i></div>'
+                  '<pre class="log" hidden></pre>')
+        out.append("\n".join(li) + "</li>")
+    return "\n".join("      " + line for line in "\n".join(out).split("\n"))
+
+
+def page(pal, has_player, cards):
     tokens = "".join("--p%d:%s;" % (i, c) for i, c in enumerate(pal))
     tabs = "\n".join(
         '        <button class="tab%s" data-tier="%s" data-q="%s" data-ar="%s">'
@@ -204,6 +402,24 @@ def page(pal, has_player):
         '      <li><h3>%s</h3><p class="chip">%s</p><p>%s</p></li>' % (t, chip, b)
         for t, chip, b in TARGETS)
     rough = "\n".join("      <li>%s</li>" % r for r in ROUGH)
+    boards = flash_cards(cards)
+    published = [c["fw"] for c in cards if c["fw"]]
+    # The flasher's 218 KB of vendored esptool-js is only worth loading when
+    # there is something to write.
+    # Only worth saying when there is a button to press.
+    flash_hint = "" if not published else (
+        '  <div class="hint">\n'
+        '    <span>The same image at the same offset the cable flash uses. Your\n'
+        '      cartridges and saves are left alone unless you tick the erase box.</span>\n'
+        '    <span><b>New here.</b> These images are the ones we flash over a cable;\n'
+        '      driving them from a browser has not been proven on glass yet.</span>\n'
+        '  </div>\n')
+    flash_js = ""
+    if published:
+        flash_js = (
+            '<script type="application/json" id="fw-manifest">%s</script>\n'
+            '<script type="module" src="flash.js"></script>'
+            % json.dumps({"boards": published}))
     return """<!doctype html>
 <html lang="en">
 <head>
@@ -347,6 +563,31 @@ body.noscroll{overflow:hidden}
   background:var(--bg);border:1px solid var(--line)}
 .rough{margin:20px 0 0;padding-left:20px;color:var(--body);font-size:15px}
 .rough li{margin:0 0 9px}
+/* --- the flasher ----------------------------------------------------------- */
+/* One card per board: what CI built, how to get the board into the loader, and
+   the button that writes it. Everything below the button is progress reporting,
+   hidden until a flash starts. */
+.boards li{display:flex;flex-direction:column}
+/* The column stretches its children, and a full-width chip reads as a field. */
+.boards .chip{align-self:flex-start}
+.boards pre{margin:12px 0 0;font-size:12px}
+.fwmeta{margin:0 0 9px;font:11px/1.7 var(--mono);color:var(--muted)}
+.fwmeta a{color:var(--muted)}
+.act{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 0}
+.act .btn{font-size:14px;padding:7px 13px}
+button.btn{appearance:none;cursor:pointer;font-family:inherit}
+button.btn:disabled{opacity:.45;cursor:default;filter:none}
+.erase{display:flex;gap:8px;align-items:flex-start;margin:12px 0 0;
+  font-size:12px;color:var(--muted);cursor:pointer}
+.erase input{margin:3px 0 0;flex:0 0 auto}
+.state{margin:11px 0 0;font-size:13px;color:var(--ink);min-height:1.3em}
+.state.ok{color:var(--ok)} .state.warn{color:var(--warn)} .state.wip{color:var(--wip)}
+.prog{height:6px;margin:9px 0 0;background:var(--bg);border:1px solid var(--line)}
+.prog i{display:block;height:100%%;width:0;background:var(--accent);
+  transition:width .12s linear}
+.log{max-height:9.5em;overflow:auto;margin:9px 0 0;padding:8px 10px;
+  white-space:pre-wrap;font:11px/1.55 var(--mono);color:var(--muted);
+  background:var(--bg);border:1px solid var(--line)}
 pre{background:var(--surface);border:1px solid var(--line);padding:16px 18px;
   overflow-x:auto;font:13px/1.7 var(--mono);color:var(--ink);margin:20px 0 0}
 pre .c{color:var(--muted)}
@@ -361,6 +602,7 @@ footer a{margin-right:4px}
   <a class="brand px" href="#top"><img class="moy" src="%(mark)s" alt="">moy<em>byte</em></a>
   <span class="sp"></span>
   <a class="l" href="#try">Try it</a>
+  <a class="l" href="#flash">Flash a board</a>
   <a class="l" href="#in">What's in it</a>
   <a class="l" href="#runs">Runs on</a>
   <a class="l" href="#build">Build</a>
@@ -421,6 +663,21 @@ footer a{margin-right:4px}
     <span><b>Nothing is saved.</b> Reloading resets the machine.</span>
   </div>
 %(missing)s</div></section>
+
+<section id="flash"><div class="wrap">
+  <h2>Put it on a board</h2>
+  <p class="slead">Plug a board in and write the current firmware to it from this
+    page &mdash; no toolchain, no checkout. Each image below is the one GitHub
+    Actions built, served from this site, and the browser writes it over USB
+    itself. Chrome, Edge or Opera on a desktop: Firefox and Safari do not
+    implement Web Serial.</p>
+  <p class="warnbox" id="fw-nowebserial" hidden>This browser has no Web Serial, so
+    the flash buttons are off. Download the image instead and write it with
+    <code>esptool</code>, at the offset on its card.</p>
+  <ul class="cards boards">
+%(boards)s
+  </ul>
+%(flash_hint)s</div></section>
 
 <section id="in"><div class="wrap">
   <h2>What's in it</h2>
@@ -532,12 +789,14 @@ document.addEventListener("keydown", function (e) {
 });
 show(tabs[0]);
 </script>
+%(flash_js)s
 </body>
 </html>
 """ % {
         "tokens": tokens, "font": font_face(), "tabs": tabs, "missing": missing,
         "status": status, "features": features, "mark": moy_mark(pal),
-        "targets": targets, "rough": rough,
+        "targets": targets, "rough": rough, "boards": boards, "flash_js": flash_js,
+        "flash_hint": flash_hint,
     }
 
 
@@ -546,6 +805,9 @@ def main():
     ap.add_argument("--out", default=os.path.join(ROOT, "_site"))
     ap.add_argument("--no-player", action="store_true",
                     help="skip copying the player bundle (page only)")
+    ap.add_argument("--firmware", default=FIRMWARE_SRC,
+                    help="CI firmware folder for the flasher "
+                         "(tools/fetch_ci_firmware.py's output)")
     args = ap.parse_args()
 
     out = os.path.abspath(args.out)
@@ -570,6 +832,23 @@ def main():
     # shot's own pixels are the same navy/yellow/cream the page is built from.
     # Frame 0 matters more than it looks: it IS the page's first paint, so the
     # recording has to open on a composed desk, not a boot wipe.
+    # The flasher: the CI images the page can write, the vendored esptool-js
+    # that writes them, and a manifest that says what each one is. All three
+    # only ship when there is at least one image to flash.
+    cards = firmware(os.path.abspath(args.firmware), out)
+    published = [c["fw"] for c in cards if c["fw"]]
+    if published:
+        with open(os.path.join(out, "firmware", "manifest.json"),
+                  "w", encoding="utf-8") as f:
+            json.dump({"boards": published}, f, indent=2, sort_keys=True)
+            f.write("\n")
+        shutil.copyfile(os.path.join(HERE, "flash.js"),
+                        os.path.join(out, "flash.js"))
+        shutil.copytree(VENDOR_SRC, os.path.join(out, "vendor"))
+    else:
+        print("!! no firmware images under %s -- the page will say so "
+              "(build them with tools/fetch_ci_firmware.py)" % args.firmware)
+
     gif = os.path.join(HERE, "hero.gif")
     if not os.path.exists(gif):
         gif = os.path.join(ROOT, "docs", "media", "desktop", "code.gif")
@@ -578,7 +857,7 @@ def main():
         shutil.copyfile(gif, os.path.join(out, "media", "desktop.gif"))
 
     with open(os.path.join(out, "index.html"), "w", encoding="utf-8") as f:
-        f.write(page(palette(), has_player))
+        f.write(page(palette(), has_player, cards))
 
     total = sum(os.path.getsize(os.path.join(d, n))
                 for d, _, ns in os.walk(out) for n in ns)
@@ -587,7 +866,9 @@ def main():
         mode = ("dev (ships modules.json)"
                 if os.path.exists(os.path.join(out, "player", "modules.json"))
                 else "production (frozen)")
-    print("-> %s  (%.1f MB, player: %s)" % (out, total / 1048576.0, mode))
+    print("-> %s  (%.1f MB, player: %s, flashable: %s)"
+          % (out, total / 1048576.0, mode,
+             ", ".join(c["id"] for c in cards if c["fw"]) or "none"))
 
 
 if __name__ == "__main__":

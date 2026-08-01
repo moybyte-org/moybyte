@@ -28,6 +28,7 @@ separate question from what is committed.
 | Lua 5.4.7 (device VM) | `firmware/lilygo_t_deck_plus_micropython/native/moy_lua/lua/` | [lua.org](https://www.lua.org/) | MIT | **Yes** — documented |
 | Lua 5.4.7 (measurement spike) | `experiments/lua_bridge/components/lua/` | [lua.org](https://www.lua.org/) | MIT | No |
 | `esp_lcd_ek79007` panel driver | `firmware/esp32_p4_wifi6_touch_lcd_7b/native/moy_dsi/vendor/` | [espressif/esp-iot-solution](https://github.com/espressif/esp-iot-solution) | Apache-2.0 | No |
+| esptool-js 0.6.0 (the site's board flasher) | `site/vendor/esptool-js/` | [espressif/esptool-js](https://github.com/espressif/esptool-js) | Apache-2.0 | No |
 | `font_petme128_8x8` glyph data | `runtime/font.py`; derived webfont `site/petme128.woff2` | [MicroPython](https://github.com/micropython/micropython) | MIT | No (re-encoded) |
 | PICO-8 base palette + colour names | `runtime/palette.py` (`_BASE16`, `NAMES`) | [PICO-8 / Lexaloffle](https://www.lexaloffle.com/pico-8.php) | CC-0 | No |
 | Pixelarticons icon shapes | `runtime/chrome.py` (`_GLYPHS` and siblings) | [halfmage/pixelarticons](https://github.com/halfmage/pixelarticons) | MIT | **Yes** — retraced |
@@ -100,6 +101,32 @@ The EK79007 MIPI-DSI controller driver for the Waveshare 7″ board (issue #58).
   [`.../vendor/MODIFICATIONS.md`](firmware/esp32_p4_wifi6_touch_lcd_7b/native/moy_dsi/vendor/MODIFICATIONS.md).
 - The board bring-up that *uses* the driver (`modmoy_dsi.c`,
   `micropython.cmake`, one level up) is Moybyte's own work.
+
+### 2.4 esptool-js — the website's board flasher
+
+`site/vendor/esptool-js/bundle.js`
+
+Espressif's JavaScript esptool. It is what the project site's "Put it on a
+board" section uses to write a firmware image to a board over Web Serial.
+
+- **Upstream:** [`espressif/esptool-js`](https://github.com/espressif/esptool-js)
+  v0.6.0, the published `bundle.js` from
+  [`esptool-js@0.6.0`](https://www.npmjs.com/package/esptool-js) on npm. That
+  single file is the project's own rollup bundle: it already contains pako
+  (MIT AND Zlib, © 2014–2017 Vitaly Puzrin and Andrey Tupitsin) and the
+  per-chip flasher stubs, and it fetches nothing at runtime.
+- **Licence:** Apache-2.0, © Espressif Systems (Shanghai) CO LTD. Full text is
+  retained beside it at [`site/vendor/esptool-js/LICENSE`](site/vendor/esptool-js/LICENSE).
+  Upstream ships no `NOTICE` file, so Apache-2.0 §4(d) attaches nothing further.
+- **Modified: no** — byte-for-byte the published artifact, so §4(b)'s
+  changed-files notice is not triggered. Re-verify, and update, with:
+  `curl -sO https://unpkg.com/esptool-js@<version>/bundle.js`.
+- **Why vendored rather than loaded from a CDN:** the page has to work as one
+  self-contained thing, and this is a tool that writes to hardware — what it
+  runs should be a file in this repository, reviewed at a pinned version, not
+  whatever a CDN serves that day.
+- The flasher around it (`site/flash.js`, the board table in `site/build.py`)
+  is Moybyte's own work.
 
 ---
 
@@ -264,6 +291,11 @@ each one on demand into gitignored working directories. They are listed because
 the **binaries the build produces** — the firmware `.bin` images and the
 WebAssembly web runner — contain compiled code from them, and those artifacts
 carry the upstreams' obligations wherever they are published.
+
+Since the project site gained its board flasher, "published" covers two more
+channels: the rolling `firmware-latest` release (both boards' images, replaced
+per board as they are rebuilt) and the website itself, which serves its own copy
+under `_site/firmware/` for a browser to write. §5.1 and §5.2 apply to both.
 
 ### 5.1 LilyGO T-Deck Plus, ESP32-S3 (`firmware/lilygo_t_deck_plus_micropython/build.sh`)
 

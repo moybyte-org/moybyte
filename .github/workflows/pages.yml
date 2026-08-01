@@ -7,6 +7,15 @@
 # and installs emsdk (~1.7 GB) the first time. It is cached, keyed on build.sh,
 # so only a change to the build itself pays for it again.
 #
+# The page also FLASHES a board over USB, so this job carries the firmware too:
+# it pulls each board's image out of the rolling `firmware-latest` release and
+# site/build.py publishes it under _site/firmware/. That copy is not a
+# convenience -- GitHub serves neither Actions artifacts nor release assets with
+# CORS headers, so a browser cannot fetch a firmware image from anywhere but the
+# page's own origin (tools/fetch_ci_firmware.py explains it at length). This
+# workflow WATCHES the firmware one (the `workflow_run` trigger below), so a new
+# board build republishes the site around it.
+#
 # Deploys on a push to master that touches the site, the console, the web runner
 # or the README -- and on demand. If the wasm build ever fails, the page still
 # assembles (build.py says so in place of the player) rather than publishing
@@ -21,14 +30,22 @@ on:
       - "runtime/**"
       - "system_carts/**"
       - "firmware/web_runner/**"
+      - "tools/fetch_ci_firmware.py"
       - "README.md"
       - ".github/workflows/pages.yml"
+  # A finished firmware build is new content for this site, so republish around
+  # it instead of waiting for the next unrelated site push. (Only on success --
+  # see the job's `if`; this event fires on every conclusion.)
+  workflow_run:
+    workflows: ["Firmware build"]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
   contents: read
   pages: write
   id-token: write
+  actions: read          # list + download the firmware build's artifacts
 
 # One deploy at a time, and never cancel one midway: a half-published site is
 # worse than a slightly stale one.
@@ -38,6 +55,11 @@ concurrency:
 
 jobs:
   build:
+    # Every trigger except a FAILED firmware build (which has nothing new to
+    # publish and would only burn a wasm build).
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     outputs:
       player: ${{ steps.player.outcome }}
@@ -65,12 +87,28 @@ jobs:
         continue-on-error: true
         run: firmware/web_runner/build.sh
 
+      # The images the page's flasher writes: the `firmware-latest` release,
+      # falling back per board to a live run artifact. A board with nothing
+      # published yet is an ordinary outcome (the firmware workflow is
+      # dispatched by hand) and the page says so per board -- so a failure here
+      # must not stop the deploy. It only fails outright if `gh` is broken.
+      - name: Fetch the firmware images
+        id: firmware
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/fetch_ci_firmware.py --out dist/ci-firmware
+
       - name: Assemble the site
-        run: python3 site/build.py --out _site
+        run: python3 site/build.py --out _site --firmware dist/ci-firmware
 
       - name: Note a missing player
         if: steps.player.outcome == 'failure'
         run: echo "::warning::the wasm build failed -- the site publishes without the live player"
+
+      - name: Note missing firmware
+        if: steps.firmware.outcome == 'failure'
+        run: echo "::warning::could not fetch CI firmware -- the site publishes without the flasher"
 
       - name: Upload the artifact
         uses: actions/upload-pages-artifact@v3
