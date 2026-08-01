@@ -16,7 +16,7 @@ from array import array
 # shared verbatim with the host (canonical: runtime/editors.py; build.sh stages a
 # copy into modules/ so it freezes here as the top-level module `editors`).
 from editors import CodeEditor, PaintEditor, SpriteSheet
-from console import NAMES, Pointer, Workstation, _cursor_delta, wire_workstation_core
+from console import NAMES, Pointer, Workstation, _cursor_delta, draw_splash, wire_workstation_core
 from carts_data import CARTS  # build-time generated from system_carts/ (tools/gen_device_carts.py)
 # Leaf tick + diag helpers (extracted to device_util.py so every device cluster can
 # import them without a moy_runtime cycle -- see device_util.py's module docstring).
@@ -100,14 +100,18 @@ SD_TRACE = True
 # run_desktop calls them between frames when perf capture is on.
 
 
-def _load_carts(session=None):
+def _load_carts(session=None, progress=None):
     """Load cartridges from SD (seeding the built-ins on first boot). Returns
     (carts, carts_root); carts_root is None (management disabled) on fallback to
     the embedded carts if the SD card is missing/unreadable.
 
     `session` is the SD lifecycle wrapper to mount under. Default is the
     pre-display machine.SDCard path (used by the boot prefetch); pass
-    moybyte_sd.with_sd_live for the post-display native path."""
+    moybyte_sd.with_sd_live for the post-display native path.
+
+    `progress(done, total, title)` feeds the boot splash's bar. Seeding is the
+    long pole of a first boot -- 17.5s of the P4's 25s, and this board writes
+    the same cartridges to SD rather than internal flash."""
     try:
         import moybyte_sd
         import moy_carts
@@ -117,7 +121,7 @@ def _load_carts(session=None):
 
         def _seed_and_scan():
             moy_carts.ensure_dirs()
-            moy_carts.seed_builtins(CARTS)
+            moy_carts.seed_builtins(CARTS, progress=progress)
             return moy_carts.scan()
 
         # Mount only for the seed+scan, then unmount: the render loop must own
@@ -333,6 +337,48 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     # fragmented internal heap (a single 320x240 tx_color NO_MEMs). strip_h=24 = band.
 
     canvas = DeviceCanvas(comp)
+
+    # -- boot splash (#45/#58) --------------------------------------------
+    # The panel is dark until the first frame ships (the backlight gate in the
+    # loop below), which is right -- it keeps the ST7789's power-on GRAM noise
+    # off the glass. The cost is that a slow boot looks like a dead board, and
+    # a FIRST boot is slow: every built-in cartridge is written out before
+    # anything composes. Measured on the P4, whose store is internal flash:
+    # 17.5s of a 25s boot. This board seeds to SD.
+    #
+    # So show the SHIPPED boot logo early (console.draw_splash -- the same
+    # picture arm_splash holds, so the machine never appears to start twice)
+    # with the seeding bar under it, and say the same on serial.
+    _splash = {"lit": False}
+
+    def _boot_note(msg, frac=None):
+        if _splash.get("done"):
+            return                       # the desktop owns the glass now
+        if frac is None:
+            print("Moybyte boot:", msg)  # a stage; the bar stays quiet
+        try:
+            # The canvas caches its framebuffer pointer, and flush() may rotate
+            # the back buffer -- a cheap no-op in single-buffer mode, and
+            # load-bearing otherwise (on the P4 its absence strobed two frames
+            # in every three).
+            canvas.sync_back()
+            draw_splash(canvas, frac=frac, status=msg)
+            comp.flush()
+            if not _splash["lit"]:
+                import tdeck_display
+                tdeck_display.set_backlight(True)
+                _splash["lit"] = True
+        except Exception as exc:  # noqa: BLE001 -- a splash must never fail a boot
+            print("Moybyte splash unavailable:", exc)
+
+    def _seed_progress(done, total, title):
+        if done % 8 == 0:                # the wire, without one line per cart
+            print("Moybyte boot: loading cartridges %d/%d" % (done + 1, total))
+        _boot_note("loading cartridges  %d/%d" % (done + 1, total),
+                   frac=float(done) / total if total else 1.0)
+
+    _boot_note("starting")
+
     inp = InputState()
     keyboard = TDeckKeyboard(inp)
     ball = TrackBall()
@@ -359,9 +405,12 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     import moybyte_sd
     # Carts are read from SD before display init; only fall back to a post-display
     # mount (now safe via the native moy_sd path) if the shell didn't prefetch.
+    _boot_note("loading cartridges")
     carts, carts_root = (prefetched if prefetched is not None
-                         else _load_carts(moybyte_sd.with_sd_live))
+                         else _load_carts(moybyte_sd.with_sd_live,
+                                          progress=_seed_progress))
     import moy_carts
+    _boot_note("building the desktop")
     ws = Workstation(comp, canvas, inp, carts)
     # #67 spike: say ONCE whether the auto-native cart loader engaged (the emitter
     # probe in player.py), so a serial capture can attribute logic-ms deltas.
@@ -529,7 +578,10 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         _diag_log("mem", "gc_free=%d (esp32 n/a: %s)" % (gc.mem_free(), _e), diag)
     frame_ms = 1000 // fps_cap
     last = _ticks_ms()
-    _backlight_on = False         # #45: panel stays dark until the first frame ships
+    # #45: the panel stays dark until the first frame ships -- unless the boot
+    # splash already composed one, in which case it is lit and stays lit.
+    _backlight_on = _splash["lit"]
+    _first_at = _ticks_ms()
     # Diag timers: flush the RAM ring to SD every ~5s (between frames, never during a
     # panel flush -- with_sd_live mounts on the native single-bus path), and sample
     # the perf HUD numbers into a PERF line every ~3s while a cart runs.
@@ -542,7 +594,13 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     # fires on SPIKES, so a steady per-frame cost that never crosses HITCH_MS was
     # invisible until this line existed (2026-07-29 fps hunt).
     _loop_acc = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    ws.arm_splash()               # boot logo: show the moybyte mascot before the launcher
+    _boot_note("drawing the first frame")
+    # NOT a second logo: the boot splash has held this exact picture for the
+    # whole boot, so arming it again would replay the splash and delay the
+    # launcher. Armed only if the splash never came up (its draw failed) --
+    # the one case where the logo would otherwise go unseen.
+    if not _splash["lit"]:
+        ws.arm_splash()           # boot logo: the moybyte mascot before the launcher
     while True:
         now = _ticks_ms()
         dt = max(0.0, min(0.1, _ticks_diff(now, last) / 1000.0))
@@ -682,6 +740,12 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             except Exception as _bl:            # display-less host / bring-up: ignore
                 print("Moybyte backlight on failed:", _bl)
             _backlight_on = True
+        # How long the desktop took to reach the glass -- reported once, then
+        # the splash hands over and stops painting.
+        if not _splash.get("done") and getattr(ws, "_frames_drawn", 0) > 0:
+            _splash["done"] = True
+            print("Moybyte first frame in %dms"
+                  % _ticks_diff(_ticks_ms(), _first_at))
         # Diag perf sample (~3s): a structured "PERF cart=<name> fps=<n> flush=<ms>
         # draw=<ms>" line while a cart runs -- the payload that makes "play -> reboot
         # -> paste the serial" yield per-cart frame timings offline. No SD touch here

@@ -902,6 +902,24 @@ def test_splash_draws_without_a_workstation_and_takes_a_progress_bar():
     console.draw_splash(over, frac=1.4, status="done")
     assert [o for o in over.ops if o[0] == "rect"][0][3] == inner
 
+    # The T-Deck's panel is 320x240 and runs the same loading screen, so the
+    # whole block (logo + wordmark + bar + status) has to fit on it, with the
+    # longest status the seeder produces.
+    class Small(Cv):
+        w, h = 320, 240
+
+    tiny = Small()
+    console.draw_splash(tiny, frac=0.5, status="loading cartridges  32/32")
+    for op in tiny.ops:
+        if op[0] == "spr":
+            assert op[2] >= 0
+        elif op[0] in ("rect", "rectb"):
+            assert op[1] >= 0 and op[2] >= 0
+            assert op[1] + op[3] <= tiny.w and op[2] + op[4] <= tiny.h
+        elif op[0] == "print":
+            assert op[2] >= 0 and op[3] >= 0
+            assert op[2] + len(op[1]) * 8 <= tiny.w and op[3] + 8 <= tiny.h
+
 
 def test_moy_mascot_baked_into_default_icon_sheet():
     """The 'moy' slot is a real, non-blank 16x16 sprite in the baked theme, so the

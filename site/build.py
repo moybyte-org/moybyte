@@ -406,13 +406,16 @@ def page(pal, has_player, cards):
     published = [c["fw"] for c in cards if c["fw"]]
     # The flasher's 218 KB of vendored esptool-js is only worth loading when
     # there is something to write.
-    # Only worth saying when there is a button to press.
+    # Only worth saying when there is a button to press. The "not proven on
+    # glass yet" caveat that used to sit here was retired once a P4 was flashed
+    # from this page end to end -- an honesty note that has stopped being true
+    # is just a lie with good intentions.
     flash_hint = "" if not published else (
         '  <div class="hint">\n'
         '    <span>The same image at the same offset the cable flash uses. Your\n'
         '      cartridges and saves are left alone unless you tick the erase box.</span>\n'
-        '    <span><b>New here.</b> These images are the ones we flash over a cable;\n'
-        '      driving them from a browser has not been proven on glass yet.</span>\n'
+        '    <span><b>After an erase</b> the board re-seeds its cartridges before the\n'
+        '      screen comes up &mdash; give it half a minute.</span>\n'
         '  </div>\n')
     flash_js = ""
     if published:
