@@ -3,8 +3,14 @@
 // assert the #175 `view` op places, clips and composes correctly. This is the half
 // the node/wasm probes never touch: they exercise the Python emitter, not the JS.
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join, resolve } from "node:path";
 
-const py = readFileSync("/home/nikola/Documents/Work/kidcode/runtime/web_view_page.py", "utf-8");
+// Resolved from THIS file, like every other harness here (pageshot/browsershot/
+// mpboot). An absolute path shipped here once and passed on every machine that
+// had the repo at that path -- i.e. mine -- and failed on the first CI run.
+const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const py = readFileSync(join(REPO, "runtime/web_view_page.py"), "utf-8");
 const lines = py.split("\n");
 const from = lines.findIndex((l) => l.startsWith("var caX=0,caY=0"));
 const to = lines.findIndex((l) => l.startsWith("function blit()"));

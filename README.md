@@ -116,11 +116,10 @@ inactive OTA slot with bootloader rollback; that whole path was confirmed on a
 T-Deck — download, install, boot the new slot, roll back. It has not been
 exercised in a while, so treat it as "worked when last tested". The device can
 also serve the running system to a browser on the same network as draw commands
-rather than pixels, which ran on that board too — but **that transport is broken
-on the T-Deck right now**
-([#182](https://github.com/moybyte-org/moybyte/issues/182)). The radio is fine:
-it associates, takes a DHCP lease and serves the page; a missing re-export makes
-the asset request fail, and the page never opens its live channel.
+rather than pixels — verified on a T-Deck
+([#182](https://github.com/moybyte-org/moybyte/issues/182)), where it works and
+is slow: that board's WiFi moves roughly 72 KB/s, and that, not the drawing, is
+what caps the frame rate over the wire.
 
 **Four rendering backends, one contract** — host, two boards, and a browser page
 that draws the system's draw commands itself. That contract is written down

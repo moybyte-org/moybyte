@@ -18,7 +18,12 @@ import time
 import gc
 
 import os
-sys.path.insert(0, os.getenv("MOYBYTE_ROOT", "/home/nikola/Documents/Work/kidcode") + "/firmware/lilygo_t_deck_plus_micropython/modules")
+# Default resolved from THIS file, not a maintainer's home directory (the same
+# trap that took CI down in replayer_view_test.mjs). MOYBYTE_ROOT still wins:
+# the micropython unix build runs this from wherever it likes.
+_ROOT = os.getenv("MOYBYTE_ROOT") or os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))
+sys.path.insert(0, _ROOT + "/firmware/lilygo_t_deck_plus_micropython/modules")
 
 import moy_gfx
 import moy_runtime as m

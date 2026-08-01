@@ -92,9 +92,9 @@ FEATURES = [
      "hardware end to end, though it has not been exercised lately."),
     ("Streams itself to a browser",
      "The device can serve the running system over WiFi as draw commands rather "
-     "than pixels &mdash; the same protocol this page&rsquo;s player speaks. It "
-     "ran on a T-Deck; on that board it is broken right now, and the cause is a "
-     "missing re-export rather than the radio."),
+     "than pixels &mdash; the same protocol this page&rsquo;s player speaks. "
+     "Verified on a T-Deck: it works, and it is slow. The board&rsquo;s WiFi "
+     "moves about 72&nbsp;KB/s, which is the ceiling on how fast frames arrive."),
 ]
 
 TARGETS = [
@@ -121,9 +121,9 @@ ROUGH = [
     "Per-cart frame rates, the frame-budget model and every lever &mdash; including "
     "the ones built, measured and reverted &mdash; are tracked in public issues, "
     "not claimed here.",
-    "Open holes are filed rather than hidden: the device web view is broken on the "
-    "T-Deck right now, the system apps are not editable yet, and USB-HID keyboard "
-    "and audio on the P4 are unbuilt.",
+    "Open holes are filed rather than hidden: the system apps are not editable "
+    "yet, USB-HID keyboard and audio on the P4 are unbuilt, and the device web "
+    "view works but is bandwidth-bound rather than smooth.",
 ]
 
 
@@ -182,7 +182,7 @@ STATUS = [
     ("ok", "Editors", "on the device itself"),
     ("ok", "OTA updates", "hardware-confirmed"),
     ("wip", "System apps", "not editable yet"),
-    ("warn", "Device web view", "broken on the T-Deck"),
+    ("ok", "Streams to a browser", "verified on the T-Deck"),
 ]
 
 def page(pal, has_player):
