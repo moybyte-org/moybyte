@@ -105,6 +105,60 @@ def test_library_game_runs_fullscreen_and_exits_back(tmp_path):
     assert ws.cart is None                        # full go_home cleanup ran
 
 
+def test_play_world_composites_onto_a_device_shaped_canvas(tmp_path):
+    """The play-world composite must not read "no public .buf" as "command-only".
+
+    The test above proves the composite on a HOST canvas, which has a public
+    `.buf` -- so it never covered the shape that actually ships on the P4: a
+    raster game canvas keeping its framebuffer in `_buf` (no `.buf` at all)
+    beside a system canvas with a native `blit_game`. The #175 command-only
+    bail matched that too, so every play-world frame ticked the cart, reported
+    it running, and composited nothing.
+    """
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open_library()
+    drv.frame(1 / 30)
+    assert _select(ws, "Star Catcher")
+    ws.open()
+    drv.frame(1 / 30)
+    assert ws.wm._order == []                     # fullscreen -> composite_game
+
+    blits, bezels = [], []
+
+    class _NoBufGame:                             # DeviceCanvas: _buf, no .buf
+        def __init__(self, real):
+            self.w, self.h = real.w, real.h
+            self._buf = real.buf
+
+    class _RasterSys(_NoBufGame):                 # P4SystemCanvas: native scaled blit
+        def cls(self, color):
+            bezels.append(color)
+
+        def blit_game(self, gc, ox, oy, scale, defer=False, src=None):
+            blits.append((ox, oy, scale))
+
+    class _CommandSys(_NoBufGame):                # web CommandCanvas: neither
+        def cls(self, color):
+            bezels.append(color)
+
+    real_game, real_sys = ws.canvas, ws._sys_canvas
+    ws.canvas = _NoBufGame(real_game)
+    ws._sys_canvas = _RasterSys(real_sys)
+    ws.wm.composite_game()
+    assert blits, "the fullscreen composite bailed on a device-shaped canvas"
+    ox, oy, scale = blits[0]
+    assert scale == 2 and (ox, oy) == (192, 60)   # 320x240 centered in 1024x600
+
+    # ...while a genuinely command-only canvas (no .buf AND no native blit)
+    # still bails BEFORE the letterbox cls -- the #175 property this relaxed
+    # guard must keep: that fill would wipe the frame already in the stream.
+    bezels.clear()
+    ws._sys_canvas = _CommandSys(real_sys)
+    ws.wm.composite_game()
+    assert bezels == []
+
+
 def test_make_tile_and_change_return_to_the_desk(tmp_path):
     ws = _ws(tmp_path)
     drv = _drv(ws)

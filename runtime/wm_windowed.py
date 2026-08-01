@@ -1219,13 +1219,27 @@ class WindowedWM(FullscreenStackWM):
             self._fb_fn()
         if sc is gc:
             return
-        if getattr(gc, "buf", None) is None:
+        if getattr(gc, "buf", None) is None \
+                and getattr(sc, "blit_game", None) is None:
             # Command-only game canvas (#175): the cart's frame is ALREADY in the
             # stream, recorded during its draw. There is nothing to composite --
             # and the letterbox cls() below runs AFTER that draw, so painting it
             # would wipe the frame. Bail before it. (The play world does not yet
             # emit a view bracket, so a fullscreen cart lands 1:1 at the origin
             # rather than centered -- tracked with the scale work in #175.)
+            #
+            # "No .buf" ALONE DOES NOT MEAN COMMAND-ONLY (P4, 2026-08-01). The
+            # device raster canvas keeps its RGB565 framebuffer in `_buf` and
+            # exposes no public `.buf` either, so this bail fired on every
+            # play-world frame: the cart ticked, the console reported it running,
+            # and the fullscreen game was never composited -- while the triple
+            # framebuffer kept rotating three stale Library frames (the "it says
+            # it's running but nothing shows, and the screen flickers" report).
+            # The desk world hid it: there `_order` is non-empty so this method
+            # returns above, and the player WINDOW composites via _blit_game,
+            # which probes the native blit_game BEFORE it ever looks at `.buf`.
+            # So ask the question _blit_game asks -- a system canvas with a
+            # native blit_game can composite, buffer or no buffer.
             return
         ox, oy, scale = FullscreenStackWM.viewport(self)
         src = self._view_src()
