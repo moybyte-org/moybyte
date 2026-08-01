@@ -559,7 +559,7 @@ def _preserve_moy_data(path):
     return kept
 
 
-def seed_builtins(seed_list, root=CARTS_DIR):
+def seed_builtins(seed_list, root=CARTS_DIR, progress=None):
     """Write missing/outdated built-in carts to SD as editable .moy folders.
 
     A seed dict that carries a non-empty "sprites" hex blob also gets a
@@ -582,7 +582,18 @@ def seed_builtins(seed_list, root=CARTS_DIR):
     (Migration note: a preserved config.json keeps the kid's old values, so a
     NEW default for an EXISTING config key won't apply to an already-seeded cart;
     a brand-new key just falls back to its code default via cfg(key, default).)"""
-    for cart in seed_list:
+    # `progress(done, total, title)` is called once per seed considered, so a
+    # boot screen can show a bar. Measured on a full-erase P4 boot: seeding all
+    # 32 built-ins takes 17.5 of the 25 seconds before the desktop composes, and
+    # it is the only stage of that boot with a countable unit of work. Optional
+    # and best-effort -- a progress callback must never be able to fail a seed.
+    _total = len(seed_list)
+    for _seeded, cart in enumerate(seed_list):
+        if progress is not None:
+            try:
+                progress(_seeded, _total, cart.get("title", ""))
+            except Exception:                 # noqa: BLE001
+                progress = None               # broken hook: drop it, keep seeding
         d = root + "/" + slug(cart["title"]) + ".moy"
         seed_ver = int(cart.get("version", 0))
         preserved = None

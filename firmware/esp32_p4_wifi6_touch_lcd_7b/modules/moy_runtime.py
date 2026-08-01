@@ -308,13 +308,17 @@ class P4SystemCanvas(DeviceCanvas):
                         gc._buf, gc.w, gc.h, int(scale))
 
 
-def _load_carts():
+def _load_carts(progress=None):
     """Load carts from the internal-flash store (seeding built-ins on first
-    boot); fall back to the embedded CARTS on any store failure."""
+    boot); fall back to the embedded CARTS on any store failure.
+
+    `progress` is handed to seed_builtins so the boot splash can show a bar:
+    on a full-erase boot this call is 17.5 of the 25 seconds before anything
+    composes, and every second of it is seeding."""
     try:
         import moy_carts
         moy_carts.ensure_dirs(CARTS_ROOT)
-        moy_carts.seed_builtins(CARTS, CARTS_ROOT)
+        moy_carts.seed_builtins(CARTS, CARTS_ROOT, progress=progress)
         carts = moy_carts.scan(CARTS_ROOT)
         if carts:
             print("Moybyte P4 loaded %d carts from flash" % len(carts))
@@ -613,21 +617,43 @@ def run_desktop(fps_cap=60):
     # boot that stalls says where it stalled on both channels.
     _splash = {"lit": False}
 
-    def _boot_note(msg):
-        print("Moybyte P4 boot:", msg)
+    def _boot_note(msg, frac=None):
         if _splash.get("done"):
             return                 # the desktop owns the glass now
+        if frac is None:
+            print("Moybyte P4 boot:", msg)   # a stage; the bar stays quiet
         try:
             w, h = sys_canvas.w, sys_canvas.h
             sys_canvas.cls(1)                       # MOY64 dark_blue
             sys_canvas.print("moybyte", (w - 7 * 8 * 4) // 2, h // 2 - 40, 10, 4)
             sys_canvas.print(msg, (w - len(msg) * 8 * 2) // 2, h // 2 + 24, 6, 2)
+            if frac is not None:
+                bw, bh = w // 3, 8
+                bx, by = (w - bw) // 2, h // 2 + 56
+                # TIC-80 naming, and the trap in it: rect is FILLED, rectb is
+                # the outline. There is no rectfill on this canvas.
+                sys_canvas.rectb(bx, by, bw, bh, 5)          # trough
+                fill = int(bw * (frac if frac < 1 else 1))
+                if fill > 0:
+                    sys_canvas.rect(bx, by, fill, bh, 10)
             comp.flush()
             if not _splash["lit"]:
                 set_backlight(True)
                 _splash["lit"] = True
         except Exception as exc:  # noqa: BLE001 -- a splash must never fail a boot
             print("Moybyte P4 splash unavailable:", exc)
+
+    def _seed_progress(done, total, title):
+        # One repaint per cart: at ~550ms of flash writes each, 32 repaints of a
+        # static screen are free (measured: the boot stays at 25.4s), and this
+        # is the only 17 seconds of the boot that knows how much of itself is
+        # left. Every 8th also goes to the wire -- a repaint says nothing to
+        # someone watching over serial, which was half the original complaint,
+        # and one line per cart would drown the boot log.
+        if done % 8 == 0:
+            print("Moybyte P4 boot: loading cartridges %d/%d" % (done + 1, total))
+        _boot_note("loading cartridges  %d/%d" % (done + 1, total),
+                   frac=float(done) / total if total else 1.0)
 
     _boot_note("starting")
     # The fixed 320x240 GAME canvas (#39): off-screen RGB565 sharing the same
@@ -644,7 +670,7 @@ def run_desktop(fps_cap=60):
     inp.pointer = pointer          # touch-driven carts read it via the api touch()
 
     _boot_note("loading cartridges")
-    carts, carts_root = _load_carts()
+    carts, carts_root = _load_carts(progress=_seed_progress)
     # P4 keyboard (#26): the C6_WIFI MicroPython variant already exposes NimBLE
     # central/GATT-client bindings over ESP-Hosted SDIO. Keep construction lazy
     # until /moy exists (the bond store lives beside the carts), and start the
