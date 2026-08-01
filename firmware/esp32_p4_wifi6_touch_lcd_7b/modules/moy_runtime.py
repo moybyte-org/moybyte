@@ -593,6 +593,43 @@ def run_desktop(fps_cap=60):
     # blit + the drag backdrop-cache copy from the CPU (DMA, ~2.6x). CPU kernel
     # if it fails to register.
     print("Moybyte P4 PPA:", "enabled" if P4SystemCanvas.enable_ppa() else "CPU-only")
+
+    # -- boot splash (#58) ------------------------------------------------
+    # The panel stays dark until a frame has composed (#45), which is right:
+    # an uninitialised framebuffer is worse than black. But it makes a slow
+    # boot indistinguishable from a dead board. Owner-reported after a full
+    # erase: "screen is black", serial silent after its last boot line, on a
+    # board that was in fact working and did light up eventually.
+    #
+    # WHY that boot was slow is still unmeasured -- a warm boot composes in
+    # ~23ms, so it is something the erase forced (re-seeding, cache rebuilds)
+    # and not the steady state. Naming it is what the timing line at the end of
+    # this function is for; this splash is so the wait is legible while it
+    # happens, on the glass and on the wire.
+    #
+    # So compose a real frame early and say what is happening on it. Navy
+    # rather than black on purpose: the point is to prove the panel is LIT.
+    # Each stage repaints one line, and the same text goes to the wire, so a
+    # boot that stalls says where it stalled on both channels.
+    _splash = {"lit": False}
+
+    def _boot_note(msg):
+        print("Moybyte P4 boot:", msg)
+        if _splash.get("done"):
+            return                 # the desktop owns the glass now
+        try:
+            w, h = sys_canvas.w, sys_canvas.h
+            sys_canvas.cls(1)                       # MOY64 dark_blue
+            sys_canvas.print("moybyte", (w - 7 * 8 * 4) // 2, h // 2 - 40, 10, 4)
+            sys_canvas.print(msg, (w - len(msg) * 8 * 2) // 2, h // 2 + 24, 6, 2)
+            comp.flush()
+            if not _splash["lit"]:
+                set_backlight(True)
+                _splash["lit"] = True
+        except Exception as exc:  # noqa: BLE001 -- a splash must never fail a boot
+            print("Moybyte P4 splash unavailable:", exc)
+
+    _boot_note("starting")
     # The fixed 320x240 GAME canvas (#39): off-screen RGB565 sharing the same
     # native kernel; the windowed WM composites it into the player window.
     # (#77: -O3 on moy_gfx and an internal-SRAM game canvas were A/B'd here --
@@ -606,6 +643,7 @@ def run_desktop(fps_cap=60):
     pointer = Pointer(sys_canvas.w, sys_canvas.h)
     inp.pointer = pointer          # touch-driven carts read it via the api touch()
 
+    _boot_note("loading cartridges")
     carts, carts_root = _load_carts()
     # P4 keyboard (#26): the C6_WIFI MicroPython variant already exposes NimBLE
     # central/GATT-client bindings over ESP-Hosted SDIO. Keep construction lazy
@@ -613,6 +651,7 @@ def run_desktop(fps_cap=60):
     # radio after the Workstation has finished its boot allocations below.
     keyboard = BleHidKeyboard(inp, store_path="/moy/ble_keyboard.json",
                               auto_start=False)
+    _boot_note("building the desktop")
     ws = Workstation(comp, game, inp, carts,
                      sys_canvas=sys_canvas, font_scale=FONT_SCALE)
     # #67 Phase 1: the Lua cart runtime (shared glue in device_api.py) -- wired
@@ -669,9 +708,15 @@ def run_desktop(fps_cap=60):
     import gc
     gc.collect()
     print("Moybyte P4 desktop running (Ctrl-C for REPL)")
+    # The last thing before the loop, and the stage the silent wait was in:
+    # everything above had already printed when the screen was reported black.
+    _boot_note("drawing the first frame")
+    _first_at = _ticks_ms()
     frame_ms = 1000 // fps_cap
     last = _ticks_ms()
-    _backlight_on = False          # dark until the first composed frame (#45)
+    # Dark until the first composed frame (#45) -- unless the splash already
+    # composed one, in which case the panel is lit and stays lit.
+    _backlight_on = _splash["lit"]
     _ps_ms = POWER_SAVE_MS         # idle blank timeout (serial `power` retunes)
     _asleep = False                # panel blanked by the idle timer
     _ps_force = False              # serial `power off`: blank on the next frame
@@ -1042,6 +1087,13 @@ def run_desktop(fps_cap=60):
                 and getattr(ws, "_frames_drawn", 0) > 0:
             set_backlight(True)
             _backlight_on = True
+        # How long the desktop actually took to put something on the glass --
+        # the number that was missing when a black screen had to be diagnosed
+        # by guesswork. Reported once, then the splash hands over.
+        if not _splash.get("done") and getattr(ws, "_frames_drawn", 0) > 0:
+            _splash["done"] = True
+            print("Moybyte P4 first frame in %dms"
+                  % _ticks_diff(_ticks_ms(), _first_at))
         elapsed = _ticks_diff(_ticks_ms(), now)
         _pf_n += 1
         _pf_busy += elapsed
