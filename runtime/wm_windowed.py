@@ -1248,10 +1248,32 @@ class WindowedWM(FullscreenStackWM):
         # changes. It was a full-screen fill EVERY play frame -- chrome=8ms of
         # a 15ms fullscreen celeste frame at 4x (the game rect covers less of
         # the screen the bigger the letterbox, so the waste grew with `view`).
+        #
+        # GEOMETRY IS NOT THE ONLY WAY IT GOES STALE (P4, 2026-08-01). _bezel_key
+        # and _bezel_paints live on the long-lived WM, so after one run they say
+        # "every buffer holds the bezel" forever. Exit to the Library -- which
+        # repaints the WHOLE screen, letterbox included, into all N buffers --
+        # and launch a cart at the SAME viewport: the key still matches, the
+        # count is still N, and the letterbox is never repainted again. It keeps
+        # whatever the Library left in each buffer, and because the Library
+        # renders a LIVE wallpaper those N leftovers are N different animation
+        # phases, so the rotation flickers them behind the game (owner report:
+        # "the game is on top and the background is flickering"; measured on
+        # glass as 0/32/24 bytes differing between the three framebuffers,
+        # frozen at those values).
+        #
+        # So the retention also has to end when anything ELSE painted the
+        # screen. The signal for that is a gap in the drawn-frame counter: two
+        # consecutive composites are one drawn frame apart, and a skipped frame
+        # advances neither the counter nor the pixels. Anything larger means
+        # some other stack drew in between and the bezel is no longer ours.
         bkey = (ox, oy, scale, sc.w, sc.h, src)
-        if bkey != getattr(self, "_bezel_key", None):
+        drawn = ws._frames_drawn
+        if bkey != getattr(self, "_bezel_key", None) \
+                or drawn != getattr(self, "_bezel_frame", -2) + 1:
             self._bezel_key = bkey
             self._bezel_paints = 0
+        self._bezel_frame = drawn
         if self._bezel_paints < self._retained_n():
             self._bezel_paints += 1
             sc.cls(_VIEWPORT_BEZEL)    # letterbox fill

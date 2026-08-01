@@ -159,6 +159,46 @@ def test_play_world_composites_onto_a_device_shaped_canvas(tmp_path):
     assert bezels == []
 
 
+def test_relaunching_a_cart_repaints_the_letterbox_bezel(tmp_path):
+    """The bezel's "every buffer holds it" latch must not survive a screen change.
+
+    _bezel_key/_bezel_paints live on the long-lived WM and were keyed on the
+    composite GEOMETRY only. Run a cart, exit to the Library (which repaints the
+    whole screen, letterbox included), relaunch at the same viewport: the key
+    still matched and the count was still saturated, so the letterbox was never
+    repainted and kept the Library's pixels -- N buffers' worth of them, which
+    on a live wallpaper is N different animation phases rotating behind the game.
+    """
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open_library()
+    drv.frame(1 / 30)
+    assert _select(ws, "Star Catcher")
+    ws.open()
+    for _ in range(3):                            # saturate the paint latch
+        drv.frame(1 / 30)
+    wm = ws.wm
+    assert wm._bezel_paints >= wm._retained_n()
+    ox, oy, _scale = wm.viewport()
+    assert ox > 0 and oy > 0                      # there IS a letterbox here
+
+    ws._exit_to_caller()
+    for _ in range(2):
+        drv.frame(1 / 30)
+
+    # Stamp a sentinel into the letterbox: it distinguishes a real repaint from
+    # a leftover of whatever was on screen before the relaunch. Sample the LEFT
+    # letterbox at mid-height -- clear of the game rect AND of the OS bar, which
+    # spans the top rows and would clear a sentinel there whatever the bezel did.
+    sc = ws.sys_canvas
+    probe = (sc.h // 2) * sc.w + (ox // 2)
+    sc.buf[probe] = 42
+    assert _select(ws, "Star Catcher")
+    ws.open()                                     # same cart, same geometry
+    drv.frame(1 / 30)
+    assert sc.buf[probe] != 42, "the letterbox kept the previous screen's pixels"
+
+
 def test_make_tile_and_change_return_to_the_desk(tmp_path):
     ws = _ws(tmp_path)
     drv = _drv(ws)
