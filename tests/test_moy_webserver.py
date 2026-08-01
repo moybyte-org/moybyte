@@ -144,6 +144,40 @@ def test_moved_code_is_re_exported_from_the_shared_module():
         assert getattr(web, name) is getattr(web._wv, name), name
 
 
+def test_every_name_device_webview_reaches_through_this_module_exists():
+    """The re-export list above is HAND-MAINTAINED, so it drifts: #182 shipped with
+    device_webview calling `self._web.effective_input_kinds(...)` while moy_webserver
+    never re-exported it. That is not an import error at boot -- it's an AttributeError
+    raised INSIDE the /assets handler, which _accept_new swallows into a zero-byte close,
+    so the browser gets net::ERR_EMPTY_RESPONSE, the page prints "no assets", and (because
+    getA() gates connect()) the WebSocket is never opened. The whole web view is dead and
+    the only evidence is one serial line.
+
+    So DERIVE the requirement instead of listing it: every `self._web.X` / `moy_webserver.X`
+    the device controller reaches for must actually exist on this module. device_webview
+    imports device-only modules, so parse it rather than importing it."""
+    import ast
+
+    src = open(os.path.join(MODULES, "device_webview.py"), encoding="utf-8").read()
+    wanted = set()
+    for node in ast.walk(ast.parse(src)):
+        if not isinstance(node, ast.Attribute):
+            continue
+        base = node.value
+        # `moy_webserver.X` (the local import name in __init__)
+        if isinstance(base, ast.Name) and base.id == "moy_webserver":
+            wanted.add(node.attr)
+        # `self._web.X` (the module handle every other call site uses)
+        elif (isinstance(base, ast.Attribute) and base.attr == "_web"
+                and isinstance(base.value, ast.Name) and base.value.id == "self"):
+            wanted.add(node.attr)
+
+    assert "effective_input_kinds" in wanted        # the #182 call site is still there
+    assert "assets_payload" in wanted               # ...and we're really parsing assets()
+    missing = sorted(n for n in wanted if not hasattr(web, n))
+    assert not missing, "moy_webserver is missing re-exports device_webview calls: %s" % missing
+
+
 # The device's canonical RGB565 MOY64 LUT (a copy of moy_runtime.PAL565 -- the host
 # can't import the device backend, which pulls in framebuf/machine).
 PAL565 = (
@@ -199,6 +233,132 @@ def _served(rec, server):
     """The command list the browser actually RECEIVES for the recorder's last committed
     frame: served_frame() prepends any not-yet-shipped defsprs (serve-time defspr, #41)."""
     return server.served_frame(rec.frame())
+
+
+# ---------------------------------------------------------------------------
+# The /assets handler, END TO END through the REAL device controller (#182).
+#
+# device_webview imports cleanly on CPython, so the handler that actually broke
+# is executable here -- no source-grep, no fake provider standing in for the
+# thing under test. This is the net the #182 outage got through: every other
+# device-side test either grepped the source or substituted _FakeProvider.
+# ---------------------------------------------------------------------------
+
+
+class _StubPointer:
+    x = y = 0
+    down = click = False
+
+    def place(self, x, y):
+        self.x, self.y = x, y
+
+    def move(self, dx, dy):
+        self.x += dx
+        self.y += dy
+
+
+class _StubWs:
+    """The few console attributes WebView.assets() reads. No wm -> the (guarded)
+    input-hint lookup falls through to None, exactly like the launcher screen."""
+
+    cart = None
+    images = None
+    sheet = None
+    tilemap = None
+    cover_assets = None
+
+
+class _CapturingConn:
+    """A socket-shaped sink so _serve_http can be driven without a real connection."""
+
+    def __init__(self):
+        self.sent = b""
+        self.closed = False
+
+    def settimeout(self, _t):
+        pass
+
+    def sendall(self, data):
+        self.sent += data
+
+    def close(self):
+        self.closed = True
+
+
+def _device_webview():
+    """The real device controller over stubs -- device_webview imports on CPython."""
+    import device_webview
+
+    view = device_webview.WebView(_StubWs(), _FakeDeviceCanvas(), object(),
+                                  _StubPointer(), None)
+    return view, device_webview._WebProvider(view)
+
+
+def test_device_assets_handler_returns_a_real_json_body():
+    """GET /assets through the REAL WebView.assets() -> _WebProvider -> _serve_http.
+
+    #182: this raised AttributeError (moy_webserver never re-exported
+    effective_input_kinds), _accept_new swallowed it, and the conn closed having
+    written ZERO bytes -- net::ERR_EMPTY_RESPONSE in the browser, "no assets" on
+    the page, and no WebSocket ever opened because getA() gates connect(). A
+    200 with a parseable body is the whole contract, and it must be asserted by
+    RUNNING the handler: the assets path is one attribute lookup away from dead
+    at any time, and the failure is invisible until a browser tries."""
+    view, provider = _device_webview()
+    server = web.WebServer(view._rec, provider, port=0)
+    conn = _CapturingConn()
+
+    server._serve_http(conn, "GET", "/assets", b"")
+
+    assert conn.sent, "the /assets handler wrote nothing (the #182 empty response)"
+    head, _, body = conn.sent.partition(b"\r\n\r\n")
+    assert b"200" in head.split(b"\r\n")[0]
+    payload = json.loads(body.decode("utf-8"))
+    # The render assets the page can't start without. (Deliberately NOT the
+    # protocol-version field -- this test is about the handler answering at all,
+    # and pinning payload keys that come and go would make it fail for reasons
+    # that have nothing to do with #182.)
+    for key in ("w", "h", "palette", "font", "cart", "audio_rate"):
+        assert key in payload, key
+    assert len(payload["palette"]) == 64
+    assert payload["input"] is None            # no cart owns the keyboard here
+    assert conn.closed
+
+
+def test_device_assets_failure_answers_500_not_an_empty_close():
+    """A broken assets provider must still WRITE something. #182's whole cost was
+    diagnostic: a zero-byte close reads as ERR_EMPTY_RESPONSE, which looks exactly
+    like a dead radio, and the T-Deck has no REPL to ask. A named 500 in the
+    network tab points straight at the failing half."""
+
+    class _Exploding:
+        def assets(self):
+            raise ValueError("boom")
+
+        def frame(self):
+            return ([], None, None)
+
+        def apply(self, events):
+            pass
+
+    server = web.WebServer(web.DrawRecorder(WIDTH, HEIGHT), _Exploding(), port=0)
+    conn = _CapturingConn()
+
+    server._serve_http(conn, "GET", "/assets", b"")
+
+    assert conn.sent, "a failing /assets still closed with zero bytes"
+    assert b"500" in conn.sent.split(b"\r\n")[0]
+    assert b"boom" in conn.sent
+
+
+def test_device_assets_survives_a_console_that_has_no_input_hint_machinery():
+    """assets() must not depend on ws.wm existing: the hint lookup is guarded, so a
+    console mid-boot (or any surface without a WM) still serves renderable assets
+    rather than an empty response."""
+    view, _provider = _device_webview()
+    payload = view.assets()
+    assert payload["input"] is None
+    json.dumps(payload)                        # and it must survive serialization
 
 
 # ---------------------------------------------------------------------------

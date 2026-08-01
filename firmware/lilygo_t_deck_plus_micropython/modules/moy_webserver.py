@@ -88,6 +88,11 @@ sheet_payload = _wv.sheet_payload
 tilemap_payload = _wv.tilemap_payload
 assets_payload = _wv.assets_payload
 frame_payload = _wv.frame_payload
+# device_webview's assets()/frame() reach for this THROUGH this module (self._web), so a
+# missing re-export is not an import error at boot -- it's an AttributeError raised inside
+# the /assets handler, which _accept_new swallows into a zero-byte close (the browser sees
+# net::ERR_EMPTY_RESPONSE -> "no assets" -> the page never opens the WebSocket at all). #182.
+effective_input_kinds = _wv.effective_input_kinds
 apply_events = _wv.apply_events
 BUTTON_NAMES = _wv.BUTTON_NAMES
 PAGE_HTML = _wv.PAGE_HTML
@@ -780,7 +785,20 @@ class WebServer:
             # A page load / cart change: the browser clears its atlas + refetches /assets, so
             # forget what we've shipped -> the next frame re-ships the defsprs it references.
             self.reset_served()
-            self._http_send_close(conn, http_response(200, json.dumps(self.provider.assets())))
+            # Build the body BEFORE writing anything, and answer a failure with a real 500
+            # (#182). Letting it raise up to _accept_new closes the conn having written zero
+            # bytes, which the browser reports as net::ERR_EMPTY_RESPONSE -- indistinguishable
+            # from a dead radio, on a board whose only other channel is one serial line. A
+            # named 500 in the network tab says WHICH half broke. Nothing is sent on this
+            # path until the payload exists, so the error response can never truncate a body.
+            try:
+                payload = json.dumps(self.provider.assets())
+            except Exception as exc:  # noqa: BLE001 -- report it, never a silent empty close
+                print("Moybyte web: /assets failed:", exc)
+                self._http_send_close(conn, http_response(
+                    500, "assets error: %s" % exc, "text/plain; charset=utf-8"))
+                return
+            self._http_send_close(conn, http_response(200, payload))
         else:
             self._http_send_close(conn, http_response(404, "not found",
                                                       "text/plain; charset=utf-8"))
