@@ -39,6 +39,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      player: ${{ steps.player.outcome }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -85,3 +87,24 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  # Publish first, THEN go red. The first deploy shipped a page whose "Try it,
+  # right here" section was an error box -- build.sh died on a cold clone -- and
+  # the run was green, because continue-on-error makes a step's *conclusion*
+  # success even when its outcome is failure. Keeping the page publishable is
+  # right (a stale player beats no site); reporting it as fine is not. This runs
+  # after deploy so the site still goes out, and fails the run so the red X is
+  # visible without reading logs.
+  player-check:
+    needs: [build, deploy]
+    if: always() && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: The page shipped without its player
+        if: needs.build.outputs.player == 'failure'
+        run: |
+          echo "::error::the wasm build failed -- the site is live but the player is an error box"
+          exit 1
+      - name: Player is present
+        if: needs.build.outputs.player != 'failure'
+        run: echo "player built and shipped"

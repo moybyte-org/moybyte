@@ -82,8 +82,15 @@ if [ "${STAGE_ONLY}" = "0" ]; then
       git clone --depth 1 -b "${MPY_TAG}" --quiet \
         https://github.com/micropython/micropython "${MPY_DIR}"
     fi
-    (cd "${MPY_DIR}" && git submodule update --init lib/micropython-lib --quiet)
   fi
+  # OUTSIDE the clone guard on purpose. Two reasons, both learned from the first
+  # Pages deploy: `--quiet` has to precede the path (after it, git reads it as a
+  # second pathspec and dies with "pathspec '--quiet' did not match"), and a
+  # checkout can exist WITHOUT its submodule -- which is exactly what that failed
+  # run left in the CI cache, since the clone succeeded and only this line broke.
+  # Guarding it meant a half-built .build/ could never repair itself. It is a
+  # no-op once the submodule is there, so running it every build costs nothing.
+  (cd "${MPY_DIR}" && git submodule update --init --quiet lib/micropython-lib)
 
   # Port patches (idempotent -- grep-guarded).
   MK="${PORT_DIR}/Makefile"
