@@ -33,6 +33,12 @@
 
 MAX_OPS_PER_SEGMENT = 256   # >= this many ops since the last keyframe -> force one
 
+# Block size text_diff_op strides its common-prefix/suffix scan in (#183). The
+# trade is one slice allocation per block against one interpreted loop iteration
+# per byte; 256 keeps both small on an 18KB doc (~72 blocks, ~18KB of temporary
+# slices total) and the per-byte tail bounded to one block.
+_DIFF_STEP = 256
+
 
 class OpCodec(object):
     """The per-editor adapter `History` drives. Duck-typed, not enforced -- a
@@ -74,22 +80,61 @@ def _has(codec, name):
 def text_diff_op(before, after):
     """The smallest ("edit", pos, deleted, inserted) turning `before` into
     `after` -- a common-prefix/suffix diff over two text snapshots, so one op
-    carries a whole typing/delete burst's net change. `pos` + the two strings
-    make TextEditCodec.invert a trivial swap (ints/strings only -- MicroPython-
-    safe, frozen on device). Returns None for a no-op pair."""
-    n = min(len(before), len(after))
+    carries a whole typing/delete burst's net change. `pos` is a CHARACTER
+    offset (TextEditCodec slices doc.text() with it) and the two strings make
+    invert a trivial swap (ints/strings only -- MicroPython-safe, frozen on
+    device). Returns None for a no-op pair.
+
+    SCANNED IN BYTE SPACE ON PURPOSE. MicroPython stores str as UTF-8, so `s[i]`
+    walks from the start of the string to find the i-th character -- a
+    character-indexed prefix/suffix scan is therefore O(n^2) THERE while looking
+    perfectly linear on CPython, where indexing is O(1). Measured on glass
+    (#183): one autosave of Brick Siege's 18.5KB main.py sat in this function
+    for 36 SECONDS with the whole console frozen, which read as a device hang
+    and got blamed on the SD/panel bus (the SD write in that same commit was
+    472ms). bytes indexing is O(1) on both runtimes, so scan the encoded forms
+    and convert back once at the end."""
+    bb = before.encode("utf-8")
+    ba = after.encode("utf-8")
+    lb = len(bb)
+    la = len(ba)
+    n = min(lb, la)
+    # ...and SKIPPED IN CHUNKS. Byte space made the scan O(n), but it was still
+    # one INTERPRETED iteration per byte: measured on glass after the first fix,
+    # 18.5KB of main.py cost ~380ms per autosave (a visible hitch on every typing
+    # pause, in the editor a kid lives in). A slice compare is one C-level memcmp,
+    # so stride through in _DIFF_STEP blocks and let the per-byte loop run only
+    # inside the single block that differs: ~n/256 + 256 iterations instead of n.
     i = 0
-    while i < n and before[i] == after[i]:
+    step = _DIFF_STEP
+    while i + step <= n and bb[i:i + step] == ba[i:i + step]:
+        i += step
+    while i < n and bb[i] == ba[i]:
         i += 1
+    # Never cut a multi-byte character in half: back the boundary onto a lead
+    # byte (continuation bytes are 0b10xxxxxx). A no-op for ASCII -- which is
+    # every cart today -- but a diff that split a codepoint would hand the undo
+    # journal an op whose slices don't decode.
+    while i and i < n and (bb[i] & 0xC0) == 0x80:
+        i -= 1
     max_suffix = n - i
     j = 0
-    while j < max_suffix and before[len(before) - 1 - j] == after[len(after) - 1 - j]:
+    while j + step <= max_suffix and bb[lb - j - step:lb - j] == ba[la - j - step:la - j]:
+        j += step
+    while j < max_suffix and bb[lb - 1 - j] == ba[la - 1 - j]:
         j += 1
-    deleted = before[i:len(before) - j]
-    inserted = after[i:len(after) - j]
+    while j and (bb[lb - j] & 0xC0) == 0x80:
+        j -= 1
+    deleted = bb[i:lb - j]
+    inserted = ba[i:la - j]
     if not deleted and not inserted:
         return None
-    return ("edit", i, deleted, inserted)
+    # pos must be a CHARACTER offset. For pure ASCII (byte length == character
+    # length) the byte offset already IS it, so the common path skips the
+    # decode entirely; a non-ASCII doc pays one linear decode, not a quadratic
+    # scan.
+    pos = i if len(bb) == len(before) else len(bb[:i].decode("utf-8"))
+    return ("edit", pos, deleted.decode("utf-8"), inserted.decode("utf-8"))
 
 
 def _place_text_offset(doc, off):

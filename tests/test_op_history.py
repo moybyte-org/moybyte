@@ -295,3 +295,103 @@ def test_old_journal_line_without_ops_loads_unchanged(tmp_path):
     entries = moy_journal._journal_load_entries(log)
     assert entries[0]["seq"] == 1
     assert moy_journal.journal_entry_ops(entries[0]) == []
+
+
+# -- text_diff_op: the #183 quadratic (device-only, invisible on CPython) --------
+
+
+def _char_space_diff(before, after):
+    """The original character-indexed implementation, kept as the ORACLE. It is
+    correct on CPython and O(n^2) on MicroPython -- the fast version must agree
+    with it exactly, or undo ops shift."""
+    n = min(len(before), len(after))
+    i = 0
+    while i < n and before[i] == after[i]:
+        i += 1
+    max_suffix = n - i
+    j = 0
+    while j < max_suffix and before[len(before) - 1 - j] == after[len(after) - 1 - j]:
+        j += 1
+    deleted = before[i:len(before) - j]
+    inserted = after[i:len(after) - j]
+    if not deleted and not inserted:
+        return None
+    return ("edit", i, deleted, inserted)
+
+
+@pytest.mark.parametrize("before,after", [
+    ("", ""),
+    ("", "abc"),
+    ("abc", ""),
+    ("abc", "abc"),
+    ("abc", "abd"),
+    ("def _draw():\n    cls(1)\n", "def _draw():\n    cls(2)\n"),
+    ("hello world", "hello brave world"),          # pure insert, mid-string
+    ("hello brave world", "hello world"),          # pure delete, mid-string
+    ("aaa", "aaaa"),                               # ambiguous run: prefix/suffix overlap
+    ("aaaa", "aaa"),
+    ("x" * 200, "x" * 200 + "y"),                  # append at the very end
+    ("y" + "x" * 200, "x" * 200),                  # delete at the very start
+    ("line1\nline2\nline3\n", "line1\nCHANGED\nline3\n"),
+    ("héllo wörld", "héllo wärld"),                # multi-byte, changed mid-string
+    ("héllo", "héllo!"),                           # multi-byte prefix, ASCII append
+    ("日本語のテキスト", "日本語のテキスト!"),
+    ("日本語", "日語"),                             # delete a whole multi-byte char
+    # Chunk-boundary cases: the scan strides in _DIFF_STEP blocks, so an edit
+    # landing exactly ON a block edge (or one byte either side of it) is where a
+    # striding implementation goes wrong. Also a doc shorter than one block, and
+    # one whose total length is an exact multiple of it.
+    ("a" * 256 + "b" * 256, "a" * 256 + "X" + "b" * 255),
+    ("a" * 255 + "b" * 257, "a" * 255 + "X" + "b" * 256),
+    ("a" * 257 + "b" * 255, "a" * 257 + "X" + "b" * 254),
+    ("a" * 512, "a" * 512 + "z"),
+    ("a" * 512 + "z", "a" * 512),
+    ("a" * 10, "a" * 10 + "z"),
+    ("héllo" + "x" * 300, "héllo" + "x" * 150 + "Z" + "x" * 150),
+])
+def test_text_diff_op_matches_the_character_space_oracle(before, after):
+    assert op_history.text_diff_op(before, after) == _char_space_diff(before, after)
+
+
+@pytest.mark.parametrize("before,after", [
+    ("héllo wörld", "héllo wärld"),
+    ("日本語のテキスト", "日本語のテキスト!"),
+    ("日本語", "日語"),
+    ("x" * 200, "x" * 200 + "y"),
+])
+def test_text_diff_op_slices_land_on_character_boundaries(before, after):
+    """The byte-space scan must never split a codepoint: applying the op's own
+    (pos, deleted, inserted) to `before` in CHARACTER space has to rebuild
+    `after` exactly -- that is precisely what TextEditCodec.apply does."""
+    op = op_history.text_diff_op(before, after)
+    if op is None:
+        assert before == after
+        return
+    _, pos, deleted, inserted = op
+    assert before[pos:pos + len(deleted)] == deleted
+    assert before[:pos] + inserted + before[pos + len(deleted):] == after
+
+
+def test_text_diff_op_never_indexes_the_str_per_character():
+    """The #183 REGRESSION GUARD, and it has to be behavioural: on CPython the
+    quadratic version is fast, so no timing test can catch a reintroduction --
+    only the device pays, 36 seconds of frozen console per autosave.
+
+    So count the actual `str.__getitem__` calls. A byte-space scan makes ZERO
+    (it indexes the encoded bytes); any per-character loop makes one per
+    character scanned."""
+    hits = []
+
+    class _CountingStr(str):
+        def __getitem__(self, k):
+            hits.append(k)
+            return str.__getitem__(self, k)
+
+    body = "def _draw():\n" + "    cls(1)\n" * 500          # ~9KB, edit at the end
+    before = _CountingStr(body)
+    after = _CountingStr(body + "x = 1\n")
+
+    op = op_history.text_diff_op(before, after)
+
+    assert op == ("edit", len(body), "", "x = 1\n")
+    assert not hits, "text_diff_op indexed the str %d times (the #183 O(n^2))" % len(hits)

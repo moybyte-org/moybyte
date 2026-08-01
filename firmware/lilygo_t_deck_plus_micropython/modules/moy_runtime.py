@@ -83,6 +83,12 @@ from device_api import make_api  # noqa: E402
 # (revert with NO rebuild, same pattern as MOY_AUDIO_CORE1).
 MOY_INPUT_POLLER = True
 
+# #183: print a phase bracket around every SD session (see _with_sd_synced). ON while
+# the "editing code hard-hangs the T-Deck, nothing on serial" bug is open -- this board
+# has no REPL to interrogate, so the trace IS the diagnostic, and it only fires on
+# commits (never per frame). Turn OFF when #183 closes.
+SD_TRACE = True
+
 
 # _ticks_ms/_ticks_diff/_ticks_us + _diag_note/_diag_log now live in the leaf
 # device_util.py (imported at the top of this module), so extracted device
@@ -377,6 +383,10 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     except ImportError:
         pass
 
+    # Set by the SD-session trace below, cleared by the first frame that flushes after
+    # one -- the "the panel survived the SD session" half of the #183 bracket.
+    _sd_traced = [False]
+
     # SD vs panel-DMA mutual exclusion (#40 double-buffer): SD shares the panel's SPI
     # host, so an SD op can NOT overlap an in-flight panel DMA. Wrap with_sd_live so it
     # drains any pending panel DMA (comp.sync()) BEFORE touching the SD card -- the
@@ -385,8 +395,32 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     # no-op in single-buffer mode (the flush already blocked), so this is safe either
     # way and the wrapper is transparent to the shared console code.
     def _with_sd_synced(fn):
+        if not SD_TRACE:
+            comp.sync()
+            return moybyte_sd.with_sd_live(fn)
+        # #183 BRACKETING TRACE. An editor commit can hard-hang this board with
+        # NOTHING on serial, and its USB-CDC RX is dead -- there is no REPL to ask
+        # what it was doing. TX streams fine, so name each phase of the SD session:
+        # whichever line is LAST before the silence identifies the op that wedged.
+        #   "> sync"  hung here -> the pre-op DMA drain (comp.sync -> _drain_dma; the
+        #             non-async branch ends in lcd_bus tx_color(last=True), a C
+        #             busy-wait with no bound of its own)
+        #   "> op"    hung here -> the SD write itself (moy_sd / _write_atomic)
+        #   "< op"    hung after -> the NEXT panel flush, i.e. the documented
+        #             shared-bus corruption ("the write lands on SD, then resume
+        #             freezes") -- the predicted one; "= panel ok" never follows
+        # Costs nothing when quiet: SD sessions happen on COMMITS, not per frame.
+        # Flip SD_TRACE off once #183 is closed.
+        print("SD > sync")
+        _t = _ticks_ms()
         comp.sync()
-        return moybyte_sd.with_sd_live(fn)
+        print("SD > op (sync %dms)" % _ticks_diff(_ticks_ms(), _t))
+        _t = _ticks_ms()
+        try:
+            return moybyte_sd.with_sd_live(fn)
+        finally:
+            print("SD < op %dms" % _ticks_diff(_ticks_ms(), _t))
+            _sd_traced[0] = True
 
     def _before_slim(ws):
         # Writes are enabled on-device via moy_sd: it attaches the SD card to the SPI
@@ -600,6 +634,12 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             _diag_flush(diag, ws)
             gc.collect()                        # a NO_MEM flush may recover after a collect
         _t_ws = _ticks_diff(_ticks_ms(), _t0)   # handle_input/pointer + ws.frame (HITCH v2)
+        # #183: close the SD bracket. Reaching here with a DRAWN frame means the first
+        # panel flush after the SD session completed -- so the bus survived it and the
+        # hang (if any) is elsewhere. Silence after "SD < op" is the shared-bus one.
+        if _sd_traced[0] and getattr(ws, "_frames_drawn", 0) != _frames_before:
+            _sd_traced[0] = False
+            print("SD = panel ok")
         # Web view (#41): publish this frame's recorded draw commands to the browser --
         # but ONLY if the frame actually drew (the redraw-on-change gate #44 may skip a
         # static screen, which would record nothing; keep serving the last full frame).
@@ -731,7 +771,7 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         # GC collect inside an alloc), which is itself the answer.
         if diag is not None and elapsed >= HITCH_MS:
             _diag_hitch(diag, ws, comp, elapsed, _t_kbd, _t_inp, _t_sb, _t_ws,
-                        _t_diag, _t_sd, _t_web)
+                        _t_diag, _t_sd, _t_web, _t_hi, _t_hp)
         # Frame pacing (#63): a running GAME locks to a steady cadence (30fps
         # default, manifest "fps": 60 for carts that sustain it) -- a LOCKED 30
         # feels smoother than a 38-55 swing, and the freed headroom absorbs

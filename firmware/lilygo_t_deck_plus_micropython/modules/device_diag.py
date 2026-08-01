@@ -50,7 +50,7 @@ HITCH_MS = 80
 
 
 def _diag_hitch(diag, ws, comp, elapsed, kbd_ms, inp_ms, sb_ms, ws_ms,
-                diag_ms, sd_ms, web_ms):
+                diag_ms, sd_ms, web_ms, hi_ms=-1, hp_ms=-1):
     """Log a HITCH line (#66): one frame blew past HITCH_MS. Names every measured
     loop stage: kbd (I2C keyboard poll), inp (trackball + touch + pointer), sb
     (canvas.sync_back = buffer repoint + GDMA layer kick, unmeasured until v3),
@@ -74,14 +74,20 @@ def _diag_hitch(diag, ws, comp, elapsed, kbd_ms, inp_ms, sb_ms, ws_ms,
         # launcher hitch gets.
         home = getattr(ws, "_pf_home", None)
         home_s = (" home(wp=%d grid=%d bar=%d)" % home) if home else ""
+        # ws= lumps handle_input + handle_pointer + ws.frame, which is one lump too
+        # coarse for #183: a 37s stall showed ws=37156 with raw(...) summing to 20ms,
+        # so "somewhere in the ws step" was as far as it could be narrowed. Split the
+        # three (the loop already measures them) -- ws(hi/hp/frm) says which.
+        ws_s = " ws(hi=%d hp=%d frm=%d)" % (hi_ms, hp_ms, ws_ms - hi_ms - hp_ms) \
+            if hi_ms >= 0 else ""
         if raw is not None:
             diag.log("HITCH",
                      "frame=%dms kbd=%d inp=%d sb=%d ws=%d diag=%d sdflush=%d "
                      "web=%d pump=%.1f lw=%d raw(logic=%.1f render=%.1f "
-                     "audio=%.1f chrome=%.1f flush=%.1f)%s"
+                     "audio=%.1f chrome=%.1f flush=%.1f)%s%s"
                      % (elapsed, kbd_ms, inp_ms, sb_ms, ws_ms, diag_ms, sd_ms,
                         web_ms, pump_ms, trips,
-                        raw[0], raw[1], raw[2], raw[3], raw[4], home_s))
+                        raw[0], raw[1], raw[2], raw[3], raw[4], ws_s, home_s))
         else:
             b = ws.perf_breakdown()
             diag.log("HITCH",

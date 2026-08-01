@@ -429,9 +429,18 @@ class Project:
         achievement toast -- a visible side effect on a nominally-invisible save. The
         badge stays earnable via the explicit SAVE / PLAY paths (quiet defaults False)."""
         ws = self.ws
+        # #183 stage split. On glass a single commit frame took 37.3 SECONDS with the
+        # store write measured at 355ms and the whole in-frame draw breakdown summing
+        # to 20ms -- i.e. ~37s inside this method, outside the one part that was
+        # instrumented. These four stamps name the stage; same perf_capture gate and
+        # print-only-if-slow discipline as the PMEM line above, so a normal commit
+        # (~100ms total, measured on host) stays silent.
+        _t0 = _ticks_ms()
+        _t_write = _t_burst = _t_ops = 0
         try:
             # moy_carts.save_code always returns a (status, message) 2-tuple.
             status, smsg = ws._with_sd(lambda: ws.carts_store.save_code(self.cart, src))
+            _t_write = _ticks_diff(_ticks_ms(), _t0)
             if status != ws.carts_store.SAVE_OK:
                 ws.save_status = "CAN'T SAVE " + str(smsg)
                 ws.cart_error = "Could not save -- " + str(smsg)
@@ -451,10 +460,20 @@ class Project:
             # for parity/future replay). flush() only after the store write succeeded.
             ws._close_code_burst()
             hist = ws._code_op_history()
+            _t_burst = _ticks_diff(_ticks_ms(), _t0) - _t_write
             ops = hist.flush() if hist is not None else None
+            _t_ops = _ticks_diff(_ticks_ms(), _t0) - _t_write - _t_burst
             self._journal_code(src, ops=ops)  # durable undo (Stage 7) + graduation (Stage 8)
             if hist is not None:
                 hist.clear()                  # re-baseline (subsumes mark_keyframe)
+            _total = _ticks_diff(_ticks_ms(), _t0)
+            if ws.perf_capture and _total > 500:
+                # journal = the remainder: _journal_code's graduation decision + the
+                # journal_append SD session (which the device SD_TRACE brackets too,
+                # so a big journal= with a small SD bracket is the compare/snapshot).
+                print("COMMIT code=%dms write=%d burst=%d ops=%d journal=%d n=%d"
+                      % (_total, _t_write, _t_burst, _t_ops,
+                         _total - _t_write - _t_burst - _t_ops, len(src)))
             if not quiet:
                 ws.ach.note("code_save")      # "Code Wizard": manual SAVE/PLAY only (#21)
             # A successful save means the source now compiles and persisted: clear
