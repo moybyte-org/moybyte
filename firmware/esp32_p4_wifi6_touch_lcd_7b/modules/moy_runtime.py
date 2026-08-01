@@ -30,7 +30,7 @@ the SDIO slot + LDO4 power fix are a follow-up for removable-cart workflows).
 
 import time
 
-from console import Pointer, Workstation, wire_workstation_core
+from console import Pointer, Workstation, draw_splash, wire_workstation_core
 from carts_data import CARTS   # build-time generated from system_carts/
 from device_util import _ticks_ms, _ticks_diff
 from device_api import make_api
@@ -624,18 +624,19 @@ def run_desktop(fps_cap=60):
             print("Moybyte P4 boot:", msg)   # a stage; the bar stays quiet
         try:
             w, h = sys_canvas.w, sys_canvas.h
-            sys_canvas.cls(1)                       # MOY64 dark_blue
-            sys_canvas.print("moybyte", (w - 7 * 8 * 4) // 2, h // 2 - 40, 10, 4)
-            sys_canvas.print(msg, (w - len(msg) * 8 * 2) // 2, h // 2 + 24, 6, 2)
-            if frac is not None:
-                bw, bh = w // 3, 8
-                bx, by = (w - bw) // 2, h // 2 + 56
-                # TIC-80 naming, and the trap in it: rect is FILLED, rectb is
-                # the outline. There is no rectfill on this canvas.
-                sys_canvas.rectb(bx, by, bw, bh, 5)          # trough
-                fill = int(bw * (frac if frac < 1 else 1))
-                if fill > 0:
-                    sys_canvas.rect(bx, by, fill, bh, 10)
+            # THE thing that makes this a loading screen rather than a strobe.
+            # The canvas caches its framebuffer pointer, and flush() rotates the
+            # back buffer (3 of them, #58 render overlap) -- so without this the
+            # splash repaints ONE buffer while the panel shows the other two,
+            # i.e. two frames in three are stale. The desktop loop calls this
+            # every frame for the same reason.
+            sys_canvas.sync_back()
+            # The SHIPPED boot logo (console.draw_splash -- Moy + the two-tone
+            # wordmark), with the bar and status under it. Deliberately the same
+            # picture the Workstation shows at #45's splash: a loading screen
+            # that looks like a different program makes the machine appear to
+            # start twice.
+            draw_splash(sys_canvas, frac=frac, status=msg)
             comp.flush()
             if not _splash["lit"]:
                 set_backlight(True)
@@ -758,7 +759,14 @@ def run_desktop(fps_cap=60):
     _pf_n = 0
     _pf_busy = 0
     _pf_drawn = 0
-    ws.arm_splash()
+    # NOT a second logo. arm_splash holds the boot picture for 1.5s once the
+    # desktop is ready, which is right on a board that boots straight into it --
+    # but here that same picture has been on the glass for the whole boot, so
+    # arming it just replays the splash and delays the desktop. Armed only if
+    # the splash never came up (its draw failed), which is the one case where
+    # the logo would otherwise never be seen.
+    if not _splash["lit"]:
+        ws.arm_splash()
     while True:
         now = _ticks_ms()
         dt = max(0.0, min(0.1, _ticks_diff(now, last) / 1000.0))

@@ -842,6 +842,67 @@ def test_boot_splash_holds_then_reveals_launcher(tmp_path):
     assert len(set(drv.rgb888())) > 4
 
 
+def test_splash_draws_without_a_workstation_and_takes_a_progress_bar():
+    """The boot logo is a free function over a canvas, not a Workstation method.
+
+    A P4 spends 17 of the 25 seconds of a full-erase boot seeding cartridges --
+    long before a Workstation exists -- and that loading screen has to BE the
+    boot logo, or the machine appears to start twice. So draw_splash() takes a
+    canvas, and optionally a bar + status to extend it downward."""
+    from runtime import console
+
+    class Cv:                       # the drawing surface, recorded
+        w, h = 1024, 600
+
+        def __init__(self):
+            self.ops = []
+
+        def cls(self, c):
+            self.ops.append(("cls",))
+
+        def spr(self, img, x, y, s):
+            self.ops.append(("spr", x, y, s))
+
+        def print(self, s, x, y, c, sc=1):
+            self.ops.append(("print", s, x, y))
+
+        def rect(self, x, y, w, h, c):
+            self.ops.append(("rect", x, y, w, h))
+
+        def rectb(self, x, y, w, h, c):
+            self.ops.append(("rectb", x, y, w, h))
+
+    plain = Cv()
+    console.draw_splash(plain)                       # no Workstation anywhere
+    kinds = [o[0] for o in plain.ops]
+    assert kinds.count("spr") == 1                   # Moy
+    assert [o[1] for o in plain.ops if o[0] == "print"] == ["moy", "byte"]
+    assert "rect" not in kinds and "rectb" not in kinds   # no bar when not asked
+
+    loading = Cv()
+    console.draw_splash(loading, frac=0.5, status="loading cartridges 16/32")
+    bar = [o for o in loading.ops if o[0] == "rect"]
+    trough = [o for o in loading.ops if o[0] == "rectb"]
+    assert len(bar) == 1 and len(trough) == 1
+    assert bar[0][3] == trough[0][3] // 2 or bar[0][3] < trough[0][3]  # half-filled
+    assert "loading cartridges 16/32" in [o[1] for o in loading.ops if o[0] == "print"]
+    # The logo stays centred: the bar extends the block DOWNWARD, so Moy sits
+    # higher than it does on the bare splash rather than the bar overlapping it.
+    moy_plain = [o for o in plain.ops if o[0] == "spr"][0]
+    moy_loading = [o for o in loading.ops if o[0] == "spr"][0]
+    assert moy_loading[2] < moy_plain[2]
+
+    full = Cv()
+    console.draw_splash(full, frac=1.0, status="done")
+    # frac=1 fills the trough exactly (its outline is drawn 2px outside), and
+    # anything over 1 is clamped rather than overrunning it.
+    inner = trough[0][3] - 4
+    assert [o for o in full.ops if o[0] == "rect"][0][3] == inner
+    over = Cv()
+    console.draw_splash(over, frac=1.4, status="done")
+    assert [o for o in over.ops if o[0] == "rect"][0][3] == inner
+
+
 def test_moy_mascot_baked_into_default_icon_sheet():
     """The 'moy' slot is a real, non-blank 16x16 sprite in the baked theme, so the
     splash (and any icon-sheet consumer) can blit it."""

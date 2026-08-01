@@ -638,6 +638,83 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 _HEAVY_CART_KEYS = ("src", "sprites", "sounds", "map", "images", "blocks", "scenes")
 
 
+_SPLASH_IMG = None
+
+
+def splash_image():
+    """The Moy mascot as a 16x16 blittable built straight from _ICON_ART with REAL
+    transparency ("." -> -1), cached. Not the icon-sheet tile: an IconSheet is a
+    solid indexed grid where a blank pixel is index 0 (black) -- which is also Moy's
+    outline colour, so a sheet blit can't tell the outside from the outline and
+    boxes the mascot. Building the image here keeps the outline AND lets the dark
+    field (and the corner bite) show through."""
+    global _SPLASH_IMG
+    if _SPLASH_IMG is None:
+        art = _ICON_ART.get("moy", ())
+        pix = []
+        for ly in range(16):
+            row = art[ly] if ly < len(art) else ""
+            for lx in range(16):
+                pix.append(_nibble(row[lx]) if lx < len(row) else -1)
+        _SPLASH_IMG = _SheetSprite(16, 16, pix, -1)
+    return _SPLASH_IMG
+
+
+def draw_splash(cv, frac=None, status=None):
+    """Paint the boot logo: 'Moy' (the moybyte mascot) scaled up over a dark field,
+    with the two-tone `moybyte` wordmark below. Drawn on the SYSTEM canvas (like the
+    launcher) so it fills the real panel; host and device share this one path.
+
+    `frac` (0..1) and `status` add a progress bar and a line of text under the
+    wordmark, which is how a board that boots slowly says so -- the P4's
+    full-erase boot spends 17 of its 25 seconds seeding cartridges, long before
+    a Workstation exists to own the screen. Hence a free function taking a
+    canvas rather than a Workstation method: the loading screen and the boot
+    logo have to BE the same picture, or the machine appears to start twice.
+    """
+    W, H = cv.w, cv.h
+    cv.cls(NAMES["dark_blue"])
+    scale = min(W, H) // 56                    # Moy ~1/4 of the panel, reflows with size
+    if scale < 3:
+        scale = 3
+    side = 16 * scale
+    # Wordmark is drawn at text scale 1: the device's framebuf text is a fixed 8px
+    # and ignores a scale arg, so scale-1 is the ONLY size that renders identically
+    # on host and device (host==device parity). Kept small + centred under Moy.
+    word = 8                                   # one 8px char cell wide
+    gap = 10
+    block_h = side + gap + word
+    # The bar and its label extend the block DOWNWARD, so the logo keeps its
+    # own vertical centring when there is no progress to report.
+    bar_h, bar_gap = 10, 18
+    if frac is not None:
+        block_h += bar_gap + bar_h
+    if status:
+        block_h += bar_gap + word
+    top = (H - block_h) // 2
+    cv.spr(splash_image(), (W - side) // 2, top, scale)
+    wy = top + side + gap
+    # Two-tone wordmark: "moy" in cream, "byte" in the mascot's indigo body colour.
+    tw = 7 * word                             # "moybyte" is 7 chars
+    wx = (W - tw) // 2
+    cv.print("moy", wx, wy, NAMES["white"], 1)
+    cv.print("byte", wx + 3 * word, wy, NAMES["indigo"], 1)
+    y = wy + word
+    if frac is not None:
+        bar_w = W // 3
+        bx, by = (W - bar_w) // 2, y + bar_gap
+        # TIC-80 naming, and the trap in it: rect is FILLED and rectb is the
+        # outline -- there is no rectfill on the device canvas.
+        cv.rectb(bx - 2, by - 2, bar_w + 4, bar_h + 4, NAMES["dark_grey"])
+        fill = int(bar_w * (frac if frac < 1 else 1))
+        if fill > 0:
+            cv.rect(bx, by, fill, bar_h, NAMES["yellow"])
+        y = by + bar_h
+    if status:
+        cv.print(status, (W - len(status) * word) // 2, y + bar_gap,
+                 NAMES["light_grey"], 1)
+
+
 def _ema(cur, sample):
     """One-pole EMA (alpha 0.15) with a <=0 "unseeded" bootstrap -- the perf
     readouts' smoothing, written once (frame() applies it to ~10 fields)."""
@@ -4549,49 +4626,12 @@ class Workstation:
         self._dirty = True
 
     def _splash_image(self):
-        """The Moy mascot as a 16x16 blittable built straight from _ICON_ART with REAL
-        transparency ("." -> -1), cached. Not the icon-sheet tile: an IconSheet is a
-        solid indexed grid where a blank pixel is index 0 (black) -- which is also Moy's
-        outline colour, so a sheet blit can't tell the outside from the outline and
-        boxes the mascot. Building the image here keeps the outline AND lets the dark
-        field (and the corner bite) show through."""
-        img = getattr(self, "_splash_img", None)
-        if img is None:
-            art = _ICON_ART.get("moy", ())
-            pix = []
-            for ly in range(16):
-                row = art[ly] if ly < len(art) else ""
-                for lx in range(16):
-                    pix.append(_nibble(row[lx]) if lx < len(row) else -1)
-            img = _SheetSprite(16, 16, pix, -1)
-            self._splash_img = img
-        return img
+        """The Moy mascot as a blittable (see the module-level splash_image)."""
+        return splash_image()
 
     def _draw_splash(self):
-        """Paint the boot logo: 'Moy' (the moybyte mascot) scaled up over a dark field,
-        with the two-tone `moybyte` wordmark below. Drawn on the SYSTEM canvas (like the
-        launcher) so it fills the real panel; host and device share this one path."""
-        cv = self.sys_canvas
-        W, H = cv.w, cv.h
-        cv.cls(NAMES["dark_blue"])
-        scale = min(W, H) // 56                    # Moy ~1/4 of the panel, reflows with size
-        if scale < 3:
-            scale = 3
-        side = 16 * scale
-        # Wordmark is drawn at text scale 1: the device's framebuf text is a fixed 8px
-        # and ignores a scale arg, so scale-1 is the ONLY size that renders identically
-        # on host and device (host==device parity). Kept small + centred under Moy.
-        word = 8                                   # one 8px char cell wide
-        gap = 10
-        block_h = side + gap + word
-        top = (H - block_h) // 2
-        cv.spr(self._splash_image(), (W - side) // 2, top, scale)
-        wy = top + side + gap
-        # Two-tone wordmark: "moy" in cream, "byte" in the mascot's indigo body colour.
-        tw = 7 * word                             # "moybyte" is 7 chars
-        wx = (W - tw) // 2
-        cv.print("moy", wx, wy, NAMES["white"], 1)
-        cv.print("byte", wx + 3 * word, wy, NAMES["indigo"], 1)
+        """Paint the boot logo on the system canvas (see draw_splash)."""
+        draw_splash(self.sys_canvas)
 
     # -- desktop shell drawing (#28) -----------------------------------------
 
