@@ -308,8 +308,31 @@ section > .wrap > h2{margin:0;font-size:clamp(22px,3vw,30px)}
 .tab:hover{border-color:var(--link)}
 .tab.on{border-color:var(--accent)}
 .tab.on b{color:var(--accent)}
-.stage{margin:12px 0 0;background:#000;border:1px solid var(--line);overflow:hidden}
+.stage{margin:12px 0 0;background:#000;border:1px solid var(--line);overflow:hidden;
+  position:relative}
 .stage iframe{display:block;width:100%%;height:100%%;border:0}
+/* --- expand: the console filling the screen -------------------------------- */
+/* Two mechanisms on purpose. The Fullscreen API is the good one, but Safari on
+   iPhone does not implement it for anything but <video> -- and a phone is
+   exactly where the inline player is too small to use. So the class below is
+   the real sizing (a fixed overlay works everywhere), and fullscreen is asked
+   for on top of it where it exists, which additionally hides the browser
+   chrome. Either can end first, so the JS syncs both ways. */
+.exp{margin-left:auto;align-self:center}
+.stage.big{position:fixed;inset:0;z-index:60;margin:0;border:0;
+  aspect-ratio:auto !important;background:#000}
+body.noscroll{overflow:hidden}
+.shrink{position:absolute;top:8px;right:8px;z-index:2;appearance:none;cursor:pointer;
+  font:13px/1 var(--sans);padding:8px 11px;color:var(--ink);
+  background:rgba(5,7,13,.72);border:1px solid var(--line)}
+.shrink:hover{border-color:var(--accent);color:var(--accent)}
+.stage:not(.big) .shrink{display:none}
+/* Landscape phone: the OS bar sits at the very top of the console, so a button
+   in the corner would cover its clock. Nudge it clear of the safe area. */
+@supports (padding:env(safe-area-inset-top)){
+  .stage.big .shrink{top:calc(8px + env(safe-area-inset-top));
+                     right:calc(8px + env(safe-area-inset-right))}
+}
 .hint{display:flex;gap:16px;flex-wrap:wrap;justify-content:space-between;
   color:var(--muted);font-size:13px;margin:10px 0 0}
 .warnbox{color:var(--warn);border:1px solid var(--warn);padding:10px 14px;margin:12px 0 0}
@@ -387,10 +410,14 @@ footer a{margin-right:4px}
     video.</p>
   <div class="tabs" id="tabs">
 %(tabs)s
+    <button class="tab exp" id="expand" type="button"><b>Expand &#8663;</b><span>fill the screen</span></button>
   </div>
-  <div class="stage" id="stage"></div>
+  <div class="stage" id="stage">
+    <button class="shrink" id="shrink" type="button">Close &#10005;</button>
+  </div>
   <div class="hint">
-    <span>Click the screen, then arrow keys and Z / X. Pick <b>Make</b> for the editors.</span>
+    <span>Click the screen, then arrow keys and Z / X. Pick <b>Make</b> for the editors.
+      <b>Expand</b> fills the screen &mdash; the console resizes to fit it.</span>
     <span><b>Nothing is saved.</b> Reloading resets the machine.</span>
   </div>
 %(missing)s</div></section>
@@ -450,18 +477,59 @@ firmware/web_runner/build.sh &amp;&amp; make site</pre>
 // would mean two heaps and two frame loops competing for the main thread). The
 // first tab loads immediately; switching reboots the system for that tier.
 var stage = document.getElementById("stage");
-var tabs = [].slice.call(document.querySelectorAll(".tab"));
+var expand = document.getElementById("expand");
+var shrink = document.getElementById("shrink");
+var tabs = [].slice.call(document.querySelectorAll(".tab:not(.exp)"));
 function show(tab) {
   tabs.forEach(function (t) { t.classList.toggle("on", t === tab); });
-  stage.style.aspectRatio = tab.dataset.ar;
-  stage.innerHTML = "";
+  stage.dataset.ar = tab.dataset.ar;
+  if (!stage.classList.contains("big")) stage.style.aspectRatio = tab.dataset.ar;
+  // Replace the IFRAME only -- the close button is a child of the stage too, and
+  // clearing innerHTML (what this used to do) would take it with them.
+  var old = stage.querySelector("iframe");
+  if (old) old.parentNode.removeChild(old);
   var f = document.createElement("iframe");
   f.setAttribute("title", tab.querySelector("b").textContent + " tier");
   f.setAttribute("allow", "autoplay");
+  f.setAttribute("allowfullscreen", "");
   f.src = "player/index.html" + tab.dataset.q;
   stage.appendChild(f);
 }
 tabs.forEach(function (t) { t.addEventListener("click", function () { show(t); }); });
+
+// EXPAND. The class is what actually resizes the player (a fixed overlay, which
+// every browser has); real fullscreen is requested on top where it exists, for
+// the browser chrome. No manual resize event is needed: resizing the iframe
+// element fires `resize` inside its own document, which is what the player's
+// fit() listens to, so the console rescales to whatever it is given.
+function fsEl() {
+  return document.fullscreenElement || document.webkitFullscreenElement || null;
+}
+function big(on) {
+  stage.classList.toggle("big", on);
+  document.body.classList.toggle("noscroll", on);
+  stage.style.aspectRatio = on ? "auto" : (stage.dataset.ar || "");
+}
+expand.addEventListener("click", function () {
+  big(true);
+  var req = stage.requestFullscreen || stage.webkitRequestFullscreen;
+  // iOS Safari has no element fullscreen; the overlay above is already the
+  // whole viewport there, so a rejection changes nothing the user can see.
+  if (req) { try { Promise.resolve(req.call(stage)).catch(function () {}); } catch (e) {} }
+});
+function collapse() {
+  var exit = document.exitFullscreen || document.webkitExitFullscreen;
+  if (fsEl() && exit) { try { exit.call(document); } catch (e) {} }
+  big(false);
+}
+shrink.addEventListener("click", collapse);
+// Esc in real fullscreen is handled by the browser, which then fires this --
+// so the overlay comes down with it instead of stranding a fixed black box.
+document.addEventListener("fullscreenchange", function () { if (!fsEl()) big(false); });
+document.addEventListener("webkitfullscreenchange", function () { if (!fsEl()) big(false); });
+document.addEventListener("keydown", function (e) {
+  if (e.key === "Escape" && stage.classList.contains("big")) collapse();
+});
 show(tabs[0]);
 </script>
 </body>
