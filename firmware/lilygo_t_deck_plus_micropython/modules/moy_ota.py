@@ -84,9 +84,7 @@ BOARD = "tdeck"
 #       (and the version) via a generated `_ota_build` module from MOYBYTE_OTA_CHANNEL, so
 #       the committed default stays "stable" and the channel is a build choice -- clean
 #       across merges, not a per-branch source edit.
-FIRMWARE_VERSION = 2            # v2: SD<->display boot fix (#56), Sky Run (#54), the WiFi
-                                # OTA online path confirmed on hardware + 4x faster streamed
-                                # download (#53). Bump on every stable release.
+FIRMWARE_VERSION = 3            # v3: two OTA channels on both boards, signed manifests, and an update that tells you whether it worked
 #   FIRMWARE_NAME -- what a HUMAN calls this release ("0.6"), and the only version anyone
 #       outside the code ever reads: the update screen, the manifest label, the git tag.
 #       Deliberately separate from FIRMWARE_VERSION above, which exists solely so the
