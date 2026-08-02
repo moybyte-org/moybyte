@@ -59,6 +59,10 @@ IMAGE_MAGIC = 0xE9          # first byte of an ESP32 app image (esp_image_header
 HEALTHY_PAINTS = 1
 HEALTHY_LOOPS = 120
 PENDING_NAME = "pending.json"   # written beside the image at finish(), read at boot
+# How long ensure_online() waits for the link AFTER the autoconnect attempt. See
+# its docstring: a saved network on the P4 came up 1.5s after connect() had
+# already given up and returned False.
+ONLINE_WAIT_MS = 12000
 
 # Which board this image is for. An OTA payload is an APP PARTITION image, so it
 # is board-specific in the strongest possible way -- handing a P4 an Xtensa S3
@@ -706,7 +710,20 @@ class OtaUpdater:
     def ensure_online(self):
         """Best-effort: report connected, else try a saved-credentials autoconnect.
         Never prompts for a password -- the kid joins a network via the WiFi cart;
-        this only reuses what's already saved."""
+        this only reuses what's already saved.
+
+        Then WAIT for the link, because `connect()` returning False does not mean
+        the association failed. Measured on the P4 (2026-08-02, saved network,
+        from a cold reset): connect() polls isconnected() for 4s and gives up --
+        and the link came up 1.5s after it did. The radio is a separate C6 over
+        SDIO here, so association from cold simply takes longer than the
+        interactive budget, and reporting "wifi offline" on a network that is
+        seconds from ready made the online update look broken.
+
+        The wait belongs HERE and not in connect(): this caller has already
+        committed to a blocking network round trip behind a CHECKING screen, so
+        a few more seconds cost nothing, while lengthening connect() would freeze
+        the desktop for every wrong password too."""
         if self.wifi_online():
             return True
         if self._go_online is not None:
@@ -714,6 +731,15 @@ class OtaUpdater:
                 self._go_online()
             except Exception:
                 pass
+        import time
+
+        for _ in range(ONLINE_WAIT_MS // 250):
+            if self.wifi_online():
+                return True
+            try:
+                time.sleep_ms(250)
+            except AttributeError:
+                time.sleep(0.25)
         return self.wifi_online()
 
     def check_online(self, channel=None):
