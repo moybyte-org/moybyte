@@ -2169,6 +2169,28 @@ class WindowedWM(FullscreenStackWM):
             win = self._wins.get(kind)
             if win is None or not p.down:
                 self._drag = None
+                # Restart the trail restore on RELEASE (owner report 2026-08-02:
+                # "drag a window very fast and let go" draws the window twice;
+                # dwell before letting go and it does not).
+                #
+                # _BackdropLayer.draw skips the restore once _desk_streak
+                # reaches _retained_n(), and a drag saturates it. Geometry is in
+                # the desk signature, and that signature is tracked SILENTLY
+                # while a gesture is live (see the comment there), so release
+                # finds it equal and nothing restarts the streak. The next
+                # painted frame -- whenever it comes: a cursor move, the clock
+                # -- then rotates onto a buffer still holding the window's old
+                # position and SKIPS the restore that would erase it. Dwelling
+                # works because the extra frames paint the settled window into
+                # every buffer before the gesture ends.
+                #
+                # Caught by capturing all three framebuffers mid-symptom: each
+                # held the window at a different point in the drag. The STREAK,
+                # not the cache -- invalidating _backdrop_valid here is the
+                # 120ms live desk re-render #155 removed. Bisected on glass:
+                # this line alone fixes it; also forcing _full_debt (the first
+                # attempt) measured as no difference at all and was dropped.
+                self._desk_streak = 0
             else:
                 self._move_window(win, px - gdx, py - gdy)
                 return True

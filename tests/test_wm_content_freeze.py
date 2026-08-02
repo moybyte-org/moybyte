@@ -178,3 +178,46 @@ def test_music_preview_excluded_from_freeze(tmp_path):
     assert ws.wm._content_static(win) is False
     ws.music_ui.music_preview = None
     assert ws.wm._content_static(win) is True
+
+
+def test_drag_release_restarts_the_backdrop_restore(tmp_path):
+    """Letting go of a fast window drag must restart the trail restore.
+
+    Owner report 2026-08-02: "drag a window very fast and let go" leaves the
+    window drawn twice; dwell before letting go and it does not. On glass the
+    three framebuffers were captured mid-symptom holding the window at three
+    DIFFERENT drag positions -- the panel shows whichever the rotation lands on.
+
+    _BackdropLayer.draw skips the restore once _desk_streak >= _retained_n(),
+    and a drag saturates it. Geometry is in the desk signature, which is tracked
+    silently while a gesture is live, so release finds it equal and nothing
+    restarts the streak: the next painted frame rotates onto a buffer holding
+    the old position and skips the very restore that would erase it. Resetting
+    the streak on release makes that frame restore instead.
+
+    Bisected on hardware: this reset alone fixes it; forcing _full_debt as well
+    (the first attempt) changed nothing and was dropped.
+    """
+    ws, drv, win = _settled_settings(tmp_path)
+    wm = ws.wm
+    x0, y0 = win.x + win.w // 2, win.y + win.title_h // 2
+
+    ws.pointer.x, ws.pointer.y = x0, y0          # grab the title strip
+    ws.pointer.down = True
+    ws.pointer.click = True                      # the press EDGE arms the grab
+    ws.handle_pointer()
+    ws.pointer.click = False
+    # No drv.frame() inside the gesture: the driver re-polls input and would
+    # clear pointer.down, ending the drag before the release under test.
+    for step in (60, 140, 240):                  # fast: big jumps per frame
+        ws.pointer.x, ws.pointer.y = x0 - step, y0 + step // 2
+        ws.handle_pointer()
+    assert wm._drag is not None, "the title-strip grab did not start a drag"
+    wm._desk_streak = wm._retained_n()           # a drag saturates the streak
+
+    ws.pointer.down = False                      # let go
+    ws.handle_pointer()
+    assert wm._drag is None
+    assert wm._desk_streak == 0, (
+        "release left the restore skipped (streak %d): the buffers the drag "
+        "never reached keep the old window" % wm._desk_streak)
