@@ -101,7 +101,19 @@ DEFAULT_CHANNEL_URLS = {
 # A TUPLE, not one key, so a compromised key can be rotated by publishing an
 # image trusted by the old key and signed by the new one. Empty = unsigned
 # builds; see _require_signature.
-OTA_PUBLIC_KEYS = ()             # ((modulus_hex, exponent), ...) -- see `make ota-keygen`
+OTA_PUBLIC_KEYS = (
+    (
+        'cde3f291071ec24c5c24af208757caf7d06a7f70a42c35435586d3a4d6b20c70'
+        'e0f5dadb9b4405eae83e1d86f1410b730d8f59dba0eba47159e6ac60b91c13e9'
+        '83da56f5867f8540242bcdb0b9f5c2b9b5bafd1959dddefe7cf42ec75ad92140'
+        'fb18eaee715e22eb80754b45f3d4848ed06e8d8d49652da0c3239afced318c69'
+        '50b6e55639970340353f32354d4f2537486c89f8129a0553c0c18391be95f73e'
+        'e30c0c98decf20ad04abd7c7b74b68bc102502bf9b98f07d22b8fe459ebf2580'
+        '2abf721b362b96000eeb8056e8308d45d1d5346cec1434992af3c80abce02366'
+        '1aaddd9580585a52a27906314d5d0f71177487a9089e63cf77a79b40b328ec19',
+        65537),
+)            # ((modulus_hex, exponent), ...) -- see `make ota-keygen`
+
 OTA_SCHEME = "moybyte-ota-v1"
 # The ASN.1 DigestInfo header for SHA-256. Fixed for the algorithm, so it is a
 # constant on both sides rather than a parser on either.
