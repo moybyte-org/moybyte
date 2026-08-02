@@ -155,3 +155,21 @@ def test_a_malformed_name_never_becomes_a_tag():
         assert not release.NAME_SHAPE.match(bad), bad
     for good in ("0.6", "1.0", "0.6.1", "12.34.56"):
         assert release.NAME_SHAPE.match(good), good
+
+
+def test_the_gate_runs_on_the_merge_not_on_a_branch():
+    """The suite must test the tree being RELEASED.
+
+    It used to run in preflight, before the merge, so it tested whichever branch
+    you were standing on -- fine while master only ever moved by being merged
+    into, wrong the moment master carried commits of its own. Asserted on the
+    source because the alternative is driving a real git tree through a merge.
+    """
+    src = open(release.__file__, encoding="utf-8").read()
+    body = src.split("def cut(")[1]
+    merge = body.index('git("merge"')
+    gated = body.index("gate(skip_tests)")
+    assert merge < gated, "the gate runs before the merge -- wrong tree"
+    # And the version comes off the merged tree, not off master as it stood.
+    assert body.index("read_version()") > merge
+    assert "def preflight" in src and "make" not in src.split("def preflight")[1].split("def ")[0]

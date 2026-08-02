@@ -145,13 +145,24 @@ def preflight(skip_tests):
                    % (DEV, MAIN))
     print("%s commit(s) to release" % pending)
 
+
+def gate(skip_tests):
+    """The host suite, run on the MERGED tree -- the thing being released.
+
+    It used to run in preflight, before the merge, which tested whichever branch
+    you happened to be standing on and never the combination. That was harmless
+    while master only ever moved by being merged into; it stopped being harmless
+    the first time master carried commits of its own (a pyproject change, as it
+    happens -- exactly the kind that can only break in combination)."""
     if skip_tests:
         print("SKIPPING the test suite (--no-tests)")
         return
-    print("running the host suite ...")
+    print("running the host suite on the merged tree ...")
     p = subprocess.run(["make", "test"], cwd=ROOT)
     if p.returncode != 0:
-        raise Stop("tests failed -- that is the release gate, so stopping here")
+        raise Stop("tests failed ON THE MERGE -- that is the release gate. The "
+                   "merge commit is still there so you can look at it; "
+                   "`git reset --hard origin/master` undoes it")
 
 
 def cut(name, notes, push, skip_tests):
@@ -161,17 +172,26 @@ def cut(name, notes, push, skip_tests):
                    "becomes the tag and the label a kid reads" % name)
     preflight(skip_tests)
 
-    version = read_version() + 1
-    name = name or read_name()
-    tag = "v%s" % name
-    if git("tag", "--list", tag):
-        raise Stop("tag %s already exists -- this release needs its own name, so "
-                   "pass NAME= (a pure fix release is %s.1)"
-                   % (tag, name if name.count(".") > 1 else name))
+    # The tag is checked BEFORE touching master (a name collision should cost
+    # nothing), but the version and the fallback name are read AFTER the merge --
+    # they are properties of the tree being released, not of master as it stands.
+    if name is not None:
+        tag = "v%s" % name
+        if git("tag", "--list", tag):
+            raise Stop("tag %s already exists -- this release needs its own name "
+                       "(a pure fix release is %s.1)" % (tag, name))
 
     git("checkout", MAIN)
     try:
         git("merge", "--no-ff", DEV, "-m", "Merge dev into master for %s" % tag)
+        gate(skip_tests)
+
+        version = read_version() + 1
+        name = name or read_name()
+        tag = "v%s" % name
+        if git("tag", "--list", tag):
+            raise Stop("tag %s already exists -- this release needs its own name, "
+                       "so pass NAME= (a pure fix release is %s.1)" % (tag, name))
 
         with open(MOY_OTA, encoding="utf-8") as f:
             text = f.read()
