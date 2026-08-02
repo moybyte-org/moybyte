@@ -105,7 +105,9 @@ def test_moy_ota_offer_logic_is_channel_aware():
     m = _load_moy_ota()
     u = m.OtaUpdater(with_sd=lambda fn: fn())
     assert u.channel() == "stable"
-    assert u.version_label() == "v%d" % m.FIRMWARE_VERSION
+    # The LABEL is the release NAME, not the counter -- FIRMWARE_VERSION is an
+    # ordering key the device compares with `>`, and nobody should have to read it.
+    assert u.version_label() == m.FIRMWARE_NAME
     assert u.offers({"version": m.FIRMWARE_VERSION + 1, "channel": "stable"}) is True
     assert u.offers({"version": m.FIRMWARE_VERSION, "channel": "stable"}) is False
     assert u.offers({"version": 0, "channel": "unstable"}) is True      # switch to beta
