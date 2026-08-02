@@ -635,15 +635,26 @@ class OtaUpdater:
         sock.write(req.encode())
         _log("request sent, reading headers")
 
-        hdr = b""
-        while b"\r\n\r\n" not in hdr:
-            b = sock.read(1)                   # headers are small; byte-wise keeps body intact
+        # Byte-wise on purpose: a chunked read would swallow the first of the
+        # body, and this runs twice per update, not per frame.
+        #
+        # The cap is 16K because GitHub's headers are not small. Its release
+        # redirect measured 5147 bytes on 2026-08-02 -- 3626 of them a single
+        # Content-Security-Policy header, with the Location we need at byte 95.
+        # Under the old 4096 cap that worked only because Location happened to
+        # come FIRST; reorder those two headers and the redirect vanishes with
+        # no error to show for it. A bytearray + a tail check rather than
+        # `hdr += b` and `in`, both of which are O(n^2) over 5K of header.
+        hdr = bytearray()
+        while hdr[-4:] != b"\r\n\r\n":
+            b = sock.read(1)
             if not b:
                 break
             hdr += b
-            if len(hdr) > 4096:
+            if len(hdr) > 16384:
+                _log("WARNING: header block over 16K, giving up on the rest")
                 break
-        head, _, rest = hdr.partition(b"\r\n\r\n")
+        head, _, rest = bytes(hdr).partition(b"\r\n\r\n")
         lines = head.split(b"\r\n")
         code = 0
         if lines and b" " in lines[0]:
