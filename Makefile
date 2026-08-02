@@ -70,8 +70,20 @@ REQUIRE_IDF = @test -x $(IDF_PYTHON) || { echo "no ESP-IDF python at $(IDF_PYTHO
 REQUIRE_ESPTOOL = @$(PYTHON) -c "import esptool" >/dev/null 2>&1 || { echo "esptool is not installed -- run: $(PYTHON) -m pip install -e '.[device]'"; exit 1; }
 REQUIRE_PYSERIAL = @$(PYTHON) -c "import serial" >/dev/null 2>&1 || { echo "pyserial is not installed -- run: $(PYTHON) -m pip install -e '.[device]'"; exit 1; }
 
+# The suite is ~2000 host tests with no shared mutable state, so it parallelizes
+# cleanly: 3m25s -> ~40s on 12 cores, same pass/fail set. `-n auto` scales to the
+# machine (CI included). PYTEST_DISABLE_PLUGIN_AUTOLOAD stops pytest importing
+# every plugin it can find on PYTHONPATH -- a ROS install puts launch_testing on
+# there, whose stale hook signatures kill xdist workers before collection (the
+# serial run tolerates them, which is why this only ever bites in parallel). We
+# use no pytest plugins beyond xdist, so autoload has nothing to offer us anyway;
+# -p loads it explicitly. Serial fallback: make test JOBS=0
+JOBS ?= auto
+PYTEST_ENV = PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
+PYTEST_FLAGS = $(if $(filter-out 0,$(JOBS)),-p xdist -n $(JOBS),)
+
 test:
-	$(PYTHON) -m pytest
+	$(PYTEST_ENV) $(PYTHON) -m pytest $(PYTEST_FLAGS)
 
 # Build the project site into _site/ (the GitHub Pages source). Embeds the web
 # runner's dist/ as the playable player, so build that first for a live page:
