@@ -37,14 +37,16 @@ OTA_ROOT ?= $(HOME)/.moybyte-ota
 #                            venv setuptools (59.6 on 3.10, absent on 3.12+) failed
 #                            with "invalid command 'bdist_wheel'".
 # `sim` is installed too: tools/simulate_desktop.py (the first thing a new dev runs)
-# needs pygame.
+# needs pygame. So is `lua` (lupa): the seed roster ships lua carts, and without it
+# they open the runtime-missing panel and every lua test silently skips -- including
+# in CI, which runs this target.
 setup:
 	$(SYSTEM_PYTHON) -m venv $(VENV)
 # A venv seeded by an older distro python can carry setuptools < 64, which has
 # no PEP 660 editable hook -- and there is no setup.py to fall back to since the
 # .moyproj SDK went. Upgrade first, then install.
 	$(PYTHON) -m pip install -q --upgrade pip setuptools
-	$(PYTHON) -m pip install -e '.[dev,sim]'
+	$(PYTHON) -m pip install -e '.[dev,sim,lua]'
 
 # Without this, every venv-backed target below dies with a bare
 # "/bin/sh: .venv/bin/python: No such file or directory".

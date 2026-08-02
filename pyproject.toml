@@ -11,14 +11,23 @@ requires-python = ">=3.10"
 dependencies = []
 
 [project.optional-dependencies]
-# `make setup` installs dev + sim: the test suite and the simulator window are
-# what a fresh clone is expected to be able to run.
+# `make setup` installs dev + sim + lua: the test suite, the simulator window and
+# BOTH cart languages are what a fresh clone is expected to be able to run.
 dev = [
   "pytest",
   "pillow",       # GIF export: tools/make_site_gifs.py + simulate_desktop.py --gif
 ]
 sim = [
   "pygame>=2.5",  # the live simulator window (tools/simulate_desktop.py, moybyte run)
+]
+# The HOST's Lua tier (#67): runtime/lua_host.py runs a "runtime": "lua" cart on a
+# real Lua 5.4 VM, the device's moy_lua native module's opposite number. Its own
+# extra rather than part of `sim` because it is genuinely optional -- python carts
+# never touch it, and a lua cart without it opens the runtime-missing panel rather
+# than failing. Unpinned: lua_host prefers lupa 2.x's `lupa.lua54` and falls back
+# to the top-level LuaRuntime on older wheels.
+lua = [
+  "lupa",
 ]
 # Flashing/monitoring a real board. NOT installed by `make setup` -- it needs
 # hardware, and the T-Deck targets use the ESP-IDF toolchain's python instead.

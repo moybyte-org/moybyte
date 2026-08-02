@@ -135,7 +135,7 @@ has a screenshot harness that replays real frames through the real page code.
 ## Try it in 60 seconds
 
 ```bash
-make setup                                       # venv + editable install (dev + sim)
+make setup                                       # venv + editable install (dev, sim, lua)
 make test                                        # pytest
 .venv/bin/python tools/simulate_desktop.py       # boots the launcher
 ```
@@ -145,22 +145,20 @@ touchscreen. Tap **Make ✏️** to open the editor on any cart, including the o
 you just played.
 
 **On Windows**, the Makefile doesn't apply (it is POSIX), so `make setup` is
-spelled out — and a Lua cart needs one package the extras don't install:
+spelled out — same three steps, same extras:
 
 ```bat
 py -3 -m venv .venv
 .venv\Scripts\python -m pip install --upgrade pip setuptools
-.venv\Scripts\python -m pip install -e ".[dev,sim]"
-.venv\Scripts\python -m pip install lupa      :: only if you run LUA carts
+.venv\Scripts\python -m pip install -e ".[dev,sim,lua]"
 
 .venv\Scripts\python tools\simulate_desktop.py
 ```
 
-`lupa` is the host's Lua 5.4 VM (`runtime/lua_host.py`); without it a
-`"runtime": "lua"` cart opens the "needs the Lua runtime" panel instead of
-running. That is true on every platform — it is an optional dependency, and
-Python carts never need it. Every command below works as written with
-`.venv\Scripts\python` in place of `.venv/bin/python`.
+Every command below works as written with `.venv\Scripts\python` in place of
+`.venv/bin/python`. Python 3.10+; the `lua` extra is `lupa`, the host's Lua 5.4
+VM (`runtime/lua_host.py`) — drop it and Python carts still run, but a
+`"runtime": "lua"` cart opens the "needs the Lua runtime" panel.
 
 ```bash
 # the P4's windowed desktop tier, on your PC
@@ -168,6 +166,9 @@ Python carts never need it. Every command below works as written with
 
 # skip the launcher, run one cart
 .venv/bin/python tools/simulate_desktop.py --cart system_carts/star_catcher.moy
+
+# ...and run YOUR cart in place, editing it between runs (see below)
+.venv/bin/python tools/simulate_desktop.py --cart ~/.moybyte/projects/mine.moy
 
 # the whole system streamed to a browser as draw commands (no wasm build)
 .venv/bin/python tools/web_console.py --size 1024x600 --windowed
@@ -178,6 +179,14 @@ Python carts never need it. Every command below works as written with
 
 No display? Every test runs headless, and `--gif`/`--script` drive the real
 system without one.
+
+**`--cart` copies before it runs.** A cart from outside the cart store is copied
+into it (`--save-dir`, default `~/.moybyte/projects/`) the first time it is seen,
+and every later run opens *that* copy — so edits to the folder you pointed at
+stop showing up. Fine for trying a cart, wrong while writing one. Keep the cart
+you are working on **inside the store** and it runs in place, edits and all.
+(`--save-dir` moves the store, but the ~30 system carts seed into wherever it
+points, so it is a second store rather than a way to run one loose folder.)
 
 **In the browser, for real.** `firmware/web_runner/build.sh` compiles the same
 system to WebAssembly (it fetches emsdk itself; first build is slow) and emits a
