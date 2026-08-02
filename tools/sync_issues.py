@@ -8,11 +8,18 @@ commits, docs, and conversation can be resolved without hitting the network.
 Both folders are wiped and rewritten every run, so an issue that changed
 state (or title/body) never leaves a stale copy behind.
 
+Issues and their comments are fetched **together** over GraphQL, 50 issues per
+request (~4 requests for this repo, a few seconds). The old path — one
+`gh issue view` per issue for its comments — cost one round trip each, which on
+a 175-issue repo was ~4 minutes of latency. `--rest` still forces it, as a
+fallback if the GraphQL API is ever unavailable.
+
 Requires the `gh` CLI, authenticated (`gh auth status`).
 
 Usage:
     python tools/sync_issues.py                 # refresh docs/issues/
     python tools/sync_issues.py --no-comments   # bodies only (1 API call)
+    python tools/sync_issues.py --rest          # legacy per-issue REST path (slow)
     python tools/sync_issues.py --repo owner/name --out docs/issues
 """
 from __future__ import annotations
@@ -26,6 +33,28 @@ import sys
 from pathlib import Path
 
 LIST_FIELDS = "number,title,state,labels,author,createdAt,updatedAt,closedAt,url,body"
+
+# One page of issues with their labels and comments. `first: 50` keeps the node
+# count under GitHub's query-cost ceiling (50 issues x 100 comments); comments
+# beyond 100 on a single issue are topped up individually (see fetch_graphql).
+ISSUES_QUERY = """
+query($owner:String!, $name:String!, $cursor:String, $ncom:Int!) {
+  repository(owner:$owner, name:$name) {
+    issues(first:50, after:$cursor, orderBy:{field:CREATED_AT, direction:ASC}) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        number title state url body createdAt updatedAt closedAt
+        author { login }
+        labels(first:30) { nodes { name } }
+        comments(first:$ncom) {
+          totalCount
+          nodes { author { login } createdAt body }
+        }
+      }
+    }
+  }
+}
+"""
 
 
 def gh(args: list[str]) -> str:
@@ -46,6 +75,74 @@ def repo_slug(explicit: str | None) -> str:
         return explicit
     out = gh(["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"]).strip()
     return out or "moybyte-org/moybyte"
+
+
+def gh_json(args: list[str]) -> dict:
+    return json.loads(gh(args))
+
+
+def fetch_graphql(slug: str, want_comments: bool) -> list[dict]:
+    """Fetch every issue **with its comments** in pages of 50.
+
+    Returns the same dict shape the REST path yields, so callers downstream
+    can't tell which transport ran.
+    """
+    owner, _, name = slug.partition("/")
+    ncom = 100 if want_comments else 0
+    issues: list[dict] = []
+    cursor: str | None = None
+    while True:
+        cmd = ["api", "graphql", "-F", f"owner={owner}", "-F", f"name={name}",
+               "-F", f"ncom={ncom}", "-f", f"query={ISSUES_QUERY}"]
+        if cursor:
+            cmd += ["-F", f"cursor={cursor}"]
+        page = gh_json(cmd)
+        if "errors" in page:
+            msgs = "; ".join(e.get("message", "?") for e in page["errors"])
+            raise RuntimeError(f"GraphQL: {msgs}")
+        node = page["data"]["repository"]["issues"]
+        for n in node["nodes"]:
+            comments = n["comments"]["nodes"]
+            # Rare: an issue with more comments than one page holds. Top it up
+            # individually rather than paginating comments inside the bulk query.
+            if want_comments and n["comments"]["totalCount"] > len(comments):
+                data = gh_json(["issue", "view", str(n["number"]), "--repo", slug,
+                                "--json", "comments"])
+                comments = data.get("comments", [])
+            issues.append({
+                "number": n["number"],
+                "title": n["title"],
+                "state": n["state"],
+                "url": n["url"],
+                "body": n["body"],
+                "createdAt": n["createdAt"],
+                "updatedAt": n["updatedAt"],
+                "closedAt": n["closedAt"],
+                "author": n["author"],
+                "labels": n["labels"]["nodes"],
+                "_comments": comments,
+            })
+        print(f"  fetched {len(issues)} issues…", file=sys.stderr)
+        if not node["pageInfo"]["hasNextPage"]:
+            return issues
+        cursor = node["pageInfo"]["endCursor"]
+
+
+def fetch_rest(slug: str, want_comments: bool) -> list[dict]:
+    """Legacy path: one list call, then one `gh issue view` per issue."""
+    issues = json.loads(
+        gh(["issue", "list", "--repo", slug, "--state", "all", "--limit", "1000",
+            "--json", LIST_FIELDS])
+    )
+    for idx, issue in enumerate(issues, 1):
+        comments: list[dict] = []
+        if want_comments:
+            data = gh_json(["issue", "view", str(issue["number"]), "--repo", slug,
+                            "--json", "comments"])
+            comments = data.get("comments", [])
+        issue["_comments"] = comments
+        print(f"  [{idx}/{len(issues)}] #{issue['number']}", file=sys.stderr)
+    return issues
 
 
 def slugify(title: str, limit: int = 50) -> str:
@@ -266,6 +363,9 @@ def write_status(out: Path, slug: str, issues: list[dict]) -> None:
         body.append("")
 
     if unclassified:
+        # Sorted like every other table, so the file never depends on the order
+        # the API happened to return issues in.
+        unclassified.sort(key=lambda i: (-_mat(i["_maturity"])[0], i["number"]))
         body += ["### unclassified ({})".format(len(unclassified)), "",
                  "| Maturity | Issue | What |", "|---|---|---|"]
         for i in unclassified:
@@ -324,35 +424,38 @@ def main() -> None:
     ap.add_argument("--repo", help="owner/name (default: current repo)")
     ap.add_argument("--out", default="docs/issues", help="output dir (default docs/issues)")
     ap.add_argument("--no-comments", action="store_true", help="skip fetching comments")
+    ap.add_argument("--rest", action="store_true",
+                    help="use the legacy per-issue REST path (slow; fallback only)")
     args = ap.parse_args()
 
     slug = repo_slug(args.repo)
     out = Path(args.out)
     print(f"Syncing issues from {slug} → {out}/", file=sys.stderr)
 
-    issues = json.loads(
-        gh(["issue", "list", "--repo", slug, "--state", "all", "--limit", "1000",
-            "--json", LIST_FIELDS])
-    )
+    want_comments = not args.no_comments
+    if args.rest:
+        issues = fetch_rest(slug, want_comments)
+    else:
+        try:
+            issues = fetch_graphql(slug, want_comments)
+        except (RuntimeError, KeyError, TypeError) as exc:
+            print(f"  GraphQL fetch failed ({exc}); falling back to REST…",
+                  file=sys.stderr)
+            issues = fetch_rest(slug, want_comments)
 
+    # Wipe only once the fetch has succeeded, so a network failure can never
+    # leave the mirror empty.
     for folder in ("open", "closed"):
         d = out / folder
         if d.exists():
             shutil.rmtree(d)
         d.mkdir(parents=True, exist_ok=True)
 
-    for idx, issue in enumerate(issues, 1):
+    for issue in issues:
         num = issue["number"]
-        comments: list[dict] = []
-        if not args.no_comments:
-            data = json.loads(
-                gh(["issue", "view", str(num), "--repo", slug, "--json", "comments"])
-            )
-            comments = data.get("comments", [])
         folder = "open" if issue["state"].upper() == "OPEN" else "closed"
         fname = out / folder / f"{num:04d}-{slugify(issue['title'])}.md"
-        fname.write_text(issue_markdown(issue, comments), encoding="utf-8")
-        print(f"  [{idx}/{len(issues)}] #{num} → {folder}/{fname.name}", file=sys.stderr)
+        fname.write_text(issue_markdown(issue, issue["_comments"]), encoding="utf-8")
 
     write_index(out, slug, issues)
     write_status(out, slug, issues)
