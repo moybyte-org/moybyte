@@ -240,6 +240,7 @@ class OtaUpdater:
         self.error = None         # last error string (shown by the console)
         self.absent = False       # the channel simply has nothing for this board yet
         self.confirmed = False   # has confirm_when_healthy already fired this boot?
+        self._pending_seen = False   # boot_check found a marker -> the confirm clears it
         self._loops = 0           # frame-loop iterations it has been called from
         self.boot_verdict = None  # ("ok"|"rolled_back", text) from the previous install
         # WiFi download (Phase 3) state:
@@ -355,8 +356,13 @@ class OtaUpdater:
         # The pending marker is cleared HERE and not where it was read, so that an
         # image which boots, reports its verdict and then dies still has a marker
         # on the boot after the rollback -- otherwise that second failure would be
-        # the silent one.
-        self._clear_pending()
+        # the silent one. Only when boot_check actually SAW one, though: on the
+        # T-Deck this is an SD session on the bus the panel shares, and an
+        # ordinary boot (no update pending, which is nearly all of them) should
+        # not pay for a delete that can only fail.
+        if self._pending_seen:
+            self._pending_seen = False
+            self._clear_pending()
         return ok
 
     # -- did the last update actually take? ----------------------------------
@@ -437,6 +443,7 @@ class OtaUpdater:
             return None               # no SD / torn file: no verdict, same as before
         if not isinstance(rec, dict):
             return None
+        self._pending_seen = True
         was = rec.get("label") or ("v%s" % rec.get("version", "?"))
         if rec.get("slot") == self.slot():
             self.boot_verdict = ("ok", "%s -> %s" % (was, self.version_label()))

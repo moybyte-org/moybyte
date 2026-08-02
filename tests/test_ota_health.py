@@ -233,6 +233,34 @@ def test_the_marker_survives_the_report_and_dies_at_the_confirm(tmp_path):
     assert u2.boot_check() is None
 
 
+def test_an_ordinary_boot_never_touches_the_card(tmp_path):
+    """No marker -> the confirm must not open an SD session to delete nothing.
+
+    On the T-Deck that card shares its bus with the panel, and nearly every boot
+    is an ordinary one -- paying for a delete that can only fail is a cost with
+    no case where it helps.
+    """
+    mod, u = _updater(tmp_path)
+    touched = []
+    u._with_sd = lambda fn: (touched.append(1), fn())[1]
+    assert u.boot_check() is None
+    touched.clear()
+    for _ in range(mod.HEALTHY_LOOPS):
+        u.confirm_when_healthy(1)
+    assert u.confirmed is True
+    assert touched == [], "the confirm opened an SD session for nothing"
+
+
+def test_a_boot_that_did_see_a_marker_clears_it(tmp_path):
+    mod, u = _updater(tmp_path, running="ota_0")
+    u._part = _FakePart("ota_1")
+    u.finish()
+    assert u.boot_check()[0] == "rolled_back"
+    for _ in range(mod.HEALTHY_LOOPS):
+        u.confirm_when_healthy(1)
+    assert not Path(u._pending_path()).exists()
+
+
 def test_a_marker_write_failure_never_costs_the_update(tmp_path):
     # Best-effort by design: losing the verdict is a missing message; failing the
     # install because the message could not be written would be a real regression.
