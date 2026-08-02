@@ -389,6 +389,58 @@ def test_the_ota_updater_is_live_on_this_board(board):
     # payload is an app-partition image, so the wrong one cannot boot.
     url = board.pyval("ws.updater.manifest_url('unstable')")
     assert url.endswith("/latest-p4.json"), url
-    # mark_valid ran at boot; without it the bootloader reverts every OTA.
+    # mark_valid ran; without it the bootloader reverts every OTA.
     assert any("marked app valid" in ln for ln in board.lines), \
         "no mark_valid at boot -- rollback would undo every update"
+
+
+def test_the_rollback_confirm_comes_from_the_frame_loop(board):
+    """The confirm has to be worth something, and where it is made decides that.
+
+    Made on the boot path it certifies an image that has never drawn a pixel --
+    a board that boots to a black screen (this project shipped one, #56) would
+    confirm itself and lose the safety net. So it waits for a painted frame AND
+    for the loop to keep running afterwards, and this asserts the loop is what
+    actually got there on a live board.
+
+    The full pass -- install, reboot into the new slot, and a reset inside the
+    confirm window to force the bootloader to revert -- was run on glass
+    2026-08-02: 15/15, both directions, banner and verdict correct each time.
+    Not re-run here because one install is ~2min and leaves the board on the
+    other slot, which every later test would inherit."""
+    ota = "__import__('moy_ota')"
+    assert board.pyval("ws.updater.confirmed") is True
+    loops = board.pyval("ws.updater._loops")
+    assert loops >= board.pyval("%s.HEALTHY_LOOPS" % ota), \
+        "confirmed after %s loop iterations -- not from the frame loop" % loops
+    # A paint threshold above 1 would be unreachable: the console repaints only
+    # when something changes, so an untouched desktop paints once and stops.
+    assert board.pyval("%s.HEALTHY_PAINTS" % ota) == 1
+    assert board.pyval("ws._frames_drawn") >= 1
+
+
+def test_a_pending_marker_becomes_a_verdict_on_this_board(board):
+    """The marker round trip against the real filesystem, without a 3MB install.
+
+    What is device-specific here is exactly what a host test cannot reach: this
+    board has no SD, so `with_sd` is a plain call-through and the marker lands on
+    the internal VFS -- the same path that has to hold a rollback's evidence
+    across a reboot."""
+    board.pyexec(
+        "import json\n"
+        "f = open(ws.updater._pending_path(), 'w')\n"
+        "f.write(json.dumps({'slot': 'nowhere', 'label': 'v99'}))\n"
+        "f.close()\n"
+        "V = ws.updater.boot_check()\n")
+    verdict = board.pyval("eval('V', ws._g)")
+    assert verdict[0] == "rolled_back", verdict
+    # Reading it must NOT consume it: an image that reports and then dies has to
+    # still have its marker on the boot after the rollback.
+    listing = board.pyval("__import__('os').listdir(ws.updater.update_dir)")
+    assert "pending.json" in listing, listing
+    board.pyexec("import os\n"
+                 "os.remove(ws.updater._pending_path())\n"
+                 "ws.updater.boot_verdict = None\n"
+                 "ws._notice = None\n")
+    assert "pending.json" not in board.pyval(
+        "__import__('os').listdir(ws.updater.update_dir)")

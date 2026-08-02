@@ -1150,6 +1150,13 @@ class Workstation:
         # via self.ach_ui.* so a stray sequence never carries between contexts.
         self.ach_ui = AchievementsUI(self, NAMES, ACHIEVEMENTS)
         self.show_achievements = False  # the locked/unlocked list overlay (Settings entry)
+        # A transient SYSTEM banner (#53): something the machine did on its own and
+        # the kid should hear about without going looking. Distinct from the
+        # achievement toast, which celebrates something the KID did. First user is
+        # the firmware-update verdict -- an update lands during a reboot, so there
+        # is no screen it could otherwise report to.
+        self._notice = None            # (title, sub, kind) while up
+        self._notice_until = 0
         # Top-bar system menu (#52): the ≡ dropdown. A reusable Popup owns its own
         # open/selected state; the SYSTEM group (Settings/About/Reboot) is always
         # present, a CART group (Restart/Delete) is prepended only while a cart is
@@ -1299,6 +1306,7 @@ class Workstation:
         self._ach_layer = _AchOverlayLayer(self, "achievements", self.ach_ui._draw_achievements)
         self._egg_layer = _AchOverlayLayer(self, "egg", self.ach_ui._draw_egg)
         self._toast_layer = L("toast", "system", draw=lambda dt: self._draw_toast())
+        self._notice_layer = L("notice", "system", draw=lambda dt: self._draw_notice())
         self._sysmenu_layer = _SysMenuLayer(self)
         self._about_layer = _AboutLayer(self)
         self._cursor_layer = L("cursor", "system", draw=lambda dt: self._draw_cursor())
@@ -4298,6 +4306,8 @@ class Workstation:
             return True
         if self.ach.toast_active():
             return True
+        if self.notice_active():
+            return True
         return False
 
     def _needs_redraw(self, dt):
@@ -4706,6 +4716,69 @@ class Workstation:
                 getattr(cv, "_batch_maxrun", 0))
 
     # -- achievements + Easter-egg drawing (#21) -----------------------------
+
+    # -- system notice banner (#53) ------------------------------------------
+
+    def notice(self, title, sub="", kind="ok", ms=6000):
+        """Say something on whatever screen is up, briefly, and then stop.
+
+        For things the MACHINE did on its own -- the achievement toast next door
+        is for things the kid did. It expires on a timer with no input, because a
+        notice that needs dismissing is a modal, and a modal in front of a kid who
+        just wanted to play is worse than the message is worth."""
+        self._notice = (str(title), str(sub), kind)
+        self._notice_until = _ticks_ms() + int(ms)
+        self._dirty = True
+
+    def notice_active(self, now=None):
+        if self._notice is None:
+            return False
+        if _ticks_diff(self._notice_until, now if now is not None else _ticks_ms()) <= 0:
+            self._notice = None
+            return False
+        return True
+
+    def announce_update(self):
+        """Put the firmware-update verdict on the desktop (#53).
+
+        An update lands during a REBOOT: the screen that asked for it is gone by
+        the time there is an answer, so unless the machine volunteers it the kid
+        learns nothing -- a successful update looks like a slow reboot, and a
+        rolled-back one looks exactly the same. Reading it here does NOT clear it;
+        Settings -> UPDATE still has it for anyone who missed the banner."""
+        u = getattr(self, "updater", None)
+        verdict = getattr(u, "boot_verdict", None)
+        if not verdict:
+            return False
+        if verdict[0] == "ok":
+            self.notice("MOYBYTE UPDATED", "now %s" % u.version_label(), "ok")
+        else:
+            self.notice("UPDATE UNDONE", "still on %s" % u.version_label(), "warn")
+        return True
+
+    def _draw_notice(self):
+        """The system banner: a wide strip under the top bar, title + one small line.
+
+        Sized off `layout` rather than the frozen 320x240 numbers the achievement
+        toast uses, because this one has to look deliberate on a 1024x600 desktop
+        too."""
+        cv = self.sys_canvas
+        lay = self.layout
+        fs = lay.fs
+        title, sub, kind = self._notice
+        th = self.theme_colors
+        accent = th["play"] if kind == "ok" else NAMES["orange"]
+        w = min(lay.w - 16 * fs, max(180 * fs, (len(title) + 2) * 8 * fs * 2))
+        h = 34 * fs
+        x = (lay.w - w) // 2
+        y = lay.status_h + 6 * fs
+        cv.rect(x, y, w, h, th["surface"])
+        cv.rectb(x, y, w, h, accent)
+        cv.rect(x, y, w, 3 * fs, accent)          # a lit edge, not a full title bar
+        self._glyph("gear", (x + 5 * fs, y + 8 * fs, 14 * fs, 14 * fs), accent, cv)
+        cv.print(title[:22], x + 22 * fs, y + 7 * fs, th["ink"], 2 * fs)
+        if sub:
+            cv.print(sub[:26], x + 22 * fs, y + 22 * fs, th["ink_dim"], 1 * fs)
 
     def _draw_toast(self):
         """A small celebratory banner near the top: a trophy + "ACHIEVEMENT!" + the

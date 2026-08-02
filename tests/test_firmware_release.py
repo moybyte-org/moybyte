@@ -324,6 +324,13 @@ def test_the_workflows_keep_the_branches_apart():
     # The stamp has to reach the publish job or the manifest version is a guess.
     assert publish.OTA_STAMP in wf
     assert "path: out/*\n" in wf
+    # EVERY board's stamp, not just the one whose dist/ lives under firmware/.
+    # Collecting only the T-Deck's published a P4 beta whose manifest said
+    # "unstable" over an image stamped "stable v2" -- so a P4 on the beta
+    # channel was offered that same install on every check, forever.
+    for board, path in (("tdeck", "firmware/lilygo_t_deck_plus_micropython/dist/current"),
+                        ("p4", "dist/p4")):
+        assert "cp %s/%s out/" % (path, publish.OTA_STAMP) in wf, board
 
     ci = open(os.path.join(ROOT, ".github", "workflows", "ci.yml"),
               encoding="utf-8").read()

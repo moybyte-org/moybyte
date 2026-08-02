@@ -186,6 +186,8 @@ class FullscreenStackWM:
             sig |= 64
         if ws._about:
             sig |= 128
+        if ws.notice_active():
+            sig |= 256
         return sig
 
     def _ensure_stack(self):
@@ -232,6 +234,8 @@ class FullscreenStackWM:
             overlays.append(ws._sysmenu_layer)
         if sig & 128:
             overlays.append(ws._about_layer)
+        if sig & 256:
+            overlays.append(ws._notice_layer)
         overlays.append(ws._cursor_layer)          # cursor last -> above everything
         # The boot logo is a draw-time takeover of the content slot (input still routes to
         # the content underneath -- so _cache_visible keeps `content`, only the draw slot

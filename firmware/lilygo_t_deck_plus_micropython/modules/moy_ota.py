@@ -39,6 +39,27 @@ UPDATE_DIR = "/sd/update"    # the T-Deck default; a board with no SD passes its
 BLOCK = 4096                 # esp32.Partition native block (erase page); writeblocks erases
 IMAGE_MAGIC = 0xE9          # first byte of an ESP32 app image (esp_image_header_t.magic)
 
+# What counts as proof that the update worked (confirm_when_healthy). The
+# rollback net can only revert an image that never SAID it was fine, so what that
+# claim is worth is decided entirely by where it is made -- and "the desktop
+# object was constructed" is worth very little. Two conditions, because either
+# alone is satisfied by a board nobody would call healthy:
+#
+#   HEALTHY_PAINTS -- frames that reached the GLASS. This is the one that catches
+#       #56, where every boot print appeared and the panel stayed dark. It is 1
+#       and cannot be more: the console repaints only when something changes, so
+#       an idle desktop paints once and then sits there for as long as you like.
+#       (Measured on the P4: 1 painted frame in the first 6 seconds. A threshold
+#       of 120 painted frames -- the obvious first guess -- would have left every
+#       board on a quiet desktop unconfirmed, i.e. rolled every update back.)
+#   HEALTHY_LOOPS -- iterations of the frame loop survived after that. ~2-4s of
+#       input polling, timers and compositing on either board; long enough that a
+#       crash in the ordinary run of things lands inside it, short enough that
+#       nobody power-cycles before it.
+HEALTHY_PAINTS = 1
+HEALTHY_LOOPS = 120
+PENDING_NAME = "pending.json"   # written beside the image at finish(), read at boot
+
 # Which board this image is for. An OTA payload is an APP PARTITION image, so it
 # is board-specific in the strongest possible way -- handing a P4 an Xtensa S3
 # build would write a valid-looking image that cannot boot. The manifest URL
@@ -206,6 +227,9 @@ class OtaUpdater:
         self.done = 0             # bytes flashed so far
         self.path = None          # the image being installed
         self.error = None         # last error string (shown by the console)
+        self.confirmed = False   # has confirm_when_healthy already fired this boot?
+        self._loops = 0           # frame-loop iterations it has been called from
+        self.boot_verdict = None  # ("ok"|"rolled_back", text) from the previous install
         # WiFi download (Phase 3) state:
         self._sock = None         # open HTTP(S) socket while a download streams
         self._dl_f = None         # open SD file the download writes to
@@ -281,8 +305,9 @@ class OtaUpdater:
 
     def mark_valid(self):
         """Confirm the running image is healthy so the bootloader cancels its pending
-        rollback. Called once at a healthy boot (run_desktop). No-op (swallowed) when
-        the image was already marked valid or this isn't an OTA build."""
+        rollback. The raw verb -- callers want confirm_when_healthy, which decides
+        WHEN this is honest. No-op (swallowed) when the image was already marked
+        valid or this isn't an OTA build."""
         try:
             import esp32
 
@@ -290,6 +315,121 @@ class OtaUpdater:
             return True
         except Exception:
             return False
+
+    def confirm_when_healthy(self, frames_drawn):
+        """The rollback confirm, deferred until the console has actually RUN.
+
+        Marking the image valid where the desktop is CONSTRUCTED confirms firmware
+        that has never drawn a pixel -- and a live board showing a black screen is
+        exactly the failure this project has already shipped once (#56: every boot
+        print appeared, the panel stayed dark). Rollback cannot save a board from a
+        fault the firmware promised in advance would not happen.
+
+        So the frame loop calls this every iteration with ws._frames_drawn, and the
+        confirm waits for both halves of "it works": something reached the glass
+        (HEALTHY_PAINTS) and the loop kept running afterwards (HEALTHY_LOOPS, which
+        this counts itself -- one call per iteration is exactly what the loop makes
+        it). An image that comes up mute, or comes up and then dies, is never
+        confirmed, so the next reset reverts it. Returns True the one frame it
+        confirms."""
+        if self.confirmed:
+            return False
+        self._loops += 1
+        if frames_drawn < HEALTHY_PAINTS or self._loops < HEALTHY_LOOPS:
+            return False
+        self.confirmed = True
+        ok = self.mark_valid()
+        # The pending marker is cleared HERE and not where it was read, so that an
+        # image which boots, reports its verdict and then dies still has a marker
+        # on the boot after the rollback -- otherwise that second failure would be
+        # the silent one.
+        self._clear_pending()
+        return ok
+
+    # -- did the last update actually take? ----------------------------------
+
+    def _pending_path(self):
+        return self.update_dir + "/" + PENDING_NAME
+
+    def _arm_pending(self, slot):
+        """Record, just before the reboot, which slot the bootloader was pointed at.
+
+        Without this a rollback is SILENT: the board comes back on the old firmware
+        and nothing says the update was tried and undone, which reads to a kid as
+        "the update did nothing". One small file turns that into a verdict the next
+        boot can state out loud. Best-effort -- losing it costs the message, never
+        the update."""
+        rec = {"slot": slot, "version": self.version(),
+               "channel": self.channel(), "label": self.version_label()}
+
+        def _w():
+            import json
+            import os
+
+            try:
+                os.mkdir(self.update_dir)
+            except OSError:
+                pass                  # already there (the image lives in it)
+            f = open(self._pending_path(), "w")
+            try:
+                f.write(json.dumps(rec))
+            finally:
+                f.close()
+
+        try:
+            self._with_sd(_w)
+            return True
+        except Exception as exc:
+            _log("could not record the pending update:", _short(exc))
+            return False
+
+    def _clear_pending(self):
+        def _rm():
+            import os
+
+            try:
+                os.remove(self._pending_path())
+            except OSError:
+                pass
+
+        try:
+            self._with_sd(_rm)
+        except Exception:
+            pass
+
+    def boot_check(self):
+        """Read the marker the previous install left and say what became of it.
+
+        Returns None on an ordinary boot, else ("ok", text) when the slot we were
+        pointed at is the one now running, or ("rolled_back", text) when it isn't --
+        which means the bootloader gave up on the new image and put the old one
+        back. The marker is deliberately NOT deleted here (see
+        confirm_when_healthy). Also caches the verdict on `boot_verdict` for the
+        update screen."""
+        def _read():
+            import json
+
+            try:
+                f = open(self._pending_path(), "r")
+            except OSError:
+                return None
+            try:
+                return json.load(f)
+            finally:
+                f.close()
+
+        try:
+            rec = self._with_sd(_read)
+        except Exception:
+            return None               # no SD / torn file: no verdict, same as before
+        if not isinstance(rec, dict):
+            return None
+        was = rec.get("label") or ("v%s" % rec.get("version", "?"))
+        if rec.get("slot") == self.slot():
+            self.boot_verdict = ("ok", "%s -> %s" % (was, self.version_label()))
+        else:
+            self.boot_verdict = ("rolled_back", "put %s back" % self.version_label())
+        return self.boot_verdict
 
     # -- discovery -----------------------------------------------------------
 
@@ -396,15 +536,19 @@ class OtaUpdater:
 
     def finish(self):
         """Point the bootloader at the freshly-written slot. The new app boots on the
-        next reset and must call mark_valid() to keep it (else rollback)."""
+        next reset and must confirm itself to keep it (confirm_when_healthy), else
+        rollback. Also records WHICH slot, so the next boot can tell whether the
+        thing we just installed is the thing now running."""
         if self._part is None:
             return False
         try:
+            slot = self._part.info()[4]
             self._part.set_boot()
-            return True
         except Exception as exc:
             self.error = _short(exc)
             return False
+        self._arm_pending(slot)
+        return True
 
     def cancel(self):
         self._close_file()

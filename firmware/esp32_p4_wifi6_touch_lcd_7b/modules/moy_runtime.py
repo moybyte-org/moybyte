@@ -755,18 +755,20 @@ def run_desktop(fps_cap=60):
 
     import gc
     gc.collect()
-    # Reaching here IS the definition of a healthy boot, so confirm the running
-    # image and cancel the bootloader's pending rollback (#53). Without this
-    # call every OTA would be reverted on the next power cycle -- the safety net
-    # cannot tell "came up fine" from "died before drawing" unless something
-    # says so. A no-op when the image was already confirmed.
-    if getattr(ws, "updater", None) is not None:
+    # Say what became of the last update before anything else can overwrite the
+    # evidence (#53). The rollback CONFIRM does not happen here -- reaching this
+    # line only proves the desktop was built, and an image that never paints has
+    # already shipped once (#56). It is fired from the frame loop below, after
+    # the console has actually drawn.
+    _ota = getattr(ws, "updater", None)   # cleared once the confirm below has fired
+    if _ota is not None:
         try:
-            if ws.updater.mark_valid():
-                print("Moybyte P4 OTA: marked app valid (slot %s)"
-                      % ws.updater.slot())
+            verdict = _ota.boot_check()
+            if verdict:
+                print("Moybyte P4 OTA: last update %s (%s)" % verdict)
+                ws.announce_update()      # and say so on the desktop, not just here
         except Exception as exc:  # noqa: BLE001 -- never block the desktop
-            print("Moybyte P4 OTA: mark_valid failed:", exc)
+            print("Moybyte P4 OTA: boot_check failed:", exc)
     print("Moybyte P4 desktop running (Ctrl-C for REPL)")
     # The last thing before the loop, and the stage the silent wait was in:
     # everything above had already printed when the screen was reported black.
@@ -1161,6 +1163,17 @@ def run_desktop(fps_cap=60):
             _splash["done"] = True
             print("Moybyte P4 first frame in %dms"
                   % _ticks_diff(_ticks_ms(), _first_at))
+        # The OTA rollback confirm (#53), now that frames are really going out.
+        # Cheap (an int compare) and self-disarming after it fires once.
+        if _ota is not None:
+            try:
+                if _ota.confirm_when_healthy(getattr(ws, "_frames_drawn", 0)):
+                    print("Moybyte P4 OTA: marked app valid (slot %s)" % _ota.slot())
+                if _ota.confirmed:
+                    _ota = None       # fired (or a non-OTA build): stop asking
+            except Exception as exc:  # noqa: BLE001 -- never break a frame over this
+                print("Moybyte P4 OTA: confirm failed:", exc)
+                _ota = None
         elapsed = _ticks_diff(_ticks_ms(), now)
         _pf_n += 1
         _pf_busy += elapsed

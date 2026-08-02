@@ -77,6 +77,8 @@ class UpdateUI:
             self._upd_phase = "error"
             self._upd_msg = "no updater"
             return
+        if self._boot_verdict_phase():
+            return
         found = u.find_bin()                    # SD op (between frames)
         if not found:
             self._upd_phase = "error"
@@ -100,8 +102,27 @@ class UpdateUI:
             self._upd_phase = "error"
             self._upd_msg = "no updater"
             return
+        if self._boot_verdict_phase():
+            return
         self._check_armed = False              # gate: draw CHECKING... before the blocking fetch
         self._upd_phase = "checking"
+
+    def _boot_verdict_phase(self):
+        """If the last install left a verdict, show THAT before anything else.
+
+        A rollback is otherwise completely silent: the kid sat through a download
+        and an install, waited out a reboot, and landed back on the firmware they
+        started with, with nothing anywhere saying so. Reading the verdict clears
+        it, so it interrupts exactly once and the screen behaves normally after.
+        Returns True when it took the screen over."""
+        u = self.ws.updater
+        verdict = getattr(u, "boot_verdict", None)
+        if not verdict:
+            return False
+        u.boot_verdict = None
+        self._upd_phase = "updated" if verdict[0] == "ok" else "rolledback"
+        self._upd_msg = verdict[1]
+        return True
 
     def _start_download(self):
         """Open the socket + SD file and switch to the streaming download phase."""
@@ -166,7 +187,7 @@ class UpdateUI:
         elif ph in ("install", "downloading", "checking"):
             if i.pressed("b"):                 # abort: nothing bootable was committed yet
                 self._exit_update()
-        elif ph in ("error", "uptodate"):
+        elif ph in ("error", "uptodate", "updated", "rolledback"):
             if i.pressed("b") or i.pressed("a"):
                 self._exit_update()
         # "done": ignore input -- _pump_update reboots into the new image shortly.
@@ -183,7 +204,7 @@ class UpdateUI:
             self._confirm_update()             # tap anywhere (besides X) = install
         elif ph == "confirm_online":
             self._start_download()             # tap anywhere (besides X) = download
-        elif ph in ("error", "uptodate"):
+        elif ph in ("error", "uptodate", "updated", "rolledback"):
             self._exit_update()
 
     def _pump_update(self, dt):
@@ -366,6 +387,32 @@ class UpdateUI:
             cv.print("UPDATED!", x, y, th["play"], 2)
             y += 20 * fs
             cv.print("rebooting...", x, y, th["ink"], 1)
+        elif phase == "updated":
+            # The verdict from the PREVIOUS boot: the slot we were pointed at is
+            # the one now running. This is the only place the machine ever says
+            # the update truly took -- "done" above is a hope, this is a fact.
+            cv.print("IT WORKED!", x, y, th["play"], 2)
+            y += 20 * fs
+            cv.print("new firmware:", x, y, th["ink_dim"], 1)
+            y += 12 * fs
+            cv.print((self._upd_msg or "?")[:26], x, y, th["ink"], 1)
+            y += 18 * fs
+            cv.print("B = BACK", x, y, th["accent"], 1)
+        elif phase == "rolledback":
+            # Voice: the machine did the right thing and should say so plainly.
+            # Nothing was lost, the kid did nothing wrong, and the old firmware
+            # is exactly the one they had -- so the tone is reassurance, not alarm.
+            cv.print("The new one didn't", x, y, th["danger"], 1)
+            y += 12 * fs
+            cv.print("start up.", x, y, th["danger"], 1)
+            y += 14 * fs
+            cv.print("I put your old one", x, y, th["ink"], 1)
+            y += 12 * fs
+            cv.print("back. Nothing lost.", x, y, th["ink"], 1)
+            y += 14 * fs
+            cv.print((self._upd_msg or "?")[:26], x, y, th["ink_dim"], 1)
+            y += 16 * fs
+            cv.print("B = BACK", x, y, th["accent"], 1)
         else:  # error
             # Voice: the rollback design means a failed update truly leaves the
             # running firmware untouched -- "Nothing changed." states that trust.

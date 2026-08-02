@@ -964,6 +964,8 @@ class WindowedWM(FullscreenStackWM):
             overlays.append(ws._sysmenu_layer)
         if sig & 128:
             overlays.append(ws._about_layer)
+        if sig & 256:
+            overlays.append(ws._notice_layer)
         overlays.append(ws._cursor_layer)
         base = [self._backdrop_layer] + pre + [self._win_layer]
         draw_base = [ws._splash_layer] if (sig & 1) else base

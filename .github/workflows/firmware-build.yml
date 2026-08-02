@@ -205,8 +205,18 @@ jobs:
           # advertising a DIFFERENT number than the image carries would offer
           # the same install forever (install -> running version is lower than
           # the manifest again -> offered again).
+          # BOTH boards, and the P4's does not live under firmware/ -- shipping
+          # only the T-Deck's is what published a P4 beta stamped "stable v2"
+          # while its manifest said "unstable": the publisher found no stamp for
+          # that board and fell back to the committed FIRMWARE_VERSION, so every
+          # P4 on beta was offered the same install forever, which is the exact
+          # failure the paragraph above exists to prevent.
           cp firmware/lilygo_t_deck_plus_micropython/dist/current/ota_build.json out/ 2>/dev/null || true
+          cp dist/p4/ota_build.json out/ 2>/dev/null || true
           ls -l out || true
+          # A build whose identity did not travel would publish a manifest that
+          # lies about the image, so say it loudly rather than shipping it.
+          test -f out/ota_build.json || echo "::warning::no ota_build.json for ${{ matrix.board }} -- the manifest will fall back to the committed version"
 
       # 90 days rather than the old 14. Artifacts are no longer where the
       # website gets its images (that is the release below, which never
