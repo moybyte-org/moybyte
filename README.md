@@ -144,6 +144,24 @@ Arrows move, `Enter` runs, `M` menu, `H` home, `Esc` quits; the mouse is the
 touchscreen. Tap **Make ✏️** to open the editor on any cart, including the ones
 you just played.
 
+**On Windows**, the Makefile doesn't apply (it is POSIX), so `make setup` is
+spelled out — and a Lua cart needs one package the extras don't install:
+
+```bat
+py -3 -m venv .venv
+.venv\Scripts\python -m pip install --upgrade pip setuptools
+.venv\Scripts\python -m pip install -e ".[dev,sim]"
+.venv\Scripts\python -m pip install lupa      :: only if you run LUA carts
+
+.venv\Scripts\python tools\simulate_desktop.py
+```
+
+`lupa` is the host's Lua 5.4 VM (`runtime/lua_host.py`); without it a
+`"runtime": "lua"` cart opens the "needs the Lua runtime" panel instead of
+running. That is true on every platform — it is an optional dependency, and
+Python carts never need it. Every command below works as written with
+`.venv\Scripts\python` in place of `.venv/bin/python`.
+
 ```bash
 # the P4's windowed desktop tier, on your PC
 .venv/bin/python tools/simulate_desktop.py --size 1024x600 --windowed
