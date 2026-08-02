@@ -418,10 +418,26 @@ reflashes during dev now target the `ota_0` offset `0x20000` via `MPY_APP_OFFSET
 
 If the device is online, it can pull the image itself instead of you copying it to SD:
 
-- Put a tiny config on the card at **`/sd/update/ota.json`**:
+- **Out of the box there is nothing to configure.** The two channels are the two
+  branches, and CI publishes a `latest.json` on each one's rolling release, which
+  `moy_ota.DEFAULT_CHANNEL_URLS` points at:
+
+  | Settings → CHANNEL | branch | release | what it is |
+  |---|---|---|---|
+  | STABLE | `master` | `firmware-latest` | tested; also what the site's flasher writes |
+  | BETA | `dev` | `firmware-beta` | every dev push, untested by definition |
+
+  (Release assets redirect to GitHub's CDN, so the updater follows redirects —
+  see `_http_open`. **This path is unverified on glass**; the LAN one below is
+  the hardware-confirmed one.)
+- To point a board somewhere else — a LAN host, an offline classroom, your own
+  build — put a config on the card at **`/sd/update/ota.json`**, which WINS over
+  the defaults:
   ```json
-  { "manifest_url": "https://your-host/moybyte/latest.json" }
+  { "channels": { "stable": "https://your-host/moybyte/stable/latest.json",
+                  "unstable": "https://your-host/moybyte/unstable/latest.json" } }
   ```
+  (The older single-channel `{ "manifest_url": ... }` is still honoured.)
 - The **manifest** at that URL describes the latest build:
   ```json
   { "version": 2, "url": "https://your-host/moybyte/moybyte_micropython_tdeck.bin",
@@ -442,9 +458,13 @@ If the device is online, it can pull the image itself instead of you copying it 
   `version > FIRMWARE_VERSION` it **streams the `.bin` straight to `/sd/update/firmware.bin`**
   (raw socket → SD, never buffering the whole 3 MB in RAM), verifying `size` + `sha256`.
   It then hands off to the same confirm → install → reboot path as above.
-- **Bump `FIRMWARE_VERSION` in `modules/moy_ota.py` on every release** and set the
-  manifest `version` to match — the online check only offers an update when the
-  manifest is strictly newer (same convention as cart versioning).
+- **`FIRMWARE_VERSION` is bumped by `make release`**, which is also what merges `dev`
+  into `master` — the merge is the release, so the two happen together and the
+  constant is never hand-edited. The manifest's `version` always matches the image
+  it describes: CI reads it back out of the identity `build.sh` stamped into the
+  build (a beta's is a build epoch, so every dev push reads as newer). The online
+  check offers an update when the manifest is strictly newer within the channel, or
+  belongs to the other channel (same convention as cart versioning).
 
 `http://` and `https://` are both supported (TLS via the frozen `ssl`). The downloaded
 image is checksummed before it can be flashed, and a corrupt/truncated download (or a

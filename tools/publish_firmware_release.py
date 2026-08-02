@@ -1,21 +1,29 @@
 #!/usr/bin/env python3
-"""Publish this build's firmware images to the rolling `firmware-latest` release.
+"""Publish this build's firmware images to a rolling per-CHANNEL release.
 
 The website flashes boards from images it serves itself, and it has to get them
 from somewhere durable. Actions artifacts expire; committing 7.4 MB of .bin per
 build would outgrow the whole repository within a month. A release costs a clone
 nothing, keeps the images forever, and gives humans a download page.
 
+TWO releases, one per branch/channel, and they never mix (CLAUDE.md ->
+"Branches and releases"):
+
+    master -> `firmware-latest`   stable: the site's flasher + the stable OTA
+    dev    -> `firmware-beta`     beta:   the unstable OTA channel only
+
 The release is ROLLING and per-board: each board's asset is replaced when that
 board is rebuilt, so the T-Deck and P4 images can be from different commits.
-That is deliberate -- the build workflow is dispatched per board -- and each
-image carries its own provenance beside it:
+That is deliberate -- the build workflow also runs per board -- and each image
+carries its own provenance beside it:
 
     firmware-latest/
       tdeck-moybyte-current-full-dio-0x0.bin
       tdeck-source.json        <- commit, run, date for THAT image
       p4-moybyte_p4.bin
       p4-source.json
+      tdeck-moybyte-current-app.bin   <- the OTA payload (app slot, not 0x0)
+      latest.json                     <- the OTA manifest pointing at it
 
 The `<board>-` prefix is how flat release assets keep the per-board layout that
 tools/fetch_ci_firmware.py rebuilds on the way back down; board ids therefore
@@ -25,7 +33,7 @@ Which image each board publishes is NOT decided here: it is read out of
 site/build.py's BOARDS table, the same table the page's flasher writes from, so
 there is one list of "the image we flash" and not two.
 
-    tools/publish_firmware_release.py --artifacts artifacts   # in CI
+    tools/publish_firmware_release.py --artifacts artifacts --channel stable
 
 Needs the `gh` CLI with `contents: write`. Boards absent from the artifacts
 folder are left untouched on the release -- a single-board dispatch must not
@@ -42,14 +50,47 @@ import subprocess
 import sys
 import tempfile
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from gen_ota_manifest import build_manifest, read_firmware_version  # noqa: E402
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TAG = "firmware-latest"
 TITLE = "Firmware — latest build"
 
+# channel -> the release it rolls, and the branch that produces it. The channel
+# ids are the device's (moy_ota.FIRMWARE_CHANNEL, Settings -> CHANNEL): kept as
+# stable/unstable rather than renamed to master/dev because they are baked into
+# shipped images and persisted settings on boards already in the world.
+CHANNELS = {
+    "stable": {
+        "tag": TAG,
+        "title": TITLE,
+        "branch": "master",
+        "blurb": "the tested branch — this is what the site's flasher writes",
+    },
+    "unstable": {
+        "tag": "firmware-beta",
+        "title": "Firmware — beta (dev)",
+        "branch": "dev",
+        "blurb": "**untested** builds off `dev`, published on every push — "
+                 "opt in from Settings → CHANNEL, and note the bootloader "
+                 "rolls a bad image back on its own",
+    },
+}
+
+# The OTA payload is NOT the image the site flashes. The flasher writes a whole
+# chip at 0x0; an OTA writes the APP into the inactive slot, so the manifest has
+# to point at the app image. Only the T-Deck has an OTA updater (the P4 has no
+# moy_ota module yet, #58), so this is a board-specific extra rather than a
+# column in the BOARDS table.
+OTA_BOARD = "tdeck"
+OTA_IMAGE = "moybyte-current-app.bin"
+OTA_STAMP = "ota_build.json"     # build.sh's baked identity, carried in the artifact
+MANIFEST_NAME = "latest.json"
+
 NOTES_HEAD = """\
-The current firmware for each board, rebuilt by the **Firmware build** workflow.
-This is exactly what the [project site]({site})'s flasher writes, and what
-`tools/fetch_ci_firmware.py` pulls down.
+The current **{channel}** firmware for each board, rebuilt by the **Firmware
+build** workflow from `{branch}` — {blurb}.
 
 """
 
@@ -65,6 +106,14 @@ Flash it from the site, or over a cable:
 make firmware-flash-lilygo-micropython-full PORT=/dev/ttyACM0   # T-Deck
 make firmware-flash-p4 PORT=/dev/ttyACM0                        # ESP32-P4
 ```
+"""
+
+NOTES_OTA = """
+### Over the air
+
+`latest.json` is this channel's OTA manifest and `{image}` is the app image it
+describes — the device's Settings → UPDATE ONLINE reads them directly, so no
+host of your own is needed. Running build: **{label}** (version `{version}`).
 """
 
 
@@ -121,6 +170,69 @@ def stage(boards, artifacts, workdir):
     return staged
 
 
+def read_stamp(artifacts, board_id=OTA_BOARD):
+    """build.sh's `ota_build.json` for this run's image: {channel, version, label}.
+
+    The image's identity is a BUILD-time fact (a beta's version is the build's
+    epoch), so it travels with the artifact. Re-deriving it here would let the
+    manifest advertise a version the image does not carry -- and a manifest
+    whose version is higher than the image it installs offers that same install
+    forever."""
+    path = os.path.join(artifacts, "moybyte-firmware-%s" % board_id, OTA_STAMP)
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def asset_url(tag, name, repo=None):
+    """The public download URL of a release asset (a 302 to the CDN, which the
+    device's updater follows -- see moy_ota._http_open)."""
+    repo = repo or os.environ.get("GITHUB_REPOSITORY") or "moybyte-org/moybyte"
+    return "https://github.com/%s/releases/download/%s/%s" % (repo, tag, name)
+
+
+def stage_ota(tag, channel, artifacts, workdir, repo=None):
+    """Stage the OTA app image + `latest.json` for this channel, or None.
+
+    Returns the manifest dict when the OTA board was built in this run. A run
+    that built only the P4 leaves the channel's existing manifest alone, exactly
+    like an unbuilt board's image."""
+    folder = os.path.join(artifacts, "moybyte-firmware-%s" % OTA_BOARD)
+    src = os.path.join(folder, OTA_IMAGE)
+    if not os.path.exists(src):
+        print("%-6s no %s in this run -- OTA manifest unchanged"
+              % (OTA_BOARD, OTA_IMAGE))
+        return None
+
+    name = "%s-%s" % (OTA_BOARD, OTA_IMAGE)
+    shutil.copyfile(src, os.path.join(workdir, name))
+
+    stamp = read_stamp(artifacts)
+    baked = stamp.get("channel")
+    if baked and baked != channel:
+        # The image says one thing and the publisher another: trust the image
+        # (it is what the device will run) and say so loudly.
+        print("WARNING: image was built for channel %r but publishing to %r -- "
+              "using the image's" % (baked, channel))
+        channel = baked
+    version = stamp.get("version")
+    if version is None:
+        version = read_firmware_version()
+        print("no %s in the artifact -- falling back to FIRMWARE_VERSION=%d"
+              % (OTA_STAMP, version))
+    manifest = build_manifest(os.path.join(workdir, name),
+                              asset_url(tag, name, repo),
+                              version, channel, stamp.get("label"))
+    with open(os.path.join(workdir, MANIFEST_NAME), "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2, sort_keys=True)
+        f.write("\n")
+    print("%-6s staged %s + %s (channel=%s version=%s)"
+          % (OTA_BOARD, name, MANIFEST_NAME, channel, manifest["version"]))
+    return manifest
+
+
 def existing_source(tag, board_id, workdir):
     """The provenance of a board we did NOT rebuild, off the release itself."""
     got = gh("release", "download", tag, "-p", "%s-source.json" % board_id,
@@ -134,9 +246,10 @@ def existing_source(tag, board_id, workdir):
         return None
 
 
-def notes(tag, boards, workdir, site):
+def notes(tag, channel, boards, workdir, site, manifest=None):
     """A release body that states each board's REAL provenance, including the
     board this run did not rebuild (read back off the release)."""
+    spec = CHANNELS[channel]
     rows = ["| board | image | flash at | built | commit |",
             "|---|---|---|---|---|"]
     for board in boards:
@@ -149,34 +262,48 @@ def notes(tag, boards, workdir, site):
                     % (board["label"], board["id"], src.get("image", "?"),
                        board["offset"], src.get("built", "?")[:10],
                        ("`%s`" % commit[:7]) if commit else "—"))
-    return NOTES_HEAD.format(site=site) + "\n".join(rows) + "\n" + NOTES_TAIL
+    head = NOTES_HEAD.format(channel="beta" if channel == "unstable" else channel,
+                             branch=spec["branch"], blurb=spec["blurb"], site=site)
+    body = head + "\n".join(rows) + "\n" + NOTES_TAIL
+    if manifest:
+        body += NOTES_OTA.format(image="%s-%s" % (OTA_BOARD, OTA_IMAGE),
+                                 label=manifest.get("label", "?"),
+                                 version=manifest.get("version", "?"))
+    return body
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--artifacts", default="artifacts",
                     help="actions/download-artifact's output folder")
-    ap.add_argument("--tag", default=TAG)
+    ap.add_argument("--channel", default="stable", choices=sorted(CHANNELS),
+                    help="which channel/release to roll (default: stable)")
+    ap.add_argument("--tag", help="override the channel's release tag")
     ap.add_argument("--site", default="https://moybyte-org.github.io/moybyte/")
     ap.add_argument("--dry-run", action="store_true",
                     help="stage and print, upload nothing")
     args = ap.parse_args()
 
-    tag = args.tag
+    channel = args.channel
+    spec = CHANNELS[channel]
+    tag = args.tag or spec["tag"]
     boards = boards_table()
     workdir = tempfile.mkdtemp(prefix="moy-release-")
     try:
         staged = stage(boards, os.path.abspath(args.artifacts), workdir)
+        manifest = stage_ota(tag, channel, os.path.abspath(args.artifacts),
+                             workdir)
         if not staged:
             print("nothing built in this run -- the release is unchanged")
             return 0
         if args.dry_run:
-            print("would upload: %s" % ", ".join(sorted(os.listdir(workdir))))
+            print("would upload to %s: %s"
+                  % (tag, ", ".join(sorted(os.listdir(workdir)))))
             return 0
 
         # Create on first use; after that every publish just replaces assets.
         if gh("release", "view", tag, check=False).returncode != 0:
-            gh("release", "create", tag, "--title", TITLE, "--prerelease",
+            gh("release", "create", tag, "--title", spec["title"], "--prerelease",
                "--notes", "Publishing…")
             print("created the %s release" % tag)
 
@@ -189,7 +316,7 @@ def main():
         # Written AFTER the upload, so the table describes what is now there.
         body = os.path.join(workdir, "notes.md")
         with open(body, "w", encoding="utf-8") as f:
-            f.write(notes(tag, boards, workdir, args.site))
+            f.write(notes(tag, channel, boards, workdir, args.site, manifest))
         gh("release", "edit", tag, "--notes-file", body)
         return 0
     finally:

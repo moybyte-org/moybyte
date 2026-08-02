@@ -175,3 +175,138 @@ def test_the_workflow_publishes_what_the_fetcher_looks_for():
     assert "tools/fetch_ci_firmware.py" in pages
     # The artifact fallback still needs its read scope.
     assert "actions: read" in pages
+
+
+# -- the two channels are the two branches ----------------------------------
+#
+# `dev` publishes beta images and `master` publishes the ones people get. The
+# tests below are about the seam where that can silently break: an image that
+# introduces itself with the wrong channel, a manifest advertising a version its
+# image does not carry (which offers the same install forever), or a beta asset
+# reaching the site's flasher.
+
+STAMP = {"channel": "unstable", "version": 1754161200, "label": "beta 2026-08-02 18:00"}
+
+
+def _load_moy_ota():
+    return _load("firmware/lilygo_t_deck_plus_micropython/modules/moy_ota.py",
+                 "_moy_ota_device")
+
+
+def _artifacts_with_ota(tmp_path, stamp=STAMP, board="tdeck"):
+    """An artifacts folder as the build job uploads it: the flashable image, the
+    OTA app image, and build.sh's identity stamp beside them."""
+    folder = tmp_path / "artifacts" / ("moybyte-firmware-%s" % board)
+    folder.mkdir(parents=True)
+    spec = next(b for b in build.BOARDS if b["id"] == board)
+    (folder / spec["images"][0]).write_bytes(b"IMAGE:" + board.encode())
+    (folder / publish.OTA_IMAGE).write_bytes(b"\xe9APP:" + board.encode() * 8)
+    if stamp is not None:
+        (folder / publish.OTA_STAMP).write_text(json.dumps(stamp))
+    return tmp_path / "artifacts"
+
+
+def test_each_channel_rolls_its_own_release():
+    assert publish.CHANNELS["stable"]["tag"] == fetch.RELEASE_TAG
+    assert publish.CHANNELS["unstable"]["tag"] != fetch.RELEASE_TAG
+    # ... which is what keeps a dev build off the site: the fetcher (and so the
+    # page's flasher) only ever reads the stable tag.
+    assert publish.CHANNELS["stable"]["branch"] == "master"
+    assert publish.CHANNELS["unstable"]["branch"] == "dev"
+
+
+def test_the_ota_manifest_describes_the_app_image_not_the_flashed_one(tmp_path):
+    """An OTA writes the app slot; the site flashes the whole chip at 0x0. The
+    manifest must point at the former -- handing a device a 0x0 image would
+    write a bootloader into an app partition."""
+    artifacts = _artifacts_with_ota(tmp_path)
+    out = tmp_path / "release"
+    out.mkdir()
+    manifest = publish.stage_ota("firmware-beta", "unstable", str(artifacts),
+                                 str(out), repo="moybyte-org/moybyte")
+    name = "%s-%s" % (publish.OTA_BOARD, publish.OTA_IMAGE)
+    assert manifest["url"].endswith("/firmware-beta/" + name)
+    assert manifest["filename"] == name
+    assert (out / name).exists() and (out / publish.MANIFEST_NAME).exists()
+    # size + sha256 are of the bytes actually staged, not of anything remembered.
+    payload = (out / name).read_bytes()
+    assert manifest["size"] == len(payload)
+    on_disk = json.load(open(str(out / publish.MANIFEST_NAME)))
+    assert on_disk == manifest
+
+    flashed = next(b for b in build.BOARDS if b["id"] == "tdeck")["images"][0]
+    assert publish.OTA_IMAGE != flashed
+
+
+def test_the_manifest_version_is_the_one_baked_into_the_image(tmp_path):
+    """A beta's version is a build-time epoch. Re-deriving it at publish time
+    would advertise a number the image does not carry, so every check after the
+    install would offer that same install again."""
+    artifacts = _artifacts_with_ota(tmp_path)
+    out = tmp_path / "release"
+    out.mkdir()
+    manifest = publish.stage_ota("firmware-beta", "unstable", str(artifacts),
+                                 str(out))
+    assert manifest["version"] == STAMP["version"]
+    assert manifest["label"] == STAMP["label"]
+    assert manifest["channel"] == "unstable"
+
+
+def test_the_image_says_which_channel_it_is(tmp_path, capsys):
+    """Publisher and image disagreeing means the build was stamped for the other
+    channel. The image is what the device will run, so it wins -- loudly."""
+    artifacts = _artifacts_with_ota(tmp_path)          # stamped unstable
+    out = tmp_path / "release"
+    out.mkdir()
+    manifest = publish.stage_ota("firmware-latest", "stable", str(artifacts),
+                                 str(out))
+    assert manifest["channel"] == "unstable"
+    assert "WARNING" in capsys.readouterr().out
+
+
+def test_a_run_without_the_ota_board_leaves_the_channel_alone(tmp_path):
+    """Same rule as an unbuilt board's image: publish nothing rather than
+    something stale. (Only the T-Deck has an updater -- the P4 has no moy_ota.)"""
+    artifacts = _artifacts_with_ota(tmp_path, board="p4", stamp=None)
+    out = tmp_path / "release"
+    out.mkdir()
+    assert publish.stage_ota("firmware-latest", "stable", str(artifacts),
+                             str(out)) is None
+    assert os.listdir(str(out)) == []
+
+
+def test_the_device_looks_where_ci_publishes():
+    """moy_ota's baked defaults and the publisher's asset URLs are two halves of
+    one contract, written in two languages and never executed together."""
+    moy_ota = _load_moy_ota()
+    assert set(moy_ota.DEFAULT_CHANNEL_URLS) == set(publish.CHANNELS)
+    for channel, spec in publish.CHANNELS.items():
+        want = publish.asset_url(spec["tag"], publish.MANIFEST_NAME,
+                                 repo="moybyte-org/moybyte")
+        assert moy_ota.DEFAULT_CHANNEL_URLS[channel] == want, channel
+
+
+def test_the_workflows_keep_the_branches_apart():
+    wf = open(os.path.join(ROOT, ".github", "workflows", "firmware-build.yml"),
+              encoding="utf-8").read()
+    # The channel is derived from the ref, so a dev build cannot introduce
+    # itself to a device as a stable release.
+    assert "MOYBYTE_OTA_CHANNEL: ${{ github.ref == 'refs/heads/master' " \
+           "&& 'stable' || 'unstable' }}" in wf
+    assert "--channel \"$CHANNEL\"" in wf
+    # Both branches build; only those two publish.
+    assert "branches: [master, dev]" in wf
+    assert "github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev'" in wf
+    # The stamp has to reach the publish job or the manifest version is a guess.
+    assert publish.OTA_STAMP in wf
+    assert "path: out/*\n" in wf
+
+    ci = open(os.path.join(ROOT, ".github", "workflows", "ci.yml"),
+              encoding="utf-8").read()
+    assert '"master", "main", "dev"' in ci     # the untested branch is tested
+
+    pages = open(os.path.join(ROOT, ".github", "workflows", "pages.yml"),
+                 encoding="utf-8").read()
+    # The public site follows master only -- a beta build must not republish it.
+    assert "github.event.workflow_run.head_branch == 'master'" in pages
+    assert "branches: [master]" in pages

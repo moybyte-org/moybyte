@@ -27,7 +27,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: setup test site site-firmware site-gifs site-hero firmware-build-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-build-p4 firmware-flash-p4 firmware-monitor-p4 firmware-stage-xiao-zero ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install sync-issues check-venv
+.PHONY: setup test site site-firmware site-gifs site-hero firmware-build-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-build-p4 firmware-flash-p4 firmware-monitor-p4 firmware-stage-xiao-zero ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install release sync-issues check-venv
 
 # A PLAIN venv on purpose. Two flags used to live here and both hid bugs on every
 # machine but the maintainer's:
@@ -52,7 +52,7 @@ check-venv:
 	@test -x $(PYTHON) || { echo "no venv at $(VENV)/ -- run: make setup"; exit 1; }
 
 VENV_TARGETS := test \
-                site-gifs site-hero sync-issues \
+                site-gifs site-hero sync-issues release \
                 ota-manifest ota-serve ota-publish-unstable \
                 ota-publish-stable ota-host ota-serve-install firmware-flash-p4 \
                 firmware-monitor-p4
@@ -116,6 +116,13 @@ ota-manifest:
 ota-serve:
 	cd $(MPY_FW_DIR)/dist && $(PYTHON) -m http.server $(OTA_PORT)
 
+# The two OTA channels are the two BRANCHES, and CI publishes both (a push to master
+# rolls the `firmware-latest` release, a push to dev rolls `firmware-beta`; moy_ota's
+# DEFAULT_CHANNEL_URLS point at them, so a device needs no ota.json and no host of its
+# owner's). The targets below stay the LOCAL path: publishing from an uncommitted tree,
+# or serving a channel on a LAN with no internet. An /sd/update/ota.json still overrides
+# the baked defaults, which is how a device is pointed at OTA_ROOT instead of GitHub.
+#
 # Publish the CURRENT working tree (uncommitted OK) as a BETA build the device can pull
 # over WiFi: build with the unstable channel stamp, then copy the image + a matching
 # manifest into OTA_ROOT/unstable/. No commit, no PC needed by the tester -- on the
@@ -147,6 +154,16 @@ ota-serve-install:
 	systemctl --user enable --now moybyte-ota.service
 	loginctl enable-linger $(USER) || true
 	@echo "OTA host: serving $(OTA_ROOT) on :$(OTA_PORT) (systemd --user moybyte-ota)"
+
+# Cut a release: merge dev into master and bump moy_ota.FIRMWARE_VERSION (tools/
+# release.py explains the whole sequence). Work lands on `dev`, which CI publishes as
+# beta; `master` is what users get, so the merge is the release and the bump rides it.
+# It stops BEFORE pushing -- pushing master is the moment a device is offered the build.
+#   make release
+#   make release NOTES="what changed for a device owner"
+#   make release PUSH=1
+release:
+	$(PYTHON) tools/release.py $(if $(NOTES),--notes "$(NOTES)") $(if $(PUSH),--push)
 
 firmware-flash-lilygo-micropython:
 	$(REQUIRE_PORT)

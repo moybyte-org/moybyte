@@ -40,8 +40,11 @@ IMAGE_MAGIC = 0xE9          # first byte of an ESP32 app image (esp_image_header
 # when the manifest is for a DIFFERENT channel than the running build (a deliberate
 # stable<->unstable switch -- so a kid can opt into beta and always drop back) OR
 # advertises a higher "version" within the SAME channel.
-#   FIRMWARE_VERSION -- monotonic build number; bump per stable release. Unstable (beta)
-#       builds stamp an auto-incrementing version so every publish reads as newer.
+#   FIRMWARE_VERSION -- monotonic build number, bumped per stable release. `make release`
+#       (tools/release.py) owns it: the merge of dev into master IS the release, so the
+#       bump rides that merge rather than whichever commit happened to land last.
+#       Unstable (beta) builds ignore it and stamp a build epoch, so every dev push reads
+#       as newer than the last for anyone on the beta channel.
 #   FIRMWARE_CHANNEL -- "stable" (master) or "unstable" (dev/beta). The build STAMPS this
 #       (and the version) via a generated `_ota_build` module from MOYBYTE_OTA_CHANNEL, so
 #       the committed default stays "stable" and the channel is a build choice -- clean
@@ -60,6 +63,20 @@ except Exception:
     pass
 
 OTA_CFG_NAME = "ota.json"        # /sd/update/ota.json -> {"channels": {"stable": url, ...}}
+
+# Where each channel lives when the card says nothing. The two branches publish
+# one rolling release each (CLAUDE.md -> "Branches and releases"), and CI writes
+# `latest.json` beside the app image on both -- so a board straight off the
+# flasher can check for updates with no ota.json and no host of the owner's own.
+# An /sd/update/ota.json still WINS, which is how a LAN test against
+# `make ota-publish-unstable` + `make ota-serve` overrides these.
+#   stable   <- master, the tested branch (firmware-latest)
+#   unstable <- dev, every push (firmware-beta)
+_GH = "https://github.com/moybyte-org/moybyte/releases/download"
+DEFAULT_CHANNEL_URLS = {
+    "stable": _GH + "/firmware-latest/latest.json",
+    "unstable": _GH + "/firmware-beta/latest.json",
+}
 DOWNLOAD_NAME = "firmware.bin"   # WiFi downloads land here (then the Phase-2 install runs)
 DL_CHUNK = 16384                 # bytes streamed (and written to SD in ONE op) per frame.
                                  # The per-frame cost (panel flush + SD sync + repaint) is
@@ -318,10 +335,12 @@ class OtaUpdater:
     # path takes the downloaded file. UNVERIFIED on hardware (see the class docstring).
 
     def manifest_url(self, channel=None):
-        """The configured manifest URL for `channel` from /sd/update/ota.json, or None.
+        """The manifest URL for `channel`: /sd/update/ota.json if it names one, else
+        the baked DEFAULT_CHANNEL_URLS (the GitHub release each branch publishes).
         Schema: {"channels": {"stable": url, "unstable": url}}; falls back to the running
         channel, then "stable", then any. A legacy {"manifest_url": url} is honoured as
-        the single (stable) channel for back-compat."""
+        the single (stable) channel for back-compat. The card WINS over the default so a
+        LAN/offline host stays a one-file override."""
         def _read():
             try:
                 import json
@@ -339,9 +358,12 @@ class OtaUpdater:
             except Exception:
                 return None
         try:
-            return self._with_sd(_read)
+            url = self._with_sd(_read)
         except Exception:
-            return None
+            url = None
+        if url:
+            return url
+        return DEFAULT_CHANNEL_URLS.get(channel or FIRMWARE_CHANNEL)
 
     def wifi_online(self):
         if self._wifi is None:
@@ -566,9 +588,33 @@ class OtaUpdater:
             host = hostport
         return scheme, host, port, path
 
-    def _http_open(self, url):
+    def _http_open(self, url, hops=4):
+        """`_http_open_once` + redirect following, which is what makes the
+        GitHub-hosted channels (DEFAULT_CHANNEL_URLS) reachable: a release
+        download is a 302 to the objects.githubusercontent.com CDN, and the
+        manifest beside it redirects the same way. Returns the FINAL response."""
+        seen = 0
+        while True:
+            sock, code, clen, rest, loc = self._http_open_once(url)
+            if code not in (301, 302, 303, 307, 308) or not loc or seen >= hops:
+                return sock, code, clen, rest
+            try:
+                sock.close()
+            except Exception:
+                pass
+            seen += 1
+            # A relative Location is legal; resolve it against the current host.
+            if loc.startswith("/"):
+                scheme, host, port, _ = self._parse_url(url)
+                dflt = 443 if scheme == "https" else 80
+                loc = "%s://%s%s%s" % (scheme, host,
+                                       "" if port == dflt else ":%d" % port, loc)
+            _log("redirect %d -> %s" % (code, loc))
+            url = loc
+
+    def _http_open_once(self, url):
         """Connect + send GET + read the response headers. Returns
-        (sock, status_code, content_length, leftover_body_bytes)."""
+        (sock, status_code, content_length, leftover_body_bytes, location)."""
         import socket
 
         scheme, host, port, path = self._parse_url(url)
@@ -606,14 +652,21 @@ class OtaUpdater:
             except Exception:
                 code = 0
         clen = 0
+        loc = None
         for ln in lines[1:]:
-            if ln.lower().startswith(b"content-length:"):
+            low = ln.lower()
+            if low.startswith(b"content-length:"):
                 try:
                     clen = int(ln.split(b":", 1)[1].strip())
                 except Exception:
                     clen = 0
-        _log("http status=%d content-length=%d" % (code, clen))
-        return sock, code, clen, rest
+            elif low.startswith(b"location:"):
+                try:
+                    loc = ln.split(b":", 1)[1].strip().decode()
+                except Exception:
+                    loc = None
+        _log("http status=%d content-length=%d loc=%s" % (code, clen, loc))
+        return sock, code, clen, rest, loc
 
     def _http_get_text(self, url, limit=8192):
         """Fetch a small text resource (the manifest) fully into RAM."""
