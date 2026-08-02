@@ -248,3 +248,123 @@ def test_idle_screen_blank_and_wake(board):
     line = board.cmd("power", wait_for="REMOTE power")
     assert "asleep=False" in line, "a disabled timer still blanked: %r" % line
     board.cmd("power 300", wait_for="REMOTE power")     # restore the default
+
+
+# -- the OTA manifest verifier, on real MicroPython (#53) ---------------------
+#
+# The P4 has no moy_ota -- the updater is T-Deck-only -- but it is the board
+# with a live REPL, and the thing worth proving is language-level, not
+# board-level: that the SHIPPED verifier runs under MicroPython at all. The host
+# suite proves the maths in CPython, where int(hex, 16) at 512 characters,
+# int.to_bytes(256, 'big') and a 2048-bit 3-argument pow are all free. On the
+# device each of those is a build-configuration question that was read out of
+# mpconfig.h and asserted. This executes them.
+#
+# The code under test is EXTRACTED from moy_ota.py by ast rather than retyped,
+# so a change there is picked up here instead of drifting; the only edits are
+# mechanical (dedent the methods, drop `self`).
+
+def _extract_verifier():
+    import ast
+    import textwrap
+
+    path = ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules" / "moy_ota.py"
+    src = path.read_text(encoding="utf-8")
+    tree = ast.parse(src)
+
+    def const(name):
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") == name:
+                return ast.get_source_segment(src, node)
+        raise AssertionError("constant vanished from moy_ota: " + name)
+
+    def method(name):
+        for cls in tree.body:
+            if isinstance(cls, ast.ClassDef) and cls.name == "OtaUpdater":
+                for f in cls.body:
+                    if isinstance(f, ast.FunctionDef) and f.name == name:
+                        out = textwrap.dedent(ast.get_source_segment(src, f))
+                        out = out.replace("def %s(self, " % name, "def %s(" % name)
+                        return out.replace("self._", "_")
+        raise AssertionError("method vanished from moy_ota: " + name)
+
+    return "\n".join([const("OTA_SCHEME"), const("_SHA256_DER"),
+                      const("OTA_PUBLIC_KEYS"), method("_canonical"),
+                      method("_verify_manifest")])
+
+
+def _val(board, expr, timeout=30):
+    """Evaluate `expr` in the PERSISTENT device namespace.
+
+    The device's `py` handler builds a FRESH env per command, so anything
+    pyexec uploaded lives in ws._g and nowhere else -- a bare pyval of a name
+    defined up there comes back None (a device NameError), which reads exactly
+    like a failed assertion and is not one."""
+    return board.pyval("eval(%r, ws._g)" % expr, timeout=timeout)
+
+
+SIGNED_MANIFEST = {
+    "channel": "unstable", "version": 1785665581, "size": 4292512,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "url": "https://example/app.bin", "label": "beta",
+}
+
+
+def test_the_shipped_verifier_runs_on_micropython(board):
+    """Signed here rather than pasted from a release: the test has to keep
+    working when the key is rotated, and the private half of the real one is a
+    GitHub secret that is deliberately not on this machine."""
+    import sys as _sys
+
+    _sys.path.insert(0, str(ROOT / "tests"))
+    from test_ota_signing import TEST_KEYS, sign_with_test_key
+
+    manifest = dict(SIGNED_MANIFEST)
+    manifest["sig"] = sign_with_test_key(manifest)
+
+    assert board.pyexec(_extract_verifier(), timeout=90), "verifier upload failed"
+    assert board.pyexec(
+        "KEYS = %r\nMANIFEST = %r\n" % (TEST_KEYS, manifest), timeout=90)
+
+    # The MicroPython API questions, asked one at a time so a failure names itself.
+    assert _val(board, "int(KEYS[0][0], 16).__class__.__name__") == "int"
+    assert _val(board, "len(int(KEYS[0][0], 16).to_bytes(256, 'big'))") == 256
+    assert _val(board,
+        "__import__('hashlib').sha256(b'moybyte').digest()[:4]") == b"\xbd\xd3\xd1\xb4"
+
+    assert _val(board, "_verify_manifest(MANIFEST, KEYS)") is True
+
+
+def test_verification_is_fast_enough_to_not_think_about(board):
+    """Measured 2026-08-02: 35ms modexp, 41ms whole verify. The bound is loose
+    on purpose -- it exists to catch an ORDER-of-magnitude regression (a
+    software-int fallback, a bigger key), not to police jitter. It runs once per
+    update check, behind a screen already waiting on the network."""
+    assert board.pyexec(
+        "import time\n"
+        "t0 = time.ticks_us()\n"
+        "for _ in range(5):\n"
+        "    _verify_manifest(MANIFEST, KEYS)\n"
+        "VERIFY_US = time.ticks_diff(time.ticks_us(), t0) // 5\n", timeout=60)
+    us = board.pyval("ws._g['VERIFY_US']")
+    print("\nverify_manifest: %dus (%.1fms)" % (us, us / 1000.0))
+    assert 0 < us < 500_000, "verify took %dus -- something got much slower" % us
+
+
+def test_a_tampered_manifest_is_refused_on_the_device(board):
+    """Every field the signature covers, refused on real hardware -- and junk in
+    the signature refused without raising, because whatever arrives off the wire
+    lands straight in int(sig, 16) and pow()."""
+    for field, value in (("sha256", "0" * 64), ("version", 999),
+                         ("size", 1), ("channel", "stable")):
+        got = _val(board, "_verify_manifest(dict(MANIFEST, **{%r: %r}), KEYS)"
+                          % (field, value))
+        assert got is False, "tampering with %s was accepted" % field
+
+    assert _val(
+        board, "_verify_manifest({k: v for k, v in MANIFEST.items() if k != 'sig'}, KEYS)"
+    ) is False, "an unsigned manifest verified"
+
+    for junk in ("", "zz", "00", "ff" * 256):
+        assert _val(board, "_verify_manifest(dict(MANIFEST, sig=%r), KEYS)"
+                           % junk) is False, "junk signature %r accepted" % junk

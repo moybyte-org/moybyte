@@ -88,7 +88,15 @@ DEFAULT_CHANNEL_URLS = {
 # half is here, in the image the owner flashed over a cable.
 #
 # RSA-2048/SHA-256 PKCS#1 v1.5, chosen for the verifier: pow(sig, 65537, n) is
-# ~17 modular squarings of a 2048-bit int, single-digit ms with no native code.
+# ~17 modular squarings of a 2048-bit int, which MicroPython does in C with no
+# native module of ours. MEASURED on the P4 (2026-08-02, this exact code run on
+# real MicroPython over the serial harness): 35ms for the modexp, 41ms for a
+# whole verify_manifest. Expect the T-Deck to be slower -- 240MHz Xtensa against
+# the P4's RISC-V -- so budget ~100ms and no more thought than that: it happens
+# once per check, behind a CHECKING screen already waiting on the network. (An
+# earlier estimate here said "single-digit ms" and was simply wrong; mpz reduces
+# by division, which is the cost. Ed25519 remains far worse -- pure-Python
+# scalar multiplication runs into seconds.)
 # That rests on two build facts, both checked in the tree rather than assumed:
 # 3-argument pow is MICROPY_PY_BUILTINS_POW3, which mpconfig.h enables at
 # ROM_LEVEL_EXTRA_FEATURES, and the esp32 port sets exactly that level. A port
