@@ -231,6 +231,7 @@ class OtaUpdater:
         self.done = 0             # bytes flashed so far
         self.path = None          # the image being installed
         self.error = None         # last error string (shown by the console)
+        self.absent = False       # the channel simply has nothing for this board yet
         self.confirmed = False   # has confirm_when_healthy already fired this boot?
         self._loops = 0           # frame-loop iterations it has been called from
         self.boot_verdict = None  # ("ok"|"rolled_back", text) from the previous install
@@ -748,6 +749,7 @@ class OtaUpdater:
         on any failure. Blocking network call -- the console runs it once, between
         frames, behind a CHECKING... screen."""
         self.error = None
+        self.absent = False
         _log("check_online channel=%r running=%s/%s" % (
             channel, FIRMWARE_CHANNEL, FIRMWARE_VERSION))
         url, from_card = self._manifest_source(channel)
@@ -770,6 +772,15 @@ class OtaUpdater:
             _log("manifest body len=", len(txt) if txt is not None else None,
                  "err=", self.error)
             if txt is None:
+                # A manifest that isn't there is not a broken update -- it is a
+                # channel with nothing published for this board yet, which is
+                # the normal state of a channel before its first release. Saying
+                # "Update didn't finish, http 404" blames the kid's console for
+                # the absence of a file on a server.
+                if self.error in ("http 404", "http 410"):
+                    _log("no manifest published on this channel for", BOARD)
+                    self.error = None
+                    self.absent = True
                 return None
             import json
 

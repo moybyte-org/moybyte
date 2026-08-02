@@ -1731,9 +1731,29 @@ class Workstation:
         return out
 
     def _ota_channel(self):
-        """The selected OTA update channel ("stable" default / "unstable" beta). Drives
-        which manifest UPDATE ONLINE checks; persisted in system.json."""
-        return self.system.get("ota_channel", "stable")
+        """The selected OTA update channel ("stable" / "unstable" beta). Drives which
+        manifest UPDATE ONLINE checks; persisted in system.json once chosen.
+
+        The default is the channel this FIRMWARE was built on, not a constant. A
+        board that took a beta is running `unstable`, and defaulting it to
+        `stable` meant every check compared the two, found them different, and
+        offered the "update" -- a downgrade, on every check, forever, because
+        installing it is the only thing that would make the two agree. Which
+        channel you are on is a fact about the running image; the setting is a
+        deliberate departure from it, so absence of a setting should mean "the
+        one I am on"."""
+        saved = self.system.get("ota_channel")
+        if saved in ("stable", "unstable"):
+            return saved
+        u = self.updater
+        if u is not None:
+            try:
+                running = u.channel()
+                if running in ("stable", "unstable"):
+                    return running
+            except Exception:            # a backend without channel(): fall through
+                pass
+        return "stable"
 
     def _cycle_channel(self, d):
         """Toggle the OTA channel STABLE<->UNSTABLE and persist. Two channels, so any

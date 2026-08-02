@@ -187,7 +187,7 @@ class UpdateUI:
         elif ph in ("install", "downloading", "checking"):
             if i.pressed("b"):                 # abort: nothing bootable was committed yet
                 self._exit_update()
-        elif ph in ("error", "uptodate", "updated", "rolledback"):
+        elif ph in ("error", "uptodate", "updated", "rolledback", "nopublish"):
             if i.pressed("b") or i.pressed("a"):
                 self._exit_update()
         # "done": ignore input -- _pump_update reboots into the new image shortly.
@@ -204,7 +204,7 @@ class UpdateUI:
             self._confirm_update()             # tap anywhere (besides X) = install
         elif ph == "confirm_online":
             self._start_download()             # tap anywhere (besides X) = download
-        elif ph in ("error", "uptodate", "updated", "rolledback"):
+        elif ph in ("error", "uptodate", "updated", "rolledback", "nopublish"):
             self._exit_update()
 
     def _pump_update(self, dt):
@@ -227,6 +227,12 @@ class UpdateUI:
             if u.error:
                 self._upd_phase = "error"
                 self._upd_msg = u.error
+                return
+            if getattr(u, "absent", False):
+                # Nothing published on this channel for this console yet -- the
+                # normal state of a channel before its first release, and not
+                # something the kid's machine did wrong.
+                self._upd_phase = "nopublish"
                 return
             if not manifest:
                 self._upd_phase = "error"
@@ -313,6 +319,18 @@ class UpdateUI:
                      NAMES["orange"] if beta else th["play"], 1)
             y += 14 * fs
             cv.print("running: %s %s" % (slot, vlabel), x, y, th["ink_dim"], 1)
+        elif phase == "nopublish":
+            beta = self.ws._ota_channel() == "unstable"
+            cv.print("NOTHING NEW YET", x, y, th["play"], 1)
+            y += 14 * fs
+            cv.print("no %s build for" % ("BETA" if beta else "STABLE"),
+                     x, y, th["ink"], 1)
+            y += 12 * fs
+            cv.print("this console yet.", x, y, th["ink"], 1)
+            y += 14 * fs
+            cv.print("running %s" % vlabel, x, y, th["ink_dim"], 1)
+            y += 16 * fs
+            cv.print("B = BACK", x, y, th["accent"], 1)
         elif phase == "uptodate":
             cv.print("UP TO DATE", x, y, th["play"], 1)
             y += 14 * fs
@@ -327,15 +345,22 @@ class UpdateUI:
             tgt_ch = m.get("channel") or self.ws._ota_channel()
             label = str(m.get("label") or ("v%d" % newv))
             switch = tgt_ch != run_ch
-            tgt_name = "BETA" if tgt_ch == "unstable" else "STABLE"
+            beta = tgt_ch == "unstable"
+            tgt_name = "BETA" if beta else "STABLE"
+            # Leading with the switch is deliberate: a kid who flipped the
+            # channel by accident should meet that fact here, on the screen that
+            # asks them to commit, rather than discover it after a reboot.
             cv.print("SWITCH TO %s" % tgt_name if switch else "UPDATE AVAILABLE",
                      x, y, th["ink_dim"], 1)
             y += 12 * fs
-            if switch:
-                cv.print(label[:22], x, y, NAMES["orange"], 1)
-            else:
-                cv.print("%s -> %s" % (vlabel, label[:13]), x, y, th["play"], 1)
-            y += 14 * fs
+            # Always from -> to. The switch case used to show only the target, so
+            # the one screen where the move matters most was the one that never
+            # said what you were leaving -- which is what an accidental flip
+            # needs to see.
+            cv.print("%s ->" % vlabel[:20], x, y, th["ink_dim"], 1)
+            y += 11 * fs
+            cv.print(label[:22], x, y, NAMES["orange"] if beta else th["play"], 1)
+            y += 13 * fs
             if kb:
                 cv.print("%d KB download" % kb, x, y, th["ink"], 1)
                 y += 14 * fs

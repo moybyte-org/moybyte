@@ -406,6 +406,124 @@ def test_dismissing_the_verdict_leaves_the_screen(tmp_path):
     assert ws.screen != "update"
 
 
+# -- a channel with nothing on it yet ----------------------------------------
+
+def test_a_missing_manifest_is_not_a_failed_update(tmp_path):
+    """404 on the manifest means the channel has nothing for this board yet.
+
+    That is the normal state of a channel before its first release -- and it is
+    what a P4 on `stable` met, because the stable release predates per-board
+    manifests entirely. Reporting it as "Update didn't finish ... http 404"
+    blames the kid's console for a file missing from a server.
+    """
+    mod, u = _updater(tmp_path)
+    u._wifi = object()
+    u.wifi_online = lambda: True
+    u._manifest_source = lambda ch=None: ("https://h/latest-p4.json", False)
+
+    def _get(url, limit=8192):
+        u.error = "http 404"
+        return None
+
+    u._http_get_text = _get
+    assert u.check_online("stable") is None
+    assert u.absent is True
+    assert u.error is None, "a missing manifest is not an error"
+
+
+def test_a_real_http_failure_stays_an_error(tmp_path):
+    # 500/403 are not "nothing published" -- something is actually wrong, and
+    # silently calling that "nothing new" would hide a broken release.
+    mod, u = _updater(tmp_path)
+    u._wifi = object()
+    u.wifi_online = lambda: True
+    u._manifest_source = lambda ch=None: ("https://h/latest-p4.json", False)
+
+    def _get(url, limit=8192):
+        u.error = "http 500"
+        return None
+
+    u._http_get_text = _get
+    assert u.check_online("stable") is None
+    assert u.absent is False
+    assert u.error == "http 500"
+
+
+def test_the_screen_says_nothing_new_rather_than_didnt_finish(tmp_path):
+    ws = _ws_with(tmp_path, None)
+
+    class _Absent(_StubUpdater):
+        absent = False
+
+        def check_online(self, ch=None):
+            self.absent = True
+            return None
+
+    ws.updater = _Absent()
+    ws.update_ui.open_update_online()
+    ws.update_ui._pump_update(0.0)      # the one-frame CHECKING gate
+    ws.update_ui._pump_update(0.0)      # the fetch
+    assert ws.update_ui._upd_phase == "nopublish"
+
+
+def test_the_nothing_new_screen_draws_and_dismisses(tmp_path):
+    from runtime import host_app
+    ws = _ws_with(tmp_path, None)
+    drv = host_app.ConsoleDriver(ws)
+    ws.update_ui.open_update_online()
+    ws.update_ui._upd_phase = "nopublish"
+    for _ in range(3):
+        drv.frame(1.0 / 30)
+    assert ws.screen == "update"
+    ws.update_ui._update_pointer(160, 120, True)
+    assert ws.screen != "update"
+
+
+# -- which channel am I on? --------------------------------------------------
+
+def test_the_default_channel_is_the_one_this_firmware_was_built_on(tmp_path):
+    """A board that took a beta is RUNNING unstable.
+
+    Defaulting it to stable meant every check compared the two, found them
+    different, and offered the install -- a downgrade, on every check, forever,
+    since installing it is the only thing that would ever make them agree.
+    """
+    ws = _ws_with(tmp_path, None)
+
+    class _Beta(_StubUpdater):
+        def channel(self):
+            return "unstable"
+
+    ws.updater = _Beta()
+    assert ws._ota_channel() == "unstable"
+
+
+def test_a_stable_build_still_defaults_to_stable(tmp_path):
+    ws = _ws_with(tmp_path, None)
+    assert ws._ota_channel() == "stable"
+
+
+def test_a_deliberate_choice_beats_the_running_channel(tmp_path):
+    # The setting is a departure from the channel you are on, so once made it
+    # wins -- that is how a beta board asks to come back to stable.
+    ws = _ws_with(tmp_path, None)
+
+    class _Beta(_StubUpdater):
+        def channel(self):
+            return "unstable"
+
+    ws.updater = _Beta()
+    ws.system["ota_channel"] = "stable"
+    assert ws._ota_channel() == "stable"
+
+
+def test_no_updater_at_all_defaults_to_stable(tmp_path):
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    assert ws.updater is None                 # the host injects none
+    assert ws._ota_channel() == "stable"
+
+
 # -- both boards are wired to it ---------------------------------------------
 
 def test_both_boards_confirm_from_the_frame_loop_not_the_boot_path():
