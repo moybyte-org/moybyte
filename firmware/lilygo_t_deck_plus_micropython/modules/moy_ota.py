@@ -127,6 +127,30 @@ DL_CHUNK = 16384                 # bytes streamed (and written to SD in ONE op) 
                                  # (~100KB/s), 16K is ~4x. Matches the install step's 32K.
 
 
+def _ms():
+    """A start stamp for _ms_since. ticks_ms on the device, monotonic on the host
+    -- moy_ota is imported by the host tests, so every device call in here needs a
+    CPython answer too."""
+    import time
+
+    try:
+        return time.ticks_ms()
+    except AttributeError:
+        return time.monotonic()
+
+
+def _ms_since(start):
+    """Elapsed ms since a _ms() stamp, wrap-safe on the device (ticks_ms rolls at
+    2**30). The two branches are self-consistent: an int start came from ticks_ms,
+    a float one from monotonic."""
+    import time
+
+    try:
+        return time.ticks_diff(time.ticks_ms(), start)
+    except AttributeError:
+        return int((time.monotonic() - start) * 1000)
+
+
 class OtaUpdater:
     """Stepwise OTA install from an SD .bin into the inactive app slot.
 
@@ -432,7 +456,17 @@ class OtaUpdater:
     def verify_manifest(self, manifest, keys=None):
         """True when the manifest carries a signature from a key this image trusts.
 
-        Whole-block comparison rather than a padding parser: rebuild the PKCS#1
+        Timed, because the cost of a 2048-bit modexp on this silicon was an
+        estimate until a board ran one, and the serial log is the only window this
+        board has (its USB RX is dead under the desktop). Once there is a real
+        number here, it stops being a question."""
+        t0 = _ms()
+        ok = self._verify_manifest(manifest, keys)
+        _log("verify_manifest ->", ok, "in %dms" % _ms_since(t0))
+        return ok
+
+    def _verify_manifest(self, manifest, keys):
+        """Whole-block comparison rather than a padding parser: rebuild the PKCS#1
         block that a valid signature must decrypt to and compare it entire. Parsing
         the padding is where the classic signature forgeries live, and there is
         nothing in it worth parsing."""
@@ -777,6 +811,7 @@ class OtaUpdater:
         # come FIRST; reorder those two headers and the redirect vanishes with
         # no error to show for it. A bytearray + a tail check rather than
         # `hdr += b` and `in`, both of which are O(n^2) over 5K of header.
+        t0 = _ms()
         hdr = bytearray()
         while hdr[-4:] != b"\r\n\r\n":
             b = sock.read(1)
@@ -808,7 +843,11 @@ class OtaUpdater:
                     loc = ln.split(b":", 1)[1].strip().decode()
                 except Exception:
                     loc = None
-        _log("http status=%d content-length=%d loc=%s" % (code, clen, loc))
+        # The header SIZE and the time to read it, because both are guesses until a
+        # board reports them: GitHub's redirect measured 5147 bytes from the host,
+        # and this reads it one byte at a time through TLS.
+        _log("http status=%d content-length=%d hdr=%dB in %dms loc=%s"
+             % (code, clen, len(hdr), _ms_since(t0), loc))
         return sock, code, clen, rest, loc
 
     def _http_get_text(self, url, limit=8192):
