@@ -1,10 +1,15 @@
-# Moybyte Console — Plan v0.5
+# Moybyte Console — Plan, 2026-07
 
 **Project:** Moybyte — a kid-safe creative computer where everything is an editable cartridge
-**Document version:** 0.5
-**Date:** 2026-07-01
-**Supersedes:** `docs/history/moybyte_Console_Plan_v0_4.md` (v0.4, 2026-06-21)
-**Status:** Consolidation + course-correction. v0.4 was written before the console shipped end-to-end and before the hardware direction resolved into a tier family. This document folds the as-built reality, the decisions taken since, and the forward vision into one source of truth.
+**Written:** 2026-07-01
+**Supersedes:** `docs/history/moybyte_Console_Plan_v0_4.md` (2026-06-21)
+**Status:** Consolidation + course-correction. The June plan was written before the console shipped end-to-end and before the hardware direction resolved into a tier family. This document folds the as-built reality, the decisions taken since, and the forward vision into one source of truth.
+
+> **Plans are dated, not numbered.** A `0.x` on a design document reads like a
+> release and is not one: the only version a user ever sees is the firmware's
+> (`moy_ota.FIRMWARE_VERSION` + its label, cut by `make release`). Earlier plans
+> keep their historical `v0_N` filenames under `docs/history/` because that is
+> what the git history and the issues call them.
 
 > **How to read the status tags in this doc**
 > **DECIDED** — a committed call; build against it.

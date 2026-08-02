@@ -87,6 +87,13 @@ BOARD = "tdeck"
 FIRMWARE_VERSION = 2            # v2: SD<->display boot fix (#56), Sky Run (#54), the WiFi
                                 # OTA online path confirmed on hardware + 4x faster streamed
                                 # download (#53). Bump on every stable release.
+#   FIRMWARE_NAME -- what a HUMAN calls this release ("0.6"), and the only version anyone
+#       outside the code ever reads: the update screen, the manifest label, the git tag.
+#       Deliberately separate from FIRMWARE_VERSION above, which exists solely so the
+#       device can order two builds with `>` -- it is signed as an int, and betas stamp a
+#       build epoch into it, so it can never carry a dotted name. `make release NAME=0.7`
+#       sets this; MAJOR.MINOR, with a third component only when a release is purely a fix.
+FIRMWARE_NAME = "0.6"
 FIRMWARE_CHANNEL = "stable"
 FIRMWARE_LABEL = None
 try:
@@ -285,9 +292,10 @@ class OtaUpdater:
 
     def version_label(self):
         """A human label for the running build: the stamped label ("beta 2026-06-29
-        14:30") or "v<n>" for a stable release. Beta versions are an epoch int, so the
-        label keeps the update screen readable."""
-        return FIRMWARE_LABEL or ("v%d" % FIRMWARE_VERSION)
+        14:30" / "0.6"), else the release name, else the raw counter. Betas stamp an
+        epoch into FIRMWARE_VERSION, so the label is the only readable thing they have
+        -- and a stable build's counter is an ordering key nobody should have to read."""
+        return FIRMWARE_LABEL or FIRMWARE_NAME or ("v%d" % FIRMWARE_VERSION)
 
     def offers(self, manifest, channel=None):
         """Decide whether `manifest` should be offered as an install. True when it's for

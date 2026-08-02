@@ -279,7 +279,7 @@ cost a debugging session.
 | `docs/` | cart API, shell UX, visual identity, architecture and design docs |
 | **`CLAUDE.md`** | **the best single map of this repo.** Written for AI tools, but it is the orientation doc humans should read first. |
 
-Design doc: [`moybyte_Console_Plan_v0_5.md`](moybyte_Console_Plan_v0_5.md).
+Design doc: [`moybyte_console_plan_2026-07.md`](moybyte_console_plan_2026-07.md).
 Shell reference: [`docs/shell_ux_v1.md`](docs/shell_ux_v1.md).
 
 ## Contributing

@@ -25,7 +25,7 @@ be tried on a real board before it is anyone's default. GitHub still shows
 
 - **Bugs / small fixes:** open an issue or a PR directly.
 - **Features:** open an issue first. The console is deliberately small and
-  opinionated (see `moybyte_Console_Plan_v0_5.md` §2 — "learn to make"); a
+  opinionated (see `moybyte_console_plan_2026-07.md` §2 — "learn to make"); a
   quick design conversation saves you from building something we can't merge.
 - **Carts:** carts you author are **yours** — license them however you like.
   A community gallery is planned (#122); until then, share them in an issue

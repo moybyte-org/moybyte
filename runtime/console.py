@@ -4671,7 +4671,7 @@ class Workstation:
 
     def _mini_btn(self, label, rect, fill, cv=None):
         # Shared draw toolkit -- the implementation moved to ui.mini_btn (the
-        # v0.5 kernel-shrink direction); this stays the tested ws entry point.
+        # 2026-07 kernel-shrink direction); this stays the tested ws entry point.
         _uimod.mini_btn(cv if cv is not None else self.canvas, rect, label, fill)
 
     # _draw_fps / _fps_tap_rect / _draw_perf_hud (the HUD *rendering*) now live on

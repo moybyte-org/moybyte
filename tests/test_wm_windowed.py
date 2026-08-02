@@ -1,5 +1,5 @@
 """Tests for the Picotron-style windowed WM (runtime/wm_windowed.py, #73 -- the
-big-screen / P4 "One" presentation of the v0.5 shell).
+big-screen / P4 "One" presentation of the 2026-07 shell).
 
 Driven through the SAME shared console the device runs (runtime.host_app +
 ConsoleDriver / Workstation) with `windowed=True`, so these pin the windowed

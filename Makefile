@@ -171,7 +171,7 @@ ota-keygen:
 #   make release NOTES="what changed for a device owner"
 #   make release PUSH=1
 release:
-	$(PYTHON) tools/release.py $(if $(NOTES),--notes "$(NOTES)") $(if $(PUSH),--push)
+	$(PYTHON) tools/release.py $(if $(NAME),--name "$(NAME)") $(if $(NOTES),--notes "$(NOTES)") $(if $(PUSH),--push)
 
 firmware-flash-lilygo-micropython:
 	$(REQUIRE_PORT)

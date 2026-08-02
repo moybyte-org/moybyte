@@ -85,7 +85,7 @@ dist/<name>_full_qio_0x0.bin
 
 ## Host development
 
-The v0.4 console runs on the PC from the **same shared code** this firmware
+The console runs on the PC from the **same shared code** this firmware
 freezes — see `tools/simulate_desktop.py` (it renders the same launcher / carts /
 code+paint editors). The old fake-LVGL `.moyproj` simulator
 (`simulate_micropython_spike.py`) was removed with the legacy game loop.

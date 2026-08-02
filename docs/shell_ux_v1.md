@@ -1,6 +1,6 @@
 # Moybyte shell UX v1 — what the user experiences
 
-**Status:** SHIPPED (v0.5) / CURRENT UX REFERENCE — the shell described here is
+**Status:** SHIPPED (2026-07) / CURRENT UX REFERENCE — the shell described here is
 implemented (branch `refactor/shell-ux`), and this doc has been corrected where the
 build deliberately diverged from the original lock: §4 (the maker/player tap-mode was
 RETIRED in favour of the Editor-as-an-app model), §7 (the bar's compact SAVE icon was
@@ -486,7 +486,7 @@ clean its boundaries are.
 
 **The stack, top to bottom:** this doc (the "what") → the implemented "how" docs, now
 archived under `docs/history/` — `shell_ux_technical_plan_v1.md` (the staged migration
-that shipped the v0.5 shell), `shell_layers_refactor_v1.md` (the Layer decomposition
+that shipped the 2026-07 shell), `shell_layers_refactor_v1.md` (the Layer decomposition
 that made surfaces movable), `shell_os_architecture_v1.md` (the capability boundary;
 its per-surface `make_system_api` track remains open) — plus
 `docs/shell_architecture_v1.md` (privileged system carts §2 + the layered compositor

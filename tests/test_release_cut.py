@@ -85,3 +85,73 @@ def test_make_release_is_wired_up():
     assert re.search(r"^release:", mk, re.MULTILINE)
     assert "release" in re.search(r"^VENV_TARGETS :=(.+?)\n\n", mk,
                                   re.MULTILINE | re.DOTALL).group(1)
+
+
+# -- the human name (the only version anyone outside the code reads) ---------
+
+def test_the_name_is_a_pure_transform():
+    src = 'FIRMWARE_NAME = "0.6"\nFIRMWARE_CHANNEL = "stable"\n'
+    out = release.name_text(src, "0.7")
+    assert 'FIRMWARE_NAME = "0.7"' in out
+    assert 'FIRMWARE_CHANNEL = "stable"' in out      # nothing else disturbed
+
+
+def test_the_name_keeps_its_trailing_comment():
+    src = 'FIRMWARE_NAME = "0.6"   # what a human calls it\n'
+    assert release.name_text(src, "1.0") == \
+        'FIRMWARE_NAME = "1.0"   # what a human calls it\n'
+
+
+def test_a_missing_name_constant_is_a_clear_stop():
+    try:
+        release.name_text("FIRMWARE_VERSION = 2\n", "0.7")
+    except release.Stop as exc:
+        assert "FIRMWARE_NAME" in str(exc)
+    else:
+        raise AssertionError("a missing constant passed silently")
+
+
+def _load_moy_ota():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("moy_ota_rel", release.MOY_OTA)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_the_shipped_module_carries_a_well_shaped_name():
+    name = release.read_name()
+    assert release.NAME_SHAPE.match(name), name
+    assert _load_moy_ota().FIRMWARE_NAME == name
+
+
+def test_the_label_a_kid_reads_prefers_the_name_over_the_counter():
+    """Precedence: the build's stamp, else the release name, else the counter.
+
+    Asserted by setting the module globals rather than by reading whatever this
+    machine last built -- moy_ota imports a gitignored `_ota_build` when one is
+    lying around, so "what does version_label() say here" is a fact about the
+    developer's last build, not about the source.
+    """
+    mod = _load_moy_ota()
+    u = mod.OtaUpdater(lambda fn: fn())
+
+    mod.FIRMWARE_LABEL, mod.FIRMWARE_NAME, mod.FIRMWARE_VERSION = None, "0.6", 3
+    assert u.version_label() == "0.6", "the counter leaked out to the kid"
+
+    # A beta stamps its own label, and it must win -- its VERSION is an epoch.
+    mod.FIRMWARE_LABEL = "beta 2026-08-02 14:02"
+    assert u.version_label() == "beta 2026-08-02 14:02"
+
+    # And with neither, the raw counter is the honest last resort.
+    mod.FIRMWARE_LABEL, mod.FIRMWARE_NAME = None, None
+    assert u.version_label() == "v3"
+
+
+def test_a_malformed_name_never_becomes_a_tag():
+    # It ends up in a git tag and on the kid's update screen, so "v0.6" or "0,6"
+    # has to fail here rather than halfway through a merge.
+    for bad in ("v0.6", "0,6", "0.6-rc1", "0", "", "0.6.1.2"):
+        assert not release.NAME_SHAPE.match(bad), bad
+    for good in ("0.6", "1.0", "0.6.1", "12.34.56"):
+        assert release.NAME_SHAPE.match(good), good

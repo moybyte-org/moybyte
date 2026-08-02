@@ -8,26 +8,33 @@ read the release that a master build publishes. The merge IS the release event,
 so the version bump belongs to it and not to the commit that happened to be
 last on dev.
 
-    make release                  # merge dev -> master, bump, commit, tag
-    make release NOTES="..."      # ... and record why, beside the constant
-    make release PUSH=1           # ... and push (master + the tag)
+    make release NAME=0.7         # merge dev -> master, name it, bump, commit, tag
+    make release NAME=0.7 NOTES="..."   # ... and record why, beside the constant
+    make release NAME=0.7 PUSH=1        # ... and push (master + the tag)
 
 What it does, in order, stopping at the first thing that looks wrong:
 
     1. clean tree, and `dev` and `master` both level with origin
     2. the host suite (`make test`) -- the gate the release is entitled to
     3. checkout master, `merge --no-ff dev`
-    4. FIRMWARE_VERSION N -> N+1 in moy_ota.py, with NOTES as its comment
-    5. commit "release: vN+1" + tag "vN+1"
+    4. FIRMWARE_VERSION N -> N+1 in moy_ota.py, with NOTES as its comment,
+       and FIRMWARE_NAME set to NAME when one is given
+    5. commit "release: v<NAME>" + tag "v<NAME>"
     6. print the push command -- it does NOT push unless asked
 
 Step 6 is deliberate. Pushing master is the moment a device somewhere is
 offered this build, so it is a separate keystroke, taken knowingly.
 
-The version is a single monotonic int, the one moy_ota compares against a
-manifest (`FIRMWARE_VERSION`, the T-Deck module -- the P4 has no OTA updater
-yet, #58). Betas do not use it: a dev build stamps a build-time epoch, so beta
-testers always see the newest.
+Two numbers, and only one of them is for people. FIRMWARE_VERSION is a
+monotonic int the device compares with `>` -- it is signed as an int, and betas
+stamp a build epoch into it, so it can never carry a dotted name. FIRMWARE_NAME
+is what a human calls the release ("0.6"): the tag, the update screen, the
+manifest label. MAJOR.MINOR, a third component only for a pure fix release.
+
+The tag is the NAME, not the counter, because that is what someone scanning the
+repo's tags is looking for -- and it is why NAME is required whenever the
+current one would collide: releasing twice under one name is the mistake this
+catches.
 """
 
 import argparse
@@ -42,6 +49,10 @@ MOY_OTA = os.path.join(ROOT, "firmware", "lilygo_t_deck_plus_micropython",
 DEV = "dev"
 MAIN = "master"
 VERSION_RE = re.compile(r"^(FIRMWARE_VERSION\s*=\s*)(\d+)(.*)$", re.MULTILINE)
+NAME_RE = re.compile(r'^(FIRMWARE_NAME\s*=\s*)"([^"]*)"(.*)$', re.MULTILINE)
+# MAJOR.MINOR[.PATCH] -- the shape the docs promise, checked here so a typo
+# ("0,6", "v0.6") cannot become a tag and a manifest label.
+NAME_SHAPE = re.compile(r"^\d+\.\d+(\.\d+)?$")
 
 
 class Stop(Exception):
@@ -82,6 +93,15 @@ def bump_text(text, notes=None):
     return text[:start] + line + tail, new
 
 
+def name_text(text, name):
+    """FIRMWARE_NAME -> `name` in moy_ota.py's source. A pure transform, like
+    bump_text, so the rename is testable without a git tree."""
+    m = NAME_RE.search(text)
+    if not m:
+        raise Stop("FIRMWARE_NAME not found in %s" % MOY_OTA)
+    return text[:m.start()] + '%s"%s"%s' % (m.group(1), name, m.group(3)) + text[m.end():]
+
+
 def read_version():
     with open(MOY_OTA, encoding="utf-8") as f:
         text = f.read()
@@ -89,6 +109,14 @@ def read_version():
     if not m:
         raise Stop("FIRMWARE_VERSION not found in %s" % MOY_OTA)
     return int(m.group(2))
+
+
+def read_name():
+    with open(MOY_OTA, encoding="utf-8") as f:
+        m = NAME_RE.search(f.read())
+    if not m:
+        raise Stop("FIRMWARE_NAME not found in %s" % MOY_OTA)
+    return m.group(2)
 
 
 def preflight(skip_tests):
@@ -126,14 +154,20 @@ def preflight(skip_tests):
         raise Stop("tests failed -- that is the release gate, so stopping here")
 
 
-def cut(notes, push, skip_tests):
+def cut(name, notes, push, skip_tests):
     started = git("rev-parse", "--abbrev-ref", "HEAD")
+    if name is not None and not NAME_SHAPE.match(name):
+        raise Stop("NAME must be MAJOR.MINOR or MAJOR.MINOR.PATCH (got %r) -- it "
+                   "becomes the tag and the label a kid reads" % name)
     preflight(skip_tests)
 
     version = read_version() + 1
-    tag = "v%d" % version
+    name = name or read_name()
+    tag = "v%s" % name
     if git("tag", "--list", tag):
-        raise Stop("tag %s already exists" % tag)
+        raise Stop("tag %s already exists -- this release needs its own name, so "
+                   "pass NAME= (a pure fix release is %s.1)"
+                   % (tag, name if name.count(".") > 1 else name))
 
     git("checkout", MAIN)
     try:
@@ -143,6 +177,7 @@ def cut(notes, push, skip_tests):
             text = f.read()
         new_text, bumped = bump_text(text, notes)
         assert bumped == version
+        new_text = name_text(new_text, name)
         with open(MOY_OTA, "w", encoding="utf-8") as f:
             f.write(new_text)
 
@@ -158,7 +193,7 @@ def cut(notes, push, skip_tests):
               "origin/master` undoes it.", file=sys.stderr)
         raise
 
-    print("\n%s cut on %s (was on %s)" % (tag, MAIN, started))
+    print("\n%s cut on %s (was on %s) -- build %d" % (tag, MAIN, started, version))
     if push:
         git("push", "origin", MAIN, capture=False)
         git("push", "origin", tag, capture=False)
@@ -175,6 +210,10 @@ def cut(notes, push, skip_tests):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--name", default=os.environ.get("NAME") or None,
+                    help="the release name humans read (\"0.7\"): the tag, the "
+                         "update screen, the manifest label. Omit only to re-cut "
+                         "under the current name, which the tag check will refuse")
     ap.add_argument("--notes", default=os.environ.get("NOTES") or None,
                     help="one line recorded beside FIRMWARE_VERSION and in the "
                          "commit -- what changed for a device owner")
@@ -185,7 +224,7 @@ def main(argv=None):
                     help="skip `make test` (you have just run it)")
     args = ap.parse_args(argv)
     try:
-        return cut(args.notes, args.push, args.no_tests)
+        return cut(args.name, args.notes, args.push, args.no_tests)
     except Stop as exc:
         print("\nrelease stopped: %s" % exc, file=sys.stderr)
         return 1

@@ -1,7 +1,7 @@
 # Archived docs (history)
 
 Superseded design docs and completed-work dev notes, kept for reference only.
-The current, authoritative plan is `moybyte_Console_Plan_v0_5.md` at the repo
+The current, authoritative plan is `moybyte_console_plan_2026-07.md` at the repo
 root (and `CLAUDE.md` for working orientation).
 
 ## Product / design history
