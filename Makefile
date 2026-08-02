@@ -27,7 +27,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: setup test site site-firmware site-gifs site-hero firmware-build-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-build-p4 firmware-flash-p4 firmware-monitor-p4 firmware-stage-xiao-zero ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install release sync-issues check-venv
+.PHONY: setup test site site-firmware site-gifs site-hero firmware-build-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-build-p4 firmware-flash-p4 firmware-monitor-p4 firmware-stage-xiao-zero ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install ota-keygen release sync-issues check-venv
 
 # A PLAIN venv on purpose. Two flags used to live here and both hid bugs on every
 # machine but the maintainer's:
@@ -52,7 +52,7 @@ check-venv:
 	@test -x $(PYTHON) || { echo "no venv at $(VENV)/ -- run: make setup"; exit 1; }
 
 VENV_TARGETS := test \
-                site-gifs site-hero sync-issues release \
+                site-gifs site-hero sync-issues release ota-keygen \
                 ota-manifest ota-serve ota-publish-unstable \
                 ota-publish-stable ota-host ota-serve-install firmware-flash-p4 \
                 firmware-monitor-p4
@@ -154,6 +154,14 @@ ota-serve-install:
 	systemctl --user enable --now moybyte-ota.service
 	loginctl enable-linger $(USER) || true
 	@echo "OTA host: serving $(OTA_ROOT) on :$(OTA_PORT) (systemd --user moybyte-ota)"
+
+# Generate the OTA signing key, ONCE. Prints the `gh secret set` line that gives it
+# to CI and the OTA_PUBLIC_KEYS constant to bake into the firmware. The private key
+# never belongs in the repo; back it up, because a lost key means every deployed
+# board needs a USB reflash before it will trust a replacement.
+ota-keygen:
+	$(PYTHON) -m pip install -q -e '.[release]'
+	$(PYTHON) tools/ota_sign.py keygen $(if $(OUT),--out $(OUT))
 
 # Cut a release: merge dev into master and bump moy_ota.FIRMWARE_VERSION (tools/
 # release.py explains the whole sequence). Work lands on `dev`, which CI publishes as

@@ -266,10 +266,19 @@ jobs:
           path: artifacts
           pattern: moybyte-firmware-*
 
+      # Signing the manifest is what stops a network attacker handing a board
+      # their own firmware (moy_ota's ssl does not verify certificates, and the
+      # manifest's sha256 cannot help against whoever wrote the manifest). The
+      # key lives here as a repository secret; with it unset the publish still
+      # succeeds and says so, and devices simply refuse the result.
+      - name: Signing dependencies
+        run: python3 -m pip install --quiet 'cryptography>=41'
+
       - name: Publish to the rolling release
         env:
           GH_TOKEN: ${{ github.token }}
           CHANNEL: ${{ github.ref == 'refs/heads/master' && 'stable' || 'unstable' }}
+          MOYBYTE_OTA_SIGNING_KEY: ${{ secrets.MOYBYTE_OTA_SIGNING_KEY }}
         run: |
           python3 tools/publish_firmware_release.py \
             --artifacts artifacts --channel "$CHANNEL"

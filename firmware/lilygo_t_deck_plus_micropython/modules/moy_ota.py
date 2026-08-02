@@ -77,6 +77,37 @@ DEFAULT_CHANNEL_URLS = {
     "stable": _GH + "/firmware-latest/latest.json",
     "unstable": _GH + "/firmware-beta/latest.json",
 }
+
+# -- manifest signing (the anti-MITM measure) --------------------------------
+#
+# TLS gets us nothing here on its own: MicroPython's ssl.wrap_socket does no
+# certificate verification, so anyone who can answer for github.com on the
+# kid's network can serve any firmware they like -- and the manifest's sha256
+# cannot help, because the same attacker writes the manifest. So a manifest
+# from the BAKED urls above must carry a signature made by the key whose public
+# half is here, in the image the owner flashed over a cable.
+#
+# RSA-2048/SHA-256 PKCS#1 v1.5, chosen for the verifier: pow(sig, 65537, n) is
+# ~17 modular squarings of a 2048-bit int, single-digit ms with no native code.
+# That rests on two build facts, both checked in the tree rather than assumed:
+# 3-argument pow is MICROPY_PY_BUILTINS_POW3, which mpconfig.h enables at
+# ROM_LEVEL_EXTRA_FEATURES, and the esp32 port sets exactly that level. A port
+# built below it would lose modular pow -- and with it, verification.
+# (Ed25519 would be the nicer primitive and the wrong one -- pure-Python scalar
+# multiplication here runs into seconds.) The signature covers
+# channel/version/size/sha256; the image follows from the sha256, which the
+# download is checked against. tools/ota_sign.py is the other half.
+#
+# A TUPLE, not one key, so a compromised key can be rotated by publishing an
+# image trusted by the old key and signed by the new one. Empty = unsigned
+# builds; see _require_signature.
+OTA_PUBLIC_KEYS = ()             # ((modulus_hex, exponent), ...) -- see `make ota-keygen`
+OTA_SCHEME = "moybyte-ota-v1"
+# The ASN.1 DigestInfo header for SHA-256. Fixed for the algorithm, so it is a
+# constant on both sides rather than a parser on either.
+_SHA256_DER = b"\x30\x31\x30\x0d\x06\x09\x60\x86\x48\x01\x65" \
+              b"\x03\x04\x02\x01\x05\x00\x04\x20"
+
 DOWNLOAD_NAME = "firmware.bin"   # WiFi downloads land here (then the Phase-2 install runs)
 DL_CHUNK = 16384                 # bytes streamed (and written to SD in ONE op) per frame.
                                  # The per-frame cost (panel flush + SD sync + repaint) is
@@ -341,6 +372,11 @@ class OtaUpdater:
         channel, then "stable", then any. A legacy {"manifest_url": url} is honoured as
         the single (stable) channel for back-compat. The card WINS over the default so a
         LAN/offline host stays a one-file override."""
+        return self._manifest_source(channel)[0]
+
+    def _manifest_source(self, channel=None):
+        """(url, from_card): WHERE the url came from decides whether an unsigned
+        manifest is acceptable -- see _require_signature."""
         def _read():
             try:
                 import json
@@ -362,8 +398,78 @@ class OtaUpdater:
         except Exception:
             url = None
         if url:
-            return url
-        return DEFAULT_CHANNEL_URLS.get(channel or FIRMWARE_CHANNEL)
+            return url, True
+        return DEFAULT_CHANNEL_URLS.get(channel or FIRMWARE_CHANNEL), False
+
+    # -- signature verification ----------------------------------------------
+
+    def _canonical(self, manifest):
+        """The bytes a signature covers. MIRRORS tools/ota_sign.canonical -- change
+        one and you must change the other (tests/test_ota_signing.py pins that they
+        agree). Built by hand rather than as canonical JSON because MicroPython's
+        json.dumps has neither sort_keys nor separators, so "serialize the same way
+        both sides do" has no meaning over here."""
+        return ("%s\n%s\n%d\n%d\n%s" % (
+            OTA_SCHEME,
+            manifest.get("channel") or "",
+            int(manifest.get("version") or 0),
+            int(manifest.get("size") or 0),
+            (manifest.get("sha256") or "").lower(),
+        )).encode()
+
+    def verify_manifest(self, manifest, keys=None):
+        """True when the manifest carries a signature from a key this image trusts.
+
+        Whole-block comparison rather than a padding parser: rebuild the PKCS#1
+        block that a valid signature must decrypt to and compare it entire. Parsing
+        the padding is where the classic signature forgeries live, and there is
+        nothing in it worth parsing."""
+        sig = manifest.get("sig")
+        keys = OTA_PUBLIC_KEYS if keys is None else keys
+        if not sig or not keys:
+            return False
+        try:
+            s = int(sig, 16)
+        except (TypeError, ValueError):
+            return False
+
+        import hashlib
+
+        digest = hashlib.sha256(self._canonical(manifest)).digest()
+        for mod_hex, exp in keys:
+            try:
+                n = int(mod_hex, 16)
+            except (TypeError, ValueError):
+                continue
+            # From the hex, not n.bit_length(): MicroPython has no bit_length.
+            k = (len(mod_hex) + 1) // 2
+            if not 0 < s < n:
+                continue
+            tail = _SHA256_DER + digest
+            want = b"\x00\x01" + b"\xff" * (k - len(tail) - 3) + b"\x00" + tail
+            try:
+                got = pow(s, exp, n).to_bytes(k, "big")
+            except (OverflowError, ValueError):
+                continue
+            if got == want:
+                return True
+        return False
+
+    def _require_signature(self, from_card):
+        """Whether an unsigned manifest may be installed.
+
+        A manifest from the BAKED urls must be signed: that is the path an
+        attacker on the network gets to answer for. One reached because the owner
+        put an ota.json on the card need not be -- choosing a host by physically
+        writing to the SD card is an act of consent, and it keeps the LAN dev loop
+        (`make ota-publish-unstable`) working with no key to manage. A signature
+        that IS present is still checked either way, so a tampered official
+        manifest cannot be laundered by copying it to a local host.
+
+        With no keys baked in at all, nothing can be verified, so requiring a
+        signature would just brick the update path -- an unsigned build trusts the
+        network exactly as it did before signing existed."""
+        return bool(OTA_PUBLIC_KEYS) and not from_card
 
     def wifi_online(self):
         if self._wifi is None:
@@ -394,8 +500,8 @@ class OtaUpdater:
         self.error = None
         _log("check_online channel=%r running=%s/%s" % (
             channel, FIRMWARE_CHANNEL, FIRMWARE_VERSION))
-        url = self.manifest_url(channel)
-        _log("manifest_url ->", url)
+        url, from_card = self._manifest_source(channel)
+        _log("manifest_url ->", url, "(from card)" if from_card else "(baked)")
         if not url:
             self.error = "no manifest url"
             _log("ABORT: no /sd/update/ota.json (or no url for channel)")
@@ -420,6 +526,20 @@ class OtaUpdater:
             m = json.loads(txt)
             _log("manifest parsed: version=%r channel=%r size=%r" % (
                 m.get("version"), m.get("channel"), m.get("size")))
+
+            # The signature gate. A bad one is refused even when a signature was
+            # not required: a manifest that carries a signature and fails it has
+            # been tampered with, which is worse news than one carrying none.
+            signed = self.verify_manifest(m) if m.get("sig") else None
+            if signed is False:
+                self.error = "bad signature"
+                _log("REJECTED: signature present but not from a trusted key")
+                return None
+            if signed is None and self._require_signature(from_card):
+                self.error = "unsigned update"
+                _log("REJECTED: unsigned manifest from a baked url")
+                return None
+            _log("signature:", "verified" if signed else "not required")
             return m
         except Exception as exc:
             self.error = _short(exc)

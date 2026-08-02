@@ -51,6 +51,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import ota_sign  # noqa: E402
 from gen_ota_manifest import build_manifest, read_firmware_version  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -225,6 +226,19 @@ def stage_ota(tag, channel, artifacts, workdir, repo=None):
     manifest = build_manifest(os.path.join(workdir, name),
                               asset_url(tag, name, repo),
                               version, channel, stamp.get("label"))
+
+    # Sign it, or say plainly that we did not. A device checking a BAKED channel
+    # url refuses an unsigned manifest (moy_ota._require_signature), so an
+    # unsigned publish is not a security hole -- it is an update nobody can
+    # install, which is worth a loud line in the log rather than a silent one.
+    key_pem = ota_sign.read_key()
+    if key_pem:
+        manifest["sig"] = ota_sign.sign(manifest, key_pem)
+        print("%-6s signed the manifest" % OTA_BOARD)
+    else:
+        print("WARNING: no $%s -- publishing an UNSIGNED manifest, which a "
+              "device on a baked channel url will refuse" % ota_sign.ENV_KEY)
+
     with open(os.path.join(workdir, MANIFEST_NAME), "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, sort_keys=True)
         f.write("\n")

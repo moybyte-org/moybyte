@@ -430,6 +430,18 @@ If the device is online, it can pull the image itself instead of you copying it 
   (Release assets redirect to GitHub's CDN, so the updater follows redirects —
   see `_http_open`. **This path is unverified on glass**; the LAN one below is
   the hardware-confirmed one.)
+- **Manifests from those urls must be SIGNED.** The TLS here does not verify
+  certificates, so without a signature anyone who can answer for `github.com` on
+  the local network could hand the board their own firmware — and the manifest's
+  `sha256` would not help, since they would be writing the manifest too. CI signs
+  with a key whose public half is baked into the image you flashed
+  (`OTA_PUBLIC_KEYS`); the device rebuilds the PKCS#1 block and compares it whole.
+  A manifest from your OWN `ota.json` need not be signed — putting a config on the
+  card is a physical act of consent, and it keeps the LAN loop below key-free —
+  but a signature that is present is always checked either way.
+  `make ota-keygen` generates the key, prints the `gh secret set` line, and prints
+  the constant to paste. Back the key up: it is baked into every image in the
+  field, so replacing a lost one costs everybody a USB reflash.
 - To point a board somewhere else — a LAN host, an offline classroom, your own
   build — put a config on the card at **`/sd/update/ota.json`**, which WINS over
   the defaults:
