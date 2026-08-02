@@ -48,7 +48,7 @@ import json
 import os
 import sys
 
-SCHEME = "moybyte-ota-v1"
+SCHEME = "moybyte-ota-v2"        # v2 added `board` -- see canonical()
 EXPONENT = 65537
 KEY_BITS = 2048
 KEY_BYTES = KEY_BITS // 8
@@ -67,9 +67,16 @@ ENV_KEY = "MOYBYTE_OTA_SIGNING_KEY"      # PEM, or a path to one
 def canonical(manifest):
     """The exact bytes the signature covers. Mirrored by moy_ota._canonical --
     change one and you MUST change the other, which is what
-    test_ota_signing.py::test_the_two_canonical_forms_agree is for."""
-    return ("%s\n%s\n%d\n%d\n%s" % (
+    test_ota_signing.py::test_the_two_canonical_forms_agree is for.
+
+    `board` is in here because an OTA payload is an app-partition image: without
+    it, a genuinely-signed T-Deck manifest replayed at the P4's url installs an
+    Xtensa image on a RISC-V chip. Rollback would recover the board, so this is
+    a denial of service rather than a takeover -- which is still worth one field
+    to close."""
+    return ("%s\n%s\n%s\n%d\n%d\n%s" % (
         SCHEME,
+        manifest.get("board") or "",
         manifest.get("channel") or "",
         int(manifest.get("version") or 0),
         int(manifest.get("size") or 0),

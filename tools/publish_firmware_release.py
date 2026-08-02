@@ -80,14 +80,23 @@ CHANNELS = {
 }
 
 # The OTA payload is NOT the image the site flashes. The flasher writes a whole
-# chip at 0x0; an OTA writes the APP into the inactive slot, so the manifest has
-# to point at the app image. Only the T-Deck has an OTA updater (the P4 has no
-# moy_ota module yet, #58), so this is a board-specific extra rather than a
-# column in the BOARDS table.
-OTA_BOARD = "tdeck"
-OTA_IMAGE = "moybyte-current-app.bin"
+# chip at 0x0 (0x2000 on the P4); an OTA writes the APP into the inactive slot,
+# so the manifest points at the app image, which each board names differently.
+#
+# PER BOARD, and strictly so: an app image is Xtensa on the T-Deck and RISC-V on
+# the P4, so a board given the other one writes a well-formed image that cannot
+# boot. Hence a manifest per (channel, board) rather than one per channel --
+# moy_ota.default_manifest_url builds the same name from the board stamped into
+# the running image.
+OTA_IMAGES = {
+    "tdeck": "moybyte-current-app.bin",
+    "p4": "moybyte_p4_app.bin",
+}
 OTA_STAMP = "ota_build.json"     # build.sh's baked identity, carried in the artifact
-MANIFEST_NAME = "latest.json"
+
+
+def manifest_name(board):
+    return "latest-%s.json" % board
 
 NOTES_HEAD = """\
 The current **{channel}** firmware for each board, rebuilt by the **Firmware
@@ -112,9 +121,12 @@ make firmware-flash-p4 PORT=/dev/ttyACM0                        # ESP32-P4
 NOTES_OTA = """
 ### Over the air
 
-`latest.json` is this channel's OTA manifest and `{image}` is the app image it
-describes — the device's Settings → UPDATE ONLINE reads them directly, so no
-host of your own is needed. Running build: **{label}** (version `{version}`).
+`latest-<board>.json` is this channel's OTA manifest for that board, beside the
+app image it describes — the device's Settings → UPDATE ONLINE reads them
+directly, so no host of your own is needed. One per board on purpose: an OTA
+payload is an app-partition image, so the T-Deck's is Xtensa and the P4's is
+RISC-V, and the board is inside the signature.
+
 """
 
 
@@ -171,7 +183,7 @@ def stage(boards, artifacts, workdir):
     return staged
 
 
-def read_stamp(artifacts, board_id=OTA_BOARD):
+def read_stamp(artifacts, board_id):
     """build.sh's `ota_build.json` for this run's image: {channel, version, label}.
 
     The image's identity is a BUILD-time fact (a beta's version is the build's
@@ -194,23 +206,32 @@ def asset_url(tag, name, repo=None):
     return "https://github.com/%s/releases/download/%s/%s" % (repo, tag, name)
 
 
-def stage_ota(tag, channel, artifacts, workdir, repo=None):
-    """Stage the OTA app image + `latest.json` for this channel, or None.
+def stage_ota_all(tag, channel, artifacts, workdir, repo=None):
+    """Stage every built board's OTA app image + its manifest.
 
-    Returns the manifest dict when the OTA board was built in this run. A run
-    that built only the P4 leaves the channel's existing manifest alone, exactly
-    like an unbuilt board's image."""
-    folder = os.path.join(artifacts, "moybyte-firmware-%s" % OTA_BOARD)
-    src = os.path.join(folder, OTA_IMAGE)
+    Returns {board: manifest}. A board absent from this run keeps whatever is
+    already published for it, exactly like its flashable image."""
+    out = {}
+    for board in sorted(OTA_IMAGES):
+        got = stage_ota(tag, channel, artifacts, workdir, repo, board)
+        if got:
+            out[board] = got
+    return out
+
+
+def stage_ota(tag, channel, artifacts, workdir, repo=None, board="tdeck"):
+    """Stage one board's OTA app image + `latest-<board>.json`, or None."""
+    image = OTA_IMAGES[board]
+    folder = os.path.join(artifacts, "moybyte-firmware-%s" % board)
+    src = os.path.join(folder, image)
     if not os.path.exists(src):
-        print("%-6s no %s in this run -- OTA manifest unchanged"
-              % (OTA_BOARD, OTA_IMAGE))
+        print("%-6s no %s in this run -- OTA manifest unchanged" % (board, image))
         return None
 
-    name = "%s-%s" % (OTA_BOARD, OTA_IMAGE)
+    name = "%s-%s" % (board, image)
     shutil.copyfile(src, os.path.join(workdir, name))
 
-    stamp = read_stamp(artifacts)
+    stamp = read_stamp(artifacts, board)
     baked = stamp.get("channel")
     if baked and baked != channel:
         # The image says one thing and the publisher another: trust the image
@@ -225,7 +246,7 @@ def stage_ota(tag, channel, artifacts, workdir, repo=None):
               % (OTA_STAMP, version))
     manifest = build_manifest(os.path.join(workdir, name),
                               asset_url(tag, name, repo),
-                              version, channel, stamp.get("label"))
+                              version, channel, stamp.get("label"), board)
 
     # Sign it, or say plainly that we did not. A device checking a BAKED channel
     # url refuses an unsigned manifest (moy_ota._require_signature), so an
@@ -234,16 +255,17 @@ def stage_ota(tag, channel, artifacts, workdir, repo=None):
     key_pem = ota_sign.read_key()
     if key_pem:
         manifest["sig"] = ota_sign.sign(manifest, key_pem)
-        print("%-6s signed the manifest" % OTA_BOARD)
+        print("%-6s signed the manifest" % board)
     else:
         print("WARNING: no $%s -- publishing an UNSIGNED manifest, which a "
               "device on a baked channel url will refuse" % ota_sign.ENV_KEY)
 
-    with open(os.path.join(workdir, MANIFEST_NAME), "w", encoding="utf-8") as f:
+    out = manifest_name(board)
+    with open(os.path.join(workdir, out), "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, sort_keys=True)
         f.write("\n")
     print("%-6s staged %s + %s (channel=%s version=%s)"
-          % (OTA_BOARD, name, MANIFEST_NAME, channel, manifest["version"]))
+          % (board, name, out, channel, manifest["version"]))
     return manifest
 
 
@@ -260,7 +282,7 @@ def existing_source(tag, board_id, workdir):
         return None
 
 
-def notes(tag, channel, boards, workdir, site, manifest=None):
+def notes(tag, channel, boards, workdir, site, manifests=None):
     """A release body that states each board's REAL provenance, including the
     board this run did not rebuild (read back off the release)."""
     spec = CHANNELS[channel]
@@ -279,10 +301,15 @@ def notes(tag, channel, boards, workdir, site, manifest=None):
     head = NOTES_HEAD.format(channel="beta" if channel == "unstable" else channel,
                              branch=spec["branch"], blurb=spec["blurb"], site=site)
     body = head + "\n".join(rows) + "\n" + NOTES_TAIL
-    if manifest:
-        body += NOTES_OTA.format(image="%s-%s" % (OTA_BOARD, OTA_IMAGE),
-                                 label=manifest.get("label", "?"),
-                                 version=manifest.get("version", "?"))
+    if manifests:
+        body += NOTES_OTA
+        for board in sorted(manifests):
+            m = manifests[board]
+            body += ("- **%s** — `%s` described by `%s`, running **%s** "
+                     "(version `%s`)\n"
+                     % (board, "%s-%s" % (board, OTA_IMAGES[board]),
+                        manifest_name(board), m.get("label", "?"),
+                        m.get("version", "?")))
     return body
 
 
@@ -305,8 +332,8 @@ def main():
     workdir = tempfile.mkdtemp(prefix="moy-release-")
     try:
         staged = stage(boards, os.path.abspath(args.artifacts), workdir)
-        manifest = stage_ota(tag, channel, os.path.abspath(args.artifacts),
-                             workdir)
+        manifests = stage_ota_all(tag, channel, os.path.abspath(args.artifacts),
+                                  workdir)
         if not staged:
             print("nothing built in this run -- the release is unchanged")
             return 0
@@ -330,7 +357,7 @@ def main():
         # Written AFTER the upload, so the table describes what is now there.
         body = os.path.join(workdir, "notes.md")
         with open(body, "w", encoding="utf-8") as f:
-            f.write(notes(tag, channel, boards, workdir, args.site, manifest))
+            f.write(notes(tag, channel, boards, workdir, args.site, manifests))
         gh("release", "edit", tag, "--notes-file", body)
         return 0
     finally:

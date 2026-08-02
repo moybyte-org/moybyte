@@ -32,9 +32,19 @@ UNVERIFIED on hardware (WiFi + the LCD DMA flush fight for internal RAM, see the
 #38 notes in moy_runtime) -- so treat the socket calls as a sketch until a device pass.
 """
 
-UPDATE_DIR = "/sd/update"
+UPDATE_DIR = "/sd/update"    # the T-Deck default; a board with no SD passes its own
+                             # (the P4 stages on its 24MB internal VFS -- see
+                             # OtaUpdater(update_dir=...), which every path here reads
+                             # off the instance rather than this module constant)
 BLOCK = 4096                 # esp32.Partition native block (erase page); writeblocks erases
 IMAGE_MAGIC = 0xE9          # first byte of an ESP32 app image (esp_image_header_t.magic)
+
+# Which board this image is for. An OTA payload is an APP PARTITION image, so it
+# is board-specific in the strongest possible way -- handing a P4 an Xtensa S3
+# build would write a valid-looking image that cannot boot. The manifest URL
+# therefore carries the board (latest-<board>.json), and this is stamped by
+# build.sh alongside the channel.
+BOARD = "tdeck"
 
 # Released-build identity (mirrors cart versioning). The online check offers an update
 # when the manifest is for a DIFFERENT channel than the running build (a deliberate
@@ -59,6 +69,7 @@ try:
     FIRMWARE_CHANNEL = getattr(_ota_build, "CHANNEL", FIRMWARE_CHANNEL) or FIRMWARE_CHANNEL
     FIRMWARE_VERSION = int(getattr(_ota_build, "VERSION", FIRMWARE_VERSION))
     FIRMWARE_LABEL = getattr(_ota_build, "LABEL", None) or FIRMWARE_LABEL
+    BOARD = getattr(_ota_build, "BOARD", BOARD) or BOARD
 except Exception:
     pass
 
@@ -72,11 +83,19 @@ OTA_CFG_NAME = "ota.json"        # /sd/update/ota.json -> {"channels": {"stable"
 # `make ota-publish-unstable` + `make ota-serve` overrides these.
 #   stable   <- master, the tested branch (firmware-latest)
 #   unstable <- dev, every push (firmware-beta)
+# PER BOARD, because an OTA payload is an app-partition image: the T-Deck's is
+# Xtensa and the P4's is RISC-V, and a board handed the other one writes a
+# perfectly valid image that cannot boot. One manifest per (channel, board).
 _GH = "https://github.com/moybyte-org/moybyte/releases/download"
-DEFAULT_CHANNEL_URLS = {
-    "stable": _GH + "/firmware-latest/latest.json",
-    "unstable": _GH + "/firmware-beta/latest.json",
+DEFAULT_CHANNEL_RELEASES = {
+    "stable": _GH + "/firmware-latest",
+    "unstable": _GH + "/firmware-beta",
 }
+
+
+def default_manifest_url(channel, board=None):
+    base = DEFAULT_CHANNEL_RELEASES.get(channel)
+    return base and (base + "/latest-%s.json" % (board or BOARD))
 
 # -- manifest signing (the anti-MITM measure) --------------------------------
 #
@@ -122,7 +141,7 @@ OTA_PUBLIC_KEYS = (
         65537),
 )            # ((modulus_hex, exponent), ...) -- see `make ota-keygen`
 
-OTA_SCHEME = "moybyte-ota-v1"
+OTA_SCHEME = "moybyte-ota-v2"    # v2 added `board` -- see _canonical
 # The ASN.1 DigestInfo header for SHA-256. Fixed for the algorithm, so it is a
 # constant on both sides rather than a parser on either.
 _SHA256_DER = b"\x30\x31\x30\x0d\x06\x09\x60\x86\x48\x01\x65" \
@@ -168,7 +187,13 @@ class OtaUpdater:
     each chunk runs inside one with_sd() call.
     """
 
-    def __init__(self, with_sd, wifi=None, go_online=None):
+    def __init__(self, with_sd, wifi=None, go_online=None, update_dir=None):
+        # Where a downloaded/copied image is staged. The T-Deck uses the SD card
+        # (its VFS is the card); the P4 has no SD in the console at all and
+        # passes a path on its 24MB internal filesystem. Every path in here reads
+        # THIS, never the module constant, so two boards' updaters cannot look at
+        # each other's directory.
+        self.update_dir = update_dir or UPDATE_DIR
         self._with_sd = with_sd
         self._wifi = wifi         # injected wifi service (DeviceWifi); None -> no online update
         self._go_online = go_online  # callable: best-effort connect from saved creds
@@ -274,14 +299,14 @@ class OtaUpdater:
             import os
 
             try:
-                names = os.listdir(UPDATE_DIR)
+                names = os.listdir(self.update_dir)
             except OSError:
                 return None
             best = None
             for name in names:
                 if not name.lower().endswith(".bin"):
                     continue
-                p = UPDATE_DIR + "/" + name
+                p = self.update_dir + "/" + name
                 try:
                     size = os.stat(p)[6]
                 except OSError:
@@ -425,7 +450,7 @@ class OtaUpdater:
             try:
                 import json
 
-                with open(UPDATE_DIR + "/" + OTA_CFG_NAME) as f:
+                with open(self.update_dir + "/" + OTA_CFG_NAME) as f:
                     cfg = json.load(f)
                 chans = cfg.get("channels")
                 if chans:
@@ -443,7 +468,7 @@ class OtaUpdater:
             url = None
         if url:
             return url, True
-        return DEFAULT_CHANNEL_URLS.get(channel or FIRMWARE_CHANNEL), False
+        return default_manifest_url(channel or FIRMWARE_CHANNEL), False
 
     # -- signature verification ----------------------------------------------
 
@@ -453,8 +478,9 @@ class OtaUpdater:
         agree). Built by hand rather than as canonical JSON because MicroPython's
         json.dumps has neither sort_keys nor separators, so "serialize the same way
         both sides do" has no meaning over here."""
-        return ("%s\n%s\n%d\n%d\n%s" % (
+        return ("%s\n%s\n%s\n%d\n%d\n%s" % (
             OTA_SCHEME,
+            manifest.get("board") or "",
             manifest.get("channel") or "",
             int(manifest.get("version") or 0),
             int(manifest.get("size") or 0),
@@ -581,6 +607,17 @@ class OtaUpdater:
             _log("manifest parsed: version=%r channel=%r size=%r" % (
                 m.get("version"), m.get("channel"), m.get("size")))
 
+            # Wrong board, wrong silicon. Checked BEFORE the signature so the
+            # error says the useful thing: a manifest naming another board is a
+            # misconfigured url or a replay, not a tampered file. (A manifest
+            # with no board at all is one from before the field existed, and
+            # only gets in if it is unsigned-and-allowed anyway.)
+            mboard = m.get("board")
+            if mboard and mboard != BOARD:
+                self.error = "wrong board"
+                _log("REJECTED: manifest is for %r, this is %r" % (mboard, BOARD))
+                return None
+
             # The signature gate. A bad one is refused even when a signature was
             # not required: a manifest that carries a signature and fails it has
             # been tampered with, which is worse news than one carrying none.
@@ -633,13 +670,13 @@ class OtaUpdater:
             import os
 
             try:
-                os.mkdir(UPDATE_DIR)
+                os.mkdir(self.update_dir)
             except OSError:
                 pass
-            return open(UPDATE_DIR + "/" + DOWNLOAD_NAME, "wb")
+            return open(self.update_dir + "/" + DOWNLOAD_NAME, "wb")
 
         self._dl_f = self._with_sd(_open)
-        self.path = UPDATE_DIR + "/" + DOWNLOAD_NAME
+        self.path = self.update_dir + "/" + DOWNLOAD_NAME
         if rest:                               # body bytes already read with the headers
             self._consume(rest)
 

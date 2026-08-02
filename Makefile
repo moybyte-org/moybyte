@@ -213,9 +213,19 @@ P4_BIN ?= dist/p4/moybyte_p4.bin
 firmware-build-p4:
 	firmware/esp32_p4_wifi6_touch_lcd_7b/build.sh
 
+# The cable flash writes the app into ota_0 (0x10000, inside the 0x2000 merged
+# image) but the BOOTLOADER picks its slot from otadata -- so on a board that has
+# taken an OTA and is running ota_1, flashing would appear to do nothing: the new
+# image lands in the slot otadata is not pointing at. Clearing otadata makes the
+# bootloader fall back to ota_0, which is what was just written. The T-Deck has
+# always done this (#53); the P4 needed it the moment it could OTA at all.
+# Override P4_OTADATA_OFFSET= (empty) to skip, e.g. for a non-OTA image.
+P4_OTADATA_OFFSET ?= 0xd000
+P4_OTADATA_SIZE ?= 0x2000
 firmware-flash-p4:
 	$(REQUIRE_PORT)
 	$(REQUIRE_ESPTOOL)
+	@[ -z "$(P4_OTADATA_OFFSET)" ] || $(PYTHON) -m esptool --chip esp32p4 --port $(PORT) --baud 921600 --after no_reset erase_region $(P4_OTADATA_OFFSET) $(P4_OTADATA_SIZE)
 	$(PYTHON) -m esptool --chip esp32p4 --port $(PORT) --baud 921600 write_flash 0x2000 $(P4_BIN)
 
 firmware-monitor-p4:

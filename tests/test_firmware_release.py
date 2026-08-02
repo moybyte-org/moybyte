@@ -193,16 +193,18 @@ def _load_moy_ota():
                  "_moy_ota_device")
 
 
-def _artifacts_with_ota(tmp_path, stamp=STAMP, board="tdeck"):
+def _artifacts_with_ota(tmp_path, stamp=STAMP, board="tdeck", app=True):
     """An artifacts folder as the build job uploads it: the flashable image, the
     OTA app image, and build.sh's identity stamp beside them."""
     folder = tmp_path / "artifacts" / ("moybyte-firmware-%s" % board)
     folder.mkdir(parents=True)
     spec = next(b for b in build.BOARDS if b["id"] == board)
     (folder / spec["images"][0]).write_bytes(b"IMAGE:" + board.encode())
-    (folder / publish.OTA_IMAGE).write_bytes(b"\xe9APP:" + board.encode() * 8)
+    if app:
+        (folder / publish.OTA_IMAGES[board]).write_bytes(
+            b"\xe9APP:" + board.encode() * 8)
     if stamp is not None:
-        (folder / publish.OTA_STAMP).write_text(json.dumps(stamp))
+        (folder / publish.OTA_STAMP).write_text(json.dumps(dict(stamp, board=board)))
     return tmp_path / "artifacts"
 
 
@@ -224,18 +226,19 @@ def test_the_ota_manifest_describes_the_app_image_not_the_flashed_one(tmp_path):
     out.mkdir()
     manifest = publish.stage_ota("firmware-beta", "unstable", str(artifacts),
                                  str(out), repo="moybyte-org/moybyte")
-    name = "%s-%s" % (publish.OTA_BOARD, publish.OTA_IMAGE)
+    name = "tdeck-%s" % publish.OTA_IMAGES["tdeck"]
     assert manifest["url"].endswith("/firmware-beta/" + name)
     assert manifest["filename"] == name
-    assert (out / name).exists() and (out / publish.MANIFEST_NAME).exists()
+    assert (out / name).exists()
+    assert (out / publish.manifest_name("tdeck")).exists()
     # size + sha256 are of the bytes actually staged, not of anything remembered.
     payload = (out / name).read_bytes()
     assert manifest["size"] == len(payload)
-    on_disk = json.load(open(str(out / publish.MANIFEST_NAME)))
+    on_disk = json.load(open(str(out / publish.manifest_name("tdeck"))))
     assert on_disk == manifest
 
     flashed = next(b for b in build.BOARDS if b["id"] == "tdeck")["images"][0]
-    assert publish.OTA_IMAGE != flashed
+    assert publish.OTA_IMAGES["tdeck"] != flashed
 
 
 def test_the_manifest_version_is_the_one_baked_into_the_image(tmp_path):
@@ -264,10 +267,10 @@ def test_the_image_says_which_channel_it_is(tmp_path, capsys):
     assert "WARNING" in capsys.readouterr().out
 
 
-def test_a_run_without_the_ota_board_leaves_the_channel_alone(tmp_path):
-    """Same rule as an unbuilt board's image: publish nothing rather than
-    something stale. (Only the T-Deck has an updater -- the P4 has no moy_ota.)"""
-    artifacts = _artifacts_with_ota(tmp_path, board="p4", stamp=None)
+def test_a_board_without_an_app_image_leaves_its_manifest_alone(tmp_path):
+    """Same rule as an unbuilt board's flashable image: publish nothing rather
+    than something stale."""
+    artifacts = _artifacts_with_ota(tmp_path, stamp=None, app=False)
     out = tmp_path / "release"
     out.mkdir()
     assert publish.stage_ota("firmware-latest", "stable", str(artifacts),
@@ -275,15 +278,36 @@ def test_a_run_without_the_ota_board_leaves_the_channel_alone(tmp_path):
     assert os.listdir(str(out)) == []
 
 
+def test_each_board_gets_its_own_manifest_and_payload(tmp_path):
+    """An OTA payload is an app-partition image -- Xtensa on the T-Deck, RISC-V
+    on the P4 -- so one manifest per board, named for it, and the board is IN
+    the manifest (and inside the signature) so neither can be served as the
+    other."""
+    artifacts = _artifacts_with_ota(tmp_path)
+    _artifacts_with_ota(tmp_path, board="p4")
+    out = tmp_path / "release"
+    out.mkdir()
+    got = publish.stage_ota_all("firmware-beta", "unstable", str(artifacts),
+                                str(out))
+    assert set(got) == {"tdeck", "p4"}
+    for board, manifest in got.items():
+        assert manifest["board"] == board
+        assert (out / publish.manifest_name(board)).exists()
+        assert manifest["filename"] == "%s-%s" % (board, publish.OTA_IMAGES[board])
+    assert got["tdeck"]["sha256"] != got["p4"]["sha256"]
+
+
 def test_the_device_looks_where_ci_publishes():
     """moy_ota's baked defaults and the publisher's asset URLs are two halves of
     one contract, written in two languages and never executed together."""
     moy_ota = _load_moy_ota()
-    assert set(moy_ota.DEFAULT_CHANNEL_URLS) == set(publish.CHANNELS)
+    assert set(moy_ota.DEFAULT_CHANNEL_RELEASES) == set(publish.CHANNELS)
     for channel, spec in publish.CHANNELS.items():
-        want = publish.asset_url(spec["tag"], publish.MANIFEST_NAME,
-                                 repo="moybyte-org/moybyte")
-        assert moy_ota.DEFAULT_CHANNEL_URLS[channel] == want, channel
+        for board in publish.OTA_IMAGES:
+            want = publish.asset_url(spec["tag"], publish.manifest_name(board),
+                                     repo="moybyte-org/moybyte")
+            got = moy_ota.default_manifest_url(channel, board)
+            assert got == want, (channel, board)
 
 
 def test_the_workflows_keep_the_branches_apart():

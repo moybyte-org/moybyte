@@ -68,13 +68,17 @@ def detect_lan_ip():
         s.close()
 
 
-def build_manifest(bin_path, url, version, channel="stable", label=None):
-    """The manifest dict the device consumes: version/channel/label/url/size/sha256
-    (+ filename for humans). size + sha256 are computed from the actual bytes on disk.
-    `channel` lets the device offer a cross-channel switch (stable<->beta); `label` is a
-    human string shown on the update screen (a beta's version is an epoch int)."""
+def build_manifest(bin_path, url, version, channel="stable", label=None,
+                   board="tdeck"):
+    """The manifest dict the device consumes: board/version/channel/label/url/size/
+    sha256 (+ filename for humans). size + sha256 are computed from the actual bytes on
+    disk. `channel` lets the device offer a cross-channel switch (stable<->beta);
+    `label` is a human string shown on the update screen (a beta's version is an epoch
+    int); `board` is what stops one board installing another's app image -- it is inside
+    the signature, and the device refuses a manifest naming a board it is not."""
     data = Path(bin_path).read_bytes()
     return {
+        "board": board,
         "version": int(version),
         "channel": channel,
         "label": label or ("v%d" % int(version)),

@@ -56,6 +56,7 @@ TEST_D = int(
 TEST_KEYS = (("%x" % TEST_N, 65537),)
 
 MANIFEST = {
+    "board": "tdeck",
     "channel": "stable",
     "version": 3,
     "size": 4290656,
@@ -130,6 +131,7 @@ def test_the_host_verifier_mirrors_the_device_one(device):
     ("size", 4290000),                   # a different image
     ("sha256", "0" * 64),                # THE one that picks the payload
     ("channel", "unstable"),             # a beta smuggled onto stable
+    ("board", "p4"),                     # an Xtensa image aimed at a RISC-V chip
 ])
 def test_editing_a_signed_field_breaks_the_signature(device, field, value):
     _m, u = device
@@ -267,9 +269,10 @@ def _stage_artifacts(tmp_path):
     publish = _load_publish()
     folder = tmp_path / "artifacts" / "moybyte-firmware-tdeck"
     folder.mkdir(parents=True)
-    (folder / publish.OTA_IMAGE).write_bytes(b"\xe9APP" * 64)
+    (folder / publish.OTA_IMAGES["tdeck"]).write_bytes(b"\xe9APP" * 64)
     (folder / publish.OTA_STAMP).write_text(json.dumps(
-        {"channel": "unstable", "version": 1785659788, "label": "beta"}))
+        {"channel": "unstable", "version": 1785659788, "label": "beta",
+         "board": "tdeck"}))
     return tmp_path / "artifacts"
 
 
@@ -310,5 +313,36 @@ def test_the_publisher_signs_when_the_key_is_present(tmp_path, monkeypatch):
     sig = manifest.pop("sig")
     assert ota_sign.verify(manifest, sig, n) is True
     # and it is the file that ships, not just the dict
-    on_disk = json.loads((out / publish.MANIFEST_NAME).read_text())
+    on_disk = json.loads((out / publish.manifest_name("tdeck")).read_text())
     assert on_disk["sig"] == sig
+
+
+# -- one board must never install another's app image ------------------------
+
+def test_a_manifest_for_another_board_is_refused_by_name(device):
+    """Checked BEFORE the signature, so the error names the real problem. This
+    is the case a second board created: the payload is an app-partition image,
+    Xtensa on the T-Deck and RISC-V on the P4, so the wrong one is a valid
+    image that cannot boot -- rollback territory, for one field's prevention."""
+    m, u = device
+    m.OTA_PUBLIC_KEYS = TEST_KEYS
+    other = signed(board="p4")            # correctly signed, wrong silicon
+    assert u.verify_manifest(other, TEST_KEYS) is True
+
+    u._manifest_source = lambda channel=None: ("https://h/latest-p4.json", False)
+    u.ensure_online = lambda: True
+    u._http_get_text = lambda url, limit=8192: json.dumps(other)
+    assert u.check_online() is None
+    assert u.error == "wrong board"
+
+
+def test_the_default_url_carries_the_board(device):
+    """A T-Deck asks for latest-tdeck.json and a P4 for latest-p4.json, off the
+    same release -- so the wrong manifest is not even fetched in the first
+    place; the check above is the backstop for a hand-written ota.json."""
+    m, _u = device
+    assert m.BOARD == "tdeck"                       # the committed default
+    for channel in ("stable", "unstable"):
+        assert m.default_manifest_url(channel).endswith("/latest-tdeck.json")
+        assert m.default_manifest_url(channel, "p4").endswith("/latest-p4.json")
+    assert m.default_manifest_url("nonesuch") is None

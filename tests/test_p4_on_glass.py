@@ -368,3 +368,27 @@ def test_a_tampered_manifest_is_refused_on_the_device(board):
     for junk in ("", "zz", "00", "ff" * 256):
         assert _val(board, "_verify_manifest(dict(MANIFEST, sig=%r), KEYS)"
                            % junk) is False, "junk signature %r accepted" % junk
+
+
+def test_the_ota_updater_is_live_on_this_board(board):
+    """#53 on the P4. The partition table has been OTA-shaped since bring-up and
+    update_ui frozen in all along; what was missing was moy_ota itself, the
+    staging directory (this board has no SD), the identity stamp and the
+    mark_valid call. Verified on glass 2026-08-02 by installing the board's OWN
+    running image into the inactive slot: 3,085,216 bytes in 11 steps, reboot
+    came up on ota_1 and marked itself valid there.
+
+    Asserted here rather than re-run: a full install is ~90s and leaves the
+    board on the other slot, which every test after this one would inherit."""
+    assert board.pyval("ws.updater is not None") is True
+    assert board.pyval("ws.updater.available()") is True, "not an OTA build"
+    assert board.pyval("__import__('moy_ota').BOARD") == "p4"
+    assert board.pyval("ws.updater.update_dir") == "/moy/update"
+    assert board.pyval("ws.updater.slot()") in ("ota_0", "ota_1")
+    # The manifest it would fetch is this board's, not the T-Deck's -- an OTA
+    # payload is an app-partition image, so the wrong one cannot boot.
+    url = board.pyval("ws.updater.manifest_url('unstable')")
+    assert url.endswith("/latest-p4.json"), url
+    # mark_valid ran at boot; without it the bootloader reverts every OTA.
+    assert any("marked app valid" in ln for ln in board.lines), \
+        "no mark_valid at boot -- rollback would undo every update"

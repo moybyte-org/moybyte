@@ -42,3 +42,12 @@ CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=64
 # HID discovery/subscription state machine (hardware panics symbolized inside
 # mp_execute_bytecode/mp_obj_print_helper during connect).  Keep ample headroom.
 CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=12288
+
+# OTA rollback (#53 on the P4). The partition table has been OTA-shaped since
+# bring-up, but nothing enabled the bootloader's safety net -- so an image that
+# failed to come up would have stayed selected, and a bad update would need a
+# cable. With this, an app that does not call
+# esp32.Partition.mark_app_valid_cancel_rollback() on its first boot is REVERTED
+# to the previous slot automatically. moy_runtime.run_desktop makes that call
+# once the desktop is up, which is what makes a healthy boot mean "healthy".
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y

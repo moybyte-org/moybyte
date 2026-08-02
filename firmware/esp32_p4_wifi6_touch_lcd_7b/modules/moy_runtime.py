@@ -36,7 +36,7 @@ from device_util import _ticks_ms, _ticks_diff
 from device_api import make_api
 from device_canvas import (DeviceCanvas, _LayerComp, _FONT8, _FONT8_FIRST,
                            _ST_FONT_SCALE, _COMPACT_MIN_PX)
-from device_wifi import make_wifi
+from device_wifi import autoconnect_wifi, make_wifi
 
 GAME_W, GAME_H = 320, 240
 FONT_SCALE = 1                     # 1x everywhere (owner call, 2026-07-12): the 7"
@@ -48,6 +48,11 @@ FONT_SCALE = 1                     # 1x everywhere (owner call, 2026-07-12): the
 # on sys.path), and the first boot's seeded /moybyte dir broke the next boot's
 # `from moybyte.input import ...` (hardware-learned 2026-07-08).
 CARTS_ROOT = "/moy/carts"
+# Where an OTA image stages (#53). This board has no SD -- the T-Deck's
+# /sd/update has no meaning here -- so it lands on the internal VFS, which
+# has ~23MB free against a ~3MB image. NOT under /moy/carts: the store
+# scans that directory.
+OTA_UPDATE_DIR = "/moy/update"
 
 
 class P4SystemCanvas(DeviceCanvas):
@@ -702,6 +707,22 @@ def run_desktop(fps_cap=60):
                           make_wifi(moy_carts, carts_root),
                           lua_runtime=lua_runtime,
                           pointer=pointer, inp=inp, keyboard=keyboard)
+    # OTA firmware update (#53 on this board). The partition table has been
+    # OTA-shaped since bring-up (ota_0/ota_1, 4MB each) and update_ui has been
+    # frozen in all along; this is the piece that was missing.
+    #
+    # Two things differ from the T-Deck. There is no SD card in this console, so
+    # the image stages on the internal VFS (~23MB free, against a ~3MB image) and
+    # with_sd is a plain call-through -- no bus to drain, no card to mount. And
+    # the board identity matters: an OTA payload is an app-partition image, so
+    # the manifest is per board and this one must never be handed an S3 build.
+    try:
+        import moy_ota
+        ws.updater = moy_ota.OtaUpdater(lambda fn: fn(),
+                                        update_dir=OTA_UPDATE_DIR)
+        ws.updater.set_wifi(ws.wifi, go_online=lambda: autoconnect_wifi(ws.wifi))
+    except Exception as exc:  # noqa: BLE001
+        print("Moybyte P4: OTA updater unavailable:", exc)
     try:
         import machine
         ws.reboot_hook = machine.reset
@@ -734,6 +755,18 @@ def run_desktop(fps_cap=60):
 
     import gc
     gc.collect()
+    # Reaching here IS the definition of a healthy boot, so confirm the running
+    # image and cancel the bootloader's pending rollback (#53). Without this
+    # call every OTA would be reverted on the next power cycle -- the safety net
+    # cannot tell "came up fine" from "died before drawing" unless something
+    # says so. A no-op when the image was already confirmed.
+    if getattr(ws, "updater", None) is not None:
+        try:
+            if ws.updater.mark_valid():
+                print("Moybyte P4 OTA: marked app valid (slot %s)"
+                      % ws.updater.slot())
+        except Exception as exc:  # noqa: BLE001 -- never block the desktop
+            print("Moybyte P4 OTA: mark_valid failed:", exc)
     print("Moybyte P4 desktop running (Ctrl-C for REPL)")
     # The last thing before the loop, and the stage the silent wait was in:
     # everything above had already printed when the screen was reported black.
