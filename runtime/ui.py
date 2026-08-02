@@ -356,7 +356,7 @@ def status_row(cv, th, rect, items):
 
 # --- the classic game-canvas button family -----------------------------------
 # The pre-toolkit Workstation draw trio (_btn/_icon_btn/_mini_btn), moved here
-# verbatim (the v0.5 kernel-shrink direction: console stays compositor/router);
+# verbatim (the 2026-07 kernel-shrink direction: console stays compositor/router);
 # Workstation keeps thin delegates so every call site and test is untouched.
 # These are the EDITOR-body vocabulary (paint/map/music/blocks action bars and
 # the block prompts' pads): caller-colored fill, cream ring, black label.

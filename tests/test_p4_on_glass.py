@@ -248,3 +248,199 @@ def test_idle_screen_blank_and_wake(board):
     line = board.cmd("power", wait_for="REMOTE power")
     assert "asleep=False" in line, "a disabled timer still blanked: %r" % line
     board.cmd("power 300", wait_for="REMOTE power")     # restore the default
+
+
+# -- the OTA manifest verifier, on real MicroPython (#53) ---------------------
+#
+# The P4 has no moy_ota -- the updater is T-Deck-only -- but it is the board
+# with a live REPL, and the thing worth proving is language-level, not
+# board-level: that the SHIPPED verifier runs under MicroPython at all. The host
+# suite proves the maths in CPython, where int(hex, 16) at 512 characters,
+# int.to_bytes(256, 'big') and a 2048-bit 3-argument pow are all free. On the
+# device each of those is a build-configuration question that was read out of
+# mpconfig.h and asserted. This executes them.
+#
+# The code under test is EXTRACTED from moy_ota.py by ast rather than retyped,
+# so a change there is picked up here instead of drifting; the only edits are
+# mechanical (dedent the methods, drop `self`).
+
+def _extract_verifier():
+    import ast
+    import textwrap
+
+    path = ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules" / "moy_ota.py"
+    src = path.read_text(encoding="utf-8")
+    tree = ast.parse(src)
+
+    def const(name):
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") == name:
+                return ast.get_source_segment(src, node)
+        raise AssertionError("constant vanished from moy_ota: " + name)
+
+    def method(name):
+        for cls in tree.body:
+            if isinstance(cls, ast.ClassDef) and cls.name == "OtaUpdater":
+                for f in cls.body:
+                    if isinstance(f, ast.FunctionDef) and f.name == name:
+                        out = textwrap.dedent(ast.get_source_segment(src, f))
+                        out = out.replace("def %s(self, " % name, "def %s(" % name)
+                        return out.replace("self._", "_")
+        raise AssertionError("method vanished from moy_ota: " + name)
+
+    return "\n".join([const("OTA_SCHEME"), const("_SHA256_DER"),
+                      const("OTA_PUBLIC_KEYS"), method("_canonical"),
+                      method("_verify_manifest")])
+
+
+def _val(board, expr, timeout=30):
+    """Evaluate `expr` in the PERSISTENT device namespace.
+
+    The device's `py` handler builds a FRESH env per command, so anything
+    pyexec uploaded lives in ws._g and nowhere else -- a bare pyval of a name
+    defined up there comes back None (a device NameError), which reads exactly
+    like a failed assertion and is not one."""
+    return board.pyval("eval(%r, ws._g)" % expr, timeout=timeout)
+
+
+SIGNED_MANIFEST = {
+    "channel": "unstable", "version": 1785665581, "size": 4292512,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "url": "https://example/app.bin", "label": "beta",
+}
+
+
+def test_the_shipped_verifier_runs_on_micropython(board):
+    """Signed here rather than pasted from a release: the test has to keep
+    working when the key is rotated, and the private half of the real one is a
+    GitHub secret that is deliberately not on this machine."""
+    import sys as _sys
+
+    _sys.path.insert(0, str(ROOT / "tests"))
+    from test_ota_signing import TEST_KEYS, sign_with_test_key
+
+    manifest = dict(SIGNED_MANIFEST)
+    manifest["sig"] = sign_with_test_key(manifest)
+
+    assert board.pyexec(_extract_verifier(), timeout=90), "verifier upload failed"
+    assert board.pyexec(
+        "KEYS = %r\nMANIFEST = %r\n" % (TEST_KEYS, manifest), timeout=90)
+
+    # The MicroPython API questions, asked one at a time so a failure names itself.
+    assert _val(board, "int(KEYS[0][0], 16).__class__.__name__") == "int"
+    assert _val(board, "len(int(KEYS[0][0], 16).to_bytes(256, 'big'))") == 256
+    assert _val(board,
+        "__import__('hashlib').sha256(b'moybyte').digest()[:4]") == b"\xbd\xd3\xd1\xb4"
+
+    assert _val(board, "_verify_manifest(MANIFEST, KEYS)") is True
+
+
+def test_verification_is_fast_enough_to_not_think_about(board):
+    """Measured 2026-08-02: 35ms modexp, 41ms whole verify. The bound is loose
+    on purpose -- it exists to catch an ORDER-of-magnitude regression (a
+    software-int fallback, a bigger key), not to police jitter. It runs once per
+    update check, behind a screen already waiting on the network."""
+    assert board.pyexec(
+        "import time\n"
+        "t0 = time.ticks_us()\n"
+        "for _ in range(5):\n"
+        "    _verify_manifest(MANIFEST, KEYS)\n"
+        "VERIFY_US = time.ticks_diff(time.ticks_us(), t0) // 5\n", timeout=60)
+    us = board.pyval("ws._g['VERIFY_US']")
+    print("\nverify_manifest: %dus (%.1fms)" % (us, us / 1000.0))
+    assert 0 < us < 500_000, "verify took %dus -- something got much slower" % us
+
+
+def test_a_tampered_manifest_is_refused_on_the_device(board):
+    """Every field the signature covers, refused on real hardware -- and junk in
+    the signature refused without raising, because whatever arrives off the wire
+    lands straight in int(sig, 16) and pow()."""
+    for field, value in (("sha256", "0" * 64), ("version", 999),
+                         ("size", 1), ("channel", "stable")):
+        got = _val(board, "_verify_manifest(dict(MANIFEST, **{%r: %r}), KEYS)"
+                          % (field, value))
+        assert got is False, "tampering with %s was accepted" % field
+
+    assert _val(
+        board, "_verify_manifest({k: v for k, v in MANIFEST.items() if k != 'sig'}, KEYS)"
+    ) is False, "an unsigned manifest verified"
+
+    for junk in ("", "zz", "00", "ff" * 256):
+        assert _val(board, "_verify_manifest(dict(MANIFEST, sig=%r), KEYS)"
+                           % junk) is False, "junk signature %r accepted" % junk
+
+
+def test_the_ota_updater_is_live_on_this_board(board):
+    """#53 on the P4. The partition table has been OTA-shaped since bring-up and
+    update_ui frozen in all along; what was missing was moy_ota itself, the
+    staging directory (this board has no SD), the identity stamp and the
+    mark_valid call. Verified on glass 2026-08-02 by installing the board's OWN
+    running image into the inactive slot: 3,085,216 bytes in 11 steps, reboot
+    came up on ota_1 and marked itself valid there.
+
+    Asserted here rather than re-run: a full install is ~90s and leaves the
+    board on the other slot, which every test after this one would inherit."""
+    assert board.pyval("ws.updater is not None") is True
+    assert board.pyval("ws.updater.available()") is True, "not an OTA build"
+    assert board.pyval("__import__('moy_ota').BOARD") == "p4"
+    assert board.pyval("ws.updater.update_dir") == "/moy/update"
+    assert board.pyval("ws.updater.slot()") in ("ota_0", "ota_1")
+    # The manifest it would fetch is this board's, not the T-Deck's -- an OTA
+    # payload is an app-partition image, so the wrong one cannot boot.
+    url = board.pyval("ws.updater.manifest_url('unstable')")
+    assert url.endswith("/latest-p4.json"), url
+    # mark_valid ran; without it the bootloader reverts every OTA.
+    assert any("marked app valid" in ln for ln in board.lines), \
+        "no mark_valid at boot -- rollback would undo every update"
+
+
+def test_the_rollback_confirm_comes_from_the_frame_loop(board):
+    """The confirm has to be worth something, and where it is made decides that.
+
+    Made on the boot path it certifies an image that has never drawn a pixel --
+    a board that boots to a black screen (this project shipped one, #56) would
+    confirm itself and lose the safety net. So it waits for a painted frame AND
+    for the loop to keep running afterwards, and this asserts the loop is what
+    actually got there on a live board.
+
+    The full pass -- install, reboot into the new slot, and a reset inside the
+    confirm window to force the bootloader to revert -- was run on glass
+    2026-08-02: 15/15, both directions, banner and verdict correct each time.
+    Not re-run here because one install is ~2min and leaves the board on the
+    other slot, which every later test would inherit."""
+    ota = "__import__('moy_ota')"
+    assert board.pyval("ws.updater.confirmed") is True
+    loops = board.pyval("ws.updater._loops")
+    assert loops >= board.pyval("%s.HEALTHY_LOOPS" % ota), \
+        "confirmed after %s loop iterations -- not from the frame loop" % loops
+    # A paint threshold above 1 would be unreachable: the console repaints only
+    # when something changes, so an untouched desktop paints once and stops.
+    assert board.pyval("%s.HEALTHY_PAINTS" % ota) == 1
+    assert board.pyval("ws._frames_drawn") >= 1
+
+
+def test_a_pending_marker_becomes_a_verdict_on_this_board(board):
+    """The marker round trip against the real filesystem, without a 3MB install.
+
+    What is device-specific here is exactly what a host test cannot reach: this
+    board has no SD, so `with_sd` is a plain call-through and the marker lands on
+    the internal VFS -- the same path that has to hold a rollback's evidence
+    across a reboot."""
+    board.pyexec(
+        "import json\n"
+        "f = open(ws.updater._pending_path(), 'w')\n"
+        "f.write(json.dumps({'slot': 'nowhere', 'label': 'v99'}))\n"
+        "f.close()\n"
+        "V = ws.updater.boot_check()\n")
+    verdict = board.pyval("eval('V', ws._g)")
+    assert verdict[0] == "rolled_back", verdict
+    # Reading it must NOT consume it: an image that reports and then dies has to
+    # still have its marker on the boot after the rollback.
+    listing = board.pyval("__import__('os').listdir(ws.updater.update_dir)")
+    assert "pending.json" in listing, listing
+    board.pyexec("import os\n"
+                 "os.remove(ws.updater._pending_path())\n"
+                 "ws.updater.boot_verdict = None\n"
+                 "ws._notice = None\n")
+    assert "pending.json" not in board.pyval(
+        "__import__('os').listdir(ws.updater.update_dir)")

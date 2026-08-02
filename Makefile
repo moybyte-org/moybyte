@@ -27,7 +27,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: setup test site site-firmware site-gifs site-hero firmware-build-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-build-p4 firmware-flash-p4 firmware-monitor-p4 firmware-stage-xiao-zero ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install sync-issues check-venv
+.PHONY: setup test site site-firmware site-gifs site-hero firmware-build-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-build-p4 firmware-flash-p4 firmware-monitor-p4 firmware-stage-xiao-zero ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install ota-keygen release sync-issues check-venv
 
 # A PLAIN venv on purpose. Two flags used to live here and both hid bugs on every
 # machine but the maintainer's:
@@ -54,7 +54,7 @@ check-venv:
 	@test -x $(PYTHON) || { echo "no venv at $(VENV)/ -- run: make setup"; exit 1; }
 
 VENV_TARGETS := test \
-                site-gifs site-hero sync-issues \
+                site-gifs site-hero sync-issues release ota-keygen \
                 ota-manifest ota-serve ota-publish-unstable \
                 ota-publish-stable ota-host ota-serve-install firmware-flash-p4 \
                 firmware-monitor-p4
@@ -118,6 +118,13 @@ ota-manifest:
 ota-serve:
 	cd $(MPY_FW_DIR)/dist && $(PYTHON) -m http.server $(OTA_PORT)
 
+# The two OTA channels are the two BRANCHES, and CI publishes both (a push to master
+# rolls the `firmware-latest` release, a push to dev rolls `firmware-beta`; moy_ota's
+# DEFAULT_CHANNEL_URLS point at them, so a device needs no ota.json and no host of its
+# owner's). The targets below stay the LOCAL path: publishing from an uncommitted tree,
+# or serving a channel on a LAN with no internet. An /sd/update/ota.json still overrides
+# the baked defaults, which is how a device is pointed at OTA_ROOT instead of GitHub.
+#
 # Publish the CURRENT working tree (uncommitted OK) as a BETA build the device can pull
 # over WiFi: build with the unstable channel stamp, then copy the image + a matching
 # manifest into OTA_ROOT/unstable/. No commit, no PC needed by the tester -- on the
@@ -149,6 +156,24 @@ ota-serve-install:
 	systemctl --user enable --now moybyte-ota.service
 	loginctl enable-linger $(USER) || true
 	@echo "OTA host: serving $(OTA_ROOT) on :$(OTA_PORT) (systemd --user moybyte-ota)"
+
+# Generate the OTA signing key, ONCE. Prints the `gh secret set` line that gives it
+# to CI and the OTA_PUBLIC_KEYS constant to bake into the firmware. The private key
+# never belongs in the repo; back it up, because a lost key means every deployed
+# board needs a USB reflash before it will trust a replacement.
+ota-keygen:
+	$(PYTHON) -m pip install -q -e '.[release]'
+	$(PYTHON) tools/ota_sign.py keygen $(if $(OUT),--out $(OUT))
+
+# Cut a release: merge dev into master and bump moy_ota.FIRMWARE_VERSION (tools/
+# release.py explains the whole sequence). Work lands on `dev`, which CI publishes as
+# beta; `master` is what users get, so the merge is the release and the bump rides it.
+# It stops BEFORE pushing -- pushing master is the moment a device is offered the build.
+#   make release
+#   make release NOTES="what changed for a device owner"
+#   make release PUSH=1
+release:
+	$(PYTHON) tools/release.py $(if $(NAME),--name "$(NAME)") $(if $(NOTES),--notes "$(NOTES)") $(if $(PUSH),--push)
 
 firmware-flash-lilygo-micropython:
 	$(REQUIRE_PORT)
@@ -190,9 +215,19 @@ P4_BIN ?= dist/p4/moybyte_p4.bin
 firmware-build-p4:
 	firmware/esp32_p4_wifi6_touch_lcd_7b/build.sh
 
+# The cable flash writes the app into ota_0 (0x10000, inside the 0x2000 merged
+# image) but the BOOTLOADER picks its slot from otadata -- so on a board that has
+# taken an OTA and is running ota_1, flashing would appear to do nothing: the new
+# image lands in the slot otadata is not pointing at. Clearing otadata makes the
+# bootloader fall back to ota_0, which is what was just written. The T-Deck has
+# always done this (#53); the P4 needed it the moment it could OTA at all.
+# Override P4_OTADATA_OFFSET= (empty) to skip, e.g. for a non-OTA image.
+P4_OTADATA_OFFSET ?= 0xd000
+P4_OTADATA_SIZE ?= 0x2000
 firmware-flash-p4:
 	$(REQUIRE_PORT)
 	$(REQUIRE_ESPTOOL)
+	@[ -z "$(P4_OTADATA_OFFSET)" ] || $(PYTHON) -m esptool --chip esp32p4 --port $(PORT) --baud 921600 --after no_reset erase_region $(P4_OTADATA_OFFSET) $(P4_OTADATA_SIZE)
 	$(PYTHON) -m esptool --chip esp32p4 --port $(PORT) --baud 921600 write_flash 0x2000 $(P4_BIN)
 
 firmware-monitor-p4:

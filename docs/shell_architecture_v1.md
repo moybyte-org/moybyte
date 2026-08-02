@@ -20,7 +20,7 @@ stalled because the remaining surfaces are smeared across `frame`/`handle_input`
 clean file/cart split is even possible. That refactor is the common foundation: logical
 Layers → { modules, §2 privileged carts, §3 retained-buffer compositor }.
 **Boundary mechanism, added 2026-07-06:** `docs/history/shell_os_architecture_v1.md`
-(archived — its data-decoupling half shipped with the v0.5 shell, its per-surface
+(archived — its data-decoupling half shipped with the 2026-07 shell, its per-surface
 capability track remains open) is the concrete "how" under both halves — it grounds §2.2's `make_system_api` in how real OSes
 draw this line (syscall table / capabilities / message passing; Picotron as the
 fantasy-console realization) and defines the migration path (per-surface capability API
@@ -34,7 +34,7 @@ that was the original intent: (1) system screens becoming actual privileged cart
 can eventually support more than one visible surface — which is also the natural shape
 for the web view to become a real remote window manager instead of a single mirror.
 
-This follows the same portability discipline as the rest of v0.4 (`CLAUDE.md`): nothing
+This follows the same portability discipline as the rest of the console (`CLAUDE.md`): nothing
 proposed here should change the **kid-facing cart contract** (`docs/moy_cart_api.md`) —
 it stays exactly as-is, indexed canvas, plain functions, portable across every tier.
 Everything below is *shell*-side, layered on top of that contract, never replacing it.

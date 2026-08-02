@@ -9,11 +9,23 @@ Thanks for your interest! First, the promise that governs everything here:
 > and even that restriction expires per release after two years. See
 > [`LICENSE.md`](LICENSE.md).
 
+## Which branch
+
+**Branch off `dev`, and target `dev` with your PR.** `dev` is where work lands;
+`master` is the tested tree that people's boards actually run — the project
+site flashes it and the stable over-the-air channel offers it, so a change gets
+there only after a maintainer has tested it on the hardware it touches (the
+merge into `master` is the release, and it bumps the firmware version).
+
+Builds off `dev` are published as **beta** firmware, which is how a change can
+be tried on a real board before it is anyone's default. GitHub still shows
+`master` by default, so a PR opened from a fork may need its base switched.
+
 ## Before you start
 
 - **Bugs / small fixes:** open an issue or a PR directly.
 - **Features:** open an issue first. The console is deliberately small and
-  opinionated (see `moybyte_Console_Plan_v0_5.md` §2 — "learn to make"); a
+  opinionated (see `moybyte_console_plan_2026-07.md` §2 — "learn to make"); a
   quick design conversation saves you from building something we can't merge.
 - **Carts:** carts you author are **yours** — license them however you like.
   A community gallery is planned (#122); until then, share them in an issue

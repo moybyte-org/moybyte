@@ -553,17 +553,21 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
               % (1 if keyboard.available else 0, 1 if ball.available else 0,
                  1 if touch.available else 0), diag)
 
-    # OTA rollback confirm (#53): reaching here means this image booted, mounted the
-    # panel + SD + keyboard, and loaded the desktop -- a strong "healthy" signal. Mark
-    # the running app valid so the bootloader cancels the pending rollback it would
-    # otherwise trigger on the next reset (CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE). No-op
-    # if the image was already confirmed or this is a non-OTA build.
-    if getattr(ws, "updater", None) is not None:
+    # Say what became of the last update, before anything can overwrite the evidence
+    # (#53). Reaching here means the panel, SD, keyboard and desktop all came up --
+    # but NOT that a single frame reached the glass, and a board that boots to a
+    # black screen has shipped here before (#56). So the rollback CONFIRM is not
+    # made here; it is made from the frame loop below, once frames are really going
+    # out (ws.updater.confirm_when_healthy).
+    _ota = getattr(ws, "updater", None)          # cleared once the confirm has fired
+    if _ota is not None:
         try:
-            if ws.updater.mark_valid():
-                _diag_log("ota", "marked app valid (slot %s)" % ws.updater.slot(), diag)
+            _verdict = _ota.boot_check()
+            if _verdict:
+                _diag_log("ota", "last update %s (%s)" % _verdict, diag)
+                ws.announce_update()      # and say so on the desktop, not just here
         except Exception as exc:
-            _diag_log("ota", "mark_valid failed: %s" % exc, diag)
+            _diag_log("ota", "boot_check failed: %s" % exc, diag)
 
     import gc
     gc.collect()                                # defrag after the heavy boot so the LCD
@@ -746,6 +750,17 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             _splash["done"] = True
             print("Moybyte first frame in %dms"
                   % _ticks_diff(_ticks_ms(), _first_at))
+        # The OTA rollback confirm (#53), now that frames are really going out.
+        # Cheap (an int compare) and self-disarming after it fires once.
+        if _ota is not None:
+            try:
+                if _ota.confirm_when_healthy(getattr(ws, "_frames_drawn", 0)):
+                    _diag_log("ota", "marked app valid (slot %s)" % _ota.slot(), diag)
+                if _ota.confirmed:
+                    _ota = None       # fired (or a non-OTA build): stop asking
+            except Exception as exc:  # never break a frame over this
+                _diag_log("ota", "confirm failed: %s" % exc, diag)
+                _ota = None
         # Diag perf sample (~3s): a structured "PERF cart=<name> fps=<n> flush=<ms>
         # draw=<ms>" line while a cart runs -- the payload that makes "play -> reboot
         # -> paste the serial" yield per-cart frame timings offline. No SD touch here

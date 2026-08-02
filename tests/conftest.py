@@ -85,10 +85,17 @@ class _SharedRuntimeAliasFinder(importlib.abc.MetaPathFinder):
 _DEVICE_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "firmware", "lilygo_t_deck_plus_micropython", "modules")
+# `_ota_build` is EXCLUDED: build.sh writes it (gitignored) with this machine's
+# last build channel/version/label, and moy_ota imports it when present. Resolving
+# it here made the suite read differently on a machine that had built firmware than
+# on one that had not -- which is how a stale `LABEL="v2"` masked the FIRMWARE_NAME
+# change locally and only failed in CI. Host tests see the committed source's
+# identity, always; a test that wants a stamp sets the module globals itself.
+_BUILD_STAMPED = {"_ota_build"}
 _DEVICE_ONLY = {
     f[:-3] for f in os.listdir(_DEVICE_DIR)
     if f.endswith(".py") and f != "__init__.py"
-} - _SHARED - set(_RENAMED)
+} - _SHARED - set(_RENAMED) - _BUILD_STAMPED
 
 
 class _DeviceModuleFinder(importlib.abc.MetaPathFinder):

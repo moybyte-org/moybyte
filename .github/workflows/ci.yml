@@ -1,7 +1,7 @@
 name: CI
 
 # The pure-software slice of #34 (automated development pipeline): host tests +
-# the portable-subset gate on every push to master and every PR, plus the
+# the portable-subset gate on every push to master or dev and every PR, plus the
 # issue's software-vs-hardware classification (firmware/ or native/ changed ->
 # flag "needs on-device verification"). This intentionally stops at the
 # decision-free infra -- it does NOT implement #34's Claude-issue-trigger or a
@@ -10,11 +10,15 @@ name: CI
 # human-in-the-loop gates). See the classify-hardware-impact job below for the
 # hand-off this workflow leaves for a human (or a future automated step).
 
+# Both branches, deliberately. `dev` is the UNTESTED branch (see CLAUDE.md ->
+# "Branches and releases"), which makes it the branch that most needs the suite:
+# it is the only automated gate work gets before a human decides it is ready for
+# master. A red dev is information, not an embarrassment.
 on:
   push:
-    branches: ["master", "main"]
+    branches: ["master", "main", "dev"]
   pull_request:
-    branches: ["master", "main"]
+    branches: ["master", "main", "dev"]
 
 jobs:
   test:

@@ -3,7 +3,7 @@
 
 Drives `runtime/host_app` (the same `Workstation` the T-Deck runs) with a scripted,
 *visible* cursor that taps real controls, and records short animated GIFs of the
-v0.5 shell:
+2026-07 shell:
 
   paint   open the Editor on Pixel Pet -> SPRITES tab -> paint a smile on the
           pet's tile -> PLAY -> the pet is wearing it in the running game.

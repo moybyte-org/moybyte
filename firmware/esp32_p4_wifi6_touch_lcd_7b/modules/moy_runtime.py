@@ -36,7 +36,7 @@ from device_util import _ticks_ms, _ticks_diff
 from device_api import make_api
 from device_canvas import (DeviceCanvas, _LayerComp, _FONT8, _FONT8_FIRST,
                            _ST_FONT_SCALE, _COMPACT_MIN_PX)
-from device_wifi import make_wifi
+from device_wifi import autoconnect_wifi, make_wifi
 
 GAME_W, GAME_H = 320, 240
 FONT_SCALE = 1                     # 1x everywhere (owner call, 2026-07-12): the 7"
@@ -48,6 +48,11 @@ FONT_SCALE = 1                     # 1x everywhere (owner call, 2026-07-12): the
 # on sys.path), and the first boot's seeded /moybyte dir broke the next boot's
 # `from moybyte.input import ...` (hardware-learned 2026-07-08).
 CARTS_ROOT = "/moy/carts"
+# Where an OTA image stages (#53). This board has no SD -- the T-Deck's
+# /sd/update has no meaning here -- so it lands on the internal VFS, which
+# has ~23MB free against a ~3MB image. NOT under /moy/carts: the store
+# scans that directory.
+OTA_UPDATE_DIR = "/moy/update"
 
 
 class P4SystemCanvas(DeviceCanvas):
@@ -702,6 +707,22 @@ def run_desktop(fps_cap=60):
                           make_wifi(moy_carts, carts_root),
                           lua_runtime=lua_runtime,
                           pointer=pointer, inp=inp, keyboard=keyboard)
+    # OTA firmware update (#53 on this board). The partition table has been
+    # OTA-shaped since bring-up (ota_0/ota_1, 4MB each) and update_ui has been
+    # frozen in all along; this is the piece that was missing.
+    #
+    # Two things differ from the T-Deck. There is no SD card in this console, so
+    # the image stages on the internal VFS (~23MB free, against a ~3MB image) and
+    # with_sd is a plain call-through -- no bus to drain, no card to mount. And
+    # the board identity matters: an OTA payload is an app-partition image, so
+    # the manifest is per board and this one must never be handed an S3 build.
+    try:
+        import moy_ota
+        ws.updater = moy_ota.OtaUpdater(lambda fn: fn(),
+                                        update_dir=OTA_UPDATE_DIR)
+        ws.updater.set_wifi(ws.wifi, go_online=lambda: autoconnect_wifi(ws.wifi))
+    except Exception as exc:  # noqa: BLE001
+        print("Moybyte P4: OTA updater unavailable:", exc)
     try:
         import machine
         ws.reboot_hook = machine.reset
@@ -734,6 +755,20 @@ def run_desktop(fps_cap=60):
 
     import gc
     gc.collect()
+    # Say what became of the last update before anything else can overwrite the
+    # evidence (#53). The rollback CONFIRM does not happen here -- reaching this
+    # line only proves the desktop was built, and an image that never paints has
+    # already shipped once (#56). It is fired from the frame loop below, after
+    # the console has actually drawn.
+    _ota = getattr(ws, "updater", None)   # cleared once the confirm below has fired
+    if _ota is not None:
+        try:
+            verdict = _ota.boot_check()
+            if verdict:
+                print("Moybyte P4 OTA: last update %s (%s)" % verdict)
+                ws.announce_update()      # and say so on the desktop, not just here
+        except Exception as exc:  # noqa: BLE001 -- never block the desktop
+            print("Moybyte P4 OTA: boot_check failed:", exc)
     print("Moybyte P4 desktop running (Ctrl-C for REPL)")
     # The last thing before the loop, and the stage the silent wait was in:
     # everything above had already printed when the screen was reported black.
@@ -1128,6 +1163,17 @@ def run_desktop(fps_cap=60):
             _splash["done"] = True
             print("Moybyte P4 first frame in %dms"
                   % _ticks_diff(_ticks_ms(), _first_at))
+        # The OTA rollback confirm (#53), now that frames are really going out.
+        # Cheap (an int compare) and self-disarming after it fires once.
+        if _ota is not None:
+            try:
+                if _ota.confirm_when_healthy(getattr(ws, "_frames_drawn", 0)):
+                    print("Moybyte P4 OTA: marked app valid (slot %s)" % _ota.slot())
+                if _ota.confirmed:
+                    _ota = None       # fired (or a non-OTA build): stop asking
+            except Exception as exc:  # noqa: BLE001 -- never break a frame over this
+                print("Moybyte P4 OTA: confirm failed:", exc)
+                _ota = None
         elapsed = _ticks_diff(_ticks_ms(), now)
         _pf_n += 1
         _pf_busy += elapsed

@@ -147,8 +147,13 @@ def test_ota_updater_wired_into_run_desktop_with_rollback_confirm():
 
     assert "import moy_ota" in runtime
     assert "ws.updater = moy_ota.OtaUpdater(_with_sd_synced)" in runtime
-    # the healthy-boot rollback confirm
-    assert "ws.updater.mark_valid()" in runtime
+    # The rollback confirm is made from the FRAME LOOP, once the console has
+    # actually painted -- not on the boot path, where "the desktop was built"
+    # would confirm an image that never reaches the glass (#56). See
+    # tests/test_ota_health.py for the behaviour; this pins the wiring.
+    assert 'confirm_when_healthy(getattr(ws, "_frames_drawn", 0))' in runtime
+    assert "boot_check()" in runtime
+    assert "ws.updater.mark_valid()" not in runtime
 
 
 def test_console_settings_has_firmware_update_screen():

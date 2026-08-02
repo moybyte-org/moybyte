@@ -1,6 +1,6 @@
 # Moybyte `.moy` cart API (current)
 
-The drawing/input/audio API a **v0.4 `.moy` cartridge** calls. This is the *current*
+The drawing/input/audio API a **`.moy` cartridge** calls. This is the *current*
 console API — it supersedes the legacy `.moyproj` SDK API in
 [`moybyte_api.md`](history/moybyte_api.md) and the 128×128 `run/sprite/text` contract in
 [`firmware_runtime_contract.md`](history/firmware_runtime_contract.md), both of which describe

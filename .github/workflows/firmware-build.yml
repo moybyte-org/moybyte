@@ -1,13 +1,35 @@
 name: Firmware build
 
 # Build the ESP32 firmware images on GitHub's runners -- no always-on box needed.
-# The .bin images drop out as downloadable artifacts on each run.
+# The .bin images drop out as downloadable artifacts on each run, and land on a
+# rolling release per BRANCH (see the publish job).
 #
-# Run it: Actions tab -> "Firmware build" -> Run workflow (pick a board), or via
-# the API/gh with a ref. It is manual-only by default so it never burns minutes
-# on ordinary pushes; to also archive every master build, uncomment the `push:`
-# trigger below.
+# WHEN THIS RUNS -- the two branches are the two release channels (CLAUDE.md ->
+# "Branches and releases"):
+#
+#   push to master  -> a STABLE build  -> the `firmware-latest` release, which is
+#                      what the project site's flasher writes and what the
+#                      device's STABLE OTA channel offers. A release is worth a
+#                      build every time, so this is automatic.
+#   push to dev     -> a BETA build    -> the `firmware-beta` release + the
+#                      UNSTABLE OTA channel. Opt-in, rollback-protected, and the
+#                      whole point of having a dev branch that testers can reach.
+#   dispatch        -> whatever board you pick, from whatever ref: an unpublished
+#                      one-off .bin (only the two branches above publish).
+#
+# Path-filtered, so a docs-only push builds nothing. Every-push-builds is
+# affordable because the `concurrency` block below cancels in progress per ref:
+# a burst of ten dev pushes collapses into ONE build of the last commit. If that
+# ever stops being true (long queues, a slow runner), the smallest fix is to
+# narrow this to a `schedule:` nightly on dev and leave master on push.
 on:
+  push:
+    branches: [master, dev]
+    paths:
+      - "firmware/**"
+      - "runtime/**"
+      - "system_carts/**"
+      - ".github/workflows/firmware-build.yml"
   workflow_dispatch:
     inputs:
       board:
@@ -15,10 +37,6 @@ on:
         type: choice
         default: tdeck
         options: [tdeck, p4, both]
-  # To archive every master build, use instead:
-  #   push:
-  #     branches: [master]
-  #     paths: ["firmware/**", "runtime/**", "system_carts/**"]
 
 concurrency:
   group: firmware-${{ github.ref }}
@@ -33,12 +51,20 @@ jobs:
       fail-fast: false
       matrix:
         board: [tdeck, p4]
-    # Only run the boards the dispatcher asked for.
+    # Only run the boards the dispatcher asked for. A PUSH sets no input, so a
+    # branch build does both boards; a dispatch honours the choice.
     env:
-      WANT: ${{ github.event.inputs.board || 'tdeck' }}
+      WANT: ${{ github.event.inputs.board || 'both' }}
       IDF_CCACHE_ENABLE: "1"
       MOYBYTE_BUILD_JOBS: "4"
       MOYBYTE_SKIP_VFS_BOOT: "1"
+      # The image's baked OTA identity (#53): build.sh stamps CHANNEL/VERSION/
+      # LABEL into a generated _ota_build.py from this. Deriving it from the REF
+      # is the whole point of the branch split -- an image built off dev must not
+      # introduce itself to a device as a stable release. master keeps the
+      # committed FIRMWARE_VERSION; unstable stamps a build epoch, so every beta
+      # publish reads as newer than the last.
+      MOYBYTE_OTA_CHANNEL: ${{ github.ref == 'refs/heads/master' && 'stable' || 'unstable' }}
     steps:
       - name: Should this board run?
         id: gate
@@ -172,7 +198,25 @@ jobs:
           # T-Deck images land under firmware/*/dist/; the P4 build writes to
           # the repo-root dist/p4/ -- scan both (dist/ may not exist).
           find firmware dist -path '*dist/*' -name '*.bin' -print -exec cp {} out/ \; 2>/dev/null || true
+          # The OTA identity build.sh stamped INTO this image (channel/version/
+          # label). It rides along so the publish job writes a manifest whose
+          # version is the one actually baked in, rather than re-deriving it a
+          # job later: a beta's version is a build-time epoch, and a manifest
+          # advertising a DIFFERENT number than the image carries would offer
+          # the same install forever (install -> running version is lower than
+          # the manifest again -> offered again).
+          # BOTH boards, and the P4's does not live under firmware/ -- shipping
+          # only the T-Deck's is what published a P4 beta stamped "stable v2"
+          # while its manifest said "unstable": the publisher found no stamp for
+          # that board and fell back to the committed FIRMWARE_VERSION, so every
+          # P4 on beta was offered the same install forever, which is the exact
+          # failure the paragraph above exists to prevent.
+          cp firmware/lilygo_t_deck_plus_micropython/dist/current/ota_build.json out/ 2>/dev/null || true
+          cp dist/p4/ota_build.json out/ 2>/dev/null || true
           ls -l out || true
+          # A build whose identity did not travel would publish a manifest that
+          # lies about the image, so say it loudly rather than shipping it.
+          test -f out/ota_build.json || echo "::warning::no ota_build.json for ${{ matrix.board }} -- the manifest will fall back to the committed version"
 
       # 90 days rather than the old 14. Artifacts are no longer where the
       # website gets its images (that is the release below, which never
@@ -183,23 +227,36 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: moybyte-firmware-${{ matrix.board }}
-          path: out/*.bin
+          path: out/*
           if-no-files-found: error
           retention-days: 90
 
-  # Publish this run's images to the rolling `firmware-latest` release: the
-  # durable store the website's flasher reads. A release costs a clone nothing,
-  # unlike committing 7.4 MB of .bin per build into a 6 MB repository.
+  # Publish this run's images to a rolling release: the durable store the
+  # website's flasher and the device's OTA both read. A release costs a clone
+  # nothing, unlike committing 7.4 MB of .bin per build into a 6 MB repository.
+  #
+  # ONE release per branch/channel, and they never mix:
+  #   master -> firmware-latest  (STABLE: the site's flasher + the stable OTA)
+  #   dev    -> firmware-beta    (BETA:   the unstable OTA channel only -- the
+  #                               site keeps flashing stable, see pages.yml)
+  # Each carries a per-channel `latest.json` OTA manifest beside the images, so
+  # the two channels are served by GitHub and a beta tester needs no host of
+  # their own (`make ota-publish-unstable` stays the LAN/offline path).
   #
   # Per board and additive: only the boards THIS run built are replaced, so a
   # single-board dispatch leaves the other board's published image alone. The
-  # Pages workflow watches this workflow and republishes the site afterwards.
+  # Pages workflow watches this workflow and republishes the site afterwards --
+  # for master only, since dev never changes what the site serves.
   publish:
-    name: publish to firmware-latest
+    name: publish to ${{ github.ref == 'refs/heads/master' && 'firmware-latest' || 'firmware-beta' }}
     needs: build
     # always(): one board failing must not withhold the other's image. With
     # nothing built at all, the publish step finds no artifacts and no-ops.
-    if: always() && github.ref == 'refs/heads/master'
+    # Dispatched runs off other refs build but never publish -- an unreviewed
+    # branch must not be able to hand itself to a device.
+    if: >-
+      always() &&
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -219,7 +276,19 @@ jobs:
           path: artifacts
           pattern: moybyte-firmware-*
 
+      # Signing the manifest is what stops a network attacker handing a board
+      # their own firmware (moy_ota's ssl does not verify certificates, and the
+      # manifest's sha256 cannot help against whoever wrote the manifest). The
+      # key lives here as a repository secret; with it unset the publish still
+      # succeeds and says so, and devices simply refuse the result.
+      - name: Signing dependencies
+        run: python3 -m pip install --quiet 'cryptography>=41'
+
       - name: Publish to the rolling release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 tools/publish_firmware_release.py --artifacts artifacts
+          CHANNEL: ${{ github.ref == 'refs/heads/master' && 'stable' || 'unstable' }}
+          MOYBYTE_OTA_SIGNING_KEY: ${{ secrets.MOYBYTE_OTA_SIGNING_KEY }}
+        run: |
+          python3 tools/publish_firmware_release.py \
+            --artifacts artifacts --channel "$CHANNEL"
