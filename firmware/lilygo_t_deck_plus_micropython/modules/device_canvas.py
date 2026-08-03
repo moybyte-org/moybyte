@@ -40,6 +40,24 @@ except ImportError:
     _FONT8 = None
     _FONT8_FIRST = 0x20
 
+# #186 moy_buf: an image whose .pix already lives OFF the gc heap (a cover --
+# memoryview pix) gets its RGB565 bakes off-heap too, so the whole cover stops
+# taxing the GC mark phase. The owner (console._free_cover_img) frees pix and
+# bakes together at eviction. Everything else (sheet tiles, paint images,
+# wallpaper blits) keeps gc bytearrays -- their owners drop them implicitly
+# (sheet gen bumps, cart ns teardown) and an explicit free there would leak.
+try:
+    import moybuf as _moybuf
+except ImportError:
+    _moybuf = None
+
+
+def _bake_buf(img, nbytes):
+    """A bake buffer riding its image's residency: off-heap iff img.pix is."""
+    if _moybuf is not None and isinstance(img.pix, memoryview):
+        return _moybuf.alloc(nbytes)
+    return bytearray(nbytes)
+
 # MOY64 palette as RGB565 (generated from runtime/palette.py; no colorsys here).
 PAL565 = (
     0x0000, 0x194A, 0x792A, 0x042A, 0xAA86, 0x5AA9, 0xC618, 0xFF9D,
@@ -1195,7 +1213,7 @@ class DeviceCanvas:
 
         w = img.w * scale
         h = img.h * scale
-        buf = bytearray(w * h * 2)
+        buf = _bake_buf(img, w * h * 2)   # #186: off-heap for off-heap images
         fb = framebuf.FrameBuffer(buf, w, h, framebuf.RGB565)
         fb.fill(_RGB_KEY)
         pal = PAL565_WIRE
@@ -1233,6 +1251,14 @@ class DeviceCanvas:
         if var is None:
             var = img._rgb_variants = {}
         elif len(var) >= 6:
+            if _moybuf is not None:
+                # #186: off-heap variants must be returned before the dict
+                # forgets them -- EXCEPT the buffer the hot _rgb slot still
+                # aliases (it frees when the image is evicted, or when a
+                # later re-bake drops it from both places).
+                for _v in var.values():
+                    if isinstance(_v[0], memoryview) and _v[0] is not img._rgb:
+                        _moybuf.free(_v[0])
             var.clear()
         var[(scale, flip, self._palgen)] = (buf, w, h)
         self._rgb_bakes += 1
@@ -1244,7 +1270,7 @@ class DeviceCanvas:
         # The "images are data, not draw calls" bake (#63 Fold 3), off the hot path.
         w = img.w
         h = img.h
-        buf = bytearray(w * h * 2)
+        buf = _bake_buf(img, w * h * 2)   # #186: off-heap for off-heap images
         self._gfx.blit_indices(buf, w, h, 0, 0, img.pix, w, h, _PAL565_WIRE_BUF)
         img._rgb_i = buf
 

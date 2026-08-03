@@ -489,7 +489,10 @@ class EditorApp:
         elif tab == _ZONE_REDO:   # REDO (#88)
             ws.redo()
         else:                     # PLAY (tab is None)
-            ws._leave_menu()
+            # #184: deferred -- the hard-commit (~850ms SD, #154) + compile +
+            # exec + first-world build run behind the next painted frame
+            # (LOADING toast), never inside the bar tap that asked for them.
+            ws.defer(ws._leave_menu)
         return True
 
     def _tab_is_clean(self, tab):

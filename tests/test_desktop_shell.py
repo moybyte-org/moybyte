@@ -33,6 +33,40 @@ def _open_game(ws):
     raise AssertionError("no game cart seeded")
 
 
+# -- #184: taps schedule transitions behind a LOADING paint -----------------
+
+def test_tap_schedules_the_run_behind_a_loading_paint(tmp_path):
+    """#184: a PLAY tap SCHEDULES the cart start -- the pointer walk only
+    queues it (ws._deferred), the next frame paints the LOADING toast, and
+    that frame's TAIL (after the flush presented the toast) runs the start.
+    So after one frame() the STATE has transitioned but the CANVAS still
+    holds the acknowledgment frame -- exactly what the panel retains on
+    glass during the 1-2s device stall."""
+    from runtime.chrome import NAMES
+    ws = _ws(tmp_path)
+    for i, it in enumerate(ws.launcher.items):
+        if it.get("path") and it.get("type") == "game":
+            ws.launcher.sel = i
+            break
+    home = ws.launcher_layer
+    chips = home._zone_action_rects(ws.layout.zone_left)
+    x, y, w, h = chips["play"]
+    assert home.zone_tap(x + 1, y + 1, ws.layout.zone_left)
+    assert ws.screen == "launcher"       # the tap only SCHEDULED the start
+    assert ws._deferred                  # ...which is queued for the frame
+    ws.frame(1 / 30)
+    assert ws.screen == "desktop"        # the frame tail ran it
+    assert not ws._deferred
+    # The canvas still shows the acknowledgment frame: the toast's border.
+    fs = ws._effective_font_scale()
+    tw = (len("LOADING...") * 8 + 16) * fs
+    tx = (ws.sys_canvas.w - tw) // 2
+    assert ws.sys_canvas.pix(tx, 24 * fs) == NAMES["light_grey"]
+    # The NEXT frame paints the transitioned world (no toast left).
+    ws.frame(1 / 30)
+    assert ws.sys_canvas.pix(tx, 24 * fs) != NAMES["light_grey"]
+
+
 # -- the desktop renders without error -------------------------------------
 
 def test_desktop_home_renders(tmp_path):

@@ -39,6 +39,7 @@ modules/layers.py
 modules/map_editor_ui.py
 modules/moy_carts.py
 modules/moy_font.py
+modules/moybuf.py
 modules/moy_fs.py
 modules/moy_image.py
 modules/moy_journal.py

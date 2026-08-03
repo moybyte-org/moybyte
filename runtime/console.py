@@ -388,6 +388,14 @@ except ImportError:
     _CROP_INDEX = None
     _DECODE_RUNS = None
 
+# #186 moy_buf: cover payloads (parsed runs, cover bitmaps, the decode
+# scratch) live OUTSIDE the MP gc heap on device, so a warm shelf stops
+# taxing every GC collect. On the host this is a transparent no-op layer.
+try:
+    import moybuf as _moybuf
+except ImportError:
+    from runtime import moybuf as _moybuf
+
 
 class _CoverJob:
     """A RESUMABLE cover build. Decoding a 320x240 RLE cover + cover-cropping
@@ -511,7 +519,10 @@ class _CoverJob:
                     if _CROP_INDEX(self.out, w, h, pix, sw, sh,
                                    ox, self._oy, cw_, ch_):
                         self.dy = h
-                        self.img = _CoverImage(w, h, bytes(self.out))
+                        # #186: the finished card bitmap moves off the gc heap
+                        # (take() copies into moy_buf storage on device; on the
+                        # host it adopts `out` unchanged, zero copies).
+                        self.img = _CoverImage(w, h, _moybuf.take(self.out))
                         self.done = True
                         return
                 except Exception:  # noqa: BLE001 -- any surprise -> Python loop
@@ -528,7 +539,7 @@ class _CoverJob:
             self.dy = dy + 1
             if _ticks_diff(_ticks_ms(), t0) >= _COVER_SLICE_MS:
                 return
-        self.img = _CoverImage(w, h, bytes(out))
+        self.img = _CoverImage(w, h, _moybuf.take(out))   # #186: off the gc heap
         self.done = True
 
 
@@ -1109,6 +1120,12 @@ class Workstation:
         self._ptr_last_x = -1     # handle_pointer's idle fast-path: last routed
         self._ptr_last_y = -1     # pointer position (ints -- no per-frame tuple)
         self._ptr_was_down = False  # ...and whether it was held (release edge)
+        # #184 deferred transitions: [armed, fn] entries queued by defer().
+        # A tap handler schedules its heavy transition here instead of running
+        # it inside the pointer walk; frame() paints the acknowledgment first
+        # (arming the entry after the flush), then runs it at the next frame's
+        # top -- so the pressed state is ON GLASS during the load stall.
+        self._deferred = []
         # RAW (un-smoothed) copy of THIS frame's phase split (#66 HITCH v3): the
         # EMAs above hide which phase a single 150ms hitch frame spent its time
         # in (a one-frame spike moves an alpha=0.15 EMA by only 15% of itself).
@@ -1993,7 +2010,19 @@ class Workstation:
             # overwrite it.
             if _DECODE_RUNS is not None and _CROP_INDEX is not None:
                 if self._cover_buf is None or len(self._cover_buf) < need:
-                    self._cover_buf = bytearray(need)
+                    # #186: the scratch lives off the gc heap too. Growing it
+                    # frees the old one -- unless a job still decodes into it
+                    # (the native-crop exception fallback can span frames);
+                    # then the old scratch LEAKS, bounded, never freed live.
+                    old = self._cover_buf
+                    if old is not None:
+                        for _j in jobs.values():
+                            if _j.pix is old:
+                                old = None
+                                break
+                    if old is not None:
+                        _moybuf.free(old)
+                    self._cover_buf = _moybuf.alloc(need)
                 job = _CoverJob(runs, w, h, buf=self._cover_buf)
             else:
                 job = _CoverJob(runs, w, h)
@@ -2075,6 +2104,11 @@ class Workstation:
         if runs is None:
             self._cover_none[path] = True
             return None, None
+        # #186: the packed RLE blob (~15KB x every cart, 512KB cap) is the
+        # biggest slice of the warm shelf -- move it off the gc heap. Every
+        # consumer (len, int indexing, the native decode_runs) reads a
+        # memoryview identically; eviction frees it (_cover_free_runs).
+        runs = (runs[0], runs[1], _moybuf.take(runs[2]))
         self._cover_runs_put(path, sig, runs)
         return runs, sig
 
@@ -2186,6 +2220,54 @@ class Workstation:
         order.append(path)
         return e[1]
 
+    def _cover_free_runs(self, packed):
+        """#186: return an evicted runs blob to off-heap storage -- unless an
+        in-flight _CoverJob still decodes from it (the LRU knows nothing
+        about jobs; leaking one blob beats a use-after-free). No-op for
+        gc-heap payloads (host / fallback)."""
+        for job in self._cover_jobs.values():
+            if job.packed is packed:
+                return
+        _moybuf.free(packed)
+
+    def _free_cover_img(self, img):
+        """#186: release an evicted cover blittable's off-heap payloads --
+        the indexed pixels plus any RGB565 bake the device canvas stamped on
+        it (_rgb_i / _rgb / the variant dict). Alias-safe: the hot _rgb slot
+        SHARES a variant entry's buffer, so each distinct buffer frees once.
+        Fields are nulled afterwards, so if anything ever drew an evicted
+        cover it would raise loudly instead of blitting freed memory
+        (nothing does -- pinned by the #186 audit)."""
+        if img is None:
+            return
+        freed = []
+        for name in ("pix", "_rgb_i", "_rgb"):
+            b = getattr(img, name, None)
+            if isinstance(b, memoryview):
+                dup = False
+                for s in freed:
+                    if b is s:
+                        dup = True
+                        break
+                if not dup:
+                    freed.append(b)
+                    _moybuf.free(b)
+            setattr(img, name, None)
+        var = getattr(img, "_rgb_variants", None)
+        if var:
+            for v in var.values():
+                b = v[0]
+                if isinstance(b, memoryview):
+                    dup = False
+                    for s in freed:
+                        if b is s:
+                            dup = True
+                            break
+                    if not dup:
+                        freed.append(b)
+                        _moybuf.free(b)
+            var.clear()
+
     def _release_cover_caches(self):
         """Drop the whole cover pipeline before a cart runs (cover_diet tier).
 
@@ -2206,6 +2288,9 @@ class Workstation:
         only cards scrolled into view later rebuild -- their normal cold path,
         prefetch-warmed. The full fix (cover payloads in moy_alloc storage the
         collector never scans, warm AND GC-invisible) is the standing follow-up."""
+        # #186: drop the in-flight jobs FIRST -- they alias runs blobs and the
+        # decode scratch, and the frees below must not race a half-built cover.
+        self._cover_jobs = {}
         keep = _COVER_DIET_KEEP
         order = self._cover_cache_order
         cache = self._cover_cache
@@ -2214,6 +2299,7 @@ class Workstation:
             img = cache.pop(k, None)
             if img is not None:
                 self._cover_cache_pixels -= len(img.pix)
+                self._free_cover_img(img)       # #186: pix + bakes off-heap
         rorder = self._cover_runs_order
         runs = self._cover_runs
         while len(rorder) > keep:
@@ -2221,8 +2307,10 @@ class Workstation:
             gone = runs.pop(k, None)
             if gone is not None:
                 self._cover_runs_bytes -= len(gone[1][2])
-        self._cover_jobs = {}
-        self._cover_buf = None        # the 76.8KB decode scratch; realloc'd on demand
+                self._cover_free_runs(gone[1][2])
+        if self._cover_buf is not None:
+            _moybuf.free(self._cover_buf)       # the 76.8KB decode scratch
+        self._cover_buf = None                  # realloc'd on demand
         self._cover_gen += 1          # any shelf band repaints from scratch
         self._cover_seen = True       # re-arm the idle prefetch for the return home
 
@@ -2233,6 +2321,7 @@ class Workstation:
         old = cache.get(path)
         if old is not None:
             self._cover_runs_bytes -= len(old[1][2])
+            self._cover_free_runs(old[1][2])   # #186: replaced blob returns
             try:
                 order.remove(path)
             except ValueError:
@@ -2248,6 +2337,7 @@ class Workstation:
             gone = cache.pop(drop, None)
             if gone is not None:
                 self._cover_runs_bytes -= len(gone[1][2])
+                self._cover_free_runs(gone[1][2])   # #186 (job-alias guarded)
 
     def _cover_spend(self, t0):
         """Charge this frame's cover budget (see _cover_for)."""
@@ -2276,6 +2366,7 @@ class Workstation:
             old_img = cache.pop(old_key, None)
             if old_img is not None:
                 self._cover_cache_pixels -= len(old_img.pix)
+                self._free_cover_img(old_img)   # #186: pix + bakes off-heap
         return img
 
     def prebuild_covers(self):
@@ -2626,6 +2717,34 @@ class Workstation:
         self.wm.goto(value)
 
     # -- run / exit (Stage 2: the run/return stack discipline) ----------------
+
+    def defer(self, fn):
+        """#184: schedule a heavy transition (cart start, editor open, PLAY)
+        instead of running it inside the pointer walk. The tap frame paints its
+        acknowledgment (selection highlight + the LOADING toast) and PRESENTS
+        it (comp.flush() runs inside frame()); the queued `fn` then runs at
+        that same frame's tail -- so the 1-2s a cart start costs happens
+        behind a frame that already shows the tap landed, not behind a frozen
+        stale shelf. defer() marks dirty so the acknowledgment frame always
+        paints (the redraw gate can't skip it)."""
+        self._deferred.append(fn)
+        self._dirty = True             # the acknowledgment frame must paint
+
+    def _run_deferred(self):
+        """Run the deferred transitions queued BEFORE this drain started
+        (frame()'s tail, after the flush presented the acknowledgment). A
+        transition that defers another action leaves it for the next frame --
+        its own result must paint first."""
+        q = self._deferred
+        for _ in range(len(q)):
+            fn = q.pop(0)
+            _t0 = _ticks_ms() if self.perf_capture else 0
+            fn()
+            if self.perf_capture:
+                print("DEFER ms=%d fn=%s"
+                      % (_ticks_diff(_ticks_ms(), _t0),
+                         getattr(fn, "__name__", "?")))
+        self._dirty = True             # the transition's result must paint
 
     def run(self, project, caller):
         """Show `project`'s running cart on the desktop, recording `caller` so the exit
@@ -4020,18 +4139,24 @@ class Workstation:
         if items:
             self._all_carts = list(items)
             self.slim_carts()              # #66: a rescan reloads FULL carts -- re-slim
+            self._cover_jobs = {}          # in-flight builds may read stale blobs
+                                           # (#186: cleared BEFORE the frees below,
+                                           # so no job can alias a freed payload)
+            for _img in self._cover_cache.values():
+                self._free_cover_img(_img)     # #186: pix + bakes off-heap
             self._cover_cache = {}         # a re-scan may carry new/changed cover art
             self._cover_cache_order = []
             self._cover_cache_pixels = 0
             # Sources too: they are stamped against the blob, so an edited cover
             # would be caught anyway -- but a rescan is also when a cart goes
             # away, and holding its 77KB source would be a leak.
+            for _e in self._cover_runs.values():
+                self._cover_free_runs(_e[1][2])
             self._cover_runs = {}
             self._cover_runs_order = []
             self._cover_runs_bytes = 0
             self._cover_none = {}
             self._cover_gen += 1
-            self._cover_jobs = {}          # in-flight builds may read stale blobs
             self._cover_seen = True        # re-arm the idle prefetch: new/changed
                                            # carts should warm before their surface opens
             self.launcher.set_items(self._launcher_view_items())   # #105: keep an active filter
@@ -4309,6 +4434,24 @@ class Workstation:
         rs = getattr(self.canvas, "reset_state", None)
         if rs is not None:
             rs()
+
+    def _draw_loading_toast(self):
+        """#184: the deferred-transition acknowledgment -- a small top-center
+        pill (the hold-to-exit toast's idiom) painted on the frame between a
+        tap and its heavy transition. The panel retains this frame for the
+        whole load stall, so the kid sees LOADING instead of a frozen shelf.
+        Drawn on the system canvas above the whole stack; indexed API only
+        (host == device == web)."""
+        cv = self.sys_canvas
+        fs = self._effective_font_scale()
+        label = "LOADING..."
+        w = (len(label) * 8 + 16) * fs
+        h = 16 * fs
+        x = (cv.w - w) // 2
+        y = 24 * fs                    # clear of the 18px-per-fs top bar
+        cv.rect(x, y, w, h, NAMES["black"])
+        cv.rectb(x, y, w, h, NAMES["light_grey"])
+        cv.print(label, x + 8 * fs, y + 4 * fs, NAMES["white"], fs)
 
     def _flush_batches(self):
         # Draw any sprites still pending in a canvas's auto-batch (Fold 1, #63) before
@@ -4731,6 +4874,12 @@ class Workstation:
             self._pf_layers = _lay
         if _game_open:                              # game was the TOP layer
             _view()
+        if self._deferred:
+            # #184: the acknowledgment frame -- a transition queued this
+            # iteration paints its LOADING toast on top of everything; the
+            # flush below presents it, and the frame TAIL then runs the
+            # transition. The panel retains this frame for the whole stall.
+            self._draw_loading_toast()
         # #63: nothing should be left in an auto-batch by the time we present. The cart
         # sprites were flushed at _reset_canvas_state; the console's own chrome draws
         # Images immediately (never queued). This final flush is the last-line guard so
@@ -4769,6 +4918,12 @@ class Workstation:
             # `pre` can be read as the whole of the unnamed edge, not a guess.
             self._pf_post = _ticks_diff(_ticks_us(), _fe0) - self._pf_pre \
                 - int(self._raw_draw * 1000) - int(self._raw_flush * 1000)
+        if self._deferred:
+            # #184: the flush above PRESENTED this frame's LOADING
+            # acknowledgment -- now run the queued transition(s) behind it.
+            # Last thing in the frame so the stall sits outside every timing
+            # bracket (the DEFER diag line names its cost instead).
+            self._run_deferred()
 
     def _frame_perf_end(self, frame_t0, cmp_ms, cur_ms):
         """The #43/#44 perf-capture frame tail (extracted from frame() so the hot

@@ -276,6 +276,7 @@ cp "${REPO_ROOT}/runtime/ui.py" "${SCRIPT_DIR}/modules/ui.py"
 cp "${REPO_ROOT}/runtime/calc_app.py" "${SCRIPT_DIR}/modules/calc_app.py"
 cp "${REPO_ROOT}/runtime/console.py" "${SCRIPT_DIR}/modules/console.py"
 cp "${REPO_ROOT}/runtime/moy_carts.py" "${SCRIPT_DIR}/modules/moy_carts.py"
+cp "${REPO_ROOT}/runtime/moybuf.py" "${SCRIPT_DIR}/modules/moybuf.py"
 cp "${REPO_ROOT}/runtime/moy_fs.py" "${SCRIPT_DIR}/modules/moy_fs.py"
 cp "${REPO_ROOT}/runtime/moy_image.py" "${SCRIPT_DIR}/modules/moy_image.py"
 # The pure-Python indexed Canvas + palette: the Wallpaper preview runner needs

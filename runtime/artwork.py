@@ -31,7 +31,12 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 def _invalidate_bitmap(img):
     if img is None:
         return
-    for name, value in (("_rgb_i", None), ("_rgb", None), ("_variants", {})):
+    # _rgb_variants, not _variants: the canvas caches variant bakes under
+    # _rgb_variants (device_canvas._cache_rgb), so the old name cleared a
+    # dict nobody read and stale variant bakes survived a repaint (found by
+    # the #186 audit).
+    for name, value in (("_rgb_i", None), ("_rgb", None),
+                        ("_rgb_variants", {})):
         try:
             setattr(img, name, value)
         except Exception:  # noqa: BLE001 -- host bitmap has no device cache

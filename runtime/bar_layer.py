@@ -591,9 +591,12 @@ class BarLayer:
             elif slot == "map":
                 ws._open_map()
             elif slot == "run":
-                ws.run_code() if ws.editor is not None else ws.apply()
+                # #184: deferred -- the recompile + run happens behind the
+                # next painted frame (the crash-loop population: each PLAY on
+                # a broken cart cost ~2s inside this tap).
+                ws.defer(ws.run_code if ws.editor is not None else ws.apply)
         elif slot == "run" and ws.launcher.selected() is not None:
-            ws.launch_selected()                 # home run = RUN the selected cart
+            ws.defer(ws.launch_selected)         # home run = RUN the selected cart
 
     def handle_bar_tap(self, where, px, py):
         """The zoned bar's tap slice (Stage 4), shared by every screen it draws on

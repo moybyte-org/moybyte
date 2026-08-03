@@ -942,6 +942,14 @@ class ConsoleDriver:
             self.pointer.click = False
             self.ws.handle_pointer()
             self.ws.mark_dirty()
+            if self.ws._deferred:
+                # #184: taps SCHEDULE their heavy transition now (run at the
+                # next frame's tail, behind the LOADING paint). This release
+                # pass ran after ws.frame(), so honor click()'s "the tap
+                # completes within this frame() call" contract by draining
+                # here -- click() is the tests/scripts verb; real mouse input
+                # rides touch()/touch_up() and the normal frame cadence.
+                self.ws._run_deferred()
 
     def rgb888(self):
         # The SYSTEM canvas is what the panel/window shows (the composited viewport +

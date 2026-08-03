@@ -205,7 +205,7 @@ class CardsLayer:
         # old "a" -> Code-editor shortcut (Code is one tap away on the bar ladder) -- that
         # shortcut is why a device tap of Enter "just entered code" instead of playing.
         if i.pressed("a") or i.pressed("run"):
-            ws._leave_menu()
+            ws.defer(ws._leave_menu)   # #184: PLAY runs behind the next paint
         else:
             ws._leave_or_home(ws._leave_menu)
         return True

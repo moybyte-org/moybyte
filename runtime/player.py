@@ -439,7 +439,12 @@ class Player:
         rl = getattr(ws.canvas, "reclaim_layers", None)
         if rl is not None:
             try:
-                rl()               # pool the dead run's layer buffers now
+                # pool the dead run's layer buffers now. The owner arg was
+                # missing until 2026-08-04: reclaim_layers(owner) raised a
+                # TypeError this except swallowed, so the release_world
+                # reclaim was silently dead and only the NEXT start() pooled
+                # (found by the #186 audit).
+                rl("cart")
             except Exception:  # noqa: BLE001
                 pass
         try:

@@ -836,9 +836,14 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
                 _t0 = _ticks_ms()
                 gc.collect()
                 _c_ms = _ticks_diff(_ticks_ms(), _t0)
-                print("Moybyte %d MEMX live=%dk free=%dk collect=%dms"
+                try:
+                    import moy_alloc as _ma_stats
+                    _ob = _ma_stats.stats()[1] // 1024   # #186 off-heap KB
+                except (ImportError, AttributeError):
+                    _ob = -1
+                print("Moybyte %d MEMX live=%dk free=%dk collect=%dms offheap=%dk"
                       % (_ticks_ms(), gc.mem_alloc() // 1024,
-                         gc.mem_free() // 1024, _c_ms))
+                         gc.mem_free() // 1024, _c_ms, _ob))
             _t_sd = _diag_flush(diag, ws)  # #68: cart exited -> persist the session's ring
         _diag_cart_prev = _cart_now
         # The periodic flush now ALSO needs Settings -> DIAG SD LOG (ws.diag_sd,
