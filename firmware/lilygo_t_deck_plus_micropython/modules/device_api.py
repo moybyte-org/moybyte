@@ -377,20 +377,22 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
     # always "not held" and players() is 1. `input` may be a bare stub with no
     # router (probes / tests) -- fall back to the local path.
     _prouter = getattr(input, "players", None)
+    _held = input.held        # bound once: btn is the hottest verb a cart calls,
+    _pressed = input.pressed  # and LOAD_ATTR per call is pure dispatch tax (#66)
 
     def btn(name, player=0):
         if name not in CART_BUTTONS:
             return False
         if player:
             return _prouter.held(name, player) if _prouter is not None else False
-        return input.held(name)
+        return _held(name)
 
     def btnp(name, player=0):
         if name not in CART_BUTTONS:
             return False
         if player:
             return _prouter.pressed(name, player) if _prouter is not None else False
-        return input.pressed(name)
+        return _pressed(name)
 
     def players():
         # The connected player count (>=1) so a cart can offer a 2P/co-op mode.
