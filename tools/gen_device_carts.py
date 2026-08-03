@@ -58,6 +58,7 @@ CART_ORDER = [
     "tap_game",
     "beeper",
     "letter_blitz",
+    "bench",
     "paint",
     "theme_picker",
     "writer",
