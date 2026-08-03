@@ -116,7 +116,17 @@ def _no_local_build_stamp(monkeypatch):
     `def read_ota_build(path=OTA_BUILD_JSON)` binds that default at def time, so
     monkeypatching the constant is accepted in silence and changes nothing. A
     test that wants a stamp sets this back to `lambda *_: {...}` -- explicit,
-    like the `_ota_build` rule above."""
+    like the `_ota_build` rule above.
+
+    THIRD door (2026-08-03): the finder exclusion above only stops THIS conftest
+    from resolving `_ota_build` -- a test file that puts the firmware modules/
+    dir on sys.path itself (test_moy_webserver does, at import time, for the
+    whole process) re-opens it, and under xdist whichever test execs moy_ota.py
+    on that worker afterwards reads the machine's last build stamp again
+    (spotted as version_label()=='v2' from a stale bisect build). sys.modules
+    [name]=None makes `import _ota_build` raise ImportError no matter what the
+    path says, and moy_ota's try/except then keeps the committed identity."""
+    monkeypatch.setitem(sys.modules, "_ota_build", None)
     try:
         import gen_ota_manifest
     except ImportError:      # tools/ not on the path for this test module
