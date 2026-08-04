@@ -95,6 +95,51 @@ class _FakeGfx:
                 mv[base + col] = c
 
     @staticmethod
+    def fill_spans(buf, dw, dh, arr, n, ox, oy, cov, pal,
+                   cam_x, cam_y, cx0, cy0, cx1, cy1):
+        # Faithful transcription of modmoy_gfx.c moy_gfx_fill_spans (#167,
+        # and since #163 the rect AUTO-GATE's flush kernel): n packed int16
+        # quints (x, y, w, h, ci), camera subtracted, clip intersected, colour
+        # from `cov` or the 64-entry resolved `pal` table.
+        mv = memoryview(buf).cast("H")
+        cap = len(mv)
+        if dw <= 0 or (cov < 0 and pal is None):
+            return
+        nmax = len(arr) // 5
+        if n < 0 or n > nmax:
+            n = nmax
+        max_rows = cap // dw
+        if cx0 < 0:
+            cx0 = 0
+        if cy0 < 0:
+            cy0 = 0
+        if cx1 > dw:
+            cx1 = dw
+        if cy1 > max_rows:
+            cy1 = max_rows
+        for i in range(n):
+            p = i * 5
+            col = (cov if cov >= 0 else pal[arr[p + 4] & 63]) & 0xFFFF
+            x0 = arr[p] + ox - cam_x
+            y0 = arr[p + 1] + oy - cam_y
+            x1 = x0 + arr[p + 2]
+            y1 = y0 + arr[p + 3]
+            if x0 < cx0:
+                x0 = cx0
+            if y0 < cy0:
+                y0 = cy0
+            if x1 > cx1:
+                x1 = cx1
+            if y1 > cy1:
+                y1 = cy1
+            if x1 <= x0 or y1 <= y0:
+                continue
+            for yy in range(y0, y1):
+                base = yy * dw
+                for xx in range(x0, x1):
+                    mv[base + xx] = col
+
+    @staticmethod
     def blit565(dst, dw, dh, dx, dy, src, sw, sh, key,
                 cx0=None, cy0=None, cx1=None, cy1=None):
         d = memoryview(dst).cast("H")
@@ -607,6 +652,10 @@ def _dev_rgb565(dc):
     # CPU byte-swap is folded into the LUT so the lcd_bus per-flush swap can be off).
     # Swap back here so the comparison is against the canonical little-endian RGB565
     # the host produces. (PAL565 itself stays canonical -- test_pal565_matches_host.)
+    # Present step first: the real loop drains the auto-batches (sprite runs +
+    # the #163 rect span gate) via _flush_batches before comp.flush reads the
+    # buffer -- reading without it would compare a half-queued frame.
+    dc.flush_batch()
     return [((v << 8) | (v >> 8)) & 0xFFFF for v in memoryview(dc._buf).cast("H")]
 
 
@@ -1167,6 +1216,34 @@ def test_auto_batch_host_equals_device():
     _drive_sprite_scene(host, sheet_h, _stray_image(Image.from_ascii), use_batch=True)
     _drive_sprite_scene(dev, sheet_d, _stray_image(m.Image.from_ascii), use_batch=True)
     _assert_same(host, dev, "auto-batch host==device")
+
+
+def test_rect_autogate_overlap_order():
+    """#163 rect AUTO-GATE: interleaved OVERLAPPING rect/sprite/pix sequences
+    keep painter's order through BOTH batch systems -- a rect between two
+    sprites on the same pixels, a >_SPAN_CAP run (the mid-run span-cap
+    flush), a pix() READ that must see a just-queued span, and rectb over a
+    sprite. Host (unbatched reference) == device (span-batched), byte-for-
+    byte."""
+    m, host, dev = _both(True)
+    sheet_h, sheet_d = _batch_sheets(m)
+    for c, sheet in ((host, sheet_h), (dev, sheet_d)):
+        c.cls(0)
+        # sprite under rect under sprite, overlapping in one cell
+        c.spr_tile(sheet, 1, 10, 10, -1, 1, 0)
+        c.rect(12, 12, 4, 4, 9)
+        c.spr_tile(sheet, 2, 14, 14, -1, 1, 0)
+        # a run longer than the span cap: the mid-run flush must be invisible
+        for i in range(m._SPAN_CAP + 22):
+            c.rect(i % 60, 30 + (i // 60) * 2, 2, 2, i % 16)
+        # a read mid-stream must see the just-queued span
+        c.rect(50, 8, 3, 3, 12)
+        assert c.pix(51, 9) == 12
+        # outline over a sprite (rectb rides the gate as four spans)
+        c.spr_tile(sheet, 3, 40, 40, -1, 1, 0)
+        c.rectb(39, 39, 10, 10, 7)
+    assert dev._span_arr is not None      # the gate actually engaged
+    _assert_same(host, dev, "#163 rect auto-gate overlap order")
 
 
 def test_auto_batch_device_equals_immediate_device():

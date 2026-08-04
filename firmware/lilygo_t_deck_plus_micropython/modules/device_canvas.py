@@ -228,6 +228,10 @@ _LAYER_POOL = {}
 # and the parity tests force it on to keep the logic pinned.
 MAP_AUTO_CACHE = False
 
+# #163 rect auto-gate: spans queued per canvas before ONE fill_spans flush.
+# 128 quints = 1280B per (ungated) canvas, allocated lazily on first rect().
+_SPAN_CAP = 128
+
 
 class Image:
     def __init__(self, width, height, pix, transparent=-1):
@@ -441,6 +445,21 @@ class DeviceCanvas:
         self._wire_pal_gen = -1
         self._gate_state = None
         self._gate_pal = None
+        # #163 rect AUTO-GATE (implicit span batching -- owner call 2026-08-04:
+        # kids write naive code, the engine optimizes it; no new cart verb).
+        # Consecutive Python rect()/rectb() fills append raw (x,y,w,h,ci) quints
+        # here and flush as ONE moy_gfx.fill_spans call. Only the canvases whose
+        # rect stays the PYTHON verb ever fill it: the T-Deck ROOT canvas (the
+        # pump keeps the C gates out, so it paid a full interpreter dispatch +
+        # one MP->C crossing PER FILL until now) and old-firmware fallbacks --
+        # on gated canvases (P4 root, layers) self.rect is rebound to the C
+        # gate and this stays empty. Ordering is the #63 batch discipline:
+        # rect() empties the sprite batch before queueing (so pending spans
+        # always PREDATE pending sprites), flush_batch() drains spans first,
+        # and every state setter (camera/clip/pal/palt) + non-rect verb already
+        # routes through flush_batch. The pack is lazy: built on first append.
+        self._span_arr = None
+        self._span_n = 0
         # VIEWPORT (#155) -- host twin: runtime/canvas.py Canvas.set_viewport.
         # w/h are the LOGICAL surface a caller draws on (0,0 based); _stride/_bh
         # are the real buffer, _ox/_oy where the surface sits inside it. Equal on
@@ -473,6 +492,10 @@ class DeviceCanvas:
         runs on the GDMA engine WHILE the kid's Python logic executes -- by the
         time _draw calls draw_layer, the ~7ms copy is already done (copy_wait
         returns immediately). Prediction armed by blit_window_from (below)."""
+        if self._span_n:
+            self._flush_spans()        # #163 defensive: complete the OLD frame's
+                                       # spans before the target repoints (the
+                                       # frame-end flush normally leaves none)
         buf = self._comp.back_buffer()
         if buf is not self._buf:
             self._buf = buf
@@ -693,6 +716,8 @@ class DeviceCanvas:
         Host twin: runtime/canvas.py Canvas.set_viewport -- see it for why. On
         this backend it also re-seeds the native draw gates, whose state array
         carries the stride and the buffer-space clip."""
+        if self._span_n:
+            self._flush_spans()        # #163: queued spans belong to the OLD viewport
         # Clamped to the buffer -- see the host twin for why (a window can hang
         # off the screen edge, and an unclamped write runs past the end).
         ox = max(0, int(x))
@@ -945,24 +970,48 @@ class DeviceCanvas:
                 err += dx; y0 += sy
 
     def rect(self, x, y, w, h, c):
-        # TIC-80 rect = FILLED rectangle. HOT PATH (see _fill): the batch break is
-        # inlined to the array-header test so an already-empty batch costs a load
-        # instead of a method call, and _col is inlined for the same reason.
+        # TIC-80 rect = FILLED rectangle. HOT PATH -- and since #163's rect
+        # AUTO-GATE, an APPEND: the span queues into _span_arr and a whole run
+        # of naive rect() calls flushes as ONE fill_spans kernel call (camera/
+        # clip/pal applied in C at flush; pal()/camera()/clip() flush first, so
+        # the state each span sees is the state it was issued under). The
+        # sprite-batch break stays inlined; emptying it BEFORE queueing is what
+        # keeps draw order (pending spans always predate pending sprites).
         if self._batch_arr[0] > 4:
             self.flush_batch()         # #63: a non-spr primitive breaks the batch
-        self._fill(int(x), int(y), int(w), int(h),
-                   PAL565_WIRE[self._pal_map[c & 63]])
+        sa = self._span_arr
+        if sa is None:
+            sa = self._span_init()
+        n = self._span_n
+        i = n * 5
+        try:
+            sa[i] = int(x)
+            sa[i + 1] = int(y)
+            sa[i + 2] = int(w)
+            sa[i + 3] = int(h)
+            sa[i + 4] = c & 63
+        except OverflowError:
+            # A coordinate outside int16 (huge camera / degenerate cart math):
+            # keep order (flush what's queued -- the partial stores above sit
+            # beyond _span_n and are ignored), then draw this one exactly.
+            if n:
+                self._flush_spans()
+            self._fill(int(x), int(y), int(w), int(h),
+                       PAL565_WIRE[self._pal_map[c & 63]])
+            return
+        self._span_n = n + 1
+        if self._span_n >= _SPAN_CAP:
+            self._flush_spans()
 
     def rectb(self, x, y, w, h, c):
-        # TIC-80 rectb = rectangle outline (4 clipped fills, like the host).
-        if self._batch_arr[0] > 4:
-            self.flush_batch()         # #63: a non-spr primitive breaks the batch
+        # TIC-80 rectb = rectangle outline (4 clipped fills, like the host) --
+        # four appends through the rect auto-gate above (#163).
         x = int(x); y = int(y); w = int(w); h = int(h)
-        col = PAL565_WIRE[self._pal_map[c & 63]]
-        self._fill(x, y, w, 1, col)
-        self._fill(x, y + h - 1, w, 1, col)
-        self._fill(x, y, 1, h, col)
-        self._fill(x + w - 1, y, 1, h, col)
+        rect = self.rect
+        rect(x, y, w, 1, c)
+        rect(x, y + h - 1, w, 1, c)
+        rect(x, y, 1, h, c)
+        rect(x + w - 1, y, 1, h, c)
 
     def fill_rects(self, arr, n=-1, ox=0, oy=0, c=-1):
         # #163 span-batch: n packed int16 quads (x, y, w, h, ci) in ONE call.
@@ -1487,6 +1536,45 @@ class DeviceCanvas:
                     continue
                 self._spr_py(img, sx + cx * step, py, scale)
 
+    def _span_init(self):
+        # #163 rect auto-gate: the lazy span pack. Only canvases whose rect
+        # stays the Python verb (T-Deck root, old-firmware fallbacks) ever
+        # allocate one; gated canvases rebind self.rect to C and never touch it.
+        sa = array("h", bytearray(2 * 5 * _SPAN_CAP))
+        self._span_arr = sa
+        return sa
+
+    def _flush_spans(self):
+        # #163: paint the queued rect() spans in ONE moy_gfx.fill_spans call
+        # (camera/clip in C, per-quint colour through the pal-resolved wire
+        # table -- pal() flushes before mutating the map, so the table always
+        # matches the spans it colours). Old-build fallback: per-span _fill,
+        # identical pixels. One pump poke per flush, not per fill (#66).
+        n = self._span_n
+        if not n:
+            return
+        self._span_n = 0
+        gfx = self._gfx
+        fs = None if gfx is None else getattr(gfx, "fill_spans", None)
+        if fs is not None:
+            _prof = self._prof
+            _t0 = _ticks_us() if _prof else 0
+            fs(self._buf, self._stride, self._bh, self._span_arr,
+               n, 0, 0, -1, self._wire_pal(),
+               self._cam_x, self._cam_y,
+               self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+            if _prof:
+                self._t_fill_us += _ticks_diff(_ticks_us(), _t0)
+            if self._pump is not None:
+                self._pump()           # #66: feed the bounce flush between native ops
+            return
+        sa = self._span_arr
+        pm = self._pal_map
+        fill = self._fill
+        for i in range(0, n * 5, 5):
+            fill(sa[i], sa[i + 1], sa[i + 2], sa[i + 3],
+                 PAL565_WIRE[pm[sa[i + 4]]])
+
     def begin_batch(self, sheet, colorkey=-1, scale=1, token=0):
         # Register a new batch run: flush whatever is pending, then stamp the run
         # state into the array header. Called on every run BREAK only (first item,
@@ -1567,6 +1655,13 @@ class DeviceCanvas:
         # ARRAY MODE (the C kernel reads the int16 quads straight from _batch_arr --
         # no tuples ever exist on this path). Header reset FIRST so the re-entrant
         # flush_batch() inside spr() is a harmless no-op.
+        #
+        # #163: drain the rect auto-gate FIRST, before the early return below --
+        # pending spans always PREDATE pending sprites (rect() empties the
+        # sprite batch before queueing a span), so spans paint under them; and
+        # every verb/state-setter that calls flush_batch is thereby span-safe.
+        if self._span_n:
+            self._flush_spans()
         a = self._batch_arr
         k = a[0]
         if k <= 4:
@@ -1680,8 +1775,9 @@ class DeviceCanvas:
         # `scale` arg stays IGNORED, exactly like the host Canvas.print (system-UI
         # scaling is the #39 font_scale path, not this arg). framebuf.text (same
         # glyphs, screen-bounds clip only) remains the no-gfx / old-build fallback.
-        if self._batch_arr[0] > 4:
-            self.flush_batch()         # #63: print() is a non-spr primitive -> break batch
+        if self._batch_arr[0] > 4 or self._span_n:
+            self.flush_batch()         # #63: print() is a non-spr primitive -> break
+                                       # batch (#163: pending rect spans too)
         if self._gfx_text is not None:
             # Chrome draws text by the dozen per frame, so the DRAW2 ticks pair
             # is gated here like _fill's (see its note).
