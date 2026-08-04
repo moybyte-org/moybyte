@@ -143,6 +143,10 @@ jobs:
       - name: Publish to the rolling release
         env:
           GH_TOKEN: ${{ github.token }}
+          # No checkout in this job (it only downloads the artifact), so gh
+          # cannot resolve the repo from git -- name it explicitly, or every
+          # release call dies with "not a git repository" (the maiden run did).
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref == 'refs/heads/master' && 'player-latest' || 'player-beta' }}
         run: |
           set -euo pipefail
