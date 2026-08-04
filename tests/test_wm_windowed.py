@@ -147,10 +147,17 @@ def test_change_leaves_library_for_desktop_backdrop(tmp_path):
     assert ws.launcher.layout.w == 1024
 
     # Even a direct background dispatch at the old selected-card coordinates
-    # cannot activate the hidden Library.
+    # cannot activate the hidden Library. The desk may claim the tap for its
+    # own icons (the column is label-wide since #174), but the grid underneath
+    # must never run a cart or surface.
+    launched = []
+    original_launch = ws.launch_selected
+    ws.launch_selected = lambda *a, **k: (launched.append(1),
+                                          original_launch(*a, **k))
     tile = ws.launcher.tile_rect(ws.launcher.sel)
     ws.wm._backdrop_layer.handle_pointer(tile[0] + 2, tile[1] + 2, True)
-    assert ws.screen == "menu"
+    assert launched == []
+    assert ws.screen != "launcher" and "desk" in ws.wm._stack
 
 
 # ---------------------------------------------------------------------------

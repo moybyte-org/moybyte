@@ -406,13 +406,17 @@ class _BackdropLayer(Layer):
         fs = ws._effective_font_scale()
         bar_h = self.wm._bar_h()
         box = 40 * fs
-        cell_w = 66 * fs
+        catalog = self._icon_catalog()
+        # The pill (cell_w - 10*fs) must hold the longest catalog label, or
+        # the chip clips it (#174: a fixed 66*fs cell cut PROJECTS/STORYBOOK).
+        maxc = max((len(label) for _k, label, _c in catalog), default=0)
+        cell_w = max(66 * fs, maxc * 8 * fs + 10 * fs + 4)
         cell_h = 62 * fs
         x = 14 * fs
         y0 = bar_h + 12 * fs
         y = y0
         out = []
-        for key, label, cart in self._icon_catalog():
+        for key, label, cart in catalog:
             if y + cell_h > ws.sys_canvas.h - 6 * fs:
                 y = y0
                 x += cell_w

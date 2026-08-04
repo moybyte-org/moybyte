@@ -94,6 +94,23 @@ def test_chip_states_match_the_legacy_button_pixels():
     assert cv.pix(12, 72) == TH["danger"]
 
 
+def test_chip_clips_an_overlong_label_inside_its_rect():
+    """#174: a label wider than its chip must clip (draw-what-fits), never
+    escape -- the desk pill overflow landed title_ink on the wallpaper
+    (invisible black-on-black on Open Machine's field)."""
+    cv = _cv()
+    cv.rect(0, 0, 320, 120, 7)                     # a field escaped ink shows on
+    r = (10, 10, 40, 20)
+    ui.chip(cv, TH, r, "STORYBOOK")
+    for x in range(r[0] + r[2], 320):
+        for y in range(120):
+            assert cv.pix(x, y) == 7               # nothing escapes the rect
+    # The truncated label still draws inside the chip.
+    assert any(cv.pix(x, y) == TH["title_ink"]
+               for y in range(r[1], r[1] + r[3])
+               for x in range(r[0], r[0] + r[2]))
+
+
 def test_apps_button_delegates_to_chip(tmp_path):
     """The Appearance app's toolbar button (one of the four migrated copies)
     still paints its exact legacy pixels through the delegate."""

@@ -40,6 +40,16 @@ def test_boot_lands_on_the_desk(tmp_path):
     drv.frame(1 / 30)                             # icons render without error
 
 
+def test_desk_icon_labels_fit_their_pills(tmp_path):
+    """#174: PROJECTS/STORYBOOK overflowed the fixed 56*fs pill -- the cell
+    now sizes to the longest catalog label, so every label fits unclipped."""
+    ws = _ws(tmp_path)
+    _drv(ws)
+    fs = ws._effective_font_scale()
+    for _key, _box, pill, label, _cart in ws.wm._backdrop_layer._icon_rects():
+        assert len(label) * 8 * fs + 4 <= pill[2], label
+
+
 def test_desk_bar_has_no_context_x(tmp_path):
     ws = _ws(tmp_path)
     _drv(ws)
