@@ -250,7 +250,8 @@ class EditorApp:
             if ws.editor is None and ws.cart is not None:
                 ws.editor = CodeEditor(ws.cart["src"],
                                        cols=ws.code_layout.cols,
-                                       rows=ws.code_layout.rows)
+                                       rows=ws.code_layout.rows,
+                                       clip=ws.clipboard)
                 ws.code_layer.reset()   # fresh keyboard-edge tracker for the new editor
                 if ws.crash_line is not None:
                     # Opened after a runtime crash -> land on the line that raised.

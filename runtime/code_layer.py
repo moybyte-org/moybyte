@@ -409,6 +409,8 @@ class CodeLayer:
                 ws.undo()
             elif k == 0x19:
                 ws.redo()
+            elif k == 0x01:                    # Ctrl+A: select all (#132 parity)
+                ed.select_all()
             elif k == 0x03:
                 ed.copy()
             elif k == 0x18:

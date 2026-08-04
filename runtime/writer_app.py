@@ -337,7 +337,8 @@ class WriterAppLayer(ListShellApp):
             except Exception:  # noqa: BLE001
                 blob = None
         lay = self.layout
-        self.editor = CodeEditor(_body_of(blob) if blob else "", lay.cols, lay.rows)
+        self.editor = CodeEditor(_body_of(blob) if blob else "", lay.cols, lay.rows,
+                                 clip=getattr(self.ws, "clipboard", None))
         self.doc_name = name
         self.mode = "edit"
         self._unsaved = False
@@ -359,7 +360,8 @@ class WriterAppLayer(ListShellApp):
             except Exception:  # noqa: BLE001
                 name = None
         lay = self.layout
-        self.editor = CodeEditor("", lay.cols, lay.rows)
+        self.editor = CodeEditor("", lay.cols, lay.rows,
+                                 clip=getattr(self.ws, "clipboard", None))
         self.doc_name = name or "doc_1"
         self.mode = "edit"
         self._unsaved = False           # written on first change (no empty litter)
@@ -456,6 +458,34 @@ class WriterAppLayer(ListShellApp):
             return
         if k == 0x19:
             self._do_redo()
+            return
+        # The clipboard lane (#132, code_layer's byte convention): Ctrl+A
+        # selects all (Writer has no selection UI of its own -- this is the
+        # copy source), Ctrl+C/X/V copy/cut/paste through ws.clipboard so text
+        # travels between Writer, the code tab and Sheets.
+        if k == 0x01:
+            ed.select_all()
+            self.status = "ALL SELECTED"
+            self.ws._dirty = True
+            return
+        if k == 0x03:
+            if ed.copy():
+                self.status = "COPIED"
+                self.ws._dirty = True
+            return
+        if k in (0x18, 0x16):
+            if k == 0x16 and \
+                    len(ed.text()) + len(ed.paste_text()) > MAX_CHARS:
+                self.status = "PAGE FULL"
+                return
+            if self._burst_before is None:
+                self._burst_before = ed.text()
+            if (ed.cut() if k == 0x18 else ed.paste()):
+                self._unsaved = True
+                self._idle = 0.0
+                self.status = self.doc_name.upper() if self.doc_name else "DOC"
+                self._close_burst()      # a cut/paste is its own burst edge
+            self.ws._dirty = True
             return
         if len(ed.text()) >= MAX_CHARS and k not in (0x08, 0x7F):
             self.status = "PAGE FULL"
