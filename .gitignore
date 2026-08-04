@@ -75,6 +75,10 @@ firmware/web_runner/dist-spec/
 # `.build/` pattern matches directories only -- which is how one got
 # committed, absolute local path and all.
 firmware/web_runner/.build
+# The web-player CI job checks moy-spec out into the workspace to run the
+# conformance gate; keep that out of `git status` (and out of the build
+# manifest's dirty flag, which is the belt to this braces).
+.moy-spec/
 
 # Generated website (site/build.py assembles it from the canonical sources)
 _site/

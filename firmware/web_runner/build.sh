@@ -467,7 +467,14 @@ manifest = {
         "branch": sh("git", "rev-parse", "--abbrev-ref", "HEAD"),
         # Dirty means the artifact does not correspond to any commit, which a
         # consumer pinning it needs to know before it trusts the sha above.
-        "dirty": bool(sh("git", "status", "--porcelain")),
+        #
+        # TRACKED changes only. Plain `git status --porcelain` also lists
+        # untracked files, and the CI job that builds this checks moy-spec out
+        # INTO the workspace to run the conformance gate -- so every published
+        # build came back dirty, and moy-spec's own `player --update` then
+        # refused to pin it. Untracked files do not change which commit the
+        # artifact corresponds to, which is the only thing this flag claims.
+        "dirty": bool(sh("git", "status", "--porcelain", "--untracked-files=no")),
     },
     "files": files,
 }
