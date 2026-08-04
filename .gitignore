@@ -70,6 +70,11 @@ ports/celeste.moy/
 # covered by the build-trees rule above).
 firmware/web_runner/dist/
 firmware/web_runner/dist-spec/
+# The toolchain (emsdk + a micropython checkout, ~2GB). No trailing slash:
+# a shared toolchain is often a SYMLINK to another checkout's copy, and a
+# `.build/` pattern matches directories only -- which is how one got
+# committed, absolute local path and all.
+firmware/web_runner/.build
 
 # Generated website (site/build.py assembles it from the canonical sources)
 _site/

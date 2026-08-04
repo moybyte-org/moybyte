@@ -34,6 +34,7 @@
 #include "py/obj.h"
 #include "py/runtime.h"
 #include "py/objstr.h"
+#include "py/unicode.h"        // utf8_check -- see lua_to_mp's LUA_TSTRING case
 
 #include "lua.h"
 #include "lauxlib.h"
@@ -143,7 +144,28 @@ static mp_obj_t lua_to_mp(lua_State *L, int i) {
             if (q != MP_QSTRnull) {
                 return MP_OBJ_NEW_QSTR(q);
             }
-            return mp_obj_new_str(s, len);
+            // A Lua string is a BYTE string and may hold anything; a
+            // MicroPython str must be valid UTF-8, and mp_obj_new_str raises
+            // UnicodeError rather than accepting one that is not. That killed
+            // the whole FRAME for a cart doing print("\255") -- legal under moy
+            // SPEC.md 6, which draws nothing for that byte but still advances a
+            // cell -- on every moy_lua host, the boards included.
+            //
+            // So hand back bytes for the ones a str cannot hold. Everything
+            // downstream reads text through a buffer already: font.as_bytes
+            // takes bytes directly, and moy_gfx.text is given the buffer of
+            // whichever it gets. Checking costs a scan of strings that missed
+            // the qstr cache, which is not the hot path -- interned verb and
+            // button names never reach here.
+            if (!utf8_check((const byte *)s, len)) {
+                return mp_obj_new_bytes((const byte *)s, len);
+            }
+            // mp_obj_new_str would utf8_check AGAIN and repeat the qstr lookup
+            // above; _copy is the tail of it, and its precondition (valid
+            // utf-8) is exactly what the line above just established. So this
+            // path now does one scan and one lookup where the original did one
+            // scan and TWO -- slightly cheaper than before the check existed.
+            return mp_obj_new_str_copy(&mp_type_str, (const byte *)s, len);
         }
         default:
             luaL_error(L, "cannot pass a %s to the console api",
@@ -228,13 +250,20 @@ static bool call_py(mp_obj_t fn, size_t n, const mp_obj_t *args, mp_obj_t *ret) 
 // ---------------------------------------------------------------------------
 // the generic trampoline: Lua global -> registered Python callable
 
+// The widest verb in the moy spec: sspr(sx, sy, sw, sh, dx, dy, dw, dh,
+// colorkey, flip) -- SPEC.md 7.1. The cap was 8, which is map()'s width, so
+// every cart calling the full sspr form failed with "too many arguments" on
+// every moy_lua host, the boards included. Found by moy-spec's conformance
+// suite (the `provisional` scene). Keep this >= the widest spec signature.
+#define MOY_API_MAX_ARGS 10
+
 static int l_tramp(lua_State *L) {
     int idx = (int)lua_tointeger(L, lua_upvalueindex(1));
     int n = lua_gettop(L);
-    if (n > 8) {
+    if (n > MOY_API_MAX_ARGS) {
         return luaL_error(L, "console api: too many arguments");
     }
-    mp_obj_t args[8];
+    mp_obj_t args[MOY_API_MAX_ARGS];
     for (int i = 0; i < n; i++) {
         args[i] = lua_to_mp(L, i + 1);
     }

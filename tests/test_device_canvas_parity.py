@@ -799,6 +799,51 @@ def test_text_camera_pal_parity():
         _assert_same(host, dev, "text camera+pal gfx=%s" % gfx)
 
 
+def test_text_bytes_parity():
+    """print() walks BYTES on both backends (moy SPEC.md 6).
+
+    moy_lua hands the console a bytes object for a Lua string that is not valid
+    UTF-8 -- a MicroPython str cannot hold one -- so a cart doing print("\\255")
+    arrives here as b"\\xff". The device paths used to do str(s) on that, which
+    renders the LITERAL "b'...'": eight visible characters where the cart asked
+    for one blank cell.
+
+    A str is UTF-8-encoded rather than read one byte per character, which is
+    what makes "cafe-acute" five cells on every tier instead of four on one of
+    them. Bytes with no glyph draw nothing and still advance, so the framebuf
+    fallback (which cannot be handed a 0xFF at all) maps them to a space and
+    lands the same pixels in the same places.
+    """
+    for gfx in (True, False):
+        m, host, dev = _both(gfx)
+        for c in (host, dev):
+            c.cls(0)
+            c.print(b"G\xffH", 2, 3, 12)        # bytes, straight from moy_lua
+            c.print("caf\u00e9", 2, 14, 7)      # a str: 5 bytes, so 5 cells
+            c.print(b"\x00\x1fA", 2, 25, 9)     # control bytes still advance
+            c.print(b"", 2, 36, 7)              # empty is not a crash
+        _assert_same(host, dev, "text bytes gfx=%s" % gfx)
+
+
+def test_text_bytes_do_not_shift_what_follows():
+    """The cursor keeps step: a byte with no glyph costs exactly one cell, so
+    the text after it lands where it would have anyway. A tier that dropped the
+    byte instead would slide the rest left and still 'look fine' in isolation."""
+    m, host, dev = _both(True)
+    for c in (host, dev):
+        c.cls(0)
+        c.print(b"A\xffB", 2, 3, 12)
+    m2, host2, dev2 = _both(True)
+    for c in (host2, dev2):
+        c.cls(0)
+        c.print(b"A B", 2, 3, 12)              # a space is also a blank cell
+    _assert_same(host, dev, "bytes advance")
+    # Host against host, so compare index buffers directly (_assert_same is the
+    # host-vs-device RGB565 comparison).
+    assert bytes(host.buf) == bytes(host2.buf), \
+        "0xff should occupy exactly one blank cell, like a space"
+
+
 def test_text_clip_rect_native():
     # Arbitrary-rect clipping of text is the native kernel's NEW power (#62) --
     # framebuf.text can't do it, so this case is gfx=True only (the documented

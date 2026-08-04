@@ -40,6 +40,34 @@ except ImportError:
     _FONT8 = None
     _FONT8_FIRST = 0x20
 
+
+def _text_bytes(s):
+    """A print() argument as bytes (moy SPEC.md 6: print walks bytes).
+
+    moy_lua hands back bytes for a Lua string that is not valid UTF-8, since a
+    MicroPython str cannot hold one. str(s) on that would draw the literal
+    "b'...'", so the conversion has to be this and not that. A str is
+    UTF-8-encoded, which is the same buffer moy_gfx.text would have taken from
+    it anyway."""
+    if isinstance(s, (bytes, bytearray)):
+        return s
+    return str(s).encode("utf-8")
+
+
+def _fb_text(s):
+    """The same bytes as a str framebuf.text can take -- the no-moy_gfx fallback.
+
+    framebuf.text needs a str, and no str holds byte 0xFF. Every byte outside
+    the font's 0x20-0x7F draws nothing in the native path and still advances a
+    cell, so mapping those to a SPACE gives the fallback identical pixels and
+    identical spacing rather than a hole where the cursor drifts."""
+    b = _text_bytes(s)
+    out = bytearray(len(b))
+    for i in range(len(b)):
+        ch = b[i]
+        out[i] = ch if 0x20 <= ch <= 0x7F else 0x20
+    return out.decode()
+
 # #186 moy_buf: an image whose .pix already lives OFF the gc heap (a cover --
 # memoryview pix) gets its RGB565 bakes off-heap too, so the whole cover stops
 # taxing the GC mark phase. The owner (console._free_cover_img) frees pix and
@@ -1696,7 +1724,7 @@ class DeviceCanvas:
             # is gated here like _fill's (see its note).
             _prof = self._prof
             _t0 = _ticks_us() if _prof else 0
-            self._gfx_text(self._buf, self._stride, self._bh, str(s), int(x), int(y),
+            self._gfx_text(self._buf, self._stride, self._bh, _text_bytes(s), int(x), int(y),
                            PAL565_WIRE[self._pal_map[c & 63]],
                            _FONT8, _FONT8_FIRST, 1,
                            self._cam_x, self._cam_y,
@@ -1707,7 +1735,7 @@ class DeviceCanvas:
             if self._pump is not None:
                 self._pump()           # #66: feed the bounce flush between native ops
             return
-        self._fb.text(str(s), int(x) - self._cam_x, int(y) - self._cam_y, self._col(c))
+        self._fb.text(_fb_text(s), int(x) - self._cam_x, int(y) - self._cam_y, self._col(c))
 
     def blit_indices(self, indices, iw, ih, x, y):
         # Place an iw x ih palette-INDEX bitmap (1 byte/pixel) at (x, y), converting each index

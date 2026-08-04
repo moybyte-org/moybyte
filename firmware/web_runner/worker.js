@@ -25,6 +25,12 @@
 //   {t:"error", s}       fatal: the page shows it and stops
 import { loadMicroPython } from "./micropython.mjs";
 
+// Build-time switch, flipped to true by build.sh --spec -- the same mechanism
+// that swaps the page's branding. A spec bundle is the neutral single-cart
+// player the moy spec ships, and it boots without the perf HUD (see the hud=
+// note in web_boot.boot).
+const SPEC = false;
+
 let mp = null, step = null, applyEvents = null, assets = null, reload = null;
 let wantAssets = false;   // an assets request that arrived before the VM was up
 let idleCollect = null;
@@ -117,9 +123,13 @@ async function init(search) {
     let dw = 1024, dh = 600;
     const szm = /^(\d+)x(\d+)$/.exec(qs.get("size") || "");
     if (szm) { dw = +szm[1]; dh = +szm[2]; }
-    const bootArgs = desktop
+    // SPEC bundles suppress the perf HUD: its FPS chip draws into the cart's own
+    // 320x240 raster, and a spec bundle's frames are either a conformance golden
+    // or somebody's published game. See web_boot.boot's hud= note.
+    const bootArgs = (desktop
         ? ", None, " + dw + ", " + dh + ", True"
-        : (cart ? ", cart=" + JSON.stringify(cart) : "");
+        : (cart ? ", cart=" + JSON.stringify(cart) : ""))
+        + (SPEC ? ", hud=False" : "");
     mp.runPython(boot + "import web_boot\n"
         + "web_boot.boot('/moy/carts'" + bootArgs + ")\n"
         + (desktop && cart ? "web_boot.open_cart(" + JSON.stringify(cart) + ")\n" : "")
