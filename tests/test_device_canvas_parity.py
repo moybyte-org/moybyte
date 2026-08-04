@@ -1218,13 +1218,14 @@ def test_auto_batch_host_equals_device():
     _assert_same(host, dev, "auto-batch host==device")
 
 
-def test_rect_autogate_overlap_order():
-    """#163 rect AUTO-GATE: interleaved OVERLAPPING rect/sprite/pix sequences
-    keep painter's order through BOTH batch systems -- a rect between two
-    sprites on the same pixels, a >_SPAN_CAP run (the mid-run span-cap
-    flush), a pix() READ that must see a just-queued span, and rectb over a
-    sprite. Host (unbatched reference) == device (span-batched), byte-for-
-    byte."""
+def test_rect_sprite_overlap_order():
+    """Interleaved OVERLAPPING rect/sprite/pix sequences keep painter's order
+    through the sprite batch -- a rect between two sprites on the same
+    pixels, a long rect run, a pix() READ mid-stream, and rectb over a
+    sprite. Host == device, byte-for-byte. (Written for #163's rect
+    auto-gate, which was REVERTED -- the pure-Python span append measured
+    SLOWER than the direct fill it replaced, 65 -> 75-85us/op on glass; the
+    scene stays as the interleaving pin either way.)"""
     m, host, dev = _both(True)
     sheet_h, sheet_d = _batch_sheets(m)
     for c, sheet in ((host, sheet_h), (dev, sheet_d)):
@@ -1233,17 +1234,16 @@ def test_rect_autogate_overlap_order():
         c.spr_tile(sheet, 1, 10, 10, -1, 1, 0)
         c.rect(12, 12, 4, 4, 9)
         c.spr_tile(sheet, 2, 14, 14, -1, 1, 0)
-        # a run longer than the span cap: the mid-run flush must be invisible
-        for i in range(m._SPAN_CAP + 22):
+        # a long run of small fills
+        for i in range(150):
             c.rect(i % 60, 30 + (i // 60) * 2, 2, 2, i % 16)
-        # a read mid-stream must see the just-queued span
+        # a read mid-stream must see the just-issued rect
         c.rect(50, 8, 3, 3, 12)
         assert c.pix(51, 9) == 12
-        # outline over a sprite (rectb rides the gate as four spans)
+        # outline over a sprite
         c.spr_tile(sheet, 3, 40, 40, -1, 1, 0)
         c.rectb(39, 39, 10, 10, 7)
-    assert dev._span_arr is not None      # the gate actually engaged
-    _assert_same(host, dev, "#163 rect auto-gate overlap order")
+    _assert_same(host, dev, "rect/sprite overlap order")
 
 
 def test_auto_batch_device_equals_immediate_device():
