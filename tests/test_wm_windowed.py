@@ -1680,3 +1680,31 @@ def test_picker_hover_select_marks_dirty_inside_the_window(tmp_path):
     ws.wm._route_pointer(tx, ty, False)
     assert ws.picker.sel == 2
     assert ws._dirty, "hover-select must mark dirty or the window never repaints"
+
+
+def test_moving_cursor_leaves_no_trail_on_the_desk(tmp_path):
+    """The backdrop streak-skip (#155) assumed nothing above the desk needed
+    erasing. A VISIBLE cursor is drawn over the desk every painted frame, so
+    from the third consecutive moving frame on, skipping the restore baked a
+    trail of stale cursor sprites into the retained buffer. The skip now
+    yields to any drawn-pointer-state change while a cursor is visible."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    p = ws.pointer
+    p.visible = True
+    cv = ws.sys_canvas
+
+    def snap(x0):
+        return [cv.pix(x, y) for x in range(x0, x0 + 44) for y in range(326, 370)]
+
+    p.x, p.y = 400, 330
+    drv.frame(1 / 30)
+    base = {x: snap(x) for x in (500, 560, 620)}   # clean desk, cursor far away
+    stale = 0
+    for x in (500, 560, 620, 680, 740, 800):       # sweep across bare desk
+        p.x, p.y = x, 330
+        drv.frame(1 / 30)
+        for bx, b in base.items():
+            if abs(bx - x) >= 50:                  # away from the live cursor
+                stale += sum(1 for a, c in zip(b, snap(bx)) if a != c)
+    assert stale == 0, "stale cursor pixels remained on skipped desk frames"

@@ -336,7 +336,18 @@ class _BackdropLayer(Layer):
             # DRAG still restores every frame: there the window moves, so the
             # backdrop it uncovers is genuinely damaged.
             if wm._drag is None and wm._resize is None:
-                if wm._desk_streak >= wm._retained_n():
+                # A VISIBLE cursor whose drawn state changed forces the restore:
+                # the cursor sprite from the last paint is baked into the
+                # retained buffer, and skipping here left a trail of stale
+                # cursors across the desk (measured on the host: from the third
+                # consecutive moving frame on). Finger gestures keep the #155
+                # skip -- the cursor is hidden there, nothing to erase.
+                ptr = self.ws._ptr_state()
+                last = self.ws._last_ptr
+                cursor_live = ((ptr is not None and ptr[2])
+                               or (last is not None and last[2]))
+                if not (cursor_live and ptr != last) \
+                        and wm._desk_streak >= wm._retained_n():
                     wm._desk_painted = False   # untouched: windows may skip too
                     self.ws.bar_layer.redraw_clock("desk")
                     return
