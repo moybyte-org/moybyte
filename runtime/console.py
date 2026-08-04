@@ -249,11 +249,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # console.Popup / console.ACHIEVEMENTS / ... resolve for Workstation + host_app + tests.
 try:
     from widgets import (
-        _Blit, Pointer, Achievements, Pmem, _SilentAudio, Popup, ACHIEVEMENTS,
+        _Blit, Pointer, Achievements, Pmem, Clipboard, _SilentAudio, Popup, ACHIEVEMENTS,
         _PLAY_GOAL, _POPUP_X, _POPUP_Y, _POPUP_W, _POPUP_ROW_H, _POPUP_PAD_X, _POPUP_SEP_H)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import (
-        _Blit, Pointer, Achievements, Pmem, _SilentAudio, Popup, ACHIEVEMENTS,
+        _Blit, Pointer, Achievements, Pmem, Clipboard, _SilentAudio, Popup, ACHIEVEMENTS,
         _PLAY_GOAL, _POPUP_X, _POPUP_Y, _POPUP_W, _POPUP_ROW_H, _POPUP_PAD_X, _POPUP_SEP_H)
 
 # The desktop wallpaper backdrop component (#28, extracted -- see wallpaper.py). The
@@ -985,6 +985,11 @@ class Workstation:
         # (The paint drag-stroke origin -- _paint_drag -- lives on self.paint_layer.)
         # (The launcher's trackball-hover state (_lhover) lives on self.launcher_layer.)
         self.pointer = None           # set by run_desktop
+        # The system clipboard (#132): the one typed holder every editor writes
+        # through (code tab / Writer / Sheets v1), so copy in one app pastes in
+        # another. Console-side end-to-end -- works identically over the web
+        # transport, never touches a host OS clipboard (parity trap).
+        self.clipboard = Clipboard()
         # Desktop wallpaper (#28): a chosen wallpaper-type cart compiled into its
         # own namespace and run (its _draw, optionally _update) as the BACKDROP each
         # home/settings frame -- the Picotron "wallpaper is a cart" model. None until

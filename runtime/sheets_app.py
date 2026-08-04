@@ -549,6 +549,35 @@ class SheetsAppLayer(ListShellApp):
         elif self.cur_row >= self.gtop + lay.vis_rows:
             self.gtop = self.cur_row - lay.vis_rows + 1
 
+    def _copy_cell(self):
+        """Copy the current cell's raw text to the system clipboard (#132)."""
+        clip = getattr(self.ws, "clipboard", None)
+        if clip is None or self.sheet is None:
+            return
+        clip.put_text(self.edit_buf if self.editing else self._cur_raw())
+        self.status = "COPIED"
+        self.ws._dirty = True
+
+    def _paste_cell(self):
+        """Paste the system clipboard into the current cell (#132) -- naive v1:
+        multi-line text lands as its first line. A cell edit like any other,
+        so the same cell OpCodec makes it undoable (the _clear_cell shape)."""
+        clip = getattr(self.ws, "clipboard", None)
+        if clip is None or self.sheet is None or not clip.text():
+            return
+        t = clip.text().split("\n")[0][:CELL_MAX]
+        if self.editing:
+            self.edit_buf = (self.edit_buf + t)[:CELL_MAX]
+            self.ws._dirty = True
+            return
+        before = self._cur_raw()
+        self.sheet.set_cell(self.cur_col, self.cur_row, t)
+        if t != before:
+            self._unsaved = True
+            self._record_cell_op(self.cur_col, self.cur_row, before, t)
+        self.status = index_to_col(self.cur_col) + str(self.cur_row + 1)
+        self.ws._dirty = True
+
     def _clear_cell(self):
         # CLEAR (#111 phase 3 marquee win): this is a cell edit to "" like any
         # other, so the SAME cell OpCodec makes it undoable -- no separate
@@ -642,6 +671,14 @@ class SheetsAppLayer(ListShellApp):
                 self._undo()
             elif k == 0x19:                      # Ctrl+Y: redo
                 self._redo()
+            elif k == 0x03:                      # Ctrl+C: cell -> system clipboard (#132)
+                self._copy_cell()
+            elif k == 0x16:                      # Ctrl+V: system clipboard -> cell (#132)
+                self._paste_cell()
+            elif k == 0x18:                      # Ctrl+X: copy + clear (#132)
+                self._copy_cell()
+                if not self.editing:
+                    self._clear_cell()
             elif self.editing:
                 if k in (0x0D, 0x0A):            # Enter: commit + step down
                     self._commit_edit()

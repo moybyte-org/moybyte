@@ -38,7 +38,7 @@ class CodeEditor:
 
     INDENT = "  "      # block indent/outdent step: two spaces (matches Tab->2 spaces)
 
-    def __init__(self, src="", cols=None, rows=None):
+    def __init__(self, src="", cols=None, rows=None, clip=None):
         # COLS/ROWS default to the 320x240 baseline class attrs; a responsive shell
         # (#39 step 2) passes the layout-derived window so a bigger system canvas
         # shows more lines + wider columns. set_view_size() re-clamps on a resize.
@@ -49,7 +49,12 @@ class CodeEditor:
         # The internal clipboard (#89): a plain string, NOT the OS clipboard, so
         # copy/cut/paste behave identically on the host and the device. Kept across
         # set_text() (a reload) so a copy survives switching what you view.
+        # `clip` (#132) is the OPTIONAL system clipboard (widgets.Clipboard):
+        # copy/cut write THROUGH it and paste prefers it, so a copy here lands
+        # in Writer/Sheets and vice versa. None (unit tests, embedding) keeps
+        # the local-only behavior exactly.
         self.clipboard = ""
+        self.clip = clip
         self.set_text(src)
 
     def set_view_size(self, cols, rows):
@@ -304,6 +309,8 @@ class CodeEditor:
         if not self.has_selection():
             return False
         self.clipboard = self.selected_text()
+        if self.clip is not None:
+            self.clip.put_text(self.clipboard)   # the system lane (#132)
         return True
 
     def cut(self):
@@ -311,15 +318,34 @@ class CodeEditor:
         if not self.has_selection():
             return False
         self.clipboard = self.selected_text()
+        if self.clip is not None:
+            self.clip.put_text(self.clipboard)   # the system lane (#132)
         return self.delete_selection()
+
+    def select_all(self):
+        """Select the whole buffer: anchor at the start, caret at the end
+        (#132: gives selection-less surfaces like Writer a copy source)."""
+        self.sel = (0, 0)
+        self.row = len(self.lines) - 1
+        self.col = len(self.lines[self.row])
+        self._scroll()
+
+    def paste_text(self):
+        """What paste() would insert: the system clipboard's text when one is
+        attached and holds any (every local copy wrote through, so it is
+        always the newest), else the internal string."""
+        if self.clip is not None and self.clip.text():
+            return self.clip.text()
+        return self.clipboard
 
     def paste(self):
         """Insert the clipboard at the caret (replacing any selection). Returns True
         iff the text changed."""
-        if not self.clipboard:
+        text = self.paste_text()
+        if not text:
             return self.delete_selection()   # empty clipboard: paste still drops a selection
         self.delete_selection()
-        self.insert_text(self.clipboard)
+        self.insert_text(text)
         return True
 
     def insert_text(self, s):

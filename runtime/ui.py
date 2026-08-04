@@ -255,6 +255,11 @@ def chip(cv, th, rect, label, on=False, hot=False, fs=None,
         return
     fw = 8 * fs
     label = str(label)
+    # A label wider than the chip CLIPS (draw-what-fits, like label_row) --
+    # overflow escaped the rect and landed ink-on-anything (#174).
+    maxc = max(0, (w - 4) // fw)
+    if len(label) > maxc:
+        label = label[:maxc]
     cv.print(label, x + max(2, (w - len(label) * fw) // 2),
              y + max(1, (h - 8 * fs) // 2), ink, 1)
 

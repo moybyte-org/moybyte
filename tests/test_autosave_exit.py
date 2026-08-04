@@ -200,7 +200,8 @@ def test_untouched_tab_switch_writes_nothing(tmp_path):
                              else ws.launcher.items[2]["title"])
     ws.editor_app.set_tab("code")
     hits = _writes_during(ws, lambda: [ws.editor_app.set_tab(t)
-                                       for t in ("paint", "map", "cards", "code")])
+                                       for t in ("paint", "map", "scene",
+                                                 "music", "cards", "code")])
     assert hits == [], "an untouched tab ladder walk still wrote: %s" % hits
 
 
@@ -228,8 +229,19 @@ def test_a_real_edit_still_commits_on_tab_switch(tmp_path):
 
     # map: one tile
     ws.tilemap.mset(0, 0, 1)
-    hits = _writes_during(ws, lambda: ws.editor_app.set_tab("code"))
+    hits = _writes_during(ws, lambda: ws.editor_app.set_tab("scene"))
     assert "save_map" in hits, hits
+
+    # scene: place one actor through the editor verb (#154: scene joined the
+    # guard, so a real placement must still commit)
+    ws.scene_ui.sceneedit.place(16, 16)
+    hits = _writes_during(ws, lambda: ws.editor_app.set_tab("music"))
+    assert "save_scene" in hits, hits
+
+    # music: one real mutation on the current SFX step
+    ws.music_ui.musicedit.toggle_rest()
+    hits = _writes_during(ws, lambda: ws.editor_app.set_tab("code"))
+    assert "save_sounds" in hits, hits
 
 
 def test_code_undo_is_not_mistaken_for_clean(tmp_path):

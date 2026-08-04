@@ -520,7 +520,14 @@ e.preventDefault();return;}
 if(e.key=="Escape"){
 // In play (INPUT set), Esc is RESET -- the p8-web-player expectation (their pause
 // menu's reset). Transports without a reset handler ignore the event safely.
-send(INPUT?{type:"reset"}:{type:"esc"});e.preventDefault();return;}var cd=null;
+send(INPUT?{type:"reset"}:{type:"esc"});e.preventDefault();return;}
+// Ctrl/Cmd chords (#132): the console's control-byte shortcuts -- select-all/
+// copy/cut/paste (a/c/x/v), undo/redo (z/y), find/autocomplete/jump (f/e/g).
+// Mapped EXPLICITLY, never every letter (Ctrl+R/T/W stay the browser's), and
+// prevented so the browser's own copy/select-all never fights the console's.
+if((e.ctrlKey||e.metaKey)&&!e.altKey&&e.key.length==1){
+var cc={a:1,c:3,e:5,f:6,g:7,v:22,x:24,y:25,z:26}[e.key.toLowerCase()];
+if(cc){send({type:"key",code:cc});e.preventDefault();}return;}var cd=null;
 if(e.key=="Enter")cd=13;
 // A physically HELD Backspace also streams a sustained "home" (bshold down/up on the
 // press/release edges) -- the desktop-keyboard twin of the burger button's hold, so
