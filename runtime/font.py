@@ -87,13 +87,38 @@ def glyph(ch):
     return _FONT[0:WIDTH]
 
 
+def as_bytes(s):
+    """A print() argument as the BYTE sequence it is.
+
+    bytes/bytearray pass through; a str is taken one byte per character rather
+    than UTF-8-encoded, because a str reaching here stands in for a Lua byte
+    string. A character above U+00FF is not one byte, so it degrades to '?'
+    rather than raising -- this is a draw path, and losing a glyph beats losing
+    the frame."""
+    if isinstance(s, (bytes, bytearray)):
+        return s
+    s = str(s)
+    out = bytearray(len(s))
+    for i in range(len(s)):
+        c = ord(s[i])
+        out[i] = c if c <= 0xFF else 0x3F
+    return out
+
+
 def draw(put, s, x, y):
     """Render `s` at (x, y) by calling put(px, py) for each set pixel. Matches
-    framebuf.text exactly: column j, row bit from LSB(top), 8px advance/char."""
+    framebuf.text exactly: column j, row bit from LSB(top), 8px advance per BYTE.
+
+    Per byte, not per character (moy SPEC.md 6). framebuf.text walks bytes and
+    so does the device's native text kernel (moy_gfx: "the string is walked as
+    BYTES"), so decoding here made the HOST disagree with the device on any
+    non-ASCII string -- one 8px cell where the device advances two. Both tiers
+    render nothing for those bytes either way; it was purely the cursor that
+    drifted, which is worse, because the text after it lands somewhere else."""
     cx = int(x)
     y = int(y)
-    for ch in str(s):
-        col = glyph(ch)
+    for code in as_bytes(s):
+        col = glyph(chr(code))
         for j in range(WIDTH):
             bits = col[j]
             py = y
