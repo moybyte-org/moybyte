@@ -452,10 +452,12 @@ static mp_obj_t moy_audio_voice_read(mp_obj_t chan_obj) {
     mp_obj_t tup[8] = {
         mp_obj_new_bool(v->active),
         MP_OBJ_NEW_SMALL_INT(v->idx),
-        mp_obj_new_float(v->t),
-        mp_obj_new_float(v->phase),
+        /* explicit mp_float_t casts: on the wasm build mp_float_t is double
+           and -Wdouble-promotion is -Werror (the boards' float passes). */
+        mp_obj_new_float((mp_float_t)v->t),
+        mp_obj_new_float((mp_float_t)v->phase),
         mp_obj_new_int_from_uint(v->noise),
-        mp_obj_new_float(v->phase2),
+        mp_obj_new_float((mp_float_t)v->phase2),
         MP_OBJ_NEW_SMALL_INT(v->prev_pitch),
         MP_OBJ_NEW_SMALL_INT(v->prev_vol),
     };
