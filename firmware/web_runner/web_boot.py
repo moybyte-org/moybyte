@@ -169,9 +169,12 @@ class _PointerSink:
 
 
 def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
-         windowed=False, font_scale=0):
+         windowed=False, font_scale=0, hud=True):
     """Build the shared Workstation over the recording canvas + the VFS store.
     The page/harness wrote the cart bundle into `carts_root` before calling.
+
+    `hud=False` suppresses the perf HUD -- see the note at the ws.show_fps
+    assignment below for why a bundle would want that.
 
     Two presentation TIERS out of one wasm binary (the page picks per tab):
       windowed=False -- the HANDHELD tier. One recording canvas: the system
@@ -283,6 +286,25 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
         from wm_windowed import WindowedWM
         ws.wm = WindowedWM(ws)
         ws.open_desk()
+    # HUD (perf_hud.PerfHud): the bottom-right FPS chip draws onto the GAME
+    # canvas, so on the handheld tier -- where the system canvas IS the game
+    # canvas -- it lands inside the cart's own 320x240 raster and ships in the
+    # cart's own command stream. That is host chrome sitting in a frame the cart
+    # owns, and it is wrong anywhere the frame IS the product: a spec
+    # conformance capture (moy SPEC.md 11 makes this player the golden-frame
+    # tiebreaker, and a golden frame must not contain an FPS counter) or a
+    # published web export of somebody's game.
+    #
+    # Found by moy-spec's conformance harness, which measured this player against
+    # the suite and got exactly 200 differing pixels on every scene -- a 20x10
+    # box at (299, 229), which is the chip.
+    #
+    # Default stays True, so the device, the dev page and the desktop tier are
+    # unchanged. The spec bundle passes hud=False (build.sh --spec flips the
+    # SPEC const in worker.js).
+    ws.show_fps = bool(hud)
+    if not hud:
+        ws.perf_hud = False
     driver = host_api.ConsoleDriver(ws)
     _S["ws"] = ws
     _S["canvas"] = rec

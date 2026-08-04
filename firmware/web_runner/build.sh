@@ -392,7 +392,18 @@ mkdir -p "${DIST_DIR}"
 cp "${STAGE_DIR}/carts.json" "${STAGE_DIR}/index.html" "${DIST_DIR}/"
 # worker.js is a SEPARATE file, not inlined: a module Worker needs its own URL.
 # It owns the VM + the frame loop; the page only replays (#176 smoothness).
-cp "${SCRIPT_DIR}/worker.js" "${DIST_DIR}/"
+# --spec flips its SPEC const, which boots the console with hud=False: the perf
+# HUD's FPS chip draws into the cart's OWN 320x240 raster, and a spec bundle's
+# frames are either a conformance golden or somebody's published game. Verified
+# rather than assumed -- a silent no-op here would ship the chip.
+if [ "${SPEC}" = "1" ]; then
+  sed 's/^const SPEC = false;$/const SPEC = true;/' \
+      "${SCRIPT_DIR}/worker.js" > "${DIST_DIR}/worker.js"
+  grep -q '^const SPEC = true;$' "${DIST_DIR}/worker.js" \
+    || { echo "!! worker.js: could not set the SPEC const"; exit 1; }
+else
+  cp "${SCRIPT_DIR}/worker.js" "${DIST_DIR}/"
+fi
 if [ "${STAGE_ONLY}" = "1" ]; then
   cp "${STAGE_DIR}/modules.json" "${DIST_DIR}/"
 else

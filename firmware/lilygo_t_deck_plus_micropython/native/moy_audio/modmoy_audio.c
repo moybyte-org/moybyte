@@ -449,13 +449,19 @@ static mp_obj_t moy_audio_voice_read(mp_obj_t chan_obj) {
         return mp_const_none;
     }
     moy_voice_t *v = &moy_voices[c];
+    // The casts are explicit because the voice state is `float` (a per-sample
+    // kernel on a single-precision FPU) while mp_float_t is `double` on ports
+    // that build 64-bit floats -- the webassembly one does. Widening here is
+    // correct: the value is leaving the kernel for the Python heap. Saying so
+    // in the source beats silencing -Wdouble-promotion, which the port sets
+    // under -Werror and which is worth keeping on inside the kernel itself.
     mp_obj_t tup[8] = {
         mp_obj_new_bool(v->active),
         MP_OBJ_NEW_SMALL_INT(v->idx),
-        mp_obj_new_float(v->t),
-        mp_obj_new_float(v->phase),
+        mp_obj_new_float((mp_float_t)v->t),
+        mp_obj_new_float((mp_float_t)v->phase),
         mp_obj_new_int_from_uint(v->noise),
-        mp_obj_new_float(v->phase2),
+        mp_obj_new_float((mp_float_t)v->phase2),
         MP_OBJ_NEW_SMALL_INT(v->prev_pitch),
         MP_OBJ_NEW_SMALL_INT(v->prev_vol),
     };
