@@ -1,10 +1,10 @@
 {
   "format": "moy-1",
-  "version": 3,
-  "title": "Bench",
+  "version": 1,
+  "title": "Bench Lua",
   "type": "game",
-  "runtime": "python",
-  "main": "main.py",
+  "runtime": "lua",
+  "main": "main.lua",
   "system": true,
   "canvas": {
     "width": 320,

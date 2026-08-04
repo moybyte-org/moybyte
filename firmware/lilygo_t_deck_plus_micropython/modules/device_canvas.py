@@ -732,18 +732,28 @@ class DeviceCanvas:
         make_ctx = getattr(gfx, "make_draw_ctx", None)
         if make_ctx is None:
             return False               # older firmware: keep the Python verbs
-        if self._pump is not None:
-            # T-Deck ROOT canvas only: _fill pokes the SRAM-bounce flush pump
-            # between native ops (#66), and a C gate has no cheap way back into
-            # Python to do that. Layers on both boards and the P4 root have no
-            # pump, so everything that matters here still gates.
-            return False
         st = array("i", bytearray(4 * _ST_LEN))
         pal = array("H", bytearray(2 * 64))
         try:
             ctx = make_ctx(self, st, pal, self._batch_arr, _FONT8, _FONT8_FIRST)
         except Exception:  # noqa: BLE001 -- never let a probe break a canvas
             return False
+        if self._pump is not None:
+            # T-Deck ROOT canvas (#163 door 1). The gates were REFUSED here for
+            # a year of lore: _fill pokes the SRAM-bounce flush pump between
+            # native ops (#66) and "a C gate has no cheap way back into Python
+            # to do that". The per-op poke was never load-bearing, though --
+            # the pump only FEEDS the in-flight partial flush, and a starved
+            # pump degrades to a longer synchronous tail in comp.flush(),
+            # never a glitch. So the ctx now upcalls the pump itself every
+            # GATE_PUMP_EVERY gated ops (~128us at gate speed -- DENSER than
+            # the old per-fill pokes whenever more than 2 fills run). An older
+            # moy_gfx without set_pump keeps the old refusal: ungated Python
+            # verbs, per-op pokes, exactly the pre-door-1 behavior.
+            sp = getattr(ctx, "set_pump", None)
+            if sp is None:
+                return False
+            sp(self._pump)
         # Grab the bound Python methods BEFORE shadowing them: they become the
         # gates' fallbacks (and on P4SystemCanvas that correctly picks up the
         # font_scale-aware print override).
@@ -974,12 +984,11 @@ class DeviceCanvas:
         if ctx is not None:
             ctx.fill_rects(arr, -1 if n is None else n, ox, oy, c)
             return
-        # #167: the T-Deck ROOT canvas never installs the gates (its _fill pokes
-        # the SRAM-bounce pump, see _install_draw_gates), so without this lane the
-        # "batch" below is one INTERPRETER rect() per span -- the exact dispatch
-        # cost #163 exists to delete, silently absent on that board. fill_spans
-        # takes buffer/camera/clip as plain args like circ/line, so it works on
-        # every canvas whether or not the gate is there.
+        # #167: this lane was built when the T-Deck ROOT canvas refused the
+        # gates (the pump handshake, since solved -- #163 door 1: the ctx
+        # upcalls the pump every N ops, see _install_draw_gates). It survives
+        # as the OLD-moy_gfx fallback: fill_spans takes buffer/camera/clip as
+        # plain args like circ/line, so it works with no gate at all.
         gfx = self._gfx
         fs = None if gfx is None else getattr(gfx, "fill_spans", None)
         if fs is not None:

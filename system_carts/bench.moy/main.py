@@ -51,11 +51,55 @@ def _verbs():
     def v_print(i):
         print("BENCH", (i * 47) % 260, (i * 23) % 230, 7)
 
+    # 2026-08-04 (#163): the rest of the drawing verb set. APPENDED so the
+    # first six lines stay comparable with every earlier capture. spr rides
+    # the bundled sprites.moygfx (tiles 0-7); map rides the _init-mset field.
+    def v_rectb(i):
+        rectb((i * 37) % 280, (i * 53) % 215, 30, 18, 2 + (i & 15))
+
+    def v_circb(i):
+        circb(10 + (i * 41) % 300, 10 + (i * 29) % 220, 8, 2 + (i & 15))
+
+    def v_tri(i):
+        tri((i * 17) % 300, (i * 31) % 230, (i * 59) % 300 + 10,
+            (i * 43) % 230, (i * 23) % 300, ((i * 13) % 230) + 8, 2 + (i & 15))
+
+    def v_spr(i):
+        spr(i & 7, (i * 37) % 310, (i * 53) % 230)
+
+    def v_sprb(i):
+        spr_batch(state["sprb_items"])
+
+    def v_map(i):
+        map(0, 0, 15, 8, (i * 7) % 40, (i * 11) % 40)
+
+    def v_sspr(i):
+        sspr((i & 7) * 8, 0, 8, 8, (i * 37) % 300, (i * 53) % 220, 20, 20)
+
     return [("cls", v_cls, 4), ("rect", v_rect, 100), ("circ", v_circ, 100),
-            ("line", v_line, 100), ("pix", v_pix, 500), ("print", v_print, 50)]
+            ("line", v_line, 100), ("pix", v_pix, 500), ("print", v_print, 50),
+            ("rectb", v_rectb, 100), ("circb", v_circb, 100),
+            ("tri", v_tri, 50), ("spr", v_spr, 500), ("sprb", v_sprb, 8),
+            ("map", v_map, 8), ("sspr", v_sspr, 50)]
 
 
 def _init():
+    # the map verb's field: a deterministic 15x8 region (tiles 0-7)
+    y = 0
+    while y < 8:
+        x = 0
+        while x < 15:
+            mset(x, y, (x + y) & 7)
+            x += 1
+        y += 1
+    # sprb's prebuilt items (64 tiles, LCG positions) -- built ONCE so the
+    # measure times the CALL, not per-frame list construction
+    items = []
+    i = 0
+    while i < 64:
+        items.append((i & 7, (i * 37) % 310, (i * 53) % 230))
+        i += 1
+    state["sprb_items"] = items
     state["phase"] = PHASE_MICRO
     state["verbs"] = _verbs()
     state["vi"] = 0            # which verb
@@ -201,8 +245,8 @@ def _report():
         us = (best * 1000.0) / k
         print(name + " x" + str(k) + " = " + str(best) + "ms  ("
               + str(int(us * 10) / 10.0) + "us/op)", 8, y, 7)
-        y += 12
-    y += 6
+        y += 10                      # 13 verbs since 2026-08-04: tight rows
+    y += 4
     for label, s in (("SILENT", st), ("SOUND ", state["stats_snd"])):
         if s is None:
             continue
