@@ -508,14 +508,15 @@ class EditorApp:
 
         Conservative by construction: it returns True only for tabs whose
         cleanliness is provable, AND whose #111 op-history has no pending batch.
-        Anything else -- an unknown tab, a missing editor, scene/music (no dirty
-        flag) -- falls through to the commit exactly as before, so this can only
-        skip writes that would have been byte-identical no-ops.
+        Anything else -- an unknown tab, a missing editor -- falls through to
+        the commit exactly as before, so this can only skip writes that would
+        have been byte-identical no-ops.
 
-        Per-tab signal, and why they differ: paint/map/blocks carry a `dirty`
-        flag their editor cores set at the single mutation chokepoint AND that
-        their undo codecs re-set on replay (_PaintOps psets through the sheet,
-        _MapOps sets tm.dirty, BlockEditor._after_history sets dirty), so the
+        Per-tab signal, and why they differ: paint/map/blocks/scene/music carry
+        a `dirty` flag their editor cores set at the single mutation chokepoint
+        AND that their undo codecs re-set on replay (_PaintOps psets through the
+        sheet, _MapOps sets tm.dirty, BlockEditor._after_history sets dirty,
+        _SceneOps._replay and _MusicOps both mark the doc), so the
         flag is trustworthy there. The CODE tab's is NOT: CodeEditor.set_text is
         the LOADER (it clears dirty) and op_history.TextEditCodec rewrites the
         buffer through it, so an undo/redo leaves a changed document flagged
@@ -546,6 +547,14 @@ class EditorApp:
         if tab == "blocks":
             blk = getattr(getattr(ws, "block_ui", None), "editor", None)
             return blk is not None and not getattr(blk, "dirty", True)
+        if tab == "scene":
+            se = getattr(getattr(ws, "scene_ui", None), "sceneedit", None)
+            return (se is not None and not getattr(se, "dirty", True)
+                    and _quiet(proj._scene_history() if proj is not None else None))
+        if tab == "music":
+            me = getattr(getattr(ws, "music_ui", None), "musicedit", None)
+            return (me is not None and not getattr(me, "dirty", True)
+                    and _quiet(proj._music_history() if proj is not None else None))
         if tab == "cards":
             # No editor core: the config IS the document. It's clean when the
             # live values already match what the cart dict carries (what a
@@ -554,7 +563,7 @@ class EditorApp:
                 return False
             return (dict(proj.config) == dict(proj.cart.get("cfg") or {})
                     and _quiet(proj.config_hist))
-        return False                 # scene / music / unknown: commit as before
+        return False                 # unknown tab: commit as before
 
     def save_current(self):
         """Hard-commit the ACTIVE tab (#111: the autosave-only model's persist verb --
