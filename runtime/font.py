@@ -90,19 +90,18 @@ def glyph(ch):
 def as_bytes(s):
     """A print() argument as the BYTE sequence it is.
 
-    bytes/bytearray pass through; a str is taken one byte per character rather
-    than UTF-8-encoded, because a str reaching here stands in for a Lua byte
-    string. A character above U+00FF is not one byte, so it degrades to '?'
-    rather than raising -- this is a draw path, and losing a glyph beats losing
-    the frame."""
+    bytes/bytearray pass through -- moy_lua hands back bytes for a Lua string
+    that is not valid UTF-8, since a MicroPython str cannot hold one.
+
+    A str is UTF-8-encoded, which is the encoding that round-trips: the str came
+    from decoding the cart's own UTF-8 bytes, and it is also literally what the
+    DEVICE draws, because moy_gfx.text takes the str's buffer and a MicroPython
+    str's buffer is its UTF-8. Reading a str one byte per character instead
+    would make the host disagree with the device on exactly the strings this
+    whole change was about."""
     if isinstance(s, (bytes, bytearray)):
         return s
-    s = str(s)
-    out = bytearray(len(s))
-    for i in range(len(s)):
-        c = ord(s[i])
-        out[i] = c if c <= 0xFF else 0x3F
-    return out
+    return str(s).encode("utf-8")
 
 
 def draw(put, s, x, y):

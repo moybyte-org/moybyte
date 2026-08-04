@@ -34,6 +34,7 @@
 #include "py/obj.h"
 #include "py/runtime.h"
 #include "py/objstr.h"
+#include "py/unicode.h"        // utf8_check -- see lua_to_mp's LUA_TSTRING case
 
 #include "lua.h"
 #include "lauxlib.h"
@@ -142,6 +143,22 @@ static mp_obj_t lua_to_mp(lua_State *L, int i) {
             qstr q = qstr_find_strn(s, len);
             if (q != MP_QSTRnull) {
                 return MP_OBJ_NEW_QSTR(q);
+            }
+            // A Lua string is a BYTE string and may hold anything; a
+            // MicroPython str must be valid UTF-8, and mp_obj_new_str raises
+            // UnicodeError rather than accepting one that is not. That killed
+            // the whole FRAME for a cart doing print("\255") -- legal under moy
+            // SPEC.md 6, which draws nothing for that byte but still advances a
+            // cell -- on every moy_lua host, the boards included.
+            //
+            // So hand back bytes for the ones a str cannot hold. Everything
+            // downstream reads text through a buffer already: font.as_bytes
+            // takes bytes directly, and moy_gfx.text is given the buffer of
+            // whichever it gets. Checking costs a scan of strings that missed
+            // the qstr cache, which is not the hot path -- interned verb and
+            // button names never reach here.
+            if (!utf8_check((const byte *)s, len)) {
+                return mp_obj_new_bytes((const byte *)s, len);
             }
             return mp_obj_new_str(s, len);
         }
