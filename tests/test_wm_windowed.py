@@ -1654,3 +1654,29 @@ def test_view_scales_the_windowed_player_too(tmp_path):
     assert scale == max(1, min(cw // 128, ch // 128))
     assert scale > max(1, min(cw // 320, ch // 240))   # bigger than full-canvas
     assert ws.wm.game_xy(ox, oy) == (96, 56)
+def test_picker_hover_select_marks_dirty_inside_the_window(tmp_path):
+    """#177: the picker's hover-preview predates the content freeze -- it moved
+    sel WITHOUT marking dirty, so inside the make window the retained buffer
+    never repainted (state moved, pixels didn't: dead on desktop + web)."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open_picker()
+    drv.frame(1 / 30)
+    win = ws.wm._wins["make"]
+    p = ws.pointer
+    p.visible = True
+    p.down = False
+    ws.wm._install(win.ctx)
+    try:
+        t2 = ws.picker.tile_rect(2)
+    finally:
+        ws.wm._install(ws.wm._root_ctx)
+    cx, cy, _cw, _ch = win.content_rect()
+    p.x, p.y = 900, 560
+    ws.wm._route_pointer(900, 560, False)          # seed the hover tracker
+    ws._dirty = False
+    tx, ty = cx + t2[0] + 8, cy + t2[1] + 8
+    p.x, p.y = tx, ty
+    ws.wm._route_pointer(tx, ty, False)
+    assert ws.picker.sel == 2
+    assert ws._dirty, "hover-select must mark dirty or the window never repaints"

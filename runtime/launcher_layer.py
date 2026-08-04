@@ -1620,7 +1620,13 @@ class EditorPickerLayer:
             i = ws.picker.tile_at(px, py)
             if i is not None:
                 self._disarm_delete()
-                ws.picker.sel = i
+                if i != ws.picker.sel:
+                    ws.picker.sel = i
+                    # A real selection move must MARK DIRTY (#177): inside the
+                    # make window the content freeze reuses the retained buffer
+                    # on position-only frames, so an unmarked hover-select
+                    # painted nothing (dead on the desktop tier + web).
+                    ws._dirty = True
         return True
 
     # -- the lent left zone (Stage 4, #46 zoned bar) --------------------------
