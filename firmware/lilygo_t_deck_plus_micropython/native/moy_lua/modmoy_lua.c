@@ -228,13 +228,20 @@ static bool call_py(mp_obj_t fn, size_t n, const mp_obj_t *args, mp_obj_t *ret) 
 // ---------------------------------------------------------------------------
 // the generic trampoline: Lua global -> registered Python callable
 
+// The widest verb in the moy spec: sspr(sx, sy, sw, sh, dx, dy, dw, dh,
+// colorkey, flip) -- SPEC.md 7.1. The cap was 8, which is map()'s width, so
+// every cart calling the full sspr form failed with "too many arguments" on
+// every moy_lua host, the boards included. Found by moy-spec's conformance
+// suite (the `provisional` scene). Keep this >= the widest spec signature.
+#define MOY_API_MAX_ARGS 10
+
 static int l_tramp(lua_State *L) {
     int idx = (int)lua_tointeger(L, lua_upvalueindex(1));
     int n = lua_gettop(L);
-    if (n > 8) {
+    if (n > MOY_API_MAX_ARGS) {
         return luaL_error(L, "console api: too many arguments");
     }
-    mp_obj_t args[8];
+    mp_obj_t args[MOY_API_MAX_ARGS];
     for (int i = 0; i < n; i++) {
         args[i] = lua_to_mp(L, i + 1);
     }
