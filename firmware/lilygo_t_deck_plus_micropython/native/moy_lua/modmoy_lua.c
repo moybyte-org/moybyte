@@ -160,7 +160,12 @@ static mp_obj_t lua_to_mp(lua_State *L, int i) {
             if (!utf8_check((const byte *)s, len)) {
                 return mp_obj_new_bytes((const byte *)s, len);
             }
-            return mp_obj_new_str(s, len);
+            // mp_obj_new_str would utf8_check AGAIN and repeat the qstr lookup
+            // above; _copy is the tail of it, and its precondition (valid
+            // utf-8) is exactly what the line above just established. So this
+            // path now does one scan and one lookup where the original did one
+            // scan and TWO -- slightly cheaper than before the check existed.
+            return mp_obj_new_str_copy(&mp_type_str, (const byte *)s, len);
         }
         default:
             luaL_error(L, "cannot pass a %s to the console api",

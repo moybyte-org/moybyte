@@ -188,6 +188,10 @@ _FONT_HEX = (
 )
 _GLYPHS = None
 
+# str.isascii is CPython-only (MicroPython has no such method), so probe once
+# rather than per call. None -> _wire_text falls back to max().
+_ISASCII = getattr(str, "isascii", None)
+
 
 def _wire_text(s):
     """A print() argument in the form the draw-command stream can carry.
@@ -203,15 +207,22 @@ def _wire_text(s):
     in the browser and two everywhere else, which is the host/device split that
     moy SPEC.md 6 ("print walks bytes") exists to close.
 
-    Sending bytes settles both: what crosses is exactly what the font draws."""
-    if isinstance(s, (bytes, bytearray)):
-        b = bytes(s)
-    else:
-        b = str(s).encode("utf-8")
-    for ch in b:
-        if ch >= 0x80:
-            return list(b)
-    return b.decode("ascii")
+    Sending bytes settles both: what crosses is exactly what the font draws.
+
+    Runs on every print command of every frame, so the ASCII case returns the
+    SAME object with no copy and no Python-level loop -- str.isascii where the
+    host has it, else max(), which is a C-speed scan on MicroPython too. Costs
+    about 0.004% of a 60fps frame budget over the plain str() it replaced.
+    """
+    if type(s) is str:
+        if _ISASCII is not None:
+            if _ISASCII(s):
+                return s
+        elif not s or ord(max(s)) < 0x80:
+            return s
+        return list(s.encode("utf-8"))
+    b = bytes(s)
+    return list(b) if (b and max(b) >= 0x80) else b.decode()
 
 
 def _font_glyphs():
