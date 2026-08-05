@@ -255,8 +255,8 @@ names it, and a reader deserves to know where the numbers came from.
 Listed so a reviewer does not have to wonder. Each of these reproduces a
 published format, protocol or behaviour; none contains third-party code.
 
-- **PICO-8 `.p8` / `.p8.png` cart format** (`tools/import_p8.py`,
-  `tools/p8_lua_port.py`) — the section layout (`__gfx__`, `__gff__`,
+- **PICO-8 `.p8` / `.p8.png` cart format** (`tools/import_p8.py`) — the
+  section layout (`__gfx__`, `__gff__`,
   `__map__`, `__sfx__`, `__music__`), the pre-0.2.0 `:c:` compression lookup
   table, and the steganographic 2-bit-per-channel PNG packing are format
   constants. The implementation is stdlib-only and written from the format
@@ -376,10 +376,10 @@ Moybyte binary.
 
 ## 7. Ported carts
 
-`tools/p8_lua_port.py` and `firmware/web_runner/moy.py demo` can convert a
-PICO-8 cart into a `.moy` cartridge. **A ported cart is a derivative work of
-its original and carries the original's licence, not this repository's.**
-PICO-8 BBS carts default to CC BY-NC-SA 4.0.
+`tools/import_p8.py` (and the moy-spec CLI's `moy port` / `moy demo`) can
+convert a PICO-8 cart into a `.moy` cartridge. **A ported cart is a derivative
+work of its original and carries the original's licence, not this
+repository's.** PICO-8 BBS carts default to CC BY-NC-SA 4.0.
 
 No ported cart is committed here. `ports/celeste.moy` — *Celeste* (PICO-8,
 2016) by Maddy Thorson & Noel Berry — is used as a Lua-runtime conformance

@@ -678,7 +678,7 @@ def make_manifest(title):
         "type": "game",
         "runtime": "python",
         "main": "main.py",
-        "canvas": {"width": 320, "height": 240, "palette": "moy64"},
+        "canvas": "320x240",
         "permissions": ["graphics", "input", "sound"],
         "safe_to_share": True,
         "config": {},

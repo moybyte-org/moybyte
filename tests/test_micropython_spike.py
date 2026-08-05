@@ -3407,9 +3407,8 @@ def test_every_new_layer_pins_retained_frames_to_one():
 
 def test_lua_table_verb_never_clobbers_the_table_library():
     """#164: the #78 `table()` cart verb must ride Lua's `table` LIBRARY as a
-    metatable __call, never replace it -- celeste's p8 shim needs table.remove.
-    Pins both halves on the device glue (host twin: tests/test_p8_lua_port.py's
-    dual-role test over runtime/lua_host.py)."""
+    metatable __call, never replace it -- a ported cart's p8 shim needs
+    table.remove (the shim generator lives in moy-spec now)."""
     api = (ROOT / "modules" / "moy_lua_glue.py").read_text(encoding="utf-8")
     assert 'moy_lua.register("moy_table_verb", v)' in api
     assert "setmetatable(table, { __call" in api

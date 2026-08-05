@@ -577,6 +577,69 @@ class Canvas:
                     continue
                 put(dx + i, ty, p)
 
+    def tline(self, tilemap, sheet, x0, y0, x1, y1, u, v, du, dv, colorkey=-1):
+        # SPEC.md 6.1 tline (#167): exactly line()'s Bresenham pixels, sampling
+        # the MAP as a virtual texture in 16.16 fixed point -- the Mode 7 verb.
+        # u/v/du/dv are ints (the cart multiplies its floats by 65536). Before
+        # each pixel the texel (u>>16, v>>16) is sampled; afterwards u += du,
+        # v += dv, for EVERY walked pixel, drawn, clipped or empty alike, so
+        # nothing can desynchronise the texture walk from the screen walk.
+        # Coordinates wrap modulo the map's pixel size; empty cells draw
+        # nothing; camera/clip/pal/palt apply through _put exactly as line()'s
+        # do. Reference: moy-spec moycore/canvas.py tline; the start and step
+        # are reduced once so no per-pixel modulo survives ((a + n*b) mod T ==
+        # ((a mod T) + n*(b mod T)) mod T). Device twin: DeviceCanvas.tline.
+        self.flush_batch()             # #63: a non-spr primitive breaks the batch
+        x0 = int(x0); y0 = int(y0); x1 = int(x1); y1 = int(y1)
+        u = int(u); v = int(v); du = int(du); dv = int(dv)
+        ck = int(colorkey)
+        tw = tilemap.w * 8
+        th = tilemap.h * 8
+        if tw <= 0 or th <= 0:
+            return
+        tu = tw << 16
+        tv = th << 16
+        uu = u % tu
+        vv = v % tv
+        du %= tu
+        dv %= tv
+        cells = tilemap.cells
+        mw = tilemap.w
+        scols = sheet.cols
+        pget = sheet.pget
+        palt = self._palt
+        put = self._put
+        dxx = x1 - x0 if x1 > x0 else x0 - x1
+        dyy = y0 - y1 if y1 > y0 else y1 - y0
+        stx = 1 if x0 < x1 else -1
+        sty = 1 if y0 < y1 else -1
+        err = dxx + dyy
+        while True:
+            px = uu >> 16
+            py = vv >> 16
+            cell = cells[(py >> 3) * mw + (px >> 3)]
+            if cell:                   # 0 = empty (id+1 storage)
+                tid = cell - 1
+                p = pget((tid % scols) * 8 + (px & 7),
+                         (tid // scols) * 8 + (py & 7))
+                if p != ck and not palt[p & 63]:
+                    put(x0, y0, p)
+            uu += du
+            if uu >= tu:
+                uu -= tu
+            vv += dv
+            if vv >= tv:
+                vv -= tv
+            if x0 == x1 and y0 == y1:
+                break
+            e2 = 2 * err
+            if e2 >= dyy:
+                err += dyy
+                x0 += stx
+            if e2 <= dxx:
+                err += dxx
+                y0 += sty
+
     def spr(self, img, x, y, scale=1, flip=0):
         # TIC-80 flip: 0=none, 1=horizontal, 2=vertical, 3=both. The source pixel
         # read is mirrored per `flip`; camera/clip/pal/palt all apply through _put.

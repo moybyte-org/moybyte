@@ -40,7 +40,7 @@ def test_bench_python_measures_the_verb_set(tmp_path):
     names = [m[0] for m in state["micro"]]
     assert names == ["cls", "rect", "circ", "line", "pix", "print",
                      "rectb", "circb", "tri", "spr", "sprb", "map",
-                     "sspr"][:len(names)]   # measured in the declared order
+                     "sspr", "tline"][:len(names)]   # measured in the declared order
 
 
 def test_bench_lua_runs_the_verb_set(tmp_path):

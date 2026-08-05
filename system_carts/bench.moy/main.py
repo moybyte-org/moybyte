@@ -76,11 +76,18 @@ def _verbs():
     def v_sspr(i):
         sspr((i & 7) * 8, 0, 8, 8, (i * 37) % 300, (i * 53) % 220, 20, 20)
 
+    def v_tline(i):
+        # SPEC.md 6.1 tline: one full-width textured scanline per call, 16.16
+        # fixed point, sampling the _init-mset field -- the Mode 7 shape.
+        tline(0, (i * 13) % 240, 319, (i * 13) % 240,
+              (i * 7) << 14, (i * 11) << 13, 16384 + ((i & 15) << 7), i << 6)
+
     return [("cls", v_cls, 4), ("rect", v_rect, 100), ("circ", v_circ, 100),
             ("line", v_line, 100), ("pix", v_pix, 500), ("print", v_print, 50),
             ("rectb", v_rectb, 100), ("circb", v_circb, 100),
             ("tri", v_tri, 50), ("spr", v_spr, 500), ("sprb", v_sprb, 8),
-            ("map", v_map, 8), ("sspr", v_sspr, 50)]
+            ("map", v_map, 8), ("sspr", v_sspr, 50),
+            ("tline", v_tline, 50)]
 
 
 def _init():

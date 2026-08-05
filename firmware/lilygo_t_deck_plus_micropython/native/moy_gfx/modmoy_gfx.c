@@ -754,6 +754,210 @@ static mp_obj_t moy_gfx_fill_spans(size_t n_args, const mp_obj_t *a) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_fill_spans_obj, 15, 15,
                                            moy_gfx_fill_spans);
 
+// --- the SPEC.md 6.1 3D verbs (#167, shape B) --------------------------------
+//
+// The geometry below is line-for-line libmoy's (moy-spec/libmoy/src/), which is
+// what the conformance goldens pin; only the WRITE differs -- these resolve the
+// palette index at draw time and store RGB565, which is this canvas's format.
+// Same standalone shape as circ/fill_spans: buffer, camera and clip as plain
+// args, so they work on every canvas, gated or not.
+
+// tri(dst, dw, dh, x1, y1, x2, y2, x3, y3, color, cam_x, cam_y, cx0, cy0, cx1, cy1)
+// -- FILLED triangle, whole scanline walk in C: sort by y, walk both edges with
+// FLOOR division (C truncation differs by one for negative numerators -- a whole
+// column on a leaning edge), one clipped span per scanline. Replaces the Python
+// tri_spans walk that measured 7.5ms/op on this board's bench (#66) -- the span
+// ARITHMETIC was the cost, not the fill, which is why the kernel owns both.
+static mp_obj_t moy_gfx_tri(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &cap);
+    mp_int_t dw = mp_obj_get_int(a[1]);
+    mp_int_t x1 = mp_obj_get_int(a[3]), y1 = mp_obj_get_int(a[4]);
+    mp_int_t x2 = mp_obj_get_int(a[5]), y2 = mp_obj_get_int(a[6]);
+    mp_int_t x3 = mp_obj_get_int(a[7]), y3 = mp_obj_get_int(a[8]);
+    uint16_t col = (uint16_t)mp_obj_get_int(a[9]);
+    mp_int_t cam_x = mp_obj_get_int(a[10]), cam_y = mp_obj_get_int(a[11]);
+    mp_int_t cx0 = mp_obj_get_int(a[12]), cy0 = mp_obj_get_int(a[13]);
+    mp_int_t cx1 = mp_obj_get_int(a[14]), cy1 = mp_obj_get_int(a[15]);
+    mp_int_t t, y, dy_long, dy_top, dy_bot;
+    if (dw <= 0) return mp_const_none;
+    moy_gfx_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
+    // Camera once, on the vertices: spans are linear in them, so this is
+    // pixel-identical to offsetting every span (differences are unchanged).
+    x1 -= cam_x; y1 -= cam_y;
+    x2 -= cam_x; y2 -= cam_y;
+    x3 -= cam_x; y3 -= cam_y;
+    if (y1 > y2) { t = x1; x1 = x2; x2 = t; t = y1; y1 = y2; y2 = t; }
+    if (y1 > y3) { t = x1; x1 = x3; x3 = t; t = y1; y1 = y3; y3 = t; }
+    if (y2 > y3) { t = x2; x2 = x3; x3 = t; t = y2; y2 = y3; y3 = t; }
+    dy_long = y3 - y1; dy_top = y2 - y1; dy_bot = y3 - y2;
+    for (y = y1; y <= y3; y++) {
+        mp_int_t xa, xb;
+        if (y < cy0 || y >= cy1) continue;
+        if (dy_long == 0) {                 // flat: one span through all three x
+            xa = x1 < x2 ? x1 : x2; if (x3 < xa) xa = x3;
+            xb = x1 > x2 ? x1 : x2; if (x3 > xb) xb = x3;
+        } else {
+            mp_int_t na = (x3 - x1) * (y - y1);
+            xa = x1 + (na >= 0 ? na / dy_long : -(((-na) + dy_long - 1) / dy_long));
+            if (y < y2) {
+                mp_int_t nb = (x2 - x1) * (y - y1);
+                xb = x1 + (nb >= 0 ? nb / dy_top : -(((-nb) + dy_top - 1) / dy_top));
+            } else if (dy_bot) {
+                mp_int_t nb = (x3 - x2) * (y - y2);
+                xb = x2 + (nb >= 0 ? nb / dy_bot : -(((-nb) + dy_bot - 1) / dy_bot));
+            } else {
+                xb = x3;
+            }
+            if (xa > xb) { t = xa; xa = xb; xb = t; }
+        }
+        xb += 1;                            // spans are inclusive
+        if (xa < cx0) xa = cx0;
+        if (xb > cx1) xb = cx1;
+        if (xa < xb)
+            moy_gfx_fill_run(dst + (size_t)y * (size_t)dw + (size_t)xa,
+                             (size_t)(xb - xa), col);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_tri_obj, 16, 16, moy_gfx_tri);
+
+// sspr(dst, dw, dh, sheet, sheetw, sheeth, sx, sy, sw, sh, dx, dy, ddw, ddh,
+//      colorkey, flip, lut, palt, cam_x, cam_y, cx0, cy0, cx1, cy1)
+// -- stretch a sheet PIXEL region to an arbitrary rect, nearest-neighbour,
+// source texel (i*sw)//dw exactly as the host canvas computes it. `sheet` is
+// the INDEX bytearray (SpriteSheet.pix); `lut` the 64-entry RGB565 table with
+// pal already folded in (_wire_pal); `palt` the 64-byte transparency mask or
+// None. colorkey compares against the RAW sheet index, before masking, exactly
+// like the Python lane. Out-of-range sheet reads sample 0, like pget.
+static mp_obj_t moy_gfx_sspr(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &cap);
+    mp_int_t dw = mp_obj_get_int(a[1]);
+    mp_buffer_info_t sb, pb, lb;
+    mp_get_buffer_raise(a[3], &sb, MP_BUFFER_READ);
+    const uint8_t *sheet = (const uint8_t *)sb.buf;
+    mp_int_t sheetw = mp_obj_get_int(a[4]), sheeth = mp_obj_get_int(a[5]);
+    mp_int_t sx = mp_obj_get_int(a[6]), sy = mp_obj_get_int(a[7]);
+    mp_int_t sw = mp_obj_get_int(a[8]), sh = mp_obj_get_int(a[9]);
+    mp_int_t dx = mp_obj_get_int(a[10]), dy = mp_obj_get_int(a[11]);
+    mp_int_t ddw = mp_obj_get_int(a[12]), ddh = mp_obj_get_int(a[13]);
+    mp_int_t ck = mp_obj_get_int(a[14]);
+    mp_int_t flip = mp_obj_get_int(a[15]);
+    mp_get_buffer_raise(a[16], &lb, MP_BUFFER_READ);
+    const uint16_t *lut = (const uint16_t *)lb.buf;
+    const uint8_t *palt = NULL;
+    if (a[17] != mp_const_none) {
+        mp_get_buffer_raise(a[17], &pb, MP_BUFFER_READ);
+        palt = (const uint8_t *)pb.buf;
+    }
+    mp_int_t cam_x = mp_obj_get_int(a[18]), cam_y = mp_obj_get_int(a[19]);
+    mp_int_t cx0 = mp_obj_get_int(a[20]), cy0 = mp_obj_get_int(a[21]);
+    mp_int_t cx1 = mp_obj_get_int(a[22]), cy1 = mp_obj_get_int(a[23]);
+    mp_int_t i, j, fx = flip & 1, fy = (flip >> 1) & 1;
+    if (dw <= 0 || sw <= 0 || sh <= 0 || ddw <= 0 || ddh <= 0) return mp_const_none;
+    if ((size_t)(sheetw * sheeth) > sb.len) return mp_const_none;
+    moy_gfx_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
+    for (j = 0; j < ddh; j++) {
+        mp_int_t v = (j * sh) / ddh;
+        mp_int_t ty = dy + j;
+        if (fy) v = sh - 1 - v;
+        for (i = 0; i < ddw; i++) {
+            mp_int_t u = (i * sw) / ddw, p, ssx, ssy;
+            if (fx) u = sw - 1 - u;
+            ssx = sx + u; ssy = sy + v;
+            p = (ssx >= 0 && ssx < sheetw && ssy >= 0 && ssy < sheeth)
+                    ? sheet[(size_t)ssy * (size_t)sheetw + (size_t)ssx] : 0;
+            if (p == ck) continue;
+            if (palt != NULL && palt[p & 63]) continue;
+            moy_gfx_put(dst, dw, dx + i, ty, lut[p & 63],
+                        cam_x, cam_y, cx0, cy0, cx1, cy1);
+        }
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_sspr_obj, 24, 24, moy_gfx_sspr);
+
+// tline(dst, dw, dh, cells, mw, mh, sheet, sheetw, sheeth, x0, y0, x1, y1,
+//       u, v, du, dv, colorkey, lut, palt, cam_x, cam_y, cx0, cy0, cx1, cy1)
+// -- SPEC.md 6.1's textured line: exactly line()'s Bresenham pixels, sampling
+// the MAP as a virtual texture in 16.16 fixed point. The start and step are
+// reduced ONCE ((a + n*b) mod T == ((a mod T) + n*(b mod T)) mod T) so the
+// loop needs no division at all -- the naive per-texel modulo measured
+// ~660ns/texel on this board (moy-spec 06fe1ba) and this shape ~210ns. `cells`
+// is the TileMap bytearray (id+1, 0 = empty); coordinates wrap modulo the
+// map's pixel size; the cursor advances for EVERY walked pixel, drawn or not.
+static mp_obj_t moy_gfx_tline(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &cap);
+    mp_int_t dw = mp_obj_get_int(a[1]);
+    mp_buffer_info_t cb, sb, pb, lb;
+    mp_get_buffer_raise(a[3], &cb, MP_BUFFER_READ);
+    const uint8_t *cells = (const uint8_t *)cb.buf;
+    mp_int_t mw = mp_obj_get_int(a[4]), mh = mp_obj_get_int(a[5]);
+    mp_get_buffer_raise(a[6], &sb, MP_BUFFER_READ);
+    const uint8_t *sheet = (const uint8_t *)sb.buf;
+    mp_int_t sheetw = mp_obj_get_int(a[7]), sheeth = mp_obj_get_int(a[8]);
+    mp_int_t x0 = mp_obj_get_int(a[9]), y0 = mp_obj_get_int(a[10]);
+    mp_int_t x1 = mp_obj_get_int(a[11]), y1 = mp_obj_get_int(a[12]);
+    int32_t u = (int32_t)mp_obj_get_int(a[13]), v = (int32_t)mp_obj_get_int(a[14]);
+    int32_t du = (int32_t)mp_obj_get_int(a[15]), dv = (int32_t)mp_obj_get_int(a[16]);
+    mp_int_t ck = mp_obj_get_int(a[17]);
+    mp_get_buffer_raise(a[18], &lb, MP_BUFFER_READ);
+    const uint16_t *lut = (const uint16_t *)lb.buf;
+    const uint8_t *palt = NULL;
+    if (a[19] != mp_const_none) {
+        mp_get_buffer_raise(a[19], &pb, MP_BUFFER_READ);
+        palt = (const uint8_t *)pb.buf;
+    }
+    mp_int_t cam_x = mp_obj_get_int(a[20]), cam_y = mp_obj_get_int(a[21]);
+    mp_int_t cx0 = mp_obj_get_int(a[22]), cy0 = mp_obj_get_int(a[23]);
+    mp_int_t cx1 = mp_obj_get_int(a[24]), cy1 = mp_obj_get_int(a[25]);
+    mp_int_t dxx = x1 > x0 ? x1 - x0 : x0 - x1;
+    mp_int_t dyy = y1 > y0 ? y0 - y1 : y1 - y0;
+    mp_int_t stx = x0 < x1 ? 1 : -1;
+    mp_int_t sty = y0 < y1 ? 1 : -1;
+    mp_int_t err = dxx + dyy;
+    mp_int_t tw = mw * 8, th = mh * 8;
+    mp_int_t scols = sheetw >> 3;
+    int32_t tu, tv, uu, vv, dur, dvr;
+    if (dw <= 0 || tw <= 0 || th <= 0 || scols <= 0) return mp_const_none;
+    if ((size_t)(mw * mh) > cb.len || (size_t)(sheetw * sheeth) > sb.len)
+        return mp_const_none;
+    moy_gfx_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
+    tu = (int32_t)tw << 16;
+    tv = (int32_t)th << 16;
+    uu = u % tu;   if (uu < 0) uu += tu;
+    vv = v % tv;   if (vv < 0) vv += tv;
+    dur = du % tu;
+    dvr = dv % tv;
+    for (;;) {
+        mp_int_t px = (mp_int_t)(uu >> 16), py = (mp_int_t)(vv >> 16);
+        mp_int_t cell = cells[(size_t)(py >> 3) * (size_t)mw + (size_t)(px >> 3)];
+        if (cell) {                          // 0 = empty (id+1 storage)
+            mp_int_t tid = cell - 1;
+            mp_int_t ssx = (tid % scols) * 8 + (px & 7);
+            mp_int_t ssy = (tid / scols) * 8 + (py & 7);
+            mp_int_t p = (ssx < sheetw && ssy < sheeth)
+                             ? sheet[(size_t)ssy * (size_t)sheetw + (size_t)ssx] : 0;
+            if (p != ck && (palt == NULL || !palt[p & 63]))
+                moy_gfx_put(dst, dw, x0, y0, lut[p & 63],
+                            cam_x, cam_y, cx0, cy0, cx1, cy1);
+        }
+        uu += dur; if (uu >= tu) uu -= tu; else if (uu < 0) uu += tu;
+        vv += dvr; if (vv >= tv) vv -= tv; else if (vv < 0) vv += tv;
+        if (x0 == x1 && y0 == y1) break;
+        { mp_int_t e2 = 2 * err;
+          if (e2 >= dyy) { err += dyy; x0 += stx; }
+          if (e2 <= dxx) { err += dxx; y0 += sty; } }
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_tline_obj, 26, 26, moy_gfx_tline);
+
 // circ(dst, dw, dh, cx, cy, r, color, cam_x, cam_y, cx0, cy0, cx1, cy1) -- FILLED
 // circle: each scanline a clipped, camera-offset span (matches host canvas circ()).
 static mp_obj_t moy_gfx_circ(size_t n_args, const mp_obj_t *a) {
@@ -1611,6 +1815,9 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     #endif
     { MP_ROM_QSTR(MP_QSTR_copy),       MP_ROM_PTR(&moy_gfx_copy_obj) },
     { MP_ROM_QSTR(MP_QSTR_fill_spans), MP_ROM_PTR(&moy_gfx_fill_spans_obj) },
+    { MP_ROM_QSTR(MP_QSTR_tri),        MP_ROM_PTR(&moy_gfx_tri_obj) },
+    { MP_ROM_QSTR(MP_QSTR_sspr),       MP_ROM_PTR(&moy_gfx_sspr_obj) },
+    { MP_ROM_QSTR(MP_QSTR_tline),      MP_ROM_PTR(&moy_gfx_tline_obj) },
     { MP_ROM_QSTR(MP_QSTR_circ),       MP_ROM_PTR(&moy_gfx_circ_obj) },
     { MP_ROM_QSTR(MP_QSTR_circb),      MP_ROM_PTR(&moy_gfx_circb_obj) },
     { MP_ROM_QSTR(MP_QSTR_line),       MP_ROM_PTR(&moy_gfx_line_obj) },
