@@ -426,6 +426,138 @@ class _FakeGfx:
             for x in range(x0, x1):
                 d[base + x] = col
 
+
+    @staticmethod
+    def tri(dst, dw, dh, x1, y1, x2, y2, x3, y3, color, cam_x, cam_y,
+            cx0, cy0, cx1, cy1):
+        # Faithful port of moy_gfx_tri (modmoy_gfx.c): camera on the vertices,
+        # floor-division edge walk, one clipped span per scanline.
+        mv = memoryview(dst).cast("H")
+        cap = len(mv)
+        max_rows = cap // dw
+        cx0 = max(cx0, 0); cy0 = max(cy0, 0)
+        cx1 = min(cx1, dw); cy1 = min(cy1, max_rows)
+        x1 -= cam_x; y1 -= cam_y
+        x2 -= cam_x; y2 -= cam_y
+        x3 -= cam_x; y3 -= cam_y
+        if y1 > y2: x1, x2, y1, y2 = x2, x1, y2, y1
+        if y1 > y3: x1, x3, y1, y3 = x3, x1, y3, y1
+        if y2 > y3: x2, x3, y2, y3 = x3, x2, y3, y2
+        dy_long = y3 - y1; dy_top = y2 - y1; dy_bot = y3 - y2
+        for y in range(y1, y3 + 1):
+            if y < cy0 or y >= cy1:
+                continue
+            if dy_long == 0:
+                xa = min(x1, x2, x3); xb = max(x1, x2, x3)
+            else:
+                xa = x1 + ((x3 - x1) * (y - y1)) // dy_long
+                if y < y2:
+                    xb = x1 + ((x2 - x1) * (y - y1)) // dy_top
+                elif dy_bot:
+                    xb = x2 + ((x3 - x2) * (y - y2)) // dy_bot
+                else:
+                    xb = x3
+                if xa > xb:
+                    xa, xb = xb, xa
+            xb += 1
+            xa = max(xa, cx0); xb = min(xb, cx1)
+            for x in range(xa, xb):
+                mv[y * dw + x] = color & 0xFFFF
+
+    @staticmethod
+    def sspr(dst, dw, dh, sheet, sheetw, sheeth, sx, sy, sw, sh,
+             dx, dy, ddw, ddh, ck, flip, lut, palt, cam_x, cam_y,
+             cx0, cy0, cx1, cy1):
+        # Faithful port of moy_gfx_sspr: index sheet + lut, colorkey on the RAW
+        # index, palt after masking, out-of-range sheet reads sample 0.
+        mv = memoryview(dst).cast("H")
+        cap = len(mv)
+        max_rows = cap // dw
+        cx0 = max(cx0, 0); cy0 = max(cy0, 0)
+        cx1 = min(cx1, dw); cy1 = min(cy1, max_rows)
+        if sw <= 0 or sh <= 0 or ddw <= 0 or ddh <= 0:
+            return
+        fx = flip & 1; fy = (flip >> 1) & 1
+        lv = memoryview(lut).cast("H") if not hasattr(lut, "typecode") else lut
+        for j in range(ddh):
+            v = (j * sh) // ddh
+            if fy:
+                v = sh - 1 - v
+            ty = dy + j - cam_y
+            if ty < cy0 or ty >= cy1:
+                # still identical: nothing to draw on this row
+                pass
+            for i in range(ddw):
+                u = (i * sw) // ddw
+                if fx:
+                    u = sw - 1 - u
+                ssx = sx + u; ssy = sy + v
+                if 0 <= ssx < sheetw and 0 <= ssy < sheeth:
+                    p = sheet[ssy * sheetw + ssx]
+                else:
+                    p = 0
+                if p == ck:
+                    continue
+                if palt is not None and palt[p & 63]:
+                    continue
+                tx = dx + i - cam_x
+                if cx0 <= tx < cx1 and cy0 <= ty < cy1:
+                    mv[ty * dw + tx] = lv[p & 63]
+
+    @staticmethod
+    def tline(dst, dw, dh, cells, mw, mh, sheet, sheetw, sheeth,
+              x0, y0, x1, y1, u, v, du, dv, ck, lut, palt,
+              cam_x, cam_y, cx0, cy0, cx1, cy1):
+        # Faithful port of moy_gfx_tline: reduce once, wrap by conditional
+        # subtract, id+1 cells, cursor advances for every walked pixel.
+        mv = memoryview(dst).cast("H")
+        cap = len(mv)
+        max_rows = cap // dw
+        cx0 = max(cx0, 0); cy0 = max(cy0, 0)
+        cx1 = min(cx1, dw); cy1 = min(cy1, max_rows)
+        tw = mw * 8; th = mh * 8
+        scols = sheetw >> 3
+        if tw <= 0 or th <= 0 or scols <= 0:
+            return
+        lv = memoryview(lut).cast("H") if not hasattr(lut, "typecode") else lut
+        tu = tw << 16; tvv = th << 16
+        uu = u % tu; vv = v % tvv
+        # C's % truncates; Python's floors -- both are valid representatives
+        # mod T and the two-sided wrap normalises them identically.
+        du %= tu; dv %= tvv
+        dxx = x1 - x0 if x1 > x0 else x0 - x1
+        dyy = y0 - y1 if y1 > y0 else y1 - y0
+        stx = 1 if x0 < x1 else -1
+        sty = 1 if y0 < y1 else -1
+        err = dxx + dyy
+        while True:
+            px = uu >> 16; py = vv >> 16
+            cell = cells[(py >> 3) * mw + (px >> 3)]
+            if cell:
+                tid = cell - 1
+                ssx = (tid % scols) * 8 + (px & 7)
+                ssy = (tid // scols) * 8 + (py & 7)
+                p = sheet[ssy * sheetw + ssx] if (ssx < sheetw and ssy < sheeth) else 0
+                if p != ck and (palt is None or not palt[p & 63]):
+                    tx = x0 - cam_x; ty = y0 - cam_y
+                    if cx0 <= tx < cx1 and cy0 <= ty < cy1:
+                        mv[ty * dw + tx] = lv[p & 63]
+            uu += du
+            if uu >= tu:
+                uu -= tu
+            vv += dv
+            if vv >= tvv:
+                vv -= tvv
+            if x0 == x1 and y0 == y1:
+                break
+            e2 = 2 * err
+            if e2 >= dyy:
+                err += dyy
+                x0 += stx
+            if e2 <= dxx:
+                err += dxx
+                y0 += sty
+
     @staticmethod
     def circb(dst, dw, dh, cx, cy, r, color, cam_x, cam_y, cx0, cy0, cx1, cy1):
         d = memoryview(dst).cast("H")
@@ -1885,3 +2017,87 @@ def test_pix_read_is_camera_relative_on_both():
     # same world pixel, now addressed through the camera offset
     assert host.pix(24, 14) == 9
     assert dev.pix(24, 14) == 9
+
+
+# --------------------------------------------------------------------------- #
+# SPEC.md 6.1 verbs (#167 shape B): tri / sspr / tline parity, native lane    #
+# (_FakeGfx ports of the C kernels) AND the Python fallbacks, against the     #
+# host canvas. The conformance golden (moy-spec provisional/_tline) pins the  #
+# same pixels a third way.                                                    #
+# --------------------------------------------------------------------------- #
+def _sheet_and_map():
+    sh = SpriteSheet()
+    for y in range(8):
+        for x in range(8):
+            sh.tset(1, x, y, 8)                       # solid
+            sh.tset(2, x, y, 12 if (x + y) & 1 else 7)  # checker
+            sh.tset(3, x, y, 0 if (1 <= x <= 6 and 1 <= y <= 6) else 11)
+    tm = TileMap(6, 4)
+    for y in range(4):
+        for x in range(6):
+            v = (x + y) % 4                            # 0 -> empty hole
+            tm.mset(x, y, v - 1 if v else -1)
+    return sh, tm
+
+
+def test_tri_parity():
+    for gfx in (True, False):
+        m, host, dev = _both(gfx)
+        for c in (host, dev):
+            c.cls(1)
+            c.tri(4, 4, 40, 10, 20, 40, 8)
+            c.tri(30, 44, 60, 44, 45, 20, 11)          # flat bottom edge
+            c.tri(5, 46, 25, 46, 15, 46, 14)           # degenerate: one row
+            c.camera(6, 3)
+            c.tri(16, 16, 50, 22, 30, 47, 12)
+            c.camera()
+            c.clip(10, 10, 30, 25)
+            c.tri(0, 0, 63, 20, 20, 47, 10)
+            c.clip()
+        _assert_same(host, dev, "tri gfx=%s" % gfx)
+
+
+def test_sspr_parity():
+    sh, _tm = _sheet_and_map()
+    for gfx in (True, False):
+        m, host, dev = _both(gfx)
+        for c in (host, dev):
+            c.cls(0)
+            c.sspr(sh, 8, 0, 8, 8, 2, 2, 20, 20)       # stretch tile 1
+            c.sspr(sh, 16, 0, 8, 8, 24, 2, 15, 30)     # non-uniform checker
+            c.sspr(sh, 16, 0, 8, 8, 42, 2, 12, 12, 7)  # colorkey drops dark
+            c.sspr(sh, 24, 0, 8, 8, 2, 26, 16, 16, -1, 3)  # border, flip both
+            c.palt(12, 1)
+            c.sspr(sh, 16, 0, 8, 8, 42, 26, 12, 12)    # palt drops light
+            c.palt()
+            c.camera(4, 2)
+            c.sspr(sh, 8, 0, 4, 4, 30, 30, 9, 9)
+            c.camera()
+        _assert_same(host, dev, "sspr gfx=%s" % gfx)
+
+
+def test_tline_parity():
+    sh, tm = _sheet_and_map()
+    F = 65536
+    for gfx in (True, False):
+        m, host, dev = _both(gfx)
+        for c in (host, dev):
+            c.cls(1)
+            for i in range(10):                        # a small Mode 7 fan
+                c.tline(tm, sh, 0, 2 + i, 60, 2 + i,
+                        0, (i * 3 * F) // 2, F // 4 + i * (F // 64), 0)
+            c.tline(tm, sh, 2, 14, 60, 40, 0, 0, F // 2, F // 3)  # diagonal
+            c.tline(tm, sh, 0, 42, 60, 42, -tm.w * 8 * F, 4 * F, 2 * F, 0)  # wrap
+            c.tline(tm, sh, 58, 2, 58, 44, 4 * F, 0, 0, F // 2)   # vertical
+            c.tline(tm, sh, 2, 45, 40, 45, 0, 8 * F, F // 2, 0, 7)  # colorkey
+            c.palt(12, 1)
+            c.tline(tm, sh, 2, 47, 40, 47, 0, 8 * F, F // 2, 0)   # palt
+            c.palt()
+            c.camera(5, 2)
+            c.tline(tm, sh, 10, 20, 50, 20, 0, 16 * F, F // 2, 0)
+            c.camera()
+            c.clip(8, 30, 20, 10)
+            c.tline(tm, sh, 0, 34, 63, 34, 0, 0, F, 0)  # cursor walks under clip
+            c.clip()
+            c.tline(tm, sh, 33, 33, 33, 33, 0, 0, F, F)  # single pixel
+        _assert_same(host, dev, "tline gfx=%s" % gfx)
