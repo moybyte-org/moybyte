@@ -268,7 +268,7 @@ class _Layer:
     OWN canvas, plus W/H. Built by the api's make_layer(w, h). Mirrors moy_runtime."""
 
     _VERBS = ("cls", "pix", "line", "rect", "rectb", "circ", "circb",
-              "tri", "trib", "rect_batch", "sspr",
+              "tri", "trib", "rect_batch", "sspr", "tline",
               "spr", "spr_batch", "map", "mget", "mset", "print",
               "camera", "clip", "pal", "palt")
 
@@ -398,6 +398,17 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         if sheet is None:
             return
         canvas.sspr(sheet, sx, sy, sw, sh, dx, dy, dw, dh, colorkey, flip)
+
+    def tline(x0, y0, x1, y1, u, v, du, dv, colorkey=-1):
+        # tline(x0, y0, x1, y1, u, v, du, dv[, colorkey]): SPEC.md 6.1's textured
+        # line -- exactly line()'s pixels, sampling the MAP as a virtual texture
+        # in 16.16 FIXED POINT (u/v/du/dv are ints: float * 65536 is the cart's
+        # job). One call per scanline is a Mode 7 floor; one per column textures
+        # a raycaster. Wraps modulo the map's pixel size; empty cells draw
+        # nothing.
+        if sheet is None or tilemap is None:
+            return
+        canvas.tline(tilemap, sheet, x0, y0, x1, y1, u, v, du, dv, colorkey)
 
     def mget(x, y):
         return tilemap.mget(x, y) if tilemap is not None else -1
@@ -642,7 +653,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         "line": canvas.line, "rect": canvas.rect, "rectb": canvas.rectb,
         "circ": canvas.circ, "circb": canvas.circb, "spr": spr,
         "tri": canvas.tri, "trib": canvas.trib,
-        "rect_batch": rect_batch, "spans": spans, "sspr": sspr,
+        "rect_batch": rect_batch, "spans": spans, "sspr": sspr, "tline": tline,
         "spr_batch": spr_batch,
         "background": background, "_moy_restore_bg": _restore_bg,
         "make_layer": make_layer, "draw_layer": draw_layer,

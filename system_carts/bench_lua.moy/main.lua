@@ -62,6 +62,12 @@ local VERBS = {
   { name = "sspr", k0 = 50, fn = function(i)
       sspr((i & 7) * 8, 0, 8, 8, (i * 37) % 300, (i * 53) % 220, 20, 20)
     end },
+  { name = "tline", k0 = 50, fn = function(i)
+      -- SPEC.md 6.1 tline: one full-width textured scanline per call, 16.16
+      -- fixed point, sampling the _init-mset field -- the Mode 7 shape.
+      tline(0, (i * 13) % 240, 319, (i * 13) % 240,
+            (i * 7) << 14, (i * 11) << 13, 16384 + ((i & 15) << 7), i << 6)
+    end },
 }
 
 function _init()

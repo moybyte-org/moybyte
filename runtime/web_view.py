@@ -571,6 +571,80 @@ class DrawRecorder:
                     run_c = p
                     run_x = i
 
+    def tline(self, tilemap, sheet, x0, y0, x1, y1, u, v, du, dv, colorkey=-1):
+        # #167: SPEC.md 6.1 tline recorded as colour RUNS (rect ops) along the
+        # walk, exactly like sspr above -- correct without a new wire op, and a
+        # Mode 7 scanline is a handful of runs. Same fixed-point walk as the
+        # host canvas (reduce once, wrap by conditional subtract); left-to-right
+        # horizontal stretches coalesce, everything else ships 1px rects (the
+        # correctness lane -- a web playtest, not the device frame loop).
+        x0 = int(x0); y0 = int(y0); x1 = int(x1); y1 = int(y1)
+        u = int(u); v = int(v); du = int(du); dv = int(dv)
+        ck = int(colorkey)
+        tw = tilemap.w * 8
+        th = tilemap.h * 8
+        if tw <= 0 or th <= 0:
+            return
+        tu = tw << 16
+        tvv = th << 16
+        uu = u % tu
+        vv = v % tvv
+        du %= tu
+        dv %= tvv
+        cells = tilemap.cells
+        mw = tilemap.w
+        scols = sheet.cols
+        pget = sheet.pget
+        dxx = x1 - x0 if x1 > x0 else x0 - x1
+        dyy = y0 - y1 if y1 > y0 else y1 - y0
+        stx = 1 if x0 < x1 else -1
+        sty = 1 if y0 < y1 else -1
+        err = dxx + dyy
+        run_c = -1
+        run_x = run_y = run_n = 0
+        while True:
+            cell = cells[(vv >> 19) * mw + (uu >> 19)]
+            p = -1
+            if cell:                   # 0 = empty (id+1 storage)
+                tid = cell - 1
+                px = uu >> 16
+                py = vv >> 16
+                p = pget((tid % scols) * 8 + (px & 7),
+                         (tid // scols) * 8 + (py & 7))
+                if p == ck:
+                    p = -1
+            if p >= 0:
+                if p == run_c and y0 == run_y and stx == 1 and x0 == run_x + run_n:
+                    run_n += 1
+                else:
+                    if run_n:
+                        self.rect(run_x, run_y, run_n, 1, run_c)
+                    run_c = p
+                    run_x = x0
+                    run_y = y0
+                    run_n = 1
+            elif run_n:
+                self.rect(run_x, run_y, run_n, 1, run_c)
+                run_n = 0
+                run_c = -1
+            uu += du
+            if uu >= tu:
+                uu -= tu
+            vv += dv
+            if vv >= tvv:
+                vv -= tvv
+            if x0 == x1 and y0 == y1:
+                break
+            e2 = 2 * err
+            if e2 >= dyy:
+                err += dyy
+                x0 += stx
+            if e2 <= dxx:
+                err += dxx
+                y0 += sty
+        if run_n:
+            self.rect(run_x, run_y, run_n, 1, run_c)
+
     def scroll_rect(self, rx, ry, rw, rh, dx, dy):
         # #113 scroll-as-blit: the browser shifts its retained index buffer in
         # place (the page's scr op -- copyWithin rows, the Canvas.scroll_rect
@@ -845,6 +919,80 @@ class _LayerRecorder:
                         self.rect(dx + run_x, dy + j, i - run_x, 1, run_c)
                     run_c = p
                     run_x = i
+
+    def tline(self, tilemap, sheet, x0, y0, x1, y1, u, v, du, dv, colorkey=-1):
+        # #167: SPEC.md 6.1 tline recorded as colour RUNS (rect ops) along the
+        # walk, exactly like sspr above -- correct without a new wire op, and a
+        # Mode 7 scanline is a handful of runs. Same fixed-point walk as the
+        # host canvas (reduce once, wrap by conditional subtract); left-to-right
+        # horizontal stretches coalesce, everything else ships 1px rects (the
+        # correctness lane -- a web playtest, not the device frame loop).
+        x0 = int(x0); y0 = int(y0); x1 = int(x1); y1 = int(y1)
+        u = int(u); v = int(v); du = int(du); dv = int(dv)
+        ck = int(colorkey)
+        tw = tilemap.w * 8
+        th = tilemap.h * 8
+        if tw <= 0 or th <= 0:
+            return
+        tu = tw << 16
+        tvv = th << 16
+        uu = u % tu
+        vv = v % tvv
+        du %= tu
+        dv %= tvv
+        cells = tilemap.cells
+        mw = tilemap.w
+        scols = sheet.cols
+        pget = sheet.pget
+        dxx = x1 - x0 if x1 > x0 else x0 - x1
+        dyy = y0 - y1 if y1 > y0 else y1 - y0
+        stx = 1 if x0 < x1 else -1
+        sty = 1 if y0 < y1 else -1
+        err = dxx + dyy
+        run_c = -1
+        run_x = run_y = run_n = 0
+        while True:
+            cell = cells[(vv >> 19) * mw + (uu >> 19)]
+            p = -1
+            if cell:                   # 0 = empty (id+1 storage)
+                tid = cell - 1
+                px = uu >> 16
+                py = vv >> 16
+                p = pget((tid % scols) * 8 + (px & 7),
+                         (tid // scols) * 8 + (py & 7))
+                if p == ck:
+                    p = -1
+            if p >= 0:
+                if p == run_c and y0 == run_y and stx == 1 and x0 == run_x + run_n:
+                    run_n += 1
+                else:
+                    if run_n:
+                        self.rect(run_x, run_y, run_n, 1, run_c)
+                    run_c = p
+                    run_x = x0
+                    run_y = y0
+                    run_n = 1
+            elif run_n:
+                self.rect(run_x, run_y, run_n, 1, run_c)
+                run_n = 0
+                run_c = -1
+            uu += du
+            if uu >= tu:
+                uu -= tu
+            vv += dv
+            if vv >= tvv:
+                vv -= tvv
+            if x0 == x1 and y0 == y1:
+                break
+            e2 = 2 * err
+            if e2 >= dyy:
+                err += dyy
+                x0 += stx
+            if e2 <= dxx:
+                err += dxx
+                y0 += sty
+        if run_n:
+            self.rect(run_x, run_y, run_n, 1, run_c)
 
     def print(self, s, x, y, c, scale=2):
         # `scale` (the legacy per-call arg) is accepted but IGNORED (the browser renders
@@ -1246,6 +1394,12 @@ class TeeCanvas:
         if self._r.enabled:
             self._r.sspr(sheet, sx, sy, sw, sh, dx, dy, dw, dh, colorkey, flip)
 
+    def tline(self, tilemap, sheet, x0, y0, x1, y1, u, v, du, dv, colorkey=-1):
+        if not self._r.record_only:
+            self._c.tline(tilemap, sheet, x0, y0, x1, y1, u, v, du, dv, colorkey)
+        if self._r.enabled:
+            self._r.tline(tilemap, sheet, x0, y0, x1, y1, u, v, du, dv, colorkey)
+
     def spr(self, img, x, y, scale=1, flip=0):
         if not self._r.record_only:
             self._c.spr(img, x, y, scale, flip)
@@ -1463,6 +1617,9 @@ class CommandCanvas:
     def sspr(self, sheet, sx, sy, sw, sh, dx, dy, dw=None, dh=None,
              colorkey=-1, flip=0):
         self._rec.sspr(sheet, sx, sy, sw, sh, dx, dy, dw, dh, colorkey, flip)
+
+    def tline(self, tilemap, sheet, x0, y0, x1, y1, u, v, du, dv, colorkey=-1):
+        self._rec.tline(tilemap, sheet, x0, y0, x1, y1, u, v, du, dv, colorkey)
 
     def scroll_rect(self, rx, ry, rw, rh, dx, dy):
         self._rec.scroll_rect(rx, ry, rw, rh, dx, dy)

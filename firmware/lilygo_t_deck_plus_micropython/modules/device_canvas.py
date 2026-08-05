@@ -1100,11 +1100,31 @@ class DeviceCanvas:
                 err -= 2 * x + 1
 
     def tri(self, x1, y1, x2, y2, x3, y3, c):
-        # TIC-80 tri = FILLED triangle (#167). Scanline spans packed once, then ONE
-        # fill_rects -- which on this backend is one MP->C crossing for the whole
-        # triangle (the #163 native lane), not one per row. That ratio is what makes
-        # software 3D affordable here. Host twin: runtime/canvas.py Canvas.tri.
+        # TIC-80 tri = FILLED triangle (#167 shape B). Native: ONE moy_gfx.tri
+        # call walks the scanlines AND fills them in C -- the Python tri_spans
+        # walk was 7.5ms/op for a bench-sized triangle on the S3 (#66), and the
+        # span ARITHMETIC was the cost, not the fill. Geometry is line-for-line
+        # libmoy's, which is what the conformance golden pins. Fallback: the old
+        # spans + fill_rects lane. Host twin: runtime/canvas.py Canvas.tri.
         self.flush_batch()             # #63: a non-spr primitive breaks the batch
+        gfx = self._gfx
+        tk = None if gfx is None else getattr(gfx, "tri", None)
+        if tk is not None:
+            col = self._col(c)
+            if self._prof:
+                _t0 = _ticks_us()      # DRAW3: shape bucket (tri)
+                tk(self._buf, self._stride, self._bh,
+                   int(x1), int(y1), int(x2), int(y2), int(x3), int(y3), col,
+                   self._cam_x, self._cam_y,
+                   self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+                self._t_shape_us += _ticks_diff(_ticks_us(), _t0)
+                self._n_shape += 1
+            else:
+                tk(self._buf, self._stride, self._bh,
+                   int(x1), int(y1), int(x2), int(y2), int(x3), int(y3), col,
+                   self._cam_x, self._cam_y,
+                   self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+            return
         spans = tri_spans(x1, y1, x2, y2, x3, y3)
         if spans:
             self.fill_rects(array("h", spans), len(spans) // 5, 0, 0, int(c) & 63)
@@ -1119,16 +1139,40 @@ class DeviceCanvas:
     def sspr(self, sheet, sx, sy, sw, sh, dx, dy, dw=None, dh=None,
              colorkey=-1, flip=0):
         # Stretch a sw x sh PIXEL sheet region into a dw x dh destination rect --
-        # arbitrary scale, unlike spr()'s integer one (#167). Nearest-neighbour, and
-        # per-destination-pixel by nature (every pixel is a different texel), so this
-        # is the correctness lane: a cart leaning on it in a frame loop wants the
-        # native kernel first. Host twin: runtime/canvas.py Canvas.sspr.
+        # arbitrary scale, unlike spr()'s integer one (#167). Nearest-neighbour
+        # and per-destination-pixel by nature (every pixel is a different texel).
+        # Native (#167 shape B): one moy_gfx.sspr call, sampling the index sheet
+        # and resolving through the _wire_pal LUT -- the Python lane measured
+        # 36ms/op at 20x20 on the S3 bench (#66), 90us/PIXEL, which is why the
+        # kernel exists. Fallback: that Python lane, kept as the no-moy_gfx
+        # path. Host twin: runtime/canvas.py Canvas.sspr.
         self.flush_batch()             # #63: a non-spr primitive breaks the batch
         sx = int(sx); sy = int(sy); sw = int(sw); sh = int(sh)
         dx = int(dx); dy = int(dy)
         dw = sw if dw is None else int(dw)
         dh = sh if dh is None else int(dh)
         if sw <= 0 or sh <= 0 or dw <= 0 or dh <= 0:
+            return
+        gfx = self._gfx
+        sk = None if gfx is None else getattr(gfx, "sspr", None)
+        if sk is not None:
+            if self._prof:
+                _t0 = _ticks_us()      # DRAW3: shape bucket (sspr)
+                sk(self._buf, self._stride, self._bh,
+                   sheet.pix, sheet.w, sheet.h, sx, sy, sw, sh,
+                   dx, dy, dw, dh, int(colorkey), int(flip),
+                   self._wire_pal(), self._palt,
+                   self._cam_x, self._cam_y,
+                   self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+                self._t_shape_us += _ticks_diff(_ticks_us(), _t0)
+                self._n_shape += 1
+            else:
+                sk(self._buf, self._stride, self._bh,
+                   sheet.pix, sheet.w, sheet.h, sx, sy, sw, sh,
+                   dx, dy, dw, dh, int(colorkey), int(flip),
+                   self._wire_pal(), self._palt,
+                   self._cam_x, self._cam_y,
+                   self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
             return
         flip = int(flip)
         fx = flip & 1
@@ -1155,6 +1199,95 @@ class DeviceCanvas:
                 if pt is not None and pt[p]:
                     continue
                 put(dx + i, ty, PAL565_WIRE[pal[p]])
+
+    def tline(self, tilemap, sheet, x0, y0, x1, y1, u, v, du, dv, colorkey=-1):
+        # SPEC.md 6.1 tline (#167 shape B): exactly line()'s Bresenham pixels,
+        # sampling the MAP as a virtual texture in 16.16 fixed point -- the
+        # Mode 7 verb. u/v/du/dv are ints (float * 65536 is the cart's job).
+        # Native: one moy_gfx.tline call; the fallback below is the same walk
+        # in Python, reduced the same way (the start and step are wrapped once,
+        # so no per-pixel modulo -- (a+n*b) mod T == ((a mod T)+n*(b mod T))
+        # mod T). Reference: moy-spec moycore/canvas.py tline; the conformance
+        # scene provisional_tline is what holds all three lanes identical.
+        self.flush_batch()             # #63: a non-spr primitive breaks the batch
+        x0 = int(x0); y0 = int(y0); x1 = int(x1); y1 = int(y1)
+        u = int(u); v = int(v); du = int(du); dv = int(dv)
+        ck = int(colorkey)
+        tw = tilemap.w * 8
+        th = tilemap.h * 8
+        if tw <= 0 or th <= 0:
+            return
+        gfx = self._gfx
+        tk = None if gfx is None else getattr(gfx, "tline", None)
+        if tk is not None:
+            if self._prof:
+                _t0 = _ticks_us()      # DRAW3: shape bucket (tline)
+                tk(self._buf, self._stride, self._bh,
+                   tilemap.cells, tilemap.w, tilemap.h,
+                   sheet.pix, sheet.w, sheet.h,
+                   x0, y0, x1, y1, u, v, du, dv, ck,
+                   self._wire_pal(), self._palt,
+                   self._cam_x, self._cam_y,
+                   self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+                self._t_shape_us += _ticks_diff(_ticks_us(), _t0)
+                self._n_shape += 1
+            else:
+                tk(self._buf, self._stride, self._bh,
+                   tilemap.cells, tilemap.w, tilemap.h,
+                   sheet.pix, sheet.w, sheet.h,
+                   x0, y0, x1, y1, u, v, du, dv, ck,
+                   self._wire_pal(), self._palt,
+                   self._cam_x, self._cam_y,
+                   self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+            return
+        # Python fallback -- the correctness lane, same arithmetic.
+        tu = tw << 16
+        tv = th << 16
+        uu = u % tu
+        vv = v % tv
+        du %= tu
+        dv %= tv
+        cells = tilemap.cells
+        mw = tilemap.w
+        scols = sheet.cols
+        pget = sheet.pget
+        pt = self._palt
+        pal = self._pal_map
+        put = self._put
+        dxx = x1 - x0 if x1 > x0 else x0 - x1
+        dyy = y0 - y1 if y1 > y0 else y1 - y0
+        stx = 1 if x0 < x1 else -1
+        sty = 1 if y0 < y1 else -1
+        err = dxx + dyy
+        while True:
+            px = uu >> 16
+            py = vv >> 16
+            cell = cells[(py >> 3) * mw + (px >> 3)]
+            if cell:                   # 0 = empty (id+1 storage)
+                tid = cell - 1
+                p = pget((tid % scols) * 8 + (px & 7),
+                         (tid // scols) * 8 + (py & 7))
+                if p != ck and (pt is None or not pt[p & 63]):
+                    put(x0, y0, PAL565_WIRE[pal[p & 63]])
+            uu += du
+            if uu >= tu:
+                uu -= tu
+            elif uu < 0:
+                uu += tu
+            vv += dv
+            if vv >= tv:
+                vv -= tv
+            elif vv < 0:
+                vv += tv
+            if x0 == x1 and y0 == y1:
+                break
+            e2 = 2 * err
+            if e2 >= dyy:
+                err += dyy
+                x0 += stx
+            if e2 <= dxx:
+                err += dxx
+                y0 += sty
 
     def spr(self, img, x, y, scale=1, flip=0):
         # TIC-80 flip: 0=none, 1=h, 2=v, 3=both (#11). Camera offsets the dst; the
