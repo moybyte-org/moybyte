@@ -1,12 +1,13 @@
 # Porting a PICO-8 cart to Moybyte
 
 > **The Lua fast path (#67):** Moybyte carts can now BE Lua
-> (`"runtime": "lua"`), and `tools/p8_lua_port.py` converts a whole `.p8` —
-> assets, the full map (including the gfx-shared rows 32-63), `__gff__` flags,
-> and the code itself under a generated PICO-8 compat shim — into a cart that
-> very nearly just runs (Celeste Classic plays this way; see
-> `ports/README.md`). The guide below is the **hand-port-to-Python** path:
-> slower, but it's the one that teaches.
+> (`"runtime": "lua"`), and the moy-spec CLI's `moy port` converts a whole
+> `.p8` — assets, the full map (including the gfx-shared rows 32-63),
+> `__gff__` flags, and the code itself under a generated PICO-8 compat shim —
+> into a cart that very nearly just runs (Celeste Classic plays this way; see
+> `ports/README.md`). The converter lives only in moy-spec so its audio and
+> code transforms cannot drift. The guide below is the
+> **hand-port-to-Python** path: slower, but it's the one that teaches.
 
 So you imported a PICO-8 `.p8` with `tools/import_p8.py` and now you have a
 `.moy`. The **art and sound came across automatically**, but the **code did

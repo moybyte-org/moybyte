@@ -13,12 +13,9 @@ art tools already work; this CLI supplies the loop around them.
     moy.py export <cart.moy>     the publishable web bundle: ~1.1MB of static
                                  files that boot straight into the game --
                                  host anywhere (itch.io HTML5 uploads work)
-    moy.py port <cart.p8|url>    convert a PICO-8 cart: assets via p8_import,
-                 [--zoom [T,B]]  --zoom trims edge rows so the port draws 2x
-                                 code mechanically ported to Lua 5.4 under the
-                                 p8 compat shim (p8_lua_port)
-    moy.py demo                  fetch Celeste Classic (PICO-8), port it, run
-                                 it -- the one-command show-off
+
+PICO-8 porting (`moy port` / `moy demo`) lives in the moy-spec CLI now --
+one converter, spec-side, so its audio and code transforms cannot drift.
 
 Pure Python stdlib, no dependencies. The player it wraps is runner/ (see
 runner/BUILD.md); the spec it implements is SPEC.md.
@@ -227,69 +224,8 @@ def cmd_export(args):
     print("  static files: host anywhere, or zip the folder for itch.io (HTML5)")
 
 
-# --- port / demo (PICO-8) ----------------------------------------------------
-
-CELESTE_URL = "https://www.lexaloffle.com/bbs/cposts/1/15133.p8.png"
-CELESTE_NOTE = """\
-  Celeste Classic (PICO-8, 2016) by Maddy Thorson & Noel Berry
-  https://www.lexaloffle.com/bbs/?tid=2145 / https://celesteclassic.github.io/
-  PICO-8 BBS carts default to CC BY-NC-SA 4.0: the port is for personal /
-  development use with attribution -- do not ship it in anything commercial."""
-
-
-def cmd_port(args):
-    import p8_lua_port
-    crop = p8_lua_port.parse_zoom(args)
-    args = [a for a in args if not a.startswith("--")]
-    if crop != (0, 0):        # drop the "T,B" that followed --zoom
-        args = [a for a in args if not ("," in a and a.replace(",", "").isdigit())]
-    if not args:
-        die("usage: moy.py port <cart.p8 | url> [out.moy] [--zoom [T,B]]")
-    src = args[0]
-    if src.startswith(("http://", "https://")):
-        import urllib.request
-        local = os.path.abspath(os.path.basename(src.split("?")[0]) or "cart.p8")
-        print("fetching %s" % src)
-        req = urllib.request.Request(src, headers={"User-Agent": "moy-cli"})
-        with urllib.request.urlopen(req) as r, open(local, "wb") as f:
-            f.write(r.read())
-        src = local
-    src = os.path.abspath(src)
-    if not os.path.isfile(src):
-        die("no such .p8: " + src)
-    out = cart_dir(args[1] if len(args) > 1
-                   else os.path.splitext(os.path.basename(src))[0])
-    p8_lua_port.port(src, out, crop=crop)
-    print("ported -> %s" % out)
-    print("  PICO-8 carts carry their own licenses (BBS default CC BY-NC-SA")
-    print("  4.0) -- ported carts are dev/personal material unless stated.")
-    print("  next: %s run %s" % (sys.argv[0], os.path.relpath(out)))
-
-
-def cmd_demo(args):
-    """Fetch + port + run Celeste Classic -- the one-command demo."""
-    print(CELESTE_NOTE)
-    out = cart_dir("celeste")
-    # --zoom belongs to the PORT, not the run, so split it out -- and re-port
-    # when it is asked for, or the flag would silently do nothing on the second
-    # `demo` (the cart is already on disk, ported at the other scale).
-    zoom = []
-    if "--zoom" in args:
-        i = args.index("--zoom")
-        zoom = [args[i]]
-        if i + 1 < len(args) and "," in args[i + 1]:
-            zoom.append(args[i + 1])
-    rest = [a for a in args if a not in zoom]
-    if zoom or not os.path.isdir(out):
-        cmd_port([CELESTE_URL, "celeste"] + zoom)
-    else:
-        print("using existing %s" % out)
-    cmd_run(["celeste.moy"] + rest)
-
-
 def main():
-    cmds = {"new": cmd_new, "run": cmd_run, "export": cmd_export,
-            "port": cmd_port, "demo": cmd_demo}
+    cmds = {"new": cmd_new, "run": cmd_run, "export": cmd_export}
     if len(sys.argv) < 2 or sys.argv[1] not in cmds:
         print(__doc__.strip())
         sys.exit(0 if len(sys.argv) < 2 else 1)

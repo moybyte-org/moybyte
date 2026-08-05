@@ -1,7 +1,8 @@
 # ports/ — third-party carts ported to the Lua runtime (dev/test material)
 
 Carts in this folder are **conformance and stress tests for the #67 Lua cart
-runtime**, ported from other fantasy consoles with `tools/p8_lua_port.py`.
+runtime**, ported from other fantasy consoles with the moy-spec CLI's
+`moy port` (the one converter, spec-side — `p8_lua_port.py` there).
 They are deliberately **NOT seed carts**: nothing here is listed in
 `tools/gen_device_carts.py` `CART_ORDER`, baked into a firmware image, or
 seeded onto devices. To play one, copy the `.moy` folder into a cart store
@@ -19,7 +20,7 @@ seeded onto devices. To play one, copy the `.moy` folder into a cart store
   `CelesteClassic/celeste-maker`) and run:
 
   ```bash
-  .venv/bin/python tools/p8_lua_port.py celeste.p8 ports/celeste.moy --title "Celeste Classic"
+  moy port celeste.p8 ports/celeste.moy --title "Celeste Classic"   # moy-spec CLI
   ```
 
 - **What the port proves:** ~1550 lines of real-world PICO-8 Lua running under
@@ -27,8 +28,8 @@ seeded onto devices. To play one, copy the `.moy` folder into a cart store
   `fget` off `__gff__`, the gfx-shared map rows 32-63, turn-based `sin`/`cos`,
   p8 table verbs (`add/del/foreach` with mid-iteration deletion), fixed-30fps
   pacing from the dt loop, and the 128x128 screen centered in the 320x240
-  canvas. `tests/test_p8_lua_port.py` drives the title screen, starts the game,
-  walks and jumps.
+  canvas. (The driving test moved out with the port tool; the Lua runtime's
+  own coverage is the moy conformance suite.)
 - **Known limitations:** moy's font is 8px wide vs PICO-8's 4px, so long text
   lines overflow the 128px window (the title credits clip); audio is the lossy
   `import_p8` fold (music is stubbed in this cart's source); numbers are IEEE

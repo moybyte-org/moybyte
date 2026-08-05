@@ -121,7 +121,9 @@ make firmware-monitor-lilygo-micropython PORT=/dev/ttyACM0         # miniterm @1
   channel; all-looping → slowest channel — the p8 wiki's "all-looping loops
   forever" is WRONG, trust zepto8 for p8 semantics). `ports/celeste.moy` is
   gitignored on BOTH repos (CC BY-NC-SA — never commit or ship it); regenerate
-  with `tools/p8_lua_port.py <cart.p8.png> ports/celeste.moy --title "Celeste Classic"`.
+  with the moy-spec CLI: `moy port <cart.p8.png> ports/celeste.moy --title
+  "Celeste Classic"` (the port tool lives ONLY there now — one converter, no
+  drift).
 
 ### Host == device: the shared console (important)
 
