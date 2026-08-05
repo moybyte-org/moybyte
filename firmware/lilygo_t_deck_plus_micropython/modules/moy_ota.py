@@ -84,14 +84,14 @@ BOARD = "tdeck"
 #       (and the version) via a generated `_ota_build` module from MOYBYTE_OTA_CHANNEL, so
 #       the committed default stays "stable" and the channel is a build choice -- clean
 #       across merges, not a per-branch source edit.
-FIRMWARE_VERSION = 3            # v3: two OTA channels on both boards, signed manifests, and an update that tells you whether it worked
+FIRMWARE_VERSION = 4            # v4: System clipboard v1 (#132) across code/Writer/Sheets/Storybook; desk icon labels fit their pills (#174); Bench + Bench Lua on-glass perf carts; P4 verified 8/8 on the moy conformance suite after reflash (closes the text_bytes and provisional failures found on 2026-08-05); scene/music clean-tab guard (#154); tap-scheduled transitions (#184); cover payloads off the GC heap (#186); print carries bytes end to end.
 #   FIRMWARE_NAME -- what a HUMAN calls this release ("0.6"), and the only version anyone
 #       outside the code ever reads: the update screen, the manifest label, the git tag.
 #       Deliberately separate from FIRMWARE_VERSION above, which exists solely so the
 #       device can order two builds with `>` -- it is signed as an int, and betas stamp a
 #       build epoch into it, so it can never carry a dotted name. `make release NAME=0.7`
 #       sets this; MAJOR.MINOR, with a third component only when a release is purely a fix.
-FIRMWARE_NAME = "0.6"
+FIRMWARE_NAME = "0.7"
 FIRMWARE_CHANNEL = "stable"
 FIRMWARE_LABEL = None
 try:
