@@ -146,7 +146,7 @@ def test_manifest_valid(tmp_path):
     assert man["format"] == "moybyte-cart-v1"
     assert man["type"] == "game"
     assert man["main"] == "main.py"
-    assert man["canvas"] == {"width": 320, "height": 240, "palette": "moy64"}
+    assert man["canvas"] == "320x240"
     assert "graphics" in man["permissions"]
     assert man["config"] == {}
     assert man["edit"] == []

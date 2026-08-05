@@ -263,7 +263,7 @@ def test_seed_builtins_writes_sprites_kgfx_when_present(tmp_path):
         "src": "def _draw():\n    cls(0)\n", "cfg": {"x": 1},
         "edit": [{"key": "x", "type": "int", "card": "X {value}"}],
         "sprites": hexs,
-        "canvas": {"width": 480, "height": 270, "palette": "moy64"},
+        "canvas": "160x120",
         "permissions": ["graphics", "input"],
     }]
     moy_carts.seed_builtins(seed, root)
@@ -271,7 +271,7 @@ def test_seed_builtins_writes_sprites_kgfx_when_present(tmp_path):
     d = Path(root) / "sheety_cart.moy"
     assert (d / "sprites.moygfx").read_text(encoding="utf-8") == hexs
     man = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
-    assert man["canvas"] == {"width": 480, "height": 270, "palette": "moy64"}
+    assert man["canvas"] == "160x120"
     assert man["permissions"] == ["graphics", "input"]
     assert man["edit"] == seed[0]["edit"]
 
