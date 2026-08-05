@@ -62,9 +62,11 @@ class _MusicOps(OpCodec):
 
     def apply(self, doc, op):          # redo -> the recorded NEW state
         doc._restore(op[1])
+        doc.dirty = True               # replay = content change (clean-tab guard)
 
     def invert(self, doc, op):         # undo -> the recorded OLD state
         doc._restore(op[0])
+        doc.dirty = True
 
 
 class MusicEditor:

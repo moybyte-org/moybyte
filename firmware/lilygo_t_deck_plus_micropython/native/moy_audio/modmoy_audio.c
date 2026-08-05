@@ -81,6 +81,21 @@
 #define MOY_AUDIO_HAVE_IDF 0
 #endif
 
+// The mixer hot path must not execute from flash on the device: both cores share
+// the flash cache, and the core-1 task's mixing bursts evicting core 0's lines was
+// a measured whole-console slowdown while a sound played (2026-08-03, the Brick
+// Siege every-2-3s "metronome" -- logic/audio/chrome all inflated on sfx frames).
+// Same reason the mixer runs in single-precision `float`: the S3 FPU is
+// single-precision only, so every `double` op was a soft-float libgcc call from
+// flash. (The Python reference stays in doubles -- CPython has nothing else --
+// so C-vs-Python PCM parity is now to float precision, not bit-exact.)
+#if MOY_AUDIO_HAVE_IDF
+#include "esp_attr.h"
+#define MOY_MIX_ATTR IRAM_ATTR
+#else
+#define MOY_MIX_ATTR
+#endif
+
 // --- model constants: MUST match runtime/audio.py -------------------------
 #define MOY_CHANNELS     4       // AudioEngine CHANNELS
 #define MOY_MAX_STEPS    64      // cap a voice's step list (SFX are short blips)
@@ -126,14 +141,19 @@ typedef struct _moy_voice_t {
     int      active;            // bool: producing sound
     int      nsteps;            // number of valid entries in `steps`
     int16_t  steps[MOY_MAX_STEPS][4];   // [pitch, wave, vol, eff] per step
-    double   step_dur;         // seconds per step
+    float   step_dur;         // seconds per step
     int      loop;             // bool: wrap idx at the end vs. deactivate
     int      loop_start;       // where a looping voice wraps back to (#170)
     int      idx;              // current step index
-    double   t;                // seconds into the current step
-    double   phase;            // oscillator phase 0..1
-    double   phase2;           // detuned secondary phase (MOY_WAVE_PHASER)
+    float   t;                // seconds into the current step
+    float   phase;            // oscillator phase 0..1
+    float   phase2;           // detuned secondary phase (MOY_WAVE_PHASER)
     uint32_t noise;            // per-voice noise LCG state
+    // pitch -> freq memo: powf per NOTE, not per sample (a plain note holds one
+    // pitch for its whole step; only slide/vibrato move it per sample and simply
+    // miss the memo). memo_freq <= 0 marks it unset (freq is always > 0 set).
+    float    memo_pitch;
+    float    memo_freq;
     // The channel's previous sounding note -- what MOY_FX_SLIDE glides from
     // (-1 = none; a slide then degenerates to the note itself). Mirror of
     // _Voice.prev_pitch/prev_vol; advanced here, committed/read via voice_set/
@@ -166,7 +186,7 @@ static TaskHandle_t      s_task = NULL;        // the core-1 feeder task
 static SemaphoreHandle_t s_voice_mutex = NULL; // guards moy_voices[] across cores
 static volatile int      s_running = 0;        // task should keep looping
 static volatile int      s_rate = 8000;        // sample rate (set before start)
-static volatile double   s_master = 1.0;       // master volume 0..1 (live, core 0 sets)
+static volatile float   s_master = 1.0f;       // master volume 0..1 (live, core 0 sets)
 // active_mask: bit c set if voice c is producing sound, published by the task after
 // each block so core 0's music scheduler can tell when a phrase slot finished. A
 // plain volatile word is a safe lock-free cross-core read of an aligned 32-bit value.
@@ -174,52 +194,52 @@ static volatile uint32_t s_active_mask = 0;
 #endif
 
 // note_to_freq: equal-temperament Hz for a (possibly fractional -- effects
-// bend it) semitone index (A4=440). Negative pitch (REST) -> 0. Identical to
+// bend it) semitone index (A4=440). Negative pitch (REST) -> 0.f Identical to
 // audio.note_to_freq.
-static inline double moy_note_to_freq(double pitch) {
-    if (pitch < 0.0) {
-        return 0.0;
+static inline float moy_note_to_freq(float pitch) {
+    if (pitch < 0.0f) {
+        return 0.0f;
     }
-    return MOY_A4_FREQ * pow(2.0, (pitch - (double)MOY_A4_PITCH) / 12.0);
+    return (float)MOY_A4_FREQ * powf(2.0f, (pitch - (float)MOY_A4_PITCH) / 12.0f);
 }
 
 // One waveform sample in [-1, 1] at `phase` in [0, 1). Advances *noise for the
 // noise voice; `phase2` is the detuned secondary phase only the phaser reads.
 // Byte-for-byte the same arithmetic as audio._sample_wave.
-static inline double moy_sample_wave(int wave, double phase, uint32_t *noise,
-                                     double phase2) {
+static inline float moy_sample_wave(int wave, float phase, uint32_t *noise,
+                                     float phase2) {
     if (wave == MOY_WAVE_SQUARE) {
-        return (phase < 0.5) ? 1.0 : -1.0;
+        return (phase < 0.5f) ? 1.0f : -1.0f;
     }
     if (wave == MOY_WAVE_TRIANGLE) {
-        return 4.0 * fabs(phase - 0.5) - 1.0;
+        return 4.0f * fabsf(phase - 0.5f) - 1.0f;
     }
     if (wave == MOY_WAVE_SAW) {
-        return 2.0 * phase - 1.0;
+        return 2.0f * phase - 1.0f;
     }
     if (wave == MOY_WAVE_PULSE) {
-        return (phase < (1.0 / 3.0)) ? 1.0 : -1.0;
+        return (phase < (1.0f / 3.0f)) ? 1.0f : -1.0f;
     }
     if (wave == MOY_WAVE_ORGAN) {
-        double p2 = fmod(phase * 2.0, 1.0);
-        double s = (4.0 * fabs(phase - 0.5) - 1.0)
-                 + 0.5 * (4.0 * fabs(p2 - 0.5) - 1.0);
-        return s / 1.5;
+        float p2 = fmodf(phase * 2.0f, 1.0f);
+        float s = (4.0f * fabsf(phase - 0.5f) - 1.0f)
+                 + 0.5f * (4.0f * fabsf(p2 - 0.5f) - 1.0f);
+        return s / 1.5f;
     }
     if (wave == MOY_WAVE_TILTED) {
-        if (phase < 0.875) {
-            return 2.0 * phase / 0.875 - 1.0;
+        if (phase < 0.875f) {
+            return 2.0f * phase / 0.875f - 1.0f;
         }
-        return 2.0 * (1.0 - phase) / 0.125 - 1.0;
+        return 2.0f * (1.0f - phase) / 0.125f - 1.0f;
     }
     if (wave == MOY_WAVE_PHASER) {
-        double s = (4.0 * fabs(phase - 0.5) - 1.0)
-                 + (4.0 * fabs(phase2 - 0.5) - 1.0);
-        return s * 0.5;
+        float s = (4.0f * fabsf(phase - 0.5f) - 1.0f)
+                 + (4.0f * fabsf(phase2 - 0.5f) - 1.0f);
+        return s * 0.5f;
     }
     // noise: tiny LCG (matches the Python `& 0x7FFFFFFF` masked LCG)
     *noise = (*noise * 1103515245u + 12345u) & 0x7FFFFFFFu;
-    return ((double)(*noise) / (double)0x3FFFFFFF) - 1.0;
+    return ((float)(*noise) / (float)0x3FFFFFFF) - 1.0f;
 }
 
 // advance_step: move a voice to its next step; deactivate (or loop) at the end.
@@ -234,7 +254,7 @@ static inline void moy_advance_step(moy_voice_t *v) {
         }
     }
     v->idx += 1;
-    v->t = 0.0;
+    v->t = 0.0f;
     if (v->idx >= v->nsteps) {
         if (v->loop) {
             v->idx = (v->loop_start < v->nsteps) ? v->loop_start : 0;
@@ -249,20 +269,20 @@ static inline void moy_advance_step(moy_voice_t *v) {
 // little-endian mono PCM into `out`, advancing the given `voices` array's phase +
 // step cursors. Byte-for-byte the per-sample body of AudioEngine.render_into (minus
 // the music scheduler, which Python runs between blocks). Pure C, no Python objects.
-static void moy_mix_block(moy_voice_t *voices, uint8_t *out, int nframes,
-                         int rate, double master) {
+static void MOY_MIX_ATTR moy_mix_block(moy_voice_t *voices, uint8_t *out, int nframes,
+                         int rate, float master) {
     if (rate <= 0) {
         rate = 8000;
     }
-    if (master < 0.0) {
-        master = 0.0;
-    } else if (master > 1.0) {
-        master = 1.0;
+    if (master < 0.0f) {
+        master = 0.0f;
+    } else if (master > 1.0f) {
+        master = 1.0f;
     }
-    const double inv_rate = 1.0 / (double)rate;
+    const float inv_rate = 1.0f / (float)rate;
 
     for (int i = 0; i < nframes; i++) {
-        double acc = 0.0;
+        float acc = 0.0f;
         for (int c = 0; c < MOY_CHANNELS; c++) {
             moy_voice_t *v = &voices[c];
             if (!v->active || v->nsteps <= 0) {
@@ -275,51 +295,58 @@ static void moy_mix_block(moy_voice_t *voices, uint8_t *out, int nframes,
             if (step[0] >= 0 && vol > 0) {
                 // Per-note effects (#170): EXACTLY the arithmetic of
                 // AudioEngine.render_into's eff block -- keep them in lockstep.
-                double pitch = (double)step[0];
-                double volf  = (double)vol;
+                float pitch = (float)step[0];
+                float volf  = (float)vol;
                 if (eff) {
-                    double frac = (v->step_dur > 0.0)
-                                ? (v->t / v->step_dur) : 0.0;
+                    float frac = (v->step_dur > 0.0f)
+                                ? (v->t / v->step_dur) : 0.0f;
                     if (eff == MOY_FX_SLIDE) {
-                        double pp = (v->prev_pitch >= 0)
-                                  ? (double)v->prev_pitch : pitch;
-                        double pv = (v->prev_pitch >= 0)
-                                  ? (double)v->prev_vol : (double)vol;
+                        float pp = (v->prev_pitch >= 0)
+                                  ? (float)v->prev_pitch : pitch;
+                        float pv = (v->prev_pitch >= 0)
+                                  ? (float)v->prev_vol : (float)vol;
                         pitch = pp + (pitch - pp) * frac;
-                        volf  = pv + ((double)vol - pv) * frac;
+                        volf  = pv + ((float)vol - pv) * frac;
                     } else if (eff == MOY_FX_VIBRATO) {
-                        double ph = fmod(v->t * 7.5, 1.0);
-                        pitch = pitch + (4.0 * fabs(ph - 0.5) - 1.0) * 0.25;
+                        float ph = fmodf(v->t * 7.5f, 1.0f);
+                        pitch = pitch + (4.0f * fabsf(ph - 0.5f) - 1.0f) * 0.25f;
                     } else if (eff == MOY_FX_FADE_IN) {
-                        volf = (double)vol * frac;
+                        volf = (float)vol * frac;
                     } else if (eff == MOY_FX_FADE_OUT) {
-                        volf = (double)vol * (1.0 - frac);
+                        volf = (float)vol * (1.0f - frac);
                     } else if (eff >= MOY_FX_ARP_FAST) {
-                        double arp = (eff == MOY_FX_ARP_FAST) ? 30.0 : 15.0;
+                        float arp = (eff == MOY_FX_ARP_FAST) ? 30.0f : 15.0f;
                         int k = (v->idx / 4) * 4 + ((int)(v->t * arp)) % 4;
                         if (k < v->nsteps) {
-                            pitch = (double)v->steps[k][0];
+                            pitch = (float)v->steps[k][0];
                         }
                     }
                 }
-                double freq = moy_note_to_freq(pitch);
-                if (eff == MOY_FX_DROP) {
-                    freq *= 1.0 - ((v->step_dur > 0.0)
-                                   ? (v->t / v->step_dur) : 0.0);
+                float freq;
+                if (pitch == v->memo_pitch && v->memo_freq > 0.0f) {
+                    freq = v->memo_freq;
+                } else {
+                    freq = moy_note_to_freq(pitch);
+                    v->memo_pitch = pitch;
+                    v->memo_freq = freq;
                 }
-                if (pitch >= 0.0) {
-                    double s = moy_sample_wave(wave, v->phase, &v->noise,
+                if (eff == MOY_FX_DROP) {
+                    freq *= 1.0f - ((v->step_dur > 0.0f)
+                                   ? (v->t / v->step_dur) : 0.0f);
+                }
+                if (pitch >= 0.0f) {
+                    float s = moy_sample_wave(wave, v->phase, &v->noise,
                                                v->phase2);
-                    acc += s * (volf / 7.0);
+                    acc += s * (volf / 7.0f);
                     v->phase += freq * inv_rate;
-                    if (v->phase >= 1.0) {
+                    if (v->phase >= 1.0f) {
                         // Python: v.phase -= int(v.phase) (drop the int part)
-                        v->phase -= (double)((int)v->phase);
+                        v->phase -= (float)((int)v->phase);
                     }
                     if (wave == MOY_WAVE_PHASER) {
-                        v->phase2 += freq * (127.0 / 128.0) * inv_rate;
-                        if (v->phase2 >= 1.0) {
-                            v->phase2 -= (double)((int)v->phase2);
+                        v->phase2 += freq * (127.0f / 128.0f) * inv_rate;
+                        if (v->phase2 >= 1.0f) {
+                            v->phase2 -= (float)((int)v->phase2);
                         }
                     }
                 }
@@ -331,13 +358,13 @@ static void moy_mix_block(moy_voice_t *voices, uint8_t *out, int nframes,
             }
         }
         // mixdown: /CHANNELS to avoid clipping, then master volume; clamp; pack LE.
-        acc = acc * master / (double)MOY_CHANNELS;
-        if (acc > 1.0) {
-            acc = 1.0;
-        } else if (acc < -1.0) {
-            acc = -1.0;
+        acc = acc * master / (float)MOY_CHANNELS;
+        if (acc > 1.0f) {
+            acc = 1.0f;
+        } else if (acc < -1.0f) {
+            acc = -1.0f;
         }
-        int val = (int)(acc * 32767.0);
+        int val = (int)(acc * 32767.0f);
         out[2 * i]     = (uint8_t)(val & 0xFF);
         out[2 * i + 1] = (uint8_t)((val >> 8) & 0xFF);
     }
@@ -422,13 +449,19 @@ static mp_obj_t moy_audio_voice_read(mp_obj_t chan_obj) {
         return mp_const_none;
     }
     moy_voice_t *v = &moy_voices[c];
+    // The casts are explicit because the voice state is `float` (a per-sample
+    // kernel on a single-precision FPU) while mp_float_t is `double` on ports
+    // that build 64-bit floats -- the webassembly one does. Widening here is
+    // correct: the value is leaving the kernel for the Python heap. Saying so
+    // in the source beats silencing -Wdouble-promotion, which the port sets
+    // under -Werror and which is worth keeping on inside the kernel itself.
     mp_obj_t tup[8] = {
         mp_obj_new_bool(v->active),
         MP_OBJ_NEW_SMALL_INT(v->idx),
-        mp_obj_new_float(v->t),
-        mp_obj_new_float(v->phase),
+        mp_obj_new_float((mp_float_t)v->t),
+        mp_obj_new_float((mp_float_t)v->phase),
         mp_obj_new_int_from_uint(v->noise),
-        mp_obj_new_float(v->phase2),
+        mp_obj_new_float((mp_float_t)v->phase2),
         MP_OBJ_NEW_SMALL_INT(v->prev_pitch),
         MP_OBJ_NEW_SMALL_INT(v->prev_vol),
     };
@@ -455,7 +488,7 @@ static mp_obj_t moy_audio_render(size_t n_args, const mp_obj_t *a) {
         return MP_OBJ_NEW_SMALL_INT(0);
     }
     mp_int_t rate = mp_obj_get_int(a[2]);
-    double master = mp_obj_get_float(a[3]);
+    float master = mp_obj_get_float(a[3]);
     moy_mix_block(moy_voices, (uint8_t *)bi.buf, (int)nframes, (int)rate, master);
     return MP_OBJ_NEW_SMALL_INT(nframes);
 }
@@ -473,21 +506,21 @@ static void moy_audio_task(void *arg) {
     static uint8_t block[MOY_BLOCK_FRAMES * 2];
 
     while (s_running) {
-        // 1. snapshot the shared voices under the mutex (fast memcpy, then release).
+        // 1.f snapshot the shared voices under the mutex (fast memcpy, then release).
         if (s_voice_mutex != NULL) {
             xSemaphoreTake(s_voice_mutex, portMAX_DELAY);
         }
         memcpy(snap, moy_voices, sizeof(snap));
-        double master = s_master;
+        float master = s_master;
         int rate = s_rate;
         if (s_voice_mutex != NULL) {
             xSemaphoreGive(s_voice_mutex);
         }
 
-        // 2. mix the block from the snapshot (heavy per-sample loop, mutex-free).
+        // 2.f mix the block from the snapshot (heavy per-sample loop, mutex-free).
         moy_mix_block(snap, block, MOY_BLOCK_FRAMES, rate, master);
 
-        // 3. write to I2S. Blocks here while the DMA ring drains -- this is the
+        // 3.f write to I2S. Blocks here while the DMA ring drains -- this is the
         //    audio-clock pacing, and it runs on core 1 so it never stalls the VM.
         size_t written = 0;
         i2s_channel_write(s_tx_chan, block, sizeof(block), &written,
@@ -685,11 +718,11 @@ static mp_obj_t moy_audio_voice_unlock(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_audio_voice_unlock_obj, moy_audio_voice_unlock);
 
 // set_master(vol) -- core 0 publishes the live master volume the task reads each
-// block. Plain double store of an aligned word; the mutex isn't needed for it.
+// block. Plain float store of an aligned word; the mutex isn't needed for it.
 static mp_obj_t moy_audio_set_master(mp_obj_t vol_obj) {
 #if MOY_AUDIO_HAVE_IDF
-    double v = mp_obj_get_float(vol_obj);
-    if (v < 0.0) { v = 0.0; } else if (v > 1.0) { v = 1.0; }
+    float v = mp_obj_get_float(vol_obj);
+    if (v < 0.0f) { v = 0.0f; } else if (v > 1.0f) { v = 1.0f; }
     s_master = v;
 #else
     (void)vol_obj;

@@ -538,7 +538,8 @@ class PaintLayer:
             # ThemeLayer.leave -- since it has no PLAY of its own) or runs+leaves to
             # the cart (PAINT: ws._leave_menu is EditorApp.leave, PLAY, itself now a
             # hard-commit trigger, #111 -- no SAVE tap exists anymore either way).
-            ws._leave_theme() if ws._editing_icons else ws._leave_menu()
+            # #184: deferred -- the commit+run happens behind the next paint.
+            ws.defer(ws._leave_theme if ws._editing_icons else ws._leave_menu)
 
     # -- tool row (#90) ------------------------------------------------------
 

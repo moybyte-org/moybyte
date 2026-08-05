@@ -80,6 +80,19 @@ def _diag_hitch(diag, ws, comp, elapsed, kbd_ms, inp_ms, sb_ms, ws_ms,
         # three (the loop already measures them) -- ws(hi/hp/frm) says which.
         ws_s = " ws(hi=%d hp=%d frm=%d)" % (hi_ms, hp_ms, ws_ms - hi_ms - hp_ms) \
             if hi_ms >= 0 else ""
+        # #184: hp= is itself one lump, and a 1.7-1.9s pointer stall lives inside
+        # it with no named stage -- the same shape ws= had before #183. Split it
+        # on the spike frame: pre = pointer bookkeeping before the routing walk,
+        # worst@id = the dearest single layer.handle_pointer in the walk, claim =
+        # the layer that consumed the tap, n = layers visited. If tot is far
+        # BELOW hp=, the time is outside handle_pointer's body altogether.
+        hp_s = ""
+        pp = getattr(ws, "perf_pointer", None)
+        if pp is not None and hp_ms > 0:
+            q = pp()
+            if q is not None:
+                hp_s = (" hp(tot=%.1f pre=%.1f worst=%.1f@%s claim=%s n=%d)"
+                        % (q[0], q[1], q[2], q[3], q[4], q[5]))
         if raw is not None:
             diag.log("HITCH",
                      "frame=%dms kbd=%d inp=%d sb=%d ws=%d diag=%d sdflush=%d "
@@ -87,7 +100,8 @@ def _diag_hitch(diag, ws, comp, elapsed, kbd_ms, inp_ms, sb_ms, ws_ms,
                      "audio=%.1f chrome=%.1f flush=%.1f)%s%s"
                      % (elapsed, kbd_ms, inp_ms, sb_ms, ws_ms, diag_ms, sd_ms,
                         web_ms, pump_ms, trips,
-                        raw[0], raw[1], raw[2], raw[3], raw[4], ws_s, home_s))
+                        raw[0], raw[1], raw[2], raw[3], raw[4],
+                        ws_s + hp_s, home_s))
         else:
             b = ws.perf_breakdown()
             diag.log("HITCH",
@@ -112,8 +126,13 @@ def _diag_drawbrk(diag, ws):
         if ws.perf_sample() is None:        # only while a cart is actively running
             return
         b = ws.perf_breakdown()             # (logic, render, audio, chrome) ms
-        diag.log("DRAWBRK", "logic=%.2f render=%.2f audio=%.2f chrome=%.2f"
-                 % (b[0], b[1], b[2], b[3]))
+        # bg= is render's declared-backdrop share (#172), printed INSIDE render
+        # rather than beside it -- it is the cart's own drawing, and showing it
+        # as a peer would re-create the reading that sent #172 hunting the shell.
+        pb = getattr(ws, "perf_backdrop", None)
+        bg_s = (" (bg=%.2f)" % pb()) if pb is not None else ""
+        diag.log("DRAWBRK", "logic=%.2f render=%.2f%s audio=%.2f chrome=%.2f"
+                 % (b[0], b[1], bg_s, b[2], b[3]))
         # #63 auto-batch profiling: flushes=1/maxrun=N means the cart's N-sprite loop
         # coalesced into ONE native blit_batch; flushes=N/maxrun=1 means it did NOT.
         pb = getattr(ws, "perf_batch", None)
@@ -208,6 +227,53 @@ def _diag_chromebrk(diag, ws):
         pass
 
 
+def _diag_layerbrk(diag, ws):
+    """Log a LAYERBRK line (#172): the last PAINTED frame's WM stack walk, split
+    per layer and printed dearest first.
+
+    CHROMEBRK's `other` IS this walk. On the 2026-07-29 T-Deck regression that
+    remainder was 6.7ms of a Brick Siege frame while bar/cmp/cur all read ~0.00
+    -- every named bucket saying "not me", which is as far as narrowing could
+    go. This names the layer instead. Read it as: one big row = that layer's
+    draw got dearer; cost spread evenly across `n` rows = the stack machinery
+    itself (the draw_stack walk, the surface probes, the batch guard), not any
+    one layer.
+
+    Deliberately NOT cart-gated, unlike DRAWBRK/CHROMEBRK: the launcher and
+    editor walks have no other instrument at all, and `sum` vs the frame's draw
+    ms is the check on whether the walk is even where the time goes."""
+    if diag is None:
+        return
+    try:
+        pl = getattr(ws, "perf_layers", None)
+        if pl is None:
+            return
+        rows = pl()
+        if not rows:
+            return
+        total = 0.0
+        for _, ms in rows:
+            total += ms
+        # Six is the whole stack on the fullscreen tiers and the dear end of a
+        # windowed one; a truncated tail is named so the sum is never read as
+        # covering fewer layers than it does.
+        head = rows[:6]
+        parts = " ".join("%s=%.2f" % (lid, ms) for lid, ms in head)
+        more = "" if len(rows) == len(head) else " +%d more" % (len(rows) - len(head))
+        # pre/post are the frame's unmeasured EDGES (#172) -- printed here
+        # because this line is the frame's anatomy and is not cart-gated:
+        # pre + sum + flush + post should account for the loop's whole `frm`.
+        pe = getattr(ws, "perf_frame_edges", None)
+        edge = ""
+        if pe is not None:
+            p0, p1 = pe()
+            edge = "pre=%.2f post=%.2f " % (p0, p1)
+        diag.log("LAYERBRK", "%sn=%d sum=%.2f %s%s"
+                 % (edge, len(rows), total, parts, more))
+    except Exception:
+        pass
+
+
 def _diag_homebrk(diag, ws):
     """Log a HOMEBRK line: the LAUNCHER frame's section split (wallpaper /
     shelf grid / bar ms, stashed by launcher_layer under perf_capture). The
@@ -243,7 +309,16 @@ def _diag_loop(diag, ws, acc):
     try:
         n = acc[0]
         stages = acc[2] + acc[3] + acc[4] + acc[5] + acc[6] + acc[7] + acc[8] + acc[9]
+        # skip= is the #77 frameskip gate. It belongs on every measurement line
+        # because it changes what fps MEANS -- with it on, logic ticks every loop
+        # frame but render/composite/flush run every second one, so a cart reads
+        # far higher than the same build with it off. #66's last full-roster
+        # T-Deck session was dated the day frameskip shipped, and nothing in any
+        # log said which way the toggle sat, so the ledger's numbers could not be
+        # compared with a later run's at all. A setting that silently redefines a
+        # metric has to be printed beside it.
         diag.log("LOOP",
+                 "skip=%d " % (1 if getattr(ws, "frameskip", False) else 0) +
                  "n=%d frame=%.1f kbd=%.1f inp=%.1f sb=%.1f ws=%.1f "
                  "(hi=%.1f hp=%.1f frm=%.1f) web=%.1f diag=%.1f sd=%.1f "
                  "sleep=%.1f other=%.1f"

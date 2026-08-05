@@ -113,10 +113,12 @@ class PlayerRouter:
 
     def begin_frame(self):
         """Advance every extra slot's press-edge for this frame. Called next to
-        the local InputState.begin_frame(); a no-op (empty loop) with no extra
-        players, so it costs nothing on the single-player path."""
-        for s in self._slots.values():
-            s.begin_frame()
+        the local InputState.begin_frame(). The truthiness guard matters on
+        MicroPython: dict.values() allocates a view + iterator PER CALL, which
+        on the single-player path was per-frame churn for an empty loop."""
+        if self._slots:
+            for s in self._slots.values():
+                s.begin_frame()
 
 
 class NetService:

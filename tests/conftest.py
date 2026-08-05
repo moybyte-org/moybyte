@@ -34,6 +34,8 @@ import importlib.machinery
 import os
 import sys
 
+import pytest
+
 _RUNTIME_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runtime")
 _SHARED = {
@@ -96,6 +98,40 @@ _DEVICE_ONLY = {
     f[:-3] for f in os.listdir(_DEVICE_DIR)
     if f.endswith(".py") and f != "__init__.py"
 } - _SHARED - set(_RENAMED) - _BUILD_STAMPED
+
+
+@pytest.fixture(autouse=True)
+def _no_local_build_stamp(monkeypatch):
+    """The SECOND door onto the same bug the `_ota_build` exclusion above closed.
+
+    build.sh stamps its identity in two places: the `_ota_build` module the device
+    imports (excluded above) and `dist/current/ota_build.json`, which
+    tools/gen_ota_manifest reads as `CLI > stamp > FIRMWARE_VERSION`. Nothing
+    neutralized the second, so on a machine that had built firmware the manifest
+    defaulted to THAT build's version and test_main_defaults_version_from_moy_ota
+    failed -- while CI, with no dist/ tree, passed. Green or red by whether you
+    had run build.sh, which is precisely what 867e676 set out to end.
+
+    Stubbing the READER (not the OTA_BUILD_JSON constant) is deliberate:
+    `def read_ota_build(path=OTA_BUILD_JSON)` binds that default at def time, so
+    monkeypatching the constant is accepted in silence and changes nothing. A
+    test that wants a stamp sets this back to `lambda *_: {...}` -- explicit,
+    like the `_ota_build` rule above.
+
+    THIRD door (2026-08-03): the finder exclusion above only stops THIS conftest
+    from resolving `_ota_build` -- a test file that puts the firmware modules/
+    dir on sys.path itself (test_moy_webserver does, at import time, for the
+    whole process) re-opens it, and under xdist whichever test execs moy_ota.py
+    on that worker afterwards reads the machine's last build stamp again
+    (spotted as version_label()=='v2' from a stale bisect build). sys.modules
+    [name]=None makes `import _ota_build` raise ImportError no matter what the
+    path says, and moy_ota's try/except then keeps the committed identity."""
+    monkeypatch.setitem(sys.modules, "_ota_build", None)
+    try:
+        import gen_ota_manifest
+    except ImportError:      # tools/ not on the path for this test module
+        return
+    monkeypatch.setattr(gen_ota_manifest, "read_ota_build", lambda *a, **k: {})
 
 
 class _DeviceModuleFinder(importlib.abc.MetaPathFinder):

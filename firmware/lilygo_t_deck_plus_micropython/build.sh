@@ -157,10 +157,18 @@ fi
 # imports, so a build without it still boots (lua carts panel gracefully).
 MOY_LUA_SRC="${SCRIPT_DIR}/native/moy_lua"
 MOY_LUA_DST="${UPSTREAM_DIR}/ext_mod/moy_lua"
-if [ -d "${MOY_LUA_SRC}" ]; then
+EXT_MOD_CMAKE="${UPSTREAM_DIR}/ext_mod/micropython.cmake"
+if [ "${MOYBYTE_NO_LUA:-0}" = "1" ]; then
+  # A/B knob (2026-08-03, #77 icache theory): build WITHOUT the Lua VM to
+  # measure what ~1MB of vendored VM code costs the shared flash cache during
+  # PYTHON-cart play. Lua carts open the runtime-missing panel on this build.
+  # Must also UNDO a previous build's staging (ext_mod persists across builds).
+  rm -rf "${MOY_LUA_DST}"
+  sed -i '/moy_lua\/micropython.cmake/d' "${EXT_MOD_CMAKE}" 2>/dev/null || true
+  echo "MOYBYTE_NO_LUA=1: moy_lua NOT staged (A/B build, lua carts will panel)"
+elif [ -d "${MOY_LUA_SRC}" ]; then
   rm -rf "${MOY_LUA_DST}"
   cp -r "${MOY_LUA_SRC}" "${MOY_LUA_DST}"
-  EXT_MOD_CMAKE="${UPSTREAM_DIR}/ext_mod/micropython.cmake"
   if ! grep -q 'moy_lua/micropython.cmake' "${EXT_MOD_CMAKE}"; then
     sed -i '/moy_audio\/micropython.cmake/a include(${CMAKE_CURRENT_LIST_DIR}/moy_lua/micropython.cmake)' "${EXT_MOD_CMAKE}"
   fi
@@ -268,6 +276,7 @@ cp "${REPO_ROOT}/runtime/ui.py" "${SCRIPT_DIR}/modules/ui.py"
 cp "${REPO_ROOT}/runtime/calc_app.py" "${SCRIPT_DIR}/modules/calc_app.py"
 cp "${REPO_ROOT}/runtime/console.py" "${SCRIPT_DIR}/modules/console.py"
 cp "${REPO_ROOT}/runtime/moy_carts.py" "${SCRIPT_DIR}/modules/moy_carts.py"
+cp "${REPO_ROOT}/runtime/moybuf.py" "${SCRIPT_DIR}/modules/moybuf.py"
 cp "${REPO_ROOT}/runtime/moy_fs.py" "${SCRIPT_DIR}/modules/moy_fs.py"
 cp "${REPO_ROOT}/runtime/moy_image.py" "${SCRIPT_DIR}/modules/moy_image.py"
 # The pure-Python indexed Canvas + palette: the Wallpaper preview runner needs

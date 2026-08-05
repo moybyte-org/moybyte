@@ -188,6 +188,42 @@ _FONT_HEX = (
 )
 _GLYPHS = None
 
+# str.isascii is CPython-only (MicroPython has no such method), so probe once
+# rather than per call. None -> _wire_text falls back to max().
+_ISASCII = getattr(str, "isascii", None)
+
+
+def _wire_text(s):
+    """A print() argument in the form the draw-command stream can carry.
+
+    ASCII goes across as a plain string, which is every string the console and
+    virtually every cart ever prints -- so the wire is unchanged for all of it.
+
+    Anything else goes as a LIST OF BYTE VALUES, and it has to, twice over. The
+    stream is JSON, and JSON strings are text: a byte like 0xFF is not valid
+    UTF-8 and cannot survive the encode, let alone the wasm-to-JS hop. And even
+    for text that IS valid UTF-8, the replayer walks its string with
+    charCodeAt, which yields a CODEPOINT -- so "e-acute" would take one 8px cell
+    in the browser and two everywhere else, which is the host/device split that
+    moy SPEC.md 6 ("print walks bytes") exists to close.
+
+    Sending bytes settles both: what crosses is exactly what the font draws.
+
+    Runs on every print command of every frame, so the ASCII case returns the
+    SAME object with no copy and no Python-level loop -- str.isascii where the
+    host has it, else max(), which is a C-speed scan on MicroPython too. Costs
+    about 0.004% of a 60fps frame budget over the plain str() it replaced.
+    """
+    if type(s) is str:
+        if _ISASCII is not None:
+            if _ISASCII(s):
+                return s
+        elif not s or ord(max(s)) < 0x80:
+            return s
+        return list(s.encode("utf-8"))
+    b = bytes(s)
+    return list(b) if (b and max(b) >= 0x80) else b.decode()
+
 
 def _font_glyphs():
     """The petme128 glyphs as a list of 8-column-byte lists (the /assets JSON shape the
@@ -619,10 +655,13 @@ class DrawRecorder:
     def print(self, s, x, y, c, fs=1):
         # `fs` > 1 (#39, the big-font system canvas) ships as a 5th element -- the
         # replayers render petme128 scaled, so big text costs characters, not rects.
+        # Text crosses as _wire_text: a plain string while it is ASCII, a list of
+        # byte values when it is not. See that function for why.
+        w = _wire_text(s)
         if int(fs) > 1:
-            self._cmds.append(["print", str(s), int(x), int(y), c & 63, int(fs)])
+            self._cmds.append(["print", w, int(x), int(y), c & 63, int(fs)])
         else:
-            self._cmds.append(["print", str(s), int(x), int(y), c & 63])
+            self._cmds.append(["print", w, int(x), int(y), c & 63])
 
     # -- off-screen layers (#54 scroll + #43 cached top bar) -----------------
     def register_layer(self, layer):

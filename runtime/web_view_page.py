@@ -401,13 +401,19 @@ if(dx<0){sx=-dx;w+=dx;dx=0;}if(dy<0){sy=-dy;h+=dy;dy=0;}
 if(dx+w>vw)w=vw-dx;if(dy+h>vh)h=vh-dy;if(w<=0||h<=0)return;
 blsrc(src,sw,sx,sy,dx,dy,w,h);}
 function bl(c){var L=LAY[c[1]];if(!L)return;if(c.length>4&&c[4]==="full")blf(L,c[2],c[3]);else blw(L,c[2],c[3]);}
+// print walks BYTES, one 8px cell each (moy SPEC.md 6). Text arrives as a plain
+// string while it is ASCII -- where a char IS its byte -- and as an ARRAY of byte
+// values when it is not: JSON cannot carry a byte like 0xFF inside a string, and
+// charCodeAt over decoded text would yield a CODEPOINT, spending one cell where
+// the device spends two. tb() collapses the two forms; .length is right for both.
+function tb(s,k){return typeof s==="string"?s.charCodeAt(k):s[k];}
 function tx(s,x,y,c,sc){if(!FONT)return;var X=x|0;y|=0;sc=(sc|0)||1;
 var fi=FONT.first,gw=FONT.w,g=FONT.glyphs,n=g.length;
-if(sc==1){for(var k=0;k<s.length;k++){var gi=s.charCodeAt(k)-fi,co=(gi>=0&&gi<n)?g[gi]:g[0];
+if(sc==1){for(var k=0;k<s.length;k++){var gi=tb(s,k)-fi,co=(gi>=0&&gi<n)?g[gi]:g[0];
 for(var j=0;j<gw;j++){var bt=co[j],py=y;while(bt){if(bt&1)put(X+j,py,c);bt>>=1;py++;}}X+=gw;}return;}
 // scaled system text (#39): each glyph bit paints an sc x sc block (fr respects clip/camera,
 // like the host SystemCanvas.print's rect blocks).
-for(var k=0;k<s.length;k++){var gi=s.charCodeAt(k)-fi,co=(gi>=0&&gi<n)?g[gi]:g[0];
+for(var k=0;k<s.length;k++){var gi=tb(s,k)-fi,co=(gi>=0&&gi<n)?g[gi]:g[0];
 for(var j=0;j<gw;j++){var bt=co[j],row=0;while(bt){if(bt&1)fr(X+j*sc,y+row*sc,sc,sc,c);bt>>=1;row++;}}X+=gw*sc;}}
 function rep(cs){for(var i=0;i<cs.length;i++){var c=cs[i],o=c[0];
 if(o=="cls"){if(vOn)fr(0,0,vCW,vCH,c[1]);else idx.fill(pm[c[1]&63]);}else if(o=="pix")put(c[1],c[2],c[3]);
@@ -520,7 +526,14 @@ e.preventDefault();return;}
 if(e.key=="Escape"){
 // In play (INPUT set), Esc is RESET -- the p8-web-player expectation (their pause
 // menu's reset). Transports without a reset handler ignore the event safely.
-send(INPUT?{type:"reset"}:{type:"esc"});e.preventDefault();return;}var cd=null;
+send(INPUT?{type:"reset"}:{type:"esc"});e.preventDefault();return;}
+// Ctrl/Cmd chords (#132): the console's control-byte shortcuts -- select-all/
+// copy/cut/paste (a/c/x/v), undo/redo (z/y), find/autocomplete/jump (f/e/g).
+// Mapped EXPLICITLY, never every letter (Ctrl+R/T/W stay the browser's), and
+// prevented so the browser's own copy/select-all never fights the console's.
+if((e.ctrlKey||e.metaKey)&&!e.altKey&&e.key.length==1){
+var cc={a:1,c:3,e:5,f:6,g:7,v:22,x:24,y:25,z:26}[e.key.toLowerCase()];
+if(cc){send({type:"key",code:cc});e.preventDefault();}return;}var cd=null;
 if(e.key=="Enter")cd=13;
 // A physically HELD Backspace also streams a sustained "home" (bshold down/up on the
 // press/release edges) -- the desktop-keyboard twin of the burger button's hold, so

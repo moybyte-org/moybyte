@@ -249,11 +249,11 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # console.Popup / console.ACHIEVEMENTS / ... resolve for Workstation + host_app + tests.
 try:
     from widgets import (
-        _Blit, Pointer, Achievements, Pmem, _SilentAudio, Popup, ACHIEVEMENTS,
+        _Blit, Pointer, Achievements, Pmem, Clipboard, _SilentAudio, Popup, ACHIEVEMENTS,
         _PLAY_GOAL, _POPUP_X, _POPUP_Y, _POPUP_W, _POPUP_ROW_H, _POPUP_PAD_X, _POPUP_SEP_H)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import (
-        _Blit, Pointer, Achievements, Pmem, _SilentAudio, Popup, ACHIEVEMENTS,
+        _Blit, Pointer, Achievements, Pmem, Clipboard, _SilentAudio, Popup, ACHIEVEMENTS,
         _PLAY_GOAL, _POPUP_X, _POPUP_Y, _POPUP_W, _POPUP_ROW_H, _POPUP_PAD_X, _POPUP_SEP_H)
 
 # The desktop wallpaper backdrop component (#28, extracted -- see wallpaper.py). The
@@ -341,6 +341,10 @@ _COVER_CACHE_MAX_PIXELS = 768 * 1024
 # this board's ~470KB/s flash cost 164ms to reload and made things worse).
 # Runs are ~15KB, so this holds far more covers in less RAM.
 _COVER_RUNS_MAX_BYTES = 512 * 1024
+# cover_diet: how many newest LRU entries (covers AND run blobs) SURVIVE the
+# release at cart start -- the visible shelf stays warm, the long tail leaves
+# the heap. ~6 covers x (8-24KB bake + ~15KB runs) ~= 150KB retained.
+_COVER_DIET_KEEP = 6
 
 
 class _CoverImage:
@@ -383,6 +387,14 @@ try:
 except ImportError:
     _CROP_INDEX = None
     _DECODE_RUNS = None
+
+# #186 moy_buf: cover payloads (parsed runs, cover bitmaps, the decode
+# scratch) live OUTSIDE the MP gc heap on device, so a warm shelf stops
+# taxing every GC collect. On the host this is a transparent no-op layer.
+try:
+    import moybuf as _moybuf
+except ImportError:
+    from runtime import moybuf as _moybuf
 
 
 class _CoverJob:
@@ -507,7 +519,10 @@ class _CoverJob:
                     if _CROP_INDEX(self.out, w, h, pix, sw, sh,
                                    ox, self._oy, cw_, ch_):
                         self.dy = h
-                        self.img = _CoverImage(w, h, bytes(self.out))
+                        # #186: the finished card bitmap moves off the gc heap
+                        # (take() copies into moy_buf storage on device; on the
+                        # host it adopts `out` unchanged, zero copies).
+                        self.img = _CoverImage(w, h, _moybuf.take(self.out))
                         self.done = True
                         return
                 except Exception:  # noqa: BLE001 -- any surprise -> Python loop
@@ -524,7 +539,7 @@ class _CoverJob:
             self.dy = dy + 1
             if _ticks_diff(_ticks_ms(), t0) >= _COVER_SLICE_MS:
                 return
-        self.img = _CoverImage(w, h, bytes(out))
+        self.img = _CoverImage(w, h, _moybuf.take(out))   # #186: off the gc heap
         self.done = True
 
 
@@ -608,7 +623,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # import back), so there is no cycle. Same bare-or-package fallback as the surfaces above.
 try:
     from chrome import (
-        _ticks_ms, _ticks_diff, _err_text, _from_ascii, CURSOR, NAMES, color,
+        _ticks_ms, _ticks_us, _ticks_diff, _err_text, _from_ascii, CURSOR, NAMES, color,
         _DOCK_Y, _DOCK_H, _ICON_COLS, _ICON_ROWS, _ICON_W, _ICON_H, _ICON_GAP_X,
         _ICON_GAP_Y, _ICON_X0, _ICON_Y0, _ICON_BOX, _PAGE_PREV, _PAGE_NEXT,
         _DOCK_W, _DOCK_GAP, _DOCK_X0, _CURSOR_BASE, _CURSOR_ACCEL,
@@ -619,7 +634,7 @@ try:
     )
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import (
-        _ticks_ms, _ticks_diff, _err_text, _from_ascii, CURSOR, NAMES, color,
+        _ticks_ms, _ticks_us, _ticks_diff, _err_text, _from_ascii, CURSOR, NAMES, color,
         _DOCK_Y, _DOCK_H, _ICON_COLS, _ICON_ROWS, _ICON_W, _ICON_H, _ICON_GAP_X,
         _ICON_GAP_Y, _ICON_X0, _ICON_Y0, _ICON_BOX, _PAGE_PREV, _PAGE_NEXT,
         _DOCK_W, _DOCK_GAP, _DOCK_X0, _CURSOR_BASE, _CURSOR_ACCEL,
@@ -970,6 +985,11 @@ class Workstation:
         # (The paint drag-stroke origin -- _paint_drag -- lives on self.paint_layer.)
         # (The launcher's trackball-hover state (_lhover) lives on self.launcher_layer.)
         self.pointer = None           # set by run_desktop
+        # The system clipboard (#132): the one typed holder every editor writes
+        # through (code tab / Writer / Sheets v1), so copy in one app pastes in
+        # another. Console-side end-to-end -- works identically over the web
+        # transport, never touches a host OS clipboard (parity trap).
+        self.clipboard = Clipboard()
         # Desktop wallpaper (#28): a chosen wallpaper-type cart compiled into its
         # own namespace and run (its _draw, optionally _update) as the BACKDROP each
         # home/settings frame -- the Picotron "wallpaper is a cart" model. None until
@@ -1002,6 +1022,11 @@ class Workstation:
         self._cover_runs_order = []   # LRU keys (oldest first)
         self._cover_runs_bytes = 0
         self._covers_deferred = False # a build was pushed past the budget -> stay dirty
+        self.cover_diet = False       # RAM-tight board (T-Deck): drop the whole cover
+                                      # pipeline when a cart RUN starts (see
+                                      # _release_cover_caches) -- set by the S3 backend
+                                      # only; the P4/host keep covers warm (windows
+                                      # leave the desk visible, and RAM is not scarce).
         self._cover_seen = True       # idle prefetch armed (see _cover_prefetch_tick);
                                       # True from BOOT: covers must be warm BEFORE the
                                       # first cover surface opens, not after (p4_clicks
@@ -1090,6 +1115,22 @@ class Workstation:
         self._cart_ms = 0.0           # smoothed cart _draw() ms (RENDERING)
         self._audio_ms = 0.0          # smoothed audio.tick(dt) ms (mixer feed)
         self._chrome_ms = 0.0         # smoothed chrome ms (= draw - upd - cart - audio)
+        # LAYERBRK (#172) / the hitch logger's hp() detail (#184): the two stack
+        # walks, split per layer. _pf_layers is {layer.id: us} for the last
+        # PAINTED frame (rebuilt each paint under _perf); _pf_ptr is a fixed
+        # 6-slot scratch overwritten in place by handle_pointer --
+        # [total_us, pre_us, worst_us, worst_id, claim_id, n_visited].
+        self._pf_layers = None
+        self._pf_ptr = [0, 0, 0, None, None, 0]
+        self._ptr_last_x = -1     # handle_pointer's idle fast-path: last routed
+        self._ptr_last_y = -1     # pointer position (ints -- no per-frame tuple)
+        self._ptr_was_down = False  # ...and whether it was held (release edge)
+        # #184 deferred transitions: [armed, fn] entries queued by defer().
+        # A tap handler schedules its heavy transition here instead of running
+        # it inside the pointer walk; frame() paints the acknowledgment first
+        # (arming the entry after the flush), then runs it at the next frame's
+        # top -- so the pressed state is ON GLASS during the load stall.
+        self._deferred = []
         # RAW (un-smoothed) copy of THIS frame's phase split (#66 HITCH v3): the
         # EMAs above hide which phase a single 150ms hitch frame spent its time
         # in (a one-frame spike moves an alpha=0.15 EMA by only 15% of itself).
@@ -1110,6 +1151,7 @@ class Workstation:
         self._bar_ms = 0.0
         self._cmp_ms = 0.0
         self._cur_ms = 0.0
+        self._bg_ms = 0.0   # #172: backdrop restore, a SUB-slice of _cart_ms
         # (The clock-text cache moved to self.bar_layer with the rest of the bar #66.)
         # Live diagnostics gate (#68 "kid mode"): False (the kid default) means the
         # device backend SKIPS the diag costs a player can feel -- the 30s forced GC
@@ -1202,6 +1244,12 @@ class Workstation:
         self._pf_cart = 0
         self._pf_audio = 0
         self._pf_bar = 0
+        self._pf_bg = 0     # #172: the declared-backdrop share of _pf_cart
+        # #172: the frame's unmeasured EDGES, us -- pre = entry..draw span open
+        # (journal tick, splash, frameskip branch, redraw gate), post = the tail
+        # after the flush (dirty clear, covers/fling re-arm, pointer snapshot).
+        self._pf_pre = 0
+        self._pf_post = 0
 
 
     # -- the layer stack (compositor / router) -------------------------------
@@ -1967,7 +2015,19 @@ class Workstation:
             # overwrite it.
             if _DECODE_RUNS is not None and _CROP_INDEX is not None:
                 if self._cover_buf is None or len(self._cover_buf) < need:
-                    self._cover_buf = bytearray(need)
+                    # #186: the scratch lives off the gc heap too. Growing it
+                    # frees the old one -- unless a job still decodes into it
+                    # (the native-crop exception fallback can span frames);
+                    # then the old scratch LEAKS, bounded, never freed live.
+                    old = self._cover_buf
+                    if old is not None:
+                        for _j in jobs.values():
+                            if _j.pix is old:
+                                old = None
+                                break
+                    if old is not None:
+                        _moybuf.free(old)
+                    self._cover_buf = _moybuf.alloc(need)
                 job = _CoverJob(runs, w, h, buf=self._cover_buf)
             else:
                 job = _CoverJob(runs, w, h)
@@ -2049,6 +2109,11 @@ class Workstation:
         if runs is None:
             self._cover_none[path] = True
             return None, None
+        # #186: the packed RLE blob (~15KB x every cart, 512KB cap) is the
+        # biggest slice of the warm shelf -- move it off the gc heap. Every
+        # consumer (len, int indexing, the native decode_runs) reads a
+        # memoryview identically; eviction frees it (_cover_free_runs).
+        runs = (runs[0], runs[1], _moybuf.take(runs[2]))
         self._cover_runs_put(path, sig, runs)
         return runs, sig
 
@@ -2160,6 +2225,100 @@ class Workstation:
         order.append(path)
         return e[1]
 
+    def _cover_free_runs(self, packed):
+        """#186: return an evicted runs blob to off-heap storage -- unless an
+        in-flight _CoverJob still decodes from it (the LRU knows nothing
+        about jobs; leaking one blob beats a use-after-free). No-op for
+        gc-heap payloads (host / fallback)."""
+        for job in self._cover_jobs.values():
+            if job.packed is packed:
+                return
+        _moybuf.free(packed)
+
+    def _free_cover_img(self, img):
+        """#186: release an evicted cover blittable's off-heap payloads --
+        the indexed pixels plus any RGB565 bake the device canvas stamped on
+        it (_rgb_i / _rgb / the variant dict). Alias-safe: the hot _rgb slot
+        SHARES a variant entry's buffer, so each distinct buffer frees once.
+        Fields are nulled afterwards, so if anything ever drew an evicted
+        cover it would raise loudly instead of blitting freed memory
+        (nothing does -- pinned by the #186 audit)."""
+        if img is None:
+            return
+        freed = []
+        for name in ("pix", "_rgb_i", "_rgb"):
+            b = getattr(img, name, None)
+            if isinstance(b, memoryview):
+                dup = False
+                for s in freed:
+                    if b is s:
+                        dup = True
+                        break
+                if not dup:
+                    freed.append(b)
+                    _moybuf.free(b)
+            setattr(img, name, None)
+        var = getattr(img, "_rgb_variants", None)
+        if var:
+            for v in var.values():
+                b = v[0]
+                if isinstance(b, memoryview):
+                    dup = False
+                    for s in freed:
+                        if b is s:
+                            dup = True
+                            break
+                    if not dup:
+                        freed.append(b)
+                        _moybuf.free(b)
+            var.clear()
+
+    def _release_cover_caches(self):
+        """Drop the whole cover pipeline before a cart runs (cover_diet tier).
+
+        The 2026-08-03 census: on the T-Deck the shelf redesign's caches are the
+        live-set staircase -- parsed runs (~15KB x every cart, 512KB cap), the
+        cover blittables (768KB-pixel cap + the device RGB565 bakes), the 76.8KB
+        decode scratch -- all sized for the P4 and none of it read while a game
+        owns the glass, yet every GC pause marks it (114ms at the old 638KB live
+        set vs 243ms at 1427KB, measured on glass). Covers are regenerable by
+        design, so the trade is: halve the mid-play GC pause, pay a shelf
+        pop-in on the way back home (_cover_seen re-arms the idle prefetch).
+        _cover_none stays: knowing a cart HAS no art is a probe saved, not RAM.
+
+        KEEPS the newest _COVER_DIET_KEEP entries of both LRUs (owner ask
+        2026-08-03, "I'd rather not have pop-in"): the covers on screen when
+        PLAY was tapped are the most recently touched, so the exact view the
+        kid returns to is still warm (~150KB retained vs ~800KB dropped) and
+        only cards scrolled into view later rebuild -- their normal cold path,
+        prefetch-warmed. The full fix (cover payloads in moy_alloc storage the
+        collector never scans, warm AND GC-invisible) is the standing follow-up."""
+        # #186: drop the in-flight jobs FIRST -- they alias runs blobs and the
+        # decode scratch, and the frees below must not race a half-built cover.
+        self._cover_jobs = {}
+        keep = _COVER_DIET_KEEP
+        order = self._cover_cache_order
+        cache = self._cover_cache
+        while len(order) > keep:
+            k = order.pop(0)
+            img = cache.pop(k, None)
+            if img is not None:
+                self._cover_cache_pixels -= len(img.pix)
+                self._free_cover_img(img)       # #186: pix + bakes off-heap
+        rorder = self._cover_runs_order
+        runs = self._cover_runs
+        while len(rorder) > keep:
+            k = rorder.pop(0)
+            gone = runs.pop(k, None)
+            if gone is not None:
+                self._cover_runs_bytes -= len(gone[1][2])
+                self._cover_free_runs(gone[1][2])
+        if self._cover_buf is not None:
+            _moybuf.free(self._cover_buf)       # the 76.8KB decode scratch
+        self._cover_buf = None                  # realloc'd on demand
+        self._cover_gen += 1          # any shelf band repaints from scratch
+        self._cover_seen = True       # re-arm the idle prefetch for the return home
+
     def _cover_runs_put(self, path, sig, runs):
         """Cache parsed runs, LRU-bounded by packed bytes."""
         cache = self._cover_runs
@@ -2167,6 +2326,7 @@ class Workstation:
         old = cache.get(path)
         if old is not None:
             self._cover_runs_bytes -= len(old[1][2])
+            self._cover_free_runs(old[1][2])   # #186: replaced blob returns
             try:
                 order.remove(path)
             except ValueError:
@@ -2182,6 +2342,7 @@ class Workstation:
             gone = cache.pop(drop, None)
             if gone is not None:
                 self._cover_runs_bytes -= len(gone[1][2])
+                self._cover_free_runs(gone[1][2])   # #186 (job-alias guarded)
 
     def _cover_spend(self, t0):
         """Charge this frame's cover budget (see _cover_for)."""
@@ -2210,6 +2371,7 @@ class Workstation:
             old_img = cache.pop(old_key, None)
             if old_img is not None:
                 self._cover_cache_pixels -= len(old_img.pix)
+                self._free_cover_img(old_img)   # #186: pix + bakes off-heap
         return img
 
     def prebuild_covers(self):
@@ -2380,6 +2542,9 @@ class Workstation:
         # The cart-run body moved to Player.start (Stage 2, player.py); this stays as
         # the tested ws. entry point (tools + apply/run_code/_leave_menu/open call it)
         # -- run() is the caller-recording wrapper around it (see below).
+        if self.cover_diet:
+            self._release_cover_caches()   # RAM-tight tier: the shelf's caches are
+                                           # dead weight (and GC-pause fuel) mid-play
         return self.player.start(self.project)
 
     # -- open-cart workspace forwards (Stage 1, project.py) -------------------
@@ -2557,6 +2722,34 @@ class Workstation:
         self.wm.goto(value)
 
     # -- run / exit (Stage 2: the run/return stack discipline) ----------------
+
+    def defer(self, fn):
+        """#184: schedule a heavy transition (cart start, editor open, PLAY)
+        instead of running it inside the pointer walk. The tap frame paints its
+        acknowledgment (selection highlight + the LOADING toast) and PRESENTS
+        it (comp.flush() runs inside frame()); the queued `fn` then runs at
+        that same frame's tail -- so the 1-2s a cart start costs happens
+        behind a frame that already shows the tap landed, not behind a frozen
+        stale shelf. defer() marks dirty so the acknowledgment frame always
+        paints (the redraw gate can't skip it)."""
+        self._deferred.append(fn)
+        self._dirty = True             # the acknowledgment frame must paint
+
+    def _run_deferred(self):
+        """Run the deferred transitions queued BEFORE this drain started
+        (frame()'s tail, after the flush presented the acknowledgment). A
+        transition that defers another action leaves it for the next frame --
+        its own result must paint first."""
+        q = self._deferred
+        for _ in range(len(q)):
+            fn = q.pop(0)
+            _t0 = _ticks_ms() if self.perf_capture else 0
+            fn()
+            if self.perf_capture:
+                print("DEFER ms=%d fn=%s"
+                      % (_ticks_diff(_ticks_ms(), _t0),
+                         getattr(fn, "__name__", "?")))
+        self._dirty = True             # the transition's result must paint
 
     def run(self, project, caller):
         """Show `project`'s running cart on the desktop, recording `caller` so the exit
@@ -3951,18 +4144,24 @@ class Workstation:
         if items:
             self._all_carts = list(items)
             self.slim_carts()              # #66: a rescan reloads FULL carts -- re-slim
+            self._cover_jobs = {}          # in-flight builds may read stale blobs
+                                           # (#186: cleared BEFORE the frees below,
+                                           # so no job can alias a freed payload)
+            for _img in self._cover_cache.values():
+                self._free_cover_img(_img)     # #186: pix + bakes off-heap
             self._cover_cache = {}         # a re-scan may carry new/changed cover art
             self._cover_cache_order = []
             self._cover_cache_pixels = 0
             # Sources too: they are stamped against the blob, so an edited cover
             # would be caught anyway -- but a rescan is also when a cart goes
             # away, and holding its 77KB source would be a leak.
+            for _e in self._cover_runs.values():
+                self._cover_free_runs(_e[1][2])
             self._cover_runs = {}
             self._cover_runs_order = []
             self._cover_runs_bytes = 0
             self._cover_none = {}
             self._cover_gen += 1
-            self._cover_jobs = {}          # in-flight builds may read stale blobs
             self._cover_seen = True        # re-arm the idle prefetch: new/changed
                                            # carts should warm before their surface opens
             self.launcher.set_items(self._launcher_view_items())   # #105: keep an active filter
@@ -4127,6 +4326,20 @@ class Workstation:
         p = self.pointer
         if p is None:
             return
+        # #184: this whole call is ONE lump (`hp`) to the device loop, and a
+        # 1.7-1.9s stall lives inside it that no stage timer names. Split it the
+        # way #183's 37s `ws` lump was split -- pre-walk bookkeeping vs the
+        # per-layer routing walk, with the dearest layer named. Overwritten in
+        # place (never reallocated): this runs every loop iteration, and a fresh
+        # list per frame would be measurement that creates the churn it measures.
+        _perf = self.perf_capture      # the hp split is diag data; the HUD
+        _pt0 = 0                       # must not pay the 6 stamps per frame
+        if _perf:
+            _pt0 = _ticks_us()
+            _pf = self._pf_ptr
+            _pf[0] = _pf[1] = _pf[2] = 0
+            _pf[3] = _pf[4] = None
+            _pf[5] = 0
         self._tick_pointer_dt(p)
         px, py, click = p.x, p.y, p.click
         gx, gy = self._game_xy(px, py)
@@ -4137,10 +4350,43 @@ class Workstation:
         _pp = getattr(self.wm, "player_has_pointer", None)
         _live = _pp() if _pp is not None else True
         self.input.game_pointer = (gx, gy, click and _live, p.down and _live)
+        if _perf:
+            self._pf_ptr[1] = _ticks_diff(_ticks_us(), _pt0)   # pre-walk share
+        # Idle fast-path (2026-08-03): while a healthy GAME owns the glass and
+        # the pointer is doing NOTHING (no click, no held finger, not moved
+        # since last frame), the layer walk below routes nothing -- the cart
+        # already got its touch state via game_pointer above. Skipping it
+        # reclaims ~1ms/frame on the S3. Any edge (move/click/down) walks, so
+        # taps, drags and hover all behave exactly as before; the crash panel
+        # (cart_error) always walks so EDIT stays reachable.
+        if (not click and not p.down and not self._ptr_was_down
+                and px == self._ptr_last_x and py == self._ptr_last_y
+                and self.cart_error is None and self.wm.top_is_player()):
+            return
+        # _ptr_was_down makes the RELEASE frame walk: the windowed WM moves
+        # focus on down->up, and that frame has no click, no down, no movement.
+        self._ptr_was_down = p.down
+        self._ptr_last_x = px
+        self._ptr_last_y = py
         # Memoized, pre-reversed visible stack (Stage 6c) -- no per-frame allocation.
         for layer in self.wm.visible_stack_rev():
-            if layer.handle_pointer(px, py, click):
+            if not _perf:
+                if layer.handle_pointer(px, py, click):
+                    return
+                continue
+            _tk = _ticks_us()
+            _claimed = layer.handle_pointer(px, py, click)
+            _lus = _ticks_diff(_ticks_us(), _tk)
+            _pf = self._pf_ptr
+            _pf[5] += 1
+            if _lus > _pf[2]:
+                _pf[2], _pf[3] = _lus, layer.id
+            if _claimed:
+                _pf[4] = layer.id
+                _pf[0] = _ticks_diff(_ticks_us(), _pt0)
                 return
+        if _perf:
+            self._pf_ptr[0] = _ticks_diff(_ticks_us(), _pt0)
 
     def _tick_pointer_dt(self, p):
         """Charge this frame's loop tick to the pointer SAMPLE, for kinetic
@@ -4193,6 +4439,24 @@ class Workstation:
         rs = getattr(self.canvas, "reset_state", None)
         if rs is not None:
             rs()
+
+    def _draw_loading_toast(self):
+        """#184: the deferred-transition acknowledgment -- a small top-center
+        pill (the hold-to-exit toast's idiom) painted on the frame between a
+        tap and its heavy transition. The panel retains this frame for the
+        whole load stall, so the kid sees LOADING instead of a frozen shelf.
+        Drawn on the system canvas above the whole stack; indexed API only
+        (host == device == web)."""
+        cv = self.sys_canvas
+        fs = self._effective_font_scale()
+        label = "LOADING..."
+        w = (len(label) * 8 + 16) * fs
+        h = 16 * fs
+        x = (cv.w - w) // 2
+        y = 24 * fs                    # clear of the 18px-per-fs top bar
+        cv.rect(x, y, w, h, NAMES["black"])
+        cv.rectb(x, y, w, h, NAMES["light_grey"])
+        cv.print(label, x + 8 * fs, y + 4 * fs, NAMES["white"], fs)
 
     def _flush_batches(self):
         # Draw any sprites still pending in a canvas's auto-batch (Fold 1, #63) before
@@ -4397,6 +4661,22 @@ class Workstation:
         self._autosave_code()
 
     def frame(self, dt):
+        # #172: bracket the frame's UNMEASURED edges. `draw` starts at _frame_t0,
+        # which is after the journal idle tick, the splash check, the frameskip
+        # branch and the redraw gate -- so all of that, plus the dirty/pointer
+        # bookkeeping in the tail, sits inside the loop's `frm` but outside
+        # DRAWBRK+flush. Comparing those two (an EMA against a windowed mean)
+        # put the gap somewhere between -4 and +15ms, which is not a measurement.
+        # Bracketing it is.
+        # DEEP meters (frame edges, per-layer walk timing, per-op canvas timers,
+        # the DRAWBRK/CHROMEBRK EMA tail) run ONLY under perf_capture -- the
+        # measurement-session mode. perf_hud alone keeps the LIGHT set (frame
+        # total, flush, fps): watching the fps chip must not cost milliseconds.
+        # 2026-08-03: the deep set is post-ledger instrumentation, and with
+        # run_desktop arming capture unconditionally it was ~1-1.5ms of every
+        # frame on the S3 -- a real slice of the fps regression it existed to
+        # find. Capture now follows Settings -> PERF DIAG on device.
+        _fe0 = _ticks_us() if self.perf_capture else 0
         if dt > 0:
             # EMA so the readout reflects sustained rate, not single-frame jitter.
             self._fps = _ema(self._fps, 1.0 / dt)
@@ -4462,13 +4742,34 @@ class Workstation:
         # is the rest (total span - flush). Both EMA-smoothed at frame end. Also
         # fires when perf_capture is set (device diag sampling) -- not just the HUD.
         _perf = self.perf_hud or self.perf_capture
+        _deep = self.perf_capture
         _frame_t0 = _ticks_ms() if _perf else 0
+        if _deep:
+            # Everything from frame() entry to here: journal idle tick, splash
+            # expiry, the frameskip branch, and the redraw gate itself.
+            self._pf_pre = _ticks_diff(_ticks_us(), _fe0)
         _cmp = 0            # CHROMEBRK: _composite_game ms
         _cur = 0            # CHROMEBRK: _draw_cursor ms
-        if _perf:
+        if _deep:
             _bc = getattr(self.canvas, "batch_reset", None)
             if _bc is not None:
                 _bc()                  # #63: zero this frame's auto-batch profiling counters
+            # Per-frame perf scratch (the running-cart content Layer fills self._pf_*).
+            # #75: zeroed ONLY under _perf -- the writers (Player.tick / the bar draws)
+            # only fill them under _perf too, and the reads below are _perf-gated, so a
+            # kid-mode play frame skips the five attribute stores entirely.
+            #
+            # These stores MUST live in the _perf branch, not the elif below: a
+            # 2026-07-26 edit nested them under "_prof just went off", so under
+            # steady capture a frame whose writer didn't fire REPORTED THE
+            # PREVIOUS WRITER'S VALUE -- launcher frames carried the last cart
+            # frame's logic/render in every HITCH line, and DRAWBRK/CHROMEBRK
+            # attribution after that date is suspect (found auditing #172).
+            self._pf_upd = 0    # cart _update(dt) ms (game LOGIC); 0 off the cart path
+            self._pf_cart = 0   # cart _draw() ms (RENDERING)
+            self._pf_audio = 0  # audio.tick(dt) ms (mixer feed) -- split out from render
+            self._pf_bar = 0    # CHROMEBRK: _draw_status_strip ms (cart path only)
+            self._pf_bg = 0     # #172: backdrop restore (cart path only)
         elif getattr(self.canvas, "_prof", False):
             # Perf capture just went off: clear the device canvas's DRAW2 timing
             # gate so its hot verbs stop paying the per-op ticks_us pair (~6us a
@@ -4476,14 +4777,6 @@ class Workstation:
             # device_canvas.py). One attribute read per frame here; the host
             # canvas has no _prof, so getattr returns False and this never fires.
             self.canvas._prof = False
-            # Per-frame perf scratch (the running-cart content Layer fills self._pf_*).
-            # #75: zeroed ONLY under _perf -- the writers (Player.tick / the bar draws)
-            # only fill them under _perf too, and the reads below are _perf-gated, so a
-            # kid-mode play frame skips the four attribute stores entirely.
-            self._pf_upd = 0    # cart _update(dt) ms (game LOGIC); 0 off the cart path
-            self._pf_cart = 0   # cart _draw() ms (RENDERING)
-            self._pf_audio = 0  # audio.tick(dt) ms (mixer feed) -- split out from render
-            self._pf_bar = 0    # CHROMEBRK: _draw_status_strip ms (cart path only)
         # Compositor / router (docs/shell_layers_refactor_v1.md §3): draw the z-ordered
         # visible stack bottom -> top. The active content draws first (game-domain
         # content on the fixed 320x240 game canvas); at the game->system domain boundary
@@ -4493,6 +4786,14 @@ class Workstation:
         # cursor is always the top system layer, so a game-domain content is always
         # composited before it -- reproducing the pre-refactor single composite step.
         _prev_domain = None
+        # #172: per-layer draw cost (us) keyed by layer.id. CHROMEBRK's `other`
+        # IS this walk -- on the 2026-07-29 T-Deck regression it was 6.7ms of a
+        # Brick Siege frame with bar/cmp/cur all reading ~0.00, i.e. every named
+        # bucket said "not me". Timing the walk names the layer directly instead
+        # of narrowing again; a cost spread evenly across it says the stack
+        # machinery, not one layer. Built only under _perf, so the kid-mode path
+        # never allocates the dict.
+        _lay = {} if _deep else None
         # WM-surface mark (Stage 9, docs/shell_ux_technical_plan_v1.md): when a RECORDING system
         # canvas is installed (the opt-in web view), tag each WM-stack surface so the recorder
         # slices the frame into ONE stream per surface (bar / app-content / player-viewport) --
@@ -4537,9 +4838,9 @@ class Workstation:
                 if _game_open:                      # close the placement span
                     _view()
                     _game_open = False
-                _tc = _ticks_ms() if _perf else 0
+                _tc = _ticks_ms() if _deep else 0
                 self._composite_game()
-                if _perf:
+                if _deep:
                     _cmp = _ticks_diff(_ticks_ms(), _tc)   # CHROMEBRK: viewport composite
             if (_lskip is not None and _sksurf is not None
                     and layer.domain == "system" and _lskip(layer.id)):
@@ -4559,16 +4860,31 @@ class Workstation:
                 self.sys_canvas.cls(0)      # _VIEWPORT_BEZEL: black
                 _view(_ox, _oy, _sc, self.canvas.w, self.canvas.h)
                 _game_open = True
-            if layer.id == "cursor":
-                _tk = _ticks_ms() if _perf else 0
+            if _lay is not None:
+                _tk = _ticks_us()
                 layer.draw(dt)
-                if _perf:
-                    _cur = _ticks_diff(_ticks_ms(), _tk)   # CHROMEBRK: cursor
+                _lus = _ticks_diff(_ticks_us(), _tk)
+                # SUMMED, not assigned: the windowed WM draws several windows
+                # that share one layer id, and each would otherwise clobber the
+                # last -- exactly the case where the number has to be a total.
+                _lay[layer.id] = _lay.get(layer.id, 0) + _lus
+                if layer.id == "cursor":
+                    _cur = _lus / 1000.0            # CHROMEBRK: cursor
             else:
                 layer.draw(dt)
             _prev_domain = layer.domain
+        if _deep:
+            # Last PAINTED frame's split (the skip/quiet gates return above), so
+            # it keeps the same "sample whenever you like" contract as DRAW2.
+            self._pf_layers = _lay
         if _game_open:                              # game was the TOP layer
             _view()
+        if self._deferred:
+            # #184: the acknowledgment frame -- a transition queued this
+            # iteration paints its LOADING toast on top of everything; the
+            # flush below presents it, and the frame TAIL then runs the
+            # transition. The panel retains this frame for the whole stall.
+            self._draw_loading_toast()
         # #63: nothing should be left in an auto-batch by the time we present. The cart
         # sprites were flushed at _reset_canvas_state; the console's own chrome draws
         # Images immediately (never queued). This final flush is the last-line guard so
@@ -4601,6 +4917,18 @@ class Workstation:
             self._dirty = True
         self._last_ptr = self._ptr_state()
         self._frames_drawn += 1
+        if _deep:
+            # The tail after the flush: dirty clear, the covers/fling re-arms,
+            # and the pointer snapshot. Small by inspection -- measured so that
+            # `pre` can be read as the whole of the unnamed edge, not a guess.
+            self._pf_post = _ticks_diff(_ticks_us(), _fe0) - self._pf_pre \
+                - int(self._raw_draw * 1000) - int(self._raw_flush * 1000)
+        if self._deferred:
+            # #184: the flush above PRESENTED this frame's LOADING
+            # acknowledgment -- now run the queued transition(s) behind it.
+            # Last thing in the frame so the stall sits outside every timing
+            # bracket (the DEFER diag line names its cost instead).
+            self._run_deferred()
 
     def _frame_perf_end(self, frame_t0, cmp_ms, cur_ms):
         """The #43/#44 perf-capture frame tail (extracted from frame() so the hot
@@ -4623,6 +4951,12 @@ class Workstation:
             _draw = 0
         self._flush_ms = _ema(self._flush_ms, _flush)
         self._draw_ms = _ema(self._draw_ms, _draw)
+        # Everything below is the DEEP tail (DRAWBRK/CHROMEBRK splits + the
+        # HITCH logger's raw copies): diag-session data, and 6 boxed floats +
+        # ~12 EMA calls of churn per frame -- perf_hud alone stops here (the
+        # chip shows fps/draw/flush, all set above).
+        if not self.perf_capture:
+            return
         # DRAWBRK split: cart _update (logic) / cart _draw (render) / audio.tick /
         # console chrome (remainder = dock + cursor + overlays).
         _chrome = _draw - _upd - _cart - _audio
@@ -4644,6 +4978,11 @@ class Workstation:
         self._bar_ms = _ema(self._bar_ms, _bar)
         self._cmp_ms = _ema(self._cmp_ms, cmp_ms)
         self._cur_ms = _ema(self._cur_ms, cur_ms)
+        # #172: the declared-backdrop restore. NOT a fourth peer of the split --
+        # it is already inside _cart_ms (Player.tick charges it to render, where
+        # the cart's own cls would have landed). Tracked separately only so
+        # DRAWBRK can say how much of render is the backdrop.
+        self._bg_ms = _ema(self._bg_ms, self._pf_bg)
 
     # -- boot logo ------------------------------------------------------------
 
@@ -4723,6 +5062,60 @@ class Workstation:
         if other < 0:
             other = 0.0
         return (self._bar_ms, self._cmp_ms, self._cur_ms, other)
+
+    def perf_backdrop(self):
+        """The EMA ms of the declared-backdrop restore (#172) -- `background()`'s
+        per-frame repaint, run by Player.tick before the cart's _draw.
+
+        A SUB-slice of perf_breakdown()'s render, not a fourth bucket: it is the
+        cart's own drawing, standing in for the cls() it would otherwise make
+        first thing. It used to fall outside every measured span and surface as
+        CHROME, which on the T-Deck read as ~4.7ms of shell cost that no
+        CHROMEBRK bucket could name. Feeds DRAWBRK's `bg=`."""
+        return self._bg_ms
+
+    def perf_frame_edges(self):
+        """(pre_ms, post_ms): the parts of frame() OUTSIDE the measured draw span
+        (#172).
+
+        `draw` is timed from _frame_t0, which sits after the journal idle tick,
+        the splash expiry, the frameskip branch and the redraw gate; the tail
+        after the flush is outside it too. Both land inside the device loop's
+        `frm` stage, so DRAWBRK + flush has never summed to a whole frame and the
+        difference was being inferred by subtracting an EMA from a windowed mean
+        -- which spread the answer across -4..+15ms. Feeds LAYERBRK."""
+        return (self._pf_pre / 1000.0, self._pf_post / 1000.0)
+
+    def perf_layers(self):
+        """((layer_id, ms), ...) for the last PAINTED frame, dearest first (#172).
+
+        The per-layer split of the WM stack walk -- which is precisely what
+        CHROMEBRK reports as its unnamed `other` remainder. Not cart-gated (the
+        launcher and editor walks are the ones with no other instrument at all).
+        Empty tuple when perf capture has never painted a frame. Only meaningful
+        with perf_capture/perf_hud on; feeds the device LAYERBRK diag line."""
+        lay = self._pf_layers
+        if not lay:
+            return ()
+        rows = [(lid, us / 1000.0) for lid, us in lay.items()]
+        rows.sort(key=lambda r: -r[1])
+        return tuple(rows)
+
+    def perf_pointer(self):
+        """(total_ms, pre_ms, worst_ms, worst_id, claim_id, n) for the last
+        handle_pointer call (#184), or None if it never ran under capture.
+
+        `pre` is the bookkeeping before the routing walk (_tick_pointer_dt +
+        _game_xy + the focus probe), `worst`/`worst_id` the dearest single
+        layer.handle_pointer in the walk, `claim_id` the layer that consumed the
+        tap, `n` how many layers were visited. total - pre - worst says whether
+        the cost was one layer or spread; a total far BELOW the loop's own hp=
+        says the time went somewhere outside this method entirely."""
+        pf = self._pf_ptr
+        if not pf[5]:
+            return None
+        return (pf[0] / 1000.0, pf[1] / 1000.0, pf[2] / 1000.0,
+                pf[3] or "-", pf[4] or "-", pf[5])
 
     def perf_batch(self):
         """(flushes, sprites, maxrun) for the auto-batch this frame (#63 profiling). N

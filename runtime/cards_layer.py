@@ -205,7 +205,7 @@ class CardsLayer:
         # old "a" -> Code-editor shortcut (Code is one tap away on the bar ladder) -- that
         # shortcut is why a device tap of Enter "just entered code" instead of playing.
         if i.pressed("a") or i.pressed("run"):
-            ws._leave_menu()
+            ws.defer(ws._leave_menu)   # #184: PLAY runs behind the next paint
         else:
             ws._leave_or_home(ws._leave_menu)
         return True
@@ -256,7 +256,13 @@ class CardsLayer:
             return True
         ci = self._card_at(px, py)
         if ci is not None:
-            self.msel = ci                 # hover highlights
+            if ci != self.msel:
+                # Hover highlight -- marking dirty on the CHANGE (#177): the
+                # window content freeze reuses the retained buffer on
+                # position-only frames, so an unmarked msel move painted
+                # nothing inside the Editor window (desktop tier + web).
+                ws._dirty = True
+            self.msel = ci
         if click:
             # GO/CODE/CLOSE dissolved into the unified bar (fix B): PLAY runs+persists,
             # the Code tab is in the ladder, the context X exits.

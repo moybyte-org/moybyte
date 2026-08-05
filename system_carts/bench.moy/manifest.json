@@ -1,0 +1,36 @@
+{
+  "format": "moy-1",
+  "version": 3,
+  "title": "Bench",
+  "type": "game",
+  "runtime": "python",
+  "main": "main.py",
+  "system": true,
+  "canvas": {
+    "width": 320,
+    "height": 240,
+    "palette": "moy64"
+  },
+  "permissions": [
+    "graphics",
+    "input",
+    "sound"
+  ],
+  "safe_to_share": true,
+  "config": {
+    "frames": 400
+  },
+  "edit": [
+    {
+      "key": "frames",
+      "label": "GAME FRAMES",
+      "type": "choice",
+      "choices": [
+        200,
+        400,
+        900
+      ],
+      "card": "MEASURE {value} FRAMES"
+    }
+  ]
+}

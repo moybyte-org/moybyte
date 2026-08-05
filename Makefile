@@ -70,8 +70,33 @@ REQUIRE_IDF = @test -x $(IDF_PYTHON) || { echo "no ESP-IDF python at $(IDF_PYTHO
 REQUIRE_ESPTOOL = @$(PYTHON) -c "import esptool" >/dev/null 2>&1 || { echo "esptool is not installed -- run: $(PYTHON) -m pip install -e '.[device]'"; exit 1; }
 REQUIRE_PYSERIAL = @$(PYTHON) -c "import serial" >/dev/null 2>&1 || { echo "pyserial is not installed -- run: $(PYTHON) -m pip install -e '.[device]'"; exit 1; }
 
+# The suite is ~2000 host tests with no shared mutable state, so it parallelizes
+# cleanly: 3m25s -> ~42s on 12 cores, same pass/fail set. `-n auto` scales to the
+# machine (CI included). Serial fallback: make test JOBS=0
+#
+# The two env vars are not belt-and-braces; they fix different things.
+#
+# `env -u PYTHONPATH` is the ROOT cause. `make setup` builds a hermetic venv (no
+# --system-site-packages), but a venv only isolates site-packages -- it cannot
+# undo PYTHONPATH, which Python injects into sys.path REGARDLESS, and ahead of
+# the venv's own packages. A sourced ROS setup.bash exports /opt/ros/..., so on
+# this machine sys.path[1:3] was ROS and `import launch_testing` resolved outside
+# the venv. That is a general shadowing hazard (any ROS package outranks the same
+# name in .venv), not just a pytest one; the tests are simply where it surfaced.
+#
+# PYTEST_DISABLE_PLUGIN_AUTOLOAD is then a SPEED lever, not a correctness one:
+# pytest otherwise imports every plugin it can find via entry points, in each of
+# the N workers. Measured with PYTHONPATH already cleared: 75s autoloading vs 42s
+# without. We use no pytest plugin except xdist, which -p loads explicitly.
+#
+# (pyproject's addopts additionally blocks the two ROS plugins by name. That is
+# for a BARE `pytest tests/foo.py`, which gets neither of these env vars.)
+JOBS ?= auto
+PYTEST_ENV = env -u PYTHONPATH PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
+PYTEST_FLAGS = $(if $(filter-out 0,$(JOBS)),-p xdist -n $(JOBS),)
+
 test:
-	$(PYTHON) -m pytest
+	$(PYTEST_ENV) $(PYTHON) -m pytest $(PYTEST_FLAGS)
 
 # Build the project site into _site/ (the GitHub Pages source). Embeds the web
 # runner's dist/ as the playable player, so build that first for a live page:

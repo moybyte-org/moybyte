@@ -857,8 +857,10 @@ def test_music_tab_shows_unified_bar_ladder_play_and_x(tmp_path):
 
 
 def test_music_tab_play_hard_commits_via_save_sounds(tmp_path):
-    """#111: PLAY on the music tab hard-commits it (save_current -> save_sounds)
-    before running -- no SAVE icon exists to do it explicitly anymore."""
+    """#111: PLAY on an EDITED music tab hard-commits it (save_current ->
+    save_sounds) before running -- no SAVE icon exists to do it explicitly
+    anymore. (An untouched tab skips instead since music joined the #154
+    clean-tab guard -- that half is pinned by test_autosave_exit.)"""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
@@ -866,6 +868,7 @@ def test_music_tab_play_hard_commits_via_save_sounds(tmp_path):
     ws.open_in_editor()
     ws._open_music()
     drv.frame(1 / 30)
+    ws.music_ui.musicedit.toggle_rest()          # a real edit: PLAY must persist it
     calls = []
     orig = ws.save_sounds
     ws.save_sounds = lambda: (calls.append(1), orig())[-1]

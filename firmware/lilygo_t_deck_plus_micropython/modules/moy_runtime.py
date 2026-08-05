@@ -34,7 +34,7 @@ from device_input import TrackBall, Touch
 # the loop's hitch threshold + one-shot calib flag (mutated in place).
 from device_diag import (
     _diag_flush, _diag_perf_sample, _diag_hitch, _diag_drawbrk, _diag_draw2,
-    _diag_draw3, _diag_loop, _diag_chromebrk, _diag_homebrk, _diag_pump,
+    _diag_draw3, _diag_loop, _diag_chromebrk, _diag_layerbrk, _diag_homebrk, _diag_pump,
     _diag_i2cstat, _diag_calib, _diag_gc, HITCH_MS, _CALIB_DONE,
 )
 # The device WEB VIEW controller (#41/#22, extracted to device_webview.py).
@@ -412,6 +412,13 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     import moy_carts
     _boot_note("building the desktop")
     ws = Workstation(comp, canvas, inp, carts)
+    # cover_diet stays OFF (owner call 2026-08-03): thumbs remain warm across a
+    # game run -- the trade of a longer GC pause (~243ms vs ~150ms at the dieted
+    # live set, roughly one mid-play collect per 10s) was judged worse than any
+    # cover rebuild. The real fix is GC-INVISIBLE warm storage: moy_alloc-backed
+    # payloads the collector never scans (the moy_buf issue). The release
+    # mechanism (Workstation._release_cover_caches, keep-newest-6) stays built
+    # for that work to reuse.
     # #67 spike: say ONCE whether the auto-native cart loader engaged (the emitter
     # probe in player.py), so a serial capture can attribute logic-ms deltas.
     try:
@@ -546,7 +553,12 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         diag = None
     if diag is not None:
         try:
-            ws.perf_capture = True   # measure flush/draw for the diag perf samples
+            # 2026-08-03: capture follows Settings -> PERF DIAG, no longer
+            # unconditionally True -- the deep per-frame meters it arms
+            # (per-layer walk timing, per-op canvas timers, the EMA tail)
+            # measured ~1-1.5ms of EVERY kid frame. The 3s diag tick below
+            # re-syncs it live when the toggle flips.
+            ws.perf_capture = bool(getattr(ws, "diag_live", False))
         except Exception:
             pass
     _diag_log("boot", "desktop running kb=%d ball=%d touch=%d"
@@ -776,6 +788,8 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         _live = bool(getattr(ws, "diag_live", False))
         if diag is not None and _ticks_diff(_tnow, _diag_perf_at) >= 0:
             _diag_perf_at = _tnow + 3000
+            if ws.perf_capture != _live:
+                ws.perf_capture = _live   # capture follows the PERF DIAG toggle
             try:
                 diag.ECHO_LIVE = _live   # echo follows the toggle (boot lines echoed
             except Exception:            # before the first 3s tick either way)
@@ -789,6 +803,8 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             for _i in range(12):                # the steady-state HITCH never sees
                 _loop_acc[_i] = 0
             _diag_chromebrk(diag, ws)   # #66 lever 5: bar/composite/cursor chrome sub-split
+            _diag_layerbrk(diag, ws)    # #172: chrome's `other` IS the stack walk --
+                                        # this names the layer inside it
             _diag_homebrk(diag, ws)     # launcher wallpaper/grid/bar split (cart-gated
                                         # DRAWBRK never fires on the home screen)
             _diag_pump(diag, comp)      # #66 lever 4: bounce-feed pacing (SPI idle gaps)
@@ -820,9 +836,14 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
                 _t0 = _ticks_ms()
                 gc.collect()
                 _c_ms = _ticks_diff(_ticks_ms(), _t0)
-                print("Moybyte %d MEMX live=%dk free=%dk collect=%dms"
+                try:
+                    import moy_alloc as _ma_stats
+                    _ob = _ma_stats.stats()[1] // 1024   # #186 off-heap KB
+                except (ImportError, AttributeError):
+                    _ob = -1
+                print("Moybyte %d MEMX live=%dk free=%dk collect=%dms offheap=%dk"
                       % (_ticks_ms(), gc.mem_alloc() // 1024,
-                         gc.mem_free() // 1024, _c_ms))
+                         gc.mem_free() // 1024, _c_ms, _ob))
             _t_sd = _diag_flush(diag, ws)  # #68: cart exited -> persist the session's ring
         _diag_cart_prev = _cart_now
         # The periodic flush now ALSO needs Settings -> DIAG SD LOG (ws.diag_sd,

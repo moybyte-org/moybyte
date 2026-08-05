@@ -615,20 +615,22 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
     # is 1. `input` may be a bare stub (make_api probes / unit tests) with no
     # router, so fall back to the local path. Host == device.
     _prouter = getattr(input, "players", None)
+    _held = input.held        # bound once: btn is the hottest verb a cart calls,
+    _pressed = input.pressed  # and the attr lookup per call is dispatch tax (#66)
 
     def btn(name, player=0):
         if name not in CART_BUTTONS:
             return False
         if player:
             return _prouter.held(name, player) if _prouter is not None else False
-        return input.held(name)
+        return _held(name)
 
     def btnp(name, player=0):
         if name not in CART_BUTTONS:
             return False
         if player:
             return _prouter.pressed(name, player) if _prouter is not None else False
-        return input.pressed(name)
+        return _pressed(name)
 
     def players():
         # The connected player count (>=1) so a cart can offer a 2P/co-op mode.
@@ -940,6 +942,14 @@ class ConsoleDriver:
             self.pointer.click = False
             self.ws.handle_pointer()
             self.ws.mark_dirty()
+            if self.ws._deferred:
+                # #184: taps SCHEDULE their heavy transition now (run at the
+                # next frame's tail, behind the LOADING paint). This release
+                # pass ran after ws.frame(), so honor click()'s "the tap
+                # completes within this frame() call" contract by draining
+                # here -- click() is the tests/scripts verb; real mouse input
+                # rides touch()/touch_up() and the normal frame cadence.
+                self.ws._run_deferred()
 
     def rgb888(self):
         # The SYSTEM canvas is what the panel/window shows (the composited viewport +

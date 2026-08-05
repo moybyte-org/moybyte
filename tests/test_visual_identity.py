@@ -267,13 +267,16 @@ def test_action_rects_only_on_desktop_density(tmp_path):
 
 
 def test_desktop_card_buttons_dispatch(tmp_path):
-    """Clicking the selected card's PLAY / CHANGE rects dispatches the verbs."""
+    """Clicking the selected card's PLAY / CHANGE rects dispatches the verbs
+    (#184: a tap SCHEDULES the transition; the next frame lands it behind the
+    LOADING paint, so the assert follows a frame pump)."""
     ws = _ws(tmp_path, sys_size=(1024, 600), font_scale=2)
     _select_real_cart(ws)
     ar = ws.launcher.action_rects()
     home = _home_layer(ws)
     x, y, w, h = ar["change"]
     home.handle_pointer(x + w // 2, y + h // 2, True)
+    ws.frame(1 / 30)
     assert ws.screen == "menu"                    # CHANGE -> Studio/Editor
     # Back out, then PLAY via the button.
     ws.go_home()
@@ -281,6 +284,7 @@ def test_desktop_card_buttons_dispatch(tmp_path):
     ar = ws.launcher.action_rects()
     x, y, w, h = ar["play"]
     home.handle_pointer(x + w // 2, y + h // 2, True)
+    ws.frame(1 / 30)
     assert ws.screen == "desktop"                 # PLAY -> Player
 
 
@@ -293,11 +297,13 @@ def test_base_tier_zone_chips_dispatch(tmp_path):
     assert chips is not None
     x, y, w, h = chips["change"]
     assert home.zone_tap(x + 1, y + 1, ws.layout.zone_left)
+    ws.frame(1 / 30)                  # #184: the tap scheduled; a frame lands it
     assert ws.screen == "menu"
     ws.go_home()
     _select_real_cart(ws)
     x, y, w, h = chips["play"]
     assert home.zone_tap(x + 1, y + 1, ws.layout.zone_left)
+    ws.frame(1 / 30)
     assert ws.screen == "desktop"
     # With the Make tile selected there are no chips (nothing to claim).
     ws._exit_to_caller()

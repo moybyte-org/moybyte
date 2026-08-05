@@ -74,6 +74,17 @@ def _ticks_ms():
         return int(time.time() * 1000)
 
 
+def _ticks_us():
+    """Microsecond clock (#172/#184). The per-layer draw + pointer splits divide a
+    single-digit-ms cost across a handful of layers, where _ticks_ms's 1ms floor
+    would quantize most of it to zero. Same MicroPython-or-host shape as
+    _ticks_ms; _ticks_diff works on either (ticks_us wraps the same way)."""
+    try:
+        return time.ticks_us()
+    except AttributeError:
+        return int(time.perf_counter() * 1000000)
+
+
 def _ticks_diff(a, b):
     try:
         return time.ticks_diff(a, b)

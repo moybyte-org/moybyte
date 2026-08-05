@@ -43,6 +43,7 @@ firmware/lilygo_t_deck_plus_micropython/modules/wm.py
 firmware/lilygo_t_deck_plus_micropython/modules/audio.py
 firmware/lilygo_t_deck_plus_micropython/modules/console.py
 firmware/lilygo_t_deck_plus_micropython/modules/moy_carts.py
+firmware/lilygo_t_deck_plus_micropython/modules/moybuf.py
 firmware/lilygo_t_deck_plus_micropython/modules/blocks.py
 firmware/lilygo_t_deck_plus_micropython/modules/web_view.py
 firmware/lilygo_t_deck_plus_micropython/modules/chrome.py
@@ -69,6 +70,15 @@ ports/celeste.moy/
 # covered by the build-trees rule above).
 firmware/web_runner/dist/
 firmware/web_runner/dist-spec/
+# The toolchain (emsdk + a micropython checkout, ~2GB). No trailing slash:
+# a shared toolchain is often a SYMLINK to another checkout's copy, and a
+# `.build/` pattern matches directories only -- which is how one got
+# committed, absolute local path and all.
+firmware/web_runner/.build
+# The web-player CI job checks moy-spec out into the workspace to run the
+# conformance gate; keep that out of `git status` (and out of the build
+# manifest's dirty flag, which is the belt to this braces).
+.moy-spec/
 
 # Generated website (site/build.py assembles it from the canonical sources)
 _site/

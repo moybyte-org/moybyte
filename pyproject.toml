@@ -15,6 +15,7 @@ dependencies = []
 # BOTH cart languages are what a fresh clone is expected to be able to run.
 dev = [
   "pytest",
+  "pytest-xdist", # `make test` runs the ~2000 host tests across cores (3m25s -> ~40s)
   "pillow",       # GIF export: tools/make_site_gifs.py + simulate_desktop.py --gif
 ]
 sim = [
@@ -49,3 +50,18 @@ include = ["runtime*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Foreign pytest plugins reachable from PYTHONPATH are refused rather than
+# imported. A ROS install exports /opt/ros/.../site-packages, which carries
+# launch_testing + launch_testing_ros; their hook signatures are years stale and
+# pluggy rejects them at registration, so `pytest` dies before collecting a
+# single test on a machine that merely HAS ROS installed. We depend on no pytest
+# plugin except xdist (loaded explicitly by `make test`), so there is nothing to
+# lose. `-p no:NAME` for a plugin that isn't installed is a no-op.
+#
+# These are ENTRY-POINT names, not package names -- launch-testing-ros registers
+# itself as `launch_ros`, so blocking "launch_testing_ros" silently does nothing.
+# List what is actually reachable with:
+#   python -c "import importlib.metadata as m; print(sorted(e.name for d in m.distributions() for e in d.entry_points if e.group=='pytest11'))"
+# `make test` additionally sets PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 -- the blanket
+# version of this, which needs no updating when a new stale plugin shows up.
+addopts = "-p no:launch_testing -p no:launch_ros"

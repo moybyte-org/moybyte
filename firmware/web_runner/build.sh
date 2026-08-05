@@ -392,7 +392,18 @@ mkdir -p "${DIST_DIR}"
 cp "${STAGE_DIR}/carts.json" "${STAGE_DIR}/index.html" "${DIST_DIR}/"
 # worker.js is a SEPARATE file, not inlined: a module Worker needs its own URL.
 # It owns the VM + the frame loop; the page only replays (#176 smoothness).
-cp "${SCRIPT_DIR}/worker.js" "${DIST_DIR}/"
+# --spec flips its SPEC const, which boots the console with hud=False: the perf
+# HUD's FPS chip draws into the cart's OWN 320x240 raster, and a spec bundle's
+# frames are either a conformance golden or somebody's published game. Verified
+# rather than assumed -- a silent no-op here would ship the chip.
+if [ "${SPEC}" = "1" ]; then
+  sed 's/^const SPEC = false;$/const SPEC = true;/' \
+      "${SCRIPT_DIR}/worker.js" > "${DIST_DIR}/worker.js"
+  grep -q '^const SPEC = true;$' "${DIST_DIR}/worker.js" \
+    || { echo "!! worker.js: could not set the SPEC const"; exit 1; }
+else
+  cp "${SCRIPT_DIR}/worker.js" "${DIST_DIR}/"
+fi
 if [ "${STAGE_ONLY}" = "1" ]; then
   cp "${STAGE_DIR}/modules.json" "${DIST_DIR}/"
 else
@@ -400,5 +411,79 @@ else
   cp "${PORT_DIR}/build-moybyte/micropython.wasm" "${DIST_DIR}/"
   rm -f "${DIST_DIR}/modules.json"
 fi
+# ---------------------------------------------------------------------------
+# 7. MANIFEST.json -- the bundle's IDENTITY.
+#
+# A consumer that vendors this player (moy-spec's runner/ does) needs to be able
+# to say which build it holds and to verify it did not get a mangled copy. So
+# the build stamps the bundle rather than leaving the answer to whoever copied
+# the files: the source commit, the branch, and a sha256 per file.
+#
+# Deliberately NOT a timestamp-only stamp. "Built on Tuesday" cannot be checked;
+# a commit sha plus file hashes can, and it is what lets an update be a
+# reviewable diff (a pin moves, hashes move with it) instead of an opaque
+# 800 KB blob swap.
+# ---------------------------------------------------------------------------
+echo "== stamping MANIFEST.json"
+DIST_DIR="${DIST_DIR}" SPEC="${SPEC}" "${PY}" - <<'PYEOF'
+import hashlib, json, os, subprocess
+
+dist = os.environ["DIST_DIR"]
+
+
+def sh(*cmd):
+    try:
+        return subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode().strip()
+    except Exception:
+        return None
+
+
+spec = os.environ.get("SPEC") == "1"
+
+# carts.json is a build INPUT for a spec bundle -- the one cart --spec baked in
+# -- not part of the player: a consumer writes its own for whatever cart it is
+# running. Leaving it out of the manifest keeps the manifest describing exactly
+# what ships, so verifying a published tarball against it succeeds. In a normal
+# (non-spec) dist the shelf's cart set IS the page's content, so it stays.
+skip = {"MANIFEST.json"} | ({"carts.json"} if spec else set())
+
+files = {}
+for name in sorted(os.listdir(dist)):
+    path = os.path.join(dist, name)
+    if not os.path.isfile(path) or name in skip:
+        continue
+    with open(path, "rb") as f:
+        blob = f.read()
+    files[name] = {"bytes": len(blob), "sha256": hashlib.sha256(blob).hexdigest()}
+
+manifest = {
+    "bundle": "moy-player" if spec else "moybyte-web-runner",
+    # The spec bundle is the neutral single-cart player: no Moybyte branding, no
+    # perf HUD, exactly one cart. See build.sh --spec.
+    "spec_bundle": spec,
+    "source": {
+        "repo": "moybyte",
+        "commit": sh("git", "rev-parse", "HEAD"),
+        "branch": sh("git", "rev-parse", "--abbrev-ref", "HEAD"),
+        # Dirty means the artifact does not correspond to any commit, which a
+        # consumer pinning it needs to know before it trusts the sha above.
+        #
+        # TRACKED changes only. Plain `git status --porcelain` also lists
+        # untracked files, and the CI job that builds this checks moy-spec out
+        # INTO the workspace to run the conformance gate -- so every published
+        # build came back dirty, and moy-spec's own `player --update` then
+        # refused to pin it. Untracked files do not change which commit the
+        # artifact corresponds to, which is the only thing this flag claims.
+        "dirty": bool(sh("git", "status", "--porcelain", "--untracked-files=no")),
+    },
+    "files": files,
+}
+with open(os.path.join(dist, "MANIFEST.json"), "w") as f:
+    json.dump(manifest, f, indent=2, sort_keys=True)
+    f.write("\n")
+print("   %s @ %s%s" % (manifest["bundle"], (manifest["source"]["commit"] or "?")[:12],
+                        " (DIRTY)" if manifest["source"]["dirty"] else ""))
+PYEOF
+
 echo "== dist/ ready:"
 ls -la "${DIST_DIR}"

@@ -439,7 +439,12 @@ class Player:
         rl = getattr(ws.canvas, "reclaim_layers", None)
         if rl is not None:
             try:
-                rl()               # pool the dead run's layer buffers now
+                # pool the dead run's layer buffers now. The owner arg was
+                # missing until 2026-08-04: reclaim_layers(owner) raised a
+                # TypeError this except swallowed, so the release_world
+                # reclaim was silently dead and only the NEXT start() pooled
+                # (found by the #186 audit).
+                rl("cart")
             except Exception:  # noqa: BLE001
                 pass
         try:
@@ -512,11 +517,16 @@ class Player:
         if self._slow_logic_next and _ticks_diff(now, self._slow_logic_next) < 0:
             return
         self._slow_logic_next = now + 2000
-        free, alloc = _heap_stats()
+        # NO _heap_stats() here (2026-08-03): gc.mem_free()+gc.mem_alloc() each
+        # walk the whole 8MB heap table -- ~150ms on the T-Deck, landing right
+        # after the perf brackets close, i.e. charged to CHROME. With Brick
+        # Siege tripping the >=10ms gate at this 2s rate limit's ceiling, the
+        # diagnostic itself was the single largest stutter source in every
+        # measured build (ledger included: 20 of its 31 play hitches), and it
+        # arms off perf_hud too -- watching the FPS chip injected it.
         self._print_run_diag(
             "SLOWLOGIC",
-            "upd=%d render=%d audio=%d heap(free=%d alloc=%d)"
-            % (upd_ms, render_ms, audio_ms, free, alloc),
+            "upd=%d render=%d audio=%d" % (upd_ms, render_ms, audio_ms),
         )
 
     def start(self, project):
@@ -528,7 +538,11 @@ class Player:
         ws = self.ws
         self._run_seq += 1
         t0 = _ticks_ms()
-        h0 = _heap_stats()
+        # Heap stats only in measurement mode: each _heap_stats() is two full
+        # heap-table walks (~150ms on device). (-1, -1) is already the host
+        # sentinel, so the RUNSTART/RUNERR phases(...) format never changes.
+        _hs = _heap_stats if self._diag_enabled() else (lambda: (-1, -1))
+        h0 = _hs()
         ws._dirty = True               # a (re)started cart paints its first frame (#44)
         self._reset_exit_state()       # a fresh run drops any half-done exit gesture
         ws.input.game_view = None      # the `view(w, h)` verb is per-run (cart_quit
@@ -712,7 +726,7 @@ class Player:
             # become the exact silent device hang the panel exists to prevent.
             self.cart_error = _err_text(exc)
             self.crash_line = self._map_crash_line(_exc_cart_line(exc))
-            h1 = _heap_stats()
+            h1 = _hs()
             self.ns = ns
             self._start_diag = (t_reclaim, t_audio, t_api,
                                 locals().get("t_compile", t_compile_native),
@@ -731,7 +745,7 @@ class Player:
         # Declared background (#63): the api's frame-start restore hook. Cached here so
         # tick() pays one attribute read; it early-outs when the cart declared nothing.
         self._restore_bg = ns.get("_moy_restore_bg")
-        h1 = _heap_stats()
+        h1 = _hs()
         self._start_diag = (t_reclaim, t_audio, t_api, t_compile, t_exec, t_init,
                             _ticks_diff(_ticks_ms(), t0),
                             h0[0], h1[0], h0[1], h1[1])
@@ -750,6 +764,8 @@ class Player:
         error panel (crash-line mapping for Lua tracebacks is Phase 5)."""
         ws = self.ws
         t_reclaim, t_audio, t_api = t_pre
+        # Same measurement-mode gate as start(): no heap walks in kid mode.
+        _hs = _heap_stats if self._diag_enabled() else (lambda: (-1, -1))
         self._native_ins = None        # RUNSTART diag: no auto-native on this path
         self._native_fail = None
         make_lua = getattr(ws, "lua_runtime", None)
@@ -782,7 +798,7 @@ class Player:
             # EDIT drops on the line exactly like a Python SyntaxError (#24)
             self.crash_line = _lua_cart_line(self.cart_error)
             self.ns = ns
-            h1 = _heap_stats()
+            h1 = _hs()
             self._start_diag = (t_reclaim, t_audio, t_api, 0, t_exec, t_init,
                                 _ticks_diff(_ticks_ms(), t0),
                                 h0[0], h1[0], h0[1], h1[1])
@@ -796,7 +812,7 @@ class Player:
         self._update = lua.update
         self._draw = lua.draw
         self._restore_bg = ns.get("_moy_restore_bg")
-        h1 = _heap_stats()
+        h1 = _hs()
         self._start_diag = (t_reclaim, t_audio, t_api, 0, t_exec, t_init,
                             _ticks_diff(_ticks_ms(), t0),
                             h0[0], h1[0], h0[1], h1[1])
@@ -832,9 +848,29 @@ class Player:
                 # its frame runs, so a naive cart draws only its actors. No-op (one
                 # early-out) when the cart never called background(). Skipped on a
                 # frameskip logic-only tick (nothing draws over it this frame).
+                #
+                # TIMED, and charged to RENDER (#172, measured on glass
+                # 2026-08-02). This restore is the cart's own drawing -- it
+                # stands in for the cls() a cart would otherwise make as _draw's
+                # first call -- but it runs before the render bracket opens
+                # below, so its cost used to fall out of `draw - upd - cart -
+                # audio` as CHROME. On the T-Deck that put ~4.7ms of Brick
+                # Siege's frame under a bucket named for the shell: chrome read
+                # 7.03ms with CHROMEBRK naming none of it (bar=0.00 cmp=0.01
+                # cur=0.06), which is what sent #172 hunting the shell for a
+                # regression that was never there.
+                #
+                # The control is brick_siege_lua, the same game clearing
+                # explicitly inside _draw ("the draw stream is IDENTICAL either
+                # way", its own comment): desktop-minus-render 2.20ms vs the
+                # Python twin's 6.58ms, for identical pixels. Counting it here
+                # makes the two languages' splits comparable, which is the whole
+                # point of the bucket.
+                _tb = _ticks_ms() if _perf else 0
                 rb = self._restore_bg
                 if render and rb is not None:
                     rb()
+                bg = _ticks_diff(_ticks_ms(), _tb) if _perf else 0
                 # Multiplayer (#65): deliver any inbound net.* messages to the cart's
                 # on_net handler BEFORE its _update runs (incoming shared state applied
                 # first -- the lockstep-friendly order). Every logic tick, incl. a
@@ -852,11 +888,12 @@ class Player:
                     ws.audio.tick(dt)      # advance/feed playback (#16)
                 if _perf:
                     upd = _ticks_diff(_tm, _ts)           # cart _update -> game LOGIC
-                    cart = _ticks_diff(_td, _tm)          # cart _draw -> RENDERING
+                    cart = _ticks_diff(_td, _tm) + bg     # cart _draw + backdrop -> RENDERING
                     aud = _ticks_diff(_ticks_ms(), _td)   # audio.tick (mixer feed)
                     ws._pf_upd = upd
                     ws._pf_cart = cart
                     ws._pf_audio = aud
+                    ws._pf_bg = bg        # the backdrop's share of cart, for DRAWBRK
                     self._maybe_diag_slow_logic(upd, cart, aud)
             except Exception as exc:  # noqa: BLE001
                 # A cart that raises mid-frame must NOT escape the loop (the

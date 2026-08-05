@@ -40,6 +40,52 @@ except ImportError:
     _FONT8 = None
     _FONT8_FIRST = 0x20
 
+
+def _text_bytes(s):
+    """A print() argument as bytes (moy SPEC.md 6: print walks bytes).
+
+    moy_lua hands back bytes for a Lua string that is not valid UTF-8, since a
+    MicroPython str cannot hold one. str(s) on that would draw the literal
+    "b'...'", so the conversion has to be this and not that. A str is
+    UTF-8-encoded, which is the same buffer moy_gfx.text would have taken from
+    it anyway."""
+    if isinstance(s, (bytes, bytearray)):
+        return s
+    return str(s).encode("utf-8")
+
+
+def _fb_text(s):
+    """The same bytes as a str framebuf.text can take -- the no-moy_gfx fallback.
+
+    framebuf.text needs a str, and no str holds byte 0xFF. Every byte outside
+    the font's 0x20-0x7F draws nothing in the native path and still advances a
+    cell, so mapping those to a SPACE gives the fallback identical pixels and
+    identical spacing rather than a hole where the cursor drifts."""
+    b = _text_bytes(s)
+    out = bytearray(len(b))
+    for i in range(len(b)):
+        ch = b[i]
+        out[i] = ch if 0x20 <= ch <= 0x7F else 0x20
+    return out.decode()
+
+# #186 moy_buf: an image whose .pix already lives OFF the gc heap (a cover --
+# memoryview pix) gets its RGB565 bakes off-heap too, so the whole cover stops
+# taxing the GC mark phase. The owner (console._free_cover_img) frees pix and
+# bakes together at eviction. Everything else (sheet tiles, paint images,
+# wallpaper blits) keeps gc bytearrays -- their owners drop them implicitly
+# (sheet gen bumps, cart ns teardown) and an explicit free there would leak.
+try:
+    import moybuf as _moybuf
+except ImportError:
+    _moybuf = None
+
+
+def _bake_buf(img, nbytes):
+    """A bake buffer riding its image's residency: off-heap iff img.pix is."""
+    if _moybuf is not None and isinstance(img.pix, memoryview):
+        return _moybuf.alloc(nbytes)
+    return bytearray(nbytes)
+
 # MOY64 palette as RGB565 (generated from runtime/palette.py; no colorsys here).
 PAL565 = (
     0x0000, 0x194A, 0x792A, 0x042A, 0xAA86, 0x5AA9, 0xC618, 0xFF9D,
@@ -714,18 +760,28 @@ class DeviceCanvas:
         make_ctx = getattr(gfx, "make_draw_ctx", None)
         if make_ctx is None:
             return False               # older firmware: keep the Python verbs
-        if self._pump is not None:
-            # T-Deck ROOT canvas only: _fill pokes the SRAM-bounce flush pump
-            # between native ops (#66), and a C gate has no cheap way back into
-            # Python to do that. Layers on both boards and the P4 root have no
-            # pump, so everything that matters here still gates.
-            return False
         st = array("i", bytearray(4 * _ST_LEN))
         pal = array("H", bytearray(2 * 64))
         try:
             ctx = make_ctx(self, st, pal, self._batch_arr, _FONT8, _FONT8_FIRST)
         except Exception:  # noqa: BLE001 -- never let a probe break a canvas
             return False
+        if self._pump is not None:
+            # T-Deck ROOT canvas (#163 door 1). The gates were REFUSED here for
+            # a year of lore: _fill pokes the SRAM-bounce flush pump between
+            # native ops (#66) and "a C gate has no cheap way back into Python
+            # to do that". The per-op poke was never load-bearing, though --
+            # the pump only FEEDS the in-flight partial flush, and a starved
+            # pump degrades to a longer synchronous tail in comp.flush(),
+            # never a glitch. So the ctx now upcalls the pump itself every
+            # GATE_PUMP_EVERY gated ops (~128us at gate speed -- DENSER than
+            # the old per-fill pokes whenever more than 2 fills run). An older
+            # moy_gfx without set_pump keeps the old refusal: ungated Python
+            # verbs, per-op pokes, exactly the pre-door-1 behavior.
+            sp = getattr(ctx, "set_pump", None)
+            if sp is None:
+                return False
+            sp(self._pump)
         # Grab the bound Python methods BEFORE shadowing them: they become the
         # gates' fallbacks (and on P4SystemCanvas that correctly picks up the
         # font_scale-aware print override).
@@ -956,12 +1012,11 @@ class DeviceCanvas:
         if ctx is not None:
             ctx.fill_rects(arr, -1 if n is None else n, ox, oy, c)
             return
-        # #167: the T-Deck ROOT canvas never installs the gates (its _fill pokes
-        # the SRAM-bounce pump, see _install_draw_gates), so without this lane the
-        # "batch" below is one INTERPRETER rect() per span -- the exact dispatch
-        # cost #163 exists to delete, silently absent on that board. fill_spans
-        # takes buffer/camera/clip as plain args like circ/line, so it works on
-        # every canvas whether or not the gate is there.
+        # #167: this lane was built when the T-Deck ROOT canvas refused the
+        # gates (the pump handshake, since solved -- #163 door 1: the ctx
+        # upcalls the pump every N ops, see _install_draw_gates). It survives
+        # as the OLD-moy_gfx fallback: fill_spans takes buffer/camera/clip as
+        # plain args like circ/line, so it works with no gate at all.
         gfx = self._gfx
         fs = None if gfx is None else getattr(gfx, "fill_spans", None)
         if fs is not None:
@@ -1195,7 +1250,7 @@ class DeviceCanvas:
 
         w = img.w * scale
         h = img.h * scale
-        buf = bytearray(w * h * 2)
+        buf = _bake_buf(img, w * h * 2)   # #186: off-heap for off-heap images
         fb = framebuf.FrameBuffer(buf, w, h, framebuf.RGB565)
         fb.fill(_RGB_KEY)
         pal = PAL565_WIRE
@@ -1233,6 +1288,14 @@ class DeviceCanvas:
         if var is None:
             var = img._rgb_variants = {}
         elif len(var) >= 6:
+            if _moybuf is not None:
+                # #186: off-heap variants must be returned before the dict
+                # forgets them -- EXCEPT the buffer the hot _rgb slot still
+                # aliases (it frees when the image is evicted, or when a
+                # later re-bake drops it from both places).
+                for _v in var.values():
+                    if isinstance(_v[0], memoryview) and _v[0] is not img._rgb:
+                        _moybuf.free(_v[0])
             var.clear()
         var[(scale, flip, self._palgen)] = (buf, w, h)
         self._rgb_bakes += 1
@@ -1244,7 +1307,7 @@ class DeviceCanvas:
         # The "images are data, not draw calls" bake (#63 Fold 3), off the hot path.
         w = img.w
         h = img.h
-        buf = bytearray(w * h * 2)
+        buf = _bake_buf(img, w * h * 2)   # #186: off-heap for off-heap images
         self._gfx.blit_indices(buf, w, h, 0, 0, img.pix, w, h, _PAL565_WIRE_BUF)
         img._rgb_i = buf
 
@@ -1661,7 +1724,7 @@ class DeviceCanvas:
             # is gated here like _fill's (see its note).
             _prof = self._prof
             _t0 = _ticks_us() if _prof else 0
-            self._gfx_text(self._buf, self._stride, self._bh, str(s), int(x), int(y),
+            self._gfx_text(self._buf, self._stride, self._bh, _text_bytes(s), int(x), int(y),
                            PAL565_WIRE[self._pal_map[c & 63]],
                            _FONT8, _FONT8_FIRST, 1,
                            self._cam_x, self._cam_y,
@@ -1672,7 +1735,7 @@ class DeviceCanvas:
             if self._pump is not None:
                 self._pump()           # #66: feed the bounce flush between native ops
             return
-        self._fb.text(str(s), int(x) - self._cam_x, int(y) - self._cam_y, self._col(c))
+        self._fb.text(_fb_text(s), int(x) - self._cam_x, int(y) - self._cam_y, self._col(c))
 
     def blit_indices(self, indices, iw, ih, x, y):
         # Place an iw x ih palette-INDEX bitmap (1 byte/pixel) at (x, y), converting each index

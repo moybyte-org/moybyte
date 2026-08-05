@@ -1126,6 +1126,8 @@ typedef struct _moy_gfx_draw_ctx_obj_t {
     mp_obj_t pal_obj;        // held: array('H')
     mp_obj_t batch_obj;      // held: the sprite queue array('h'), or None
     mp_obj_t font_obj;       // held: the petme128 blob
+    mp_obj_t pump;           // #163 door 1: bounce-pump upcall, or mp_const_none
+    int32_t pump_ctr;        // gated ops until the next pump upcall
     uint16_t *px;            // destination (gc never moves objects)
     size_t cap;              // destination capacity in pixels
     int32_t *st;
@@ -1136,6 +1138,24 @@ typedef struct _moy_gfx_draw_ctx_obj_t {
     mp_int_t nglyphs;
     mp_int_t first;
 } moy_gfx_draw_ctx_obj_t;
+
+// #163 door 1: how many gated ops run between two bounce-pump upcalls on a
+// canvas that registered one (set_pump -- the T-Deck ROOT canvas). The
+// per-op Python poke was the reason the gates were refused there; the pump
+// only FEEDS the in-flight partial flush, so its cadence just has to beat
+// the SPI draining a bounce strip -- at ~8us/gated-op, 16 ops is ~128us
+// between pokes, denser than the per-fill pokes were at the old ~65us/call
+// whenever more than 2 fills run. A starved pump costs a longer synchronous
+// tail in comp.flush(), never a glitch.
+#define GATE_PUMP_EVERY 16
+
+static inline void gate_pump(moy_gfx_draw_ctx_obj_t *c, mp_int_t nops) {
+    if (c->pump == mp_const_none) return;
+    c->pump_ctr -= (int32_t)nops;
+    if (c->pump_ctr > 0) return;
+    c->pump_ctr = GATE_PUMP_EVERY;
+    mp_call_function_0(c->pump);
+}
 
 // set_buf(buf): re-point at the compositor's current back buffer. Called once
 // per frame from DeviceCanvas.sync_back -- the DPI double buffer ping-pongs, so
@@ -1150,6 +1170,19 @@ static mp_obj_t moy_gfx_draw_ctx_set_buf(mp_obj_t self_in, mp_obj_t buf_obj) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(moy_gfx_draw_ctx_set_buf_obj,
                                  moy_gfx_draw_ctx_set_buf);
+
+// set_pump(fn): register the bounce-pump upcall (#163 door 1 -- the T-Deck
+// root canvas; every other canvas never calls this). fn is called every
+// GATE_PUMP_EVERY gated ops; None unregisters. Its PRESENCE is also the
+// version probe _install_draw_gates uses before gating a pumped canvas.
+static mp_obj_t moy_gfx_draw_ctx_set_pump(mp_obj_t self_in, mp_obj_t fn) {
+    moy_gfx_draw_ctx_obj_t *c = MP_OBJ_TO_PTR(self_in);
+    c->pump = fn;
+    c->pump_ctr = GATE_PUMP_EVERY;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(moy_gfx_draw_ctx_set_pump_obj,
+                                 moy_gfx_draw_ctx_set_pump);
 
 static inline void gate_fill(moy_gfx_draw_ctx_obj_t *c, mp_int_t x, mp_int_t y,
                              mp_int_t w, mp_int_t h, uint16_t col);
@@ -1200,6 +1233,7 @@ static mp_obj_t moy_gfx_draw_ctx_fill_rects(size_t n_args, const mp_obj_t *a) {
     }
     st[ST_N_FILL] += n;
     if (st[ST_PROF]) st[ST_T_FILL] += (int32_t)(mp_hal_ticks_us() - t0);
+    gate_pump(c, n);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_draw_ctx_fill_rects_obj,
@@ -1207,6 +1241,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_draw_ctx_fill_rects_obj,
 
 static const mp_rom_map_elem_t moy_gfx_draw_ctx_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_set_buf), MP_ROM_PTR(&moy_gfx_draw_ctx_set_buf_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_pump), MP_ROM_PTR(&moy_gfx_draw_ctx_set_pump_obj) },
     { MP_ROM_QSTR(MP_QSTR_fill_rects),
       MP_ROM_PTR(&moy_gfx_draw_ctx_fill_rects_obj) },
 };
@@ -1306,6 +1341,7 @@ static mp_obj_t draw_gate_call(mp_obj_t self_in, size_t n_args, size_t n_kw,
                          st[ST_CX0], st[ST_CY0], st[ST_CX1], st[ST_CY1]);
         st[ST_N_TEXT]++;
         if (st[ST_PROF]) st[ST_T_TEXT] += (int32_t)(mp_hal_ticks_us() - t0);
+        gate_pump(c, 1);
         return mp_const_none;
     }
 
@@ -1319,6 +1355,7 @@ static mp_obj_t draw_gate_call(mp_obj_t self_in, size_t n_args, size_t n_kw,
         gate_fill(c, x, y, 1, 1, c->pal[(size_t)(ci & 63) % c->npal]);
         st[ST_N_FILL]++;
         if (st[ST_PROF]) st[ST_T_FILL] += (int32_t)(mp_hal_ticks_us() - t0);
+        gate_pump(c, 1);
         return mp_const_none;
     }
 
@@ -1344,6 +1381,7 @@ static mp_obj_t draw_gate_call(mp_obj_t self_in, size_t n_args, size_t n_kw,
     }
     st[ST_N_FILL]++;
     if (st[ST_PROF]) st[ST_T_FILL] += (int32_t)(mp_hal_ticks_us() - t0);
+    gate_pump(c, 1);
     return mp_const_none;
 }
 
@@ -1380,6 +1418,8 @@ static mp_obj_t moy_gfx_make_draw_ctx(size_t n_args, const mp_obj_t *a) {
     c->pal_obj = a[2];
     c->batch_obj = a[3];
     c->font_obj = a[4];
+    c->pump = mp_const_none;   // #163 door 1: set_pump registers one (root canvas)
+    c->pump_ctr = GATE_PUMP_EVERY;
     c->px = NULL;
     c->cap = 0;
     c->st = (int32_t *)sbi.buf;

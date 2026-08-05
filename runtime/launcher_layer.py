@@ -1196,12 +1196,14 @@ class LauncherHomeLayer:
         if i.pressed("down"):
             ws.launcher.nav2d(0, 1)
         if i.pressed("a") or i.pressed("run"):
-            ws.launch_selected()             # launcher tap = RUN the selected cart
+            # #184: DEFERRED -- the cart start runs behind the next painted
+            # frame (LOADING toast), never inside this input dispatch.
+            ws.defer(ws.launch_selected)     # launcher tap = RUN the selected cart
         if i.pressed("code"):
             # CHANGE (visual identity v1 Section 1.2): open the selected cartridge
             # in place in the Studio/Editor, landing on Config. The keyboard route
             # to the second verb; PLAY stays the primary activation above.
-            ws.change_selected()
+            ws.defer(ws.change_selected)
         return True
 
     def handle_pointer(self, px, py, click):
@@ -1238,10 +1240,10 @@ class LauncherHomeLayer:
             ar = ws.launcher.action_rects()
             if ar is not None:
                 if self._in(px, py, ar["play"]):
-                    ws.launch_selected()
+                    ws.defer(ws.launch_selected)   # #184: start behind the paint
                     return True
                 if self._in(px, py, ar["change"]):
-                    ws.change_selected()
+                    ws.defer(ws.change_selected)
                     return True
         # The grid's press/drag/release machine: returns an index only on a clean
         # tap release -- the launcher tap = RUN the selected cart.
@@ -1249,7 +1251,9 @@ class LauncherHomeLayer:
                                       dt_ms=ws._pointer_dt_ms)
         if i is not None:
             ws.launcher.sel = i
-            ws.launch_selected()
+            # #184: the tap frame paints the moved selection + LOADING first;
+            # the cart start (the launcher's 1.5-2.3s stall) runs behind it.
+            ws.defer(ws.launch_selected)
             return True
         if click or down:
             self._lhover = (px, py)   # track the finger so the release frame
@@ -1358,10 +1362,10 @@ class LauncherHomeLayer:
             rect if rect is not None else ws.layout.zone_left)
         if chips is not None:
             if self._in(px, py, chips["play"]):
-                ws.launch_selected()
+                ws.defer(ws.launch_selected)   # #184: start behind the paint
                 return True
             if self._in(px, py, chips["change"]):
-                ws.change_selected()
+                ws.defer(ws.change_selected)
                 return True
         return False
 
@@ -1579,7 +1583,8 @@ class EditorPickerLayer:
             self._disarm_delete(); ws.picker.nav2d(0, 1)
         if i.pressed("a") or i.pressed("run"):
             self._disarm_delete()
-            ws.pick_selected()               # open the picked cart in the Editor (or + New)
+            # #184: deferred -- the workspace open runs behind the next paint
+            ws.defer(ws.pick_selected)       # open the picked cart in the Editor (or + New)
         if i.pressed("b") or i.pressed("home") or i.pressed("stop"):
             self._disarm_delete()
             ws.exit()                        # back to the launcher root
@@ -1603,7 +1608,9 @@ class EditorPickerLayer:
         if i is not None:
             self._disarm_delete()
             ws.picker.sel = i
-            ws.pick_selected()
+            # #184: the tap frame paints the moved selection + LOADING first;
+            # the workspace open + Editor build runs behind it.
+            ws.defer(ws.pick_selected)
             return True
         if click or down:
             if ws.picker.dragging:
@@ -1620,7 +1627,13 @@ class EditorPickerLayer:
             i = ws.picker.tile_at(px, py)
             if i is not None:
                 self._disarm_delete()
-                ws.picker.sel = i
+                if i != ws.picker.sel:
+                    ws.picker.sel = i
+                    # A real selection move must MARK DIRTY (#177): inside the
+                    # make window the content freeze reuses the retained buffer
+                    # on position-only frames, so an unmarked hover-select
+                    # painted nothing (dead on the desktop tier + web).
+                    ws._dirty = True
         return True
 
     # -- the lent left zone (Stage 4, #46 zoned bar) --------------------------

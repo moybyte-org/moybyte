@@ -58,6 +58,8 @@ TITLE_TO_FOLDER = {
     "Coin Quest": "coin_quest",
     "Beeper": "beeper",
     "Letter Blitz": "letter_blitz",
+    "Bench": "bench",
+    "Bench Lua": "bench_lua",
     "Paint": "paint",
     "Appearance": "theme_picker",
     "Writer": "writer",

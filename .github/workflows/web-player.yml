@@ -1,0 +1,173 @@
+name: Web player
+
+# Build the moy web player and publish it to a rolling release per branch, the
+# same shape firmware-build.yml uses for the board images.
+#
+# WHY THIS EXISTS. moy-spec vendors this player in its runner/ directory, and
+# until now that copy was made by hand out of a local dist-spec/. That is a
+# problem in both directions: moy-spec cannot say which build it holds, and
+# nobody outside this machine can produce one (the toolchain is emsdk plus a
+# MicroPython checkout). A published, hashed artifact turns "copy these three
+# files" into "pin this release".
+#
+# WHAT MAKES IT WORTH TRUSTING is the conformance gate below, not the build. The
+# player is what moy SPEC.md 11 names as the tiebleaker for golden frames, so a
+# published player that fails the conformance suite would be worse than no
+# publish at all -- it would be a wrong answer with authority. The gate runs the
+# suite headlessly (plain node, no browser, no npm) and the publish job will not
+# start unless every core scene is pixel-identical.
+#
+# Two channels, matching firmware-build.yml and CLAUDE.md's branch model:
+#   master -> player-latest    dev -> player-beta
+# Any other ref builds and gates but never publishes: an unreviewed branch must
+# not be able to hand itself to the spec repo.
+
+on:
+  push:
+    branches: ["master", "main", "dev"]
+    paths:
+      - "firmware/web_runner/**"
+      - "runtime/**"
+      - "firmware/lilygo_t_deck_plus_micropython/native/**"
+      - ".github/workflows/web-player.yml"
+  pull_request:
+    branches: ["master", "main", "dev"]
+    paths:
+      - "firmware/web_runner/**"
+      - "runtime/**"
+      - "firmware/lilygo_t_deck_plus_micropython/native/**"
+  workflow_dispatch:
+
+concurrency:
+  # A newer push supersedes an in-flight build of the same ref; the toolchain
+  # step is long enough that queued duplicates are pure waste.
+  group: web-player-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build + conformance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out moybyte
+        uses: actions/checkout@v4
+
+      - name: Check out moy-spec
+        uses: actions/checkout@v4
+        with:
+          repository: moybyte-org/moy-spec
+          path: .moy-spec
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # emsdk plus the MicroPython checkout is ~2 GB and neither changes between
+      # runs; without this every build spends most of its wall clock cloning.
+      # Keyed on the pinned MicroPython tag so bumping it invalidates the cache.
+      - name: Cache the web-runner toolchain
+        uses: actions/cache@v4
+        with:
+          path: firmware/web_runner/.build
+          key: web-runner-toolchain-${{ runner.os }}-mpy-v1.28.0-v1
+          restore-keys: web-runner-toolchain-${{ runner.os }}-
+
+      - name: Build the spec bundle
+        run: ./build.sh --spec
+        working-directory: firmware/web_runner
+
+      # THE GATE. moy-spec's harness boots this exact bundle under node, runs
+      # every conformance cart through it, and diffs each frame against the
+      # golden. Non-zero exit means a core scene differs, and then nothing
+      # publishes -- see the header note on why a wrong tiebreaker is worse than
+      # a missing one.
+      - name: Conformance
+        run: |
+          python3 conformance/run.py \
+            --player "MOY_RUNNER=$GITHUB_WORKSPACE/firmware/web_runner/dist-spec \
+                      node conformance/player.mjs {cart} {out}" \
+            --diff conformance-diffs
+        working-directory: .moy-spec
+
+      # Only on a failure, and only then: the diff frames say WHERE a scene
+      # differs, which a log line cannot.
+      - name: Upload conformance diffs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-diffs
+          path: .moy-spec/conformance-diffs
+          if-no-files-found: ignore
+
+      - name: Package
+        run: |
+          cd firmware/web_runner/dist-spec
+          # carts.json is the ONE cart --spec bakes in. It is a build input, not
+          # part of the player: moy-spec's moy.py writes its own for whatever
+          # cart you are running, so shipping this one would only be a stale
+          # copy of somebody's test cart.
+          tar --exclude=carts.json -czf "$GITHUB_WORKSPACE/moy-player.tar.gz" .
+          echo "--- MANIFEST.json ---"
+          cat MANIFEST.json
+
+      - name: Upload the bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: moy-player
+          path: |
+            moy-player.tar.gz
+            firmware/web_runner/dist-spec/MANIFEST.json
+
+  publish:
+    name: publish to ${{ github.ref == 'refs/heads/master' && 'player-latest' || 'player-beta' }}
+    needs: build
+    # needs: build already means a red conformance gate stops us. The ref test is
+    # the second half: build-and-gate runs everywhere, publishing is for the two
+    # release branches only.
+    if: >-
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: moy-player
+          path: artifacts
+
+      - name: Publish to the rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # No checkout in this job (it only downloads the artifact), so gh
+          # cannot resolve the repo from git -- name it explicitly, or every
+          # release call dies with "not a git repository" (the maiden run did).
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref == 'refs/heads/master' && 'player-latest' || 'player-beta' }}
+        run: |
+          set -euo pipefail
+          COMMIT="$(python3 -c "import json;print(json.load(open('artifacts/firmware/web_runner/dist-spec/MANIFEST.json'))['source']['commit'])")"
+          NOTES="$(printf '%s\n' \
+            "The moy web player, built from \`${GITHUB_REF_NAME}\` at \`${COMMIT}\`." \
+            "" \
+            "Passes the moy conformance suite (moy-spec \`conformance/\`): every core" \
+            "scene pixel-identical. Published only because it does -- see" \
+            ".github/workflows/web-player.yml." \
+            "" \
+            "\`MANIFEST.json\` carries a sha256 per file. Consumers pin against it;" \
+            "moy-spec's \`moy.py player --update\` verifies before it rewrites runner/.")"
+          # A ROLLING tag: the release is recreated in place, so the URL a
+          # consumer pins never moves and "player-beta" always means the head of
+          # dev. Deleting the release leaves the tag, hence the second delete.
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" \
+            --title "moy player ($GITHUB_REF_NAME)" \
+            --notes "$NOTES" \
+            --target "$GITHUB_SHA" \
+            $([ "$GITHUB_REF_NAME" = "master" ] || echo --prerelease) \
+            artifacts/moy-player.tar.gz \
+            artifacts/firmware/web_runner/dist-spec/MANIFEST.json

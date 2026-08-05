@@ -3090,6 +3090,7 @@ def test_micropython_offline_diag_wiring():
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
                + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    player = (Path("runtime") / "player.py").read_text(encoding="utf-8")
     # The _diag_* logging functions moved to device_diag.py (extracted from
     # moy_runtime.py); run_desktop still CALLS them (the _diag_X(...) asserts
     # stay vs runtime, the def/log-format asserts point at device_diag).
@@ -3138,16 +3139,31 @@ def test_micropython_offline_diag_wiring():
     # The shared console EXPOSES the numbers host-safely; the device SAMPLES them.
     assert "def perf_sample(self):" in console
     assert "self.perf_capture = False" in console         # default off -> host identical
-    assert "ws.perf_capture = True" in runtime            # device turns capture on
+    # 2026-08-03: capture is no longer unconditional -- it follows the persisted
+    # PERF DIAG toggle (the deep meters cost ~1-1.5ms/frame, a kid-mode tax),
+    # and the 3s diag tick re-syncs it live when the toggle flips.
+    assert 'ws.perf_capture = bool(getattr(ws, "diag_live", False))' in runtime
+    assert "ws.perf_capture = _live" in runtime           # the 3s re-sync
     assert "_perf = self.perf_hud or self.perf_capture" in console
 
     # DRAWBRK (#43 follow-up): the phase split of draw= into cart _update (logic) /
     # cart _draw (render) / audio.tick / console chrome, sampled alongside PERF so we
     # can see where the per-frame draw cost actually goes instead of guessing.
     assert "def perf_breakdown(self):" in console
-    assert 'diag.log("DRAWBRK", "logic=%.2f render=%.2f audio=%.2f chrome=%.2f"' in device_diag
+    assert 'diag.log("DRAWBRK", "logic=%.2f render=%.2f%s audio=%.2f chrome=%.2f"' in device_diag
     assert "_diag_drawbrk(diag, ws)" in runtime
     assert "ws.perf_breakdown()" in device_diag
+
+    # bg= (#172): render's declared-backdrop share. Player.tick TIMES the
+    # background() restore and charges it to render -- it runs before the render
+    # bracket opens, so it used to fall out of `draw - upd - cart - audio` and
+    # surface as CHROME. On glass that read as ~4.7ms of Brick Siege's frame
+    # under a bucket named for the shell, with CHROMEBRK naming none of it, which
+    # is what sent #172 hunting a shell regression that was never there.
+    assert "def perf_backdrop(self):" in console
+    assert "ws._pf_bg = bg" in player                      # timed by the writer
+    assert "+ bg     # cart _draw + backdrop" in player    # ...and folded into render
+    assert 'bg_s = (" (bg=%.2f)" % pb())' in device_diag
 
     # GC line (#63, sakura ~14fps profiling): the forced-collect pause + churn, sampled on
     # the ~3s cadence (gc.mem_alloc/free WALK the heap, so never per frame).

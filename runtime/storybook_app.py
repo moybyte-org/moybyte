@@ -374,7 +374,8 @@ class StorybookAppLayer(ListShellApp):
         self.page_i = i
         lay = self.layout
         self.editor = CodeEditor("\n".join(pages[i].get("text") or []),
-                                 lay.cols, lay.rows)
+                                 lay.cols, lay.rows,
+                                 clip=getattr(self.ws, "clipboard", None))
         # Typing continues the page: caret at the END of the words, not (0,0).
         self.editor.row = len(self.editor.lines) - 1
         self.editor.col = len(self.editor.lines[self.editor.row])

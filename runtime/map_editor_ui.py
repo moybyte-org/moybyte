@@ -837,7 +837,7 @@ class MapEditorUI:
         elif self._in(px, py, lay.close_btn):
             # CLOSE runs+leaves to the cart (ws._leave_menu is EditorApp.leave --
             # PLAY, itself a hard-commit trigger now, #111: no SAVE tap exists).
-            ws._leave_menu()
+            ws.defer(ws._leave_menu)   # #184: commit+run behind the next paint
 
     # -- drawing -----------------------------------------------------------------
 

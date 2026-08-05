@@ -29,6 +29,8 @@ TileMap gives the map tab. SAVE persists through Project.commit_scene (atomic
 write + the durable undo journal, Stage 1). The editor manages the cart's
 DEFAULT scene (multi-scene UX is a deferred follow-up, #85 decision log 4)."""
 
+from array import array
+
 try:
     import ui as _ui              # frozen on device
 except ImportError:  # pragma: no cover - host fallback
@@ -218,6 +220,8 @@ class SceneEditorUI:
         self._drag = None              # last pointer (px, py) during a view pan
         self._grab = (0, 0)            # world offset actor-origin - press (a drag
                                        # holds the sprite where the finger picked it)
+        self._tp_memo = None           # #163: palette-grid quad pack, keyed on
+                                       # (geometry, count) -- relayout invalidates
         sc = ws.sys_canvas
         self.layout = SceneLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
 
@@ -630,12 +634,15 @@ class SceneEditorUI:
         g = sheet.TILE
         if tm is not None:
             # Visible map cells, drawn at the zoom scale (the scene draws OVER
-            # the tilemap, #85 Section 4). Tile images cached per id per draw.
-            cache = {}
+            # the tilemap, #85 Section 4). Via spr_tile (#163): a contiguous
+            # run coalesces into ONE native blit_batch, where the old
+            # tile_image + spr pair paid an Image blit crossing PER CELL that
+            # no batch could collect (pixel parity pinned by the #63 suite).
             c0 = se.cam_x // g
             r0 = se.cam_y // g
             c1 = (se.cam_x + vw - 1) // g
             r1 = (se.cam_y + vh - 1) // g
+            spr_tile = cv.spr_tile
             for cy in range(r0, r1 + 1):
                 if cy < 0 or cy >= tm.h:
                     continue
@@ -649,12 +656,7 @@ class SceneEditorUI:
                         continue              # only whole cells (no clip bleed)
                     tid = tm.mget(cx, cy)
                     if tid >= 0:
-                        img = cache.get(tid)
-                        if img is None:
-                            img = sheet.tile_image(tid, -1)
-                            cache[tid] = img if img is not None else False
-                        if img:
-                            cv.spr(img, vx, vy, scale)
+                        spr_tile(sheet, tid, vx, vy, -1, scale, 0)
         # The fixed game viewport's frame at world (0,0)-(320,240): what a
         # non-panning cart shows. Each edge clamped to the view rectangle.
         self._frame_world(cv, 0, 0, 320, 240, NAMES["yellow"])
@@ -677,19 +679,46 @@ class SceneEditorUI:
                 if i == se.sel and side > 4:
                     cv.rectb(vx + 1, vy + 1, side - 2, side - 2, NAMES["white"])
         # -- tile palette (the stamp picker; the brush tile is boxed white).
+        # #163 conversion: the grid's chrome is a MEMOIZED quad pack -- one
+        # fill_rects paints every cell's black bg, one paints every dark
+        # border -- with the tile stamps as a single spr_tile run between
+        # them (one native blit_batch). Cells are disjoint rects, so the
+        # phase split is pixel-identical to the old per-cell rect/spr/rectb
+        # order; the brush cell's white border paints LAST over its dark
+        # twin (opaque, same final pixels as drawing it alone). Was ~250
+        # per-call verbs on an 80-cell pane; now 3 batched calls + a rectb.
         ids = self._palette_ids()
         tscale = max(1, lay.tp_cell // (sheet.TILE + 6))
-        for k in range(len(ids)):
-            tid = ids[k]
-            x = lay.tp_x0 + (k % lay.tp_cols) * lay.tp_cell
-            y = lay.tp_y0 + (k // lay.tp_cols) * lay.tp_cell
-            cv.rect(x, y, lay.tp_cell, lay.tp_cell, NAMES["black"])
-            img = sheet.tile_image(tid, -1)
-            if img is not None:
-                cv.spr(img, x + (lay.tp_cell - sheet.TILE * tscale) // 2,
-                       y + (lay.tp_cell - sheet.TILE * tscale) // 2, tscale)
-            cv.rectb(x, y, lay.tp_cell, lay.tp_cell,
-                     NAMES["white"] if tid == se.n else NAMES["dark_grey"])
+        npal = len(ids)
+        key = (lay.tp_x0, lay.tp_y0, lay.tp_cols, lay.tp_cell, npal)
+        memo = self._tp_memo
+        if memo is None or memo[0] != key:
+            cell = lay.tp_cell
+            bg = []
+            bd = []
+            for k in range(npal):
+                x = key[0] + (k % key[2]) * cell
+                y = key[1] + (k // key[2]) * cell
+                bg += [x, y, cell, cell, 0]        # ci unused: c overrides
+                bd += [x, y, cell, 1, 0,
+                       x, y + cell - 1, cell, 1, 0,
+                       x, y, 1, cell, 0,
+                       x + cell - 1, y, 1, cell, 0]
+            memo = (key, array("h", bg), array("h", bd))
+            self._tp_memo = memo
+        cv.fill_rects(memo[1], npal, 0, 0, NAMES["black"])
+        inset = (lay.tp_cell - sheet.TILE * tscale) // 2
+        for k in range(npal):
+            cv.spr_tile(sheet, ids[k],
+                        lay.tp_x0 + (k % lay.tp_cols) * lay.tp_cell + inset,
+                        lay.tp_y0 + (k // lay.tp_cols) * lay.tp_cell + inset,
+                        -1, tscale, 0)
+        cv.fill_rects(memo[2], npal * 4, 0, 0, NAMES["dark_grey"])
+        if se.n in ids:
+            k = ids.index(se.n)
+            cv.rectb(lay.tp_x0 + (k % lay.tp_cols) * lay.tp_cell,
+                     lay.tp_y0 + (k // lay.tp_cols) * lay.tp_cell,
+                     lay.tp_cell, lay.tp_cell, NAMES["white"])
         ws._btn("<", lay.tp_prev, NAMES["blue"], cv)
         ws._btn(">", lay.tp_next, NAMES["blue"], cv)
         # -- pan/zoom column + FLIP (props) in the corner slot.

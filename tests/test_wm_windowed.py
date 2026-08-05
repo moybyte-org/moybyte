@@ -147,10 +147,17 @@ def test_change_leaves_library_for_desktop_backdrop(tmp_path):
     assert ws.launcher.layout.w == 1024
 
     # Even a direct background dispatch at the old selected-card coordinates
-    # cannot activate the hidden Library.
+    # cannot activate the hidden Library. The desk may claim the tap for its
+    # own icons (the column is label-wide since #174), but the grid underneath
+    # must never run a cart or surface.
+    launched = []
+    original_launch = ws.launch_selected
+    ws.launch_selected = lambda *a, **k: (launched.append(1),
+                                          original_launch(*a, **k))
     tile = ws.launcher.tile_rect(ws.launcher.sel)
     ws.wm._backdrop_layer.handle_pointer(tile[0] + 2, tile[1] + 2, True)
-    assert ws.screen == "menu"
+    assert launched == []
+    assert ws.screen != "launcher" and "desk" in ws.wm._stack
 
 
 # ---------------------------------------------------------------------------
@@ -1647,3 +1654,57 @@ def test_view_scales_the_windowed_player_too(tmp_path):
     assert scale == max(1, min(cw // 128, ch // 128))
     assert scale > max(1, min(cw // 320, ch // 240))   # bigger than full-canvas
     assert ws.wm.game_xy(ox, oy) == (96, 56)
+def test_picker_hover_select_marks_dirty_inside_the_window(tmp_path):
+    """#177: the picker's hover-preview predates the content freeze -- it moved
+    sel WITHOUT marking dirty, so inside the make window the retained buffer
+    never repainted (state moved, pixels didn't: dead on desktop + web)."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    ws.open_picker()
+    drv.frame(1 / 30)
+    win = ws.wm._wins["make"]
+    p = ws.pointer
+    p.visible = True
+    p.down = False
+    ws.wm._install(win.ctx)
+    try:
+        t2 = ws.picker.tile_rect(2)
+    finally:
+        ws.wm._install(ws.wm._root_ctx)
+    cx, cy, _cw, _ch = win.content_rect()
+    p.x, p.y = 900, 560
+    ws.wm._route_pointer(900, 560, False)          # seed the hover tracker
+    ws._dirty = False
+    tx, ty = cx + t2[0] + 8, cy + t2[1] + 8
+    p.x, p.y = tx, ty
+    ws.wm._route_pointer(tx, ty, False)
+    assert ws.picker.sel == 2
+    assert ws._dirty, "hover-select must mark dirty or the window never repaints"
+
+
+def test_moving_cursor_leaves_no_trail_on_the_desk(tmp_path):
+    """The backdrop streak-skip (#155) assumed nothing above the desk needed
+    erasing. A VISIBLE cursor is drawn over the desk every painted frame, so
+    from the third consecutive moving frame on, skipping the restore baked a
+    trail of stale cursor sprites into the retained buffer. The skip now
+    yields to any drawn-pointer-state change while a cursor is visible."""
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    p = ws.pointer
+    p.visible = True
+    cv = ws.sys_canvas
+
+    def snap(x0):
+        return [cv.pix(x, y) for x in range(x0, x0 + 44) for y in range(326, 370)]
+
+    p.x, p.y = 400, 330
+    drv.frame(1 / 30)
+    base = {x: snap(x) for x in (500, 560, 620)}   # clean desk, cursor far away
+    stale = 0
+    for x in (500, 560, 620, 680, 740, 800):       # sweep across bare desk
+        p.x, p.y = x, 330
+        drv.frame(1 / 30)
+        for bx, b in base.items():
+            if abs(bx - x) >= 50:                  # away from the live cursor
+                stale += sum(1 for a, c in zip(b, snap(bx)) if a != c)
+    assert stale == 0, "stale cursor pixels remained on skipped desk frames"
