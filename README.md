@@ -336,3 +336,6 @@ author are yours. What each licence lets you do, in a table:
 
 *The kid- and parent-facing side of this project lives at
 [moybyte.com](https://moybyte.com). This README is for people reading the source.*
+
+*Most of the code here was written with Claude Code, directed and tested on
+hardware by a human.*
