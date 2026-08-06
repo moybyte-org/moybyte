@@ -22,23 +22,53 @@ the verbs whose GEOMETRY the spec defines route through libmoy:
 
 | | |
 |---|---|
-| **libmoy's** | `tri`, `sspr`, `tline` |
-| **still moybyte's** | `fill`, `fill_rect`, `blit565`, `blit565_scale`, `blit_map`, `blit_batch`, `spr_gate`, `circ`, `circb`, `line`, `text`, `copy_async`, `copy_wait`, `scroll_rect`, `blit_window`, `blit_indices`, `fill_spans`, `draw_ctx` |
+| **libmoy's** | `tri`, `sspr`, `tline`, `circ`, `circb`, `line` |
+| **measured and DECLINED** | `print`, `blit_map`, the sprite path (`blit565`/`blit_batch`/`spr_gate`) |
+| **no counterpart** | `fill`, `fill_rect`, `blit565_scale`, `copy_async`, `copy_wait`, `scroll_rect`, `blit_window`, `blit_indices`, `fill_spans`, `draw_ctx` |
 
-The second list is two different things. Most of it has **no libmoy
-counterpart** — async DMA, sprite batching, the scroll blit, the window
-composite, the draw-context gate — and never will; that is moybyte's
-compositor, not the spec's raster.
+The third row is moybyte's compositor, not the spec's raster: async DMA, the
+scroll blit, the window composite, the draw-context gate. `fill`/`fill_rect`
+belong there too despite `moy_cls`/`moy_rect` existing, because they are
+**viewport-aware** — a windowed layer clearing itself must not wipe the desktop
+it draws on, and libmoy's canvas has no such notion.
 
-But `fill_rect`, `circ`, `circb`, `line` and `text` **do** have counterparts and
-are still transcriptions. They stay for now because each is a small, closed
-loop that the conformance goldens already pin, and because moving them means
-moving the sprite path too (`blit565` is a 565→565 blit of a pre-scaled cache,
-which is a different strategy from `moy_spr` reading the raw sheet, and the
-cache exists because per-pixel palette lookup was too slow on the S3). That
-call wants an ESP32-S3 measurement, which does not exist yet.
+The second row is the interesting one, and it is a measurement rather than a
+preference. All four rasters hash identical on every verb; only the cost differs:
 
-## Why these three went first
+| verb | ESP32-S3 | ESP32-P4 | kept |
+|---|---|---|---|
+| `print` | libmoy **1.21× slower** | identical (18.8 µs/op either way) | moy_gfx |
+| `blit_map` | libmoy **1.54× slower** | libmoy 0.92× | moy_gfx |
+| `spr` | moy_gfx **6% faster** | libmoy 0.83× | moy_gfx |
+
+The causes are named, not mysterious. `moy_gfx_text_raw` hoists the clip and
+early-outs per glyph where `moy_print` walks bits through `moy_put`.
+`moy_map_draw` routes each cell through `moy_spr` and resolves colour per pixel,
+where `blit_map` copies 16-bit words out of a pre-baked RGB565 atlas. And the
+sprite path pairs that atlas with the #43 batch protocol — which, note, beats
+libmoy by only six percent, so that architecture is worth much less than its
+complexity suggests.
+
+**The S3 is what decides these, and the P4 disagrees with it on two of the
+three.** That is the whole reason both boards get measured: the constrained
+board is the one a cart is too slow on, and it is also the one that cannot be
+driven remotely (its USB-CDC RX is dead under the desktop), so its numbers come
+from the standalone A/B bench rather than from the console.
+
+`print` is the sharpest case, because SPEC.md §6 has no scale ("text is always
+8px") so the cart's `print` *is* scale 1 and could cross. It was routed through
+`moy_print`, measured identical on the P4, and **reverted on the S3 number** —
+the console draws chrome text by the dozen per frame there. Scale > 1 was never
+a cart anyway; that is this console's chrome at the #39 system font size, which
+is host business (SPEC.md §0).
+
+All three are worth revisiting if libmoy grows the per-row and per-glyph fast
+paths — they would benefit every libmoy host, which is the right place to fix
+them. `moy_circ` already took that route: it emitted one `moy_rect` per row
+until this console measured its own hand-written direct-span form faster, and
+the fix went **upstream** (moy-spec `ef01426`) rather than staying here.
+
+## Why the 3D verbs went first
 
 `provisional_tline` **failed on the board and passed on the host** — 2773
 pixels, 3.61%. The host and the device ran two hand-written copies of the same

@@ -81,15 +81,26 @@ could ride.
 colour, proven on silicon. That question is closed; the format choice is settled
 on performance, and B is what ships.
 
-**What is settled** is that §6 has goldens where §8.3 has none, so a hand-ported
-raster is at least *checkable* — the #167 3D verbs (`tri`/`sspr`/`tline`) are
-ported line-for-line from `moy_canvas.c` and cited in the source. But checkable
-only helps if something checks: on 2026-08-06 the board failed
+**Six verbs are libmoy's now (2026-08-07), and the hand-porting argument lost.**
+`tri`/`sspr`/`tline`/`circ`/`circb`/`line` in `moy_gfx` are CALLS into vendored
+libmoy (`native/moy_gfx/libmoy/`, built `MOY_PIXEL_RGB565`), not transcriptions
+of it. The reason is one measurement: on 2026-08-06 the board failed
 `provisional_tline` against the golden (2773 px, 3.61%) while the host passed it,
 because the only lane that exercises the REAL C kernel is on-glass conformance
-and it had never been run on that verb. `test_device_canvas_parity.py` compares
+and it had never been run on that verb — `test_device_canvas_parity.py` compares
 the host to a *Python transcription* of the kernel, which cannot catch the
-transcription being right and the C being wrong.
+transcription being right and the C being wrong. Routing the verb through the
+spec's own raster took it to **0 differing pixels**, all ten scenes pass on the
+P4, and the cart-level cost is nil (per-verb A/B within the bench's ±5% noise;
+per-cart fps unchanged across the roster). **`print`, `blit_map` and the sprite
+path were measured and DECLINED** — libmoy is 1.21×/1.54× slower and 6% slower
+respectively **on the S3**, which is the board that decides, even though the P4
+prefers libmoy on two of the three. `native/moy_gfx/libmoy/UPSTREAM.md` carries
+that table and the named causes; fixes belong upstream (`moy_circ` already went
+that way — moy-spec `ef01426`). Tooling: `tools/p4_perf.py` (per-cart fps),
+`tools/p4_bench.py` (the Bench cart's per-verb µs, and the Lua twin's on-glass
+report), `tools/p4_conformance.py --serve` (holds the board — opening the port
+REBOOTS it, which cost a full boot per scene; the suite went 12min → 4m45).
 
 **`tests/test_spec_conformance.py` is that gate** (suite vendored under
 `tests/spec_conformance/`, see its UPSTREAM.md). It replays the spec's recorded

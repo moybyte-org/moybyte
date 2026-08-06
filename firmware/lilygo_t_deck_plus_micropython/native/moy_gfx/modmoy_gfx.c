@@ -1279,31 +1279,17 @@ static mp_obj_t moy_gfx_text(size_t n_args, const mp_obj_t *a) {
     mp_get_buffer_raise(a[3], &sbi, MP_BUFFER_READ);
     mp_buffer_info_t fbi;
     mp_get_buffer_raise(a[7], &fbi, MP_BUFFER_READ);
-    // THE CART's text is scale 1 and goes through libmoy (#97). SPEC.md 6 is
-    // explicit that "print has no scale parameter; text is always 8px", and
-    // moybyte agrees -- DeviceCanvas.print hardcodes 1 and documents its own
-    // `scale` argument as accepted-and-ignored. So scale > 1 is never a cart:
-    // it is this console's CHROME at the #39 system font size, which is host
-    // business (SPEC.md 0) and keeps moybyte's kernel.
-    //
-    // libmoy uses its own compiled-in font rather than the blob passed here.
-    // Both are petme128 and SPEC.md 6 requires them byte-identical or text
-    // conformance fails -- so the `text` and `text_bytes` scenes are what
-    // license this, not the assumption.
-    if (mp_obj_get_int(a[9]) == 1) {
-        moy_canvas c;
-        mp_int_t cam_x = mp_obj_get_int(a[10]), cam_y = mp_obj_get_int(a[11]);
-        mp_int_t cx0 = mp_obj_get_int(a[12]), cy0 = mp_obj_get_int(a[13]);
-        mp_int_t cx1 = mp_obj_get_int(a[14]), cy1 = mp_obj_get_int(a[15]);
-        if (dw <= 0) return mp_const_none;
-        moy_gfx_clip(dw, dcap, &cx0, &cy0, &cx1, &cy1);
-        moy_gfx_canvas_solid(&c, dst, dw, dcap,
-                             (uint16_t)(mp_obj_get_int(a[6]) & 0xFFFF),
-                             cam_x, cam_y, cx0, cy0, cx1, cy1);
-        moy_print(&c, (const uint8_t *)sbi.buf, sbi.len,
-                  mp_obj_get_int(a[4]), mp_obj_get_int(a[5]), 0);
-        return mp_const_none;
-    }
+    // TEXT STAYS OURS, and the reason is a measurement rather than a
+    // principle. SPEC.md 6 has no scale ("text is always 8px") so the cart's
+    // print IS scale 1 and could route through moy_print -- and on a P4 that
+    // measured identical, 18.8us/op either way. On an ESP32-S3 the same swap
+    // measured 1.21x SLOWER (11648us vs 9642us on the bench's text scene),
+    // because moy_gfx_text_raw hoists the clip and early-outs per glyph while
+    // moy_print walks bits through moy_put. The S3 is the constrained board and
+    // the console draws chrome text by the dozen per frame, so the verb whose
+    // correctness was never in doubt keeps the kernel that is faster where it
+    // matters. Worth revisiting when moy_print gets the per-glyph hoist
+    // upstream -- see libmoy/UPSTREAM.md.
     moy_gfx_text_raw(dst, dcap, dw,
                      (const uint8_t *)sbi.buf, sbi.len,
                      mp_obj_get_int(a[4]), mp_obj_get_int(a[5]),

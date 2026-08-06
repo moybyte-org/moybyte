@@ -342,12 +342,31 @@ void moy_circ(moy_canvas *c, int cx, int cy, int r, int col)
      * circle instead of 2r+1 library calls. This was the slowest verb in the
      * console by 3x. It also leaves the raster with no libm dependency. */
     int dy, span = 0;
+    /* Read once, then written through for the whole circle -- see moy_ds. The
+     * span used to go through moy_rect, which re-derives the camera offset and
+     * re-clamps against the clip rect for every one of the 2r+1 rows; a filled
+     * circle is nothing BUT spans, so that prologue was most of the verb.
+     * Identical pixels -- same clamp, same moy_fill -- measured 1.1x faster on
+     * an ESP32-P4 through a host that had hand-written the direct form. */
+    moy_pixel v = c->store[col & 63];
+    moy_pixel *pix = c->pix;
+    int cam_x = c->cam_x, cam_y = c->cam_y, cw = c->w;
+    int cx0 = c->clip_x0, cy0 = c->clip_y0, cx1 = c->clip_x1, cy1 = c->clip_y1;
     if (r < 0) return;
     for (dy = -r; dy <= r; dy++) {
         int t = r * r - dy * dy;
+        int px0, px1, py;
         while ((span + 1) * (span + 1) <= t) span++;
         while (span > 0 && span * span > t) span--;
-        moy_rect(c, cx - span, cy + dy, 2 * span + 1, 1, col);
+        py = cy + dy - cam_y;
+        if (py < cy0 || py >= cy1) continue;
+        px0 = cx - span - cam_x;
+        px1 = cx + span + 1 - cam_x;
+        if (px0 < cx0) px0 = cx0;
+        if (px1 > cx1) px1 = cx1;
+        if (px1 > px0)
+            moy_fill(pix + (size_t)py * (size_t)cw + (size_t)px0, v,
+                     (size_t)(px1 - px0));
     }
 }
 
