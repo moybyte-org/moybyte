@@ -1073,8 +1073,14 @@ class DeviceCanvas:
                                self._clip_x0, self._clip_y0,
                                self._clip_x1, self._clip_y1)
             return
+        # The no-moy_gfx fallback, walking span the way the kernel does (#97).
+        span = 0
         for dy in range(-r, r + 1):
-            span = int((r * r - dy * dy) ** 0.5)
+            t = r * r - dy * dy
+            while (span + 1) * (span + 1) <= t:
+                span += 1
+            while span > 0 and span * span > t:
+                span -= 1
             self._fill(cx - span, cy + dy, 2 * span + 1, 1, col)
 
     def circb(self, cx, cy, r, c):

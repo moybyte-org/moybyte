@@ -411,8 +411,17 @@ class _FakeGfx:
             return
         cx0, cy0, cx1, cy1 = _FakeGfx._clip(dw, len(d), cx0, cy0, cx1, cy1)
         col = color & 0xFFFF
+        # The integer span walk, transcribed from the C (which took it from
+        # libmoy). Updated BEFORE the clip test and never after the `continue`:
+        # it is carried state, and skipping a row's update would shift every row
+        # below an off-screen one.
+        span = 0
         for dy in range(-r, r + 1):
-            span = int((r * r - dy * dy) ** 0.5)
+            t = r * r - dy * dy
+            while (span + 1) * (span + 1) <= t:
+                span += 1
+            while span > 0 and span * span > t:
+                span -= 1
             y = cy + dy - cam_y
             if y < cy0 or y >= cy1:
                 continue

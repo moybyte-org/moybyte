@@ -2842,48 +2842,105 @@ def test_music_editor_wired_into_device_shell():
     assert 'cp "${REPO_ROOT}/runtime/achievements_ui.py" "${SCRIPT_DIR}/modules/achievements_ui.py"' in build
 
 
-def test_native_moy_audio_mixer_wired():
-    # Native PCM mixer (#16): the per-sample software mix in runtime/audio.py is the
-    # device bottleneck (~12 FPS, crackle), so the heavy inner loop moves into the C
-    # module native/moy_audio (mirror of moy_gfx/moy_sd). DeviceAudio PREFERS it and
-    # falls back to the Python render_into when it isn't frozen in. Source-level
-    # checks, the same way the other firmware tests grep the device sources.
+def test_native_moy_audio_is_vendored_libmoy():
+    # #97: the device synth is not ours. libmoy -- moy-spec's own C implementation
+    # of SPEC.md 8 -- is vendored into native/moy_audio/libmoy/ and COMPILED IN, so
+    # the T-Deck and the web runner are conformant by construction rather than by a
+    # hand-maintained twin. These greps pin the vendoring itself: that the sources
+    # are present, built, and not quietly replaced by a reimplementation.
+    lib = ROOT / "native" / "moy_audio" / "libmoy"
+    assert (lib / "moy_audio.c").exists()
+    assert (lib / "moy_audio.h").exists()
+    assert (lib / "LICENSE").exists()          # MIT, carried with the source
+    upstream = (lib / "UPSTREAM.md").read_text(encoding="utf-8")
+    assert "Do not edit these files" in upstream
+    # WHICH commit, and whether the copy still matches it, moved out of this
+    # page and into native/libmoy_vendor.json, where a hash can check it --
+    # tests/test_libmoy_vendor.py is that check. A prose line reading "vendored
+    # at <sha>" could say anything.
+    assert "libmoy_vendor.json" in upstream
+    assert "make vendor-libmoy" in upstream
+
+    lib_c = (lib / "moy_audio.c").read_text(encoding="utf-8")
+    # A few load-bearing SPEC.md 8.3 constants, so a re-vendor that silently drops
+    # the calibrated synthesis fails here rather than on someone's speaker.
+    assert "109.0f / 110.0f" in lib_c          # the phaser's detune, not 127/128
+    assert "8.858923f" in lib_c                # the noise low-pass cutoff
+    assert "moy_bank_parse" in lib_c
+
     c = (ROOT / "native" / "moy_audio" / "modmoy_audio.c").read_text(encoding="utf-8")
     cmake = (ROOT / "native" / "moy_audio" / "micropython.cmake").read_text(encoding="utf-8")
+    mk = (ROOT / "native" / "moy_audio" / "micropython.mk").read_text(encoding="utf-8")
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
-    # moy_runtime + device_api together are the device backend surface the
-    # greps pin: make_api moved to device_api.py (#58, staged to every device
-    # target); run_desktop and the loop stay in moy_runtime.py.
-    runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
     device_audio = (ROOT / "modules" / "device_audio.py").read_text(encoding="utf-8")
 
-    # The C module exposes the per-block kernel API + registers as `moy_audio`.
+    # The module is a BINDING: it includes libmoy's header and calls its public
+    # API. Every SPEC.md 8.2 verb is forwarded, not reimplemented.
     assert "MP_REGISTER_MODULE(MP_QSTR_moy_audio" in c
-    assert "moy_audio_voice_set" in c          # push exact Python _Voice state into C
-    assert "moy_audio_voice_read" in c         # read advanced render state back out
-    assert "moy_audio_render" in c             # the heavy per-sample mix loop
-    # cmake links the usermod the moy_gfx/moy_sd way.
+    assert '#include "moy_audio.h"' in c
+    for fn in ("moy_bank_parse(", "moy_audio_init(", "moy_audio_render(",
+               "moy_audio_sfx(", "moy_audio_beep(", "moy_audio_music(",
+               "moy_audio_music_stop(", "moy_audio_sound_stop(",
+               "moy_audio_volume("):
+        assert fn in c, fn
+    # ...and it does NOT carry a synth of its own. These are the giveaways of the
+    # reimplementation this replaced; if one comes back, the boards have two
+    # synths again and only one of them is the spec. Checked against the CODE
+    # only -- the header comment names them all, explaining what went away.
+    code = "\n".join(ln for ln in c.splitlines()
+                     if not ln.lstrip().startswith("//"))
+    for gone in ("moy_sample_wave", "moy_mix_block", "moy_advance_step",
+                 "voice_set", "voice_read", "active_mask", "set_master"):
+        assert gone not in code, gone
+
+    # Both build systems compile the vendored source alongside the binding:
+    # cmake for the boards, the .mk for ports/unix (how the binding is tested off
+    # hardware) and the wasm runner.
+    assert "libmoy/moy_audio.c" in cmake
     assert "target_link_libraries(usermod INTERFACE usermod_moy_audio)" in cmake
+    assert "libmoy/moy_audio.c" in mk
+    assert "SRC_USERMOD_C += $(MOY_AUDIO_MOD_DIR)/modmoy_audio.c" in mk
     # build.sh stages it into ext_mod next to moy_gfx/moy_sd (re-staged every build).
     assert "ext_mod/moy_audio" in build
     assert "moy_audio/micropython.cmake" in build
 
-    # DeviceAudio prefers the native mixer but keeps a Python fallback so a build
-    # WITHOUT moy_audio still works (and the host is unaffected).
+    # DeviceAudio forwards verbs and hands the bank over ONCE per cart, keeping a
+    # Python-engine fallback so a build WITHOUT moy_audio still makes sound.
     assert "import moy_audio" in device_audio
-    assert "self._moy_audio = moy_audio" in device_audio
-    assert "self._moy_audio = None" in device_audio                      # fallback branch
-    assert "def _render_native(self, buf, n):" in device_audio
-    assert "if self._moy_audio is not None:" in device_audio
-    assert "self._render_native(buf, n)" in device_audio
-    assert "self.engine.render_into(buf, n)" in device_audio            # Python fallback path
-    # The native path keeps the Python engine the source of truth: it still runs the
-    # music scheduler in Python and pushes/reads voice state around the C mix.
-    assert "eng._advance_music" in device_audio
-    assert "ka.voice_set(" in device_audio
-    assert "ka.render(buf, n, eng.rate, eng.volume)" in device_audio
-    assert "ka.voice_read(c)" in device_audio
+    assert "self._na = moy_audio" in device_audio
+    assert "self._na = None" in device_audio                     # fallback branch
+    assert "na.bank_load(json.dumps(bank.to_dict()))" in device_audio
+    assert "def _sync_bank(self):" in device_audio               # re-push after an edit
+    assert "self.engine.bank.rev != self._bank_rev" in device_audio
+    assert "self._na.sfx(" in device_audio
+    assert "self._na.render(buf, n)" in device_audio
+    assert "self.engine.render_into(buf, n)" in device_audio     # Python fallback
+    # The per-frame voice marshalling is gone -- nothing crosses per frame now.
+    # Matched as CALLS, since the module docstring names them all explaining what
+    # went away.
+    for gone in (".voice_set(", ".voice_read(", "._advance_music(",
+                 "self._commit_gen", "self._await_active"):
+        assert gone not in device_audio, gone
+
+
+def test_web_runner_audio_forwards_to_libmoy():
+    # The wasm runner loads the SAME native module (its build.sh stages
+    # native/moy_audio and the module ships its own micropython.mk), so the
+    # browser's synth is libmoy too -- one audible behaviour across all three
+    # targets. Pin the forwarding, and that no per-frame marshalling came back.
+    web = Path("firmware/web_runner")
+    boot = (web / "web_boot.py").read_text(encoding="utf-8")
+    build = (web / "build.sh").read_text(encoding="utf-8")
+    assert "native/moy_audio" in build
+    # The module carries its own Makefile fragment now; the runner must not be
+    # copying a second, drifting copy over it.
+    assert not (web / "moy_audio_micropython.mk").exists()
+    assert "moy_audio_micropython.mk" not in build
+    assert "self._ka.bank_load(" in boot
+    assert "self._ka.render(buf, n)" in boot
+    assert "def is_active(self):" in boot
+    for gone in (".voice_set(", ".voice_read(", "._advance_music("):
+        assert gone not in boot, gone
 
 
 def test_native_moy_audio_core1_task_wired():
@@ -2912,89 +2969,83 @@ def test_native_moy_audio_core1_task_wired():
     assert "i2s_new_channel(" in c
     assert "i2s_channel_init_std_mode(" in c
     assert "i2s_channel_write(" in c
-    # The cross-core voice handoff is mutex-protected (core 0 writes, core 1 reads):
-    # a torn read / use-after-free is NOT acceptable (a momentary glitch is).
+    # The one engine struct is mutex-protected (core 0 calls verbs, core 1
+    # renders): a torn read is NOT acceptable (a momentary glitch is).
     assert "xSemaphoreCreateMutex(" in c
     assert "xSemaphoreTake(" in c
     assert "xSemaphoreGive(" in c
-    # The core-1 task must NEVER call into the MicroPython runtime (no MP heap/GIL from
-    # core 1) -- it mixes from a plain-C snapshot of the shared voices.
-    assert "moy_mix_block(snap" in c
-    # MP control surface for the task: start (returns False -> fallback), stop, the
-    # commit lock, the live master volume, and the published active mask.
-    for fn in ("moy_audio_audio_start", "moy_audio_audio_stop", "moy_audio_voice_lock",
-               "moy_audio_voice_unlock", "moy_audio_set_master", "moy_audio_active_mask"):
+    # The task renders in CHUNKS, dropping the lock between them, so a verb call
+    # from core 0 waits tens of microseconds rather than a whole 32 ms block.
+    assert "MOY_MIX_CHUNK" in c
+    assert "off += MOY_MIX_CHUNK" in c
+    # The core-1 task must NEVER call into the MicroPython runtime (no MP heap or
+    # GIL from core 1) -- it only touches libmoy's plain-C state.
+    assert "moy_audio_render(&s_audio, block + off, MOY_MIX_CHUNK)" in c
+    # MP control surface for the task: start (returns False -> fallback) and stop.
+    for fn in ("mod_audio_start", "mod_audio_stop", "mod_running"):
         assert fn in c, fn
-    for name in ('MP_QSTR_audio_start', 'MP_QSTR_audio_stop', 'MP_QSTR_voice_lock',
-                 'MP_QSTR_voice_unlock', 'MP_QSTR_set_master', 'MP_QSTR_active_mask'):
+    for name in ("MP_QSTR_audio_start", "MP_QSTR_audio_stop", "MP_QSTR_running",
+                 "MP_QSTR_bank_load", "MP_QSTR_active", "MP_QSTR_volume"):
         assert name in c, name
 
     # The Python DeviceAudio prefers the core-1 task and exposes a revert flag.
     assert "MOY_AUDIO_CORE1 = True" in device_audio          # default-on, the crackle fix
-    assert "if MOY_AUDIO_CORE1 and self._moy_audio is not None:" in device_audio
-    assert "self._moy_audio.audio_start(I2S_BCK, I2S_WS, I2S_DOUT, AUDIO_RATE)" in device_audio
+    assert "if MOY_AUDIO_CORE1 and self._na is not None:" in device_audio
+    assert "self._na.audio_start(I2S_BCK, I2S_WS, I2S_DOUT, AUDIO_RATE)" in device_audio
     assert "self._core1 = True" in device_audio
-    # In core-1 mode tick() does NO per-frame I2S write / per-sample mix -- it only
-    # schedules + commits voice state across to the C task.
-    assert "def _tick_core1(self, dt):" in device_audio
-    assert "if self._core1:" in device_audio
-    assert "ka.voice_lock()" in device_audio
-    assert "ka.voice_unlock()" in device_audio
-    assert "ka.active_mask()" in device_audio
-    assert "ka.voice_set(c, v.active, v.steps, v.step_dur, v.loop," in device_audio
-    # BRICK SIEGE FIX (#41): commit is keyed off the monotonic _Voice.gen counter, NOT
-    # (id(steps), active). id(steps) aliases on a GC list-address reuse, so a rapid
-    # same-SFX retrigger read as "unchanged" and was never committed (silent). gen
-    # bumps on every play()/stop(), so every rapid/overlapping sfx commits.
-    assert "self._commit_gen" in device_audio               # gen-keyed dirty tracking
-    assert "self.gen" in audio_src                      # _Voice.gen counter (audio.py)
-    assert "voices[c].gen != self._commit_gen[c]" in device_audio
-    assert "self._commit_gen[c] = v.gen" in device_audio
-    # The mask-clear must NOT clobber a voice the cart re-triggered this frame: it only
-    # honours a done-clear when gen still matches the last commit (no pending trigger).
-    assert "v.gen == self._commit_gen[c]" in device_audio
-    assert "self.gen += 1" in audio_src                 # bumped on play() AND stop()
+    # In core-1 mode tick() does NOTHING at all now (#97). It used to run the
+    # music scheduler and commit voice state across every frame; libmoy owns the
+    # sequencers, so there is no per-frame work left to do on core 0.
+    assert "if self._core1:\n            return" in device_audio
+    assert "self._core1 = True" in device_audio
     # The legacy single-core feed stays as the FALLBACK (machine.I2S) so a bad result
     # is revert-able (MOY_AUDIO_CORE1=False) and a no-moy_audio build still works. It now
     # TOPS the deep DMA ring UP toward full each tick (the single-core crackle fix)
     # instead of feeding exactly rate*dt (which kept the ring near-empty -> under-ran).
-    assert "legacy single-core feed (fallback)" in device_audio
+    assert "legacy single-core feed" in device_audio
     assert "if not self._core1:" in device_audio            # only open machine.I2S in fallback
     assert "self.i2s = I2S(" in device_audio
     assert "AUDIO_IBUF_FRAMES = AUDIO_IBUF // 2" in device_audio
     assert "self._buffered" in device_audio                  # software ring-occupancy estimate
     assert "want = AUDIO_IBUF_FRAMES - self._buffered" in device_audio
     assert "self._buffered += n" in device_audio             # account for what we wrote
-    # AUDIO DIAGNOSTICS: each sfx/music trigger logs an event line; core-1 logs a
-    # rate-limited active=/committed= sample so Brick Siege's audio is debuggable blind.
+    # AUDIO DIAGNOSTICS: each sfx/music trigger logs an event line, so what
+    # reached the mixer is readable on serial/SD when the board is playing blind.
+    # (The periodic core-1 "active=/committed=" sample went with the commit
+    # machinery it reported on -- there is nothing per-frame left to sample.)
     assert "AUDIO_DIAG = True" in device_audio
     assert "def _diag_trigger(self, kind, n, chan):" in device_audio
-    assert "def _diag_core1_sample(self, mask):" in device_audio
     assert '_diag_note("AUDIO"' in device_audio
-    assert "core1 active=%d committed=%d" in device_audio
 
 
 def test_core1_writeback_cannot_clobber_a_fresh_trigger():
-    # THE OVERLAPPING-SFX DROP: the core-1 task folds its advanced cursor state back
-    # into the shared moy_voices[] after every ~32 ms block. It must skip voices core 0
-    # re-committed during the block -- and it used to detect that with a CONTENT proxy
-    # (same nsteps + first step + step_dur), which a same-SFX retrigger satisfies
-    # exactly. So "sound 1 is ending (goes inactive inside the block), sound 2 starts
-    # on the reused channel" folded back active=0 over the fresh trigger: sound 2
-    # never played, and DeviceAudio._await_active waited forever for a confirmation
-    # that never came (channel leaked as busy). The fix is the C-side twin of the
-    # Brick Siege gen fix: an exact per-voice commit counter.
+    # THE OVERLAPPING-SFX DROP, and why it cannot recur (#41 -> #97).
+    #
+    # The core-1 task used to mix from a SNAPSHOT of a shared voice array and
+    # fold its advanced cursor back afterwards, which meant deciding whose copy
+    # was authoritative. The first attempt used a content proxy (same nsteps +
+    # first step + step_dur) that a same-SFX retrigger satisfies exactly, so
+    # "sound 1 ends inside the block, sound 2 starts on the reused channel"
+    # folded active=0 back over the fresh trigger: sound 2 never played and the
+    # channel leaked as busy. That was fixed with an exact per-voice commit
+    # counter.
+    #
+    # The counter is gone now, because the thing it arbitrated is gone: libmoy
+    # owns the state and there is exactly ONE copy of it, so there is no
+    # snapshot, no fold-back and nothing to reconcile. This test now pins the
+    # structural property rather than the fix -- if a second copy of the voice
+    # state ever reappears, so does the bug, and this is where it should be
+    # argued out.
     c = (ROOT / "native" / "moy_audio" / "modmoy_audio.c").read_text(encoding="utf-8")
+    code = "\n".join(ln for ln in c.splitlines()
+                     if not ln.lstrip().startswith("//"))
 
-    # The shared voice carries a commit sequence number...
-    assert "uint32_t seq;" in c
-    # ...every voice_set (commit) bumps it under the mutex...
-    assert "v->seq += 1;" in c
-    # ...and the task's fold-back is gated on it being unchanged since the snapshot.
-    assert "if (shared->seq == s->seq) {" in c
-    # The aliasing content-proxy is GONE (it can never come back as the guard).
-    assert "int unchanged" not in c
-    assert 'cheap "unchanged" proxy' not in c
+    # No second copy of the engine state, so no reconciliation machinery.
+    for gone in ("moy_voice_t", "snap[", "memcpy(snap", "->seq", "shared->"):
+        assert gone not in code, gone
+    # The task renders straight out of the one engine struct, under the lock.
+    assert "moy_audio_render(&s_audio, block + off, MOY_MIX_CHUNK)" in code
+    assert code.count("static moy_audio  s_audio;") == 1
 
 
 def test_device_wifi_wired():

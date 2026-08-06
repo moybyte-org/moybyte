@@ -19,10 +19,15 @@
 // pragma, NOT cmake: source-file properties are directory-scoped and the linked
 // object is compiled by the micropython.elf target, which never sees them
 // (verified via build.ninja -- the cmake route left the linked object at -O2).
-// -O3 not -Ofast: -ffast-math would perturb the one sqrt() in circ. Measured
-// NULL on the P4 (render slice is MP dispatch, not C compute); kept as the S3
-// experiment -- its slower PSRAM (120MHz OCT vs 200MHz HEX) and smaller flash
-// cache make the compute/bandwidth split land differently there.
+// -O3 not -Ofast: -ffast-math reassociates float arithmetic, and this kernel's
+// job is to agree with the goldens pixel for pixel. (The specific reason used
+// to be circ's sqrt; that is now an integer walk, so the raster is integer
+// throughout and -Ofast would have nothing left to perturb -- the rule stands
+// because "no float rewriting in a conformance-checked raster" is the rule,
+// not because of one call site.) Measured NULL on the P4 (render slice is MP
+// dispatch, not C compute); kept as the S3 experiment -- its slower PSRAM
+// (120MHz OCT vs 200MHz HEX) and smaller flash cache make the
+// compute/bandwidth split land differently there.
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC optimize("O3")
 #endif
@@ -979,8 +984,27 @@ static mp_obj_t moy_gfx_circ(size_t n_args, const mp_obj_t *a) {
     (void)dh;
     if (dw <= 0 || r < 0) return mp_const_none;
     moy_gfx_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
+    // Half-width by an INTEGER walk, not sqrt (libmoy's moy_circ; #97). `span`
+    // is the largest s with s*s <= r*r - dy*dy, which is exactly what
+    // truncating the correctly-rounded sqrt of an exact integer gives -- so the
+    // pixels are identical and the conformance goldens say so.
+    //
+    // The old line was `(mp_int_t)sqrt((double)(r*r - dy*dy))` per row, and
+    // DOUBLE precision on two boards whose FPUs are single: a soft-float call
+    // 2r+1 times a circle. Measured on a P4 at 10,880us against libmoy's
+    // 1,620us for the same scene -- 6.7x, and by far the widest gap between the
+    // two rasters. It moves by at most a little between adjacent rows, so
+    // carrying it costs O(r) over the whole circle instead of 2r+1 library
+    // calls.
+    //
+    // The walk is updated BEFORE the clip test, never after a `continue`: it is
+    // carried state, and skipping a row's update would shift every row below an
+    // off-screen one.
+    mp_int_t span = 0;
     for (mp_int_t dy = -r; dy <= r; dy++) {
-        mp_int_t span = (mp_int_t)sqrt((double)(r * r - dy * dy));
+        mp_int_t t = r * r - dy * dy;
+        while ((span + 1) * (span + 1) <= t) span++;
+        while (span > 0 && span * span > t) span--;
         mp_int_t y = cy + dy - cam_y;
         if (y < cy0 || y >= cy1) continue;
         mp_int_t x0 = cx - span - cam_x;
