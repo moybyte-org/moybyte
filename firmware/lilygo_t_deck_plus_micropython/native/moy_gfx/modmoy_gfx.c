@@ -15,6 +15,11 @@
 #include "py/runtime.h"
 #include "py/mphal.h"        // mp_hal_ticks_us -- the draw gates' DRAW2 timers
 
+// libmoy -- moy-spec's own raster, vendored into libmoy/ and compiled in with
+// MOY_PIXEL_RGB565 (see libmoy/UPSTREAM.md). Some verbs below are thin wrappers
+// over it; the rest are still moybyte's own, for reasons that file records.
+#include "moy.h"
+
 // #77: build the pixel kernel at -O3 (the ports default to -O2). In-source
 // pragma, NOT cmake: source-file properties are directory-scoped and the linked
 // object is compiled by the micropython.elf target, which never sees them
@@ -681,6 +686,76 @@ static inline void moy_gfx_clip(mp_int_t dw, size_t cap, mp_int_t *cx0, mp_int_t
     if (*cy1 > max_rows) *cy1 = max_rows;
 }
 
+// -- the libmoy bridge -------------------------------------------------------
+//
+// libmoy holds camera, clip and the index->pixel table in a moy_canvas; this
+// module passes them as scalars on every call. Rather than invert either side,
+// a canvas is BORROWED for the duration of one call: it points at the caller's
+// buffer and is filled in from the same arguments the hand-written kernel used.
+//
+// The cost is the store[] copy -- 128 bytes for the 64-entry table. That is the
+// whole bridge, and it is why this is affordable per call: no allocation, no
+// palette rebuild (the LUT arrives already folded through `pal`, which is
+// exactly what libmoy's store[] is), nothing that scales with the pixels drawn.
+//
+// `dh` is derived from the buffer capacity rather than trusted, the same way
+// moy_gfx_clip does it: a canvas whose h exceeds its buffer would let libmoy's
+// own clamping write past the end.
+static inline void moy_gfx_canvas(moy_canvas *c, uint16_t *dst, mp_int_t dw,
+                                  size_t cap, const uint16_t *lut,
+                                  const uint8_t *palt, mp_int_t cam_x,
+                                  mp_int_t cam_y, mp_int_t cx0, mp_int_t cy0,
+                                  mp_int_t cx1, mp_int_t cy1) {
+    c->pix = dst;
+    c->w = (int)dw;
+    c->h = (int)(cap / (size_t)dw);
+    c->cam_x = (int)cam_x;
+    c->cam_y = (int)cam_y;
+    c->clip_x0 = (int)cx0;
+    c->clip_y0 = (int)cy0;
+    c->clip_x1 = (int)cx1;
+    c->clip_y1 = (int)cy1;
+    // pal is already folded into `lut` by the Python side (_wire_pal), so
+    // store[] IS that table and pal[] stays identity -- libmoy reads store[]
+    // on every pixel and pal[] only when rebuilding, which never happens here.
+    for (int i = 0; i < MOY_PALETTE; i++) {
+        c->pal[i] = (uint8_t)i;
+        c->store[i] = lut[i];
+        c->wire[i] = lut[i];
+    }
+    if (palt != NULL) {
+        memcpy(c->palt, palt, MOY_PALETTE);
+    } else {
+        memset(c->palt, 0, MOY_PALETTE);
+    }
+}
+
+// libmoy addresses a sheet with SPEC.md 3.2's FIXED geometry (128 x 256, 16
+// tiles per row) rather than a width passed per call, so handing it anything
+// else would read at the wrong stride or past the end. A cart sheet is exactly
+// that shape -- Project._build_sheet makes a 16x32 SpriteSheet and from_hex
+// pads a short (pre-512) blob into the top half -- so this is a guard against
+// a wrong caller, not a case that happens. Silent rather than raising, like the
+// other malformed-input guards here: a draw verb that throws mid-frame takes
+// the cart down.
+static inline bool moy_gfx_is_moy_sheet(mp_int_t w, mp_int_t h, size_t len) {
+    return w == MOY_SHEET_W && h == MOY_SHEET_H &&
+           len >= (size_t)(MOY_SHEET_W * MOY_SHEET_H);
+}
+
+// A canvas for the verbs that take ONE already-resolved colour. moybyte's
+// kernels are handed a 565 word; libmoy's take an index and look it up. Filling
+// the table with that one word and passing index 0 bridges the two exactly --
+// libmoy reads store[col & 63] and cannot tell that the other 63 slots agree.
+static inline void moy_gfx_canvas_solid(moy_canvas *c, uint16_t *dst, mp_int_t dw,
+                                        size_t cap, uint16_t col, mp_int_t cam_x,
+                                        mp_int_t cam_y, mp_int_t cx0, mp_int_t cy0,
+                                        mp_int_t cx1, mp_int_t cy1) {
+    uint16_t lut[MOY_PALETTE];
+    for (int i = 0; i < MOY_PALETTE; i++) lut[i] = col;
+    moy_gfx_canvas(c, dst, dw, cap, lut, NULL, cam_x, cam_y, cx0, cy0, cx1, cy1);
+}
+
 static inline void moy_gfx_put(uint16_t *dst, mp_int_t dw, mp_int_t x, mp_int_t y,
                               uint16_t col, mp_int_t cam_x, mp_int_t cam_y,
                               mp_int_t cx0, mp_int_t cy0, mp_int_t cx1, mp_int_t cy1) {
@@ -785,44 +860,19 @@ static mp_obj_t moy_gfx_tri(size_t n_args, const mp_obj_t *a) {
     mp_int_t cam_x = mp_obj_get_int(a[10]), cam_y = mp_obj_get_int(a[11]);
     mp_int_t cx0 = mp_obj_get_int(a[12]), cy0 = mp_obj_get_int(a[13]);
     mp_int_t cx1 = mp_obj_get_int(a[14]), cy1 = mp_obj_get_int(a[15]);
-    mp_int_t t, y, dy_long, dy_top, dy_bot;
     if (dw <= 0) return mp_const_none;
     moy_gfx_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
-    // Camera once, on the vertices: spans are linear in them, so this is
-    // pixel-identical to offsetting every span (differences are unchanged).
-    x1 -= cam_x; y1 -= cam_y;
-    x2 -= cam_x; y2 -= cam_y;
-    x3 -= cam_x; y3 -= cam_y;
-    if (y1 > y2) { t = x1; x1 = x2; x2 = t; t = y1; y1 = y2; y2 = t; }
-    if (y1 > y3) { t = x1; x1 = x3; x3 = t; t = y1; y1 = y3; y3 = t; }
-    if (y2 > y3) { t = x2; x2 = x3; x3 = t; t = y2; y2 = y3; y3 = t; }
-    dy_long = y3 - y1; dy_top = y2 - y1; dy_bot = y3 - y2;
-    for (y = y1; y <= y3; y++) {
-        mp_int_t xa, xb;
-        if (y < cy0 || y >= cy1) continue;
-        if (dy_long == 0) {                 // flat: one span through all three x
-            xa = x1 < x2 ? x1 : x2; if (x3 < xa) xa = x3;
-            xb = x1 > x2 ? x1 : x2; if (x3 > xb) xb = x3;
-        } else {
-            mp_int_t na = (x3 - x1) * (y - y1);
-            xa = x1 + (na >= 0 ? na / dy_long : -(((-na) + dy_long - 1) / dy_long));
-            if (y < y2) {
-                mp_int_t nb = (x2 - x1) * (y - y1);
-                xb = x1 + (nb >= 0 ? nb / dy_top : -(((-nb) + dy_top - 1) / dy_top));
-            } else if (dy_bot) {
-                mp_int_t nb = (x3 - x2) * (y - y2);
-                xb = x2 + (nb >= 0 ? nb / dy_bot : -(((-nb) + dy_bot - 1) / dy_bot));
-            } else {
-                xb = x3;
-            }
-            if (xa > xb) { t = xa; xa = xb; xb = t; }
-        }
-        xb += 1;                            // spans are inclusive
-        if (xa < cx0) xa = cx0;
-        if (xb > cx1) xb = cx1;
-        if (xa < xb)
-            moy_gfx_fill_run(dst + (size_t)y * (size_t)dw + (size_t)xa,
-                             (size_t)(xb - xa), col);
+    // libmoy's moy_tri (#97). This verb used to be a hand transcription of it;
+    // the transcription is gone rather than kept beside it, because two copies
+    // that have to agree is the arrangement this is replacing.
+    //
+    // The colour arrives already resolved to a 565 word, so the canvas gets a
+    // one-entry table and index 0 -- libmoy writes store[col & 63] per span and
+    // does not care that the other 63 slots are the same word.
+    {
+        moy_canvas c;
+        moy_gfx_canvas_solid(&c, dst, dw, cap, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
+        moy_tri(&c, (int)x1, (int)y1, (int)x2, (int)y2, (int)x3, (int)y3, 0);
     }
     return mp_const_none;
 }
@@ -861,25 +911,18 @@ static mp_obj_t moy_gfx_sspr(size_t n_args, const mp_obj_t *a) {
     mp_int_t cam_x = mp_obj_get_int(a[18]), cam_y = mp_obj_get_int(a[19]);
     mp_int_t cx0 = mp_obj_get_int(a[20]), cy0 = mp_obj_get_int(a[21]);
     mp_int_t cx1 = mp_obj_get_int(a[22]), cy1 = mp_obj_get_int(a[23]);
-    mp_int_t i, j, fx = flip & 1, fy = (flip >> 1) & 1;
     if (dw <= 0 || sw <= 0 || sh <= 0 || ddw <= 0 || ddh <= 0) return mp_const_none;
-    if ((size_t)(sheetw * sheeth) > sb.len) return mp_const_none;
+    if (!moy_gfx_is_moy_sheet(sheetw, sheeth, sb.len)) return mp_const_none;
     moy_gfx_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
-    for (j = 0; j < ddh; j++) {
-        mp_int_t v = (j * sh) / ddh;
-        mp_int_t ty = dy + j;
-        if (fy) v = sh - 1 - v;
-        for (i = 0; i < ddw; i++) {
-            mp_int_t u = (i * sw) / ddw, p, ssx, ssy;
-            if (fx) u = sw - 1 - u;
-            ssx = sx + u; ssy = sy + v;
-            p = (ssx >= 0 && ssx < sheetw && ssy >= 0 && ssy < sheeth)
-                    ? sheet[(size_t)ssy * (size_t)sheetw + (size_t)ssx] : 0;
-            if (p == ck) continue;
-            if (palt != NULL && palt[p & 63]) continue;
-            moy_gfx_put(dst, dw, dx + i, ty, lut[p & 63],
-                        cam_x, cam_y, cx0, cy0, cx1, cy1);
-        }
+    // libmoy's moy_sspr (#97).
+    {
+        moy_canvas c;
+        moy_sheet s;
+        moy_gfx_canvas(&c, dst, dw, cap, lut, palt,
+                       cam_x, cam_y, cx0, cy0, cx1, cy1);
+        moy_sheet_init(&s, (uint8_t *)sheet);
+        moy_sspr(&c, &s, (int)sx, (int)sy, (int)sw, (int)sh,
+                 (int)dx, (int)dy, (int)ddw, (int)ddh, (int)ck, (int)flip);
     }
     return mp_const_none;
 }
@@ -921,43 +964,26 @@ static mp_obj_t moy_gfx_tline(size_t n_args, const mp_obj_t *a) {
     mp_int_t cam_x = mp_obj_get_int(a[20]), cam_y = mp_obj_get_int(a[21]);
     mp_int_t cx0 = mp_obj_get_int(a[22]), cy0 = mp_obj_get_int(a[23]);
     mp_int_t cx1 = mp_obj_get_int(a[24]), cy1 = mp_obj_get_int(a[25]);
-    mp_int_t dxx = x1 > x0 ? x1 - x0 : x0 - x1;
-    mp_int_t dyy = y1 > y0 ? y0 - y1 : y1 - y0;
-    mp_int_t stx = x0 < x1 ? 1 : -1;
-    mp_int_t sty = y0 < y1 ? 1 : -1;
-    mp_int_t err = dxx + dyy;
-    mp_int_t tw = mw * 8, th = mh * 8;
-    mp_int_t scols = sheetw >> 3;
-    int32_t tu, tv, uu, vv, dur, dvr;
-    if (dw <= 0 || tw <= 0 || th <= 0 || scols <= 0) return mp_const_none;
+    if (dw <= 0 || mw <= 0 || mh <= 0) return mp_const_none;
     if ((size_t)(mw * mh) > cb.len || (size_t)(sheetw * sheeth) > sb.len)
         return mp_const_none;
+    if (!moy_gfx_is_moy_sheet(sheetw, sheeth, sb.len)) return mp_const_none;
+    if (mw > MOY_MAP_MAX || mh > MOY_MAP_MAX) return mp_const_none;
     moy_gfx_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
-    tu = (int32_t)tw << 16;
-    tv = (int32_t)th << 16;
-    uu = u % tu;   if (uu < 0) uu += tu;
-    vv = v % tv;   if (vv < 0) vv += tv;
-    dur = du % tu;
-    dvr = dv % tv;
-    for (;;) {
-        mp_int_t px = (mp_int_t)(uu >> 16), py = (mp_int_t)(vv >> 16);
-        mp_int_t cell = cells[(size_t)(py >> 3) * (size_t)mw + (size_t)(px >> 3)];
-        if (cell) {                          // 0 = empty (id+1 storage)
-            mp_int_t tid = cell - 1;
-            mp_int_t ssx = (tid % scols) * 8 + (px & 7);
-            mp_int_t ssy = (tid / scols) * 8 + (py & 7);
-            mp_int_t p = (ssx < sheetw && ssy < sheeth)
-                             ? sheet[(size_t)ssy * (size_t)sheetw + (size_t)ssx] : 0;
-            if (p != ck && (palt == NULL || !palt[p & 63]))
-                moy_gfx_put(dst, dw, x0, y0, lut[p & 63],
-                            cam_x, cam_y, cx0, cy0, cx1, cy1);
-        }
-        uu += dur; if (uu >= tu) uu -= tu; else if (uu < 0) uu += tu;
-        vv += dvr; if (vv >= tv) vv -= tv; else if (vv < 0) vv += tv;
-        if (x0 == x1 && y0 == y1) break;
-        { mp_int_t e2 = 2 * err;
-          if (e2 >= dyy) { err += dyy; x0 += stx; }
-          if (e2 <= dxx) { err += dxx; y0 += sty; } }
+    // libmoy's moy_tline (#97). The hand transcription this replaces passed
+    // every conformance scene on the HOST and failed provisional_tline on the
+    // board by 2773 pixels -- which is the whole argument for calling the
+    // spec's raster instead of keeping a copy of it in step by hand.
+    {
+        moy_canvas c;
+        moy_sheet s;
+        moy_map m;
+        moy_gfx_canvas(&c, dst, dw, cap, lut, palt,
+                       cam_x, cam_y, cx0, cy0, cx1, cy1);
+        moy_sheet_init(&s, (uint8_t *)sheet);
+        moy_map_init(&m, (uint8_t *)cells, (int)mw, (int)mh);
+        moy_tline(&c, &s, &m, (int)x0, (int)y0, (int)x1, (int)y1,
+                  u, v, du, dv, (int)ck);
     }
     return mp_const_none;
 }
@@ -984,36 +1010,14 @@ static mp_obj_t moy_gfx_circ(size_t n_args, const mp_obj_t *a) {
     (void)dh;
     if (dw <= 0 || r < 0) return mp_const_none;
     moy_gfx_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
-    // Half-width by an INTEGER walk, not sqrt (libmoy's moy_circ; #97). `span`
-    // is the largest s with s*s <= r*r - dy*dy, which is exactly what
-    // truncating the correctly-rounded sqrt of an exact integer gives -- so the
-    // pixels are identical and the conformance goldens say so.
-    //
-    // The old line was `(mp_int_t)sqrt((double)(r*r - dy*dy))` per row, and
-    // DOUBLE precision on two boards whose FPUs are single: a soft-float call
-    // 2r+1 times a circle. Measured on a P4 at 10,880us against libmoy's
-    // 1,620us for the same scene -- 6.7x, and by far the widest gap between the
-    // two rasters. It moves by at most a little between adjacent rows, so
-    // carrying it costs O(r) over the whole circle instead of 2r+1 library
-    // calls.
-    //
-    // The walk is updated BEFORE the clip test, never after a `continue`: it is
-    // carried state, and skipping a row's update would shift every row below an
-    // off-screen one.
-    mp_int_t span = 0;
-    for (mp_int_t dy = -r; dy <= r; dy++) {
-        mp_int_t t = r * r - dy * dy;
-        while ((span + 1) * (span + 1) <= t) span++;
-        while (span > 0 && span * span > t) span--;
-        mp_int_t y = cy + dy - cam_y;
-        if (y < cy0 || y >= cy1) continue;
-        mp_int_t x0 = cx - span - cam_x;
-        mp_int_t x1 = x0 + 2 * span + 1;          // exclusive end
-        if (x0 < cx0) x0 = cx0;
-        if (x1 > cx1) x1 = cx1;
-        if (x1 <= x0) continue;
-        moy_gfx_fill_run(dst + (size_t)y * (size_t)dw + (size_t)x0,
-                         (size_t)(x1 - x0), col);
+    // libmoy's moy_circ (#97). It walks the half-width as an integer rather
+    // than calling sqrt per row -- which is where the 8.4x came from when that
+    // algorithm was first adopted by hand here (10,880us -> 1,297us on a P4).
+    // This is the same code, now as a call rather than a copy of it.
+    {
+        moy_canvas c;
+        moy_gfx_canvas_solid(&c, dst, dw, cap, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
+        moy_circ(&c, (int)cx, (int)cy, (int)r, 0);
     }
     return mp_const_none;
 }
@@ -1040,23 +1044,13 @@ static mp_obj_t moy_gfx_circb(size_t n_args, const mp_obj_t *a) {
     (void)dh;
     if (dw <= 0 || r < 0) return mp_const_none;
     moy_gfx_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
-    mp_int_t x = r, y = 0, err = 0;
-    while (x >= y) {
-        moy_gfx_put(dst, dw, cx + x, cy + y, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
-        moy_gfx_put(dst, dw, cx + y, cy + x, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
-        moy_gfx_put(dst, dw, cx - y, cy + x, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
-        moy_gfx_put(dst, dw, cx - x, cy + y, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
-        moy_gfx_put(dst, dw, cx - x, cy - y, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
-        moy_gfx_put(dst, dw, cx - y, cy - x, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
-        moy_gfx_put(dst, dw, cx + y, cy - x, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
-        moy_gfx_put(dst, dw, cx + x, cy - y, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
-        y += 1;
-        if (err <= 0) {
-            err += 2 * y + 1;
-        } else {
-            x -= 1;
-            err -= 2 * x + 1;
-        }
+    // libmoy's moy_circb (#97) -- the midpoint error term, eight octant points
+    // per step. A fill and an outline are different rasterizations, which is
+    // why the spec keeps them as separate verbs.
+    {
+        moy_canvas c;
+        moy_gfx_canvas_solid(&c, dst, dw, cap, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
+        moy_circb(&c, (int)cx, (int)cy, (int)r, 0);
     }
     return mp_const_none;
 }
@@ -1084,17 +1078,12 @@ static mp_obj_t moy_gfx_line(size_t n_args, const mp_obj_t *a) {
     (void)dh;
     if (dw <= 0) return mp_const_none;
     moy_gfx_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
-    mp_int_t dx = x1 > x0 ? x1 - x0 : x0 - x1;
-    mp_int_t dy = y1 > y0 ? y0 - y1 : y1 - y0;    // -abs(y1-y0)
-    mp_int_t sx = x0 < x1 ? 1 : -1;
-    mp_int_t sy = y0 < y1 ? 1 : -1;
-    mp_int_t err = dx + dy;
-    for (;;) {
-        moy_gfx_put(dst, dw, x0, y0, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
-        if (x0 == x1 && y0 == y1) break;
-        mp_int_t e2 = 2 * err;
-        if (e2 >= dy) { err += dy; x0 += sx; }
-        if (e2 <= dx) { err += dx; y0 += sy; }
+    // libmoy's moy_line (#97): Bresenham, with its axis-aligned and
+    // wholly-visible fast paths -- the shapes carts actually draw most.
+    {
+        moy_canvas c;
+        moy_gfx_canvas_solid(&c, dst, dw, cap, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
+        moy_line(&c, (int)x0, (int)y0, (int)x1, (int)y1, 0);
     }
     return mp_const_none;
 }
@@ -1290,6 +1279,31 @@ static mp_obj_t moy_gfx_text(size_t n_args, const mp_obj_t *a) {
     mp_get_buffer_raise(a[3], &sbi, MP_BUFFER_READ);
     mp_buffer_info_t fbi;
     mp_get_buffer_raise(a[7], &fbi, MP_BUFFER_READ);
+    // THE CART's text is scale 1 and goes through libmoy (#97). SPEC.md 6 is
+    // explicit that "print has no scale parameter; text is always 8px", and
+    // moybyte agrees -- DeviceCanvas.print hardcodes 1 and documents its own
+    // `scale` argument as accepted-and-ignored. So scale > 1 is never a cart:
+    // it is this console's CHROME at the #39 system font size, which is host
+    // business (SPEC.md 0) and keeps moybyte's kernel.
+    //
+    // libmoy uses its own compiled-in font rather than the blob passed here.
+    // Both are petme128 and SPEC.md 6 requires them byte-identical or text
+    // conformance fails -- so the `text` and `text_bytes` scenes are what
+    // license this, not the assumption.
+    if (mp_obj_get_int(a[9]) == 1) {
+        moy_canvas c;
+        mp_int_t cam_x = mp_obj_get_int(a[10]), cam_y = mp_obj_get_int(a[11]);
+        mp_int_t cx0 = mp_obj_get_int(a[12]), cy0 = mp_obj_get_int(a[13]);
+        mp_int_t cx1 = mp_obj_get_int(a[14]), cy1 = mp_obj_get_int(a[15]);
+        if (dw <= 0) return mp_const_none;
+        moy_gfx_clip(dw, dcap, &cx0, &cy0, &cx1, &cy1);
+        moy_gfx_canvas_solid(&c, dst, dw, dcap,
+                             (uint16_t)(mp_obj_get_int(a[6]) & 0xFFFF),
+                             cam_x, cam_y, cx0, cy0, cx1, cy1);
+        moy_print(&c, (const uint8_t *)sbi.buf, sbi.len,
+                  mp_obj_get_int(a[4]), mp_obj_get_int(a[5]), 0);
+        return mp_const_none;
+    }
     moy_gfx_text_raw(dst, dcap, dw,
                      (const uint8_t *)sbi.buf, sbi.len,
                      mp_obj_get_int(a[4]), mp_obj_get_int(a[5]),

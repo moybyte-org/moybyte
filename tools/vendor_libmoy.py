@@ -51,6 +51,18 @@ VENDOR = {
         "moy_audio.h": "libmoy/include/moy_audio.h",
         "LICENSE": "LICENSE",
     },
+    # SPEC.md 6/6.1's raster. Only some of moy_gfx's verbs route through this so
+    # far (see its UPSTREAM.md for which, and why the rest do not) -- but the
+    # whole translation units come over, because taking half a .c file is how a
+    # vendored copy stops being a copy.
+    os.path.join(NATIVE, "moy_gfx", "libmoy"): {
+        "moy.h": "libmoy/include/moy.h",
+        "moy_pixel.h": "libmoy/src/moy_pixel.h",
+        "moy_canvas.c": "libmoy/src/moy_canvas.c",
+        "moy_sprite.c": "libmoy/src/moy_sprite.c",
+        "moy_data.c": "libmoy/src/moy_data.c",
+        "LICENSE": "LICENSE",
+    },
 }
 
 

@@ -49,7 +49,9 @@ from p4_autotest import P4Board            # noqa: E402
 W, H = 320, 240
 FRAME_BYTES = W * H
 CART_ROOT = "/moy/carts"
-CHUNK = 1024                    # index bytes per base64 read
+CHUNK = 4096                    # wire bytes per base64 read: each one is a
+                                # serial ROUND TRIP, and at 1024 the 76800-byte
+                                # raw frame cost 75 of them
 
 
 # --- getting the cart onto the board ----------------------------------------
@@ -149,33 +151,75 @@ def _grab():
                 bad += 1
                 v = 0
             out[i] = v
-    ws._grabbed = out
+    # RUN-LENGTH ENCODE before it goes near the wire. A conformance frame is
+    # flat by construction -- fills, spans, a background -- and the wire is a
+    # 115200-baud serial line, so the raw 76800 bytes cost ~9s of the ~15s a
+    # scene took. Runs of (count, value), count 1..255; if that comes out BIGGER
+    # than the raw frame (a dithered or noise-heavy scene would), the raw frame
+    # is sent instead and the leading byte says which. Lossless either way --
+    # this is a transport, and a golden comparison would catch it if it were not.
+    enc = bytearray()
+    i = 0
+    while i < n:
+        v = out[i]
+        j = i + 1
+        end = i + 255
+        if end > n:
+            end = n
+        while j < end and out[j] == v:
+            j += 1
+        enc.append(j - i)
+        enc.append(v)
+        i = j
+    if len(enc) < n:
+        ws._grabbed = b'\x01' + bytes(enc)
+    else:
+        ws._grabbed = b'\x00' + bytes(out)
     return bad
 """
 
 
 def capture(board, log=print):
     """The board's current frame as FRAME_BYTES of palette indices."""
-    if not board.pyexec(CAPTURE_SETUP):
-        raise RuntimeError("could not install the capture helper")
+    # Install the helper ONCE per board session. It uploads in 120-char chunks
+    # and the device reads one command per frame, so this snippet alone is ~21
+    # serial round trips -- the single biggest cost in a scene, and pure waste
+    # from the second scene onward. The namespace (ws._g) persists, so asking is
+    # one round trip and the answer is usually yes.
+    if board.pyval("1 if 'ws' in dir() and '_grab' in getattr(ws, '_g', {}) "
+                   "else 0", timeout=8.0) != 1:
+        if not board.pyexec(CAPTURE_SETUP):
+            raise RuntimeError("could not install the capture helper")
     bad = board.pyval("ws._g['_grab']()", timeout=60.0)
     if bad is None:
         raise RuntimeError("the capture helper did not run")
     if bad:
         log("  WARNING: %d pixels were not palette colours (reported as 0)" % bad)
     n = board.pyval("len(ws._grabbed)")
-    if n != FRAME_BYTES:
-        raise RuntimeError("device frame is %s bytes, expected %d" % (n, FRAME_BYTES))
-    out = bytearray()
-    while len(out) < FRAME_BYTES:
-        i = len(out)
+    if not isinstance(n, int) or n < 1:
+        raise RuntimeError("device frame is %s bytes" % n)
+    wire = bytearray()
+    while len(wire) < n:
+        i = len(wire)
         piece = board.pyval(
             "__import__('binascii').b2a_base64(ws._grabbed[%d:%d])" % (i, i + CHUNK),
             timeout=30.0)
         if not piece:
-            raise RuntimeError("frame read stalled at byte %d" % i)
-        out.extend(binascii.a2b_base64(piece))
-    return bytes(out[:FRAME_BYTES])
+            raise RuntimeError("frame read stalled at byte %d of %d" % (i, n))
+        wire.extend(binascii.a2b_base64(piece))
+    wire = bytes(wire[:n])
+    log("  %d bytes on the wire (%.1f%% of raw)"
+        % (n, 100.0 * n / (FRAME_BYTES + 1)))
+    if wire[0] == 1:
+        out = bytearray()
+        for k in range(1, len(wire) - 1, 2):
+            out.extend(bytes((wire[k + 1],)) * wire[k])
+    else:
+        out = bytearray(wire[1:])
+    if len(out) != FRAME_BYTES:
+        raise RuntimeError("frame decoded to %d bytes, expected %d"
+                           % (len(out), FRAME_BYTES))
+    return bytes(out)
 
 
 # --- driving -----------------------------------------------------------------
@@ -203,23 +247,130 @@ def run_scene(board, cart_dir, log=print, frames=1.5):
     return capture(board, log=log)
 
 
+# --- the server -------------------------------------------------------------
+#
+# OPENING THE PORT REBOOTS THE BOARD. Not the RTS pulse -- P4Board already holds
+# dtr/rts low across open for exactly that reason -- but the CH343 resets on
+# enumeration anyway, and the board comes up reporting rst:0x1 (POWERON). So a
+# player command that opens the port per scene pays a full boot per scene: ~40s
+# of waiting for the desktop and 34 carts to load, against ~5s of actual work.
+# Ten scenes spent twelve minutes doing ninety seconds of testing.
+#
+# The suite's player protocol is one process per scene and should stay that way
+# -- it is what lets any implementation be a shell command. So the port is held
+# by a SERVER instead, and the per-scene process becomes a thin client:
+#
+#     python3 tools/p4_conformance.py --serve &          # boots the board once
+#     python3 conformance/run.py --player "python3 .../p4_conformance.py {cart} {out}"
+#
+# With no server running the client does the whole thing itself, exactly as
+# before, so nothing has to know about this to work -- it is only slow.
+
+SOCKET = "/tmp/moy-p4-conformance.sock"
+
+
+def serve(port, sock_path, log):
+    import socket
+    if os.path.exists(sock_path):
+        os.unlink(sock_path)
+    board = P4Board(port)
+    try:
+        board.drain(0.4)
+        if board.pyval("1", timeout=8.0) != 1:
+            log("board booting...")
+            board.reset()
+        log("board ready; listening on %s" % sock_path)
+        srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        srv.bind(sock_path)
+        srv.listen(4)
+        while True:
+            conn, _ = srv.accept()
+            try:
+                req = json.loads(conn.makefile("r").readline() or "{}")
+                if req.get("op") == "stop":
+                    conn.sendall(b'{"ok": true}\n')
+                    break
+                t0 = time.time()
+                # One retry, for TRANSPORT failures only. The serial link drops
+                # a reply now and then (see P4Board.cmd) and a scene that dies
+                # that way is not a result. A frame that comes back WRONG raises
+                # nothing and is not retried -- so a real raster bug still fails,
+                # which is the distinction that makes this safe.
+                try:
+                    frame = run_scene(board, req["cart"], log=log)
+                except RuntimeError as exc:
+                    log("  transport failure (%s); retrying once" % exc)
+                    frame = run_scene(board, req["cart"], log=log)
+                with open(req["out"], "wb") as f:
+                    f.write(frame)
+                log("  %s in %.1fs" % (os.path.basename(req["cart"]), time.time() - t0))
+                conn.sendall(b'{"ok": true}\n')
+            except Exception as exc:            # noqa: BLE001
+                # A scene that fails must not take the server down with it: the
+                # next one may well pass, and a dead server turns one bad scene
+                # into a whole suite that cannot run.
+                log("  ERROR: %s" % exc)
+                conn.sendall(json.dumps({"ok": False, "error": str(exc)}).encode() + b"\n")
+            finally:
+                conn.close()
+    finally:
+        board.close()
+        if os.path.exists(sock_path):
+            os.unlink(sock_path)
+    return 0
+
+
+def via_server(sock_path, cart, out):
+    """Ask a running server for this scene. None if there is no server."""
+    import socket
+    if not os.path.exists(sock_path):
+        return None
+    try:
+        c = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        c.settimeout(180.0)
+        c.connect(sock_path)
+    except OSError:
+        return None                 # a stale socket file, not a live server
+    try:
+        c.sendall(json.dumps({"cart": os.path.abspath(cart),
+                              "out": os.path.abspath(out)}).encode() + b"\n")
+        reply = json.loads(c.makefile("r").readline() or "{}")
+    finally:
+        c.close()
+    if not reply.get("ok"):
+        raise RuntimeError(reply.get("error", "the board server failed"))
+    return True
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("cart", help="the conformance cart folder")
-    ap.add_argument("out", help="where to write the raw frame")
+    ap.add_argument("cart", nargs="?", help="the conformance cart folder")
+    ap.add_argument("out", nargs="?", help="where to write the raw frame")
     ap.add_argument("--port", default="/dev/ttyACM0")
     ap.add_argument("--reset", action="store_true",
                     help="hard-reset first (slow; only needed if the board is wedged)")
+    ap.add_argument("--serve", action="store_true",
+                    help="hold the board and answer scene requests (see above)")
+    ap.add_argument("--socket", default=SOCKET)
+    ap.add_argument("--no-server", action="store_true",
+                    help="ignore a running server and drive the board directly")
     ap.add_argument("-v", "--verbose", action="store_true")
     a = ap.parse_args(argv)
 
-    log = print if a.verbose else (lambda *x: None)
+    log = print if (a.verbose or a.serve) else (lambda *x: None)
+    if a.serve:
+        return serve(a.port, a.socket, log)
+    if not a.cart or not a.out:
+        ap.error("cart and out are required unless --serve")
+
+    if not a.no_server and via_server(a.socket, a.cart, a.out):
+        return 0
+
     board = P4Board(a.port)
     try:
-        # A reset costs ~40s and the suite is nine scenes, so only do it when
-        # the board is genuinely wedged. Drain first: opening the port leaves
-        # whatever the desktop last printed in the buffer, and a probe that
-        # reads that instead of its own reply looks like a dead board.
+        # Opening the port already rebooted the board (see above), so this is
+        # not so much a probe as a wait -- but it stays a probe, because a
+        # future cable or port that does NOT reset gets the fast path for free.
         board.drain(0.4)
         if a.reset or board.pyval("1", timeout=8.0) != 1:
             log("  board not answering; resetting")
