@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, resolve } from "node:path";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const DIST = resolve(process.env.MOY_DIST || join(HERE, "dist"));  // dist-spec via MOY_DIST
+const DIST = resolve(process.env.MOY_DIST || join(HERE, "dist"));
 const { loadMicroPython } = await import(pathToFileURL(join(DIST, "micropython.mjs")).href);
 
 const mp = await loadMicroPython({ heapsize: 16 * 1024 * 1024,

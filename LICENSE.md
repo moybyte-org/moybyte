@@ -16,19 +16,17 @@ restriction above is temporary by design.
 
 | Part | License |
 |---|---|
-| Repo default — the system, firmware, tools, seed carts (everything not listed below) | [FSL-1.1-MIT](LICENSES/FSL-1.1-MIT.md) (source-available; MIT after 2 years) |
-| The **web player artifacts** built by `firmware/web_runner/build.sh --spec` (`index.html`, `micropython.mjs`, `micropython.wasm`) | [MIT](LICENSES/MIT.md) — see below |
+| Repo default — the system, firmware, tools, seed carts (everything here) | [FSL-1.1-MIT](LICENSES/FSL-1.1-MIT.md) (source-available; MIT after 2 years) |
 
-**The spec player is MIT on purpose.** The de-branded player built by
-`build.sh --spec` is vendored into the public cart spec
-([moybyte-org/moy-spec](https://github.com/moybyte-org/moy-spec), MIT) so that
-anyone can embed a working `.moy` player — a format spec is only useful if its
-player is freely redistributable. The *source* it is compiled from stays
-FSL-1.1-MIT; the copyright holder additionally grants those **compiled
-artifacts** under MIT. Rebuilding them yourself from this tree carries the same
-grant. (Third-party components inside the build — MicroPython, Lua, the
-petme128 font, emscripten runtime — keep their own licences; see
-[THIRD_PARTY.md](THIRD_PARTY.md).)
+**The spec's player is not built here any more, and needs no grant from this
+repository.** It used to be: `build.sh --spec` produced a de-branded player that
+was vendored into the public cart spec
+([moybyte-org/moy-spec](https://github.com/moybyte-org/moy-spec), MIT), and the
+copyright holder granted those compiled artifacts under MIT so that anyone could
+embed a working `.moy` player. The spec now builds its own, from its own
+MIT-licensed C library (`libmoy/port/wasm`), so the intent is served without a
+carve-out: **a format spec is only useful if its player is freely
+redistributable**, and that player is MIT all the way down.
 
 Some files here come from other projects and keep their own licenses — see [THIRD_PARTY.md](THIRD_PARTY.md).
 

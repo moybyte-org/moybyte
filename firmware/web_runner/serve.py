@@ -5,7 +5,7 @@ Plain `python -m http.server` minus two gotchas: .mjs must ship as
 text/javascript (older CPython mimetypes map it to text/plain, which browsers
 refuse for ES modules) and .wasm as application/wasm (streaming compile).
 
-    python serve.py [port] [dir]    # defaults: 8321, dist/ (dir e.g. dist-spec)
+    python serve.py [port] [dir]    # defaults: 8321, dist/
                                     # dir may be absolute (e.g. the _site build)
 
 Bind the directory by PATH, never by chdir. Every build here REPLACES its output
