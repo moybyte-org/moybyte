@@ -27,7 +27,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: setup test site site-firmware site-gifs site-hero firmware-build-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-build-p4 firmware-flash-p4 firmware-monitor-p4 firmware-stage-xiao-zero ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install ota-keygen release sync-issues check-venv
+.PHONY: setup test site site-firmware site-gifs site-hero firmware-build-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-build-p4 firmware-flash-p4 firmware-monitor-p4 firmware-stage-xiao-zero ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install ota-keygen release sync-issues vendor-libmoy check-venv
 
 # A PLAIN venv on purpose. Two flags used to live here and both hid bugs on every
 # machine but the maintainer's:
@@ -127,6 +127,16 @@ site-hero:
 # numbers referenced in commits/docs/chat resolve locally. Needs the `gh` CLI, authed.
 sync-issues:
 	$(PYTHON) tools/sync_issues.py
+
+# Re-vendor libmoy -- moy-spec's C console -- from a checkout beside this one
+# (or SPEC=/path, or $MOYBYTE_MOY_SPEC). Copies the pinned file set, re-stamps
+# native/libmoy_vendor.json, and tests/test_libmoy_vendor.py holds it to that:
+# a vendored file edited HERE is a red test rather than a change that survives
+# until the next re-vendor silently reverts it.
+#   make vendor-libmoy
+#   make vendor-libmoy SPEC=/path/to/moy-spec
+vendor-libmoy:
+	$(PYTHON) tools/vendor_libmoy.py $(if $(SPEC),--spec $(SPEC))
 
 firmware-build-lilygo-micropython:
 	bash firmware/lilygo_t_deck_plus_micropython/build.sh

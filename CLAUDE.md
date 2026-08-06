@@ -117,8 +117,14 @@ nothing marshals across the boundary per frame — the bank crosses ONCE per car
 as `sounds.json` text.
 
 So: **do not "improve" the synthesis locally, and do not add a waveform or an
-effect here.** Fix it in moy-spec, re-vendor (`libmoy/UPSTREAM.md` has the two
-commands), bring the Python twin along. The #167 3D verbs took the other route
+effect here.** Fix it in moy-spec, re-vendor with **`make vendor-libmoy`**
+(`tools/vendor_libmoy.py`, pointed at a sibling moy-spec checkout or `SPEC=`;
+it copies the pinned file set and re-stamps `native/libmoy_vendor.json`), bring
+the Python twin along. **Editing a vendored file in place is a red test** —
+`tests/test_libmoy_vendor.py` hashes every one against the manifest, and also
+diffs against a sibling checkout when it sits at the pinned commit, so both
+"someone patched the copy" and "someone patched upstream without re-vendoring"
+fail on the same day rather than at the next re-vendor. The #167 3D verbs took the other route
 — `moy_gfx` re-implements `moy_canvas.c`'s geometry line-for-line — and that is
 only safe because the conformance goldens pin every pixel; §8.3 deliberately
 exempts audio from pixel conformance, so there is no golden to catch a drifting

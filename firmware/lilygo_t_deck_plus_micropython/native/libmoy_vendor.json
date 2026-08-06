@@ -1,0 +1,13 @@
+{
+  "files": {
+    "firmware/lilygo_t_deck_plus_micropython/native/moy_audio/libmoy/LICENSE": "b405680e72b1cea95fea5072fd140185d793e860867f3d9f66d4af244dcd0d5a",
+    "firmware/lilygo_t_deck_plus_micropython/native/moy_audio/libmoy/moy_audio.c": "86fa35380ef5b48fd761faba624e1377984dad9a5f9243c580f82a2ba6c00ea8",
+    "firmware/lilygo_t_deck_plus_micropython/native/moy_audio/libmoy/moy_audio.h": "c580b1414246a02e615cefa622e7b8e3fc01b8590ee713fc43458a0a40265a53"
+  },
+  "upstream": {
+    "commit": "d443bfa1c61b409e90190337d4fbac36595bb2bb",
+    "date": "2026-08-06",
+    "dirty": false,
+    "repo": "moybyte-org/moy-spec"
+  }
+}
