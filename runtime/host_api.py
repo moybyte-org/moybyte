@@ -102,6 +102,12 @@ class FakeAudio:
         self.calls.append(("volume", level))
         self.engine.set_volume(level)
 
+    def is_active(self):
+        """True while anything is audible. The backend-level hook the Music
+        editor asks (#97) -- on the host that is just the engine, but the device
+        and web backends answer from libmoy, which owns the sequencers there."""
+        return self.engine.is_active()
+
     def tick(self, dt):
         n = int(self.engine.rate * max(0.0, dt))
         if n > 0:

@@ -438,7 +438,10 @@ Both `net` and `on_net` are **only present** when the manifest grants
 | `music(track, loop=True)` | start a music track |
 | `music_stop()` | stop music |
 | `sound_stop(chan=None)` | stop a channel (or all) |
-| `volume(level)` | set output volume |
+| `volume(level)` | master output level, **0–7** (the same scale as a note's `vol`) |
+
+`beep()` plays at the exact frequency you ask for, on the engine's own
+oscillator — it never takes a channel away from music or an effect.
 
 The sound bank lives in the cart's `sounds.json` (authored in the Music tab).
 Since #170 the model is PICO-8-parity:
@@ -459,8 +462,19 @@ Since #170 the model is PICO-8-parity:
   durations in seconds (`0` = hold the row forever) — how a p8 song's
   changing pattern lengths survive the import.
 
+- A note with `vol` `0` but a real pitch is a **keyed rest**: silent, but still
+  the note a following slide glides *from*. Only pitch `−1` leaves that origin
+  untouched. (PICO-8 works this way, so ported slides land right.)
+
 Imported PICO-8 carts (`tools/import_p8.py` / `moy port`) carry all of this
 over verbatim — waves, effects and all four music channels.
+
+**Instruments are not equally loud, on purpose.** The triangle family is about
+twice the square family, which is PICO-8's own mix; music is balanced against
+it, and evening them out would make every square lead shout down its own
+accompaniment. The synthesis is [SPEC.md §8.3](https://github.com/moybyte-org/moy-spec)
+exactly — moybyte compiles moy-spec's `libmoy` for it — so a cart sounds the
+same here as on any other console that implements the spec.
 
 ## State & utility
 

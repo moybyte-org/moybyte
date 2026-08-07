@@ -633,6 +633,9 @@ class _SilentAudio:
     def volume(self, level):
         pass
 
+    def is_active(self):
+        return False        # nothing is ever audible on the silent backend
+
     def tick(self, dt):
         pass
 

@@ -8,8 +8,22 @@
 > optional per-note **effect column** (p8 numbering), **multi-channel music
 > rows**, SFX **loop ranges** (`loop_start`) and per-row pattern lengths
 > (`row_secs`). The current model is documented in `docs/moy_cart_api.md`
-> (Audio) and the moy-spec §8; the C mixer (`native/moy_audio`) is a
-> byte-identical twin compiled into the T-Deck **and** the web runner's wasm.
+> (Audio) and the moy-spec §8.
+>
+> **#97 (2026-08-06) — the SYNTH is no longer ours.** SPEC.md §8.3 pins
+> synthesis to PICO-8's measured output (zepto8/fake-08), and moy-spec's own C
+> implementation of it, **libmoy**, is now vendored into
+> `firmware/lilygo_t_deck_plus_micropython/native/moy_audio/libmoy/` and
+> **compiled into** the T-Deck and the web runner. `native/moy_audio` is a thin
+> binding over its public API: libmoy owns the bank, both sequencers and the
+> mixer, and MicroPython only forwards the six §8.2 verbs. §2.5 and §5 below
+> describe the architecture that replaced — read them as history.
+>
+> `runtime/audio.py`'s `AudioEngine` survives because the host sim runs CPython
+> and cannot link C without putting a compiler in `make setup`. It is a
+> hand-maintained twin of that same file, pinned **bit-for-bit** by
+> `tests/test_audio_parity.py`. The data model (§2.1–2.4) and the storage
+> format (§3) are unchanged and still shared by everything.
 **Scope of this doc:** the cart-facing audio API, the shared sound data model, the
 host backend, the device (T-Deck Plus I2S) backend, on-cart storage, and where the
 on-device music/SFX editor fits the existing console UI.
@@ -128,6 +142,12 @@ editor are never empty.
 
 ### 2.5 The mixer (`AudioEngine`)
 
+> **Superseded by #97 for playback** — the boards and the browser render through
+> vendored libmoy, not through this. `AudioEngine` is now the HOST's twin of that
+> C source (and the fallback for a build without the native module); its API
+> below is unchanged, but `set_volume` takes **0–7**, not a 0–1 fraction, and
+> `beep` no longer consumes a channel. See `runtime/audio.py`'s docstring.
+
 Pure Python, no backend:
 
 - `AudioEngine(bank, rate=11025)` — low sample rate keeps the device CPU/RAM sane.
@@ -196,6 +216,15 @@ backend the calls + the engine state are enough to assert behavior headlessly.
 ---
 
 ## 5. Device backend (T-Deck Plus, I2S MAX98357) — STUB, NEEDS ON-DEVICE VERIFICATION
+
+> **The pin map and the feed strategy below still hold; the rest is history
+> (#97).** `DeviceAudio` no longer renders anything: it hands the cart's
+> `sounds.json` to libmoy once, forwards the §8.2 verbs, and owns I2S. The
+> core-1 task renders straight out of libmoy's one engine struct under a mutex,
+> in small chunks so a verb call from core 0 waits microseconds. The per-frame
+> voice marshalling (`voice_set` / `voice_read`), the snapshot-and-fold-back and
+> the per-voice commit counter that arbitrated between the two copies are all
+> gone — there is one copy of the state now, so there is nothing to reconcile.
 
 The T-Deck Plus has a MAX98357 I2S class-D amp + speaker. From the LilyGO
 reference (`firmware/lilygo_t_deck_plus_reference/examples/I2SPlay/utilities.h`):
