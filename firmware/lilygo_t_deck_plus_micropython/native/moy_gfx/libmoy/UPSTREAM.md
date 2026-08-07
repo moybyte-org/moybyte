@@ -62,11 +62,32 @@ the console draws chrome text by the dozen per frame there. Scale > 1 was never
 a cart anyway; that is this console's chrome at the #39 system font size, which
 is host business (SPEC.md §0).
 
-All three are worth revisiting if libmoy grows the per-row and per-glyph fast
-paths — they would benefit every libmoy host, which is the right place to fix
-them. `moy_circ` already took that route: it emitted one `moy_rect` per row
-until this console measured its own hand-written direct-span form faster, and
-the fix went **upstream** (moy-spec `ef01426`) rather than staying here.
+### Two of those three numbers are SUSPECT — re-measure before trusting them
+
+The S3 column came from a standalone A/B bench run at 21:04 on 2026-08-06. The
+libmoy in that build got `moy_print`'s whole-column off-clip early-out and
+`moy_spr`'s scale-1 fast path **afterwards** (the source in the bench tree is
+stamped 21:45), and the run's own write-up describes the pre-optimization code
+in both cases: *"moy_print walks bits through moy_put"* and *"moy_map_draw
+routes each cell through moy_spr and therefore moy_put, resolving per pixel"*.
+That second one is no longer true at scale 1 — which is the only scale a
+tilemap uses by default.
+
+So `print` and `blit_map` may have been declined against a libmoy that no
+longer exists. `spr` lost by only six percent, which is inside the size of that
+kind of change too. **Nothing here is settled until the S3 bench is re-run
+against current libmoy**, and it needs a hand: that board has no BOOT button and
+its USB-CDC RX is dead under the desktop, so it enters the ROM loader only by
+holding the trackball (GPIO0) in while powering on.
+
+The P4 half was re-measured and is current. It prefers libmoy on `blit_map`
+(0.92×) and calls `print` a tie — so if the S3 numbers move, all three verbs are
+back in play.
+
+Whatever the answer, fixes belong **upstream**: they would benefit every libmoy
+host, not just this one. `moy_circ` already took that route — it emitted one
+`moy_rect` per row until this console measured its own hand-written direct-span
+form faster, and the fix went to moy-spec (`ef01426`) rather than staying here.
 
 ## Why the 3D verbs went first
 
