@@ -52,33 +52,60 @@ def run_bench(board, title, secs, log):
 
 
 def parse(lines):
-    verbs, phases = {}, {}
+    verbs, phases, spread = {}, {}, {}
     for ln in lines:
         if not ln.startswith("BENCHCART "):
             continue
         f = {}
         for tok in ln[10:].split():
             if "=" in tok:
-                k, v = tok.split("=", 1)
-                f[k] = v
+                key, val = tok.split("=", 1)
+                f[key] = val
         if "verb" in f:
             try:
-                verbs[f["verb"]] = float(f["best_ms"]) / max(1, int(f["k"]))
+                k = max(1, int(f["k"]))
+                verbs[f["verb"]] = float(f["best_ms"]) / k
+                # The spread is what says whether the number means anything.
+                # `line` once reported 31.2us/op and 62.5 on the same build,
+                # and only the min was recorded, so nothing in the output
+                # hinted that the measurement was bimodal.
+                if "max_ms" in f:
+                    spread[f["verb"]] = (float(f["med_ms"]) / k,
+                                         float(f["max_ms"]) / k, k)
             except (ValueError, KeyError):
                 pass
         elif "phase" in f:
             phases[f["phase"]] = {k: v for k, v in f.items() if k != "phase"}
-    return {"verbs": verbs, "phases": phases}
+    return {"verbs": verbs, "phases": phases, "spread": spread}
 
 
 def show(res):
     v = res["verbs"]
+    sp = res.get("spread") or {}
     if not v:
         print("  (no BENCHCART verb lines -- a Lua cart reports on the glass only)")
     else:
-        print("  %-8s %10s" % ("verb", "us/op"))
+        print("  %-8s %10s %10s %10s %7s   %s"
+              % ("verb", "min", "med", "max", "k", "spread"))
         for name in sorted(v, key=lambda k: -v[k]):
-            print("  %-8s %10.1f" % (name, v[name] * 1000.0))
+            lo = v[name] * 1000.0
+            if name in sp:
+                med, mx, k = sp[name][0] * 1000.0, sp[name][1] * 1000.0, sp[name][2]
+                # Flag anything whose max is more than 25% off its min: that is
+                # a verb the harness is not measuring cleanly, and its number
+                # should not be quoted in a comparison.
+                flag = "  <-- UNSTABLE" if mx > lo * 1.25 else ""
+                print("  %-8s %10.1f %10.1f %10.1f %7d   %4.2fx%s"
+                      % (name, lo, med, mx, k, mx / lo if lo else 0.0, flag))
+            else:
+                print("  %-8s %10.1f %10s %10s" % (name, lo, "-", "-"))
+    # k is printed because it is the OTHER instability, and the spread column
+    # cannot see it: spread is the variation WITHIN a batch size, while the
+    # batch size itself is chosen per run by a doubling ladder that stops at
+    # the first rung over 25ms. `line` read 31.2us/op at k=800 and 62.5 at
+    # k=400 on the same build -- two rungs, one of them wrong, and nothing in
+    # the old output said which had been used. Comparing two builds means
+    # checking they landed on the same k.
     for ph, f in sorted(res["phases"].items()):
         print("  phase %-9s %s" % (ph, " ".join("%s=%s" % kv for kv in sorted(f.items()))))
 

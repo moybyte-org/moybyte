@@ -113,7 +113,8 @@ def _init():
     state["rep"] = 0           # which repetition
     state["k"] = state["verbs"][0][2]
     state["best"] = None
-    state["micro"] = []        # (name, k, best_ms)
+    state["reps"] = []         # this verb's timed batches, ms
+    state["micro"] = []        # (name, k, best_ms, med_ms, max_ms)
     state["dts"] = []          # silent game-phase frame times, ms (floats)
     state["dts_snd"] = []      # sound game-phase frame times, ms
     state["frame"] = 0
@@ -139,11 +140,20 @@ def _measure_one():
         return
     if state["best"] is None or ms < state["best"]:
         state["best"] = ms
+    # Keep every batch, not just the winner. `best` alone reported 31.2us/op
+    # for `line` on one run and 62.5 on the next with no hint in the output
+    # that anything was unstable -- a min cannot say how far the other seven
+    # landed. Purely additive: the k ladder above is untouched, because a
+    # version that also changed WHEN k locks moved every small-k verb by 6-7x
+    # (line 62.5 -> 450) and had to be reverted.
+    state["reps"].append(ms)
     state["rep"] += 1
     if state["rep"] >= REPS:
-        state["micro"].append((name, k, state["best"]))
+        s = sorted(state["reps"])
+        state["micro"].append((name, k, state["best"], s[len(s) // 2], s[-1]))
         state["vi"] += 1
         state["rep"] = 0
+        state["reps"] = []
         state["best"] = None
         if state["vi"] >= len(state["verbs"]):
             state["phase"] = PHASE_GAME
@@ -248,10 +258,10 @@ def _report():
     cls(0)
     print("MOYBYTE BENCH", 8, 8, 11)
     y = 26
-    for name, k, best in state["micro"]:
+    for name, k, best, med, mx in state["micro"]:
         us = (best * 1000.0) / k
-        print(name + " x" + str(k) + " = " + str(best) + "ms  ("
-              + str(int(us * 10) / 10.0) + "us/op)", 8, y, 7)
+        print(name + " x" + str(k) + " = " + str(best) + "-" + str(mx)
+              + "ms  (" + str(int(us * 10) / 10.0) + "us/op)", 8, y, 7)
         y += 10                      # 13 verbs since 2026-08-04: tight rows
     y += 4
     for label, s in (("SILENT", st), ("SOUND ", state["stats_snd"])):
@@ -275,8 +285,9 @@ def _f1(v):
 
 def _serial_report():
     # One machine-readable block; harmless if nobody is listening.
-    for name, k, best in state["micro"]:
-        _p("BENCHCART verb=" + name + " k=" + str(k) + " best_ms=" + str(best))
+    for name, k, best, med, mx in state["micro"]:
+        _p("BENCHCART verb=" + name + " k=" + str(k) + " best_ms=" + str(best)
+           + " med_ms=" + str(med) + " max_ms=" + str(mx))
     for label, s in (("silent", state["stats"]), ("sound", state["stats_snd"])):
         if s is None:
             continue
