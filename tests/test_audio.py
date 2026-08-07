@@ -158,7 +158,7 @@ def test_music_loops_and_stops():
         eng.render(800)
     assert eng.is_active()
     eng.stop_music()
-    assert eng._music is None
+    assert eng.track is None
 
 
 def test_stop_all_silences_everything():
@@ -227,14 +227,16 @@ def test_make_api_exposes_audio_and_drives_engine():
     api["sfx"](1)
     api["beep"](440)
     api["music"](0)
-    api["volume"](0.5)
+    api["volume"](3)
     api["music_stop"]()
     api["sound_stop"]()
     # the fake recorded every call ...
     kinds = [c[0] for c in fake.calls]
     assert kinds == ["sfx", "beep", "music", "volume", "music_stop", "sound_stop"]
-    # ... and routed them through the real engine (volume took effect)
-    assert eng.volume == 0.5
+    # ... and routed them through the real engine (volume took effect).
+    # volume(level) is 0..7 -- the same scale as a note's vol, and what libmoy
+    # and SPEC.md 8.2 mean by it.
+    assert eng.master == 3
 
 
 def test_fake_audio_tick_renders_frames():
@@ -1019,8 +1021,9 @@ def test_fade_out_ends_silent_fade_in_starts_silent():
 
 
 def test_slide_records_previous_note_and_survives_retrigger():
-    # advance_step records the finished sounding note; play() must NOT clear it
-    # (a slide on the next music row glides from the previous row's note).
+    # Finishing a step records it as the channel's previous sounding note;
+    # start() must NOT clear that (a slide on the next music row glides from the
+    # previous row's note -- SPEC.md 8.1).
     eng = audio.AudioEngine(
         audio.AudioBank([audio.SFX([[30, 0, 6], [90, 0, 6, audio.FX_SLIDE]],
                                    speed=2)], []), rate=8000)
@@ -1028,8 +1031,28 @@ def test_slide_records_previous_note_and_survives_retrigger():
     eng.render(6000)                     # into the slide step
     v = eng.voices[0]
     assert v.prev_pitch == 30 and v.prev_vol == 6
-    v.play([[50, 0, 6]], 0.05, False)
+    v.start(audio.SFX([[50, 0, 6]], speed=20), 1)
     assert v.prev_pitch == 30            # retrigger keeps the channel memory
+
+
+def test_keyed_rest_is_a_slide_origin():
+    # SPEC.md 8.1: a note with vol 0 but a real pitch is a KEYED REST -- silent,
+    # but still the origin a following slide glides from (every PICO-8 tracker
+    # slot has a key, so ported slides depend on it). Only pitch -1 records
+    # nothing.
+    eng = audio.AudioEngine(
+        audio.AudioBank([audio.SFX([[30, 0, 0], [90, 0, 6, audio.FX_SLIDE]],
+                                   speed=2)], []), rate=8000)
+    eng.play_sfx(0, chan=0)
+    eng.render(6000)
+    assert eng.voices[0].prev_pitch == 30
+
+    eng2 = audio.AudioEngine(
+        audio.AudioBank([audio.SFX([[-1, 0, 0], [90, 0, 6, audio.FX_SLIDE]],
+                                   speed=2)], []), rate=8000)
+    eng2.play_sfx(0, chan=0)
+    eng2.render(6000)
+    assert eng2.voices[0].prev_pitch == -1      # a true rest records nothing
 
 
 def test_multichannel_music_claims_voices_from_the_top():
@@ -1038,7 +1061,7 @@ def test_multichannel_music_claims_voices_from_the_top():
     eng = audio.AudioEngine(b, rate=8000)
     eng.play_music(0)
     # row channel j -> voice MUSIC_CHANNEL - j; voice 0 stays free for sfx
-    assert eng._music_nch == 3
+    assert eng._track_width == 3
     assert all(eng.voices[c].active for c in (3, 2, 1))
     assert not eng.voices[0].active
     eng.play_sfx(3)                      # a game sfx avoids the claimed voices
@@ -1046,7 +1069,7 @@ def test_multichannel_music_claims_voices_from_the_top():
     eng.stop_music()                     # releases every claimed voice ...
     assert not any(eng.voices[c].active for c in (1, 2, 3))
     assert eng.voices[0].active          # ... but never the live game sfx
-    assert eng._music_nch == 1
+    assert eng._track_width == 0
 
 
 def test_multichannel_row_minus_one_silences_that_voice():
@@ -1070,7 +1093,7 @@ def test_music_track_rows_serialize_stably():
 def test_legacy_single_channel_music_behavior_unchanged():
     eng = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
     eng.play_music(0)
-    assert eng._music_nch == 1
+    assert eng._track_width == 1
     assert eng.voices[audio.MUSIC_CHANNEL].active
     assert not any(v.active for v in eng.voices[:audio.MUSIC_CHANNEL])
     # sfx still round-robin 0..2 and never steal the music voice
@@ -1117,7 +1140,7 @@ def test_sfx_loop_start_roundtrips_and_voice_wraps_there():
     eng.render(8000)          # 10 steps/s -> several wraps in 1 s
     v = eng.voices[0]
     assert v.active
-    assert 1 <= v.idx <= 2    # wrapped to loop_start, never back to step 0
+    assert 1 <= v.step <= 2    # wrapped to loop_start, never back to step 0
 
 
 def test_music_row_secs_schedule_and_roundtrip():
@@ -1129,13 +1152,13 @@ def test_music_row_secs_schedule_and_roundtrip():
     assert audio.MusicTrack.from_dict(d).to_dict() == d
     eng = audio.AudioEngine(audio.AudioBank(sfx, [t]), rate=8000)
     eng.play_music(0)
-    assert eng._music_slot == 0
+    assert eng._mrow == 0
     eng.render(4000)                       # 0.5 s -> row 0 (0.25s) done
-    assert eng._music_slot == 1
+    assert eng._mrow == 1
     eng.render(4000)                       # 1.0 s total: row 1 lasts 1.0s
-    assert eng._music_slot == 1            # still inside the long row
+    assert eng._mrow == 1            # still inside the long row
     eng.render(4000)
-    assert eng._music_slot == 2
+    assert eng._mrow == 2
 
 
 def test_music_hold_forever_row_never_advances():
@@ -1145,7 +1168,7 @@ def test_music_hold_forever_row_never_advances():
     eng.play_music(0)
     for _ in range(5):
         eng.render(8000)                   # 5 s on a 0-duration row
-    assert eng._music_slot == 0            # held
+    assert eng._mrow == 0            # held
     assert eng.is_active()
     eng.stop_music()                       # still stoppable
     assert not eng.is_active()

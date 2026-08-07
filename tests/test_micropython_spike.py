@@ -1888,7 +1888,7 @@ def test_touch_holds_a_held_finger_between_gt911_samples():
 
 def test_native_blit_map_wired_for_tilemaps():
     # The tilemap blit (#32) is a native moy_gfx op (one C call per map() region) and
-    # DeviceCanvas.map drives it from a baked RGB565 tile atlas, with a Python
+    # DeviceCanvas.map drives it from the INDEX sheet through libmoy, with a Python
     # per-tile fallback when moy_gfx is absent. Grep the frozen device sources +
     # the C module like the other firmware tests.
     c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
@@ -1904,7 +1904,12 @@ def test_native_blit_map_wired_for_tilemaps():
     assert "def map(self, tilemap, sheet" in device_canvas     # DeviceCanvas.map
     assert "self._gfx.blit_map(dst" in device_canvas           # native one-call blit (via _blit_map_into)
     assert "def _blit_map_into(self" in device_canvas          # #63 Fold 2: shared blit_map helper
-    assert "def _sheet_atlas(self, sheet, colorkey):" in device_canvas  # baked RGB565 atlas
+    # The baked RGB565 tile atlas is GONE (#97): blit_map calls libmoy's
+    # moy_map_draw, which reads the index sheet and resolves through the LUT.
+    # Measured faster on both boards, and it hands back the atlas's 64 KB.
+    assert "def _sheet_atlas" not in device_canvas
+    assert "moy_map_draw(&c, &m, &sh" in c
+    assert "sheet.pix, sheet.w, sheet.h" in device_canvas
     assert "def _map_py(self, tilemap, sheet" in device_canvas  # no-moy_gfx fallback
     # #63 Fold 2: map() auto-caches the rasterized region (blit565 composite of a hidden
     # 565 layer) so a camera-only change re-uses it instead of re-walking every cell.
@@ -1963,7 +1968,7 @@ def test_native_text_wired_with_shared_font():
 def test_native_spr_batch_wired_for_sprites():
     # The sprite-batch blit (#43) is a native moy_gfx op (one C call for N sprites, the
     # sprite analogue of blit_map / #32) and DeviceCanvas.spr_batch drives it from the
-    # SAME baked RGB565 tile atlas map() uses, with a Python per-item fallback when
+    # SAME index sheet map() reads, with a Python per-item fallback when
     # moy_gfx is absent. Grep the frozen device sources + the C module, like the other
     # firmware tests (this file does not execute device code).
     c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
@@ -1998,8 +2003,10 @@ def test_native_blit_indices_wired_for_paint_images():
                + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
     assert "def blit_indices(self, indices, iw, ih, x, y)" in device_canvas   # DeviceCanvas method
     assert "self._gfx.blit_indices(self._buf" in device_canvas  # native one-call bake
-    # The batch reuses the map() atlas (one bake, keyed on sheet.gen), not per-sprite.
-    assert "atlas, ntiles = self._sheet_atlas(sheet, colorkey)" in device_canvas
+    # The batch walks the sheet through libmoy's moy_spr -- one canvas for the whole
+    # run, so the #43 dispatch win is untouched and only the inner loop moved (#97).
+    assert "moy_spr(&c, &sh, (int)tid" in c
+    assert "self._wire_pal(), self._palt" in device_canvas
     # Brick Siege adopts it: the moving sprites go out in one batch (#43).
     battle = (Path("system_carts") / "brick_siege.moy"
               / "main.py").read_text(encoding="utf-8")
@@ -2652,7 +2659,7 @@ def test_device_tile_cache_invalidated_on_sprite_edit():
     # not the stale cached Image. make_api watches the sheet's gen counter and
     # clears the cache when it changes. Checked here on the MULTI-TILE span path (which
     # still resolves through make_api's tile_cache); plain 1x1 sprites auto-batch (#63)
-    # through the sheet atlas, which is itself keyed on sheet.gen (see the atlas tests).
+    # straight from the sheet, so a paint edit needs no cache invalidation at all.
     m = _load_moy_runtime()
     sheet = m.SpriteSheet(4, 4)
     sheet.tset(0, 0, 0, 3)

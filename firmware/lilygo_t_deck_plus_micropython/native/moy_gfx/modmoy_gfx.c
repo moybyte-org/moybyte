@@ -327,19 +327,16 @@ static mp_obj_t moy_gfx_blit_map(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit_map_obj, 23, 23, moy_gfx_blit_map);
 
-// blit_batch(dst, dw, dh, items, atlas, ntiles, tile, scale, key,
+// blit_batch(dst, dw, dh, items, sheet, sheetw, sheeth, lut, palt, key, scale,
 //            cam_x, cam_y, cx0, cy0, cx1, cy1) -- draw N sprite tiles in ONE C call
 // (issue #43): the sprite analogue of blit_map (#32). `items` is a list/tuple of
-// (tile, x, y) or (tile, x, y, flip) tuples; each tile is copied from the
-// pre-converted RGB565 `atlas` (ntiles tiles of `tile`x`tile` pixels, tile-major,
-// row-within-tile -- exactly what _sheet_atlas bakes, the SAME atlas map() uses)
-// into dst at world (x,y) minus the camera, each source pixel expanded to a
-// `scale` x `scale` block. Pixels equal to `key` are transparent. `flip` mirrors
-// per item (TIC-80: 0=none, 1=h, 2=v, 3=both) -- the one thing blit_map has no need
-// of, so we read the source pixel from the mirrored tile-local index but write it
-// to the un-mirrored block. The clip rect [cx0,cy0)..[cx1,cy1) (#11) bounds the
-// write region, intersected with the buffer. Collapses N per-sprite MicroPython->C
-// blit565 calls into one walk, which is the device's draw-call bottleneck.
+// (tile, x, y) or (tile, x, y, flip) tuples; each is drawn from the INDEX sheet
+// through libmoy's moy_spr (#97), resolving colour via `lut` (the 64-entry table
+// with pal folded in) and treating a pixel as transparent if it equals `key` or
+// its `palt` entry is set. `flip` is TIC-80's (0=none, 1=h, 2=v, 3=both).
+// Collapses N per-sprite MicroPython->C calls into one walk, which is the
+// device's draw-call bottleneck -- that part is unchanged and is the whole
+// reason the verb exists.
 //
 // ARRAY MODE (#63 spr_gate): `items` may instead be the canvas batch array -- an
 // array('h') laid out [next, colorkey, scale, token, (tile x y flip)*N...] with
@@ -349,7 +346,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit_map_obj, 23, 23, moy_gfx
 // (a list/tuple of tuples has no buffer -> classic mode).
 static mp_obj_t moy_gfx_blit_batch(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
-    size_t dcap, acap;
+    size_t dcap;
     uint16_t *dst = moy_gfx_buf_w(a[0], &dcap);
     mp_int_t dw = mp_obj_get_int(a[1]);
     mp_int_t dh = mp_obj_get_int(a[2]);
@@ -368,74 +365,75 @@ static mp_obj_t moy_gfx_blit_batch(size_t n_args, const mp_obj_t *a) {
     } else {
         mp_obj_get_array(a[3], &n_items, &item_arr);  // list or tuple of item tuples
     }
-    const uint16_t *atlas = moy_gfx_buf_r(a[4], &acap);
-    mp_int_t ntiles = mp_obj_get_int(a[5]);
-    mp_int_t tile = mp_obj_get_int(a[6]);
-    mp_int_t scale = mp_obj_get_int(a[7]);
-    mp_int_t key = mp_obj_get_int(a[8]);
-    mp_int_t cam_x = mp_obj_get_int(a[9]);
-    mp_int_t cam_y = mp_obj_get_int(a[10]);
-    if (dw <= 0 || dh <= 0 || tile <= 0 || ntiles <= 0) return mp_const_none;
+    mp_buffer_info_t sb, lb, pb;
+    mp_get_buffer_raise(a[4], &sb, MP_BUFFER_READ);
+    mp_int_t sheetw = mp_obj_get_int(a[5]), sheeth = mp_obj_get_int(a[6]);
+    mp_get_buffer_raise(a[7], &lb, MP_BUFFER_READ);
+    const uint16_t *lut = (const uint16_t *)lb.buf;
+    const uint8_t *palt = NULL;
+    if (a[8] != mp_const_none) {
+        mp_get_buffer_raise(a[8], &pb, MP_BUFFER_READ);
+        palt = (const uint8_t *)pb.buf;
+    }
+    mp_int_t key = mp_obj_get_int(a[9]);
+    mp_int_t scale = mp_obj_get_int(a[10]);
+    mp_int_t cam_x = mp_obj_get_int(a[11]);
+    mp_int_t cam_y = mp_obj_get_int(a[12]);
+    mp_int_t cx0 = mp_obj_get_int(a[13]);
+    mp_int_t cy0 = mp_obj_get_int(a[14]);
+    mp_int_t cx1 = mp_obj_get_int(a[15]);
+    mp_int_t cy1 = mp_obj_get_int(a[16]);
+    if (dw <= 0 || dh <= 0) return mp_const_none;
     if (scale < 1) scale = 1;
-    // Clip rect, intersected with the buffer.
-    mp_int_t cx0 = mp_obj_get_int(a[11]);
-    mp_int_t cy0 = mp_obj_get_int(a[12]);
-    mp_int_t cx1 = mp_obj_get_int(a[13]);
-    mp_int_t cy1 = mp_obj_get_int(a[14]);
-    if (cx0 < 0) cx0 = 0;
-    if (cy0 < 0) cy0 = 0;
-    if (cx1 > dw) cx1 = dw;
-    if (cy1 > dh) cy1 = dh;
-    mp_int_t tpx = tile * tile;                  // pixels per atlas tile
-    if ((size_t)ntiles * (size_t)tpx > acap) return mp_const_none;  // atlas too small
-    for (size_t i = 0; i < n_items; i++) {
-        mp_int_t tid, dx0, dy0, flip;
-        if (qitems != NULL) {
-            const int16_t *it = qitems + i * 4u;   // (tile, x, y, flip) int16 quad
-            tid = it[0];
-            dx0 = (mp_int_t)it[1] - cam_x;
-            dy0 = (mp_int_t)it[2] - cam_y;
-            flip = it[3];
-        } else {
-            size_t ilen;
-            mp_obj_t *ielem;
-            mp_obj_get_array(item_arr[i], &ilen, &ielem);  // (tile, x, y[, flip])
-            if (ilen < 3) continue;
-            tid = mp_obj_get_int(ielem[0]);
-            dx0 = mp_obj_get_int(ielem[1]) - cam_x;
-            dy0 = mp_obj_get_int(ielem[2]) - cam_y;
-            flip = (ilen > 3) ? mp_obj_get_int(ielem[3]) : 0;
-        }
-        if (tid < 0 || tid >= ntiles) continue;
-        mp_int_t fx = flip & 1;
-        mp_int_t fy = (flip >> 1) & 1;
-        const uint16_t *tsrc = atlas + (size_t)tid * (size_t)tpx;
-        // expand the tile's tile x tile pixels by `scale`, clip-bounded, mirroring
-        // the SOURCE read per flip but writing to the un-mirrored block (like spr).
-        for (mp_int_t row = 0; row < tile; row++) {
-            mp_int_t ssy = fy ? (tile - 1 - row) : row;
-            const uint16_t *srow = tsrc + (size_t)ssy * (size_t)tile;
-            for (mp_int_t sub_y = 0; sub_y < scale; sub_y++) {
-                mp_int_t ty = dy0 + row * scale + sub_y;
-                if (ty < cy0 || ty >= cy1) continue;
-                uint16_t *drow = dst + (size_t)ty * (size_t)dw;
-                for (mp_int_t col = 0; col < tile; col++) {
-                    mp_int_t ssx = fx ? (tile - 1 - col) : col;
-                    uint16_t p = srow[ssx];
-                    if (key >= 0 && p == (uint16_t)key) continue;
-                    mp_int_t bx = dx0 + col * scale;
-                    for (mp_int_t sub_x = 0; sub_x < scale; sub_x++) {
-                        mp_int_t tx = bx + sub_x;
-                        if (tx < cx0 || tx >= cx1) continue;
-                        drow[tx] = p;
-                    }
-                }
+    if (!moy_gfx_is_moy_sheet(sheetw, sheeth, sb.len)) return mp_const_none;
+    moy_gfx_clip(dw, dcap, &cx0, &cy0, &cx1, &cy1);
+    {
+        // ONE canvas for the whole batch -- which is the point of this verb. The
+        // #43 protocol exists because N per-sprite MicroPython->C calls were the
+        // device's draw-call bottleneck; that is unchanged, and what moved is
+        // only what happens inside: libmoy's moy_spr reading the INDEX sheet,
+        // rather than a copy out of a pre-baked RGB565 atlas.
+        //
+        // Re-measured on real glass, the atlas LOSES: 0.79x on an ESP32-S3 and
+        // 0.83x on a P4. It never removed the per-pixel loop, only its two
+        // lookups, and moy_spr's scale-1 path buys more back by resolving the
+        // clip into loop bounds once per sprite. Losing it also hands back its
+        // 64 KB, which on the S3 is the scarcest memory there is.
+        //
+        // The camera goes in the CANVAS rather than being subtracted per item:
+        // moy_spr applies it, and its fast path hoists it out of the pixel loop.
+        moy_canvas c;
+        moy_sheet sh;
+        moy_gfx_canvas(&c, dst, dw, dcap, lut, palt,
+                       cam_x, cam_y, cx0, cy0, cx1, cy1);
+        moy_sheet_init(&sh, (uint8_t *)sb.buf);
+        for (size_t i = 0; i < n_items; i++) {
+            mp_int_t tid, ix, iy, flip;
+            if (qitems != NULL) {
+                const int16_t *it = qitems + i * 4u;   // (tile, x, y, flip) quad
+                tid = it[0];
+                ix = it[1];
+                iy = it[2];
+                flip = it[3];
+            } else {
+                size_t ilen;
+                mp_obj_t *ielem;
+                mp_obj_get_array(item_arr[i], &ilen, &ielem);  // (tile, x, y[, flip])
+                if (ilen < 3) continue;
+                tid = mp_obj_get_int(ielem[0]);
+                ix = mp_obj_get_int(ielem[1]);
+                iy = mp_obj_get_int(ielem[2]);
+                flip = (ilen > 3) ? mp_obj_get_int(ielem[3]) : 0;
             }
+            // moy_spr refuses an out-of-range tile itself (SPEC.md: a blank tile
+            // is legal, a bad id is not an error), so no guard is needed here.
+            moy_spr(&c, &sh, (int)tid, (int)ix, (int)iy,
+                    (int)key, (int)scale, (int)flip);
         }
     }
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit_batch_obj, 15, 15, moy_gfx_blit_batch);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit_batch_obj, 17, 17, moy_gfx_blit_batch);
 
 // --- spr_gate: the kid-facing native spr() fast path (#63) -------------------
 //

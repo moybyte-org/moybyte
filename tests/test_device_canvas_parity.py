@@ -253,54 +253,61 @@ class _FakeGfx:
                                 d[drow + tx] = wire
 
     @staticmethod
-    def blit_batch(dst, dw, dh, items, atlas, ntiles, tile, scale, key,
-                   cam_x, cam_y, cx0, cy0, cx1, cy1):
-        # #43/#63: draw a run of sheet tiles from an RGB565 atlas in one call -- a
-        # faithful transcription of moy_gfx_blit_batch in modmoy_gfx.c, so the
-        # auto-batch path is cross-checked against the host rasterizer. Like the C,
-        # `items` is EITHER a list of (tile, x, y[, flip]) tuples OR the canvas
+    def blit_batch(dst, dw, dh, items, sheet, sheetw, sheeth, lut, palt, key,
+                   scale, cam_x, cam_y, cx0, cy0, cx1, cy1):
+        # #43/#63: draw a run of sheet tiles in one call -- a faithful transcription
+        # of moy_gfx_blit_batch, which now walks the INDEX sheet through libmoy's
+        # moy_spr (#97) rather than copying from a pre-baked RGB565 atlas. Like the
+        # C, `items` is EITHER a list of (tile, x, y[, flip]) tuples OR the canvas
         # batch array('h') [next, ck, scale, token, (tile x y flip)*N...] (#63
         # spr_gate array mode) -- detected the same way (buffer protocol).
         d = memoryview(dst).cast("H")
-        a = memoryview(atlas).cast("H")
-        acap = len(a)
-        if dw <= 0 or dh <= 0 or tile <= 0 or ntiles <= 0:
+        try:
+            L = memoryview(lut).cast("H")
+        except TypeError:
+            L = lut
+        dcap = len(d)
+        if dw <= 0 or dh <= 0:
             return
         if scale < 1:
             scale = 1
-        if cx0 < 0:
-            cx0 = 0
-        if cy0 < 0:
-            cy0 = 0
-        if cx1 > dw:
-            cx1 = dw
-        if cy1 > dh:
-            cy1 = dh
-        tpx = tile * tile
-        if ntiles * tpx > acap:
+        tile = 8
+        cols = sheetw // tile
+        if cols <= 0 or sheetw * sheeth > len(sheet):
             return
+        ntiles = cols * (sheeth // tile)
+        cx0, cy0, cx1, cy1 = _FakeGfx._clip(dw, dcap, cx0, cy0, cx1, cy1)
+        quads = None
         try:
-            q = memoryview(items).cast("B").cast("h")   # array mode (int16 quads)
-            nxt = max(4, min(q[0], len(q)))
-            items = [(q[i], q[i + 1], q[i + 2], q[i + 3])
-                     for i in range(4, nxt, 4)]
+            mv = memoryview(items)
+            if mv.format in ("h", "H") or hasattr(items, "typecode"):
+                q = items
+                nxt = q[0]
+                if nxt < 4:
+                    nxt = 4
+                quads = [(q[k], q[k + 1], q[k + 2], q[k + 3])
+                         for k in range(4, nxt, 4)]
         except TypeError:
-            pass                                        # classic list-of-tuples mode
-        for it in items:
-            if len(it) < 3:
-                continue
-            tid = int(it[0])
+            quads = None
+        if quads is None:
+            quads = []
+            for it in items:
+                if len(it) < 3:
+                    continue
+                quads.append((it[0], it[1], it[2], it[3] if len(it) > 3 else 0))
+        for tid, ix, iy, flip in quads:
+            # moy_spr refuses an out-of-range tile itself.
             if tid < 0 or tid >= ntiles:
                 continue
-            dx0 = int(it[1]) - cam_x
-            dy0 = int(it[2]) - cam_y
-            flip = int(it[3]) if len(it) > 3 else 0
             fx = flip & 1
             fy = (flip >> 1) & 1
-            tsrc = tid * tpx
+            ox = (tid % cols) * tile
+            oy = (tid // cols) * tile
+            dx0 = ix - cam_x
+            dy0 = iy - cam_y
             for row in range(tile):
                 ssy = (tile - 1 - row) if fy else row
-                srow = tsrc + ssy * tile
+                base = (oy + ssy) * sheetw + ox
                 for sub_y in range(scale):
                     ty = dy0 + row * scale + sub_y
                     if ty < cy0 or ty >= cy1:
@@ -308,15 +315,16 @@ class _FakeGfx:
                     drow = ty * dw
                     for col in range(tile):
                         ssx = (tile - 1 - col) if fx else col
-                        p = a[srow + ssx]
-                        if key >= 0 and p == (key & 0xFFFF):
+                        pv = sheet[base + ssx]
+                        if pv == key or (palt is not None and palt[pv & 63]):
                             continue
+                        wire = L[pv & 63]
                         bx = dx0 + col * scale
                         for sub_x in range(scale):
                             tx = bx + sub_x
                             if tx < cx0 or tx >= cx1:
                                 continue
-                            d[drow + tx] = p
+                            d[drow + tx] = wire
 
     @staticmethod
     def blit_window(dst, dw, dh, src, src_w, sx, sy):

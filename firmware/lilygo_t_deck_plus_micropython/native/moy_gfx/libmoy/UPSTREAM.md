@@ -22,8 +22,7 @@ the verbs whose GEOMETRY the spec defines route through libmoy:
 
 | | |
 |---|---|
-| **libmoy's** | `tri`, `sspr`, `tline`, `circ`, `circb`, `line`, `print`, `blit_map` |
-| **measured, ready, not yet done** | the sprite path (`blit565`/`blit_batch`/`spr_gate`) |
+| **libmoy's** | `tri`, `sspr`, `tline`, `circ`, `circb`, `line`, `print`, `blit_map`, `blit_batch` |
 | **no counterpart** | `fill`, `fill_rect`, `blit565_scale`, `copy_async`, `copy_wait`, `scroll_rect`, `blit_window`, `blit_indices`, `fill_spans`, `draw_ctx` |
 
 The third row is moybyte's compositor, not the spec's raster: async DMA, the
@@ -46,17 +45,38 @@ means libmoy is faster):
 |---|---|---|---|---|
 | `print` | 1.21× slower | **1.04×** | tie | crossed; measured 1.03× in the console |
 | `blit_map` | 1.54× slower | **0.78×** | 0.92× | crossed; **640.6 → 562.5 µs/op** in the console |
-| `spr` | 1.06× slower | **0.79×** | 0.83× | ready, not done — see below |
+| `spr` | 1.06× slower | **0.79×** | 0.83× | crossed; **406.2 → 335.9 µs/op** (0.83×) |
 
 `blit_map` and `print` crossed on 2026-08-07 and are **verified on glass**: all
 ten conformance scenes pass on an ESP32-P4, `tilemap` among them, and the Bench
 cart puts `map` at 0.88× — the largest single verb gain on either board, since
 it was also the most expensive verb by four times.
 
-The sprite path is measured and ready but **not attempted**: it is the #43 batch
-protocol on the hottest path in the console, and it is what actually reclaims
-the 64 KB RGB565 atlas (`blit_batch` and `spr_gate` still bake it, so `map`
-leaving did not free a byte). That wants its own session with a board attached.
+The sprite path crossed too, and it turned out to be **one C function** rather
+than the three the name suggests: `blit565` blits arbitrary RGB565 sources
+(Images, layers) and has no libmoy counterpart, `spr_gate` only fills the batch
+array, and both batch call sites funnel into `blit_batch`. The #43 dispatch win
+is untouched — one canvas is borrowed for the whole run and the loop still
+collapses N sprites into one MicroPython→C call; only the inner blit moved.
+
+**The RGB565 tile atlas is gone.** `_sheet_atlas` baked all 512 tiles with pal
+and colorkey folded in, and nothing reads it any more. Three things followed:
+
+| | |
+|---|---|
+| `sprb` | 406.2 → **335.9 µs/op** (0.83×) |
+| `map` | 640.6 → **562.5 µs/op** (0.88×) |
+| worst frame | 104 ms → **29 ms** |
+
+That last one was not predicted and is the best of the three. The bake was
+32,768 MicroPython loop iterations plus a 64 KB allocation, paid on first
+map/spr use — a ~100 ms hitch that had been sitting in the silent phase of every
+Bench run all along, attributed to nothing. Removing the cache removed the
+stall, and the 64 KB it held goes back to the S3, where internal SRAM is the
+scarcest thing there is.
+
+A paint edit now needs no cache invalidation at all, because there is no cache:
+the sheet IS the source.
 
 `moy_spr`'s scale-1 fast path is what moved the last two: `moy_map_draw` routes
 every cell through it, so fixing one fixed both. The old write-up's diagnosis
