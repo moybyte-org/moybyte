@@ -32,62 +32,36 @@ belong there too despite `moy_cls`/`moy_rect` existing, because they are
 **viewport-aware** — a windowed layer clearing itself must not wipe the desktop
 it draws on, and libmoy's canvas has no such notion.
 
-The second row is the interesting one, and it is a measurement rather than a
-preference. All four rasters hash identical on every verb; only the cost differs:
+The second row was declined on measurements that turned out to be STALE, and
+re-running them on 2026-08-07 overturned two of the three. Kept here in full,
+because a decision reversed quietly teaches nobody anything.
 
-| verb | ESP32-S3 | ESP32-P4 | kept |
-|---|---|---|---|
-| `print` | libmoy **1.21× slower** | identical (18.8 µs/op either way) | moy_gfx |
-| `blit_map` | libmoy **1.54× slower** | libmoy 0.92× | moy_gfx |
-| `spr` | moy_gfx **6% faster** | libmoy 0.83× | moy_gfx |
+The S3 column originally came from a bench run whose libmoy predated that same
+session's optimizations — `moy_print`'s whole-column off-clip early-out and
+`moy_spr`'s scale-1 fast path, which between them are most of what those verbs
+do. Re-measured against current libmoy on both boards (`LIB565/gfx`, below 1.00
+means libmoy is faster):
 
-The causes are named, not mysterious. `moy_gfx_text_raw` hoists the clip and
-early-outs per glyph where `moy_print` walks bits through `moy_put`.
-`moy_map_draw` routes each cell through `moy_spr` and resolves colour per pixel,
-where `blit_map` copies 16-bit words out of a pre-baked RGB565 atlas. And the
-sprite path pairs that atlas with the #43 batch protocol — which, note, beats
-libmoy by only six percent, so that architecture is worth much less than its
-complexity suggests.
+| verb | S3 before | **S3 now** | P4 | verdict |
+|---|---|---|---|---|
+| `print` | 1.21× slower | **1.04×** | tie | a tie; crossing costs ~0.8 µs/op |
+| `blit_map` | 1.54× slower | **0.78×** | 0.92× | **libmoy wins on both** |
+| `spr` | 1.06× slower | **0.79×** | 0.83× | **libmoy wins on both** |
 
-**The S3 is what decides these, and the P4 disagrees with it on two of the
-three.** That is the whole reason both boards get measured: the constrained
-board is the one a cart is too slow on, and it is also the one that cannot be
-driven remotely (its USB-CDC RX is dead under the desktop), so its numbers come
-from the standalone A/B bench rather than from the console.
+`moy_spr`'s scale-1 fast path is what moved the last two: `moy_map_draw` routes
+every cell through it, so fixing one fixed both. The old write-up's diagnosis
+("resolves per pixel through `moy_put`") described code that no longer existed
+by the time it was quoted.
 
-`print` is the sharpest case, because SPEC.md §6 has no scale ("text is always
-8px") so the cart's `print` *is* scale 1 and could cross. It was routed through
-`moy_print`, measured identical on the P4, and **reverted on the S3 number** —
-the console draws chrome text by the dozen per frame there. Scale > 1 was never
-a cart anyway; that is this console's chrome at the #39 system font size, which
-is host business (SPEC.md §0).
+Two consequences worth stating plainly. **`map` is the console's most expensive
+verb** — 640 µs/op, four times the next — so a 22% win there is the largest
+single raster gain available on either board. And **adopting `spr` hands back
+the 64 KB RGB565 tile atlas**, on the board where 64 KB of internal SRAM is the
+scarcest thing there is.
 
-### Two of those three numbers are SUSPECT — re-measure before trusting them
-
-The S3 column came from a standalone A/B bench run at 21:04 on 2026-08-06. The
-libmoy in that build got `moy_print`'s whole-column off-clip early-out and
-`moy_spr`'s scale-1 fast path **afterwards** (the source in the bench tree is
-stamped 21:45), and the run's own write-up describes the pre-optimization code
-in both cases: *"moy_print walks bits through moy_put"* and *"moy_map_draw
-routes each cell through moy_spr and therefore moy_put, resolving per pixel"*.
-That second one is no longer true at scale 1 — which is the only scale a
-tilemap uses by default.
-
-So `print` and `blit_map` may have been declined against a libmoy that no
-longer exists. `spr` lost by only six percent, which is inside the size of that
-kind of change too. **Nothing here is settled until the S3 bench is re-run
-against current libmoy**, and it needs a hand: that board has no BOOT button and
-its USB-CDC RX is dead under the desktop, so it enters the ROM loader only by
-holding the trackball (GPIO0) in while powering on.
-
-The P4 half was re-measured and is current. It prefers libmoy on `blit_map`
-(0.92×) and calls `print` a tie — so if the S3 numbers move, all three verbs are
-back in play.
-
-Whatever the answer, fixes belong **upstream**: they would benefit every libmoy
-host, not just this one. `moy_circ` already took that route — it emitted one
-`moy_rect` per row until this console measured its own hand-written direct-span
-form faster, and the fix went to moy-spec (`ef01426`) rather than staying here.
+The lesson is not about libmoy. It is that a measurement written up confidently
+outlives the code it measured, and nobody re-runs a number that reads like a
+verdict. The dates are in the table for that reason.
 
 ## Why the 3D verbs went first
 
