@@ -1484,13 +1484,16 @@ class DeviceCanvas:
     def _blit_map_into(self, dst, dw, dh, dsx, dsy, tilemap, sheet, mx, my, w, h,
                        colorkey, tile, scale, cx0, cy0, cx1, cy1):
         # One native moy_gfx.blit_map into `dst` -- the framebuffer (a direct draw) or a
-        # hidden cache layer (Fold 2 fill). Bakes/reuses the sheet's RGB565 tile atlas
-        # (cached on the sheet, keyed on gen/colorkey/palgen) then walks the w x h region.
-        atlas, ntiles = self._sheet_atlas(sheet, colorkey)
+        # hidden cache layer (Fold 2 fill). Reads the INDEX sheet and resolves through
+        # the _wire_pal LUT, which is libmoy's moy_map_draw (#97): re-measured on glass
+        # it beats the pre-baked RGB565 atlas this used to walk, 0.78x on the S3 and
+        # 0.92x on the P4. colorkey is the cart's own index again rather than the
+        # _RGB_KEY sentinel the atlas baked it into.
         self._gfx.blit_map(dst, dw, dh, dsx, dsy,
                            tilemap.cells, tilemap.w, tilemap.h,
                            mx, my, w, h,
-                           atlas, ntiles, tile, scale, _RGB_KEY,
+                           sheet.pix, sheet.w, sheet.h,
+                           self._wire_pal(), self._palt, int(colorkey), scale,
                            cx0, cy0, cx1, cy1)
 
     def map(self, tilemap, sheet, mx=0, my=0, w=None, h=None,

@@ -135,10 +135,12 @@ if [ -d "${MOY_SD_SRC}" ]; then
   fi
 fi
 
-# Stage the Moybyte moy_audio native C module (focused PCM mixer for the v0.4
-# console -- see native/moy_audio/modmoy_audio.c, #16) into the upstream ext_mod
-# tree, same pattern as moy_sd (ext_mod is wiped on re-clone, so re-stage every
-# build). DeviceAudio prefers it and falls back to the Python mixer when absent.
+# Stage the Moybyte moy_audio native C module into the upstream ext_mod tree,
+# same pattern as moy_sd (ext_mod is wiped on re-clone, so re-stage every build).
+# This is SPEC.md 8: native/moy_audio/libmoy/ is moy-spec's own C synth, vendored
+# verbatim and compiled in (#97), with modmoy_audio.c the MicroPython binding
+# over it -- so the cp must stay RECURSIVE, exactly like moy_lua's vendored lua/.
+# DeviceAudio prefers it and falls back to the Python twin when absent.
 MOY_AUDIO_SRC="${SCRIPT_DIR}/native/moy_audio"
 MOY_AUDIO_DST="${UPSTREAM_DIR}/ext_mod/moy_audio"
 if [ -d "${MOY_AUDIO_SRC}" ]; then

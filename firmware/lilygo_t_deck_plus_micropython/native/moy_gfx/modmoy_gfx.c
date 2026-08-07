@@ -20,6 +20,18 @@
 // over it; the rest are still moybyte's own, for reasons that file records.
 #include "moy.h"
 
+// The libmoy bridge helpers live further down, next to the per-pixel put they
+// belong with; blit_map sits above them and needs them. Declared here rather
+// than moved, because their neighbours are the reason they are readable.
+static inline void moy_gfx_clip(mp_int_t dw, size_t cap, mp_int_t *cx0, mp_int_t *cy0,
+                                mp_int_t *cx1, mp_int_t *cy1);
+static inline void moy_gfx_canvas(moy_canvas *c, uint16_t *dst, mp_int_t dw,
+                                  size_t cap, const uint16_t *lut,
+                                  const uint8_t *palt, mp_int_t cam_x,
+                                  mp_int_t cam_y, mp_int_t cx0, mp_int_t cy0,
+                                  mp_int_t cx1, mp_int_t cy1);
+static inline bool moy_gfx_is_moy_sheet(mp_int_t w, mp_int_t h, size_t len);
+
 // #77: build the pixel kernel at -O3 (the ports default to -O2). In-source
 // pragma, NOT cmake: source-file properties are directory-scoped and the linked
 // object is compiled by the micropython.elf target, which never sees them
@@ -254,90 +266,66 @@ static mp_obj_t moy_gfx_blit565_scale(size_t n_args, const mp_obj_t *a) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit565_scale_obj, 9, 9, moy_gfx_blit565_scale);
 
 // blit_map(dst, dw, dh, sx, sy, cells, map_w, map_h, mx, my, rw, rh,
-//          atlas, ntiles, tile, scale, key[, cx0, cy0, cx1, cy1]) -- blit a (rw x rh)
-// cell region of a tilemap in ONE C call (issue #32). `cells` is a byte grid where
-// each cell holds `tile_id + 1` (0 = empty, skipped); a non-empty cell's tile is
-// copied from the pre-converted RGB565 `atlas` (ntiles tiles of `tile`x`tile` pixels,
-// tile-major, row-within-tile) into dst at screen (sx,sy), each source pixel expanded
-// to a `scale` x `scale` block (so scale=2 => 16px tiles). Pixels equal to `key` are
-// transparent. The optional clip rect [cx0,cy0)..[cx1,cy1) (#11) bounds the write
-// region; omitted -> full destination, so pre-#11 17-arg calls are unchanged.
+//          sheet, sheetw, sheeth, lut, palt, colorkey, scale, cx0, cy0, cx1, cy1)
+// -- blit a (rw x rh) cell region of a tilemap in ONE C call (issue #32), through
+// libmoy's moy_map_draw (#97). `cells` is a byte grid holding tile_id + 1 (0 =
+// empty, skipped, leaving whatever was underneath -- which is what makes a
+// tilemap composable with a background).
+//
+// IT READS THE SHEET, not a pre-baked RGB565 atlas. That atlas was this verb's
+// whole design: bake the sheet once with pal and colorkey folded in, then copy
+// 16-bit words. Re-measured on real glass, libmoy reading the 4-bit sheet and
+// resolving through store[] is FASTER on both boards -- 0.78x on an ESP32-S3,
+// 0.92x on a P4 -- because moy_spr's scale-1 path resolves the clip into loop
+// bounds once per tile and the atlas never removed the per-pixel loop, only its
+// lookups. map is the console's most expensive verb (640us/op, four times the
+// next), so this is the largest single raster gain on either board.
 static mp_obj_t moy_gfx_blit_map(size_t n_args, const mp_obj_t *a) {
-    size_t dcap, ccap, acap;
+    (void)n_args;
+    size_t dcap;
     uint16_t *dst = moy_gfx_buf_w(a[0], &dcap);
     mp_int_t dw = mp_obj_get_int(a[1]);
-    mp_int_t dh = mp_obj_get_int(a[2]);
-    mp_int_t sx = mp_obj_get_int(a[3]);
-    mp_int_t sy = mp_obj_get_int(a[4]);
-    mp_buffer_info_t cbi;
-    mp_get_buffer_raise(a[5], &cbi, MP_BUFFER_READ);
-    const uint8_t *cells = (const uint8_t *)cbi.buf;
-    ccap = cbi.len;                              // cells is a byte grid (1 byte/cell)
-    mp_int_t map_w = mp_obj_get_int(a[6]);
-    mp_int_t map_h = mp_obj_get_int(a[7]);
-    mp_int_t mx = mp_obj_get_int(a[8]);
-    mp_int_t my = mp_obj_get_int(a[9]);
-    mp_int_t rw = mp_obj_get_int(a[10]);
-    mp_int_t rh = mp_obj_get_int(a[11]);
-    const uint16_t *atlas = moy_gfx_buf_r(a[12], &acap);
-    mp_int_t ntiles = mp_obj_get_int(a[13]);
-    mp_int_t tile = mp_obj_get_int(a[14]);
-    mp_int_t scale = mp_obj_get_int(a[15]);
-    mp_int_t key = mp_obj_get_int(a[16]);
-    if (dw <= 0 || dh <= 0 || map_w <= 0 || map_h <= 0 || tile <= 0 || ntiles <= 0)
-        return mp_const_none;
-    if (scale < 1) scale = 1;
-    // Clip rect, intersected with the buffer; defaults to the whole destination.
-    mp_int_t cx0 = (n_args > 17) ? mp_obj_get_int(a[17]) : 0;
-    mp_int_t cy0 = (n_args > 18) ? mp_obj_get_int(a[18]) : 0;
-    mp_int_t cx1 = (n_args > 19) ? mp_obj_get_int(a[19]) : dw;
-    mp_int_t cy1 = (n_args > 20) ? mp_obj_get_int(a[20]) : dh;
-    if (cx0 < 0) cx0 = 0;
-    if (cy0 < 0) cy0 = 0;
-    if (cx1 > dw) cx1 = dw;
-    if (cy1 > dh) cy1 = dh;
-    mp_int_t tpx = tile * tile;                  // pixels per atlas tile
-    if ((size_t)ntiles * (size_t)tpx > acap) return mp_const_none;  // atlas too small
-    mp_int_t step = tile * scale;                // on-screen size of one cell
-    for (mp_int_t cy = 0; cy < rh; cy++) {
-        mp_int_t myy = my + cy;
-        if (myy < 0 || myy >= map_h) continue;
-        mp_int_t dy0 = sy + cy * step;
-        for (mp_int_t cx = 0; cx < rw; cx++) {
-            mp_int_t mxx = mx + cx;
-            if (mxx < 0 || mxx >= map_w) continue;
-            size_t ci = (size_t)myy * (size_t)map_w + (size_t)mxx;
-            if (ci >= ccap) continue;
-            mp_int_t v = cells[ci];
-            if (v == 0) continue;                // empty cell
-            mp_int_t tid = v - 1;
-            if (tid >= ntiles) continue;
-            const uint16_t *tsrc = atlas + (size_t)tid * (size_t)tpx;
-            mp_int_t dx0 = sx + cx * step;
-            // expand the tile's tile x tile pixels by `scale`, clip-bounded.
-            for (mp_int_t row = 0; row < tile; row++) {
-                const uint16_t *srow = tsrc + (size_t)row * (size_t)tile;
-                for (mp_int_t sub_y = 0; sub_y < scale; sub_y++) {
-                    mp_int_t ty = dy0 + row * scale + sub_y;
-                    if (ty < cy0 || ty >= cy1) continue;
-                    uint16_t *drow = dst + (size_t)ty * (size_t)dw;
-                    for (mp_int_t col = 0; col < tile; col++) {
-                        uint16_t p = srow[col];
-                        if (key >= 0 && p == (uint16_t)key) continue;
-                        mp_int_t bx = dx0 + col * scale;
-                        for (mp_int_t sub_x = 0; sub_x < scale; sub_x++) {
-                            mp_int_t tx = bx + sub_x;
-                            if (tx < cx0 || tx >= cx1) continue;
-                            drow[tx] = p;
-                        }
-                    }
-                }
-            }
-        }
+    mp_int_t dsx = mp_obj_get_int(a[3]), dsy = mp_obj_get_int(a[4]);
+    mp_buffer_info_t cb, sb, pb, lb;
+    mp_get_buffer_raise(a[5], &cb, MP_BUFFER_READ);
+    mp_int_t mw = mp_obj_get_int(a[6]), mh = mp_obj_get_int(a[7]);
+    mp_int_t mx = mp_obj_get_int(a[8]), my = mp_obj_get_int(a[9]);
+    mp_int_t rw = mp_obj_get_int(a[10]), rh = mp_obj_get_int(a[11]);
+    mp_get_buffer_raise(a[12], &sb, MP_BUFFER_READ);
+    mp_int_t sheetw = mp_obj_get_int(a[13]), sheeth = mp_obj_get_int(a[14]);
+    mp_get_buffer_raise(a[15], &lb, MP_BUFFER_READ);
+    const uint16_t *lut = (const uint16_t *)lb.buf;
+    const uint8_t *palt = NULL;
+    if (a[16] != mp_const_none) {
+        mp_get_buffer_raise(a[16], &pb, MP_BUFFER_READ);
+        palt = (const uint8_t *)pb.buf;
+    }
+    mp_int_t ck = mp_obj_get_int(a[17]);
+    mp_int_t scale = mp_obj_get_int(a[18]);
+    mp_int_t cx0 = mp_obj_get_int(a[19]), cy0 = mp_obj_get_int(a[20]);
+    mp_int_t cx1 = mp_obj_get_int(a[21]), cy1 = mp_obj_get_int(a[22]);
+    if (dw <= 0 || mw <= 0 || mh <= 0 || rw <= 0 || rh <= 0) return mp_const_none;
+    if ((size_t)(mw * mh) > cb.len) return mp_const_none;
+    if (!moy_gfx_is_moy_sheet(sheetw, sheeth, sb.len)) return mp_const_none;
+    if (mw > MOY_MAP_MAX || mh > MOY_MAP_MAX) return mp_const_none;
+    moy_gfx_clip(dw, dcap, &cx0, &cy0, &cx1, &cy1);
+    {
+        moy_canvas c;
+        moy_sheet sh;
+        moy_map m;
+        moy_gfx_canvas(&c, dst, dw, dcap, lut, palt, 0, 0, cx0, cy0, cx1, cy1);
+        moy_sheet_init(&sh, (uint8_t *)sb.buf);
+        moy_map_init(&m, (uint8_t *)cb.buf, (int)mw, (int)mh);
+        // Camera is ZERO here on purpose: the caller has already resolved the
+        // region's screen position into dsx/dsy (this destination may be a
+        // hidden cache layer rather than the framebuffer, where a camera would
+        // mean nothing), so applying one again would double the offset.
+        moy_map_draw(&c, &m, &sh, (int)mx, (int)my, (int)rw, (int)rh,
+                     (int)dsx, (int)dsy, (int)ck, (int)scale);
     }
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit_map_obj, 17, 21, moy_gfx_blit_map);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit_map_obj, 23, 23, moy_gfx_blit_map);
 
 // blit_batch(dst, dw, dh, items, atlas, ntiles, tile, scale, key,
 //            cam_x, cam_y, cx0, cy0, cx1, cy1) -- draw N sprite tiles in ONE C call
@@ -1279,17 +1267,37 @@ static mp_obj_t moy_gfx_text(size_t n_args, const mp_obj_t *a) {
     mp_get_buffer_raise(a[3], &sbi, MP_BUFFER_READ);
     mp_buffer_info_t fbi;
     mp_get_buffer_raise(a[7], &fbi, MP_BUFFER_READ);
-    // TEXT STAYS OURS, and the reason is a measurement rather than a
-    // principle. SPEC.md 6 has no scale ("text is always 8px") so the cart's
-    // print IS scale 1 and could route through moy_print -- and on a P4 that
-    // measured identical, 18.8us/op either way. On an ESP32-S3 the same swap
-    // measured 1.21x SLOWER (11648us vs 9642us on the bench's text scene),
-    // because moy_gfx_text_raw hoists the clip and early-outs per glyph while
-    // moy_print walks bits through moy_put. The S3 is the constrained board and
-    // the console draws chrome text by the dozen per frame, so the verb whose
-    // correctness was never in doubt keeps the kernel that is faster where it
-    // matters. Worth revisiting when moy_print gets the per-glyph hoist
-    // upstream -- see libmoy/UPSTREAM.md.
+    // THE CART's text is scale 1 and goes through libmoy (#97). SPEC.md 6 is
+    // explicit that "print has no scale parameter; text is always 8px", and
+    // moybyte agrees -- DeviceCanvas.print hardcodes 1 and documents its own
+    // `scale` argument as accepted-and-ignored. So scale > 1 is never a cart:
+    // it is this console's CHROME at the #39 system font size, which is host
+    // business (SPEC.md 0) and keeps the kernel below.
+    //
+    // This crossed, was REVERTED on an S3 number of 1.21x, and crossed again
+    // when that number was re-measured at 1.04x against current libmoy -- the
+    // 1.21x had been taken before moy_print grew its whole-column off-clip
+    // early-out. See libmoy/UPSTREAM.md; the reversal is recorded there rather
+    // than tidied away.
+    //
+    // libmoy uses its own compiled-in font rather than the blob passed here.
+    // Both are petme128 and SPEC.md 6 requires them byte-identical or text
+    // conformance fails -- so the `text` and `text_bytes` scenes are what
+    // license this, not the assumption.
+    if (mp_obj_get_int(a[9]) == 1) {
+        moy_canvas c;
+        mp_int_t cam_x = mp_obj_get_int(a[10]), cam_y = mp_obj_get_int(a[11]);
+        mp_int_t cx0 = mp_obj_get_int(a[12]), cy0 = mp_obj_get_int(a[13]);
+        mp_int_t cx1 = mp_obj_get_int(a[14]), cy1 = mp_obj_get_int(a[15]);
+        if (dw <= 0) return mp_const_none;
+        moy_gfx_clip(dw, dcap, &cx0, &cy0, &cx1, &cy1);
+        moy_gfx_canvas_solid(&c, dst, dw, dcap,
+                             (uint16_t)(mp_obj_get_int(a[6]) & 0xFFFF),
+                             cam_x, cam_y, cx0, cy0, cx1, cy1);
+        moy_print(&c, (const uint8_t *)sbi.buf, sbi.len,
+                  mp_obj_get_int(a[4]), mp_obj_get_int(a[5]), 0);
+        return mp_const_none;
+    }
     moy_gfx_text_raw(dst, dcap, dw,
                      (const uint8_t *)sbi.buf, sbi.len,
                      mp_obj_get_int(a[4]), mp_obj_get_int(a[5]),
