@@ -10,6 +10,11 @@
 > (`row_secs`). The current model is documented in `docs/moy_cart_api.md`
 > (Audio) and the moy-spec §8.
 >
+> **The `.moyproj` SDK it names is gone (2026-07-31).** Where the text below
+> reaches for `moybyte/audio.py`, `moybyte_sim`'s fake audio or the portable
+> subset, none of that exists any more — the host twin is `runtime/audio.py` and
+> the sim is `tools/simulate_desktop.py`. Git history has the rest.
+>
 > **#97 (2026-08-06) — the SYNTH is no longer ours.** SPEC.md §8.3 pins
 > synthesis to PICO-8's measured output (zepto8/fake-08), and moy-spec's own C
 > implementation of it, **libmoy**, is now vendored into
