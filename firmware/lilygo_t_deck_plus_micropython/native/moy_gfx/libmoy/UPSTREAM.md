@@ -15,6 +15,14 @@ the whole module). SPEC.md §1.1 leaves the canvas format to the host, and this
 console's is 16-bit words rather than palette indices — measured and settled,
 see CLAUDE.md's graphics section.
 
+**And at `-O3`, via `../libmoy_kernels.c`.** That shim exists because the ports
+build usermods at `-O2` and `modmoy_gfx.c` carries an in-source
+`#pragma GCC optimize("O3")` that only covers its own file — so when six verbs
+became calls into libmoy they silently dropped an optimisation level. Measured
+on a P4 (2026-08-07): **`map` 562.5 → 453.1 µs/op, `sprb` 335.9 → 296.9**. The
+pragma cannot go in the vendored copies (that is a red test), so the shim
+`#include`s them instead and they stay byte-identical.
+
 ## Which verbs cross, and which do not
 
 `modmoy_gfx.c` is not a libmoy port. It is moybyte's compositor kernel, and only
@@ -44,8 +52,23 @@ means libmoy is faster):
 | verb | S3 before | **S3 now** | P4 | verdict |
 |---|---|---|---|---|
 | `print` | 1.21× slower | **1.04×** | tie | crossed; measured 1.03× in the console |
-| `blit_map` | 1.54× slower | **0.78×** | 0.92× | crossed; **640.6 → 562.5 µs/op** in the console |
-| `spr` | 1.06× slower | **0.79×** | 0.83× | crossed; **406.2 → 335.9 µs/op** (0.83×) |
+| `blit_map` | 1.54× slower | **0.78×** | 0.92× | crossed; **640.6 → 453.1 µs/op** in the console |
+| `spr` | 1.06× slower | **0.79×** | 0.83× | crossed; **406.2 → 296.9 µs/op** (0.73×) |
+
+The two console figures are master → this build **with the `-O3` shim**, both
+re-measured on a P4 on 2026-08-07 against a master build flashed the same hour.
+The intermediate 562.5 / 335.9 quoted in the commits that landed these verbs
+were correct at the time and predate the shim.
+
+**Do not quote this bench's cheap verbs.** `line`, `tri` and `circb` are timed
+in batches whose size is chosen per run by a doubling ladder, and they disagree
+with a direct probe by 2–4× and vary between runs on ONE build — `line` read
+31.2 µs/op and 62.5 on the same master image. Measured directly, libmoy's `line`
+and the transcription it replaced are **identical** (14.41 µs/op median, five
+samples each, both builds), so nothing about those three verbs changed. Only
+verbs expensive enough to fill a batch at a small, stable `k` (`map`, `sprb`,
+`cls`, `sspr`, `tline`) carry a number worth comparing. The harness now prints
+`k` and the min/med/max spread so this is visible rather than inferred.
 
 `blit_map` and `print` crossed on 2026-08-07 and are **verified on glass**: all
 ten conformance scenes pass on an ESP32-P4, `tilemap` among them, and the Bench
@@ -64,9 +87,9 @@ and colorkey folded in, and nothing reads it any more. Three things followed:
 
 | | |
 |---|---|
-| `sprb` | 406.2 → **335.9 µs/op** (0.83×) |
-| `map` | 640.6 → **562.5 µs/op** (0.88×) |
-| worst frame | 104 ms → **29 ms** |
+| `sprb` | 406.2 → **296.9 µs/op** (0.73×, with the `-O3` shim) |
+| `map` | 640.6 → **453.1 µs/op** (0.71×, with the `-O3` shim) |
+| worst frame | 102 ms → **25 ms** |
 
 That last one was not predicted and is the best of the three. The bake was
 32,768 MicroPython loop iterations plus a 64 KB allocation, paid on first

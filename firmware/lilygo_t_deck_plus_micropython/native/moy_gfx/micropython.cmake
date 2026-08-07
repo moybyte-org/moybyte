@@ -9,11 +9,13 @@
 
 add_library(usermod_moy_gfx INTERFACE)
 
+# libmoy's three .c files are NOT listed here: they are #included by
+# libmoy_kernels.c, which exists to compile them at -O3 alongside the kernel
+# that calls them. Listing them here as well would define every symbol twice.
+# That file's header explains why the pragma cannot live in the vendored copies.
 target_sources(usermod_moy_gfx INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_gfx.c
-    ${CMAKE_CURRENT_LIST_DIR}/libmoy/moy_canvas.c
-    ${CMAKE_CURRENT_LIST_DIR}/libmoy/moy_sprite.c
-    ${CMAKE_CURRENT_LIST_DIR}/libmoy/moy_data.c
+    ${CMAKE_CURRENT_LIST_DIR}/libmoy_kernels.c
 )
 
 target_include_directories(usermod_moy_gfx INTERFACE
