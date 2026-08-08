@@ -664,6 +664,9 @@ class MusicEditor:
         pre = self._pre_op
         self._pre_op = None
         self.dirty = True
+        # Tell backends that hold a parsed copy of this bank (libmoy on the
+        # device and the web runner) that it moved -- see AudioBank.rev.
+        self.bank.touch()
         if pre is None:
             return
         post = self._snapshot_of(pre)
@@ -688,8 +691,14 @@ class MusicEditor:
 
     def undo(self):
         """Revert the last recorded edit; True iff a step was taken."""
-        return self._hist.undo() is not None
+        took = self._hist.undo() is not None
+        if took:
+            self.bank.touch()       # undo edits the bank too (AudioBank.rev)
+        return took
 
     def redo(self):
         """Re-apply the last undone edit; True iff a step was taken."""
-        return self._hist.redo() is not None
+        took = self._hist.redo() is not None
+        if took:
+            self.bank.touch()
+        return took

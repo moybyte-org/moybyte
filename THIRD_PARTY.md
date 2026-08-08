@@ -233,16 +233,18 @@ The separate 16×16 top-bar icon art (`_ICON_ART` in the same file, persisted as
 
 ### 3.4 Board pin assignments — LilyGO T-Deck
 
-`moybyte_cli/boards.py` (`BOARD_PROFILES`), `docs/boards/lilygo_t_deck_plus.md`,
-and the constants derived from them in
+`docs/boards/lilygo_t_deck_plus.md` and the constants derived from it in
 `firmware/lilygo_t_deck_plus_micropython/modules/tdeck_board.py` /
-`tdeck_display.py`.
+`tdeck_display.py`. (The transcription originally landed in the `.moyproj`
+SDK's `moybyte_cli/boards.py` as `BOARD_PROFILES`, with its own `sources` list;
+that SDK was deleted on 2026-07-31 and git history has it. The board doc is the
+surviving citation.)
 
 GPIO numbers, the I²C keyboard address and the SPI pin map were transcribed
 from LilyGO's own board files —
 <https://github.com/Xinyuan-LilyGO/T-Deck> (`boards/T-Deck.json` and
-`examples/UnitTest/utilities.h`), which `boards.py` cites in its `sources` list
-and `docs/boards/lilygo_t_deck_plus.md` names directly.
+`examples/UnitTest/utilities.h`), which `docs/boards/lilygo_t_deck_plus.md`
+names directly.
 
 These are hardware facts about a physical product, not expressive work, and no
 upstream code was copied — but the source is named here because the repository

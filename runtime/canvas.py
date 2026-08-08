@@ -498,8 +498,18 @@ class Canvas:
         cx = int(cx)
         cy = int(cy)
         r = int(r)
+        # Half-width by an integer walk rather than a sqrt per row -- libmoy's
+        # moy_circ, which the native kernel now runs too (#97). `span` is the
+        # largest s with s*s <= r*r - dy*dy, which is exactly what truncating
+        # the correctly-rounded root of an exact integer gives, so the pixels
+        # do not move; it just stops being a float op per scanline.
+        span = 0
         for dy in range(-r, r + 1):
-            span = int((r * r - dy * dy) ** 0.5)
+            t = r * r - dy * dy
+            while (span + 1) * (span + 1) <= t:
+                span += 1
+            while span > 0 and span * span > t:
+                span -= 1
             self.rect(cx - span, cy + dy, 2 * span + 1, 1, c)
 
     def circb(self, cx, cy, r, c):

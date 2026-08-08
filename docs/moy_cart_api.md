@@ -170,6 +170,8 @@ Your `_update(dt)` gets the real `dt` either way — movement written as
 | `rectb(x, y, w, h, c)` | rectangle **outline** |
 | `circ(cx, cy, r, c)` | **filled** circle |
 | `circb(cx, cy, r, c)` | circle **outline** |
+| `tri(x1, y1, x2, y2, x3, y3, c)` | **filled** triangle — *provisional*, see below |
+| `trib(x1, y1, x2, y2, x3, y3, c)` | triangle **outline** — *provisional*, see below |
 | `print(s, x, y, c, scale=1)` | text (8×8 petme128 font, pixel-identical host↔device). `scale` is accepted but **ignored** — game text is always 8px (the Settings text-size option scales the SYSTEM UI only, #39). Honours `camera`/`clip`/`pal` like every primitive (native on device, #62) |
 | `camera(x=0, y=0)` | offset all subsequent draws by `-x,-y` (world → screen). No args resets |
 | `clip(x=None, y=None, w=None, h=None)` | clip drawing to a rect. No args resets to full screen |
@@ -190,6 +192,34 @@ editor). Tiles are referenced by integer id.
 | `image(name)` | load a paint-image asset (`images/<name>.moyimg`) as a big `Image`; place with `spr(img, x, y)`. Memoised. `None` if absent |
 | `image(rows, mapping, transparent=".")` | build a small `Image` from ASCII art, e.g. `image(["..##..","..##.."], {"#": 8})` |
 | `Image(w, h, indices, transparent)` | a sprite bitmap object (also `Image.from_ascii(...)`) |
+| `sspr(sx, sy, sw, sh, dx, dy, dw=None, dh=None, colorkey=-1, flip=0)` | **stretch** a `sw×sh` region of the sheet into a `dw×dh` rect. Source coords are sheet **pixels**, not tile ids. Unlike `spr`'s integer `scale` this is an arbitrary stretch — the textured wall-slice verb, and how you scale a sprite by a non-integer amount. `dw`/`dh` default to `sw`/`sh`. *Provisional*, see below |
+| `tline(x0, y0, x1, y1, u, v, du, dv, colorkey=-1)` | a **textured** line: exactly `line()`'s pixels, but sampling the **tilemap** as a virtual texture. `u,v` is the start texture coord and `du,dv` the per-pixel step, all in **16.16 fixed point** — an integer, so a cart passes `int(f * 65536)`. Wraps modulo the map's pixel size; empty cells draw nothing. One call per scanline is a Mode 7 floor, one per column textures a raycaster. *Provisional*, see below |
+
+### The 3D verbs are provisional
+
+`tri`, `trib`, `sspr` and `tline` are **moy core's**, not moybyte's — their pixels are
+defined by [SPEC.md §6.1 and §7.1](https://github.com/moybyte-org/moy-spec), and moybyte
+compiles the spec's own `libmoy` for them, so a cart draws the same triangle on every
+conforming console. That is also why the signatures above are terse: **the spec is the
+authority on what they draw**, and a fuller restatement here would be a second source of
+truth that drifts.
+
+"Provisional" is the spec's own word (§6.1): membership is settled but the semantics may
+still move, and §11's conformance suite does not yet count them. A cart using them is fine
+— the seed carts do — but they are the one corner of this API that could change under you.
+
+### `rect_batch` / `spans` — present, but you should not need them
+
+Moybyte also has `spans(n)` (a reusable flat `x, y, w, h, c` buffer) and
+`rect_batch(items, n=-1, ox=0, oy=0, c=-1)`, which draws many filled rects in one call.
+
+**Reach for a plain `rect` loop first.** These were built for software 3D and then
+measured out of a job: once the console gated its root canvas through C-side appends, an
+ordinary `rect` call costs ~26 µs on the slower board, and the raycaster that motivated the
+batch ships without it. moy core declined both verbs for that reason — *batching is the
+host's duty, and a cart is never asked to pre-pack its geometry* ([SPEC.md
+§6.1](https://github.com/moybyte-org/moy-spec)). They stay here because carts use them, not
+because they are the way to draw.
 
 ## Scroll layers (`#54`)
 
@@ -438,7 +468,10 @@ Both `net` and `on_net` are **only present** when the manifest grants
 | `music(track, loop=True)` | start a music track |
 | `music_stop()` | stop music |
 | `sound_stop(chan=None)` | stop a channel (or all) |
-| `volume(level)` | set output volume |
+| `volume(level)` | master output level, **0–7** (the same scale as a note's `vol`) |
+
+`beep()` plays at the exact frequency you ask for, on the engine's own
+oscillator — it never takes a channel away from music or an effect.
 
 The sound bank lives in the cart's `sounds.json` (authored in the Music tab).
 Since #170 the model is PICO-8-parity:
@@ -459,8 +492,19 @@ Since #170 the model is PICO-8-parity:
   durations in seconds (`0` = hold the row forever) — how a p8 song's
   changing pattern lengths survive the import.
 
+- A note with `vol` `0` but a real pitch is a **keyed rest**: silent, but still
+  the note a following slide glides *from*. Only pitch `−1` leaves that origin
+  untouched. (PICO-8 works this way, so ported slides land right.)
+
 Imported PICO-8 carts (`tools/import_p8.py` / `moy port`) carry all of this
 over verbatim — waves, effects and all four music channels.
+
+**Instruments are not equally loud, on purpose.** The triangle family is about
+twice the square family, which is PICO-8's own mix; music is balanced against
+it, and evening them out would make every square lead shout down its own
+accompaniment. The synthesis is [SPEC.md §8.3](https://github.com/moybyte-org/moy-spec)
+exactly — moybyte compiles moy-spec's `libmoy` for it — so a cart sounds the
+same here as on any other console that implements the spec.
 
 ## State & utility
 

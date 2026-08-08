@@ -1,0 +1,82 @@
+{
+  "suite": "moy core conformance",
+  "spec": "0.1",
+  "raster": {
+    "w": 320,
+    "h": 240
+  },
+  "generated_by": "moycore 0.1.0",
+  "provenance": "Rendered by moycore. Confirmed pixel-identical on all core scenes by two other implementations: the reference console's own rasterizer (conformance/parity.py) and the shipped WebAssembly player's JavaScript replayer (conformance/player.mjs), the tiebreaker SPEC.md 11 names.",
+  "scenes": [
+    {
+      "name": "primitives",
+      "core": true,
+      "calls": 22,
+      "frame_sha256": "03617d7a3ad822b790f57c4c5c38be5d500e1375cf48d8f6e1fad88fce037c7f",
+      "note": "Every core drawing verb (SPEC.md 6) at a size where the\nrasterization is visible, plus the degenerate cases: a 1x1\nrect, r=0 and r=1 circles, zero-size rects."
+    },
+    {
+      "name": "edges",
+      "core": true,
+      "calls": 13,
+      "frame_sha256": "3382d734a57cf981005520a43a81a1fb68406db8b696b8e40561bb37fd8c9460",
+      "note": "Clipping. Every shape hangs off an edge; a host that clamps\ninstead of clipping, or wraps a row, fails here and nowhere else."
+    },
+    {
+      "name": "text",
+      "core": true,
+      "calls": 14,
+      "frame_sha256": "0d164d46f63a1c49414c5449249ee839f3c05815a99b6166dbac3f5497eb1bdc",
+      "note": "The whole printable range (SPEC.md 6), then bytes outside it,\nwhich must draw nothing and still advance 8px."
+    },
+    {
+      "name": "text_bytes",
+      "core": true,
+      "calls": 7,
+      "frame_sha256": "1b5411dccb1cef3a8b2d858d9fb214112b65027950f36b96eb18765b8d125e78",
+      "note": "Bytes outside 0x20-0x7F, which draw nothing and still advance\n8px. SPEC.md 6: print walks BYTES, so a two-byte UTF-8\ncharacter takes two cells, not one."
+    },
+    {
+      "name": "camera_clip",
+      "core": true,
+      "calls": 22,
+      "frame_sha256": "a7ced6b97efd7766f9949eff34f6ccf0ef38bdae0f7639afb4e3abe6ac55de90",
+      "note": "camera and clip TOGETHER. clip is screen space, applied\nafter the camera offset -- an implementation that clips in\nworld space passes both features separately and fails this."
+    },
+    {
+      "name": "pal_palt",
+      "core": true,
+      "calls": 26,
+      "frame_sha256": "cd12839c113c6ae9c40b4c4f7c5506adbd7296f111fd8a71ce0bf4d65a489a79",
+      "note": "Draw-time remap and sprite transparency, including the case\nwhere both are active. pal must not touch pixels already drawn."
+    },
+    {
+      "name": "sprites",
+      "core": true,
+      "calls": 28,
+      "frame_sha256": "d0d11daa919e496c1c6949311dc179a56e1024f3bbf4c1e61875b5ec862b590e",
+      "note": "Flips, integer scales, colorkeys, out-of-range tile ids, and\nsprites under camera and clip."
+    },
+    {
+      "name": "tilemap",
+      "core": true,
+      "calls": 12,
+      "frame_sha256": "3ecb1d04ed570ee04bfb19875b2202aab8680d31eca5b002b79c6ddc8a2b2585",
+      "note": "map() regions, screen offsets, scale, colorkey, camera, clip,\nand a region starting outside the map."
+    },
+    {
+      "name": "provisional",
+      "core": false,
+      "calls": 12,
+      "frame_sha256": "e2e0a288c374a4c3662e75a418e70d8b7c6608847e42268b479d8460b8d22a3b",
+      "note": "SPEC.md 6.1 verbs. NOT part of conformance -- SPEC.md 11\nexcludes 6.1 until its promotion gates clear. Kept so the\ngolden already exists when they do."
+    },
+    {
+      "name": "provisional_tline",
+      "core": false,
+      "calls": 57,
+      "frame_sha256": "2de00b3509055fc3a468fa14fc28542aca79f74e172146431602ffd4962bba42",
+      "note": "SPEC.md 6.1 tline: line()'s pixels, texture-stepped\nacross the map in 16.16 fixed point. Excluded like\n`provisional`, and separate so a host with tri/sspr\nbut no tline fails one scene, not both."
+    }
+  ]
+}

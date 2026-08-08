@@ -1,0 +1,19 @@
+{
+  "files": {
+    "firmware/lilygo_t_deck_plus_micropython/native/moy_audio/libmoy/LICENSE": "b405680e72b1cea95fea5072fd140185d793e860867f3d9f66d4af244dcd0d5a",
+    "firmware/lilygo_t_deck_plus_micropython/native/moy_audio/libmoy/moy_audio.c": "86fa35380ef5b48fd761faba624e1377984dad9a5f9243c580f82a2ba6c00ea8",
+    "firmware/lilygo_t_deck_plus_micropython/native/moy_audio/libmoy/moy_audio.h": "c580b1414246a02e615cefa622e7b8e3fc01b8590ee713fc43458a0a40265a53",
+    "firmware/lilygo_t_deck_plus_micropython/native/moy_gfx/libmoy/LICENSE": "b405680e72b1cea95fea5072fd140185d793e860867f3d9f66d4af244dcd0d5a",
+    "firmware/lilygo_t_deck_plus_micropython/native/moy_gfx/libmoy/moy.h": "a64db87ebc57a75ef70948b53011c750ed4606a47382197018b0d905ab789951",
+    "firmware/lilygo_t_deck_plus_micropython/native/moy_gfx/libmoy/moy_canvas.c": "40a6f16e1e68ace347f60d67eadde29c654e921bf05318ad2d1fdb5b48d1b49c",
+    "firmware/lilygo_t_deck_plus_micropython/native/moy_gfx/libmoy/moy_data.c": "091a8271274d6165dd8ac73e1d577c65c6cf86a03da44223368c564eddbd366c",
+    "firmware/lilygo_t_deck_plus_micropython/native/moy_gfx/libmoy/moy_pixel.h": "6fbf26844e06f6f5ecd50e80b984e5216be6cb81475255de79f0caf957f77ee6",
+    "firmware/lilygo_t_deck_plus_micropython/native/moy_gfx/libmoy/moy_sprite.c": "74d083a9852c0b9cf929ad36aa17a58e997558a24d30f57e189cc644c048a379"
+  },
+  "upstream": {
+    "commit": "ef01426b4a77dfd92c1cc1593f73eb839ac1cf35",
+    "date": "2026-08-07",
+    "dirty": false,
+    "repo": "moybyte-org/moy-spec"
+  }
+}

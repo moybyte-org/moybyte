@@ -82,13 +82,30 @@ class P4Board:
                 n0 += 1
         return None
 
-    def cmd(self, text, wait_for=None, timeout=8.0):
-        """Send one dev command; optionally wait for an echo line."""
+    def cmd(self, text, wait_for=None, timeout=8.0, retry=True):
+        """Send one dev command; optionally wait for an echo line.
+
+        A reply goes missing every so often -- measured at 2 in 5 for one size
+        and 0 in 5 for six others, so it is loss, not truncation, and no chunk
+        size avoids it. One resend costs 200ms and turns a failed suite into a
+        passing one.
+
+        THE RESEND IS ONLY SAFE FOR IDEMPOTENT COMMANDS, because a lost REPLY
+        does not mean the command did not run. Every caller here is a probe, an
+        assignment or an exec of an already-uploaded buffer; the one place that
+        was not -- pyexec's `ws._up += part` -- is now an indexed store for
+        exactly this reason. Pass retry=False for anything that accumulates."""
         self.ser.write(text.encode() + b"\n")
         self.ser.flush()
         if wait_for is None:
             wait_for = "REMOTE"
-        return self.wait_line(wait_for, timeout)
+        line = self.wait_line(wait_for, timeout)
+        if line is None and retry:
+            self.log("no reply; resending: " + text[:60])
+            self.ser.write(text.encode() + b"\n")
+            self.ser.flush()
+            line = self.wait_line(wait_for, timeout)
+        return line
 
     # -- lifecycle --------------------------------------------------------
 
@@ -144,10 +161,22 @@ class P4Board:
     # -- the `py` probe hook ----------------------------------------------
 
     # The device reads dev commands with one sys.stdin.readline() per frame, so
-    # a command must fit the USB-CDC RX ring: a ~1KB one-liner arrives TRUNCATED
-    # and execs as a SyntaxError (measured 2026-07-26 -- a 988-char snippet).
-    # Multi-line snippets therefore upload in chunks and exec once.
-    CHUNK = 120
+    # a command must fit the USB-CDC RX ring, and multi-line snippets upload in
+    # chunks and exec once.
+    #
+    # 120 was set after a ~1KB one-liner came back truncated (2026-07-26) and
+    # the size was never re-measured. It was expensive: ONE ROUND TRIP COSTS
+    # 201ms (measured 2026-08-07 -- the device answers one command per frame,
+    # and the desktop's frame is not fast), so the conformance harness spent
+    # ~85 round trips a scene, most of them uploading 120 characters at a time.
+    #
+    # Re-measured, five tries per size: 120, 400, 512, 640, 768, 900 and 1000
+    # all pass 5/5 -- and 256 passes 3/5. So the 2026-07-26 failure was not
+    # length at all, it was the INTERMITTENT lost reply that shows up at every
+    # size. `cmd` retries once for that (below), and the chunk is now sized for
+    # round trips instead: 768 is 6x fewer, with 25% of headroom under the
+    # largest size that measured clean.
+    CHUNK = 768
 
     def pyval(self, expr, timeout=30.0):
         """Evaluate a short expression on the device; returns the repr'd value
@@ -174,20 +203,24 @@ class P4Board:
         if len(code) <= self.CHUNK and "\n" not in code:
             line = self.cmd("py " + code, wait_for="PY", timeout=timeout) or ""
             return "PY ERR" not in line
-        self.cmd("py setattr(ws, '_up', '') or 1", wait_for="PY")
+        self.cmd("py setattr(ws, '_up', {}) or 1", wait_for="PY")
         # NB: plain getattr-or, not ws.__dict__.setdefault -- a MicroPython
         # instance __dict__ is not a full dict (no setdefault; raises TypeError).
         self.cmd("py ws._g = getattr(ws, '_g', None) or {'ws': ws, 'wm': ws.wm}",
                  wait_for="PY")
-        for i in range(0, len(code), self.CHUNK):
+        # A DICT keyed by chunk index, not a string being appended to: `+=` is
+        # not idempotent, so a resend after a lost reply would double a chunk
+        # and exec a corrupted snippet. Indexed stores make the resend a no-op.
+        for k, i in enumerate(range(0, len(code), self.CHUNK)):
             part = code[i:i + self.CHUNK]
-            line = self.cmd("py ws._up += %r" % part, wait_for="PY",
-                            timeout=timeout) or ""
+            line = self.cmd("py ws._up.__setitem__(%d, %r) or 1" % (k, part),
+                            wait_for="PY", timeout=timeout) or ""
             if "PY ERR" in line:
                 self.log("upload failed: " + line.strip())
                 return False
-        line = self.cmd("py exec(ws._up, ws._g)", wait_for="PY",
-                        timeout=timeout) or ""
+        line = self.cmd(
+            "py exec(''.join(ws._up[k] for k in sorted(ws._up)), ws._g)",
+            wait_for="PY", timeout=timeout) or ""
         if "PY ERR" in line:
             self.log("device: " + line.strip())
             return False

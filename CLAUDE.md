@@ -39,6 +39,125 @@ public cart vocabulary for no gain.
 
 The `.moy` canvas works in **palette indices** (the `MOY64` palette) with a plain-function drawing API (`cls/pset/line/rect/rectfill/circ/circfill/spr/print`) — no dependency on `framebuf`, LVGL, or even Python. This is deliberate: the *same* `.moy` is meant to run on the host (`runtime/canvas.py`) and on the device (`moy_compositor`, indices → RGB565), and eventually a Lua VM. When adding drawing features, add them to **both** backends and keep the API identical.
 
+### Graphics is conformance-checked, and the indexed canvas was MEASURED AND DECLINED
+
+Graphics has not followed audio into vendoring, but the reason is *not* that
+libmoy's raster cannot fit here — an earlier version of this note claimed that
+and was wrong, so the argument is recorded properly.
+
+**The difference.** libmoy draws into a framebuffer of palette INDICES and
+resolves colour once, later. Moybyte's device canvas resolves at DRAW time and
+stores RGB565 straight into the compositor buffer.
+
+**"It doesn't fit" is wrong.** libmoy renders the CART canvas, which SPEC.md 1
+fixes at 320×240 — not the desktop, so the P4's 1024×600 scan-out buffer is not
+the thing being proposed. An indexed cart canvas is 76,800 B instead of
+153,600 B, every draw writes one byte per pixel instead of two, and the kernel
+for the conversion already exists (`moy_gfx.blit_indices`, #63).
+
+**It was A/B'd on P4 glass and RGB565-at-draw won** (2026-08-05, moy-spec
+session; a standalone ESP-IDF bench at 360MHz / 200MHz PSRAM / `-O2`, four
+deterministic scenes × 20 frames, canvas in SRAM and again in PSRAM). **A** =
+8-bit index canvas drawn by libmoy's kernels unmodified + one resolve at the
+stamp; **B** = 565-at-draw, geometry copied line-for-line from libmoy so only
+the write differs. A/B ratios, A over B (below 1 = indexed wins):
+
+| ui (100 rects) | ray (320 sspr cols) | mode7 (120 tline rows) | tri (60 tris) | stamp |
+|---|---|---|---|---|
+| **0.73×** | **1.13×** | **1.20×** | **0.85×** | A 2.0ms resolve vs B 0.42ms memcpy (SRAM) / 1.76ms (PSRAM) |
+
+So indexed wins where the kernel is **write-bandwidth-bound** (fills) and loses
+where it is **per-pixel-sample-bound** (sspr, tline) — those loops are dominated
+by sheet addressing and Bresenham, so a narrower store buys nothing while the
+resolve is added on top. Two things not to misquote: the "tline is a wash"
+reading is from the run *before* the reduce-once tline fix (25ms → 8ms), when
+the soft-modulos hid the format entirely; and the stamp comparison flatters A,
+because on the P4 today B's stamp is not a memcpy at all but `moy_ppa.blit_async`
+— hardware, ~free to the CPU, and the PPA does not consume indices. The T-Deck
+is the untested opposite shape: it already pays an SRAM bounce copy the resolve
+could ride.
+
+**Every scene hashed A==B in both placements** — an indexed canvas loses no
+colour, proven on silicon. That question is closed; the format choice is settled
+on performance, and B is what ships.
+
+**Nine verbs are libmoy's now (2026-08-07), and the hand-porting argument lost.**
+`tri`/`sspr`/`tline`/`circ`/`circb`/`line` went first, then `print`/`blit_map`/
+`blit_batch` later the same day; in `moy_gfx` all nine are CALLS into vendored
+libmoy (`native/moy_gfx/libmoy/`, built `MOY_PIXEL_RGB565` at `-O3` via
+`libmoy_kernels.c`), not transcriptions of it. The reason is one measurement: on 2026-08-06 the board failed
+`provisional_tline` against the golden (2773 px, 3.61%) while the host passed it,
+because the only lane that exercises the REAL C kernel is on-glass conformance
+and it had never been run on that verb — `test_device_canvas_parity.py` compares
+the host to a *Python transcription* of the kernel, which cannot catch the
+transcription being right and the C being wrong. Routing the verb through the
+spec's own raster took it to **0 differing pixels**, all ten scenes pass on the
+P4, and the cart-level cost is nil (per-verb A/B within the bench's ±5% noise;
+per-cart fps unchanged across the roster). **`print`, `blit_map` and the sprite
+path were declined first and then CROSSED** — the numbers that kept them out were
+stale (they predated `moy_print`'s off-clip early-out and `moy_spr`'s scale-1 fast
+path), and re-measuring on 2026-08-07 reversed two of the three; adopting `spr`
+also deleted the RGB565 tile atlas, which handed back 64 KB of S3 internal SRAM
+and removed a ~100ms first-use bake nobody had attributed. What `moy_gfx` still
+owns is its COMPOSITOR — viewport-aware `fill`/`fill_rect`, `blit565_scale`,
+`copy_async`, `scroll_rect`, `blit_window`, `blit_indices`, `fill_spans`,
+`draw_ctx` — which the spec's raster has no counterpart for.
+**`native/moy_gfx/libmoy/UPSTREAM.md` is the authority on which verbs cross and
+why** (it carries the before/after table, the dates, and the warning about which
+of the bench's verbs are too cheap to quote); fixes belong upstream (`moy_circ`
+already went that way — moy-spec `ef01426`). Tooling: `tools/p4_perf.py` (per-cart fps),
+`tools/p4_bench.py` (the Bench cart's per-verb µs, and the Lua twin's on-glass
+report), `tools/p4_conformance.py --serve` (holds the board — opening the port
+REBOOTS it, which cost a full boot per scene; the suite went 12min → 4m45).
+
+**`tests/test_spec_conformance.py` is that gate** (suite vendored under
+`tests/spec_conformance/`, see its UPSTREAM.md). It replays the spec's recorded
+verb traces through `runtime/canvas.py` and hashes each frame against the
+golden — all ten scenes including the provisional 3D ones, in ~0.1s, on every
+`make test`. It exists because the suite previously only checked this repo from
+*outside* it (moy-spec's `conformance/parity.py --ref`, and `tools/p4_conformance.py`
+on a board), so `make test` could go green on a raster that no longer drew what
+the spec said. The device inherits it through `test_device_canvas_parity.py`
+(host↔device), and `tools/p4_conformance.py` is still the only check that
+reaches the real C kernel on real glass — run it when the raster changes.
+
+### Audio is VENDORED from moy-spec, not implemented here (#97)
+
+The one subsystem where that rule is inverted. SPEC.md §8.3 pins synthesis to
+PICO-8's measured output (as reverse-engineered by zepto8/fake-08) — the
+unequal instrument loudness, the pitched noise walk, the Hz-linear slide, the
+109/110 phaser detune — and moy-spec ships its own C implementation of it,
+**libmoy**. That source is vendored verbatim into
+`firmware/lilygo_t_deck_plus_micropython/native/moy_audio/libmoy/` and
+**compiled into** the T-Deck and the web runner; `modmoy_audio.c` is a thin
+binding that forwards the six §8.2 verbs and owns I2S. libmoy owns the bank,
+both sequencers and the mixer, so the boards are conformant by construction and
+nothing marshals across the boundary per frame — the bank crosses ONCE per cart
+as `sounds.json` text.
+
+So: **do not "improve" the synthesis locally, and do not add a waveform or an
+effect here.** Fix it in moy-spec, re-vendor with **`make vendor-libmoy`**
+(`tools/vendor_libmoy.py`, pointed at a sibling moy-spec checkout or `SPEC=`;
+it copies the pinned file set and re-stamps `native/libmoy_vendor.json`), bring
+the Python twin along. **Editing a vendored file in place is a red test** —
+`tests/test_libmoy_vendor.py` hashes every one against the manifest, and also
+diffs against a sibling checkout when it sits at the pinned commit, so both
+"someone patched the copy" and "someone patched upstream without re-vendoring"
+fail on the same day rather than at the next re-vendor. The #167 3D verbs took the other route
+— `moy_gfx` re-implements `moy_canvas.c`'s geometry line-for-line — and that is
+only safe because the conformance goldens pin every pixel; §8.3 deliberately
+exempts audio from pixel conformance, so there is no golden to catch a drifting
+twin.
+
+`runtime/audio.py` remains a hand-maintained Python twin because the host sim is
+CPython and linking C would put a compiler in `make setup`. It is pinned
+**bit-for-bit** by `tests/test_audio_parity.py`, which compiles the vendored
+source (at CPython's float width) and diffs every sample; it also drives the
+NATIVE module under a desktop MicroPython build when one exists. Run
+`.venv/bin/python experiments/audio_parity/audio_parity.py -v` for the report.
+The data model (`SFX`/`MusicTrack`/`AudioBank`, `sounds.json`, the Music editor)
+is still ordinary shared Python and is not affected by any of this.
+
 ## Common commands
 
 ```bash
@@ -81,9 +200,10 @@ make firmware-monitor-lilygo-micropython PORT=/dev/ttyACM0         # miniterm @1
   never rasterizes a pixel — the page's JS replayer draws). `build.sh` clones +
   patches the webassembly port (custom `moybyte` variant: GC_SPLIT_HEAP_AUTO,
   no asyncify), freezes the shared `runtime/` console, and compiles the SAME
-  `moy_lua` **and** `moy_audio` native modules in as usermods (Makefile-fragment
-  twins of the boards' cmake), so Lua carts and the C mixer run in the browser
-  too. Dev loop: `moy.py run` (sub-second hot reload via `?dev=1` + `/stamp`);
+  `moy_lua` **and** `moy_audio` native modules in as usermods (`moy_audio` ships
+  its own `micropython.mk`, so unlike `moy_lua` the runner supplies no fragment
+  of its own), so Lua carts and libmoy's synth run in the browser too. Dev loop:
+  `moy.py run` (sub-second hot reload via `?dev=1` + `/stamp`);
   `node harness.mjs` / the scratchpad probes drive it headless. **To see what the
   BROWSER shows, use `node pageshot.mjs <scenario.json> [outdir]`** (2026-07-31):
   it runs BOTH halves in node — the real wasm console from `dist/` producing
@@ -103,14 +223,27 @@ make firmware-monitor-lilygo-micropython PORT=/dev/ttyACM0         # miniterm @1
   which is how you hook `df()` to see what the page actually receives.
   Both harnesses beat reasoning: the dropped-frame desync (a tablet-only bug the
   desktop's moving mouse hid) was found by hooking `df` in Chrome and then
-  reproduced deterministically in `pageshot`'s `{"drop":N}` step. **`--spec`**
-  builds the de-branded SLIM player (24 shell modules AST-stubbed to absorbing
-  `_Stub`s) that is **vendored into the public spec repo**
-  (`~/Documents/Work/moy-spec`, github.com/moybyte-org/moy-spec, MIT): SPEC.md
+  reproduced deterministically in `pageshot`'s `{"drop":N}` step. **This build
+  is Moybyte's own browser console and nothing else's** — the `--spec` slim
+  player (24 shell modules AST-stubbed to absorbing `_Stub`s, de-branded,
+  vendored into the spec's `runner/` and published by a `web-player` workflow)
+  was **deleted 2026-08-06**, along with that workflow, the `MANIFEST.json`
+  stamp and the MIT carve-out in `LICENSE.md` that existed to let it be
+  redistributed. The public spec repo (`~/Documents/Work/moy-spec`,
+  github.com/moybyte-org/moy-spec, MIT) now **builds its own player from
+  libmoy** (`libmoy/port/wasm`, emscripten): 297KB against the MicroPython
+  build's 1,001KB, because SPEC.md pins Lua as the cart language so the Python
+  VM was only ever there for the shell `--spec` stubbed out — and because a C
+  raster in wasm can fill 76,800 px/frame, so the page's whole JS
+  draw-command replayer stopped being necessary. That repo is still SPEC.md
   ("moy core 0.1") + runner + the `moy` CLI (new/run/export/port/demo) + the
   vendored p8 converters (re-vendor `p8_import.py` whenever `tools/import_p8.py`
   changes — a mechanical stdlib-only transform, see the session scripts in git
-  history). AUDIO on the web (#170): the console ships per-frame FINISHED PCM
+  history). One thing the swap COST, recorded in the spec's
+  `conformance/README.md`: that JS replayer was the project's only *independent*
+  raster, and moycore/libmoy/moy_gfx all share one lineage — the ESP32-P4 run is
+  now the only cross-check that cannot have inherited a bug. AUDIO on the web
+  (#170): the console ships per-frame FINISHED PCM
   (base64) and the page plays it through ONE AudioWorklet ring (continuous
   resample, seam-free; starvation decays instead of hard-cutting); the runner
   tops a ~120ms cushion via the page-reported queue depth
@@ -356,14 +489,14 @@ to whoever called it.
 - `moy_compositor.py` — native RGB565 framebuffer + DMA flush.
 - `tdeck_display.py` — display/LVGL + SPI bus bootstrap.
 - `moy_ota.py` — OTA firmware updater (#53): `OtaUpdater` flashes a new app image from `/sd/update/*.bin` into the **inactive** OTA slot via `esp32.Partition` (block-erase `writeblocks`), then `set_boot` + `machine.reset`. Phase 3 adds WiFi download — `check_online`/`begin_download`/`download_step` stream a manifest-described `.bin` over a raw socket straight to SD (sha256-verified, never buffering the whole 3MB), reusing the injected `wifi` service. Device-only; `run_desktop` injects it into the shared `Workstation` (which owns all the update-screen pixels), wires the wifi service, and calls `mark_valid()` at a healthy boot to cancel rollback.
-- `moy_webserver.py` — device WEB VIEW (#41/#22): serves the **running console** to a browser on the same WiFi via the **same draw-command protocol** (`defspr`/`spr`-by-index/`map`/`settiles`/primitives, serve-time defspr, atlas `gen` lock-step), so the device page renders device frames. The **live channel is a persistent WebSocket** (`GET /ws`, RFC 6455 handshake): frames PUSH down as text messages, input pushes up as `{"events":[...]}` text — one socket, **no per-frame HTTP handshake** (the #41 transport swap; the old transport opened a new TCP conn per `/frame`, capping ~20-25fps). The page + assets still load over plain HTTP (`GET /`, `GET /assets`); the legacy `GET/POST /frame` + `POST /input` poll transport was **removed** — the page is WebSocket-only. Records the cart's per-frame draw calls (a `DrawRecorder` fed by a `TeeCanvas` that forwards to the real `DeviceCanvas`, format identical to `tools/command_canvas.py`) — **never** the raw framebuffer (WiFi ~72KB/s, 153KB/frame is unplayable). Non-blocking listening socket + a non-blocking persistent `_WSConn` (cross-iteration read buffer for split frames; blocking-budget sends, stalled client dropped); `moy_runtime.run_desktop`'s single-threaded loop services it **BETWEEN frames** via the `WebView` controller (`begin_frame`/`commit_frame`/`poll`). **Liveness/stream-mode now key on a connected WebSocket** (not a recent `/frame` poll). Per-WS-connection serve state is the **shared `web_view.WsClientState`** (2026-07-23, both tiers: this server AND `tools/web_console.py`): the #76 SurfaceDelta + the **first-frame keyframe latch** — the loop re-arms the console's dirty gate every push tick until the connection has been served one full frame, closing the black-until-tap reload race (one-shot kicks — the `/assets` arm, the recording-wanted edge — all had holes). **Off by default → `ws.canvas` stays the raw `DeviceCanvas` (zero per-draw cost); Settings → WEB VIEW swaps the Tee in** (and rebinds wallpaper/cart). WiFi STA ≠ display SPI, so it doesn't touch the SD/panel bus. **Owner-verified on the T-Deck 2026-08-01** (#182): the page loads, the WS channel comes up and the console streams — slow but working, so WiFi↔LCD-DMA coexistence (#38/#40) and the socket/WebSocket layer now have one on-glass data point each rather than none. It was dead from 2026-07-21 to 2026-08-01 on a missing re-export (`effective_input_kinds`), which presented as "T-Deck WiFi is broken" — a zero-byte close is indistinguishable from a dead radio in a browser. WS removes the per-frame handshake (smoother, lower-latency input) but **not** the ~72KB/s ceiling: light screens ~30-40fps, the heavy launcher ~18fps. **Per-WM-surface streams (v0.5 shell Stage 9):** the shared recorder can slice each frame into one command stream per WM surface (`web_view.surfaces_on` — bar / app content / player viewport, a view over the same flat stream); the **host** web console renders them, the **device keeps the flag off** (flat frames) — wiring the device transport to per-surface render is a standing gate.
+- `moy_webserver.py` — device WEB VIEW (#41/#22): serves the **running console** to a browser on the same WiFi via the **same draw-command protocol** (`defspr`/`spr`-by-index/`map`/`settiles`/primitives, serve-time defspr, atlas `gen` lock-step), so the device page renders device frames. The **live channel is a persistent WebSocket** (`GET /ws`, RFC 6455 handshake): frames PUSH down as text messages, input pushes up as `{"events":[...]}` text — one socket, **no per-frame HTTP handshake** (the #41 transport swap; the old transport opened a new TCP conn per `/frame`, capping ~20-25fps). The page + assets still load over plain HTTP (`GET /`, `GET /assets`); the legacy `GET/POST /frame` + `POST /input` poll transport was **removed** — the page is WebSocket-only. Records the cart's per-frame draw calls (a `DrawRecorder` fed by a `TeeCanvas` that forwards to the real `DeviceCanvas`, the same format `runtime/web_view.py` records for the host) — **never** the raw framebuffer (WiFi ~72KB/s, 153KB/frame is unplayable). Non-blocking listening socket + a non-blocking persistent `_WSConn` (cross-iteration read buffer for split frames; blocking-budget sends, stalled client dropped); `moy_runtime.run_desktop`'s single-threaded loop services it **BETWEEN frames** via the `WebView` controller (`begin_frame`/`commit_frame`/`poll`). **Liveness/stream-mode now key on a connected WebSocket** (not a recent `/frame` poll). Per-WS-connection serve state is the **shared `web_view.WsClientState`** (2026-07-23, both tiers: this server AND `tools/web_console.py`): the #76 SurfaceDelta + the **first-frame keyframe latch** — the loop re-arms the console's dirty gate every push tick until the connection has been served one full frame, closing the black-until-tap reload race (one-shot kicks — the `/assets` arm, the recording-wanted edge — all had holes). **Off by default → `ws.canvas` stays the raw `DeviceCanvas` (zero per-draw cost); Settings → WEB VIEW swaps the Tee in** (and rebinds wallpaper/cart). WiFi STA ≠ display SPI, so it doesn't touch the SD/panel bus. **Owner-verified on the T-Deck 2026-08-01** (#182): the page loads, the WS channel comes up and the console streams — slow but working, so WiFi↔LCD-DMA coexistence (#38/#40) and the socket/WebSocket layer now have one on-glass data point each rather than none. It was dead from 2026-07-21 to 2026-08-01 on a missing re-export (`effective_input_kinds`), which presented as "T-Deck WiFi is broken" — a zero-byte close is indistinguishable from a dead radio in a browser. WS removes the per-frame handshake (smoother, lower-latency input) but **not** the ~72KB/s ceiling: light screens ~30-40fps, the heavy launcher ~18fps. **Per-WM-surface streams (v0.5 shell Stage 9):** the shared recorder can slice each frame into one command stream per WM surface (`web_view.surfaces_on` — bar / app content / player viewport, a view over the same flat stream); the **host** web console renders them, the **device keeps the flag off** (flat frames) — wiring the device transport to per-surface render is a standing gate.
 
 ### Hard device constraints (learned the painful way — respect these)
 
 - **SD shares the SPI host with the display.** **SD is no longer mounted before `init_display()` (#56).** The old boot prefetch read carts via `machine.SDCard` *before* the panel came up; that re-runs `spi_bus_initialize()`, and on a **populated** card the mount succeeds but leaves the shared host claimed, so the next `init_display()` intermittently failed with `can't convert '' to int` (the "no-SD / empty-SD boots, SD-with-files doesn't" bug, confirmed + fixed on hardware). So `moybyte_shell.main()` now defaults `PREFETCH_SD_BEFORE_DISPLAY=False`: **nothing touches SD before the panel is up**, and `run_desktop` loads carts *after* init via `with_sd_live` (`prefetched=None → _load_carts(with_sd_live)`), degrading to built-in carts on any SD failure (so this can only make display init MORE reliable). Mounting `machine.SDCard` **after** the panel is live still hard-hangs the board (gray screen, dead USB): `esp_lcd` and `machine.SDCard` are two driver stacks fighting over one host and CS-deselect alone is not enough — which is exactly why the post-display path uses the native `moy_sd` attach (below), not `machine.SDCard`. **Live reads/writes (post-display) go through the native `moy_sd` module** (`native/moy_sd/modmoy_sd.c`), which *attaches* the card to the host `esp_lcd` already initialized (`sdspi_host_init_device`, no bus re-init — the ESP-IDF "Sharing the SPI Bus" pattern) and leaves the panel device intact. `moybyte_sd.with_sd_live(fn)` mounts via `moy_sd` **once and keeps the card resident** for the session, then just runs `fn`. **Do not tear the SD device down between ops** (learned the painful way): a per-op `sdspi_host_deinit` — or reconfiguring the panel's `TFT_CS` via `Pin(...)` — corrupts the shared bus/DMA state and the *next panel flush silent-hangs the board* (the write itself lands on SD, then resume freezes; no panic, USB stays enumerated but dead). So leave `TFT_CS`/`SD_CS` alone (driver-owned; only park the unused LoRa `RADIO_CS` high) and never flush the panel inside the session — the desktop loop is single-threaded, so SD ops run between frames. On-device writes are enabled (`Workstation.can_manage`, wired to `with_sd_live` in `run_desktop`).
 - **T-Deck USB under the desktop — the 2026-07-10 measured verdict (replaces the old "starves USB" lore).** Serial **TX streams fine during play** (PERF/MEMX/HITCH lines flow for hours — passively read `/dev/ttyACM*` with reconnect) and **esptool flashing works** — but its auto-reset never syncs on this board's native USB, so the board has to be put in the ROM loader BY HAND: there is no BOOT button — **the trackball click is GPIO0, so hold the trackball in while powering the board on**, then let go (the P4's CH343 auto-resets fine). **RX is dead on the shipped loop**: this fork's USB-CDC stack has no at-arrival interrupt-char scan, so Ctrl-C/REPL/commands never arrive — and there is no software workaround: a cross-thread `sys.stdin` read never completes (and eats Ctrl-C as data while blocked), `select.poll` reports stdin always-ready-when-empty, and a main-thread read stalls the desktop whenever a serial client is attached but quiet (a 30s kbd-attributed HITCH when it shipped briefly). Both experiment shapes were built, glass-tested and **reverted** — don't re-attempt in-loop serial commands on the T-Deck without fixing the fork's CDC RX first; the P4 keeps its `run`/`skip`/`diag` stdin commands (mainline + CH343 stdin semantics are sane).
 - **Full-screen flush must be a single `tx_color`** from a PSRAM DMA buffer; multiple `tx_color` calls glitch rows at the command→data boundary.
-- **The keyboard has two modes; the console flips between them per screen.** The T-Deck keyboard is a separate ESP32-C3 (I2C 0x55; firmware in `firmware/lilygo_t_deck_plus_reference/examples/Keyboard_ESP32C3`). In its default mode it returns clean 1-byte ASCII (shift→uppercase, sym→symbols/digits, all resolved on-keyboard) but reports each key **once on the press edge with no autorepeat** — so a *held* key can't be detected, only faked for `KEY_HOLD_MS` by `TDeckKeyboard`'s latch (movement stalls while you hold). For true hold-to-move, a running cart switches the keyboard to **raw-matrix mode** (`0x03`, `LILYGO_KB_MODE_RAW_CMD`): it then streams the full key matrix each read, so a held direction keeps firing. `Workstation._set_text_mode` → `TDeckKeyboard.set_game_mode(on)` drives this: ASCII for the code editor (so typing is clean — `last_key`), raw everywhere else. The revert is `0x04` (`..._MODE_KEY_CMD`) — the step an earlier attempt missed, which is why raw mode used to garble the editor *irreversibly*. **`__init__` boots in ASCII and never enables raw**; raw needs keyboard fw **≥ 2025-06-12** (`T-Keyboard_..._250620.bin`), and on older fw the `0x03` is ignored — `_read_raw_buttons` detects the stray ASCII byte and sticks the session back on the 1-byte + latch path (`_raw_unsupported`; class flag `RAW_GAME_MODE` force-disables raw). The keyboard has **no `=` `[ ] { } < > %`** keys at all → the code editor shows an on-screen symbol palette for those. (`0x01 <duty>` over I2C sets the keyboard backlight.) Use `RUN_KEYBOARD_PROBE` to dump keys over serial (USB-friendly, no takeover).
+- **The keyboard has two modes; the console flips between them per screen.** The T-Deck keyboard is a separate ESP32-C3 (I2C 0x55; firmware in `firmware/lilygo_t_deck_plus_reference/examples/Keyboard_ESP32C3` — an UNTRACKED vendor reference tree, so a fresh checkout will not have it; THIRD_PARTY.md's scope note explains why). In its default mode it returns clean 1-byte ASCII (shift→uppercase, sym→symbols/digits, all resolved on-keyboard) but reports each key **once on the press edge with no autorepeat** — so a *held* key can't be detected, only faked for `KEY_HOLD_MS` by `TDeckKeyboard`'s latch (movement stalls while you hold). For true hold-to-move, a running cart switches the keyboard to **raw-matrix mode** (`0x03`, `LILYGO_KB_MODE_RAW_CMD`): it then streams the full key matrix each read, so a held direction keeps firing. `Workstation._set_text_mode` → `TDeckKeyboard.set_game_mode(on)` drives this: ASCII for the code editor (so typing is clean — `last_key`), raw everywhere else. The revert is `0x04` (`..._MODE_KEY_CMD`) — the step an earlier attempt missed, which is why raw mode used to garble the editor *irreversibly*. **`__init__` boots in ASCII and never enables raw**; raw needs keyboard fw **≥ 2025-06-12** (`T-Keyboard_..._250620.bin`), and on older fw the `0x03` is ignored — `_read_raw_buttons` detects the stray ASCII byte and sticks the session back on the 1-byte + latch path (`_raw_unsupported`; class flag `RAW_GAME_MODE` force-disables raw). The keyboard has **no `=` `[ ] { } < > %`** keys at all → the code editor shows an on-screen symbol palette for those. (`0x01 <duty>` over I2C sets the keyboard backlight.) Use `RUN_KEYBOARD_PROBE` to dump keys over serial (USB-friendly, no takeover).
 
 ## Conventions
 

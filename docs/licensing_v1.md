@@ -11,9 +11,10 @@ This is the answer to "why isn't this MIT?".
 1. **Carts, the cart format, and the spec's player are unencumbered.** Projects
    you write, the carts you make, and community tools around them carry no
    obligation to this repository; the cart format/API is an open specification
-   anyone may implement; and the compiled **web player** the spec repo ships
-   (`build.sh --spec`) is granted under MIT so a `.moy` player can be embedded
-   anywhere.
+   anyone may implement; and the **web player** the spec repo ships is MIT --
+   built there from its own C library rather than granted out of this one, since
+   2026-08. (It used to be `build.sh --spec`, a de-branded build of this
+   console, carved out under MIT for exactly that purpose.)
 2. **The console and firmware are FSL-1.1-MIT** (Functional Source License):
    free for everyone to read, modify, and flash on their own hardware — but
    **selling hardware or a competing product built on it requires a commercial

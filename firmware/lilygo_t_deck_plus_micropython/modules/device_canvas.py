@@ -1073,8 +1073,14 @@ class DeviceCanvas:
                                self._clip_x0, self._clip_y0,
                                self._clip_x1, self._clip_y1)
             return
+        # The no-moy_gfx fallback, walking span the way the kernel does (#97).
+        span = 0
         for dy in range(-r, r + 1):
-            span = int((r * r - dy * dy) ** 0.5)
+            t = r * r - dy * dy
+            while (span + 1) * (span + 1) <= t:
+                span += 1
+            while span > 0 and span * span > t:
+                span -= 1
             self._fill(cx - span, cy + dy, 2 * span + 1, 1, col)
 
     def circb(self, cx, cy, r, c):
@@ -1478,13 +1484,16 @@ class DeviceCanvas:
     def _blit_map_into(self, dst, dw, dh, dsx, dsy, tilemap, sheet, mx, my, w, h,
                        colorkey, tile, scale, cx0, cy0, cx1, cy1):
         # One native moy_gfx.blit_map into `dst` -- the framebuffer (a direct draw) or a
-        # hidden cache layer (Fold 2 fill). Bakes/reuses the sheet's RGB565 tile atlas
-        # (cached on the sheet, keyed on gen/colorkey/palgen) then walks the w x h region.
-        atlas, ntiles = self._sheet_atlas(sheet, colorkey)
+        # hidden cache layer (Fold 2 fill). Reads the INDEX sheet and resolves through
+        # the _wire_pal LUT, which is libmoy's moy_map_draw (#97): re-measured on glass
+        # it beats the pre-baked RGB565 atlas this used to walk, 0.78x on the S3 and
+        # 0.92x on the P4. colorkey is the cart's own index again rather than the
+        # _RGB_KEY sentinel the atlas baked it into.
         self._gfx.blit_map(dst, dw, dh, dsx, dsy,
                            tilemap.cells, tilemap.w, tilemap.h,
                            mx, my, w, h,
-                           atlas, ntiles, tile, scale, _RGB_KEY,
+                           sheet.pix, sheet.w, sheet.h,
+                           self._wire_pal(), self._palt, int(colorkey), scale,
                            cx0, cy0, cx1, cy1)
 
     def map(self, tilemap, sheet, mx=0, my=0, w=None, h=None,
@@ -1588,53 +1597,6 @@ class DeviceCanvas:
         # and every later frame re-used the cache. The map() analogue of batch_reset.
         self._map_raster_count = 0
         self._map_hits = 0
-
-    def _sheet_atlas(self, sheet, colorkey):
-        # Bake the whole sheet into a contiguous RGB565 tile atlas (ntiles tiles of
-        # TILE x TILE, tile-major) for moy_gfx.blit_map. Cached on the sheet and keyed
-        # by (gen, colorkey, palgen) so a paint edit, a different colorkey, or a
-        # pal/palt change rebakes; this is the map() analogue of _cache_rgb. pal remap
-        # + palt transparency are applied (so map honours them, host==device).
-        # Transparent indices (== colorkey, or palt) bake to _RGB_KEY -> blit_map skips.
-        gen = getattr(sheet, "gen", 0)
-        if (getattr(sheet, "_atlas", None) is not None
-                and sheet._atlas_gen == gen and sheet._atlas_key == colorkey
-                and getattr(sheet, "_atlas_palgen", -1) == self._palgen):
-            return sheet._atlas, sheet._atlas_n
-        tile = sheet.TILE
-        ntiles = sheet.count
-        tpx = tile * tile
-        buf = bytearray(ntiles * tpx * 2)
-        pal = PAL565_WIRE
-        pmap = self._pal_map
-        palt = self._palt
-        cols = sheet.cols
-        sw = sheet.w
-        spix = sheet.pix
-        key = _RGB_KEY
-        pos = 0
-        for n in range(ntiles):
-            ox = (n % cols) * tile
-            oy = (n // cols) * tile
-            for ly in range(tile):
-                base = (oy + ly) * sw + ox
-                for lx in range(tile):
-                    p = spix[base + lx]
-                    if p == colorkey or palt[p & 63]:
-                        col = key
-                    else:
-                        col = pal[pmap[p & 63]]
-                        if col == key:
-                            col ^= 0x20      # nudge a visible pixel off the key
-                    buf[pos] = col & 0xFF
-                    buf[pos + 1] = (col >> 8) & 0xFF
-                    pos += 2
-        sheet._atlas = buf
-        sheet._atlas_n = ntiles
-        sheet._atlas_gen = gen
-        sheet._atlas_key = colorkey
-        sheet._atlas_palgen = self._palgen
-        return buf, ntiles
 
     def _map_py(self, tilemap, sheet, mx, my, w, h, sx, sy, colorkey, scale):
         # Per-tile fallback when moy_gfx is absent: draw each non-empty cell via the
@@ -1775,11 +1737,12 @@ class DeviceCanvas:
                         self.spr(img, a[i + 1], a[i + 2], scale, a[i + 3])
                 i += 4
             return
-        atlas, ntiles = self._sheet_atlas(sheet, colorkey)
         a[0] = k                       # array mode: C reads the count from a[0]
         _t0 = _ticks_us()              # #63 DRAW2: time the native sprite batch
         self._gfx.blit_batch(self._buf, self._stride, self._bh, a,
-                             atlas, ntiles, sheet.TILE, scale, _RGB_KEY,
+                             sheet.pix, sheet.w, sheet.h,
+                             self._wire_pal(), self._palt,
+                             int(colorkey), scale,
                              self._cam_x, self._cam_y,
                              self._clip_x0, self._clip_y0,
                              self._clip_x1, self._clip_y1)
@@ -1809,10 +1772,10 @@ class DeviceCanvas:
     def spr_batch(self, sheet, items, colorkey=-1, scale=1):
         # Draw N sheet tiles in ONE native moy_gfx.blit_batch call (#43) -- the sprite
         # analogue of map(). `items` is a list of (tile, x, y) or (tile, x, y, flip)
-        # tuples (world coords; camera offsets each, clip honoured). It reuses the SAME
-        # cached RGB565 tile atlas map() bakes (_sheet_atlas, keyed on sheet.gen so a
-        # paint edit / colorkey / pal change rebakes), so the per-frame cost is just the
-        # C walk over the items -- N per-sprite MP->C blits collapse to one call.
+        # tuples (world coords; camera offsets each, clip honoured). The C walk reads
+        # the INDEX sheet through libmoy's moy_spr (#97), so there is nothing to bake
+        # and nothing to invalidate on a paint edit -- N per-sprite MP->C blits still
+        # collapse to one call, which is the whole point of the verb.
         self.flush_batch()             # #63: emit any auto-batched run first (z-order)
         scale = int(scale)
         if scale < 1:
@@ -1835,10 +1798,11 @@ class DeviceCanvas:
                     continue
                 self.spr(img, it[1], it[2], scale, flip)
             return
-        atlas, ntiles = self._sheet_atlas(sheet, colorkey)
         _t0 = _ticks_us()                           # #63 DRAW2: time the native sprite batch
         self._gfx.blit_batch(self._buf, self._stride, self._bh, items,
-                             atlas, ntiles, tile, scale, _RGB_KEY,
+                             sheet.pix, sheet.w, sheet.h,
+                             self._wire_pal(), self._palt,
+                             int(colorkey), scale,
                              self._cam_x, self._cam_y,
                              self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
         self._t_batch_us += _ticks_diff(_ticks_us(), _t0)

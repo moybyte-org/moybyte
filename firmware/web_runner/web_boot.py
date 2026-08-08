@@ -61,12 +61,14 @@ class _RunnerAudio(host_api.FakeAudio):
       twin of the device feed's ring top-up (device_audio.py). Without the
       report (ahead < 0: a transport that never sends it) the per-dt render
       stays, unchanged.
-    * The NATIVE moy_audio kernel does the per-sample mix when the wasm was
-      built with the usermod (the slowdown fix: the Python sample loop costs
-      whole milliseconds per frame under wasm). Same voice_set / render /
-      voice_read per-block pattern as the device's legacy feed -- Python keeps
-      the model, the scheduler and all triggering; C only mixes the block, so
-      host == device == browser stays one audible behaviour.
+    * The synth is the NATIVE moy_audio module when the wasm was built with the
+      usermod -- i.e. libmoy, moy-spec's own SPEC.md 8 implementation, compiled
+      in (#97). It owns the bank, both sequencers and the mixer; this class only
+      forwards the 8.2 verbs and pulls finished blocks. That is also the
+      slowdown fix: the Python per-sample loop cost whole milliseconds per frame
+      under wasm. Without the usermod it falls back to the shared Python engine,
+      which is a twin of the same libmoy source, so browser == device == host
+      stays one audible behaviour either way.
 
     step_frame_json drains take_pcm() into the frame payload and the page's
     playPCM plays the FINISHED samples (no JS synth), as before."""
@@ -79,7 +81,74 @@ class _RunnerAudio(host_api.FakeAudio):
             self._ka = moy_audio
         except ImportError:
             self._ka = None
+        self._bank_rev = None
         self._buf = bytearray(int(engine.rate * _AUDIO_MAX_STEP) * 2 + 64)
+        if self._ka is not None:
+            self._ka.set_rate(engine.rate)
+            self._push_bank()
+            self._ka.volume(engine.master)
+
+    # -- the bank: one crossing per cart, re-pushed when the editor moves it --
+
+    def _push_bank(self):
+        import json
+        bank = self.engine.bank
+        self._ka.bank_load(json.dumps(bank.to_dict()))
+        self._bank_rev = bank.rev
+
+    def _sync_bank(self):
+        if self._ka is not None and self.engine.bank.rev != self._bank_rev:
+            self._push_bank()
+
+    # -- SPEC.md 8.2, forwarded (FakeAudio still records every call) ----------
+
+    def sfx(self, n, chan=None):
+        self.calls.append(("sfx", int(n), chan))
+        if self._ka is not None:
+            self._sync_bank()
+            self._ka.sfx(int(n), -1 if chan is None else int(chan))
+        else:
+            self.engine.play_sfx(n, chan)
+
+    def beep(self, freq, dur=0.15):
+        self.calls.append(("beep", freq, dur))
+        if self._ka is not None:
+            self._ka.beep(float(freq), float(dur))
+        else:
+            self.engine.play_beep(freq, dur)
+
+    def music(self, track, loop=True):
+        self.calls.append(("music", int(track), bool(loop)))
+        if self._ka is not None:
+            self._sync_bank()
+            self._ka.music(int(track), 1 if loop else 0)
+        else:
+            self.engine.play_music(track, loop)
+
+    def music_stop(self):
+        self.calls.append(("music_stop",))
+        if self._ka is not None:
+            self._ka.music_stop()
+        else:
+            self.engine.stop_music()
+
+    def sound_stop(self, chan=None):
+        self.calls.append(("sound_stop", chan))
+        if self._ka is not None:
+            self._ka.sound_stop(-1 if chan is None else int(chan))
+        else:
+            self.engine.stop(chan)
+
+    def volume(self, level):
+        self.calls.append(("volume", level))
+        self.engine.set_volume(level)      # keep the model in step
+        if self._ka is not None:
+            self._ka.volume(self.engine.master)
+
+    def is_active(self):
+        if self._ka is not None:
+            return bool(self._ka.active())
+        return self.engine.is_active()
 
     def tick(self, dt):
         if len(self.calls) > 64:
@@ -95,43 +164,15 @@ class _RunnerAudio(host_api.FakeAudio):
         cap = len(self._buf) // 2
         if n > cap:
             n = cap
-        if n <= 0 or not eng.is_active():
+        if n <= 0 or not self.is_active():
             return
         if self._ka is not None:
-            self.last_pcm = self._render_native(n)
+            buf = memoryview(self._buf)[:n * 2]
+            self._ka.render(buf, n)
+            self.last_pcm = bytes(buf)
         else:
             self.last_pcm = eng.render(n)
         self.rendered += n
-
-    def _render_native(self, n):
-        """device_audio._render_native's pattern: music scheduler in Python,
-        the per-sample mix in C, advanced voice state read back so the Python
-        engine stays the single source of truth."""
-        eng = self.engine
-        ka = self._ka
-        eng._advance_music(n / float(eng.rate))
-        voices = eng.voices
-        for c in range(len(voices)):
-            v = voices[c]
-            ka.voice_set(c, v.active, v.steps, v.step_dur, v.loop,
-                         v.idx, v.t, v.phase, v.noise,
-                         v.phase2, v.prev_pitch, v.prev_vol, v.loop_start)
-        buf = memoryview(self._buf)[:n * 2]
-        ka.render(buf, n, eng.rate, eng.volume)
-        for c in range(len(voices)):
-            st = ka.voice_read(c)
-            if st is not None:
-                v = voices[c]
-                v.active = st[0]
-                v.idx = st[1]
-                v.t = st[2]
-                v.phase = st[3]
-                v.noise = st[4]
-                if len(st) > 7:
-                    v.phase2 = st[5]
-                    v.prev_pitch = st[6]
-                    v.prev_vol = st[7]
-        return bytes(buf)
 
 
 def _make_audio(engine):
@@ -300,8 +341,7 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     # box at (299, 229), which is the chip.
     #
     # Default stays True, so the device, the dev page and the desktop tier are
-    # unchanged. The spec bundle passes hud=False (build.sh --spec flips the
-    # SPEC const in worker.js).
+    # unchanged. A caller that wants clean frames passes hud=False.
     ws.show_fps = bool(hud)
     if not hud:
         ws.perf_hud = False

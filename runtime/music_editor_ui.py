@@ -289,13 +289,22 @@ class MusicEditorUI:
 
     def _music_preview_active(self):
         """True while a music-editor preview is still producing sound (so the frame
-        loop keeps ticking the mixer + redrawing the PLAY/STOP button)."""
+        loop keeps ticking the mixer + redrawing the PLAY/STOP button).
+
+        Asks the BACKEND, not `au.engine`: on the device and the web runner the
+        sequencers live in libmoy, so the Python engine's voices sit idle no
+        matter what the speaker is doing (#97). Backends without the hook fall
+        back to their engine, which is the host's answer anyway."""
         if self.music_preview is None:
             return False
         au = self.ws.audio
-        if au is None or getattr(au, "engine", None) is None:
+        if au is None:
             return False
-        return au.engine.is_active()
+        hook = getattr(au, "is_active", None)
+        if hook is not None:
+            return bool(hook())
+        eng = getattr(au, "engine", None)
+        return bool(eng is not None and eng.is_active())
 
     # -- input -------------------------------------------------------------------
 
