@@ -157,12 +157,31 @@ def _diag_draw2(diag, ws):
             return
         # #66: map/text/fill joined so the WHOLE render ms attributes to named C
         # ops -- (DRAWBRK render) - (these) = Python dispatch + circ/line/pix.
-        diag.log("DRAW2", "layer=%.2fms batch=%.2fms map=%.2fms text=%.2fms fill=%.2fms"
+        #
+        # ...except fill and text READ ZERO for any cart whose rect/print reach
+        # the #155 native gates, because a gated call never enters the Python
+        # method that holds the _t_ timer. The gates have always timed
+        # themselves (ST_T_FILL/ST_T_TEXT, behind ST_PROF) and DeviceCanvas has
+        # always exposed gate_counts() -- nothing ever CALLED it, so the
+        # measurement existed and was thrown away every frame. Zoomed celeste is
+        # what made that visible: 29.6ms of render with fill=0.00ms and 20.6ms
+        # in no bucket at all. Fold the gated microseconds into the bucket they
+        # belong to -- `fill` means time spent filling, whichever lane did it --
+        # and carry the call counts, which are the other half of the question
+        # (a big fill and 300 small ones cost the same ms and want different
+        # fixes).
+        nf = nt = gf = gt = 0
+        gc = getattr(cv, "gate_counts", None)
+        if gc is not None:
+            nf, nt, gf, gt = gc()
+        diag.log("DRAW2", "layer=%.2fms batch=%.2fms map=%.2fms text=%.2fms "
+                          "fill=%.2fms gated(fill=%d text=%d)"
                  % (getattr(cv, "_t_layer_us", 0) / 1000.0,
                     getattr(cv, "_t_batch_us", 0) / 1000.0,
                     getattr(cv, "_t_map_us", 0) / 1000.0,
-                    getattr(cv, "_t_text_us", 0) / 1000.0,
-                    getattr(cv, "_t_fill_us", 0) / 1000.0))
+                    (getattr(cv, "_t_text_us", 0) + gt) / 1000.0,
+                    (getattr(cv, "_t_fill_us", 0) + gf) / 1000.0,
+                    nf, nt))
     except Exception:
         pass
 

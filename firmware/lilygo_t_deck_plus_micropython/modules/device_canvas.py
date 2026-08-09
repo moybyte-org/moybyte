@@ -1767,6 +1767,11 @@ class DeviceCanvas:
         self._t_img_us = 0
         self._n_spr = 0
         self._n_shape = 0
+        self.gate_counts_reset()    # the #155 gates keep their own fill/text us
+                                    # (a gated rect never reaches _t_fill_us);
+                                    # they are per-FRAME numbers like the rest,
+                                    # so they zero with the rest -- without this
+                                    # DRAW2 would report a running total.
         self._prof = True           # perf capture is on this frame -- time the ops
 
     def spr_batch(self, sheet, items, colorkey=-1, scale=1):
