@@ -85,6 +85,11 @@ AUDIO_MAX_FRAME = AUDIO_IBUF_FRAMES
 # Log each sfx/music trigger to moybyte_diag, so the owner can read on serial/SD
 # exactly what reached the mixer. Event-gated: one line per actual call.
 AUDIO_DIAG = True
+# Print an AUDIORATE line every ~2s while sound is audible: the rate the I2S
+# peripheral actually consumes frames at, against the rate libmoy synthesised
+# for. This is the only instrument that can see a uniform playback-speed error --
+# see _rate_probe. Cheap (one counter read per frame) and quiet when silent.
+AUDIO_RATE_PROBE = True
 
 _AUDIO_BACKEND_SEQ = 0
 
@@ -109,6 +114,8 @@ class DeviceAudio:
         self.i2s = None
         self._core1 = False             # core-1 feeder task running
         self._reused_core1 = False      # audio_start found the task already alive
+        self._probe_secs = 0.0          # _rate_probe accumulator
+        self._probe_frames = None       # last frames_out() sample
         self._bank_rev = None           # AudioBank.rev last pushed to libmoy
         # Legacy-feed double buffer: render alternates into bufs[_buf] and
         # write()s it non-blocking; the port copies it on a background task and
@@ -327,11 +334,41 @@ class DeviceAudio:
 
     # -- the feed ---------------------------------------------------------
 
+    def _rate_probe(self, dt):
+        """Report the rate the SPEAKER is really running at (AUDIORATE lines).
+
+        The synth is rate-correct by construction -- every libmoy timing derives
+        from a->rate -- so a playback that is uniformly fast or slow can only be
+        the peripheral consuming samples at a different rate than they were made
+        for. That is invisible from inside the mixer and inaudible as anything but
+        "wrong speed", so measure it: the core-1 feeder blocks on the DMA drain,
+        which makes its accepted-frame count a clock. eff/want == 1.0 is correct;
+        1.38 would be 11025 leaking into an 8 kHz pipe, 2.0 a frame/slot mismatch.
+        Costs one counter read per frame and prints only while sound is audible."""
+        if not AUDIO_RATE_PROBE or self._na is None:
+            return
+        self._probe_secs += dt
+        if self._probe_secs < 2.0:
+            return
+        secs, self._probe_secs = self._probe_secs, 0.0
+        try:
+            frames, rate = self._na.frames_out()
+        except Exception:   # noqa: BLE001 -- an older native module: nothing to say
+            return
+        last, self._probe_frames = self._probe_frames, frames
+        if last is None or frames == last:
+            return                      # first sample, or nothing playing
+        eff = (frames - last) / secs
+        _diag_note("AUDIORATE", "eff=%d want=%d ratio=%.3f feed=%s"
+                   % (int(eff), rate, eff / (rate or 1),
+                      "core1" if self._core1 else "single"))
+
     def tick(self, dt):
         """Per-frame audio work. In core-1 mode there is NONE -- the task renders
         and feeds I2S continuously, off the render core. The legacy fallback
         renders this frame's PCM and streams it to the DMA ring non-blockingly.
         Either way it must never stall the single-threaded desktop loop."""
+        self._rate_probe(dt)
         if self._core1:
             return
 

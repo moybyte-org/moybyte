@@ -104,6 +104,12 @@ static i2s_chan_handle_t s_tx_chan = NULL;
 static TaskHandle_t      s_task = NULL;
 static SemaphoreHandle_t s_mutex = NULL;
 static volatile int      s_running = 0;
+// Frames the I2S peripheral has actually ACCEPTED. The feeder blocks on the DMA
+// drain, so this counter advances at the hardware's true consumption rate --
+// divide it by wall-clock and you get the rate the speaker is really running at,
+// which is the one number that says whether playback speed matches the rate
+// libmoy synthesised for. Written only by the core-1 task, read by anyone.
+static volatile uint32_t s_frames_out = 0;
 #endif
 
 // The lock is a no-op until the core-1 task exists; in the fallback and host
@@ -354,6 +360,7 @@ static void moy_audio_task(void *arg) {
         size_t written = 0;
         i2s_channel_write(s_tx_chan, block, sizeof(block), &written,
                           pdMS_TO_TICKS(MOY_WRITE_TIMEOUT_MS));
+        s_frames_out += (uint32_t)(written / sizeof(int16_t));
     }
 
     if (s_tx_chan != NULL) {
@@ -484,6 +491,24 @@ static mp_obj_t mod_running(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_running_obj, mod_running);
 
+// frames_out() -> (frames, rate). Frames the I2S peripheral has accepted since
+// boot, and the rate libmoy is synthesising for. Sampling this against wall
+// clock answers the one question the synth cannot: is the speaker consuming
+// samples at the rate they were MADE for? A ratio other than 1.0 is playback
+// speed error -- pitch and tempo together -- and no amount of staring at the
+// mixer will show it, because the mixer is right.
+static mp_obj_t mod_frames_out(void) {
+    mp_obj_t t[2];
+#if MOY_AUDIO_HAVE_IDF
+    t[0] = mp_obj_new_int_from_uint(s_frames_out);
+#else
+    t[0] = mp_obj_new_int_from_uint(0);
+#endif
+    t[1] = mp_obj_new_int(s_inited ? (int)s_audio.rate : s_rate);
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_frames_out_obj, mod_frames_out);
+
 static const mp_rom_map_elem_t moy_audio_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__),     MP_OBJ_NEW_QSTR(MP_QSTR_moy_audio) },
     { MP_ROM_QSTR(MP_QSTR_CHANNELS),     MP_ROM_INT(MOY_A_CHANNELS) },
@@ -502,6 +527,7 @@ static const mp_rom_map_elem_t moy_audio_globals_table[] = {
     // core-1 feeder task (#41)
     { MP_ROM_QSTR(MP_QSTR_audio_start),  MP_ROM_PTR(&mod_audio_start_obj) },
     { MP_ROM_QSTR(MP_QSTR_audio_stop),   MP_ROM_PTR(&mod_audio_stop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_frames_out),   MP_ROM_PTR(&mod_frames_out_obj) },
     { MP_ROM_QSTR(MP_QSTR_running),      MP_ROM_PTR(&mod_running_obj) },
 };
 static MP_DEFINE_CONST_DICT(moy_audio_globals, moy_audio_globals_table);
