@@ -135,6 +135,21 @@ both sequencers and the mixer, so the boards are conformant by construction and
 nothing marshals across the boundary per frame — the bank crosses ONCE per cart
 as `sounds.json` text.
 
+**Heard on a T-Deck (owner-verified, 2026-08-09, firmware 0.9 over OTA).** Until
+then the swap had only host evidence — `tests/test_audio_parity.py` diffs every
+sample against the vendored C, which proves the twin faithful and says nothing
+about whether I2S comes up on glass. It does. **The game sounds CHANGED audibly,
+and that is the expected result, not a regression**: §8.3 pins the synth to
+PICO-8's measured output, whose instrument loudness is deliberately unequal — the
+triangle family peaks at about twice the square family. The engine it replaced
+had them EQUAL: `_sample_wave` before `c5d594e` returned ±1.0 for both square and
+triangle (organ reached 1.5, phaser was halved back to 1.0), so the audible change
+is that triangle-family parts are now roughly twice as loud against a square lead
+as they used to be. The seed carts were authored against the old balance, so a
+cart whose lead now sits under its accompaniment is a **cart mix** to fix in its
+`sounds.json` vol column, never a synth to "correct" here — and nothing will catch
+it for you, because §8.3 exempts audio from pixel conformance on purpose.
+
 So: **do not "improve" the synthesis locally, and do not add a waveform or an
 effect here.** Fix it in moy-spec, re-vendor with **`make vendor-libmoy`**
 (`tools/vendor_libmoy.py`, pointed at a sibling moy-spec checkout or `SPEC=`;
