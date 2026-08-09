@@ -413,6 +413,20 @@ class Player:
         # The dead run's `view(w, h)` must not outlive it: every fullscreen
         # surface shares viewport(), and a lingering view would crop chrome.
         self.ws.input.game_view = None
+        # Nor may its SOUND. The device mixer is a global the cart only ever
+        # posts notes to -- libmoy keeps sequencing a looping sfx or music track
+        # long after the run that started it is gone, so beeper's tones and
+        # celeste's music went on playing over whatever the kid did next
+        # (owner, T-Deck). Same category as the view and the palette above:
+        # state the run set on a shared surface, cleared where the run ends
+        # rather than wherever the next one happens to overwrite it.
+        au = getattr(self.ws, "audio", None)
+        if au is not None:
+            try:
+                au.music_stop()
+                au.sound_stop()
+            except Exception:  # noqa: BLE001 -- teardown must not raise
+                pass
         # A cart-supplied palette (spec 2.2) dies with its run -- the system
         # surfaces underneath get the default table back.
         self._restore_palette()
