@@ -4833,6 +4833,14 @@ class Workstation:
             if _fs_game is None or _fs_game():
                 _vp = getattr(self.wm, "viewport", None)
         _game_open = False
+        # RASTER TWIN of the letterbox above, for the tier where the system
+        # canvas IS the game canvas: there composite_game short-circuits, so the
+        # bezel it normally fills is never written at all and a cart-declared
+        # view leaves stale pixels that FLASH on a double-buffered root (#58).
+        # Same fix, same place in the order -- before the cart draws. The WM
+        # decides whether it applies; a no-view cart pays one getattr.
+        _lb = getattr(self.wm, "letterbox_inplace", None) if _vp is None else None
+        _lb_done = False
         for layer in self.wm.draw_stack():          # memoized (Stage 6c) -- no per-frame alloc
             if _prev_domain == "game" and layer.domain == "system":
                 if _game_open:                      # close the placement span
@@ -4860,6 +4868,9 @@ class Workstation:
                 self.sys_canvas.cls(0)      # _VIEWPORT_BEZEL: black
                 _view(_ox, _oy, _sc, self.canvas.w, self.canvas.h)
                 _game_open = True
+            if _lb is not None and layer.domain == "game" and not _lb_done:
+                _lb()
+                _lb_done = True
             if _lay is not None:
                 _tk = _ticks_us()
                 layer.draw(dt)
