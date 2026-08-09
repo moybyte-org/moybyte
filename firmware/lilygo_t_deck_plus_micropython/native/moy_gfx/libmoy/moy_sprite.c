@@ -117,18 +117,75 @@ void moy_spr(moy_canvas *c, const moy_sheet *s, int n, int x, int y,
         }
         return;
     }
-    for (sy = 0; sy < MOY_TILE; sy++) {
-        int ssy = fy ? (MOY_TILE - 1 - sy) : sy;
-        for (sx = 0; sx < MOY_TILE; sx++) {
-            int ssx = fx ? (MOY_TILE - 1 - sx) : sx;
-            int p = s->pix[(oy + ssy) * MOY_SHEET_W + (ox + ssx)];
-            /* Three transparency sources, checked independently because they
-             * arrive from three different places: the call's colorkey, a
-             * negative sentinel, and the cart's global palt. */
-            if (p == colorkey || p < 0 || c->palt[p & 63]) continue;
-            moy_rect(c, x + sx * scale, y + sy * scale, scale, scale, p);
+    {
+        /* scale > 1: the SAME hoist, generalised. This used to emit one
+         * moy_rect per SOURCE pixel -- 64 calls for one 8x8 tile, each
+         * re-deriving the camera offset, four clip clamps, an early-out and an
+         * alignment phase, to write a scale x scale block. moy_rect earns that
+         * setup when it is filling a span; at 2x2 it is nearly all of the work.
+         * A zoomed PICO-8 port makes the shape obvious: celeste at 2x draws its
+         * map twice a frame, so ~512 sprites became ~32k moy_rect calls.
+         *
+         * Measured 1.12x on the celeste-shaped workload (a 16x16 map at 2x,
+         * drawn twice) on x86 at -O2. Modest, and worth saying plainly: the
+         * scaled path was never the disaster the call count suggests, so this
+         * is not what makes a 2x port cheap. Drawing 3.75x the pixels is.
+         *
+         * Pixel-identical to the moy_rect form by construction: same source
+         * order, same clip (max/min against the same rect), same destination
+         * addressing (c->pix + py*c->w), same store[p & 63]. The dropped
+         * `p < 0` test cannot fire -- a sheet pixel is a uint8_t -- which is
+         * the argument the scale-1 path above already makes. The conformance
+         * goldens are what say so rather than this comment. */
+        int span = MOY_TILE * scale;
+        int px0 = x - c->cam_x, py0 = y - c->cam_y;
+        int gx0 = px0 > c->clip_x0 ? px0 : c->clip_x0;
+        int gy0 = py0 > c->clip_y0 ? py0 : c->clip_y0;
+        int gx1 = px0 + span < c->clip_x1 ? px0 + span : c->clip_x1;
+        int gy1 = py0 + span < c->clip_y1 ? py0 + span : c->clip_y1;
+        const uint8_t *spix = s->pix;
+        const uint8_t *palt = c->palt;
+        const moy_pixel *store = c->store;
+        moy_pixel *cpix = c->pix;
+        int cw = c->w;
+        int sx_lo, sx_hi, sy_lo, sy_hi;
+        if (gx0 >= gx1 || gy0 >= gy1) return;
+        /* Walk the SOURCE pixels that survive the clip, not the destination
+         * ones: the transparency question then costs the same 64 asks the old
+         * form paid, and each answer fills its whole scale x scale block. (An
+         * earlier rewrite walked destination rows instead and asked once per
+         * ROW -- scale times too often -- which measured 0.78x, i.e. slower
+         * than what it replaced. Hence this note: the win here is dropping the
+         * per-source-pixel moy_rect CALL, not asking anything less often.) */
+        sx_lo = (gx0 - px0) / scale;          /* gx0 >= px0, so these floor cleanly */
+        sx_hi = (gx1 - 1 - px0) / scale + 1;
+        sy_lo = (gy0 - py0) / scale;
+        sy_hi = (gy1 - 1 - py0) / scale + 1;
+        for (sy = sy_lo; sy < sy_hi; sy++) {
+            int dy0 = py0 + sy * scale, dy1 = dy0 + scale, dy;
+            const uint8_t *srow;
+            if (dy0 < gy0) dy0 = gy0;
+            if (dy1 > gy1) dy1 = gy1;
+            srow = spix + (size_t)(oy + (fy ? MOY_TILE - 1 - sy : sy))
+                        * MOY_SHEET_W + ox;
+            for (sx = sx_lo; sx < sx_hi; sx++) {
+                int p = srow[fx ? MOY_TILE - 1 - sx : sx];
+                int dx0, dx1, dx;
+                moy_pixel v;
+                if (p == colorkey || palt[p & 63]) continue;
+                dx0 = px0 + sx * scale;
+                dx1 = dx0 + scale;
+                if (dx0 < gx0) dx0 = gx0;
+                if (dx1 > gx1) dx1 = gx1;
+                v = store[p & 63];
+                for (dy = dy0; dy < dy1; dy++) {
+                    moy_pixel *drow = cpix + (size_t)dy * (size_t)cw;
+                    for (dx = dx0; dx < dx1; dx++) drow[dx] = v;
+                }
+            }
         }
     }
+
 }
 
 void moy_sspr(moy_canvas *c, const moy_sheet *s, int sx, int sy, int sw, int sh,

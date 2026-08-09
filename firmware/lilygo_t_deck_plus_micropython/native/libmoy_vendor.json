@@ -8,11 +8,11 @@
     "firmware/lilygo_t_deck_plus_micropython/native/moy_gfx/libmoy/moy_canvas.c": "40a6f16e1e68ace347f60d67eadde29c654e921bf05318ad2d1fdb5b48d1b49c",
     "firmware/lilygo_t_deck_plus_micropython/native/moy_gfx/libmoy/moy_data.c": "091a8271274d6165dd8ac73e1d577c65c6cf86a03da44223368c564eddbd366c",
     "firmware/lilygo_t_deck_plus_micropython/native/moy_gfx/libmoy/moy_pixel.h": "6fbf26844e06f6f5ecd50e80b984e5216be6cb81475255de79f0caf957f77ee6",
-    "firmware/lilygo_t_deck_plus_micropython/native/moy_gfx/libmoy/moy_sprite.c": "74d083a9852c0b9cf929ad36aa17a58e997558a24d30f57e189cc644c048a379"
+    "firmware/lilygo_t_deck_plus_micropython/native/moy_gfx/libmoy/moy_sprite.c": "b4b89c7ab1614831cc00e9bf3a3d6d4439bd5ac952003376d9f675c6c2416105"
   },
   "upstream": {
-    "commit": "ef01426b4a77dfd92c1cc1593f73eb839ac1cf35",
-    "date": "2026-08-07",
+    "commit": "75cf851a574da71606988a7f7d03c1fece7f95c5",
+    "date": "2026-08-09",
     "dirty": false,
     "repo": "moybyte-org/moy-spec"
   }
