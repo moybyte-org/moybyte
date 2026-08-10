@@ -186,6 +186,31 @@ def _diag_draw2(diag, ws):
         pass
 
 
+def _diag_luadraw(diag, ws):
+    """Log a LUADRAW line (#189): the libmoy-direct Lua draw verbs' counters
+    since the LAST line -- (calls, ms) per DRAW3 bucket plus the odd-shape
+    fallback count. This board's USB-CDC RX is dead under the desktop, so the
+    serial TX diag is the ONLY on-glass proof the direct lane is live here;
+    all-zero buckets while a Lua cart draws shapes means bind_draw declined
+    (or the cart is pure spr, like sakura's twin -- check DRAW2 batch first).
+    us accumulate only under perf capture (ST_PROF), same as the gates."""
+    if diag is None:
+        return
+    try:
+        import moy_lua
+        st = moy_lua.draw_stats()
+        if st is None:                     # build without the direct path
+            return
+        if st[0] or st[1] or st[2] or st[6]:
+            diag.log("LUADRAW", "fill=%d/%.2fms shape=%d/%.2fms "
+                                "text=%d/%.2fms fb=%d"
+                     % (st[0], st[3] / 1000.0, st[1], st[4] / 1000.0,
+                        st[2], st[5] / 1000.0, st[6]))
+            moy_lua.draw_stats_reset()
+    except Exception:
+        pass
+
+
 def _diag_draw3(diag, ws):
     """Log a DRAW3 line: the REST of the render ms, and what's left after it.
 

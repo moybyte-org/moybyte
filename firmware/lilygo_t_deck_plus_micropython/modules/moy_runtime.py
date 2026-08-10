@@ -34,7 +34,8 @@ from device_input import TrackBall, Touch
 # the loop's hitch threshold + one-shot calib flag (mutated in place).
 from device_diag import (
     _diag_flush, _diag_perf_sample, _diag_hitch, _diag_drawbrk, _diag_draw2,
-    _diag_draw3, _diag_loop, _diag_chromebrk, _diag_layerbrk, _diag_homebrk, _diag_pump,
+    _diag_draw3, _diag_luadraw, _diag_loop, _diag_chromebrk, _diag_layerbrk,
+    _diag_homebrk, _diag_pump,
     _diag_luamem,
     _diag_i2cstat, _diag_calib, _diag_gc, HITCH_MS, _CALIB_DONE,
 )
@@ -871,6 +872,8 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             _diag_draw2(diag, ws)       # #63: split render into layer-copy vs sprite-batch us
             _diag_draw3(diag, ws)       # the REST of render (spr/circ/line) + the
                                         # measured dispatch residual
+            _diag_luadraw(diag, ws)     # #189: the libmoy-direct Lua verbs' counters
+                                        # (dead RX: serial TX is this board's only proof)
             _diag_loop(diag, ws, _loop_acc)     # the average frame by loop stage --
             for _i in range(12):                # the steady-state HITCH never sees
                 _loop_acc[_i] = 0

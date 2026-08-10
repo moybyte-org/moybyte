@@ -1,0 +1,72 @@
+// The C-level draw API moy_gfx exports to SIBLING native modules -- today
+// that is moy_lua's libmoy-direct draw verbs (#67/#189): a Lua cart's
+// pix/rect/line/circ/tri/print run as lua_CFunctions that call straight into
+// these, so a draw never crosses into Python at all.
+//
+// The contract mirrors the Python-facing draw gates exactly: every function
+// reads the SAME DrawCtx a canvas keeps in step from its cold paths
+// (camera/clip/reset_state -> the state array, pal/palt -> the RGB565 table),
+// and the raster underneath is the same gate_fill / libmoy kernels the MP
+// verbs end in -- so a pixel drawn through this API is byte-identical to one
+// drawn through the canvas method it shadows. That equivalence is pinned by
+// tests/test_lua_draw_direct.py on a unix-port MicroPython build.
+//
+// Consumers include this RELATIVELY ("../moy_gfx/moy_gfx_capi.h"): the build
+// stages native modules as sibling directories on every target that has
+// moy_gfx (T-Deck ext_mod/, P4 .staged/, the unix test build), and the wasm
+// runner -- which builds moy_lua WITHOUT moy_gfx -- simply fails the
+// __has_include probe and compiles the direct path out. Definitions live in
+// modmoy_gfx.c; nothing here allocates or raises.
+
+#pragma once
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include "py/obj.h"
+
+// Opaque: the layout stays private to modmoy_gfx.c.
+typedef struct _moy_gfx_draw_ctx_obj_t moy_gfx_draw_ctx_t;
+
+// The DrawCtx behind a Python-side ctx object (canvas._gate_ctx), or NULL if
+// `obj` is not one.
+moy_gfx_draw_ctx_t *moy_gfx_capi_ctx(mp_obj_t obj);
+
+// False until set_buf has pointed the ctx at a destination buffer.
+bool moy_gfx_capi_ready(const moy_gfx_draw_ctx_t *c);
+
+// True when the canvas's sprite queue holds quads: the caller must upcall
+// canvas.flush_batch BEFORE drawing (the #63 order rule -- queued sprites
+// belong under the primitive about to land). The upcall is the caller's job
+// because only the caller knows how to protect it (moy_lua must not let an MP
+// exception longjmp through Lua frames).
+bool moy_gfx_capi_batch_pending(const moy_gfx_draw_ctx_t *c);
+
+// The canvas object the ctx was made for (the flush_batch upcall target).
+mp_obj_t moy_gfx_capi_canvas(const moy_gfx_draw_ctx_t *c);
+
+// The DRAW2 profiling flag (ST_PROF), so callers gate their own timers the
+// way the gates do -- the ticks_us pair costs ~6us on the S3, real money
+// against a 1x1 fill.
+bool moy_gfx_capi_prof(const moy_gfx_draw_ctx_t *c);
+
+// Pump bookkeeping (#163 door 1, T-Deck root canvas): decrement the shared
+// cadence counter by `nops`; when the pump is due, returns the registered
+// callable for the CALLER to invoke (protected), else MP_OBJ_NULL. Ctxs with
+// no pump (every canvas but the T-Deck root) always return MP_OBJ_NULL.
+mp_obj_t moy_gfx_capi_pump_due(moy_gfx_draw_ctx_t *c, int nops);
+
+// Draw verbs. Coordinates are canvas coords (camera applied inside), `ci` a
+// MOY64 palette index resolved through the ctx's pal-remapped RGB565 table.
+// All clip to the ctx clip rect intersected with the buffer; all are pure C
+// (no upcalls, no allocation, never raise). fill/rectb/print bump the ctx's
+// ST_N_FILL / ST_N_TEXT liveness counters like the gates do.
+void moy_gfx_capi_fill(moy_gfx_draw_ctx_t *c, int x, int y, int w, int h, int ci);
+void moy_gfx_capi_rectb(moy_gfx_draw_ctx_t *c, int x, int y, int w, int h, int ci);
+void moy_gfx_capi_line(moy_gfx_draw_ctx_t *c, int x0, int y0, int x1, int y1, int ci);
+void moy_gfx_capi_circ(moy_gfx_draw_ctx_t *c, int cx, int cy, int r, int ci,
+                       bool outline);
+void moy_gfx_capi_tri(moy_gfx_draw_ctx_t *c, int x1, int y1, int x2, int y2,
+                      int x3, int y3, int ci);
+void moy_gfx_capi_print(moy_gfx_draw_ctx_t *c, const uint8_t *s, size_t slen,
+                        int x, int y, int ci);

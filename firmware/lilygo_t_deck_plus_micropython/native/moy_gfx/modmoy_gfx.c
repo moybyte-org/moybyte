@@ -20,6 +20,11 @@
 // over it; the rest are still moybyte's own, for reasons that file records.
 #include "moy.h"
 
+// The C draw API exported to sibling native modules (moy_lua's libmoy-direct
+// verbs, #189) -- declarations only; the definitions sit with the DrawCtx
+// machinery they wrap, below.
+#include "moy_gfx_capi.h"
+
 // The libmoy bridge helpers live further down, next to the per-pixel put they
 // belong with; blit_map sits above them and needs them. Declared here rather
 // than moved, because their neighbours are the reason they are readable.
@@ -1694,6 +1699,125 @@ static mp_obj_t moy_gfx_make_draw_gate(mp_obj_t ctx_in, mp_obj_t kind_in,
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(moy_gfx_make_draw_gate_obj,
                                  moy_gfx_make_draw_gate);
+
+// --- the exported C draw API (moy_gfx_capi.h -- moy_lua's direct verbs) -----
+//
+// Thin non-static wrappers over the SAME machinery the gates and MP verbs use:
+// gate_fill for the fill family, moy_gfx_canvas_solid + the libmoy kernels for
+// the shapes, moy_gfx_text_raw for print (the gate's lane -- at cart scale it
+// and libmoy's moy_print are pinned byte-identical by the text conformance
+// scenes). Nothing here parses args, upcalls, allocates, or raises: the
+// callers run inside Lua C functions where an MP exception must not longjmp.
+
+moy_gfx_draw_ctx_t *moy_gfx_capi_ctx(mp_obj_t obj) {
+    if (!mp_obj_is_type(obj, &moy_gfx_draw_ctx_type)) {
+        return NULL;
+    }
+    return MP_OBJ_TO_PTR(obj);
+}
+
+bool moy_gfx_capi_ready(const moy_gfx_draw_ctx_t *c) {
+    return c->px != NULL && c->st[ST_W] > 0;
+}
+
+bool moy_gfx_capi_batch_pending(const moy_gfx_draw_ctx_t *c) {
+    return c->batch != NULL && c->batch[0] > 4;
+}
+
+mp_obj_t moy_gfx_capi_canvas(const moy_gfx_draw_ctx_t *c) {
+    return c->canvas;
+}
+
+bool moy_gfx_capi_prof(const moy_gfx_draw_ctx_t *c) {
+    return c->st[ST_PROF] != 0;
+}
+
+mp_obj_t moy_gfx_capi_pump_due(moy_gfx_draw_ctx_t *c, int nops) {
+    if (c->pump == mp_const_none) {
+        return MP_OBJ_NULL;
+    }
+    c->pump_ctr -= (int32_t)nops;
+    if (c->pump_ctr > 0) {
+        return MP_OBJ_NULL;
+    }
+    c->pump_ctr = GATE_PUMP_EVERY;
+    return c->pump;
+}
+
+static inline uint16_t capi_col(const moy_gfx_draw_ctx_t *c, int ci) {
+    return c->pal[(size_t)(ci & 63) % c->npal];
+}
+
+void moy_gfx_capi_fill(moy_gfx_draw_ctx_t *c, int x, int y, int w, int h, int ci) {
+    gate_fill(c, x, y, w, h, capi_col(c, ci));
+    c->st[ST_N_FILL]++;
+}
+
+void moy_gfx_capi_rectb(moy_gfx_draw_ctx_t *c, int x, int y, int w, int h, int ci) {
+    // The same four clipped fills the rect gate and the Python path issue.
+    uint16_t col = capi_col(c, ci);
+    gate_fill(c, x, y, w, 1, col);
+    gate_fill(c, x, y + h - 1, w, 1, col);
+    gate_fill(c, x, y, 1, h, col);
+    gate_fill(c, x + w - 1, y, 1, h, col);
+    c->st[ST_N_FILL]++;
+}
+
+// Borrow a solid-colour libmoy canvas from the ctx state, exactly the way the
+// MP shape verbs build one from their scalar args (clip clamped to the buffer
+// first). False when the ctx has no usable destination.
+static bool capi_solid(moy_gfx_draw_ctx_t *c, moy_canvas *mc, int ci) {
+    const int32_t *st = c->st;
+    mp_int_t dw = st[ST_W];
+    if (dw <= 0 || c->px == NULL) {
+        return false;
+    }
+    mp_int_t cx0 = st[ST_CX0], cy0 = st[ST_CY0];
+    mp_int_t cx1 = st[ST_CX1], cy1 = st[ST_CY1];
+    moy_gfx_clip(dw, c->cap, &cx0, &cy0, &cx1, &cy1);
+    moy_gfx_canvas_solid(mc, c->px, dw, c->cap, capi_col(c, ci),
+                         st[ST_CAM_X], st[ST_CAM_Y], cx0, cy0, cx1, cy1);
+    return true;
+}
+
+void moy_gfx_capi_line(moy_gfx_draw_ctx_t *c, int x0, int y0, int x1, int y1,
+                       int ci) {
+    moy_canvas mc;
+    if (capi_solid(c, &mc, ci)) {
+        moy_line(&mc, x0, y0, x1, y1, 0);
+    }
+}
+
+void moy_gfx_capi_circ(moy_gfx_draw_ctx_t *c, int cx, int cy, int r, int ci,
+                       bool outline) {
+    moy_canvas mc;
+    if (r < 0 || !capi_solid(c, &mc, ci)) {
+        return;
+    }
+    if (outline) {
+        moy_circb(&mc, cx, cy, r, 0);
+    } else {
+        moy_circ(&mc, cx, cy, r, 0);
+    }
+}
+
+void moy_gfx_capi_tri(moy_gfx_draw_ctx_t *c, int x1, int y1, int x2, int y2,
+                      int x3, int y3, int ci) {
+    moy_canvas mc;
+    if (capi_solid(c, &mc, ci)) {
+        moy_tri(&mc, x1, y1, x2, y2, x3, y3, 0);
+    }
+}
+
+void moy_gfx_capi_print(moy_gfx_draw_ctx_t *c, const uint8_t *s, size_t slen,
+                        int x, int y, int ci) {
+    const int32_t *st = c->st;
+    moy_gfx_text_raw(c->px, c->cap, st[ST_W], s, slen, x, y, capi_col(c, ci),
+                     c->font, c->nglyphs, c->first, st[ST_FONT_SCALE],
+                     st[ST_CAM_X], st[ST_CAM_Y],
+                     st[ST_CX0], st[ST_CY0], st[ST_CX1], st[ST_CY1]);
+    c->st[ST_N_TEXT]++;
+}
 
 // decode_runs(dst, npix, packed) -> pixels written, or -1 on a corrupt stream.
 // Expands a MOY64 run-length stream -- byte pairs (count, value), count >= 1,

@@ -9,7 +9,13 @@
 //     of moy_gfx's spr_gate (same header stamping via a canvas.begin_batch
 //     upcall on run breaks, same clamps), so the existing frame machinery
 //     (flush_batch -> blit_batch) drains Lua sprites with zero new plumbing
-//     and the per-sprite cost is a C append, not a VM dispatch.
+//     and the per-sprite cost is a C append, not a VM dispatch. And since
+//     #189, the whole solid draw family (pix/rect/rectb/line/circ/circb/tri/
+//     trib/print) goes libmoy-DIRECT on builds with moy_gfx beside this
+//     module: bind_draw() swaps in lua_CFunctions that draw through the
+//     canvas's shared DrawCtx (moy_gfx_capi.h), so those verbs never enter
+//     Python at all -- the p8 shim's soft font is ~15 pix() per glyph, which
+//     made per-call dispatch the T-Deck's whole render residual.
 //   * EVERYTHING else: registered Python callables (the cart's make_api
 //     closures) exposed as Lua globals through one generic trampoline --
 //     100% semantic parity with Python carts because it IS the same closure.
@@ -31,6 +37,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>     // free/realloc -- the no-PSRAM lua_Alloc path (unix)
 #include "py/obj.h"
 #include "py/runtime.h"
 #include "py/objstr.h"
@@ -39,6 +46,20 @@
 #include "lua.h"
 #include "lauxlib.h"
 #include "lualib.h"
+
+// #189 libmoy-direct draw verbs: when moy_gfx is staged BESIDE this module
+// (both boards + the unix test build -- the wasm runner is the one that
+// isn't), its exported C draw API turns pix/rect/rectb/line/circ/circb/tri/
+// trib/print into lua_CFunctions that draw through the shared DrawCtx without
+// ever entering Python. Probe by layout, not by port: the relative include
+// resolves exactly where the API can exist.
+#if defined(__has_include)
+#if __has_include("../moy_gfx/moy_gfx_capi.h")
+#include "../moy_gfx/moy_gfx_capi.h"
+#include "py/mphal.h"          // mp_hal_ticks_us -- the ST_PROF-gated timers
+#define MOY_LUA_DRAW_DIRECT 1
+#endif
+#endif
 
 #if defined(__has_include)
 #if __has_include("esp_heap_caps.h")
@@ -62,10 +83,25 @@
 #define ROOT_SHEET 1
 #define ROOT_ARR 2
 #define ROOT_CALLS 3
+#define ROOT_CTX 4     // #189: the bound DrawCtx (or None) -- gc must keep it
 
 static lua_State *g_L = NULL;
 static size_t g_live = 0;
 static size_t g_peak = 0;
+
+#ifdef MOY_LUA_DRAW_DIRECT
+// The bound DrawCtx pointer (NULL = no direct verbs; the trampolines stand).
+// The OBJECT is rooted at ROOT_CTX so this raw pointer can never dangle.
+static moy_gfx_draw_ctx_t *g_ctx = NULL;
+// Liveness/attribution counters, DRAW3's three buckets: 0 fill (pix/rect/
+// rectb), 1 shape (line/circ/circb/tri/trib), 2 text (print). Counts always;
+// microseconds only while the ctx's ST_PROF flag is up (the ticks pair costs
+// ~6us on the S3 -- real money against a 1x1 fill). g_dfb counts odd-shape
+// falls back to the Python trampoline (pix's 2-arg read, most of all).
+static uint32_t g_dn[3];
+static uint32_t g_dus[3];
+static uint32_t g_dfb = 0;
+#endif
 
 #ifdef MOY_LUA_PSRAM
 // #67 SRAM-vs-PSRAM attribution (2026-08-10): the allocator is SRAM-first,
@@ -317,8 +353,7 @@ static bool call_py(mp_obj_t fn, size_t n, const mp_obj_t *args, mp_obj_t *ret) 
 // suite (the `provisional` scene). Keep this >= the widest spec signature.
 #define MOY_API_MAX_ARGS 10
 
-static int l_tramp(lua_State *L) {
-    int idx = (int)lua_tointeger(L, lua_upvalueindex(1));
+static int tramp_call(lua_State *L, int idx) {
     int n = lua_gettop(L);
     if (n > MOY_API_MAX_ARGS) {
         return luaL_error(L, "console api: too many arguments");
@@ -336,6 +371,10 @@ static int l_tramp(lua_State *L) {
         return luaL_error(L, "%s", g_pyerr);
     }
     return push_mp_to_lua(L, ret);
+}
+
+static int l_tramp(lua_State *L) {
+    return tramp_call(L, (int)lua_tointeger(L, lua_upvalueindex(1)));
 }
 
 // ---------------------------------------------------------------------------
@@ -412,6 +451,243 @@ static int l_spr(lua_State *L) {
 }
 
 // ---------------------------------------------------------------------------
+// #189: the libmoy-direct draw verbs
+//
+// One shared lua_CFunction, closed over (kind, fallback-trampoline-idx). The
+// hot shapes -- all-number args at the verb's exact arity, plus a string head
+// for print -- draw through moy_gfx's exported C API against the SAME DrawCtx
+// the canvas keeps in step (camera/clip/pal all applied C-side), so a Lua
+// draw never enters Python at all. Anything else (pix's 2-arg READ form, a
+// nil, a table) falls back to the verb's original Python trampoline, which is
+// where the odd forms were always handled -- semantics unchanged, purely a
+// fast lane, exactly the draw-gate contract one layer down.
+
+static void moy_lua_check_open(void);   // defined with the module functions
+
+#ifdef MOY_LUA_DRAW_DIRECT
+
+enum {
+    DV_PIX = 0, DV_RECT, DV_RECTB, DV_LINE,
+    DV_CIRC, DV_CIRCB, DV_TRI, DV_TRIB, DV_PRINT
+};
+
+// A coordinate/colour arg: number only; floats truncate toward zero, exactly
+// like the draw gates' gate_num (and Python int()).
+static bool dv_num(lua_State *L, int i, int *out) {
+    if (lua_type(L, i) != LUA_TNUMBER) {
+        return false;
+    }
+    lua_Integer v = lua_isinteger(L, i) ? lua_tointeger(L, i)
+                                        : (lua_Integer)lua_tonumber(L, i);
+    *out = (int)v;
+    return true;
+}
+
+static int l_draw_fallback(lua_State *L) {
+    int fidx = (int)lua_tointeger(L, lua_upvalueindex(2));
+    if (fidx < 0) {
+        return luaL_error(L, "console api: unsupported call form");
+    }
+    g_dfb++;
+    return tramp_call(L, fidx);
+}
+
+static int l_draw(lua_State *L) {
+    moy_gfx_draw_ctx_t *c = g_ctx;
+    if (c == NULL || !moy_gfx_capi_ready(c)) {
+        return l_draw_fallback(L);
+    }
+    int kind = (int)lua_tointeger(L, lua_upvalueindex(1));
+    int n = lua_gettop(L);
+    int v[7];
+    const char *s = NULL;
+    size_t slen = 0;
+    switch (kind) {
+        case DV_PIX:                       // 2-arg READ form returns a value
+            if (n != 3) return l_draw_fallback(L);
+            break;
+        case DV_RECT:
+        case DV_RECTB:
+        case DV_LINE:
+            if (n != 5) return l_draw_fallback(L);
+            break;
+        case DV_CIRC:
+        case DV_CIRCB:
+            if (n != 4) return l_draw_fallback(L);
+            break;
+        case DV_TRI:
+        case DV_TRIB:
+            if (n != 7) return l_draw_fallback(L);
+            break;
+        default:                           // DV_PRINT: (s, x, y, c[, scale]);
+            if (n < 4 || n > 5 || lua_type(L, 1) != LUA_TSTRING) {
+                return l_draw_fallback(L); // the legacy scale is IGNORED, like
+            }                              // the print gate it mirrors
+            s = lua_tolstring(L, 1, &slen);
+            break;
+    }
+    if (kind == DV_PRINT) {
+        for (int i = 0; i < 3; i++) {
+            if (!dv_num(L, i + 2, &v[i])) return l_draw_fallback(L);
+        }
+    } else {
+        for (int i = 0; i < n; i++) {
+            if (!dv_num(L, i + 1, &v[i])) return l_draw_fallback(L);
+        }
+    }
+    // #63 order rule: queued sprites were drawn under the current state and
+    // must land BEFORE this primitive. Same upcall the gates make -- but
+    // nlr-protected, because an MP exception must never longjmp through Lua.
+    if (moy_gfx_capi_batch_pending(c)) {
+        nlr_buf_t nlr;
+        if (nlr_push(&nlr) == 0) {
+            mp_obj_t dest[2];
+            mp_load_method(moy_gfx_capi_canvas(c), MP_QSTR_flush_batch, dest);
+            mp_call_method_n_kw(0, 0, dest);
+            nlr_pop();
+        } else {
+            return luaL_error(L, "draw: flush_batch failed");
+        }
+    }
+    bool prof = moy_gfx_capi_prof(c);
+    uint32_t t0 = prof ? (uint32_t)mp_hal_ticks_us() : 0;
+    int bucket = 1;                        // shape (line/circ/circb/tri/trib)
+    switch (kind) {
+        case DV_PIX:
+            moy_gfx_capi_fill(c, v[0], v[1], 1, 1, v[2]);
+            bucket = 0;
+            break;
+        case DV_RECT:
+            moy_gfx_capi_fill(c, v[0], v[1], v[2], v[3], v[4]);
+            bucket = 0;
+            break;
+        case DV_RECTB:
+            moy_gfx_capi_rectb(c, v[0], v[1], v[2], v[3], v[4]);
+            bucket = 0;
+            break;
+        case DV_LINE:
+            moy_gfx_capi_line(c, v[0], v[1], v[2], v[3], v[4]);
+            break;
+        case DV_CIRC:
+            moy_gfx_capi_circ(c, v[0], v[1], v[2], v[3], false);
+            break;
+        case DV_CIRCB:
+            moy_gfx_capi_circ(c, v[0], v[1], v[2], v[3], true);
+            break;
+        case DV_TRI:
+            moy_gfx_capi_tri(c, v[0], v[1], v[2], v[3], v[4], v[5], v[6]);
+            break;
+        case DV_TRIB:                      // three lines, like the Python trib
+            moy_gfx_capi_line(c, v[0], v[1], v[2], v[3], v[6]);
+            moy_gfx_capi_line(c, v[2], v[3], v[4], v[5], v[6]);
+            moy_gfx_capi_line(c, v[4], v[5], v[0], v[1], v[6]);
+            break;
+        default:
+            moy_gfx_capi_print(c, (const uint8_t *)s, slen, v[0], v[1], v[2]);
+            bucket = 2;
+            break;
+    }
+    g_dn[bucket]++;
+    if (prof) {
+        g_dus[bucket] += (uint32_t)mp_hal_ticks_us() - t0;
+    }
+    // #163 door 1: keep the T-Deck root canvas's bounce pump fed. The capi
+    // hands back the callable when it is due; the invoke is protected here.
+    mp_obj_t pump = moy_gfx_capi_pump_due(c, 1);
+    if (pump != MP_OBJ_NULL) {
+        mp_obj_t ret;
+        if (!call_py(pump, 0, NULL, &ret)) {
+            return luaL_error(L, "%s", g_pyerr);
+        }
+    }
+    return 0;
+}
+
+#endif  // MOY_LUA_DRAW_DIRECT
+
+// bind_draw(ctx) -> bool: install the direct draw verbs over their registered
+// trampolines. Call AFTER register()ing the cart namespace (each verb's
+// trampoline index is recovered from the live global -- it becomes the
+// odd-shape fallback) and BEFORE exec()ing the cart, whose locals must
+// capture the C functions. Returns False -- leaving every trampoline standing
+// -- when the build has no moy_gfx beside it (wasm) or `ctx` is not a
+// DrawCtx, so callers can pass whatever the canvas offered and not care.
+static mp_obj_t moy_lua_bind_draw(mp_obj_t ctx_in) {
+#ifndef MOY_LUA_DRAW_DIRECT
+    (void)ctx_in;
+    return mp_const_false;
+#else
+    moy_lua_check_open();
+    moy_gfx_draw_ctx_t *c = moy_gfx_capi_ctx(ctx_in);
+    if (c == NULL) {
+        return mp_const_false;
+    }
+    // Root the ctx OBJECT: g_ctx is a raw pointer and must never dangle.
+    mp_obj_subscr(MP_STATE_VM(moy_lua_root), MP_OBJ_NEW_SMALL_INT(ROOT_CTX),
+                  ctx_in);
+    static const struct {
+        const char *name;
+        uint8_t kind;
+    } verbs[] = {
+        {"pix", DV_PIX},   {"rect", DV_RECT},   {"rectb", DV_RECTB},
+        {"line", DV_LINE}, {"circ", DV_CIRC},   {"circb", DV_CIRCB},
+        {"tri", DV_TRI},   {"trib", DV_TRIB},   {"print", DV_PRINT},
+    };
+    lua_State *L = g_L;
+    for (size_t i = 0; i < sizeof(verbs) / sizeof(verbs[0]); i++) {
+        lua_Integer fidx = -1;
+        if (lua_getglobal(L, verbs[i].name) == LUA_TFUNCTION
+            && lua_tocfunction(L, -1) == l_tramp
+            && lua_getupvalue(L, -1, 1) != NULL) {
+            fidx = lua_tointeger(L, -1);
+            lua_pop(L, 1);                 // the upvalue copy
+        }
+        lua_pop(L, 1);                     // whatever getglobal pushed
+        lua_pushinteger(L, (lua_Integer)verbs[i].kind);
+        lua_pushinteger(L, fidx);
+        lua_pushcclosure(L, l_draw, 2);
+        lua_setglobal(L, verbs[i].name);
+    }
+    g_ctx = c;
+    g_dfb = 0;
+    memset(g_dn, 0, sizeof(g_dn));
+    memset(g_dus, 0, sizeof(g_dus));
+    return mp_const_true;
+#endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(moy_lua_bind_draw_obj, moy_lua_bind_draw);
+
+// draw_stats() -> (n_fill, n_shape, n_text, us_fill, us_shape, us_text,
+// n_fallback) since the last reset -- the on-glass proof the direct lane is
+// live, in DRAW3's buckets (us only accumulates under perf capture). None on
+// builds without the direct path, so callers can gate.
+static mp_obj_t moy_lua_draw_stats(void) {
+#ifdef MOY_LUA_DRAW_DIRECT
+    mp_obj_t items[7];
+    for (int i = 0; i < 3; i++) {
+        items[i] = mp_obj_new_int((mp_int_t)g_dn[i]);
+        items[3 + i] = mp_obj_new_int((mp_int_t)g_dus[i]);
+    }
+    items[6] = mp_obj_new_int((mp_int_t)g_dfb);
+    return mp_obj_new_tuple(7, items);
+#else
+    return mp_const_none;
+#endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_lua_draw_stats_obj, moy_lua_draw_stats);
+
+static mp_obj_t moy_lua_draw_stats_reset(void) {
+#ifdef MOY_LUA_DRAW_DIRECT
+    g_dfb = 0;
+    memset(g_dn, 0, sizeof(g_dn));
+    memset(g_dus, 0, sizeof(g_dus));
+#endif
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_lua_draw_stats_reset_obj,
+                                 moy_lua_draw_stats_reset);
+
+// ---------------------------------------------------------------------------
 // module functions
 
 static void moy_lua_check_open(void) {
@@ -427,6 +703,9 @@ static mp_obj_t moy_lua_close_(void) {
     }
     g_q = NULL;
     g_qlen = 0;
+#ifdef MOY_LUA_DRAW_DIRECT
+    g_ctx = NULL;                              // the rooted ctx obj goes below
+#endif
     MP_STATE_VM(moy_lua_root) = MP_OBJ_NULL;   // un-root: the gc may reclaim
     return mp_const_none;
 }
@@ -441,9 +720,10 @@ static mp_obj_t moy_lua_init(size_t n_args, const mp_obj_t *a) {
     if (bi.len < 2 * 8) {
         mp_raise_ValueError(MP_ERROR_TEXT("batch array too small"));
     }
-    // root list FIRST: [canvas, sheet, arr, callables]
-    mp_obj_t items[4] = {a[0], a[1], a[2], mp_obj_new_list(0, NULL)};
-    MP_STATE_VM(moy_lua_root) = mp_obj_new_list(4, items);
+    // root list FIRST: [canvas, sheet, arr, callables, draw-ctx-or-None]
+    mp_obj_t items[5] = {a[0], a[1], a[2], mp_obj_new_list(0, NULL),
+                         mp_const_none};
+    MP_STATE_VM(moy_lua_root) = mp_obj_new_list(5, items);
     g_q = (int16_t *)bi.buf;
     g_qlen = bi.len / 2;
     g_token = (int)(mp_obj_get_int(a[3]) & 0x7FFF);
@@ -610,6 +890,10 @@ static const mp_rom_map_elem_t moy_lua_module_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_lua)},
     {MP_ROM_QSTR(MP_QSTR_init), MP_ROM_PTR(&moy_lua_init_obj)},
     {MP_ROM_QSTR(MP_QSTR_register), MP_ROM_PTR(&moy_lua_register_obj)},
+    {MP_ROM_QSTR(MP_QSTR_bind_draw), MP_ROM_PTR(&moy_lua_bind_draw_obj)},
+    {MP_ROM_QSTR(MP_QSTR_draw_stats), MP_ROM_PTR(&moy_lua_draw_stats_obj)},
+    {MP_ROM_QSTR(MP_QSTR_draw_stats_reset),
+     MP_ROM_PTR(&moy_lua_draw_stats_reset_obj)},
     {MP_ROM_QSTR(MP_QSTR_exec), MP_ROM_PTR(&moy_lua_exec_obj)},
     {MP_ROM_QSTR(MP_QSTR_has), MP_ROM_PTR(&moy_lua_has_obj)},
     {MP_ROM_QSTR(MP_QSTR_call), MP_ROM_PTR(&moy_lua_call_obj)},

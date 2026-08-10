@@ -113,6 +113,19 @@ class LuaCartRun:
                          % (int(ns.get("W", 320)), int(ns.get("H", 240))), "glue")
             if not direct:
                 moy_lua.register("spr", ns["spr"])
+            # #189 libmoy-direct draw verbs: hand the canvas's DrawCtx to the
+            # VM so pix/rect/.../print become lua_CFunctions that never enter
+            # Python. MUST run after the register loop (each verb's trampoline
+            # becomes the odd-shape fallback) and before exec(src) (the p8
+            # shim captures the globals into locals at load). Declined on the
+            # Tee for the same reason as the batch above -- a C draw would
+            # bypass the recorder -- and a no-op (returns False) on builds
+            # without moy_gfx (wasm) or canvases without gates.
+            if not is_tee:
+                ctx = getattr(canvas, "_gate_ctx", None)
+                bd = getattr(moy_lua, "bind_draw", None)
+                if ctx is not None and bd is not None:
+                    bd(ctx)
             self._install_handles(ns)
             moy_lua.exec(_LUA_PRELUDE, "prelude")
             # "@cart" so error positions render `cart:12:` -- the chunkname

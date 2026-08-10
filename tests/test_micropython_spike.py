@@ -3453,6 +3453,34 @@ def test_moy_lua_hardware_learned_constraints_pinned():
     assert "(lua_Integer)(mp_int_t)v == v" in tramp    # the fits-check guard
 
 
+def test_moy_lua_libmoy_direct_draw_wired():
+    """#189: the libmoy-direct draw verbs. Pixel parity is the unix-build A/B
+    (tests/test_lua_draw_direct.py); these greps pin the WIRING no host test
+    can execute -- the layout-probed include, the sibling staging on both
+    boards, and the wasm build's deliberate exclusion."""
+    mod = (ROOT / "native" / "moy_lua" / "modmoy_lua.c").read_text(encoding="utf-8")
+    # The direct path probes for moy_gfx BY LAYOUT (sibling dir), so the wasm
+    # runner -- which stages moy_lua without moy_gfx -- compiles it out.
+    assert '__has_include("../moy_gfx/moy_gfx_capi.h")' in mod
+    assert "MOY_LUA_DRAW_DIRECT" in mod
+    assert "bind_draw" in mod and "draw_stats" in mod
+    # The #63 order rule crosses into the direct lane: a queued sprite run
+    # lands before any direct primitive, via the protected flush upcall.
+    assert "moy_gfx_capi_batch_pending" in mod
+    assert "MP_QSTR_flush_batch" in mod
+    # The exported C API lives beside the gates it mirrors.
+    gfx = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    assert (ROOT / "native" / "moy_gfx" / "moy_gfx_capi.h").exists()
+    assert "moy_gfx_capi_ctx" in gfx and "moy_gfx_capi_pump_due" in gfx
+    # Both boards stage the two modules as SIBLINGS (what the include probe
+    # rides): the T-Deck into ext_mod/, the P4 into .staged/.
+    build = (ROOT / "build.sh").read_text(encoding="utf-8")
+    assert "ext_mod/moy_gfx" in build and "ext_mod/moy_lua" in build
+    p4_build = (ROOT.parent / "esp32_p4_wifi6_touch_lcd_7b" / "build.sh"
+                ).read_text(encoding="utf-8")
+    assert 'moy_gfx" "${STAGED_NATIVE}' in p4_build.replace("\n", "")
+
+
 def test_every_new_layer_pins_retained_frames_to_one():
     """(#113) A layer/window buffer is ONE persistent surface, so a blit-
     scrolling caller must measure against the LAST paint -- RETAINED_FRAMES = 1.
