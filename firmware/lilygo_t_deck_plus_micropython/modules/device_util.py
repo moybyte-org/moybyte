@@ -39,6 +39,33 @@ def _ticks_us():
         return int(time.time() * 1000000)
 
 
+def sram_census(stage):
+    """Print one STAGE line: internal-SRAM free / largest block / total, plus
+    free PSRAM (#66/#67, 2026-08-10). MEMBENCH + LUAMEM proved internal RAM is
+    EXHAUSTED by desktop-up (a 77KB boot alloc fails; celeste's Lua heap wins
+    9.2KB, then everything is PSRAM -- the measured-2x regime). The deltas
+    between these lines name the stage that eats it, which no per-capability
+    heap dump can. Regions >=1MB are PSRAM; the rest is internal DRAM. Cheap
+    (~us) and unconditional like the other boot chatter; fully guarded."""
+    try:
+        import esp32
+        int_tot = int_free = int_big = ps_free = 0
+        for reg in esp32.idf_heap_info(esp32.HEAP_DATA):
+            tot, free, big = reg[0], reg[1], reg[2]
+            if tot >= 1024 * 1024:
+                ps_free += free
+            else:
+                int_tot += tot
+                int_free += free
+                if big > int_big:
+                    int_big = big
+        _diag_note("STAGE", "%s int_free=%dk big=%dk int_tot=%dk ps_free=%dk"
+                   % (stage, int_free // 1024, int_big // 1024,
+                      int_tot // 1024, ps_free // 1024))
+    except Exception:
+        pass
+
+
 def _diag_note(tag, msg):
     """Module-level convenience for call sites that don't hold a `diag` handle
     (the audio/wifi/keyboard backends): lazily import moybyte_diag and persist +

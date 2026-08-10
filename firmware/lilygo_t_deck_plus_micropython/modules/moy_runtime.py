@@ -21,7 +21,7 @@ from carts_data import CARTS  # build-time generated from system_carts/ (tools/g
 # Leaf tick + diag helpers (extracted to device_util.py so every device cluster can
 # import them without a moy_runtime cycle -- see device_util.py's module docstring).
 from device_util import (
-    _ticks_ms, _ticks_diff, _ticks_us, _diag_note, _diag_log,
+    _ticks_ms, _ticks_diff, _ticks_us, _diag_note, _diag_log, sram_census,
 )
 # The device WiFi service (#38, extracted to device_wifi.py). run_desktop calls
 # make_wifi()/autoconnect_wifi(); DeviceWifi is the injected `wifi` backend.
@@ -406,13 +406,16 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     import moybyte_sd
     # Carts are read from SD before display init; only fall back to a post-display
     # mount (now safe via the native moy_sd path) if the shell didn't prefetch.
+    sram_census("rd-entry")         # compositor/canvas/input are up by here
     _boot_note("loading cartridges")
     carts, carts_root = (prefetched if prefetched is not None
                          else _load_carts(moybyte_sd.with_sd_live,
                                           progress=_seed_progress))
     import moy_carts
+    sram_census("carts")
     _boot_note("building the desktop")
     ws = Workstation(comp, canvas, inp, carts)
+    sram_census("console")
     # cover_diet stays OFF (owner call 2026-08-03): thumbs remain warm across a
     # game run -- the trade of a longer GC pause (~243ms vs ~150ms at the dieted
     # live set, roughly one mid-play collect per 10s) was judged worse than any
@@ -565,6 +568,7 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     _diag_log("boot", "desktop running kb=%d ball=%d touch=%d"
               % (1 if keyboard.available else 0, 1 if ball.available else 0,
                  1 if touch.available else 0), diag)
+    sram_census("desktop-up")
 
     # #66/#67 indexed-SRAM-canvas pricing: one MEMBENCH line at boot when PERF
     # DIAG is persisted on (the T-Deck has no serial RX to ask for it later; the

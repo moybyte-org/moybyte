@@ -242,14 +242,27 @@ def _diag_luamem(diag, ws):
         st = moy_lua.alloc_stats()
         if not st or (st[0] + st[1]) == 0:
             return
+        # In-play internal-SRAM headroom rides along (#66 census): free +
+        # largest block, internal regions only (>=1MB regions are PSRAM).
+        int_free = int_big = 0
+        try:
+            import esp32
+            for reg in esp32.idf_heap_info(esp32.HEAP_DATA):
+                if reg[0] < 1024 * 1024:
+                    int_free += reg[1]
+                    if reg[2] > int_big:
+                        int_big = reg[2]
+        except Exception:
+            pass
         k = 1024.0
         diag.log("LUAMEM",
                  "sram=%.1fKB psram=%.1fKB peak=%.1fKB denied=%.0fKB "
-                 "sc=%.1f/%.1f/%.1f/%.1f pc=%.1f/%.1f/%.1f/%.1f n=%d/%d"
+                 "sc=%.1f/%.1f/%.1f/%.1f pc=%.1f/%.1f/%.1f/%.1f n=%d/%d "
+                 "int=%d/%dk"
                  % (st[0] / k, st[1] / k, st[2] / k, st[7] / k,
                     st[8] / k, st[9] / k, st[10] / k, st[11] / k,
                     st[12] / k, st[13] / k, st[14] / k, st[15] / k,
-                    st[3], st[4]))
+                    st[3], st[4], int_free // 1024, int_big // 1024))
     except Exception:
         pass
 
