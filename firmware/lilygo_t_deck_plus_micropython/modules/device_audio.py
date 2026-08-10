@@ -100,6 +100,14 @@ AUDIO_RATE_PROBE = True
 
 _AUDIO_BACKEND_SEQ = 0
 
+# One-shot digital self-dump (2026-08-10 celeste tempo hunt): at the first
+# celeste-sized bank push, render 6s of music 4 through the DEVICE'S OWN C
+# engine and print it as base64 AUDIODUMP lines -- the host listener captures
+# and compares it against the authored reference with no mic, speaker or I2S
+# in the loop. Diagnostic build flag; rip out when the hunt closes.
+AUDIO_SELFDUMP = False
+_SELFDUMP_DONE = False
+
 
 class DeviceAudio:
     """I2S audio backend for the T-Deck. Forwards SPEC.md 8.2 to libmoy via the
@@ -219,8 +227,28 @@ class DeviceAudio:
         if na is None:
             return
         bank = self.engine.bank
+        # BANKSIG (2026-08-10): fingerprint what actually crosses to libmoy --
+        # the count of FRACTIONAL sfx speeds plus two sentinels. The celeste
+        # "still too fast" hunt certified every engine door identical on host,
+        # which leaves only the DATA the device holds; this line says whether
+        # the cart on SD carries the authored 7.5/3.75 speeds (frac>0) or an
+        # old conversion's rounded ones (frac=0), with no serial RX needed.
+        try:
+            fr = sum(1 for s in bank.sfx if float(s.speed) != int(s.speed))
+            s10 = float(bank.sfx[10].speed) if len(bank.sfx) > 10 else -1.0
+            m4 = (float(bank.music[4].speed) if len(bank.music) > 4 else -1.0)
+            _diag_note("BANKSIG", "sfx=%d frac=%d s10=%.4f m4=%.6f"
+                       % (len(bank.sfx), fr, s10, m4))
+        except Exception:   # noqa: BLE001 -- diag only
+            pass
         ok = na.bank_load(json.dumps(bank.to_dict()))
-        self._bank_rev = bank.rev
+        # ...and read back what the C actually HOLDS (the last unverified hop).
+        try:
+            sig = na.engine_sig()
+            _diag_note("BANKSIG", "C: rate=%d nsfx=%d s10=%.4f m4=%.6f"
+                       % (sig[0], sig[1], sig[2], sig[3]))
+        except Exception:   # noqa: BLE001 -- diag only
+            pass
         if not ok:
             # Malformed, or past libmoy's fixed capacities (64 sfx x 64 steps,
             # 32 tracks x 64 rows). The bank is left zeroed and silent rather
@@ -228,6 +256,39 @@ class DeviceAudio:
             _diag_note("audio", "bank REJECTED (bad json or over capacity): "
                        "%d sfx, %d music" % (len(bank.sfx), len(bank.music)))
             print("Moybyte audio: sound bank rejected by libmoy -- silent")
+        self._selfdump(na, bank)
+        self._bank_rev = bank.rev
+
+    def _selfdump(self, na, bank):
+        """Digital PCM dump over serial (see AUDIO_SELFDUMP). Only when the
+        core-1 task is NOT running (a cold boot straight into celeste), so the
+        dump's render calls are the engine's only consumer."""
+        global _SELFDUMP_DONE
+        if not AUDIO_SELFDUMP or _SELFDUMP_DONE or len(bank.sfx) < 60:
+            return
+        try:
+            if na.running():
+                print("AUDIODUMP skipped (core-1 task already running)")
+                return
+        except Exception:   # noqa: BLE001
+            pass
+        _SELFDUMP_DONE = True
+        try:
+            import binascii
+            na.music(4)
+            n = 512
+            buf = bytearray(n * 2)
+            total = 6 * AUDIO_RATE
+            print("AUDIODUMP begin rate=%d frames=%d" % (AUDIO_RATE, total))
+            done = 0
+            while done < total:
+                na.render(buf, n)
+                print("AUDIODUMP " + binascii.b2a_base64(buf).decode().strip())
+                done += n
+            print("AUDIODUMP end")
+            na.music_stop()
+        except Exception as exc:  # noqa: BLE001 -- diag only
+            print("AUDIODUMP failed:", exc)
 
     def _sync_bank(self):
         """Re-push if the Music editor (or undo) moved the bank. An int compare
@@ -365,7 +426,10 @@ class DeviceAudio:
         self._probe_secs = 0.0
         now = time.ticks_ms()
         try:
-            frames, rate = self._na.frames_out()
+            fo = self._na.frames_out()
+            frames, rate = fo[0], fo[1]
+            rend = fo[2] if len(fo) > 2 else 0    # engine frames by the task
+            pyr = fo[3] if len(fo) > 3 else 0     # engine frames by mod_render
         except Exception:   # noqa: BLE001 -- an older native module: nothing to say
             return
         last, self._probe_frames = self._probe_frames, (frames, now)
@@ -382,9 +446,15 @@ class DeviceAudio:
         cum = time.ticks_diff(now, t0) / 1000.0
         eff = (frames - last[0]) / secs
         ceff = (frames - f0) / cum if cum > 0 else 0.0
-        _diag_note("AUDIORATE", "eff=%d want=%d ratio=%.3f cum=%.4f feed=%s"
+        # rendered-vs-written seam (cumulative): rend/out > 1.0 means engine
+        # time is being consumed that never reaches the speaker -- audibly
+        # fast playback that both per-side clocks call correct. pyr > 0 during
+        # play names a Python-side phantom renderer.
+        seam = (rend / frames) if frames else 0.0
+        _diag_note("AUDIORATE", "eff=%d want=%d ratio=%.3f cum=%.4f "
+                   "seam=%.4f pyr=%d feed=%s"
                    % (int(eff), rate, eff / (rate or 1), ceff / (rate or 1),
-                      "core1" if self._core1 else "single"))
+                      seam, pyr, "core1" if self._core1 else "single"))
 
     def tick(self, dt):
         """Per-frame audio work. In core-1 mode there is NONE -- the task renders
