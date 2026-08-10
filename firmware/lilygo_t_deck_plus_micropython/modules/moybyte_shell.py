@@ -14,6 +14,8 @@ RUN_DESKTOP = True              # the v0.4 console: launcher + carts + editors
 
 def main():
     print("Moybyte MicroPython shell starting")
+    from device_util import sram_census
+    sram_census("shell")            # #66/#67: who eats internal SRAM, by stage
     # SD <-> display handoff (#56): touch NO SD before init_display(). A pre-display
     # machine.SDCard mount can leave the shared SPI host claimed and intermittently
     # break display init on a populated card ("can't convert '' to int"). run_desktop
@@ -21,6 +23,7 @@ def main():
     # (prefetched=None -> _load_carts(with_sd_live)), degrading to the built-in carts
     # on any SD failure.
     lv, _display, _task_handler = _init_display()
+    sram_census("display")
     if lv is None:
         _serial_fallback_loop(None)
         return

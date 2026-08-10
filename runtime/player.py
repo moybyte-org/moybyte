@@ -413,6 +413,23 @@ class Player:
         # The dead run's `view(w, h)` must not outlive it: every fullscreen
         # surface shares viewport(), and a lingering view would crop chrome.
         self.ws.input.game_view = None
+        # Nor its per-run cart canvas (SPEC.md 1/3.1) -- whoever ran us draws
+        # on the boot raster, so the small canvas dies with the run.
+        self.ws.release_run_canvas()
+        # Nor may its SOUND. The device mixer is a global the cart only ever
+        # posts notes to -- libmoy keeps sequencing a looping sfx or music track
+        # long after the run that started it is gone, so beeper's tones and
+        # celeste's music went on playing over whatever the kid did next
+        # (owner, T-Deck). Same category as the view and the palette above:
+        # state the run set on a shared surface, cleared where the run ends
+        # rather than wherever the next one happens to overwrite it.
+        au = getattr(self.ws, "audio", None)
+        if au is not None:
+            try:
+                au.music_stop()
+                au.sound_stop()
+            except Exception:  # noqa: BLE001 -- teardown must not raise
+                pass
         # A cart-supplied palette (spec 2.2) dies with its run -- the system
         # surfaces underneath get the default table back.
         self._restore_palette()
@@ -569,6 +586,24 @@ class Player:
                    if e not in SUPPORTED_EXTENSIONS]
         if missing:
             self.cart_error = "needs extension: " + ", ".join(missing)
+            self.crash_line = None
+            return False
+        # Cart canvas gate (SPEC.md 1/3.1): `canvas` is the other capability
+        # field -- an out-of-set size was carried raw by the loader and is
+        # refused here BY NAME, like an unknown runtime; an in-set size binds a
+        # real small canvas for the run (released in release_world). A tier
+        # with no factory refuses too: running a 128x128 cart on a 320x240
+        # canvas would letterbox it into a corner and lie about W/H.
+        cv = cart.get("canvas") if cart else None
+        if cv is not None and (not isinstance(cv, (tuple, list)) or len(cv) != 2):
+            # clip the repr: a malformed value can be an arbitrary object and
+            # the panel wraps 8px cells -- the NAME matters, not the whole blob
+            self.cart_error = 'no "%.32s" canvas (SPEC.md 3.1)' % (cv,)
+            self.crash_line = None
+            return False
+        ws.release_run_canvas()        # a straggler bind never leaks into this run
+        if cv is not None and not ws.bind_run_canvas(cv[0], cv[1]):
+            self.cart_error = "no %dx%d canvas on this screen yet" % (cv[0], cv[1])
             self.crash_line = None
             return False
         # #63 leak fix: the PREVIOUS cart is dead -- return its pooled layer buffers
@@ -1076,7 +1111,13 @@ class Player:
         if cv is None:
             cv = self.ws.canvas
         NAMES = self.NAMES
-        x, y, w, h = 14, 40, 292, 132
+        # Sized against the surface, not 320x240: a cart-declared small canvas
+        # (SPEC.md 1/3.1) still gets a panel that fits (chunky once upscaled,
+        # but readable and inside the raster).
+        w = min(292, cv.w - 12)
+        h = min(132, cv.h - 16)
+        x = (cv.w - w) // 2
+        y = min(40, (cv.h - h) // 2)
         cv.rect(x, y, w, h, NAMES["dark_purple"])
         cv.rectb(x, y, w, h, NAMES["red"])
         cv.rect(x, y, w, 14, NAMES["red"])
@@ -1098,7 +1139,7 @@ class Player:
         obscures the other."""
         cv = self.ws.canvas
         NAMES = self.NAMES
-        w, h = 128, 16
+        w, h = min(128, cv.w - 8), 16    # fits a cart-declared small canvas too
         x = (cv.w - w) // 2
         y = 6
         cv.rect(x, y, w, h, NAMES["black"])

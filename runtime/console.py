@@ -776,6 +776,16 @@ class Workstation:
         # reassigns it later (the web console does `ws.canvas = CommandCanvas(...)`).
         self._sys_canvas = sys_canvas if (sys_canvas is not None
                                           and sys_canvas is not canvas) else None
+        # Per-run cart canvas (SPEC.md 1/3.1): a cart declaring a smaller raster
+        # plays on its own small canvas, bound by bind_run_canvas for the run and
+        # restored at run death (Player.release_world). make_game_canvas is the
+        # backend attach point (like make_api): a factory (w, h) -> canvas, or
+        # None on a tier that can't build one yet -- Player then refuses cleanly.
+        self.make_game_canvas = None
+        self._run_canvas = None            # the bound small canvas, while a run holds it
+        self._run_canvas_stock = None      # what self.canvas was before the bind
+        self._run_canvas_shared = False    # True when the bind promoted stock to system
+        self._run_canvas_cache = {}        # {(w, h): canvas} -- 3 sizes max, reused
         # `font_scale` is the REQUESTED system-UI scale (persisted). It only takes
         # visible effect on a distinct SYSTEM canvas that can render scaled text; in
         # the degradation case (no system canvas -- e.g. the T-Deck, whose framebuf
@@ -2877,7 +2887,14 @@ class Workstation:
         Sky Run). Tools/apps and every console screen keep 60 -- the pointer must
         stay responsive. The device loop re-reads this every iteration; the host
         simulator paces via its own --fps flag."""
-        if (FPS_GOVERNOR and self.wm.top_is_player()
+        # #77 pairing (2026-08-10, learned on zoomed celeste): FRAMESKIP implies
+        # the cap. The p8 ports pace THEMSELVES by frame-quantized dt with a
+        # never-fast rule -- against an UNCAPPED skip loop (~30ms frames) the
+        # quantizer must halve to avoid running fast, so skip made the game
+        # SLOWER (20Hz -> 16.5Hz). Capped at 30, dt=33.3ms quantizes to
+        # tick-every-frame: correct 30Hz logic, render at 15 -- the trade skip
+        # promises. dt-driven carts are indifferent to the cap either way.
+        if ((FPS_GOVERNOR or self.frameskip) and self.wm.top_is_player()
                 and self.cart_error is None):
             cart = self.cart
             if cart is not None and cart.get("type") == "game":
@@ -4488,12 +4505,13 @@ class Workstation:
     def game_view(self):
         """The running cart's declared logical viewport (the additive
         `view(w, h)` cart verb): a centered (sx, sy, w, h) source rect of the
-        320x240 game canvas, or None for the full canvas. The fullscreen
-        composite scales the VIEW to the surface instead of the container --
-        celeste's 128x128 p8 screen fills the P4 glass at 4x instead of riding
-        the 320x240 canvas's 2x -- and game_xy maps taps back through it.
-        Lives on the shared InputState (the cart_quit pattern) so the verb
-        needs no console handle; Player.start clears it per run."""
+        game canvas, or None for the full canvas. The fullscreen composite
+        scales the VIEW to the surface instead of the container -- celeste's
+        128x128 cart canvas (SPEC.md 3.1) concedes 8 rows via view(128, 120)
+        and fills a 4:3 screen's height (2x on the handheld, 5x on the P4)
+        instead of letterboxing the square -- and game_xy maps taps back
+        through it. Lives on the shared InputState (the cart_quit pattern) so
+        the verb needs no console handle; Player.start clears it per run."""
         v = getattr(self.input, "game_view", None)
         if not v:
             return None
@@ -4509,6 +4527,56 @@ class Workstation:
 
     def _composite_game(self):
         return self.wm.composite_game()
+
+    # -- per-run cart canvas (SPEC.md 1/3.1) ---------------------------------
+
+    def bind_run_canvas(self, w, h):
+        """Bind a per-run GAME canvas for a cart whose manifest declares a
+        smaller raster: the cart draws (and W/H report) the declared size, and
+        the WM's viewport()/composite scale it up exactly like a cart-declared
+        view -- on a shared-canvas tier (the T-Deck, where the boot canvas IS
+        the glass) the boot canvas is promoted to SYSTEM canvas for the run, so
+        `sc is gc` stops short-circuiting and the composite runs. Returns True
+        when bound (or already native-size); False when this backend has no
+        factory -- the caller refuses the cart cleanly (SPEC.md 3.1), never
+        runs it at dimensions it did not ask for."""
+        stock = self.canvas
+        if w == stock.w and h == stock.h:
+            return True                 # declared == native raster: nothing to bind
+        mk = self.make_game_canvas
+        if mk is None:
+            return False
+        small = self._run_canvas_cache.get((w, h))
+        if small is None:
+            try:
+                small = mk(w, h)
+            except Exception as exc:  # noqa: BLE001 -- an alloc failure refuses, not crashes
+                print("Moybyte run canvas failed:", _err_text(exc))
+                small = None
+            if small is None:
+                return False
+            self._run_canvas_cache[(w, h)] = small
+        self._run_canvas = small
+        self._run_canvas_stock = stock
+        self._run_canvas_shared = self._sys_canvas is None
+        if self._run_canvas_shared:
+            self._sys_canvas = stock    # promote: the boot canvas is the glass
+        self.canvas = small
+        return True
+
+    def release_run_canvas(self):
+        """Undo bind_run_canvas at run death (Player.release_world) -- the
+        cart_quit pattern, idempotent. Identity-guarded so a backend that
+        swapped ws.canvas mid-run (the web-view Tee) is never clobbered."""
+        stock = self._run_canvas_stock
+        if stock is None:
+            return
+        if self.canvas is self._run_canvas:
+            self.canvas = stock
+        if self._run_canvas_shared and self._sys_canvas is stock:
+            self._sys_canvas = None     # back to the shared-canvas degradation
+        self._run_canvas = self._run_canvas_stock = None
+        self._run_canvas_shared = False
 
     # -- redraw-on-change (#44 step 1) ---------------------------------------
 
@@ -4833,6 +4901,14 @@ class Workstation:
             if _fs_game is None or _fs_game():
                 _vp = getattr(self.wm, "viewport", None)
         _game_open = False
+        # RASTER TWIN of the letterbox above, for the tier where the system
+        # canvas IS the game canvas: there composite_game short-circuits, so the
+        # bezel it normally fills is never written at all and a cart-declared
+        # view leaves stale pixels that FLASH on a double-buffered root (#58).
+        # Same fix, same place in the order -- before the cart draws. The WM
+        # decides whether it applies; a no-view cart pays one getattr.
+        _lb = getattr(self.wm, "letterbox_inplace", None) if _vp is None else None
+        _lb_done = False
         for layer in self.wm.draw_stack():          # memoized (Stage 6c) -- no per-frame alloc
             if _prev_domain == "game" and layer.domain == "system":
                 if _game_open:                      # close the placement span
@@ -4860,6 +4936,9 @@ class Workstation:
                 self.sys_canvas.cls(0)      # _VIEWPORT_BEZEL: black
                 _view(_ox, _oy, _sc, self.canvas.w, self.canvas.h)
                 _game_open = True
+            if _lb is not None and layer.domain == "game" and not _lb_done:
+                _lb()
+                _lb_done = True
             if _lay is not None:
                 _tk = _ticks_us()
                 layer.draw(dt)

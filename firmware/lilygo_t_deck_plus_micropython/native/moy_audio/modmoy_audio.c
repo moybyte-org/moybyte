@@ -83,7 +83,8 @@
 // 6 * 256 = 1536 frames ~= 0.19 s @ 8 kHz -- a deep cushion the task keeps
 // topped, independent of core 0's frame jitter.
 #define MOY_DMA_DESC_NUM  6
-#define MOY_DMA_FRAME_NUM 256
+#define MOY_DMA_FRAME_NUM 512   /* 6x512 = ~140ms of hardware cushion at 22050
+                                   (was 256: ~190ms at the old 8000 rate) */
 // A finite (not portMAX_DELAY) write timeout means a stuck channel cannot wedge
 // the task forever -- it loops and retries.
 #define MOY_WRITE_TIMEOUT_MS 100
@@ -104,6 +105,20 @@ static i2s_chan_handle_t s_tx_chan = NULL;
 static TaskHandle_t      s_task = NULL;
 static SemaphoreHandle_t s_mutex = NULL;
 static volatile int      s_running = 0;
+// Frames the I2S peripheral has actually ACCEPTED. The feeder blocks on the DMA
+// drain, so this counter advances at the hardware's true consumption rate --
+// divide it by wall-clock and you get the rate the speaker is really running at,
+// which is the one number that says whether playback speed matches the rate
+// libmoy synthesised for. Written only by the core-1 task, read by anyone.
+static volatile uint32_t s_frames_out = 0;
+// The two sides of the render->speaker seam (2026-08-10 tempo hunt): the
+// engine timeline advances by RENDERED frames; the speaker plays WRITTEN
+// frames. If rendered outruns written, something consumes engine time
+// whose output never reaches the DMA -- audibly fast playback that every
+// per-side counter calls correct.
+static volatile uint32_t s_frames_rendered = 0;   // by the core-1 task
+static volatile uint32_t s_frames_pyrender = 0;   // by mod_render (Python)
+
 #endif
 
 // The lock is a no-op until the core-1 task exists; in the fallback and host
@@ -297,6 +312,7 @@ static mp_obj_t mod_render(size_t n_args, const mp_obj_t *a) {
     } else {
         s_audio.rate = s_rate;
         moy_audio_render(&s_audio, (int16_t *)bi.buf, (int)nframes);
+        s_frames_pyrender += (uint32_t)nframes;
     }
     moy_unlock();
     return MP_OBJ_NEW_SMALL_INT(nframes);
@@ -343,6 +359,7 @@ static void moy_audio_task(void *arg) {
             moy_lock();
             if (s_inited) {
                 moy_audio_render(&s_audio, block + off, MOY_MIX_CHUNK);
+                s_frames_rendered += MOY_MIX_CHUNK;
             } else {
                 memset(block + off, 0, sizeof(int16_t) * MOY_MIX_CHUNK);
             }
@@ -351,9 +368,32 @@ static void moy_audio_task(void *arg) {
 
         // Blocks here while the DMA drains -- that IS the pacing, and it happens
         // on core 1, so the VM never stalls on it.
-        size_t written = 0;
-        i2s_channel_write(s_tx_chan, block, sizeof(block), &written,
-                          pdMS_TO_TICKS(MOY_WRITE_TIMEOUT_MS));
+        //
+        // Write the WHOLE block, retrying the remainder after a timeout
+        // (2026-08-10): the old single write dropped whatever a timeout left
+        // unwritten and moved on to render the NEXT block -- every drop skips
+        // the synth timeline forward, which the ear hears as SPED-UP audio on
+        // every cart, and which frames_out cannot see (it counts writes, so
+        // AUDIORATE read ~1.0 while the music ran fast). The sustained >1.0
+        // AUDIORATE means (1.01-1.08 steady, 1.1+ during sfx bursts) were this
+        // hole measured from the other side: rendered-minus-played.
+        // NEVER abandon rendered frames (2026-08-10, the celeste 1.6x): the
+        // driver chronically accepts only part of a block per call here, and
+        // every abandoned tail advances the synth timeline without reaching
+        // the speaker -- the seam counters measured rendered/written at the
+        // exact audible tempo error (1.61-1.64) while both per-side clocks
+        // read 1.000. Retry until the WHOLE block is consumed; a timeout just
+        // loops (s_running is the only exit), so a wedged channel parks the
+        // task at 100ms polls instead of silently eating the music.
+        size_t done = 0;
+        while (done < sizeof(block) && s_running) {
+            size_t written = 0;
+            i2s_channel_write(s_tx_chan, (const char *)block + done,
+                              sizeof(block) - done, &written,
+                              pdMS_TO_TICKS(MOY_WRITE_TIMEOUT_MS));
+            done += written;
+        }
+        s_frames_out += (uint32_t)(done / sizeof(int16_t));
     }
 
     if (s_tx_chan != NULL) {
@@ -484,6 +524,52 @@ static mp_obj_t mod_running(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_running_obj, mod_running);
 
+// engine_sig() -> (rate, nsfx, sfx10_speed, music4_speed) read from the C
+// structs themselves (2026-08-10, the celeste tempo hunt): BANKSIG certifies
+// the PYTHON bank at push time; this reads back what libmoy actually HOLDS
+// after bank_load, closing the last unverified hop of the json crossing.
+static mp_obj_t mod_engine_sig(void) {
+    mp_obj_t t[4];
+    moy_lock();
+    int rate = s_inited ? (int)s_audio.rate : s_rate;
+    int nsfx = (s_bank != NULL) ? s_bank->nsfx : -1;
+    float s10 = (s_bank != NULL && s_bank->nsfx > 10)
+                ? s_bank->sfx[10].speed : -1.0f;
+    float m4 = (s_bank != NULL && s_bank->nmusic > 4)
+               ? s_bank->music[4].speed : -1.0f;
+    moy_unlock();
+    t[0] = mp_obj_new_int(rate);
+    t[1] = mp_obj_new_int(nsfx);
+    t[2] = mp_obj_new_float((mp_float_t)s10);
+    t[3] = mp_obj_new_float((mp_float_t)m4);
+    return mp_obj_new_tuple(4, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_engine_sig_obj, mod_engine_sig);
+
+// frames_out() -> (frames, rate). Frames the I2S peripheral has accepted since
+// boot, and the rate libmoy is synthesising for. Sampling this against wall
+// clock answers the one question the synth cannot: is the speaker consuming
+// samples at the rate they were MADE for? A ratio other than 1.0 is playback
+// speed error -- pitch and tempo together -- and no amount of staring at the
+// mixer will show it, because the mixer is right.
+static mp_obj_t mod_frames_out(void) {
+    mp_obj_t t[4];
+#if MOY_AUDIO_HAVE_IDF
+    t[0] = mp_obj_new_int_from_uint(s_frames_out);
+#else
+    t[0] = mp_obj_new_int_from_uint(0);
+#endif
+    t[1] = mp_obj_new_int(s_inited ? (int)s_audio.rate : s_rate);
+#if MOY_AUDIO_HAVE_IDF
+    t[2] = mp_obj_new_int_from_uint(s_frames_rendered);
+#else
+    t[2] = mp_obj_new_int_from_uint(0);
+#endif
+    t[3] = mp_obj_new_int_from_uint(s_frames_pyrender);
+    return mp_obj_new_tuple(4, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_frames_out_obj, mod_frames_out);
+
 static const mp_rom_map_elem_t moy_audio_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__),     MP_OBJ_NEW_QSTR(MP_QSTR_moy_audio) },
     { MP_ROM_QSTR(MP_QSTR_CHANNELS),     MP_ROM_INT(MOY_A_CHANNELS) },
@@ -502,6 +588,8 @@ static const mp_rom_map_elem_t moy_audio_globals_table[] = {
     // core-1 feeder task (#41)
     { MP_ROM_QSTR(MP_QSTR_audio_start),  MP_ROM_PTR(&mod_audio_start_obj) },
     { MP_ROM_QSTR(MP_QSTR_audio_stop),   MP_ROM_PTR(&mod_audio_stop_obj) },
+    { MP_ROM_QSTR(MP_QSTR_frames_out),   MP_ROM_PTR(&mod_frames_out_obj) },
+    { MP_ROM_QSTR(MP_QSTR_engine_sig),   MP_ROM_PTR(&mod_engine_sig_obj) },
     { MP_ROM_QSTR(MP_QSTR_running),      MP_ROM_PTR(&mod_running_obj) },
 };
 static MP_DEFINE_CONST_DICT(moy_audio_globals, moy_audio_globals_table);

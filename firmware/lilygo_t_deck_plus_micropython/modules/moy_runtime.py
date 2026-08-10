@@ -21,7 +21,7 @@ from carts_data import CARTS  # build-time generated from system_carts/ (tools/g
 # Leaf tick + diag helpers (extracted to device_util.py so every device cluster can
 # import them without a moy_runtime cycle -- see device_util.py's module docstring).
 from device_util import (
-    _ticks_ms, _ticks_diff, _ticks_us, _diag_note, _diag_log,
+    _ticks_ms, _ticks_diff, _ticks_us, _diag_note, _diag_log, sram_census,
 )
 # The device WiFi service (#38, extracted to device_wifi.py). run_desktop calls
 # make_wifi()/autoconnect_wifi(); DeviceWifi is the injected `wifi` backend.
@@ -35,6 +35,7 @@ from device_input import TrackBall, Touch
 from device_diag import (
     _diag_flush, _diag_perf_sample, _diag_hitch, _diag_drawbrk, _diag_draw2,
     _diag_draw3, _diag_loop, _diag_chromebrk, _diag_layerbrk, _diag_homebrk, _diag_pump,
+    _diag_luamem,
     _diag_i2cstat, _diag_calib, _diag_gc, HITCH_MS, _CALIB_DONE,
 )
 # The device WEB VIEW controller (#41/#22, extracted to device_webview.py).
@@ -405,13 +406,28 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     import moybyte_sd
     # Carts are read from SD before display init; only fall back to a post-display
     # mount (now safe via the native moy_sd path) if the shell didn't prefetch.
+    sram_census("rd-entry")         # compositor/canvas/input are up by here
     _boot_note("loading cartridges")
     carts, carts_root = (prefetched if prefetched is not None
                          else _load_carts(moybyte_sd.with_sd_live,
                                           progress=_seed_progress))
     import moy_carts
+    sram_census("carts")
     _boot_note("building the desktop")
     ws = Workstation(comp, canvas, inp, carts)
+    sram_census("console")
+    # Per-run cart canvas factory (SPEC.md 1/3.1): a cart declaring a smaller
+    # raster (celeste's 128x128) plays on its own off-screen _LayerComp-backed
+    # DeviceCanvas; bind_run_canvas promotes the boot canvas (the glass) to
+    # SYSTEM canvas for the run and wm.composite_game upscales through
+    # DeviceCanvas.blit_game (blit565_scale). No native kernel -> None, so the
+    # Player refuses the cart cleanly instead of crawling per-pixel.
+    def _mk_game_canvas(w, h):
+        if getattr(canvas, "_gfx", None) is None:
+            return None
+        from device_canvas import _LayerComp
+        return DeviceCanvas(_LayerComp(int(w), int(h), canvas._gfx))
+    ws.make_game_canvas = _mk_game_canvas
     # cover_diet stays OFF (owner call 2026-08-03): thumbs remain warm across a
     # game run -- the trade of a longer GC pause (~243ms vs ~150ms at the dieted
     # live set, roughly one mid-play collect per 10s) was judged worse than any
@@ -564,6 +580,38 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     _diag_log("boot", "desktop running kb=%d ball=%d touch=%d"
               % (1 if keyboard.available else 0, 1 if ball.available else 0,
                  1 if touch.available else 0), diag)
+    sram_census("desktop-up")
+
+    # #66/#67 SRAM diet: everything that needs boot-time internal RAM has taken
+    # it by here (flush bounce, poller; audio reserves at first cart start), so
+    # the Lua allocator's headroom floor drops 48->24KB and the SRAM-first
+    # grant grows by the difference. The accepted edge: a FIRST wifi start
+    # mid-cart can fail for RAM -- games are fullscreen so the wifi/OTA flows
+    # normally run with no Lua cart loaded (a closed cart frees its whole heap).
+    try:
+        import moy_lua as _ml
+        _fl = getattr(_ml, "set_sram_floor", None)
+        if _fl is not None:
+            _diag_log("boot", "lua sram floor=%dKB" % _fl(24), diag)
+    except Exception:
+        pass
+
+    # #66/#67 indexed-SRAM-canvas pricing: one MEMBENCH line at boot when PERF
+    # DIAG is persisted on (the T-Deck has no serial RX to ask for it later; the
+    # P4 can also run `py __import__('moy_gfx').membench()` any time). Runs
+    # BEFORE any cart so internal SRAM is at its largest -- ~50ms, diag-gated.
+    if ws.perf_capture:
+        try:
+            import moy_gfx as _mg
+            _mb = getattr(_mg, "membench", None)
+            if _mb is not None:
+                _r = _mb()
+                _diag_log("MEMBENCH",
+                          "us/frame fill16 s=%d p=%d fill8 s=%d p=%d "
+                          "blit16 s=%d p=%d blit8 s=%d p=%d resolve=%d bounce=%d"
+                          % tuple(_r), diag)
+        except Exception as _e:
+            _diag_log("MEMBENCH", "failed: %r" % _e, diag)
 
     # Say what became of the last update, before anything can overwrite the evidence
     # (#53). Reaching here means the panel, SD, keyboard and desktop all came up --
@@ -610,6 +658,14 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     # fires on SPIKES, so a steady per-frame cost that never crosses HITCH_MS was
     # invisible until this line existed (2026-07-29 fps hunt).
     _loop_acc = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    # Pacing debt (#77, 2026-08-10): ms the loop is BEHIND its cadence. The old
+    # per-frame clamp couldn't pace a frameskip pair whose FULL frame overruns
+    # the 33ms budget (celeste: 50ms full + 33ms padded skip = 83ms pairs, the
+    # game 20% slow and 12fps -- worse on both axes). An over-budget frame now
+    # borrows from the next frames' sleeps so the PAIR lands on cadence
+    # (50 + 16 = 66ms = two 30fps slots). Capped at one pair so a real hitch
+    # (a 200ms GC) doesn't eat the sleeps for a second afterwards.
+    _pace_debt = 0
     _boot_note("drawing the first frame")
     # NOT a second logo: the boot splash has held this exact picture for the
     # whole boot, so arming it again would replay the splash and delay the
@@ -790,6 +846,22 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             _diag_perf_at = _tnow + 3000
             if ws.perf_capture != _live:
                 ws.perf_capture = _live   # capture follows the PERF DIAG toggle
+                if _live:
+                    # #66/#67: the MEMBENCH pricing line also fires on the
+                    # OFF->ON edge, so a measurement session needs no reboot
+                    # to get it (it otherwise prints only at a diag-on boot).
+                    # ~50ms once, and only in a diag-armed session.
+                    try:
+                        import moy_gfx as _mg
+                        _mb = getattr(_mg, "membench", None)
+                        if _mb is not None:
+                            _diag_log("MEMBENCH",
+                                      "us/frame fill16 s=%d p=%d fill8 s=%d "
+                                      "p=%d blit16 s=%d p=%d blit8 s=%d p=%d "
+                                      "resolve=%d bounce=%d" % tuple(_mb()),
+                                      diag)
+                    except Exception as _e:
+                        _diag_log("MEMBENCH", "failed: %r" % _e, diag)
             try:
                 diag.ECHO_LIVE = _live   # echo follows the toggle (boot lines echoed
             except Exception:            # before the first 3s tick either way)
@@ -805,6 +877,8 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             _diag_chromebrk(diag, ws)   # #66 lever 5: bar/composite/cursor chrome sub-split
             _diag_layerbrk(diag, ws)    # #172: chrome's `other` IS the stack walk --
                                         # this names the layer inside it
+            _diag_luamem(diag, ws)      # #67: the lua heap's SRAM/PSRAM split --
+                                        # prices any structural SRAM proposal
             _diag_homebrk(diag, ws)     # launcher wallpaper/grid/bar split (cart-gated
                                         # DRAWBRK never fires on the home screen)
             _diag_pump(diag, comp)      # #66 lever 4: bounce-feed pacing (SPI idle gaps)
@@ -883,7 +957,17 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             _fms = frame_ms
         if _fms < frame_ms:
             _fms = frame_ms                     # never pace FASTER than the loop cap
-        _t_sleep = _fms - elapsed if elapsed < _fms else 0
+        if elapsed < _fms:
+            _t_sleep = _fms - elapsed
+            if _pace_debt:                      # pay the debt out of this sleep
+                _take = _t_sleep if _t_sleep < _pace_debt else _pace_debt
+                _t_sleep -= _take
+                _pace_debt -= _take
+        else:
+            _t_sleep = 0
+            _pace_debt += elapsed - _fms
+            if _pace_debt > 2 * _fms:
+                _pace_debt = 2 * _fms           # unpayable: just run flat out
         # LOOP accumulation (see _loop_acc): plain int adds, one per stage per
         # frame. Done BEFORE the sleep so `frame` is work, and `sleep` is carried
         # separately -- a paced loop must not read as a slow one.

@@ -325,6 +325,41 @@ class FullscreenStackWM:
         there is no window whose default size could vary with WHY it started.
         The windowed WM overrides -- see its _win_size."""
 
+    def letterbox_inplace(self):
+        """Fill the bezel when the system canvas IS the game canvas.
+
+        composite_game owns the bezel on every tier where the two canvases
+        differ -- but it fills it AFTER the cart draws, which it can only get
+        away with because it is copying into a DIFFERENT buffer. When they are
+        the same object (the 320x240 device glass, where the composite is a
+        no-op) nothing ever writes the pixels a cart-declared view leaves
+        uncovered, and a cart is under no obligation to: celeste clears with a
+        clipped `rectfill`, not `cls`. On a ping-pong double-buffered root the
+        two buffers then hold DIFFERENT stale content and the border flashes at
+        the frame rate -- reported on the T-Deck, invisible on the P4 for
+        exactly this reason. So paint it here: before the cart draws, into the
+        buffer it is about to draw into.
+
+        Only the four bands OUTSIDE the view, not a whole-surface cls: this runs
+        on the tier with the least fill rate to spare, and for a 256x240 view
+        that is 15,360 px instead of 76,800. Camera and clip are identity here --
+        the Player resets both after every cart frame."""
+        view = self._view_src()
+        if view is None:
+            return                      # cart owns the whole canvas: nothing outside
+        sc = self.ws.sys_canvas
+        if sc is not self.ws.canvas:
+            return                      # the composite will fill it, as it always has
+        sx, sy, vw, vh = view
+        if sy > 0:
+            sc.rect(0, 0, sc.w, sy, _VIEWPORT_BEZEL)
+        if sy + vh < sc.h:
+            sc.rect(0, sy + vh, sc.w, sc.h - (sy + vh), _VIEWPORT_BEZEL)
+        if sx > 0:
+            sc.rect(0, sy, sx, vh, _VIEWPORT_BEZEL)
+        if sx + vw < sc.w:
+            sc.rect(sx + vw, sy, sc.w - (sx + vw), vh, _VIEWPORT_BEZEL)
+
     def composite_game(self):
         """Blit the fixed 320x240 GAME canvas into the SYSTEM canvas as a
         fixed-aspect, integer-scaled, centered viewport, filling the letterbox with
@@ -347,6 +382,15 @@ class FullscreenStackWM:
         if sc is gc:
             return
         ox, oy, scale = self.viewport()
+        # Native composite probe (the wm_windowed._blit_game convention): a
+        # system canvas with a blit_game verb scales + letterboxes in C -- the
+        # T-Deck path for a cart-declared small canvas (SPEC.md 1/3.1), where
+        # the boot DeviceCanvas was promoted to system canvas and neither side
+        # has an index `buf` for the Python loops below.
+        bg = getattr(sc, "blit_game", None)
+        if bg is not None:
+            bg(gc, ox, oy, scale, src=self._view_src())
+            return
         sc.cls(_VIEWPORT_BEZEL)                     # letterbox fill
         gbuf = getattr(gc, "buf", None)
         sbuf = getattr(sc, "buf", None)

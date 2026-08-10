@@ -84,6 +84,50 @@ def _normalize_input_kinds(value):
     return kinds or None
 
 
+# The closed set of cart canvas sizes (SPEC.md 1/3.1). Closed so a host still
+# provisions for a fixed-size machine and can pick its scaler per size ahead of
+# time; 128x128 exists to inherit the PICO-8 back catalogue at native res.
+CANVAS_SIZES = {"320x240": (320, 240), "160x120": (160, 120),
+                "128x128": (128, 128)}
+
+
+def _normalize_canvas(value):
+    """A manifest "canvas" (SPEC.md 1/3.1) -> (w, h) from the closed set, None
+    when absent, or the raw declared value when OUT OF SET. Unlike an icon this
+    is a CAPABILITY field: a bad value is not dropped here, because the loader
+    has no way to refuse -- the evidence is carried so Player.start can refuse
+    the cart by name (like an unknown `runtime`) instead of running it at
+    dimensions it did not ask for, which would break every coordinate in it.
+
+    The dict form ({"width": W, "height": H, ...}) is the LEGACY moybyte shape
+    -- carts already seeded on boards carry it (a stale celeste on the P4
+    refused the day this normalizer shipped without it), so it normalizes like
+    the string when its size is in the set."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        wh = CANVAS_SIZES.get(value)
+        if wh is not None:
+            return wh
+    elif isinstance(value, dict):
+        try:
+            wh = (int(value.get("width")), int(value.get("height")))
+        except (TypeError, ValueError):
+            return value
+        if wh in CANVAS_SIZES.values():
+            return wh
+    return value
+
+
+def _canvas_str(value):
+    """The manifest wire form of a canvas value: a loaded (w, h) tuple goes back
+    to its "WxH" string; anything else (including an out-of-set original) is
+    written back verbatim, so a copy stays lossless."""
+    if isinstance(value, (list, tuple)) and len(value) == 2:
+        return "%dx%d" % (value[0], value[1])
+    return value
+
+
 # Paint-image assets (#63 Fold 3) live in a per-cart images/ subfolder as
 # <name>.moyimg files -- the THIRD asset type (a 64-colour MOY64 index bitmap from
 # the paint app), alongside sprites.moygfx and map.moymap. A .moyimg is a small JSON
@@ -623,7 +667,9 @@ def seed_builtins(seed_list, root=CARTS_DIR, progress=None):
         if cart.get("icon"):              # launcher icon tiles (SPEC.md 3.4)
             manifest["icon"] = list(cart["icon"])
         if cart.get("canvas") is not None:
-            manifest["canvas"] = cart["canvas"]
+            # A baked seed carries the manifest string; a load()ed cart carries
+            # the normalized (w, h) -- both serialize back to the "WxH" form.
+            manifest["canvas"] = _canvas_str(cart["canvas"])
         if cart.get("permissions") is not None:
             manifest["permissions"] = cart["permissions"]
         if cart.get("input") is not None:               # #42 Thread 3 input-kind hint
@@ -777,6 +823,10 @@ def load(path):
             # actually reads, or None when undeclared (show every control -- see
             # _normalize_input_kinds above).
             "input": _normalize_input_kinds(man.get("input")),
+            # Cart canvas (SPEC.md 1/3.1): (w, h) from the closed set, None for
+            # the 320x240 default, or the raw out-of-set value Player.start
+            # refuses by name -- see _normalize_canvas above.
+            "canvas": _normalize_canvas(man.get("canvas")),
             "sprites": sprites,
             "sounds": sounds,
             "map": tilemap,
@@ -1383,7 +1433,7 @@ def _unique_dir(root, base):
 def create(title, root=CARTS_DIR, src=None, cfg=None, edit=None, type="app",
            runtime="python", main="main.py", scenes=None, scene_order=None,
            author=None, palette=None, extensions=None, format=None, fps=None,
-           icon=None):
+           icon=None, canvas=None):
     """Create a new .moy folder and return its loaded cart dict. `runtime`/`main`
     default to a python cart; duplicate() passes a source cart's through so a
     copied "lua" cart (#67) stays a lua cart with its source in main.lua. `scenes`
@@ -1409,6 +1459,8 @@ def create(title, root=CARTS_DIR, src=None, cfg=None, edit=None, type="app",
         manifest["extensions"] = list(extensions)
     if icon:                          # launcher icon tiles (SPEC.md 3.4) survive a copy
         manifest["icon"] = list(icon)
+    if canvas is not None:            # cart canvas (SPEC.md 1/3.1) survives a copy
+        manifest["canvas"] = _canvas_str(canvas)
     if scenes:                        # scene assets (#85): register + write (see above)
         manifest["assets"] = {"scenes": list(scene_order or sorted(scenes.keys()))}
     _write(d + "/manifest.json", json.dumps(manifest))
@@ -1480,7 +1532,8 @@ def duplicate(cart, root=CARTS_DIR, new_title=None):
                  extensions=cart.get("extensions"),          # spec 10 extensions carry over
                  format=cart.get("format"),                  # spec 3.1: a moy-1 copy
                  fps=cart.get("fps"),                        # stays moy-1 at its tick
-                 icon=cart.get("icon"))                      # spec 3.4 launcher art
+                 icon=cart.get("icon"),                      # spec 3.4 launcher art
+                 canvas=cart.get("canvas"))                  # spec 1/3.1 cart canvas
     # create() writes the CODE side of a project (manifest/main/config/scenes).
     # Everything else a cart owns -- sprites.moygfx, map.moymap, sounds.json,
     # blocks.json, images/, tables/, docs/ -- lived only in the source FOLDER, so

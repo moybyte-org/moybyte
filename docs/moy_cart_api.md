@@ -400,6 +400,16 @@ Buttons are named. The canonical set is `left, right, up, down, a, b, run, home`
 | `textmode(on=True)` | opt a running cart into clean text-keyboard input (for typing a name/password) so `key()/keyp()` return typeable ASCII; `textmode(False)` restores game mode (held WASD/arrows drive `btn()`). Auto-resets to game mode on exit |
 | `view(w, h)` | declare the cart's LOGICAL viewport: the console composites the centered `w`x`h` region of the 320x240 canvas at the biggest integer scale that fits the screen (a 128x128 PICO-8 port fills the P4 glass at 4x instead of the full canvas's 2x); touch coords stay in full canvas space. `view()` restores the full canvas; auto-resets each run |
 
+**Declaring a smaller canvas (SPEC.md 1/3.1):** `manifest.json` may carry
+`"canvas": "160x120"` or `"canvas": "128x128"` (default `"320x240"`) — the cart
+then plays on a genuinely smaller raster: `W`/`H` report it, every verb clips to
+it, and the console integer-scales it up centered on the screen. The set is
+**closed** (those three sizes only); anything else is refused at start, never run
+at the wrong dimensions. A 128x128 PICO-8 port that can spare 8 rows pairs this
+with `view(128, 120)` so the 4:3 glass fills its height (2x on the handheld, 5x
+on the P4) instead of letterboxing the square. Drawing a quarter of the pixels is
+also the single biggest speed lever a port has.
+
 **Declaring which input you use (`#42`):** `manifest.json` may carry an optional
 `"input"` list naming the input groups a cart actually reads — any of `"buttons"`
 (`btn`/`btnp`), `"touch"` (`touch()`), `"keyboard"` (`key`/`keyp`/`textmode`), e.g.

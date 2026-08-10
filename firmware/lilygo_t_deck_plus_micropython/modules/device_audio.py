@@ -36,6 +36,7 @@ core-1 task and the PSRAM bank placement cannot be reached that way. Do not clai
 this plays on a board until a board has played it.
 """
 import json
+import time
 
 from device_util import _diag_note
 
@@ -71,11 +72,17 @@ MOY_AUDIO_CORE1 = True
 I2S_BCK = 7
 I2S_WS = 5
 I2S_DOUT = 6
-# 8 kHz mono: matches the reference SimpleTone rate and keeps the mixer cheap.
-AUDIO_RATE = 8000
-# DMA ring buffer (bytes). ~0.5 s of 8 kHz/16-bit mono -- a deep cushion so the
-# speaker never under-runs across slow/variable render frames plus jitter.
-AUDIO_IBUF = 8192
+# 22050 mono -- PICO-8's OWN rate (2026-08-10). The synth is pinned to PICO-8's
+# measured output (SPEC.md 8.3) and that character is DEFINED at 22050: at the
+# old 8000, every harmonic above 4kHz folded back inharmonic (an aliased square
+# lead sounds sharp/wrong -- reported as "sped up" though every clock measured
+# exact: synth rate-correct on host, C bit-exact at the device rate, playback
+# cum=1.0000 on glass). The mixer is core-1 C now, so the 2.75x sample cost is
+# noise; the 8000 was a legacy of the Python-mixer era.
+AUDIO_RATE = 22050
+# DMA ring buffer (bytes). ~0.37 s at 22050/16-bit mono -- a deep cushion so
+# the speaker never under-runs across slow/variable render frames plus jitter.
+AUDIO_IBUF = 16384
 AUDIO_IBUF_FRAMES = AUDIO_IBUF // 2
 # Cap on a single tick's render/write. The legacy feed TOPS THE RING UP toward
 # full rather than feeding exactly rate*dt (which kept it hovering near-empty --
@@ -85,8 +92,21 @@ AUDIO_MAX_FRAME = AUDIO_IBUF_FRAMES
 # Log each sfx/music trigger to moybyte_diag, so the owner can read on serial/SD
 # exactly what reached the mixer. Event-gated: one line per actual call.
 AUDIO_DIAG = True
+# Print an AUDIORATE line every ~2s while sound is audible: the rate the I2S
+# peripheral actually consumes frames at, against the rate libmoy synthesised
+# for. This is the only instrument that can see a uniform playback-speed error --
+# see _rate_probe. Cheap (one counter read per frame) and quiet when silent.
+AUDIO_RATE_PROBE = True
 
 _AUDIO_BACKEND_SEQ = 0
+
+# One-shot digital self-dump (2026-08-10 celeste tempo hunt): at the first
+# celeste-sized bank push, render 6s of music 4 through the DEVICE'S OWN C
+# engine and print it as base64 AUDIODUMP lines -- the host listener captures
+# and compares it against the authored reference with no mic, speaker or I2S
+# in the loop. Diagnostic build flag; rip out when the hunt closes.
+AUDIO_SELFDUMP = False
+_SELFDUMP_DONE = False
 
 
 class DeviceAudio:
@@ -103,12 +123,15 @@ class DeviceAudio:
         _AUDIO_BACKEND_SEQ += 1
         self.engine = engine            # the MODEL: bank + the host-side twin
         self._diag_seq = _AUDIO_BACKEND_SEQ
-        # The shared engine is built at 11025 Hz; the device runs 8 kHz to match
-        # the I2S port. Only the fallback render path reads this, live.
+        # The shared engine is built at 11025 Hz; the device runs AUDIO_RATE
+        # (22050 -- PICO-8's own). Only the fallback render path reads this, live.
         engine.rate = AUDIO_RATE
         self.i2s = None
         self._core1 = False             # core-1 feeder task running
         self._reused_core1 = False      # audio_start found the task already alive
+        self._probe_secs = 0.0          # _rate_probe accumulator
+        self._probe_frames = None       # (frames_out sample, ticks_ms) last seen
+        self._probe_t0 = None           # (frames, ticks_ms) at first sound
         self._bank_rev = None           # AudioBank.rev last pushed to libmoy
         # Legacy-feed double buffer: render alternates into bufs[_buf] and
         # write()s it non-blocking; the port copies it on a background task and
@@ -204,8 +227,28 @@ class DeviceAudio:
         if na is None:
             return
         bank = self.engine.bank
+        # BANKSIG (2026-08-10): fingerprint what actually crosses to libmoy --
+        # the count of FRACTIONAL sfx speeds plus two sentinels. The celeste
+        # "still too fast" hunt certified every engine door identical on host,
+        # which leaves only the DATA the device holds; this line says whether
+        # the cart on SD carries the authored 7.5/3.75 speeds (frac>0) or an
+        # old conversion's rounded ones (frac=0), with no serial RX needed.
+        try:
+            fr = sum(1 for s in bank.sfx if float(s.speed) != int(s.speed))
+            s10 = float(bank.sfx[10].speed) if len(bank.sfx) > 10 else -1.0
+            m4 = (float(bank.music[4].speed) if len(bank.music) > 4 else -1.0)
+            _diag_note("BANKSIG", "sfx=%d frac=%d s10=%.4f m4=%.6f"
+                       % (len(bank.sfx), fr, s10, m4))
+        except Exception:   # noqa: BLE001 -- diag only
+            pass
         ok = na.bank_load(json.dumps(bank.to_dict()))
-        self._bank_rev = bank.rev
+        # ...and read back what the C actually HOLDS (the last unverified hop).
+        try:
+            sig = na.engine_sig()
+            _diag_note("BANKSIG", "C: rate=%d nsfx=%d s10=%.4f m4=%.6f"
+                       % (sig[0], sig[1], sig[2], sig[3]))
+        except Exception:   # noqa: BLE001 -- diag only
+            pass
         if not ok:
             # Malformed, or past libmoy's fixed capacities (64 sfx x 64 steps,
             # 32 tracks x 64 rows). The bank is left zeroed and silent rather
@@ -213,6 +256,39 @@ class DeviceAudio:
             _diag_note("audio", "bank REJECTED (bad json or over capacity): "
                        "%d sfx, %d music" % (len(bank.sfx), len(bank.music)))
             print("Moybyte audio: sound bank rejected by libmoy -- silent")
+        self._selfdump(na, bank)
+        self._bank_rev = bank.rev
+
+    def _selfdump(self, na, bank):
+        """Digital PCM dump over serial (see AUDIO_SELFDUMP). Only when the
+        core-1 task is NOT running (a cold boot straight into celeste), so the
+        dump's render calls are the engine's only consumer."""
+        global _SELFDUMP_DONE
+        if not AUDIO_SELFDUMP or _SELFDUMP_DONE or len(bank.sfx) < 60:
+            return
+        try:
+            if na.running():
+                print("AUDIODUMP skipped (core-1 task already running)")
+                return
+        except Exception:   # noqa: BLE001
+            pass
+        _SELFDUMP_DONE = True
+        try:
+            import binascii
+            na.music(4)
+            n = 512
+            buf = bytearray(n * 2)
+            total = 6 * AUDIO_RATE
+            print("AUDIODUMP begin rate=%d frames=%d" % (AUDIO_RATE, total))
+            done = 0
+            while done < total:
+                na.render(buf, n)
+                print("AUDIODUMP " + binascii.b2a_base64(buf).decode().strip())
+                done += n
+            print("AUDIODUMP end")
+            na.music_stop()
+        except Exception as exc:  # noqa: BLE001 -- diag only
+            print("AUDIODUMP failed:", exc)
 
     def _sync_bank(self):
         """Re-push if the Music editor (or undo) moved the bank. An int compare
@@ -327,11 +403,65 @@ class DeviceAudio:
 
     # -- the feed ---------------------------------------------------------
 
+    def _rate_probe(self, dt):
+        """Report the rate the SPEAKER is really running at (AUDIORATE lines).
+
+        The synth is rate-correct by construction -- every libmoy timing derives
+        from a->rate -- so a playback that is uniformly fast or slow can only be
+        the peripheral consuming samples at a different rate than they were made
+        for. That is invisible from inside the mixer and inaudible as anything but
+        "wrong speed", so measure it: the core-1 feeder blocks on the DMA drain,
+        which makes its accepted-frame count a clock. eff/want == 1.0 is correct;
+        0.5 would be 11025 leaking into the 22050 pipe, 2.0 a frame/slot mismatch.
+        Costs one counter read per frame and prints only while sound is audible."""
+        if not AUDIO_RATE_PROBE or self._na is None:
+            return
+        # WALL CLOCK, not summed loop dt (2026-08-10): frames_out advances on
+        # core 1 through every HITCH, but the loop's dt is clamped/quantized --
+        # summing it under-counts real time, which read as a sustained ~3%
+        # "speed-up" that was pure instrument error. ticks_ms is the clock.
+        self._probe_secs += dt
+        if self._probe_secs < 2.0:
+            return
+        self._probe_secs = 0.0
+        now = time.ticks_ms()
+        try:
+            fo = self._na.frames_out()
+            frames, rate = fo[0], fo[1]
+            rend = fo[2] if len(fo) > 2 else 0    # engine frames by the task
+            pyr = fo[3] if len(fo) > 3 else 0     # engine frames by mod_render
+        except Exception:   # noqa: BLE001 -- an older native module: nothing to say
+            return
+        last, self._probe_frames = self._probe_frames, (frames, now)
+        if last is None or frames == last[0]:
+            return                      # first sample, or nothing playing
+        secs = time.ticks_diff(now, last[1]) / 1000.0
+        if secs <= 0:
+            return
+        # Cumulative ratio since first sound: integrates every window, immune
+        # to boundary effects -- hardware clock truth after a minute.
+        if self._probe_t0 is None:
+            self._probe_t0 = (last[0], last[1])
+        f0, t0 = self._probe_t0
+        cum = time.ticks_diff(now, t0) / 1000.0
+        eff = (frames - last[0]) / secs
+        ceff = (frames - f0) / cum if cum > 0 else 0.0
+        # rendered-vs-written seam (cumulative): rend/out > 1.0 means engine
+        # time is being consumed that never reaches the speaker -- audibly
+        # fast playback that both per-side clocks call correct. pyr > 0 during
+        # play names a Python-side phantom renderer.
+        seam = (rend / frames) if frames else 0.0
+        _diag_note("AUDIORATE", "eff=%d want=%d ratio=%.3f cum=%.4f "
+                   "seam=%.4f pyr=%d feed=%s"
+                   % (int(eff), rate, eff / (rate or 1), ceff / (rate or 1),
+                      seam, pyr, "core1" if self._core1 else "single"))
+
     def tick(self, dt):
         """Per-frame audio work. In core-1 mode there is NONE -- the task renders
         and feeds I2S continuously, off the render core. The legacy fallback
         renders this frame's PCM and streams it to the DMA ring non-blockingly.
         Either way it must never stall the single-threaded desktop loop."""
+        self._rate_probe(dt)
         if self._core1:
             return
 

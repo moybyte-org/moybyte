@@ -3235,8 +3235,21 @@ def test_micropython_offline_diag_wiring():
     # around the native calls, reset per frame by batch_reset.
     assert "def _diag_draw2(diag, ws):" in device_diag
     assert ('diag.log("DRAW2", "layer=%.2fms batch=%.2fms '
-            'map=%.2fms text=%.2fms fill=%.2fms"') in device_diag
+            'map=%.2fms text=%.2fms "') in device_diag
+    assert '"fill=%.2fms gated(fill=%d text=%d)"' in device_diag
     assert "_diag_draw2(diag, ws)" in runtime
+
+    # ...and the gated microseconds are FOLDED IN. The #155 native gates shadow
+    # rect/rectb/print/pix, so a gated call never reaches the Python method that
+    # holds _t_fill_us -- fill read 0.00ms for any cart using them while the
+    # gates did all the filling. The C side always timed itself and
+    # DeviceCanvas always exposed gate_counts(); the defect was that NOTHING
+    # CALLED IT, which no format assertion above could have caught. So pin the
+    # consumer, and pin the per-frame reset that keeps it from being a running
+    # total (found via zoomed celeste: 29.6ms render, 20.6ms in no bucket).
+    assert 'gc = getattr(cv, "gate_counts", None)' in device_diag
+    assert "nf, nt, gf, gt = gc()" in device_diag
+    assert "self.gate_counts_reset()" in device_canvas
     assert "self._t_layer_us += _ticks_diff(_ticks_us(), _t0)" in device_canvas
     assert "self._t_batch_us += _ticks_diff(_ticks_us(), _t0)" in device_canvas
     assert "self._t_map_us += _ticks_diff(_ticks_us(), _t0)" in device_canvas

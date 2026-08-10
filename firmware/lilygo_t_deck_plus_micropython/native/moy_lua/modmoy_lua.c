@@ -45,6 +45,9 @@
 #include "esp_heap_caps.h"
 #define MOY_LUA_PSRAM 1
 #endif
+#if __has_include("esp_memory_utils.h")
+#include "esp_memory_utils.h"   // esp_ptr_internal: which region a ptr is in
+#endif
 #endif
 
 // ---------------------------------------------------------------------------
@@ -63,6 +66,44 @@
 static lua_State *g_L = NULL;
 static size_t g_live = 0;
 static size_t g_peak = 0;
+
+#ifdef MOY_LUA_PSRAM
+// #67 SRAM-vs-PSRAM attribution (2026-08-10): the allocator is SRAM-first,
+// but nobody had ever measured what the cart's heap actually WINS -- how many
+// live bytes sit internal, and whether they are the hot small objects (stack
+// segments, table nodes: the all-PSRAM ~2x verdict's likely cause) or cold
+// big ones (loaded protos, long strings). Any structural SRAM proposal (an
+// indexed SRAM canvas would take ~77KB from this same pool) prices itself
+// against these numbers. Region 0 = internal SRAM, 1 = PSRAM; size classes
+// <=64 / <=256 / <=2048 / >2048 bytes.
+static size_t g_live_r[2];
+static uint32_t g_alloc_n[2];      // cumulative allocations landed per region
+static size_t g_alloc_b[2];        // cumulative bytes landed per region
+static size_t g_live_cls[2][4];    // live bytes, region x size class
+static size_t g_sram_denied = 0;   // bytes the headroom floor pushed to PSRAM
+
+static inline int moy_lua_cls(size_t n) {
+    return n <= 64 ? 0 : n <= 256 ? 1 : n <= 2048 ? 2 : 3;
+}
+
+static inline int moy_lua_region(const void *p) {
+#if __has_include("esp_memory_utils.h")
+    return esp_ptr_internal(p) ? 0 : 1;
+#else
+    (void)p;
+    return 1;
+#endif
+}
+
+// The SRAM-first headroom floor, now a runtime knob (set_sram_floor). 48KB
+// was sized to leave room for a WiFi stack that might start at any moment --
+// but the census showed that on a 269KB internal heap it leaves celeste's Lua
+// 9KB (97% PSRAM, the measured-2x regime). run_desktop lowers it to 24KB
+// AFTER wifi autoconnect has run (whatever needed internal has taken it by
+// then); the accepted edge is a FIRST wifi start mid-cart failing -- close
+// the cart (its heap frees wholesale) and retry.
+static size_t g_sram_floor = 48 * 1024;
+#endif
 static int16_t *g_q = NULL;      // _batch_arr int16 view (buffer is gc-pinned via root)
 static size_t g_qlen = 0;        // in int16 slots
 static int g_token = 0;
@@ -74,6 +115,11 @@ static void *moy_lua_alloc(void *ud, void *ptr, size_t osize, size_t nsize) {
     }
     if (nsize == 0) {
         if (ptr != NULL) {
+#ifdef MOY_LUA_PSRAM
+            int rf = moy_lua_region(ptr);
+            g_live_r[rf] -= osize;
+            g_live_cls[rf][moy_lua_cls(osize)] -= osize;
+#endif
             free(ptr);
         }
         g_live -= osize;
@@ -85,16 +131,30 @@ static void *moy_lua_alloc(void *ud, void *ptr, size_t osize, size_t nsize) {
     // measured the whole _update ~2x slower than the #6 spike's SRAM-resident
     // state. Keep a headroom floor so the WiFi/DMA pools never starve, and
     // fall back to PSRAM so a big cart still loads (just slower).
+    int ro = (ptr != NULL) ? moy_lua_region(ptr) : -1;  // before realloc frees it
     void *np = NULL;
     if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
-            >= nsize + (48 * 1024)) {
+            >= nsize + g_sram_floor) {
         np = heap_caps_realloc(ptr, nsize, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    } else {
+        g_sram_denied += nsize;  // floor pressure: bytes that wanted SRAM
     }
     if (np == NULL) {
         np = heap_caps_realloc(ptr, nsize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     }
     if (np == NULL) {            // both pools exhausted: Lua runs emergency GC
         return NULL;
+    }
+    {
+        int rn = moy_lua_region(np);
+        if (ro >= 0) {
+            g_live_r[ro] -= osize;
+            g_live_cls[ro][moy_lua_cls(osize)] -= osize;
+        }
+        g_live_r[rn] += nsize;
+        g_live_cls[rn][moy_lua_cls(nsize)] += nsize;
+        g_alloc_n[rn]++;
+        g_alloc_b[rn] += nsize;
     }
 #else
     void *np = realloc(ptr, nsize);
@@ -389,6 +449,13 @@ static mp_obj_t moy_lua_init(size_t n_args, const mp_obj_t *a) {
     g_token = (int)(mp_obj_get_int(a[3]) & 0x7FFF);
     g_live = 0;
     g_peak = 0;
+#ifdef MOY_LUA_PSRAM
+    memset(g_live_r, 0, sizeof(g_live_r));
+    memset(g_alloc_n, 0, sizeof(g_alloc_n));
+    memset(g_alloc_b, 0, sizeof(g_alloc_b));
+    memset(g_live_cls, 0, sizeof(g_live_cls));
+    g_sram_denied = 0;
+#endif
     g_L = lua_newstate(moy_lua_alloc, NULL);
     if (g_L == NULL) {
         MP_STATE_VM(moy_lua_root) = MP_OBJ_NULL;
@@ -497,6 +564,48 @@ static mp_obj_t moy_lua_peak_kb(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_lua_peak_kb_obj, moy_lua_peak_kb);
 
+// (live_sram, live_psram, peak, n_sram, n_psram, b_sram, b_psram, denied,
+//  live_cls_sram x4, live_cls_psram x4) -- bytes except the two counts.
+// None on builds with no region choice (host/wasm), so callers can gate.
+static mp_obj_t moy_lua_alloc_stats(void) {
+#ifdef MOY_LUA_PSRAM
+    mp_obj_t items[16];
+    items[0] = mp_obj_new_int((mp_int_t)g_live_r[0]);
+    items[1] = mp_obj_new_int((mp_int_t)g_live_r[1]);
+    items[2] = mp_obj_new_int((mp_int_t)g_peak);
+    items[3] = mp_obj_new_int((mp_int_t)g_alloc_n[0]);
+    items[4] = mp_obj_new_int((mp_int_t)g_alloc_n[1]);
+    items[5] = mp_obj_new_int((mp_int_t)g_alloc_b[0]);
+    items[6] = mp_obj_new_int((mp_int_t)g_alloc_b[1]);
+    items[7] = mp_obj_new_int((mp_int_t)g_sram_denied);
+    for (int r = 0; r < 2; r++) {
+        for (int c = 0; c < 4; c++) {
+            items[8 + r * 4 + c] = mp_obj_new_int((mp_int_t)g_live_cls[r][c]);
+        }
+    }
+    return mp_obj_new_tuple(16, items);
+#else
+    return mp_const_none;
+#endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_lua_alloc_stats_obj, moy_lua_alloc_stats);
+
+// set_sram_floor(kb) -> effective kb. Clamped [16, 256]; no-op (returns the
+// compiled default) on builds with no region choice.
+static mp_obj_t moy_lua_set_sram_floor(mp_obj_t kb_obj) {
+#ifdef MOY_LUA_PSRAM
+    mp_int_t kb = mp_obj_get_int(kb_obj);
+    if (kb < 16) kb = 16;
+    if (kb > 256) kb = 256;
+    g_sram_floor = (size_t)kb * 1024;
+    return mp_obj_new_int(kb);
+#else
+    (void)kb_obj;
+    return mp_obj_new_int(48);
+#endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(moy_lua_set_sram_floor_obj, moy_lua_set_sram_floor);
+
 static const mp_rom_map_elem_t moy_lua_module_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_lua)},
     {MP_ROM_QSTR(MP_QSTR_init), MP_ROM_PTR(&moy_lua_init_obj)},
@@ -507,6 +616,8 @@ static const mp_rom_map_elem_t moy_lua_module_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_close), MP_ROM_PTR(&moy_lua_close_obj)},
     {MP_ROM_QSTR(MP_QSTR_mem_kb), MP_ROM_PTR(&moy_lua_mem_kb_obj)},
     {MP_ROM_QSTR(MP_QSTR_peak_kb), MP_ROM_PTR(&moy_lua_peak_kb_obj)},
+    {MP_ROM_QSTR(MP_QSTR_alloc_stats), MP_ROM_PTR(&moy_lua_alloc_stats_obj)},
+    {MP_ROM_QSTR(MP_QSTR_set_sram_floor), MP_ROM_PTR(&moy_lua_set_sram_floor_obj)},
 };
 static MP_DEFINE_CONST_DICT(moy_lua_module_globals, moy_lua_module_globals_table);
 

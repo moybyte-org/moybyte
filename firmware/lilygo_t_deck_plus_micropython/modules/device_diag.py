@@ -157,12 +157,31 @@ def _diag_draw2(diag, ws):
             return
         # #66: map/text/fill joined so the WHOLE render ms attributes to named C
         # ops -- (DRAWBRK render) - (these) = Python dispatch + circ/line/pix.
-        diag.log("DRAW2", "layer=%.2fms batch=%.2fms map=%.2fms text=%.2fms fill=%.2fms"
+        #
+        # ...except fill and text READ ZERO for any cart whose rect/print reach
+        # the #155 native gates, because a gated call never enters the Python
+        # method that holds the _t_ timer. The gates have always timed
+        # themselves (ST_T_FILL/ST_T_TEXT, behind ST_PROF) and DeviceCanvas has
+        # always exposed gate_counts() -- nothing ever CALLED it, so the
+        # measurement existed and was thrown away every frame. Zoomed celeste is
+        # what made that visible: 29.6ms of render with fill=0.00ms and 20.6ms
+        # in no bucket at all. Fold the gated microseconds into the bucket they
+        # belong to -- `fill` means time spent filling, whichever lane did it --
+        # and carry the call counts, which are the other half of the question
+        # (a big fill and 300 small ones cost the same ms and want different
+        # fixes).
+        nf = nt = gf = gt = 0
+        gc = getattr(cv, "gate_counts", None)
+        if gc is not None:
+            nf, nt, gf, gt = gc()
+        diag.log("DRAW2", "layer=%.2fms batch=%.2fms map=%.2fms text=%.2fms "
+                          "fill=%.2fms gated(fill=%d text=%d)"
                  % (getattr(cv, "_t_layer_us", 0) / 1000.0,
                     getattr(cv, "_t_batch_us", 0) / 1000.0,
                     getattr(cv, "_t_map_us", 0) / 1000.0,
-                    getattr(cv, "_t_text_us", 0) / 1000.0,
-                    getattr(cv, "_t_fill_us", 0) / 1000.0))
+                    (getattr(cv, "_t_text_us", 0) + gt) / 1000.0,
+                    (getattr(cv, "_t_fill_us", 0) + gf) / 1000.0,
+                    nf, nt))
     except Exception:
         pass
 
@@ -202,6 +221,48 @@ def _diag_draw3(diag, ws):
                     getattr(cv, "_t_img_us", 0) / 1000.0,
                     getattr(cv, "_n_spr", 0), getattr(cv, "_n_shape", 0),
                     named / 1000.0, render_ms - named / 1000.0))
+    except Exception:
+        pass
+
+
+def _diag_luamem(diag, ws):
+    """Log a LUAMEM line (#67, 2026-08-10): where the running Lua cart's heap
+    LIVES -- live bytes internal SRAM vs PSRAM, the floor-denied demand, and
+    the live size-class split per region (<=64/<=256/<=2048/>2048 -- small
+    classes are the VM's hot objects: stack segments, table nodes). This is
+    the pricing input for any structural SRAM proposal (#66: an indexed SRAM
+    canvas would take ~77KB from the same pool the allocator feeds on).
+    Guarded; prints only while a lua cart's VM is alive (live bytes > 0)."""
+    if diag is None:
+        return
+    try:
+        if ws.perf_sample() is None:
+            return
+        import moy_lua
+        st = moy_lua.alloc_stats()
+        if not st or (st[0] + st[1]) == 0:
+            return
+        # In-play internal-SRAM headroom rides along (#66 census): free +
+        # largest block, internal regions only (>=1MB regions are PSRAM).
+        int_free = int_big = 0
+        try:
+            import esp32
+            for reg in esp32.idf_heap_info(esp32.HEAP_DATA):
+                if reg[0] < 1024 * 1024:
+                    int_free += reg[1]
+                    if reg[2] > int_big:
+                        int_big = reg[2]
+        except Exception:
+            pass
+        k = 1024.0
+        diag.log("LUAMEM",
+                 "sram=%.1fKB psram=%.1fKB peak=%.1fKB denied=%.0fKB "
+                 "sc=%.1f/%.1f/%.1f/%.1f pc=%.1f/%.1f/%.1f/%.1f n=%d/%d "
+                 "int=%d/%dk"
+                 % (st[0] / k, st[1] / k, st[2] / k, st[7] / k,
+                    st[8] / k, st[9] / k, st[10] / k, st[11] / k,
+                    st[12] / k, st[13] / k, st[14] / k, st[15] / k,
+                    st[3], st[4], int_free // 1024, int_big // 1024))
     except Exception:
         pass
 
