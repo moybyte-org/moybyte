@@ -35,6 +35,7 @@ from device_input import TrackBall, Touch
 from device_diag import (
     _diag_flush, _diag_perf_sample, _diag_hitch, _diag_drawbrk, _diag_draw2,
     _diag_draw3, _diag_loop, _diag_chromebrk, _diag_layerbrk, _diag_homebrk, _diag_pump,
+    _diag_luamem,
     _diag_i2cstat, _diag_calib, _diag_gc, HITCH_MS, _CALIB_DONE,
 )
 # The device WEB VIEW controller (#41/#22, extracted to device_webview.py).
@@ -565,6 +566,23 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
               % (1 if keyboard.available else 0, 1 if ball.available else 0,
                  1 if touch.available else 0), diag)
 
+    # #66/#67 indexed-SRAM-canvas pricing: one MEMBENCH line at boot when PERF
+    # DIAG is persisted on (the T-Deck has no serial RX to ask for it later; the
+    # P4 can also run `py __import__('moy_gfx').membench()` any time). Runs
+    # BEFORE any cart so internal SRAM is at its largest -- ~50ms, diag-gated.
+    if ws.perf_capture:
+        try:
+            import moy_gfx as _mg
+            _mb = getattr(_mg, "membench", None)
+            if _mb is not None:
+                _r = _mb()
+                _diag_log("MEMBENCH",
+                          "us/frame fill16 s=%d p=%d fill8 s=%d p=%d "
+                          "blit16 s=%d p=%d blit8 s=%d p=%d resolve=%d bounce=%d"
+                          % tuple(_r), diag)
+        except Exception as _e:
+            _diag_log("MEMBENCH", "failed: %r" % _e, diag)
+
     # Say what became of the last update, before anything can overwrite the evidence
     # (#53). Reaching here means the panel, SD, keyboard and desktop all came up --
     # but NOT that a single frame reached the glass, and a board that boots to a
@@ -790,6 +808,22 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             _diag_perf_at = _tnow + 3000
             if ws.perf_capture != _live:
                 ws.perf_capture = _live   # capture follows the PERF DIAG toggle
+                if _live:
+                    # #66/#67: the MEMBENCH pricing line also fires on the
+                    # OFF->ON edge, so a measurement session needs no reboot
+                    # to get it (it otherwise prints only at a diag-on boot).
+                    # ~50ms once, and only in a diag-armed session.
+                    try:
+                        import moy_gfx as _mg
+                        _mb = getattr(_mg, "membench", None)
+                        if _mb is not None:
+                            _diag_log("MEMBENCH",
+                                      "us/frame fill16 s=%d p=%d fill8 s=%d "
+                                      "p=%d blit16 s=%d p=%d blit8 s=%d p=%d "
+                                      "resolve=%d bounce=%d" % tuple(_mb()),
+                                      diag)
+                    except Exception as _e:
+                        _diag_log("MEMBENCH", "failed: %r" % _e, diag)
             try:
                 diag.ECHO_LIVE = _live   # echo follows the toggle (boot lines echoed
             except Exception:            # before the first 3s tick either way)
@@ -805,6 +839,8 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             _diag_chromebrk(diag, ws)   # #66 lever 5: bar/composite/cursor chrome sub-split
             _diag_layerbrk(diag, ws)    # #172: chrome's `other` IS the stack walk --
                                         # this names the layer inside it
+            _diag_luamem(diag, ws)      # #67: the lua heap's SRAM/PSRAM split --
+                                        # prices any structural SRAM proposal
             _diag_homebrk(diag, ws)     # launcher wallpaper/grid/bar split (cart-gated
                                         # DRAWBRK never fires on the home screen)
             _diag_pump(diag, comp)      # #66 lever 4: bounce-feed pacing (SPI idle gaps)

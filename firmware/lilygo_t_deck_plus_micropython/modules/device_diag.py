@@ -225,6 +225,35 @@ def _diag_draw3(diag, ws):
         pass
 
 
+def _diag_luamem(diag, ws):
+    """Log a LUAMEM line (#67, 2026-08-10): where the running Lua cart's heap
+    LIVES -- live bytes internal SRAM vs PSRAM, the floor-denied demand, and
+    the live size-class split per region (<=64/<=256/<=2048/>2048 -- small
+    classes are the VM's hot objects: stack segments, table nodes). This is
+    the pricing input for any structural SRAM proposal (#66: an indexed SRAM
+    canvas would take ~77KB from the same pool the allocator feeds on).
+    Guarded; prints only while a lua cart's VM is alive (live bytes > 0)."""
+    if diag is None:
+        return
+    try:
+        if ws.perf_sample() is None:
+            return
+        import moy_lua
+        st = moy_lua.alloc_stats()
+        if not st or (st[0] + st[1]) == 0:
+            return
+        k = 1024.0
+        diag.log("LUAMEM",
+                 "sram=%.1fKB psram=%.1fKB peak=%.1fKB denied=%.0fKB "
+                 "sc=%.1f/%.1f/%.1f/%.1f pc=%.1f/%.1f/%.1f/%.1f n=%d/%d"
+                 % (st[0] / k, st[1] / k, st[2] / k, st[7] / k,
+                    st[8] / k, st[9] / k, st[10] / k, st[11] / k,
+                    st[12] / k, st[13] / k, st[14] / k, st[15] / k,
+                    st[3], st[4]))
+    except Exception:
+        pass
+
+
 def _diag_chromebrk(diag, ws):
     """Log a CHROMEBRK line (#66 lever 5, instrument-before-cutting): the sub-split
     of DRAWBRK's chrome remainder -- bar (_draw_status_strip), cmp (the game->system

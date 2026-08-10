@@ -1827,6 +1827,152 @@ static mp_obj_t moy_gfx_native_code_free_all(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_gfx_native_code_free_all_obj, moy_gfx_native_code_free_all);
 
+// --- membench (#66/#67, 2026-08-10): price the indexed-SRAM-canvas idea ----
+//
+// The P4 A/B'd indexed-vs-RGB565 and declined indexed, but the T-Deck was
+// recorded as "the untested opposite shape: it already pays an SRAM bounce
+// copy the resolve could ride". This measures that shape's raw ingredients on
+// whatever board runs it: per-pixel fill and tile-blit cost by destination
+// REGION (internal SRAM vs PSRAM) and pixel WIDTH (8-bit index vs RGB565),
+// plus the chunked 8->16 LUT resolve a bounce-riding flush would add and the
+// chunked PSRAM->SRAM memcpy the flush pays TODAY. All kernels are plain
+// per-pixel loops -- the raster's shape -- so the numbers compare shapes, not
+// compiler tricks. Returns a 10-tuple of us (min of 3 passes), -1 where the
+// buffer would not allocate (a 153KB internal RGB565 canvas is EXPECTED to
+// fail on the S3 -- that failure is the point of the 8-bit candidate):
+//   (fill16_sram, fill16_psram, fill8_sram, fill8_psram,
+//    blit16_sram, blit16_psram, blit8_sram, blit8_psram, resolve, bounce)
+#ifdef MOY_GFX_HAS_ASYNC_COPY   // proxy for "an ESP-IDF build with heap_caps"
+#include "esp_heap_caps.h"
+#define MOY_GFX_HAS_MEMBENCH 1
+
+#define MB_W 320
+#define MB_H 240
+#define MB_PX (MB_W * MB_H)
+#define MB_TILE 16
+#define MB_TILES 300             /* 300 x 16x16 = 76800 px = one frame */
+#define MB_CHUNK_PX 9600         /* resolve/bounce chunk: 8 chunks a frame */
+#define MB_REPS 3
+
+static uint32_t mb_fill16(uint16_t *d) {
+    uint32_t t0 = (uint32_t)mp_hal_ticks_us();
+    for (int y = 0; y < MB_H; y++) {
+        uint16_t *row = d + y * MB_W;
+        for (int x = 0; x < MB_W; x++) row[x] = 0xAAAA;
+    }
+    return (uint32_t)mp_hal_ticks_us() - t0;
+}
+
+static uint32_t mb_fill8(uint8_t *d) {
+    uint32_t t0 = (uint32_t)mp_hal_ticks_us();
+    for (int y = 0; y < MB_H; y++) {
+        uint8_t *row = d + y * MB_W;
+        for (int x = 0; x < MB_W; x++) row[x] = 0x2A;
+    }
+    return (uint32_t)mp_hal_ticks_us() - t0;
+}
+
+static uint32_t mb_blit16(uint16_t *d, const uint16_t *src, size_t src_px) {
+    uint32_t t0 = (uint32_t)mp_hal_ticks_us();
+    uint32_t o = 12345;
+    for (int t = 0; t < MB_TILES; t++) {
+        o = o * 1103515245u + 12345u;            /* scattered dst + src reads */
+        int dx = (int)(o % (MB_W - MB_TILE));
+        int dy = (int)((o >> 8) % (MB_H - MB_TILE));
+        const uint16_t *s = src + (o % (src_px - MB_TILE * MB_TILE));
+        for (int y = 0; y < MB_TILE; y++) {
+            uint16_t *dr = d + (dy + y) * MB_W + dx;
+            const uint16_t *sr = s + y * MB_TILE;
+            for (int x = 0; x < MB_TILE; x++) dr[x] = sr[x];
+        }
+    }
+    return (uint32_t)mp_hal_ticks_us() - t0;
+}
+
+static uint32_t mb_blit8(uint8_t *d, const uint8_t *src, size_t src_px) {
+    uint32_t t0 = (uint32_t)mp_hal_ticks_us();
+    uint32_t o = 12345;
+    for (int t = 0; t < MB_TILES; t++) {
+        o = o * 1103515245u + 12345u;
+        int dx = (int)(o % (MB_W - MB_TILE));
+        int dy = (int)((o >> 8) % (MB_H - MB_TILE));
+        const uint8_t *s = src + (o % (src_px - MB_TILE * MB_TILE));
+        for (int y = 0; y < MB_TILE; y++) {
+            uint8_t *dr = d + (dy + y) * MB_W + dx;
+            const uint8_t *sr = s + y * MB_TILE;
+            for (int x = 0; x < MB_TILE; x++) dr[x] = sr[x];
+        }
+    }
+    return (uint32_t)mp_hal_ticks_us() - t0;
+}
+
+static uint32_t mb_resolve(const uint8_t *s8, uint16_t *chunk,
+                           const uint16_t *lut) {
+    uint32_t t0 = (uint32_t)mp_hal_ticks_us();
+    for (int c = 0; c < MB_PX / MB_CHUNK_PX; c++) {
+        const uint8_t *s = s8 + c * MB_CHUNK_PX;
+        for (int i = 0; i < MB_CHUNK_PX; i++) chunk[i] = lut[s[i] & 63];
+    }
+    return (uint32_t)mp_hal_ticks_us() - t0;
+}
+
+static uint32_t mb_bounce(const uint16_t *s16, uint16_t *chunk) {
+    uint32_t t0 = (uint32_t)mp_hal_ticks_us();
+    for (int c = 0; c < MB_PX / MB_CHUNK_PX; c++) {
+        memcpy(chunk, s16 + c * MB_CHUNK_PX, MB_CHUNK_PX * 2);
+    }
+    return (uint32_t)mp_hal_ticks_us() - t0;
+}
+
+#define MB_BEST(dst, call) do { \
+        uint32_t best = 0xFFFFFFFFu; \
+        for (int r = 0; r < MB_REPS; r++) { \
+            uint32_t us = (call); \
+            if (us < best) best = us; \
+        } \
+        (dst) = (mp_int_t)best; \
+    } while (0)
+
+static mp_obj_t moy_gfx_membench(void) {
+    uint16_t *d16s = heap_caps_malloc(MB_PX * 2, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    uint16_t *d16p = heap_caps_malloc(MB_PX * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint8_t *d8s = heap_caps_malloc(MB_PX, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    uint8_t *d8p = heap_caps_malloc(MB_PX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    size_t src_px = 64 * 1024;               /* sprite caches live in PSRAM */
+    uint16_t *src16 = heap_caps_malloc(src_px * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint8_t *src8 = heap_caps_malloc(src_px, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint16_t *chunk = heap_caps_malloc(MB_CHUNK_PX * 2, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    mp_int_t r[10];
+    for (int i = 0; i < 10; i++) r[i] = -1;
+    if (src16 != NULL) {
+        for (size_t i = 0; i < src_px; i++) src16[i] = (uint16_t)(i * 2654435761u >> 8);
+    }
+    if (src8 != NULL) {
+        for (size_t i = 0; i < src_px; i++) src8[i] = (uint8_t)(i * 2654435761u >> 8);
+    }
+    if (d16s) MB_BEST(r[0], mb_fill16(d16s));
+    if (d16p) MB_BEST(r[1], mb_fill16(d16p));
+    if (d8s) MB_BEST(r[2], mb_fill8(d8s));
+    if (d8p) MB_BEST(r[3], mb_fill8(d8p));
+    if (d16s && src16) MB_BEST(r[4], mb_blit16(d16s, src16, src_px));
+    if (d16p && src16) MB_BEST(r[5], mb_blit16(d16p, src16, src_px));
+    if (d8s && src8) MB_BEST(r[6], mb_blit8(d8s, src8, src_px));
+    if (d8p && src8) MB_BEST(r[7], mb_blit8(d8p, src8, src_px));
+    if (d8s && chunk) {
+        static uint16_t lut[64];
+        for (int i = 0; i < 64; i++) lut[i] = (uint16_t)(i * 1031);
+        MB_BEST(r[8], mb_resolve(d8s, chunk, lut));
+    }
+    if (d16p && chunk) MB_BEST(r[9], mb_bounce(d16p, chunk));
+    free(d16s); free(d16p); free(d8s); free(d8p);
+    free(src16); free(src8); free(chunk);
+    mp_obj_t items[10];
+    for (int i = 0; i < 10; i++) items[i] = mp_obj_new_int(r[i]);
+    return mp_obj_new_tuple(10, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_gfx_membench_obj, moy_gfx_membench);
+#endif  // MOY_GFX_HAS_MEMBENCH
+
 static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__),   MP_OBJ_NEW_QSTR(MP_QSTR_moy_gfx) },
     { MP_ROM_QSTR(MP_QSTR_native_code_free_all), MP_ROM_PTR(&moy_gfx_native_code_free_all_obj) },
@@ -1858,6 +2004,9 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_decode_runs), MP_ROM_PTR(&moy_gfx_decode_runs_obj) },
     { MP_ROM_QSTR(MP_QSTR_crop_index), MP_ROM_PTR(&moy_gfx_crop_index_obj) },
     { MP_ROM_QSTR(MP_QSTR_pack_strip), MP_ROM_PTR(&moy_gfx_pack_strip_obj) },
+    #ifdef MOY_GFX_HAS_MEMBENCH
+    { MP_ROM_QSTR(MP_QSTR_membench),   MP_ROM_PTR(&moy_gfx_membench_obj) },
+    #endif
 };
 static MP_DEFINE_CONST_DICT(moy_gfx_globals, moy_gfx_globals_table);
 
