@@ -72,11 +72,17 @@ MOY_AUDIO_CORE1 = True
 I2S_BCK = 7
 I2S_WS = 5
 I2S_DOUT = 6
-# 8 kHz mono: matches the reference SimpleTone rate and keeps the mixer cheap.
-AUDIO_RATE = 8000
-# DMA ring buffer (bytes). ~0.5 s of 8 kHz/16-bit mono -- a deep cushion so the
-# speaker never under-runs across slow/variable render frames plus jitter.
-AUDIO_IBUF = 8192
+# 22050 mono -- PICO-8's OWN rate (2026-08-10). The synth is pinned to PICO-8's
+# measured output (SPEC.md 8.3) and that character is DEFINED at 22050: at the
+# old 8000, every harmonic above 4kHz folded back inharmonic (an aliased square
+# lead sounds sharp/wrong -- reported as "sped up" though every clock measured
+# exact: synth rate-correct on host, C bit-exact at the device rate, playback
+# cum=1.0000 on glass). The mixer is core-1 C now, so the 2.75x sample cost is
+# noise; the 8000 was a legacy of the Python-mixer era.
+AUDIO_RATE = 22050
+# DMA ring buffer (bytes). ~0.37 s at 22050/16-bit mono -- a deep cushion so
+# the speaker never under-runs across slow/variable render frames plus jitter.
+AUDIO_IBUF = 16384
 AUDIO_IBUF_FRAMES = AUDIO_IBUF // 2
 # Cap on a single tick's render/write. The legacy feed TOPS THE RING UP toward
 # full rather than feeding exactly rate*dt (which kept it hovering near-empty --
@@ -109,8 +115,8 @@ class DeviceAudio:
         _AUDIO_BACKEND_SEQ += 1
         self.engine = engine            # the MODEL: bank + the host-side twin
         self._diag_seq = _AUDIO_BACKEND_SEQ
-        # The shared engine is built at 11025 Hz; the device runs 8 kHz to match
-        # the I2S port. Only the fallback render path reads this, live.
+        # The shared engine is built at 11025 Hz; the device runs AUDIO_RATE
+        # (22050 -- PICO-8's own). Only the fallback render path reads this, live.
         engine.rate = AUDIO_RATE
         self.i2s = None
         self._core1 = False             # core-1 feeder task running
@@ -345,7 +351,7 @@ class DeviceAudio:
         for. That is invisible from inside the mixer and inaudible as anything but
         "wrong speed", so measure it: the core-1 feeder blocks on the DMA drain,
         which makes its accepted-frame count a clock. eff/want == 1.0 is correct;
-        1.38 would be 11025 leaking into an 8 kHz pipe, 2.0 a frame/slot mismatch.
+        0.5 would be 11025 leaking into the 22050 pipe, 2.0 a frame/slot mismatch.
         Costs one counter read per frame and prints only while sound is audible."""
         if not AUDIO_RATE_PROBE or self._na is None:
             return

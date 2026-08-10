@@ -83,7 +83,8 @@
 // 6 * 256 = 1536 frames ~= 0.19 s @ 8 kHz -- a deep cushion the task keeps
 // topped, independent of core 0's frame jitter.
 #define MOY_DMA_DESC_NUM  6
-#define MOY_DMA_FRAME_NUM 256
+#define MOY_DMA_FRAME_NUM 512   /* 6x512 = ~140ms of hardware cushion at 22050
+                                   (was 256: ~190ms at the old 8000 rate) */
 // A finite (not portMAX_DELAY) write timeout means a stuck channel cannot wedge
 // the task forever -- it loops and retries.
 #define MOY_WRITE_TIMEOUT_MS 100
