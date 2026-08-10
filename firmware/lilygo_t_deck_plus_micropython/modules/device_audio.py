@@ -36,6 +36,7 @@ core-1 task and the PSRAM bank placement cannot be reached that way. Do not clai
 this plays on a board until a board has played it.
 """
 import json
+import time
 
 from device_util import _diag_note
 
@@ -115,7 +116,8 @@ class DeviceAudio:
         self._core1 = False             # core-1 feeder task running
         self._reused_core1 = False      # audio_start found the task already alive
         self._probe_secs = 0.0          # _rate_probe accumulator
-        self._probe_frames = None       # last frames_out() sample
+        self._probe_frames = None       # (frames_out sample, ticks_ms) last seen
+        self._probe_t0 = None           # (frames, ticks_ms) at first sound
         self._bank_rev = None           # AudioBank.rev last pushed to libmoy
         # Legacy-feed double buffer: render alternates into bufs[_buf] and
         # write()s it non-blocking; the port copies it on a background task and
@@ -347,20 +349,35 @@ class DeviceAudio:
         Costs one counter read per frame and prints only while sound is audible."""
         if not AUDIO_RATE_PROBE or self._na is None:
             return
+        # WALL CLOCK, not summed loop dt (2026-08-10): frames_out advances on
+        # core 1 through every HITCH, but the loop's dt is clamped/quantized --
+        # summing it under-counts real time, which read as a sustained ~3%
+        # "speed-up" that was pure instrument error. ticks_ms is the clock.
         self._probe_secs += dt
         if self._probe_secs < 2.0:
             return
-        secs, self._probe_secs = self._probe_secs, 0.0
+        self._probe_secs = 0.0
+        now = time.ticks_ms()
         try:
             frames, rate = self._na.frames_out()
         except Exception:   # noqa: BLE001 -- an older native module: nothing to say
             return
-        last, self._probe_frames = self._probe_frames, frames
-        if last is None or frames == last:
+        last, self._probe_frames = self._probe_frames, (frames, now)
+        if last is None or frames == last[0]:
             return                      # first sample, or nothing playing
-        eff = (frames - last) / secs
-        _diag_note("AUDIORATE", "eff=%d want=%d ratio=%.3f feed=%s"
-                   % (int(eff), rate, eff / (rate or 1),
+        secs = time.ticks_diff(now, last[1]) / 1000.0
+        if secs <= 0:
+            return
+        # Cumulative ratio since first sound: integrates every window, immune
+        # to boundary effects -- hardware clock truth after a minute.
+        if self._probe_t0 is None:
+            self._probe_t0 = (last[0], last[1])
+        f0, t0 = self._probe_t0
+        cum = time.ticks_diff(now, t0) / 1000.0
+        eff = (frames - last[0]) / secs
+        ceff = (frames - f0) / cum if cum > 0 else 0.0
+        _diag_note("AUDIORATE", "eff=%d want=%d ratio=%.3f cum=%.4f feed=%s"
+                   % (int(eff), rate, eff / (rate or 1), ceff / (rate or 1),
                       "core1" if self._core1 else "single"))
 
     def tick(self, dt):

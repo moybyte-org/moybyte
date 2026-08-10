@@ -357,10 +357,27 @@ static void moy_audio_task(void *arg) {
 
         // Blocks here while the DMA drains -- that IS the pacing, and it happens
         // on core 1, so the VM never stalls on it.
-        size_t written = 0;
-        i2s_channel_write(s_tx_chan, block, sizeof(block), &written,
-                          pdMS_TO_TICKS(MOY_WRITE_TIMEOUT_MS));
-        s_frames_out += (uint32_t)(written / sizeof(int16_t));
+        //
+        // Write the WHOLE block, retrying the remainder after a timeout
+        // (2026-08-10): the old single write dropped whatever a timeout left
+        // unwritten and moved on to render the NEXT block -- every drop skips
+        // the synth timeline forward, which the ear hears as SPED-UP audio on
+        // every cart, and which frames_out cannot see (it counts writes, so
+        // AUDIORATE read ~1.0 while the music ran fast). The sustained >1.0
+        // AUDIORATE means (1.01-1.08 steady, 1.1+ during sfx bursts) were this
+        // hole measured from the other side: rendered-minus-played.
+        size_t done = 0;
+        while (done < sizeof(block) && s_running) {
+            size_t written = 0;
+            i2s_channel_write(s_tx_chan, (const char *)block + done,
+                              sizeof(block) - done, &written,
+                              pdMS_TO_TICKS(MOY_WRITE_TIMEOUT_MS));
+            done += written;
+            if (written == 0) {
+                break;            // channel wedged: don't spin the core
+            }
+        }
+        s_frames_out += (uint32_t)(done / sizeof(int16_t));
     }
 
     if (s_tx_chan != NULL) {
