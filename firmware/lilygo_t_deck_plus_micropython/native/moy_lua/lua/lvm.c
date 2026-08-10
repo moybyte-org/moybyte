@@ -1156,6 +1156,16 @@ void luaV_finishOp (lua_State *L) {
 #define vmbreak		break
 
 
+/* Moybyte #67: pin the dispatch loop in IRAM on the Xtensa boards (S3). The
+   interpreter core otherwise executes from flash through the 32KB icache,
+   which a cart the size of celeste thrashes; the P4 (RISC-V) is excluded --
+   its 256KB L2 cache already closed this gap (#159). Section name is ours
+   (.iram1.*), collected by the IDF linker scripts like any IRAM_ATTR.
+   Gated on the toolchain's __XTENSA__, NOT ESP_PLATFORM: the build compiles
+   this file twice and the copy that wins the link doesn't get -D flags. */
+#if defined(__XTENSA__)
+__attribute__((section(".iram1.moyluavm")))
+#endif
 void luaV_execute (lua_State *L, CallInfo *ci) {
   LClosure *cl;
   TValue *k;
