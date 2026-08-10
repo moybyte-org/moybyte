@@ -479,9 +479,14 @@ to whoever called it.
   C fast path (its `__getattr__` would bypass the recorder — same trap
   `make_spr_gate` shadows against). The Phase 4 protocol tests + Phase 5 UX tail
   (crash-line mapping via `player._lua_cart_line`, the per-language symbol
-  palette in `code_layer`, the docs Lua section) shipped 2026-07-15 (`21c1278`);
-  remaining: only the `LUA_32BITS` decision (doubles are soft-float on both
-  boards' FPUs).
+  palette in `code_layer`, the docs Lua section) shipped 2026-07-15 (`21c1278`).
+  **`LUA_32BITS` is DECIDED AND ON** (`6ddaf7c`, `luaconf.h`): both boards' FPUs
+  are single-precision, so doubles would be soft-float — 32-bit floats use the
+  hardware FPU and halve TValue. The host runner (lupa) stays on 64-bit doubles,
+  so golden-frame parity is host-only for float-heavy carts and device integers
+  wrap at 2^31. Recorded because this line said "remaining: only the LUA_32BITS
+  decision" for weeks after it was made, and a 2026-08-09 perf hunt spent its
+  last lead re-proposing a lever that was already shipped.
 - **pmem persistence is DEFERRED (#66, on-glass 2026-07-14):** `pmem(i, v)` is
   RAM + a dirty mark; `Pmem.flush()` persists at cart exit (`release_world`),
   the crash capture, the workspace swap, and a periodic frame-boundary save
