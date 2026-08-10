@@ -570,6 +570,20 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
                  1 if touch.available else 0), diag)
     sram_census("desktop-up")
 
+    # #66/#67 SRAM diet: everything that needs boot-time internal RAM has taken
+    # it by here (flush bounce, poller; audio reserves at first cart start), so
+    # the Lua allocator's headroom floor drops 48->24KB and the SRAM-first
+    # grant grows by the difference. The accepted edge: a FIRST wifi start
+    # mid-cart can fail for RAM -- games are fullscreen so the wifi/OTA flows
+    # normally run with no Lua cart loaded (a closed cart frees its whole heap).
+    try:
+        import moy_lua as _ml
+        _fl = getattr(_ml, "set_sram_floor", None)
+        if _fl is not None:
+            _diag_log("boot", "lua sram floor=%dKB" % _fl(24), diag)
+    except Exception:
+        pass
+
     # #66/#67 indexed-SRAM-canvas pricing: one MEMBENCH line at boot when PERF
     # DIAG is persisted on (the T-Deck has no serial RX to ask for it later; the
     # P4 can also run `py __import__('moy_gfx').membench()` any time). Runs

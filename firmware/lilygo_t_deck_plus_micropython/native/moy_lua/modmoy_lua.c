@@ -94,6 +94,15 @@ static inline int moy_lua_region(const void *p) {
     return 1;
 #endif
 }
+
+// The SRAM-first headroom floor, now a runtime knob (set_sram_floor). 48KB
+// was sized to leave room for a WiFi stack that might start at any moment --
+// but the census showed that on a 269KB internal heap it leaves celeste's Lua
+// 9KB (97% PSRAM, the measured-2x regime). run_desktop lowers it to 24KB
+// AFTER wifi autoconnect has run (whatever needed internal has taken it by
+// then); the accepted edge is a FIRST wifi start mid-cart failing -- close
+// the cart (its heap frees wholesale) and retry.
+static size_t g_sram_floor = 48 * 1024;
 #endif
 static int16_t *g_q = NULL;      // _batch_arr int16 view (buffer is gc-pinned via root)
 static size_t g_qlen = 0;        // in int16 slots
@@ -125,7 +134,7 @@ static void *moy_lua_alloc(void *ud, void *ptr, size_t osize, size_t nsize) {
     int ro = (ptr != NULL) ? moy_lua_region(ptr) : -1;  // before realloc frees it
     void *np = NULL;
     if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
-            >= nsize + (48 * 1024)) {
+            >= nsize + g_sram_floor) {
         np = heap_caps_realloc(ptr, nsize, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     } else {
         g_sram_denied += nsize;  // floor pressure: bytes that wanted SRAM
@@ -581,6 +590,22 @@ static mp_obj_t moy_lua_alloc_stats(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_lua_alloc_stats_obj, moy_lua_alloc_stats);
 
+// set_sram_floor(kb) -> effective kb. Clamped [16, 256]; no-op (returns the
+// compiled default) on builds with no region choice.
+static mp_obj_t moy_lua_set_sram_floor(mp_obj_t kb_obj) {
+#ifdef MOY_LUA_PSRAM
+    mp_int_t kb = mp_obj_get_int(kb_obj);
+    if (kb < 16) kb = 16;
+    if (kb > 256) kb = 256;
+    g_sram_floor = (size_t)kb * 1024;
+    return mp_obj_new_int(kb);
+#else
+    (void)kb_obj;
+    return mp_obj_new_int(48);
+#endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(moy_lua_set_sram_floor_obj, moy_lua_set_sram_floor);
+
 static const mp_rom_map_elem_t moy_lua_module_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_lua)},
     {MP_ROM_QSTR(MP_QSTR_init), MP_ROM_PTR(&moy_lua_init_obj)},
@@ -592,6 +617,7 @@ static const mp_rom_map_elem_t moy_lua_module_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_mem_kb), MP_ROM_PTR(&moy_lua_mem_kb_obj)},
     {MP_ROM_QSTR(MP_QSTR_peak_kb), MP_ROM_PTR(&moy_lua_peak_kb_obj)},
     {MP_ROM_QSTR(MP_QSTR_alloc_stats), MP_ROM_PTR(&moy_lua_alloc_stats_obj)},
+    {MP_ROM_QSTR(MP_QSTR_set_sram_floor), MP_ROM_PTR(&moy_lua_set_sram_floor_obj)},
 };
 static MP_DEFINE_CONST_DICT(moy_lua_module_globals, moy_lua_module_globals_table);
 

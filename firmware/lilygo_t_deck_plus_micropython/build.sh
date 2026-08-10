@@ -408,6 +408,26 @@ if [ "${CACHE_GEOMETRY}" = "fast" ]; then
   done
 fi
 
+# IRAM diet (#66/#67, 2026-08-10): move FreeRTOS/ringbuf/heap code out of IRAM
+# into flash. The census measured .iram0.text at 124KB of the S3's 512KB SRAM
+# while the internal HEAP was 269KB total with celeste's Lua heap winning just
+# 9KB of it (97% PSRAM, the measured-2x-slower regime) -- these three flags are
+# the movable slice (~13-20KB back to the heap, which the SRAM-first Lua
+# allocator takes automatically). The cost is those calls running through the
+# 32KB icache like everything else. Same strip+append+guard pattern as the
+# cache geometry above.
+sed -i \
+  -e '/^CONFIG_FREERTOS_PLACE_FUNCTIONS_INTO_FLASH=y$/d' \
+  -e '/^CONFIG_RINGBUF_PLACE_FUNCTIONS_INTO_FLASH=y$/d' \
+  -e '/^CONFIG_HEAP_PLACE_FUNCTION_INTO_FLASH=y$/d' \
+  "${SDKCONFIG_BASE}"
+for opt in \
+  'CONFIG_FREERTOS_PLACE_FUNCTIONS_INTO_FLASH=y' \
+  'CONFIG_RINGBUF_PLACE_FUNCTIONS_INTO_FLASH=y' \
+  'CONFIG_HEAP_PLACE_FUNCTION_INTO_FLASH=y'; do
+  printf '%s\n' "${opt}" >> "${SDKCONFIG_BASE}"
+done
+
 # External MSPI speed (#66, T-Deck S3): run octal flash + octal PSRAM at 120MHz.
 # PSRAM 120 selects a 240MHz MSPI timing tuple; leaving flash at 80MHz hit an
 # unsupported ESP-IDF 240/80 timing-table path, so the tested build moves both
@@ -770,6 +790,9 @@ if [ -f "${GEN_SDKCONFIG}" ]; then
   done <<EOF
 ${WANT_CACHE}
 ${WANT_EXTMEM}
+CONFIG_FREERTOS_PLACE_FUNCTIONS_INTO_FLASH=y
+CONFIG_RINGBUF_PLACE_FUNCTIONS_INTO_FLASH=y
+CONFIG_HEAP_PLACE_FUNCTION_INTO_FLASH=y
 EOF
 fi
 
