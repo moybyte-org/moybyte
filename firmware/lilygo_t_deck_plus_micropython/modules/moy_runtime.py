@@ -646,6 +646,14 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     # fires on SPIKES, so a steady per-frame cost that never crosses HITCH_MS was
     # invisible until this line existed (2026-07-29 fps hunt).
     _loop_acc = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    # Pacing debt (#77, 2026-08-10): ms the loop is BEHIND its cadence. The old
+    # per-frame clamp couldn't pace a frameskip pair whose FULL frame overruns
+    # the 33ms budget (celeste: 50ms full + 33ms padded skip = 83ms pairs, the
+    # game 20% slow and 12fps -- worse on both axes). An over-budget frame now
+    # borrows from the next frames' sleeps so the PAIR lands on cadence
+    # (50 + 16 = 66ms = two 30fps slots). Capped at one pair so a real hitch
+    # (a 200ms GC) doesn't eat the sleeps for a second afterwards.
+    _pace_debt = 0
     _boot_note("drawing the first frame")
     # NOT a second logo: the boot splash has held this exact picture for the
     # whole boot, so arming it again would replay the splash and delay the
@@ -937,7 +945,17 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             _fms = frame_ms
         if _fms < frame_ms:
             _fms = frame_ms                     # never pace FASTER than the loop cap
-        _t_sleep = _fms - elapsed if elapsed < _fms else 0
+        if elapsed < _fms:
+            _t_sleep = _fms - elapsed
+            if _pace_debt:                      # pay the debt out of this sleep
+                _take = _t_sleep if _t_sleep < _pace_debt else _pace_debt
+                _t_sleep -= _take
+                _pace_debt -= _take
+        else:
+            _t_sleep = 0
+            _pace_debt += elapsed - _fms
+            if _pace_debt > 2 * _fms:
+                _pace_debt = 2 * _fms           # unpayable: just run flat out
         # LOOP accumulation (see _loop_acc): plain int adds, one per stage per
         # frame. Done BEFORE the sleep so `frame` is work, and `sleep` is carried
         # separately -- a paced loop must not read as a slow one.
