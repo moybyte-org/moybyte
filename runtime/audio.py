@@ -138,7 +138,20 @@ class SFX:
     def __init__(self, steps=None, speed=8, loop=False, loop_start=0):
         # normalize each step to a [pitch, wave, vol(, eff)] list of ints
         self.steps = [self._norm(s) for s in (steps or [])]
-        self.speed = max(1, int(speed))
+        # FRACTIONAL speeds are legal, exactly as libmoy declares them
+        # ("float speed; fractions legal"; <= 0 falls to the SPEC default 8).
+        # The old max(1, int(speed)) was a pre-#151 leftover -- the music side
+        # learned fractional speeds, this side never did -- and it truncated
+        # the p8 imports' 7.5/3.75 melodies so every phrase overran its music
+        # row and got RETRIGGERED early: the tune audibly hurries, while every
+        # tempo clock measures exact (the 2026-08-10 "sped up on device" hunt --
+        # device AND host sim both played the truncation; only a raw-file
+        # libmoy host played the cart as authored).
+        try:
+            speed = float(speed)
+        except (TypeError, ValueError):
+            speed = 8.0
+        self.speed = speed if speed > 0 else 8.0
         self.loop = bool(loop)
         # Where a looping SFX jumps BACK to (#170: the p8 loop range -- play
         # 0..end once, then repeat loop_start..end). 0 = loop the whole list,

@@ -168,6 +168,24 @@ def scenarios():
             _note(45, 0, 6), _note(47, 0, 6), _note(52, 0, 6), _note(55, 0, 6),
         ]}], "music": []}, ["sfx 0 0", f"render {int(RATE * 0.4)}"]))
 
+    # FRACTIONAL sfx speeds (2026-08-10): libmoy declares speed float,
+    # "fractions legal", and the p8 imports depend on it -- a 7.5-steps/s
+    # melody lasts exactly its 0.234-rows/s music row. The Python twin
+    # truncated these for years (max(1, int(speed))), so every ported phrase
+    # overran its row and got retriggered early -- audibly "sped up" on any
+    # host that plays the twin's bank while every clock measured exact. One
+    # bare fractional sfx + the row-retrigger composition, so both the step
+    # clock and the phrase/row interaction stay pinned.
+    out.append(("speed_frac", {"sfx": [{
+        "speed": 7.5, "loop": False, "steps": [
+            _note(40 + (i % 5), 1, 6) for i in range(8)
+        ]}], "music": []}, ["sfx 0 0", f"render {int(RATE * 1.2)}"]))
+    out.append(("speed_frac_row", {
+        "sfx": [{"speed": 7.5, "loop": False,
+                 "steps": [_note(38 + (i % 7), 2, 6) for i in range(16)]}],
+        "music": [{"speed": 0.46875, "loop": True, "pattern": [[0], [0]]}],
+    }, ["music 0", f"render {int(RATE * 5)}"]))
+
     return out
 
 
