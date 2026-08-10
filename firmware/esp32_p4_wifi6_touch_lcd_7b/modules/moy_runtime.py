@@ -686,6 +686,12 @@ def run_desktop(fps_cap=60):
     _boot_note("building the desktop")
     ws = Workstation(comp, game, inp, carts,
                      sys_canvas=sys_canvas, font_scale=FONT_SCALE)
+    # Per-run cart canvas factory (SPEC.md 1/3.1): a cart declaring a smaller
+    # raster plays on its own off-screen canvas -- the exact constructor the
+    # boot `game` canvas uses -- and P4SystemCanvas.blit_game (PPA) upscales it
+    # like any game composite (a 128x120 view fills the 600px height at 5x).
+    ws.make_game_canvas = lambda w, h: DeviceCanvas(
+        _LayerComp(int(w), int(h), gfx))
     # #67 Phase 1: the Lua cart runtime (shared glue in device_api.py) -- wired
     # only when the moy_lua native module is in this build; without it a
     # "runtime": "lua" cart opens the Player's runtime-missing panel.

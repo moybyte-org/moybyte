@@ -416,6 +416,18 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     _boot_note("building the desktop")
     ws = Workstation(comp, canvas, inp, carts)
     sram_census("console")
+    # Per-run cart canvas factory (SPEC.md 1/3.1): a cart declaring a smaller
+    # raster (celeste's 128x128) plays on its own off-screen _LayerComp-backed
+    # DeviceCanvas; bind_run_canvas promotes the boot canvas (the glass) to
+    # SYSTEM canvas for the run and wm.composite_game upscales through
+    # DeviceCanvas.blit_game (blit565_scale). No native kernel -> None, so the
+    # Player refuses the cart cleanly instead of crawling per-pixel.
+    def _mk_game_canvas(w, h):
+        if getattr(canvas, "_gfx", None) is None:
+            return None
+        from device_canvas import _LayerComp
+        return DeviceCanvas(_LayerComp(int(w), int(h), canvas._gfx))
+    ws.make_game_canvas = _mk_game_canvas
     # cover_diet stays OFF (owner call 2026-08-03): thumbs remain warm across a
     # game run -- the trade of a longer GC pause (~243ms vs ~150ms at the dieted
     # live set, roughly one mid-play collect per 10s) was judged worse than any

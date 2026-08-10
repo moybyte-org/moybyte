@@ -337,6 +337,9 @@ class DeviceCanvas:
         # virtually every frame. The big verbs call self._pump() right after
         # their native call instead. None on layers / host fakes (no bounce).
         self._pump = getattr(compositor, "pump_if_pending", None)
+        # Cart-view crop scratch (SPEC.md 10; see blit_game): one pooled
+        # _LayerComp reused across frames, allocated on first cropped composite.
+        self._view_scratch = None
         # DMA double-buffer (#40, DEFAULT ON -- moy_compositor.DOUBLE_BUFFER, device-
         # confirmed stable): the compositor's BACK buffer ping-pongs between two
         # physical buffers each flush, so this canvas must re-point its draw target
@@ -1001,6 +1004,56 @@ class DeviceCanvas:
         self._fill(x, y + h - 1, w, 1, col)
         self._fill(x, y, 1, h, col)
         self._fill(x + w - 1, y, 1, h, col)
+
+    # -- the native game composite (probed via getattr by wm.composite_game) --
+
+    def blit_game(self, gc, ox, oy, scale, defer=False, src=None):
+        """FullscreenStackWM's device composite for a cart-declared small canvas
+        (SPEC.md 1/3.1): THIS canvas is the promoted system surface (the glass),
+        `gc` the cart's off-screen raster. Bezel bands + one integer upscale
+        through the moy_gfx kernel; a cart-declared view crops through a scratch
+        layer via one dest-clipped blit565 at a NEGATIVE offset (the P4's
+        glass-proven trick -- no crop kernel needed). The bands repaint every
+        frame because the root ping-pongs two physical buffers (the
+        letterbox_inplace lesson: paint into the buffer being drawn into).
+        `defer` is accepted for signature parity with the P4; there is no async
+        engine here, so it is ignored."""
+        fb = getattr(gc, "flush_batch", None)
+        if fb is not None:
+            fb()
+        if self._batch_arr[0] > 4:
+            self.flush_batch()
+        g = self._gfx
+        if g is None:
+            return                     # no-gfx build: the factory refused earlier
+        gw, gh = gc.w, gc.h
+        sx, sy, vw, vh = src if src is not None else (0, 0, gw, gh)
+        ox = int(ox)
+        oy = int(oy)
+        scale = int(scale)
+        rw = vw * scale
+        rh = vh * scale
+        # Bezel: only the four strips outside the viewport (raw 565 black).
+        if oy > 0:
+            self._fill(0, 0, self.w, oy, 0)
+        if oy + rh < self.h:
+            self._fill(0, oy + rh, self.w, self.h - (oy + rh), 0)
+        if ox > 0:
+            self._fill(0, oy, ox, rh, 0)
+        if ox + rw < self.w:
+            self._fill(ox + rw, oy, self.w - (ox + rw), rh, 0)
+        src_buf = gc._buf
+        if sx or sy or vw != gw or vh != gh:
+            scr = self._view_scratch
+            if scr is None or scr.size() != (vw, vh):
+                scr = self._view_scratch = _LayerComp(vw, vh, g)
+            g.blit565(scr.framebuffer(), vw, vh, -sx, -sy,
+                      src_buf, gw, gh, -1)
+            src_buf = scr.framebuffer()
+        g.blit565_scale(self._buf, self.w, self.h, ox, oy,
+                        src_buf, vw, vh, scale)
+        if self._pump is not None:
+            self._pump()               # feed the in-flight SRAM-bounce flush
 
     def fill_rects(self, arr, n=-1, ox=0, oy=0, c=-1):
         # #163 span-batch: n packed int16 quads (x, y, w, h, ci) in ONE call.
