@@ -2877,7 +2877,14 @@ class Workstation:
         Sky Run). Tools/apps and every console screen keep 60 -- the pointer must
         stay responsive. The device loop re-reads this every iteration; the host
         simulator paces via its own --fps flag."""
-        if (FPS_GOVERNOR and self.wm.top_is_player()
+        # #77 pairing (2026-08-10, learned on zoomed celeste): FRAMESKIP implies
+        # the cap. The p8 ports pace THEMSELVES by frame-quantized dt with a
+        # never-fast rule -- against an UNCAPPED skip loop (~30ms frames) the
+        # quantizer must halve to avoid running fast, so skip made the game
+        # SLOWER (20Hz -> 16.5Hz). Capped at 30, dt=33.3ms quantizes to
+        # tick-every-frame: correct 30Hz logic, render at 15 -- the trade skip
+        # promises. dt-driven carts are indifferent to the cap either way.
+        if ((FPS_GOVERNOR or self.frameskip) and self.wm.top_is_player()
                 and self.cart_error is None):
             cart = self.cart
             if cart is not None and cart.get("type") == "game":
