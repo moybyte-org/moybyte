@@ -97,12 +97,24 @@ def _normalize_canvas(value):
     is a CAPABILITY field: a bad value is not dropped here, because the loader
     has no way to refuse -- the evidence is carried so Player.start can refuse
     the cart by name (like an unknown `runtime`) instead of running it at
-    dimensions it did not ask for, which would break every coordinate in it."""
+    dimensions it did not ask for, which would break every coordinate in it.
+
+    The dict form ({"width": W, "height": H, ...}) is the LEGACY moybyte shape
+    -- carts already seeded on boards carry it (a stale celeste on the P4
+    refused the day this normalizer shipped without it), so it normalizes like
+    the string when its size is in the set."""
     if value is None:
         return None
     if isinstance(value, str):
         wh = CANVAS_SIZES.get(value)
         if wh is not None:
+            return wh
+    elif isinstance(value, dict):
+        try:
+            wh = (int(value.get("width")), int(value.get("height")))
+        except (TypeError, ValueError):
+            return value
+        if wh in CANVAS_SIZES.values():
             return wh
     return value
 

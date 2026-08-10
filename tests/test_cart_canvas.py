@@ -92,6 +92,14 @@ def test_normalize_canvas_closed_set():
     assert _normalize_canvas("256x192") == "256x192"
     assert _normalize_canvas("128x120") == "128x120"
     assert _normalize_canvas({"w": 128}) == {"w": 128}
+    # The LEGACY moybyte dict form (carts already seeded on boards carry it --
+    # a stale celeste on the P4 was refused without this) normalizes when its
+    # size is in the set, and stays refusal evidence when it is not.
+    assert _normalize_canvas({"palette": "moy64", "height": 240,
+                              "width": 320}) == (320, 240)
+    assert _normalize_canvas({"width": 128, "height": 128}) == (128, 128)
+    assert _normalize_canvas({"width": 999, "height": 2}) == \
+        {"width": 999, "height": 2}
 
 
 def test_canvas_str_round_trip():

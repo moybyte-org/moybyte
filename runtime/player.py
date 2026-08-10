@@ -596,7 +596,9 @@ class Player:
         # canvas would letterbox it into a corner and lie about W/H.
         cv = cart.get("canvas") if cart else None
         if cv is not None and (not isinstance(cv, (tuple, list)) or len(cv) != 2):
-            self.cart_error = 'no "%s" canvas (SPEC.md 3.1)' % (cv,)
+            # clip the repr: a malformed value can be an arbitrary object and
+            # the panel wraps 8px cells -- the NAME matters, not the whole blob
+            self.cart_error = 'no "%.32s" canvas (SPEC.md 3.1)' % (cv,)
             self.crash_line = None
             return False
         ws.release_run_canvas()        # a straggler bind never leaks into this run
