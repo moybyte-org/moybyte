@@ -776,6 +776,16 @@ class Workstation:
         # reassigns it later (the web console does `ws.canvas = CommandCanvas(...)`).
         self._sys_canvas = sys_canvas if (sys_canvas is not None
                                           and sys_canvas is not canvas) else None
+        # Per-run cart canvas (SPEC.md 1/3.1): a cart declaring a smaller raster
+        # plays on its own small canvas, bound by bind_run_canvas for the run and
+        # restored at run death (Player.release_world). make_game_canvas is the
+        # backend attach point (like make_api): a factory (w, h) -> canvas, or
+        # None on a tier that can't build one yet -- Player then refuses cleanly.
+        self.make_game_canvas = None
+        self._run_canvas = None            # the bound small canvas, while a run holds it
+        self._run_canvas_stock = None      # what self.canvas was before the bind
+        self._run_canvas_shared = False    # True when the bind promoted stock to system
+        self._run_canvas_cache = {}        # {(w, h): canvas} -- 3 sizes max, reused
         # `font_scale` is the REQUESTED system-UI scale (persisted). It only takes
         # visible effect on a distinct SYSTEM canvas that can render scaled text; in
         # the degradation case (no system canvas -- e.g. the T-Deck, whose framebuf
@@ -4516,6 +4526,56 @@ class Workstation:
 
     def _composite_game(self):
         return self.wm.composite_game()
+
+    # -- per-run cart canvas (SPEC.md 1/3.1) ---------------------------------
+
+    def bind_run_canvas(self, w, h):
+        """Bind a per-run GAME canvas for a cart whose manifest declares a
+        smaller raster: the cart draws (and W/H report) the declared size, and
+        the WM's viewport()/composite scale it up exactly like a cart-declared
+        view -- on a shared-canvas tier (the T-Deck, where the boot canvas IS
+        the glass) the boot canvas is promoted to SYSTEM canvas for the run, so
+        `sc is gc` stops short-circuiting and the composite runs. Returns True
+        when bound (or already native-size); False when this backend has no
+        factory -- the caller refuses the cart cleanly (SPEC.md 3.1), never
+        runs it at dimensions it did not ask for."""
+        stock = self.canvas
+        if w == stock.w and h == stock.h:
+            return True                 # declared == native raster: nothing to bind
+        mk = self.make_game_canvas
+        if mk is None:
+            return False
+        small = self._run_canvas_cache.get((w, h))
+        if small is None:
+            try:
+                small = mk(w, h)
+            except Exception as exc:  # noqa: BLE001 -- an alloc failure refuses, not crashes
+                print("Moybyte run canvas failed:", _err_text(exc))
+                small = None
+            if small is None:
+                return False
+            self._run_canvas_cache[(w, h)] = small
+        self._run_canvas = small
+        self._run_canvas_stock = stock
+        self._run_canvas_shared = self._sys_canvas is None
+        if self._run_canvas_shared:
+            self._sys_canvas = stock    # promote: the boot canvas is the glass
+        self.canvas = small
+        return True
+
+    def release_run_canvas(self):
+        """Undo bind_run_canvas at run death (Player.release_world) -- the
+        cart_quit pattern, idempotent. Identity-guarded so a backend that
+        swapped ws.canvas mid-run (the web-view Tee) is never clobbered."""
+        stock = self._run_canvas_stock
+        if stock is None:
+            return
+        if self.canvas is self._run_canvas:
+            self.canvas = stock
+        if self._run_canvas_shared and self._sys_canvas is stock:
+            self._sys_canvas = None     # back to the shared-canvas degradation
+        self._run_canvas = self._run_canvas_stock = None
+        self._run_canvas_shared = False
 
     # -- redraw-on-change (#44 step 1) ---------------------------------------
 

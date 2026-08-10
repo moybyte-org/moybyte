@@ -382,6 +382,15 @@ class FullscreenStackWM:
         if sc is gc:
             return
         ox, oy, scale = self.viewport()
+        # Native composite probe (the wm_windowed._blit_game convention): a
+        # system canvas with a blit_game verb scales + letterboxes in C -- the
+        # T-Deck path for a cart-declared small canvas (SPEC.md 1/3.1), where
+        # the boot DeviceCanvas was promoted to system canvas and neither side
+        # has an index `buf` for the Python loops below.
+        bg = getattr(sc, "blit_game", None)
+        if bg is not None:
+            bg(gc, ox, oy, scale, src=self._view_src())
+            return
         sc.cls(_VIEWPORT_BEZEL)                     # letterbox fill
         gbuf = getattr(gc, "buf", None)
         sbuf = getattr(sc, "buf", None)

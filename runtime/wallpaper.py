@@ -105,7 +105,33 @@ class Wallpaper:
         if rl is not None:
             rl("wallpaper")
 
+    def _stock_bracket(self):
+        """The backdrop never follows a cart's private raster: while a per-run
+        cart canvas (SPEC.md 1/3.1) is bound, every live ws.canvas read in this
+        component must see the STOCK canvas the wallpaper world lives on. This
+        returns (restore_needed, previous) after pointing ws.canvas at stock --
+        pair with _stock_unbracket in a finally."""
+        ws = self.ws
+        stock = getattr(ws, "_run_canvas_stock", None)
+        if stock is None or ws.canvas is stock:
+            return (False, None)
+        prev = ws.canvas
+        ws.canvas = stock
+        return (True, prev)
+
+    def _stock_unbracket(self, bracket):
+        restore, prev = bracket
+        if restore:
+            self.ws.canvas = prev
+
     def compile(self, cart):
+        b = self._stock_bracket()
+        try:
+            self._compile(cart)
+        finally:
+            self._stock_unbracket(b)
+
+    def _compile(self, cart):
         """Compile a wallpaper cart into its own namespace + grab its _update/_draw,
         running its _init. Guarded: any failure leaves the backdrop on the solid
         fill (a broken wallpaper must never take down the desktop)."""
@@ -144,6 +170,13 @@ class Wallpaper:
                 and self._wp_draw is not None and dt > 0)
 
     def draw(self, dt):
+        b = self._stock_bracket()       # a bound cart canvas never hosts the backdrop
+        try:
+            self._paint(dt)
+        finally:
+            self._stock_unbracket(b)
+
+    def _paint(self, dt):
         """Paint the backdrop: run the wallpaper cart's _update/_draw, or a solid
         fill. Always fully clears the canvas so the foreground draws over a clean
         backdrop. Guarded so a misbehaving wallpaper degrades to a fill.

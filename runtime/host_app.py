@@ -263,6 +263,9 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1, windowed=Fals
     inp = InputState()
     ws = console.Workstation(_NullComp(), canvas, inp, carts,
                              sys_canvas=sys_canvas, font_scale=font_scale)
+    # Per-run cart canvas factory (SPEC.md 1/3.1): a cart declaring a smaller
+    # raster plays on its own Canvas; the WM composites it up like a view.
+    ws.make_game_canvas = lambda w, h: Canvas(w, h)
     # #67 dual-runtime seam: the lupa-backed Lua cart runtime, injected only when
     # lupa is importable (an optional dev dependency) -- without it a "lua" cart
     # opens the Player's runtime-missing panel, same as today's device builds.
