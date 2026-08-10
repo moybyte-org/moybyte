@@ -75,18 +75,34 @@ def push_cart(board, cart_dir, name, log=print):
         # base64 rather than a repr: a cart's main.lua may hold any byte (the
         # text_bytes scene prints 0xFF on purpose), and a repr of that is not
         # something to round-trip through a serial REPL.
+        #
+        # Each chunk decodes STRAIGHT into the open file. The first shape of
+        # this accumulated the whole file's base64 in one board-side string
+        # via repeated += -- O(n^2) reallocation in whatever RAM the running
+        # console left behind, which is how a 16KB map.moymap could fail to
+        # upload on a board with megabytes free. Three wire realities shape
+        # the replacement (all learned by tripping over them): the device's
+        # `py` handler builds a FRESH env per command, so state must hang on
+        # `ws`, never on a bare name or an import; cmd() RESENDS on a lost
+        # reply, so each write is seek-addressed (a resend rewrites the same
+        # bytes -- idempotent, per the p4_autotest warning); and chunks stay
+        # a multiple of 4 so every piece decodes independently.
         b64 = binascii.b2a_base64(blob).decode().strip()
-        board.pyexec("ws._blob = ''")
-        for i in range(0, len(b64), board.CHUNK - 40):
-            part = b64[i:i + board.CHUNK - 40]
-            if not board.pyexec("ws._blob += %r" % part):
-                raise RuntimeError("upload of %s failed" % fn)
-        ok = board.pyexec(
-            "import binascii\n"
-            "_f = open(%r, 'wb')\n"
-            "_f.write(binascii.a2b_base64(ws._blob))\n"
-            "_f.close()\n" % ("%s/%s" % (dst, fn)))
-        if not ok:
+        step = (board.CHUNK - 72) & ~3          # ~55-char prefix + margin
+        board.pyexec("ws._b2 = __import__('binascii')")
+        if not board.pyexec("ws._pf = open(%r, 'wb')" % ("%s/%s" % (dst, fn))):
+            raise RuntimeError("open of %s failed" % fn)
+        for i in range(0, len(b64), step):
+            part = ("(ws._pf.seek(%d), ws._pf.write(ws._b2.a2b_base64(%r)))"
+                    % (i // 4 * 3, b64[i:i + step]))
+            if not board.pyexec(part):
+                # one retry after a collect: a transient alloc failure mid-
+                # session is exactly what a gc pass clears
+                board.pyexec("__import__('gc').collect()")
+                if not board.pyexec(part):
+                    board.pyexec("ws._pf.close()")
+                    raise RuntimeError("upload of %s failed" % fn)
+        if not board.pyexec("ws._pf.close()"):
             raise RuntimeError("write of %s failed" % fn)
         log("    %-16s %d bytes" % (fn, len(blob)))
     # Rebuild the cart list in place. _all_carts is what the launcher's items
