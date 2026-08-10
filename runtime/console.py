@@ -4505,12 +4505,13 @@ class Workstation:
     def game_view(self):
         """The running cart's declared logical viewport (the additive
         `view(w, h)` cart verb): a centered (sx, sy, w, h) source rect of the
-        320x240 game canvas, or None for the full canvas. The fullscreen
-        composite scales the VIEW to the surface instead of the container --
-        celeste's 128x128 p8 screen fills the P4 glass at 4x instead of riding
-        the 320x240 canvas's 2x -- and game_xy maps taps back through it.
-        Lives on the shared InputState (the cart_quit pattern) so the verb
-        needs no console handle; Player.start clears it per run."""
+        game canvas, or None for the full canvas. The fullscreen composite
+        scales the VIEW to the surface instead of the container -- celeste's
+        128x128 cart canvas (SPEC.md 3.1) concedes 8 rows via view(128, 120)
+        and fills a 4:3 screen's height (2x on the handheld, 5x on the P4)
+        instead of letterboxing the square -- and game_xy maps taps back
+        through it. Lives on the shared InputState (the cart_quit pattern) so
+        the verb needs no console handle; Player.start clears it per run."""
         v = getattr(self.input, "game_view", None)
         if not v:
             return None
