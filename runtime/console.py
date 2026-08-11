@@ -1498,6 +1498,7 @@ class Workstation:
         # #68: apply the persisted diagnostics gate (kid-mode default OFF).
         self.set_diag_live(self.system.get("diag_live", False), persist=False)
         self.set_diag_sd(self.system.get("diag_sd", False), persist=False)
+        self.set_show_fps(self.system.get("show_fps", True), persist=False)
         # #77: apply the persisted frameskip gate (default OFF).
         self.set_frameskip(self.system.get("frameskip", False), persist=False)
 
@@ -1717,6 +1718,21 @@ class Workstation:
         self._dirty = True
         if persist:
             self.system["frameskip"] = self.frameskip
+            self._persist_system()
+
+    def set_show_fps(self, on, persist=True):
+        """Flip the in-game FPS chip (Settings -> SHOW FPS) and persist it.
+        The chip is GAME-domain (it rides the cart's canvas and its composite
+        scale -- 2x-big on a 128px cart, and fold-compatible for free, #190),
+        so hiding it is purely cosmetic: the perf fields keep updating and
+        PERF DIAG is untouched. Hiding also disables the chip's tap-to-toggle
+        breakdown HUD, so clear that too rather than strand it on-screen."""
+        self.show_fps = bool(on)
+        if not self.show_fps:
+            self.perf_hud = False
+        self._dirty = True
+        if persist:
+            self.system["show_fps"] = self.show_fps
             self._persist_system()
 
     def _persist_system(self):

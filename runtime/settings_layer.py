@@ -83,6 +83,10 @@ class SettingsLayer:
         # OFF pending the on-glass feel verdict. Reads ws.frameskip (the "diag"
         # kind's generic getattr ON/OFF rendering).
         ("frameskip", "FRAMESKIP", "diag"),
+        # SHOW FPS: the in-game FPS chip (default ON). It rides the GAME
+        # canvas, so on a small-canvas cart (celeste) it scales up with the
+        # composite -- 2x size -- which is what prompted the off switch.
+        ("show_fps", "SHOW FPS", "diag"),
         # PERF DIAG (#68 "kid mode" gate): OFF (default) skips the diag costs a
         # player can FEEL on device -- the 30s forced GC sample and the periodic
         # diag->SD write -- and hushes the live serial echo. Crash/cart-exit
@@ -696,6 +700,8 @@ class SettingsLayer:
             ws.set_diag_sd(not ws.diag_sd)
         elif key == "frameskip":
             ws.set_frameskip(not ws.frameskip)
+        elif key == "show_fps":
+            ws.set_show_fps(not ws.show_fps)
         else:
             ws.set_diag_live(not ws.diag_live)
 
