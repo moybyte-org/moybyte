@@ -2768,7 +2768,7 @@ def test_device_audio_wired():
     # and a completion flag gates the next write, so write() can never stall the
     # single-threaded render loop (the cause of the reported FPS drop / crackle).
     assert "self.i2s.irq(self._on_done)" in device_audio
-    assert "self.engine.render_into(buf, n)" in device_audio
+    assert "self._na.render(buf, n)" in device_audio
     assert "if self._busy:" in device_audio
     # sounds.json storage in the shared cart store.
     assert "def save_sounds(cart, bank_dict):" in carts
@@ -2912,16 +2912,20 @@ def test_native_moy_audio_is_vendored_libmoy():
     assert "moy_audio/micropython.cmake" in build
 
     # DeviceAudio forwards verbs and hands the bank over ONCE per cart, keeping a
-    # Python-engine fallback so a build WITHOUT moy_audio still makes sound.
+    # A build WITHOUT moy_audio is SILENT -- the Python-twin fallback died with
+    # moycore stage 0 (#97): the twin's drift class was the bug, and silence is
+    # the honest degradation. The absence branch must exist and say so.
     assert "import moy_audio" in device_audio
     assert "self._na = moy_audio" in device_audio
-    assert "self._na = None" in device_audio                     # fallback branch
+    assert "self._na = None" in device_audio                     # absence branch
+    assert "SILENT" in device_audio
+    assert "self.engine.play_sfx" not in device_audio            # no twin lane
+    assert "self.engine.render_into" not in device_audio
     assert "na.bank_load(json.dumps(bank.to_dict()))" in device_audio
     assert "def _sync_bank(self):" in device_audio               # re-push after an edit
     assert "self.engine.bank.rev != self._bank_rev" in device_audio
     assert "self._na.sfx(" in device_audio
     assert "self._na.render(buf, n)" in device_audio
-    assert "self.engine.render_into(buf, n)" in device_audio     # Python fallback
     # The per-frame voice marshalling is gone -- nothing crosses per frame now.
     # Matched as CALLS, since the module docstring names them all explaining what
     # went away.
@@ -3006,11 +3010,13 @@ def test_native_moy_audio_core1_task_wired():
     assert "if self._core1:\n            return" in device_audio
     assert "self._core1 = True" in device_audio
     # The legacy single-core feed stays as the FALLBACK (machine.I2S) so a bad result
-    # is revert-able (MOY_AUDIO_CORE1=False) and a no-moy_audio build still works. It now
-    # TOPS the deep DMA ring UP toward full each tick (the single-core crackle fix)
-    # instead of feeding exactly rate*dt (which kept the ring near-empty -> under-ran).
+    # is revert-able (MOY_AUDIO_CORE1=False). It renders through the NATIVE module
+    # (no moy_audio -> no I2S open at all: silence, #97 stage 0), and TOPS the deep
+    # DMA ring UP toward full each tick (the single-core crackle fix) instead of
+    # feeding exactly rate*dt (which kept the ring near-empty -> under-ran).
     assert "legacy single-core feed" in device_audio
-    assert "if not self._core1:" in device_audio            # only open machine.I2S in fallback
+    # only open machine.I2S in fallback, and only with a renderer to feed it
+    assert "if not self._core1 and self._na is not None:" in device_audio
     assert "self.i2s = I2S(" in device_audio
     assert "AUDIO_IBUF_FRAMES = AUDIO_IBUF // 2" in device_audio
     assert "self._buffered" in device_audio                  # software ring-occupancy estimate

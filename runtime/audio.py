@@ -3,8 +3,7 @@
 Like runtime/editors.py, this is pure logic -- no I/O, no hardware, no canvas --
 so the *same* file backs the host reference (imported as runtime.audio) and the
 MicroPython device port (frozen as the top-level module `audio`, staged by
-build.sh). Only `math` is imported, so it freezes cleanly and runs under both
-CPython and MicroPython.
+build.sh).
 
 It holds two things:
 
@@ -15,28 +14,35 @@ It holds two things:
                                                 up to 4 ids -- one per channel)
        AudioBank = {sfx:[SFX], music:[track]}  (the whole cart bank -> sounds.json)
 
-  2. A software SYNTH + MIXER (AudioEngine) that turns that model into signed-16-bit
-     mono PCM via render(nframes). render() is the seam the HOST backends consume
-     (an SDL stream, a test recorder, the web view's per-frame PCM).
+  2. AudioEngine -- the per-cart engine object. On the HOST it synthesizes by
+     driving the vendored libmoy C through runtime/audio_binding.py (a ctypes
+     .so built from the exact source the boards compile), and render(nframes)
+     pulls signed-16-bit mono PCM -- the seam the host backends consume (the
+     SDL stream, the test recorder, the web console's per-frame PCM). On the
+     DEVICE the binding is absent by design and the class is the MODEL holder
+     only: it carries the bank the Music editor edits and the master level,
+     while playback lives in the native moy_audio module (device_audio.py).
 
-THE SYNTH IS A TWIN OF libmoy, NOT AN ORIGINAL (#97)
-The synthesis below -- the eight waveshapes, the effect table, the sequencers, the
-mixdown -- is a line-for-line port of the vendored
-firmware/lilygo_t_deck_plus_micropython/native/moy_audio/libmoy/moy_audio.c, which
-is moy-spec's own C implementation of SPEC.md 8. The DEVICE and the web runner
-compile that file directly, so their audio is the spec by construction; this
-module exists because the host sim runs CPython and linking C would put a compiler
-in `make setup`.
+THERE IS NO PYTHON SYNTH ANY MORE (#97, moycore stage 0)
+This module used to carry a hand-maintained line-for-line Python twin of
+libmoy's synthesizer, pinned by a bit-exact parity suite. The twin's whole
+drift class had a body count anyway (the equal-loudness bug, the truncated
+fractional SFX speeds -- both were twin bugs the pin caught late), so the host
+now binds the vendored C itself: one synthesizer, every tier. The binding
+compiles the source DOUBLE-WIDENED (the parity harness's own recipe), which the
+old strict suite had already proven bit-identical to the twin -- the swap moved
+no sample the host ever played. Without a C compiler the host plays SILENCE
+(owner decision 2026-08-11: no fallback, KISS -- the degradation lane's job was
+never playback quality). tests/test_audio_parity.py still gates: it now pins
+the BINDING against the reference render, marshalling instead of arithmetic.
 
-That makes this file the one place moybyte's audio can drift from the spec, and
-SPEC.md 8.3 deliberately exempts audio from the pixel conformance that catches
-such drift everywhere else. So it is pinned instead: tests/test_audio_parity.py
-compiles the vendored source and compares level, pitch and waveform shape
-scenario by scenario. **Change the synthesis here only to follow libmoy**, and run
-that test -- the arithmetic is PICO-8's measured output (via zepto8/fake-08), not
-anything that should be "improved" locally.
+SPEC.md 8.3 exempts audio from pixel conformance, so cart mixes are balanced
+against PICO-8's deliberately unequal instrument loudness (via zepto8/fake-08);
+fix a wrong-sounding cart in its sounds.json, never by touching libmoy locally
+(see native/moy_audio/libmoy/UPSTREAM.md -- fixes go upstream, `make
+vendor-libmoy` brings them back).
 
-See docs/audio_design_v04.md for the full design and the device-verification TODO.
+See docs/audio_design_v04.md for the data-model design history.
 """
 
 import math
@@ -301,174 +307,92 @@ class AudioBank:
         return cls([coin, jump, thud], [loop])
 
 
-# -- synth + mixer -----------------------------------------------------------
+# -- the engine ---------------------------------------------------------------
 #
-# Line-for-line from native/moy_audio/libmoy/moy_audio.c (see the module
-# docstring). Function names and the order of operations deliberately track that
-# file so the two can be diffed by eye; where the C has a pointer or a fixed
-# array this has the Python object the data model already provides.
+# AudioEngine drives the vendored libmoy synthesizer through the ctypes binding
+# (runtime/audio_binding.py). The class is constructed everywhere -- host and
+# device -- so the binding import is guarded and every playback verb degrades to
+# a silent no-op without it (on the boards, playback lives in the native
+# moy_audio module instead; this object is their bank/model holder). Argument
+# guards mirror what the retired twin did; the bounds/ownership logic itself is
+# libmoy's own (moy_audio.c checks them all), so nothing here re-implements the
+# spec.
+
+_binding_mod = None      # the audio_binding module, or False once import failed
 
 
-# The semitone ratios libmoy's pitch_hz interpolates between. Copied digit for
-# digit, INCLUDING the 7-digit truncation -- see _pitch_hz.
-_SEMI = (
-    1.0, 1.059463, 1.122462, 1.189207, 1.259921, 1.334840,
-    1.414214, 1.498307, 1.587401, 1.681793, 1.781797, 1.887749,
-)
-
-
-def _pitch_hz(semitone):
-    """Equal-temperament Hz for a (possibly fractional -- effects bend it)
-    semitone index, A4 = 57 = 440 Hz.
-
-    Octave doublings, a 12-entry table, and a quadratic for the FRACTIONAL
-    semitone that vibrato and slide produce. libmoy computes it this way so a
-    firmware needn't link libm; CPython has math and `_A4_FREQ * 2.0 ** ((n -
-    _A4_PITCH) / 12.0)` would be shorter AND more accurate -- but it is not the
-    same, and "more accurate" is the wrong axis. The table is truncated at seven
-    digits and the quadratic is good to about a hundredth of a cent, so the
-    closed form drifts from it by ~6e-6 relative. Inaudible, and still enough to
-    move a square-wave edge by a whole sample after a few thousand phase
-    accumulations -- which is exactly the difference between a twin that can be
-    proven bit-identical to libmoy and one that can only be argued about. The
-    tuning is part of what was adopted."""
-    n = semitone - 57.0
-    oct_ = 0
-    while n < 0.0:
-        n += 12.0
-        oct_ -= 1
-    while n >= 12.0:
-        n -= 12.0
-        oct_ += 1
-    idx = int(n)
-    frac = n - idx
-    base = _SEMI[idx] * (1.0 + frac * (0.0577623 + frac * 0.0016682))
-    while oct_ > 0:
-        base *= 2.0
-        oct_ -= 1
-    while oct_ < 0:
-        base *= 0.5
-        oct_ += 1
-    return 440.0 * base
-
-
-def _tri_wave(p):
-    """The triangle LFO the vibrato effect rides (NOT the triangle instrument)."""
-    d = p - 0.5
-    if d < 0.0:
-        d = -d
-    return 4.0 * d - 1.0
-
-
-def _lcg_unit(rng):
-    """One step of the noise LCG -> (sample in [-1, 1), new state)."""
-    rng = (rng * 1664525 + 1013904223) & 0xFFFFFFFF
-    return (((rng >> 16) & 0x7FFF) / 16384.0 - 1.0), rng
-
-
-def _wave_sample(wave, p, phase2, nto):
-    """SPEC.md 8.3's eight shapes at phase `p` in [0, 1).
-
-    This is PICO-8's synthesis arithmetic (from zepto8/fake-08's reverse
-    engineering), INCLUDING the deliberately unequal loudness per instrument:
-    the square family peaks at 0.25, the triangle family at 0.5. Ported music is
-    balanced against exactly this. Noise is the one stateful shape -- it is
-    computed where the note's frequency is known and merely held here."""
-    if wave == WAVE_SQUARE:
-        return 0.25 if p < 0.5 else -0.25
-    if wave == WAVE_TRIANGLE:
-        return (1.0 - abs(4.0 * p - 2.0)) * 0.5
-    if wave == WAVE_SAW:
-        return 0.653 * (p if p < 0.5 else p - 1.0)
-    if wave == WAVE_NOISE:
-        return nto
-    if wave == WAVE_PULSE:
-        return 0.25 if p < (1.0 / 3.0) else -0.25
-    if wave == WAVE_ORGAN:
-        return ((3.0 - abs(24.0 * p - 6.0)) if p < 0.5
-                else (1.0 - abs(16.0 * p - 12.0))) / 9.0
-    if wave == WAVE_TILTED:
-        return ((2.0 * p / 0.875 - 1.0) if p < 0.875
-                else (2.0 * (1.0 - p) / 0.125 - 1.0)) * 0.5
-    # phaser: two triangles, the second detuned to freq * 109/110
-    return (2.0 - abs(8.0 * p - 4.0) + 1.0 - abs(4.0 * phase2 - 2.0)) / 6.0
-
-
-class _Voice:
-    """One channel. The mirror of libmoy's `moy_voice`: a reference to the SFX
-    being played plus the cursor and oscillator state that advance under it."""
-
-    def __init__(self):
-        self.owner = 0          # 0 free, 1 the sfx verb, 2 music
-        self.sfx = None         # the SFX object being played (libmoy's v->s)
-        self.step = 0           # index into sfx.steps
-        self.samp = 0           # samples into the current step -- an INTEGER,
-                                # so a step boundary stays exact at any length
-        self.phase = 0.0        # oscillator phase 0..1
-        self.phase2 = 0.0       # the phaser's detuned partner
-        self.rng = 0            # noise LCG state
-        self.nfrom = 0.0        # noise: low-pass filter state
-        self.nto = 0.0          # noise: shaped output, held between updates
-        self.amp = 0.0          # de-click amplitude slew (current gain)
-        # The channel's previous SOUNDING note -- what FX_SLIDE glides from.
-        # Survives retriggers on purpose: SPEC.md 8.1 says a slide carries
-        # across a row boundary. -1 means no previous note yet.
-        self.prev_pitch = -1.0
-        self.prev_vol = 0.0
-        # Monotonic trigger counter, bumped on every (re)trigger and stop. Not
-        # part of libmoy: it lets a consumer detect a fresh play unambiguously
-        # without comparing object identity, which the GC makes unreliable.
-        self.gen = 0
-
-    @property
-    def active(self):
-        return self.owner != 0
-
-    def start(self, sfx, owner):
-        """Trigger `sfx` on this channel. prev_pitch/prev_vol and the noise
-        filter state deliberately SURVIVE -- the slide's origin is whatever this
-        channel last played, and PICO-8 keeps its per-channel noise walk
-        running. The amplitude slew restarts from 0: a retrigger resets the
-        oscillator phase, and the short ramp is what keeps that from clicking."""
-        self.owner = owner
-        self.sfx = sfx
-        self.step = 0
-        self.samp = 0
-        self.phase = 0.0
-        self.phase2 = 0.0
-        self.amp = 0.0
-        if not self.rng:
-            self.rng = 0x2F9E2B1
-        self.gen += 1
-
-    def stop(self):
-        self.owner = 0
-        self.sfx = None
-        self.gen += 1
+def _binding():
+    """The loaded C binding, or None (MicroPython, or no compiler)."""
+    global _binding_mod
+    if _binding_mod is False:
+        return None
+    if _binding_mod is None:
+        try:
+            try:
+                from runtime import audio_binding as _ab
+            except ImportError:
+                import audio_binding as _ab
+            _binding_mod = _ab
+        except Exception:        # MicroPython: no such module, by design
+            _binding_mod = False
+            return None
+    return _binding_mod.get()
 
 
 class AudioEngine:
-    """Software synth + mixer. Holds the bank and the live voices; render(nframes)
-    pulls signed-16-bit mono PCM, mixing every active voice plus the beep
-    oscillator. This is the single primitive the host backends consume."""
+    """The per-cart audio engine: holds the AudioBank (the MODEL -- the Music
+    editor mutates it in place and bumps bank.rev) and, on the host, a libmoy
+    engine handle that does the actual synthesis. render(nframes) pulls
+    signed-16-bit little-endian mono PCM; without the binding it pulls silence.
+
+    The control surface (play_sfx/play_beep/play_music/stop_music/stop/
+    set_volume/is_active) survives the retired Python twin unchanged, so
+    FakeAudio, SdlAudio and the Music editor drive exactly what they always
+    drove. The bank crosses to C ONCE per edit generation, as sounds.json text
+    through libmoy's own parser -- the same single crossing the device makes,
+    re-checked by an identity+int compare at each trigger (AudioBank.rev)."""
 
     def __init__(self, bank=None, rate=11025):
         self.bank = bank if bank is not None else AudioBank.default()
         self.rate = int(rate)
-        self.voices = [_Voice() for _ in range(CHANNELS)]
         self.master = 7             # SPEC.md 8.2 volume(level): 0..7
-        self._rr = 0                # sfx round-robin cursor
-        # music sequencer
-        self.track = None
-        self._track_width = 0
-        self._mrow = 0
-        self._msamp = 0             # samples into the row, same integer rule
-        self._mloop = True
-        # beep: engine-native, OUTSIDE the four channels, so a beep never steals
-        # a voice from music or an effect (SPEC.md 8.2).
-        self._bfreq = 0.0
-        self._bleft = 0.0
-        self._bphase = 0.0
+        lib = _binding()
+        self._h = lib.new(self.rate) if lib is not None else None
+        self._lib = lib if self._h else None
+        self._pushed_bank = None    # strong ref: the bank last handed to C --
+        self._pushed_rev = -1       # object identity, so a reused id() can
+        self._pushed_rate = -1      # never alias a fresh bank as "unchanged"
+
+    def __del__(self):
+        lib, h = self._lib, self._h
+        self._lib = None
+        self._h = None
+        if lib is not None and h:
+            try:
+                lib.free(h)
+            except Exception:       # interpreter teardown: ctypes may be gone
+                pass
+
+    def _sync(self):
+        """Hand the bank to libmoy when it (or the rate) moved since the last
+        trigger. One compare on the hot path; the JSON crossing only happens
+        after a real edit. Returns True when the C engine is live."""
+        lib, h = self._lib, self._h
+        if h is None:
+            return False
+        b = self.bank
+        if (b is self._pushed_bank and b.rev == self._pushed_rev
+                and self.rate == self._pushed_rate):
+            return True
+        if self.rate != self._pushed_rate:
+            lib.set_rate(h, self.rate)
+        import json
+        lib.bank_load(h, json.dumps(b.to_dict()))
+        lib.volume(h, self.master)  # bank_load resets the engine, master too
+        self._pushed_bank = b
+        self._pushed_rev = b.rev
+        self._pushed_rate = self.rate
+        return True
 
     # -- control ---------------------------------------------------------
 
@@ -480,36 +404,19 @@ class AudioEngine:
         except (TypeError, ValueError):
             return
         self.master = 0 if v < 0 else (7 if v > 7 else v)
+        if self._h is not None:
+            self._lib.volume(self._h, self.master)
 
     def play_sfx(self, n, chan=None):
-        """Play SFX `n`. `chan` forces a channel; otherwise round-robin whatever
-        music leaves free -- a track of width W owns voices 3..4-W, so the pool
-        is 0..3-W. When a 4-channel track owns every voice, steal voice 0 (the
-        track's last, typically least melodic, line) rather than drop the
-        effect."""
-        b = self.bank
+        """Play SFX `n`. `chan` forces a channel; otherwise (or out of range)
+        libmoy round-robins whatever music leaves free -- see moy_audio_sfx."""
         try:
             n = int(n)
+            c = -1 if chan is None else int(chan)
         except (TypeError, ValueError):
             return
-        if b is None or n < 0 or n >= len(b.sfx):
-            return
-        s = b.sfx[n]
-        if chan is not None:
-            c = int(chan)
-            if 0 <= c < CHANNELS:
-                self.voices[c].start(s, 1)
-                return
-        free_top = CHANNELS - (self._track_width if self.track is not None else 0)
-        if free_top <= 0:
-            self.voices[0].start(s, 1)
-            return
-        for i in range(free_top):           # prefer an idle voice, in order
-            if not self.voices[i].owner:
-                self.voices[i].start(s, 1)
-                return
-        self.voices[self._rr % free_top].start(s, 1)
-        self._rr = (self._rr % free_top + 1) % free_top
+        if self._sync():
+            self._lib.sfx(self._h, n, c)
 
     def play_beep(self, freq, dur=0.15):
         """A tone at `freq` Hz for `dur` seconds -- square at vol 6 (SPEC.md
@@ -522,276 +429,72 @@ class AudioEngine:
             return
         if freq <= 0.0 or dur <= 0.0:
             return
-        self._bfreq = freq
-        self._bleft = dur
-        self._bphase = 0.0
+        if self._h is not None:
+            self._lib.beep(self._h, freq, dur)
 
     @staticmethod
     def freq_to_pitch(freq):
         """Nearest semitone index for a frequency (inverse of note_to_freq)."""
         return int(round(_A4_PITCH + 12.0 * math.log(freq / _A4_FREQ, 2)))
 
-    @staticmethod
-    def _track_channels(m):
-        """How many voices a track claims: the widest row's channel count."""
-        w = 0
-        for r in m.pattern:
-            n = len(r) if isinstance(r, (list, tuple)) else 1
-            if n > w:
-                w = n
-        return w if w < CHANNELS else CHANNELS
-
-    def _music_row_start(self):
-        """Start the current row: channel j plays on voice 3-j (SPEC.md 8.1).
-        A -1 (or out-of-range) id means that channel is silent this row."""
-        m = self.track
-        b = self.bank
-        row = m.pattern[self._mrow]
-        ids = row if isinstance(row, (list, tuple)) else (row,)
-        for j in range(self._track_width):
-            v = self.voices[MUSIC_CHANNEL - j]
-            sid = ids[j] if j < len(ids) else -1
-            if sid is None or sid < 0 or sid >= len(b.sfx):
-                v.stop()
-            else:
-                v.start(b.sfx[sid], 2)
-
     def play_music(self, track, loop=True):
-        """Start music track `track`, claiming channels from the top. `loop`
-        overrides the track's own flag. Out of range is a no-op."""
-        b = self.bank
+        """Start music track `track`, claiming channels from the top (8.1).
+        `loop` overrides the track's own flag; None keeps the track's. Out of
+        range (or an empty pattern) is a no-op, exactly as libmoy treats it."""
         try:
             t = int(track)
         except (TypeError, ValueError):
             return
-        if b is None or t < 0 or t >= len(b.music):
+        m = self.bank.get_music(t)
+        if m is None:
             return
-        for v in self.voices:               # release the old track's voices
-            if v.owner == 2:
-                v.stop()
-        m = b.music[t]
-        self.track = m
-        self._track_width = self._track_channels(m)
-        self._mrow = 0
-        self._msamp = 0
-        self._mloop = m.loop if loop is None else bool(loop)
-        if not m.pattern:
-            self.track = None
-            self._track_width = 0
-            return
-        self._music_row_start()
+        lp = m.loop if loop is None else bool(loop)
+        if self._sync():
+            self._lib.music(self._h, t, 1 if lp else 0)
 
     def stop_music(self):
-        self.track = None
-        self._track_width = 0
-        for v in self.voices:
-            if v.owner == 2:
-                v.stop()
+        if self._h is not None:
+            self._lib.music_stop(self._h)
 
     def stop(self, chan=None):
         """Stop one channel, or everything (voices, music and the beep) when
         chan is None."""
-        if chan is not None:
-            c = int(chan)
-            if 0 <= c < CHANNELS:
-                self.voices[c].stop()
+        if self._h is None:
             return
-        for v in self.voices:
-            v.stop()
-        self._bleft = 0.0
-        self.track = None
-        self._track_width = 0
+        try:
+            c = -1 if chan is None else int(chan)
+        except (TypeError, ValueError):
+            return
+        self._lib.sound_stop(self._h, c)
+
+    def active_channels(self):
+        """Bit mask of what is sounding: bits 0..3 the four voices, bit 4 the
+        music track, bit 5 the beep -- the device module's active() layout, so
+        behavior tests read the same instrument on every tier. 0 is silence,
+        and all a binding-less build ever reports."""
+        if self._h is None:
+            return 0
+        return self._lib.active(self._h)
 
     def is_active(self):
         """True if anything is currently producing sound."""
-        if self.track is not None or self._bleft > 0.0:
-            return True
-        for v in self.voices:
-            if v.owner:
-                return True
-        return False
+        return self.active_channels() != 0
 
     # -- rendering -------------------------------------------------------
 
-    def _voice_sample(self, v, dt, rate):
-        """One sample from one voice: SPEC.md 8.1's effect table, evaluated.
-
-        Time is counted in integer SAMPLES and converted by one multiply, so a
-        step boundary lands within a sample of where `speed` says it should --
-        a float seconds accumulator drifts, and at 30 steps/s that is audible.
-
-        The last stage is a ~1.5 ms amplitude slew toward the note's level. It
-        is not in the spec and needs not to be: it is de-clicking, the same
-        smoothing PICO-8 applies. A retriggered oscillator restarts at phase 0,
-        and without the ramp every fast sfx chain carries a click per step."""
-        s = v.sfx
-        if s is None or not s.steps:
-            return 0.0
-        steps = s.steps
-        nsteps = len(steps)
-        step_dur = 1.0 / s.speed
-        t = v.samp * dt
-        n = steps[v.step]
-        pitch_i = n[0]
-        pitch = float(pitch_i)
-        wave = n[1]
-        vol = float(n[2])
-        eff = n[3] if len(n) > 3 else 0
-        slide_from = -1.0
-
-        # Arpeggio cycles the step's group of four -- the PITCH only; volume and
-        # wave stay the step's own. 30/15 notes/s, doubled on a fast sfx.
-        if eff == FX_ARP_FAST or eff == FX_ARP_SLOW:
-            nps = (30.0 if eff == FX_ARP_FAST else 15.0) * \
-                  (2.0 if s.speed >= 15.0 else 1.0)
-            k = (v.step // 4) * 4 + int(t * nps) % 4
-            if k < nsteps:
-                pitch_i = steps[k][0]
-                pitch = float(pitch_i)
-
-        u = t / step_dur                    # 0..1 through the step
-        if u > 1.0:
-            u = 1.0
-
-        if eff == FX_SLIDE:
-            # Glide from the channel's previous note; with none yet, from
-            # itself. Linear in FREQUENCY, not semitones (PICO-8/zepto8) -- on a
-            # wide slide the two curves differ audibly.
-            if v.prev_pitch >= 0.0:
-                slide_from = _pitch_hz(v.prev_pitch)
-                vol = v.prev_vol + (vol - v.prev_vol) * u
-        elif eff == FX_VIBRATO:
-            ph = t * 7.5
-            ph -= int(ph)
-            pitch += 0.25 * _tri_wave(ph)
-        elif eff == FX_FADE_IN:
-            vol *= u
-        elif eff == FX_FADE_OUT:
-            vol *= 1.0 - u
-
-        g = 0.0 if (pitch_i < 0 or vol <= 0.0) else vol / 7.0
-        if g > 0.0:
-            freq = _pitch_hz(pitch)
-            if slide_from > 0.0:
-                freq = slide_from + (freq - slide_from) * u
-            if eff == FX_DROP:
-                freq *= 1.0 - u             # falls linearly to 0
-            v.phase += freq * dt
-            v.phase -= int(v.phase)
-            if wave == WAVE_PHASER:
-                v.phase2 += freq * (109.0 / 110.0) * dt
-                v.phase2 -= int(v.phase2)
-            if wave == WAVE_NOISE:
-                # PICO-8's noise: an LCG random walk through a one-pole low-pass
-                # whose cutoff tracks the note (zepto8's constant), then a bass
-                # lift -- low keys up to 3x.
-                scale = freq * dt * 8.858923
-                p8key = pitch - 24.0        # moy 57=A4 <-> p8 33=A4
-                if p8key < 0.0:
-                    p8key = 0.0
-                elif p8key > 63.0:
-                    p8key = 63.0
-                factor = 1.0 - p8key / 63.0
-                r, v.rng = _lcg_unit(v.rng)
-                v.nfrom = (v.nfrom + scale * r) / (1.0 + scale)
-                v.nto = v.nfrom * 1.5 * (1.0 + factor * factor)
-
-        # On a rest the phase holds and the slew rides the held level to zero --
-        # that IS the release de-click.
-        w = _wave_sample(wave, v.phase, v.phase2, v.nto)
-
-        slew = dt / 0.0015
-        if v.amp < g:
-            v.amp += slew
-            if v.amp > g:
-                v.amp = g
-        else:
-            v.amp -= slew
-            if v.amp < g:
-                v.amp = g
-
-        # Advance the sequencer. Any KEYED step -- volume 0 included -- becomes
-        # the channel's previous note: in PICO-8 every tracker slot has a key,
-        # so a rest is still a slide origin, and only pitch -1 records nothing.
-        v.samp += 1
-        if v.samp >= step_dur * rate:
-            fin = steps[v.step]
-            if fin[0] >= 0:
-                v.prev_pitch = float(fin[0])
-                v.prev_vol = float(fin[2])
-            v.samp = 0
-            v.step += 1
-            if v.step >= nsteps:
-                if s.loop:
-                    ls = s.loop_start
-                    v.step = ls if ls < nsteps else 0
-                else:
-                    v.stop()
-        return w * v.amp
-
     def render_into(self, out, nframes):
-        """Mix `nframes` of signed-16-bit little-endian mono PCM into the caller's
-        `out` bytearray (at least nframes*2 bytes), advancing every voice, the
-        music row clock and the beep. Returns the frames written.
-
-        This is the allocation-free core: the device I2S backend reuses one
-        persistent buffer per frame (a non-blocking write holds a pointer to it,
-        so it must never see a GC'd buffer), while render() wraps it for the
-        host's bytes-returning sample-pull."""
+        """Mix `nframes` of signed-16-bit mono PCM into the caller's `out`
+        bytearray (at least nframes*2 bytes). Returns the frames written.
+        Allocation-free when the binding is live: libmoy writes into the
+        buffer directly, in native byte order (little-endian on every host the
+        sim runs on, matching what the seam always produced)."""
         nframes = int(nframes)
         if nframes <= 0:
             return 0
-        rate = self.rate
-        dt = 1.0 / rate
-        master = self.master / 7.0
-        voices = self.voices
-        bfreq = self._bfreq
-        for f in range(nframes):
-            mix = 0.0
-
-            # the music clock -- per SAMPLE, so a row boundary is exact. (It was
-            # once advanced once per BLOCK, which silently swallowed any track
-            # whose rows were shorter than the block: a 0.34 s row_secs song
-            # ended before its first sample was rendered.)
-            m = self.track
-            if m is not None:
-                row_dur = m.row_dur(self._mrow)
-                if row_dur is not None:     # None: hold this row forever (8.1)
-                    self._msamp += 1
-                    if self._msamp >= row_dur * rate:
-                        self._msamp = 0
-                        self._mrow += 1
-                        if self._mrow >= len(m.pattern):
-                            if self._mloop:
-                                self._mrow = 0
-                                self._music_row_start()
-                            else:
-                                self.stop_music()
-                        else:
-                            self._music_row_start()
-
-            for v in voices:
-                if v.owner:
-                    mix += self._voice_sample(v, dt, rate)
-
-            if self._bleft > 0.0:           # beep: square at vol 6 (8.2)
-                bg = 6.0 / 7.0
-                if self._bleft < 0.0015:    # ...with its own release de-click
-                    bg *= self._bleft / 0.0015
-                self._bphase += bfreq * dt
-                self._bphase -= int(self._bphase)
-                mix += (0.25 if self._bphase < 0.5 else -0.25) * bg
-                self._bleft -= dt
-
-            # Sum, scale, saturate. The instruments themselves peak at 0.25-0.5
-            # (PICO-8's mix), so 0.5 here is the headroom for four voices.
-            val = int(mix * master * 0.5 * 32767.0)
-            if val > 32767:
-                val = 32767
-            elif val < -32768:
-                val = -32768
-            out[2 * f] = val & 0xFF
-            out[2 * f + 1] = (val >> 8) & 0xFF
+        if self._h is not None:
+            self._lib.render_into(self._h, out, nframes)
+        else:
+            out[:2 * nframes] = b"\x00" * (2 * nframes)
         return nframes
 
     def render(self, nframes):

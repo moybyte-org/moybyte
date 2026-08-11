@@ -1,30 +1,30 @@
-"""Audio parity: runtime/audio.py's synth vs. the vendored libmoy library (#97).
+"""Audio parity: the host AudioEngine's door into vendored libmoy (#97).
 
-The device and the web runner COMPILE libmoy (native/moy_audio/libmoy/), so their
-audio is SPEC.md 8 by construction. The host sim can't -- linking C would put a
-compiler in `make setup` -- so `runtime/audio.AudioEngine` is a hand-maintained
-Python twin of that exact file. This harness is what stops the twin drifting: it
-renders the same scenario through both and compares.
+Every tier compiles libmoy (native/moy_audio/libmoy/) now: the boards and the
+web runner natively, and -- since moycore stage 0 deleted the hand-maintained
+Python twin -- the host sim too, through the ctypes .so that
+runtime/audio_binding.py builds from the DOUBLE-WIDENED vendored source. This
+harness renders the same scenario through `runtime/audio.AudioEngine` (i.e.
+the binding) and through an independently-driven reference binary
+(libmoy_render.c) and compares; what it can catch is no longer synth drift --
+there is one synth -- but a mangled verb argument, the bank's one JSON
+crossing, or a broken render buffer.
 
 It checks two things, because there are two different questions.
 
-STRICT -- is the Python arithmetic the same arithmetic?
-    libmoy is single-precision throughout (the S3 and P4 FPUs are); CPython has
-    only doubles. Comparing them directly buries a real porting bug under an
-    unavoidable rounding difference, so this mode compiles the vendored source
-    at DOUBLE precision -- mechanically, two regexes over a copy in a temp dir,
-    never the vendored file -- and then demands that every single sample match
-    exactly. It does: all scenarios are bit-identical. That turns "the port is
-    faithful" from a judgement call into a boolean, and it is what caught the
-    last divergence in the original port (a closed-form 2**(n/12) in place of
-    libmoy's pitch table: inaudible on its own, but enough to walk a square-wave
-    edge a whole sample sideways after a few thousand phase accumulations).
+STRICT -- does the binding's door pass every byte through faithfully?
+    The reference is compiled at the binding's own DOUBLE precision
+    (mechanically, two regexes over a copy in a temp dir, never the vendored
+    file), so both sides are the same program and every sample must match
+    exactly. Historically this mode compared the Python twin and is what
+    proved it bit-identical to the widened C -- the fact that made stage 0's
+    swap provably sample-neutral.
 
-DEVICE PRECISION -- does it still sound the same at the precision that ships?
-    The same comparison against the source exactly as vendored. Bit-equality is
-    neither expected nor required here -- SPEC.md 8.3 says outright that two
-    hosts will not produce identical samples -- so this measures what 8.3 does
-    promise:
+DEVICE PRECISION -- does the host still sound like the boards?
+    The same comparison against the source exactly as vendored (float, as the
+    S3/P4 FPUs run it). Bit-equality is neither expected nor required here --
+    SPEC.md 8.3 says outright that two hosts will not produce identical
+    samples -- so this measures what 8.3 does promise:
 
       level  -- RMS overall and per block. Catches the calibrated instrument
                 loudness (square 0.25 vs triangle 0.5), vol/7, the master level,
@@ -299,7 +299,9 @@ def find_micropython():
 # -- the Python engine -------------------------------------------------------
 
 def render_python(bank_dict, commands):
-    """Run one scenario through runtime/audio.AudioEngine; int16 samples."""
+    """Run one scenario through runtime/audio.AudioEngine -- since stage 0
+    that IS the ctypes binding over the double-widened vendored C, so this is
+    the host console's real playback path end to end; int16 samples."""
     from runtime.audio import AudioBank, AudioEngine
 
     engine = AudioEngine(AudioBank.from_dict(bank_dict), rate=RATE)
@@ -437,13 +439,15 @@ def run_parity(verbose=False, only=None):
         exe = build_reference(work)
         if exe is None:
             if verbose:
-                print("no C compiler -- skipping. (The device and the web "
-                      "runner COMPILE libmoy, so they are unaffected; this only "
-                      "checks the host's Python twin of it.)")
+                print("no C compiler -- skipping. (The boards and the web "
+                      "runner COMPILE libmoy, so they are unaffected; without "
+                      "a compiler the host binding is absent too and the sim "
+                      "is deliberately silent.)")
             return None
 
         if verbose:
-            print("== strict: bit-exact vs libmoy at CPython's precision ==")
+            print("== strict: binding bit-exact vs libmoy at its own "
+                  "(double) precision ==")
         strict_bad = run_strict(work, build_reference(work, double=True),
                                 only=only, verbose=verbose)
         if verbose and not strict_bad:

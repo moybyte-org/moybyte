@@ -85,3 +85,6 @@ _site/
 # Screenshot harness output (pageshot.mjs / browsershot.mjs)
 firmware/web_runner/shots/
 firmware/web_runner/shots-browser/
+
+# Host audio binding cache (runtime/audio_binding.py, #97 stage 0)
+/.build/

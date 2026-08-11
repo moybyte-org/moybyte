@@ -114,9 +114,12 @@ class DeviceAudio:
     native `moy_audio` module, and feeds the result to the amp -- from a core-1
     task by default, or per-frame from tick() as a fallback.
 
-    Without the native module (a build with moy_audio left out) it falls back to
-    the shared Python AudioEngine, which is a twin of the same libmoy source, so
-    a stripped build still makes the right noises -- just more slowly."""
+    Without the native module (a build with moy_audio left out) it is SILENT:
+    the verbs no-op and nothing renders. The old degradation lane rendered
+    through the Python twin of libmoy, and the twin died with moycore stage 0
+    (#97 -- owner decision 2026-08-11, no fallback synth, KISS). `self.engine`
+    survives as the MODEL only: the bank the Music editor edits + the master
+    level Settings shows."""
 
     def __init__(self, engine):
         global _AUDIO_BACKEND_SEQ
@@ -152,9 +155,10 @@ class DeviceAudio:
             import moy_audio
             self._na = moy_audio
             print("Moybyte audio: native moy_audio (libmoy) ENABLED")
-        except Exception:   # noqa: BLE001 -- no native module -> Python twin
+        except Exception:   # noqa: BLE001 -- no native module -> silence (#97)
             self._na = None
-            print("Moybyte audio: native moy_audio absent, using Python engine")
+            print("Moybyte audio: native moy_audio absent -- SILENT "
+                  "(the Python fallback synth died with moycore stage 0)")
 
         if self._na is not None:
             try:
@@ -188,8 +192,9 @@ class DeviceAudio:
                 self._core1 = False
 
         # 2) Fallback: open machine.I2S for the per-frame feed. Skipped when the
-        #    core-1 task owns the peripheral (two owners would clash).
-        if not self._core1:
+        #    core-1 task owns the peripheral (two owners would clash), and when
+        #    there is no native module (nothing would render into it).
+        if not self._core1 and self._na is not None:
             try:
                 from machine import I2S, Pin
                 self.i2s = I2S(
@@ -336,16 +341,12 @@ class DeviceAudio:
         if self._na is not None:
             self._sync_bank()
             self._na.sfx(int(n), -1 if chan is None else int(chan))
-        else:
-            self.engine.play_sfx(n, chan)
         if AUDIO_DIAG:
             self._diag_trigger("sfx", n, chan)
 
     def beep(self, freq, dur=0.15):
         if self._na is not None:
             self._na.beep(float(freq), float(dur))
-        else:
-            self.engine.play_beep(freq, dur)
         if AUDIO_DIAG:
             self._diag_trigger("beep", int(freq), None)
 
@@ -353,22 +354,16 @@ class DeviceAudio:
         if self._na is not None:
             self._sync_bank()
             self._na.music(int(track), 1 if loop else 0)
-        else:
-            self.engine.play_music(track, loop)
         if AUDIO_DIAG:
             self._diag_trigger("music", track, None)
 
     def music_stop(self):
         if self._na is not None:
             self._na.music_stop()
-        else:
-            self.engine.stop_music()
 
     def sound_stop(self, chan=None):
         if self._na is not None:
             self._na.sound_stop(-1 if chan is None else int(chan))
-        else:
-            self.engine.stop(chan)
 
     def volume(self, level):
         # Keep the Python model in step so a build without the native module --
@@ -389,7 +384,7 @@ class DeviceAudio:
                 return bool(self._na.active())
             except Exception:   # noqa: BLE001
                 return False
-        return self.engine.is_active()
+        return False            # no native module -> nothing ever sounds (#97)
 
     def _diag_trigger(self, kind, n, chan):
         """Log one trigger to moybyte_diag (event-gated, one line per call).
@@ -470,7 +465,7 @@ class DeviceAudio:
         # it hovers near-empty and any long draw / GC pause drains it to an
         # under-run. So top the deep (~0.5 s) ring UP toward full each tick and
         # let the cushion absorb long frames.
-        if self.i2s is None:
+        if self.i2s is None or self._na is None:
             return
         drained = int(AUDIO_RATE * dt)
         self._buffered -= drained
@@ -500,10 +495,7 @@ class DeviceAudio:
             # buffer the port holds a pointer to stays alive. memoryview gives
             # write() exactly the rendered slice.
             buf = self._bufs[self._buf]
-            if self._na is not None:
-                self._na.render(buf, n)
-            else:
-                self.engine.render_into(buf, n)
+            self._na.render(buf, n)
             self._buf ^= 1
             self._busy = True
             self.i2s.write(memoryview(buf)[:n * 2])
