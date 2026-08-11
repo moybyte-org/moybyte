@@ -68,6 +68,16 @@ do
     cache[name] = t
     return t
   end
+  -- #66 M0: rnd/flr as pure Lua. The registered trampolines cost a full
+  -- upcall for what is one arithmetic op; shadowing them here (after the
+  -- register loop, before the cart) makes them VM-local. rnd's PRNG changes
+  -- from Python's to Lua's -- rnd is random, no cart may depend on the
+  -- stream. time() deliberately STAYS a trampoline: it reads live input
+  -- state (cart_start_ms) in MicroPython's 30-bit ticks domain, and no cart
+  -- calls it hot enough to pay for a second clock.
+  local mrandom, mfloor = math.random, math.floor
+  function rnd(n) return mrandom() * (n or 1.0) end
+  function flr(x) return mfloor(x) end
 end
 """
 

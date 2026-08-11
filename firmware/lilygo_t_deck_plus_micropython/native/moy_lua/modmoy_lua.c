@@ -394,26 +394,18 @@ static int l_tramp(lua_State *L) {
 // ---------------------------------------------------------------------------
 // the HOT spr: quads straight into _batch_arr (moy_gfx spr_gate protocol)
 
-static int l_spr(lua_State *L) {
-    // spr(tile, x, y [, colorkey, scale, flip]) -- numbers only; image sprites
-    // go through the layer/image glue handles in a Lua cart (Phase 1 scope).
-    int n = lua_gettop(L);
-    if (n < 3 || n > 6) {
-        return luaL_error(L, "spr(tile, x, y[, colorkey, scale, flip])");
-    }
-    lua_Integer v[6] = {0, 0, 0, -1, 1, 0};
-    for (int i = 0; i < n; i++) {
-        if (lua_type(L, i + 1) != LUA_TNUMBER) {
-            return luaL_error(L, "spr: arg %d must be a number "
-                                 "(image sprites: use layers in lua carts)", i + 1);
-        }
-        // float coords truncate toward zero, matching Python int() / spr_gate
-        v[i] = lua_isinteger(L, i + 1) ? lua_tointeger(L, i + 1)
-                                       : (lua_Integer)lua_tonumber(L, i + 1);
-    }
+// Append one sheet-tile quad under run header (ck, scale) -- the protocol
+// l_spr has always spoken, factored out since the flag-masked map walk
+// (#66 M0) emits the same quads. Returns false only when the queue is
+// unusable after a break (the quad drops, the original defensive path);
+// Lua-raises (never returns) on a failed begin_batch upcall.
+static bool batch_append_quad(lua_State *L, lua_Integer tid, lua_Integer x,
+                              lua_Integer y, lua_Integer flip,
+                              lua_Integer ck, lua_Integer scale) {
     int16_t *q = g_q;
     if (q == NULL) {
-        return luaL_error(L, "spr: no batch bound (moy_lua.init first)");
+        luaL_error(L, "spr: no batch bound (moy_lua.init first)");
+        return false;                  // unreachable: luaL_error longjmps
     }
     lua_Integer k = q[0];
     if (k < 4) {
@@ -421,7 +413,7 @@ static int l_spr(lua_State *L) {
     }
     if (k == 4 || (size_t)(k + 4) > g_qlen
         || q[3] != (int16_t)g_token
-        || q[1] != (int16_t)v[3] || q[2] != (int16_t)v[4]) {
+        || q[1] != (int16_t)ck || q[2] != (int16_t)scale) {
         // run break (first item / state change / foreign writer / full queue).
         bool stamped = false;
 #ifdef MOY_LUA_DRAW_DIRECT
@@ -436,8 +428,8 @@ static int l_spr(lua_State *L) {
         // emits these quads.
         if (k <= 4 || q[3] == (int16_t)g_token) {
             if (lua_batch_flush_c(L)) {
-                q[1] = (int16_t)v[3];
-                q[2] = (int16_t)v[4];
+                q[1] = (int16_t)ck;
+                q[2] = (int16_t)scale;
                 q[3] = (int16_t)g_token;
                 stamped = true;
             }
@@ -458,33 +450,52 @@ static int l_spr(lua_State *L) {
                 mp_obj_t dest[2 + 4];
                 mp_load_method(canvas, MP_QSTR_begin_batch, dest);
                 dest[2] = sheet;
-                dest[3] = MP_OBJ_NEW_SMALL_INT((mp_int_t)v[3]);
-                dest[4] = MP_OBJ_NEW_SMALL_INT((mp_int_t)v[4]);
+                dest[3] = MP_OBJ_NEW_SMALL_INT((mp_int_t)ck);
+                dest[4] = MP_OBJ_NEW_SMALL_INT((mp_int_t)scale);
                 dest[5] = MP_OBJ_NEW_SMALL_INT(g_token);
                 mp_call_method_n_kw(4, 0, dest);
                 nlr_pop();
             } else {
-                return luaL_error(L, "spr: begin_batch failed");
+                luaL_error(L, "spr: begin_batch failed");
+                return false;          // unreachable
             }
         }
         k = q[0];
         if (k < 4 || (size_t)(k + 4) > g_qlen) {
-            return 0;                  // defensive: queue unusable, drop
+            return false;              // defensive: queue unusable, drop
         }
     }
-    lua_Integer tid = v[0];
     if (tid < -32768 || tid > 32767) {
         tid = -1;                      // invalid tile id -> skipped at draw
     }
-    lua_Integer x = v[1];
     if (x < -32768) x = -32768; else if (x > 32767) x = 32767;
-    lua_Integer y = v[2];
     if (y < -32768) y = -32768; else if (y > 32767) y = 32767;
     q[k] = (int16_t)tid;
     q[k + 1] = (int16_t)x;
     q[k + 2] = (int16_t)y;
-    q[k + 3] = (int16_t)(v[5] & 3);
+    q[k + 3] = (int16_t)(flip & 3);
     q[0] = (int16_t)(k + 4);
+    return true;
+}
+
+static int l_spr(lua_State *L) {
+    // spr(tile, x, y [, colorkey, scale, flip]) -- numbers only; image sprites
+    // go through the layer/image glue handles in a Lua cart (Phase 1 scope).
+    int n = lua_gettop(L);
+    if (n < 3 || n > 6) {
+        return luaL_error(L, "spr(tile, x, y[, colorkey, scale, flip])");
+    }
+    lua_Integer v[6] = {0, 0, 0, -1, 1, 0};
+    for (int i = 0; i < n; i++) {
+        if (lua_type(L, i + 1) != LUA_TNUMBER) {
+            return luaL_error(L, "spr: arg %d must be a number "
+                                 "(image sprites: use layers in lua carts)", i + 1);
+        }
+        // float coords truncate toward zero, matching Python int() / spr_gate
+        v[i] = lua_isinteger(L, i + 1) ? lua_tointeger(L, i + 1)
+                                       : (lua_Integer)lua_tonumber(L, i + 1);
+    }
+    batch_append_quad(L, v[0], v[1], v[2], v[5], v[3], v[4]);
     return 0;
 }
 
@@ -707,6 +718,109 @@ static int l_draw(lua_State *L) {
     return 0;
 }
 
+// ---------------------------------------------------------------------------
+// #66 M0: the p8 shim's flag-masked map() as ONE C call.
+//
+// The shim's Lua cell loop (4.5ms of celeste's S3 render, measured by
+// difference in #66) collapses to a masked walk over the ctx's registered map
+// cells, each surviving cell appended as a 1x1 tile quad through the SAME
+// batch protocol l_spr stamps -- the pixels ride blit_batch's walk unchanged,
+// so no new raster exists. Deliberately NOT named `map`: the console's map()
+// keeps its Python lane (and owns the Fold-2 cache); these are p8-shim
+// machinery with p8 semantics -- tile 0 never draws, colorkey 0, scale 1, no
+// flip, and the __gff__ flag byte gates each cell against the mask. The shim
+// probes __moy_map_masked and keeps its Lua loop as the fallback (wasm builds
+// moy_lua without moy_gfx, and a run without registered sources refuses).
+
+static uint8_t g_map_flags[256];
+
+static int dv_unhex(int ch) {
+    if (ch >= '0' && ch <= '9') return ch - '0';
+    if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+    if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+    return -1;
+}
+
+// __moy_map_flags(hex): the baked __gff__ table, two hex chars per sprite,
+// crossed ONCE at shim boot. A bad nibble reads as 0, exactly like the shim's
+// tonumber(..., 16) building __p8_gff. Non-string clears.
+static int l_map_flags(lua_State *L) {
+    memset(g_map_flags, 0, sizeof(g_map_flags));
+    size_t len = 0;
+    const char *s = (lua_type(L, 1) == LUA_TSTRING)
+                        ? lua_tolstring(L, 1, &len) : NULL;
+    if (s == NULL) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    size_t n = len / 2;
+    if (n > sizeof(g_map_flags)) {
+        n = sizeof(g_map_flags);
+    }
+    for (size_t i = 0; i < n; i++) {
+        int hi = dv_unhex((unsigned char)s[2 * i]);
+        int lo = dv_unhex((unsigned char)s[2 * i + 1]);
+        if (hi >= 0 && lo >= 0) {
+            g_map_flags[i] = (uint8_t)((hi << 4) | lo);
+        }
+    }
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+// __moy_map_masked(celx, cely, sx, sy, cw, ch, mask) -> bool: true when the
+// walk ran (even if every cell was masked out); false when the caller must
+// take its Lua-loop fallback (sources unregistered / odd args). Map cells
+// store tile id + 1 (0 = empty), so a cell draws when its id > 0 and, with a
+// nonzero mask, when (gff[id] & mask) != 0 -- the shim's exact condition.
+static int l_map_masked(lua_State *L) {
+    moy_gfx_draw_ctx_t *c = g_ctx;
+    int mw = 0, mh = 0;
+    const uint8_t *cells;
+    if (c == NULL || !moy_gfx_capi_ready(c) || !moy_gfx_capi_batch_src(c)
+        || (cells = moy_gfx_capi_map_cells(c, &mw, &mh)) == NULL
+        || lua_gettop(L) != 7) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    int v[7];
+    for (int i = 0; i < 7; i++) {
+        if (!dv_num(L, i + 1, &v[i])) {
+            lua_pushboolean(L, 0);
+            return 1;
+        }
+    }
+    int celx = v[0], cely = v[1], sx = v[2], sy = v[3];
+    int cw = v[4], ch = v[5], mask = v[6];
+    for (int cy = 0; cy < ch; cy++) {
+        int my = cely + cy;
+        if (my < 0 || my >= mh) {
+            continue;                  // off-map rows read empty, like p8map
+        }
+        const uint8_t *row = cells + (size_t)my * (size_t)mw;
+        int py = sy + cy * 8;
+        for (int cx = 0; cx < cw; cx++) {
+            int mx = celx + cx;
+            if (mx < 0 || mx >= mw) {
+                continue;
+            }
+            int id = (int)row[mx] - 1;
+            if (id <= 0) {
+                continue;              // empty cell, or p8's never-drawn tile 0
+            }
+            if (mask != 0 && (g_map_flags[id] & mask) == 0) {
+                continue;
+            }
+            if (!batch_append_quad(L, id, sx + cx * 8, py, 0, 0, 1)) {
+                lua_pushboolean(L, 1); // queue unusable: quads drop, as l_spr's
+                return 1;
+            }
+        }
+    }
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
 #endif  // MOY_LUA_DRAW_DIRECT
 
 // bind_draw(ctx) -> bool: install the direct draw verbs over their registered
@@ -753,6 +867,14 @@ static mp_obj_t moy_lua_bind_draw(mp_obj_t ctx_in) {
         lua_pushcclosure(L, l_draw, 2);
         lua_setglobal(L, verbs[i].name);
     }
+    // #66 M0: the p8 shim's helpers. Plain globals, not verb shadows -- the
+    // shim's own map() captures them (nil-safe) and keeps its Lua loop as the
+    // fallback; the console's map() trampoline is untouched.
+    lua_pushcfunction(L, l_map_masked);
+    lua_setglobal(L, "__moy_map_masked");
+    lua_pushcfunction(L, l_map_flags);
+    lua_setglobal(L, "__moy_map_flags");
+    memset(g_map_flags, 0, sizeof(g_map_flags));
     g_ctx = c;
     g_dfb = 0;
     memset(g_dn, 0, sizeof(g_dn));

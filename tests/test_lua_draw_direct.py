@@ -368,6 +368,69 @@ for name, lua_src, py_fn in TEX_CASES:
 with_state()
 assert canvas_a.upcalls == [], canvas_a.upcalls   # all direct, zero upcalls
 
+# --- #66 M0: the flag-masked p8 map walk -------------------------------------
+# Side A: __moy_map_masked over the registered map + the __gff__ flags crossed
+# once as hex. Side B: blit_batch of the same filtered quads (ck=0, scale=1),
+# the filter computed independently in Python -- the pixels ride the same
+# batch walk, so equality pins the C mask/geometry/cell decoding (id+1, 0 and
+# p8's tile 0 both empty), including the >64-quad full-queue breaks.
+
+GFF_HEX = "".join("%02x" % ((i * 3) & 0xFF) for i in range(256))
+
+
+def map_items(celx, cely, sx, sy, cw, ch, mask):
+    items = []
+    for cy in range(ch):
+        my = cely + cy
+        if not (0 <= my < MH):
+            continue
+        for cx in range(cw):
+            mx = celx + cx
+            if not (0 <= mx < MW):
+                continue
+            tid = map_cells[my * MW + mx] - 1
+            if tid <= 0:
+                continue
+            if mask and not (((tid * 3) & 0xFF) & mask):
+                continue
+            items.append((tid, sx + cx * 8, sy + cy * 8, 0))
+    return items
+
+
+mreads = []
+moy_lua.register("mprobe", lambda v: mreads.append(v))
+moy_lua.exec('mprobe(__moy_map_flags("%s"))' % GFF_HEX)
+assert mreads == [True], mreads
+
+MAP_SCENES = [
+    ("mmap_all", (0, 0, 4, 4, 10, 7, 0)),
+    ("mmap_mask1", (0, 0, 4, 4, 10, 7, 1)),
+    ("mmap_mask6", (2, 1, -6, -3, 14, 9, 6)),
+    ("mmap_edge", (-3, -2, 1, 1, 24, 20, 2)),     # off-map cells read empty
+    ("mmap_none", (0, 0, 4, 4, 10, 7, 0x40)),     # everything masked out
+    ("mmap_big", (0, 0, 0, 0, 16, 12, 3)),        # >64 quads: queue breaks
+]
+for name, args in MAP_SCENES:
+    moy_lua.exec("mprobe(__moy_map_masked(%d, %d, %d, %d, %d, %d, %d)) "
+                 "rect(0, 0, 0, 0, 0)" % args)
+    b_batch(map_items(*args), ck=0)
+    print(name, bytes(buf_a).hex(), bytes(buf_b).hex())
+with_state(cam=(5, -3), clip=(10, 8, 78, 50))
+for name, args in MAP_SCENES:
+    moy_lua.exec("mprobe(__moy_map_masked(%d, %d, %d, %d, %d, %d, %d)) "
+                 "rect(0, 0, 0, 0, 0)" % args)
+    b_batch(map_items(*args), ck=0)
+    print("camclip_" + name, bytes(buf_a).hex(), bytes(buf_b).hex())
+with_state()
+assert mreads == [True] * (1 + 2 * len(MAP_SCENES)), mreads
+assert canvas_a.upcalls == [], canvas_a.upcalls   # the walk never upcalled
+
+# Un-registering the map refuses the walk (False -> the shim's Lua loop).
+ctx_a.set_map_src(None)
+moy_lua.exec("mprobe(__moy_map_masked(0, 0, 4, 4, 4, 4, 0))")
+assert mreads[-1] is False, mreads[-1]
+ctx_a.set_map_src(map_cells, MW, MH)
+
 # Un-registering the map drops tline (and only tline) back to its trampoline.
 falls0 = moy_lua.draw_stats()[6]
 ctx_a.set_map_src(None)

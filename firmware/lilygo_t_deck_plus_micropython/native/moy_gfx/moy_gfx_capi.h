@@ -68,6 +68,13 @@ bool moy_gfx_capi_flush_batch(moy_gfx_draw_ctx_t *c, int token);
 // allocation, never raise; the #63 order-rule flush is the caller's job
 // BEFORE calling (they sample under the current state).
 bool moy_gfx_capi_map_src(const moy_gfx_draw_ctx_t *c);
+
+// The registered map cells themselves (set_map_src's buffer: tile id + 1 per
+// byte, 0 = empty; mw/mh in tiles), or NULL when none is registered. For
+// consumers that WALK the map -- moy_lua's flag-masked p8 map() (#66 M0)
+// emits batch quads per cell; the pixels still ride blit_batch's walk.
+const uint8_t *moy_gfx_capi_map_cells(const moy_gfx_draw_ctx_t *c,
+                                      int *mw, int *mh);
 void moy_gfx_capi_sspr(moy_gfx_draw_ctx_t *c, int sx, int sy, int sw, int sh,
                        int dx, int dy, int ddw, int ddh, int ck, int flip);
 void moy_gfx_capi_tline(moy_gfx_draw_ctx_t *c, int x0, int y0, int x1, int y1,

@@ -1982,6 +1982,16 @@ bool moy_gfx_capi_map_src(const moy_gfx_draw_ctx_t *c) {
     return c->msrc != NULL;
 }
 
+const uint8_t *moy_gfx_capi_map_cells(const moy_gfx_draw_ctx_t *c,
+                                      int *mw, int *mh) {
+    if (c->msrc == NULL) {
+        return NULL;
+    }
+    *mw = (int)c->msrc_w;
+    *mh = (int)c->msrc_h;
+    return c->msrc;
+}
+
 // Borrow a full libmoy canvas (pal LUT + palt, unlike capi_solid's one-colour
 // table) from the ctx state -- what the sheet-sampling verbs need. False when
 // the ctx has no usable destination.
