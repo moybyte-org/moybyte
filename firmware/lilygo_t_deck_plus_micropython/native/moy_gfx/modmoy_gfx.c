@@ -1386,6 +1386,11 @@ typedef struct _moy_gfx_draw_ctx_obj_t {
     mp_obj_t bpalt_obj;
     const uint8_t *bsrc;
     const uint8_t *bpalt;
+    // #67 stage-1b: the tilemap source for the direct tline (set_map_src) --
+    // same live-read/held-object rules as the batch source above.
+    mp_obj_t msrc_obj;
+    const uint8_t *msrc;
+    mp_int_t msrc_w, msrc_h;     // in TILES, like TileMap.w/h
 } moy_gfx_draw_ctx_obj_t;
 
 // #163 door 1: how many gated ops run between two bounce-pump upcalls on a
@@ -1534,11 +1539,47 @@ static mp_obj_t moy_gfx_draw_ctx_set_batch_src(size_t n_args, const mp_obj_t *a)
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_draw_ctx_set_batch_src_obj,
                                            2, 5, moy_gfx_draw_ctx_set_batch_src);
 
+// set_map_src(cells, mw, mh) / set_map_src(None): register (or clear) the
+// tilemap the direct tline samples (#67 stage-1b). `cells` is the TileMap
+// bytearray (id+1, 0 = empty), mw/mh in TILES -- the same shape the tline
+// verb takes, with its guards applied at registration so the hot path never
+// checks. Held + read live, like set_batch_src.
+static mp_obj_t moy_gfx_draw_ctx_set_map_src(size_t n_args, const mp_obj_t *a) {
+    moy_gfx_draw_ctx_obj_t *c = MP_OBJ_TO_PTR(a[0]);
+    if (n_args == 2 && a[1] == mp_const_none) {
+        c->msrc_obj = mp_const_none;
+        c->msrc = NULL;
+        c->msrc_w = 0;
+        c->msrc_h = 0;
+        return mp_const_none;
+    }
+    if (n_args != 4) {
+        mp_raise_TypeError(MP_ERROR_TEXT("set_map_src(cells, mw, mh)"));
+    }
+    mp_buffer_info_t cb;
+    mp_get_buffer_raise(a[1], &cb, MP_BUFFER_READ);
+    mp_int_t mw = mp_obj_get_int(a[2]);
+    mp_int_t mh = mp_obj_get_int(a[3]);
+    if (mw <= 0 || mh <= 0 || (size_t)(mw * mh) > cb.len
+        || mw > MOY_MAP_MAX || mh > MOY_MAP_MAX) {
+        mp_raise_ValueError(MP_ERROR_TEXT("set_map_src: not a moy map"));
+    }
+    c->msrc_obj = a[1];
+    c->msrc = (const uint8_t *)cb.buf;
+    c->msrc_w = mw;
+    c->msrc_h = mh;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_draw_ctx_set_map_src_obj,
+                                           2, 4, moy_gfx_draw_ctx_set_map_src);
+
 static const mp_rom_map_elem_t moy_gfx_draw_ctx_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_set_buf), MP_ROM_PTR(&moy_gfx_draw_ctx_set_buf_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_pump), MP_ROM_PTR(&moy_gfx_draw_ctx_set_pump_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_batch_src),
       MP_ROM_PTR(&moy_gfx_draw_ctx_set_batch_src_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_map_src),
+      MP_ROM_PTR(&moy_gfx_draw_ctx_set_map_src_obj) },
     { MP_ROM_QSTR(MP_QSTR_fill_rects),
       MP_ROM_PTR(&moy_gfx_draw_ctx_fill_rects_obj) },
 };
@@ -1735,6 +1776,10 @@ static mp_obj_t moy_gfx_make_draw_ctx(size_t n_args, const mp_obj_t *a) {
     c->bpalt_obj = mp_const_none;
     c->bsrc = NULL;
     c->bpalt = NULL;
+    c->msrc_obj = mp_const_none;
+    c->msrc = NULL;
+    c->msrc_w = 0;
+    c->msrc_h = 0;
     c->font = (const uint8_t *)fbi.buf;
     c->nglyphs = (mp_int_t)(fbi.len / 8u);
     c->first = mp_obj_get_int(a[5]);
@@ -1931,6 +1976,56 @@ bool moy_gfx_capi_flush_batch(moy_gfx_draw_ctx_t *c, int token) {
                 (int)key, (int)scale, (int)(q[i + 3] & 3));
     }
     return true;
+}
+
+bool moy_gfx_capi_map_src(const moy_gfx_draw_ctx_t *c) {
+    return c->msrc != NULL;
+}
+
+// Borrow a full libmoy canvas (pal LUT + palt, unlike capi_solid's one-colour
+// table) from the ctx state -- what the sheet-sampling verbs need. False when
+// the ctx has no usable destination.
+static bool capi_texture_canvas(moy_gfx_draw_ctx_t *c, moy_canvas *mc) {
+    const int32_t *st = c->st;
+    mp_int_t dw = st[ST_W];
+    if (dw <= 0 || c->px == NULL) {
+        return false;
+    }
+    mp_int_t cx0 = st[ST_CX0], cy0 = st[ST_CY0];
+    mp_int_t cx1 = st[ST_CX1], cy1 = st[ST_CY1];
+    moy_gfx_clip(dw, c->cap, &cx0, &cy0, &cx1, &cy1);
+    moy_gfx_canvas(mc, c->px, dw, c->cap, c->pal, c->bpalt,
+                   st[ST_CAM_X], st[ST_CAM_Y], cx0, cy0, cx1, cy1);
+    return true;
+}
+
+// sspr against the REGISTERED sheet (set_batch_src) -- the same moy_sspr call
+// the MP verb makes, state from the ctx. Caller gates on capi_batch_src.
+void moy_gfx_capi_sspr(moy_gfx_draw_ctx_t *c, int sx, int sy, int sw, int sh,
+                       int dx, int dy, int ddw, int ddh, int ck, int flip) {
+    moy_canvas mc;
+    moy_sheet s;
+    if (c->bsrc == NULL || sw <= 0 || sh <= 0 || ddw <= 0 || ddh <= 0
+        || !capi_texture_canvas(c, &mc)) {
+        return;
+    }
+    moy_sheet_init(&s, (uint8_t *)c->bsrc);
+    moy_sspr(&mc, &s, sx, sy, sw, sh, dx, dy, ddw, ddh, ck, flip);
+}
+
+// tline against the registered sheet + map (set_batch_src + set_map_src).
+// u/v/du/dv are 16.16 fixed-point ints, exactly the MP verb's contract.
+void moy_gfx_capi_tline(moy_gfx_draw_ctx_t *c, int x0, int y0, int x1, int y1,
+                        int32_t u, int32_t v, int32_t du, int32_t dv, int ck) {
+    moy_canvas mc;
+    moy_sheet s;
+    moy_map m;
+    if (c->bsrc == NULL || c->msrc == NULL || !capi_texture_canvas(c, &mc)) {
+        return;
+    }
+    moy_sheet_init(&s, (uint8_t *)c->bsrc);
+    moy_map_init(&m, (uint8_t *)c->msrc, (int)c->msrc_w, (int)c->msrc_h);
+    moy_tline(&mc, &s, &m, x0, y0, x1, y1, u, v, du, dv, ck);
 }
 
 // decode_runs(dst, npix, packed) -> pixels written, or -1 on a corrupt stream.

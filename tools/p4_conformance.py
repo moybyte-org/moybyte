@@ -303,6 +303,8 @@ def serve(port, sock_path, log):
             conn, _ = srv.accept()
             try:
                 req = json.loads(conn.makefile("r").readline() or "{}")
+                if not req:
+                    continue            # a probe (connect-and-close): not a scene
                 if req.get("op") == "stop":
                     conn.sendall(b'{"ok": true}\n')
                     break
@@ -326,7 +328,12 @@ def serve(port, sock_path, log):
                 # next one may well pass, and a dead server turns one bad scene
                 # into a whole suite that cannot run.
                 log("  ERROR: %s" % exc)
-                conn.sendall(json.dumps({"ok": False, "error": str(exc)}).encode() + b"\n")
+                try:
+                    conn.sendall(json.dumps({"ok": False,
+                                             "error": str(exc)}).encode() + b"\n")
+                except OSError:
+                    pass                # client gone: a dead pipe must not
+                                        # take the server down either
             finally:
                 conn.close()
     finally:

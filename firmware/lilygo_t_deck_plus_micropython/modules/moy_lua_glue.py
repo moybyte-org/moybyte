@@ -144,6 +144,18 @@ class LuaCartRun:
                             canvas._lua_batch_sheet = sheet
                             canvas._lua_batch_token = _LUA_TOKEN
                             self._canvas = canvas
+                            # stage-1b: the tilemap too, so tline goes direct.
+                            # Registered only under a live batch source (the
+                            # direct sspr/tline gate on both); a refusal keeps
+                            # those verbs on their trampolines.
+                            sms = getattr(ctx, "set_map_src", None)
+                            tilemap = (ws.project.tilemap
+                                       if ws.project is not None else None)
+                            if sms is not None and tilemap is not None:
+                                try:
+                                    sms(tilemap.cells, tilemap.w, tilemap.h)
+                                except (ValueError, TypeError):
+                                    pass
                         except (ValueError, TypeError):
                             pass
             self._install_handles(ns)
@@ -223,12 +235,13 @@ class LuaCartRun:
             cv._lua_batch_sheet = None
             cv._lua_batch_token = -1
             ctx = getattr(cv, "_gate_ctx", None)
-            sbs = getattr(ctx, "set_batch_src", None) if ctx is not None else None
-            if sbs is not None:
-                try:
-                    sbs(None)
-                except Exception:  # noqa: BLE001 -- close must never block an exit
-                    pass
+            for name in ("set_batch_src", "set_map_src"):
+                fn = getattr(ctx, name, None) if ctx is not None else None
+                if fn is not None:
+                    try:
+                        fn(None)
+                    except Exception:  # noqa: BLE001 -- close must never block an exit
+                        pass
             self._canvas = None
         try:
             self._moy_lua.close()

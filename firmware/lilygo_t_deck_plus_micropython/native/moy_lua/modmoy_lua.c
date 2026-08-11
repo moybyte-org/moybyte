@@ -506,7 +506,10 @@ static void moy_lua_check_open(void);   // defined with the module functions
 
 enum {
     DV_PIX = 0, DV_RECT, DV_RECTB, DV_LINE,
-    DV_CIRC, DV_CIRCB, DV_TRI, DV_TRIB, DV_PRINT
+    DV_CIRC, DV_CIRCB, DV_TRI, DV_TRIB, DV_PRINT,
+    // #67 stage-1b: the sheet-sampling verbs -- direct only when the glue
+    // registered the sources (set_batch_src / set_map_src); else trampoline.
+    DV_SSPR, DV_TLINE
 };
 
 // Flush the pending run C-side when the ctx owns a source and the run is OURS
@@ -571,7 +574,7 @@ static int l_draw(lua_State *L) {
     }
     int kind = (int)lua_tointeger(L, lua_upvalueindex(1));
     int n = lua_gettop(L);
-    int v[7];
+    int v[10];
     const char *s = NULL;
     size_t slen = 0;
     switch (kind) {
@@ -590,6 +593,20 @@ static int l_draw(lua_State *L) {
         case DV_TRI:
         case DV_TRIB:
             if (n != 7) return l_draw_fallback(L);
+            break;
+        case DV_SSPR:
+            // sspr(sx, sy, sw, sh, dx, dy[, dw, dh[, ck[, flip]]]) -- the
+            // 7-arg half-form keeps the trampoline (dh defaults pairwise).
+            if (n < 6 || n == 7 || n > 10 || !moy_gfx_capi_batch_src(c)) {
+                return l_draw_fallback(L);
+            }
+            break;
+        case DV_TLINE:
+            // tline(x0, y0, x1, y1, u, v, du, dv[, ck]) -- 16.16 fixed ints.
+            if (n < 8 || n > 9 || !moy_gfx_capi_batch_src(c)
+                || !moy_gfx_capi_map_src(c)) {
+                return l_draw_fallback(L);
+            }
             break;
         default:                           // DV_PRINT: (s, x, y, c[, scale]);
             if (n < 4 || n > 5 || lua_type(L, 1) != LUA_TSTRING) {
@@ -656,6 +673,19 @@ static int l_draw(lua_State *L) {
             moy_gfx_capi_line(c, v[2], v[3], v[4], v[5], v[6]);
             moy_gfx_capi_line(c, v[4], v[5], v[0], v[1], v[6]);
             break;
+        case DV_SSPR:                      // defaults exactly as the MP verb
+            if (n < 8) { v[6] = v[2]; v[7] = v[3]; }
+            if (n < 9) v[8] = -1;
+            if (n < 10) v[9] = 0;
+            moy_gfx_capi_sspr(c, v[0], v[1], v[2], v[3], v[4], v[5],
+                              v[6], v[7], v[8], v[9]);
+            break;
+        case DV_TLINE:
+            if (n < 9) v[8] = -1;
+            moy_gfx_capi_tline(c, v[0], v[1], v[2], v[3],
+                               (int32_t)v[4], (int32_t)v[5],
+                               (int32_t)v[6], (int32_t)v[7], v[8]);
+            break;
         default:
             moy_gfx_capi_print(c, (const uint8_t *)s, slen, v[0], v[1], v[2]);
             bucket = 2;
@@ -706,6 +736,7 @@ static mp_obj_t moy_lua_bind_draw(mp_obj_t ctx_in) {
         {"pix", DV_PIX},   {"rect", DV_RECT},   {"rectb", DV_RECTB},
         {"line", DV_LINE}, {"circ", DV_CIRC},   {"circb", DV_CIRCB},
         {"tri", DV_TRI},   {"trib", DV_TRIB},   {"print", DV_PRINT},
+        {"sspr", DV_SSPR}, {"tline", DV_TLINE},
     };
     lua_State *L = g_L;
     for (size_t i = 0; i < sizeof(verbs) / sizeof(verbs[0]); i++) {

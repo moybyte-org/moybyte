@@ -61,6 +61,18 @@ bool moy_gfx_capi_batch_src(const moy_gfx_draw_ctx_t *c);
 // profiling counters, exactly as with the draw verbs above.
 bool moy_gfx_capi_flush_batch(moy_gfx_draw_ctx_t *c, int token);
 
+// #67 stage-1b: the sheet-sampling verbs, against the ctx-registered sources.
+// sspr needs set_batch_src (the sheet); tline needs set_map_src too. Callers
+// gate their fast path on these probes and fall back to the trampoline
+// otherwise. Same purity contract as the draw verbs: no upcalls, no
+// allocation, never raise; the #63 order-rule flush is the caller's job
+// BEFORE calling (they sample under the current state).
+bool moy_gfx_capi_map_src(const moy_gfx_draw_ctx_t *c);
+void moy_gfx_capi_sspr(moy_gfx_draw_ctx_t *c, int sx, int sy, int sw, int sh,
+                       int dx, int dy, int ddw, int ddh, int ck, int flip);
+void moy_gfx_capi_tline(moy_gfx_draw_ctx_t *c, int x0, int y0, int x1, int y1,
+                        int32_t u, int32_t v, int32_t du, int32_t dv, int ck);
+
 // The canvas object the ctx was made for (the flush_batch upcall target).
 mp_obj_t moy_gfx_capi_canvas(const moy_gfx_draw_ctx_t *c);
 

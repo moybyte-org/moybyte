@@ -467,7 +467,12 @@ to whoever called it.
   trib/print for lua_CFunctions over moy_gfx's exported C API
   (`moy_gfx_capi.h`, the sibling-staged `__has_include` probe — absent on the
   wasm runner by layout), byte-parity pinned by `tests/test_lua_draw_direct.py`
-  on the unix build; every OTHER verb still trampolines to the SAME Python
+  on the unix build; **sspr/tline joined the direct family in stage 1b** (same
+  night — capi exports over the registered sheet + `set_map_src` tilemap,
+  documented arities direct, odd forms/unregistered sources fall back;
+  P4 conformance 10/10 with the provisional scenes at 3,388/15,000 direct
+  shape-draws and 0 fallbacks; `map()` deliberately NOT crossed — it owns the
+  Fold-2 cache); every OTHER verb still trampolines to the SAME Python
   `make_api` closures (tuple returns fan out to Lua multivalues, so `touch()`
   needs no wrapper), and layers/images stay Python-side behind int-handle glue
   (`device_api.LuaCartRun`, shared by both boards' `moy_runtime.run_desktop`

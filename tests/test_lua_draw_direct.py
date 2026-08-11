@@ -106,7 +106,7 @@ buf_b, st_b, pal_b, canvas_b, ctx_b = make_side()
 # --- side A: the Lua direct verbs ------------------------------------------
 moy_lua.init(canvas_a, None, canvas_a._batch_arr, 0x7A11)
 for name in ("pix", "rect", "rectb", "line", "circ", "circb",
-             "tri", "trib", "print"):
+             "tri", "trib", "print", "sspr", "tline"):
     moy_lua.register(name, lambda *a: None)
 assert moy_lua.bind_draw(ctx_a) is True
 
@@ -308,6 +308,72 @@ b_batch([(9, 80, 55, 0)])
 print("batch_foreign", bytes(buf_a).hex(), bytes(buf_b).hex())
 assert canvas_a.upcalls == [("begin", -1, 1, 0x7A11)], canvas_a.upcalls
 assert moy_lua.batch_stats()[3] >= 1, moy_lua.batch_stats()
+
+# --- stage-1b (#67): sspr + tline direct ------------------------------------
+# Side A: the Lua verbs against the registered sheet/map sources. Side B: the
+# exact moy_gfx kernel calls DeviceCanvas.sspr/tline make. Byte-equality, incl.
+# the default-arg forms and under camera+clip.
+
+MW, MH = 16, 12
+map_cells = bytearray(MW * MH)
+for my in range(MH):
+    for mx in range(MW):
+        map_cells[my * MW + mx] = ((mx + my * 3) % 9)     # 0 = empty cells too
+ctx_a.set_map_src(map_cells, MW, MH)
+
+
+def b_sspr(sx, sy, sw, sh, dx, dy, ddw, ddh, ck=-1, flip=0):
+    moy_gfx.sspr(buf_b, W, H, sheet_px, SW, SH, sx, sy, sw, sh,
+                 dx, dy, ddw, ddh, ck, flip, pal_b, palt_b,
+                 st_b[ST_CAM_X], st_b[ST_CAM_Y],
+                 st_b[ST_CX0], st_b[ST_CY0], st_b[ST_CX1], st_b[ST_CY1])
+
+
+def b_tline(x0, y0, x1, y1, u, v, du, dv, ck=-1):
+    moy_gfx.tline(buf_b, W, H, map_cells, MW, MH, sheet_px, SW, SH,
+                  x0, y0, x1, y1, u, v, du, dv, ck, pal_b, palt_b,
+                  st_b[ST_CAM_X], st_b[ST_CAM_Y],
+                  st_b[ST_CX0], st_b[ST_CY0], st_b[ST_CX1], st_b[ST_CY1])
+
+
+TEX_CASES = [
+    ("sspr_plain", "sspr(4, 8, 16, 16, 10, 10)",
+     lambda: b_sspr(4, 8, 16, 16, 10, 10, 16, 16)),
+    ("sspr_stretch", "sspr(0, 0, 8, 8, 40, 5, 24, 20)",
+     lambda: b_sspr(0, 0, 8, 8, 40, 5, 24, 20)),
+    ("sspr_shrink_ck", "sspr(0, 16, 32, 32, 60, 30, 12, 9, 5)",
+     lambda: b_sspr(0, 16, 32, 32, 60, 30, 12, 9, 5)),
+    ("sspr_flip", "sspr(8, 8, 12, 10, 4, 44, 18, 15, -1, 3)",
+     lambda: b_sspr(8, 8, 12, 10, 4, 44, 18, 15, -1, 3)),
+    ("sspr_offcanvas", "sspr(0, 0, 16, 16, -6, 56, 20, 20)",
+     lambda: b_sspr(0, 0, 16, 16, -6, 56, 20, 20)),
+    ("tline_h", "tline(0, 20, 95, 20, 0, 131072, 65536, 0)",
+     lambda: b_tline(0, 20, 95, 20, 0, 131072, 65536, 0)),
+    ("tline_diag", "tline(5, 60, 90, 25, 262144, 0, 49152, 32768)",
+     lambda: b_tline(5, 60, 90, 25, 262144, 0, 49152, 32768)),
+    ("tline_wrap_ck", "tline(0, 35, 95, 45, -655360, 917504, 98304, -16384, 3)",
+     lambda: b_tline(0, 35, 95, 45, -655360, 917504, 98304, -16384, 3)),
+]
+
+canvas_a.upcalls = []
+for name, lua_src, py_fn in TEX_CASES:
+    moy_lua.exec(lua_src)
+    py_fn()
+    print(name, bytes(buf_a).hex(), bytes(buf_b).hex())
+with_state(cam=(6, -2), clip=(8, 6, 82, 54))
+for name, lua_src, py_fn in TEX_CASES:
+    moy_lua.exec(lua_src)
+    py_fn()
+    print("camclip_" + name, bytes(buf_a).hex(), bytes(buf_b).hex())
+with_state()
+assert canvas_a.upcalls == [], canvas_a.upcalls   # all direct, zero upcalls
+
+# Un-registering the map drops tline (and only tline) back to its trampoline.
+falls0 = moy_lua.draw_stats()[6]
+ctx_a.set_map_src(None)
+moy_lua.exec("tline(0, 3, 20, 3, 0, 0, 65536, 0)")
+assert moy_lua.draw_stats()[6] == falls0 + 1, moy_lua.draw_stats()
+ctx_a.set_map_src(map_cells, MW, MH)
 
 # Non-parity semantics, asserted directly:
 # print of a non-UTF-8 byte draws glyph 0 and advances one cell (SPEC.md 6's
