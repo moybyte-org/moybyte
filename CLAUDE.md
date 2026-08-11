@@ -490,11 +490,11 @@ to whoever called it.
   celeste's S3 render, measured by difference — as the lupa/wasm fallback;
   `rnd`/`flr` are pure-Lua prelude functions now, `time()` deliberately still
   a trampoline. **The moycore stage-1 semantic PIN is
-  `tests/test_semantic_traces.py`**: one scripted trace (input edges + twin
-  carts) down both device cart paths under the unix dual-usermod build,
-  comparing canvas hashes + btn/btnp/pmem logs + audio order + pmem image —
-  run it (and `test_lua_draw_direct.py`) before crossing ANY further verb;
-  `docs/moycore_plan_2026-08.md` is the direction doc); every OTHER verb still trampolines to the SAME Python
+  `tests/test_semantic_traces.py`** — twin Python/Lua carts fed scripted
+  input, replayed through the real glue on the unix build with both native
+  modules, hash- and log-compared; run it (and `test_lua_draw_direct.py`)
+  before crossing ANY further verb, and extend its trace vocabulary FIRST —
+  `docs/moycore_plan_2026-08.md` (tracker #192) is the direction doc); every OTHER verb still trampolines to the SAME Python
   `make_api` closures (tuple returns fan out to Lua multivalues, so `touch()`
   needs no wrapper), and layers/images stay Python-side behind int-handle glue
   (`device_api.LuaCartRun`, shared by both boards' `moy_runtime.run_desktop`

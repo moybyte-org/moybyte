@@ -98,10 +98,11 @@ and the Music editor (editor-domain Python, untouched). This is **stage 0**
 (§6): it ships value alone and proves the CPython-host-embedding pattern the
 rest of moycore's sim story needs.
 
-The same pattern later kills **lupa**: when the host embeds moycore's VM, the
-host runs `LUA_32BITS` semantics, closing the standing hole where golden-frame
-parity is host-only for float-heavy carts and device integers wrap at 2^31.
-Host-cart behavior becomes device-identical by construction.
+The same pattern later kills **lupa**: when the host embeds moycore's VM,
+the host runs `LUA_32BITS` semantics, closing the standing hole CLAUDE.md's
+#67 section records — the float-width/integer-wrap gap that limits
+golden-frame parity to the host for float-heavy carts. Host-cart behavior
+becomes device-identical by construction.
 
 ### 3.2 The streaming webview is sunset (supersedes docked mode's frozen-scope mirror)
 
